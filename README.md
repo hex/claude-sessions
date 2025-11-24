@@ -143,9 +143,18 @@ When Claude Code launches, these environment variables are set:
 - `CLAUDE_SESSION_DIR` - Full path to session directory
 - `CLAUDE_ARTIFACT_DIR` - Full path to artifacts directory
 
-## Tmux Integration
+## Tmux Integration (Optional)
 
-The `cs` tool does not use tmux by default. If you need tmux functionality during a session, use the tmux skill available in Claude Code.
+The `cs` tool does not use tmux by default. For advanced terminal multiplexing capabilities, you can install the [tmux skill](https://github.com/mitsuhiko/agent-commands/tree/main/skills/tmux) which allows Claude to remote control tmux sessions for interactive CLIs.
+
+**Installation:**
+```bash
+# Install the tmux skill to ~/.claude/skills/
+git clone https://github.com/mitsuhiko/agent-commands.git /tmp/agent-commands
+cp -r /tmp/agent-commands/skills/tmux ~/.claude/skills/
+```
+
+Once installed, Claude can use the tmux skill to work with interactive tools like Python REPL, gdb, and other TTY applications.
 
 ## Configuration
 
