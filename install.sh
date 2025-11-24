@@ -29,9 +29,9 @@ REPO_URL="https://raw.githubusercontent.com/hex/claude-sessions/main"
 CS_URL="${REPO_URL}/bin/cs"
 
 # Detect if running from cloned repo or web install
-if [ -f "$(dirname "${BASH_SOURCE[0]}")/bin/cs" ]; then
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
+if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/bin/cs" ]; then
     # Running from cloned repo
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     CS_SOURCE="$SCRIPT_DIR/bin/cs"
     INSTALL_METHOD="local"
 else
