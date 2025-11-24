@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: Installation script for cs (Claude Code session manager)
-# ABOUTME: Copies the cs binary to ~/.local/bin and ensures it's executable
+# ABOUTME: Downloads and installs cs to ~/.local/bin
 
 set -euo pipefail
 
@@ -23,9 +23,21 @@ warn() {
     echo -e "${YELLOW}$1${NC}"
 }
 
-# Get script directory
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Configuration
 INSTALL_DIR="${HOME}/.local/bin"
+REPO_URL="https://raw.githubusercontent.com/hex/claude-sessions/main"
+CS_URL="${REPO_URL}/bin/cs"
+
+# Detect if running from cloned repo or web install
+if [ -f "$(dirname "${BASH_SOURCE[0]}")/bin/cs" ]; then
+    # Running from cloned repo
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    CS_SOURCE="$SCRIPT_DIR/bin/cs"
+    INSTALL_METHOD="local"
+else
+    # Running from web (curl | bash)
+    INSTALL_METHOD="web"
+fi
 
 # Check for Claude Code
 if ! command -v claude >/dev/null 2>&1; then
@@ -38,9 +50,23 @@ fi
 # Create install directory if needed
 mkdir -p "$INSTALL_DIR"
 
-# Copy cs script
+# Install cs script
 info "Installing cs to $INSTALL_DIR/cs"
-cp "$SCRIPT_DIR/bin/cs" "$INSTALL_DIR/cs"
+
+if [ "$INSTALL_METHOD" = "local" ]; then
+    # Install from local clone
+    cp "$CS_SOURCE" "$INSTALL_DIR/cs"
+else
+    # Download from GitHub
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$CS_URL" -o "$INSTALL_DIR/cs" || error "Failed to download cs script"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q "$CS_URL" -O "$INSTALL_DIR/cs" || error "Failed to download cs script"
+    else
+        error "Neither curl nor wget found. Please install one of them."
+    fi
+fi
+
 chmod +x "$INSTALL_DIR/cs"
 
 # Check if ~/.local/bin is in PATH

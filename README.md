@@ -12,6 +12,14 @@ A session manager for [Claude Code](https://github.com/anthropics/claude-code) t
 
 ## Installation
 
+**Quick install (recommended):**
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/hex/claude-sessions/main/install.sh)"
+```
+
+**Or clone and install:**
+
 ```bash
 git clone https://github.com/hex/claude-sessions.git
 cd claude-sessions
@@ -19,7 +27,7 @@ cd claude-sessions
 ```
 
 The installer will:
-1. Copy `cs` to `~/.local/bin/cs`
+1. Download (or copy) `cs` to `~/.local/bin/cs`
 2. Make it executable
 3. Check if `~/.local/bin` is in your PATH
 
