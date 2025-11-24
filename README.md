@@ -13,7 +13,7 @@ A session manager for [Claude Code](https://github.com/anthropics/claude-code) t
 ## Installation
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/claude-sessions.git
+git clone https://github.com/hex/claude-sessions.git
 cd claude-sessions
 ./install.sh
 ```
