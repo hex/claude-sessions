@@ -42,27 +42,42 @@ export PATH="$HOME/.local/bin:$PATH"
 - [Claude Code](https://github.com/anthropics/claude-code) - Must be available as `claude` command
 - Bash 4.0+
 
-## Usage
+## How It Works
 
-Run `cs` from anywhere on your system - it creates isolated session workspaces independent of your current directory:
+**`cs` is completely independent:**
+
+1. **Creates its own workspace** - Sessions are stored in `~/.claude-sessions/<session-name>/` by default
+2. **Can be run from anywhere** - Just type `cs my-session` from any directory
+3. **Not tied to git repos** - Each session is its own isolated environment
+
+**Each session directory is independent:**
+- Has its own documentation (README.md, discoveries.md, etc.)
+- Has its own artifacts/ folder
+- Can optionally be a git repo itself if you want to track changes
+- But doesn't need to be
+
+The session workspace is where Claude Code runs, but you can SSH to servers, work on remote systems, or do anything else from within that session. The documentation and artifacts stay in the session directory.
+
+## Usage
 
 ```bash
 cs <session-name>
 ```
 
-Sessions are stored in `~/.claude-sessions/` and are completely independent. You don't need to be in a git repo or special folder to use `cs`.
-
 ### Examples
 
 ```bash
-# Create or resume a debugging session (from any directory)
-cs debug-api
+# From anywhere on your system:
+cd ~
+cs debug-task
+# Creates ~/.claude-sessions/debug-task/ and launches Claude there
 
-# Create or resume a server troubleshooting session
-cs server-fix
+cd /some/project
+cs fix-bug
+# Creates ~/.claude-sessions/fix-bug/ and launches Claude there
 
-# Create or resume a feature development session
-cs add-auth
+# Each session is independent and can be resumed anytime
+cs debug-task  # Resume the debug-task session
 ```
 
 ## Session Structure
