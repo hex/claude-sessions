@@ -44,14 +44,18 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ## Usage
 
+Run `cs` from anywhere on your system - it creates isolated session workspaces independent of your current directory:
+
 ```bash
 cs <session-name>
 ```
 
+Sessions are stored in `~/.claude-sessions/` and are completely independent. You don't need to be in a git repo or special folder to use `cs`.
+
 ### Examples
 
 ```bash
-# Create or resume a debugging session
+# Create or resume a debugging session (from any directory)
 cs debug-api
 
 # Create or resume a server troubleshooting session
