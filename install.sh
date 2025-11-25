@@ -47,16 +47,12 @@ uninstall() {
     fi
 
     # Remove hooks
-    local hooks_removed=0
     for hook in session-start.sh artifact-tracker.sh session-end.sh; do
         if [ -f "$HOOKS_DIR/$hook" ]; then
             rm "$HOOKS_DIR/$hook"
-            hooks_removed=1
+            info "Removed $HOOKS_DIR/$hook"
         fi
     done
-    if [ $hooks_removed -eq 1 ]; then
-        info "Removed hooks from $HOOKS_DIR/"
-    fi
 
     # Remove cs hooks from settings.json (preserve other hooks)
     if [ -f "$CLAUDE_SETTINGS" ] && command -v jq >/dev/null 2>&1; then
@@ -98,7 +94,7 @@ uninstall() {
         ')
 
         echo "$SETTINGS" > "$CLAUDE_SETTINGS"
-        info "Removed cs hooks from $CLAUDE_SETTINGS"
+        info "Modified $CLAUDE_SETTINGS (removed cs hooks)"
 
         # Remove settings.json if empty
         if [ "$(jq 'keys | length' "$CLAUDE_SETTINGS")" -eq 0 ]; then
