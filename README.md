@@ -44,12 +44,28 @@ export PATH="$HOME/.local/bin:$PATH"
 ./install.sh --uninstall
 ```
 
-This removes:
-- `~/.local/bin/cs`
-- Hooks from `~/.claude/hooks/`
-- Hook configuration from `~/.claude/settings.json`
+Or manually:
 
-You'll be prompted whether to delete session data at `~/.claude-sessions/`.
+```bash
+# Remove cs script
+rm ~/.local/bin/cs
+
+# Remove hooks
+rm ~/.claude/hooks/session-start.sh
+rm ~/.claude/hooks/artifact-tracker.sh
+rm ~/.claude/hooks/session-end.sh
+
+# Remove hook configuration from settings.json
+# Edit ~/.claude/settings.json and remove the SessionStart, PreToolUse (Write matcher),
+# and SessionEnd entries that reference the above hook scripts
+
+# Optionally remove session data
+rm -rf ~/.claude-sessions/
+```
+
+The uninstaller preserves:
+- Other hooks you've configured in `~/.claude/settings.json`
+- Other settings like `statusLine`, `alwaysThinkingEnabled`, etc.
 
 ## Requirements
 
