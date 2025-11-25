@@ -58,18 +58,52 @@ uninstall() {
         info "Removed hooks from $HOOKS_DIR/"
     fi
 
-    # Remove hooks config from settings.json
+    # Remove cs hooks from settings.json (preserve other hooks)
     if [ -f "$CLAUDE_SETTINGS" ] && command -v jq >/dev/null 2>&1; then
-        if jq -e '.hooks' "$CLAUDE_SETTINGS" >/dev/null 2>&1; then
-            jq 'del(.hooks)' "$CLAUDE_SETTINGS" > "$CLAUDE_SETTINGS.tmp"
-            mv "$CLAUDE_SETTINGS.tmp" "$CLAUDE_SETTINGS"
-            info "Removed hooks configuration from $CLAUDE_SETTINGS"
+        SESSION_START_PATH="$HOME/.claude/hooks/session-start.sh"
+        ARTIFACT_TRACKER_PATH="$HOME/.claude/hooks/artifact-tracker.sh"
+        SESSION_END_PATH="$HOME/.claude/hooks/session-end.sh"
 
-            # Remove settings.json if empty (only has {})
-            if [ "$(jq 'keys | length' "$CLAUDE_SETTINGS")" -eq 0 ]; then
-                rm "$CLAUDE_SETTINGS"
-                info "Removed empty $CLAUDE_SETTINGS"
-            fi
+        SETTINGS=$(cat "$CLAUDE_SETTINGS")
+
+        # Remove our SessionStart hook
+        SETTINGS=$(echo "$SETTINGS" | jq --arg path "$SESSION_START_PATH" '
+            if .hooks.SessionStart then
+                .hooks.SessionStart = [.hooks.SessionStart[] | select(.hooks | all(.command != $path))]
+            else . end
+        ')
+
+        # Remove our PreToolUse Write hook
+        SETTINGS=$(echo "$SETTINGS" | jq --arg path "$ARTIFACT_TRACKER_PATH" '
+            if .hooks.PreToolUse then
+                .hooks.PreToolUse = [.hooks.PreToolUse[] | select(
+                    (.matcher == "Write" and (.hooks | any(.command == $path))) | not
+                )]
+            else . end
+        ')
+
+        # Remove our SessionEnd hook
+        SETTINGS=$(echo "$SETTINGS" | jq --arg path "$SESSION_END_PATH" '
+            if .hooks.SessionEnd then
+                .hooks.SessionEnd = [.hooks.SessionEnd[] | select(.hooks | all(.command != $path))]
+            else . end
+        ')
+
+        # Clean up empty hook arrays
+        SETTINGS=$(echo "$SETTINGS" | jq '
+            if .hooks then
+                .hooks |= with_entries(select(.value | length > 0))
+                | if .hooks == {} then del(.hooks) else . end
+            else . end
+        ')
+
+        echo "$SETTINGS" > "$CLAUDE_SETTINGS"
+        info "Removed cs hooks from $CLAUDE_SETTINGS"
+
+        # Remove settings.json if empty
+        if [ "$(jq 'keys | length' "$CLAUDE_SETTINGS")" -eq 0 ]; then
+            rm "$CLAUDE_SETTINGS"
+            info "Removed empty $CLAUDE_SETTINGS"
         fi
     fi
 
