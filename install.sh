@@ -166,67 +166,65 @@ chmod +x "$HOOKS_DIR"/*.sh
 # Configure Claude Code settings
 info "Configuring Claude Code hooks"
 
-# Define the hooks configuration
-HOOKS_CONFIG=$(cat << 'EOF'
-{
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$HOME/.claude/hooks/session-start.sh",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$HOME/.claude/hooks/artifact-tracker.sh",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$HOME/.claude/hooks/session-end.sh",
-            "timeout": 10
-          }
-        ]
-      }
-    ]
-  }
-}
-EOF
-)
-
-# Expand $HOME in the config
-HOOKS_CONFIG=$(echo "$HOOKS_CONFIG" | sed "s|\$HOME|$HOME|g")
-
 # Create or merge settings.json
-if [ -f "$CLAUDE_SETTINGS" ]; then
-    # Merge with existing settings
-    if command -v jq >/dev/null 2>&1; then
-        EXISTING=$(cat "$CLAUDE_SETTINGS")
-        echo "$EXISTING" | jq --argjson hooks "$(echo "$HOOKS_CONFIG" | jq '.hooks')" '.hooks = $hooks' > "$CLAUDE_SETTINGS.tmp"
-        mv "$CLAUDE_SETTINGS.tmp" "$CLAUDE_SETTINGS"
-    else
-        warn "jq not found - cannot merge settings. Please manually configure hooks."
-        warn "See README for hook configuration details."
-    fi
+mkdir -p "$(dirname "$CLAUDE_SETTINGS")"
+
+if ! command -v jq >/dev/null 2>&1; then
+    warn "jq not found - cannot configure hooks automatically."
+    warn "See README for manual hook configuration."
 else
-    # Create new settings file
-    mkdir -p "$(dirname "$CLAUDE_SETTINGS")"
-    echo "$HOOKS_CONFIG" > "$CLAUDE_SETTINGS"
+    # Start with existing settings or empty object
+    if [ -f "$CLAUDE_SETTINGS" ]; then
+        SETTINGS=$(cat "$CLAUDE_SETTINGS")
+    else
+        SETTINGS='{}'
+    fi
+
+    # Our hook script paths (for detecting existing cs hooks)
+    SESSION_START_PATH="$HOME/.claude/hooks/session-start.sh"
+    ARTIFACT_TRACKER_PATH="$HOME/.claude/hooks/artifact-tracker.sh"
+    SESSION_END_PATH="$HOME/.claude/hooks/session-end.sh"
+
+    # Merge hooks: remove existing cs hooks, then add ours
+    # This prevents duplicates on reinstall while preserving other hooks
+    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$SESSION_START_PATH" '
+        .hooks.SessionStart = ((.hooks.SessionStart // []) | map(
+            select(.hooks | all(.command != $path))
+        )) + [{
+            "hooks": [{
+                "type": "command",
+                "command": $path,
+                "timeout": 10
+            }]
+        }]
+    ')
+
+    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$ARTIFACT_TRACKER_PATH" '
+        .hooks.PreToolUse = ((.hooks.PreToolUse // []) | map(
+            select((.matcher == "Write" and (.hooks | any(.command == $path))) | not)
+        )) + [{
+            "matcher": "Write",
+            "hooks": [{
+                "type": "command",
+                "command": $path,
+                "timeout": 10
+            }]
+        }]
+    ')
+
+    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$SESSION_END_PATH" '
+        .hooks.SessionEnd = ((.hooks.SessionEnd // []) | map(
+            select(.hooks | all(.command != $path))
+        )) + [{
+            "hooks": [{
+                "type": "command",
+                "command": $path,
+                "timeout": 10
+            }]
+        }]
+    ')
+
+    echo "$SETTINGS" > "$CLAUDE_SETTINGS"
 fi
 
 # Check if ~/.local/bin is in PATH
