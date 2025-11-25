@@ -26,6 +26,7 @@ warn() {
 # Configuration
 INSTALL_DIR="${HOME}/.local/bin"
 HOOKS_DIR="${HOME}/.claude/hooks"
+COMMANDS_DIR="${HOME}/.claude/commands"
 CLAUDE_SETTINGS="${HOME}/.claude/settings.json"
 SESSIONS_DIR="${HOME}/.claude-sessions"
 REPO_URL="https://raw.githubusercontent.com/hex/claude-sessions/main"
@@ -35,6 +36,9 @@ CS_URL="${REPO_URL}/bin/cs"
 HOOK_SESSION_START_URL="${REPO_URL}/hooks/session-start.sh"
 HOOK_ARTIFACT_TRACKER_URL="${REPO_URL}/hooks/artifact-tracker.sh"
 HOOK_SESSION_END_URL="${REPO_URL}/hooks/session-end.sh"
+
+# Command URLs for web install
+COMMAND_SUMMARY_URL="${REPO_URL}/commands/summary.md"
 
 # Uninstall function
 uninstall() {
@@ -53,6 +57,12 @@ uninstall() {
             info "Removed $HOOKS_DIR/$hook"
         fi
     done
+
+    # Remove commands
+    if [ -f "$COMMANDS_DIR/summary.md" ]; then
+        rm "$COMMANDS_DIR/summary.md"
+        info "Removed $COMMANDS_DIR/summary.md"
+    fi
 
     # Remove cs hooks from settings.json (preserve other hooks)
     if [ -f "$CLAUDE_SETTINGS" ] && command -v jq >/dev/null 2>&1; then
@@ -127,6 +137,7 @@ if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/bin/cs" ]; then
     # Running from cloned repo
     CS_SOURCE="$SCRIPT_DIR/bin/cs"
     HOOKS_SOURCE="$SCRIPT_DIR/hooks"
+    COMMANDS_SOURCE="$SCRIPT_DIR/commands"
     INSTALL_METHOD="local"
 else
     # Running from web (curl | bash)
@@ -186,6 +197,20 @@ else
 fi
 
 chmod +x "$HOOKS_DIR"/*.sh
+
+# Install commands
+info "Installing commands to $COMMANDS_DIR"
+mkdir -p "$COMMANDS_DIR"
+
+if [ "$INSTALL_METHOD" = "local" ]; then
+    cp "$COMMANDS_SOURCE/summary.md" "$COMMANDS_DIR/"
+else
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$COMMAND_SUMMARY_URL" -o "$COMMANDS_DIR/summary.md" || error "Failed to download summary.md"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q "$COMMAND_SUMMARY_URL" -O "$COMMANDS_DIR/summary.md" || error "Failed to download summary.md"
+    fi
+fi
 
 # Configure Claude Code settings
 info "Configuring Claude Code hooks"
@@ -267,6 +292,7 @@ info ""
 info "Installed:"
 info "  - cs command to $INSTALL_DIR/cs"
 info "  - Session hooks to $HOOKS_DIR/"
+info "  - Slash commands to $COMMANDS_DIR/"
 info "  - Hook configuration in $CLAUDE_SETTINGS"
 info ""
 info "Usage: cs <session-name>"

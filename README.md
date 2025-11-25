@@ -29,8 +29,9 @@ cd claude-sessions
 The installer will:
 1. Download (or copy) `cs` to `~/.local/bin/cs`
 2. Install Claude Code hooks to `~/.claude/hooks/`
-3. Configure hooks in `~/.claude/settings.json`
-4. Check if `~/.local/bin` is in your PATH
+3. Install slash commands to `~/.claude/commands/`
+4. Configure hooks in `~/.claude/settings.json`
+5. Check if `~/.local/bin` is in your PATH
 
 If `~/.local/bin` is not in your PATH, add this to your `~/.bashrc` or `~/.zshrc`:
 
@@ -54,6 +55,9 @@ rm ~/.local/bin/cs
 rm ~/.claude/hooks/session-start.sh
 rm ~/.claude/hooks/artifact-tracker.sh
 rm ~/.claude/hooks/session-end.sh
+
+# Remove commands
+rm ~/.claude/commands/summary.md
 
 # Remove hook configuration from settings.json
 # Edit ~/.claude/settings.json and remove the SessionStart, PreToolUse (Write matcher),
@@ -150,6 +154,23 @@ The hooks are configured in `~/.claude/settings.json`:
 ```
 
 Hooks only activate when running inside a `cs` session (detected via `CLAUDE_SESSION_NAME` environment variable). Outside of `cs` sessions, they pass through without effect.
+
+## Slash Commands
+
+### /summary
+
+Generates an intelligent summary of the current session by reading all documentation files and synthesizing them into a cohesive narrative.
+
+```
+/summary
+```
+
+This command:
+1. Reads all session files (README.md, discoveries.md, changes.md, notes.md, artifacts/MANIFEST.json)
+2. Synthesizes findings into a narrative summary
+3. Writes the result to `summary.md` in the session directory
+
+The summary includes: objective, environment, key discoveries, changes made, artifacts created, outcome, and notes for future reference.
 
 ## How It Works
 
