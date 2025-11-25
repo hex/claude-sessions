@@ -95,12 +95,6 @@ uninstall() {
 
         echo "$SETTINGS" > "$CLAUDE_SETTINGS"
         info "Modified $CLAUDE_SETTINGS (removed cs hooks)"
-
-        # Remove settings.json if empty
-        if [ "$(jq 'keys | length' "$CLAUDE_SETTINGS")" -eq 0 ]; then
-            rm "$CLAUDE_SETTINGS"
-            info "Removed empty $CLAUDE_SETTINGS"
-        fi
     fi
 
     # Ask about session data
