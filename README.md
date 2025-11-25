@@ -28,8 +28,9 @@ cd claude-sessions
 
 The installer will:
 1. Download (or copy) `cs` to `~/.local/bin/cs`
-2. Make it executable
-3. Check if `~/.local/bin` is in your PATH
+2. Install Claude Code hooks to `~/.claude/hooks/`
+3. Configure hooks in `~/.claude/settings.json`
+4. Check if `~/.local/bin` is in your PATH
 
 If `~/.local/bin` is not in your PATH, add this to your `~/.bashrc` or `~/.zshrc`:
 
@@ -37,10 +38,102 @@ If `~/.local/bin` is not in your PATH, add this to your `~/.bashrc` or `~/.zshrc
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
+## Uninstalling
+
+```bash
+./install.sh --uninstall
+```
+
+This removes:
+- `~/.local/bin/cs`
+- Hooks from `~/.claude/hooks/`
+- Hook configuration from `~/.claude/settings.json`
+
+You'll be prompted whether to delete session data at `~/.claude-sessions/`.
+
 ## Requirements
 
 - [Claude Code](https://github.com/anthropics/claude-code) - Must be available as `claude` command
 - Bash 4.0+
+- `jq` - For hook configuration (install via `brew install jq` or `apt install jq`)
+
+## Hooks
+
+The installer configures three Claude Code hooks that enable session management features:
+
+### session-start.sh (SessionStart)
+
+Runs when Claude Code starts a session:
+- Logs session start to `logs/session.log`
+- Exports session environment variables
+- Injects session context into Claude's system prompt
+
+### artifact-tracker.sh (PreToolUse on Write)
+
+Runs before any file write operation:
+- Detects script and config files by extension
+- Redirects tracked files to `artifacts/` directory
+- Updates `artifacts/MANIFEST.json` with metadata
+- Handles duplicate filenames automatically
+
+**Tracked extensions:**
+- Scripts: `.sh`, `.bash`, `.zsh`, `.py`, `.js`, `.ts`, `.rb`, `.pl`
+- Configs: `.conf`, `.config`, `.json`, `.yaml`, `.yml`, `.toml`, `.ini`, `.env`
+
+### session-end.sh (SessionEnd)
+
+Runs when Claude Code session ends:
+- Logs session end time
+- Creates `artifacts-YYYYMMDD-HHMMSS.tar.gz` archive
+- Updates global `~/.claude-sessions/INDEX.md`
+- Cleans up lock files
+
+### Hook Configuration
+
+The hooks are configured in `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/you/.claude/hooks/session-start.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/you/.claude/hooks/artifact-tracker.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/you/.claude/hooks/session-end.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Hooks only activate when running inside a `cs` session (detected via `CLAUDE_SESSION_NAME` environment variable). Outside of `cs` sessions, they pass through without effect.
 
 ## How It Works
 
