@@ -5,6 +5,7 @@
 set -euo pipefail
 
 # Configuration
+VERSION="2025.11.1"
 SESSIONS_ROOT="$HOME/.claude-sessions"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 
@@ -203,6 +204,89 @@ Location: $(hostname):$(pwd)
 EOF
 }
 
+# Get file modification time (cross-platform)
+get_mtime() {
+    local file="$1"
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$file" 2>/dev/null || echo "-"
+    else
+        stat -c "%y" "$file" 2>/dev/null | cut -d'.' -f1 | cut -d':' -f1,2 || echo "-"
+    fi
+}
+
+# List all sessions
+list_sessions() {
+    if [ ! -d "$SESSIONS_ROOT" ]; then
+        info "No sessions found"
+        return 0
+    fi
+
+    local sessions=()
+    while IFS= read -r -d '' dir; do
+        sessions+=("$(basename "$dir")")
+    done < <(find "$SESSIONS_ROOT" -mindepth 1 -maxdepth 1 -type d -print0 | sort -z)
+
+    if [ ${#sessions[@]} -eq 0 ]; then
+        info "No sessions found"
+        return 0
+    fi
+
+    # Find max session name length for column alignment
+    local max_len=7  # minimum "SESSION" header length
+    for session in "${sessions[@]}"; do
+        if [ ${#session} -gt $max_len ]; then
+            max_len=${#session}
+        fi
+    done
+
+    # Print header
+    printf "${YELLOW}%-${max_len}s  %-16s  %s${NC}\n" "SESSION" "CREATED" "MODIFIED"
+    printf "%-${max_len}s  %-16s  %s\n" "$(printf '%*s' "$max_len" '' | tr ' ' '-')" "----------------" "----------------"
+
+    # Print sessions
+    for session in "${sessions[@]}"; do
+        local session_dir="$SESSIONS_ROOT/$session"
+        local created="-"
+        local modified="-"
+
+        if [ -f "$session_dir/logs/session.log" ]; then
+            local started
+            started=$(head -4 "$session_dir/logs/session.log" | grep "Started:" | cut -d' ' -f2-)
+            if [ -n "$started" ]; then
+                created=$(echo "$started" | cut -d':' -f1,2)
+            fi
+            modified=$(get_mtime "$session_dir/logs/session.log")
+        fi
+
+        printf "${GREEN}%-${max_len}s${NC}  %-16s  %s\n" "$session" "$created" "$modified"
+    done
+}
+
+# Remove a session
+remove_session() {
+    local session_name="$1"
+
+    if [ -z "$session_name" ]; then
+        error "Usage: cs remove <session-name>"
+    fi
+
+    local session_dir="$SESSIONS_ROOT/$session_name"
+
+    if [ ! -d "$session_dir" ]; then
+        error "Session not found: $session_name"
+    fi
+
+    # Confirm deletion
+    read -r -p $'\033[0;31mRemove session '"'$session_name'"$'? [y/N] \033[0m' confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        info "Cancelled"
+        return 0
+    fi
+
+    rm -rf "$session_dir"
+    info "Removed session: $session_name"
+}
+
 # Launch Claude Code
 launch_claude_code() {
     local session_name="$1"
@@ -214,9 +298,10 @@ launch_claude_code() {
     export CLAUDE_ARTIFACT_DIR="$session_dir/artifacts"
 
     # Launch Claude Code
-    info "Launching Claude Code in session: $session_name"
-    info "Session directory: $session_dir"
-    info ""
+    echo -e "${YELLOW}cs${NC} ${GREEN}$VERSION${NC}"
+    echo -e "${YELLOW}Session:${NC}   ${GREEN}$session_name${NC}"
+    echo -e "${YELLOW}Directory:${NC} $session_dir"
+    echo ""
 
     cd "$session_dir"
     exec "$CLAUDE_CODE_BIN"
@@ -225,10 +310,28 @@ launch_claude_code() {
 # Main function
 main() {
     if [ $# -eq 0 ]; then
-        error "Usage: cs <session-name>"
+        error "Usage: cs <session-name> | cs list | cs remove <session-name>"
     fi
 
-    local session_name="$1"
+    local cmd="$1"
+
+    # Handle subcommands
+    case "$cmd" in
+        -v|--version|version)
+            echo "cs $VERSION"
+            return 0
+            ;;
+        list|ls)
+            list_sessions
+            return 0
+            ;;
+        remove|rm)
+            remove_session "${2:-}"
+            return 0
+            ;;
+    esac
+
+    local session_name="$cmd"
 
     # Validate inputs
     validate_session_name "$session_name"

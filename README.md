@@ -191,7 +191,10 @@ The session workspace is where Claude Code runs, but you can SSH to servers, wor
 ## Usage
 
 ```bash
-cs <session-name>
+cs <session-name>           # Create or resume a session
+cs list                     # List all sessions (alias: cs ls)
+cs remove <session-name>    # Remove a session (alias: cs rm)
+cs --version                # Show version (alias: cs -v)
 ```
 
 ### Examples
