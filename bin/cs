@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2025.11.3"
+VERSION="2025.11.4"
 SESSIONS_ROOT="$HOME/.claude-sessions"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -38,6 +38,29 @@ get_remote_version() {
     echo "$remote_cs" | grep '^VERSION=' | head -1 | cut -d'"' -f2
 }
 
+# Compare versions (YYYY.MM.N format). Returns 0 if v1 > v2, 1 otherwise
+version_greater() {
+    local v1="$1" v2="$2"
+
+    # Split into components
+    local y1 m1 n1 y2 m2 n2
+    IFS='.' read -r y1 m1 n1 <<< "$v1"
+    IFS='.' read -r y2 m2 n2 <<< "$v2"
+
+    # Compare year
+    if [ "$y1" -gt "$y2" ] 2>/dev/null; then return 0; fi
+    if [ "$y1" -lt "$y2" ] 2>/dev/null; then return 1; fi
+
+    # Compare month
+    if [ "$m1" -gt "$m2" ] 2>/dev/null; then return 0; fi
+    if [ "$m1" -lt "$m2" ] 2>/dev/null; then return 1; fi
+
+    # Compare patch
+    if [ "$n1" -gt "$n2" ] 2>/dev/null; then return 0; fi
+
+    return 1
+}
+
 # Check for updates
 check_update() {
     local remote_version
@@ -48,7 +71,7 @@ check_update() {
     echo -e "Current version: ${GREEN}$VERSION${NC}"
     echo -e "Latest version:  ${GREEN}$remote_version${NC}"
 
-    if [ "$remote_version" != "$VERSION" ]; then
+    if version_greater "$remote_version" "$VERSION"; then
         echo ""
         info "Update available. Run 'cs update' to install."
         return 0
@@ -68,9 +91,11 @@ do_update() {
         error "Failed to fetch update. Check your internet connection."
     }
 
-    if [ "$force" != "true" ] && [ "$remote_version" = "$VERSION" ]; then
-        info "Already up to date ($VERSION)"
-        return 0
+    if [ "$force" != "true" ]; then
+        if ! version_greater "$remote_version" "$VERSION"; then
+            info "Already up to date ($VERSION)"
+            return 0
+        fi
     fi
 
     echo -e "Updating cs from ${YELLOW}$VERSION${NC} to ${GREEN}$remote_version${NC}..."
