@@ -93,11 +93,17 @@ MANIFEST_ENTRY=$(jq -n \
     }')
 
 # Append to manifest (with file locking to prevent race conditions)
-(
-    flock -x 200
-    CURRENT_MANIFEST=$(cat "$MANIFEST")
-    echo "$CURRENT_MANIFEST" | jq --argjson entry "$MANIFEST_ENTRY" '. += [$entry]' > "$MANIFEST"
-) 200>"$MANIFEST.lock"
+LOCKDIR="$MANIFEST.lock"
+while ! mkdir "$LOCKDIR" 2>/dev/null; do
+    sleep 0.1
+done
+trap 'rmdir "$LOCKDIR" 2>/dev/null' EXIT
+
+CURRENT_MANIFEST=$(cat "$MANIFEST")
+echo "$CURRENT_MANIFEST" | jq --argjson entry "$MANIFEST_ENTRY" '. += [$entry]' > "$MANIFEST"
+
+rmdir "$LOCKDIR" 2>/dev/null
+trap - EXIT
 
 # Log the artifact capture
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Artifact captured: $FILENAME (from $FILE_PATH)" >> "$SESSION_DIR/logs/session.log"
