@@ -194,6 +194,8 @@ The session workspace is where Claude Code runs, but you can SSH to servers, wor
 cs <session-name>           # Create or resume a session
 cs list                     # List all sessions (alias: cs ls)
 cs remove <session-name>    # Remove a session (alias: cs rm)
+cs update                   # Update cs to latest version
+cs update --check           # Check for updates without installing
 cs --version                # Show version (alias: cs -v)
 ```
 

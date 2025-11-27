@@ -5,9 +5,11 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2025.11.2"
+VERSION="2025.11.3"
 SESSIONS_ROOT="$HOME/.claude-sessions"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
+REPO_URL="https://github.com/hex/claude-sessions"
+RAW_URL="https://raw.githubusercontent.com/hex/claude-sessions/main"
 
 # Colors for output
 RED='\033[0;31m'
@@ -27,6 +29,61 @@ info() {
 
 warn() {
     echo -e "${YELLOW}$1${NC}"
+}
+
+# Fetch latest version from GitHub
+get_remote_version() {
+    local remote_cs
+    remote_cs=$(curl -fsSL "$RAW_URL/bin/cs" 2>/dev/null) || return 1
+    echo "$remote_cs" | grep '^VERSION=' | head -1 | cut -d'"' -f2
+}
+
+# Check for updates
+check_update() {
+    local remote_version
+    remote_version=$(get_remote_version) || {
+        error "Failed to check for updates. Check your internet connection."
+    }
+
+    echo -e "Current version: ${GREEN}$VERSION${NC}"
+    echo -e "Latest version:  ${GREEN}$remote_version${NC}"
+
+    if [ "$remote_version" != "$VERSION" ]; then
+        echo ""
+        info "Update available. Run 'cs update' to install."
+        return 0
+    else
+        echo ""
+        info "Already up to date."
+        return 0
+    fi
+}
+
+# Perform update
+do_update() {
+    local force="${1:-false}"
+    local remote_version
+
+    remote_version=$(get_remote_version) || {
+        error "Failed to fetch update. Check your internet connection."
+    }
+
+    if [ "$force" != "true" ] && [ "$remote_version" = "$VERSION" ]; then
+        info "Already up to date ($VERSION)"
+        return 0
+    fi
+
+    echo -e "Updating cs from ${YELLOW}$VERSION${NC} to ${GREEN}$remote_version${NC}..."
+    echo ""
+
+    # Download and run install.sh
+    local install_script
+    install_script=$(curl -fsSL "$RAW_URL/install.sh" 2>/dev/null) || {
+        error "Failed to download installer."
+    }
+
+    # Run the installer
+    bash -c "$install_script"
 }
 
 # Check dependencies
@@ -310,7 +367,7 @@ launch_claude_code() {
 # Main function
 main() {
     if [ $# -eq 0 ]; then
-        error "Usage: cs <session-name> | cs list | cs remove <session-name>"
+        error "Usage: cs <session-name> | cs list | cs remove <name> | cs update"
     fi
 
     local cmd="$1"
@@ -327,6 +384,24 @@ main() {
             ;;
         remove|rm)
             remove_session "${2:-}"
+            return 0
+            ;;
+        update)
+            local update_arg="${2:-}"
+            case "$update_arg" in
+                --check|-c)
+                    check_update
+                    ;;
+                --force|-f)
+                    do_update "true"
+                    ;;
+                "")
+                    do_update
+                    ;;
+                *)
+                    error "Unknown option: $update_arg. Use 'cs update [--check|--force]'"
+                    ;;
+            esac
             return 0
             ;;
     esac
