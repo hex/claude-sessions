@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2025.12.4"
+VERSION="2025.12.5"
 SESSIONS_ROOT="$HOME/.claude-sessions"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -148,6 +148,7 @@ do_update() {
 # Check for updates periodically and notify (non-blocking)
 UPDATE_CACHE="$HOME/.cache/cs/update-check"
 UPDATE_CHECK_INTERVAL=86400  # 24 hours in seconds
+UPDATE_AVAILABLE=""  # Set by check_update_notify if update available
 
 check_update_notify() {
     local cache_dir
@@ -164,9 +165,9 @@ check_update_notify() {
 
         # Skip if checked recently
         if [ -n "$cache_time" ] && [ $((now - cache_time)) -lt $UPDATE_CHECK_INTERVAL ]; then
-            # Show notification if cached version is newer
+            # Set update available if cached version is newer
             if [ -n "$cached_version" ] && version_greater "$cached_version" "$VERSION"; then
-                echo -e "${YELLOW}Update available: $VERSION -> $cached_version (run 'cs update')${NC}"
+                UPDATE_AVAILABLE="$cached_version"
             fi
             return 0
         fi
@@ -509,6 +510,9 @@ launch_claude_code() {
     echo -e "${GREEN}▌${NC} ${BOLD}cs${NC} ${DIM}$VERSION${NC}"
     echo -e "${GREEN}▌${NC} ${WHITE}${BOLD}$session_name${NC} ${DIM}($status_icon $status_text)${NC}"
     echo -e "${GREEN}▌${NC} ${DIM}$session_dir${NC}"
+    if [ -n "$UPDATE_AVAILABLE" ]; then
+        echo -e "${YELLOW}▌${NC} ${YELLOW}Update available: $VERSION -> $UPDATE_AVAILABLE${NC} ${DIM}(cs update)${NC}"
+    fi
     echo ""
 
     cd "$session_dir"
