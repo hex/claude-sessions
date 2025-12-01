@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2025.12.3"
+VERSION="2025.12.4"
 SESSIONS_ROOT="$HOME/.claude-sessions"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -15,6 +15,10 @@ RAW_URL="https://raw.githubusercontent.com/hex/claude-sessions/main"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+WHITE='\033[0;97m'
+BOLD='\033[1m'
+DIM='\033[2m'
 NC='\033[0m' # No Color
 
 # Utility functions
@@ -483,16 +487,28 @@ remove_session() {
 launch_claude_code() {
     local session_name="$1"
     local session_dir="$2"
+    local is_new="$3"
 
     # Set environment variables
     export CLAUDE_SESSION_NAME="$session_name"
     export CLAUDE_SESSION_DIR="$session_dir"
     export CLAUDE_ARTIFACT_DIR="$session_dir/artifacts"
 
-    # Launch Claude Code
-    echo -e "${YELLOW}cs${NC} ${GREEN}$VERSION${NC}"
-    echo -e "${YELLOW}Session:${NC}   ${GREEN}$session_name${NC}"
-    echo -e "${YELLOW}Directory:${NC} $session_dir"
+    # Status indicator
+    local status_icon status_text
+    if [ "$is_new" = "true" ]; then
+        status_icon="+"
+        status_text="new"
+    else
+        status_icon="↻"
+        status_text="resuming"
+    fi
+
+    # Display banner
+    echo ""
+    echo -e "${GREEN}▌${NC} ${BOLD}cs${NC} ${DIM}$VERSION${NC}"
+    echo -e "${GREEN}▌${NC} ${WHITE}${BOLD}$session_name${NC} ${DIM}($status_icon $status_text)${NC}"
+    echo -e "${GREEN}▌${NC} ${DIM}$session_dir${NC}"
     echo ""
 
     cd "$session_dir"
@@ -557,18 +573,18 @@ main() {
 
     # Define paths
     local session_dir="$SESSIONS_ROOT/$session_name"
+    local is_new="false"
 
     # Create session structure if needed
     if [ ! -d "$session_dir" ]; then
-        info "Creating new session: $session_name"
+        is_new="true"
         create_session_structure "$session_dir"
     else
-        info "Resuming existing session: $session_name"
         migrate_session "$session_dir"
     fi
 
     # Launch Claude Code
-    launch_claude_code "$session_name" "$session_dir"
+    launch_claude_code "$session_name" "$session_dir" "$is_new"
 }
 
 main "$@"
