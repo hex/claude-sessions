@@ -5,8 +5,8 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2025.12.7"
-SESSIONS_ROOT="$HOME/.claude-sessions"
+VERSION="2025.12.8"
+SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
 RAW_URL="https://raw.githubusercontent.com/hex/claude-sessions/main"
@@ -47,6 +47,10 @@ Commands:
     --force, -f       Force reinstall even if up to date
   help, -h, --help    Show this help message
   version, -v         Show version
+
+Environment:
+  CS_SESSIONS_ROOT    Override sessions directory (default: ~/.claude-sessions)
+  CLAUDE_CODE_BIN     Override claude binary name (default: claude)
 
 Examples:
   cs debug-api        Create or resume 'debug-api' session

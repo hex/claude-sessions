@@ -327,17 +327,13 @@ Once installed, Claude can use the tmux skill to work with interactive tools lik
 
 ## Configuration
 
-By default, sessions are stored in `~/.claude-sessions/`.
-
-To change this, set the `SESSIONS_ROOT` variable in the `cs` script:
+Configuration is done via environment variables. Add these to your `~/.bashrc` or `~/.zshrc`:
 
 ```bash
-SESSIONS_ROOT="/path/to/your/sessions"
-```
+# Override sessions directory (default: ~/.claude-sessions)
+export CS_SESSIONS_ROOT="/path/to/your/sessions"
 
-To use a different Claude Code binary, set `CLAUDE_CODE_BIN`:
-
-```bash
+# Override Claude Code binary name (default: claude)
 export CLAUDE_CODE_BIN="path/to/claude"
 ```
 
