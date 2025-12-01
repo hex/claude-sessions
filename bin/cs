@@ -27,6 +27,33 @@ info() {
     echo -e "${GREEN}$1${NC}"
 }
 
+show_help() {
+    cat <<EOF
+cs $VERSION - Claude Code session manager
+
+Usage: cs <session-name>    Create or resume a session
+       cs <command>         Run a subcommand
+
+Commands:
+  <name>              Create or resume session <name>
+  list, ls            List all sessions
+  remove, rm <name>   Remove a session
+  update              Update cs to latest version
+    --check, -c       Check for updates without installing
+    --force, -f       Force reinstall even if up to date
+  help, -h, --help    Show this help message
+  version, -v         Show version
+
+Examples:
+  cs debug-api        Create or resume 'debug-api' session
+  cs list             List all sessions
+  cs rm old-session   Remove 'old-session'
+  cs update --check   Check for updates
+
+Sessions are stored in: $SESSIONS_ROOT
+EOF
+}
+
 warn() {
     echo -e "${YELLOW}$1${NC}"
 }
@@ -438,13 +465,18 @@ launch_claude_code() {
 # Main function
 main() {
     if [ $# -eq 0 ]; then
-        error "Usage: cs <session-name> | cs list | cs remove <name> | cs update"
+        show_help
+        exit 0
     fi
 
     local cmd="$1"
 
     # Handle subcommands
     case "$cmd" in
+        -h|--help|help)
+            show_help
+            return 0
+            ;;
         -v|--version|version)
             echo "cs $VERSION"
             return 0
