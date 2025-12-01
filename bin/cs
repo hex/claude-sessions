@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2025.12.8"
+VERSION="2025.12.9"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -167,7 +167,7 @@ check_update_notify() {
         local cache_time cached_version
         read -r cache_time cached_version < "$UPDATE_CACHE" 2>/dev/null || true
 
-        # Skip if checked recently
+        # If cache is fresh, use it
         if [ -n "$cache_time" ] && [ $((now - cache_time)) -lt $UPDATE_CHECK_INTERVAL ]; then
             # Set update available if cached version is newer
             if [ -n "$cached_version" ] && version_greater "$cached_version" "$VERSION"; then
@@ -177,11 +177,16 @@ check_update_notify() {
         fi
     fi
 
-    # Check in background to avoid slowing down startup
-    (
-        remote_version=$(get_remote_version 2>/dev/null) || exit 0
+    # No fresh cache - do a quick synchronous check
+    local remote_version
+    remote_version=$(get_remote_version 2>/dev/null) || remote_version=""
+
+    if [ -n "$remote_version" ]; then
         echo "$now $remote_version" > "$UPDATE_CACHE"
-    ) &
+        if version_greater "$remote_version" "$VERSION"; then
+            UPDATE_AVAILABLE="$remote_version"
+        fi
+    fi
 }
 
 # Check dependencies
