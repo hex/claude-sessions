@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2025.11.4"
+VERSION="2025.12.1"
 SESSIONS_ROOT="$HOME/.claude-sessions"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -216,16 +216,16 @@ EOF
 
 This is a Claude Code session managed by the cs tool. This session has automatic artifact tracking and documentation support.
 
-## Session Structure
+## Session Files - READ THESE ON RESUME
 
-This session directory contains:
+When resuming this session, read the following files to restore context:
 
-- **README.md** - Session overview, objective, environment, and outcome
-- **discoveries.md** - Document findings about the system/environment
-- **changes.md** - Log all modifications and fixes made
-- **notes.md** - Miscellaneous observations and ideas
-- **artifacts/** - Automatically collected scripts and configuration files
-- **logs/session.log** - Complete session command log
+1. **summary.md** - If exists, read first for previous session overview
+2. **README.md** - Session objective, environment, and outcome
+3. **discoveries.md** - Findings about the system/environment
+4. **changes.md** - Modifications and fixes made
+5. **notes.md** - Observations and ideas
+6. **artifacts/MANIFEST.json** - List of tracked artifacts
 
 ## Artifact Auto-Tracking
 
@@ -238,7 +238,7 @@ When you use the Write tool for these file types, they are automatically redirec
 
 ## Documentation Discipline
 
-**IMPORTANT:** Update the markdown documentation files throughout the session:
+Update the markdown documentation files throughout the session:
 
 1. **Start of session:** Fill in README.md objective and environment
 2. **As you work:** Update discoveries.md with findings and changes.md with modifications
@@ -246,21 +246,9 @@ When you use the Write tool for these file types, they are automatically redirec
 
 Treat these files as a lab notebook - document as you go, not just at the end.
 
-## Tmux Integration
-
-If you need tmux functionality during this session, use the tmux skill available in Claude Code.
-
 ## Summary Command
 
 When the session is complete, use the `/summary` command to generate an intelligent summary of the entire session. This will create a summary.md file synthesizing all documentation.
-
-## SSH Workflow
-
-For remote server work:
-1. Establish SSH connection in the main pane: `ssh user@host`
-2. Run commands on the remote system as needed
-3. Session documentation remains local
-4. Artifacts are saved locally
 
 ## Best Practices
 
@@ -284,6 +272,64 @@ Location: $(hostname):$(pwd)
 ================================================================================
 
 EOF
+}
+
+# Migrate existing session to latest format
+migrate_session() {
+    local session_dir="$1"
+    local claude_md="$session_dir/CLAUDE.md"
+
+    # Check if CLAUDE.md needs migration (old format has "## Session Structure")
+    if [ -f "$claude_md" ] && grep -q "^## Session Structure" "$claude_md"; then
+        cat > "$claude_md" << 'EOF'
+# Session Documentation Protocol
+
+This is a Claude Code session managed by the cs tool. This session has automatic artifact tracking and documentation support.
+
+## Session Files - READ THESE ON RESUME
+
+When resuming this session, read the following files to restore context:
+
+1. **summary.md** - If exists, read first for previous session overview
+2. **README.md** - Session objective, environment, and outcome
+3. **discoveries.md** - Findings about the system/environment
+4. **changes.md** - Modifications and fixes made
+5. **notes.md** - Observations and ideas
+6. **artifacts/MANIFEST.json** - List of tracked artifacts
+
+## Artifact Auto-Tracking
+
+Scripts and configuration files you create are **automatically saved to artifacts/**:
+
+- Scripts: .sh, .bash, .zsh, .py, .js, .ts, .rb, .pl
+- Configs: .conf, .config, .json, .yaml, .yml, .toml, .ini, .env
+
+When you use the Write tool for these file types, they are automatically redirected to the artifacts/ directory and tracked in MANIFEST.json.
+
+## Documentation Discipline
+
+Update the markdown documentation files throughout the session:
+
+1. **Start of session:** Fill in README.md objective and environment
+2. **As you work:** Update discoveries.md with findings and changes.md with modifications
+3. **End of session:** Complete the README.md outcome section
+
+Treat these files as a lab notebook - document as you go, not just at the end.
+
+## Summary Command
+
+When the session is complete, use the `/summary` command to generate an intelligent summary of the entire session. This will create a summary.md file synthesizing all documentation.
+
+## Best Practices
+
+- Document discoveries as you find them - don't wait until the end
+- Use artifacts/ for any reusable scripts or configs
+- Keep changes.md updated with each modification
+- Use notes.md for temporary thoughts and ideas
+- Run `/summary` at the end to create a cohesive record
+EOF
+        warn "Migrated CLAUDE.md to latest format"
+    fi
 }
 
 # Get file modification time (cross-platform)
@@ -446,6 +492,7 @@ main() {
         create_session_structure "$session_dir"
     else
         info "Resuming existing session: $session_name"
+        migrate_session "$session_dir"
     fi
 
     # Launch Claude Code

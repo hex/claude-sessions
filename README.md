@@ -172,6 +172,10 @@ This command:
 
 The summary includes: objective, environment, key discoveries, changes made, artifacts created, outcome, and notes for future reference.
 
+## Session Migration
+
+When resuming an existing session, `cs` automatically migrates older session formats to the latest structure. This ensures CLAUDE.md always has the current instructions for context loading.
+
 ## How It Works
 
 **`cs` is completely independent:**
