@@ -333,8 +333,9 @@ Configuration is done via environment variables. Add these to your `~/.bashrc` o
 # Override sessions directory (default: ~/.claude-sessions)
 export CS_SESSIONS_ROOT="/path/to/your/sessions"
 
-# Override Claude Code binary name (default: claude)
-export CLAUDE_CODE_BIN="path/to/claude"
+# Override Claude Code binary (default: claude)
+# Can include arguments - use $HOME instead of ~ in paths
+export CLAUDE_CODE_BIN="$HOME/.local/bin/claude --dangerously-skip-permissions"
 ```
 
 ## SSH Workflow

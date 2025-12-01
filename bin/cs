@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2025.12.10"
+VERSION="2025.12.11"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -197,7 +197,10 @@ check_update_notify() {
 check_dependencies() {
     local missing=()
 
-    command -v "$CLAUDE_CODE_BIN" >/dev/null 2>&1 || missing+=("claude-code")
+    # Extract just the binary name (first word) for the check
+    local claude_bin
+    claude_bin="${CLAUDE_CODE_BIN%% *}"
+    command -v "$claude_bin" >/dev/null 2>&1 || missing+=("claude-code")
 
     if [ ${#missing[@]} -gt 0 ]; then
         error "Missing required dependencies: ${missing[*]}"
@@ -529,7 +532,8 @@ launch_claude_code() {
     echo ""
 
     cd "$session_dir"
-    exec "$CLAUDE_CODE_BIN"
+    # shellcheck disable=SC2086
+    exec $CLAUDE_CODE_BIN
 }
 
 # Main function
