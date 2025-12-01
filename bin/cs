@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2025.12.9"
+VERSION="2025.12.10"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -147,6 +147,10 @@ do_update() {
 
     # Clear update cache so notification disappears
     rm -f "$HOME/.cache/cs/update-check"
+
+    # Exit immediately to prevent bash from reading more of the old script
+    # (the file was just overwritten, continuing would cause errors)
+    exit 0
 }
 
 # Check for updates periodically and notify (non-blocking)
