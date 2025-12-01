@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2025.12.5"
+VERSION="2025.12.6"
 SESSIONS_ROOT="$HOME/.claude-sessions"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -15,6 +15,7 @@ RAW_URL="https://raw.githubusercontent.com/hex/claude-sessions/main"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+ORANGE='\033[38;5;208m'
 CYAN='\033[0;36m'
 WHITE='\033[0;97m'
 BOLD='\033[1m'
@@ -511,7 +512,7 @@ launch_claude_code() {
     echo -e "${GREEN}▌${NC} ${WHITE}${BOLD}$session_name${NC} ${DIM}($status_icon $status_text)${NC}"
     echo -e "${GREEN}▌${NC} ${DIM}$session_dir${NC}"
     if [ -n "$UPDATE_AVAILABLE" ]; then
-        echo -e "${YELLOW}▌${NC} ${YELLOW}Update available: $VERSION -> $UPDATE_AVAILABLE${NC} ${DIM}(cs update)${NC}"
+        echo -e "${ORANGE}▌${NC} ${ORANGE}Update available: $VERSION -> $UPDATE_AVAILABLE${NC} ${DIM}(cs update)${NC}"
     fi
     echo ""
 
