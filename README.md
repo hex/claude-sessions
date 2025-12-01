@@ -9,6 +9,7 @@ A session manager for [Claude Code](https://github.com/anthropics/claude-code) t
 - **Documentation templates** - Pre-configured markdown files for tracking discoveries, changes, and notes
 - **Smart resume** - Automatically resumes existing sessions or creates new ones
 - **Session-specific context** - Custom CLAUDE.md instructions for each session
+- **Update notifications** - Checks for updates daily and notifies when a new version is available
 
 ## Installation
 
@@ -200,6 +201,8 @@ cs list                     # List all sessions (alias: cs ls)
 cs remove <session-name>    # Remove a session (alias: cs rm)
 cs update                   # Update cs to latest version
 cs update --check           # Check for updates without installing
+cs update --force           # Force reinstall even if up to date
+cs help                     # Show help (alias: cs -h, cs --help)
 cs --version                # Show version (alias: cs -v)
 ```
 
