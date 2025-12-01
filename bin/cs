@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2025.12.2"
+VERSION="2025.12.3"
 SESSIONS_ROOT="$HOME/.claude-sessions"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -136,6 +136,43 @@ do_update() {
 
     # Run the installer
     bash -c "$install_script"
+
+    # Clear update cache so notification disappears
+    rm -f "$HOME/.cache/cs/update-check"
+}
+
+# Check for updates periodically and notify (non-blocking)
+UPDATE_CACHE="$HOME/.cache/cs/update-check"
+UPDATE_CHECK_INTERVAL=86400  # 24 hours in seconds
+
+check_update_notify() {
+    local cache_dir
+    cache_dir="$(dirname "$UPDATE_CACHE")"
+    mkdir -p "$cache_dir"
+
+    local now
+    now=$(date +%s)
+
+    # Check if cache exists and is fresh
+    if [ -f "$UPDATE_CACHE" ]; then
+        local cache_time cached_version
+        read -r cache_time cached_version < "$UPDATE_CACHE" 2>/dev/null || true
+
+        # Skip if checked recently
+        if [ -n "$cache_time" ] && [ $((now - cache_time)) -lt $UPDATE_CHECK_INTERVAL ]; then
+            # Show notification if cached version is newer
+            if [ -n "$cached_version" ] && version_greater "$cached_version" "$VERSION"; then
+                echo -e "${YELLOW}Update available: $VERSION -> $cached_version (run 'cs update')${NC}"
+            fi
+            return 0
+        fi
+    fi
+
+    # Check in background to avoid slowing down startup
+    (
+        remote_version=$(get_remote_version 2>/dev/null) || exit 0
+        echo "$now $remote_version" > "$UPDATE_CACHE"
+    ) &
 }
 
 # Check dependencies
@@ -514,6 +551,9 @@ main() {
     # Validate inputs
     validate_session_name "$session_name"
     check_dependencies
+
+    # Check for updates (non-blocking)
+    check_update_notify
 
     # Define paths
     local session_dir="$SESSIONS_ROOT/$session_name"
