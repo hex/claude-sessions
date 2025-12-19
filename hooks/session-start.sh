@@ -44,7 +44,8 @@ fi
 CONTEXT=$(cat << EOF
 You are working in a managed Claude Code session: $CLAUDE_SESSION_NAME
 
-Session directory: $SESSION_DIR
+Session directory: $CLAUDE_SESSION_DIR
+Artifacts directory: $CLAUDE_ARTIFACT_DIR
 
 This session has:
 - Automatic artifact tracking for scripts and configs
@@ -53,11 +54,14 @@ This session has:
 
 Key files to maintain:
 - README.md: Update objective and outcome
-- discoveries.md: Document findings as you discover them
-- changes.md: Log all modifications made
-- notes.md: Scratchpad for thoughts
+- discoveries.md: Document findings, observations, and ideas
+- changes.md: Automatically logs file modifications
 
 All scripts and config files are automatically saved to artifacts/.
+
+IMPORTANT: Environment variables, API keys, access tokens, and credentials for this session
+may be stored in the artifacts directory. When you need credentials or env configuration,
+check \$CLAUDE_ARTIFACT_DIR first (look for .env, .envrc, credentials.*, or similar files).
 
 See CLAUDE.md in the session directory for complete documentation protocol.
 EOF

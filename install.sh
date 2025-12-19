@@ -35,6 +35,8 @@ CS_URL="${REPO_URL}/bin/cs"
 # Hook URLs for web install
 HOOK_SESSION_START_URL="${REPO_URL}/hooks/session-start.sh"
 HOOK_ARTIFACT_TRACKER_URL="${REPO_URL}/hooks/artifact-tracker.sh"
+HOOK_CHANGES_TRACKER_URL="${REPO_URL}/hooks/changes-tracker.sh"
+HOOK_DISCOVERIES_REMINDER_URL="${REPO_URL}/hooks/discoveries-reminder.sh"
 HOOK_SESSION_END_URL="${REPO_URL}/hooks/session-end.sh"
 
 # Command URLs for web install
@@ -51,7 +53,7 @@ uninstall() {
     fi
 
     # Remove hooks
-    for hook in session-start.sh artifact-tracker.sh session-end.sh; do
+    for hook in session-start.sh artifact-tracker.sh changes-tracker.sh discoveries-reminder.sh session-end.sh; do
         if [ -f "$HOOKS_DIR/$hook" ]; then
             rm "$HOOKS_DIR/$hook"
             info "Removed $HOOKS_DIR/$hook"
@@ -68,6 +70,8 @@ uninstall() {
     if [ -f "$CLAUDE_SETTINGS" ] && command -v jq >/dev/null 2>&1; then
         SESSION_START_PATH="$HOME/.claude/hooks/session-start.sh"
         ARTIFACT_TRACKER_PATH="$HOME/.claude/hooks/artifact-tracker.sh"
+        CHANGES_TRACKER_PATH="$HOME/.claude/hooks/changes-tracker.sh"
+        DISCOVERIES_REMINDER_PATH="$HOME/.claude/hooks/discoveries-reminder.sh"
         SESSION_END_PATH="$HOME/.claude/hooks/session-end.sh"
 
         SETTINGS=$(cat "$CLAUDE_SETTINGS")
@@ -85,6 +89,20 @@ uninstall() {
                 .hooks.PreToolUse = [.hooks.PreToolUse[] | select(
                     (.matcher == "Write" and (.hooks | any(.command == $path))) | not
                 )]
+            else . end
+        ')
+
+        # Remove our PostToolUse changes tracker hook
+        SETTINGS=$(echo "$SETTINGS" | jq --arg path "$CHANGES_TRACKER_PATH" '
+            if .hooks.PostToolUse then
+                .hooks.PostToolUse = [.hooks.PostToolUse[] | select(.hooks | all(.command != $path))]
+            else . end
+        ')
+
+        # Remove our Stop discoveries reminder hook
+        SETTINGS=$(echo "$SETTINGS" | jq --arg path "$DISCOVERIES_REMINDER_PATH" '
+            if .hooks.Stop then
+                .hooks.Stop = [.hooks.Stop[] | select(.hooks | all(.command != $path))]
             else . end
         ')
 
@@ -182,16 +200,22 @@ if [ "$INSTALL_METHOD" = "local" ]; then
     # Install from local clone
     cp "$HOOKS_SOURCE/session-start.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/artifact-tracker.sh" "$HOOKS_DIR/"
+    cp "$HOOKS_SOURCE/changes-tracker.sh" "$HOOKS_DIR/"
+    cp "$HOOKS_SOURCE/discoveries-reminder.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/session-end.sh" "$HOOKS_DIR/"
 else
     # Download from GitHub
     if command -v curl >/dev/null 2>&1; then
         curl -fsSL "$HOOK_SESSION_START_URL" -o "$HOOKS_DIR/session-start.sh" || error "Failed to download session-start.sh"
         curl -fsSL "$HOOK_ARTIFACT_TRACKER_URL" -o "$HOOKS_DIR/artifact-tracker.sh" || error "Failed to download artifact-tracker.sh"
+        curl -fsSL "$HOOK_CHANGES_TRACKER_URL" -o "$HOOKS_DIR/changes-tracker.sh" || error "Failed to download changes-tracker.sh"
+        curl -fsSL "$HOOK_DISCOVERIES_REMINDER_URL" -o "$HOOKS_DIR/discoveries-reminder.sh" || error "Failed to download discoveries-reminder.sh"
         curl -fsSL "$HOOK_SESSION_END_URL" -o "$HOOKS_DIR/session-end.sh" || error "Failed to download session-end.sh"
     elif command -v wget >/dev/null 2>&1; then
         wget -q "$HOOK_SESSION_START_URL" -O "$HOOKS_DIR/session-start.sh" || error "Failed to download session-start.sh"
         wget -q "$HOOK_ARTIFACT_TRACKER_URL" -O "$HOOKS_DIR/artifact-tracker.sh" || error "Failed to download artifact-tracker.sh"
+        wget -q "$HOOK_CHANGES_TRACKER_URL" -O "$HOOKS_DIR/changes-tracker.sh" || error "Failed to download changes-tracker.sh"
+        wget -q "$HOOK_DISCOVERIES_REMINDER_URL" -O "$HOOKS_DIR/discoveries-reminder.sh" || error "Failed to download discoveries-reminder.sh"
         wget -q "$HOOK_SESSION_END_URL" -O "$HOOKS_DIR/session-end.sh" || error "Failed to download session-end.sh"
     fi
 fi
@@ -232,6 +256,8 @@ else
     # Our hook script paths (for detecting existing cs hooks)
     SESSION_START_PATH="$HOME/.claude/hooks/session-start.sh"
     ARTIFACT_TRACKER_PATH="$HOME/.claude/hooks/artifact-tracker.sh"
+    CHANGES_TRACKER_PATH="$HOME/.claude/hooks/changes-tracker.sh"
+    DISCOVERIES_REMINDER_PATH="$HOME/.claude/hooks/discoveries-reminder.sh"
     SESSION_END_PATH="$HOME/.claude/hooks/session-end.sh"
 
     # Merge hooks: remove existing cs hooks, then add ours
@@ -253,6 +279,31 @@ else
             select((.matcher == "Write" and (.hooks | any(.command == $path))) | not)
         )) + [{
             "matcher": "Write",
+            "hooks": [{
+                "type": "command",
+                "command": $path,
+                "timeout": 10
+            }]
+        }]
+    ')
+
+    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$CHANGES_TRACKER_PATH" '
+        .hooks.PostToolUse = ((.hooks.PostToolUse // []) | map(
+            select(.hooks | all(.command != $path))
+        )) + [{
+            "matcher": "",
+            "hooks": [{
+                "type": "command",
+                "command": $path,
+                "timeout": 10
+            }]
+        }]
+    ')
+
+    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$DISCOVERIES_REMINDER_PATH" '
+        .hooks.Stop = ((.hooks.Stop // []) | map(
+            select(.hooks | all(.command != $path))
+        )) + [{
             "hooks": [{
                 "type": "command",
                 "command": $path,

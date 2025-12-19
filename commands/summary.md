@@ -6,9 +6,8 @@ You are working in a cs session. Your task is to create a comprehensive summary 
 
 1. **Read all session documentation:**
    - README.md (objective, environment, outcome)
-   - discoveries.md (findings about the system)
-   - changes.md (modifications made)
-   - notes.md (observations and ideas)
+   - discoveries.md (findings, observations, and ideas)
+   - changes.md (auto-logged file modifications)
    - artifacts/MANIFEST.json (list of created files)
 
 2. **Synthesize into a cohesive summary** that tells the story of this session. The summary should:

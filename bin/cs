@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2025.12.11"
+VERSION="2025.12.19"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -248,17 +248,22 @@ EOF
 
     # Create discoveries.md
     cat > "$session_dir/discoveries.md" << 'EOF'
-# Discoveries
+# Discoveries & Notes
 
-Document what you learn about the environment, system, or codebase:
+Document what you learn and observe during this session:
 
+## Findings
 - System architecture and configuration
 - Existing patterns and conventions
 - Dependencies and relationships
 - Unexpected behaviors or gotchas
+
+## Ideas & Observations
+- Potential improvements
+- Questions to investigate
 - Useful commands or procedures
 
-Update this file as you discover new information throughout the session.
+Update this file throughout the session as you discover new information.
 EOF
 
     # Create changes.md
@@ -286,15 +291,6 @@ Document all modifications, fixes, and changes made during this session:
 Update this file as you make changes throughout the session.
 EOF
 
-    # Create notes.md
-    cat > "$session_dir/notes.md" << 'EOF'
-# Session Notes
-
-Miscellaneous observations, ideas, and context that don't fit in other files.
-
-Use this as a scratchpad for thoughts and temporary notes.
-EOF
-
     # Create CLAUDE.md with session-specific instructions
     cat > "$session_dir/CLAUDE.md" << 'EOF'
 # Session Documentation Protocol
@@ -307,10 +303,9 @@ When resuming this session, read the following files to restore context:
 
 1. **summary.md** - If exists, read first for previous session overview
 2. **README.md** - Session objective, environment, and outcome
-3. **discoveries.md** - Findings about the system/environment
+3. **discoveries.md** - Findings, observations, and ideas
 4. **changes.md** - Modifications and fixes made
-5. **notes.md** - Observations and ideas
-6. **artifacts/MANIFEST.json** - List of tracked artifacts
+5. **artifacts/MANIFEST.json** - List of tracked artifacts
 
 ## Artifact Auto-Tracking
 
@@ -339,8 +334,7 @@ When the session is complete, use the `/summary` command to generate an intellig
 
 - Document discoveries as you find them - don't wait until the end
 - Use artifacts/ for any reusable scripts or configs
-- Keep changes.md updated with each modification
-- Use notes.md for temporary thoughts and ideas
+- changes.md is updated automatically when files are modified
 - Run `/summary` at the end to create a cohesive record
 EOF
 
@@ -377,10 +371,9 @@ When resuming this session, read the following files to restore context:
 
 1. **summary.md** - If exists, read first for previous session overview
 2. **README.md** - Session objective, environment, and outcome
-3. **discoveries.md** - Findings about the system/environment
+3. **discoveries.md** - Findings, observations, and ideas
 4. **changes.md** - Modifications and fixes made
-5. **notes.md** - Observations and ideas
-6. **artifacts/MANIFEST.json** - List of tracked artifacts
+5. **artifacts/MANIFEST.json** - List of tracked artifacts
 
 ## Artifact Auto-Tracking
 
@@ -409,8 +402,7 @@ When the session is complete, use the `/summary` command to generate an intellig
 
 - Document discoveries as you find them - don't wait until the end
 - Use artifacts/ for any reusable scripts or configs
-- Keep changes.md updated with each modification
-- Use notes.md for temporary thoughts and ideas
+- changes.md is updated automatically when files are modified
 - Run `/summary` at the end to create a cohesive record
 EOF
         warn "Migrated CLAUDE.md to latest format"

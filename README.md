@@ -6,7 +6,7 @@ A session manager for [Claude Code](https://github.com/anthropics/claude-code) t
 
 - **Isolated session workspaces** - Each session has its own directory with structured documentation
 - **Automatic artifact tracking** - Scripts and configs are auto-saved to `artifacts/`
-- **Documentation templates** - Pre-configured markdown files for tracking discoveries, changes, and notes
+- **Documentation templates** - Pre-configured markdown files for discoveries and auto-logged changes
 - **Smart resume** - Automatically resumes existing sessions or creates new ones
 - **Session-specific context** - Custom CLAUDE.md instructions for each session
 - **Update notifications** - Checks for updates daily and notifies when a new version is available
@@ -167,11 +167,11 @@ Generates an intelligent summary of the current session by reading all documenta
 ```
 
 This command:
-1. Reads all session files (README.md, discoveries.md, changes.md, notes.md, artifacts/MANIFEST.json)
+1. Reads all session files (README.md, discoveries.md, changes.md, artifacts/MANIFEST.json)
 2. Synthesizes findings into a narrative summary
 3. Writes the result to `summary.md` in the session directory
 
-The summary includes: objective, environment, key discoveries, changes made, artifacts created, outcome, and notes for future reference.
+The summary includes: objective, environment, key discoveries, changes made, artifacts created, and outcome.
 
 ## Session Migration
 
@@ -229,9 +229,8 @@ Each session creates a directory at `~/.claude-sessions/<session-name>/` with:
 ```
 <session-name>/
 ├── README.md           # Session overview, objective, environment, outcome
-├── discoveries.md      # Document findings about the system/environment
-├── changes.md          # Log all modifications and fixes made
-├── notes.md            # Miscellaneous observations and ideas
+├── discoveries.md      # Findings, observations, and ideas
+├── changes.md          # Auto-logged file modifications
 ├── CLAUDE.md           # Session-specific instructions for Claude
 ├── artifacts/          # Auto-tracked scripts and configuration files
 │   └── MANIFEST.json   # Artifact metadata
@@ -248,25 +247,19 @@ Session overview with three key sections:
 - **Outcome** - Summary of what was accomplished (filled at end)
 
 ### discoveries.md
-Document what you learn about:
+Document what you learn and observe:
 - System architecture and configuration
 - Existing patterns and conventions
 - Dependencies and relationships
 - Unexpected behaviors or gotchas
-- Useful commands or procedures
+- Ideas and potential improvements
+- Questions to investigate
 
 ### changes.md
-Track all modifications:
-- Files modified
-- Configuration changes
-- Bug fixes
-- Scripts created
-
-### notes.md
-Scratchpad for:
-- Temporary thoughts and ideas
-- Observations that don't fit elsewhere
-- Quick notes during work
+Automatically logs all file modifications with timestamps:
+```
+- [2025-12-19 17:59:42] Edit: /path/to/file.js
+```
 
 ## Artifact Auto-Tracking
 
@@ -282,6 +275,21 @@ When Claude creates files with these extensions, they're automatically saved to 
 - `.json`, `.yaml`, `.yml`
 - `.toml`, `.ini`, `.env`
 
+## Automatic Changes Logging
+
+All file modifications (Edit, Write, MultiEdit) outside the session directory are automatically logged to `changes.md` with timestamps:
+
+```
+- [2025-12-19 17:59:42] Edit: /path/to/project/src/app.js
+- [2025-12-19 17:59:45] Write: /path/to/project/config.yaml
+```
+
+This provides a complete audit trail of every file touched during the session without requiring manual documentation.
+
+**Excluded from logging:**
+- Session documentation files (changes.md, discoveries.md, etc.)
+- Files in the artifacts directory (tracked separately)
+
 ## Workflow
 
 1. **Start session:**
@@ -295,9 +303,8 @@ When Claude creates files with these extensions, they're automatically saved to 
    - Artifacts are automatically tracked
 
 3. **Document as you go:**
-   - Update discoveries.md with findings
-   - Update changes.md with modifications
-   - Use notes.md for quick thoughts
+   - Update discoveries.md with findings and observations
+   - changes.md is updated automatically when files are modified
 
 4. **Resume later:**
    ```bash
