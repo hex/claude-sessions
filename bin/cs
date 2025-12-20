@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2025.12.20"
+VERSION="2025.12.21"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -155,7 +155,7 @@ do_update() {
 
 # Check for updates periodically and notify (non-blocking)
 UPDATE_CACHE="$HOME/.cache/cs/update-check"
-UPDATE_CHECK_INTERVAL=86400  # 24 hours in seconds
+UPDATE_CHECK_INTERVAL=3600  # 1 hour in seconds
 UPDATE_AVAILABLE=""  # Set by check_update_notify if update available
 
 check_update_notify() {
