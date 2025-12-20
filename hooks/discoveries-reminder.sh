@@ -60,8 +60,8 @@ echo "$CURRENT_TIME" > "$COOLDOWN_FILE"
 # Return reminder prompt
 cat << EOF
 {
-  "decision": "continue",
-  "reason": "Quick check: Have you discovered anything noteworthy about the codebase, system, or environment during this work? If so, briefly update $DISCOVERIES_FILE. If nothing significant, just acknowledge and continue."
+  "decision": "approve",
+  "systemMessage": "Quick check: Have you discovered anything noteworthy about the codebase, system, or environment during this work? If so, briefly update $DISCOVERIES_FILE. If nothing significant, just acknowledge and continue."
 }
 EOF
 
