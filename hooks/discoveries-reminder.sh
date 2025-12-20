@@ -6,13 +6,13 @@ set -euo pipefail
 
 # Only run in cs sessions
 if [ -z "${CLAUDE_SESSION_NAME:-}" ]; then
-    echo '{"decision": "allow"}'
+    echo '{"decision": "approve"}'
     exit 0
 fi
 
 SESSION_DIR="${CLAUDE_SESSION_DIR:-}"
 if [ -z "$SESSION_DIR" ] || [ ! -d "$SESSION_DIR" ]; then
-    echo '{"decision": "allow"}'
+    echo '{"decision": "approve"}'
     exit 0
 fi
 
@@ -29,14 +29,14 @@ if [ -f "$COOLDOWN_FILE" ]; then
 
     if [ "$ELAPSED" -lt "$COOLDOWN_SECONDS" ]; then
         # Still in cooldown period
-        echo '{"decision": "allow"}'
+        echo '{"decision": "approve"}'
         exit 0
     fi
 fi
 
 # Check if discoveries.md exists and when it was last modified
 if [ ! -f "$DISCOVERIES_FILE" ]; then
-    echo '{"decision": "allow"}'
+    echo '{"decision": "approve"}'
     exit 0
 fi
 
@@ -50,7 +50,7 @@ fi
 # If discoveries.md was modified recently (within cooldown period), no reminder needed
 DISCOVERIES_AGE=$((CURRENT_TIME - DISCOVERIES_MTIME))
 if [ "$DISCOVERIES_AGE" -lt "$COOLDOWN_SECONDS" ]; then
-    echo '{"decision": "allow"}'
+    echo '{"decision": "approve"}'
     exit 0
 fi
 
