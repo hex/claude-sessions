@@ -96,6 +96,7 @@ Runs before any file write operation:
 - Redirects tracked files to `artifacts/` directory
 - Updates `artifacts/MANIFEST.json` with metadata
 - Handles duplicate filenames automatically
+- **Detects and secures sensitive data** (see Secrets Handling below)
 
 **Tracked extensions:**
 - Scripts: `.sh`, `.bash`, `.zsh`, `.py`, `.js`, `.ts`, `.rb`, `.pl`
@@ -197,13 +198,14 @@ The session workspace is where Claude Code runs, but you can SSH to servers, wor
 
 ```bash
 cs <session-name>           # Create or resume a session
-cs list                     # List all sessions (alias: cs ls)
-cs remove <session-name>    # Remove a session (alias: cs rm)
-cs update                   # Update cs to latest version
-cs update --check           # Check for updates without installing
-cs update --force           # Force reinstall even if up to date
-cs help                     # Show help (alias: cs -h, cs --help)
-cs --version                # Show version (alias: cs -v)
+cs -list                    # List all sessions (alias: cs -ls)
+cs -remove <session-name>   # Remove a session (alias: cs -rm)
+cs -secrets <cmd>           # Manage session secrets
+cs -update                  # Update cs to latest version
+cs -update --check          # Check for updates without installing
+cs -update --force          # Force reinstall even if up to date
+cs -help                    # Show help (alias: cs -h)
+cs -version                 # Show version (alias: cs -v)
 ```
 
 ### Examples
@@ -289,6 +291,95 @@ This provides a complete audit trail of every file touched during the session wi
 **Excluded from logging:**
 - Session documentation files (changes.md, discoveries.md, etc.)
 - Files in the artifacts directory (tracked separately)
+
+## Secrets Handling
+
+Sensitive data is automatically detected and stored securely instead of being written to artifact files in plaintext.
+
+### Storage Backends
+
+The `cs -secrets` command auto-detects the best available backend:
+
+| Platform | Backend | Storage Location |
+|----------|---------|------------------|
+| macOS | Keychain | Login keychain |
+| Windows | Credential Manager | Windows Credential Store (requires PowerShell SecretManagement) |
+| Linux/Other | Encrypted file | `~/.cs-secrets/<session>.enc` |
+
+**Windows Setup:**
+
+To use the Windows Credential Manager backend, install the PowerShell SecretManagement modules:
+
+```powershell
+Install-Module Microsoft.PowerShell.SecretManagement -Scope CurrentUser
+Install-Module Microsoft.PowerShell.SecretStore -Scope CurrentUser
+```
+
+If these modules are not installed, `cs -secrets` automatically falls back to the encrypted file backend.
+
+**Encrypted File Backend:**
+
+The encrypted file backend uses AES-256-CBC with PBKDF2 key derivation (100,000 iterations). The encryption key is derived from a machine-specific salt stored in `~/.cs-secrets/.salt`. This provides protection against:
+- Casual snooping
+- Accidental git commits of the secrets directory
+- Backup/sync services copying plaintext credentials
+
+For additional security, set `CS_SECRETS_PASSWORD` to use an explicit master password instead of the auto-derived key.
+
+Check which backend is active: `cs -secrets backend`
+
+### Auto-Detection
+
+**By file type:**
+- `.env` files
+
+**By filename patterns:**
+- Files containing: `key`, `secret`, `password`, `token`, `credential`, `auth`, `apikey`, `api_key`
+
+**By content patterns:**
+- Variables like `API_KEY=`, `SECRET_TOKEN=`, `PASSWORD=`, etc.
+
+### What Happens
+
+When sensitive data is detected:
+1. The actual values are extracted and stored securely
+2. The artifact file is written with redacted placeholders:
+   ```
+   API_KEY=[REDACTED: stored in keychain as API_KEY]
+   ```
+3. MANIFEST.json records which secrets exist (not the values)
+
+### Using cs -secrets
+
+The `cs -secrets` command manages session secrets:
+
+```bash
+# Check which storage backend is being used
+cs -secrets backend
+
+# List all secrets for current session
+cs -secrets list
+
+# Get a specific secret value
+cs -secrets get API_KEY
+
+# Store a secret manually
+cs -secrets set my_secret "secret-value"
+
+# Delete a secret
+cs -secrets rm API_KEY
+
+# Export all secrets as environment variables
+eval "$(cs -secrets export)"
+
+# Use with a specific session
+cs -secrets --session my-session list
+```
+
+### Environment Variables
+
+- `CLAUDE_SESSION_NAME` - Current session (set automatically by `cs`)
+- `CS_SECRETS_PASSWORD` - Optional master password for encrypted backend (overrides auto-derived key)
 
 ## Workflow
 

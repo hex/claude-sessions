@@ -31,6 +31,7 @@ CLAUDE_SETTINGS="${HOME}/.claude/settings.json"
 SESSIONS_DIR="${HOME}/.claude-sessions"
 REPO_URL="https://raw.githubusercontent.com/hex/claude-sessions/main"
 CS_URL="${REPO_URL}/bin/cs"
+CS_SECRETS_URL="${REPO_URL}/bin/cs-secrets"
 
 # Hook URLs for web install
 HOOK_SESSION_START_URL="${REPO_URL}/hooks/session-start.sh"
@@ -50,6 +51,12 @@ uninstall() {
     if [ -f "$INSTALL_DIR/cs" ]; then
         rm "$INSTALL_DIR/cs"
         info "Removed $INSTALL_DIR/cs"
+    fi
+
+    # Remove cs-secrets utility
+    if [ -f "$INSTALL_DIR/cs-secrets" ]; then
+        rm "$INSTALL_DIR/cs-secrets"
+        info "Removed $INSTALL_DIR/cs-secrets"
     fi
 
     # Remove hooks
@@ -191,6 +198,21 @@ else
 fi
 
 chmod +x "$INSTALL_DIR/cs"
+
+# Install cs-secrets utility
+info "Installing cs-secrets to $INSTALL_DIR/cs-secrets"
+
+if [ "$INSTALL_METHOD" = "local" ]; then
+    cp "$SCRIPT_DIR/bin/cs-secrets" "$INSTALL_DIR/cs-secrets"
+else
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$CS_SECRETS_URL" -o "$INSTALL_DIR/cs-secrets" || error "Failed to download cs-secrets"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q "$CS_SECRETS_URL" -O "$INSTALL_DIR/cs-secrets" || error "Failed to download cs-secrets"
+    fi
+fi
+
+chmod +x "$INSTALL_DIR/cs-secrets"
 
 # Install hooks
 info "Installing hooks to $HOOKS_DIR"

@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2025.12.22"
+VERSION="2025.12.23"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -36,27 +36,40 @@ show_help() {
 cs $VERSION - Claude Code session manager
 
 Usage: cs <session-name>    Create or resume a session
-       cs <command>         Run a subcommand
+       cs -<command>        Run a subcommand
 
 Commands:
   <name>              Create or resume session <name>
-  list, ls            List all sessions
-  remove, rm <name>   Remove a session
-  update              Update cs to latest version
+  -list, -ls          List all sessions
+  -remove, -rm <name> Remove a session
+  -secrets <cmd>      Manage session secrets (store, get, list, delete, export)
+  -update             Update cs to latest version
     --check, -c       Check for updates without installing
     --force, -f       Force reinstall even if up to date
-  help, -h, --help    Show this help message
-  version, -v         Show version
+  -help, -h           Show this help message
+  -version, -v        Show version
+
+Secrets Commands (cs -secrets <cmd>):
+  set, store <name>   Store a secret (prompts if value not provided)
+  get <name>          Retrieve a secret value
+  list, ls            List all secrets for current session
+  delete, rm <name>   Delete a secret
+  export              Export secrets as environment variables
+  backend             Show which storage backend is active
 
 Environment:
-  CS_SESSIONS_ROOT    Override sessions directory (default: ~/.claude-sessions)
-  CLAUDE_CODE_BIN     Override claude binary name (default: claude)
+  CS_SESSIONS_ROOT      Override sessions directory (default: ~/.claude-sessions)
+  CLAUDE_CODE_BIN       Override claude binary name (default: claude)
+  CLAUDE_SESSION_NAME   Current session name (set automatically)
+  CS_SECRETS_PASSWORD   Master password for encrypted secrets backend
 
 Examples:
-  cs debug-api        Create or resume 'debug-api' session
-  cs list             List all sessions
-  cs rm old-session   Remove 'old-session'
-  cs update --check   Check for updates
+  cs debug-api                Create or resume 'debug-api' session
+  cs -list                    List all sessions
+  cs -rm old-session          Remove 'old-session'
+  cs -secrets set API_KEY     Store a secret (will prompt for value)
+  cs -secrets get API_KEY     Retrieve a secret
+  cs -update --check          Check for updates
 
 Sessions are stored in: $SESSIONS_ROOT
 EOF
@@ -108,7 +121,7 @@ check_update() {
 
     if version_greater "$remote_version" "$VERSION"; then
         echo ""
-        info "Update available. Run 'cs update' to install."
+        info "Update available. Run 'cs -update' to install."
         return 0
     else
         echo ""
@@ -330,12 +343,39 @@ Treat these files as a lab notebook - document as you go, not just at the end.
 
 When the session is complete, use the `/summary` command to generate an intelligent summary of the entire session. This will create a summary.md file synthesizing all documentation.
 
+## Secure Secrets Handling
+
+Sensitive data is automatically detected and stored securely (macOS Keychain, Windows Credential Manager, or encrypted file):
+
+**Auto-detected patterns:**
+- Files: .env, filenames containing key, secret, password, token, credential, auth
+- Content: Variables like API_KEY, SECRET_TOKEN, PASSWORD, etc.
+
+**What happens:**
+1. Sensitive values are extracted and stored securely
+2. The artifact file contains redacted placeholders
+3. MANIFEST.json lists which secrets exist (not the values)
+
+**Retrieving secrets:**
+```bash
+cs -secrets backend                # Check which storage backend is active
+cs -secrets list                   # List secrets for current session
+cs -secrets get API_KEY            # Get a specific secret value
+cs -secrets export                 # Export as environment variables
+```
+
+**If you detect sensitive data** that wasn't auto-captured (unusual patterns, embedded credentials, etc.), use cs -secrets directly:
+```bash
+cs -secrets set <name> <value>     # Store manually
+```
+
 ## Best Practices
 
 - Document discoveries as you find them - don't wait until the end
 - Use artifacts/ for any reusable scripts or configs
 - changes.md is updated automatically when files are modified
 - Run `/summary` at the end to create a cohesive record
+- Never write raw API keys or passwords to artifact files - use cs -secrets
 EOF
 
     # Initialize empty MANIFEST.json
@@ -398,12 +438,39 @@ Treat these files as a lab notebook - document as you go, not just at the end.
 
 When the session is complete, use the `/summary` command to generate an intelligent summary of the entire session. This will create a summary.md file synthesizing all documentation.
 
+## Secure Secrets Handling
+
+Sensitive data is automatically detected and stored securely (macOS Keychain, Windows Credential Manager, or encrypted file):
+
+**Auto-detected patterns:**
+- Files: .env, filenames containing key, secret, password, token, credential, auth
+- Content: Variables like API_KEY, SECRET_TOKEN, PASSWORD, etc.
+
+**What happens:**
+1. Sensitive values are extracted and stored securely
+2. The artifact file contains redacted placeholders
+3. MANIFEST.json lists which secrets exist (not the values)
+
+**Retrieving secrets:**
+```bash
+cs -secrets backend                # Check which storage backend is active
+cs -secrets list                   # List secrets for current session
+cs -secrets get API_KEY            # Get a specific secret value
+cs -secrets export                 # Export as environment variables
+```
+
+**If you detect sensitive data** that wasn't auto-captured (unusual patterns, embedded credentials, etc.), use cs -secrets directly:
+```bash
+cs -secrets set <name> <value>     # Store manually
+```
+
 ## Best Practices
 
 - Document discoveries as you find them - don't wait until the end
 - Use artifacts/ for any reusable scripts or configs
 - changes.md is updated automatically when files are modified
 - Run `/summary` at the end to create a cohesive record
+- Never write raw API keys or passwords to artifact files - use cs -secrets
 EOF
         warn "Migrated CLAUDE.md to latest format"
     fi
@@ -472,7 +539,7 @@ remove_session() {
     local session_name="$1"
 
     if [ -z "$session_name" ]; then
-        error "Usage: cs remove <session-name>"
+        error "Usage: cs -remove <session-name>"
     fi
 
     local session_dir="$SESSIONS_ROOT/$session_name"
@@ -513,19 +580,53 @@ launch_claude_code() {
         status_text="resuming"
     fi
 
+    # Count secrets for this session
+    local secret_count=0
+    if command -v cs-secrets >/dev/null 2>&1; then
+        secret_count=$(cs-secrets list 2>/dev/null | grep -c "^  - " || echo 0)
+    fi
+
     # Display banner
     echo ""
     echo -e "${GREEN}▌${NC} ${BOLD}cs${NC} ${DIM}$VERSION${NC}"
     echo -e "${GREEN}▌${NC} ${WHITE}${BOLD}$session_name${NC} ${DIM}($status_icon $status_text)${NC}"
     echo -e "${GREEN}▌${NC} ${DIM}$session_dir${NC}"
+    if [ "$secret_count" -gt 0 ]; then
+        local secret_word="secret"
+        [ "$secret_count" -gt 1 ] && secret_word="secrets"
+        echo -e "${GREEN}▌${NC} ${DIM}⚿${NC} ${YELLOW}${BOLD}$secret_count${NC} ${DIM}$secret_word${NC}"
+    fi
     if [ -n "$UPDATE_AVAILABLE" ]; then
-        echo -e "${YELLOW}▌${NC} ${YELLOW}Update available: $VERSION -> $UPDATE_AVAILABLE${NC} ${DIM}(cs update)${NC}"
+        echo -e "${YELLOW}▌${NC} ${YELLOW}Update available: $VERSION -> $UPDATE_AVAILABLE${NC} ${DIM}(cs -update)${NC}"
     fi
     echo ""
 
     cd "$session_dir"
     # shellcheck disable=SC2086
     exec $CLAUDE_CODE_BIN
+}
+
+# Run secrets subcommand
+run_secrets() {
+    # Find the secrets helper script
+    local secrets_script=""
+    local script_dir
+    script_dir="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")"
+
+    # Check common locations
+    for loc in "$script_dir/cs-secrets" "$HOME/.local/bin/cs-secrets" "/usr/local/bin/cs-secrets"; do
+        if [ -x "$loc" ]; then
+            secrets_script="$loc"
+            break
+        fi
+    done
+
+    if [ -z "$secrets_script" ]; then
+        error "cs-secrets not found. Try reinstalling with: cs -update --force"
+    fi
+
+    # Pass all remaining arguments to secrets script
+    exec "$secrets_script" "$@"
 }
 
 # Main function
@@ -537,25 +638,30 @@ main() {
 
     local cmd="$1"
 
-    # Handle subcommands
+    # Handle subcommands (with - prefix)
     case "$cmd" in
-        -h|--help|help)
+        -h|-help|--help)
             show_help
             return 0
             ;;
-        -v|--version|version)
+        -v|-version|--version)
             echo "cs $VERSION"
             return 0
             ;;
-        list|ls)
+        -list|-ls)
             list_sessions
             return 0
             ;;
-        remove|rm)
+        -remove|-rm)
             remove_session "${2:-}"
             return 0
             ;;
-        update)
+        -secrets)
+            shift
+            run_secrets "$@"
+            return 0
+            ;;
+        -update)
             local update_arg="${2:-}"
             case "$update_arg" in
                 --check|-c)
@@ -568,10 +674,13 @@ main() {
                     do_update
                     ;;
                 *)
-                    error "Unknown option: $update_arg. Use 'cs update [--check|--force]'"
+                    error "Unknown option: $update_arg. Use 'cs -update [--check|--force]'"
                     ;;
             esac
             return 0
+            ;;
+        -*)
+            error "Unknown command: $cmd. Run 'cs -help' for usage."
             ;;
     esac
 
