@@ -6,6 +6,7 @@ A session manager for [Claude Code](https://github.com/anthropics/claude-code) t
 
 - **Isolated session workspaces** - Each session has its own directory with structured documentation
 - **Automatic artifact tracking** - Scripts and configs are auto-saved to `artifacts/`
+- **Secure secrets handling** - Sensitive data auto-detected and stored in OS keychain (cross-platform)
 - **Documentation templates** - Pre-configured markdown files for discoveries and auto-logged changes
 - **Smart resume** - Automatically resumes existing sessions or creates new ones
 - **Session-specific context** - Custom CLAUDE.md instructions for each session
@@ -401,6 +402,22 @@ cs -secrets --session my-session list
    ```bash
    cs my-task  # Same command resumes the session
    ```
+
+## Session Banner
+
+When starting a session, cs displays a status banner:
+
+```
+▌ cs 2025.12.23
+▌ my-session (+ new)
+▌ /Users/you/.claude-sessions/my-session
+▌ ⚿ 3 secrets
+```
+
+- **Version** - Current cs version
+- **Session name** - With status indicator (`+` new, `↻` resuming)
+- **Path** - Full path to session directory
+- **Secrets** - Number of secrets stored for this session (if any)
 
 ## Environment Variables
 
