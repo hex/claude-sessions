@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2025.12.24"
+VERSION="2025.12.25"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -81,8 +81,9 @@ warn() {
 
 # Fetch latest version from GitHub
 get_remote_version() {
-    local remote_cs
-    remote_cs=$(curl -fsSL "$RAW_URL/bin/cs" 2>/dev/null) || return 1
+    local remote_cs cache_bust
+    cache_bust=$(date +%s)
+    remote_cs=$(curl -fsSL "$RAW_URL/bin/cs?cb=$cache_bust" 2>/dev/null) || return 1
     echo "$remote_cs" | grep '^VERSION=' | head -1 | cut -d'"' -f2
 }
 
@@ -149,9 +150,10 @@ do_update() {
     echo -e "Updating cs from ${YELLOW}$VERSION${NC} to ${GREEN}$remote_version${NC}..."
     echo ""
 
-    # Download and run install.sh
-    local install_script
-    install_script=$(curl -fsSL "$RAW_URL/install.sh" 2>/dev/null) || {
+    # Download and run install.sh (with cache busting)
+    local install_script cache_bust
+    cache_bust=$(date +%s)
+    install_script=$(curl -fsSL "$RAW_URL/install.sh?cb=$cache_bust" 2>/dev/null) || {
         error "Failed to download installer."
     }
 
