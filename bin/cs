@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2025.12.23"
+VERSION="2025.12.24"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -583,7 +583,9 @@ launch_claude_code() {
     # Count secrets for this session
     local secret_count=0
     if command -v cs-secrets >/dev/null 2>&1; then
-        secret_count=$(cs-secrets list 2>/dev/null | grep -c "^  - " || echo 0)
+        secret_count=$(cs-secrets list 2>/dev/null | grep -c "^  - " 2>/dev/null) || secret_count=0
+        # Ensure it's a valid integer
+        [[ "$secret_count" =~ ^[0-9]+$ ]] || secret_count=0
     fi
 
     # Display banner
