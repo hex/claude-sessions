@@ -209,6 +209,15 @@ cs -help                    # Show help (alias: cs -h)
 cs -version                 # Show version (alias: cs -v)
 ```
 
+### Updates
+
+cs checks for updates hourly and displays a notification in the session banner when a new version is available. Update checks use cache busting to bypass GitHub's CDN cache.
+
+- **Check interval**: 1 hour (cached in `~/.cache/cs/update-check`)
+- **Manual check**: `cs -update --check`
+- **Install update**: `cs -update`
+- **Force reinstall**: `cs -update --force`
+
 ### Examples
 
 ```bash
