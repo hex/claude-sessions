@@ -42,6 +42,7 @@ HOOK_SESSION_END_URL="${REPO_URL}/hooks/session-end.sh"
 
 # Command URLs for web install
 COMMAND_SUMMARY_URL="${REPO_URL}/commands/summary.md"
+COMMAND_STORE_SECRET_URL="${REPO_URL}/commands/store-secret.md"
 
 # Uninstall function
 uninstall() {
@@ -71,6 +72,10 @@ uninstall() {
     if [ -f "$COMMANDS_DIR/summary.md" ]; then
         rm "$COMMANDS_DIR/summary.md"
         info "Removed $COMMANDS_DIR/summary.md"
+    fi
+    if [ -f "$COMMANDS_DIR/store-secret.md" ]; then
+        rm "$COMMANDS_DIR/store-secret.md"
+        info "Removed $COMMANDS_DIR/store-secret.md"
     fi
 
     # Remove cs hooks from settings.json (preserve other hooks)
@@ -250,11 +255,14 @@ mkdir -p "$COMMANDS_DIR"
 
 if [ "$INSTALL_METHOD" = "local" ]; then
     cp "$COMMANDS_SOURCE/summary.md" "$COMMANDS_DIR/"
+    cp "$COMMANDS_SOURCE/store-secret.md" "$COMMANDS_DIR/"
 else
     if command -v curl >/dev/null 2>&1; then
         curl -fsSL "$COMMAND_SUMMARY_URL" -o "$COMMANDS_DIR/summary.md" || error "Failed to download summary.md"
+        curl -fsSL "$COMMAND_STORE_SECRET_URL" -o "$COMMANDS_DIR/store-secret.md" || error "Failed to download store-secret.md"
     elif command -v wget >/dev/null 2>&1; then
         wget -q "$COMMAND_SUMMARY_URL" -O "$COMMANDS_DIR/summary.md" || error "Failed to download summary.md"
+        wget -q "$COMMAND_STORE_SECRET_URL" -O "$COMMANDS_DIR/store-secret.md" || error "Failed to download store-secret.md"
     fi
 fi
 
@@ -364,6 +372,7 @@ info "Installation complete!"
 info ""
 info "Installed:"
 info "  - cs command to $INSTALL_DIR/cs"
+info "  - cs-secrets command to $INSTALL_DIR/cs-secrets"
 info "  - Session hooks to $HOOKS_DIR/"
 info "  - Slash commands to $COMMANDS_DIR/"
 info "  - Hook configuration in $CLAUDE_SETTINGS"

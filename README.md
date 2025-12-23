@@ -340,14 +340,23 @@ Check which backend is active: `cs -secrets backend`
 
 ### Auto-Detection
 
-**By file type:**
-- `.env` files
+Secrets are detected and stored automatically in two ways:
 
-**By filename patterns:**
-- Files containing: `key`, `secret`, `password`, `token`, `credential`, `auth`, `apikey`, `api_key`
+**1. File-based detection** (via `artifact-tracker.sh` hook):
 
-**By content patterns:**
-- Variables like `API_KEY=`, `SECRET_TOKEN=`, `PASSWORD=`, etc.
+When writing files, secrets are detected by:
+- File type: `.env` files
+- Filename patterns: Files containing `key`, `secret`, `password`, `token`, `credential`, `auth`, `apikey`, `api_key`
+- Content patterns: Variables like `API_KEY=`, `SECRET_TOKEN=`, `PASSWORD=`, etc.
+
+**2. Conversational detection** (via `store-secret` skill):
+
+When you share secrets in chat, Claude automatically invokes the `/store-secret` skill to capture them:
+- "Here's my OpenAI key: sk-abc123..."
+- "The password is hunter2"
+- "Use this token: ghp_xxxx"
+
+Claude identifies appropriate key names and stores secrets securely, then confirms what was stored.
 
 ### What Happens
 
