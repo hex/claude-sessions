@@ -8,6 +8,9 @@ set -euo pipefail
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+WHITE='\033[1;37m'
+PINK='\033[0;35m'
+GREY='\033[0;90m'
 NC='\033[0m'
 
 error() {
@@ -386,18 +389,18 @@ fi
 
 info ""
 info "Installation complete!"
-info ""
-info "Installed:"
-info "  - cs command to $INSTALL_DIR/cs"
-info "  - cs-secrets command to $INSTALL_DIR/cs-secrets"
-info "  - Session hooks to $HOOKS_DIR/"
-info "  - Slash commands to $COMMANDS_DIR/"
-info "  - Skills to $SKILLS_DIR/"
-info "  - Hook configuration in $CLAUDE_SETTINGS"
-info ""
-info "Usage: cs <session-name>"
-info ""
-info "Examples:"
-info "  cs debug-api    # Create or resume 'debug-api' session"
-info "  cs server-fix   # Create or resume 'server-fix' session"
-info ""
+echo ""
+echo -e "${WHITE}Installed:${NC}"
+echo -e "${WHITE}  - cs command to $INSTALL_DIR/cs${NC}"
+echo -e "${WHITE}  - cs-secrets command to $INSTALL_DIR/cs-secrets${NC}"
+echo -e "${WHITE}  - Session hooks to $HOOKS_DIR/${NC}"
+echo -e "${WHITE}  - Slash commands to $COMMANDS_DIR/${NC}"
+echo -e "${WHITE}  - Skills to $SKILLS_DIR/${NC}"
+echo -e "${WHITE}  - Hook configuration in $CLAUDE_SETTINGS${NC}"
+echo ""
+echo -e "${PINK}Usage: cs <session-name>${NC}"
+echo ""
+echo -e "${GREY}Examples:${NC}"
+echo -e "${GREY}  cs debug-api    # Create or resume 'debug-api' session${NC}"
+echo -e "${GREY}  cs server-fix   # Create or resume 'server-fix' session${NC}"
+echo ""
