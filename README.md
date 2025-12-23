@@ -395,6 +395,24 @@ eval "$(cs -secrets export)"
 cs -secrets --session my-session list
 ```
 
+### Migrating Existing Secrets
+
+If you have sessions created before the secrets feature was added, plaintext secrets may exist in artifact files. Use the migrate command to move them to secure storage:
+
+```bash
+# Scan artifacts and migrate secrets to keychain (keeps original files)
+cs -secrets migrate
+
+# Migrate and redact plaintext values in artifact files
+cs -secrets migrate --redact
+```
+
+The migrate command:
+1. Scans all artifact files in the session
+2. Detects KEY=value patterns with sensitive key names
+3. Stores values securely in the keychain
+4. Optionally replaces plaintext with `[REDACTED: stored in keychain as KEY]`
+
 ### Environment Variables
 
 - `CLAUDE_SESSION_NAME` - Current session (set automatically by `cs`)
