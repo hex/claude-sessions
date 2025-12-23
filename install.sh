@@ -42,7 +42,9 @@ HOOK_SESSION_END_URL="${REPO_URL}/hooks/session-end.sh"
 
 # Command URLs for web install
 COMMAND_SUMMARY_URL="${REPO_URL}/commands/summary.md"
-COMMAND_STORE_SECRET_URL="${REPO_URL}/commands/store-secret.md"
+
+# Skill URLs for web install
+SKILL_STORE_SECRET_URL="${REPO_URL}/skills/store-secret/SKILL.md"
 
 # Uninstall function
 uninstall() {
@@ -73,9 +75,11 @@ uninstall() {
         rm "$COMMANDS_DIR/summary.md"
         info "Removed $COMMANDS_DIR/summary.md"
     fi
-    if [ -f "$COMMANDS_DIR/store-secret.md" ]; then
-        rm "$COMMANDS_DIR/store-secret.md"
-        info "Removed $COMMANDS_DIR/store-secret.md"
+    # Remove skills
+    SKILLS_DIR="$HOME/.claude/skills"
+    if [ -d "$SKILLS_DIR/store-secret" ]; then
+        rm -rf "$SKILLS_DIR/store-secret"
+        info "Removed $SKILLS_DIR/store-secret/"
     fi
 
     # Remove cs hooks from settings.json (preserve other hooks)
@@ -255,14 +259,27 @@ mkdir -p "$COMMANDS_DIR"
 
 if [ "$INSTALL_METHOD" = "local" ]; then
     cp "$COMMANDS_SOURCE/summary.md" "$COMMANDS_DIR/"
-    cp "$COMMANDS_SOURCE/store-secret.md" "$COMMANDS_DIR/"
 else
     if command -v curl >/dev/null 2>&1; then
         curl -fsSL "$COMMAND_SUMMARY_URL" -o "$COMMANDS_DIR/summary.md" || error "Failed to download summary.md"
-        curl -fsSL "$COMMAND_STORE_SECRET_URL" -o "$COMMANDS_DIR/store-secret.md" || error "Failed to download store-secret.md"
     elif command -v wget >/dev/null 2>&1; then
         wget -q "$COMMAND_SUMMARY_URL" -O "$COMMANDS_DIR/summary.md" || error "Failed to download summary.md"
-        wget -q "$COMMAND_STORE_SECRET_URL" -O "$COMMANDS_DIR/store-secret.md" || error "Failed to download store-secret.md"
+    fi
+fi
+
+# Install skills
+SKILLS_DIR="$HOME/.claude/skills"
+SKILLS_SOURCE="$SCRIPT_DIR/skills"
+info "Installing skills to $SKILLS_DIR"
+mkdir -p "$SKILLS_DIR/store-secret"
+
+if [ "$INSTALL_METHOD" = "local" ]; then
+    cp "$SKILLS_SOURCE/store-secret/SKILL.md" "$SKILLS_DIR/store-secret/"
+else
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$SKILL_STORE_SECRET_URL" -o "$SKILLS_DIR/store-secret/SKILL.md" || error "Failed to download store-secret skill"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q "$SKILL_STORE_SECRET_URL" -O "$SKILLS_DIR/store-secret/SKILL.md" || error "Failed to download store-secret skill"
     fi
 fi
 
@@ -375,6 +392,7 @@ info "  - cs command to $INSTALL_DIR/cs"
 info "  - cs-secrets command to $INSTALL_DIR/cs-secrets"
 info "  - Session hooks to $HOOKS_DIR/"
 info "  - Slash commands to $COMMANDS_DIR/"
+info "  - Skills to $SKILLS_DIR/"
 info "  - Hook configuration in $CLAUDE_SETTINGS"
 info ""
 info "Usage: cs <session-name>"

@@ -351,7 +351,7 @@ When writing files, secrets are detected by:
 
 **2. Conversational detection** (via `store-secret` skill):
 
-When you share secrets in chat, Claude automatically invokes the `/store-secret` skill to capture them:
+When you share secrets in chat, Claude automatically invokes the `store-secret` skill to capture them:
 - "Here's my OpenAI key: sk-abc123..."
 - "The password is hunter2"
 - "Use this token: ghp_xxxx"
