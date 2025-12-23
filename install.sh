@@ -8,9 +8,10 @@ set -euo pipefail
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-WHITE='\033[1;37m'
+LIGHT_BLUE='\033[1;36m'
 PINK='\033[0;35m'
 GREY='\033[0;90m'
+DIM='\033[2m'
 NC='\033[0m'
 
 error() {
@@ -390,13 +391,15 @@ fi
 info ""
 info "Installation complete!"
 echo ""
-echo -e "${WHITE}Installed:${NC}"
-echo -e "${WHITE}  - cs command to $INSTALL_DIR/cs${NC}"
-echo -e "${WHITE}  - cs-secrets command to $INSTALL_DIR/cs-secrets${NC}"
-echo -e "${WHITE}  - Session hooks to $HOOKS_DIR/${NC}"
-echo -e "${WHITE}  - Slash commands to $COMMANDS_DIR/${NC}"
-echo -e "${WHITE}  - Skills to $SKILLS_DIR/${NC}"
-echo -e "${WHITE}  - Hook configuration in $CLAUDE_SETTINGS${NC}"
+echo -e "${DIM}┌──────────────────────────────────────────────────────────────┐${NC}"
+echo -e "${DIM}│${NC} ${LIGHT_BLUE}Installed:${NC}"
+echo -e "${DIM}│${NC} ${LIGHT_BLUE}  - cs command to $INSTALL_DIR/cs${NC}"
+echo -e "${DIM}│${NC} ${LIGHT_BLUE}  - cs-secrets command to $INSTALL_DIR/cs-secrets${NC}"
+echo -e "${DIM}│${NC} ${LIGHT_BLUE}  - Session hooks to $HOOKS_DIR/${NC}"
+echo -e "${DIM}│${NC} ${LIGHT_BLUE}  - Slash commands to $COMMANDS_DIR/${NC}"
+echo -e "${DIM}│${NC} ${LIGHT_BLUE}  - Skills to $SKILLS_DIR/${NC}"
+echo -e "${DIM}│${NC} ${LIGHT_BLUE}  - Hook configuration in $CLAUDE_SETTINGS${NC}"
+echo -e "${DIM}└──────────────────────────────────────────────────────────────┘${NC}"
 echo ""
 echo -e "${PINK}Usage: cs <session-name>${NC}"
 echo ""
