@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2025.12.31"
+VERSION="2025.12.33"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -606,8 +606,25 @@ launch_claude_code() {
     echo ""
 
     cd "$session_dir"
+
+    # For existing sessions, ask if user wants to continue previous conversation
+    local continue_flag=""
+    if [ "$is_new" = "false" ]; then
+        printf "${DIM}Continue previous conversation?${NC} [Y/n] "
+        read -r response
+        case "$response" in
+            [nN]|[nN][oO])
+                continue_flag=""
+                ;;
+            *)
+                continue_flag="--continue"
+                ;;
+        esac
+        echo ""
+    fi
+
     # shellcheck disable=SC2086
-    exec $CLAUDE_CODE_BIN
+    exec $CLAUDE_CODE_BIN $continue_flag
 }
 
 # Run secrets subcommand
