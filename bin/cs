@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2025.12.34"
+VERSION="2025.12.35"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -265,45 +265,12 @@ EOF
     cat > "$session_dir/discoveries.md" << 'EOF'
 # Discoveries & Notes
 
-Document what you learn and observe during this session:
-
-## Findings
-- System architecture and configuration
-- Existing patterns and conventions
-- Dependencies and relationships
-- Unexpected behaviors or gotchas
-
-## Ideas & Observations
-- Potential improvements
-- Questions to investigate
-- Useful commands or procedures
-
-Update this file throughout the session as you discover new information.
 EOF
 
     # Create changes.md
     cat > "$session_dir/changes.md" << 'EOF'
-# Changes Made
+# Changes Log
 
-Document all modifications, fixes, and changes made during this session:
-
-## Files Modified
-
--
-
-## Configuration Changes
-
--
-
-## Bug Fixes
-
--
-
-## Scripts Created
-
--
-
-Update this file as you make changes throughout the session.
 EOF
 
     # Create CLAUDE.md with session-specific instructions
