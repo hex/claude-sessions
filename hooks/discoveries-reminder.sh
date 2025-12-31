@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: Stop hook that reminds Claude to update discoveries.md periodically
-# ABOUTME: Uses cooldown to avoid nagging - reminds at most once per 15 minutes
+# ABOUTME: Uses cooldown to avoid nagging - reminds at most once per 5 minutes
 
 set -euo pipefail
 
@@ -18,7 +18,7 @@ fi
 
 DISCOVERIES_FILE="$SESSION_DIR/discoveries.md"
 COOLDOWN_FILE="$SESSION_DIR/.discoveries-reminder-cooldown"
-COOLDOWN_SECONDS=900  # 15 minutes
+COOLDOWN_SECONDS=300  # 5 minutes
 
 CURRENT_TIME=$(date +%s)
 
