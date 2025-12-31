@@ -38,7 +38,9 @@ echo "  Artifacts collected: $ARTIFACT_COUNT" >> "$SESSION_DIR/logs/session.log"
 
 # Create archive if artifacts exist
 if [ "$ARTIFACT_COUNT" -gt 0 ]; then
-    ARCHIVE_PATH="$SESSION_DIR/artifacts-$(date +%Y%m%d-%H%M%S).tar.gz"
+    ARCHIVE_DIR="$SESSION_DIR/archives"
+    mkdir -p "$ARCHIVE_DIR"
+    ARCHIVE_PATH="$ARCHIVE_DIR/artifacts-$(date +%Y%m%d-%H%M%S).tar.gz"
     tar -czf "$ARCHIVE_PATH" -C "$SESSION_DIR" artifacts/ 2>/dev/null || true
 
     if [ -f "$ARCHIVE_PATH" ]; then

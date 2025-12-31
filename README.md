@@ -107,7 +107,7 @@ Runs before any file write operation:
 
 Runs when Claude Code session ends:
 - Logs session end time
-- Creates `artifacts-YYYYMMDD-HHMMSS.tar.gz` archive
+- Creates `archives/artifacts-YYYYMMDD-HHMMSS.tar.gz` archive
 - Updates global `~/.claude-sessions/INDEX.md`
 - Cleans up lock files
 

@@ -46,11 +46,6 @@ fi
 CHANGES_MD="$SESSION_DIR/changes.md"
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 
-# Use file locking to prevent race conditions
-LOCK_FILE="$SESSION_DIR/.changes.lock"
-exec 200>"$LOCK_FILE"
-flock 200
-
 echo "- [$TIMESTAMP] $TOOL_NAME: $FILE_PATH" >> "$CHANGES_MD"
 
 exit 0
