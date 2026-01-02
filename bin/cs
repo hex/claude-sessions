@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.01.42"
+VERSION="2026.01.43"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -60,6 +60,7 @@ Secrets Commands:
   get <name>          Retrieve a secret value
   list, ls            List all secrets for session
   delete, rm <name>   Delete a secret
+  purge               Delete ALL secrets for session
   export              Export secrets as environment variables
   backend             Show which storage backend is active
 
@@ -1215,6 +1216,43 @@ run_uninstall() {
     elif [ -f "$settings_file" ]; then
         warn "jq not found - cannot clean up $settings_file automatically"
         warn "Manually remove cs hook entries from $settings_file"
+    fi
+
+    # Ask about secrets in keychain
+    if [ -d "$SESSIONS_ROOT" ]; then
+        local sessions
+        sessions=$(ls -1 "$SESSIONS_ROOT" 2>/dev/null | grep -v "^INDEX.md$" || true)
+
+        if [ -n "$sessions" ]; then
+            echo ""
+            warn "Secrets may exist in OS keychain for these sessions:"
+            echo "$sessions" | while read -r s; do
+                echo "  - $s"
+            done
+            echo ""
+            read -p "Delete secrets from keychain? [y/N] " -n 1 -r
+            echo ""
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                # Find cs-secrets script
+                local secrets_script=""
+                for loc in "$install_dir/cs-secrets" "/usr/local/bin/cs-secrets"; do
+                    if [ -x "$loc" ]; then
+                        secrets_script="$loc"
+                        break
+                    fi
+                done
+
+                if [ -n "$secrets_script" ]; then
+                    echo "$sessions" | while read -r s; do
+                        "$secrets_script" --session "$s" purge 2>/dev/null || true
+                    done
+                else
+                    warn "cs-secrets not found - cannot purge secrets automatically"
+                fi
+            else
+                info "Kept secrets in keychain"
+            fi
+        fi
     fi
 
     # Ask about session data
