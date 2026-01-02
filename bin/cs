@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.01.43"
+VERSION="2026.01.44"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -768,6 +768,14 @@ sync_init() {
     fi
 
     cd "$session_dir" || error "Cannot access session directory"
+
+    # Security notice
+    echo ""
+    warn "SECURITY NOTICE:"
+    echo "  Session data may contain sensitive information (code, notes, context)."
+    echo "  Use a PRIVATE repository to protect your data."
+    echo "  Secrets are encrypted but session files are not."
+    echo ""
 
     # Check if already a git repo
     if [ -d ".git" ]; then
