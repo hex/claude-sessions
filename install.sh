@@ -383,8 +383,16 @@ if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
     warn ""
     warn "WARNING: $INSTALL_DIR is not in your PATH"
     warn ""
-    warn "Add this line to your ~/.bashrc, ~/.zshrc, or equivalent:"
-    warn "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+    case "$OSTYPE" in
+        msys*|cygwin*|mingw*)
+            warn "For Git Bash on Windows, add to ~/.bashrc:"
+            warn "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+            ;;
+        *)
+            warn "Add this line to your ~/.bashrc, ~/.zshrc, or equivalent:"
+            warn "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+            ;;
+    esac
     warn ""
 fi
 
