@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.01.40"
+VERSION="2026.01.41"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -51,6 +51,7 @@ Commands:
   -update             Update cs to latest version
     --check, -c       Check for updates without installing
     --force, -f       Force reinstall even if up to date
+  -uninstall          Uninstall cs and all components
   -help, -h           Show this help message
   -version, -v        Show version
 
@@ -1096,6 +1097,129 @@ sync_clone() {
     info "Start session with: cs $session_name"
 }
 
+# Uninstall cs and all components
+run_uninstall() {
+    local install_dir="$HOME/.local/bin"
+    local hooks_dir="$HOME/.claude/hooks"
+    local commands_dir="$HOME/.claude/commands"
+    local skills_dir="$HOME/.claude/skills"
+    local settings_file="$HOME/.claude/settings.json"
+
+    info "Uninstalling cs..."
+    echo ""
+
+    # Remove binaries
+    if [ -f "$install_dir/cs" ]; then
+        rm "$install_dir/cs"
+        info "Removed $install_dir/cs"
+    fi
+
+    if [ -f "$install_dir/cs-secrets" ]; then
+        rm "$install_dir/cs-secrets"
+        info "Removed $install_dir/cs-secrets"
+    fi
+
+    # Remove hooks
+    for hook in session-start.sh artifact-tracker.sh changes-tracker.sh discoveries-reminder.sh session-end.sh; do
+        if [ -f "$hooks_dir/$hook" ]; then
+            rm "$hooks_dir/$hook"
+            info "Removed $hooks_dir/$hook"
+        fi
+    done
+
+    # Remove commands
+    if [ -f "$commands_dir/summary.md" ]; then
+        rm "$commands_dir/summary.md"
+        info "Removed $commands_dir/summary.md"
+    fi
+
+    # Remove skills
+    if [ -d "$skills_dir/store-secret" ]; then
+        rm -rf "$skills_dir/store-secret"
+        info "Removed $skills_dir/store-secret/"
+    fi
+
+    # Clean up settings.json (remove cs hooks, preserve others)
+    if [ -f "$settings_file" ] && command -v jq >/dev/null 2>&1; then
+        local session_start_path="$hooks_dir/session-start.sh"
+        local artifact_tracker_path="$hooks_dir/artifact-tracker.sh"
+        local changes_tracker_path="$hooks_dir/changes-tracker.sh"
+        local discoveries_reminder_path="$hooks_dir/discoveries-reminder.sh"
+        local session_end_path="$hooks_dir/session-end.sh"
+
+        local settings
+        settings=$(cat "$settings_file")
+
+        # Remove our SessionStart hook
+        settings=$(echo "$settings" | jq --arg path "$session_start_path" '
+            if .hooks.SessionStart then
+                .hooks.SessionStart = [.hooks.SessionStart[] | select(.hooks | all(.command != $path))]
+            else . end
+        ')
+
+        # Remove our PreToolUse Write hook
+        settings=$(echo "$settings" | jq --arg path "$artifact_tracker_path" '
+            if .hooks.PreToolUse then
+                .hooks.PreToolUse = [.hooks.PreToolUse[] | select(
+                    (.matcher == "Write" and (.hooks | any(.command == $path))) | not
+                )]
+            else . end
+        ')
+
+        # Remove our PostToolUse changes tracker hook
+        settings=$(echo "$settings" | jq --arg path "$changes_tracker_path" '
+            if .hooks.PostToolUse then
+                .hooks.PostToolUse = [.hooks.PostToolUse[] | select(.hooks | all(.command != $path))]
+            else . end
+        ')
+
+        # Remove our Stop discoveries reminder hook
+        settings=$(echo "$settings" | jq --arg path "$discoveries_reminder_path" '
+            if .hooks.Stop then
+                .hooks.Stop = [.hooks.Stop[] | select(.hooks | all(.command != $path))]
+            else . end
+        ')
+
+        # Remove our SessionEnd hook
+        settings=$(echo "$settings" | jq --arg path "$session_end_path" '
+            if .hooks.SessionEnd then
+                .hooks.SessionEnd = [.hooks.SessionEnd[] | select(.hooks | all(.command != $path))]
+            else . end
+        ')
+
+        # Clean up empty hook arrays
+        settings=$(echo "$settings" | jq '
+            if .hooks then
+                .hooks |= with_entries(select(.value | length > 0))
+                | if .hooks == {} then del(.hooks) else . end
+            else . end
+        ')
+
+        echo "$settings" > "$settings_file"
+        info "Cleaned up $settings_file"
+    elif [ -f "$settings_file" ]; then
+        warn "jq not found - cannot clean up $settings_file automatically"
+        warn "Manually remove cs hook entries from $settings_file"
+    fi
+
+    # Ask about session data
+    if [ -d "$SESSIONS_ROOT" ]; then
+        echo ""
+        warn "Session data exists at $SESSIONS_ROOT"
+        read -p "Delete session data? This cannot be undone. [y/N] " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            rm -rf "$SESSIONS_ROOT"
+            info "Removed $SESSIONS_ROOT"
+        else
+            info "Kept $SESSIONS_ROOT"
+        fi
+    fi
+
+    echo ""
+    info "Uninstall complete!"
+}
+
 # Main sync command router
 run_sync() {
     local subcommand="${1:-}"
@@ -1185,6 +1309,10 @@ main() {
         -sync|-s)
             shift
             run_sync "$@"
+            return 0
+            ;;
+        -uninstall)
+            run_uninstall
             return 0
             ;;
         -update)
