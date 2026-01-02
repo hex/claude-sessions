@@ -93,8 +93,8 @@ if [ -f "$SYNC_CONFIG" ] && [ -d "$SESSION_DIR/.git" ]; then
         git add -A 2>/dev/null || true
         if ! git diff --cached --quiet 2>/dev/null; then
             TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
-            HOSTNAME=$(hostname -s)
-            if git commit -q -m "Auto-sync: $TIMESTAMP ($HOSTNAME)" 2>/dev/null; then
+            SHORT_HOSTNAME=$(hostname | cut -d. -f1)
+            if git commit -q -m "Auto-sync: $TIMESTAMP ($SHORT_HOSTNAME)" 2>/dev/null; then
                 if git push -q origin main 2>/dev/null; then
                     echo "$(date '+%Y-%m-%d %H:%M:%S') - Auto-pushed to remote" >> "$SESSION_DIR/logs/session.log"
                 else

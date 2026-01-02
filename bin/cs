@@ -632,6 +632,22 @@ run_secrets() {
 
 SYNC_CONFIG_FILE="sync.conf"
 
+# Cross-platform helpers
+get_short_hostname() {
+    # hostname -s doesn't work on all platforms
+    hostname | cut -d. -f1
+}
+
+get_file_mtime() {
+    local file="$1"
+    if [[ "$OSTYPE" == darwin* ]]; then
+        stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$file" 2>/dev/null || echo "unknown"
+    else
+        # GNU stat (Linux, Windows Git Bash)
+        stat -c "%y" "$file" 2>/dev/null | cut -d. -f1 || echo "unknown"
+    fi
+}
+
 # Find the secrets helper script
 find_secrets_script() {
     local script_dir
@@ -671,8 +687,11 @@ set_sync_config() {
 
     if [ -f "$config_file" ]; then
         if grep -q "^${key}=" "$config_file" 2>/dev/null; then
-            # Update existing key (macOS compatible sed)
-            sed -i '' "s|^${key}=.*|${key}=${value}|" "$config_file"
+            # Update existing key (cross-platform: write to temp then move)
+            local tmp_file="${config_file}.tmp"
+            grep -v "^${key}=" "$config_file" > "$tmp_file" || true
+            echo "${key}=${value}" >> "$tmp_file"
+            mv "$tmp_file" "$config_file"
         else
             echo "${key}=${value}" >> "$config_file"
         fi
@@ -814,11 +833,11 @@ sync_push() {
     fi
 
     # Commit with timestamp
-    local timestamp hostname
+    local timestamp short_hostname
     timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    hostname=$(hostname -s)
+    short_hostname=$(get_short_hostname)
 
-    git commit -q -m "Sync: $timestamp ($hostname)"
+    git commit -q -m "Sync: $timestamp ($short_hostname)"
 
     # Push
     if git push -u origin main; then
@@ -947,7 +966,7 @@ sync_status() {
     echo ""
     if [ -f "$session_dir/secrets.enc" ]; then
         local enc_time
-        enc_time=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$session_dir/secrets.enc" 2>/dev/null || echo "unknown")
+        enc_time=$(get_file_mtime "$session_dir/secrets.enc")
         echo -e "${BOLD}Secrets file:${NC} secrets.enc (modified: $enc_time)"
     else
         echo -e "${BOLD}Secrets file:${NC} not exported"
