@@ -4,6 +4,25 @@ A session manager for [Claude Code](https://github.com/anthropics/claude-code) t
 
 ![cs session demo](assets/screenshot.png)
 
+## Why cs?
+
+Claude Code doesn't require a project. You can spin up an instance to debug an API, troubleshoot home automation, research a hardware problem, or explore any idea that comes to mind.
+
+But conversations get lost. You discover key insights, create useful scripts, figure out a tricky configuration - then the session ends and it's gone.
+
+**cs gives every task a home:**
+
+```bash
+cs debug-api          # Investigate that flaky endpoint
+cs homeassistant      # Fix your smart home setup
+cs router-config      # Document your network settings
+cs research-llms      # Explore a topic, keep your notes
+```
+
+Each session is a persistent workspace - documentation, artifacts, and secrets that survive across conversations and sync across machines.
+
+No git repo required. No project structure needed. Just a name for what you're working on.
+
 ## Features
 
 - **Isolated session workspaces** - Each session has its own directory with structured documentation
