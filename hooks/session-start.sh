@@ -88,9 +88,9 @@ Key files to maintain:
 
 All scripts and config files are automatically saved to artifacts/.
 
-IMPORTANT: Environment variables, API keys, access tokens, and credentials for this session
-may be stored in the artifacts directory. When you need credentials or env configuration,
-check \$CLAUDE_ARTIFACT_DIR first (look for .env, .envrc, credentials.*, or similar files).
+IMPORTANT: Secrets (API keys, tokens, passwords) are stored securely in the OS keychain.
+Use 'cs -secrets list' to see stored secrets, 'cs -secrets get <name>' to retrieve values.
+Never write raw credentials to files - use 'cs -secrets set <name>' to store them securely.
 
 See CLAUDE.md in the session directory for complete documentation protocol.
 EOF

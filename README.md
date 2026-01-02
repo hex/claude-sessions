@@ -51,20 +51,26 @@ export PATH="$HOME/.local/bin:$PATH"
 Or manually:
 
 ```bash
-# Remove cs script
+# Remove cs scripts
 rm ~/.local/bin/cs
+rm ~/.local/bin/cs-secrets
 
 # Remove hooks
 rm ~/.claude/hooks/session-start.sh
 rm ~/.claude/hooks/artifact-tracker.sh
+rm ~/.claude/hooks/changes-tracker.sh
+rm ~/.claude/hooks/discoveries-reminder.sh
 rm ~/.claude/hooks/session-end.sh
 
 # Remove commands
 rm ~/.claude/commands/summary.md
 
+# Remove skills
+rm -rf ~/.claude/skills/store-secret
+
 # Remove hook configuration from settings.json
 # Edit ~/.claude/settings.json and remove the SessionStart, PreToolUse (Write matcher),
-# and SessionEnd entries that reference the above hook scripts
+# PostToolUse, Stop, and SessionEnd entries that reference the above hook scripts
 
 # Optionally remove session data
 rm -rf ~/.claude-sessions/
@@ -96,7 +102,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/hex/claude-sessions/main
 
 ## Hooks
 
-The installer configures three Claude Code hooks that enable session management features:
+The installer configures five Claude Code hooks that enable session management features:
 
 ### session-start.sh (SessionStart)
 
@@ -104,6 +110,7 @@ Runs when Claude Code starts a session:
 - Logs session start to `logs/session.log`
 - Exports session environment variables
 - Injects session context into Claude's system prompt
+- Auto-pulls from remote if sync is enabled
 
 ### artifact-tracker.sh (PreToolUse on Write)
 
@@ -118,12 +125,25 @@ Runs before any file write operation:
 - Scripts: `.sh`, `.bash`, `.zsh`, `.py`, `.js`, `.ts`, `.rb`, `.pl`
 - Configs: `.conf`, `.config`, `.json`, `.yaml`, `.yml`, `.toml`, `.ini`, `.env`
 
+### changes-tracker.sh (PostToolUse)
+
+Runs after any file modification (Edit, Write, MultiEdit):
+- Logs file path and timestamp to `changes.md`
+- Skips session documentation files and artifacts (tracked separately)
+
+### discoveries-reminder.sh (Stop)
+
+Runs when Claude pauses for user input:
+- Reminds to update `discoveries.md` if not recently modified
+- Uses 5-minute cooldown to avoid excessive reminders
+
 ### session-end.sh (SessionEnd)
 
 Runs when Claude Code session ends:
 - Logs session end time
 - Creates `archives/artifacts-YYYYMMDD-HHMMSS.tar.gz` archive
 - Updates global `~/.claude-sessions/INDEX.md`
+- Auto-pushes to remote if sync is enabled
 - Cleans up lock files
 
 ### Hook Configuration
@@ -134,38 +154,19 @@ The hooks are configured in `~/.claude/settings.json`:
 {
   "hooks": {
     "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/Users/you/.claude/hooks/session-start.sh",
-            "timeout": 10
-          }
-        ]
-      }
+      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/session-start.sh", "timeout": 10 }] }
     ],
     "PreToolUse": [
-      {
-        "matcher": "Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/Users/you/.claude/hooks/artifact-tracker.sh",
-            "timeout": 10
-          }
-        ]
-      }
+      { "matcher": "Write", "hooks": [{ "type": "command", "command": "~/.claude/hooks/artifact-tracker.sh", "timeout": 10 }] }
+    ],
+    "PostToolUse": [
+      { "matcher": "", "hooks": [{ "type": "command", "command": "~/.claude/hooks/changes-tracker.sh", "timeout": 10 }] }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/discoveries-reminder.sh", "timeout": 10 }] }
     ],
     "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/Users/you/.claude/hooks/session-end.sh",
-            "timeout": 10
-          }
-        ]
-      }
+      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/session-end.sh", "timeout": 10 }] }
     ]
   }
 }
@@ -214,9 +215,10 @@ The session workspace is where Claude Code runs, but you can SSH to servers, wor
 
 ```bash
 cs <session-name>           # Create or resume a session
+cs <session> -sync <cmd>    # Sync session with git remote
+cs <session> -secrets <cmd> # Manage session secrets
 cs -list                    # List all sessions (alias: cs -ls)
 cs -remove <session-name>   # Remove a session (alias: cs -rm)
-cs -secrets <cmd>           # Manage session secrets
 cs -update                  # Update cs to latest version
 cs -update --check          # Check for updates without installing
 cs -update --force          # Force reinstall even if up to date
@@ -577,6 +579,12 @@ export CS_SESSIONS_ROOT="/path/to/your/sessions"
 # Override Claude Code binary (default: claude)
 # Can include arguments - use $HOME instead of ~ in paths
 export CLAUDE_CODE_BIN="$HOME/.local/bin/claude --dangerously-skip-permissions"
+
+# Git sync prefix for shorter commands (optional)
+export CS_SYNC_PREFIX="git@github.com:youruser/"
+
+# Master password for cross-machine secrets sync (required for sync)
+export CS_SECRETS_PASSWORD="your-secure-password"
 ```
 
 ## SSH Workflow

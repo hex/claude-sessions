@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# ABOUTME: Claude Code session manager with artifact tracking and tmux integration
+# ABOUTME: Claude Code session manager with artifact tracking and git sync
 # ABOUTME: Creates isolated session workspaces with automatic documentation and file organization
 
 set -euo pipefail
 
 # Configuration
-VERSION="2026.01.39"
+VERSION="2026.01.40"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -461,13 +461,17 @@ EOF
     fi
 }
 
-# Get file modification time (cross-platform)
-get_mtime() {
+# Cross-platform helpers
+get_short_hostname() {
+    hostname | cut -d. -f1
+}
+
+get_file_mtime() {
     local file="$1"
-    if [[ "$OSTYPE" == "darwin"* ]]; then
+    if [[ "$OSTYPE" == darwin* ]]; then
         stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$file" 2>/dev/null || echo "-"
     else
-        stat -c "%y" "$file" 2>/dev/null | cut -d'.' -f1 | cut -d':' -f1,2 || echo "-"
+        stat -c "%y" "$file" 2>/dev/null | cut -d. -f1 || echo "-"
     fi
 }
 
@@ -512,7 +516,7 @@ list_sessions() {
             if [ -n "$started" ]; then
                 created=$(echo "$started" | cut -d':' -f1,2)
             fi
-            modified=$(get_mtime "$session_dir/logs/session.log")
+            modified=$(get_file_mtime "$session_dir/logs/session.log")
         fi
 
         printf "${GREEN}%-${max_len}s${NC}  %-16s  %s\n" "$session" "$created" "$modified"
@@ -638,22 +642,6 @@ run_secrets() {
 # ============================================================================
 
 SYNC_CONFIG_FILE="sync.conf"
-
-# Cross-platform helpers
-get_short_hostname() {
-    # hostname -s doesn't work on all platforms
-    hostname | cut -d. -f1
-}
-
-get_file_mtime() {
-    local file="$1"
-    if [[ "$OSTYPE" == darwin* ]]; then
-        stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$file" 2>/dev/null || echo "unknown"
-    else
-        # GNU stat (Linux, Windows Git Bash)
-        stat -c "%y" "$file" 2>/dev/null | cut -d. -f1 || echo "unknown"
-    fi
-}
 
 # Find the secrets helper script
 find_secrets_script() {
