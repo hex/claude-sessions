@@ -447,9 +447,8 @@ Sync sessions across machines using git.
 
 2. Initialize sync for a session:
    ```bash
-   cs my-session                                    # Start or resume session
-   cs -sync init git@github.com:you/my-session.git # Initialize git repo
-   cs -sync push                                    # Push to remote
+   cs my-session -sync init git@github.com:you/my-session.git
+   cs my-session -sync push
    ```
 
 3. On another machine:
@@ -463,20 +462,20 @@ Sync sessions across machines using git.
 
 | Command | Description |
 |---------|-------------|
-| `cs -sync init <url>` | Initialize git repo with remote |
-| `cs -sync push` | Commit and push (exports secrets) |
-| `cs -sync pull` | Pull and import secrets |
-| `cs -sync status` | Show sync state |
-| `cs -sync auto on` | Enable auto-sync on session start/end |
+| `cs <session> -sync init <url>` | Initialize git repo with remote |
+| `cs <session> -sync push` | Commit and push (exports secrets) |
+| `cs <session> -sync pull` | Pull and import secrets |
+| `cs <session> -sync status` | Show sync state |
+| `cs <session> -sync auto on` | Enable auto-sync on session start/end |
 | `cs -sync clone <url>` | Clone session from remote |
-| `cs -s` | Alias for `cs -sync` |
+| `cs <session> -s` | Alias for `-sync` |
 
 ### Auto-Sync
 
 Enable automatic sync on session start/end:
 
 ```bash
-cs -sync auto on
+cs my-session -sync auto on
 ```
 
 When enabled:

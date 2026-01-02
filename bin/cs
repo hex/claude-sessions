@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.01.37"
+VERSION="2026.01.38"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -35,30 +35,34 @@ show_help() {
     cat <<EOF
 cs $VERSION - Claude Code session manager
 
-Usage: cs <session-name>    Create or resume a session
-       cs -<command>        Run a subcommand
+Usage: cs <session-name>              Create or resume a session
+       cs <session-name> -sync <cmd>  Run sync command on session
+       cs <session-name> -secrets <cmd>  Run secrets command on session
+       cs -<command>                  Run a global subcommand
 
 Commands:
   <name>              Create or resume session <name>
+  <name> -sync <cmd>  Run sync command on <name> without launching session
+  <name> -secrets <cmd>  Run secrets command on <name> without launching session
   -list, -ls          List all sessions
   -remove, -rm <name> Remove a session
-  -secrets <cmd>      Manage session secrets (store, get, list, delete, export)
-  -sync, -s <cmd>     Sync session with git remote (init, push, pull, status, auto, clone)
+  -sync, -s <cmd>     Sync current session (requires CLAUDE_SESSION_NAME)
+  -secrets <cmd>      Manage current session secrets (requires CLAUDE_SESSION_NAME)
   -update             Update cs to latest version
     --check, -c       Check for updates without installing
     --force, -f       Force reinstall even if up to date
   -help, -h           Show this help message
   -version, -v        Show version
 
-Secrets Commands (cs -secrets <cmd>):
+Secrets Commands:
   set, store <name>   Store a secret (prompts if value not provided)
   get <name>          Retrieve a secret value
-  list, ls            List all secrets for current session
+  list, ls            List all secrets for session
   delete, rm <name>   Delete a secret
   export              Export secrets as environment variables
   backend             Show which storage backend is active
 
-Sync Commands (cs -sync <cmd>):
+Sync Commands:
   init <url>          Initialize git repo with remote URL
   push                Commit and push changes (exports secrets)
   pull                Pull changes (imports secrets)
@@ -73,12 +77,13 @@ Environment:
   CS_SECRETS_PASSWORD   Master password for encrypted secrets backend
 
 Examples:
-  cs debug-api                Create or resume 'debug-api' session
-  cs -list                    List all sessions
-  cs -rm old-session          Remove 'old-session'
-  cs -secrets set API_KEY     Store a secret (will prompt for value)
-  cs -secrets get API_KEY     Retrieve a secret
-  cs -update --check          Check for updates
+  cs debug-api                    Create or resume 'debug-api' session
+  cs my-session -sync init <url>  Initialize sync for 'my-session'
+  cs my-session -sync push        Push 'my-session' to remote
+  cs my-session -secrets list     List secrets for 'my-session'
+  cs -list                        List all sessions
+  cs -rm old-session              Remove 'old-session'
+  cs -update --check              Check for updates
 
 Sessions are stored in: $SESSIONS_ROOT
 EOF
@@ -1174,6 +1179,35 @@ main() {
 
     # Validate inputs
     validate_session_name "$session_name"
+
+    # Check for session subcommands: cs <session> -sync, cs <session> -secrets
+    if [ $# -gt 1 ]; then
+        local subcmd="$2"
+        shift 2  # Remove session name and subcommand
+
+        case "$subcmd" in
+            -sync|-s)
+                # Set up session context for sync command
+                export CLAUDE_SESSION_NAME="$session_name"
+                export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
+                export CLAUDE_ARTIFACT_DIR="$SESSIONS_ROOT/$session_name/artifacts"
+                run_sync "$@"
+                return 0
+                ;;
+            -secrets)
+                # Set up session context for secrets command
+                export CLAUDE_SESSION_NAME="$session_name"
+                export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
+                export CLAUDE_ARTIFACT_DIR="$SESSIONS_ROOT/$session_name/artifacts"
+                run_secrets "$@"
+                return 0
+                ;;
+            *)
+                error "Unknown session command: $subcmd. Use -sync or -secrets."
+                ;;
+        esac
+    fi
+
     check_dependencies
 
     # Check for updates (non-blocking)
