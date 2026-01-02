@@ -439,35 +439,46 @@ Sync sessions across machines using git.
 
 ### Setup
 
-1. Set a sync password (same on all machines):
+1. Set environment variables (same on all machines):
    ```bash
    export CS_SECRETS_PASSWORD="your-secure-password"
+   export CS_SYNC_PREFIX="git@github.com:you/"  # Optional: enables short syntax
    # Add to ~/.bashrc or ~/.zshrc for persistence
    ```
 
 2. Initialize sync for a session:
    ```bash
-   cs my-session -sync init git@github.com:you/my-session.git
+   cs my-session -sync init                      # Uses CS_SYNC_PREFIX
    cs my-session -sync push
+
+   # Or with explicit URL:
+   cs my-session -sync init git@github.com:you/my-session.git
    ```
 
 3. On another machine:
    ```bash
    export CS_SECRETS_PASSWORD="your-secure-password"
+   export CS_SYNC_PREFIX="git@github.com:you/"
+
+   cs -sync clone my-session                     # Uses CS_SYNC_PREFIX
+   cs my-session                                 # Start working
+
+   # Or with explicit URL:
    cs -sync clone git@github.com:you/my-session.git
-   cs my-session                                    # Start working
    ```
 
 ### Sync Commands
 
 | Command | Description |
 |---------|-------------|
-| `cs <session> -sync init <url>` | Initialize git repo with remote |
+| `cs <session> -sync init` | Initialize git repo (uses CS_SYNC_PREFIX) |
+| `cs <session> -sync init <url>` | Initialize git repo with explicit URL |
 | `cs <session> -sync push` | Commit and push (exports secrets) |
 | `cs <session> -sync pull` | Pull and import secrets |
 | `cs <session> -sync status` | Show sync state |
 | `cs <session> -sync auto on` | Enable auto-sync on session start/end |
-| `cs -sync clone <url>` | Clone session from remote |
+| `cs -sync clone <session>` | Clone session (uses CS_SYNC_PREFIX) |
+| `cs -sync clone <url>` | Clone session from explicit URL |
 | `cs <session> -s` | Alias for `-sync` |
 
 ### Auto-Sync

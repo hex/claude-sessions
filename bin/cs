@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.01.38"
+VERSION="2026.01.39"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -75,15 +75,17 @@ Environment:
   CLAUDE_CODE_BIN       Override claude binary name (default: claude)
   CLAUDE_SESSION_NAME   Current session name (set automatically)
   CS_SECRETS_PASSWORD   Master password for encrypted secrets backend
+  CS_SYNC_PREFIX        Git remote prefix (e.g., git@github.com:user/)
 
 Examples:
   cs debug-api                    Create or resume 'debug-api' session
   cs my-session -sync init <url>  Initialize sync for 'my-session'
+  cs my-session -sync init        Initialize sync (uses CS_SYNC_PREFIX)
   cs my-session -sync push        Push 'my-session' to remote
+  cs -sync clone other-session    Clone session (uses CS_SYNC_PREFIX)
   cs my-session -secrets list     List secrets for 'my-session'
   cs -list                        List all sessions
   cs -rm old-session              Remove 'old-session'
-  cs -update --check              Check for updates
 
 Sessions are stored in: $SESSIONS_ROOT
 EOF
@@ -730,17 +732,43 @@ Thumbs.db
 GITIGNORE
 }
 
+# Construct remote URL from prefix and session name
+construct_remote_url() {
+    local session_name="$1"
+    local prefix="${CS_SYNC_PREFIX:-}"
+
+    if [ -z "$prefix" ]; then
+        return 1
+    fi
+
+    # Normalize prefix: ensure it ends with / or : (for git@host:path style)
+    if [[ "$prefix" == *"@"* ]] && [[ "$prefix" != *"/" ]] && [[ "$prefix" != *":" ]]; then
+        # git@host style without trailing separator - add /
+        prefix="${prefix}/"
+    elif [[ "$prefix" != *"/" ]] && [[ "$prefix" != *":" ]]; then
+        # https:// style without trailing / - add /
+        prefix="${prefix}/"
+    fi
+
+    echo "${prefix}${session_name}.git"
+}
+
 # Initialize sync for session
 sync_init() {
     local session_name="$1"
-    local remote_url="$2"
+    local remote_url="${2:-}"
 
     if [ -z "$session_name" ]; then
-        error "No session specified. Use: cs -sync --session <name> init <url>"
+        error "No session specified. Use: cs <session> -sync init [url]"
     fi
 
+    # If no URL provided, try to construct from prefix
     if [ -z "$remote_url" ]; then
-        error "Usage: cs -sync init <remote-url>"
+        if remote_url=$(construct_remote_url "$session_name"); then
+            info "Using remote: $remote_url"
+        else
+            error "No URL provided. Either specify a URL or set CS_SYNC_PREFIX."
+        fi
     fi
 
     local session_dir="$SESSIONS_ROOT/$session_name"
@@ -922,7 +950,7 @@ sync_status() {
     echo ""
 
     if [ ! -d "$session_dir/.git" ]; then
-        echo -e "${YELLOW}Not synced${NC} - Run 'cs -sync init <remote-url>' to enable"
+        echo -e "${YELLOW}Not synced${NC} - Run 'cs $session_name -sync init' to enable"
         return 0
     fi
 
@@ -1012,18 +1040,37 @@ sync_auto() {
     esac
 }
 
+# Check if argument looks like a URL
+is_remote_url() {
+    local arg="$1"
+    # URLs contain :// or have @ followed by :
+    [[ "$arg" == *"://"* ]] || [[ "$arg" == *"@"*":"* ]]
+}
+
 # Clone session from remote
 sync_clone() {
-    local remote_url="$1"
-    local session_name="$2"
+    local first_arg="$1"
+    local second_arg="${2:-}"
+    local remote_url=""
+    local session_name=""
 
-    if [ -z "$remote_url" ]; then
-        error "Usage: cs -sync clone <remote-url> [session-name]"
+    if [ -z "$first_arg" ]; then
+        error "Usage: cs -sync clone <session-name|remote-url> [session-name]"
     fi
 
-    # Derive session name from URL if not provided
-    if [ -z "$session_name" ]; then
-        session_name=$(basename "$remote_url" .git)
+    # Detect if first arg is URL or session name
+    if is_remote_url "$first_arg"; then
+        # First arg is a URL
+        remote_url="$first_arg"
+        session_name="${second_arg:-$(basename "$remote_url" .git)}"
+    else
+        # First arg is a session name - construct URL from prefix
+        session_name="$first_arg"
+        if remote_url=$(construct_remote_url "$session_name"); then
+            info "Using remote: $remote_url"
+        else
+            error "No URL provided. Either specify a URL or set CS_SYNC_PREFIX."
+        fi
     fi
 
     validate_session_name "$session_name"
@@ -1084,7 +1131,7 @@ run_sync() {
 
     case "$subcommand" in
         init)
-            sync_init "$session_name" "$1"
+            sync_init "$session_name" "${1:-}"
             ;;
         push)
             sync_push "$session_name"
