@@ -72,6 +72,39 @@ cat >> "$GLOBAL_INDEX" << EOF
 - **Artifacts:** $ARTIFACT_COUNT files
 EOF
 
+# Auto-push if enabled
+SYNC_CONFIG="$SESSION_DIR/sync.conf"
+if [ -f "$SYNC_CONFIG" ] && [ -d "$SESSION_DIR/.git" ]; then
+    AUTO_SYNC=$(grep "^auto_sync=" "$SYNC_CONFIG" 2>/dev/null | cut -d= -f2)
+    if [ "$AUTO_SYNC" = "on" ]; then
+        cd "$SESSION_DIR" || true
+
+        # Export secrets if password is set
+        if [ -n "${CS_SECRETS_PASSWORD:-}" ]; then
+            for loc in "$(dirname "$0")/cs-secrets" "$HOME/.local/bin/cs-secrets"; do
+                if [ -x "$loc" ]; then
+                    "$loc" --session "$CLAUDE_SESSION_NAME" export-file 2>/dev/null || true
+                    break
+                fi
+            done
+        fi
+
+        # Stage, commit, and push
+        git add -A 2>/dev/null || true
+        if ! git diff --cached --quiet 2>/dev/null; then
+            TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+            HOSTNAME=$(hostname -s)
+            if git commit -q -m "Auto-sync: $TIMESTAMP ($HOSTNAME)" 2>/dev/null; then
+                if git push -q origin main 2>/dev/null; then
+                    echo "$(date '+%Y-%m-%d %H:%M:%S') - Auto-pushed to remote" >> "$SESSION_DIR/logs/session.log"
+                else
+                    echo "$(date '+%Y-%m-%d %H:%M:%S') - Auto-push failed (will retry next session)" >> "$SESSION_DIR/logs/session.log"
+                fi
+            fi
+        fi
+    fi
+fi
+
 # Clean up lock files
 find "$ARTIFACT_DIR" -name "*.lock" -delete 2>/dev/null || true
 

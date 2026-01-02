@@ -31,6 +31,35 @@ echo "$(date '+%Y-%m-%d %H:%M:%S') - Session started (ID: $SESSION_ID)" >> "$SES
 echo "  Working directory: $CWD" >> "$SESSION_DIR/logs/session.log"
 echo "" >> "$SESSION_DIR/logs/session.log"
 
+# Auto-pull if enabled (runs in background to not block session start)
+SYNC_CONFIG="$SESSION_DIR/sync.conf"
+if [ -f "$SYNC_CONFIG" ] && [ -d "$SESSION_DIR/.git" ]; then
+    AUTO_SYNC=$(grep "^auto_sync=" "$SYNC_CONFIG" 2>/dev/null | cut -d= -f2)
+    if [ "$AUTO_SYNC" = "on" ]; then
+        (
+            cd "$SESSION_DIR" || exit 0
+            if git fetch -q origin 2>/dev/null; then
+                BEHIND=$(git rev-list --count 'HEAD..@{upstream}' 2>/dev/null || echo "0")
+                if [ "$BEHIND" -gt 0 ]; then
+                    if git pull --rebase -q origin main 2>/dev/null; then
+                        echo "$(date '+%Y-%m-%d %H:%M:%S') - Auto-pulled $BEHIND commit(s) from remote" >> "$SESSION_DIR/logs/session.log"
+
+                        # Import secrets if secrets.enc was updated and password is set
+                        if [ -f "$SESSION_DIR/secrets.enc" ] && [ -n "${CS_SECRETS_PASSWORD:-}" ]; then
+                            for loc in "$(dirname "$0")/cs-secrets" "$HOME/.local/bin/cs-secrets"; do
+                                if [ -x "$loc" ]; then
+                                    "$loc" --session "$CLAUDE_SESSION_NAME" import-file 2>/dev/null || true
+                                    break
+                                fi
+                            done
+                        fi
+                    fi
+                fi
+            fi
+        ) &
+    fi
+fi
+
 # Export environment variables for the session via CLAUDE_ENV_FILE
 if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
     cat >> "$CLAUDE_ENV_FILE" << EOF

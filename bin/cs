@@ -43,6 +43,7 @@ Commands:
   -list, -ls          List all sessions
   -remove, -rm <name> Remove a session
   -secrets <cmd>      Manage session secrets (store, get, list, delete, export)
+  -sync, -s <cmd>     Sync session with git remote (init, push, pull, status, auto, clone)
   -update             Update cs to latest version
     --check, -c       Check for updates without installing
     --force, -f       Force reinstall even if up to date
@@ -56,6 +57,14 @@ Secrets Commands (cs -secrets <cmd>):
   delete, rm <name>   Delete a secret
   export              Export secrets as environment variables
   backend             Show which storage backend is active
+
+Sync Commands (cs -sync <cmd>):
+  init <url>          Initialize git repo with remote URL
+  push                Commit and push changes (exports secrets)
+  pull                Pull changes (imports secrets)
+  status, st          Show sync status
+  auto [on|off]       Toggle/show auto-sync setting
+  clone <url> [name]  Clone session from remote
 
 Environment:
   CS_SESSIONS_ROOT      Override sessions directory (default: ~/.claude-sessions)
@@ -617,6 +626,471 @@ run_secrets() {
     exec "$secrets_script" "$@"
 }
 
+# ============================================================================
+# SYNC FUNCTIONS
+# ============================================================================
+
+SYNC_CONFIG_FILE="sync.conf"
+
+# Find the secrets helper script
+find_secrets_script() {
+    local script_dir
+    script_dir="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")"
+
+    for loc in "$script_dir/cs-secrets" "$HOME/.local/bin/cs-secrets" "/usr/local/bin/cs-secrets"; do
+        if [ -x "$loc" ]; then
+            echo "$loc"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Read sync config value
+get_sync_config() {
+    local session_dir="$1"
+    local key="$2"
+    local default="${3:-}"
+    local config_file="$session_dir/$SYNC_CONFIG_FILE"
+
+    if [ -f "$config_file" ]; then
+        local value
+        value=$(grep "^${key}=" "$config_file" 2>/dev/null | cut -d= -f2-)
+        echo "${value:-$default}"
+    else
+        echo "$default"
+    fi
+}
+
+# Write sync config value
+set_sync_config() {
+    local session_dir="$1"
+    local key="$2"
+    local value="$3"
+    local config_file="$session_dir/$SYNC_CONFIG_FILE"
+
+    if [ -f "$config_file" ]; then
+        if grep -q "^${key}=" "$config_file" 2>/dev/null; then
+            # Update existing key (macOS compatible sed)
+            sed -i '' "s|^${key}=.*|${key}=${value}|" "$config_file"
+        else
+            echo "${key}=${value}" >> "$config_file"
+        fi
+    else
+        echo "${key}=${value}" > "$config_file"
+    fi
+}
+
+# Create session .gitignore
+create_session_gitignore() {
+    local session_dir="$1"
+    cat > "$session_dir/.gitignore" << 'GITIGNORE'
+# Transient files
+*.lock
+*.tmp
+*.bak
+
+# Archives (large, regenerated from artifacts)
+archives/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+GITIGNORE
+}
+
+# Initialize sync for session
+sync_init() {
+    local session_name="$1"
+    local remote_url="$2"
+
+    if [ -z "$session_name" ]; then
+        error "No session specified. Use: cs -sync --session <name> init <url>"
+    fi
+
+    if [ -z "$remote_url" ]; then
+        error "Usage: cs -sync init <remote-url>"
+    fi
+
+    local session_dir="$SESSIONS_ROOT/$session_name"
+
+    if [ ! -d "$session_dir" ]; then
+        error "Session not found: $session_name"
+    fi
+
+    cd "$session_dir" || error "Cannot access session directory"
+
+    # Check if already a git repo
+    if [ -d ".git" ]; then
+        warn "Session is already a git repository"
+        if git remote get-url origin >/dev/null 2>&1; then
+            git remote set-url origin "$remote_url"
+            info "Updated remote origin to: $remote_url"
+        else
+            git remote add origin "$remote_url"
+            info "Added remote origin: $remote_url"
+        fi
+        return 0
+    fi
+
+    # Create .gitignore
+    create_session_gitignore "$session_dir"
+
+    # Initialize git repo
+    git init -q
+    git remote add origin "$remote_url"
+
+    # Set default branch to main
+    git branch -M main
+
+    info "Initialized git repo for session: $session_name"
+    info "Remote: $remote_url"
+    echo ""
+    info "Next steps:"
+    echo "  cs -sync push          # Push to remote"
+    echo "  cs -sync auto on       # Enable auto-sync"
+
+    if [ -z "${CS_SECRETS_PASSWORD:-}" ]; then
+        echo ""
+        warn "Note: Set CS_SECRETS_PASSWORD for secrets sync across machines"
+    fi
+}
+
+# Push session to remote
+sync_push() {
+    local session_name="$1"
+
+    if [ -z "$session_name" ]; then
+        error "No session specified."
+    fi
+
+    local session_dir="$SESSIONS_ROOT/$session_name"
+
+    if [ ! -d "$session_dir/.git" ]; then
+        error "Session not initialized for sync. Run: cs -sync init <remote-url>"
+    fi
+
+    cd "$session_dir" || error "Cannot access session directory"
+
+    # Export secrets to encrypted file if password is set
+    if [ -n "${CS_SECRETS_PASSWORD:-}" ]; then
+        local secrets_script
+        if secrets_script=$(find_secrets_script); then
+            if "$secrets_script" --session "$session_name" export-file 2>/dev/null; then
+                info "Exported secrets to secrets.enc"
+            fi
+        fi
+    fi
+
+    # Stage all changes
+    git add -A
+
+    # Check if there are changes to commit
+    if git diff --cached --quiet; then
+        echo "No changes to commit"
+
+        # Still try to push in case there are unpushed commits
+        if git rev-parse --abbrev-ref '@{upstream}' >/dev/null 2>&1; then
+            local ahead
+            ahead=$(git rev-list --count '@{upstream}..HEAD' 2>/dev/null || echo "0")
+            if [ "$ahead" -gt 0 ]; then
+                git push origin main
+                info "Pushed $ahead commit(s) to remote"
+            else
+                echo "Already up to date with remote"
+            fi
+        else
+            # No upstream set, try initial push
+            git push -u origin main 2>/dev/null || echo "No commits to push"
+        fi
+        return 0
+    fi
+
+    # Commit with timestamp
+    local timestamp hostname
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    hostname=$(hostname -s)
+
+    git commit -q -m "Sync: $timestamp ($hostname)"
+
+    # Push
+    if git push -u origin main; then
+        info "Pushed session to remote"
+    else
+        error "Push failed. Check your remote configuration."
+    fi
+}
+
+# Pull session from remote
+sync_pull() {
+    local session_name="$1"
+
+    if [ -z "$session_name" ]; then
+        error "No session specified."
+    fi
+
+    local session_dir="$SESSIONS_ROOT/$session_name"
+
+    if [ ! -d "$session_dir/.git" ]; then
+        error "Session not initialized for sync. Run: cs -sync init <remote-url>"
+    fi
+
+    cd "$session_dir" || error "Cannot access session directory"
+
+    # Stash any local changes
+    local had_changes=0
+    if ! git diff --quiet || ! git diff --cached --quiet; then
+        git stash -q
+        had_changes=1
+    fi
+
+    # Pull with rebase to avoid merge commits
+    if git pull --rebase origin main 2>/dev/null; then
+        info "Pulled latest changes"
+    else
+        warn "Pull failed - may need manual resolution"
+        if [ $had_changes -eq 1 ]; then
+            git stash pop -q 2>/dev/null || true
+        fi
+        return 1
+    fi
+
+    # Restore stashed changes
+    if [ $had_changes -eq 1 ]; then
+        if ! git stash pop -q 2>/dev/null; then
+            warn "Local changes conflicted - saved in git stash"
+        fi
+    fi
+
+    # Import secrets from encrypted file if it exists and password is set
+    local secrets_file="$session_dir/secrets.enc"
+    if [ -f "$secrets_file" ] && [ -n "${CS_SECRETS_PASSWORD:-}" ]; then
+        local secrets_script
+        if secrets_script=$(find_secrets_script); then
+            if "$secrets_script" --session "$session_name" import-file 2>/dev/null; then
+                info "Imported secrets from secrets.enc"
+            fi
+        fi
+    fi
+
+    info "Session synced"
+}
+
+# Show sync status
+sync_status() {
+    local session_name="$1"
+
+    if [ -z "$session_name" ]; then
+        error "No session specified."
+    fi
+
+    local session_dir="$SESSIONS_ROOT/$session_name"
+
+    echo -e "${BOLD}Session:${NC} $session_name"
+    echo -e "${BOLD}Path:${NC} $session_dir"
+    echo ""
+
+    if [ ! -d "$session_dir/.git" ]; then
+        echo -e "${YELLOW}Not synced${NC} - Run 'cs -sync init <remote-url>' to enable"
+        return 0
+    fi
+
+    cd "$session_dir" || error "Cannot access session directory"
+
+    local remote
+    remote=$(git remote get-url origin 2>/dev/null || echo "none")
+    echo -e "${BOLD}Remote:${NC} $remote"
+
+    local branch
+    branch=$(git branch --show-current 2>/dev/null || echo "unknown")
+    echo -e "${BOLD}Branch:${NC} $branch"
+
+    local auto_sync
+    auto_sync=$(get_sync_config "$session_dir" "auto_sync" "off")
+    echo -e "${BOLD}Auto-sync:${NC} $auto_sync"
+
+    echo ""
+
+    # Show local changes status
+    local changes
+    changes=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$changes" -gt 0 ]; then
+        echo -e "${YELLOW}$changes uncommitted change(s)${NC}"
+    else
+        echo -e "${GREEN}No local changes${NC}"
+    fi
+
+    # Check remote status (fetch quietly)
+    git fetch -q origin 2>/dev/null || true
+    local ahead behind
+    ahead=$(git rev-list --count '@{upstream}..HEAD' 2>/dev/null || echo "0")
+    behind=$(git rev-list --count 'HEAD..@{upstream}' 2>/dev/null || echo "0")
+
+    if [ "$ahead" -gt 0 ]; then
+        echo -e "${CYAN}$ahead commit(s) ahead of remote${NC}"
+    fi
+    if [ "$behind" -gt 0 ]; then
+        echo -e "${CYAN}$behind commit(s) behind remote${NC}"
+    fi
+    if [ "$ahead" -eq 0 ] && [ "$behind" -eq 0 ]; then
+        echo -e "${GREEN}Up to date with remote${NC}"
+    fi
+
+    # Secrets status
+    echo ""
+    if [ -f "$session_dir/secrets.enc" ]; then
+        local enc_time
+        enc_time=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$session_dir/secrets.enc" 2>/dev/null || echo "unknown")
+        echo -e "${BOLD}Secrets file:${NC} secrets.enc (modified: $enc_time)"
+    else
+        echo -e "${BOLD}Secrets file:${NC} not exported"
+    fi
+}
+
+# Toggle auto-sync
+sync_auto() {
+    local session_name="$1"
+    local setting="$2"
+
+    if [ -z "$session_name" ]; then
+        error "No session specified."
+    fi
+
+    local session_dir="$SESSIONS_ROOT/$session_name"
+
+    if [ ! -d "$session_dir" ]; then
+        error "Session not found: $session_name"
+    fi
+
+    if [ -z "$setting" ]; then
+        # Show current setting
+        local current
+        current=$(get_sync_config "$session_dir" "auto_sync" "off")
+        echo "Auto-sync: $current"
+        return 0
+    fi
+
+    case "$setting" in
+        on|off)
+            set_sync_config "$session_dir" "auto_sync" "$setting"
+            info "Auto-sync set to: $setting"
+            ;;
+        *)
+            error "Usage: cs -sync auto [on|off]"
+            ;;
+    esac
+}
+
+# Clone session from remote
+sync_clone() {
+    local remote_url="$1"
+    local session_name="$2"
+
+    if [ -z "$remote_url" ]; then
+        error "Usage: cs -sync clone <remote-url> [session-name]"
+    fi
+
+    # Derive session name from URL if not provided
+    if [ -z "$session_name" ]; then
+        session_name=$(basename "$remote_url" .git)
+    fi
+
+    validate_session_name "$session_name"
+
+    local session_dir="$SESSIONS_ROOT/$session_name"
+
+    if [ -d "$session_dir" ]; then
+        error "Session already exists: $session_name"
+    fi
+
+    # Clone the repo
+    info "Cloning session: $session_name"
+    if ! git clone "$remote_url" "$session_dir"; then
+        error "Clone failed. Check the remote URL."
+    fi
+
+    info "Cloned session to: $session_dir"
+
+    # Import secrets if available
+    local secrets_file="$session_dir/secrets.enc"
+    if [ -f "$secrets_file" ]; then
+        if [ -z "${CS_SECRETS_PASSWORD:-}" ]; then
+            warn "secrets.enc found but CS_SECRETS_PASSWORD not set"
+            warn "Set CS_SECRETS_PASSWORD and run: cs -secrets --session $session_name import-file"
+        else
+            local secrets_script
+            if secrets_script=$(find_secrets_script); then
+                "$secrets_script" --session "$session_name" import-file 2>/dev/null && \
+                    info "Imported secrets"
+            fi
+        fi
+    fi
+
+    echo ""
+    info "Start session with: cs $session_name"
+}
+
+# Main sync command router
+run_sync() {
+    local subcommand="${1:-}"
+    shift 2>/dev/null || true
+
+    # Determine session name from environment or --session flag
+    local session_name="${CLAUDE_SESSION_NAME:-}"
+
+    # Parse --session flag if present
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -s|--session)
+                session_name="$2"
+                shift 2
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+
+    case "$subcommand" in
+        init)
+            sync_init "$session_name" "$1"
+            ;;
+        push)
+            sync_push "$session_name"
+            ;;
+        pull)
+            sync_pull "$session_name"
+            ;;
+        status|st)
+            sync_status "$session_name"
+            ;;
+        auto)
+            sync_auto "$session_name" "${1:-}"
+            ;;
+        clone)
+            sync_clone "${1:-}" "${2:-}"
+            ;;
+        "")
+            # Default to status if in a session, otherwise show help
+            if [ -n "$session_name" ]; then
+                sync_status "$session_name"
+            else
+                error "Usage: cs -sync <init|push|pull|status|auto|clone>"
+            fi
+            ;;
+        *)
+            error "Unknown sync command: $subcommand. Use: init, push, pull, status, auto, clone"
+            ;;
+    esac
+}
+
 # Main function
 main() {
     if [ $# -eq 0 ]; then
@@ -647,6 +1121,11 @@ main() {
         -secrets)
             shift
             run_secrets "$@"
+            return 0
+            ;;
+        -sync|-s)
+            shift
+            run_sync "$@"
             return 0
             ;;
         -update)

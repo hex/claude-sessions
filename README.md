@@ -10,6 +10,7 @@ A session manager for [Claude Code](https://github.com/anthropics/claude-code) t
 - **Documentation templates** - Pre-configured markdown files for discoveries and auto-logged changes
 - **Smart resume** - Automatically resumes existing sessions or creates new ones
 - **Session-specific context** - Custom CLAUDE.md instructions for each session
+- **Git-based sync** - Sync sessions across machines with encrypted secrets
 - **Update notifications** - Checks for updates daily and notifies when a new version is available
 
 ## Installation
@@ -417,6 +418,71 @@ The migrate command:
 
 - `CLAUDE_SESSION_NAME` - Current session (set automatically by `cs`)
 - `CS_SECRETS_PASSWORD` - Optional master password for encrypted backend (overrides auto-derived key)
+
+## Session Sync
+
+Sync sessions across machines using git.
+
+### Setup
+
+1. Set a sync password (same on all machines):
+   ```bash
+   export CS_SECRETS_PASSWORD="your-secure-password"
+   # Add to ~/.bashrc or ~/.zshrc for persistence
+   ```
+
+2. Initialize sync for a session:
+   ```bash
+   cs my-session                                    # Start or resume session
+   cs -sync init git@github.com:you/my-session.git # Initialize git repo
+   cs -sync push                                    # Push to remote
+   ```
+
+3. On another machine:
+   ```bash
+   export CS_SECRETS_PASSWORD="your-secure-password"
+   cs -sync clone git@github.com:you/my-session.git
+   cs my-session                                    # Start working
+   ```
+
+### Sync Commands
+
+| Command | Description |
+|---------|-------------|
+| `cs -sync init <url>` | Initialize git repo with remote |
+| `cs -sync push` | Commit and push (exports secrets) |
+| `cs -sync pull` | Pull and import secrets |
+| `cs -sync status` | Show sync state |
+| `cs -sync auto on` | Enable auto-sync on session start/end |
+| `cs -sync clone <url>` | Clone session from remote |
+| `cs -s` | Alias for `cs -sync` |
+
+### Auto-Sync
+
+Enable automatic sync on session start/end:
+
+```bash
+cs -sync auto on
+```
+
+When enabled:
+- **Session start:** Pulls latest changes from remote
+- **Session end:** Commits and pushes all changes
+
+### Secrets Sync
+
+Secrets are exported to `secrets.enc` (AES-256-CBC encrypted) and included in git.
+
+**Important:** You must set `CS_SECRETS_PASSWORD` to the same value on all machines for secrets to sync correctly. Machine-derived passwords are not portable.
+
+### What Gets Synced
+
+- All markdown files (README.md, discoveries.md, changes.md, CLAUDE.md)
+- Artifacts directory (scripts, configs, MANIFEST.json)
+- Session log (logs/session.log)
+- Encrypted secrets (secrets.enc)
+
+**Excluded from sync:** archives/, lock files, OS/editor files
 
 ## Workflow
 
