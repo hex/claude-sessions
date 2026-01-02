@@ -2,6 +2,8 @@
 
 A session manager for [Claude Code](https://github.com/anthropics/claude-code) that creates isolated workspaces with automatic documentation and artifact tracking.
 
+![cs session demo](assets/screenshot.png)
+
 ## Features
 
 - **Isolated session workspaces** - Each session has its own directory with structured documentation
