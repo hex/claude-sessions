@@ -38,7 +38,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/hex/claude-sessions/main/install.sh)"
 ```
 
-> **Note:** Always [review scripts](install.sh) before running them from the internet.
+> :warning: Always [review scripts](install.sh) before running them from the internet. Use [ShellCheck](https://www.shellcheck.net/) to analyze unfamiliar scripts.
 
 Or clone and run `./install.sh`.
 
