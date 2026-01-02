@@ -50,12 +50,6 @@ export PATH="$HOME/.local/bin:$PATH"
 cs -uninstall
 ```
 
-Or using the install script:
-
-```bash
-./install.sh --uninstall
-```
-
 Or manually:
 
 ```bash
