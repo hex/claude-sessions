@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.01.41"
+VERSION="2026.01.42"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -1105,6 +1105,21 @@ run_uninstall() {
     local skills_dir="$HOME/.claude/skills"
     local settings_file="$HOME/.claude/settings.json"
 
+    warn "This will uninstall cs and all its components:"
+    echo "  - $install_dir/cs, $install_dir/cs-secrets"
+    echo "  - Hooks in $hooks_dir/"
+    echo "  - Commands in $commands_dir/"
+    echo "  - Skills in $skills_dir/"
+    echo "  - Hook entries in $settings_file"
+    echo ""
+    read -p "Continue with uninstall? [y/N] " -n 1 -r
+    echo ""
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        info "Uninstall cancelled."
+        return 0
+    fi
+
+    echo ""
     info "Uninstalling cs..."
     echo ""
 
