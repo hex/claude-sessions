@@ -79,6 +79,20 @@ The uninstaller preserves:
 - [Claude Code](https://github.com/anthropics/claude-code) - Must be available as `claude` command
 - Bash 4.0+
 - `jq` - For hook configuration (install via `brew install jq` or `apt install jq`)
+- `git` - Required for session sync feature
+
+### Windows
+
+On Windows, run cs from **Git Bash**, WSL, or MSYS2:
+
+```bash
+# Install jq (using Chocolatey or Scoop)
+choco install jq
+# or: scoop install jq
+
+# Then run the installer in Git Bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/hex/claude-sessions/main/install.sh)"
+```
 
 ## Hooks
 
