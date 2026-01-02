@@ -38,9 +38,15 @@ No git repo required. No project structure needed. Just a name for what you're w
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/hex/claude-sessions/main/install.sh)"
 ```
 
+> **Note:** Always [review scripts](install.sh) before running them from the internet.
+
 Or clone and run `./install.sh`.
 
-The installer adds `cs` to `~/.local/bin/` and configures Claude Code hooks.
+The installer:
+- Adds `cs` and `cs-secrets` to `~/.local/bin/`
+- Installs five [hooks](docs/hooks.md) to `~/.claude/hooks/` for session tracking
+- Adds a `/summary` command and `store-secret` skill to `~/.claude/`
+- Configures hook entries in `~/.claude/settings.json`
 
 ## Usage
 
