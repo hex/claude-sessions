@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: Installation script for cs (Claude Code session manager)
-# ABOUTME: Downloads and installs cs to ~/.local/bin and hooks to ~/.claude/hooks
+# ABOUTME: Installs binaries, hooks, commands, skills, and shell completions
 
 set -euo pipefail
 
