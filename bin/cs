@@ -1116,12 +1116,15 @@ run_uninstall() {
     local commands_dir="$HOME/.claude/commands"
     local skills_dir="$HOME/.claude/skills"
     local settings_file="$HOME/.claude/settings.json"
+    local bash_completion_dir="$HOME/.bash_completion.d"
+    local zsh_completion_dir="$HOME/.zsh/completions"
 
     warn "This will uninstall cs and all its components:"
     echo "  - $install_dir/cs, $install_dir/cs-secrets"
     echo "  - Hooks in $hooks_dir/"
     echo "  - Commands in $commands_dir/"
     echo "  - Skills in $skills_dir/"
+    echo "  - Shell completions"
     echo "  - Hook entries in $settings_file"
     echo ""
     read -p "Continue with uninstall? [y/N] " -n 1 -r
@@ -1164,6 +1167,17 @@ run_uninstall() {
     if [ -d "$skills_dir/store-secret" ]; then
         rm -rf "$skills_dir/store-secret"
         info "Removed $skills_dir/store-secret/"
+    fi
+
+    # Remove shell completions
+    if [ -f "$bash_completion_dir/cs.bash" ]; then
+        rm "$bash_completion_dir/cs.bash"
+        info "Removed $bash_completion_dir/cs.bash"
+    fi
+
+    if [ -f "$zsh_completion_dir/_cs" ]; then
+        rm "$zsh_completion_dir/_cs"
+        info "Removed $zsh_completion_dir/_cs"
     fi
 
     # Clean up settings.json (remove cs hooks, preserve others)
