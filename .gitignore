@@ -13,3 +13,4 @@ Thumbs.db
 *.tmp
 *.bak
 .beads/
+.claude/
