@@ -46,6 +46,7 @@ The installer:
 - Adds `cs` and `cs-secrets` to `~/.local/bin/`
 - Installs five [hooks](docs/hooks.md) to `~/.claude/hooks/` for session tracking
 - Adds a `/summary` command and `store-secret` skill to `~/.claude/`
+- Installs shell completions for bash and zsh
 - Configures hook entries in `~/.claude/settings.json`
 
 ## Usage
@@ -99,6 +100,29 @@ export CS_SYNC_PREFIX="git@github.com:youruser/"
 # Master password for cross-machine secrets sync
 export CS_SECRETS_PASSWORD="your-secure-password"
 ```
+
+## Shell Completion
+
+Tab completion for session names and commands is installed automatically. To enable it:
+
+**Bash** - Add to `~/.bashrc`:
+```bash
+[[ -f ~/.bash_completion.d/cs.bash ]] && source ~/.bash_completion.d/cs.bash
+```
+
+**Zsh** - Add to `~/.zshrc` (before `compinit`):
+```bash
+fpath=(~/.zsh/completions $fpath)
+autoload -Uz compinit && compinit
+```
+
+Then restart your shell or run `source ~/.bashrc` / `source ~/.zshrc`.
+
+Completions support:
+- Session names: `cs home<TAB>` → `cs homeassistant`
+- Global flags: `cs -<TAB>` → `-list`, `-sync`, `-secrets`, etc.
+- Sync commands: `cs session -sync <TAB>` → `init`, `push`, `pull`, etc.
+- Secrets commands: `cs session -secrets <TAB>` → `set`, `get`, `list`, etc.
 
 ## Documentation
 

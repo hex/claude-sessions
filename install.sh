@@ -31,6 +31,8 @@ warn() {
 INSTALL_DIR="${HOME}/.local/bin"
 HOOKS_DIR="${HOME}/.claude/hooks"
 COMMANDS_DIR="${HOME}/.claude/commands"
+BASH_COMPLETION_DIR="${HOME}/.bash_completion.d"
+ZSH_COMPLETION_DIR="${HOME}/.zsh/completions"
 CLAUDE_SETTINGS="${HOME}/.claude/settings.json"
 SESSIONS_DIR="${HOME}/.claude-sessions"
 REPO_URL="https://raw.githubusercontent.com/hex/claude-sessions/main"
@@ -49,6 +51,10 @@ COMMAND_SUMMARY_URL="${REPO_URL}/commands/summary.md"
 
 # Skill URLs for web install
 SKILL_STORE_SECRET_URL="${REPO_URL}/skills/store-secret/SKILL.md"
+
+# Completion URLs for web install
+COMPLETION_BASH_URL="${REPO_URL}/completions/cs.bash"
+COMPLETION_ZSH_URL="${REPO_URL}/completions/_cs"
 
 # Detect if running from cloned repo or web install
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
@@ -165,6 +171,38 @@ else
         curl -fsSL "$SKILL_STORE_SECRET_URL" -o "$SKILLS_DIR/store-secret/SKILL.md" || error "Failed to download store-secret skill"
     elif command -v wget >/dev/null 2>&1; then
         wget -q "$SKILL_STORE_SECRET_URL" -O "$SKILLS_DIR/store-secret/SKILL.md" || error "Failed to download store-secret skill"
+    fi
+fi
+
+# Install shell completions
+COMPLETIONS_SOURCE="$SCRIPT_DIR/completions"
+COMPLETION_SETUP_NEEDED=""
+
+# Bash completion
+info "Installing bash completion to $BASH_COMPLETION_DIR"
+mkdir -p "$BASH_COMPLETION_DIR"
+
+if [ "$INSTALL_METHOD" = "local" ]; then
+    cp "$COMPLETIONS_SOURCE/cs.bash" "$BASH_COMPLETION_DIR/"
+else
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$COMPLETION_BASH_URL" -o "$BASH_COMPLETION_DIR/cs.bash" || warn "Failed to download bash completion"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q "$COMPLETION_BASH_URL" -O "$BASH_COMPLETION_DIR/cs.bash" || warn "Failed to download bash completion"
+    fi
+fi
+
+# Zsh completion
+info "Installing zsh completion to $ZSH_COMPLETION_DIR"
+mkdir -p "$ZSH_COMPLETION_DIR"
+
+if [ "$INSTALL_METHOD" = "local" ]; then
+    cp "$COMPLETIONS_SOURCE/_cs" "$ZSH_COMPLETION_DIR/"
+else
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$COMPLETION_ZSH_URL" -o "$ZSH_COMPLETION_DIR/_cs" || warn "Failed to download zsh completion"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q "$COMPLETION_ZSH_URL" -O "$ZSH_COMPLETION_DIR/_cs" || warn "Failed to download zsh completion"
     fi
 fi
 
@@ -287,9 +325,31 @@ echo -e "${DIM}│${NC} ${LIGHT_BLUE}  - cs-secrets command to $INSTALL_DIR/cs-s
 echo -e "${DIM}│${NC} ${LIGHT_BLUE}  - Session hooks to $HOOKS_DIR/${NC}"
 echo -e "${DIM}│${NC} ${LIGHT_BLUE}  - Slash commands to $COMMANDS_DIR/${NC}"
 echo -e "${DIM}│${NC} ${LIGHT_BLUE}  - Skills to $SKILLS_DIR/${NC}"
+echo -e "${DIM}│${NC} ${LIGHT_BLUE}  - Shell completions to ~/.bash_completion.d/ & ~/.zsh/completions/${NC}"
 echo -e "${DIM}│${NC} ${LIGHT_BLUE}  - Hook configuration in $CLAUDE_SETTINGS${NC}"
 echo -e "${DIM}└──────────────────────────────────────────────────────────────┘${NC}"
 echo ""
+
+# Check if completion setup is needed
+SHELL_NAME=$(basename "$SHELL")
+case "$SHELL_NAME" in
+    bash)
+        if ! grep -q 'bash_completion.d/cs.bash' "$HOME/.bashrc" 2>/dev/null; then
+            warn "To enable tab completion, add to ~/.bashrc:"
+            warn "  [[ -f ~/.bash_completion.d/cs.bash ]] && source ~/.bash_completion.d/cs.bash"
+            echo ""
+        fi
+        ;;
+    zsh)
+        if ! grep -q 'fpath.*zsh/completions' "$HOME/.zshrc" 2>/dev/null; then
+            warn "To enable tab completion, add to ~/.zshrc (before compinit):"
+            warn "  fpath=(~/.zsh/completions \$fpath)"
+            warn "  autoload -Uz compinit && compinit"
+            echo ""
+        fi
+        ;;
+esac
+
 echo -e "${PINK}Usage: cs <session-name>${NC}"
 echo ""
 echo -e "${GREY}Examples:${NC}"
