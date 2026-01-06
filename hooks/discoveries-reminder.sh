@@ -57,11 +57,11 @@ fi
 # Update cooldown marker
 echo "$CURRENT_TIME" > "$COOLDOWN_FILE"
 
-# Return reminder prompt
+# Return reminder prompt - use "block" + "reason" so Claude sees it
 cat << EOF
 {
-  "decision": "approve",
-  "systemMessage": "Quick check: Have you discovered anything noteworthy about the codebase, system, or environment during this work? If so, briefly update $DISCOVERIES_FILE. If nothing significant, just acknowledge and continue."
+  "decision": "block",
+  "reason": "Quick check: Have you discovered anything noteworthy about the codebase, system, or environment during this work? If so, briefly update $DISCOVERIES_FILE. If nothing significant, just acknowledge and continue."
 }
 EOF
 
