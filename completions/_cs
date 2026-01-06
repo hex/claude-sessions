@@ -10,11 +10,11 @@ _cs() {
 
     # Helper: get session names
     _cs_sessions() {
-        local sessions=()
+        local -a sessions
         if [[ -d "$sessions_root" ]]; then
-            sessions=(${(f)"$(find "$sessions_root" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null)"})
+            sessions=("$sessions_root"/*(N/:t))
         fi
-        _describe 'session' sessions
+        compadd -a sessions
     }
 
     # Sync subcommands with descriptions
