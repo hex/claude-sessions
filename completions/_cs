@@ -6,10 +6,9 @@ _cs() {
     local curcontext="$curcontext" state line
     typeset -A opt_args
 
-    local sessions_root="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
-
     # Helper: get session names
     _cs_sessions() {
+        local sessions_root="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
         local -a sessions
         if [[ -d "$sessions_root" ]]; then
             sessions=("$sessions_root"/*(N/:t))
