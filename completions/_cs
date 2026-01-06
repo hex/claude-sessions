@@ -68,8 +68,8 @@ _cs() {
     local in_sync=false in_secrets=false has_session=false after_remove=false
     local i word
 
-    for ((i=1; i < CURRENT; i++)); do
-        word="${words[i+1]}"
+    for ((i=2; i < CURRENT; i++)); do
+        word="${words[i]}"
         case "$word" in
             -sync|-s) in_sync=true; in_secrets=false ;;
             -secrets) in_secrets=true; in_sync=false ;;
