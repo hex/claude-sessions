@@ -39,6 +39,16 @@ if [ -f "$SYNC_CONFIG" ] && [ -d "$SESSION_DIR/.git" ]; then
         (
             cd "$SESSION_DIR" || exit 0
             if git fetch -q origin 2>/dev/null; then
+                # Check if upstream is configured
+                if ! git rev-parse --abbrev-ref '@{upstream}' >/dev/null 2>&1; then
+                    # Try to set up upstream tracking automatically
+                    CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "main")
+                    if ! git branch --set-upstream-to=origin/$CURRENT_BRANCH $CURRENT_BRANCH 2>/dev/null; then
+                        echo "$(date '+%Y-%m-%d %H:%M:%S') - Auto-pull skipped: upstream tracking not configured" >> "$SESSION_DIR/logs/session.log"
+                        exit 0
+                    fi
+                fi
+
                 BEHIND=$(git rev-list --count 'HEAD..@{upstream}' 2>/dev/null || echo "0")
                 if [ "$BEHIND" -gt 0 ]; then
                     if git pull --rebase -q origin main 2>/dev/null; then
