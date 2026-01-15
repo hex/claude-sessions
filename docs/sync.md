@@ -104,11 +104,15 @@ cs my-session -sync push
 
 ## Auto-Sync
 
-**Auto-sync is enabled by default for all new sessions.** Changes are automatically committed when the session ends.
+**Auto-sync is enabled by default for all new sessions.** Changes are automatically committed in two ways:
+
+1. **Discovery commits:** Automatically committed when you write to `discoveries.md`, using the latest entry as the commit message
+2. **Session end commits:** All remaining changes committed when the session ends
 
 When enabled:
 - **Session start:** Pulls latest changes from remote (if configured)
-- **Session end:** Commits all changes (and pushes to remote if configured)
+- **Discovery writes:** Creates commit with latest discovery entry as message
+- **Session end:** Commits all remaining changes (and pushes to remote if configured)
 
 To disable for a specific session:
 ```bash

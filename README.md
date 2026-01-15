@@ -29,7 +29,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 - **Automatic artifact tracking** - Scripts and configs are auto-saved to `artifacts/`
 - **Secure secrets handling** - Sensitive data auto-detected and stored in OS keychain
 - **Documentation templates** - Pre-configured markdown files for discoveries and changes
-- **Automatic git version control** - Every session gets local git history with auto-commit on session end; optionally sync to remote
+- **Automatic git version control** - Every session gets local git history with auto-commits on discoveries and session end; optionally sync to remote
 - **Update notifications** - Checks for updates and notifies when new versions are available
 
 ## Installation
@@ -54,7 +54,7 @@ Or clone and run `./install.ps1`.
 
 The installer:
 - Adds `cs` and `cs-secrets` to `~/.local/bin/`
-- Installs five [hooks](docs/hooks.md) to `~/.claude/hooks/` for session tracking
+- Installs six [hooks](docs/hooks.md) to `~/.claude/hooks/` for session tracking
 - Adds a `/summary` command and `store-secret` skill to `~/.claude/`
 - Installs shell completions for bash and zsh
 - Configures hook entries in `~/.claude/settings.json`
@@ -141,7 +141,7 @@ Completions support:
 
 ## Documentation
 
-- **[Hooks](docs/hooks.md)** - How the five Claude Code hooks work
+- **[Hooks](docs/hooks.md)** - How the six Claude Code hooks work
 - **[Secrets](docs/secrets.md)** - Secure secrets handling and storage backends
 - **[Sync](docs/sync.md)** - Git-based session sync across machines
 

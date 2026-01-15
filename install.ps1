@@ -91,6 +91,7 @@ function Install-ClaudeHooks {
         'session-start.sh',
         'artifact-tracker.sh',
         'changes-tracker.sh',
+        'discovery-commits.sh',
         'discoveries-reminder.sh',
         'session-end.sh'
     )
@@ -189,6 +190,7 @@ function Merge-ClaudeSettings {
     Add-Hook -EventName 'SessionStart' -HookPath "$HOME/.claude/hooks/session-start.sh"
     Add-Hook -EventName 'PreToolUse' -HookPath "$HOME/.claude/hooks/artifact-tracker.sh" -Matcher 'Write'
     Add-Hook -EventName 'PostToolUse' -HookPath "$HOME/.claude/hooks/changes-tracker.sh" -Matcher ''
+    Add-Hook -EventName 'PostToolUse' -HookPath "$HOME/.claude/hooks/discovery-commits.sh" -Matcher 'Write|Edit'
     Add-Hook -EventName 'Stop' -HookPath "$HOME/.claude/hooks/discoveries-reminder.sh"
     Add-Hook -EventName 'SessionEnd' -HookPath "$HOME/.claude/hooks/session-end.sh"
 

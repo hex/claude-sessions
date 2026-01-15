@@ -43,6 +43,7 @@ CS_SECRETS_URL="${REPO_URL}/bin/cs-secrets"
 HOOK_SESSION_START_URL="${REPO_URL}/hooks/session-start.sh"
 HOOK_ARTIFACT_TRACKER_URL="${REPO_URL}/hooks/artifact-tracker.sh"
 HOOK_CHANGES_TRACKER_URL="${REPO_URL}/hooks/changes-tracker.sh"
+HOOK_DISCOVERY_COMMITS_URL="${REPO_URL}/hooks/discovery-commits.sh"
 HOOK_DISCOVERIES_REMINDER_URL="${REPO_URL}/hooks/discoveries-reminder.sh"
 HOOK_SESSION_END_URL="${REPO_URL}/hooks/session-end.sh"
 
@@ -123,6 +124,7 @@ if [ "$INSTALL_METHOD" = "local" ]; then
     cp "$HOOKS_SOURCE/session-start.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/artifact-tracker.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/changes-tracker.sh" "$HOOKS_DIR/"
+    cp "$HOOKS_SOURCE/discovery-commits.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/discoveries-reminder.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/session-end.sh" "$HOOKS_DIR/"
 else
@@ -131,12 +133,14 @@ else
         curl -fsSL "$HOOK_SESSION_START_URL" -o "$HOOKS_DIR/session-start.sh" || error "Failed to download session-start.sh"
         curl -fsSL "$HOOK_ARTIFACT_TRACKER_URL" -o "$HOOKS_DIR/artifact-tracker.sh" || error "Failed to download artifact-tracker.sh"
         curl -fsSL "$HOOK_CHANGES_TRACKER_URL" -o "$HOOKS_DIR/changes-tracker.sh" || error "Failed to download changes-tracker.sh"
+        curl -fsSL "$HOOK_DISCOVERY_COMMITS_URL" -o "$HOOKS_DIR/discovery-commits.sh" || error "Failed to download discovery-commits.sh"
         curl -fsSL "$HOOK_DISCOVERIES_REMINDER_URL" -o "$HOOKS_DIR/discoveries-reminder.sh" || error "Failed to download discoveries-reminder.sh"
         curl -fsSL "$HOOK_SESSION_END_URL" -o "$HOOKS_DIR/session-end.sh" || error "Failed to download session-end.sh"
     elif command -v wget >/dev/null 2>&1; then
         wget -q "$HOOK_SESSION_START_URL" -O "$HOOKS_DIR/session-start.sh" || error "Failed to download session-start.sh"
         wget -q "$HOOK_ARTIFACT_TRACKER_URL" -O "$HOOKS_DIR/artifact-tracker.sh" || error "Failed to download artifact-tracker.sh"
         wget -q "$HOOK_CHANGES_TRACKER_URL" -O "$HOOKS_DIR/changes-tracker.sh" || error "Failed to download changes-tracker.sh"
+        wget -q "$HOOK_DISCOVERY_COMMITS_URL" -O "$HOOKS_DIR/discovery-commits.sh" || error "Failed to download discovery-commits.sh"
         wget -q "$HOOK_DISCOVERIES_REMINDER_URL" -O "$HOOKS_DIR/discoveries-reminder.sh" || error "Failed to download discoveries-reminder.sh"
         wget -q "$HOOK_SESSION_END_URL" -O "$HOOKS_DIR/session-end.sh" || error "Failed to download session-end.sh"
     fi
@@ -227,6 +231,7 @@ else
     SESSION_START_PATH="$HOME/.claude/hooks/session-start.sh"
     ARTIFACT_TRACKER_PATH="$HOME/.claude/hooks/artifact-tracker.sh"
     CHANGES_TRACKER_PATH="$HOME/.claude/hooks/changes-tracker.sh"
+    DISCOVERY_COMMITS_PATH="$HOME/.claude/hooks/discovery-commits.sh"
     DISCOVERIES_REMINDER_PATH="$HOME/.claude/hooks/discoveries-reminder.sh"
     SESSION_END_PATH="$HOME/.claude/hooks/session-end.sh"
 
@@ -262,6 +267,19 @@ else
             select(.hooks | all(.command != $path))
         )) + [{
             "matcher": "",
+            "hooks": [{
+                "type": "command",
+                "command": $path,
+                "timeout": 10
+            }]
+        }]
+    ')
+
+    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$DISCOVERY_COMMITS_PATH" '
+        .hooks.PostToolUse = ((.hooks.PostToolUse // []) | map(
+            select(.hooks | all(.command != $path))
+        )) + [{
+            "matcher": "Write|Edit",
             "hooks": [{
                 "type": "command",
                 "command": $path,

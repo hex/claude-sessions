@@ -1,6 +1,6 @@
 # Hooks
 
-The installer configures five Claude Code hooks that enable session management features.
+The installer configures six Claude Code hooks that enable session management features.
 
 ## session-start.sh (SessionStart)
 
@@ -28,6 +28,14 @@ Runs before any file write operation:
 Runs after any file modification (Edit, Write, MultiEdit):
 - Logs file path and timestamp to `changes.md`
 - Skips session documentation files and artifacts (tracked separately)
+
+## discovery-commits.sh (PostToolUse on Write/Edit)
+
+Runs after modifications to `discoveries.md`:
+- Parses the latest discovery entry (heading or bullet point)
+- Creates a git commit using the entry as the commit message
+- Automatically pushes to remote if sync is enabled
+- Commits are prefixed with 📝 emoji for easy identification
 
 ## discoveries-reminder.sh (Stop)
 
@@ -58,7 +66,8 @@ The hooks are configured in `~/.claude/settings.json`:
       { "matcher": "Write", "hooks": [{ "type": "command", "command": "~/.claude/hooks/artifact-tracker.sh", "timeout": 10 }] }
     ],
     "PostToolUse": [
-      { "matcher": "", "hooks": [{ "type": "command", "command": "~/.claude/hooks/changes-tracker.sh", "timeout": 10 }] }
+      { "matcher": "", "hooks": [{ "type": "command", "command": "~/.claude/hooks/changes-tracker.sh", "timeout": 10 }] },
+      { "matcher": "Write|Edit", "hooks": [{ "type": "command", "command": "~/.claude/hooks/discovery-commits.sh", "timeout": 10 }] }
     ],
     "Stop": [
       { "hooks": [{ "type": "command", "command": "~/.claude/hooks/discoveries-reminder.sh", "timeout": 10 }] }
