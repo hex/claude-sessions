@@ -88,3 +88,34 @@ When initializing sync, you'll see a security notice:
 ```
 
 Always use private repositories for session sync. While secrets are encrypted, session documentation (discoveries.md, README.md, etc.) may contain sensitive context about your work.
+
+## Troubleshooting
+
+### "No upstream tracking configured" Warning
+
+If `cs <session> -sync status` shows this warning:
+
+```
+Warning: No upstream tracking configured for branch 'main'
+Run: git branch --set-upstream-to=origin/main main
+```
+
+**Cause:** Your local git branch isn't configured to track the remote branch.
+
+**Fix:** Run the suggested command in your session directory:
+
+```bash
+cd ~/.claude-sessions/<session-name>
+git branch --set-upstream-to=origin/main main
+```
+
+Replace `main` with your branch name if different.
+
+**Why it happens:**
+- You cloned without using `git clone` (manual git init)
+- You pushed without the `-u` flag: `git push origin main` (should be `git push -u origin main`)
+- You created a new branch that doesn't track a remote yet
+
+**What it means:** Upstream tracking tells git which remote branch your local branch corresponds to. Without it, git commands like `git pull` and sync status checks don't know where to pull from or compare against.
+
+The `cs -sync push` and `cs -sync pull` commands will still work (they explicitly use `origin/main`), but status checks can't determine if you're ahead or behind the remote.
