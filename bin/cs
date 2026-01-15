@@ -65,9 +65,9 @@ Secrets Commands:
   backend             Show which storage backend is active
 
 Sync Commands:
-  init [url]          Initialize git repo with remote URL (uses CS_SYNC_PREFIX if not provided)
-  push                Commit and push changes (exports secrets)
-  pull                Pull changes (imports secrets)
+  init [url]          Initialize git repo (local-only, or remote via URL/CS_SYNC_PREFIX)
+  push                Commit changes (pushes to remote if configured)
+  pull                Pull changes from remote (skips if local-only)
   status, st          Show sync status
   auto [on|off]       Toggle/show auto-sync setting
   clone <session|url> [name]  Clone session from remote (uses CS_SYNC_PREFIX if session name)
@@ -81,9 +81,9 @@ Environment:
 
 Examples:
   cs debug-api                    Create or resume 'debug-api' session
+  cs my-session -sync init        Initialize local-only git repo
   cs my-session -sync init <url>  Initialize sync for 'my-session'
-  cs my-session -sync init        Initialize sync (uses CS_SYNC_PREFIX)
-  cs my-session -sync push        Push 'my-session' to remote
+  cs my-session -sync push        Commit (and push to remote if configured)
   cs -sync clone other-session    Clone session (uses CS_SYNC_PREFIX)
   cs my-session -secrets list     List secrets for 'my-session'
   cs -list                        List all sessions
@@ -747,6 +747,7 @@ construct_remote_url() {
 sync_init() {
     local session_name="$1"
     local remote_url="${2:-}"
+    local is_local_only=0
 
     if [ -z "$session_name" ]; then
         error "No session specified. Use: cs <session> -sync init [url]"
@@ -754,10 +755,11 @@ sync_init() {
 
     # If no URL provided, try to construct from prefix
     if [ -z "$remote_url" ]; then
-        if remote_url=$(construct_remote_url "$session_name"); then
+        if remote_url=$(construct_remote_url "$session_name" 2>/dev/null); then
             info "Using remote: $remote_url"
         else
-            error "No URL provided. Either specify a URL or set CS_SYNC_PREFIX."
+            # No URL and no prefix - create local-only repo
+            is_local_only=1
         fi
     fi
 
@@ -769,26 +771,39 @@ sync_init() {
 
     cd "$session_dir" || error "Cannot access session directory"
 
-    # Security notice
-    echo ""
-    echo -e "${DIM}┌─────────────────────────────────────────────────────────────┐${NC}"
-    echo -e "${DIM}│${NC} ${YELLOW}${BOLD}SECURITY NOTICE${NC}                                            ${DIM}│${NC}"
-    echo -e "${DIM}│${NC}                                                             ${DIM}│${NC}"
-    echo -e "${DIM}│${NC} Session data may contain sensitive information.             ${DIM}│${NC}"
-    echo -e "${DIM}│${NC} ${WHITE}${BOLD}Use a PRIVATE repository${NC} to protect your data.             ${DIM}│${NC}"
-    echo -e "${DIM}│${NC} Secrets are encrypted, but session files are ${RED}not${NC}.          ${DIM}│${NC}"
-    echo -e "${DIM}└─────────────────────────────────────────────────────────────┘${NC}"
-    echo ""
+    # Security notice (only for remote repos)
+    if [ $is_local_only -eq 0 ]; then
+        echo ""
+        echo -e "${DIM}┌─────────────────────────────────────────────────────────────┐${NC}"
+        echo -e "${DIM}│${NC} ${YELLOW}${BOLD}SECURITY NOTICE${NC}                                            ${DIM}│${NC}"
+        echo -e "${DIM}│${NC}                                                             ${DIM}│${NC}"
+        echo -e "${DIM}│${NC} Session data may contain sensitive information.             ${DIM}│${NC}"
+        echo -e "${DIM}│${NC} ${WHITE}${BOLD}Use a PRIVATE repository${NC} to protect your data.             ${DIM}│${NC}"
+        echo -e "${DIM}│${NC} Secrets are encrypted, but session files are ${RED}not${NC}.          ${DIM}│${NC}"
+        echo -e "${DIM}└─────────────────────────────────────────────────────────────┘${NC}"
+        echo ""
+    fi
 
     # Check if already a git repo
     if [ -d ".git" ]; then
         warn "Session is already a git repository"
-        if git remote get-url origin >/dev/null 2>&1; then
-            git remote set-url origin "$remote_url"
-            info "Updated remote origin to: $remote_url"
+
+        if [ $is_local_only -eq 1 ]; then
+            # Local-only mode - don't add remote
+            if git remote get-url origin >/dev/null 2>&1; then
+                info "Session already has a remote. Use 'cs -sync init <url>' to change it."
+            else
+                info "Session is local-only (no remote configured)"
+            fi
         else
-            git remote add origin "$remote_url"
-            info "Added remote origin: $remote_url"
+            # Remote mode - add or update remote
+            if git remote get-url origin >/dev/null 2>&1; then
+                git remote set-url origin "$remote_url"
+                info "Updated remote origin to: $remote_url"
+            else
+                git remote add origin "$remote_url"
+                info "Added remote origin: $remote_url"
+            fi
         fi
         return 0
     fi
@@ -798,21 +813,37 @@ sync_init() {
 
     # Initialize git repo
     git init -q
-    git remote add origin "$remote_url"
 
     # Set default branch to main
     git branch -M main
 
-    info "Initialized git repo for session: $session_name"
-    info "Remote: $remote_url"
-    echo ""
-    info "Next steps:"
-    echo "  cs -sync push          # Push to remote"
-    echo "  cs -sync auto on       # Enable auto-sync"
-
-    if [ -z "${CS_SECRETS_PASSWORD:-}" ]; then
+    if [ $is_local_only -eq 1 ]; then
+        # Local-only mode
+        info "Initialized local git repo for session: $session_name"
         echo ""
-        warn "Note: Set CS_SECRETS_PASSWORD for secrets sync across machines"
+        info "This is a local-only repository (no remote)"
+        echo ""
+        info "Next steps:"
+        echo "  cs -sync push          # Commit changes locally"
+        echo "  cs -sync auto on       # Enable auto-commit on session end"
+        echo ""
+        info "To add a remote later:"
+        echo "  cs -sync init <url>    # Add remote and push"
+    else
+        # Remote mode
+        git remote add origin "$remote_url"
+
+        info "Initialized git repo for session: $session_name"
+        info "Remote: $remote_url"
+        echo ""
+        info "Next steps:"
+        echo "  cs -sync push          # Push to remote"
+        echo "  cs -sync auto on       # Enable auto-sync"
+
+        if [ -z "${CS_SECRETS_PASSWORD:-}" ]; then
+            echo ""
+            warn "Note: Set CS_SECRETS_PASSWORD for secrets sync across machines"
+        fi
     fi
 }
 
@@ -827,10 +858,16 @@ sync_push() {
     local session_dir="$SESSIONS_ROOT/$session_name"
 
     if [ ! -d "$session_dir/.git" ]; then
-        error "Session not initialized for sync. Run: cs -sync init <remote-url>"
+        error "Session not initialized for sync. Run: cs -sync init [remote-url]"
     fi
 
     cd "$session_dir" || error "Cannot access session directory"
+
+    # Check if remote exists
+    local has_remote=0
+    if git remote get-url origin >/dev/null 2>&1; then
+        has_remote=1
+    fi
 
     # Export secrets to encrypted file if password is set
     if [ -n "${CS_SECRETS_PASSWORD:-}" ]; then
@@ -849,19 +886,26 @@ sync_push() {
     if git diff --cached --quiet; then
         echo "No changes to commit"
 
-        # Still try to push in case there are unpushed commits
-        if git rev-parse --abbrev-ref '@{upstream}' >/dev/null 2>&1; then
-            local ahead
-            ahead=$(git rev-list --count '@{upstream}..HEAD' 2>/dev/null || echo "0")
-            if [ "$ahead" -gt 0 ]; then
-                git push origin main
-                info "Pushed $ahead commit(s) to remote"
+        if [ $has_remote -eq 1 ]; then
+            # Still try to push in case there are unpushed commits
+            if git rev-parse --abbrev-ref '@{upstream}' >/dev/null 2>&1; then
+                local ahead
+                ahead=$(git rev-list --count '@{upstream}..HEAD' 2>/dev/null || echo "0")
+                if [ "$ahead" -gt 0 ]; then
+                    git push origin main
+                    info "Pushed $ahead commit(s) to remote"
+                else
+                    echo "Already up to date with remote"
+                fi
             else
-                echo "Already up to date with remote"
+                # No upstream set, try initial push
+                git push -u origin main 2>/dev/null || echo "No commits to push"
             fi
         else
-            # No upstream set, try initial push
-            git push -u origin main 2>/dev/null || echo "No commits to push"
+            # Local-only mode
+            local total_commits
+            total_commits=$(git rev-list --count HEAD 2>/dev/null || echo "0")
+            info "Repository is local-only ($total_commits commit(s))"
         fi
         return 0
     fi
@@ -873,11 +917,20 @@ sync_push() {
 
     git commit -q -m "Sync: $timestamp ($short_hostname)"
 
-    # Push
-    if git push -u origin main; then
-        info "Pushed session to remote"
+    # Push or inform based on remote status
+    if [ $has_remote -eq 1 ]; then
+        if git push -u origin main; then
+            info "Pushed session to remote"
+        else
+            error "Push failed. Check your remote configuration."
+        fi
     else
-        error "Push failed. Check your remote configuration."
+        info "Committed locally (no remote configured)"
+        local total_commits
+        total_commits=$(git rev-list --count HEAD 2>/dev/null || echo "0")
+        echo "  Total commits: $total_commits"
+        echo ""
+        info "To push to a remote, run: cs -sync init <url>"
     fi
 }
 
@@ -892,10 +945,21 @@ sync_pull() {
     local session_dir="$SESSIONS_ROOT/$session_name"
 
     if [ ! -d "$session_dir/.git" ]; then
-        error "Session not initialized for sync. Run: cs -sync init <remote-url>"
+        error "Session not initialized for sync. Run: cs -sync init [remote-url]"
     fi
 
     cd "$session_dir" || error "Cannot access session directory"
+
+    # Check if remote exists
+    if ! git remote get-url origin >/dev/null 2>&1; then
+        info "Repository is local-only (no remote to pull from)"
+        local total_commits
+        total_commits=$(git rev-list --count HEAD 2>/dev/null || echo "0")
+        echo "  Total commits: $total_commits"
+        echo ""
+        info "To add a remote, run: cs -sync init <url>"
+        return 0
+    fi
 
     # Stash any local changes
     local had_changes=0
@@ -980,26 +1044,37 @@ sync_status() {
         echo -e "${GREEN}No local changes${NC}"
     fi
 
-    # Check remote status (fetch quietly)
-    git fetch -q origin 2>/dev/null || true
-
-    # Check if upstream is configured
-    if ! git rev-parse --abbrev-ref '@{upstream}' >/dev/null 2>&1; then
-        echo -e "${YELLOW}Warning: No upstream tracking configured for branch '$branch'${NC}"
-        echo -e "${YELLOW}Run: git branch --set-upstream-to=origin/$branch $branch${NC}"
+    # Check if remote exists
+    if [ "$remote" = "none" ]; then
+        # Local-only mode
+        local total_commits
+        total_commits=$(git rev-list --count HEAD 2>/dev/null || echo "0")
+        echo -e "${CYAN}Local-only repository ($total_commits commit(s))${NC}"
+        echo ""
+        info "To add a remote, run: cs $session_name -sync init <url>"
     else
-        local ahead behind
-        ahead=$(git rev-list --count '@{upstream}..HEAD' 2>/dev/null || echo "0")
-        behind=$(git rev-list --count 'HEAD..@{upstream}' 2>/dev/null || echo "0")
+        # Remote mode - check remote status
+        # Check remote status (fetch quietly)
+        git fetch -q origin 2>/dev/null || true
 
-        if [ "$ahead" -gt 0 ]; then
-            echo -e "${CYAN}$ahead commit(s) ahead of remote${NC}"
-        fi
-        if [ "$behind" -gt 0 ]; then
-            echo -e "${CYAN}$behind commit(s) behind remote${NC}"
-        fi
-        if [ "$ahead" -eq 0 ] && [ "$behind" -eq 0 ]; then
-            echo -e "${GREEN}Up to date with remote${NC}"
+        # Check if upstream is configured
+        if ! git rev-parse --abbrev-ref '@{upstream}' >/dev/null 2>&1; then
+            echo -e "${YELLOW}Warning: No upstream tracking configured for branch '$branch'${NC}"
+            echo -e "${YELLOW}Run: git branch --set-upstream-to=origin/$branch $branch${NC}"
+        else
+            local ahead behind
+            ahead=$(git rev-list --count '@{upstream}..HEAD' 2>/dev/null || echo "0")
+            behind=$(git rev-list --count 'HEAD..@{upstream}' 2>/dev/null || echo "0")
+
+            if [ "$ahead" -gt 0 ]; then
+                echo -e "${CYAN}$ahead commit(s) ahead of remote${NC}"
+            fi
+            if [ "$behind" -gt 0 ]; then
+                echo -e "${CYAN}$behind commit(s) behind remote${NC}"
+            fi
+            if [ "$ahead" -eq 0 ] && [ "$behind" -eq 0 ]; then
+                echo -e "${GREEN}Up to date with remote${NC}"
+            fi
         fi
     fi
 

@@ -38,6 +38,13 @@ if [ -f "$SYNC_CONFIG" ] && [ -d "$SESSION_DIR/.git" ]; then
     if [ "$AUTO_SYNC" = "on" ]; then
         (
             cd "$SESSION_DIR" || exit 0
+
+            # Check if remote exists
+            if ! git remote get-url origin >/dev/null 2>&1; then
+                # Local-only mode - skip auto-pull
+                exit 0
+            fi
+
             if git fetch -q origin 2>/dev/null; then
                 # Check if upstream is configured
                 if ! git rev-parse --abbrev-ref '@{upstream}' >/dev/null 2>&1; then

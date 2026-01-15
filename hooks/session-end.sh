@@ -79,6 +79,12 @@ if [ -f "$SYNC_CONFIG" ] && [ -d "$SESSION_DIR/.git" ]; then
     if [ "$AUTO_SYNC" = "on" ]; then
         cd "$SESSION_DIR" || true
 
+        # Check if remote exists
+        HAS_REMOTE=0
+        if git remote get-url origin >/dev/null 2>&1; then
+            HAS_REMOTE=1
+        fi
+
         # Export secrets if password is set
         if [ -n "${CS_SECRETS_PASSWORD:-}" ]; then
             for loc in "$(dirname "$0")/cs-secrets" "$HOME/.local/bin/cs-secrets"; do
@@ -89,16 +95,20 @@ if [ -f "$SYNC_CONFIG" ] && [ -d "$SESSION_DIR/.git" ]; then
             done
         fi
 
-        # Stage, commit, and push
+        # Stage, commit, and push (or commit locally)
         git add -A 2>/dev/null || true
         if ! git diff --cached --quiet 2>/dev/null; then
             TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
             SHORT_HOSTNAME=$(hostname | cut -d. -f1)
             if git commit -q -m "Auto-sync: $TIMESTAMP ($SHORT_HOSTNAME)" 2>/dev/null; then
-                if git push -q origin main 2>/dev/null; then
-                    echo "$(date '+%Y-%m-%d %H:%M:%S') - Auto-pushed to remote" >> "$SESSION_DIR/logs/session.log"
+                if [ $HAS_REMOTE -eq 1 ]; then
+                    if git push -q origin main 2>/dev/null; then
+                        echo "$(date '+%Y-%m-%d %H:%M:%S') - Auto-pushed to remote" >> "$SESSION_DIR/logs/session.log"
+                    else
+                        echo "$(date '+%Y-%m-%d %H:%M:%S') - Auto-push failed (will retry next session)" >> "$SESSION_DIR/logs/session.log"
+                    fi
                 else
-                    echo "$(date '+%Y-%m-%d %H:%M:%S') - Auto-push failed (will retry next session)" >> "$SESSION_DIR/logs/session.log"
+                    echo "$(date '+%Y-%m-%d %H:%M:%S') - Auto-committed locally (no remote)" >> "$SESSION_DIR/logs/session.log"
                 fi
             fi
         fi

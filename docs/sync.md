@@ -32,15 +32,64 @@ Sync sessions across machines using git.
    cs -sync clone git@github.com:you/my-session.git
    ```
 
+## Local-Only Mode
+
+cs sync can work without a remote repository, providing version control for sessions stored only on your machine.
+
+### When to Use Local-Only Mode
+
+- **Privacy:** Keep session history completely local
+- **Simplicity:** No GitHub/GitLab account needed
+- **Offline:** Version control without internet
+- **Upgrade path:** Start local, add remote later
+
+### Using Local-Only Mode
+
+```bash
+# Initialize without URL (local-only)
+cs my-session -sync init
+
+# Commit changes locally
+cs my-session -sync push
+
+# Check status
+cs my-session -sync status
+
+# Enable auto-commit on session end
+cs my-session -sync auto on
+```
+
+### Upgrading to Remote Sync
+
+Add a remote at any time:
+
+```bash
+# Add remote to existing local-only session
+cs my-session -sync init git@github.com:you/my-session.git
+
+# Push commits to remote
+cs my-session -sync push
+```
+
+### Behavior Differences
+
+| Feature | Local-Only | With Remote |
+|---------|------------|-------------|
+| `sync init` | Creates local git repo | Adds remote origin |
+| `sync push` | Commits locally | Commits and pushes |
+| `sync pull` | No-op (graceful skip) | Pulls from remote |
+| `sync status` | Shows local commit count | Shows ahead/behind |
+| Auto-sync | Commits on session end | Syncs with remote |
+
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `cs <session> -sync init` | Initialize git repo (uses CS_SYNC_PREFIX) |
+| `cs <session> -sync init` | Initialize git repo (local-only or uses CS_SYNC_PREFIX) |
 | `cs <session> -sync init <url>` | Initialize git repo with explicit URL |
-| `cs <session> -sync push` | Commit and push (exports secrets) |
-| `cs <session> -sync pull` | Pull and import secrets |
-| `cs <session> -sync status` | Show sync state |
+| `cs <session> -sync push` | Commit (and push if remote configured) |
+| `cs <session> -sync pull` | Pull and import secrets (if remote configured) |
+| `cs <session> -sync status` | Show sync state (local or remote) |
 | `cs <session> -sync auto on` | Enable auto-sync on session start/end |
 | `cs -sync clone <session>` | Clone session (uses CS_SYNC_PREFIX) |
 | `cs -sync clone <url>` | Clone session from explicit URL |
