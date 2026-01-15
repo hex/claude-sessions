@@ -65,7 +65,7 @@ Secrets Commands:
   backend             Show which storage backend is active
 
 Sync Commands:
-  init [url]          Initialize git repo (local-only, or remote via URL/CS_SYNC_PREFIX)
+  remote [url]        Add remote to git repo (uses CS_SYNC_PREFIX if URL not provided)
   push                Commit changes (pushes to remote if configured)
   pull                Pull changes from remote (skips if local-only)
   status, st          Show sync status
@@ -80,10 +80,10 @@ Environment:
   CS_SYNC_PREFIX        Git remote prefix (e.g., git@github.com:user/)
 
 Examples:
-  cs debug-api                    Create or resume 'debug-api' session (auto-init git)
-  cs my-session -sync push        Commit changes (local git enabled by default)
-  cs my-session -sync init <url>  Add remote to existing local repo
-  cs my-session -sync auto on     Enable auto-commit on session end
+  cs debug-api                      Create or resume 'debug-api' session (auto-init git)
+  cs my-session -sync push          Commit changes (local git enabled by default)
+  cs my-session -sync remote <url>  Add remote to existing local repo
+  cs my-session -sync auto on       Enable auto-commit on session end
   cs -sync clone other-session    Clone session (uses CS_SYNC_PREFIX)
   cs my-session -secrets list     List secrets for 'my-session'
   cs -list                        List all sessions
@@ -743,14 +743,14 @@ construct_remote_url() {
     echo "${prefix}${session_name}.git"
 }
 
-# Initialize sync for session
-sync_init() {
+# Add remote to session git repo
+sync_remote() {
     local session_name="$1"
     local remote_url="${2:-}"
     local is_local_only=0
 
     if [ -z "$session_name" ]; then
-        error "No session specified. Use: cs <session> -sync init [url]"
+        error "No session specified. Use: cs <session> -sync remote [url]"
     fi
 
     # If no URL provided, try to construct from prefix
@@ -791,7 +791,7 @@ sync_init() {
         if [ $is_local_only -eq 1 ]; then
             # Local-only mode - don't add remote
             if git remote get-url origin >/dev/null 2>&1; then
-                info "Session already has a remote. Use 'cs -sync init <url>' to change it."
+                info "Session already has a remote. Use 'cs -sync remote <url>' to change it."
             else
                 info "Session is local-only (no remote configured)"
             fi
@@ -828,7 +828,7 @@ sync_init() {
         echo "  cs -sync auto on       # Enable auto-commit on session end"
         echo ""
         info "To add a remote later:"
-        echo "  cs -sync init <url>    # Add remote and push"
+        echo "  cs -sync remote <url>  # Add remote and push"
     else
         # Remote mode
         git remote add origin "$remote_url"
@@ -858,7 +858,7 @@ sync_push() {
     local session_dir="$SESSIONS_ROOT/$session_name"
 
     if [ ! -d "$session_dir/.git" ]; then
-        error "Session not initialized for sync. Run: cs -sync init [remote-url]"
+        error "Session git repo not found. This shouldn't happen for new sessions."
     fi
 
     cd "$session_dir" || error "Cannot access session directory"
@@ -930,7 +930,7 @@ sync_push() {
         total_commits=$(git rev-list --count HEAD 2>/dev/null || echo "0")
         echo "  Total commits: $total_commits"
         echo ""
-        info "To push to a remote, run: cs -sync init <url>"
+        info "To push to a remote, run: cs -sync remote <url>"
     fi
 }
 
@@ -945,7 +945,7 @@ sync_pull() {
     local session_dir="$SESSIONS_ROOT/$session_name"
 
     if [ ! -d "$session_dir/.git" ]; then
-        error "Session not initialized for sync. Run: cs -sync init [remote-url]"
+        error "Session git repo not found. This shouldn't happen for new sessions."
     fi
 
     cd "$session_dir" || error "Cannot access session directory"
@@ -957,7 +957,7 @@ sync_pull() {
         total_commits=$(git rev-list --count HEAD 2>/dev/null || echo "0")
         echo "  Total commits: $total_commits"
         echo ""
-        info "To add a remote, run: cs -sync init <url>"
+        info "To add a remote, run: cs -sync remote <url>"
         return 0
     fi
 
@@ -1015,7 +1015,7 @@ sync_status() {
     echo ""
 
     if [ ! -d "$session_dir/.git" ]; then
-        echo -e "${YELLOW}Not synced${NC} - Run 'cs $session_name -sync init' to enable"
+        echo -e "${YELLOW}Git not initialized${NC} - This shouldn't happen for new sessions"
         return 0
     fi
 
@@ -1051,7 +1051,7 @@ sync_status() {
         total_commits=$(git rev-list --count HEAD 2>/dev/null || echo "0")
         echo -e "${CYAN}Local-only repository ($total_commits commit(s))${NC}"
         echo ""
-        info "To add a remote, run: cs $session_name -sync init <url>"
+        info "To add a remote, run: cs $session_name -sync remote <url>"
     else
         # Remote mode - check remote status
         # Check remote status (fetch quietly)
@@ -1402,8 +1402,8 @@ run_sync() {
     done
 
     case "$subcommand" in
-        init)
-            sync_init "$session_name" "${1:-}"
+        remote)
+            sync_remote "$session_name" "${1:-}"
             ;;
         push)
             sync_push "$session_name"

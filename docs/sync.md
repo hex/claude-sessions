@@ -15,11 +15,11 @@ Sync sessions across machines using git.
 
 2. Initialize sync for a session:
    ```bash
-   cs my-session -sync init                      # Uses CS_SYNC_PREFIX
+   cs my-session -sync remote                      # Uses CS_SYNC_PREFIX
    cs my-session -sync push
 
    # Or with explicit URL:
-   cs my-session -sync init git@github.com:you/my-session.git
+   cs my-session -sync remote git@github.com:you/my-session.git
    ```
 
 3. On another machine:
@@ -70,7 +70,7 @@ Add a remote at any time:
 
 ```bash
 # Add remote to existing local-only session
-cs my-session -sync init git@github.com:you/my-session.git
+cs my-session -sync remote git@github.com:you/my-session.git
 
 # Push commits to remote
 cs my-session -sync push
@@ -80,7 +80,7 @@ cs my-session -sync push
 
 | Feature | Local-Only | With Remote |
 |---------|------------|-------------|
-| `sync init` | Creates local git repo | Adds remote origin |
+| `sync remote` | No-op (already local) | Adds remote origin |
 | `sync push` | Commits locally | Commits and pushes |
 | `sync pull` | No-op (graceful skip) | Pulls from remote |
 | `sync status` | Shows local commit count | Shows ahead/behind |
@@ -90,8 +90,8 @@ cs my-session -sync push
 
 | Command | Description |
 |---------|-------------|
-| `cs <session> -sync init` | Initialize git repo (local-only or uses CS_SYNC_PREFIX) |
-| `cs <session> -sync init <url>` | Initialize git repo with explicit URL |
+| `cs <session> -sync remote` | Add remote to git repo (uses CS_SYNC_PREFIX) |
+| `cs <session> -sync remote <url>` | Add remote to git repo with explicit URL |
 | `cs <session> -sync push` | Commit (and push if remote configured) |
 | `cs <session> -sync pull` | Pull and import secrets (if remote configured) |
 | `cs <session> -sync status` | Show sync state (local or remote) |
