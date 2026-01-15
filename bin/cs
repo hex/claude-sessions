@@ -80,10 +80,10 @@ Environment:
   CS_SYNC_PREFIX        Git remote prefix (e.g., git@github.com:user/)
 
 Examples:
-  cs debug-api                    Create or resume 'debug-api' session
-  cs my-session -sync init        Initialize local-only git repo
-  cs my-session -sync init <url>  Initialize sync for 'my-session'
-  cs my-session -sync push        Commit (and push to remote if configured)
+  cs debug-api                    Create or resume 'debug-api' session (auto-init git)
+  cs my-session -sync push        Commit changes (local git enabled by default)
+  cs my-session -sync init <url>  Add remote to existing local repo
+  cs my-session -sync auto on     Enable auto-commit on session end
   cs -sync clone other-session    Clone session (uses CS_SYNC_PREFIX)
   cs my-session -secrets list     List secrets for 'my-session'
   cs -list                        List all sessions
@@ -1544,6 +1544,16 @@ main() {
     if [ ! -d "$session_dir" ]; then
         is_new="true"
         create_session_structure "$session_dir"
+
+        # Initialize local git repo by default
+        (
+            cd "$session_dir" || exit 0
+            create_session_gitignore "$session_dir"
+            git init -q 2>/dev/null || true
+            git branch -M main 2>/dev/null || true
+            git add -A 2>/dev/null || true
+            git commit -q -m "Initial session structure" 2>/dev/null || true
+        )
     else
         migrate_session "$session_dir"
     fi

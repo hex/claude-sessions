@@ -2,6 +2,8 @@
 
 Sync sessions across machines using git.
 
+**Note:** All new sessions automatically get local git version control. This section is for setting up **remote sync** across machines.
+
 ## Setup
 
 1. Set environment variables (same on all machines):
@@ -34,20 +36,23 @@ Sync sessions across machines using git.
 
 ## Local-Only Mode
 
-cs sync can work without a remote repository, providing version control for sessions stored only on your machine.
+**New sessions automatically get local git version control** - no remote repository required. This provides full version history for your session stored only on your machine.
 
-### When to Use Local-Only Mode
+### Benefits of Local-Only Mode
 
 - **Privacy:** Keep session history completely local
 - **Simplicity:** No GitHub/GitLab account needed
 - **Offline:** Version control without internet
-- **Upgrade path:** Start local, add remote later
+- **Automatic:** Enabled by default for all new sessions
+- **Upgrade path:** Add a remote anytime with `sync init <url>`
 
 ### Using Local-Only Mode
 
+Local git is automatically initialized when you create a session. You can immediately start using sync commands:
+
 ```bash
-# Initialize without URL (local-only)
-cs my-session -sync init
+# Create new session (git auto-initialized)
+cs my-session
 
 # Commit changes locally
 cs my-session -sync push
