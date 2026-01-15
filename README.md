@@ -29,7 +29,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 - **Automatic artifact tracking** - Scripts and configs are auto-saved to `artifacts/`
 - **Secure secrets handling** - Sensitive data auto-detected and stored in OS keychain
 - **Documentation templates** - Pre-configured markdown files for discoveries and changes
-- **Automatic git version control** - Every session gets local git history by default; optionally sync to remote
+- **Automatic git version control** - Every session gets local git history with auto-commit on session end; optionally sync to remote
 - **Update notifications** - Checks for updates and notifies when new versions are available
 
 ## Installation

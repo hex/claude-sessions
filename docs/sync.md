@@ -48,20 +48,22 @@ Sync sessions across machines using git.
 
 ### Using Local-Only Mode
 
-Local git is automatically initialized when you create a session. You can immediately start using sync commands:
+Local git is automatically initialized when you create a session, with auto-sync enabled by default:
 
 ```bash
-# Create new session (git auto-initialized)
+# Create new session (git auto-initialized, auto-sync on)
 cs my-session
+# ... work happens ...
+# exit Claude Code → auto-commit happens
 
-# Commit changes locally
+# Manual commit if needed during session
 cs my-session -sync push
 
 # Check status
 cs my-session -sync status
 
-# Enable auto-commit on session end
-cs my-session -sync auto on
+# Disable auto-sync if desired
+cs my-session -sync auto off
 ```
 
 ### Upgrading to Remote Sync
@@ -102,15 +104,21 @@ cs my-session -sync push
 
 ## Auto-Sync
 
-Enable automatic sync on session start/end:
+**Auto-sync is enabled by default for all new sessions.** Changes are automatically committed when the session ends.
 
+When enabled:
+- **Session start:** Pulls latest changes from remote (if configured)
+- **Session end:** Commits all changes (and pushes to remote if configured)
+
+To disable for a specific session:
+```bash
+cs my-session -sync auto off
+```
+
+To re-enable:
 ```bash
 cs my-session -sync auto on
 ```
-
-When enabled:
-- **Session start:** Pulls latest changes from remote
-- **Session end:** Commits and pushes all changes
 
 ## Secrets Sync
 
