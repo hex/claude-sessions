@@ -65,12 +65,12 @@ Secrets Commands:
   backend             Show which storage backend is active
 
 Sync Commands:
-  init <url>          Initialize git repo with remote URL
+  init [url]          Initialize git repo with remote URL (uses CS_SYNC_PREFIX if not provided)
   push                Commit and push changes (exports secrets)
   pull                Pull changes (imports secrets)
   status, st          Show sync status
   auto [on|off]       Toggle/show auto-sync setting
-  clone <url> [name]  Clone session from remote
+  clone <session|url> [name]  Clone session from remote (uses CS_SYNC_PREFIX if session name)
 
 Environment:
   CS_SESSIONS_ROOT      Override sessions directory (default: ~/.claude-sessions)
