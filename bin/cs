@@ -579,11 +579,26 @@ launch_claude_code() {
         [[ "$secret_count" =~ ^[0-9]+$ ]] || secret_count=0
     fi
 
+    # Check git remote status
+    local remote_display=""
+    if [ -d "$session_dir/.git" ]; then
+        local remote_url
+        remote_url=$(cd "$session_dir" && git remote get-url origin 2>/dev/null || echo "")
+        if [ -n "$remote_url" ]; then
+            remote_display="${CYAN}⇄${NC} ${DIM}$remote_url${NC}"
+        else
+            remote_display="${CYAN}⌂${NC} ${DIM}local-only${NC}"
+        fi
+    fi
+
     # Display banner
     echo ""
     echo -e "${GREEN}▌${NC} ${BOLD}cs${NC} ${DIM}$VERSION${NC}"
     echo -e "${GREEN}▌${NC} ${WHITE}${BOLD}$session_name${NC} ${DIM}($status_icon $status_text)${NC}"
     echo -e "${GREEN}▌${NC} ${DIM}$session_dir${NC}"
+    if [ -n "$remote_display" ]; then
+        echo -e "${GREEN}▌${NC} $remote_display"
+    fi
     if [ "$secret_count" -gt 0 ]; then
         local secret_word="secret"
         [ "$secret_count" -gt 1 ] && secret_word="secrets"
