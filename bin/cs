@@ -982,18 +982,25 @@ sync_status() {
 
     # Check remote status (fetch quietly)
     git fetch -q origin 2>/dev/null || true
-    local ahead behind
-    ahead=$(git rev-list --count '@{upstream}..HEAD' 2>/dev/null || echo "0")
-    behind=$(git rev-list --count 'HEAD..@{upstream}' 2>/dev/null || echo "0")
 
-    if [ "$ahead" -gt 0 ]; then
-        echo -e "${CYAN}$ahead commit(s) ahead of remote${NC}"
-    fi
-    if [ "$behind" -gt 0 ]; then
-        echo -e "${CYAN}$behind commit(s) behind remote${NC}"
-    fi
-    if [ "$ahead" -eq 0 ] && [ "$behind" -eq 0 ]; then
-        echo -e "${GREEN}Up to date with remote${NC}"
+    # Check if upstream is configured
+    if ! git rev-parse --abbrev-ref '@{upstream}' >/dev/null 2>&1; then
+        echo -e "${YELLOW}Warning: No upstream tracking configured for branch '$branch'${NC}"
+        echo -e "${YELLOW}Run: git branch --set-upstream-to=origin/$branch $branch${NC}"
+    else
+        local ahead behind
+        ahead=$(git rev-list --count '@{upstream}..HEAD' 2>/dev/null || echo "0")
+        behind=$(git rev-list --count 'HEAD..@{upstream}' 2>/dev/null || echo "0")
+
+        if [ "$ahead" -gt 0 ]; then
+            echo -e "${CYAN}$ahead commit(s) ahead of remote${NC}"
+        fi
+        if [ "$behind" -gt 0 ]; then
+            echo -e "${CYAN}$behind commit(s) behind remote${NC}"
+        fi
+        if [ "$ahead" -eq 0 ] && [ "$behind" -eq 0 ]; then
+            echo -e "${GREEN}Up to date with remote${NC}"
+        fi
     fi
 
     # Secrets status
