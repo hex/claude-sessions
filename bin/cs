@@ -466,6 +466,15 @@ cs -secrets set <name> <value>     # Store manually
 EOF
         warn "Migrated CLAUDE.md to latest format"
     fi
+
+    # Migrate sync.conf if missing (for sessions created before auto-sync default)
+    local sync_conf="$session_dir/sync.conf"
+    if [ ! -f "$sync_conf" ]; then
+        cat > "$sync_conf" << EOF
+auto_sync=on
+EOF
+        warn "Added sync.conf with auto-sync enabled"
+    fi
 }
 
 # Cross-platform helpers
