@@ -333,20 +333,20 @@ fi
 
 # Check if ~/.local/bin is in PATH
 if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
-    warn ""
-    warn "WARNING: $INSTALL_DIR is not in your PATH"
-    warn ""
+    echo ""
+    warn "   WARNING: $INSTALL_DIR is not in your PATH"
+    echo ""
     case "$OSTYPE" in
         msys*|cygwin*|mingw*)
-            warn "For Git Bash on Windows, add to ~/.bashrc:"
-            warn "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+            warn "   For Git Bash on Windows, add to ~/.bashrc:"
+            warn "     export PATH=\"\$HOME/.local/bin:\$PATH\""
             ;;
         *)
-            warn "Add this line to your ~/.bashrc, ~/.zshrc, or equivalent:"
-            warn "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+            warn "   Add this line to your ~/.bashrc, ~/.zshrc, or equivalent:"
+            warn "     export PATH=\"\$HOME/.local/bin:\$PATH\""
             ;;
     esac
-    warn ""
+    echo ""
 fi
 
 # Get version for completion message
@@ -361,24 +361,24 @@ SHELL_NAME=$(basename "$SHELL")
 case "$SHELL_NAME" in
     bash)
         if ! grep -q 'bash_completion.d/cs.bash' "$HOME/.bashrc" 2>/dev/null; then
-            warn "To enable tab completion, add to ~/.bashrc:"
-            warn "  [[ -f ~/.bash_completion.d/cs.bash ]] && source ~/.bash_completion.d/cs.bash"
+            warn "   To enable tab completion, add to ~/.bashrc:"
+            warn "     [[ -f ~/.bash_completion.d/cs.bash ]] && source ~/.bash_completion.d/cs.bash"
             echo ""
         fi
         ;;
     zsh)
         if ! grep -q 'fpath.*zsh/completions' "$HOME/.zshrc" 2>/dev/null; then
-            warn "To enable tab completion, add to ~/.zshrc (before compinit):"
-            warn "  fpath=(~/.zsh/completions \$fpath)"
-            warn "  autoload -Uz compinit && compinit"
+            warn "   To enable tab completion, add to ~/.zshrc (before compinit):"
+            warn "     fpath=(~/.zsh/completions \$fpath)"
+            warn "     autoload -Uz compinit && compinit"
             echo ""
         fi
         ;;
 esac
 
-echo -e "${PURPLE}Usage:${NC} cs ${CYAN}<session-name>${NC}"
+echo -e "   ${PURPLE}Usage:${NC} cs ${CYAN}<session-name>${NC}"
 echo ""
-echo -e "${COMMENT}Examples:${NC}"
-echo -e "  ${COMMENT}cs${NC} ${CYAN}debug-api${NC}    ${COMMENT}# Create or resume session${NC}"
-echo -e "  ${COMMENT}cs${NC} ${CYAN}server-fix${NC}   ${COMMENT}# Work on server issues${NC}"
+echo -e "   ${COMMENT}Examples:${NC}"
+echo -e "     ${COMMENT}cs${NC} ${CYAN}debug-api${NC}    ${COMMENT}# Create or resume session${NC}"
+echo -e "     ${COMMENT}cs${NC} ${CYAN}server-fix${NC}   ${COMMENT}# Work on server issues${NC}"
 echo ""
