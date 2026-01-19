@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.01.62"
+VERSION="2026.01.63"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -1061,6 +1061,11 @@ sync_status() {
     local auto_sync
     auto_sync=$(get_sync_config "$session_dir" "auto_sync" "off")
     echo -e "${BOLD}Auto-sync:${NC} $auto_sync"
+
+    local secrets_backend script_dir
+    script_dir="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")"
+    secrets_backend=$(CLAUDE_SESSION_NAME="$session_name" "$script_dir/cs-secrets" backend 2>/dev/null | head -1 | sed 's/Storage backend: //')
+    echo -e "${BOLD}Secrets:${NC} $secrets_backend"
 
     echo ""
 
