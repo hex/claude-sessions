@@ -4,14 +4,14 @@
 
 set -euo pipefail
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-LIGHT_BLUE='\033[1;36m'
-PINK='\033[0;35m'
-GREY='\033[0;90m'
-DIM='\033[2m'
+# Colors - Tokyo Night palette
+RED='\033[38;2;247;118;142m'      # #f7768e
+GREEN='\033[38;2;158;206;106m'    # #9ece6a
+YELLOW='\033[38;2;224;175;104m'   # #e0af68
+BLUE='\033[38;2;122;162;247m'     # #7aa2f7
+CYAN='\033[38;2;125;207;255m'     # #7dcfff
+PURPLE='\033[38;2;187;154;247m'   # #bb9af7
+COMMENT='\033[38;2;86;95;137m'    # #565f89
 NC='\033[0m'
 
 error() {
@@ -25,6 +25,10 @@ info() {
 
 warn() {
     echo -e "${YELLOW}$1${NC}"
+}
+
+installed() {
+    echo -e "   ${COMMENT}Installed${NC} $1 ${COMMENT}→${NC} ${CYAN}$2${NC}"
 }
 
 # Configuration
@@ -82,7 +86,7 @@ fi
 mkdir -p "$INSTALL_DIR"
 
 # Install cs script
-info "Installing cs to $INSTALL_DIR/cs"
+installed "cs" "$INSTALL_DIR/cs"
 
 if [ "$INSTALL_METHOD" = "local" ]; then
     # Install from local clone
@@ -101,7 +105,7 @@ fi
 chmod +x "$INSTALL_DIR/cs"
 
 # Install cs-secrets utility
-info "Installing cs-secrets to $INSTALL_DIR/cs-secrets"
+installed "cs-secrets" "$INSTALL_DIR/cs-secrets"
 
 if [ "$INSTALL_METHOD" = "local" ]; then
     cp "$SCRIPT_DIR/bin/cs-secrets" "$INSTALL_DIR/cs-secrets"
@@ -116,7 +120,7 @@ fi
 chmod +x "$INSTALL_DIR/cs-secrets"
 
 # Install hooks
-info "Installing hooks to $HOOKS_DIR"
+installed "6 hooks" "$HOOKS_DIR/"
 mkdir -p "$HOOKS_DIR"
 
 if [ "$INSTALL_METHOD" = "local" ]; then
@@ -149,7 +153,7 @@ fi
 chmod +x "$HOOKS_DIR"/*.sh
 
 # Install commands
-info "Installing commands to $COMMANDS_DIR"
+installed "commands" "$COMMANDS_DIR/"
 mkdir -p "$COMMANDS_DIR"
 
 if [ "$INSTALL_METHOD" = "local" ]; then
@@ -165,7 +169,7 @@ fi
 # Install skills
 SKILLS_DIR="$HOME/.claude/skills"
 SKILLS_SOURCE="$SCRIPT_DIR/skills"
-info "Installing skills to $SKILLS_DIR"
+installed "skills" "$SKILLS_DIR/"
 mkdir -p "$SKILLS_DIR/store-secret"
 
 if [ "$INSTALL_METHOD" = "local" ]; then
@@ -183,7 +187,7 @@ COMPLETIONS_SOURCE="$SCRIPT_DIR/completions"
 COMPLETION_SETUP_NEEDED=""
 
 # Bash completion
-info "Installing bash completion to $BASH_COMPLETION_DIR"
+installed "completions" "bash, zsh"
 mkdir -p "$BASH_COMPLETION_DIR"
 
 if [ "$INSTALL_METHOD" = "local" ]; then
@@ -197,7 +201,6 @@ else
 fi
 
 # Zsh completion
-info "Installing zsh completion to $ZSH_COMPLETION_DIR"
 mkdir -p "$ZSH_COMPLETION_DIR"
 
 if [ "$INSTALL_METHOD" = "local" ]; then
@@ -211,7 +214,7 @@ else
 fi
 
 # Configure Claude Code settings
-info "Configuring Claude Code hooks"
+installed "hook config" "~/.claude/settings.json"
 
 # Create or merge settings.json
 mkdir -p "$(dirname "$CLAUDE_SETTINGS")"
@@ -333,19 +336,11 @@ if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
     warn ""
 fi
 
-info ""
-info "Installation complete!"
+# Get version for completion message
+CS_VERSION=$(grep -m1 "^VERSION=" "$INSTALL_DIR/cs" 2>/dev/null | cut -d'"' -f2 || echo "unknown")
+
 echo ""
-echo -e "${DIM}┌──────────────────────────────────────────────────────────────┐${NC}"
-echo -e "${DIM}│${NC} ${LIGHT_BLUE}Installed:${NC}"
-echo -e "${DIM}│${NC} ${LIGHT_BLUE}  - cs command to $INSTALL_DIR/cs${NC}"
-echo -e "${DIM}│${NC} ${LIGHT_BLUE}  - cs-secrets command to $INSTALL_DIR/cs-secrets${NC}"
-echo -e "${DIM}│${NC} ${LIGHT_BLUE}  - Session hooks to $HOOKS_DIR/${NC}"
-echo -e "${DIM}│${NC} ${LIGHT_BLUE}  - Slash commands to $COMMANDS_DIR/${NC}"
-echo -e "${DIM}│${NC} ${LIGHT_BLUE}  - Skills to $SKILLS_DIR/${NC}"
-echo -e "${DIM}│${NC} ${LIGHT_BLUE}  - Shell completions to ~/.bash_completion.d/ & ~/.zsh/completions/${NC}"
-echo -e "${DIM}│${NC} ${LIGHT_BLUE}  - Hook configuration in $CLAUDE_SETTINGS${NC}"
-echo -e "${DIM}└──────────────────────────────────────────────────────────────┘${NC}"
+echo -e "   ${GREEN}✓${NC} ${BLUE}Installation complete${NC} ${COMMENT}(${CS_VERSION})${NC}"
 echo ""
 
 # Check if completion setup is needed
@@ -368,9 +363,9 @@ case "$SHELL_NAME" in
         ;;
 esac
 
-echo -e "${PINK}Usage: cs <session-name>${NC}"
+echo -e "${PURPLE}Usage:${NC} cs ${CYAN}<session-name>${NC}"
 echo ""
-echo -e "${GREY}Examples:${NC}"
-echo -e "${GREY}  cs debug-api    # Create or resume 'debug-api' session${NC}"
-echo -e "${GREY}  cs server-fix   # Create or resume 'server-fix' session${NC}"
+echo -e "${COMMENT}Examples:${NC}"
+echo -e "  ${COMMENT}cs${NC} ${CYAN}debug-api${NC}    ${COMMENT}# Create or resume session${NC}"
+echo -e "  ${COMMENT}cs${NC} ${CYAN}server-fix${NC}   ${COMMENT}# Work on server issues${NC}"
 echo ""
