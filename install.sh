@@ -31,6 +31,14 @@ installed() {
     echo -e "   ${COMMENT}Installed${NC} $1 ${COMMENT}→${NC} ${CYAN}$2${NC}"
 }
 
+show_banner() {
+    echo ""
+    echo -e "   ${PURPLE}╭───────────────────────╮${NC}"
+    echo -e "   ${PURPLE}│${NC}    ${PURPLE}c${BLUE}laude${NC}-${CYAN}sessions${NC}    ${CYAN}│${NC}"
+    echo -e "   ${CYAN}╰───────────────────────╯${NC}"
+    echo ""
+}
+
 # Configuration
 INSTALL_DIR="${HOME}/.local/bin"
 HOOKS_DIR="${HOME}/.claude/hooks"
@@ -81,6 +89,9 @@ if ! command -v claude >/dev/null 2>&1; then
     warn "Visit: https://github.com/anthropics/claude-code"
     echo ""
 fi
+
+# Show banner
+show_banner
 
 # Create install directory if needed
 mkdir -p "$INSTALL_DIR"
