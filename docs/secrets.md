@@ -4,13 +4,33 @@ Sensitive data is automatically detected and stored securely instead of being wr
 
 ## Storage Backends
 
-The `cs -secrets` command auto-detects the best available backend:
+The `cs -secrets` command auto-detects the best available backend (in priority order):
 
-| Platform | Backend | Storage Location |
-|----------|---------|------------------|
-| macOS | Keychain | Login keychain |
-| Windows | Credential Manager | Windows Credential Store (requires PowerShell SecretManagement) |
-| Linux/Other | Encrypted file | `~/.cs-secrets/<session>.enc` |
+| Priority | Backend | Storage Location | Cross-Machine Sync |
+|----------|---------|------------------|-------------------|
+| 1 | Bitwarden Secrets Manager | Bitwarden cloud (project per session) | Yes |
+| 2 | macOS Keychain | Login keychain | No |
+| 3 | Windows Credential Manager | Windows Credential Store | No |
+| 4 | Encrypted file | `~/.cs-secrets/<session>.enc` | Manual |
+
+**Bitwarden Secrets Manager Setup:**
+
+Bitwarden Secrets Manager provides cross-machine synchronization via Bitwarden's cloud. Each cs session gets its own Bitwarden project (e.g., session `aws-api` maps to project `cs-aws-api`).
+
+Prerequisites:
+- `bws` CLI installed: https://bitwarden.com/help/secrets-manager-cli/
+- `jq` installed for JSON parsing
+- Access token configured via `bws config`
+
+```bash
+# Install bws (macOS)
+brew install bitwarden/tap/bws
+
+# Configure your access token
+bws config
+```
+
+Once configured, Bitwarden becomes the default backend automatically. Override with `CS_SECRETS_BACKEND=keychain` if needed.
 
 **Windows Setup:**
 
@@ -115,4 +135,5 @@ The migrate command:
 ## Environment Variables
 
 - `CLAUDE_SESSION_NAME` - Current session (set automatically by `cs`)
+- `CS_SECRETS_BACKEND` - Force a specific backend (`bitwarden`, `keychain`, `credential`, `encrypted`)
 - `CS_SECRETS_PASSWORD` - Optional master password for encrypted backend (overrides auto-derived key)
