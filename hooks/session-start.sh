@@ -86,13 +86,28 @@ export CLAUDE_ARTIFACT_DIR="$ARTIFACT_DIR"
 EOF
 fi
 
+# Check for unmigrated keychain secrets (when bitwarden is the backend)
+KEYCHAIN_NOTICE=""
+if command -v bws >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+    if bws project list -o none >/dev/null 2>&1; then
+        # Bitwarden is configured - check if keychain has secrets for this session
+        KEYCHAIN_SECRETS=$( (security dump-keychain 2>/dev/null | grep -o "\"svce\"<blob>=\"cs:${CLAUDE_SESSION_NAME}:[^\"]*\"" || true) | wc -l | tr -d ' ')
+        if [ "$KEYCHAIN_SECRETS" -gt 0 ]; then
+            KEYCHAIN_NOTICE="
+NOTE: $KEYCHAIN_SECRETS secret(s) found in macOS Keychain that could be migrated to Bitwarden.
+Run: cs -secrets migrate-backend bitwarden --delete-source
+"
+        fi
+    fi
+fi
+
 # Provide context to Claude about the session
 CONTEXT=$(cat << EOF
 You are working in a managed Claude Code session: $CLAUDE_SESSION_NAME
 
 Session directory: $CLAUDE_SESSION_DIR
 Artifacts directory: $CLAUDE_ARTIFACT_DIR
-
+${KEYCHAIN_NOTICE}
 This session has:
 - Automatic artifact tracking for scripts and configs
 - Documentation templates in markdown files
