@@ -114,6 +114,38 @@ eval "$(cs -secrets export)"
 cs -secrets --session my-session list
 ```
 
+## Syncing Secrets Across Machines
+
+Secrets can be exported to an encrypted file for git sync:
+
+```bash
+# Export secrets to encrypted file (requires CS_SECRETS_PASSWORD)
+cs -secrets export-file
+
+# Import secrets from encrypted file
+cs -secrets import-file
+
+# Import and overwrite existing secrets
+cs -secrets import-file --replace
+```
+
+The encrypted file (`secrets.enc`) is automatically included in git sync. See [Sync](sync.md) for details.
+
+## Migrating Between Backends
+
+Move secrets from one storage backend to another:
+
+```bash
+# Migrate from current backend to bitwarden
+cs -secrets migrate-backend bitwarden
+
+# Migrate from keychain to bitwarden (when bitwarden is already active)
+cs -secrets migrate-backend bitwarden --from keychain
+
+# Migrate and delete from source after successful migration
+cs -secrets migrate-backend bitwarden --from keychain --delete-source
+```
+
 ## Migrating Existing Secrets
 
 If you have sessions created before the secrets feature was added, plaintext secrets may exist in artifact files. Use the migrate command to move them to secure storage:

@@ -95,7 +95,7 @@ if command -v bws >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
         if [ "$KEYCHAIN_SECRETS" -gt 0 ]; then
             KEYCHAIN_NOTICE="
 NOTE: $KEYCHAIN_SECRETS secret(s) found in macOS Keychain that could be migrated to Bitwarden.
-Run: cs -secrets migrate-backend bitwarden --delete-source
+Run: cs -secrets migrate-backend bitwarden --from keychain --delete-source
 "
         fi
     fi
