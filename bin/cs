@@ -623,47 +623,6 @@ launch_claude_code() {
         echo -e "${GREEN}▌${NC} ${DIM}⚿${NC} ${YELLOW}${BOLD}$secret_count${NC} ${DIM}$secret_word${NC}"
     fi
 
-    # Check for unmigrated keychain secrets (when bitwarden is the backend)
-    if command -v bws >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
-        if bws project list -o none >/dev/null 2>&1; then
-            local keychain_secrets
-            keychain_secrets=$( (security dump-keychain 2>/dev/null | grep -c "\"svce\"<blob>=\"cs:${session_name}:" || true) )
-            if [ "$keychain_secrets" -gt 0 ]; then
-                local migration_offered_file="$HOME/.cs-secrets/.migration-prompted"
-                local already_prompted=false
-
-                # Check if we've already prompted for this session
-                if [ -f "$migration_offered_file" ] && grep -qxF "$session_name" "$migration_offered_file" 2>/dev/null; then
-                    already_prompted=true
-                fi
-
-                echo -e "${YELLOW}▌${NC} ${YELLOW}$keychain_secrets secret(s) in Keychain can be migrated to Bitwarden${NC}"
-
-                if [ "$already_prompted" = false ]; then
-                    # First time - prompt user
-                    echo ""
-                    printf "${YELLOW}Migrate secrets to Bitwarden now?${NC} [y/N] "
-                    read -r migrate_answer
-
-                    # Mark as prompted regardless of answer
-                    mkdir -p "$HOME/.cs-secrets"
-                    echo "$session_name" >> "$migration_offered_file"
-
-                    if [[ "$migrate_answer" =~ ^[Yy]$ ]]; then
-                        echo ""
-                        cs-secrets --session "$session_name" migrate-backend bitwarden --from keychain --delete-source
-                        echo ""
-                    else
-                        echo -e "${DIM}Run later: cs -secrets migrate-backend bitwarden --from keychain --delete-source${NC}"
-                    fi
-                else
-                    # Already prompted - just show hint
-                    echo -e "${YELLOW}▌${NC} ${DIM}Run: cs -secrets migrate-backend bitwarden --from keychain --delete-source${NC}"
-                fi
-            fi
-        fi
-    fi
-
     if [ -n "$UPDATE_AVAILABLE" ]; then
         echo -e "${YELLOW}▌${NC} ${YELLOW}Update available: $VERSION -> $UPDATE_AVAILABLE${NC} ${DIM}(cs -update)${NC}"
     fi

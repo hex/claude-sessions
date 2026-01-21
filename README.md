@@ -27,7 +27,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 
 - **Isolated session workspaces** - Each session has its own directory with structured documentation
 - **Automatic artifact tracking** - Scripts and configs are auto-saved to `artifacts/`
-- **Secure secrets handling** - Sensitive data auto-detected and stored in [Bitwarden Secrets Manager](https://bitwarden.com/products/secrets-manager/), OS keychain, or encrypted files
+- **Secure secrets handling** - Sensitive data auto-detected and stored in OS keychain or encrypted files
 - **Documentation templates** - Pre-configured markdown files for discoveries and changes
 - **Automatic git version control** - Every session gets local git history with auto-commits on discoveries and session end; optionally sync to remote
 - **Update notifications** - Checks for updates and notifies when new versions are available
