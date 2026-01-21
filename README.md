@@ -27,7 +27,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 
 - **Isolated session workspaces** - Each session has its own directory with structured documentation
 - **Automatic artifact tracking** - Scripts and configs are auto-saved to `artifacts/`
-- **Secure secrets handling** - Sensitive data auto-detected and stored in OS keychain or encrypted files
+- **Secure secrets handling** - Sensitive data auto-detected and stored in OS keychain; sync across machines with [age](https://github.com/FiloSottile/age) public-key encryption
 - **Documentation templates** - Pre-configured markdown files for discoveries and changes
 - **Automatic git version control** - Every session gets local git history with auto-commits on discoveries and session end; optionally sync to remote
 - **Update notifications** - Checks for updates and notifies when new versions are available
@@ -109,7 +109,7 @@ export CS_SESSIONS_ROOT="/path/to/sessions"
 # Git sync prefix for shorter commands
 export CS_SYNC_PREFIX="git@github.com:youruser/"
 
-# Master password for cross-machine secrets sync
+# Legacy password for secrets sync (age encryption preferred - see docs/secrets.md)
 export CS_SECRETS_PASSWORD="your-secure-password"
 
 # Override Claude Code binary (default: claude)

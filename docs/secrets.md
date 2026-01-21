@@ -96,10 +96,57 @@ cs -secrets --session my-session list
 
 ## Syncing Secrets Across Machines
 
-Secrets can be exported to an encrypted file for git sync:
+There are two ways to sync secrets: **age encryption** (recommended) or **password-based encryption** (legacy).
+
+### Age Encryption (Recommended)
+
+[age](https://github.com/FiloSottile/age) provides modern public-key encryption - no shared password needed:
 
 ```bash
-# Export secrets to encrypted file (requires CS_SECRETS_PASSWORD)
+# Initialize age (auto-downloads if needed)
+cs -secrets age init
+
+# Show your public key (share this with collaborators)
+cs -secrets age pubkey
+
+# Export secrets (auto-configures age on first use)
+cs -secrets export-file
+
+# Import on another machine (after adding your pubkey as recipient)
+cs -secrets import-file
+```
+
+**Adding collaborators:**
+
+```bash
+# Add a collaborator's public key
+cs -secrets age add colleague.pub
+
+# Or add a raw key directly
+cs -secrets age add age1abc123...
+
+# List who can decrypt
+cs -secrets age list
+
+# Revoke access (re-export to re-encrypt without them)
+cs -secrets age remove colleague
+```
+
+**How it works:**
+- Each machine has a keypair stored in `~/.cs-secrets/age.key`
+- Session recipients are stored in `<session>/age-recipients/*.pub`
+- Secrets are encrypted to all recipients' public keys
+- Anyone with their private key + being in recipients can decrypt
+
+### Password-Based Encryption (Legacy)
+
+For simpler setups or when age isn't available:
+
+```bash
+# Set the same password on all machines
+export CS_SECRETS_PASSWORD="your-secure-password"
+
+# Export secrets to encrypted file
 cs -secrets export-file
 
 # Import secrets from encrypted file
@@ -109,7 +156,11 @@ cs -secrets import-file
 cs -secrets import-file --replace
 ```
 
-The encrypted file (`secrets.enc`) is automatically included in git sync. See [Sync](sync.md) for details.
+**Sync files:**
+- `secrets.age` - age-encrypted (preferred when recipients configured)
+- `secrets.enc` - password-encrypted (legacy, requires `CS_SECRETS_PASSWORD`)
+
+Both files are automatically included in git sync. See [Sync](sync.md) for details.
 
 ## Migrating Between Backends
 
@@ -144,8 +195,27 @@ The migrate command:
 3. Stores values securely in the keychain
 4. Optionally replaces plaintext with `[REDACTED: stored in keychain as KEY]`
 
+## Age Commands Reference
+
+```bash
+# Initialize keypair (auto-downloads age binary if needed)
+cs -secrets age init
+
+# Print your public key for sharing
+cs -secrets age pubkey
+
+# Add recipient to current session
+cs -secrets age add <file.pub|age1...>
+
+# List recipients who can decrypt session secrets
+cs -secrets age list
+
+# Remove a recipient (re-export to apply)
+cs -secrets age remove <name>
+```
+
 ## Environment Variables
 
 - `CLAUDE_SESSION_NAME` - Current session (set automatically by `cs`)
 - `CS_SECRETS_BACKEND` - Force a specific backend (`keychain`, `credential`, `encrypted`)
-- `CS_SECRETS_PASSWORD` - Optional master password for encrypted backend (overrides auto-derived key)
+- `CS_SECRETS_PASSWORD` - Master password for legacy sync (only needed if not using age)
