@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.01.71"
+VERSION="2026.1.72"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -622,6 +622,19 @@ launch_claude_code() {
         [ "$secret_count" -gt 1 ] && secret_word="secrets"
         echo -e "${GREEN}▌${NC} ${DIM}⚿${NC} ${YELLOW}${BOLD}$secret_count${NC} ${DIM}$secret_word${NC}"
     fi
+
+    # Check for unmigrated keychain secrets (when bitwarden is the backend)
+    if command -v bws >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+        if bws project list -o none >/dev/null 2>&1; then
+            local keychain_secrets
+            keychain_secrets=$( (security dump-keychain 2>/dev/null | grep -c "\"svce\"<blob>=\"cs:${session_name}:" || true) )
+            if [ "$keychain_secrets" -gt 0 ]; then
+                echo -e "${YELLOW}▌${NC} ${YELLOW}$keychain_secrets secret(s) in Keychain can be migrated to Bitwarden${NC}"
+                echo -e "${YELLOW}▌${NC} ${DIM}Run: cs -secrets migrate-backend bitwarden --from keychain --delete-source${NC}"
+            fi
+        fi
+    fi
+
     if [ -n "$UPDATE_AVAILABLE" ]; then
         echo -e "${YELLOW}▌${NC} ${YELLOW}Update available: $VERSION -> $UPDATE_AVAILABLE${NC} ${DIM}(cs -update)${NC}"
     fi
