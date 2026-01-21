@@ -67,6 +67,8 @@ cs -list                    # List all sessions
 cs -remove <name>           # Remove a session
 cs -update                  # Update to latest version
 cs -uninstall               # Uninstall cs
+cs -help                    # Show help message
+cs -version                 # Show version
 ```
 
 ### Session Commands
@@ -109,7 +111,12 @@ export CS_SYNC_PREFIX="git@github.com:youruser/"
 
 # Master password for cross-machine secrets sync
 export CS_SECRETS_PASSWORD="your-secure-password"
+
+# Override Claude Code binary (default: claude)
+export CLAUDE_CODE_BIN="claude"
 ```
+
+The `CLAUDE_SESSION_NAME` environment variable is set automatically when you start a session and can be used by scripts and hooks to identify the current session.
 
 ## Shell Completion
 
