@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.1.75"
+VERSION="2026.1.76"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -1020,13 +1020,33 @@ sync_pull() {
         fi
     fi
 
-    # Import secrets from encrypted file if it exists and password is set
-    local secrets_file="$session_dir/secrets.enc"
-    if [ -f "$secrets_file" ] && [ -n "${CS_SECRETS_PASSWORD:-}" ]; then
-        local secrets_script
-        if secrets_script=$(find_secrets_script); then
-            if "$secrets_script" --session "$session_name" import-file 2>/dev/null; then
-                info "Imported secrets from secrets.enc"
+    # Import secrets from sync file (prefer age over enc)
+    local secrets_script
+    if secrets_script=$(find_secrets_script); then
+        local age_file="$session_dir/secrets.age"
+        local enc_file="$session_dir/secrets.enc"
+
+        if [ -f "$age_file" ]; then
+            # Prefer age-encrypted file
+            if "$secrets_script" --session "$session_name" import-file "$age_file" 2>/dev/null; then
+                info "Imported secrets from secrets.age"
+            else
+                warn "Failed to import secrets.age - your key may not be in recipients list"
+            fi
+        elif [ -f "$enc_file" ]; then
+            # Legacy password-encrypted file
+            if [ -n "${CS_SECRETS_PASSWORD:-}" ]; then
+                if "$secrets_script" --session "$session_name" import-file "$enc_file" 2>/dev/null; then
+                    info "Imported secrets from secrets.enc"
+                    # Offer migration to age if available
+                    if "$secrets_script" age init >/dev/null 2>&1; then
+                        echo ""
+                        info "Tip: Migrate to age encryption for easier sync (no shared password needed)"
+                        echo "  Run: cs $session_name -secrets export-file"
+                    fi
+                fi
+            else
+                warn "secrets.enc found but CS_SECRETS_PASSWORD not set"
             fi
         fi
     fi
