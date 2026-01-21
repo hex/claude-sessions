@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.1.72"
+VERSION="2026.1.73"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -629,8 +629,37 @@ launch_claude_code() {
             local keychain_secrets
             keychain_secrets=$( (security dump-keychain 2>/dev/null | grep -c "\"svce\"<blob>=\"cs:${session_name}:" || true) )
             if [ "$keychain_secrets" -gt 0 ]; then
+                local migration_offered_file="$HOME/.cs-secrets/.migration-prompted"
+                local already_prompted=false
+
+                # Check if we've already prompted for this session
+                if [ -f "$migration_offered_file" ] && grep -qxF "$session_name" "$migration_offered_file" 2>/dev/null; then
+                    already_prompted=true
+                fi
+
                 echo -e "${YELLOW}▌${NC} ${YELLOW}$keychain_secrets secret(s) in Keychain can be migrated to Bitwarden${NC}"
-                echo -e "${YELLOW}▌${NC} ${DIM}Run: cs -secrets migrate-backend bitwarden --from keychain --delete-source${NC}"
+
+                if [ "$already_prompted" = false ]; then
+                    # First time - prompt user
+                    echo ""
+                    printf "${YELLOW}Migrate secrets to Bitwarden now?${NC} [y/N] "
+                    read -r migrate_answer
+
+                    # Mark as prompted regardless of answer
+                    mkdir -p "$HOME/.cs-secrets"
+                    echo "$session_name" >> "$migration_offered_file"
+
+                    if [[ "$migrate_answer" =~ ^[Yy]$ ]]; then
+                        echo ""
+                        cs-secrets --session "$session_name" migrate-backend bitwarden --from keychain --delete-source
+                        echo ""
+                    else
+                        echo -e "${DIM}Run later: cs -secrets migrate-backend bitwarden --from keychain --delete-source${NC}"
+                    fi
+                else
+                    # Already prompted - just show hint
+                    echo -e "${YELLOW}▌${NC} ${DIM}Run: cs -secrets migrate-backend bitwarden --from keychain --delete-source${NC}"
+                fi
             fi
         fi
     fi
