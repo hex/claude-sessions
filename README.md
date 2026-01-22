@@ -63,12 +63,12 @@ The installer:
 
 ```bash
 cs <session-name>           # Create or resume a session
-cs -list                    # List all sessions
-cs -remove <name>           # Remove a session
+cs -list, -ls               # List all sessions
+cs -remove, -rm <name>      # Remove a session
 cs -update                  # Update to latest version
 cs -uninstall               # Uninstall cs
-cs -help                    # Show help message
-cs -version                 # Show version
+cs -help, -h                # Show help message
+cs -version, -v             # Show version
 ```
 
 ### Session Commands
