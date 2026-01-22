@@ -4,14 +4,14 @@
 
 set -euo pipefail
 
-# Colors - Tokyo Night palette
-RED='\033[38;2;247;118;142m'      # #f7768e
-GREEN='\033[38;2;158;206;106m'    # #9ece6a
-YELLOW='\033[38;2;224;175;104m'   # #e0af68
-BLUE='\033[38;2;122;162;247m'     # #7aa2f7
-CYAN='\033[38;2;125;207;255m'     # #7dcfff
-PURPLE='\033[38;2;187;154;247m'   # #bb9af7
-COMMENT='\033[38;2;86;95;137m'    # #565f89
+# Colors - Claude warm palette (rust → orange → gold)
+RED='\033[38;2;239;83;80m'        # #ef5350 - warm red
+GREEN='\033[38;2;139;195;74m'     # #8bc34a - vibrant green
+YELLOW='\033[38;2;255;183;77m'    # #ffb74d - warm amber
+ORANGE='\033[38;2;255;138;101m'   # #ff8a65 - coral orange
+GOLD='\033[38;2;255;193;7m'       # #ffc107 - golden
+RUST='\033[38;2;230;74;25m'       # #e64a19 - terracotta
+COMMENT='\033[38;2;161;136;127m'  # #a1887f - warm taupe
 NC='\033[0m'
 
 error() {
@@ -28,16 +28,16 @@ warn() {
 }
 
 installed() {
-    echo -e "   ${COMMENT}Installed${NC} $1 ${COMMENT}→${NC} ${CYAN}$2${NC}"
+    echo -e "   ${COMMENT}Installed${NC} $1 ${COMMENT}→${NC} ${GOLD}$2${NC}"
 }
 
 show_banner() {
-    # Smooth gradient: purple (#bb9af7) → cyan (#7dcfff)
-    local GT='\033[38;2;187;154;247mc\033[38;2;179;157;249ml\033[38;2;171;161;251ma\033[38;2;163;165;253mu\033[38;2;155;169;255md\033[38;2;147;177;255me\033[38;2;139;185;255m-\033[38;2;131;193;255ms\033[38;2;128;197;255me\033[38;2;126;201;255ms\033[38;2;125;203;255ms\033[38;2;125;205;255mi\033[38;2;125;206;255mo\033[38;2;125;207;255mn\033[38;2;125;207;255ms'
+    # Smooth gradient: rust (#e64a19) → gold (#ffc107)
+    local GT='\033[38;2;230;74;25mc\033[38;2;232;83;24ml\033[38;2;234;91;22ma\033[38;2;235;100;21mu\033[38;2;237;108;20md\033[38;2;239;117;19me\033[38;2;241;125;17m-\033[38;2;243;134;16ms\033[38;2;245;142;15me\033[38;2;246;151;14ms\033[38;2;248;159;12ms\033[38;2;250;168;11mi\033[38;2;252;176;10mo\033[38;2;254;185;9mn\033[38;2;255;193;7ms'
     echo ""
-    echo -e "   ${PURPLE}╭───────────────────────╮${NC}"
-    echo -e "   ${PURPLE}│${NC}    ${GT}${NC}    ${CYAN}│${NC}"
-    echo -e "   ${CYAN}╰───────────────────────╯${NC}"
+    echo -e "   ${RUST}╭───────────────────────╮${NC}"
+    echo -e "   ${RUST}│${NC}    ${GT}${NC}    ${GOLD}│${NC}"
+    echo -e "   ${GOLD}╰───────────────────────╯${NC}"
     echo ""
 }
 
@@ -353,7 +353,7 @@ fi
 CS_VERSION=$(grep -m1 "^VERSION=" "$INSTALL_DIR/cs" 2>/dev/null | cut -d'"' -f2 || echo "unknown")
 
 echo ""
-echo -e "   ${GREEN}✓${NC} ${BLUE}Installation complete${NC} ${COMMENT}(${CS_VERSION})${NC}"
+echo -e "   ${GREEN}✓${NC} ${ORANGE}Installation complete${NC} ${COMMENT}(${CS_VERSION})${NC}"
 echo ""
 
 # Check if completion setup is needed
@@ -376,9 +376,9 @@ case "$SHELL_NAME" in
         ;;
 esac
 
-echo -e "   ${PURPLE}Usage:${NC} cs ${CYAN}<session-name>${NC}"
+echo -e "   ${RUST}Usage:${NC} cs ${GOLD}<session-name>${NC}"
 echo ""
 echo -e "   ${COMMENT}Examples:${NC}"
-echo -e "     ${COMMENT}cs${NC} ${CYAN}debug-api${NC}    ${COMMENT}# Create or resume session${NC}"
-echo -e "     ${COMMENT}cs${NC} ${CYAN}server-fix${NC}   ${COMMENT}# Work on server issues${NC}"
+echo -e "     ${COMMENT}cs${NC} ${GOLD}debug-api${NC}    ${COMMENT}# Create or resume session${NC}"
+echo -e "     ${COMMENT}cs${NC} ${GOLD}server-fix${NC}   ${COMMENT}# Work on server issues${NC}"
 echo ""

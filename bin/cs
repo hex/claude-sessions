@@ -11,15 +11,15 @@ CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
 RAW_URL="https://raw.githubusercontent.com/hex/claude-sessions/main"
 
-# Colors - Tokyo Night palette
-RED='\033[38;2;247;118;142m'      # #f7768e
-GREEN='\033[38;2;158;206;106m'    # #9ece6a
-YELLOW='\033[38;2;224;175;104m'   # #e0af68
-BLUE='\033[38;2;122;162;247m'     # #7aa2f7
-CYAN='\033[38;2;125;207;255m'     # #7dcfff
-PURPLE='\033[38;2;187;154;247m'   # #bb9af7
-COMMENT='\033[38;2;86;95;137m'    # #565f89
-WHITE='\033[38;2;169;177;214m'    # #a9b1d6 (foreground)
+# Colors - Claude warm palette (rust → orange → gold)
+RED='\033[38;2;239;83;80m'        # #ef5350 - warm red
+GREEN='\033[38;2;139;195;74m'     # #8bc34a - vibrant green
+YELLOW='\033[38;2;255;183;77m'    # #ffb74d - warm amber
+ORANGE='\033[38;2;255;138;101m'   # #ff8a65 - coral orange
+GOLD='\033[38;2;255;193;7m'       # #ffc107 - golden
+RUST='\033[38;2;230;74;25m'       # #e64a19 - terracotta
+COMMENT='\033[38;2;161;136;127m'  # #a1887f - warm taupe
+WHITE='\033[38;2;245;230;211m'    # #f5e6d3 - warm cream
 DIM='\033[2m'
 BOLD='\033[1m'
 NC='\033[0m'
@@ -169,7 +169,7 @@ do_update() {
     fi
 
     echo ""
-    echo -e "   ${COMMENT}Updating${NC} cs ${COMMENT}from${NC} ${PURPLE}$VERSION${NC} ${COMMENT}→${NC} ${GREEN}$remote_version${NC}"
+    echo -e "   ${COMMENT}Updating${NC} cs ${COMMENT}from${NC} ${RUST}$VERSION${NC} ${COMMENT}→${NC} ${GREEN}$remote_version${NC}"
     echo ""
 
     # Download and run install.sh (with cache busting)
@@ -603,27 +603,27 @@ launch_claude_code() {
         local remote_url
         remote_url=$(cd "$session_dir" && git remote get-url origin 2>/dev/null || echo "")
         if [ -n "$remote_url" ]; then
-            remote_display="${CYAN}⇄${NC} ${DIM}$remote_url${NC}"
+            remote_display="${GOLD}⇄${NC} ${DIM}$remote_url${NC}"
         else
-            remote_display="${CYAN}⌂${NC} ${DIM}local-only${NC}"
+            remote_display="${GOLD}⌂${NC} ${DIM}local-only${NC}"
         fi
     fi
 
-    # Display banner with gradient bar (purple → cyan)
+    # Display banner with gradient bar (rust → gold)
     # Gradient colors for left bar
-    local BAR1='\033[38;2;187;154;247m▌'  # purple
-    local BAR2='\033[38;2;171;167;249m▌'
-    local BAR3='\033[38;2;156;180;251m▌'
-    local BAR4='\033[38;2;140;194;253m▌'
-    local BAR5='\033[38;2;125;207;255m▌'  # cyan
+    local BAR1='\033[38;2;230;74;25m▌'    # rust #e64a19
+    local BAR2='\033[38;2;245;124;0m▌'    # dark orange #f57c00
+    local BAR3='\033[38;2;255;152;0m▌'    # orange #ff9800
+    local BAR4='\033[38;2;255;179;0m▌'    # amber #ffb300
+    local BAR5='\033[38;2;255;193;7m▌'    # gold #ffc107
 
     local bar_idx=0
     local bars=("$BAR1" "$BAR2" "$BAR3" "$BAR4" "$BAR5")
 
     echo ""
-    echo -e "${bars[$bar_idx]}${NC} ${BLUE}cs${NC} ${GREEN}$VERSION${NC}"; ((bar_idx++))
+    echo -e "${bars[$bar_idx]}${NC} ${ORANGE}cs${NC} ${GREEN}$VERSION${NC}"; ((bar_idx++))
     echo -e "${bars[$bar_idx]}${NC} ${WHITE}${BOLD}$session_name${NC} ${COMMENT}($status_icon $status_text)${NC}"; ((bar_idx++))
-    echo -e "${bars[$bar_idx]}${NC} ${CYAN}$session_dir${NC}"; ((bar_idx++))
+    echo -e "${bars[$bar_idx]}${NC} ${GOLD}$session_dir${NC}"; ((bar_idx++))
     if [ -n "$remote_display" ]; then
         echo -e "${bars[$bar_idx]}${NC} $remote_display"; ((bar_idx++))
     fi
@@ -1118,7 +1118,7 @@ sync_status() {
         # Local-only mode
         local total_commits
         total_commits=$(git rev-list --count HEAD 2>/dev/null || echo "0")
-        echo -e "${CYAN}Local-only repository ($total_commits commit(s))${NC}"
+        echo -e "${GOLD}Local-only repository ($total_commits commit(s))${NC}"
         echo ""
         info "To add a remote, run: cs $session_name -sync remote <url>"
     else
@@ -1136,10 +1136,10 @@ sync_status() {
             behind=$(git rev-list --count 'HEAD..@{upstream}' 2>/dev/null || echo "0")
 
             if [ "$ahead" -gt 0 ]; then
-                echo -e "${CYAN}$ahead commit(s) ahead of remote${NC}"
+                echo -e "${GOLD}$ahead commit(s) ahead of remote${NC}"
             fi
             if [ "$behind" -gt 0 ]; then
-                echo -e "${CYAN}$behind commit(s) behind remote${NC}"
+                echo -e "${GOLD}$behind commit(s) behind remote${NC}"
             fi
             if [ "$ahead" -eq 0 ] && [ "$behind" -eq 0 ]; then
                 echo -e "${GREEN}Up to date with remote${NC}"
