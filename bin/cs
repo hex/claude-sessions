@@ -537,7 +537,32 @@ list_sessions() {
             modified=$(get_file_mtime "$session_dir/logs/session.log")
         fi
 
-        printf "${GOLD}%-${max_len}s${NC}  ${COMMENT}%-16s  %s${NC}\n" "$session" "$created" "$modified"
+        # Count secrets for this session
+        local secret_count=0
+        if command -v cs-secrets >/dev/null 2>&1; then
+            secret_count=$(cs-secrets --session "$session" list 2>/dev/null | grep -c "^  - " 2>/dev/null) || secret_count=0
+            [[ "$secret_count" =~ ^[0-9]+$ ]] || secret_count=0
+        fi
+
+        # Build secret indicator (accounts for display width in padding)
+        local secret_indicator=""
+        local indicator_len=0
+        if [ "$secret_count" -gt 0 ]; then
+            secret_indicator=" (⚿ ${secret_count})"
+            indicator_len=${#secret_indicator}
+        fi
+
+        # Calculate padding (max_len - session length - indicator length)
+        local pad_len=$((max_len - ${#session} - indicator_len))
+        [ $pad_len -lt 0 ] && pad_len=0
+        local padding=$(printf '%*s' "$pad_len" '')
+
+        # Print with proper alignment
+        if [ "$secret_count" -gt 0 ]; then
+            printf "${GOLD}%s${NC}${COMMENT}%s${NC}%s  ${COMMENT}%-16s  %s${NC}\n" "$session" "$secret_indicator" "$padding" "$created" "$modified"
+        else
+            printf "${GOLD}%s${NC}%s  ${COMMENT}%-16s  %s${NC}\n" "$session" "$padding" "$created" "$modified"
+        fi
     done
 }
 
