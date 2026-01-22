@@ -35,65 +35,63 @@ info() {
 }
 
 show_help() {
-    cat <<EOF
-cs $VERSION - Claude Code session manager
-
-Usage: cs <session-name>              Create or resume a session
-       cs <session-name> -sync <cmd>  Run sync command on session
-       cs <session-name> -secrets <cmd>  Run secrets command on session
-       cs -<command>                  Run a global subcommand
-
-Commands:
-  <name>              Create or resume session <name>
-  <name> -sync <cmd>  Run sync command on <name> without launching session
-  <name> -secrets <cmd>  Run secrets command on <name> without launching session
-  -list, -ls          List all sessions
-  -remove, -rm <name> Remove a session
-  -sync, -s <cmd>     Sync current session (requires CLAUDE_SESSION_NAME)
-  -secrets <cmd>      Manage current session secrets (requires CLAUDE_SESSION_NAME)
-  -update             Update cs to latest version
-    --check, -c       Check for updates without installing
-    --force, -f       Force reinstall even if up to date
-  -uninstall          Uninstall cs and all components
-  -help, -h           Show this help message
-  -version, -v        Show version
-
-Secrets Commands:
-  set, store <name>   Store a secret (prompts if value not provided)
-  get <name>          Retrieve a secret value
-  list, ls            List all secrets for session
-  delete, rm <name>   Delete a secret
-  purge               Delete ALL secrets for session
-  export              Export secrets as environment variables
-  backend             Show which storage backend is active
-
-Sync Commands:
-  remote [url]        Add remote to git repo (uses CS_SYNC_PREFIX if URL not provided)
-  push                Commit changes (pushes to remote if configured)
-  pull                Pull changes from remote (skips if local-only)
-  status, st          Show sync status
-  auto [on|off]       Toggle/show auto-sync setting
-  clone <session|url> [name]  Clone session from remote (uses CS_SYNC_PREFIX if session name)
-
-Environment:
-  CS_SESSIONS_ROOT      Override sessions directory (default: ~/.claude-sessions)
-  CLAUDE_CODE_BIN       Override claude binary name (default: claude)
-  CLAUDE_SESSION_NAME   Current session name (set automatically)
-  CS_SECRETS_PASSWORD   Master password for encrypted secrets backend
-  CS_SYNC_PREFIX        Git remote prefix (e.g., git@github.com:user/)
-
-Examples:
-  cs debug-api                      Create or resume 'debug-api' session (git + auto-sync)
-  cs my-session -sync push          Commit changes manually during session
-  cs my-session -sync remote <url>  Add remote to existing local repo
-  cs my-session -sync auto off      Disable auto-commit (on by default)
-  cs -sync clone other-session    Clone session (uses CS_SYNC_PREFIX)
-  cs my-session -secrets list     List secrets for 'my-session'
-  cs -list                        List all sessions
-  cs -rm old-session              Remove 'old-session'
-
-Sessions are stored in: $SESSIONS_ROOT
-EOF
+    echo -e "${ORANGE}cs${NC} ${GREEN}$VERSION${NC} - Claude Code session manager"
+    echo ""
+    echo -e "${RUST}Usage:${NC} cs ${GOLD}<session-name>${NC}              Create or resume a session"
+    echo -e "       cs ${GOLD}<session-name>${NC} ${ORANGE}-sync${NC} ${GOLD}<cmd>${NC}  Run sync command on session"
+    echo -e "       cs ${GOLD}<session-name>${NC} ${ORANGE}-secrets${NC} ${GOLD}<cmd>${NC}  Run secrets command on session"
+    echo -e "       cs ${ORANGE}-<command>${NC}                  Run a global subcommand"
+    echo ""
+    echo -e "${RUST}Commands:${NC}"
+    echo -e "  ${GOLD}<name>${NC}              Create or resume session ${GOLD}<name>${NC}"
+    echo -e "  ${GOLD}<name>${NC} ${ORANGE}-sync${NC} ${GOLD}<cmd>${NC}  Run sync command on ${GOLD}<name>${NC} without launching session"
+    echo -e "  ${GOLD}<name>${NC} ${ORANGE}-secrets${NC} ${GOLD}<cmd>${NC}  Run secrets command on ${GOLD}<name>${NC} without launching session"
+    echo -e "  ${ORANGE}-list${NC}, ${ORANGE}-ls${NC}          List all sessions"
+    echo -e "  ${ORANGE}-remove${NC}, ${ORANGE}-rm${NC} ${GOLD}<name>${NC} Remove a session"
+    echo -e "  ${ORANGE}-sync${NC}, ${ORANGE}-s${NC} ${GOLD}<cmd>${NC}     Sync current session (requires CLAUDE_SESSION_NAME)"
+    echo -e "  ${ORANGE}-secrets${NC} ${GOLD}<cmd>${NC}      Manage current session secrets (requires CLAUDE_SESSION_NAME)"
+    echo -e "  ${ORANGE}-update${NC}             Update cs to latest version"
+    echo -e "    ${ORANGE}--check${NC}, ${ORANGE}-c${NC}       Check for updates without installing"
+    echo -e "    ${ORANGE}--force${NC}, ${ORANGE}-f${NC}       Force reinstall even if up to date"
+    echo -e "  ${ORANGE}-uninstall${NC}          Uninstall cs and all components"
+    echo -e "  ${ORANGE}-help${NC}, ${ORANGE}-h${NC}           Show this help message"
+    echo -e "  ${ORANGE}-version${NC}, ${ORANGE}-v${NC}        Show version"
+    echo ""
+    echo -e "${RUST}Secrets Commands:${NC}"
+    echo -e "  ${ORANGE}set${NC}, ${ORANGE}store${NC} ${GOLD}<name>${NC}   Store a secret (prompts if value not provided)"
+    echo -e "  ${ORANGE}get${NC} ${GOLD}<name>${NC}          Retrieve a secret value"
+    echo -e "  ${ORANGE}list${NC}, ${ORANGE}ls${NC}            List all secrets for session"
+    echo -e "  ${ORANGE}delete${NC}, ${ORANGE}rm${NC} ${GOLD}<name>${NC}   Delete a secret"
+    echo -e "  ${ORANGE}purge${NC}               Delete ALL secrets for session"
+    echo -e "  ${ORANGE}export${NC}              Export secrets as environment variables"
+    echo -e "  ${ORANGE}backend${NC}             Show which storage backend is active"
+    echo ""
+    echo -e "${RUST}Sync Commands:${NC}"
+    echo -e "  ${ORANGE}remote${NC} ${GOLD}[url]${NC}        Add remote to git repo (uses CS_SYNC_PREFIX if URL not provided)"
+    echo -e "  ${ORANGE}push${NC}                Commit changes (pushes to remote if configured)"
+    echo -e "  ${ORANGE}pull${NC}                Pull changes from remote (skips if local-only)"
+    echo -e "  ${ORANGE}status${NC}, ${ORANGE}st${NC}          Show sync status"
+    echo -e "  ${ORANGE}auto${NC} ${GOLD}[on|off]${NC}       Toggle/show auto-sync setting"
+    echo -e "  ${ORANGE}clone${NC} ${GOLD}<session|url>${NC} ${GOLD}[name]${NC}  Clone session from remote (uses CS_SYNC_PREFIX if session name)"
+    echo ""
+    echo -e "${RUST}Environment:${NC}"
+    echo -e "  ${GOLD}CS_SESSIONS_ROOT${NC}      Override sessions directory (default: ~/.claude-sessions)"
+    echo -e "  ${GOLD}CLAUDE_CODE_BIN${NC}       Override claude binary name (default: claude)"
+    echo -e "  ${GOLD}CLAUDE_SESSION_NAME${NC}   Current session name (set automatically)"
+    echo -e "  ${GOLD}CS_SECRETS_PASSWORD${NC}   Master password for encrypted secrets backend"
+    echo -e "  ${GOLD}CS_SYNC_PREFIX${NC}        Git remote prefix (e.g., git@github.com:user/)"
+    echo ""
+    echo -e "${RUST}Examples:${NC}"
+    echo -e "  cs ${GOLD}debug-api${NC}                      Create or resume 'debug-api' session (git + auto-sync)"
+    echo -e "  cs ${GOLD}my-session${NC} ${ORANGE}-sync push${NC}          Commit changes manually during session"
+    echo -e "  cs ${GOLD}my-session${NC} ${ORANGE}-sync remote${NC} ${GOLD}<url>${NC}  Add remote to existing local repo"
+    echo -e "  cs ${GOLD}my-session${NC} ${ORANGE}-sync auto off${NC}      Disable auto-commit (on by default)"
+    echo -e "  cs ${ORANGE}-sync clone${NC} ${GOLD}other-session${NC}    Clone session (uses CS_SYNC_PREFIX)"
+    echo -e "  cs ${GOLD}my-session${NC} ${ORANGE}-secrets list${NC}     List secrets for 'my-session'"
+    echo -e "  cs ${ORANGE}-list${NC}                        List all sessions"
+    echo -e "  cs ${ORANGE}-rm${NC} ${GOLD}old-session${NC}              Remove 'old-session'"
+    echo ""
+    echo -e "Sessions are stored in: ${GOLD}$SESSIONS_ROOT${NC}"
 }
 
 warn() {
