@@ -12,17 +12,32 @@ REPO_URL="https://github.com/hex/claude-sessions"
 RAW_URL="https://raw.githubusercontent.com/hex/claude-sessions/main"
 
 # Colors - Claude warm palette (rust → orange → gold)
-RED='\033[38;2;239;83;80m'        # #ef5350 - warm red
-GREEN='\033[38;2;139;195;74m'     # #8bc34a - vibrant green
-YELLOW='\033[38;2;255;183;77m'    # #ffb74d - warm amber
-ORANGE='\033[38;2;255;138;101m'   # #ff8a65 - coral orange
-GOLD='\033[38;2;255;193;7m'       # #ffc107 - golden
-RUST='\033[38;2;230;74;25m'       # #e64a19 - terracotta
-COMMENT='\033[38;2;161;136;127m'  # #a1887f - warm taupe
-WHITE='\033[38;2;245;230;211m'    # #f5e6d3 - warm cream
-DIM='\033[2m'
-BOLD='\033[1m'
-NC='\033[0m'
+# Disable colors if NO_COLOR is set (https://no-color.org) or not a TTY
+if [[ -n "${NO_COLOR:-}" ]] || [[ ! -t 1 ]]; then
+    RED=''
+    GREEN=''
+    YELLOW=''
+    ORANGE=''
+    GOLD=''
+    RUST=''
+    COMMENT=''
+    WHITE=''
+    DIM=''
+    BOLD=''
+    NC=''
+else
+    RED='\033[38;2;239;83;80m'        # #ef5350 - warm red
+    GREEN='\033[38;2;139;195;74m'     # #8bc34a - vibrant green
+    YELLOW='\033[38;2;255;183;77m'    # #ffb74d - warm amber
+    ORANGE='\033[38;2;255;138;101m'   # #ff8a65 - coral orange
+    GOLD='\033[38;2;255;193;7m'       # #ffc107 - golden
+    RUST='\033[38;2;230;74;25m'       # #e64a19 - terracotta
+    COMMENT='\033[38;2;161;136;127m'  # #a1887f - warm taupe
+    WHITE='\033[38;2;245;230;211m'    # #f5e6d3 - warm cream
+    DIM='\033[2m'
+    BOLD='\033[1m'
+    NC='\033[0m'
+fi
 
 # Icons - Nerd Font with Unicode fallback
 if [[ "${CS_NERD_FONTS:-}" == "1" ]]; then
@@ -92,6 +107,7 @@ show_help() {
     echo -e "  ${GOLD}CS_SECRETS_PASSWORD${NC}   Master password for encrypted secrets backend"
     echo -e "  ${GOLD}CS_SYNC_PREFIX${NC}        Git remote prefix (e.g., git@github.com:user/)"
     echo -e "  ${GOLD}CS_NERD_FONTS${NC}         Set to 1 for Nerd Font icons (default: Unicode)"
+    echo -e "  ${GOLD}NO_COLOR${NC}              Disable all colors (see no-color.org)"
     echo ""
     echo -e "${RUST}Examples:${NC}"
     echo -e "  cs ${GOLD}debug-api${NC}                      Create or resume 'debug-api' session (git + auto-sync)"

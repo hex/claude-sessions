@@ -117,6 +117,9 @@ export CLAUDE_CODE_BIN="claude"
 
 # Use Nerd Font icons (requires a Nerd Font in your terminal)
 export CS_NERD_FONTS="1"
+
+# Disable colors (see https://no-color.org)
+export NO_COLOR="1"
 ```
 
 The `CLAUDE_SESSION_NAME` environment variable is set automatically when you start a session and can be used by scripts and hooks to identify the current session.

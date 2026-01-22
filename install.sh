@@ -5,14 +5,26 @@
 set -euo pipefail
 
 # Colors - Claude warm palette (rust → orange → gold)
-RED='\033[38;2;239;83;80m'        # #ef5350 - warm red
-GREEN='\033[38;2;139;195;74m'     # #8bc34a - vibrant green
-YELLOW='\033[38;2;255;183;77m'    # #ffb74d - warm amber
-ORANGE='\033[38;2;255;138;101m'   # #ff8a65 - coral orange
-GOLD='\033[38;2;255;193;7m'       # #ffc107 - golden
-RUST='\033[38;2;230;74;25m'       # #e64a19 - terracotta
-COMMENT='\033[38;2;161;136;127m'  # #a1887f - warm taupe
-NC='\033[0m'
+# Disable colors if NO_COLOR is set (https://no-color.org) or not a TTY
+if [[ -n "${NO_COLOR:-}" ]] || [[ ! -t 1 ]]; then
+    RED=''
+    GREEN=''
+    YELLOW=''
+    ORANGE=''
+    GOLD=''
+    RUST=''
+    COMMENT=''
+    NC=''
+else
+    RED='\033[38;2;239;83;80m'        # #ef5350 - warm red
+    GREEN='\033[38;2;139;195;74m'     # #8bc34a - vibrant green
+    YELLOW='\033[38;2;255;183;77m'    # #ffb74d - warm amber
+    ORANGE='\033[38;2;255;138;101m'   # #ff8a65 - coral orange
+    GOLD='\033[38;2;255;193;7m'       # #ffc107 - golden
+    RUST='\033[38;2;230;74;25m'       # #e64a19 - terracotta
+    COMMENT='\033[38;2;161;136;127m'  # #a1887f - warm taupe
+    NC='\033[0m'
+fi
 
 error() {
     echo -e "${RED}Error: $1${NC}" >&2
