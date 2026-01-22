@@ -24,6 +24,17 @@ DIM='\033[2m'
 BOLD='\033[1m'
 NC='\033[0m'
 
+# Icons - Nerd Font with Unicode fallback
+if [[ "${CS_NERD_FONTS:-}" == "1" ]]; then
+    ICON_LOCK='󰌾'      # mdi-lock
+    ICON_SYNC='󰓦'      # mdi-sync
+    ICON_LOCAL='󰋜'     # mdi-home
+else
+    ICON_LOCK='⚿'      # Unicode lock with key
+    ICON_SYNC='⇄'      # Unicode arrows
+    ICON_LOCAL='⌂'     # Unicode house
+fi
+
 # Utility functions
 error() {
     echo -e "${RED}Error: $1${NC}" >&2
@@ -80,6 +91,7 @@ show_help() {
     echo -e "  ${GOLD}CLAUDE_SESSION_NAME${NC}   Current session name (set automatically)"
     echo -e "  ${GOLD}CS_SECRETS_PASSWORD${NC}   Master password for encrypted secrets backend"
     echo -e "  ${GOLD}CS_SYNC_PREFIX${NC}        Git remote prefix (e.g., git@github.com:user/)"
+    echo -e "  ${GOLD}CS_NERD_FONTS${NC}         Set to 1 for Nerd Font icons (default: Unicode)"
     echo ""
     echo -e "${RUST}Examples:${NC}"
     echo -e "  cs ${GOLD}debug-api${NC}                      Create or resume 'debug-api' session (git + auto-sync)"
@@ -548,7 +560,7 @@ list_sessions() {
         local secret_indicator=""
         local indicator_len=0
         if [ "$secret_count" -gt 0 ]; then
-            secret_indicator=" (⚿ ${secret_count})"
+            secret_indicator=" (${ICON_LOCK} ${secret_count})"
             indicator_len=${#secret_indicator}
         fi
 
@@ -626,9 +638,9 @@ launch_claude_code() {
         local remote_url
         remote_url=$(cd "$session_dir" && git remote get-url origin 2>/dev/null || echo "")
         if [ -n "$remote_url" ]; then
-            remote_display="${GOLD}⇄${NC} ${DIM}$remote_url${NC}"
+            remote_display="${GOLD}${ICON_SYNC}${NC} ${DIM}$remote_url${NC}"
         else
-            remote_display="${GOLD}⌂${NC} ${DIM}local-only${NC}"
+            remote_display="${GOLD}${ICON_LOCAL}${NC} ${DIM}local-only${NC}"
         fi
     fi
 
@@ -653,7 +665,7 @@ launch_claude_code() {
     if [ "$secret_count" -gt 0 ]; then
         local secret_word="secret"
         [ "$secret_count" -gt 1 ] && secret_word="secrets"
-        echo -e "${bars[$bar_idx]}${NC} ${COMMENT}⚿${NC} ${YELLOW}$secret_count${NC} ${COMMENT}$secret_word${NC}"; ((bar_idx++))
+        echo -e "${bars[$bar_idx]}${NC} ${COMMENT}${ICON_LOCK}${NC} ${YELLOW}$secret_count${NC} ${COMMENT}$secret_word${NC}"; ((bar_idx++))
     fi
 
     if [ -n "$UPDATE_AVAILABLE" ]; then
