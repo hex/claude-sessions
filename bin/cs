@@ -519,8 +519,8 @@ list_sessions() {
     done
 
     # Print header
-    printf "${YELLOW}%-${max_len}s  %-16s  %s${NC}\n" "SESSION" "CREATED" "MODIFIED"
-    printf "%-${max_len}s  %-16s  %s\n" "$(printf '%*s' "$max_len" '' | tr ' ' '-')" "----------------" "----------------"
+    printf "${RUST}%-${max_len}s  %-16s  %s${NC}\n" "SESSION" "CREATED" "MODIFIED"
+    printf "${COMMENT}%-${max_len}s  %-16s  %s${NC}\n" "$(printf '%*s' "$max_len" '' | tr ' ' '-')" "----------------" "----------------"
 
     # Print sessions
     for session in "${sessions[@]}"; do
@@ -537,7 +537,7 @@ list_sessions() {
             modified=$(get_file_mtime "$session_dir/logs/session.log")
         fi
 
-        printf "${GREEN}%-${max_len}s${NC}  %-16s  %s\n" "$session" "$created" "$modified"
+        printf "${GOLD}%-${max_len}s${NC}  ${COMMENT}%-16s  %s${NC}\n" "$session" "$created" "$modified"
     done
 }
 
