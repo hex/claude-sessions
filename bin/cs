@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.1.78"
+VERSION="2026.1.79"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -609,22 +609,32 @@ launch_claude_code() {
         fi
     fi
 
-    # Display banner
+    # Display banner with gradient bar (purple → cyan)
+    # Gradient colors for left bar
+    local BAR1='\033[38;2;187;154;247m▌'  # purple
+    local BAR2='\033[38;2;171;167;249m▌'
+    local BAR3='\033[38;2;156;180;251m▌'
+    local BAR4='\033[38;2;140;194;253m▌'
+    local BAR5='\033[38;2;125;207;255m▌'  # cyan
+
+    local bar_idx=0
+    local bars=("$BAR1" "$BAR2" "$BAR3" "$BAR4" "$BAR5")
+
     echo ""
-    echo -e "${GREEN}▌${NC} ${BOLD}cs${NC} ${DIM}$VERSION${NC}"
-    echo -e "${GREEN}▌${NC} ${WHITE}${BOLD}$session_name${NC} ${DIM}($status_icon $status_text)${NC}"
-    echo -e "${GREEN}▌${NC} ${DIM}$session_dir${NC}"
+    echo -e "${bars[$bar_idx]}${NC} ${BLUE}cs${NC} ${GREEN}$VERSION${NC}"; ((bar_idx++))
+    echo -e "${bars[$bar_idx]}${NC} ${WHITE}${BOLD}$session_name${NC} ${COMMENT}($status_icon $status_text)${NC}"; ((bar_idx++))
+    echo -e "${bars[$bar_idx]}${NC} ${CYAN}$session_dir${NC}"; ((bar_idx++))
     if [ -n "$remote_display" ]; then
-        echo -e "${GREEN}▌${NC} $remote_display"
+        echo -e "${bars[$bar_idx]}${NC} $remote_display"; ((bar_idx++))
     fi
     if [ "$secret_count" -gt 0 ]; then
         local secret_word="secret"
         [ "$secret_count" -gt 1 ] && secret_word="secrets"
-        echo -e "${GREEN}▌${NC} ${DIM}⚿${NC} ${YELLOW}${BOLD}$secret_count${NC} ${DIM}$secret_word${NC}"
+        echo -e "${bars[$bar_idx]}${NC} ${COMMENT}⚿${NC} ${YELLOW}$secret_count${NC} ${COMMENT}$secret_word${NC}"; ((bar_idx++))
     fi
 
     if [ -n "$UPDATE_AVAILABLE" ]; then
-        echo -e "${YELLOW}▌${NC} ${YELLOW}Update available: $VERSION -> $UPDATE_AVAILABLE${NC} ${DIM}(cs -update)${NC}"
+        echo -e "${YELLOW}▌${NC} ${YELLOW}Update available:${NC} $VERSION ${COMMENT}→${NC} ${GREEN}$UPDATE_AVAILABLE${NC} ${COMMENT}(cs -update)${NC}"
     fi
     echo ""
 
