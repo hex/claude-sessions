@@ -122,7 +122,12 @@ export CS_NERD_FONTS="1"
 export NO_COLOR="1"
 ```
 
-The `CLAUDE_SESSION_NAME` environment variable is set automatically when you start a session and can be used by scripts and hooks to identify the current session.
+The following environment variables are set automatically when you start a session:
+
+- `CLAUDE_SESSION_NAME` - The session name (e.g., `myproject`)
+- `CLAUDE_SESSION_DIR` - Full path to the session directory
+- `CLAUDE_ARTIFACT_DIR` - Path to the artifacts subdirectory
+- `CLAUDE_CODE_TASK_LIST_ID` - Set to the session name for task list persistence
 
 ## Shell Completion
 

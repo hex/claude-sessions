@@ -629,6 +629,7 @@ launch_claude_code() {
     export CLAUDE_SESSION_NAME="$session_name"
     export CLAUDE_SESSION_DIR="$session_dir"
     export CLAUDE_ARTIFACT_DIR="$session_dir/artifacts"
+    export CLAUDE_CODE_TASK_LIST_ID="$session_name"
 
     # Status indicator
     local status_icon status_text
