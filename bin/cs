@@ -672,16 +672,16 @@ launch_claude_code() {
     local bars=("$BAR1" "$BAR2" "$BAR3" "$BAR4" "$BAR5")
 
     echo ""
-    echo -e "${bars[$bar_idx]}${NC} ${ORANGE}cs${NC} ${GREEN}$VERSION${NC}"; ((bar_idx++))
-    echo -e "${bars[$bar_idx]}${NC} ${WHITE}${BOLD}$session_name${NC} ${COMMENT}($status_icon $status_text)${NC}"; ((bar_idx++))
-    echo -e "${bars[$bar_idx]}${NC} ${GOLD}$session_dir${NC}"; ((bar_idx++))
+    echo -e "${bars[$bar_idx]}${NC} ${ORANGE}cs${NC} ${GREEN}$VERSION${NC}"; ((++bar_idx))
+    echo -e "${bars[$bar_idx]}${NC} ${WHITE}${BOLD}$session_name${NC} ${COMMENT}($status_icon $status_text)${NC}"; ((++bar_idx))
+    echo -e "${bars[$bar_idx]}${NC} ${GOLD}$session_dir${NC}"; ((++bar_idx))
     if [ -n "$remote_display" ]; then
-        echo -e "${bars[$bar_idx]}${NC} $remote_display"; ((bar_idx++))
+        echo -e "${bars[$bar_idx]}${NC} $remote_display"; ((++bar_idx))
     fi
     if [ "$secret_count" -gt 0 ]; then
         local secret_word="secret"
         [ "$secret_count" -gt 1 ] && secret_word="secrets"
-        echo -e "${bars[$bar_idx]}${NC} ${COMMENT}${ICON_LOCK}${NC} ${YELLOW}$secret_count${NC} ${COMMENT}$secret_word${NC}"; ((bar_idx++))
+        echo -e "${bars[$bar_idx]}${NC} ${COMMENT}${ICON_LOCK}${NC} ${YELLOW}$secret_count${NC} ${COMMENT}$secret_word${NC}"; ((++bar_idx))
     fi
 
     if [ -n "$UPDATE_AVAILABLE" ]; then
