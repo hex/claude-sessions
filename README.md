@@ -112,6 +112,9 @@ export CS_SYNC_PREFIX="git@github.com:youruser/"
 # Legacy password for secrets sync (age encryption preferred - see docs/secrets.md)
 export CS_SECRETS_PASSWORD="your-secure-password"
 
+# Override secrets backend (keychain, credential, or encrypted)
+export CS_SECRETS_BACKEND="keychain"
+
 # Override Claude Code binary (default: claude)
 export CLAUDE_CODE_BIN="claude"
 
