@@ -708,8 +708,23 @@ launch_claude_code() {
         echo ""
     fi
 
-    # shellcheck disable=SC2086
-    exec $CLAUDE_CODE_BIN $continue_flag
+    if [ -n "$continue_flag" ]; then
+        # Try continuing previous conversation
+        SECONDS=0
+        local rc=0
+        # shellcheck disable=SC2086
+        $CLAUDE_CODE_BIN $continue_flag || rc=$?
+        if [ $rc -ne 0 ] && [ $SECONDS -lt 3 ]; then
+            # Quick failure suggests no conversation to continue
+            echo -e "${DIM}No previous conversation found. Starting fresh...${NC}"
+            echo ""
+            exec $CLAUDE_CODE_BIN
+        fi
+        exit $rc
+    else
+        # shellcheck disable=SC2086
+        exec $CLAUDE_CODE_BIN
+    fi
 }
 
 # Run secrets subcommand
