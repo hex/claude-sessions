@@ -457,7 +457,10 @@ migrate_session() {
         # Update .gitignore for new structure
         create_session_gitignore "$session_dir"
 
-        warn "Migrated session to .cs/ directory structure"
+        echo ""
+        echo -e "${ORANGE}Migrated session to .cs/ directory structure${NC}"
+        echo -e "${DIM}Session metadata moved to .cs/ - your workspace root is now clean for project files.${NC}"
+        echo ""
 
         # Commit the migration if git is initialized
         if [ -d "$session_dir/.git" ]; then
