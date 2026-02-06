@@ -11,13 +11,14 @@ if [ -z "${CLAUDE_SESSION_NAME:-}" ]; then
 fi
 
 SESSION_DIR="${CLAUDE_SESSION_DIR:-}"
+META_DIR="${CLAUDE_SESSION_META_DIR:-$SESSION_DIR/.cs}"
 if [ -z "$SESSION_DIR" ] || [ ! -d "$SESSION_DIR" ]; then
     echo '{"decision": "approve"}'
     exit 0
 fi
 
-DISCOVERIES_FILE="$SESSION_DIR/discoveries.md"
-COOLDOWN_FILE="$SESSION_DIR/.discoveries-reminder-cooldown"
+DISCOVERIES_FILE="$META_DIR/discoveries.md"
+COOLDOWN_FILE="$META_DIR/.discoveries-reminder-cooldown"
 COOLDOWN_SECONDS=300  # 5 minutes
 
 CURRENT_TIME=$(date +%s)

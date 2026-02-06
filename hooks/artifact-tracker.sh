@@ -24,6 +24,7 @@ fi
 
 SESSION_DIR="${CLAUDE_SESSION_DIR:-}"
 ARTIFACT_DIR="${CLAUDE_ARTIFACT_DIR:-}"
+META_DIR="${CLAUDE_SESSION_META_DIR:-$SESSION_DIR/.cs}"
 
 # Verify session directory exists
 if [ ! -d "$SESSION_DIR" ] || [ ! -d "$ARTIFACT_DIR" ]; then
@@ -276,9 +277,9 @@ trap - EXIT
 # Log the artifact capture
 if [ $IS_SENSITIVE -eq 1 ] && [ -n "$STORED_SECRETS" ]; then
     SECRET_COUNT=$(echo "$STORED_SECRETS" | grep -c . || echo 0)
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - Artifact captured: $FILENAME (from $FILE_PATH) - $SECRET_COUNT secrets stored in Keychain" >> "$SESSION_DIR/logs/session.log"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - Artifact captured: $FILENAME (from $FILE_PATH) - $SECRET_COUNT secrets stored in Keychain" >> "$META_DIR/logs/session.log"
 else
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - Artifact captured: $FILENAME (from $FILE_PATH)" >> "$SESSION_DIR/logs/session.log"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - Artifact captured: $FILENAME (from $FILE_PATH)" >> "$META_DIR/logs/session.log"
 fi
 
 # Return decision with updated path and redacted content

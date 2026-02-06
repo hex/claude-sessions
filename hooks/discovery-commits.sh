@@ -10,6 +10,7 @@ if [ -z "${CLAUDE_SESSION_NAME:-}" ]; then
 fi
 
 SESSION_DIR="${CLAUDE_SESSION_DIR:-}"
+META_DIR="${CLAUDE_SESSION_META_DIR:-$SESSION_DIR/.cs}"
 if [ -z "$SESSION_DIR" ] || [ ! -d "$SESSION_DIR" ]; then
     exit 0
 fi
@@ -30,12 +31,12 @@ if [[ "$TOOL_NAME" != "Edit" && "$TOOL_NAME" != "Write" ]]; then
     exit 0
 fi
 
-if [ -z "$FILE_PATH" ] || [ "$FILE_PATH" != "$SESSION_DIR/discoveries.md" ]; then
+if [ -z "$FILE_PATH" ] || [ "$FILE_PATH" != "$META_DIR/discoveries.md" ]; then
     exit 0
 fi
 
 # Parse the latest discovery entry from discoveries.md
-DISCOVERIES_FILE="$SESSION_DIR/discoveries.md"
+DISCOVERIES_FILE="$META_DIR/discoveries.md"
 if [ ! -f "$DISCOVERIES_FILE" ]; then
     exit 0
 fi
@@ -83,15 +84,15 @@ fi
         if git commit -q -m "$COMMIT_MSG" 2>/dev/null; then
             # Log the discovery commit
             TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
-            echo "[$TIMESTAMP] Discovery commit: $LATEST_ENTRY" >> "$SESSION_DIR/logs/session.log"
+            echo "[$TIMESTAMP] Discovery commit: $LATEST_ENTRY" >> "$META_DIR/logs/session.log"
 
             # If remote exists and auto-sync is enabled, push
-            SYNC_CONFIG="$SESSION_DIR/sync.conf"
+            SYNC_CONFIG="$META_DIR/sync.conf"
             if [ -f "$SYNC_CONFIG" ]; then
                 AUTO_SYNC=$(grep "^auto_sync=" "$SYNC_CONFIG" 2>/dev/null | cut -d= -f2)
                 if [ "$AUTO_SYNC" = "on" ] && git remote get-url origin >/dev/null 2>&1; then
                     if git push -q origin main 2>/dev/null; then
-                        echo "[$TIMESTAMP] Pushed discovery commit to remote" >> "$SESSION_DIR/logs/session.log"
+                        echo "[$TIMESTAMP] Pushed discovery commit to remote" >> "$META_DIR/logs/session.log"
                     fi
                 fi
             fi

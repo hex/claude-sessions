@@ -10,6 +10,7 @@ if [ -z "${CLAUDE_SESSION_NAME:-}" ]; then
 fi
 
 SESSION_DIR="${CLAUDE_SESSION_DIR:-}"
+META_DIR="${CLAUDE_SESSION_META_DIR:-$SESSION_DIR/.cs}"
 if [ -z "$SESSION_DIR" ] || [ ! -d "$SESSION_DIR" ]; then
     exit 0
 fi
@@ -32,18 +33,18 @@ fi
 
 # Skip session documentation files
 case "$FILE_PATH" in
-    "$SESSION_DIR/changes.md"|"$SESSION_DIR/discoveries.md"|"$SESSION_DIR/README.md"|"$SESSION_DIR/summary.md"|"$SESSION_DIR/CLAUDE.md")
+    "$META_DIR/changes.md"|"$META_DIR/discoveries.md"|"$META_DIR/README.md"|"$META_DIR/summary.md"|"$SESSION_DIR/CLAUDE.md")
         exit 0
         ;;
 esac
 
 # Skip artifacts directory (tracked separately)
-if [[ "$FILE_PATH" == "$SESSION_DIR/artifacts/"* ]]; then
+if [[ "$FILE_PATH" == "$META_DIR/artifacts/"* ]]; then
     exit 0
 fi
 
 # Append to changes.md
-CHANGES_MD="$SESSION_DIR/changes.md"
+CHANGES_MD="$META_DIR/changes.md"
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 
 echo "- [$TIMESTAMP] $TOOL_NAME: $FILE_PATH" >> "$CHANGES_MD"

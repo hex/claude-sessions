@@ -19,6 +19,7 @@ fi
 
 SESSION_DIR="${CLAUDE_SESSION_DIR:-}"
 ARTIFACT_DIR="${CLAUDE_ARTIFACT_DIR:-}"
+META_DIR="${CLAUDE_SESSION_META_DIR:-$SESSION_DIR/.cs}"
 
 # Verify session directory exists
 if [ ! -d "$SESSION_DIR" ]; then
@@ -27,12 +28,12 @@ if [ ! -d "$SESSION_DIR" ]; then
 fi
 
 # Log session start
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Session started (ID: $SESSION_ID)" >> "$SESSION_DIR/logs/session.log"
-echo "  Working directory: $CWD" >> "$SESSION_DIR/logs/session.log"
-echo "" >> "$SESSION_DIR/logs/session.log"
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Session started (ID: $SESSION_ID)" >> "$META_DIR/logs/session.log"
+echo "  Working directory: $CWD" >> "$META_DIR/logs/session.log"
+echo "" >> "$META_DIR/logs/session.log"
 
 # Auto-pull if enabled (runs in background to not block session start)
-SYNC_CONFIG="$SESSION_DIR/sync.conf"
+SYNC_CONFIG="$META_DIR/sync.conf"
 if [ -f "$SYNC_CONFIG" ] && [ -d "$SESSION_DIR/.git" ]; then
     AUTO_SYNC=$(grep "^auto_sync=" "$SYNC_CONFIG" 2>/dev/null | cut -d= -f2)
     if [ "$AUTO_SYNC" = "on" ]; then
@@ -51,7 +52,7 @@ if [ -f "$SYNC_CONFIG" ] && [ -d "$SESSION_DIR/.git" ]; then
                     # Try to set up upstream tracking automatically
                     CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "main")
                     if ! git branch --set-upstream-to=origin/$CURRENT_BRANCH $CURRENT_BRANCH 2>/dev/null; then
-                        echo "$(date '+%Y-%m-%d %H:%M:%S') - Auto-pull skipped: upstream tracking not configured" >> "$SESSION_DIR/logs/session.log"
+                        echo "$(date '+%Y-%m-%d %H:%M:%S') - Auto-pull skipped: upstream tracking not configured" >> "$META_DIR/logs/session.log"
                         exit 0
                     fi
                 fi
@@ -59,10 +60,10 @@ if [ -f "$SYNC_CONFIG" ] && [ -d "$SESSION_DIR/.git" ]; then
                 BEHIND=$(git rev-list --count 'HEAD..@{upstream}' 2>/dev/null || echo "0")
                 if [ "$BEHIND" -gt 0 ]; then
                     if git pull --rebase -q origin main 2>/dev/null; then
-                        echo "$(date '+%Y-%m-%d %H:%M:%S') - Auto-pulled $BEHIND commit(s) from remote" >> "$SESSION_DIR/logs/session.log"
+                        echo "$(date '+%Y-%m-%d %H:%M:%S') - Auto-pulled $BEHIND commit(s) from remote" >> "$META_DIR/logs/session.log"
 
                         # Import secrets if secrets.enc was updated and password is set
-                        if [ -f "$SESSION_DIR/secrets.enc" ] && [ -n "${CS_SECRETS_PASSWORD:-}" ]; then
+                        if [ -f "$META_DIR/secrets.enc" ] && [ -n "${CS_SECRETS_PASSWORD:-}" ]; then
                             for loc in "$(dirname "$0")/cs-secrets" "$HOME/.local/bin/cs-secrets"; do
                                 if [ -x "$loc" ]; then
                                     "$loc" --session "$CLAUDE_SESSION_NAME" import-file 2>/dev/null || true
@@ -82,6 +83,7 @@ if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
     cat >> "$CLAUDE_ENV_FILE" << EOF
 export CLAUDE_SESSION_NAME="$CLAUDE_SESSION_NAME"
 export CLAUDE_SESSION_DIR="$SESSION_DIR"
+export CLAUDE_SESSION_META_DIR="$META_DIR"
 export CLAUDE_ARTIFACT_DIR="$ARTIFACT_DIR"
 EOF
 fi
@@ -93,17 +95,19 @@ You are working in a managed Claude Code session: $CLAUDE_SESSION_NAME
 Session directory: $CLAUDE_SESSION_DIR
 Artifacts directory: $CLAUDE_ARTIFACT_DIR
 
+Session metadata is in the .cs/ directory. The session root is your workspace.
+
 This session has:
 - Automatic artifact tracking for scripts and configs
-- Documentation templates in markdown files
-- Command logging to logs/session.log
+- Documentation templates in .cs/ markdown files
+- Command logging to .cs/logs/session.log
 
 Key files to maintain:
-- README.md: Update objective and outcome
-- discoveries.md: Document findings, observations, and ideas
-- changes.md: Automatically logs file modifications
+- .cs/README.md: Update objective and outcome
+- .cs/discoveries.md: Document findings, observations, and ideas
+- .cs/changes.md: Automatically logs file modifications
 
-All scripts and config files are automatically saved to artifacts/.
+All scripts and config files are automatically saved to .cs/artifacts/.
 
 IMPORTANT: Secrets (API keys, tokens, passwords) are stored securely in the OS keychain.
 Use 'cs -secrets list' to see stored secrets, 'cs -secrets get <name>' to retrieve values.

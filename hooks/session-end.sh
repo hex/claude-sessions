@@ -18,6 +18,7 @@ fi
 
 SESSION_DIR="${CLAUDE_SESSION_DIR:-}"
 ARTIFACT_DIR="${CLAUDE_ARTIFACT_DIR:-}"
+META_DIR="${CLAUDE_SESSION_META_DIR:-$SESSION_DIR/.cs}"
 
 # Verify session directory exists
 if [ ! -d "$SESSION_DIR" ]; then
@@ -25,8 +26,8 @@ if [ ! -d "$SESSION_DIR" ]; then
 fi
 
 # Log session end
-echo "" >> "$SESSION_DIR/logs/session.log"
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Session ended (ID: $SESSION_ID)" >> "$SESSION_DIR/logs/session.log"
+echo "" >> "$META_DIR/logs/session.log"
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Session ended (ID: $SESSION_ID)" >> "$META_DIR/logs/session.log"
 
 # Count artifacts
 ARTIFACT_COUNT=0
@@ -34,18 +35,18 @@ if [ -d "$ARTIFACT_DIR" ]; then
     ARTIFACT_COUNT=$(find "$ARTIFACT_DIR" -type f ! -name "MANIFEST.json" ! -name "*.lock" | wc -l | tr -d ' ')
 fi
 
-echo "  Artifacts collected: $ARTIFACT_COUNT" >> "$SESSION_DIR/logs/session.log"
+echo "  Artifacts collected: $ARTIFACT_COUNT" >> "$META_DIR/logs/session.log"
 
 # Create archive if artifacts exist
 if [ "$ARTIFACT_COUNT" -gt 0 ]; then
-    ARCHIVE_DIR="$SESSION_DIR/archives"
+    ARCHIVE_DIR="$META_DIR/archives"
     mkdir -p "$ARCHIVE_DIR"
     ARCHIVE_PATH="$ARCHIVE_DIR/artifacts-$(date +%Y%m%d-%H%M%S).tar.gz"
-    tar -czf "$ARCHIVE_PATH" -C "$SESSION_DIR" artifacts/ 2>/dev/null || true
+    tar -czf "$ARCHIVE_PATH" -C "$META_DIR" artifacts/ 2>/dev/null || true
 
     if [ -f "$ARCHIVE_PATH" ]; then
         ARCHIVE_SIZE=$(du -h "$ARCHIVE_PATH" | cut -f1)
-        echo "  Archive created: $(basename "$ARCHIVE_PATH") ($ARCHIVE_SIZE)" >> "$SESSION_DIR/logs/session.log"
+        echo "  Archive created: $(basename "$ARCHIVE_PATH") ($ARCHIVE_SIZE)" >> "$META_DIR/logs/session.log"
     fi
 fi
 
@@ -73,7 +74,7 @@ cat >> "$GLOBAL_INDEX" << EOF
 EOF
 
 # Auto-push if enabled
-SYNC_CONFIG="$SESSION_DIR/sync.conf"
+SYNC_CONFIG="$META_DIR/sync.conf"
 if [ -f "$SYNC_CONFIG" ] && [ -d "$SESSION_DIR/.git" ]; then
     AUTO_SYNC=$(grep "^auto_sync=" "$SYNC_CONFIG" 2>/dev/null | cut -d= -f2)
     if [ "$AUTO_SYNC" = "on" ]; then
@@ -103,12 +104,12 @@ if [ -f "$SYNC_CONFIG" ] && [ -d "$SESSION_DIR/.git" ]; then
             if git commit -q -m "Auto-sync: $TIMESTAMP ($SHORT_HOSTNAME)" 2>/dev/null; then
                 if [ $HAS_REMOTE -eq 1 ]; then
                     if git push -q origin main 2>/dev/null; then
-                        echo "$(date '+%Y-%m-%d %H:%M:%S') - Auto-pushed to remote" >> "$SESSION_DIR/logs/session.log"
+                        echo "$(date '+%Y-%m-%d %H:%M:%S') - Auto-pushed to remote" >> "$META_DIR/logs/session.log"
                     else
-                        echo "$(date '+%Y-%m-%d %H:%M:%S') - Auto-push failed (will retry next session)" >> "$SESSION_DIR/logs/session.log"
+                        echo "$(date '+%Y-%m-%d %H:%M:%S') - Auto-push failed (will retry next session)" >> "$META_DIR/logs/session.log"
                     fi
                 else
-                    echo "$(date '+%Y-%m-%d %H:%M:%S') - Auto-committed locally (no remote)" >> "$SESSION_DIR/logs/session.log"
+                    echo "$(date '+%Y-%m-%d %H:%M:%S') - Auto-committed locally (no remote)" >> "$META_DIR/logs/session.log"
                 fi
             fi
         fi
@@ -118,7 +119,7 @@ fi
 # Clean up lock files
 find "$ARTIFACT_DIR" -name "*.lock" -delete 2>/dev/null || true
 
-echo "Session management cleanup complete" >> "$SESSION_DIR/logs/session.log"
-echo "================================================================================" >> "$SESSION_DIR/logs/session.log"
+echo "Session management cleanup complete" >> "$META_DIR/logs/session.log"
+echo "================================================================================" >> "$META_DIR/logs/session.log"
 
 exit 0
