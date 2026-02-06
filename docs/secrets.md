@@ -134,7 +134,7 @@ cs -secrets age remove colleague
 
 **How it works:**
 - Each machine has a keypair stored in `~/.cs-secrets/age.key`
-- Session recipients are stored in `<session>/age-recipients/*.pub`
+- Session recipients are stored in `<session>/.cs/age-recipients/*.pub`
 - Secrets are encrypted to all recipients' public keys
 - Anyone with their private key + being in recipients can decrypt
 
@@ -157,8 +157,8 @@ cs -secrets import-file --replace
 ```
 
 **Sync files:**
-- `secrets.age` - age-encrypted (preferred when recipients configured)
-- `secrets.enc` - password-encrypted (legacy, requires `CS_SECRETS_PASSWORD`)
+- `.cs/secrets.age` - age-encrypted (preferred when recipients configured)
+- `.cs/secrets.enc` - password-encrypted (legacy, requires `CS_SECRETS_PASSWORD`)
 
 Both files are automatically included in git sync. See [Sync](sync.md) for details.
 

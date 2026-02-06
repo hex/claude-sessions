@@ -126,18 +126,19 @@ cs my-session -sync auto on
 
 ## Secrets Sync
 
-Secrets are exported to `secrets.enc` (AES-256-CBC encrypted) and included in git.
+Secrets are exported to `.cs/secrets.enc` (AES-256-CBC encrypted) and included in git.
 
 **Important:** You must set `CS_SECRETS_PASSWORD` to the same value on all machines for secrets to sync correctly. Machine-derived passwords are not portable.
 
 ## What Gets Synced
 
-- All markdown files (README.md, discoveries.md, changes.md, CLAUDE.md)
-- Artifacts directory (scripts, configs, MANIFEST.json)
-- Session log (logs/session.log)
-- Encrypted secrets (secrets.enc)
+- CLAUDE.md (at session root)
+- .cs/ metadata directory (README.md, discoveries.md, changes.md, sync.conf)
+- .cs/artifacts/ directory (scripts, configs, MANIFEST.json)
+- .cs/logs/session.log
+- Encrypted secrets (.cs/secrets.enc or .cs/secrets.age)
 
-**Excluded from sync:** archives/, lock files, OS/editor files
+**Excluded from sync:** .cs/archives/, lock files, OS/editor files
 
 ## Security
 

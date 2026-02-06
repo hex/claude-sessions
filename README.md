@@ -90,12 +90,15 @@ cs my-project -secrets list # List secrets for session
 
 ```
 ~/.claude-sessions/<session-name>/
-├── README.md           # Objective, environment, outcome
-├── discoveries.md      # Findings and observations
-├── changes.md          # Auto-logged file modifications
-├── CLAUDE.md           # Session instructions for Claude
-├── artifacts/          # Auto-tracked scripts and configs
-└── logs/session.log    # Session command log
+├── .cs/                    # Session metadata
+│   ├── README.md           # Objective, environment, outcome
+│   ├── discoveries.md      # Findings and observations
+│   ├── changes.md          # Auto-logged file modifications
+│   ├── sync.conf           # Sync configuration
+│   ├── artifacts/          # Auto-tracked scripts and configs
+│   └── logs/session.log    # Session command log
+├── CLAUDE.md               # Session instructions for Claude
+└── [your project files]    # Clean workspace
 ```
 
 ## Configuration
@@ -128,8 +131,9 @@ export NO_COLOR="1"
 The following environment variables are set automatically when you start a session:
 
 - `CLAUDE_SESSION_NAME` - The session name (e.g., `myproject`)
-- `CLAUDE_SESSION_DIR` - Full path to the session directory
-- `CLAUDE_ARTIFACT_DIR` - Path to the artifacts subdirectory
+- `CLAUDE_SESSION_DIR` - Full path to the session directory (workspace root)
+- `CLAUDE_SESSION_META_DIR` - Path to the `.cs/` metadata directory
+- `CLAUDE_ARTIFACT_DIR` - Path to the artifacts subdirectory (`.cs/artifacts`)
 - `CLAUDE_CODE_TASK_LIST_ID` - Set to the session name for task list persistence
 
 ## Shell Completion

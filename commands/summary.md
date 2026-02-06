@@ -5,10 +5,10 @@ You are working in a cs session. Your task is to create a comprehensive summary 
 ## Steps
 
 1. **Read all session documentation:**
-   - README.md (objective, environment, outcome)
-   - discoveries.md (findings, observations, and ideas)
-   - changes.md (auto-logged file modifications)
-   - artifacts/MANIFEST.json (list of created files)
+   - .cs/README.md (objective, environment, outcome)
+   - .cs/discoveries.md (findings, observations, and ideas)
+   - .cs/changes.md (auto-logged file modifications)
+   - .cs/artifacts/MANIFEST.json (list of created files)
 
 2. **Synthesize into a cohesive summary** that tells the story of this session. The summary should:
    - Explain what you were trying to accomplish
@@ -18,7 +18,7 @@ You are working in a cs session. Your task is to create a comprehensive summary 
    - List important artifacts created
    - Conclude with the outcome and results
 
-3. **Write the summary to summary.md** in the session root directory. Use this structure:
+3. **Write the summary to .cs/summary.md** in the session metadata directory. Use this structure:
 
 ```markdown
 # Session Summary: [SESSION_NAME]
