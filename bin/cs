@@ -287,10 +287,10 @@ validate_session_name() {
 create_session_structure() {
     local session_dir="$1"
 
-    mkdir -p "$session_dir"/{artifacts,logs}
+    mkdir -p "$session_dir/.cs"/{artifacts,logs}
 
     # Create README.md
-    cat > "$session_dir/README.md" << EOF
+    cat > "$session_dir/.cs/README.md" << EOF
 # Session: $(basename "$session_dir")
 
 **Started:** $(date '+%Y-%m-%d %H:%M:%S')
@@ -310,13 +310,13 @@ create_session_structure() {
 EOF
 
     # Create discoveries.md
-    cat > "$session_dir/discoveries.md" << 'EOF'
+    cat > "$session_dir/.cs/discoveries.md" << 'EOF'
 # Discoveries & Notes
 
 EOF
 
     # Create changes.md
-    cat > "$session_dir/changes.md" << 'EOF'
+    cat > "$session_dir/.cs/changes.md" << 'EOF'
 # Changes Log
 
 EOF
@@ -325,40 +325,40 @@ EOF
     cat > "$session_dir/CLAUDE.md" << 'EOF'
 # Session Documentation Protocol
 
-This is a Claude Code session managed by the cs tool. This session has automatic artifact tracking and documentation support.
+This is a Claude Code session managed by the cs tool. Session metadata lives in the .cs/ directory. The session root is your workspace for project files.
 
 ## Session Files - READ THESE ON RESUME
 
 When resuming this session, read the following files to restore context:
 
-1. **summary.md** - If exists, read first for previous session overview
-2. **README.md** - Session objective, environment, and outcome
-3. **discoveries.md** - Findings, observations, and ideas
-4. **changes.md** - Modifications and fixes made
-5. **artifacts/MANIFEST.json** - List of tracked artifacts
+1. **.cs/summary.md** - If exists, read first for previous session overview
+2. **.cs/README.md** - Session objective, environment, and outcome
+3. **.cs/discoveries.md** - Findings, observations, and ideas
+4. **.cs/changes.md** - Modifications and fixes made
+5. **.cs/artifacts/MANIFEST.json** - List of tracked artifacts
 
 ## Artifact Auto-Tracking
 
-Scripts and configuration files you create are **automatically saved to artifacts/**:
+Scripts and configuration files you create are **automatically saved to .cs/artifacts/**:
 
 - Scripts: .sh, .bash, .zsh, .py, .js, .ts, .rb, .pl
 - Configs: .conf, .config, .json, .yaml, .yml, .toml, .ini, .env
 
-When you use the Write tool for these file types, they are automatically redirected to the artifacts/ directory and tracked in MANIFEST.json.
+When you use the Write tool for these file types, they are automatically redirected to the .cs/artifacts/ directory and tracked in MANIFEST.json.
 
 ## Documentation Discipline
 
 Update the markdown documentation files throughout the session:
 
-1. **Start of session:** Fill in README.md objective and environment
-2. **As you work:** Update discoveries.md with findings and changes.md with modifications
-3. **End of session:** Complete the README.md outcome section
+1. **Start of session:** Fill in .cs/README.md objective and environment
+2. **As you work:** Update .cs/discoveries.md with findings and .cs/changes.md with modifications
+3. **End of session:** Complete the .cs/README.md outcome section
 
 Treat these files as a lab notebook - document as you go, not just at the end.
 
 ## Summary Command
 
-When the session is complete, use the `/summary` command to generate an intelligent summary of the entire session. This will create a summary.md file synthesizing all documentation.
+When the session is complete, use the `/summary` command to generate an intelligent summary of the entire session. This will create a .cs/summary.md file synthesizing all documentation.
 
 ## Secure Secrets Handling
 
@@ -389,17 +389,17 @@ cs -secrets set <name> <value>     # Store manually
 ## Best Practices
 
 - Document discoveries as you find them - don't wait until the end
-- Use artifacts/ for any reusable scripts or configs
-- changes.md is updated automatically when files are modified
+- Use .cs/artifacts/ for any reusable scripts or configs
+- .cs/changes.md is updated automatically when files are modified
 - Run `/summary` at the end to create a cohesive record
 - Never write raw API keys or passwords to artifact files - use cs -secrets
 EOF
 
     # Initialize empty MANIFEST.json
-    echo "[]" > "$session_dir/artifacts/MANIFEST.json"
+    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
 
     # Initialize session log
-    cat > "$session_dir/logs/session.log" << EOF
+    cat > "$session_dir/.cs/logs/session.log" << EOF
 Claude Code Session Log
 Session: $(basename "$session_dir")
 Started: $(date '+%Y-%m-%d %H:%M:%S')
@@ -410,55 +410,122 @@ Location: $(hostname):$(pwd)
 EOF
 
     # Initialize sync config with auto-sync enabled by default
-    cat > "$session_dir/sync.conf" << EOF
+    cat > "$session_dir/.cs/sync.conf" << EOF
 auto_sync=on
 EOF
+}
+
+# Move a file or directory if source exists and destination doesn't (idempotent)
+migrate_if_exists() {
+    local src="$1" dst="$2"
+    if [ -e "$src" ] && [ ! -e "$dst" ]; then
+        mv "$src" "$dst"
+    fi
+}
+
+# Check if session needs migration from flat layout to .cs/ directory
+needs_cs_migration() {
+    local session_dir="$1"
+    [[ ! -d "$session_dir/.cs" ]] && { [[ -d "$session_dir/artifacts" ]] || [[ -d "$session_dir/logs" ]] || [[ -f "$session_dir/discoveries.md" ]]; }
 }
 
 # Migrate existing session to latest format
 migrate_session() {
     local session_dir="$1"
-    local claude_md="$session_dir/CLAUDE.md"
 
-    # Check if CLAUDE.md needs migration (old format has "## Session Structure")
-    if [ -f "$claude_md" ] && grep -q "^## Session Structure" "$claude_md"; then
+    # Phase 1: Structural migration (flat layout -> .cs/ directory)
+    if needs_cs_migration "$session_dir"; then
+        mkdir -p "$session_dir/.cs"
+
+        # Move directories
+        migrate_if_exists "$session_dir/artifacts" "$session_dir/.cs/artifacts"
+        migrate_if_exists "$session_dir/logs" "$session_dir/.cs/logs"
+        migrate_if_exists "$session_dir/archives" "$session_dir/.cs/archives"
+        migrate_if_exists "$session_dir/age-recipients" "$session_dir/.cs/age-recipients"
+
+        # Move metadata files
+        migrate_if_exists "$session_dir/README.md" "$session_dir/.cs/README.md"
+        migrate_if_exists "$session_dir/discoveries.md" "$session_dir/.cs/discoveries.md"
+        migrate_if_exists "$session_dir/changes.md" "$session_dir/.cs/changes.md"
+        migrate_if_exists "$session_dir/sync.conf" "$session_dir/.cs/sync.conf"
+        migrate_if_exists "$session_dir/summary.md" "$session_dir/.cs/summary.md"
+        migrate_if_exists "$session_dir/secrets.enc" "$session_dir/.cs/secrets.enc"
+        migrate_if_exists "$session_dir/secrets.age" "$session_dir/.cs/secrets.age"
+        migrate_if_exists "$session_dir/.discoveries-reminder-cooldown" \
+                          "$session_dir/.cs/.discoveries-reminder-cooldown"
+
+        # Update .gitignore for new structure
+        create_session_gitignore "$session_dir"
+
+        warn "Migrated session to .cs/ directory structure"
+
+        # Commit the migration if git is initialized
+        if [ -d "$session_dir/.git" ]; then
+            (
+                cd "$session_dir" || exit 0
+                git add -A 2>/dev/null || true
+                if ! git diff --cached --quiet 2>/dev/null; then
+                    git commit -q -m "Migrate session structure to .cs/ metadata directory" 2>/dev/null || true
+                fi
+            )
+        fi
+    fi
+
+    # Phase 2: Ensure .cs/ subdirectories exist (handles partial migrations and edge cases)
+    mkdir -p "$session_dir/.cs"/{artifacts,logs}
+
+    # Phase 3: Ensure required files exist
+    if [ ! -f "$session_dir/.cs/artifacts/MANIFEST.json" ]; then
+        echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
+    fi
+
+    if [ ! -f "$session_dir/.cs/sync.conf" ]; then
+        cat > "$session_dir/.cs/sync.conf" << EOF
+auto_sync=on
+EOF
+        warn "Added sync.conf with auto-sync enabled"
+    fi
+
+    # Phase 4: Update CLAUDE.md to reference .cs/ paths if needed
+    local claude_md="$session_dir/CLAUDE.md"
+    if [ -f "$claude_md" ] && ! grep -q '\.cs/' "$claude_md"; then
         cat > "$claude_md" << 'EOF'
 # Session Documentation Protocol
 
-This is a Claude Code session managed by the cs tool. This session has automatic artifact tracking and documentation support.
+This is a Claude Code session managed by the cs tool. Session metadata lives in the .cs/ directory. The session root is your workspace for project files.
 
 ## Session Files - READ THESE ON RESUME
 
 When resuming this session, read the following files to restore context:
 
-1. **summary.md** - If exists, read first for previous session overview
-2. **README.md** - Session objective, environment, and outcome
-3. **discoveries.md** - Findings, observations, and ideas
-4. **changes.md** - Modifications and fixes made
-5. **artifacts/MANIFEST.json** - List of tracked artifacts
+1. **.cs/summary.md** - If exists, read first for previous session overview
+2. **.cs/README.md** - Session objective, environment, and outcome
+3. **.cs/discoveries.md** - Findings, observations, and ideas
+4. **.cs/changes.md** - Modifications and fixes made
+5. **.cs/artifacts/MANIFEST.json** - List of tracked artifacts
 
 ## Artifact Auto-Tracking
 
-Scripts and configuration files you create are **automatically saved to artifacts/**:
+Scripts and configuration files you create are **automatically saved to .cs/artifacts/**:
 
 - Scripts: .sh, .bash, .zsh, .py, .js, .ts, .rb, .pl
 - Configs: .conf, .config, .json, .yaml, .yml, .toml, .ini, .env
 
-When you use the Write tool for these file types, they are automatically redirected to the artifacts/ directory and tracked in MANIFEST.json.
+When you use the Write tool for these file types, they are automatically redirected to the .cs/artifacts/ directory and tracked in MANIFEST.json.
 
 ## Documentation Discipline
 
 Update the markdown documentation files throughout the session:
 
-1. **Start of session:** Fill in README.md objective and environment
-2. **As you work:** Update discoveries.md with findings and changes.md with modifications
-3. **End of session:** Complete the README.md outcome section
+1. **Start of session:** Fill in .cs/README.md objective and environment
+2. **As you work:** Update .cs/discoveries.md with findings and .cs/changes.md with modifications
+3. **End of session:** Complete the .cs/README.md outcome section
 
 Treat these files as a lab notebook - document as you go, not just at the end.
 
 ## Summary Command
 
-When the session is complete, use the `/summary` command to generate an intelligent summary of the entire session. This will create a summary.md file synthesizing all documentation.
+When the session is complete, use the `/summary` command to generate an intelligent summary of the entire session. This will create a .cs/summary.md file synthesizing all documentation.
 
 ## Secure Secrets Handling
 
@@ -489,21 +556,12 @@ cs -secrets set <name> <value>     # Store manually
 ## Best Practices
 
 - Document discoveries as you find them - don't wait until the end
-- Use artifacts/ for any reusable scripts or configs
-- changes.md is updated automatically when files are modified
+- Use .cs/artifacts/ for any reusable scripts or configs
+- .cs/changes.md is updated automatically when files are modified
 - Run `/summary` at the end to create a cohesive record
 - Never write raw API keys or passwords to artifact files - use cs -secrets
 EOF
-        warn "Migrated CLAUDE.md to latest format"
-    fi
-
-    # Migrate sync.conf if missing (for sessions created before auto-sync default)
-    local sync_conf="$session_dir/sync.conf"
-    if [ ! -f "$sync_conf" ]; then
-        cat > "$sync_conf" << EOF
-auto_sync=on
-EOF
-        warn "Added sync.conf with auto-sync enabled"
+        warn "Updated CLAUDE.md to reference .cs/ paths"
     fi
 }
 
@@ -556,13 +614,16 @@ list_sessions() {
         local created="-"
         local modified="-"
 
-        if [ -f "$session_dir/logs/session.log" ]; then
+        local log_file="$session_dir/.cs/logs/session.log"
+        # Fall back to old location for unmigrated sessions
+        [ ! -f "$log_file" ] && log_file="$session_dir/logs/session.log"
+        if [ -f "$log_file" ]; then
             local started
-            started=$(head -4 "$session_dir/logs/session.log" | grep "Started:" | cut -d' ' -f2-)
+            started=$(head -4 "$log_file" | grep "Started:" | cut -d' ' -f2-)
             if [ -n "$started" ]; then
                 created=$(echo "$started" | cut -d':' -f1,2)
             fi
-            modified=$(get_file_mtime "$session_dir/logs/session.log")
+            modified=$(get_file_mtime "$log_file")
         fi
 
         # Count secrets for this session
@@ -628,7 +689,8 @@ launch_claude_code() {
     # Set environment variables
     export CLAUDE_SESSION_NAME="$session_name"
     export CLAUDE_SESSION_DIR="$session_dir"
-    export CLAUDE_ARTIFACT_DIR="$session_dir/artifacts"
+    export CLAUDE_SESSION_META_DIR="$session_dir/.cs"
+    export CLAUDE_ARTIFACT_DIR="$session_dir/.cs/artifacts"
     export CLAUDE_CODE_TASK_LIST_ID="$session_name"
 
     # Status indicator
@@ -775,7 +837,7 @@ get_sync_config() {
     local session_dir="$1"
     local key="$2"
     local default="${3:-}"
-    local config_file="$session_dir/$SYNC_CONFIG_FILE"
+    local config_file="$session_dir/.cs/$SYNC_CONFIG_FILE"
 
     if [ -f "$config_file" ]; then
         local value
@@ -791,7 +853,7 @@ set_sync_config() {
     local session_dir="$1"
     local key="$2"
     local value="$3"
-    local config_file="$session_dir/$SYNC_CONFIG_FILE"
+    local config_file="$session_dir/.cs/$SYNC_CONFIG_FILE"
 
     if [ -f "$config_file" ]; then
         if grep -q "^${key}=" "$config_file" 2>/dev/null; then
@@ -818,7 +880,10 @@ create_session_gitignore() {
 *.bak
 
 # Archives (large, regenerated from artifacts)
-archives/
+.cs/archives/
+
+# Session cooldown markers
+.cs/.discoveries-reminder-cooldown
 
 # OS files
 .DS_Store
@@ -1100,8 +1165,8 @@ sync_pull() {
     # Import secrets from sync file (prefer age over enc)
     local secrets_script
     if secrets_script=$(find_secrets_script); then
-        local age_file="$session_dir/secrets.age"
-        local enc_file="$session_dir/secrets.enc"
+        local age_file="$session_dir/.cs/secrets.age"
+        local enc_file="$session_dir/.cs/secrets.enc"
 
         if [ -f "$age_file" ]; then
             # Prefer age-encrypted file
@@ -1216,9 +1281,9 @@ sync_status() {
 
     # Secrets status
     echo ""
-    if [ -f "$session_dir/secrets.enc" ]; then
+    if [ -f "$session_dir/.cs/secrets.enc" ]; then
         local enc_time
-        enc_time=$(get_file_mtime "$session_dir/secrets.enc")
+        enc_time=$(get_file_mtime "$session_dir/.cs/secrets.enc")
         echo -e "${BOLD}Secrets file:${NC} secrets.enc (modified: $enc_time)"
     else
         echo -e "${BOLD}Secrets file:${NC} not exported"
@@ -1308,8 +1373,11 @@ sync_clone() {
 
     info "Cloned session to: $session_dir"
 
+    # Migrate cloned session if it uses old flat layout
+    migrate_session "$session_dir"
+
     # Import secrets if available
-    local secrets_file="$session_dir/secrets.enc"
+    local secrets_file="$session_dir/.cs/secrets.enc"
     if [ -f "$secrets_file" ]; then
         if [ -z "${CS_SECRETS_PASSWORD:-}" ]; then
             warn "secrets.enc found but CS_SECRETS_PASSWORD not set"
@@ -1649,7 +1717,8 @@ main() {
                 # Set up session context for sync command
                 export CLAUDE_SESSION_NAME="$session_name"
                 export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
-                export CLAUDE_ARTIFACT_DIR="$SESSIONS_ROOT/$session_name/artifacts"
+                export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
+                export CLAUDE_ARTIFACT_DIR="$SESSIONS_ROOT/$session_name/.cs/artifacts"
                 run_sync "$@"
                 return 0
                 ;;
@@ -1657,7 +1726,8 @@ main() {
                 # Set up session context for secrets command
                 export CLAUDE_SESSION_NAME="$session_name"
                 export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
-                export CLAUDE_ARTIFACT_DIR="$SESSIONS_ROOT/$session_name/artifacts"
+                export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
+                export CLAUDE_ARTIFACT_DIR="$SESSIONS_ROOT/$session_name/.cs/artifacts"
                 run_secrets "$@"
                 return 0
                 ;;
