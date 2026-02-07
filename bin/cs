@@ -279,8 +279,8 @@ validate_session_name() {
         error "Session name cannot be empty"
     fi
 
-    if ! [[ "$name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
-        error "Session name must contain only alphanumeric characters, hyphens, and underscores"
+    if ! [[ "$name" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+        error "Session name must contain only alphanumeric characters, hyphens, underscores, and dots"
     fi
 }
 
