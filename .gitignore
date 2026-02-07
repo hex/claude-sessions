@@ -14,3 +14,5 @@ Thumbs.db
 *.bak
 .beads/
 .claude/
+.cs/archives/
+.cs/.discoveries-reminder-cooldown
