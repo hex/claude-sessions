@@ -63,6 +63,7 @@ The installer:
 
 ```bash
 cs <session-name>           # Create or resume a session
+cs -adopt <name>            # Adopt current directory as a session
 cs -list, -ls               # List all sessions
 cs -remove, -rm <name>      # Remove a session
 cs -update                  # Update to latest version
@@ -85,6 +86,22 @@ cs debug-api                # Create/resume 'debug-api' session
 cs fix-auth -sync remote      # Initialize sync for session
 cs my-project -secrets list # List secrets for session
 ```
+
+### Adopting Existing Projects
+
+Already working in a project directory with Claude Code? Use `-adopt` to add cs session management without moving anything:
+
+```bash
+cd ~/my-project
+cs -adopt my-project
+```
+
+This converts the current directory into a cs session in place:
+- Creates the `.cs/` metadata structure in the current directory
+- Symlinks `~/.claude-sessions/<name>` to the current directory
+- Merges session protocol into existing `CLAUDE.md` if one exists
+- Initializes a git repo if one doesn't exist (preserves existing repos)
+- Since the working directory doesn't change, `claude --continue` picks up previous conversations
 
 ## Session Structure
 

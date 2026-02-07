@@ -73,6 +73,7 @@ show_help() {
     echo -e "  ${GOLD}<name>${NC} ${ORANGE}-sync${NC} ${GOLD}<cmd>${NC}  Run sync command on ${GOLD}<name>${NC} without launching session"
     echo -e "  ${GOLD}<name>${NC} ${ORANGE}-secrets${NC} ${GOLD}<cmd>${NC}  Run secrets command on ${GOLD}<name>${NC} without launching session"
     echo -e "  ${ORANGE}-list${NC}, ${ORANGE}-ls${NC}          List all sessions"
+    echo -e "  ${ORANGE}-adopt${NC} ${GOLD}<name>${NC}        Adopt current directory as a cs session"
     echo -e "  ${ORANGE}-remove${NC}, ${ORANGE}-rm${NC} ${GOLD}<name>${NC} Remove a session"
     echo -e "  ${ORANGE}-sync${NC}, ${ORANGE}-s${NC} ${GOLD}<cmd>${NC}     Sync current session (requires CLAUDE_SESSION_NAME)"
     echo -e "  ${ORANGE}-secrets${NC} ${GOLD}<cmd>${NC}      Manage current session secrets (requires CLAUDE_SESSION_NAME)"
@@ -592,7 +593,7 @@ list_sessions() {
     local sessions=()
     while IFS= read -r -d '' dir; do
         sessions+=("$(basename "$dir")")
-    done < <(find "$SESSIONS_ROOT" -mindepth 1 -maxdepth 1 -type d -print0 | sort -z)
+    done < <(find "$SESSIONS_ROOT" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) -print0 | sort -z)
 
     if [ ${#sessions[@]} -eq 0 ]; then
         info "No sessions found"
@@ -668,19 +669,30 @@ remove_session() {
 
     local session_dir="$SESSIONS_ROOT/$session_name"
 
-    if [ ! -d "$session_dir" ]; then
+    if [ ! -d "$session_dir" ] && [ ! -L "$session_dir" ]; then
         error "Session not found: $session_name"
     fi
 
     # Confirm deletion
-    read -r -p $'\033[0;31mRemove session '"'$session_name'"$'? [y/N] \033[0m' confirm
+    if [ -L "$session_dir" ]; then
+        local target
+        target="$(readlink -f "$session_dir")"
+        read -r -p $'\033[0;31mRemove adopted session '"'$session_name'"$'? (removes symlink only, project at '"$target"$' is preserved) [y/N] \033[0m' confirm
+    else
+        read -r -p $'\033[0;31mRemove session '"'$session_name'"$'? [y/N] \033[0m' confirm
+    fi
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
         info "Cancelled"
         return 0
     fi
 
-    rm -rf "$session_dir"
-    info "Removed session: $session_name"
+    if [ -L "$session_dir" ]; then
+        rm "$session_dir"
+        info "Removed session link: $session_name (project directory preserved)"
+    else
+        rm -rf "$session_dir"
+        info "Removed session: $session_name"
+    fi
 }
 
 # Launch Claude Code
@@ -899,6 +911,92 @@ Thumbs.db
 *.swo
 *~
 GITIGNORE
+}
+
+# Adopt an existing project directory as a cs session
+adopt_session() {
+    local session_name="$1"
+    local target_dir
+    target_dir="$(pwd -P)"
+
+    validate_session_name "$session_name"
+
+    # Check if already a cs session
+    if [ -d "$target_dir/.cs" ]; then
+        error "Directory is already a cs session (found .cs/ directory)"
+    fi
+
+    # Check if session name is taken
+    local session_link="$SESSIONS_ROOT/$session_name"
+    if [ -e "$session_link" ] || [ -L "$session_link" ]; then
+        error "Session '$session_name' already exists"
+    fi
+
+    # Back up existing CLAUDE.md before create_session_structure overwrites it
+    local had_claude_md="false"
+    local original_claude_md=""
+    if [ -f "$target_dir/CLAUDE.md" ]; then
+        had_claude_md="true"
+        original_claude_md=$(cat "$target_dir/CLAUDE.md")
+    fi
+
+    # Create .cs/ structure and CLAUDE.md
+    create_session_structure "$target_dir"
+
+    # Merge original CLAUDE.md content if it existed
+    if [ "$had_claude_md" = "true" ]; then
+        printf '\n\n---\n\n# Project Instructions\n\n%s\n' "$original_claude_md" >> "$target_dir/CLAUDE.md"
+    fi
+
+    # Create symlink from sessions root
+    mkdir -p "$SESSIONS_ROOT"
+    ln -s "$target_dir" "$session_link"
+
+    # Initialize git if not already a repo
+    if [ ! -d "$target_dir/.git" ]; then
+        (
+            cd "$target_dir" || exit 0
+            create_session_gitignore "$target_dir"
+            git init -q 2>/dev/null || true
+            git branch -M main 2>/dev/null || true
+            git add -A 2>/dev/null || true
+            git commit -q -m "Adopt as cs session: $session_name" 2>/dev/null || true
+        )
+    else
+        # Merge .cs/ gitignore entries into existing .gitignore
+        local cs_gitignore_entries
+        cs_gitignore_entries=$(cat << 'ENTRIES'
+# cs session metadata
+.cs/archives/
+.cs/.discoveries-reminder-cooldown
+ENTRIES
+        )
+        if [ -f "$target_dir/.gitignore" ]; then
+            # Append entries not already present
+            while IFS= read -r line; do
+                [ -z "$line" ] && continue
+                [[ "$line" == \#* ]] && continue
+                if ! grep -qF "$line" "$target_dir/.gitignore" 2>/dev/null; then
+                    echo "$line" >> "$target_dir/.gitignore"
+                fi
+            done <<< "$cs_gitignore_entries"
+        else
+            create_session_gitignore "$target_dir"
+        fi
+
+        # Commit the adoption
+        (
+            cd "$target_dir" || exit 0
+            git add .cs/ CLAUDE.md .gitignore 2>/dev/null || true
+            if ! git diff --cached --quiet 2>/dev/null; then
+                git commit -q -m "Adopt as cs session: $session_name" 2>/dev/null || true
+            fi
+        )
+    fi
+
+    info "Adopted $(basename "$target_dir") as session '$session_name'"
+    echo -e "${DIM}Symlink: $session_link -> $target_dir${NC}"
+    echo -e "${DIM}Resume with: cs $session_name${NC}"
 }
 
 # Construct remote URL from prefix and session name
@@ -1668,6 +1766,10 @@ main() {
             remove_session "${2:-}"
             return 0
             ;;
+        -adopt)
+            adopt_session "${2:-}"
+            return 0
+            ;;
         -secrets)
             shift
             run_secrets "$@"
@@ -1745,8 +1847,12 @@ main() {
     # Check for updates (non-blocking)
     check_update_notify
 
-    # Define paths
+    # Define paths (resolve symlinks for adopted sessions so Claude Code
+    # sees the original project path, preserving conversation continuity)
     local session_dir="$SESSIONS_ROOT/$session_name"
+    if [ -L "$session_dir" ]; then
+        session_dir="$(readlink -f "$session_dir")"
+    fi
     local is_new="false"
 
     # Create session structure if needed
