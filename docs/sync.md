@@ -107,12 +107,14 @@ cs my-session -sync push
 **Auto-sync is enabled by default for all new sessions.** Changes are automatically committed in two ways:
 
 1. **Discovery commits:** Automatically committed when you write to `discoveries.md`, using the latest entry as the commit message
-2. **Session end commits:** All remaining changes committed when the session ends
+2. **Session end commits:** All remaining changes committed when the session ends, with a summary of changed filenames
+
+All auto-commits are prefixed with a robot emoji (🤖) to distinguish them from manual commits. You can filter them with `git log --grep='🤖'`.
 
 When enabled:
 - **Session start:** Pulls latest changes from remote (if configured)
-- **Discovery writes:** Creates commit with latest discovery entry as message
-- **Session end:** Commits all remaining changes (and pushes to remote if configured)
+- **Discovery writes:** Creates commit with latest discovery entry as message (e.g., `🤖 Found auth timeout bug`)
+- **Session end:** Commits remaining changes with file summary (e.g., `🤖 Update session.log, discoveries.md (+1 more)`)
 
 To disable for a specific session:
 ```bash
