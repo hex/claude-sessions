@@ -72,7 +72,7 @@ if [ -f "$ARCHIVE_FILE" ]; then
     fi
     # Suggest compaction if archive has 200+ more lines than compact summary
     if [ $((ARCHIVE_LINES - COMPACT_LINES)) -gt 200 ]; then
-        REASON="$REASON (3) Archive has grown (${ARCHIVE_LINES} lines) — run /compact-discoveries to update the compacted summary."
+        REASON="$REASON (3) Archive has grown (${ARCHIVE_LINES} lines) — use the Task tool with run_in_background=true, model=sonnet, and subagent_type=general-purpose to compact discoveries (follow the /compact-discoveries instructions)."
     fi
 fi
 

@@ -42,7 +42,7 @@ Runs after modifications to discovery files (`.cs/discoveries.md`, `.cs/discover
 Runs when Claude pauses for user input:
 - Reminds to update `.cs/discoveries.md` if not recently modified
 - Uses 5-minute cooldown to avoid excessive reminders
-- Suggests running `/compact-discoveries` when the archive has grown significantly
+- Instructs Claude to run discoveries compaction in the background when the archive has grown significantly
 
 ## discoveries-archiver.sh (PreCompact)
 

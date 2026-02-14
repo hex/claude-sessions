@@ -1,12 +1,16 @@
 Compact archived discoveries into a condensed summary for context-efficient session resumption.
 
+Use the Task tool to delegate this work to a subagent with `model: sonnet` and `subagent_type: general-purpose`. Pass the following prompt to the subagent:
+
+---
+
 You are working in a cs session. Your task is to read the raw discoveries archive and produce a condensed technical summary.
 
 ## Steps
 
 1. **Check if compaction is needed:**
    - Read `.cs/discoveries.archive.md`
-   - If it doesn't exist or has fewer than 50 lines, tell the user there's nothing to compact and stop
+   - If it doesn't exist or has fewer than 50 lines, report that there's nothing to compact and stop
 
 2. **Read the archive** and analyze all `##` entries
 
@@ -32,7 +36,7 @@ You are working in a cs session. Your task is to read the raw discoveries archiv
 - [Key point]
 ```
 
-5. **Report to the user:**
+5. **Report back:**
    - How many archive entries were processed
    - How many compacted sections were produced
    - The line count reduction (archive lines vs compact lines)
