@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.2.3"
+VERSION="2026.2.4"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -600,6 +600,21 @@ list_sessions() {
         return 0
     fi
 
+    # Dump keychain once and count secrets per session using bash builtins
+    local -A secret_counts
+    if command -v cs-secrets >/dev/null 2>&1; then
+        local keychain_dump
+        keychain_dump=$(security dump-keychain 2>/dev/null | grep -o '"svce"<blob>="cs:[^"]*"' || true)
+        if [ -n "$keychain_dump" ]; then
+            local kc_line kc_session
+            while IFS= read -r kc_line; do
+                kc_session="${kc_line#*\"cs:}"
+                kc_session="${kc_session%%:*}"
+                secret_counts["$kc_session"]=$(( ${secret_counts["$kc_session"]:-0} + 1 ))
+            done <<< "$keychain_dump"
+        fi
+    fi
+
     # Find max session name length for column alignment
     local max_len=7  # minimum "SESSION" header length
     for session in "${sessions[@]}"; do
@@ -622,20 +637,31 @@ list_sessions() {
         # Fall back to old location for unmigrated sessions
         [ ! -f "$log_file" ] && log_file="$session_dir/logs/session.log"
         if [ -f "$log_file" ]; then
-            local started
-            started=$(head -4 "$log_file" | grep "Started:" | cut -d' ' -f2-)
+            # Parse created timestamp using bash builtins (avoids forking head|grep|cut)
+            local line started=""
+            local lines_read=0
+            while IFS= read -r line && [ $lines_read -lt 4 ]; do
+                lines_read=$((lines_read + 1))
+                if [[ "$line" == Started:* ]]; then
+                    started="${line#Started: }"
+                    break
+                fi
+            done < "$log_file"
+            if [ -z "$started" ]; then
+                # Parse timestamp from "YYYY-MM-DD HH:MM:SS - Session started" format
+                IFS= read -r line < "$log_file" || true
+                if [[ "$line" =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2}) ]]; then
+                    started="${BASH_REMATCH[1]}"
+                fi
+            fi
             if [ -n "$started" ]; then
-                created=$(echo "$started" | cut -d':' -f1,2)
+                # Trim to YYYY-MM-DD HH:MM
+                created="${started%:*}"
             fi
             modified=$(get_file_mtime "$log_file")
         fi
 
-        # Count secrets for this session
-        local secret_count=0
-        if command -v cs-secrets >/dev/null 2>&1; then
-            secret_count=$(cs-secrets --session "$session" list 2>/dev/null | grep -c "^  - " 2>/dev/null) || secret_count=0
-            [[ "$secret_count" =~ ^[0-9]+$ ]] || secret_count=0
-        fi
+        local secret_count=${secret_counts["$session"]:-0}
 
         # Build secret indicator (accounts for display width in padding)
         local secret_indicator=""
@@ -856,7 +882,7 @@ get_sync_config() {
 
     if [ -f "$config_file" ]; then
         local value
-        value=$(grep "^${key}=" "$config_file" 2>/dev/null | cut -d= -f2-)
+        value=$(grep "^${key}=" "$config_file" 2>/dev/null | cut -d= -f2- || true)
         echo "${value:-$default}"
     else
         echo "$default"
