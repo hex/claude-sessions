@@ -1,6 +1,6 @@
 # Hooks
 
-The installer configures six Claude Code hooks that enable session management features.
+The installer configures seven Claude Code hooks that enable session management features.
 
 ## session-start.sh (SessionStart)
 
@@ -31,17 +31,26 @@ Runs after any file modification (Edit, Write, MultiEdit):
 
 ## discovery-commits.sh (PostToolUse on Write/Edit)
 
-Runs after modifications to `.cs/discoveries.md`:
+Runs after modifications to discovery files (`.cs/discoveries.md`, `.cs/discoveries.archive.md`, `.cs/discoveries.compact.md`):
 - Parses the latest discovery entry (heading or bullet point)
 - Creates a git commit using the entry as the commit message
 - Automatically pushes to remote if sync is enabled
-- Commits are prefixed with 📝 emoji for easy identification
+- Commit prefix indicates the file type: 📝 active, 📦 archive, 📋 compact
 
 ## discoveries-reminder.sh (Stop)
 
 Runs when Claude pauses for user input:
 - Reminds to update `.cs/discoveries.md` if not recently modified
 - Uses 5-minute cooldown to avoid excessive reminders
+- Suggests running `/compact-discoveries` when the archive has grown significantly
+
+## discoveries-archiver.sh (PreCompact)
+
+Runs before Claude Code compresses conversation history:
+- Checks if `.cs/discoveries.md` exceeds 200 lines
+- Moves oldest entries to `.cs/discoveries.archive.md` (append-only), keeping the newest ~100 lines
+- Splits on `##` heading boundaries to avoid breaking entries mid-section
+- Logs the rotation to `.cs/logs/session.log`
 
 ## session-end.sh (SessionEnd)
 
@@ -71,6 +80,9 @@ The hooks are configured in `~/.claude/settings.json`:
     ],
     "Stop": [
       { "hooks": [{ "type": "command", "command": "~/.claude/hooks/discoveries-reminder.sh", "timeout": 10 }] }
+    ],
+    "PreCompact": [
+      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/discoveries-archiver.sh", "timeout": 10 }] }
     ],
     "SessionEnd": [
       { "hooks": [{ "type": "command", "command": "~/.claude/hooks/session-end.sh", "timeout": 10 }] }

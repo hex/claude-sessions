@@ -378,9 +378,14 @@ When resuming this session, read the following files to restore context:
 
 1. **.cs/summary.md** - If exists, read first for previous session overview
 2. **.cs/README.md** - Session objective, environment, and outcome
-3. **.cs/discoveries.md** - Findings, observations, and ideas
-4. **.cs/changes.md** - Modifications and fixes made
-5. **.cs/artifacts/MANIFEST.json** - List of tracked artifacts
+3. **.cs/discoveries.md** - Recent findings, observations, and ideas
+4. **.cs/discoveries.compact.md** - If exists, condensed historical findings
+5. **.cs/changes.md** - Modifications and fixes made
+6. **.cs/artifacts/MANIFEST.json** - List of tracked artifacts
+
+Note: Historical discoveries are archived to .cs/discoveries.archive.md
+and condensed into .cs/discoveries.compact.md. Only read the archive
+if you need full detail on a specific past finding.
 
 ## Artifact Auto-Tracking
 
@@ -548,9 +553,14 @@ When resuming this session, read the following files to restore context:
 
 1. **.cs/summary.md** - If exists, read first for previous session overview
 2. **.cs/README.md** - Session objective, environment, and outcome
-3. **.cs/discoveries.md** - Findings, observations, and ideas
-4. **.cs/changes.md** - Modifications and fixes made
-5. **.cs/artifacts/MANIFEST.json** - List of tracked artifacts
+3. **.cs/discoveries.md** - Recent findings, observations, and ideas
+4. **.cs/discoveries.compact.md** - If exists, condensed historical findings
+5. **.cs/changes.md** - Modifications and fixes made
+6. **.cs/artifacts/MANIFEST.json** - List of tracked artifacts
+
+Note: Historical discoveries are archived to .cs/discoveries.archive.md
+and condensed into .cs/discoveries.compact.md. Only read the archive
+if you need full detail on a specific past finding.
 
 ## Artifact Auto-Tracking
 
@@ -1612,7 +1622,7 @@ run_uninstall() {
     fi
 
     # Remove hooks
-    for hook in session-start.sh artifact-tracker.sh changes-tracker.sh discoveries-reminder.sh session-end.sh; do
+    for hook in session-start.sh artifact-tracker.sh changes-tracker.sh discovery-commits.sh discoveries-reminder.sh discoveries-archiver.sh session-end.sh; do
         if [ -f "$hooks_dir/$hook" ]; then
             rm "$hooks_dir/$hook"
             info "Removed $hooks_dir/$hook"
@@ -1620,10 +1630,12 @@ run_uninstall() {
     done
 
     # Remove commands
-    if [ -f "$commands_dir/summary.md" ]; then
-        rm "$commands_dir/summary.md"
-        info "Removed $commands_dir/summary.md"
-    fi
+    for cmd in summary.md compact-discoveries.md; do
+        if [ -f "$commands_dir/$cmd" ]; then
+            rm "$commands_dir/$cmd"
+            info "Removed $commands_dir/$cmd"
+        fi
+    done
 
     # Remove skills
     if [ -d "$skills_dir/store-secret" ]; then
@@ -1647,7 +1659,9 @@ run_uninstall() {
         local session_start_path="$hooks_dir/session-start.sh"
         local artifact_tracker_path="$hooks_dir/artifact-tracker.sh"
         local changes_tracker_path="$hooks_dir/changes-tracker.sh"
+        local discovery_commits_path="$hooks_dir/discovery-commits.sh"
         local discoveries_reminder_path="$hooks_dir/discoveries-reminder.sh"
+        local discoveries_archiver_path="$hooks_dir/discoveries-archiver.sh"
         local session_end_path="$hooks_dir/session-end.sh"
 
         local settings
@@ -1673,6 +1687,20 @@ run_uninstall() {
         settings=$(echo "$settings" | jq --arg path "$changes_tracker_path" '
             if .hooks.PostToolUse then
                 .hooks.PostToolUse = [.hooks.PostToolUse[] | select(.hooks | all(.command != $path))]
+            else . end
+        ')
+
+        # Remove our PostToolUse discovery commits hook
+        settings=$(echo "$settings" | jq --arg path "$discovery_commits_path" '
+            if .hooks.PostToolUse then
+                .hooks.PostToolUse = [.hooks.PostToolUse[] | select(.hooks | all(.command != $path))]
+            else . end
+        ')
+
+        # Remove our PreCompact discoveries archiver hook
+        settings=$(echo "$settings" | jq --arg path "$discoveries_archiver_path" '
+            if .hooks.PreCompact then
+                .hooks.PreCompact = [.hooks.PreCompact[] | select(.hooks | all(.command != $path))]
             else . end
         ')
 

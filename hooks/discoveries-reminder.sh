@@ -58,11 +58,29 @@ fi
 # Update cooldown marker
 echo "$CURRENT_TIME" > "$COOLDOWN_FILE"
 
+# Build the reminder message
+REASON="Discoveries check: (1) Review existing entries in $DISCOVERIES_FILE — if any have been disproven or superseded by your recent work, correct or remove them now. (2) If you have new findings to add, use the Task tool with run_in_background to append them. If nothing to change, just acknowledge and continue."
+
+# Check if archive compaction is needed
+ARCHIVE_FILE="$META_DIR/discoveries.archive.md"
+COMPACT_FILE="$META_DIR/discoveries.compact.md"
+if [ -f "$ARCHIVE_FILE" ]; then
+    ARCHIVE_LINES=$(wc -l < "$ARCHIVE_FILE" | tr -d ' ')
+    COMPACT_LINES=0
+    if [ -f "$COMPACT_FILE" ]; then
+        COMPACT_LINES=$(wc -l < "$COMPACT_FILE" | tr -d ' ')
+    fi
+    # Suggest compaction if archive has 200+ more lines than compact summary
+    if [ $((ARCHIVE_LINES - COMPACT_LINES)) -gt 200 ]; then
+        REASON="$REASON (3) Archive has grown (${ARCHIVE_LINES} lines) — run /compact-discoveries to update the compacted summary."
+    fi
+fi
+
 # Return reminder prompt - use "block" + "reason" so Claude sees it
 cat << EOF
 {
   "decision": "block",
-  "reason": "Discoveries check: (1) Review existing entries in $DISCOVERIES_FILE — if any have been disproven or superseded by your recent work, correct or remove them now. (2) If you have new findings to add, use the Task tool with run_in_background to append them. If nothing to change, just acknowledge and continue."
+  "reason": "$REASON"
 }
 EOF
 

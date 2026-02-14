@@ -71,10 +71,12 @@ HOOK_ARTIFACT_TRACKER_URL="${REPO_URL}/hooks/artifact-tracker.sh"
 HOOK_CHANGES_TRACKER_URL="${REPO_URL}/hooks/changes-tracker.sh"
 HOOK_DISCOVERY_COMMITS_URL="${REPO_URL}/hooks/discovery-commits.sh"
 HOOK_DISCOVERIES_REMINDER_URL="${REPO_URL}/hooks/discoveries-reminder.sh"
+HOOK_DISCOVERIES_ARCHIVER_URL="${REPO_URL}/hooks/discoveries-archiver.sh"
 HOOK_SESSION_END_URL="${REPO_URL}/hooks/session-end.sh"
 
 # Command URLs for web install
 COMMAND_SUMMARY_URL="${REPO_URL}/commands/summary.md"
+COMMAND_COMPACT_DISCOVERIES_URL="${REPO_URL}/commands/compact-discoveries.md"
 
 # Skill URLs for web install
 SKILL_STORE_SECRET_URL="${REPO_URL}/skills/store-secret/SKILL.md"
@@ -145,7 +147,7 @@ fi
 chmod +x "$INSTALL_DIR/cs-secrets"
 
 # Install hooks
-installed "6 hooks" "$HOOKS_DIR/"
+installed "7 hooks" "$HOOKS_DIR/"
 mkdir -p "$HOOKS_DIR"
 
 if [ "$INSTALL_METHOD" = "local" ]; then
@@ -155,6 +157,7 @@ if [ "$INSTALL_METHOD" = "local" ]; then
     cp "$HOOKS_SOURCE/changes-tracker.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/discovery-commits.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/discoveries-reminder.sh" "$HOOKS_DIR/"
+    cp "$HOOKS_SOURCE/discoveries-archiver.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/session-end.sh" "$HOOKS_DIR/"
 else
     # Download from GitHub
@@ -164,6 +167,7 @@ else
         curl -fsSL "$HOOK_CHANGES_TRACKER_URL" -o "$HOOKS_DIR/changes-tracker.sh" || error "Failed to download changes-tracker.sh"
         curl -fsSL "$HOOK_DISCOVERY_COMMITS_URL" -o "$HOOKS_DIR/discovery-commits.sh" || error "Failed to download discovery-commits.sh"
         curl -fsSL "$HOOK_DISCOVERIES_REMINDER_URL" -o "$HOOKS_DIR/discoveries-reminder.sh" || error "Failed to download discoveries-reminder.sh"
+        curl -fsSL "$HOOK_DISCOVERIES_ARCHIVER_URL" -o "$HOOKS_DIR/discoveries-archiver.sh" || error "Failed to download discoveries-archiver.sh"
         curl -fsSL "$HOOK_SESSION_END_URL" -o "$HOOKS_DIR/session-end.sh" || error "Failed to download session-end.sh"
     elif command -v wget >/dev/null 2>&1; then
         wget -q "$HOOK_SESSION_START_URL" -O "$HOOKS_DIR/session-start.sh" || error "Failed to download session-start.sh"
@@ -171,6 +175,7 @@ else
         wget -q "$HOOK_CHANGES_TRACKER_URL" -O "$HOOKS_DIR/changes-tracker.sh" || error "Failed to download changes-tracker.sh"
         wget -q "$HOOK_DISCOVERY_COMMITS_URL" -O "$HOOKS_DIR/discovery-commits.sh" || error "Failed to download discovery-commits.sh"
         wget -q "$HOOK_DISCOVERIES_REMINDER_URL" -O "$HOOKS_DIR/discoveries-reminder.sh" || error "Failed to download discoveries-reminder.sh"
+        wget -q "$HOOK_DISCOVERIES_ARCHIVER_URL" -O "$HOOKS_DIR/discoveries-archiver.sh" || error "Failed to download discoveries-archiver.sh"
         wget -q "$HOOK_SESSION_END_URL" -O "$HOOKS_DIR/session-end.sh" || error "Failed to download session-end.sh"
     fi
 fi
@@ -183,11 +188,14 @@ mkdir -p "$COMMANDS_DIR"
 
 if [ "$INSTALL_METHOD" = "local" ]; then
     cp "$COMMANDS_SOURCE/summary.md" "$COMMANDS_DIR/"
+    cp "$COMMANDS_SOURCE/compact-discoveries.md" "$COMMANDS_DIR/"
 else
     if command -v curl >/dev/null 2>&1; then
         curl -fsSL "$COMMAND_SUMMARY_URL" -o "$COMMANDS_DIR/summary.md" || error "Failed to download summary.md"
+        curl -fsSL "$COMMAND_COMPACT_DISCOVERIES_URL" -o "$COMMANDS_DIR/compact-discoveries.md" || error "Failed to download compact-discoveries.md"
     elif command -v wget >/dev/null 2>&1; then
         wget -q "$COMMAND_SUMMARY_URL" -O "$COMMANDS_DIR/summary.md" || error "Failed to download summary.md"
+        wget -q "$COMMAND_COMPACT_DISCOVERIES_URL" -O "$COMMANDS_DIR/compact-discoveries.md" || error "Failed to download compact-discoveries.md"
     fi
 fi
 
@@ -261,6 +269,7 @@ else
     CHANGES_TRACKER_PATH="$HOME/.claude/hooks/changes-tracker.sh"
     DISCOVERY_COMMITS_PATH="$HOME/.claude/hooks/discovery-commits.sh"
     DISCOVERIES_REMINDER_PATH="$HOME/.claude/hooks/discoveries-reminder.sh"
+    DISCOVERIES_ARCHIVER_PATH="$HOME/.claude/hooks/discoveries-archiver.sh"
     SESSION_END_PATH="$HOME/.claude/hooks/session-end.sh"
 
     # Merge hooks: remove existing cs hooks, then add ours
@@ -318,6 +327,18 @@ else
 
     SETTINGS=$(echo "$SETTINGS" | jq --arg path "$DISCOVERIES_REMINDER_PATH" '
         .hooks.Stop = ((.hooks.Stop // []) | map(
+            select(.hooks | all(.command != $path))
+        )) + [{
+            "hooks": [{
+                "type": "command",
+                "command": $path,
+                "timeout": 10
+            }]
+        }]
+    ')
+
+    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$DISCOVERIES_ARCHIVER_PATH" '
+        .hooks.PreCompact = ((.hooks.PreCompact // []) | map(
             select(.hooks | all(.command != $path))
         )) + [{
             "hooks": [{

@@ -33,7 +33,7 @@ fi
 
 # Skip session documentation files
 case "$FILE_PATH" in
-    "$META_DIR/changes.md"|"$META_DIR/discoveries.md"|"$META_DIR/README.md"|"$META_DIR/summary.md"|"$SESSION_DIR/CLAUDE.md")
+    "$META_DIR/changes.md"|"$META_DIR/discoveries.md"|"$META_DIR/discoveries.archive.md"|"$META_DIR/discoveries.compact.md"|"$META_DIR/README.md"|"$META_DIR/summary.md"|"$SESSION_DIR/CLAUDE.md")
         exit 0
         ;;
 esac

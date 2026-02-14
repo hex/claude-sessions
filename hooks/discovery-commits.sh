@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# ABOUTME: PostToolUse hook that creates git commits when discoveries.md is updated
-# ABOUTME: Extracts the latest discovery entry and uses it as the commit message
+# ABOUTME: PostToolUse hook that creates git commits when discovery files are updated
+# ABOUTME: Handles discoveries.md, discoveries.archive.md, and discoveries.compact.md
 
 set -euo pipefail
 
@@ -26,18 +26,33 @@ INPUT=$(cat)
 TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name')
 FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
 
-# Only trigger on Edit/Write to discoveries.md
+# Only trigger on Edit/Write
 if [[ "$TOOL_NAME" != "Edit" && "$TOOL_NAME" != "Write" ]]; then
     exit 0
 fi
 
-if [ -z "$FILE_PATH" ] || [ "$FILE_PATH" != "$META_DIR/discoveries.md" ]; then
-    exit 0
-fi
+# Match any discovery file (active, archive, or compact)
+COMMIT_PREFIX=""
+DISCOVERIES_FILE=""
+case "$FILE_PATH" in
+    "$META_DIR/discoveries.md")
+        DISCOVERIES_FILE="$FILE_PATH"
+        COMMIT_PREFIX="📝"
+        ;;
+    "$META_DIR/discoveries.archive.md")
+        DISCOVERIES_FILE="$FILE_PATH"
+        COMMIT_PREFIX="📦"
+        ;;
+    "$META_DIR/discoveries.compact.md")
+        DISCOVERIES_FILE="$FILE_PATH"
+        COMMIT_PREFIX="📋"
+        ;;
+    *)
+        exit 0
+        ;;
+esac
 
-# Parse the latest discovery entry from discoveries.md
-DISCOVERIES_FILE="$META_DIR/discoveries.md"
-if [ ! -f "$DISCOVERIES_FILE" ]; then
+if [ -z "$FILE_PATH" ] || [ ! -f "$DISCOVERIES_FILE" ]; then
     exit 0
 fi
 
@@ -78,8 +93,7 @@ fi
 
     # Only commit if there are changes
     if ! git diff --cached --quiet 2>/dev/null; then
-        # Prefix with emoji for discovery commits
-        COMMIT_MSG="📝 $LATEST_ENTRY"
+        COMMIT_MSG="$COMMIT_PREFIX $LATEST_ENTRY"
 
         if git commit -q -m "$COMMIT_MSG" 2>/dev/null; then
             # Log the discovery commit

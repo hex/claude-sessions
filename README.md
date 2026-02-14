@@ -29,6 +29,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 - **Automatic artifact tracking** - Scripts and configs are auto-saved to `artifacts/`
 - **Secure secrets handling** - Sensitive data auto-detected and stored in OS keychain; sync across machines with [age](https://github.com/FiloSottile/age) public-key encryption
 - **Documentation templates** - Pre-configured markdown files for discoveries and changes
+- **Discoveries archival** - Automatic rotation of large discovery files before context compaction, with LLM-powered condensation via `/compact-discoveries`
 - **Automatic git version control** - Every session gets local git history with auto-commits on discoveries and session end; optionally sync to remote
 - **Session locking** - PID-based lock prevents the same session from being opened in two terminals simultaneously; use `--force` to override
 - **Update notifications** - Checks for updates and notifies when new versions are available
@@ -55,7 +56,7 @@ Or clone and run `./install.ps1`.
 
 The installer:
 - Adds `cs` and `cs-secrets` to `~/.local/bin/`
-- Installs six [hooks](docs/hooks.md) to `~/.claude/hooks/` for session tracking
+- Installs seven [hooks](docs/hooks.md) to `~/.claude/hooks/` for session tracking
 - Adds a `/summary` command and `store-secret` skill to `~/.claude/`
 - Installs shell completions for bash and zsh
 - Configures hook entries in `~/.claude/settings.json`
@@ -111,7 +112,9 @@ This converts the current directory into a cs session in place:
 ~/.claude-sessions/<session-name>/
 ├── .cs/                    # Session metadata
 │   ├── README.md           # Objective, environment, outcome
-│   ├── discoveries.md      # Findings and observations
+│   ├── discoveries.md      # Recent findings and observations
+│   ├── discoveries.archive.md  # Archived historical entries
+│   ├── discoveries.compact.md  # LLM-condensed archive summary
 │   ├── changes.md          # Auto-logged file modifications
 │   ├── sync.conf           # Sync configuration
 │   ├── artifacts/          # Auto-tracked scripts and configs
@@ -185,7 +188,7 @@ Completions support:
 
 ## Documentation
 
-- **[Hooks](docs/hooks.md)** - How the six Claude Code hooks work
+- **[Hooks](docs/hooks.md)** - How the seven Claude Code hooks work
 - **[Secrets](docs/secrets.md)** - Secure secrets handling and storage backends
 - **[Sync](docs/sync.md)** - Git-based session sync across machines
 
