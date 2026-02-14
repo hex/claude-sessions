@@ -62,7 +62,7 @@ echo "$CURRENT_TIME" > "$COOLDOWN_FILE"
 cat << EOF
 {
   "decision": "block",
-  "reason": "Quick check: Have you discovered anything noteworthy about the codebase, system, or environment during this work? If so, briefly update $DISCOVERIES_FILE. If nothing significant, just acknowledge and continue."
+  "reason": "Quick check: Have you discovered anything noteworthy? If so, use the Task tool with run_in_background to review and update $DISCOVERIES_FILE — add new findings and remove or correct any earlier entries that have been disproven or superseded. If nothing to change, just acknowledge and continue."
 }
 EOF
 
