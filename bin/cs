@@ -69,7 +69,8 @@ show_help() {
     echo -e "       cs ${ORANGE}-<command>${NC}                  Run a global subcommand"
     echo ""
     echo -e "${RUST}Commands:${NC}"
-    echo -e "  ${GOLD}<name>${NC}              Create or resume session ${GOLD}<name>${NC}"
+    echo -e "  ${GOLD}<name>${NC}              Create or resume session ${GOLD}<name>${NC} (locks session)"
+    echo -e "  ${GOLD}<name>${NC} ${ORANGE}--force${NC}      Override active session lock"
     echo -e "  ${GOLD}<name>${NC} ${ORANGE}-sync${NC} ${GOLD}<cmd>${NC}  Run sync command on ${GOLD}<name>${NC} without launching session"
     echo -e "  ${GOLD}<name>${NC} ${ORANGE}-secrets${NC} ${GOLD}<cmd>${NC}  Run secrets command on ${GOLD}<name>${NC} without launching session"
     echo -e "  ${ORANGE}-list${NC}, ${ORANGE}-ls${NC}          List all sessions"
@@ -125,6 +126,49 @@ show_help() {
 
 warn() {
     echo -e "${YELLOW}$1${NC}"
+}
+
+# Acquire a PID-based session lock to prevent concurrent access
+acquire_session_lock() {
+    local meta_dir="$1"
+    local force="${2:-}"
+    local lock_file="$meta_dir/session.lock"
+
+    if [ -f "$lock_file" ]; then
+        local lock_pid
+        lock_pid=$(cat "$lock_file" 2>/dev/null || echo "")
+
+        if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
+            # PID is alive — session is in use
+            if [ "$force" = "true" ]; then
+                warn "Overriding active session lock (PID $lock_pid)"
+            else
+                echo -e "${RED}Error: Session is already open (PID $lock_pid)${NC}" >&2
+                echo -e "${DIM}Use --force to override: cs $(basename "$(dirname "$meta_dir")") --force${NC}" >&2
+                exit 1
+            fi
+        else
+            # PID is dead — stale lock
+            warn "Removing stale session lock (PID ${lock_pid:-unknown})"
+            rm -f "$lock_file"
+        fi
+    fi
+
+    echo "$$" > "$lock_file"
+}
+
+# Release session lock if owned by current process
+release_session_lock() {
+    local meta_dir="$1"
+    local lock_file="$meta_dir/session.lock"
+
+    if [ -f "$lock_file" ]; then
+        local lock_pid
+        lock_pid=$(cat "$lock_file" 2>/dev/null || echo "")
+        if [ "$lock_pid" = "$$" ]; then
+            rm -f "$lock_file"
+        fi
+    fi
 }
 
 # Fetch latest version from GitHub
@@ -726,6 +770,11 @@ launch_claude_code() {
     local session_name="$1"
     local session_dir="$2"
     local is_new="$3"
+    local force="${4:-}"
+
+    # Acquire session lock before anything else
+    acquire_session_lock "$session_dir/.cs" "$force"
+    trap 'release_session_lock "'"$session_dir/.cs"'"' EXIT INT TERM
 
     # Set environment variables
     export CLAUDE_SESSION_NAME="$session_name"
@@ -1834,11 +1883,12 @@ main() {
     esac
 
     local session_name="$cmd"
+    local force_flag=""
 
     # Validate inputs
     validate_session_name "$session_name"
 
-    # Check for session subcommands: cs <session> -sync, cs <session> -secrets
+    # Check for session subcommands: cs <session> -sync, cs <session> -secrets, --force
     if [ $# -gt 1 ]; then
         local subcmd="$2"
         shift 2  # Remove session name and subcommand
@@ -1861,6 +1911,9 @@ main() {
                 export CLAUDE_ARTIFACT_DIR="$SESSIONS_ROOT/$session_name/.cs/artifacts"
                 run_secrets "$@"
                 return 0
+                ;;
+            --force)
+                force_flag="true"
                 ;;
             *)
                 error "Unknown session command: $subcmd. Use -sync or -secrets."
@@ -1900,7 +1953,7 @@ main() {
     fi
 
     # Launch Claude Code
-    launch_claude_code "$session_name" "$session_dir" "$is_new"
+    launch_claude_code "$session_name" "$session_dir" "$is_new" "$force_flag"
 }
 
 main "$@"

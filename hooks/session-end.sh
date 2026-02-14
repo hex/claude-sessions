@@ -118,6 +118,7 @@ fi
 
 # Clean up lock files
 find "$ARTIFACT_DIR" -name "*.lock" -delete 2>/dev/null || true
+rm -f "$META_DIR/session.lock" 2>/dev/null || true
 
 echo "Session management cleanup complete" >> "$META_DIR/logs/session.log"
 echo "================================================================================" >> "$META_DIR/logs/session.log"

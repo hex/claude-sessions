@@ -30,6 +30,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 - **Secure secrets handling** - Sensitive data auto-detected and stored in OS keychain; sync across machines with [age](https://github.com/FiloSottile/age) public-key encryption
 - **Documentation templates** - Pre-configured markdown files for discoveries and changes
 - **Automatic git version control** - Every session gets local git history with auto-commits on discoveries and session end; optionally sync to remote
+- **Session locking** - PID-based lock prevents the same session from being opened in two terminals simultaneously; use `--force` to override
 - **Update notifications** - Checks for updates and notifies when new versions are available
 
 ## Installation
@@ -63,6 +64,7 @@ The installer:
 
 ```bash
 cs <session-name>           # Create or resume a session
+cs <session-name> --force   # Override active session lock
 cs -adopt <name>            # Adopt current directory as a session
 cs -list, -ls               # List all sessions
 cs -remove, -rm <name>      # Remove a session
