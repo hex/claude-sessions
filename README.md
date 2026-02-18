@@ -86,7 +86,7 @@ cs <session> -secrets <cmd> # Manage secrets
 
 ```bash
 cs debug-api                # Create/resume 'debug-api' session
-cs fix-auth -sync remote      # Initialize sync for session
+cs fix-auth -sync remote <url> # Initialize sync for session
 cs my-project -secrets list # List secrets for session
 ```
 

@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.2.7"
+VERSION="2026.2.8"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -1736,7 +1736,7 @@ run_uninstall() {
     # Ask about secrets in keychain
     if [ -d "$SESSIONS_ROOT" ]; then
         local sessions
-        sessions=$(ls -1 "$SESSIONS_ROOT" 2>/dev/null | grep -v "^INDEX.md$" || true)
+        sessions=$(ls -1 "$SESSIONS_ROOT" 2>/dev/null || true)
 
         if [ -n "$sessions" ]; then
             echo ""
@@ -1833,11 +1833,11 @@ run_sync() {
             if [ -n "$session_name" ]; then
                 sync_status "$session_name"
             else
-                error "Usage: cs -sync <init|push|pull|status|auto|clone>"
+                error "Usage: cs -sync <remote|push|pull|status|auto|clone>"
             fi
             ;;
         *)
-            error "Unknown sync command: $subcommand. Use: init, push, pull, status, auto, clone"
+            error "Unknown sync command: $subcommand. Use: remote, push, pull, status, auto, clone"
             ;;
     esac
 }

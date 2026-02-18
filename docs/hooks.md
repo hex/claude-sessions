@@ -57,8 +57,8 @@ Runs before Claude Code compresses conversation history:
 Runs when Claude Code session ends:
 - Logs session end time
 - Creates `.cs/archives/artifacts-YYYYMMDD-HHMMSS.tar.gz` archive
-- Updates global `~/.claude-sessions/INDEX.md`
-- Auto-pushes to remote if sync is enabled
+- Exports secrets to encrypted file if password is set
+- Auto-commits with descriptive messages and pushes to remote if sync is enabled
 - Cleans up lock files
 
 ## Hook Configuration

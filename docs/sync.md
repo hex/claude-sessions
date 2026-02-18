@@ -44,7 +44,7 @@ Sync sessions across machines using git.
 - **Simplicity:** No GitHub/GitLab account needed
 - **Offline:** Version control without internet
 - **Automatic:** Enabled by default for all new sessions
-- **Upgrade path:** Add a remote anytime with `sync init <url>`
+- **Upgrade path:** Add a remote anytime with `sync remote <url>`
 
 ### Using Local-Only Mode
 

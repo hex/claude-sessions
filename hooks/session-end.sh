@@ -50,29 +50,6 @@ if [ "$ARTIFACT_COUNT" -gt 0 ]; then
     fi
 fi
 
-# Update global session index
-GLOBAL_INDEX="$HOME/.claude-sessions/INDEX.md"
-
-if [ ! -f "$GLOBAL_INDEX" ]; then
-    cat > "$GLOBAL_INDEX" << 'EOF'
-# Claude Code Sessions Index
-
-This file tracks all cs sessions for quick reference.
-
-## Sessions
-
-EOF
-fi
-
-# Append session summary to index
-cat >> "$GLOBAL_INDEX" << EOF
-
-### $CLAUDE_SESSION_NAME
-- **Ended:** $(date '+%Y-%m-%d %H:%M:%S')
-- **Location:** $SESSION_DIR
-- **Artifacts:** $ARTIFACT_COUNT files
-EOF
-
 # Auto-push if enabled
 SYNC_CONFIG="$META_DIR/sync.conf"
 if [ -f "$SYNC_CONFIG" ] && [ -d "$SESSION_DIR/.git" ]; then
