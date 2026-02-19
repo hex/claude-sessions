@@ -183,12 +183,12 @@ Then restart your shell or run `source ~/.bashrc` / `source ~/.zshrc` / `. $PROF
 Completions support:
 - Session names: `cs home<TAB>` → `cs homeassistant`
 - Global flags: `cs -<TAB>` → `-list`, `-sync`, `-secrets`, etc.
-- Sync commands: `cs session -sync <TAB>` → `init`, `push`, `pull`, etc.
+- Sync commands: `cs session -sync <TAB>` → `remote`, `push`, `pull`, etc.
 - Secrets commands: `cs session -secrets <TAB>` → `set`, `get`, `list`, etc.
 
 ## Documentation
 
-- **[Hooks](docs/hooks.md)** - How the seven Claude Code hooks work
+- **[Hooks](docs/hooks.md)** - How the Claude Code hooks work
 - **[Secrets](docs/secrets.md)** - Secure secrets handling and storage backends
 - **[Sync](docs/sync.md)** - Git-based session sync across machines
 

@@ -16,7 +16,7 @@ _cs_completions() {
     local global_flags="-list -ls -remove -rm -sync -s -secrets -update -uninstall -help -h -version -v"
 
     # Sync subcommands
-    local sync_cmds="init push pull status st auto clone"
+    local sync_cmds="remote push pull status st auto clone"
 
     # Secrets subcommands
     local secrets_cmds="set store get list ls delete rm purge export export-file import-file migrate backend"

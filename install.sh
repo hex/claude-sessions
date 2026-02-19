@@ -59,6 +59,13 @@ HOOKS_DIR="${HOME}/.claude/hooks"
 COMMANDS_DIR="${HOME}/.claude/commands"
 BASH_COMPLETION_DIR="${HOME}/.bash_completion.d"
 ZSH_COMPLETION_DIR="${HOME}/.zsh/completions"
+# Detect existing zsh completion dir from user's fpath config
+if [ -f "$HOME/.zshrc" ]; then
+    _detected_dir=$(grep -oE 'fpath.*~/\.zsh/completions?' "$HOME/.zshrc" 2>/dev/null | grep -oE '~/\.zsh/completions?' | head -1 | sed "s|~|$HOME|")
+    if [ -n "$_detected_dir" ]; then
+        ZSH_COMPLETION_DIR="$_detected_dir"
+    fi
+fi
 CLAUDE_SETTINGS="${HOME}/.claude/settings.json"
 SESSIONS_DIR="${HOME}/.claude-sessions"
 REPO_URL="https://raw.githubusercontent.com/hex/claude-sessions/main"
@@ -400,7 +407,7 @@ case "$SHELL_NAME" in
         fi
         ;;
     zsh)
-        if ! grep -q 'fpath.*zsh/completions' "$HOME/.zshrc" 2>/dev/null; then
+        if ! grep -qE 'fpath.*zsh/completions?' "$HOME/.zshrc" 2>/dev/null; then
             warn "   To enable tab completion, add to ~/.zshrc (before compinit):"
             warn "     fpath=(~/.zsh/completions \$fpath)"
             warn "     autoload -Uz compinit && compinit"

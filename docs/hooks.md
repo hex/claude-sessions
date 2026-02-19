@@ -1,6 +1,6 @@
 # Hooks
 
-The installer configures seven Claude Code hooks that enable session management features.
+The installer configures Claude Code hooks that enable session management features.
 
 ## session-start.sh (SessionStart)
 
@@ -32,7 +32,7 @@ Runs after any file modification (Edit, Write, MultiEdit):
 ## discovery-commits.sh (PostToolUse on Write/Edit)
 
 Runs after modifications to discovery files (`.cs/discoveries.md`, `.cs/discoveries.archive.md`, `.cs/discoveries.compact.md`):
-- Parses the latest discovery entry (heading or bullet point)
+- Parses the latest `##` heading (falls back to last bullet point if no heading)
 - Creates a git commit using the entry as the commit message
 - Automatically pushes to remote if sync is enabled
 - Commit prefix indicates the file type: 📝 active, 📦 archive, 📋 compact
@@ -40,7 +40,7 @@ Runs after modifications to discovery files (`.cs/discoveries.md`, `.cs/discover
 ## discoveries-reminder.sh (Stop)
 
 Runs when Claude pauses for user input:
-- Reminds to update `.cs/discoveries.md` if not recently modified
+- Reminds to review existing entries and update `.cs/discoveries.md` if not recently modified
 - Uses 5-minute cooldown to avoid excessive reminders
 - Instructs Claude to run discoveries compaction in the background when the archive has grown significantly
 
@@ -57,8 +57,8 @@ Runs before Claude Code compresses conversation history:
 Runs when Claude Code session ends:
 - Logs session end time
 - Creates `.cs/archives/artifacts-YYYYMMDD-HHMMSS.tar.gz` archive
-- Exports secrets to encrypted file if password is set
-- Auto-commits with descriptive messages and pushes to remote if sync is enabled
+- Exports secrets to encrypted file if sync is enabled and password is set
+- Auto-commits with descriptive messages (🔄 prefix) and pushes to remote if sync is enabled
 - Cleans up lock files
 
 ## Hook Configuration

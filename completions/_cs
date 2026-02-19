@@ -19,7 +19,7 @@ _cs() {
     # Sync subcommands with descriptions
     local -a sync_cmds
     sync_cmds=(
-        'init:Initialize git repo with remote URL'
+        'remote:Add remote to git repo'
         'push:Commit and push changes'
         'pull:Pull changes from remote'
         'status:Show sync status'

@@ -82,7 +82,7 @@ cs my-session -sync push
 
 | Feature | Local-Only | With Remote |
 |---------|------------|-------------|
-| `sync remote` | No-op (already local) | Adds remote origin |
+| `sync remote` | Shows local-only status | Adds remote origin |
 | `sync push` | Commits locally | Commits and pushes |
 | `sync pull` | No-op (graceful skip) | Pulls from remote |
 | `sync status` | Shows local commit count | Shows ahead/behind |
@@ -98,23 +98,23 @@ cs my-session -sync push
 | `cs <session> -sync pull` | Pull and import secrets (if remote configured) |
 | `cs <session> -sync status` | Show sync state (local or remote) |
 | `cs <session> -sync auto on` | Enable auto-sync on session start/end |
-| `cs -sync clone <session>` | Clone session (uses CS_SYNC_PREFIX) |
-| `cs -sync clone <url>` | Clone session from explicit URL |
+| `cs -sync clone <session> [name]` | Clone session (uses CS_SYNC_PREFIX) |
+| `cs -sync clone <url> [name]` | Clone session from explicit URL |
 | `cs <session> -s` | Alias for `-sync` |
 
 ## Auto-Sync
 
 **Auto-sync is enabled by default for all new sessions.** Changes are automatically committed in two ways:
 
-1. **Discovery commits:** Automatically committed when you write to `discoveries.md`, using the latest entry as the commit message
+1. **Discovery commits:** Automatically committed when you write to `discoveries.md`, using the last `##` heading (or last bullet point if no heading) as the commit message
 2. **Session end commits:** All remaining changes committed when the session ends, with a summary of changed filenames
 
-All auto-commits are prefixed with a robot emoji (🤖) to distinguish them from manual commits. You can filter them with `git log --grep='🤖'`.
+Discovery commits are prefixed with file-type emoji (📝 active, 📦 archive, 📋 compact). Session-end commits use 🔄.
 
 When enabled:
 - **Session start:** Pulls latest changes from remote (if configured)
-- **Discovery writes:** Creates commit with latest discovery entry as message (e.g., `🤖 Found auth timeout bug`)
-- **Session end:** Commits remaining changes with file summary (e.g., `🤖 Update session.log, discoveries.md (+1 more)`)
+- **Discovery writes:** Creates commit with latest heading as message (e.g., `📝 Found auth timeout bug`)
+- **Session end:** Commits remaining changes with file summary (e.g., `🔄 3 files: session.log, discoveries.md, changes.md`)
 
 To disable for a specific session:
 ```bash
