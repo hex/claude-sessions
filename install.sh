@@ -279,11 +279,20 @@ else
     DISCOVERIES_ARCHIVER_PATH="$HOME/.claude/hooks/discoveries-archiver.sh"
     SESSION_END_PATH="$HOME/.claude/hooks/session-end.sh"
 
-    # Merge hooks: remove existing cs hooks, then add ours
+    # Tilde-path variants for dedup (handles entries added with ~ instead of $HOME)
+    SESSION_START_TILDE="~/.claude/hooks/session-start.sh"
+    ARTIFACT_TRACKER_TILDE="~/.claude/hooks/artifact-tracker.sh"
+    CHANGES_TRACKER_TILDE="~/.claude/hooks/changes-tracker.sh"
+    DISCOVERY_COMMITS_TILDE="~/.claude/hooks/discovery-commits.sh"
+    DISCOVERIES_REMINDER_TILDE="~/.claude/hooks/discoveries-reminder.sh"
+    DISCOVERIES_ARCHIVER_TILDE="~/.claude/hooks/discoveries-archiver.sh"
+    SESSION_END_TILDE="~/.claude/hooks/session-end.sh"
+
+    # Merge hooks: remove existing cs hooks (both path forms), then add ours
     # This prevents duplicates on reinstall while preserving other hooks
-    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$SESSION_START_PATH" '
+    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$SESSION_START_PATH" --arg tilde "$SESSION_START_TILDE" '
         .hooks.SessionStart = ((.hooks.SessionStart // []) | map(
-            select(.hooks | all(.command != $path))
+            select(.hooks | all(.command != $path and .command != $tilde))
         )) + [{
             "hooks": [{
                 "type": "command",
@@ -293,9 +302,9 @@ else
         }]
     ')
 
-    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$ARTIFACT_TRACKER_PATH" '
+    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$ARTIFACT_TRACKER_PATH" --arg tilde "$ARTIFACT_TRACKER_TILDE" '
         .hooks.PreToolUse = ((.hooks.PreToolUse // []) | map(
-            select((.matcher == "Write" and (.hooks | any(.command == $path))) | not)
+            select((.matcher == "Write" and (.hooks | any(.command == $path or .command == $tilde))) | not)
         )) + [{
             "matcher": "Write",
             "hooks": [{
@@ -306,9 +315,9 @@ else
         }]
     ')
 
-    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$CHANGES_TRACKER_PATH" '
+    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$CHANGES_TRACKER_PATH" --arg tilde "$CHANGES_TRACKER_TILDE" '
         .hooks.PostToolUse = ((.hooks.PostToolUse // []) | map(
-            select(.hooks | all(.command != $path))
+            select(.hooks | all(.command != $path and .command != $tilde))
         )) + [{
             "matcher": "",
             "hooks": [{
@@ -319,9 +328,9 @@ else
         }]
     ')
 
-    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$DISCOVERY_COMMITS_PATH" '
+    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$DISCOVERY_COMMITS_PATH" --arg tilde "$DISCOVERY_COMMITS_TILDE" '
         .hooks.PostToolUse = ((.hooks.PostToolUse // []) | map(
-            select(.hooks | all(.command != $path))
+            select(.hooks | all(.command != $path and .command != $tilde))
         )) + [{
             "matcher": "Write|Edit",
             "hooks": [{
@@ -332,9 +341,9 @@ else
         }]
     ')
 
-    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$DISCOVERIES_REMINDER_PATH" '
+    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$DISCOVERIES_REMINDER_PATH" --arg tilde "$DISCOVERIES_REMINDER_TILDE" '
         .hooks.Stop = ((.hooks.Stop // []) | map(
-            select(.hooks | all(.command != $path))
+            select(.hooks | all(.command != $path and .command != $tilde))
         )) + [{
             "hooks": [{
                 "type": "command",
@@ -344,9 +353,9 @@ else
         }]
     ')
 
-    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$DISCOVERIES_ARCHIVER_PATH" '
+    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$DISCOVERIES_ARCHIVER_PATH" --arg tilde "$DISCOVERIES_ARCHIVER_TILDE" '
         .hooks.PreCompact = ((.hooks.PreCompact // []) | map(
-            select(.hooks | all(.command != $path))
+            select(.hooks | all(.command != $path and .command != $tilde))
         )) + [{
             "hooks": [{
                 "type": "command",
@@ -356,9 +365,9 @@ else
         }]
     ')
 
-    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$SESSION_END_PATH" '
+    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$SESSION_END_PATH" --arg tilde "$SESSION_END_TILDE" '
         .hooks.SessionEnd = ((.hooks.SessionEnd // []) | map(
-            select(.hooks | all(.command != $path))
+            select(.hooks | all(.command != $path and .command != $tilde))
         )) + [{
             "hooks": [{
                 "type": "command",
