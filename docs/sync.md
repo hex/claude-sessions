@@ -82,9 +82,9 @@ cs my-session -sync push
 
 | Feature | Local-Only | With Remote |
 |---------|------------|-------------|
-| `sync remote` | Shows local-only status | Adds remote origin |
+| `sync remote` | Initializes local git repo | Adds remote origin |
 | `sync push` | Commits locally | Commits and pushes |
-| `sync pull` | No-op (graceful skip) | Pulls from remote |
+| `sync pull` | Shows local commit info | Pulls from remote |
 | `sync status` | Shows local commit count | Shows ahead/behind |
 | Auto-sync | Commits on session end | Syncs with remote |
 

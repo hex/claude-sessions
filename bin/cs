@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.2.9"
+VERSION="2026.2.10"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -129,9 +129,9 @@ show_help() {
     echo -e "  cs ${GOLD}my-session${NC} ${ORANGE}-sync auto off${NC}      Disable auto-commit (on by default)"
     echo -e "  cs ${ORANGE}-sync clone${NC} ${GOLD}other-session${NC}    Clone session (uses CS_SYNC_PREFIX)"
     echo -e "  cs ${GOLD}my-session${NC} ${ORANGE}-secrets list${NC}     List secrets for 'my-session'"
-    echo -e "  cs ${ORANGE}-remote add${NC} ${GOLD}mini alex@mac-mini.local${NC}  Register a remote host"
+    echo -e "  cs ${ORANGE}-remote add${NC} ${GOLD}mini hex@mac-mini.local${NC}  Register a remote host"
     echo -e "  cs ${GOLD}my-session${NC} ${ORANGE}--on${NC} ${GOLD}mini${NC}          Run session on registered remote"
-    echo -e "  cs ${GOLD}alex@mac-mini.local:debug${NC}        Connect via host:session syntax"
+    echo -e "  cs ${GOLD}hex@mac-mini.local:debug${NC}        Connect via host:session syntax"
     echo -e "  cs ${GOLD}my-session${NC} ${ORANGE}--move-to${NC} ${GOLD}mini${NC}      Move local session to remote"
     echo -e "  cs ${ORANGE}-list${NC}                        List all sessions"
     echo -e "  cs ${ORANGE}-rm${NC} ${GOLD}old-session${NC}              Remove 'old-session'"
@@ -1139,7 +1139,7 @@ run_remote() {
                 error "Usage: cs -remote add <name> <user@host>"
             fi
             if [[ "$host" != *"@"* ]]; then
-                error "Host must be in user@hostname format (e.g., alex@mac-mini.local)"
+                error "Host must be in user@hostname format (e.g., hex@mac-mini.local)"
             fi
             set_remote_host "$name" "$host"
             info "Registered remote host: $name -> $host"
@@ -1209,6 +1209,20 @@ resolve_remote_host() {
     return 1
 }
 
+# Query the remote machine's CS_SESSIONS_ROOT via ssh
+detect_remote_sessions_root() {
+    local resolved_host="$1"
+
+    # Query via ssh with short timeout
+    local remote_root
+    if remote_root=$(ssh -o ConnectTimeout=3 -o BatchMode=yes "$resolved_host" \
+        'echo ${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}' 2>/dev/null); then
+        [ -n "$remote_root" ] && echo "$remote_root" && return 0
+    fi
+
+    echo "$HOME/.claude-sessions"
+}
+
 # Connect to a remote session via et (preferred) or ssh, wrapped in tmux
 connect_remote() {
     local session_name="$1"
@@ -1250,15 +1264,21 @@ connect_remote() {
         it2setcolor tab blue 2>/dev/null || true
     fi
 
+    # Transport-specific flag: et uses -c (command), ssh uses -t (TTY)
+    local transport_flag="-t"
+    if [ "$transport" = "et" ]; then
+        transport_flag="-c"
+    fi
+
     # Dry run mode for testing
     if [ "${CS_TEST_DRY_RUN:-}" = "1" ]; then
-        echo "DRY_RUN: $transport $resolved_host -t $remote_cmd"
+        echo "DRY_RUN: $transport $resolved_host $transport_flag $remote_cmd"
         echo "DRY_RUN: tmux session=$tmux_session"
         return 0
     fi
 
     # Execute connection (replaces this process)
-    exec "$transport" "$resolved_host" -t "$remote_cmd"
+    exec "$transport" "$resolved_host" "$transport_flag" "$remote_cmd"
 }
 
 # Move a local session to a remote host
@@ -1280,15 +1300,20 @@ move_session_to_remote() {
     resolved_host=$(resolve_remote_host "$host_spec") || \
         error "Host '$host_spec' not found in registry. Register it with: cs -remote add <name> <user@host>"
 
+    # Detect remote sessions root via ssh
+    local remote_root
+    remote_root=$(detect_remote_sessions_root "$resolved_host")
+
     # rsync session to remote
-    local rsync_cmd="rsync -az ${session_dir}/ ${resolved_host}:~/.claude-sessions/${session_name}/"
+    local rsync_cmd="rsync -az ${session_dir}/ ${resolved_host}:${remote_root}/${session_name}/"
 
     echo -e "Moving session ${GOLD}${session_name}${NC} to ${GOLD}${resolved_host}${NC}..."
 
     if [ "${CS_TEST_DRY_RUN:-}" = "1" ]; then
         echo "DRY_RUN: $rsync_cmd"
         # Still create the stub in dry run
-        echo "host=$host_spec" > "$session_dir/.cs/remote.conf"
+        mkdir -p "$session_dir/.cs"
+        printf 'host=%s\nroot=%s\n' "$host_spec" "$remote_root" > "$session_dir/.cs/remote.conf"
         info "Session '$session_name' moved to $resolved_host (dry run)"
         return 0
     fi
@@ -1297,8 +1322,9 @@ move_session_to_remote() {
         error "rsync failed. Local session was not modified."
     fi
 
-    # Write remote.conf to mark this as a remote session
-    echo "host=$host_spec" > "$session_dir/.cs/remote.conf"
+    # Write remote.conf with host and detected root
+    mkdir -p "$session_dir/.cs"
+    printf 'host=%s\nroot=%s\n' "$host_spec" "$remote_root" > "$session_dir/.cs/remote.conf"
     info "Session '$session_name' moved to $resolved_host"
     echo -e "${DIM}Connect with: cs $session_name${NC}"
 }

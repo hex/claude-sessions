@@ -9,11 +9,16 @@ _cs() {
     # Helper: get session names
     _cs_sessions() {
         local sessions_root="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
-        local -a sessions
+        local -a sessions session_descs
         if [[ -d "$sessions_root" ]]; then
             sessions=("$sessions_root"/*(N/:t))
         fi
-        compadd -a sessions
+        # Use _describe so zsh shows a menu even when one name is an
+        # exact prefix of another (e.g., "comfy" and "comfy-nodes")
+        for s in "${sessions[@]}"; do
+            session_descs+=("$s:session")
+        done
+        _describe 'session' session_descs
     }
 
     # Sync subcommands with descriptions

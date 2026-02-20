@@ -108,10 +108,10 @@ run_test() {
 
 test_remote_add_host() {
     local output
-    output=$("$CS_BIN" -remote add myserver alex@mac-mini.local 2>&1)
+    output=$("$CS_BIN" -remote add myserver hex@mac-mini.local 2>&1)
 
     assert_exists "$CS_SESSIONS_ROOT/.remotes" ".remotes file should be created" || return 1
-    assert_file_contains "$CS_SESSIONS_ROOT/.remotes" "myserver=alex@mac-mini.local" \
+    assert_file_contains "$CS_SESSIONS_ROOT/.remotes" "myserver=hex@mac-mini.local" \
         "Should store host entry" || return 1
 }
 
@@ -126,26 +126,26 @@ test_remote_add_requires_at_sign() {
 }
 
 test_remote_add_duplicate_updates() {
-    "$CS_BIN" -remote add myserver alex@mac-mini.local 2>&1
-    "$CS_BIN" -remote add myserver alex@new-host.local 2>&1
+    "$CS_BIN" -remote add myserver hex@mac-mini.local 2>&1
+    "$CS_BIN" -remote add myserver hex@new-host.local 2>&1
 
     # Should have updated, not duplicated
     local count
     count=$(grep -c "myserver=" "$CS_SESSIONS_ROOT/.remotes")
     assert_eq "1" "$count" "Should have exactly one entry for myserver" || return 1
-    assert_file_contains "$CS_SESSIONS_ROOT/.remotes" "myserver=alex@new-host.local" \
+    assert_file_contains "$CS_SESSIONS_ROOT/.remotes" "myserver=hex@new-host.local" \
         "Should have updated host" || return 1
 }
 
 test_remote_list_hosts() {
-    "$CS_BIN" -remote add server1 alex@host1.local 2>&1
+    "$CS_BIN" -remote add server1 hex@host1.local 2>&1
     "$CS_BIN" -remote add server2 bob@host2.local 2>&1
 
     local output
     output=$("$CS_BIN" -remote list 2>&1)
 
     assert_output_contains "$output" "server1" "Should list server1" || return 1
-    assert_output_contains "$output" "alex@host1.local" "Should show host1 address" || return 1
+    assert_output_contains "$output" "hex@host1.local" "Should show host1 address" || return 1
     assert_output_contains "$output" "server2" "Should list server2" || return 1
     assert_output_contains "$output" "bob@host2.local" "Should show host2 address" || return 1
 }
@@ -158,7 +158,7 @@ test_remote_list_empty() {
 }
 
 test_remote_remove_host() {
-    "$CS_BIN" -remote add myserver alex@mac-mini.local 2>&1
+    "$CS_BIN" -remote add myserver hex@mac-mini.local 2>&1
     "$CS_BIN" -remote remove myserver 2>&1
 
     assert_file_not_contains "$CS_SESSIONS_ROOT/.remotes" "myserver=" \
@@ -176,7 +176,7 @@ test_remote_remove_nonexistent() {
 }
 
 test_remote_ls_alias() {
-    "$CS_BIN" -remote add myserver alex@mac-mini.local 2>&1
+    "$CS_BIN" -remote add myserver hex@mac-mini.local 2>&1
 
     local output
     output=$("$CS_BIN" -remote ls 2>&1)
@@ -185,7 +185,7 @@ test_remote_ls_alias() {
 }
 
 test_remote_rm_alias() {
-    "$CS_BIN" -remote add myserver alex@mac-mini.local 2>&1
+    "$CS_BIN" -remote add myserver hex@mac-mini.local 2>&1
     "$CS_BIN" -remote rm myserver 2>&1
 
     assert_file_not_contains "$CS_SESSIONS_ROOT/.remotes" "myserver=" \
@@ -208,16 +208,16 @@ test_remote_add_requires_name_and_host() {
 
 test_on_flag_creates_stub() {
     local output
-    output=$("$CS_BIN" my-session --on alex@mac-mini.local 2>&1)
+    output=$("$CS_BIN" my-session --on hex@mac-mini.local 2>&1)
 
     local session_dir="$CS_SESSIONS_ROOT/my-session"
     assert_exists "$session_dir/.cs/remote.conf" "remote.conf should be created" || return 1
-    assert_file_contains "$session_dir/.cs/remote.conf" "host=alex@mac-mini.local" \
+    assert_file_contains "$session_dir/.cs/remote.conf" "host=hex@mac-mini.local" \
         "remote.conf should contain host" || return 1
 }
 
 test_on_flag_with_registered_name() {
-    "$CS_BIN" -remote add myserver alex@mac-mini.local 2>&1
+    "$CS_BIN" -remote add myserver hex@mac-mini.local 2>&1
 
     local output
     output=$("$CS_BIN" my-session --on myserver 2>&1)
@@ -243,7 +243,7 @@ test_on_flag_with_existing_local_session_errors() {
     mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs"
 
     local output
-    if output=$("$CS_BIN" my-session --on alex@mac-mini.local 2>&1); then
+    if output=$("$CS_BIN" my-session --on hex@mac-mini.local 2>&1); then
         echo "  FAIL: Should have failed for existing local session"
         return 1
     fi
@@ -254,25 +254,25 @@ test_on_flag_with_existing_local_session_errors() {
 test_on_flag_same_host_reconnects() {
     # Create a remote stub
     mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs"
-    echo "host=alex@mac-mini.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
+    echo "host=hex@mac-mini.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
 
     local output
-    output=$("$CS_BIN" my-session --on alex@mac-mini.local 2>&1)
+    output=$("$CS_BIN" my-session --on hex@mac-mini.local 2>&1)
 
     # Should succeed (reconnect)
-    assert_file_contains "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf" "host=alex@mac-mini.local" \
+    assert_file_contains "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf" "host=hex@mac-mini.local" \
         "remote.conf should still have same host" || return 1
 }
 
 test_on_flag_different_host_warns_and_updates() {
     # Create a remote stub pointing to old host
     mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs"
-    echo "host=alex@old-host.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
+    echo "host=hex@old-host.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
 
     local output
-    output=$("$CS_BIN" my-session --on alex@new-host.local 2>&1)
+    output=$("$CS_BIN" my-session --on hex@new-host.local 2>&1)
 
-    assert_file_contains "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf" "host=alex@new-host.local" \
+    assert_file_contains "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf" "host=hex@new-host.local" \
         "remote.conf should be updated to new host" || return 1
 }
 
@@ -282,24 +282,24 @@ test_on_flag_different_host_warns_and_updates() {
 
 test_host_session_syntax_creates_stub() {
     local output
-    output=$("$CS_BIN" "alex@mac-mini.local:my-session" 2>&1)
+    output=$("$CS_BIN" "hex@mac-mini.local:my-session" 2>&1)
 
     local session_dir="$CS_SESSIONS_ROOT/my-session"
     assert_exists "$session_dir/.cs/remote.conf" "remote.conf should be created" || return 1
-    assert_file_contains "$session_dir/.cs/remote.conf" "host=alex@mac-mini.local" \
+    assert_file_contains "$session_dir/.cs/remote.conf" "host=hex@mac-mini.local" \
         "remote.conf should contain parsed host" || return 1
 }
 
 test_host_session_syntax_remembered() {
     # First connection via host:session
-    "$CS_BIN" "alex@mac-mini.local:my-session" 2>&1
+    "$CS_BIN" "hex@mac-mini.local:my-session" 2>&1
 
     # Second connection via just session name should detect remote
     local output
     output=$("$CS_BIN" my-session 2>&1)
 
     # Should attempt remote connection (dry run shows the command)
-    assert_output_contains "$output" "alex@mac-mini.local" \
+    assert_output_contains "$output" "hex@mac-mini.local" \
         "Should connect to remembered host" || return 1
 }
 
@@ -310,13 +310,13 @@ test_host_session_syntax_remembered() {
 test_remote_session_detected() {
     # Create a remote stub
     mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs"
-    echo "host=alex@mac-mini.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
+    echo "host=hex@mac-mini.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
 
     local output
     output=$("$CS_BIN" my-session 2>&1)
 
     # In dry run mode, should show the connection command
-    assert_output_contains "$output" "alex@mac-mini.local" \
+    assert_output_contains "$output" "hex@mac-mini.local" \
         "Should detect remote session and show host" || return 1
 }
 
@@ -343,7 +343,7 @@ test_local_session_not_detected_as_remote() {
 test_connection_prefers_et() {
     # Create a remote stub
     mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs"
-    echo "host=alex@mac-mini.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
+    echo "host=hex@mac-mini.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
 
     # Create a fake et binary
     local fake_bin="$TEST_TMPDIR/bin"
@@ -361,7 +361,7 @@ test_connection_prefers_et() {
 test_connection_falls_back_to_ssh() {
     # Create a remote stub
     mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs"
-    echo "host=alex@mac-mini.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
+    echo "host=hex@mac-mini.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
 
     # Ensure et is not available (use a restricted PATH)
     local fake_bin="$TEST_TMPDIR/bin"
@@ -379,7 +379,7 @@ test_connection_falls_back_to_ssh() {
 
 test_connection_uses_tmux() {
     mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs"
-    echo "host=alex@mac-mini.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
+    echo "host=hex@mac-mini.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
 
     local output
     output=$("$CS_BIN" my-session 2>&1)
@@ -387,15 +387,52 @@ test_connection_uses_tmux() {
     assert_output_contains "$output" "tmux" "Connection should use tmux" || return 1
 }
 
+test_et_uses_command_flag() {
+    mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs"
+    echo "host=hex@mac-mini.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
+
+    # Create a fake et binary
+    local fake_bin="$TEST_TMPDIR/bin"
+    mkdir -p "$fake_bin"
+    echo '#!/bin/sh' > "$fake_bin/et"
+    chmod +x "$fake_bin/et"
+    export PATH="$fake_bin:$PATH"
+
+    local output
+    output=$("$CS_BIN" my-session 2>&1)
+
+    # et uses -c for command, NOT -t (which means --tunnel in et)
+    assert_output_contains "$output" "et hex@mac-mini.local -c" \
+        "et should use -c flag for command" || return 1
+}
+
+test_ssh_uses_tty_flag() {
+    mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs"
+    echo "host=hex@mac-mini.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
+
+    # Provide ssh but not et
+    local fake_bin="$TEST_TMPDIR/bin"
+    mkdir -p "$fake_bin"
+    echo '#!/bin/sh' > "$fake_bin/ssh"
+    chmod +x "$fake_bin/ssh"
+
+    local output
+    output=$(PATH="$fake_bin:/usr/bin:/bin" "$CS_BIN" my-session 2>&1)
+
+    # ssh uses -t for TTY allocation
+    assert_output_contains "$output" "ssh hex@mac-mini.local -t" \
+        "ssh should use -t flag for TTY" || return 1
+}
+
 test_connection_banner_shows_info() {
     mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs"
-    echo "host=alex@mac-mini.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
+    echo "host=hex@mac-mini.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
 
     local output
     output=$("$CS_BIN" my-session 2>&1)
 
     assert_output_contains "$output" "my-session" "Banner should show session name" || return 1
-    assert_output_contains "$output" "alex@mac-mini.local" "Banner should show host" || return 1
+    assert_output_contains "$output" "hex@mac-mini.local" "Banner should show host" || return 1
 }
 
 # ============================================================================
@@ -404,7 +441,7 @@ test_connection_banner_shows_info() {
 
 test_sync_blocked_on_remote_session() {
     mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs"
-    echo "host=alex@mac-mini.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
+    echo "host=hex@mac-mini.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
 
     local output
     if output=$("$CS_BIN" my-session -sync push 2>&1); then
@@ -417,7 +454,7 @@ test_sync_blocked_on_remote_session() {
 
 test_secrets_blocked_on_remote_session() {
     mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs"
-    echo "host=alex@mac-mini.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
+    echo "host=hex@mac-mini.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
 
     local output
     if output=$("$CS_BIN" my-session -secrets list 2>&1); then
@@ -439,17 +476,17 @@ test_move_to_creates_stub() {
     echo "some work" > "$CS_SESSIONS_ROOT/my-session/notes.txt"
 
     local output
-    output=$("$CS_BIN" my-session --move-to alex@mac-mini.local 2>&1)
+    output=$("$CS_BIN" my-session --move-to hex@mac-mini.local 2>&1)
 
     assert_exists "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf" \
         "remote.conf should be created after move" || return 1
-    assert_file_contains "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf" "host=alex@mac-mini.local" \
+    assert_file_contains "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf" "host=hex@mac-mini.local" \
         "remote.conf should contain target host" || return 1
 }
 
 test_move_to_nonexistent_session_errors() {
     local output
-    if output=$("$CS_BIN" nonexistent --move-to alex@mac-mini.local 2>&1); then
+    if output=$("$CS_BIN" nonexistent --move-to hex@mac-mini.local 2>&1); then
         echo "  FAIL: Should have failed for nonexistent session"
         return 1
     fi
@@ -461,10 +498,10 @@ test_move_to_nonexistent_session_errors() {
 
 test_move_to_already_remote_errors() {
     mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs"
-    echo "host=alex@other-host.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
+    echo "host=hex@other-host.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
 
     local output
-    if output=$("$CS_BIN" my-session --move-to alex@mac-mini.local 2>&1); then
+    if output=$("$CS_BIN" my-session --move-to hex@mac-mini.local 2>&1); then
         echo "  FAIL: Should have failed for already-remote session"
         return 1
     fi
@@ -473,7 +510,7 @@ test_move_to_already_remote_errors() {
 }
 
 test_move_to_with_registered_name() {
-    "$CS_BIN" -remote add myserver alex@mac-mini.local 2>&1
+    "$CS_BIN" -remote add myserver hex@mac-mini.local 2>&1
     mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs"
 
     local output
@@ -487,9 +524,34 @@ test_move_to_shows_rsync_command() {
     mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs"
 
     local output
-    output=$("$CS_BIN" my-session --move-to alex@mac-mini.local 2>&1)
+    output=$("$CS_BIN" my-session --move-to hex@mac-mini.local 2>&1)
 
     assert_output_contains "$output" "rsync" "Should show rsync command in dry run" || return 1
+}
+
+test_move_to_queries_remote_sessions_root() {
+    mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs"
+
+    # Create a fake ssh that simulates remote CS_SESSIONS_ROOT
+    local fake_bin="$TEST_TMPDIR/bin"
+    mkdir -p "$fake_bin"
+    cat > "$fake_bin/ssh" << 'SCRIPT'
+#!/bin/sh
+# Simulate remote CS_SESSIONS_ROOT query
+echo "/data/sessions"
+SCRIPT
+    chmod +x "$fake_bin/ssh"
+    export PATH="$fake_bin:$PATH"
+
+    local output
+    output=$("$CS_BIN" my-session --move-to hex@mac-mini.local 2>&1)
+
+    assert_output_contains "$output" "/data/sessions/my-session" \
+        "Should use remote CS_SESSIONS_ROOT in rsync destination" || return 1
+
+    # Verify root is cached in remote.conf
+    assert_file_contains "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf" "root=/data/sessions" \
+        "remote.conf should cache detected root" || return 1
 }
 
 # ============================================================================
@@ -499,7 +561,7 @@ test_move_to_shows_rsync_command() {
 test_list_shows_remote_location() {
     # Create a remote session
     mkdir -p "$CS_SESSIONS_ROOT/remote-session/.cs/logs"
-    echo "host=alex@mac-mini.local" > "$CS_SESSIONS_ROOT/remote-session/.cs/remote.conf"
+    echo "host=hex@mac-mini.local" > "$CS_SESSIONS_ROOT/remote-session/.cs/remote.conf"
     echo "Started: 2026-01-01 12:00:00" > "$CS_SESSIONS_ROOT/remote-session/.cs/logs/session.log"
 
     # Create a local session
@@ -510,11 +572,11 @@ test_list_shows_remote_location() {
     output=$("$CS_BIN" -ls 2>&1)
 
     assert_output_contains "$output" "LOCATION" "Header should include LOCATION column" || return 1
-    assert_output_contains "$output" "alex@mac-mini.local" "Should show remote host for remote session" || return 1
+    assert_output_contains "$output" "hex@mac-mini.local" "Should show remote host for remote session" || return 1
 }
 
 test_list_shows_registered_name_for_remote() {
-    "$CS_BIN" -remote add myserver alex@mac-mini.local 2>&1
+    "$CS_BIN" -remote add myserver hex@mac-mini.local 2>&1
 
     mkdir -p "$CS_SESSIONS_ROOT/remote-session/.cs/logs"
     echo "host=myserver" > "$CS_SESSIONS_ROOT/remote-session/.cs/remote.conf"
@@ -528,7 +590,7 @@ test_list_shows_registered_name_for_remote() {
 
 test_remove_remote_session_removes_stub() {
     mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs"
-    echo "host=alex@mac-mini.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
+    echo "host=hex@mac-mini.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
 
     echo "y" | "$CS_BIN" -rm my-session 2>&1
 
@@ -576,6 +638,8 @@ run_test test_local_session_not_detected_as_remote
 run_test test_connection_prefers_et
 run_test test_connection_falls_back_to_ssh
 run_test test_connection_uses_tmux
+run_test test_et_uses_command_flag
+run_test test_ssh_uses_tty_flag
 run_test test_connection_banner_shows_info
 
 # Blocking
@@ -588,6 +652,7 @@ run_test test_move_to_nonexistent_session_errors
 run_test test_move_to_already_remote_errors
 run_test test_move_to_with_registered_name
 run_test test_move_to_shows_rsync_command
+run_test test_move_to_queries_remote_sessions_root
 
 # List sessions
 run_test test_list_shows_remote_location

@@ -80,8 +80,11 @@ cs -version, -v             # Show version
 ### Session Commands
 
 ```bash
-cs <session> -sync <cmd>    # Sync with git remote
-cs <session> -secrets <cmd> # Manage secrets
+cs <session> -sync, -s <cmd>  # Sync with git remote
+cs <session> -secrets <cmd>   # Manage secrets
+cs <session> --on <host>      # Run on remote host
+cs <session> --move-to <host> # Move session to remote host
+cs <session> --force          # Override active session lock
 ```
 
 ### Examples
@@ -115,7 +118,7 @@ Run sessions on a remote machine (e.g., a Mac Mini build server) while keeping `
 **Register a remote host (one-time):**
 
 ```bash
-cs -remote add mini alex@mac-mini.local
+cs -remote add mini hex@mac-mini.local
 cs -remote list
 cs -remote remove mini
 ```
@@ -124,8 +127,8 @@ cs -remote remove mini
 
 ```bash
 cs my-session --on mini                # using registered name
-cs my-session --on alex@mac-mini.local # inline, no registration needed
-cs alex@mac-mini.local:my-session      # host:session syntax (auto-remembered)
+cs my-session --on hex@mac-mini.local # inline, no registration needed
+cs hex@mac-mini.local:my-session      # host:session syntax (auto-remembered)
 ```
 
 After the first connection, `cs my-session` automatically reconnects to the remote host.
@@ -141,6 +144,8 @@ This rsyncs the session to the remote host and creates a local stub so future `c
 **Transport:** Prefers [Eternal Terminal](https://eternalterminal.dev/) (`et`) when available, falls back to `ssh`. Sessions are wrapped in `tmux` on the remote side.
 
 **Listing:** `cs -ls` shows a LOCATION column when remote sessions exist.
+
+**Note:** `-sync` and `-secrets` commands are not available on remote sessions. Connect to the remote session first, then run them from within.
 
 ## Session Structure
 
