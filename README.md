@@ -205,6 +205,10 @@ Completions support:
 cs -uninstall
 ```
 
+## See also
+
+- [iTerm2-dimmer](https://github.com/hex/iTerm2-dimmer) -- dims noisy hook output (TASKMASTER, discoveries) in iTerm2 so it doesn't clutter the screen
+
 ## License
 
 MIT
