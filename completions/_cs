@@ -46,6 +46,16 @@ _cs() {
         'backend:Show storage backend'
     )
 
+    # Remote subcommands with descriptions
+    local -a remote_cmds
+    remote_cmds=(
+        'add:Register a remote host'
+        'list:List registered remote hosts'
+        'ls:List registered remote hosts (alias)'
+        'remove:Remove a registered host'
+        'rm:Remove a registered host (alias)'
+    )
+
     # Global flags with descriptions
     local -a global_flags
     global_flags=(
@@ -53,6 +63,7 @@ _cs() {
         '-ls:List all sessions (alias)'
         '-remove:Remove a session'
         '-rm:Remove a session (alias)'
+        '-remote:Manage remote hosts'
         '-sync:Sync current session'
         '-s:Sync current session (alias)'
         '-secrets:Manage session secrets'
@@ -65,18 +76,19 @@ _cs() {
     )
 
     # Determine context
-    local in_sync=false in_secrets=false has_session=false after_remove=false
+    local in_sync=false in_secrets=false in_remote=false has_session=false after_remove=false
     local i word
 
     for ((i=2; i < CURRENT; i++)); do
         word="${words[i]}"
         case "$word" in
-            -sync|-s) in_sync=true; in_secrets=false ;;
-            -secrets) in_secrets=true; in_sync=false ;;
+            -sync|-s) in_sync=true; in_secrets=false; in_remote=false ;;
+            -secrets) in_secrets=true; in_sync=false; in_remote=false ;;
+            -remote) in_remote=true; in_sync=false; in_secrets=false ;;
             -remove|-rm) after_remove=true ;;
             -*) ;;
             *)
-                if ! $in_sync && ! $in_secrets && ! $after_remove; then
+                if ! $in_sync && ! $in_secrets && ! $after_remove && ! $in_remote; then
                     has_session=true
                 fi
                 ;;
@@ -86,6 +98,12 @@ _cs() {
     # Context: after -remove/-rm
     if $after_remove && [[ $CURRENT -eq 3 ]]; then
         _cs_sessions
+        return
+    fi
+
+    # Context: after -remote
+    if $in_remote; then
+        _describe 'remote command' remote_cmds
         return
     fi
 
@@ -108,6 +126,9 @@ _cs() {
             '-sync:Run sync command'
             '-s:Run sync command (alias)'
             '-secrets:Run secrets command'
+            '--on:Run session on remote host'
+            '--move-to:Move session to remote host'
+            '--force:Override active session lock'
         )
         _describe 'option' session_opts
         return

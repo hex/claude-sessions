@@ -32,6 +32,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 - **Discoveries archival** - Automatic rotation of large discovery files before context compaction, with LLM-powered condensation via `/compact-discoveries`
 - **Automatic git version control** - Every session gets local git history with auto-commits on discoveries and session end; optionally sync to remote
 - **Session locking** - PID-based lock prevents the same session from being opened in two terminals simultaneously; use `--force` to override
+- **Remote sessions** - Run sessions on remote machines via `et` or `ssh` + `tmux`; `cs` handles connection, stubbing, and session tracking
 - **Update notifications** - Checks for updates and notifies when new versions are available
 
 ## Installation
@@ -67,6 +68,7 @@ The installer:
 cs <session-name>           # Create or resume a session
 cs <session-name> --force   # Override active session lock
 cs -adopt <name>            # Adopt current directory as a session
+cs -remote <cmd>            # Manage remote hosts
 cs -list, -ls               # List all sessions
 cs -remove, -rm <name>      # Remove a session
 cs -update                  # Update to latest version
@@ -106,6 +108,40 @@ This converts the current directory into a cs session in place:
 - Initializes a git repo if one doesn't exist (preserves existing repos)
 - Since the working directory doesn't change, `claude --continue` picks up previous conversations
 
+### Remote Sessions
+
+Run sessions on a remote machine (e.g., a Mac Mini build server) while keeping `cs SESSION_NAME` as your single entry point. The remote machine needs `cs` and Claude Code installed independently.
+
+**Register a remote host (one-time):**
+
+```bash
+cs -remote add mini alex@mac-mini.local
+cs -remote list
+cs -remote remove mini
+```
+
+**Create or connect to a remote session:**
+
+```bash
+cs my-session --on mini                # using registered name
+cs my-session --on alex@mac-mini.local # inline, no registration needed
+cs alex@mac-mini.local:my-session      # host:session syntax (auto-remembered)
+```
+
+After the first connection, `cs my-session` automatically reconnects to the remote host.
+
+**Move an existing local session to remote:**
+
+```bash
+cs my-session --move-to mini
+```
+
+This rsyncs the session to the remote host and creates a local stub so future `cs my-session` calls connect remotely.
+
+**Transport:** Prefers [Eternal Terminal](https://eternalterminal.dev/) (`et`) when available, falls back to `ssh`. Sessions are wrapped in `tmux` on the remote side.
+
+**Listing:** `cs -ls` shows a LOCATION column when remote sessions exist.
+
 ## Session Structure
 
 ```
@@ -117,6 +153,7 @@ This converts the current directory into a cs session in place:
 │   ├── discoveries.compact.md  # LLM-condensed archive summary
 │   ├── changes.md          # Auto-logged file modifications
 │   ├── sync.conf           # Sync configuration
+│   ├── remote.conf         # Remote host (if remote session)
 │   ├── artifacts/          # Auto-tracked scripts and configs
 │   └── logs/session.log    # Session command log
 ├── CLAUDE.md               # Session instructions for Claude

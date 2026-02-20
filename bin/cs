@@ -44,10 +44,12 @@ if [[ "${CS_NERD_FONTS:-}" == "1" ]]; then
     ICON_LOCK='󰌾'      # mdi-lock
     ICON_SYNC='󰓦'      # mdi-sync
     ICON_LOCAL='󰋜'     # mdi-home
+    ICON_REMOTE='󰌘'    # mdi-remote-desktop
 else
     ICON_LOCK='⚿'      # Unicode lock with key
     ICON_SYNC='⇄'      # Unicode arrows
     ICON_LOCAL='⌂'     # Unicode house
+    ICON_REMOTE='⇝'    # Unicode rightwards squiggle arrow
 fi
 
 # Utility functions
@@ -71,10 +73,14 @@ show_help() {
     echo -e "${RUST}Commands:${NC}"
     echo -e "  ${GOLD}<name>${NC}              Create or resume session ${GOLD}<name>${NC} (locks session)"
     echo -e "  ${GOLD}<name>${NC} ${ORANGE}--force${NC}      Override active session lock"
+    echo -e "  ${GOLD}<name>${NC} ${ORANGE}--on${NC} ${GOLD}<host>${NC}  Create/connect session on a remote host"
+    echo -e "  ${GOLD}<name>${NC} ${ORANGE}--move-to${NC} ${GOLD}<host>${NC}  Move local session to remote host"
+    echo -e "  ${GOLD}user@host:name${NC}      Connect to remote session (auto-remembered)"
     echo -e "  ${GOLD}<name>${NC} ${ORANGE}-sync${NC} ${GOLD}<cmd>${NC}  Run sync command on ${GOLD}<name>${NC} without launching session"
     echo -e "  ${GOLD}<name>${NC} ${ORANGE}-secrets${NC} ${GOLD}<cmd>${NC}  Run secrets command on ${GOLD}<name>${NC} without launching session"
-    echo -e "  ${ORANGE}-list${NC}, ${ORANGE}-ls${NC}          List all sessions"
+    echo -e "  ${ORANGE}-list${NC}, ${ORANGE}-ls${NC}          List all sessions (shows remote location)"
     echo -e "  ${ORANGE}-adopt${NC} ${GOLD}<name>${NC}        Adopt current directory as a cs session"
+    echo -e "  ${ORANGE}-remote${NC} ${GOLD}<cmd>${NC}        Manage remote hosts"
     echo -e "  ${ORANGE}-remove${NC}, ${ORANGE}-rm${NC} ${GOLD}<name>${NC} Remove a session"
     echo -e "  ${ORANGE}-sync${NC}, ${ORANGE}-s${NC} ${GOLD}<cmd>${NC}     Sync current session (requires CLAUDE_SESSION_NAME)"
     echo -e "  ${ORANGE}-secrets${NC} ${GOLD}<cmd>${NC}      Manage current session secrets (requires CLAUDE_SESSION_NAME)"
@@ -93,6 +99,11 @@ show_help() {
     echo -e "  ${ORANGE}purge${NC}               Delete ALL secrets for session"
     echo -e "  ${ORANGE}export${NC}              Export secrets as environment variables"
     echo -e "  ${ORANGE}backend${NC}             Show which storage backend is active"
+    echo ""
+    echo -e "${RUST}Remote Commands:${NC} (cs -remote ...)"
+    echo -e "  ${ORANGE}add${NC} ${GOLD}<name>${NC} ${GOLD}<user@host>${NC}  Register a remote host"
+    echo -e "  ${ORANGE}list${NC}, ${ORANGE}ls${NC}             List registered remote hosts"
+    echo -e "  ${ORANGE}remove${NC}, ${ORANGE}rm${NC} ${GOLD}<name>${NC}    Remove a registered host"
     echo ""
     echo -e "${RUST}Sync Commands:${NC}"
     echo -e "  ${ORANGE}remote${NC} ${GOLD}[url]${NC}        Add remote to git repo (uses CS_SYNC_PREFIX if URL not provided)"
@@ -118,6 +129,10 @@ show_help() {
     echo -e "  cs ${GOLD}my-session${NC} ${ORANGE}-sync auto off${NC}      Disable auto-commit (on by default)"
     echo -e "  cs ${ORANGE}-sync clone${NC} ${GOLD}other-session${NC}    Clone session (uses CS_SYNC_PREFIX)"
     echo -e "  cs ${GOLD}my-session${NC} ${ORANGE}-secrets list${NC}     List secrets for 'my-session'"
+    echo -e "  cs ${ORANGE}-remote add${NC} ${GOLD}mini alex@mac-mini.local${NC}  Register a remote host"
+    echo -e "  cs ${GOLD}my-session${NC} ${ORANGE}--on${NC} ${GOLD}mini${NC}          Run session on registered remote"
+    echo -e "  cs ${GOLD}alex@mac-mini.local:debug${NC}        Connect via host:session syntax"
+    echo -e "  cs ${GOLD}my-session${NC} ${ORANGE}--move-to${NC} ${GOLD}mini${NC}      Move local session to remote"
     echo -e "  cs ${ORANGE}-list${NC}                        List all sessions"
     echo -e "  cs ${ORANGE}-rm${NC} ${GOLD}old-session${NC}              Remove 'old-session'"
     echo ""
@@ -677,9 +692,57 @@ list_sessions() {
         fi
     done
 
+    # Check if any sessions are remote (to decide whether to show LOCATION column)
+    local has_remote=false
+    local -A remote_locations
+    local max_loc_len=8  # minimum "LOCATION" header length
+    for session in "${sessions[@]}"; do
+        local session_dir="$SESSIONS_ROOT/$session"
+        if [ -f "$session_dir/.cs/remote.conf" ]; then
+            has_remote=true
+            local host_spec loc_display
+            host_spec=$(grep "^host=" "$session_dir/.cs/remote.conf" 2>/dev/null | cut -d= -f2- || true)
+            if [ -n "$host_spec" ] && [[ "$host_spec" != *"@"* ]]; then
+                # Registered name — resolve to show both
+                local resolved
+                resolved=$(get_remote_host "$host_spec")
+                if [ -n "$resolved" ]; then
+                    loc_display="${ICON_REMOTE} ${host_spec} (${resolved})"
+                else
+                    loc_display="${ICON_REMOTE} ${host_spec}"
+                fi
+            elif [ -n "$host_spec" ]; then
+                loc_display="${ICON_REMOTE} ${host_spec}"
+            fi
+            remote_locations["$session"]="$loc_display"
+            # Track plain-text length for alignment
+            local plain_loc
+            if [[ "$host_spec" != *"@"* ]]; then
+                resolved=$(get_remote_host "$host_spec")
+                if [ -n "$resolved" ]; then
+                    plain_loc="${ICON_REMOTE} ${host_spec} (${resolved})"
+                else
+                    plain_loc="${ICON_REMOTE} ${host_spec}"
+                fi
+            else
+                plain_loc="${ICON_REMOTE} ${host_spec}"
+            fi
+            if [ ${#plain_loc} -gt $max_loc_len ]; then
+                max_loc_len=${#plain_loc}
+            fi
+        fi
+    done
+
     # Print header
-    printf "${RUST}%-${max_len}s  %-16s  %s${NC}\n" "SESSION" "CREATED" "MODIFIED"
-    printf "${COMMENT}%-${max_len}s  %-16s  %s${NC}\n" "$(printf '%*s' "$max_len" '' | tr ' ' '-')" "----------------" "----------------"
+    if $has_remote; then
+        printf "${RUST}%-${max_len}s  %-16s  %-16s  %s${NC}\n" "SESSION" "CREATED" "MODIFIED" "LOCATION"
+        printf "${COMMENT}%-${max_len}s  %-16s  %-16s  %s${NC}\n" \
+            "$(printf '%*s' "$max_len" '' | tr ' ' '-')" "----------------" "----------------" \
+            "$(printf '%*s' "$max_loc_len" '' | tr ' ' '-')"
+    else
+        printf "${RUST}%-${max_len}s  %-16s  %s${NC}\n" "SESSION" "CREATED" "MODIFIED"
+        printf "${COMMENT}%-${max_len}s  %-16s  %s${NC}\n" "$(printf '%*s' "$max_len" '' | tr ' ' '-')" "----------------" "----------------"
+    fi
 
     # Print sessions
     for session in "${sessions[@]}"; do
@@ -730,11 +793,25 @@ list_sessions() {
         [ $pad_len -lt 0 ] && pad_len=0
         local padding=$(printf '%*s' "$pad_len" '')
 
+        # Build location display for remote sessions
+        local location=""
+        if $has_remote; then
+            location="${remote_locations["$session"]:-}"
+        fi
+
         # Print with proper alignment
         if [ "$secret_count" -gt 0 ]; then
-            printf "${GOLD}%s${NC}${COMMENT}%s${NC}%s  ${COMMENT}%-16s  %s${NC}\n" "$session" "$secret_indicator" "$padding" "$created" "$modified"
+            if $has_remote; then
+                printf "${GOLD}%s${NC}${COMMENT}%s${NC}%s  ${COMMENT}%-16s  %-16s${NC}  %s\n" "$session" "$secret_indicator" "$padding" "$created" "$modified" "$location"
+            else
+                printf "${GOLD}%s${NC}${COMMENT}%s${NC}%s  ${COMMENT}%-16s  %s${NC}\n" "$session" "$secret_indicator" "$padding" "$created" "$modified"
+            fi
         else
-            printf "${GOLD}%s${NC}%s  ${COMMENT}%-16s  %s${NC}\n" "$session" "$padding" "$created" "$modified"
+            if $has_remote; then
+                printf "${GOLD}%s${NC}%s  ${COMMENT}%-16s  %-16s${NC}  %s\n" "$session" "$padding" "$created" "$modified" "$location"
+            else
+                printf "${GOLD}%s${NC}%s  ${COMMENT}%-16s  %s${NC}\n" "$session" "$padding" "$created" "$modified"
+            fi
         fi
     done
 }
@@ -968,6 +1045,262 @@ set_sync_config() {
     else
         echo "${key}=${value}" > "$config_file"
     fi
+}
+
+# Remote host registry file
+REMOTES_FILE=".remotes"
+
+# Look up a registered remote host by name
+get_remote_host() {
+    local name="$1"
+    local remotes_file="$SESSIONS_ROOT/$REMOTES_FILE"
+
+    if [ -f "$remotes_file" ]; then
+        local value
+        value=$(grep "^${name}=" "$remotes_file" 2>/dev/null | cut -d= -f2- || true)
+        echo "$value"
+    fi
+}
+
+# Register or update a remote host
+set_remote_host() {
+    local name="$1"
+    local host="$2"
+    local remotes_file="$SESSIONS_ROOT/$REMOTES_FILE"
+
+    if [ -f "$remotes_file" ]; then
+        if grep -q "^${name}=" "$remotes_file" 2>/dev/null; then
+            local tmp_file="${remotes_file}.tmp"
+            grep -v "^${name}=" "$remotes_file" > "$tmp_file" || true
+            echo "${name}=${host}" >> "$tmp_file"
+            mv "$tmp_file" "$remotes_file"
+        else
+            echo "${name}=${host}" >> "$remotes_file"
+        fi
+    else
+        echo "${name}=${host}" > "$remotes_file"
+    fi
+}
+
+# Remove a registered remote host
+remove_remote_host() {
+    local name="$1"
+    local remotes_file="$SESSIONS_ROOT/$REMOTES_FILE"
+
+    if [ ! -f "$remotes_file" ] || ! grep -q "^${name}=" "$remotes_file" 2>/dev/null; then
+        error "Remote host '$name' not found"
+    fi
+
+    local tmp_file="${remotes_file}.tmp"
+    grep -v "^${name}=" "$remotes_file" > "$tmp_file" || true
+    mv "$tmp_file" "$remotes_file"
+    info "Removed remote host: $name"
+}
+
+# List all registered remote hosts
+list_remote_hosts() {
+    local remotes_file="$SESSIONS_ROOT/$REMOTES_FILE"
+
+    if [ ! -f "$remotes_file" ] || [ ! -s "$remotes_file" ]; then
+        echo "No remote hosts registered."
+        echo ""
+        echo -e "Register one with: cs ${ORANGE}-remote add${NC} ${GOLD}<name>${NC} ${GOLD}<user@host>${NC}"
+        return 0
+    fi
+
+    local max_name_len=4  # minimum "NAME" header
+    local name host
+    while IFS='=' read -r name host; do
+        [ -z "$name" ] && continue
+        if [ ${#name} -gt $max_name_len ]; then
+            max_name_len=${#name}
+        fi
+    done < "$remotes_file"
+
+    printf "${RUST}%-${max_name_len}s  %s${NC}\n" "NAME" "HOST"
+    printf "${COMMENT}%-${max_name_len}s  %s${NC}\n" \
+        "$(printf '%*s' "$max_name_len" '' | tr ' ' '-')" "--------------------"
+
+    while IFS='=' read -r name host; do
+        [ -z "$name" ] && continue
+        printf "${GOLD}%-${max_name_len}s${NC}  ${COMMENT}%s${NC}\n" "$name" "$host"
+    done < "$remotes_file"
+}
+
+# Dispatcher for cs -remote subcommands
+run_remote() {
+    local subcommand="${1:-}"
+
+    case "$subcommand" in
+        add)
+            local name="${2:-}"
+            local host="${3:-}"
+            if [ -z "$name" ] || [ -z "$host" ]; then
+                error "Usage: cs -remote add <name> <user@host>"
+            fi
+            if [[ "$host" != *"@"* ]]; then
+                error "Host must be in user@hostname format (e.g., alex@mac-mini.local)"
+            fi
+            set_remote_host "$name" "$host"
+            info "Registered remote host: $name -> $host"
+            ;;
+        list|ls)
+            list_remote_hosts
+            ;;
+        remove|rm)
+            local name="${2:-}"
+            if [ -z "$name" ]; then
+                error "Usage: cs -remote remove <name>"
+            fi
+            remove_remote_host "$name"
+            ;;
+        "")
+            error "Usage: cs -remote <add|list|remove> [args...]"
+            ;;
+        *)
+            error "Unknown remote command: $subcommand. Use: add, list, remove"
+            ;;
+    esac
+}
+
+# Check if a session directory is a remote session
+is_remote_session() {
+    local session_dir="$1"
+    [ -f "$session_dir/.cs/remote.conf" ]
+}
+
+# Read the host from a remote session's remote.conf
+get_session_remote() {
+    local session_dir="$1"
+    local config_file="$session_dir/.cs/remote.conf"
+    if [ -f "$config_file" ]; then
+        grep "^host=" "$config_file" 2>/dev/null | cut -d= -f2- || true
+    fi
+}
+
+# Create a remote session stub directory with remote.conf
+create_remote_stub() {
+    local session_name="$1"
+    local host="$2"
+    local session_dir="$SESSIONS_ROOT/$session_name"
+
+    mkdir -p "$session_dir/.cs"
+    echo "host=$host" > "$session_dir/.cs/remote.conf"
+}
+
+# Resolve a host spec to a connectable address
+# If it contains @, use directly (inline host). Otherwise, look up in registry.
+resolve_remote_host() {
+    local host_spec="$1"
+
+    if [[ "$host_spec" == *"@"* ]]; then
+        echo "$host_spec"
+        return 0
+    fi
+
+    # Look up in registry
+    local resolved
+    resolved=$(get_remote_host "$host_spec")
+    if [ -n "$resolved" ]; then
+        echo "$resolved"
+        return 0
+    fi
+
+    return 1
+}
+
+# Connect to a remote session via et (preferred) or ssh, wrapped in tmux
+connect_remote() {
+    local session_name="$1"
+    local host_spec="$2"
+
+    local resolved_host
+    resolved_host=$(resolve_remote_host "$host_spec") || \
+        error "Host '$host_spec' not found in registry. Register it with: cs -remote add <name> <user@host>"
+
+    # Pick transport: prefer et, fall back to ssh
+    local transport=""
+    if command -v et >/dev/null 2>&1; then
+        transport="et"
+    elif command -v ssh >/dev/null 2>&1; then
+        transport="ssh"
+    else
+        error "Neither et nor ssh found. Install one to connect to remote sessions."
+    fi
+
+    # tmux session name on the remote
+    local tmux_session="cs-${session_name}"
+
+    # Remote command: tmux attach-or-create running cs
+    local remote_cmd="tmux new-session -As ${tmux_session} 'cs ${session_name}'"
+
+    # Connection banner
+    echo ""
+    echo -e "${RUST}Connecting to remote session${NC}"
+    echo -e "  Session:   ${GOLD}${session_name}${NC}"
+    echo -e "  Host:      ${GOLD}${resolved_host}${NC}"
+    echo -e "  Transport: ${COMMENT}${transport}${NC}"
+    echo ""
+
+    # Set terminal title
+    printf '\033]0;cs: %s @ %s\007' "$session_name" "$resolved_host"
+
+    # Set iTerm2 tab color if available
+    if command -v it2check >/dev/null 2>&1 && it2check 2>/dev/null; then
+        it2setcolor tab blue 2>/dev/null || true
+    fi
+
+    # Dry run mode for testing
+    if [ "${CS_TEST_DRY_RUN:-}" = "1" ]; then
+        echo "DRY_RUN: $transport $resolved_host -t $remote_cmd"
+        echo "DRY_RUN: tmux session=$tmux_session"
+        return 0
+    fi
+
+    # Execute connection (replaces this process)
+    exec "$transport" "$resolved_host" -t "$remote_cmd"
+}
+
+# Move a local session to a remote host
+move_session_to_remote() {
+    local session_name="$1"
+    local host_spec="$2"
+
+    local session_dir="$SESSIONS_ROOT/$session_name"
+
+    if [ ! -d "$session_dir" ]; then
+        error "Session not found: $session_name"
+    fi
+
+    if is_remote_session "$session_dir"; then
+        error "Session '$session_name' is already remote"
+    fi
+
+    local resolved_host
+    resolved_host=$(resolve_remote_host "$host_spec") || \
+        error "Host '$host_spec' not found in registry. Register it with: cs -remote add <name> <user@host>"
+
+    # rsync session to remote
+    local rsync_cmd="rsync -az ${session_dir}/ ${resolved_host}:~/.claude-sessions/${session_name}/"
+
+    echo -e "Moving session ${GOLD}${session_name}${NC} to ${GOLD}${resolved_host}${NC}..."
+
+    if [ "${CS_TEST_DRY_RUN:-}" = "1" ]; then
+        echo "DRY_RUN: $rsync_cmd"
+        # Still create the stub in dry run
+        echo "host=$host_spec" > "$session_dir/.cs/remote.conf"
+        info "Session '$session_name' moved to $resolved_host (dry run)"
+        return 0
+    fi
+
+    if ! eval "$rsync_cmd"; then
+        error "rsync failed. Local session was not modified."
+    fi
+
+    # Write remote.conf to mark this as a remote session
+    echo "host=$host_spec" > "$session_dir/.cs/remote.conf"
+    info "Session '$session_name' moved to $resolved_host"
+    echo -e "${DIM}Connect with: cs $session_name${NC}"
 }
 
 # Create session .gitignore
@@ -1905,6 +2238,11 @@ main() {
             esac
             return 0
             ;;
+        -remote)
+            shift
+            run_remote "$@"
+            return 0
+            ;;
         -*)
             error "Unknown command: $cmd. Run 'cs -help' for usage."
             ;;
@@ -1912,18 +2250,28 @@ main() {
 
     local session_name="$cmd"
     local force_flag=""
+    local remote_host=""
+    local move_to_host=""
+
+    # Detect host:session syntax (user@host:session)
+    if [[ "$session_name" == *"@"*":"* ]]; then
+        remote_host="${session_name%:*}"
+        session_name="${session_name##*:}"
+    fi
 
     # Validate inputs
     validate_session_name "$session_name"
 
-    # Check for session subcommands: cs <session> -sync, cs <session> -secrets, --force
-    if [ $# -gt 1 ]; then
-        local subcmd="$2"
-        shift 2  # Remove session name and subcommand
-
-        case "$subcmd" in
+    # Parse session subcommands with a while loop to support flag combinations
+    shift  # Remove session name / cmd
+    while [ $# -gt 0 ]; do
+        case "$1" in
             -sync|-s)
-                # Set up session context for sync command
+                shift
+                # Block -sync on remote sessions
+                if [ -f "$SESSIONS_ROOT/$session_name/.cs/remote.conf" ]; then
+                    error "Cannot run -sync on a remote session. Connect first with: cs $session_name"
+                fi
                 export CLAUDE_SESSION_NAME="$session_name"
                 export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
                 export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
@@ -1932,7 +2280,11 @@ main() {
                 return 0
                 ;;
             -secrets)
-                # Set up session context for secrets command
+                shift
+                # Block -secrets on remote sessions
+                if [ -f "$SESSIONS_ROOT/$session_name/.cs/remote.conf" ]; then
+                    error "Cannot run -secrets on a remote session. Connect first with: cs $session_name"
+                fi
                 export CLAUDE_SESSION_NAME="$session_name"
                 export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
                 export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
@@ -1942,11 +2294,75 @@ main() {
                 ;;
             --force)
                 force_flag="true"
+                shift
+                ;;
+            --on)
+                remote_host="${2:-}"
+                if [ -z "$remote_host" ]; then
+                    error "Usage: cs <session> --on <host>"
+                fi
+                shift 2
+                ;;
+            --move-to)
+                move_to_host="${2:-}"
+                if [ -z "$move_to_host" ]; then
+                    error "Usage: cs <session> --move-to <host>"
+                fi
+                shift 2
                 ;;
             *)
-                error "Unknown session command: $subcmd. Use -sync or -secrets."
+                error "Unknown session command: $1. Use -sync, -secrets, --on, --move-to, or --force."
                 ;;
         esac
+    done
+
+    # Handle --move-to: move a local session to a remote host
+    if [ -n "$move_to_host" ]; then
+        move_session_to_remote "$session_name" "$move_to_host"
+        return 0
+    fi
+
+    # Handle --on or host:session: create/update remote stub and connect
+    if [ -n "$remote_host" ]; then
+        local session_dir="$SESSIONS_ROOT/$session_name"
+
+        # Validate the host spec (must contain @ or be in registry)
+        if [[ "$remote_host" != *"@"* ]]; then
+            if ! resolve_remote_host "$remote_host" >/dev/null 2>&1; then
+                error "Host '$remote_host' not found. Register it with: cs -remote add <name> <user@host>"
+            fi
+        fi
+
+        if [ -d "$session_dir" ] && ! is_remote_session "$session_dir"; then
+            # Local session exists, can't use --on
+            error "Session '$session_name' exists locally. Use --move-to to migrate it."
+        fi
+
+        if is_remote_session "$session_dir"; then
+            local current_host
+            current_host=$(get_session_remote "$session_dir")
+            local current_resolved new_resolved
+            current_resolved=$(resolve_remote_host "$current_host" 2>/dev/null || echo "$current_host")
+            new_resolved=$(resolve_remote_host "$remote_host" 2>/dev/null || echo "$remote_host")
+            if [ "$current_resolved" != "$new_resolved" ]; then
+                warn "Updating remote host from $current_host to $remote_host"
+                echo "host=$remote_host" > "$session_dir/.cs/remote.conf"
+            fi
+        else
+            create_remote_stub "$session_name" "$remote_host"
+        fi
+
+        connect_remote "$session_name" "$remote_host"
+        return 0
+    fi
+
+    # Check if existing session is remote
+    local session_dir="$SESSIONS_ROOT/$session_name"
+    if [ -d "$session_dir" ] && is_remote_session "$session_dir"; then
+        local host
+        host=$(get_session_remote "$session_dir")
+        connect_remote "$session_name" "$host"
+        return 0
     fi
 
     check_dependencies
@@ -1956,7 +2372,6 @@ main() {
 
     # Define paths (resolve symlinks for adopted sessions so Claude Code
     # sees the original project path, preserving conversation continuity)
-    local session_dir="$SESSIONS_ROOT/$session_name"
     if [ -L "$session_dir" ]; then
         session_dir="$(readlink -f "$session_dir")"
     fi
