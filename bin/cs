@@ -2204,6 +2204,16 @@ run_sync() {
 # Main function
 main() {
     if [ $# -eq 0 ]; then
+        local tui_bin
+        tui_bin="$(command -v cs-tui 2>/dev/null || echo "$(dirname "$0")/cs-tui")"
+        if [ -x "$tui_bin" ]; then
+            local selected
+            selected=$("$tui_bin") || exit $?
+            if [ -n "$selected" ]; then
+                exec "$0" "$selected"
+            fi
+            exit 0
+        fi
         show_help
         exit 0
     fi
@@ -2221,6 +2231,9 @@ main() {
             return 0
             ;;
         -list|-ls)
+            if command -v cs-tui >/dev/null 2>&1; then
+                info "Hint: run bare 'cs' for the interactive session manager"
+            fi
             list_sessions
             return 0
             ;;

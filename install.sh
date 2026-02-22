@@ -153,6 +153,13 @@ fi
 
 chmod +x "$INSTALL_DIR/cs-secrets"
 
+# Install cs-tui (optional, from local builds only)
+if [ "$INSTALL_METHOD" = "local" ] && [ -f "$SCRIPT_DIR/bin/cs-tui" ]; then
+    installed "cs-tui" "$INSTALL_DIR/cs-tui"
+    cp "$SCRIPT_DIR/bin/cs-tui" "$INSTALL_DIR/cs-tui"
+    chmod +x "$INSTALL_DIR/cs-tui"
+fi
+
 # Install hooks
 installed "7 hooks" "$HOOKS_DIR/"
 mkdir -p "$HOOKS_DIR"

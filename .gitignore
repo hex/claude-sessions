@@ -15,3 +15,7 @@ Thumbs.db
 .beads/
 .claude/
 .cs/
+
+# Rust build artifacts
+tui/target/
+bin/cs-tui

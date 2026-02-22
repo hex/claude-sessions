@@ -56,7 +56,7 @@ Or clone and run `./install.ps1`.
 > :warning: Always review scripts ([bash](install.sh), [PowerShell](install.ps1)) before running them from the internet.
 
 The installer:
-- Adds `cs` and `cs-secrets` to `~/.local/bin/`
+- Adds `cs` and `cs-secrets` to `~/.local/bin/` (plus `cs-tui` if built from source)
 - Installs seven [hooks](docs/hooks.md) to `~/.claude/hooks/` for session tracking
 - Adds `/summary` and `/compact-discoveries` commands, and `store-secret` skill to `~/.claude/`
 - Installs shell completions for bash and zsh
@@ -65,6 +65,7 @@ The installer:
 ## Usage
 
 ```bash
+cs                          # Interactive session manager (TUI)
 cs <session-name>           # Create or resume a session
 cs <session-name> --force   # Override active session lock
 cs -adopt <name>            # Adopt current directory as a session
@@ -76,6 +77,21 @@ cs -uninstall               # Uninstall cs
 cs -help, -h                # Show help message
 cs -version, -v             # Show version
 ```
+
+### Interactive Session Manager
+
+Running `cs` with no arguments launches an interactive TUI for browsing and managing sessions:
+
+- **Navigate** with `j`/`k` or arrow keys
+- **Sort** by column with `1`-`4` (toggles ascending/descending)
+- **Search** with `/` to filter sessions by name
+- **Open** a session with `Enter`
+- **Delete** with `d` (confirmation required)
+- **Rename** with `r`
+- **Sync** with `P` (push), `L` (pull), `S` (status)
+- **Quit** with `q` or `Esc`
+
+The TUI requires `cs-tui` (a 671 KB Rust binary). If not installed, `cs` falls back to showing help. Build from source: `cd tui && cargo build --release`.
 
 ### Session Commands
 
