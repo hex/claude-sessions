@@ -226,7 +226,22 @@ minisign_ensure_binary() {
         return 0
     fi
 
-    echo "minisign not found. Downloading for signature verification..." >&2
+    echo "minisign is needed for signature verification but was not found." >&2
+    echo "It will be downloaded from github.com/jedisct1/minisign and installed to ~/.local/bin/" >&2
+
+    if [[ -t 0 ]]; then
+        local response
+        read -r -p "Download minisign? [Y/n] " response </dev/tty
+        case "$response" in
+            [nN]|[nN][oO])
+                echo "Skipped. Install minisign manually: brew install minisign" >&2
+                return 1
+                ;;
+        esac
+    else
+        echo "Non-interactive shell — skipping auto-download. Install minisign manually." >&2
+        return 1
+    fi
 
     local os arch tmpdir
     case "$(uname -s)" in
