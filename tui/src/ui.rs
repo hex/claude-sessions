@@ -30,6 +30,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         Mode::ConfirmDelete => render_confirm_delete(app, frame),
         Mode::ConfirmForceOpen => render_confirm_force_open(app, frame),
         Mode::Rename => render_rename_dialog(app, frame),
+        Mode::MoveToRemote => render_move_to_dialog(app, frame),
         Mode::SyncOutput(text) => render_sync_output(text, frame),
         _ => {}
     }
@@ -252,13 +253,13 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
             if let Some(msg) = &app.status_message {
                 msg.as_str().to_string()
             } else {
-                "q:quit  Enter:open  d:delete  r:rename  /:search  P:push  L:pull  S:status  1-6:sort"
+                "q:quit  Enter:open  d:delete  r:rename  m:move  s:secrets  /:search  P:push  L:pull  S:status  1-6:sort"
                     .to_string()
             }
         }
         Mode::ConfirmDelete => "y:confirm  n:cancel".to_string(),
         Mode::ConfirmForceOpen => "y:force open  n:cancel".to_string(),
-        Mode::Rename => "Enter:confirm  Esc:cancel".to_string(),
+        Mode::Rename | Mode::MoveToRemote => "Enter:confirm  Esc:cancel".to_string(),
         Mode::SyncOutput(_) => "Press any key to dismiss".to_string(),
         Mode::Search => unreachable!(),
     };
@@ -349,6 +350,34 @@ fn render_rename_dialog(app: &App, frame: &mut Frame) {
 
     let line = Line::from(vec![
         Span::styled(&app.rename_input, Style::default().fg(WHITE)),
+        Span::styled("\u{2588}", Style::default().fg(WHITE)),
+    ]);
+    let text = Paragraph::new(line)
+        .style(Style::default().fg(WHITE))
+        .block(block);
+    frame.render_widget(text, popup_area);
+}
+
+fn render_move_to_dialog(app: &App, frame: &mut Frame) {
+    let session = match app.selected_session() {
+        Some(s) => s,
+        None => return,
+    };
+
+    let popup_area = centered_rect(50, 5, frame.area());
+    frame.render_widget(Clear, popup_area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(ORANGE))
+        .title(" Move to Remote ")
+        .title_style(Style::default().fg(ORANGE).add_modifier(Modifier::BOLD));
+
+    let line = Line::from(vec![
+        Span::styled(
+            format!("Move '{}' to: ", session.name),
+            Style::default().fg(COMMENT),
+        ),
+        Span::styled(&app.move_to_input, Style::default().fg(WHITE)),
         Span::styled("\u{2588}", Style::default().fg(WHITE)),
     ]);
     let text = Paragraph::new(line)

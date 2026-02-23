@@ -38,6 +38,7 @@ pub enum Mode {
     ConfirmDelete,
     ConfirmForceOpen,
     Rename,
+    MoveToRemote,
     SyncOutput(String),
 }
 
@@ -46,6 +47,7 @@ pub enum Action {
     Quit,
     Open(String),
     ForceOpen(String),
+    MoveTo(String, String),
 }
 
 pub struct App {
@@ -57,6 +59,7 @@ pub struct App {
     pub sort_dir: SortDirection,
     pub search_query: String,
     pub rename_input: String,
+    pub move_to_input: String,
     pub status_message: Option<String>,
     pub table_area: ratatui::layout::Rect,
     pub column_widths: Vec<u16>,
@@ -80,6 +83,7 @@ impl App {
             sort_dir: SortDirection::Asc,
             search_query: String::new(),
             rename_input: String::new(),
+            move_to_input: String::new(),
             status_message: None,
         }
     }
@@ -146,6 +150,7 @@ impl App {
             Mode::ConfirmDelete => self.handle_confirm_delete(key),
             Mode::ConfirmForceOpen => self.handle_confirm_force_open(key),
             Mode::Rename => self.handle_rename(key),
+            Mode::MoveToRemote => self.handle_move_to_remote(key),
             Mode::SyncOutput(_) => {
                 self.mode = Mode::Normal;
                 Action::None
@@ -215,6 +220,21 @@ impl App {
             }
             KeyCode::Char('S') => {
                 self.run_sync_command("status");
+                Action::None
+            }
+            KeyCode::Char('m') => {
+                if let Some(session) = self.selected_session() {
+                    if session.location.is_some() {
+                        self.status_message = Some("Session is already remote".to_string());
+                    } else {
+                        self.move_to_input.clear();
+                        self.mode = Mode::MoveToRemote;
+                    }
+                }
+                Action::None
+            }
+            KeyCode::Char('s') => {
+                self.run_secrets_command();
                 Action::None
             }
             KeyCode::Char('1') => {
@@ -309,6 +329,25 @@ impl App {
             }
             KeyCode::Char(c) => {
                 self.rename_input.push(c);
+            }
+            _ => {}
+        }
+        Action::None
+    }
+
+    fn handle_move_to_remote(&mut self, key: KeyEvent) -> Action {
+        match key.code {
+            KeyCode::Esc => {
+                self.mode = Mode::Normal;
+            }
+            KeyCode::Enter => {
+                return self.execute_move_to();
+            }
+            KeyCode::Backspace => {
+                self.move_to_input.pop();
+            }
+            KeyCode::Char(c) => {
+                self.move_to_input.push(c);
             }
             _ => {}
         }
@@ -415,6 +454,45 @@ impl App {
                 }
                 Err(e) => {
                     self.status_message = Some(format!("Sync failed: {}", e));
+                }
+            }
+        }
+    }
+
+    fn execute_move_to(&mut self) -> Action {
+        let host = self.move_to_input.trim().to_string();
+        if host.is_empty() {
+            self.status_message = Some("Host cannot be empty".to_string());
+            self.mode = Mode::Normal;
+            return Action::None;
+        }
+        if host.contains(char::is_whitespace) {
+            self.status_message = Some("Host cannot contain spaces".to_string());
+            self.mode = Mode::Normal;
+            return Action::None;
+        }
+        if let Some(name) = self.selected_session_name() {
+            self.mode = Mode::Normal;
+            return Action::MoveTo(name, host);
+        }
+        self.mode = Mode::Normal;
+        Action::None
+    }
+
+    fn run_secrets_command(&mut self) {
+        if let Some(session) = self.selected_session() {
+            let name = session.name.clone();
+            let output = std::process::Command::new("cs")
+                .args([&name, "-secrets", "list"])
+                .output();
+            match output {
+                Ok(out) => {
+                    let text = String::from_utf8_lossy(&out.stdout).to_string()
+                        + &String::from_utf8_lossy(&out.stderr).to_string();
+                    self.mode = Mode::SyncOutput(text);
+                }
+                Err(e) => {
+                    self.status_message = Some(format!("Secrets failed: {}", e));
                 }
             }
         }
@@ -809,5 +887,85 @@ mod tests {
 
         app.handle_key(KeyEvent::from(KeyCode::Char('k')));
         assert_eq!(app.table_state.selected(), Some(0));
+    }
+
+    #[test]
+    fn m_on_local_session_enters_move_to_remote() {
+        let mut app = App::new(sample_sessions());
+        // alpha (index 0) is local (location=None)
+        app.handle_key(KeyEvent::from(KeyCode::Char('m')));
+        assert_eq!(app.mode, Mode::MoveToRemote);
+        assert_eq!(app.move_to_input, "");
+    }
+
+    #[test]
+    fn m_on_remote_session_shows_status() {
+        let mut app = App::new(sample_sessions());
+        // beta (index 1) is remote (location=Some)
+        app.table_state.select(Some(1));
+        app.handle_key(KeyEvent::from(KeyCode::Char('m')));
+        assert_eq!(app.mode, Mode::Normal);
+        assert!(app.status_message.as_ref().unwrap().contains("already remote"));
+    }
+
+    #[test]
+    fn move_to_remote_esc_cancels() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::MoveToRemote;
+        app.move_to_input = "somehost".into();
+        app.handle_key(KeyEvent::from(KeyCode::Esc));
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn move_to_remote_chars_accumulate() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::MoveToRemote;
+        app.handle_key(KeyEvent::from(KeyCode::Char('m')));
+        app.handle_key(KeyEvent::from(KeyCode::Char('i')));
+        app.handle_key(KeyEvent::from(KeyCode::Char('n')));
+        app.handle_key(KeyEvent::from(KeyCode::Char('i')));
+        assert_eq!(app.move_to_input, "mini");
+    }
+
+    #[test]
+    fn move_to_remote_backspace_removes() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::MoveToRemote;
+        app.move_to_input = "min".into();
+        app.handle_key(KeyEvent::from(KeyCode::Backspace));
+        assert_eq!(app.move_to_input, "mi");
+    }
+
+    #[test]
+    fn move_to_remote_enter_returns_move_to_action() {
+        let mut app = App::new(sample_sessions());
+        // alpha (index 0) is selected
+        app.mode = Mode::MoveToRemote;
+        app.move_to_input = "mini".into();
+        let action = app.handle_key(KeyEvent::from(KeyCode::Enter));
+        assert!(matches!(action, Action::MoveTo(name, host) if name == "alpha" && host == "mini"));
+    }
+
+    #[test]
+    fn move_to_remote_empty_input_shows_error() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::MoveToRemote;
+        app.move_to_input = "".into();
+        let action = app.handle_key(KeyEvent::from(KeyCode::Enter));
+        assert!(matches!(action, Action::None));
+        assert_eq!(app.mode, Mode::Normal);
+        assert!(app.status_message.as_ref().unwrap().contains("empty"));
+    }
+
+    #[test]
+    fn move_to_remote_whitespace_input_shows_error() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::MoveToRemote;
+        app.move_to_input = "bad host".into();
+        let action = app.handle_key(KeyEvent::from(KeyCode::Enter));
+        assert!(matches!(action, Action::None));
+        assert_eq!(app.mode, Mode::Normal);
+        assert!(app.status_message.as_ref().unwrap().contains("spaces"));
     }
 }

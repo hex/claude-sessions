@@ -89,6 +89,8 @@ Running `cs` with no arguments launches an interactive TUI for browsing and mana
 - **Open** a session with `Enter` (locked sessions prompt for force-open confirmation)
 - **Delete** with `d` (confirmation required)
 - **Rename** with `r`
+- **Move to remote** with `m` (local sessions only)
+- **View secrets** with `s`
 - **Sync** with `P` (push), `L` (pull), `S` (status)
 - **Quit** with `q` or `Esc`
 
