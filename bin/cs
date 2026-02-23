@@ -1424,8 +1424,8 @@ connect_remote() {
     # tmux session name on the remote
     local tmux_session="cs-${session_name}"
 
-    # Remote command: tmux attach-or-create running cs
-    local remote_cmd="tmux new-session -As ${tmux_session} 'cs ${session_name}'"
+    # Remote command: tmux attach-or-create running cs (absolute path avoids PATH issues in non-interactive shells)
+    local remote_cmd="tmux new-session -As ${tmux_session} '\$HOME/.local/bin/cs ${session_name}'"
 
     # Connection banner
     echo ""

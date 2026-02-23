@@ -435,6 +435,18 @@ test_connection_banner_shows_info() {
     assert_output_contains "$output" "hex@mac-mini.local" "Banner should show host" || return 1
 }
 
+test_connection_uses_absolute_cs_path() {
+    mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs"
+    echo "host=hex@mac-mini.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
+
+    local output
+    output=$("$CS_BIN" my-session 2>&1)
+
+    # Remote command should use absolute path to cs, not bare 'cs'
+    assert_output_contains "$output" ".local/bin/cs my-session" \
+        "Remote command should use absolute path to cs" || return 1
+}
+
 # ============================================================================
 # Blocking Tests (remote sessions can't use -sync/-secrets)
 # ============================================================================
@@ -641,6 +653,7 @@ run_test test_connection_uses_tmux
 run_test test_et_uses_command_flag
 run_test test_ssh_uses_tty_flag
 run_test test_connection_banner_shows_info
+run_test test_connection_uses_absolute_cs_path
 
 # Blocking
 run_test test_sync_blocked_on_remote_session
