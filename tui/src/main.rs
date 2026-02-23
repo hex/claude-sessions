@@ -1,14 +1,20 @@
 // ABOUTME: Entry point that initializes the terminal, runs the event loop, and handles exit
 // ABOUTME: Communicates the selected session name to the calling bash script via stdout
 
-use std::io::{self, IsTerminal};
+use std::io::{self, BufWriter, IsTerminal};
 
-use crossterm::event::{self, Event, KeyEventKind};
+use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind};
+use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
+use crossterm::ExecutableCommand;
+use ratatui::backend::CrosstermBackend;
+use ratatui::Terminal;
 
 mod app;
 mod session;
 mod theme;
 mod ui;
+
+type Tui = Terminal<CrosstermBackend<BufWriter<io::Stderr>>>;
 
 fn main() {
     if !io::stderr().is_terminal() {
@@ -23,11 +29,10 @@ fn main() {
     }
 
     let mut app = app::App::new(sessions);
-    let mut terminal = ratatui::init();
 
+    let mut terminal = init_terminal().expect("failed to initialize terminal");
     let result = run_event_loop(&mut app, &mut terminal);
-
-    ratatui::restore();
+    restore_terminal().expect("failed to restore terminal");
 
     match result {
         Ok(app::Action::Open(name)) => {
@@ -41,21 +46,46 @@ fn main() {
     }
 }
 
-fn run_event_loop(
-    app: &mut app::App,
-    terminal: &mut ratatui::DefaultTerminal,
-) -> io::Result<app::Action> {
+fn init_terminal() -> io::Result<Tui> {
+    terminal::enable_raw_mode()?;
+    let mut stderr = io::stderr();
+    stderr.execute(EnterAlternateScreen)?;
+    stderr.execute(EnableMouseCapture)?;
+    let backend = CrosstermBackend::new(BufWriter::new(io::stderr()));
+    let terminal = Terminal::new(backend)?;
+    Ok(terminal)
+}
+
+fn restore_terminal() -> io::Result<()> {
+    let mut stderr = io::stderr();
+    stderr.execute(DisableMouseCapture)?;
+    stderr.execute(LeaveAlternateScreen)?;
+    terminal::disable_raw_mode()?;
+    Ok(())
+}
+
+fn run_event_loop(app: &mut app::App, terminal: &mut Tui) -> io::Result<app::Action> {
     loop {
         terminal.draw(|frame| ui::render(app, frame))?;
 
-        if let Event::Key(key) = event::read()? {
-            if key.kind == KeyEventKind::Press {
-                let action = app.handle_key(key);
+        match event::read()? {
+            Event::Key(key) => {
+                if key.kind == KeyEventKind::Press {
+                    let action = app.handle_key(key);
+                    match action {
+                        app::Action::Quit | app::Action::Open(_) => return Ok(action),
+                        app::Action::None => {}
+                    }
+                }
+            }
+            Event::Mouse(mouse) => {
+                let action = app.handle_mouse(mouse);
                 match action {
                     app::Action::Quit | app::Action::Open(_) => return Ok(action),
                     app::Action::None => {}
                 }
             }
+            _ => {}
         }
     }
 }

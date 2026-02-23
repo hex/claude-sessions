@@ -1,7 +1,7 @@
 // ABOUTME: Application state machine that processes keyboard input and manages UI modes
 // ABOUTME: Tracks table selection, sort order, search filter, and modal dialog state
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::widgets::TableState;
 
 use crate::session::{self, Session};
@@ -11,8 +11,19 @@ pub enum SortColumn {
     Name,
     Created,
     Modified,
-    Location,
+    Secrets,
+    Remote,
+    Github,
 }
+
+pub const SORT_COLUMNS: &[SortColumn] = &[
+    SortColumn::Name,
+    SortColumn::Created,
+    SortColumn::Modified,
+    SortColumn::Secrets,
+    SortColumn::Remote,
+    SortColumn::Github,
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SortDirection {
@@ -45,6 +56,8 @@ pub struct App {
     pub search_query: String,
     pub rename_input: String,
     pub status_message: Option<String>,
+    pub table_area: ratatui::layout::Rect,
+    pub column_widths: Vec<u16>,
 }
 
 impl App {
@@ -59,6 +72,8 @@ impl App {
             filtered,
             table_state,
             mode: Mode::Normal,
+            table_area: ratatui::layout::Rect::default(),
+            column_widths: Vec::new(),
             sort_col: SortColumn::Name,
             sort_dir: SortDirection::Asc,
             search_query: String::new(),
@@ -97,7 +112,9 @@ impl App {
                 SortColumn::Name => sa.name.to_lowercase().cmp(&sb.name.to_lowercase()),
                 SortColumn::Created => sa.created.cmp(&sb.created),
                 SortColumn::Modified => sa.modified.cmp(&sb.modified),
-                SortColumn::Location => sa.location.cmp(&sb.location),
+                SortColumn::Secrets => sa.secrets_count.cmp(&sb.secrets_count),
+                SortColumn::Remote => sa.location.cmp(&sb.location),
+                SortColumn::Github => sa.git_repo.cmp(&sb.git_repo),
             };
             match sort_dir {
                 SortDirection::Asc => ord,
@@ -205,7 +222,15 @@ impl App {
                 Action::None
             }
             KeyCode::Char('4') => {
-                self.cycle_sort(SortColumn::Location);
+                self.cycle_sort(SortColumn::Secrets);
+                Action::None
+            }
+            KeyCode::Char('5') => {
+                self.cycle_sort(SortColumn::Remote);
+                Action::None
+            }
+            KeyCode::Char('6') => {
+                self.cycle_sort(SortColumn::Github);
                 Action::None
             }
             _ => Action::None,
@@ -374,6 +399,73 @@ impl App {
     pub fn has_remote_sessions(&self) -> bool {
         self.sessions.iter().any(|s| s.location.is_some())
     }
+
+    pub fn has_git_sessions(&self) -> bool {
+        self.sessions.iter().any(|s| s.git_repo.is_some())
+    }
+
+    pub fn handle_mouse(&mut self, mouse: MouseEvent) -> Action {
+        if self.mode != Mode::Normal {
+            return Action::None;
+        }
+
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                self.table_state.select_previous();
+                Action::None
+            }
+            MouseEventKind::ScrollDown => {
+                self.table_state.select_next();
+                self.clamp_selection();
+                Action::None
+            }
+            MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                let row = mouse.row;
+                let col = mouse.column;
+
+                // Check if click is within the table area
+                if row >= self.table_area.y && col >= self.table_area.x {
+                    let relative_row = row - self.table_area.y;
+
+                    // Row 0 is the border, row 1 is the title, row 2 is header, row 3 is separator
+                    if relative_row == 2 {
+                        // Header click — determine which column
+                        if let Some(sort_col) = self.column_at_x(col) {
+                            self.cycle_sort(sort_col);
+                        }
+                    } else if relative_row >= 4 {
+                        // Data row click
+                        let data_row = (relative_row - 4) as usize + self.table_state.offset();
+                        if data_row < self.filtered.len() {
+                            self.table_state.select(Some(data_row));
+                        }
+                    }
+                }
+                Action::None
+            }
+            MouseEventKind::Down(crossterm::event::MouseButton::Middle) => {
+                // Middle-click opens the selected session
+                if let Some(name) = self.selected_session_name() {
+                    Action::Open(name)
+                } else {
+                    Action::None
+                }
+            }
+            _ => Action::None,
+        }
+    }
+
+    fn column_at_x(&self, x: u16) -> Option<SortColumn> {
+        let mut offset = self.table_area.x + 1; // +1 for border
+        offset += 3; // highlight_symbol ">> " width
+        for (i, &width) in self.column_widths.iter().enumerate() {
+            if x >= offset && x < offset + width + 1 {
+                return SORT_COLUMNS.get(i).copied();
+            }
+            offset += width + 1; // +1 for column spacing
+        }
+        None
+    }
 }
 
 #[cfg(test)]
@@ -392,6 +484,7 @@ mod tests {
                 is_locked: false,
                 secrets_count: 0,
                 has_git: true,
+                git_repo: Some("hex/alpha".into()),
                 sync_auto: None,
             },
             Session {
@@ -403,6 +496,7 @@ mod tests {
                 is_locked: false,
                 secrets_count: 2,
                 has_git: true,
+                git_repo: Some("hex/beta".into()),
                 sync_auto: Some(true),
             },
             Session {
@@ -414,6 +508,7 @@ mod tests {
                 is_locked: true,
                 secrets_count: 0,
                 has_git: false,
+                git_repo: None,
                 sync_auto: None,
             },
         ]

@@ -14,6 +14,7 @@ pub struct Session {
     pub is_locked: bool,
     pub secrets_count: u32,
     pub has_git: bool,
+    pub git_repo: Option<String>,
     pub sync_auto: Option<bool>,
 }
 
@@ -68,6 +69,11 @@ fn read_session(path: &Path, secret_counts: &HashMap<String, u32>) -> Session {
     let is_locked = check_lock(&meta_dir);
     let secrets_count = secret_counts.get(&name).copied().unwrap_or(0);
     let has_git = path.join(".git").is_dir();
+    let git_repo = if has_git {
+        parse_git_remote(path)
+    } else {
+        None
+    };
     let sync_auto = parse_sync_conf(&meta_dir);
 
     Session {
@@ -79,6 +85,7 @@ fn read_session(path: &Path, secret_counts: &HashMap<String, u32>) -> Session {
         is_locked,
         secrets_count,
         has_git,
+        git_repo,
         sync_auto,
     }
 }
@@ -259,6 +266,42 @@ fn parse_sync_conf(meta_dir: &Path) -> Option<bool> {
         }
     }
     None
+}
+
+fn parse_git_remote(session_dir: &Path) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .args(["-C", &session_dir.to_string_lossy(), "remote", "get-url", "origin"])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    extract_user_repo(&url)
+}
+
+fn extract_user_repo(url: &str) -> Option<String> {
+    // Handle: git@github.com:user/repo.git
+    if let Some(rest) = url.strip_prefix("git@") {
+        if let Some(path) = rest.split(':').nth(1) {
+            let path = path.strip_suffix(".git").unwrap_or(path);
+            return Some(path.to_string());
+        }
+    }
+    // Handle: https://github.com/user/repo.git
+    if let Some(idx) = url.find("github.com/") {
+        let path = &url[idx + "github.com/".len()..];
+        let path = path.strip_suffix(".git").unwrap_or(path);
+        let path = path.strip_suffix('/').unwrap_or(path);
+        return Some(path.to_string());
+    }
+    // Other URLs: return as-is, truncated
+    if !url.is_empty() {
+        Some(url.to_string())
+    } else {
+        None
+    }
 }
 
 fn count_secrets_from_keychain() -> HashMap<String, u32> {
@@ -463,5 +506,38 @@ mod tests {
             trim_timestamp("2026-01-15 10:30"),
             Some("2026-01-15 10:30".to_string())
         );
+    }
+
+    #[test]
+    fn extract_user_repo_from_ssh_url() {
+        assert_eq!(
+            extract_user_repo("git@github.com:hex/claude-sessions.git"),
+            Some("hex/claude-sessions".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_user_repo_from_https_url() {
+        assert_eq!(
+            extract_user_repo("https://github.com/hex/claude-sessions.git"),
+            Some("hex/claude-sessions".to_string())
+        );
+        assert_eq!(
+            extract_user_repo("https://github.com/hex/claude-sessions"),
+            Some("hex/claude-sessions".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_user_repo_from_non_github_url() {
+        assert_eq!(
+            extract_user_repo("https://gitlab.com/user/repo.git"),
+            Some("https://gitlab.com/user/repo.git".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_user_repo_empty_returns_none() {
+        assert_eq!(extract_user_repo(""), None);
     }
 }

@@ -69,6 +69,7 @@ fi
 CLAUDE_SETTINGS="${HOME}/.claude/settings.json"
 SESSIONS_DIR="${HOME}/.claude-sessions"
 REPO_URL="https://raw.githubusercontent.com/hex/claude-sessions/main"
+RELEASES_URL="https://github.com/hex/claude-sessions/releases/download"
 CS_URL="${REPO_URL}/bin/cs"
 CS_SECRETS_URL="${REPO_URL}/bin/cs-secrets"
 
@@ -153,11 +154,24 @@ fi
 
 chmod +x "$INSTALL_DIR/cs-secrets"
 
-# Install cs-tui (optional, from local builds only)
+# Install cs-tui (interactive session manager)
 if [ "$INSTALL_METHOD" = "local" ] && [ -f "$SCRIPT_DIR/bin/cs-tui" ]; then
     installed "cs-tui" "$INSTALL_DIR/cs-tui"
     cp "$SCRIPT_DIR/bin/cs-tui" "$INSTALL_DIR/cs-tui"
     chmod +x "$INSTALL_DIR/cs-tui"
+elif [ "$INSTALL_METHOD" = "web" ]; then
+    _cs_version=$(grep -m1 "^VERSION=" "$INSTALL_DIR/cs" 2>/dev/null | cut -d'"' -f2 || echo "")
+    _os=$(uname -s | tr '[:upper:]' '[:lower:]')
+    _arch=$(uname -m)
+    [ "$_arch" = "x86_64" ] && _arch="amd64"
+    _tui_url="${RELEASES_URL}/v${_cs_version}/cs-tui-${_os}-${_arch}"
+    if [ -n "$_cs_version" ] && curl -fsSL --head "$_tui_url" >/dev/null 2>&1; then
+        installed "cs-tui" "$INSTALL_DIR/cs-tui"
+        curl -fsSL "$_tui_url" -o "$INSTALL_DIR/cs-tui" || warn "Failed to download cs-tui — skipping"
+        chmod +x "$INSTALL_DIR/cs-tui"
+    else
+        info "cs-tui not available for ${_os}-${_arch} — run 'cs' for help, or build from source: cd tui && cargo build --release"
+    fi
 fi
 
 # Install hooks

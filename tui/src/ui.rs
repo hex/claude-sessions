@@ -8,7 +8,7 @@ use ratatui::widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, Wrap}
 use ratatui::Frame;
 
 use crate::app::{App, Mode, SortColumn, SortDirection};
-use crate::theme::{self, COMMENT, GOLD, ORANGE, RED, RUST, WHITE};
+use crate::theme::{self, COMMENT, GOLD, GREEN, ORANGE, RED, RUST, WHITE};
 
 pub fn render(app: &mut App, frame: &mut Frame) {
     let chunks = Layout::vertical([Constraint::Min(5), Constraint::Length(1)])
@@ -32,7 +32,8 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 
 fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
     let icons = theme::icons();
-    let has_remote = app.has_remote_sessions();
+
+    app.table_area = area;
 
     let sort_indicator = |col: SortColumn| -> &'static str {
         if app.sort_col != col {
@@ -44,20 +45,16 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
         }
     };
 
-    let mut header_cells = vec![
-        Cell::from(format!("SESSION{}", sort_indicator(SortColumn::Name))),
-        Cell::from(format!("CREATED{}", sort_indicator(SortColumn::Created))),
-        Cell::from(format!("MODIFIED{}", sort_indicator(SortColumn::Modified))),
-    ];
-    if has_remote {
-        header_cells.push(Cell::from(format!(
-            "LOCATION{}",
-            sort_indicator(SortColumn::Location)
-        )));
-    }
-    let header = Row::new(header_cells)
-        .style(Style::default().fg(RUST).add_modifier(Modifier::BOLD))
-        .height(1);
+    let header = Row::new(vec![
+        Cell::from(format!("Session{}", sort_indicator(SortColumn::Name))),
+        Cell::from(format!("Created{}", sort_indicator(SortColumn::Created))),
+        Cell::from(format!("Modified{}", sort_indicator(SortColumn::Modified))),
+        Cell::from(format!("Secrets{}", sort_indicator(SortColumn::Secrets))),
+        Cell::from(format!("Remote{}", sort_indicator(SortColumn::Remote))),
+        Cell::from(format!("Github{}", sort_indicator(SortColumn::Github))),
+    ])
+    .style(Style::default().fg(RUST).add_modifier(Modifier::BOLD))
+    .bottom_margin(1);
 
     let rows: Vec<Row> = app
         .filtered
@@ -68,40 +65,50 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
             if s.is_locked {
                 name_text.push_str(&format!(" {}", icons.lock));
             }
-            if s.secrets_count > 0 {
-                name_text.push_str(&format!(" ({} {})", icons.lock, s.secrets_count));
-            }
 
-            let mut cells = vec![
+            let secrets = if s.secrets_count > 0 {
+                format!("{} {}", icons.lock, s.secrets_count)
+            } else {
+                String::new()
+            };
+
+            let remote = s
+                .location
+                .as_ref()
+                .map(|l| format!("{} {}", icons.remote, l))
+                .unwrap_or_default();
+
+            let github = s.git_repo.clone().unwrap_or_default();
+
+            Row::new(vec![
                 Cell::from(name_text).style(Style::default().fg(GOLD)),
                 Cell::from(s.created.clone().unwrap_or_else(|| "-".into()))
                     .style(Style::default().fg(COMMENT)),
                 Cell::from(s.modified.clone().unwrap_or_else(|| "-".into()))
                     .style(Style::default().fg(COMMENT)),
-            ];
-            if has_remote {
-                let loc = s
-                    .location
-                    .as_ref()
-                    .map(|l| format!("{} {}", icons.remote, l))
-                    .unwrap_or_default();
-                cells.push(Cell::from(loc).style(Style::default().fg(ORANGE)));
-            }
-            Row::new(cells)
+                Cell::from(secrets).style(Style::default().fg(COMMENT)),
+                Cell::from(remote).style(Style::default().fg(ORANGE)),
+                Cell::from(github).style(Style::default().fg(GREEN)),
+            ])
         })
         .collect();
 
-    let mut widths = vec![
+    let widths = [
         Constraint::Min(20),
         Constraint::Length(16),
         Constraint::Length(16),
+        Constraint::Length(9),
+        Constraint::Length(20),
+        Constraint::Min(15),
     ];
-    if has_remote {
-        widths.push(Constraint::Min(10));
-    }
+
+    // Store resolved column widths for mouse click-to-sort
+    let inner_width = area.width.saturating_sub(2); // borders
+    let resolved = resolve_widths(&widths, inner_width.saturating_sub(3)); // -3 for highlight_symbol
+    app.column_widths = resolved;
 
     let session_count = app.filtered.len();
-    let title = format!(" cs - Session Manager  [{} sessions] ", session_count);
+    let title = format!(" cs  [{} sessions] ", session_count);
 
     let table = Table::new(rows, widths)
         .header(header)
@@ -122,13 +129,48 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
     frame.render_stateful_widget(table, area, &mut app.table_state);
 }
 
+fn resolve_widths(constraints: &[Constraint], available: u16) -> Vec<u16> {
+    // Approximate constraint resolution for mouse hit-testing
+    let mut fixed_total: u16 = 0;
+    let mut min_total: u16 = 0;
+    let mut flex_count: u16 = 0;
+
+    for c in constraints {
+        match c {
+            Constraint::Length(l) => fixed_total += l,
+            Constraint::Min(m) => {
+                min_total += m;
+                flex_count += 1;
+            }
+            _ => flex_count += 1,
+        }
+    }
+
+    let remaining = available.saturating_sub(fixed_total).saturating_sub(min_total);
+    let flex_extra = if flex_count > 0 {
+        remaining / flex_count
+    } else {
+        0
+    };
+
+    constraints
+        .iter()
+        .map(|c| match c {
+            Constraint::Length(l) => *l,
+            Constraint::Min(m) => m + flex_extra,
+            _ => flex_extra,
+        })
+        .collect()
+}
+
 fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
     let keys = match app.mode {
         Mode::Normal => {
             if let Some(msg) = &app.status_message {
                 msg.as_str().to_string()
             } else {
-                "q:quit  Enter:open  d:delete  r:rename  /:search  P:push  L:pull  S:status  1-4:sort".to_string()
+                "q:quit  Enter:open  d:delete  r:rename  /:search  P:push  L:pull  S:status  1-6:sort"
+                    .to_string()
             }
         }
         Mode::ConfirmDelete => "y:confirm  n:cancel".to_string(),
@@ -147,7 +189,7 @@ fn render_search_bar(app: &App, frame: &mut Frame, area: Rect) {
     let line = Line::from(vec![
         Span::styled("/ ", Style::default().fg(GOLD)),
         Span::styled(&app.search_query, Style::default().fg(WHITE)),
-        Span::styled("\u{2588}", Style::default().fg(WHITE)), // block cursor
+        Span::styled("\u{2588}", Style::default().fg(WHITE)),
     ]);
     let paragraph = Paragraph::new(line);
     frame.render_widget(paragraph, area);
@@ -217,13 +259,12 @@ fn render_sync_output(text: &str, frame: &mut Frame) {
 }
 
 fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
-    let popup_layout =
-        Layout::vertical([
-            Constraint::Fill(1),
-            Constraint::Length(height),
-            Constraint::Fill(1),
-        ])
-        .split(area);
+    let popup_layout = Layout::vertical([
+        Constraint::Fill(1),
+        Constraint::Length(height),
+        Constraint::Fill(1),
+    ])
+    .split(area);
     Layout::horizontal([
         Constraint::Percentage((100 - percent_x) / 2),
         Constraint::Percentage(percent_x),
