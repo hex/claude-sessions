@@ -20,7 +20,7 @@ pub struct Icons {
 pub fn icons() -> Icons {
     if std::env::var("CS_NERD_FONTS").as_deref() == Ok("1") {
         Icons {
-            lock: "\u{f0192}",
+            lock: "\u{f033e}",
             remote: "\u{f0318}",
         }
     } else {
