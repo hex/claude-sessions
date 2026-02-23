@@ -39,6 +39,7 @@ pub enum Mode {
     ConfirmForceOpen,
     Rename,
     MoveToRemote,
+    Secrets,
     SyncOutput(String),
 }
 
@@ -60,6 +61,8 @@ pub struct App {
     pub search_query: String,
     pub rename_input: String,
     pub move_to_input: String,
+    pub secrets_names: Vec<String>,
+    pub secrets_selected: usize,
     pub status_message: Option<String>,
     pub table_area: ratatui::layout::Rect,
     pub column_widths: Vec<u16>,
@@ -84,6 +87,8 @@ impl App {
             search_query: String::new(),
             rename_input: String::new(),
             move_to_input: String::new(),
+            secrets_names: Vec::new(),
+            secrets_selected: 0,
             status_message: None,
         }
     }
@@ -151,6 +156,7 @@ impl App {
             Mode::ConfirmForceOpen => self.handle_confirm_force_open(key),
             Mode::Rename => self.handle_rename(key),
             Mode::MoveToRemote => self.handle_move_to_remote(key),
+            Mode::Secrets => self.handle_secrets(key),
             Mode::SyncOutput(_) => {
                 self.mode = Mode::Normal;
                 Action::None
@@ -354,6 +360,39 @@ impl App {
         Action::None
     }
 
+    fn handle_secrets(&mut self, key: KeyEvent) -> Action {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.mode = Mode::Normal;
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if !self.secrets_names.is_empty()
+                    && self.secrets_selected < self.secrets_names.len() - 1
+                {
+                    self.secrets_selected += 1;
+                }
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if self.secrets_selected > 0 {
+                    self.secrets_selected -= 1;
+                }
+            }
+            KeyCode::Char('v') | KeyCode::Enter => {
+                if let Some(key_name) = self.secrets_names.get(self.secrets_selected).cloned() {
+                    self.run_secrets_subcommand("get", &key_name);
+                }
+            }
+            KeyCode::Char('d') => {
+                if let Some(key_name) = self.secrets_names.get(self.secrets_selected).cloned() {
+                    self.run_secrets_subcommand("delete", &key_name);
+                    self.refresh_secrets_list();
+                }
+            }
+            _ => {}
+        }
+        Action::None
+    }
+
     fn cycle_sort(&mut self, col: SortColumn) {
         if self.sort_col == col {
             self.sort_dir = match self.sort_dir {
@@ -487,12 +526,66 @@ impl App {
                 .output();
             match output {
                 Ok(out) => {
+                    let text = String::from_utf8_lossy(&out.stdout).to_string();
+                    self.secrets_names = Self::parse_secrets_list(&text);
+                    self.secrets_selected = 0;
+                    self.mode = Mode::Secrets;
+                }
+                Err(e) => {
+                    self.status_message = Some(format!("Secrets failed: {}", e));
+                }
+            }
+        }
+    }
+
+    fn refresh_secrets_list(&mut self) {
+        if let Some(session) = self.selected_session() {
+            let name = session.name.clone();
+            let output = std::process::Command::new("cs")
+                .args([&name, "-secrets", "list"])
+                .output();
+            if let Ok(out) = output {
+                let text = String::from_utf8_lossy(&out.stdout).to_string();
+                self.secrets_names = Self::parse_secrets_list(&text);
+                if self.secrets_selected >= self.secrets_names.len() && !self.secrets_names.is_empty()
+                {
+                    self.secrets_selected = self.secrets_names.len() - 1;
+                }
+                if self.secrets_names.is_empty() {
+                    self.mode = Mode::Normal;
+                    self.status_message = Some("No secrets remaining".to_string());
+                }
+            }
+        }
+    }
+
+    fn parse_secrets_list(output: &str) -> Vec<String> {
+        output
+            .lines()
+            .filter(|line| {
+                !line.is_empty()
+                    && !line.starts_with("Secrets for session:")
+                    && !line.starts_with("No secrets stored")
+            })
+            .map(|line| line.to_string())
+            .collect()
+    }
+
+    fn run_secrets_subcommand(&mut self, subcommand: &str, key: &str) {
+        if let Some(session) = self.selected_session() {
+            let name = session.name.clone();
+            let output = std::process::Command::new("cs")
+                .args([&name, "-secrets", subcommand, key])
+                .output();
+            match output {
+                Ok(out) => {
                     let text = String::from_utf8_lossy(&out.stdout).to_string()
                         + &String::from_utf8_lossy(&out.stderr).to_string();
                     self.mode = Mode::SyncOutput(text);
                 }
                 Err(e) => {
                     self.status_message = Some(format!("Secrets failed: {}", e));
+                    self.mode = Mode::Normal;
                 }
             }
         }
@@ -967,5 +1060,69 @@ mod tests {
         assert!(matches!(action, Action::None));
         assert_eq!(app.mode, Mode::Normal);
         assert!(app.status_message.as_ref().unwrap().contains("spaces"));
+    }
+
+    #[test]
+    fn secrets_esc_returns_to_normal() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::Secrets;
+        app.handle_key(KeyEvent::from(KeyCode::Esc));
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn secrets_q_returns_to_normal() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::Secrets;
+        app.handle_key(KeyEvent::from(KeyCode::Char('q')));
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn secrets_navigate_down() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::Secrets;
+        app.secrets_names = vec!["KEY1".into(), "KEY2".into(), "KEY3".into()];
+        app.secrets_selected = 0;
+        app.handle_key(KeyEvent::from(KeyCode::Char('j')));
+        assert_eq!(app.secrets_selected, 1);
+        app.handle_key(KeyEvent::from(KeyCode::Char('j')));
+        assert_eq!(app.secrets_selected, 2);
+        // Should not go past the end
+        app.handle_key(KeyEvent::from(KeyCode::Char('j')));
+        assert_eq!(app.secrets_selected, 2);
+    }
+
+    #[test]
+    fn secrets_navigate_up() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::Secrets;
+        app.secrets_names = vec!["KEY1".into(), "KEY2".into()];
+        app.secrets_selected = 1;
+        app.handle_key(KeyEvent::from(KeyCode::Char('k')));
+        assert_eq!(app.secrets_selected, 0);
+        // Should not go below 0
+        app.handle_key(KeyEvent::from(KeyCode::Char('k')));
+        assert_eq!(app.secrets_selected, 0);
+    }
+
+    #[test]
+    fn parse_secrets_list_extracts_names() {
+        let output = "Secrets for session: test\nAPI_KEY\nDB_PASSWORD\n";
+        let names = App::parse_secrets_list(output);
+        assert_eq!(names, vec!["API_KEY", "DB_PASSWORD"]);
+    }
+
+    #[test]
+    fn parse_secrets_list_empty_session() {
+        let output = "No secrets stored for session: test\n";
+        let names = App::parse_secrets_list(output);
+        assert!(names.is_empty());
+    }
+
+    #[test]
+    fn parse_secrets_list_empty_output() {
+        let names = App::parse_secrets_list("");
+        assert!(names.is_empty());
     }
 }

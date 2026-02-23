@@ -31,6 +31,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         Mode::ConfirmForceOpen => render_confirm_force_open(app, frame),
         Mode::Rename => render_rename_dialog(app, frame),
         Mode::MoveToRemote => render_move_to_dialog(app, frame),
+        Mode::Secrets => render_secrets_popup(app, frame),
         Mode::SyncOutput(text) => render_sync_output(text, frame),
         _ => {}
     }
@@ -69,6 +70,9 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
         .map(|(row_idx, &i)| {
             let s = &app.sessions[i];
             let mut name_text = s.name.clone();
+            if s.location.is_some() {
+                name_text.push_str(&format!(" {}", icons.remote));
+            }
             if s.is_locked {
                 name_text.push_str(&format!(" {}", icons.lock));
             }
@@ -260,6 +264,7 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
         Mode::ConfirmDelete => "y:confirm  n:cancel".to_string(),
         Mode::ConfirmForceOpen => "y:force open  n:cancel".to_string(),
         Mode::Rename | Mode::MoveToRemote => "Enter:confirm  Esc:cancel".to_string(),
+        Mode::Secrets => "j/k:navigate  v/Enter:view  d:remove  Esc:close".to_string(),
         Mode::SyncOutput(_) => "Press any key to dismiss".to_string(),
         Mode::Search => unreachable!(),
     };
@@ -384,6 +389,55 @@ fn render_move_to_dialog(app: &App, frame: &mut Frame) {
         .style(Style::default().fg(WHITE))
         .block(block);
     frame.render_widget(text, popup_area);
+}
+
+fn render_secrets_popup(app: &App, frame: &mut Frame) {
+    let session_name = app
+        .selected_session()
+        .map(|s| s.name.as_str())
+        .unwrap_or("?");
+
+    let height = (app.secrets_names.len() as u16 + 3).max(5).min(20);
+    let popup_area = centered_rect(50, height, frame.area());
+    frame.render_widget(Clear, popup_area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(ORANGE))
+        .title(format!(" Secrets - {} ", session_name))
+        .title_style(Style::default().fg(ORANGE).add_modifier(Modifier::BOLD));
+
+    if app.secrets_names.is_empty() {
+        let paragraph = Paragraph::new("No secrets stored")
+            .style(Style::default().fg(COMMENT))
+            .block(block);
+        frame.render_widget(paragraph, popup_area);
+        return;
+    }
+
+    let lines: Vec<Line> = app
+        .secrets_names
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            if i == app.secrets_selected {
+                Line::from(vec![
+                    Span::styled(">> ", Style::default().fg(GOLD).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        name.as_str(),
+                        Style::default().fg(WHITE).add_modifier(Modifier::BOLD),
+                    ),
+                ])
+            } else {
+                Line::from(vec![
+                    Span::styled("   ", Style::default()),
+                    Span::styled(name.as_str(), Style::default().fg(COMMENT)),
+                ])
+            }
+        })
+        .collect();
+
+    let paragraph = Paragraph::new(lines).block(block);
+    frame.render_widget(paragraph, popup_area);
 }
 
 fn render_sync_output(text: &str, frame: &mut Frame) {
