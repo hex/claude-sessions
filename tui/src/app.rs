@@ -63,6 +63,7 @@ pub struct App {
     pub move_to_input: String,
     pub secrets_names: Vec<String>,
     pub secrets_selected: usize,
+    pub return_to_secrets: bool,
     pub status_message: Option<String>,
     pub table_area: ratatui::layout::Rect,
     pub column_widths: Vec<u16>,
@@ -89,6 +90,7 @@ impl App {
             move_to_input: String::new(),
             secrets_names: Vec::new(),
             secrets_selected: 0,
+            return_to_secrets: false,
             status_message: None,
         }
     }
@@ -158,7 +160,17 @@ impl App {
             Mode::MoveToRemote => self.handle_move_to_remote(key),
             Mode::Secrets => self.handle_secrets(key),
             Mode::SyncOutput(_) => {
-                self.mode = Mode::Normal;
+                if self.return_to_secrets {
+                    self.return_to_secrets = false;
+                    if self.secrets_names.is_empty() {
+                        self.mode = Mode::Normal;
+                        self.status_message = Some("No secrets remaining".to_string());
+                    } else {
+                        self.mode = Mode::Secrets;
+                    }
+                } else {
+                    self.mode = Mode::Normal;
+                }
                 Action::None
             }
         }
@@ -385,7 +397,12 @@ impl App {
             KeyCode::Char('d') => {
                 if let Some(key_name) = self.secrets_names.get(self.secrets_selected).cloned() {
                     self.run_secrets_subcommand("delete", &key_name);
-                    self.refresh_secrets_list();
+                    self.secrets_names.remove(self.secrets_selected);
+                    if self.secrets_selected >= self.secrets_names.len()
+                        && !self.secrets_names.is_empty()
+                    {
+                        self.secrets_selected = self.secrets_names.len() - 1;
+                    }
                 }
             }
             _ => {}
@@ -538,27 +555,6 @@ impl App {
         }
     }
 
-    fn refresh_secrets_list(&mut self) {
-        if let Some(session) = self.selected_session() {
-            let name = session.name.clone();
-            let output = std::process::Command::new("cs")
-                .args([&name, "-secrets", "list"])
-                .output();
-            if let Ok(out) = output {
-                let text = String::from_utf8_lossy(&out.stdout).to_string();
-                self.secrets_names = Self::parse_secrets_list(&text);
-                if self.secrets_selected >= self.secrets_names.len() && !self.secrets_names.is_empty()
-                {
-                    self.secrets_selected = self.secrets_names.len() - 1;
-                }
-                if self.secrets_names.is_empty() {
-                    self.mode = Mode::Normal;
-                    self.status_message = Some("No secrets remaining".to_string());
-                }
-            }
-        }
-    }
-
     fn parse_secrets_list(output: &str) -> Vec<String> {
         output
             .lines()
@@ -581,6 +577,7 @@ impl App {
                 Ok(out) => {
                     let text = String::from_utf8_lossy(&out.stdout).to_string()
                         + &String::from_utf8_lossy(&out.stderr).to_string();
+                    self.return_to_secrets = true;
                     self.mode = Mode::SyncOutput(text);
                 }
                 Err(e) => {
@@ -1104,6 +1101,26 @@ mod tests {
         // Should not go below 0
         app.handle_key(KeyEvent::from(KeyCode::Char('k')));
         assert_eq!(app.secrets_selected, 0);
+    }
+
+    #[test]
+    fn sync_output_returns_to_secrets_when_flagged() {
+        let mut app = App::new(sample_sessions());
+        app.secrets_names = vec!["KEY1".into(), "KEY2".into()];
+        app.secrets_selected = 0;
+        app.return_to_secrets = true;
+        app.mode = Mode::SyncOutput("value: 123".into());
+        app.handle_key(KeyEvent::from(KeyCode::Char(' ')));
+        assert_eq!(app.mode, Mode::Secrets);
+        assert!(!app.return_to_secrets);
+    }
+
+    #[test]
+    fn sync_output_returns_to_normal_when_not_flagged() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::SyncOutput("some output".into());
+        app.handle_key(KeyEvent::from(KeyCode::Char(' ')));
+        assert_eq!(app.mode, Mode::Normal);
     }
 
     #[test]
