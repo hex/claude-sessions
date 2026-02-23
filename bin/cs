@@ -914,7 +914,7 @@ launch_claude_code() {
 
     echo ""
     echo -e "${bars[$bar_idx]}${NC} ${ORANGE}cs${NC} ${GREEN}$VERSION${NC}"; ((++bar_idx))
-    echo -e "${bars[$bar_idx]}${NC} ${WHITE}${BOLD}$session_name${NC} ${COMMENT}($status_icon $status_text)${NC}"; ((++bar_idx))
+    echo -e "${bars[$bar_idx]}${NC} ${WHITE}${BOLD}$session_name${NC} ${COMMENT}($status_icon $status_text)${NC} ${DIM}@ $(hostname -s)${NC}"; ((++bar_idx))
     echo -e "${bars[$bar_idx]}${NC} ${GOLD}$session_dir${NC}"; ((++bar_idx))
     if [ -n "$remote_display" ]; then
         echo -e "${bars[$bar_idx]}${NC} $remote_display"; ((++bar_idx))
