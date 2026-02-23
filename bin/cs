@@ -2209,7 +2209,7 @@ main() {
         tui_bin="$(command -v cs-tui 2>/dev/null || echo "$(dirname "$0")/cs-tui")"
         if [ -x "$tui_bin" ]; then
             local selected
-            selected=$("$tui_bin") || exit $?
+            selected=$(CS_VERSION="$VERSION" "$tui_bin") || exit $?
             if [ -n "$selected" ]; then
                 exec "$0" "$selected"
             fi

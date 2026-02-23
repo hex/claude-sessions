@@ -131,7 +131,9 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
     app.column_widths = resolved;
 
     let session_count = app.filtered.len();
-    let title = format!(" cs  [{} sessions] ", session_count);
+    let version = std::env::var("CS_VERSION").unwrap_or_default();
+
+    let title = gradient_title(&version, session_count);
 
     let table = Table::new(rows, widths)
         .header(header)
@@ -140,8 +142,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(RUST))
-                .title(title)
-                .title_style(Style::default().fg(WHITE).add_modifier(Modifier::BOLD)),
+                .title(title),
         )
         .row_highlight_style(
             Style::default()
@@ -207,6 +208,41 @@ fn resolve_widths(constraints: &[Constraint], available: u16) -> Vec<u16> {
             _ => flex_extra,
         })
         .collect()
+}
+
+fn gradient_title<'a>(version: &str, session_count: usize) -> Line<'a> {
+    // Rust (#e64a19) → Gold (#ffc107) gradient matching install.sh banner
+    const START: (u8, u8, u8) = (230, 74, 25);
+    const END: (u8, u8, u8) = (255, 193, 7);
+    let text = "claude-sessions";
+    let len = text.len() as f32 - 1.0;
+
+    let mut spans: Vec<Span<'a>> = Vec::with_capacity(text.len() + 4);
+    spans.push(Span::styled(" ", Style::default()));
+
+    for (i, ch) in text.chars().enumerate() {
+        let t = if len > 0.0 { i as f32 / len } else { 0.0 };
+        let r = START.0 as f32 + t * (END.0 as f32 - START.0 as f32);
+        let g = START.1 as f32 + t * (END.1 as f32 - START.1 as f32);
+        let b = START.2 as f32 + t * (END.2 as f32 - START.2 as f32);
+        spans.push(Span::styled(
+            ch.to_string(),
+            Style::default()
+                .fg(ratatui::style::Color::Rgb(r as u8, g as u8, b as u8))
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+
+    spans.push(Span::styled(
+        format!(" v{} ", version),
+        Style::default().fg(COMMENT),
+    ));
+    spans.push(Span::styled(
+        format!("[{} sessions] ", session_count),
+        Style::default().fg(WHITE).add_modifier(Modifier::BOLD),
+    ));
+
+    Line::from(spans)
 }
 
 fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
