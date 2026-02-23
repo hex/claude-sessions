@@ -88,8 +88,14 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
 
             let github = s.git_repo.clone().unwrap_or_default();
 
+            let name_color = if s.location.is_some() {
+                ratatui::style::Color::Cyan
+            } else {
+                GOLD
+            };
+
             let row = Row::new(vec![
-                Cell::from(name_text).style(Style::default().fg(GOLD)),
+                Cell::from(name_text).style(Style::default().fg(name_color)),
                 Cell::from(s.created.clone().unwrap_or_else(|| "-".into()))
                     .style(Style::default().fg(COMMENT)),
                 Cell::from(s.modified.clone().unwrap_or_else(|| "-".into()))
