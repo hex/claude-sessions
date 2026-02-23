@@ -45,11 +45,13 @@ if [[ "${CS_NERD_FONTS:-}" == "1" ]]; then
     ICON_SYNC='󰓦'      # mdi-sync
     ICON_LOCAL='󰋜'     # mdi-home
     ICON_REMOTE='󰌘'    # mdi-remote-desktop
+    ICON_HOST='󰟀'      # mdi-monitor
 else
     ICON_LOCK='⚿'      # Unicode lock with key
     ICON_SYNC='⇄'      # Unicode arrows
     ICON_LOCAL='⌂'     # Unicode house
     ICON_REMOTE='⇝'    # Unicode rightwards squiggle arrow
+    ICON_HOST='⌘'      # Unicode command/place of interest
 fi
 
 # Utility functions
@@ -914,7 +916,7 @@ launch_claude_code() {
 
     echo ""
     echo -e "${bars[$bar_idx]}${NC} ${ORANGE}cs${NC} ${GREEN}$VERSION${NC}"; ((++bar_idx))
-    echo -e "${bars[$bar_idx]}${NC} ${WHITE}${BOLD}$session_name${NC} ${COMMENT}($status_icon $status_text)${NC} ${DIM}@ $(hostname -s)${NC}"; ((++bar_idx))
+    echo -e "${bars[$bar_idx]}${NC} ${WHITE}${BOLD}$session_name${NC} ${COMMENT}($status_icon $status_text)${NC} ${DIM}${ICON_HOST} $(hostname -s)${NC}"; ((++bar_idx))
     echo -e "${bars[$bar_idx]}${NC} ${GOLD}$session_dir${NC}"; ((++bar_idx))
     if [ -n "$remote_display" ]; then
         echo -e "${bars[$bar_idx]}${NC} $remote_display"; ((++bar_idx))
