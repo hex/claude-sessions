@@ -566,6 +566,57 @@ SCRIPT
         "remote.conf should cache detected root" || return 1
 }
 
+test_move_to_cleans_local_files() {
+    # Create a local session with project files
+    mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs/logs"
+    echo "auto_sync=on" > "$CS_SESSIONS_ROOT/my-session/.cs/sync.conf"
+    echo "some work" > "$CS_SESSIONS_ROOT/my-session/notes.txt"
+    echo "# My Project" > "$CS_SESSIONS_ROOT/my-session/CLAUDE.md"
+
+    local output
+    output=$("$CS_BIN" my-session --move-to hex@mac-mini.local 2>&1)
+
+    # remote.conf should exist (it's the stub)
+    assert_exists "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf" \
+        "remote.conf should survive cleanup" || return 1
+
+    # Project files should be gone
+    if [ -f "$CS_SESSIONS_ROOT/my-session/notes.txt" ]; then
+        echo "  FAIL: notes.txt should be removed after move"
+        return 1
+    fi
+    if [ -f "$CS_SESSIONS_ROOT/my-session/CLAUDE.md" ]; then
+        echo "  FAIL: CLAUDE.md should be removed after move"
+        return 1
+    fi
+    # Other .cs/ contents should be gone too
+    if [ -f "$CS_SESSIONS_ROOT/my-session/.cs/sync.conf" ]; then
+        echo "  FAIL: sync.conf should be removed after move"
+        return 1
+    fi
+}
+
+test_move_to_preserves_adopted_session_files() {
+    # Simulate an adopted session (symlink to external project)
+    local project_dir="$TEST_TMPDIR/my-project"
+    mkdir -p "$project_dir/.cs"
+    echo "important work" > "$project_dir/main.py"
+    ln -s "$project_dir" "$CS_SESSIONS_ROOT/my-session"
+
+    local output
+    output=$("$CS_BIN" my-session --move-to hex@mac-mini.local 2>&1)
+
+    # remote.conf should exist
+    assert_exists "$project_dir/.cs/remote.conf" \
+        "remote.conf should be created in adopted session" || return 1
+
+    # Project files should be preserved (it's a symlink — not safe to delete)
+    if [ ! -f "$project_dir/main.py" ]; then
+        echo "  FAIL: adopted project files should be preserved"
+        return 1
+    fi
+}
+
 # ============================================================================
 # List Sessions Tests
 # ============================================================================
@@ -666,6 +717,8 @@ run_test test_move_to_already_remote_errors
 run_test test_move_to_with_registered_name
 run_test test_move_to_shows_rsync_command
 run_test test_move_to_queries_remote_sessions_root
+run_test test_move_to_cleans_local_files
+run_test test_move_to_preserves_adopted_session_files
 
 # List sessions
 run_test test_list_shows_remote_location

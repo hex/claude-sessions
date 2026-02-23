@@ -1494,31 +1494,40 @@ move_session_to_remote() {
     resolved_host=$(resolve_remote_host "$host_spec") || \
         error "Host '$host_spec' not found in registry. Register it with: cs -remote add <name> <user@host>"
 
-    # Detect remote sessions root via ssh
+    echo -e "Moving session ${GOLD}${session_name}${NC} to ${GOLD}${resolved_host}${NC}..."
+
+    # Step 1: Detect remote sessions root via ssh
+    echo -e "  ${DIM}Detecting remote sessions directory...${NC}"
     local remote_root
     remote_root=$(detect_remote_sessions_root "$resolved_host")
 
-    # rsync session to remote
+    # Step 2: rsync session to remote
     local rsync_cmd="rsync -az ${session_dir}/ ${resolved_host}:${remote_root}/${session_name}/"
-
-    echo -e "Moving session ${GOLD}${session_name}${NC} to ${GOLD}${resolved_host}${NC}..."
 
     if [ "${CS_TEST_DRY_RUN:-}" = "1" ]; then
         echo "DRY_RUN: $rsync_cmd"
-        # Still create the stub in dry run
+    else
+        echo -e "  ${DIM}Syncing files to ${resolved_host}...${NC}"
+        if ! eval "$rsync_cmd"; then
+            error "rsync failed. Local session was not modified."
+        fi
+    fi
+
+    # Step 3: Clean local files and write remote stub
+    echo -e "  ${DIM}Creating remote stub...${NC}"
+    if [ -L "$session_dir" ]; then
+        # Adopted session (symlink to project) — keep project files, just add remote.conf
         mkdir -p "$session_dir/.cs"
         printf 'host=%s\nroot=%s\n' "$host_spec" "$remote_root" > "$session_dir/.cs/remote.conf"
-        info "Session '$session_name' moved to $resolved_host (dry run)"
-        return 0
+    else
+        # Regular session — replace contents with minimal stub
+        local tmp_conf
+        tmp_conf=$(mktemp)
+        printf 'host=%s\nroot=%s\n' "$host_spec" "$remote_root" > "$tmp_conf"
+        rm -rf "${session_dir:?}"
+        mkdir -p "$session_dir/.cs"
+        mv "$tmp_conf" "$session_dir/.cs/remote.conf"
     fi
-
-    if ! eval "$rsync_cmd"; then
-        error "rsync failed. Local session was not modified."
-    fi
-
-    # Write remote.conf with host and detected root
-    mkdir -p "$session_dir/.cs"
-    printf 'host=%s\nroot=%s\n' "$host_spec" "$remote_root" > "$session_dir/.cs/remote.conf"
     info "Session '$session_name' moved to $resolved_host"
     echo -e "${DIM}Connect with: cs $session_name${NC}"
 }
