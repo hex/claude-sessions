@@ -24,6 +24,9 @@ _cs_completions() {
     # Remote subcommands
     local remote_cmds="add list ls remove rm"
 
+    # Update subcommands
+    local update_cmds="--check -c --force -f auto"
+
     # Session-level options
     local session_opts="-sync -s -secrets --on --move-to --force"
 
@@ -38,6 +41,7 @@ _cs_completions() {
     local in_sync=false
     local in_secrets=false
     local in_remote=false
+    local in_update=false
     local has_session=false
     local after_remove=false
 
@@ -47,16 +51,25 @@ _cs_completions() {
                 in_sync=true
                 in_secrets=false
                 in_remote=false
+                in_update=false
                 ;;
             -secrets)
                 in_secrets=true
                 in_sync=false
                 in_remote=false
+                in_update=false
                 ;;
             -remote)
                 in_remote=true
                 in_sync=false
                 in_secrets=false
+                in_update=false
+                ;;
+            -update)
+                in_update=true
+                in_sync=false
+                in_secrets=false
+                in_remote=false
                 ;;
             -remove|-rm)
                 after_remove=true
@@ -66,7 +79,7 @@ _cs_completions() {
                 ;;
             *)
                 # A non-flag word that's not a subcommand is likely a session name
-                if ! $in_sync && ! $in_secrets && ! $after_remove && ! $in_remote; then
+                if ! $in_sync && ! $in_secrets && ! $after_remove && ! $in_remote && ! $in_update; then
                     has_session=true
                 fi
                 ;;
@@ -82,6 +95,12 @@ _cs_completions() {
     # Context: after -remote, complete with remote subcommands
     if $in_remote; then
         COMPREPLY=($(compgen -W "$remote_cmds" -- "$cur"))
+        return
+    fi
+
+    # Context: after -update, complete with update subcommands
+    if $in_update; then
+        COMPREPLY=($(compgen -W "$update_cmds" -- "$cur"))
         return
     fi
 

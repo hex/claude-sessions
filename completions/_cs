@@ -61,6 +61,16 @@ _cs() {
         'rm:Remove a registered host (alias)'
     )
 
+    # Update subcommands with descriptions
+    local -a update_cmds
+    update_cmds=(
+        '--check:Check for updates without installing'
+        '-c:Check for updates (alias)'
+        '--force:Force reinstall even if up to date'
+        '-f:Force reinstall (alias)'
+        'auto:Toggle/show auto-update setting'
+    )
+
     # Global flags with descriptions
     local -a global_flags
     global_flags=(
@@ -81,19 +91,20 @@ _cs() {
     )
 
     # Determine context
-    local in_sync=false in_secrets=false in_remote=false has_session=false after_remove=false
+    local in_sync=false in_secrets=false in_remote=false in_update=false has_session=false after_remove=false
     local i word
 
     for ((i=2; i < CURRENT; i++)); do
         word="${words[i]}"
         case "$word" in
-            -sync|-s) in_sync=true; in_secrets=false; in_remote=false ;;
-            -secrets) in_secrets=true; in_sync=false; in_remote=false ;;
-            -remote) in_remote=true; in_sync=false; in_secrets=false ;;
+            -sync|-s) in_sync=true; in_secrets=false; in_remote=false; in_update=false ;;
+            -secrets) in_secrets=true; in_sync=false; in_remote=false; in_update=false ;;
+            -remote) in_remote=true; in_sync=false; in_secrets=false; in_update=false ;;
+            -update) in_update=true; in_sync=false; in_secrets=false; in_remote=false ;;
             -remove|-rm) after_remove=true ;;
             -*) ;;
             *)
-                if ! $in_sync && ! $in_secrets && ! $after_remove && ! $in_remote; then
+                if ! $in_sync && ! $in_secrets && ! $after_remove && ! $in_remote && ! $in_update; then
                     has_session=true
                 fi
                 ;;
@@ -109,6 +120,12 @@ _cs() {
     # Context: after -remote
     if $in_remote; then
         _describe 'remote command' remote_cmds
+        return
+    fi
+
+    # Context: after -update
+    if $in_update; then
+        _describe 'update command' update_cmds
         return
     fi
 
