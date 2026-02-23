@@ -459,10 +459,10 @@ impl App {
         let mut offset = self.table_area.x + 1; // +1 for border
         offset += 3; // highlight_symbol ">> " width
         for (i, &width) in self.column_widths.iter().enumerate() {
-            if x >= offset && x < offset + width + 1 {
+            if x >= offset && x < offset + width + 3 {
                 return SORT_COLUMNS.get(i).copied();
             }
-            offset += width + 1; // +1 for column spacing
+            offset += width + 3; // +3 for column_spacing(3)
         }
         None
     }

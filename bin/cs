@@ -861,7 +861,8 @@ launch_claude_code() {
 
     # Acquire session lock before anything else
     acquire_session_lock "$session_dir/.cs" "$force"
-    trap 'release_session_lock "'"$session_dir/.cs"'"' EXIT INT TERM
+    trap 'release_session_lock "'"$session_dir/.cs"'"' EXIT
+    trap 'release_session_lock "'"$session_dir/.cs"'"; exit 130' INT TERM
 
     # Set environment variables
     export CLAUDE_SESSION_NAME="$session_name"
@@ -935,7 +936,7 @@ launch_claude_code() {
     local continue_flag=""
     if [ "$is_new" = "false" ]; then
         printf "${DIM}Continue previous conversation?${NC} [Y/n] "
-        read -r response
+        read -r response || exit 130
         case "$response" in
             [nN]|[nN][oO])
                 continue_flag=""

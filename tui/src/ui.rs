@@ -7,8 +7,12 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, Wrap};
 use ratatui::Frame;
 
+use ratatui::layout::Alignment;
+
 use crate::app::{App, Mode, SortColumn, SortDirection};
 use crate::theme::{self, COMMENT, GOLD, GREEN, ORANGE, RED, RUST, WHITE};
+
+const ZEBRA_DIM: ratatui::style::Color = ratatui::style::Color::Rgb(40, 36, 34);
 
 pub fn render(app: &mut App, frame: &mut Frame) {
     let chunks = Layout::vertical([Constraint::Min(5), Constraint::Length(1)])
@@ -59,7 +63,8 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
     let rows: Vec<Row> = app
         .filtered
         .iter()
-        .map(|&i| {
+        .enumerate()
+        .map(|(row_idx, &i)| {
             let s = &app.sessions[i];
             let mut name_text = s.name.clone();
             if s.is_locked {
@@ -72,6 +77,9 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
                 String::new()
             };
 
+            // Center the secrets text within the column by padding
+            let secrets_line = Line::from(secrets).alignment(Alignment::Center);
+
             let remote = s
                 .location
                 .as_ref()
@@ -80,16 +88,23 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
 
             let github = s.git_repo.clone().unwrap_or_default();
 
-            Row::new(vec![
+            let row = Row::new(vec![
                 Cell::from(name_text).style(Style::default().fg(GOLD)),
                 Cell::from(s.created.clone().unwrap_or_else(|| "-".into()))
                     .style(Style::default().fg(COMMENT)),
                 Cell::from(s.modified.clone().unwrap_or_else(|| "-".into()))
                     .style(Style::default().fg(COMMENT)),
-                Cell::from(secrets).style(Style::default().fg(COMMENT)),
+                Cell::from(secrets_line).style(Style::default().fg(COMMENT)),
                 Cell::from(remote).style(Style::default().fg(ORANGE)),
                 Cell::from(github).style(Style::default().fg(GREEN)),
-            ])
+            ]);
+
+            // Zebra striping on odd rows
+            if row_idx % 2 == 1 {
+                row.style(Style::default().bg(ZEBRA_DIM))
+            } else {
+                row
+            }
         })
         .collect();
 
@@ -104,7 +119,9 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
 
     // Store resolved column widths for mouse click-to-sort
     let inner_width = area.width.saturating_sub(2); // borders
-    let resolved = resolve_widths(&widths, inner_width.saturating_sub(3)); // -3 for highlight_symbol
+    let col_spacing = 3u16;
+    let spacing_total = col_spacing * (widths.len() as u16 - 1);
+    let resolved = resolve_widths(&widths, inner_width.saturating_sub(3).saturating_sub(spacing_total));
     app.column_widths = resolved;
 
     let session_count = app.filtered.len();
@@ -112,6 +129,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
 
     let table = Table::new(rows, widths)
         .header(header)
+        .column_spacing(3)
         .block(
             Block::default()
                 .borders(Borders::ALL)
