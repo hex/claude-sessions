@@ -5,11 +5,14 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.2.12"
+VERSION="2026.2.13"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
-RAW_URL="https://raw.githubusercontent.com/hex/claude-sessions/main"
+RELEASES_BASE="https://github.com/hex/claude-sessions/releases"
+
+# Minisign public key for verifying signed releases
+CS_SIGN_PUBKEY="RWQvs3IVdvrS8PJs0V0gwdJGPw/x5waQ6z6iqPQm90JfpxfcsSy9b9Vo"
 GLOBAL_CONFIG="$SESSIONS_ROOT/.cs.conf"
 
 # Colors - Claude warm palette (rust → orange → gold)
@@ -191,12 +194,125 @@ release_session_lock() {
     fi
 }
 
-# Fetch latest version from GitHub
+# --- Minisign signature verification ---
+
+MINISIGN_BIN=""  # Set by minisign_find_binary
+
+# Find minisign binary (checks PATH, then ~/.local/bin)
+minisign_find_binary() {
+    if [[ -n "$MINISIGN_BIN" && -x "$MINISIGN_BIN" ]]; then
+        echo "$MINISIGN_BIN"
+        return 0
+    fi
+
+    if command -v minisign &>/dev/null; then
+        MINISIGN_BIN=$(command -v minisign)
+        echo "$MINISIGN_BIN"
+        return 0
+    fi
+
+    if [[ -x "$HOME/.local/bin/minisign" ]]; then
+        MINISIGN_BIN="$HOME/.local/bin/minisign"
+        echo "$MINISIGN_BIN"
+        return 0
+    fi
+
+    return 1
+}
+
+# Download minisign binary if not found
+minisign_ensure_binary() {
+    if minisign_find_binary &>/dev/null; then
+        return 0
+    fi
+
+    echo "minisign not found. Downloading for signature verification..." >&2
+
+    local os arch tmpdir
+    case "$(uname -s)" in
+        Darwin) os="macos" ;;
+        Linux)  os="linux" ;;
+        *)
+            echo "Warning: Unsupported OS for minisign auto-download" >&2
+            return 1
+            ;;
+    esac
+
+    case "$(uname -m)" in
+        x86_64|amd64) arch="x86_64" ;;
+        arm64|aarch64) arch="aarch64" ;;
+        *)
+            echo "Warning: Unsupported architecture for minisign auto-download" >&2
+            return 1
+            ;;
+    esac
+
+    tmpdir=$(mktemp -d)
+    mkdir -p "$HOME/.local/bin"
+
+    if [ "$os" = "macos" ]; then
+        # macOS: universal binary in a zip
+        local url="https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-macos.zip"
+        if curl -fsSL "$url" -o "$tmpdir/minisign.zip" 2>/dev/null; then
+            unzip -q "$tmpdir/minisign.zip" -d "$tmpdir" 2>/dev/null
+            if [[ -f "$tmpdir/minisign" ]]; then
+                mv "$tmpdir/minisign" "$HOME/.local/bin/"
+            else
+                rm -rf "$tmpdir"
+                echo "Warning: Unexpected archive structure" >&2
+                return 1
+            fi
+        else
+            rm -rf "$tmpdir"
+            echo "Warning: Failed to download minisign" >&2
+            return 1
+        fi
+    else
+        # Linux: arch-specific binary in a tarball
+        local url="https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-linux.tar.gz"
+        if curl -fsSL "$url" 2>/dev/null | tar xz -C "$tmpdir" 2>/dev/null; then
+            if [[ -f "$tmpdir/minisign-linux/$arch/minisign" ]]; then
+                mv "$tmpdir/minisign-linux/$arch/minisign" "$HOME/.local/bin/"
+            else
+                rm -rf "$tmpdir"
+                echo "Warning: Unexpected archive structure (no $arch binary)" >&2
+                return 1
+            fi
+        else
+            rm -rf "$tmpdir"
+            echo "Warning: Failed to download minisign" >&2
+            return 1
+        fi
+    fi
+
+    chmod +x "$HOME/.local/bin/minisign"
+    rm -rf "$tmpdir"
+
+    MINISIGN_BIN="$HOME/.local/bin/minisign"
+    echo "Installed minisign to ~/.local/bin/" >&2
+    return 0
+}
+
+# Verify a file's minisign signature against the embedded public key
+verify_signature() {
+    local file="$1" sigfile="$2"
+    local ms_bin
+    ms_bin=$(minisign_find_binary) || {
+        minisign_ensure_binary || {
+            echo "Cannot verify signature: minisign not available" >&2
+            return 1
+        }
+        ms_bin=$(minisign_find_binary)
+    }
+    "$ms_bin" -Vm "$file" -P "$CS_SIGN_PUBKEY" -x "$sigfile" >/dev/null 2>&1
+}
+
+# --- Update mechanism ---
+
+# Fetch latest version from GitHub Releases
 get_remote_version() {
-    local remote_cs cache_bust
-    cache_bust=$(date +%s)
-    remote_cs=$(curl -fsSL "$RAW_URL/bin/cs?cb=$cache_bust" 2>/dev/null) || return 1
-    echo "$remote_cs" | grep '^VERSION=' | head -1 | cut -d'"' -f2
+    curl -fsSL "${RELEASES_BASE}/latest" -o /dev/null -w '%{url_effective}' 2>/dev/null \
+        | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/^v//'
 }
 
 # Compare versions (YYYY.MM.N format). Returns 0 if v1 > v2, 1 otherwise
@@ -243,7 +359,7 @@ check_update() {
     fi
 }
 
-# Perform update
+# Perform update (downloads signed installer from GitHub Releases)
 do_update() {
     local force="${1:-false}"
     local remote_version
@@ -263,15 +379,29 @@ do_update() {
     echo -e "   ${COMMENT}Updating${NC} cs ${COMMENT}from${NC} ${RUST}$VERSION${NC} ${COMMENT}→${NC} ${GREEN}$remote_version${NC}"
     echo ""
 
-    # Download and run install.sh (with cache busting)
-    local install_script cache_bust
-    cache_bust=$(date +%s)
-    install_script=$(curl -fsSL "$RAW_URL/install.sh?cb=$cache_bust" 2>/dev/null) || {
-        error "Failed to download installer."
+    local releases_url="${RELEASES_BASE}/download/v${remote_version}"
+    local tmpdir
+    tmpdir=$(mktemp -d)
+
+    # Download install.sh + signature from release assets
+    curl -fsSL "$releases_url/install.sh" -o "$tmpdir/install.sh" || {
+        rm -rf "$tmpdir"; error "Failed to download installer."
+    }
+    curl -fsSL "$releases_url/install.sh.minisig" -o "$tmpdir/install.sh.minisig" || {
+        rm -rf "$tmpdir"; error "Failed to download installer signature."
     }
 
-    # Run the installer
-    bash -c "$install_script"
+    # Verify signature
+    if ! verify_signature "$tmpdir/install.sh" "$tmpdir/install.sh.minisig"; then
+        rm -rf "$tmpdir"
+        error "Signature verification failed. Update aborted."
+    fi
+
+    info "Signature verified"
+
+    # Run the verified installer
+    bash "$tmpdir/install.sh"
+    rm -rf "$tmpdir"
 
     # Clear update cache so notification disappears
     rm -f "$HOME/.cache/cs/update-check"

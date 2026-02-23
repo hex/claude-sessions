@@ -93,6 +93,9 @@ SKILL_STORE_SECRET_URL="${REPO_URL}/skills/store-secret/SKILL.md"
 COMPLETION_BASH_URL="${REPO_URL}/completions/cs.bash"
 COMPLETION_ZSH_URL="${REPO_URL}/completions/_cs"
 
+# Minisign public key for verifying signed releases
+CS_SIGN_PUBKEY="RWQvs3IVdvrS8PJs0V0gwdJGPw/x5waQ6z6iqPQm90JfpxfcsSy9b9Vo"
+
 # Detect if running from cloned repo or web install
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
 if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/bin/cs" ]; then
@@ -169,6 +172,24 @@ elif [ "$INSTALL_METHOD" = "web" ]; then
         installed "cs-tui" "$INSTALL_DIR/cs-tui"
         curl -fsSL "$_tui_url" -o "$INSTALL_DIR/cs-tui" || warn "Failed to download cs-tui — skipping"
         chmod +x "$INSTALL_DIR/cs-tui"
+
+        # Verify cs-tui signature (best-effort: minisign may not be installed on first install)
+        _sig_url="${RELEASES_URL}/v${_cs_version}/cs-tui-${_os}-${_arch}.minisig"
+        if curl -fsSL "$_sig_url" -o "$INSTALL_DIR/cs-tui.minisig" 2>/dev/null; then
+            _ms_bin=""
+            if command -v minisign >/dev/null 2>&1; then
+                _ms_bin=$(command -v minisign)
+            elif [ -x "$HOME/.local/bin/minisign" ]; then
+                _ms_bin="$HOME/.local/bin/minisign"
+            fi
+            if [ -n "$_ms_bin" ]; then
+                if ! "$_ms_bin" -Vm "$INSTALL_DIR/cs-tui" -P "$CS_SIGN_PUBKEY" -x "$INSTALL_DIR/cs-tui.minisig" >/dev/null 2>&1; then
+                    rm -f "$INSTALL_DIR/cs-tui" "$INSTALL_DIR/cs-tui.minisig"
+                    warn "cs-tui signature verification failed -- removed"
+                fi
+            fi
+            rm -f "$INSTALL_DIR/cs-tui.minisig"
+        fi
     else
         info "cs-tui not available for ${_os}-${_arch} — run 'cs' for help, or build from source: cd tui && cargo build --release"
     fi

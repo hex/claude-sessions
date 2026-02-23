@@ -55,12 +55,35 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
 
+      - name: Install minisign
+        run: |
+          curl -fsSL https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-linux.tar.gz | tar xz
+          sudo mv minisign-linux/x86_64/minisign /usr/local/bin/
+
+      - name: Sign release assets
+        env:
+          MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
+        run: |
+          echo "$MINISIGN_KEY" > /tmp/minisign.key
+
+          minisign -Sm install.sh -s /tmp/minisign.key -t "cs ${GITHUB_REF_NAME}" -W
+          for bin in cs-tui-*; do
+            minisign -Sm "$bin" -s /tmp/minisign.key -t "cs ${GITHUB_REF_NAME}" -W
+          done
+
+          rm -f /tmp/minisign.key
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: cs-tui-*
+          files: |
+            install.sh
+            install.sh.minisig
+            cs-tui-*
           generate_release_notes: true

@@ -34,6 +34,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 - **Session locking** - PID-based lock prevents the same session from being opened in two terminals simultaneously; use `--force` to override
 - **Remote sessions** - Run sessions on remote machines via `et` or `ssh` + `tmux`; `cs` handles connection, stubbing, and session tracking
 - **Update notifications** - Checks for updates and notifies when new versions are available; opt-in auto-update on session open
+- **Signed updates** - Updates are downloaded from immutable GitHub Releases and verified with [minisign](https://jedisct1.github.io/minisign/) signatures before execution
 
 ## Installation
 
