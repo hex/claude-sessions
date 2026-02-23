@@ -16,7 +16,7 @@ _cs() {
         # Use _describe so zsh shows a menu even when one name is an
         # exact prefix of another (e.g., "comfy" and "comfy-nodes")
         for s in "${sessions[@]}"; do
-            session_descs+=("$s:session")
+            session_descs+=("${s}:session")
         done
         _describe 'session' session_descs
     }

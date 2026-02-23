@@ -12,7 +12,7 @@ use ratatui::layout::Alignment;
 use crate::app::{App, Mode, SortColumn, SortDirection};
 use crate::theme::{self, COMMENT, GOLD, GREEN, ORANGE, RED, RUST, WHITE};
 
-const ZEBRA_DIM: ratatui::style::Color = ratatui::style::Color::Rgb(40, 36, 34);
+const ZEBRA_DIM: ratatui::style::Color = ratatui::style::Color::Rgb(32, 29, 28);
 
 pub fn render(app: &mut App, frame: &mut Frame) {
     let chunks = Layout::vertical([Constraint::Min(5), Constraint::Length(1)])
@@ -125,7 +125,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
 
     // Store resolved column widths for mouse click-to-sort
     let inner_width = area.width.saturating_sub(2); // borders
-    let col_spacing = 3u16;
+    let col_spacing = 7u16;
     let spacing_total = col_spacing * (widths.len() as u16 - 1);
     let resolved = resolve_widths(&widths, inner_width.saturating_sub(3).saturating_sub(spacing_total));
     app.column_widths = resolved;
@@ -135,7 +135,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
 
     let table = Table::new(rows, widths)
         .header(header)
-        .column_spacing(3)
+        .column_spacing(col_spacing)
         .block(
             Block::default()
                 .borders(Borders::ALL)
@@ -151,6 +151,28 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
         .highlight_symbol(">> ");
 
     frame.render_stateful_widget(table, area, &mut app.table_state);
+
+    // Draw discrete column separators in the middle of each column gap
+    const SEP: ratatui::style::Color = ratatui::style::Color::Rgb(50, 45, 42);
+    let y_start = area.y + 1;
+    let y_end = area.y + area.height.saturating_sub(1);
+    let mut x = area.x + 1 + 3; // border + highlight symbol width
+    let buf = frame.buffer_mut();
+    for (i, &w) in app.column_widths.iter().enumerate() {
+        x += w;
+        if i < app.column_widths.len() - 1 {
+            let sep_x = x + col_spacing / 2; // center of gap
+            if sep_x < area.x + area.width.saturating_sub(1) {
+                for y in y_start..y_end {
+                    if let Some(cell) = buf.cell_mut(ratatui::layout::Position::new(sep_x, y)) {
+                        cell.set_char('\u{2502}');
+                        cell.set_fg(SEP);
+                    }
+                }
+            }
+            x += col_spacing;
+        }
+    }
 }
 
 fn resolve_widths(constraints: &[Constraint], available: u16) -> Vec<u16> {
