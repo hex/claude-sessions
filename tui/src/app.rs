@@ -35,6 +35,7 @@ pub enum SortDirection {
 pub enum Mode {
     Normal,
     Search,
+    SessionMenu,
     ConfirmDelete,
     ConfirmForceOpen,
     Rename,
@@ -42,6 +43,17 @@ pub enum Mode {
     Secrets,
     SyncOutput(String),
 }
+
+pub const MENU_ITEMS: &[(&str, &str)] = &[
+    ("Open", "Enter"),
+    ("Delete", "d"),
+    ("Rename", "r"),
+    ("Move to Remote", "m"),
+    ("Secrets", "s"),
+    ("Push", "P"),
+    ("Pull", "L"),
+    ("Status", "S"),
+];
 
 pub enum Action {
     None,
@@ -64,6 +76,7 @@ pub struct App {
     pub secrets_names: Vec<String>,
     pub secrets_selected: usize,
     pub return_to_secrets: bool,
+    pub menu_selected: usize,
     pub status_message: Option<String>,
     pub table_area: ratatui::layout::Rect,
     pub column_widths: Vec<u16>,
@@ -91,6 +104,7 @@ impl App {
             secrets_names: Vec::new(),
             secrets_selected: 0,
             return_to_secrets: false,
+            menu_selected: 0,
             status_message: None,
         }
     }
@@ -154,6 +168,7 @@ impl App {
         match &self.mode {
             Mode::Normal => self.handle_normal(key),
             Mode::Search => self.handle_search(key),
+            Mode::SessionMenu => self.handle_session_menu(key),
             Mode::ConfirmDelete => self.handle_confirm_delete(key),
             Mode::ConfirmForceOpen => self.handle_confirm_force_open(key),
             Mode::Rename => self.handle_rename(key),
@@ -180,16 +195,11 @@ impl App {
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => Action::Quit,
             KeyCode::Enter => {
-                if let Some(session) = self.selected_session() {
-                    if session.is_locked {
-                        self.mode = Mode::ConfirmForceOpen;
-                        Action::None
-                    } else {
-                        Action::Open(session.name.clone())
-                    }
-                } else {
-                    Action::None
+                if self.selected_session().is_some() {
+                    self.menu_selected = 0;
+                    self.mode = Mode::SessionMenu;
                 }
+                Action::None
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 self.table_state.select_next();
@@ -277,6 +287,104 @@ impl App {
             }
             KeyCode::Char('6') => {
                 self.cycle_sort(SortColumn::Github);
+                Action::None
+            }
+            _ => Action::None,
+        }
+    }
+
+    fn handle_session_menu(&mut self, key: KeyEvent) -> Action {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.mode = Mode::Normal;
+                Action::None
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if self.menu_selected < MENU_ITEMS.len() - 1 {
+                    self.menu_selected += 1;
+                }
+                Action::None
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if self.menu_selected > 0 {
+                    self.menu_selected -= 1;
+                }
+                Action::None
+            }
+            KeyCode::Enter => self.execute_menu_action(self.menu_selected),
+            // Direct shortcut keys
+            KeyCode::Char('d') => self.execute_menu_action(1),
+            KeyCode::Char('r') => self.execute_menu_action(2),
+            KeyCode::Char('m') => self.execute_menu_action(3),
+            KeyCode::Char('s') => self.execute_menu_action(4),
+            KeyCode::Char('P') => self.execute_menu_action(5),
+            KeyCode::Char('L') => self.execute_menu_action(6),
+            KeyCode::Char('S') => self.execute_menu_action(7),
+            _ => Action::None,
+        }
+    }
+
+    fn execute_menu_action(&mut self, index: usize) -> Action {
+        self.mode = Mode::Normal;
+        match index {
+            0 => {
+                // Open: same as old Enter logic
+                if let Some(session) = self.selected_session() {
+                    if session.is_locked {
+                        self.mode = Mode::ConfirmForceOpen;
+                        Action::None
+                    } else {
+                        Action::Open(session.name.clone())
+                    }
+                } else {
+                    Action::None
+                }
+            }
+            1 => {
+                // Delete
+                if self.selected_session().is_some() {
+                    self.mode = Mode::ConfirmDelete;
+                }
+                Action::None
+            }
+            2 => {
+                // Rename
+                if let Some(name) = self.selected_session_name() {
+                    self.rename_input = name;
+                    self.mode = Mode::Rename;
+                }
+                Action::None
+            }
+            3 => {
+                // Move to Remote
+                if let Some(session) = self.selected_session() {
+                    if session.location.is_some() {
+                        self.status_message = Some("Session is already remote".to_string());
+                    } else {
+                        self.move_to_input.clear();
+                        self.mode = Mode::MoveToRemote;
+                    }
+                }
+                Action::None
+            }
+            4 => {
+                // Secrets
+                self.run_secrets_command();
+                Action::None
+            }
+            5 => {
+                // Push
+                self.run_sync_command("push");
+                Action::None
+            }
+            6 => {
+                // Pull
+                self.run_sync_command("pull");
+                Action::None
+            }
+            7 => {
+                // Status
+                self.run_sync_command("status");
                 Action::None
             }
             _ => Action::None,
@@ -820,10 +928,12 @@ mod tests {
     }
 
     #[test]
-    fn enter_returns_open_action() {
+    fn enter_opens_session_menu() {
         let mut app = App::new(sample_sessions());
         let action = app.handle_key(KeyEvent::from(KeyCode::Enter));
-        assert!(matches!(action, Action::Open(name) if name == "alpha"));
+        assert!(matches!(action, Action::None));
+        assert_eq!(app.mode, Mode::SessionMenu);
+        assert_eq!(app.menu_selected, 0);
     }
 
     #[test]
@@ -931,13 +1041,14 @@ mod tests {
     }
 
     #[test]
-    fn enter_on_locked_session_enters_confirm_force_open() {
+    fn enter_on_locked_session_opens_menu() {
         let mut app = App::new(sample_sessions());
         // Navigate to gamma (index 2), which is locked
         app.table_state.select(Some(2));
         let action = app.handle_key(KeyEvent::from(KeyCode::Enter));
         assert!(matches!(action, Action::None));
-        assert_eq!(app.mode, Mode::ConfirmForceOpen);
+        assert_eq!(app.mode, Mode::SessionMenu);
+        assert_eq!(app.menu_selected, 0);
     }
 
     #[test]
@@ -960,11 +1071,12 @@ mod tests {
     }
 
     #[test]
-    fn enter_on_unlocked_session_returns_open() {
+    fn enter_on_unlocked_session_opens_menu() {
         let mut app = App::new(sample_sessions());
-        // alpha (index 0) is unlocked
+        // alpha (index 0) is unlocked — Enter opens menu, not session directly
         let action = app.handle_key(KeyEvent::from(KeyCode::Enter));
-        assert!(matches!(action, Action::Open(name) if name == "alpha"));
+        assert!(matches!(action, Action::None));
+        assert_eq!(app.mode, Mode::SessionMenu);
     }
 
     #[test]
@@ -1141,5 +1253,156 @@ mod tests {
     fn parse_secrets_list_empty_output() {
         let names = App::parse_secrets_list("");
         assert!(names.is_empty());
+    }
+
+    // --- SessionMenu tests ---
+
+    #[test]
+    fn menu_j_increments_selection() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::SessionMenu;
+        app.menu_selected = 0;
+        app.handle_key(KeyEvent::from(KeyCode::Char('j')));
+        assert_eq!(app.menu_selected, 1);
+        app.handle_key(KeyEvent::from(KeyCode::Char('j')));
+        assert_eq!(app.menu_selected, 2);
+    }
+
+    #[test]
+    fn menu_k_decrements_selection() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::SessionMenu;
+        app.menu_selected = 2;
+        app.handle_key(KeyEvent::from(KeyCode::Char('k')));
+        assert_eq!(app.menu_selected, 1);
+        app.handle_key(KeyEvent::from(KeyCode::Char('k')));
+        assert_eq!(app.menu_selected, 0);
+    }
+
+    #[test]
+    fn menu_selection_clamps_at_bounds() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::SessionMenu;
+        app.menu_selected = 0;
+        // Can't go below 0
+        app.handle_key(KeyEvent::from(KeyCode::Char('k')));
+        assert_eq!(app.menu_selected, 0);
+        // Can't go past last item
+        app.menu_selected = MENU_ITEMS.len() - 1;
+        app.handle_key(KeyEvent::from(KeyCode::Char('j')));
+        assert_eq!(app.menu_selected, MENU_ITEMS.len() - 1);
+    }
+
+    #[test]
+    fn menu_enter_on_open_returns_open_for_unlocked() {
+        let mut app = App::new(sample_sessions());
+        // alpha (index 0) is unlocked
+        app.mode = Mode::SessionMenu;
+        app.menu_selected = 0;
+        let action = app.handle_key(KeyEvent::from(KeyCode::Enter));
+        assert!(matches!(action, Action::Open(name) if name == "alpha"));
+    }
+
+    #[test]
+    fn menu_enter_on_open_enters_force_open_for_locked() {
+        let mut app = App::new(sample_sessions());
+        // gamma (index 2) is locked
+        app.table_state.select(Some(2));
+        app.mode = Mode::SessionMenu;
+        app.menu_selected = 0;
+        let action = app.handle_key(KeyEvent::from(KeyCode::Enter));
+        assert!(matches!(action, Action::None));
+        assert_eq!(app.mode, Mode::ConfirmForceOpen);
+    }
+
+    #[test]
+    fn menu_esc_returns_to_normal() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::SessionMenu;
+        app.menu_selected = 3;
+        app.handle_key(KeyEvent::from(KeyCode::Esc));
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn menu_q_returns_to_normal() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::SessionMenu;
+        app.handle_key(KeyEvent::from(KeyCode::Char('q')));
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn menu_shortcut_d_enters_confirm_delete() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::SessionMenu;
+        app.handle_key(KeyEvent::from(KeyCode::Char('d')));
+        assert_eq!(app.mode, Mode::ConfirmDelete);
+    }
+
+    #[test]
+    fn menu_shortcut_r_enters_rename() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::SessionMenu;
+        app.handle_key(KeyEvent::from(KeyCode::Char('r')));
+        assert_eq!(app.mode, Mode::Rename);
+        assert_eq!(app.rename_input, "alpha");
+    }
+
+    #[test]
+    fn menu_enter_on_delete_enters_confirm_delete() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::SessionMenu;
+        app.menu_selected = 1; // Delete
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        assert_eq!(app.mode, Mode::ConfirmDelete);
+    }
+
+    #[test]
+    fn menu_enter_on_rename_enters_rename() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::SessionMenu;
+        app.menu_selected = 2; // Rename
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        assert_eq!(app.mode, Mode::Rename);
+        assert_eq!(app.rename_input, "alpha");
+    }
+
+    #[test]
+    fn menu_shortcut_m_on_local_enters_move() {
+        let mut app = App::new(sample_sessions());
+        // alpha (index 0) is local
+        app.mode = Mode::SessionMenu;
+        app.handle_key(KeyEvent::from(KeyCode::Char('m')));
+        assert_eq!(app.mode, Mode::MoveToRemote);
+    }
+
+    #[test]
+    fn menu_shortcut_m_on_remote_shows_status() {
+        let mut app = App::new(sample_sessions());
+        // beta (index 1) is remote
+        app.table_state.select(Some(1));
+        app.mode = Mode::SessionMenu;
+        app.handle_key(KeyEvent::from(KeyCode::Char('m')));
+        assert_eq!(app.mode, Mode::Normal);
+        assert!(app.status_message.as_ref().unwrap().contains("already remote"));
+    }
+
+    #[test]
+    fn menu_down_arrow_increments() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::SessionMenu;
+        app.menu_selected = 0;
+        app.handle_key(KeyEvent::from(KeyCode::Down));
+        assert_eq!(app.menu_selected, 1);
+    }
+
+    #[test]
+    fn menu_up_arrow_decrements() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::SessionMenu;
+        app.menu_selected = 1;
+        app.handle_key(KeyEvent::from(KeyCode::Up));
+        assert_eq!(app.menu_selected, 0);
     }
 }

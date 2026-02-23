@@ -9,7 +9,7 @@ use ratatui::Frame;
 
 use ratatui::layout::Alignment;
 
-use crate::app::{App, Mode, SortColumn, SortDirection};
+use crate::app::{App, Mode, SortColumn, SortDirection, MENU_ITEMS};
 use crate::theme::{self, COMMENT, GOLD, GREEN, ORANGE, RED, RUST, WHITE, YELLOW};
 
 const ZEBRA_DIM: ratatui::style::Color = ratatui::style::Color::Rgb(32, 29, 28);
@@ -27,6 +27,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 
     // Overlay dialogs on top
     match &app.mode {
+        Mode::SessionMenu => render_session_menu(app, frame),
         Mode::ConfirmDelete => render_confirm_delete(app, frame),
         Mode::ConfirmForceOpen => render_confirm_force_open(app, frame),
         Mode::Rename => render_rename_dialog(app, frame),
@@ -261,6 +262,7 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
                     .to_string()
             }
         }
+        Mode::SessionMenu => "j/k:navigate  Enter:select  Esc:cancel".to_string(),
         Mode::ConfirmDelete => "y:confirm  n:cancel".to_string(),
         Mode::ConfirmForceOpen => "y:force open  n:cancel".to_string(),
         Mode::Rename | Mode::MoveToRemote => "Enter:confirm  Esc:cancel".to_string(),
@@ -283,6 +285,49 @@ fn render_search_bar(app: &App, frame: &mut Frame, area: Rect) {
     ]);
     let paragraph = Paragraph::new(line);
     frame.render_widget(paragraph, area);
+}
+
+fn render_session_menu(app: &App, frame: &mut Frame) {
+    let session_name = app
+        .selected_session()
+        .map(|s| s.name.as_str())
+        .unwrap_or("?");
+
+    let height = MENU_ITEMS.len() as u16 + 3;
+    let popup_area = centered_rect(40, height, frame.area());
+    frame.render_widget(Clear, popup_area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(GOLD))
+        .title(format!(" Actions - {} ", session_name))
+        .title_style(Style::default().fg(GOLD).add_modifier(Modifier::BOLD));
+
+    let lines: Vec<Line> = MENU_ITEMS
+        .iter()
+        .enumerate()
+        .map(|(i, (label, shortcut))| {
+            let shortcut_text = format!("[{}]", shortcut);
+            if i == app.menu_selected {
+                Line::from(vec![
+                    Span::styled(">> ", Style::default().fg(GOLD).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        format!("{:<18}", label),
+                        Style::default().fg(WHITE).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(shortcut_text, Style::default().fg(COMMENT)),
+                ])
+            } else {
+                Line::from(vec![
+                    Span::styled("   ", Style::default()),
+                    Span::styled(format!("{:<18}", label), Style::default().fg(COMMENT)),
+                    Span::styled(shortcut_text, Style::default().fg(COMMENT)),
+                ])
+            }
+        })
+        .collect();
+
+    let paragraph = Paragraph::new(lines).block(block);
+    frame.render_widget(paragraph, popup_area);
 }
 
 fn render_confirm_delete(app: &App, frame: &mut Frame) {

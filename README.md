@@ -84,9 +84,9 @@ cs -version, -v             # Show version
 Running `cs` with no arguments launches an interactive TUI for browsing and managing sessions:
 
 - **Navigate** with `j`/`k` or arrow keys
-- **Sort** by column with `1`-`4` (toggles ascending/descending)
+- **Sort** by column with `1`-`6` (toggles ascending/descending)
 - **Search** with `/` to filter sessions by name
-- **Open** a session with `Enter` (locked sessions prompt for force-open confirmation)
+- **Actions menu** with `Enter` — shows all available actions for the selected session (open, delete, rename, move, secrets, sync). Navigate with `j`/`k`, select with `Enter`, or use shortcut keys directly.
 - **Delete** with `d` (confirmation required)
 - **Rename** with `r`
 - **Move to remote** with `m` (local sessions only)
@@ -94,7 +94,7 @@ Running `cs` with no arguments launches an interactive TUI for browsing and mana
 - **Sync** with `P` (push), `L` (pull), `S` (status)
 - **Quit** with `q` or `Esc`
 
-The TUI requires `cs-tui` (a 671 KB Rust binary). If not installed, `cs` falls back to showing help. Build from source: `cd tui && cargo build --release`.
+The TUI requires `cs-tui` (a ~703 KB Rust binary). If not installed, `cs` falls back to showing help. Build from source: `cd tui && cargo build --release`.
 
 ### Session Commands
 
