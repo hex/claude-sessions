@@ -38,6 +38,10 @@ fn main() {
         Ok(app::Action::Open(name)) => {
             println!("{}", name);
         }
+        Ok(app::Action::ForceOpen(name)) => {
+            println!("{}", name);
+            println!("--force");
+        }
         Ok(app::Action::Quit) | Ok(app::Action::None) => {}
         Err(e) => {
             eprintln!("Error: {}", e);
@@ -73,7 +77,7 @@ fn run_event_loop(app: &mut app::App, terminal: &mut Tui) -> io::Result<app::Act
                 if key.kind == KeyEventKind::Press {
                     let action = app.handle_key(key);
                     match action {
-                        app::Action::Quit | app::Action::Open(_) => return Ok(action),
+                        app::Action::Quit | app::Action::Open(_) | app::Action::ForceOpen(_) => return Ok(action),
                         app::Action::None => {}
                     }
                 }
@@ -81,7 +85,7 @@ fn run_event_loop(app: &mut app::App, terminal: &mut Tui) -> io::Result<app::Act
             Event::Mouse(mouse) => {
                 let action = app.handle_mouse(mouse);
                 match action {
-                    app::Action::Quit | app::Action::Open(_) => return Ok(action),
+                    app::Action::Quit | app::Action::Open(_) | app::Action::ForceOpen(_) => return Ok(action),
                     app::Action::None => {}
                 }
             }

@@ -86,7 +86,7 @@ Running `cs` with no arguments launches an interactive TUI for browsing and mana
 - **Navigate** with `j`/`k` or arrow keys
 - **Sort** by column with `1`-`4` (toggles ascending/descending)
 - **Search** with `/` to filter sessions by name
-- **Open** a session with `Enter`
+- **Open** a session with `Enter` (locked sessions prompt for force-open confirmation)
 - **Delete** with `d` (confirmation required)
 - **Rename** with `r`
 - **Sync** with `P` (push), `L` (pull), `S` (status)

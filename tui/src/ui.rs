@@ -10,7 +10,7 @@ use ratatui::Frame;
 use ratatui::layout::Alignment;
 
 use crate::app::{App, Mode, SortColumn, SortDirection};
-use crate::theme::{self, COMMENT, GOLD, GREEN, ORANGE, RED, RUST, WHITE};
+use crate::theme::{self, COMMENT, GOLD, GREEN, ORANGE, RED, RUST, WHITE, YELLOW};
 
 const ZEBRA_DIM: ratatui::style::Color = ratatui::style::Color::Rgb(32, 29, 28);
 
@@ -28,6 +28,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     // Overlay dialogs on top
     match &app.mode {
         Mode::ConfirmDelete => render_confirm_delete(app, frame),
+        Mode::ConfirmForceOpen => render_confirm_force_open(app, frame),
         Mode::Rename => render_rename_dialog(app, frame),
         Mode::SyncOutput(text) => render_sync_output(text, frame),
         _ => {}
@@ -256,6 +257,7 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
             }
         }
         Mode::ConfirmDelete => "y:confirm  n:cancel".to_string(),
+        Mode::ConfirmForceOpen => "y:force open  n:cancel".to_string(),
         Mode::Rename => "Enter:confirm  Esc:cancel".to_string(),
         Mode::SyncOutput(_) => "Press any key to dismiss".to_string(),
         Mode::Search => unreachable!(),
@@ -299,6 +301,36 @@ fn render_confirm_delete(app: &App, frame: &mut Frame) {
         .border_style(Style::default().fg(RED))
         .title(" Confirm Delete ")
         .title_style(Style::default().fg(RED).add_modifier(Modifier::BOLD));
+    let text = Paragraph::new(msg)
+        .style(Style::default().fg(WHITE))
+        .block(block)
+        .wrap(Wrap { trim: true });
+    frame.render_widget(text, popup_area);
+}
+
+fn render_confirm_force_open(app: &App, frame: &mut Frame) {
+    let session = match app.selected_session() {
+        Some(s) => s,
+        None => return,
+    };
+
+    let pid_text = session
+        .lock_pid
+        .map(|pid| format!(" (PID {})", pid))
+        .unwrap_or_default();
+
+    let msg = format!(
+        "Session '{}' is in use{}.\nForce open?",
+        session.name, pid_text
+    );
+
+    let popup_area = centered_rect(50, 6, frame.area());
+    frame.render_widget(Clear, popup_area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(YELLOW))
+        .title(" Locked Session ")
+        .title_style(Style::default().fg(YELLOW).add_modifier(Modifier::BOLD));
     let text = Paragraph::new(msg)
         .style(Style::default().fg(WHITE))
         .block(block)

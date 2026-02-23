@@ -11,6 +11,7 @@ pub struct Session {
     pub created: Option<String>,
     pub modified: Option<String>,
     pub location: Option<String>,
+    pub lock_pid: Option<u32>,
     pub is_locked: bool,
     pub secrets_count: u32,
     pub has_git: bool,
@@ -66,7 +67,8 @@ fn read_session(path: &Path, secret_counts: &HashMap<String, u32>) -> Session {
     let created = log_file.as_ref().and_then(|f| parse_created(f));
     let modified = log_file.as_ref().and_then(|f| parse_modified(f));
     let location = parse_remote_conf(&meta_dir);
-    let is_locked = check_lock(&meta_dir);
+    let lock_pid = read_lock_pid(&meta_dir);
+    let is_locked = lock_pid.is_some();
     let secrets_count = secret_counts.get(&name).copied().unwrap_or(0);
     let has_git = path.join(".git").is_dir();
     let git_repo = if has_git {
@@ -82,6 +84,7 @@ fn read_session(path: &Path, secret_counts: &HashMap<String, u32>) -> Session {
         created,
         modified,
         location,
+        lock_pid,
         is_locked,
         secrets_count,
         has_git,
@@ -238,14 +241,11 @@ fn parse_remote_conf(meta_dir: &Path) -> Option<String> {
     None
 }
 
-fn check_lock(meta_dir: &Path) -> bool {
+fn read_lock_pid(meta_dir: &Path) -> Option<u32> {
     let lock_file = meta_dir.join("session.lock");
-    if let Ok(content) = fs::read_to_string(&lock_file) {
-        if let Ok(pid) = content.trim().parse::<u32>() {
-            return is_pid_alive(pid);
-        }
-    }
-    false
+    let content = fs::read_to_string(&lock_file).ok()?;
+    let pid = content.trim().parse::<u32>().ok()?;
+    if is_pid_alive(pid) { Some(pid) } else { None }
 }
 
 fn is_pid_alive(pid: u32) -> bool {
@@ -424,38 +424,39 @@ mod tests {
     }
 
     #[test]
-    fn check_lock_returns_false_for_missing_file() {
+    fn read_lock_pid_returns_none_for_missing_file() {
         let dir = std::env::temp_dir().join(format!("cs-test-nolock-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
 
-        assert!(!check_lock(&dir));
+        assert_eq!(read_lock_pid(&dir), None);
 
         fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
-    fn check_lock_returns_false_for_stale_pid() {
+    fn read_lock_pid_returns_none_for_stale_pid() {
         let dir = std::env::temp_dir().join(format!("cs-test-stalelock-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         // PID 99999999 almost certainly doesn't exist
         fs::write(dir.join("session.lock"), "99999999").unwrap();
 
-        assert!(!check_lock(&dir));
+        assert_eq!(read_lock_pid(&dir), None);
 
         fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
-    fn check_lock_returns_true_for_own_pid() {
+    fn read_lock_pid_returns_pid_for_live_process() {
         let dir = std::env::temp_dir().join(format!("cs-test-livelock-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
+        let own_pid = std::process::id();
         fs::write(
             dir.join("session.lock"),
-            std::process::id().to_string(),
+            own_pid.to_string(),
         )
         .unwrap();
 
-        assert!(check_lock(&dir));
+        assert_eq!(read_lock_pid(&dir), Some(own_pid));
 
         fs::remove_dir_all(&dir).unwrap();
     }

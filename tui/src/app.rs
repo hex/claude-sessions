@@ -36,6 +36,7 @@ pub enum Mode {
     Normal,
     Search,
     ConfirmDelete,
+    ConfirmForceOpen,
     Rename,
     SyncOutput(String),
 }
@@ -44,6 +45,7 @@ pub enum Action {
     None,
     Quit,
     Open(String),
+    ForceOpen(String),
 }
 
 pub struct App {
@@ -142,6 +144,7 @@ impl App {
             Mode::Normal => self.handle_normal(key),
             Mode::Search => self.handle_search(key),
             Mode::ConfirmDelete => self.handle_confirm_delete(key),
+            Mode::ConfirmForceOpen => self.handle_confirm_force_open(key),
             Mode::Rename => self.handle_rename(key),
             Mode::SyncOutput(_) => {
                 self.mode = Mode::Normal;
@@ -154,8 +157,13 @@ impl App {
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => Action::Quit,
             KeyCode::Enter => {
-                if let Some(name) = self.selected_session_name() {
-                    Action::Open(name)
+                if let Some(session) = self.selected_session() {
+                    if session.is_locked {
+                        self.mode = Mode::ConfirmForceOpen;
+                        Action::None
+                    } else {
+                        Action::Open(session.name.clone())
+                    }
                 } else {
                     Action::None
                 }
@@ -270,6 +278,22 @@ impl App {
             }
         }
         Action::None
+    }
+
+    fn handle_confirm_force_open(&mut self, key: KeyEvent) -> Action {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                if let Some(name) = self.selected_session_name() {
+                    return Action::ForceOpen(name);
+                }
+                self.mode = Mode::Normal;
+                Action::None
+            }
+            _ => {
+                self.mode = Mode::Normal;
+                Action::None
+            }
+        }
     }
 
     fn handle_rename(&mut self, key: KeyEvent) -> Action {
@@ -481,6 +505,7 @@ mod tests {
                 created: Some("2026-01-01 10:00".into()),
                 modified: Some("2026-02-20 14:00".into()),
                 location: None,
+                lock_pid: None,
                 is_locked: false,
                 secrets_count: 0,
                 has_git: true,
@@ -493,6 +518,7 @@ mod tests {
                 created: Some("2026-02-01 10:00".into()),
                 modified: Some("2026-02-15 09:00".into()),
                 location: Some("hex@mini".into()),
+                lock_pid: None,
                 is_locked: false,
                 secrets_count: 2,
                 has_git: true,
@@ -505,6 +531,7 @@ mod tests {
                 created: Some("2025-12-01 10:00".into()),
                 modified: Some("2026-01-10 08:00".into()),
                 location: None,
+                lock_pid: Some(12345),
                 is_locked: true,
                 secrets_count: 0,
                 has_git: false,
@@ -733,6 +760,43 @@ mod tests {
         app.apply_filter_and_sort();
         // Only 1 result, so selection should clamp to 0
         assert_eq!(app.table_state.selected(), Some(0));
+    }
+
+    #[test]
+    fn enter_on_locked_session_enters_confirm_force_open() {
+        let mut app = App::new(sample_sessions());
+        // Navigate to gamma (index 2), which is locked
+        app.table_state.select(Some(2));
+        let action = app.handle_key(KeyEvent::from(KeyCode::Enter));
+        assert!(matches!(action, Action::None));
+        assert_eq!(app.mode, Mode::ConfirmForceOpen);
+    }
+
+    #[test]
+    fn confirm_force_open_y_returns_force_open_action() {
+        let mut app = App::new(sample_sessions());
+        app.table_state.select(Some(2));
+        app.mode = Mode::ConfirmForceOpen;
+        let action = app.handle_key(KeyEvent::from(KeyCode::Char('y')));
+        assert!(matches!(action, Action::ForceOpen(name) if name == "gamma"));
+    }
+
+    #[test]
+    fn confirm_force_open_n_returns_to_normal() {
+        let mut app = App::new(sample_sessions());
+        app.table_state.select(Some(2));
+        app.mode = Mode::ConfirmForceOpen;
+        let action = app.handle_key(KeyEvent::from(KeyCode::Char('n')));
+        assert!(matches!(action, Action::None));
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn enter_on_unlocked_session_returns_open() {
+        let mut app = App::new(sample_sessions());
+        // alpha (index 0) is unlocked
+        let action = app.handle_key(KeyEvent::from(KeyCode::Enter));
+        assert!(matches!(action, Action::Open(name) if name == "alpha"));
     }
 
     #[test]

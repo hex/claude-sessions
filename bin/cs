@@ -2256,10 +2256,16 @@ main() {
         local tui_bin
         tui_bin="$(command -v cs-tui 2>/dev/null || echo "$(dirname "$0")/cs-tui")"
         if [ -x "$tui_bin" ]; then
-            local selected
-            selected=$(CS_VERSION="$VERSION" "$tui_bin") || exit $?
-            if [ -n "$selected" ]; then
-                exec "$0" "$selected"
+            local tui_output
+            tui_output=$(CS_VERSION="$VERSION" "$tui_bin") || exit $?
+            if [ -n "$tui_output" ]; then
+                local selected="${tui_output%%$'\n'*}"
+                if [ "$tui_output" != "$selected" ]; then
+                    local tui_flags="${tui_output#*$'\n'}"
+                    exec "$0" "$selected" $tui_flags
+                else
+                    exec "$0" "$selected"
+                fi
             fi
             exit 0
         fi
