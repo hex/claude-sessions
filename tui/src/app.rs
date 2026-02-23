@@ -567,7 +567,7 @@ impl App {
                     && !line.starts_with("Secrets for session:")
                     && !line.starts_with("No secrets stored")
             })
-            .map(|line| line.to_string())
+            .map(|line| line.trim_start().strip_prefix("- ").unwrap_or(line).to_string())
             .collect()
     }
 
@@ -1108,7 +1108,7 @@ mod tests {
 
     #[test]
     fn parse_secrets_list_extracts_names() {
-        let output = "Secrets for session: test\nAPI_KEY\nDB_PASSWORD\n";
+        let output = "Secrets for session: test\n  - API_KEY\n  - DB_PASSWORD\n";
         let names = App::parse_secrets_list(output);
         assert_eq!(names, vec!["API_KEY", "DB_PASSWORD"]);
     }
