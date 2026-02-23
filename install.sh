@@ -317,7 +317,7 @@ else
         )) + [{
             "hooks": [{
                 "type": "command",
-                "command": $path,
+                "command": $tilde,
                 "timeout": 10
             }]
         }]
@@ -330,7 +330,7 @@ else
             "matcher": "Write",
             "hooks": [{
                 "type": "command",
-                "command": $path,
+                "command": $tilde,
                 "timeout": 10
             }]
         }]
@@ -343,7 +343,7 @@ else
             "matcher": "",
             "hooks": [{
                 "type": "command",
-                "command": $path,
+                "command": $tilde,
                 "timeout": 10
             }]
         }]
@@ -356,7 +356,7 @@ else
             "matcher": "Write|Edit",
             "hooks": [{
                 "type": "command",
-                "command": $path,
+                "command": $tilde,
                 "timeout": 10
             }]
         }]
@@ -368,7 +368,7 @@ else
         )) + [{
             "hooks": [{
                 "type": "command",
-                "command": $path,
+                "command": $tilde,
                 "timeout": 10
             }]
         }]
@@ -380,7 +380,7 @@ else
         )) + [{
             "hooks": [{
                 "type": "command",
-                "command": $path,
+                "command": $tilde,
                 "timeout": 10
             }]
         }]
@@ -392,7 +392,7 @@ else
         )) + [{
             "hooks": [{
                 "type": "command",
-                "command": $path,
+                "command": $tilde,
                 "timeout": 10
             }]
         }]
