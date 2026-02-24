@@ -78,6 +78,20 @@ if [ -f "$SYNC_CONFIG" ] && [ -d "$SESSION_DIR/.git" ]; then
     fi
 fi
 
+# Shadow ref: crash recovery and push protection
+if [ -d "$SESSION_DIR/.git" ]; then
+    # Ensure shadow refs are never pushed
+    git -C "$SESSION_DIR" config transfer.hideRefs refs/cs 2>/dev/null || true
+
+    # Recover from orphaned shadow ref (previous session crashed)
+    if git -C "$SESSION_DIR" rev-parse -q --verify refs/cs/auto >/dev/null 2>&1; then
+        git -C "$SESSION_DIR" checkout refs/cs/auto -- . 2>/dev/null || true
+        git -C "$SESSION_DIR" update-ref -d refs/cs/auto 2>/dev/null || true
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Recovered autosaved changes from previous session" \
+            >> "$META_DIR/logs/session.log"
+    fi
+fi
+
 # Export environment variables for the session via CLAUDE_ENV_FILE
 if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
     cat >> "$CLAUDE_ENV_FILE" << EOF

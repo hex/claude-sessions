@@ -103,6 +103,11 @@ if [ -f "$SYNC_CONFIG" ] && [ -d "$SESSION_DIR/.git" ]; then
     fi
 fi
 
+# Delete shadow autosave ref (no longer needed after clean session end)
+if [ -d "$SESSION_DIR/.git" ]; then
+    git -C "$SESSION_DIR" update-ref -d refs/cs/auto 2>/dev/null || true
+fi
+
 # Clean up lock files
 find "$ARTIFACT_DIR" -name "*.lock" -delete 2>/dev/null || true
 rm -f "$META_DIR/session.lock" 2>/dev/null || true

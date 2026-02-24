@@ -6,6 +6,8 @@ The installer configures Claude Code hooks that enable session management featur
 
 Runs when Claude Code starts a session:
 - Logs session start to `.cs/logs/session.log`
+- Configures `transfer.hideRefs` to prevent shadow refs from being pushed
+- Recovers autosaved changes from a crashed previous session (restores from `refs/cs/auto`)
 - Exports session environment variables
 - Injects session context into Claude's system prompt
 - Auto-pulls from remote if sync is enabled
@@ -33,9 +35,10 @@ Runs after any file modification (Edit, Write, MultiEdit):
 
 Runs after modifications to discovery files (`.cs/discoveries.md`, `.cs/discoveries.archive.md`, `.cs/discoveries.compact.md`):
 - Parses the latest `##` heading (falls back to last bullet point if no heading)
-- Creates a git commit using the entry as the commit message
-- Automatically pushes to remote if sync is enabled
-- Commit prefix indicates the file type: 📝 active, 📦 archive, 📋 compact
+- Autosaves to `refs/cs/auto` shadow ref using git plumbing commands
+- Does not create commits on `main` or touch the working tree index
+- Each autosave chains onto the previous one (linked list of snapshots)
+- Runs in background to avoid blocking the session
 
 ## discoveries-reminder.sh (Stop)
 
@@ -58,7 +61,8 @@ Runs when Claude Code session ends:
 - Logs session end time
 - Creates `.cs/archives/artifacts-YYYYMMDD-HHMMSS.tar.gz` archive
 - Exports secrets to encrypted file if sync is enabled and password is set
-- Auto-commits with descriptive messages (🔄 prefix) and pushes to remote if sync is enabled
+- Auto-commits all accumulated changes with one clean commit and pushes to remote if sync is enabled
+- Deletes the shadow autosave ref (`refs/cs/auto`)
 - Cleans up lock files
 
 ## Hook Configuration

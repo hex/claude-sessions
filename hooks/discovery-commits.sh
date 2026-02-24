@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# ABOUTME: PostToolUse hook that creates git commits when discovery files are updated
-# ABOUTME: Handles discoveries.md, discoveries.archive.md, and discoveries.compact.md
+# ABOUTME: PostToolUse hook that autosaves to a shadow git ref when discovery files are updated
+# ABOUTME: Writes to refs/cs/auto using git plumbing, keeping main branch untouched
 
 set -euo pipefail
 
@@ -32,20 +32,10 @@ if [[ "$TOOL_NAME" != "Edit" && "$TOOL_NAME" != "Write" ]]; then
 fi
 
 # Match any discovery file (active, archive, or compact)
-COMMIT_PREFIX=""
 DISCOVERIES_FILE=""
 case "$FILE_PATH" in
-    "$META_DIR/discoveries.md")
+    "$META_DIR/discoveries.md"|"$META_DIR/discoveries.archive.md"|"$META_DIR/discoveries.compact.md")
         DISCOVERIES_FILE="$FILE_PATH"
-        COMMIT_PREFIX="📝"
-        ;;
-    "$META_DIR/discoveries.archive.md")
-        DISCOVERIES_FILE="$FILE_PATH"
-        COMMIT_PREFIX="📦"
-        ;;
-    "$META_DIR/discoveries.compact.md")
-        DISCOVERIES_FILE="$FILE_PATH"
-        COMMIT_PREFIX="📋"
         ;;
     *)
         exit 0
@@ -84,34 +74,41 @@ if [ -z "$LATEST_ENTRY" ] || [ "$LATEST_ENTRY" = "Discoveries & Notes" ]; then
     exit 0
 fi
 
-# Create commit with discovery entry as message
-(
-    cd "$SESSION_DIR" || exit 0
+# Autosave to shadow ref using git plumbing (does not touch HEAD or main branch)
+autosave_to_shadow_ref() {
+    cd "$SESSION_DIR" || return 0
 
-    # Stage all changes (including the discovery)
-    git add -A 2>/dev/null || true
+    TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+    GIT_DIR=$(git rev-parse --git-dir 2>/dev/null) || return 0
 
-    # Only commit if there are changes
-    if ! git diff --cached --quiet 2>/dev/null; then
-        COMMIT_MSG="$COMMIT_PREFIX $LATEST_ENTRY"
+    # Create temporary index from current index
+    TEMP_INDEX=$(mktemp)
+    cp "$GIT_DIR/index" "$TEMP_INDEX"
 
-        if git commit -q -m "$COMMIT_MSG" 2>/dev/null; then
-            # Log the discovery commit
-            TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
-            echo "[$TIMESTAMP] Discovery commit: $LATEST_ENTRY" >> "$META_DIR/logs/session.log"
+    # Stage all current files in the temporary index
+    GIT_INDEX_FILE="$TEMP_INDEX" git add -A 2>/dev/null || { rm -f "$TEMP_INDEX"; return 0; }
 
-            # If remote exists and auto-sync is enabled, push
-            SYNC_CONFIG="$META_DIR/sync.conf"
-            if [ -f "$SYNC_CONFIG" ]; then
-                AUTO_SYNC=$(grep "^auto_sync=" "$SYNC_CONFIG" 2>/dev/null | cut -d= -f2)
-                if [ "$AUTO_SYNC" = "on" ] && git remote get-url origin >/dev/null 2>&1; then
-                    if git push -q origin main 2>/dev/null; then
-                        echo "[$TIMESTAMP] Pushed discovery commit to remote" >> "$META_DIR/logs/session.log"
-                    fi
-                fi
-            fi
-        fi
+    # Write tree object from temporary index
+    tree=$(GIT_INDEX_FILE="$TEMP_INDEX" git write-tree 2>/dev/null) || { rm -f "$TEMP_INDEX"; return 0; }
+    rm -f "$TEMP_INDEX"
+
+    # Chain onto previous autosave if it exists
+    parent=$(git rev-parse -q --verify refs/cs/auto 2>/dev/null || true)
+    if [ -n "$parent" ]; then
+        commit=$(echo "autosave: $TIMESTAMP" | git commit-tree "$tree" -p "$parent" 2>/dev/null) || return 0
+    else
+        commit=$(echo "autosave: $TIMESTAMP" | git commit-tree "$tree" 2>/dev/null) || return 0
     fi
-) &
+
+    git update-ref refs/cs/auto "$commit" 2>/dev/null || return 0
+
+    echo "[$TIMESTAMP] Autosave: $LATEST_ENTRY" >> "$META_DIR/logs/session.log"
+}
+
+if [ "${CS_TEST_SYNC:-}" = "1" ]; then
+    autosave_to_shadow_ref
+else
+    autosave_to_shadow_ref &
+fi
 
 exit 0
