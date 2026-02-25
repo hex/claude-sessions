@@ -68,7 +68,6 @@ _cs() {
         '-c:Check for updates (alias)'
         '--force:Force reinstall even if up to date'
         '-f:Force reinstall (alias)'
-        'auto:Toggle/show auto-update setting'
     )
 
     # Global flags with descriptions

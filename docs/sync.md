@@ -104,17 +104,15 @@ cs my-session -sync push
 
 ## Auto-Sync
 
-**Auto-sync is enabled by default for all new sessions.** Changes are automatically committed in two ways:
+**Auto-sync is enabled by default for all new sessions.** Changes are handled automatically:
 
-1. **Discovery commits:** Automatically committed when you write to `discoveries.md`, using the last `##` heading (or last bullet point if no heading) as the commit message
-2. **Session end commits:** All remaining changes committed when the session ends, with a summary of changed filenames
-
-Discovery commits are prefixed with file-type emoji (📝 active, 📦 archive, 📋 compact). Session-end commits use 🔄.
+1. **Discovery autosaves:** When you write to `discoveries.md`, a snapshot is saved to a shadow git ref (`refs/cs/auto`) for crash safety. These are invisible to `git log` and never pushed.
+2. **Session end commits:** All accumulated changes are committed in one clean commit when the session ends, with a summary of changed filenames (e.g., `🔄 3 files: session.log, discoveries.md, changes.md`).
 
 When enabled:
-- **Session start:** Pulls latest changes from remote (if configured)
-- **Discovery writes:** Creates commit with latest heading as message (e.g., `📝 Found auth timeout bug`)
-- **Session end:** Commits remaining changes with file summary (e.g., `🔄 3 files: session.log, discoveries.md, changes.md`)
+- **Session start:** Pulls latest changes from remote (if configured); recovers from crashed sessions via shadow ref
+- **Discovery writes:** Autosaves to shadow ref (no commits on main)
+- **Session end:** Commits all changes, pushes to remote if configured, deletes shadow ref
 
 To disable for a specific session:
 ```bash

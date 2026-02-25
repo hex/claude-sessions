@@ -30,10 +30,10 @@ No git repo required. No project structure needed. Just a name for what you're w
 - **Secure secrets handling** - Sensitive data auto-detected and stored in OS keychain; sync across machines with [age](https://github.com/FiloSottile/age) public-key encryption
 - **Documentation templates** - Pre-configured markdown files for discoveries and changes
 - **Discoveries archival** - Automatic rotation of large discovery files before context compaction, with LLM-powered condensation via `/compact-discoveries`
-- **Automatic git version control** - Every session gets local git history with auto-commits on discoveries and session end; optionally sync to remote
+- **Automatic git version control** - Every session gets local git history; discovery edits are autosaved to a shadow ref for crash safety, session end creates one clean commit; optionally sync to remote
 - **Session locking** - PID-based lock prevents the same session from being opened in two terminals simultaneously; use `--force` to override
 - **Remote sessions** - Run sessions on remote machines via `et` or `ssh` + `tmux`; `cs` handles connection, stubbing, and session tracking
-- **Update notifications** - Checks for updates and notifies when new versions are available; opt-in auto-update on session open
+- **Update notifications** - Checks for updates and notifies when new versions are available
 - **Signed updates** - Updates are downloaded from immutable GitHub Releases and verified with [minisign](https://jedisct1.github.io/minisign/) signatures before execution
 
 ## Installation
@@ -74,7 +74,6 @@ cs -remote <cmd>            # Manage remote hosts
 cs -list, -ls               # List all sessions
 cs -remove, -rm <name>      # Remove a session
 cs -update                  # Update to latest version
-cs -update auto [on|off]    # Toggle/show auto-update setting
 cs -uninstall               # Uninstall cs
 cs -help, -h                # Show help message
 cs -version, -v             # Show version
@@ -207,9 +206,6 @@ export CLAUDE_CODE_BIN="claude"
 
 # Use Nerd Font icons (requires a Nerd Font in your terminal)
 export CS_NERD_FONTS="1"
-
-# Auto-update cs when a new version is detected on session open
-export CS_AUTO_UPDATE="1"
 
 # Disable colors (see https://no-color.org)
 export NO_COLOR="1"

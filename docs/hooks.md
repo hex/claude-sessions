@@ -60,7 +60,7 @@ Runs before Claude Code compresses conversation history:
 Runs when Claude Code session ends:
 - Logs session end time
 - Creates `.cs/archives/artifacts-YYYYMMDD-HHMMSS.tar.gz` archive
-- Exports secrets to encrypted file if sync is enabled and password is set
+- Exports secrets to encrypted file if `CS_SECRETS_PASSWORD` is set
 - Auto-commits all accumulated changes with one clean commit and pushes to remote if sync is enabled
 - Deletes the shadow autosave ref (`refs/cs/auto`)
 - Cleans up lock files

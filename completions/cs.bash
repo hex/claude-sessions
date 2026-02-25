@@ -25,7 +25,7 @@ _cs_completions() {
     local remote_cmds="add list ls remove rm"
 
     # Update subcommands
-    local update_cmds="--check -c --force -f auto"
+    local update_cmds="--check -c --force -f"
 
     # Session-level options
     local session_opts="-sync -s -secrets --on --move-to --force"

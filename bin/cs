@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.2.13"
+VERSION="2026.2.14"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -13,8 +13,6 @@ RELEASES_BASE="https://github.com/hex/claude-sessions/releases"
 
 # Minisign public key for verifying signed releases
 CS_SIGN_PUBKEY="RWQvs3IVdvrS8PJs0V0gwdJGPw/x5waQ6z6iqPQm90JfpxfcsSy9b9Vo"
-GLOBAL_CONFIG="$SESSIONS_ROOT/.cs.conf"
-
 # Colors - Claude warm palette (rust → orange → gold)
 # Disable colors if NO_COLOR is set (https://no-color.org) or not a TTY
 if [[ -n "${NO_COLOR:-}" ]] || [[ ! -t 1 ]]; then
@@ -93,7 +91,6 @@ show_help() {
     echo -e "  ${ORANGE}-update${NC}             Update cs to latest version"
     echo -e "    ${ORANGE}--check${NC}, ${ORANGE}-c${NC}       Check for updates without installing"
     echo -e "    ${ORANGE}--force${NC}, ${ORANGE}-f${NC}       Force reinstall even if up to date"
-    echo -e "    ${ORANGE}auto${NC} ${GOLD}[on|off]${NC}      Toggle/show auto-update setting"
     echo -e "  ${ORANGE}-uninstall${NC}          Uninstall cs and all components"
     echo -e "  ${ORANGE}-help${NC}, ${ORANGE}-h${NC}           Show this help message"
     echo -e "  ${ORANGE}-version${NC}, ${ORANGE}-v${NC}        Show version"
@@ -127,7 +124,6 @@ show_help() {
     echo -e "  ${GOLD}CS_SECRETS_PASSWORD${NC}   Master password for encrypted secrets backend"
     echo -e "  ${GOLD}CS_SYNC_PREFIX${NC}        Git remote prefix (e.g., git@github.com:user/)"
     echo -e "  ${GOLD}CS_NERD_FONTS${NC}         Set to 1 for Nerd Font icons (default: Unicode)"
-    echo -e "  ${GOLD}CS_AUTO_UPDATE${NC}        Set to 1 to auto-update on session open"
     echo -e "  ${GOLD}NO_COLOR${NC}              Disable all colors (see no-color.org)"
     echo ""
     echo -e "${RUST}Examples:${NC}"
@@ -466,14 +462,6 @@ check_update_notify() {
         fi
     fi
 
-    # Auto-update if enabled and an update is available
-    if [ -n "$UPDATE_AVAILABLE" ]; then
-        local auto_update
-        auto_update="${CS_AUTO_UPDATE:-$(get_global_config "auto_update" "off")}"
-        if [ "$auto_update" = "on" ] || [ "$auto_update" = "1" ]; then
-            do_update
-        fi
-    fi
 }
 
 # Check dependencies
@@ -1205,39 +1193,6 @@ set_sync_config() {
         fi
     else
         echo "${key}=${value}" > "$config_file"
-    fi
-}
-
-# Read global config value
-get_global_config() {
-    local key="$1"
-    local default="${2:-}"
-
-    if [ -f "$GLOBAL_CONFIG" ]; then
-        local value
-        value=$(grep "^${key}=" "$GLOBAL_CONFIG" 2>/dev/null | cut -d= -f2- || true)
-        echo "${value:-$default}"
-    else
-        echo "$default"
-    fi
-}
-
-# Write global config value
-set_global_config() {
-    local key="$1"
-    local value="$2"
-
-    if [ -f "$GLOBAL_CONFIG" ]; then
-        if grep -q "^${key}=" "$GLOBAL_CONFIG" 2>/dev/null; then
-            local tmp_file="${GLOBAL_CONFIG}.tmp"
-            grep -v "^${key}=" "$GLOBAL_CONFIG" > "$tmp_file" || true
-            echo "${key}=${value}" >> "$tmp_file"
-            mv "$tmp_file" "$GLOBAL_CONFIG"
-        else
-            echo "${key}=${value}" >> "$GLOBAL_CONFIG"
-        fi
-    else
-        echo "${key}=${value}" > "$GLOBAL_CONFIG"
     fi
 }
 
@@ -2477,29 +2432,11 @@ main() {
                 --force|-f)
                     do_update "true"
                     ;;
-                auto)
-                    local auto_setting="${3:-}"
-                    if [ -z "$auto_setting" ]; then
-                        local current
-                        current=$(get_global_config "auto_update" "off")
-                        echo "Auto-update: $current"
-                    else
-                        case "$auto_setting" in
-                            on|off)
-                                set_global_config "auto_update" "$auto_setting"
-                                info "Auto-update set to: $auto_setting"
-                                ;;
-                            *)
-                                error "Usage: cs -update auto [on|off]"
-                                ;;
-                        esac
-                    fi
-                    ;;
                 "")
                     do_update
                     ;;
                 *)
-                    error "Unknown option: $update_arg. Use 'cs -update [--check|--force|auto]'"
+                    error "Unknown option: $update_arg. Use 'cs -update [--check|--force]'"
                     ;;
             esac
             return 0
