@@ -79,11 +79,20 @@ jobs:
 
           rm -f /tmp/minisign.key
 
+      - name: Generate checksums
+        run: |
+          sha256sum install.sh > install.sh.sha256
+          for bin in cs-tui-*; do
+            [[ "$bin" == *.minisig ]] && continue
+            sha256sum "$bin" > "${bin}.sha256"
+          done
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             install.sh
             install.sh.minisig
+            install.sh.sha256
             cs-tui-*
           generate_release_notes: true

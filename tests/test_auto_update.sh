@@ -123,6 +123,77 @@ test_update_auto_is_unknown() {
 }
 
 # ============================================================================
+# Checksum verification tests
+# ============================================================================
+
+test_verify_checksum_present_in_source() {
+    if ! grep -q 'verify_checksum()' "$CS_BIN"; then
+        echo "  FAIL: bin/cs should define verify_checksum function"
+        return 1
+    fi
+}
+
+test_verify_checksum_catches_mismatch() {
+    # Create a file and a checksum that doesn't match
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+    echo "hello world" > "$tmpdir/test.txt"
+    echo "0000000000000000000000000000000000000000000000000000000000000000  test.txt" > "$tmpdir/test.txt.sha256"
+
+    # Source the verify_checksum function
+    local result
+    if ( source <(grep -A 15 '^verify_checksum()' "$CS_BIN"); verify_checksum "$tmpdir/test.txt" "$tmpdir/test.txt.sha256" ); then
+        rm -rf "$tmpdir"
+        echo "  FAIL: verify_checksum should reject mismatched checksum"
+        return 1
+    fi
+
+    rm -rf "$tmpdir"
+}
+
+test_verify_checksum_accepts_match() {
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+    echo "hello world" > "$tmpdir/test.txt"
+
+    # Generate correct checksum
+    if command -v sha256sum &>/dev/null; then
+        sha256sum "$tmpdir/test.txt" > "$tmpdir/test.txt.sha256"
+    elif command -v shasum &>/dev/null; then
+        shasum -a 256 "$tmpdir/test.txt" > "$tmpdir/test.txt.sha256"
+    else
+        rm -rf "$tmpdir"
+        echo "  SKIP: no sha256sum or shasum available"
+        return 0
+    fi
+
+    # Source the verify_checksum function and test
+    if ! ( source <(grep -A 15 '^verify_checksum()' "$CS_BIN"); verify_checksum "$tmpdir/test.txt" "$tmpdir/test.txt.sha256" ); then
+        rm -rf "$tmpdir"
+        echo "  FAIL: verify_checksum should accept matching checksum"
+        return 1
+    fi
+
+    rm -rf "$tmpdir"
+}
+
+test_do_update_downloads_checksum() {
+    # Verify the do_update function references install.sh.sha256
+    if ! grep -q 'install.sh.sha256' "$CS_BIN"; then
+        echo "  FAIL: do_update should download install.sh.sha256"
+        return 1
+    fi
+}
+
+test_signature_is_optional() {
+    # Verify the signature download is best-effort (uses 2>/dev/null)
+    if ! grep -A 1 'install.sh.minisig' "$CS_BIN" | grep -q '2>/dev/null'; then
+        echo "  FAIL: minisig download should be best-effort"
+        return 1
+    fi
+}
+
+# ============================================================================
 # Runner
 # ============================================================================
 
@@ -136,6 +207,11 @@ run_test test_help_shows_check_and_force
 run_test test_help_does_not_show_auto_update
 run_test test_update_unknown_arg_errors
 run_test test_update_auto_is_unknown
+run_test test_verify_checksum_present_in_source
+run_test test_verify_checksum_catches_mismatch
+run_test test_verify_checksum_accepts_match
+run_test test_do_update_downloads_checksum
+run_test test_signature_is_optional
 
 echo ""
 echo "Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed"

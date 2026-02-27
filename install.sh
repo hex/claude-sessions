@@ -173,7 +173,24 @@ elif [ "$INSTALL_METHOD" = "web" ]; then
         curl -fsSL "$_tui_url" -o "$INSTALL_DIR/cs-tui" || warn "Failed to download cs-tui — skipping"
         chmod +x "$INSTALL_DIR/cs-tui"
 
-        # Verify cs-tui signature (best-effort: minisign may not be installed on first install)
+        # Verify cs-tui checksum (hard gate)
+        _checksum_url="${RELEASES_URL}/v${_cs_version}/cs-tui-${_os}-${_arch}.sha256"
+        if curl -fsSL "$_checksum_url" -o "$INSTALL_DIR/cs-tui.sha256" 2>/dev/null; then
+            _expected=$(awk '{print $1}' "$INSTALL_DIR/cs-tui.sha256")
+            _actual=""
+            if command -v sha256sum >/dev/null 2>&1; then
+                _actual=$(sha256sum "$INSTALL_DIR/cs-tui" | awk '{print $1}')
+            elif command -v shasum >/dev/null 2>&1; then
+                _actual=$(shasum -a 256 "$INSTALL_DIR/cs-tui" | awk '{print $1}')
+            fi
+            if [ -n "$_actual" ] && [ "$_expected" != "$_actual" ]; then
+                rm -f "$INSTALL_DIR/cs-tui" "$INSTALL_DIR/cs-tui.sha256"
+                warn "cs-tui checksum verification failed -- removed"
+            fi
+            rm -f "$INSTALL_DIR/cs-tui.sha256"
+        fi
+
+        # Verify cs-tui signature (best-effort: minisign may not be installed)
         _sig_url="${RELEASES_URL}/v${_cs_version}/cs-tui-${_os}-${_arch}.minisig"
         if curl -fsSL "$_sig_url" -o "$INSTALL_DIR/cs-tui.minisig" 2>/dev/null; then
             _ms_bin=""
