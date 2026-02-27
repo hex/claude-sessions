@@ -280,8 +280,9 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
 fn render_search_bar(app: &App, frame: &mut Frame, area: Rect) {
     let line = Line::from(vec![
         Span::styled("/ ", Style::default().fg(GOLD)),
-        Span::styled(&app.search_query, Style::default().fg(WHITE)),
+        Span::styled(app.search_input.before_cursor(), Style::default().fg(WHITE)),
         Span::styled("\u{2588}", Style::default().fg(WHITE)),
+        Span::styled(app.search_input.after_cursor(), Style::default().fg(WHITE)),
     ]);
     let paragraph = Paragraph::new(line);
     frame.render_widget(paragraph, area);
@@ -399,8 +400,9 @@ fn render_rename_dialog(app: &App, frame: &mut Frame) {
         .title_style(Style::default().fg(GOLD).add_modifier(Modifier::BOLD));
 
     let line = Line::from(vec![
-        Span::styled(&app.rename_input, Style::default().fg(WHITE)),
+        Span::styled(app.rename_input.before_cursor(), Style::default().fg(WHITE)),
         Span::styled("\u{2588}", Style::default().fg(WHITE)),
+        Span::styled(app.rename_input.after_cursor(), Style::default().fg(WHITE)),
     ]);
     let text = Paragraph::new(line)
         .style(Style::default().fg(WHITE))
@@ -427,8 +429,9 @@ fn render_move_to_dialog(app: &App, frame: &mut Frame) {
             format!("Move '{}' to: ", session.name),
             Style::default().fg(COMMENT),
         ),
-        Span::styled(&app.move_to_input, Style::default().fg(WHITE)),
+        Span::styled(app.move_to_input.before_cursor(), Style::default().fg(WHITE)),
         Span::styled("\u{2588}", Style::default().fg(WHITE)),
+        Span::styled(app.move_to_input.after_cursor(), Style::default().fg(WHITE)),
     ]);
     let text = Paragraph::new(line)
         .style(Style::default().fg(WHITE))

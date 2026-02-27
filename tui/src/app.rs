@@ -6,6 +6,116 @@ use ratatui::widgets::TableState;
 
 use crate::session::{self, Session};
 
+/// Editable text buffer with cursor position tracking.
+/// Cursor is stored as a byte offset, always on a char boundary.
+pub struct TextInput {
+    text: String,
+    cursor: usize,
+}
+
+impl TextInput {
+    pub fn new() -> Self {
+        TextInput {
+            text: String::new(),
+            cursor: 0,
+        }
+    }
+
+    /// Replace text contents; cursor moves to end.
+    pub fn set(&mut self, s: &str) {
+        self.text = s.to_string();
+        self.cursor = self.text.len();
+    }
+
+    /// Clear text and reset cursor.
+    pub fn clear(&mut self) {
+        self.text.clear();
+        self.cursor = 0;
+    }
+
+    /// Insert a character at the cursor position and advance cursor.
+    pub fn insert(&mut self, c: char) {
+        self.text.insert(self.cursor, c);
+        self.cursor += c.len_utf8();
+    }
+
+    /// Delete the character before the cursor (Backspace).
+    pub fn delete_back(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+        let prev = self.text[..self.cursor]
+            .char_indices()
+            .next_back()
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        self.text.drain(prev..self.cursor);
+        self.cursor = prev;
+    }
+
+    /// Delete the character at the cursor (Delete key).
+    pub fn delete_forward(&mut self) {
+        if self.cursor >= self.text.len() {
+            return;
+        }
+        let next = self.text[self.cursor..]
+            .char_indices()
+            .nth(1)
+            .map(|(i, _)| self.cursor + i)
+            .unwrap_or(self.text.len());
+        self.text.drain(self.cursor..next);
+    }
+
+    /// Move cursor one character left.
+    pub fn move_left(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+        self.cursor = self.text[..self.cursor]
+            .char_indices()
+            .next_back()
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+    }
+
+    /// Move cursor one character right.
+    pub fn move_right(&mut self) {
+        if self.cursor >= self.text.len() {
+            return;
+        }
+        self.cursor = self.text[self.cursor..]
+            .char_indices()
+            .nth(1)
+            .map(|(i, _)| self.cursor + i)
+            .unwrap_or(self.text.len());
+    }
+
+    /// Move cursor to the beginning.
+    pub fn move_home(&mut self) {
+        self.cursor = 0;
+    }
+
+    /// Move cursor to the end.
+    pub fn move_end(&mut self) {
+        self.cursor = self.text.len();
+    }
+
+    /// Get the full text.
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// Text before the cursor.
+    pub fn before_cursor(&self) -> &str {
+        &self.text[..self.cursor]
+    }
+
+    /// Text after the cursor.
+    pub fn after_cursor(&self) -> &str {
+        &self.text[self.cursor..]
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SortColumn {
     Name,
@@ -70,9 +180,9 @@ pub struct App {
     pub mode: Mode,
     pub sort_col: SortColumn,
     pub sort_dir: SortDirection,
-    pub search_query: String,
-    pub rename_input: String,
-    pub move_to_input: String,
+    pub search_input: TextInput,
+    pub rename_input: TextInput,
+    pub move_to_input: TextInput,
     pub secrets_names: Vec<String>,
     pub secrets_selected: usize,
     pub return_to_secrets: bool,
@@ -98,9 +208,9 @@ impl App {
             column_widths: Vec::new(),
             sort_col: SortColumn::Name,
             sort_dir: SortDirection::Asc,
-            search_query: String::new(),
-            rename_input: String::new(),
-            move_to_input: String::new(),
+            search_input: TextInput::new(),
+            rename_input: TextInput::new(),
+            move_to_input: TextInput::new(),
             secrets_names: Vec::new(),
             secrets_selected: 0,
             return_to_secrets: false,
@@ -120,7 +230,7 @@ impl App {
     }
 
     pub fn apply_filter_and_sort(&mut self) {
-        let query = self.search_query.to_lowercase();
+        let query = self.search_input.text().to_lowercase();
         self.filtered = self
             .sessions
             .iter()
@@ -222,7 +332,7 @@ impl App {
             }
             KeyCode::Char('/') => {
                 self.mode = Mode::Search;
-                self.search_query.clear();
+                self.search_input.clear();
                 Action::None
             }
             KeyCode::Char('d') => {
@@ -233,7 +343,7 @@ impl App {
             }
             KeyCode::Char('r') => {
                 if let Some(name) = self.selected_session_name() {
-                    self.rename_input = name;
+                    self.rename_input.set(&name);
                     self.mode = Mode::Rename;
                 }
                 Action::None
@@ -261,6 +371,7 @@ impl App {
                 }
                 Action::None
             }
+
             KeyCode::Char('s') => {
                 self.run_secrets_command();
                 Action::None
@@ -350,7 +461,7 @@ impl App {
             2 => {
                 // Rename
                 if let Some(name) = self.selected_session_name() {
-                    self.rename_input = name;
+                    self.rename_input.set(&name);
                     self.mode = Mode::Rename;
                 }
                 Action::None
@@ -394,19 +505,35 @@ impl App {
     fn handle_search(&mut self, key: KeyEvent) -> Action {
         match key.code {
             KeyCode::Esc => {
-                self.search_query.clear();
+                self.search_input.clear();
                 self.apply_filter_and_sort();
                 self.mode = Mode::Normal;
             }
             KeyCode::Enter => {
                 self.mode = Mode::Normal;
             }
+            KeyCode::Left => {
+                self.search_input.move_left();
+            }
+            KeyCode::Right => {
+                self.search_input.move_right();
+            }
+            KeyCode::Home => {
+                self.search_input.move_home();
+            }
+            KeyCode::End => {
+                self.search_input.move_end();
+            }
+            KeyCode::Delete => {
+                self.search_input.delete_forward();
+                self.apply_filter_and_sort();
+            }
             KeyCode::Backspace => {
-                self.search_query.pop();
+                self.search_input.delete_back();
                 self.apply_filter_and_sort();
             }
             KeyCode::Char(c) => {
-                self.search_query.push(c);
+                self.search_input.insert(c);
                 self.apply_filter_and_sort();
             }
             _ => {}
@@ -450,11 +577,26 @@ impl App {
             KeyCode::Enter => {
                 self.execute_rename();
             }
+            KeyCode::Left => {
+                self.rename_input.move_left();
+            }
+            KeyCode::Right => {
+                self.rename_input.move_right();
+            }
+            KeyCode::Home => {
+                self.rename_input.move_home();
+            }
+            KeyCode::End => {
+                self.rename_input.move_end();
+            }
+            KeyCode::Delete => {
+                self.rename_input.delete_forward();
+            }
             KeyCode::Backspace => {
-                self.rename_input.pop();
+                self.rename_input.delete_back();
             }
             KeyCode::Char(c) => {
-                self.rename_input.push(c);
+                self.rename_input.insert(c);
             }
             _ => {}
         }
@@ -469,11 +611,26 @@ impl App {
             KeyCode::Enter => {
                 return self.execute_move_to();
             }
+            KeyCode::Left => {
+                self.move_to_input.move_left();
+            }
+            KeyCode::Right => {
+                self.move_to_input.move_right();
+            }
+            KeyCode::Home => {
+                self.move_to_input.move_home();
+            }
+            KeyCode::End => {
+                self.move_to_input.move_end();
+            }
+            KeyCode::Delete => {
+                self.move_to_input.delete_forward();
+            }
             KeyCode::Backspace => {
-                self.move_to_input.pop();
+                self.move_to_input.delete_back();
             }
             KeyCode::Char(c) => {
-                self.move_to_input.push(c);
+                self.move_to_input.insert(c);
             }
             _ => {}
         }
@@ -567,7 +724,7 @@ impl App {
     }
 
     fn execute_rename(&mut self) {
-        let new_name = self.rename_input.trim().to_string();
+        let new_name = self.rename_input.text().trim().to_string();
         if new_name.is_empty() {
             self.status_message = Some("Name cannot be empty".to_string());
             self.mode = Mode::Normal;
@@ -624,7 +781,7 @@ impl App {
     }
 
     fn execute_move_to(&mut self) -> Action {
-        let host = self.move_to_input.trim().to_string();
+        let host = self.move_to_input.text().trim().to_string();
         if host.is_empty() {
             self.status_message = Some("Host cannot be empty".to_string());
             self.mode = Mode::Normal;
@@ -827,7 +984,7 @@ mod tests {
     #[test]
     fn filter_narrows_results() {
         let mut app = App::new(sample_sessions());
-        app.search_query = "bet".into();
+        app.search_input.set("bet");
         app.apply_filter_and_sort();
         assert_eq!(app.filtered.len(), 1);
         assert_eq!(app.sessions[app.filtered[0]].name, "beta");
@@ -836,7 +993,7 @@ mod tests {
     #[test]
     fn filter_is_case_insensitive() {
         let mut app = App::new(sample_sessions());
-        app.search_query = "ALPHA".into();
+        app.search_input.set("ALPHA");
         app.apply_filter_and_sort();
         assert_eq!(app.filtered.len(), 1);
         assert_eq!(app.sessions[app.filtered[0]].name, "alpha");
@@ -845,7 +1002,7 @@ mod tests {
     #[test]
     fn empty_filter_shows_all() {
         let mut app = App::new(sample_sessions());
-        app.search_query = "".into();
+        app.search_input.set("");
         app.apply_filter_and_sort();
         assert_eq!(app.filtered.len(), 3);
     }
@@ -963,7 +1120,7 @@ mod tests {
         app.handle_key(KeyEvent::from(KeyCode::Char('/')));
         app.handle_key(KeyEvent::from(KeyCode::Char('b')));
         app.handle_key(KeyEvent::from(KeyCode::Char('e')));
-        assert_eq!(app.search_query, "be");
+        assert_eq!(app.search_input.text(), "be");
         assert_eq!(app.filtered.len(), 1);
     }
 
@@ -976,7 +1133,7 @@ mod tests {
 
         app.handle_key(KeyEvent::from(KeyCode::Esc));
         assert_eq!(app.mode, Mode::Normal);
-        assert_eq!(app.search_query, "");
+        assert_eq!(app.search_input.text(), "");
         assert_eq!(app.filtered.len(), 3);
     }
 
@@ -1001,14 +1158,14 @@ mod tests {
         let mut app = App::new(sample_sessions());
         app.handle_key(KeyEvent::from(KeyCode::Char('r')));
         assert_eq!(app.mode, Mode::Rename);
-        assert_eq!(app.rename_input, "alpha");
+        assert_eq!(app.rename_input.text(), "alpha");
     }
 
     #[test]
     fn rename_validates_empty_name() {
         let mut app = App::new(sample_sessions());
         app.mode = Mode::Rename;
-        app.rename_input = "".into();
+        app.rename_input.set("");
         app.handle_key(KeyEvent::from(KeyCode::Enter));
         assert_eq!(app.mode, Mode::Normal);
         assert!(app.status_message.as_ref().unwrap().contains("empty"));
@@ -1018,7 +1175,7 @@ mod tests {
     fn rename_validates_invalid_chars() {
         let mut app = App::new(sample_sessions());
         app.mode = Mode::Rename;
-        app.rename_input = "bad/name".into();
+        app.rename_input.set("bad/name");
         app.handle_key(KeyEvent::from(KeyCode::Enter));
         assert_eq!(app.mode, Mode::Normal);
         assert!(app.status_message.as_ref().unwrap().contains("Invalid"));
@@ -1034,7 +1191,7 @@ mod tests {
     fn selection_clamps_after_filter() {
         let mut app = App::new(sample_sessions());
         app.table_state.select(Some(2)); // select "gamma"
-        app.search_query = "alph".into();
+        app.search_input.set("alph");
         app.apply_filter_and_sort();
         // Only 1 result, so selection should clamp to 0
         assert_eq!(app.table_state.selected(), Some(0));
@@ -1097,7 +1254,7 @@ mod tests {
         // alpha (index 0) is local (location=None)
         app.handle_key(KeyEvent::from(KeyCode::Char('m')));
         assert_eq!(app.mode, Mode::MoveToRemote);
-        assert_eq!(app.move_to_input, "");
+        assert_eq!(app.move_to_input.text(), "");
     }
 
     #[test]
@@ -1114,7 +1271,7 @@ mod tests {
     fn move_to_remote_esc_cancels() {
         let mut app = App::new(sample_sessions());
         app.mode = Mode::MoveToRemote;
-        app.move_to_input = "somehost".into();
+        app.move_to_input.set("somehost");
         app.handle_key(KeyEvent::from(KeyCode::Esc));
         assert_eq!(app.mode, Mode::Normal);
     }
@@ -1127,16 +1284,16 @@ mod tests {
         app.handle_key(KeyEvent::from(KeyCode::Char('i')));
         app.handle_key(KeyEvent::from(KeyCode::Char('n')));
         app.handle_key(KeyEvent::from(KeyCode::Char('i')));
-        assert_eq!(app.move_to_input, "mini");
+        assert_eq!(app.move_to_input.text(), "mini");
     }
 
     #[test]
     fn move_to_remote_backspace_removes() {
         let mut app = App::new(sample_sessions());
         app.mode = Mode::MoveToRemote;
-        app.move_to_input = "min".into();
+        app.move_to_input.set("min");
         app.handle_key(KeyEvent::from(KeyCode::Backspace));
-        assert_eq!(app.move_to_input, "mi");
+        assert_eq!(app.move_to_input.text(), "mi");
     }
 
     #[test]
@@ -1144,7 +1301,7 @@ mod tests {
         let mut app = App::new(sample_sessions());
         // alpha (index 0) is selected
         app.mode = Mode::MoveToRemote;
-        app.move_to_input = "mini".into();
+        app.move_to_input.set("mini");
         let action = app.handle_key(KeyEvent::from(KeyCode::Enter));
         assert!(matches!(action, Action::MoveTo(name, host) if name == "alpha" && host == "mini"));
     }
@@ -1153,7 +1310,7 @@ mod tests {
     fn move_to_remote_empty_input_shows_error() {
         let mut app = App::new(sample_sessions());
         app.mode = Mode::MoveToRemote;
-        app.move_to_input = "".into();
+        app.move_to_input.set("");
         let action = app.handle_key(KeyEvent::from(KeyCode::Enter));
         assert!(matches!(action, Action::None));
         assert_eq!(app.mode, Mode::Normal);
@@ -1164,7 +1321,7 @@ mod tests {
     fn move_to_remote_whitespace_input_shows_error() {
         let mut app = App::new(sample_sessions());
         app.mode = Mode::MoveToRemote;
-        app.move_to_input = "bad host".into();
+        app.move_to_input.set("bad host");
         let action = app.handle_key(KeyEvent::from(KeyCode::Enter));
         assert!(matches!(action, Action::None));
         assert_eq!(app.mode, Mode::Normal);
@@ -1346,7 +1503,7 @@ mod tests {
         app.mode = Mode::SessionMenu;
         app.handle_key(KeyEvent::from(KeyCode::Char('r')));
         assert_eq!(app.mode, Mode::Rename);
-        assert_eq!(app.rename_input, "alpha");
+        assert_eq!(app.rename_input.text(), "alpha");
     }
 
     #[test]
@@ -1365,7 +1522,7 @@ mod tests {
         app.menu_selected = 2; // Rename
         app.handle_key(KeyEvent::from(KeyCode::Enter));
         assert_eq!(app.mode, Mode::Rename);
-        assert_eq!(app.rename_input, "alpha");
+        assert_eq!(app.rename_input.text(), "alpha");
     }
 
     #[test]
@@ -1404,5 +1561,107 @@ mod tests {
         app.menu_selected = 1;
         app.handle_key(KeyEvent::from(KeyCode::Up));
         assert_eq!(app.menu_selected, 0);
+    }
+
+    // --- TextInput tests ---
+
+    #[test]
+    fn text_input_insert_at_cursor() {
+        let mut input = TextInput::new();
+        input.set("hllo");
+        input.move_home();
+        input.move_right(); // cursor after 'h'
+        input.insert('e');
+        assert_eq!(input.text(), "hello");
+        assert_eq!(input.before_cursor(), "he");
+        assert_eq!(input.after_cursor(), "llo");
+    }
+
+    #[test]
+    fn text_input_delete_back() {
+        let mut input = TextInput::new();
+        input.set("hello");
+        input.move_home();
+        input.move_right();
+        input.move_right(); // cursor after 'e'
+        input.delete_back();
+        assert_eq!(input.text(), "hllo");
+        assert_eq!(input.before_cursor(), "h");
+    }
+
+    #[test]
+    fn text_input_delete_forward() {
+        let mut input = TextInput::new();
+        input.set("hello");
+        input.move_home();
+        input.move_right(); // cursor after 'h'
+        input.delete_forward(); // deletes 'e'
+        assert_eq!(input.text(), "hllo");
+        assert_eq!(input.before_cursor(), "h");
+    }
+
+    #[test]
+    fn text_input_move_left_right() {
+        let mut input = TextInput::new();
+        input.set("abc");
+        assert_eq!(input.before_cursor(), "abc"); // cursor at end
+        input.move_left();
+        assert_eq!(input.before_cursor(), "ab");
+        assert_eq!(input.after_cursor(), "c");
+        input.move_right();
+        assert_eq!(input.before_cursor(), "abc");
+    }
+
+    #[test]
+    fn text_input_home_end() {
+        let mut input = TextInput::new();
+        input.set("hello");
+        input.move_home();
+        assert_eq!(input.before_cursor(), "");
+        assert_eq!(input.after_cursor(), "hello");
+        input.move_end();
+        assert_eq!(input.before_cursor(), "hello");
+        assert_eq!(input.after_cursor(), "");
+    }
+
+    #[test]
+    fn text_input_set_puts_cursor_at_end() {
+        let mut input = TextInput::new();
+        input.set("test");
+        assert_eq!(input.text(), "test");
+        assert_eq!(input.before_cursor(), "test");
+        assert_eq!(input.after_cursor(), "");
+    }
+
+    #[test]
+    fn text_input_empty_edge_cases() {
+        let mut input = TextInput::new();
+        // Operations on empty input should not panic
+        input.delete_back();
+        input.delete_forward();
+        input.move_left();
+        input.move_right();
+        assert_eq!(input.text(), "");
+        assert_eq!(input.before_cursor(), "");
+        assert_eq!(input.after_cursor(), "");
+    }
+
+    #[test]
+    fn text_input_multibyte_chars() {
+        let mut input = TextInput::new();
+        input.set("cafe\u{0301}"); // café with combining accent
+        input.move_left(); // move before the combining accent
+        input.move_left(); // move before 'e'
+        assert_eq!(input.before_cursor(), "caf");
+    }
+
+    #[test]
+    fn text_input_clear_resets_cursor() {
+        let mut input = TextInput::new();
+        input.set("hello");
+        input.move_left();
+        input.clear();
+        assert_eq!(input.text(), "");
+        assert_eq!(input.before_cursor(), "");
     }
 }
