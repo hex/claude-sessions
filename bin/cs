@@ -379,15 +379,17 @@ do_update() {
         error "Failed to fetch update. Check your internet connection."
     }
 
-    if [ "$force" != "true" ]; then
-        if ! version_greater "$remote_version" "$VERSION"; then
-            info "Already up to date ($VERSION)"
-            return 0
-        fi
+    local is_upgrade=false
+    if version_greater "$remote_version" "$VERSION"; then
+        is_upgrade=true
     fi
 
     echo ""
-    echo -e "   ${COMMENT}Updating${NC} cs ${COMMENT}from${NC} ${RUST}$VERSION${NC} ${COMMENT}→${NC} ${GREEN}$remote_version${NC}"
+    if [ "$is_upgrade" = true ]; then
+        echo -e "   ${COMMENT}Updating${NC} cs ${COMMENT}from${NC} ${RUST}$VERSION${NC} ${COMMENT}→${NC} ${GREEN}$remote_version${NC}"
+    else
+        echo -e "   ${COMMENT}Reinstalling${NC} cs ${GREEN}$VERSION${NC}"
+    fi
     echo ""
 
     local releases_url="${RELEASES_BASE}/download/v${remote_version}"

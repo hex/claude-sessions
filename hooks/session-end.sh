@@ -80,13 +80,13 @@ if [ -f "$SYNC_CONFIG" ] && [ -d "$SESSION_DIR/.git" ]; then
             CHANGED_FILES=$(git diff --cached --name-only 2>/dev/null)
             FILE_COUNT=$(echo "$CHANGED_FILES" | wc -l | tr -d ' ')
             if [ "$FILE_COUNT" -eq 1 ]; then
-                COMMIT_MSG="🔄 $(basename "$CHANGED_FILES")"
+                COMMIT_MSG="Session update: $(basename "$CHANGED_FILES")"
             else
                 FILE_LIST=$(echo "$CHANGED_FILES" | xargs -n1 basename 2>/dev/null | head -5 | paste -sd', ' -)
                 if [ "$FILE_COUNT" -gt 5 ]; then
                     FILE_LIST="$FILE_LIST +$((FILE_COUNT - 5)) more"
                 fi
-                COMMIT_MSG="🔄 ${FILE_COUNT} files: $FILE_LIST"
+                COMMIT_MSG="Session update: ${FILE_COUNT} files ($FILE_LIST)"
             fi
             if git commit -q -m "$COMMIT_MSG" 2>/dev/null; then
                 if [ $HAS_REMOTE -eq 1 ]; then
