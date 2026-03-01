@@ -748,6 +748,7 @@ impl App {
             } else {
                 match std::fs::rename(&old, &new) {
                     Ok(()) => {
+                        rename_claude_projects_dir(&old, &new);
                         self.status_message = Some(format!("Renamed to: {}", new_name));
                         self.sessions = session::scan_sessions();
                         self.apply_filter_and_sort();
@@ -922,6 +923,29 @@ impl App {
             offset += width + 3; // +3 for column_spacing(3)
         }
         None
+    }
+}
+
+/// Rename the Claude Code conversation history directory to match the session rename.
+/// Claude stores conversations under ~/.claude/projects/ keyed by encoded absolute path.
+/// Path encoding: replace '/' and '.' with '-'.
+fn rename_claude_projects_dir(old_session_path: &std::path::Path, new_session_path: &std::path::Path) {
+    fn encode_path(p: &std::path::Path) -> String {
+        p.to_string_lossy().replace('/', "-").replace('.', "-")
+    }
+
+    let home = match std::env::var("HOME") {
+        Ok(h) => h,
+        Err(_) => return,
+    };
+    let projects_dir = std::path::PathBuf::from(&home).join(".claude/projects");
+    let old_encoded = encode_path(old_session_path);
+    let new_encoded = encode_path(new_session_path);
+    let old_proj = projects_dir.join(&old_encoded);
+    let new_proj = projects_dir.join(&new_encoded);
+
+    if old_proj.is_dir() && !new_proj.exists() {
+        let _ = std::fs::rename(&old_proj, &new_proj);
     }
 }
 
@@ -1663,5 +1687,62 @@ mod tests {
         input.clear();
         assert_eq!(input.text(), "");
         assert_eq!(input.before_cursor(), "");
+    }
+
+    #[test]
+    fn rename_claude_projects_dir_moves_matching_dir() {
+        let tmp = std::env::temp_dir().join(format!("cs-test-proj-rename-{}", std::process::id()));
+        let fake_projects = tmp.join(".claude/projects");
+        let sessions = tmp.join("sessions");
+
+        let old_session = sessions.join("old-name");
+        let new_session = sessions.join("new-name");
+
+        // Create the fake Claude projects dir with encoded old path
+        fn encode_path(p: &std::path::Path) -> String {
+            p.to_string_lossy().replace('/', "-").replace('.', "-")
+        }
+        let old_encoded = encode_path(&old_session);
+        let old_proj = fake_projects.join(&old_encoded);
+        std::fs::create_dir_all(&old_proj).unwrap();
+        // Put a marker file inside to verify it moved
+        std::fs::write(old_proj.join("conv.jsonl"), "test").unwrap();
+
+        // Override HOME so the function finds our fake .claude/projects
+        let real_home = std::env::var("HOME").unwrap();
+        std::env::set_var("HOME", &tmp);
+
+        rename_claude_projects_dir(&old_session, &new_session);
+
+        std::env::set_var("HOME", &real_home);
+
+        let new_encoded = encode_path(&new_session);
+        let new_proj = fake_projects.join(&new_encoded);
+        assert!(new_proj.is_dir(), "projects dir should exist at new path");
+        assert!(!old_proj.is_dir(), "projects dir should not exist at old path");
+        assert_eq!(
+            std::fs::read_to_string(new_proj.join("conv.jsonl")).unwrap(),
+            "test"
+        );
+
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    #[test]
+    fn rename_claude_projects_dir_noop_when_no_projects_dir() {
+        let tmp = std::env::temp_dir().join(format!("cs-test-proj-noop-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let real_home = std::env::var("HOME").unwrap();
+        std::env::set_var("HOME", &tmp);
+
+        // Should not panic even if .claude/projects doesn't exist
+        rename_claude_projects_dir(
+            &std::path::PathBuf::from("/fake/old"),
+            &std::path::PathBuf::from("/fake/new"),
+        );
+
+        std::env::set_var("HOME", &real_home);
+        std::fs::remove_dir_all(&tmp).unwrap();
     }
 }
