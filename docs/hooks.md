@@ -5,12 +5,9 @@ The installer configures Claude Code hooks that enable session management featur
 ## session-start.sh (SessionStart)
 
 Runs when Claude Code starts a session:
-- Logs session start to `.cs/logs/session.log`
-- Configures `transfer.hideRefs` to prevent shadow refs from being pushed
-- Recovers autosaved changes from a crashed previous session (restores from `refs/cs/auto`)
-- Exports session environment variables
-- Injects session context into Claude's system prompt
-- Auto-pulls from remote if sync is enabled
+- Logs session start (including source: `startup`, `resume`, `clear`, `compact`) to `.cs/logs/session.log`
+- On `startup`/`resume` only: configures `transfer.hideRefs`, recovers autosaved changes from crashed sessions, auto-pulls from remote
+- On all sources: exports session environment variables, injects session context into Claude's system prompt
 
 ## artifact-tracker.sh (PreToolUse on Write)
 
@@ -58,12 +55,32 @@ Runs before Claude Code compresses conversation history:
 ## session-end.sh (SessionEnd)
 
 Runs when Claude Code session ends:
-- Logs session end time
-- Creates `.cs/archives/artifacts-YYYYMMDD-HHMMSS.tar.gz` archive
+- Logs session end time and exit reason (`user_exit`, `sigint`, `error`, `timeout`)
+- Creates `.cs/archives/artifacts-YYYYMMDD-HHMMSS.tar.gz` archive (skipped on `sigint` for faster exit)
 - Exports secrets to encrypted file if `CS_SECRETS_PASSWORD` is set
 - Auto-commits all accumulated changes with one clean commit and pushes to remote if sync is enabled
 - Deletes the shadow autosave ref (`refs/cs/auto`)
 - Cleans up lock files
+
+## subagent-context.sh (SubagentStart)
+
+Runs when Claude Code spawns a subagent (via the Agent tool):
+- Injects session context into subagents so they know about the cs session
+- Provides session directory, artifacts directory, and key rules (secrets handling, documentation protocol)
+- Uses `additionalContext` in the same format as SessionStart
+
+## tool-failure-logger.sh (PostToolUseFailure)
+
+Runs when a tool call fails (async, non-blocking):
+- Logs tool name and truncated error message to `.cs/logs/session.log`
+- Helps debug build failures, test errors, and other tool issues after the fact
+
+## session-auto-approve.sh (PermissionRequest on Write/Edit)
+
+Runs when Claude Code would show a permission dialog for Write or Edit:
+- Auto-approves writes to files inside the session's `.cs/` metadata directory
+- Falls through to the normal permission prompt for all other files
+- Scoped narrowly to session metadata only — project files always require explicit approval
 
 ## Hook Configuration
 
@@ -80,7 +97,7 @@ The hooks are configured in `~/.claude/settings.json`:
     ],
     "PostToolUse": [
       { "matcher": "", "hooks": [{ "type": "command", "command": "~/.claude/hooks/changes-tracker.sh", "timeout": 10 }] },
-      { "matcher": "Write|Edit", "hooks": [{ "type": "command", "command": "~/.claude/hooks/discovery-commits.sh", "timeout": 10 }] }
+      { "matcher": "Write|Edit", "hooks": [{ "type": "command", "command": "~/.claude/hooks/discovery-commits.sh", "timeout": 10, "async": true }] }
     ],
     "Stop": [
       { "hooks": [{ "type": "command", "command": "~/.claude/hooks/discoveries-reminder.sh", "timeout": 10 }] }
@@ -90,6 +107,15 @@ The hooks are configured in `~/.claude/settings.json`:
     ],
     "SessionEnd": [
       { "hooks": [{ "type": "command", "command": "~/.claude/hooks/session-end.sh", "timeout": 10 }] }
+    ],
+    "SubagentStart": [
+      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/subagent-context.sh", "timeout": 10 }] }
+    ],
+    "PostToolUseFailure": [
+      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/tool-failure-logger.sh", "timeout": 10, "async": true }] }
+    ],
+    "PermissionRequest": [
+      { "matcher": "Write|Edit", "hooks": [{ "type": "command", "command": "~/.claude/hooks/session-auto-approve.sh", "timeout": 5 }] }
     ]
   }
 }

@@ -9,6 +9,7 @@ INPUT=$(cat)
 
 # Extract session information
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id')
+SOURCE=$(echo "$INPUT" | jq -r '.source // "user_exit"')
 
 # Check if we're in a cs session
 if [ -z "${CLAUDE_SESSION_NAME:-}" ]; then
@@ -27,7 +28,12 @@ fi
 
 # Log session end
 echo "" >> "$META_DIR/logs/session.log"
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Session ended (ID: $SESSION_ID)" >> "$META_DIR/logs/session.log"
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Session ended (source: $SOURCE, ID: $SESSION_ID)" >> "$META_DIR/logs/session.log"
+
+# Skip artifact archiving on sigint for faster exit
+if [ "$SOURCE" = "sigint" ]; then
+    echo "  Skipping artifact archive (interrupted)" >> "$META_DIR/logs/session.log"
+fi
 
 # Count artifacts
 ARTIFACT_COUNT=0
@@ -37,8 +43,8 @@ fi
 
 echo "  Artifacts collected: $ARTIFACT_COUNT" >> "$META_DIR/logs/session.log"
 
-# Create archive if artifacts exist
-if [ "$ARTIFACT_COUNT" -gt 0 ]; then
+# Create archive if artifacts exist (skip on sigint for faster exit)
+if [ "$ARTIFACT_COUNT" -gt 0 ] && [ "$SOURCE" != "sigint" ]; then
     ARCHIVE_DIR="$META_DIR/archives"
     mkdir -p "$ARCHIVE_DIR"
     ARCHIVE_PATH="$ARCHIVE_DIR/artifacts-$(date +%Y%m%d-%H%M%S).tar.gz"

@@ -10,6 +10,7 @@ INPUT=$(cat)
 # Extract session information
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id')
 CWD=$(echo "$INPUT" | jq -r '.cwd')
+SOURCE=$(echo "$INPUT" | jq -r '.source // "startup"')
 
 # Check if we're in a cs session
 if [ -z "${CLAUDE_SESSION_NAME:-}" ]; then
@@ -28,9 +29,13 @@ if [ ! -d "$SESSION_DIR" ]; then
 fi
 
 # Log session start
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Session started (ID: $SESSION_ID)" >> "$META_DIR/logs/session.log"
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Session started (source: $SOURCE, ID: $SESSION_ID)" >> "$META_DIR/logs/session.log"
 echo "  Working directory: $CWD" >> "$META_DIR/logs/session.log"
 echo "" >> "$META_DIR/logs/session.log"
+
+# Auto-pull and crash recovery only on fresh start or resume
+# Skip on clear/compact since the session is already running
+if [ "$SOURCE" = "startup" ] || [ "$SOURCE" = "resume" ]; then
 
 # Auto-pull if enabled (runs in background to not block session start)
 SYNC_CONFIG="$META_DIR/sync.conf"
@@ -92,6 +97,8 @@ if [ -d "$SESSION_DIR/.git" ]; then
     fi
 fi
 
+fi # end startup/resume guard
+
 # Export environment variables for the session via CLAUDE_ENV_FILE
 if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
     cat >> "$CLAUDE_ENV_FILE" << EOF
@@ -133,7 +140,11 @@ EOF
 
 # Return additional context as JSON
 jq -n --arg context "$CONTEXT" '{
-    additionalContext: $context
+    hookSpecificOutput: {
+        hookEventName: "SessionStart",
+        additionalContext: $context,
+        statusMessage: "Loading session..."
+    }
 }'
 
 exit 0

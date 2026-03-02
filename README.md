@@ -58,7 +58,7 @@ Or clone and run `./install.ps1`.
 
 The installer:
 - Adds `cs` and `cs-secrets` to `~/.local/bin/` (plus `cs-tui` if built from source)
-- Installs seven [hooks](docs/hooks.md) to `~/.claude/hooks/` for session tracking
+- Installs ten [hooks](docs/hooks.md) to `~/.claude/hooks/` for session tracking
 - Adds `/summary` and `/compact-discoveries` commands, and `store-secret` skill to `~/.claude/`
 - Installs shell completions for bash and zsh
 - Configures hook entries in `~/.claude/settings.json`

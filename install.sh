@@ -81,6 +81,9 @@ HOOK_DISCOVERY_COMMITS_URL="${REPO_URL}/hooks/discovery-commits.sh"
 HOOK_DISCOVERIES_REMINDER_URL="${REPO_URL}/hooks/discoveries-reminder.sh"
 HOOK_DISCOVERIES_ARCHIVER_URL="${REPO_URL}/hooks/discoveries-archiver.sh"
 HOOK_SESSION_END_URL="${REPO_URL}/hooks/session-end.sh"
+HOOK_SUBAGENT_CONTEXT_URL="${REPO_URL}/hooks/subagent-context.sh"
+HOOK_TOOL_FAILURE_LOGGER_URL="${REPO_URL}/hooks/tool-failure-logger.sh"
+HOOK_SESSION_AUTO_APPROVE_URL="${REPO_URL}/hooks/session-auto-approve.sh"
 
 # Command URLs for web install
 COMMAND_SUMMARY_URL="${REPO_URL}/commands/summary.md"
@@ -213,7 +216,7 @@ elif [ "$INSTALL_METHOD" = "web" ]; then
 fi
 
 # Install hooks
-installed "7 hooks" "$HOOKS_DIR/"
+installed "10 hooks" "$HOOKS_DIR/"
 mkdir -p "$HOOKS_DIR"
 
 if [ "$INSTALL_METHOD" = "local" ]; then
@@ -225,6 +228,9 @@ if [ "$INSTALL_METHOD" = "local" ]; then
     cp "$HOOKS_SOURCE/discoveries-reminder.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/discoveries-archiver.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/session-end.sh" "$HOOKS_DIR/"
+    cp "$HOOKS_SOURCE/subagent-context.sh" "$HOOKS_DIR/"
+    cp "$HOOKS_SOURCE/tool-failure-logger.sh" "$HOOKS_DIR/"
+    cp "$HOOKS_SOURCE/session-auto-approve.sh" "$HOOKS_DIR/"
 else
     # Download from GitHub
     if command -v curl >/dev/null 2>&1; then
@@ -235,6 +241,9 @@ else
         curl -fsSL "$HOOK_DISCOVERIES_REMINDER_URL" -o "$HOOKS_DIR/discoveries-reminder.sh" || error "Failed to download discoveries-reminder.sh"
         curl -fsSL "$HOOK_DISCOVERIES_ARCHIVER_URL" -o "$HOOKS_DIR/discoveries-archiver.sh" || error "Failed to download discoveries-archiver.sh"
         curl -fsSL "$HOOK_SESSION_END_URL" -o "$HOOKS_DIR/session-end.sh" || error "Failed to download session-end.sh"
+        curl -fsSL "$HOOK_SUBAGENT_CONTEXT_URL" -o "$HOOKS_DIR/subagent-context.sh" || error "Failed to download subagent-context.sh"
+        curl -fsSL "$HOOK_TOOL_FAILURE_LOGGER_URL" -o "$HOOKS_DIR/tool-failure-logger.sh" || error "Failed to download tool-failure-logger.sh"
+        curl -fsSL "$HOOK_SESSION_AUTO_APPROVE_URL" -o "$HOOKS_DIR/session-auto-approve.sh" || error "Failed to download session-auto-approve.sh"
     elif command -v wget >/dev/null 2>&1; then
         wget -q "$HOOK_SESSION_START_URL" -O "$HOOKS_DIR/session-start.sh" || error "Failed to download session-start.sh"
         wget -q "$HOOK_ARTIFACT_TRACKER_URL" -O "$HOOKS_DIR/artifact-tracker.sh" || error "Failed to download artifact-tracker.sh"
@@ -243,6 +252,9 @@ else
         wget -q "$HOOK_DISCOVERIES_REMINDER_URL" -O "$HOOKS_DIR/discoveries-reminder.sh" || error "Failed to download discoveries-reminder.sh"
         wget -q "$HOOK_DISCOVERIES_ARCHIVER_URL" -O "$HOOKS_DIR/discoveries-archiver.sh" || error "Failed to download discoveries-archiver.sh"
         wget -q "$HOOK_SESSION_END_URL" -O "$HOOKS_DIR/session-end.sh" || error "Failed to download session-end.sh"
+        wget -q "$HOOK_SUBAGENT_CONTEXT_URL" -O "$HOOKS_DIR/subagent-context.sh" || error "Failed to download subagent-context.sh"
+        wget -q "$HOOK_TOOL_FAILURE_LOGGER_URL" -O "$HOOKS_DIR/tool-failure-logger.sh" || error "Failed to download tool-failure-logger.sh"
+        wget -q "$HOOK_SESSION_AUTO_APPROVE_URL" -O "$HOOKS_DIR/session-auto-approve.sh" || error "Failed to download session-auto-approve.sh"
     fi
 fi
 
@@ -337,6 +349,9 @@ else
     DISCOVERIES_REMINDER_PATH="$HOME/.claude/hooks/discoveries-reminder.sh"
     DISCOVERIES_ARCHIVER_PATH="$HOME/.claude/hooks/discoveries-archiver.sh"
     SESSION_END_PATH="$HOME/.claude/hooks/session-end.sh"
+    SUBAGENT_CONTEXT_PATH="$HOME/.claude/hooks/subagent-context.sh"
+    TOOL_FAILURE_LOGGER_PATH="$HOME/.claude/hooks/tool-failure-logger.sh"
+    SESSION_AUTO_APPROVE_PATH="$HOME/.claude/hooks/session-auto-approve.sh"
 
     # Tilde-path variants for dedup (handles entries added with ~ instead of $HOME)
     SESSION_START_TILDE="~/.claude/hooks/session-start.sh"
@@ -346,6 +361,9 @@ else
     DISCOVERIES_REMINDER_TILDE="~/.claude/hooks/discoveries-reminder.sh"
     DISCOVERIES_ARCHIVER_TILDE="~/.claude/hooks/discoveries-archiver.sh"
     SESSION_END_TILDE="~/.claude/hooks/session-end.sh"
+    SUBAGENT_CONTEXT_TILDE="~/.claude/hooks/subagent-context.sh"
+    TOOL_FAILURE_LOGGER_TILDE="~/.claude/hooks/tool-failure-logger.sh"
+    SESSION_AUTO_APPROVE_TILDE="~/.claude/hooks/session-auto-approve.sh"
 
     # Merge hooks: remove existing cs hooks (both path forms), then add ours
     # This prevents duplicates on reinstall while preserving other hooks
@@ -395,7 +413,8 @@ else
             "hooks": [{
                 "type": "command",
                 "command": $tilde,
-                "timeout": 10
+                "timeout": 10,
+                "async": true
             }]
         }]
     ')
@@ -432,6 +451,44 @@ else
                 "type": "command",
                 "command": $tilde,
                 "timeout": 10
+            }]
+        }]
+    ')
+
+    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$SUBAGENT_CONTEXT_PATH" --arg tilde "$SUBAGENT_CONTEXT_TILDE" '
+        .hooks.SubagentStart = ((.hooks.SubagentStart // []) | map(
+            select(.hooks | all(.command != $path and .command != $tilde))
+        )) + [{
+            "hooks": [{
+                "type": "command",
+                "command": $tilde,
+                "timeout": 10
+            }]
+        }]
+    ')
+
+    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$TOOL_FAILURE_LOGGER_PATH" --arg tilde "$TOOL_FAILURE_LOGGER_TILDE" '
+        .hooks.PostToolUseFailure = ((.hooks.PostToolUseFailure // []) | map(
+            select(.hooks | all(.command != $path and .command != $tilde))
+        )) + [{
+            "hooks": [{
+                "type": "command",
+                "command": $tilde,
+                "timeout": 10,
+                "async": true
+            }]
+        }]
+    ')
+
+    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$SESSION_AUTO_APPROVE_PATH" --arg tilde "$SESSION_AUTO_APPROVE_TILDE" '
+        .hooks.PermissionRequest = ((.hooks.PermissionRequest // []) | map(
+            select(.hooks | all(.command != $path and .command != $tilde))
+        )) + [{
+            "matcher": "Write|Edit",
+            "hooks": [{
+                "type": "command",
+                "command": $tilde,
+                "timeout": 5
             }]
         }]
     ')
