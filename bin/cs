@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.3.1"
+VERSION="2026.3.2"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -64,6 +64,62 @@ error() {
 
 info() {
     echo -e "${GREEN}$1${NC}"
+}
+
+# Set terminal tab title and optional tab color
+# Uses standard xterm escape sequences (works in iTerm2, Terminal.app, Ghostty, Alacritty, WezTerm, etc.)
+# Also sets tmux window name when running inside tmux
+set_tab_title() {
+    local title="$1"
+    local color="${2:-}"  # optional: "orange", "blue", or r,g,b values
+
+    # Standard xterm OSC 0: set window and tab title
+    printf '\033]0;%s\007' "$title"
+
+    # tmux: also set window name directly
+    if [ -n "${TMUX:-}" ]; then
+        tmux rename-window "$title" 2>/dev/null || true
+    fi
+
+    # Tab color via iTerm2 escape sequences (also supported by WezTerm)
+    if [ -n "$color" ]; then
+        case "${TERM_PROGRAM:-}" in
+            iTerm.app|WezTerm)
+                local r g b
+                case "$color" in
+                    orange) r=255 g=152 b=0 ;;
+                    blue)   r=66  g=133 b=244 ;;
+                    *)
+                        # Accept r,g,b format
+                        IFS=',' read -r r g b <<< "$color"
+                        ;;
+                esac
+                if [ -n "${r:-}" ] && [ -n "${g:-}" ] && [ -n "${b:-}" ]; then
+                    printf '\033]6;1;bg;red;brightness;%d\a' "$r"
+                    printf '\033]6;1;bg;green;brightness;%d\a' "$g"
+                    printf '\033]6;1;bg;blue;brightness;%d\a' "$b"
+                fi
+                ;;
+        esac
+    fi
+}
+
+# Reset terminal tab title and color to defaults
+reset_tab_title() {
+    # Reset title (empty = let shell/prompt set its own)
+    printf '\033]0;\007'
+
+    # tmux: re-enable automatic window naming
+    if [ -n "${TMUX:-}" ]; then
+        tmux set-window-option automatic-rename on 2>/dev/null || true
+    fi
+
+    # Reset tab color (iTerm2/WezTerm)
+    case "${TERM_PROGRAM:-}" in
+        iTerm.app|WezTerm)
+            printf '\033]6;1;bg;*;default\a'
+            ;;
+    esac
 }
 
 show_help() {
@@ -920,8 +976,8 @@ launch_claude_code() {
 
     # Acquire session lock before anything else
     acquire_session_lock "$session_dir/.cs" "$force"
-    trap 'release_session_lock "'"$session_dir/.cs"'"' EXIT
-    trap 'release_session_lock "'"$session_dir/.cs"'"; exit 130' INT TERM
+    trap 'reset_tab_title; release_session_lock "'"$session_dir/.cs"'"' EXIT
+    trap 'reset_tab_title; release_session_lock "'"$session_dir/.cs"'"; exit 130' INT TERM
 
     # Set environment variables
     export CLAUDE_SESSION_NAME="$session_name"
@@ -988,6 +1044,9 @@ launch_claude_code() {
         echo -e "${YELLOW}▌${NC} ${YELLOW}Update available:${NC} $VERSION ${COMMENT}→${NC} ${GREEN}$UPDATE_AVAILABLE${NC} ${COMMENT}(cs -update)${NC}"
     fi
     echo ""
+
+    # Set terminal tab title and color
+    set_tab_title "cs: $session_name" "orange"
 
     cd "$session_dir"
 
@@ -1316,13 +1375,8 @@ connect_remote() {
     echo -e "  Transport: ${COMMENT}${transport}${NC}"
     echo ""
 
-    # Set terminal title
-    printf '\033]0;cs: %s @ %s\007' "$session_name" "$resolved_host"
-
-    # Set iTerm2 tab color if available
-    if command -v it2check >/dev/null 2>&1 && it2check 2>/dev/null; then
-        it2setcolor tab blue 2>/dev/null || true
-    fi
+    # Set terminal tab title and color
+    set_tab_title "cs: $session_name @ $resolved_host" "blue"
 
     # Transport-specific flag: et uses -c (command), ssh uses -t (TTY)
     local transport_flag="-t"
