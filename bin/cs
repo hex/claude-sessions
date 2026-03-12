@@ -129,12 +129,15 @@ set_tab_title() {
     local outer_term
     outer_term=$(_detect_terminal)
 
-    # Standard xterm OSC 0: set window and tab title
+    # Standard xterm OSC 0: set window and tab title (also sets tmux pane title)
     printf '\033]0;%s\007' "$title"
 
-    # tmux: also set window name directly
+    # tmux: set window name and pane title, then lock both so Claude Code can't overwrite
     if [ -n "${TMUX:-}" ]; then
         tmux rename-window "$title" 2>/dev/null || true
+        tmux select-pane -T "$title" 2>/dev/null || true
+        tmux set-window-option allow-rename off 2>/dev/null || true
+        tmux set-window-option allow-set-title off 2>/dev/null || true
     fi
 
     # Tab color via iTerm2 escape sequences (also supported by WezTerm)
@@ -168,9 +171,11 @@ reset_tab_title() {
     # Reset title (empty = let shell/prompt set its own)
     printf '\033]0;\007'
 
-    # tmux: re-enable automatic window naming
+    # tmux: re-enable automatic window/title naming
     if [ -n "${TMUX:-}" ]; then
         tmux set-window-option automatic-rename on 2>/dev/null || true
+        tmux set-window-option allow-rename on 2>/dev/null || true
+        tmux set-window-option allow-set-title on 2>/dev/null || true
     fi
 
     # Reset tab color (iTerm2/WezTerm)
