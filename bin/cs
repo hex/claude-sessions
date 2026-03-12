@@ -66,12 +66,44 @@ info() {
     echo -e "${GREEN}$1${NC}"
 }
 
-# Set terminal tab title and optional tab color
+# Detect the outer terminal, even when running inside tmux.
+# tmux overrides TERM_PROGRAM, so we check LC_TERMINAL and ITERM_SESSION_ID as fallbacks.
+_detect_terminal() {
+    local term="${TERM_PROGRAM:-}"
+    if [ "$term" = "tmux" ] || [ -n "${TMUX:-}" ]; then
+        # Inside tmux: check env vars that survive from the outer terminal
+        if [ "${LC_TERMINAL:-}" = "iTerm2" ] || [ -n "${ITERM_SESSION_ID:-}" ]; then
+            echo "iTerm.app"
+        elif [ "${LC_TERMINAL:-}" = "WezTerm" ]; then
+            echo "WezTerm"
+        else
+            echo "tmux"
+        fi
+    else
+        echo "$term"
+    fi
+}
+
+# Send an escape sequence, using tmux DCS passthrough when inside tmux.
+# tmux intercepts proprietary escape sequences (like iTerm2 tab color) unless
+# wrapped in: ESC P tmux ; ESC ESC <payload> ESC backslash
+# (ESC must be doubled inside the DCS payload per tmux protocol)
+_send_escape() {
+    if [ -n "${TMUX:-}" ]; then
+        printf '\033Ptmux;\033\033%s\033\\' "$1"
+    else
+        printf '\033%s' "$1"
+    fi
+}
+
+# Set terminal tab title and optional tab color.
 # Uses standard xterm escape sequences (works in iTerm2, Terminal.app, Ghostty, Alacritty, WezTerm, etc.)
-# Also sets tmux window name when running inside tmux
+# Also sets tmux window name when running inside tmux.
 set_tab_title() {
     local title="$1"
     local color="${2:-}"  # optional: "orange", "blue", or r,g,b values
+    local outer_term
+    outer_term=$(_detect_terminal)
 
     # Standard xterm OSC 0: set window and tab title
     printf '\033]0;%s\007' "$title"
@@ -83,7 +115,7 @@ set_tab_title() {
 
     # Tab color via iTerm2 escape sequences (also supported by WezTerm)
     if [ -n "$color" ]; then
-        case "${TERM_PROGRAM:-}" in
+        case "$outer_term" in
             iTerm.app|WezTerm)
                 local r g b
                 case "$color" in
@@ -95,9 +127,9 @@ set_tab_title() {
                         ;;
                 esac
                 if [ -n "${r:-}" ] && [ -n "${g:-}" ] && [ -n "${b:-}" ]; then
-                    printf '\033]6;1;bg;red;brightness;%d\a' "$r"
-                    printf '\033]6;1;bg;green;brightness;%d\a' "$g"
-                    printf '\033]6;1;bg;blue;brightness;%d\a' "$b"
+                    _send_escape "]6;1;bg;red;brightness;${r}\a"
+                    _send_escape "]6;1;bg;green;brightness;${g}\a"
+                    _send_escape "]6;1;bg;blue;brightness;${b}\a"
                 fi
                 ;;
         esac
@@ -115,9 +147,11 @@ reset_tab_title() {
     fi
 
     # Reset tab color (iTerm2/WezTerm)
-    case "${TERM_PROGRAM:-}" in
+    local outer_term
+    outer_term=$(_detect_terminal)
+    case "$outer_term" in
         iTerm.app|WezTerm)
-            printf '\033]6;1;bg;*;default\a'
+            _send_escape ']6;1;bg;*;default\a'
             ;;
     esac
 }
