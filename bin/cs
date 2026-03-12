@@ -96,12 +96,36 @@ _send_escape() {
     fi
 }
 
+# Pick a tab color deterministically from a string (e.g., session name).
+# Same name always produces the same color for visual consistency across launches.
+_color_from_name() {
+    local name="$1"
+    local colors=(
+        "255,82,82"     # red
+        "255,152,0"     # orange
+        "255,193,7"     # amber
+        "198,255,0"     # chartreuse
+        "76,175,80"     # green
+        "0,150,136"     # teal
+        "0,188,212"     # cyan
+        "3,169,244"     # sky blue
+        "92,107,192"    # indigo
+        "149,117,205"   # purple
+        "236,64,122"    # pink
+        "255,138,101"   # coral
+    )
+    local hash
+    hash=$(printf '%s' "$name" | shasum | cut -d' ' -f1)
+    local index=$(( 16#${hash:0:8} % ${#colors[@]} ))
+    echo "${colors[$index]}"
+}
+
 # Set terminal tab title and optional tab color.
 # Uses standard xterm escape sequences (works in iTerm2, Terminal.app, Ghostty, Alacritty, WezTerm, etc.)
 # Also sets tmux window name when running inside tmux.
 set_tab_title() {
     local title="$1"
-    local color="${2:-}"  # optional: "orange", "blue", or r,g,b values
+    local color="${2:-}"  # optional: "blue", r,g,b values, or "auto:name" to hash from name
     local outer_term
     outer_term=$(_detect_terminal)
 
@@ -119,8 +143,11 @@ set_tab_title() {
             iTerm.app|WezTerm)
                 local r g b
                 case "$color" in
-                    orange) r=255 g=152 b=0 ;;
-                    blue)   r=66  g=133 b=244 ;;
+                    auto:*)
+                        # Derive color from name hash
+                        IFS=',' read -r r g b <<< "$(_color_from_name "${color#auto:}")"
+                        ;;
+                    blue) r=66  g=133 b=244 ;;
                     *)
                         # Accept r,g,b format
                         IFS=',' read -r r g b <<< "$color"
@@ -1080,7 +1107,7 @@ launch_claude_code() {
     echo ""
 
     # Set terminal tab title and color
-    set_tab_title "cs: $session_name" "orange"
+    set_tab_title "cs: $session_name" "auto:$session_name"
 
     cd "$session_dir"
 
