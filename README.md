@@ -57,7 +57,7 @@ Or clone and run `./install.ps1`.
 > :warning: Always review scripts ([bash](install.sh), [PowerShell](install.ps1)) before running them from the internet.
 
 The installer:
-- Adds `cs` and `cs-secrets` to `~/.local/bin/` (plus `cs-tui` if built from source)
+- Adds `cs`, `cs-secrets`, and `cs-tui` to `~/.local/bin/`
 - Installs ten [hooks](docs/hooks.md) to `~/.claude/hooks/` for session tracking
 - Adds `/summary` and `/compact-discoveries` commands, and `store-secret` skill to `~/.claude/`
 - Installs shell completions for bash and zsh
@@ -83,18 +83,23 @@ cs -version, -v             # Show version
 
 Running `cs` with no arguments launches an interactive TUI for browsing and managing sessions:
 
-- **Navigate** with `j`/`k` or arrow keys
+- **Navigate** with `j`/`k` or arrow keys; `g`/`G` for first/last; mouse scroll and click supported
 - **Sort** by column with `1`-`6` (toggles ascending/descending)
-- **Search** with `/` to filter sessions by name
-- **Actions menu** with `Enter` — shows all available actions for the selected session (open, delete, rename, move, secrets, sync). Navigate with `j`/`k`, select with `Enter`, or use shortcut keys directly.
+- **Fuzzy search** with `/` — matches characters in order with highlighting; Enter commits the filter
+- **Time-based sections** — sessions grouped under Today, Yesterday, This Week, This Month, Older when sorted by date
+- **Action bar** with `Enter` — inline bar shows available actions with shortcut keys
+- **Preview pane** — appears automatically on wide terminals (>120 cols); toggle with `p`
+- **Expand row** with `Tab` — shows session objective, discoveries, and artifact count inline
+- **Create session** with `n` — opens inline dialog to create a new session
 - **Delete** with `d` (confirmation required)
+- **Batch operations** — mark sessions with `Space`, then `D` to batch delete
 - **Rename** with `r`
 - **Move to remote** with `m` (local sessions only)
-- **Manage secrets** with `s` (view values, remove)
-- **Sync** with `P` (push), `L` (pull), `S` (status)
+- **Manage secrets** with `s` (view values with `v`, auto-redacts after 5 seconds)
+- **Async sync** with `P` (push), `L` (pull), `S` (status) — runs in background with spinner; `Esc` to cancel
 - **Quit** with `q` or `Esc`
 
-The TUI requires `cs-tui` (a ~703 KB Rust binary). If not installed, `cs` falls back to showing help. Build from source: `cd tui && cargo build --release`.
+The TUI requires `cs-tui` (an ~817 KB Rust binary). Build from source: `cd tui && cargo build --release`.
 
 ### Session Commands
 

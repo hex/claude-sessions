@@ -126,9 +126,12 @@ cs my-session -sync auto on
 
 ## Secrets Sync
 
-Secrets are exported to `.cs/secrets.enc` (AES-256-CBC encrypted) and included in git.
+Secrets are encrypted and included in git sync. Two encryption methods are supported:
 
-**Important:** You must set `CS_SECRETS_PASSWORD` to the same value on all machines for secrets to sync correctly. Machine-derived passwords are not portable.
+- **age encryption** (recommended): Uses public-key cryptography via [age](https://github.com/FiloSottile/age). Secrets are stored in `.cs/secrets.age`. See [docs/secrets.md](secrets.md) for setup.
+- **Password encryption** (legacy): Uses AES-256-CBC via OpenSSL. Secrets are stored in `.cs/secrets.enc`. Requires `CS_SECRETS_PASSWORD` set to the same value on all machines.
+
+On pull, `secrets.age` is preferred if present; `secrets.enc` is used as fallback.
 
 ## What Gets Synced
 
