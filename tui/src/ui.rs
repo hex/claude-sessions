@@ -445,6 +445,31 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
         }
     }
 
+    // Syncing mode renders its own spinner footer
+    if app.mode == Mode::Syncing {
+        let spinner = app.spinner_frame();
+        let subcmd = app
+            .sync_job
+            .as_ref()
+            .map(|j| j.subcommand.as_str())
+            .unwrap_or("sync");
+        let session = app
+            .sync_job
+            .as_ref()
+            .map(|j| j.session_name.as_str())
+            .unwrap_or("?");
+        let footer = Paragraph::new(Line::from(vec![
+            Span::styled(format!("{} ", spinner), Style::default().fg(GOLD)),
+            Span::styled(
+                format!("{}ing {}...", subcmd, session),
+                Style::default().fg(WHITE),
+            ),
+            Span::styled("  Esc:cancel", Style::default().fg(COMMENT)),
+        ]));
+        frame.render_widget(footer, area);
+        return;
+    }
+
     let keys = match app.mode {
         Mode::Normal if !app.marked_sessions.is_empty() => {
             "Space:mark  D:delete marked  Esc:clear marks  q:quit  Enter:open  /:search"
@@ -458,6 +483,7 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
         Mode::Rename | Mode::MoveToRemote | Mode::CreateSession => "Enter:confirm  Esc:cancel",
         Mode::Secrets => "j/k:navigate  v/Enter:view  d:remove  Esc:close",
         Mode::SyncOutput(_) => "Press any key to dismiss",
+        Mode::Syncing => unreachable!(), // handled above
         Mode::Search => unreachable!(),
     };
     let mut footer_spans = Vec::new();

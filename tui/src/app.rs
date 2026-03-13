@@ -214,6 +214,7 @@ pub enum Mode {
     MoveToRemote,
     CreateSession,
     Secrets,
+    Syncing,
     SyncOutput(String),
 }
 
@@ -280,6 +281,20 @@ pub enum FlashKind {
     Error,
 }
 
+pub struct SyncJob {
+    pub session_name: String,
+    pub subcommand: String,
+    pub receiver: std::sync::mpsc::Receiver<SyncResult>,
+    pub started: std::time::Instant,
+}
+
+pub struct SyncResult {
+    pub success: bool,
+    pub output: String,
+}
+
+pub const SPINNER_FRAMES: &[char] = &['\u{280b}', '\u{2819}', '\u{2839}', '\u{2838}', '\u{283c}', '\u{2834}', '\u{2826}', '\u{2827}', '\u{2807}', '\u{280f}'];
+
 pub struct StatusMessage {
     pub text: String,
     pub level: StatusLevel,
@@ -322,6 +337,8 @@ pub struct App {
     pub expanded_session: Option<String>,
     /// Cached session previews (by session name).
     pub preview_cache: HashMap<String, session::SessionPreview>,
+    /// Background sync operation in progress.
+    pub sync_job: Option<SyncJob>,
 }
 
 impl App {
@@ -359,6 +376,7 @@ impl App {
             marked_sessions: std::collections::HashSet::new(),
             expanded_session: None,
             preview_cache: HashMap::new(),
+            sync_job: None,
         }
     }
 
@@ -586,6 +604,14 @@ impl App {
             Mode::CreateSession => self.handle_create_session(key),
             Mode::MoveToRemote => self.handle_move_to_remote(key),
             Mode::Secrets => self.handle_secrets(key),
+            Mode::Syncing => {
+                if key.code == KeyCode::Esc {
+                    self.sync_job = None;
+                    self.mode = Mode::Normal;
+                    self.set_status("Sync cancelled", StatusLevel::Info);
+                }
+                Action::None
+            }
             Mode::SyncOutput(_) => {
                 if self.return_to_secrets {
                     self.return_to_secrets = false;
@@ -658,15 +684,15 @@ impl App {
                 Action::None
             }
             KeyCode::Char('P') => {
-                self.run_sync_command("push");
+                self.start_sync("push");
                 Action::None
             }
             KeyCode::Char('L') => {
-                self.run_sync_command("pull");
+                self.start_sync("pull");
                 Action::None
             }
             KeyCode::Char('S') => {
-                self.run_sync_command("status");
+                self.start_sync("status");
                 Action::None
             }
             KeyCode::Char('m') => {
@@ -835,17 +861,17 @@ impl App {
             }
             5 => {
                 // Push
-                self.run_sync_command("push");
+                self.start_sync("push");
                 Action::None
             }
             6 => {
                 // Pull
-                self.run_sync_command("pull");
+                self.start_sync("pull");
                 Action::None
             }
             7 => {
                 // Status
-                self.run_sync_command("status");
+                self.start_sync("status");
                 Action::None
             }
             _ => Action::None,
@@ -1241,25 +1267,91 @@ impl App {
         self.mode = Mode::Normal;
     }
 
-    fn run_sync_command(&mut self, subcommand: &str) {
+    fn start_sync(&mut self, subcommand: &str) {
         if let Some(session) = self.selected_session() {
             let name = session.name.clone();
-            let output = std::process::Command::new("cs")
-                .args([&name, "-sync", subcommand])
-                .output();
-            match output {
-                Ok(out) => {
-                    let text = String::from_utf8_lossy(&out.stdout).to_string()
-                        + &String::from_utf8_lossy(&out.stderr).to_string();
-                    let kind = if out.status.success() { FlashKind::Success } else { FlashKind::Error };
-                    self.flash_row(&name, kind);
-                    self.mode = Mode::SyncOutput(text);
-                }
-                Err(e) => {
-                    self.flash_row(&name, FlashKind::Error);
-                    self.set_status(format!("Sync failed: {}", e), StatusLevel::Error);
+            let subcmd = subcommand.to_string();
+            let (tx, rx) = std::sync::mpsc::channel();
+
+            let session_name = name.clone();
+            std::thread::spawn(move || {
+                let output = std::process::Command::new("cs")
+                    .args([&session_name, "-sync", &subcmd])
+                    .output();
+                let result = match output {
+                    Ok(out) => {
+                        let text = String::from_utf8_lossy(&out.stdout).to_string()
+                            + &String::from_utf8_lossy(&out.stderr).to_string();
+                        SyncResult {
+                            success: out.status.success(),
+                            output: text,
+                        }
+                    }
+                    Err(e) => SyncResult {
+                        success: false,
+                        output: format!("Sync failed: {}", e),
+                    },
+                };
+                let _ = tx.send(result);
+            });
+
+            self.sync_job = Some(SyncJob {
+                session_name: name,
+                subcommand: subcommand.to_string(),
+                receiver: rx,
+                started: std::time::Instant::now(),
+            });
+            self.mode = Mode::Syncing;
+        }
+    }
+
+    /// Poll the background sync job. Called each event loop tick.
+    pub fn check_sync(&mut self) {
+        let job = match self.sync_job.take() {
+            Some(j) => j,
+            None => return,
+        };
+
+        match job.receiver.try_recv() {
+            Ok(result) => {
+                let kind = if result.success {
+                    FlashKind::Success
+                } else {
+                    FlashKind::Error
+                };
+                self.flash_row(&job.session_name, kind);
+                if result.output.trim().is_empty() {
+                    let label = if result.success { "completed" } else { "failed" };
+                    self.set_status(
+                        format!("Sync {} {}", job.subcommand, label),
+                        if result.success { StatusLevel::Success } else { StatusLevel::Error },
+                    );
+                    self.mode = Mode::Normal;
+                } else {
+                    self.mode = Mode::SyncOutput(result.output);
                 }
             }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                // Still running — put the job back
+                self.sync_job = Some(job);
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                // Thread panicked or dropped sender
+                self.flash_row(&job.session_name, FlashKind::Error);
+                self.set_status("Sync process lost", StatusLevel::Error);
+                self.mode = Mode::Normal;
+            }
+        }
+    }
+
+    /// Current spinner frame character for the active sync job.
+    pub fn spinner_frame(&self) -> char {
+        if let Some(ref job) = self.sync_job {
+            let elapsed_ms = job.started.elapsed().as_millis() as usize;
+            let idx = (elapsed_ms / 80) % SPINNER_FRAMES.len();
+            SPINNER_FRAMES[idx]
+        } else {
+            SPINNER_FRAMES[0]
         }
     }
 
@@ -2786,6 +2878,137 @@ mod tests {
         app.handle_key(KeyEvent::from(KeyCode::Tab));
         // Preview was loaded (even if empty, the key exists)
         assert!(app.preview_cache.contains_key("alpha"));
+    }
+
+    // --- Async sync with spinner ---
+
+    fn make_sync_job(session_name: &str, subcommand: &str) -> (std::sync::mpsc::Sender<SyncResult>, SyncJob) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let job = SyncJob {
+            session_name: session_name.to_string(),
+            subcommand: subcommand.to_string(),
+            receiver: rx,
+            started: std::time::Instant::now(),
+        };
+        (tx, job)
+    }
+
+    #[test]
+    fn check_sync_noop_when_no_job() {
+        let mut app = App::new(sample_sessions());
+        app.check_sync(); // should not panic
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn check_sync_stays_syncing_while_pending() {
+        let mut app = App::new(sample_sessions());
+        let (_tx, job) = make_sync_job("alpha", "push");
+        app.sync_job = Some(job);
+        app.mode = Mode::Syncing;
+        app.check_sync();
+        assert_eq!(app.mode, Mode::Syncing);
+        assert!(app.sync_job.is_some());
+    }
+
+    #[test]
+    fn check_sync_transitions_to_output_on_success() {
+        let mut app = App::new(sample_sessions());
+        let (tx, job) = make_sync_job("alpha", "push");
+        app.sync_job = Some(job);
+        app.mode = Mode::Syncing;
+
+        tx.send(SyncResult {
+            success: true,
+            output: "Pushed OK".to_string(),
+        })
+        .unwrap();
+
+        app.check_sync();
+        assert!(matches!(app.mode, Mode::SyncOutput(ref s) if s == "Pushed OK"));
+        assert!(app.sync_job.is_none());
+    }
+
+    #[test]
+    fn check_sync_transitions_to_normal_on_empty_output() {
+        let mut app = App::new(sample_sessions());
+        let (tx, job) = make_sync_job("alpha", "push");
+        app.sync_job = Some(job);
+        app.mode = Mode::Syncing;
+
+        tx.send(SyncResult {
+            success: true,
+            output: "  ".to_string(),
+        })
+        .unwrap();
+
+        app.check_sync();
+        assert_eq!(app.mode, Mode::Normal);
+        assert!(app.status_message.is_some());
+    }
+
+    #[test]
+    fn check_sync_flashes_error_on_failure() {
+        let mut app = App::new(sample_sessions());
+        let (tx, job) = make_sync_job("alpha", "pull");
+        app.sync_job = Some(job);
+        app.mode = Mode::Syncing;
+
+        tx.send(SyncResult {
+            success: false,
+            output: "Error: no remote".to_string(),
+        })
+        .unwrap();
+
+        app.check_sync();
+        assert!(matches!(app.mode, Mode::SyncOutput(ref s) if s == "Error: no remote"));
+        assert!(app.row_flashes.contains_key("alpha"));
+    }
+
+    #[test]
+    fn check_sync_handles_disconnected_sender() {
+        let mut app = App::new(sample_sessions());
+        let (tx, job) = make_sync_job("alpha", "status");
+        drop(tx); // simulate thread panic / drop
+        app.sync_job = Some(job);
+        app.mode = Mode::Syncing;
+
+        app.check_sync();
+        assert_eq!(app.mode, Mode::Normal);
+        assert!(app.status_message.is_some());
+    }
+
+    #[test]
+    fn syncing_mode_esc_cancels() {
+        let mut app = App::new(sample_sessions());
+        let (_tx, job) = make_sync_job("alpha", "push");
+        app.sync_job = Some(job);
+        app.mode = Mode::Syncing;
+
+        app.handle_key(KeyEvent::from(KeyCode::Esc));
+        assert_eq!(app.mode, Mode::Normal);
+        assert!(app.sync_job.is_none());
+    }
+
+    #[test]
+    fn syncing_mode_ignores_other_keys() {
+        let mut app = App::new(sample_sessions());
+        let (_tx, job) = make_sync_job("alpha", "push");
+        app.sync_job = Some(job);
+        app.mode = Mode::Syncing;
+
+        app.handle_key(KeyEvent::from(KeyCode::Char('j')));
+        assert_eq!(app.mode, Mode::Syncing); // not normal
+        assert!(app.sync_job.is_some());
+    }
+
+    #[test]
+    fn spinner_frame_returns_valid_char() {
+        let mut app = App::new(sample_sessions());
+        let (_tx, job) = make_sync_job("alpha", "push");
+        app.sync_job = Some(job);
+        let frame = app.spinner_frame();
+        assert!(SPINNER_FRAMES.contains(&frame));
     }
 
     #[test]
