@@ -9,7 +9,7 @@ use ratatui::Frame;
 
 use ratatui::layout::Alignment;
 
-use crate::app::{App, FlashKind, Mode, SortColumn, SortDirection, StatusLevel, MENU_ITEMS};
+use crate::app::{App, FlashKind, Mode, SortColumn, SortDirection, StatusLevel};
 use crate::theme::{self, COMMENT, FLASH_ERROR, FLASH_SUCCESS, GOLD, GREEN, ORANGE, RED, RUST, WHITE, YELLOW};
 
 const ZEBRA_DIM: ratatui::style::Color = ratatui::style::Color::Rgb(32, 29, 28);
@@ -17,8 +17,15 @@ const ZEBRA_DIM: ratatui::style::Color = ratatui::style::Color::Rgb(32, 29, 28);
 const PREVIEW_MIN_WIDTH: u16 = 120;
 
 pub fn render(app: &mut App, frame: &mut Frame) {
-    let chunks = Layout::vertical([Constraint::Min(5), Constraint::Length(1)])
-        .split(frame.area());
+    // When in SessionMenu mode, allocate an extra line for the inline action bar
+    let action_bar_height = if app.mode == Mode::SessionMenu { 1u16 } else { 0 };
+
+    let chunks = Layout::vertical([
+        Constraint::Min(5),
+        Constraint::Length(action_bar_height),
+        Constraint::Length(1),
+    ])
+    .split(frame.area());
 
     let show_preview = app.show_preview && chunks[0].width >= PREVIEW_MIN_WIDTH;
 
@@ -32,14 +39,17 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         render_table(app, frame, chunks[0]);
     }
 
+    if app.mode == Mode::SessionMenu {
+        render_action_bar(app, frame, chunks[1]);
+    }
+
     match &app.mode {
-        Mode::Search => render_search_bar(app, frame, chunks[1]),
-        _ => render_footer(app, frame, chunks[1]),
+        Mode::Search => render_search_bar(app, frame, chunks[2]),
+        _ => render_footer(app, frame, chunks[2]),
     }
 
     // Overlay dialogs on top
     match &app.mode {
-        Mode::SessionMenu => render_session_menu(app, frame),
         Mode::ConfirmDelete => render_confirm_delete(app, frame),
         Mode::ConfirmBatchDelete => render_confirm_batch_delete(app, frame),
         Mode::ConfirmForceOpen => render_confirm_force_open(app, frame),
@@ -521,47 +531,60 @@ fn render_search_bar(app: &App, frame: &mut Frame, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
-fn render_session_menu(app: &App, frame: &mut Frame) {
-    let session_name = app
-        .selected_session()
-        .map(|s| s.name.as_str())
-        .unwrap_or("?");
+fn render_action_bar(app: &App, frame: &mut Frame, area: Rect) {
+    let session = app.selected_session();
+    let is_remote = session.as_ref().map(|s| s.location.is_some()).unwrap_or(false);
+    let has_git = session.as_ref().map(|s| s.has_git).unwrap_or(false);
+    let has_secrets = session.as_ref().map(|s| s.secrets_count > 0).unwrap_or(false);
 
-    let height = MENU_ITEMS.len() as u16 + 3;
-    let popup_area = centered_rect(40, height, frame.area());
-    frame.render_widget(Clear, popup_area);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(GOLD))
-        .title(format!(" Actions - {} ", session_name))
-        .title_style(Style::default().fg(GOLD).add_modifier(Modifier::BOLD));
+    let mut spans: Vec<Span> = Vec::new();
+    spans.push(Span::styled(" ", Style::default()));
 
-    let lines: Vec<Line> = MENU_ITEMS
-        .iter()
-        .enumerate()
-        .map(|(i, (label, shortcut))| {
-            let shortcut_text = format!("[{}]", shortcut);
-            if i == app.menu_selected {
-                Line::from(vec![
-                    Span::styled(">> ", Style::default().fg(GOLD).add_modifier(Modifier::BOLD)),
-                    Span::styled(
-                        format!("{:<18}", label),
-                        Style::default().fg(WHITE).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(shortcut_text, Style::default().fg(COMMENT)),
-                ])
-            } else {
-                Line::from(vec![
-                    Span::styled("   ", Style::default()),
-                    Span::styled(format!("{:<18}", label), Style::default().fg(COMMENT)),
-                    Span::styled(shortcut_text, Style::default().fg(COMMENT)),
-                ])
-            }
-        })
-        .collect();
+    // Each action: [key]label with availability-based coloring
+    let actions: &[(&str, &str, bool)] = &[
+        ("Enter", "open", true),
+        ("d", "delete", true),
+        ("r", "rename", true),
+        ("m", "move", !is_remote),
+        ("s", "secrets", has_secrets),
+        ("P", "push", has_git),
+        ("L", "pull", has_git),
+        ("S", "status", has_git),
+    ];
 
-    let paragraph = Paragraph::new(lines).block(block);
-    frame.render_widget(paragraph, popup_area);
+    for (i, (key, label, available)) in actions.iter().enumerate() {
+        let is_selected = i == app.menu_selected;
+
+        if i > 0 {
+            spans.push(Span::styled("  ", Style::default()));
+        }
+
+        let (key_color, label_color) = if !available {
+            (COMMENT, COMMENT)
+        } else if is_selected {
+            (GOLD, WHITE)
+        } else {
+            (GOLD, COMMENT)
+        };
+
+        let key_style = Style::default().fg(key_color).add_modifier(Modifier::BOLD);
+        let label_style = if is_selected {
+            Style::default().fg(label_color).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(label_color)
+        };
+
+        spans.push(Span::styled("[", Style::default().fg(key_color)));
+        spans.push(Span::styled(*key, key_style));
+        spans.push(Span::styled("]", Style::default().fg(key_color)));
+        spans.push(Span::styled(*label, label_style));
+    }
+
+    spans.push(Span::styled("  Esc:close", Style::default().fg(COMMENT)));
+
+    let bar = Paragraph::new(Line::from(spans))
+        .style(Style::default().bg(ZEBRA_DIM));
+    frame.render_widget(bar, area);
 }
 
 fn render_confirm_delete(app: &App, frame: &mut Frame) {
