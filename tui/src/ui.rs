@@ -84,35 +84,45 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
         .style(Style::default().fg(RUST).add_modifier(Modifier::BOLD))
         .bottom_margin(1);
 
+    let is_searching = app.mode == Mode::Search && !app.search_input.text().is_empty();
+
     let rows: Vec<Row> = app
         .filtered
         .iter()
         .enumerate()
         .map(|(row_idx, &i)| {
             let s = &app.sessions[i];
+            // During search typing, dim rows that don't match
+            let dimmed = is_searching && !app.fuzzy_indices.contains_key(&i);
+
             // Build gutter indicators as colored prefix spans
             let mut name_spans: Vec<Span> = Vec::new();
             if s.is_locked {
+                let lock_color = if dimmed { COMMENT } else { RED };
                 name_spans.push(Span::styled(
                     format!("{} ", icons.lock),
-                    Style::default().fg(RED),
+                    Style::default().fg(lock_color),
                 ));
             }
             if s.location.is_some() {
+                let remote_icon_color = if dimmed { COMMENT } else { ORANGE };
                 name_spans.push(Span::styled(
                     format!("{} ", icons.remote),
-                    Style::default().fg(ORANGE),
+                    Style::default().fg(remote_icon_color),
                 ));
             }
             if s.secrets_count > 0 && !show_secrets {
                 // Show secrets indicator in gutter only when secrets column is hidden
+                let secrets_color = if dimmed { COMMENT } else { GOLD };
                 name_spans.push(Span::styled(
                     format!("{} ", icons.lock),
-                    Style::default().fg(GOLD),
+                    Style::default().fg(secrets_color),
                 ));
             }
 
-            let name_color = if s.location.is_some() {
+            let name_color = if dimmed {
+                COMMENT
+            } else if s.location.is_some() {
                 ratatui::style::Color::Cyan
             } else {
                 GOLD
@@ -153,7 +163,11 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
                 name_spans.push(Span::styled(s.name.clone(), Style::default().fg(name_color)));
             }
 
-            let meta_color = theme::recency_color(s.modified_ts);
+            let meta_color = if dimmed {
+                COMMENT
+            } else {
+                theme::recency_color(s.modified_ts)
+            };
 
             let mut cells = vec![
                 Cell::from(Line::from(name_spans)),
@@ -179,12 +193,14 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
                     .as_ref()
                     .map(|l| format!("{} {}", icons.remote, l))
                     .unwrap_or_default();
-                cells.push(Cell::from(remote).style(Style::default().fg(ORANGE)));
+                let remote_color = if dimmed { COMMENT } else { ORANGE };
+                cells.push(Cell::from(remote).style(Style::default().fg(remote_color)));
             }
 
             if show_github {
                 let github = s.git_repo.clone().unwrap_or_default();
-                cells.push(Cell::from(github).style(Style::default().fg(GREEN)));
+                let github_color = if dimmed { COMMENT } else { GREEN };
+                cells.push(Cell::from(github).style(Style::default().fg(github_color)));
             }
 
             let row = Row::new(cells);

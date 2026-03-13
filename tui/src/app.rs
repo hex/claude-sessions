@@ -381,6 +381,22 @@ impl App {
         self.selected_session().map(|s| s.name.clone())
     }
 
+    /// Compute fuzzy match indices for highlighting without filtering the session list.
+    /// Used during search typing phase to show all sessions with matches highlighted.
+    pub fn update_search_highlights(&mut self) {
+        let query = self.search_input.text();
+        self.fuzzy_indices.clear();
+        if !query.is_empty() {
+            for (i, s) in self.sessions.iter().enumerate() {
+                if let Some((_score, indices)) = fuzzy_match(query, &s.name) {
+                    if !indices.is_empty() {
+                        self.fuzzy_indices.insert(i, indices);
+                    }
+                }
+            }
+        }
+    }
+
     pub fn apply_filter_and_sort(&mut self) {
         // Remember the selected session name so we can restore it after re-sorting
         let prev_name = self.selected_session().map(|s| s.name.clone());
@@ -694,10 +710,13 @@ impl App {
         match key.code {
             KeyCode::Esc => {
                 self.search_input.clear();
+                self.fuzzy_indices.clear();
                 self.apply_filter_and_sort();
                 self.mode = Mode::Normal;
             }
             KeyCode::Enter => {
+                // Commit: filter to matches only
+                self.apply_filter_and_sort();
                 self.mode = Mode::Normal;
             }
             KeyCode::Left => {
@@ -714,15 +733,15 @@ impl App {
             }
             KeyCode::Delete => {
                 self.search_input.delete_forward();
-                self.apply_filter_and_sort();
+                self.update_search_highlights();
             }
             KeyCode::Backspace => {
                 self.search_input.delete_back();
-                self.apply_filter_and_sort();
+                self.update_search_highlights();
             }
             KeyCode::Char(c) => {
                 self.search_input.insert(c);
-                self.apply_filter_and_sort();
+                self.update_search_highlights();
             }
             _ => {}
         }
@@ -1425,13 +1444,16 @@ mod tests {
     }
 
     #[test]
-    fn search_typing_filters() {
+    fn search_typing_highlights_but_keeps_all_visible() {
         let mut app = App::new(sample_sessions());
         app.handle_key(KeyEvent::from(KeyCode::Char('/')));
         app.handle_key(KeyEvent::from(KeyCode::Char('b')));
         app.handle_key(KeyEvent::from(KeyCode::Char('e')));
         assert_eq!(app.search_input.text(), "be");
-        assert_eq!(app.filtered.len(), 1);
+        // All sessions still visible during typing (highlight-only phase)
+        assert_eq!(app.filtered.len(), 3);
+        // But fuzzy indices populated for matching session
+        assert!(!app.fuzzy_indices.is_empty());
     }
 
     #[test]
@@ -1439,7 +1461,8 @@ mod tests {
         let mut app = App::new(sample_sessions());
         app.handle_key(KeyEvent::from(KeyCode::Char('/')));
         app.handle_key(KeyEvent::from(KeyCode::Char('x')));
-        assert_eq!(app.filtered.len(), 0);
+        // All sessions still visible during typing
+        assert_eq!(app.filtered.len(), 3);
 
         app.handle_key(KeyEvent::from(KeyCode::Esc));
         assert_eq!(app.mode, Mode::Normal);
@@ -2268,5 +2291,47 @@ mod tests {
         let (_, indices) = result.unwrap();
         // c=0, s=7 (sessions)
         assert_eq!(indices[0], 0);
+    }
+
+    #[test]
+    fn search_typing_highlights_without_filtering() {
+        let mut app = App::new(sample_sessions());
+        // Enter search mode
+        app.handle_key(KeyEvent::from(KeyCode::Char('/')));
+        assert_eq!(app.mode, Mode::Search);
+        // Type "al" — should match "alpha"
+        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        app.handle_key(KeyEvent::from(KeyCode::Char('l')));
+        // All 3 sessions still visible (not filtered yet)
+        assert_eq!(app.filtered.len(), 3);
+        // But fuzzy_indices only has the matching session
+        assert!(app.fuzzy_indices.values().any(|v| !v.is_empty()));
+    }
+
+    #[test]
+    fn search_enter_commits_filter() {
+        let mut app = App::new(sample_sessions());
+        app.handle_key(KeyEvent::from(KeyCode::Char('/')));
+        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        app.handle_key(KeyEvent::from(KeyCode::Char('l')));
+        // All still visible during typing
+        assert_eq!(app.filtered.len(), 3);
+        // Commit with Enter
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        assert_eq!(app.mode, Mode::Normal);
+        // Now filtered to matches only
+        assert_eq!(app.filtered.len(), 1);
+    }
+
+    #[test]
+    fn search_esc_restores_all() {
+        let mut app = App::new(sample_sessions());
+        app.handle_key(KeyEvent::from(KeyCode::Char('/')));
+        app.handle_key(KeyEvent::from(KeyCode::Char('z')));
+        // Esc clears search and restores all
+        app.handle_key(KeyEvent::from(KeyCode::Esc));
+        assert_eq!(app.mode, Mode::Normal);
+        assert_eq!(app.filtered.len(), 3);
+        assert!(app.fuzzy_indices.is_empty());
     }
 }
