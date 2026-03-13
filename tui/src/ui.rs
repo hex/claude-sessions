@@ -9,7 +9,7 @@ use ratatui::Frame;
 
 use ratatui::layout::Alignment;
 
-use crate::app::{App, Mode, SortColumn, SortDirection, MENU_ITEMS};
+use crate::app::{App, Mode, SortColumn, SortDirection, StatusLevel, MENU_ITEMS};
 use crate::theme::{self, COMMENT, GOLD, GREEN, ORANGE, RED, RUST, WHITE, YELLOW};
 
 const ZEBRA_DIM: ratatui::style::Color = ratatui::style::Color::Rgb(32, 29, 28);
@@ -31,6 +31,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         Mode::ConfirmDelete => render_confirm_delete(app, frame),
         Mode::ConfirmForceOpen => render_confirm_force_open(app, frame),
         Mode::Rename => render_rename_dialog(app, frame),
+        Mode::CreateSession => render_create_dialog(app, frame),
         Mode::MoveToRemote => render_move_to_dialog(app, frame),
         Mode::Secrets => render_secrets_popup(app, frame),
         Mode::SyncOutput(text) => render_sync_output(text, frame),
@@ -101,13 +102,15 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
                 GOLD
             };
 
+            let meta_color = theme::recency_color(s.modified_ts);
+
             let row = Row::new(vec![
                 Cell::from(name_text).style(Style::default().fg(name_color)),
                 Cell::from(s.created.clone().unwrap_or_else(|| "-".into()))
-                    .style(Style::default().fg(COMMENT)),
+                    .style(Style::default().fg(meta_color)),
                 Cell::from(s.modified.clone().unwrap_or_else(|| "-".into()))
-                    .style(Style::default().fg(COMMENT)),
-                Cell::from(secrets_line).style(Style::default().fg(COMMENT)),
+                    .style(Style::default().fg(meta_color)),
+                Cell::from(secrets_line).style(Style::default().fg(meta_color)),
                 Cell::from(remote).style(Style::default().fg(ORANGE)),
                 Cell::from(github).style(Style::default().fg(GREEN)),
             ]);
@@ -253,21 +256,33 @@ fn gradient_title<'a>(version: &str, session_count: usize) -> Line<'a> {
 }
 
 fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
+    // Status message takes priority in Normal mode
+    if app.mode == Mode::Normal {
+        if let Some(msg) = &app.status_message {
+            let color = match msg.level {
+                StatusLevel::Success => GREEN,
+                StatusLevel::Error => RED,
+                StatusLevel::Info => YELLOW,
+            };
+            let footer = Paragraph::new(Line::from(vec![Span::styled(
+                &msg.text,
+                Style::default().fg(color),
+            )]));
+            frame.render_widget(footer, area);
+            return;
+        }
+    }
+
     let keys = match app.mode {
         Mode::Normal => {
-            if let Some(msg) = &app.status_message {
-                msg.as_str().to_string()
-            } else {
-                "q:quit  Enter:open  d:delete  r:rename  m:move  s:secrets  /:search  P:push  L:pull  S:status  1-6:sort"
-                    .to_string()
-            }
+            "q:quit  Enter:open  n:new  d:delete  r:rename  m:move  s:secrets  /:search  P:push  L:pull  S:status  1-6:sort"
         }
-        Mode::SessionMenu => "j/k:navigate  Enter:select  Esc:cancel".to_string(),
-        Mode::ConfirmDelete => "y:confirm  n:cancel".to_string(),
-        Mode::ConfirmForceOpen => "y:force open  n:cancel".to_string(),
-        Mode::Rename | Mode::MoveToRemote => "Enter:confirm  Esc:cancel".to_string(),
-        Mode::Secrets => "j/k:navigate  v/Enter:view  d:remove  Esc:close".to_string(),
-        Mode::SyncOutput(_) => "Press any key to dismiss".to_string(),
+        Mode::SessionMenu => "j/k:navigate  Enter:select  Esc:cancel",
+        Mode::ConfirmDelete => "y:confirm  n:cancel",
+        Mode::ConfirmForceOpen => "y:force open  n:cancel",
+        Mode::Rename | Mode::MoveToRemote | Mode::CreateSession => "Enter:confirm  Esc:cancel",
+        Mode::Secrets => "j/k:navigate  v/Enter:view  d:remove  Esc:close",
+        Mode::SyncOutput(_) => "Press any key to dismiss",
         Mode::Search => unreachable!(),
     };
     let footer = Paragraph::new(Line::from(vec![Span::styled(
@@ -403,6 +418,26 @@ fn render_rename_dialog(app: &App, frame: &mut Frame) {
         Span::styled(app.rename_input.before_cursor(), Style::default().fg(WHITE)),
         Span::styled("\u{2588}", Style::default().fg(WHITE)),
         Span::styled(app.rename_input.after_cursor(), Style::default().fg(WHITE)),
+    ]);
+    let text = Paragraph::new(line)
+        .style(Style::default().fg(WHITE))
+        .block(block);
+    frame.render_widget(text, popup_area);
+}
+
+fn render_create_dialog(app: &App, frame: &mut Frame) {
+    let popup_area = centered_rect(50, 5, frame.area());
+    frame.render_widget(Clear, popup_area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(GREEN))
+        .title(" New Session ")
+        .title_style(Style::default().fg(GREEN).add_modifier(Modifier::BOLD));
+
+    let line = Line::from(vec![
+        Span::styled(app.create_input.before_cursor(), Style::default().fg(WHITE)),
+        Span::styled("\u{2588}", Style::default().fg(WHITE)),
+        Span::styled(app.create_input.after_cursor(), Style::default().fg(WHITE)),
     ]);
     let text = Paragraph::new(line)
         .style(Style::default().fg(WHITE))

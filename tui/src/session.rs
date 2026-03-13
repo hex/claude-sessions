@@ -10,6 +10,7 @@ pub struct Session {
     pub is_adopted: bool,
     pub created: Option<String>,
     pub modified: Option<String>,
+    pub modified_ts: Option<std::time::SystemTime>,
     pub location: Option<String>,
     pub lock_pid: Option<u32>,
     pub is_locked: bool,
@@ -65,7 +66,10 @@ fn read_session(path: &Path, secret_counts: &HashMap<String, u32>) -> Session {
     let log_file = find_log_file(path);
 
     let created = log_file.as_ref().and_then(|f| parse_created(f));
-    let modified = log_file.as_ref().and_then(|f| parse_modified(f));
+    let (modified, modified_ts) = log_file
+        .as_ref()
+        .map(|f| parse_modified(f))
+        .unwrap_or((None, None));
     let location = parse_remote_conf(&meta_dir);
     let lock_pid = read_lock_pid(&meta_dir);
     let is_locked = lock_pid.is_some();
@@ -83,6 +87,7 @@ fn read_session(path: &Path, secret_counts: &HashMap<String, u32>) -> Session {
         is_adopted,
         created,
         modified,
+        modified_ts,
         location,
         lock_pid,
         is_locked,
@@ -150,15 +155,25 @@ fn is_timestamp_format(s: &str) -> bool {
         && bytes[16] == b':'
 }
 
-fn parse_modified(log_file: &Path) -> Option<String> {
-    let metadata = fs::metadata(log_file).ok()?;
-    let mtime = metadata.modified().ok()?;
-    let duration = mtime.duration_since(std::time::UNIX_EPOCH).ok()?;
+fn parse_modified(log_file: &Path) -> (Option<String>, Option<std::time::SystemTime>) {
+    let metadata = match fs::metadata(log_file).ok() {
+        Some(m) => m,
+        None => return (None, None),
+    };
+    let mtime = match metadata.modified().ok() {
+        Some(t) => t,
+        None => return (None, None),
+    };
+    let duration = match mtime.duration_since(std::time::UNIX_EPOCH).ok() {
+        Some(d) => d,
+        None => return (None, Some(mtime)),
+    };
     let secs = duration.as_secs() as i64;
 
     // Format as YYYY-MM-DD HH:MM without external crates
     let (year, month, day, hour, minute) = unix_to_datetime(secs);
-    Some(format!("{:04}-{:02}-{:02} {:02}:{:02}", year, month, day, hour, minute))
+    let formatted = format!("{:04}-{:02}-{:02} {:02}:{:02}", year, month, day, hour, minute);
+    (Some(formatted), Some(mtime))
 }
 
 fn unix_to_datetime(timestamp: i64) -> (i64, u32, u32, u32, u32) {

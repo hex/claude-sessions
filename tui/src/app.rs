@@ -150,6 +150,7 @@ pub enum Mode {
     ConfirmForceOpen,
     Rename,
     MoveToRemote,
+    CreateSession,
     Secrets,
     SyncOutput(String),
 }
@@ -173,6 +174,21 @@ pub enum Action {
     MoveTo(String, String),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StatusLevel {
+    Success,
+    Error,
+    Info,
+}
+
+const STATUS_EXPIRE_SECS: u64 = 4;
+
+pub struct StatusMessage {
+    pub text: String,
+    pub level: StatusLevel,
+    pub set_at: std::time::Instant,
+}
+
 pub struct App {
     pub sessions: Vec<Session>,
     pub filtered: Vec<usize>,
@@ -183,11 +199,12 @@ pub struct App {
     pub search_input: TextInput,
     pub rename_input: TextInput,
     pub move_to_input: TextInput,
+    pub create_input: TextInput,
     pub secrets_names: Vec<String>,
     pub secrets_selected: usize,
     pub return_to_secrets: bool,
     pub menu_selected: usize,
-    pub status_message: Option<String>,
+    pub status_message: Option<StatusMessage>,
     pub table_area: ratatui::layout::Rect,
     pub column_widths: Vec<u16>,
 }
@@ -211,12 +228,32 @@ impl App {
             search_input: TextInput::new(),
             rename_input: TextInput::new(),
             move_to_input: TextInput::new(),
+            create_input: TextInput::new(),
             secrets_names: Vec::new(),
             secrets_selected: 0,
             return_to_secrets: false,
             menu_selected: 0,
             status_message: None,
         }
+    }
+
+    pub fn set_status(&mut self, text: impl Into<String>, level: StatusLevel) {
+        self.status_message = Some(StatusMessage {
+            text: text.into(),
+            level,
+            set_at: std::time::Instant::now(),
+        });
+    }
+
+    /// Remove the status message if it has expired. Returns true if it was cleared.
+    pub fn expire_status(&mut self) -> bool {
+        if let Some(ref msg) = self.status_message {
+            if msg.set_at.elapsed().as_secs() >= STATUS_EXPIRE_SECS {
+                self.status_message = None;
+                return true;
+            }
+        }
+        false
     }
 
     pub fn selected_session(&self) -> Option<&Session> {
@@ -230,6 +267,9 @@ impl App {
     }
 
     pub fn apply_filter_and_sort(&mut self) {
+        // Remember the selected session name so we can restore it after re-sorting
+        let prev_name = self.selected_session().map(|s| s.name.clone());
+
         let query = self.search_input.text().to_lowercase();
         self.filtered = self
             .sessions
@@ -259,13 +299,17 @@ impl App {
             }
         });
 
-        // Clamp selection
+        // Restore selection: find the previously selected session in the new order
         if self.filtered.is_empty() {
             self.table_state.select(None);
-        } else if let Some(sel) = self.table_state.selected() {
-            if sel >= self.filtered.len() {
-                self.table_state.select(Some(self.filtered.len() - 1));
-            }
+        } else if let Some(name) = prev_name {
+            let new_pos = self
+                .filtered
+                .iter()
+                .position(|&i| self.sessions[i].name == name);
+            self.table_state.select(Some(new_pos.unwrap_or(0)));
+        } else {
+            self.table_state.select(Some(0));
         }
     }
 
@@ -282,6 +326,7 @@ impl App {
             Mode::ConfirmDelete => self.handle_confirm_delete(key),
             Mode::ConfirmForceOpen => self.handle_confirm_force_open(key),
             Mode::Rename => self.handle_rename(key),
+            Mode::CreateSession => self.handle_create_session(key),
             Mode::MoveToRemote => self.handle_move_to_remote(key),
             Mode::Secrets => self.handle_secrets(key),
             Mode::SyncOutput(_) => {
@@ -289,7 +334,7 @@ impl App {
                     self.return_to_secrets = false;
                     if self.secrets_names.is_empty() {
                         self.mode = Mode::Normal;
-                        self.status_message = Some("No secrets remaining".to_string());
+                        self.set_status("No secrets remaining", StatusLevel::Info);
                     } else {
                         self.mode = Mode::Secrets;
                     }
@@ -363,7 +408,7 @@ impl App {
             KeyCode::Char('m') => {
                 if let Some(session) = self.selected_session() {
                     if session.location.is_some() {
-                        self.status_message = Some("Session is already remote".to_string());
+                        self.set_status("Session is already remote", StatusLevel::Info);
                     } else {
                         self.move_to_input.clear();
                         self.mode = Mode::MoveToRemote;
@@ -374,6 +419,11 @@ impl App {
 
             KeyCode::Char('s') => {
                 self.run_secrets_command();
+                Action::None
+            }
+            KeyCode::Char('n') => {
+                self.create_input.clear();
+                self.mode = Mode::CreateSession;
                 Action::None
             }
             KeyCode::Char('1') => {
@@ -470,7 +520,7 @@ impl App {
                 // Move to Remote
                 if let Some(session) = self.selected_session() {
                     if session.location.is_some() {
-                        self.status_message = Some("Session is already remote".to_string());
+                        self.set_status("Session is already remote", StatusLevel::Info);
                     } else {
                         self.move_to_input.clear();
                         self.mode = Mode::MoveToRemote;
@@ -603,6 +653,65 @@ impl App {
         Action::None
     }
 
+    fn handle_create_session(&mut self, key: KeyEvent) -> Action {
+        match key.code {
+            KeyCode::Esc => {
+                self.mode = Mode::Normal;
+            }
+            KeyCode::Enter => {
+                return self.execute_create();
+            }
+            KeyCode::Left => {
+                self.create_input.move_left();
+            }
+            KeyCode::Right => {
+                self.create_input.move_right();
+            }
+            KeyCode::Home => {
+                self.create_input.move_home();
+            }
+            KeyCode::End => {
+                self.create_input.move_end();
+            }
+            KeyCode::Delete => {
+                self.create_input.delete_forward();
+            }
+            KeyCode::Backspace => {
+                self.create_input.delete_back();
+            }
+            KeyCode::Char(c) => {
+                self.create_input.insert(c);
+            }
+            _ => {}
+        }
+        Action::None
+    }
+
+    fn execute_create(&mut self) -> Action {
+        let name = self.create_input.text().trim().to_string();
+        if name.is_empty() {
+            self.set_status("Name cannot be empty", StatusLevel::Error);
+            self.mode = Mode::Normal;
+            return Action::None;
+        }
+        if !name
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == ' ')
+        {
+            self.set_status("Invalid characters in name", StatusLevel::Error);
+            self.mode = Mode::Normal;
+            return Action::None;
+        }
+        let root = session::sessions_root();
+        if root.join(&name).exists() {
+            self.set_status("Session already exists", StatusLevel::Error);
+            self.mode = Mode::Normal;
+            return Action::None;
+        }
+        self.mode = Mode::Normal;
+        Action::Open(name)
+    }
+
     fn handle_move_to_remote(&mut self, key: KeyEvent) -> Action {
         match key.code {
             KeyCode::Esc => {
@@ -711,12 +820,12 @@ impl App {
             };
             match result {
                 Ok(()) => {
-                    self.status_message = Some(format!("Deleted: {}", session.name));
+                    self.set_status(format!("Deleted: {}", session.name), StatusLevel::Success);
                     self.sessions = session::scan_sessions();
                     self.apply_filter_and_sort();
                 }
                 Err(e) => {
-                    self.status_message = Some(format!("Delete failed: {}", e));
+                    self.set_status(format!("Delete failed: {}", e), StatusLevel::Error);
                 }
             }
         }
@@ -726,7 +835,7 @@ impl App {
     fn execute_rename(&mut self) {
         let new_name = self.rename_input.text().trim().to_string();
         if new_name.is_empty() {
-            self.status_message = Some("Name cannot be empty".to_string());
+            self.set_status("Name cannot be empty", StatusLevel::Error);
             self.mode = Mode::Normal;
             return;
         }
@@ -734,7 +843,7 @@ impl App {
             .chars()
             .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == ' ')
         {
-            self.status_message = Some("Invalid characters in name".to_string());
+            self.set_status("Invalid characters in name", StatusLevel::Error);
             self.mode = Mode::Normal;
             return;
         }
@@ -744,17 +853,17 @@ impl App {
             let old = root.join(&session.name);
             let new = root.join(&new_name);
             if new.exists() {
-                self.status_message = Some("Name already taken".to_string());
+                self.set_status("Name already taken", StatusLevel::Error);
             } else {
                 match std::fs::rename(&old, &new) {
                     Ok(()) => {
                         rename_claude_projects_dir(&old, &new);
-                        self.status_message = Some(format!("Renamed to: {}", new_name));
+                        self.set_status(format!("Renamed to: {}", new_name), StatusLevel::Success);
                         self.sessions = session::scan_sessions();
                         self.apply_filter_and_sort();
                     }
                     Err(e) => {
-                        self.status_message = Some(format!("Rename failed: {}", e));
+                        self.set_status(format!("Rename failed: {}", e), StatusLevel::Error);
                     }
                 }
             }
@@ -775,7 +884,7 @@ impl App {
                     self.mode = Mode::SyncOutput(text);
                 }
                 Err(e) => {
-                    self.status_message = Some(format!("Sync failed: {}", e));
+                    self.set_status(format!("Sync failed: {}", e), StatusLevel::Error);
                 }
             }
         }
@@ -784,12 +893,12 @@ impl App {
     fn execute_move_to(&mut self) -> Action {
         let host = self.move_to_input.text().trim().to_string();
         if host.is_empty() {
-            self.status_message = Some("Host cannot be empty".to_string());
+            self.set_status("Host cannot be empty", StatusLevel::Error);
             self.mode = Mode::Normal;
             return Action::None;
         }
         if host.contains(char::is_whitespace) {
-            self.status_message = Some("Host cannot contain spaces".to_string());
+            self.set_status("Host cannot contain spaces", StatusLevel::Error);
             self.mode = Mode::Normal;
             return Action::None;
         }
@@ -815,7 +924,7 @@ impl App {
                     self.mode = Mode::Secrets;
                 }
                 Err(e) => {
-                    self.status_message = Some(format!("Secrets failed: {}", e));
+                    self.set_status(format!("Secrets failed: {}", e), StatusLevel::Error);
                 }
             }
         }
@@ -847,7 +956,7 @@ impl App {
                     self.mode = Mode::SyncOutput(text);
                 }
                 Err(e) => {
-                    self.status_message = Some(format!("Secrets failed: {}", e));
+                    self.set_status(format!("Secrets failed: {}", e), StatusLevel::Error);
                     self.mode = Mode::Normal;
                 }
             }
@@ -961,6 +1070,7 @@ mod tests {
                 is_adopted: false,
                 created: Some("2026-01-01 10:00".into()),
                 modified: Some("2026-02-20 14:00".into()),
+                modified_ts: None,
                 location: None,
                 lock_pid: None,
                 is_locked: false,
@@ -974,6 +1084,7 @@ mod tests {
                 is_adopted: false,
                 created: Some("2026-02-01 10:00".into()),
                 modified: Some("2026-02-15 09:00".into()),
+                modified_ts: None,
                 location: Some("hex@mini".into()),
                 lock_pid: None,
                 is_locked: false,
@@ -987,6 +1098,7 @@ mod tests {
                 is_adopted: true,
                 created: Some("2025-12-01 10:00".into()),
                 modified: Some("2026-01-10 08:00".into()),
+                modified_ts: None,
                 location: None,
                 lock_pid: Some(12345),
                 is_locked: true,
@@ -1085,6 +1197,28 @@ mod tests {
             .map(|&i| app.sessions[i].name.as_str())
             .collect();
         assert_eq!(names, vec!["alpha", "beta", "gamma"]);
+    }
+
+    #[test]
+    fn sort_preserves_selected_session() {
+        let mut app = App::new(sample_sessions());
+        // Default: sorted by name asc → alpha(0), beta(1), gamma(2)
+        // Select "beta" at index 1
+        app.table_state.select(Some(1));
+        assert_eq!(app.selected_session().unwrap().name, "beta");
+
+        // Reverse sort → gamma(0), beta(1), alpha(2) — beta stays at 1
+        app.sort_dir = SortDirection::Desc;
+        app.apply_filter_and_sort();
+        assert_eq!(app.selected_session().unwrap().name, "beta");
+
+        // Sort by created asc → gamma(0), alpha(1), beta(2)
+        app.sort_col = SortColumn::Created;
+        app.sort_dir = SortDirection::Asc;
+        app.apply_filter_and_sort();
+        // "beta" should now be at index 2
+        assert_eq!(app.selected_session().unwrap().name, "beta");
+        assert_eq!(app.table_state.selected(), Some(2));
     }
 
     #[test]
@@ -1192,7 +1326,7 @@ mod tests {
         app.rename_input.set("");
         app.handle_key(KeyEvent::from(KeyCode::Enter));
         assert_eq!(app.mode, Mode::Normal);
-        assert!(app.status_message.as_ref().unwrap().contains("empty"));
+        assert!(app.status_message.as_ref().unwrap().text.contains("empty"));
     }
 
     #[test]
@@ -1202,7 +1336,7 @@ mod tests {
         app.rename_input.set("bad/name");
         app.handle_key(KeyEvent::from(KeyCode::Enter));
         assert_eq!(app.mode, Mode::Normal);
-        assert!(app.status_message.as_ref().unwrap().contains("Invalid"));
+        assert!(app.status_message.as_ref().unwrap().text.contains("Invalid"));
     }
 
     #[test]
@@ -1288,7 +1422,7 @@ mod tests {
         app.table_state.select(Some(1));
         app.handle_key(KeyEvent::from(KeyCode::Char('m')));
         assert_eq!(app.mode, Mode::Normal);
-        assert!(app.status_message.as_ref().unwrap().contains("already remote"));
+        assert!(app.status_message.as_ref().unwrap().text.contains("already remote"));
     }
 
     #[test]
@@ -1338,7 +1472,7 @@ mod tests {
         let action = app.handle_key(KeyEvent::from(KeyCode::Enter));
         assert!(matches!(action, Action::None));
         assert_eq!(app.mode, Mode::Normal);
-        assert!(app.status_message.as_ref().unwrap().contains("empty"));
+        assert!(app.status_message.as_ref().unwrap().text.contains("empty"));
     }
 
     #[test]
@@ -1349,7 +1483,7 @@ mod tests {
         let action = app.handle_key(KeyEvent::from(KeyCode::Enter));
         assert!(matches!(action, Action::None));
         assert_eq!(app.mode, Mode::Normal);
-        assert!(app.status_message.as_ref().unwrap().contains("spaces"));
+        assert!(app.status_message.as_ref().unwrap().text.contains("spaces"));
     }
 
     #[test]
@@ -1566,7 +1700,7 @@ mod tests {
         app.mode = Mode::SessionMenu;
         app.handle_key(KeyEvent::from(KeyCode::Char('m')));
         assert_eq!(app.mode, Mode::Normal);
-        assert!(app.status_message.as_ref().unwrap().contains("already remote"));
+        assert!(app.status_message.as_ref().unwrap().text.contains("already remote"));
     }
 
     #[test]
@@ -1744,5 +1878,79 @@ mod tests {
 
         std::env::set_var("HOME", &real_home);
         std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    #[test]
+    fn set_status_creates_message() {
+        let mut app = App::new(sample_sessions());
+        app.set_status("test message", StatusLevel::Success);
+        let msg = app.status_message.as_ref().unwrap();
+        assert_eq!(msg.text, "test message");
+        assert_eq!(msg.level, StatusLevel::Success);
+    }
+
+    #[test]
+    fn expire_status_clears_after_timeout() {
+        let mut app = App::new(sample_sessions());
+        // Manually create a message with an old timestamp
+        app.status_message = Some(StatusMessage {
+            text: "old".into(),
+            level: StatusLevel::Info,
+            set_at: std::time::Instant::now() - std::time::Duration::from_secs(10),
+        });
+        assert!(app.expire_status());
+        assert!(app.status_message.is_none());
+    }
+
+    #[test]
+    fn expire_status_keeps_fresh_messages() {
+        let mut app = App::new(sample_sessions());
+        app.set_status("fresh", StatusLevel::Error);
+        assert!(!app.expire_status());
+        assert!(app.status_message.is_some());
+    }
+
+    #[test]
+    fn n_enters_create_session_mode() {
+        let mut app = App::new(sample_sessions());
+        app.handle_key(KeyEvent::from(KeyCode::Char('n')));
+        assert_eq!(app.mode, Mode::CreateSession);
+    }
+
+    #[test]
+    fn create_session_esc_cancels() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::CreateSession;
+        app.handle_key(KeyEvent::from(KeyCode::Esc));
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn create_session_empty_name_shows_error() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::CreateSession;
+        app.create_input.clear();
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        assert_eq!(app.mode, Mode::Normal);
+        assert!(app.status_message.as_ref().unwrap().text.contains("empty"));
+    }
+
+    #[test]
+    fn create_session_invalid_chars_shows_error() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::CreateSession;
+        app.create_input.set("bad/name");
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        assert_eq!(app.mode, Mode::Normal);
+        assert!(app.status_message.as_ref().unwrap().text.contains("Invalid"));
+    }
+
+    #[test]
+    fn create_session_valid_name_returns_open_action() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::CreateSession;
+        app.create_input.set("brand-new-session");
+        let action = app.handle_key(KeyEvent::from(KeyCode::Enter));
+        assert!(matches!(action, Action::Open(name) if name == "brand-new-session"));
     }
 }
