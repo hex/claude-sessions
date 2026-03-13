@@ -9,8 +9,8 @@ use ratatui::Frame;
 
 use ratatui::layout::Alignment;
 
-use crate::app::{App, Mode, SortColumn, SortDirection, StatusLevel, MENU_ITEMS};
-use crate::theme::{self, COMMENT, GOLD, GREEN, ORANGE, RED, RUST, WHITE, YELLOW};
+use crate::app::{App, FlashKind, Mode, SortColumn, SortDirection, StatusLevel, MENU_ITEMS};
+use crate::theme::{self, COMMENT, FLASH_ERROR, FLASH_SUCCESS, GOLD, GREEN, ORANGE, RED, RUST, WHITE, YELLOW};
 
 const ZEBRA_DIM: ratatui::style::Color = ratatui::style::Color::Rgb(32, 29, 28);
 
@@ -140,8 +140,14 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
 
             let row = Row::new(cells);
 
-            // Zebra striping on odd rows
-            if row_idx % 2 == 1 {
+            // Flash background takes priority, then zebra striping
+            if let Some(flash) = app.active_flash(&s.name) {
+                let bg = match flash {
+                    FlashKind::Success => FLASH_SUCCESS,
+                    FlashKind::Error => FLASH_ERROR,
+                };
+                row.style(Style::default().bg(bg))
+            } else if row_idx % 2 == 1 {
                 row.style(Style::default().bg(ZEBRA_DIM))
             } else {
                 row

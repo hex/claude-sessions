@@ -100,7 +100,8 @@ fn run_event_loop(app: &mut app::App, terminal: &mut Tui) -> io::Result<app::Act
             }
         }
 
-        // Expire timed status messages
+        // Expire timed status messages and row flashes
         app.expire_status();
+        app.expire_flashes();
     }
 }

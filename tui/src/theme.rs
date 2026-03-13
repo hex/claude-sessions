@@ -12,6 +12,10 @@ pub const RUST: Color = Color::Rgb(230, 74, 25);
 pub const COMMENT: Color = Color::Rgb(161, 136, 127);
 pub const WHITE: Color = Color::Rgb(245, 230, 211);
 
+// Muted background tints for row flash feedback
+pub const FLASH_SUCCESS: Color = Color::Rgb(30, 50, 30);
+pub const FLASH_ERROR: Color = Color::Rgb(55, 25, 25);
+
 /// Color for metadata columns based on how recently the session was modified.
 /// Blends from WHITE (today) through intermediate tones to COMMENT (old).
 pub fn recency_color(modified_ts: Option<std::time::SystemTime>) -> Color {

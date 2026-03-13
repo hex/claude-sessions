@@ -1,6 +1,8 @@
 // ABOUTME: Application state machine that processes keyboard input and manages UI modes
 // ABOUTME: Tracks table selection, sort order, search filter, and modal dialog state
 
+use std::collections::HashMap;
+
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::widgets::TableState;
 
@@ -173,6 +175,13 @@ pub enum StatusLevel {
 }
 
 const STATUS_EXPIRE_SECS: u64 = 4;
+const FLASH_DURATION_MS: u64 = 400;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FlashKind {
+    Success,
+    Error,
+}
 
 pub struct StatusMessage {
     pub text: String,
@@ -196,6 +205,7 @@ pub struct App {
     pub return_to_secrets: bool,
     pub menu_selected: usize,
     pub status_message: Option<StatusMessage>,
+    pub row_flashes: HashMap<String, (FlashKind, std::time::Instant)>,
     pub table_area: ratatui::layout::Rect,
     pub column_widths: Vec<u16>,
     pub visible_sort_columns: Vec<SortColumn>,
@@ -226,6 +236,7 @@ impl App {
             return_to_secrets: false,
             menu_selected: 0,
             status_message: None,
+            row_flashes: HashMap::new(),
             visible_sort_columns: Vec::new(),
         }
     }
@@ -247,6 +258,31 @@ impl App {
             }
         }
         false
+    }
+
+    pub fn flash_row(&mut self, name: impl Into<String>, kind: FlashKind) {
+        self.row_flashes
+            .insert(name.into(), (kind, std::time::Instant::now()));
+    }
+
+    /// Remove expired row flashes. Returns true if any were removed.
+    pub fn expire_flashes(&mut self) -> bool {
+        let before = self.row_flashes.len();
+        self.row_flashes.retain(|_, (_, at)| {
+            at.elapsed().as_millis() < FLASH_DURATION_MS as u128
+        });
+        self.row_flashes.len() < before
+    }
+
+    /// Get active flash for a session name, if any.
+    pub fn active_flash(&self, name: &str) -> Option<FlashKind> {
+        self.row_flashes.get(name).and_then(|(kind, at)| {
+            if at.elapsed().as_millis() < FLASH_DURATION_MS as u128 {
+                Some(*kind)
+            } else {
+                None
+            }
+        })
     }
 
     pub fn selected_session(&self) -> Option<&Session> {
@@ -852,6 +888,7 @@ impl App {
                     Ok(()) => {
                         rename_claude_projects_dir(&old, &new);
                         self.set_status(format!("Renamed to: {}", new_name), StatusLevel::Success);
+                        self.flash_row(&new_name, FlashKind::Success);
                         self.sessions = session::scan_sessions();
                         self.apply_filter_and_sort();
                     }
@@ -874,9 +911,12 @@ impl App {
                 Ok(out) => {
                     let text = String::from_utf8_lossy(&out.stdout).to_string()
                         + &String::from_utf8_lossy(&out.stderr).to_string();
+                    let kind = if out.status.success() { FlashKind::Success } else { FlashKind::Error };
+                    self.flash_row(&name, kind);
                     self.mode = Mode::SyncOutput(text);
                 }
                 Err(e) => {
+                    self.flash_row(&name, FlashKind::Error);
                     self.set_status(format!("Sync failed: {}", e), StatusLevel::Error);
                 }
             }
@@ -1956,6 +1996,33 @@ mod tests {
         let app = App::new(sample_sessions());
         // beta has secrets_count=2
         assert!(app.has_secrets());
+    }
+
+    #[test]
+    fn flash_row_sets_and_active_flash_reads() {
+        let mut app = App::new(sample_sessions());
+        app.flash_row("alpha", FlashKind::Success);
+        assert_eq!(app.active_flash("alpha"), Some(FlashKind::Success));
+        assert_eq!(app.active_flash("beta"), None);
+    }
+
+    #[test]
+    fn expire_flashes_clears_old_entries() {
+        let mut app = App::new(sample_sessions());
+        app.row_flashes.insert(
+            "old".into(),
+            (FlashKind::Error, std::time::Instant::now() - std::time::Duration::from_secs(2)),
+        );
+        assert!(app.expire_flashes());
+        assert!(app.row_flashes.is_empty());
+    }
+
+    #[test]
+    fn expire_flashes_keeps_fresh_entries() {
+        let mut app = App::new(sample_sessions());
+        app.flash_row("fresh", FlashKind::Success);
+        assert!(!app.expire_flashes());
+        assert!(!app.row_flashes.is_empty());
     }
 
     #[test]
