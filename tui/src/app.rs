@@ -313,6 +313,8 @@ pub struct App {
     /// Section labels for time-based grouping (parallel to `filtered`).
     /// Each entry is Some("label") if this row starts a new time section, None otherwise.
     pub section_labels: Vec<Option<&'static str>>,
+    /// Navigation repeat tracking: (last direction char, repeat count, last press time).
+    nav_repeat: (char, usize, std::time::Instant),
 }
 
 impl App {
@@ -346,6 +348,7 @@ impl App {
             fuzzy_indices: HashMap::new(),
             revealed_secret: None,
             section_labels: Vec::new(),
+            nav_repeat: ('\0', 0, std::time::Instant::now()),
         }
     }
 
@@ -423,6 +426,25 @@ impl App {
                 PEEK_DURATION_SECS.saturating_sub(at.elapsed().as_secs())
             }
             None => 0,
+        }
+    }
+
+    /// Track a navigation key press and return the step size based on repeat velocity.
+    fn nav_step(&mut self, direction: char) -> usize {
+        const REPEAT_THRESHOLD_MS: u128 = 200;
+        let now = std::time::Instant::now();
+        let elapsed = now.duration_since(self.nav_repeat.2).as_millis();
+        if self.nav_repeat.0 == direction && elapsed < REPEAT_THRESHOLD_MS {
+            self.nav_repeat.1 += 1;
+        } else {
+            self.nav_repeat.1 = 1;
+        }
+        self.nav_repeat.0 = direction;
+        self.nav_repeat.2 = now;
+        match self.nav_repeat.1 {
+            1..=3 => 1,
+            4..=8 => 2,
+            _ => 5,
         }
     }
 
@@ -581,12 +603,16 @@ impl App {
                 Action::None
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.table_state.select_next();
-                self.clamp_selection();
+                let step = self.nav_step('j');
+                let max = self.filtered.len().saturating_sub(1);
+                let cur = self.table_state.selected().unwrap_or(0);
+                self.table_state.select(Some((cur + step).min(max)));
                 Action::None
             }
             KeyCode::Up | KeyCode::Char('k') => {
-                self.table_state.select_previous();
+                let step = self.nav_step('k');
+                let cur = self.table_state.selected().unwrap_or(0);
+                self.table_state.select(Some(cur.saturating_sub(step)));
                 Action::None
             }
             KeyCode::Home | KeyCode::Char('g') => {
@@ -2523,5 +2549,34 @@ mod tests {
         app.sort_col = SortColumn::Name;
         app.apply_filter_and_sort();
         assert!(app.section_labels.is_empty());
+    }
+
+    #[test]
+    fn nav_step_starts_at_one() {
+        let mut app = App::new(sample_sessions());
+        assert_eq!(app.nav_step('j'), 1);
+    }
+
+    #[test]
+    fn nav_step_accelerates_on_rapid_repeat() {
+        let mut app = App::new(sample_sessions());
+        // First 3 presses: step 1
+        assert_eq!(app.nav_step('j'), 1);
+        assert_eq!(app.nav_step('j'), 1);
+        assert_eq!(app.nav_step('j'), 1);
+        // Presses 4-8: step 2
+        assert_eq!(app.nav_step('j'), 2);
+        assert_eq!(app.nav_step('j'), 2);
+    }
+
+    #[test]
+    fn nav_step_resets_on_direction_change() {
+        let mut app = App::new(sample_sessions());
+        app.nav_step('j');
+        app.nav_step('j');
+        app.nav_step('j');
+        app.nav_step('j');
+        // Changing direction resets
+        assert_eq!(app.nav_step('k'), 1);
     }
 }
