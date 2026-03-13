@@ -90,12 +90,26 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
         .enumerate()
         .map(|(row_idx, &i)| {
             let s = &app.sessions[i];
-            let mut name_text = s.name.clone();
-            if s.location.is_some() {
-                name_text.push_str(&format!(" {}", icons.remote));
-            }
+            // Build gutter indicators as colored prefix spans
+            let mut name_spans: Vec<Span> = Vec::new();
             if s.is_locked {
-                name_text.push_str(&format!(" {}", icons.lock));
+                name_spans.push(Span::styled(
+                    format!("{} ", icons.lock),
+                    Style::default().fg(RED),
+                ));
+            }
+            if s.location.is_some() {
+                name_spans.push(Span::styled(
+                    format!("{} ", icons.remote),
+                    Style::default().fg(ORANGE),
+                ));
+            }
+            if s.secrets_count > 0 && !show_secrets {
+                // Show secrets indicator in gutter only when secrets column is hidden
+                name_spans.push(Span::styled(
+                    format!("{} ", icons.lock),
+                    Style::default().fg(GOLD),
+                ));
             }
 
             let name_color = if s.location.is_some() {
@@ -103,11 +117,12 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
             } else {
                 GOLD
             };
+            name_spans.push(Span::styled(s.name.clone(), Style::default().fg(name_color)));
 
             let meta_color = theme::recency_color(s.modified_ts);
 
             let mut cells = vec![
-                Cell::from(name_text).style(Style::default().fg(name_color)),
+                Cell::from(Line::from(name_spans)),
                 Cell::from(s.created.clone().unwrap_or_else(|| "-".into()))
                     .style(Style::default().fg(meta_color)),
                 Cell::from(s.modified.clone().unwrap_or_else(|| "-".into()))
