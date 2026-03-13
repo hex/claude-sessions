@@ -44,6 +44,17 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
 
     app.table_area = area;
 
+    let show_secrets = app.has_secrets();
+    let show_remote = app.has_remote_sessions();
+    let show_github = app.has_git_sessions();
+
+    // Track which sort columns are visible (for mouse click-to-sort)
+    let mut visible_cols = vec![SortColumn::Name, SortColumn::Created, SortColumn::Modified];
+    if show_secrets { visible_cols.push(SortColumn::Secrets); }
+    if show_remote { visible_cols.push(SortColumn::Remote); }
+    if show_github { visible_cols.push(SortColumn::Github); }
+    app.visible_sort_columns = visible_cols;
+
     let sort_indicator = |col: SortColumn| -> &'static str {
         if app.sort_col != col {
             return "";
@@ -54,16 +65,24 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
         }
     };
 
-    let header = Row::new(vec![
+    let mut header_cells = vec![
         Cell::from(format!("Session{}", sort_indicator(SortColumn::Name))),
         Cell::from(format!("Created{}", sort_indicator(SortColumn::Created))),
         Cell::from(format!("Modified{}", sort_indicator(SortColumn::Modified))),
-        Cell::from(format!("Secrets{}", sort_indicator(SortColumn::Secrets))),
-        Cell::from(format!("Remote{}", sort_indicator(SortColumn::Remote))),
-        Cell::from(format!("Github{}", sort_indicator(SortColumn::Github))),
-    ])
-    .style(Style::default().fg(RUST).add_modifier(Modifier::BOLD))
-    .bottom_margin(1);
+    ];
+    if show_secrets {
+        header_cells.push(Cell::from(format!("Secrets{}", sort_indicator(SortColumn::Secrets))));
+    }
+    if show_remote {
+        header_cells.push(Cell::from(format!("Remote{}", sort_indicator(SortColumn::Remote))));
+    }
+    if show_github {
+        header_cells.push(Cell::from(format!("Github{}", sort_indicator(SortColumn::Github))));
+    }
+
+    let header = Row::new(header_cells)
+        .style(Style::default().fg(RUST).add_modifier(Modifier::BOLD))
+        .bottom_margin(1);
 
     let rows: Vec<Row> = app
         .filtered
@@ -79,23 +98,6 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
                 name_text.push_str(&format!(" {}", icons.lock));
             }
 
-            let secrets = if s.secrets_count > 0 {
-                format!("{} {}", icons.lock, s.secrets_count)
-            } else {
-                String::new()
-            };
-
-            // Center the secrets text within the column by padding
-            let secrets_line = Line::from(secrets).alignment(Alignment::Center);
-
-            let remote = s
-                .location
-                .as_ref()
-                .map(|l| format!("{} {}", icons.remote, l))
-                .unwrap_or_default();
-
-            let github = s.git_repo.clone().unwrap_or_default();
-
             let name_color = if s.location.is_some() {
                 ratatui::style::Color::Cyan
             } else {
@@ -104,16 +106,39 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
 
             let meta_color = theme::recency_color(s.modified_ts);
 
-            let row = Row::new(vec![
+            let mut cells = vec![
                 Cell::from(name_text).style(Style::default().fg(name_color)),
                 Cell::from(s.created.clone().unwrap_or_else(|| "-".into()))
                     .style(Style::default().fg(meta_color)),
                 Cell::from(s.modified.clone().unwrap_or_else(|| "-".into()))
                     .style(Style::default().fg(meta_color)),
-                Cell::from(secrets_line).style(Style::default().fg(meta_color)),
-                Cell::from(remote).style(Style::default().fg(ORANGE)),
-                Cell::from(github).style(Style::default().fg(GREEN)),
-            ]);
+            ];
+
+            if show_secrets {
+                let secrets = if s.secrets_count > 0 {
+                    format!("{} {}", icons.lock, s.secrets_count)
+                } else {
+                    String::new()
+                };
+                let secrets_line = Line::from(secrets).alignment(Alignment::Center);
+                cells.push(Cell::from(secrets_line).style(Style::default().fg(meta_color)));
+            }
+
+            if show_remote {
+                let remote = s
+                    .location
+                    .as_ref()
+                    .map(|l| format!("{} {}", icons.remote, l))
+                    .unwrap_or_default();
+                cells.push(Cell::from(remote).style(Style::default().fg(ORANGE)));
+            }
+
+            if show_github {
+                let github = s.git_repo.clone().unwrap_or_default();
+                cells.push(Cell::from(github).style(Style::default().fg(GREEN)));
+            }
+
+            let row = Row::new(cells);
 
             // Zebra striping on odd rows
             if row_idx % 2 == 1 {
@@ -124,14 +149,14 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
         })
         .collect();
 
-    let widths = [
+    let mut widths: Vec<Constraint> = vec![
         Constraint::Min(20),
         Constraint::Length(16),
         Constraint::Length(16),
-        Constraint::Length(9),
-        Constraint::Length(20),
-        Constraint::Min(15),
     ];
+    if show_secrets { widths.push(Constraint::Length(9)); }
+    if show_remote { widths.push(Constraint::Length(20)); }
+    if show_github { widths.push(Constraint::Min(15)); }
 
     // Store resolved column widths for mouse click-to-sort
     let inner_width = area.width.saturating_sub(2); // borders

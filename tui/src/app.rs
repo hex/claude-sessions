@@ -126,15 +126,6 @@ pub enum SortColumn {
     Github,
 }
 
-pub const SORT_COLUMNS: &[SortColumn] = &[
-    SortColumn::Name,
-    SortColumn::Created,
-    SortColumn::Modified,
-    SortColumn::Secrets,
-    SortColumn::Remote,
-    SortColumn::Github,
-];
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SortDirection {
     Asc,
@@ -207,6 +198,7 @@ pub struct App {
     pub status_message: Option<StatusMessage>,
     pub table_area: ratatui::layout::Rect,
     pub column_widths: Vec<u16>,
+    pub visible_sort_columns: Vec<SortColumn>,
 }
 
 impl App {
@@ -234,6 +226,7 @@ impl App {
             return_to_secrets: false,
             menu_selected: 0,
             status_message: None,
+            visible_sort_columns: Vec::new(),
         }
     }
 
@@ -971,6 +964,10 @@ impl App {
         self.sessions.iter().any(|s| s.git_repo.is_some())
     }
 
+    pub fn has_secrets(&self) -> bool {
+        self.sessions.iter().any(|s| s.secrets_count > 0)
+    }
+
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> Action {
         if self.mode != Mode::Normal {
             return Action::None;
@@ -1027,7 +1024,7 @@ impl App {
         offset += 3; // highlight_symbol ">> " width
         for (i, &width) in self.column_widths.iter().enumerate() {
             if x >= offset && x < offset + width + 3 {
-                return SORT_COLUMNS.get(i).copied();
+                return self.visible_sort_columns.get(i).copied();
             }
             offset += width + 3; // +3 for column_spacing(3)
         }
@@ -1952,5 +1949,22 @@ mod tests {
         app.create_input.set("brand-new-session");
         let action = app.handle_key(KeyEvent::from(KeyCode::Enter));
         assert!(matches!(action, Action::Open(name) if name == "brand-new-session"));
+    }
+
+    #[test]
+    fn has_secrets_detects_sessions_with_secrets() {
+        let app = App::new(sample_sessions());
+        // beta has secrets_count=2
+        assert!(app.has_secrets());
+    }
+
+    #[test]
+    fn has_secrets_false_when_no_secrets() {
+        let sessions: Vec<Session> = sample_sessions()
+            .into_iter()
+            .map(|mut s| { s.secrets_count = 0; s })
+            .collect();
+        let app = App::new(sessions);
+        assert!(!app.has_secrets());
     }
 }
