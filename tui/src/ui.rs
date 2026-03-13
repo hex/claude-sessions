@@ -14,11 +14,23 @@ use crate::theme::{self, COMMENT, FLASH_ERROR, FLASH_SUCCESS, GOLD, GREEN, ORANG
 
 const ZEBRA_DIM: ratatui::style::Color = ratatui::style::Color::Rgb(32, 29, 28);
 
+const PREVIEW_MIN_WIDTH: u16 = 120;
+
 pub fn render(app: &mut App, frame: &mut Frame) {
     let chunks = Layout::vertical([Constraint::Min(5), Constraint::Length(1)])
         .split(frame.area());
 
-    render_table(app, frame, chunks[0]);
+    let show_preview = app.show_preview && chunks[0].width >= PREVIEW_MIN_WIDTH;
+
+    if show_preview {
+        app.ensure_preview_loaded();
+        let cols = Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
+            .split(chunks[0]);
+        render_table(app, frame, cols[0]);
+        render_preview_pane(app, frame, cols[1]);
+    } else {
+        render_table(app, frame, chunks[0]);
+    }
 
     match &app.mode {
         Mode::Search => render_search_bar(app, frame, chunks[1]),
@@ -830,6 +842,145 @@ fn render_sync_output(text: &str, frame: &mut Frame) {
         .block(block)
         .wrap(Wrap { trim: false });
     frame.render_widget(paragraph, popup_area);
+}
+
+fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
+    let session = match app.selected_session() {
+        Some(s) => s,
+        None => {
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(RUST))
+                .title(" Preview ")
+                .title_style(Style::default().fg(RUST));
+            let p = Paragraph::new("No session selected")
+                .style(Style::default().fg(COMMENT))
+                .block(block);
+            frame.render_widget(p, area);
+            return;
+        }
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(RUST))
+        .title(format!(" {} ", session.name))
+        .title_style(Style::default().fg(GOLD).add_modifier(Modifier::BOLD));
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    // Session metadata
+    if let Some(ref created) = session.created {
+        lines.push(Line::from(vec![
+            Span::styled("Created:  ", Style::default().fg(COMMENT)),
+            Span::styled(created.as_str(), Style::default().fg(WHITE)),
+        ]));
+    }
+    if let Some(ref modified) = session.modified {
+        lines.push(Line::from(vec![
+            Span::styled("Modified: ", Style::default().fg(COMMENT)),
+            Span::styled(modified.as_str(), Style::default().fg(WHITE)),
+        ]));
+    }
+    if let Some(ref loc) = session.location {
+        lines.push(Line::from(vec![
+            Span::styled("Remote:   ", Style::default().fg(COMMENT)),
+            Span::styled(loc.as_str(), Style::default().fg(ORANGE)),
+        ]));
+    }
+    if let Some(ref repo) = session.git_repo {
+        lines.push(Line::from(vec![
+            Span::styled("Github:   ", Style::default().fg(COMMENT)),
+            Span::styled(repo.as_str(), Style::default().fg(GREEN)),
+        ]));
+    }
+    if session.secrets_count > 0 {
+        lines.push(Line::from(vec![
+            Span::styled("Secrets:  ", Style::default().fg(COMMENT)),
+            Span::styled(
+                format!("{}", session.secrets_count),
+                Style::default().fg(YELLOW),
+            ),
+        ]));
+    }
+    if session.is_locked {
+        let pid_text = session
+            .lock_pid
+            .map(|pid| format!("Locked (PID {})", pid))
+            .unwrap_or_else(|| "Locked".to_string());
+        lines.push(Line::from(Span::styled(
+            pid_text,
+            Style::default().fg(RED),
+        )));
+    }
+
+    // Preview content from .cs/ files
+    if let Some(preview) = app.preview_cache.get(&session.name) {
+        lines.push(Line::from(""));
+
+        if let Some(ref obj) = preview.objective {
+            lines.push(Line::from(Span::styled(
+                "Objective",
+                Style::default().fg(GOLD).add_modifier(Modifier::BOLD),
+            )));
+            lines.push(Line::from(Span::styled(
+                obj.as_str(),
+                Style::default().fg(WHITE),
+            )));
+            lines.push(Line::from(""));
+        }
+
+        if !preview.discoveries.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "Discoveries",
+                Style::default().fg(GOLD).add_modifier(Modifier::BOLD),
+            )));
+            for disc in &preview.discoveries {
+                let truncated = if disc.len() > (area.width as usize).saturating_sub(6) {
+                    format!("{}...", &disc[..disc.len().min(area.width as usize - 9)])
+                } else {
+                    disc.clone()
+                };
+                lines.push(Line::from(vec![
+                    Span::styled("  - ", Style::default().fg(COMMENT)),
+                    Span::styled(truncated, Style::default().fg(YELLOW)),
+                ]));
+            }
+            lines.push(Line::from(""));
+        }
+
+        if preview.artifact_count > 0 {
+            lines.push(Line::from(Span::styled(
+                format!("Artifacts ({})", preview.artifact_count),
+                Style::default().fg(GOLD).add_modifier(Modifier::BOLD),
+            )));
+            let max_names = (area.height as usize).saturating_sub(lines.len() + 3);
+            for name in preview.artifact_names.iter().take(max_names) {
+                lines.push(Line::from(vec![
+                    Span::styled("  ", Style::default()),
+                    Span::styled(name.as_str(), Style::default().fg(COMMENT)),
+                ]));
+            }
+            if preview.artifact_names.len() > max_names {
+                lines.push(Line::from(Span::styled(
+                    format!("  ... and {} more", preview.artifact_names.len() - max_names),
+                    Style::default().fg(COMMENT).add_modifier(Modifier::DIM),
+                )));
+            }
+        }
+
+        if preview.objective.is_none() && preview.discoveries.is_empty() && preview.artifact_count == 0 {
+            lines.push(Line::from(Span::styled(
+                "No .cs/ metadata",
+                Style::default().fg(COMMENT).add_modifier(Modifier::DIM),
+            )));
+        }
+    }
+
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: true });
+    frame.render_widget(paragraph, area);
 }
 
 fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {

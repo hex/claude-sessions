@@ -339,6 +339,8 @@ pub struct App {
     pub preview_cache: HashMap<String, session::SessionPreview>,
     /// Background sync operation in progress.
     pub sync_job: Option<SyncJob>,
+    /// Whether to show the preview pane on wide terminals (toggled with `p`).
+    pub show_preview: bool,
 }
 
 impl App {
@@ -377,6 +379,7 @@ impl App {
             expanded_session: None,
             preview_cache: HashMap::new(),
             sync_job: None,
+            show_preview: true,
         }
     }
 
@@ -484,6 +487,17 @@ impl App {
 
     pub fn selected_session_name(&self) -> Option<String> {
         self.selected_session().map(|s| s.name.clone())
+    }
+
+    /// Ensure the selected session's preview is loaded into the cache.
+    pub fn ensure_preview_loaded(&mut self) {
+        if let Some(name) = self.selected_session_name() {
+            if !self.preview_cache.contains_key(&name) {
+                let root = session::sessions_root();
+                let preview = session::load_preview(&root.join(&name));
+                self.preview_cache.insert(name, preview);
+            }
+        }
     }
 
     /// Compute fuzzy match indices for highlighting without filtering the session list.
@@ -773,6 +787,10 @@ impl App {
                     self.delete_countdown_start = Some(std::time::Instant::now());
                     self.mode = Mode::ConfirmBatchDelete;
                 }
+                Action::None
+            }
+            KeyCode::Char('p') => {
+                self.show_preview = !self.show_preview;
                 Action::None
             }
             _ => Action::None,
@@ -3022,6 +3040,8 @@ mod tests {
                 objective: Some("test objective".into()),
                 last_discovery: None,
                 artifact_count: 3,
+                discoveries: Vec::new(),
+                artifact_names: Vec::new(),
             },
         );
         app.handle_key(KeyEvent::from(KeyCode::Tab));
@@ -3029,5 +3049,49 @@ mod tests {
         let preview = app.preview_cache.get("alpha").unwrap();
         assert_eq!(preview.objective.as_deref(), Some("test objective"));
         assert_eq!(preview.artifact_count, 3);
+    }
+
+    // --- Preview pane ---
+
+    #[test]
+    fn p_toggles_show_preview() {
+        let mut app = App::new(sample_sessions());
+        assert!(app.show_preview); // default on
+        app.handle_key(KeyEvent::from(KeyCode::Char('p')));
+        assert!(!app.show_preview);
+        app.handle_key(KeyEvent::from(KeyCode::Char('p')));
+        assert!(app.show_preview);
+    }
+
+    #[test]
+    fn ensure_preview_loaded_caches_on_first_call() {
+        let mut app = App::new(sample_sessions());
+        app.table_state.select(Some(0));
+        assert!(app.preview_cache.is_empty());
+        app.ensure_preview_loaded();
+        // Preview was loaded for "alpha" (even if empty metadata)
+        assert!(app.preview_cache.contains_key("alpha"));
+    }
+
+    #[test]
+    fn ensure_preview_loaded_skips_if_cached() {
+        let mut app = App::new(sample_sessions());
+        app.table_state.select(Some(0));
+        app.preview_cache.insert(
+            "alpha".into(),
+            session::SessionPreview {
+                objective: Some("cached".into()),
+                last_discovery: None,
+                artifact_count: 0,
+                discoveries: Vec::new(),
+                artifact_names: Vec::new(),
+            },
+        );
+        app.ensure_preview_loaded();
+        // Should not overwrite cached value
+        assert_eq!(
+            app.preview_cache.get("alpha").unwrap().objective.as_deref(),
+            Some("cached")
+        );
     }
 }
