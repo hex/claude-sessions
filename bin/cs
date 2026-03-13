@@ -90,9 +90,9 @@ _detect_terminal() {
 # (ESC must be doubled inside the DCS payload per tmux protocol)
 _send_escape() {
     if [ -n "${TMUX:-}" ]; then
-        printf '\033Ptmux;\033\033%s\033\\' "$1"
+        printf '\033Ptmux;\033\033%b\033\\' "$1"
     else
-        printf '\033%s' "$1"
+        printf '\033%b' "$1"
     fi
 }
 
