@@ -612,20 +612,49 @@ fn render_secrets_popup(app: &App, frame: &mut Frame) {
         .iter()
         .enumerate()
         .map(|(i, name)| {
-            if i == app.secrets_selected {
-                Line::from(vec![
-                    Span::styled(">> ", Style::default().fg(GOLD).add_modifier(Modifier::BOLD)),
-                    Span::styled(
-                        name.as_str(),
-                        Style::default().fg(WHITE).add_modifier(Modifier::BOLD),
-                    ),
-                ])
+            let is_selected = i == app.secrets_selected;
+            let is_revealed = app
+                .revealed_secret
+                .as_ref()
+                .map(|(k, _, _)| k == name)
+                .unwrap_or(false);
+
+            let mut spans = Vec::new();
+            if is_selected {
+                spans.push(Span::styled(
+                    ">> ",
+                    Style::default().fg(GOLD).add_modifier(Modifier::BOLD),
+                ));
+                spans.push(Span::styled(
+                    name.as_str(),
+                    Style::default().fg(WHITE).add_modifier(Modifier::BOLD),
+                ));
             } else {
-                Line::from(vec![
-                    Span::styled("   ", Style::default()),
-                    Span::styled(name.as_str(), Style::default().fg(COMMENT)),
-                ])
+                spans.push(Span::styled("   ", Style::default()));
+                spans.push(Span::styled(name.as_str(), Style::default().fg(COMMENT)));
             }
+
+            if is_revealed {
+                if let Some((_, ref value, _)) = app.revealed_secret {
+                    let remaining = app.peek_remaining();
+                    let display_val = if value.len() > 30 {
+                        format!("{}...", &value[..27])
+                    } else {
+                        value.clone()
+                    };
+                    spans.push(Span::styled("  ", Style::default()));
+                    spans.push(Span::styled(
+                        display_val,
+                        Style::default().fg(YELLOW),
+                    ));
+                    spans.push(Span::styled(
+                        format!(" ({}s)", remaining),
+                        Style::default().fg(COMMENT),
+                    ));
+                }
+            }
+
+            Line::from(spans)
         })
         .collect();
 

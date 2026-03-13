@@ -245,6 +245,7 @@ pub enum StatusLevel {
 const STATUS_EXPIRE_SECS: u64 = 4;
 const FLASH_DURATION_MS: u64 = 400;
 const DELETE_COUNTDOWN_SECS: u64 = 2;
+const PEEK_DURATION_SECS: u64 = 5;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FlashKind {
@@ -281,6 +282,8 @@ pub struct App {
     pub delete_countdown_start: Option<std::time::Instant>,
     /// Fuzzy match indices per session index (for highlighting matched chars in names).
     pub fuzzy_indices: HashMap<usize, Vec<usize>>,
+    /// Revealed secret: (key_name, value, reveal_time). Auto-expires after PEEK_DURATION_SECS.
+    pub revealed_secret: Option<(String, String, std::time::Instant)>,
 }
 
 impl App {
@@ -312,6 +315,7 @@ impl App {
             visible_sort_columns: Vec::new(),
             delete_countdown_start: None,
             fuzzy_indices: HashMap::new(),
+            revealed_secret: None,
         }
     }
 
@@ -366,6 +370,27 @@ impl App {
             Some(start) => {
                 let elapsed = start.elapsed().as_secs();
                 DELETE_COUNTDOWN_SECS.saturating_sub(elapsed)
+            }
+            None => 0,
+        }
+    }
+
+    /// Expire the revealed secret after PEEK_DURATION_SECS.
+    pub fn expire_peek(&mut self) -> bool {
+        if let Some((_, _, ref at)) = self.revealed_secret {
+            if at.elapsed().as_secs() >= PEEK_DURATION_SECS {
+                self.revealed_secret = None;
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Seconds remaining on the peek reveal countdown.
+    pub fn peek_remaining(&self) -> u64 {
+        match self.revealed_secret {
+            Some((_, _, ref at)) => {
+                PEEK_DURATION_SECS.saturating_sub(at.elapsed().as_secs())
             }
             None => 0,
         }
@@ -911,6 +936,7 @@ impl App {
     fn handle_secrets(&mut self, key: KeyEvent) -> Action {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => {
+                self.revealed_secret = None;
                 self.mode = Mode::Normal;
             }
             KeyCode::Down | KeyCode::Char('j') => {
@@ -927,7 +953,7 @@ impl App {
             }
             KeyCode::Char('v') | KeyCode::Enter => {
                 if let Some(key_name) = self.secrets_names.get(self.secrets_selected).cloned() {
-                    self.run_secrets_subcommand("get", &key_name);
+                    self.peek_secret(&key_name);
                 }
             }
             KeyCode::Char('d') => {
@@ -1125,6 +1151,25 @@ impl App {
                 Err(e) => {
                     self.set_status(format!("Secrets failed: {}", e), StatusLevel::Error);
                     self.mode = Mode::Normal;
+                }
+            }
+        }
+    }
+
+    fn peek_secret(&mut self, key_name: &str) {
+        if let Some(session) = self.selected_session() {
+            let name = session.name.clone();
+            let output = std::process::Command::new("cs")
+                .args([&name, "-secrets", "get", key_name])
+                .output();
+            match output {
+                Ok(out) => {
+                    let value = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                    self.revealed_secret =
+                        Some((key_name.to_string(), value, std::time::Instant::now()));
+                }
+                Err(e) => {
+                    self.set_status(format!("Peek failed: {}", e), StatusLevel::Error);
                 }
             }
         }
@@ -2333,5 +2378,53 @@ mod tests {
         assert_eq!(app.mode, Mode::Normal);
         assert_eq!(app.filtered.len(), 3);
         assert!(app.fuzzy_indices.is_empty());
+    }
+
+    #[test]
+    fn peek_remaining_returns_countdown() {
+        let mut app = App::new(sample_sessions());
+        // No reveal
+        assert_eq!(app.peek_remaining(), 0);
+        // Fresh reveal
+        app.revealed_secret = Some(("KEY".into(), "val".into(), std::time::Instant::now()));
+        assert_eq!(app.peek_remaining(), 5);
+        // After 3 seconds
+        app.revealed_secret = Some((
+            "KEY".into(),
+            "val".into(),
+            std::time::Instant::now() - std::time::Duration::from_secs(3),
+        ));
+        assert_eq!(app.peek_remaining(), 2);
+    }
+
+    #[test]
+    fn expire_peek_clears_after_timeout() {
+        let mut app = App::new(sample_sessions());
+        app.revealed_secret = Some((
+            "KEY".into(),
+            "val".into(),
+            std::time::Instant::now() - std::time::Duration::from_secs(6),
+        ));
+        assert!(app.expire_peek());
+        assert!(app.revealed_secret.is_none());
+    }
+
+    #[test]
+    fn expire_peek_keeps_fresh_reveal() {
+        let mut app = App::new(sample_sessions());
+        app.revealed_secret = Some(("KEY".into(), "val".into(), std::time::Instant::now()));
+        assert!(!app.expire_peek());
+        assert!(app.revealed_secret.is_some());
+    }
+
+    #[test]
+    fn secrets_esc_clears_revealed_secret() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::Secrets;
+        app.secrets_names = vec!["API_KEY".into()];
+        app.revealed_secret = Some(("API_KEY".into(), "sk-abc".into(), std::time::Instant::now()));
+        app.handle_key(KeyEvent::from(KeyCode::Esc));
+        assert_eq!(app.mode, Mode::Normal);
+        assert!(app.revealed_secret.is_none());
     }
 }
