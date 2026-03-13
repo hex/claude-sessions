@@ -176,6 +176,7 @@ pub enum StatusLevel {
 
 const STATUS_EXPIRE_SECS: u64 = 4;
 const FLASH_DURATION_MS: u64 = 400;
+const DELETE_COUNTDOWN_SECS: u64 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FlashKind {
@@ -209,6 +210,7 @@ pub struct App {
     pub table_area: ratatui::layout::Rect,
     pub column_widths: Vec<u16>,
     pub visible_sort_columns: Vec<SortColumn>,
+    pub delete_countdown_start: Option<std::time::Instant>,
 }
 
 impl App {
@@ -238,6 +240,7 @@ impl App {
             status_message: None,
             row_flashes: HashMap::new(),
             visible_sort_columns: Vec::new(),
+            delete_countdown_start: None,
         }
     }
 
@@ -283,6 +286,18 @@ impl App {
                 None
             }
         })
+    }
+
+    /// Seconds remaining on the delete confirmation countdown.
+    /// Returns 0 when the countdown has elapsed and `y` should be accepted.
+    pub fn delete_countdown_remaining(&self) -> u64 {
+        match self.delete_countdown_start {
+            Some(start) => {
+                let elapsed = start.elapsed().as_secs();
+                DELETE_COUNTDOWN_SECS.saturating_sub(elapsed)
+            }
+            None => 0,
+        }
     }
 
     pub fn selected_session(&self) -> Option<&Session> {
@@ -412,6 +427,7 @@ impl App {
             KeyCode::Char('d') => {
                 if self.selected_session().is_some() {
                     self.mode = Mode::ConfirmDelete;
+                    self.delete_countdown_start = Some(std::time::Instant::now());
                 }
                 Action::None
             }
@@ -534,6 +550,7 @@ impl App {
                 // Delete
                 if self.selected_session().is_some() {
                     self.mode = Mode::ConfirmDelete;
+                    self.delete_countdown_start = Some(std::time::Instant::now());
                 }
                 Action::None
             }
@@ -623,10 +640,15 @@ impl App {
     fn handle_confirm_delete(&mut self, key: KeyEvent) -> Action {
         match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') => {
-                self.execute_delete();
+                if self.delete_countdown_remaining() == 0 {
+                    self.execute_delete();
+                } else {
+                    self.set_status("Wait...", StatusLevel::Info);
+                }
             }
             _ => {
                 self.mode = Mode::Normal;
+                self.delete_countdown_start = None;
             }
         }
         Action::None
@@ -859,6 +881,7 @@ impl App {
             }
         }
         self.mode = Mode::Normal;
+        self.delete_countdown_start = None;
     }
 
     fn execute_rename(&mut self) {
@@ -2033,5 +2056,54 @@ mod tests {
             .collect();
         let app = App::new(sessions);
         assert!(!app.has_secrets());
+    }
+
+    #[test]
+    fn confirm_delete_sets_countdown_start() {
+        let mut app = App::new(sample_sessions());
+        app.handle_key(KeyEvent::from(KeyCode::Char('d')));
+        assert_eq!(app.mode, Mode::ConfirmDelete);
+        assert!(app.delete_countdown_start.is_some());
+    }
+
+    #[test]
+    fn confirm_delete_y_rejected_during_countdown() {
+        let mut app = App::new(sample_sessions());
+        app.handle_key(KeyEvent::from(KeyCode::Char('d')));
+        // Countdown just started — y should be rejected
+        app.handle_key(KeyEvent::from(KeyCode::Char('y')));
+        assert_eq!(app.mode, Mode::ConfirmDelete); // still in confirm mode
+        assert_eq!(app.sessions.len(), 3); // not deleted
+        // Should show a "Wait..." status message
+        assert!(app.status_message.as_ref().unwrap().text.contains("Wait"));
+    }
+
+    #[test]
+    fn confirm_delete_y_accepted_after_countdown() {
+        let mut app = App::new(sample_sessions());
+        app.handle_key(KeyEvent::from(KeyCode::Char('d')));
+        // Simulate countdown elapsed by backdating the start
+        app.delete_countdown_start =
+            Some(std::time::Instant::now() - std::time::Duration::from_secs(3));
+        app.handle_key(KeyEvent::from(KeyCode::Char('y')));
+        // execute_delete runs and returns to Normal
+        // (actual filesystem delete fails in tests, but mode change confirms acceptance)
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn confirm_delete_remaining_seconds() {
+        let mut app = App::new(sample_sessions());
+        app.handle_key(KeyEvent::from(KeyCode::Char('d')));
+        // Just started: should show 2
+        assert_eq!(app.delete_countdown_remaining(), 2);
+        // Backdate by 1 second
+        app.delete_countdown_start =
+            Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+        assert_eq!(app.delete_countdown_remaining(), 1);
+        // Backdate by 2+ seconds
+        app.delete_countdown_start =
+            Some(std::time::Instant::now() - std::time::Duration::from_secs(3));
+        assert_eq!(app.delete_countdown_remaining(), 0);
     }
 }

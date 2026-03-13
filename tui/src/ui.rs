@@ -398,7 +398,9 @@ fn render_confirm_delete(app: &App, frame: &mut Frame) {
         None => return,
     };
 
-    let msg = if session.is_adopted {
+    let remaining = app.delete_countdown_remaining();
+
+    let action_msg = if session.is_adopted {
         format!(
             "Remove adopted session '{}'?\n(removes symlink only, project preserved)",
             session.name
@@ -407,15 +409,27 @@ fn render_confirm_delete(app: &App, frame: &mut Frame) {
         format!("Delete session '{}'?\nThis cannot be undone.", session.name)
     };
 
-    let popup_area = centered_rect(50, 6, frame.area());
+    let hint = if remaining > 0 {
+        format!("[y] Confirm ({}...)  [n/Esc] Cancel", remaining)
+    } else {
+        "[y] Confirm  [n/Esc] Cancel".to_string()
+    };
+    let hint_color = if remaining > 0 { COMMENT } else { WHITE };
+
+    let popup_area = centered_rect(50, 7, frame.area());
     frame.render_widget(Clear, popup_area);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(RED))
         .title(" Confirm Delete ")
         .title_style(Style::default().fg(RED).add_modifier(Modifier::BOLD));
-    let text = Paragraph::new(msg)
-        .style(Style::default().fg(WHITE))
+
+    let lines = vec![
+        Line::from(Span::styled(action_msg, Style::default().fg(WHITE))),
+        Line::from(""),
+        Line::from(Span::styled(hint, Style::default().fg(hint_color))),
+    ];
+    let text = Paragraph::new(lines)
         .block(block)
         .wrap(Wrap { trim: true });
     frame.render_widget(text, popup_area);
