@@ -247,6 +247,32 @@ const FLASH_DURATION_MS: u64 = 400;
 const DELETE_COUNTDOWN_SECS: u64 = 2;
 const PEEK_DURATION_SECS: u64 = 5;
 
+/// Classify a timestamp into a time section for grouping display.
+fn time_section(ts: Option<std::time::SystemTime>) -> &'static str {
+    let ts = match ts {
+        Some(t) => t,
+        None => return "Older",
+    };
+    let age = match std::time::SystemTime::now().duration_since(ts) {
+        Ok(d) => d,
+        Err(_) => return "Today", // future timestamp
+    };
+    let secs = age.as_secs();
+    const HOUR: u64 = 3600;
+    const DAY: u64 = 86400;
+    if secs < DAY {
+        "Today"
+    } else if secs < 2 * DAY {
+        "Yesterday"
+    } else if secs < 7 * DAY {
+        "This Week"
+    } else if secs < 30 * DAY {
+        "This Month"
+    } else {
+        "Older"
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FlashKind {
     Success,
@@ -284,6 +310,9 @@ pub struct App {
     pub fuzzy_indices: HashMap<usize, Vec<usize>>,
     /// Revealed secret: (key_name, value, reveal_time). Auto-expires after PEEK_DURATION_SECS.
     pub revealed_secret: Option<(String, String, std::time::Instant)>,
+    /// Section labels for time-based grouping (parallel to `filtered`).
+    /// Each entry is Some("label") if this row starts a new time section, None otherwise.
+    pub section_labels: Vec<Option<&'static str>>,
 }
 
 impl App {
@@ -316,6 +345,7 @@ impl App {
             delete_countdown_start: None,
             fuzzy_indices: HashMap::new(),
             revealed_secret: None,
+            section_labels: Vec::new(),
         }
     }
 
@@ -474,6 +504,23 @@ impl App {
                     SortDirection::Desc => ord.reverse(),
                 }
             });
+        }
+
+        // Compute section labels for time-based grouping
+        self.section_labels.clear();
+        let show_sections = matches!(self.sort_col, SortColumn::Created | SortColumn::Modified);
+        if show_sections && !self.filtered.is_empty() {
+            let mut prev_section = "";
+            for &idx in &self.filtered {
+                let ts = self.sessions[idx].modified_ts;
+                let section = time_section(ts);
+                if section != prev_section {
+                    self.section_labels.push(Some(section));
+                    prev_section = section;
+                } else {
+                    self.section_labels.push(None);
+                }
+            }
         }
 
         // Restore selection: find the previously selected session in the new order
@@ -2426,5 +2473,55 @@ mod tests {
         app.handle_key(KeyEvent::from(KeyCode::Esc));
         assert_eq!(app.mode, Mode::Normal);
         assert!(app.revealed_secret.is_none());
+    }
+
+    #[test]
+    fn time_section_classifies_ages() {
+        use std::time::{Duration, SystemTime};
+        assert_eq!(time_section(None), "Older");
+        assert_eq!(time_section(Some(SystemTime::now())), "Today");
+        assert_eq!(
+            time_section(Some(SystemTime::now() - Duration::from_secs(3600))),
+            "Today"
+        );
+        assert_eq!(
+            time_section(Some(SystemTime::now() - Duration::from_secs(90_000))),
+            "Yesterday"
+        );
+        assert_eq!(
+            time_section(Some(SystemTime::now() - Duration::from_secs(4 * 86400))),
+            "This Week"
+        );
+        assert_eq!(
+            time_section(Some(SystemTime::now() - Duration::from_secs(15 * 86400))),
+            "This Month"
+        );
+        assert_eq!(
+            time_section(Some(SystemTime::now() - Duration::from_secs(60 * 86400))),
+            "Older"
+        );
+    }
+
+    #[test]
+    fn section_labels_populated_when_sorted_by_modified() {
+        let mut app = App::new(sample_sessions());
+        app.sort_col = SortColumn::Modified;
+        app.apply_filter_and_sort();
+        // All test sessions have modified_ts: None → all "Older"
+        // So only the first row should have a section label
+        assert_eq!(app.section_labels.len(), app.filtered.len());
+        assert_eq!(app.section_labels[0], Some("Older"));
+        // Remaining should be None (same section)
+        for label in &app.section_labels[1..] {
+            assert_eq!(*label, None);
+        }
+    }
+
+    #[test]
+    fn section_labels_empty_when_sorted_by_name() {
+        let mut app = App::new(sample_sessions());
+        app.sort_col = SortColumn::Name;
+        app.apply_filter_and_sort();
+        assert!(app.section_labels.is_empty());
     }
 }

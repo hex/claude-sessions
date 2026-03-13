@@ -169,8 +169,21 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
                 theme::recency_color(s.modified_ts)
             };
 
+            // Build the name cell — may include section header as first line
+            let section_label = app.section_labels.get(row_idx).copied().flatten();
+            let name_cell = if let Some(label) = section_label {
+                let section_line = Line::from(Span::styled(
+                    format!("── {} ──", label),
+                    Style::default().fg(COMMENT).add_modifier(Modifier::DIM),
+                ));
+                let name_line = Line::from(name_spans);
+                Cell::from(ratatui::text::Text::from(vec![section_line, name_line]))
+            } else {
+                Cell::from(Line::from(name_spans))
+            };
+
             let mut cells = vec![
-                Cell::from(Line::from(name_spans)),
+                name_cell,
                 Cell::from(s.created.clone().unwrap_or_else(|| "-".into()))
                     .style(Style::default().fg(meta_color)),
                 Cell::from(s.modified.clone().unwrap_or_else(|| "-".into()))
@@ -203,7 +216,11 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
                 cells.push(Cell::from(github).style(Style::default().fg(github_color)));
             }
 
-            let row = Row::new(cells);
+            let row = if section_label.is_some() {
+                Row::new(cells).height(2)
+            } else {
+                Row::new(cells)
+            };
 
             // Flash background takes priority, then zebra striping
             if let Some(flash) = app.active_flash(&s.name) {
