@@ -20,6 +20,63 @@ pub struct Session {
     pub sync_auto: Option<bool>,
 }
 
+pub struct SessionPreview {
+    pub objective: Option<String>,
+    pub last_discovery: Option<String>,
+    pub artifact_count: usize,
+}
+
+/// Load preview info for a session by reading .cs/ metadata files.
+pub fn load_preview(session_dir: &Path) -> SessionPreview {
+    let cs_dir = session_dir.join(".cs");
+
+    // First non-empty line from README.md after "## Objective" or first content line
+    let objective = fs::read_to_string(cs_dir.join("README.md"))
+        .ok()
+        .and_then(|content| {
+            let mut after_objective = false;
+            for line in content.lines() {
+                if line.starts_with("## Objective") {
+                    after_objective = true;
+                    continue;
+                }
+                if after_objective {
+                    let trimmed = line.trim();
+                    if !trimmed.is_empty() {
+                        return Some(trimmed.to_string());
+                    }
+                }
+            }
+            None
+        });
+
+    // Last ## heading from discoveries.md
+    let last_discovery = fs::read_to_string(cs_dir.join("discoveries.md"))
+        .ok()
+        .and_then(|content| {
+            content
+                .lines()
+                .rev()
+                .find(|line| line.starts_with("## "))
+                .map(|line| line.trim_start_matches("## ").to_string())
+        });
+
+    // Count entries in artifacts/MANIFEST.json
+    let artifact_count = fs::read_to_string(cs_dir.join("artifacts/MANIFEST.json"))
+        .ok()
+        .and_then(|content| {
+            // Simple: count "path" keys
+            Some(content.matches("\"path\"").count())
+        })
+        .unwrap_or(0);
+
+    SessionPreview {
+        objective,
+        last_discovery,
+        artifact_count,
+    }
+}
+
 pub fn sessions_root() -> PathBuf {
     std::env::var("CS_SESSIONS_ROOT")
         .map(PathBuf::from)
@@ -555,5 +612,76 @@ mod tests {
     #[test]
     fn extract_user_repo_empty_returns_none() {
         assert_eq!(extract_user_repo(""), None);
+    }
+
+    // --- load_preview tests ---
+
+    #[test]
+    fn load_preview_reads_objective() {
+        let dir = std::env::temp_dir().join(format!("cs-test-preview-obj-{}", std::process::id()));
+        let cs = dir.join(".cs");
+        fs::create_dir_all(&cs).unwrap();
+        fs::write(
+            cs.join("README.md"),
+            "# Session\n\n## Objective\n\nBuild a TUI for session management\n\n## Outcome\n",
+        )
+        .unwrap();
+
+        let preview = load_preview(&dir);
+        assert_eq!(
+            preview.objective.as_deref(),
+            Some("Build a TUI for session management")
+        );
+        assert!(preview.last_discovery.is_none());
+        assert_eq!(preview.artifact_count, 0);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn load_preview_reads_last_discovery() {
+        let dir = std::env::temp_dir().join(format!("cs-test-preview-disc-{}", std::process::id()));
+        let cs = dir.join(".cs");
+        fs::create_dir_all(&cs).unwrap();
+        fs::write(
+            cs.join("discoveries.md"),
+            "# Discoveries\n\n## First thing\nSome text\n\n## Second thing\nMore text\n",
+        )
+        .unwrap();
+
+        let preview = load_preview(&dir);
+        assert_eq!(preview.last_discovery.as_deref(), Some("Second thing"));
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn load_preview_counts_artifacts() {
+        let dir = std::env::temp_dir().join(format!("cs-test-preview-art-{}", std::process::id()));
+        let cs = dir.join(".cs/artifacts");
+        fs::create_dir_all(&cs).unwrap();
+        fs::write(
+            cs.join("MANIFEST.json"),
+            r#"[{"path":"a.sh"},{"path":"b.py"},{"path":"c.json"}]"#,
+        )
+        .unwrap();
+
+        let preview = load_preview(&dir);
+        assert_eq!(preview.artifact_count, 3);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn load_preview_handles_missing_files() {
+        let dir = std::env::temp_dir().join(format!("cs-test-preview-empty-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+
+        let preview = load_preview(&dir);
+        assert!(preview.objective.is_none());
+        assert!(preview.last_discovery.is_none());
+        assert_eq!(preview.artifact_count, 0);
+
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

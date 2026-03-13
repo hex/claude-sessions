@@ -177,18 +177,68 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
                 theme::recency_color(s.modified_ts)
             };
 
-            // Build the name cell — may include section header as first line
+            // Build the name cell — may include section header and/or preview lines
             let section_label = app.section_labels.get(row_idx).copied().flatten();
-            let name_cell = if let Some(label) = section_label {
-                let section_line = Line::from(Span::styled(
+            let is_expanded = app.expanded_session.as_deref() == Some(&s.name);
+
+            let mut name_lines: Vec<Line> = Vec::new();
+
+            if let Some(label) = section_label {
+                name_lines.push(Line::from(Span::styled(
                     format!("── {} ──", label),
                     Style::default().fg(COMMENT).add_modifier(Modifier::DIM),
-                ));
-                let name_line = Line::from(name_spans);
-                Cell::from(ratatui::text::Text::from(vec![section_line, name_line]))
-            } else {
-                Cell::from(Line::from(name_spans))
-            };
+                )));
+            }
+
+            name_lines.push(Line::from(name_spans));
+
+            // Add preview lines when expanded
+            let mut preview_lines: u16 = 0;
+            if is_expanded {
+                if let Some(preview) = app.preview_cache.get(&s.name) {
+                    if let Some(ref obj) = preview.objective {
+                        let truncated = if obj.len() > 60 {
+                            format!("{}...", &obj[..57])
+                        } else {
+                            obj.clone()
+                        };
+                        name_lines.push(Line::from(vec![
+                            Span::styled("  goal: ", Style::default().fg(COMMENT)),
+                            Span::styled(truncated, Style::default().fg(WHITE)),
+                        ]));
+                        preview_lines += 1;
+                    }
+                    if let Some(ref disc) = preview.last_discovery {
+                        let truncated = if disc.len() > 58 {
+                            format!("{}...", &disc[..55])
+                        } else {
+                            disc.clone()
+                        };
+                        name_lines.push(Line::from(vec![
+                            Span::styled("  last: ", Style::default().fg(COMMENT)),
+                            Span::styled(truncated, Style::default().fg(YELLOW)),
+                        ]));
+                        preview_lines += 1;
+                    }
+                    if preview.artifact_count > 0 {
+                        name_lines.push(Line::from(Span::styled(
+                            format!("  {} artifacts", preview.artifact_count),
+                            Style::default().fg(COMMENT),
+                        )));
+                        preview_lines += 1;
+                    }
+                    // Show at least a "no metadata" line if everything is empty
+                    if preview_lines == 0 {
+                        name_lines.push(Line::from(Span::styled(
+                            "  (no metadata)",
+                            Style::default().fg(COMMENT).add_modifier(Modifier::DIM),
+                        )));
+                        preview_lines += 1;
+                    }
+                }
+            }
+
+            let name_cell = Cell::from(ratatui::text::Text::from(name_lines));
 
             let mut cells = vec![
                 name_cell,
@@ -224,8 +274,9 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
                 cells.push(Cell::from(github).style(Style::default().fg(github_color)));
             }
 
-            let row = if section_label.is_some() {
-                Row::new(cells).height(2)
+            let extra_height = if section_label.is_some() { 1u16 } else { 0 } + preview_lines;
+            let row = if extra_height > 0 {
+                Row::new(cells).height(1 + extra_height)
             } else {
                 Row::new(cells)
             };
@@ -399,7 +450,7 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
             "Space:mark  D:delete marked  Esc:clear marks  q:quit  Enter:open  /:search"
         }
         Mode::Normal => {
-            "q:quit  Enter:open  n:new  d:delete  r:rename  Space:mark  /:search  P:push  L:pull  1-6:sort"
+            "q:quit  Enter:open  n:new  d:delete  r:rename  Tab:preview  Space:mark  /:search  1-6:sort"
         }
         Mode::SessionMenu => "j/k:navigate  Enter:select  Esc:cancel",
         Mode::ConfirmDelete | Mode::ConfirmBatchDelete => "y:confirm  n:cancel",

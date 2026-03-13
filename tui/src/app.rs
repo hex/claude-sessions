@@ -318,6 +318,10 @@ pub struct App {
     nav_repeat: (char, usize, std::time::Instant),
     /// Sessions marked for batch operations (by name).
     pub marked_sessions: std::collections::HashSet<String>,
+    /// Currently expanded session name (for Tab expand/collapse).
+    pub expanded_session: Option<String>,
+    /// Cached session previews (by session name).
+    pub preview_cache: HashMap<String, session::SessionPreview>,
 }
 
 impl App {
@@ -353,6 +357,8 @@ impl App {
             section_labels: Vec::new(),
             nav_repeat: ('\0', 0, std::time::Instant::now()),
             marked_sessions: std::collections::HashSet::new(),
+            expanded_session: None,
+            preview_cache: HashMap::new(),
         }
     }
 
@@ -608,6 +614,7 @@ impl App {
                 Action::None
             }
             KeyCode::Down | KeyCode::Char('j') => {
+                self.expanded_session = None;
                 let step = self.nav_step('j');
                 let max = self.filtered.len().saturating_sub(1);
                 let cur = self.table_state.selected().unwrap_or(0);
@@ -615,6 +622,7 @@ impl App {
                 Action::None
             }
             KeyCode::Up | KeyCode::Char('k') => {
+                self.expanded_session = None;
                 let step = self.nav_step('k');
                 let cur = self.table_state.selected().unwrap_or(0);
                 self.table_state.select(Some(cur.saturating_sub(step)));
@@ -704,6 +712,22 @@ impl App {
             }
             KeyCode::Char('6') => {
                 self.cycle_sort(SortColumn::Github);
+                Action::None
+            }
+            KeyCode::Tab => {
+                if let Some(name) = self.selected_session_name() {
+                    if self.expanded_session.as_deref() == Some(&name) {
+                        self.expanded_session = None;
+                    } else {
+                        // Load preview if not cached
+                        if !self.preview_cache.contains_key(&name) {
+                            let root = session::sessions_root();
+                            let preview = session::load_preview(&root.join(&name));
+                            self.preview_cache.insert(name.clone(), preview);
+                        }
+                        self.expanded_session = Some(name);
+                    }
+                }
                 Action::None
             }
             KeyCode::Char(' ') => {
@@ -2712,5 +2736,75 @@ mod tests {
         assert_eq!(app.mode, Mode::Normal);
         // Marks preserved after cancel
         assert!(app.marked_sessions.contains("alpha"));
+    }
+
+    // --- Row expand/collapse with Tab ---
+
+    #[test]
+    fn tab_expands_selected_session() {
+        let mut app = App::new(sample_sessions());
+        app.table_state.select(Some(0));
+        assert!(app.expanded_session.is_none());
+        app.handle_key(KeyEvent::from(KeyCode::Tab));
+        assert_eq!(app.expanded_session, Some("alpha".into()));
+    }
+
+    #[test]
+    fn tab_collapses_already_expanded() {
+        let mut app = App::new(sample_sessions());
+        app.table_state.select(Some(0));
+        app.expanded_session = Some("alpha".into());
+        app.handle_key(KeyEvent::from(KeyCode::Tab));
+        assert!(app.expanded_session.is_none());
+    }
+
+    #[test]
+    fn tab_switches_expansion_to_different_row() {
+        let mut app = App::new(sample_sessions());
+        app.table_state.select(Some(0));
+        app.expanded_session = Some("alpha".into());
+        // Move to row 1 and press Tab
+        app.table_state.select(Some(1));
+        app.handle_key(KeyEvent::from(KeyCode::Tab));
+        assert_eq!(app.expanded_session, Some("beta".into()));
+    }
+
+    #[test]
+    fn navigation_collapses_expanded() {
+        let mut app = App::new(sample_sessions());
+        app.table_state.select(Some(0));
+        app.expanded_session = Some("alpha".into());
+        app.handle_key(KeyEvent::from(KeyCode::Char('j')));
+        assert!(app.expanded_session.is_none());
+    }
+
+    #[test]
+    fn tab_caches_preview() {
+        let mut app = App::new(sample_sessions());
+        app.table_state.select(Some(0));
+        assert!(app.preview_cache.is_empty());
+        app.handle_key(KeyEvent::from(KeyCode::Tab));
+        // Preview was loaded (even if empty, the key exists)
+        assert!(app.preview_cache.contains_key("alpha"));
+    }
+
+    #[test]
+    fn tab_reuses_cached_preview() {
+        let mut app = App::new(sample_sessions());
+        app.table_state.select(Some(0));
+        // Pre-populate cache
+        app.preview_cache.insert(
+            "alpha".into(),
+            session::SessionPreview {
+                objective: Some("test objective".into()),
+                last_discovery: None,
+                artifact_count: 3,
+            },
+        );
+        app.handle_key(KeyEvent::from(KeyCode::Tab));
+        // Should use cached value, not overwrite
+        let preview = app.preview_cache.get("alpha").unwrap();
+        assert_eq!(preview.objective.as_deref(), Some("test objective"));
+        assert_eq!(preview.artifact_count, 3);
     }
 }
