@@ -117,7 +117,41 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
             } else {
                 GOLD
             };
-            name_spans.push(Span::styled(s.name.clone(), Style::default().fg(name_color)));
+
+            // Highlight matched characters from fuzzy search
+            if let Some(indices) = app.fuzzy_indices.get(&i) {
+                let matched_set: std::collections::HashSet<usize> =
+                    indices.iter().copied().collect();
+                let mut run_start = 0;
+                let name = &s.name;
+                for (byte_idx, ch) in name.char_indices() {
+                    if matched_set.contains(&byte_idx) {
+                        // Flush any unmatched run before this char
+                        if run_start < byte_idx {
+                            name_spans.push(Span::styled(
+                                name[run_start..byte_idx].to_string(),
+                                Style::default().fg(name_color),
+                            ));
+                        }
+                        name_spans.push(Span::styled(
+                            ch.to_string(),
+                            Style::default()
+                                .fg(name_color)
+                                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+                        ));
+                        run_start = byte_idx + ch.len_utf8();
+                    }
+                }
+                // Flush remaining unmatched chars
+                if run_start < name.len() {
+                    name_spans.push(Span::styled(
+                        name[run_start..].to_string(),
+                        Style::default().fg(name_color),
+                    ));
+                }
+            } else {
+                name_spans.push(Span::styled(s.name.clone(), Style::default().fg(name_color)));
+            }
 
             let meta_color = theme::recency_color(s.modified_ts);
 

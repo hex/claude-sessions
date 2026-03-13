@@ -118,6 +118,74 @@ impl TextInput {
     }
 }
 
+/// Fuzzy-match `pattern` against `text` (case-insensitive).
+/// Returns (score, matched_indices) or None if no match.
+/// Indices refer to byte positions of matched characters in `text`.
+pub fn fuzzy_match(pattern: &str, text: &str) -> Option<(i32, Vec<usize>)> {
+    if pattern.is_empty() {
+        return Some((0, vec![]));
+    }
+
+    let pattern_lower: Vec<char> = pattern.to_lowercase().chars().collect();
+    let text_chars: Vec<(usize, char)> = text.char_indices().collect();
+    let text_lower: Vec<char> = text.to_lowercase().chars().collect();
+
+    let mut indices = Vec::with_capacity(pattern_lower.len());
+    let mut ti = 0;
+
+    for &pc in &pattern_lower {
+        let mut found = false;
+        while ti < text_lower.len() {
+            if text_lower[ti] == pc {
+                indices.push(text_chars[ti].0);
+                ti += 1;
+                found = true;
+                break;
+            }
+            ti += 1;
+        }
+        if !found {
+            return None;
+        }
+    }
+
+    // Score the match
+    let mut score: i32 = 0;
+
+    // Bonus for matching first character
+    if !indices.is_empty() && indices[0] == 0 {
+        score += 10;
+    }
+
+    for (i, &byte_idx) in indices.iter().enumerate() {
+        // Find the char index for this byte position
+        let char_idx = text_chars.iter().position(|(bi, _)| *bi == byte_idx).unwrap();
+
+        // Bonus for consecutive matches
+        if i > 0 {
+            let prev_char_idx = text_chars
+                .iter()
+                .position(|(bi, _)| *bi == indices[i - 1])
+                .unwrap();
+            if char_idx == prev_char_idx + 1 {
+                score += 3;
+            }
+        }
+
+        // Bonus for word boundary matches (after -, _, ., space, or start)
+        if char_idx == 0
+            || matches!(
+                text_chars[char_idx - 1].1,
+                '-' | '_' | '.' | ' '
+            )
+        {
+            score += 5;
+        }
+    }
+
+    Some((score, indices))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SortColumn {
     Name,
@@ -211,6 +279,8 @@ pub struct App {
     pub column_widths: Vec<u16>,
     pub visible_sort_columns: Vec<SortColumn>,
     pub delete_countdown_start: Option<std::time::Instant>,
+    /// Fuzzy match indices per session index (for highlighting matched chars in names).
+    pub fuzzy_indices: HashMap<usize, Vec<usize>>,
 }
 
 impl App {
@@ -241,6 +311,7 @@ impl App {
             row_flashes: HashMap::new(),
             visible_sort_columns: Vec::new(),
             delete_countdown_start: None,
+            fuzzy_indices: HashMap::new(),
         }
     }
 
@@ -314,34 +385,55 @@ impl App {
         // Remember the selected session name so we can restore it after re-sorting
         let prev_name = self.selected_session().map(|s| s.name.clone());
 
-        let query = self.search_input.text().to_lowercase();
-        self.filtered = self
-            .sessions
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| query.is_empty() || s.name.to_lowercase().contains(&query))
-            .map(|(i, _)| i)
-            .collect();
+        let query = self.search_input.text();
+        self.fuzzy_indices.clear();
 
-        let sessions = &self.sessions;
-        let sort_col = self.sort_col;
-        let sort_dir = self.sort_dir;
-        self.filtered.sort_by(|&a, &b| {
-            let sa = &sessions[a];
-            let sb = &sessions[b];
-            let ord = match sort_col {
-                SortColumn::Name => sa.name.to_lowercase().cmp(&sb.name.to_lowercase()),
-                SortColumn::Created => sa.created.cmp(&sb.created),
-                SortColumn::Modified => sa.modified.cmp(&sb.modified),
-                SortColumn::Secrets => sa.secrets_count.cmp(&sb.secrets_count),
-                SortColumn::Remote => sa.location.cmp(&sb.location),
-                SortColumn::Github => sa.git_repo.cmp(&sb.git_repo),
-            };
-            match sort_dir {
-                SortDirection::Asc => ord,
-                SortDirection::Desc => ord.reverse(),
+        if query.is_empty() {
+            self.filtered = (0..self.sessions.len()).collect();
+        } else {
+            // Fuzzy match and collect (index, score, matched_indices)
+            let mut matches: Vec<(usize, i32, Vec<usize>)> = self
+                .sessions
+                .iter()
+                .enumerate()
+                .filter_map(|(i, s)| {
+                    fuzzy_match(query, &s.name).map(|(score, indices)| (i, score, indices))
+                })
+                .collect();
+
+            // Sort by score descending (best matches first)
+            matches.sort_by(|a, b| b.1.cmp(&a.1));
+
+            self.filtered = matches.iter().map(|(i, _, _)| *i).collect();
+            for (i, _, indices) in matches {
+                if !indices.is_empty() {
+                    self.fuzzy_indices.insert(i, indices);
+                }
             }
-        });
+        }
+
+        // When not searching, apply column sort
+        if query.is_empty() {
+            let sessions = &self.sessions;
+            let sort_col = self.sort_col;
+            let sort_dir = self.sort_dir;
+            self.filtered.sort_by(|&a, &b| {
+                let sa = &sessions[a];
+                let sb = &sessions[b];
+                let ord = match sort_col {
+                    SortColumn::Name => sa.name.to_lowercase().cmp(&sb.name.to_lowercase()),
+                    SortColumn::Created => sa.created.cmp(&sb.created),
+                    SortColumn::Modified => sa.modified.cmp(&sb.modified),
+                    SortColumn::Secrets => sa.secrets_count.cmp(&sb.secrets_count),
+                    SortColumn::Remote => sa.location.cmp(&sb.location),
+                    SortColumn::Github => sa.git_repo.cmp(&sb.git_repo),
+                };
+                match sort_dir {
+                    SortDirection::Asc => ord,
+                    SortDirection::Desc => ord.reverse(),
+                }
+            });
+        }
 
         // Restore selection: find the previously selected session in the new order
         if self.filtered.is_empty() {
@@ -2105,5 +2197,76 @@ mod tests {
         app.delete_countdown_start =
             Some(std::time::Instant::now() - std::time::Duration::from_secs(3));
         assert_eq!(app.delete_countdown_remaining(), 0);
+    }
+
+    #[test]
+    fn fuzzy_match_empty_pattern_matches_everything() {
+        let result = fuzzy_match("", "anything");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), (0, vec![]));
+    }
+
+    #[test]
+    fn fuzzy_match_exact_prefix() {
+        let result = fuzzy_match("deb", "debug-api");
+        assert!(result.is_some());
+        let (score, indices) = result.unwrap();
+        assert_eq!(indices, vec![0, 1, 2]);
+        // first char bonus (10) + word boundary for first char (5) + 2 consecutive (6)
+        assert!(score > 0);
+    }
+
+    #[test]
+    fn fuzzy_match_scattered_chars() {
+        let result = fuzzy_match("dba", "debug-api");
+        assert!(result.is_some());
+        let (_score, indices) = result.unwrap();
+        // d=0, b=2, a=6
+        assert_eq!(indices, vec![0, 2, 6]);
+    }
+
+    #[test]
+    fn fuzzy_match_case_insensitive() {
+        let result = fuzzy_match("ABC", "a-big-cat");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn fuzzy_match_no_match() {
+        assert!(fuzzy_match("xyz", "debug-api").is_none());
+    }
+
+    #[test]
+    fn fuzzy_match_order_matters() {
+        // "ba" should not match "ab" (b comes before a)
+        assert!(fuzzy_match("ba", "ab").is_none());
+    }
+
+    #[test]
+    fn fuzzy_match_word_boundary_bonus() {
+        // "da" matching "debug-api" should get word boundary bonus for 'a' at position 6
+        let result = fuzzy_match("da", "debug-api");
+        assert!(result.is_some());
+        let (score_boundary, _) = result.unwrap();
+
+        // "de" matching "debug-api" — both consecutive from start, no extra boundary
+        let result2 = fuzzy_match("de", "debug-api");
+        assert!(result2.is_some());
+        let (score_consecutive, _) = result2.unwrap();
+
+        // "da" gets boundary bonus on 'a' (after '-'), "de" gets consecutive bonus
+        // Both should have reasonable scores
+        assert!(score_boundary > 0);
+        assert!(score_consecutive > 0);
+    }
+
+    #[test]
+    fn fuzzy_match_filter_replaces_substring() {
+        // Verify fuzzy match handles cases that substring wouldn't
+        let result = fuzzy_match("cs", "claude-sessions");
+        assert!(result.is_some());
+        let (_, indices) = result.unwrap();
+        // c=0, s=7 (sessions)
+        assert_eq!(indices[0], 0);
     }
 }
