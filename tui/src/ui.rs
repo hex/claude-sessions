@@ -29,6 +29,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     match &app.mode {
         Mode::SessionMenu => render_session_menu(app, frame),
         Mode::ConfirmDelete => render_confirm_delete(app, frame),
+        Mode::ConfirmBatchDelete => render_confirm_batch_delete(app, frame),
         Mode::ConfirmForceOpen => render_confirm_force_open(app, frame),
         Mode::Rename => render_rename_dialog(app, frame),
         Mode::CreateSession => render_create_dialog(app, frame),
@@ -97,6 +98,13 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
 
             // Build gutter indicators as colored prefix spans
             let mut name_spans: Vec<Span> = Vec::new();
+            if app.marked_sessions.contains(&s.name) {
+                let mark_color = if dimmed { COMMENT } else { GOLD };
+                name_spans.push(Span::styled(
+                    "* ",
+                    Style::default().fg(mark_color).add_modifier(Modifier::BOLD),
+                ));
+            }
             if s.is_locked {
                 let lock_color = if dimmed { COMMENT } else { RED };
                 name_spans.push(Span::styled(
@@ -387,21 +395,29 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
     }
 
     let keys = match app.mode {
+        Mode::Normal if !app.marked_sessions.is_empty() => {
+            "Space:mark  D:delete marked  Esc:clear marks  q:quit  Enter:open  /:search"
+        }
         Mode::Normal => {
-            "q:quit  Enter:open  n:new  d:delete  r:rename  m:move  s:secrets  /:search  P:push  L:pull  S:status  1-6:sort"
+            "q:quit  Enter:open  n:new  d:delete  r:rename  Space:mark  /:search  P:push  L:pull  1-6:sort"
         }
         Mode::SessionMenu => "j/k:navigate  Enter:select  Esc:cancel",
-        Mode::ConfirmDelete => "y:confirm  n:cancel",
+        Mode::ConfirmDelete | Mode::ConfirmBatchDelete => "y:confirm  n:cancel",
         Mode::ConfirmForceOpen => "y:force open  n:cancel",
         Mode::Rename | Mode::MoveToRemote | Mode::CreateSession => "Enter:confirm  Esc:cancel",
         Mode::Secrets => "j/k:navigate  v/Enter:view  d:remove  Esc:close",
         Mode::SyncOutput(_) => "Press any key to dismiss",
         Mode::Search => unreachable!(),
     };
-    let footer = Paragraph::new(Line::from(vec![Span::styled(
-        keys,
-        Style::default().fg(COMMENT),
-    )]));
+    let mut footer_spans = Vec::new();
+    if !app.marked_sessions.is_empty() && matches!(app.mode, Mode::Normal) {
+        footer_spans.push(Span::styled(
+            format!("{} marked  ", app.marked_sessions.len()),
+            Style::default().fg(GOLD).add_modifier(Modifier::BOLD),
+        ));
+    }
+    footer_spans.push(Span::styled(keys, Style::default().fg(COMMENT)));
+    let footer = Paragraph::new(Line::from(footer_spans));
     frame.render_widget(footer, area);
 }
 
@@ -494,6 +510,51 @@ fn render_confirm_delete(app: &App, frame: &mut Frame) {
     let lines = vec![
         Line::from(Span::styled(action_msg, Style::default().fg(WHITE))),
         Line::from(""),
+        Line::from(Span::styled(hint, Style::default().fg(hint_color))),
+    ];
+    let text = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: true });
+    frame.render_widget(text, popup_area);
+}
+
+fn render_confirm_batch_delete(app: &App, frame: &mut Frame) {
+    let count = app.marked_sessions.len();
+    let remaining = app.delete_countdown_remaining();
+
+    let mut names: Vec<&str> = app.marked_sessions.iter().map(|s| s.as_str()).collect();
+    names.sort();
+
+    let list = if names.len() <= 5 {
+        names.join(", ")
+    } else {
+        format!("{}, ... and {} more", names[..4].join(", "), names.len() - 4)
+    };
+
+    let hint = if remaining > 0 {
+        format!("[y] Confirm ({}...)  [n/Esc] Cancel", remaining)
+    } else {
+        "[y] Confirm  [n/Esc] Cancel".to_string()
+    };
+    let hint_color = if remaining > 0 { COMMENT } else { WHITE };
+
+    let height = if names.len() <= 5 { 7 } else { 7 };
+    let popup_area = centered_rect(55, height, frame.area());
+    frame.render_widget(Clear, popup_area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(RED))
+        .title(format!(" Delete {} sessions ", count))
+        .title_style(Style::default().fg(RED).add_modifier(Modifier::BOLD));
+
+    let lines = vec![
+        Line::from(Span::styled(
+            format!("Delete {} sessions?", count),
+            Style::default().fg(WHITE),
+        )),
+        Line::from(Span::styled(list, Style::default().fg(COMMENT))),
+        Line::from(""),
+        Line::from(Span::styled("This cannot be undone.", Style::default().fg(RED))),
         Line::from(Span::styled(hint, Style::default().fg(hint_color))),
     ];
     let text = Paragraph::new(lines)

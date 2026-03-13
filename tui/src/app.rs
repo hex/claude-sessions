@@ -208,6 +208,7 @@ pub enum Mode {
     Search,
     SessionMenu,
     ConfirmDelete,
+    ConfirmBatchDelete,
     ConfirmForceOpen,
     Rename,
     MoveToRemote,
@@ -315,6 +316,8 @@ pub struct App {
     pub section_labels: Vec<Option<&'static str>>,
     /// Navigation repeat tracking: (last direction char, repeat count, last press time).
     nav_repeat: (char, usize, std::time::Instant),
+    /// Sessions marked for batch operations (by name).
+    pub marked_sessions: std::collections::HashSet<String>,
 }
 
 impl App {
@@ -349,6 +352,7 @@ impl App {
             revealed_secret: None,
             section_labels: Vec::new(),
             nav_repeat: ('\0', 0, std::time::Instant::now()),
+            marked_sessions: std::collections::HashSet::new(),
         }
     }
 
@@ -570,6 +574,7 @@ impl App {
             Mode::Search => self.handle_search(key),
             Mode::SessionMenu => self.handle_session_menu(key),
             Mode::ConfirmDelete => self.handle_confirm_delete(key),
+            Mode::ConfirmBatchDelete => self.handle_confirm_batch_delete(key),
             Mode::ConfirmForceOpen => self.handle_confirm_force_open(key),
             Mode::Rename => self.handle_rename(key),
             Mode::CreateSession => self.handle_create_session(key),
@@ -699,6 +704,25 @@ impl App {
             }
             KeyCode::Char('6') => {
                 self.cycle_sort(SortColumn::Github);
+                Action::None
+            }
+            KeyCode::Char(' ') => {
+                if let Some(name) = self.selected_session_name() {
+                    if self.marked_sessions.contains(&name) {
+                        self.marked_sessions.remove(&name);
+                    } else {
+                        self.marked_sessions.insert(name);
+                    }
+                }
+                Action::None
+            }
+            KeyCode::Char('D') => {
+                if self.marked_sessions.is_empty() {
+                    self.set_status("No sessions marked", StatusLevel::Info);
+                } else {
+                    self.delete_countdown_start = Some(std::time::Instant::now());
+                    self.mode = Mode::ConfirmBatchDelete;
+                }
                 Action::None
             }
             _ => Action::None,
@@ -851,6 +875,23 @@ impl App {
             KeyCode::Char('y') | KeyCode::Char('Y') => {
                 if self.delete_countdown_remaining() == 0 {
                     self.execute_delete();
+                } else {
+                    self.set_status("Wait...", StatusLevel::Info);
+                }
+            }
+            _ => {
+                self.mode = Mode::Normal;
+                self.delete_countdown_start = None;
+            }
+        }
+        Action::None
+    }
+
+    fn handle_confirm_batch_delete(&mut self, key: KeyEvent) -> Action {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                if self.delete_countdown_remaining() == 0 {
+                    self.execute_batch_delete();
                 } else {
                     self.set_status("Wait...", StatusLevel::Info);
                 }
@@ -1089,6 +1130,48 @@ impl App {
                     self.set_status(format!("Delete failed: {}", e), StatusLevel::Error);
                 }
             }
+        }
+        self.mode = Mode::Normal;
+        self.delete_countdown_start = None;
+    }
+
+    fn execute_batch_delete(&mut self) {
+        let root = session::sessions_root();
+        let mut deleted = 0;
+        let mut errors = 0;
+        let names: Vec<String> = self.marked_sessions.iter().cloned().collect();
+        for name in &names {
+            let path = root.join(name);
+            let result = if path
+                .symlink_metadata()
+                .map(|m| m.is_symlink())
+                .unwrap_or(false)
+            {
+                std::fs::remove_file(&path)
+            } else {
+                std::fs::remove_dir_all(&path)
+            };
+            match result {
+                Ok(()) => {
+                    deleted += 1;
+                    self.flash_row(name.clone(), FlashKind::Success);
+                }
+                Err(_) => {
+                    errors += 1;
+                    self.flash_row(name.clone(), FlashKind::Error);
+                }
+            }
+        }
+        self.marked_sessions.clear();
+        self.sessions = session::scan_sessions();
+        self.apply_filter_and_sort();
+        if errors == 0 {
+            self.set_status(format!("Deleted {} sessions", deleted), StatusLevel::Success);
+        } else {
+            self.set_status(
+                format!("Deleted {}, {} failed", deleted, errors),
+                StatusLevel::Error,
+            );
         }
         self.mode = Mode::Normal;
         self.delete_countdown_start = None;
@@ -2578,5 +2661,56 @@ mod tests {
         app.nav_step('j');
         // Changing direction resets
         assert_eq!(app.nav_step('k'), 1);
+    }
+
+    #[test]
+    fn space_toggles_mark() {
+        let mut app = App::new(sample_sessions());
+        assert!(app.marked_sessions.is_empty());
+        // Mark first session
+        app.handle_key(KeyEvent::from(KeyCode::Char(' ')));
+        assert!(app.marked_sessions.contains("alpha"));
+        // Toggle off
+        app.handle_key(KeyEvent::from(KeyCode::Char(' ')));
+        assert!(!app.marked_sessions.contains("alpha"));
+    }
+
+    #[test]
+    fn d_uppercase_enters_batch_delete_when_marked() {
+        let mut app = App::new(sample_sessions());
+        app.marked_sessions.insert("alpha".into());
+        app.handle_key(KeyEvent::from(KeyCode::Char('D')));
+        assert_eq!(app.mode, Mode::ConfirmBatchDelete);
+        assert!(app.delete_countdown_start.is_some());
+    }
+
+    #[test]
+    fn d_uppercase_shows_status_when_no_marks() {
+        let mut app = App::new(sample_sessions());
+        app.handle_key(KeyEvent::from(KeyCode::Char('D')));
+        assert_eq!(app.mode, Mode::Normal);
+        assert!(app.status_message.as_ref().unwrap().text.contains("No sessions marked"));
+    }
+
+    #[test]
+    fn batch_delete_y_rejected_during_countdown() {
+        let mut app = App::new(sample_sessions());
+        app.marked_sessions.insert("alpha".into());
+        app.mode = Mode::ConfirmBatchDelete;
+        app.delete_countdown_start = Some(std::time::Instant::now());
+        app.handle_key(KeyEvent::from(KeyCode::Char('y')));
+        assert_eq!(app.mode, Mode::ConfirmBatchDelete); // still confirming
+    }
+
+    #[test]
+    fn batch_delete_n_cancels() {
+        let mut app = App::new(sample_sessions());
+        app.marked_sessions.insert("alpha".into());
+        app.mode = Mode::ConfirmBatchDelete;
+        app.delete_countdown_start = Some(std::time::Instant::now());
+        app.handle_key(KeyEvent::from(KeyCode::Char('n')));
+        assert_eq!(app.mode, Mode::Normal);
+        // Marks preserved after cancel
+        assert!(app.marked_sessions.contains("alpha"));
     }
 }
