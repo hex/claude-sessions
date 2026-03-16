@@ -192,7 +192,7 @@ This rsyncs the session to the remote host and creates a local stub so future `c
 └── [your project files]    # Clean workspace
 ```
 
-Claude Code's [auto memory](https://code.claude.com/docs/en/memory) is redirected into `.cs/memory/` so it lives inside the session directory. This means auto memory is synced across machines with `cs -sync`, cleaned up with `cs -rm`, and available for session preview in the TUI.
+Claude Code's [auto memory](https://code.claude.com/docs/en/memory) is redirected into `.cs/memory/` via `CLAUDE_CODE_AUTO_MEMORY_PATH` env var (set at launch) and `.claude/settings.local.json` (for future compatibility). This means auto memory is synced across machines with `cs -sync` and cleaned up with `cs -rm`.
 
 ## Configuration
 

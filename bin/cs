@@ -524,16 +524,27 @@ validate_session_name() {
     fi
 }
 
-# Configure auto memory to live inside the session directory
+# Ensure auto memory directory exists and migrate from default location
 setup_auto_memory() {
     local session_dir="$1"
     mkdir -p "$session_dir/.cs/memory"
+    # Add autoMemoryDirectory to settings.local.json (merge, don't overwrite)
+    local settings_file="$session_dir/.claude/settings.local.json"
     mkdir -p "$session_dir/.claude"
-    cat > "$session_dir/.claude/settings.local.json" << 'EOF'
+    if [ -f "$settings_file" ] && command -v jq >/dev/null 2>&1; then
+        local current
+        current=$(cat "$settings_file")
+        echo "$current" | jq '.autoMemoryDirectory = ".cs/memory"' > "$settings_file"
+    elif [ -f "$settings_file" ]; then
+        # No jq, file exists — leave it alone rather than risk clobbering
+        :
+    else
+        cat > "$settings_file" << 'SETTINGS'
 {
   "autoMemoryDirectory": ".cs/memory"
 }
-EOF
+SETTINGS
+    fi
 
     # Migrate existing auto memory from the default location
     local real_path
@@ -1082,6 +1093,7 @@ launch_claude_code() {
     export CLAUDE_SESSION_META_DIR="$session_dir/.cs"
     export CLAUDE_ARTIFACT_DIR="$session_dir/.cs/artifacts"
     export CLAUDE_CODE_TASK_LIST_ID="$session_name"
+    export CLAUDE_CODE_AUTO_MEMORY_PATH="$session_dir/.cs/memory"
 
     # Status indicator
     local status_icon status_text
@@ -2392,6 +2404,16 @@ run_uninstall() {
             rm -rf "$SESSIONS_ROOT"
             info "Removed $SESSIONS_ROOT"
         else
+            # Clean up autoMemoryDirectory from session settings files
+            if command -v jq >/dev/null 2>&1; then
+                for session_link in "$SESSIONS_ROOT"/*/; do
+                    local sf
+                    sf="$(readlink -f "$session_link" 2>/dev/null || echo "$session_link")/.claude/settings.local.json"
+                    if [ -f "$sf" ] && jq -e '.autoMemoryDirectory' "$sf" >/dev/null 2>&1; then
+                        jq 'del(.autoMemoryDirectory)' "$sf" > "${sf}.tmp" && mv "${sf}.tmp" "$sf"
+                    fi
+                done
+            fi
             info "Kept $SESSIONS_ROOT"
         fi
     fi
