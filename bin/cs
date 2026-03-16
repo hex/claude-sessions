@@ -524,6 +524,18 @@ validate_session_name() {
     fi
 }
 
+# Configure auto memory to live inside the session directory
+setup_auto_memory() {
+    local session_dir="$1"
+    mkdir -p "$session_dir/.cs/memory"
+    mkdir -p "$session_dir/.claude"
+    cat > "$session_dir/.claude/settings.local.json" << 'EOF'
+{
+  "autoMemoryDirectory": ".cs/memory"
+}
+EOF
+}
+
 # Create session directory structure
 create_session_structure() {
     local session_dir="$1"
@@ -659,6 +671,9 @@ EOF
     cat > "$session_dir/.cs/sync.conf" << EOF
 auto_sync=on
 EOF
+
+    # Redirect Claude Code auto memory into the session directory
+    setup_auto_memory "$session_dir"
 }
 
 # Move a file or directory if source exists and destination doesn't (idempotent)
@@ -735,7 +750,12 @@ EOF
         warn "Added sync.conf with auto-sync enabled"
     fi
 
-    # Phase 4: Update CLAUDE.md to reference .cs/ paths if needed
+    # Phase 4: Ensure auto memory is configured
+    if [ ! -d "$session_dir/.cs/memory" ] || [ ! -f "$session_dir/.claude/settings.local.json" ]; then
+        setup_auto_memory "$session_dir"
+    fi
+
+    # Phase 5: Update CLAUDE.md to reference .cs/ paths if needed
     local claude_md="$session_dir/CLAUDE.md"
     if [ -f "$claude_md" ] && ! grep -q '\.cs/' "$claude_md"; then
         cat > "$claude_md" << 'EOF'
@@ -1533,6 +1553,9 @@ create_session_gitignore() {
 # Session cooldown markers
 .cs/.discoveries-reminder-cooldown
 
+# Claude Code local settings (recreated by cs on each machine)
+.claude/settings.local.json
+
 # OS files
 .DS_Store
 Thumbs.db
@@ -1602,6 +1625,7 @@ adopt_session() {
 # cs session metadata
 .cs/archives/
 .cs/.discoveries-reminder-cooldown
+.claude/settings.local.json
 ENTRIES
         )
         if [ -f "$target_dir/.gitignore" ]; then

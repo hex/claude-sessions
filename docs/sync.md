@@ -137,11 +137,12 @@ On pull, `secrets.age` is preferred if present; `secrets.enc` is used as fallbac
 
 - CLAUDE.md (at session root)
 - .cs/ metadata directory (README.md, discoveries.md, changes.md, sync.conf)
+- .cs/memory/ directory (Claude Code auto memory)
 - .cs/artifacts/ directory (scripts, configs, MANIFEST.json)
 - .cs/logs/session.log
 - Encrypted secrets (.cs/secrets.enc or .cs/secrets.age)
 
-**Excluded from sync:** .cs/archives/, lock files, OS/editor files
+**Excluded from sync:** .cs/archives/, .claude/settings.local.json (recreated by cs), lock files, OS/editor files
 
 ## Security
 
