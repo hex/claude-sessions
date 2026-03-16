@@ -527,23 +527,25 @@ validate_session_name() {
 # Ensure auto memory directory exists and migrate from default location
 setup_auto_memory() {
     local session_dir="$1"
-    mkdir -p "$session_dir/.cs/memory"
-    # Add autoMemoryDirectory to settings.local.json (merge, don't overwrite)
-    # autoMemoryDirectory requires absolute paths (~/expanded), not relative
+    mkdir -p "$session_dir/.cs"/{memory,plans}
+    # Merge cs settings into settings.local.json (don't overwrite user's other settings)
+    # autoMemoryDirectory requires absolute paths; plansDirectory supports relative paths
     local settings_file="$session_dir/.claude/settings.local.json"
     local memory_path="$session_dir/.cs/memory"
     mkdir -p "$session_dir/.claude"
     if [ -f "$settings_file" ] && command -v jq >/dev/null 2>&1; then
         local current
         current=$(cat "$settings_file")
-        echo "$current" | jq --arg p "$memory_path" '.autoMemoryDirectory = $p' > "$settings_file"
+        echo "$current" | jq --arg m "$memory_path" \
+            '.autoMemoryDirectory = $m | .plansDirectory = ".cs/plans"' > "$settings_file"
     elif [ -f "$settings_file" ]; then
         # No jq, file exists — leave it alone rather than risk clobbering
         :
     else
         cat > "$settings_file" << SETTINGS
 {
-  "autoMemoryDirectory": "$memory_path"
+  "autoMemoryDirectory": "$memory_path",
+  "plansDirectory": ".cs/plans"
 }
 SETTINGS
     fi
@@ -774,8 +776,8 @@ EOF
         warn "Added sync.conf with auto-sync enabled"
     fi
 
-    # Phase 4: Ensure auto memory is configured
-    if [ ! -d "$session_dir/.cs/memory" ] || [ ! -f "$session_dir/.claude/settings.local.json" ]; then
+    # Phase 4: Ensure auto memory and plans are configured
+    if [ ! -d "$session_dir/.cs/memory" ] || [ ! -d "$session_dir/.cs/plans" ] || [ ! -f "$session_dir/.claude/settings.local.json" ]; then
         setup_auto_memory "$session_dir"
     fi
 
