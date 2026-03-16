@@ -157,6 +157,52 @@ EOF
         "settings.local.json should be created on migration" || return 1
 }
 
+test_migration_moves_existing_auto_memory() {
+    # Simulate an existing session with auto memory at the default location
+    local session_dir="$CS_SESSIONS_ROOT/mem-session"
+    mkdir -p "$session_dir/.cs"/{artifacts,logs}
+    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
+    cat > "$session_dir/.cs/sync.conf" << 'EOF'
+auto_sync=on
+EOF
+    cat > "$session_dir/CLAUDE.md" << 'EOF'
+# Session Documentation Protocol
+
+This is a Claude Code session managed by the cs tool. Session metadata lives in the .cs/ directory.
+EOF
+    (cd "$session_dir" && git init -q && git add -A && git commit -q -m "init")
+
+    # Create auto memory at the default Claude Code location
+    local real_path
+    real_path="$(cd "$session_dir" && pwd -P)"
+    local encoded_path
+    encoded_path=$(echo "$real_path" | sed 's|/|-|g; s|\.|-|g')
+    local old_memory_dir="$HOME/.claude/projects/${encoded_path}/memory"
+    mkdir -p "$old_memory_dir"
+    echo "build command: cargo test" > "$old_memory_dir/MEMORY.md"
+    echo "debug notes here" > "$old_memory_dir/debugging.md"
+
+    # Opening the session triggers migration
+    "$CS_BIN" mem-session <<< "" 2>&1 || true
+
+    # Memory files should be moved into .cs/memory/
+    assert_exists "$session_dir/.cs/memory/MEMORY.md" \
+        "MEMORY.md should be migrated to .cs/memory/" || return 1
+    assert_file_contains "$session_dir/.cs/memory/MEMORY.md" "cargo test" \
+        "MEMORY.md content should be preserved" || return 1
+    assert_exists "$session_dir/.cs/memory/debugging.md" \
+        "debugging.md should be migrated to .cs/memory/" || return 1
+
+    # Old location should be cleaned up
+    if [ -d "$old_memory_dir" ] && [ "$(ls -A "$old_memory_dir" 2>/dev/null)" ]; then
+        echo "  FAIL: old memory dir should be empty after migration"
+        return 1
+    fi
+
+    # Clean up the projects dir we created
+    rm -rf "$HOME/.claude/projects/${encoded_path}" 2>/dev/null || true
+}
+
 # ============================================================================
 # Runner
 # ============================================================================
@@ -172,6 +218,7 @@ run_test test_settings_local_is_gitignored
 run_test test_adopt_creates_memory_dir
 run_test test_adopt_adds_settings_to_gitignore
 run_test test_migration_creates_memory_and_settings
+run_test test_migration_moves_existing_auto_memory
 
 echo ""
 echo "Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed"
