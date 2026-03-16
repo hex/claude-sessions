@@ -184,6 +184,7 @@ This rsyncs the session to the remote host and creates a local stub so future `c
 │   ├── sync.conf           # Sync configuration
 │   ├── remote.conf         # Remote host (if remote session)
 │   ├── memory/             # Claude Code auto memory (synced)
+│   ├── plans/              # Claude Code plans (synced)
 │   ├── artifacts/          # Auto-tracked scripts and configs
 │   └── logs/session.log    # Session command log
 ├── .claude/
@@ -192,7 +193,7 @@ This rsyncs the session to the remote host and creates a local stub so future `c
 └── [your project files]    # Clean workspace
 ```
 
-Claude Code's [auto memory](https://code.claude.com/docs/en/memory) is redirected into `.cs/memory/` via `CLAUDE_CODE_AUTO_MEMORY_PATH` env var (set at launch) and `.claude/settings.local.json` (for future compatibility). This means auto memory is synced across machines with `cs -sync` and cleaned up with `cs -rm`.
+Claude Code's [auto memory](https://code.claude.com/docs/en/memory) and [plans](https://code.claude.com/docs/en/settings) are redirected into `.cs/memory/` and `.cs/plans/` respectively via `CLAUDE_CODE_AUTO_MEMORY_PATH` env var and `.claude/settings.local.json`. This means both are synced across machines with `cs -sync` and cleaned up with `cs -rm`.
 
 ## Configuration
 
