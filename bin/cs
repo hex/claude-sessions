@@ -529,19 +529,21 @@ setup_auto_memory() {
     local session_dir="$1"
     mkdir -p "$session_dir/.cs/memory"
     # Add autoMemoryDirectory to settings.local.json (merge, don't overwrite)
+    # autoMemoryDirectory requires absolute paths (~/expanded), not relative
     local settings_file="$session_dir/.claude/settings.local.json"
+    local memory_path="$session_dir/.cs/memory"
     mkdir -p "$session_dir/.claude"
     if [ -f "$settings_file" ] && command -v jq >/dev/null 2>&1; then
         local current
         current=$(cat "$settings_file")
-        echo "$current" | jq '.autoMemoryDirectory = ".cs/memory"' > "$settings_file"
+        echo "$current" | jq --arg p "$memory_path" '.autoMemoryDirectory = $p' > "$settings_file"
     elif [ -f "$settings_file" ]; then
         # No jq, file exists — leave it alone rather than risk clobbering
         :
     else
-        cat > "$settings_file" << 'SETTINGS'
+        cat > "$settings_file" << SETTINGS
 {
-  "autoMemoryDirectory": ".cs/memory"
+  "autoMemoryDirectory": "$memory_path"
 }
 SETTINGS
     fi
