@@ -2404,16 +2404,6 @@ run_uninstall() {
             rm -rf "$SESSIONS_ROOT"
             info "Removed $SESSIONS_ROOT"
         else
-            # Clean up autoMemoryDirectory from session settings files
-            if command -v jq >/dev/null 2>&1; then
-                for session_link in "$SESSIONS_ROOT"/*/; do
-                    local sf
-                    sf="$(readlink -f "$session_link" 2>/dev/null || echo "$session_link")/.claude/settings.local.json"
-                    if [ -f "$sf" ] && jq -e '.autoMemoryDirectory' "$sf" >/dev/null 2>&1; then
-                        jq 'del(.autoMemoryDirectory)' "$sf" > "${sf}.tmp" && mv "${sf}.tmp" "$sf"
-                    fi
-                done
-            fi
             info "Kept $SESSIONS_ROOT"
         fi
     fi
