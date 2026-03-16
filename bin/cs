@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.3.4"
+VERSION="2026.3.7"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -2175,7 +2175,7 @@ run_uninstall() {
     local zsh_completion_dir="$HOME/.zsh/completions"
 
     warn "This will uninstall cs and all its components:"
-    echo "  - $install_dir/cs, $install_dir/cs-secrets"
+    echo "  - $install_dir/cs, $install_dir/cs-secrets, $install_dir/cs-tui"
     echo "  - Hooks in $hooks_dir/"
     echo "  - Commands in $commands_dir/"
     echo "  - Skills in $skills_dir/"
@@ -2204,8 +2204,13 @@ run_uninstall() {
         info "Removed $install_dir/cs-secrets"
     fi
 
+    if [ -f "$install_dir/cs-tui" ]; then
+        rm "$install_dir/cs-tui"
+        info "Removed $install_dir/cs-tui"
+    fi
+
     # Remove hooks
-    for hook in session-start.sh artifact-tracker.sh changes-tracker.sh discovery-commits.sh discoveries-reminder.sh discoveries-archiver.sh session-end.sh; do
+    for hook in session-start.sh artifact-tracker.sh changes-tracker.sh discovery-commits.sh discoveries-reminder.sh discoveries-archiver.sh session-end.sh subagent-context.sh tool-failure-logger.sh session-auto-approve.sh; do
         if [ -f "$hooks_dir/$hook" ]; then
             rm "$hooks_dir/$hook"
             info "Removed $hooks_dir/$hook"
@@ -2246,6 +2251,9 @@ run_uninstall() {
         local discoveries_reminder_path="$hooks_dir/discoveries-reminder.sh"
         local discoveries_archiver_path="$hooks_dir/discoveries-archiver.sh"
         local session_end_path="$hooks_dir/session-end.sh"
+        local subagent_context_path="$hooks_dir/subagent-context.sh"
+        local tool_failure_logger_path="$hooks_dir/tool-failure-logger.sh"
+        local session_auto_approve_path="$hooks_dir/session-auto-approve.sh"
 
         local settings
         settings=$(cat "$settings_file")
@@ -2298,6 +2306,27 @@ run_uninstall() {
         settings=$(echo "$settings" | jq --arg path "$session_end_path" '
             if .hooks.SessionEnd then
                 .hooks.SessionEnd = [.hooks.SessionEnd[] | select(.hooks | all(.command != $path))]
+            else . end
+        ')
+
+        # Remove our SubagentStart hook
+        settings=$(echo "$settings" | jq --arg path "$subagent_context_path" '
+            if .hooks.SubagentStart then
+                .hooks.SubagentStart = [.hooks.SubagentStart[] | select(.hooks | all(.command != $path))]
+            else . end
+        ')
+
+        # Remove our PostToolUseFailure hook
+        settings=$(echo "$settings" | jq --arg path "$tool_failure_logger_path" '
+            if .hooks.PostToolUseFailure then
+                .hooks.PostToolUseFailure = [.hooks.PostToolUseFailure[] | select(.hooks | all(.command != $path))]
+            else . end
+        ')
+
+        # Remove our PermissionRequest hook
+        settings=$(echo "$settings" | jq --arg path "$session_auto_approve_path" '
+            if .hooks.PermissionRequest then
+                .hooks.PermissionRequest = [.hooks.PermissionRequest[] | select(.hooks | all(.command != $path))]
             else . end
         ')
 
