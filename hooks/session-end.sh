@@ -79,6 +79,16 @@ if [ -f "$SYNC_CONFIG" ] && [ -d "$SESSION_DIR/.git" ]; then
             done
         fi
 
+        # Scan memory files for suspicious patterns (warn only, don't block auto-sync)
+        if [ -d "$SESSION_DIR/.cs/memory" ]; then
+            for _memfile in "$SESSION_DIR"/.cs/memory/*.md; do
+                [ -f "$_memfile" ] || continue
+                if grep -qiE 'ignore\s+(previous|all|above)\s+instructions|system\s+prompt\s+override|disregard\s+(your|all)\s+(instructions|rules)' "$_memfile" 2>/dev/null; then
+                    echo "$(date '+%Y-%m-%d %H:%M:%S') - WARNING: suspicious pattern in memory file: $(basename "$_memfile")" >> "$META_DIR/logs/session.log"
+                fi
+            done
+        fi
+
         # Stage, commit, and push (or commit locally)
         git add -A 2>/dev/null || true
         if ! git diff --cached --quiet 2>/dev/null; then
