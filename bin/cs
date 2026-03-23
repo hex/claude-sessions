@@ -1865,6 +1865,53 @@ sync_remote() {
     fi
 }
 
+# Scan memory files for injection/exfiltration patterns before syncing
+scan_memory_files() {
+    local session_dir="$1"
+    local memory_dir="$session_dir/.cs/memory"
+    local found=0
+
+    [ -d "$memory_dir" ] || return 0
+
+    for file in "$memory_dir"/*.md; do
+        [ -f "$file" ] || continue
+        local filename
+        filename=$(basename "$file")
+
+        # Invisible unicode characters
+        if grep -Pq '[\x{200b}\x{200c}\x{200d}\x{2060}\x{feff}\x{202a}-\x{202e}]' "$file" 2>/dev/null; then
+            warn "  $filename: contains invisible unicode characters (possible injection)"
+            found=$((found + 1))
+        fi
+
+        # Prompt injection patterns
+        while IFS= read -r match; do
+            warn "  $filename: $match"
+            found=$((found + 1))
+        done < <(grep -inE 'ignore\s+(previous|all|above)(\s+\w+)*\s+instructions|you\s+are\s+now\s+|system\s+prompt\s+override|disregard\s+(your|all|any)(\s+\w+)*\s+(instructions|rules|guidelines)' "$file" 2>/dev/null || true)
+
+        # Credential exfiltration via curl/wget
+        while IFS= read -r match; do
+            warn "  $filename: $match"
+            found=$((found + 1))
+        done < <(grep -inE 'curl\s+.*\$\{?\w*(KEY|TOKEN|SECRET|PASSWORD)|wget\s+.*\$\{?\w*(KEY|TOKEN|SECRET|PASSWORD)' "$file" 2>/dev/null || true)
+
+        # Secret file reads
+        while IFS= read -r match; do
+            warn "  $filename: $match"
+            found=$((found + 1))
+        done < <(grep -inE 'cat\s+.*(\.env|credentials|\.netrc|\.pgpass|authorized_keys)' "$file" 2>/dev/null || true)
+    done
+
+    if [ "$found" -gt 0 ]; then
+        warn ""
+        warn "Found $found suspicious pattern(s) in memory files."
+        warn "Review the content above. Use --force to push anyway."
+        return 1
+    fi
+    return 0
+}
+
 # Push session to remote
 sync_push() {
     local session_name="$1"
@@ -1895,6 +1942,11 @@ sync_push() {
                 info "Exported secrets to secrets.enc"
             fi
         fi
+    fi
+
+    # Scan memory files for injection patterns
+    if ! scan_memory_files "$session_dir"; then
+        return 1
     fi
 
     # Stage all changes
