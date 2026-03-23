@@ -34,6 +34,8 @@ No git repo required. No project structure needed. Just a name for what you're w
 - **Session locking** - PID-based lock prevents the same session from being opened in two terminals simultaneously; use `--force` to override
 - **Remote sessions** - Run sessions on remote machines via `et` or `ssh` + `tmux`; `cs` handles connection, stubbing, and session tracking
 - **Update notifications** - Checks for updates and notifies when new versions are available
+- **CLI command capture** - Interesting commands auto-tracked to `.cs/commands.md` with secret scrubbing; frequently used commands can be promoted to reusable skills via `/skillify`
+- **Cross-session search** - `cs -search <query>` greps across all sessions' discoveries, memory, README, and changes
 - **Verified updates** - Updates are downloaded from GitHub Releases and verified with SHA-256 checksums; additionally verified with [minisign](https://jedisct1.github.io/minisign/) signatures when available
 
 ## Installation
@@ -184,6 +186,8 @@ This rsyncs the session to the remote host and creates a local stub so future `c
 │   ├── sync.conf           # Sync configuration
 │   ├── remote.conf         # Remote host (if remote session)
 │   ├── memory/             # Claude Code auto memory (synced)
+│   ├── plans/              # Claude Code plans (synced)
+│   ├── commands.md         # Auto-discovered CLI commands
 │   ├── artifacts/          # Auto-tracked scripts and configs
 │   └── logs/session.log    # Session command log
 ├── .claude/
