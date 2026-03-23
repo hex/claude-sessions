@@ -15,30 +15,27 @@ The user provides a command string (e.g., `/skillify npm run build && npm test`)
 ## Steps
 
 1. Parse the command from the arguments
-2. Determine a short, descriptive skill name from the command (e.g., `build-and-test`, `deploy-staging`, `run-migrations`)
-3. Create a skill file at `.claude/skills/<name>/SKILL.md` with:
-   - A clear description of what the command does
-   - When to use it
-   - The exact command(s) to run
-   - Prerequisites or caveats (if any)
-4. Confirm creation to the user
+2. Determine a skill name: lowercase, hyphens only, max 64 chars. Prefer gerund form (e.g., `building-project`, `testing-api`, `deploying-staging`)
+3. Write a description in **third person** that says what the skill does AND when to use it (max 1024 chars)
+4. Check if `.claude/skills/<name>/SKILL.md` already exists — if so, ask before overwriting
+5. Create the skill file following the format below
+6. Confirm creation and tell the user they can invoke it with `/<skill-name>`
 
 ## Skill File Format
 
+The file MUST have YAML frontmatter with `name` and `description`:
+
 ```markdown
-PROACTIVE: Invoke when the user asks to <description of when>.
+---
+name: <skill-name>
+description: <Third-person description of what it does and when to use it. Include key terms for discovery.>
+---
 
-# <Skill Name>
+# <Human-Readable Title>
 
-<Brief description of what this workflow does.>
-
-## When to Use
-
-- <Situation where this skill applies>
+<One sentence: what this does.>
 
 ## Commands
-
-Run these commands in sequence:
 
 ```bash
 <the command(s)>
@@ -46,13 +43,14 @@ Run these commands in sequence:
 
 ## Notes
 
-- <Any prerequisites, caveats, or environment requirements>
+- <Prerequisites, caveats, or environment requirements — only if needed>
 ```
 
-## Guidelines
+## Rules
 
-- Keep the skill name lowercase with hyphens (e.g., `build-project`, `test-api`)
-- If the command contains secrets or environment-specific values, note them as prerequisites
-- If the command is a multi-step workflow (contains && or |), break it into numbered steps
-- Check if a skill with the same name already exists before creating
-- After creating, tell the user they can invoke it with `/<skill-name>`
+- `name`: lowercase letters, numbers, hyphens only. No "anthropic" or "claude" in the name.
+- `description`: third person ("Runs the build pipeline" not "I run the build"). Include trigger terms.
+- Keep SKILL.md concise — only include what Claude doesn't already know. No verbose explanations.
+- If the command is a multi-step workflow (contains && or |), break into numbered steps.
+- If the command references secrets or env-specific values, note them in Notes section.
+- Do NOT use `PROACTIVE:` keyword — use the `description` field for triggering.
