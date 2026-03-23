@@ -604,6 +604,13 @@ EOF
 
 EOF
 
+    # Create commands.md (populated by command-tracker hook)
+    cat > "$session_dir/.cs/commands.md" << 'EOF'
+# Project Commands
+Auto-discovered CLI commands from prior sessions.
+
+EOF
+
     # Create CLAUDE.md with session-specific instructions
     cat > "$session_dir/CLAUDE.md" << 'EOF'
 # Session Documentation Protocol
@@ -620,10 +627,17 @@ When resuming this session, read the following files to restore context:
 4. **.cs/discoveries.compact.md** - If exists, condensed historical findings
 5. **.cs/changes.md** - Modifications and fixes made
 6. **.cs/artifacts/MANIFEST.json** - List of tracked artifacts
+7. **.cs/commands.md** - CLI commands discovered in prior sessions
 
 Note: Historical discoveries are archived to .cs/discoveries.archive.md
 and condensed into .cs/discoveries.compact.md. Only read the archive
 if you need full detail on a specific past finding.
+
+## Discovered Commands
+
+Useful CLI commands from prior sessions are tracked automatically.
+
+@.cs/commands.md
 
 ## Artifact Auto-Tracking
 
@@ -803,10 +817,17 @@ When resuming this session, read the following files to restore context:
 4. **.cs/discoveries.compact.md** - If exists, condensed historical findings
 5. **.cs/changes.md** - Modifications and fixes made
 6. **.cs/artifacts/MANIFEST.json** - List of tracked artifacts
+7. **.cs/commands.md** - CLI commands discovered in prior sessions
 
 Note: Historical discoveries are archived to .cs/discoveries.archive.md
 and condensed into .cs/discoveries.compact.md. Only read the archive
 if you need full detail on a specific past finding.
+
+## Discovered Commands
+
+Useful CLI commands from prior sessions are tracked automatically.
+
+@.cs/commands.md
 
 ## Artifact Auto-Tracking
 
@@ -2338,7 +2359,7 @@ run_uninstall() {
     fi
 
     # Remove hooks
-    for hook in session-start.sh artifact-tracker.sh changes-tracker.sh discovery-commits.sh discoveries-reminder.sh discoveries-archiver.sh session-end.sh subagent-context.sh tool-failure-logger.sh session-auto-approve.sh; do
+    for hook in session-start.sh artifact-tracker.sh changes-tracker.sh discovery-commits.sh discoveries-reminder.sh discoveries-archiver.sh session-end.sh subagent-context.sh tool-failure-logger.sh session-auto-approve.sh command-tracker.sh; do
         if [ -f "$hooks_dir/$hook" ]; then
             rm "$hooks_dir/$hook"
             info "Removed $hooks_dir/$hook"
@@ -2382,6 +2403,7 @@ run_uninstall() {
         local subagent_context_path="$hooks_dir/subagent-context.sh"
         local tool_failure_logger_path="$hooks_dir/tool-failure-logger.sh"
         local session_auto_approve_path="$hooks_dir/session-auto-approve.sh"
+        local command_tracker_path="$hooks_dir/command-tracker.sh"
 
         local settings
         settings=$(cat "$settings_file")
@@ -2455,6 +2477,13 @@ run_uninstall() {
         settings=$(echo "$settings" | jq --arg path "$session_auto_approve_path" '
             if .hooks.PermissionRequest then
                 .hooks.PermissionRequest = [.hooks.PermissionRequest[] | select(.hooks | all(.command != $path))]
+            else . end
+        ')
+
+        # Remove our PostToolUse command tracker hook
+        settings=$(echo "$settings" | jq --arg path "$command_tracker_path" '
+            if .hooks.PostToolUse then
+                .hooks.PostToolUse = [.hooks.PostToolUse[] | select(.hooks | all(.command != $path))]
             else . end
         ')
 
