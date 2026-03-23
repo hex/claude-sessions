@@ -134,6 +134,27 @@ else
     ' "$COMMANDS_FILE" > "$COMMANDS_FILE.tmp" && mv "$COMMANDS_FILE.tmp" "$COMMANDS_FILE"
 fi
 
+# --- Skill promotion detection ---
+DATES_FILE="$META_DIR/command-dates.txt"
+PROMOTED_FILE="$META_DIR/promoted-commands.txt"
+
+# Record this command + date (for cross-session detection)
+echo "${SAFE_COMMAND}|${DATE_TODAY}" >> "$DATES_FILE" 2>/dev/null || true
+
+# Check promotion threshold: 3+ uses AND 2+ distinct dates
+if [ -f "$DATES_FILE" ] && [ ! -f "$PROMOTED_FILE" ] || ! grep -qF "$SAFE_COMMAND" "$PROMOTED_FILE" 2>/dev/null; then
+    USE_COUNT=$(grep -cF "${SAFE_COMMAND}|" "$DATES_FILE" 2>/dev/null || echo "0")
+    DISTINCT_DATES=$(grep -F "${SAFE_COMMAND}|" "$DATES_FILE" 2>/dev/null | cut -d'|' -f2 | sort -u | wc -l | tr -d ' ')
+
+    if [ "$USE_COUNT" -ge 3 ] && [ "$DISTINCT_DATES" -ge 2 ]; then
+        # Mark as promoted so we don't suggest again
+        echo "$SAFE_COMMAND" >> "$PROMOTED_FILE" 2>/dev/null || true
+
+        # Output suggestion via additionalContext (shown to Claude)
+        echo '{"additionalContext": "A frequently used command was detected: `'"$SAFE_COMMAND"'` (used '"$USE_COUNT"' times across '"$DISTINCT_DATES"' sessions). Consider creating a reusable skill with: /skillify '"$SAFE_COMMAND"'"}'
+    fi
+fi
+
 _cleanup_lock
 trap - EXIT
 

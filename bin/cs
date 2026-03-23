@@ -1661,6 +1661,10 @@ create_session_gitignore() {
 # Session cooldown markers
 .cs/.discoveries-reminder-cooldown
 
+# Command tracker internal state
+.cs/command-dates.txt
+.cs/promoted-commands.txt
+
 # Claude Code local settings (recreated by cs on each machine)
 .claude/settings.local.json
 
