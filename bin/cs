@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.3.8"
+VERSION="2026.3.7"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -204,6 +204,7 @@ show_help() {
     echo -e "  ${GOLD}user@host:name${NC}      Connect to remote session (auto-remembered)"
     echo -e "  ${GOLD}<name>${NC} ${ORANGE}-sync${NC} ${GOLD}<cmd>${NC}  Run sync command on ${GOLD}<name>${NC} without launching session"
     echo -e "  ${GOLD}<name>${NC} ${ORANGE}-secrets${NC} ${GOLD}<cmd>${NC}  Run secrets command on ${GOLD}<name>${NC} without launching session"
+    echo -e "  ${ORANGE}-search${NC} ${GOLD}<query>${NC}      Search across all sessions (discoveries, memory, README)"
     echo -e "  ${ORANGE}-list${NC}, ${ORANGE}-ls${NC}          List all sessions (shows remote location)"
     echo -e "  ${ORANGE}-adopt${NC} ${GOLD}<name>${NC}        Adopt current directory as a cs session"
     echo -e "  ${ORANGE}-remote${NC} ${GOLD}<cmd>${NC}        Manage remote hosts"
@@ -876,6 +877,62 @@ get_file_mtime() {
         stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$file" 2>/dev/null || echo "-"
     else
         stat -c "%y" "$file" 2>/dev/null | cut -d. -f1 || echo "-"
+    fi
+}
+
+# Search across all sessions' metadata
+search_sessions() {
+    local query="$1"
+
+    if [ -z "$query" ]; then
+        error "Usage: cs -search <query>"
+    fi
+
+    if [ ! -d "$SESSIONS_ROOT" ]; then
+        info "No sessions found"
+        return 0
+    fi
+
+    local found=0
+    local search_files=".cs/discoveries.md .cs/discoveries.compact.md .cs/README.md .cs/changes.md"
+    local search_globs=".cs/memory/*.md"
+
+    for session_dir in "$SESSIONS_ROOT"/*/; do
+        [ -d "$session_dir" ] || continue
+        local session_name
+        session_name=$(basename "$session_dir")
+
+        # Resolve symlinks for adopted sessions
+        local real_dir
+        real_dir=$(cd "$session_dir" 2>/dev/null && pwd -P) || continue
+
+        # Search fixed files
+        for relpath in $search_files; do
+            local filepath="$real_dir/$relpath"
+            [ -f "$filepath" ] || continue
+            local matches
+            matches=$(grep -in "$query" "$filepath" 2>/dev/null) || continue
+            while IFS= read -r line; do
+                echo -e "${GOLD}${session_name}${NC}: ${DIM}${relpath}${NC}: ${line}"
+                found=$((found + 1))
+            done <<< "$matches"
+        done
+
+        # Search glob patterns (memory files)
+        for filepath in "$real_dir"/$search_globs; do
+            [ -f "$filepath" ] || continue
+            local relpath="${filepath#"$real_dir"/}"
+            local matches
+            matches=$(grep -in "$query" "$filepath" 2>/dev/null) || continue
+            while IFS= read -r line; do
+                echo -e "${GOLD}${session_name}${NC}: ${DIM}${relpath}${NC}: ${line}"
+                found=$((found + 1))
+            done <<< "$matches"
+        done
+    done
+
+    if [ "$found" -eq 0 ]; then
+        info "No results for '$query'"
     fi
 }
 
@@ -2550,6 +2607,10 @@ main() {
                     error "Unknown option: $update_arg. Use 'cs -update [--check|--force]'"
                     ;;
             esac
+            return 0
+            ;;
+        -search)
+            search_sessions "${2:-}"
             return 0
             ;;
         -remote)
