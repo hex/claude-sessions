@@ -456,7 +456,7 @@ else
             "hooks": [{
                 "type": "command",
                 "command": $tilde,
-                "timeout": 10
+                "timeout": 30
             }]
         }]
     ')
