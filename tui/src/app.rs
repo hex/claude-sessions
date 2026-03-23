@@ -3042,6 +3042,7 @@ mod tests {
                 artifact_count: 3,
                 discoveries: Vec::new(),
                 artifact_names: Vec::new(),
+                memory_entries: Vec::new(),
             },
         );
         app.handle_key(KeyEvent::from(KeyCode::Tab));
@@ -3085,6 +3086,7 @@ mod tests {
                 artifact_count: 0,
                 discoveries: Vec::new(),
                 artifact_names: Vec::new(),
+                memory_entries: Vec::new(),
             },
         );
         app.ensure_preview_loaded();

@@ -28,6 +28,8 @@ pub struct SessionPreview {
     pub discoveries: Vec<String>,
     /// Artifact file names for preview pane.
     pub artifact_names: Vec<String>,
+    /// First few lines from auto memory MEMORY.md.
+    pub memory_entries: Vec<String>,
 }
 
 /// Load preview info for a session by reading .cs/ metadata files.
@@ -91,12 +93,26 @@ pub fn load_preview(session_dir: &Path) -> SessionPreview {
         })
         .unwrap_or((0, Vec::new()));
 
+    // Memory entries from .cs/memory/MEMORY.md (first few non-empty lines)
+    let memory_entries = fs::read_to_string(cs_dir.join("memory/MEMORY.md"))
+        .ok()
+        .map(|content| {
+            content
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .take(5)
+                .map(|line| line.to_string())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
     SessionPreview {
         objective,
         last_discovery,
         artifact_count,
         discoveries,
         artifact_names,
+        memory_entries,
     }
 }
 

@@ -972,6 +972,25 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
             lines.push(Line::from(""));
         }
 
+        if !preview.memory_entries.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "Memory",
+                Style::default().fg(GOLD).add_modifier(Modifier::BOLD),
+            )));
+            for entry in &preview.memory_entries {
+                let truncated = if entry.len() > (area.width as usize).saturating_sub(6) {
+                    format!("{}...", &entry[..entry.len().min(area.width as usize - 9)])
+                } else {
+                    entry.clone()
+                };
+                lines.push(Line::from(vec![
+                    Span::styled("  ", Style::default()),
+                    Span::styled(truncated, Style::default().fg(COMMENT)),
+                ]));
+            }
+            lines.push(Line::from(""));
+        }
+
         if preview.artifact_count > 0 {
             lines.push(Line::from(Span::styled(
                 format!("Artifacts ({})", preview.artifact_count),
@@ -992,7 +1011,7 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
             }
         }
 
-        if preview.objective.is_none() && preview.discoveries.is_empty() && preview.artifact_count == 0 {
+        if preview.objective.is_none() && preview.discoveries.is_empty() && preview.memory_entries.is_empty() && preview.artifact_count == 0 {
             lines.push(Line::from(Span::styled(
                 "No .cs/ metadata",
                 Style::default().fg(COMMENT).add_modifier(Modifier::DIM),
