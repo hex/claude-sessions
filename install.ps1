@@ -93,7 +93,12 @@ function Install-ClaudeHooks {
         'changes-tracker.sh',
         'discovery-commits.sh',
         'discoveries-reminder.sh',
-        'session-end.sh'
+        'discoveries-archiver.sh',
+        'session-end.sh',
+        'subagent-context.sh',
+        'tool-failure-logger.sh',
+        'session-auto-approve.sh',
+        'command-tracker.sh'
     )
 
     foreach ($hook in $hooks) {
@@ -109,10 +114,14 @@ function Install-ClaudeHooks {
 function Install-ClaudeCommands {
     Write-Success "Installing commands to $($Config.CommandsDir)"
 
-    Get-FileFromSource `
-        -LocalPath "$ScriptDir/commands/summary.md" `
-        -RemoteUrl "$($Config.RepoUrl)/commands/summary.md" `
-        -Destination "$($Config.CommandsDir)/summary.md"
+    $commands = @('summary.md', 'compact-discoveries.md')
+
+    foreach ($cmd in $commands) {
+        Get-FileFromSource `
+            -LocalPath "$ScriptDir/commands/$cmd" `
+            -RemoteUrl "$($Config.RepoUrl)/commands/$cmd" `
+            -Destination "$($Config.CommandsDir)/$cmd"
+    }
 }
 
 function Install-ClaudeSkills {
@@ -149,17 +158,23 @@ function Merge-ClaudeSettings {
         param(
             [string]$EventName,
             [string]$HookPath,
-            [string]$Matcher = $null
+            [string]$Matcher = $null,
+            [int]$Timeout = 10,
+            [switch]$Async
         )
 
+        $hookDef = @{
+            type    = 'command'
+            command = $HookPath
+            timeout = $Timeout
+        }
+
+        if ($Async) {
+            $hookDef['async'] = $true
+        }
+
         $hookEntry = @{
-            hooks = @(
-                @{
-                    type    = 'command'
-                    command = $HookPath
-                    timeout = 10
-                }
-            )
+            hooks = @($hookDef)
         }
 
         if ($null -ne $Matcher) {
@@ -186,13 +201,18 @@ function Merge-ClaudeSettings {
         $settings['hooks'][$EventName] = @($existingHooks) + @($hookEntry)
     }
 
-    # Configure all hooks
-    Add-Hook -EventName 'SessionStart' -HookPath "$HOME/.claude/hooks/session-start.sh"
+    # Configure all hooks (must match install.sh exactly)
+    Add-Hook -EventName 'SessionStart' -HookPath "$HOME/.claude/hooks/session-start.sh" -Timeout 30
     Add-Hook -EventName 'PreToolUse' -HookPath "$HOME/.claude/hooks/artifact-tracker.sh" -Matcher 'Write'
     Add-Hook -EventName 'PostToolUse' -HookPath "$HOME/.claude/hooks/changes-tracker.sh" -Matcher ''
-    Add-Hook -EventName 'PostToolUse' -HookPath "$HOME/.claude/hooks/discovery-commits.sh" -Matcher 'Write|Edit'
+    Add-Hook -EventName 'PostToolUse' -HookPath "$HOME/.claude/hooks/discovery-commits.sh" -Matcher 'Write|Edit' -Async
+    Add-Hook -EventName 'PostToolUse' -HookPath "$HOME/.claude/hooks/command-tracker.sh" -Matcher 'Bash' -Async
     Add-Hook -EventName 'Stop' -HookPath "$HOME/.claude/hooks/discoveries-reminder.sh"
-    Add-Hook -EventName 'SessionEnd' -HookPath "$HOME/.claude/hooks/session-end.sh"
+    Add-Hook -EventName 'PreCompact' -HookPath "$HOME/.claude/hooks/discoveries-archiver.sh"
+    Add-Hook -EventName 'SessionEnd' -HookPath "$HOME/.claude/hooks/session-end.sh" -Timeout 30
+    Add-Hook -EventName 'SubagentStart' -HookPath "$HOME/.claude/hooks/subagent-context.sh"
+    Add-Hook -EventName 'PostToolUseFailure' -HookPath "$HOME/.claude/hooks/tool-failure-logger.sh" -Async
+    Add-Hook -EventName 'PermissionRequest' -HookPath "$HOME/.claude/hooks/session-auto-approve.sh" -Matcher 'Write|Edit' -Timeout 5
 
     # Write settings back
     $settings | ConvertTo-Json -Depth 10 | Set-Content $Config.ClaudeSettings -Encoding UTF8
