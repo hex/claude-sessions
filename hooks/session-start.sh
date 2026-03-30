@@ -79,7 +79,7 @@ if [ -f "$SYNC_CONFIG" ] && [ -d "$SESSION_DIR/.git" ]; then
                     fi
                 fi
             fi
-        ) &
+        ) > /dev/null 2>&1 &
     fi
 fi
 
@@ -90,7 +90,7 @@ if [ -d "$SESSION_DIR/.git" ]; then
 
     # Recover from orphaned shadow ref (previous session crashed)
     if git -C "$SESSION_DIR" rev-parse -q --verify refs/cs/auto >/dev/null 2>&1; then
-        git -C "$SESSION_DIR" checkout refs/cs/auto -- . 2>/dev/null || true
+        git -C "$SESSION_DIR" checkout refs/cs/auto -- . >/dev/null 2>&1 || true
         git -C "$SESSION_DIR" update-ref -d refs/cs/auto 2>/dev/null || true
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Recovered autosaved changes from previous session" \
             >> "$META_DIR/logs/session.log"
