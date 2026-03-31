@@ -30,11 +30,11 @@ Runs after any file modification (Edit, Write, MultiEdit):
 
 ## discovery-commits.sh (PostToolUse on Write/Edit)
 
-Runs after modifications to discovery files (`.cs/discoveries.md`, `.cs/discoveries.archive.md`, `.cs/discoveries.compact.md`):
-- Parses the latest `##` heading (falls back to last bullet point if no heading)
-- Autosaves to `refs/cs/auto` shadow ref using git plumbing commands
+Runs after any file modification (Write or Edit), providing crash recovery for all session files:
+- Autosaves entire working tree to `refs/cs/auto` shadow ref using git plumbing commands
 - Does not create commits on `main` or touch the working tree index
 - Each autosave chains onto the previous one (linked list of snapshots)
+- For discovery file edits, also logs the latest heading/bullet to `session.log`
 - Runs in background to avoid blocking the session
 
 ## discoveries-reminder.sh (Stop)
@@ -82,6 +82,24 @@ Runs when Claude Code would show a permission dialog for Write or Edit:
 - Falls through to the normal permission prompt for all other files
 - Scoped narrowly to session metadata only — project files always require explicit approval
 
+## command-tracker.sh (PostToolUse on Bash)
+
+Runs after Bash tool calls (async, non-blocking):
+- Captures interesting CLI commands to `.cs/commands.md`
+- Filters trivial commands (cd, ls, pwd, echo, cat, etc.) and bare interpreters (vim, python, node without flags)
+- Scrubs secrets: `KEY=value` env vars, Bearer tokens, `--password`/`--token` flags
+- Categorizes commands: Build, Test, Dev, Deploy, Lint, Other
+- Deduplicates exact matches, bumps use count and last-used date
+- Detects skill-worthy commands (3+ uses across 2+ sessions) and suggests `/skillify`
+
+## bash-logger.sh (PreToolUse on Bash)
+
+Runs before every Bash tool call (sync, fast):
+- Logs `[timestamp] BASH: command` to `.cs/logs/session.log`
+- Creates a complete audit trail of all commands Claude runs
+- Truncates long commands at 200 chars
+- Never blocks — uses `set -uo pipefail` without `set -e`
+
 ## Hook Configuration
 
 The hooks are configured in `~/.claude/settings.json`:
@@ -90,14 +108,16 @@ The hooks are configured in `~/.claude/settings.json`:
 {
   "hooks": {
     "SessionStart": [
-      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/session-start.sh", "timeout": 10 }] }
+      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/session-start.sh", "timeout": 30 }] }
     ],
     "PreToolUse": [
-      { "matcher": "Write", "hooks": [{ "type": "command", "command": "~/.claude/hooks/artifact-tracker.sh", "timeout": 10 }] }
+      { "matcher": "Write", "hooks": [{ "type": "command", "command": "~/.claude/hooks/artifact-tracker.sh", "timeout": 10 }] },
+      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "~/.claude/hooks/bash-logger.sh", "timeout": 5 }] }
     ],
     "PostToolUse": [
       { "matcher": "", "hooks": [{ "type": "command", "command": "~/.claude/hooks/changes-tracker.sh", "timeout": 10 }] },
-      { "matcher": "Write|Edit", "hooks": [{ "type": "command", "command": "~/.claude/hooks/discovery-commits.sh", "timeout": 10, "async": true }] }
+      { "matcher": "Write|Edit", "hooks": [{ "type": "command", "command": "~/.claude/hooks/discovery-commits.sh", "timeout": 10, "async": true }] },
+      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "~/.claude/hooks/command-tracker.sh", "timeout": 10, "async": true }] }
     ],
     "Stop": [
       { "hooks": [{ "type": "command", "command": "~/.claude/hooks/discoveries-reminder.sh", "timeout": 10 }] }
@@ -106,7 +126,7 @@ The hooks are configured in `~/.claude/settings.json`:
       { "hooks": [{ "type": "command", "command": "~/.claude/hooks/discoveries-archiver.sh", "timeout": 10 }] }
     ],
     "SessionEnd": [
-      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/session-end.sh", "timeout": 10 }] }
+      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/session-end.sh", "timeout": 30 }] }
     ],
     "SubagentStart": [
       { "hooks": [{ "type": "command", "command": "~/.claude/hooks/subagent-context.sh", "timeout": 10 }] }
