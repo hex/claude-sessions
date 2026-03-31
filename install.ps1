@@ -98,7 +98,8 @@ function Install-ClaudeHooks {
         'subagent-context.sh',
         'tool-failure-logger.sh',
         'session-auto-approve.sh',
-        'command-tracker.sh'
+        'command-tracker.sh',
+        'bash-logger.sh'
     )
 
     foreach ($hook in $hooks) {
@@ -213,6 +214,7 @@ function Merge-ClaudeSettings {
     Add-Hook -EventName 'SubagentStart' -HookPath "$HOME/.claude/hooks/subagent-context.sh"
     Add-Hook -EventName 'PostToolUseFailure' -HookPath "$HOME/.claude/hooks/tool-failure-logger.sh" -Async
     Add-Hook -EventName 'PermissionRequest' -HookPath "$HOME/.claude/hooks/session-auto-approve.sh" -Matcher 'Write|Edit' -Timeout 5
+    Add-Hook -EventName 'PreToolUse' -HookPath "$HOME/.claude/hooks/bash-logger.sh" -Matcher 'Bash' -Timeout 5
 
     # Write settings back
     $settings | ConvertTo-Json -Depth 10 | Set-Content $Config.ClaudeSettings -Encoding UTF8
