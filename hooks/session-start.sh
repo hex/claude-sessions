@@ -138,6 +138,41 @@ See CLAUDE.md in the session directory for complete documentation protocol.
 EOF
 )
 
+# Dynamic context: add session state info on resume
+if [ "$SOURCE" = "resume" ] && [ -d "$SESSION_DIR/.git" ]; then
+    DYNAMIC=""
+
+    # Time since last session activity
+    LAST_LOG_TIME=$(tail -1 "$META_DIR/logs/session.log" 2>/dev/null | grep -oE '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}' | head -1 || true)
+    if [ -n "$LAST_LOG_TIME" ]; then
+        DYNAMIC="${DYNAMIC}Last activity: ${LAST_LOG_TIME}\n"
+    fi
+
+    # Recent commits since last session
+    COMMIT_COUNT=$(git -C "$SESSION_DIR" rev-list --count --since="7 days ago" HEAD 2>/dev/null || echo "0")
+    if [ "$COMMIT_COUNT" -gt 0 ]; then
+        RECENT_FILES=$(git -C "$SESSION_DIR" diff --name-only "HEAD~${COMMIT_COUNT}" HEAD 2>/dev/null | head -5 | xargs -n1 basename 2>/dev/null | paste -sd', ' - 2>/dev/null || true)
+        DYNAMIC="${DYNAMIC}Recent commits: ${COMMIT_COUNT} in last 7 days"
+        if [ -n "$RECENT_FILES" ]; then
+            DYNAMIC="${DYNAMIC} (${RECENT_FILES})"
+        fi
+        DYNAMIC="${DYNAMIC}\n"
+    fi
+
+    # Objective from README.md
+    OBJECTIVE=$(sed -n '/^## Objective/,/^## /{/^## Objective/d;/^## /d;/^$/d;p;}' "$META_DIR/README.md" 2>/dev/null | head -1 | sed 's/^\[.*\]$//' || true)
+    if [ -n "$OBJECTIVE" ] && [ "$OBJECTIVE" != "[Describe what you're trying to accomplish in this session]" ]; then
+        DYNAMIC="${DYNAMIC}Objective: ${OBJECTIVE}\n"
+    fi
+
+    if [ -n "$DYNAMIC" ]; then
+        CONTEXT="${CONTEXT}
+
+--- Session State ---
+$(printf '%b' "$DYNAMIC")"
+    fi
+fi
+
 # Return additional context as JSON
 jq -n --arg context "$CONTEXT" '{
     hookSpecificOutput: {
