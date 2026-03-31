@@ -2363,7 +2363,7 @@ run_uninstall() {
     fi
 
     # Remove hooks
-    for hook in session-start.sh artifact-tracker.sh changes-tracker.sh discovery-commits.sh discoveries-reminder.sh discoveries-archiver.sh session-end.sh subagent-context.sh tool-failure-logger.sh session-auto-approve.sh command-tracker.sh; do
+    for hook in session-start.sh artifact-tracker.sh changes-tracker.sh discovery-commits.sh discoveries-reminder.sh discoveries-archiver.sh session-end.sh subagent-context.sh tool-failure-logger.sh session-auto-approve.sh command-tracker.sh bash-logger.sh; do
         if [ -f "$hooks_dir/$hook" ]; then
             rm "$hooks_dir/$hook"
             info "Removed $hooks_dir/$hook"
@@ -2408,6 +2408,7 @@ run_uninstall() {
         local tool_failure_logger_path="$hooks_dir/tool-failure-logger.sh"
         local session_auto_approve_path="$hooks_dir/session-auto-approve.sh"
         local command_tracker_path="$hooks_dir/command-tracker.sh"
+        local bash_logger_path="$hooks_dir/bash-logger.sh"
 
         local settings
         settings=$(cat "$settings_file")
@@ -2425,6 +2426,13 @@ run_uninstall() {
                 .hooks.PreToolUse = [.hooks.PreToolUse[] | select(
                     (.matcher == "Write" and (.hooks | any(.command == $path))) | not
                 )]
+            else . end
+        ')
+
+        # Remove our PreToolUse Bash logger hook
+        settings=$(echo "$settings" | jq --arg path "$bash_logger_path" '
+            if .hooks.PreToolUse then
+                .hooks.PreToolUse = [.hooks.PreToolUse[] | select(.hooks | all(.command != $path))]
             else . end
         ')
 

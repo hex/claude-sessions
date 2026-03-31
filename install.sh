@@ -85,6 +85,7 @@ HOOK_SUBAGENT_CONTEXT_URL="${REPO_URL}/hooks/subagent-context.sh"
 HOOK_TOOL_FAILURE_LOGGER_URL="${REPO_URL}/hooks/tool-failure-logger.sh"
 HOOK_SESSION_AUTO_APPROVE_URL="${REPO_URL}/hooks/session-auto-approve.sh"
 HOOK_COMMAND_TRACKER_URL="${REPO_URL}/hooks/command-tracker.sh"
+HOOK_BASH_LOGGER_URL="${REPO_URL}/hooks/bash-logger.sh"
 
 # Command URLs for web install
 COMMAND_SUMMARY_URL="${REPO_URL}/commands/summary.md"
@@ -217,7 +218,7 @@ elif [ "$INSTALL_METHOD" = "web" ]; then
 fi
 
 # Install hooks
-installed "11 hooks" "$HOOKS_DIR/"
+installed "12 hooks" "$HOOKS_DIR/"
 mkdir -p "$HOOKS_DIR"
 
 if [ "$INSTALL_METHOD" = "local" ]; then
@@ -233,6 +234,7 @@ if [ "$INSTALL_METHOD" = "local" ]; then
     cp "$HOOKS_SOURCE/tool-failure-logger.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/session-auto-approve.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/command-tracker.sh" "$HOOKS_DIR/"
+    cp "$HOOKS_SOURCE/bash-logger.sh" "$HOOKS_DIR/"
 else
     # Download from GitHub
     if command -v curl >/dev/null 2>&1; then
@@ -247,6 +249,7 @@ else
         curl -fsSL "$HOOK_TOOL_FAILURE_LOGGER_URL" -o "$HOOKS_DIR/tool-failure-logger.sh" || error "Failed to download tool-failure-logger.sh"
         curl -fsSL "$HOOK_SESSION_AUTO_APPROVE_URL" -o "$HOOKS_DIR/session-auto-approve.sh" || error "Failed to download session-auto-approve.sh"
         curl -fsSL "$HOOK_COMMAND_TRACKER_URL" -o "$HOOKS_DIR/command-tracker.sh" || error "Failed to download command-tracker.sh"
+        curl -fsSL "$HOOK_BASH_LOGGER_URL" -o "$HOOKS_DIR/bash-logger.sh" || error "Failed to download bash-logger.sh"
     elif command -v wget >/dev/null 2>&1; then
         wget -q "$HOOK_SESSION_START_URL" -O "$HOOKS_DIR/session-start.sh" || error "Failed to download session-start.sh"
         wget -q "$HOOK_ARTIFACT_TRACKER_URL" -O "$HOOKS_DIR/artifact-tracker.sh" || error "Failed to download artifact-tracker.sh"
@@ -259,6 +262,7 @@ else
         wget -q "$HOOK_TOOL_FAILURE_LOGGER_URL" -O "$HOOKS_DIR/tool-failure-logger.sh" || error "Failed to download tool-failure-logger.sh"
         wget -q "$HOOK_SESSION_AUTO_APPROVE_URL" -O "$HOOKS_DIR/session-auto-approve.sh" || error "Failed to download session-auto-approve.sh"
         wget -q "$HOOK_COMMAND_TRACKER_URL" -O "$HOOKS_DIR/command-tracker.sh" || error "Failed to download command-tracker.sh"
+        wget -q "$HOOK_BASH_LOGGER_URL" -O "$HOOKS_DIR/bash-logger.sh" || error "Failed to download bash-logger.sh"
     fi
 fi
 
@@ -357,6 +361,7 @@ else
     TOOL_FAILURE_LOGGER_PATH="$HOME/.claude/hooks/tool-failure-logger.sh"
     SESSION_AUTO_APPROVE_PATH="$HOME/.claude/hooks/session-auto-approve.sh"
     COMMAND_TRACKER_PATH="$HOME/.claude/hooks/command-tracker.sh"
+    BASH_LOGGER_PATH="$HOME/.claude/hooks/bash-logger.sh"
 
     # Tilde-path variants for dedup (handles entries added with ~ instead of $HOME)
     SESSION_START_TILDE="~/.claude/hooks/session-start.sh"
@@ -370,6 +375,7 @@ else
     TOOL_FAILURE_LOGGER_TILDE="~/.claude/hooks/tool-failure-logger.sh"
     SESSION_AUTO_APPROVE_TILDE="~/.claude/hooks/session-auto-approve.sh"
     COMMAND_TRACKER_TILDE="~/.claude/hooks/command-tracker.sh"
+    BASH_LOGGER_TILDE="~/.claude/hooks/bash-logger.sh"
 
     # Merge hooks: remove existing cs hooks (both path forms), then add ours
     # This prevents duplicates on reinstall while preserving other hooks
@@ -509,6 +515,19 @@ else
                 "command": $tilde,
                 "timeout": 10,
                 "async": true
+            }]
+        }]
+    ')
+
+    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$BASH_LOGGER_PATH" --arg tilde "$BASH_LOGGER_TILDE" '
+        .hooks.PreToolUse = ((.hooks.PreToolUse // []) | map(
+            select(.hooks | all(.command != $path and .command != $tilde))
+        )) + [{
+            "matcher": "Bash",
+            "hooks": [{
+                "type": "command",
+                "command": $tilde,
+                "timeout": 5
             }]
         }]
     ')
