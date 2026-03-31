@@ -905,9 +905,17 @@ impl App {
                 self.mode = Mode::Normal;
             }
             KeyCode::Enter => {
-                // Commit: filter to matches only
-                self.apply_filter_and_sort();
+                // Commit search and return to normal mode
                 self.mode = Mode::Normal;
+            }
+            KeyCode::Up => {
+                let cur = self.table_state.selected().unwrap_or(0);
+                self.table_state.select(Some(cur.saturating_sub(1)));
+            }
+            KeyCode::Down => {
+                let cur = self.table_state.selected().unwrap_or(0);
+                let max = self.filtered.len().saturating_sub(1);
+                self.table_state.select(Some((cur + 1).min(max)));
             }
             KeyCode::Left => {
                 self.search_input.move_left();
@@ -923,15 +931,15 @@ impl App {
             }
             KeyCode::Delete => {
                 self.search_input.delete_forward();
-                self.update_search_highlights();
+                self.apply_filter_and_sort();
             }
             KeyCode::Backspace => {
                 self.search_input.delete_back();
-                self.update_search_highlights();
+                self.apply_filter_and_sort();
             }
             KeyCode::Char(c) => {
                 self.search_input.insert(c);
-                self.update_search_highlights();
+                self.apply_filter_and_sort();
             }
             _ => {}
         }
@@ -1779,15 +1787,15 @@ mod tests {
     }
 
     #[test]
-    fn search_typing_highlights_but_keeps_all_visible() {
+    fn search_typing_filters_while_typing() {
         let mut app = App::new(sample_sessions());
         app.handle_key(KeyEvent::from(KeyCode::Char('/')));
         app.handle_key(KeyEvent::from(KeyCode::Char('b')));
         app.handle_key(KeyEvent::from(KeyCode::Char('e')));
         assert_eq!(app.search_input.text(), "be");
-        // All sessions still visible during typing (highlight-only phase)
-        assert_eq!(app.filtered.len(), 3);
-        // But fuzzy indices populated for matching session
+        // Filtered to matches while typing
+        assert!(app.filtered.len() < 3);
+        // Fuzzy indices populated for matching session
         assert!(!app.fuzzy_indices.is_empty());
     }
 
@@ -1796,12 +1804,11 @@ mod tests {
         let mut app = App::new(sample_sessions());
         app.handle_key(KeyEvent::from(KeyCode::Char('/')));
         app.handle_key(KeyEvent::from(KeyCode::Char('x')));
-        // All sessions still visible during typing
-        assert_eq!(app.filtered.len(), 3);
 
         app.handle_key(KeyEvent::from(KeyCode::Esc));
         assert_eq!(app.mode, Mode::Normal);
         assert_eq!(app.search_input.text(), "");
+        // All sessions restored after Esc
         assert_eq!(app.filtered.len(), 3);
     }
 
@@ -2629,32 +2636,30 @@ mod tests {
     }
 
     #[test]
-    fn search_typing_highlights_without_filtering() {
+    fn search_filters_while_typing() {
         let mut app = App::new(sample_sessions());
         // Enter search mode
         app.handle_key(KeyEvent::from(KeyCode::Char('/')));
         assert_eq!(app.mode, Mode::Search);
-        // Type "al" — should match "alpha"
+        // Type "al" — should filter to "alpha" immediately
         app.handle_key(KeyEvent::from(KeyCode::Char('a')));
         app.handle_key(KeyEvent::from(KeyCode::Char('l')));
-        // All 3 sessions still visible (not filtered yet)
-        assert_eq!(app.filtered.len(), 3);
-        // But fuzzy_indices only has the matching session
+        // Filtered to matches while typing
+        assert_eq!(app.filtered.len(), 1);
         assert!(app.fuzzy_indices.values().any(|v| !v.is_empty()));
     }
 
     #[test]
-    fn search_enter_commits_filter() {
+    fn search_enter_commits_and_exits() {
         let mut app = App::new(sample_sessions());
         app.handle_key(KeyEvent::from(KeyCode::Char('/')));
         app.handle_key(KeyEvent::from(KeyCode::Char('a')));
         app.handle_key(KeyEvent::from(KeyCode::Char('l')));
-        // All still visible during typing
-        assert_eq!(app.filtered.len(), 3);
-        // Commit with Enter
+        // Already filtered while typing
+        assert_eq!(app.filtered.len(), 1);
+        // Enter exits search mode, keeps filter
         app.handle_key(KeyEvent::from(KeyCode::Enter));
         assert_eq!(app.mode, Mode::Normal);
-        // Now filtered to matches only
         assert_eq!(app.filtered.len(), 1);
     }
 
