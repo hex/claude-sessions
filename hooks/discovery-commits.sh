@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# ABOUTME: PostToolUse hook that autosaves to a shadow git ref when discovery files are updated
-# ABOUTME: Writes to refs/cs/auto using git plumbing, keeping main branch untouched
+# ABOUTME: PostToolUse hook that autosaves to a shadow git ref on every Write/Edit
+# ABOUTME: Crash recovery for all session files via refs/cs/auto, logs discovery edits
 
 set -euo pipefail
 
@@ -31,50 +31,30 @@ if [[ "$TOOL_NAME" != "Edit" && "$TOOL_NAME" != "Write" ]]; then
     exit 0
 fi
 
-# Match any discovery file (active, archive, or compact)
-DISCOVERIES_FILE=""
+# Extract discovery log entry if this is a discovery file edit
+LATEST_ENTRY=""
 case "$FILE_PATH" in
     "$META_DIR/discoveries.md"|"$META_DIR/discoveries.archive.md"|"$META_DIR/discoveries.compact.md")
-        DISCOVERIES_FILE="$FILE_PATH"
-        ;;
-    *)
-        exit 0
+        # Try to find last heading (## Something)
+        LATEST_HEADING=$(grep "^##" "$FILE_PATH" 2>/dev/null | tail -1 | sed 's/^##\+[[:space:]]*//' || true)
+        # Try to find last bullet point (- Something)
+        LATEST_BULLET=$(grep "^[[:space:]]*-" "$FILE_PATH" 2>/dev/null | tail -1 | sed 's/^[[:space:]]*-[[:space:]]*//' || true)
+        if [ -n "$LATEST_HEADING" ]; then
+            LATEST_ENTRY="$LATEST_HEADING"
+        elif [ -n "$LATEST_BULLET" ]; then
+            LATEST_ENTRY="$LATEST_BULLET"
+        else
+            LATEST_ENTRY=$(grep -v "^#" "$FILE_PATH" 2>/dev/null | grep -v "^[[:space:]]*$" | tail -1 || true)
+        fi
+        LATEST_ENTRY=$(echo "$LATEST_ENTRY" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | cut -c1-100)
+        if [ "$LATEST_ENTRY" = "Discoveries & Notes" ]; then
+            LATEST_ENTRY=""
+        fi
         ;;
 esac
 
-if [ -z "$FILE_PATH" ] || [ ! -f "$DISCOVERIES_FILE" ]; then
-    exit 0
-fi
-
-# Extract the latest meaningful entry (last heading, bullet, or paragraph)
-# Strategy: Look for the last non-empty line that's a heading (##) or bullet (-)
-LATEST_ENTRY=""
-
-# Try to find last heading (## Something)
-LATEST_HEADING=$(grep "^##" "$DISCOVERIES_FILE" 2>/dev/null | tail -1 | sed 's/^##\+[[:space:]]*//' || true)
-
-# Try to find last bullet point (- Something)
-LATEST_BULLET=$(grep "^[[:space:]]*-" "$DISCOVERIES_FILE" 2>/dev/null | tail -1 | sed 's/^[[:space:]]*-[[:space:]]*//' || true)
-
-# Use heading if found, otherwise bullet, otherwise last non-empty line
-if [ -n "$LATEST_HEADING" ]; then
-    LATEST_ENTRY="$LATEST_HEADING"
-elif [ -n "$LATEST_BULLET" ]; then
-    LATEST_ENTRY="$LATEST_BULLET"
-else
-    # Fallback: last non-empty, non-heading line
-    LATEST_ENTRY=$(grep -v "^#" "$DISCOVERIES_FILE" 2>/dev/null | grep -v "^[[:space:]]*$" | tail -1 || true)
-fi
-
-# Trim whitespace and limit length
-LATEST_ENTRY=$(echo "$LATEST_ENTRY" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | cut -c1-100)
-
-# Skip if no meaningful entry found
-if [ -z "$LATEST_ENTRY" ] || [ "$LATEST_ENTRY" = "Discoveries & Notes" ]; then
-    exit 0
-fi
-
 # Autosave to shadow ref using git plumbing (does not touch HEAD or main branch)
+# Fires on ALL Write/Edit — protects all files, not just discoveries
 autosave_to_shadow_ref() {
     cd "$SESSION_DIR" || return 0
 
@@ -102,7 +82,9 @@ autosave_to_shadow_ref() {
 
     git update-ref refs/cs/auto "$commit" 2>/dev/null || return 0
 
-    echo "[$TIMESTAMP] Autosave: $LATEST_ENTRY" >> "$META_DIR/logs/session.log"
+    if [ -n "$LATEST_ENTRY" ]; then
+        echo "[$TIMESTAMP] Autosave: $LATEST_ENTRY" >> "$META_DIR/logs/session.log"
+    fi
 }
 
 if [ "${CS_TEST_SYNC:-}" = "1" ]; then
