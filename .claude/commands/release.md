@@ -39,27 +39,29 @@ Update the VERSION line in `bin/cs`.
 
 ### 2. Verify Install/Uninstall Parity
 
-Check that `install.sh` and `run_uninstall()` in `bin/cs` are in sync. All three lists must match:
+Check that `install.sh`, `install.ps1`, and `run_uninstall()` in `bin/cs` are all in sync. The source of truth is `hooks/*.sh`.
 
 ```bash
-# Source of truth: hooks in the repo
-ls hooks/*.sh | xargs -I{} basename {}
-
-# What install.sh installs (hook cp/curl lines)
-# What run_uninstall() removes (the 'for hook in ...' loop)
-# What run_uninstall() cleans from settings.json (jq removal blocks)
+# Verify all four match:
+REPO=$(ls hooks/*.sh | xargs -I{} basename {} | sort)
+INSTALL_SH=$(rg -o 'cp "\$HOOKS_SOURCE/[^"]+' install.sh | sed 's/.*\///' | sort)
+INSTALL_PS1=$(sed -n '/\$hooks = @(/,/)/p' install.ps1 | grep '\.sh' | tr -d "' ," | sort)
+UNINSTALL=$(rg "for hook in" bin/cs | grep -oE '[a-z-]+\.sh' | tr ' ' '\n' | sort)
+diff <(echo "$REPO") <(echo "$INSTALL_SH") && echo "install.sh: OK"
+diff <(echo "$REPO") <(echo "$INSTALL_PS1") && echo "install.ps1: OK"
+diff <(echo "$REPO") <(echo "$UNINSTALL") && echo "uninstall: OK"
 ```
 
 **Check these specifically:**
 - Every hook file in `hooks/` is installed by `install.sh` AND removed by `run_uninstall()`
 - Every hook file in `hooks/` is in the `$hooks` array in `install.ps1`
-- Every settings.json hook event configured by `install.sh` has a matching `Add-Hook` call in `install.ps1`
-- Timeouts match between `install.sh` and `install.ps1` (especially SessionStart/SessionEnd at 30s)
+- Every settings.json hook event configured by `install.sh` has a matching `Add-Hook` call in `install.ps1` (same event, matcher, async flag, and timeout)
+- Timeouts match between `install.sh` and `install.ps1` (SessionStart/SessionEnd = 30s)
 - Every binary installed (`cs`, `cs-secrets`, `cs-tui`) is removed by `run_uninstall()`
 - Every settings.json hook event configured by `install.sh` is cleaned up by `run_uninstall()`
-- Commands and skills installed match those removed
+- Commands installed by `install.sh` match those in `install.ps1`
 
-**Fix any drift immediately** — do not proceed with the release if install and uninstall are out of sync.
+**Fix any drift immediately** — update all four locations (install.sh, install.ps1, run_uninstall, docs/hooks.md) before proceeding.
 
 ### 3. Review Documentation
 
