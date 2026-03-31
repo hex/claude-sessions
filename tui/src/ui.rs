@@ -48,10 +48,10 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         app.ensure_preview_loaded();
         let cols = Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
             .split(chunks[0]);
-        render_table(app, frame, cols[0]);
+        render_table(app, frame, cols[0], true);
         render_preview_pane(app, frame, cols[1]);
     } else {
-        render_table(app, frame, chunks[0]);
+        render_table(app, frame, chunks[0], false);
     }
 
     if app.mode == Mode::SessionMenu {
@@ -77,14 +77,15 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     }
 }
 
-fn render_table(app: &mut App, frame: &mut Frame, area: Rect) {
+fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool) {
     let icons = theme::icons();
 
     app.table_area = area;
 
     let show_secrets = app.has_secrets();
-    let show_remote = app.has_remote_sessions();
-    let show_github = app.has_git_sessions();
+    // Hide Remote and Github columns when preview pane is open (they're shown in the preview)
+    let show_remote = app.has_remote_sessions() && !preview_open;
+    let show_github = app.has_git_sessions() && !preview_open;
 
     // Track which sort columns are visible (for mouse click-to-sort)
     let mut visible_cols = vec![SortColumn::Name, SortColumn::Created, SortColumn::Modified];
