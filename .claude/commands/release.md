@@ -52,6 +52,9 @@ ls hooks/*.sh | xargs -I{} basename {}
 
 **Check these specifically:**
 - Every hook file in `hooks/` is installed by `install.sh` AND removed by `run_uninstall()`
+- Every hook file in `hooks/` is in the `$hooks` array in `install.ps1`
+- Every settings.json hook event configured by `install.sh` has a matching `Add-Hook` call in `install.ps1`
+- Timeouts match between `install.sh` and `install.ps1` (especially SessionStart/SessionEnd at 30s)
 - Every binary installed (`cs`, `cs-secrets`, `cs-tui`) is removed by `run_uninstall()`
 - Every settings.json hook event configured by `install.sh` is cleaned up by `run_uninstall()`
 - Commands and skills installed match those removed
