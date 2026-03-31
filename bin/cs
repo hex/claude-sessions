@@ -635,7 +635,7 @@ if you need full detail on a specific past finding.
 
 ## Discovered Commands
 
-Useful CLI commands from prior sessions are tracked automatically.
+Useful CLI commands from prior sessions are tracked automatically. These may be stale if the project setup changed — verify before using.
 
 @.cs/commands.md
 
@@ -825,7 +825,7 @@ if you need full detail on a specific past finding.
 
 ## Discovered Commands
 
-Useful CLI commands from prior sessions are tracked automatically.
+Useful CLI commands from prior sessions are tracked automatically. These may be stale if the project setup changed — verify before using.
 
 @.cs/commands.md
 
