@@ -175,7 +175,7 @@ test_session_end_commits_to_main() {
 # session-start.sh: crash recovery + push protection
 # ============================================================================
 
-test_recovery_restores_from_shadow_ref() {
+test_recovery_detects_crash_and_injects_context() {
     # Create a shadow ref that includes a file not in the working tree
     (
         cd "$CLAUDE_SESSION_DIR"
@@ -195,18 +195,32 @@ test_recovery_restores_from_shadow_ref() {
         return 1
     fi
 
-    echo '{"session_id":"test-789","cwd":"'"$CLAUDE_SESSION_DIR"'"}' \
-        | bash "$HOOKS_DIR/session-start.sh" > /dev/null
+    # Hook should NOT auto-restore — instead inject crash context
+    local output
+    output=$(echo '{"session_id":"test-789","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
 
-    if [ ! -f "$CLAUDE_SESSION_DIR/recovered.txt" ]; then
-        echo "  FAIL: recovered.txt should be restored from shadow ref"
+    # File should NOT be restored (waiting for user decision)
+    if [ -f "$CLAUDE_SESSION_DIR/recovered.txt" ]; then
+        echo "  FAIL: recovered.txt should NOT be auto-restored (ask user first)"
         return 1
     fi
 
-    if git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify refs/cs/auto >/dev/null 2>&1; then
-        echo "  FAIL: refs/cs/auto should be deleted after recovery"
+    # Shadow ref should still exist (not cleaned up until user decides)
+    if ! git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify refs/cs/auto >/dev/null 2>&1; then
+        echo "  FAIL: refs/cs/auto should still exist until user decides"
         return 1
     fi
+
+    # Hook output should contain crash recovery context
+    if ! echo "$output" | grep -q "CRASH RECOVERY"; then
+        echo "  FAIL: hook output should contain CRASH RECOVERY context"
+        echo "  Output: $(echo "$output" | head -5)"
+        return 1
+    fi
+
+    # Clean up
+    git -C "$CLAUDE_SESSION_DIR" update-ref -d refs/cs/auto 2>/dev/null || true
 }
 
 test_shadow_ref_not_pushed() {
@@ -237,7 +251,7 @@ run_test test_autosave_does_not_touch_main
 run_test test_autosave_chains_multiple_saves
 run_test test_session_end_deletes_shadow_ref
 run_test test_session_end_commits_to_main
-run_test test_recovery_restores_from_shadow_ref
+run_test test_recovery_detects_crash_and_injects_context
 run_test test_shadow_ref_not_pushed
 
 echo ""

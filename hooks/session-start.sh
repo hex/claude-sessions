@@ -88,12 +88,22 @@ if [ -d "$SESSION_DIR/.git" ]; then
     # Ensure shadow refs are never pushed
     git -C "$SESSION_DIR" config transfer.hideRefs refs/cs 2>/dev/null || true
 
-    # Recover from orphaned shadow ref (previous session crashed)
+    # Detect orphaned shadow ref (previous session crashed)
     if git -C "$SESSION_DIR" rev-parse -q --verify refs/cs/auto >/dev/null 2>&1; then
-        git -C "$SESSION_DIR" checkout refs/cs/auto -- . >/dev/null 2>&1 || true
-        git -C "$SESSION_DIR" update-ref -d refs/cs/auto 2>/dev/null || true
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Recovered autosaved changes from previous session" \
-            >> "$META_DIR/logs/session.log"
+        # Generate a summary of what would be restored
+        CRASH_DIFF=$(git -C "$SESSION_DIR" diff --stat HEAD refs/cs/auto -- . 2>/dev/null || true)
+        CRASH_FILES=$(git -C "$SESSION_DIR" diff --name-only HEAD refs/cs/auto -- . 2>/dev/null | head -10 || true)
+        CRASH_FILE_COUNT=$(echo "$CRASH_FILES" | grep -c . 2>/dev/null || echo "0")
+
+        if [ -n "$CRASH_FILES" ] && [ "$CRASH_FILE_COUNT" -gt 0 ]; then
+            # Don't auto-restore — inject into context so Claude can ask the user
+            CRASH_CONTEXT="CRASH RECOVERY: The previous session ended without saving (crash or timeout). Autosaved changes were found in ${CRASH_FILE_COUNT} file(s):\n\n${CRASH_FILES}\n\nDiff summary:\n${CRASH_DIFF}\n\nIMPORTANT: Ask the user if they want to restore these changes. To restore, run: git -C \"$SESSION_DIR\" checkout refs/cs/auto -- . && git -C \"$SESSION_DIR\" update-ref -d refs/cs/auto\nTo discard, run: git -C \"$SESSION_DIR\" update-ref -d refs/cs/auto"
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Crash recovery: found ${CRASH_FILE_COUNT} unsaved file(s), awaiting user decision" \
+                >> "$META_DIR/logs/session.log"
+        else
+            # No actual changes — just clean up the orphaned ref
+            git -C "$SESSION_DIR" update-ref -d refs/cs/auto 2>/dev/null || true
+        fi
     fi
 fi
 
@@ -171,6 +181,13 @@ if [ "$SOURCE" = "resume" ] && [ -d "$SESSION_DIR/.git" ]; then
 --- Session State ---
 $(printf '%b' "$DYNAMIC")"
     fi
+fi
+
+# Append crash recovery info if present
+if [ -n "${CRASH_CONTEXT:-}" ]; then
+    CONTEXT="${CONTEXT}
+
+--- $(printf '%b' "$CRASH_CONTEXT")"
 fi
 
 # Return additional context as JSON
