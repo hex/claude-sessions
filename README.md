@@ -33,6 +33,9 @@ No git repo required. No project structure needed. Just a name for what you're w
 - **Automatic git version control** - Every session gets local git history; discovery edits are autosaved to a shadow ref for crash safety, session end creates one clean commit; optionally sync to remote
 - **Session locking** - PID-based lock prevents the same session from being opened in two terminals simultaneously; use `--force` to override
 - **Remote sessions** - Run sessions on remote machines via `et` or `ssh` + `tmux`; `cs` handles connection, stubbing, and session tracking
+- **CLI command capture** - Interesting commands auto-tracked to `.cs/commands.md` with secret scrubbing; frequently used commands can be promoted to reusable skills via `/skillify`
+- **Cross-session search** - `cs -search <query>` greps across all sessions' discoveries, memory, README, and changes
+- **Bash command audit trail** - Every Bash command Claude runs is logged to `.cs/logs/session.log` with timestamps
 - **Update notifications** - Checks for updates and notifies when new versions are available
 - **Verified updates** - Updates are downloaded from GitHub Releases and verified with SHA-256 checksums; additionally verified with [minisign](https://jedisct1.github.io/minisign/) signatures when available
 
@@ -57,9 +60,9 @@ Or clone and run `./install.ps1`.
 > :warning: Always review scripts ([bash](install.sh), [PowerShell](install.ps1)) before running them from the internet.
 
 The installer:
-- Adds `cs`, `cs-secrets`, and `cs-tui` to `~/.local/bin/`
+- Adds `cs`, `cs-secrets`, and `cs-tui` to `~/.local/bin/` (PowerShell installer: `cs` and `cs-secrets` only)
 - Installs twelve [hooks](docs/hooks.md) to `~/.claude/hooks/` for session tracking
-- Adds `/summary` and `/compact-discoveries` commands, and `store-secret` skill to `~/.claude/`
+- Adds `/summary`, `/compact-discoveries`, and `/skillify` commands, and `store-secret` skill to `~/.claude/`
 - Installs shell completions for bash and zsh
 - Configures hook entries in `~/.claude/settings.json`
 
@@ -71,6 +74,7 @@ cs <session-name>           # Create or resume a session
 cs <session-name> --force   # Override active session lock
 cs -adopt <name>            # Adopt current directory as a session
 cs -remote <cmd>            # Manage remote hosts
+cs -search <query>          # Search across all sessions
 cs -list, -ls               # List all sessions
 cs -remove, -rm <name>      # Remove a session
 cs -update                  # Update to latest version
@@ -184,8 +188,10 @@ This rsyncs the session to the remote host and creates a local stub so future `c
 │   ├── sync.conf           # Sync configuration
 │   ├── remote.conf         # Remote host (if remote session)
 │   ├── memory/             # Claude Code auto memory (synced)
+│   ├── plans/              # Claude Code plans (synced)
+│   ├── commands.md         # Auto-discovered CLI commands
 │   ├── artifacts/          # Auto-tracked scripts and configs
-│   └── logs/session.log    # Session command log
+│   └── logs/session.log    # Bash command audit trail + session log
 ├── .claude/
 │   └── settings.local.json # Redirects auto memory into .cs/memory
 ├── CLAUDE.md               # Session instructions for Claude
