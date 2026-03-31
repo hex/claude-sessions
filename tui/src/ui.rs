@@ -16,6 +16,21 @@ const ZEBRA_DIM: ratatui::style::Color = ratatui::style::Color::Rgb(32, 29, 28);
 
 const PREVIEW_MIN_WIDTH: u16 = 120;
 
+/// Truncate a string to fit within max_width, respecting UTF-8 char boundaries.
+fn truncate_str(s: &str, max_width: usize) -> String {
+    if s.len() <= max_width {
+        return s.to_string();
+    }
+    // Find the last char boundary at or before max_width - 3 (room for "...")
+    let end = s
+        .char_indices()
+        .map(|(i, _)| i)
+        .take_while(|&i| i <= max_width.saturating_sub(3))
+        .last()
+        .unwrap_or(0);
+    format!("{}...", &s[..end])
+}
+
 pub fn render(app: &mut App, frame: &mut Frame) {
     // When in SessionMenu mode, allocate an extra line for the inline action bar
     let action_bar_height = if app.mode == Mode::SessionMenu { 1u16 } else { 0 };
@@ -959,11 +974,7 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
                 Style::default().fg(GOLD).add_modifier(Modifier::BOLD),
             )));
             for disc in &preview.discoveries {
-                let truncated = if disc.len() > (area.width as usize).saturating_sub(6) {
-                    format!("{}...", &disc[..disc.len().min(area.width as usize - 9)])
-                } else {
-                    disc.clone()
-                };
+                let truncated = truncate_str(disc, (area.width as usize).saturating_sub(6));
                 lines.push(Line::from(vec![
                     Span::styled("  - ", Style::default().fg(COMMENT)),
                     Span::styled(truncated, Style::default().fg(YELLOW)),
@@ -978,11 +989,7 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
                 Style::default().fg(GOLD).add_modifier(Modifier::BOLD),
             )));
             for entry in &preview.memory_entries {
-                let truncated = if entry.len() > (area.width as usize).saturating_sub(6) {
-                    format!("{}...", &entry[..entry.len().min(area.width as usize - 9)])
-                } else {
-                    entry.clone()
-                };
+                let truncated = truncate_str(entry, (area.width as usize).saturating_sub(6));
                 lines.push(Line::from(vec![
                     Span::styled("  ", Style::default()),
                     Span::styled(truncated, Style::default().fg(COMMENT)),
