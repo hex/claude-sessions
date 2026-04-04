@@ -2,19 +2,12 @@
 # ABOUTME: Tests for the command-tracker PostToolUse hook
 # ABOUTME: Validates command capture, filtering, deduplication, secret scrubbing, and categorization
 
-set -euo pipefail
-
-# Test framework
-TESTS_RUN=0
-TESTS_PASSED=0
-TESTS_FAILED=0
-FAILURES=()
-
-# Paths
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-HOOK="$SCRIPT_DIR/../hooks/command-tracker.sh"
-TEST_TMPDIR=""
+source "$SCRIPT_DIR/test_lib.sh"
 
+HOOK="$SCRIPT_DIR/../hooks/command-tracker.sh"
+
+# Override setup for hook-specific env vars
 setup() {
     TEST_TMPDIR="$(mktemp -d)"
     export CLAUDE_SESSION_NAME="test-session"
@@ -24,58 +17,10 @@ setup() {
 }
 
 teardown() {
-    if [ -n "$TEST_TMPDIR" ] && [ -d "$TEST_TMPDIR" ]; then
+    if [[ -n "$TEST_TMPDIR" ]] && [[ -d "$TEST_TMPDIR" ]]; then
         rm -rf "$TEST_TMPDIR"
     fi
     unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR 2>/dev/null || true
-}
-
-assert_file_contains() {
-    local file="$1" pattern="$2" msg="${3:-$file should contain '$pattern'}"
-    if ! grep -q "$pattern" "$file" 2>/dev/null; then
-        echo "  FAIL: $msg"
-        echo "  File contents: $(cat "$file" 2>/dev/null | head -10)"
-        return 1
-    fi
-}
-
-assert_file_not_contains() {
-    local file="$1" pattern="$2" msg="${3:-$file should not contain '$pattern'}"
-    if grep -q "$pattern" "$file" 2>/dev/null; then
-        echo "  FAIL: $msg"
-        return 1
-    fi
-}
-
-assert_file_exists() {
-    local path="$1" msg="${2:-$path should exist}"
-    if [ ! -f "$path" ]; then
-        echo "  FAIL: $msg"
-        return 1
-    fi
-}
-
-assert_file_not_exists() {
-    local path="$1" msg="${2:-$path should not exist}"
-    if [ -f "$path" ]; then
-        echo "  FAIL: $msg"
-        return 1
-    fi
-}
-
-run_test() {
-    local test_name="$1"
-    TESTS_RUN=$((TESTS_RUN + 1))
-    echo "  $test_name..."
-    setup
-    if "$test_name" 2>&1; then
-        TESTS_PASSED=$((TESTS_PASSED + 1))
-        echo "    OK"
-    else
-        TESTS_FAILED=$((TESTS_FAILED + 1))
-        FAILURES+=("$test_name")
-    fi
-    teardown
 }
 
 # Helper: send a Bash tool use to the hook
@@ -165,10 +110,9 @@ test_deduplicates_same_command() {
     update_commands_file
     send_bash_command "npm run build"
     send_bash_command "npm run build"
-    # Should have count 2, not two separate entries
     local count
     count=$(grep -c "npm run build" "$COMMANDS_FILE" 2>/dev/null || echo "0")
-    if [ "$count" -ne 1 ]; then
+    if [[ "$count" -ne 1 ]]; then
         echo "  FAIL: Should have exactly 1 entry (got $count)"
         return 1
     fi
@@ -273,13 +217,4 @@ run_test test_skips_outside_session
 run_test test_skips_non_bash_tool
 run_test test_creates_file_with_header
 
-echo ""
-echo "Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed"
-if [ ${#FAILURES[@]} -gt 0 ]; then
-    echo "Failed tests:"
-    for f in "${FAILURES[@]}"; do
-        echo "  - $f"
-    done
-    exit 1
-fi
-echo ""
+report_results

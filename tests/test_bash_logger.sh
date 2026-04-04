@@ -2,17 +2,12 @@
 # ABOUTME: Tests for the bash-logger PreToolUse hook
 # ABOUTME: Validates command logging to session.log
 
-set -euo pipefail
-
-TESTS_RUN=0
-TESTS_PASSED=0
-TESTS_FAILED=0
-FAILURES=()
-
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-HOOK="$SCRIPT_DIR/../hooks/bash-logger.sh"
-TEST_TMPDIR=""
+source "$SCRIPT_DIR/test_lib.sh"
 
+HOOK="$SCRIPT_DIR/../hooks/bash-logger.sh"
+
+# Override setup for hook-specific env vars
 setup() {
     TEST_TMPDIR="$(mktemp -d)"
     export CLAUDE_SESSION_NAME="test-session"
@@ -22,25 +17,10 @@ setup() {
 }
 
 teardown() {
-    if [ -n "$TEST_TMPDIR" ] && [ -d "$TEST_TMPDIR" ]; then
+    if [[ -n "$TEST_TMPDIR" ]] && [[ -d "$TEST_TMPDIR" ]]; then
         rm -rf "$TEST_TMPDIR"
     fi
     unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR 2>/dev/null || true
-}
-
-run_test() {
-    local test_name="$1"
-    TESTS_RUN=$((TESTS_RUN + 1))
-    echo "  $test_name..."
-    setup
-    if "$test_name" 2>&1; then
-        TESTS_PASSED=$((TESTS_PASSED + 1))
-        echo "    OK"
-    else
-        TESTS_FAILED=$((TESTS_FAILED + 1))
-        FAILURES+=("$test_name")
-    fi
-    teardown
 }
 
 send_bash() {
@@ -70,7 +50,7 @@ test_skips_non_bash() {
     update_log
     echo '{"tool_name":"Edit","tool_input":{"file_path":"/tmp/x.txt"},"hook_event_name":"PreToolUse"}' \
         | bash "$HOOK"
-    if [ -f "$LOG_FILE" ] && grep -q "BASH" "$LOG_FILE"; then
+    if [[ -f "$LOG_FILE" ]] && grep -q "BASH" "$LOG_FILE"; then
         echo "  FAIL: should not log Edit tool"
         return 1
     fi
@@ -81,7 +61,7 @@ test_skips_outside_session() {
     update_log
     echo '{"tool_name":"Bash","tool_input":{"command":"ls"},"hook_event_name":"PreToolUse"}' \
         | bash "$HOOK"
-    if [ -f "$LOG_FILE" ] && grep -q "BASH" "$LOG_FILE"; then
+    if [[ -f "$LOG_FILE" ]] && grep -q "BASH" "$LOG_FILE"; then
         echo "  FAIL: should not log outside cs session"
         return 1
     fi
@@ -94,7 +74,7 @@ test_truncates_long_commands() {
     send_bash "$long_cmd"
     local logged_len
     logged_len=$(grep "BASH:" "$LOG_FILE" | head -1 | wc -c | tr -d ' ')
-    if [ "$logged_len" -gt 250 ]; then
+    if [[ "$logged_len" -gt 250 ]]; then
         echo "  FAIL: logged command too long ($logged_len chars)"
         return 1
     fi
@@ -108,7 +88,7 @@ test_multiple_commands_appended() {
     send_bash "npm run lint"
     local count
     count=$(grep -c "BASH:" "$LOG_FILE")
-    if [ "$count" -ne 3 ]; then
+    if [[ "$count" -ne 3 ]]; then
         echo "  FAIL: expected 3 log entries, got $count"
         return 1
     fi
@@ -118,7 +98,7 @@ test_never_blocks_exit_zero() {
     update_log
     send_bash "rm -rf /"
     local rc=$?
-    if [ "$rc" -ne 0 ]; then
+    if [[ "$rc" -ne 0 ]]; then
         echo "  FAIL: hook should always exit 0 (got $rc)"
         return 1
     fi
@@ -139,13 +119,4 @@ run_test test_truncates_long_commands
 run_test test_multiple_commands_appended
 run_test test_never_blocks_exit_zero
 
-echo ""
-echo "Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed"
-if [ ${#FAILURES[@]} -gt 0 ]; then
-    echo "Failed tests:"
-    for f in "${FAILURES[@]}"; do
-        echo "  - $f"
-    done
-    exit 1
-fi
-echo ""
+report_results

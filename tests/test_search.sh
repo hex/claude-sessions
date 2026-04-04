@@ -2,72 +2,8 @@
 # ABOUTME: Tests for the cs -search command that searches across all sessions
 # ABOUTME: Validates search output format, filtering, and edge cases
 
-set -euo pipefail
-
-# Test framework
-TESTS_RUN=0
-TESTS_PASSED=0
-TESTS_FAILED=0
-FAILURES=()
-
-# Paths
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CS_BIN="$SCRIPT_DIR/../bin/cs"
-TEST_TMPDIR=""
-
-setup() {
-    TEST_TMPDIR="$(mktemp -d)"
-    export CS_SESSIONS_ROOT="$TEST_TMPDIR/sessions"
-    export CLAUDE_CODE_BIN="echo"
-    mkdir -p "$CS_SESSIONS_ROOT"
-}
-
-teardown() {
-    if [ -n "$TEST_TMPDIR" ] && [ -d "$TEST_TMPDIR" ]; then
-        rm -rf "$TEST_TMPDIR"
-    fi
-    unset CS_SESSIONS_ROOT CLAUDE_CODE_BIN
-}
-
-assert_output_contains() {
-    local output="$1" pattern="$2" msg="${3:-output should contain '$pattern'}"
-    if ! echo "$output" | grep -q "$pattern"; then
-        echo "  FAIL: $msg"
-        echo "  Output: $(echo "$output" | head -5)"
-        return 1
-    fi
-}
-
-assert_output_not_contains() {
-    local output="$1" pattern="$2" msg="${3:-output should not contain '$pattern'}"
-    if echo "$output" | grep -q "$pattern"; then
-        echo "  FAIL: $msg"
-        return 1
-    fi
-}
-
-run_test() {
-    local test_name="$1"
-    TESTS_RUN=$((TESTS_RUN + 1))
-    echo "  $test_name..."
-    setup
-    if "$test_name" 2>&1; then
-        TESTS_PASSED=$((TESTS_PASSED + 1))
-        echo "    OK"
-    else
-        TESTS_FAILED=$((TESTS_FAILED + 1))
-        FAILURES+=("$test_name")
-    fi
-    teardown
-}
-
-# Helper: create a session with content
-create_test_session() {
-    local name="$1"
-    local session_dir="$CS_SESSIONS_ROOT/$name"
-    mkdir -p "$session_dir/.cs"/{memory,artifacts,logs}
-    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
-}
+source "$SCRIPT_DIR/test_lib.sh"
 
 # ============================================================================
 # Tests
@@ -158,7 +94,6 @@ test_search_no_query() {
 }
 
 test_search_follows_symlinks() {
-    # Simulate an adopted session (symlink)
     local real_dir="$TEST_TMPDIR/real-project"
     mkdir -p "$real_dir/.cs"/{memory,artifacts,logs}
     echo "Real project uses Rust nightly" > "$real_dir/.cs/discoveries.md"
@@ -188,13 +123,4 @@ run_test test_search_no_results
 run_test test_search_no_query
 run_test test_search_follows_symlinks
 
-echo ""
-echo "Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed"
-if [ ${#FAILURES[@]} -gt 0 ]; then
-    echo "Failed tests:"
-    for f in "${FAILURES[@]}"; do
-        echo "  - $f"
-    done
-    exit 1
-fi
-echo ""
+report_results

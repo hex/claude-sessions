@@ -2,104 +2,24 @@
 # ABOUTME: Tests for cs remote session features (host registry, stubs, connection, --move-to)
 # ABOUTME: Validates remote host management, session stubs, host:session parsing, and list display
 
-set -euo pipefail
-
-# Test framework
-TESTS_RUN=0
-TESTS_PASSED=0
-TESTS_FAILED=0
-FAILURES=()
-
-# Paths
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CS_BIN="$SCRIPT_DIR/../bin/cs"
-TEST_TMPDIR=""
+source "$SCRIPT_DIR/test_lib.sh"
 
+# Override setup to add remote-specific env vars
 setup() {
     TEST_TMPDIR="$(mktemp -d)"
     export CS_SESSIONS_ROOT="$TEST_TMPDIR/sessions"
-    export CLAUDE_CODE_BIN="echo"  # Stub out claude so it doesn't launch
+    export CLAUDE_CODE_BIN="echo"
     export CS_TEST_DRY_RUN=1       # Prevent actual remote connections
     mkdir -p "$CS_SESSIONS_ROOT"
 }
 
 teardown() {
-    if [ -n "$TEST_TMPDIR" ] && [ -d "$TEST_TMPDIR" ]; then
+    if [[ -n "$TEST_TMPDIR" ]] && [[ -d "$TEST_TMPDIR" ]]; then
         rm -rf "$TEST_TMPDIR"
     fi
     unset CS_SESSIONS_ROOT CLAUDE_CODE_BIN CS_TEST_DRY_RUN
     unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR CLAUDE_ARTIFACT_DIR 2>/dev/null || true
-}
-
-assert_eq() {
-    local expected="$1" actual="$2" msg="${3:-}"
-    if [ "$expected" != "$actual" ]; then
-        echo "  FAIL: $msg"
-        echo "    expected: $expected"
-        echo "    actual:   $actual"
-        return 1
-    fi
-}
-
-assert_exists() {
-    local path="$1" msg="${2:-$path should exist}"
-    if [ ! -e "$path" ]; then
-        echo "  FAIL: $msg (path does not exist: $path)"
-        return 1
-    fi
-}
-
-assert_not_exists() {
-    local path="$1" msg="${2:-$path should not exist}"
-    if [ -e "$path" ]; then
-        echo "  FAIL: $msg (path exists: $path)"
-        return 1
-    fi
-}
-
-assert_file_contains() {
-    local file="$1" pattern="$2" msg="${3:-$file should contain '$pattern'}"
-    if ! grep -q "$pattern" "$file" 2>/dev/null; then
-        echo "  FAIL: $msg"
-        if [ -f "$file" ]; then
-            echo "    file contents: $(cat "$file")"
-        else
-            echo "    file does not exist"
-        fi
-        return 1
-    fi
-}
-
-assert_file_not_contains() {
-    local file="$1" pattern="$2" msg="${3:-$file should not contain '$pattern'}"
-    if grep -q "$pattern" "$file" 2>/dev/null; then
-        echo "  FAIL: $msg"
-        return 1
-    fi
-}
-
-assert_output_contains() {
-    local output="$1" pattern="$2" msg="${3:-output should contain '$pattern'}"
-    if ! echo "$output" | grep -q "$pattern"; then
-        echo "  FAIL: $msg"
-        echo "    output: $output"
-        return 1
-    fi
-}
-
-run_test() {
-    local test_name="$1"
-    TESTS_RUN=$((TESTS_RUN + 1))
-    echo "  $test_name..."
-    setup
-    if "$test_name" 2>&1; then
-        TESTS_PASSED=$((TESTS_PASSED + 1))
-        echo "    OK"
-    else
-        TESTS_FAILED=$((TESTS_FAILED + 1))
-        FAILURES+=("$test_name")
-    fi
-    teardown
 }
 
 # ============================================================================
@@ -129,7 +49,6 @@ test_remote_add_duplicate_updates() {
     "$CS_BIN" -remote add myserver hex@mac-mini.local 2>&1
     "$CS_BIN" -remote add myserver hex@new-host.local 2>&1
 
-    # Should have updated, not duplicated
     local count
     count=$(grep -c "myserver=" "$CS_SESSIONS_ROOT/.remotes")
     assert_eq "1" "$count" "Should have exactly one entry for myserver" || return 1
@@ -239,7 +158,6 @@ test_on_flag_with_unregistered_name_errors() {
 }
 
 test_on_flag_with_existing_local_session_errors() {
-    # Create a local session first
     mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs"
 
     local output
@@ -252,20 +170,17 @@ test_on_flag_with_existing_local_session_errors() {
 }
 
 test_on_flag_same_host_reconnects() {
-    # Create a remote stub
     mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs"
     echo "host=hex@mac-mini.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
 
     local output
     output=$("$CS_BIN" my-session --on hex@mac-mini.local 2>&1)
 
-    # Should succeed (reconnect)
     assert_file_contains "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf" "host=hex@mac-mini.local" \
         "remote.conf should still have same host" || return 1
 }
 
 test_on_flag_different_host_warns_and_updates() {
-    # Create a remote stub pointing to old host
     mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs"
     echo "host=hex@old-host.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
 
@@ -291,14 +206,11 @@ test_host_session_syntax_creates_stub() {
 }
 
 test_host_session_syntax_remembered() {
-    # First connection via host:session
     "$CS_BIN" "hex@mac-mini.local:my-session" 2>&1
 
-    # Second connection via just session name should detect remote
     local output
     output=$("$CS_BIN" my-session 2>&1)
 
-    # Should attempt remote connection (dry run shows the command)
     assert_output_contains "$output" "hex@mac-mini.local" \
         "Should connect to remembered host" || return 1
 }
@@ -308,28 +220,23 @@ test_host_session_syntax_remembered() {
 # ============================================================================
 
 test_remote_session_detected() {
-    # Create a remote stub
     mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs"
     echo "host=hex@mac-mini.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
 
     local output
     output=$("$CS_BIN" my-session 2>&1)
 
-    # In dry run mode, should show the connection command
     assert_output_contains "$output" "hex@mac-mini.local" \
         "Should detect remote session and show host" || return 1
 }
 
 test_local_session_not_detected_as_remote() {
-    # Create a normal local session (no remote.conf)
     mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs"
     touch "$CS_SESSIONS_ROOT/my-session/.cs/sync.conf"
 
-    # This will try to launch claude (stubbed as echo), not connect remotely
     local output
     output=$("$CS_BIN" my-session 2>&1)
 
-    # Should NOT contain remote connection indicators
     if echo "$output" | grep -q "Connecting to"; then
         echo "  FAIL: Local session should not trigger remote connection"
         return 1
@@ -341,11 +248,9 @@ test_local_session_not_detected_as_remote() {
 # ============================================================================
 
 test_connection_prefers_et() {
-    # Create a remote stub
     mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs"
     echo "host=hex@mac-mini.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
 
-    # Create a fake et binary
     local fake_bin="$TEST_TMPDIR/bin"
     mkdir -p "$fake_bin"
     echo '#!/bin/sh' > "$fake_bin/et"
@@ -359,18 +264,14 @@ test_connection_prefers_et() {
 }
 
 test_connection_falls_back_to_ssh() {
-    # Create a remote stub
     mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs"
     echo "host=hex@mac-mini.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
 
-    # Ensure et is not available (use a restricted PATH)
     local fake_bin="$TEST_TMPDIR/bin"
     mkdir -p "$fake_bin"
-    # Provide ssh but not et
     echo '#!/bin/sh' > "$fake_bin/ssh"
     chmod +x "$fake_bin/ssh"
 
-    # Override PATH to exclude et but include ssh and basic tools
     local output
     output=$(PATH="$fake_bin:/usr/bin:/bin" "$CS_BIN" my-session 2>&1)
 
@@ -391,7 +292,6 @@ test_et_uses_command_flag() {
     mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs"
     echo "host=hex@mac-mini.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
 
-    # Create a fake et binary
     local fake_bin="$TEST_TMPDIR/bin"
     mkdir -p "$fake_bin"
     echo '#!/bin/sh' > "$fake_bin/et"
@@ -401,7 +301,6 @@ test_et_uses_command_flag() {
     local output
     output=$("$CS_BIN" my-session 2>&1)
 
-    # et uses -c for command, NOT -t (which means --tunnel in et)
     assert_output_contains "$output" "et hex@mac-mini.local -c" \
         "et should use -c flag for command" || return 1
 }
@@ -410,7 +309,6 @@ test_ssh_uses_tty_flag() {
     mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs"
     echo "host=hex@mac-mini.local" > "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf"
 
-    # Provide ssh but not et
     local fake_bin="$TEST_TMPDIR/bin"
     mkdir -p "$fake_bin"
     echo '#!/bin/sh' > "$fake_bin/ssh"
@@ -419,7 +317,6 @@ test_ssh_uses_tty_flag() {
     local output
     output=$(PATH="$fake_bin:/usr/bin:/bin" "$CS_BIN" my-session 2>&1)
 
-    # ssh uses -t for TTY allocation
     assert_output_contains "$output" "ssh hex@mac-mini.local -t" \
         "ssh should use -t flag for TTY" || return 1
 }
@@ -442,7 +339,6 @@ test_connection_uses_absolute_cs_path() {
     local output
     output=$("$CS_BIN" my-session 2>&1)
 
-    # Remote command should use absolute path to cs, not bare 'cs'
     assert_output_contains "$output" ".local/bin/cs my-session" \
         "Remote command should use absolute path to cs" || return 1
 }
@@ -482,7 +378,6 @@ test_secrets_blocked_on_remote_session() {
 # ============================================================================
 
 test_move_to_creates_stub() {
-    # Create a local session with some content
     mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs"
     echo "auto_sync=on" > "$CS_SESSIONS_ROOT/my-session/.cs/sync.conf"
     echo "some work" > "$CS_SESSIONS_ROOT/my-session/notes.txt"
@@ -503,7 +398,6 @@ test_move_to_nonexistent_session_errors() {
         return 1
     fi
 
-    # Should error about session not existing
     assert_output_contains "$output" "not found\|does not exist\|No.*session" \
         "Error should indicate session doesn't exist" || return 1
 }
@@ -544,12 +438,10 @@ test_move_to_shows_rsync_command() {
 test_move_to_queries_remote_sessions_root() {
     mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs"
 
-    # Create a fake ssh that simulates remote CS_SESSIONS_ROOT
     local fake_bin="$TEST_TMPDIR/bin"
     mkdir -p "$fake_bin"
     cat > "$fake_bin/ssh" << 'SCRIPT'
 #!/bin/sh
-# Simulate remote CS_SESSIONS_ROOT query
 echo "/data/sessions"
 SCRIPT
     chmod +x "$fake_bin/ssh"
@@ -561,13 +453,11 @@ SCRIPT
     assert_output_contains "$output" "/data/sessions/my-session" \
         "Should use remote CS_SESSIONS_ROOT in rsync destination" || return 1
 
-    # Verify root is cached in remote.conf
     assert_file_contains "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf" "root=/data/sessions" \
         "remote.conf should cache detected root" || return 1
 }
 
 test_move_to_cleans_local_files() {
-    # Create a local session with project files
     mkdir -p "$CS_SESSIONS_ROOT/my-session/.cs/logs"
     echo "auto_sync=on" > "$CS_SESSIONS_ROOT/my-session/.cs/sync.conf"
     echo "some work" > "$CS_SESSIONS_ROOT/my-session/notes.txt"
@@ -576,28 +466,24 @@ test_move_to_cleans_local_files() {
     local output
     output=$("$CS_BIN" my-session --move-to hex@mac-mini.local 2>&1)
 
-    # remote.conf should exist (it's the stub)
     assert_exists "$CS_SESSIONS_ROOT/my-session/.cs/remote.conf" \
         "remote.conf should survive cleanup" || return 1
 
-    # Project files should be gone
-    if [ -f "$CS_SESSIONS_ROOT/my-session/notes.txt" ]; then
+    if [[ -f "$CS_SESSIONS_ROOT/my-session/notes.txt" ]]; then
         echo "  FAIL: notes.txt should be removed after move"
         return 1
     fi
-    if [ -f "$CS_SESSIONS_ROOT/my-session/CLAUDE.md" ]; then
+    if [[ -f "$CS_SESSIONS_ROOT/my-session/CLAUDE.md" ]]; then
         echo "  FAIL: CLAUDE.md should be removed after move"
         return 1
     fi
-    # Other .cs/ contents should be gone too
-    if [ -f "$CS_SESSIONS_ROOT/my-session/.cs/sync.conf" ]; then
+    if [[ -f "$CS_SESSIONS_ROOT/my-session/.cs/sync.conf" ]]; then
         echo "  FAIL: sync.conf should be removed after move"
         return 1
     fi
 }
 
 test_move_to_preserves_adopted_session_files() {
-    # Simulate an adopted session (symlink to external project)
     local project_dir="$TEST_TMPDIR/my-project"
     mkdir -p "$project_dir/.cs"
     echo "important work" > "$project_dir/main.py"
@@ -606,12 +492,10 @@ test_move_to_preserves_adopted_session_files() {
     local output
     output=$("$CS_BIN" my-session --move-to hex@mac-mini.local 2>&1)
 
-    # remote.conf should exist
     assert_exists "$project_dir/.cs/remote.conf" \
         "remote.conf should be created in adopted session" || return 1
 
-    # Project files should be preserved (it's a symlink — not safe to delete)
-    if [ ! -f "$project_dir/main.py" ]; then
+    if [[ ! -f "$project_dir/main.py" ]]; then
         echo "  FAIL: adopted project files should be preserved"
         return 1
     fi
@@ -622,12 +506,10 @@ test_move_to_preserves_adopted_session_files() {
 # ============================================================================
 
 test_list_shows_remote_location() {
-    # Create a remote session
     mkdir -p "$CS_SESSIONS_ROOT/remote-session/.cs/logs"
     echo "host=hex@mac-mini.local" > "$CS_SESSIONS_ROOT/remote-session/.cs/remote.conf"
     echo "Started: 2026-01-01 12:00:00" > "$CS_SESSIONS_ROOT/remote-session/.cs/logs/session.log"
 
-    # Create a local session
     mkdir -p "$CS_SESSIONS_ROOT/local-session/.cs/logs"
     echo "Started: 2026-01-01 12:00:00" > "$CS_SESSIONS_ROOT/local-session/.cs/logs/session.log"
 
@@ -725,13 +607,4 @@ run_test test_list_shows_remote_location
 run_test test_list_shows_registered_name_for_remote
 run_test test_remove_remote_session_removes_stub
 
-echo ""
-echo "Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed"
-if [ ${#FAILURES[@]} -gt 0 ]; then
-    echo "Failed tests:"
-    for f in "${FAILURES[@]}"; do
-        echo "  - $f"
-    done
-    exit 1
-fi
-echo ""
+report_results

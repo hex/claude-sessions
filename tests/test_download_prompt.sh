@@ -2,39 +2,10 @@
 # ABOUTME: Tests for user consent prompts before auto-downloading age binaries
 # ABOUTME: Validates that non-interactive contexts skip download and interactive contexts show prompt
 
-set -euo pipefail
-
-# Test framework
-TESTS_RUN=0
-TESTS_PASSED=0
-TESTS_FAILED=0
-FAILURES=()
-
-# Paths
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CS_BIN="$SCRIPT_DIR/../bin/cs"
+source "$SCRIPT_DIR/test_lib.sh"
+
 CS_SECRETS_BIN="$SCRIPT_DIR/../bin/cs-secrets"
-
-assert_file_contains() {
-    local file="$1" pattern="$2" msg="${3:-$file should contain '$pattern'}"
-    if ! grep -q "$pattern" "$file" 2>/dev/null; then
-        echo "  FAIL: $msg"
-        return 1
-    fi
-}
-
-run_test() {
-    local test_name="$1"
-    TESTS_RUN=$((TESTS_RUN + 1))
-    echo "  $test_name..."
-    if "$test_name" 2>&1; then
-        TESTS_PASSED=$((TESTS_PASSED + 1))
-        echo "    OK"
-    else
-        TESTS_FAILED=$((TESTS_FAILED + 1))
-        FAILURES+=("$test_name")
-    fi
-}
 
 # ============================================================================
 # minisign is no longer a hard dependency (SHA-256 is primary)
@@ -110,13 +81,4 @@ run_test test_age_has_noninteractive_guard
 run_test test_age_has_manual_install_hint
 run_test test_age_has_download_source_disclosure
 
-echo ""
-echo "Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed"
-if [ ${#FAILURES[@]} -gt 0 ]; then
-    echo "Failed tests:"
-    for f in "${FAILURES[@]}"; do
-        echo "  - $f"
-    done
-    exit 1
-fi
-echo ""
+report_results
