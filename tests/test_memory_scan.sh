@@ -2,19 +2,10 @@
 # ABOUTME: Tests for memory security scanning in cs -sync push
 # ABOUTME: Validates detection of injection, exfiltration, and invisible unicode patterns
 
-set -euo pipefail
-
-# Test framework
-TESTS_RUN=0
-TESTS_PASSED=0
-TESTS_FAILED=0
-FAILURES=()
-
-# Paths
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CS_BIN="$SCRIPT_DIR/../bin/cs"
-TEST_TMPDIR=""
+source "$SCRIPT_DIR/test_lib.sh"
 
+# Override setup to also extract scan_memory_files into a testable script
 setup() {
     TEST_TMPDIR="$(mktemp -d)"
     export CS_SESSIONS_ROOT="$TEST_TMPDIR/sessions"
@@ -28,32 +19,9 @@ set -euo pipefail
 RED='' GREEN='' YELLOW='' ORANGE='' GOLD='' RUST='' COMMENT='' NC='' DIM=''
 warn() { echo "WARNING: $1" >&2; }
 SCANEOF
-    # Extract the scan_memory_files function
     sed -n '/^scan_memory_files()/,/^}/p' "$SCRIPT_DIR/../bin/cs" >> "$TEST_TMPDIR/scan.sh"
     echo 'scan_memory_files "$1"' >> "$TEST_TMPDIR/scan.sh"
     chmod +x "$TEST_TMPDIR/scan.sh"
-}
-
-teardown() {
-    if [ -n "$TEST_TMPDIR" ] && [ -d "$TEST_TMPDIR" ]; then
-        rm -rf "$TEST_TMPDIR"
-    fi
-    unset CS_SESSIONS_ROOT CLAUDE_CODE_BIN
-}
-
-run_test() {
-    local test_name="$1"
-    TESTS_RUN=$((TESTS_RUN + 1))
-    echo "  $test_name..."
-    setup
-    if "$test_name" 2>&1; then
-        TESTS_PASSED=$((TESTS_PASSED + 1))
-        echo "    OK"
-    else
-        TESTS_FAILED=$((TESTS_FAILED + 1))
-        FAILURES+=("$test_name")
-    fi
-    teardown
 }
 
 # Helper: create session with git and memory
@@ -62,7 +30,6 @@ create_session_with_memory() {
     local session_dir="$CS_SESSIONS_ROOT/$name"
     mkdir -p "$session_dir/.cs"/{memory,artifacts,logs}
     echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
-    echo "auto_sync=on" > "$session_dir/.cs/sync.conf"
     echo "# Session" > "$session_dir/CLAUDE.md"
     echo "$content" > "$session_dir/.cs/memory/MEMORY.md"
     (cd "$session_dir" && git init -q && git add -A && git commit -q -m "init")
@@ -152,13 +119,4 @@ run_test test_credential_exfil_detected
 run_test test_no_memory_dir_passes
 run_test test_empty_memory_passes
 
-echo ""
-echo "Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed"
-if [ ${#FAILURES[@]} -gt 0 ]; then
-    echo "Failed tests:"
-    for f in "${FAILURES[@]}"; do
-        echo "  - $f"
-    done
-    exit 1
-fi
-echo ""
+report_results

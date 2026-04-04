@@ -2,62 +2,8 @@
 # ABOUTME: Tests for cs -update subcommand (manual update, check, force)
 # ABOUTME: Validates help text, subcommand routing, and that auto-update is not offered
 
-set -euo pipefail
-
-TESTS_RUN=0
-TESTS_PASSED=0
-TESTS_FAILED=0
-FAILURES=()
-
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CS_BIN="$SCRIPT_DIR/../bin/cs"
-TEST_TMPDIR=""
-
-setup() {
-    TEST_TMPDIR="$(mktemp -d)"
-    export CS_SESSIONS_ROOT="$TEST_TMPDIR/sessions"
-    export CLAUDE_CODE_BIN="echo"  # Stub out claude so it doesn't launch
-    mkdir -p "$CS_SESSIONS_ROOT"
-}
-
-teardown() {
-    if [ -n "$TEST_TMPDIR" ] && [ -d "$TEST_TMPDIR" ]; then
-        rm -rf "$TEST_TMPDIR"
-    fi
-    unset CS_SESSIONS_ROOT CLAUDE_CODE_BIN 2>/dev/null || true
-}
-
-assert_output_contains() {
-    local output="$1" pattern="$2" msg="${3:-output should contain '$pattern'}"
-    if ! echo "$output" | grep -q -- "$pattern"; then
-        echo "  FAIL: $msg"
-        echo "    output: $output"
-        return 1
-    fi
-}
-
-assert_output_not_contains() {
-    local output="$1" pattern="$2" msg="${3:-output should not contain '$pattern'}"
-    if echo "$output" | grep -q -- "$pattern"; then
-        echo "  FAIL: $msg"
-        return 1
-    fi
-}
-
-run_test() {
-    local test_name="$1"
-    TESTS_RUN=$((TESTS_RUN + 1))
-    echo "  $test_name..."
-    setup
-    if "$test_name" 2>&1; then
-        TESTS_PASSED=$((TESTS_PASSED + 1))
-        echo "    OK"
-    else
-        TESTS_FAILED=$((TESTS_FAILED + 1))
-        FAILURES+=("$test_name")
-    fi
-    teardown
-}
+source "$SCRIPT_DIR/test_lib.sh"
 
 # ============================================================================
 # Help text tests
@@ -87,7 +33,6 @@ test_help_does_not_show_auto_update() {
 
     assert_output_not_contains "$output" "CS_AUTO_UPDATE" \
         "Help should not reference CS_AUTO_UPDATE env var" || return 1
-    # The update section should not mention "auto" (sync section still has auto, that's fine)
     local update_section
     update_section=$(echo "$output" | sed -n '/-update/,/^  -/p' | head -5)
     if echo "$update_section" | grep -q -- "auto"; then
@@ -134,13 +79,11 @@ test_verify_checksum_present_in_source() {
 }
 
 test_verify_checksum_catches_mismatch() {
-    # Create a file and a checksum that doesn't match
     local tmpdir
     tmpdir="$(mktemp -d)"
     echo "hello world" > "$tmpdir/test.txt"
     echo "0000000000000000000000000000000000000000000000000000000000000000  test.txt" > "$tmpdir/test.txt.sha256"
 
-    # Source the verify_checksum function
     local result
     if ( source <(grep -A 15 '^verify_checksum()' "$CS_BIN"); verify_checksum "$tmpdir/test.txt" "$tmpdir/test.txt.sha256" ); then
         rm -rf "$tmpdir"
@@ -156,7 +99,6 @@ test_verify_checksum_accepts_match() {
     tmpdir="$(mktemp -d)"
     echo "hello world" > "$tmpdir/test.txt"
 
-    # Generate correct checksum
     if command -v sha256sum &>/dev/null; then
         sha256sum "$tmpdir/test.txt" > "$tmpdir/test.txt.sha256"
     elif command -v shasum &>/dev/null; then
@@ -167,7 +109,6 @@ test_verify_checksum_accepts_match() {
         return 0
     fi
 
-    # Source the verify_checksum function and test
     if ! ( source <(grep -A 15 '^verify_checksum()' "$CS_BIN"); verify_checksum "$tmpdir/test.txt" "$tmpdir/test.txt.sha256" ); then
         rm -rf "$tmpdir"
         echo "  FAIL: verify_checksum should accept matching checksum"
@@ -178,7 +119,6 @@ test_verify_checksum_accepts_match() {
 }
 
 test_do_update_downloads_checksum() {
-    # Verify the do_update function references install.sh.sha256
     if ! grep -q 'install.sh.sha256' "$CS_BIN"; then
         echo "  FAIL: do_update should download install.sh.sha256"
         return 1
@@ -186,7 +126,6 @@ test_do_update_downloads_checksum() {
 }
 
 test_signature_is_optional() {
-    # Verify the signature download is best-effort (uses 2>/dev/null)
     if ! grep -A 1 'install.sh.minisig' "$CS_BIN" | grep -q '2>/dev/null'; then
         echo "  FAIL: minisig download should be best-effort"
         return 1
@@ -213,13 +152,4 @@ run_test test_verify_checksum_accepts_match
 run_test test_do_update_downloads_checksum
 run_test test_signature_is_optional
 
-echo ""
-echo "Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed"
-if [ ${#FAILURES[@]} -gt 0 ]; then
-    echo "Failed tests:"
-    for f in "${FAILURES[@]}"; do
-        echo "  - $f"
-    done
-    exit 1
-fi
-echo ""
+report_results
