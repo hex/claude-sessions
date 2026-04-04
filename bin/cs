@@ -1812,8 +1812,8 @@ scan_memory_files() {
         local filename
         filename=$(basename "$file")
 
-        # Invisible unicode characters
-        if grep -Pq '[\x{200b}\x{200c}\x{200d}\x{2060}\x{feff}\x{202a}-\x{202e}]' "$file" 2>/dev/null; then
+        # Invisible unicode characters (perl for portability — grep -P is unavailable on macOS)
+        if perl -e 'use open ":std",":encoding(UTF-8)"; while(<ARGV>){ exit 0 if /[\x{200b}\x{200c}\x{200d}\x{2060}\x{feff}\x{202a}-\x{202e}]/; } exit 1;' "$file" 2>/dev/null; then
             warn "  $filename: contains invisible unicode characters (possible injection)"
             found=$((found + 1))
         fi
