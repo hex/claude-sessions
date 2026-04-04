@@ -151,7 +151,7 @@ assert_file_not_contains() {
 
 assert_output_contains() {
     local output="$1" pattern="$2" msg="${3:-output should contain '$pattern'}"
-    if ! echo "$output" | grep -q "$pattern"; then
+    if ! echo "$output" | grep -q -- "$pattern"; then
         echo "  FAIL: $msg"
         echo "    output: $(echo "$output" | head -5)"
         return 1
@@ -160,7 +160,7 @@ assert_output_contains() {
 
 assert_output_not_contains() {
     local output="$1" pattern="$2" msg="${3:-output should not contain '$pattern'}"
-    if echo "$output" | grep -q "$pattern"; then
+    if echo "$output" | grep -q -- "$pattern"; then
         echo "  FAIL: $msg"
         return 1
     fi
