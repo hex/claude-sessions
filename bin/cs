@@ -621,7 +621,7 @@ When the session is complete, use the `/summary` command to generate an intellig
 
 ## Secure Secrets Handling
 
-Sensitive data is automatically detected and stored securely (macOS Keychain, Windows Credential Manager, or encrypted file):
+Sensitive data is automatically detected and stored securely (macOS Keychain or encrypted file):
 
 **Auto-detected patterns:**
 - Files: .env, filenames containing key, secret, password, token, credential, auth

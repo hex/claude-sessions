@@ -9,19 +9,7 @@ The `cs -secrets` command auto-detects the best available backend (in priority o
 | Priority | Backend | Storage Location | Cross-Machine Sync |
 |----------|---------|------------------|-------------------|
 | 1 | macOS Keychain | Login keychain | Via export-file |
-| 2 | Windows Credential Manager | Windows Credential Store | Via export-file |
-| 3 | Encrypted file | `~/.cs-secrets/<session>.enc` | Manual |
-
-**Windows Setup:**
-
-To use the Windows Credential Manager backend, install the PowerShell SecretManagement modules:
-
-```powershell
-Install-Module Microsoft.PowerShell.SecretManagement -Scope CurrentUser
-Install-Module Microsoft.PowerShell.SecretStore -Scope CurrentUser
-```
-
-If these modules are not installed, `cs -secrets` automatically falls back to the encrypted file backend.
+| 2 | Encrypted file | `~/.cs-secrets/<session>.enc` | Manual |
 
 **Encrypted File Backend:**
 

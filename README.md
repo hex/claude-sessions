@@ -49,18 +49,10 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/hex/claude-sessions/main
 
 Or clone and run `./install.sh`.
 
-### PowerShell 7 (Windows/macOS/Linux)
-
-```powershell
-irm https://raw.githubusercontent.com/hex/claude-sessions/main/install.ps1 | iex
-```
-
-Or clone and run `./install.ps1`.
-
-> :warning: Always review scripts ([bash](install.sh), [PowerShell](install.ps1)) before running them from the internet.
+> :warning: Always review [install.sh](install.sh) before running scripts from the internet.
 
 The installer:
-- Adds `cs`, `cs-secrets`, and `cs-tui` to `~/.local/bin/` (PowerShell installer: `cs` and `cs-secrets` only)
+- Adds `cs`, `cs-secrets`, and `cs-tui` to `~/.local/bin/`
 - Installs twelve [hooks](docs/hooks.md) to `~/.claude/hooks/` for session tracking
 - Adds `/summary`, `/compact-discoveries`, and `/skillify` commands, and `store-secret` skill to `~/.claude/`
 - Installs shell completions for bash and zsh
@@ -250,12 +242,7 @@ fpath=(~/.zsh/completions $fpath)
 autoload -Uz compinit && compinit
 ```
 
-**PowerShell** - Add to your `$PROFILE`:
-```powershell
-. "$HOME/.config/powershell/completions/cs.ps1"
-```
-
-Then restart your shell or run `source ~/.bashrc` / `source ~/.zshrc` / `. $PROFILE`.
+Then restart your shell or run `source ~/.bashrc` / `source ~/.zshrc`.
 
 Completions support:
 - Session names: `cs home<TAB>` → `cs homeassistant`
@@ -272,8 +259,8 @@ Completions support:
 ## Requirements
 
 - [Claude Code](https://github.com/anthropics/claude-code)
-- Bash 4.0+ or PowerShell 7+
-- `jq` for hook configuration (bash installer only; PowerShell uses native JSON)
+- Bash 4.0+
+- `jq` for hook configuration
 - `git` for session sync
 
 ## Uninstalling
