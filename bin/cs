@@ -566,52 +566,9 @@ SETTINGS
     fi
 }
 
-# Create session directory structure
-create_session_structure() {
+# Write the session CLAUDE.md template to the given directory
+write_session_claude_md() {
     local session_dir="$1"
-
-    mkdir -p "$session_dir/.cs"/{artifacts,logs}
-
-    # Create README.md
-    cat > "$session_dir/.cs/README.md" << EOF
-# Session: $(basename "$session_dir")
-
-**Started:** $(date '+%Y-%m-%d %H:%M:%S')
-**Location:** $(hostname):$(pwd)
-
-## Objective
-
-[Describe what you're trying to accomplish in this session]
-
-## Environment
-
-[Describe the system, server, or context you're working in]
-
-## Outcome
-
-[To be filled when session is complete - summarize what was accomplished]
-EOF
-
-    # Create discoveries.md
-    cat > "$session_dir/.cs/discoveries.md" << 'EOF'
-# Discoveries & Notes
-
-EOF
-
-    # Create changes.md
-    cat > "$session_dir/.cs/changes.md" << 'EOF'
-# Changes Log
-
-EOF
-
-    # Create commands.md (populated by command-tracker hook)
-    cat > "$session_dir/.cs/commands.md" << 'EOF'
-# Project Commands
-Auto-discovered CLI commands from prior sessions.
-
-EOF
-
-    # Create CLAUDE.md with session-specific instructions
     cat > "$session_dir/CLAUDE.md" << 'EOF'
 # Session Documentation Protocol
 
@@ -696,6 +653,54 @@ cs -secrets set <name> <value>     # Store manually
 - Run `/summary` at the end to create a cohesive record
 - Never write raw API keys or passwords to artifact files - use cs -secrets
 EOF
+}
+
+# Create session directory structure
+create_session_structure() {
+    local session_dir="$1"
+
+    mkdir -p "$session_dir/.cs"/{artifacts,logs}
+
+    # Create README.md
+    cat > "$session_dir/.cs/README.md" << EOF
+# Session: $(basename "$session_dir")
+
+**Started:** $(date '+%Y-%m-%d %H:%M:%S')
+**Location:** $(hostname):$(pwd)
+
+## Objective
+
+[Describe what you're trying to accomplish in this session]
+
+## Environment
+
+[Describe the system, server, or context you're working in]
+
+## Outcome
+
+[To be filled when session is complete - summarize what was accomplished]
+EOF
+
+    # Create discoveries.md
+    cat > "$session_dir/.cs/discoveries.md" << 'EOF'
+# Discoveries & Notes
+
+EOF
+
+    # Create changes.md
+    cat > "$session_dir/.cs/changes.md" << 'EOF'
+# Changes Log
+
+EOF
+
+    # Create commands.md (populated by command-tracker hook)
+    cat > "$session_dir/.cs/commands.md" << 'EOF'
+# Project Commands
+Auto-discovered CLI commands from prior sessions.
+
+EOF
+
+    write_session_claude_md "$session_dir"
 
     # Initialize empty MANIFEST.json
     echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
@@ -802,90 +807,7 @@ EOF
     # Phase 5: Update CLAUDE.md to reference .cs/ paths if needed
     local claude_md="$session_dir/CLAUDE.md"
     if [ -f "$claude_md" ] && ! grep -q '\.cs/' "$claude_md"; then
-        cat > "$claude_md" << 'EOF'
-# Session Documentation Protocol
-
-This is a Claude Code session managed by the cs tool. Session metadata lives in the .cs/ directory. The session root is your workspace for project files.
-
-## Session Files - READ THESE ON RESUME
-
-When resuming this session, read the following files to restore context:
-
-1. **.cs/summary.md** - If exists, read first for previous session overview
-2. **.cs/README.md** - Session objective, environment, and outcome
-3. **.cs/discoveries.md** - Recent findings, observations, and ideas
-4. **.cs/discoveries.compact.md** - If exists, condensed historical findings
-5. **.cs/changes.md** - Modifications and fixes made
-6. **.cs/artifacts/MANIFEST.json** - List of tracked artifacts
-7. **.cs/commands.md** - CLI commands discovered in prior sessions
-
-Note: Historical discoveries are archived to .cs/discoveries.archive.md
-and condensed into .cs/discoveries.compact.md. Only read the archive
-if you need full detail on a specific past finding.
-
-## Discovered Commands
-
-Useful CLI commands from prior sessions are tracked automatically. These may be stale if the project setup changed — verify before using.
-
-@.cs/commands.md
-
-## Artifact Auto-Tracking
-
-Scripts and configuration files you create are **automatically saved to .cs/artifacts/**:
-
-- Scripts: .sh, .bash, .zsh, .py, .js, .ts, .rb, .pl
-- Configs: .conf, .config, .json, .yaml, .yml, .toml, .ini, .env
-
-When you use the Write tool for these file types, they are automatically redirected to the .cs/artifacts/ directory and tracked in MANIFEST.json.
-
-## Documentation Discipline
-
-Update the markdown documentation files throughout the session:
-
-1. **Start of session:** Fill in .cs/README.md objective and environment
-2. **As you work:** Update .cs/discoveries.md with findings and .cs/changes.md with modifications
-3. **End of session:** Complete the .cs/README.md outcome section
-
-Treat these files as a lab notebook - document as you go, not just at the end.
-
-## Summary Command
-
-When the session is complete, use the `/summary` command to generate an intelligent summary of the entire session. This will create a .cs/summary.md file synthesizing all documentation.
-
-## Secure Secrets Handling
-
-Sensitive data is automatically detected and stored securely (macOS Keychain, Windows Credential Manager, or encrypted file):
-
-**Auto-detected patterns:**
-- Files: .env, filenames containing key, secret, password, token, credential, auth
-- Content: Variables like API_KEY, SECRET_TOKEN, PASSWORD, etc.
-
-**What happens:**
-1. Sensitive values are extracted and stored securely
-2. The artifact file contains redacted placeholders
-3. MANIFEST.json lists which secrets exist (not the values)
-
-**Retrieving secrets:**
-```bash
-cs -secrets backend                # Check which storage backend is active
-cs -secrets list                   # List secrets for current session
-cs -secrets get API_KEY            # Get a specific secret value
-cs -secrets export                 # Export as environment variables
-```
-
-**If you detect sensitive data** that wasn't auto-captured (unusual patterns, embedded credentials, etc.), use cs -secrets directly:
-```bash
-cs -secrets set <name> <value>     # Store manually
-```
-
-## Best Practices
-
-- Document discoveries as you find them - don't wait until the end
-- Use .cs/artifacts/ for any reusable scripts or configs
-- .cs/changes.md is updated automatically when files are modified
-- Run `/summary` at the end to create a cohesive record
-- Never write raw API keys or passwords to artifact files - use cs -secrets
-EOF
+        write_session_claude_md "$session_dir"
         warn "Updated CLAUDE.md to reference .cs/ paths"
     fi
 }
@@ -1281,24 +1203,8 @@ launch_claude_code() {
 
 # Run secrets subcommand
 run_secrets() {
-    # Find the secrets helper script
-    local secrets_script=""
-    local script_dir
-    script_dir="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")"
-
-    # Check common locations
-    for loc in "$script_dir/cs-secrets" "$HOME/.local/bin/cs-secrets" "/usr/local/bin/cs-secrets"; do
-        if [ -x "$loc" ]; then
-            secrets_script="$loc"
-            break
-        fi
-    done
-
-    if [ -z "$secrets_script" ]; then
-        error "cs-secrets not found. Try reinstalling with: cs -update --force"
-    fi
-
-    # Pass all remaining arguments to secrets script
+    local secrets_script
+    secrets_script=$(find_secrets_script) || error "cs-secrets not found. Try reinstalling with: cs -update --force"
     exec "$secrets_script" "$@"
 }
 
