@@ -7,6 +7,7 @@ The installer configures Claude Code hooks that enable session management featur
 Runs when Claude Code starts a session:
 - Logs session start (including source: `startup`, `resume`, `clear`, `compact`) to `.cs/logs/session.log`
 - On `startup`/`resume` only: configures `transfer.hideRefs`, recovers autosaved changes from crashed sessions, auto-pulls from remote
+- On `resume` only: injects dynamic context (last activity, recent commits, objective, up to 5 most recently active sibling sessions with their objectives)
 - On all sources: exports session environment variables, injects session context into Claude's system prompt
 
 ## artifact-tracker.sh (PreToolUse on Write)
