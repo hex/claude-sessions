@@ -373,6 +373,178 @@ test_failure_handles_missing_error() {
 }
 
 # ============================================================================
+# session-start.sh: cross-session context
+# ============================================================================
+
+# Setup for session-start tests needs CS_SESSIONS_ROOT with sibling sessions
+session_start_setup() {
+    setup
+    export CS_SESSIONS_ROOT="$TEST_TMPDIR/sessions"
+    mkdir -p "$CS_SESSIONS_ROOT"
+
+    # Current session lives inside SESSIONS_ROOT
+    export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/current-session"
+    export CLAUDE_SESSION_META_DIR="$CLAUDE_SESSION_DIR/.cs"
+    export CLAUDE_ARTIFACT_DIR="$CLAUDE_SESSION_DIR/.cs/artifacts"
+    export CLAUDE_SESSION_NAME="current-session"
+    mkdir -p "$CLAUDE_SESSION_META_DIR"/{logs,artifacts,memory}
+    touch "$CLAUDE_SESSION_META_DIR/logs/session.log"
+
+    # Initialize git so the dynamic context block runs
+    (cd "$CLAUDE_SESSION_DIR" && git init -q -b main && git config user.email t@t && git config user.name T && echo init > README.md && git add -A && git commit -q -m init)
+
+    # Create README with placeholder objective
+    cat > "$CLAUDE_SESSION_META_DIR/README.md" << 'EOF'
+## Objective
+
+Current session objective
+EOF
+}
+
+session_start_teardown() {
+    teardown
+    unset CS_SESSIONS_ROOT 2>/dev/null || true
+}
+
+# Helper: create a sibling session with an objective
+create_sibling_session() {
+    local name="$1"
+    local objective="$2"
+    local dir="$CS_SESSIONS_ROOT/$name"
+    mkdir -p "$dir/.cs"/{logs,artifacts}
+    cat > "$dir/.cs/README.md" << EOF
+## Objective
+
+$objective
+EOF
+    # Touch log to set modification time
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - Session started" > "$dir/.cs/logs/session.log"
+}
+
+test_session_start_includes_sibling_sessions() {
+    session_start_setup
+
+    create_sibling_session "api-refactor" "Refactor REST API to use GraphQL"
+    create_sibling_session "auth-migration" "Migrate auth from JWT to Clerk"
+
+    local output
+    output=$(echo '{"session_id":"test","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+
+    local context
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+
+    if ! echo "$context" | grep -q "api-refactor"; then
+        echo "  FAIL: Should include sibling session api-refactor"
+        echo "  Context: $(echo "$context" | tail -10)"
+        session_start_teardown
+        return 1
+    fi
+    if ! echo "$context" | grep -q "auth-migration"; then
+        echo "  FAIL: Should include sibling session auth-migration"
+        session_start_teardown
+        return 1
+    fi
+
+    session_start_teardown
+}
+
+test_session_start_excludes_current_session() {
+    session_start_setup
+
+    create_sibling_session "other-work" "Some other work"
+
+    local output
+    output=$(echo '{"session_id":"test","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+
+    local context
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+
+    # Current session should NOT appear in the sibling list
+    # (it's already the session being started)
+    if echo "$context" | grep -q "Other Sessions" && echo "$context" | grep -q "current-session:"; then
+        echo "  FAIL: Should not include current session in sibling list"
+        session_start_teardown
+        return 1
+    fi
+
+    session_start_teardown
+}
+
+test_session_start_shows_objectives() {
+    session_start_setup
+
+    create_sibling_session "my-project" "Build the analytics dashboard"
+
+    local output
+    output=$(echo '{"session_id":"test","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+
+    local context
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+
+    if ! echo "$context" | grep -q "analytics dashboard"; then
+        echo "  FAIL: Should include sibling objective text"
+        echo "  Context: $(echo "$context" | tail -10)"
+        session_start_teardown
+        return 1
+    fi
+
+    session_start_teardown
+}
+
+test_session_start_limits_sibling_count() {
+    session_start_setup
+
+    # Create 10 sibling sessions
+    for i in $(seq 1 10); do
+        create_sibling_session "session-$i" "Objective for session $i"
+    done
+
+    local output
+    output=$(echo '{"session_id":"test","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+
+    local context
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+
+    # Should show at most 5 siblings
+    local sibling_count
+    sibling_count=$(echo "$context" | grep -c "^  [a-z]" || echo "0")
+    if [[ "$sibling_count" -gt 5 ]]; then
+        echo "  FAIL: Should limit to 5 siblings (got $sibling_count)"
+        session_start_teardown
+        return 1
+    fi
+
+    session_start_teardown
+}
+
+test_session_start_skips_siblings_on_startup() {
+    session_start_setup
+
+    create_sibling_session "other" "Some work"
+
+    # source=startup (fresh session, not resume)
+    local output
+    output=$(echo '{"session_id":"test","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+
+    local context
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+
+    # On startup, no dynamic context is injected (including siblings)
+    if echo "$context" | grep -q "Other Sessions"; then
+        echo "  FAIL: Should not inject siblings on startup (only on resume)"
+        session_start_teardown
+        return 1
+    fi
+
+    session_start_teardown
+}
+
+# ============================================================================
 # Runner
 # ============================================================================
 
@@ -414,5 +586,12 @@ run_test test_failure_log_has_timestamp
 run_test test_failure_truncates_long_errors
 run_test test_failure_skips_outside_session
 run_test test_failure_handles_missing_error
+
+# Session start: cross-session context
+run_test test_session_start_includes_sibling_sessions
+run_test test_session_start_excludes_current_session
+run_test test_session_start_shows_objectives
+run_test test_session_start_limits_sibling_count
+run_test test_session_start_skips_siblings_on_startup
 
 report_results

@@ -175,6 +175,31 @@ if [ "$SOURCE" = "resume" ] && [ -d "$SESSION_DIR/.git" ]; then
         DYNAMIC="${DYNAMIC}Objective: ${OBJECTIVE}\n"
     fi
 
+    # Cross-session awareness: show recent sibling sessions with objectives
+    SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
+    if [ -d "$SESSIONS_ROOT" ]; then
+        SIBLINGS=""
+        SIBLING_COUNT=0
+        # Find recently modified sibling sessions (by .cs/logs/session.log mtime)
+        for sibling_dir in "$SESSIONS_ROOT"/*/; do
+            [ -d "$sibling_dir/.cs" ] || continue
+            sibling_name=$(basename "$sibling_dir")
+            # Skip current session and remote stubs
+            [ "$sibling_name" = "$CLAUDE_SESSION_NAME" ] && continue
+            [ -f "$sibling_dir/.cs/remote.conf" ] && continue
+            # Extract objective
+            sibling_obj=$(sed -n '/^## Objective/,/^## /{/^## Objective/d;/^## /d;/^$/d;p;}' "$sibling_dir/.cs/README.md" 2>/dev/null | head -1 || true)
+            [ -z "$sibling_obj" ] && continue
+            [[ "$sibling_obj" == "["*"]" ]] && continue  # skip placeholder
+            SIBLINGS="${SIBLINGS}  ${sibling_name}: ${sibling_obj}\n"
+            SIBLING_COUNT=$((SIBLING_COUNT + 1))
+            [ "$SIBLING_COUNT" -ge 5 ] && break
+        done
+        if [ -n "$SIBLINGS" ]; then
+            DYNAMIC="${DYNAMIC}Other Sessions:\n${SIBLINGS}"
+        fi
+    fi
+
     if [ -n "$DYNAMIC" ]; then
         CONTEXT="${CONTEXT}
 
