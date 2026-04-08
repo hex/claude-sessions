@@ -256,6 +256,45 @@ Completions support:
 - **[Secrets](docs/secrets.md)** - Secure secrets handling and storage backends
 - **[Sync](docs/sync.md)** - Git-based session sync across machines
 
+## Obsidian Integration
+
+Open `~/.claude-sessions/` (or your `CS_SESSIONS_ROOT`) as an [Obsidian](https://obsidian.md) vault for a visual dashboard over all sessions.
+
+**What works out of the box:**
+- Full-text search across all sessions
+- Graph view showing session connections via standard markdown links
+- `index.md` at the vault root listing all sessions (auto-generated on session end)
+- YAML frontmatter in each session's `.cs/README.md` with `status`, `created`, `updated`, `tags`, and `aliases`
+
+**Recommended plugins:**
+- **[Dataview](https://github.com/blacksmithgu/obsidian-dataview)** - Query sessions by frontmatter (status, tags, dates)
+- **[Projects](https://github.com/marcusolsson/obsidian-projects)** - Kanban/calendar views over session frontmatter
+- **[Juggl](https://github.com/HEmile/juggl)** - Graph views from YAML relationships (no wikilinks needed)
+
+**Example Dataview queries** (paste into any note):
+
+Active sessions sorted by last activity:
+````markdown
+```dataview
+TABLE status, tags, last_resumed
+FROM "."
+WHERE file.name = "README" AND status = "active"
+SORT last_resumed DESC
+```
+````
+
+Stale sessions (not touched in 7+ days):
+````markdown
+```dataview
+LIST
+FROM "."
+WHERE file.name = "README" AND status = "active"
+  AND last_resumed <= date(today) - dur(7 days)
+```
+````
+
+**Graph view tip:** In Obsidian's graph settings, add `.cs/artifacts` and `.cs/logs` to the folder exclusion filter to reduce clutter.
+
 ## Requirements
 
 - [Claude Code](https://github.com/anthropics/claude-code)
