@@ -30,6 +30,18 @@ fi
 echo "" >> "$META_DIR/logs/session.log"
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Session ended (source: $SOURCE, ID: $SESSION_ID)" >> "$META_DIR/logs/session.log"
 
+# Update 'updated' timestamp in README.md frontmatter
+README_FILE="$META_DIR/README.md"
+if [ -f "$README_FILE" ] && head -1 "$README_FILE" | grep -q '^---$'; then
+    TODAY=$(date '+%Y-%m-%d')
+    if grep -q '^updated:' "$README_FILE"; then
+        sed -i.bak "s/^updated:.*$/updated: $TODAY/" "$README_FILE" && rm -f "$README_FILE.bak"
+    else
+        sed -i.bak "/^tags:/a\\
+updated: $TODAY" "$README_FILE" && rm -f "$README_FILE.bak"
+    fi
+fi
+
 # Skip artifact archiving on sigint for faster exit
 if [ "$SOURCE" = "sigint" ]; then
     echo "  Skipping artifact archive (interrupted)" >> "$META_DIR/logs/session.log"
