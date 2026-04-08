@@ -661,8 +661,13 @@ create_session_structure() {
 
     mkdir -p "$session_dir/.cs"/{artifacts,logs}
 
-    # Create README.md
+    # Create README.md with YAML frontmatter for structured queries
     cat > "$session_dir/.cs/README.md" << EOF
+---
+status: active
+created: $(date '+%Y-%m-%d')
+tags: []
+---
 # Session: $(basename "$session_dir")
 
 **Started:** $(date '+%Y-%m-%d %H:%M:%S')
