@@ -180,6 +180,46 @@ test_adopt_inits_git_when_none_exists() {
 }
 
 # ============================================================================
+# README.md frontmatter
+# ============================================================================
+
+test_readme_has_yaml_frontmatter() {
+    "$CS_BIN" test-session <<< "" 2>&1 || true
+    local readme="$CS_SESSIONS_ROOT/test-session/.cs/README.md"
+    local first_line
+    first_line=$(head -1 "$readme")
+    assert_eq "---" "$first_line" "README should start with YAML frontmatter delimiter" || return 1
+}
+
+test_readme_frontmatter_has_status() {
+    "$CS_BIN" test-session <<< "" 2>&1 || true
+    local readme="$CS_SESSIONS_ROOT/test-session/.cs/README.md"
+    assert_file_contains "$readme" "status:" "Frontmatter should have status field" || return 1
+}
+
+test_readme_frontmatter_has_created_date() {
+    "$CS_BIN" test-session <<< "" 2>&1 || true
+    local readme="$CS_SESSIONS_ROOT/test-session/.cs/README.md"
+    assert_file_contains "$readme" "created: 20" "Frontmatter should have created date" || return 1
+}
+
+test_readme_frontmatter_has_tags() {
+    "$CS_BIN" test-session <<< "" 2>&1 || true
+    local readme="$CS_SESSIONS_ROOT/test-session/.cs/README.md"
+    assert_file_contains "$readme" "tags:" "Frontmatter should have tags field" || return 1
+}
+
+test_readme_objective_still_extractable() {
+    "$CS_BIN" test-session <<< "" 2>&1 || true
+    local readme="$CS_SESSIONS_ROOT/test-session/.cs/README.md"
+    # The sed pattern used by session-start.sh should still work
+    local obj
+    obj=$(sed -n '/^## Objective/,/^## /{/^## Objective/d;/^## /d;/^$/d;p;}' "$readme" | head -1)
+    assert_eq "[Describe what you're trying to accomplish in this session]" "$obj" \
+        "Objective should still be extractable with existing sed pattern" || return 1
+}
+
+# ============================================================================
 # Runner
 # ============================================================================
 
@@ -199,5 +239,12 @@ run_test test_list_shows_adopted_sessions
 run_test test_remove_adopted_session_removes_symlink_only
 run_test test_adopt_preserves_existing_git_repo
 run_test test_adopt_inits_git_when_none_exists
+
+# README frontmatter
+run_test test_readme_has_yaml_frontmatter
+run_test test_readme_frontmatter_has_status
+run_test test_readme_frontmatter_has_created_date
+run_test test_readme_frontmatter_has_tags
+run_test test_readme_objective_still_extractable
 
 report_results
