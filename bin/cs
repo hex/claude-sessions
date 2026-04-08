@@ -1584,9 +1584,10 @@ create_session_gitignore() {
 .DS_Store
 Thumbs.db
 
-# Editor files
+# Editor and tool config
 .vscode/
 .idea/
+.obsidian/
 *.swp
 *.swo
 *~
@@ -1650,6 +1651,7 @@ adopt_session() {
 .cs/archives/
 .cs/.discoveries-reminder-cooldown
 .claude/settings.local.json
+.obsidian/
 ENTRIES
         )
         if [ -f "$target_dir/.gitignore" ]; then
