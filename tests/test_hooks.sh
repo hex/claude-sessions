@@ -729,6 +729,42 @@ test_index_has_auto_generated_notice() {
 }
 
 # ============================================================================
+# session-end.sh: updated timestamp in frontmatter
+# ============================================================================
+
+test_session_end_sets_updated_timestamp() {
+    index_setup
+
+    assert_file_not_contains "$CLAUDE_SESSION_META_DIR/README.md" "updated:" \
+        "Should not have updated before session end" || { index_teardown; return 1; }
+
+    echo '{"session_id":"test-123"}' | bash "$HOOKS_DIR/session-end.sh"
+
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/README.md" "updated: 20" \
+        "Should set updated after session end" || { index_teardown; return 1; }
+
+    index_teardown
+}
+
+test_session_end_updates_existing_timestamp() {
+    index_setup
+
+    # Add an old updated timestamp
+    sed -i.bak '/^tags:/a\
+updated: 2026-01-01' "$CLAUDE_SESSION_META_DIR/README.md" && rm -f "$CLAUDE_SESSION_META_DIR/README.md.bak"
+
+    echo '{"session_id":"test-123"}' | bash "$HOOKS_DIR/session-end.sh"
+
+    # Should be today, not the old date
+    assert_file_not_contains "$CLAUDE_SESSION_META_DIR/README.md" "updated: 2026-01-01" \
+        "Should overwrite old date" || { index_teardown; return 1; }
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/README.md" "updated: $(date '+%Y-%m-%d')" \
+        "Should have today's date" || { index_teardown; return 1; }
+
+    index_teardown
+}
+
+# ============================================================================
 # Runner
 # ============================================================================
 
@@ -787,5 +823,9 @@ run_test test_index_shows_objectives
 run_test test_index_shows_status
 run_test test_index_skips_remote_stubs
 run_test test_index_has_auto_generated_notice
+
+# Session end: updated timestamp
+run_test test_session_end_sets_updated_timestamp
+run_test test_session_end_updates_existing_timestamp
 
 report_results
