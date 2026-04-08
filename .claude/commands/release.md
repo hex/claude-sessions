@@ -95,6 +95,9 @@ Stop immediately if any tests fail. Do not proceed with the release until all te
 Generate release notes by looking at commits since the last release tag:
 
 ```bash
+# Fetch tags from remote (gh release create makes tags on GitHub, not locally)
+git fetch --tags origin 2>/dev/null
+
 # Find the previous release tag
 PREV_TAG=$(git tag --list 'v*' --sort=-version:refname | head -1)
 
