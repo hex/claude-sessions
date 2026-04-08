@@ -393,8 +393,16 @@ session_start_setup() {
     # Initialize git so the dynamic context block runs
     (cd "$CLAUDE_SESSION_DIR" && git init -q -b main && git config user.email t@t && git config user.name T && echo init > README.md && git add -A && git commit -q -m init)
 
-    # Create README with placeholder objective
+    # Create README with frontmatter and placeholder objective
     cat > "$CLAUDE_SESSION_META_DIR/README.md" << 'EOF'
+---
+status: active
+created: 2026-04-08
+tags: []
+aliases: ["current-session"]
+---
+# Session: current-session
+
 ## Objective
 
 Current session objective
@@ -517,6 +525,36 @@ test_session_start_limits_sibling_count() {
         session_start_teardown
         return 1
     fi
+
+    session_start_teardown
+}
+
+test_session_start_updates_last_resumed() {
+    session_start_setup
+
+    # Verify no last_resumed yet
+    assert_file_not_contains "$CLAUDE_SESSION_META_DIR/README.md" "last_resumed:" \
+        "Should not have last_resumed before resume" || { session_start_teardown; return 1; }
+
+    # Trigger resume
+    echo '{"session_id":"test","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null > /dev/null
+
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/README.md" "last_resumed: 20" \
+        "Should set last_resumed after resume" || { session_start_teardown; return 1; }
+
+    session_start_teardown
+}
+
+test_session_start_last_resumed_not_set_on_startup() {
+    session_start_setup
+
+    # source=startup should NOT set last_resumed
+    echo '{"session_id":"test","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null > /dev/null
+
+    assert_file_not_contains "$CLAUDE_SESSION_META_DIR/README.md" "last_resumed:" \
+        "Should not set last_resumed on startup" || { session_start_teardown; return 1; }
 
     session_start_teardown
 }
@@ -738,6 +776,8 @@ run_test test_session_start_includes_sibling_sessions
 run_test test_session_start_excludes_current_session
 run_test test_session_start_shows_objectives
 run_test test_session_start_limits_sibling_count
+run_test test_session_start_updates_last_resumed
+run_test test_session_start_last_resumed_not_set_on_startup
 run_test test_session_start_skips_siblings_on_startup
 
 # Session end: index.md generation

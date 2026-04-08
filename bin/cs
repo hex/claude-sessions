@@ -667,6 +667,7 @@ create_session_structure() {
 status: active
 created: $(date '+%Y-%m-%d')
 tags: []
+aliases: ["$(basename "$session_dir")"]
 ---
 # Session: $(basename "$session_dir")
 

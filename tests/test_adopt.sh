@@ -209,6 +209,13 @@ test_readme_frontmatter_has_tags() {
     assert_file_contains "$readme" "tags:" "Frontmatter should have tags field" || return 1
 }
 
+test_readme_frontmatter_has_aliases() {
+    "$CS_BIN" test-session <<< "" 2>&1 || true
+    local readme="$CS_SESSIONS_ROOT/test-session/.cs/README.md"
+    assert_file_contains "$readme" 'aliases:' "Frontmatter should have aliases field" || return 1
+    assert_file_contains "$readme" 'test-session' "Aliases should contain session name" || return 1
+}
+
 test_readme_objective_still_extractable() {
     "$CS_BIN" test-session <<< "" 2>&1 || true
     local readme="$CS_SESSIONS_ROOT/test-session/.cs/README.md"
@@ -245,6 +252,7 @@ run_test test_readme_has_yaml_frontmatter
 run_test test_readme_frontmatter_has_status
 run_test test_readme_frontmatter_has_created_date
 run_test test_readme_frontmatter_has_tags
+run_test test_readme_frontmatter_has_aliases
 run_test test_readme_objective_still_extractable
 
 report_results

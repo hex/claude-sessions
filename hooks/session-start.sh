@@ -148,6 +148,21 @@ See CLAUDE.md in the session directory for complete documentation protocol.
 EOF
 )
 
+# Update last_resumed in README.md frontmatter on resume
+if [ "$SOURCE" = "resume" ]; then
+    README_FILE="$META_DIR/README.md"
+    if [ -f "$README_FILE" ] && head -1 "$README_FILE" | grep -q '^---$'; then
+        TODAY=$(date '+%Y-%m-%d')
+        if grep -q '^last_resumed:' "$README_FILE"; then
+            sed -i.bak "s/^last_resumed:.*$/last_resumed: $TODAY/" "$README_FILE" && rm -f "$README_FILE.bak"
+        else
+            # Insert after created: line
+            sed -i.bak "/^created:/a\\
+last_resumed: $TODAY" "$README_FILE" && rm -f "$README_FILE.bak"
+        fi
+    fi
+fi
+
 # Dynamic context: add session state info on resume
 if [ "$SOURCE" = "resume" ] && [ -d "$SESSION_DIR/.git" ]; then
     DYNAMIC=""
