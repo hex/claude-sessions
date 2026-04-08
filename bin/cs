@@ -816,6 +816,35 @@ EOF
         write_session_claude_md "$session_dir"
         warn "Updated CLAUDE.md to reference .cs/ paths"
     fi
+
+    # Phase 6: Add YAML frontmatter to README.md if missing
+    local readme="$session_dir/.cs/README.md"
+    if [ -f "$readme" ] && ! head -1 "$readme" | grep -q '^---$'; then
+        local session_name
+        session_name=$(basename "$session_dir")
+        # Derive created date from "Started:" line, fall back to file mtime
+        local created_date
+        created_date=$(grep -oE 'Started:\*\* [0-9]{4}-[0-9]{2}-[0-9]{2}' "$readme" 2>/dev/null | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1 || true)
+        if [ -z "$created_date" ]; then
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+                created_date=$(stat -f '%Sm' -t '%Y-%m-%d' "$readme" 2>/dev/null || date '+%Y-%m-%d')
+            else
+                created_date=$(stat -c '%y' "$readme" 2>/dev/null | cut -d' ' -f1 || date '+%Y-%m-%d')
+            fi
+        fi
+        local existing_content
+        existing_content=$(cat "$readme")
+        {
+            echo "---"
+            echo "status: active"
+            echo "created: $created_date"
+            echo "tags: []"
+            echo "aliases: [\"$session_name\"]"
+            echo "---"
+            echo "$existing_content"
+        } > "$readme"
+        warn "Added frontmatter to .cs/README.md"
+    fi
 }
 
 # Cross-platform helpers
