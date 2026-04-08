@@ -128,6 +128,35 @@ fi
 find "$ARTIFACT_DIR" -name "*.lock" -delete 2>/dev/null || true
 rm -f "$META_DIR/session.lock" 2>/dev/null || true
 
+# Regenerate sessions index.md at the sessions root
+SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$(dirname "$SESSION_DIR")}"
+if [ -d "$SESSIONS_ROOT" ]; then
+    INDEX_FILE="$SESSIONS_ROOT/index.md"
+    {
+        echo "# Sessions"
+        echo ""
+        echo "> Auto-generated on session end. Do not edit manually."
+        echo ""
+        echo "| Session | Status | Objective | Created |"
+        echo "|---------|--------|-----------|---------|"
+        for dir in "$SESSIONS_ROOT"/*/; do
+            [ -d "$dir/.cs" ] || continue
+            local_name=$(basename "$dir")
+            # Skip remote stubs
+            [ -f "$dir/.cs/remote.conf" ] && continue
+            local_readme="$dir/.cs/README.md"
+            [ -f "$local_readme" ] || continue
+            # Extract frontmatter fields (always in first few lines)
+            local_status=$(head -6 "$local_readme" | grep '^status:' | sed 's/^status: *//' || true)
+            local_created=$(head -6 "$local_readme" | grep '^created:' | sed 's/^created: *//' || true)
+            # Extract objective
+            local_obj=$(sed -n '/^## Objective/,/^## /{/^## Objective/d;/^## /d;/^$/d;p;}' "$local_readme" 2>/dev/null | head -1 || true)
+            [[ "$local_obj" == "["*"]" ]] && local_obj=""
+            echo "| [${local_name}](${local_name}/.cs/README.md) | ${local_status:-—} | ${local_obj:-—} | ${local_created:-—} |"
+        done
+    } > "$INDEX_FILE" 2>/dev/null || true
+fi
+
 echo "Session management cleanup complete" >> "$META_DIR/logs/session.log"
 echo "================================================================================" >> "$META_DIR/logs/session.log"
 

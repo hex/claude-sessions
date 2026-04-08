@@ -545,6 +545,152 @@ test_session_start_skips_siblings_on_startup() {
 }
 
 # ============================================================================
+# session-end.sh: index.md generation
+# ============================================================================
+
+# Setup for index tests: need SESSIONS_ROOT with sessions that have frontmatter
+index_setup() {
+    setup
+    export CS_SESSIONS_ROOT="$TEST_TMPDIR/sessions"
+    mkdir -p "$CS_SESSIONS_ROOT"
+
+    # Current session
+    export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/current-session"
+    export CLAUDE_SESSION_META_DIR="$CLAUDE_SESSION_DIR/.cs"
+    export CLAUDE_ARTIFACT_DIR="$CLAUDE_SESSION_DIR/.cs/artifacts"
+    export CLAUDE_SESSION_NAME="current-session"
+    mkdir -p "$CLAUDE_SESSION_META_DIR"/{logs,artifacts}
+    touch "$CLAUDE_SESSION_META_DIR/logs/session.log"
+    cat > "$CLAUDE_SESSION_META_DIR/README.md" << 'EOF'
+---
+status: active
+created: 2026-04-08
+tags: [testing, hooks]
+---
+# Session: current-session
+
+## Objective
+
+Test the index generation feature
+
+## Environment
+
+Local dev
+EOF
+    (cd "$CLAUDE_SESSION_DIR" && git init -q -b main && git config user.email t@t && git config user.name T && echo init > f && git add -A && git commit -q -m init)
+}
+
+index_teardown() {
+    teardown
+    unset CS_SESSIONS_ROOT 2>/dev/null || true
+}
+
+# Helper: create a session with frontmatter
+create_indexed_session() {
+    local name="$1"
+    local status="$2"
+    local objective="$3"
+    local tags="${4:-}"
+    local dir="$CS_SESSIONS_ROOT/$name"
+    mkdir -p "$dir/.cs"/{logs,artifacts}
+    touch "$dir/.cs/logs/session.log"
+    cat > "$dir/.cs/README.md" << EOF
+---
+status: $status
+created: 2026-04-01
+tags: [$tags]
+---
+# Session: $name
+
+## Objective
+
+$objective
+
+## Outcome
+
+[pending]
+EOF
+}
+
+test_session_end_generates_index() {
+    index_setup
+
+    create_indexed_session "api-work" "active" "Build the API" "api, backend"
+
+    echo '{"session_id":"test-123"}' | bash "$HOOKS_DIR/session-end.sh"
+
+    assert_exists "$CS_SESSIONS_ROOT/index.md" "index.md should be generated" || { index_teardown; return 1; }
+
+    index_teardown
+}
+
+test_index_lists_all_sessions() {
+    index_setup
+
+    create_indexed_session "alpha" "active" "Alpha objective"
+    create_indexed_session "beta" "completed" "Beta objective"
+
+    echo '{"session_id":"test-123"}' | bash "$HOOKS_DIR/session-end.sh"
+
+    assert_file_contains "$CS_SESSIONS_ROOT/index.md" "alpha" "Should list alpha" || { index_teardown; return 1; }
+    assert_file_contains "$CS_SESSIONS_ROOT/index.md" "beta" "Should list beta" || { index_teardown; return 1; }
+    assert_file_contains "$CS_SESSIONS_ROOT/index.md" "current-session" "Should list current session" || { index_teardown; return 1; }
+
+    index_teardown
+}
+
+test_index_shows_objectives() {
+    index_setup
+
+    create_indexed_session "my-project" "active" "Build the dashboard"
+
+    echo '{"session_id":"test-123"}' | bash "$HOOKS_DIR/session-end.sh"
+
+    assert_file_contains "$CS_SESSIONS_ROOT/index.md" "Build the dashboard" \
+        "Should include objective text" || { index_teardown; return 1; }
+
+    index_teardown
+}
+
+test_index_shows_status() {
+    index_setup
+
+    create_indexed_session "done-project" "completed" "Old work"
+
+    echo '{"session_id":"test-123"}' | bash "$HOOKS_DIR/session-end.sh"
+
+    assert_file_contains "$CS_SESSIONS_ROOT/index.md" "completed" \
+        "Should show status" || { index_teardown; return 1; }
+
+    index_teardown
+}
+
+test_index_skips_remote_stubs() {
+    index_setup
+
+    create_indexed_session "remote-sess" "active" "Remote work"
+    echo "host=hex@mac-mini.local" > "$CS_SESSIONS_ROOT/remote-sess/.cs/remote.conf"
+
+    echo '{"session_id":"test-123"}' | bash "$HOOKS_DIR/session-end.sh"
+
+    assert_file_not_contains "$CS_SESSIONS_ROOT/index.md" "remote-sess" \
+        "Should skip remote stubs" || { index_teardown; return 1; }
+
+    index_teardown
+}
+
+test_index_has_auto_generated_notice() {
+    index_setup
+
+    echo '{"session_id":"test-123"}' | bash "$HOOKS_DIR/session-end.sh"
+
+    assert_file_contains "$CS_SESSIONS_ROOT/index.md" "Auto-generated" \
+        "Should have auto-generated notice" || { index_teardown; return 1; }
+
+    index_teardown
+}
+
+# ============================================================================
 # Runner
 # ============================================================================
 
@@ -593,5 +739,13 @@ run_test test_session_start_excludes_current_session
 run_test test_session_start_shows_objectives
 run_test test_session_start_limits_sibling_count
 run_test test_session_start_skips_siblings_on_startup
+
+# Session end: index.md generation
+run_test test_session_end_generates_index
+run_test test_index_lists_all_sessions
+run_test test_index_shows_objectives
+run_test test_index_shows_status
+run_test test_index_skips_remote_stubs
+run_test test_index_has_auto_generated_notice
 
 report_results
