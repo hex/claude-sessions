@@ -125,6 +125,114 @@ EOF
 }
 
 # ============================================================================
+# Frontmatter migration for old sessions
+# ============================================================================
+
+# Helper: create an old-style session (no frontmatter in README)
+create_old_session() {
+    local name="$1"
+    local session_dir="$CS_SESSIONS_ROOT/$name"
+    mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
+    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
+    echo "auto_sync=on" > "$session_dir/.cs/sync.conf"
+    # Old README.md: no frontmatter, starts with heading
+    cat > "$session_dir/.cs/README.md" << 'EOF'
+# Session: test-old
+
+**Started:** 2026-03-15 10:30:00
+**Location:** macbook:~/projects
+
+## Objective
+
+Fix the database connection pooling issue
+
+## Environment
+
+Production PostgreSQL server
+
+## Outcome
+
+[pending]
+EOF
+    cat > "$session_dir/CLAUDE.md" << 'EOF'
+# Session Documentation Protocol
+
+This is a Claude Code session managed by the cs tool. Session metadata lives in the .cs/ directory.
+EOF
+    (cd "$session_dir" && git init -q -b main && git config user.email t@t && git config user.name T && git add -A && git commit -q -m "init")
+}
+
+test_migration_adds_frontmatter_to_old_readme() {
+    create_old_session "test-old"
+    # Verify no frontmatter before migration
+    local first_line
+    first_line=$(head -1 "$CS_SESSIONS_ROOT/test-old/.cs/README.md")
+    assert_eq "# Session: test-old" "$first_line" "Old README should not have frontmatter" || return 1
+
+    # Open session to trigger migration
+    "$CS_BIN" test-old <<< "" 2>&1 || true
+
+    first_line=$(head -1 "$CS_SESSIONS_ROOT/test-old/.cs/README.md")
+    assert_eq "---" "$first_line" "Migrated README should have frontmatter" || return 1
+}
+
+test_migration_preserves_existing_content() {
+    create_old_session "test-old"
+    "$CS_BIN" test-old <<< "" 2>&1 || true
+
+    assert_file_contains "$CS_SESSIONS_ROOT/test-old/.cs/README.md" "database connection pooling" \
+        "Migration should preserve objective text" || return 1
+    assert_file_contains "$CS_SESSIONS_ROOT/test-old/.cs/README.md" "Production PostgreSQL" \
+        "Migration should preserve environment text" || return 1
+}
+
+test_migration_derives_created_date() {
+    create_old_session "test-old"
+    "$CS_BIN" test-old <<< "" 2>&1 || true
+
+    # Should derive created date from the "Started:" line (2026-03-15)
+    assert_file_contains "$CS_SESSIONS_ROOT/test-old/.cs/README.md" "created: 2026-03-15" \
+        "Should derive created date from Started line" || return 1
+}
+
+test_migration_adds_aliases_from_session_name() {
+    create_old_session "test-old"
+    "$CS_BIN" test-old <<< "" 2>&1 || true
+
+    assert_file_contains "$CS_SESSIONS_ROOT/test-old/.cs/README.md" 'aliases:' \
+        "Should add aliases" || return 1
+    assert_file_contains "$CS_SESSIONS_ROOT/test-old/.cs/README.md" 'test-old' \
+        "Aliases should contain session name" || return 1
+}
+
+test_migration_skips_if_frontmatter_exists() {
+    create_old_session "test-old"
+    # Manually add frontmatter
+    local readme="$CS_SESSIONS_ROOT/test-old/.cs/README.md"
+    local content
+    content=$(cat "$readme")
+    {
+        echo "---"
+        echo "status: completed"
+        echo "created: 2026-01-01"
+        echo "tags: [custom]"
+        echo 'aliases: ["my-custom-alias"]'
+        echo "---"
+        echo "$content"
+    } > "$readme"
+
+    "$CS_BIN" test-old <<< "" 2>&1 || true
+
+    # Should NOT overwrite existing frontmatter
+    assert_file_contains "$readme" "status: completed" \
+        "Should preserve existing status" || return 1
+    assert_file_contains "$readme" "created: 2026-01-01" \
+        "Should preserve existing created date" || return 1
+    assert_file_contains "$readme" "my-custom-alias" \
+        "Should preserve existing aliases" || return 1
+}
+
+# ============================================================================
 # Runner
 # ============================================================================
 
@@ -140,5 +248,12 @@ run_test test_adopt_creates_memory_dir
 run_test test_adopt_adds_settings_to_gitignore
 run_test test_migration_creates_memory_and_settings
 run_test test_migration_moves_existing_auto_memory
+
+# Frontmatter migration
+run_test test_migration_adds_frontmatter_to_old_readme
+run_test test_migration_preserves_existing_content
+run_test test_migration_derives_created_date
+run_test test_migration_adds_aliases_from_session_name
+run_test test_migration_skips_if_frontmatter_exists
 
 report_results
