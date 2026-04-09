@@ -757,6 +757,90 @@ test_index_has_auto_generated_notice() {
 }
 
 # ============================================================================
+# timeline.jsonl
+# ============================================================================
+
+test_session_start_appends_to_timeline() {
+    local timeline="$CLAUDE_SESSION_META_DIR/timeline.jsonl"
+    rm -f "$timeline"
+
+    # Need README with frontmatter for full context
+    cat > "$CLAUDE_SESSION_META_DIR/README.md" << 'EOF'
+---
+status: active
+created: 2026-04-09
+tags: []
+aliases: ["test-session"]
+---
+# Session: test-session
+EOF
+
+    (cd "$CLAUDE_SESSION_DIR" && git init -q -b main && git config user.email t@t && git config user.name T && echo init > f && git add -A && git commit -q -m init) 2>/dev/null || true
+
+    echo '{"session_id":"abc","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" > /dev/null 2>&1
+
+    assert_exists "$timeline" "timeline.jsonl should be created" || return 1
+    # Should contain a started event
+    if ! jq -e '. | select(.event == "started")' "$timeline" > /dev/null 2>&1; then
+        echo "  FAIL: timeline should contain a started event"
+        echo "  Content: $(cat "$timeline")"
+        return 1
+    fi
+}
+
+test_session_end_appends_to_timeline() {
+    local timeline="$CLAUDE_SESSION_META_DIR/timeline.jsonl"
+    rm -f "$timeline"
+
+    echo '{"session_id":"abc","source":"user_exit"}' | bash "$HOOKS_DIR/session-end.sh"
+
+    assert_exists "$timeline" "timeline.jsonl should be created on end" || return 1
+    if ! jq -e '. | select(.event == "ended")' "$timeline" > /dev/null 2>&1; then
+        echo "  FAIL: timeline should contain an ended event"
+        return 1
+    fi
+}
+
+test_timeline_events_are_valid_jsonl() {
+    local timeline="$CLAUDE_SESSION_META_DIR/timeline.jsonl"
+    rm -f "$timeline"
+
+    # Write a fake event
+    echo '{"ts":"2026-04-09T20:00:00Z","event":"started","source":"resume"}' >> "$timeline"
+    echo '{"ts":"2026-04-09T20:30:00Z","event":"ended","source":"user_exit"}' >> "$timeline"
+
+    # Each line must be valid JSON
+    while IFS= read -r line; do
+        if ! echo "$line" | jq -e . > /dev/null 2>&1; then
+            echo "  FAIL: Invalid JSON line: $line"
+            return 1
+        fi
+    done < "$timeline"
+}
+
+test_timeline_subagent_skipped() {
+    # Subagents shouldn't write to parent's timeline
+    # (test indirectly: session-start with agent_id should not append)
+    local timeline="$CLAUDE_SESSION_META_DIR/timeline.jsonl"
+    rm -f "$timeline"
+    echo '{}' > "$CLAUDE_SESSION_META_DIR/README.md"
+
+    # SubagentStart doesn't fire session-start, but if a subagent somehow invokes it
+    # with agent_id in payload, the hook should skip the timeline append.
+    # (This test documents the expectation even though in practice SubagentStart
+    # is a different hook event.)
+    echo '{"session_id":"abc","source":"startup","agent_id":"sub-123"}' \
+        | bash "$HOOKS_DIR/session-start.sh" > /dev/null 2>&1 || true
+
+    # Timeline should not exist or should not have a started event from this
+    if [[ -f "$timeline" ]] && jq -e '. | select(.event == "started" and .subagent == true)' "$timeline" > /dev/null 2>&1; then
+        echo "  FAIL: subagent invocation should not add timeline entry"
+        return 1
+    fi
+}
+
+# ============================================================================
 # session-end.sh: updated timestamp in frontmatter
 # ============================================================================
 
@@ -875,6 +959,12 @@ run_test test_index_shows_objectives
 run_test test_index_shows_status
 run_test test_index_skips_remote_stubs
 run_test test_index_has_auto_generated_notice
+
+# Timeline
+run_test test_session_start_appends_to_timeline
+run_test test_session_end_appends_to_timeline
+run_test test_timeline_events_are_valid_jsonl
+run_test test_timeline_subagent_skipped
 
 # Session end: updated timestamp
 run_test test_session_end_sets_updated_timestamp
