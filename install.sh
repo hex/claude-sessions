@@ -90,6 +90,7 @@ HOOK_BASH_LOGGER_URL="${REPO_URL}/hooks/bash-logger.sh"
 # Command URLs for web install
 COMMAND_SUMMARY_URL="${REPO_URL}/commands/summary.md"
 COMMAND_COMPACT_DISCOVERIES_URL="${REPO_URL}/commands/compact-discoveries.md"
+COMMAND_CHECKPOINT_URL="${REPO_URL}/commands/checkpoint.md"
 
 # Skill URLs for web install
 SKILL_STORE_SECRET_URL="${REPO_URL}/skills/store-secret/SKILL.md"
@@ -275,13 +276,16 @@ mkdir -p "$COMMANDS_DIR"
 if [ "$INSTALL_METHOD" = "local" ]; then
     cp "$COMMANDS_SOURCE/summary.md" "$COMMANDS_DIR/"
     cp "$COMMANDS_SOURCE/compact-discoveries.md" "$COMMANDS_DIR/"
+    cp "$COMMANDS_SOURCE/checkpoint.md" "$COMMANDS_DIR/"
 else
     if command -v curl >/dev/null 2>&1; then
         curl -fsSL "$COMMAND_SUMMARY_URL" -o "$COMMANDS_DIR/summary.md" || error "Failed to download summary.md"
         curl -fsSL "$COMMAND_COMPACT_DISCOVERIES_URL" -o "$COMMANDS_DIR/compact-discoveries.md" || error "Failed to download compact-discoveries.md"
+        curl -fsSL "$COMMAND_CHECKPOINT_URL" -o "$COMMANDS_DIR/checkpoint.md" || error "Failed to download checkpoint.md"
     elif command -v wget >/dev/null 2>&1; then
         wget -q "$COMMAND_SUMMARY_URL" -O "$COMMANDS_DIR/summary.md" || error "Failed to download summary.md"
         wget -q "$COMMAND_COMPACT_DISCOVERIES_URL" -O "$COMMANDS_DIR/compact-discoveries.md" || error "Failed to download compact-discoveries.md"
+        wget -q "$COMMAND_CHECKPOINT_URL" -O "$COMMANDS_DIR/checkpoint.md" || error "Failed to download checkpoint.md"
     fi
 fi
 
