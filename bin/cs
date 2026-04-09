@@ -2497,7 +2497,7 @@ run_uninstall() {
     done
 
     # Remove commands
-    for cmd in summary.md compact-discoveries.md checkpoint.md; do
+    for cmd in summary.md compact-discoveries.md checkpoint.md learn.md; do
         if [ -f "$commands_dir/$cmd" ]; then
             rm "$commands_dir/$cmd"
             info "Removed $commands_dir/$cmd"
