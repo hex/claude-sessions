@@ -4,6 +4,17 @@
 
 set -euo pipefail
 
+# Read hook input (may be empty for legacy Stop events)
+INPUT=$(cat 2>/dev/null || echo '{}')
+
+# Belt-and-suspenders: skip if running inside a subagent
+# (Stop hooks auto-convert to SubagentStop so this shouldn't fire, but just in case)
+AGENT_ID=$(echo "$INPUT" | jq -r '.agent_id // empty' 2>/dev/null || true)
+if [ -n "$AGENT_ID" ]; then
+    echo '{"decision": "approve"}'
+    exit 0
+fi
+
 # Only run in cs sessions
 if [ -z "${CLAUDE_SESSION_NAME:-}" ]; then
     echo '{"decision": "approve"}'

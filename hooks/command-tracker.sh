@@ -18,6 +18,12 @@ fi
 # Read hook input
 INPUT=$(cat)
 
+# Skip subagent commands — they're exploratory, not part of the user's workflow
+AGENT_ID=$(echo "$INPUT" | jq -r '.agent_id // empty')
+if [ -n "$AGENT_ID" ]; then
+    exit 0
+fi
+
 TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name')
 if [ "$TOOL_NAME" != "Bash" ]; then
     exit 0
