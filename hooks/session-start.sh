@@ -232,6 +232,37 @@ if [ "$SOURCE" = "resume" ] && [ -d "$SESSION_DIR/.git" ]; then
         fi
     fi
 
+    # Cross-session learnings: inject up to 3 relevant project insights
+    LEARNINGS_FILE="$SESSIONS_ROOT/learnings.jsonl"
+    if [ -f "$LEARNINGS_FILE" ]; then
+        LEARNINGS=""
+        # Pick the 3 most recent matching this session name, fall back to most recent overall
+        OWN_MATCHES=$(jq -c --arg name "$CLAUDE_SESSION_NAME" \
+            'select(.session == $name)' "$LEARNINGS_FILE" 2>/dev/null | tail -3 || true)
+        if [ -n "$OWN_MATCHES" ]; then
+            while IFS= read -r entry; do
+                [ -z "$entry" ] && continue
+                insight=$(echo "$entry" | jq -r '.insight // empty' 2>/dev/null || true)
+                [ -z "$insight" ] && continue
+                LEARNINGS="${LEARNINGS}  - ${insight}\n"
+            done <<< "$OWN_MATCHES"
+        else
+            # Fall back to the 3 most recent from any session
+            RECENT=$(tail -3 "$LEARNINGS_FILE" 2>/dev/null || true)
+            if [ -n "$RECENT" ]; then
+                while IFS= read -r entry; do
+                    [ -z "$entry" ] && continue
+                    insight=$(echo "$entry" | jq -r '.insight // empty' 2>/dev/null || true)
+                    [ -z "$insight" ] && continue
+                    LEARNINGS="${LEARNINGS}  - ${insight}\n"
+                done <<< "$RECENT"
+            fi
+        fi
+        if [ -n "$LEARNINGS" ]; then
+            DYNAMIC="${DYNAMIC}Learnings:\n${LEARNINGS}"
+        fi
+    fi
+
     if [ -n "$DYNAMIC" ]; then
         CONTEXT="${CONTEXT}
 
