@@ -7,6 +7,12 @@ set -euo pipefail
 # Read hook input from stdin
 INPUT=$(cat)
 
+# Skip entirely if running inside a subagent call
+AGENT_ID=$(echo "$INPUT" | jq -r '.agent_id // empty' 2>/dev/null || true)
+if [ -n "$AGENT_ID" ]; then
+    exit 0
+fi
+
 # Extract session information
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id')
 SOURCE=$(echo "$INPUT" | jq -r '.source // "user_exit"')
@@ -29,6 +35,17 @@ fi
 # Log session end
 echo "" >> "$META_DIR/logs/session.log"
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Session ended (source: $SOURCE, ID: $SESSION_ID)" >> "$META_DIR/logs/session.log"
+
+# Append structured event to timeline.jsonl
+TIMELINE_FILE="$META_DIR/timeline.jsonl"
+TIMELINE_BRANCH=$(git -C "$SESSION_DIR" branch --show-current 2>/dev/null || echo "")
+jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+       --arg event "ended" \
+       --arg source "$SOURCE" \
+       --arg session_id "$SESSION_ID" \
+       --arg branch "$TIMELINE_BRANCH" \
+       '{ts: $ts, event: $event, source: $source, session_id: $session_id, branch: $branch}' \
+    >> "$TIMELINE_FILE" 2>/dev/null || true
 
 # Update 'updated' timestamp in README.md frontmatter
 README_FILE="$META_DIR/README.md"
