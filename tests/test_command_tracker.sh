@@ -35,6 +35,13 @@ update_commands_file() {
     COMMANDS_FILE="$CLAUDE_SESSION_META_DIR/commands.md"
 }
 
+# Helper: send a Bash tool use from a subagent (agent_id present)
+send_bash_command_as_subagent() {
+    local cmd="$1"
+    echo "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$cmd\"},\"tool_response\":{},\"hook_event_name\":\"PostToolUse\",\"agent_id\":\"sub-123\",\"agent_type\":\"Explore\"}" \
+        | bash "$HOOK"
+}
+
 # ============================================================================
 # Tests
 # ============================================================================
@@ -185,6 +192,25 @@ test_creates_file_with_header() {
     assert_file_contains "$COMMANDS_FILE" "# Project Commands" "Should have header" || return 1
 }
 
+test_skips_subagent_commands() {
+    # Commands from subagents should not be tracked (they're ephemeral exploration)
+    update_commands_file
+    send_bash_command_as_subagent "npm run build"
+    assert_file_not_exists "$COMMANDS_FILE" \
+        "Should not track commands from subagents" || return 1
+}
+
+test_allows_main_thread_after_subagent() {
+    # Main thread commands should still be tracked after a subagent call
+    update_commands_file
+    send_bash_command_as_subagent "curl https://example.com/api"
+    send_bash_command "npm run build"
+    assert_file_contains "$COMMANDS_FILE" "npm run build" \
+        "Main thread commands should still be tracked" || return 1
+    assert_file_not_contains "$COMMANDS_FILE" "curl" \
+        "Subagent commands should be filtered out" || return 1
+}
+
 # ============================================================================
 # Runner
 # ============================================================================
@@ -216,5 +242,7 @@ run_test test_categorizes_lint
 run_test test_skips_outside_session
 run_test test_skips_non_bash_tool
 run_test test_creates_file_with_header
+run_test test_skips_subagent_commands
+run_test test_allows_main_thread_after_subagent
 
 report_results

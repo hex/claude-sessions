@@ -196,6 +196,20 @@ test_reminder_blocks_when_stale() {
         "Should include discovery check message" || return 1
 }
 
+test_reminder_approves_for_subagent() {
+    # Subagents should never get the discoveries reminder
+    echo "stale content" > "$CLAUDE_SESSION_META_DIR/discoveries.md"
+    touch -t "$(date -v-10M '+%Y%m%d%H%M.%S' 2>/dev/null || date -d '10 minutes ago' '+%Y%m%d%H%M.%S' 2>/dev/null)" "$CLAUDE_SESSION_META_DIR/discoveries.md" 2>/dev/null || true
+    rm -f "$CLAUDE_SESSION_META_DIR/.discoveries-reminder-cooldown"
+
+    local output
+    output=$(echo '{"agent_id":"sub-123","agent_type":"Explore"}' | bash "$HOOKS_DIR/discoveries-reminder.sh")
+    assert_output_contains "$output" '"approve"' \
+        "Subagent should always get approve, even with stale discoveries" || return 1
+    assert_output_not_contains "$output" '"block"' \
+        "Subagent should never be blocked with reminder" || return 1
+}
+
 test_reminder_respects_cooldown() {
     echo "# Stale discoveries" > "$CLAUDE_SESSION_META_DIR/discoveries.md"
     touch -t "$(date -v-10M '+%Y%m%d%H%M.%S' 2>/dev/null || date -d '10 minutes ago' '+%Y%m%d%H%M.%S' 2>/dev/null)" "$CLAUDE_SESSION_META_DIR/discoveries.md" 2>/dev/null || true
@@ -821,6 +835,7 @@ run_test test_archiver_logs_rotation
 run_test test_reminder_approves_outside_session
 run_test test_reminder_approves_when_recently_modified
 run_test test_reminder_blocks_when_stale
+run_test test_reminder_approves_for_subagent
 run_test test_reminder_respects_cooldown
 
 # Session auto-approve
