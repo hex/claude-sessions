@@ -746,6 +746,28 @@ test_session_end_sets_updated_timestamp() {
     index_teardown
 }
 
+test_session_end_generates_index_with_many_changes() {
+    # Regression: when git has 6+ uncommitted files, the FILE_LIST pipeline
+    # used to trip SIGPIPE + pipefail, killing the script before index.md
+    # was generated.
+    index_setup
+
+    # Enable auto-sync so the buggy block runs
+    echo "auto_sync=on" > "$CLAUDE_SESSION_META_DIR/sync.conf"
+
+    # Create more than 5 uncommitted files in the session repo
+    for i in 1 2 3 4 5 6 7 8; do
+        echo "content $i" > "$CLAUDE_SESSION_DIR/file_$i.txt"
+    done
+
+    echo '{"session_id":"test-123","source":"user_exit"}' | bash "$HOOKS_DIR/session-end.sh"
+
+    assert_exists "$CS_SESSIONS_ROOT/index.md" \
+        "index.md should be generated even with 6+ uncommitted files" || { index_teardown; return 1; }
+
+    index_teardown
+}
+
 test_session_end_updates_existing_timestamp() {
     index_setup
 
@@ -826,6 +848,7 @@ run_test test_index_has_auto_generated_notice
 
 # Session end: updated timestamp
 run_test test_session_end_sets_updated_timestamp
+run_test test_session_end_generates_index_with_many_changes
 run_test test_session_end_updates_existing_timestamp
 
 report_results
