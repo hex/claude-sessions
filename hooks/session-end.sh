@@ -110,7 +110,9 @@ if [ -f "$SYNC_CONFIG" ] && [ -d "$SESSION_DIR/.git" ]; then
             if [ "$FILE_COUNT" -eq 1 ]; then
                 COMMIT_MSG="Session update: $(basename "$CHANGED_FILES")"
             else
-                FILE_LIST=$(echo "$CHANGED_FILES" | xargs -n1 basename 2>/dev/null | head -5 | paste -sd', ' -)
+                # head -5 closes its input early, causing SIGPIPE upstream;
+                # || true protects against pipefail killing the script
+                FILE_LIST=$(echo "$CHANGED_FILES" | xargs -n1 basename 2>/dev/null | head -5 | paste -sd', ' - || true)
                 if [ "$FILE_COUNT" -gt 5 ]; then
                     FILE_LIST="$FILE_LIST +$((FILE_COUNT - 5)) more"
                 fi
