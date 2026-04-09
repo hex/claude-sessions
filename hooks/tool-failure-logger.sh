@@ -28,7 +28,8 @@ TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // "unknown"')
 ERROR=$(echo "$INPUT" | jq -r '.error // "no error message"')
 
 # Truncate error to first line and 200 chars to keep logs readable
-ERROR_SHORT=$(echo "$ERROR" | head -1 | cut -c1-200)
+# || true protects against SIGPIPE from head closing input early
+ERROR_SHORT=$(echo "$ERROR" | head -1 | cut -c1-200 || true)
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Tool failure: $TOOL_NAME - $ERROR_SHORT" >> "$LOG_FILE"
 
