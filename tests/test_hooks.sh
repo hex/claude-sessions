@@ -757,6 +757,110 @@ test_index_has_auto_generated_notice() {
 }
 
 # ============================================================================
+# learnings.jsonl — cross-session project wisdom
+# ============================================================================
+
+test_session_start_injects_recent_learnings() {
+    session_start_setup
+
+    # Populate learnings at sessions root
+    cat > "$CS_SESSIONS_ROOT/learnings.jsonl" << EOF
+{"ts":"2026-04-01T10:00:00Z","session":"old-session","key":"git-lfs","insight":"git lfs pulls fail silently if credential helper is wrong","tags":["git","auth"],"confidence":9}
+{"ts":"2026-04-02T11:00:00Z","session":"other-session","key":"pytest-fixtures","insight":"pytest fixture scope=session shares state across all tests","tags":["python","testing"],"confidence":7}
+{"ts":"2026-04-03T12:00:00Z","session":"current-session","key":"sed-macos","insight":"sed -i on macOS requires empty '' argument","tags":["bash","macos"],"confidence":10}
+EOF
+
+    local output
+    output=$(echo '{"session_id":"test","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+
+    local context
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+
+    if ! echo "$context" | grep -q "Learnings"; then
+        echo "  FAIL: Context should have a Learnings section"
+        echo "  Got: $(echo "$context" | tail -10)"
+        session_start_teardown
+        return 1
+    fi
+
+    session_start_teardown
+}
+
+test_session_start_prefers_own_session_learnings() {
+    session_start_setup
+
+    cat > "$CS_SESSIONS_ROOT/learnings.jsonl" << EOF
+{"ts":"2026-04-01T10:00:00Z","session":"other","key":"irrelevant","insight":"something about another session","tags":[],"confidence":5}
+{"ts":"2026-04-02T11:00:00Z","session":"current-session","key":"relevant","insight":"something specific to this session","tags":[],"confidence":9}
+EOF
+
+    local output
+    output=$(echo '{"session_id":"test","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+
+    local context
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+
+    if ! echo "$context" | grep -q "specific to this session"; then
+        echo "  FAIL: Should include own-session learning"
+        session_start_teardown
+        return 1
+    fi
+
+    session_start_teardown
+}
+
+test_session_start_no_learnings_file() {
+    session_start_setup
+    rm -f "$CS_SESSIONS_ROOT/learnings.jsonl"
+
+    # Should still work, just no learnings section
+    local output
+    output=$(echo '{"session_id":"test","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+
+    local context
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+
+    if echo "$context" | grep -q "Learnings"; then
+        echo "  FAIL: Should not have Learnings section when no learnings file"
+        session_start_teardown
+        return 1
+    fi
+
+    session_start_teardown
+}
+
+test_session_start_limits_learnings_to_3() {
+    session_start_setup
+
+    # Write 10 learnings matching this session
+    : > "$CS_SESSIONS_ROOT/learnings.jsonl"
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        echo "{\"ts\":\"2026-04-$i"T"10:00:00Z\",\"session\":\"current-session\",\"key\":\"learn-$i\",\"insight\":\"insight number $i\",\"tags\":[],\"confidence\":5}" >> "$CS_SESSIONS_ROOT/learnings.jsonl"
+    done
+
+    local output
+    output=$(echo '{"session_id":"test","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+
+    local context
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+
+    # Count how many "insight number N" lines appear
+    local count
+    count=$(echo "$context" | grep -c "insight number" || echo "0")
+    if [[ "$count" -gt 3 ]]; then
+        echo "  FAIL: Should limit to 3 learnings (got $count)"
+        session_start_teardown
+        return 1
+    fi
+
+    session_start_teardown
+}
+
+# ============================================================================
 # timeline.jsonl
 # ============================================================================
 
@@ -959,6 +1063,12 @@ run_test test_index_shows_objectives
 run_test test_index_shows_status
 run_test test_index_skips_remote_stubs
 run_test test_index_has_auto_generated_notice
+
+# Learnings
+run_test test_session_start_injects_recent_learnings
+run_test test_session_start_prefers_own_session_learnings
+run_test test_session_start_no_learnings_file
+run_test test_session_start_limits_learnings_to_3
 
 # Timeline
 run_test test_session_start_appends_to_timeline
