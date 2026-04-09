@@ -181,16 +181,18 @@ extract_and_store_secrets() {
         local value=""
 
         # Try KEY=value (unquoted)
-        value=$(echo "$content" | grep -E "^[[:space:]]*$key[[:space:]]*=" | head -1 | sed -E "s/^[[:space:]]*$key[[:space:]]*=[[:space:]]*//" | sed -E 's/^"([^"]*)".*/\1/' | sed -E "s/^'([^']*)'.*/\1/")
+        # || true guards against SIGPIPE when grep matches multiple lines
+        # and head -1 closes its input early (file content > pipe buffer)
+        value=$(echo "$content" | grep -E "^[[:space:]]*$key[[:space:]]*=" | head -1 | sed -E "s/^[[:space:]]*$key[[:space:]]*=[[:space:]]*//" | sed -E 's/^"([^"]*)".*/\1/' | sed -E "s/^'([^']*)'.*/\1/" || true)
 
         # If still has quotes, it was unquoted value
         if [[ "$value" =~ ^[^\"\'[:space:]] ]]; then
-            value=$(echo "$content" | grep -E "^[[:space:]]*$key[[:space:]]*=" | head -1 | sed -E "s/^[[:space:]]*$key[[:space:]]*=[[:space:]]*//" | awk '{print $1}')
+            value=$(echo "$content" | grep -E "^[[:space:]]*$key[[:space:]]*=" | head -1 | sed -E "s/^[[:space:]]*$key[[:space:]]*=[[:space:]]*//" | awk '{print $1}' || true)
         fi
 
         # Try YAML-style KEY: value
         if [ -z "$value" ]; then
-            value=$(echo "$content" | grep -E "^[[:space:]]*$key[[:space:]]*:" | head -1 | sed -E "s/^[[:space:]]*$key[[:space:]]*:[[:space:]]*//" | sed 's/[[:space:]]*$//')
+            value=$(echo "$content" | grep -E "^[[:space:]]*$key[[:space:]]*:" | head -1 | sed -E "s/^[[:space:]]*$key[[:space:]]*:[[:space:]]*//" | sed 's/[[:space:]]*$//' || true)
         fi
 
         if [ -n "$value" ] && [ "$value" != "" ]; then

@@ -350,6 +350,20 @@ test_failure_truncates_long_errors() {
     fi
 }
 
+test_failure_handles_huge_multiline_error() {
+    # Regression: echo "$err" | head -1 | cut writes >64KB before head closes,
+    # causing SIGPIPE in echo. With pipefail, this killed the hook silently.
+    # Reproduce with a large multi-line error like a long stack trace.
+    local huge_error
+    huge_error=$(python3 -c "print('\n'.join(['x' * 500 for _ in range(500)]))")
+    local input
+    input=$(jq -n --arg err "$huge_error" '{tool_name: "Bash", error: $err}')
+    echo "$input" | bash "$HOOKS_DIR/tool-failure-logger.sh"
+
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/logs/session.log" "Tool failure: Bash" \
+        "Should log huge multi-line error without crashing" || return 1
+}
+
 test_failure_skips_outside_session() {
     unset CLAUDE_SESSION_NAME
     local input='{"tool_name":"Bash","error":"fail"}'
@@ -826,6 +840,7 @@ run_test test_subagent_skips_outside_session
 run_test test_failure_logged_to_session_log
 run_test test_failure_log_has_timestamp
 run_test test_failure_truncates_long_errors
+run_test test_failure_handles_huge_multiline_error
 run_test test_failure_skips_outside_session
 run_test test_failure_handles_missing_error
 
