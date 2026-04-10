@@ -457,6 +457,25 @@ do_update() {
     # Clear update cache so notification disappears
     rm -f "$HOME/.cache/cs/update-check"
 
+    # Show release notes for the installed version
+    local new_version
+    new_version=$(grep '^VERSION=' "$HOME/.local/bin/cs" 2>/dev/null | head -1 | cut -d'"' -f2)
+    if [ -n "$new_version" ]; then
+        local changelog
+        local script_dir
+        script_dir="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")"
+        changelog="$(dirname "$script_dir")/CHANGELOG.md"
+        if [ -f "$changelog" ]; then
+            echo ""
+            # Extract section between "## $new_version" and next "## "
+            sed -n "/^## ${new_version}$/,/^## [0-9]/{ /^## [0-9]/!p; }" "$changelog" \
+                | sed '/^$/N;/^\n$/d'
+        else
+            echo ""
+            echo "  See ${RELEASES_BASE} for what's new."
+        fi
+    fi
+
     # Exit immediately to prevent bash from reading more of the old script
     # (the file was just overwritten, continuing would cause errors)
     exit 0
@@ -877,7 +896,7 @@ save_checkpoint() {
         error "Usage: cs -checkpoint \"<label>\"   # from inside a session"
     fi
 
-    if [ -z "${CLAUDE_SESSION_NAME:-}" ] || [ -z "${CLAUDE_SESSION_META_DIR:-}" ]; then
+    if [ -z "${CLAUDE_SESSION_NAME:-}" ] || [ -z "${CLAUDE_SESSION_META_DIR:-}" ] || [ ! -d "${CLAUDE_SESSION_META_DIR}" ]; then
         error "cs -checkpoint must be run from inside a cs session (CLAUDE_SESSION_NAME not set)"
     fi
 
@@ -2709,23 +2728,31 @@ run_sync() {
 # Main function
 main() {
     if [ $# -eq 0 ]; then
-        local tui_bin
-        tui_bin="$(command -v cs-tui 2>/dev/null || echo "$(dirname "$0")/cs-tui")"
-        if [ -x "$tui_bin" ]; then
-            local tui_output
-            tui_output=$(CS_VERSION="$VERSION" "$tui_bin") || exit $?
-            if [ -n "$tui_output" ]; then
-                local selected="${tui_output%%$'\n'*}"
-                if [ "$tui_output" != "$selected" ]; then
-                    local tui_flags="${tui_output#*$'\n'}"
-                    exec "$0" "$selected" $tui_flags
-                else
-                    exec "$0" "$selected"
+        if [ -t 1 ]; then
+            local tui_bin
+            tui_bin="$(command -v cs-tui 2>/dev/null || echo "$(dirname "$0")/cs-tui")"
+            if [ -x "$tui_bin" ]; then
+                local tui_output
+                tui_output=$(CS_VERSION="$VERSION" "$tui_bin") || exit $?
+                if [ -n "$tui_output" ]; then
+                    local selected="${tui_output%%$'\n'*}"
+                    if [ "$tui_output" != "$selected" ]; then
+                        local tui_flags="${tui_output#*$'\n'}"
+                        exec "$0" "$selected" $tui_flags
+                    else
+                        exec "$0" "$selected"
+                    fi
                 fi
+                exit 0
             fi
-            exit 0
+            show_help
+        else
+            echo "cs <name>        Create or resume a session"
+            echo "cs -list         List all sessions"
+            echo "cs -search       Search across sessions"
+            echo "cs -help         Show full help"
+            echo "cs -version      Show version"
         fi
-        show_help
         exit 0
     fi
 

@@ -5,7 +5,7 @@ The installer configures Claude Code hooks that enable session management featur
 ## session-start.sh (SessionStart)
 
 Runs when Claude Code starts a session:
-- Logs session start (including source: `startup`, `resume`, `clear`, `compact`) to `.cs/logs/session.log`
+- Logs session start (including source: `startup`, `resume`, `clear`, `compact`) to `.cs/logs/session.log` and appends a `session_start` event to `.cs/timeline.jsonl`
 - On `startup`/`resume` only: configures `transfer.hideRefs`, recovers autosaved changes from crashed sessions, auto-pulls from remote
 - On `resume` only: injects dynamic context (last activity, recent commits, objective, up to 5 most recently active sibling sessions with their objectives)
 - On all sources: exports session environment variables, injects session context into Claude's system prompt
@@ -56,7 +56,7 @@ Runs before Claude Code compresses conversation history:
 ## session-end.sh (SessionEnd)
 
 Runs when Claude Code session ends:
-- Logs session end time and exit reason (`user_exit`, `sigint`, `error`, `timeout`)
+- Logs session end time and exit reason (`user_exit`, `sigint`, `error`, `timeout`) and appends a `session_end` event to `.cs/timeline.jsonl`
 - Creates `.cs/archives/artifacts-YYYYMMDD-HHMMSS.tar.gz` archive (skipped on `sigint` for faster exit)
 - Exports secrets to encrypted file if `CS_SECRETS_PASSWORD` is set
 - Auto-commits all accumulated changes with one clean commit and pushes to remote if sync is enabled
