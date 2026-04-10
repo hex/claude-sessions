@@ -897,7 +897,7 @@ save_checkpoint() {
     fi
 
     if [ -z "${CLAUDE_SESSION_NAME:-}" ] || [ -z "${CLAUDE_SESSION_META_DIR:-}" ] || [ ! -d "${CLAUDE_SESSION_META_DIR}" ]; then
-        error "cs -checkpoint must be run from inside a cs session (CLAUDE_SESSION_NAME not set)"
+        error "cs -checkpoint must be run from inside a cs session"
     fi
 
     local meta_dir="$CLAUDE_SESSION_META_DIR"
