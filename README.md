@@ -23,6 +23,15 @@ Each session is a persistent workspace - documentation, artifacts, and secrets t
 
 No git repo required. No project structure needed. Just a name for what you're working on.
 
+## Concepts
+
+- **Sessions** — Isolated workspaces, each with their own git repo, documentation, and artifact tracking. `cs debug-api` creates one; running it again resumes it.
+- **Discoveries** (`.cs/discoveries.md`) — A lab notebook for recording findings, observations, and ideas during a session. Older entries are automatically archived and can be condensed with `/compact-discoveries`.
+- **Artifacts** (`.cs/artifacts/`) — Scripts and config files are automatically intercepted and saved here, tracked in a `MANIFEST.json` with metadata.
+- **Checkpoints** (`.cs/checkpoints/`) — Labelled narrative snapshots you can save mid-session with `/checkpoint`, capturing discoveries, changes, and the current git HEAD.
+- **Timeline** (`.cs/timeline.jsonl`) — A structured event log recording session starts, ends, and checkpoints as newline-delimited JSON.
+- **Auto-memory** (`.cs/memory/`) — Claude Code's persistent operational notes, redirected into the session so they sync across machines and get cleaned up with `cs -rm`.
+
 ## Features
 
 - **Isolated session workspaces** - Each session has its own directory with structured documentation
@@ -182,6 +191,7 @@ This rsyncs the session to the remote host and creates a local stub so future `c
 │   ├── memory/             # Claude Code auto memory (synced)
 │   ├── plans/              # Claude Code plans (synced)
 │   ├── commands.md         # Auto-discovered CLI commands
+│   ├── timeline.jsonl      # Session event log (starts, ends, checkpoints)
 │   ├── artifacts/          # Auto-tracked scripts and configs
 │   └── logs/session.log    # Bash command audit trail + session log
 ├── .claude/
@@ -191,6 +201,13 @@ This rsyncs the session to the remote host and creates a local stub so future `c
 ```
 
 Claude Code's [auto memory](https://code.claude.com/docs/en/memory) is redirected into `.cs/memory/` via `CLAUDE_CODE_AUTO_MEMORY_PATH` env var (set at launch) and `.claude/settings.local.json` (for future compatibility). This means auto memory is synced across machines with `cs -sync` and cleaned up with `cs -rm`.
+
+## Slash Commands
+
+- `/summary` — Generate a narrative summary of the current session
+- `/compact-discoveries` — Condense the discoveries archive for context efficiency
+- `/checkpoint <label>` — Save a labelled state snapshot (discoveries, changes, git HEAD)
+- `/skillify <command>` — Create a reusable Claude Code skill from a CLI command (session-local, not installed globally)
 
 ## Configuration
 

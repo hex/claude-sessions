@@ -61,6 +61,13 @@ _cs() {
         'rm:Remove a registered host (alias)'
     )
 
+    # Checkpoint subcommands with descriptions
+    local -a checkpoint_cmds
+    checkpoint_cmds=(
+        'list:List checkpoints for current session'
+        'show:Print a specific checkpoint'
+    )
+
     # Update subcommands with descriptions
     local -a update_cmds
     update_cmds=(
@@ -81,6 +88,8 @@ _cs() {
         '-sync:Sync current session'
         '-s:Sync current session (alias)'
         '-secrets:Manage session secrets'
+        '-checkpoint:Save or manage session checkpoints'
+        '-search:Search across all sessions'
         '-update:Update cs to latest version'
         '-uninstall:Uninstall cs'
         '-help:Show help message'
@@ -90,20 +99,21 @@ _cs() {
     )
 
     # Determine context
-    local in_sync=false in_secrets=false in_remote=false in_update=false has_session=false after_remove=false
+    local in_sync=false in_secrets=false in_remote=false in_update=false in_checkpoint=false has_session=false after_remove=false
     local i word
 
     for ((i=2; i < CURRENT; i++)); do
         word="${words[i]}"
         case "$word" in
-            -sync|-s) in_sync=true; in_secrets=false; in_remote=false; in_update=false ;;
-            -secrets) in_secrets=true; in_sync=false; in_remote=false; in_update=false ;;
-            -remote) in_remote=true; in_sync=false; in_secrets=false; in_update=false ;;
-            -update) in_update=true; in_sync=false; in_secrets=false; in_remote=false ;;
+            -sync|-s) in_sync=true; in_secrets=false; in_remote=false; in_update=false; in_checkpoint=false ;;
+            -secrets) in_secrets=true; in_sync=false; in_remote=false; in_update=false; in_checkpoint=false ;;
+            -remote) in_remote=true; in_sync=false; in_secrets=false; in_update=false; in_checkpoint=false ;;
+            -update) in_update=true; in_sync=false; in_secrets=false; in_remote=false; in_checkpoint=false ;;
+            -checkpoint) in_checkpoint=true; in_sync=false; in_secrets=false; in_remote=false; in_update=false ;;
             -remove|-rm) after_remove=true ;;
             -*) ;;
             *)
-                if ! $in_sync && ! $in_secrets && ! $after_remove && ! $in_remote && ! $in_update; then
+                if ! $in_sync && ! $in_secrets && ! $after_remove && ! $in_remote && ! $in_update && ! $in_checkpoint; then
                     has_session=true
                 fi
                 ;;
@@ -137,6 +147,12 @@ _cs() {
     # Context: after -secrets
     if $in_secrets; then
         _describe 'secrets command' secrets_cmds
+        return
+    fi
+
+    # Context: after -checkpoint
+    if $in_checkpoint; then
+        _describe 'checkpoint command' checkpoint_cmds
         return
     fi
 
