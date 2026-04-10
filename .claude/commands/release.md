@@ -76,9 +76,11 @@ Check these files for accuracy against the current code:
 
 **Fix any issues found** - update the documentation to match current code.
 
-### 4. Update Changelog (if present)
+### 4. Update Changelog
 
-If a CHANGELOG.md exists, add an entry for this version.
+CHANGELOG.md exists at the repo root. After generating release notes (Step 6) and getting approval, insert the approved notes as a new `## X.Y.Z` section at the top of the file (after the header, before the previous version's section). Use the version number WITHOUT the `v` prefix to match existing entries. Include all the same content as the GitHub Release notes.
+
+The CHANGELOG entry is committed as part of the release commit in Step 7.
 
 ### 5. Run Tests
 
