@@ -206,8 +206,6 @@ Commands:
   <name> -sync <cmd>  Run sync command on <name> without launching session
   <name> -secrets <cmd>  Run secrets command on <name> without launching session
   -search <query>     Search across all sessions (discoveries, memory, README)
-  -learn "<insight>"  Record a cross-session learning (auto-injected on resume)
-  -learnings [name]   List recorded learnings (optionally filtered by session)
   -checkpoint "<label>"  Save labelled state snapshot (run from inside a session)
   -checkpoint list    List checkpoints for current session
   -checkpoint show <name>  Print a specific checkpoint
@@ -863,47 +861,6 @@ get_file_mtime() {
         stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$file" 2>/dev/null || echo "-"
     else
         stat -c "%y" "$file" 2>/dev/null | cut -d. -f1 || echo "-"
-    fi
-}
-
-# Record a cross-session learning (append to learnings.jsonl at sessions root)
-record_learning() {
-    local insight="$*"
-
-    if [ -z "$insight" ]; then
-        error "Usage: cs -learn \"<insight>\""
-    fi
-
-    mkdir -p "$SESSIONS_ROOT"
-    local learnings_file="$SESSIONS_ROOT/learnings.jsonl"
-    local session_name="${CLAUDE_SESSION_NAME:-unknown}"
-
-    # Append as JSONL
-    jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-           --arg session "$session_name" \
-           --arg insight "$insight" \
-           '{ts: $ts, session: $session, insight: $insight, tags: [], confidence: 7}' \
-        >> "$learnings_file" || error "Failed to write learning"
-
-    info "Learning recorded: $insight"
-}
-
-# List recent learnings (optionally filtered by session name)
-list_learnings() {
-    local filter="${1:-}"
-    local learnings_file="$SESSIONS_ROOT/learnings.jsonl"
-
-    if [ ! -f "$learnings_file" ]; then
-        info "No learnings recorded yet. Use: cs -learn \"<insight>\""
-        return 0
-    fi
-
-    if [ -n "$filter" ]; then
-        jq -r --arg name "$filter" \
-            'select(.session == $name) | "\(.ts) [\(.session)] \(.insight)"' \
-            "$learnings_file" 2>/dev/null || true
-    else
-        jq -r '"\(.ts) [\(.session)] \(.insight)"' "$learnings_file" 2>/dev/null || true
     fi
 }
 
@@ -2497,7 +2454,7 @@ run_uninstall() {
     done
 
     # Remove commands
-    for cmd in summary.md compact-discoveries.md checkpoint.md learn.md; do
+    for cmd in summary.md compact-discoveries.md checkpoint.md; do
         if [ -f "$commands_dir/$cmd" ]; then
             rm "$commands_dir/$cmd"
             info "Removed $commands_dir/$cmd"
@@ -2833,15 +2790,6 @@ main() {
             ;;
         -search)
             search_sessions "${2:-}"
-            return 0
-            ;;
-        -learn)
-            shift
-            record_learning "$@"
-            return 0
-            ;;
-        -learnings)
-            list_learnings "${2:-}"
             return 0
             ;;
         -checkpoint)
