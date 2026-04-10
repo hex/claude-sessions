@@ -2,6 +2,37 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
+## 2026.4.6
+
+### Features
+- **Subagent detection in hooks** -- hooks now check for `agent_id` in the JSON input and skip side-effects (command tracking, discoveries reminder, session lifecycle events) when running inside a Task-spawned subagent. Prevents subagents from polluting parent session state.
+- **Structured timeline log** (`.cs/timeline.jsonl`) -- session-start and session-end hooks append JSONL events with timestamp, source, session ID, and branch. Checkpoints also write timeline events.
+- **`cs -checkpoint` + `/checkpoint` slash command** -- save labelled narrative snapshots mid-session. Captures discoveries, changes, git HEAD, and uncommitted files. List with `cs -checkpoint list`, view with `cs -checkpoint show <name>`.
+
+### Fixes
+- **Fix stdout leak in session-end hook** -- `cs-secrets export-file` printed to stdout inside the hook, causing Claude Code to report "Hook cancelled" on every session exit for sessions with age keys. Redirected to `/dev/null`.
+- **Fix checkpoint error message** -- guard now says "must be run from inside a cs session" instead of misleading "CLAUDE_SESSION_NAME not set" when the real issue is a nonexistent directory.
+
+### DX Improvements (10 items, built by 3 parallel agent teams)
+- **Non-TTY help** -- `cs` with no args in a non-TTY context now shows a compact 5-line help instead of "cs-tui requires interactive terminal"
+- **Post-install message** -- installer now shows "Getting started: cs my-first-session" after completion
+- **Shell completions** -- added `-checkpoint` and `-search` to both zsh and bash completions with subcommand support
+- **Checkpoint guard** -- `cs -checkpoint` verifies `CLAUDE_SESSION_META_DIR` exists as a directory, not just that the env var is set
+- **Concepts section in README** -- explains sessions, discoveries, artifacts, checkpoints, timeline, auto-memory
+- **Slash Commands section in README** -- documents /summary, /compact-discoveries, /checkpoint, /skillify
+- **Timeline documented** -- in README session structure and docs/hooks.md
+- **CHANGELOG.md** -- 683 lines covering all 43 releases
+- **Release notes on update** -- `cs -update` now shows what changed after installing
+- **CONTRIBUTING.md** -- dev setup, test workflow, hook/command addition checklists
+
+### Other
+- `/release` command now maintains CHANGELOG.md on each release
+- Removed `cs -learn` / `cs -learnings` / `/learn` (YAGNI -- discoveries + auto-memory + search already cover cross-session knowledge)
+
+283/283 tests passing.
+
+**Full Changelog**: https://github.com/hex/claude-sessions/compare/v2026.4.5...v2026.4.6
+
 ## 2026.4.5
 
 
