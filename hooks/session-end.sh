@@ -102,7 +102,7 @@ if [ -f "$SYNC_CONFIG" ] && [ -d "$SESSION_DIR/.git" ]; then
         if [ -n "${CS_SECRETS_PASSWORD:-}" ]; then
             for loc in "$(dirname "$0")/cs-secrets" "$HOME/.local/bin/cs-secrets"; do
                 if [ -x "$loc" ]; then
-                    "$loc" --session "$CLAUDE_SESSION_NAME" export-file 2>/dev/null || true
+                    "$loc" --session "$CLAUDE_SESSION_NAME" export-file >/dev/null 2>&1 || true
                     break
                 fi
             done
