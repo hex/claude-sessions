@@ -72,11 +72,12 @@ echo "$CURRENT_TIME" > "$COOLDOWN_FILE"
 # Build the reminder message
 REASON="Discoveries check: (1) Review existing entries in $DISCOVERIES_FILE — if any have been disproven or superseded by your recent work, correct or remove them now. (2) If you have new findings to add, use the Task tool with run_in_background to append them. If nothing to change, just acknowledge and continue."
 
-# Check if discoveries.md exceeds the character budget (~20KB ≈ 4-5K tokens)
-MAX_CHARS=20000
+# Check if discoveries.md exceeds the size budget (default 60KB ≈ 12-15K tokens)
+# Override via CS_DISCOVERIES_MAX_SIZE env var (bytes)
+MAX_SIZE="${CS_DISCOVERIES_MAX_SIZE:-60000}"
 DISCOVERIES_SIZE=$(wc -c < "$DISCOVERIES_FILE" | tr -d ' ')
-if [ "$DISCOVERIES_SIZE" -gt "$MAX_CHARS" ]; then
-    REASON="$REASON (3) discoveries.md is over budget (${DISCOVERIES_SIZE} chars, max ${MAX_CHARS}). Summarize the oldest entries into .cs/discoveries.compact.md (append to existing if present), then remove those entries from discoveries.md. Keep the most recent entries intact. Split on ## heading boundaries."
+if [ "$DISCOVERIES_SIZE" -gt "$MAX_SIZE" ]; then
+    REASON="$REASON (3) discoveries.md is over budget (${DISCOVERIES_SIZE} bytes, max ${MAX_SIZE}). Summarize the oldest entries into .cs/discoveries.compact.md (append to existing if present), then remove those entries from discoveries.md. Keep the most recent entries intact. Split on ## heading boundaries."
 fi
 
 # Return reminder prompt - use "block" + "reason" so Claude sees it

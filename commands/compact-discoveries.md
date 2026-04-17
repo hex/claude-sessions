@@ -4,19 +4,20 @@ Use the Task tool to delegate this work to a subagent with `model: sonnet` and `
 
 ---
 
-You are working in a cs session. Your task is to summarize old discoveries and trim the active file to stay within its character budget.
+You are working in a cs session. Your task is to summarize old discoveries and trim the active file to stay within its size budget.
 
 ## Steps
 
 1. **Check if compaction is needed:**
    - Read `.cs/discoveries.md`
    - Measure the file size with `wc -c`
-   - If it's under 20,000 characters, report that there's nothing to compact and stop
+   - Get the budget: `${CS_DISCOVERIES_MAX_SIZE:-60000}` bytes (default 60KB, override via env var)
+   - If the file is under the budget, report that there's nothing to compact and stop
 
 2. **Read the full discoveries.md** and identify all `##` entries
 
 3. **Decide what to keep vs compact:**
-   - The most recent entries (roughly the last 10KB) stay in `discoveries.md` untouched
+   - The most recent entries (roughly the last half of the budget) stay in `discoveries.md` untouched
    - Older entries get summarized into `.cs/discoveries.compact.md`
 
 4. **Produce a condensed summary of the older entries** with these rules:

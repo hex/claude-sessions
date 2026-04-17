@@ -43,7 +43,7 @@ Runs after any file modification (Write or Edit), providing crash recovery for a
 Runs when Claude pauses for user input:
 - Reminds to review existing entries and update `.cs/discoveries.md` if not recently modified
 - Uses 5-minute cooldown to avoid excessive reminders
-- When discoveries.md exceeds the 20KB character budget, instructs Claude to summarize old entries into `.cs/discoveries.compact.md` and trim the active file
+- When discoveries.md exceeds its size budget (default 60KB, override via `CS_DISCOVERIES_MAX_SIZE` env var), instructs Claude to summarize old entries into `.cs/discoveries.compact.md` and trim the active file
 
 ## session-end.sh (SessionEnd)
 

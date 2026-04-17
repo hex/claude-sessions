@@ -2,6 +2,26 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
+## 2026.4.8
+
+### Improvements
+
+- **Raise discoveries size budget from 20KB to 60KB** -- The 20KB default introduced in v2026.4.7 was too aggressive for sessions used as Claude's working memory. New 60KB default (~12-15K tokens) gives substantial headroom for long-running sessions while still staying well under 1% of a 200K context window.
+
+- **`CS_DISCOVERIES_MAX_SIZE` env var** -- Override the default 60KB budget by setting this env var (in bytes) in your shell rc. Useful for sessions that are particularly knowledge-dense, or for users who want to be more/less aggressive about compaction.
+
+### Renamed
+
+- Internal var `MAX_CHARS` -> `MAX_SIZE` and "character budget" -> "size budget" in docs/messages, since `wc -c` measures bytes (not characters) and `MAX_SIZE` matches Unix tool conventions (`ls -l`, `du -b`, `wc -c`, `find -size`).
+
+### Tests
+
+- Added `test_reminder_env_var_overrides_default` -- verifies that `CS_DISCOVERIES_MAX_SIZE` overrides the default threshold.
+- Refactored existing budget tests to use the env var with small thresholds for fast, reliable testing (instead of generating large test files).
+- 281 tests passing across 17 test suites (was 280).
+
+**Full Changelog**: https://github.com/hex/claude-sessions/compare/v2026.4.7...v2026.4.8
+
 ## 2026.4.7
 
 ### Improvements

@@ -13,8 +13,9 @@ When resuming this session, read the following files to restore context:
 5. **.cs/changes.md** - Modifications and fixes made
 6. **.cs/artifacts/MANIFEST.json** - List of tracked artifacts
 
-Note: When discoveries.md exceeds its character budget (~20KB), older entries
-are summarized into .cs/discoveries.compact.md to keep context lean.
+Note: When discoveries.md exceeds its size budget (default 60KB, override via
+CS_DISCOVERIES_MAX_SIZE env var), older entries are summarized into
+.cs/discoveries.compact.md to keep context lean.
 
 ## Artifact Auto-Tracking
 
