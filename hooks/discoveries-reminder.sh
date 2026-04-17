@@ -70,7 +70,7 @@ fi
 echo "$CURRENT_TIME" > "$COOLDOWN_FILE"
 
 # Build the reminder message
-REASON="Discoveries check: (1) Review existing entries in $DISCOVERIES_FILE — if any have been disproven or superseded by your recent work, correct or remove them now. (2) If you have new findings to add, use the Task tool with run_in_background to append them. If nothing to change, just acknowledge and continue."
+REASON="Discoveries check: (1) Review existing entries in $DISCOVERIES_FILE — if any have been disproven or superseded by your recent work, correct or remove them now. (2) If you have new findings to add, use the Task tool with run_in_background to append them. Write findings as regular content — do NOT prepend status metadata like 'N chars - under budget' or similar size checks; those are ephemeral and pollute the file. If nothing to change, just acknowledge and continue."
 
 # Check if discoveries.md exceeds the size budget (default 60KB ≈ 12-15K tokens)
 # Override via CS_DISCOVERIES_MAX_SIZE env var (bytes)
