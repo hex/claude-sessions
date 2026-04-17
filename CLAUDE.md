@@ -8,14 +8,13 @@ When resuming this session, read the following files to restore context:
 
 1. **.cs/summary.md** - If exists, read first for previous session overview
 2. **.cs/README.md** - Session objective, environment, and outcome
-3. **.cs/discoveries.md** - Recent findings, observations, and ideas
-4. **.cs/discoveries.compact.md** - If exists, condensed historical findings
+3. **.cs/discoveries.md** - Findings, observations, and ideas
+4. **.cs/discoveries.compact.md** - If exists, condensed older findings
 5. **.cs/changes.md** - Modifications and fixes made
 6. **.cs/artifacts/MANIFEST.json** - List of tracked artifacts
 
-Note: Historical discoveries are archived to .cs/discoveries.archive.md
-and condensed into .cs/discoveries.compact.md. Only read the archive
-if you need full detail on a specific past finding.
+Note: When discoveries.md exceeds its character budget (~20KB), older entries
+are summarized into .cs/discoveries.compact.md to keep context lean.
 
 ## Artifact Auto-Tracking
 

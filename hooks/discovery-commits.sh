@@ -34,7 +34,7 @@ fi
 # Extract discovery log entry if this is a discovery file edit
 LATEST_ENTRY=""
 case "$FILE_PATH" in
-    "$META_DIR/discoveries.md"|"$META_DIR/discoveries.archive.md"|"$META_DIR/discoveries.compact.md")
+    "$META_DIR/discoveries.md"|"$META_DIR/discoveries.compact.md")
         # Try to find last heading (## Something)
         LATEST_HEADING=$(grep "^##" "$FILE_PATH" 2>/dev/null | tail -1 | sed 's/^##\+[[:space:]]*//' || true)
         # Try to find last bullet point (- Something)

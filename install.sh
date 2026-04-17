@@ -79,7 +79,6 @@ HOOK_ARTIFACT_TRACKER_URL="${REPO_URL}/hooks/artifact-tracker.sh"
 HOOK_CHANGES_TRACKER_URL="${REPO_URL}/hooks/changes-tracker.sh"
 HOOK_DISCOVERY_COMMITS_URL="${REPO_URL}/hooks/discovery-commits.sh"
 HOOK_DISCOVERIES_REMINDER_URL="${REPO_URL}/hooks/discoveries-reminder.sh"
-HOOK_DISCOVERIES_ARCHIVER_URL="${REPO_URL}/hooks/discoveries-archiver.sh"
 HOOK_SESSION_END_URL="${REPO_URL}/hooks/session-end.sh"
 HOOK_SUBAGENT_CONTEXT_URL="${REPO_URL}/hooks/subagent-context.sh"
 HOOK_TOOL_FAILURE_LOGGER_URL="${REPO_URL}/hooks/tool-failure-logger.sh"
@@ -229,7 +228,6 @@ if [ "$INSTALL_METHOD" = "local" ]; then
     cp "$HOOKS_SOURCE/changes-tracker.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/discovery-commits.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/discoveries-reminder.sh" "$HOOKS_DIR/"
-    cp "$HOOKS_SOURCE/discoveries-archiver.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/session-end.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/subagent-context.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/tool-failure-logger.sh" "$HOOKS_DIR/"
@@ -244,7 +242,6 @@ else
         curl -fsSL "$HOOK_CHANGES_TRACKER_URL" -o "$HOOKS_DIR/changes-tracker.sh" || error "Failed to download changes-tracker.sh"
         curl -fsSL "$HOOK_DISCOVERY_COMMITS_URL" -o "$HOOKS_DIR/discovery-commits.sh" || error "Failed to download discovery-commits.sh"
         curl -fsSL "$HOOK_DISCOVERIES_REMINDER_URL" -o "$HOOKS_DIR/discoveries-reminder.sh" || error "Failed to download discoveries-reminder.sh"
-        curl -fsSL "$HOOK_DISCOVERIES_ARCHIVER_URL" -o "$HOOKS_DIR/discoveries-archiver.sh" || error "Failed to download discoveries-archiver.sh"
         curl -fsSL "$HOOK_SESSION_END_URL" -o "$HOOKS_DIR/session-end.sh" || error "Failed to download session-end.sh"
         curl -fsSL "$HOOK_SUBAGENT_CONTEXT_URL" -o "$HOOKS_DIR/subagent-context.sh" || error "Failed to download subagent-context.sh"
         curl -fsSL "$HOOK_TOOL_FAILURE_LOGGER_URL" -o "$HOOKS_DIR/tool-failure-logger.sh" || error "Failed to download tool-failure-logger.sh"
@@ -257,7 +254,6 @@ else
         wget -q "$HOOK_CHANGES_TRACKER_URL" -O "$HOOKS_DIR/changes-tracker.sh" || error "Failed to download changes-tracker.sh"
         wget -q "$HOOK_DISCOVERY_COMMITS_URL" -O "$HOOKS_DIR/discovery-commits.sh" || error "Failed to download discovery-commits.sh"
         wget -q "$HOOK_DISCOVERIES_REMINDER_URL" -O "$HOOKS_DIR/discoveries-reminder.sh" || error "Failed to download discoveries-reminder.sh"
-        wget -q "$HOOK_DISCOVERIES_ARCHIVER_URL" -O "$HOOKS_DIR/discoveries-archiver.sh" || error "Failed to download discoveries-archiver.sh"
         wget -q "$HOOK_SESSION_END_URL" -O "$HOOKS_DIR/session-end.sh" || error "Failed to download session-end.sh"
         wget -q "$HOOK_SUBAGENT_CONTEXT_URL" -O "$HOOKS_DIR/subagent-context.sh" || error "Failed to download subagent-context.sh"
         wget -q "$HOOK_TOOL_FAILURE_LOGGER_URL" -O "$HOOKS_DIR/tool-failure-logger.sh" || error "Failed to download tool-failure-logger.sh"
@@ -359,7 +355,6 @@ else
     CHANGES_TRACKER_PATH="$HOME/.claude/hooks/changes-tracker.sh"
     DISCOVERY_COMMITS_PATH="$HOME/.claude/hooks/discovery-commits.sh"
     DISCOVERIES_REMINDER_PATH="$HOME/.claude/hooks/discoveries-reminder.sh"
-    DISCOVERIES_ARCHIVER_PATH="$HOME/.claude/hooks/discoveries-archiver.sh"
     SESSION_END_PATH="$HOME/.claude/hooks/session-end.sh"
     SUBAGENT_CONTEXT_PATH="$HOME/.claude/hooks/subagent-context.sh"
     TOOL_FAILURE_LOGGER_PATH="$HOME/.claude/hooks/tool-failure-logger.sh"
@@ -373,7 +368,6 @@ else
     CHANGES_TRACKER_TILDE="~/.claude/hooks/changes-tracker.sh"
     DISCOVERY_COMMITS_TILDE="~/.claude/hooks/discovery-commits.sh"
     DISCOVERIES_REMINDER_TILDE="~/.claude/hooks/discoveries-reminder.sh"
-    DISCOVERIES_ARCHIVER_TILDE="~/.claude/hooks/discoveries-archiver.sh"
     SESSION_END_TILDE="~/.claude/hooks/session-end.sh"
     SUBAGENT_CONTEXT_TILDE="~/.claude/hooks/subagent-context.sh"
     TOOL_FAILURE_LOGGER_TILDE="~/.claude/hooks/tool-failure-logger.sh"
@@ -437,18 +431,6 @@ else
 
     SETTINGS=$(echo "$SETTINGS" | jq --arg path "$DISCOVERIES_REMINDER_PATH" --arg tilde "$DISCOVERIES_REMINDER_TILDE" '
         .hooks.Stop = ((.hooks.Stop // []) | map(
-            select(.hooks | all(.command != $path and .command != $tilde))
-        )) + [{
-            "hooks": [{
-                "type": "command",
-                "command": $tilde,
-                "timeout": 10
-            }]
-        }]
-    ')
-
-    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$DISCOVERIES_ARCHIVER_PATH" --arg tilde "$DISCOVERIES_ARCHIVER_TILDE" '
-        .hooks.PreCompact = ((.hooks.PreCompact // []) | map(
             select(.hooks | all(.command != $path and .command != $tilde))
         )) + [{
             "hooks": [{

@@ -2,6 +2,25 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
+## 2026.4.7
+
+### Improvements
+
+- **Character-budget discoveries management** -- Replaced the line-count archiver with a 20KB character budget. The old system used a PreCompact hook (`discoveries-archiver.sh`) that mechanically moved entries to an archive file at 200 lines -- a threshold borrowed from MEMORY.md's hard truncation limit, which was the wrong basis since discoveries loads fully through the CLAUDE.md protocol. The new system checks character count in the Stop hook and instructs Claude to summarize old entries directly into `discoveries.compact.md`. No intermediate archive file, one fewer hook, and a principled threshold based on context cost (~4-5K tokens).
+
+### Removed
+
+- `discoveries-archiver.sh` PreCompact hook -- replaced by character budget check in `discoveries-reminder.sh`
+- `discoveries.archive.md` intermediate file concept -- old entries now summarize directly into `discoveries.compact.md`
+
+### Other
+
+- Updated `/compact-discoveries` command to work directly with `discoveries.md` instead of the archive
+- Fixed `/release` command to cross-check against CHANGELOG.md to prevent listing already-released features
+- 280 tests passing across 17 test suites (was 283 -- 6 archiver tests removed, 3 budget tests added)
+
+**Full Changelog**: https://github.com/hex/claude-sessions/compare/v2026.4.6...v2026.4.7
+
 ## 2026.4.6
 
 ### Features

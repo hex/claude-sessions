@@ -106,7 +106,7 @@ cs my-session -sync push
 
 **Auto-sync is enabled by default for all new sessions.** Changes are handled automatically:
 
-1. **Discovery autosaves:** When you write to discovery files (`discoveries.md`, `discoveries.archive.md`, `discoveries.compact.md`), a snapshot is saved to a shadow git ref (`refs/cs/auto`) for crash safety. These are invisible to `git log` and never pushed.
+1. **Discovery autosaves:** When you write to discovery files (`discoveries.md`, `discoveries.compact.md`), a snapshot is saved to a shadow git ref (`refs/cs/auto`) for crash safety. These are invisible to `git log` and never pushed.
 2. **Session end commits:** All accumulated changes are committed in one clean commit when the session ends, with a summary of changed filenames (e.g., `Session update: 3 files (session.log, discoveries.md, changes.md)`).
 
 When enabled:
