@@ -38,7 +38,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 - **Automatic artifact tracking** - Scripts and configs are auto-saved to `artifacts/`
 - **Secure secrets handling** - Sensitive data auto-detected and stored in OS keychain; sync across machines with [age](https://github.com/FiloSottile/age) public-key encryption
 - **Documentation templates** - Pre-configured markdown files for discoveries and changes
-- **Discoveries archival** - Automatic rotation of large discovery files before context compaction, with LLM-powered condensation via `/compact-discoveries`
+- **Discoveries management** - Character-budget monitoring with automatic summarization of old entries into a condensed file via `/compact-discoveries`
 - **Automatic git version control** - Every session gets local git history; discovery edits are autosaved to a shadow ref for crash safety, session end creates one clean commit; optionally sync to remote
 - **Session locking** - PID-based lock prevents the same session from being opened in two terminals simultaneously; use `--force` to override
 - **Remote sessions** - Run sessions on remote machines via `et` or `ssh` + `tmux`; `cs` handles connection, stubbing, and session tracking
@@ -62,7 +62,7 @@ Or clone and run `./install.sh`.
 
 The installer:
 - Adds `cs`, `cs-secrets`, and `cs-tui` to `~/.local/bin/`
-- Installs twelve [hooks](docs/hooks.md) to `~/.claude/hooks/` for session tracking
+- Installs eleven [hooks](docs/hooks.md) to `~/.claude/hooks/` for session tracking
 - Adds `/summary`, `/compact-discoveries`, and `/skillify` commands, and `store-secret` skill to `~/.claude/`
 - Installs shell completions for bash and zsh
 - Configures hook entries in `~/.claude/settings.json`
@@ -182,9 +182,8 @@ This rsyncs the session to the remote host and creates a local stub so future `c
 ~/.claude-sessions/<session-name>/
 ├── .cs/                    # Session metadata
 │   ├── README.md           # Objective, environment, outcome
-│   ├── discoveries.md      # Recent findings and observations
-│   ├── discoveries.archive.md  # Archived historical entries
-│   ├── discoveries.compact.md  # LLM-condensed archive summary
+│   ├── discoveries.md      # Findings and observations
+│   ├── discoveries.compact.md  # Condensed older findings
 │   ├── changes.md          # Auto-logged file modifications
 │   ├── sync.conf           # Sync configuration
 │   ├── remote.conf         # Remote host (if remote session)
@@ -205,7 +204,7 @@ Claude Code's [auto memory](https://code.claude.com/docs/en/memory) is redirecte
 ## Slash Commands
 
 - `/summary` — Generate a narrative summary of the current session
-- `/compact-discoveries` — Condense the discoveries archive for context efficiency
+- `/compact-discoveries` — Summarize old discoveries into a condensed file for context efficiency
 - `/checkpoint <label>` — Save a labelled state snapshot (discoveries, changes, git HEAD)
 - `/skillify <command>` — Create a reusable Claude Code skill from a CLI command (session-local, not installed globally)
 

@@ -94,7 +94,7 @@ Stop immediately if any tests fail. Do not proceed with the release until all te
 
 ### 6. Generate Release Notes and Get Approval
 
-Generate release notes by looking at commits since the last release tag:
+Generate release notes by looking at what changed since the last release:
 
 ```bash
 # Fetch tags from remote (gh release create makes tags on GitHub, not locally)
@@ -105,7 +105,12 @@ PREV_TAG=$(git tag --list 'v*' --sort=-version:refname | head -1)
 
 # View commits since last tag
 git log "$PREV_TAG"..HEAD --oneline --no-merges
+
+# IMPORTANT: Also check uncommitted changes (git diff --stat) since
+# some releases may have only working tree changes with no intermediate commits
 ```
+
+**Cross-check against CHANGELOG.md** to avoid duplicating already-released features. Read the previous release entry in CHANGELOG.md and verify that nothing in your draft was already shipped. This is critical when working tree changes accumulate across multiple sessions — features from earlier sessions may already be released even though the files show as modified in `git diff`.
 
 - Group the commits into categories: **Features**, **Fixes**, **Docs**, **Other**
 - Draft release notes in markdown format with a `## What's Changed` heading

@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.4.6"
+VERSION="2026.4.7"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -602,15 +602,14 @@ When resuming this session, read the following files to restore context:
 
 1. **.cs/summary.md** - If exists, read first for previous session overview
 2. **.cs/README.md** - Session objective, environment, and outcome
-3. **.cs/discoveries.md** - Recent findings, observations, and ideas
-4. **.cs/discoveries.compact.md** - If exists, condensed historical findings
+3. **.cs/discoveries.md** - Findings, observations, and ideas
+4. **.cs/discoveries.compact.md** - If exists, condensed older findings
 5. **.cs/changes.md** - Modifications and fixes made
 6. **.cs/artifacts/MANIFEST.json** - List of tracked artifacts
 7. **.cs/commands.md** - CLI commands discovered in prior sessions
 
-Note: Historical discoveries are archived to .cs/discoveries.archive.md
-and condensed into .cs/discoveries.compact.md. Only read the archive
-if you need full detail on a specific past finding.
+Note: When discoveries.md exceeds its character budget (~20KB), older entries
+are summarized into .cs/discoveries.compact.md to keep context lean.
 
 ## Discovered Commands
 
@@ -2465,7 +2464,7 @@ run_uninstall() {
     fi
 
     # Remove hooks
-    for hook in session-start.sh artifact-tracker.sh changes-tracker.sh discovery-commits.sh discoveries-reminder.sh discoveries-archiver.sh session-end.sh subagent-context.sh tool-failure-logger.sh session-auto-approve.sh command-tracker.sh bash-logger.sh; do
+    for hook in session-start.sh artifact-tracker.sh changes-tracker.sh discovery-commits.sh discoveries-reminder.sh session-end.sh subagent-context.sh tool-failure-logger.sh session-auto-approve.sh command-tracker.sh bash-logger.sh; do
         if [ -f "$hooks_dir/$hook" ]; then
             rm "$hooks_dir/$hook"
             info "Removed $hooks_dir/$hook"
@@ -2504,7 +2503,6 @@ run_uninstall() {
         local changes_tracker_path="$hooks_dir/changes-tracker.sh"
         local discovery_commits_path="$hooks_dir/discovery-commits.sh"
         local discoveries_reminder_path="$hooks_dir/discoveries-reminder.sh"
-        local discoveries_archiver_path="$hooks_dir/discoveries-archiver.sh"
         local session_end_path="$hooks_dir/session-end.sh"
         local subagent_context_path="$hooks_dir/subagent-context.sh"
         local tool_failure_logger_path="$hooks_dir/tool-failure-logger.sh"
@@ -2549,13 +2547,6 @@ run_uninstall() {
         settings=$(echo "$settings" | jq --arg path "$discovery_commits_path" '
             if .hooks.PostToolUse then
                 .hooks.PostToolUse = [.hooks.PostToolUse[] | select(.hooks | all(.command != $path))]
-            else . end
-        ')
-
-        # Remove our PreCompact discoveries archiver hook
-        settings=$(echo "$settings" | jq --arg path "$discoveries_archiver_path" '
-            if .hooks.PreCompact then
-                .hooks.PreCompact = [.hooks.PreCompact[] | select(.hooks | all(.command != $path))]
             else . end
         ')
 

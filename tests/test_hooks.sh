@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: Tests for session lifecycle hooks not covered by other test files
-# ABOUTME: Covers discoveries-archiver, discoveries-reminder, session-auto-approve, subagent-context, tool-failure-logger
+# ABOUTME: Covers discoveries-reminder, session-auto-approve, subagent-context, tool-failure-logger
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/test_lib.sh"
@@ -23,139 +23,6 @@ teardown() {
         rm -rf "$TEST_TMPDIR"
     fi
     unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR CLAUDE_ARTIFACT_DIR 2>/dev/null || true
-}
-
-# ============================================================================
-# discoveries-archiver.sh
-# ============================================================================
-
-test_archiver_skips_small_file() {
-    # Create a short discoveries file (under 200 lines)
-    {
-        echo "# Discoveries & Notes"
-        echo ""
-        echo "## Finding 1"
-        echo "Some content here"
-    } > "$CLAUDE_SESSION_META_DIR/discoveries.md"
-
-    echo '{"transcript_path": "/tmp/transcript"}' | bash "$HOOKS_DIR/discoveries-archiver.sh"
-
-    # Archive should NOT be created
-    if [[ -f "$CLAUDE_SESSION_META_DIR/discoveries.archive.md" ]]; then
-        echo "  FAIL: Should not archive a small file"
-        return 1
-    fi
-}
-
-test_archiver_moves_old_entries() {
-    # Create a discoveries file with 250+ lines
-    {
-        echo "# Discoveries & Notes"
-        echo ""
-        # Generate ~30 entries of ~8 lines each = ~240 lines
-        for i in $(seq 1 30); do
-            echo "## Finding $i"
-            echo ""
-            echo "Detail line 1 for finding $i"
-            echo "Detail line 2 for finding $i"
-            echo "Detail line 3 for finding $i"
-            echo "Detail line 4 for finding $i"
-            echo "Detail line 5 for finding $i"
-            echo ""
-        done
-    } > "$CLAUDE_SESSION_META_DIR/discoveries.md"
-
-    local lines_before
-    lines_before=$(wc -l < "$CLAUDE_SESSION_META_DIR/discoveries.md" | tr -d ' ')
-
-    echo '{"transcript_path": "/tmp/transcript"}' | bash "$HOOKS_DIR/discoveries-archiver.sh"
-
-    # Archive should be created
-    assert_exists "$CLAUDE_SESSION_META_DIR/discoveries.archive.md" \
-        "Archive file should be created" || return 1
-
-    # Discoveries should be shorter now
-    local lines_after
-    lines_after=$(wc -l < "$CLAUDE_SESSION_META_DIR/discoveries.md" | tr -d ' ')
-    if [[ "$lines_after" -ge "$lines_before" ]]; then
-        echo "  FAIL: Discoveries should be shorter after archiving ($lines_before -> $lines_after)"
-        return 1
-    fi
-}
-
-test_archiver_preserves_header() {
-    {
-        echo "# Discoveries & Notes"
-        echo ""
-        for i in $(seq 1 30); do
-            echo "## Finding $i"
-            echo "Detail for $i"
-            echo "More detail"
-            echo "Even more"
-            echo "Line 4"
-            echo "Line 5"
-            echo "Line 6"
-            echo "Line 7"
-            echo ""
-        done
-    } > "$CLAUDE_SESSION_META_DIR/discoveries.md"
-
-    echo '{}' | bash "$HOOKS_DIR/discoveries-archiver.sh"
-
-    local header
-    header=$(head -1 "$CLAUDE_SESSION_META_DIR/discoveries.md")
-    assert_eq "# Discoveries & Notes" "$header" "Header should be preserved" || return 1
-}
-
-test_archiver_keeps_recent_entries() {
-    {
-        echo "# Discoveries & Notes"
-        echo ""
-        for i in $(seq 1 30); do
-            echo "## Finding $i"
-            echo "Detail for finding $i with enough content"
-            echo "Second line for $i"
-            echo "Third line for $i"
-            echo "Fourth line for $i"
-            echo "Fifth line for $i"
-            echo "Sixth line for $i"
-            echo ""
-        done
-    } > "$CLAUDE_SESSION_META_DIR/discoveries.md"
-
-    echo '{}' | bash "$HOOKS_DIR/discoveries-archiver.sh"
-
-    # The most recent entries should still be in discoveries
-    assert_file_contains "$CLAUDE_SESSION_META_DIR/discoveries.md" "Finding 30" \
-        "Most recent entry should be kept" || return 1
-}
-
-test_archiver_skips_outside_session() {
-    unset CLAUDE_SESSION_NAME
-    echo '{}' | bash "$HOOKS_DIR/discoveries-archiver.sh"
-    # Should exit cleanly with no output
-}
-
-test_archiver_logs_rotation() {
-    {
-        echo "# Discoveries"
-        echo ""
-        for i in $(seq 1 30); do
-            echo "## Entry $i"
-            echo "Content $i line 1"
-            echo "Content $i line 2"
-            echo "Content $i line 3"
-            echo "Content $i line 4"
-            echo "Content $i line 5"
-            echo "Content $i line 6"
-            echo ""
-        done
-    } > "$CLAUDE_SESSION_META_DIR/discoveries.md"
-
-    echo '{}' | bash "$HOOKS_DIR/discoveries-archiver.sh"
-
-    assert_file_contains "$CLAUDE_SESSION_META_DIR/logs/session.log" "Archived discoveries" \
-        "Should log the rotation" || return 1
 }
 
 # ============================================================================
@@ -221,6 +88,86 @@ test_reminder_respects_cooldown() {
     output=$(echo '{}' | bash "$HOOKS_DIR/discoveries-reminder.sh")
     assert_output_contains "$output" '"approve"' \
         "Should approve during cooldown period" || return 1
+}
+
+test_reminder_no_compaction_under_budget() {
+    # Create a small discoveries file (well under 20KB)
+    {
+        echo "# Discoveries & Notes"
+        echo ""
+        echo "## Small finding"
+        echo "- Just a small note"
+    } > "$CLAUDE_SESSION_META_DIR/discoveries.md"
+    # Backdate so the stale check triggers the reminder
+    touch -t "$(date -v-10M '+%Y%m%d%H%M.%S' 2>/dev/null || date -d '10 minutes ago' '+%Y%m%d%H%M.%S' 2>/dev/null)" "$CLAUDE_SESSION_META_DIR/discoveries.md" 2>/dev/null || true
+    rm -f "$CLAUDE_SESSION_META_DIR/.discoveries-reminder-cooldown"
+
+    local output
+    output=$(echo '{}' | bash "$HOOKS_DIR/discoveries-reminder.sh")
+    assert_output_contains "$output" '"block"' \
+        "Should block (stale file triggers reminder)" || return 1
+    assert_output_not_contains "$output" "over budget" \
+        "Should NOT mention compaction when under 20KB" || return 1
+}
+
+test_reminder_compaction_over_budget() {
+    # Create a discoveries file that exceeds 20KB
+    {
+        echo "# Discoveries & Notes"
+        echo ""
+        for i in $(seq 1 60); do
+            echo "## Finding number $i — detailed technical analysis of session behavior"
+            echo ""
+            echo "- This is a detailed finding with enough text to push the file over the 20KB character budget threshold"
+            echo "- Additional technical detail: the root cause was traced to a combination of environmental factors and config"
+            echo "- Resolution: applied fix in hooks/example.sh line $i, verified with comprehensive regression test suite"
+            echo "- Related: see finding $((i - 1)) for earlier investigation of this area and related infrastructure"
+            echo "- Impact: affects all sessions using the standard hook configuration with default timeout settings"
+            echo ""
+        done
+    } > "$CLAUDE_SESSION_META_DIR/discoveries.md"
+    # Backdate so stale check triggers
+    touch -t "$(date -v-10M '+%Y%m%d%H%M.%S' 2>/dev/null || date -d '10 minutes ago' '+%Y%m%d%H%M.%S' 2>/dev/null)" "$CLAUDE_SESSION_META_DIR/discoveries.md" 2>/dev/null || true
+    rm -f "$CLAUDE_SESSION_META_DIR/.discoveries-reminder-cooldown"
+
+    local output
+    output=$(echo '{}' | bash "$HOOKS_DIR/discoveries-reminder.sh")
+    assert_output_contains "$output" '"block"' \
+        "Should block with reminder" || return 1
+    assert_output_contains "$output" "over budget" \
+        "Should mention compaction when over 20KB" || return 1
+    assert_output_contains "$output" "compact" \
+        "Should reference compaction into compact.md" || return 1
+    assert_output_not_contains "$output" "archive" \
+        "Should NOT reference archive (archive flow removed)" || return 1
+}
+
+test_reminder_uses_character_count_not_lines() {
+    # Create a file with few lines but large content (over 20KB)
+    {
+        echo "# Discoveries & Notes"
+        echo ""
+        echo "## Single massive entry"
+        # Generate a single entry with >20KB of content
+        for i in $(seq 1 200); do
+            echo "- Line $i: This is padding text to make a single entry exceed the character budget threshold without many entries"
+        done
+    } > "$CLAUDE_SESSION_META_DIR/discoveries.md"
+    touch -t "$(date -v-10M '+%Y%m%d%H%M.%S' 2>/dev/null || date -d '10 minutes ago' '+%Y%m%d%H%M.%S' 2>/dev/null)" "$CLAUDE_SESSION_META_DIR/discoveries.md" 2>/dev/null || true
+    rm -f "$CLAUDE_SESSION_META_DIR/.discoveries-reminder-cooldown"
+
+    local file_size
+    file_size=$(wc -c < "$CLAUDE_SESSION_META_DIR/discoveries.md" | tr -d ' ')
+    # Verify our test file is actually over 20KB
+    if [ "$file_size" -lt 20000 ]; then
+        echo "  FAIL: Test setup error — file is only ${file_size} bytes, need >20000"
+        return 1
+    fi
+
+    local output
+    output=$(echo '{}' | bash "$HOOKS_DIR/discoveries-reminder.sh")
+    assert_output_contains "$output" "over budget" \
+        "Should detect over-budget via character count, not line count" || return 1
 }
 
 # ============================================================================
@@ -909,19 +856,15 @@ echo "====================="
 echo ""
 
 # Discoveries archiver
-run_test test_archiver_skips_small_file
-run_test test_archiver_moves_old_entries
-run_test test_archiver_preserves_header
-run_test test_archiver_keeps_recent_entries
-run_test test_archiver_skips_outside_session
-run_test test_archiver_logs_rotation
-
 # Discoveries reminder
 run_test test_reminder_approves_outside_session
 run_test test_reminder_approves_when_recently_modified
 run_test test_reminder_blocks_when_stale
 run_test test_reminder_approves_for_subagent
 run_test test_reminder_respects_cooldown
+run_test test_reminder_no_compaction_under_budget
+run_test test_reminder_compaction_over_budget
+run_test test_reminder_uses_character_count_not_lines
 
 # Session auto-approve
 run_test test_auto_approve_allows_cs_metadata_write

@@ -43,15 +43,7 @@ Runs after any file modification (Write or Edit), providing crash recovery for a
 Runs when Claude pauses for user input:
 - Reminds to review existing entries and update `.cs/discoveries.md` if not recently modified
 - Uses 5-minute cooldown to avoid excessive reminders
-- Instructs Claude to run discoveries compaction in the background when the archive has grown significantly
-
-## discoveries-archiver.sh (PreCompact)
-
-Runs before Claude Code compresses conversation history:
-- Checks if `.cs/discoveries.md` exceeds 200 lines
-- Moves oldest entries to `.cs/discoveries.archive.md` (append-only), keeping the newest ~100 lines
-- Splits on `##` heading boundaries to avoid breaking entries mid-section
-- Logs the rotation to `.cs/logs/session.log`
+- When discoveries.md exceeds the 20KB character budget, instructs Claude to summarize old entries into `.cs/discoveries.compact.md` and trim the active file
 
 ## session-end.sh (SessionEnd)
 
@@ -122,9 +114,6 @@ The hooks are configured in `~/.claude/settings.json`:
     ],
     "Stop": [
       { "hooks": [{ "type": "command", "command": "~/.claude/hooks/discoveries-reminder.sh", "timeout": 10 }] }
-    ],
-    "PreCompact": [
-      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/discoveries-archiver.sh", "timeout": 10 }] }
     ],
     "SessionEnd": [
       { "hooks": [{ "type": "command", "command": "~/.claude/hooks/session-end.sh", "timeout": 30 }] }

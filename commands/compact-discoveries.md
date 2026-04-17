@@ -1,32 +1,37 @@
-Compact archived discoveries into a condensed summary for context-efficient session resumption.
+Compact old discoveries into a condensed summary and trim the active file.
 
 Use the Task tool to delegate this work to a subagent with `model: sonnet` and `subagent_type: general-purpose`. Pass the following prompt to the subagent:
 
 ---
 
-You are working in a cs session. Your task is to read the raw discoveries archive and produce a condensed technical summary.
+You are working in a cs session. Your task is to summarize old discoveries and trim the active file to stay within its character budget.
 
 ## Steps
 
 1. **Check if compaction is needed:**
-   - Read `.cs/discoveries.archive.md`
-   - If it doesn't exist or has fewer than 50 lines, report that there's nothing to compact and stop
+   - Read `.cs/discoveries.md`
+   - Measure the file size with `wc -c`
+   - If it's under 20,000 characters, report that there's nothing to compact and stop
 
-2. **Read the archive** and analyze all `##` entries
+2. **Read the full discoveries.md** and identify all `##` entries
 
-3. **Produce a condensed summary** with these rules:
+3. **Decide what to keep vs compact:**
+   - The most recent entries (roughly the last 10KB) stay in `discoveries.md` untouched
+   - Older entries get summarized into `.cs/discoveries.compact.md`
+
+4. **Produce a condensed summary of the older entries** with these rules:
    - Each original `##` entry becomes 1-3 bullet points capturing the key technical finding
    - Merge entries that cover the same topic into a single section
    - Drop entries that were superseded or corrected by later entries
    - Preserve actionable information: file paths, command patterns, configuration values, workarounds
    - Drop exploratory dead-ends unless they contain useful "don't do this" warnings
 
-4. **Write the result to `.cs/discoveries.compact.md`** using this format:
+5. **Update `.cs/discoveries.compact.md`** using this format:
 
 ```markdown
 # Compacted Discoveries
 
-> Auto-generated summary of discoveries.archive.md. Read the archive for full detail.
+> Condensed summary of older findings. See discoveries.md for recent entries.
 
 ## [Topic or Finding Title]
 - [Key point 1]
@@ -36,14 +41,19 @@ You are working in a cs session. Your task is to read the raw discoveries archiv
 - [Key point]
 ```
 
-5. **Report back:**
-   - How many archive entries were processed
-   - How many compacted sections were produced
-   - The line count reduction (archive lines vs compact lines)
+If `discoveries.compact.md` already exists, merge the new compacted entries into it (don't duplicate existing sections — update them if the new entries add information).
+
+6. **Trim `discoveries.md`:**
+   - Keep the `# Discoveries & Notes` header
+   - Keep only the recent entries (the ones NOT compacted)
+   - Write the trimmed file back
+
+7. **Report back:**
+   - How many entries were compacted vs kept
+   - The size reduction (before vs after in characters)
 
 ## Important
 
-- Read the ENTIRE archive before writing -- context from later entries may supersede earlier ones
-- The compact file replaces the previous version entirely (it's a full re-summary)
+- Read the ENTIRE discoveries.md before writing — context from later entries may supersede earlier ones
+- Split on `##` heading boundaries — never break an entry mid-section
 - Favor precision over brevity: a specific file path or command is more useful than a vague description
-- If `.cs/discoveries.md` (active discoveries) exists, read it too so you don't duplicate content that's still in the active file
