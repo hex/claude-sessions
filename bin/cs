@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.4.7"
+VERSION="2026.4.8"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -608,8 +608,9 @@ When resuming this session, read the following files to restore context:
 6. **.cs/artifacts/MANIFEST.json** - List of tracked artifacts
 7. **.cs/commands.md** - CLI commands discovered in prior sessions
 
-Note: When discoveries.md exceeds its character budget (~20KB), older entries
-are summarized into .cs/discoveries.compact.md to keep context lean.
+Note: When discoveries.md exceeds its size budget (default 60KB, override via
+CS_DISCOVERIES_MAX_SIZE env var), older entries are summarized into
+.cs/discoveries.compact.md to keep context lean.
 
 ## Discovered Commands
 

@@ -91,7 +91,7 @@ test_reminder_respects_cooldown() {
 }
 
 test_reminder_no_compaction_under_budget() {
-    # Create a small discoveries file (well under 20KB)
+    # Create a small discoveries file (well under default 60KB)
     {
         echo "# Discoveries & Notes"
         echo ""
@@ -107,35 +107,34 @@ test_reminder_no_compaction_under_budget() {
     assert_output_contains "$output" '"block"' \
         "Should block (stale file triggers reminder)" || return 1
     assert_output_not_contains "$output" "over budget" \
-        "Should NOT mention compaction when under 20KB" || return 1
+        "Should NOT mention compaction when under default budget" || return 1
 }
 
 test_reminder_compaction_over_budget() {
-    # Create a discoveries file that exceeds 20KB
+    # Use env var to set a small threshold for fast testing
+    export CS_DISCOVERIES_MAX_SIZE=500
+
+    # Create a discoveries file that exceeds 500 chars
     {
         echo "# Discoveries & Notes"
         echo ""
-        for i in $(seq 1 60); do
-            echo "## Finding number $i — detailed technical analysis of session behavior"
-            echo ""
-            echo "- This is a detailed finding with enough text to push the file over the 20KB character budget threshold"
-            echo "- Additional technical detail: the root cause was traced to a combination of environmental factors and config"
-            echo "- Resolution: applied fix in hooks/example.sh line $i, verified with comprehensive regression test suite"
-            echo "- Related: see finding $((i - 1)) for earlier investigation of this area and related infrastructure"
-            echo "- Impact: affects all sessions using the standard hook configuration with default timeout settings"
+        for i in $(seq 1 10); do
+            echo "## Finding number $i"
+            echo "- Detail line for finding $i with enough text to exceed the small test threshold"
             echo ""
         done
     } > "$CLAUDE_SESSION_META_DIR/discoveries.md"
-    # Backdate so stale check triggers
     touch -t "$(date -v-10M '+%Y%m%d%H%M.%S' 2>/dev/null || date -d '10 minutes ago' '+%Y%m%d%H%M.%S' 2>/dev/null)" "$CLAUDE_SESSION_META_DIR/discoveries.md" 2>/dev/null || true
     rm -f "$CLAUDE_SESSION_META_DIR/.discoveries-reminder-cooldown"
 
     local output
     output=$(echo '{}' | bash "$HOOKS_DIR/discoveries-reminder.sh")
+    unset CS_DISCOVERIES_MAX_SIZE
+
     assert_output_contains "$output" '"block"' \
         "Should block with reminder" || return 1
     assert_output_contains "$output" "over budget" \
-        "Should mention compaction when over 20KB" || return 1
+        "Should mention compaction when over budget" || return 1
     assert_output_contains "$output" "compact" \
         "Should reference compaction into compact.md" || return 1
     assert_output_not_contains "$output" "archive" \
@@ -143,31 +142,55 @@ test_reminder_compaction_over_budget() {
 }
 
 test_reminder_uses_character_count_not_lines() {
-    # Create a file with few lines but large content (over 20KB)
+    # Use env var to set a small threshold
+    export CS_DISCOVERIES_MAX_SIZE=200
+
+    # Single entry, few lines, but exceeds character threshold
     {
         echo "# Discoveries & Notes"
         echo ""
-        echo "## Single massive entry"
-        # Generate a single entry with >20KB of content
-        for i in $(seq 1 200); do
-            echo "- Line $i: This is padding text to make a single entry exceed the character budget threshold without many entries"
-        done
+        echo "## Single entry with long content"
+        echo "- This is a single bullet with enough padding text to exceed the 200-char threshold while keeping the line count very low which proves the check is byte-based not line-based"
     } > "$CLAUDE_SESSION_META_DIR/discoveries.md"
     touch -t "$(date -v-10M '+%Y%m%d%H%M.%S' 2>/dev/null || date -d '10 minutes ago' '+%Y%m%d%H%M.%S' 2>/dev/null)" "$CLAUDE_SESSION_META_DIR/discoveries.md" 2>/dev/null || true
     rm -f "$CLAUDE_SESSION_META_DIR/.discoveries-reminder-cooldown"
 
-    local file_size
-    file_size=$(wc -c < "$CLAUDE_SESSION_META_DIR/discoveries.md" | tr -d ' ')
-    # Verify our test file is actually over 20KB
-    if [ "$file_size" -lt 20000 ]; then
-        echo "  FAIL: Test setup error — file is only ${file_size} bytes, need >20000"
-        return 1
-    fi
-
     local output
     output=$(echo '{}' | bash "$HOOKS_DIR/discoveries-reminder.sh")
+    unset CS_DISCOVERIES_MAX_SIZE
+
     assert_output_contains "$output" "over budget" \
         "Should detect over-budget via character count, not line count" || return 1
+}
+
+test_reminder_env_var_overrides_default() {
+    # File is small (under default 60KB) but env var sets a tiny threshold
+    {
+        echo "# Discoveries & Notes"
+        echo ""
+        echo "## Finding"
+        echo "- Some content that is several hundred characters long which exceeds a small env-var threshold but is well under the default 60KB"
+    } > "$CLAUDE_SESSION_META_DIR/discoveries.md"
+    touch -t "$(date -v-10M '+%Y%m%d%H%M.%S' 2>/dev/null || date -d '10 minutes ago' '+%Y%m%d%H%M.%S' 2>/dev/null)" "$CLAUDE_SESSION_META_DIR/discoveries.md" 2>/dev/null || true
+    rm -f "$CLAUDE_SESSION_META_DIR/.discoveries-reminder-cooldown"
+
+    # Without env var → no over-budget message
+    local output_default
+    output_default=$(echo '{}' | bash "$HOOKS_DIR/discoveries-reminder.sh")
+    assert_output_not_contains "$output_default" "over budget" \
+        "Default 60KB threshold should NOT trigger on small file" || return 1
+
+    # Reset cooldown for second invocation
+    rm -f "$CLAUDE_SESSION_META_DIR/.discoveries-reminder-cooldown"
+
+    # With env var → over-budget message
+    export CS_DISCOVERIES_MAX_SIZE=100
+    local output_override
+    output_override=$(echo '{}' | bash "$HOOKS_DIR/discoveries-reminder.sh")
+    unset CS_DISCOVERIES_MAX_SIZE
+
+    assert_output_contains "$output_override" "over budget" \
+        "Env var override should trigger on same file" || return 1
 }
 
 # ============================================================================
@@ -865,6 +888,7 @@ run_test test_reminder_respects_cooldown
 run_test test_reminder_no_compaction_under_budget
 run_test test_reminder_compaction_over_budget
 run_test test_reminder_uses_character_count_not_lines
+run_test test_reminder_env_var_overrides_default
 
 # Session auto-approve
 run_test test_auto_approve_allows_cs_metadata_write
