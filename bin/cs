@@ -5,11 +5,12 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.4.8"
+VERSION="2026.4.9"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
 RELEASES_BASE="https://github.com/hex/claude-sessions/releases"
+CS_DISCOVERIES_DEFAULT_MAX=60000
 
 # Minisign public key for verifying signed releases
 CS_SIGN_PUBKEY="RWQvs3IVdvrS8PJs0V0gwdJGPw/x5waQ6z6iqPQm90JfpxfcsSy9b9Vo"
@@ -1021,7 +1022,6 @@ run_checkpoint() {
     esac
 }
 
-# Doctor status helpers. DOCTOR_FAIL and DOCTOR_WARN accumulate across checks.
 _doctor_ok()   { printf "  ${GREEN}[ OK ]${NC} %s\n" "$1"; }
 _doctor_warn() { printf "  ${YELLOW}[WARN]${NC} %s\n" "$1"; DOCTOR_WARN=$((DOCTOR_WARN+1)); }
 _doctor_fail() { printf "  ${RED}[FAIL]${NC} %s\n" "$1"; DOCTOR_FAIL=$((DOCTOR_FAIL+1)); }
@@ -1032,13 +1032,13 @@ _doctor_check_keychain() {
         _doctor_warn "Keychain: cs-secrets binary not found on PATH"
         return
     fi
-    local backend
-    backend=$("$script" backend 2>/dev/null | head -1 | sed 's/Storage backend: //' || true)
-    if [ -n "$backend" ]; then
-        _doctor_ok "Keychain: $backend"
-    else
+    local backend_line
+    backend_line=$("$script" backend 2>/dev/null | grep '^Storage backend:' | head -1 || true)
+    if [ -z "$backend_line" ]; then
         _doctor_fail "Keychain: cs-secrets backend check failed"
+        return
     fi
+    _doctor_ok "Keychain: ${backend_line#Storage backend: }"
 }
 
 _doctor_check_hooks_registered() {
@@ -1049,18 +1049,21 @@ _doctor_check_hooks_registered() {
         return
     fi
     if [ ! -d "$hooks_dir" ]; then
+        _doctor_warn "Hooks: directory $hooks_dir not found"
         return
     fi
-    local missing=()
-    local f
-    for f in "$hooks_dir"/*.sh; do
-        [ -e "$f" ] || continue
-        local name
-        name=$(basename "$f")
-        if ! grep -q "/$name" "$settings" 2>/dev/null; then
-            missing+=("$name")
-        fi
-    done
+    local names settings_contents missing=()
+    names=$(cd "$hooks_dir" && ls *.sh 2>/dev/null || true)
+    [ -z "$names" ] && { _doctor_warn "Hooks: no .sh files in $hooks_dir"; return; }
+    settings_contents=$(cat "$settings")
+    local name
+    while IFS= read -r name; do
+        [ -z "$name" ] && continue
+        case "$settings_contents" in
+            *"/$name"*) ;;
+            *) missing+=("$name") ;;
+        esac
+    done <<< "$names"
     if [ ${#missing[@]} -eq 0 ]; then
         _doctor_ok "Hooks: all registered in settings.json"
     else
@@ -1099,33 +1102,37 @@ _doctor_check_git_sync() {
         _doctor_warn "Git: no origin remote (local-only session)"
         return
     fi
-    local branch ahead behind
+    local branch
     branch=$(git -C "$dir" branch --show-current 2>/dev/null || echo "")
     if [ -z "$branch" ]; then
         _doctor_warn "Git: detached HEAD"
         return
     fi
-    ahead=$(git -C "$dir" rev-list --count "origin/$branch..HEAD" 2>/dev/null || echo "?")
-    behind=$(git -C "$dir" rev-list --count "HEAD..origin/$branch" 2>/dev/null || echo "?")
-    if [ "$ahead" = "?" ] || [ "$behind" = "?" ]; then
-        _doctor_warn "Git: origin/$branch not tracked locally (try: cs -sync)"
-    elif [ "$ahead" = "0" ] && [ "$behind" = "0" ]; then
-        _doctor_ok "Git: in sync with origin/$branch"
+    local counts ahead behind
+    counts=$(git -C "$dir" rev-list --left-right --count '@{upstream}...HEAD' 2>/dev/null || true)
+    if [ -z "$counts" ]; then
+        _doctor_warn "Git: $branch has no tracked upstream (try: cs -sync)"
+        return
+    fi
+    behind=$(echo "$counts" | cut -f1)
+    ahead=$(echo "$counts" | cut -f2)
+    if [ "$ahead" = "0" ] && [ "$behind" = "0" ]; then
+        _doctor_ok "Git: $branch in sync with upstream"
     else
-        _doctor_warn "Git: $ahead ahead, $behind behind origin/$branch"
+        _doctor_warn "Git: $branch is $ahead ahead, $behind behind upstream"
     fi
 }
 
 _doctor_check_shadow_ref() {
     local dir="${CLAUDE_SESSION_DIR:-$PWD}"
     if ! git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
+        _doctor_warn "Shadow ref: session directory is not a git repo"
         return
     fi
     local shadow_sha
     shadow_sha=$(git -C "$dir" show-ref --verify refs/cs/auto 2>/dev/null | awk '{print $1}' || true)
     local has_changes=0
-    git -C "$dir" diff --quiet 2>/dev/null || has_changes=1
-    git -C "$dir" diff --cached --quiet 2>/dev/null || has_changes=1
+    git -C "$dir" diff --quiet HEAD 2>/dev/null || has_changes=1
     if [ "$has_changes" = "1" ] && [ -z "$shadow_sha" ]; then
         _doctor_warn "Shadow ref: uncommitted changes but no refs/cs/auto (autosave may be broken)"
     elif [ -n "$shadow_sha" ]; then
@@ -1147,7 +1154,7 @@ _doctor_check_discoveries_size() {
     fi
     local size max
     size=$(wc -c < "$file" | tr -d ' ')
-    max="${CS_DISCOVERIES_MAX_SIZE:-60000}"
+    max="${CS_DISCOVERIES_MAX_SIZE:-$CS_DISCOVERIES_DEFAULT_MAX}"
     if [ "$size" -gt "$max" ]; then
         _doctor_warn "Discoveries: ${size}B over budget (${max}B) - consider /compact-discoveries"
     else
@@ -1168,12 +1175,9 @@ _doctor_check_auto_memory() {
     fi
 }
 
-# Run health checks covering install state, hooks, and (if inside a session) session health.
-# Global checks always run; session-scoped checks only when CLAUDE_SESSION_META_DIR is set.
-# Exits non-zero when any check FAILs so scripts can chain on it.
 run_doctor() {
-    DOCTOR_FAIL=0
-    DOCTOR_WARN=0
+    local DOCTOR_FAIL=0
+    local DOCTOR_WARN=0
 
     echo "cs doctor - running health checks"
     echo ""
