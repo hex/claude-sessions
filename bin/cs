@@ -209,6 +209,7 @@ Commands:
   -checkpoint "<label>"  Save labelled state snapshot (run from inside a session)
   -checkpoint list    List checkpoints for current session
   -checkpoint show <name>  Print a specific checkpoint
+  -doctor, -diag      Run health checks (Keychain, hooks, git sync, discoveries size)
   -list, -ls          List all sessions (shows remote location)
   -adopt <name>       Adopt current directory as a cs session
   -remote <cmd>       Manage remote hosts
@@ -1018,6 +1019,186 @@ run_checkpoint() {
             save_checkpoint "$@"
             ;;
     esac
+}
+
+# Doctor status helpers. DOCTOR_FAIL and DOCTOR_WARN accumulate across checks.
+_doctor_ok()   { printf "  ${GREEN}[ OK ]${NC} %s\n" "$1"; }
+_doctor_warn() { printf "  ${YELLOW}[WARN]${NC} %s\n" "$1"; DOCTOR_WARN=$((DOCTOR_WARN+1)); }
+_doctor_fail() { printf "  ${RED}[FAIL]${NC} %s\n" "$1"; DOCTOR_FAIL=$((DOCTOR_FAIL+1)); }
+
+_doctor_check_keychain() {
+    local script
+    if ! script=$(find_secrets_script); then
+        _doctor_warn "Keychain: cs-secrets binary not found on PATH"
+        return
+    fi
+    local backend
+    backend=$("$script" backend 2>/dev/null | head -1 | sed 's/Storage backend: //' || true)
+    if [ -n "$backend" ]; then
+        _doctor_ok "Keychain: $backend"
+    else
+        _doctor_fail "Keychain: cs-secrets backend check failed"
+    fi
+}
+
+_doctor_check_hooks_registered() {
+    local hooks_dir="${CS_HOOKS_DIR:-$HOME/.claude/hooks}"
+    local settings="$HOME/.claude/settings.json"
+    if [ ! -f "$settings" ]; then
+        _doctor_warn "Hooks: $settings not found (cs may not be installed via install.sh)"
+        return
+    fi
+    if [ ! -d "$hooks_dir" ]; then
+        return
+    fi
+    local missing=()
+    local f
+    for f in "$hooks_dir"/*.sh; do
+        [ -e "$f" ] || continue
+        local name
+        name=$(basename "$f")
+        if ! grep -q "/$name" "$settings" 2>/dev/null; then
+            missing+=("$name")
+        fi
+    done
+    if [ ${#missing[@]} -eq 0 ]; then
+        _doctor_ok "Hooks: all registered in settings.json"
+    else
+        _doctor_fail "Hooks: missing in settings.json: ${missing[*]}"
+    fi
+}
+
+_doctor_check_hook_files_executable() {
+    local hooks_dir="${CS_HOOKS_DIR:-$HOME/.claude/hooks}"
+    if [ ! -d "$hooks_dir" ]; then
+        _doctor_warn "Hooks: directory $hooks_dir not found"
+        return
+    fi
+    local non_exec=()
+    local f
+    for f in "$hooks_dir"/*.sh; do
+        [ -e "$f" ] || continue
+        if [ ! -x "$f" ]; then
+            non_exec+=("$(basename "$f")")
+        fi
+    done
+    if [ ${#non_exec[@]} -eq 0 ]; then
+        _doctor_ok "Hooks: all files executable"
+    else
+        _doctor_fail "Hooks: not executable: ${non_exec[*]}"
+    fi
+}
+
+_doctor_check_git_sync() {
+    local dir="${CLAUDE_SESSION_DIR:-$PWD}"
+    if ! git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
+        _doctor_warn "Git: session directory is not a git repo"
+        return
+    fi
+    if ! git -C "$dir" remote get-url origin >/dev/null 2>&1; then
+        _doctor_warn "Git: no origin remote (local-only session)"
+        return
+    fi
+    local branch ahead behind
+    branch=$(git -C "$dir" branch --show-current 2>/dev/null || echo "")
+    if [ -z "$branch" ]; then
+        _doctor_warn "Git: detached HEAD"
+        return
+    fi
+    ahead=$(git -C "$dir" rev-list --count "origin/$branch..HEAD" 2>/dev/null || echo "?")
+    behind=$(git -C "$dir" rev-list --count "HEAD..origin/$branch" 2>/dev/null || echo "?")
+    if [ "$ahead" = "?" ] || [ "$behind" = "?" ]; then
+        _doctor_warn "Git: origin/$branch not tracked locally (try: cs -sync)"
+    elif [ "$ahead" = "0" ] && [ "$behind" = "0" ]; then
+        _doctor_ok "Git: in sync with origin/$branch"
+    else
+        _doctor_warn "Git: $ahead ahead, $behind behind origin/$branch"
+    fi
+}
+
+_doctor_check_shadow_ref() {
+    local dir="${CLAUDE_SESSION_DIR:-$PWD}"
+    if ! git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
+        return
+    fi
+    local shadow_sha
+    shadow_sha=$(git -C "$dir" show-ref --verify refs/cs/auto 2>/dev/null | awk '{print $1}' || true)
+    local has_changes=0
+    git -C "$dir" diff --quiet 2>/dev/null || has_changes=1
+    git -C "$dir" diff --cached --quiet 2>/dev/null || has_changes=1
+    if [ "$has_changes" = "1" ] && [ -z "$shadow_sha" ]; then
+        _doctor_warn "Shadow ref: uncommitted changes but no refs/cs/auto (autosave may be broken)"
+    elif [ -n "$shadow_sha" ]; then
+        local ts now age
+        ts=$(git -C "$dir" log -1 --format=%ct "$shadow_sha" 2>/dev/null || echo 0)
+        now=$(date +%s)
+        age=$((now - ts))
+        _doctor_ok "Shadow ref: refs/cs/auto present (${age}s old)"
+    else
+        _doctor_ok "Shadow ref: no uncommitted work to snapshot"
+    fi
+}
+
+_doctor_check_discoveries_size() {
+    local file="$CLAUDE_SESSION_META_DIR/discoveries.md"
+    if [ ! -f "$file" ]; then
+        _doctor_warn "Discoveries: $file not found"
+        return
+    fi
+    local size max
+    size=$(wc -c < "$file" | tr -d ' ')
+    max="${CS_DISCOVERIES_MAX_SIZE:-60000}"
+    if [ "$size" -gt "$max" ]; then
+        _doctor_warn "Discoveries: ${size}B over budget (${max}B) - consider /compact-discoveries"
+    else
+        _doctor_ok "Discoveries: ${size}B / ${max}B budget"
+    fi
+}
+
+_doctor_check_auto_memory() {
+    local dir="$CLAUDE_SESSION_META_DIR/memory"
+    if [ ! -d "$dir" ]; then
+        _doctor_warn "Auto-memory: $dir does not exist"
+        return
+    fi
+    if [ -w "$dir" ]; then
+        _doctor_ok "Auto-memory: $dir writable"
+    else
+        _doctor_fail "Auto-memory: $dir not writable"
+    fi
+}
+
+# Run health checks covering install state, hooks, and (if inside a session) session health.
+# Global checks always run; session-scoped checks only when CLAUDE_SESSION_META_DIR is set.
+# Exits non-zero when any check FAILs so scripts can chain on it.
+run_doctor() {
+    DOCTOR_FAIL=0
+    DOCTOR_WARN=0
+
+    echo "cs doctor - running health checks"
+    echo ""
+
+    _doctor_check_keychain
+    _doctor_check_hooks_registered
+    _doctor_check_hook_files_executable
+
+    if [ -n "${CLAUDE_SESSION_META_DIR:-}" ] && [ -d "${CLAUDE_SESSION_META_DIR:-}" ]; then
+        _doctor_check_git_sync
+        _doctor_check_shadow_ref
+        _doctor_check_discoveries_size
+        _doctor_check_auto_memory
+    fi
+
+    echo ""
+    if [ "$DOCTOR_FAIL" -gt 0 ]; then
+        echo -e "${RED}Failed: $DOCTOR_FAIL  Warnings: $DOCTOR_WARN${NC}"
+        return 1
+    elif [ "$DOCTOR_WARN" -gt 0 ]; then
+        echo -e "${YELLOW}Complete with $DOCTOR_WARN warning(s).${NC}"
+    else
+        echo -e "${GREEN}All checks OK.${NC}"
+    fi
+    return 0
 }
 
 # Search across all sessions' metadata
@@ -2815,6 +2996,10 @@ main() {
             shift
             run_checkpoint "$@"
             return 0
+            ;;
+        -doctor|-diag)
+            run_doctor
+            return $?
             ;;
         -remote)
             shift
