@@ -7,6 +7,7 @@ allowed_tools:
   - Bash
   - Task
   - AskUserQuestion
+  - Skill
 ---
 
 Release a new version of cs (claude-sessions).
@@ -76,13 +77,21 @@ Check these files for accuracy against the current code:
 
 **Fix any issues found** - update the documentation to match current code.
 
-### 4. Update Changelog
+### 4. Simplify Code
 
-CHANGELOG.md exists at the repo root. After generating release notes (Step 6) and getting approval, insert the approved notes as a new `## X.Y.Z` section at the top of the file (after the header, before the previous version's section). Use the version number WITHOUT the `v` prefix to match existing entries. Include all the same content as the GitHub Release notes.
+Invoke the `/simplify` skill via the Skill tool to review all pending changes for reuse, quality, and efficiency. This catches duplicated logic, hacky patterns, and inefficiencies before they ship.
 
-The CHANGELOG entry is committed as part of the release commit in Step 7.
+The skill fans out three parallel review agents (reuse, quality, efficiency) over the diff and auto-applies fixes it finds. The subsequent test run (Step 6) validates that nothing was broken.
 
-### 5. Run Tests
+If `/simplify` reports an empty diff, verify this is intentional — a release with zero code changes is unusual unless it's a pure docs/changelog release.
+
+### 5. Update Changelog
+
+CHANGELOG.md exists at the repo root. After generating release notes (Step 7) and getting approval, insert the approved notes as a new `## X.Y.Z` section at the top of the file (after the header, before the previous version's section). Use the version number WITHOUT the `v` prefix to match existing entries. Include all the same content as the GitHub Release notes.
+
+The CHANGELOG entry is committed as part of the release commit in Step 8.
+
+### 6. Run Tests
 
 Run the full test suite to verify nothing is broken before releasing:
 
@@ -92,7 +101,7 @@ bash tests/test_*.sh
 
 Stop immediately if any tests fail. Do not proceed with the release until all tests pass.
 
-### 6. Generate Release Notes and Get Approval
+### 7. Generate Release Notes and Get Approval
 
 Generate release notes by looking at what changed since the last release:
 
@@ -122,7 +131,7 @@ Show the draft to the user via **AskUserQuestion** with options:
 
 Do NOT proceed to commit until the user approves.
 
-### 7. Commit and Push
+### 8. Commit and Push
 
 ```bash
 # Run git status first to verify what's being included
@@ -138,7 +147,7 @@ git commit -m "Release vX.Y.Z"
 git push
 ```
 
-### 8. Create GitHub Release
+### 9. Create GitHub Release
 
 Create a GitHub release with the approved release notes using the `gh` CLI:
 
