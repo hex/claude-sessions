@@ -1076,4 +1076,99 @@ test_retired_hooks_strip_preserves_coexisting_hook() {
 run_test test_retired_hooks_strip_settings_json
 run_test test_retired_hooks_strip_preserves_coexisting_hook
 
+# ============================================================================
+# install.sh: files-context.sh registration under PreToolUse:Read
+# (spec tests — embed the exact jq block install.sh must use)
+# ============================================================================
+
+test_install_registers_files_context_on_read() {
+    local settings='{}'
+    local path="$HOME/.claude/hooks/files-context.sh"
+    local tilde="~/.claude/hooks/files-context.sh"
+    local result
+    result=$(echo "$settings" | jq --arg path "$path" --arg tilde "$tilde" '
+        .hooks.PreToolUse = ((.hooks.PreToolUse // []) | map(
+            select((.matcher == "Read" and (.hooks | any(.command == $path or .command == $tilde))) | not)
+        )) + [{
+            "matcher": "Read",
+            "hooks": [{
+                "type": "command",
+                "command": $tilde,
+                "timeout": 10
+            }]
+        }]
+    ')
+    local matcher
+    matcher=$(echo "$result" | jq -r '.hooks.PreToolUse[-1].matcher')
+    if [ "$matcher" != "Read" ]; then
+        echo "  FAIL: expected matcher 'Read', got '$matcher'"
+        echo "  $result"
+        return 1
+    fi
+    local cmd
+    cmd=$(echo "$result" | jq -r '.hooks.PreToolUse[-1].hooks[0].command')
+    if [ "$cmd" != "$tilde" ]; then
+        echo "  FAIL: expected command '$tilde', got '$cmd'"
+        return 1
+    fi
+}
+
+test_install_dedups_files_context_on_reinstall() {
+    local path="$HOME/.claude/hooks/files-context.sh"
+    local tilde="~/.claude/hooks/files-context.sh"
+    local settings='{"hooks":{"PreToolUse":[{"matcher":"Read","hooks":[{"type":"command","command":"~/.claude/hooks/files-context.sh","timeout":10}]}]}}'
+    local result
+    result=$(echo "$settings" | jq --arg path "$path" --arg tilde "$tilde" '
+        .hooks.PreToolUse = ((.hooks.PreToolUse // []) | map(
+            select((.matcher == "Read" and (.hooks | any(.command == $path or .command == $tilde))) | not)
+        )) + [{
+            "matcher": "Read",
+            "hooks": [{
+                "type": "command",
+                "command": $tilde,
+                "timeout": 10
+            }]
+        }]
+    ')
+    local count
+    count=$(echo "$result" | jq '[.hooks.PreToolUse[] | select(.matcher == "Read")] | length')
+    if [ "$count" != "1" ]; then
+        echo "  FAIL: expected 1 Read matcher block after reinstall, got $count"
+        echo "  $result"
+        return 1
+    fi
+}
+
+test_install_preserves_write_matcher_when_adding_read() {
+    local path="$HOME/.claude/hooks/files-context.sh"
+    local tilde="~/.claude/hooks/files-context.sh"
+    local settings='{"hooks":{"PreToolUse":[{"matcher":"Write","hooks":[{"type":"command","command":"~/.claude/hooks/artifact-tracker.sh","timeout":10}]}]}}'
+    local result
+    result=$(echo "$settings" | jq --arg path "$path" --arg tilde "$tilde" '
+        .hooks.PreToolUse = ((.hooks.PreToolUse // []) | map(
+            select((.matcher == "Read" and (.hooks | any(.command == $path or .command == $tilde))) | not)
+        )) + [{
+            "matcher": "Read",
+            "hooks": [{
+                "type": "command",
+                "command": $tilde,
+                "timeout": 10
+            }]
+        }]
+    ')
+    if ! echo "$result" | jq -e '.hooks.PreToolUse[] | select(.matcher == "Write")' >/dev/null 2>&1; then
+        echo "  FAIL: Write matcher block was removed"
+        echo "  $result"
+        return 1
+    fi
+    if ! echo "$result" | jq -e '.hooks.PreToolUse[] | select(.matcher == "Read")' >/dev/null 2>&1; then
+        echo "  FAIL: Read matcher block was not added"
+        return 1
+    fi
+}
+
+run_test test_install_registers_files_context_on_read
+run_test test_install_dedups_files_context_on_reinstall
+run_test test_install_preserves_write_matcher_when_adding_read
+
 report_results
