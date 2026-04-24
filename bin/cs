@@ -132,6 +132,12 @@ _color_from_name() {
 # Uses standard xterm escape sequences (works in iTerm2, Terminal.app, Ghostty, Alacritty, WezTerm, etc.)
 # Also sets tmux window name when running inside tmux.
 set_tab_title() {
+    # Skip when stdout is not a TTY (tests, piped output) — otherwise the OSC 0
+    # escape sequence still reaches the parent terminal but cs's `exec` into claude
+    # bypasses the EXIT trap that would normally call reset_tab_title, leaving the
+    # title stuck (e.g., "cs: test-session" after running the test suite).
+    [ -t 1 ] || return 0
+
     local title="$1"
     local color="${2:-}"  # optional: "blue", r,g,b values, or "auto:name" to hash from name
     local outer_term
@@ -176,6 +182,9 @@ set_tab_title() {
 
 # Reset terminal tab title and color to defaults
 reset_tab_title() {
+    # Symmetric with set_tab_title: skip when not on a TTY
+    [ -t 1 ] || return 0
+
     # Reset title (empty = let shell/prompt set its own)
     printf '\033]0;\007'
 
