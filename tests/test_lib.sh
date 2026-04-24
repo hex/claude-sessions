@@ -81,7 +81,7 @@ assert_eq() {
 }
 
 assert_exists() {
-    local path="$1" msg="${2:-$path should exist}"
+    local path="$1"; local msg="${2:-$path should exist}"
     if [[ ! -e "$path" ]]; then
         echo "  FAIL: $msg (path does not exist: $path)"
         return 1
@@ -89,7 +89,7 @@ assert_exists() {
 }
 
 assert_not_exists() {
-    local path="$1" msg="${2:-$path should not exist}"
+    local path="$1"; local msg="${2:-$path should not exist}"
     if [[ -e "$path" ]]; then
         echo "  FAIL: $msg (path exists: $path)"
         return 1
@@ -97,7 +97,7 @@ assert_not_exists() {
 }
 
 assert_dir() {
-    local path="$1" msg="${2:-$path should be a directory}"
+    local path="$1"; local msg="${2:-$path should be a directory}"
     if [[ ! -d "$path" ]]; then
         echo "  FAIL: $msg (not a directory: $path)"
         return 1
@@ -105,7 +105,7 @@ assert_dir() {
 }
 
 assert_symlink() {
-    local path="$1" msg="${2:-$path should be a symlink}"
+    local path="$1"; local msg="${2:-$path should be a symlink}"
     if [[ ! -L "$path" ]]; then
         echo "  FAIL: $msg (not a symlink: $path)"
         return 1
@@ -113,7 +113,7 @@ assert_symlink() {
 }
 
 assert_file_exists() {
-    local path="$1" msg="${2:-$path should be a file}"
+    local path="$1"; local msg="${2:-$path should be a file}"
     if [[ ! -f "$path" ]]; then
         echo "  FAIL: $msg (not a file: $path)"
         return 1
@@ -121,7 +121,7 @@ assert_file_exists() {
 }
 
 assert_file_not_exists() {
-    local path="$1" msg="${2:-$path should not exist}"
+    local path="$1"; local msg="${2:-$path should not exist}"
     if [[ -f "$path" ]]; then
         echo "  FAIL: $msg (file exists: $path)"
         return 1
