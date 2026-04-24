@@ -93,6 +93,8 @@ HOOK_FILES_CONTEXT_URL="${REPO_URL}/hooks/files-context.sh"
 # When retiring a hook in a release, add its filename here.
 RETIRED_HOOKS=(
     discoveries-archiver.sh   # retired in v2026.4.7 (archive flow replaced by size-budget compaction)
+    aboutme-prereader.sh      # retired: source-file ABOUTME-header nudge experiment, superseded by files.md pre-read hook
+    gotcha-prewriter.sh       # retired: brief pre-write gotcha-surfacing experiment; approach was rethought
 )
 
 # Command URLs for web install
