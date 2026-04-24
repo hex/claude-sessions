@@ -49,4 +49,28 @@ TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 
 echo "- [$TIMESTAMP] $TOOL_NAME: $FILE_PATH" >> "$CHANGES_MD"
 
+# Incrementally refresh files.md token estimate when the target is indexed.
+# Does not create or append new entries — session-start.sh seeds the index.
+FILES_MD="$META_DIR/files.md"
+if [ -f "$FILES_MD" ] && [ -f "$FILE_PATH" ]; then
+    SESSION_DIR_NOSLASH="${SESSION_DIR%/}"
+    REL="${FILE_PATH#$SESSION_DIR_NOSLASH/}"
+    if [ "$REL" != "$FILE_PATH" ] && grep -Fxq "## $REL" "$FILES_MD"; then
+        BYTES=$(wc -c < "$FILE_PATH" 2>/dev/null | tr -d ' ')
+        [ -z "$BYTES" ] && BYTES=0
+        TOKENS=$(awk -v b="$BYTES" 'BEGIN { printf "%d", b / 3.75 + 0.5 }')
+        [ "$TOKENS" = "0" ] && TOKENS=1
+        TODAY=$(date '+%Y-%m-%d')
+        NEW_META="~$TOKENS tokens -- updated $TODAY"
+        FILES_TMP="$FILES_MD.tmp.$$"
+        awk -v target="$REL" -v newmeta="$NEW_META" '
+            BEGIN { in_target = 0 }
+            $0 == "## " target { in_target = 1; print; next }
+            in_target && /^~[0-9]/ { print newmeta; in_target = 0; next }
+            in_target && /^## / { print newmeta; print ""; in_target = 0 }
+            { print }
+        ' "$FILES_MD" > "$FILES_TMP" && mv "$FILES_TMP" "$FILES_MD"
+    fi
+fi
+
 exit 0
