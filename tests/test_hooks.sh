@@ -939,4 +939,69 @@ run_test test_session_end_sets_updated_timestamp
 run_test test_session_end_generates_index_with_many_changes
 run_test test_session_end_updates_existing_timestamp
 
+# ============================================================================
+# Retired-hooks cleanup (install.sh + run_uninstall)
+# ============================================================================
+
+test_retired_hooks_strip_settings_json() {
+    # Settings.json with one retired hook (PreCompact only) and one current hook (PostToolUse)
+    local settings='{"hooks":{"PreCompact":[{"matcher":"","hooks":[{"type":"command","command":"~/.claude/hooks/discoveries-archiver.sh","timeout":10}]}],"PostToolUse":[{"matcher":"","hooks":[{"type":"command","command":"~/.claude/hooks/changes-tracker.sh","timeout":10}]}]}}'
+    local p="$HOME/.claude/hooks/discoveries-archiver.sh"
+    local t="~/.claude/hooks/discoveries-archiver.sh"
+    local stripped
+    stripped=$(echo "$settings" | jq --arg p "$p" --arg t "$t" '
+        if .hooks then
+            .hooks |= with_entries(
+                .value |= (
+                    map(.hooks |= map(select(.command != $p and .command != $t)))
+                    | map(select(.hooks | length > 0))
+                )
+            )
+            | .hooks |= with_entries(select(.value | length > 0))
+            | if .hooks == {} then del(.hooks) else . end
+        else . end
+    ')
+    if echo "$stripped" | jq -e '.hooks.PreCompact' >/dev/null 2>&1; then
+        echo "  FAIL: PreCompact event should be empty/gone after stripping its only (retired) hook"
+        echo "  got: $stripped"
+        return 1
+    fi
+    if ! echo "$stripped" | jq -e '.hooks.PostToolUse[0].hooks[0].command' >/dev/null 2>&1; then
+        echo "  FAIL: PostToolUse should still have its (current) hook after stripping unrelated retired"
+        return 1
+    fi
+}
+
+test_retired_hooks_strip_preserves_coexisting_hook() {
+    # Two hooks under SAME event — one retired, one current. Only the retired should be stripped.
+    local settings='{"hooks":{"PostToolUse":[{"matcher":"","hooks":[{"type":"command","command":"~/.claude/hooks/discoveries-archiver.sh","timeout":10},{"type":"command","command":"~/.claude/hooks/changes-tracker.sh","timeout":10}]}]}}'
+    local p="$HOME/.claude/hooks/discoveries-archiver.sh"
+    local t="~/.claude/hooks/discoveries-archiver.sh"
+    local stripped
+    stripped=$(echo "$settings" | jq --arg p "$p" --arg t "$t" '
+        if .hooks then
+            .hooks |= with_entries(
+                .value |= (
+                    map(.hooks |= map(select(.command != $p and .command != $t)))
+                    | map(select(.hooks | length > 0))
+                )
+            )
+        else . end
+    ')
+    local remaining_count
+    remaining_count=$(echo "$stripped" | jq '.hooks.PostToolUse[0].hooks | length')
+    if [ "$remaining_count" != "1" ]; then
+        echo "  FAIL: expected 1 hook to remain in PostToolUse[0], got $remaining_count"
+        echo "  $stripped"
+        return 1
+    fi
+    if ! echo "$stripped" | jq -e '.hooks.PostToolUse[0].hooks[] | select(.command | contains("changes-tracker"))' >/dev/null 2>&1; then
+        echo "  FAIL: changes-tracker entry should remain"
+        return 1
+    fi
+}
+
+run_test test_retired_hooks_strip_settings_json
+run_test test_retired_hooks_strip_preserves_coexisting_hook
+
 report_results

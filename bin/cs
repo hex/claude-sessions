@@ -12,6 +12,13 @@ REPO_URL="https://github.com/hex/claude-sessions"
 RELEASES_BASE="https://github.com/hex/claude-sessions/releases"
 CS_DISCOVERIES_DEFAULT_MAX=60000
 
+# Hooks retired in past versions but possibly still installed from older cs versions.
+# install.sh and run_uninstall both clean these up. KEEP IN SYNC WITH install.sh's RETIRED_HOOKS.
+# When retiring a hook in a release, add its filename here.
+RETIRED_HOOKS=(
+    discoveries-archiver.sh   # retired in v2026.4.7 (archive flow replaced by size-budget compaction)
+)
+
 # Minisign public key for verifying signed releases
 CS_SIGN_PUBKEY="RWQvs3IVdvrS8PJs0V0gwdJGPw/x5waQ6z6iqPQm90JfpxfcsSy9b9Vo"
 # Colors - Claude warm palette (rust → orange → gold)
@@ -2657,6 +2664,15 @@ run_uninstall() {
         fi
     done
 
+    # Remove retired hook files left behind from older cs versions
+    local retired
+    for retired in "${RETIRED_HOOKS[@]}"; do
+        if [ -f "$hooks_dir/$retired" ]; then
+            rm "$hooks_dir/$retired"
+            info "Removed retired $hooks_dir/$retired"
+        fi
+    done
+
     # Remove commands
     for cmd in summary.md compact-discoveries.md checkpoint.md; do
         if [ -f "$commands_dir/$cmd" ]; then
@@ -2777,6 +2793,24 @@ run_uninstall() {
                 .hooks.PostToolUse = [.hooks.PostToolUse[] | select(.hooks | all(.command != $path))]
             else . end
         ')
+
+        # Strip retired hooks from any event in settings.json (event-agnostic since
+        # we don't know which event the old version registered them under).
+        local retired_settings_path retired_settings_tilde
+        for retired in "${RETIRED_HOOKS[@]}"; do
+            retired_settings_path="$hooks_dir/$retired"
+            retired_settings_tilde="~/.claude/hooks/$retired"
+            settings=$(echo "$settings" | jq --arg p "$retired_settings_path" --arg t "$retired_settings_tilde" '
+                if .hooks then
+                    .hooks |= with_entries(
+                        .value |= (
+                            map(.hooks |= map(select(.command != $p and .command != $t)))
+                            | map(select(.hooks | length > 0))
+                        )
+                    )
+                else . end
+            ')
+        done
 
         # Clean up empty hook arrays
         settings=$(echo "$settings" | jq '

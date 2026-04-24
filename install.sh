@@ -86,6 +86,13 @@ HOOK_SESSION_AUTO_APPROVE_URL="${REPO_URL}/hooks/session-auto-approve.sh"
 HOOK_COMMAND_TRACKER_URL="${REPO_URL}/hooks/command-tracker.sh"
 HOOK_BASH_LOGGER_URL="${REPO_URL}/hooks/bash-logger.sh"
 
+# Hooks retired in past versions but possibly still installed from older cs versions.
+# install.sh and bin/cs run_uninstall both clean these up. KEEP THIS LIST IN SYNC WITH bin/cs.
+# When retiring a hook in a release, add its filename here.
+RETIRED_HOOKS=(
+    discoveries-archiver.sh   # retired in v2026.4.7 (archive flow replaced by size-budget compaction)
+)
+
 # Command URLs for web install
 COMMAND_SUMMARY_URL="${REPO_URL}/commands/summary.md"
 COMMAND_COMPACT_DISCOVERIES_URL="${REPO_URL}/commands/compact-discoveries.md"
@@ -220,6 +227,15 @@ fi
 # Install hooks
 installed "12 hooks" "$HOOKS_DIR/"
 mkdir -p "$HOOKS_DIR"
+
+# Remove any retired hook files that earlier cs versions installed but no longer ship.
+# Settings.json entries are stripped further below.
+for retired in "${RETIRED_HOOKS[@]}"; do
+    if [ -f "$HOOKS_DIR/$retired" ]; then
+        rm "$HOOKS_DIR/$retired"
+        info "  Removed retired hook: $HOOKS_DIR/$retired"
+    fi
+done
 
 if [ "$INSTALL_METHOD" = "local" ]; then
     # Install from local clone
@@ -374,6 +390,25 @@ else
     SESSION_AUTO_APPROVE_TILDE="~/.claude/hooks/session-auto-approve.sh"
     COMMAND_TRACKER_TILDE="~/.claude/hooks/command-tracker.sh"
     BASH_LOGGER_TILDE="~/.claude/hooks/bash-logger.sh"
+
+    # Strip retired hooks from any event in settings.json (event-agnostic since
+    # we don't know which event the old version registered them under).
+    for retired in "${RETIRED_HOOKS[@]}"; do
+        retired_path="$HOME/.claude/hooks/$retired"
+        retired_tilde="~/.claude/hooks/$retired"
+        SETTINGS=$(echo "$SETTINGS" | jq --arg p "$retired_path" --arg t "$retired_tilde" '
+            if .hooks then
+                .hooks |= with_entries(
+                    .value |= (
+                        map(.hooks |= map(select(.command != $p and .command != $t)))
+                        | map(select(.hooks | length > 0))
+                    )
+                )
+                | .hooks |= with_entries(select(.value | length > 0))
+                | if .hooks == {} then del(.hooks) else . end
+            else . end
+        ')
+    done
 
     # Merge hooks: remove existing cs hooks (both path forms), then add ours
     # This prevents duplicates on reinstall while preserving other hooks
