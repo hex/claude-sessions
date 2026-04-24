@@ -125,6 +125,18 @@ if [ -d "$SESSION_DIR/.git" ]; then
     fi
 fi
 
+# Initial file-index scan — populates .cs/files.md on first run of a session.
+# Skip when already present: changes-tracker.sh keeps the index incrementally
+# current during the session. Runs in background so it doesn't block startup.
+FILES_SCAN_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/files-scan.sh"
+if [ ! -f "$META_DIR/files.md" ] && [ -x "$FILES_SCAN_SCRIPT" ]; then
+    if [ "${CS_TEST_SYNC:-}" = "1" ]; then
+        "$FILES_SCAN_SCRIPT" "$SESSION_DIR" > /dev/null 2>&1 || true
+    else
+        "$FILES_SCAN_SCRIPT" "$SESSION_DIR" > /dev/null 2>&1 &
+    fi
+fi
+
 fi # end startup/resume guard
 
 # Export environment variables for the session via CLAUDE_ENV_FILE

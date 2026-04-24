@@ -581,6 +581,75 @@ test_session_start_skips_siblings_on_startup() {
 }
 
 # ============================================================================
+# session-start.sh: files.md initial scan trigger
+# ============================================================================
+
+test_session_start_scan_creates_files_md() {
+    session_start_setup
+
+    export CS_TEST_SYNC=1
+    echo '{"session_id":"t","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>&1
+    unset CS_TEST_SYNC
+
+    if [ ! -f "$CLAUDE_SESSION_META_DIR/files.md" ]; then
+        echo "  FAIL: session-start should create files.md on startup"
+        session_start_teardown
+        return 1
+    fi
+    if ! grep -q "^## README.md" "$CLAUDE_SESSION_META_DIR/files.md"; then
+        echo "  FAIL: files.md should index README.md"
+        session_start_teardown
+        return 1
+    fi
+
+    session_start_teardown
+}
+
+test_session_start_scan_preserves_existing_files_md() {
+    session_start_setup
+
+    cat > "$CLAUDE_SESSION_META_DIR/files.md" << 'EOF'
+# Files
+
+## sentinel-path
+Hand-written description preserved.
+~999 tokens -- updated 2026-04-24
+
+EOF
+
+    export CS_TEST_SYNC=1
+    echo '{"session_id":"t","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>&1
+    unset CS_TEST_SYNC
+
+    if ! grep -q "Hand-written description preserved" "$CLAUDE_SESSION_META_DIR/files.md"; then
+        echo "  FAIL: session-start should not overwrite existing files.md"
+        session_start_teardown
+        return 1
+    fi
+
+    session_start_teardown
+}
+
+test_session_start_scan_skips_on_clear() {
+    session_start_setup
+
+    export CS_TEST_SYNC=1
+    echo '{"session_id":"t","source":"clear","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>&1
+    unset CS_TEST_SYNC
+
+    if [ -f "$CLAUDE_SESSION_META_DIR/files.md" ]; then
+        echo "  FAIL: session-start should not scan on source=clear"
+        session_start_teardown
+        return 1
+    fi
+
+    session_start_teardown
+}
+
+# ============================================================================
 # session-end.sh: index.md generation
 # ============================================================================
 
@@ -919,6 +988,9 @@ run_test test_session_start_limits_sibling_count
 run_test test_session_start_updates_last_resumed
 run_test test_session_start_last_resumed_not_set_on_startup
 run_test test_session_start_skips_siblings_on_startup
+run_test test_session_start_scan_creates_files_md
+run_test test_session_start_scan_preserves_existing_files_md
+run_test test_session_start_scan_skips_on_clear
 
 # Session end: index.md generation
 run_test test_session_end_generates_index
