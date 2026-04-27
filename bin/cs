@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.4.9"
+VERSION="2026.4.10"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -2668,7 +2668,7 @@ run_uninstall() {
     fi
 
     # Remove hooks
-    for hook in session-start.sh artifact-tracker.sh changes-tracker.sh discovery-commits.sh discoveries-reminder.sh session-end.sh subagent-context.sh tool-failure-logger.sh session-auto-approve.sh command-tracker.sh bash-logger.sh; do
+    for hook in session-start.sh artifact-tracker.sh changes-tracker.sh discovery-commits.sh discoveries-reminder.sh session-end.sh subagent-context.sh tool-failure-logger.sh session-auto-approve.sh command-tracker.sh bash-logger.sh files-scan.sh files-context.sh; do
         if [ -f "$hooks_dir/$hook" ]; then
             rm "$hooks_dir/$hook"
             info "Removed $hooks_dir/$hook"
@@ -2722,6 +2722,7 @@ run_uninstall() {
         local session_auto_approve_path="$hooks_dir/session-auto-approve.sh"
         local command_tracker_path="$hooks_dir/command-tracker.sh"
         local bash_logger_path="$hooks_dir/bash-logger.sh"
+        local files_context_path="$hooks_dir/files-context.sh"
 
         local settings
         settings=$(cat "$settings_file")
@@ -2802,6 +2803,15 @@ run_uninstall() {
         settings=$(echo "$settings" | jq --arg path "$command_tracker_path" '
             if .hooks.PostToolUse then
                 .hooks.PostToolUse = [.hooks.PostToolUse[] | select(.hooks | all(.command != $path))]
+            else . end
+        ')
+
+        # Remove our PreToolUse Read files-context hook
+        settings=$(echo "$settings" | jq --arg path "$files_context_path" '
+            if .hooks.PreToolUse then
+                .hooks.PreToolUse = [.hooks.PreToolUse[] | select(
+                    (.matcher == "Read" and (.hooks | any(.command == $path))) | not
+                )]
             else . end
         ')
 

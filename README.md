@@ -31,6 +31,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 - **Checkpoints** (`.cs/checkpoints/`) — Labelled narrative snapshots you can save mid-session with `/checkpoint`, capturing discoveries, changes, and the current git HEAD.
 - **Timeline** (`.cs/timeline.jsonl`) — A structured event log recording session starts, ends, and checkpoints as newline-delimited JSON.
 - **Auto-memory** (`.cs/memory/`) — Claude Code's persistent operational notes, redirected into the session so they sync across machines and get cleaned up with `cs -rm`.
+- **Files index** (`.cs/files.md`) — Per-file token estimates and optional hand-written descriptions, maintained automatically. Surfaced to Claude before each `Read` so it can skip full-file reads when the description suffices.
 
 ## Features
 
@@ -38,6 +39,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 - **Automatic artifact tracking** - Scripts and configs are auto-saved to `artifacts/`
 - **Secure secrets handling** - Sensitive data auto-detected and stored in OS keychain; sync across machines with [age](https://github.com/FiloSottile/age) public-key encryption
 - **Documentation templates** - Pre-configured markdown files for discoveries and changes
+- **Pre-read file context** - `.cs/files.md` indexes every workspace file with rough token estimates (`bytes / 3.75`); the PreToolUse-on-Read hook injects each file's description and size into Claude's context before a Read, and `changes-tracker.sh` keeps estimates fresh on every Write/Edit
 - **Discoveries management** - Character-budget monitoring with automatic summarization of old entries into a condensed file via `/compact-discoveries`
 - **Automatic git version control** - Every session gets local git history; discovery edits are autosaved to a shadow ref for crash safety, session end creates one clean commit; optionally sync to remote
 - **Session locking** - PID-based lock prevents the same session from being opened in two terminals simultaneously; use `--force` to override
@@ -63,7 +65,7 @@ Or clone and run `./install.sh`.
 
 The installer:
 - Adds `cs`, `cs-secrets`, and `cs-tui` to `~/.local/bin/`
-- Installs eleven [hooks](docs/hooks.md) to `~/.claude/hooks/` for session tracking
+- Installs thirteen [hooks](docs/hooks.md) to `~/.claude/hooks/` for session tracking
 - Adds `/summary`, `/compact-discoveries`, and `/skillify` commands, and `store-secret` skill to `~/.claude/`
 - Installs shell completions for bash and zsh
 - Configures hook entries in `~/.claude/settings.json`

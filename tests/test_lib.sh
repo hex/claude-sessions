@@ -129,7 +129,7 @@ assert_file_not_exists() {
 }
 
 assert_file_contains() {
-    local file="$1" pattern="$2" msg="${3:-$file should contain '$pattern'}"
+    local file="$1"; local pattern="$2"; local msg="${3:-$file should contain '$pattern'}"
     if ! grep -q "$pattern" "$file" 2>/dev/null; then
         echo "  FAIL: $msg"
         if [[ -f "$file" ]]; then
@@ -142,7 +142,7 @@ assert_file_contains() {
 }
 
 assert_file_not_contains() {
-    local file="$1" pattern="$2" msg="${3:-$file should not contain '$pattern'}"
+    local file="$1"; local pattern="$2"; local msg="${3:-$file should not contain '$pattern'}"
     if grep -q "$pattern" "$file" 2>/dev/null; then
         echo "  FAIL: $msg"
         return 1
@@ -150,7 +150,7 @@ assert_file_not_contains() {
 }
 
 assert_output_contains() {
-    local output="$1" pattern="$2" msg="${3:-output should contain '$pattern'}"
+    local output="$1"; local pattern="$2"; local msg="${3:-output should contain '$pattern'}"
     if ! echo "$output" | grep -q -- "$pattern"; then
         echo "  FAIL: $msg"
         echo "    output: $(echo "$output" | head -5)"
@@ -159,7 +159,7 @@ assert_output_contains() {
 }
 
 assert_output_not_contains() {
-    local output="$1" pattern="$2" msg="${3:-output should not contain '$pattern'}"
+    local output="$1"; local pattern="$2"; local msg="${3:-output should not contain '$pattern'}"
     if echo "$output" | grep -q -- "$pattern"; then
         echo "  FAIL: $msg"
         return 1

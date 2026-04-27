@@ -15,11 +15,9 @@ if [ -z "$SESSION_DIR" ] || [ ! -d "$SESSION_DIR" ]; then
     exit 0
 fi
 
-# Read hook input
+# Read hook input (single jq call extracts both fields — saves a fork per Write)
 INPUT=$(cat)
-
-TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name')
-FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
+IFS=$'\t' read -r TOOL_NAME FILE_PATH < <(echo "$INPUT" | jq -r '[.tool_name, (.tool_input.file_path // "")] | @tsv')
 
 # Only track Edit, Write, MultiEdit
 if [[ "$TOOL_NAME" != "Edit" && "$TOOL_NAME" != "Write" && "$TOOL_NAME" != "MultiEdit" ]]; then

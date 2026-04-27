@@ -12,16 +12,17 @@ FILES_MD="$META_DIR/files.md"
 [ -f "$FILES_MD" ] || exit 0
 
 INPUT=$(cat)
-TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name' 2>/dev/null || echo "")
-[ "$TOOL_NAME" = "Read" ] || exit 0
-
-FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
-[ -n "$FILE_PATH" ] || exit 0
+IFS=$'\t' read -r TOOL_NAME FILE_PATH < <(echo "$INPUT" | jq -r '[.tool_name, (.tool_input.file_path // "")] | @tsv' 2>/dev/null)
+[ "${TOOL_NAME:-}" = "Read" ] || exit 0
+[ -n "${FILE_PATH:-}" ] || exit 0
 
 # Strip the session-dir prefix so we can look up by the relative path used in files.md
 SESSION_DIR="${CLAUDE_SESSION_DIR:-}"
 SESSION_DIR="${SESSION_DIR%/}"
 REL="${FILE_PATH#$SESSION_DIR/}"
+
+# Fast-path: exit cheaply when the target isn't indexed (avoids full awk scan)
+grep -Fxq "## $REL" "$FILES_MD" || exit 0
 
 # Find the entry for REL in files.md. Entry shape:
 #   ## <path>
