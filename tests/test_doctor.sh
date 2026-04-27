@@ -111,6 +111,94 @@ test_doctor_runs_without_session() {
         "doctor should not require a session context" || return 1
 }
 
+test_doctor_runs_audit_check() {
+    local output
+    output=$("$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Audit" "doctor should report an audit summary" || return 1
+}
+
+test_doctor_audit_counts_settings_contents() {
+    local fake_claude="$TEST_TMPDIR/claude"
+    mkdir -p "$fake_claude"
+    cat > "$fake_claude/settings.json" << 'EOF'
+{
+  "hooks": {
+    "PreToolUse": [
+      {"matcher": "Read", "hooks": [{"type": "command", "command": "/x.sh"}]},
+      {"matcher": "Write", "hooks": [{"type": "command", "command": "/y.sh"}, {"type": "command", "command": "/z.sh"}]}
+    ]
+  },
+  "permissions": {"allow": ["Bash(ls:*)", "Read"], "deny": ["Write(secrets/**)"]},
+  "mcpServers": {"foo": {}, "bar": {}},
+  "env": {"FOO": "1"}
+}
+EOF
+    local output
+    output=$(CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "3 hooks" "should count 3 hook commands across PreToolUse matchers" || return 1
+    assert_output_contains "$output" "2 MCPs" "should count 2 MCP servers" || return 1
+    assert_output_contains "$output" "3 perm rules" "should count 2 allow + 1 deny = 3 perm rules" || return 1
+    assert_output_contains "$output" "1 env vars" "should count 1 env var" || return 1
+}
+
+test_doctor_does_not_flag_utility_hooks_as_missing() {
+    # files-scan.sh is a utility invoked by session-start.sh — it lives in
+    # ~/.claude/hooks/ but is intentionally absent from settings.json.
+    # The hooks_registered check must skip it.
+    local fake_hooks="$TEST_TMPDIR/utility-hooks"
+    mkdir -p "$fake_hooks"
+    touch "$fake_hooks/files-scan.sh"
+    chmod +x "$fake_hooks/files-scan.sh"
+    local output
+    output=$(CS_HOOKS_DIR="$fake_hooks" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_not_contains "$output" "missing in settings.json: files-scan.sh" \
+        "utility hooks must not be flagged as unregistered" || return 1
+}
+
+test_doctor_runs_token_cost_check() {
+    local output
+    output=$("$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Tokens" "doctor should report a tokens summary inside a session" || return 1
+}
+
+test_doctor_token_cost_sums_jsonl() {
+    local fake_transcripts="$TEST_TMPDIR/transcripts"
+    local encoded
+    encoded=$(echo "$CLAUDE_SESSION_DIR" | sed 's|/|-|g; s|\.|-|g')
+    local proj_dir="$fake_transcripts/$encoded"
+    mkdir -p "$proj_dir"
+    cat > "$proj_dir/session1.jsonl" << 'EOF'
+{"type":"user","message":{"role":"user","content":"hi"}}
+{"type":"assistant","message":{"usage":{"input_tokens":1000,"output_tokens":250}}}
+{"type":"assistant","message":{"usage":{"input_tokens":2000,"output_tokens":500}}}
+EOF
+    cat > "$proj_dir/session2.jsonl" << 'EOF'
+{"type":"assistant","message":{"usage":{"input_tokens":3000,"output_tokens":750}}}
+EOF
+    local output
+    output=$(CS_TRANSCRIPTS_DIR="$fake_transcripts" "$CS_BIN" -doctor 2>&1) || true
+    # Expected: 6000 input, 1500 output
+    assert_output_contains "$output" "6.0K input" "should sum input_tokens to 6000 across files" || return 1
+    assert_output_contains "$output" "1.5K output" "should sum output_tokens to 1500" || return 1
+}
+
+test_doctor_token_cost_handles_no_transcripts() {
+    local fake_transcripts="$TEST_TMPDIR/empty-transcripts"
+    mkdir -p "$fake_transcripts"
+    local output
+    output=$(CS_TRANSCRIPTS_DIR="$fake_transcripts" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Tokens" "tokens check should still run when no transcripts exist" || return 1
+    assert_output_contains "$output" "no transcripts" "should report missing transcripts gracefully" || return 1
+}
+
+test_doctor_audit_handles_missing_settings() {
+    local fake_claude="$TEST_TMPDIR/claude-empty"
+    mkdir -p "$fake_claude"
+    local output
+    output=$(CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Audit" "audit check should still run when settings.json is missing" || return 1
+}
+
 echo "Running doctor tests..."
 run_test test_doctor_subcommand_exists
 run_test test_doctor_runs_default_checks_from_session
@@ -119,4 +207,11 @@ run_test test_doctor_warns_when_discoveries_over_budget
 run_test test_doctor_fails_when_hook_not_executable
 run_test test_doctor_exits_nonzero_on_failure
 run_test test_doctor_runs_without_session
+run_test test_doctor_runs_audit_check
+run_test test_doctor_audit_counts_settings_contents
+run_test test_doctor_audit_handles_missing_settings
+run_test test_doctor_runs_token_cost_check
+run_test test_doctor_token_cost_sums_jsonl
+run_test test_doctor_token_cost_handles_no_transcripts
+run_test test_doctor_does_not_flag_utility_hooks_as_missing
 report_results

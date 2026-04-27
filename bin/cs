@@ -21,6 +21,13 @@ RETIRED_HOOKS=(
     gotcha-prewriter.sh       # retired: brief pre-write gotcha-surfacing experiment; approach was rethought
 )
 
+# Hook scripts in HOOKS_DIR that are NOT registered in settings.json. They are
+# utilities invoked by other hooks (e.g., files-scan.sh is called by
+# session-start.sh and changes-tracker.sh, never directly by Claude Code).
+UTILITY_HOOKS=(
+    files-scan.sh
+)
+
 # Minisign public key for verifying signed releases
 CS_SIGN_PUBKEY="RWQvs3IVdvrS8PJs0V0gwdJGPw/x5waQ6z6iqPQm90JfpxfcsSy9b9Vo"
 # Colors - Claude warm palette (rust → orange → gold)
@@ -1074,9 +1081,14 @@ _doctor_check_hooks_registered() {
     names=$(cd "$hooks_dir" && ls *.sh 2>/dev/null || true)
     [ -z "$names" ] && { _doctor_warn "Hooks: no .sh files in $hooks_dir"; return; }
     settings_contents=$(cat "$settings")
-    local name
+    local name util skip
     while IFS= read -r name; do
         [ -z "$name" ] && continue
+        skip=0
+        for util in "${UTILITY_HOOKS[@]}"; do
+            [ "$name" = "$util" ] && { skip=1; break; }
+        done
+        [ "$skip" = "1" ] && continue
         case "$settings_contents" in
             *"/$name"*) ;;
             *) missing+=("$name") ;;
@@ -1180,6 +1192,46 @@ _doctor_check_discoveries_size() {
     fi
 }
 
+_doctor_check_claude_audit() {
+    local claude_dir="${CS_CLAUDE_DIR:-$HOME/.claude}"
+    local settings="$claude_dir/settings.json"
+    if [ ! -f "$settings" ]; then
+        _doctor_warn "Audit: $settings not found"
+        return
+    fi
+    local hooks_count perms_count mcps_count env_count
+    # .hooks is event -> [{matcher, hooks: [{type, command, ...}]}]; flatten 3 levels for command count.
+    hooks_count=$(jq '[.hooks // {} | to_entries[].value[].hooks[]?] | length' "$settings" 2>/dev/null || echo 0)
+    perms_count=$(jq '((.permissions.allow // []) + (.permissions.deny // [])) | length' "$settings" 2>/dev/null || echo 0)
+    mcps_count=$(jq '.mcpServers // {} | length' "$settings" 2>/dev/null || echo 0)
+    env_count=$(jq '.env // {} | length' "$settings" 2>/dev/null || echo 0)
+    _doctor_ok "Audit: ${hooks_count} hooks, ${mcps_count} MCPs, ${perms_count} perm rules, ${env_count} env vars in settings.json"
+}
+
+_doctor_check_token_cost() {
+    local cwd="${CLAUDE_SESSION_DIR:-$PWD}"
+    # Claude Code encodes project paths by replacing both / and . with -
+    local encoded
+    encoded=$(echo "$cwd" | sed 's|/|-|g; s|\.|-|g')
+    local transcripts_dir="${CS_TRANSCRIPTS_DIR:-$HOME/.claude/projects}/$encoded"
+
+    local files=("$transcripts_dir"/*.jsonl)
+    if [ ! -e "${files[0]:-}" ]; then
+        _doctor_ok "Tokens (this project): no transcripts found"
+        return
+    fi
+    local sums total_in total_out
+    sums=$(cat "${files[@]}" 2>/dev/null \
+        | jq -r '.message.usage // empty | "\(.input_tokens // 0) \(.output_tokens // 0)"' 2>/dev/null \
+        | awk '{i+=$1; o+=$2} END {print i+0, o+0}')
+    total_in="${sums% *}"
+    total_out="${sums#* }"
+    local h_in h_out
+    h_in=$(awk -v n="$total_in" 'BEGIN { if (n>=1000000) printf "%.1fM",n/1000000; else if (n>=1000) printf "%.1fK",n/1000; else printf "%d",n }')
+    h_out=$(awk -v n="$total_out" 'BEGIN { if (n>=1000000) printf "%.1fM",n/1000000; else if (n>=1000) printf "%.1fK",n/1000; else printf "%d",n }')
+    _doctor_ok "Tokens (this project): ${h_in} input, ${h_out} output"
+}
+
 _doctor_check_auto_memory() {
     local dir="$CLAUDE_SESSION_META_DIR/memory"
     if [ ! -d "$dir" ]; then
@@ -1203,12 +1255,14 @@ run_doctor() {
     _doctor_check_keychain
     _doctor_check_hooks_registered
     _doctor_check_hook_files_executable
+    _doctor_check_claude_audit
 
     if [ -n "${CLAUDE_SESSION_META_DIR:-}" ] && [ -d "${CLAUDE_SESSION_META_DIR:-}" ]; then
         _doctor_check_git_sync
         _doctor_check_shadow_ref
         _doctor_check_discoveries_size
         _doctor_check_auto_memory
+        _doctor_check_token_cost
     fi
 
     echo ""
