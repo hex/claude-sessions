@@ -46,7 +46,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 - **Remote sessions** - Run sessions on remote machines via `et` or `ssh` + `tmux`; `cs` handles connection, stubbing, and session tracking
 - **CLI command capture** - Interesting commands auto-tracked to `.cs/commands.md` with secret scrubbing; frequently used commands can be promoted to reusable skills via `/skillify`
 - **Cross-session search** - `cs -search <query>` greps across all sessions' discoveries, memory, README, and changes
-- **Health checks** - `cs -doctor` reports status of Keychain backend, hook registration, git sync state, shadow-ref freshness, discoveries.md size, and auto-memory writability
+- **Health checks** - `cs -doctor` reports status of Keychain backend, hook registration, git sync state, shadow-ref freshness, discoveries.md size, auto-memory writability, Claude Code settings audit (hooks/MCPs/permissions/env vars counts), and cumulative token usage for the current project
 - **Bash command audit trail** - Every Bash command Claude runs is logged to `.cs/logs/session.log` with timestamps
 - **Update notifications** - Checks for updates and notifies when new versions are available
 - **Verified updates** - Updates are downloaded from GitHub Releases and verified with SHA-256 checksums; additionally verified with [minisign](https://jedisct1.github.io/minisign/) signatures when available
@@ -79,7 +79,7 @@ cs <session-name> --force   # Override active session lock
 cs -adopt <name>            # Adopt current directory as a session
 cs -remote <cmd>            # Manage remote hosts
 cs -search <query>          # Search across all sessions
-cs -doctor, -diag           # Run health checks (Keychain, hooks, git sync, discoveries size)
+cs -doctor, -diag           # Run health checks (Keychain, hooks, sync, discoveries, audit, tokens)
 cs -list, -ls               # List all sessions
 cs -remove, -rm <name>      # Remove a session
 cs -update                  # Update to latest version

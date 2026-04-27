@@ -2,6 +2,29 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
+## 2026.4.11
+
+### Features
+
+- **`cs -doctor` now audits Claude Code settings and tracks per-project token cost** -- Two new checks fold into the existing doctor flow (no new subcommands):
+  - **Audit**: counts hook commands across all events, MCP servers, permission rules (allow + deny), and env vars in `~/.claude/settings.json`. One-line summary for security review and config-drift detection. Override the settings dir via `CS_CLAUDE_DIR` for testing.
+  - **Tokens**: parses Claude Code transcript jsonl files in `~/.claude/projects/<encoded-cwd>/`, sums input + output tokens across all assistant messages in every session for the current project, and reports a K/M-suffixed total (e.g. `1.2M input, 340K output`). Override the transcripts dir via `CS_TRANSCRIPTS_DIR`.
+
+### Fixes
+
+- **`_doctor_check_hooks_registered` falsely flagged utility hooks** -- The check assumed every `.sh` in `~/.claude/hooks/` had to be registered in settings.json, which broke for `files-scan.sh` (a utility invoked by other hooks, deliberately absent from settings). Added a `UTILITY_HOOKS` array (currently just `files-scan.sh`) and skips utilities in the registration check.
+
+### Improvements
+
+- **Single-jq audit query and pure-bash path encoding** (post-`/simplify` cleanup):
+  - `_doctor_check_claude_audit` now collapses 4 separate `jq` invocations of settings.json into 1.
+  - `_doctor_check_token_cost` lets `jq` read transcript files directly instead of going through `cat`.
+  - Extracted `_claude_encode_path` helper used by `setup_auto_memory` and `_doctor_check_token_cost`. Pure-bash form (no fork) replaces the prior `echo … | sed`.
+
+### Tests
+
+- 7 new tests in `test_doctor.sh`: audit-runs, audit-counts-correctly, audit-handles-missing-settings, tokens-runs, tokens-sums-jsonl, tokens-handles-no-transcripts, utility-hooks-not-flagged.
+
 ## 2026.4.10
 
 ### Features

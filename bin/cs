@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.4.10"
+VERSION="2026.4.11"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -27,6 +27,17 @@ RETIRED_HOOKS=(
 UTILITY_HOOKS=(
     files-scan.sh
 )
+
+# Encode an absolute filesystem path the way Claude Code does for project
+# directory names under ~/.claude/projects/ (each `/` and `.` becomes `-`).
+# Used by setup_auto_memory and _doctor_check_token_cost to locate the
+# transcript directory for a given workspace.
+_claude_encode_path() {
+    local p="$1"
+    p="${p//\//-}"
+    p="${p//./-}"
+    printf '%s' "$p"
+}
 
 # Minisign public key for verifying signed releases
 CS_SIGN_PUBKEY="RWQvs3IVdvrS8PJs0V0gwdJGPw/x5waQ6z6iqPQm90JfpxfcsSy9b9Vo"
@@ -235,7 +246,7 @@ Commands:
   -checkpoint "<label>"  Save labelled state snapshot (run from inside a session)
   -checkpoint list    List checkpoints for current session
   -checkpoint show <name>  Print a specific checkpoint
-  -doctor, -diag      Run health checks (Keychain, hooks, git sync, discoveries size)
+  -doctor, -diag      Run health checks (Keychain, hooks, sync, discoveries, audit, tokens)
   -list, -ls          List all sessions (shows remote location)
   -adopt <name>       Adopt current directory as a cs session
   -remote <cmd>       Manage remote hosts
@@ -607,7 +618,7 @@ SETTINGS
     local real_path
     real_path="$(cd "$session_dir" 2>/dev/null && pwd -P)"
     local encoded_path
-    encoded_path=$(echo "$real_path" | sed 's|/|-|g; s|\.|-|g')
+    encoded_path=$(_claude_encode_path "$real_path")
     local old_memory_dir="$HOME/.claude/projects/${encoded_path}/memory"
     if [ -d "$old_memory_dir" ] && [ "$(ls -A "$old_memory_dir" 2>/dev/null)" ]; then
         cp -n "$old_memory_dir"/* "$session_dir/.cs/memory/" 2>/dev/null || true
@@ -1199,36 +1210,35 @@ _doctor_check_claude_audit() {
         _doctor_warn "Audit: $settings not found"
         return
     fi
-    local hooks_count perms_count mcps_count env_count
     # .hooks is event -> [{matcher, hooks: [{type, command, ...}]}]; flatten 3 levels for command count.
-    hooks_count=$(jq '[.hooks // {} | to_entries[].value[].hooks[]?] | length' "$settings" 2>/dev/null || echo 0)
-    perms_count=$(jq '((.permissions.allow // []) + (.permissions.deny // [])) | length' "$settings" 2>/dev/null || echo 0)
-    mcps_count=$(jq '.mcpServers // {} | length' "$settings" 2>/dev/null || echo 0)
-    env_count=$(jq '.env // {} | length' "$settings" 2>/dev/null || echo 0)
+    local counts hooks_count mcps_count perms_count env_count
+    counts=$(jq -r '
+        "\([.hooks // {} | to_entries[].value[].hooks[]?] | length) " +
+        "\(.mcpServers // {} | length) " +
+        "\(((.permissions.allow // []) + (.permissions.deny // [])) | length) " +
+        "\(.env // {} | length)"
+    ' "$settings" 2>/dev/null || echo "0 0 0 0")
+    read -r hooks_count mcps_count perms_count env_count <<< "$counts"
     _doctor_ok "Audit: ${hooks_count} hooks, ${mcps_count} MCPs, ${perms_count} perm rules, ${env_count} env vars in settings.json"
 }
 
 _doctor_check_token_cost() {
     local cwd="${CLAUDE_SESSION_DIR:-$PWD}"
-    # Claude Code encodes project paths by replacing both / and . with -
     local encoded
-    encoded=$(echo "$cwd" | sed 's|/|-|g; s|\.|-|g')
+    encoded=$(_claude_encode_path "$cwd")
     local transcripts_dir="${CS_TRANSCRIPTS_DIR:-$HOME/.claude/projects}/$encoded"
 
     local files=("$transcripts_dir"/*.jsonl)
     if [ ! -e "${files[0]:-}" ]; then
-        _doctor_ok "Tokens (this project): no transcripts found"
+        _doctor_ok "Tokens (this project): no transcripts found yet"
         return
     fi
-    local sums total_in total_out
-    sums=$(cat "${files[@]}" 2>/dev/null \
-        | jq -r '.message.usage // empty | "\(.input_tokens // 0) \(.output_tokens // 0)"' 2>/dev/null \
-        | awk '{i+=$1; o+=$2} END {print i+0, o+0}')
-    total_in="${sums% *}"
-    total_out="${sums#* }"
     local h_in h_out
-    h_in=$(awk -v n="$total_in" 'BEGIN { if (n>=1000000) printf "%.1fM",n/1000000; else if (n>=1000) printf "%.1fK",n/1000; else printf "%d",n }')
-    h_out=$(awk -v n="$total_out" 'BEGIN { if (n>=1000000) printf "%.1fM",n/1000000; else if (n>=1000) printf "%.1fK",n/1000; else printf "%d",n }')
+    read -r h_in h_out < <(jq -r '.message.usage // empty | "\(.input_tokens // 0) \(.output_tokens // 0)"' "${files[@]}" 2>/dev/null \
+        | awk '
+            function fmt(n) { if (n>=1000000) return sprintf("%.1fM",n/1000000); else if (n>=1000) return sprintf("%.1fK",n/1000); else return sprintf("%d",n) }
+            {i+=$1; o+=$2}
+            END {print fmt(i+0), fmt(o+0)}')
     _doctor_ok "Tokens (this project): ${h_in} input, ${h_out} output"
 }
 
