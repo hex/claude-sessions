@@ -2,6 +2,25 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
+## 2026.4.13
+
+### Fixes
+
+- **Auto-memory redirect now actually works.** cs has been exporting `CLAUDE_CODE_AUTO_MEMORY_PATH` to redirect Claude Code's auto-memory writes into `<session>/.cs/memory/`. Verified across three independent methods (binary `strings`-grep, black-box `claude --print` introspection, and a community-maintained env-var index): Claude Code 2.1.x ignores that name entirely — the resolver reads `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE`. cs now exports both names defensively, so memory writes from new sessions land in the cs-controlled path *during* the session instead of relying on the post-launch `cp+rm` migration to move them on the next session start.
+
+- Side note for users: orphan memory files at `~/.claude/projects/<encoded-cwd>/memory/` from past sessions get migrated automatically on next launch by the existing `setup_auto_memory()` cleanup — no manual action required.
+
+### Improvements
+
+- `/simplify` review caught a recurrence of writing temporal/historical context into source comments (a CLAUDE.md violation). The auto-memory comment was rewritten to evergreen form and the duplicated `"$session_dir/.cs/memory"` literal was extracted into a local variable.
+- README paragraph on auto-memory tightened to user-facing behavior; internal helper names and migration mechanics moved out of the public surface.
+
+### Tests
+
+- All 20 test files pass (97 tests across command-tracker, doctor, hooks, sync, secrets, etc.).
+
+**Full Changelog**: https://github.com/hex/claude-sessions/compare/v2026.4.12...v2026.4.13
+
 ## 2026.4.12
 
 ### Features
