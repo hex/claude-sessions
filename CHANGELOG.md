@@ -2,6 +2,41 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
+## 2026.4.12
+
+### Features
+
+- **`cs -doctor` adds command-leak audit** -- New `_doctor_check_command_leaks` scans every session's `.cs/commands.md` under `$SESSIONS_ROOT` for two leak shapes: glued `-p<value>` on db CLIs (mysql/mysqldump/psql) and positional values to `cs -secrets set <name> <value>`. Reports file:line only, never the matched value. Flagged a real-world leak during testing where a dev MySQL admin password had survived three captures across 905 entries in a sibling project's commands.md.
+
+### Fixes
+
+- **Redactor blind spots in `hooks/command-tracker.sh`**:
+  - **Glued short-flag** like `mysql -u admin -pSECRET` (POSIX `-p<value>` form, no separator). New rule scoped to `mysql|mysqldump|psql` only -- `docker run -p`, `ssh -p`, `cp -p` stay intact.
+  - **Positional value of `cs -secrets set <name> <value>`** -- the call meant to keep the secret out of shell history was logging it in the runbook. New rule stops at shell separators so chained commands survive.
+
+- **Trivial-filter dropped any `cd dir && <real-cmd>`** -- BASE_CMD looked at the literal first word, so `cd /tmp && cargo test` was filtered as trivial cd and silently skipped. Fixed by extracting BASE_CMD from the prefix-stripped command.
+
+### Improvements
+
+- **Categorizer matches leading verb instead of full-line substring** -- The `*build*` / `*test*` glob over the full command was misclassifying by *arguments*: `mysql ... LIKE '%build%'` landed in Build, `rg "testLoginParameter"` landed in Test, `fd "building_model"` landed in Build. Replaced with explicit leading-verb lookup table plus sub-rules for npm/yarn/pnpm/bun/cargo. New categories: **Search** (rg/fd/grep/find), **DB** (mysql/psql/sqlite3), **Remote** (ssh/scp/rsync/curl), **Git** (git/gh/hg). Existing Build/Test/Lint/Deploy/Dev/Other still work.
+
+- **`strip_leading_prefixes` helper** -- Iterative fixed-point stripper for `cd path &&`, `export VAR=val;`, and inline `FOO=bar ` env-prefix forms. Used by both the trivial filter and the categorizer.
+
+- **`/simplify` cleanup**: 5 `sed -E` invocations in the scrubber collapsed into one `sed -E -e ... -e ...` (saves 4 fork+pipe round-trips per Bash hook); 3 sed calls inside `strip_leading_prefixes` collapsed to 1 (saves 2 forks per loop iteration); `categorize_command` no longer re-strips since the caller already computed STRIPPED. Hot-path fork count drops from ~14 to ~4 per Bash command.
+
+### Tests
+
+- 5 new tests for redactor blind spots (glued mysql/mysqldump/psql, `cs -secrets set` positional, plus a guard that `docker run -p 8080:8080` stays unredacted).
+- 11 new tests for categorizer rewrite (Search/DB/Remote/Git classifications, false-positive guards, env/cd prefix stripping).
+- 5 new tests for `cs -doctor` leak scan, including a contract test that the doctor never echoes the matched secret value.
+- `send_bash_command` test helper now uses `jq -n --arg` for JSON-safe escaping; the prior shell-interpolation form silently broke on commands with literal double-quotes.
+
+### Docs
+
+- README, `docs/hooks.md`, `docs/secrets.md` updated to reflect the new redactor patterns, categorizer scheme, and doctor check.
+
+**Full Changelog**: https://github.com/hex/claude-sessions/compare/v2026.4.11...v2026.4.12
+
 ## 2026.4.11
 
 ### Features

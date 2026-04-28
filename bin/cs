@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.4.11"
+VERSION="2026.4.12"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -1256,11 +1256,8 @@ _doctor_check_auto_memory() {
 }
 
 # Audit-time guard for the write-time secret scrubber in command-tracker.sh.
-# The scrubber catches most leaks but glued -p<value> on db CLIs and positional
-# args to `cs -secrets set` have slipped through historically (see
-# discoveries.md "command-tracker secret scrubber has known blind spots").
-# This scan reports file:line only — never the matched value, since echoing
-# the secret to the terminal would re-leak it into scrollback.
+# Reports file:line only — never the matched value, since echoing the secret
+# to the terminal would re-leak it into scrollback.
 _doctor_check_command_leaks() {
     if [ ! -d "$SESSIONS_ROOT" ]; then
         return

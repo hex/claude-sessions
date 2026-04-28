@@ -41,9 +41,10 @@ strip_leading_prefixes() {
     local prev=""
     while [ "$cmd" != "$prev" ]; do
         prev="$cmd"
-        cmd=$(echo "$cmd" | sed -E 's/^[[:space:]]*cd[[:space:]]+[^;&]+[;&]+[[:space:]]*//')
-        cmd=$(echo "$cmd" | sed -E 's/^[[:space:]]*export[[:space:]]+[^;&]+[;&]+[[:space:]]*//')
-        cmd=$(echo "$cmd" | sed -E 's/^[[:space:]]*[A-Z_][A-Z0-9_]*=[^[:space:]]+[[:space:]]+//')
+        cmd=$(printf '%s' "$cmd" | sed -E \
+            -e 's/^[[:space:]]*cd[[:space:]]+[^;&]+[;&]+[[:space:]]*//' \
+            -e 's/^[[:space:]]*export[[:space:]]+[^;&]+[;&]+[[:space:]]*//' \
+            -e 's/^[[:space:]]*[A-Z_][A-Z0-9_]*=[^[:space:]]+[[:space:]]+//')
     done
     printf '%s\n' "$cmd"
 }
@@ -78,26 +79,25 @@ if echo "$COMMAND" | grep -qE '^git (status|log|diff|show|blame|branch)(\s|$)'; 
 fi
 
 # --- Secret scrubbing ---
-SAFE_COMMAND="$COMMAND"
-# Redact KEY=value patterns with sensitive names
-SAFE_COMMAND=$(echo "$SAFE_COMMAND" | sed -E 's/([A-Z_]*(KEY|TOKEN|SECRET|PASSWORD|PASS|AUTH|CREDENTIAL)[A-Z_]*)=[^ ]*/\1=[REDACTED]/gI')
-# Redact Bearer tokens
-SAFE_COMMAND=$(echo "$SAFE_COMMAND" | sed -E 's/Bearer [A-Za-z0-9._-]+/Bearer [REDACTED]/g')
-# Redact --token/--password/--secret flag values
-SAFE_COMMAND=$(echo "$SAFE_COMMAND" | sed -E 's/(--?(token|password|secret|api[_-]?key))[= ][^ ]*/\1=[REDACTED]/gI')
-# Redact glued short-flag passwords for db CLIs (mysql/mysqldump/psql -pSECRET).
-# Scoped to those tools to avoid eating -p in docker run, ssh -p, etc.
-SAFE_COMMAND=$(echo "$SAFE_COMMAND" | sed -E 's/((^|[ 	])(mysql|mysqldump|psql)[^|;&]* -p)[^ ]+/\1[REDACTED]/g')
-# Redact the positional value of `cs -secrets set <name> <value>` — the call
-# itself logs the secret if not scrubbed here.
-SAFE_COMMAND=$(echo "$SAFE_COMMAND" | sed -E 's/(cs -secrets set [^ ]+ )[^|;&]+/\1[REDACTED]/g')
+# Redactor rules: KEY=value sensitive env vars; Bearer tokens; --token/--password
+# /--secret flag values; glued -p<value> for db CLIs only (mysql/mysqldump/psql,
+# scoped so docker run -p / ssh -p / cp -p stay intact); positional value of
+# `cs -secrets set <name> <value>` (otherwise the secret-store call leaks the
+# value into the runbook).
+SAFE_COMMAND=$(printf '%s' "$COMMAND" | sed -E \
+    -e 's/([A-Z_]*(KEY|TOKEN|SECRET|PASSWORD|PASS|AUTH|CREDENTIAL)[A-Z_]*)=[^ ]*/\1=[REDACTED]/gI' \
+    -e 's/Bearer [A-Za-z0-9._-]+/Bearer [REDACTED]/g' \
+    -e 's/(--?(token|password|secret|api[_-]?key))[= ][^ ]*/\1=[REDACTED]/gI' \
+    -e 's/((^|[ 	])(mysql|mysqldump|psql)[^|;&]* -p)[^ ]+/\1[REDACTED]/g' \
+    -e 's/(cs -secrets set [^ ]+ )[^|;&]+/\1[REDACTED]/g')
 
 # --- Categorize ---
+# Caller passes the already-stripped command (see STRIPPED above); we don't
+# re-run strip_leading_prefixes here because scrubbing doesn't change the verb.
 categorize_command() {
-    local stripped verb arg1
-    stripped=$(strip_leading_prefixes "$1")
-    verb=$(echo "$stripped" | awk '{print $1}')
-    arg1=$(echo "$stripped" | awk '{print $2}')
+    local verb arg1
+    verb=$(echo "$1" | awk '{print $1}')
+    arg1=$(echo "$1" | awk '{print $2}')
 
     case "$verb" in
         npm|yarn|pnpm|bun)
@@ -137,7 +137,7 @@ categorize_command() {
     esac
 }
 
-CATEGORY=$(categorize_command "$SAFE_COMMAND")
+CATEGORY=$(categorize_command "$STRIPPED")
 DATE_TODAY=$(date '+%Y-%m-%d')
 COMMANDS_FILE="$META_DIR/commands.md"
 

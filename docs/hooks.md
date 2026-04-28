@@ -82,8 +82,9 @@ Runs when Claude Code would show a permission dialog for Write or Edit:
 Runs after Bash tool calls (async, non-blocking):
 - Captures interesting CLI commands to `.cs/commands.md`
 - Filters trivial commands (cd, ls, pwd, echo, cat, etc.) and bare interpreters (vim, python, node without flags)
-- Scrubs secrets: `KEY=value` env vars, Bearer tokens, `--password`/`--token` flags
-- Categorizes commands: Build, Test, Dev, Deploy, Lint, Other
+- Scrubs secrets: `KEY=value` env vars, Bearer tokens, `--password`/`--token` flags, glued `-p<value>` for db CLIs (`mysql`/`mysqldump`/`psql`), and the positional value of `cs -secrets set <name> <value>`
+- Strips leading `cd ... &&`, `export VAR=val;`, and inline `FOO=bar ` env-prefixes before classifying so `cd dir && cargo test` is correctly captured as a `cargo test` invocation
+- Categorizes commands by leading verb against an explicit lookup: Build, Test, Lint, Deploy, Dev, Search (rg/fd/grep/find), DB (mysql/psql/sqlite3), Remote (ssh/scp/rsync/curl), Git (git/gh/hg), Other
 - Deduplicates exact matches, bumps use count and last-used date
 - Detects skill-worthy commands (3+ uses across 2+ sessions) and suggests `/skillify`
 
