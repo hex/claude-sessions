@@ -70,6 +70,12 @@ SAFE_COMMAND=$(echo "$SAFE_COMMAND" | sed -E 's/([A-Z_]*(KEY|TOKEN|SECRET|PASSWO
 SAFE_COMMAND=$(echo "$SAFE_COMMAND" | sed -E 's/Bearer [A-Za-z0-9._-]+/Bearer [REDACTED]/g')
 # Redact --token/--password/--secret flag values
 SAFE_COMMAND=$(echo "$SAFE_COMMAND" | sed -E 's/(--?(token|password|secret|api[_-]?key))[= ][^ ]*/\1=[REDACTED]/gI')
+# Redact glued short-flag passwords for db CLIs (mysql/mysqldump/psql -pSECRET).
+# Scoped to those tools to avoid eating -p in docker run, ssh -p, etc.
+SAFE_COMMAND=$(echo "$SAFE_COMMAND" | sed -E 's/((^|[ 	])(mysql|mysqldump|psql)[^|;&]* -p)[^ ]+/\1[REDACTED]/g')
+# Redact the positional value of `cs -secrets set <name> <value>` — the call
+# itself logs the secret if not scrubbed here.
+SAFE_COMMAND=$(echo "$SAFE_COMMAND" | sed -E 's/(cs -secrets set [^ ]+ )[^|;&]+/\1[REDACTED]/g')
 
 # --- Categorize ---
 categorize_command() {

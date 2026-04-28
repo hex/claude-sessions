@@ -147,6 +147,41 @@ test_scrubs_password_flag() {
     assert_file_not_contains "$COMMANDS_FILE" "secret123" "Should not contain raw password" || return 1
 }
 
+test_scrubs_mysql_glued_password() {
+    update_commands_file
+    send_bash_command "mysql -h db.example.com -u admin -pHunter2GluedToFlag war_model -e SELECT"
+    assert_file_contains "$COMMANDS_FILE" "REDACTED" "Should redact mysql -p<value>" || return 1
+    assert_file_not_contains "$COMMANDS_FILE" "Hunter2GluedToFlag" "Should not contain raw mysql password" || return 1
+}
+
+test_scrubs_psql_glued_password() {
+    update_commands_file
+    send_bash_command "psql -h db.example.com -U admin -pSeCrEtPg42 mydb"
+    assert_file_contains "$COMMANDS_FILE" "REDACTED" "Should redact psql -p<value>" || return 1
+    assert_file_not_contains "$COMMANDS_FILE" "SeCrEtPg42" "Should not contain raw psql password" || return 1
+}
+
+test_scrubs_mysqldump_glued_password() {
+    update_commands_file
+    send_bash_command "mysqldump -h db.example.com -u admin -pDumpSecretXYZ war_model"
+    assert_file_contains "$COMMANDS_FILE" "REDACTED" "Should redact mysqldump -p<value>" || return 1
+    assert_file_not_contains "$COMMANDS_FILE" "DumpSecretXYZ" "Should not contain raw mysqldump password" || return 1
+}
+
+test_scrubs_secrets_set_positional() {
+    update_commands_file
+    send_bash_command "cs -secrets set MYSQL_DEV_PASSWORD RawPwdShouldNotLeak"
+    assert_file_contains "$COMMANDS_FILE" "REDACTED" "Should redact cs -secrets set value" || return 1
+    assert_file_not_contains "$COMMANDS_FILE" "RawPwdShouldNotLeak" "Should not contain raw secret value" || return 1
+}
+
+test_does_not_redact_other_p_flags() {
+    update_commands_file
+    send_bash_command "docker run -p 8080:8080 nginx"
+    assert_file_contains "$COMMANDS_FILE" "docker run -p 8080:8080" "Non-db -p flag must remain intact" || return 1
+    assert_file_not_contains "$COMMANDS_FILE" "REDACTED" "Non-db -p flag must not trigger redaction" || return 1
+}
+
 test_categorizes_build() {
     update_commands_file
     send_bash_command "npm run build"
@@ -235,6 +270,11 @@ run_test test_deduplicates_same_command
 run_test test_scrubs_api_key
 run_test test_scrubs_bearer_token
 run_test test_scrubs_password_flag
+run_test test_scrubs_mysql_glued_password
+run_test test_scrubs_psql_glued_password
+run_test test_scrubs_mysqldump_glued_password
+run_test test_scrubs_secrets_set_positional
+run_test test_does_not_redact_other_p_flags
 run_test test_categorizes_build
 run_test test_categorizes_test
 run_test test_categorizes_dev
