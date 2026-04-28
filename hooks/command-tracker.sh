@@ -34,8 +34,23 @@ if [ -z "$COMMAND" ]; then
     exit 0
 fi
 
+# Strip leading env/cd/export prefixes so trivial-filter and categorizer see
+# the actual verb. `cd dir && cargo test` should not be filtered as trivial cd.
+strip_leading_prefixes() {
+    local cmd="$1"
+    local prev=""
+    while [ "$cmd" != "$prev" ]; do
+        prev="$cmd"
+        cmd=$(echo "$cmd" | sed -E 's/^[[:space:]]*cd[[:space:]]+[^;&]+[;&]+[[:space:]]*//')
+        cmd=$(echo "$cmd" | sed -E 's/^[[:space:]]*export[[:space:]]+[^;&]+[;&]+[[:space:]]*//')
+        cmd=$(echo "$cmd" | sed -E 's/^[[:space:]]*[A-Z_][A-Z0-9_]*=[^[:space:]]+[[:space:]]+//')
+    done
+    printf '%s\n' "$cmd"
+}
+
 # --- Filter: skip trivial commands ---
-BASE_CMD=$(echo "$COMMAND" | sed 's/^[A-Z_]*=[^ ]* *//' | awk '{print $1}')
+STRIPPED=$(strip_leading_prefixes "$COMMAND")
+BASE_CMD=$(echo "$STRIPPED" | awk '{print $1}')
 BASE_CMD=$(basename "$BASE_CMD" 2>/dev/null || echo "$BASE_CMD")
 
 TRIVIAL="cd ls pwd echo cat head tail clear mkdir rm rmdir mv cp touch which whoami date true false wc"
@@ -79,20 +94,44 @@ SAFE_COMMAND=$(echo "$SAFE_COMMAND" | sed -E 's/(cs -secrets set [^ ]+ )[^|;&]+/
 
 # --- Categorize ---
 categorize_command() {
-    local cmd="$1"
-    local base
-    base=$(echo "$cmd" | awk '{print $1}')
-    case "$cmd" in
-        *build*|make\ *|gradle\ *|mvn\ *)
+    local stripped verb arg1
+    stripped=$(strip_leading_prefixes "$1")
+    verb=$(echo "$stripped" | awk '{print $1}')
+    arg1=$(echo "$stripped" | awk '{print $2}')
+
+    case "$verb" in
+        npm|yarn|pnpm|bun)
+            case "$arg1" in
+                test|t) echo "Test" ;;
+                lint) echo "Lint" ;;
+                build|run) echo "Build" ;;
+                *) echo "Dev" ;;
+            esac ;;
+        cargo)
+            case "$arg1" in
+                test|bench) echo "Test" ;;
+                clippy|fmt) echo "Lint" ;;
+                run) echo "Dev" ;;
+                *) echo "Build" ;;
+            esac ;;
+        make|gradle|mvn|cmake|bazel|tsc|webpack|rollup|vite|esbuild|sbt|swift)
             echo "Build" ;;
-        *test*|pytest*|jest*|vitest*|playwright*|cypress*)
+        pytest|jest|vitest|playwright|cypress|mocha|tape|ava)
             echo "Test" ;;
-        *lint*|eslint*|prettier*|*clippy*|*fmt*|black\ *|ruff\ *|mypy\ *|tsc\ *)
+        eslint|prettier|clippy|black|ruff|mypy|flake8|rubocop|gofmt|stylelint|biome)
             echo "Lint" ;;
-        *deploy*|kubectl*|terraform*|helm*|aws\ *|gcloud\ *|az\ *)
+        kubectl|terraform|helm|aws|gcloud|az|fly|vercel|heroku|ansible)
             echo "Deploy" ;;
-        docker\ compose\ up*|docker\ run*|*dev*|*start*|*serve*|uvicorn*|flask\ *)
+        docker|docker-compose|uvicorn|flask|gunicorn|node|deno|rails|hugo|jekyll)
             echo "Dev" ;;
+        rg|fd|grep|find|ag|ack|fzf|ast-grep|locate)
+            echo "Search" ;;
+        mysql|mysqldump|psql|sqlite3|mongo|mongosh|redis-cli|pg_dump|pg_restore)
+            echo "DB" ;;
+        ssh|scp|rsync|sftp|curl|wget)
+            echo "Remote" ;;
+        git|gh|hg)
+            echo "Git" ;;
         *)
             echo "Other" ;;
     esac

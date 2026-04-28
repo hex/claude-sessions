@@ -23,10 +23,11 @@ teardown() {
     unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR 2>/dev/null || true
 }
 
-# Helper: send a Bash tool use to the hook
+# Helper: send a Bash tool use to the hook (jq for JSON-safe escaping so commands
+# with embedded double-quotes survive the trip into the hook intact).
 send_bash_command() {
     local cmd="$1"
-    echo "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$cmd\"},\"tool_response\":{},\"hook_event_name\":\"PostToolUse\"}" \
+    jq -n --arg cmd "$cmd" '{tool_name:"Bash", tool_input:{command:$cmd}, tool_response:{}, hook_event_name:"PostToolUse"}' \
         | bash "$HOOK"
 }
 
@@ -38,7 +39,7 @@ update_commands_file() {
 # Helper: send a Bash tool use from a subagent (agent_id present)
 send_bash_command_as_subagent() {
     local cmd="$1"
-    echo "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$cmd\"},\"tool_response\":{},\"hook_event_name\":\"PostToolUse\",\"agent_id\":\"sub-123\",\"agent_type\":\"Explore\"}" \
+    jq -n --arg cmd "$cmd" '{tool_name:"Bash", tool_input:{command:$cmd}, tool_response:{}, hook_event_name:"PostToolUse", agent_id:"sub-123", agent_type:"Explore"}' \
         | bash "$HOOK"
 }
 
@@ -206,6 +207,73 @@ test_categorizes_lint() {
     assert_file_contains "$COMMANDS_FILE" "## Lint" "Should have Lint category" || return 1
 }
 
+test_categorizes_search_rg() {
+    update_commands_file
+    send_bash_command "rg 'pattern' src/"
+    assert_file_contains "$COMMANDS_FILE" "## Search" "rg should land in Search" || return 1
+}
+
+test_categorizes_search_fd() {
+    update_commands_file
+    send_bash_command "fd -e rs"
+    assert_file_contains "$COMMANDS_FILE" "## Search" "fd should land in Search" || return 1
+}
+
+test_categorizes_db_mysql() {
+    update_commands_file
+    send_bash_command "mysql -h db.example.com -u admin --password=foo war_model -e 'SELECT 1'"
+    assert_file_contains "$COMMANDS_FILE" "## DB" "mysql should land in DB" || return 1
+}
+
+test_categorizes_remote_ssh() {
+    update_commands_file
+    send_bash_command "ssh host 'docker logs container'"
+    assert_file_contains "$COMMANDS_FILE" "## Remote" "ssh should land in Remote" || return 1
+}
+
+test_categorizes_git_push() {
+    update_commands_file
+    send_bash_command "git push origin feature/foo"
+    assert_file_contains "$COMMANDS_FILE" "## Git" "git push should land in Git" || return 1
+}
+
+test_categorizer_does_not_match_build_substring_in_args() {
+    # mysql query containing %build% in SQL must not land in Build.
+    update_commands_file
+    send_bash_command "mysql -h h -u u --password=p war_model -e \"SHOW TABLES LIKE '%build%'\""
+    assert_file_contains "$COMMANDS_FILE" "## DB" "mysql with %build% in args belongs in DB" || return 1
+    assert_file_not_contains "$COMMANDS_FILE" "## Build" "Substring 'build' in args must not trigger Build" || return 1
+}
+
+test_categorizer_does_not_match_test_substring_in_args() {
+    # rg searching for "testLoginParameter" must not land in Test.
+    update_commands_file
+    send_bash_command "rg 'testLoginParameter' src/"
+    assert_file_contains "$COMMANDS_FILE" "## Search" "rg with 'test' in pattern belongs in Search" || return 1
+    assert_file_not_contains "$COMMANDS_FILE" "## Test" "Substring 'test' in args must not trigger Test" || return 1
+}
+
+test_categorizer_strips_env_prefix() {
+    # export PATH=...; cargo build → Build (verb is cargo build, not export)
+    update_commands_file
+    send_bash_command "export PATH=/opt/homebrew/bin:\$PATH; cargo build --release"
+    assert_file_contains "$COMMANDS_FILE" "## Build" \
+        "Leading export prefix must be stripped before classifying" || return 1
+}
+
+test_categorizer_strips_cd_prefix() {
+    update_commands_file
+    send_bash_command "cd /tmp/repo && cargo test"
+    assert_file_contains "$COMMANDS_FILE" "## Test" \
+        "Leading cd prefix must be stripped before classifying" || return 1
+}
+
+test_categorizer_npm_install_is_dev() {
+    update_commands_file
+    send_bash_command "npm install"
+    assert_file_contains "$COMMANDS_FILE" "## Dev" "npm install belongs in Dev" || return 1
+}
+
 test_skips_outside_session() {
     unset CLAUDE_SESSION_NAME
     update_commands_file
@@ -279,6 +347,16 @@ run_test test_categorizes_build
 run_test test_categorizes_test
 run_test test_categorizes_dev
 run_test test_categorizes_lint
+run_test test_categorizes_search_rg
+run_test test_categorizes_search_fd
+run_test test_categorizes_db_mysql
+run_test test_categorizes_remote_ssh
+run_test test_categorizes_git_push
+run_test test_categorizer_does_not_match_build_substring_in_args
+run_test test_categorizer_does_not_match_test_substring_in_args
+run_test test_categorizer_strips_env_prefix
+run_test test_categorizer_strips_cd_prefix
+run_test test_categorizer_npm_install_is_dev
 run_test test_skips_outside_session
 run_test test_skips_non_bash_tool
 run_test test_creates_file_with_header
