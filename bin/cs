@@ -1255,6 +1255,44 @@ _doctor_check_auto_memory() {
     fi
 }
 
+# Audit-time guard for the write-time secret scrubber in command-tracker.sh.
+# The scrubber catches most leaks but glued -p<value> on db CLIs and positional
+# args to `cs -secrets set` have slipped through historically (see
+# discoveries.md "command-tracker secret scrubber has known blind spots").
+# This scan reports file:line only — never the matched value, since echoing
+# the secret to the terminal would re-leak it into scrollback.
+_doctor_check_command_leaks() {
+    if [ ! -d "$SESSIONS_ROOT" ]; then
+        return
+    fi
+    local files=("$SESSIONS_ROOT"/*/.cs/commands.md)
+    local present=()
+    local f
+    for f in "${files[@]}"; do
+        [ -f "$f" ] && present+=("$f")
+    done
+    if [ ${#present[@]} -eq 0 ]; then
+        _doctor_ok "Command leaks: no commands.md files yet"
+        return
+    fi
+    # Two leak shapes:
+    #  (a) mysql/mysqldump/psql ... -p<value>  where <value> doesn't start with `[`
+    #  (b) cs -secrets set <name> <value>      where <value> doesn't start with `[`
+    # The leading `[` exclusion lets `[REDACTED]` survive the scan.
+    local hits
+    hits=$(grep -rEn '(mysql|mysqldump|psql)[^|;&]* -p[^[ ][^ ]*|cs -secrets set [^ ]+ [^[ ][^ |;&]*' \
+        "${present[@]}" 2>/dev/null || true)
+    if [ -z "$hits" ]; then
+        _doctor_ok "Command leaks: ${#present[@]} commands.md file(s) clean"
+        return
+    fi
+    local count
+    count=$(echo "$hits" | wc -l | tr -d ' ')
+    _doctor_warn "Command leaks: $count entries may contain unredacted secrets"
+    # file:line only — the matched line is suppressed so the secret never re-leaks.
+    echo "$hits" | awk -F: '{printf "      %s:%s\n", $1, $2}' | head -5
+}
+
 run_doctor() {
     local DOCTOR_FAIL=0
     local DOCTOR_WARN=0
@@ -1266,6 +1304,7 @@ run_doctor() {
     _doctor_check_hooks_registered
     _doctor_check_hook_files_executable
     _doctor_check_claude_audit
+    _doctor_check_command_leaks
 
     if [ -n "${CLAUDE_SESSION_META_DIR:-}" ] && [ -d "${CLAUDE_SESSION_META_DIR:-}" ]; then
         _doctor_check_git_sync
