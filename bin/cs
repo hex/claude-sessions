@@ -1597,7 +1597,13 @@ launch_claude_code() {
     export CLAUDE_SESSION_META_DIR="$session_dir/.cs"
     export CLAUDE_ARTIFACT_DIR="$session_dir/.cs/artifacts"
     export CLAUDE_CODE_TASK_LIST_ID="$session_name"
+    # Belt-and-suspenders: export both names. As of Claude Code 2.1.121
+    # (verified by `strings`-grep + `claude --print` introspection on
+    # 2026-04-28), the auto-memory resolver reads CLAUDE_COWORK_MEMORY_PATH_OVERRIDE
+    # — CLAUDE_CODE_AUTO_MEMORY_PATH is not referenced in the binary at all.
+    # Keep the older name in case a past or future version honors it.
     export CLAUDE_CODE_AUTO_MEMORY_PATH="$session_dir/.cs/memory"
+    export CLAUDE_COWORK_MEMORY_PATH_OVERRIDE="$session_dir/.cs/memory"
 
     # Status indicator
     local status_icon status_text
