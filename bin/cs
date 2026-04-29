@@ -1134,6 +1134,38 @@ _doctor_check_hook_files_executable() {
     fi
 }
 
+# Inverse of _doctor_check_hooks_registered: walks every hook command in
+# settings.json and warns when its `command` path doesn't exist on disk.
+# Catches orphans left behind by feature branches that registered a hook
+# without ever shipping the corresponding file.
+_doctor_check_settings_hooks_resolve() {
+    local claude_dir="${CS_CLAUDE_DIR:-$HOME/.claude}"
+    local settings="$claude_dir/settings.json"
+    if [ ! -f "$settings" ]; then
+        return
+    fi
+    local commands
+    commands=$(jq -r '.hooks // {} | to_entries[].value[].hooks[]?.command // empty' "$settings" 2>/dev/null)
+    if [ -z "$commands" ]; then
+        _doctor_ok "Hook paths: no hooks registered in settings.json"
+        return
+    fi
+    local missing=() cmd resolved
+    while IFS= read -r cmd; do
+        [ -z "$cmd" ] && continue
+        resolved="${cmd/#~/$HOME}"
+        resolved="${resolved%% *}"
+        if [ ! -f "$resolved" ]; then
+            missing+=("$(basename "$resolved")")
+        fi
+    done <<< "$commands"
+    if [ ${#missing[@]} -eq 0 ]; then
+        _doctor_ok "Hook paths: all registered hooks resolve to existing files"
+    else
+        _doctor_warn "Hook paths: ${#missing[@]} registered hook(s) point at missing files: ${missing[*]}"
+    fi
+}
+
 _doctor_check_git_sync() {
     local dir="${CLAUDE_SESSION_DIR:-$PWD}"
     if ! git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
@@ -1301,6 +1333,7 @@ run_doctor() {
     _doctor_check_keychain
     _doctor_check_hooks_registered
     _doctor_check_hook_files_executable
+    _doctor_check_settings_hooks_resolve
     _doctor_check_claude_audit
     _doctor_check_command_leaks
 

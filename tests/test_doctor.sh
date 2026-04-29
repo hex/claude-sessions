@@ -199,6 +199,110 @@ test_doctor_audit_handles_missing_settings() {
     assert_output_contains "$output" "Audit" "audit check should still run when settings.json is missing" || return 1
 }
 
+# --- Settings.json hook-resolve scan ---
+# Catches the inverse direction of _doctor_check_hooks_registered: hooks registered
+# in settings.json that point at files which do not exist on disk. This is the
+# class of orphan that aboutme-validator.sh exemplified — a feature-branch
+# experiment registered the hook in settings.json without the file ever shipping.
+
+test_doctor_runs_settings_hooks_resolve_check() {
+    local fake_claude="$TEST_TMPDIR/claude-resolve"
+    mkdir -p "$fake_claude/hooks"
+    : > "$fake_claude/hooks/exists.sh"
+    chmod +x "$fake_claude/hooks/exists.sh"
+    cat > "$fake_claude/settings.json" << EOF
+{
+  "hooks": {
+    "PostToolUse": [
+      {"matcher": "Bash", "hooks": [{"type": "command", "command": "$fake_claude/hooks/exists.sh"}]}
+    ]
+  }
+}
+EOF
+    local output
+    output=$(CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Hook paths" "doctor should report a hook-paths summary" || return 1
+}
+
+test_doctor_warns_on_settings_hook_missing_file() {
+    local fake_claude="$TEST_TMPDIR/claude-orphan"
+    mkdir -p "$fake_claude/hooks"
+    cat > "$fake_claude/settings.json" << EOF
+{
+  "hooks": {
+    "PostToolUse": [
+      {"matcher": "Write", "hooks": [{"type": "command", "command": "$fake_claude/hooks/aboutme-validator.sh"}]}
+    ]
+  }
+}
+EOF
+    local output
+    output=$(CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "WARN.*Hook paths\|registered hook.*missing\|aboutme-validator" \
+        "doctor should warn when a registered hook points at a missing file" || return 1
+}
+
+test_doctor_passes_when_all_settings_hooks_resolve() {
+    local fake_claude="$TEST_TMPDIR/claude-clean"
+    mkdir -p "$fake_claude/hooks"
+    : > "$fake_claude/hooks/real.sh"
+    chmod +x "$fake_claude/hooks/real.sh"
+    cat > "$fake_claude/settings.json" << EOF
+{
+  "hooks": {
+    "PreToolUse": [
+      {"matcher": "Bash", "hooks": [{"type": "command", "command": "$fake_claude/hooks/real.sh"}]}
+    ],
+    "PostToolUse": [
+      {"matcher": "Edit", "hooks": [{"type": "command", "command": "$fake_claude/hooks/real.sh"}]}
+    ]
+  }
+}
+EOF
+    local output
+    output=$(CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Hook paths.*OK\|Hook paths.*resolve\|Hook paths.*all" \
+        "all-resolved hooks should produce an OK status" || return 1
+    assert_output_not_contains "$output" "registered hook.*missing" \
+        "no warning should be raised when every hook file exists" || return 1
+}
+
+test_doctor_settings_hooks_resolve_handles_no_hooks_section() {
+    local fake_claude="$TEST_TMPDIR/claude-nohooks"
+    mkdir -p "$fake_claude"
+    cat > "$fake_claude/settings.json" << 'EOF'
+{ "permissions": {"allow": [], "deny": []} }
+EOF
+    local output
+    output=$(CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Hook paths" \
+        "check should still run when settings.json has no hooks key" || return 1
+    assert_output_not_contains "$output" "registered hook.*missing" \
+        "missing hooks key is not a leak" || return 1
+}
+
+test_doctor_settings_hooks_resolve_expands_tilde() {
+    # settings.json typically uses ~/ in the command path; the check must expand it.
+    local fake_claude="$TEST_TMPDIR/claude-tilde"
+    mkdir -p "$fake_claude/hooks"
+    : > "$fake_claude/hooks/real.sh"
+    chmod +x "$fake_claude/hooks/real.sh"
+    local fake_home="$fake_claude"
+    cat > "$fake_claude/settings.json" << 'EOF'
+{
+  "hooks": {
+    "PreToolUse": [
+      {"matcher": "Bash", "hooks": [{"type": "command", "command": "~/hooks/real.sh"}]}
+    ]
+  }
+}
+EOF
+    local output
+    output=$(HOME="$fake_home" CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_not_contains "$output" "missing" \
+        "tilde-prefixed paths must be expanded before existence check" || return 1
+}
+
 # --- Command-leak scan ---
 
 test_doctor_runs_command_leaks_check() {
@@ -281,6 +385,11 @@ run_test test_doctor_runs_without_session
 run_test test_doctor_runs_audit_check
 run_test test_doctor_audit_counts_settings_contents
 run_test test_doctor_audit_handles_missing_settings
+run_test test_doctor_runs_settings_hooks_resolve_check
+run_test test_doctor_warns_on_settings_hook_missing_file
+run_test test_doctor_passes_when_all_settings_hooks_resolve
+run_test test_doctor_settings_hooks_resolve_handles_no_hooks_section
+run_test test_doctor_settings_hooks_resolve_expands_tilde
 run_test test_doctor_runs_command_leaks_check
 run_test test_doctor_command_leaks_passes_when_clean
 run_test test_doctor_command_leaks_warns_on_glued_mysql_password
