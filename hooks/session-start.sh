@@ -152,6 +152,7 @@ fi
 # Provide context to Claude about the session
 CONTEXT=$(cat << EOF
 You are working in a managed Claude Code session: $CLAUDE_SESSION_NAME
+Session started: $(date '+%Y-%m-%d %H:%M:%S %Z') ($(date -u +%Y-%m-%dT%H:%M:%SZ))
 
 Session directory: $CLAUDE_SESSION_DIR
 Artifacts directory: $CLAUDE_ARTIFACT_DIR
