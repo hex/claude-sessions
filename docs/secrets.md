@@ -67,8 +67,6 @@ cs -secrets list
 cs -secrets get API_KEY
 
 # Store a secret manually
-# (command-tracker.sh scrubs the positional value before writing to .cs/commands.md,
-# so this call won't leave the secret in your runbook)
 cs -secrets set my_secret "secret-value"
 
 # Delete a secret

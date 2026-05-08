@@ -60,8 +60,8 @@ There are 283+ tests across 17 test suites. All tests must pass before submittin
 - Match the style of surrounding code.
 - Every code file starts with a 2-line `ABOUTME:` comment explaining what the file does:
   ```bash
-  # ABOUTME: Tracks bash commands executed during a session.
-  # ABOUTME: Logs interesting commands to .cs/commands.md with categorization.
+  # ABOUTME: Logs every Bash tool call to .cs/logs/session.log with timestamp.
+  # ABOUTME: Truncates long commands at 200 chars; never blocks on errors.
   ```
 - No emojis in code or documentation (unless part of a functional emoji set).
 - No temporal names (`NewAPI`, `LegacyHandler`, `ImprovedParser`). Name things for what they do, not their history.

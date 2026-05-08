@@ -77,17 +77,6 @@ Runs when Claude Code would show a permission dialog for Write or Edit:
 - Falls through to the normal permission prompt for all other files
 - Scoped narrowly to session metadata only — project files always require explicit approval
 
-## command-tracker.sh (PostToolUse on Bash)
-
-Runs after Bash tool calls (async, non-blocking):
-- Captures interesting CLI commands to `.cs/commands.md`
-- Filters trivial commands (cd, ls, pwd, echo, cat, etc.) and bare interpreters (vim, python, node without flags)
-- Scrubs secrets: `KEY=value` env vars, Bearer tokens, `--password`/`--token` flags, glued `-p<value>` for db CLIs (`mysql`/`mysqldump`/`psql`), and the positional value of `cs -secrets set <name> <value>`
-- Strips leading `cd ... &&`, `export VAR=val;`, and inline `FOO=bar ` env-prefixes before classifying so `cd dir && cargo test` is correctly captured as a `cargo test` invocation
-- Categorizes commands by leading verb against an explicit lookup: Build, Test, Lint, Deploy, Dev, Search (rg/fd/grep/find), DB (mysql/psql/sqlite3), Remote (ssh/scp/rsync/curl), Git (git/gh/hg), Other
-- Deduplicates exact matches, bumps use count and last-used date
-- Detects skill-worthy commands (3+ uses across 2+ sessions) and suggests `/skillify`
-
 ## bash-logger.sh (PreToolUse on Bash)
 
 Runs before every Bash tool call (sync, fast):
@@ -130,8 +119,7 @@ The hooks are configured in `~/.claude/settings.json`:
     ],
     "PostToolUse": [
       { "matcher": "", "hooks": [{ "type": "command", "command": "~/.claude/hooks/changes-tracker.sh", "timeout": 10 }] },
-      { "matcher": "Write|Edit", "hooks": [{ "type": "command", "command": "~/.claude/hooks/discovery-commits.sh", "timeout": 10, "async": true }] },
-      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "~/.claude/hooks/command-tracker.sh", "timeout": 10, "async": true }] }
+      { "matcher": "Write|Edit", "hooks": [{ "type": "command", "command": "~/.claude/hooks/discovery-commits.sh", "timeout": 10, "async": true }] }
     ],
     "Stop": [
       { "hooks": [{ "type": "command", "command": "~/.claude/hooks/discoveries-reminder.sh", "timeout": 10 }] }

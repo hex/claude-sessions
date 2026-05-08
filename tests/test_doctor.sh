@@ -303,77 +303,6 @@ EOF
         "tilde-prefixed paths must be expanded before existence check" || return 1
 }
 
-# --- Command-leak scan ---
-
-test_doctor_runs_command_leaks_check() {
-    local output
-    output=$("$CS_BIN" -doctor 2>&1) || true
-    assert_output_contains "$output" "Command leaks" "doctor should report a command-leaks summary" || return 1
-}
-
-test_doctor_command_leaks_passes_when_clean() {
-    local cmd_file="$CLAUDE_SESSION_META_DIR/commands.md"
-    cat > "$cmd_file" << 'EOF'
-# Project Commands
-
-## Git
-- `git push origin main` -- [1x, last: 2026-04-28]
-
-## DB
-- `mysql -h h -u u -p[REDACTED] war_model` -- [1x, last: 2026-04-28]
-
-## Other
-- `cs -secrets set MYSQL_PWD [REDACTED]` -- [1x, last: 2026-04-28]
-EOF
-    local output
-    output=$("$CS_BIN" -doctor 2>&1) || true
-    assert_output_contains "$output" "Command leaks.*clean" \
-        "redacted entries should produce a clean summary" || return 1
-    assert_output_not_contains "$output" "may contain unredacted secrets" \
-        "no warning should be raised on a clean file" || return 1
-}
-
-test_doctor_command_leaks_warns_on_glued_mysql_password() {
-    local cmd_file="$CLAUDE_SESSION_META_DIR/commands.md"
-    cat > "$cmd_file" << 'EOF'
-# Project Commands
-## DB
-- `mysql -h db -u admin -pHunter2RawValue war_model -e "SELECT 1"` -- [1x, last: 2026-04-28]
-EOF
-    local output
-    output=$("$CS_BIN" -doctor 2>&1) || true
-    assert_output_contains "$output" "Command leaks.*1 entr" \
-        "glued mysql -p should trigger leak warning" || return 1
-}
-
-test_doctor_command_leaks_warns_on_secrets_set_value() {
-    local cmd_file="$CLAUDE_SESSION_META_DIR/commands.md"
-    cat > "$cmd_file" << 'EOF'
-# Project Commands
-## Other
-- `cs -secrets set DEV_PASSWORD RawPwdNotRedacted` -- [1x, last: 2026-04-28]
-EOF
-    local output
-    output=$("$CS_BIN" -doctor 2>&1) || true
-    assert_output_contains "$output" "Command leaks.*1 entr" \
-        "cs -secrets set with raw value should trigger leak warning" || return 1
-}
-
-test_doctor_command_leaks_does_not_echo_secret() {
-    # If the doctor printed the matched line, the secret would leak again into
-    # the user's terminal scrollback. Verify only file:line is shown.
-    local cmd_file="$CLAUDE_SESSION_META_DIR/commands.md"
-    cat > "$cmd_file" << 'EOF'
-# Project Commands
-## DB
-- `mysql -h db -u admin -pSecretValueXYZ123 war_model` -- [1x, last: 2026-04-28]
-EOF
-    local output
-    output=$("$CS_BIN" -doctor 2>&1) || true
-    assert_output_not_contains "$output" "SecretValueXYZ123" \
-        "doctor must not echo the leaked secret value" || return 1
-}
-
 echo "Running doctor tests..."
 run_test test_doctor_subcommand_exists
 run_test test_doctor_runs_default_checks_from_session
@@ -390,11 +319,6 @@ run_test test_doctor_warns_on_settings_hook_missing_file
 run_test test_doctor_passes_when_all_settings_hooks_resolve
 run_test test_doctor_settings_hooks_resolve_handles_no_hooks_section
 run_test test_doctor_settings_hooks_resolve_expands_tilde
-run_test test_doctor_runs_command_leaks_check
-run_test test_doctor_command_leaks_passes_when_clean
-run_test test_doctor_command_leaks_warns_on_glued_mysql_password
-run_test test_doctor_command_leaks_warns_on_secrets_set_value
-run_test test_doctor_command_leaks_does_not_echo_secret
 run_test test_doctor_runs_token_cost_check
 run_test test_doctor_token_cost_sums_jsonl
 run_test test_doctor_token_cost_handles_no_transcripts

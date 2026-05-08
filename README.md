@@ -44,9 +44,8 @@ No git repo required. No project structure needed. Just a name for what you're w
 - **Automatic git version control** - Every session gets local git history; discovery edits are autosaved to a shadow ref for crash safety, session end creates one clean commit; optionally sync to remote
 - **Session locking** - PID-based lock prevents the same session from being opened in two terminals simultaneously; use `--force` to override
 - **Remote sessions** - Run sessions on remote machines via `et` or `ssh` + `tmux`; `cs` handles connection, stubbing, and session tracking
-- **CLI command capture** - Interesting commands auto-tracked to `.cs/commands.md` with secret scrubbing; frequently used commands can be promoted to reusable skills via `/skillify`
 - **Cross-session search** - `cs -search <query>` greps across all sessions' discoveries, memory, README, and changes
-- **Health checks** - `cs -doctor` reports status of Keychain backend, hook registration, git sync state, shadow-ref freshness, discoveries.md size, auto-memory writability, Claude Code settings audit (hooks/MCPs/permissions/env vars counts), command-leak audit (scans every session's `commands.md` for unredacted db passwords and `cs -secrets set` values), and cumulative token usage for the current project
+- **Health checks** - `cs -doctor` reports status of Keychain backend, hook registration, git sync state, shadow-ref freshness, discoveries.md size, auto-memory writability, Claude Code settings audit (hooks/MCPs/permissions/env vars counts), and cumulative token usage for the current project
 - **Bash command audit trail** - Every Bash command Claude runs is logged to `.cs/logs/session.log` with timestamps
 - **Update notifications** - Checks for updates and notifies when new versions are available
 - **Verified updates** - Updates are downloaded from GitHub Releases and verified with SHA-256 checksums; additionally verified with [minisign](https://jedisct1.github.io/minisign/) signatures when available
@@ -65,8 +64,8 @@ Or clone and run `./install.sh`.
 
 The installer:
 - Adds `cs`, `cs-secrets`, and `cs-tui` to `~/.local/bin/`
-- Installs thirteen [hooks](docs/hooks.md) to `~/.claude/hooks/` for session tracking
-- Adds `/summary`, `/compact-discoveries`, and `/skillify` commands, and `store-secret` skill to `~/.claude/`
+- Installs twelve [hooks](docs/hooks.md) to `~/.claude/hooks/` for session tracking
+- Adds `/summary` and `/compact-discoveries` commands, and `store-secret` skill to `~/.claude/`
 - Installs shell completions for bash and zsh
 - Configures hook entries in `~/.claude/settings.json`
 
@@ -193,7 +192,6 @@ This rsyncs the session to the remote host and creates a local stub so future `c
 │   ├── remote.conf         # Remote host (if remote session)
 │   ├── memory/             # Claude Code auto memory (synced)
 │   ├── plans/              # Claude Code plans (synced)
-│   ├── commands.md         # Auto-discovered CLI commands
 │   ├── timeline.jsonl      # Session event log (starts, ends, checkpoints)
 │   ├── artifacts/          # Auto-tracked scripts and configs
 │   └── logs/session.log    # Bash command audit trail + session log
@@ -210,7 +208,6 @@ Claude Code's [auto memory](https://code.claude.com/docs/en/memory) is redirecte
 - `/summary` — Generate a narrative summary of the current session
 - `/compact-discoveries` — Summarize old discoveries into a condensed file for context efficiency
 - `/checkpoint <label>` — Save a labelled state snapshot (discoveries, changes, git HEAD)
-- `/skillify <command>` — Create a reusable Claude Code skill from a CLI command (session-local, not installed globally)
 
 ## Configuration
 

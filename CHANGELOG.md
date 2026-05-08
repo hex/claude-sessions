@@ -2,6 +2,32 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
+## 2026.5.1
+
+### Removed
+
+- **CLI command capture (`command-tracker.sh`, `commands.md`, `/skillify`).** An empirical audit across 35 sessions and 3,918 logged commands showed 95.1% one-shot reuse — the `@.cs/commands.md` import in the session CLAUDE.md was injecting non-trivial context (~125K tokens for the largest session) without measurable model-behaviour effect, and the skill-promotion path almost never fired (2.2% of entries crossed the 3-uses-across-2-dates threshold). Retired: the `command-tracker.sh` PostToolUse hook, the `@.cs/commands.md` import block in the session-template CLAUDE.md, the `_doctor_check_command_leaks` audit (its data source no longer exists), the `/skillify` slash command, and the three data files (`commands.md`, `command-dates.txt`, `promoted-commands.txt`). Net diff: -757 lines across 14 files.
+
+### Features
+
+- **`cs -doctor` settings-hook resolve check.** New `_doctor_check_settings_hooks_resolve` walks every hook command in `~/.claude/settings.json` and warns when its `command` path doesn't exist on disk. Catches the class of orphan that `aboutme-validator.sh` exemplified — a feature-branch experiment registered in settings.json whose file was never shipped. Symmetric to `_doctor_check_command_leaks`: pairs a write-time guard (RETIRED_HOOKS) with an audit-time guard that requires no discipline.
+
+- **Lazy migration via Phase 7 of `migrate_session()`.** `prune_commands_artifacts()` runs on every session open: deletes the four legacy data files and strips the `## Discovered Commands` block + `@.cs/commands.md` import from the session's CLAUDE.md. Idempotent; silent on already-clean sessions. No flag day, no central migration script — every existing session migrates transparently the next time it's opened.
+
+### Fixes
+
+- **`aboutme-validator.sh` retired from settings.json registrations.** A `wip/aboutme-validator` branch registered the hook in `~/.claude/settings.json` during dev installation but the file was never shipped; branch deletion left the entry orphaned, causing `/bin/sh: ~/.claude/hooks/aboutme-validator.sh: No such file or directory` errors on every PostToolUse-on-Write event. Adding it to the RETIRED_HOOKS arrays in both `bin/cs` and `install.sh` strips the orphan on next install.
+
+- **Pre-existing executable-bit bug** on `tests/test_download_prompt.sh`, `tests/test_session_lock.sh`, and `tests/test_shadow_ref.sh` — these were silently reported as failed because the test runner conflated exit-126 (permission denied) with real test failures.
+
+### Tests
+
+- New `tests/test_prune_commands.sh` (5 tests) exercising the Phase 7 migration: legacy-data-file removal, CLAUDE.md @-include stripping, preservation of unrelated session data, idempotence, no-op on already-clean sessions.
+- Removed `tests/test_command_tracker.sh` (366 lines) and 5 obsolete `_doctor_check_command_leaks` tests in `test_doctor.sh`.
+- Five new tests for `_doctor_check_settings_hooks_resolve`.
+
+**Full Changelog**: https://github.com/hex/claude-sessions/compare/v2026.4.13...v2026.5.1
+
 ## 2026.4.13
 
 ### Fixes

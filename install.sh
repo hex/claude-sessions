@@ -83,7 +83,6 @@ HOOK_SESSION_END_URL="${REPO_URL}/hooks/session-end.sh"
 HOOK_SUBAGENT_CONTEXT_URL="${REPO_URL}/hooks/subagent-context.sh"
 HOOK_TOOL_FAILURE_LOGGER_URL="${REPO_URL}/hooks/tool-failure-logger.sh"
 HOOK_SESSION_AUTO_APPROVE_URL="${REPO_URL}/hooks/session-auto-approve.sh"
-HOOK_COMMAND_TRACKER_URL="${REPO_URL}/hooks/command-tracker.sh"
 HOOK_BASH_LOGGER_URL="${REPO_URL}/hooks/bash-logger.sh"
 HOOK_FILES_SCAN_URL="${REPO_URL}/hooks/files-scan.sh"
 HOOK_FILES_CONTEXT_URL="${REPO_URL}/hooks/files-context.sh"
@@ -96,6 +95,7 @@ RETIRED_HOOKS=(
     aboutme-prereader.sh      # retired: source-file ABOUTME-header nudge experiment, superseded by files.md pre-read hook
     gotcha-prewriter.sh       # retired: brief pre-write gotcha-surfacing experiment; approach was rethought
     aboutme-validator.sh      # retired: never-shipped PostToolUse-on-Write experiment from a feature branch that registered the hook in settings.json without the file ever landing in source
+    command-tracker.sh        # retired: CLI command capture; @-included payload did not influence model behaviour at a rate justifying its context cost
 )
 
 # Command URLs for web install
@@ -230,7 +230,7 @@ elif [ "$INSTALL_METHOD" = "web" ]; then
 fi
 
 # Install hooks
-installed "13 hooks" "$HOOKS_DIR/"
+installed "12 hooks" "$HOOKS_DIR/"
 mkdir -p "$HOOKS_DIR"
 
 # Remove any retired hook files that earlier cs versions installed but no longer ship.
@@ -253,7 +253,6 @@ if [ "$INSTALL_METHOD" = "local" ]; then
     cp "$HOOKS_SOURCE/subagent-context.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/tool-failure-logger.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/session-auto-approve.sh" "$HOOKS_DIR/"
-    cp "$HOOKS_SOURCE/command-tracker.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/bash-logger.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/files-scan.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/files-context.sh" "$HOOKS_DIR/"
@@ -269,7 +268,6 @@ else
         curl -fsSL "$HOOK_SUBAGENT_CONTEXT_URL" -o "$HOOKS_DIR/subagent-context.sh" || error "Failed to download subagent-context.sh"
         curl -fsSL "$HOOK_TOOL_FAILURE_LOGGER_URL" -o "$HOOKS_DIR/tool-failure-logger.sh" || error "Failed to download tool-failure-logger.sh"
         curl -fsSL "$HOOK_SESSION_AUTO_APPROVE_URL" -o "$HOOKS_DIR/session-auto-approve.sh" || error "Failed to download session-auto-approve.sh"
-        curl -fsSL "$HOOK_COMMAND_TRACKER_URL" -o "$HOOKS_DIR/command-tracker.sh" || error "Failed to download command-tracker.sh"
         curl -fsSL "$HOOK_BASH_LOGGER_URL" -o "$HOOKS_DIR/bash-logger.sh" || error "Failed to download bash-logger.sh"
         curl -fsSL "$HOOK_FILES_SCAN_URL" -o "$HOOKS_DIR/files-scan.sh" || error "Failed to download files-scan.sh"
         curl -fsSL "$HOOK_FILES_CONTEXT_URL" -o "$HOOKS_DIR/files-context.sh" || error "Failed to download files-context.sh"
@@ -283,7 +281,6 @@ else
         wget -q "$HOOK_SUBAGENT_CONTEXT_URL" -O "$HOOKS_DIR/subagent-context.sh" || error "Failed to download subagent-context.sh"
         wget -q "$HOOK_TOOL_FAILURE_LOGGER_URL" -O "$HOOKS_DIR/tool-failure-logger.sh" || error "Failed to download tool-failure-logger.sh"
         wget -q "$HOOK_SESSION_AUTO_APPROVE_URL" -O "$HOOKS_DIR/session-auto-approve.sh" || error "Failed to download session-auto-approve.sh"
-        wget -q "$HOOK_COMMAND_TRACKER_URL" -O "$HOOKS_DIR/command-tracker.sh" || error "Failed to download command-tracker.sh"
         wget -q "$HOOK_BASH_LOGGER_URL" -O "$HOOKS_DIR/bash-logger.sh" || error "Failed to download bash-logger.sh"
         wget -q "$HOOK_FILES_SCAN_URL" -O "$HOOKS_DIR/files-scan.sh" || error "Failed to download files-scan.sh"
         wget -q "$HOOK_FILES_CONTEXT_URL" -O "$HOOKS_DIR/files-context.sh" || error "Failed to download files-context.sh"
@@ -386,7 +383,6 @@ else
     SUBAGENT_CONTEXT_PATH="$HOME/.claude/hooks/subagent-context.sh"
     TOOL_FAILURE_LOGGER_PATH="$HOME/.claude/hooks/tool-failure-logger.sh"
     SESSION_AUTO_APPROVE_PATH="$HOME/.claude/hooks/session-auto-approve.sh"
-    COMMAND_TRACKER_PATH="$HOME/.claude/hooks/command-tracker.sh"
     BASH_LOGGER_PATH="$HOME/.claude/hooks/bash-logger.sh"
     FILES_CONTEXT_PATH="$HOME/.claude/hooks/files-context.sh"
 
@@ -400,7 +396,6 @@ else
     SUBAGENT_CONTEXT_TILDE="~/.claude/hooks/subagent-context.sh"
     TOOL_FAILURE_LOGGER_TILDE="~/.claude/hooks/tool-failure-logger.sh"
     SESSION_AUTO_APPROVE_TILDE="~/.claude/hooks/session-auto-approve.sh"
-    COMMAND_TRACKER_TILDE="~/.claude/hooks/command-tracker.sh"
     BASH_LOGGER_TILDE="~/.claude/hooks/bash-logger.sh"
     FILES_CONTEXT_TILDE="~/.claude/hooks/files-context.sh"
 
@@ -535,20 +530,6 @@ else
                 "type": "command",
                 "command": $tilde,
                 "timeout": 5
-            }]
-        }]
-    ')
-
-    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$COMMAND_TRACKER_PATH" --arg tilde "$COMMAND_TRACKER_TILDE" '
-        .hooks.PostToolUse = ((.hooks.PostToolUse // []) | map(
-            select(.hooks | all(.command != $path and .command != $tilde))
-        )) + [{
-            "matcher": "Bash",
-            "hooks": [{
-                "type": "command",
-                "command": $tilde,
-                "timeout": 10,
-                "async": true
             }]
         }]
     ')

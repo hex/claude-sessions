@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.4.13"
+VERSION="2026.5.1"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -20,6 +20,7 @@ RETIRED_HOOKS=(
     aboutme-prereader.sh      # retired: source-file ABOUTME-header nudge experiment, superseded by files.md pre-read hook
     gotcha-prewriter.sh       # retired: brief pre-write gotcha-surfacing experiment; approach was rethought
     aboutme-validator.sh      # retired: never-shipped PostToolUse-on-Write experiment from a feature branch that registered the hook in settings.json without the file ever landing in source
+    command-tracker.sh        # retired: CLI command capture; @-included payload did not influence model behaviour at a rate justifying its context cost
 )
 
 # Hook scripts in HOOKS_DIR that are NOT registered in settings.json. They are
@@ -645,17 +646,10 @@ When resuming this session, read the following files to restore context:
 4. **.cs/discoveries.compact.md** - If exists, condensed older findings
 5. **.cs/changes.md** - Modifications and fixes made
 6. **.cs/artifacts/MANIFEST.json** - List of tracked artifacts
-7. **.cs/commands.md** - CLI commands discovered in prior sessions
 
 Note: When discoveries.md exceeds its size budget (default 60KB, override via
 CS_DISCOVERIES_MAX_SIZE env var), older entries are summarized into
 .cs/discoveries.compact.md to keep context lean.
-
-## Discovered Commands
-
-Useful CLI commands from prior sessions are tracked automatically. These may be stale if the project setup changed — verify before using.
-
-@.cs/commands.md
 
 ## Artifact Auto-Tracking
 
@@ -760,13 +754,6 @@ EOF
 
 EOF
 
-    # Create commands.md (populated by command-tracker hook)
-    cat > "$session_dir/.cs/commands.md" << 'EOF'
-# Project Commands
-Auto-discovered CLI commands from prior sessions.
-
-EOF
-
     write_session_claude_md "$session_dir"
 
     # Initialize empty MANIFEST.json
@@ -790,6 +777,40 @@ EOF
 
     # Redirect Claude Code auto memory into the session directory
     setup_auto_memory "$session_dir"
+}
+
+# Remove .cs/commands.md (and its adjacent state files), and strip the
+# `@.cs/commands.md` import plus the "Discovered Commands" section from
+# CLAUDE.md. Idempotent: silent and a no-op once a session is clean.
+prune_commands_artifacts() {
+    local session_dir="$1"
+    local meta_dir="$session_dir/.cs"
+    local removed=0
+
+    local f
+    for f in commands.md commands.md.tmp command-dates.txt promoted-commands.txt; do
+        if [ -f "$meta_dir/$f" ]; then
+            rm -f "$meta_dir/$f"
+            removed=1
+        fi
+    done
+
+    local claude_md="$session_dir/CLAUDE.md"
+    if [ -f "$claude_md" ] && grep -qE '@\.cs/commands\.md|^## Discovered Commands|^[0-9]+\. \*\*\.cs/commands\.md\*\*' "$claude_md"; then
+        local tmp="$claude_md.tmp"
+        awk '
+            /^## Discovered Commands[[:space:]]*$/ { in_section = 1; next }
+            in_section && /^## / { in_section = 0 }
+            in_section { next }
+            /^[0-9]+\. \*\*\.cs\/commands\.md\*\*/ { next }
+            { print }
+        ' "$claude_md" > "$tmp" && mv "$tmp" "$claude_md"
+        removed=1
+    fi
+
+    if [ "$removed" -eq 1 ]; then
+        warn "Pruned retired command-tracker artifacts"
+    fi
 }
 
 # Move a file or directory if source exists and destination doesn't (idempotent)
@@ -877,6 +898,9 @@ EOF
         write_session_claude_md "$session_dir"
         warn "Updated CLAUDE.md to reference .cs/ paths"
     fi
+
+    # Phase 7: prune retired command-tracker artifacts.
+    prune_commands_artifacts "$session_dir"
 
     # Phase 6: Add YAML frontmatter to README.md if missing
     local readme="$session_dir/.cs/README.md"
@@ -1288,41 +1312,6 @@ _doctor_check_auto_memory() {
     fi
 }
 
-# Audit-time guard for the write-time secret scrubber in command-tracker.sh.
-# Reports file:line only — never the matched value, since echoing the secret
-# to the terminal would re-leak it into scrollback.
-_doctor_check_command_leaks() {
-    if [ ! -d "$SESSIONS_ROOT" ]; then
-        return
-    fi
-    local files=("$SESSIONS_ROOT"/*/.cs/commands.md)
-    local present=()
-    local f
-    for f in "${files[@]}"; do
-        [ -f "$f" ] && present+=("$f")
-    done
-    if [ ${#present[@]} -eq 0 ]; then
-        _doctor_ok "Command leaks: no commands.md files yet"
-        return
-    fi
-    # Two leak shapes:
-    #  (a) mysql/mysqldump/psql ... -p<value>  where <value> doesn't start with `[`
-    #  (b) cs -secrets set <name> <value>      where <value> doesn't start with `[`
-    # The leading `[` exclusion lets `[REDACTED]` survive the scan.
-    local hits
-    hits=$(grep -rEn '(mysql|mysqldump|psql)[^|;&]* -p[^[ ][^ ]*|cs -secrets set [^ ]+ [^[ ][^ |;&]*' \
-        "${present[@]}" 2>/dev/null || true)
-    if [ -z "$hits" ]; then
-        _doctor_ok "Command leaks: ${#present[@]} commands.md file(s) clean"
-        return
-    fi
-    local count
-    count=$(echo "$hits" | wc -l | tr -d ' ')
-    _doctor_warn "Command leaks: $count entries may contain unredacted secrets"
-    # file:line only — the matched line is suppressed so the secret never re-leaks.
-    echo "$hits" | awk -F: '{printf "      %s:%s\n", $1, $2}' | head -5
-}
-
 run_doctor() {
     local DOCTOR_FAIL=0
     local DOCTOR_WARN=0
@@ -1335,7 +1324,6 @@ run_doctor() {
     _doctor_check_hook_files_executable
     _doctor_check_settings_hooks_resolve
     _doctor_check_claude_audit
-    _doctor_check_command_leaks
 
     if [ -n "${CLAUDE_SESSION_META_DIR:-}" ] && [ -d "${CLAUDE_SESSION_META_DIR:-}" ]; then
         _doctor_check_git_sync
@@ -2103,10 +2091,6 @@ create_session_gitignore() {
 # Session cooldown markers
 .cs/.discoveries-reminder-cooldown
 
-# Command tracker internal state
-.cs/command-dates.txt
-.cs/promoted-commands.txt
-
 # Claude Code local settings (recreated by cs on each machine)
 .claude/settings.local.json
 
@@ -2807,7 +2791,7 @@ run_uninstall() {
     fi
 
     # Remove hooks
-    for hook in session-start.sh artifact-tracker.sh changes-tracker.sh discovery-commits.sh discoveries-reminder.sh session-end.sh subagent-context.sh tool-failure-logger.sh session-auto-approve.sh command-tracker.sh bash-logger.sh files-scan.sh files-context.sh; do
+    for hook in session-start.sh artifact-tracker.sh changes-tracker.sh discovery-commits.sh discoveries-reminder.sh session-end.sh subagent-context.sh tool-failure-logger.sh session-auto-approve.sh bash-logger.sh files-scan.sh files-context.sh; do
         if [ -f "$hooks_dir/$hook" ]; then
             rm "$hooks_dir/$hook"
             info "Removed $hooks_dir/$hook"
@@ -2859,7 +2843,6 @@ run_uninstall() {
         local subagent_context_path="$hooks_dir/subagent-context.sh"
         local tool_failure_logger_path="$hooks_dir/tool-failure-logger.sh"
         local session_auto_approve_path="$hooks_dir/session-auto-approve.sh"
-        local command_tracker_path="$hooks_dir/command-tracker.sh"
         local bash_logger_path="$hooks_dir/bash-logger.sh"
         local files_context_path="$hooks_dir/files-context.sh"
 
@@ -2935,13 +2918,6 @@ run_uninstall() {
         settings=$(echo "$settings" | jq --arg path "$session_auto_approve_path" '
             if .hooks.PermissionRequest then
                 .hooks.PermissionRequest = [.hooks.PermissionRequest[] | select(.hooks | all(.command != $path))]
-            else . end
-        ')
-
-        # Remove our PostToolUse command tracker hook
-        settings=$(echo "$settings" | jq --arg path "$command_tracker_path" '
-            if .hooks.PostToolUse then
-                .hooks.PostToolUse = [.hooks.PostToolUse[] | select(.hooks | all(.command != $path))]
             else . end
         ')
 
