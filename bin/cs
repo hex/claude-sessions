@@ -1360,6 +1360,38 @@ _doctor_check_auto_memory() {
     fi
 }
 
+# Cross-check the session UUID recorded in .cs/README.md frontmatter against
+# the live $CLAUDE_CODE_SESSION_ID (set by Claude Code inside its own session).
+# A mismatch means the running claude conversation is not the one cs thinks
+# it is — usually because the user launched claude outside cs in this dir,
+# or because migrate_session backfilled a UUID after Claude Code had already
+# resolved its own session ID. The recorded UUID is the source of truth for
+# cs and hooks; doctor surfaces the divergence so the user can decide whether
+# to relaunch via cs or accept the drift.
+_doctor_check_session_id_match() {
+    local readme="$CLAUDE_SESSION_META_DIR/README.md"
+    if [ ! -f "$readme" ]; then
+        _doctor_warn "Session UUID: $readme missing"
+        return
+    fi
+    local recorded
+    recorded=$(_read_session_uuid "$readme")
+    if [ -z "$recorded" ]; then
+        _doctor_warn "Session UUID: not recorded in frontmatter — next cs launch will backfill"
+        return
+    fi
+    local current="${CLAUDE_CODE_SESSION_ID:-}"
+    if [ -z "$current" ]; then
+        _doctor_ok "Session UUID: $recorded (\$CLAUDE_CODE_SESSION_ID unset, cannot verify)"
+        return
+    fi
+    if [ "$recorded" = "$current" ]; then
+        _doctor_ok "Session UUID: $recorded matches \$CLAUDE_CODE_SESSION_ID"
+    else
+        _doctor_warn "Session UUID mismatch: recorded $recorded, but \$CLAUDE_CODE_SESSION_ID=$current"
+    fi
+}
+
 run_doctor() {
     local DOCTOR_FAIL=0
     local DOCTOR_WARN=0
@@ -1378,6 +1410,7 @@ run_doctor() {
         _doctor_check_shadow_ref
         _doctor_check_discoveries_size
         _doctor_check_auto_memory
+        _doctor_check_session_id_match
         _doctor_check_token_cost
     fi
 
@@ -1669,6 +1702,16 @@ launch_claude_code() {
     local claude_session_id=""
     if [ -f "$session_dir/.cs/README.md" ]; then
         claude_session_id=$(_read_session_uuid "$session_dir/.cs/README.md")
+    fi
+
+    # Live-duplicate guard: refuse to spawn a second claude process for the
+    # same session UUID. Mostly catches "I opened this in two tabs" accidents.
+    # --force overrides. Tests stub `ps` via CS_PS_BIN to inject canned output;
+    # production runs the real `ps`. Best-effort — ps failures fall through.
+    if [ -n "$claude_session_id" ] && [ "$force" != "true" ]; then
+        if "${CS_PS_BIN:-ps}" -Ao args= 2>/dev/null | grep -Fq -- "$claude_session_id"; then
+            error "Session $session_name is already running elsewhere (UUID $claude_session_id). Use --force to override."
+        fi
     fi
 
     # Set environment variables

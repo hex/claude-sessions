@@ -199,4 +199,134 @@ STUB_EOF
 }
 
 run_test test_env_var_exported_with_uuid
+
+# ============================================================================
+# Cycle 5: doctor check verifies recorded UUID against $CLAUDE_CODE_SESSION_ID
+# ============================================================================
+
+# Build a session with a fixed UUID in frontmatter and the minimal layout
+# needed for `cs -doctor` to run its in-session checks. Returns the path.
+_seed_doctor_session() {
+    local name="$1"
+    local uuid="$2"
+    local session_dir="$CS_SESSIONS_ROOT/$name"
+    mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
+    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
+    cat > "$session_dir/.cs/README.md" << EOF
+---
+status: active
+created: 2026-04-21
+claude_session_id: $uuid
+tags: []
+aliases: ["$name"]
+---
+# Session: $name
+EOF
+    echo "# Discoveries" > "$session_dir/.cs/discoveries.md"
+    echo "# Session" > "$session_dir/CLAUDE.md"
+    (cd "$session_dir" && git init -q -b main && git config user.email t@t \
+        && git config user.name T && git add -A && git commit -q -m init)
+    echo "$session_dir"
+}
+
+test_doctor_session_id_match_reports_ok() {
+    local uuid="11111111-2222-4333-8444-555555555555"
+    local session_dir
+    session_dir=$(_seed_doctor_session "test-session" "$uuid")
+
+    local output
+    output=$(CLAUDE_SESSION_DIR="$session_dir" \
+             CLAUDE_SESSION_META_DIR="$session_dir/.cs" \
+             CLAUDE_SESSION_NAME="test-session" \
+             CLAUDE_CODE_SESSION_ID="$uuid" \
+             "$CS_BIN" -doctor 2>&1) || true
+
+    assert_output_contains "$output" "Session UUID" \
+        "doctor should print a Session UUID check line" || return 1
+    assert_output_contains "$output" "$uuid" \
+        "doctor output should include the matching UUID for context" || return 1
+}
+
+test_doctor_session_id_mismatch_warns() {
+    local recorded="11111111-2222-4333-8444-555555555555"
+    local current="99999999-aaaa-4bbb-8ccc-dddddddddddd"
+    local session_dir
+    session_dir=$(_seed_doctor_session "test-session" "$recorded")
+
+    local output
+    output=$(CLAUDE_SESSION_DIR="$session_dir" \
+             CLAUDE_SESSION_META_DIR="$session_dir/.cs" \
+             CLAUDE_SESSION_NAME="test-session" \
+             CLAUDE_CODE_SESSION_ID="$current" \
+             "$CS_BIN" -doctor 2>&1) || true
+
+    assert_output_contains "$output" "WARN" \
+        "doctor should WARN when CLAUDE_CODE_SESSION_ID does not match frontmatter" || return 1
+    assert_output_contains "$output" "$recorded" \
+        "warning text should reference the recorded UUID" || return 1
+}
+
+run_test test_doctor_session_id_match_reports_ok
+run_test test_doctor_session_id_mismatch_warns
+
+# ============================================================================
+# Cycle 6: live-duplicate guard refuses second spawn; --force overrides
+# ============================================================================
+
+# Build a ps stub that emits a fake process line containing the given UUID.
+# bin/cs reads CS_PS_BIN in place of `ps` so we can inject canned output
+# without PATH manipulation.
+_seed_ps_stub_with_uuid() {
+    local uuid="$1"
+    local stub="$TEST_TMPDIR/ps-stub"
+    cat > "$stub" << STUB
+#!/usr/bin/env bash
+echo "  47533 ??       0:00.42 claude --resume $uuid"
+STUB
+    chmod +x "$stub"
+    echo "$stub"
+}
+
+test_live_duplicate_refuses_without_force() {
+    local uuid="11111111-2222-4333-8444-555555555555"
+    local session_dir
+    session_dir=$(_seed_doctor_session "test-session" "$uuid")
+
+    local stub
+    stub=$(_seed_ps_stub_with_uuid "$uuid")
+
+    local output rc=0
+    output=$(CS_PS_BIN="$stub" "$CS_BIN" test-session <<< "" 2>&1) || rc=$?
+
+    if [ "$rc" -eq 0 ]; then
+        echo "  FAIL: cs should have refused with non-zero exit (got 0)"
+        echo "    output: $(echo "$output" | tail -5)"
+        return 1
+    fi
+
+    assert_output_contains "$output" "already running" \
+        "error should call out the live duplicate" || return 1
+    assert_output_contains "$output" "$uuid" \
+        "error should mention the UUID for traceability" || return 1
+}
+
+test_live_duplicate_force_overrides() {
+    local uuid="11111111-2222-4333-8444-555555555555"
+    local session_dir
+    session_dir=$(_seed_doctor_session "test-session" "$uuid")
+
+    local stub
+    stub=$(_seed_ps_stub_with_uuid "$uuid")
+
+    local output
+    output=$(CS_PS_BIN="$stub" "$CS_BIN" test-session --force <<< "" 2>&1) || true
+
+    assert_output_contains "$output" "--resume $uuid" \
+        "with --force the spawn should proceed and use --resume <uuid>" || return 1
+    assert_output_not_contains "$output" "already running" \
+        "with --force the live-duplicate refusal must not fire" || return 1
+}
+
+run_test test_live_duplicate_refuses_without_force
+run_test test_live_duplicate_force_overrides
 report_results
