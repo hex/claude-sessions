@@ -710,9 +710,37 @@ cs -secrets set <name> <value>     # Store manually
 EOF
 }
 
+# Generate a v4 UUID, lowercased. uuidgen on BSD (macOS) returns uppercase;
+# Linux uuidgen and /proc are already lowercase. Lowercasing keeps the
+# value consistent with how Claude Code stores its session jsonl paths.
+_alloc_uuid() {
+    if command -v uuidgen >/dev/null 2>&1; then
+        uuidgen | tr '[:upper:]' '[:lower:]'
+    elif [ -r /proc/sys/kernel/random/uuid ]; then
+        cat /proc/sys/kernel/random/uuid
+    elif command -v python3 >/dev/null 2>&1; then
+        python3 -c 'import uuid; print(uuid.uuid4())'
+    else
+        error "no UUID generator available (need uuidgen, /proc/sys/kernel/random/uuid, or python3)"
+    fi
+}
+
+# Read claude_session_id from a session's .cs/README.md frontmatter.
+# Prints the UUID to stdout, or empty if absent or unreadable. Never errors.
+_read_session_uuid() {
+    local readme="$1"
+    [ -f "$readme" ] || return 0
+    grep -E '^claude_session_id:' "$readme" 2>/dev/null \
+        | head -1 \
+        | sed -E 's/^claude_session_id:[[:space:]]*//; s/^"//; s/"$//' \
+        || true
+}
+
 # Create session directory structure
 create_session_structure() {
     local session_dir="$1"
+    local claude_session_id
+    claude_session_id=$(_alloc_uuid)
 
     mkdir -p "$session_dir/.cs"/{artifacts,logs}
 
@@ -721,6 +749,7 @@ create_session_structure() {
 ---
 status: active
 created: $(date '+%Y-%m-%d')
+claude_session_id: $claude_session_id
 tags: []
 aliases: ["$(basename "$session_dir")"]
 ---
@@ -1720,8 +1749,23 @@ launch_claude_code() {
         fi
         exit $rc
     else
-        # shellcheck disable=SC2086
-        exec $CLAUDE_CODE_BIN
+        # Pre-allocated UUID path: for fresh sessions, spawn claude with
+        # --session-id <uuid> so its jsonl lands at a deterministic path
+        # (~/.claude/projects/<encoded-cwd>/<uuid>.jsonl), enabling reliable
+        # resume and reverse-lookup from hooks via $CLAUDE_CODE_SESSION_ID.
+        # The "user said N to continue" branch on existing sessions stays
+        # naked for now — Cycle 2 of the UUID work decides that policy.
+        local claude_session_id=""
+        if [ "$is_new" = "true" ] && [ -f "$session_dir/.cs/README.md" ]; then
+            claude_session_id=$(_read_session_uuid "$session_dir/.cs/README.md")
+        fi
+        if [ -n "$claude_session_id" ]; then
+            # shellcheck disable=SC2086
+            exec $CLAUDE_CODE_BIN --session-id "$claude_session_id"
+        else
+            # shellcheck disable=SC2086
+            exec $CLAUDE_CODE_BIN
+        fi
     fi
 }
 
