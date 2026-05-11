@@ -16,9 +16,21 @@ All notable changes to cs are documented here. Release notes are also available 
 
 - **`cs -doctor` Session UUID cross-check.** New `_doctor_check_session_id_match` compares the recorded `claude_session_id` against the live `$CLAUDE_CODE_SESSION_ID` (set by Claude Code inside its own session). Mismatches WARN — they indicate either claude was launched outside cs in this directory, or that Phase 8 backfilled a UUID after Claude Code had already resolved its own session ID. The recorded UUID is cs's source of truth; the check surfaces drift.
 
+- **Auto-memory bucket guidance in session CLAUDE.md.** `write_session_claude_md()` now includes an "Auto-memory bucket guidance" section with a per-bucket signal-phrase decision table (`user_*.md` / `feedback_*.md` / `project_*.md` / `reference_*.md`) plus dedup, lazy-load, and "never invent" discipline. Borrowed from `Facets-cloud/flow`'s SKILL.md §4.10 — cs's auto-memory taxonomy is fixed by the harness, but the guidance fills the "when user says X, write to Y" gap that the harness prompt leaves open. The block is wrapped in a `<!-- cs:memory-rules -->` HTML comment so the user can opt out by deleting the content and keeping the sentinel as a tombstone — cs treats the sentinel's presence as "managed, do not re-add."
+
+- **Lazy migration via `migrate_session()` Phase 9.** Existing sessions whose CLAUDE.md predates the bucket-guidance feature get the block appended on next launch. Idempotent (sentinel-presence skips), and respects user opt-out via the tombstone pattern. Same lazy-on-resume mechanism as Phase 7 (commands.md retirement) and Phase 8 (UUID backfill).
+
+### Fixes
+
+- **`grep`-finds-itself in the live-duplicate guard.** The Feature 2 spawn guard was `ps -Ao args= | grep -F -- "$UUID"`, which puts `$UUID` in grep's own argv; `ps` captured grep's argv and grep matched itself, falsely blocking every non-stubbed spawn. Surfaced when the Feature 3 tests exercised multi-spawn lifecycles harder than Feature 2's own tests did (which used a stub `ps` that bypassed the bug). Replaced with a bash builtin substring match (`[[ "$ps_out" == *"$uuid"* ]]`) that runs entirely in-process and never exposes the UUID as a subprocess argv.
+
 ### Tests
 
-- New `tests/test_uuid.sh` with 8 tests covering: new-session UUID allocation and `--session-id` spawn, resume via `--resume <uuid>`, lazy migration with idempotence and exactly-once frontmatter, `CS_CLAUDE_SESSION_ID` env export, doctor match + mismatch, live-duplicate refusal + `--force` override. Full suite (21 files) clean.
+- New `tests/test_uuid.sh` with 8 tests covering: new-session UUID allocation and `--session-id` spawn, resume via `--resume <uuid>`, lazy migration with idempotence and exactly-once frontmatter, `CS_CLAUDE_SESSION_ID` env export, doctor match + mismatch, live-duplicate refusal + `--force` override.
+
+- New `tests/test_memory_rules.sh` with 4 tests covering: new-session block insertion, lazy migration append, idempotence (HTML-comment-specific count to avoid false-matching the prose mention of the sentinel name), and user opt-out via tombstone sentinel.
+
+- Full suite (22 files) clean.
 
 ## 2026.5.1
 
