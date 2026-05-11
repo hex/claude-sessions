@@ -999,6 +999,41 @@ EOF
         ' "$readme" > "$_tmp" && mv "$_tmp" "$readme"
         warn "Backfilled claude_session_id in .cs/README.md"
     fi
+
+    # Phase 9: Append auto-memory bucket guidance to CLAUDE.md if missing.
+    # The cs:memory-rules sentinel marks "managed by cs" — its presence
+    # (with or without content beneath) signals "do not re-add" so users
+    # can opt out by deleting the content and keeping the sentinel as a
+    # tombstone. Block content matches write_session_claude_md; updating
+    # one means updating both until a third caller justifies extracting
+    # a shared helper.
+    local claude_md_p9="$session_dir/CLAUDE.md"
+    if [ -f "$claude_md_p9" ] && ! grep -q 'cs:memory-rules' "$claude_md_p9"; then
+        cat >> "$claude_md_p9" << 'EOF'
+
+<!-- cs:memory-rules -->
+## Auto-memory bucket guidance
+
+When the user shares a durable fact worth saving to .cs/memory/, listen for these signals to pick the right bucket:
+
+| User says...                                                                | Goes to          |
+|-----------------------------------------------------------------------------|------------------|
+| "I'm the / my role is / I prefer / I always / I hate / I never"             | `user_*.md`      |
+| "don't do X / stop doing Y / not like that" — corrections                   | `feedback_*.md`  |
+| "yes exactly / keep that approach / that worked" — validated choices        | `feedback_*.md`  |
+| "we're shipping / deadline is / X is driving this / freeze on..."           | `project_*.md`   |
+| "Linear project X / Grafana board at Y / the #channel for Z / docs at URL" | `reference_*.md` |
+
+Discipline:
+- Read the matching memory file before writing — dedup, don't duplicate.
+- One bucket per fact. If it plausibly fits two, pick the more specific.
+- Lazy-load: don't read all four eagerly; load on demand when the question needs that bucket.
+- Never invent or extrapolate. Record only what the user literally said or clearly implied.
+
+To opt out of this guidance, delete the table and prose above but keep the `cs:memory-rules` HTML comment as a tombstone — cs treats the sentinel's presence as "managed, do not re-add."
+EOF
+        warn "Appended auto-memory bucket guidance to CLAUDE.md"
+    fi
 }
 
 # Cross-platform helpers
@@ -1729,8 +1764,17 @@ launch_claude_code() {
     # same session UUID. Mostly catches "I opened this in two tabs" accidents.
     # --force overrides. Tests stub `ps` via CS_PS_BIN to inject canned output;
     # production runs the real `ps`. Best-effort — ps failures fall through.
+    #
+    # The match uses a bash builtin (`[[ ... == *needle* ]]`) rather than
+    # piping ps to grep, to avoid the classic grep-finds-itself bug: with
+    # `ps -Ao args= | grep -F -- "$UUID"`, grep's own argv contains the
+    # UUID and ps sees it, producing a false-positive self-match. The
+    # builtin substring test runs entirely in-process and never exposes
+    # the UUID as a subprocess argv.
     if [ -n "$claude_session_id" ] && [ "$force" != "true" ]; then
-        if "${CS_PS_BIN:-ps}" -Ao args= 2>/dev/null | grep -Fq -- "$claude_session_id"; then
+        local _ps_out
+        _ps_out=$("${CS_PS_BIN:-ps}" -Ao args= 2>/dev/null || true)
+        if [[ "$_ps_out" == *"$claude_session_id"* ]]; then
             error "Session $session_name is already running elsewhere (UUID $claude_session_id). Use --force to override."
         fi
     fi

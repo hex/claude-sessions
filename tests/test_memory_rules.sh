@@ -36,10 +36,95 @@ test_new_session_has_memory_rules_block() {
         "CLAUDE.md should mention user_*.md bucket in the signal-phrase table" || return 1
 }
 
+# Build a "legacy" session whose CLAUDE.md predates the memory-rules block.
+# Used by the lazy-migration tests.
+_seed_legacy_session() {
+    local name="$1"
+    local session_dir="$CS_SESSIONS_ROOT/$name"
+    mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
+    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
+    echo "auto_sync=on" > "$session_dir/.cs/sync.conf"
+    cat > "$session_dir/.cs/README.md" << EOF
+---
+status: active
+created: 2026-01-01
+tags: []
+aliases: ["$name"]
+---
+# Session: $name
+EOF
+    echo "# Discoveries" > "$session_dir/.cs/discoveries.md"
+    echo "# Changes" > "$session_dir/.cs/changes.md"
+    # Legacy CLAUDE.md: mentions .cs/ paths (so Phase 5 won't rewrite it)
+    # but contains no cs:memory-rules sentinel.
+    cat > "$session_dir/CLAUDE.md" << 'EOF'
+# Session Documentation Protocol
+
+This is a Claude Code session managed by cs. Session metadata lives in the .cs/ directory.
+
+## Documentation
+
+Update .cs/discoveries.md, .cs/changes.md, and .cs/README.md as you work.
+EOF
+    (cd "$session_dir" && git init -q && git add -A && git commit -q -m "init")
+    echo "$session_dir"
+}
+
+# ============================================================================
+# Cycle 2: lazy migration appends the block to legacy CLAUDE.md (idempotent)
+# ============================================================================
+
+test_lazy_migration_appends_block() {
+    local session_dir
+    session_dir=$(_seed_legacy_session "legacy-claude")
+
+    assert_file_not_contains "$session_dir/CLAUDE.md" "cs:memory-rules" \
+        "precondition: legacy CLAUDE.md should lack the sentinel" || return 1
+
+    "$CS_BIN" legacy-claude <<< "" >/dev/null 2>&1 || true
+
+    assert_file_contains "$session_dir/CLAUDE.md" "cs:memory-rules" \
+        "Phase 9 migration should append the sentinel" || return 1
+    assert_file_contains "$session_dir/CLAUDE.md" "Auto-memory bucket guidance" \
+        "appended block should include the section header" || return 1
+}
+
+test_lazy_migration_idempotent() {
+    local session_dir
+    session_dir=$(_seed_legacy_session "legacy-claude")
+
+    # First migration appends.
+    "$CS_BIN" legacy-claude <<< "" >/dev/null 2>&1 || true
+
+    local first_size
+    first_size=$(wc -c < "$session_dir/CLAUDE.md" | tr -d ' ')
+
+    # Second migration must be a no-op.
+    "$CS_BIN" legacy-claude <<< "" >/dev/null 2>&1 || true
+
+    local second_size
+    second_size=$(wc -c < "$session_dir/CLAUDE.md" | tr -d ' ')
+
+    assert_eq "$first_size" "$second_size" \
+        "second migration should not change CLAUDE.md size" || return 1
+
+    # The token `cs:memory-rules` also appears in the opt-out instruction
+    # prose (documenting the sentinel by name). The actual sentinel marker
+    # is the HTML comment; that's what must be exactly-once. Production
+    # grep at Phase 9 is intentionally loose so opt-out-with-docs is also
+    # detected as "managed."
+    local sentinel_count
+    sentinel_count=$(grep -cF '<!-- cs:memory-rules -->' "$session_dir/CLAUDE.md")
+    assert_eq "1" "$sentinel_count" \
+        "HTML comment sentinel must appear exactly once after repeated migrations" || return 1
+}
+
 # ============================================================================
 # Runner
 # ============================================================================
 echo "Running test_memory_rules.sh"
 echo ""
 run_test test_new_session_has_memory_rules_block
+run_test test_lazy_migration_appends_block
+run_test test_lazy_migration_idempotent
 report_results
