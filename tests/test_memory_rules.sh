@@ -127,4 +127,53 @@ echo ""
 run_test test_new_session_has_memory_rules_block
 run_test test_lazy_migration_appends_block
 run_test test_lazy_migration_idempotent
+
+# ============================================================================
+# Cycle 3: user opt-out — sentinel as tombstone prevents re-addition
+# ============================================================================
+
+test_user_opt_out_respected() {
+    local name="opted-out"
+    local session_dir="$CS_SESSIONS_ROOT/$name"
+    mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
+    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
+    echo "auto_sync=on" > "$session_dir/.cs/sync.conf"
+    cat > "$session_dir/.cs/README.md" << EOF
+---
+status: active
+created: 2026-01-01
+tags: []
+aliases: ["$name"]
+---
+# Session: $name
+EOF
+    echo "# Discoveries" > "$session_dir/.cs/discoveries.md"
+    echo "# Changes" > "$session_dir/.cs/changes.md"
+    # User opted out: kept the sentinel as a tombstone, deleted the block.
+    cat > "$session_dir/CLAUDE.md" << 'EOF'
+# Session Documentation Protocol
+
+This is a Claude Code session managed by cs. Session metadata lives in the .cs/ directory.
+
+<!-- cs:memory-rules -->
+EOF
+    (cd "$session_dir" && git init -q && git add -A && git commit -q -m init)
+
+    assert_file_contains "$session_dir/CLAUDE.md" '<!-- cs:memory-rules -->' \
+        "precondition: tombstone sentinel must be present" || return 1
+    assert_file_not_contains "$session_dir/CLAUDE.md" "Auto-memory bucket guidance" \
+        "precondition: opted-out CLAUDE.md must lack the block content" || return 1
+
+    "$CS_BIN" opted-out <<< "" >/dev/null 2>&1 || true
+
+    assert_file_not_contains "$session_dir/CLAUDE.md" "Auto-memory bucket guidance" \
+        "tombstone sentinel must prevent re-addition of the block" || return 1
+
+    local sentinel_count
+    sentinel_count=$(grep -cF '<!-- cs:memory-rules -->' "$session_dir/CLAUDE.md")
+    assert_eq "1" "$sentinel_count" \
+        "tombstone sentinel must not duplicate" || return 1
+}
+
+run_test test_user_opt_out_respected
 report_results
