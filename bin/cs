@@ -1729,7 +1729,17 @@ launch_claude_code() {
                 continue_flag=""
                 ;;
             *)
-                continue_flag="--continue"
+                # Prefer --resume <uuid> when the session has a recorded UUID:
+                # it names the exact conversation, vs --continue which means
+                # "most recent" and may resolve to a sibling Claude session
+                # the user ran in a different terminal between cs launches.
+                local _existing_uuid
+                _existing_uuid=$(_read_session_uuid "$session_dir/.cs/README.md")
+                if [ -n "$_existing_uuid" ]; then
+                    continue_flag="--resume $_existing_uuid"
+                else
+                    continue_flag="--continue"
+                fi
                 ;;
         esac
         echo ""
