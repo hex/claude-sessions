@@ -2,6 +2,24 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
+## Unreleased
+
+### Features
+
+- **Deterministic Claude-session resume via pre-allocated UUIDs.** `create_session_structure()` now allocates a v4 UUID at session creation and writes it to `.cs/README.md` frontmatter as `claude_session_id`. `launch_claude_code()` reads it once and uses it for two things: spawning fresh sessions via `claude --session-id <uuid>` (so the conversation jsonl lands at a deterministic path under `~/.claude/projects/`), and resuming existing sessions via `claude --resume <uuid>` instead of `--continue`. `--continue` resolves to "the most recent claude conversation," which can be a sibling session the user ran in a different terminal between cs launches; `--resume <uuid>` names the exact conversation. Borrowed from `Facets-cloud/flow`'s session-binding pattern (`internal/app/do.go`).
+
+- **`CS_CLAUDE_SESSION_ID` exported to hooks.** Hook scripts can reverse-look-up the bound cs session without depending on `$CLAUDE_CODE_SESSION_ID` (which Claude Code sets in-session, not in pre-spawn hooks).
+
+- **Lazy migration via `migrate_session()` Phase 8.** Sessions created before this feature lack `claude_session_id` in frontmatter. Phase 8 allocates a UUID, inserts it after the `created:` line, and is idempotent on subsequent resumes. Phase 6 (frontmatter creation) is the precondition. No flag day — every legacy session migrates transparently the next time it's opened, same pattern as the Phase 7 commands.md retirement in v2026.5.1.
+
+- **Live-duplicate guard at spawn.** `launch_claude_code()` scans `ps` for the session's UUID before exec'ing claude. If a process already exists with the UUID in its argv (a duplicate tab), spawn is refused with a clear message. `--force` overrides. Tests stub `ps` via the `CS_PS_BIN` env var without touching `PATH`.
+
+- **`cs -doctor` Session UUID cross-check.** New `_doctor_check_session_id_match` compares the recorded `claude_session_id` against the live `$CLAUDE_CODE_SESSION_ID` (set by Claude Code inside its own session). Mismatches WARN — they indicate either claude was launched outside cs in this directory, or that Phase 8 backfilled a UUID after Claude Code had already resolved its own session ID. The recorded UUID is cs's source of truth; the check surfaces drift.
+
+### Tests
+
+- New `tests/test_uuid.sh` with 8 tests covering: new-session UUID allocation and `--session-id` spawn, resume via `--resume <uuid>`, lazy migration with idempotence and exactly-once frontmatter, `CS_CLAUDE_SESSION_ID` env export, doctor match + mismatch, live-duplicate refusal + `--force` override. Full suite (21 files) clean.
+
 ## 2026.5.1
 
 ### Removed
