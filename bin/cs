@@ -1661,6 +1661,16 @@ launch_claude_code() {
     trap 'reset_tab_title; release_session_lock "'"$session_dir/.cs"'"' EXIT
     trap 'reset_tab_title; release_session_lock "'"$session_dir/.cs"'"; exit 130' INT TERM
 
+    # Read the session's recorded UUID (allocated by create_session_structure
+    # on new sessions or backfilled by migrate_session Phase 8 on legacy ones).
+    # Used for both the CS_CLAUDE_SESSION_ID env export below and for the
+    # spawn args at exec time. Empty only if the README is somehow missing —
+    # exec paths fall back gracefully.
+    local claude_session_id=""
+    if [ -f "$session_dir/.cs/README.md" ]; then
+        claude_session_id=$(_read_session_uuid "$session_dir/.cs/README.md")
+    fi
+
     # Set environment variables
     export CLAUDE_SESSION_NAME="$session_name"
     export CLAUDE_SESSION_DIR="$session_dir"
@@ -1673,6 +1683,13 @@ launch_claude_code() {
     local memory_path="$session_dir/.cs/memory"
     export CLAUDE_CODE_AUTO_MEMORY_PATH="$memory_path"
     export CLAUDE_COWORK_MEMORY_PATH_OVERRIDE="$memory_path"
+    # Expose the recorded session UUID to hooks. Hooks can use this to
+    # reverse-look-up which cs session they're firing inside without having
+    # to depend on $CLAUDE_CODE_SESSION_ID (set by Claude Code itself, but
+    # only in-session) or walk the filesystem.
+    if [ -n "$claude_session_id" ]; then
+        export CS_CLAUDE_SESSION_ID="$claude_session_id"
+    fi
 
     # Status indicator
     local status_icon status_text
@@ -1752,10 +1769,8 @@ launch_claude_code() {
                 # it names the exact conversation, vs --continue which means
                 # "most recent" and may resolve to a sibling Claude session
                 # the user ran in a different terminal between cs launches.
-                local _existing_uuid
-                _existing_uuid=$(_read_session_uuid "$session_dir/.cs/README.md")
-                if [ -n "$_existing_uuid" ]; then
-                    continue_flag="--resume $_existing_uuid"
+                if [ -n "$claude_session_id" ]; then
+                    continue_flag="--resume $claude_session_id"
                 else
                     continue_flag="--continue"
                 fi
@@ -1778,17 +1793,12 @@ launch_claude_code() {
         fi
         exit $rc
     else
-        # Pre-allocated UUID path: for fresh sessions, spawn claude with
-        # --session-id <uuid> so its jsonl lands at a deterministic path
-        # (~/.claude/projects/<encoded-cwd>/<uuid>.jsonl), enabling reliable
-        # resume and reverse-lookup from hooks via $CLAUDE_CODE_SESSION_ID.
-        # The "user said N to continue" branch on existing sessions stays
-        # naked for now — Cycle 2 of the UUID work decides that policy.
-        local claude_session_id=""
-        if [ "$is_new" = "true" ] && [ -f "$session_dir/.cs/README.md" ]; then
-            claude_session_id=$(_read_session_uuid "$session_dir/.cs/README.md")
-        fi
-        if [ -n "$claude_session_id" ]; then
+        # Fresh-spawn path: for new sessions, pass --session-id <uuid> so
+        # claude's jsonl lands at a deterministic path under
+        # ~/.claude/projects/<encoded-cwd>/<uuid>.jsonl. The "user said N"
+        # branch on existing sessions stays naked — Claude Code treats that
+        # as a new transcript without us having to allocate a fresh UUID.
+        if [ "$is_new" = "true" ] && [ -n "$claude_session_id" ]; then
             # shellcheck disable=SC2086
             exec $CLAUDE_CODE_BIN --session-id "$claude_session_id"
         else

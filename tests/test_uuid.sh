@@ -165,4 +165,38 @@ echo ""
 run_test test_new_session_allocates_and_records_uuid
 run_test test_resume_uses_recorded_uuid
 run_test test_lazy_migration_backfills_uuid
+
+# ============================================================================
+# Cycle 4: CS_CLAUDE_SESSION_ID is exported to the claude process environment
+# ============================================================================
+
+test_env_var_exported_with_uuid() {
+    # Override CLAUDE_CODE_BIN with a stub that prints `env`. This captures
+    # what variables are exported into claude's process environment — echo
+    # (the default test stub) doesn't show env at all.
+    local stub="$TEST_TMPDIR/claude-stub"
+    cat > "$stub" << 'STUB_EOF'
+#!/usr/bin/env bash
+env
+STUB_EOF
+    chmod +x "$stub"
+    export CLAUDE_CODE_BIN="$stub"
+
+    local output
+    output=$("$CS_BIN" test-session <<< "" 2>&1) || true
+
+    local session_dir="$CS_SESSIONS_ROOT/test-session"
+    local recorded
+    recorded=$(_extract_session_uuid "$session_dir/.cs/README.md")
+
+    if [[ ! "$recorded" =~ $UUID_V4_RE ]]; then
+        echo "  FAIL: precondition - cs did not record a v4 UUID"
+        return 1
+    fi
+
+    assert_output_contains "$output" "CS_CLAUDE_SESSION_ID=$recorded" \
+        "CS_CLAUDE_SESSION_ID env var should be exported with the recorded UUID" || return 1
+}
+
+run_test test_env_var_exported_with_uuid
 report_results
