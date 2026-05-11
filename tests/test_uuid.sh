@@ -95,10 +95,74 @@ test_resume_uses_recorded_uuid() {
 }
 
 # ============================================================================
+# Cycle 3: lazy migration backfills claude_session_id on legacy sessions
+# ============================================================================
+
+test_lazy_migration_backfills_uuid() {
+    # Build a "legacy" session — has .cs/README.md with frontmatter but no
+    # claude_session_id (created on a cs version before this feature).
+    local session_dir="$CS_SESSIONS_ROOT/legacy-session"
+    mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
+    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
+    echo "auto_sync=on" > "$session_dir/.cs/sync.conf"
+    cat > "$session_dir/.cs/README.md" << 'EOF'
+---
+status: active
+created: 2026-01-01
+tags: []
+aliases: ["legacy-session"]
+---
+# Session: legacy-session
+
+**Started:** 2026-01-01 09:00:00
+EOF
+    echo "# Discoveries" > "$session_dir/.cs/discoveries.md"
+    echo "# Changes" > "$session_dir/.cs/changes.md"
+    cat > "$session_dir/CLAUDE.md" << 'EOF'
+# Session Documentation Protocol
+
+This is a Claude Code session managed by cs. Session metadata lives in the .cs/ directory.
+EOF
+    (cd "$session_dir" && git init -q && git add -A && git commit -q -m "init")
+
+    # Precondition.
+    assert_file_not_contains "$session_dir/.cs/README.md" "^claude_session_id:" \
+        "precondition: legacy session must lack claude_session_id" || return 1
+
+    # First resume backfills.
+    "$CS_BIN" legacy-session <<< "" >/dev/null 2>&1 || true
+
+    assert_file_contains "$session_dir/.cs/README.md" "^claude_session_id:" \
+        "lazy migration should backfill claude_session_id" || return 1
+
+    local backfilled
+    backfilled=$(_extract_session_uuid "$session_dir/.cs/README.md")
+
+    if [[ ! "$backfilled" =~ $UUID_V4_RE ]]; then
+        echo "  FAIL: backfilled value is not a valid v4 UUID: '$backfilled'"
+        return 1
+    fi
+
+    # Second resume must be idempotent: same value, no duplication.
+    "$CS_BIN" legacy-session <<< "" >/dev/null 2>&1 || true
+
+    local after
+    after=$(_extract_session_uuid "$session_dir/.cs/README.md")
+    assert_eq "$backfilled" "$after" \
+        "second resume must not rewrite the backfilled UUID" || return 1
+
+    local count
+    count=$(grep -cE '^claude_session_id:' "$session_dir/.cs/README.md")
+    assert_eq "1" "$count" \
+        "claude_session_id must appear exactly once in frontmatter" || return 1
+}
+
+# ============================================================================
 # Runner
 # ============================================================================
 echo "Running test_uuid.sh"
 echo ""
 run_test test_new_session_allocates_and_records_uuid
 run_test test_resume_uses_recorded_uuid
+run_test test_lazy_migration_backfills_uuid
 report_results

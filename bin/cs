@@ -959,6 +959,25 @@ EOF
         } > "$readme"
         warn "Added frontmatter to .cs/README.md"
     fi
+
+    # Phase 8: Backfill claude_session_id in README frontmatter if missing.
+    # Sessions created before cs gained UUID pre-allocation have no recorded
+    # session ID. Allocate one and insert it after 'created:' so subsequent
+    # launches resume via --resume <uuid> and hooks can reverse-look-up the
+    # bound session via $CLAUDE_CODE_SESSION_ID. Phase 6 guarantees that any
+    # README reaching this point has a frontmatter block; the grep guard
+    # short-circuits the second resume so this is idempotent.
+    if [ -f "$readme" ] && head -1 "$readme" | grep -q '^---$' \
+       && ! grep -qE '^claude_session_id:' "$readme"; then
+        local _new_uuid
+        _new_uuid=$(_alloc_uuid)
+        local _tmp="$readme.tmp"
+        awk -v new_line="claude_session_id: $_new_uuid" '
+            /^created:/ { print; print new_line; next }
+            { print }
+        ' "$readme" > "$_tmp" && mv "$_tmp" "$readme"
+        warn "Backfilled claude_session_id in .cs/README.md"
+    fi
 }
 
 # Cross-platform helpers
