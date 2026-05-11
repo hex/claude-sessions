@@ -700,6 +700,27 @@ cs -secrets export                 # Export as environment variables
 cs -secrets set <name> <value>     # Store manually
 ```
 
+<!-- cs:memory-rules -->
+## Auto-memory bucket guidance
+
+When the user shares a durable fact worth saving to .cs/memory/, listen for these signals to pick the right bucket:
+
+| User says...                                                                | Goes to          |
+|-----------------------------------------------------------------------------|------------------|
+| "I'm the / my role is / I prefer / I always / I hate / I never"             | `user_*.md`      |
+| "don't do X / stop doing Y / not like that" — corrections                   | `feedback_*.md`  |
+| "yes exactly / keep that approach / that worked" — validated choices        | `feedback_*.md`  |
+| "we're shipping / deadline is / X is driving this / freeze on..."           | `project_*.md`   |
+| "Linear project X / Grafana board at Y / the #channel for Z / docs at URL" | `reference_*.md` |
+
+Discipline:
+- Read the matching memory file before writing — dedup, don't duplicate.
+- One bucket per fact. If it plausibly fits two, pick the more specific.
+- Lazy-load: don't read all four eagerly; load on demand when the question needs that bucket.
+- Never invent or extrapolate. Record only what the user literally said or clearly implied.
+
+To opt out of this guidance, delete the table and prose above but keep the `cs:memory-rules` HTML comment as a tombstone — cs treats the sentinel's presence as "managed, do not re-add."
+
 ## Best Practices
 
 - Document discoveries as you find them - don't wait until the end
