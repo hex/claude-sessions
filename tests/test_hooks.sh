@@ -1221,4 +1221,117 @@ run_test test_install_registers_files_context_on_read
 run_test test_install_dedups_files_context_on_reinstall
 run_test test_install_preserves_write_matcher_when_adding_read
 
+# ============================================================================
+# install.sh: cs-hook merge must preserve co-shipped non-cs entries inside
+# the same {hooks: [...]} wrapper. Spec tests — embed the exact jq filter
+# install.sh must use.
+# ============================================================================
+
+# Filter shape documented here as the source of truth. install.sh's 12
+# event-specific filters must follow the same pattern: dive into nested
+# .hooks, strip only the matching command, drop wrappers that emptied out,
+# leave flat or unrelated wrappers untouched, then append the cs entry.
+_install_merge_filter() {
+    cat << 'JQ'
+.hooks[$event] = (
+    ((.hooks[$event] // []) | map(
+        if .hooks then
+            .hooks |= map(select(.command != $path and .command != $tilde))
+        else . end
+    ) | map(select(.hooks == null or (.hooks | length > 0))))
+    + [{ "hooks": [{ "type": "command", "command": $tilde, "timeout": $timeout }] }]
+)
+JQ
+}
+
+test_install_preserves_coshipped_hook_in_wrapper() {
+    # User has a non-cs hook co-located inside the same wrapper as cs's hook.
+    # Common pattern when the user hand-edited settings.json to add another
+    # hook next to cs's. The merge must NOT drop the user's hook.
+    local path="$HOME/.claude/hooks/session-start.sh"
+    local tilde="~/.claude/hooks/session-start.sh"
+    local settings
+    settings=$(cat << EOF
+{"hooks":{"SessionStart":[{"hooks":[
+  {"type":"command","command":"~/bin/claude-status","timeout":5},
+  {"type":"command","command":"$tilde","timeout":30}
+]}]}}
+EOF
+)
+    local result
+    result=$(echo "$settings" | jq \
+        --arg event "SessionStart" \
+        --arg path "$path" \
+        --arg tilde "$tilde" \
+        --argjson timeout 30 \
+        "$(_install_merge_filter)")
+
+    local user_hook_count
+    user_hook_count=$(echo "$result" | jq '[.. | objects | select(.command == "~/bin/claude-status")] | length')
+    if [ "$user_hook_count" != "1" ]; then
+        echo "  FAIL: claude-status should survive merge exactly once, got $user_hook_count"
+        echo "  Result: $result"
+        return 1
+    fi
+
+    local cs_hook_count
+    cs_hook_count=$(echo "$result" | jq --arg t "$tilde" '[.. | objects | select(.command == $t)] | length')
+    if [ "$cs_hook_count" != "1" ]; then
+        echo "  FAIL: cs hook should appear exactly once, got $cs_hook_count"
+        echo "  Result: $result"
+        return 1
+    fi
+}
+
+test_install_drops_emptied_wrapper_when_only_cs_hook_present() {
+    # Pre-existing standalone wrapper containing only cs's hook. After merge,
+    # we want exactly one wrapper containing one cs entry — not two.
+    local path="$HOME/.claude/hooks/session-start.sh"
+    local tilde="~/.claude/hooks/session-start.sh"
+    local settings='{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"~/.claude/hooks/session-start.sh","timeout":30}]}]}}'
+
+    local result
+    result=$(echo "$settings" | jq \
+        --arg event "SessionStart" \
+        --arg path "$path" \
+        --arg tilde "$tilde" \
+        --argjson timeout 30 \
+        "$(_install_merge_filter)")
+
+    local wrapper_count cs_hook_count
+    wrapper_count=$(echo "$result" | jq '.hooks.SessionStart | length')
+    cs_hook_count=$(echo "$result" | jq --arg t "$tilde" '[.. | objects | select(.command == $t)] | length')
+
+    if [ "$wrapper_count" != "1" ] || [ "$cs_hook_count" != "1" ]; then
+        echo "  FAIL: expected 1 wrapper + 1 cs entry; got wrappers=$wrapper_count cs_entries=$cs_hook_count"
+        echo "  Result: $result"
+        return 1
+    fi
+}
+
+test_install_leaves_flat_entries_alone() {
+    # Old-shape flat entries (no .hooks nesting) must pass through untouched.
+    local path="$HOME/.claude/hooks/session-start.sh"
+    local tilde="~/.claude/hooks/session-start.sh"
+    local settings='{"hooks":{"SessionStart":[{"type":"command","command":"~/bin/claude-status","timeout":5}]}}'
+
+    local result
+    result=$(echo "$settings" | jq \
+        --arg event "SessionStart" \
+        --arg path "$path" \
+        --arg tilde "$tilde" \
+        --argjson timeout 30 \
+        "$(_install_merge_filter)")
+
+    if ! echo "$result" | jq -e '.hooks.SessionStart[] | select(.command == "~/bin/claude-status")' >/dev/null; then
+        echo "  FAIL: flat-shape claude-status entry was dropped"
+        echo "  Result: $result"
+        return 1
+    fi
+}
+
+run_test test_install_preserves_coshipped_hook_in_wrapper
+run_test test_install_drops_emptied_wrapper_when_only_cs_hook_present
+run_test test_install_leaves_flat_entries_alone
+
 report_results

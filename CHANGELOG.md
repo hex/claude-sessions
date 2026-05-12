@@ -2,6 +2,16 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
+## 2026.5.4
+
+### Fixes
+
+- **`install.sh` no longer clobbers co-shipped user hooks.** The 12 jq merge filters that register cs's hooks in `~/.claude/settings.json` operated at the wrapper level — `select(.hooks | all(.command != $cs_path))` — which dropped the entire `{hooks: [...]}` wrapper whenever it contained cs's command, even if the wrapper also held an unrelated user hook (eg. `~/bin/claude-status` co-located inside cs's SessionStart wrapper after the user hand-edited settings.json). On every install/reinstall, the user's hook silently vanished. The new filter dives into the wrapper's nested `.hooks` array, strips only cs's command, drops wrappers that emptied out, and leaves flat-shape entries (no `.hooks` field) untouched. The 12 inline jq calls also collapse onto a single `_merge_cs_hook` shell helper — one source of truth for the merge shape.
+
+### Tests
+
+- 3 new install-merge spec tests in `tests/test_hooks.sh`: `preserves_coshipped_hook_in_wrapper`, `drops_emptied_wrapper_when_only_cs_hook_present`, `leaves_flat_entries_alone`. The filter shape is centralized in a `_install_merge_filter` test helper so the spec stays in sync with the production helper in `install.sh`.
+
 ## 2026.5.3
 
 ### Fixes

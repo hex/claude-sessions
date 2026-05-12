@@ -426,147 +426,67 @@ else
         ')
     done
 
-    # Merge hooks: remove existing cs hooks (both path forms), then add ours
-    # This prevents duplicates on reinstall while preserving other hooks
-    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$SESSION_START_PATH" --arg tilde "$SESSION_START_TILDE" '
-        .hooks.SessionStart = ((.hooks.SessionStart // []) | map(
-            select(.hooks | all(.command != $path and .command != $tilde))
-        )) + [{
-            "hooks": [{
-                "type": "command",
-                "command": $tilde,
-                "timeout": 30
-            }]
-        }]
-    ')
+    # Merge hooks: strip cs's command from any wrapper's nested .hooks array,
+    # drop wrappers that emptied out, then append a fresh standalone wrapper
+    # for cs's hook. This preserves non-cs entries that the user co-shipped
+    # inside the same wrapper (eg. `~/bin/claude-status` alongside cs's
+    # session-end.sh) — the prior shape dropped the entire wrapper whenever
+    # it contained cs's command, taking sibling user hooks with it.
+    #
+    # Flat-shape entries (no `.hooks` field, command at top level) pass
+    # through untouched because the `if .hooks then ... else . end` branch
+    # skips them. The spec tests in tests/test_hooks.sh embed this same
+    # filter shape via _install_merge_filter — keep them aligned.
+    _merge_cs_hook() {
+        local event="$1" path="$2" tilde="$3" timeout="$4" append_block="$5"
+        SETTINGS=$(echo "$SETTINGS" | jq \
+            --arg event "$event" \
+            --arg path "$path" \
+            --arg tilde "$tilde" \
+            --argjson append "$append_block" '
+            .hooks[$event] = (
+                ((.hooks[$event] // []) | map(
+                    if .hooks then
+                        .hooks |= map(select(.command != $path and .command != $tilde))
+                    else . end
+                ) | map(select(.hooks == null or (.hooks | length > 0))))
+                + [$append]
+            )
+        ')
+    }
 
-    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$ARTIFACT_TRACKER_PATH" --arg tilde "$ARTIFACT_TRACKER_TILDE" '
-        .hooks.PreToolUse = ((.hooks.PreToolUse // []) | map(
-            select((.matcher == "Write" and (.hooks | any(.command == $path or .command == $tilde))) | not)
-        )) + [{
-            "matcher": "Write",
-            "hooks": [{
-                "type": "command",
-                "command": $tilde,
-                "timeout": 10
-            }]
-        }]
-    ')
+    _merge_cs_hook SessionStart "$SESSION_START_PATH" "$SESSION_START_TILDE" 30 \
+        "{\"hooks\":[{\"type\":\"command\",\"command\":\"$SESSION_START_TILDE\",\"timeout\":30}]}"
 
-    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$CHANGES_TRACKER_PATH" --arg tilde "$CHANGES_TRACKER_TILDE" '
-        .hooks.PostToolUse = ((.hooks.PostToolUse // []) | map(
-            select(.hooks | all(.command != $path and .command != $tilde))
-        )) + [{
-            "matcher": "",
-            "hooks": [{
-                "type": "command",
-                "command": $tilde,
-                "timeout": 10
-            }]
-        }]
-    ')
+    _merge_cs_hook PreToolUse "$ARTIFACT_TRACKER_PATH" "$ARTIFACT_TRACKER_TILDE" 10 \
+        "{\"matcher\":\"Write\",\"hooks\":[{\"type\":\"command\",\"command\":\"$ARTIFACT_TRACKER_TILDE\",\"timeout\":10}]}"
 
-    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$DISCOVERY_COMMITS_PATH" --arg tilde "$DISCOVERY_COMMITS_TILDE" '
-        .hooks.PostToolUse = ((.hooks.PostToolUse // []) | map(
-            select(.hooks | all(.command != $path and .command != $tilde))
-        )) + [{
-            "matcher": "Write|Edit",
-            "hooks": [{
-                "type": "command",
-                "command": $tilde,
-                "timeout": 10,
-                "async": true
-            }]
-        }]
-    ')
+    _merge_cs_hook PostToolUse "$CHANGES_TRACKER_PATH" "$CHANGES_TRACKER_TILDE" 10 \
+        "{\"matcher\":\"\",\"hooks\":[{\"type\":\"command\",\"command\":\"$CHANGES_TRACKER_TILDE\",\"timeout\":10}]}"
 
-    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$DISCOVERIES_REMINDER_PATH" --arg tilde "$DISCOVERIES_REMINDER_TILDE" '
-        .hooks.Stop = ((.hooks.Stop // []) | map(
-            select(.hooks | all(.command != $path and .command != $tilde))
-        )) + [{
-            "hooks": [{
-                "type": "command",
-                "command": $tilde,
-                "timeout": 10
-            }]
-        }]
-    ')
+    _merge_cs_hook PostToolUse "$DISCOVERY_COMMITS_PATH" "$DISCOVERY_COMMITS_TILDE" 10 \
+        "{\"matcher\":\"Write|Edit\",\"hooks\":[{\"type\":\"command\",\"command\":\"$DISCOVERY_COMMITS_TILDE\",\"timeout\":10,\"async\":true}]}"
 
-    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$SESSION_END_PATH" --arg tilde "$SESSION_END_TILDE" '
-        .hooks.SessionEnd = ((.hooks.SessionEnd // []) | map(
-            select(.hooks | all(.command != $path and .command != $tilde))
-        )) + [{
-            "hooks": [{
-                "type": "command",
-                "command": $tilde,
-                "timeout": 30
-            }]
-        }]
-    ')
+    _merge_cs_hook Stop "$DISCOVERIES_REMINDER_PATH" "$DISCOVERIES_REMINDER_TILDE" 10 \
+        "{\"hooks\":[{\"type\":\"command\",\"command\":\"$DISCOVERIES_REMINDER_TILDE\",\"timeout\":10}]}"
 
-    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$SUBAGENT_CONTEXT_PATH" --arg tilde "$SUBAGENT_CONTEXT_TILDE" '
-        .hooks.SubagentStart = ((.hooks.SubagentStart // []) | map(
-            select(.hooks | all(.command != $path and .command != $tilde))
-        )) + [{
-            "hooks": [{
-                "type": "command",
-                "command": $tilde,
-                "timeout": 10
-            }]
-        }]
-    ')
+    _merge_cs_hook SessionEnd "$SESSION_END_PATH" "$SESSION_END_TILDE" 30 \
+        "{\"hooks\":[{\"type\":\"command\",\"command\":\"$SESSION_END_TILDE\",\"timeout\":30}]}"
 
-    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$TOOL_FAILURE_LOGGER_PATH" --arg tilde "$TOOL_FAILURE_LOGGER_TILDE" '
-        .hooks.PostToolUseFailure = ((.hooks.PostToolUseFailure // []) | map(
-            select(.hooks | all(.command != $path and .command != $tilde))
-        )) + [{
-            "hooks": [{
-                "type": "command",
-                "command": $tilde,
-                "timeout": 10,
-                "async": true
-            }]
-        }]
-    ')
+    _merge_cs_hook SubagentStart "$SUBAGENT_CONTEXT_PATH" "$SUBAGENT_CONTEXT_TILDE" 10 \
+        "{\"hooks\":[{\"type\":\"command\",\"command\":\"$SUBAGENT_CONTEXT_TILDE\",\"timeout\":10}]}"
 
-    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$SESSION_AUTO_APPROVE_PATH" --arg tilde "$SESSION_AUTO_APPROVE_TILDE" '
-        .hooks.PermissionRequest = ((.hooks.PermissionRequest // []) | map(
-            select(.hooks | all(.command != $path and .command != $tilde))
-        )) + [{
-            "matcher": "Write|Edit",
-            "hooks": [{
-                "type": "command",
-                "command": $tilde,
-                "timeout": 5
-            }]
-        }]
-    ')
+    _merge_cs_hook PostToolUseFailure "$TOOL_FAILURE_LOGGER_PATH" "$TOOL_FAILURE_LOGGER_TILDE" 10 \
+        "{\"hooks\":[{\"type\":\"command\",\"command\":\"$TOOL_FAILURE_LOGGER_TILDE\",\"timeout\":10,\"async\":true}]}"
 
-    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$BASH_LOGGER_PATH" --arg tilde "$BASH_LOGGER_TILDE" '
-        .hooks.PreToolUse = ((.hooks.PreToolUse // []) | map(
-            select(.hooks | all(.command != $path and .command != $tilde))
-        )) + [{
-            "matcher": "Bash",
-            "hooks": [{
-                "type": "command",
-                "command": $tilde,
-                "timeout": 5
-            }]
-        }]
-    ')
+    _merge_cs_hook PermissionRequest "$SESSION_AUTO_APPROVE_PATH" "$SESSION_AUTO_APPROVE_TILDE" 5 \
+        "{\"matcher\":\"Write|Edit\",\"hooks\":[{\"type\":\"command\",\"command\":\"$SESSION_AUTO_APPROVE_TILDE\",\"timeout\":5}]}"
 
-    SETTINGS=$(echo "$SETTINGS" | jq --arg path "$FILES_CONTEXT_PATH" --arg tilde "$FILES_CONTEXT_TILDE" '
-        .hooks.PreToolUse = ((.hooks.PreToolUse // []) | map(
-            select((.matcher == "Read" and (.hooks | any(.command == $path or .command == $tilde))) | not)
-        )) + [{
-            "matcher": "Read",
-            "hooks": [{
-                "type": "command",
-                "command": $tilde,
-                "timeout": 10
-            }]
-        }]
-    ')
+    _merge_cs_hook PreToolUse "$BASH_LOGGER_PATH" "$BASH_LOGGER_TILDE" 5 \
+        "{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"$BASH_LOGGER_TILDE\",\"timeout\":5}]}"
+
+    _merge_cs_hook PreToolUse "$FILES_CONTEXT_PATH" "$FILES_CONTEXT_TILDE" 10 \
+        "{\"matcher\":\"Read\",\"hooks\":[{\"type\":\"command\",\"command\":\"$FILES_CONTEXT_TILDE\",\"timeout\":10}]}"
 
     echo "$SETTINGS" > "$CLAUDE_SETTINGS"
 fi
