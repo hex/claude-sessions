@@ -721,6 +721,29 @@ Discipline:
 
 To opt out of this guidance, delete the table and prose above but keep the `cs:memory-rules` HTML comment as a tombstone — cs treats the sentinel's presence as "managed, do not re-add."
 
+<!-- cs:wrap-cues -->
+## Session wrap-up cues
+
+When the conversation reaches a natural stopping point — work shipped, a PR merged, a deploy completed, a bug fixed, or the user signaling they're winding down — proactively offer to distill the session via AskUserQuestion BEFORE the conversation drifts.
+
+**Strong triggers (fire on any single occurrence):**
+- "shipped", "PR merged", "PR up", "deployed", "released"
+- "let's call it", "wraps up", "done for the day", "good place to stop"
+- "all good now", "that did it", "ready to ship"
+
+**Soft triggers (require a corroborating signal — a recent commit, an explicit "done", or two or more soft signals in succession):**
+- "that works", "looks good", "we're good", "all set"
+
+**When fired**, use AskUserQuestion with header "Wrap up?" and these options:
+- "Run /wrap" — distill memory entries AND write a session summary in sequence (the usual choice)
+- "Run /sweep only" — just the memory pass; skip the narrative summary
+- "Run /summary only" — just the narrative; skip the memory pass
+- "Not yet — keep working"
+
+Do not fire on every short affirmative ("yes", "ok", "thanks"). Fire when the *work itself* has reached a coherent stopping point, not when a single answer satisfied a single question. False positives erode the signal — be picky.
+
+To opt out, delete the prose above but keep the `cs:wrap-cues` HTML comment as a tombstone — cs treats the sentinel's presence as "managed, do not re-add."
+
 ## Best Practices
 
 - Document discoveries as you find them - don't wait until the end
@@ -1033,6 +1056,39 @@ Discipline:
 To opt out of this guidance, delete the table and prose above but keep the `cs:memory-rules` HTML comment as a tombstone — cs treats the sentinel's presence as "managed, do not re-add."
 EOF
         warn "Appended auto-memory bucket guidance to CLAUDE.md"
+    fi
+
+    # Phase 10: Append session wrap-up cues to CLAUDE.md if missing.
+    # Same sentinel-based pattern as Phase 9 — cs:wrap-cues presence
+    # (with or without content beneath) signals "managed by cs, do not
+    # re-add." Users opt out via tombstone (delete prose, keep comment).
+    if [ -f "$claude_md_p9" ] && ! grep -q 'cs:wrap-cues' "$claude_md_p9"; then
+        cat >> "$claude_md_p9" << 'EOF'
+
+<!-- cs:wrap-cues -->
+## Session wrap-up cues
+
+When the conversation reaches a natural stopping point — work shipped, a PR merged, a deploy completed, a bug fixed, or the user signaling they're winding down — proactively offer to distill the session via AskUserQuestion BEFORE the conversation drifts.
+
+**Strong triggers (fire on any single occurrence):**
+- "shipped", "PR merged", "PR up", "deployed", "released"
+- "let's call it", "wraps up", "done for the day", "good place to stop"
+- "all good now", "that did it", "ready to ship"
+
+**Soft triggers (require a corroborating signal — a recent commit, an explicit "done", or two or more soft signals in succession):**
+- "that works", "looks good", "we're good", "all set"
+
+**When fired**, use AskUserQuestion with header "Wrap up?" and these options:
+- "Run /wrap" — distill memory entries AND write a session summary in sequence (the usual choice)
+- "Run /sweep only" — just the memory pass; skip the narrative summary
+- "Run /summary only" — just the narrative; skip the memory pass
+- "Not yet — keep working"
+
+Do not fire on every short affirmative ("yes", "ok", "thanks"). Fire when the *work itself* has reached a coherent stopping point, not when a single answer satisfied a single question. False positives erode the signal — be picky.
+
+To opt out, delete the prose above but keep the `cs:wrap-cues` HTML comment as a tombstone — cs treats the sentinel's presence as "managed, do not re-add."
+EOF
+        warn "Appended session wrap-up cues to CLAUDE.md"
     fi
 }
 
