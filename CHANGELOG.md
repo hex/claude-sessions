@@ -2,6 +2,24 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
+## 2026.5.3
+
+### Fixes
+
+- **Phase 8 UUID backfill no longer mints orphans.** The v2026.5.2 backfill allocated a fresh UUID for every legacy session and wrote it as `claude_session_id:` — but that UUID was never bound to a real claude transcript, so `claude --resume <uuid>` failed and cs fell through to a fresh conversation on every resume. Phase 8 now reads the session's per-cwd transcript directory (`~/.claude/projects/<encoded-cwd>/`), binds the recorded UUID to the most-recent existing transcript, and self-heals already-orphaned READMEs from v2026.5.2 on next launch. Three new helpers — `_claude_project_dir`, `_discover_session_uuid_in`, `_set_session_uuid` — share `_claude_encode_path` and `CS_TRANSCRIPTS_DIR` with the existing doctor token-cost check, no parallel APIs.
+
+### Features
+
+- **Declining the resume prompt rebinds instead of orphaning.** Answering `N` to "Continue previous conversation?" used to exec `claude` naked, meaning claude picked its own UUID for the fresh conversation while cs's README kept pointing at the old one — next launch resumed the wrong conversation. Now the N branch (and the `--resume` failure fallback) allocate a fresh UUID, rewrite `claude_session_id:` in README, and exec `claude --session-id <new>`. cs's tracking always follows the conversation claude is actually running.
+
+- **`CS_FRESH_REBIND=1` signal to SessionStart hooks.** When the rebind path fires, cs exports `CS_FRESH_REBIND=1` before exec. `session-start.sh` detects it and appends a "Fresh Conversation" block to its `additionalContext`: tells claude not to assume continuity with prior turns and points at `.cs/discoveries.md` / `README.md` / `changes.md` for lazy-read prior context. Without the signal, the hook's behavior is unchanged.
+
+### Tests
+
+- 4 new tests in `tests/test_uuid.sh`: bind-to-existing-transcript, self-heal-orphan-UUID, preserve-when-transcript-matches, decline-resume-rebinds-and-exports-CS_FRESH_REBIND.
+- 2 new tests in `tests/test_hooks.sh`: fresh-rebind injects clean-break notice when env is set; omits it when env is unset.
+- `tests/test_lib.sh` now exports `CS_TRANSCRIPTS_DIR` per-test to isolate discovery from the developer's real `~/.claude/projects/`.
+
 ## 2026.5.2
 
 ### Features

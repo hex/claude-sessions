@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.5.2"
+VERSION="2026.5.3"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -785,6 +785,65 @@ _read_session_uuid() {
     ' "$readme" 2>/dev/null || true
 }
 
+# Return the path to claude's per-cwd transcript directory. Symlinks in the
+# input are resolved via `pwd -P` so the encoding matches claude's own —
+# macOS mktemp returns /var/folders/... which is a symlink to
+# /private/var/folders/... and claude realpaths cwd before encoding.
+# CS_TRANSCRIPTS_DIR overrides the base for tests (also used by doctor).
+_claude_project_dir() {
+    local cwd="$1"
+    local resolved
+    resolved=$( (cd "$cwd" 2>/dev/null && pwd -P) || printf '%s' "$cwd" )
+    printf '%s/%s\n' "${CS_TRANSCRIPTS_DIR:-$HOME/.claude/projects}" \
+        "$(_claude_encode_path "$resolved")"
+}
+
+# Discover claude's most-recently-modified transcript UUID under a project
+# directory, or empty string if none. The newest transcript is what
+# `claude --continue` would resume, so binding the session's recorded UUID
+# to it makes `--resume <uuid>` equivalent to `--continue` on first contact.
+# Takes the project dir (not cwd) so callers that already computed it via
+# _claude_project_dir can avoid a second symlink resolution.
+_discover_session_uuid_in() {
+    local proj="$1"
+    [ -d "$proj" ] || return 0
+    local newest
+    newest=$(ls -t "$proj"/*.jsonl 2>/dev/null | head -1 || true)
+    [ -n "$newest" ] || return 0
+    basename "$newest" .jsonl
+}
+
+# Write claude_session_id: <uuid> into README frontmatter, replacing any
+# existing line and inserting after 'created:' if absent. Idempotent.
+_set_session_uuid() {
+    local readme="$1"
+    local uuid="$2"
+    [ -f "$readme" ] || return 0
+    local tmp="$readme.tmp"
+    awk -v new_line="claude_session_id: $uuid" '
+        /^claude_session_id:/ { next }
+        /^created:/ { print; print new_line; next }
+        { print }
+    ' "$readme" > "$tmp" && mv "$tmp" "$readme"
+}
+
+# Allocate a fresh UUID, rewrite README's claude_session_id to it, export
+# CS_CLAUDE_SESSION_ID + CS_FRESH_REBIND, and exec claude --session-id <new>.
+# Used on the "user declined resume" path and the "resume failed" fallback
+# so cs's recorded UUID always tracks the conversation claude is about to
+# create — never orphaned. The CS_FRESH_REBIND signal lets session-start.sh
+# tailor its additionalContext (the user is starting fresh, not cold-booting).
+_exec_fresh_rebind() {
+    local session_dir="$1"
+    local new_uuid
+    new_uuid=$(_alloc_uuid)
+    _set_session_uuid "$session_dir/.cs/README.md" "$new_uuid"
+    export CS_CLAUDE_SESSION_ID="$new_uuid"
+    export CS_FRESH_REBIND=1
+    # shellcheck disable=SC2086
+    exec $CLAUDE_CODE_BIN --session-id "$new_uuid"
+}
+
 # Create session directory structure
 create_session_structure() {
     local session_dir="$1"
@@ -1009,21 +1068,51 @@ EOF
         warn "Added frontmatter to .cs/README.md"
     fi
 
-    # Phase 8: Backfill claude_session_id in README frontmatter when absent.
-    # Allocate a v4 UUID and insert it after 'created:' so cs can resume via
-    # --resume <uuid> and hooks can reverse-look-up the bound session via
-    # $CLAUDE_CODE_SESSION_ID. Phase 6 guarantees the frontmatter block
-    # exists; the grep guard makes this idempotent.
-    if [ -f "$readme" ] && head -1 "$readme" | grep -q '^---$' \
-       && ! grep -qE '^claude_session_id:' "$readme"; then
-        local _new_uuid
-        _new_uuid=$(_alloc_uuid)
-        local _tmp="$readme.tmp"
-        awk -v new_line="claude_session_id: $_new_uuid" '
-            /^created:/ { print; print new_line; next }
-            { print }
-        ' "$readme" > "$_tmp" && mv "$_tmp" "$readme"
-        warn "Backfilled claude_session_id in .cs/README.md"
+    # Phase 8: Bind claude_session_id in README frontmatter to a real claude
+    # transcript on disk so `claude --resume <uuid>` resolves to an actual
+    # conversation. A recorded UUID with no matching transcript file is an
+    # orphan — the cs hooks/doctor cross-checks will warn about it on every
+    # launch, and `--resume` will fail. Steady state ("recorded UUID present,
+    # transcript exists") is the fast path; cold paths run discovery.
+    #
+    # Phase 6 guarantees the frontmatter block exists.
+    if [ -f "$readme" ] && head -1 "$readme" | grep -q '^---$'; then
+        local _existing _proj _bind_uuid=""
+        _existing=$(_read_session_uuid "$readme")
+        _proj=$(_claude_project_dir "$session_dir")
+
+        if [ -n "$_existing" ] && [ -f "$_proj/$_existing.jsonl" ]; then
+            : # already bound — skip discovery entirely
+        else
+            local _discovered
+            _discovered=$(_discover_session_uuid_in "$_proj")
+            if [ -n "$_discovered" ]; then
+                _bind_uuid="$_discovered"
+            elif [ -z "$_existing" ]; then
+                # No transcripts and no recorded UUID — allocate fresh.
+                # A recorded UUID without transcripts is left alone: claude
+                # hasn't written the jsonl yet (eg. session was just created
+                # with --session-id but hasn't talked to the user).
+                _bind_uuid=$(_alloc_uuid)
+            fi
+        fi
+
+        if [ -n "$_bind_uuid" ]; then
+            local _tmp="$readme.tmp"
+            # Strip any existing claude_session_id: line, then insert the
+            # bound value after 'created:'. One awk handles both insert and
+            # replace; no branching on whether the line was already present.
+            awk -v new_line="claude_session_id: $_bind_uuid" '
+                /^claude_session_id:/ { next }
+                /^created:/ { print; print new_line; next }
+                { print }
+            ' "$readme" > "$_tmp" && mv "$_tmp" "$readme"
+            if [ -z "$_existing" ]; then
+                warn "Bound claude_session_id in .cs/README.md to $_bind_uuid"
+            else
+                warn "Repaired orphan claude_session_id (was $_existing)"
+            fi
+        fi
     fi
 
     # Phase 9: Append auto-memory bucket guidance to CLAUDE.md if missing.
@@ -1957,21 +2046,31 @@ launch_claude_code() {
         # shellcheck disable=SC2086
         $CLAUDE_CODE_BIN $continue_flag || rc=$?
         if [ $rc -ne 0 ] && [ $SECONDS -lt 3 ]; then
-            # Quick failure suggests no conversation to continue
+            # Quick failure suggests no conversation to continue. Rebind so
+            # the fresh transcript claude is about to create is tracked by
+            # cs (otherwise the README's claude_session_id keeps pointing at
+            # a transcript that doesn't resolve, and the next launch repeats
+            # the same failure).
             echo -e "${DIM}No previous conversation found. Starting fresh...${NC}"
             echo ""
-            exec $CLAUDE_CODE_BIN
+            _exec_fresh_rebind "$session_dir"
         fi
         exit $rc
     else
-        # Fresh-spawn path: for new sessions, pass --session-id <uuid> so
-        # claude's jsonl lands at a deterministic path under
-        # ~/.claude/projects/<encoded-cwd>/<uuid>.jsonl. The "user said N"
-        # branch on existing sessions stays naked — Claude Code treats that
-        # as a new transcript without us having to allocate a fresh UUID.
+        # Fresh-spawn path. Three sub-cases:
+        #   - is_new=true: pass --session-id <pre-allocated-uuid> so claude
+        #     adopts the UUID create_session_structure wrote into README.
+        #   - is_new=false (user said N to resume): rebind to a fresh UUID
+        #     and pass --session-id <new> so cs stays bound to the new
+        #     conversation. Without rebind, next launch resumes the OLD
+        #     conversation while the fresh one becomes orphaned.
+        #   - is_new=false with no claude_session_id (shouldn't happen
+        #     post-Phase-8 but handled defensively): naked exec.
         if [ "$is_new" = "true" ] && [ -n "$claude_session_id" ]; then
             # shellcheck disable=SC2086
             exec $CLAUDE_CODE_BIN --session-id "$claude_session_id"
+        elif [ "$is_new" = "false" ]; then
+            _exec_fresh_rebind "$session_dir"
         else
             # shellcheck disable=SC2086
             exec $CLAUDE_CODE_BIN

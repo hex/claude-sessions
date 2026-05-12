@@ -11,7 +11,7 @@ teardown() {
     if [[ -n "$TEST_TMPDIR" ]] && [[ -d "$TEST_TMPDIR" ]]; then
         rm -rf "$TEST_TMPDIR"
     fi
-    unset CS_SESSIONS_ROOT CLAUDE_CODE_BIN
+    unset CS_SESSIONS_ROOT CLAUDE_CODE_BIN CS_TRANSCRIPTS_DIR
     unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR 2>/dev/null || true
     unset CS_CLAUDE_SESSION_ID 2>/dev/null || true
 }
@@ -158,6 +158,124 @@ EOF
 }
 
 # ============================================================================
+# Cycle 3b: lazy migration binds to an existing claude transcript when one
+# exists for the session cwd, instead of allocating a fresh orphan UUID.
+# ============================================================================
+
+# Mirrors claude's per-project transcript dir encoding (see _claude_project_dir
+# in bin/cs): replace each '/' and '.' in the realpath'd cwd with '-'. Tests
+# seed transcripts at this path so the discovery helper finds them.
+_encode_cwd_for_claude_test() {
+    local resolved
+    resolved=$(cd "$1" && pwd -P)
+    printf '%s' "$resolved" | tr '/.' '--'
+}
+
+# Drop a fake claude transcript file at the location bin/cs's discovery helper
+# will look. Tests use this to simulate "claude has run here before".
+_seed_claude_transcript() {
+    local cwd="$1"
+    local uuid="$2"
+    local encoded proj
+    encoded=$(_encode_cwd_for_claude_test "$cwd")
+    proj="$CS_TRANSCRIPTS_DIR/$encoded"
+    mkdir -p "$proj"
+    echo '{}' > "$proj/$uuid.jsonl"
+}
+
+# Build a minimal session with optional claude_session_id in frontmatter.
+# Returns the session_dir path. Centralizes the layout (mkdir + MANIFEST +
+# README frontmatter + discoveries + git init) so tests don't reimplement it.
+_seed_legacy_session() {
+    local name="$1"
+    local uuid="${2:-}"
+    local session_dir="$CS_SESSIONS_ROOT/$name"
+    mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
+    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
+    {
+        echo "---"
+        echo "status: active"
+        echo "created: 2026-01-01"
+        [ -n "$uuid" ] && echo "claude_session_id: $uuid"
+        echo "tags: []"
+        echo "aliases: [\"$name\"]"
+        echo "---"
+        echo "# Session: $name"
+    } > "$session_dir/.cs/README.md"
+    echo "# Discoveries" > "$session_dir/.cs/discoveries.md"
+    echo "# Changes" > "$session_dir/.cs/changes.md"
+    echo "# Session" > "$session_dir/CLAUDE.md"
+    (cd "$session_dir" && git init -q && git add -A && git commit -q -m "init")
+    echo "$session_dir"
+}
+
+test_lazy_migration_binds_to_existing_transcript() {
+    local session_dir
+    session_dir=$(_seed_legacy_session "legacy-session")
+
+    local existing_uuid="abcd1234-5678-4abc-9def-fedcba987654"
+    _seed_claude_transcript "$session_dir" "$existing_uuid"
+
+    "$CS_BIN" legacy-session <<< "" >/dev/null 2>&1 || true
+
+    local recorded
+    recorded=$(_extract_session_uuid "$session_dir/.cs/README.md")
+    assert_eq "$existing_uuid" "$recorded" \
+        "backfill should bind to the existing transcript UUID, not allocate fresh" || return 1
+}
+
+# ============================================================================
+# Cycle 3c: lazy migration self-heals a recorded UUID with no matching
+# transcript by rewriting it to the most-recent real transcript.
+# ============================================================================
+
+test_lazy_migration_self_heals_orphan_uuid() {
+    local orphan_uuid="00000000-0000-4000-8000-000000000000"
+    local session_dir
+    session_dir=$(_seed_legacy_session "legacy-session" "$orphan_uuid")
+
+    local real_uuid="abcd1234-5678-4abc-9def-fedcba987654"
+    _seed_claude_transcript "$session_dir" "$real_uuid"
+
+    "$CS_BIN" legacy-session <<< "" >/dev/null 2>&1 || true
+
+    local recorded
+    recorded=$(_extract_session_uuid "$session_dir/.cs/README.md")
+    assert_eq "$real_uuid" "$recorded" \
+        "self-heal should rewrite orphan claude_session_id to the existing transcript UUID" || return 1
+
+    # Idempotent: a second resume must not flip the value back.
+    "$CS_BIN" legacy-session <<< "" >/dev/null 2>&1 || true
+    local after
+    after=$(_extract_session_uuid "$session_dir/.cs/README.md")
+    assert_eq "$real_uuid" "$after" \
+        "second resume must keep the healed UUID stable" || return 1
+}
+
+test_lazy_migration_preserves_uuid_when_transcript_matches() {
+    # Guards against accidental rewrites that would invalidate a valid binding.
+    local good_uuid="abcd1234-5678-4abc-9def-fedcba987654"
+    local session_dir
+    session_dir=$(_seed_legacy_session "bound-session" "$good_uuid")
+
+    _seed_claude_transcript "$session_dir" "$good_uuid"
+    # A NEWER transcript with a different UUID must not be chased — the
+    # recorded UUID is already valid.
+    local newer_uuid="11111111-2222-4333-8444-555555555555"
+    _seed_claude_transcript "$session_dir" "$newer_uuid"
+    local encoded
+    encoded=$(_encode_cwd_for_claude_test "$session_dir")
+    touch "$CS_TRANSCRIPTS_DIR/$encoded/$newer_uuid.jsonl"
+
+    "$CS_BIN" bound-session <<< "" >/dev/null 2>&1 || true
+
+    local recorded
+    recorded=$(_extract_session_uuid "$session_dir/.cs/README.md")
+    assert_eq "$good_uuid" "$recorded" \
+        "recorded UUID with a matching transcript must not be rewritten" || return 1
+}
+
+# ============================================================================
 # Runner
 # ============================================================================
 echo "Running test_uuid.sh"
@@ -165,6 +283,68 @@ echo ""
 run_test test_new_session_allocates_and_records_uuid
 run_test test_resume_uses_recorded_uuid
 run_test test_lazy_migration_backfills_uuid
+run_test test_lazy_migration_binds_to_existing_transcript
+run_test test_lazy_migration_self_heals_orphan_uuid
+run_test test_lazy_migration_preserves_uuid_when_transcript_matches
+
+# ============================================================================
+# Cycle 7: declining resume rebinds the session UUID to a fresh one and
+# launches claude with --session-id <new>. Prevents the "user said N then
+# next launch resumes the OLD conversation" footgun.
+# ============================================================================
+
+test_decline_resume_rebinds_to_fresh_uuid() {
+    local old_uuid="abcd1234-5678-4abc-9def-fedcba987654"
+    local session_dir
+    session_dir=$(_seed_legacy_session "test-session" "$old_uuid")
+    _seed_claude_transcript "$session_dir" "$old_uuid"
+
+    # Answer N to "Continue previous conversation?".
+    local output
+    output=$("$CS_BIN" test-session <<< "n" 2>&1) || true
+
+    local recorded
+    recorded=$(_extract_session_uuid "$session_dir/.cs/README.md")
+
+    if [ "$recorded" = "$old_uuid" ]; then
+        echo "  FAIL: declining resume should rewrite claude_session_id"
+        echo "    recorded still: $recorded"
+        return 1
+    fi
+    if [[ ! "$recorded" =~ $UUID_V4_RE ]]; then
+        echo "  FAIL: rewritten UUID is not a valid v4 UUID: '$recorded'"
+        return 1
+    fi
+    assert_output_contains "$output" -- "--session-id $recorded" \
+        "claude spawn after N should pass --session-id <new-uuid>" || return 1
+}
+
+run_test test_decline_resume_rebinds_to_fresh_uuid
+
+test_decline_resume_exports_fresh_rebind_signal() {
+    # The CS_FRESH_REBIND=1 env signals to hooks (session-start.sh) that the
+    # user declined to resume — used to tailor SessionStart additionalContext.
+    local stub="$TEST_TMPDIR/claude-env-stub"
+    cat > "$stub" << 'STUB_EOF'
+#!/usr/bin/env bash
+env
+STUB_EOF
+    chmod +x "$stub"
+    export CLAUDE_CODE_BIN="$stub"
+
+    local old_uuid="abcd1234-5678-4abc-9def-fedcba987654"
+    local session_dir
+    session_dir=$(_seed_legacy_session "test-session" "$old_uuid")
+    _seed_claude_transcript "$session_dir" "$old_uuid"
+
+    local output
+    output=$("$CS_BIN" test-session <<< "n" 2>&1) || true
+
+    assert_output_contains "$output" "CS_FRESH_REBIND=1" \
+        "CS_FRESH_REBIND=1 should be exported when user declines resume" || return 1
+}
+
+run_test test_decline_resume_exports_fresh_rebind_signal
 
 # ============================================================================
 # Cycle 4: CS_CLAUDE_SESSION_ID is exported to the claude process environment

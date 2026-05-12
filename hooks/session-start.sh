@@ -253,6 +253,24 @@ $(printf '%b' "$DYNAMIC")"
     fi
 fi
 
+# Append fresh-rebind notice if cs flagged that the user declined to resume
+# the prior conversation. Tells claude not to assume continuity with prior
+# turns and points at the lazy-read .cs/ files for prior context. Set by
+# bin/cs's _exec_fresh_rebind helper just before exec.
+if [ "${CS_FRESH_REBIND:-}" = "1" ]; then
+    CONTEXT="${CONTEXT}
+
+--- Fresh Conversation ---
+The user explicitly started a fresh conversation in this cs session — the prior conversation's transcript is not loaded. Treat this as a clean break, not a continuation.
+
+For prior context, lazily consult as needed:
+- .cs/discoveries.md  — findings and decisions from earlier work
+- .cs/README.md       — session objective
+- .cs/changes.md      — recent file modifications
+
+The new conversation has its own UUID (\$CS_CLAUDE_SESSION_ID). Do not assume continuity with previous turns."
+fi
+
 # Append crash recovery info if present
 if [ -n "${CRASH_CONTEXT:-}" ]; then
     CONTEXT="${CONTEXT}

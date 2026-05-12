@@ -1002,6 +1002,56 @@ run_test test_index_has_auto_generated_notice
 
 # Timeline
 run_test test_session_start_appends_to_timeline
+
+# ============================================================================
+# session-start.sh: CS_FRESH_REBIND signal — tailored additionalContext when
+# the user declined to resume the prior conversation
+# ============================================================================
+
+test_session_start_fresh_rebind_injects_clean_break_notice() {
+    session_start_setup
+
+    local output context
+    output=$(CS_FRESH_REBIND=1 \
+        echo '{"session_id":"test","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | CS_FRESH_REBIND=1 bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+
+    if ! echo "$context" | grep -q "Fresh Conversation"; then
+        echo "  FAIL: fresh-rebind context block missing"
+        echo "  Context tail: $(echo "$context" | tail -8)"
+        session_start_teardown
+        return 1
+    fi
+    if ! echo "$context" | grep -q "clean break"; then
+        echo "  FAIL: fresh-rebind block should mention the clean break"
+        session_start_teardown
+        return 1
+    fi
+
+    session_start_teardown
+}
+
+test_session_start_without_fresh_rebind_omits_clean_break_notice() {
+    session_start_setup
+
+    # No CS_FRESH_REBIND env — context must NOT include the block.
+    local output context
+    output=$(echo '{"session_id":"test","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+
+    if echo "$context" | grep -q "Fresh Conversation"; then
+        echo "  FAIL: fresh-rebind block must not appear when CS_FRESH_REBIND is unset"
+        session_start_teardown
+        return 1
+    fi
+
+    session_start_teardown
+}
+
+run_test test_session_start_fresh_rebind_injects_clean_break_notice
+run_test test_session_start_without_fresh_rebind_omits_clean_break_notice
 run_test test_session_end_appends_to_timeline
 run_test test_timeline_events_are_valid_jsonl
 run_test test_timeline_subagent_skipped
