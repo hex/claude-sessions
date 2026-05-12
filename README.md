@@ -67,7 +67,7 @@ Or clone and run `./install.sh`.
 The installer:
 - Adds `cs`, `cs-secrets`, and `cs-tui` to `~/.local/bin/`
 - Installs twelve [hooks](docs/hooks.md) to `~/.claude/hooks/` for session tracking
-- Adds `/summary`, `/compact-discoveries`, `/checkpoint`, and `/sweep` commands, and `store-secret` skill to `~/.claude/`
+- Adds `/summary`, `/compact-discoveries`, `/checkpoint`, `/sweep`, and `/wrap` commands, and `store-secret` skill to `~/.claude/`
 - Installs shell completions for bash and zsh
 - Configures hook entries in `~/.claude/settings.json`
 

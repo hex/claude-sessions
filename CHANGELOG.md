@@ -22,6 +22,12 @@ All notable changes to cs are documented here. Release notes are also available 
 
 - **`/sweep` slash command for manual memory distillation.** New `commands/sweep.md` prompts the active Claude session to review the conversation in its context and write durable facts to `.cs/memory/*.md` (strict bar — default write nothing) plus substantive findings to `.cs/discoveries.md` (looser bar). Companion to the Feature 3 bucket-guidance block — the block tells Claude *where* to write durable facts continuously; `/sweep` asks Claude to look back over the whole session and do a focused distillation pass. No headless spawn, no auto-trigger, no consent gate — user invokes manually when they think a session surfaced something worth saving. The two-bar mental model (`memory` forever, `discoveries` session-local) is lifted from `Facets-cloud/flow`'s `done.go:147-154`.
 
+- **Session wrap-up cues in CLAUDE.md.** `write_session_claude_md()` now includes a `<!-- cs:wrap-cues -->` block listing strong wrap-up triggers ("shipped", "PR merged", "deployed", "let's call it") and soft triggers ("that works", "looks good" with corroboration). Claude is instructed to fire an `AskUserQuestion` with four options — Run `/wrap`, Run `/sweep` only, Run `/summary` only, or Not yet — at those moments. Borrowed from `Facets-cloud/flow`'s SKILL.md §4.7. Detection runs in-context; no hook, no auto-fire. Tombstone opt-out via the sentinel pattern.
+
+- **Lazy migration via `migrate_session()` Phase 10.** Existing sessions whose CLAUDE.md predates the wrap-cues block get it appended on next launch. Idempotent via sentinel-presence skip; same shape as Phase 9.
+
+- **`/wrap` slash command for end-of-session distillation.** New `commands/wrap.md` runs both passes back-to-back: memory distillation first (strict bar, default write nothing), then a comprehensive session summary at `.cs/summary.md`. Companion to the wrap-cues block — the block suggests Claude offer `/wrap` at natural stopping points; `/wrap` is what to invoke when that prompt fires. Reduces the "which one of /sweep, /summary do I need?" friction down to one button.
+
 ### Fixes
 
 - **`grep`-finds-itself in the live-duplicate guard.** The Feature 2 spawn guard was `ps -Ao args= | grep -F -- "$UUID"`, which puts `$UUID` in grep's own argv; `ps` captured grep's argv and grep matched itself, falsely blocking every non-stubbed spawn. Surfaced when the Feature 3 tests exercised multi-spawn lifecycles harder than Feature 2's own tests did (which used a stub `ps` that bypassed the bug). Replaced with a bash builtin substring match (`[[ "$ps_out" == *"$uuid"* ]]`) that runs entirely in-process and never exposes the UUID as a subprocess argv.
@@ -32,7 +38,9 @@ All notable changes to cs are documented here. Release notes are also available 
 
 - New `tests/test_memory_rules.sh` with 4 tests covering: new-session block insertion, lazy migration append, idempotence (HTML-comment-specific count to avoid false-matching the prose mention of the sentinel name), and user opt-out via tombstone sentinel.
 
-- Full suite (22 files) clean.
+- New `tests/test_wrap_cues.sh` with 4 tests covering: new-session wrap-cues block, Phase 10 lazy migration, idempotence, and tombstone opt-out.
+
+- Full suite (23 files) clean.
 
 ## 2026.5.1
 
