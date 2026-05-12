@@ -2,7 +2,7 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
-## Unreleased
+## 2026.5.2
 
 ### Features
 
@@ -41,6 +41,8 @@ All notable changes to cs are documented here. Release notes are also available 
 - New `tests/test_wrap_cues.sh` with 4 tests covering: new-session wrap-cues block, Phase 10 lazy migration, idempotence, and tombstone opt-out.
 
 - Full suite (23 files) clean.
+
+**Full Changelog**: https://github.com/hex/claude-sessions/compare/v2026.5.1...v2026.5.2
 
 ## 2026.5.1
 

@@ -32,7 +32,7 @@ test_new_session_has_memory_rules_block() {
         "CLAUDE.md should contain the cs:memory-rules sentinel" || return 1
     assert_file_contains "$claude_md" "Auto-memory bucket guidance" \
         "CLAUDE.md should contain the section header" || return 1
-    assert_file_contains "$claude_md" "user_\*\.md\|user_\\\*\.md" \
+    assert_file_contains "$claude_md" 'user_\*\.md' \
         "CLAUDE.md should mention user_*.md bucket in the signal-phrase table" || return 1
 }
 

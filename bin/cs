@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.5.1"
+VERSION="2026.5.2"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -771,13 +771,18 @@ _alloc_uuid() {
 
 # Read claude_session_id from a session's .cs/README.md frontmatter.
 # Prints the UUID to stdout, or empty if absent or unreadable. Never errors.
+# Single-awk implementation: one fork, prints first match, exits.
 _read_session_uuid() {
     local readme="$1"
     [ -f "$readme" ] || return 0
-    grep -E '^claude_session_id:' "$readme" 2>/dev/null \
-        | head -1 \
-        | sed -E 's/^claude_session_id:[[:space:]]*//; s/^"//; s/"$//' \
-        || true
+    awk '
+        /^claude_session_id:/ {
+            sub(/^claude_session_id:[[:space:]]*/, "")
+            gsub(/"/, "")
+            print
+            exit
+        }
+    ' "$readme" 2>/dev/null || true
 }
 
 # Create session directory structure
@@ -1004,13 +1009,11 @@ EOF
         warn "Added frontmatter to .cs/README.md"
     fi
 
-    # Phase 8: Backfill claude_session_id in README frontmatter if missing.
-    # Sessions created before cs gained UUID pre-allocation have no recorded
-    # session ID. Allocate one and insert it after 'created:' so subsequent
-    # launches resume via --resume <uuid> and hooks can reverse-look-up the
-    # bound session via $CLAUDE_CODE_SESSION_ID. Phase 6 guarantees that any
-    # README reaching this point has a frontmatter block; the grep guard
-    # short-circuits the second resume so this is idempotent.
+    # Phase 8: Backfill claude_session_id in README frontmatter when absent.
+    # Allocate a v4 UUID and insert it after 'created:' so cs can resume via
+    # --resume <uuid> and hooks can reverse-look-up the bound session via
+    # $CLAUDE_CODE_SESSION_ID. Phase 6 guarantees the frontmatter block
+    # exists; the grep guard makes this idempotent.
     if [ -f "$readme" ] && head -1 "$readme" | grep -q '^---$' \
        && ! grep -qE '^claude_session_id:' "$readme"; then
         local _new_uuid
@@ -1058,10 +1061,10 @@ EOF
         warn "Appended auto-memory bucket guidance to CLAUDE.md"
     fi
 
-    # Phase 10: Append session wrap-up cues to CLAUDE.md if missing.
-    # Same sentinel-based pattern as Phase 9 — cs:wrap-cues presence
-    # (with or without content beneath) signals "managed by cs, do not
-    # re-add." Users opt out via tombstone (delete prose, keep comment).
+    # Phase 10: Append session wrap-up cues to CLAUDE.md when sentinel absent.
+    # The cs:wrap-cues marker (with or without content beneath) signals
+    # "managed, do not re-add" — users opt out via tombstone (delete prose,
+    # keep the HTML comment).
     if [ -f "$claude_md_p9" ] && ! grep -q 'cs:wrap-cues' "$claude_md_p9"; then
         cat >> "$claude_md_p9" << 'EOF'
 
@@ -1827,7 +1830,11 @@ launch_claude_code() {
     # UUID and ps sees it, producing a false-positive self-match. The
     # builtin substring test runs entirely in-process and never exposes
     # the UUID as a subprocess argv.
-    if [ -n "$claude_session_id" ] && [ "$force" != "true" ]; then
+    #
+    # Skip when is_new=true: the UUID was just allocated by
+    # create_session_structure milliseconds ago, so no other process can
+    # be holding it. Spares the ps fork on fresh-spawn.
+    if [ -n "$claude_session_id" ] && [ "$force" != "true" ] && [ "$is_new" != "true" ]; then
         local _ps_out
         _ps_out=$("${CS_PS_BIN:-ps}" -Ao args= 2>/dev/null || true)
         if [[ "$_ps_out" == *"$claude_session_id"* ]]; then
@@ -3055,7 +3062,7 @@ run_uninstall() {
     done
 
     # Remove commands
-    for cmd in summary.md compact-discoveries.md checkpoint.md; do
+    for cmd in summary.md compact-discoveries.md checkpoint.md sweep.md wrap.md; do
         if [ -f "$commands_dir/$cmd" ]; then
             rm "$commands_dir/$cmd"
             info "Removed $commands_dir/$cmd"
