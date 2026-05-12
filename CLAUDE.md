@@ -73,3 +73,47 @@ cs -secrets set <name> <value>     # Store manually
 - .cs/changes.md is updated automatically when files are modified
 - Run `/summary` at the end to create a cohesive record
 - Never write raw API keys or passwords to artifact files - use cs -secrets
+
+<!-- cs:memory-rules -->
+## Auto-memory bucket guidance
+
+When the user shares a durable fact worth saving to .cs/memory/, listen for these signals to pick the right bucket:
+
+| User says...                                                                | Goes to          |
+|-----------------------------------------------------------------------------|------------------|
+| "I'm the / my role is / I prefer / I always / I hate / I never"             | `user_*.md`      |
+| "don't do X / stop doing Y / not like that" — corrections                   | `feedback_*.md`  |
+| "yes exactly / keep that approach / that worked" — validated choices        | `feedback_*.md`  |
+| "we're shipping / deadline is / X is driving this / freeze on..."           | `project_*.md`   |
+| "Linear project X / Grafana board at Y / the #channel for Z / docs at URL" | `reference_*.md` |
+
+Discipline:
+- Read the matching memory file before writing — dedup, don't duplicate.
+- One bucket per fact. If it plausibly fits two, pick the more specific.
+- Lazy-load: don't read all four eagerly; load on demand when the question needs that bucket.
+- Never invent or extrapolate. Record only what the user literally said or clearly implied.
+
+To opt out of this guidance, delete the table and prose above but keep the `cs:memory-rules` HTML comment as a tombstone — cs treats the sentinel's presence as "managed, do not re-add."
+
+<!-- cs:wrap-cues -->
+## Session wrap-up cues
+
+When the conversation reaches a natural stopping point — work shipped, a PR merged, a deploy completed, a bug fixed, or the user signaling they're winding down — proactively offer to distill the session via AskUserQuestion BEFORE the conversation drifts.
+
+**Strong triggers (fire on any single occurrence):**
+- "shipped", "PR merged", "PR up", "deployed", "released"
+- "let's call it", "wraps up", "done for the day", "good place to stop"
+- "all good now", "that did it", "ready to ship"
+
+**Soft triggers (require a corroborating signal — a recent commit, an explicit "done", or two or more soft signals in succession):**
+- "that works", "looks good", "we're good", "all set"
+
+**When fired**, use AskUserQuestion with header "Wrap up?" and these options:
+- "Run /wrap" — distill memory entries AND write a session summary in sequence (the usual choice)
+- "Run /sweep only" — just the memory pass; skip the narrative summary
+- "Run /summary only" — just the narrative; skip the memory pass
+- "Not yet — keep working"
+
+Do not fire on every short affirmative ("yes", "ok", "thanks"). Fire when the *work itself* has reached a coherent stopping point, not when a single answer satisfied a single question. False positives erode the signal — be picky.
+
+To opt out, delete the prose above but keep the `cs:wrap-cues` HTML comment as a tombstone — cs treats the sentinel's presence as "managed, do not re-add."
