@@ -2,6 +2,26 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
+## 2026.5.5
+
+### Changed
+
+- **Auto-memory bucket guidance rewritten in imperative-action-sequence prose.** Audit of 71 cs sessions (2026-05-18) showed the v2026.5.2 block — a passive decision table — was empirically inconclusive: 25 spec-compliant bucket files existed BEFORE the block shipped (claude was already following the convention via the harness auto-memory writer), and only 5 landed in the week after. The block was documentation without an action contract. Rewrite adapts the prose structure from a peer project's KB-scoop doctrine (an imperative four-step sequence — Read → check dedup → Write → announce — with explicit "never pause to ask" + announce-after-write pattern, plus a "writing is eager / reading is lazy" distinction, plus lazy-load read signals, plus non-negotiable guardrails framing). Buckets, file format, and tombstone opt-out unchanged — the 30 existing spec-compliant files keep working. Block grows from ~25 to ~75 lines; static input-token cost is bounded (~+630 tokens per session, ~$0.001-$0.01 per 100-turn session with prompt caching).
+
+- **`_emit_memory_rules_block` helper extracted.** Both `write_session_claude_md` (new-session path) and `migrate_session` Phase 9 (lazy-backfill on existing sessions) now call a single helper instead of carrying near-identical HEREDOCs. Closes the first half of the "duplicated heredoc content" deferred-refactor entry from v2026.5.3; the wrap-cues block remains duplicated and is deferred until the next time that area is touched.
+
+- **Smart Phase 9 auto-upgrades existing sessions in-place.** Phase 9 now distinguishes four states of CLAUDE.md: (1) new-prose header present → skip silently, (2) sentinel + bare old header `## Auto-memory bucket guidance` (no suffix) → strip old block, emit new prose at the same position so adjacent `<!-- cs:wrap-cues -->` block keeps its order, (3) sentinel + no header → tombstone opt-out preserved, (4) no sentinel → append fresh. Detection uses three single-grep tests; replacement uses a single `awk` pass with the new block passed via `$NEW_BLOCK` env var (not `-v`, which would re-process C-style escapes in the markdown content). On next launch, every existing session not opted out auto-converges to v2 prose with one `Upgraded auto-memory bucket guidance to v2 prose` warn message. **Trade-off: any user customization of the block content is clobbered on upgrade** — preserving customizations would conflict with shipping prose improvements to existing sessions.
+
+### Tests
+
+- 5 new tests in `tests/test_memory_rules.sh`:
+  - `block_uses_imperative_prose_markers` — asserts "Never pause to ask", "Writing is eager", "non-negotiable", "Signals it's time to Read"; catches silent regression to the decision-table-only shape.
+  - `block_single_source_of_truth_in_bin_cs` — asserts the unique block-content phrase "### The four buckets" appears exactly once in `bin/cs` (only inside `_emit_memory_rules_block`); catches future inline-HEREDOC drift if someone adds a third call site.
+  - `smart_phase9_upgrades_v1_block_to_v2_prose` — seeded session with v1 prose; asserts upgrade fires, new prose present, sentinel still unique, adjacent `cs:wrap-cues` block preserved.
+  - `smart_phase9_preserves_tombstone_on_upgrade_pass` — seeded session with bare sentinel (user opt-out); asserts no re-add.
+  - `smart_phase9_skips_when_already_on_v2_prose` — second launch on a session already on new prose must be a no-op.
+- Existing 4 tests pass unchanged — assertions check structural markers ("cs:memory-rules", "Auto-memory bucket guidance", `user_*.md`) that the new prose preserves.
+
 ## 2026.5.4
 
 ### Fixes
