@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# ABOUTME: Tests for auto-memory bucket guidance block in session CLAUDE.md
-# ABOUTME: Validates new-session insertion, lazy migration, and user opt-out
+# ABOUTME: Tests for cs memory disclosure note in session CLAUDE.md
+# ABOUTME: Covers new sessions, legacy retirement (v1/v2 rules block → note), tombstone opt-outs
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=tests/test_lib.sh
@@ -14,30 +14,45 @@ teardown() {
     unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR 2>/dev/null || true
 }
 
-# Sentinel marker injected at the top of the managed block. Presence means
-# cs has touched this section — migration treats it as "do not modify."
-SENTINEL='<!-- cs:memory-rules -->'
+# Current sentinel — managed by cs, marks the disclosure note section.
+NOTE_SENTINEL='<!-- cs:memory-note -->'
+# Legacy sentinel — retired in v2026.5.5 along with the imperative bucket-
+# guidance block. Phase 9 still respects its tombstone form (sentinel-only,
+# no header) as a user opt-out signal for the entire cs memory-documentation
+# surface, which carries over to the replacement note.
+LEGACY_SENTINEL='<!-- cs:memory-rules -->'
 
 # ============================================================================
-# Cycle 1: new session CLAUDE.md contains the memory-rules block
+# Cycle 1: new session CLAUDE.md contains the memory-note (not the rules block)
 # ============================================================================
 
-test_new_session_has_memory_rules_block() {
+test_new_session_has_memory_note() {
     "$CS_BIN" test-session <<< "" >/dev/null 2>&1 || true
 
     local claude_md="$CS_SESSIONS_ROOT/test-session/CLAUDE.md"
 
     assert_file_exists "$claude_md" "session CLAUDE.md should exist" || return 1
-    assert_file_contains "$claude_md" "cs:memory-rules" \
-        "CLAUDE.md should contain the cs:memory-rules sentinel" || return 1
-    assert_file_contains "$claude_md" "Auto-memory bucket guidance" \
-        "CLAUDE.md should contain the section header" || return 1
-    assert_file_contains "$claude_md" 'user_\*\.md' \
-        "CLAUDE.md should mention user_*.md bucket in the signal-phrase table" || return 1
+    assert_file_contains "$claude_md" "cs:memory-note" \
+        "CLAUDE.md should contain the cs:memory-note sentinel" || return 1
+    assert_file_contains "$claude_md" 'CLAUDE_COWORK_MEMORY_PATH_OVERRIDE' \
+        "note should mention the env var cs uses to redirect memory" || return 1
+    assert_file_contains "$claude_md" '\.cs/memory/' \
+        "note should mention the .cs/memory/ destination" || return 1
 }
 
-# Build a "legacy" session whose CLAUDE.md predates the memory-rules block.
-# Used by the lazy-migration tests.
+test_new_session_has_no_legacy_rules_block() {
+    "$CS_BIN" test-session <<< "" >/dev/null 2>&1 || true
+    local claude_md="$CS_SESSIONS_ROOT/test-session/CLAUDE.md"
+
+    assert_file_not_contains "$claude_md" "cs:memory-rules" \
+        "new sessions must not ship the retired memory-rules sentinel" || return 1
+    assert_file_not_contains "$claude_md" "Auto-memory bucket guidance" \
+        "new sessions must not ship the retired imperative prose" || return 1
+    assert_file_not_contains "$claude_md" "Never pause to ask" \
+        "new sessions must not ship behavioral instruction prose" || return 1
+}
+
+# Build a "legacy" session whose CLAUDE.md predates any cs memory documentation.
 _seed_legacy_session() {
     local name="$1"
     local session_dir="$CS_SESSIONS_ROOT/$name"
@@ -55,8 +70,6 @@ aliases: ["$name"]
 EOF
     echo "# Discoveries" > "$session_dir/.cs/discoveries.md"
     echo "# Changes" > "$session_dir/.cs/changes.md"
-    # Legacy CLAUDE.md: mentions .cs/ paths (so Phase 5 won't rewrite it)
-    # but contains no cs:memory-rules sentinel.
     cat > "$session_dir/CLAUDE.md" << 'EOF'
 # Session Documentation Protocol
 
@@ -71,73 +84,55 @@ EOF
 }
 
 # ============================================================================
-# Cycle 2: lazy migration appends the block to legacy CLAUDE.md (idempotent)
+# Cycle 2: lazy migration appends the note to legacy CLAUDE.md (idempotent)
 # ============================================================================
 
-test_lazy_migration_appends_block() {
+test_lazy_migration_appends_note() {
     local session_dir
     session_dir=$(_seed_legacy_session "legacy-claude")
 
-    assert_file_not_contains "$session_dir/CLAUDE.md" "cs:memory-rules" \
+    assert_file_not_contains "$session_dir/CLAUDE.md" "cs:memory-note" \
         "precondition: legacy CLAUDE.md should lack the sentinel" || return 1
 
     "$CS_BIN" legacy-claude <<< "" >/dev/null 2>&1 || true
 
-    assert_file_contains "$session_dir/CLAUDE.md" "cs:memory-rules" \
-        "Phase 9 migration should append the sentinel" || return 1
-    assert_file_contains "$session_dir/CLAUDE.md" "Auto-memory bucket guidance" \
-        "appended block should include the section header" || return 1
+    assert_file_contains "$session_dir/CLAUDE.md" "cs:memory-note" \
+        "Phase 9 should append the note sentinel" || return 1
+    assert_file_contains "$session_dir/CLAUDE.md" 'CLAUDE_COWORK_MEMORY_PATH_OVERRIDE' \
+        "appended note should describe the cs path-redirect mechanism" || return 1
 }
 
 test_lazy_migration_idempotent() {
     local session_dir
     session_dir=$(_seed_legacy_session "legacy-claude")
 
-    # First migration appends.
     "$CS_BIN" legacy-claude <<< "" >/dev/null 2>&1 || true
-
     local first_size
     first_size=$(wc -c < "$session_dir/CLAUDE.md" | tr -d ' ')
 
-    # Second migration must be a no-op.
     "$CS_BIN" legacy-claude <<< "" >/dev/null 2>&1 || true
-
     local second_size
     second_size=$(wc -c < "$session_dir/CLAUDE.md" | tr -d ' ')
 
     assert_eq "$first_size" "$second_size" \
         "second migration should not change CLAUDE.md size" || return 1
 
-    # The token `cs:memory-rules` also appears in the opt-out instruction
-    # prose (documenting the sentinel by name). The actual sentinel marker
-    # is the HTML comment; that's what must be exactly-once. Production
-    # grep at Phase 9 is intentionally loose so opt-out-with-docs is also
-    # detected as "managed."
     local sentinel_count
-    sentinel_count=$(grep -cF '<!-- cs:memory-rules -->' "$session_dir/CLAUDE.md")
+    sentinel_count=$(grep -cF '<!-- cs:memory-note -->' "$session_dir/CLAUDE.md")
     assert_eq "1" "$sentinel_count" \
-        "HTML comment sentinel must appear exactly once after repeated migrations" || return 1
+        "memory-note sentinel must appear exactly once after repeated migrations" || return 1
 }
 
 # ============================================================================
-# Runner
-# ============================================================================
-echo "Running test_memory_rules.sh"
-echo ""
-run_test test_new_session_has_memory_rules_block
-run_test test_lazy_migration_appends_block
-run_test test_lazy_migration_idempotent
-
-# ============================================================================
-# Cycle 3: user opt-out — sentinel as tombstone prevents re-addition
+# Cycle 3: legacy cs:memory-rules tombstone opt-out is respected
+# (user kept the sentinel, deleted the prose — applies to the replacement too)
 # ============================================================================
 
-test_user_opt_out_respected() {
+test_legacy_rules_tombstone_prevents_note_addition() {
     local name="opted-out"
     local session_dir="$CS_SESSIONS_ROOT/$name"
     mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
     echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
-    echo "auto_sync=on" > "$session_dir/.cs/sync.conf"
     cat > "$session_dir/.cs/README.md" << EOF
 ---
 status: active
@@ -149,7 +144,9 @@ aliases: ["$name"]
 EOF
     echo "# Discoveries" > "$session_dir/.cs/discoveries.md"
     echo "# Changes" > "$session_dir/.cs/changes.md"
-    # User opted out: kept the sentinel as a tombstone, deleted the block.
+    # User opted out: kept the legacy sentinel as a tombstone, deleted the block.
+    # That intent ("no cs memory documentation in my CLAUDE.md") carries over to
+    # the replacement note — Phase 9 must NOT add cs:memory-note here.
     cat > "$session_dir/CLAUDE.md" << 'EOF'
 # Session Documentation Protocol
 
@@ -159,80 +156,28 @@ This is a Claude Code session managed by cs. Session metadata lives in the .cs/ 
 EOF
     (cd "$session_dir" && git init -q && git add -A && git commit -q -m init)
 
-    assert_file_contains "$session_dir/CLAUDE.md" '<!-- cs:memory-rules -->' \
-        "precondition: tombstone sentinel must be present" || return 1
-    assert_file_not_contains "$session_dir/CLAUDE.md" "Auto-memory bucket guidance" \
-        "precondition: opted-out CLAUDE.md must lack the block content" || return 1
-
     "$CS_BIN" opted-out <<< "" >/dev/null 2>&1 || true
 
-    assert_file_not_contains "$session_dir/CLAUDE.md" "Auto-memory bucket guidance" \
-        "tombstone sentinel must prevent re-addition of the block" || return 1
+    assert_file_not_contains "$session_dir/CLAUDE.md" "cs:memory-note" \
+        "legacy tombstone must prevent addition of the replacement note" || return 1
+    assert_file_not_contains "$session_dir/CLAUDE.md" "CLAUDE_COWORK_MEMORY_PATH_OVERRIDE" \
+        "legacy tombstone must prevent addition of any cs memory documentation" || return 1
 
     local sentinel_count
     sentinel_count=$(grep -cF '<!-- cs:memory-rules -->' "$session_dir/CLAUDE.md")
     assert_eq "1" "$sentinel_count" \
-        "tombstone sentinel must not duplicate" || return 1
-}
-
-run_test test_user_opt_out_respected
-
-# ============================================================================
-# Cycle 4: imperative-action-sequence prose markers — guards against silent
-# regression to the decision-table-only shape (v2026.5.2 through v2026.5.4)
-# ============================================================================
-
-test_block_uses_imperative_prose_markers() {
-    "$CS_BIN" test-session <<< "" >/dev/null 2>&1 || true
-    local claude_md="$CS_SESSIONS_ROOT/test-session/CLAUDE.md"
-
-    # These phrases are the load-bearing markers of the imperative
-    # action-sequence prose. Their absence means the block reverted to the
-    # passive decision-table shape that empirically didn't move claude's
-    # memory-write behavior (see .cs/discoveries.md, Phase 9 audit entry).
-    assert_file_contains "$claude_md" "Never pause to ask" \
-        "block should include the 'never pause to ask' instruction" || return 1
-    assert_file_contains "$claude_md" "Writing is eager" \
-        "block should include the writing-eager/reading-lazy distinction" || return 1
-    assert_file_contains "$claude_md" "non-negotiable" \
-        "block should mark guardrails as non-negotiable" || return 1
-    assert_file_contains "$claude_md" "Signals it's time to Read" \
-        "block should include lazy-load read signals section" || return 1
+        "legacy tombstone sentinel must not duplicate" || return 1
 }
 
 # ============================================================================
-# Cycle 5: single source of truth — the literal cs:memory-rules HTML comment
-# appears in exactly ONE place in bin/cs (inside _emit_memory_rules_block).
-# Guards against future drift if someone re-introduces an inline HEREDOC.
+# Cycle 4: legacy rules block (v1 or v2) gets stripped + replaced with note
+# in place, so adjacent cs:wrap-cues block keeps its order.
 # ============================================================================
 
-test_block_single_source_of_truth_in_bin_cs() {
-    # Pick a unique phrase from the new prose content that wouldn't appear
-    # in detection logic or comments — the section header for the buckets
-    # table is unique to the helper's HEREDOC. Catches a regression where
-    # someone re-inlines the block content at a third call site.
-    local cs_bin="$SCRIPT_DIR/../bin/cs"
-    local content_count
-    content_count=$(grep -cF '### The four buckets' "$cs_bin")
-    assert_eq "1" "$content_count" \
-        "unique block-content phrase should appear exactly once in bin/cs (inside _emit_memory_rules_block helper)" || return 1
-}
-
-run_test test_block_uses_imperative_prose_markers
-run_test test_block_single_source_of_truth_in_bin_cs
-
-# ============================================================================
-# Cycle 6: smart Phase 9 — upgrade-in-place when the old (v2026.5.2 — 5.4)
-# decision-table block is detected. Tombstone opt-out preserved; user
-# customizations of the block are intentionally clobbered (documented).
-# ============================================================================
-
-# Seed a session with the OLD prose (decision-table-only, no imperative
-# action sequence). The minimum viable shape is the bare header line
-# without the new "(scoop mode" suffix — that's what smart Phase 9
-# detects as "v1 prose, upgrade needed."
-_seed_session_with_v1_block() {
+_seed_session_with_legacy_rules_block() {
+    # Args: $1 = session name, $2 = "v1" or "v2" — controls header shape
     local name="$1"
+    local variant="$2"
     local session_dir="$CS_SESSIONS_ROOT/$name"
     mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
     echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
@@ -247,15 +192,21 @@ aliases: ["$name"]
 EOF
     echo "# Discoveries" > "$session_dir/.cs/discoveries.md"
     echo "# Changes" > "$session_dir/.cs/changes.md"
-    # CLAUDE.md with the OLD v1 block — bare header line, no imperative
-    # action sequence, no "scoop mode" suffix.
-    cat > "$session_dir/CLAUDE.md" << 'EOF'
+
+    local header
+    if [ "$variant" = "v2" ]; then
+        header='## Auto-memory bucket guidance (scoop mode — passive, continuous)'
+    else
+        header='## Auto-memory bucket guidance'
+    fi
+
+    cat > "$session_dir/CLAUDE.md" << EOF
 # Session Documentation Protocol
 
 This is a Claude Code session managed by cs. Session metadata lives in the .cs/ directory.
 
 <!-- cs:memory-rules -->
-## Auto-memory bucket guidance
+$header
 
 When the user shares a durable fact worth saving, listen for signals and pick a bucket.
 
@@ -273,93 +224,112 @@ EOF
     echo "$session_dir"
 }
 
-test_smart_phase9_upgrades_v1_block_to_v2_prose() {
+test_phase9_retires_v1_block_to_note() {
     local session_dir
-    session_dir=$(_seed_session_with_v1_block "v1-session")
+    session_dir=$(_seed_session_with_legacy_rules_block "v1-session" "v1")
 
-    # Precondition: v1 block present, no v2 markers.
     assert_file_contains "$session_dir/CLAUDE.md" '<!-- cs:memory-rules -->' \
-        "precondition: v1 sentinel must be present" || return 1
-    assert_file_not_contains "$session_dir/CLAUDE.md" "Never pause to ask" \
-        "precondition: v2 imperative prose must be absent" || return 1
+        "precondition: v1 sentinel present" || return 1
+    assert_file_contains "$session_dir/CLAUDE.md" '^## Auto-memory bucket guidance$' \
+        "precondition: v1 header (no suffix) present" || return 1
 
     "$CS_BIN" v1-session <<< "" >/dev/null 2>&1 || true
 
-    # Post: v2 prose markers present.
-    assert_file_contains "$session_dir/CLAUDE.md" "Never pause to ask" \
-        "smart Phase 9 should upgrade v1 prose to v2 imperative prose" || return 1
-    assert_file_contains "$session_dir/CLAUDE.md" "Writing is eager" \
-        "upgraded block should include writing-eager/reading-lazy section" || return 1
-
-    # Sentinel still appears exactly once (no duplicate).
-    local sentinel_count
-    sentinel_count=$(grep -cF '<!-- cs:memory-rules -->' "$session_dir/CLAUDE.md")
-    assert_eq "1" "$sentinel_count" \
-        "sentinel must appear exactly once after upgrade" || return 1
-
-    # The wrap-cues sentinel (which followed the v1 block) must still be present.
-    assert_file_contains "$session_dir/CLAUDE.md" '<!-- cs:wrap-cues -->' \
-        "smart Phase 9 must not eat the adjacent cs:wrap-cues block" || return 1
-}
-
-test_smart_phase9_preserves_tombstone_on_upgrade_pass() {
-    # User opted out: sentinel present without the block header.
-    # Smart Phase 9 must NOT re-add the block (would defeat opt-out).
-    local name="tombstone-during-upgrade"
-    local session_dir="$CS_SESSIONS_ROOT/$name"
-    mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
-    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
-    cat > "$session_dir/.cs/README.md" << EOF
----
-status: active
-created: 2026-01-01
-tags: []
-aliases: ["$name"]
----
-# Session: $name
-EOF
-    echo "# Discoveries" > "$session_dir/.cs/discoveries.md"
-    echo "# Changes" > "$session_dir/.cs/changes.md"
-    # Mention .cs/ in the CLAUDE.md prelude so Phase 5 (which rewrites
-    # CLAUDE.md from scratch when it lacks .cs/ references) doesn't fire
-    # before Phase 9 sees the tombstone.
-    cat > "$session_dir/CLAUDE.md" << 'EOF'
-# Session Documentation Protocol
-
-This is a Claude Code session managed by cs. Session metadata lives in the .cs/ directory.
-
-<!-- cs:memory-rules -->
-EOF
-    (cd "$session_dir" && git init -q && git add -A && git commit -q -m init)
-
-    "$CS_BIN" tombstone-during-upgrade <<< "" >/dev/null 2>&1 || true
-
-    assert_file_not_contains "$session_dir/CLAUDE.md" "Never pause to ask" \
-        "smart Phase 9 must not re-add the block when tombstone-only" || return 1
+    assert_file_not_contains "$session_dir/CLAUDE.md" 'cs:memory-rules' \
+        "v1 sentinel must be gone after retirement" || return 1
     assert_file_not_contains "$session_dir/CLAUDE.md" "Auto-memory bucket guidance" \
-        "smart Phase 9 must preserve tombstone opt-out (no block content)" || return 1
+        "v1 header must be gone after retirement" || return 1
+    assert_file_contains "$session_dir/CLAUDE.md" 'cs:memory-note' \
+        "memory-note must be added in v1's place" || return 1
+    assert_file_contains "$session_dir/CLAUDE.md" '<!-- cs:wrap-cues -->' \
+        "adjacent cs:wrap-cues block must be preserved across retirement" || return 1
 }
 
-test_smart_phase9_skips_when_already_on_v2_prose() {
-    # Session already on the new prose — second launch must be a no-op.
-    "$CS_BIN" already-current <<< "" >/dev/null 2>&1 || true
-    local claude_md="$CS_SESSIONS_ROOT/already-current/CLAUDE.md"
+test_phase9_retires_v2_block_to_note() {
+    local session_dir
+    session_dir=$(_seed_session_with_legacy_rules_block "v2-session" "v2")
+
+    assert_file_contains "$session_dir/CLAUDE.md" "(scoop mode" \
+        "precondition: v2 header (with scoop mode suffix) present" || return 1
+
+    "$CS_BIN" v2-session <<< "" >/dev/null 2>&1 || true
+
+    assert_file_not_contains "$session_dir/CLAUDE.md" 'cs:memory-rules' \
+        "v2 sentinel must be gone after retirement" || return 1
+    assert_file_not_contains "$session_dir/CLAUDE.md" "(scoop mode" \
+        "v2 header must be gone after retirement" || return 1
+    assert_file_not_contains "$session_dir/CLAUDE.md" "Never pause to ask" \
+        "v2 imperative instructions must be gone after retirement" || return 1
+    assert_file_contains "$session_dir/CLAUDE.md" 'cs:memory-note' \
+        "memory-note must be added in v2's place" || return 1
+    assert_file_contains "$session_dir/CLAUDE.md" '<!-- cs:wrap-cues -->' \
+        "adjacent cs:wrap-cues block must be preserved across retirement" || return 1
+}
+
+test_phase9_idempotent_when_already_on_note() {
+    "$CS_BIN" already-on-note <<< "" >/dev/null 2>&1 || true
+    local claude_md="$CS_SESSIONS_ROOT/already-on-note/CLAUDE.md"
     local before_size after_size
     before_size=$(wc -c < "$claude_md" | tr -d ' ')
 
-    "$CS_BIN" already-current <<< "" >/dev/null 2>&1 || true
+    "$CS_BIN" already-on-note <<< "" >/dev/null 2>&1 || true
     after_size=$(wc -c < "$claude_md" | tr -d ' ')
 
     assert_eq "$before_size" "$after_size" \
-        "second launch on session already on v2 prose must not change CLAUDE.md size" || return 1
+        "second launch on session already-on-note must not change CLAUDE.md size" || return 1
 
     local sentinel_count
-    sentinel_count=$(grep -cF '<!-- cs:memory-rules -->' "$claude_md")
+    sentinel_count=$(grep -cF '<!-- cs:memory-note -->' "$claude_md")
     assert_eq "1" "$sentinel_count" \
-        "sentinel must appear exactly once after re-launch on already-current session" || return 1
+        "memory-note sentinel must appear exactly once after re-launch" || return 1
 }
 
-run_test test_smart_phase9_upgrades_v1_block_to_v2_prose
-run_test test_smart_phase9_preserves_tombstone_on_upgrade_pass
-run_test test_smart_phase9_skips_when_already_on_v2_prose
+# ============================================================================
+# Cycle 5: structural invariants — single source of truth + no behavioral prose
+# ============================================================================
+
+test_note_single_source_of_truth_in_bin_cs() {
+    # Pick a content-unique phrase that only appears in the helper HEREDOC
+    # (NOT in Phase 9 state-detection greps, which legitimately reference
+    # the sentinel literal). Catches future drift if someone re-inlines the
+    # note's prose at another call site.
+    local cs_bin="$SCRIPT_DIR/../bin/cs"
+    local content_count
+    content_count=$(grep -cF "Claude's built-in memory writes durable facts" "$cs_bin")
+    assert_eq "1" "$content_count" \
+        "unique note-content phrase must appear exactly once in bin/cs (only inside _emit_memory_note_block)" || return 1
+}
+
+test_note_has_no_behavioral_instruction() {
+    # The retirement explicitly removes behavioral prose. Catches a regression
+    # where someone restores imperative content under the new sentinel name.
+    "$CS_BIN" test-session <<< "" >/dev/null 2>&1 || true
+    local claude_md="$CS_SESSIONS_ROOT/test-session/CLAUDE.md"
+
+    for forbidden in \
+        "Never pause to ask" \
+        "Writing is eager" \
+        "action sequence" \
+        "non-negotiable" \
+        "Signals it's time to Read"; do
+        assert_file_not_contains "$claude_md" "$forbidden" \
+            "note must not contain behavioral instruction phrase '$forbidden'" || return 1
+    done
+}
+
+# ============================================================================
+# Runner
+# ============================================================================
+echo "Running test_memory_rules.sh"
+echo ""
+run_test test_new_session_has_memory_note
+run_test test_new_session_has_no_legacy_rules_block
+run_test test_lazy_migration_appends_note
+run_test test_lazy_migration_idempotent
+run_test test_legacy_rules_tombstone_prevents_note_addition
+run_test test_phase9_retires_v1_block_to_note
+run_test test_phase9_retires_v2_block_to_note
+run_test test_phase9_idempotent_when_already_on_note
+run_test test_note_single_source_of_truth_in_bin_cs
+run_test test_note_has_no_behavioral_instruction
 report_results

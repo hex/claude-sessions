@@ -4,23 +4,25 @@ All notable changes to cs are documented here. Release notes are also available 
 
 ## 2026.5.5
 
+### Removed
+
+- **Auto-memory bucket guidance block (`cs:memory-rules`) retired.** The v2026.5.2 block — a ~75-line markdown section in each session's CLAUDE.md instructing claude on how to write durable user facts into per-bucket memory files — has been empirically shown not to drive the behavior it claimed. An 8-day measurement window (2026-05-18 to 2026-05-26) found 4 memory files written across all active sessions; 3 of those were written in a session whose CLAUDE.md has **no cs:memory-rules block at all** (its CLAUDE.md is project-owned and never carried the block). All 4 files carry the frontmatter fingerprint of claude's built-in auto-memory harness (`node_type: memory`, `originSessionId: <uuid>`) — fields the cs template never specified, evidence that claude's harness writes the files regardless of cs's prose. The block claimed behavioral ownership of a mechanism the harness actually drives. A council of four AI advisors independently converged on retirement.
+
+### Added
+
+- **`cs:memory-note` disclosure breadcrumb** replaces the rules block. One factual sentence stating what cs actually owns — the path-redirect via `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE` and the `MEMORY.md` index — and nothing about how claude should write. ~50 tokens per session vs the prior ~940. Block content lives in `_emit_memory_note_block` (single source of truth for both `write_session_claude_md` and Phase 9).
+
 ### Changed
 
-- **Auto-memory bucket guidance rewritten in imperative-action-sequence prose.** Audit of 71 cs sessions (2026-05-18) showed the v2026.5.2 block — a passive decision table — was empirically inconclusive: 25 spec-compliant bucket files existed BEFORE the block shipped (claude was already following the convention via the harness auto-memory writer), and only 5 landed in the week after. The block was documentation without an action contract. Rewrite adapts the prose structure from a peer project's KB-scoop doctrine (an imperative four-step sequence — Read → check dedup → Write → announce — with explicit "never pause to ask" + announce-after-write pattern, plus a "writing is eager / reading is lazy" distinction, plus lazy-load read signals, plus non-negotiable guardrails framing). Buckets, file format, and tombstone opt-out unchanged — the 30 existing spec-compliant files keep working. Block grows from ~25 to ~75 lines; static input-token cost is bounded (~+630 tokens per session, ~$0.001-$0.01 per 100-turn session with prompt caching).
-
-- **`_emit_memory_rules_block` helper extracted.** Both `write_session_claude_md` (new-session path) and `migrate_session` Phase 9 (lazy-backfill on existing sessions) now call a single helper instead of carrying near-identical HEREDOCs. Closes the first half of the "duplicated heredoc content" deferred-refactor entry from v2026.5.3; the wrap-cues block remains duplicated and is deferred until the next time that area is touched.
-
-- **Smart Phase 9 auto-upgrades existing sessions in-place.** Phase 9 now distinguishes four states of CLAUDE.md: (1) new-prose header present → skip silently, (2) sentinel + bare old header `## Auto-memory bucket guidance` (no suffix) → strip old block, emit new prose at the same position so adjacent `<!-- cs:wrap-cues -->` block keeps its order, (3) sentinel + no header → tombstone opt-out preserved, (4) no sentinel → append fresh. Detection uses three single-grep tests; replacement uses a single `awk` pass with the new block passed via `$NEW_BLOCK` env var (not `-v`, which would re-process C-style escapes in the markdown content). On next launch, every existing session not opted out auto-converges to v2 prose with one `Upgraded auto-memory bucket guidance to v2 prose` warn message. **Trade-off: any user customization of the block content is clobbered on upgrade** — preserving customizations would conflict with shipping prose improvements to existing sessions.
+- **Smart Phase 9 now retires the legacy rules block.** Four states distinguished on existing sessions: (1) `cs:memory-note` already present → skip; (2) `cs:memory-rules` sentinel + `## Auto-memory bucket guidance` header (any variant — v1 from 5.2 or v2 from 5.3–5.4 with the "scoop mode" suffix) → strip the entire rules section, insert the note in its place; adjacent `cs:wrap-cues` block keeps its order via an awk `stripping` flag that resets on the next `<!--` marker; (3) `cs:memory-rules` sentinel only (no header, user tombstone opt-out) → preserve as-is, do NOT add the replacement note (the opt-out signal carries over); (4) neither sentinel → append note fresh. Every existing non-opted-out session auto-converges to the note on next launch with one `Retired auto-memory bucket guidance; replaced with cs:memory-note` warn message.
 
 ### Tests
 
-- 5 new tests in `tests/test_memory_rules.sh`:
-  - `block_uses_imperative_prose_markers` — asserts "Never pause to ask", "Writing is eager", "non-negotiable", "Signals it's time to Read"; catches silent regression to the decision-table-only shape.
-  - `block_single_source_of_truth_in_bin_cs` — asserts the unique block-content phrase "### The four buckets" appears exactly once in `bin/cs` (only inside `_emit_memory_rules_block`); catches future inline-HEREDOC drift if someone adds a third call site.
-  - `smart_phase9_upgrades_v1_block_to_v2_prose` — seeded session with v1 prose; asserts upgrade fires, new prose present, sentinel still unique, adjacent `cs:wrap-cues` block preserved.
-  - `smart_phase9_preserves_tombstone_on_upgrade_pass` — seeded session with bare sentinel (user opt-out); asserts no re-add.
-  - `smart_phase9_skips_when_already_on_v2_prose` — second launch on a session already on new prose must be a no-op.
-- Existing 4 tests pass unchanged — assertions check structural markers ("cs:memory-rules", "Auto-memory bucket guidance", `user_*.md`) that the new prose preserves.
+`tests/test_memory_rules.sh` rewritten — 10 tests covering: new-session note insertion, absence of legacy rules content in new sessions, legacy-session note append, idempotence, legacy tombstone opt-out preservation, retirement of v1 and v2 rules blocks with `cs:wrap-cues` adjacency preserved, idempotence on already-noted sessions, single-source-of-truth in `bin/cs`, and absence of behavioral instruction phrases ("Never pause to ask", "Writing is eager", "non-negotiable", "Signals it's time to Read") in the new note. Full 23-file suite green.
+
+### Background
+
+The retirement is documented in `.cs/discoveries.md` with the 8-day measurement timeline, the empire-as-accidental-control finding, the harness-fingerprint analysis, and the council consensus. The structural lesson: cs should claim ownership only of behavior it actually controls (path redirect, session lifecycle, hooks). Instruction prose in CLAUDE.md that duplicates harness behavior is documentation overhead with no measurable lift — and creates "false ownership" cost beyond the token bill (source-of-truth conflicts when the harness evolves, maintenance liability that lags behind upstream).
 
 ## 2026.5.4
 

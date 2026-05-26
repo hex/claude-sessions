@@ -628,88 +628,17 @@ SETTINGS
     fi
 }
 
-# Emit the auto-memory bucket guidance block (cs:memory-rules section).
-# Single source of truth used by write_session_claude_md (new sessions)
-# and migrate_session Phase 9 (lazy backfill on existing sessions). Both
-# call sites print exactly what this function emits — never inline the
-# HEREDOC at a call site or the two will drift. The block content adapts
-# flow's §4.10 imperative-action-sequence prose for cs's 4-bucket schema
-# (intent-based: user/feedback/project/reference) and file-per-fact YAML
-# storage (forced by claude's harness auto-memory writer).
-_emit_memory_rules_block() {
+# Emit the cs memory disclosure note (cs:memory-note section).
+# Single source of truth used by write_session_claude_md (new sessions) and
+# migrate_session Phase 9 (lazy migration on existing sessions). The note
+# documents what cs actually owns — path redirect via
+# CLAUDE_COWORK_MEMORY_PATH_OVERRIDE and the MEMORY.md index — without
+# claiming ownership of capture behavior, which is owned by Claude's
+# built-in auto-memory harness.
+_emit_memory_note_block() {
     cat << 'EOF'
-<!-- cs:memory-rules -->
-## Auto-memory bucket guidance (scoop mode — passive, continuous)
-
-This is a **passive** workflow that runs alongside every conversation, without the user asking for it. When you hear a durable fact worth saving across sessions, append it to the matching `.cs/memory/` bucket on the fly — no permission needed.
-
-### The four buckets
-
-| File pattern | Holds |
-|---|---|
-| `user_*.md` | Durable facts about the user — role, preferences, working style, constraints, availability |
-| `feedback_*.md` | Corrections AND validated choices — guidance about how to approach work in this codebase |
-| `project_*.md` | Ongoing work, goals, deadlines, drivers, incidents — state of THIS project that's not derivable from git/code |
-| `reference_*.md` | Pointers to external systems — Linear projects, Grafana boards, Slack channels, docs URLs |
-
-### How to decide which bucket
-
-| User says something like… | Goes to |
-|---|---|
-| "I'm the / my role is / I prefer / I always / I hate / I never" | `user_*.md` |
-| "don't do X / stop doing Y / not like that" (corrections) | `feedback_*.md` |
-| "yes exactly / keep that approach / that worked" (validated choices) | `feedback_*.md` |
-| "we're shipping / deadline is / X is driving this / freeze on…" | `project_*.md` |
-| "Linear project X / Grafana board at Y / the #channel for Z / docs at URL" | `reference_*.md` |
-
-### The action sequence — eager, never pause to ask
-
-When you hear a durable fact, do these in order. Do not skip steps. Never pause to ask the user "should I record this?" — the bar is the guardrails below, not your hesitation.
-
-1. Skim existing `<bucket>_*.md` files in `.cs/memory/` (and check `MEMORY.md` for the index) to see whether this fact is already captured.
-2. If it's new, Write a file at `.cs/memory/<bucket>_<short-slug>.md` with YAML frontmatter:
-   ```
-   ---
-   name: <short title — kebab-case>
-   description: <one-line summary used to decide relevance in future conversations>
-   metadata:
-     type: <user|feedback|project|reference>
-   ---
-
-   <the actual fact, in your own words, with the why if it's non-obvious>
-   ```
-3. Add a one-line pointer to `MEMORY.md`: `- [Title](file.md) — one-line hook`.
-4. Announce quietly in one line: `noted in <bucket>_<slug>.md: "<short paraphrase>"`.
-
-### Writing is eager. Reading is lazy.
-
-The action sequence above is for **writing** — when you hear a fact, capture it immediately. The opposite discipline applies to **reading** existing memory files: never preload all four buckets eagerly. Load on demand when the current question actually needs that category of fact.
-
-**Signals it's time to Read a specific bucket file:**
-
-- User mentions a person, tool, customer, or external resource you don't recognize → look for it in `reference_*.md`.
-- User references a previous decision or correction ("like we discussed", "the rule we have") → look for it in `feedback_*.md`.
-- User asks about project status, a deadline, an ongoing initiative → look for it in `project_*.md`.
-- You're reasoning about who the user is or how they prefer to work (e.g. composing an explanation, choosing communication style) → look for it in `user_*.md`.
-- `MEMORY.md` references a file you haven't read yet AND it's clearly relevant to the current turn → load that one file.
-
-**Signals it's NOT time to read:**
-
-- The current task is mechanical and self-contained ("run the tests", "fix this typo").
-- You already read the relevant file earlier this turn and nothing new has been written since.
-- You just wrote a new entry — the write is the source of truth; no need to re-read.
-
-Read at most the specific file you need, not all four. Load on demand, one file at a time.
-
-### Guardrails (non-negotiable)
-
-1. **Only durable facts.** "I'm tired today" is not durable. "I prefer async communication" is. When in doubt, don't record.
-2. **Deduplicate.** Skim the matching bucket's files first. If the same fact (even paraphrased) is already captured, don't write a new file.
-3. **Never invent.** Only record what the user literally said or clearly implied. Do not embellish, extrapolate, or guess.
-4. **One bucket per fact.** If a fact plausibly fits two categories, pick the more specific one. Do not cross-post.
-5. **Keep the index in sync.** Every new file gets a one-liner in `MEMORY.md` so future conversations can locate it without reading the whole directory.
-
-To opt out of this guidance, delete the prose above but keep the `cs:memory-rules` HTML comment as a tombstone — cs treats the sentinel's presence as "managed, do not re-add."
+<!-- cs:memory-note -->
+Claude's built-in memory writes durable facts to `.cs/memory/` (cs redirects via `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE`); the `MEMORY.md` index lists entries and individual `<bucket>_*.md` files are loaded lazily.
 EOF
 }
 
@@ -786,7 +715,7 @@ cs -secrets set <name> <value>     # Store manually
 ```
 
 EOF
-    _emit_memory_rules_block >> "$session_dir/CLAUDE.md"
+    _emit_memory_note_block >> "$session_dir/CLAUDE.md"
     cat >> "$session_dir/CLAUDE.md" << 'EOF'
 
 <!-- cs:wrap-cues -->
@@ -1183,37 +1112,37 @@ EOF
         fi
     fi
 
-    # Phase 9: Bind CLAUDE.md to the current auto-memory bucket guidance
-    # prose. Four states are distinguished:
+    # Phase 9: Manage the cs:memory-note section in CLAUDE.md. Four states:
     #
-    #   1. New-prose header present ("(scoop mode" suffix) — already current,
-    #      skip silently.
-    #   2. Sentinel + bare old header ("## Auto-memory bucket guidance" with
-    #      no suffix) — old (v2026.5.2–5.4) prose detected. Replace the block
-    #      in place: emit new prose at the sentinel's position, skip the old
-    #      content until the next <!-- comment (or EOF). Adjacent cs:wrap-cues
-    #      block is preserved. This deliberately clobbers user customizations
-    #      of the block (documented trade-off — preserving customization would
-    #      conflict with shipping prose improvements to existing sessions).
-    #   3. Sentinel present + no header line — user opted out via tombstone.
-    #      Preserve opt-out, skip silently.
-    #   4. No sentinel — never had the block. Append fresh.
+    #   1. cs:memory-note already present — skip silently.
+    #   2. cs:memory-rules sentinel + "## Auto-memory bucket guidance" header
+    #      (any variant, with or without the "(scoop mode" suffix) — legacy
+    #      imperative-prose block from v2026.5.2–5.4. Strip the entire block
+    #      (sentinel through the next <!-- marker or EOF) and insert the
+    #      cs:memory-note in its place. Adjacent cs:wrap-cues block keeps its
+    #      order. Empirically the block did not influence claude's auto-memory
+    #      writer (see .cs/discoveries.md); the note documents what cs
+    #      actually owns — path redirect + indexing — without claiming
+    #      behavioral ownership.
+    #   3. cs:memory-rules sentinel without header line — user opted out via
+    #      tombstone. The opt-out signal ("no cs memory documentation in my
+    #      CLAUDE.md") carries over to the replacement note: preserve as-is,
+    #      do NOT add the note.
+    #   4. Neither sentinel present — append the note fresh.
     #
-    # Block content lives in _emit_memory_rules_block (shared with
+    # Note content lives in _emit_memory_note_block (shared with
     # write_session_claude_md). Phase 6 guarantees CLAUDE.md exists.
     local claude_md_p9="$session_dir/CLAUDE.md"
     if [ -f "$claude_md_p9" ]; then
-        if grep -q '## Auto-memory bucket guidance (scoop mode' "$claude_md_p9"; then
-            : # State 1: already on current prose
+        if grep -q '<!-- cs:memory-note -->' "$claude_md_p9"; then
+            : # State 1: already on the note
         elif grep -q '<!-- cs:memory-rules -->' "$claude_md_p9"; then
-            if grep -qE '^## Auto-memory bucket guidance$' "$claude_md_p9"; then
-                # State 2: old prose — upgrade in place. Single awk replaces
-                # the block at its original position so adjacent sentinels
-                # (notably cs:wrap-cues which follows) keep their order.
-                # new_block is passed via env (not -v) so awk doesn't
-                # re-process C-style escapes in the markdown content.
+            if grep -qE '^## Auto-memory bucket guidance' "$claude_md_p9"; then
+                # State 2: legacy rules block — strip + insert note in place.
+                # NEW_BLOCK passed via env (not -v) so awk doesn't re-process
+                # C-style escapes in the markdown content.
                 local tmp="$claude_md_p9.tmp"
-                NEW_BLOCK=$(_emit_memory_rules_block) awk '
+                NEW_BLOCK=$(_emit_memory_note_block) awk '
                     /<!-- cs:memory-rules -->/ {
                         print ENVIRON["NEW_BLOCK"]
                         stripping = 1
@@ -1222,16 +1151,16 @@ EOF
                     stripping && /^<!-- / { stripping = 0 }
                     !stripping { print }
                 ' "$claude_md_p9" > "$tmp" && mv "$tmp" "$claude_md_p9"
-                warn "Upgraded auto-memory bucket guidance to v2 prose"
+                warn "Retired auto-memory bucket guidance; replaced with cs:memory-note"
             # State 3: tombstone (sentinel without header) — preserve opt-out
             fi
         else
-            # State 4: no sentinel — append fresh
+            # State 4: no sentinel of either kind — append fresh
             {
                 echo ""
-                _emit_memory_rules_block
+                _emit_memory_note_block
             } >> "$claude_md_p9"
-            warn "Appended auto-memory bucket guidance to CLAUDE.md"
+            warn "Added cs:memory-note to CLAUDE.md"
         fi
     fi
 
