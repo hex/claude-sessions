@@ -61,7 +61,7 @@ BASH_COMPLETION_DIR="${HOME}/.bash_completion.d"
 ZSH_COMPLETION_DIR="${HOME}/.zsh/completions"
 # Detect existing zsh completion dir from user's fpath config
 if [ -f "$HOME/.zshrc" ]; then
-    _detected_dir=$(grep -oE 'fpath.*~/\.zsh/completions?' "$HOME/.zshrc" 2>/dev/null | grep -oE '~/\.zsh/completions?' | head -1 | sed "s|~|$HOME|")
+    _detected_dir=$(grep -oE 'fpath.*~/\.zsh/completions?' "$HOME/.zshrc" 2>/dev/null | grep -oE '~/\.zsh/completions?' | head -1 | sed "s|~|$HOME|") || true
     if [ -n "$_detected_dir" ]; then
         ZSH_COMPLETION_DIR="$_detected_dir"
     fi

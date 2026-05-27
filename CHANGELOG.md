@@ -10,11 +10,15 @@ All notable changes to cs are documented here. Release notes are also available 
 
 ### Fixed
 
+- **`install.sh` silently exited when `.zshrc` lacked an `fpath` line** ([#1](https://github.com/hex/claude-sessions/issues/1)). With `set -euo pipefail` at the top of the script, the `grep -oE 'fpath.*~/\.zsh/completions?'` pipeline at line 64 returned exit code 1 when no fpath line matched, `pipefail` surfaced that through the command substitution, `set -e` killed the script immediately — silent exit, no banner, nothing installed. Affected any user running a fresh install whose `.zshrc` doesn't pre-configure `fpath`. One-line fix per the bug report: append `|| true` to the pipeline. Reported by @pgardella-ml.
+
 - **Vacuous-pass test bug in `test_decline_resume_rebinds_to_fresh_uuid`** (Cycle 6 of `test_uuid.sh`). The assertion `assert_output_contains "$output" -- "--session-id $recorded" "msg"` passed a literal `--` as the pattern arg (the test helper takes 3 positional args, not GNU-style flag separation), so the test silently matched on any output containing two consecutive dashes — trivially true for any flag-bearing argv. Fixed to `assert_output_contains "$output" "--session-id $recorded" "msg"`. The real behavior was already correct (fresh-rebind has emitted `--session-id` since v2026.5.3); this just makes the assertion actually verify it. Same family of vacuous-pass anti-pattern noted in the v2026.5.1 discoveries entry — added to the recurring "tests-that-pass-for-the-wrong-reason" list.
 
 ### Tests
 
-3 new tests in `tests/test_uuid.sh` Cycle 7 cover the `--name` pass-through across all three user-facing launch paths: new session, resume (Y), declined resume (N → fresh rebind). Full 23-file suite green.
+- 3 new tests in `tests/test_uuid.sh` Cycle 7 cover the `--name` pass-through across all three user-facing launch paths: new session, resume (Y), declined resume (N → fresh rebind).
+- New `tests/test_install.sh` with 2 tests covering install.sh end-to-end behavior with isolated `HOME`: silent-exit regression (issue #1) and fpath-detection happy path. First test runs the full installer in a tmpdir so future regressions in the installer's early-exit paths get caught immediately.
+- Full 24-file suite green.
 
 ## 2026.5.5
 
