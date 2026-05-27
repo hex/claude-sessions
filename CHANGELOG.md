@@ -2,6 +2,20 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
+## 2026.5.6
+
+### Added
+
+- **`--name $session_name` passed to every claude launch.** Surfaces cs's session name in claude's native display surfaces — the TUI prompt box, `/resume` interactive picker, and terminal title — instead of leaving them showing the bare UUID. Symmetry between cs's primary identifier (the session-name directory) and claude's display label. Touches all 4 exec sites in `bin/cs`: new-session (`--session-id <uuid>` path), resume Y (`--resume <uuid>` path), fresh-rebind helper (`_exec_fresh_rebind`, used by both the N-to-resume path and the resume-failure fallback), and the defensive naked-exec branch. The `--name` flag was discovered in `claude --help` and works on Claude Code 2.x+.
+
+### Fixed
+
+- **Vacuous-pass test bug in `test_decline_resume_rebinds_to_fresh_uuid`** (Cycle 6 of `test_uuid.sh`). The assertion `assert_output_contains "$output" -- "--session-id $recorded" "msg"` passed a literal `--` as the pattern arg (the test helper takes 3 positional args, not GNU-style flag separation), so the test silently matched on any output containing two consecutive dashes — trivially true for any flag-bearing argv. Fixed to `assert_output_contains "$output" "--session-id $recorded" "msg"`. The real behavior was already correct (fresh-rebind has emitted `--session-id` since v2026.5.3); this just makes the assertion actually verify it. Same family of vacuous-pass anti-pattern noted in the v2026.5.1 discoveries entry — added to the recurring "tests-that-pass-for-the-wrong-reason" list.
+
+### Tests
+
+3 new tests in `tests/test_uuid.sh` Cycle 7 cover the `--name` pass-through across all three user-facing launch paths: new session, resume (Y), declined resume (N → fresh rebind). Full 23-file suite green.
+
 ## 2026.5.5
 
 ### Removed

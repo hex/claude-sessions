@@ -315,7 +315,7 @@ test_decline_resume_rebinds_to_fresh_uuid() {
         echo "  FAIL: rewritten UUID is not a valid v4 UUID: '$recorded'"
         return 1
     fi
-    assert_output_contains "$output" -- "--session-id $recorded" \
+    assert_output_contains "$output" "--session-id $recorded" \
         "claude spawn after N should pass --session-id <new-uuid>" || return 1
 }
 
@@ -509,4 +509,44 @@ test_live_duplicate_force_overrides() {
 
 run_test test_live_duplicate_refuses_without_force
 run_test test_live_duplicate_force_overrides
+
+# ============================================================================
+# Cycle 7: --name <session-name> passed to claude on every launch path.
+# Surfaces the cs session name in claude's /resume picker, terminal title,
+# and prompt-box display — symmetry between cs's primary identifier and
+# claude's native display label.
+# ============================================================================
+
+test_new_session_launch_passes_name() {
+    local output
+    output=$("$CS_BIN" my-test-session <<< "" 2>&1) || true
+    assert_output_contains "$output" "--name my-test-session" \
+        "new-session launch must pass --name <session>" || return 1
+}
+
+test_resume_launch_passes_name() {
+    # First run creates the session.
+    "$CS_BIN" my-test-session <<< "" >/dev/null 2>&1 || true
+
+    # Second run resumes (default 'Y').
+    local output
+    output=$("$CS_BIN" my-test-session <<< "" 2>&1) || true
+    assert_output_contains "$output" "--name my-test-session" \
+        "resume launch must pass --name <session>" || return 1
+}
+
+test_decline_resume_launch_passes_name() {
+    # First run creates the session.
+    "$CS_BIN" my-test-session <<< "" >/dev/null 2>&1 || true
+
+    # Second run, user says N -> fresh-rebind path.
+    local output
+    output=$("$CS_BIN" my-test-session <<< "n" 2>&1) || true
+    assert_output_contains "$output" "--name my-test-session" \
+        "fresh-rebind (N path) must pass --name <session>" || return 1
+}
+
+run_test test_new_session_launch_passes_name
+run_test test_resume_launch_passes_name
+run_test test_decline_resume_launch_passes_name
 report_results

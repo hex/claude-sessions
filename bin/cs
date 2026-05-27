@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.5.5"
+VERSION="2026.5.6"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -832,13 +832,15 @@ _set_session_uuid() {
 # tailor its additionalContext (the user is starting fresh, not cold-booting).
 _exec_fresh_rebind() {
     local session_dir="$1"
+    local session_name
+    session_name=$(basename "$session_dir")
     local new_uuid
     new_uuid=$(_alloc_uuid)
     _set_session_uuid "$session_dir/.cs/README.md" "$new_uuid"
     export CS_CLAUDE_SESSION_ID="$new_uuid"
     export CS_FRESH_REBIND=1
     # shellcheck disable=SC2086
-    exec $CLAUDE_CODE_BIN --session-id "$new_uuid"
+    exec $CLAUDE_CODE_BIN --name "$session_name" --session-id "$new_uuid"
 }
 
 # Create session directory structure
@@ -2058,7 +2060,7 @@ launch_claude_code() {
         SECONDS=0
         local rc=0
         # shellcheck disable=SC2086
-        $CLAUDE_CODE_BIN $continue_flag || rc=$?
+        $CLAUDE_CODE_BIN --name "$session_name" $continue_flag || rc=$?
         if [ $rc -ne 0 ] && [ $SECONDS -lt 3 ]; then
             # Quick failure suggests no conversation to continue. Rebind so
             # the fresh transcript claude is about to create is tracked by
@@ -2082,12 +2084,12 @@ launch_claude_code() {
         #     post-Phase-8 but handled defensively): naked exec.
         if [ "$is_new" = "true" ] && [ -n "$claude_session_id" ]; then
             # shellcheck disable=SC2086
-            exec $CLAUDE_CODE_BIN --session-id "$claude_session_id"
+            exec $CLAUDE_CODE_BIN --name "$session_name" --session-id "$claude_session_id"
         elif [ "$is_new" = "false" ]; then
             _exec_fresh_rebind "$session_dir"
         else
             # shellcheck disable=SC2086
-            exec $CLAUDE_CODE_BIN
+            exec $CLAUDE_CODE_BIN --name "$session_name"
         fi
     fi
 }
