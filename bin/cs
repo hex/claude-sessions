@@ -249,6 +249,7 @@ Commands:
   -checkpoint list    List checkpoints for current session
   -checkpoint show <name>  Print a specific checkpoint
   -doctor, -diag      Run health checks (Keychain, hooks, sync, discoveries, audit, tokens)
+  -lint <file>...     Flag AI-slop prose tells (em-dashes, banned phrases); 0=clean 1=issues 2=error
   -list, -ls          List all sessions (shows remote location)
   -adopt <name>       Adopt current directory as a cs session
   -remote <cmd>       Manage remote hosts
@@ -1329,6 +1330,110 @@ show_checkpoint() {
         error "Checkpoint not found: $name"
     fi
     cat "$path"
+}
+
+# Deterministic blocklist: multi-word, distinctive AI-slop phrases that measured
+# ZERO occurrences across the real session corpus, so blocking on them is safe.
+# The FULL stop-slop taxonomy (including single-word adverbs and lazy extremes)
+# lives in the prose-hygiene skill and is enforced by the /summary and /wrap judge.
+# Single-word tells (just, really, actually, every, always, never...) are
+# DELIBERATELY excluded here: they occur 50-160+ times in legitimate technical
+# prose, so a blocking regex on them would be unusable. They are judge-only by design.
+# Phrases reworded from the stop-slop skill (github.com/hardikpandya/stop-slop, MIT).
+PROSE_SLOP_PHRASES=(
+    "it's worth noting"
+    "at the end of the day"
+    "needless to say"
+    "the uncomfortable truth"
+    "let that sink in"
+    "make no mistake"
+    "in today's fast-paced"
+    "in a world where"
+    "last but not least"
+    "rest assured"
+    "plot twist"
+    "when all is said and done"
+    "the fact of the matter"
+    "without a doubt"
+    "here's the thing"
+    "let me be clear"
+    "i'm going to be honest"
+    "can we talk about"
+    "here's what i find interesting"
+    "here's the problem though"
+    "this matters because"
+    "here's why that matters"
+    "you already know this"
+    "but that's another post"
+    "let me walk you through"
+    "as we'll see"
+    "i want to explore"
+    "this is genuinely hard"
+    "the reasons are structural"
+    "the implications are significant"
+    "the stakes are high"
+    "the consequences are real"
+    "at its core"
+)
+
+# Scan one file for lexical prose-slop tells outside fenced code blocks.
+# Prints "<file>:<line>: <reason>" per violation. Returns 1 if any found, else 0.
+lint_prose_file() {
+    local file="$1"
+    local lineno=0 in_fence=0 violations=0 line lower phrase
+    while IFS= read -r line || [ -n "$line" ]; do
+        lineno=$((lineno + 1))
+        # Toggle fenced-code state on a line whose first non-space chars are ```
+        if [[ "$line" =~ ^[[:space:]]*'```' ]]; then
+            in_fence=$((1 - in_fence))
+            continue
+        fi
+        [ "$in_fence" -eq 1 ] && continue
+        # Em-dash (U+2014): a reliable AI tell with near-zero legitimate use in prose
+        if [[ "$line" == *—* ]]; then
+            echo "$file:$lineno: em-dash (—); use a comma or period"
+            violations=$((violations + 1))
+        fi
+        # Banned phrases, matched case-insensitively
+        lower=$(printf '%s' "$line" | tr '[:upper:]' '[:lower:]')
+        for phrase in "${PROSE_SLOP_PHRASES[@]}"; do
+            if [[ "$lower" == *"$phrase"* ]]; then
+                echo "$file:$lineno: slop phrase: \"$phrase\""
+                violations=$((violations + 1))
+            fi
+        done
+    done < "$file"
+    [ "$violations" -eq 0 ]
+}
+
+# `cs -lint <file>...` — deterministic prose linter for AI-slop tells.
+# Exit codes: 0 clean, 1 violations found, 2 usage / unreadable file.
+run_lint() {
+    if [ $# -eq 0 ]; then
+        echo "Usage: cs -lint <file>..." >&2
+        return 2
+    fi
+    local file out had_violations=0 had_error=0 checked=0
+    for file in "$@"; do
+        if [ ! -f "$file" ]; then
+            echo "cs -lint: cannot read '$file'" >&2
+            had_error=1
+            continue
+        fi
+        checked=$((checked + 1))
+        if ! out=$(lint_prose_file "$file"); then
+            printf '%s\n' "$out"
+            had_violations=1
+        fi
+    done
+    if [ "$had_error" -eq 1 ]; then
+        return 2
+    fi
+    if [ "$had_violations" -eq 1 ]; then
+        return 1
+    fi
+    info "cs -lint: no prose issues found ($checked file(s))"
+    return 0
 }
 
 # Dispatcher for cs -checkpoint subcommand
@@ -3542,6 +3647,11 @@ main() {
             ;;
         -doctor|-diag)
             run_doctor
+            return $?
+            ;;
+        -lint)
+            shift
+            run_lint "$@"
             return $?
             ;;
         -remote)
