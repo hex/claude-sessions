@@ -3265,7 +3265,7 @@ run_uninstall() {
     fi
 
     # Remove hooks
-    for hook in session-start.sh artifact-tracker.sh changes-tracker.sh discovery-commits.sh discoveries-reminder.sh session-end.sh subagent-context.sh tool-failure-logger.sh session-auto-approve.sh bash-logger.sh files-scan.sh files-context.sh; do
+    for hook in session-start.sh artifact-tracker.sh changes-tracker.sh discovery-commits.sh discoveries-reminder.sh prose-lint.sh session-end.sh subagent-context.sh tool-failure-logger.sh session-auto-approve.sh bash-logger.sh files-scan.sh files-context.sh; do
         if [ -f "$hooks_dir/$hook" ]; then
             rm "$hooks_dir/$hook"
             info "Removed $hooks_dir/$hook"

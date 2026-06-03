@@ -79,6 +79,7 @@ HOOK_ARTIFACT_TRACKER_URL="${REPO_URL}/hooks/artifact-tracker.sh"
 HOOK_CHANGES_TRACKER_URL="${REPO_URL}/hooks/changes-tracker.sh"
 HOOK_DISCOVERY_COMMITS_URL="${REPO_URL}/hooks/discovery-commits.sh"
 HOOK_DISCOVERIES_REMINDER_URL="${REPO_URL}/hooks/discoveries-reminder.sh"
+HOOK_PROSE_LINT_URL="${REPO_URL}/hooks/prose-lint.sh"
 HOOK_SESSION_END_URL="${REPO_URL}/hooks/session-end.sh"
 HOOK_SUBAGENT_CONTEXT_URL="${REPO_URL}/hooks/subagent-context.sh"
 HOOK_TOOL_FAILURE_LOGGER_URL="${REPO_URL}/hooks/tool-failure-logger.sh"
@@ -232,7 +233,7 @@ elif [ "$INSTALL_METHOD" = "web" ]; then
 fi
 
 # Install hooks
-installed "12 hooks" "$HOOKS_DIR/"
+installed "13 hooks" "$HOOKS_DIR/"
 mkdir -p "$HOOKS_DIR"
 
 # Remove any retired hook files that earlier cs versions installed but no longer ship.
@@ -251,6 +252,7 @@ if [ "$INSTALL_METHOD" = "local" ]; then
     cp "$HOOKS_SOURCE/changes-tracker.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/discovery-commits.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/discoveries-reminder.sh" "$HOOKS_DIR/"
+    cp "$HOOKS_SOURCE/prose-lint.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/session-end.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/subagent-context.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/tool-failure-logger.sh" "$HOOKS_DIR/"
@@ -266,6 +268,7 @@ else
         curl -fsSL "$HOOK_CHANGES_TRACKER_URL" -o "$HOOKS_DIR/changes-tracker.sh" || error "Failed to download changes-tracker.sh"
         curl -fsSL "$HOOK_DISCOVERY_COMMITS_URL" -o "$HOOKS_DIR/discovery-commits.sh" || error "Failed to download discovery-commits.sh"
         curl -fsSL "$HOOK_DISCOVERIES_REMINDER_URL" -o "$HOOKS_DIR/discoveries-reminder.sh" || error "Failed to download discoveries-reminder.sh"
+        curl -fsSL "$HOOK_PROSE_LINT_URL" -o "$HOOKS_DIR/prose-lint.sh" || error "Failed to download prose-lint.sh"
         curl -fsSL "$HOOK_SESSION_END_URL" -o "$HOOKS_DIR/session-end.sh" || error "Failed to download session-end.sh"
         curl -fsSL "$HOOK_SUBAGENT_CONTEXT_URL" -o "$HOOKS_DIR/subagent-context.sh" || error "Failed to download subagent-context.sh"
         curl -fsSL "$HOOK_TOOL_FAILURE_LOGGER_URL" -o "$HOOKS_DIR/tool-failure-logger.sh" || error "Failed to download tool-failure-logger.sh"
@@ -279,6 +282,7 @@ else
         wget -q "$HOOK_CHANGES_TRACKER_URL" -O "$HOOKS_DIR/changes-tracker.sh" || error "Failed to download changes-tracker.sh"
         wget -q "$HOOK_DISCOVERY_COMMITS_URL" -O "$HOOKS_DIR/discovery-commits.sh" || error "Failed to download discovery-commits.sh"
         wget -q "$HOOK_DISCOVERIES_REMINDER_URL" -O "$HOOKS_DIR/discoveries-reminder.sh" || error "Failed to download discoveries-reminder.sh"
+        wget -q "$HOOK_PROSE_LINT_URL" -O "$HOOKS_DIR/prose-lint.sh" || error "Failed to download prose-lint.sh"
         wget -q "$HOOK_SESSION_END_URL" -O "$HOOKS_DIR/session-end.sh" || error "Failed to download session-end.sh"
         wget -q "$HOOK_SUBAGENT_CONTEXT_URL" -O "$HOOKS_DIR/subagent-context.sh" || error "Failed to download subagent-context.sh"
         wget -q "$HOOK_TOOL_FAILURE_LOGGER_URL" -O "$HOOKS_DIR/tool-failure-logger.sh" || error "Failed to download tool-failure-logger.sh"
@@ -387,6 +391,7 @@ else
     CHANGES_TRACKER_PATH="$HOME/.claude/hooks/changes-tracker.sh"
     DISCOVERY_COMMITS_PATH="$HOME/.claude/hooks/discovery-commits.sh"
     DISCOVERIES_REMINDER_PATH="$HOME/.claude/hooks/discoveries-reminder.sh"
+    PROSE_LINT_PATH="$HOME/.claude/hooks/prose-lint.sh"
     SESSION_END_PATH="$HOME/.claude/hooks/session-end.sh"
     SUBAGENT_CONTEXT_PATH="$HOME/.claude/hooks/subagent-context.sh"
     TOOL_FAILURE_LOGGER_PATH="$HOME/.claude/hooks/tool-failure-logger.sh"
@@ -400,6 +405,7 @@ else
     CHANGES_TRACKER_TILDE="~/.claude/hooks/changes-tracker.sh"
     DISCOVERY_COMMITS_TILDE="~/.claude/hooks/discovery-commits.sh"
     DISCOVERIES_REMINDER_TILDE="~/.claude/hooks/discoveries-reminder.sh"
+    PROSE_LINT_TILDE="~/.claude/hooks/prose-lint.sh"
     SESSION_END_TILDE="~/.claude/hooks/session-end.sh"
     SUBAGENT_CONTEXT_TILDE="~/.claude/hooks/subagent-context.sh"
     TOOL_FAILURE_LOGGER_TILDE="~/.claude/hooks/tool-failure-logger.sh"
@@ -469,6 +475,9 @@ else
 
     _merge_cs_hook Stop "$DISCOVERIES_REMINDER_PATH" "$DISCOVERIES_REMINDER_TILDE" 10 \
         "{\"hooks\":[{\"type\":\"command\",\"command\":\"$DISCOVERIES_REMINDER_TILDE\",\"timeout\":10}]}"
+
+    _merge_cs_hook Stop "$PROSE_LINT_PATH" "$PROSE_LINT_TILDE" 15 \
+        "{\"hooks\":[{\"type\":\"command\",\"command\":\"$PROSE_LINT_TILDE\",\"timeout\":15}]}"
 
     _merge_cs_hook SessionEnd "$SESSION_END_PATH" "$SESSION_END_TILDE" 30 \
         "{\"hooks\":[{\"type\":\"command\",\"command\":\"$SESSION_END_TILDE\",\"timeout\":30}]}"

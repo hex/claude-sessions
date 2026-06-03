@@ -47,6 +47,14 @@ Runs when Claude pauses for user input:
 - Uses 5-minute cooldown to avoid excessive reminders
 - When discoveries.md exceeds its size budget (default 60KB, override via `CS_DISCOVERIES_MAX_SIZE` env var), instructs Claude to summarize old entries into `.cs/discoveries.compact.md` and trim the active file
 
+## prose-lint.sh (Stop)
+
+Runs when Claude pauses for user input:
+- Lints prose written this session via `cs -lint` and blocks turn-end (`decision: block`) when AI-slop tells are found, feeding the file:line violations back so Claude fixes them before stopping
+- Scope is `.cs/summary.md` and `.cs/memory/*.md` (surfaces with no cross-session in-file backlog); `discoveries.md` and the `MEMORY.md` index are excluded
+- Only files modified at/after `session.lock` mtime are checked, so a resumed session never re-flags prose written in earlier sessions
+- After 3 consecutive unresolved blocks, allows the stop with a `session.log` warning rather than trapping the session
+
 ## session-end.sh (SessionEnd)
 
 Runs when Claude Code session ends:
@@ -122,7 +130,8 @@ The hooks are configured in `~/.claude/settings.json`:
       { "matcher": "Write|Edit", "hooks": [{ "type": "command", "command": "~/.claude/hooks/discovery-commits.sh", "timeout": 10, "async": true }] }
     ],
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/discoveries-reminder.sh", "timeout": 10 }] }
+      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/discoveries-reminder.sh", "timeout": 10 }] },
+      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/prose-lint.sh", "timeout": 15 }] }
     ],
     "SessionEnd": [
       { "hooks": [{ "type": "command", "command": "~/.claude/hooks/session-end.sh", "timeout": 30 }] }

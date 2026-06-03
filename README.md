@@ -66,7 +66,7 @@ Or clone and run `./install.sh`.
 
 The installer:
 - Adds `cs`, `cs-secrets`, and `cs-tui` to `~/.local/bin/`
-- Installs twelve [hooks](docs/hooks.md) to `~/.claude/hooks/` for session tracking
+- Installs thirteen [hooks](docs/hooks.md) to `~/.claude/hooks/` for session tracking
 - Adds `/summary`, `/compact-discoveries`, `/checkpoint`, `/sweep`, and `/wrap` commands, and `store-secret` skill to `~/.claude/`
 - Installs shell completions for bash and zsh
 - Configures hook entries in `~/.claude/settings.json`
@@ -81,6 +81,7 @@ cs -adopt <name>            # Adopt current directory as a session
 cs -remote <cmd>            # Manage remote hosts
 cs -search <query>          # Search across all sessions
 cs -doctor, -diag           # Run health checks (Keychain, hooks, sync, discoveries, audit, leaks, tokens)
+cs -lint <file>...          # Flag AI-slop prose tells (em-dashes, banned phrases); 0 clean 1 issues 2 error
 cs -list, -ls               # List all sessions
 cs -remove, -rm <name>      # Remove a session
 cs -update                  # Update to latest version
