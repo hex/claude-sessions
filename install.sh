@@ -108,6 +108,7 @@ COMMAND_WRAP_URL="${REPO_URL}/commands/wrap.md"
 
 # Skill URLs for web install
 SKILL_STORE_SECRET_URL="${REPO_URL}/skills/store-secret/SKILL.md"
+SKILL_PROSE_HYGIENE_URL="${REPO_URL}/skills/prose-hygiene/SKILL.md"
 
 # Completion URLs for web install
 COMPLETION_BASH_URL="${REPO_URL}/completions/cs.bash"
@@ -326,14 +327,18 @@ SKILLS_DIR="$HOME/.claude/skills"
 SKILLS_SOURCE="$SCRIPT_DIR/skills"
 installed "skills" "$SKILLS_DIR/"
 mkdir -p "$SKILLS_DIR/store-secret"
+mkdir -p "$SKILLS_DIR/prose-hygiene"
 
 if [ "$INSTALL_METHOD" = "local" ]; then
     cp "$SKILLS_SOURCE/store-secret/SKILL.md" "$SKILLS_DIR/store-secret/"
+    cp "$SKILLS_SOURCE/prose-hygiene/SKILL.md" "$SKILLS_DIR/prose-hygiene/"
 else
     if command -v curl >/dev/null 2>&1; then
         curl -fsSL "$SKILL_STORE_SECRET_URL" -o "$SKILLS_DIR/store-secret/SKILL.md" || error "Failed to download store-secret skill"
+        curl -fsSL "$SKILL_PROSE_HYGIENE_URL" -o "$SKILLS_DIR/prose-hygiene/SKILL.md" || error "Failed to download prose-hygiene skill"
     elif command -v wget >/dev/null 2>&1; then
         wget -q "$SKILL_STORE_SECRET_URL" -O "$SKILLS_DIR/store-secret/SKILL.md" || error "Failed to download store-secret skill"
+        wget -q "$SKILL_PROSE_HYGIENE_URL" -O "$SKILLS_DIR/prose-hygiene/SKILL.md" || error "Failed to download prose-hygiene skill"
     fi
 fi
 

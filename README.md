@@ -47,6 +47,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 - **Per-session memory path redirect** - cs exports `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE` so claude's built-in auto-memory writer lands durable facts in `<session>/.cs/memory/` instead of the default `~/.claude/projects/<encoded-cwd>/memory/`. The harness owns the writing (file naming, frontmatter, MEMORY.md index updates); cs owns only the storage path + a one-line `<!-- cs:memory-note -->` disclosure in CLAUDE.md describing the redirect. The prior `cs:memory-rules` block (an imperative bucket-guidance doctrine shipped in v2026.5.2) was retired in v2026.5.5 after an audit showed claude's harness writes memory files autonomously regardless of cs's prose — see CHANGELOG for the retirement rationale. Phase 9 lazy-migrates existing sessions: legacy rules blocks (v1 or v2) are stripped and replaced with the note in place; tombstone opt-outs are preserved.
 - **Remote sessions** - Run sessions on remote machines via `et` or `ssh` + `tmux`; `cs` handles connection, stubbing, and session tracking
 - **Cross-session search** - `cs -search <query>` greps across all sessions' discoveries, memory, README, and changes
+- **Prose hygiene enforcement** - `cs -lint <file>` flags AI-slop tells (em-dashes, a curated banned-phrase list) outside code fences; the `prose-lint` Stop hook blocks turn-end when prose written this session (`.cs/summary.md`, `.cs/memory/*.md`) carries them, scoped by `session.lock` mtime so it never re-flags the historical backlog. `/summary` and `/wrap` add an independent structural-quality judge: a subagent that reads the `prose-hygiene` skill (the complete AI-tell taxonomy: phrases, structures, voice rules, and a five-dimension rubric) and applies all of it, catching the slop a regex cannot. Single-word adverbs and lazy extremes are judge-only by design, since they occur in nearly all legitimate prose
 - **Health checks** - `cs -doctor` reports status of Keychain backend, hook registration, git sync state, shadow-ref freshness, discoveries.md size, auto-memory writability, Claude Code settings audit (hooks/MCPs/permissions/env vars counts), and cumulative token usage for the current project
 - **Bash command audit trail** - Every Bash command Claude runs is logged to `.cs/logs/session.log` with timestamps
 - **Update notifications** - Checks for updates and notifies when new versions are available
@@ -67,7 +68,7 @@ Or clone and run `./install.sh`.
 The installer:
 - Adds `cs`, `cs-secrets`, and `cs-tui` to `~/.local/bin/`
 - Installs thirteen [hooks](docs/hooks.md) to `~/.claude/hooks/` for session tracking
-- Adds `/summary`, `/compact-discoveries`, `/checkpoint`, `/sweep`, and `/wrap` commands, and `store-secret` skill to `~/.claude/`
+- Adds `/summary`, `/compact-discoveries`, `/checkpoint`, `/sweep`, and `/wrap` commands, and the `store-secret` and `prose-hygiene` skills to `~/.claude/`
 - Installs shell completions for bash and zsh
 - Configures hook entries in `~/.claude/settings.json`
 

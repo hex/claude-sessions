@@ -3294,6 +3294,10 @@ run_uninstall() {
         rm -rf "$skills_dir/store-secret"
         info "Removed $skills_dir/store-secret/"
     fi
+    if [ -d "$skills_dir/prose-hygiene" ]; then
+        rm -rf "$skills_dir/prose-hygiene"
+        info "Removed $skills_dir/prose-hygiene/"
+    fi
 
     # Remove shell completions
     if [ -f "$bash_completion_dir/cs.bash" ]; then

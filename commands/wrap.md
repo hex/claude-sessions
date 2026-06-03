@@ -66,6 +66,13 @@ Synthesize them into a cohesive narrative at `.cs/summary.md`. Use this structur
 
 If `.cs/summary.md` already exists, this run **replaces** it — `/wrap` writes the canonical end-of-session narrative.
 
+## Pass 3 — Prose-quality gate (run before the report)
+
+Before reporting, gate the prose written in passes 1 and 2:
+
+1. **Lexical (deterministic):** run `cs -lint .cs/summary.md .cs/memory/*.md` and fix every em-dash and flagged phrase. The prose-lint Stop hook enforces this on turn-end; clearing it now avoids the block.
+2. **Structural (independent judge):** use the Task tool to spawn a subagent as an impartial prose critic of `.cs/summary.md`. The subagent MUST read `~/.claude/skills/prose-hygiene/SKILL.md` and apply EVERY rule in it (the full taxonomy of phrases, structures, voice rules, and the scoring rubric). It only judges, never edits. It returns a 1-10 score for each of the five dimensions (Directness, Rhythm, Trust, Authenticity, Density; total out of 50) and, for every violation, the quoted text, the rule it breaks, and a concrete rewrite. Apply the rewrites whenever the total is below 35/50 or any rule is violated, then continue.
+
 ## Report
 
 Output a brief two-line report. No long prose; the summary IS the prose.

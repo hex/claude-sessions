@@ -57,7 +57,11 @@ You are working in a cs session. Your task is to create a comprehensive summary 
 
 4. **Make the summary narrative and insightful**, not just a concatenation of files. Explain the "why" behind discoveries and changes. Connect related pieces of information.
 
-5. **Inform the user** when the summary is complete and where it was saved.
+5. **Gate the prose on quality before finalizing** (two layers):
+   - **Lexical (deterministic):** run `cs -lint .cs/summary.md` and fix every em-dash and flagged phrase it reports. The prose-lint Stop hook enforces this on turn-end anyway; clearing it now avoids the block.
+   - **Structural (independent judge):** use the Task tool to spawn a subagent as an impartial prose critic of `.cs/summary.md`. The subagent MUST read `~/.claude/skills/prose-hygiene/SKILL.md` and apply EVERY rule in it (the full taxonomy of phrases, structures, voice rules, and the scoring rubric). It only judges, never edits. It returns a 1-10 score for each of the five dimensions (Directness, Rhythm, Trust, Authenticity, Density; total out of 50) and, for every violation, the quoted text, the rule it breaks, and a concrete rewrite. Apply the subagent's rewrites to `.cs/summary.md` whenever the total is below 35/50 or any rule is violated, then continue.
+
+6. **Inform the user** when the summary is complete and where it was saved.
 
 ## Important
 
