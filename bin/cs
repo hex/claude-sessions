@@ -1552,6 +1552,14 @@ _doctor_check_settings_hooks_resolve() {
         [ -z "$cmd" ] && continue
         resolved="${cmd/#~/$HOME}"
         resolved="${resolved%% *}"
+        # Only validate commands that reference a script by absolute path. Inline
+        # shell snippets (e.g. `if [ -z "$TMUX" ]; then ...`) and wrapped commands
+        # (`bash ...`) are valid hooks, not file paths — skip them so they are not
+        # mis-reported as missing files.
+        case "$resolved" in
+            /*) ;;
+            *) continue ;;
+        esac
         if [ ! -f "$resolved" ]; then
             missing+=("$(basename "$resolved")")
         fi

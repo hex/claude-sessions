@@ -303,6 +303,27 @@ EOF
         "tilde-prefixed paths must be expanded before existence check" || return 1
 }
 
+test_doctor_skips_inline_shell_hook_commands() {
+    # Inline shell snippets (e.g. an `if [ -z "$TMUX" ]...` PreToolUse hook) are
+    # valid hook commands, not file paths, and must not be flagged as missing.
+    local fake_claude="$TEST_TMPDIR/claude-inline"
+    mkdir -p "$fake_claude/hooks"
+    : > "$fake_claude/hooks/real.sh"
+    chmod +x "$fake_claude/hooks/real.sh"
+    jq -n --arg real "$fake_claude/hooks/real.sh" '{
+      hooks: {
+        PreToolUse: [
+          {hooks: [{type: "command", command: "if [ -z \"$TMUX\" ]; then echo hi >&2; fi"}]},
+          {matcher: "Bash", hooks: [{type: "command", command: $real}]}
+        ]
+      }
+    }' > "$fake_claude/settings.json"
+    local output
+    output=$(CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_not_contains "$output" "registered hook.*missing" \
+        "inline shell-snippet hook commands must not be flagged as missing files" || return 1
+}
+
 echo "Running doctor tests..."
 run_test test_doctor_subcommand_exists
 run_test test_doctor_runs_default_checks_from_session
@@ -319,6 +340,7 @@ run_test test_doctor_warns_on_settings_hook_missing_file
 run_test test_doctor_passes_when_all_settings_hooks_resolve
 run_test test_doctor_settings_hooks_resolve_handles_no_hooks_section
 run_test test_doctor_settings_hooks_resolve_expands_tilde
+run_test test_doctor_skips_inline_shell_hook_commands
 run_test test_doctor_runs_token_cost_check
 run_test test_doctor_token_cost_sums_jsonl
 run_test test_doctor_token_cost_handles_no_transcripts
