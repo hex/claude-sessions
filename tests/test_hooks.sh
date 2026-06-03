@@ -377,6 +377,9 @@ test_failure_handles_missing_error() {
 # Setup for session-start tests needs CS_SESSIONS_ROOT with sibling sessions
 session_start_setup() {
     setup
+    # Isolate from an ambient CS_FRESH_REBIND (set when the suite runs from inside
+    # a freshly-rebound cs session); the positive test re-supplies it inline.
+    unset CS_FRESH_REBIND 2>/dev/null || true
     export CS_SESSIONS_ROOT="$TEST_TMPDIR/sessions"
     mkdir -p "$CS_SESSIONS_ROOT"
 
