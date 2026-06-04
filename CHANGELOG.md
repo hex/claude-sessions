@@ -2,6 +2,32 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
+## 2026.5.7
+
+### Added
+
+- **Per-session random color via `/color` slash-command pass-through.** Each cs session gets a random color (red, blue, green, yellow, purple, orange, pink, cyan) allocated at creation and stored in `.cs/README.md` frontmatter as `claude_session_color`. Every claude launch appends `/color $color` as a trailing positional prompt arg so the prompt-bar accent is applied without dirtying the transcript. Symmetric with the `--name` pass-through shipped in v2026.5.6 — cs owns the visual identity, claude renders it. Legacy sessions without a color get one backfilled on next launch via `migrate_session` Phase 11 (audible warn: `Backfilled claude_session_color in .cs/README.md (X)`). Mechanism verified: slash commands at launch produce zero transcript-jsonl entries; the valid color list is the 8 the claude binary itself prints in its error message (earlier agent answers inflating this to 16 were hallucinated).
+
+- **`cs -lint` deterministic prose linter.** Flags AI-slop lexical tells in markdown files — em-dashes and a curated 33-phrase blocklist of multi-word zero-false-positive phrases — while skipping fenced code blocks. Exit codes: 0 clean, 1 violations found, 2 usage/unreadable. Single-word adverbs and lazy extremes (verys, alwayss) are excluded by design since they occur in nearly all legitimate prose; the structural judge (see below) catches those instead.
+
+- **`prose-lint` Stop hook.** Runs `cs -lint` against prose written this session (`.cs/summary.md`, `.cs/memory/*.md`) and blocks turn-end with `file:line` violations until fixed. Scope gated by `session.lock` mtime so a resumed session never re-flags the historical backlog (`.cs/discoveries.md` and the rest stay untouched).
+
+- **`prose-hygiene` skill.** Captures the full stop-slop taxonomy: 8 core rules, 8 phrase categories, 11 structural patterns, a 5-dimension rubric, plus before/after examples. `/summary` and `/wrap` now spawn an independent structural-quality judge subagent that reads the skill and applies all of it — catching the slop a regex can't, like cadence, meta-commentary, false symmetry, and stacked qualifiers. Installs to `~/.claude/skills/prose-hygiene/SKILL.md`.
+
+### Fixed
+
+- **`cs -doctor` no longer mis-reports inline shell snippets as missing hook files.** `_doctor_check_settings_hooks_resolve` walks every `hooks[*].command` entry in `~/.claude/settings.json` and warns when the path doesn't exist on disk — but the check ran indiscriminately against entries like `if [ -z "$TMUX" ]; then echo ... fi`, which are valid inline-shell hooks, not file paths. Added a guard that only validates commands starting with an absolute path (`/...`); inline shell and `bash ...` wrappers are skipped.
+
+- **Session-start tests leaked `CS_FRESH_REBIND` from the ambient cs environment.** When the test suite ran from inside a freshly-rebound cs session, the env var leaked into the hook subprocess and the negative-assertion test failed. `session_start_setup` now `unset CS_FRESH_REBIND` at the top; the positive test re-supplies it inline. Same family as v2026.5.6's vacuous-pass fix — tests passing/failing for ambient-environment reasons.
+
+### Tests
+
+- 7 new tests in `tests/test_uuid.sh` Cycle 8 cover color allocation, frontmatter persistence, all three launch paths emitting `/color`, color stability across resumes, and legacy-session Phase 11 backfill idempotence.
+- New `tests/test_prose_lint.sh` (12 tests) covers the linter's fenced-code skipping, em-dash detection, blocklist phrase detection, and exit-code contract.
+- New `tests/test_prose_lint_hook.sh` (10 tests) covers the Stop hook's scope-by-lock-mtime behavior, fixture isolation, and the block-decision JSON output shape.
+- `tests/test_doctor.sh` gains 22 lines covering the inline-shell-skip fix.
+- Full 26-file suite green.
+
 ## 2026.5.6
 
 ### Added
