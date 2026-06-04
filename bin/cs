@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.5.6"
+VERSION="2026.5.7"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -767,6 +767,34 @@ _alloc_uuid() {
     fi
 }
 
+# The 8 colors claude's /color slash command accepts (verified against the
+# binary's own error message in claude 2.1.162). Anything else errors with
+# "Invalid color X". Notably absent: teal, magenta, white, black, gray, hex.
+CS_VALID_COLORS=(red blue green yellow purple orange pink cyan)
+
+# Pick a random color from CS_VALID_COLORS. Used at session creation to give
+# each cs session a distinct prompt-bar accent without user choice. Claude
+# defaults to teal; cs randomizes so parallel sessions are visually distinct
+# at a glance.
+_alloc_random_color() {
+    echo "${CS_VALID_COLORS[$((RANDOM % ${#CS_VALID_COLORS[@]}))]}"
+}
+
+# Read claude_session_color from a session's .cs/README.md frontmatter.
+# Prints the color name to stdout, or empty if absent or unreadable.
+_read_session_color() {
+    local readme="$1"
+    [ -f "$readme" ] || return 0
+    awk '
+        /^claude_session_color:/ {
+            sub(/^claude_session_color:[[:space:]]*/, "")
+            gsub(/"/, "")
+            print
+            exit
+        }
+    ' "$readme" 2>/dev/null || true
+}
+
 # Read claude_session_id from a session's .cs/README.md frontmatter.
 # Prints the UUID to stdout, or empty if absent or unreadable. Never errors.
 # Single-awk implementation: one fork, prints first match, exits.
@@ -825,6 +853,20 @@ _set_session_uuid() {
     ' "$readme" > "$tmp" && mv "$tmp" "$readme"
 }
 
+# Write claude_session_color: <color> into README frontmatter, replacing any
+# existing line and inserting after 'claude_session_id:' if absent. Idempotent.
+_set_session_color() {
+    local readme="$1"
+    local color="$2"
+    [ -f "$readme" ] || return 0
+    local tmp="$readme.tmp"
+    awk -v new_line="claude_session_color: $color" '
+        /^claude_session_color:/ { next }
+        /^claude_session_id:/ { print; print new_line; next }
+        { print }
+    ' "$readme" > "$tmp" && mv "$tmp" "$readme"
+}
+
 # Allocate a fresh UUID, rewrite README's claude_session_id to it, export
 # CS_CLAUDE_SESSION_ID + CS_FRESH_REBIND, and exec claude --session-id <new>.
 # Used on the "user declined resume" path and the "resume failed" fallback
@@ -838,17 +880,22 @@ _exec_fresh_rebind() {
     local new_uuid
     new_uuid=$(_alloc_uuid)
     _set_session_uuid "$session_dir/.cs/README.md" "$new_uuid"
+    local session_color
+    session_color=$(_read_session_color "$session_dir/.cs/README.md")
+    local color_arg=""
+    [ -n "$session_color" ] && color_arg="/color $session_color"
     export CS_CLAUDE_SESSION_ID="$new_uuid"
     export CS_FRESH_REBIND=1
     # shellcheck disable=SC2086
-    exec $CLAUDE_CODE_BIN --name "$session_name" --session-id "$new_uuid"
+    exec $CLAUDE_CODE_BIN --name "$session_name" --session-id "$new_uuid" ${color_arg:+"$color_arg"}
 }
 
 # Create session directory structure
 create_session_structure() {
     local session_dir="$1"
-    local claude_session_id
+    local claude_session_id claude_session_color
     claude_session_id=$(_alloc_uuid)
+    claude_session_color=$(_alloc_random_color)
 
     mkdir -p "$session_dir/.cs"/{artifacts,logs}
 
@@ -858,6 +905,7 @@ create_session_structure() {
 status: active
 created: $(date '+%Y-%m-%d')
 claude_session_id: $claude_session_id
+claude_session_color: $claude_session_color
 tags: []
 aliases: ["$(basename "$session_dir")"]
 ---
@@ -1198,6 +1246,19 @@ Do not fire on every short affirmative ("yes", "ok", "thanks"). Fire when the *w
 To opt out, delete the prose above but keep the `cs:wrap-cues` HTML comment as a tombstone — cs treats the sentinel's presence as "managed, do not re-add."
 EOF
         warn "Appended session wrap-up cues to CLAUDE.md"
+    fi
+
+    # Phase 11: Backfill claude_session_color in README frontmatter when
+    # absent. Picks one of the 8 colors claude's /color command accepts and
+    # writes it after claude_session_id. Idempotent — runs only when the
+    # field is missing. Legacy sessions (pre-v2026.5.7) get a randomly-chosen
+    # color on next launch and stay on it from then on.
+    if [ -f "$readme" ] && head -1 "$readme" | grep -q '^---$' \
+       && ! grep -qE '^claude_session_color:' "$readme"; then
+        local _new_color
+        _new_color=$(_alloc_random_color)
+        _set_session_color "$readme" "$_new_color"
+        warn "Backfilled claude_session_color in .cs/README.md ($_new_color)"
     fi
 }
 
@@ -2033,9 +2094,20 @@ launch_claude_code() {
     # spawn args at exec time. Empty only if the README is somehow missing —
     # exec paths fall back gracefully.
     local claude_session_id=""
+    local claude_session_color=""
     if [ -f "$session_dir/.cs/README.md" ]; then
         claude_session_id=$(_read_session_uuid "$session_dir/.cs/README.md")
+        claude_session_color=$(_read_session_color "$session_dir/.cs/README.md")
     fi
+
+    # Build the trailing positional prompt arg that applies the session's
+    # color at launch. Claude has no --color CLI flag (verified through
+    # 2.1.162); the slash command as a positional prompt is the only
+    # mechanism. Slash commands at launch produce no transcript entry —
+    # confirmed by grep against this session's own jsonl after a /color
+    # invocation — so re-applying every launch is free.
+    local color_arg=""
+    [ -n "$claude_session_color" ] && color_arg="/color $claude_session_color"
 
     # Live-duplicate guard: refuse to spawn a second claude process for the
     # same session UUID. Mostly catches "I opened this in two tabs" accidents.
@@ -2173,7 +2245,7 @@ launch_claude_code() {
         SECONDS=0
         local rc=0
         # shellcheck disable=SC2086
-        $CLAUDE_CODE_BIN --name "$session_name" $continue_flag || rc=$?
+        $CLAUDE_CODE_BIN --name "$session_name" $continue_flag ${color_arg:+"$color_arg"} || rc=$?
         if [ $rc -ne 0 ] && [ $SECONDS -lt 3 ]; then
             # Quick failure suggests no conversation to continue. Rebind so
             # the fresh transcript claude is about to create is tracked by
@@ -2197,12 +2269,12 @@ launch_claude_code() {
         #     post-Phase-8 but handled defensively): naked exec.
         if [ "$is_new" = "true" ] && [ -n "$claude_session_id" ]; then
             # shellcheck disable=SC2086
-            exec $CLAUDE_CODE_BIN --name "$session_name" --session-id "$claude_session_id"
+            exec $CLAUDE_CODE_BIN --name "$session_name" --session-id "$claude_session_id" ${color_arg:+"$color_arg"}
         elif [ "$is_new" = "false" ]; then
             _exec_fresh_rebind "$session_dir"
         else
             # shellcheck disable=SC2086
-            exec $CLAUDE_CODE_BIN --name "$session_name"
+            exec $CLAUDE_CODE_BIN --name "$session_name" ${color_arg:+"$color_arg"}
         fi
     fi
 }

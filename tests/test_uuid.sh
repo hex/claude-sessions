@@ -549,4 +549,157 @@ test_decline_resume_launch_passes_name() {
 run_test test_new_session_launch_passes_name
 run_test test_resume_launch_passes_name
 run_test test_decline_resume_launch_passes_name
+
+# ============================================================================
+# Cycle 8: random color picked at session creation, stored in frontmatter,
+# and passed to claude as a /color slash-command on every launch path.
+# Symmetric in spirit with --name pass-through — claude doesn't have a
+# --color CLI flag, so the slash command is the only mechanism.
+# ============================================================================
+
+# The 8 colors claude accepts via /color (the binary errors on anything else).
+# Verified against claude 2.1.162's own error message; the prior agent answer
+# inflated this list with teal/magenta/etc — those are NOT valid.
+VALID_COLORS_RE='^(red|blue|green|yellow|purple|orange|pink|cyan)$'
+
+_extract_session_color() {
+    local readme="$1"
+    grep -E '^claude_session_color:' "$readme" 2>/dev/null \
+        | head -1 \
+        | sed -E 's/^claude_session_color:[[:space:]]*//; s/^"//; s/"$//' \
+        || true
+}
+
+test_new_session_records_random_color_in_frontmatter() {
+    "$CS_BIN" my-test-session <<< "" >/dev/null 2>&1 || true
+
+    local readme="$CS_SESSIONS_ROOT/my-test-session/.cs/README.md"
+
+    assert_file_contains "$readme" '^claude_session_color:' \
+        "README frontmatter should record claude_session_color" || return 1
+
+    local color
+    color=$(_extract_session_color "$readme")
+
+    if [[ ! "$color" =~ $VALID_COLORS_RE ]]; then
+        echo "  FAIL: recorded color is not in the valid 8-color set"
+        echo "    recorded: '$color'"
+        return 1
+    fi
+}
+
+test_new_session_launch_passes_color_slash_command() {
+    local output
+    output=$("$CS_BIN" my-test-session <<< "" 2>&1) || true
+
+    local readme="$CS_SESSIONS_ROOT/my-test-session/.cs/README.md"
+    local color
+    color=$(_extract_session_color "$readme")
+
+    assert_output_contains "$output" "/color $color" \
+        "new-session launch must pass /color <color> as a positional prompt" || return 1
+}
+
+test_resume_launch_passes_color_slash_command() {
+    "$CS_BIN" my-test-session <<< "" >/dev/null 2>&1 || true
+
+    local readme="$CS_SESSIONS_ROOT/my-test-session/.cs/README.md"
+    local color
+    color=$(_extract_session_color "$readme")
+
+    local output
+    output=$("$CS_BIN" my-test-session <<< "" 2>&1) || true
+
+    assert_output_contains "$output" "/color $color" \
+        "resume launch must pass /color <color>" || return 1
+}
+
+test_decline_resume_launch_passes_color_slash_command() {
+    "$CS_BIN" my-test-session <<< "" >/dev/null 2>&1 || true
+
+    local readme="$CS_SESSIONS_ROOT/my-test-session/.cs/README.md"
+    local color
+    color=$(_extract_session_color "$readme")
+
+    local output
+    output=$("$CS_BIN" my-test-session <<< "n" 2>&1) || true
+
+    assert_output_contains "$output" "/color $color" \
+        "fresh-rebind (N path) must pass /color <color>" || return 1
+}
+
+test_color_persists_across_resumes() {
+    # The color is allocated ONCE at session creation and must stay stable
+    # across subsequent resumes — never re-randomized.
+    "$CS_BIN" my-test-session <<< "" >/dev/null 2>&1 || true
+
+    local readme="$CS_SESSIONS_ROOT/my-test-session/.cs/README.md"
+    local first_color
+    first_color=$(_extract_session_color "$readme")
+
+    "$CS_BIN" my-test-session <<< "" >/dev/null 2>&1 || true
+    local second_color
+    second_color=$(_extract_session_color "$readme")
+
+    assert_eq "$first_color" "$second_color" \
+        "color must remain stable across resumes (never re-randomized)" || return 1
+}
+
+test_legacy_session_backfills_color_on_next_launch() {
+    # Build a "legacy" session with claude_session_id but no
+    # claude_session_color in frontmatter — simulates a session created
+    # before v2026.5.7 shipped. Phase 11 should allocate + persist a color
+    # on first launch under v5.7.
+    local session_dir="$CS_SESSIONS_ROOT/legacy-no-color"
+    mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
+    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
+    cat > "$session_dir/.cs/README.md" << 'EOF'
+---
+status: active
+created: 2026-01-01
+claude_session_id: abcd1234-5678-4abc-9def-fedcba987654
+tags: []
+aliases: ["legacy-no-color"]
+---
+# Session: legacy-no-color
+EOF
+    echo "# Discoveries" > "$session_dir/.cs/discoveries.md"
+    echo "# Changes" > "$session_dir/.cs/changes.md"
+    echo "# Session" > "$session_dir/CLAUDE.md"
+    (cd "$session_dir" && git init -q && git add -A && git commit -q -m "init")
+
+    assert_file_not_contains "$session_dir/.cs/README.md" '^claude_session_color:' \
+        "precondition: legacy session must lack claude_session_color" || return 1
+
+    "$CS_BIN" legacy-no-color <<< "" >/dev/null 2>&1 || true
+
+    assert_file_contains "$session_dir/.cs/README.md" '^claude_session_color:' \
+        "Phase 11 should backfill claude_session_color on legacy session" || return 1
+
+    local color
+    color=$(_extract_session_color "$session_dir/.cs/README.md")
+    if [[ ! "$color" =~ $VALID_COLORS_RE ]]; then
+        echo "  FAIL: backfilled color is not in the valid 8-color set: '$color'"
+        return 1
+    fi
+
+    # Idempotent: second launch must NOT re-randomize.
+    "$CS_BIN" legacy-no-color <<< "" >/dev/null 2>&1 || true
+    local color_after
+    color_after=$(_extract_session_color "$session_dir/.cs/README.md")
+    assert_eq "$color" "$color_after" \
+        "second migration must not change the backfilled color" || return 1
+
+    local count
+    count=$(grep -cE '^claude_session_color:' "$session_dir/.cs/README.md")
+    assert_eq "1" "$count" \
+        "claude_session_color must appear exactly once in frontmatter" || return 1
+}
+
+run_test test_new_session_records_random_color_in_frontmatter
+run_test test_new_session_launch_passes_color_slash_command
+run_test test_resume_launch_passes_color_slash_command
+run_test test_decline_resume_launch_passes_color_slash_command
+run_test test_color_persists_across_resumes
+run_test test_legacy_session_backfills_color_on_next_launch
 report_results
