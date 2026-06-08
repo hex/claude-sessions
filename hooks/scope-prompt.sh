@@ -32,6 +32,25 @@ if ! printf '%s' "$PROMPT" | rg -qi "$VERB_RE" 2>/dev/null \
     exit 0   # negative classification: silent pass-through
 fi
 
+# --- Cache (30-minute window) ---
+
+SCOPE_DIR="$META_DIR/scope"
+mkdir -p "$SCOPE_DIR" 2>/dev/null || true
+
+# Prune stale entries on every invocation. This also serves as the freshness filter:
+# any cache file that survives the prune was modified within the last 30 minutes.
+find "$SCOPE_DIR" -name '*.md' -mmin +30 -delete 2>/dev/null || true
+
+HASH=$(printf '%s' "$PROMPT" | shasum -a 256 2>/dev/null | cut -c1-16)
+CACHE_FILE="$SCOPE_DIR/$HASH.md"
+
+# Cache hit: reuse a fresh (post-prune) cache file without rescanning.
+if [ -n "$HASH" ] && [ -f "$CACHE_FILE" ]; then
+    jq -n --arg c "$(cat "$CACHE_FILE")" \
+        '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: $c}}'
+    exit 0
+fi
+
 # --- Grounded scan (all bounded; all read-only git) ---
 
 # Tokens: word-ish fragments of the prompt. Drop tokens <= 3 chars and any token without a
@@ -87,6 +106,9 @@ fi
 if [ "$(printf '%s' "$BLOCK" | wc -c)" -gt 8000 ]; then
     BLOCK=$(printf '%s' "$BLOCK" | head -c 8000)
 fi
+
+# Cache the block so re-prompts within 30 minutes reuse it without rescanning.
+[ -n "$HASH" ] && printf '%s' "$BLOCK" > "$CACHE_FILE" 2>/dev/null || true
 
 jq -n --arg c "$BLOCK" \
     '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: $c}}'
