@@ -205,6 +205,44 @@ test_scan_over_match_lone_dot_defused() {
     done
 }
 
+# Count the entries listed under the "### Relevant files" subsection.
+relevant_files_count() {
+    printf '%s' "$1" | awk '/^### Relevant files$/{f=1;next} /^### /{f=0} f && NF {c++} END{print c+0}'
+}
+
+test_scan_bounded_on_common_words() {
+    # finding-03a: bare dictionary words (>=4 chars) used to substring-match many paths.
+    # A firing prompt made only of filler words must NOT dump a pile of tangential files.
+    local w i
+    mkdir -p "$CLAUDE_SESSION_DIR/src"
+    for w in this that from with; do
+        for i in 1 2 3; do printf 'x\n' > "$CLAUDE_SESSION_DIR/src/${w}_mod${i}.ts"; done
+    done
+    git -C "$CLAUDE_SESSION_DIR" add -A >/dev/null 2>&1
+    git -C "$CLAUDE_SESSION_DIR" commit -q -m seed >/dev/null 2>&1
+    local out ac count
+    out=$(run_hook "fix this with that from then than")
+    ac=$(additional_context "$out")
+    printf '%s' "$ac" | grep -q "Scope (auto-grounded)" || { echo "  FAIL: prompt fires on 'fix'; expected a block (RED guard)"; return 1; }
+    count=$(relevant_files_count "$ac")
+    [ "$count" -lt 10 ] || { echo "  FAIL: filler-only prompt over-matched $count files (stoplist not applied?)"; return 1; }
+}
+
+test_scan_handles_spaces_in_filenames() {
+    # finding-03b: $RELEVANT_FILES must be passed to `git log` quoted, else a tracked path
+    # with a space splits into bogus pathspecs and the recent-commits section silently empties.
+    mkdir -p "$CLAUDE_SESSION_DIR/src"
+    printf 'x\n' > "$CLAUDE_SESSION_DIR/src/weird name.ts"
+    git -C "$CLAUDE_SESSION_DIR" add -A >/dev/null 2>&1
+    git -C "$CLAUDE_SESSION_DIR" commit -q -m "SPACEFILE_COMMIT add weird name" >/dev/null 2>&1
+    local out ac rc
+    out=$(run_hook "fix the weird handler logic" 2>/dev/null) && rc=0 || rc=$?
+    [ "$rc" -eq 0 ] || { echo "  FAIL: hook must exit 0 with spaced filenames (got $rc)"; return 1; }
+    ac=$(additional_context "$out")
+    printf '%s' "$ac" | grep -qF "src/weird name.ts" || { echo "  FAIL: spaced filename should surface in relevant files"; return 1; }
+    printf '%s' "$ac" | grep -q "SPACEFILE_COMMIT" || { echo "  FAIL: recent commits must resolve for spaced filenames (unquoted \$RELEVANT_FILES?)"; return 1; }
+}
+
 # ============================================================================
 # Token cap
 # ============================================================================
@@ -342,6 +380,8 @@ run_test test_scan_surfaces_relevant_file
 run_test test_scan_includes_recent_commits
 run_test test_scan_excludes_build_and_meta_dirs
 run_test test_scan_over_match_lone_dot_defused
+run_test test_scan_bounded_on_common_words
+run_test test_scan_handles_spaces_in_filenames
 run_test test_token_cap_under_8000_bytes
 run_test test_cache_hit_reuses_without_rescan
 run_test test_cache_miss_after_30min_rescans

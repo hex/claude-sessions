@@ -53,13 +53,15 @@ fi
 
 # --- Grounded scan (all bounded; all read-only git) ---
 
-# Tokens: word-ish fragments of the prompt. Drop tokens <= 3 chars and any token without a
-# letter — the latter defuses the lone-'.' scan bomb (a bare '.' as an rg fixed-string would
-# match every path containing a period).
+# Tokens: word-ish fragments of the prompt. Keep only tokens >= 4 chars that contain a letter
+# and are not common filler words. The length+letter filter defuses the lone-'.' scan bomb (a
+# bare '.' as an rg fixed-string would match every path with a period); the stoplist stops
+# bare dictionary words from substring-matching tangential paths.
 TOKENS=$(printf '%s' "$PROMPT" \
     | tr -cs '[:alnum:]_/.-' '\n' \
     | rg -v '^.{0,3}$' 2>/dev/null \
     | rg '[a-zA-Z]' 2>/dev/null \
+    | rg -vi '^(the|this|that|with|from|into|when|then|than|will|just|some|like|need|want|have|been)$' 2>/dev/null \
     | sort -u)
 
 # Build/vendor/meta dirs that must never be injected. The \.cs/ entry is load-bearing:
@@ -84,8 +86,13 @@ if [ -n "$RELEVANT_FILES" ]; then
 ### Relevant files
 $RELEVANT_FILES"
 
-    # shellcheck disable=SC2086
-    RECENT_COMMITS=$(git -C "$SESSION_DIR" log --oneline -5 --no-merges -- $RELEVANT_FILES 2>/dev/null | head -5)
+    # Pass paths as quoted argv (an array), so a tracked filename with a space or glob char
+    # can't split into bogus pathspecs. The count guard keeps "${arr[@]}" safe under set -u
+    # on bash 3.2 (macOS) when the array is empty.
+    RECENT_COMMITS=""
+    REL_PATHS=()
+    while IFS= read -r _f; do [ -n "$_f" ] && REL_PATHS+=("$_f"); done <<< "$RELEVANT_FILES"
+    [ "${#REL_PATHS[@]}" -gt 0 ] && RECENT_COMMITS=$(git -C "$SESSION_DIR" log --oneline -5 --no-merges -- "${REL_PATHS[@]}" 2>/dev/null | head -5)
     [ -n "$RECENT_COMMITS" ] && BLOCK="$BLOCK
 
 ### Recent commits
