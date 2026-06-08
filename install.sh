@@ -76,7 +76,6 @@ CS_SECRETS_URL="${REPO_URL}/bin/cs-secrets"
 # Hook URLs for web install
 HOOK_SESSION_START_URL="${REPO_URL}/hooks/session-start.sh"
 HOOK_ARTIFACT_TRACKER_URL="${REPO_URL}/hooks/artifact-tracker.sh"
-HOOK_CHANGES_TRACKER_URL="${REPO_URL}/hooks/changes-tracker.sh"
 HOOK_DISCOVERY_COMMITS_URL="${REPO_URL}/hooks/discovery-commits.sh"
 HOOK_DISCOVERIES_REMINDER_URL="${REPO_URL}/hooks/discoveries-reminder.sh"
 HOOK_PROSE_LINT_URL="${REPO_URL}/hooks/prose-lint.sh"
@@ -95,6 +94,9 @@ RETIRED_HOOKS=(
     gotcha-prewriter.sh       # retired: brief pre-write gotcha-surfacing experiment; approach was rethought
     aboutme-validator.sh      # retired: never-shipped PostToolUse-on-Write experiment from a feature branch that registered the hook in settings.json without the file ever landing in source
     command-tracker.sh        # retired: CLI command capture; @-included payload did not influence model behaviour at a rate justifying its context cost
+    files-scan.sh             # retired: workspace file indexer for .cs/files.md (assumption that the agent can't introspect file sizes has expired)
+    files-context.sh          # retired: PreToolUse:Read context injector that surfaced files.md token estimates
+    changes-tracker.sh        # retired: PostToolUse change log re-narrating git history into .cs/changes.md; git log/diff/status is authoritative
 )
 
 # Command URLs for web install
@@ -248,7 +250,6 @@ if [ "$INSTALL_METHOD" = "local" ]; then
     # Install from local clone
     cp "$HOOKS_SOURCE/session-start.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/artifact-tracker.sh" "$HOOKS_DIR/"
-    cp "$HOOKS_SOURCE/changes-tracker.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/discovery-commits.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/discoveries-reminder.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/prose-lint.sh" "$HOOKS_DIR/"
@@ -262,7 +263,6 @@ else
     if command -v curl >/dev/null 2>&1; then
         curl -fsSL "$HOOK_SESSION_START_URL" -o "$HOOKS_DIR/session-start.sh" || error "Failed to download session-start.sh"
         curl -fsSL "$HOOK_ARTIFACT_TRACKER_URL" -o "$HOOKS_DIR/artifact-tracker.sh" || error "Failed to download artifact-tracker.sh"
-        curl -fsSL "$HOOK_CHANGES_TRACKER_URL" -o "$HOOKS_DIR/changes-tracker.sh" || error "Failed to download changes-tracker.sh"
         curl -fsSL "$HOOK_DISCOVERY_COMMITS_URL" -o "$HOOKS_DIR/discovery-commits.sh" || error "Failed to download discovery-commits.sh"
         curl -fsSL "$HOOK_DISCOVERIES_REMINDER_URL" -o "$HOOKS_DIR/discoveries-reminder.sh" || error "Failed to download discoveries-reminder.sh"
         curl -fsSL "$HOOK_PROSE_LINT_URL" -o "$HOOKS_DIR/prose-lint.sh" || error "Failed to download prose-lint.sh"
@@ -274,7 +274,6 @@ else
     elif command -v wget >/dev/null 2>&1; then
         wget -q "$HOOK_SESSION_START_URL" -O "$HOOKS_DIR/session-start.sh" || error "Failed to download session-start.sh"
         wget -q "$HOOK_ARTIFACT_TRACKER_URL" -O "$HOOKS_DIR/artifact-tracker.sh" || error "Failed to download artifact-tracker.sh"
-        wget -q "$HOOK_CHANGES_TRACKER_URL" -O "$HOOKS_DIR/changes-tracker.sh" || error "Failed to download changes-tracker.sh"
         wget -q "$HOOK_DISCOVERY_COMMITS_URL" -O "$HOOKS_DIR/discovery-commits.sh" || error "Failed to download discovery-commits.sh"
         wget -q "$HOOK_DISCOVERIES_REMINDER_URL" -O "$HOOKS_DIR/discoveries-reminder.sh" || error "Failed to download discoveries-reminder.sh"
         wget -q "$HOOK_PROSE_LINT_URL" -O "$HOOKS_DIR/prose-lint.sh" || error "Failed to download prose-lint.sh"
@@ -385,7 +384,6 @@ else
     # Our hook script paths (for detecting existing cs hooks)
     SESSION_START_PATH="$HOME/.claude/hooks/session-start.sh"
     ARTIFACT_TRACKER_PATH="$HOME/.claude/hooks/artifact-tracker.sh"
-    CHANGES_TRACKER_PATH="$HOME/.claude/hooks/changes-tracker.sh"
     DISCOVERY_COMMITS_PATH="$HOME/.claude/hooks/discovery-commits.sh"
     DISCOVERIES_REMINDER_PATH="$HOME/.claude/hooks/discoveries-reminder.sh"
     PROSE_LINT_PATH="$HOME/.claude/hooks/prose-lint.sh"
@@ -398,7 +396,6 @@ else
     # Tilde-path variants for dedup (handles entries added with ~ instead of $HOME)
     SESSION_START_TILDE="~/.claude/hooks/session-start.sh"
     ARTIFACT_TRACKER_TILDE="~/.claude/hooks/artifact-tracker.sh"
-    CHANGES_TRACKER_TILDE="~/.claude/hooks/changes-tracker.sh"
     DISCOVERY_COMMITS_TILDE="~/.claude/hooks/discovery-commits.sh"
     DISCOVERIES_REMINDER_TILDE="~/.claude/hooks/discoveries-reminder.sh"
     PROSE_LINT_TILDE="~/.claude/hooks/prose-lint.sh"
@@ -461,9 +458,6 @@ else
 
     _merge_cs_hook PreToolUse "$ARTIFACT_TRACKER_PATH" "$ARTIFACT_TRACKER_TILDE" 10 \
         "{\"matcher\":\"Write\",\"hooks\":[{\"type\":\"command\",\"command\":\"$ARTIFACT_TRACKER_TILDE\",\"timeout\":10}]}"
-
-    _merge_cs_hook PostToolUse "$CHANGES_TRACKER_PATH" "$CHANGES_TRACKER_TILDE" 10 \
-        "{\"matcher\":\"\",\"hooks\":[{\"type\":\"command\",\"command\":\"$CHANGES_TRACKER_TILDE\",\"timeout\":10}]}"
 
     _merge_cs_hook PostToolUse "$DISCOVERY_COMMITS_PATH" "$DISCOVERY_COMMITS_TILDE" 10 \
         "{\"matcher\":\"Write|Edit\",\"hooks\":[{\"type\":\"command\",\"command\":\"$DISCOVERY_COMMITS_TILDE\",\"timeout\":10,\"async\":true}]}"

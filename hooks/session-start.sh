@@ -155,7 +155,6 @@ This session has:
 Key files to maintain:
 - .cs/README.md: Update objective and outcome
 - .cs/discoveries.md: Document findings, observations, and ideas
-- .cs/changes.md: Automatically logs file modifications
 
 All scripts and config files are automatically saved to .cs/artifacts/.
 
@@ -254,7 +253,6 @@ The user explicitly started a fresh conversation in this cs session — the prio
 For prior context, lazily consult as needed:
 - .cs/discoveries.md  — findings and decisions from earlier work
 - .cs/README.md       — session objective
-- .cs/changes.md      — recent file modifications
 
 The new conversation has its own UUID (\$CS_CLAUDE_SESSION_ID). Do not assume continuity with previous turns."
 fi

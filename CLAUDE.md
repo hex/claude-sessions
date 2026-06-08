@@ -10,8 +10,7 @@ When resuming this session, read the following files to restore context:
 2. **.cs/README.md** - Session objective, environment, and outcome
 3. **.cs/discoveries.md** - Findings, observations, and ideas
 4. **.cs/discoveries.compact.md** - If exists, condensed older findings
-5. **.cs/changes.md** - Modifications and fixes made
-6. **.cs/artifacts/MANIFEST.json** - List of tracked artifacts
+5. **.cs/artifacts/MANIFEST.json** - List of tracked artifacts
 
 Note: When discoveries.md exceeds its size budget (default 60KB, override via
 CS_DISCOVERIES_MAX_SIZE env var), older entries are summarized into
@@ -31,7 +30,7 @@ When you use the Write tool for these file types, they are automatically redirec
 Update the markdown documentation files throughout the session:
 
 1. **Start of session:** Fill in .cs/README.md objective and environment
-2. **As you work:** Update .cs/discoveries.md with findings and .cs/changes.md with modifications
+2. **As you work:** Update .cs/discoveries.md with findings
 3. **End of session:** Complete the .cs/README.md outcome section
 
 Treat these files as a lab notebook - document as you go, not just at the end.
@@ -70,7 +69,6 @@ cs -secrets set <name> <value>     # Store manually
 
 - Document discoveries as you find them - don't wait until the end
 - Use .cs/artifacts/ for any reusable scripts or configs
-- .cs/changes.md is updated automatically when files are modified
 - Run `/summary` at the end to create a cohesive record
 - Never write raw API keys or passwords to artifact files - use cs -secrets
 

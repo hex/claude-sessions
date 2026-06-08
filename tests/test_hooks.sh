@@ -210,7 +210,7 @@ test_auto_approve_allows_cs_metadata_write() {
 
 test_auto_approve_allows_cs_edit() {
     local input
-    input=$(jq -n --arg path "$CLAUDE_SESSION_META_DIR/changes.md" \
+    input=$(jq -n --arg path "$CLAUDE_SESSION_META_DIR/summary.md" \
         '{tool_name: "Edit", tool_input: {file_path: $path}}')
 
     local output
@@ -998,7 +998,7 @@ run_test test_session_end_updates_existing_timestamp
 
 test_retired_hooks_strip_settings_json() {
     # Settings.json with one retired hook (PreCompact only) and one current hook (PostToolUse)
-    local settings='{"hooks":{"PreCompact":[{"matcher":"","hooks":[{"type":"command","command":"~/.claude/hooks/discoveries-archiver.sh","timeout":10}]}],"PostToolUse":[{"matcher":"","hooks":[{"type":"command","command":"~/.claude/hooks/changes-tracker.sh","timeout":10}]}]}}'
+    local settings='{"hooks":{"PreCompact":[{"matcher":"","hooks":[{"type":"command","command":"~/.claude/hooks/discoveries-archiver.sh","timeout":10}]}],"PostToolUse":[{"matcher":"","hooks":[{"type":"command","command":"~/.claude/hooks/discovery-commits.sh","timeout":10}]}]}}'
     local p="$HOME/.claude/hooks/discoveries-archiver.sh"
     local t="~/.claude/hooks/discoveries-archiver.sh"
     local stripped
@@ -1027,7 +1027,7 @@ test_retired_hooks_strip_settings_json() {
 
 test_retired_hooks_strip_preserves_coexisting_hook() {
     # Two hooks under SAME event — one retired, one current. Only the retired should be stripped.
-    local settings='{"hooks":{"PostToolUse":[{"matcher":"","hooks":[{"type":"command","command":"~/.claude/hooks/discoveries-archiver.sh","timeout":10},{"type":"command","command":"~/.claude/hooks/changes-tracker.sh","timeout":10}]}]}}'
+    local settings='{"hooks":{"PostToolUse":[{"matcher":"","hooks":[{"type":"command","command":"~/.claude/hooks/discoveries-archiver.sh","timeout":10},{"type":"command","command":"~/.claude/hooks/discovery-commits.sh","timeout":10}]}]}}'
     local p="$HOME/.claude/hooks/discoveries-archiver.sh"
     local t="~/.claude/hooks/discoveries-archiver.sh"
     local stripped
@@ -1048,8 +1048,8 @@ test_retired_hooks_strip_preserves_coexisting_hook() {
         echo "  $stripped"
         return 1
     fi
-    if ! echo "$stripped" | jq -e '.hooks.PostToolUse[0].hooks[] | select(.command | contains("changes-tracker"))' >/dev/null 2>&1; then
-        echo "  FAIL: changes-tracker entry should remain"
+    if ! echo "$stripped" | jq -e '.hooks.PostToolUse[0].hooks[] | select(.command | contains("discovery-commits"))' >/dev/null 2>&1; then
+        echo "  FAIL: discovery-commits entry should remain"
         return 1
     fi
 }

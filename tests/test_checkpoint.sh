@@ -38,12 +38,6 @@ Moved JWT validation to middleware layer.
 ## Migration strategy
 Rolling deploy with feature flag.
 EOF
-    cat > "$session_dir/.cs/changes.md" << 'EOF'
-# Changes Log
-
-- 2026-04-09: Modified auth/middleware.ts
-- 2026-04-09: Added tests/auth.test.ts
-EOF
     echo "# Test" > "$session_dir/CLAUDE.md"
     (cd "$session_dir" && git init -q -b main && git config user.email t@t && git config user.name T && git add -A && git commit -q -m init)
 

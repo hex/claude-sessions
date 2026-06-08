@@ -28,7 +28,6 @@ Read these files end to end:
 - `.cs/README.md` (objective, environment, outcome)
 - `.cs/discoveries.md` (findings and observations)
 - `.cs/discoveries.compact.md` (if exists — condensed older findings)
-- `.cs/changes.md` (auto-logged file modifications)
 - `.cs/artifacts/MANIFEST.json` (created files)
 
 Synthesize them into a cohesive narrative at `.cs/summary.md`. Use this structure:

@@ -117,7 +117,6 @@ aliases: ["legacy-session"]
 **Started:** 2026-01-01 09:00:00
 EOF
     echo "# Discoveries" > "$session_dir/.cs/discoveries.md"
-    echo "# Changes" > "$session_dir/.cs/changes.md"
     cat > "$session_dir/CLAUDE.md" << 'EOF'
 # Session Documentation Protocol
 
@@ -203,7 +202,6 @@ _seed_legacy_session() {
         echo "# Session: $name"
     } > "$session_dir/.cs/README.md"
     echo "# Discoveries" > "$session_dir/.cs/discoveries.md"
-    echo "# Changes" > "$session_dir/.cs/changes.md"
     echo "# Session" > "$session_dir/CLAUDE.md"
     (cd "$session_dir" && git init -q && git add -A && git commit -q -m "init")
     echo "$session_dir"
@@ -664,7 +662,6 @@ aliases: ["legacy-no-color"]
 # Session: legacy-no-color
 EOF
     echo "# Discoveries" > "$session_dir/.cs/discoveries.md"
-    echo "# Changes" > "$session_dir/.cs/changes.md"
     echo "# Session" > "$session_dir/CLAUDE.md"
     (cd "$session_dir" && git init -q && git add -A && git commit -q -m "init")
 

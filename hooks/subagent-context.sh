@@ -29,7 +29,6 @@ Key rules:
 - NEVER write raw API keys, tokens, or passwords to files
 - Scripts and configs are tracked in .cs/artifacts/
 - Document findings in .cs/discoveries.md
-- Log changes in .cs/changes.md
 EOF
 )
 

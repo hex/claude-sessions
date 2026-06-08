@@ -65,7 +65,7 @@ Or clone and run `./install.sh`.
 
 The installer:
 - Adds `cs`, `cs-secrets`, and `cs-tui` to `~/.local/bin/`
-- Installs eleven [hooks](docs/hooks.md) to `~/.claude/hooks/` for session tracking
+- Installs ten [hooks](docs/hooks.md) to `~/.claude/hooks/` for session tracking
 - Adds `/summary`, `/compact-discoveries`, `/checkpoint`, `/sweep`, and `/wrap` commands, and the `store-secret` and `prose-hygiene` skills to `~/.claude/`
 - Installs shell completions for bash and zsh
 - Configures hook entries in `~/.claude/settings.json`
@@ -189,7 +189,6 @@ This rsyncs the session to the remote host and creates a local stub so future `c
 │   ├── README.md           # Objective, environment, outcome
 │   ├── discoveries.md      # Findings and observations
 │   ├── discoveries.compact.md  # Condensed older findings
-│   ├── changes.md          # Auto-logged file modifications
 │   ├── sync.conf           # Sync configuration
 │   ├── remote.conf         # Remote host (if remote session)
 │   ├── memory/             # Claude Code auto memory (synced)

@@ -21,7 +21,6 @@ The label is free text describing what this moment represents — for example:
 Runs `cs -checkpoint "<label>"` via the Bash tool. This captures:
 - Current timestamp and git HEAD
 - Snapshot of `.cs/discoveries.md`
-- Snapshot of `.cs/changes.md`
 - List of uncommitted files
 - Appends a `checkpoint` event to `.cs/timeline.jsonl`
 

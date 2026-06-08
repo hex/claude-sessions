@@ -23,12 +23,6 @@ Runs before any file write operation:
 - Scripts: `.sh`, `.bash`, `.zsh`, `.py`, `.js`, `.ts`, `.rb`, `.pl`
 - Configs: `.conf`, `.config`, `.json`, `.yaml`, `.yml`, `.toml`, `.ini`, `.env`
 
-## changes-tracker.sh (PostToolUse)
-
-Runs after any file modification (Edit, Write, MultiEdit):
-- Logs file path and timestamp to `.cs/changes.md`
-- Skips session documentation files and artifacts (tracked separately)
-
 ## discovery-commits.sh (PostToolUse on Write/Edit)
 
 Runs after any file modification (Write or Edit), providing crash recovery for all session files:
@@ -106,7 +100,6 @@ The hooks are configured in `~/.claude/settings.json`:
       { "matcher": "Bash", "hooks": [{ "type": "command", "command": "~/.claude/hooks/bash-logger.sh", "timeout": 5 }] }
     ],
     "PostToolUse": [
-      { "matcher": "", "hooks": [{ "type": "command", "command": "~/.claude/hooks/changes-tracker.sh", "timeout": 10 }] },
       { "matcher": "Write|Edit", "hooks": [{ "type": "command", "command": "~/.claude/hooks/discovery-commits.sh", "timeout": 10, "async": true }] }
     ],
     "Stop": [

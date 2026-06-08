@@ -107,7 +107,7 @@ cs my-session -sync push
 **Auto-sync is enabled by default for all new sessions.** Changes are handled automatically:
 
 1. **Discovery autosaves:** When you write to discovery files (`discoveries.md`, `discoveries.compact.md`), a snapshot is saved to a shadow git ref (`refs/cs/auto`) for crash safety. These are invisible to `git log` and never pushed.
-2. **Session end commits:** All accumulated changes are committed in one clean commit when the session ends, with a summary of changed filenames (e.g., `Session update: 3 files (session.log, discoveries.md, changes.md)`).
+2. **Session end commits:** All accumulated changes are committed in one clean commit when the session ends, with a summary of changed filenames (e.g., `Session update: 2 files (session.log, discoveries.md)`).
 
 When enabled:
 - **Session start:** Pulls latest changes from remote (if configured); recovers from crashed sessions via shadow ref
@@ -136,7 +136,7 @@ On pull, `secrets.age` is preferred if present; `secrets.enc` is used as fallbac
 ## What Gets Synced
 
 - CLAUDE.md (at session root)
-- .cs/ metadata directory (README.md, discoveries.md, changes.md, sync.conf)
+- .cs/ metadata directory (README.md, discoveries.md, sync.conf)
 - .cs/memory/ directory (Claude Code auto memory)
 - .cs/artifacts/ directory (scripts, configs, MANIFEST.json)
 - .cs/logs/session.log

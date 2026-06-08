@@ -69,7 +69,6 @@ aliases: ["$name"]
 # Session: $name
 EOF
     echo "# Discoveries" > "$session_dir/.cs/discoveries.md"
-    echo "# Changes" > "$session_dir/.cs/changes.md"
     cat > "$session_dir/CLAUDE.md" << 'EOF'
 # Session Documentation Protocol
 
@@ -77,7 +76,7 @@ This is a Claude Code session managed by cs. Session metadata lives in the .cs/ 
 
 ## Documentation
 
-Update .cs/discoveries.md, .cs/changes.md, and .cs/README.md as you work.
+Update .cs/discoveries.md and .cs/README.md as you work.
 EOF
     (cd "$session_dir" && git init -q && git add -A && git commit -q -m "init")
     echo "$session_dir"
@@ -143,7 +142,6 @@ aliases: ["$name"]
 # Session: $name
 EOF
     echo "# Discoveries" > "$session_dir/.cs/discoveries.md"
-    echo "# Changes" > "$session_dir/.cs/changes.md"
     # User opted out: kept the legacy sentinel as a tombstone, deleted the block.
     # That intent ("no cs memory documentation in my CLAUDE.md") carries over to
     # the replacement note — Phase 9 must NOT add cs:memory-note here.
@@ -191,7 +189,6 @@ aliases: ["$name"]
 # Session: $name
 EOF
     echo "# Discoveries" > "$session_dir/.cs/discoveries.md"
-    echo "# Changes" > "$session_dir/.cs/changes.md"
 
     local header
     if [ "$variant" = "v2" ]; then

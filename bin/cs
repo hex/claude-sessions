@@ -21,6 +21,9 @@ RETIRED_HOOKS=(
     gotcha-prewriter.sh       # retired: brief pre-write gotcha-surfacing experiment; approach was rethought
     aboutme-validator.sh      # retired: never-shipped PostToolUse-on-Write experiment from a feature branch that registered the hook in settings.json without the file ever landing in source
     command-tracker.sh        # retired: CLI command capture; @-included payload did not influence model behaviour at a rate justifying its context cost
+    files-scan.sh             # retired: workspace file indexer for .cs/files.md (assumption that the agent can't introspect file sizes has expired)
+    files-context.sh          # retired: PreToolUse:Read context injector that surfaced files.md token estimates
+    changes-tracker.sh        # retired: PostToolUse change log re-narrating git history into .cs/changes.md; git log/diff/status is authoritative
 )
 
 # Hook scripts in HOOKS_DIR that are NOT registered in settings.json. They are
@@ -656,8 +659,7 @@ When resuming this session, read the following files to restore context:
 2. **.cs/README.md** - Session objective, environment, and outcome
 3. **.cs/discoveries.md** - Findings, observations, and ideas
 4. **.cs/discoveries.compact.md** - If exists, condensed older findings
-5. **.cs/changes.md** - Modifications and fixes made
-6. **.cs/artifacts/MANIFEST.json** - List of tracked artifacts
+5. **.cs/artifacts/MANIFEST.json** - List of tracked artifacts
 
 Note: When discoveries.md exceeds its size budget (default 60KB, override via
 CS_DISCOVERIES_MAX_SIZE env var), older entries are summarized into
@@ -677,7 +679,7 @@ When you use the Write tool for these file types, they are automatically redirec
 Update the markdown documentation files throughout the session:
 
 1. **Start of session:** Fill in .cs/README.md objective and environment
-2. **As you work:** Update .cs/discoveries.md with findings and .cs/changes.md with modifications
+2. **As you work:** Update .cs/discoveries.md with findings
 3. **End of session:** Complete the .cs/README.md outcome section
 
 Treat these files as a lab notebook - document as you go, not just at the end.
@@ -743,7 +745,6 @@ To opt out, delete the prose above but keep the `cs:wrap-cues` HTML comment as a
 
 - Document discoveries as you find them - don't wait until the end
 - Use .cs/artifacts/ for any reusable scripts or configs
-- .cs/changes.md is updated automatically when files are modified
 - Run `/summary` at the end to create a cohesive record
 - Never write raw API keys or passwords to artifact files - use cs -secrets
 EOF
@@ -930,12 +931,6 @@ EOF
 
 EOF
 
-    # Create changes.md
-    cat > "$session_dir/.cs/changes.md" << 'EOF'
-# Changes Log
-
-EOF
-
     write_session_claude_md "$session_dir"
 
     # Initialize empty MANIFEST.json
@@ -1026,7 +1021,6 @@ migrate_session() {
         # Move metadata files
         migrate_if_exists "$session_dir/README.md" "$session_dir/.cs/README.md"
         migrate_if_exists "$session_dir/discoveries.md" "$session_dir/.cs/discoveries.md"
-        migrate_if_exists "$session_dir/changes.md" "$session_dir/.cs/changes.md"
         migrate_if_exists "$session_dir/sync.conf" "$session_dir/.cs/sync.conf"
         migrate_if_exists "$session_dir/summary.md" "$session_dir/.cs/summary.md"
         migrate_if_exists "$session_dir/secrets.enc" "$session_dir/.cs/secrets.enc"
@@ -1326,12 +1320,6 @@ save_checkpoint() {
             echo "## Discoveries snapshot"
             echo ""
             cat "$meta_dir/discoveries.md"
-            echo ""
-        fi
-        if [ -f "$meta_dir/changes.md" ]; then
-            echo "## Changes snapshot"
-            echo ""
-            cat "$meta_dir/changes.md"
             echo ""
         fi
     } > "$checkpoint_path"
@@ -1831,7 +1819,7 @@ search_sessions() {
     fi
 
     local found=0
-    local search_files=".cs/discoveries.md .cs/discoveries.compact.md .cs/README.md .cs/changes.md"
+    local search_files=".cs/discoveries.md .cs/discoveries.compact.md .cs/README.md"
     local search_globs=".cs/memory/*.md"
 
     for session_dir in "$SESSIONS_ROOT"/*/; do
@@ -3342,7 +3330,7 @@ run_uninstall() {
     fi
 
     # Remove hooks
-    for hook in session-start.sh artifact-tracker.sh changes-tracker.sh discovery-commits.sh discoveries-reminder.sh prose-lint.sh session-end.sh subagent-context.sh tool-failure-logger.sh session-auto-approve.sh bash-logger.sh; do
+    for hook in session-start.sh artifact-tracker.sh discovery-commits.sh discoveries-reminder.sh prose-lint.sh session-end.sh subagent-context.sh tool-failure-logger.sh session-auto-approve.sh bash-logger.sh; do
         if [ -f "$hooks_dir/$hook" ]; then
             rm "$hooks_dir/$hook"
             info "Removed $hooks_dir/$hook"
@@ -3391,7 +3379,6 @@ run_uninstall() {
     if [ -f "$settings_file" ] && command -v jq >/dev/null 2>&1; then
         local session_start_path="$hooks_dir/session-start.sh"
         local artifact_tracker_path="$hooks_dir/artifact-tracker.sh"
-        local changes_tracker_path="$hooks_dir/changes-tracker.sh"
         local discovery_commits_path="$hooks_dir/discovery-commits.sh"
         local discoveries_reminder_path="$hooks_dir/discoveries-reminder.sh"
         local session_end_path="$hooks_dir/session-end.sh"
@@ -3423,13 +3410,6 @@ run_uninstall() {
         settings=$(echo "$settings" | jq --arg path "$bash_logger_path" '
             if .hooks.PreToolUse then
                 .hooks.PreToolUse = [.hooks.PreToolUse[] | select(.hooks | all(.command != $path))]
-            else . end
-        ')
-
-        # Remove our PostToolUse changes tracker hook
-        settings=$(echo "$settings" | jq --arg path "$changes_tracker_path" '
-            if .hooks.PostToolUse then
-                .hooks.PostToolUse = [.hooks.PostToolUse[] | select(.hooks | all(.command != $path))]
             else . end
         ')
 
