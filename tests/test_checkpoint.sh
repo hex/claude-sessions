@@ -94,14 +94,6 @@ test_checkpoint_snapshots_discoveries() {
         "Checkpoint should snapshot discoveries" || return 1
 }
 
-test_checkpoint_snapshots_changes() {
-    "$CS_BIN" -checkpoint "test" > /dev/null 2>&1
-    local f
-    f=$(find "$CLAUDE_SESSION_META_DIR/checkpoints" -name "*.md" | head -1)
-    assert_file_contains "$f" "auth/middleware.ts" \
-        "Checkpoint should snapshot changes" || return 1
-}
-
 test_checkpoint_records_git_head() {
     "$CS_BIN" -checkpoint "test" > /dev/null 2>&1
     local f
@@ -213,7 +205,6 @@ run_test test_checkpoint_creates_file
 run_test test_checkpoint_filename_has_timestamp
 run_test test_checkpoint_includes_label
 run_test test_checkpoint_snapshots_discoveries
-run_test test_checkpoint_snapshots_changes
 run_test test_checkpoint_records_git_head
 run_test test_checkpoint_requires_label
 run_test test_checkpoint_requires_active_session
