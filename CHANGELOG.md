@@ -2,6 +2,26 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
+## Unreleased
+
+### Removed
+
+- **`files.md` workspace indexer + PreToolUse:Read context hook.** `hooks/files-scan.sh` (the utility that walked the workspace and emitted `.cs/files.md` with per-file `~N tokens -- updated YYYY-MM-DD` lines) and `hooks/files-context.sh` (the PreToolUse:Read hook that injected the indexed entry as `additionalContext` before every Read) are gone, along with `.cs/files.md` itself. The indexer encoded an assumption that the agent couldn't introspect file sizes before reading; that assumption has expired now that `wc -l` / `fd` / `rg` are reliable. The injected entries carried only a token estimate and a date (no semantic description), and observation of a live session showed the hook firing repeatedly with notices dated *27 days before today* — pure context tax with no signal. README's "Files index" concept entry and "Pre-read file context" feature entry are dropped. Hook count: thirteen → eleven.
+
+- **`changes-tracker.sh` PostToolUse re-narration log.** `hooks/changes-tracker.sh` appended `[timestamp] path` lines to `.cs/changes.md` on every Edit/Write, plus surgically updated `files.md` token estimates when a target was indexed. `git status` / `git log -p` / `git diff` already give the same view, authoritatively, and the re-narration drifted (sessions accumulated 125KB+ of `changes.md` that disagreed with git history on file scope). The `.cs/changes.md` path is removed from the session-start CONTEXT block, the fresh-rebind notice, the subagent context, the search corpus, the checkpoint snapshot, the adopt/migrate paths, and the `/summary`, `/wrap`, `/checkpoint` command prompts. Hook count: eleven → ten.
+
+### Changed
+
+- **`RETIRED_HOOKS` in `install.sh` and `bin/cs` grew by three.** `files-scan.sh`, `files-context.sh`, and `changes-tracker.sh` are now listed alongside earlier retirements (`discoveries-archiver.sh`, `aboutme-prereader.sh`, etc.) so existing installs strip the stale `settings.json` registrations and delete the deployed hook binaries on next `install.sh` or `cs -uninstall`. Without this, the deployed hooks at `~/.claude/hooks/files-context.sh` keep firing against deleted source until users manually clean up.
+
+### Tests
+
+- Dropped `tests/test_files_scan.sh`, `tests/test_files_context.sh`, `tests/test_changes_tracker.sh` and the three files.md scan-trigger tests + three files-context registration tests inside `tests/test_hooks.sh` (the features they covered no longer exist).
+- `test_checkpoint_snapshots_changes` removed from `tests/test_checkpoint.sh` — it asserted that `cs -checkpoint` snapshots `.cs/changes.md` content; with `changes.md` gone, both the fixture and the snapshot block are gone too.
+- Retired-hooks-strip tests in `test_hooks.sh` swap the "current PostToolUse hook" example from `changes-tracker.sh` (now retired) to `discovery-commits.sh`, keeping the assertion meaningful.
+- Fixture cleanups across `test_adopt.sh`, `test_memory_rules.sh`, `test_uuid.sh`, `test_wrap_cues.sh`, `test_checkpoint.sh` (drop no-op `echo "# Changes" > .cs/changes.md` seed lines and the `assert_exists changes.md` line in adopt).
+- Full 24-file suite green.
+
 ## 2026.5.7
 
 ### Added
