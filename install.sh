@@ -85,15 +85,13 @@ HOOK_SUBAGENT_CONTEXT_URL="${REPO_URL}/hooks/subagent-context.sh"
 HOOK_TOOL_FAILURE_LOGGER_URL="${REPO_URL}/hooks/tool-failure-logger.sh"
 HOOK_SESSION_AUTO_APPROVE_URL="${REPO_URL}/hooks/session-auto-approve.sh"
 HOOK_BASH_LOGGER_URL="${REPO_URL}/hooks/bash-logger.sh"
-HOOK_FILES_SCAN_URL="${REPO_URL}/hooks/files-scan.sh"
-HOOK_FILES_CONTEXT_URL="${REPO_URL}/hooks/files-context.sh"
 
 # Hooks retired in past versions but possibly still installed from older cs versions.
 # install.sh and bin/cs run_uninstall both clean these up. KEEP THIS LIST IN SYNC WITH bin/cs.
 # When retiring a hook in a release, add its filename here.
 RETIRED_HOOKS=(
     discoveries-archiver.sh   # retired in v2026.4.7 (archive flow replaced by size-budget compaction)
-    aboutme-prereader.sh      # retired: source-file ABOUTME-header nudge experiment, superseded by files.md pre-read hook
+    aboutme-prereader.sh      # retired: source-file ABOUTME-header nudge experiment
     gotcha-prewriter.sh       # retired: brief pre-write gotcha-surfacing experiment; approach was rethought
     aboutme-validator.sh      # retired: never-shipped PostToolUse-on-Write experiment from a feature branch that registered the hook in settings.json without the file ever landing in source
     command-tracker.sh        # retired: CLI command capture; @-included payload did not influence model behaviour at a rate justifying its context cost
@@ -259,8 +257,6 @@ if [ "$INSTALL_METHOD" = "local" ]; then
     cp "$HOOKS_SOURCE/tool-failure-logger.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/session-auto-approve.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/bash-logger.sh" "$HOOKS_DIR/"
-    cp "$HOOKS_SOURCE/files-scan.sh" "$HOOKS_DIR/"
-    cp "$HOOKS_SOURCE/files-context.sh" "$HOOKS_DIR/"
 else
     # Download from GitHub
     if command -v curl >/dev/null 2>&1; then
@@ -275,8 +271,6 @@ else
         curl -fsSL "$HOOK_TOOL_FAILURE_LOGGER_URL" -o "$HOOKS_DIR/tool-failure-logger.sh" || error "Failed to download tool-failure-logger.sh"
         curl -fsSL "$HOOK_SESSION_AUTO_APPROVE_URL" -o "$HOOKS_DIR/session-auto-approve.sh" || error "Failed to download session-auto-approve.sh"
         curl -fsSL "$HOOK_BASH_LOGGER_URL" -o "$HOOKS_DIR/bash-logger.sh" || error "Failed to download bash-logger.sh"
-        curl -fsSL "$HOOK_FILES_SCAN_URL" -o "$HOOKS_DIR/files-scan.sh" || error "Failed to download files-scan.sh"
-        curl -fsSL "$HOOK_FILES_CONTEXT_URL" -o "$HOOKS_DIR/files-context.sh" || error "Failed to download files-context.sh"
     elif command -v wget >/dev/null 2>&1; then
         wget -q "$HOOK_SESSION_START_URL" -O "$HOOKS_DIR/session-start.sh" || error "Failed to download session-start.sh"
         wget -q "$HOOK_ARTIFACT_TRACKER_URL" -O "$HOOKS_DIR/artifact-tracker.sh" || error "Failed to download artifact-tracker.sh"
@@ -289,8 +283,6 @@ else
         wget -q "$HOOK_TOOL_FAILURE_LOGGER_URL" -O "$HOOKS_DIR/tool-failure-logger.sh" || error "Failed to download tool-failure-logger.sh"
         wget -q "$HOOK_SESSION_AUTO_APPROVE_URL" -O "$HOOKS_DIR/session-auto-approve.sh" || error "Failed to download session-auto-approve.sh"
         wget -q "$HOOK_BASH_LOGGER_URL" -O "$HOOKS_DIR/bash-logger.sh" || error "Failed to download bash-logger.sh"
-        wget -q "$HOOK_FILES_SCAN_URL" -O "$HOOKS_DIR/files-scan.sh" || error "Failed to download files-scan.sh"
-        wget -q "$HOOK_FILES_CONTEXT_URL" -O "$HOOKS_DIR/files-context.sh" || error "Failed to download files-context.sh"
     fi
 fi
 
@@ -402,7 +394,6 @@ else
     TOOL_FAILURE_LOGGER_PATH="$HOME/.claude/hooks/tool-failure-logger.sh"
     SESSION_AUTO_APPROVE_PATH="$HOME/.claude/hooks/session-auto-approve.sh"
     BASH_LOGGER_PATH="$HOME/.claude/hooks/bash-logger.sh"
-    FILES_CONTEXT_PATH="$HOME/.claude/hooks/files-context.sh"
 
     # Tilde-path variants for dedup (handles entries added with ~ instead of $HOME)
     SESSION_START_TILDE="~/.claude/hooks/session-start.sh"
@@ -416,7 +407,6 @@ else
     TOOL_FAILURE_LOGGER_TILDE="~/.claude/hooks/tool-failure-logger.sh"
     SESSION_AUTO_APPROVE_TILDE="~/.claude/hooks/session-auto-approve.sh"
     BASH_LOGGER_TILDE="~/.claude/hooks/bash-logger.sh"
-    FILES_CONTEXT_TILDE="~/.claude/hooks/files-context.sh"
 
     # Strip retired hooks from any event in settings.json (event-agnostic since
     # we don't know which event the old version registered them under).
@@ -498,9 +488,6 @@ else
 
     _merge_cs_hook PreToolUse "$BASH_LOGGER_PATH" "$BASH_LOGGER_TILDE" 5 \
         "{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"$BASH_LOGGER_TILDE\",\"timeout\":5}]}"
-
-    _merge_cs_hook PreToolUse "$FILES_CONTEXT_PATH" "$FILES_CONTEXT_TILDE" 10 \
-        "{\"matcher\":\"Read\",\"hooks\":[{\"type\":\"command\",\"command\":\"$FILES_CONTEXT_TILDE\",\"timeout\":10}]}"
 
     echo "$SETTINGS" > "$CLAUDE_SETTINGS"
 fi

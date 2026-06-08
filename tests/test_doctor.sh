@@ -141,20 +141,6 @@ EOF
     assert_output_contains "$output" "1 env vars" "should count 1 env var" || return 1
 }
 
-test_doctor_does_not_flag_utility_hooks_as_missing() {
-    # files-scan.sh is a utility invoked by session-start.sh — it lives in
-    # ~/.claude/hooks/ but is intentionally absent from settings.json.
-    # The hooks_registered check must skip it.
-    local fake_hooks="$TEST_TMPDIR/utility-hooks"
-    mkdir -p "$fake_hooks"
-    touch "$fake_hooks/files-scan.sh"
-    chmod +x "$fake_hooks/files-scan.sh"
-    local output
-    output=$(CS_HOOKS_DIR="$fake_hooks" "$CS_BIN" -doctor 2>&1) || true
-    assert_output_not_contains "$output" "missing in settings.json: files-scan.sh" \
-        "utility hooks must not be flagged as unregistered" || return 1
-}
-
 test_doctor_runs_token_cost_check() {
     local output
     output=$("$CS_BIN" -doctor 2>&1) || true
@@ -344,5 +330,4 @@ run_test test_doctor_skips_inline_shell_hook_commands
 run_test test_doctor_runs_token_cost_check
 run_test test_doctor_token_cost_sums_jsonl
 run_test test_doctor_token_cost_handles_no_transcripts
-run_test test_doctor_does_not_flag_utility_hooks_as_missing
 report_results

@@ -584,75 +584,6 @@ test_session_start_skips_siblings_on_startup() {
 }
 
 # ============================================================================
-# session-start.sh: files.md initial scan trigger
-# ============================================================================
-
-test_session_start_scan_creates_files_md() {
-    session_start_setup
-
-    export CS_TEST_SYNC=1
-    echo '{"session_id":"t","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
-        | bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>&1
-    unset CS_TEST_SYNC
-
-    if [ ! -f "$CLAUDE_SESSION_META_DIR/files.md" ]; then
-        echo "  FAIL: session-start should create files.md on startup"
-        session_start_teardown
-        return 1
-    fi
-    if ! grep -q "^## README.md" "$CLAUDE_SESSION_META_DIR/files.md"; then
-        echo "  FAIL: files.md should index README.md"
-        session_start_teardown
-        return 1
-    fi
-
-    session_start_teardown
-}
-
-test_session_start_scan_preserves_existing_files_md() {
-    session_start_setup
-
-    cat > "$CLAUDE_SESSION_META_DIR/files.md" << 'EOF'
-# Files
-
-## sentinel-path
-Hand-written description preserved.
-~999 tokens -- updated 2026-04-24
-
-EOF
-
-    export CS_TEST_SYNC=1
-    echo '{"session_id":"t","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
-        | bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>&1
-    unset CS_TEST_SYNC
-
-    if ! grep -q "Hand-written description preserved" "$CLAUDE_SESSION_META_DIR/files.md"; then
-        echo "  FAIL: session-start should not overwrite existing files.md"
-        session_start_teardown
-        return 1
-    fi
-
-    session_start_teardown
-}
-
-test_session_start_scan_skips_on_clear() {
-    session_start_setup
-
-    export CS_TEST_SYNC=1
-    echo '{"session_id":"t","source":"clear","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
-        | bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>&1
-    unset CS_TEST_SYNC
-
-    if [ -f "$CLAUDE_SESSION_META_DIR/files.md" ]; then
-        echo "  FAIL: session-start should not scan on source=clear"
-        session_start_teardown
-        return 1
-    fi
-
-    session_start_teardown
-}
-
-# ============================================================================
 # session-end.sh: index.md generation
 # ============================================================================
 
@@ -991,9 +922,6 @@ run_test test_session_start_limits_sibling_count
 run_test test_session_start_updates_last_resumed
 run_test test_session_start_last_resumed_not_set_on_startup
 run_test test_session_start_skips_siblings_on_startup
-run_test test_session_start_scan_creates_files_md
-run_test test_session_start_scan_preserves_existing_files_md
-run_test test_session_start_scan_skips_on_clear
 
 # Session end: index.md generation
 run_test test_session_end_generates_index
@@ -1128,101 +1056,6 @@ test_retired_hooks_strip_preserves_coexisting_hook() {
 
 run_test test_retired_hooks_strip_settings_json
 run_test test_retired_hooks_strip_preserves_coexisting_hook
-
-# ============================================================================
-# install.sh: files-context.sh registration under PreToolUse:Read
-# (spec tests — embed the exact jq block install.sh must use)
-# ============================================================================
-
-test_install_registers_files_context_on_read() {
-    local settings='{}'
-    local path="$HOME/.claude/hooks/files-context.sh"
-    local tilde="~/.claude/hooks/files-context.sh"
-    local result
-    result=$(echo "$settings" | jq --arg path "$path" --arg tilde "$tilde" '
-        .hooks.PreToolUse = ((.hooks.PreToolUse // []) | map(
-            select((.matcher == "Read" and (.hooks | any(.command == $path or .command == $tilde))) | not)
-        )) + [{
-            "matcher": "Read",
-            "hooks": [{
-                "type": "command",
-                "command": $tilde,
-                "timeout": 10
-            }]
-        }]
-    ')
-    local matcher
-    matcher=$(echo "$result" | jq -r '.hooks.PreToolUse[-1].matcher')
-    if [ "$matcher" != "Read" ]; then
-        echo "  FAIL: expected matcher 'Read', got '$matcher'"
-        echo "  $result"
-        return 1
-    fi
-    local cmd
-    cmd=$(echo "$result" | jq -r '.hooks.PreToolUse[-1].hooks[0].command')
-    if [ "$cmd" != "$tilde" ]; then
-        echo "  FAIL: expected command '$tilde', got '$cmd'"
-        return 1
-    fi
-}
-
-test_install_dedups_files_context_on_reinstall() {
-    local path="$HOME/.claude/hooks/files-context.sh"
-    local tilde="~/.claude/hooks/files-context.sh"
-    local settings='{"hooks":{"PreToolUse":[{"matcher":"Read","hooks":[{"type":"command","command":"~/.claude/hooks/files-context.sh","timeout":10}]}]}}'
-    local result
-    result=$(echo "$settings" | jq --arg path "$path" --arg tilde "$tilde" '
-        .hooks.PreToolUse = ((.hooks.PreToolUse // []) | map(
-            select((.matcher == "Read" and (.hooks | any(.command == $path or .command == $tilde))) | not)
-        )) + [{
-            "matcher": "Read",
-            "hooks": [{
-                "type": "command",
-                "command": $tilde,
-                "timeout": 10
-            }]
-        }]
-    ')
-    local count
-    count=$(echo "$result" | jq '[.hooks.PreToolUse[] | select(.matcher == "Read")] | length')
-    if [ "$count" != "1" ]; then
-        echo "  FAIL: expected 1 Read matcher block after reinstall, got $count"
-        echo "  $result"
-        return 1
-    fi
-}
-
-test_install_preserves_write_matcher_when_adding_read() {
-    local path="$HOME/.claude/hooks/files-context.sh"
-    local tilde="~/.claude/hooks/files-context.sh"
-    local settings='{"hooks":{"PreToolUse":[{"matcher":"Write","hooks":[{"type":"command","command":"~/.claude/hooks/artifact-tracker.sh","timeout":10}]}]}}'
-    local result
-    result=$(echo "$settings" | jq --arg path "$path" --arg tilde "$tilde" '
-        .hooks.PreToolUse = ((.hooks.PreToolUse // []) | map(
-            select((.matcher == "Read" and (.hooks | any(.command == $path or .command == $tilde))) | not)
-        )) + [{
-            "matcher": "Read",
-            "hooks": [{
-                "type": "command",
-                "command": $tilde,
-                "timeout": 10
-            }]
-        }]
-    ')
-    if ! echo "$result" | jq -e '.hooks.PreToolUse[] | select(.matcher == "Write")' >/dev/null 2>&1; then
-        echo "  FAIL: Write matcher block was removed"
-        echo "  $result"
-        return 1
-    fi
-    if ! echo "$result" | jq -e '.hooks.PreToolUse[] | select(.matcher == "Read")' >/dev/null 2>&1; then
-        echo "  FAIL: Read matcher block was not added"
-        return 1
-    fi
-}
-
-run_test test_install_registers_files_context_on_read
-run_test test_install_dedups_files_context_on_reinstall
-run_test test_install_preserves_write_matcher_when_adding_read
 
 # ============================================================================
 # install.sh: cs-hook merge must preserve co-shipped non-cs entries inside

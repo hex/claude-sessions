@@ -17,18 +17,15 @@ CS_DISCOVERIES_DEFAULT_MAX=60000
 # When retiring a hook in a release, add its filename here.
 RETIRED_HOOKS=(
     discoveries-archiver.sh   # retired in v2026.4.7 (archive flow replaced by size-budget compaction)
-    aboutme-prereader.sh      # retired: source-file ABOUTME-header nudge experiment, superseded by files.md pre-read hook
+    aboutme-prereader.sh      # retired: source-file ABOUTME-header nudge experiment
     gotcha-prewriter.sh       # retired: brief pre-write gotcha-surfacing experiment; approach was rethought
     aboutme-validator.sh      # retired: never-shipped PostToolUse-on-Write experiment from a feature branch that registered the hook in settings.json without the file ever landing in source
     command-tracker.sh        # retired: CLI command capture; @-included payload did not influence model behaviour at a rate justifying its context cost
 )
 
 # Hook scripts in HOOKS_DIR that are NOT registered in settings.json. They are
-# utilities invoked by other hooks (e.g., files-scan.sh is called by
-# session-start.sh and changes-tracker.sh, never directly by Claude Code).
-UTILITY_HOOKS=(
-    files-scan.sh
-)
+# utilities invoked by other hooks rather than directly by Claude Code.
+UTILITY_HOOKS=()
 
 # Encode an absolute filesystem path the way Claude Code does for project
 # directory names under ~/.claude/projects/ (each `/` and `.` becomes `-`).
@@ -3345,7 +3342,7 @@ run_uninstall() {
     fi
 
     # Remove hooks
-    for hook in session-start.sh artifact-tracker.sh changes-tracker.sh discovery-commits.sh discoveries-reminder.sh prose-lint.sh session-end.sh subagent-context.sh tool-failure-logger.sh session-auto-approve.sh bash-logger.sh files-scan.sh files-context.sh; do
+    for hook in session-start.sh artifact-tracker.sh changes-tracker.sh discovery-commits.sh discoveries-reminder.sh prose-lint.sh session-end.sh subagent-context.sh tool-failure-logger.sh session-auto-approve.sh bash-logger.sh; do
         if [ -f "$hooks_dir/$hook" ]; then
             rm "$hooks_dir/$hook"
             info "Removed $hooks_dir/$hook"
@@ -3402,7 +3399,6 @@ run_uninstall() {
         local tool_failure_logger_path="$hooks_dir/tool-failure-logger.sh"
         local session_auto_approve_path="$hooks_dir/session-auto-approve.sh"
         local bash_logger_path="$hooks_dir/bash-logger.sh"
-        local files_context_path="$hooks_dir/files-context.sh"
 
         local settings
         settings=$(cat "$settings_file")
@@ -3476,15 +3472,6 @@ run_uninstall() {
         settings=$(echo "$settings" | jq --arg path "$session_auto_approve_path" '
             if .hooks.PermissionRequest then
                 .hooks.PermissionRequest = [.hooks.PermissionRequest[] | select(.hooks | all(.command != $path))]
-            else . end
-        ')
-
-        # Remove our PreToolUse Read files-context hook
-        settings=$(echo "$settings" | jq --arg path "$files_context_path" '
-            if .hooks.PreToolUse then
-                .hooks.PreToolUse = [.hooks.PreToolUse[] | select(
-                    (.matcher == "Read" and (.hooks | any(.command == $path))) | not
-                )]
             else . end
         ')
 
