@@ -64,7 +64,7 @@ TOKENS=$(printf '%s' "$PROMPT" \
 
 # Build/vendor/meta dirs that must never be injected. The \.cs/ entry is load-bearing:
 # without it /scope would surface the session's own metadata (discoveries.md, memory, ...).
-EXCLUDE_RE='(^|/)(node_modules|target/release/deps|dist|build|\.next|coverage|\.cs)/|(^|/)\.git/'
+EXCLUDE_RE='(^|/)(node_modules|target|dist|build|\.next|coverage|\.cs)/|(^|/)\.git/'
 
 RELEVANT_FILES=""
 if [ -n "$TOKENS" ]; then
@@ -76,7 +76,7 @@ fi
 
 # --- Build the scope block ---
 
-TOMBSTONE='_scope: no matching tracked files; grounding from prompt only_'
+TOMBSTONE='Scope: no tracked files matched (grounding from prompt only).'
 
 if [ -n "$RELEVANT_FILES" ]; then
     BLOCK="## Scope (auto-grounded)

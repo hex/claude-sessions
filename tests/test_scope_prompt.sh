@@ -169,6 +169,8 @@ test_scan_excludes_build_and_meta_dirs() {
         "build/auth.o" \
         "node_modules/auth/index.js" \
         "target/release/deps/auth-1a2b.d" \
+        "target/release/auth-cli" \
+        "target/debug/auth.o" \
         "coverage/auth.html" \
         ".next/auth.js" \
         ".cs/auth-notes.md"
@@ -176,8 +178,10 @@ test_scan_excludes_build_and_meta_dirs() {
     out=$(run_hook "fix the auth handler, then clean up dist and the .cs auth notes")
     ac=$(additional_context "$out")
     printf '%s' "$ac" | grep -q "src/auth.ts" || { echo "  FAIL: should surface the real file src/auth.ts"; return 1; }
+    # target/ must be excluded WHOLESALE, not just target/release/deps/ (finding-02).
     for bad in "dist/auth.js" "build/auth.o" "node_modules/auth/index.js" \
-               "target/release/deps/auth-1a2b.d" "coverage/auth.html" ".next/auth.js" ".cs/auth-notes.md"; do
+               "target/release/deps/auth-1a2b.d" "target/release/auth-cli" "target/debug/auth.o" \
+               "coverage/auth.html" ".next/auth.js" ".cs/auth-notes.md"; do
         if printf '%s' "$ac" | grep -q "$bad"; then
             echo "  FAIL: excluded path leaked into scope block: $bad"; return 1
         fi
@@ -301,7 +305,7 @@ test_empty_tree_tombstone_marker() {
     out=$(run_hook "implement a retry wrapper around the fetch call in src/api.ts")
     ac=$(additional_context "$out")
     printf '%s' "$ac" | grep -q "Scope (auto-grounded)" || { echo "  FAIL: tombstone block should still carry the header"; return 1; }
-    printf '%s' "$ac" | grep -q "no matching tracked files" || { echo "  FAIL: expected the empty-tree tombstone marker"; return 1; }
+    printf '%s' "$ac" | grep -qF "Scope: no tracked files matched" || { echo "  FAIL: expected the pinned empty-tree tombstone marker"; return 1; }
 }
 
 test_injection_prompt_is_data_not_code() {
