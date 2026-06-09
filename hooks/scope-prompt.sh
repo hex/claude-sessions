@@ -42,11 +42,13 @@ fi
 # but it's kept as belt-and-suspenders against a bare word matching a same-named directory.
 STOP_RE='^(the|this|that|with|from|into|when|then|than|will|just|some|like|need|want|have|been|and|but|for|not|all|any|its|use|via|new|old|fix|add|set|get|to|of|in|on|by|is|as|it|or|if|so|do)$'
 
-# Tokens: word-ish fragments of the prompt. Keep tokens >= 2 chars that contain a letter (the
-# letter rule defuses the lone-'.'/'/' scan bomb — punctuation has no letter) and are not
-# function words.
+# Tokens: word-ish fragments of the prompt. Strip leading/trailing . / _ - so a sentence-final
+# period ("...the api.") doesn't fake an explicit-path token and silently kill recall — only an
+# INTERIOR . or / marks a path. Keep tokens >= 2 chars that contain a letter (the letter rule
+# defuses the lone-'.'/'/' scan bomb — punctuation has no letter) and are not function words.
 TOKENS=$(printf '%s' "$PROMPT" \
     | tr -cs '[:alnum:]_/.-' '\n' \
+    | sed -E 's#^[./_-]+##; s#[./_-]+$##' \
     | rg -v '^.{0,1}$' 2>/dev/null \
     | rg '[a-zA-Z]' 2>/dev/null \
     | rg -vi "$STOP_RE" 2>/dev/null \
@@ -75,11 +77,13 @@ if [ -n "$PATH_TOKENS" ] || [ -n "$WORD_PARTS" ]; then
         | rg -v "$EXCLUDE_RE" 2>/dev/null \
         | awk -v ptoks="$(printf '%s' "$PATH_TOKENS" | tr '\n' ' ')" \
               -v wtoks="$(printf '%s' "$WORD_PARTS" | tr '\n' ' ')" '
-            function splitcamel(s,   out, i, c, p) {
+            function splitcamel(s,   out, i, c, p, n) {
                 out = ""; p = "";
                 for (i = 1; i <= length(s); i++) {
                     c = substr(s, i, 1);
-                    if (p ~ /[a-z0-9]/ && c ~ /[A-Z]/) out = out " ";
+                    n = (i < length(s)) ? substr(s, i + 1, 1) : "";
+                    if (p ~ /[a-z0-9]/ && c ~ /[A-Z]/) out = out " ";                   # word -> Word
+                    else if (p ~ /[A-Z]/ && c ~ /[A-Z]/ && n ~ /[a-z]/) out = out " ";  # ACRONYM -> Word (APIClient -> API Client)
                     out = out c; p = c;
                 }
                 return out;

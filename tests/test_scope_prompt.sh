@@ -289,6 +289,27 @@ test_scan_camelcase_component_match() {
     return 0
 }
 
+test_scan_trailing_punctuation_recall() {
+    # finding-08: a sentence-final period must not turn a bare word into a dead path-like token.
+    # "refactor the api." -> token "api." must still component-match api/, not substring-miss.
+    seed_repo "api/handler.ts" "db/store.ts"
+    local out ac
+    out=$(run_hook "refactor the api. and the db.")
+    ac=$(additional_context "$out")
+    printf '%s' "$ac" | grep -q "api/handler.ts" || { echo "  FAIL: trailing '.' killed recall for 'api.'"; return 1; }
+    printf '%s' "$ac" | grep -q "db/store.ts" || { echo "  FAIL: trailing '.' killed recall for 'db.'"; return 1; }
+}
+
+test_scan_acronym_component_match() {
+    # finding-07: acronym prefixes must split (APIClient -> API + Client) so 'api'/'html' ground.
+    seed_repo "src/APIClient.ts" "src/HTMLParser.ts" "src/plain.ts"
+    local out ac
+    out=$(run_hook "refactor the api and html layers")
+    ac=$(additional_context "$out")
+    printf '%s' "$ac" | grep -q "src/APIClient.ts" || { echo "  FAIL: 'api' should match APIClient.ts (acronym split)"; return 1; }
+    printf '%s' "$ac" | grep -q "src/HTMLParser.ts" || { echo "  FAIL: 'html' should match HTMLParser.ts (acronym split)"; return 1; }
+}
+
 # ============================================================================
 # Token cap
 # ============================================================================
@@ -390,6 +411,8 @@ run_test test_scan_surfaces_short_dir_tokens
 run_test test_scan_no_substring_overmatch
 run_test test_scan_component_matches_unexcluded_dir
 run_test test_scan_camelcase_component_match
+run_test test_scan_trailing_punctuation_recall
+run_test test_scan_acronym_component_match
 run_test test_token_cap_under_8000_bytes
 run_test test_noop_outside_cs_session
 run_test test_opt_out_via_disable_env
