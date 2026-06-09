@@ -13,7 +13,6 @@ set -uo pipefail
 [ "${CS_SCOPE_DISABLE:-}" = "1" ] && exit 0
 
 SESSION_DIR="${CLAUDE_SESSION_DIR:-}"
-META_DIR="${CLAUDE_SESSION_META_DIR:-$SESSION_DIR/.cs}"
 [ -n "$SESSION_DIR" ] && [ -d "$SESSION_DIR" ] || exit 0
 
 # Read the prompt purely as DATA: jq decodes it, and it is only ever fed to other
@@ -32,36 +31,22 @@ if ! printf '%s' "$PROMPT" | rg -qi "$VERB_RE" 2>/dev/null \
     exit 0   # negative classification: silent pass-through
 fi
 
-# --- Cache (30-minute window) ---
-
-SCOPE_DIR="$META_DIR/scope"
-mkdir -p "$SCOPE_DIR" 2>/dev/null || true
-
-# Prune stale entries on every invocation. This also serves as the freshness filter:
-# any cache file that survives the prune was modified within the last 30 minutes.
-find "$SCOPE_DIR" -name '*.md' -mmin +30 -delete 2>/dev/null || true
-
-HASH=$(printf '%s' "$PROMPT" | shasum -a 256 2>/dev/null | cut -c1-16)
-CACHE_FILE="$SCOPE_DIR/$HASH.md"
-
-# Cache hit: reuse a fresh (post-prune) cache file without rescanning.
-if [ -n "$HASH" ] && [ -f "$CACHE_FILE" ]; then
-    jq -n --arg c "$(cat "$CACHE_FILE")" \
-        '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: $c}}'
-    exit 0
-fi
+# No cache: a grounding hook must reflect the CURRENT tree. A prompt-only cache key served
+# stale ground after commits/edits, and a repo-state-aware key would almost never hit in an
+# active session — so the scan (bounded, read-only) just runs every time.
 
 # --- Grounded scan (all bounded; all read-only git) ---
 
-# Tokens: word-ish fragments of the prompt. Keep only tokens >= 4 chars that contain a letter
-# and are not common filler words. The length+letter filter defuses the lone-'.' scan bomb (a
-# bare '.' as an rg fixed-string would match every path with a period); the stoplist stops
-# bare dictionary words from substring-matching tangential paths.
+# Tokens: word-ish fragments of the prompt. Keep tokens >= 2 chars that contain a letter and
+# are not common function words. The min-length-2 + must-contain-a-letter rule still defuses
+# the lone-'.'/'/' scan bomb (punctuation has no letter) while keeping short dir/identifier
+# tokens like api, db, js, ui; the stoplist drops bare function words that would otherwise
+# substring-match tangential paths.
 TOKENS=$(printf '%s' "$PROMPT" \
     | tr -cs '[:alnum:]_/.-' '\n' \
-    | rg -v '^.{0,3}$' 2>/dev/null \
+    | rg -v '^.{0,1}$' 2>/dev/null \
     | rg '[a-zA-Z]' 2>/dev/null \
-    | rg -vi '^(the|this|that|with|from|into|when|then|than|will|just|some|like|need|want|have|been)$' 2>/dev/null \
+    | rg -vi '^(the|this|that|with|from|into|when|then|than|will|just|some|like|need|want|have|been|and|but|for|not|all|any|its|use|via|new|old|fix|add|set|get|to|of|in|on|by|is|as|it|or|if|so|do)$' 2>/dev/null \
     | sort -u)
 
 # Build/vendor/meta dirs that must never be injected. The \.cs/ entry is load-bearing:
@@ -113,9 +98,6 @@ fi
 if [ "$(printf '%s' "$BLOCK" | wc -c)" -gt 8000 ]; then
     BLOCK=$(printf '%s' "$BLOCK" | head -c 8000)
 fi
-
-# Cache the block so re-prompts within 30 minutes reuse it without rescanning.
-[ -n "$HASH" ] && printf '%s' "$BLOCK" > "$CACHE_FILE" 2>/dev/null || true
 
 jq -n --arg c "$BLOCK" \
     '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: $c}}'

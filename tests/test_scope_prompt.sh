@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: Tests for the scope-prompt UserPromptSubmit hook
-# ABOUTME: Validates classifier, grounded scan, exclusions, token cap, cache, and defensive no-ops
+# ABOUTME: Validates classifier, grounded scan, exclusions, token cap, and defensive no-ops
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/test_lib.sh"
@@ -46,7 +46,7 @@ setup() {
     export CLAUDE_SESSION_NAME="test-scope"
     export CLAUDE_SESSION_DIR="$TEST_TMPDIR/session"
     export CLAUDE_SESSION_META_DIR="$CLAUDE_SESSION_DIR/.cs"
-    mkdir -p "$CLAUDE_SESSION_META_DIR/scope"
+    mkdir -p "$CLAUDE_SESSION_DIR"
     git -C "$CLAUDE_SESSION_DIR" init -q
     git -C "$CLAUDE_SESSION_DIR" config user.email "test@cs.local"
     git -C "$CLAUDE_SESSION_DIR" config user.name "cs test"
@@ -73,11 +73,6 @@ additional_context() {
     printf '%s' "$1" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null
 }
 
-# Portable mtime (BSD stat, then GNU stat).
-file_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null; }
-
-# touch timestamp 31 minutes in the past (BSD date, then GNU date).
-backdate_31min() { date -v-31M +%Y%m%d%H%M 2>/dev/null || date -d '31 minutes ago' +%Y%m%d%H%M; }
 
 # Create + track files (paths relative to the session repo) and commit them.
 seed_repo() {
@@ -243,6 +238,18 @@ test_scan_handles_spaces_in_filenames() {
     printf '%s' "$ac" | grep -q "SPACEFILE_COMMIT" || { echo "  FAIL: recent commits must resolve for spaced filenames (unquoted \$RELEVANT_FILES?)"; return 1; }
 }
 
+test_scan_surfaces_short_dir_tokens() {
+    # finding-05: short dir/identifier tokens (api, db) must NOT be dropped by the length floor.
+    # Paths are named so they can ONLY be matched via the 'api'/'db' tokens — no other word in
+    # the prompt is a substring of them — so this fails red if the floor over-drops.
+    seed_repo "api/core.ts" "db/store.ts" "docs/guide.md"
+    local out ac
+    out=$(run_hook "refactor the api and the db")
+    ac=$(additional_context "$out")
+    printf '%s' "$ac" | grep -q "api/core.ts" || { echo "  FAIL: 'api' token should surface api/core.ts (length floor over-drops short tokens)"; return 1; }
+    printf '%s' "$ac" | grep -q "db/store.ts" || { echo "  FAIL: 'db' token should surface db/store.ts (length floor over-drops short tokens)"; return 1; }
+}
+
 # ============================================================================
 # Token cap
 # ============================================================================
@@ -263,50 +270,6 @@ test_token_cap_under_8000_bytes() {
     bytes=$(printf '%s' "$ac" | wc -c | tr -d ' ')
     [ "$bytes" -gt 0 ] || { echo "  FAIL: expected a non-empty scope block"; return 1; }
     [ "$bytes" -le 8000 ] || { echo "  FAIL: additionalContext is $bytes bytes (> 8000 cap)"; return 1; }
-}
-
-# ============================================================================
-# Cache (30-minute window)
-# ============================================================================
-
-test_cache_hit_reuses_without_rescan() {
-    seed_repo "src/api.ts"
-    local p="implement a retry wrapper around the fetch call in src/api.ts so failed requests back off exponentially"
-    run_hook "$p" >/dev/null 2>&1
-    local cache_file
-    cache_file=$(ls "$CLAUDE_SESSION_META_DIR/scope/"*.md 2>/dev/null | head -1)
-    [ -n "$cache_file" ] || { echo "  FAIL: expected a cache file after the first call"; return 1; }
-    local m1 m2
-    m1=$(file_mtime "$cache_file")
-    sleep 1
-    run_hook "$p" >/dev/null 2>&1
-    m2=$(file_mtime "$cache_file")
-    [ "$m1" = "$m2" ] || { echo "  FAIL: a cache hit must not rewrite the cache file (m1=$m1 m2=$m2)"; return 1; }
-}
-
-test_cache_miss_after_30min_rescans() {
-    seed_repo "src/api.ts"
-    local p="implement a retry wrapper around the fetch call in src/api.ts so failed requests back off exponentially"
-    run_hook "$p" >/dev/null 2>&1
-    local cache_file
-    cache_file=$(ls "$CLAUDE_SESSION_META_DIR/scope/"*.md 2>/dev/null | head -1)
-    [ -n "$cache_file" ] || { echo "  FAIL: expected a cache file after the first call"; return 1; }
-    touch -t "$(backdate_31min)" "$cache_file"
-    local m_old
-    m_old=$(file_mtime "$cache_file")
-    run_hook "$p" >/dev/null 2>&1
-    local m_new
-    m_new=$(file_mtime "$cache_file")
-    [ "$m_new" != "$m_old" ] || { echo "  FAIL: stale (>30min) cache should be rescanned/rewritten"; return 1; }
-}
-
-test_cache_prunes_stale_entries() {
-    local stale="$CLAUDE_SESSION_META_DIR/scope/deadbeefdeadbeef.md"
-    printf 'old scope block\n' > "$stale"
-    touch -t "$(backdate_31min)" "$stale"
-    seed_repo "src/api.ts"
-    run_hook "implement a retry wrapper around the fetch call in src/api.ts" >/dev/null 2>&1
-    [ ! -f "$stale" ] || { echo "  FAIL: stale (>30min) cache entry should be pruned"; return 1; }
 }
 
 # ============================================================================
@@ -382,10 +345,8 @@ run_test test_scan_excludes_build_and_meta_dirs
 run_test test_scan_over_match_lone_dot_defused
 run_test test_scan_bounded_on_common_words
 run_test test_scan_handles_spaces_in_filenames
+run_test test_scan_surfaces_short_dir_tokens
 run_test test_token_cap_under_8000_bytes
-run_test test_cache_hit_reuses_without_rescan
-run_test test_cache_miss_after_30min_rescans
-run_test test_cache_prunes_stale_entries
 run_test test_noop_outside_cs_session
 run_test test_opt_out_via_disable_env
 run_test test_graceful_malformed_input
