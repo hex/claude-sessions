@@ -43,6 +43,14 @@ CORPUS
 
 setup() {
     TEST_TMPDIR="$(mktemp -d)"
+    # Clean slate: drop ANY ambient cs/Claude env FIRST, so running these tests from inside a
+    # live cs session (which exports CLAUDE_SESSION_*/CS_SCOPE_DISABLE/etc.) can't leak a value
+    # the hook reads. We then set exactly the vars the hook keys off. This isolates the suite
+    # from the cs-session-env-pollution anti-pattern (see compact discoveries).
+    local _v
+    while IFS='=' read -r _v _; do
+        case "$_v" in CS_*|CLAUDE_*) unset "$_v" 2>/dev/null || true ;; esac
+    done < <(env)
     export CLAUDE_SESSION_NAME="test-scope"
     export CLAUDE_SESSION_DIR="$TEST_TMPDIR/session"
     export CLAUDE_SESSION_META_DIR="$CLAUDE_SESSION_DIR/.cs"
@@ -50,7 +58,6 @@ setup() {
     git -C "$CLAUDE_SESSION_DIR" init -q
     git -C "$CLAUDE_SESSION_DIR" config user.email "test@cs.local"
     git -C "$CLAUDE_SESSION_DIR" config user.name "cs test"
-    unset CS_SCOPE_DISABLE 2>/dev/null || true
 }
 
 teardown() {

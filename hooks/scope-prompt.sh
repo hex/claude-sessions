@@ -69,6 +69,14 @@ WORD_PARTS=$(printf '%s' "$TOKENS" | rg -v '[/.]' 2>/dev/null \
 # without it /scope would surface the session's own metadata (discoveries.md, memory, ...).
 EXCLUDE_RE='(^|/)(node_modules|target|dist|build|\.next|coverage|\.cs)/|(^|/)\.git/'
 
+# Known, deliberately-accepted limitations of this matcher (not bugs):
+#  - Multi-part bare tokens OR-match each part, so "getUserData" (parts user, data) surfaces
+#    *Data.ts neighbours alongside userData.ts. Accepted recall/precision trade — stoplisting
+#    "data" would hurt prompts that legitimately want data-handling code. Revisit if noisy.
+#  - Non-English tokens are mangled: `tr -cs '[:alnum:]'` splits at non-ASCII letters in the C
+#    locale, so "münchen" won't match "café/münchen.ts". Known gap; non-English was never a goal.
+#  - The awk pass is ~255ms on a 10k-file tree (vs ~137ms for the old rg -iF) — bounded and well
+#    under the hook's 3s timeout.
 RELEVANT_FILES=""
 if [ -n "$PATH_TOKENS" ] || [ -n "$WORD_PARTS" ]; then
     # splitcamel() is a hand-rolled char loop ON PURPOSE: BSD awk (macOS) has no gensub /
