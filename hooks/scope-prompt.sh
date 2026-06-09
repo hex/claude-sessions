@@ -37,27 +37,64 @@ fi
 
 # --- Grounded scan (all bounded; all read-only git) ---
 
-# Tokens: word-ish fragments of the prompt. Keep tokens >= 2 chars that contain a letter and
-# are not common function words. The min-length-2 + must-contain-a-letter rule still defuses
-# the lone-'.'/'/' scan bomb (punctuation has no letter) while keeping short dir/identifier
-# tokens like api, db, js, ui; the stoplist drops bare function words that would otherwise
-# substring-match tangential paths.
+# Stoplist of common function words (anchored, case-insensitive). Applied to whole tokens and
+# again to camelCase/snake sub-parts. Component-equality (below) makes most of this redundant,
+# but it's kept as belt-and-suspenders against a bare word matching a same-named directory.
+STOP_RE='^(the|this|that|with|from|into|when|then|than|will|just|some|like|need|want|have|been|and|but|for|not|all|any|its|use|via|new|old|fix|add|set|get|to|of|in|on|by|is|as|it|or|if|so|do)$'
+
+# Tokens: word-ish fragments of the prompt. Keep tokens >= 2 chars that contain a letter (the
+# letter rule defuses the lone-'.'/'/' scan bomb — punctuation has no letter) and are not
+# function words.
 TOKENS=$(printf '%s' "$PROMPT" \
     | tr -cs '[:alnum:]_/.-' '\n' \
     | rg -v '^.{0,1}$' 2>/dev/null \
     | rg '[a-zA-Z]' 2>/dev/null \
-    | rg -vi '^(the|this|that|with|from|into|when|then|than|will|just|some|like|need|want|have|been|and|but|for|not|all|any|its|use|via|new|old|fix|add|set|get|to|of|in|on|by|is|as|it|or|if|so|do)$' 2>/dev/null \
+    | rg -vi "$STOP_RE" 2>/dev/null \
     | sort -u)
+
+# Hybrid matching. Path-like tokens (containing / or .) are explicit paths/filenames and match
+# as ordered SUBSTRINGS — this keeps "src/api.ts" from also matching "api/src/x.ts". Bare words
+# match by path-COMPONENT equality, so "api" grounds api/handler.ts and apiHandler.ts but "me"
+# does NOT ground README.md. Bare words are first split on camelCase + _ - into parts, refiltered.
+PATH_TOKENS=$(printf '%s' "$TOKENS" | rg '[/.]' 2>/dev/null || true)
+WORD_PARTS=$(printf '%s' "$TOKENS" | rg -v '[/.]' 2>/dev/null \
+    | sed -E 's/([a-z0-9])([A-Z])/\1 \2/g' \
+    | tr '_-' '  ' | tr '[:upper:]' '[:lower:]' | tr ' ' '\n' \
+    | rg -v '^.{0,1}$' 2>/dev/null | rg '[a-z]' 2>/dev/null \
+    | rg -vi "$STOP_RE" 2>/dev/null | sort -u || true)
 
 # Build/vendor/meta dirs that must never be injected. The \.cs/ entry is load-bearing:
 # without it /scope would surface the session's own metadata (discoveries.md, memory, ...).
 EXCLUDE_RE='(^|/)(node_modules|target|dist|build|\.next|coverage|\.cs)/|(^|/)\.git/'
 
 RELEVANT_FILES=""
-if [ -n "$TOKENS" ]; then
+if [ -n "$PATH_TOKENS" ] || [ -n "$WORD_PARTS" ]; then
+    # splitcamel() is a hand-rolled char loop ON PURPOSE: BSD awk (macOS) has no gensub /
+    # backreferences, so the GNU `gsub(/.../, "\\1 \\2")` trick is non-portable. Do not simplify.
     RELEVANT_FILES=$(git -C "$SESSION_DIR" ls-files 2>/dev/null \
-        | rg -iF -f <(printf '%s' "$TOKENS") 2>/dev/null \
         | rg -v "$EXCLUDE_RE" 2>/dev/null \
+        | awk -v ptoks="$(printf '%s' "$PATH_TOKENS" | tr '\n' ' ')" \
+              -v wtoks="$(printf '%s' "$WORD_PARTS" | tr '\n' ' ')" '
+            function splitcamel(s,   out, i, c, p) {
+                out = ""; p = "";
+                for (i = 1; i <= length(s); i++) {
+                    c = substr(s, i, 1);
+                    if (p ~ /[a-z0-9]/ && c ~ /[A-Z]/) out = out " ";
+                    out = out c; p = c;
+                }
+                return out;
+            }
+            BEGIN {
+                np = split(ptoks, pa, " "); for (i = 1; i <= np; i++) PT[i] = tolower(pa[i]);
+                nw = split(wtoks, wa, " "); for (i = 1; i <= nw; i++) WT[wa[i]] = 1;
+            }
+            {
+                lp = tolower($0);
+                for (i = 1; i <= np; i++) if (PT[i] != "" && index(lp, PT[i]) > 0) { print; next }
+                comp = splitcamel($0); gsub(/[\/._-]/, " ", comp);
+                m = split(tolower(comp), parts, " ");
+                for (i = 1; i <= m; i++) if (parts[i] in WT) { print; next }
+            }' \
         | head -30)
 fi
 

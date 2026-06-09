@@ -250,22 +250,63 @@ test_scan_surfaces_short_dir_tokens() {
     printf '%s' "$ac" | grep -q "db/store.ts" || { echo "  FAIL: 'db' token should surface db/store.ts (length floor over-drops short tokens)"; return 1; }
 }
 
+test_scan_no_substring_overmatch() {
+    # finding-06: bare words must match path COMPONENTS, not substrings. A zero-intent prompt
+    # firing on "fix" must not drag in files via incidental substrings (me -> README/runtime).
+    seed_repo "README.md" "docs/readme.md" "lib/runtime.ts" "src/components/Menu.ts" \
+              "src/components/theme.ts" "src/names.ts" "src/payment.ts" "src/today.ts"
+    local out ac bad
+    out=$(run_hook "fix this . thing for me please, it has been bugging me all day")
+    ac=$(additional_context "$out")
+    printf '%s' "$ac" | grep -q "Scope (auto-grounded)" || { echo "  FAIL: prompt fires on 'fix'; expected a block (RED guard)"; return 1; }
+    for bad in README.md docs/readme.md lib/runtime.ts src/components/Menu.ts \
+               src/components/theme.ts src/names.ts src/payment.ts src/today.ts; do
+        if printf '%s' "$ac" | grep -qF "$bad"; then
+            echo "  FAIL: substring over-match surfaced $bad (short word matched as a substring)"; return 1
+        fi
+    done
+}
+
+test_scan_component_matches_unexcluded_dir() {
+    # team-lead edge: a bare token equal to a real dir component NOT under an excluded dir must
+    # surface via the matcher — proving the exclusion isn't masking a matcher gap (a deps/ dir
+    # outside target/ is legitimate ground).
+    seed_repo "myapp/deps/loader.go" "src/other.ts"
+    local out ac
+    out=$(run_hook "fix the deps issue")
+    ac=$(additional_context "$out")
+    printf '%s' "$ac" | grep -q "myapp/deps/loader.go" || { echo "  FAIL: 'deps' should component-match myapp/deps/loader.go"; return 1; }
+}
+
+test_scan_camelcase_component_match() {
+    # team-lead camelCase requirement: bare 'api' must surface apiHandler.ts via a camelCase split.
+    seed_repo "src/apiHandler.ts" "src/tokenStore.ts"
+    local out ac
+    out=$(run_hook "refactor the api error handling")
+    ac=$(additional_context "$out")
+    printf '%s' "$ac" | grep -q "src/apiHandler.ts" || { echo "  FAIL: 'api' should match apiHandler.ts via camelCase split"; return 1; }
+    printf '%s' "$ac" | grep -q "src/tokenStore.ts" && { echo "  FAIL: 'api' should NOT match tokenStore.ts"; return 1; }
+    return 0
+}
+
 # ============================================================================
 # Token cap
 # ============================================================================
 
 test_token_cap_under_8000_bytes() {
-    # Force a pre-truncation block well over 8000 bytes via many long matching paths.
+    # Force a pre-truncation block well over 8000 bytes: 35 long paths sharing a real "loader"
+    # component. The long segments are separate nested dirs so each stays under the 255-char
+    # filename limit while the full path is long enough that 30 of them exceed 8000 bytes.
     local seg i
     seg=$(printf 'x%.0s' $(seq 1 200))
-    mkdir -p "$CLAUDE_SESSION_DIR/src/module$seg/loader$seg"
+    mkdir -p "$CLAUDE_SESSION_DIR/src/loader/$seg/$seg"
     for i in $(seq 1 35); do
-        printf 'x\n' > "$CLAUDE_SESSION_DIR/src/module$seg/loader$seg/f$i.ts"
+        printf 'x\n' > "$CLAUDE_SESSION_DIR/src/loader/$seg/$seg/f$i.ts"
     done
     git -C "$CLAUDE_SESSION_DIR" add -A >/dev/null 2>&1
     git -C "$CLAUDE_SESSION_DIR" commit -q -m seed >/dev/null 2>&1
     local out ac bytes
-    out=$(run_hook "refactor the module loader")
+    out=$(run_hook "refactor the loader module")
     ac=$(additional_context "$out")
     bytes=$(printf '%s' "$ac" | wc -c | tr -d ' ')
     [ "$bytes" -gt 0 ] || { echo "  FAIL: expected a non-empty scope block"; return 1; }
@@ -346,6 +387,9 @@ run_test test_scan_over_match_lone_dot_defused
 run_test test_scan_bounded_on_common_words
 run_test test_scan_handles_spaces_in_filenames
 run_test test_scan_surfaces_short_dir_tokens
+run_test test_scan_no_substring_overmatch
+run_test test_scan_component_matches_unexcluded_dir
+run_test test_scan_camelcase_component_match
 run_test test_token_cap_under_8000_bytes
 run_test test_noop_outside_cs_session
 run_test test_opt_out_via_disable_env
