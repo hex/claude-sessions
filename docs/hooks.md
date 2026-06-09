@@ -85,6 +85,19 @@ Runs before every Bash tool call (sync, fast):
 - Truncates long commands at 200 chars
 - Never blocks — uses `set -uo pipefail` without `set -e`
 
+## scope-prompt.sh (UserPromptSubmit)
+
+Runs before each user prompt is sent to Claude. Grounds code-work prompts in the current codebase by injecting a bounded "Scope (auto-grounded)" block as `additionalContext`:
+
+- Classifies the prompt: positive iff a work verb (`implement`, `add`, `fix`, `refactor`, …) OR a source-file extension is mentioned. Negative classifications pass through silently with no output.
+- On a positive classification, tokenizes the prompt and uses a **hybrid matcher**: path-like tokens (`src/api.ts`) get ordered-substring matching against `git ls-files`; bare-word tokens (`api`, `db`) get component-equality with camelCase + `_-` splitting via a hand-rolled `splitcamel()` awk char-loop (portable across BSD and GNU awk). Excludes `node_modules/`, `target/`, `dist/`, `build/`, `.next/`, `coverage/`, `.cs/`, `.git/`.
+- Adds recent commits touching the matched files (`git log --oneline -5`) and a working-tree diff summary.
+- Caps total `additionalContext` at 8000 bytes (rough 2K-token proxy).
+- Emits a pinned tombstone block (`Scope: no tracked files matched`) when the classifier fires but no tracked files match, so the agent knows scope ran but found no ground.
+- Opt-out per-session: `export CS_SCOPE_DISABLE=1`.
+- NO caching by design: a grounding hook must reflect the current tree; a prompt-only cache key would silently serve stale ground after commits/edits.
+- Never blocks the prompt path — every error path exits 0.
+
 ## Hook Configuration
 
 The hooks are configured in `~/.claude/settings.json`:
@@ -117,6 +130,9 @@ The hooks are configured in `~/.claude/settings.json`:
     ],
     "PermissionRequest": [
       { "matcher": "Write|Edit", "hooks": [{ "type": "command", "command": "~/.claude/hooks/session-auto-approve.sh", "timeout": 5 }] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/scope-prompt.sh", "timeout": 3 }] }
     ]
   }
 }

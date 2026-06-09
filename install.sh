@@ -84,6 +84,7 @@ HOOK_SUBAGENT_CONTEXT_URL="${REPO_URL}/hooks/subagent-context.sh"
 HOOK_TOOL_FAILURE_LOGGER_URL="${REPO_URL}/hooks/tool-failure-logger.sh"
 HOOK_SESSION_AUTO_APPROVE_URL="${REPO_URL}/hooks/session-auto-approve.sh"
 HOOK_BASH_LOGGER_URL="${REPO_URL}/hooks/bash-logger.sh"
+HOOK_SCOPE_PROMPT_URL="${REPO_URL}/hooks/scope-prompt.sh"
 
 # Hooks retired in past versions but possibly still installed from older cs versions.
 # install.sh and bin/cs run_uninstall both clean these up. KEEP THIS LIST IN SYNC WITH bin/cs.
@@ -258,6 +259,7 @@ if [ "$INSTALL_METHOD" = "local" ]; then
     cp "$HOOKS_SOURCE/tool-failure-logger.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/session-auto-approve.sh" "$HOOKS_DIR/"
     cp "$HOOKS_SOURCE/bash-logger.sh" "$HOOKS_DIR/"
+    cp "$HOOKS_SOURCE/scope-prompt.sh" "$HOOKS_DIR/"
 else
     # Download from GitHub
     if command -v curl >/dev/null 2>&1; then
@@ -271,6 +273,7 @@ else
         curl -fsSL "$HOOK_TOOL_FAILURE_LOGGER_URL" -o "$HOOKS_DIR/tool-failure-logger.sh" || error "Failed to download tool-failure-logger.sh"
         curl -fsSL "$HOOK_SESSION_AUTO_APPROVE_URL" -o "$HOOKS_DIR/session-auto-approve.sh" || error "Failed to download session-auto-approve.sh"
         curl -fsSL "$HOOK_BASH_LOGGER_URL" -o "$HOOKS_DIR/bash-logger.sh" || error "Failed to download bash-logger.sh"
+        curl -fsSL "$HOOK_SCOPE_PROMPT_URL" -o "$HOOKS_DIR/scope-prompt.sh" || error "Failed to download scope-prompt.sh"
     elif command -v wget >/dev/null 2>&1; then
         wget -q "$HOOK_SESSION_START_URL" -O "$HOOKS_DIR/session-start.sh" || error "Failed to download session-start.sh"
         wget -q "$HOOK_ARTIFACT_TRACKER_URL" -O "$HOOKS_DIR/artifact-tracker.sh" || error "Failed to download artifact-tracker.sh"
@@ -282,6 +285,7 @@ else
         wget -q "$HOOK_TOOL_FAILURE_LOGGER_URL" -O "$HOOKS_DIR/tool-failure-logger.sh" || error "Failed to download tool-failure-logger.sh"
         wget -q "$HOOK_SESSION_AUTO_APPROVE_URL" -O "$HOOKS_DIR/session-auto-approve.sh" || error "Failed to download session-auto-approve.sh"
         wget -q "$HOOK_BASH_LOGGER_URL" -O "$HOOKS_DIR/bash-logger.sh" || error "Failed to download bash-logger.sh"
+        wget -q "$HOOK_SCOPE_PROMPT_URL" -O "$HOOKS_DIR/scope-prompt.sh" || error "Failed to download scope-prompt.sh"
     fi
 fi
 
@@ -392,6 +396,7 @@ else
     TOOL_FAILURE_LOGGER_PATH="$HOME/.claude/hooks/tool-failure-logger.sh"
     SESSION_AUTO_APPROVE_PATH="$HOME/.claude/hooks/session-auto-approve.sh"
     BASH_LOGGER_PATH="$HOME/.claude/hooks/bash-logger.sh"
+    SCOPE_PROMPT_PATH="$HOME/.claude/hooks/scope-prompt.sh"
 
     # Tilde-path variants for dedup (handles entries added with ~ instead of $HOME)
     SESSION_START_TILDE="~/.claude/hooks/session-start.sh"
@@ -404,6 +409,7 @@ else
     TOOL_FAILURE_LOGGER_TILDE="~/.claude/hooks/tool-failure-logger.sh"
     SESSION_AUTO_APPROVE_TILDE="~/.claude/hooks/session-auto-approve.sh"
     BASH_LOGGER_TILDE="~/.claude/hooks/bash-logger.sh"
+    SCOPE_PROMPT_TILDE="~/.claude/hooks/scope-prompt.sh"
 
     # Strip retired hooks from any event in settings.json (event-agnostic since
     # we don't know which event the old version registered them under).
@@ -482,6 +488,9 @@ else
 
     _merge_cs_hook PreToolUse "$BASH_LOGGER_PATH" "$BASH_LOGGER_TILDE" 5 \
         "{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"$BASH_LOGGER_TILDE\",\"timeout\":5}]}"
+
+    _merge_cs_hook UserPromptSubmit "$SCOPE_PROMPT_PATH" "$SCOPE_PROMPT_TILDE" 3 \
+        "{\"hooks\":[{\"type\":\"command\",\"command\":\"$SCOPE_PROMPT_TILDE\",\"timeout\":3}]}"
 
     echo "$SETTINGS" > "$CLAUDE_SETTINGS"
 fi

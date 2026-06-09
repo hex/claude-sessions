@@ -46,6 +46,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 - **Remote sessions** - Run sessions on remote machines via `et` or `ssh` + `tmux`; `cs` handles connection, stubbing, and session tracking
 - **Cross-session search** - `cs -search <query>` greps across all sessions' discoveries, memory, README, and changes
 - **Prose hygiene enforcement** - `cs -lint <file>` flags AI-slop tells (em-dashes, a curated banned-phrase list) outside code fences; the `prose-lint` Stop hook blocks turn-end when prose written this session (`.cs/summary.md`, `.cs/memory/*.md`) carries them, scoped by `session.lock` mtime so it never re-flags the historical backlog. `/summary` and `/wrap` add an independent structural-quality judge: a subagent that reads the `prose-hygiene` skill (the complete AI-tell taxonomy: phrases, structures, voice rules, and a five-dimension rubric) and applies all of it, catching the slop a regex cannot. Single-word adverbs and lazy extremes are judge-only by design, since they occur in nearly all legitimate prose
+- **Auto-grounded scope** - `/scope` (UserPromptSubmit hook) classifies each user prompt and, on a positive (code-work) classification, injects a bounded `Scope (auto-grounded)` block as `additionalContext`: matching tracked files + recent commits + working-tree diff, all derived from `git ls-files` and a hybrid token matcher (ordered substring for path-like tokens, component-equality with camelCase splitting for bare-word tokens). Excludes `node_modules/`, `target/`, `dist/`, `build/`, `.next/`, `coverage/`, `.cs/`, `.git/`. Capped at 8000 bytes. Opt out per-session via `CS_SCOPE_DISABLE=1`. No caching — a grounding hook must reflect the current tree, so the scan runs on every fire (~50-150ms bounded). Negative classifications pass through silently.
 - **Health checks** - `cs -doctor` reports status of Keychain backend, hook registration, git sync state, shadow-ref freshness, discoveries.md size, auto-memory writability, Claude Code settings audit (hooks/MCPs/permissions/env vars counts), and cumulative token usage for the current project
 - **Bash command audit trail** - Every Bash command Claude runs is logged to `.cs/logs/session.log` with timestamps
 - **Update notifications** - Checks for updates and notifies when new versions are available
@@ -65,7 +66,7 @@ Or clone and run `./install.sh`.
 
 The installer:
 - Adds `cs`, `cs-secrets`, and `cs-tui` to `~/.local/bin/`
-- Installs ten [hooks](docs/hooks.md) to `~/.claude/hooks/` for session tracking
+- Installs eleven [hooks](docs/hooks.md) to `~/.claude/hooks/` for session tracking (including the `/scope` auto-grounding hook on UserPromptSubmit)
 - Adds `/summary`, `/compact-discoveries`, `/checkpoint`, `/sweep`, and `/wrap` commands, and the `store-secret` and `prose-hygiene` skills to `~/.claude/`
 - Installs shell completions for bash and zsh
 - Configures hook entries in `~/.claude/settings.json`

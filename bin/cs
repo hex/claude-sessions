@@ -3330,7 +3330,7 @@ run_uninstall() {
     fi
 
     # Remove hooks
-    for hook in session-start.sh artifact-tracker.sh discovery-commits.sh discoveries-reminder.sh prose-lint.sh session-end.sh subagent-context.sh tool-failure-logger.sh session-auto-approve.sh bash-logger.sh; do
+    for hook in session-start.sh artifact-tracker.sh discovery-commits.sh discoveries-reminder.sh prose-lint.sh session-end.sh subagent-context.sh tool-failure-logger.sh session-auto-approve.sh bash-logger.sh scope-prompt.sh; do
         if [ -f "$hooks_dir/$hook" ]; then
             rm "$hooks_dir/$hook"
             info "Removed $hooks_dir/$hook"
@@ -3386,6 +3386,7 @@ run_uninstall() {
         local tool_failure_logger_path="$hooks_dir/tool-failure-logger.sh"
         local session_auto_approve_path="$hooks_dir/session-auto-approve.sh"
         local bash_logger_path="$hooks_dir/bash-logger.sh"
+        local scope_prompt_path="$hooks_dir/scope-prompt.sh"
 
         local settings
         settings=$(cat "$settings_file")
@@ -3452,6 +3453,13 @@ run_uninstall() {
         settings=$(echo "$settings" | jq --arg path "$session_auto_approve_path" '
             if .hooks.PermissionRequest then
                 .hooks.PermissionRequest = [.hooks.PermissionRequest[] | select(.hooks | all(.command != $path))]
+            else . end
+        ')
+
+        # Remove our UserPromptSubmit scope-prompt hook
+        settings=$(echo "$settings" | jq --arg path "$scope_prompt_path" '
+            if .hooks.UserPromptSubmit then
+                .hooks.UserPromptSubmit = [.hooks.UserPromptSubmit[] | select(.hooks | all(.command != $path))]
             else . end
         ')
 
