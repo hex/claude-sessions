@@ -583,6 +583,62 @@ test_session_start_skips_siblings_on_startup() {
     session_start_teardown
 }
 
+# Helper: seed README frontmatter with a recorded claude_session_id
+seed_recorded_uuid() {
+    local uuid="$1"
+    sed -i.bak "/^created:/a\\
+claude_session_id: $uuid" "$CLAUDE_SESSION_META_DIR/README.md" && rm -f "$CLAUDE_SESSION_META_DIR/README.md.bak"
+}
+
+test_session_start_rebinds_uuid_to_live_session() {
+    session_start_setup
+
+    # README records an old conversation; the hook reports a different live one
+    # (claude forks a new UUID on context-limit continuation, leaving the old
+    # transcript on disk — the recorded binding goes stale)
+    seed_recorded_uuid "aaaaaaaa-1111-2222-3333-444444444444"
+
+    echo '{"session_id":"bbbbbbbb-5555-6666-7777-888888888888","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null > /dev/null
+
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/README.md" "claude_session_id: bbbbbbbb-5555-6666-7777-888888888888" \
+        "Should rebind claude_session_id to the live session UUID" || { session_start_teardown; return 1; }
+    assert_file_not_contains "$CLAUDE_SESSION_META_DIR/README.md" "aaaaaaaa-1111-2222-3333-444444444444" \
+        "Stale UUID should be gone after rebind" || { session_start_teardown; return 1; }
+
+    session_start_teardown
+}
+
+test_session_start_rebinds_uuid_on_startup() {
+    session_start_setup
+
+    seed_recorded_uuid "aaaaaaaa-1111-2222-3333-444444444444"
+
+    echo '{"session_id":"bbbbbbbb-5555-6666-7777-888888888888","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null > /dev/null
+
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/README.md" "claude_session_id: bbbbbbbb-5555-6666-7777-888888888888" \
+        "Should rebind on startup too (live UUID is authoritative on every source)" || { session_start_teardown; return 1; }
+
+    session_start_teardown
+}
+
+test_session_start_rebind_ignores_invalid_session_id() {
+    session_start_setup
+
+    seed_recorded_uuid "aaaaaaaa-1111-2222-3333-444444444444"
+
+    # Non-UUID session_id (eg. jq null fallback or harness stub) must not
+    # clobber a valid recorded binding
+    echo '{"session_id":"not-a-uuid","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null > /dev/null
+
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/README.md" "claude_session_id: aaaaaaaa-1111-2222-3333-444444444444" \
+        "Recorded UUID should survive an invalid live session_id" || { session_start_teardown; return 1; }
+
+    session_start_teardown
+}
+
 # ============================================================================
 # session-end.sh: index.md generation
 # ============================================================================
@@ -922,6 +978,9 @@ run_test test_session_start_limits_sibling_count
 run_test test_session_start_updates_last_resumed
 run_test test_session_start_last_resumed_not_set_on_startup
 run_test test_session_start_skips_siblings_on_startup
+run_test test_session_start_rebinds_uuid_to_live_session
+run_test test_session_start_rebinds_uuid_on_startup
+run_test test_session_start_rebind_ignores_invalid_session_id
 
 # Session end: index.md generation
 run_test test_session_end_generates_index

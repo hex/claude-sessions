@@ -166,6 +166,28 @@ See CLAUDE.md in the session directory for complete documentation protocol.
 EOF
 )
 
+# Bind claude_session_id in README frontmatter to the live conversation.
+# Claude Code forks a new UUID when a conversation is continued past the
+# context limit; the old transcript stays on disk, so the recorded UUID
+# looks healthy while naming the pre-fork conversation and `cs` resumes
+# stale history. The hook input names the conversation actually running,
+# so it is authoritative on every source.
+README_FILE="$META_DIR/README.md"
+UUID_RE='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+if [ -f "$README_FILE" ] && head -1 "$README_FILE" | grep -q '^---$' \
+    && echo "$SESSION_ID" | grep -Eq "$UUID_RE"; then
+    RECORDED_UUID=$(grep '^claude_session_id:' "$README_FILE" | head -1 | awk '{print $2}' || true)
+    if [ "$RECORDED_UUID" != "$SESSION_ID" ]; then
+        if [ -n "$RECORDED_UUID" ]; then
+            sed -i.bak "s/^claude_session_id:.*$/claude_session_id: $SESSION_ID/" "$README_FILE" && rm -f "$README_FILE.bak"
+        else
+            sed -i.bak "/^created:/a\\
+claude_session_id: $SESSION_ID" "$README_FILE" && rm -f "$README_FILE.bak"
+        fi
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - Rebound claude_session_id: ${RECORDED_UUID:-none} -> $SESSION_ID" >> "$META_DIR/logs/session.log"
+    fi
+fi
+
 # Update last_resumed in README.md frontmatter on resume
 if [ "$SOURCE" = "resume" ]; then
     README_FILE="$META_DIR/README.md"
