@@ -55,7 +55,8 @@ show_banner() {
 
 # Configuration
 INSTALL_DIR="${HOME}/.local/bin"
-HOOKS_DIR="${HOME}/.claude/hooks"
+HOOKS_PARENT_DIR="${HOME}/.claude/hooks"
+HOOKS_DIR="${HOOKS_PARENT_DIR}/cs"
 COMMANDS_DIR="${HOME}/.claude/commands"
 BASH_COMPLETION_DIR="${HOME}/.bash_completion.d"
 ZSH_COMPLETION_DIR="${HOME}/.zsh/completions"
@@ -73,18 +74,21 @@ RELEASES_URL="https://github.com/hex/claude-sessions/releases/download"
 CS_URL="${REPO_URL}/bin/cs"
 CS_SECRETS_URL="${REPO_URL}/bin/cs-secrets"
 
-# Hook URLs for web install
-HOOK_SESSION_START_URL="${REPO_URL}/hooks/session-start.sh"
-HOOK_ARTIFACT_TRACKER_URL="${REPO_URL}/hooks/artifact-tracker.sh"
-HOOK_DISCOVERY_COMMITS_URL="${REPO_URL}/hooks/discovery-commits.sh"
-HOOK_DISCOVERIES_REMINDER_URL="${REPO_URL}/hooks/discoveries-reminder.sh"
-HOOK_PROSE_LINT_URL="${REPO_URL}/hooks/prose-lint.sh"
-HOOK_SESSION_END_URL="${REPO_URL}/hooks/session-end.sh"
-HOOK_SUBAGENT_CONTEXT_URL="${REPO_URL}/hooks/subagent-context.sh"
-HOOK_TOOL_FAILURE_LOGGER_URL="${REPO_URL}/hooks/tool-failure-logger.sh"
-HOOK_SESSION_AUTO_APPROVE_URL="${REPO_URL}/hooks/session-auto-approve.sh"
-HOOK_BASH_LOGGER_URL="${REPO_URL}/hooks/bash-logger.sh"
-HOOK_SCOPE_PROMPT_URL="${REPO_URL}/hooks/scope-prompt.sh"
+# Hook scripts cs ships; deployed to HOOKS_DIR and registered in settings.json.
+# KEEP THIS LIST IN SYNC WITH bin/cs's CS_HOOKS.
+CS_HOOKS=(
+    session-start.sh
+    artifact-tracker.sh
+    discovery-commits.sh
+    discoveries-reminder.sh
+    prose-lint.sh
+    session-end.sh
+    subagent-context.sh
+    tool-failure-logger.sh
+    session-auto-approve.sh
+    bash-logger.sh
+    scope-prompt.sh
+)
 
 # Hooks retired in past versions but possibly still installed from older cs versions.
 # install.sh and bin/cs run_uninstall both clean these up. KEEP THIS LIST IN SYNC WITH bin/cs.
@@ -235,57 +239,45 @@ elif [ "$INSTALL_METHOD" = "web" ]; then
 fi
 
 # Install hooks
-installed "13 hooks" "$HOOKS_DIR/"
+installed "${#CS_HOOKS[@]} hooks" "$HOOKS_DIR/"
 mkdir -p "$HOOKS_DIR"
 
 # Remove any retired hook files that earlier cs versions installed but no longer ship.
-# Settings.json entries are stripped further below.
+# Settings.json entries are stripped further below. Retired hooks may sit in
+# HOOKS_DIR or, for installs that deployed hooks flat, its parent directory.
 for retired in "${RETIRED_HOOKS[@]}"; do
-    if [ -f "$HOOKS_DIR/$retired" ]; then
-        rm "$HOOKS_DIR/$retired"
-        info "  Removed retired hook: $HOOKS_DIR/$retired"
+    for dir in "$HOOKS_DIR" "$HOOKS_PARENT_DIR"; do
+        if [ -f "$dir/$retired" ]; then
+            rm "$dir/$retired"
+            info "  Removed retired hook: $dir/$retired"
+        fi
+    done
+done
+
+# The subdirectory copy is canonical; remove parent-level copies left by
+# installs that deployed hooks flat into ~/.claude/hooks/.
+for hook in "${CS_HOOKS[@]}"; do
+    if [ -f "$HOOKS_PARENT_DIR/$hook" ]; then
+        rm "$HOOKS_PARENT_DIR/$hook"
+        info "  Removed $HOOKS_PARENT_DIR/$hook"
     fi
 done
 
 if [ "$INSTALL_METHOD" = "local" ]; then
     # Install from local clone
-    cp "$HOOKS_SOURCE/session-start.sh" "$HOOKS_DIR/"
-    cp "$HOOKS_SOURCE/artifact-tracker.sh" "$HOOKS_DIR/"
-    cp "$HOOKS_SOURCE/discovery-commits.sh" "$HOOKS_DIR/"
-    cp "$HOOKS_SOURCE/discoveries-reminder.sh" "$HOOKS_DIR/"
-    cp "$HOOKS_SOURCE/prose-lint.sh" "$HOOKS_DIR/"
-    cp "$HOOKS_SOURCE/session-end.sh" "$HOOKS_DIR/"
-    cp "$HOOKS_SOURCE/subagent-context.sh" "$HOOKS_DIR/"
-    cp "$HOOKS_SOURCE/tool-failure-logger.sh" "$HOOKS_DIR/"
-    cp "$HOOKS_SOURCE/session-auto-approve.sh" "$HOOKS_DIR/"
-    cp "$HOOKS_SOURCE/bash-logger.sh" "$HOOKS_DIR/"
-    cp "$HOOKS_SOURCE/scope-prompt.sh" "$HOOKS_DIR/"
+    for hook in "${CS_HOOKS[@]}"; do
+        cp "$HOOKS_SOURCE/$hook" "$HOOKS_DIR/"
+    done
 else
     # Download from GitHub
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "$HOOK_SESSION_START_URL" -o "$HOOKS_DIR/session-start.sh" || error "Failed to download session-start.sh"
-        curl -fsSL "$HOOK_ARTIFACT_TRACKER_URL" -o "$HOOKS_DIR/artifact-tracker.sh" || error "Failed to download artifact-tracker.sh"
-        curl -fsSL "$HOOK_DISCOVERY_COMMITS_URL" -o "$HOOKS_DIR/discovery-commits.sh" || error "Failed to download discovery-commits.sh"
-        curl -fsSL "$HOOK_DISCOVERIES_REMINDER_URL" -o "$HOOKS_DIR/discoveries-reminder.sh" || error "Failed to download discoveries-reminder.sh"
-        curl -fsSL "$HOOK_PROSE_LINT_URL" -o "$HOOKS_DIR/prose-lint.sh" || error "Failed to download prose-lint.sh"
-        curl -fsSL "$HOOK_SESSION_END_URL" -o "$HOOKS_DIR/session-end.sh" || error "Failed to download session-end.sh"
-        curl -fsSL "$HOOK_SUBAGENT_CONTEXT_URL" -o "$HOOKS_DIR/subagent-context.sh" || error "Failed to download subagent-context.sh"
-        curl -fsSL "$HOOK_TOOL_FAILURE_LOGGER_URL" -o "$HOOKS_DIR/tool-failure-logger.sh" || error "Failed to download tool-failure-logger.sh"
-        curl -fsSL "$HOOK_SESSION_AUTO_APPROVE_URL" -o "$HOOKS_DIR/session-auto-approve.sh" || error "Failed to download session-auto-approve.sh"
-        curl -fsSL "$HOOK_BASH_LOGGER_URL" -o "$HOOKS_DIR/bash-logger.sh" || error "Failed to download bash-logger.sh"
-        curl -fsSL "$HOOK_SCOPE_PROMPT_URL" -o "$HOOKS_DIR/scope-prompt.sh" || error "Failed to download scope-prompt.sh"
+        for hook in "${CS_HOOKS[@]}"; do
+            curl -fsSL "$REPO_URL/hooks/$hook" -o "$HOOKS_DIR/$hook" || error "Failed to download $hook"
+        done
     elif command -v wget >/dev/null 2>&1; then
-        wget -q "$HOOK_SESSION_START_URL" -O "$HOOKS_DIR/session-start.sh" || error "Failed to download session-start.sh"
-        wget -q "$HOOK_ARTIFACT_TRACKER_URL" -O "$HOOKS_DIR/artifact-tracker.sh" || error "Failed to download artifact-tracker.sh"
-        wget -q "$HOOK_DISCOVERY_COMMITS_URL" -O "$HOOKS_DIR/discovery-commits.sh" || error "Failed to download discovery-commits.sh"
-        wget -q "$HOOK_DISCOVERIES_REMINDER_URL" -O "$HOOKS_DIR/discoveries-reminder.sh" || error "Failed to download discoveries-reminder.sh"
-        wget -q "$HOOK_PROSE_LINT_URL" -O "$HOOKS_DIR/prose-lint.sh" || error "Failed to download prose-lint.sh"
-        wget -q "$HOOK_SESSION_END_URL" -O "$HOOKS_DIR/session-end.sh" || error "Failed to download session-end.sh"
-        wget -q "$HOOK_SUBAGENT_CONTEXT_URL" -O "$HOOKS_DIR/subagent-context.sh" || error "Failed to download subagent-context.sh"
-        wget -q "$HOOK_TOOL_FAILURE_LOGGER_URL" -O "$HOOKS_DIR/tool-failure-logger.sh" || error "Failed to download tool-failure-logger.sh"
-        wget -q "$HOOK_SESSION_AUTO_APPROVE_URL" -O "$HOOKS_DIR/session-auto-approve.sh" || error "Failed to download session-auto-approve.sh"
-        wget -q "$HOOK_BASH_LOGGER_URL" -O "$HOOKS_DIR/bash-logger.sh" || error "Failed to download bash-logger.sh"
-        wget -q "$HOOK_SCOPE_PROMPT_URL" -O "$HOOKS_DIR/scope-prompt.sh" || error "Failed to download scope-prompt.sh"
+        for hook in "${CS_HOOKS[@]}"; do
+            wget -q "$REPO_URL/hooks/$hook" -O "$HOOKS_DIR/$hook" || error "Failed to download $hook"
+        done
     fi
 fi
 
@@ -386,37 +378,37 @@ else
     fi
 
     # Our hook script paths (for detecting existing cs hooks)
-    SESSION_START_PATH="$HOME/.claude/hooks/session-start.sh"
-    ARTIFACT_TRACKER_PATH="$HOME/.claude/hooks/artifact-tracker.sh"
-    DISCOVERY_COMMITS_PATH="$HOME/.claude/hooks/discovery-commits.sh"
-    DISCOVERIES_REMINDER_PATH="$HOME/.claude/hooks/discoveries-reminder.sh"
-    PROSE_LINT_PATH="$HOME/.claude/hooks/prose-lint.sh"
-    SESSION_END_PATH="$HOME/.claude/hooks/session-end.sh"
-    SUBAGENT_CONTEXT_PATH="$HOME/.claude/hooks/subagent-context.sh"
-    TOOL_FAILURE_LOGGER_PATH="$HOME/.claude/hooks/tool-failure-logger.sh"
-    SESSION_AUTO_APPROVE_PATH="$HOME/.claude/hooks/session-auto-approve.sh"
-    BASH_LOGGER_PATH="$HOME/.claude/hooks/bash-logger.sh"
-    SCOPE_PROMPT_PATH="$HOME/.claude/hooks/scope-prompt.sh"
+    HOOKS_TILDE_DIR="~/.claude/hooks/cs"
+    SESSION_START_PATH="$HOOKS_DIR/session-start.sh"
+    ARTIFACT_TRACKER_PATH="$HOOKS_DIR/artifact-tracker.sh"
+    DISCOVERY_COMMITS_PATH="$HOOKS_DIR/discovery-commits.sh"
+    DISCOVERIES_REMINDER_PATH="$HOOKS_DIR/discoveries-reminder.sh"
+    PROSE_LINT_PATH="$HOOKS_DIR/prose-lint.sh"
+    SESSION_END_PATH="$HOOKS_DIR/session-end.sh"
+    SUBAGENT_CONTEXT_PATH="$HOOKS_DIR/subagent-context.sh"
+    TOOL_FAILURE_LOGGER_PATH="$HOOKS_DIR/tool-failure-logger.sh"
+    SESSION_AUTO_APPROVE_PATH="$HOOKS_DIR/session-auto-approve.sh"
+    BASH_LOGGER_PATH="$HOOKS_DIR/bash-logger.sh"
+    SCOPE_PROMPT_PATH="$HOOKS_DIR/scope-prompt.sh"
 
     # Tilde-path variants for dedup (handles entries added with ~ instead of $HOME)
-    SESSION_START_TILDE="~/.claude/hooks/session-start.sh"
-    ARTIFACT_TRACKER_TILDE="~/.claude/hooks/artifact-tracker.sh"
-    DISCOVERY_COMMITS_TILDE="~/.claude/hooks/discovery-commits.sh"
-    DISCOVERIES_REMINDER_TILDE="~/.claude/hooks/discoveries-reminder.sh"
-    PROSE_LINT_TILDE="~/.claude/hooks/prose-lint.sh"
-    SESSION_END_TILDE="~/.claude/hooks/session-end.sh"
-    SUBAGENT_CONTEXT_TILDE="~/.claude/hooks/subagent-context.sh"
-    TOOL_FAILURE_LOGGER_TILDE="~/.claude/hooks/tool-failure-logger.sh"
-    SESSION_AUTO_APPROVE_TILDE="~/.claude/hooks/session-auto-approve.sh"
-    BASH_LOGGER_TILDE="~/.claude/hooks/bash-logger.sh"
-    SCOPE_PROMPT_TILDE="~/.claude/hooks/scope-prompt.sh"
+    SESSION_START_TILDE="$HOOKS_TILDE_DIR/session-start.sh"
+    ARTIFACT_TRACKER_TILDE="$HOOKS_TILDE_DIR/artifact-tracker.sh"
+    DISCOVERY_COMMITS_TILDE="$HOOKS_TILDE_DIR/discovery-commits.sh"
+    DISCOVERIES_REMINDER_TILDE="$HOOKS_TILDE_DIR/discoveries-reminder.sh"
+    PROSE_LINT_TILDE="$HOOKS_TILDE_DIR/prose-lint.sh"
+    SESSION_END_TILDE="$HOOKS_TILDE_DIR/session-end.sh"
+    SUBAGENT_CONTEXT_TILDE="$HOOKS_TILDE_DIR/subagent-context.sh"
+    TOOL_FAILURE_LOGGER_TILDE="$HOOKS_TILDE_DIR/tool-failure-logger.sh"
+    SESSION_AUTO_APPROVE_TILDE="$HOOKS_TILDE_DIR/session-auto-approve.sh"
+    BASH_LOGGER_TILDE="$HOOKS_TILDE_DIR/bash-logger.sh"
+    SCOPE_PROMPT_TILDE="$HOOKS_TILDE_DIR/scope-prompt.sh"
 
-    # Strip retired hooks from any event in settings.json (event-agnostic since
-    # we don't know which event the old version registered them under).
-    for retired in "${RETIRED_HOOKS[@]}"; do
-        retired_path="$HOME/.claude/hooks/$retired"
-        retired_tilde="~/.claude/hooks/$retired"
-        SETTINGS=$(echo "$SETTINGS" | jq --arg p "$retired_path" --arg t "$retired_tilde" '
+    # Remove a hook registration from any event in settings.json, matching
+    # either path spelling; drops wrappers that empty out.
+    _strip_hook_registration() {
+        local p="$1" t="$2"
+        SETTINGS=$(echo "$SETTINGS" | jq --arg p "$p" --arg t "$t" '
             if .hooks then
                 .hooks |= with_entries(
                     .value |= (
@@ -428,6 +420,20 @@ else
                 | if .hooks == {} then del(.hooks) else . end
             else . end
         ')
+    }
+
+    # Strip retired hooks from any event in settings.json (event-agnostic since
+    # we don't know which event the old version registered them under). Covers
+    # both deployment layouts.
+    for retired in "${RETIRED_HOOKS[@]}"; do
+        _strip_hook_registration "$HOOKS_PARENT_DIR/$retired" "~/.claude/hooks/$retired"
+        _strip_hook_registration "$HOOKS_DIR/$retired" "$HOOKS_TILDE_DIR/$retired"
+    done
+
+    # Strip parent-level registrations of current hooks (flat-layout installs);
+    # _merge_cs_hook re-registers each one under HOOKS_DIR below.
+    for hook in "${CS_HOOKS[@]}"; do
+        _strip_hook_registration "$HOOKS_PARENT_DIR/$hook" "~/.claude/hooks/$hook"
     done
 
     # Merge hooks: strip cs's command from any wrapper's nested .hooks array,

@@ -4,7 +4,14 @@ All notable changes to cs are documented here. Release notes are also available 
 
 ## Unreleased
 
+### Changed
+
+- **Hooks deploy to `~/.claude/hooks/cs/` instead of flat `~/.claude/hooks/`.** The subdirectory makes cs's footprint atomic: `ls` shows exactly what cs owns, uninstall removes the whole directory, and drift between repo source and deployed copies is a one-line `diff -r`. `install.sh` migrates existing installs — parent-level binaries (current and retired) are removed and parent-level settings.json registrations are stripped before re-registering under the subdirectory, so hooks never double-fire. `bin/cs -uninstall` cleans both layouts. The hook name list is now a shared `CS_HOOKS` array in both `install.sh` and `bin/cs` (KEEP IN SYNC comments on both), replacing eleven hand-written cp/curl/wget lines per transport and ten per-event jq strip blocks in uninstall.
+- **`cs -doctor` gained a hook-drift check.** When run from a cs source checkout (detected by `hooks/` + `install.sh` + `bin/cs` in cwd), it compares each `hooks/*.sh` against the deployed copy and warns `deployed copy differs from source` / `not deployed` with a `run ./install.sh` pointer. Catches the failure mode where repo-side hook edits (or deletions) silently never reach the running install — observed live when three hooks deleted in the harness audit kept firing for three days from their deployed copies. Silent outside a checkout.
+
 ### Fixed
+
+- **`cs -uninstall` left all hook registrations behind in settings.json.** The per-event strip blocks matched only `$HOME`-form command paths, but `install.sh` registers hooks in tilde form (`~/.claude/hooks/...`), so no entry ever matched and every cs registration survived uninstall. The consolidated strip now matches both spellings in both deployment layouts; a regression test seeds a tilde-form registration plus a non-cs sibling hook and asserts cs entries vanish while the sibling survives.
 
 - **`cs` could resume an older conversation after a context-limit continuation.** Claude Code forks a new session UUID when a conversation runs out of context and is continued; the old transcript stays on disk, so the `claude_session_id` recorded in `.cs/README.md` kept naming the pre-fork conversation while looking healthy to the launcher's orphan check (`bin/cs` Phase 8 fast path: "recorded UUID present, transcript exists → skip discovery"). The next `cs <name>` resume then ran `claude --resume <stale-uuid>` and reopened stale history. `session-start.sh` now rebinds the README's `claude_session_id` to the live conversation UUID from the hook input on every SessionStart (all sources) — by the time the user is talking, the binding names the conversation they are actually in. Non-UUID session ids (harness stubs, jq null fallback) never clobber a valid recorded binding; each rebind is logged to `session.log`. Three new tests in `tests/test_hooks.sh` (rebind on resume, rebind on startup, invalid-id guard).
 

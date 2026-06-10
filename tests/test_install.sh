@@ -85,10 +85,130 @@ EOF
 }
 
 # ============================================================================
+# Hook deployment: binaries and registrations live under ~/.claude/hooks/cs/
+# ============================================================================
+
+CS_BIN="$SCRIPT_DIR/../bin/cs"
+
+test_install_deploys_hooks_to_cs_subdir() {
+    local fake_home="$TEST_TMPDIR/home"
+    mkdir -p "$fake_home"
+
+    HOME="$fake_home" bash "$INSTALL_SH" > /dev/null 2>&1 || {
+        echo "  FAIL: install.sh exited non-zero"
+        return 1
+    }
+
+    if [ ! -f "$fake_home/.claude/hooks/cs/session-start.sh" ]; then
+        echo "  FAIL: session-start.sh not deployed under hooks/cs/"
+        ls "$fake_home/.claude/hooks" 2>/dev/null | head -5
+        return 1
+    fi
+    if [ ! -f "$fake_home/.claude/hooks/cs/scope-prompt.sh" ]; then
+        echo "  FAIL: scope-prompt.sh not deployed under hooks/cs/"
+        return 1
+    fi
+
+    local cnt
+    cnt=$(jq '[.hooks[][] | .hooks[]?.command | select(. == "~/.claude/hooks/cs/session-start.sh")] | length' \
+        "$fake_home/.claude/settings.json")
+    if [ "$cnt" != "1" ]; then
+        echo "  FAIL: expected 1 subdir registration for session-start.sh, got $cnt"
+        return 1
+    fi
+}
+
+test_install_migrates_flat_hook_layout() {
+    local fake_home="$TEST_TMPDIR/home"
+    mkdir -p "$fake_home/.claude/hooks"
+    # Deployed binaries at the parent level: one current hook, one retired
+    echo '#!/bin/sh' > "$fake_home/.claude/hooks/session-start.sh"
+    echo '#!/bin/sh' > "$fake_home/.claude/hooks/files-context.sh"
+    cat > "$fake_home/.claude/settings.json" << 'EOF'
+{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"~/.claude/hooks/session-start.sh","timeout":30}]}],"PreToolUse":[{"matcher":"Read","hooks":[{"type":"command","command":"~/.claude/hooks/files-context.sh","timeout":5}]}]}}
+EOF
+
+    HOME="$fake_home" bash "$INSTALL_SH" > /dev/null 2>&1 || {
+        echo "  FAIL: install.sh exited non-zero"
+        return 1
+    }
+
+    if [ -f "$fake_home/.claude/hooks/session-start.sh" ]; then
+        echo "  FAIL: parent-level session-start.sh binary not removed"
+        return 1
+    fi
+    if [ -f "$fake_home/.claude/hooks/files-context.sh" ]; then
+        echo "  FAIL: retired files-context.sh binary not removed"
+        return 1
+    fi
+    if [ ! -f "$fake_home/.claude/hooks/cs/session-start.sh" ]; then
+        echo "  FAIL: subdir session-start.sh missing after migration"
+        return 1
+    fi
+
+    local flat sub
+    flat=$(jq '[.hooks[][] | .hooks[]?.command | select(. == "~/.claude/hooks/session-start.sh")] | length' \
+        "$fake_home/.claude/settings.json")
+    sub=$(jq '[.hooks[][] | .hooks[]?.command | select(. == "~/.claude/hooks/cs/session-start.sh")] | length' \
+        "$fake_home/.claude/settings.json")
+    if [ "$flat" != "0" ]; then
+        echo "  FAIL: parent-level registration survived migration ($flat left)"
+        return 1
+    fi
+    if [ "$sub" != "1" ]; then
+        echo "  FAIL: expected exactly 1 subdir registration, got $sub (double-registration?)"
+        return 1
+    fi
+    if jq -e '[.hooks[][] | .hooks[]?.command | select(test("files-context"))] | length > 0' \
+        "$fake_home/.claude/settings.json" > /dev/null; then
+        echo "  FAIL: retired files-context.sh registration survived"
+        return 1
+    fi
+}
+
+test_uninstall_strips_hook_registrations() {
+    local fake_home="$TEST_TMPDIR/uninstall-home"
+    mkdir -p "$fake_home/.claude/hooks/cs"
+    echo '#!/bin/sh' > "$fake_home/.claude/hooks/cs/session-start.sh"
+    # Tilde-form registrations in both layouts, plus a non-cs hook that must survive
+    cat > "$fake_home/.claude/settings.json" << 'EOF'
+{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"~/.claude/hooks/cs/session-start.sh","timeout":30}]}],"Stop":[{"hooks":[{"type":"command","command":"~/.claude/hooks/prose-lint.sh","timeout":15}]},{"hooks":[{"type":"command","command":"~/bin/my-own-hook.sh","timeout":5}]}]}}
+EOF
+
+    printf 'y\n' | HOME="$fake_home" "$CS_BIN" -uninstall > /dev/null 2>&1 || {
+        echo "  FAIL: cs -uninstall exited non-zero"
+        return 1
+    }
+
+    if [ -f "$fake_home/.claude/hooks/cs/session-start.sh" ]; then
+        echo "  FAIL: deployed hook binary not removed"
+        return 1
+    fi
+
+    local cs_cnt user_cnt
+    cs_cnt=$(jq '[.hooks // {} | .[][] | .hooks[]?.command | select(test("claude/hooks"))] | length' \
+        "$fake_home/.claude/settings.json")
+    user_cnt=$(jq '[.hooks // {} | .[][] | .hooks[]?.command | select(. == "~/bin/my-own-hook.sh")] | length' \
+        "$fake_home/.claude/settings.json")
+    if [ "$cs_cnt" != "0" ]; then
+        echo "  FAIL: cs hook registrations survived uninstall ($cs_cnt left)"
+        jq '.hooks' "$fake_home/.claude/settings.json"
+        return 1
+    fi
+    if [ "$user_cnt" != "1" ]; then
+        echo "  FAIL: non-cs hook registration was removed (expected it preserved)"
+        return 1
+    fi
+}
+
+# ============================================================================
 # Runner
 # ============================================================================
 echo "Running test_install.sh"
 echo ""
 run_test test_install_completes_when_zshrc_has_no_fpath
 run_test test_install_respects_custom_fpath_dir
+run_test test_install_deploys_hooks_to_cs_subdir
+run_test test_install_migrates_flat_hook_layout
+run_test test_uninstall_strips_hook_registrations
 report_results

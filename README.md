@@ -66,7 +66,7 @@ Or clone and run `./install.sh`.
 
 The installer:
 - Adds `cs`, `cs-secrets`, and `cs-tui` to `~/.local/bin/`
-- Installs eleven [hooks](docs/hooks.md) to `~/.claude/hooks/` for session tracking (including the `/scope` auto-grounding hook on UserPromptSubmit)
+- Installs eleven [hooks](docs/hooks.md) to `~/.claude/hooks/cs/` for session tracking (including the `/scope` auto-grounding hook on UserPromptSubmit)
 - Adds `/summary`, `/compact-discoveries`, `/checkpoint`, `/sweep`, and `/wrap` commands, and the `store-secret` and `prose-hygiene` skills to `~/.claude/`
 - Installs shell completions for bash and zsh
 - Configures hook entries in `~/.claude/settings.json`

@@ -34,8 +34,8 @@ There are 283+ tests across 17 test suites. All tests must pass before submittin
 
 2. **Register in `install.sh`**:
    - Add a URL variable at the top: `HOOK_YOUR_HOOK_URL="${REPO_URL}/hooks/your-hook.sh"`
-   - Add a path variable: `YOUR_HOOK_PATH="$HOME/.claude/hooks/your-hook.sh"`
-   - Add a tilde variant: `YOUR_HOOK_TILDE="~/.claude/hooks/your-hook.sh"`
+   - Add a path variable: `YOUR_HOOK_PATH="$HOOKS_DIR/your-hook.sh"`
+   - Add a tilde variant: `YOUR_HOOK_TILDE="$HOOKS_TILDE_DIR/your-hook.sh"`
    - Add a `jq` block to merge the hook into `settings.json` under the appropriate event (`SessionStart`, `PreToolUse`, `PostToolUse`, etc.)
 
 3. **Add to `run_uninstall()`** in `bin/cs` — add your hook filename to the cleanup loop so it gets removed on `cs -uninstall`.

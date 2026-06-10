@@ -26,6 +26,22 @@ RETIRED_HOOKS=(
     changes-tracker.sh        # retired: PostToolUse change log re-narrating git history into .cs/changes.md; git log/diff/status is authoritative
 )
 
+# Hook scripts cs ships; deployed to ~/.claude/hooks/cs/ and registered in
+# settings.json. KEEP THIS LIST IN SYNC WITH install.sh's CS_HOOKS.
+CS_HOOKS=(
+    session-start.sh
+    artifact-tracker.sh
+    discovery-commits.sh
+    discoveries-reminder.sh
+    prose-lint.sh
+    session-end.sh
+    subagent-context.sh
+    tool-failure-logger.sh
+    session-auto-approve.sh
+    bash-logger.sh
+    scope-prompt.sh
+)
+
 # Hook scripts in HOOKS_DIR that are NOT registered in settings.json. They are
 # utilities invoked by other hooks rather than directly by Claude Code.
 UTILITY_HOOKS=()
@@ -1522,7 +1538,7 @@ _doctor_check_keychain() {
 }
 
 _doctor_check_hooks_registered() {
-    local hooks_dir="${CS_HOOKS_DIR:-$HOME/.claude/hooks}"
+    local hooks_dir="${CS_HOOKS_DIR:-$HOME/.claude/hooks/cs}"
     local settings="$HOME/.claude/settings.json"
     if [ ! -f "$settings" ]; then
         _doctor_warn "Hooks: $settings not found (cs may not be installed via install.sh)"
@@ -1557,7 +1573,7 @@ _doctor_check_hooks_registered() {
 }
 
 _doctor_check_hook_files_executable() {
-    local hooks_dir="${CS_HOOKS_DIR:-$HOME/.claude/hooks}"
+    local hooks_dir="${CS_HOOKS_DIR:-$HOME/.claude/hooks/cs}"
     if [ ! -d "$hooks_dir" ]; then
         _doctor_warn "Hooks: directory $hooks_dir not found"
         return
@@ -1574,6 +1590,35 @@ _doctor_check_hook_files_executable() {
         _doctor_ok "Hooks: all files executable"
     else
         _doctor_fail "Hooks: not executable: ${non_exec[*]}"
+    fi
+}
+
+# Compares hooks/*.sh in the current directory's cs source checkout against
+# the deployed copies. A hooks/ edit only takes effect once install.sh
+# deploys it, so silent drift between the two means the running hooks don't
+# match what the source says they do. Silent outside a checkout.
+_doctor_check_hook_drift() {
+    local hooks_dir="${CS_HOOKS_DIR:-$HOME/.claude/hooks/cs}"
+    [ -d "hooks" ] && [ -f "install.sh" ] && [ -f "bin/cs" ] || return 0
+    local drifted=() missing=() f name
+    for f in hooks/*.sh; do
+        [ -e "$f" ] || continue
+        name=$(basename "$f")
+        if [ ! -f "$hooks_dir/$name" ]; then
+            missing+=("$name")
+        elif ! cmp -s "$f" "$hooks_dir/$name"; then
+            drifted+=("$name")
+        fi
+    done
+    if [ ${#drifted[@]} -eq 0 ] && [ ${#missing[@]} -eq 0 ]; then
+        _doctor_ok "Hook drift: deployed hooks match checkout source"
+        return
+    fi
+    if [ ${#drifted[@]} -gt 0 ]; then
+        _doctor_warn "Hook drift: deployed copy differs from source: ${drifted[*]} (run ./install.sh)"
+    fi
+    if [ ${#missing[@]} -gt 0 ]; then
+        _doctor_warn "Hook drift: not deployed: ${missing[*]} (run ./install.sh)"
     fi
 }
 
@@ -1781,6 +1826,7 @@ run_doctor() {
     _doctor_check_keychain
     _doctor_check_hooks_registered
     _doctor_check_hook_files_executable
+    _doctor_check_hook_drift
     _doctor_check_settings_hooks_resolve
     _doctor_check_claude_audit
 
@@ -3287,7 +3333,8 @@ sync_clone() {
 # Uninstall cs and all components
 run_uninstall() {
     local install_dir="$HOME/.local/bin"
-    local hooks_dir="$HOME/.claude/hooks"
+    local hooks_parent_dir="$HOME/.claude/hooks"
+    local hooks_dir="$hooks_parent_dir/cs"
     local commands_dir="$HOME/.claude/commands"
     local skills_dir="$HOME/.claude/skills"
     local settings_file="$HOME/.claude/settings.json"
@@ -3329,22 +3376,28 @@ run_uninstall() {
         info "Removed $install_dir/cs-tui"
     fi
 
-    # Remove hooks
-    for hook in session-start.sh artifact-tracker.sh discovery-commits.sh discoveries-reminder.sh prose-lint.sh session-end.sh subagent-context.sh tool-failure-logger.sh session-auto-approve.sh bash-logger.sh scope-prompt.sh; do
-        if [ -f "$hooks_dir/$hook" ]; then
-            rm "$hooks_dir/$hook"
-            info "Removed $hooks_dir/$hook"
-        fi
+    # Remove hooks from both deployment layouts (subdirectory and flat)
+    local hook dir
+    for hook in "${CS_HOOKS[@]}"; do
+        for dir in "$hooks_dir" "$hooks_parent_dir"; do
+            if [ -f "$dir/$hook" ]; then
+                rm "$dir/$hook"
+                info "Removed $dir/$hook"
+            fi
+        done
     done
 
     # Remove retired hook files left behind from older cs versions
     local retired
     for retired in "${RETIRED_HOOKS[@]}"; do
-        if [ -f "$hooks_dir/$retired" ]; then
-            rm "$hooks_dir/$retired"
-            info "Removed retired $hooks_dir/$retired"
-        fi
+        for dir in "$hooks_dir" "$hooks_parent_dir"; do
+            if [ -f "$dir/$retired" ]; then
+                rm "$dir/$retired"
+                info "Removed retired $dir/$retired"
+            fi
+        done
     done
+    rmdir "$hooks_dir" 2>/dev/null || true
 
     # Remove commands
     for cmd in summary.md compact-discoveries.md checkpoint.md sweep.md wrap.md; do
@@ -3377,108 +3430,30 @@ run_uninstall() {
 
     # Clean up settings.json (remove cs hooks, preserve others)
     if [ -f "$settings_file" ] && command -v jq >/dev/null 2>&1; then
-        local session_start_path="$hooks_dir/session-start.sh"
-        local artifact_tracker_path="$hooks_dir/artifact-tracker.sh"
-        local discovery_commits_path="$hooks_dir/discovery-commits.sh"
-        local discoveries_reminder_path="$hooks_dir/discoveries-reminder.sh"
-        local session_end_path="$hooks_dir/session-end.sh"
-        local subagent_context_path="$hooks_dir/subagent-context.sh"
-        local tool_failure_logger_path="$hooks_dir/tool-failure-logger.sh"
-        local session_auto_approve_path="$hooks_dir/session-auto-approve.sh"
-        local bash_logger_path="$hooks_dir/bash-logger.sh"
-        local scope_prompt_path="$hooks_dir/scope-prompt.sh"
-
         local settings
         settings=$(cat "$settings_file")
 
-        # Remove our SessionStart hook
-        settings=$(echo "$settings" | jq --arg path "$session_start_path" '
-            if .hooks.SessionStart then
-                .hooks.SessionStart = [.hooks.SessionStart[] | select(.hooks | all(.command != $path))]
-            else . end
-        ')
-
-        # Remove our PreToolUse Write hook
-        settings=$(echo "$settings" | jq --arg path "$artifact_tracker_path" '
-            if .hooks.PreToolUse then
-                .hooks.PreToolUse = [.hooks.PreToolUse[] | select(
-                    (.matcher == "Write" and (.hooks | any(.command == $path))) | not
-                )]
-            else . end
-        ')
-
-        # Remove our PreToolUse Bash logger hook
-        settings=$(echo "$settings" | jq --arg path "$bash_logger_path" '
-            if .hooks.PreToolUse then
-                .hooks.PreToolUse = [.hooks.PreToolUse[] | select(.hooks | all(.command != $path))]
-            else . end
-        ')
-
-        # Remove our PostToolUse discovery commits hook
-        settings=$(echo "$settings" | jq --arg path "$discovery_commits_path" '
-            if .hooks.PostToolUse then
-                .hooks.PostToolUse = [.hooks.PostToolUse[] | select(.hooks | all(.command != $path))]
-            else . end
-        ')
-
-        # Remove our Stop discoveries reminder hook
-        settings=$(echo "$settings" | jq --arg path "$discoveries_reminder_path" '
-            if .hooks.Stop then
-                .hooks.Stop = [.hooks.Stop[] | select(.hooks | all(.command != $path))]
-            else . end
-        ')
-
-        # Remove our SessionEnd hook
-        settings=$(echo "$settings" | jq --arg path "$session_end_path" '
-            if .hooks.SessionEnd then
-                .hooks.SessionEnd = [.hooks.SessionEnd[] | select(.hooks | all(.command != $path))]
-            else . end
-        ')
-
-        # Remove our SubagentStart hook
-        settings=$(echo "$settings" | jq --arg path "$subagent_context_path" '
-            if .hooks.SubagentStart then
-                .hooks.SubagentStart = [.hooks.SubagentStart[] | select(.hooks | all(.command != $path))]
-            else . end
-        ')
-
-        # Remove our PostToolUseFailure hook
-        settings=$(echo "$settings" | jq --arg path "$tool_failure_logger_path" '
-            if .hooks.PostToolUseFailure then
-                .hooks.PostToolUseFailure = [.hooks.PostToolUseFailure[] | select(.hooks | all(.command != $path))]
-            else . end
-        ')
-
-        # Remove our PermissionRequest hook
-        settings=$(echo "$settings" | jq --arg path "$session_auto_approve_path" '
-            if .hooks.PermissionRequest then
-                .hooks.PermissionRequest = [.hooks.PermissionRequest[] | select(.hooks | all(.command != $path))]
-            else . end
-        ')
-
-        # Remove our UserPromptSubmit scope-prompt hook
-        settings=$(echo "$settings" | jq --arg path "$scope_prompt_path" '
-            if .hooks.UserPromptSubmit then
-                .hooks.UserPromptSubmit = [.hooks.UserPromptSubmit[] | select(.hooks | all(.command != $path))]
-            else . end
-        ')
-
-        # Strip retired hooks from any event in settings.json (event-agnostic since
-        # we don't know which event the old version registered them under).
-        local retired_settings_path retired_settings_tilde
-        for retired in "${RETIRED_HOOKS[@]}"; do
-            retired_settings_path="$hooks_dir/$retired"
-            retired_settings_tilde="~/.claude/hooks/$retired"
-            settings=$(echo "$settings" | jq --arg p "$retired_settings_path" --arg t "$retired_settings_tilde" '
-                if .hooks then
-                    .hooks |= with_entries(
-                        .value |= (
-                            map(.hooks |= map(select(.command != $p and .command != $t)))
-                            | map(select(.hooks | length > 0))
+        # Strip every cs hook (current and retired) from any event,
+        # event-agnostic, matching both path spellings ($HOME and ~) in both
+        # deployment layouts (subdirectory and flat). Drops wrappers that
+        # empty out; sibling user hooks co-shipped in a wrapper survive.
+        local strip_name strip_p strip_t
+        for strip_name in "${CS_HOOKS[@]}" "${RETIRED_HOOKS[@]}"; do
+            for strip_p in "$hooks_dir/$strip_name|~/.claude/hooks/cs/$strip_name" \
+                           "$hooks_parent_dir/$strip_name|~/.claude/hooks/$strip_name"; do
+                strip_t="${strip_p##*|}"
+                strip_p="${strip_p%%|*}"
+                settings=$(echo "$settings" | jq --arg p "$strip_p" --arg t "$strip_t" '
+                    if .hooks then
+                        .hooks |= with_entries(
+                            .value |= (
+                                map(.hooks |= map(select(.command != $p and .command != $t)))
+                                | map(select(.hooks | length > 0))
+                            )
                         )
-                    )
-                else . end
-            ')
+                    else . end
+                ')
+            done
         done
 
         # Clean up empty hook arrays

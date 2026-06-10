@@ -102,6 +102,71 @@ test_doctor_exits_nonzero_on_failure() {
     fi
 }
 
+# Helper: build a directory that looks like a cs source checkout
+make_fake_checkout() {
+    local dir="$1"
+    mkdir -p "$dir/hooks" "$dir/bin"
+    : > "$dir/install.sh"
+    : > "$dir/bin/cs"
+}
+
+test_doctor_warns_on_hook_drift() {
+    local checkout="$TEST_TMPDIR/checkout" deployed="$TEST_TMPDIR/deployed"
+    make_fake_checkout "$checkout"
+    mkdir -p "$deployed"
+    echo 'echo source-version' > "$checkout/hooks/session-start.sh"
+    echo 'echo deployed-version' > "$deployed/session-start.sh"
+    chmod +x "$deployed/session-start.sh"
+
+    local output
+    output=$(cd "$checkout" && CS_HOOKS_DIR="$deployed" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "differs from source" \
+        "doctor should warn when a deployed hook differs from checkout source" || return 1
+}
+
+test_doctor_warns_on_undeployed_hook() {
+    local checkout="$TEST_TMPDIR/checkout" deployed="$TEST_TMPDIR/deployed"
+    make_fake_checkout "$checkout"
+    mkdir -p "$deployed"
+    echo 'echo only-in-source' > "$checkout/hooks/brand-new.sh"
+
+    local output
+    output=$(cd "$checkout" && CS_HOOKS_DIR="$deployed" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "not deployed" \
+        "doctor should warn when a source hook has no deployed copy" || return 1
+}
+
+test_doctor_drift_silent_when_in_sync() {
+    local checkout="$TEST_TMPDIR/checkout" deployed="$TEST_TMPDIR/deployed"
+    make_fake_checkout "$checkout"
+    mkdir -p "$deployed"
+    echo 'echo same' > "$checkout/hooks/session-start.sh"
+    cp "$checkout/hooks/session-start.sh" "$deployed/session-start.sh"
+    chmod +x "$deployed/session-start.sh"
+
+    local output
+    output=$(cd "$checkout" && CS_HOOKS_DIR="$deployed" "$CS_BIN" -doctor 2>&1) || true
+    if echo "$output" | grep -q "differs from source\|not deployed"; then
+        echo "  FAIL: in-sync hooks should not produce drift warnings"
+        echo "$output" | grep "Hook drift"
+        return 1
+    fi
+}
+
+test_doctor_drift_skipped_outside_checkout() {
+    local plain="$TEST_TMPDIR/not-a-checkout" deployed="$TEST_TMPDIR/deployed"
+    mkdir -p "$plain" "$deployed"
+    echo 'echo deployed' > "$deployed/session-start.sh"
+    chmod +x "$deployed/session-start.sh"
+
+    local output
+    output=$(cd "$plain" && CS_HOOKS_DIR="$deployed" "$CS_BIN" -doctor 2>&1) || true
+    if echo "$output" | grep -q "Hook drift"; then
+        echo "  FAIL: drift check should be silent outside a cs source checkout"
+        return 1
+    fi
+}
+
 test_doctor_runs_without_session() {
     unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR
     local output
@@ -317,6 +382,10 @@ run_test test_doctor_reports_pass_for_healthy_session
 run_test test_doctor_warns_when_discoveries_over_budget
 run_test test_doctor_fails_when_hook_not_executable
 run_test test_doctor_exits_nonzero_on_failure
+run_test test_doctor_warns_on_hook_drift
+run_test test_doctor_warns_on_undeployed_hook
+run_test test_doctor_drift_silent_when_in_sync
+run_test test_doctor_drift_skipped_outside_checkout
 run_test test_doctor_runs_without_session
 run_test test_doctor_runs_audit_check
 run_test test_doctor_audit_counts_settings_contents

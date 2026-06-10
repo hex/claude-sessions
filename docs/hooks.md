@@ -107,33 +107,33 @@ The hooks are configured in `~/.claude/settings.json`:
 {
   "hooks": {
     "SessionStart": [
-      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/session-start.sh", "timeout": 30 }] }
+      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/session-start.sh", "timeout": 30 }] }
     ],
     "PreToolUse": [
-      { "matcher": "Write", "hooks": [{ "type": "command", "command": "~/.claude/hooks/artifact-tracker.sh", "timeout": 10 }] },
-      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "~/.claude/hooks/bash-logger.sh", "timeout": 5 }] }
+      { "matcher": "Write", "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/artifact-tracker.sh", "timeout": 10 }] },
+      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/bash-logger.sh", "timeout": 5 }] }
     ],
     "PostToolUse": [
-      { "matcher": "Write|Edit", "hooks": [{ "type": "command", "command": "~/.claude/hooks/discovery-commits.sh", "timeout": 10, "async": true }] }
+      { "matcher": "Write|Edit", "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/discovery-commits.sh", "timeout": 10, "async": true }] }
     ],
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/discoveries-reminder.sh", "timeout": 10 }] },
-      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/prose-lint.sh", "timeout": 15 }] }
+      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/discoveries-reminder.sh", "timeout": 10 }] },
+      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/prose-lint.sh", "timeout": 15 }] }
     ],
     "SessionEnd": [
-      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/session-end.sh", "timeout": 30 }] }
+      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/session-end.sh", "timeout": 30 }] }
     ],
     "SubagentStart": [
-      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/subagent-context.sh", "timeout": 10 }] }
+      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/subagent-context.sh", "timeout": 10 }] }
     ],
     "PostToolUseFailure": [
-      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/tool-failure-logger.sh", "timeout": 10, "async": true }] }
+      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/tool-failure-logger.sh", "timeout": 10, "async": true }] }
     ],
     "PermissionRequest": [
-      { "matcher": "Write|Edit", "hooks": [{ "type": "command", "command": "~/.claude/hooks/session-auto-approve.sh", "timeout": 5 }] }
+      { "matcher": "Write|Edit", "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/session-auto-approve.sh", "timeout": 5 }] }
     ],
     "UserPromptSubmit": [
-      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/scope-prompt.sh", "timeout": 3 }] }
+      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/scope-prompt.sh", "timeout": 3 }] }
     ]
   }
 }
