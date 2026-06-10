@@ -146,6 +146,37 @@
       ]
     }
   },
-  "hotPaths": [],
+  "hotPaths": [
+    {
+      "path": "bin/cs",
+      "accessCount": 3,
+      "lastAccessed": 1781074293585,
+      "type": "file"
+    },
+    {
+      "path": "tests/test_hooks.sh",
+      "accessCount": 3,
+      "lastAccessed": 1781074556569,
+      "type": "file"
+    },
+    {
+      "path": "hooks/session-start.sh",
+      "accessCount": 3,
+      "lastAccessed": 1781074607971,
+      "type": "file"
+    },
+    {
+      "path": "docs/hooks.md",
+      "accessCount": 2,
+      "lastAccessed": 1781074714032,
+      "type": "file"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "accessCount": 1,
+      "lastAccessed": 1781074724211,
+      "type": "file"
+    }
+  ],
   "userDirectives": []
 }
