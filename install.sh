@@ -104,16 +104,22 @@ RETIRED_HOOKS=(
     changes-tracker.sh        # retired: PostToolUse change log re-narrating git history into .cs/changes.md; git log/diff/status is authoritative
 )
 
-# Command URLs for web install
-COMMAND_SUMMARY_URL="${REPO_URL}/commands/summary.md"
-COMMAND_COMPACT_DISCOVERIES_URL="${REPO_URL}/commands/compact-discoveries.md"
-COMMAND_CHECKPOINT_URL="${REPO_URL}/commands/checkpoint.md"
-COMMAND_SWEEP_URL="${REPO_URL}/commands/sweep.md"
-COMMAND_WRAP_URL="${REPO_URL}/commands/wrap.md"
+# Slash commands cs ships; deployed to COMMANDS_DIR.
+# KEEP THIS LIST IN SYNC WITH bin/cs's CS_COMMANDS.
+CS_COMMANDS=(
+    summary.md
+    compact-discoveries.md
+    checkpoint.md
+    sweep.md
+    wrap.md
+)
 
-# Skill URLs for web install
-SKILL_STORE_SECRET_URL="${REPO_URL}/skills/store-secret/SKILL.md"
-SKILL_PROSE_HYGIENE_URL="${REPO_URL}/skills/prose-hygiene/SKILL.md"
+# Skills cs ships; each deploys as SKILLS_DIR/<name>/SKILL.md.
+# KEEP THIS LIST IN SYNC WITH bin/cs's CS_SKILLS.
+CS_SKILLS=(
+    store-secret
+    prose-hygiene
+)
 
 # Completion URLs for web install
 COMPLETION_BASH_URL="${REPO_URL}/completions/cs.bash"
@@ -288,24 +294,18 @@ installed "commands" "$COMMANDS_DIR/"
 mkdir -p "$COMMANDS_DIR"
 
 if [ "$INSTALL_METHOD" = "local" ]; then
-    cp "$COMMANDS_SOURCE/summary.md" "$COMMANDS_DIR/"
-    cp "$COMMANDS_SOURCE/compact-discoveries.md" "$COMMANDS_DIR/"
-    cp "$COMMANDS_SOURCE/checkpoint.md" "$COMMANDS_DIR/"
-    cp "$COMMANDS_SOURCE/sweep.md" "$COMMANDS_DIR/"
-    cp "$COMMANDS_SOURCE/wrap.md" "$COMMANDS_DIR/"
+    for cmd in "${CS_COMMANDS[@]}"; do
+        cp "$COMMANDS_SOURCE/$cmd" "$COMMANDS_DIR/"
+    done
 else
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "$COMMAND_SUMMARY_URL" -o "$COMMANDS_DIR/summary.md" || error "Failed to download summary.md"
-        curl -fsSL "$COMMAND_COMPACT_DISCOVERIES_URL" -o "$COMMANDS_DIR/compact-discoveries.md" || error "Failed to download compact-discoveries.md"
-        curl -fsSL "$COMMAND_CHECKPOINT_URL" -o "$COMMANDS_DIR/checkpoint.md" || error "Failed to download checkpoint.md"
-        curl -fsSL "$COMMAND_SWEEP_URL" -o "$COMMANDS_DIR/sweep.md" || error "Failed to download sweep.md"
-        curl -fsSL "$COMMAND_WRAP_URL" -o "$COMMANDS_DIR/wrap.md" || error "Failed to download wrap.md"
+        for cmd in "${CS_COMMANDS[@]}"; do
+            curl -fsSL "$REPO_URL/commands/$cmd" -o "$COMMANDS_DIR/$cmd" || error "Failed to download $cmd"
+        done
     elif command -v wget >/dev/null 2>&1; then
-        wget -q "$COMMAND_SUMMARY_URL" -O "$COMMANDS_DIR/summary.md" || error "Failed to download summary.md"
-        wget -q "$COMMAND_COMPACT_DISCOVERIES_URL" -O "$COMMANDS_DIR/compact-discoveries.md" || error "Failed to download compact-discoveries.md"
-        wget -q "$COMMAND_CHECKPOINT_URL" -O "$COMMANDS_DIR/checkpoint.md" || error "Failed to download checkpoint.md"
-        wget -q "$COMMAND_SWEEP_URL" -O "$COMMANDS_DIR/sweep.md" || error "Failed to download sweep.md"
-        wget -q "$COMMAND_WRAP_URL" -O "$COMMANDS_DIR/wrap.md" || error "Failed to download wrap.md"
+        for cmd in "${CS_COMMANDS[@]}"; do
+            wget -q "$REPO_URL/commands/$cmd" -O "$COMMANDS_DIR/$cmd" || error "Failed to download $cmd"
+        done
     fi
 fi
 
@@ -313,19 +313,23 @@ fi
 SKILLS_DIR="$HOME/.claude/skills"
 SKILLS_SOURCE="$SCRIPT_DIR/skills"
 installed "skills" "$SKILLS_DIR/"
-mkdir -p "$SKILLS_DIR/store-secret"
-mkdir -p "$SKILLS_DIR/prose-hygiene"
+for skill in "${CS_SKILLS[@]}"; do
+    mkdir -p "$SKILLS_DIR/$skill"
+done
 
 if [ "$INSTALL_METHOD" = "local" ]; then
-    cp "$SKILLS_SOURCE/store-secret/SKILL.md" "$SKILLS_DIR/store-secret/"
-    cp "$SKILLS_SOURCE/prose-hygiene/SKILL.md" "$SKILLS_DIR/prose-hygiene/"
+    for skill in "${CS_SKILLS[@]}"; do
+        cp "$SKILLS_SOURCE/$skill/SKILL.md" "$SKILLS_DIR/$skill/"
+    done
 else
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "$SKILL_STORE_SECRET_URL" -o "$SKILLS_DIR/store-secret/SKILL.md" || error "Failed to download store-secret skill"
-        curl -fsSL "$SKILL_PROSE_HYGIENE_URL" -o "$SKILLS_DIR/prose-hygiene/SKILL.md" || error "Failed to download prose-hygiene skill"
+        for skill in "${CS_SKILLS[@]}"; do
+            curl -fsSL "$REPO_URL/skills/$skill/SKILL.md" -o "$SKILLS_DIR/$skill/SKILL.md" || error "Failed to download $skill skill"
+        done
     elif command -v wget >/dev/null 2>&1; then
-        wget -q "$SKILL_STORE_SECRET_URL" -O "$SKILLS_DIR/store-secret/SKILL.md" || error "Failed to download store-secret skill"
-        wget -q "$SKILL_PROSE_HYGIENE_URL" -O "$SKILLS_DIR/prose-hygiene/SKILL.md" || error "Failed to download prose-hygiene skill"
+        for skill in "${CS_SKILLS[@]}"; do
+            wget -q "$REPO_URL/skills/$skill/SKILL.md" -O "$SKILLS_DIR/$skill/SKILL.md" || error "Failed to download $skill skill"
+        done
     fi
 fi
 
@@ -521,6 +525,12 @@ fi
 
 # Get version for completion message
 CS_VERSION=$(grep -m1 "^VERSION=" "$INSTALL_DIR/cs" 2>/dev/null | cut -d'"' -f2 || echo "unknown")
+
+# Stamp the deployed-hooks version so cs -doctor can flag installs whose
+# deployed artifacts lag behind the running cs binary.
+if [ "$CS_VERSION" != "unknown" ]; then
+    echo "$CS_VERSION" > "$HOOKS_DIR/.version"
+fi
 
 echo ""
 echo -e "   ${GREEN}✓${NC} ${ORANGE}Installation complete${NC} ${COMMENT}(${CS_VERSION})${NC}"

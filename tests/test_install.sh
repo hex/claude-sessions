@@ -85,10 +85,73 @@ EOF
 }
 
 # ============================================================================
-# Hook deployment: binaries and registrations live under ~/.claude/hooks/cs/
+# Manifest arrays: install.sh and bin/cs must agree, and must match the repo
 # ============================================================================
 
 CS_BIN="$SCRIPT_DIR/../bin/cs"
+
+# Print the entries of a bash array literal from a script file, one per line,
+# with trailing comments and whitespace stripped.
+extract_array() {
+    local file="$1" name="$2"
+    awk -v name="$name" '
+        $0 ~ "^"name"=\\(" { f=1; next }
+        f && /^\)/ { exit }
+        f { sub(/#.*/, ""); gsub(/^[ \t]+|[ \t]+$/, ""); if (length) print }
+    ' "$file"
+}
+
+test_manifest_arrays_in_sync() {
+    local arr a b
+    for arr in CS_HOOKS RETIRED_HOOKS CS_COMMANDS CS_SKILLS; do
+        a=$(extract_array "$SCRIPT_DIR/../install.sh" "$arr" | sort)
+        b=$(extract_array "$CS_BIN" "$arr" | sort)
+        if [ -z "$a" ]; then
+            echo "  FAIL: $arr not found in install.sh"
+            return 1
+        fi
+        if [ -z "$b" ]; then
+            echo "  FAIL: $arr not found in bin/cs"
+            return 1
+        fi
+        if [ "$a" != "$b" ]; then
+            echo "  FAIL: $arr differs between install.sh and bin/cs"
+            diff <(echo "$a") <(echo "$b") | head -10
+            return 1
+        fi
+    done
+}
+
+test_manifest_arrays_match_repo_files() {
+    local listed actual
+    listed=$(extract_array "$SCRIPT_DIR/../install.sh" CS_HOOKS | sort)
+    actual=$(cd "$SCRIPT_DIR/../hooks" && ls *.sh | sort)
+    if [ "$listed" != "$actual" ]; then
+        echo "  FAIL: CS_HOOKS does not match hooks/*.sh"
+        diff <(echo "$listed") <(echo "$actual") | head -10
+        return 1
+    fi
+
+    listed=$(extract_array "$SCRIPT_DIR/../install.sh" CS_COMMANDS | sort)
+    actual=$(cd "$SCRIPT_DIR/../commands" && ls *.md | sort)
+    if [ "$listed" != "$actual" ]; then
+        echo "  FAIL: CS_COMMANDS does not match commands/*.md"
+        diff <(echo "$listed") <(echo "$actual") | head -10
+        return 1
+    fi
+
+    listed=$(extract_array "$SCRIPT_DIR/../install.sh" CS_SKILLS | sort)
+    actual=$(cd "$SCRIPT_DIR/../skills" && ls -d ./*/ | sed 's|^\./||; s|/$||' | sort)
+    if [ "$listed" != "$actual" ]; then
+        echo "  FAIL: CS_SKILLS does not match skills/ directories"
+        diff <(echo "$listed") <(echo "$actual") | head -10
+        return 1
+    fi
+}
+
+# ============================================================================
+# Hook deployment: binaries and registrations live under ~/.claude/hooks/cs/
+# ============================================================================
 
 test_install_deploys_hooks_to_cs_subdir() {
     local fake_home="$TEST_TMPDIR/home"
@@ -166,10 +229,33 @@ EOF
     fi
 }
 
+test_install_writes_version_stamp() {
+    local fake_home="$TEST_TMPDIR/home"
+    mkdir -p "$fake_home"
+
+    HOME="$fake_home" bash "$INSTALL_SH" > /dev/null 2>&1 || {
+        echo "  FAIL: install.sh exited non-zero"
+        return 1
+    }
+
+    local stamp expected
+    if [ ! -f "$fake_home/.claude/hooks/cs/.version" ]; then
+        echo "  FAIL: no .version stamp written to hooks/cs/"
+        return 1
+    fi
+    stamp=$(cat "$fake_home/.claude/hooks/cs/.version")
+    expected=$(grep -m1 '^VERSION=' "$CS_BIN" | cut -d'"' -f2)
+    if [ "$stamp" != "$expected" ]; then
+        echo "  FAIL: stamp '$stamp' does not match bin/cs VERSION '$expected'"
+        return 1
+    fi
+}
+
 test_uninstall_strips_hook_registrations() {
     local fake_home="$TEST_TMPDIR/uninstall-home"
     mkdir -p "$fake_home/.claude/hooks/cs"
     echo '#!/bin/sh' > "$fake_home/.claude/hooks/cs/session-start.sh"
+    echo "0.0.0" > "$fake_home/.claude/hooks/cs/.version"
     # Tilde-form registrations in both layouts, plus a non-cs hook that must survive
     cat > "$fake_home/.claude/settings.json" << 'EOF'
 {"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"~/.claude/hooks/cs/session-start.sh","timeout":30}]}],"Stop":[{"hooks":[{"type":"command","command":"~/.claude/hooks/prose-lint.sh","timeout":15}]},{"hooks":[{"type":"command","command":"~/bin/my-own-hook.sh","timeout":5}]}]}}
@@ -182,6 +268,10 @@ EOF
 
     if [ -f "$fake_home/.claude/hooks/cs/session-start.sh" ]; then
         echo "  FAIL: deployed hook binary not removed"
+        return 1
+    fi
+    if [ -d "$fake_home/.claude/hooks/cs" ]; then
+        echo "  FAIL: hooks/cs directory not removed (stale .version blocking rmdir?)"
         return 1
     fi
 
@@ -208,7 +298,10 @@ echo "Running test_install.sh"
 echo ""
 run_test test_install_completes_when_zshrc_has_no_fpath
 run_test test_install_respects_custom_fpath_dir
+run_test test_manifest_arrays_in_sync
+run_test test_manifest_arrays_match_repo_files
 run_test test_install_deploys_hooks_to_cs_subdir
 run_test test_install_migrates_flat_hook_layout
+run_test test_install_writes_version_stamp
 run_test test_uninstall_strips_hook_registrations
 report_results

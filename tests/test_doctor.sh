@@ -161,8 +161,63 @@ test_doctor_drift_skipped_outside_checkout() {
 
     local output
     output=$(cd "$plain" && CS_HOOKS_DIR="$deployed" "$CS_BIN" -doctor 2>&1) || true
-    if echo "$output" | grep -q "Hook drift"; then
+    if echo "$output" | grep -qi "drift"; then
         echo "  FAIL: drift check should be silent outside a cs source checkout"
+        return 1
+    fi
+}
+
+test_doctor_warns_on_command_drift() {
+    local checkout="$TEST_TMPDIR/checkout" deployed_cmds="$TEST_TMPDIR/commands"
+    make_fake_checkout "$checkout"
+    mkdir -p "$checkout/commands" "$deployed_cmds" "$TEST_TMPDIR/deployed-hooks"
+    echo 'source version' > "$checkout/commands/summary.md"
+    echo 'deployed version' > "$deployed_cmds/summary.md"
+
+    local output
+    output=$(cd "$checkout" && CS_HOOKS_DIR="$TEST_TMPDIR/deployed-hooks" \
+        CS_COMMANDS_DIR="$deployed_cmds" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Command drift" \
+        "doctor should warn when a deployed command differs from checkout source" || return 1
+}
+
+test_doctor_warns_on_skill_drift() {
+    local checkout="$TEST_TMPDIR/checkout" deployed_skills="$TEST_TMPDIR/skills"
+    make_fake_checkout "$checkout"
+    mkdir -p "$checkout/skills/store-secret" "$deployed_skills/store-secret" "$TEST_TMPDIR/deployed-hooks"
+    echo 'source version' > "$checkout/skills/store-secret/SKILL.md"
+    echo 'deployed version' > "$deployed_skills/store-secret/SKILL.md"
+
+    local output
+    output=$(cd "$checkout" && CS_HOOKS_DIR="$TEST_TMPDIR/deployed-hooks" \
+        CS_SKILLS_DIR="$deployed_skills" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Skill drift" \
+        "doctor should warn when a deployed skill differs from checkout source" || return 1
+}
+
+test_doctor_warns_on_version_mismatch() {
+    local deployed="$TEST_TMPDIR/deployed-hooks"
+    mkdir -p "$deployed"
+    echo "0.0.0" > "$deployed/.version"
+
+    local output
+    output=$(CS_HOOKS_DIR="$deployed" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Deployed version" \
+        "doctor should warn when the deployed stamp differs from cs VERSION" || return 1
+    assert_output_contains "$output" "0.0.0" \
+        "warning should name the stamped version" || return 1
+}
+
+test_doctor_version_silent_without_stamp() {
+    local deployed="$TEST_TMPDIR/deployed-hooks"
+    mkdir -p "$deployed"
+    echo 'echo x' > "$deployed/session-start.sh"
+    chmod +x "$deployed/session-start.sh"
+
+    local output
+    output=$(CS_HOOKS_DIR="$deployed" "$CS_BIN" -doctor 2>&1) || true
+    if echo "$output" | grep -q "Deployed version.*WARN\|WARN.*Deployed version"; then
+        echo "  FAIL: missing stamp should not produce a version warning"
         return 1
     fi
 }
@@ -386,6 +441,10 @@ run_test test_doctor_warns_on_hook_drift
 run_test test_doctor_warns_on_undeployed_hook
 run_test test_doctor_drift_silent_when_in_sync
 run_test test_doctor_drift_skipped_outside_checkout
+run_test test_doctor_warns_on_command_drift
+run_test test_doctor_warns_on_skill_drift
+run_test test_doctor_warns_on_version_mismatch
+run_test test_doctor_version_silent_without_stamp
 run_test test_doctor_runs_without_session
 run_test test_doctor_runs_audit_check
 run_test test_doctor_audit_counts_settings_contents

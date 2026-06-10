@@ -42,6 +42,23 @@ CS_HOOKS=(
     scope-prompt.sh
 )
 
+# Slash commands cs ships; deployed to ~/.claude/commands/.
+# KEEP THIS LIST IN SYNC WITH install.sh's CS_COMMANDS.
+CS_COMMANDS=(
+    summary.md
+    compact-discoveries.md
+    checkpoint.md
+    sweep.md
+    wrap.md
+)
+
+# Skills cs ships; each deploys as ~/.claude/skills/<name>/SKILL.md.
+# KEEP THIS LIST IN SYNC WITH install.sh's CS_SKILLS.
+CS_SKILLS=(
+    store-secret
+    prose-hygiene
+)
+
 # Hook scripts in HOOKS_DIR that are NOT registered in settings.json. They are
 # utilities invoked by other hooks rather than directly by Claude Code.
 UTILITY_HOOKS=()
@@ -1593,32 +1610,71 @@ _doctor_check_hook_files_executable() {
     fi
 }
 
-# Compares hooks/*.sh in the current directory's cs source checkout against
-# the deployed copies. A hooks/ edit only takes effect once install.sh
-# deploys it, so silent drift between the two means the running hooks don't
-# match what the source says they do. Silent outside a checkout.
+# Compares deployable artifacts in the current directory's cs source checkout
+# (hooks/*.sh, commands/*.md, skills/*/SKILL.md) against their deployed
+# copies. A source edit only takes effect once install.sh deploys it, so
+# silent drift between the two means the running install doesn't match what
+# the source says it does. Silent outside a checkout.
 _doctor_check_hook_drift() {
     local hooks_dir="${CS_HOOKS_DIR:-$HOME/.claude/hooks/cs}"
+    local commands_dir="${CS_COMMANDS_DIR:-$HOME/.claude/commands}"
+    local skills_dir="${CS_SKILLS_DIR:-$HOME/.claude/skills}"
     [ -d "hooks" ] && [ -f "install.sh" ] && [ -f "bin/cs" ] || return 0
-    local drifted=() missing=() f name
-    for f in hooks/*.sh; do
-        [ -e "$f" ] || continue
-        name=$(basename "$f")
-        if [ ! -f "$hooks_dir/$name" ]; then
-            missing+=("$name")
-        elif ! cmp -s "$f" "$hooks_dir/$name"; then
-            drifted+=("$name")
+
+    local clean=1
+
+    # area label, source glob result, deployed path — reported per artifact kind
+    _drift_scan() {
+        local label="$1" deploy_root="$2"
+        shift 2
+        local drifted=() missing=() src name deployed
+        for src in "$@"; do
+            [ -e "$src" ] || continue
+            name=$(basename "$src")
+            case "$label" in
+                Skill) deployed="$deploy_root/$(basename "$(dirname "$src")")/SKILL.md"
+                       name=$(basename "$(dirname "$src")") ;;
+                *)     deployed="$deploy_root/$name" ;;
+            esac
+            if [ ! -f "$deployed" ]; then
+                missing+=("$name")
+            elif ! cmp -s "$src" "$deployed"; then
+                drifted+=("$name")
+            fi
+        done
+        if [ ${#drifted[@]} -gt 0 ]; then
+            _doctor_warn "$label drift: deployed copy differs from source: ${drifted[*]} (run ./install.sh)"
+            clean=0
         fi
-    done
-    if [ ${#drifted[@]} -eq 0 ] && [ ${#missing[@]} -eq 0 ]; then
-        _doctor_ok "Hook drift: deployed hooks match checkout source"
-        return
+        if [ ${#missing[@]} -gt 0 ]; then
+            _doctor_warn "$label drift: not deployed: ${missing[*]} (run ./install.sh)"
+            clean=0
+        fi
+    }
+
+    _drift_scan "Hook" "$hooks_dir" hooks/*.sh
+    _drift_scan "Command" "$commands_dir" commands/*.md
+    _drift_scan "Skill" "$skills_dir" skills/*/SKILL.md
+
+    if [ "$clean" = "1" ]; then
+        _doctor_ok "Deploy drift: hooks, commands, and skills match checkout source"
     fi
-    if [ ${#drifted[@]} -gt 0 ]; then
-        _doctor_warn "Hook drift: deployed copy differs from source: ${drifted[*]} (run ./install.sh)"
-    fi
-    if [ ${#missing[@]} -gt 0 ]; then
-        _doctor_warn "Hook drift: not deployed: ${missing[*]} (run ./install.sh)"
+}
+
+# Compares the version stamped into the deployed hooks directory at install
+# time against this binary's VERSION. A mismatch means cs was updated without
+# re-deploying its artifacts (or vice versa). Skips silently when no stamp
+# exists.
+_doctor_check_deployed_version() {
+    local stamp="${CS_HOOKS_DIR:-$HOME/.claude/hooks/cs}/.version"
+    [ -f "$stamp" ] || return 0
+    local deployed
+    deployed=$(cat "$stamp" 2>/dev/null || true)
+    [ -n "$deployed" ] || return 0
+    if [ "$deployed" = "$VERSION" ]; then
+        _doctor_ok "Deployed version: artifacts stamped $deployed match cs $VERSION"
+    else
+        _doctor_warn "Deployed version: artifacts stamped $deployed but cs is $VERSION (run install.sh)"
     fi
 }
 
@@ -1827,6 +1883,7 @@ run_doctor() {
     _doctor_check_hooks_registered
     _doctor_check_hook_files_executable
     _doctor_check_hook_drift
+    _doctor_check_deployed_version
     _doctor_check_settings_hooks_resolve
     _doctor_check_claude_audit
 
@@ -3397,10 +3454,11 @@ run_uninstall() {
             fi
         done
     done
+    rm -f "$hooks_dir/.version"
     rmdir "$hooks_dir" 2>/dev/null || true
 
     # Remove commands
-    for cmd in summary.md compact-discoveries.md checkpoint.md sweep.md wrap.md; do
+    for cmd in "${CS_COMMANDS[@]}"; do
         if [ -f "$commands_dir/$cmd" ]; then
             rm "$commands_dir/$cmd"
             info "Removed $commands_dir/$cmd"
@@ -3408,14 +3466,13 @@ run_uninstall() {
     done
 
     # Remove skills
-    if [ -d "$skills_dir/store-secret" ]; then
-        rm -rf "$skills_dir/store-secret"
-        info "Removed $skills_dir/store-secret/"
-    fi
-    if [ -d "$skills_dir/prose-hygiene" ]; then
-        rm -rf "$skills_dir/prose-hygiene"
-        info "Removed $skills_dir/prose-hygiene/"
-    fi
+    local skill
+    for skill in "${CS_SKILLS[@]}"; do
+        if [ -d "$skills_dir/$skill" ]; then
+            rm -rf "$skills_dir/$skill"
+            info "Removed $skills_dir/$skill/"
+        fi
+    done
 
     # Remove shell completions
     if [ -f "$bash_completion_dir/cs.bash" ]; then

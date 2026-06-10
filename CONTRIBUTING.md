@@ -33,12 +33,12 @@ There are 283+ tests across 17 test suites. All tests must pass before submittin
 1. **Create the hook script** in `hooks/your-hook.sh`. Copy an existing hook (e.g., `hooks/bash-logger.sh`) as a starting template.
 
 2. **Register in `install.sh`**:
-   - Add a URL variable at the top: `HOOK_YOUR_HOOK_URL="${REPO_URL}/hooks/your-hook.sh"`
+   - Add the filename to the `CS_HOOKS` array (deploy, flat-layout cleanup, and registration stripping all derive from it)
    - Add a path variable: `YOUR_HOOK_PATH="$HOOKS_DIR/your-hook.sh"`
    - Add a tilde variant: `YOUR_HOOK_TILDE="$HOOKS_TILDE_DIR/your-hook.sh"`
-   - Add a `jq` block to merge the hook into `settings.json` under the appropriate event (`SessionStart`, `PreToolUse`, `PostToolUse`, etc.)
+   - Add a `_merge_cs_hook` call to register the hook in `settings.json` under the appropriate event (`SessionStart`, `PreToolUse`, `PostToolUse`, etc.)
 
-3. **Add to `run_uninstall()`** in `bin/cs` — add your hook filename to the cleanup loop so it gets removed on `cs -uninstall`.
+3. **Add to `CS_HOOKS` in `bin/cs`** — uninstall and doctor derive from it. `tests/test_install.sh` fails if the two arrays disagree with each other or with the actual contents of `hooks/`.
 
 4. **Document in `docs/hooks.md`** — add a section following the existing format: hook name, event type, description, and behavior.
 
