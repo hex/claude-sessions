@@ -1,0 +1,151 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1781074206510,
+  "projectRoot": "/Users/alex.geana/.claude-sessions/claude-sessions",
+  "techStack": {
+    "languages": [],
+    "frameworks": [],
+    "packageManager": null,
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "assets",
+      "bin",
+      "docs",
+      "tests"
+    ],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "assets": {
+      "path": "assets",
+      "purpose": "Static assets",
+      "fileCount": 1,
+      "lastAccessed": 1781074206335,
+      "keyFiles": [
+        "screenshot.png"
+      ]
+    },
+    "bin": {
+      "path": "bin",
+      "purpose": "Executable scripts",
+      "fileCount": 3,
+      "lastAccessed": 1781074206335,
+      "keyFiles": [
+        "cs",
+        "cs-secrets",
+        "cs-tui"
+      ]
+    },
+    "commands": {
+      "path": "commands",
+      "purpose": null,
+      "fileCount": 5,
+      "lastAccessed": 1781074206335,
+      "keyFiles": [
+        "checkpoint.md",
+        "compact-discoveries.md",
+        "summary.md",
+        "sweep.md",
+        "wrap.md"
+      ]
+    },
+    "completions": {
+      "path": "completions",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1781074206336,
+      "keyFiles": [
+        "_cs",
+        "cs.bash"
+      ]
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 3,
+      "lastAccessed": 1781074206336,
+      "keyFiles": [
+        "hooks.md",
+        "secrets.md",
+        "sync.md"
+      ]
+    },
+    "hooks": {
+      "path": "hooks",
+      "purpose": null,
+      "fileCount": 11,
+      "lastAccessed": 1781074206336,
+      "keyFiles": [
+        "artifact-tracker.sh",
+        "bash-logger.sh",
+        "discoveries-reminder.sh",
+        "discovery-commits.sh",
+        "prose-lint.sh"
+      ]
+    },
+    "skills": {
+      "path": "skills",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1781074206336,
+      "keyFiles": []
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Test files",
+      "fileCount": 25,
+      "lastAccessed": 1781074206336,
+      "keyFiles": [
+        "test_adopt.sh",
+        "test_artifact_tracker.sh",
+        "test_auto_memory.sh",
+        "test_auto_update.sh",
+        "test_bash_logger.sh"
+      ]
+    },
+    "tui": {
+      "path": "tui",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1781074206337,
+      "keyFiles": [
+        "Cargo.lock",
+        "Cargo.toml"
+      ]
+    },
+    "tui/src": {
+      "path": "tui/src",
+      "purpose": "Source code",
+      "fileCount": 5,
+      "lastAccessed": 1781074206338,
+      "keyFiles": [
+        "app.rs",
+        "main.rs",
+        "session.rs"
+      ]
+    }
+  },
+  "hotPaths": [],
+  "userDirectives": []
+}
