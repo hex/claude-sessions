@@ -16,6 +16,7 @@ Thumbs.db
 .claude/
 .claude-crawl/
 .cs/
+.omc/
 
 # Rust build artifacts
 tui/target/
