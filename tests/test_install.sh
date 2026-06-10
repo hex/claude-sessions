@@ -122,6 +122,41 @@ test_manifest_arrays_in_sync() {
     done
 }
 
+# Print the jq filter body of _strip_hook_registration from a script file,
+# whitespace-normalized: the lines between the `--arg t "$t"` argument line
+# and the closing single-quote line.
+extract_strip_filter() {
+    local file="$1"
+    awk '
+        /_strip_hook_registration\(\)/ { infn=1 }
+        infn && /--arg t "\$t"/ { grab=1; next }
+        grab {
+            if ($0 ~ /^[ \t]*'\''/) exit
+            gsub(/^[ \t]+|[ \t]+$/, "")
+            if (length) print
+        }
+    ' "$file"
+}
+
+test_strip_filters_in_sync() {
+    local a b
+    a=$(extract_strip_filter "$SCRIPT_DIR/../install.sh")
+    b=$(extract_strip_filter "$CS_BIN")
+    if [ -z "$a" ]; then
+        echo "  FAIL: _strip_hook_registration filter not found in install.sh"
+        return 1
+    fi
+    if [ -z "$b" ]; then
+        echo "  FAIL: _strip_hook_registration filter not found in bin/cs"
+        return 1
+    fi
+    if [ "$a" != "$b" ]; then
+        echo "  FAIL: _strip_hook_registration jq filter differs between install.sh and bin/cs"
+        diff <(echo "$a") <(echo "$b") | head -10
+        return 1
+    fi
+}
+
 test_manifest_arrays_match_repo_files() {
     local listed actual
     listed=$(extract_array "$SCRIPT_DIR/../install.sh" CS_HOOKS | sort)
@@ -300,6 +335,7 @@ run_test test_install_completes_when_zshrc_has_no_fpath
 run_test test_install_respects_custom_fpath_dir
 run_test test_manifest_arrays_in_sync
 run_test test_manifest_arrays_match_repo_files
+run_test test_strip_filters_in_sync
 run_test test_install_deploys_hooks_to_cs_subdir
 run_test test_install_migrates_flat_hook_layout
 run_test test_install_writes_version_stamp

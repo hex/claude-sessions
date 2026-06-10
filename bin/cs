@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.5.7"
+VERSION="2026.6.1"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -59,9 +59,8 @@ CS_SKILLS=(
     prose-hygiene
 )
 
-# Hook scripts in HOOKS_DIR that are NOT registered in settings.json. They are
-# utilities invoked by other hooks rather than directly by Claude Code.
-UTILITY_HOOKS=()
+# Deployed-hooks directory; CS_HOOKS_DIR overrides it for tests.
+HOOKS_DEPLOY_DIR="${CS_HOOKS_DIR:-$HOME/.claude/hooks/cs}"
 
 # Encode an absolute filesystem path the way Claude Code does for project
 # directory names under ~/.claude/projects/ (each `/` and `.` becomes `-`).
@@ -1555,7 +1554,7 @@ _doctor_check_keychain() {
 }
 
 _doctor_check_hooks_registered() {
-    local hooks_dir="${CS_HOOKS_DIR:-$HOME/.claude/hooks/cs}"
+    local hooks_dir="$HOOKS_DEPLOY_DIR"
     local settings="$HOME/.claude/settings.json"
     if [ ! -f "$settings" ]; then
         _doctor_warn "Hooks: $settings not found (cs may not be installed via install.sh)"
@@ -1569,14 +1568,9 @@ _doctor_check_hooks_registered() {
     names=$(cd "$hooks_dir" && ls *.sh 2>/dev/null || true)
     [ -z "$names" ] && { _doctor_warn "Hooks: no .sh files in $hooks_dir"; return; }
     settings_contents=$(cat "$settings")
-    local name util skip
+    local name
     while IFS= read -r name; do
         [ -z "$name" ] && continue
-        skip=0
-        for util in "${UTILITY_HOOKS[@]}"; do
-            [ "$name" = "$util" ] && { skip=1; break; }
-        done
-        [ "$skip" = "1" ] && continue
         case "$settings_contents" in
             *"/$name"*) ;;
             *) missing+=("$name") ;;
@@ -1590,7 +1584,7 @@ _doctor_check_hooks_registered() {
 }
 
 _doctor_check_hook_files_executable() {
-    local hooks_dir="${CS_HOOKS_DIR:-$HOME/.claude/hooks/cs}"
+    local hooks_dir="$HOOKS_DEPLOY_DIR"
     if [ ! -d "$hooks_dir" ]; then
         _doctor_warn "Hooks: directory $hooks_dir not found"
         return
@@ -1616,26 +1610,29 @@ _doctor_check_hook_files_executable() {
 # silent drift between the two means the running install doesn't match what
 # the source says it does. Silent outside a checkout.
 _doctor_check_hook_drift() {
-    local hooks_dir="${CS_HOOKS_DIR:-$HOME/.claude/hooks/cs}"
+    local hooks_dir="$HOOKS_DEPLOY_DIR"
     local commands_dir="${CS_COMMANDS_DIR:-$HOME/.claude/commands}"
     local skills_dir="${CS_SKILLS_DIR:-$HOME/.claude/skills}"
     [ -d "hooks" ] && [ -f "install.sh" ] && [ -f "bin/cs" ] || return 0
 
     local clean=1
 
-    # area label, source glob result, deployed path — reported per artifact kind
+    # area label, deploy root, source paths — reported per artifact kind.
+    # Skills deploy as <name>/SKILL.md; everything else deploys flat, keyed
+    # on the source path shape so the label stays purely cosmetic.
     _drift_scan() {
         local label="$1" deploy_root="$2"
         shift 2
         local drifted=() missing=() src name deployed
         for src in "$@"; do
             [ -e "$src" ] || continue
-            name=$(basename "$src")
-            case "$label" in
-                Skill) deployed="$deploy_root/$(basename "$(dirname "$src")")/SKILL.md"
-                       name=$(basename "$(dirname "$src")") ;;
-                *)     deployed="$deploy_root/$name" ;;
-            esac
+            if [[ "$src" == */SKILL.md ]]; then
+                name=$(basename "$(dirname "$src")")
+                deployed="$deploy_root/$name/SKILL.md"
+            else
+                name=$(basename "$src")
+                deployed="$deploy_root/$name"
+            fi
             if [ ! -f "$deployed" ]; then
                 missing+=("$name")
             elif ! cmp -s "$src" "$deployed"; then
@@ -1666,7 +1663,7 @@ _doctor_check_hook_drift() {
 # re-deploying its artifacts (or vice versa). Skips silently when no stamp
 # exists.
 _doctor_check_deployed_version() {
-    local stamp="${CS_HOOKS_DIR:-$HOME/.claude/hooks/cs}/.version"
+    local stamp="$HOOKS_DEPLOY_DIR/.version"
     [ -f "$stamp" ] || return 0
     local deployed
     deployed=$(cat "$stamp" 2>/dev/null || true)
@@ -3387,6 +3384,25 @@ sync_clone() {
     info "Start session with: cs $session_name"
 }
 
+# Remove a hook registration from any event in a settings JSON string,
+# matching either path spelling; drops wrappers that empty out. Prints the
+# updated JSON.
+# KEEP THE jq FILTER IN SYNC WITH install.sh's _strip_hook_registration —
+# tests/test_install.sh diffs the two filter bodies.
+_strip_hook_registration() {
+    local settings="$1" p="$2" t="$3"
+    echo "$settings" | jq --arg p "$p" --arg t "$t" '
+        if .hooks then
+            .hooks |= with_entries(
+                .value |= (
+                    map(.hooks |= map(select(.command != $p and .command != $t)))
+                    | map(select(.hooks | length > 0))
+                )
+            )
+        else . end
+    '
+}
+
 # Uninstall cs and all components
 run_uninstall() {
     local install_dir="$HOME/.local/bin"
@@ -3494,23 +3510,10 @@ run_uninstall() {
         # event-agnostic, matching both path spellings ($HOME and ~) in both
         # deployment layouts (subdirectory and flat). Drops wrappers that
         # empty out; sibling user hooks co-shipped in a wrapper survive.
-        local strip_name strip_p strip_t
+        local strip_name
         for strip_name in "${CS_HOOKS[@]}" "${RETIRED_HOOKS[@]}"; do
-            for strip_p in "$hooks_dir/$strip_name|~/.claude/hooks/cs/$strip_name" \
-                           "$hooks_parent_dir/$strip_name|~/.claude/hooks/$strip_name"; do
-                strip_t="${strip_p##*|}"
-                strip_p="${strip_p%%|*}"
-                settings=$(echo "$settings" | jq --arg p "$strip_p" --arg t "$strip_t" '
-                    if .hooks then
-                        .hooks |= with_entries(
-                            .value |= (
-                                map(.hooks |= map(select(.command != $p and .command != $t)))
-                                | map(select(.hooks | length > 0))
-                            )
-                        )
-                    else . end
-                ')
-            done
+            settings=$(_strip_hook_registration "$settings" "$hooks_dir/$strip_name" "~/.claude/hooks/cs/$strip_name")
+            settings=$(_strip_hook_registration "$settings" "$hooks_parent_dir/$strip_name" "~/.claude/hooks/$strip_name")
         done
 
         # Clean up empty hook arrays

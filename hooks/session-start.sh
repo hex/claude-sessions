@@ -166,41 +166,39 @@ See CLAUDE.md in the session directory for complete documentation protocol.
 EOF
 )
 
+# Set a key in README frontmatter, replacing any existing line and inserting
+# after 'created:' if absent. Atomic (tmp+mv), collapses duplicate key lines.
+# No-op when README is missing or has no frontmatter block.
+README_FILE="$META_DIR/README.md"
+frontmatter_set() {
+    local key="$1" value="$2"
+    [ -f "$README_FILE" ] && head -1 "$README_FILE" | grep -q '^---$' || return 0
+    local tmp="$README_FILE.tmp"
+    awk -v new_line="$key: $value" -v key="$key" '
+        index($0, key ":") == 1 { next }
+        /^created:/ { print; print new_line; next }
+        { print }
+    ' "$README_FILE" > "$tmp" && mv "$tmp" "$README_FILE"
+}
+
 # Bind claude_session_id in README frontmatter to the live conversation.
 # Claude Code forks a new UUID when a conversation is continued past the
 # context limit; the old transcript stays on disk, so the recorded UUID
 # looks healthy while naming the pre-fork conversation and `cs` resumes
 # stale history. The hook input names the conversation actually running,
 # so it is authoritative on every source.
-README_FILE="$META_DIR/README.md"
 UUID_RE='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
-if [ -f "$README_FILE" ] && head -1 "$README_FILE" | grep -q '^---$' \
-    && echo "$SESSION_ID" | grep -Eq "$UUID_RE"; then
-    RECORDED_UUID=$(grep '^claude_session_id:' "$README_FILE" | head -1 | awk '{print $2}' || true)
-    if [ "$RECORDED_UUID" != "$SESSION_ID" ]; then
-        if [ -n "$RECORDED_UUID" ]; then
-            sed -i.bak "s/^claude_session_id:.*$/claude_session_id: $SESSION_ID/" "$README_FILE" && rm -f "$README_FILE.bak"
-        else
-            sed -i.bak "/^created:/a\\
-claude_session_id: $SESSION_ID" "$README_FILE" && rm -f "$README_FILE.bak"
-        fi
+if [ -f "$README_FILE" ] && [[ "$SESSION_ID" =~ $UUID_RE ]]; then
+    RECORDED_UUID=$(awk '/^claude_session_id:/ { print $2; exit }' "$README_FILE")
+    if [ "$RECORDED_UUID" != "$SESSION_ID" ] && head -1 "$README_FILE" | grep -q '^---$'; then
+        frontmatter_set claude_session_id "$SESSION_ID"
         echo "$(date '+%Y-%m-%d %H:%M:%S') - Rebound claude_session_id: ${RECORDED_UUID:-none} -> $SESSION_ID" >> "$META_DIR/logs/session.log"
     fi
 fi
 
 # Update last_resumed in README.md frontmatter on resume
 if [ "$SOURCE" = "resume" ]; then
-    README_FILE="$META_DIR/README.md"
-    if [ -f "$README_FILE" ] && head -1 "$README_FILE" | grep -q '^---$'; then
-        TODAY=$(date '+%Y-%m-%d')
-        if grep -q '^last_resumed:' "$README_FILE"; then
-            sed -i.bak "s/^last_resumed:.*$/last_resumed: $TODAY/" "$README_FILE" && rm -f "$README_FILE.bak"
-        else
-            # Insert after created: line
-            sed -i.bak "/^created:/a\\
-last_resumed: $TODAY" "$README_FILE" && rm -f "$README_FILE.bak"
-        fi
-    fi
+    frontmatter_set last_resumed "$(date '+%Y-%m-%d')"
 fi
 
 # Dynamic context: add session state info on resume

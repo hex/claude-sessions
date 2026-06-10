@@ -381,35 +381,13 @@ else
         SETTINGS='{}'
     fi
 
-    # Our hook script paths (for detecting existing cs hooks)
+    # Tilde spelling of HOOKS_DIR (settings.json entries use ~ instead of $HOME)
     HOOKS_TILDE_DIR="~/.claude/hooks/cs"
-    SESSION_START_PATH="$HOOKS_DIR/session-start.sh"
-    ARTIFACT_TRACKER_PATH="$HOOKS_DIR/artifact-tracker.sh"
-    DISCOVERY_COMMITS_PATH="$HOOKS_DIR/discovery-commits.sh"
-    DISCOVERIES_REMINDER_PATH="$HOOKS_DIR/discoveries-reminder.sh"
-    PROSE_LINT_PATH="$HOOKS_DIR/prose-lint.sh"
-    SESSION_END_PATH="$HOOKS_DIR/session-end.sh"
-    SUBAGENT_CONTEXT_PATH="$HOOKS_DIR/subagent-context.sh"
-    TOOL_FAILURE_LOGGER_PATH="$HOOKS_DIR/tool-failure-logger.sh"
-    SESSION_AUTO_APPROVE_PATH="$HOOKS_DIR/session-auto-approve.sh"
-    BASH_LOGGER_PATH="$HOOKS_DIR/bash-logger.sh"
-    SCOPE_PROMPT_PATH="$HOOKS_DIR/scope-prompt.sh"
-
-    # Tilde-path variants for dedup (handles entries added with ~ instead of $HOME)
-    SESSION_START_TILDE="$HOOKS_TILDE_DIR/session-start.sh"
-    ARTIFACT_TRACKER_TILDE="$HOOKS_TILDE_DIR/artifact-tracker.sh"
-    DISCOVERY_COMMITS_TILDE="$HOOKS_TILDE_DIR/discovery-commits.sh"
-    DISCOVERIES_REMINDER_TILDE="$HOOKS_TILDE_DIR/discoveries-reminder.sh"
-    PROSE_LINT_TILDE="$HOOKS_TILDE_DIR/prose-lint.sh"
-    SESSION_END_TILDE="$HOOKS_TILDE_DIR/session-end.sh"
-    SUBAGENT_CONTEXT_TILDE="$HOOKS_TILDE_DIR/subagent-context.sh"
-    TOOL_FAILURE_LOGGER_TILDE="$HOOKS_TILDE_DIR/tool-failure-logger.sh"
-    SESSION_AUTO_APPROVE_TILDE="$HOOKS_TILDE_DIR/session-auto-approve.sh"
-    BASH_LOGGER_TILDE="$HOOKS_TILDE_DIR/bash-logger.sh"
-    SCOPE_PROMPT_TILDE="$HOOKS_TILDE_DIR/scope-prompt.sh"
 
     # Remove a hook registration from any event in settings.json, matching
     # either path spelling; drops wrappers that empty out.
+    # KEEP THE jq FILTER IN SYNC WITH bin/cs's _strip_hook_registration —
+    # tests/test_install.sh diffs the two filter bodies.
     _strip_hook_registration() {
         local p="$1" t="$2"
         SETTINGS=$(echo "$SETTINGS" | jq --arg p "$p" --arg t "$t" '
@@ -420,8 +398,6 @@ else
                         | map(select(.hooks | length > 0))
                     )
                 )
-                | .hooks |= with_entries(select(.value | length > 0))
-                | if .hooks == {} then del(.hooks) else . end
             else . end
         ')
     }
@@ -440,6 +416,14 @@ else
         _strip_hook_registration "$HOOKS_PARENT_DIR/$hook" "~/.claude/hooks/$hook"
     done
 
+    # Drop events that emptied out entirely after the strips
+    SETTINGS=$(echo "$SETTINGS" | jq '
+        if .hooks then
+            .hooks |= with_entries(select(.value | length > 0))
+            | if .hooks == {} then del(.hooks) else . end
+        else . end
+    ')
+
     # Merge hooks: strip cs's command from any wrapper's nested .hooks array,
     # drop wrappers that emptied out, then append a fresh standalone wrapper
     # for cs's hook. This preserves non-cs entries that the user co-shipped
@@ -452,12 +436,22 @@ else
     # skips them. The spec tests in tests/test_hooks.sh embed this same
     # filter shape via _install_merge_filter — keep them aligned.
     _merge_cs_hook() {
-        local event="$1" path="$2" tilde="$3" timeout="$4" append_block="$5"
+        local event="$1" file="$2" timeout="$3" matcher="${4:-}" async="${5:-}"
+        local path="$HOOKS_DIR/$file" tilde="$HOOKS_TILDE_DIR/$file"
+        local append
+        append=$(jq -n --arg cmd "$tilde" --argjson timeout "$timeout" \
+            --arg matcher "$matcher" --arg async "$async" '
+            (if $matcher != "" then {matcher: $matcher} else {} end)
+            + {hooks: [
+                {type: "command", command: $cmd, timeout: $timeout}
+                + (if $async == "true" then {async: true} else {} end)
+              ]}
+        ')
         SETTINGS=$(echo "$SETTINGS" | jq \
             --arg event "$event" \
             --arg path "$path" \
             --arg tilde "$tilde" \
-            --argjson append "$append_block" '
+            --argjson append "$append" '
             .hooks[$event] = (
                 ((.hooks[$event] // []) | map(
                     if .hooks then
@@ -469,38 +463,18 @@ else
         ')
     }
 
-    _merge_cs_hook SessionStart "$SESSION_START_PATH" "$SESSION_START_TILDE" 30 \
-        "{\"hooks\":[{\"type\":\"command\",\"command\":\"$SESSION_START_TILDE\",\"timeout\":30}]}"
-
-    _merge_cs_hook PreToolUse "$ARTIFACT_TRACKER_PATH" "$ARTIFACT_TRACKER_TILDE" 10 \
-        "{\"matcher\":\"Write\",\"hooks\":[{\"type\":\"command\",\"command\":\"$ARTIFACT_TRACKER_TILDE\",\"timeout\":10}]}"
-
-    _merge_cs_hook PostToolUse "$DISCOVERY_COMMITS_PATH" "$DISCOVERY_COMMITS_TILDE" 10 \
-        "{\"matcher\":\"Write|Edit\",\"hooks\":[{\"type\":\"command\",\"command\":\"$DISCOVERY_COMMITS_TILDE\",\"timeout\":10,\"async\":true}]}"
-
-    _merge_cs_hook Stop "$DISCOVERIES_REMINDER_PATH" "$DISCOVERIES_REMINDER_TILDE" 10 \
-        "{\"hooks\":[{\"type\":\"command\",\"command\":\"$DISCOVERIES_REMINDER_TILDE\",\"timeout\":10}]}"
-
-    _merge_cs_hook Stop "$PROSE_LINT_PATH" "$PROSE_LINT_TILDE" 15 \
-        "{\"hooks\":[{\"type\":\"command\",\"command\":\"$PROSE_LINT_TILDE\",\"timeout\":15}]}"
-
-    _merge_cs_hook SessionEnd "$SESSION_END_PATH" "$SESSION_END_TILDE" 30 \
-        "{\"hooks\":[{\"type\":\"command\",\"command\":\"$SESSION_END_TILDE\",\"timeout\":30}]}"
-
-    _merge_cs_hook SubagentStart "$SUBAGENT_CONTEXT_PATH" "$SUBAGENT_CONTEXT_TILDE" 10 \
-        "{\"hooks\":[{\"type\":\"command\",\"command\":\"$SUBAGENT_CONTEXT_TILDE\",\"timeout\":10}]}"
-
-    _merge_cs_hook PostToolUseFailure "$TOOL_FAILURE_LOGGER_PATH" "$TOOL_FAILURE_LOGGER_TILDE" 10 \
-        "{\"hooks\":[{\"type\":\"command\",\"command\":\"$TOOL_FAILURE_LOGGER_TILDE\",\"timeout\":10,\"async\":true}]}"
-
-    _merge_cs_hook PermissionRequest "$SESSION_AUTO_APPROVE_PATH" "$SESSION_AUTO_APPROVE_TILDE" 5 \
-        "{\"matcher\":\"Write|Edit\",\"hooks\":[{\"type\":\"command\",\"command\":\"$SESSION_AUTO_APPROVE_TILDE\",\"timeout\":5}]}"
-
-    _merge_cs_hook PreToolUse "$BASH_LOGGER_PATH" "$BASH_LOGGER_TILDE" 5 \
-        "{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"$BASH_LOGGER_TILDE\",\"timeout\":5}]}"
-
-    _merge_cs_hook UserPromptSubmit "$SCOPE_PROMPT_PATH" "$SCOPE_PROMPT_TILDE" 3 \
-        "{\"hooks\":[{\"type\":\"command\",\"command\":\"$SCOPE_PROMPT_TILDE\",\"timeout\":3}]}"
+    # Registration table: event, file, timeout, [matcher], [async]
+    _merge_cs_hook SessionStart       session-start.sh       30
+    _merge_cs_hook PreToolUse         artifact-tracker.sh    10 "Write"
+    _merge_cs_hook PostToolUse        discovery-commits.sh   10 "Write|Edit" true
+    _merge_cs_hook Stop               discoveries-reminder.sh 10
+    _merge_cs_hook Stop               prose-lint.sh          15
+    _merge_cs_hook SessionEnd         session-end.sh         30
+    _merge_cs_hook SubagentStart      subagent-context.sh    10
+    _merge_cs_hook PostToolUseFailure tool-failure-logger.sh 10 "" true
+    _merge_cs_hook PermissionRequest  session-auto-approve.sh 5 "Write|Edit"
+    _merge_cs_hook PreToolUse         bash-logger.sh          5 "Bash"
+    _merge_cs_hook UserPromptSubmit   scope-prompt.sh         3
 
     echo "$SETTINGS" > "$CLAUDE_SETTINGS"
 fi
