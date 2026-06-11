@@ -128,8 +128,8 @@ test_limits_purple_pair() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":23},"seven_day":{"used_percentage":41}}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;140;140;232" "5h block should have a periwinkle background" || return 1
-    assert_output_contains "$out" "48;2;95;95;132" "wk block should have a slate purple background" || return 1
+    assert_output_contains "$out" "48;2;140;140;232;38;2;30;30;30" "5h block should be periwinkle with dark text" || return 1
+    assert_output_contains "$out" "48;2;175;175;215;38;2;30;30;30" "wk block should be lavender with dark text" || return 1
 }
 
 # ============================================================================
@@ -143,7 +143,30 @@ test_limits_threshold_per_block() {
     out=$(run_sl "$json")
     assert_output_contains "$out" "48;2;140;140;232" "healthy 5h block should keep periwinkle" || return 1
     assert_output_contains "$out" "48;2;215;0;0" "wk 95% block should go red" || return 1
-    assert_output_not_contains "$out" "48;2;95;95;132" "hot wk block should not render slate" || return 1
+    assert_output_not_contains "$out" "48;2;175;175;215" "hot wk block should not render lavender" || return 1
+}
+
+# ============================================================================
+# Same-colored neighbor segments separate with a thin chevron, not a solid arrow
+# ============================================================================
+
+test_thin_chevron_between_same_bg() {
+    export COLORTERM=truecolor
+    # session (grey fallback), ctx healthy (grey), model (grey): two same-bg joints.
+    local json='{"session_name":"s","model":{"display_name":"Opus"},"workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "›" "same-bg neighbors should join with a thin chevron" || return 1
+}
+
+test_solid_arrow_between_different_bg() {
+    export COLORTERM=truecolor
+    # session grey then 5h periwinkle: differing neighbors keep the solid arrow.
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":4}}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" ">" "different-bg neighbors should keep the solid arrow" || return 1
+    assert_output_not_contains "$out" "›" "no thin chevron when backgrounds differ" || return 1
 }
 
 # ============================================================================
@@ -587,6 +610,8 @@ run_test test_happy_path_docs_fixture_plain
 run_test test_all_segments_ordering_plain
 run_test test_limits_purple_pair
 run_test test_limits_threshold_per_block
+run_test test_thin_chevron_between_same_bg
+run_test test_solid_arrow_between_different_bg
 run_test test_nerd_font_segment_icons
 run_test test_no_segment_icons_without_nerd_fonts
 run_test test_missing_rate_limits_absent

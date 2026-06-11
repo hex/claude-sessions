@@ -131,7 +131,7 @@ _sgr() {
                 pink)   rgb="175;0;135" ;;
                 cyan)   rgb="0;135;135" ;;
                 periwinkle) rgb="140;140;232" ;;
-                slate)  rgb="95;95;132" ;;
+                lavender) rgb="175;175;215" ;;
                 white)  rgb="255;255;255" ;;
                 black)  rgb="30;30;30" ;;
                 *)      rgb="88;88;88" ;;
@@ -149,7 +149,7 @@ _sgr() {
                 pink)   idx=162 ;;
                 cyan)   idx=30 ;;
                 periwinkle) idx=104 ;;
-                slate)  idx=60 ;;
+                lavender) idx=146 ;;
                 white)  idx=255 ;;
                 black)  idx=235 ;;
                 *)      idx=240 ;;
@@ -167,7 +167,7 @@ _sgr() {
                 pink)   base=95 ;;
                 cyan)   base=36 ;;
                 periwinkle) base=94 ;;
-                slate)  base=35 ;;
+                lavender) base=95 ;;
                 white)  base=97 ;;
                 black)  base=30 ;;
                 *)      base=90 ;;
@@ -300,7 +300,7 @@ _seg_git() {
 }
 
 # The 5h/wk pair mirrors claude's own usage bar: periwinkle for the rolling
-# window, slate for the week, each escalating to yellow/red on its own value.
+# window, lavender for the week, each escalating to yellow/red on its own value.
 _seg_limits() {
     local h="${SL_5H%%.*}" w="${SL_WK%%.*}"
     if [ -n "$h" ]; then
@@ -308,7 +308,7 @@ _seg_limits() {
         _add "${ICON_5H}5h ${h}%" "$_COLOR"
     fi
     if [ -n "$w" ]; then
-        _thresh_color "$w" 70 90 slate
+        _thresh_color "$w" 70 90 lavender
         _add "${ICON_WK}wk ${w}%" "$_COLOR"
     fi
 }
@@ -349,8 +349,11 @@ _render() {
         return 0
     fi
 
-    local esc=$'\033' reset=$'\033[0m' glyph=">"
-    [ "${CS_NERD_FONTS:-}" = "1" ] && glyph=$'\xee\x82\xb0'   # U+E0B0
+    local esc=$'\033' reset=$'\033[0m' glyph=">" thin="›"
+    if [ "${CS_NERD_FONTS:-}" = "1" ]; then
+        glyph=$'\xee\x82\xb0'   # U+E0B0 solid arrow
+        thin=$'\xee\x82\xb1'    # U+E0B1 outline chevron
+    fi
 
     # Lead with a reset so any residual SGR state from the caller's terminal
     # cannot bleed into the first segment's text.
@@ -360,16 +363,22 @@ _render() {
         _sgr 48 "$bg"; bgsgr="$_SGR"
         # Light backgrounds take dark text; everything else takes white.
         case "$bg" in
-            periwinkle|yellow|white) _sgr 38 black ;;
-            *)                       _sgr 38 white ;;
+            periwinkle|lavender|yellow|white) _sgr 38 black ;;
+            *)                                _sgr 38 white ;;
         esac
         fgtext="$_SGR"
         out+="${esc}[${bgsgr};${fgtext}m ${_SEG_TEXT[i]} "
         _sgr 38 "$bg"; fgseg="$_SGR"
         if [ $((i + 1)) -lt "$n" ]; then
             nbg="${_SEG_BG[i + 1]}"
-            _sgr 48 "$nbg"; nbgsgr="$_SGR"
-            out+="${esc}[${fgseg};${nbgsgr}m${glyph}"
+            if [ "$nbg" = "$bg" ]; then
+                # A solid arrow vanishes between equal backgrounds; draw a thin
+                # chevron in the segment's text color to keep the boundary.
+                out+="${esc}[${bgsgr};${fgtext}m${thin}"
+            else
+                _sgr 48 "$nbg"; nbgsgr="$_SGR"
+                out+="${esc}[${fgseg};${nbgsgr}m${glyph}"
+            fi
         else
             out+="${reset}${esc}[${fgseg}m${glyph}${reset}"
         fi
