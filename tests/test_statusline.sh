@@ -129,7 +129,7 @@ test_limits_purple_pair() {
     local out
     out=$(run_sl "$json")
     assert_output_contains "$out" "48;2;140;140;232;38;2;30;30;30" "5h block should be periwinkle with dark text" || return 1
-    assert_output_contains "$out" "48;2;175;175;215;38;2;30;30;30" "wk block should be lavender with dark text" || return 1
+    assert_output_contains "$out" "48;2;95;95;135;38;2;255;255;255" "wk block should be slate with white text" || return 1
 }
 
 # ============================================================================
@@ -143,7 +143,7 @@ test_limits_threshold_per_block() {
     out=$(run_sl "$json")
     assert_output_contains "$out" "48;2;140;140;232" "healthy 5h block should keep periwinkle" || return 1
     assert_output_contains "$out" "48;2;215;0;0" "wk 95% block should go red" || return 1
-    assert_output_not_contains "$out" "48;2;175;175;215" "hot wk block should not render lavender" || return 1
+    assert_output_not_contains "$out" "48;2;95;95;135" "hot wk block should not render slate" || return 1
 }
 
 # ============================================================================
