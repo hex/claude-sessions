@@ -120,33 +120,40 @@ test_all_segments_ordering_plain() {
 }
 
 # ============================================================================
-# Limits render as a purple pair: 5h periwinkle, wk slate (truecolor)
+# Limits render quietly when healthy: grey blocks, no accent colors
 # ============================================================================
 
-test_limits_purple_pair() {
+test_limits_neutral_when_healthy() {
     export COLORTERM=truecolor
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":23},"seven_day":{"used_percentage":41}}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;140;140;232;38;2;30;30;30" "5h block should be periwinkle with dark text" || return 1
-    assert_output_contains "$out" "48;2;175;175;215;38;2;30;30;30" "wk block should be lavender with dark text" || return 1
+    assert_output_contains "$out" "5h 23%" "5h block should render" || return 1
+    assert_output_contains "$out" "wk 41%" "wk block should render" || return 1
+    assert_output_not_contains "$out" "48;2;140;140;232" "healthy limits must not take the accent periwinkle" || return 1
+    assert_output_not_contains "$out" "48;2;255;183;77" "healthy limits must not show amber" || return 1
 }
 
 # ============================================================================
-# Pastel family: healthy segments take distinct pastel tints with dark text
+# Two accents by default: session color and model; every other healthy
+# segment is quiet grey
 # ============================================================================
 
-test_pastel_family_healthy_segments() {
+test_two_accents_default() {
     export COLORTERM=truecolor
-    export CLAUDE_SESSION_NAME="pastel"
-    make_cs_session "pastel" 30720 cyan   # 30K of 60K: disc healthy
-    local json='{"session_name":"pastel","model":{"display_name":"Opus"},"workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8},"cost":{"total_cost_usd":1.0}}'
+    export CLAUDE_SESSION_NAME="accents"
+    make_cs_session "accents" 30720 cyan   # 30K of 60K: disc healthy
+    local json='{"session_name":"accents","model":{"display_name":"Opus"},"workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8},"cost":{"total_cost_usd":1.0},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":40}}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;135;175;215;38;2;30;30;30" "healthy ctx should be soft blue with dark text" || return 1
-    assert_output_contains "$out" "48;2;175;215;215;38;2;30;30;30" "model should be pale cyan with dark text" || return 1
-    assert_output_contains "$out" "48;2;255;215;175;38;2;30;30;30" "healthy disc should be cream with dark text" || return 1
-    assert_output_contains "$out" "48;2;175;215;175;38;2;30;30;30" "cost should be mint with dark text" || return 1
+    assert_output_contains "$out" "48;2;0;135;135" "session block should carry the session color (cyan)" || return 1
+    assert_output_contains "$out" "48;2;140;140;232;38;2;30;30;30" "model should be the periwinkle accent with dark text" || return 1
+    local greys
+    greys=$(printf '%s' "$out" | grep -o '48;2;88;88;88' | grep -c . ) || greys=0
+    if [ "$greys" -lt 5 ]; then
+        echo "  FAIL: expected ctx, git-less run, 5h, wk, disc, cost on grey (got $greys grey blocks)"
+        return 1
+    fi
 }
 
 # ============================================================================
@@ -158,9 +165,8 @@ test_limits_threshold_per_block() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":95}}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;140;140;232" "healthy 5h block should keep periwinkle" || return 1
     assert_output_contains "$out" "48;2;215;0;0" "wk 95% block should go red" || return 1
-    assert_output_not_contains "$out" "48;2;175;175;215" "hot wk block should not render lavender" || return 1
+    assert_output_not_contains "$out" "48;2;255;183;77" "healthy 5h block must not show amber" || return 1
 }
 
 # ============================================================================
@@ -180,8 +186,9 @@ test_thin_chevron_between_same_bg() {
 
 test_solid_arrow_between_different_bg() {
     export COLORTERM=truecolor
-    # session grey then 5h periwinkle: differing neighbors keep the solid arrow.
-    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":4}}}'
+    # session grey then the periwinkle model accent: differing neighbors keep
+    # the solid arrow.
+    local json='{"session_name":"s","model":{"display_name":"Opus"},"workspace":{"current_dir":"/none"}}'
     local out
     out=$(run_sl "$json")
     assert_output_contains "$out" ">" "different-bg neighbors should keep the solid arrow" || return 1
@@ -364,11 +371,11 @@ test_model_neutral_not_blue() {
 
 test_dark_text_on_periwinkle() {
     export COLORTERM=truecolor
-    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":4}}}'
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"model":{"display_name":"Opus"}}'
     local out
     out=$(run_sl "$json")
     assert_output_contains "$out" "48;2;140;140;232;38;2;30;30;30" \
-        "periwinkle block should carry dark text for contrast" || return 1
+        "the periwinkle model accent should carry dark text for contrast" || return 1
 }
 
 test_dark_text_on_amber_warn() {
@@ -642,8 +649,8 @@ echo "Running test_statusline.sh"
 echo ""
 run_test test_happy_path_docs_fixture_plain
 run_test test_all_segments_ordering_plain
-run_test test_limits_purple_pair
-run_test test_pastel_family_healthy_segments
+run_test test_limits_neutral_when_healthy
+run_test test_two_accents_default
 run_test test_limits_threshold_per_block
 run_test test_thin_chevron_between_same_bg
 run_test test_solid_arrow_between_different_bg
