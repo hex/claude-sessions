@@ -10,7 +10,7 @@ With colors enabled, each segment renders as a colored background block with an 
 
 ## Segments
 
-Default order: `session,model,ctx,git,limits,disc,cost` — identity first (which session, which model), then the gauges.
+Default order: `session,model,ctx,git,limits,disc,cost`. Identity first (which session, which model), then the gauges.
 
 | Segment | Shows | Source | Color |
 |---|---|---|---|
