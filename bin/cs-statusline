@@ -1,0 +1,382 @@
+#!/usr/bin/env bash
+# ABOUTME: Claude Code statusLine command — renders a one-line powerline status bar
+# ABOUTME: Reads the statusline JSON on stdin and prints session/ctx/model/git/limits/disc/cost
+
+set -uo pipefail
+
+SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
+CS_DISCOVERIES_DEFAULT_MAX=61440
+
+# Parsed stdin fields (filled by _parse_stdin).
+SL_SESSION=""; SL_CTX=""; SL_MODEL=""; SL_EFFORT=""
+SL_5H=""; SL_WK=""; SL_COST=""; SL_DIR=""
+
+# Collected segments (parallel arrays) and chosen color level.
+_SEG_TEXT=(); _SEG_BG=(); LEVEL="basic"
+
+# Scratch globals used in place of command substitution (keeps the per-render
+# hot path fork-free; this script runs on every assistant message).
+_SGR=""; _COLOR=""
+
+# --- stdin -----------------------------------------------------------------
+
+# Run a command with a wall-clock cap when timeout(1) is available, else plain.
+_timeout() {
+    local secs="$1"; shift
+    if command -v timeout >/dev/null 2>&1; then
+        timeout "$secs" "$@"
+    elif command -v gtimeout >/dev/null 2>&1; then
+        gtimeout "$secs" "$@"
+    else
+        "$@"
+    fi
+}
+
+# Slurp stdin with a builtin read so no subprocess is spawned and a stuck pipe
+# cannot hang the render past one second. Handles single-line compact JSON
+# (the common case) and multi-line pretty JSON alike.
+_read_stdin() {
+    [ -t 0 ] && return 0
+    local line input=""
+    while IFS= read -r -t 1 line; do
+        input+="$line"$'\n'
+    done
+    input+="$line"   # trailing partial line (no newline) or empty
+    printf '%s' "$input"
+}
+
+# Extract every field we need in one jq pass, one value per line. Returns
+# non-zero (caller falls back) when jq is missing, stdin is empty, or the JSON
+# does not parse. One value per line (not @tsv) because `read` collapses
+# consecutive tab delimiters, which would drop empty fields and shift values.
+_parse_stdin() {
+    local input="$1" fields
+    command -v jq >/dev/null 2>&1 || return 1
+    [ -n "$input" ] || return 1
+    fields=$(printf '%s' "$input" | jq -r '
+        [ (.session_name // ""),
+          (.context_window.used_percentage // "" | tostring),
+          (.model.display_name // ""),
+          (.effort.level // ""),
+          (.rate_limits.five_hour.used_percentage // "" | tostring),
+          (.rate_limits.seven_day.used_percentage // "" | tostring),
+          (.cost.total_cost_usd // "" | tostring),
+          (.workspace.current_dir // .cwd // "")
+        ] | .[]' 2>/dev/null) || return 1
+    {
+        IFS= read -r SL_SESSION
+        IFS= read -r SL_CTX
+        IFS= read -r SL_MODEL
+        IFS= read -r SL_EFFORT
+        IFS= read -r SL_5H
+        IFS= read -r SL_WK
+        IFS= read -r SL_COST
+        IFS= read -r SL_DIR
+    } <<EOF
+$fields
+EOF
+    return 0
+}
+
+# Print the dir basename as a last-resort plain status, then exit cleanly.
+_fallback() {
+    printf '%s\n' "$(basename "${PWD:-/}")"
+    exit 0
+}
+
+# --- color ladder ----------------------------------------------------------
+
+# Choose the richest color level the terminal advertises.
+_detect_level() {
+    if [ "${FORCE_COLOR:-}" = "0" ] || [ -n "${NO_COLOR:-}" ] || [ "${TERM:-}" = "dumb" ]; then
+        LEVEL="plain"
+    elif [ "${COLORTERM:-}" = "truecolor" ] || [ "${COLORTERM:-}" = "24bit" ] \
+        || [ "${TERM_PROGRAM:-}" = "iTerm.app" ] || [ "${TERM_PROGRAM:-}" = "WezTerm" ]; then
+        LEVEL="truecolor"
+    elif [[ "${TERM:-}" == *256color* ]]; then
+        LEVEL="256"
+    else
+        LEVEL="basic"
+    fi
+}
+
+# Set _SGR to the SGR parameters painting a color name for the active level.
+# $1 = 38 (foreground) or 48 (background); $2 = color name. No subprocess.
+_sgr() {
+    local kind="$1" name="$2"
+    case "$LEVEL" in
+        truecolor)
+            local rgb
+            case "$name" in
+                red)    rgb="215;0;0" ;;
+                blue)   rgb="0;95;175" ;;
+                green)  rgb="0;135;0" ;;
+                yellow) rgb="175;135;0" ;;
+                purple) rgb="95;0;175" ;;
+                orange) rgb="215;95;0" ;;
+                pink)   rgb="175;0;135" ;;
+                cyan)   rgb="0;135;135" ;;
+                white)  rgb="255;255;255" ;;
+                *)      rgb="88;88;88" ;;
+            esac
+            _SGR="${kind};2;${rgb}" ;;
+        256)
+            local idx
+            case "$name" in
+                red)    idx=160 ;;
+                blue)   idx=25 ;;
+                green)  idx=28 ;;
+                yellow) idx=136 ;;
+                purple) idx=55 ;;
+                orange) idx=166 ;;
+                pink)   idx=162 ;;
+                cyan)   idx=30 ;;
+                white)  idx=255 ;;
+                *)      idx=240 ;;
+            esac
+            _SGR="${kind};5;${idx}" ;;
+        *)
+            local base
+            case "$name" in
+                red)    base=31 ;;
+                blue)   base=34 ;;
+                green)  base=32 ;;
+                yellow) base=33 ;;
+                purple) base=35 ;;
+                orange) base=33 ;;
+                pink)   base=95 ;;
+                cyan)   base=36 ;;
+                white)  base=97 ;;
+                *)      base=90 ;;
+            esac
+            if [ "$kind" = "48" ]; then _SGR=$((base + 10)); else _SGR="$base"; fi ;;
+    esac
+}
+
+# --- segment helpers -------------------------------------------------------
+
+# Append a segment (text + background color name).
+_add() {
+    _SEG_TEXT+=("$1")
+    _SEG_BG+=("$2")
+}
+
+# Set _COLOR to green/yellow/red by mapping a value against warn/crit thresholds.
+_thresh_color() {
+    local v="$1" warn="$2" crit="$3"
+    if [ "$v" -ge "$crit" ]; then
+        _COLOR=red
+    elif [ "$v" -ge "$warn" ]; then
+        _COLOR=yellow
+    else
+        _COLOR=green
+    fi
+}
+
+# Read claude_session_color from a session README's frontmatter (empty if none).
+_read_session_color() {
+    local readme="$1"
+    [ -f "$readme" ] || return 0
+    awk '
+        /^claude_session_color:/ {
+            sub(/^claude_session_color:[[:space:]]*/, "")
+            gsub(/"/, "")
+            print
+            exit
+        }
+    ' "$readme" 2>/dev/null || true
+}
+
+# Byte size of a file, portably (empty on failure).
+_filesize() {
+    wc -c < "$1" 2>/dev/null | tr -d ' ' || true
+}
+
+# Format the git segment text for a workspace dir, or nothing when it is not a
+# git repo / git is unavailable / git times out.
+_git_text() {
+    local dir="$1"
+    [ -n "$dir" ] || return 0
+    [ -e "$dir/.git" ] || return 0
+    local out
+    out=$(_timeout 2 env GIT_OPTIONAL_LOCKS=0 git -C "$dir" status --porcelain=v1 -b 2>/dev/null) || return 0
+    local branch="" ahead=0 behind=0 staged=0 modified=0 first=1 line x y h
+    while IFS= read -r line; do
+        if [ "$first" = "1" ]; then
+            first=0
+            h="${line#\#\# }"
+            case "$h" in
+                "No commits yet on "*) branch="${h#No commits yet on }" ;;
+                "HEAD (no branch)")    branch="HEAD" ;;
+                *)
+                    branch="${h%%...*}"
+                    [[ "$h" =~ ahead\ ([0-9]+) ]] && ahead="${BASH_REMATCH[1]}"
+                    [[ "$h" =~ behind\ ([0-9]+) ]] && behind="${BASH_REMATCH[1]}"
+                    ;;
+            esac
+        else
+            x="${line:0:1}"; y="${line:1:1}"
+            # Untracked entries are `??` in both columns; exclude `?` from both
+            # counts so untracked files do not show as a phantom modified `!`.
+            [ "$x" != " " ] && [ "$x" != "?" ] && staged=$((staged + 1))
+            [ "$y" != " " ] && [ "$y" != "?" ] && modified=$((modified + 1))
+        fi
+    done <<EOF
+$out
+EOF
+    [ -n "$branch" ] || return 0
+    local text="$branch"
+    # Brace the expansion: a bare $text↑ would let set -u read the arrow's first
+    # UTF-8 byte as part of the variable name and abort on "unbound variable".
+    [ "$ahead" -gt 0 ] && text="${text}↑${ahead}"
+    [ "$behind" -gt 0 ] && text="${text}↓${behind}"
+    local marks=""
+    [ "$staged" -gt 0 ] && marks="+$staged"
+    [ "$modified" -gt 0 ] && marks="$marks!$modified"
+    [ -n "$marks" ] && text="$text $marks"
+    printf '%s' "$text"
+}
+
+# --- segments --------------------------------------------------------------
+
+_seg_session() {
+    local name="$SL_SESSION"
+    [ -n "$name" ] || name="${CLAUDE_SESSION_NAME:-}"
+    if [ -z "$name" ]; then
+        local dir="${SL_DIR:-$PWD}"
+        name="${dir##*/}"
+    fi
+    local bg="grey" color=""
+    if [ -n "${CLAUDE_SESSION_NAME:-}" ]; then
+        color=$(_read_session_color "$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/README.md")
+        [ -n "$color" ] && bg="$color"
+    fi
+    _add "$name" "$bg"
+}
+
+_seg_ctx() {
+    local v="${SL_CTX%%.*}"
+    [ -n "$v" ] || return 0
+    local warn="${CS_STATUSLINE_CTX_WARN:-50}" crit="${CS_STATUSLINE_CTX_CRIT:-80}"
+    _thresh_color "$v" "$warn" "$crit"
+    _add "ctx ${v}%" "$_COLOR"
+}
+
+_seg_model() {
+    [ -n "$SL_MODEL" ] || return 0
+    local t="$SL_MODEL"
+    [ -n "$SL_EFFORT" ] && t="$t $SL_EFFORT"
+    _add "$t" "blue"
+}
+
+_seg_git() {
+    local t; t=$(_git_text "$SL_DIR")
+    [ -n "$t" ] || return 0
+    _add "$t" "grey"
+}
+
+_seg_limits() {
+    local h="${SL_5H%%.*}" w="${SL_WK%%.*}"
+    [ -n "$h" ] || [ -n "$w" ] || return 0
+    local text="" maxv=0
+    if [ -n "$h" ]; then
+        text="5h ${h}%"
+        [ "$h" -gt "$maxv" ] && maxv="$h"
+    fi
+    if [ -n "$w" ]; then
+        [ -n "$text" ] && text="$text wk ${w}%" || text="wk ${w}%"
+        [ "$w" -gt "$maxv" ] && maxv="$w"
+    fi
+    _thresh_color "$maxv" 70 90
+    _add "$text" "$_COLOR"
+}
+
+_seg_disc() {
+    [ -n "${CLAUDE_SESSION_NAME:-}" ] || return 0
+    local f="$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/discoveries.md"
+    [ -f "$f" ] || return 0
+    local bytes; bytes=$(_filesize "$f")
+    [ -n "$bytes" ] || return 0
+    local budget="${CS_DISCOVERIES_MAX_SIZE:-$CS_DISCOVERIES_DEFAULT_MAX}"
+    local sizeK=$((bytes / 1024)) budgetK=$((budget / 1024)) pct=0
+    [ "$budget" -gt 0 ] && pct=$((bytes * 100 / budget))
+    _thresh_color "$pct" 70 90
+    _add "disc ${sizeK}K/${budgetK}K" "$_COLOR"
+}
+
+_seg_cost() {
+    [ -n "$SL_COST" ] || return 0
+    local formatted
+    printf -v formatted '$%.2f' "$SL_COST" 2>/dev/null || return 0
+    _add "$formatted" "grey"
+}
+
+# --- render ----------------------------------------------------------------
+
+_render() {
+    local n=${#_SEG_TEXT[@]}
+    [ "$n" -gt 0 ] || return 0
+
+    if [ "$LEVEL" = "plain" ]; then
+        local i out=""
+        for ((i = 0; i < n; i++)); do
+            [ -n "$out" ] && out+=" > "
+            out+="${_SEG_TEXT[i]}"
+        done
+        printf '%s\n' "$out"
+        return 0
+    fi
+
+    local esc=$'\033' reset=$'\033[0m' glyph=">"
+    [ "${CS_NERD_FONTS:-}" = "1" ] && glyph=$'\xee\x82\xb0'   # U+E0B0
+
+    local fgwhite; _sgr 38 white; fgwhite="$_SGR"
+    # Lead with a reset so any residual SGR state from the caller's terminal
+    # cannot bleed into the first segment's text.
+    local i out="$reset" bg nbg bgsgr fgseg nbgsgr
+    for ((i = 0; i < n; i++)); do
+        bg="${_SEG_BG[i]}"
+        _sgr 48 "$bg"; bgsgr="$_SGR"
+        out+="${esc}[${bgsgr};${fgwhite}m ${_SEG_TEXT[i]} "
+        _sgr 38 "$bg"; fgseg="$_SGR"
+        if [ $((i + 1)) -lt "$n" ]; then
+            nbg="${_SEG_BG[i + 1]}"
+            _sgr 48 "$nbg"; nbgsgr="$_SGR"
+            out+="${esc}[${fgseg};${nbgsgr}m${glyph}"
+        else
+            out+="${reset}${esc}[${fgseg}m${glyph}${reset}"
+        fi
+    done
+    printf '%s\n' "$out"
+}
+
+# --- main ------------------------------------------------------------------
+
+main() {
+    [ "${CS_STATUSLINE_DISABLE:-}" = "1" ] && exit 0
+
+    local input
+    input=$(_read_stdin)
+    _parse_stdin "$input" || _fallback
+
+    _detect_level
+
+    local segments="${CS_STATUSLINE_SEGMENTS:-session,ctx,model,git,limits,disc,cost}"
+    local name names
+    IFS=',' read -ra names <<< "$segments"
+    for name in "${names[@]}"; do
+        case "$name" in
+            session) _seg_session ;;
+            ctx)     _seg_ctx ;;
+            model)   _seg_model ;;
+            git)     _seg_git ;;
+            limits)  _seg_limits ;;
+            disc)    _seg_disc ;;
+            cost)    _seg_cost ;;
+        esac
+    done
+
+    _render
+}
+
+main "$@"

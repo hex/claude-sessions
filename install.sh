@@ -73,6 +73,7 @@ REPO_URL="https://raw.githubusercontent.com/hex/claude-sessions/main"
 RELEASES_URL="https://github.com/hex/claude-sessions/releases/download"
 CS_URL="${REPO_URL}/bin/cs"
 CS_SECRETS_URL="${REPO_URL}/bin/cs-secrets"
+CS_STATUSLINE_URL="${REPO_URL}/bin/cs-statusline"
 
 # Hook scripts cs ships; deployed to HOOKS_DIR and registered in settings.json.
 # KEEP THIS LIST IN SYNC WITH bin/cs's CS_HOOKS.
@@ -188,6 +189,21 @@ else
 fi
 
 chmod +x "$INSTALL_DIR/cs-secrets"
+
+# Install cs-statusline (Claude Code status line)
+installed "cs-statusline" "$INSTALL_DIR/cs-statusline"
+
+if [ "$INSTALL_METHOD" = "local" ]; then
+    cp "$SCRIPT_DIR/bin/cs-statusline" "$INSTALL_DIR/cs-statusline"
+else
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$CS_STATUSLINE_URL" -o "$INSTALL_DIR/cs-statusline" || error "Failed to download cs-statusline"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q "$CS_STATUSLINE_URL" -O "$INSTALL_DIR/cs-statusline" || error "Failed to download cs-statusline"
+    fi
+fi
+
+chmod +x "$INSTALL_DIR/cs-statusline"
 
 # Install cs-tui (interactive session manager)
 if [ "$INSTALL_METHOD" = "local" ] && [ -f "$SCRIPT_DIR/bin/cs-tui" ]; then
@@ -475,6 +491,39 @@ else
     _merge_cs_hook PermissionRequest  session-auto-approve.sh 5 "Write|Edit"
     _merge_cs_hook PreToolUse         bash-logger.sh          5 "Bash"
     _merge_cs_hook UserPromptSubmit   scope-prompt.sh         3
+
+    # Register cs-statusline as the Claude Code status line. A status line the
+    # user already configured is never replaced silently: prompt when a
+    # terminal is attached, otherwise keep it and print how to switch.
+    _statusline_cmd="$INSTALL_DIR/cs-statusline"
+    _current_statusline=$(echo "$SETTINGS" | jq -r '.statusLine.command // ""')
+    case "$_current_statusline" in
+        "")
+            SETTINGS=$(echo "$SETTINGS" | jq --arg cmd "$_statusline_cmd" \
+                '.statusLine = {type: "command", command: $cmd}')
+            installed "status line" "cs-statusline"
+            ;;
+        */cs-statusline)
+            SETTINGS=$(echo "$SETTINGS" | jq --arg cmd "$_statusline_cmd" \
+                '.statusLine = {type: "command", command: $cmd}')
+            ;;
+        *)
+            _replace_statusline=""
+            if [ -t 0 ]; then
+                read -p "Replace current status line ($_current_statusline) with cs-statusline? [y/N] " -n 1 -r
+                echo ""
+                [[ $REPLY =~ ^[Yy]$ ]] && _replace_statusline=1
+            fi
+            if [ -n "$_replace_statusline" ]; then
+                SETTINGS=$(echo "$SETTINGS" | jq --arg cmd "$_statusline_cmd" \
+                    '.statusLine = {type: "command", command: $cmd}')
+                installed "status line" "cs-statusline"
+            else
+                warn "Keeping current status line. To switch to cs-statusline:"
+                warn "  set statusLine.command to $_statusline_cmd in ~/.claude/settings.json"
+            fi
+            ;;
+    esac
 
     echo "$SETTINGS" > "$CLAUDE_SETTINGS"
 fi

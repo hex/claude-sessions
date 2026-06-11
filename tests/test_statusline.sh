@@ -1,0 +1,509 @@
+#!/usr/bin/env bash
+# ABOUTME: Tests for bin/cs-statusline, the Claude Code powerline statusline
+# ABOUTME: Covers segment rendering, ordering, thresholds, color ladder, and defensive fallbacks
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=tests/test_lib.sh
+source "$SCRIPT_DIR/test_lib.sh"
+
+SL="$SCRIPT_DIR/../bin/cs-statusline"
+
+# The docs' example statusline JSON, verbatim values (session_name "my-session",
+# ctx 8%, Opus/high, 5h 23.5, wk 41.2, cost 0.01234, non-git current_dir).
+FIXTURE_DOCS='{"cwd":"/current/working/directory","session_id":"abc123","session_name":"my-session","model":{"id":"claude-opus-4-8","display_name":"Opus"},"workspace":{"current_dir":"/current/working/directory","project_dir":"/orig"},"cost":{"total_cost_usd":0.01234},"context_window":{"used_percentage":8},"effort":{"level":"high"},"rate_limits":{"five_hour":{"used_percentage":23.5},"seven_day":{"used_percentage":41.2}}}'
+
+# --- Setup / teardown: isolate from ambient cs/Claude env and terminal vars ---
+
+setup() {
+    TEST_TMPDIR="$(mktemp -d)"
+    local _v
+    while IFS='=' read -r _v _; do
+        case "$_v" in
+            CS_*|CLAUDE_*|NO_COLOR|COLORTERM|TERM_PROGRAM|FORCE_COLOR)
+                unset "$_v" 2>/dev/null || true ;;
+        esac
+    done < <(env)
+    export CS_SESSIONS_ROOT="$TEST_TMPDIR/sessions"
+    mkdir -p "$CS_SESSIONS_ROOT"
+    # Neutral terminal by default; per-test overrides as needed.
+    export TERM="xterm-256color"
+}
+
+teardown() {
+    if [[ -n "$TEST_TMPDIR" ]] && [[ -d "$TEST_TMPDIR" ]]; then
+        rm -rf "$TEST_TMPDIR"
+    fi
+    unset CS_SESSIONS_ROOT CLAUDE_SESSION_NAME NO_COLOR COLORTERM TERM_PROGRAM \
+        FORCE_COLOR CS_STATUSLINE_DISABLE CS_STATUSLINE_SEGMENTS CS_STATUSLINE_CTX_WARN \
+        CS_STATUSLINE_CTX_CRIT CS_NERD_FONTS CS_DISCOVERIES_MAX_SIZE 2>/dev/null || true
+}
+
+# --- Helpers ---
+
+# Run the statusline with $1 as stdin JSON; prints its stdout.
+run_sl() {
+    printf '%s' "$1" | bash "$SL"
+}
+
+# Build a git working tree on branch main with one staged + one modified file.
+# Echoes the directory path.
+make_git_work() {
+    local dir="$TEST_TMPDIR/work"
+    mkdir -p "$dir"
+    git -C "$dir" init -q
+    git -C "$dir" symbolic-ref HEAD refs/heads/main
+    git -C "$dir" config user.email "t@cs.local"
+    git -C "$dir" config user.name "cs test"
+    printf 'tracked\n' > "$dir/a.txt"
+    git -C "$dir" add a.txt
+    git -C "$dir" commit -q -m init
+    printf 'changed\n' >> "$dir/a.txt"   # modified, unstaged -> ` M`
+    printf 'new\n' > "$dir/b.txt"
+    git -C "$dir" add b.txt               # staged -> `A `
+    echo "$dir"
+}
+
+# Seed a cs session under CS_SESSIONS_ROOT with a color and a discoveries file
+# of $2 bytes. $1 = session name, $3 = color.
+make_cs_session() {
+    local name="$1" bytes="$2" color="$3"
+    local sdir="$CS_SESSIONS_ROOT/$name"
+    mkdir -p "$sdir/.cs"
+    cat > "$sdir/.cs/README.md" <<EOF
+---
+created: 2026-06-11
+claude_session_color: $color
+---
+# $name
+EOF
+    dd if=/dev/zero of="$sdir/.cs/discoveries.md" bs=1024 \
+        count="$((bytes / 1024))" 2>/dev/null
+}
+
+# ============================================================================
+# Happy path: documented fixture renders the visible segments in order (plain)
+# ============================================================================
+
+test_happy_path_docs_fixture_plain() {
+    export NO_COLOR=1
+    local out
+    out=$(run_sl "$FIXTURE_DOCS")
+    # git absent (non-git dir) and disc absent (no cs session).
+    assert_eq "my-session > ctx 8% > Opus high > 5h 23% wk 41% > \$0.01" "$out" \
+        "docs fixture should render 5 segments in order"
+}
+
+# ============================================================================
+# All seven segments render in order with git + disc present (plain)
+# ============================================================================
+
+test_all_segments_ordering_plain() {
+    export NO_COLOR=1
+    export CLAUDE_SESSION_NAME="mysess"
+    make_cs_session "mysess" 49152 cyan
+    local work
+    work=$(make_git_work)
+    local json
+    json=$(jq -nc --arg dir "$work" '{
+        session_name:"mysess",
+        model:{display_name:"Opus"},
+        effort:{level:"high"},
+        workspace:{current_dir:$dir},
+        context_window:{used_percentage:34},
+        rate_limits:{five_hour:{used_percentage:23.5},seven_day:{used_percentage:41.2}},
+        cost:{total_cost_usd:1.23}
+    }')
+    local out
+    out=$(run_sl "$json")
+    assert_eq "mysess > ctx 34% > Opus high > main +1!1 > 5h 23% wk 41% > disc 48K/60K > \$1.23" "$out" \
+        "all seven segments should render in order"
+}
+
+# ============================================================================
+# Missing rate_limits -> limits segment absent
+# ============================================================================
+
+test_missing_rate_limits_absent() {
+    export NO_COLOR=1
+    local json='{"session_name":"s","model":{"display_name":"Opus"},"workspace":{"current_dir":"/none"},"context_window":{"used_percentage":10},"cost":{"total_cost_usd":0.5}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_not_contains "$out" "5h " "limits segment should be absent without rate_limits"
+    assert_output_contains "$out" "ctx 10%" "other segments should still render"
+}
+
+# ============================================================================
+# Missing session_name outside a cs session -> basename of current_dir
+# ============================================================================
+
+test_missing_session_name_dir_fallback() {
+    export NO_COLOR=1
+    local json='{"model":{"display_name":"Opus"},"workspace":{"current_dir":"/tmp/alpha/beta"},"context_window":{"used_percentage":5}}'
+    local out
+    out=$(run_sl "$json")
+    assert_eq "beta > ctx 5% > Opus" "$out" \
+        "session label should fall back to basename of current_dir"
+}
+
+# ============================================================================
+# NO_COLOR -> no ANSI escape sequences in the output
+# ============================================================================
+
+test_no_color_emits_no_escapes() {
+    export NO_COLOR=1
+    local out
+    out=$(run_sl "$FIXTURE_DOCS")
+    [ -n "$out" ] || { echo "  FAIL: expected non-empty output, got nothing"; return 1; }
+    if printf '%s' "$out" | grep -q $'\033'; then
+        echo "  FAIL: NO_COLOR output contained an ESC byte"
+        return 1
+    fi
+}
+
+# ============================================================================
+# CS_STATUSLINE_DISABLE=1 -> empty output, exit 0
+# ============================================================================
+
+test_disable_prints_nothing() {
+    export CS_STATUSLINE_DISABLE=1
+    local out rc
+    out=$(run_sl "$FIXTURE_DOCS"); rc=$?
+    assert_eq "0" "$rc" "disabled statusline should exit 0"
+    assert_eq "" "$out" "disabled statusline should print nothing"
+}
+
+# ============================================================================
+# Malformed stdin -> plain fallback (dir basename), exit 0
+# ============================================================================
+
+test_malformed_stdin_fallback() {
+    export NO_COLOR=1
+    local out rc
+    out=$(run_sl 'this is not json {{{'); rc=$?
+    assert_eq "0" "$rc" "malformed stdin must still exit 0"
+    if [ -z "$out" ]; then
+        echo "  FAIL: expected a non-empty fallback line"
+        return 1
+    fi
+    if printf '%s' "$out" | grep -q $'\033'; then
+        echo "  FAIL: fallback should be plain text"
+        return 1
+    fi
+}
+
+# ============================================================================
+# Non-git workspace -> git segment absent
+# ============================================================================
+
+test_non_git_workspace_absent() {
+    export NO_COLOR=1
+    local json
+    json=$(jq -nc --arg dir "$TEST_TMPDIR" '{
+        session_name:"s",
+        model:{display_name:"Opus"},
+        workspace:{current_dir:$dir},
+        context_window:{used_percentage:5}
+    }')
+    local out
+    out=$(run_sl "$json")
+    # current_dir is a real, non-git directory; output must end at the model
+    # segment with no git slot appended.
+    assert_eq "s > ctx 5% > Opus" "$out" \
+        "git segment should be absent for a non-git workspace"
+}
+
+# ============================================================================
+# Threshold colors: ctx >= crit renders red; normal renders green, not red
+# ============================================================================
+
+test_ctx_threshold_red() {
+    export COLORTERM=truecolor
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":84}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "215;0;0" "ctx 84% should use the red background rgb"
+    if ! printf '%s' "$out" | grep -qF "$(printf '\033[0m')"; then
+        echo "  FAIL: colored line must contain a reset"
+        return 1
+    fi
+}
+
+test_ctx_normal_green_not_red() {
+    export COLORTERM=truecolor
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "0;135;0" "ctx 8% should use the green background rgb"
+    assert_output_not_contains "$out" "215;0;0" "ctx 8% must not use red"
+}
+
+# ============================================================================
+# Limits threshold: max(5h,wk) >= crit renders red
+# ============================================================================
+
+test_limits_threshold_red() {
+    export COLORTERM=truecolor
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":95}}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "215;0;0" "wk 95% should drive the limits bg red"
+}
+
+# ============================================================================
+# CS_STATUSLINE_SEGMENTS subset controls which segments render and their order
+# ============================================================================
+
+test_segments_subset() {
+    export NO_COLOR=1
+    export CS_STATUSLINE_SEGMENTS="model,cost"
+    local out
+    out=$(run_sl "$FIXTURE_DOCS")
+    assert_eq "Opus high > \$0.01" "$out" \
+        "subset should render only the named segments in order"
+    assert_output_not_contains "$out" "ctx" "excluded segments must not appear"
+}
+
+# ============================================================================
+# disc segment: size vs budget formatting from a fixture session dir
+# ============================================================================
+
+test_disc_budget_formatting() {
+    export NO_COLOR=1
+    export CLAUDE_SESSION_NAME="dsess"
+    export CS_STATUSLINE_SEGMENTS="disc"
+    make_cs_session "dsess" 49152 blue
+    local json='{"session_name":"dsess","workspace":{"current_dir":"/none"}}'
+    local out
+    out=$(run_sl "$json")
+    assert_eq "disc 48K/60K" "$out" "disc should format size/budget in K"
+}
+
+# ============================================================================
+# Git: an untracked file must not be counted as modified (no phantom `!`)
+# ============================================================================
+
+test_git_untracked_not_modified() {
+    export NO_COLOR=1
+    export CS_STATUSLINE_SEGMENTS="git"
+    local work="$TEST_TMPDIR/untracked"
+    mkdir -p "$work"
+    git -C "$work" init -q
+    git -C "$work" symbolic-ref HEAD refs/heads/main
+    git -C "$work" config user.email "t@cs.local"
+    git -C "$work" config user.name "cs test"
+    printf 'tracked\n' > "$work/a.txt"
+    git -C "$work" add a.txt
+    git -C "$work" commit -q -m init
+    printf 'loose\n' > "$work/untracked.txt"   # `?? untracked.txt`, nothing else
+    local json
+    json=$(jq -nc --arg dir "$work" '{session_name:"s",workspace:{current_dir:$dir}}')
+    local out
+    out=$(run_sl "$json")
+    assert_eq "main" "$out" "untracked-only repo should render a clean branch, no markers"
+}
+
+# ============================================================================
+# Color ladder: 256-color level uses indexed codes, not truecolor
+# ============================================================================
+
+test_color_level_256() {
+    # setup() leaves TERM=xterm-256color and COLORTERM unset.
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "48;5;" "256-color level should emit indexed bg codes"
+    assert_output_not_contains "$out" "48;2;" "256-color level must not emit truecolor codes"
+}
+
+# ============================================================================
+# Color ladder: basic ANSI when neither truecolor nor 256color is advertised
+# ============================================================================
+
+test_color_level_basic() {
+    export TERM="xterm"
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_not_contains "$out" "48;5;" "basic level must not emit indexed codes"
+    assert_output_not_contains "$out" "48;2;" "basic level must not emit truecolor codes"
+    # session bg = grey -> basic bg code 100, text fg white -> 97
+    assert_output_contains "$out" "100;97m" "basic level should emit 8/16-color SGR codes"
+}
+
+# ============================================================================
+# Color ladder: TERM=dumb forces plain output
+# ============================================================================
+
+test_term_dumb_is_plain() {
+    export TERM="dumb"
+    export COLORTERM="truecolor"   # must be overridden by the dumb check
+    local out
+    out=$(run_sl "$FIXTURE_DOCS")
+    [ -n "$out" ] || { echo "  FAIL: expected non-empty output, got nothing"; return 1; }
+    if printf '%s' "$out" | grep -q $'\033'; then
+        echo "  FAIL: TERM=dumb should suppress all escapes"
+        return 1
+    fi
+}
+
+# ============================================================================
+# Nerd-font glyph toggle: CS_NERD_FONTS=1 emits the U+E0B0 powerline arrow
+# ============================================================================
+
+test_nerd_font_glyph() {
+    export COLORTERM="truecolor"
+    export CS_NERD_FONTS=1
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8}}'
+    local out glyph
+    glyph=$(printf '\xee\x82\xb0')
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "$glyph" "nerd fonts should render the powerline arrow"
+    assert_output_not_contains "$out" ">" "nerd glyph should replace the ASCII '>' arrow"
+}
+
+# ============================================================================
+# Git ahead-of-upstream renders the ahead arrow
+# ============================================================================
+
+test_git_ahead_arrow() {
+    export NO_COLOR=1
+    export CS_STATUSLINE_SEGMENTS="git"
+    local origin="$TEST_TMPDIR/origin.git" work="$TEST_TMPDIR/clone"
+    git init -q --bare "$origin"
+    git clone -q "$origin" "$work" 2>/dev/null
+    git -C "$work" symbolic-ref HEAD refs/heads/main
+    git -C "$work" config user.email "t@cs.local"
+    git -C "$work" config user.name "cs test"
+    printf 'one\n' > "$work/a.txt"
+    git -C "$work" add a.txt
+    git -C "$work" commit -q -m one
+    git -C "$work" push -q -u origin main 2>/dev/null
+    printf 'two\n' > "$work/b.txt"          # one local commit ahead of origin/main
+    git -C "$work" add b.txt
+    git -C "$work" commit -q -m two
+    local json
+    json=$(jq -nc --arg dir "$work" '{session_name:"s",workspace:{current_dir:$dir}}')
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "main↑1" "git segment should show the ahead arrow"
+}
+
+# ============================================================================
+# Color ladder: FORCE_COLOR=0 forces plain output (overrides COLORTERM)
+# ============================================================================
+
+test_force_color_zero_is_plain() {
+    export FORCE_COLOR=0
+    export COLORTERM="truecolor"   # must be overridden by FORCE_COLOR=0
+    local out
+    out=$(run_sl "$FIXTURE_DOCS")
+    if printf '%s' "$out" | grep -q $'\033'; then
+        echo "  FAIL: FORCE_COLOR=0 should suppress all escapes"
+        return 1
+    fi
+}
+
+# ============================================================================
+# I/O gating: the git subprocess forks only when "git" is an enabled segment
+# ============================================================================
+
+test_io_gating_git_subprocess() {
+    local bindir="$TEST_TMPDIR/fakebin"
+    mkdir -p "$bindir"
+    # Fake git records each invocation so we can assert whether it ran.
+    cat > "$bindir/git" <<EOF
+#!/usr/bin/env bash
+echo invoked >> "$TEST_TMPDIR/git-calls"
+exit 0
+EOF
+    chmod +x "$bindir/git"
+    local work="$TEST_TMPDIR/repo"
+    mkdir -p "$work/.git"   # looks like a repo so the .git existence check passes
+    local json
+    json=$(jq -nc --arg dir "$work" '{session_name:"s",model:{display_name:"Opus"},workspace:{current_dir:$dir}}')
+
+    # git NOT in the segment list -> the subprocess must never fork.
+    printf '%s' "$json" | env PATH="$bindir:$PATH" NO_COLOR=1 \
+        CS_STATUSLINE_SEGMENTS="session,model" bash "$SL" >/dev/null
+    if [ -f "$TEST_TMPDIR/git-calls" ]; then
+        echo "  FAIL: git forked despite 'git' not being in CS_STATUSLINE_SEGMENTS"
+        return 1
+    fi
+
+    # git IN the segment list -> git is consulted (proves the gate isn't a no-op).
+    printf '%s' "$json" | env PATH="$bindir:$PATH" NO_COLOR=1 \
+        CS_STATUSLINE_SEGMENTS="git" bash "$SL" >/dev/null
+    if [ ! -f "$TEST_TMPDIR/git-calls" ]; then
+        echo "  FAIL: git was not invoked when 'git' is enabled"
+        return 1
+    fi
+}
+
+# ============================================================================
+# Context %: 0 renders explicitly; absent omits the segment
+# ============================================================================
+
+test_ctx_zero_vs_absent() {
+    export NO_COLOR=1
+    local with0='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":0}}'
+    assert_eq "s > ctx 0%" "$(run_sl "$with0")" "ctx 0% should render explicitly"
+    local without='{"session_name":"s","workspace":{"current_dir":"/none"}}'
+    assert_eq "s" "$(run_sl "$without")" "absent used_percentage should omit the ctx segment"
+}
+
+# ============================================================================
+# Unknown CS_STATUSLINE_SEGMENTS tokens are skipped, not fatal
+# ============================================================================
+
+test_unknown_segment_ignored() {
+    export NO_COLOR=1
+    export CS_STATUSLINE_SEGMENTS="session,bogus,model"
+    local json='{"session_name":"s","model":{"display_name":"Opus"},"workspace":{"current_dir":"/none"}}'
+    assert_eq "s > Opus" "$(run_sl "$json")" "unknown segment tokens should be skipped"
+}
+
+# ============================================================================
+# A session color name outside the table falls back to neutral grey, no crash
+# ============================================================================
+
+test_unknown_session_color_falls_back() {
+    export COLORTERM="truecolor"
+    export CLAUDE_SESSION_NAME="weird"
+    make_cs_session "weird" 1024 chartreuse   # not one of the 8 valid color names
+    local json='{"session_name":"weird","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":5}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "48;2;88;88;88" \
+        "unknown session color should fall back to neutral grey"
+}
+
+# ============================================================================
+# Runner
+# ============================================================================
+echo "Running test_statusline.sh"
+echo ""
+run_test test_happy_path_docs_fixture_plain
+run_test test_all_segments_ordering_plain
+run_test test_missing_rate_limits_absent
+run_test test_missing_session_name_dir_fallback
+run_test test_no_color_emits_no_escapes
+run_test test_disable_prints_nothing
+run_test test_malformed_stdin_fallback
+run_test test_non_git_workspace_absent
+run_test test_ctx_threshold_red
+run_test test_ctx_normal_green_not_red
+run_test test_limits_threshold_red
+run_test test_segments_subset
+run_test test_disc_budget_formatting
+run_test test_git_untracked_not_modified
+run_test test_color_level_256
+run_test test_color_level_basic
+run_test test_term_dumb_is_plain
+run_test test_nerd_font_glyph
+run_test test_git_ahead_arrow
+run_test test_force_color_zero_is_plain
+run_test test_io_gating_git_subprocess
+run_test test_ctx_zero_vs_absent
+run_test test_unknown_segment_ignored
+run_test test_unknown_session_color_falls_back
+report_results

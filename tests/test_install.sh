@@ -327,6 +327,105 @@ EOF
 }
 
 # ============================================================================
+# Cycle: cs-statusline deployment + statusLine registration
+# ============================================================================
+
+test_install_deploys_statusline_binary() {
+    local fake_home="$TEST_TMPDIR/home-sl"
+    mkdir -p "$fake_home"
+    HOME="$fake_home" bash "$INSTALL_SH" > /dev/null 2>&1 || {
+        echo "  FAIL: install.sh exited non-zero"
+        return 1
+    }
+    if [ ! -x "$fake_home/.local/bin/cs-statusline" ]; then
+        echo "  FAIL: cs-statusline not deployed executable to ~/.local/bin"
+        return 1
+    fi
+}
+
+test_install_registers_statusline_when_absent() {
+    local fake_home="$TEST_TMPDIR/home-sl-reg"
+    mkdir -p "$fake_home"
+    HOME="$fake_home" bash "$INSTALL_SH" > /dev/null 2>&1 || {
+        echo "  FAIL: install.sh exited non-zero"
+        return 1
+    }
+    local cmd type
+    cmd=$(jq -r '.statusLine.command // ""' "$fake_home/.claude/settings.json")
+    type=$(jq -r '.statusLine.type // ""' "$fake_home/.claude/settings.json")
+    case "$cmd" in
+        */cs-statusline) ;;
+        *)
+            echo "  FAIL: statusLine.command is '$cmd' (expected a path ending in /cs-statusline)"
+            return 1
+            ;;
+    esac
+    if [ "$type" != "command" ]; then
+        echo "  FAIL: statusLine.type is '$type' (expected 'command')"
+        return 1
+    fi
+}
+
+test_install_preserves_foreign_statusline() {
+    local fake_home="$TEST_TMPDIR/home-sl-foreign"
+    mkdir -p "$fake_home/.claude"
+    cat > "$fake_home/.claude/settings.json" << 'EOF'
+{"statusLine":{"type":"command","command":"node /Users/x/.claude/hud/omc-hud.mjs"}}
+EOF
+    local out
+    out=$(HOME="$fake_home" bash "$INSTALL_SH" 2>&1 < /dev/null) || {
+        echo "  FAIL: install.sh exited non-zero"
+        return 1
+    }
+    local cmd
+    cmd=$(jq -r '.statusLine.command // ""' "$fake_home/.claude/settings.json")
+    if [ "$cmd" != "node /Users/x/.claude/hud/omc-hud.mjs" ]; then
+        echo "  FAIL: foreign statusLine was replaced non-interactively (now '$cmd')"
+        return 1
+    fi
+    assert_output_contains "$out" "cs-statusline" "install should mention how to enable cs-statusline" || return 1
+}
+
+test_uninstall_removes_statusline() {
+    local fake_home="$TEST_TMPDIR/uninstall-sl"
+    mkdir -p "$fake_home/.local/bin" "$fake_home/.claude"
+    echo '#!/bin/sh' > "$fake_home/.local/bin/cs-statusline"
+    cat > "$fake_home/.claude/settings.json" << EOF
+{"statusLine":{"type":"command","command":"$fake_home/.local/bin/cs-statusline"}}
+EOF
+    printf 'y\n' | HOME="$fake_home" "$CS_BIN" -uninstall > /dev/null 2>&1 || {
+        echo "  FAIL: cs -uninstall exited non-zero"
+        return 1
+    }
+    if [ -f "$fake_home/.local/bin/cs-statusline" ]; then
+        echo "  FAIL: cs-statusline binary not removed"
+        return 1
+    fi
+    if jq -e '.statusLine' "$fake_home/.claude/settings.json" > /dev/null 2>&1; then
+        echo "  FAIL: statusLine registration survived uninstall"
+        return 1
+    fi
+}
+
+test_uninstall_preserves_foreign_statusline() {
+    local fake_home="$TEST_TMPDIR/uninstall-sl-foreign"
+    mkdir -p "$fake_home/.claude"
+    cat > "$fake_home/.claude/settings.json" << 'EOF'
+{"statusLine":{"type":"command","command":"node /Users/x/.claude/hud/omc-hud.mjs"}}
+EOF
+    printf 'y\n' | HOME="$fake_home" "$CS_BIN" -uninstall > /dev/null 2>&1 || {
+        echo "  FAIL: cs -uninstall exited non-zero"
+        return 1
+    }
+    local cmd
+    cmd=$(jq -r '.statusLine.command // ""' "$fake_home/.claude/settings.json")
+    if [ "$cmd" != "node /Users/x/.claude/hud/omc-hud.mjs" ]; then
+        echo "  FAIL: foreign statusLine was stripped by uninstall (now '$cmd')"
+        return 1
+    fi
+}
+
+# ============================================================================
 # Runner
 # ============================================================================
 echo "Running test_install.sh"
@@ -340,4 +439,9 @@ run_test test_install_deploys_hooks_to_cs_subdir
 run_test test_install_migrates_flat_hook_layout
 run_test test_install_writes_version_stamp
 run_test test_uninstall_strips_hook_registrations
+run_test test_install_deploys_statusline_binary
+run_test test_install_registers_statusline_when_absent
+run_test test_install_preserves_foreign_statusline
+run_test test_uninstall_removes_statusline
+run_test test_uninstall_preserves_foreign_statusline
 report_results

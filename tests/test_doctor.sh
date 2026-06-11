@@ -430,6 +430,48 @@ test_doctor_skips_inline_shell_hook_commands() {
         "inline shell-snippet hook commands must not be flagged as missing files" || return 1
 }
 
+test_doctor_statusline_ok_when_registered_and_executable() {
+    local fake_claude="$TEST_TMPDIR/sl-claude"
+    local fake_bin="$TEST_TMPDIR/sl-bin"
+    mkdir -p "$fake_claude" "$fake_bin"
+    printf '#!/bin/sh\n' > "$fake_bin/cs-statusline"
+    chmod +x "$fake_bin/cs-statusline"
+    printf '{"statusLine":{"type":"command","command":"%s"}}\n' "$fake_bin/cs-statusline" > "$fake_claude/settings.json"
+    local output
+    output=$(CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Statusline" "doctor should run a Statusline check" || return 1
+    if echo "$output" | grep "Statusline" | grep -q "FAIL"; then
+        echo "  FAIL: Statusline check failed for a healthy registration"
+        return 1
+    fi
+}
+
+test_doctor_statusline_fails_when_binary_missing() {
+    local fake_claude="$TEST_TMPDIR/sl-claude-missing"
+    mkdir -p "$fake_claude"
+    printf '{"statusLine":{"type":"command","command":"%s"}}\n' "$TEST_TMPDIR/absent/cs-statusline" > "$fake_claude/settings.json"
+    local output
+    output=$(CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
+    if ! echo "$output" | grep "Statusline" | grep -q "FAIL"; then
+        echo "  FAIL: missing cs-statusline binary not reported as FAIL"
+        echo "$output" | grep "Statusline" || echo "  (no Statusline line at all)"
+        return 1
+    fi
+}
+
+test_doctor_statusline_no_fail_when_not_registered() {
+    local fake_claude="$TEST_TMPDIR/sl-claude-none"
+    mkdir -p "$fake_claude"
+    echo '{}' > "$fake_claude/settings.json"
+    local output
+    output=$(CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Statusline" "doctor should mention the Statusline check even when unregistered" || return 1
+    if echo "$output" | grep "Statusline" | grep -q "FAIL"; then
+        echo "  FAIL: unregistered statusline must not FAIL (it is optional)"
+        return 1
+    fi
+}
+
 echo "Running doctor tests..."
 run_test test_doctor_subcommand_exists
 run_test test_doctor_runs_default_checks_from_session
@@ -455,6 +497,9 @@ run_test test_doctor_passes_when_all_settings_hooks_resolve
 run_test test_doctor_settings_hooks_resolve_handles_no_hooks_section
 run_test test_doctor_settings_hooks_resolve_expands_tilde
 run_test test_doctor_skips_inline_shell_hook_commands
+run_test test_doctor_statusline_ok_when_registered_and_executable
+run_test test_doctor_statusline_fails_when_binary_missing
+run_test test_doctor_statusline_no_fail_when_not_registered
 run_test test_doctor_runs_token_cost_check
 run_test test_doctor_token_cost_sums_jsonl
 run_test test_doctor_token_cost_handles_no_transcripts
