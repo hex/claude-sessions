@@ -18,6 +18,20 @@ _SEG_TEXT=(); _SEG_BG=(); LEVEL="basic"
 # hot path fork-free; this script runs on every assistant message).
 _SGR=""; _COLOR=""
 
+# Per-segment icon glyphs (Nerd Font, Font Awesome + powerline ranges).
+# Empty without CS_NERD_FONTS=1, so segment text stays plain.
+ICON_SESSION=""; ICON_CTX=""; ICON_MODEL=""; ICON_GIT=""
+ICON_5H=""; ICON_WK=""; ICON_DISC=""
+if [ "${CS_NERD_FONTS:-}" = "1" ]; then
+    ICON_SESSION=$'\xef\x80\x95 '   # U+F015 home
+    ICON_CTX=$'\xef\x83\xa4 '       # U+F0E4 gauge
+    ICON_MODEL=$'\xef\x8b\x9b '     # U+F2DB microchip
+    ICON_GIT=$'\xee\x82\xa0 '       # U+E0A0 branch
+    ICON_5H=$'\xef\x80\x97 '        # U+F017 clock
+    ICON_WK=$'\xef\x81\xb3 '        # U+F073 calendar
+    ICON_DISC=$'\xef\x80\xad '      # U+F02D book
+fi
+
 # --- stdin -----------------------------------------------------------------
 
 # Run a command with a wall-clock cap when timeout(1) is available, else plain.
@@ -116,6 +130,8 @@ _sgr() {
                 orange) rgb="215;95;0" ;;
                 pink)   rgb="175;0;135" ;;
                 cyan)   rgb="0;135;135" ;;
+                periwinkle) rgb="140;140;232" ;;
+                slate)  rgb="95;95;132" ;;
                 white)  rgb="255;255;255" ;;
                 *)      rgb="88;88;88" ;;
             esac
@@ -131,6 +147,8 @@ _sgr() {
                 orange) idx=166 ;;
                 pink)   idx=162 ;;
                 cyan)   idx=30 ;;
+                periwinkle) idx=104 ;;
+                slate)  idx=60 ;;
                 white)  idx=255 ;;
                 *)      idx=240 ;;
             esac
@@ -146,6 +164,8 @@ _sgr() {
                 orange) base=33 ;;
                 pink)   base=95 ;;
                 cyan)   base=36 ;;
+                periwinkle) base=94 ;;
+                slate)  base=35 ;;
                 white)  base=97 ;;
                 *)      base=90 ;;
             esac
@@ -161,15 +181,16 @@ _add() {
     _SEG_BG+=("$2")
 }
 
-# Set _COLOR to green/yellow/red by mapping a value against warn/crit thresholds.
+# Set _COLOR by mapping a value against warn/crit thresholds; below warn it
+# takes the healthy color ($4, default green).
 _thresh_color() {
-    local v="$1" warn="$2" crit="$3"
+    local v="$1" warn="$2" crit="$3" healthy="${4:-green}"
     if [ "$v" -ge "$crit" ]; then
         _COLOR=red
     elif [ "$v" -ge "$warn" ]; then
         _COLOR=yellow
     else
-        _COLOR=green
+        _COLOR="$healthy"
     fi
 }
 
@@ -251,7 +272,7 @@ _seg_session() {
         color=$(_read_session_color "$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/README.md")
         [ -n "$color" ] && bg="$color"
     fi
-    _add "$name" "$bg"
+    _add "${ICON_SESSION}${name}" "$bg"
 }
 
 _seg_ctx() {
@@ -259,36 +280,34 @@ _seg_ctx() {
     [ -n "$v" ] || return 0
     local warn="${CS_STATUSLINE_CTX_WARN:-50}" crit="${CS_STATUSLINE_CTX_CRIT:-80}"
     _thresh_color "$v" "$warn" "$crit"
-    _add "ctx ${v}%" "$_COLOR"
+    _add "${ICON_CTX}ctx ${v}%" "$_COLOR"
 }
 
 _seg_model() {
     [ -n "$SL_MODEL" ] || return 0
     local t="$SL_MODEL"
     [ -n "$SL_EFFORT" ] && t="$t $SL_EFFORT"
-    _add "$t" "blue"
+    _add "${ICON_MODEL}${t}" "blue"
 }
 
 _seg_git() {
     local t; t=$(_git_text "$SL_DIR")
     [ -n "$t" ] || return 0
-    _add "$t" "grey"
+    _add "${ICON_GIT}${t}" "grey"
 }
 
+# The 5h/wk pair mirrors claude's own usage bar: periwinkle for the rolling
+# window, slate for the week, each escalating to yellow/red on its own value.
 _seg_limits() {
     local h="${SL_5H%%.*}" w="${SL_WK%%.*}"
-    [ -n "$h" ] || [ -n "$w" ] || return 0
-    local text="" maxv=0
     if [ -n "$h" ]; then
-        text="5h ${h}%"
-        [ "$h" -gt "$maxv" ] && maxv="$h"
+        _thresh_color "$h" 70 90 periwinkle
+        _add "${ICON_5H}5h ${h}%" "$_COLOR"
     fi
     if [ -n "$w" ]; then
-        [ -n "$text" ] && text="$text wk ${w}%" || text="wk ${w}%"
-        [ "$w" -gt "$maxv" ] && maxv="$w"
+        _thresh_color "$w" 70 90 slate
+        _add "${ICON_WK}wk ${w}%" "$_COLOR"
     fi
-    _thresh_color "$maxv" 70 90
-    _add "$text" "$_COLOR"
 }
 
 _seg_disc() {
@@ -301,7 +320,7 @@ _seg_disc() {
     local sizeK=$((bytes / 1024)) budgetK=$((budget / 1024)) pct=0
     [ "$budget" -gt 0 ] && pct=$((bytes * 100 / budget))
     _thresh_color "$pct" 70 90
-    _add "disc ${sizeK}K/${budgetK}K" "$_COLOR"
+    _add "${ICON_DISC}disc ${sizeK}K/${budgetK}K" "$_COLOR"
 }
 
 _seg_cost() {

@@ -89,8 +89,8 @@ test_happy_path_docs_fixture_plain() {
     local out
     out=$(run_sl "$FIXTURE_DOCS")
     # git absent (non-git dir) and disc absent (no cs session).
-    assert_eq "my-session > ctx 8% > Opus high > 5h 23% wk 41% > \$0.01" "$out" \
-        "docs fixture should render 5 segments in order"
+    assert_eq "my-session > ctx 8% > Opus high > 5h 23% > wk 41% > \$0.01" "$out" \
+        "docs fixture should render the visible segments in order"
 }
 
 # ============================================================================
@@ -115,8 +115,82 @@ test_all_segments_ordering_plain() {
     }')
     local out
     out=$(run_sl "$json")
-    assert_eq "mysess > ctx 34% > Opus high > main +1!1 > 5h 23% wk 41% > disc 48K/60K > \$1.23" "$out" \
-        "all seven segments should render in order"
+    assert_eq "mysess > ctx 34% > Opus high > main +1!1 > 5h 23% > wk 41% > disc 48K/60K > \$1.23" "$out" \
+        "all segments should render in order, limits as a 5h/wk pair"
+}
+
+# ============================================================================
+# Limits render as a purple pair: 5h periwinkle, wk slate (truecolor)
+# ============================================================================
+
+test_limits_purple_pair() {
+    export COLORTERM=truecolor
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":23},"seven_day":{"used_percentage":41}}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "48;2;140;140;232" "5h block should have a periwinkle background" || return 1
+    assert_output_contains "$out" "48;2;95;95;132" "wk block should have a slate purple background" || return 1
+}
+
+# ============================================================================
+# Limits thresholds escalate per block: healthy 5h stays periwinkle, hot wk red
+# ============================================================================
+
+test_limits_threshold_per_block() {
+    export COLORTERM=truecolor
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":95}}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "48;2;140;140;232" "healthy 5h block should keep periwinkle" || return 1
+    assert_output_contains "$out" "48;2;215;0;0" "wk 95% block should go red" || return 1
+    assert_output_not_contains "$out" "48;2;95;95;132" "hot wk block should not render slate" || return 1
+}
+
+# ============================================================================
+# Nerd Font segment icons appear only behind CS_NERD_FONTS=1
+# ============================================================================
+
+test_nerd_font_segment_icons() {
+    export NO_COLOR=1
+    export CS_NERD_FONTS=1
+    local work
+    work=$(make_git_work)
+    local json
+    json=$(jq -nc --arg dir "$work" '{
+        session_name:"s",
+        model:{display_name:"Opus"},
+        workspace:{current_dir:$dir},
+        context_window:{used_percentage:34},
+        rate_limits:{five_hour:{used_percentage:23},seven_day:{used_percentage:41}}
+    }')
+    local out branch_glyph clock_glyph
+    out=$(run_sl "$json")
+    branch_glyph=$'\xee\x82\xa0'
+    clock_glyph=$'\xef\x80\x97'
+    assert_output_contains "$out" "$branch_glyph" "git segment should carry the branch glyph" || return 1
+    assert_output_contains "$out" "$clock_glyph" "5h segment should carry the clock glyph" || return 1
+}
+
+test_no_segment_icons_without_nerd_fonts() {
+    export NO_COLOR=1
+    local work
+    work=$(make_git_work)
+    local json
+    json=$(jq -nc --arg dir "$work" '{
+        session_name:"s",
+        model:{display_name:"Opus"},
+        workspace:{current_dir:$dir},
+        context_window:{used_percentage:34},
+        rate_limits:{five_hour:{used_percentage:23},seven_day:{used_percentage:41}}
+    }')
+    local out branch_glyph
+    out=$(run_sl "$json")
+    if [ -z "$out" ]; then
+        echo "  FAIL: no output at all"
+        return 1
+    fi
+    branch_glyph=$'\xee\x82\xa0'
+    assert_output_not_contains "$out" "$branch_glyph" "no glyphs without CS_NERD_FONTS=1"
 }
 
 # ============================================================================
@@ -484,6 +558,10 @@ echo "Running test_statusline.sh"
 echo ""
 run_test test_happy_path_docs_fixture_plain
 run_test test_all_segments_ordering_plain
+run_test test_limits_purple_pair
+run_test test_limits_threshold_per_block
+run_test test_nerd_font_segment_icons
+run_test test_no_segment_icons_without_nerd_fonts
 run_test test_missing_rate_limits_absent
 run_test test_missing_session_name_dir_fallback
 run_test test_no_color_emits_no_escapes

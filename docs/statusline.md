@@ -3,7 +3,7 @@
 `cs-statusline` is the Claude Code status line shipped with cs. It reads the JSON Claude Code pipes to the registered `statusLine.command` on every render and prints exactly one powerline-style line of colored segments.
 
 ```
-claude-sessions > ctx 42% > Fable high > main↑1 +2!1 > 5h 23% wk 41% > disc 45K/60K > $1.23
+claude-sessions > ctx 42% > Fable high > main↑1 +2!1 > 5h 23% > wk 41% > disc 45K/60K > $1.23
 ```
 
 With colors enabled, each segment renders as a colored background block with an arrow transition into the next; the plain form above is what `NO_COLOR=1` produces.
@@ -18,7 +18,7 @@ Default order: `session,ctx,model,git,limits,disc,cost`.
 | `ctx` | Context window usage, `ctx 42%` | stdin `context_window.used_percentage` | Green, yellow at 50%, red at 80% (tunable) |
 | `model` | Model display name plus effort level when present | stdin `model.display_name`, `effort.level` | Blue |
 | `git` | Branch, ahead/behind arrows, staged `+N` and modified `!N` counts | One `git status --porcelain=v1 -b` call | Grey |
-| `limits` | 5-hour and weekly rate limit usage | stdin `rate_limits.*.used_percentage` | By the higher of the two: yellow at 70%, red at 90% |
+| `limits` | 5-hour and weekly rate limit usage as two adjacent blocks, `5h 23%` and `wk 41%` | stdin `rate_limits.*.used_percentage` | The pair mirrors claude's usage bar: periwinkle for 5h, slate purple for the week; each block escalates to yellow at 70% and red at 90% on its own value |
 | `disc` | `discoveries.md` size against its budget, `disc 45K/60K` | File size vs `CS_DISCOVERIES_MAX_SIZE` (default 60K) | Yellow at 70% of budget, red at 90% |
 | `cost` | Session cost, `$1.23` | stdin `cost.total_cost_usd` | Grey |
 
@@ -38,7 +38,9 @@ Color depth is detected per render, in priority order: `FORCE_COLOR=0`, `NO_COLO
 
 The `session` segment's background is the same color claude shows for the session (`/color`), read from `claude_session_color:` in the session's `.cs/README.md` frontmatter.
 
-Segment separators use the Nerd Font powerline arrow (U+E0B0) when `CS_NERD_FONTS=1`, and `>` otherwise.
+The `limits` pair uses the two purples from claude's own usage bar: periwinkle `rgb(140,140,232)` for the 5-hour block and slate `rgb(95,95,132)` for the weekly block, with 256-color and basic-ANSI fallbacks.
+
+`CS_NERD_FONTS=1` enables the powerline arrow separator (U+E0B0) and per-segment icons (home, gauge, microchip, branch, clock, calendar, book, from the Font Awesome and powerline glyph ranges). Without it, separators are `>` and segments are plain text.
 
 ## Configuration
 
@@ -53,7 +55,7 @@ export CS_STATUSLINE_SEGMENTS="session,ctx,git,limits"
 export CS_STATUSLINE_CTX_WARN=50
 export CS_STATUSLINE_CTX_CRIT=80
 
-# Powerline glyphs (otherwise ASCII '>')
+# Powerline glyphs and segment icons (otherwise ASCII '>' and plain text)
 export CS_NERD_FONTS=1
 
 # Plain text, no colors
