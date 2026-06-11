@@ -499,9 +499,22 @@ else
     _current_statusline=$(echo "$SETTINGS" | jq -r '.statusLine.command // ""')
     case "$_current_statusline" in
         "")
-            SETTINGS=$(echo "$SETTINGS" | jq --arg cmd "$_statusline_cmd" \
-                '.statusLine = {type: "command", command: $cmd}')
-            installed "status line" "cs-statusline"
+            # The status bar is user-visible UI: claim it only with consent.
+            # Interactive installs ask (default yes); non-interactive installs
+            # leave it off and say how to enable.
+            _enable_statusline=""
+            if [ -t 0 ]; then
+                read -p "Register cs-statusline as the Claude Code status line? [Y/n] " -n 1 -r
+                echo ""
+                [[ ! $REPLY =~ ^[Nn]$ ]] && _enable_statusline=1
+            fi
+            if [ -n "$_enable_statusline" ]; then
+                SETTINGS=$(echo "$SETTINGS" | jq --arg cmd "$_statusline_cmd" \
+                    '.statusLine = {type: "command", command: $cmd}')
+                installed "status line" "cs-statusline"
+            else
+                info "Status line not registered. Enable any time with: cs -statusline enable"
+            fi
             ;;
         */cs-statusline)
             SETTINGS=$(echo "$SETTINGS" | jq --arg cmd "$_statusline_cmd" \

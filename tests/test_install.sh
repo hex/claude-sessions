@@ -343,25 +343,64 @@ test_install_deploys_statusline_binary() {
     fi
 }
 
-test_install_registers_statusline_when_absent() {
+test_install_skips_statusline_noninteractive() {
     local fake_home="$TEST_TMPDIR/home-sl-reg"
     mkdir -p "$fake_home"
-    HOME="$fake_home" bash "$INSTALL_SH" > /dev/null 2>&1 || {
+    local out
+    out=$(HOME="$fake_home" bash "$INSTALL_SH" 2>&1 < /dev/null) || {
         echo "  FAIL: install.sh exited non-zero"
         return 1
     }
-    local cmd type
+    local cmd
     cmd=$(jq -r '.statusLine.command // ""' "$fake_home/.claude/settings.json")
-    type=$(jq -r '.statusLine.type // ""' "$fake_home/.claude/settings.json")
+    if [ -n "$cmd" ]; then
+        echo "  FAIL: statusLine was registered without consent (got '$cmd')"
+        return 1
+    fi
+    assert_output_contains "$out" "cs -statusline enable" \
+        "non-interactive install should say how to enable the status line" || return 1
+}
+
+test_statusline_enable_registers() {
+    local fake_home="$TEST_TMPDIR/home-sl-enable"
+    mkdir -p "$fake_home/.claude" "$fake_home/.local/bin"
+    echo '#!/bin/sh' > "$fake_home/.local/bin/cs-statusline"
+    chmod +x "$fake_home/.local/bin/cs-statusline"
+    echo '{}' > "$fake_home/.claude/settings.json"
+    HOME="$fake_home" "$CS_BIN" -statusline enable > /dev/null 2>&1 || {
+        echo "  FAIL: cs -statusline enable exited non-zero"
+        return 1
+    }
+    local cmd
+    cmd=$(jq -r '.statusLine.command // ""' "$fake_home/.claude/settings.json")
     case "$cmd" in
         */cs-statusline) ;;
         *)
-            echo "  FAIL: statusLine.command is '$cmd' (expected a path ending in /cs-statusline)"
+            echo "  FAIL: enable did not register cs-statusline (got '$cmd')"
             return 1
             ;;
     esac
-    if [ "$type" != "command" ]; then
-        echo "  FAIL: statusLine.type is '$type' (expected 'command')"
+}
+
+test_statusline_disable_strips_only_ours() {
+    local fake_home="$TEST_TMPDIR/home-sl-disable"
+    mkdir -p "$fake_home/.claude"
+    printf '{"statusLine":{"type":"command","command":"%s"}}\n' "$fake_home/.local/bin/cs-statusline" > "$fake_home/.claude/settings.json"
+    HOME="$fake_home" "$CS_BIN" -statusline disable > /dev/null 2>&1 || {
+        echo "  FAIL: cs -statusline disable exited non-zero"
+        return 1
+    }
+    if jq -e '.statusLine' "$fake_home/.claude/settings.json" > /dev/null 2>&1; then
+        echo "  FAIL: disable left the cs-statusline registration behind"
+        return 1
+    fi
+    # A foreign status line must survive disable untouched.
+    echo '{"statusLine":{"type":"command","command":"node /x/omc-hud.mjs"}}' > "$fake_home/.claude/settings.json"
+    HOME="$fake_home" "$CS_BIN" -statusline disable > /dev/null 2>&1 || true
+    local cmd
+    cmd=$(jq -r '.statusLine.command // ""' "$fake_home/.claude/settings.json")
+    if [ "$cmd" != "node /x/omc-hud.mjs" ]; then
+        echo "  FAIL: disable touched a foreign status line (now '$cmd')"
         return 1
     fi
 }
@@ -440,7 +479,9 @@ run_test test_install_migrates_flat_hook_layout
 run_test test_install_writes_version_stamp
 run_test test_uninstall_strips_hook_registrations
 run_test test_install_deploys_statusline_binary
-run_test test_install_registers_statusline_when_absent
+run_test test_install_skips_statusline_noninteractive
+run_test test_statusline_enable_registers
+run_test test_statusline_disable_strips_only_ours
 run_test test_install_preserves_foreign_statusline
 run_test test_uninstall_removes_statusline
 run_test test_uninstall_preserves_foreign_statusline

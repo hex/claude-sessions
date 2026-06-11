@@ -72,7 +72,12 @@ export NO_COLOR=1
 
 ## Install, uninstall, doctor
 
-`install.sh` deploys `cs-statusline` to `~/.local/bin` and registers it as `statusLine` in `~/.claude/settings.json`. An existing status line is never replaced silently: with a terminal attached the installer asks first, otherwise it keeps the current one and prints how to switch.
+`install.sh` deploys the `cs-statusline` binary to `~/.local/bin` unconditionally, but the status bar itself is claimed only with consent: with a terminal attached the installer asks before registering (default yes; it also asks before replacing an existing status line), and a non-interactive install registers nothing and prints how to enable later. Turn it on or off any time:
+
+```bash
+cs -statusline enable    # register (overwrites the current status line; the command is your consent)
+cs -statusline disable   # remove the registration, only if it points at cs-statusline
+```
 
 `cs -uninstall` removes the binary and strips the `statusLine` registration only when it points at `cs-statusline`; a status line you configured yourself is left untouched.
 

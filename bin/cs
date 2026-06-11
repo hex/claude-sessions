@@ -282,6 +282,7 @@ Commands:
   -checkpoint show <name>  Print a specific checkpoint
   -doctor, -diag      Run health checks (Keychain, hooks, sync, discoveries, audit, tokens)
   -lint <file>...     Flag AI-slop prose tells (em-dashes, banned phrases); 0=clean 1=issues 2=error
+  -statusline <cmd>   enable|disable the cs status line in Claude Code settings
   -list, -ls          List all sessions (shows remote location)
   -adopt <name>       Adopt current directory as a cs session
   -remote <cmd>       Manage remote hosts
@@ -1817,7 +1818,7 @@ _doctor_check_statusline() {
         cmd=$(jq -r '.statusLine.command // ""' "$settings" 2>/dev/null) || cmd=""
     fi
     if [ -z "$cmd" ]; then
-        _doctor_ok "Statusline: not registered (optional; install.sh registers cs-statusline)"
+        _doctor_ok "Statusline: not registered (optional; enable with: cs -statusline enable)"
         return
     fi
     case "$cmd" in
@@ -2194,6 +2195,52 @@ remove_session() {
 }
 
 # Launch Claude Code
+# Register or remove the cs-statusline entry in Claude Code's settings.json.
+# Enable overwrites whatever is registered (the command is explicit consent);
+# disable strips only a cs-statusline registration, never a foreign one.
+run_statusline_cmd() {
+    local action="${1:-}"
+    local settings="$HOME/.claude/settings.json"
+    local bin="$HOME/.local/bin/cs-statusline"
+    command -v jq >/dev/null 2>&1 || error "jq is required for cs -statusline"
+    case "$action" in
+        enable)
+            [ -x "$bin" ] || warn "cs-statusline binary not found at $bin (run install.sh first)"
+            mkdir -p "$(dirname "$settings")"
+            [ -f "$settings" ] || echo '{}' > "$settings"
+            local _tmp
+            _tmp=$(mktemp)
+            if jq --arg cmd "$bin" '.statusLine = {type: "command", command: $cmd}' \
+                "$settings" > "$_tmp" 2>/dev/null; then
+                mv "$_tmp" "$settings"
+                info "Registered cs-statusline as the Claude Code status line"
+            else
+                rm -f "$_tmp"
+                error "Could not update $settings"
+            fi
+            ;;
+        disable)
+            [ -f "$settings" ] || { info "No settings.json; nothing to disable."; return 0; }
+            if jq -e '.statusLine.command // "" | endswith("/cs-statusline")' "$settings" >/dev/null 2>&1; then
+                local _tmp
+                _tmp=$(mktemp)
+                if jq 'del(.statusLine)' "$settings" > "$_tmp" 2>/dev/null; then
+                    mv "$_tmp" "$settings"
+                    info "Removed the cs-statusline registration"
+                else
+                    rm -f "$_tmp"
+                    error "Could not update $settings"
+                fi
+            else
+                info "Status line is not cs-statusline; leaving it untouched."
+            fi
+            ;;
+        *)
+            error "Usage: cs -statusline enable|disable"
+            ;;
+    esac
+}
+
 # Classify a COLORFGBG value ("fg;bg" or Konsole's "fg;default;bg") as
 # light/dark by its background index; unknown when unparseable.
 _theme_from_colorfgbg() {
@@ -3865,6 +3912,11 @@ main() {
         -detect-theme)
             detect_term_theme
             return 0
+            ;;
+        -statusline)
+            shift
+            run_statusline_cmd "$@"
+            return $?
             ;;
         -lint)
             shift
