@@ -287,7 +287,7 @@ test_non_git_workspace_absent() {
 }
 
 # ============================================================================
-# Threshold colors: ctx >= crit renders red; normal renders green, not red
+# Threshold colors: ctx >= crit renders red; healthy renders neutral grey
 # ============================================================================
 
 test_ctx_threshold_red() {
@@ -302,13 +302,40 @@ test_ctx_threshold_red() {
     fi
 }
 
-test_ctx_normal_green_not_red() {
+test_ctx_normal_neutral_not_red() {
     export COLORTERM=truecolor
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "0;135;0" "ctx 8% should use the green background rgb"
-    assert_output_not_contains "$out" "215;0;0" "ctx 8% must not use red"
+    assert_output_not_contains "$out" "0;135;0" "healthy ctx must not shout green" || return 1
+    assert_output_not_contains "$out" "215;0;0" "ctx 8% must not use red" || return 1
+}
+
+test_model_neutral_not_blue() {
+    export COLORTERM=truecolor
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"model":{"display_name":"Opus"}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "Opus" "model segment should render" || return 1
+    assert_output_not_contains "$out" "0;95;175" "model segment must not use the blue background" || return 1
+}
+
+test_dark_text_on_periwinkle() {
+    export COLORTERM=truecolor
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":4}}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "48;2;140;140;232;38;2;30;30;30" \
+        "periwinkle block should carry dark text for contrast" || return 1
+}
+
+test_dark_text_on_yellow_warn() {
+    export COLORTERM=truecolor
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":55}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "48;2;175;135;0;38;2;30;30;30" \
+        "yellow warn block should carry dark text for contrast" || return 1
 }
 
 # ============================================================================
@@ -569,7 +596,10 @@ run_test test_disable_prints_nothing
 run_test test_malformed_stdin_fallback
 run_test test_non_git_workspace_absent
 run_test test_ctx_threshold_red
-run_test test_ctx_normal_green_not_red
+run_test test_ctx_normal_neutral_not_red
+run_test test_model_neutral_not_blue
+run_test test_dark_text_on_periwinkle
+run_test test_dark_text_on_yellow_warn
 run_test test_limits_threshold_red
 run_test test_segments_subset
 run_test test_disc_budget_formatting

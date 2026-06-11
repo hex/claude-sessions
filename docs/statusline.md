@@ -15,8 +15,8 @@ Default order: `session,ctx,model,git,limits,disc,cost`.
 | Segment | Shows | Source | Color |
 |---|---|---|---|
 | `session` | Session name | stdin `session_name`, falling back to `CLAUDE_SESSION_NAME`, then the workspace dir basename | The session's `claude_session_color` from `.cs/README.md` frontmatter; grey outside cs sessions |
-| `ctx` | Context window usage, `ctx 42%` | stdin `context_window.used_percentage` | Green, yellow at 50%, red at 80% (tunable) |
-| `model` | Model display name plus effort level when present | stdin `model.display_name`, `effort.level` | Blue |
+| `ctx` | Context window usage, `ctx 42%` | stdin `context_window.used_percentage` | Neutral grey; yellow at 50%, red at 80% (tunable) |
+| `model` | Model display name plus effort level when present | stdin `model.display_name`, `effort.level` | Neutral grey |
 | `git` | Branch, ahead/behind arrows, staged `+N` and modified `!N` counts | One `git status --porcelain=v1 -b` call | Grey |
 | `limits` | 5-hour and weekly rate limit usage as two adjacent blocks, `5h 23%` and `wk 41%` | stdin `rate_limits.*.used_percentage` | The pair mirrors claude's usage bar: periwinkle for 5h, slate purple for the week; each block escalates to yellow at 70% and red at 90% on its own value |
 | `disc` | `discoveries.md` size against its budget, `disc 45K/60K` | File size vs `CS_DISCOVERIES_MAX_SIZE` (default 60K) | Yellow at 70% of budget, red at 90% |
@@ -38,7 +38,7 @@ Color depth is detected per render, in priority order: `FORCE_COLOR=0`, `NO_COLO
 
 The `session` segment's background is the same color claude shows for the session (`/color`), read from `claude_session_color:` in the session's `.cs/README.md` frontmatter.
 
-The `limits` pair uses the two purples from claude's own usage bar: periwinkle `rgb(140,140,232)` for the 5-hour block and slate `rgb(95,95,132)` for the weekly block, with 256-color and basic-ANSI fallbacks.
+Color means state, not decoration: healthy segments sit on neutral grey, the session name carries the one identity accent (its `claude_session_color`), the limits pair keeps the two purples from claude's own usage bar (periwinkle `rgb(140,140,232)` for the 5-hour block, slate `rgb(95,95,132)` for the weekly block), and yellow/red appear only when a threshold fires. Light backgrounds (periwinkle, yellow) take dark text for contrast; all colors have 256-color and basic-ANSI fallbacks.
 
 `CS_NERD_FONTS=1` enables the powerline arrow separator (U+E0B0) and per-segment icons (home, gauge, microchip, branch, clock, calendar, book, from the Font Awesome and powerline glyph ranges). Without it, separators are `>` and segments are plain text.
 

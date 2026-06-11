@@ -133,6 +133,7 @@ _sgr() {
                 periwinkle) rgb="140;140;232" ;;
                 slate)  rgb="95;95;132" ;;
                 white)  rgb="255;255;255" ;;
+                black)  rgb="30;30;30" ;;
                 *)      rgb="88;88;88" ;;
             esac
             _SGR="${kind};2;${rgb}" ;;
@@ -150,6 +151,7 @@ _sgr() {
                 periwinkle) idx=104 ;;
                 slate)  idx=60 ;;
                 white)  idx=255 ;;
+                black)  idx=235 ;;
                 *)      idx=240 ;;
             esac
             _SGR="${kind};5;${idx}" ;;
@@ -167,6 +169,7 @@ _sgr() {
                 periwinkle) base=94 ;;
                 slate)  base=35 ;;
                 white)  base=97 ;;
+                black)  base=30 ;;
                 *)      base=90 ;;
             esac
             if [ "$kind" = "48" ]; then _SGR=$((base + 10)); else _SGR="$base"; fi ;;
@@ -279,7 +282,7 @@ _seg_ctx() {
     local v="${SL_CTX%%.*}"
     [ -n "$v" ] || return 0
     local warn="${CS_STATUSLINE_CTX_WARN:-50}" crit="${CS_STATUSLINE_CTX_CRIT:-80}"
-    _thresh_color "$v" "$warn" "$crit"
+    _thresh_color "$v" "$warn" "$crit" grey
     _add "${ICON_CTX}ctx ${v}%" "$_COLOR"
 }
 
@@ -287,7 +290,7 @@ _seg_model() {
     [ -n "$SL_MODEL" ] || return 0
     local t="$SL_MODEL"
     [ -n "$SL_EFFORT" ] && t="$t $SL_EFFORT"
-    _add "${ICON_MODEL}${t}" "blue"
+    _add "${ICON_MODEL}${t}" "grey"
 }
 
 _seg_git() {
@@ -349,14 +352,19 @@ _render() {
     local esc=$'\033' reset=$'\033[0m' glyph=">"
     [ "${CS_NERD_FONTS:-}" = "1" ] && glyph=$'\xee\x82\xb0'   # U+E0B0
 
-    local fgwhite; _sgr 38 white; fgwhite="$_SGR"
     # Lead with a reset so any residual SGR state from the caller's terminal
     # cannot bleed into the first segment's text.
-    local i out="$reset" bg nbg bgsgr fgseg nbgsgr
+    local i out="$reset" bg nbg bgsgr fgtext fgseg nbgsgr
     for ((i = 0; i < n; i++)); do
         bg="${_SEG_BG[i]}"
         _sgr 48 "$bg"; bgsgr="$_SGR"
-        out+="${esc}[${bgsgr};${fgwhite}m ${_SEG_TEXT[i]} "
+        # Light backgrounds take dark text; everything else takes white.
+        case "$bg" in
+            periwinkle|yellow|white) _sgr 38 black ;;
+            *)                       _sgr 38 white ;;
+        esac
+        fgtext="$_SGR"
+        out+="${esc}[${bgsgr};${fgtext}m ${_SEG_TEXT[i]} "
         _sgr 38 "$bg"; fgseg="$_SGR"
         if [ $((i + 1)) -lt "$n" ]; then
             nbg="${_SEG_BG[i + 1]}"
