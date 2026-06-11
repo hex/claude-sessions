@@ -132,6 +132,7 @@ _sgr() {
                 cyan)   rgb="0;135;135" ;;
                 periwinkle) rgb="140;140;232" ;;
                 slate)  rgb="95;95;135" ;;
+                amber)  rgb="255;183;77" ;;
                 white)  rgb="255;255;255" ;;
                 black)  rgb="30;30;30" ;;
                 *)      rgb="88;88;88" ;;
@@ -150,6 +151,7 @@ _sgr() {
                 cyan)   idx=30 ;;
                 periwinkle) idx=104 ;;
                 slate)  idx=60 ;;
+                amber)  idx=215 ;;
                 white)  idx=255 ;;
                 black)  idx=235 ;;
                 *)      idx=240 ;;
@@ -168,6 +170,7 @@ _sgr() {
                 cyan)   base=36 ;;
                 periwinkle) base=94 ;;
                 slate)  base=35 ;;
+                amber)  base=33 ;;
                 white)  base=97 ;;
                 black)  base=30 ;;
                 *)      base=90 ;;
@@ -191,7 +194,7 @@ _thresh_color() {
     if [ "$v" -ge "$crit" ]; then
         _COLOR=red
     elif [ "$v" -ge "$warn" ]; then
-        _COLOR=yellow
+        _COLOR=amber
     else
         _COLOR="$healthy"
     fi
@@ -322,7 +325,8 @@ _seg_disc() {
     local budget="${CS_DISCOVERIES_MAX_SIZE:-$CS_DISCOVERIES_DEFAULT_MAX}"
     local sizeK=$((bytes / 1024)) budgetK=$((budget / 1024)) pct=0
     [ "$budget" -gt 0 ] && pct=$((bytes * 100 / budget))
-    _thresh_color "$pct" 70 90
+    # Discoveries fill slowly and idle high; warn only when compaction is due.
+    _thresh_color "$pct" 85 95
     _add "${ICON_DISC}disc ${sizeK}K/${budgetK}K" "$_COLOR"
 }
 
@@ -363,8 +367,8 @@ _render() {
         _sgr 48 "$bg"; bgsgr="$_SGR"
         # Light backgrounds take dark text; everything else takes white.
         case "$bg" in
-            periwinkle|yellow|white) _sgr 38 black ;;
-            *)                       _sgr 38 white ;;
+            periwinkle|amber|yellow|white) _sgr 38 black ;;
+            *)                             _sgr 38 white ;;
         esac
         fgtext="$_SGR"
         out+="${esc}[${bgsgr};${fgtext}m ${_SEG_TEXT[i]} "

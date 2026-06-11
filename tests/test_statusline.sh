@@ -352,13 +352,28 @@ test_dark_text_on_periwinkle() {
         "periwinkle block should carry dark text for contrast" || return 1
 }
 
-test_dark_text_on_yellow_warn() {
+test_dark_text_on_amber_warn() {
     export COLORTERM=truecolor
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":55}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;175;135;0;38;2;30;30;30" \
-        "yellow warn block should carry dark text for contrast" || return 1
+    assert_output_contains "$out" "48;2;255;183;77;38;2;30;30;30" \
+        "warn blocks should be warm amber with dark text" || return 1
+}
+
+test_disc_calm_below_85_amber_above() {
+    export COLORTERM=truecolor
+    export CLAUDE_SESSION_NAME="dthr"
+    make_cs_session "dthr" 49152 cyan   # 48K of 60K budget = 80%
+    local json='{"session_name":"dthr","workspace":{"current_dir":"/none"}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "disc 48K/60K" "disc segment should render" || return 1
+    assert_output_not_contains "$out" "48;2;255;183;77" "80% of budget should stay calm grey" || return 1
+
+    dd if=/dev/zero of="$CS_SESSIONS_ROOT/dthr/.cs/discoveries.md" bs=1024 count=53 2>/dev/null  # 53K = 88%
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "48;2;255;183;77" "88% of budget should warn amber" || return 1
 }
 
 # ============================================================================
@@ -624,7 +639,8 @@ run_test test_ctx_threshold_red
 run_test test_ctx_normal_neutral_not_red
 run_test test_model_neutral_not_blue
 run_test test_dark_text_on_periwinkle
-run_test test_dark_text_on_yellow_warn
+run_test test_dark_text_on_amber_warn
+run_test test_disc_calm_below_85_amber_above
 run_test test_limits_threshold_red
 run_test test_segments_subset
 run_test test_disc_budget_formatting
