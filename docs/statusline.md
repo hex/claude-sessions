@@ -42,6 +42,10 @@ The healthy bar carries exactly two colored blocks: the session name in its `cla
 
 Adjacent segments that share a background join with a thin chevron (U+E0B1, `›` without Nerd Fonts) instead of the solid arrow, which would vanish between equal colors.
 
+## Terminal theme
+
+cs detects the terminal's light/dark theme once at session launch, while it still owns the tty: an OSC 11 background query classified by BT.709 luminance first, falling back to `COLORFGBG` only when the query gets no answer. The query outranks the variable because tmux panes inherit `COLORFGBG` from the tmux server's start-time environment, where it goes stale across theme changes; OSC 11 asks the live terminal. The result is exported as `CS_TERM_THEME` for the statusline and hooks; detection runs at launch because an OSC query fired from a render hook would race its reply into claude's input stream. On dark terminals the statusline lifts its neutral grey and softens white text; all other colors are self-backgrounded and theme-independent. Set `CS_TERM_THEME=light|dark` to override detection, and run `cs -detect-theme` to see what detection yields.
+
 `CS_NERD_FONTS=1` enables the powerline arrow separator (U+E0B0) and per-segment icons (home, gauge, microchip, branch, clock, calendar, book, from the Font Awesome and powerline glyph ranges). Without it, separators are `>` and segments are plain text.
 
 ## Configuration

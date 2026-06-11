@@ -7,6 +7,10 @@ set -uo pipefail
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CS_DISCOVERIES_DEFAULT_MAX=61440
 
+# Terminal theme, exported by cs at launch (detected via COLORFGBG/OSC 11
+# while cs still owned the tty). Anything but "dark" renders the light set.
+SL_THEME="${CS_TERM_THEME:-light}"
+
 # Parsed stdin fields (filled by _parse_stdin).
 SL_SESSION=""; SL_CTX=""; SL_MODEL=""; SL_EFFORT=""
 SL_5H=""; SL_WK=""; SL_COST=""; SL_DIR=""
@@ -132,9 +136,13 @@ _sgr() {
                 cyan)   rgb="0;135;135" ;;
                 periwinkle) rgb="140;140;232" ;;
                 amber)  rgb="255;183;77" ;;
-                white)  rgb="255;255;255" ;;
+                white)
+                    # Softer text on dark terminals to avoid glare.
+                    [ "$SL_THEME" = "dark" ] && rgb="230;230;230" || rgb="255;255;255" ;;
                 black)  rgb="30;30;30" ;;
-                *)      rgb="88;88;88" ;;
+                *)
+                    # Neutral lifts on dark terminals to separate from the bg.
+                    [ "$SL_THEME" = "dark" ] && rgb="100;100;108" || rgb="88;88;88" ;;
             esac
             _SGR="${kind};2;${rgb}" ;;
         256)
@@ -150,9 +158,11 @@ _sgr() {
                 cyan)   idx=30 ;;
                 periwinkle) idx=104 ;;
                 amber)  idx=215 ;;
-                white)  idx=255 ;;
+                white)
+                    [ "$SL_THEME" = "dark" ] && idx=254 || idx=255 ;;
                 black)  idx=235 ;;
-                *)      idx=240 ;;
+                *)
+                    [ "$SL_THEME" = "dark" ] && idx=242 || idx=240 ;;
             esac
             _SGR="${kind};5;${idx}" ;;
         *)

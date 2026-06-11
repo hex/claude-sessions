@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/test_lib.sh"
 
 SL="$SCRIPT_DIR/../bin/cs-statusline"
+CS_BIN="${CS_BIN:-$SCRIPT_DIR/../bin/cs}"
 
 # The docs' example statusline JSON, verbatim values (session_name "my-session",
 # ctx 8%, Opus/high, 5h 23.5, wk 41.2, cost 0.01234, non-git current_dir).
@@ -240,6 +241,46 @@ test_no_segment_icons_without_nerd_fonts() {
     fi
     branch_glyph=$'\xee\x82\xa0'
     assert_output_not_contains "$out" "$branch_glyph" "no glyphs without CS_NERD_FONTS=1"
+}
+
+# ============================================================================
+# Terminal theme: cs -detect-theme classification and the dark statusline
+# variant behind CS_TERM_THEME
+# ============================================================================
+
+test_detect_theme_colorfgbg_dark() {
+    local out
+    out=$(COLORFGBG="15;0" "$CS_BIN" -detect-theme 2>&1 < /dev/null)
+    assert_output_contains "$out" "dark" "COLORFGBG bg index 0 should classify as dark" || return 1
+}
+
+test_detect_theme_colorfgbg_light() {
+    local out
+    out=$(COLORFGBG="0;15" "$CS_BIN" -detect-theme 2>&1 < /dev/null)
+    assert_output_contains "$out" "light" "COLORFGBG bg index 15 should classify as light" || return 1
+}
+
+test_detect_theme_konsole_three_part() {
+    local out
+    out=$(COLORFGBG="0;default;7" "$CS_BIN" -detect-theme 2>&1 < /dev/null)
+    assert_output_contains "$out" "light" "three-part COLORFGBG should classify by its last field" || return 1
+}
+
+test_detect_theme_unknown_without_signals() {
+    local out
+    out=$(env -u COLORFGBG "$CS_BIN" -detect-theme 2>&1 < /dev/null)
+    assert_output_contains "$out" "unknown" "no COLORFGBG and no tty should classify as unknown" || return 1
+}
+
+test_statusline_dark_theme_variant() {
+    export COLORTERM=truecolor
+    export CS_TERM_THEME=dark
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "48;2;100;100;108" "dark theme should lift the neutral grey" || return 1
+    assert_output_contains "$out" "38;2;230;230;230" "dark theme should soften white text" || return 1
+    assert_output_not_contains "$out" "48;2;88;88;88" "dark theme must not use the light-theme grey" || return 1
 }
 
 # ============================================================================
@@ -656,6 +697,11 @@ run_test test_thin_chevron_between_same_bg
 run_test test_solid_arrow_between_different_bg
 run_test test_nerd_font_segment_icons
 run_test test_no_segment_icons_without_nerd_fonts
+run_test test_detect_theme_colorfgbg_dark
+run_test test_detect_theme_colorfgbg_light
+run_test test_detect_theme_konsole_three_part
+run_test test_detect_theme_unknown_without_signals
+run_test test_statusline_dark_theme_variant
 run_test test_missing_rate_limits_absent
 run_test test_missing_session_name_dir_fallback
 run_test test_no_color_emits_no_escapes

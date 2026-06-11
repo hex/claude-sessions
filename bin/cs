@@ -328,6 +328,8 @@ Environment:
   CS_STATUSLINE_DISABLE   Set to 1 to render nothing in the status line
   CS_STATUSLINE_SEGMENTS  Status line segments, csv order (default:
                           session,model,ctx,git,limits,disc,cost)
+  CS_TERM_THEME           Override terminal theme detection (light|dark);
+                          cs -detect-theme shows what detection yields
 
 Examples:
   cs debug-api                      Create or resume 'debug-api' session (git + auto-sync)
@@ -2192,6 +2194,63 @@ remove_session() {
 }
 
 # Launch Claude Code
+# Classify a COLORFGBG value ("fg;bg" or Konsole's "fg;default;bg") as
+# light/dark by its background index; unknown when unparseable.
+_theme_from_colorfgbg() {
+    local bg="${1##*;}"
+    case "$bg" in
+        7|9|1[0-5]) echo "light" ;;
+        [0-8])      echo "dark" ;;
+        *)          echo "unknown" ;;
+    esac
+}
+
+# Query the terminal background via OSC 11 and classify by BT.709 luminance.
+# Safe only while cs owns the tty (before claude takes over stdin).
+_theme_from_osc11() {
+    if [ ! -t 0 ] || [ ! -t 1 ] || [ ! -e /dev/tty ]; then
+        echo "unknown"
+        return
+    fi
+    local saved reply="" rgb r4 g4 b4 r g b lum
+    saved=$(stty -g < /dev/tty 2>/dev/null) || { echo "unknown"; return; }
+    stty raw -echo < /dev/tty 2>/dev/null
+    printf '\033]11;?\033\\' > /dev/tty
+    IFS= read -r -t 1 -d '\' reply < /dev/tty 2>/dev/null || true
+    stty "$saved" < /dev/tty 2>/dev/null
+    rgb="${reply#*rgb:}"
+    if [ "$rgb" = "$reply" ]; then
+        echo "unknown"
+        return
+    fi
+    IFS=/ read -r r4 g4 b4 <<< "$rgb"
+    r4="${r4:0:2}"; g4="${g4:0:2}"; b4="${b4:0:2}"
+    case "$r4$g4$b4" in
+        *[!0-9a-fA-F]*|"") echo "unknown"; return ;;
+    esac
+    r=$((16#$r4)); g=$((16#$g4)); b=$((16#$b4))
+    # BT.709 luminance scaled by 10000; threshold is 0.5 * 255 * 10000.
+    lum=$((2126 * r + 7152 * g + 722 * b))
+    if [ "$lum" -ge 1275000 ]; then
+        echo "light"
+    else
+        echo "dark"
+    fi
+}
+
+# Detect the terminal theme. The OSC 11 query comes first because it asks the
+# live terminal; COLORFGBG is only a fallback since tmux panes inherit it from
+# the tmux server's start-time environment, where it goes stale across theme
+# changes (observed: 15;0 under a light terminal).
+detect_term_theme() {
+    local theme
+    theme=$(_theme_from_osc11)
+    if [ "$theme" = "unknown" ] && [ -n "${COLORFGBG:-}" ]; then
+        theme=$(_theme_from_colorfgbg "$COLORFGBG")
+    fi
+    echo "$theme"
+}
+
 launch_claude_code() {
     local session_name="$1"
     local session_dir="$2"
@@ -2265,6 +2324,16 @@ launch_claude_code() {
     # only in-session) or walk the filesystem.
     if [ -n "$claude_session_id" ]; then
         export CS_CLAUDE_SESSION_ID="$claude_session_id"
+    fi
+    # Terminal theme for the statusline and hooks. Detected once here while
+    # cs still owns the tty (an OSC query from a hook would race its reply
+    # into claude's input). A preset CS_TERM_THEME is a manual override.
+    if [ -z "${CS_TERM_THEME:-}" ]; then
+        local _term_theme
+        _term_theme=$(detect_term_theme)
+        if [ "$_term_theme" != "unknown" ]; then
+            export CS_TERM_THEME="$_term_theme"
+        fi
     fi
 
     # Status indicator
@@ -3792,6 +3861,10 @@ main() {
         -doctor|-diag)
             run_doctor
             return $?
+            ;;
+        -detect-theme)
+            detect_term_theme
+            return 0
             ;;
         -lint)
             shift
