@@ -131,7 +131,12 @@ _sgr() {
                 pink)   rgb="175;0;135" ;;
                 cyan)   rgb="0;135;135" ;;
                 periwinkle) rgb="140;140;232" ;;
-                slate)  rgb="95;95;135" ;;
+                lavender)   rgb="175;175;215" ;;
+                softblue)   rgb="135;175;215" ;;
+                palecyan)   rgb="175;215;215" ;;
+                palegraphite) rgb="135;135;175" ;;
+                cream)  rgb="255;215;175" ;;
+                mint)   rgb="175;215;175" ;;
                 amber)  rgb="255;183;77" ;;
                 white)  rgb="255;255;255" ;;
                 black)  rgb="30;30;30" ;;
@@ -150,7 +155,12 @@ _sgr() {
                 pink)   idx=162 ;;
                 cyan)   idx=30 ;;
                 periwinkle) idx=104 ;;
-                slate)  idx=60 ;;
+                lavender)   idx=146 ;;
+                softblue)   idx=110 ;;
+                palecyan)   idx=152 ;;
+                palegraphite) idx=103 ;;
+                cream)  idx=223 ;;
+                mint)   idx=151 ;;
                 amber)  idx=215 ;;
                 white)  idx=255 ;;
                 black)  idx=235 ;;
@@ -169,7 +179,12 @@ _sgr() {
                 pink)   base=95 ;;
                 cyan)   base=36 ;;
                 periwinkle) base=94 ;;
-                slate)  base=35 ;;
+                lavender)   base=95 ;;
+                softblue)   base=94 ;;
+                palecyan)   base=96 ;;
+                palegraphite) base=90 ;;
+                cream)  base=93 ;;
+                mint)   base=92 ;;
                 amber)  base=33 ;;
                 white)  base=97 ;;
                 black)  base=30 ;;
@@ -285,7 +300,7 @@ _seg_ctx() {
     local v="${SL_CTX%%.*}"
     [ -n "$v" ] || return 0
     local warn="${CS_STATUSLINE_CTX_WARN:-50}" crit="${CS_STATUSLINE_CTX_CRIT:-80}"
-    _thresh_color "$v" "$warn" "$crit" grey
+    _thresh_color "$v" "$warn" "$crit" softblue
     _add "${ICON_CTX}ctx ${v}%" "$_COLOR"
 }
 
@@ -293,17 +308,17 @@ _seg_model() {
     [ -n "$SL_MODEL" ] || return 0
     local t="$SL_MODEL"
     [ -n "$SL_EFFORT" ] && t="$t $SL_EFFORT"
-    _add "${ICON_MODEL}${t}" "grey"
+    _add "${ICON_MODEL}${t}" "palecyan"
 }
 
 _seg_git() {
     local t; t=$(_git_text "$SL_DIR")
     [ -n "$t" ] || return 0
-    _add "${ICON_GIT}${t}" "grey"
+    _add "${ICON_GIT}${t}" "palegraphite"
 }
 
 # The 5h/wk pair mirrors claude's own usage bar: periwinkle for the rolling
-# window, slate for the week, each escalating to yellow/red on its own value.
+# window, lavender for the week, each escalating on its own value.
 _seg_limits() {
     local h="${SL_5H%%.*}" w="${SL_WK%%.*}"
     if [ -n "$h" ]; then
@@ -311,7 +326,7 @@ _seg_limits() {
         _add "${ICON_5H}5h ${h}%" "$_COLOR"
     fi
     if [ -n "$w" ]; then
-        _thresh_color "$w" 70 90 slate
+        _thresh_color "$w" 70 90 lavender
         _add "${ICON_WK}wk ${w}%" "$_COLOR"
     fi
 }
@@ -326,7 +341,7 @@ _seg_disc() {
     local sizeK=$((bytes / 1024)) budgetK=$((budget / 1024)) pct=0
     [ "$budget" -gt 0 ] && pct=$((bytes * 100 / budget))
     # Discoveries fill slowly and idle high; warn only when compaction is due.
-    _thresh_color "$pct" 85 95
+    _thresh_color "$pct" 85 95 cream
     _add "${ICON_DISC}disc ${sizeK}K/${budgetK}K" "$_COLOR"
 }
 
@@ -334,7 +349,7 @@ _seg_cost() {
     [ -n "$SL_COST" ] || return 0
     local formatted
     printf -v formatted '$%.2f' "$SL_COST" 2>/dev/null || return 0
-    _add "$formatted" "grey"
+    _add "$formatted" "mint"
 }
 
 # --- render ----------------------------------------------------------------
@@ -367,8 +382,10 @@ _render() {
         _sgr 48 "$bg"; bgsgr="$_SGR"
         # Light backgrounds take dark text; everything else takes white.
         case "$bg" in
-            periwinkle|amber|yellow|white) _sgr 38 black ;;
-            *)                             _sgr 38 white ;;
+            periwinkle|lavender|softblue|palecyan|palegraphite|cream|mint|amber|yellow|white)
+                _sgr 38 black ;;
+            *)
+                _sgr 38 white ;;
         esac
         fgtext="$_SGR"
         out+="${esc}[${bgsgr};${fgtext}m ${_SEG_TEXT[i]} "

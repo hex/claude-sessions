@@ -129,7 +129,24 @@ test_limits_purple_pair() {
     local out
     out=$(run_sl "$json")
     assert_output_contains "$out" "48;2;140;140;232;38;2;30;30;30" "5h block should be periwinkle with dark text" || return 1
-    assert_output_contains "$out" "48;2;95;95;135;38;2;255;255;255" "wk block should be slate with white text" || return 1
+    assert_output_contains "$out" "48;2;175;175;215;38;2;30;30;30" "wk block should be lavender with dark text" || return 1
+}
+
+# ============================================================================
+# Pastel family: healthy segments take distinct pastel tints with dark text
+# ============================================================================
+
+test_pastel_family_healthy_segments() {
+    export COLORTERM=truecolor
+    export CLAUDE_SESSION_NAME="pastel"
+    make_cs_session "pastel" 30720 cyan   # 30K of 60K: disc healthy
+    local json='{"session_name":"pastel","model":{"display_name":"Opus"},"workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8},"cost":{"total_cost_usd":1.0}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "48;2;135;175;215;38;2;30;30;30" "healthy ctx should be soft blue with dark text" || return 1
+    assert_output_contains "$out" "48;2;175;215;215;38;2;30;30;30" "model should be pale cyan with dark text" || return 1
+    assert_output_contains "$out" "48;2;255;215;175;38;2;30;30;30" "healthy disc should be cream with dark text" || return 1
+    assert_output_contains "$out" "48;2;175;215;175;38;2;30;30;30" "cost should be mint with dark text" || return 1
 }
 
 # ============================================================================
@@ -143,7 +160,7 @@ test_limits_threshold_per_block() {
     out=$(run_sl "$json")
     assert_output_contains "$out" "48;2;140;140;232" "healthy 5h block should keep periwinkle" || return 1
     assert_output_contains "$out" "48;2;215;0;0" "wk 95% block should go red" || return 1
-    assert_output_not_contains "$out" "48;2;95;95;135" "hot wk block should not render slate" || return 1
+    assert_output_not_contains "$out" "48;2;175;175;215" "hot wk block should not render lavender" || return 1
 }
 
 # ============================================================================
@@ -152,8 +169,10 @@ test_limits_threshold_per_block() {
 
 test_thin_chevron_between_same_bg() {
     export COLORTERM=truecolor
-    # session (grey fallback), ctx healthy (grey), model (grey): two same-bg joints.
-    local json='{"session_name":"s","model":{"display_name":"Opus"},"workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8}}'
+    # Adjacent warn blocks share the amber background: ctx at warn next to a
+    # 5h block at warn (segment order trimmed so the two are neighbors).
+    export CS_STATUSLINE_SEGMENTS="ctx,limits"
+    local json='{"workspace":{"current_dir":"/none"},"context_window":{"used_percentage":55},"rate_limits":{"five_hour":{"used_percentage":75}}}'
     local out
     out=$(run_sl "$json")
     assert_output_contains "$out" "›" "same-bg neighbors should join with a thin chevron" || return 1
@@ -624,6 +643,7 @@ echo ""
 run_test test_happy_path_docs_fixture_plain
 run_test test_all_segments_ordering_plain
 run_test test_limits_purple_pair
+run_test test_pastel_family_healthy_segments
 run_test test_limits_threshold_per_block
 run_test test_thin_chevron_between_same_bg
 run_test test_solid_arrow_between_different_bg
