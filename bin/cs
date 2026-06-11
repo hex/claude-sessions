@@ -327,7 +327,7 @@ Environment:
   NO_COLOR            Disable all colors (see no-color.org)
   CS_STATUSLINE_DISABLE   Set to 1 to render nothing in the status line
   CS_STATUSLINE_SEGMENTS  Status line segments, csv order (default:
-                          session,ctx,model,git,limits,disc,cost)
+                          session,model,ctx,git,limits,disc,cost)
 
 Examples:
   cs debug-api                      Create or resume 'debug-api' session (git + auto-sync)

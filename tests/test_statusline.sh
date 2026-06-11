@@ -89,8 +89,8 @@ test_happy_path_docs_fixture_plain() {
     local out
     out=$(run_sl "$FIXTURE_DOCS")
     # git absent (non-git dir) and disc absent (no cs session).
-    assert_eq "my-session > ctx 8% > Opus high > 5h 23% > wk 41% > \$0.01" "$out" \
-        "docs fixture should render the visible segments in order"
+    assert_eq "my-session > Opus high > ctx 8% > 5h 23% > wk 41% > \$0.01" "$out" \
+        "docs fixture should render identity first, then gauges"
 }
 
 # ============================================================================
@@ -115,8 +115,8 @@ test_all_segments_ordering_plain() {
     }')
     local out
     out=$(run_sl "$json")
-    assert_eq "mysess > ctx 34% > Opus high > main +1!1 > 5h 23% > wk 41% > disc 48K/60K > \$1.23" "$out" \
-        "all segments should render in order, limits as a 5h/wk pair"
+    assert_eq "mysess > Opus high > ctx 34% > main +1!1 > 5h 23% > wk 41% > disc 48K/60K > \$1.23" "$out" \
+        "all segments should render in order: identity pair, then gauges"
 }
 
 # ============================================================================
@@ -264,7 +264,7 @@ test_missing_session_name_dir_fallback() {
     local json='{"model":{"display_name":"Opus"},"workspace":{"current_dir":"/tmp/alpha/beta"},"context_window":{"used_percentage":5}}'
     local out
     out=$(run_sl "$json")
-    assert_eq "beta > ctx 5% > Opus" "$out" \
+    assert_eq "beta > Opus > ctx 5%" "$out" \
         "session label should fall back to basename of current_dir"
 }
 
@@ -329,9 +329,9 @@ test_non_git_workspace_absent() {
     }')
     local out
     out=$(run_sl "$json")
-    # current_dir is a real, non-git directory; output must end at the model
+    # current_dir is a real, non-git directory; output must end at the ctx
     # segment with no git slot appended.
-    assert_eq "s > ctx 5% > Opus" "$out" \
+    assert_eq "s > Opus > ctx 5%" "$out" \
         "git segment should be absent for a non-git workspace"
 }
 

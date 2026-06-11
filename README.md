@@ -239,7 +239,7 @@ export CS_NERD_FONTS="1"
 export NO_COLOR="1"
 
 # Status line: choose/order segments, or disable entirely
-export CS_STATUSLINE_SEGMENTS="session,ctx,model,git,limits,disc,cost"
+export CS_STATUSLINE_SEGMENTS="session,model,ctx,git,limits,disc,cost"
 export CS_STATUSLINE_DISABLE="1"
 ```
 

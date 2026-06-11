@@ -397,7 +397,7 @@ main() {
 
     _detect_level
 
-    local segments="${CS_STATUSLINE_SEGMENTS:-session,ctx,model,git,limits,disc,cost}"
+    local segments="${CS_STATUSLINE_SEGMENTS:-session,model,ctx,git,limits,disc,cost}"
     local name names
     IFS=',' read -ra names <<< "$segments"
     for name in "${names[@]}"; do
