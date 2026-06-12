@@ -134,7 +134,7 @@ _sgr() {
                 orange) rgb="215;95;0" ;;
                 pink)   rgb="175;0;135" ;;
                 cyan)   rgb="0;135;135" ;;
-                periwinkle) rgb="140;140;232" ;;
+                periwinkle) rgb="153;152;255" ;;
                 amber)  rgb="255;183;77" ;;
                 white)
                     # Softer text on dark terminals to avoid glare.
@@ -156,7 +156,7 @@ _sgr() {
                 orange) idx=166 ;;
                 pink)   idx=162 ;;
                 cyan)   idx=30 ;;
-                periwinkle) idx=104 ;;
+                periwinkle) idx=105 ;;
                 amber)  idx=215 ;;
                 white)
                     [ "$SL_THEME" = "dark" ] && idx=254 || idx=255 ;;
@@ -373,8 +373,8 @@ _render() {
         _sgr 48 "$bg"; bgsgr="$_SGR"
         # Light backgrounds take dark text; everything else takes white.
         case "$bg" in
-            periwinkle|amber|yellow|white) _sgr 38 black ;;
-            *)                             _sgr 38 white ;;
+            amber|yellow|white) _sgr 38 black ;;
+            *)                  _sgr 38 white ;;
         esac
         fgtext="$_SGR"
         out+="${esc}[${bgsgr};${fgtext}m ${_SEG_TEXT[i]} "

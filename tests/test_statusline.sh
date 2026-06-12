@@ -131,7 +131,7 @@ test_limits_neutral_when_healthy() {
     out=$(run_sl "$json")
     assert_output_contains "$out" "5h 23%" "5h block should render" || return 1
     assert_output_contains "$out" "wk 41%" "wk block should render" || return 1
-    assert_output_not_contains "$out" "48;2;140;140;232" "healthy limits must not take the accent periwinkle" || return 1
+    assert_output_not_contains "$out" "48;2;153;152;255" "healthy limits must not take the accent periwinkle" || return 1
     assert_output_not_contains "$out" "48;2;255;183;77" "healthy limits must not show amber" || return 1
 }
 
@@ -148,7 +148,7 @@ test_two_accents_default() {
     local out
     out=$(run_sl "$json")
     assert_output_contains "$out" "48;2;0;135;135" "session block should carry the session color (cyan)" || return 1
-    assert_output_contains "$out" "48;2;140;140;232;38;2;30;30;30" "model should be the periwinkle accent with dark text" || return 1
+    assert_output_contains "$out" "48;2;153;152;255;38;2;255;255;255" "model should be the usage-chip periwinkle with white text" || return 1
     local greys
     greys=$(printf '%s' "$out" | grep -o '48;2;88;88;88' | grep -c . ) || greys=0
     if [ "$greys" -lt 5 ]; then
@@ -455,13 +455,13 @@ test_model_neutral_not_blue() {
     assert_output_not_contains "$out" "0;95;175" "model segment must not use the blue background" || return 1
 }
 
-test_dark_text_on_periwinkle() {
+test_white_text_on_periwinkle() {
     export COLORTERM=truecolor
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"model":{"display_name":"Opus"}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;140;140;232;38;2;30;30;30" \
-        "the periwinkle model accent should carry dark text for contrast" || return 1
+    assert_output_contains "$out" "48;2;153;152;255;38;2;255;255;255" \
+        "the periwinkle model accent carries white text, matching claude's usage chip" || return 1
 }
 
 test_dark_text_on_amber_warn() {
@@ -759,7 +759,7 @@ run_test test_non_git_workspace_absent
 run_test test_ctx_threshold_red
 run_test test_ctx_normal_neutral_not_red
 run_test test_model_neutral_not_blue
-run_test test_dark_text_on_periwinkle
+run_test test_white_text_on_periwinkle
 run_test test_dark_text_on_amber_warn
 run_test test_disc_calm_below_85_amber_above
 run_test test_limits_threshold_red

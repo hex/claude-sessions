@@ -16,7 +16,7 @@ Default order: `session,model,ctx,git,limits,disc,cost`. Identity first (which s
 |---|---|---|---|
 | `session` | Session name | stdin `session_name`, falling back to `CLAUDE_SESSION_NAME`, then the workspace dir basename | The session's `claude_session_color` from `.cs/README.md` frontmatter; grey outside cs sessions |
 | `ctx` | Context window usage, `ctx 42%` | stdin `context_window.used_percentage` | Grey; amber at 50%, red at 80% (tunable) |
-| `model` | Model display name plus effort level when present | stdin `model.display_name`, `effort.level` | Periwinkle accent, dark text |
+| `model` | Model display name plus effort level when present | stdin `model.display_name`, `effort.level` | Periwinkle accent (claude's usage-chip purple), white text |
 | `git` | Branch, ahead/behind arrows, staged `+N` and modified `!N` counts | One `git status --porcelain=v1 -b` call | Grey |
 | `limits` | 5-hour and weekly rate limit usage as two adjacent blocks, `5h 23%` and `wk 41%` | stdin `rate_limits.*.used_percentage` | Grey; each block escalates to amber at 70% and red at 90% on its own value |
 | `disc` | `discoveries.md` size against its budget, `disc 45K/60K` | File size vs `CS_DISCOVERIES_MAX_SIZE` (default 60K) | Grey through normal accumulation; amber at 85% of budget, red at 95% (discoveries fill slowly, so the nag waits until compaction is due) |
@@ -38,7 +38,7 @@ Color depth is detected per render, in priority order: `FORCE_COLOR=0`, `NO_COLO
 
 The `session` segment's background is the same color claude shows for the session (`/color`), read from `claude_session_color:` in the session's `.cs/README.md` frontmatter.
 
-The healthy bar carries exactly two colored blocks: the session name in its `claude_session_color` (white text) and the model in periwinkle `rgb(140,140,232)` (dark text). Everything else rests on quiet grey with white text. Color beyond those two accents is state: warm amber `rgb(255,183,77)` (cs's warning color) past warn thresholds, red past crit. A glance answers three questions in order: which session, which model, and is anything on fire.
+The healthy bar carries exactly two colored blocks: the session name in its `claude_session_color` (white text) and the model in periwinkle `rgb(153,152,255)` with white text, matching claude's own usage chip. Everything else rests on quiet grey with white text. Color beyond those two accents is state: warm amber `rgb(255,183,77)` (cs's warning color) past warn thresholds, red past crit. A glance answers three questions in order: which session, which model, and is anything on fire.
 
 Adjacent segments that share a background join with a thin chevron (U+E0B1, `›` without Nerd Fonts) instead of the solid arrow, which would vanish between equal colors.
 
