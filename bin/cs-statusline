@@ -16,7 +16,7 @@ SL_SESSION=""; SL_CTX=""; SL_MODEL=""; SL_EFFORT=""
 SL_5H=""; SL_WK=""; SL_COST=""; SL_DIR=""
 
 # Collected segments (parallel arrays) and chosen color level.
-_SEG_TEXT=(); _SEG_BG=(); LEVEL="basic"
+_SEG_TEXT=(); _SEG_BG=(); _SEG_BOLD=(); LEVEL="basic"
 
 # Scratch globals used in place of command substitution (keeps the per-render
 # hot path fork-free; this script runs on every assistant message).
@@ -192,6 +192,7 @@ _sgr() {
 _add() {
     _SEG_TEXT+=("$1")
     _SEG_BG+=("$2")
+    _SEG_BOLD+=("${3:-}")
 }
 
 # Set _COLOR by mapping a value against warn/crit thresholds; below warn it
@@ -285,7 +286,7 @@ _seg_session() {
         color=$(_read_session_color "$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/README.md")
         [ -n "$color" ] && bg="$color"
     fi
-    _add "${ICON_SESSION}${name}" "$bg"
+    _add "${ICON_SESSION}${name}" "$bg" bold
 }
 
 _seg_ctx() {
@@ -300,7 +301,7 @@ _seg_model() {
     [ -n "$SL_MODEL" ] || return 0
     local t="$SL_MODEL"
     [ -n "$SL_EFFORT" ] && t="$t $SL_EFFORT"
-    _add "${ICON_MODEL}${t}" "periwinkle"
+    _add "${ICON_MODEL}${t}" "periwinkle" bold
 }
 
 _seg_git() {
@@ -377,6 +378,7 @@ _render() {
             *)                  _sgr 38 white ;;
         esac
         fgtext="$_SGR"
+        [ -n "${_SEG_BOLD[i]}" ] && fgtext+=";1"
         out+="${esc}[${bgsgr};${fgtext}m ${_SEG_TEXT[i]} "
         _sgr 38 "$bg"; fgseg="$_SGR"
         if [ $((i + 1)) -lt "$n" ]; then

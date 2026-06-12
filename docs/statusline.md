@@ -38,7 +38,7 @@ Color depth is detected per render, in priority order: `FORCE_COLOR=0`, `NO_COLO
 
 The `session` segment's background is the same color claude shows for the session (`/color`), read from `claude_session_color:` in the session's `.cs/README.md` frontmatter.
 
-The healthy bar carries exactly two colored blocks: the session name in its `claude_session_color` (white text) and the model in periwinkle `rgb(153,152,255)` with white text, matching claude's own usage chip. Everything else rests on quiet grey with white text. Color beyond those two accents is state: warm amber `rgb(255,183,77)` (cs's warning color) past warn thresholds, red past crit. A glance answers three questions in order: which session, which model, and is anything on fire.
+The healthy bar carries exactly two colored blocks: the session name in its `claude_session_color` and the model in periwinkle `rgb(153,152,255)`, matching claude's own usage chip. Both accents render bold white text; the identity segments are also the typographically loudest. Everything else rests on quiet grey with white text. Color beyond those two accents is state: warm amber `rgb(255,183,77)` (cs's warning color) past warn thresholds, red past crit. A glance answers three questions in order: which session, which model, and is anything on fire.
 
 Adjacent segments that share a background join with a thin chevron (U+E0B1, `›` without Nerd Fonts) instead of the solid arrow, which would vanish between equal colors.
 

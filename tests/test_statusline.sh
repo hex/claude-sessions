@@ -464,6 +464,21 @@ test_white_text_on_periwinkle() {
         "the periwinkle model accent carries white text, matching claude's usage chip" || return 1
 }
 
+test_accent_segments_bold() {
+    export COLORTERM=truecolor
+    export CLAUDE_SESSION_NAME="boldsess"
+    make_cs_session "boldsess" 1000 cyan
+    local json='{"session_name":"boldsess","model":{"display_name":"Opus"},"workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "48;2;0;135;135;38;2;255;255;255;1" \
+        "the session accent should render bold" || return 1
+    assert_output_contains "$out" "48;2;153;152;255;38;2;255;255;255;1" \
+        "the model accent should render bold" || return 1
+    assert_output_not_contains "$out" "48;2;88;88;88;38;2;255;255;255;1" \
+        "grey segments must not render bold" || return 1
+}
+
 test_dark_text_on_amber_warn() {
     export COLORTERM=truecolor
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":55}}'
@@ -760,6 +775,7 @@ run_test test_ctx_threshold_red
 run_test test_ctx_normal_neutral_not_red
 run_test test_model_neutral_not_blue
 run_test test_white_text_on_periwinkle
+run_test test_accent_segments_bold
 run_test test_dark_text_on_amber_warn
 run_test test_disc_calm_below_85_amber_above
 run_test test_limits_threshold_red
