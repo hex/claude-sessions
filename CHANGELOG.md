@@ -2,6 +2,12 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
+## Unreleased
+
+### Changed
+
+- **`cs -lint` synced against stop-slop upstream and hardened.** A source-level comparison against github.com/hardikpandya/stop-slop found the prose-hygiene skill already current with upstream HEAD `8da1f03` (2026-03-18, including the false-agency rule; the upstream changelog stops in January, so currency checks must read `git log`). Three improvements landed on our side: 18 upstream phrases joined `PROSE_SLOP_PHRASES` after passing the zero-hits-across-the-real-corpus admission rule ("it turns out", "the truth is", "think about it:", "full stop.", "game-changer", "circle back", "deep dive", "when it comes to", and ten more; "a feature, not a bug" and "on the same page" had corpus hits and stay judge-only); inline backtick spans are now stripped before matching, so a flagged character or phrase can be mentioned as quoted material (previously only fenced blocks were exempt); and the skill's `metadata.source` records the upstream commit it was synced against, making the next currency check a one-line diff. Tests: an 18-phrase loop, inline-code exemption coverage for both check types, a mixed-line case, and a provenance assertion.
+
 ## 2026.6.2
 
 ### Added

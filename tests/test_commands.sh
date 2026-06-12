@@ -116,6 +116,11 @@ test_compact_discoveries_gates_spawn_in_parent() {
         "the parent must check the budget before paying for a subagent" || return 1
 }
 
+test_prose_hygiene_records_upstream_sync() {
+    assert_file_contains "$SKILLS_DIR/prose-hygiene/SKILL.md" "synced at upstream" \
+        "the skill must record which stop-slop commit it was synced against" || return 1
+}
+
 test_hook_defers_to_compact_command() {
     assert_file_contains "$HOOKS_DIR/discoveries-reminder.sh" "/compact-discoveries" \
         "the over-budget reminder must defer to the command, not respecify compaction" || return 1
@@ -139,5 +144,6 @@ run_test test_scoring_threshold_owned_by_skill
 run_test test_summary_reads_compacted_discoveries
 run_test test_prose_critic_pinned_and_contracted
 run_test test_compact_discoveries_gates_spawn_in_parent
+run_test test_prose_hygiene_records_upstream_sync
 run_test test_hook_defers_to_compact_command
 report_results

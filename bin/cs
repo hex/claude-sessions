@@ -1460,13 +1460,31 @@ PROSE_SLOP_PHRASES=(
     "the stakes are high"
     "the consequences are real"
     "at its core"
+    "it turns out"
+    "the truth is"
+    "i'll say it again"
+    "full stop."
+    "here's what i mean"
+    "think about it:"
+    "and that's okay"
+    "that's it. that's the"
+    "the reality is"
+    "when it comes to"
+    "game-changer"
+    "circle back"
+    "deep dive"
+    "actually matters"
+    "in this section, we'll"
+    "the rest of this essay"
+    "dressed up as"
+    "moving forward"
 )
 
 # Scan one file for lexical prose-slop tells outside fenced code blocks.
 # Prints "<file>:<line>: <reason>" per violation. Returns 1 if any found, else 0.
 lint_prose_file() {
     local file="$1"
-    local lineno=0 in_fence=0 violations=0 line lower phrase
+    local lineno=0 in_fence=0 violations=0 line scan lower phrase
     while IFS= read -r line || [ -n "$line" ]; do
         lineno=$((lineno + 1))
         # Toggle fenced-code state on a line whose first non-space chars are ```
@@ -1475,13 +1493,19 @@ lint_prose_file() {
             continue
         fi
         [ "$in_fence" -eq 1 ] && continue
+        # Inline code spans are quoted material, not prose: strip `...` pairs
+        # before matching so a flagged character or phrase can be mentioned.
+        scan="$line"
+        while [[ "$scan" =~ \`[^\`]*\` ]]; do
+            scan="${scan/"${BASH_REMATCH[0]}"/}"
+        done
         # Em-dash (U+2014): a reliable AI tell with near-zero legitimate use in prose
-        if [[ "$line" == *—* ]]; then
+        if [[ "$scan" == *—* ]]; then
             echo "$file:$lineno: em-dash (—); use a comma or period"
             violations=$((violations + 1))
         fi
         # Banned phrases, matched case-insensitively
-        lower=$(printf '%s' "$line" | tr '[:upper:]' '[:lower:]')
+        lower=$(printf '%s' "$scan" | tr '[:upper:]' '[:lower:]')
         for phrase in "${PROSE_SLOP_PHRASES[@]}"; do
             if [[ "$lower" == *"$phrase"* ]]; then
                 echo "$file:$lineno: slop phrase: \"$phrase\""

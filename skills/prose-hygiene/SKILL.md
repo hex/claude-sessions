@@ -2,7 +2,7 @@
 name: prose-hygiene
 description: Remove AI writing tells from prose. Use when drafting, editing, or reviewing text to eliminate predictable AI patterns.
 metadata:
-  source: taxonomy adapted from stop-slop (github.com/hardikpandya/stop-slop, MIT), reworded for cs
+  source: taxonomy adapted from stop-slop (github.com/hardikpandya/stop-slop, MIT), reworded for cs; synced at upstream 8da1f03 (2026-03-18)
 ---
 
 # Prose Hygiene

@@ -120,6 +120,68 @@ test_single_word_adverbs_not_flagged() {
     assert_eq "0" "$RC" "single-word adverbs/extremes must not be blocked by cs -lint" || return 1
 }
 
+test_stop_slop_sync_phrases_flagged() {
+    # The 2026-06-12 corpus pass admitted these upstream phrases: each measured
+    # zero hits across the real session corpus, the same rule as the original 33.
+    local phrases=(
+        "it turns out"
+        "the truth is"
+        "i'll say it again"
+        "full stop."
+        "here's what i mean"
+        "think about it:"
+        "and that's okay"
+        "that's it. that's the"
+        "the reality is"
+        "when it comes to"
+        "game-changer"
+        "circle back"
+        "deep dive"
+        "actually matters"
+        "in this section, we'll"
+        "the rest of this essay"
+        "dressed up as"
+        "moving forward"
+    )
+    local p f i=0
+    for p in "${phrases[@]}"; do
+        i=$((i + 1))
+        f="$TEST_TMPDIR/sync$i.md"
+        printf 'Filler context %s more context.\n' "$p" > "$f"
+        lint "$f"
+        assert_eq "1" "$RC" "phrase should be flagged: $p" || return 1
+    done
+}
+
+test_corpus_rejected_phrases_not_flagged() {
+    # These upstream phrases had real-corpus hits, so they stay judge-only.
+    local f="$TEST_TMPDIR/rejected.md"
+    printf '%s\n' "Calling it a feature, not a bug kept everyone on the same page." > "$f"
+    lint "$f"
+    assert_eq "0" "$RC" "corpus-rejected phrases must stay judge-only" || return 1
+}
+
+test_phrase_in_inline_code_ignored() {
+    local f="$TEST_TMPDIR/inline.md"
+    printf '%s\n' 'The hook prints `it turns out` when tracing is on.' > "$f"
+    lint "$f"
+    assert_eq "0" "$RC" "phrases inside inline backtick spans must not be flagged" || return 1
+}
+
+test_em_dash_in_inline_code_ignored() {
+    local f="$TEST_TMPDIR/inlinedash.md"
+    printf '%s\n' 'The linter reports `em-dash (—)` for that character.' > "$f"
+    lint "$f"
+    assert_eq "0" "$RC" "em-dash inside inline backtick spans must not be flagged" || return 1
+}
+
+test_violation_outside_inline_code_still_flagged() {
+    local f="$TEST_TMPDIR/inlinemix.md"
+    printf '%s\n' 'Run `cs -lint` and it turns out the file fails.' > "$f"
+    lint "$f"
+    assert_eq "1" "$RC" "a violation outside the backtick span must still be flagged" || return 1
+}
+
 echo "Running prose-lint tests..."
 run_test test_clean_prose_exits_zero
 run_test test_em_dash_flagged
@@ -133,5 +195,10 @@ run_test test_multiple_files_one_dirty_exit_1
 run_test test_multiple_files_all_clean_exit_0
 run_test test_expanded_phrase_flagged
 run_test test_single_word_adverbs_not_flagged
+run_test test_stop_slop_sync_phrases_flagged
+run_test test_corpus_rejected_phrases_not_flagged
+run_test test_phrase_in_inline_code_ignored
+run_test test_em_dash_in_inline_code_ignored
+run_test test_violation_outside_inline_code_still_flagged
 
 report_results
