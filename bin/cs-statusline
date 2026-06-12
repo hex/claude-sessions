@@ -5,7 +5,12 @@
 set -uo pipefail
 
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
-CS_DISCOVERIES_DEFAULT_MAX=61440
+# Same default as bin/cs and hooks/discoveries-reminder.sh, so the disc
+# segment's thresholds agree with the hook's over-budget trigger.
+CS_DISCOVERIES_DEFAULT_MAX=60000
+
+# Read-only status query; never take the index lock from a render.
+export GIT_OPTIONAL_LOCKS=0
 
 # Terminal theme, exported by cs at launch (detected via COLORFGBG/OSC 11
 # while cs still owned the tty). Anything but "dark" renders the light set.
@@ -50,17 +55,17 @@ _timeout() {
     fi
 }
 
-# Slurp stdin with a builtin read so no subprocess is spawned and a stuck pipe
-# cannot hang the render past one second. Handles single-line compact JSON
-# (the common case) and multi-line pretty JSON alike.
+# Slurp stdin into _STDIN with a builtin read so no subprocess is spawned and
+# a stuck pipe cannot hang the render past one second. Handles single-line
+# compact JSON (the common case) and multi-line pretty JSON alike.
 _read_stdin() {
+    _STDIN=""
     [ -t 0 ] && return 0
-    local line input=""
+    local line=""
     while IFS= read -r -t 1 line; do
-        input+="$line"$'\n'
+        _STDIN+="$line"$'\n'
     done
-    input+="$line"   # trailing partial line (no newline) or empty
-    printf '%s' "$input"
+    _STDIN+="$line"   # trailing partial line (no newline) or empty
 }
 
 # Extract every field we need in one jq pass, one value per line. Returns
@@ -199,9 +204,9 @@ _add() {
 }
 
 # Set _COLOR by mapping a value against warn/crit thresholds; below warn it
-# takes the healthy color ($4, default green).
+# takes the healthy color ($4, default grey).
 _thresh_color() {
-    local v="$1" warn="$2" crit="$3" healthy="${4:-green}"
+    local v="$1" warn="$2" crit="$3" healthy="${4:-grey}"
     if [ "$v" -ge "$crit" ]; then
         _COLOR=red
     elif [ "$v" -ge "$warn" ]; then
@@ -211,33 +216,44 @@ _thresh_color() {
     fi
 }
 
-# Read claude_session_color from a session README's frontmatter (empty if none).
+# Read claude_session_color from a session README's frontmatter into
+# _SESSION_COLOR (empty if none). Pure bash: this runs once per render, where
+# an awk fork is real cost. KEEP THE FRONTMATTER FORMAT IN SYNC WITH bin/cs's
+# _read_session_color.
 _read_session_color() {
-    local readme="$1"
+    _SESSION_COLOR=""
+    local readme="$1" line v
     [ -f "$readme" ] || return 0
-    awk '
-        /^claude_session_color:/ {
-            sub(/^claude_session_color:[[:space:]]*/, "")
-            gsub(/"/, "")
-            print
-            exit
-        }
-    ' "$readme" 2>/dev/null || true
+    while IFS= read -r line; do
+        case "$line" in
+            claude_session_color:*)
+                v="${line#claude_session_color:}"
+                v="${v#"${v%%[![:space:]]*}"}"
+                _SESSION_COLOR="${v//\"/}"
+                return 0
+                ;;
+        esac
+    done < "$readme"
 }
 
-# Byte size of a file, portably (empty on failure).
+# Byte size of a file into _FILESIZE (0 on failure); arithmetic evaluation
+# strips wc's leading whitespace without a tr fork, and an empty result
+# evaluates to 0 instead of erroring.
 _filesize() {
-    wc -c < "$1" 2>/dev/null | tr -d ' ' || true
+    local n
+    n=$(wc -c < "$1" 2>/dev/null) || n=0
+    _FILESIZE=$(( n ))
 }
 
-# Format the git segment text for a workspace dir, or nothing when it is not a
-# git repo / git is unavailable / git times out.
+# Format the git segment text for a workspace dir into _GIT_TEXT, empty when
+# it is not a git repo / git is unavailable / git times out.
 _git_text() {
+    _GIT_TEXT=""
     local dir="$1"
     [ -n "$dir" ] || return 0
     [ -e "$dir/.git" ] || return 0
     local out
-    out=$(_timeout 2 env GIT_OPTIONAL_LOCKS=0 git -C "$dir" status --porcelain=v1 -b 2>/dev/null) || return 0
+    out=$(_timeout 2 git -C "$dir" status --porcelain=v1 -b 2>/dev/null) || return 0
     local branch="" ahead=0 behind=0 staged=0 modified=0 first=1 line x y h
     while IFS= read -r line; do
         if [ "$first" = "1" ]; then
@@ -272,7 +288,7 @@ EOF
     [ "$staged" -gt 0 ] && marks="+$staged"
     [ "$modified" -gt 0 ] && marks="$marks!$modified"
     [ -n "$marks" ] && text="$text $marks"
-    printf '%s' "$text"
+    _GIT_TEXT="$text"
 }
 
 # --- segments --------------------------------------------------------------
@@ -286,7 +302,8 @@ _seg_session() {
     fi
     local bg="grey" color=""
     if [ -n "${CLAUDE_SESSION_NAME:-}" ]; then
-        color=$(_read_session_color "$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/README.md")
+        _read_session_color "$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/README.md"
+        color="$_SESSION_COLOR"
         [ -n "$color" ] && bg="$color"
     fi
     _add "${ICON_SESSION}${name}" "$bg" bold
@@ -296,7 +313,7 @@ _seg_ctx() {
     local v="${SL_CTX%%.*}"
     [ -n "$v" ] || return 0
     local warn="${CS_STATUSLINE_CTX_WARN:-50}" crit="${CS_STATUSLINE_CTX_CRIT:-80}"
-    _thresh_color "$v" "$warn" "$crit" grey
+    _thresh_color "$v" "$warn" "$crit"
     _add "${ICON_CTX}ctx ${v}%" "$_COLOR"
 }
 
@@ -308,7 +325,8 @@ _seg_model() {
 }
 
 _seg_git() {
-    local t; t=$(_git_text "$SL_DIR")
+    _git_text "$SL_DIR"
+    local t="$_GIT_TEXT"
     [ -n "$t" ] || return 0
     _add "${ICON_GIT}${t}" "grey"
 }
@@ -317,11 +335,11 @@ _seg_git() {
 _seg_limits() {
     local h="${SL_5H%%.*}" w="${SL_WK%%.*}"
     if [ -n "$h" ]; then
-        _thresh_color "$h" 70 90 grey
+        _thresh_color "$h" 70 90
         _add "${ICON_5H}5h ${h}%" "$_COLOR"
     fi
     if [ -n "$w" ]; then
-        _thresh_color "$w" 70 90 grey
+        _thresh_color "$w" 70 90
         _add "${ICON_WK}wk ${w}%" "$_COLOR"
     fi
 }
@@ -330,13 +348,14 @@ _seg_disc() {
     [ -n "${CLAUDE_SESSION_NAME:-}" ] || return 0
     local f="$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/discoveries.md"
     [ -f "$f" ] || return 0
-    local bytes; bytes=$(_filesize "$f")
-    [ -n "$bytes" ] || return 0
+    _filesize "$f"
+    local bytes="$_FILESIZE"
+    [ "$bytes" -gt 0 ] || return 0
     local budget="${CS_DISCOVERIES_MAX_SIZE:-$CS_DISCOVERIES_DEFAULT_MAX}"
-    local sizeK=$((bytes / 1024)) budgetK=$((budget / 1024)) pct=0
+    local sizeK=$((bytes / 1000)) budgetK=$((budget / 1000)) pct=0
     [ "$budget" -gt 0 ] && pct=$((bytes * 100 / budget))
     # Discoveries fill slowly and idle high; warn only when compaction is due.
-    _thresh_color "$pct" 85 95 grey
+    _thresh_color "$pct" 85 95
     _add "${ICON_DISC}disc ${sizeK}K/${budgetK}K" "$_COLOR"
 }
 
@@ -410,9 +429,8 @@ _render() {
 main() {
     [ "${CS_STATUSLINE_DISABLE:-}" = "1" ] && exit 0
 
-    local input
-    input=$(_read_stdin)
-    _parse_stdin "$input" || _fallback
+    _read_stdin
+    _parse_stdin "$_STDIN" || _fallback
 
     _detect_level
 

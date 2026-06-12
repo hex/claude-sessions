@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.6.1"
+VERSION="2026.6.2"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -818,6 +818,8 @@ _alloc_random_color() {
 
 # Read claude_session_color from a session's .cs/README.md frontmatter.
 # Prints the color name to stdout, or empty if absent or unreadable.
+# KEEP THE FRONTMATTER FORMAT IN SYNC WITH bin/cs-statusline's
+# _read_session_color (a pure-bash copy on the render hot path).
 _read_session_color() {
     local readme="$1"
     [ -f "$readme" ] || return 0
@@ -2197,10 +2199,27 @@ remove_session() {
 # Launch Claude Code
 # Register or remove the cs-statusline entry in Claude Code's settings.json.
 # Enable overwrites whatever is registered (the command is explicit consent);
+# Strip the statusLine registration when (and only when) it points at
+# cs-statusline; a status line the user configured themselves is left alone.
+# Returns 0 when stripped, 1 when absent or foreign, 2 when the write failed.
+_strip_statusline_registration() {
+    local settings_file="$1"
+    [ -f "$settings_file" ] || return 1
+    jq -e '.statusLine.command // "" | endswith("/cs-statusline")' "$settings_file" >/dev/null 2>&1 || return 1
+    local _tmp
+    _tmp=$(mktemp)
+    if jq 'del(.statusLine)' "$settings_file" > "$_tmp" 2>/dev/null; then
+        mv "$_tmp" "$settings_file"
+        return 0
+    fi
+    rm -f "$_tmp"
+    return 2
+}
+
 # disable strips only a cs-statusline registration, never a foreign one.
 run_statusline_cmd() {
     local action="${1:-}"
-    local settings="$HOME/.claude/settings.json"
+    local settings="${CS_CLAUDE_DIR:-$HOME/.claude}/settings.json"
     local bin="$HOME/.local/bin/cs-statusline"
     command -v jq >/dev/null 2>&1 || error "jq is required for cs -statusline"
     case "$action" in
@@ -2221,19 +2240,12 @@ run_statusline_cmd() {
             ;;
         disable)
             [ -f "$settings" ] || { info "No settings.json; nothing to disable."; return 0; }
-            if jq -e '.statusLine.command // "" | endswith("/cs-statusline")' "$settings" >/dev/null 2>&1; then
-                local _tmp
-                _tmp=$(mktemp)
-                if jq 'del(.statusLine)' "$settings" > "$_tmp" 2>/dev/null; then
-                    mv "$_tmp" "$settings"
-                    info "Removed the cs-statusline registration"
-                else
-                    rm -f "$_tmp"
-                    error "Could not update $settings"
-                fi
-            else
-                info "Status line is not cs-statusline; leaving it untouched."
-            fi
+            _strip_statusline_registration "$settings"
+            case $? in
+                0) info "Removed the cs-statusline registration" ;;
+                1) info "Status line is not cs-statusline; leaving it untouched." ;;
+                *) error "Could not update $settings" ;;
+            esac
             ;;
         *)
             error "Usage: cs -statusline enable|disable"
@@ -2310,7 +2322,7 @@ detect_term_theme() {
 # macOS reports dark mode by the presence of the AppleInterfaceStyle key;
 # the key is absent in light mode (including auto mode while light).
 _theme_from_os_appearance() {
-    [ "$(uname -s)" = "Darwin" ] || { echo "unknown"; return; }
+    [[ "$OSTYPE" == darwin* ]] || { echo "unknown"; return; }
     if defaults read -g AppleInterfaceStyle >/dev/null 2>&1; then
         echo "dark"
     else
@@ -3576,7 +3588,7 @@ run_uninstall() {
     local hooks_dir="$hooks_parent_dir/cs"
     local commands_dir="$HOME/.claude/commands"
     local skills_dir="$HOME/.claude/skills"
-    local settings_file="$HOME/.claude/settings.json"
+    local settings_file="${CS_CLAUDE_DIR:-$HOME/.claude}/settings.json"
     local bash_completion_dir="$HOME/.bash_completion.d"
     local zsh_completion_dir="$HOME/.zsh/completions"
 
@@ -3617,17 +3629,8 @@ run_uninstall() {
 
     # Remove the statusLine registration only when it points at cs-statusline;
     # a status line the user configured themselves is left untouched.
-    if [ -f "$settings_file" ] && command -v jq >/dev/null 2>&1; then
-        if jq -e '.statusLine.command // "" | endswith("/cs-statusline")' "$settings_file" >/dev/null 2>&1; then
-            local _settings_tmp
-            _settings_tmp=$(mktemp)
-            if jq 'del(.statusLine)' "$settings_file" > "$_settings_tmp" 2>/dev/null; then
-                mv "$_settings_tmp" "$settings_file"
-                info "Removed cs-statusline registration from settings.json"
-            else
-                rm -f "$_settings_tmp"
-            fi
-        fi
+    if command -v jq >/dev/null 2>&1 && _strip_statusline_registration "$settings_file"; then
+        info "Removed cs-statusline registration from settings.json"
     fi
 
     if [ -f "$install_dir/cs-tui" ]; then

@@ -497,46 +497,46 @@ else
     # terminal is attached, otherwise keep it and print how to switch.
     _statusline_cmd="$INSTALL_DIR/cs-statusline"
     _current_statusline=$(echo "$SETTINGS" | jq -r '.statusLine.command // ""')
+    # Each branch only decides consent; the registration itself happens once
+    # below. "quiet" re-registers an existing cs-statusline entry (refreshing
+    # the path) without announcing it.
+    _register_statusline=""
     case "$_current_statusline" in
         "")
             # The status bar is user-visible UI: claim it only with consent.
             # Interactive installs ask (default yes); non-interactive installs
             # leave it off and say how to enable.
-            _enable_statusline=""
             if [ -t 0 ]; then
                 read -p "Register cs-statusline as the Claude Code status line? [Y/n] " -n 1 -r
                 echo ""
-                [[ ! $REPLY =~ ^[Nn]$ ]] && _enable_statusline=1
+                [[ ! $REPLY =~ ^[Nn]$ ]] && _register_statusline=1
             fi
-            if [ -n "$_enable_statusline" ]; then
-                SETTINGS=$(echo "$SETTINGS" | jq --arg cmd "$_statusline_cmd" \
-                    '.statusLine = {type: "command", command: $cmd}')
-                installed "status line" "cs-statusline"
-            else
+            if [ -z "$_register_statusline" ]; then
                 info "Status line not registered. Enable any time with: cs -statusline enable"
             fi
             ;;
         */cs-statusline)
-            SETTINGS=$(echo "$SETTINGS" | jq --arg cmd "$_statusline_cmd" \
-                '.statusLine = {type: "command", command: $cmd}')
+            _register_statusline=quiet
             ;;
         *)
-            _replace_statusline=""
             if [ -t 0 ]; then
                 read -p "Replace current status line ($_current_statusline) with cs-statusline? [y/N] " -n 1 -r
                 echo ""
-                [[ $REPLY =~ ^[Yy]$ ]] && _replace_statusline=1
+                [[ $REPLY =~ ^[Yy]$ ]] && _register_statusline=1
             fi
-            if [ -n "$_replace_statusline" ]; then
-                SETTINGS=$(echo "$SETTINGS" | jq --arg cmd "$_statusline_cmd" \
-                    '.statusLine = {type: "command", command: $cmd}')
-                installed "status line" "cs-statusline"
-            else
+            if [ -z "$_register_statusline" ]; then
                 warn "Keeping current status line. To switch to cs-statusline:"
                 warn "  set statusLine.command to $_statusline_cmd in ~/.claude/settings.json"
             fi
             ;;
     esac
+    if [ -n "$_register_statusline" ]; then
+        SETTINGS=$(echo "$SETTINGS" | jq --arg cmd "$_statusline_cmd" \
+            '.statusLine = {type: "command", command: $cmd}')
+        if [ "$_register_statusline" = "1" ]; then
+            installed "status line" "cs-statusline"
+        fi
+    fi
 
     echo "$SETTINGS" > "$CLAUDE_SETTINGS"
 fi

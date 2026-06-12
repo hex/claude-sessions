@@ -116,7 +116,7 @@ test_all_segments_ordering_plain() {
     }')
     local out
     out=$(run_sl "$json")
-    assert_eq "mysess > Opus high > ctx 34% > main +1!1 > 5h 23% > wk 41% > disc 48K/60K > \$1.23" "$out" \
+    assert_eq "mysess > Opus high > ctx 34% > main +1!1 > 5h 23% > wk 41% > disc 49K/60K > \$1.23" "$out" \
         "all segments should render in order: identity pair, then gauges"
 }
 
@@ -279,39 +279,40 @@ test_detect_theme_unknown_without_signals() {
 
 _make_appearance_fakes() {
     # $1: "dark" makes `defaults read -g AppleInterfaceStyle` succeed,
-    #     "light" makes it fail (key absent); $2: uname -s output
+    #     "light" makes it fail (key absent). The OS check itself reads
+    #     $OSTYPE (no fork), which bash inherits from the environment, so
+    #     tests inject it directly instead of faking uname.
     mkdir -p "$TEST_TMPDIR/fakebin"
     if [ "$1" = "dark" ]; then
         printf '#!/bin/sh\necho Dark\nexit 0\n' > "$TEST_TMPDIR/fakebin/defaults"
     else
         printf '#!/bin/sh\nexit 1\n' > "$TEST_TMPDIR/fakebin/defaults"
     fi
-    printf '#!/bin/sh\necho %s\n' "$2" > "$TEST_TMPDIR/fakebin/uname"
-    chmod +x "$TEST_TMPDIR/fakebin/defaults" "$TEST_TMPDIR/fakebin/uname"
+    chmod +x "$TEST_TMPDIR/fakebin/defaults"
 }
 
 test_detect_theme_tmux_appearance_dark() {
-    _make_appearance_fakes dark Darwin
+    _make_appearance_fakes dark
     local out
-    out=$(TMUX="fake,1,0" COLORFGBG="0;15" PATH="$TEST_TMPDIR/fakebin:$PATH" \
+    out=$(TMUX="fake,1,0" OSTYPE="darwin24.0" COLORFGBG="0;15" PATH="$TEST_TMPDIR/fakebin:$PATH" \
         "$CS_BIN" -detect-theme 2>&1 < /dev/null)
     assert_output_contains "$out" "dark" \
         "tmux + dark OS appearance must classify dark despite light COLORFGBG" || return 1
 }
 
 test_detect_theme_tmux_appearance_light() {
-    _make_appearance_fakes light Darwin
+    _make_appearance_fakes light
     local out
-    out=$(TMUX="fake,1,0" COLORFGBG="15;0" PATH="$TEST_TMPDIR/fakebin:$PATH" \
+    out=$(TMUX="fake,1,0" OSTYPE="darwin24.0" COLORFGBG="15;0" PATH="$TEST_TMPDIR/fakebin:$PATH" \
         "$CS_BIN" -detect-theme 2>&1 < /dev/null)
     assert_output_contains "$out" "light" \
         "tmux + light OS appearance must classify light despite dark COLORFGBG" || return 1
 }
 
 test_detect_theme_tmux_non_darwin_unknown() {
-    _make_appearance_fakes dark Linux
+    _make_appearance_fakes dark
     local out
-    out=$(TMUX="fake,1,0" COLORFGBG="15;0" PATH="$TEST_TMPDIR/fakebin:$PATH" \
+    out=$(TMUX="fake,1,0" OSTYPE="linux-gnu" COLORFGBG="15;0" PATH="$TEST_TMPDIR/fakebin:$PATH" \
         "$CS_BIN" -detect-theme 2>&1 < /dev/null)
     assert_output_contains "$out" "unknown" \
         "tmux without a macOS appearance source must classify unknown, not trust COLORFGBG" || return 1
@@ -495,11 +496,11 @@ test_dark_text_on_amber_warn() {
 test_disc_calm_below_85_amber_above() {
     export COLORTERM=truecolor
     export CLAUDE_SESSION_NAME="dthr"
-    make_cs_session "dthr" 49152 cyan   # 48K of 60K budget = 80%
+    make_cs_session "dthr" 49152 cyan   # 49152 bytes of 60000 budget = 81%
     local json='{"session_name":"dthr","workspace":{"current_dir":"/none"}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "disc 48K/60K" "disc segment should render" || return 1
+    assert_output_contains "$out" "disc 49K/60K" "disc segment should render" || return 1
     assert_output_not_contains "$out" "48;2;255;183;77" "80% of budget should stay calm grey" || return 1
 
     dd if=/dev/zero of="$CS_SESSIONS_ROOT/dthr/.cs/discoveries.md" bs=1024 count=53 2>/dev/null  # 53K = 88%
@@ -545,7 +546,7 @@ test_disc_budget_formatting() {
     local json='{"session_name":"dsess","workspace":{"current_dir":"/none"}}'
     local out
     out=$(run_sl "$json")
-    assert_eq "disc 48K/60K" "$out" "disc should format size/budget in K"
+    assert_eq "disc 49K/60K" "$out" "disc should format size/budget in K"
 }
 
 # ============================================================================
