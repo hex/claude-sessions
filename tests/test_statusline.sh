@@ -148,7 +148,7 @@ test_two_accents_default() {
     local out
     out=$(run_sl "$json")
     assert_output_contains "$out" "48;2;0;135;135" "session block should carry the session color (cyan)" || return 1
-    assert_output_contains "$out" "48;2;153;152;255;38;2;255;255;255" "model should be the usage-chip periwinkle with white text" || return 1
+    assert_output_contains "$out" "48;2;153;152;255;38;2;240;242;255" "model should be the usage-chip periwinkle with the chip's text color" || return 1
     local greys
     greys=$(printf '%s' "$out" | grep -o '48;2;88;88;88' | grep -c . ) || greys=0
     if [ "$greys" -lt 5 ]; then
@@ -460,8 +460,8 @@ test_white_text_on_periwinkle() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"model":{"display_name":"Opus"}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;153;152;255;38;2;255;255;255" \
-        "the periwinkle model accent carries white text, matching claude's usage chip" || return 1
+    assert_output_contains "$out" "48;2;153;152;255;38;2;240;242;255" \
+        "the periwinkle model accent carries the chip's text color rgb(240,242,255)" || return 1
 }
 
 test_accent_segments_bold() {
@@ -471,11 +471,15 @@ test_accent_segments_bold() {
     local json='{"session_name":"boldsess","model":{"display_name":"Opus"},"workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;0;135;135;38;2;255;255;255;1" \
-        "the session accent should render bold" || return 1
-    assert_output_contains "$out" "48;2;153;152;255;38;2;255;255;255;1" \
-        "the model accent should render bold" || return 1
-    assert_output_not_contains "$out" "48;2;88;88;88;38;2;255;255;255;1" \
+    assert_output_contains "$out" "48;2;0;135;135;38;2;240;242;255;1" \
+        "the session accent should render bold in the chip text color" || return 1
+    assert_output_contains "$out" "48;2;153;152;255;38;2;240;242;255;1" \
+        "the model accent should render bold in the chip text color" || return 1
+    # SGR bold is stateful: a segment that does not explicitly emit normal
+    # intensity (22) inherits bold from the accent before it.
+    assert_output_contains "$out" "48;2;88;88;88;38;2;255;255;255;22" \
+        "grey segments must explicitly reset to normal intensity" || return 1
+    assert_output_not_contains "$out" "48;2;88;88;88;38;2;255;255;255;1m" \
         "grey segments must not render bold" || return 1
 }
 
@@ -592,8 +596,10 @@ test_color_level_basic() {
     out=$(run_sl "$json")
     assert_output_not_contains "$out" "48;5;" "basic level must not emit indexed codes"
     assert_output_not_contains "$out" "48;2;" "basic level must not emit truecolor codes"
-    # session bg = grey -> basic bg code 100, text fg white -> 97
-    assert_output_contains "$out" "100;97m" "basic level should emit 8/16-color SGR codes"
+    # session bg = grey -> basic bg code 100, text fg white -> 97; the
+    # session accent carries bold (1), plain segments normal intensity (22)
+    assert_output_contains "$out" "100;97;1m" "basic level should emit 8/16-color SGR codes with accent bold"
+    assert_output_contains "$out" "100;97;22m" "basic level plain segments should reset to normal intensity"
 }
 
 # ============================================================================

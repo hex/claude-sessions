@@ -135,6 +135,7 @@ _sgr() {
                 pink)   rgb="175;0;135" ;;
                 cyan)   rgb="0;135;135" ;;
                 periwinkle) rgb="153;152;255" ;;
+                chiptext) rgb="240;242;255" ;;
                 amber)  rgb="255;183;77" ;;
                 white)
                     # Softer text on dark terminals to avoid glare.
@@ -157,6 +158,7 @@ _sgr() {
                 pink)   idx=162 ;;
                 cyan)   idx=30 ;;
                 periwinkle) idx=105 ;;
+                chiptext) idx=231 ;;
                 amber)  idx=215 ;;
                 white)
                     [ "$SL_THEME" = "dark" ] && idx=254 || idx=255 ;;
@@ -177,6 +179,7 @@ _sgr() {
                 pink)   base=95 ;;
                 cyan)   base=36 ;;
                 periwinkle) base=94 ;;
+                chiptext) base=97 ;;
                 amber)  base=33 ;;
                 white)  base=97 ;;
                 black)  base=30 ;;
@@ -372,13 +375,17 @@ _render() {
     for ((i = 0; i < n; i++)); do
         bg="${_SEG_BG[i]}"
         _sgr 48 "$bg"; bgsgr="$_SGR"
-        # Light backgrounds take dark text; everything else takes white.
+        # Light backgrounds take dark text; accents take the usage chip's
+        # text color, everything else plain white. SGR bold is stateful, so
+        # every segment emits its intensity explicitly (1 accent, 22 normal)
+        # or it would inherit bold from the accent before it.
         case "$bg" in
             amber|yellow|white) _sgr 38 black ;;
-            *)                  _sgr 38 white ;;
+            *)
+                if [ -n "${_SEG_BOLD[i]}" ]; then _sgr 38 chiptext; else _sgr 38 white; fi ;;
         esac
         fgtext="$_SGR"
-        [ -n "${_SEG_BOLD[i]}" ] && fgtext+=";1"
+        if [ -n "${_SEG_BOLD[i]}" ]; then fgtext+=";1"; else fgtext+=";22"; fi
         out+="${esc}[${bgsgr};${fgtext}m ${_SEG_TEXT[i]} "
         _sgr 38 "$bg"; fgseg="$_SGR"
         if [ $((i + 1)) -lt "$n" ]; then
@@ -389,7 +396,7 @@ _render() {
                 out+="${esc}[${bgsgr};${fgtext}m${thin}"
             else
                 _sgr 48 "$nbg"; nbgsgr="$_SGR"
-                out+="${esc}[${fgseg};${nbgsgr}m${glyph}"
+                out+="${esc}[22;${fgseg};${nbgsgr}m${glyph}"
             fi
         else
             out+="${reset}${esc}[${fgseg}m${glyph}${reset}"
