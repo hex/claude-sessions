@@ -1,6 +1,8 @@
 Compact old discoveries into a condensed summary and trim the active file.
 
-Use the Task tool to delegate this work to a subagent with `model: sonnet` and `subagent_type: general-purpose`. Pass the following prompt to the subagent:
+Before spawning anything, check whether compaction is needed: run `wc -c .cs/discoveries.md` and compare against `${CS_DISCOVERIES_MAX_SIZE:-60000}` bytes. If the file is under budget, report that and stop — don't pay for a subagent to find that out.
+
+If it is over budget, use the Task tool to delegate the compaction to a subagent with `model: sonnet` and `subagent_type: general-purpose`. Pass the following prompt to the subagent:
 
 ---
 
@@ -17,8 +19,8 @@ You are working in a cs session. Your task is to summarize old discoveries and t
 2. **Read the full discoveries.md** and identify all `##` entries
 
 3. **Decide what to keep vs compact:**
-   - The most recent entries (roughly the last half of the budget) stay in `discoveries.md` untouched
-   - Older entries get summarized into `.cs/discoveries.compact.md`
+   - Keep the most recent entries such that `discoveries.md` lands comfortably under the budget — target roughly half the budget in bytes of kept entries
+   - Everything older gets summarized into `.cs/discoveries.compact.md`
 
 4. **Produce a condensed summary of the older entries** with these rules:
    - Each original `##` entry becomes 1-3 bullet points capturing the key technical finding
@@ -47,6 +49,7 @@ If `discoveries.compact.md` already exists, merge the new compacted entries into
 6. **Trim `discoveries.md`:**
    - Keep the `# Discoveries & Notes` header
    - Keep only the recent entries (the ones NOT compacted)
+   - Immediately before writing, re-read `discoveries.md` and carry over any entries appended since your first read — background tasks append findings concurrently, and a full-file overwrite would silently drop them
    - Write the trimmed file back
 
 7. **Report back:**

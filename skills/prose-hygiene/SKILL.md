@@ -1,16 +1,18 @@
 ---
 name: prose-hygiene
-description: Remove AI writing tells from prose. Use when drafting, editing, or reviewing text to eliminate predictable AI patterns. cs applies this to /summary and /wrap narratives; the lexical subset is enforced by `cs -lint`.
+description: Remove AI writing tells from prose. Use when drafting, editing, or reviewing text to eliminate predictable AI patterns.
 metadata:
   source: taxonomy adapted from stop-slop (github.com/hardikpandya/stop-slop, MIT), reworded for cs
 ---
 
 # Prose Hygiene
 
-The complete checklist for removing AI writing tells from prose. A reviewer applying
-this reads the prose, flags every match below with the quoted text and a concrete
-rewrite, then scores it (see Scoring). A regex can only catch the lexical items; the
-structural and voice rules need a model judging meaning.
+The complete checklist for removing AI writing tells from prose. While drafting,
+avoid the patterns below. A reviewer applying this reads the prose, flags every match
+below with the quoted text and a concrete rewrite, then scores it (see Scoring). A
+regex can only catch the lexical items; the structural and voice rules need a model
+judging meaning. cs applies this to /summary and /wrap narratives; the lexical subset
+is enforced by `cs -lint`.
 
 ## Core principles
 

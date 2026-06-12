@@ -1,6 +1,5 @@
 ---
-allowed_tools:
-  - Bash
+allowed-tools: Bash
 ---
 
 Save a labelled checkpoint of the current cs session state.
@@ -18,13 +17,7 @@ The label is free text describing what this moment represents — for example:
 
 ## What it does
 
-Runs `cs -checkpoint "<label>"` via the Bash tool. This captures:
-- Current timestamp and git HEAD
-- Snapshot of `.cs/discoveries.md`
-- List of uncommitted files
-- Appends a `checkpoint` event to `.cs/timeline.jsonl`
-
-Checkpoints are saved to `.cs/checkpoints/YYYY-MM-DD-HHMMSS-{slug}.md`.
+Runs `cs -checkpoint "<label>"` via the Bash tool, which captures the current git state, the uncommitted-file list, and a snapshot of the session's discoveries, and records the checkpoint on the session timeline. The command's own output names the file it saved under `.cs/checkpoints/`.
 
 ## Related commands
 

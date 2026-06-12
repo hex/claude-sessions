@@ -7,6 +7,7 @@ You are working in a cs session. Your task is to create a comprehensive summary 
 1. **Read all session documentation:**
    - .cs/README.md (objective, environment, outcome)
    - .cs/discoveries.md (findings, observations, and ideas)
+   - .cs/discoveries.compact.md (if it exists — condensed older findings; without it a compacted session loses its early history)
    - .cs/artifacts/MANIFEST.json (list of created files)
 
 2. **Synthesize into a cohesive summary** that tells the story of this session. The summary should:
@@ -58,7 +59,7 @@ You are working in a cs session. Your task is to create a comprehensive summary 
 
 5. **Gate the prose on quality before finalizing** (two layers):
    - **Lexical (deterministic):** run `cs -lint .cs/summary.md` and fix every em-dash and flagged phrase it reports. The prose-lint Stop hook enforces this on turn-end anyway; clearing it now avoids the block.
-   - **Structural (independent judge):** use the Task tool to spawn a subagent as an impartial prose critic of `.cs/summary.md`. The subagent MUST read `~/.claude/skills/prose-hygiene/SKILL.md` and apply EVERY rule in it (the full taxonomy of phrases, structures, voice rules, and the scoring rubric). It only judges, never edits. It returns a 1-10 score for each of the five dimensions (Directness, Rhythm, Trust, Authenticity, Density; total out of 50) and, for every violation, the quoted text, the rule it breaks, and a concrete rewrite. Apply the subagent's rewrites to `.cs/summary.md` whenever the total is below 35/50 or any rule is violated, then continue.
+   - **Structural (independent judge):** use the Task tool to spawn a subagent (`model: opus`, `subagent_type: general-purpose`) as an impartial prose critic of `.cs/summary.md`. The subagent MUST read `~/.claude/skills/prose-hygiene/SKILL.md` and apply EVERY rule in it (the full taxonomy of phrases, structures, voice rules, and the scoring rubric). It only judges, never edits. Its final message must contain only the deliverable: the per-dimension scores and total from the skill's rubric, then a numbered list giving, for every violation, the quoted text, the rule it breaks, and a concrete rewrite — no preamble, nothing else. Apply every rewrite it returns to `.cs/summary.md`; if the total falls below the skill's revise threshold, run the critic once more after applying them.
 
 6. **Inform the user** when the summary is complete and where it was saved.
 

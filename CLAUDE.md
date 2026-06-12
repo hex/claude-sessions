@@ -35,9 +35,9 @@ Update the markdown documentation files throughout the session:
 
 Treat these files as a lab notebook - document as you go, not just at the end.
 
-## Summary Command
+## Wrap-up Command
 
-When the session is complete, use the `/summary` command to generate an intelligent summary of the entire session. This will create a .cs/summary.md file synthesizing all documentation.
+When the session is complete, use the `/wrap` command to distill durable memory entries and generate an intelligent summary of the entire session (.cs/summary.md). Use `/summary` for the narrative alone, or `/sweep` for the memory pass alone.
 
 ## Secure Secrets Handling
 
@@ -69,7 +69,7 @@ cs -secrets set <name> <value>     # Store manually
 
 - Document discoveries as you find them - don't wait until the end
 - Use .cs/artifacts/ for any reusable scripts or configs
-- Run `/summary` at the end to create a cohesive record
+- Run `/wrap` at the end to distill memory and create a cohesive record
 - Never write raw API keys or passwords to artifact files - use cs -secrets
 
 <!-- cs:memory-note -->

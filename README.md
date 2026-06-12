@@ -208,6 +208,8 @@ Claude Code's [auto memory](https://code.claude.com/docs/en/memory) is redirecte
 
 ## Slash Commands
 
+- `/wrap` — The canonical end-of-session command: runs the `/sweep` memory pass, then the `/summary` narrative, then the prose gate
+- `/sweep` — Distill the session into durable auto-memory entries (strict bar) and sweep findings into discoveries
 - `/summary` — Generate a narrative summary of the current session
 - `/compact-discoveries` — Summarize old discoveries into a condensed file for context efficiency
 - `/checkpoint <label>` — Save a labelled state snapshot (discoveries, changes, git HEAD)

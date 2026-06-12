@@ -77,7 +77,7 @@ REASON="Discoveries check: (1) Review existing entries in $DISCOVERIES_FILE — 
 MAX_SIZE="${CS_DISCOVERIES_MAX_SIZE:-60000}"
 DISCOVERIES_SIZE=$(wc -c < "$DISCOVERIES_FILE" | tr -d ' ')
 if [ "$DISCOVERIES_SIZE" -gt "$MAX_SIZE" ]; then
-    REASON="$REASON (3) discoveries.md is over budget (${DISCOVERIES_SIZE} bytes, max ${MAX_SIZE}). Summarize the oldest entries into .cs/discoveries.compact.md (append to existing if present), then remove those entries from discoveries.md. Keep the most recent entries intact. Split on ## heading boundaries."
+    REASON="$REASON (3) discoveries.md is over budget (${DISCOVERIES_SIZE} bytes, max ${MAX_SIZE}). Run the /compact-discoveries command to condense older entries into .cs/discoveries.compact.md."
 fi
 
 # Return reminder prompt - use "block" + "reason" so Claude sees it

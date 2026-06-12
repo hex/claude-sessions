@@ -135,8 +135,8 @@ test_reminder_compaction_over_budget() {
         "Should block with reminder" || return 1
     assert_output_contains "$output" "over budget" \
         "Should mention compaction when over budget" || return 1
-    assert_output_contains "$output" "compact" \
-        "Should reference compaction into compact.md" || return 1
+    assert_output_contains "$output" "/compact-discoveries" \
+        "Should defer to the /compact-discoveries command" || return 1
     assert_output_not_contains "$output" "archive" \
         "Should NOT reference archive (archive flow removed)" || return 1
 }

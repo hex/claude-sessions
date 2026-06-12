@@ -1,6 +1,9 @@
-PROACTIVE: Invoke immediately when the user shares API keys, passwords, tokens, credentials, or secrets in their message. Look for patterns like "my API key is...", "password: ...", "TOKEN=...", or any sensitive credential. Do not wait to be asked.
+---
+name: store-secret
+description: Store secrets shared in chat into the cs session secret store. PROACTIVE - invoke immediately when the user shares API keys, passwords, tokens, or other credentials in their message; do not wait to be asked.
+---
 
-You detected that the user shared sensitive credentials. Your task is to securely store them in the session keychain.
+You detected that the user shared sensitive credentials. Your task is to store them in the session secret store.
 
 ## Prerequisites
 
@@ -40,17 +43,6 @@ If empty, inform the user that secrets storage requires a cs session and skip st
    - How to retrieve: `cs -secrets get KEY_NAME`
    - How to list all: `cs -secrets list`
    - How to delete if unwanted: `cs -secrets delete KEY_NAME`
-
-## Example
-
-User says: "Here's my OpenAI API key: sk-abc123def456"
-
-You would:
-```bash
-cs -secrets set OPENAI_API_KEY "sk-abc123def456"
-```
-
-Then confirm: "I've stored your OpenAI API key as `OPENAI_API_KEY` in the session keychain."
 
 ## Important
 

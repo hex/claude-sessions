@@ -1,6 +1,6 @@
 Distill the current session into durable auto-memory entries with a strict bar.
 
-You are working in a cs session. Your task is to review the conversation in your current context and write durable facts into the four auto-memory bucket files at `.cs/memory/`. The session's `CLAUDE.md` contains the bucket-guidance signal-phrase table — apply it strictly here.
+You are working in a cs session. Your task is to review the conversation in your current context and write durable facts into the four auto-memory bucket files at `.cs/memory/`.
 
 ## Mental model
 
@@ -21,10 +21,21 @@ Two write surfaces, deliberately DIFFERENT bars:
 
    Most sessions produce nothing here. The expected answer for most files on most sessions is "no." Don't reach.
 
+   Route each fact that passes by what the user actually said:
+
+   | User says... | Goes to |
+   |---|---|
+   | "I'm the / my role is / I prefer / I always / I hate / I never" | `user_*.md` |
+   | "don't do X / stop doing Y / not like that" — corrections | `feedback_*.md` |
+   | "yes exactly / keep that approach / that worked" — validated choices | `feedback_*.md` |
+   | "we're shipping / deadline is / X is driving this / freeze on..." | `project_*.md` |
+   | "Linear project X / Grafana board at Y / the #channel for Z / docs at URL" | `reference_*.md` |
+
 3. **Writing memory entries — INTERPRET, don't transcribe.**
    - Read the matching `.cs/memory/<bucket>_*.md` file first to check for duplicates in any form — paraphrase, near-duplicate, superset. If something similar exists, skip; do not append.
-   - For new entries, follow the standard auto-memory format (frontmatter with `name` / `description` / `type`, then concise paraphrase capturing the essence in your own words).
+   - For new entries, match the frontmatter shape of the existing entries in that bucket (the dedup read above shows you the current format), then a concise paraphrase capturing the essence in your own words.
    - One entry per durable fact. If a fact plausibly fits two buckets, pick the more specific one — do not cross-post.
+   - After writing an entry, add a one-line pointer for it to `.cs/memory/MEMORY.md`. The index is what future sessions load; an unindexed entry is never read again.
 
 4. **Discoveries sweep — looser bar.** If a substantive finding from this session is not yet in `.cs/discoveries.md`, append it as a dated section. Substantive = something a future session resuming this work would want to know.
 
