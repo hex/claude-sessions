@@ -2,7 +2,7 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
-## Unreleased
+## 2026.6.2
 
 ### Added
 
