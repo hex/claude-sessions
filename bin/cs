@@ -2291,11 +2291,31 @@ _theme_from_osc11() {
 # changes (observed: 15;0 under a light terminal).
 detect_term_theme() {
     local theme
-    theme=$(_theme_from_osc11)
-    if [ "$theme" = "unknown" ] && [ -n "${COLORFGBG:-}" ]; then
-        theme=$(_theme_from_colorfgbg "$COLORFGBG")
+    if [ -n "${TMUX:-}" ]; then
+        # Inside tmux both tty signals lie: tmux answers an OSC 11 query
+        # itself with its default (black) background instead of the outer
+        # terminal's color, and COLORFGBG is a snapshot of the server's
+        # start-time environment. The OS appearance is the only honest
+        # signal left.
+        theme=$(_theme_from_os_appearance)
+    else
+        theme=$(_theme_from_osc11)
+        if [ "$theme" = "unknown" ] && [ -n "${COLORFGBG:-}" ]; then
+            theme=$(_theme_from_colorfgbg "$COLORFGBG")
+        fi
     fi
     echo "$theme"
+}
+
+# macOS reports dark mode by the presence of the AppleInterfaceStyle key;
+# the key is absent in light mode (including auto mode while light).
+_theme_from_os_appearance() {
+    [ "$(uname -s)" = "Darwin" ] || { echo "unknown"; return; }
+    if defaults read -g AppleInterfaceStyle >/dev/null 2>&1; then
+        echo "dark"
+    else
+        echo "light"
+    fi
 }
 
 launch_claude_code() {

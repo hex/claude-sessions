@@ -250,26 +250,71 @@ test_no_segment_icons_without_nerd_fonts() {
 
 test_detect_theme_colorfgbg_dark() {
     local out
-    out=$(COLORFGBG="15;0" "$CS_BIN" -detect-theme 2>&1 < /dev/null)
+    out=$(env -u TMUX COLORFGBG="15;0" "$CS_BIN" -detect-theme 2>&1 < /dev/null)
     assert_output_contains "$out" "dark" "COLORFGBG bg index 0 should classify as dark" || return 1
 }
 
 test_detect_theme_colorfgbg_light() {
     local out
-    out=$(COLORFGBG="0;15" "$CS_BIN" -detect-theme 2>&1 < /dev/null)
+    out=$(env -u TMUX COLORFGBG="0;15" "$CS_BIN" -detect-theme 2>&1 < /dev/null)
     assert_output_contains "$out" "light" "COLORFGBG bg index 15 should classify as light" || return 1
 }
 
 test_detect_theme_konsole_three_part() {
     local out
-    out=$(COLORFGBG="0;default;7" "$CS_BIN" -detect-theme 2>&1 < /dev/null)
+    out=$(env -u TMUX COLORFGBG="0;default;7" "$CS_BIN" -detect-theme 2>&1 < /dev/null)
     assert_output_contains "$out" "light" "three-part COLORFGBG should classify by its last field" || return 1
 }
 
 test_detect_theme_unknown_without_signals() {
     local out
-    out=$(env -u COLORFGBG "$CS_BIN" -detect-theme 2>&1 < /dev/null)
+    out=$(env -u COLORFGBG -u TMUX "$CS_BIN" -detect-theme 2>&1 < /dev/null)
     assert_output_contains "$out" "unknown" "no COLORFGBG and no tty should classify as unknown" || return 1
+}
+
+# Under tmux, OSC 11 is answered by tmux itself (default-black) and COLORFGBG
+# is the server's start-time snapshot — both misreport. Detection must ignore
+# them and read the OS appearance instead. Each test sets a CONTRADICTING
+# COLORFGBG to prove the tty signals are not consulted.
+
+_make_appearance_fakes() {
+    # $1: "dark" makes `defaults read -g AppleInterfaceStyle` succeed,
+    #     "light" makes it fail (key absent); $2: uname -s output
+    mkdir -p "$TEST_TMPDIR/fakebin"
+    if [ "$1" = "dark" ]; then
+        printf '#!/bin/sh\necho Dark\nexit 0\n' > "$TEST_TMPDIR/fakebin/defaults"
+    else
+        printf '#!/bin/sh\nexit 1\n' > "$TEST_TMPDIR/fakebin/defaults"
+    fi
+    printf '#!/bin/sh\necho %s\n' "$2" > "$TEST_TMPDIR/fakebin/uname"
+    chmod +x "$TEST_TMPDIR/fakebin/defaults" "$TEST_TMPDIR/fakebin/uname"
+}
+
+test_detect_theme_tmux_appearance_dark() {
+    _make_appearance_fakes dark Darwin
+    local out
+    out=$(TMUX="fake,1,0" COLORFGBG="0;15" PATH="$TEST_TMPDIR/fakebin:$PATH" \
+        "$CS_BIN" -detect-theme 2>&1 < /dev/null)
+    assert_output_contains "$out" "dark" \
+        "tmux + dark OS appearance must classify dark despite light COLORFGBG" || return 1
+}
+
+test_detect_theme_tmux_appearance_light() {
+    _make_appearance_fakes light Darwin
+    local out
+    out=$(TMUX="fake,1,0" COLORFGBG="15;0" PATH="$TEST_TMPDIR/fakebin:$PATH" \
+        "$CS_BIN" -detect-theme 2>&1 < /dev/null)
+    assert_output_contains "$out" "light" \
+        "tmux + light OS appearance must classify light despite dark COLORFGBG" || return 1
+}
+
+test_detect_theme_tmux_non_darwin_unknown() {
+    _make_appearance_fakes dark Linux
+    local out
+    out=$(TMUX="fake,1,0" COLORFGBG="15;0" PATH="$TEST_TMPDIR/fakebin:$PATH" \
+        "$CS_BIN" -detect-theme 2>&1 < /dev/null)
+    assert_output_contains "$out" "unknown" \
+        "tmux without a macOS appearance source must classify unknown, not trust COLORFGBG" || return 1
 }
 
 test_statusline_dark_theme_variant() {
@@ -701,6 +746,9 @@ run_test test_detect_theme_colorfgbg_dark
 run_test test_detect_theme_colorfgbg_light
 run_test test_detect_theme_konsole_three_part
 run_test test_detect_theme_unknown_without_signals
+run_test test_detect_theme_tmux_appearance_dark
+run_test test_detect_theme_tmux_appearance_light
+run_test test_detect_theme_tmux_non_darwin_unknown
 run_test test_statusline_dark_theme_variant
 run_test test_missing_rate_limits_absent
 run_test test_missing_session_name_dir_fallback
