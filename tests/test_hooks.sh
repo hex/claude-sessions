@@ -26,6 +26,75 @@ teardown() {
 }
 
 # ============================================================================
+# narrative-reminder.sh
+# ============================================================================
+
+_backdate() {
+    # backdate a file ~10 minutes so the staleness check fires
+    touch -t "$(date -v-10M '+%Y%m%d%H%M.%S' 2>/dev/null || date -d '10 minutes ago' '+%Y%m%d%H%M.%S' 2>/dev/null)" "$1" 2>/dev/null || true
+}
+
+test_narrative_reminder_approves_outside_session() {
+    local output
+    output=$(echo '{}' | CLAUDE_SESSION_NAME= bash "$HOOKS_DIR/narrative-reminder.sh")
+    assert_output_contains "$output" "approve" "Should approve outside a cs session" || return 1
+}
+
+test_narrative_reminder_approves_when_recently_modified() {
+    echo "# Session narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    local output
+    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
+    assert_output_contains "$output" "approve" "Should approve when narrative recently modified" || return 1
+}
+
+test_narrative_reminder_blocks_when_stale() {
+    echo "# Session narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    local output
+    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
+    assert_output_contains "$output" "block" "Should block when narrative is stale" || return 1
+    assert_output_contains "$output" "narrative.md" "Reminder should point at narrative.md" || return 1
+}
+
+test_narrative_reminder_respects_cooldown() {
+    echo "# Session narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    date +%s > "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    local output
+    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
+    assert_output_contains "$output" "approve" "Fresh cooldown should suppress the reminder" || return 1
+}
+
+test_narrative_reminder_approves_for_subagent() {
+    echo "# Session narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    local output
+    output=$(echo '{"agent_id":"sub-1"}' | bash "$HOOKS_DIR/narrative-reminder.sh")
+    assert_output_contains "$output" "approve" "Subagent should always approve" || return 1
+    assert_output_not_contains "$output" "block" "Subagent should never be blocked" || return 1
+}
+
+# ============================================================================
+# narrative-precompact.sh
+# ============================================================================
+
+test_narrative_precompact_injects_context() {
+    local output
+    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-precompact.sh")
+    assert_output_contains "$output" "narrative.md" "PreCompact should reference narrative.md" || return 1
+    assert_output_contains "$output" "additionalContext" "PreCompact should emit additionalContext" || return 1
+}
+
+test_narrative_precompact_skips_outside_session() {
+    local output
+    output=$(echo '{}' | CLAUDE_SESSION_NAME= bash "$HOOKS_DIR/narrative-precompact.sh")
+    assert_eq "" "$output" "PreCompact should emit nothing outside a cs session" || return 1
+}
+
+# ============================================================================
 # session-auto-approve.sh
 # ============================================================================
 
@@ -772,6 +841,13 @@ echo ""
 # Discoveries archiver
 
 # Session auto-approve
+run_test test_narrative_reminder_approves_outside_session
+run_test test_narrative_reminder_approves_when_recently_modified
+run_test test_narrative_reminder_blocks_when_stale
+run_test test_narrative_reminder_respects_cooldown
+run_test test_narrative_reminder_approves_for_subagent
+run_test test_narrative_precompact_injects_context
+run_test test_narrative_precompact_skips_outside_session
 run_test test_auto_approve_allows_cs_metadata_write
 run_test test_auto_approve_allows_cs_edit
 run_test test_auto_approve_ignores_non_cs_path

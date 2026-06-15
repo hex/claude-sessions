@@ -33,6 +33,8 @@ CS_HOOKS=(
     session-start.sh
     artifact-tracker.sh
     autosave-commits.sh
+    narrative-reminder.sh
+    narrative-precompact.sh
     prose-lint.sh
     session-end.sh
     subagent-context.sh
@@ -705,9 +707,11 @@ migrate_discoveries_to_narrative() {
     local compact="$meta/discoveries.compact.md"
 
     [ -f "$disc" ] || return 0
-    local body
-    body=$(grep -vE '^# Discoveries & Notes$|^[[:space:]]*$' "$disc" 2>/dev/null || true)
-    if [ -z "$body" ]; then
+    local disc_body compact_body
+    disc_body=$(grep -vE '^# Discoveries & Notes$|^[[:space:]]*$' "$disc" 2>/dev/null || true)
+    compact_body=""
+    [ -f "$compact" ] && compact_body=$(grep -vE '^[[:space:]]*$' "$compact" 2>/dev/null || true)
+    if [ -z "$disc_body" ] && [ -z "$compact_body" ]; then
         rm -f "$disc" "$compact"
         return 0
     fi
@@ -715,11 +719,13 @@ migrate_discoveries_to_narrative() {
     ensure_narrative_file "$session_dir"
     local narrative="$meta/memory/narrative.md"
     {
-        echo ""
-        echo "## Folded from discoveries.md ($(date '+%Y-%m-%d'))"
-        echo ""
-        cat "$disc"
-        if [ -f "$compact" ]; then
+        if [ -n "$disc_body" ]; then
+            echo ""
+            echo "## Folded from discoveries.md ($(date '+%Y-%m-%d'))"
+            echo ""
+            cat "$disc"
+        fi
+        if [ -n "$compact_body" ]; then
             echo ""
             echo "## Folded from discoveries.compact.md"
             echo ""
@@ -2974,6 +2980,9 @@ create_session_gitignore() {
 # Archives (large, regenerated from artifacts)
 .cs/archives/
 
+# Session cooldown markers
+.cs/.narrative-reminder-cooldown
+
 # Claude Code local settings (recreated by cs on each machine)
 .claude/settings.local.json
 
@@ -3046,6 +3055,7 @@ adopt_session() {
         cs_gitignore_entries=$(cat << 'ENTRIES'
 # cs session metadata
 .cs/archives/
+.cs/.narrative-reminder-cooldown
 .claude/settings.local.json
 .obsidian/
 ENTRIES

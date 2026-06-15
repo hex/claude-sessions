@@ -301,6 +301,35 @@ EOF
     fi
 }
 
+test_resume_folds_compact_when_discoveries_header_only() {
+    local session_dir="$CS_SESSIONS_ROOT/compact-session"
+    mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
+    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
+    echo "auto_sync=on" > "$session_dir/.cs/sync.conf"
+    # Active file is header-only, but the compact companion holds real content
+    printf '# Discoveries & Notes\n\n' > "$session_dir/.cs/discoveries.md"
+    cat > "$session_dir/.cs/discoveries.compact.md" << 'EOF'
+## Condensed finding from an earlier compaction
+The cache must be invalidated on tenant switch.
+EOF
+    cat > "$session_dir/CLAUDE.md" << 'EOF'
+# Session Documentation Protocol
+
+This is a Claude Code session managed by the cs tool. Session metadata lives in the .cs/ directory.
+EOF
+    (cd "$session_dir" && git init -q && git add -A && git commit -q -m "init")
+
+    "$CS_BIN" compact-session <<< "" 2>&1 || true
+
+    local narrative="$session_dir/.cs/memory/narrative.md"
+    assert_file_contains "$narrative" "invalidated on tenant switch" \
+        "compact.md content must be folded even when discoveries.md is header-only" || return 1
+    if [ -f "$session_dir/.cs/discoveries.compact.md" ]; then
+        echo "  FAIL: discoveries.compact.md should be consumed after fold"
+        return 1
+    fi
+}
+
 # ============================================================================
 # Runner
 # ============================================================================
@@ -330,5 +359,6 @@ run_test test_new_session_creates_narrative_file
 run_test test_new_session_adds_narrative_pointer
 run_test test_narrative_pointer_idempotent_readd
 run_test test_resume_folds_discoveries_into_narrative
+run_test test_resume_folds_compact_when_discoveries_header_only
 
 report_results

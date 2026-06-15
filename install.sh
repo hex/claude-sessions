@@ -81,6 +81,8 @@ CS_HOOKS=(
     session-start.sh
     artifact-tracker.sh
     autosave-commits.sh
+    narrative-reminder.sh
+    narrative-precompact.sh
     prose-lint.sh
     session-end.sh
     subagent-context.sh
@@ -483,7 +485,9 @@ else
     _merge_cs_hook SessionStart       session-start.sh       30
     _merge_cs_hook PreToolUse         artifact-tracker.sh    10 "Write"
     _merge_cs_hook PostToolUse        autosave-commits.sh    10 "Write|Edit" true
+    _merge_cs_hook Stop               narrative-reminder.sh  10
     _merge_cs_hook Stop               prose-lint.sh          15
+    _merge_cs_hook PreCompact         narrative-precompact.sh 10
     _merge_cs_hook SessionEnd         session-end.sh         30
     _merge_cs_hook SubagentStart      subagent-context.sh    10
     _merge_cs_hook PostToolUseFailure tool-failure-logger.sh 10 "" true
