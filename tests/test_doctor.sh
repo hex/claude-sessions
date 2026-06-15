@@ -26,12 +26,6 @@ aliases: ["test-session"]
 ## Objective
 Test doctor
 EOF
-    cat > "$session_dir/.cs/discoveries.md" << 'EOF'
-# Discoveries & Notes
-
-## Sample finding
-Short.
-EOF
     echo "# Test" > "$session_dir/CLAUDE.md"
     (cd "$session_dir" && git init -q -b main && git config user.email t@t && git config user.name T && git add -A && git commit -q -m init)
 
@@ -59,22 +53,12 @@ test_doctor_runs_default_checks_from_session() {
     assert_output_contains "$output" "Keychain" "should report Keychain check" || return 1
     assert_output_contains "$output" "Git" "should report git sync check" || return 1
     assert_output_contains "$output" "Hooks" "should report hooks check" || return 1
-    assert_output_contains "$output" "Discoveries" "should report discoveries size check" || return 1
 }
 
 test_doctor_reports_pass_for_healthy_session() {
     local output
     output=$("$CS_BIN" -doctor 2>&1) || true
     assert_output_contains "$output" "OK" "healthy session should show OK status" || return 1
-}
-
-test_doctor_warns_when_discoveries_over_budget() {
-    local big_file="$CLAUDE_SESSION_META_DIR/discoveries.md"
-    yes "## Filler entry content line padding padding padding" | head -1500 > "$big_file"
-    local output
-    output=$(CS_DISCOVERIES_MAX_SIZE=5000 "$CS_BIN" -doctor 2>&1) || true
-    assert_output_contains "$output" "WARN\|over budget\|exceeds" \
-        "oversized discoveries.md should produce a warning" || return 1
 }
 
 test_doctor_fails_when_hook_not_executable() {
@@ -476,7 +460,6 @@ echo "Running doctor tests..."
 run_test test_doctor_subcommand_exists
 run_test test_doctor_runs_default_checks_from_session
 run_test test_doctor_reports_pass_for_healthy_session
-run_test test_doctor_warns_when_discoveries_over_budget
 run_test test_doctor_fails_when_hook_not_executable
 run_test test_doctor_exits_nonzero_on_failure
 run_test test_doctor_warns_on_hook_drift

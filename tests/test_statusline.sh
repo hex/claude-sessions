@@ -95,7 +95,7 @@ test_happy_path_docs_fixture_plain() {
 }
 
 # ============================================================================
-# All seven segments render in order with git + disc present (plain)
+# All six segments render in order with git present (plain)
 # ============================================================================
 
 test_all_segments_ordering_plain() {
@@ -116,7 +116,7 @@ test_all_segments_ordering_plain() {
     }')
     local out
     out=$(run_sl "$json")
-    assert_eq "mysess > Opus high > ctx 34% > main +1!1 > 5h 23% > wk 41% > disc 49K/60K > \$1.23" "$out" \
+    assert_eq "mysess > Opus high > ctx 34% > main +1!1 > 5h 23% > wk 41% > \$1.23" "$out" \
         "all segments should render in order: identity pair, then gauges"
 }
 
@@ -143,7 +143,7 @@ test_limits_neutral_when_healthy() {
 test_two_accents_default() {
     export COLORTERM=truecolor
     export CLAUDE_SESSION_NAME="accents"
-    make_cs_session "accents" 30720 cyan   # 30K of 60K: disc healthy
+    make_cs_session "accents" 30720 cyan
     local json='{"session_name":"accents","model":{"display_name":"Opus"},"workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8},"cost":{"total_cost_usd":1.0},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":40}}}'
     local out
     out=$(run_sl "$json")
@@ -151,8 +151,8 @@ test_two_accents_default() {
     assert_output_contains "$out" "48;2;153;152;255;38;2;240;242;255" "model should be the usage-chip periwinkle with the chip's text color" || return 1
     local greys
     greys=$(printf '%s' "$out" | grep -o '48;2;88;88;88' | grep -c . ) || greys=0
-    if [ "$greys" -lt 5 ]; then
-        echo "  FAIL: expected ctx, git-less run, 5h, wk, disc, cost on grey (got $greys grey blocks)"
+    if [ "$greys" -lt 4 ]; then
+        echo "  FAIL: expected ctx, git-less run, 5h, wk, cost on grey (got $greys grey blocks)"
         return 1
     fi
 }
@@ -493,21 +493,6 @@ test_dark_text_on_amber_warn() {
         "warn blocks should be warm amber with dark text" || return 1
 }
 
-test_disc_calm_below_85_amber_above() {
-    export COLORTERM=truecolor
-    export CLAUDE_SESSION_NAME="dthr"
-    make_cs_session "dthr" 49152 cyan   # 49152 bytes of 60000 budget = 81%
-    local json='{"session_name":"dthr","workspace":{"current_dir":"/none"}}'
-    local out
-    out=$(run_sl "$json")
-    assert_output_contains "$out" "disc 49K/60K" "disc segment should render" || return 1
-    assert_output_not_contains "$out" "48;2;255;183;77" "80% of budget should stay calm grey" || return 1
-
-    dd if=/dev/zero of="$CS_SESSIONS_ROOT/dthr/.cs/discoveries.md" bs=1024 count=53 2>/dev/null  # 53K = 88%
-    out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;255;183;77" "88% of budget should warn amber" || return 1
-}
-
 # ============================================================================
 # Limits threshold: max(5h,wk) >= crit renders red
 # ============================================================================
@@ -534,20 +519,6 @@ test_segments_subset() {
     assert_output_not_contains "$out" "ctx" "excluded segments must not appear"
 }
 
-# ============================================================================
-# disc segment: size vs budget formatting from a fixture session dir
-# ============================================================================
-
-test_disc_budget_formatting() {
-    export NO_COLOR=1
-    export CLAUDE_SESSION_NAME="dsess"
-    export CS_STATUSLINE_SEGMENTS="disc"
-    make_cs_session "dsess" 49152 blue
-    local json='{"session_name":"dsess","workspace":{"current_dir":"/none"}}'
-    local out
-    out=$(run_sl "$json")
-    assert_eq "disc 49K/60K" "$out" "disc should format size/budget in K"
-}
 
 # ============================================================================
 # Git: an untracked file must not be counted as modified (no phantom `!`)
@@ -784,10 +755,8 @@ run_test test_model_neutral_not_blue
 run_test test_white_text_on_periwinkle
 run_test test_accent_segments_bold
 run_test test_dark_text_on_amber_warn
-run_test test_disc_calm_below_85_amber_above
 run_test test_limits_threshold_red
 run_test test_segments_subset
-run_test test_disc_budget_formatting
 run_test test_git_untracked_not_modified
 run_test test_color_level_256
 run_test test_color_level_basic

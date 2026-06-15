@@ -33,13 +33,6 @@ Runs after any file modification (Write or Edit), providing crash recovery for a
 - For narrative file edits, also logs the latest heading/bullet to `session.log`
 - Runs in background to avoid blocking the session
 
-## discoveries-reminder.sh (Stop)
-
-Runs when Claude pauses for user input:
-- Reminds to review existing entries and update `.cs/discoveries.md` if not recently modified
-- Uses 5-minute cooldown to avoid excessive reminders
-- When discoveries.md exceeds its size budget (default 60KB, override via `CS_DISCOVERIES_MAX_SIZE` env var), tells Claude to run the `/compact-discoveries` command, which condenses older entries into `.cs/discoveries.compact.md` and trims the active file
-
 ## prose-lint.sh (Stop)
 
 Runs when Claude pauses for user input:
@@ -117,7 +110,6 @@ The hooks are configured in `~/.claude/settings.json`:
       { "matcher": "Write|Edit", "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/autosave-commits.sh", "timeout": 10, "async": true }] }
     ],
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/discoveries-reminder.sh", "timeout": 10 }] },
       { "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/prose-lint.sh", "timeout": 15 }] }
     ],
     "SessionEnd": [

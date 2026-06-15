@@ -81,7 +81,6 @@ CS_HOOKS=(
     session-start.sh
     artifact-tracker.sh
     autosave-commits.sh
-    discoveries-reminder.sh
     prose-lint.sh
     session-end.sh
     subagent-context.sh
@@ -96,6 +95,7 @@ CS_HOOKS=(
 # When retiring a hook in a release, add its filename here.
 RETIRED_HOOKS=(
     discovery-commits.sh      # renamed to autosave-commits.sh (general all-file crash recovery, not discoveries-specific)
+    discoveries-reminder.sh   # retired: session narrative moved to .cs/memory/narrative.md (native lazy-load, no size budget)
     discoveries-archiver.sh   # retired in v2026.4.7 (archive flow replaced by size-budget compaction)
     aboutme-prereader.sh      # retired: source-file ABOUTME-header nudge experiment
     gotcha-prewriter.sh       # retired: brief pre-write gotcha-surfacing experiment; approach was rethought
@@ -110,7 +110,6 @@ RETIRED_HOOKS=(
 # KEEP THIS LIST IN SYNC WITH bin/cs's CS_COMMANDS.
 CS_COMMANDS=(
     summary.md
-    compact-discoveries.md
     checkpoint.md
     sweep.md
     wrap.md
@@ -484,7 +483,6 @@ else
     _merge_cs_hook SessionStart       session-start.sh       30
     _merge_cs_hook PreToolUse         artifact-tracker.sh    10 "Write"
     _merge_cs_hook PostToolUse        autosave-commits.sh    10 "Write|Edit" true
-    _merge_cs_hook Stop               discoveries-reminder.sh 10
     _merge_cs_hook Stop               prose-lint.sh          15
     _merge_cs_hook SessionEnd         session-end.sh         30
     _merge_cs_hook SubagentStart      subagent-context.sh    10

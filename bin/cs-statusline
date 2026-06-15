@@ -1,13 +1,10 @@
 #!/usr/bin/env bash
 # ABOUTME: Claude Code statusLine command — renders a one-line powerline status bar
-# ABOUTME: Reads the statusline JSON on stdin and prints session/ctx/model/git/limits/disc/cost
+# ABOUTME: Reads the statusline JSON on stdin and prints session/ctx/model/git/limits/cost
 
 set -uo pipefail
 
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
-# Same default as bin/cs and hooks/discoveries-reminder.sh, so the disc
-# segment's thresholds agree with the hook's over-budget trigger.
-CS_DISCOVERIES_DEFAULT_MAX=60000
 
 # Read-only status query; never take the index lock from a render.
 export GIT_OPTIONAL_LOCKS=0
@@ -30,7 +27,7 @@ _SGR=""; _COLOR=""
 # Per-segment icon glyphs (Nerd Font, Font Awesome + powerline ranges).
 # Empty without CS_NERD_FONTS=1, so segment text stays plain.
 ICON_SESSION=""; ICON_CTX=""; ICON_MODEL=""; ICON_GIT=""
-ICON_5H=""; ICON_WK=""; ICON_DISC=""
+ICON_5H=""; ICON_WK=""
 if [ "${CS_NERD_FONTS:-}" = "1" ]; then
     ICON_SESSION=$'\xef\x80\x95 '   # U+F015 home
     ICON_CTX=$'\xef\x83\xa4 '       # U+F0E4 gauge
@@ -38,7 +35,6 @@ if [ "${CS_NERD_FONTS:-}" = "1" ]; then
     ICON_GIT=$'\xee\x82\xa0 '       # U+E0A0 branch
     ICON_5H=$'\xef\x80\x97 '        # U+F017 clock
     ICON_WK=$'\xef\x81\xb3 '        # U+F073 calendar
-    ICON_DISC=$'\xef\x80\xad '      # U+F02D book
 fi
 
 # --- stdin -----------------------------------------------------------------
@@ -344,21 +340,6 @@ _seg_limits() {
     fi
 }
 
-_seg_disc() {
-    [ -n "${CLAUDE_SESSION_NAME:-}" ] || return 0
-    local f="$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/discoveries.md"
-    [ -f "$f" ] || return 0
-    _filesize "$f"
-    local bytes="$_FILESIZE"
-    [ "$bytes" -gt 0 ] || return 0
-    local budget="${CS_DISCOVERIES_MAX_SIZE:-$CS_DISCOVERIES_DEFAULT_MAX}"
-    local sizeK=$((bytes / 1000)) budgetK=$((budget / 1000)) pct=0
-    [ "$budget" -gt 0 ] && pct=$((bytes * 100 / budget))
-    # Discoveries fill slowly and idle high; warn only when compaction is due.
-    _thresh_color "$pct" 85 95
-    _add "${ICON_DISC}disc ${sizeK}K/${budgetK}K" "$_COLOR"
-}
-
 _seg_cost() {
     [ -n "$SL_COST" ] || return 0
     local formatted
@@ -434,7 +415,7 @@ main() {
 
     _detect_level
 
-    local segments="${CS_STATUSLINE_SEGMENTS:-session,model,ctx,git,limits,disc,cost}"
+    local segments="${CS_STATUSLINE_SEGMENTS:-session,model,ctx,git,limits,cost}"
     local name names
     IFS=',' read -ra names <<< "$segments"
     for name in "${names[@]}"; do
@@ -444,7 +425,6 @@ main() {
             model)   _seg_model ;;
             git)     _seg_git ;;
             limits)  _seg_limits ;;
-            disc)    _seg_disc ;;
             cost)    _seg_cost ;;
         esac
     done

@@ -116,7 +116,7 @@ aliases: ["legacy-session"]
 
 **Started:** 2026-01-01 09:00:00
 EOF
-    echo "# Discoveries" > "$session_dir/.cs/discoveries.md"
+    echo "# Session narrative" > "$session_dir/.cs/memory/narrative.md"
     cat > "$session_dir/CLAUDE.md" << 'EOF'
 # Session Documentation Protocol
 
@@ -184,7 +184,7 @@ _seed_claude_transcript() {
 
 # Build a minimal session with optional claude_session_id in frontmatter.
 # Returns the session_dir path. Centralizes the layout (mkdir + MANIFEST +
-# README frontmatter + discoveries + git init) so tests don't reimplement it.
+# README frontmatter + narrative + git init) so tests don't reimplement it.
 _seed_legacy_session() {
     local name="$1"
     local uuid="${2:-}"
@@ -201,7 +201,7 @@ _seed_legacy_session() {
         echo "---"
         echo "# Session: $name"
     } > "$session_dir/.cs/README.md"
-    echo "# Discoveries" > "$session_dir/.cs/discoveries.md"
+    echo "# Session narrative" > "$session_dir/.cs/memory/narrative.md"
     echo "# Session" > "$session_dir/CLAUDE.md"
     (cd "$session_dir" && git init -q && git add -A && git commit -q -m "init")
     echo "$session_dir"
@@ -400,7 +400,7 @@ aliases: ["$name"]
 ---
 # Session: $name
 EOF
-    echo "# Discoveries" > "$session_dir/.cs/discoveries.md"
+    echo "# Session narrative" > "$session_dir/.cs/memory/narrative.md"
     echo "# Session" > "$session_dir/CLAUDE.md"
     (cd "$session_dir" && git init -q -b main && git config user.email t@t \
         && git config user.name T && git add -A && git commit -q -m init)
@@ -661,7 +661,7 @@ aliases: ["legacy-no-color"]
 ---
 # Session: legacy-no-color
 EOF
-    echo "# Discoveries" > "$session_dir/.cs/discoveries.md"
+    echo "# Session narrative" > "$session_dir/.cs/memory/narrative.md"
     echo "# Session" > "$session_dir/CLAUDE.md"
     (cd "$session_dir" && git init -q && git add -A && git commit -q -m "init")
 

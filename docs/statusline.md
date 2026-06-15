@@ -3,14 +3,14 @@
 `cs-statusline` is the Claude Code status line shipped with cs. It reads the JSON Claude Code pipes to the registered `statusLine.command` on every render and prints exactly one powerline-style line of colored segments.
 
 ```
-claude-sessions > ctx 42% > Fable high > main↑1 +2!1 > 5h 23% > wk 41% > disc 45K/60K > $1.23
+claude-sessions > ctx 42% > Fable high > main↑1 +2!1 > 5h 23% > wk 41% > $1.23
 ```
 
 With colors enabled, each segment renders as a colored background block with an arrow transition into the next; the plain form above is what `NO_COLOR=1` produces.
 
 ## Segments
 
-Default order: `session,model,ctx,git,limits,disc,cost`. Identity first (which session, which model), then the gauges.
+Default order: `session,model,ctx,git,limits,cost`. Identity first (which session, which model), then the gauges.
 
 | Segment | Shows | Source | Color |
 |---|---|---|---|
@@ -19,14 +19,13 @@ Default order: `session,model,ctx,git,limits,disc,cost`. Identity first (which s
 | `model` | Model display name plus effort level when present | stdin `model.display_name`, `effort.level` | Periwinkle accent (claude's usage-chip purple), white text |
 | `git` | Branch, ahead/behind arrows, staged `+N` and modified `!N` counts | One `git status --porcelain=v1 -b` call | Grey |
 | `limits` | 5-hour and weekly rate limit usage as two adjacent blocks, `5h 23%` and `wk 41%` | stdin `rate_limits.*.used_percentage` | Grey; each block escalates to amber at 70% and red at 90% on its own value |
-| `disc` | `discoveries.md` size against its budget, `disc 45K/60K` | File size vs `CS_DISCOVERIES_MAX_SIZE` (default 60K) | Grey through normal accumulation; amber at 85% of budget, red at 95% (discoveries fill slowly, so the nag waits until compaction is due) |
 | `cost` | Session cost, `$1.23` | stdin `cost.total_cost_usd` | Grey |
 
-Every segment is null-when-nothing: missing data means the segment and its separator simply do not render. Outside a cs session, `session` falls back to the directory name and `disc` disappears.
+Every segment is null-when-nothing: missing data means the segment and its separator simply do not render. Outside a cs session, `session` falls back to the directory name.
 
 ## Data sources and performance
 
-The render path is deliberately thin: one `jq` pass over stdin, at most one git subprocess, and at most two small file reads (`README.md` frontmatter for the session color, `discoveries.md` size). There is no transcript parsing, no network access, no caching, and the script never writes anything. Data gathering is gated per segment, so disabling `git` in `CS_STATUSLINE_SEGMENTS` means the git subprocess never forks.
+The render path is deliberately thin: one `jq` pass over stdin, at most one git subprocess, and one small file read (`README.md` frontmatter for the session color). There is no transcript parsing, no network access, no caching, and the script never writes anything. Data gathering is gated per segment, so disabling `git` in `CS_STATUSLINE_SEGMENTS` means the git subprocess never forks.
 
 The git call runs with `GIT_OPTIONAL_LOCKS=0` (no index locking for a read-only query) under a 2-second timeout, and is skipped entirely when the workspace has no `.git`.
 

@@ -50,7 +50,7 @@ aliases: ["$name"]
 ---
 # Session: $name
 EOF
-    echo "# Discoveries" > "$session_dir/.cs/discoveries.md"
+    echo "# Session narrative" > "$session_dir/.cs/memory/narrative.md"
     # Legacy CLAUDE.md: mentions .cs/ paths (Phase 5 doesn't fire) and has
     # the cs:memory-rules sentinel (Phase 9 doesn't fire), but no cs:wrap-cues.
     cat > "$session_dir/CLAUDE.md" << 'EOF'
@@ -126,7 +126,7 @@ aliases: ["$name"]
 ---
 # Session: $name
 EOF
-    echo "# Discoveries" > "$session_dir/.cs/discoveries.md"
+    echo "# Session narrative" > "$session_dir/.cs/memory/narrative.md"
     # User deleted the wrap-cues content but kept the tombstone sentinel.
     cat > "$session_dir/CLAUDE.md" << 'EOF'
 # Session Documentation Protocol

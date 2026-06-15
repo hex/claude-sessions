@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: Tests for session lifecycle hooks not covered by other test files
-# ABOUTME: Covers discoveries-reminder, session-auto-approve, subagent-context, tool-failure-logger
+# ABOUTME: Covers session-auto-approve, subagent-context, tool-failure-logger
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/test_lib.sh"
@@ -26,180 +26,12 @@ teardown() {
 }
 
 # ============================================================================
-# discoveries-reminder.sh
-# ============================================================================
-
-test_reminder_approves_outside_session() {
-    unset CLAUDE_SESSION_NAME
-    local output
-    output=$(echo '{}' | bash "$HOOKS_DIR/discoveries-reminder.sh")
-    assert_output_contains "$output" '"approve"' "Should approve outside session" || return 1
-}
-
-test_reminder_approves_when_recently_modified() {
-    echo "# Recent discoveries" > "$CLAUDE_SESSION_META_DIR/discoveries.md"
-    # File was just created, so mtime is now — within cooldown
-    local output
-    output=$(echo '{}' | bash "$HOOKS_DIR/discoveries-reminder.sh")
-    assert_output_contains "$output" '"approve"' \
-        "Should approve when discoveries recently modified" || return 1
-}
-
-test_reminder_blocks_when_stale() {
-    echo "# Stale discoveries" > "$CLAUDE_SESSION_META_DIR/discoveries.md"
-    # Backdate the file to 10 minutes ago
-    touch -t "$(date -v-10M '+%Y%m%d%H%M.%S' 2>/dev/null || date -d '10 minutes ago' '+%Y%m%d%H%M.%S' 2>/dev/null)" "$CLAUDE_SESSION_META_DIR/discoveries.md" 2>/dev/null || {
-        # Fallback: directly use a past mtime
-        touch -A -001000 "$CLAUDE_SESSION_META_DIR/discoveries.md" 2>/dev/null || true
-    }
-    # Also make sure no cooldown file exists
-    rm -f "$CLAUDE_SESSION_META_DIR/.discoveries-reminder-cooldown"
-
-    local output
-    output=$(echo '{}' | bash "$HOOKS_DIR/discoveries-reminder.sh")
-    assert_output_contains "$output" '"block"' \
-        "Should block when discoveries are stale" || return 1
-    assert_output_contains "$output" "Discoveries check" \
-        "Should include discovery check message" || return 1
-}
-
-test_reminder_approves_for_subagent() {
-    # Subagents should never get the discoveries reminder
-    echo "stale content" > "$CLAUDE_SESSION_META_DIR/discoveries.md"
-    touch -t "$(date -v-10M '+%Y%m%d%H%M.%S' 2>/dev/null || date -d '10 minutes ago' '+%Y%m%d%H%M.%S' 2>/dev/null)" "$CLAUDE_SESSION_META_DIR/discoveries.md" 2>/dev/null || true
-    rm -f "$CLAUDE_SESSION_META_DIR/.discoveries-reminder-cooldown"
-
-    local output
-    output=$(echo '{"agent_id":"sub-123","agent_type":"Explore"}' | bash "$HOOKS_DIR/discoveries-reminder.sh")
-    assert_output_contains "$output" '"approve"' \
-        "Subagent should always get approve, even with stale discoveries" || return 1
-    assert_output_not_contains "$output" '"block"' \
-        "Subagent should never be blocked with reminder" || return 1
-}
-
-test_reminder_respects_cooldown() {
-    echo "# Stale discoveries" > "$CLAUDE_SESSION_META_DIR/discoveries.md"
-    touch -t "$(date -v-10M '+%Y%m%d%H%M.%S' 2>/dev/null || date -d '10 minutes ago' '+%Y%m%d%H%M.%S' 2>/dev/null)" "$CLAUDE_SESSION_META_DIR/discoveries.md" 2>/dev/null || true
-
-    # Set cooldown to now
-    date +%s > "$CLAUDE_SESSION_META_DIR/.discoveries-reminder-cooldown"
-
-    local output
-    output=$(echo '{}' | bash "$HOOKS_DIR/discoveries-reminder.sh")
-    assert_output_contains "$output" '"approve"' \
-        "Should approve during cooldown period" || return 1
-}
-
-test_reminder_no_compaction_under_budget() {
-    # Create a small discoveries file (well under default 60KB)
-    {
-        echo "# Discoveries & Notes"
-        echo ""
-        echo "## Small finding"
-        echo "- Just a small note"
-    } > "$CLAUDE_SESSION_META_DIR/discoveries.md"
-    # Backdate so the stale check triggers the reminder
-    touch -t "$(date -v-10M '+%Y%m%d%H%M.%S' 2>/dev/null || date -d '10 minutes ago' '+%Y%m%d%H%M.%S' 2>/dev/null)" "$CLAUDE_SESSION_META_DIR/discoveries.md" 2>/dev/null || true
-    rm -f "$CLAUDE_SESSION_META_DIR/.discoveries-reminder-cooldown"
-
-    local output
-    output=$(echo '{}' | bash "$HOOKS_DIR/discoveries-reminder.sh")
-    assert_output_contains "$output" '"block"' \
-        "Should block (stale file triggers reminder)" || return 1
-    assert_output_not_contains "$output" "over budget" \
-        "Should NOT mention compaction when under default budget" || return 1
-}
-
-test_reminder_compaction_over_budget() {
-    # Use env var to set a small threshold for fast testing
-    export CS_DISCOVERIES_MAX_SIZE=500
-
-    # Create a discoveries file that exceeds 500 chars
-    {
-        echo "# Discoveries & Notes"
-        echo ""
-        for i in $(seq 1 10); do
-            echo "## Finding number $i"
-            echo "- Detail line for finding $i with enough text to exceed the small test threshold"
-            echo ""
-        done
-    } > "$CLAUDE_SESSION_META_DIR/discoveries.md"
-    touch -t "$(date -v-10M '+%Y%m%d%H%M.%S' 2>/dev/null || date -d '10 minutes ago' '+%Y%m%d%H%M.%S' 2>/dev/null)" "$CLAUDE_SESSION_META_DIR/discoveries.md" 2>/dev/null || true
-    rm -f "$CLAUDE_SESSION_META_DIR/.discoveries-reminder-cooldown"
-
-    local output
-    output=$(echo '{}' | bash "$HOOKS_DIR/discoveries-reminder.sh")
-    unset CS_DISCOVERIES_MAX_SIZE
-
-    assert_output_contains "$output" '"block"' \
-        "Should block with reminder" || return 1
-    assert_output_contains "$output" "over budget" \
-        "Should mention compaction when over budget" || return 1
-    assert_output_contains "$output" "/compact-discoveries" \
-        "Should defer to the /compact-discoveries command" || return 1
-    assert_output_not_contains "$output" "archive" \
-        "Should NOT reference archive (archive flow removed)" || return 1
-}
-
-test_reminder_uses_character_count_not_lines() {
-    # Use env var to set a small threshold
-    export CS_DISCOVERIES_MAX_SIZE=200
-
-    # Single entry, few lines, but exceeds character threshold
-    {
-        echo "# Discoveries & Notes"
-        echo ""
-        echo "## Single entry with long content"
-        echo "- This is a single bullet with enough padding text to exceed the 200-char threshold while keeping the line count very low which proves the check is byte-based not line-based"
-    } > "$CLAUDE_SESSION_META_DIR/discoveries.md"
-    touch -t "$(date -v-10M '+%Y%m%d%H%M.%S' 2>/dev/null || date -d '10 minutes ago' '+%Y%m%d%H%M.%S' 2>/dev/null)" "$CLAUDE_SESSION_META_DIR/discoveries.md" 2>/dev/null || true
-    rm -f "$CLAUDE_SESSION_META_DIR/.discoveries-reminder-cooldown"
-
-    local output
-    output=$(echo '{}' | bash "$HOOKS_DIR/discoveries-reminder.sh")
-    unset CS_DISCOVERIES_MAX_SIZE
-
-    assert_output_contains "$output" "over budget" \
-        "Should detect over-budget via character count, not line count" || return 1
-}
-
-test_reminder_env_var_overrides_default() {
-    # File is small (under default 60KB) but env var sets a tiny threshold
-    {
-        echo "# Discoveries & Notes"
-        echo ""
-        echo "## Finding"
-        echo "- Some content that is several hundred characters long which exceeds a small env-var threshold but is well under the default 60KB"
-    } > "$CLAUDE_SESSION_META_DIR/discoveries.md"
-    touch -t "$(date -v-10M '+%Y%m%d%H%M.%S' 2>/dev/null || date -d '10 minutes ago' '+%Y%m%d%H%M.%S' 2>/dev/null)" "$CLAUDE_SESSION_META_DIR/discoveries.md" 2>/dev/null || true
-    rm -f "$CLAUDE_SESSION_META_DIR/.discoveries-reminder-cooldown"
-
-    # Without env var → no over-budget message
-    local output_default
-    output_default=$(echo '{}' | bash "$HOOKS_DIR/discoveries-reminder.sh")
-    assert_output_not_contains "$output_default" "over budget" \
-        "Default 60KB threshold should NOT trigger on small file" || return 1
-
-    # Reset cooldown for second invocation
-    rm -f "$CLAUDE_SESSION_META_DIR/.discoveries-reminder-cooldown"
-
-    # With env var → over-budget message
-    export CS_DISCOVERIES_MAX_SIZE=100
-    local output_override
-    output_override=$(echo '{}' | bash "$HOOKS_DIR/discoveries-reminder.sh")
-    unset CS_DISCOVERIES_MAX_SIZE
-
-    assert_output_contains "$output_override" "over budget" \
-        "Env var override should trigger on same file" || return 1
-}
-
-# ============================================================================
 # session-auto-approve.sh
 # ============================================================================
 
 test_auto_approve_allows_cs_metadata_write() {
     local input
-    input=$(jq -n --arg path "$CLAUDE_SESSION_META_DIR/discoveries.md" \
+    input=$(jq -n --arg path "$CLAUDE_SESSION_META_DIR/memory/narrative.md" \
         '{tool_name: "Write", tool_input: {file_path: $path}}')
 
     local output
@@ -938,16 +770,6 @@ echo "====================="
 echo ""
 
 # Discoveries archiver
-# Discoveries reminder
-run_test test_reminder_approves_outside_session
-run_test test_reminder_approves_when_recently_modified
-run_test test_reminder_blocks_when_stale
-run_test test_reminder_approves_for_subagent
-run_test test_reminder_respects_cooldown
-run_test test_reminder_no_compaction_under_budget
-run_test test_reminder_compaction_over_budget
-run_test test_reminder_uses_character_count_not_lines
-run_test test_reminder_env_var_overrides_default
 
 # Session auto-approve
 run_test test_auto_approve_allows_cs_metadata_write
