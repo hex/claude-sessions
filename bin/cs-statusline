@@ -30,8 +30,8 @@ ICON_SESSION=""; ICON_CTX=""; ICON_MODEL=""; ICON_GIT=""
 ICON_5H=""; ICON_WK=""
 if [ "${CS_NERD_FONTS:-}" = "1" ]; then
     ICON_SESSION=$'\xef\x80\x95 '   # U+F015 home
-    ICON_CTX=$'\xef\x83\xa4 '       # U+F0E4 gauge
-    ICON_MODEL=$'\xef\x8b\x9b '     # U+F2DB microchip
+    ICON_CTX=$'\xf3\xb0\xaa\x9d '   # U+F0A9D circle-slice (pie)
+    ICON_MODEL=$'\xf3\xb0\xa7\x91 ' # U+F09D1 brain
     ICON_GIT=$'\xee\x82\xa0 '       # U+E0A0 branch
     ICON_5H=$'\xef\x80\x97 '        # U+F017 clock
     ICON_WK=$'\xef\x81\xb3 '        # U+F073 calendar
