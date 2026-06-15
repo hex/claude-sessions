@@ -37,7 +37,7 @@ Runs after any file modification (Write or Edit), providing crash recovery for a
 
 Runs when Claude pauses for user input:
 - Lints prose written this session via `cs -lint` and blocks turn-end (`decision: block`) when AI-slop tells are found, feeding the file:line violations back so Claude fixes them before stopping
-- Scope is `.cs/summary.md` and `.cs/memory/*.md` (surfaces with no cross-session in-file backlog); `discoveries.md` and the `MEMORY.md` index are excluded
+- Scope is `.cs/summary.md` and `.cs/memory/*.md` (surfaces with no cross-session in-file backlog); the append-heavy `narrative.md` and the `MEMORY.md` index are excluded
 - Only files modified at/after `session.lock` mtime are checked, so a resumed session never re-flags prose written in earlier sessions
 - After 3 consecutive unresolved blocks, allows the stop with a `session.log` warning rather than trapping the session
 

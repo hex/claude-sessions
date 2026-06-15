@@ -54,7 +54,7 @@ case "$FILE_PATH" in
 esac
 
 # Autosave to shadow ref using git plumbing (does not touch HEAD or main branch)
-# Fires on ALL Write/Edit — protects all files, not just discoveries
+# Fires on ALL Write/Edit — protects all files, not just the narrative
 autosave_to_shadow_ref() {
     cd "$SESSION_DIR" || return 0
 

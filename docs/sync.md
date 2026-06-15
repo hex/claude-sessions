@@ -106,8 +106,8 @@ cs my-session -sync push
 
 **Auto-sync is enabled by default for all new sessions.** Changes are handled automatically:
 
-1. **Discovery autosaves:** When you write to discovery files (`discoveries.md`, `discoveries.compact.md`), a snapshot is saved to a shadow git ref (`refs/cs/auto`) for crash safety. These are invisible to `git log` and never pushed.
-2. **Session end commits:** All accumulated changes are committed in one clean commit when the session ends, with a summary of changed filenames (e.g., `Session update: 2 files (session.log, discoveries.md)`).
+1. **Autosaves:** On every Write/Edit, a snapshot of the whole working tree is saved to a shadow git ref (`refs/cs/auto`) for crash safety. These are invisible to `git log` and never pushed.
+2. **Session end commits:** All accumulated changes are committed in one clean commit when the session ends, with a summary of changed filenames (e.g., `Session update: 2 files (session.log, README.md)`).
 
 When enabled:
 - **Session start:** Pulls latest changes from remote (if configured); recovers from crashed sessions via shadow ref
@@ -136,8 +136,8 @@ On pull, `secrets.age` is preferred if present; `secrets.enc` is used as fallbac
 ## What Gets Synced
 
 - CLAUDE.md (at session root)
-- .cs/ metadata directory (README.md, discoveries.md, sync.conf)
-- .cs/memory/ directory (Claude Code auto memory)
+- .cs/ metadata directory (README.md, sync.conf)
+- .cs/memory/ directory (Claude Code auto memory + narrative.md lab notebook)
 - .cs/artifacts/ directory (scripts, configs, MANIFEST.json)
 - .cs/logs/session.log
 - Encrypted secrets (.cs/secrets.enc or .cs/secrets.age)
@@ -158,7 +158,7 @@ When initializing sync, you'll see a security notice:
 └─────────────────────────────────────────────────────────────┘
 ```
 
-Always use private repositories for session sync. While secrets are encrypted, session documentation (discoveries.md, README.md, etc.) may contain sensitive context about your work.
+Always use private repositories for session sync. While secrets are encrypted, session documentation (README.md, narrative.md, summary.md, etc.) may contain sensitive context about your work.
 
 ## Troubleshooting
 

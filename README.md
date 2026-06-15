@@ -26,9 +26,9 @@ No git repo required. No project structure needed. Just a name for what you're w
 ## Concepts
 
 - **Sessions** — Isolated workspaces, each with their own git repo, documentation, and artifact tracking. `cs debug-api` creates one; running it again resumes it.
-- **Discoveries** (`.cs/discoveries.md`) — A lab notebook for recording findings, observations, and ideas during a session. Older entries are automatically archived and can be condensed with `/compact-discoveries`.
+- **Narrative** (`.cs/memory/narrative.md`) — A lab notebook for recording findings, observations, and ideas during a session. Held as a native Claude Code memory topic file, so it inherits lazy-loading (the `MEMORY.md` index pointer loads at startup; the body is read on demand) and shows up in the `/memory` tooling.
 - **Artifacts** (`.cs/artifacts/`) — Scripts and config files are automatically intercepted and saved here, tracked in a `MANIFEST.json` with metadata.
-- **Checkpoints** (`.cs/checkpoints/`) — Labelled narrative snapshots you can save mid-session with `/checkpoint`, capturing discoveries, changes, and the current git HEAD.
+- **Checkpoints** (`.cs/checkpoints/`) — Labelled narrative snapshots you can save mid-session with `/checkpoint`, capturing the narrative, changes, and the current git HEAD.
 - **Timeline** (`.cs/timeline.jsonl`) — A structured event log recording session starts, ends, and checkpoints as newline-delimited JSON.
 - **Auto-memory** (`.cs/memory/`) — Claude Code's persistent operational notes, redirected into the session so they sync across machines and get cleaned up with `cs -rm`.
 
@@ -37,20 +37,19 @@ No git repo required. No project structure needed. Just a name for what you're w
 - **Isolated session workspaces** - Each session has its own directory with structured documentation
 - **Automatic artifact tracking** - Scripts and configs are auto-saved to `artifacts/`
 - **Secure secrets handling** - Sensitive data auto-detected and stored in OS keychain; sync across machines with [age](https://github.com/FiloSottile/age) public-key encryption
-- **Documentation templates** - Pre-configured markdown files for discoveries and changes
-- **Discoveries management** - Character-budget monitoring with automatic summarization of old entries into a condensed file via `/compact-discoveries`
-- **Automatic git version control** - Every session gets local git history; discovery edits are autosaved to a shadow ref for crash safety, session end creates one clean commit; optionally sync to remote
+- **Documentation templates** - Pre-configured markdown files for the session narrative and outcome
+- **Automatic git version control** - Every session gets local git history; narrative edits are autosaved to a shadow ref for crash safety, session end creates one clean commit; optionally sync to remote
 - **Session locking** - PID-based lock prevents the same session from being opened in two terminals simultaneously; use `--force` to override
 - **Deterministic Claude-session resume** - Each session pre-allocates a UUID at creation and records it in `.cs/README.md` frontmatter; `cs <name>` resumes via `claude --resume <uuid>` (the exact conversation) rather than `--continue` (the most-recent claude conversation, which can be a sibling). Hooks read `$CS_CLAUDE_SESSION_ID`; `cs -doctor` cross-checks the recorded UUID against the live `$CLAUDE_CODE_SESSION_ID`. A `ps`-based guard refuses to spawn a second claude for the same UUID (`--force` overrides). Legacy sessions bind to their existing claude transcript on next launch via `migrate_session` Phase 8 — the recorded UUID is discovered from `~/.claude/projects/<encoded-cwd>/` rather than minted blind, and an orphaned recorded UUID (one with no matching transcript file) is self-healed to the most-recent real transcript. Declining the resume prompt (`N`) rebinds the session to a fresh UUID and passes `--session-id <new>` to claude so the fresh conversation stays tracked, with `CS_FRESH_REBIND=1` signalling SessionStart hooks to inject a "clean break, lazy-read .cs/ for context" notice instead of acting like a cold-start. Every launch also passes `--name <session>` so cs's session name appears in claude's prompt-box badge, `/resume` picker, and terminal title; and a random color (one of `red blue green yellow purple orange pink cyan`) is allocated at session creation and stored in frontmatter as `claude_session_color`, re-applied at every launch via a `/color $color` positional prompt so parallel sessions stay visually distinct. Legacy sessions without a color get one backfilled on next launch via `migrate_session` Phase 11.
 - **Per-session memory path redirect** - cs exports `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE` so claude's built-in auto-memory writer lands durable facts in `<session>/.cs/memory/` instead of the default `~/.claude/projects/<encoded-cwd>/memory/`. The harness owns the writing (file naming, frontmatter, MEMORY.md index updates); cs owns only the storage path + a one-line `<!-- cs:memory-note -->` disclosure in CLAUDE.md describing the redirect. The prior `cs:memory-rules` block (an imperative bucket-guidance doctrine shipped in v2026.5.2) was retired in v2026.5.5 after an audit showed claude's harness writes memory files autonomously regardless of cs's prose — see CHANGELOG for the retirement rationale. Phase 9 lazy-migrates existing sessions: legacy rules blocks (v1 or v2) are stripped and replaced with the note in place; tombstone opt-outs are preserved.
 - **Remote sessions** - Run sessions on remote machines via `et` or `ssh` + `tmux`; `cs` handles connection, stubbing, and session tracking
-- **Cross-session search** - `cs -search <query>` greps across all sessions' discoveries, memory, README, and changes
+- **Cross-session search** - `cs -search <query>` greps across all sessions' narrative, memory, and README
 - **Prose hygiene enforcement** - `cs -lint <file>` flags AI-slop tells (em-dashes, a curated banned-phrase list) outside code fences; the `prose-lint` Stop hook blocks turn-end when prose written this session (`.cs/summary.md`, `.cs/memory/*.md`) carries them, scoped by `session.lock` mtime so it never re-flags the historical backlog. `/summary` and `/wrap` add an independent structural-quality judge: a subagent that reads the `prose-hygiene` skill (the complete AI-tell taxonomy: phrases, structures, voice rules, and a five-dimension rubric) and applies all of it, catching the slop a regex cannot. Single-word adverbs and lazy extremes are judge-only by design, since they occur in nearly all legitimate prose
 - **Auto-grounded scope** - `/scope` (UserPromptSubmit hook) classifies each user prompt and, on a positive (code-work) classification, injects a bounded `Scope (auto-grounded)` block as `additionalContext`: matching tracked files + recent commits + working-tree diff, all derived from `git ls-files` and a hybrid token matcher (ordered substring for path-like tokens, component-equality with camelCase splitting for bare-word tokens). Excludes `node_modules/`, `target/`, `dist/`, `build/`, `.next/`, `coverage/`, `.cs/`, `.git/`. Capped at 8000 bytes. Opt out per-session via `CS_SCOPE_DISABLE=1`. No caching — a grounding hook must reflect the current tree, so the scan runs on every fire (~50-150ms bounded). Negative classifications pass through silently.
-- **Status line** - `cs-statusline` renders Claude Code's status bar as one powerline-style line: session name tinted with the session's `claude_session_color`, context %, model + effort level, git branch with ahead/behind and dirty counts, 5-hour/weekly rate limits, discoveries size against its budget, and session cost. Everything comes from the status-line stdin JSON plus one bounded git call (`GIT_OPTIONAL_LOCKS=0`, 2s timeout) and two small `.cs/` reads; no transcript parsing, no network, no writes. `install.sh` only registers it in `settings.json` with confirmation (and never replaces an existing status line without asking); enable or remove it any time with `cs -statusline enable|disable`. Choose and order segments with `CS_STATUSLINE_SEGMENTS`, disable with `CS_STATUSLINE_DISABLE=1`, tune thresholds with `CS_STATUSLINE_CTX_WARN`/`CS_STATUSLINE_CTX_CRIT`; outside cs sessions the cs-only segments go blank. cs detects the terminal's light/dark theme at launch (OSC 11, with the OS appearance under tmux) and exports it as `CS_TERM_THEME`, which also acts as a manual override; `cs -detect-theme` shows the result. See [docs/statusline.md](docs/statusline.md)
+- **Status line** - `cs-statusline` renders Claude Code's status bar as one powerline-style line: session name tinted with the session's `claude_session_color`, context %, model + effort level, git branch with ahead/behind and dirty counts, 5-hour/weekly rate limits, and session cost. Everything comes from the status-line stdin JSON plus one bounded git call (`GIT_OPTIONAL_LOCKS=0`, 2s timeout) and one small `.cs/` read; no transcript parsing, no network, no writes. `install.sh` only registers it in `settings.json` with confirmation (and never replaces an existing status line without asking); enable or remove it any time with `cs -statusline enable|disable`. Choose and order segments with `CS_STATUSLINE_SEGMENTS`, disable with `CS_STATUSLINE_DISABLE=1`, tune thresholds with `CS_STATUSLINE_CTX_WARN`/`CS_STATUSLINE_CTX_CRIT`; outside cs sessions the cs-only segments go blank. cs detects the terminal's light/dark theme at launch (OSC 11, with the OS appearance under tmux) and exports it as `CS_TERM_THEME`, which also acts as a manual override; `cs -detect-theme` shows the result. See [docs/statusline.md](docs/statusline.md)
 
   ![cs-statusline: session and model accents, amber rate-limit warnings, Nerd Font icons](assets/screenshot2.png)
-- **Health checks** - `cs -doctor` reports status of Keychain backend, hook registration, git sync state, shadow-ref freshness, discoveries.md size, auto-memory writability, status line registration, Claude Code settings audit (hooks/MCPs/permissions/env vars counts), and cumulative token usage for the current project
+- **Health checks** - `cs -doctor` reports status of Keychain backend, hook registration, git sync state, shadow-ref freshness, auto-memory writability, status line registration, Claude Code settings audit (hooks/MCPs/permissions/env vars counts), and cumulative token usage for the current project
 - **Bash command audit trail** - Every Bash command Claude runs is logged to `.cs/logs/session.log` with timestamps
 - **Update notifications** - Checks for updates and notifies when new versions are available
 - **Verified updates** - Updates are downloaded from GitHub Releases and verified with SHA-256 checksums; additionally verified with [minisign](https://jedisct1.github.io/minisign/) signatures when available
@@ -70,7 +69,7 @@ Or clone and run `./install.sh`.
 The installer:
 - Adds `cs`, `cs-secrets`, and `cs-tui` to `~/.local/bin/`
 - Installs eleven [hooks](docs/hooks.md) to `~/.claude/hooks/cs/` for session tracking (including the `/scope` auto-grounding hook on UserPromptSubmit)
-- Adds `/summary`, `/compact-discoveries`, `/checkpoint`, `/sweep`, and `/wrap` commands, and the `store-secret` and `prose-hygiene` skills to `~/.claude/`
+- Adds `/summary`, `/checkpoint`, `/sweep`, and `/wrap` commands, and the `store-secret` and `prose-hygiene` skills to `~/.claude/`
 - Installs shell completions for bash and zsh
 - Configures hook entries in `~/.claude/settings.json`
 
@@ -83,7 +82,7 @@ cs <session-name> --force   # Override active session lock
 cs -adopt <name>            # Adopt current directory as a session
 cs -remote <cmd>            # Manage remote hosts
 cs -search <query>          # Search across all sessions
-cs -doctor, -diag           # Run health checks (Keychain, hooks, sync, discoveries, audit, leaks, tokens)
+cs -doctor, -diag           # Run health checks (Keychain, hooks, sync, memory, audit, leaks, tokens)
 cs -lint <file>...          # Flag AI-slop prose tells (em-dashes, banned phrases); 0 clean 1 issues 2 error
 cs -list, -ls               # List all sessions
 cs -remove, -rm <name>      # Remove a session
@@ -103,7 +102,7 @@ Running `cs` with no arguments launches an interactive TUI for browsing and mana
 - **Time-based sections** — sessions grouped under Today, Yesterday, This Week, This Month, Older when sorted by date
 - **Action bar** with `Enter` — inline bar shows available actions with shortcut keys
 - **Preview pane** — appears automatically on wide terminals (>120 cols); toggle with `p`
-- **Expand row** with `Tab` — shows session objective, discoveries, and artifact count inline
+- **Expand row** with `Tab` — shows session objective, narrative, and artifact count inline
 - **Create session** with `n` — opens inline dialog to create a new session
 - **Delete** with `d` (confirmation required)
 - **Batch operations** — mark sessions with `Space`, then `D` to batch delete
@@ -191,11 +190,9 @@ This rsyncs the session to the remote host and creates a local stub so future `c
 ~/.claude-sessions/<session-name>/
 ├── .cs/                    # Session metadata
 │   ├── README.md           # Objective, environment, outcome
-│   ├── discoveries.md      # Findings and observations
-│   ├── discoveries.compact.md  # Condensed older findings
 │   ├── sync.conf           # Sync configuration
 │   ├── remote.conf         # Remote host (if remote session)
-│   ├── memory/             # Claude Code auto memory (synced)
+│   ├── memory/             # Claude Code auto memory + narrative.md lab notebook (synced)
 │   ├── plans/              # Claude Code plans (synced)
 │   ├── timeline.jsonl      # Session event log (starts, ends, checkpoints)
 │   ├── artifacts/          # Auto-tracked scripts and configs
@@ -211,10 +208,9 @@ Claude Code's [auto memory](https://code.claude.com/docs/en/memory) is redirecte
 ## Slash Commands
 
 - `/wrap` — The canonical end-of-session command: runs the `/sweep` memory pass, then the `/summary` narrative, then the prose gate
-- `/sweep` — Distill the session into durable auto-memory entries (strict bar) and sweep findings into discoveries
+- `/sweep` — Distill the session into durable auto-memory entries (strict bar) and sweep findings into the narrative
 - `/summary` — Generate a narrative summary of the current session
-- `/compact-discoveries` — Summarize old discoveries into a condensed file for context efficiency
-- `/checkpoint <label>` — Save a labelled state snapshot (discoveries, changes, git HEAD)
+- `/checkpoint <label>` — Save a labelled state snapshot (narrative, changes, git HEAD)
 
 ## Configuration
 
@@ -339,7 +335,7 @@ cs -uninstall
 
 ## See also
 
-- [iTerm2-dimmer](https://github.com/hex/iTerm2-dimmer) -- dims noisy hook output (TASKMASTER, discoveries) in iTerm2 so it doesn't clutter the screen
+- [iTerm2-dimmer](https://github.com/hex/iTerm2-dimmer) -- dims noisy hook output (TASKMASTER, prose-lint) in iTerm2 so it doesn't clutter the screen
 
 ## License
 

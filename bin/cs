@@ -1026,11 +1026,6 @@ aliases: ["$(basename "$session_dir")"]
 [To be filled when session is complete - summarize what was accomplished]
 EOF
 
-    # Create discoveries.md
-    cat > "$session_dir/.cs/discoveries.md" << 'EOF'
-# Discoveries & Notes
-
-EOF
 
     write_session_claude_md "$session_dir"
 
@@ -1129,8 +1124,6 @@ migrate_session() {
         migrate_if_exists "$session_dir/summary.md" "$session_dir/.cs/summary.md"
         migrate_if_exists "$session_dir/secrets.enc" "$session_dir/.cs/secrets.enc"
         migrate_if_exists "$session_dir/secrets.age" "$session_dir/.cs/secrets.age"
-        migrate_if_exists "$session_dir/.discoveries-reminder-cooldown" \
-                          "$session_dir/.cs/.discoveries-reminder-cooldown"
 
         # Update .gitignore for new structure
         create_session_gitignore "$session_dir"
@@ -2981,9 +2974,6 @@ create_session_gitignore() {
 # Archives (large, regenerated from artifacts)
 .cs/archives/
 
-# Session cooldown markers
-.cs/.discoveries-reminder-cooldown
-
 # Claude Code local settings (recreated by cs on each machine)
 .claude/settings.local.json
 
@@ -3056,7 +3046,6 @@ adopt_session() {
         cs_gitignore_entries=$(cat << 'ENTRIES'
 # cs session metadata
 .cs/archives/
-.cs/.discoveries-reminder-cooldown
 .claude/settings.local.json
 .obsidian/
 ENTRIES

@@ -30,7 +30,7 @@ test_adopt_creates_cs_structure() {
     assert_exists "$project_dir/.cs/artifacts/MANIFEST.json" "MANIFEST.json should exist" || return 1
     assert_exists "$project_dir/.cs/logs/session.log" "session.log should exist" || return 1
     assert_exists "$project_dir/.cs/README.md" ".cs/README.md should exist" || return 1
-    assert_exists "$project_dir/.cs/discoveries.md" "discoveries.md should exist" || return 1
+    assert_exists "$project_dir/.cs/memory/narrative.md" "narrative.md should exist" || return 1
     assert_exists "$project_dir/.cs/sync.conf" "sync.conf should exist" || return 1
 }
 

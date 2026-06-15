@@ -8,13 +8,12 @@ When resuming this session, read the following files to restore context:
 
 1. **.cs/summary.md** - If exists, read first for previous session overview
 2. **.cs/README.md** - Session objective, environment, and outcome
-3. **.cs/discoveries.md** - Findings, observations, and ideas
-4. **.cs/discoveries.compact.md** - If exists, condensed older findings
-5. **.cs/artifacts/MANIFEST.json** - List of tracked artifacts
+3. **.cs/memory/narrative.md** - Session lab notebook: findings, in-progress state, observations
+4. **.cs/artifacts/MANIFEST.json** - List of tracked artifacts
 
-Note: When discoveries.md exceeds its size budget (default 60KB, override via
-CS_DISCOVERIES_MAX_SIZE env var), older entries are summarized into
-.cs/discoveries.compact.md to keep context lean.
+Note: narrative.md is a native memory topic file — its `MEMORY.md` index pointer
+loads at startup, but its body is read on demand, so read it explicitly on resume
+to restore the working narrative.
 
 ## Artifact Auto-Tracking
 
@@ -30,7 +29,7 @@ When you use the Write tool for these file types, they are automatically redirec
 Update the markdown documentation files throughout the session:
 
 1. **Start of session:** Fill in .cs/README.md objective and environment
-2. **As you work:** Update .cs/discoveries.md with findings
+2. **As you work:** Update .cs/memory/narrative.md with findings
 3. **End of session:** Complete the .cs/README.md outcome section
 
 Treat these files as a lab notebook - document as you go, not just at the end.
@@ -67,7 +66,7 @@ cs -secrets set <name> <value>     # Store manually
 
 ## Best Practices
 
-- Document discoveries as you find them - don't wait until the end
+- Document findings in .cs/memory/narrative.md as you go - don't wait until the end
 - Use .cs/artifacts/ for any reusable scripts or configs
 - Run `/wrap` at the end to distill memory and create a cohesive record
 - Never write raw API keys or passwords to artifact files - use cs -secrets
