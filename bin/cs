@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.6.2"
+VERSION="2026.6.3"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -2346,6 +2346,8 @@ _theme_from_colorfgbg() {
 # terminal instead of being answered by tmux itself: bracket with `\ePtmux;` …
 # `\e\\` and double every ESC in the payload. Requires `allow-passthrough on`
 # in the user's tmux; without it tmux drops the sequence and the query times out.
+# Handles arbitrary multi-ESC payloads (e.g. an ST-terminated OSC query);
+# _send_escape covers the single-ESC, BEL-terminated tab-color case separately.
 _tmux_passthrough() {
     local seq="$1"
     local escaped=${seq//$'\033'/$'\033\033'}

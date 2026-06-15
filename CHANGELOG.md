@@ -2,11 +2,28 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
-## Unreleased
+## 2026.6.3
+
+### Added
+
+- **Session lab notebook relocated into native memory.** `.cs/discoveries.md` (and its `discoveries.compact.md` companion) becomes `.cs/memory/narrative.md`, a `type: narrative` Claude Code memory topic file. It inherits the native handling the bespoke notebook had reimplemented by hand: the `MEMORY.md` index pointer loads at startup while the body is read on demand (so the 60KB size budget and compaction are gone), it appears in `/memory`, and it syncs across machines like the other memory files. `ensure_narrative_file` creates the stub and re-adds the index pointer idempotently on every resume; `migrate_discoveries_to_narrative` folds a legacy `discoveries.md` (+ compact) forward once and consumes the originals. The two-bar design is preserved — narrative is the looser bar, the `user/feedback/project/reference` buckets stay strict — and the resume read list, `/sweep`, `/summary`, `/wrap`, `/checkpoint`, `cs -search`, and the TUI all repoint to the new location.
+- **`narrative-reminder.sh` (Stop) and `narrative-precompact.sh` (PreCompact) hooks.** Two complementary capture triggers replace the single retired discoveries timer-nag: a cooldown-gated Stop reminder (no size-budget logic) that nudges when the narrative goes stale, and an event-based PreCompact reminder that injects an `additionalContext` prompt to flush findings into the narrative before the conversation is compacted.
 
 ### Changed
 
+- **Retired the bespoke discoveries machinery superseded by native memory handling.** `discoveries-reminder.sh`, the `/compact-discoveries` command, the `CS_DISCOVERIES_*` size budget and compaction, the `_doctor_check_discoveries_size` health check, and the statusline `disc` segment are all removed; deployed copies of the retired hook are cleaned up via `RETIRED_HOOKS` on next install/uninstall.
+- **Renamed `discovery-commits.sh` → `autosave-commits.sh`.** The hook was always general all-file shadow-ref crash recovery, not discoveries-specific; the old name is listed in `RETIRED_HOOKS` so deployed copies are cleaned up.
+- **Statusline icons.** The model segment uses a brain glyph and context uses a database glyph. Icon-to-text spacing is tuned per glyph (Nerd Font advance widths vary per glyph, not per icon family), so the wider brain glyph gets a second trailing space and every icon's gap lines up.
 - **`cs -lint` synced against stop-slop upstream and hardened.** A source-level comparison against github.com/hardikpandya/stop-slop found the prose-hygiene skill already current with upstream HEAD `8da1f03` (2026-03-18, including the false-agency rule; the upstream changelog stops in January, so currency checks must read `git log`). Three improvements landed on our side: 18 upstream phrases joined `PROSE_SLOP_PHRASES` after passing the zero-hits-across-the-real-corpus admission rule ("it turns out", "the truth is", "think about it:", "full stop.", "game-changer", "circle back", "deep dive", "when it comes to", and ten more; "a feature, not a bug" and "on the same page" had corpus hits and stay judge-only); inline backtick spans are now stripped before matching, so a flagged character or phrase can be mentioned as quoted material (previously only fenced blocks were exempt); and the skill's `metadata.source` records the upstream commit it was synced against, making the next currency check a one-line diff. Tests: an 18-phrase loop, inline-code exemption coverage for both check types, a mixed-line case, and a provenance assertion.
+
+### Fixed
+
+- **Statusline theme detection under tmux.** `detect_term_theme` now sends the OSC 11 background query through tmux DCS passthrough (`_tmux_passthrough`) so it reaches the real outer terminal, instead of falling back to the macOS OS appearance. The fallback mis-classified a light-themed terminal as dark whenever the OS was in Dark Mode (an independent signal from the terminal's own background), freezing the wrong `CS_TERM_THEME` at launch. Passthrough requires `allow-passthrough on` in tmux; when it is off or the reply does not round-trip, detection still falls back to the OS appearance as before.
+- **Narrative fold preserves compact content.** `migrate_discoveries_to_narrative` now folds `discoveries.compact.md` even when the active `discoveries.md` is header-only; previously the empty-active short-circuit could delete the compact file without folding its content.
+
+### Docs
+
+- **README, `docs/hooks.md`, `docs/sync.md`, `docs/statusline.md`** updated for the narrative relocation and the tmux theme passthrough, and the README gained a status-line screenshot.
 
 ## 2026.6.2
 
