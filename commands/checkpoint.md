@@ -17,7 +17,7 @@ The label is free text describing what this moment represents — for example:
 
 ## What it does
 
-Runs `cs -checkpoint "<label>"` via the Bash tool, which captures the current git state, the uncommitted-file list, and a snapshot of the session's discoveries, and records the checkpoint on the session timeline. The command's own output names the file it saved under `.cs/checkpoints/`.
+Runs `cs -checkpoint "<label>"` via the Bash tool, which captures the current git state, the uncommitted-file list, and a snapshot of the session narrative, and records the checkpoint on the session timeline. The command's own output names the file it saved under `.cs/checkpoints/`.
 
 ## Related commands
 
@@ -30,6 +30,6 @@ Runs `cs -checkpoint "<label>"` via the Bash tool, which captures the current gi
 2. If it's empty, ask the user what label they want.
 3. Run `cs -checkpoint "<label>"` via Bash.
 4. Report the result — include the filename it was saved as.
-5. Briefly note what the checkpoint captured (discoveries, changes, git HEAD).
+5. Briefly note what the checkpoint captured (narrative, changes, git HEAD).
 
 Do NOT restate the entire checkpoint content — just confirm it was saved and what it included.

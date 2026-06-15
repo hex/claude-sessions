@@ -6,8 +6,7 @@ You are working in a cs session. Your task is to create a comprehensive summary 
 
 1. **Read all session documentation:**
    - .cs/README.md (objective, environment, outcome)
-   - .cs/discoveries.md (findings, observations, and ideas)
-   - .cs/discoveries.compact.md (if it exists — condensed older findings; without it a compacted session loses its early history)
+   - .cs/memory/narrative.md (session lab notebook: findings, observations, in-progress state)
    - .cs/artifacts/MANIFEST.json (list of created files)
 
 2. **Synthesize into a cohesive summary** that tells the story of this session. The summary should:

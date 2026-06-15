@@ -28,7 +28,7 @@ Artifacts directory: $ARTIFACT_DIR
 Key rules:
 - NEVER write raw API keys, tokens, or passwords to files
 - Scripts and configs are tracked in .cs/artifacts/
-- Document findings in .cs/discoveries.md
+- Document findings in .cs/memory/narrative.md
 EOF
 )
 

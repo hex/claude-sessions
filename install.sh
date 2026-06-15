@@ -80,7 +80,7 @@ CS_STATUSLINE_URL="${REPO_URL}/bin/cs-statusline"
 CS_HOOKS=(
     session-start.sh
     artifact-tracker.sh
-    discovery-commits.sh
+    autosave-commits.sh
     discoveries-reminder.sh
     prose-lint.sh
     session-end.sh
@@ -95,6 +95,7 @@ CS_HOOKS=(
 # install.sh and bin/cs run_uninstall both clean these up. KEEP THIS LIST IN SYNC WITH bin/cs.
 # When retiring a hook in a release, add its filename here.
 RETIRED_HOOKS=(
+    discovery-commits.sh      # renamed to autosave-commits.sh (general all-file crash recovery, not discoveries-specific)
     discoveries-archiver.sh   # retired in v2026.4.7 (archive flow replaced by size-budget compaction)
     aboutme-prereader.sh      # retired: source-file ABOUTME-header nudge experiment
     gotcha-prewriter.sh       # retired: brief pre-write gotcha-surfacing experiment; approach was rethought
@@ -482,7 +483,7 @@ else
     # Registration table: event, file, timeout, [matcher], [async]
     _merge_cs_hook SessionStart       session-start.sh       30
     _merge_cs_hook PreToolUse         artifact-tracker.sh    10 "Write"
-    _merge_cs_hook PostToolUse        discovery-commits.sh   10 "Write|Edit" true
+    _merge_cs_hook PostToolUse        autosave-commits.sh    10 "Write|Edit" true
     _merge_cs_hook Stop               discoveries-reminder.sh 10
     _merge_cs_hook Stop               prose-lint.sh          15
     _merge_cs_hook SessionEnd         session-end.sh         30

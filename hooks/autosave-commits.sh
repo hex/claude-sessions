@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: PostToolUse hook that autosaves to a shadow git ref on every Write/Edit
-# ABOUTME: Crash recovery for all session files via refs/cs/auto, logs discovery edits
+# ABOUTME: Crash recovery for all session files via refs/cs/auto, logs narrative edits
 
 set -euo pipefail
 
@@ -31,10 +31,10 @@ if [[ "$TOOL_NAME" != "Edit" && "$TOOL_NAME" != "Write" ]]; then
     exit 0
 fi
 
-# Extract discovery log entry if this is a discovery file edit
+# Extract a log entry if this is a narrative file edit
 LATEST_ENTRY=""
 case "$FILE_PATH" in
-    "$META_DIR/discoveries.md"|"$META_DIR/discoveries.compact.md")
+    "$META_DIR/memory/narrative.md")
         # Try to find last heading (## Something)
         LATEST_HEADING=$(grep "^##" "$FILE_PATH" 2>/dev/null | tail -1 | sed 's/^##\+[[:space:]]*//' || true)
         # Try to find last bullet point (- Something)
@@ -47,7 +47,7 @@ case "$FILE_PATH" in
             LATEST_ENTRY=$(grep -v "^#" "$FILE_PATH" 2>/dev/null | grep -v "^[[:space:]]*$" | tail -1 || true)
         fi
         LATEST_ENTRY=$(echo "$LATEST_ENTRY" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | cut -c1-100)
-        if [ "$LATEST_ENTRY" = "Discoveries & Notes" ]; then
+        if [ "$LATEST_ENTRY" = "Session narrative" ]; then
             LATEST_ENTRY=""
         fi
         ;;

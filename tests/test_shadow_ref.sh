@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ABOUTME: Tests for shadow ref autosave in discovery-commits, session-end, and session-start hooks
+# ABOUTME: Tests for shadow ref autosave in autosave-commits, session-end, and session-start hooks
 # ABOUTME: Validates shadow ref creation, main branch isolation, crash recovery, and push protection
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -24,7 +24,8 @@ setup() {
         git init -q
         git config user.email "test@test.com"
         git config user.name "Test"
-        echo "# Discoveries" > .cs/discoveries.md
+        mkdir -p .cs/memory
+        echo "# Session narrative" > .cs/memory/narrative.md
         echo "initial" > README.md
         git add -A
         git commit -q -m "Initial commit"
@@ -39,14 +40,14 @@ teardown() {
 }
 
 # ============================================================================
-# discovery-commits.sh: shadow ref autosave
+# autosave-commits.sh: shadow ref autosave
 # ============================================================================
 
 test_autosave_creates_shadow_ref() {
-    echo "## New Finding" >> "$CLAUDE_SESSION_DIR/.cs/discoveries.md"
+    echo "## New Finding" >> "$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"
 
-    echo '{"tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/discoveries.md"'"}}' \
-        | bash "$HOOKS_DIR/discovery-commits.sh"
+    echo '{"tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
+        | bash "$HOOKS_DIR/autosave-commits.sh"
     sleep 1
 
     if ! git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify refs/cs/auto >/dev/null 2>&1; then
@@ -59,10 +60,10 @@ test_autosave_does_not_touch_main() {
     local head_before head_after
     head_before=$(git -C "$CLAUDE_SESSION_DIR" rev-parse HEAD)
 
-    echo "## New Finding" >> "$CLAUDE_SESSION_DIR/.cs/discoveries.md"
+    echo "## New Finding" >> "$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"
 
-    echo '{"tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/discoveries.md"'"}}' \
-        | bash "$HOOKS_DIR/discovery-commits.sh"
+    echo '{"tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
+        | bash "$HOOKS_DIR/autosave-commits.sh"
     sleep 1
 
     head_after=$(git -C "$CLAUDE_SESSION_DIR" rev-parse HEAD)
@@ -76,17 +77,17 @@ test_autosave_does_not_touch_main() {
 }
 
 test_autosave_chains_multiple_saves() {
-    echo "## First" >> "$CLAUDE_SESSION_DIR/.cs/discoveries.md"
-    echo '{"tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/discoveries.md"'"}}' \
-        | bash "$HOOKS_DIR/discovery-commits.sh"
+    echo "## First" >> "$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"
+    echo '{"tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
+        | bash "$HOOKS_DIR/autosave-commits.sh"
     sleep 1
 
     local ref_after_first
     ref_after_first=$(git -C "$CLAUDE_SESSION_DIR" rev-parse refs/cs/auto 2>/dev/null || echo "none")
 
-    echo "## Second" >> "$CLAUDE_SESSION_DIR/.cs/discoveries.md"
-    echo '{"tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/discoveries.md"'"}}' \
-        | bash "$HOOKS_DIR/discovery-commits.sh"
+    echo "## Second" >> "$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"
+    echo '{"tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
+        | bash "$HOOKS_DIR/autosave-commits.sh"
     sleep 1
 
     local ref_after_second

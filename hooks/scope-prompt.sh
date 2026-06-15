@@ -66,7 +66,7 @@ WORD_PARTS=$(printf '%s' "$TOKENS" | rg -v '[/.]' 2>/dev/null \
     | rg -vi "$STOP_RE" 2>/dev/null | sort -u || true)
 
 # Build/vendor/meta dirs that must never be injected. The \.cs/ entry is load-bearing:
-# without it /scope would surface the session's own metadata (discoveries.md, memory, ...).
+# without it /scope would surface the session's own metadata (memory, narrative, ...).
 EXCLUDE_RE='(^|/)(node_modules|target|dist|build|\.next|coverage|\.cs)/|(^|/)\.git/'
 
 # Known, deliberately-accepted limitations of this matcher (not bugs):

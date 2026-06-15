@@ -6,11 +6,11 @@ Each pass is owned by its own command file. Read that file and apply it — do n
 
 ## Pass 1 — Memory distillation
 
-Read `~/.claude/commands/sweep.md` and execute it end to end: the strict bar with its bucket routing table, the dedup and `MEMORY.md` index rules, and the looser-bar discoveries sweep. Skip its final report; the combined report below replaces it.
+Read `~/.claude/commands/sweep.md` and execute it end to end: the strict bar with its bucket routing table, the dedup and `MEMORY.md` index rules, and the looser-bar narrative sweep. Skip its final report; the combined report below replaces it.
 
 ## Pass 2 — Session summary
 
-Read `~/.claude/commands/summary.md` and execute its steps 1-4: read all the session documentation it lists (including `.cs/discoveries.compact.md` when present) and synthesize the narrative at `.cs/summary.md` using its structure. If `.cs/summary.md` already exists, this run **replaces** it — `/wrap` writes the canonical end-of-session narrative.
+Read `~/.claude/commands/summary.md` and execute its steps 1-4: read all the session documentation it lists (including `.cs/memory/narrative.md`) and synthesize the narrative at `.cs/summary.md` using its structure. If `.cs/summary.md` already exists, this run **replaces** it — `/wrap` writes the canonical end-of-session narrative.
 
 ## Pass 3 — Prose-quality gate
 

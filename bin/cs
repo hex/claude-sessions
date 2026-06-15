@@ -16,6 +16,7 @@ CS_DISCOVERIES_DEFAULT_MAX=60000
 # install.sh and run_uninstall both clean these up. KEEP IN SYNC WITH install.sh's RETIRED_HOOKS.
 # When retiring a hook in a release, add its filename here.
 RETIRED_HOOKS=(
+    discovery-commits.sh      # renamed to autosave-commits.sh (general all-file crash recovery, not discoveries-specific)
     discoveries-archiver.sh   # retired in v2026.4.7 (archive flow replaced by size-budget compaction)
     aboutme-prereader.sh      # retired: source-file ABOUTME-header nudge experiment
     gotcha-prewriter.sh       # retired: brief pre-write gotcha-surfacing experiment; approach was rethought
@@ -31,7 +32,7 @@ RETIRED_HOOKS=(
 CS_HOOKS=(
     session-start.sh
     artifact-tracker.sh
-    discovery-commits.sh
+    autosave-commits.sh
     discoveries-reminder.sh
     prose-lint.sh
     session-end.sh
@@ -276,7 +277,7 @@ Commands:
   user@host:name      Connect to remote session (auto-remembered)
   <name> -sync <cmd>  Run sync command on <name> without launching session
   <name> -secrets <cmd>  Run secrets command on <name> without launching session
-  -search <query>     Search across all sessions (discoveries, memory, README)
+  -search <query>     Search across all sessions (narrative, memory, README)
   -checkpoint "<label>"  Save labelled state snapshot (run from inside a session)
   -checkpoint list    List checkpoints for current session
   -checkpoint show <name>  Print a specific checkpoint
@@ -758,13 +759,12 @@ When resuming this session, read the following files to restore context:
 
 1. **.cs/summary.md** - If exists, read first for previous session overview
 2. **.cs/README.md** - Session objective, environment, and outcome
-3. **.cs/discoveries.md** - Findings, observations, and ideas
-4. **.cs/discoveries.compact.md** - If exists, condensed older findings
-5. **.cs/artifacts/MANIFEST.json** - List of tracked artifacts
+3. **.cs/memory/narrative.md** - Session lab notebook: findings, in-progress state, observations
+4. **.cs/artifacts/MANIFEST.json** - List of tracked artifacts
 
-Note: When discoveries.md exceeds its size budget (default 60KB, override via
-CS_DISCOVERIES_MAX_SIZE env var), older entries are summarized into
-.cs/discoveries.compact.md to keep context lean.
+Note: narrative.md is a native memory topic file — its `MEMORY.md` index pointer
+loads at startup, but its body is read on demand, so read it explicitly on resume
+to restore the working narrative.
 
 ## Artifact Auto-Tracking
 
@@ -780,7 +780,7 @@ When you use the Write tool for these file types, they are automatically redirec
 Update the markdown documentation files throughout the session:
 
 1. **Start of session:** Fill in .cs/README.md objective and environment
-2. **As you work:** Update .cs/discoveries.md with findings
+2. **As you work:** Update .cs/memory/narrative.md with findings
 3. **End of session:** Complete the .cs/README.md outcome section
 
 Treat these files as a lab notebook - document as you go, not just at the end.
@@ -844,7 +844,7 @@ To opt out, delete the prose above but keep the `cs:wrap-cues` HTML comment as a
 
 ## Best Practices
 
-- Document discoveries as you find them - don't wait until the end
+- Document findings in .cs/memory/narrative.md as you go - don't wait until the end
 - Use .cs/artifacts/ for any reusable scripts or configs
 - Run `/wrap` at the end to distill memory and create a cohesive record
 - Never write raw API keys or passwords to artifact files - use cs -secrets
@@ -1274,7 +1274,7 @@ EOF
     #      (sentinel through the next <!-- marker or EOF) and insert the
     #      cs:memory-note in its place. Adjacent cs:wrap-cues block keeps its
     #      order. Empirically the block did not influence claude's auto-memory
-    #      writer (see .cs/discoveries.md); the note documents what cs
+    #      writer (see .cs/memory/narrative.md); the note documents what cs
     #      actually owns — path redirect + indexing — without claiming
     #      behavioral ownership.
     #   3. cs:memory-rules sentinel without header line — user opted out via
@@ -1427,10 +1427,10 @@ save_checkpoint() {
             echo '```'
             echo ""
         fi
-        if [ -f "$meta_dir/discoveries.md" ]; then
-            echo "## Discoveries snapshot"
+        if [ -f "$meta_dir/memory/narrative.md" ]; then
+            echo "## Narrative snapshot"
             echo ""
-            cat "$meta_dir/discoveries.md"
+            cat "$meta_dir/memory/narrative.md"
             echo ""
         fi
     } > "$checkpoint_path"
@@ -2049,7 +2049,7 @@ search_sessions() {
     fi
 
     local found=0
-    local search_files=".cs/discoveries.md .cs/discoveries.compact.md .cs/README.md"
+    local search_files=".cs/README.md"
     local search_globs=".cs/memory/*.md"
 
     for session_dir in "$SESSIONS_ROOT"/*/; do

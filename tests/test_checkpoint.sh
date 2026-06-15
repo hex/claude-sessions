@@ -29,8 +29,8 @@ aliases: ["test-session"]
 ## Objective
 Test checkpoints
 EOF
-    cat > "$session_dir/.cs/discoveries.md" << 'EOF'
-# Discoveries & Notes
+    cat > "$session_dir/.cs/memory/narrative.md" << 'EOF'
+# Session narrative
 
 ## Auth refactor complete
 Moved JWT validation to middleware layer.
@@ -86,12 +86,12 @@ test_checkpoint_includes_label() {
     assert_file_contains "$f" "finished auth" "Checkpoint should include label" || return 1
 }
 
-test_checkpoint_snapshots_discoveries() {
+test_checkpoint_snapshots_narrative() {
     "$CS_BIN" -checkpoint "test" > /dev/null 2>&1
     local f
     f=$(find "$CLAUDE_SESSION_META_DIR/checkpoints" -name "*.md" | head -1)
     assert_file_contains "$f" "Auth refactor complete" \
-        "Checkpoint should snapshot discoveries" || return 1
+        "Checkpoint should snapshot narrative" || return 1
 }
 
 test_checkpoint_records_git_head() {
@@ -178,7 +178,7 @@ test_checkpoint_show_prints_content() {
     local output
     output=$("$CS_BIN" -checkpoint show "$name" 2>&1)
     assert_output_contains "$output" "auth done" "Should show label" || return 1
-    assert_output_contains "$output" "Auth refactor complete" "Should show discoveries snapshot" || return 1
+    assert_output_contains "$output" "Auth refactor complete" "Should show narrative snapshot" || return 1
 }
 
 # ============================================================================
@@ -204,7 +204,7 @@ echo ""
 run_test test_checkpoint_creates_file
 run_test test_checkpoint_filename_has_timestamp
 run_test test_checkpoint_includes_label
-run_test test_checkpoint_snapshots_discoveries
+run_test test_checkpoint_snapshots_narrative
 run_test test_checkpoint_records_git_head
 run_test test_checkpoint_requires_label
 run_test test_checkpoint_requires_active_session

@@ -9,9 +9,9 @@ source "$SCRIPT_DIR/test_lib.sh"
 # Tests
 # ============================================================================
 
-test_search_finds_in_discoveries() {
+test_search_finds_in_narrative() {
     create_test_session "project-alpha"
-    echo "## PostgreSQL migration failed on staging server" > "$CS_SESSIONS_ROOT/project-alpha/.cs/discoveries.md"
+    echo "## PostgreSQL migration failed on staging server" > "$CS_SESSIONS_ROOT/project-alpha/.cs/memory/narrative.md"
 
     local output
     output=$("$CS_BIN" -search "postgresql" 2>&1)
@@ -52,9 +52,9 @@ test_search_across_multiple_sessions() {
     create_test_session "session-two"
     create_test_session "session-three"
 
-    echo "Database uses PostgreSQL 16" > "$CS_SESSIONS_ROOT/session-one/.cs/discoveries.md"
-    echo "Redis cache for hot queries" > "$CS_SESSIONS_ROOT/session-two/.cs/discoveries.md"
-    echo "PostgreSQL needs vacuum on large tables" > "$CS_SESSIONS_ROOT/session-three/.cs/discoveries.md"
+    echo "Database uses PostgreSQL 16" > "$CS_SESSIONS_ROOT/session-one/.cs/memory/narrative.md"
+    echo "Redis cache for hot queries" > "$CS_SESSIONS_ROOT/session-two/.cs/memory/narrative.md"
+    echo "PostgreSQL needs vacuum on large tables" > "$CS_SESSIONS_ROOT/session-three/.cs/memory/narrative.md"
 
     local output
     output=$("$CS_BIN" -search "PostgreSQL" 2>&1)
@@ -66,7 +66,7 @@ test_search_across_multiple_sessions() {
 
 test_search_case_insensitive() {
     create_test_session "my-session"
-    echo "Docker compose up failed with network error" > "$CS_SESSIONS_ROOT/my-session/.cs/discoveries.md"
+    echo "Docker compose up failed with network error" > "$CS_SESSIONS_ROOT/my-session/.cs/memory/narrative.md"
 
     local output
     output=$("$CS_BIN" -search "docker" 2>&1)
@@ -76,7 +76,7 @@ test_search_case_insensitive() {
 
 test_search_no_results() {
     create_test_session "empty-session"
-    echo "Nothing interesting here" > "$CS_SESSIONS_ROOT/empty-session/.cs/discoveries.md"
+    echo "Nothing interesting here" > "$CS_SESSIONS_ROOT/empty-session/.cs/memory/narrative.md"
 
     local output
     output=$("$CS_BIN" -search "xyznonexistent" 2>&1)
@@ -96,7 +96,7 @@ test_search_no_query() {
 test_search_follows_symlinks() {
     local real_dir="$TEST_TMPDIR/real-project"
     mkdir -p "$real_dir/.cs"/{memory,artifacts,logs}
-    echo "Real project uses Rust nightly" > "$real_dir/.cs/discoveries.md"
+    echo "Real project uses Rust nightly" > "$real_dir/.cs/memory/narrative.md"
     ln -s "$real_dir" "$CS_SESSIONS_ROOT/adopted-proj"
 
     local output
@@ -114,7 +114,7 @@ echo "cs -search tests"
 echo "================"
 echo ""
 
-run_test test_search_finds_in_discoveries
+run_test test_search_finds_in_narrative
 run_test test_search_finds_in_memory
 run_test test_search_finds_in_readme
 run_test test_search_across_multiple_sessions

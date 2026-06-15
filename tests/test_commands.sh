@@ -99,9 +99,9 @@ test_scoring_threshold_owned_by_skill() {
 # Correctness strays
 # ============================================================================
 
-test_summary_reads_compacted_discoveries() {
-    assert_file_contains "$COMMANDS_DIR/summary.md" "discoveries.compact.md" \
-        "post-compaction sessions lose older findings without this read" || return 1
+test_summary_reads_narrative() {
+    assert_file_contains "$COMMANDS_DIR/summary.md" "memory/narrative.md" \
+        "summary must read the session narrative" || return 1
 }
 
 test_prose_critic_pinned_and_contracted() {
@@ -141,7 +141,7 @@ run_test test_wrap_references_deployed_commands
 run_test test_wrap_does_not_duplicate_memory_bars
 run_test test_wrap_does_not_duplicate_summary_skeleton
 run_test test_scoring_threshold_owned_by_skill
-run_test test_summary_reads_compacted_discoveries
+run_test test_summary_reads_narrative
 run_test test_prose_critic_pinned_and_contracted
 run_test test_compact_discoveries_gates_spawn_in_parent
 run_test test_prose_hygiene_records_upstream_sync

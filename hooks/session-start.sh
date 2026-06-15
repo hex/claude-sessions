@@ -154,7 +154,7 @@ This session has:
 
 Key files to maintain:
 - .cs/README.md: Update objective and outcome
-- .cs/discoveries.md: Document findings, observations, and ideas
+- .cs/memory/narrative.md: Document findings, observations, and ideas
 
 All scripts and config files are automatically saved to .cs/artifacts/.
 
@@ -271,8 +271,8 @@ if [ "${CS_FRESH_REBIND:-}" = "1" ]; then
 The user explicitly started a fresh conversation in this cs session — the prior conversation's transcript is not loaded. Treat this as a clean break, not a continuation.
 
 For prior context, lazily consult as needed:
-- .cs/discoveries.md  — findings and decisions from earlier work
-- .cs/README.md       — session objective
+- .cs/memory/narrative.md  — findings and decisions from earlier work
+- .cs/README.md            — session objective
 
 The new conversation has its own UUID (\$CS_CLAUDE_SESSION_ID). Do not assume continuity with previous turns."
 fi

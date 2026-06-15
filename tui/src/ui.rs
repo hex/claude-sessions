@@ -971,7 +971,7 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
 
         if !preview.discoveries.is_empty() {
             lines.push(Line::from(Span::styled(
-                "Discoveries",
+                "Narrative",
                 Style::default().fg(GOLD).add_modifier(Modifier::BOLD),
             )));
             for disc in &preview.discoveries {

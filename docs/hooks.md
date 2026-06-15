@@ -24,13 +24,13 @@ Runs before any file write operation:
 - Scripts: `.sh`, `.bash`, `.zsh`, `.py`, `.js`, `.ts`, `.rb`, `.pl`
 - Configs: `.conf`, `.config`, `.json`, `.yaml`, `.yml`, `.toml`, `.ini`, `.env`
 
-## discovery-commits.sh (PostToolUse on Write/Edit)
+## autosave-commits.sh (PostToolUse on Write/Edit)
 
 Runs after any file modification (Write or Edit), providing crash recovery for all session files:
 - Autosaves entire working tree to `refs/cs/auto` shadow ref using git plumbing commands
 - Does not create commits on `main` or touch the working tree index
 - Each autosave chains onto the previous one (linked list of snapshots)
-- For discovery file edits, also logs the latest heading/bullet to `session.log`
+- For narrative file edits, also logs the latest heading/bullet to `session.log`
 - Runs in background to avoid blocking the session
 
 ## discoveries-reminder.sh (Stop)
@@ -114,7 +114,7 @@ The hooks are configured in `~/.claude/settings.json`:
       { "matcher": "Bash", "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/bash-logger.sh", "timeout": 5 }] }
     ],
     "PostToolUse": [
-      { "matcher": "Write|Edit", "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/discovery-commits.sh", "timeout": 10, "async": true }] }
+      { "matcher": "Write|Edit", "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/autosave-commits.sh", "timeout": 10, "async": true }] }
     ],
     "Stop": [
       { "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/discoveries-reminder.sh", "timeout": 10 }] },

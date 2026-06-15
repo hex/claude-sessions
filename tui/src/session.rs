@@ -56,8 +56,8 @@ pub fn load_preview(session_dir: &Path) -> SessionPreview {
             None
         });
 
-    // Discovery headings from discoveries.md (all ## headings, most recent last in file)
-    let (last_discovery, discoveries) = fs::read_to_string(cs_dir.join("discoveries.md"))
+    // Narrative headings from memory/narrative.md (all ## headings, most recent last in file)
+    let (last_discovery, discoveries) = fs::read_to_string(cs_dir.join("memory/narrative.md"))
         .ok()
         .map(|content| {
             let headings: Vec<String> = content
@@ -680,11 +680,11 @@ mod tests {
     #[test]
     fn load_preview_reads_last_discovery() {
         let dir = std::env::temp_dir().join(format!("cs-test-preview-disc-{}", std::process::id()));
-        let cs = dir.join(".cs");
+        let cs = dir.join(".cs/memory");
         fs::create_dir_all(&cs).unwrap();
         fs::write(
-            cs.join("discoveries.md"),
-            "# Discoveries\n\n## First thing\nSome text\n\n## Second thing\nMore text\n",
+            cs.join("narrative.md"),
+            "# Session narrative\n\n## First thing\nSome text\n\n## Second thing\nMore text\n",
         )
         .unwrap();
 
