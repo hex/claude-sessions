@@ -1,6 +1,8 @@
 # Plan: Relocate session narrative into native memory (`discoveries.md` → `.cs/memory/narrative.md`)
 
-Status: SHIPPED on branch wip-narrative-relocation (2026-06-15). All 4 phases complete, full suite green, deployed via install.sh, cs -doctor clean. Commits: Phase 1 bd53371, Phase 2 f044a67, Phase 3 d1c635c, Phase 4 c69a37c.
+Status: SHIPPED on branch wip-narrative-relocation (2026-06-15). All phases complete, full suite green, deployed via install.sh, cs -doctor clean. Commits: Phase 1 bd53371, Phase 2 f044a67, Phase 3 d1c635c, Phase 4 c69a37c, Phase 5 5206a3b (+ plan-shipped 8a0ca1d).
+
+Phase 5 (post-review, per Alex): added narrative-reminder.sh (Stop, lighter — cooldown + stale check, no size budget) AND narrative-precompact.sh (PreCompact — flush findings before context loss) to replace the retired discoveries-reminder with complementary periodic + event-based triggers. Also fixed a code-review bug: migrate_discoveries_to_narrative dropped discoveries.compact.md content when discoveries.md was header-only. Open caveat: PreCompact additionalContext injection is unverified at runtime (well-formed + fail-open; periodic reminder is the backstop).
 
 ## Goal
 Move the session lab-notebook narrative out of cs's hand-rolled `discoveries.md` (+ `discoveries.compact.md`) and into a native Claude Code memory **topic file** `.cs/memory/narrative.md`. Retire the bespoke size-budget / compaction / reminder machinery; inherit native lazy-load, `/memory` tooling, and persistence. Preserve the two-bar separation (narrative stays looser-bar via `type: narrative`; the strict `user/feedback/project/reference` buckets are untouched) and the resume-narrative role.
