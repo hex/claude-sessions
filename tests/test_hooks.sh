@@ -78,23 +78,6 @@ test_narrative_reminder_approves_for_subagent() {
 }
 
 # ============================================================================
-# narrative-precompact.sh
-# ============================================================================
-
-test_narrative_precompact_injects_context() {
-    local output
-    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-precompact.sh")
-    assert_output_contains "$output" "narrative.md" "PreCompact should reference narrative.md" || return 1
-    assert_output_contains "$output" "additionalContext" "PreCompact should emit additionalContext" || return 1
-}
-
-test_narrative_precompact_skips_outside_session() {
-    local output
-    output=$(echo '{}' | CLAUDE_SESSION_NAME= bash "$HOOKS_DIR/narrative-precompact.sh")
-    assert_eq "" "$output" "PreCompact should emit nothing outside a cs session" || return 1
-}
-
-# ============================================================================
 # session-auto-approve.sh
 # ============================================================================
 
@@ -846,8 +829,6 @@ run_test test_narrative_reminder_approves_when_recently_modified
 run_test test_narrative_reminder_blocks_when_stale
 run_test test_narrative_reminder_respects_cooldown
 run_test test_narrative_reminder_approves_for_subagent
-run_test test_narrative_precompact_injects_context
-run_test test_narrative_precompact_skips_outside_session
 run_test test_auto_approve_allows_cs_metadata_write
 run_test test_auto_approve_allows_cs_edit
 run_test test_auto_approve_ignores_non_cs_path

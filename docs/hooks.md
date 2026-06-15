@@ -40,12 +40,6 @@ Runs when Claude pauses for user input:
 - Cooldown-gated via `.cs/.narrative-reminder-cooldown` (at most once per 5 minutes); no size budget — narrative.md is a native memory topic file that lazy-loads
 - Approves silently inside subagents and outside cs sessions, and when the narrative was modified within the cooldown window
 
-## narrative-precompact.sh (PreCompact)
-
-Runs immediately before the conversation is compacted:
-- Injects an `additionalContext` reminder to flush any uncaptured findings/decisions into `.cs/memory/narrative.md` so they survive the context loss — an event-based companion to the periodic Stop reminder
-- Fails open (exits 0) outside cs sessions
-
 ## prose-lint.sh (Stop)
 
 Runs when Claude pauses for user input:
@@ -125,9 +119,6 @@ The hooks are configured in `~/.claude/settings.json`:
     "Stop": [
       { "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/narrative-reminder.sh", "timeout": 10 }] },
       { "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/prose-lint.sh", "timeout": 15 }] }
-    ],
-    "PreCompact": [
-      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/narrative-precompact.sh", "timeout": 10 }] }
     ],
     "SessionEnd": [
       { "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/session-end.sh", "timeout": 30 }] }

@@ -2,6 +2,12 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
+## 2026.6.4
+
+### Fixed
+
+- **Retired the PreCompact hook (`narrative-precompact.sh`), shipped in 2026.6.3.** It emitted `hookSpecificOutput`/`additionalContext`, which Claude Code's PreCompact event does not accept — the hook output schema offers `hookSpecificOutput` variants only for `PreToolUse`, `UserPromptSubmit`, `PostToolUse`, `PostToolBatch`, and `Stop`/`SubagentStop`, with no context-injection path for `PreCompact`. The hook therefore failed JSON-output validation ("(root): Invalid input") on every `/compact` in every cs session. The premise was also unsupported in principle: PreCompact gives the model no turn before compaction, so it cannot prompt a flush. The Stop reminder (`narrative-reminder.sh`) already covers mid-session narrative capture, so the PreCompact hook is removed and added to `RETIRED_HOOKS` (both `install.sh` and `bin/cs`) so deployed copies are stripped on next install/uninstall.
+
 ## 2026.6.3
 
 ### Added

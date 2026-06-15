@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.6.3"
+VERSION="2026.6.4"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -15,6 +15,7 @@ RELEASES_BASE="https://github.com/hex/claude-sessions/releases"
 # install.sh and run_uninstall both clean these up. KEEP IN SYNC WITH install.sh's RETIRED_HOOKS.
 # When retiring a hook in a release, add its filename here.
 RETIRED_HOOKS=(
+    narrative-precompact.sh   # retired: PreCompact cannot inject context (no hookSpecificOutput/additionalContext); Stop reminder covers capture
     discovery-commits.sh      # renamed to autosave-commits.sh (general all-file crash recovery, not discoveries-specific)
     discoveries-reminder.sh   # retired: session narrative moved to .cs/memory/narrative.md (native lazy-load, no size budget)
     discoveries-archiver.sh   # retired in v2026.4.7 (archive flow replaced by size-budget compaction)
@@ -34,7 +35,6 @@ CS_HOOKS=(
     artifact-tracker.sh
     autosave-commits.sh
     narrative-reminder.sh
-    narrative-precompact.sh
     prose-lint.sh
     session-end.sh
     subagent-context.sh

@@ -82,7 +82,6 @@ CS_HOOKS=(
     artifact-tracker.sh
     autosave-commits.sh
     narrative-reminder.sh
-    narrative-precompact.sh
     prose-lint.sh
     session-end.sh
     subagent-context.sh
@@ -96,6 +95,7 @@ CS_HOOKS=(
 # install.sh and bin/cs run_uninstall both clean these up. KEEP THIS LIST IN SYNC WITH bin/cs.
 # When retiring a hook in a release, add its filename here.
 RETIRED_HOOKS=(
+    narrative-precompact.sh   # retired: PreCompact cannot inject context (no hookSpecificOutput/additionalContext); Stop reminder covers capture
     discovery-commits.sh      # renamed to autosave-commits.sh (general all-file crash recovery, not discoveries-specific)
     discoveries-reminder.sh   # retired: session narrative moved to .cs/memory/narrative.md (native lazy-load, no size budget)
     discoveries-archiver.sh   # retired in v2026.4.7 (archive flow replaced by size-budget compaction)
@@ -487,7 +487,6 @@ else
     _merge_cs_hook PostToolUse        autosave-commits.sh    10 "Write|Edit" true
     _merge_cs_hook Stop               narrative-reminder.sh  10
     _merge_cs_hook Stop               prose-lint.sh          15
-    _merge_cs_hook PreCompact         narrative-precompact.sh 10
     _merge_cs_hook SessionEnd         session-end.sh         30
     _merge_cs_hook SubagentStart      subagent-context.sh    10
     _merge_cs_hook PostToolUseFailure tool-failure-logger.sh 10 "" true
