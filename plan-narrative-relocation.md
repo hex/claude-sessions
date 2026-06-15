@@ -1,6 +1,6 @@
 # Plan: Relocate session narrative into native memory (`discoveries.md` → `.cs/memory/narrative.md`)
 
-Status: DRAFT for review (2026-06-15). Supersedes the bespoke discoveries machinery.
+Status: SHIPPED on branch wip-narrative-relocation (2026-06-15). All 4 phases complete, full suite green, deployed via install.sh, cs -doctor clean. Commits: Phase 1 bd53371, Phase 2 f044a67, Phase 3 d1c635c, Phase 4 c69a37c.
 
 ## Goal
 Move the session lab-notebook narrative out of cs's hand-rolled `discoveries.md` (+ `discoveries.compact.md`) and into a native Claude Code memory **topic file** `.cs/memory/narrative.md`. Retire the bespoke size-budget / compaction / reminder machinery; inherit native lazy-load, `/memory` tooling, and persistence. Preserve the two-bar separation (narrative stays looser-bar via `type: narrative`; the strict `user/feedback/project/reference` buckets are untouched) and the resume-narrative role.
