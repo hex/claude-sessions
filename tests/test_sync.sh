@@ -289,10 +289,10 @@ test_clone_from_local_bare_repo() {
     local output
     output=$("$CS_BIN" -sync clone "file://$bare_repo" cloned-session 2>&1)
 
-    assert_exists "$CS_SESSIONS_ROOT/cloned-session/.cs/discoveries.md" \
-        "Cloned session should have discoveries" || return 1
-    assert_file_contains "$CS_SESSIONS_ROOT/cloned-session/.cs/discoveries.md" "Source discoveries" \
-        "Should have source content" || return 1
+    assert_exists "$CS_SESSIONS_ROOT/cloned-session/.cs/memory/narrative.md" \
+        "Cloned session should have narrative" || return 1
+    assert_file_contains "$CS_SESSIONS_ROOT/cloned-session/.cs/memory/narrative.md" "Source discoveries" \
+        "Should have source content (folded into narrative)" || return 1
 }
 
 # ============================================================================

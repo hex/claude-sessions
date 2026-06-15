@@ -233,6 +233,75 @@ test_migration_skips_if_frontmatter_exists() {
 }
 
 # ============================================================================
+# Session narrative topic file (narrative.md) — relocation of discoveries
+# ============================================================================
+
+test_new_session_creates_narrative_file() {
+    "$CS_BIN" test-session <<< "" 2>&1 || true
+
+    local narrative="$CS_SESSIONS_ROOT/test-session/.cs/memory/narrative.md"
+    assert_exists "$narrative" "narrative.md should be created in .cs/memory/" || return 1
+    assert_file_contains "$narrative" "type: narrative" \
+        "narrative.md should carry the narrative type" || return 1
+}
+
+test_new_session_adds_narrative_pointer() {
+    "$CS_BIN" test-session <<< "" 2>&1 || true
+
+    local index="$CS_SESSIONS_ROOT/test-session/.cs/memory/MEMORY.md"
+    assert_file_contains "$index" "(narrative.md)" \
+        "MEMORY.md should carry a pointer to narrative.md" || return 1
+}
+
+test_narrative_pointer_idempotent_readd() {
+    "$CS_BIN" test-session <<< "" 2>&1 || true
+    local session_dir="$CS_SESSIONS_ROOT/test-session"
+    # Simulate the harness regenerating MEMORY.md and dropping the pointer
+    : > "$session_dir/.cs/memory/MEMORY.md"
+    (cd "$session_dir" && git init -q && git add -A && git commit -q -m init 2>/dev/null) || true
+
+    "$CS_BIN" test-session <<< "" 2>&1 || true
+
+    local index="$session_dir/.cs/memory/MEMORY.md"
+    assert_file_contains "$index" "(narrative.md)" \
+        "Dropped narrative pointer should be re-added on resume" || return 1
+    # Must not duplicate when already present
+    local count
+    count=$(grep -c '(narrative.md)' "$index")
+    assert_eq "1" "$count" "narrative pointer should appear exactly once" || return 1
+}
+
+test_resume_folds_discoveries_into_narrative() {
+    local session_dir="$CS_SESSIONS_ROOT/disc-session"
+    mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
+    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
+    echo "auto_sync=on" > "$session_dir/.cs/sync.conf"
+    cat > "$session_dir/.cs/discoveries.md" << 'EOF'
+# Discoveries & Notes
+
+## A real finding worth keeping
+The widget frobnicator needs a retry on EAGAIN.
+EOF
+    cat > "$session_dir/CLAUDE.md" << 'EOF'
+# Session Documentation Protocol
+
+This is a Claude Code session managed by the cs tool. Session metadata lives in the .cs/ directory.
+EOF
+    (cd "$session_dir" && git init -q && git add -A && git commit -q -m "init")
+
+    "$CS_BIN" disc-session <<< "" 2>&1 || true
+
+    local narrative="$session_dir/.cs/memory/narrative.md"
+    assert_file_contains "$narrative" "frobnicator needs a retry on EAGAIN" \
+        "discoveries content should be folded into narrative.md on resume" || return 1
+    # One-shot: the original is consumed so it is not re-folded
+    if [ -f "$session_dir/.cs/discoveries.md" ]; then
+        echo "  FAIL: discoveries.md should be consumed after fold"
+        return 1
+    fi
+}
+
+# ============================================================================
 # Runner
 # ============================================================================
 
@@ -255,5 +324,11 @@ run_test test_migration_preserves_existing_content
 run_test test_migration_derives_created_date
 run_test test_migration_adds_aliases_from_session_name
 run_test test_migration_skips_if_frontmatter_exists
+
+# Session narrative topic file
+run_test test_new_session_creates_narrative_file
+run_test test_new_session_adds_narrative_pointer
+run_test test_narrative_pointer_idempotent_readd
+run_test test_resume_folds_discoveries_into_narrative
 
 report_results

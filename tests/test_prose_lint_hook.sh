@@ -81,6 +81,12 @@ test_memory_index_is_excluded() {
     assert_output_not_contains "$OUT" "block" "MEMORY.md index must not be linted as prose" || return 1
 }
 
+test_narrative_md_is_excluded() {
+    printf '%s\n' "An aside — with an em-dash." > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    run_hook '{}'
+    assert_output_not_contains "$OUT" "block" "narrative.md lab notebook must not be linted as prose" || return 1
+}
+
 test_loop_guard_allows_after_cap() {
     printf '%s\n' "Slop — persists." > "$CLAUDE_SESSION_META_DIR/summary.md"
     run_hook '{}'; assert_output_contains "$OUT" "block" "1st attempt blocks" || return 1
@@ -99,6 +105,7 @@ run_test test_skips_outside_cs_session
 run_test test_skips_file_older_than_session_start
 run_test test_discoveries_md_is_excluded
 run_test test_memory_index_is_excluded
+run_test test_narrative_md_is_excluded
 run_test test_loop_guard_allows_after_cap
 
 report_results

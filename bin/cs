@@ -667,6 +667,69 @@ SETTINGS
     fi
 }
 
+# Ensure the session narrative topic file and its MEMORY.md index pointer exist.
+# The narrative is the looser-bar lab notebook, held as a native memory topic
+# file so it inherits lazy-load and /memory tooling. Idempotent: creates the
+# stub on first run and re-adds the index pointer if a memory write dropped it.
+ensure_narrative_file() {
+    local session_dir="$1"
+    local mem_dir="$session_dir/.cs/memory"
+    local narrative="$mem_dir/narrative.md"
+    local index="$mem_dir/MEMORY.md"
+    mkdir -p "$mem_dir"
+
+    if [ ! -f "$narrative" ]; then
+        cat > "$narrative" << 'EOF'
+---
+name: session-narrative
+description: Session lab-notebook and work-in-progress narrative. Looser bar than durable memory. Read on resume.
+type: narrative
+---
+# Session narrative
+
+EOF
+    fi
+
+    if [ ! -f "$index" ] || ! grep -q '(narrative.md)' "$index" 2>/dev/null; then
+        printf -- '- [Session narrative (lab notebook)](narrative.md): looser-bar work-in-progress; read on resume\n' >> "$index"
+    fi
+}
+
+# Fold a legacy discoveries.md (and its compact companion) into the narrative
+# topic file, then consume the originals so the fold runs at most once. A
+# header-only or empty discoveries.md is ignored. Runs on resume of sessions
+# that predate the narrative relocation.
+migrate_discoveries_to_narrative() {
+    local session_dir="$1"
+    local meta="$session_dir/.cs"
+    local disc="$meta/discoveries.md"
+    local compact="$meta/discoveries.compact.md"
+
+    [ -f "$disc" ] || return 0
+    local body
+    body=$(grep -vE '^# Discoveries & Notes$|^[[:space:]]*$' "$disc" 2>/dev/null || true)
+    if [ -z "$body" ]; then
+        rm -f "$disc" "$compact"
+        return 0
+    fi
+
+    ensure_narrative_file "$session_dir"
+    local narrative="$meta/memory/narrative.md"
+    {
+        echo ""
+        echo "## Folded from discoveries.md ($(date '+%Y-%m-%d'))"
+        echo ""
+        cat "$disc"
+        if [ -f "$compact" ]; then
+            echo ""
+            echo "## Folded from discoveries.compact.md"
+            echo ""
+            cat "$compact"
+        fi
+    } >> "$narrative"
+    rm -f "$disc" "$compact"
+}
+
 # Emit the cs memory disclosure note (cs:memory-note section).
 # Single source of truth used by write_session_claude_md (new sessions) and
 # migrate_session Phase 9 (lazy migration on existing sessions). The note
@@ -994,6 +1057,9 @@ EOF
 
     # Redirect Claude Code auto memory into the session directory
     setup_auto_memory "$session_dir"
+
+    # Create the session narrative topic file + index pointer
+    ensure_narrative_file "$session_dir"
 }
 
 # Remove .cs/commands.md (and its adjacent state files), and strip the
@@ -1107,6 +1173,11 @@ EOF
     if [ ! -d "$session_dir/.cs/memory" ] || [ ! -d "$session_dir/.cs/plans" ] || [ ! -f "$session_dir/.claude/settings.local.json" ]; then
         setup_auto_memory "$session_dir"
     fi
+
+    # Phase 4b: Fold a legacy discoveries.md into the narrative topic file, then
+    # ensure the narrative file + index pointer exist (idempotent on every resume).
+    migrate_discoveries_to_narrative "$session_dir"
+    ensure_narrative_file "$session_dir"
 
     # Phase 5: Update CLAUDE.md to reference .cs/ paths if needed
     local claude_md="$session_dir/CLAUDE.md"
