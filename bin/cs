@@ -331,7 +331,10 @@ Environment:
   CS_STATUSLINE_SEGMENTS  Status line segments, csv order (default:
                           session,model,ctx,git,limits,disc,cost)
   CS_TERM_THEME           Override terminal theme detection (light|dark);
-                          cs -detect-theme shows what detection yields
+                          cs -detect-theme shows what detection yields.
+                          Under tmux, detection queries the outer terminal via
+                          DCS passthrough (needs `allow-passthrough on`), else
+                          falls back to the OS appearance — set this to override.
 
 Examples:
   cs debug-api                      Create or resume 'debug-api' session (git + auto-sync)
@@ -2339,17 +2342,32 @@ _theme_from_colorfgbg() {
     esac
 }
 
+# Wrap an escape sequence for tmux DCS passthrough so it reaches the OUTER
+# terminal instead of being answered by tmux itself: bracket with `\ePtmux;` …
+# `\e\\` and double every ESC in the payload. Requires `allow-passthrough on`
+# in the user's tmux; without it tmux drops the sequence and the query times out.
+_tmux_passthrough() {
+    local seq="$1"
+    local escaped=${seq//$'\033'/$'\033\033'}
+    printf '\033Ptmux;%s\033\\' "$escaped"
+}
+
 # Query the terminal background via OSC 11 and classify by BT.709 luminance.
-# Safe only while cs owns the tty (before claude takes over stdin).
+# Safe only while cs owns the tty (before claude takes over stdin). With a
+# "tmux" argument the query is wrapped for DCS passthrough so it reaches the
+# real outer terminal from inside a tmux pane.
 _theme_from_osc11() {
+    local via_tmux="${1:-}"
     if [ ! -t 0 ] || [ ! -t 1 ] || [ ! -e /dev/tty ]; then
         echo "unknown"
         return
     fi
-    local saved reply="" rgb r4 g4 b4 r g b lum
+    local saved reply="" rgb r4 g4 b4 r g b lum query
+    query=$'\033]11;?\033\\'
+    [ "$via_tmux" = "tmux" ] && query=$(_tmux_passthrough "$query")
     saved=$(stty -g < /dev/tty 2>/dev/null) || { echo "unknown"; return; }
     stty raw -echo < /dev/tty 2>/dev/null
-    printf '\033]11;?\033\\' > /dev/tty
+    printf '%s' "$query" > /dev/tty
     IFS= read -r -t 1 -d '\' reply < /dev/tty 2>/dev/null || true
     stty "$saved" < /dev/tty 2>/dev/null
     rgb="${reply#*rgb:}"
@@ -2379,12 +2397,14 @@ _theme_from_osc11() {
 detect_term_theme() {
     local theme
     if [ -n "${TMUX:-}" ]; then
-        # Inside tmux both tty signals lie: tmux answers an OSC 11 query
-        # itself with its default (black) background instead of the outer
-        # terminal's color, and COLORFGBG is a snapshot of the server's
-        # start-time environment. The OS appearance is the only honest
-        # signal left.
-        theme=$(_theme_from_os_appearance)
+        # Inside tmux a direct OSC 11 query is answered by tmux itself (its
+        # default black bg), not the outer terminal. Ask the real terminal via
+        # DCS passthrough first — it reads the actual background even when the
+        # OS appearance disagrees (e.g. a light terminal theme under macOS Dark
+        # Mode). Fall back to OS appearance only when passthrough can't answer
+        # (allow-passthrough off, or the reply doesn't round-trip).
+        theme=$(_theme_from_osc11 tmux)
+        [ "$theme" = "unknown" ] && theme=$(_theme_from_os_appearance)
     else
         theme=$(_theme_from_osc11)
         if [ "$theme" = "unknown" ] && [ -n "${COLORFGBG:-}" ]; then
