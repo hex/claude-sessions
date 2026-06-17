@@ -171,10 +171,11 @@ test_limits_threshold_per_block() {
 }
 
 # ============================================================================
-# Same-colored neighbor segments separate with a thin chevron, not a solid arrow
+# Minimal style (no Nerd Font): same-bg neighbors join with a thin bar, and
+# differing-bg neighbors abut so the color change itself is the divider
 # ============================================================================
 
-test_thin_chevron_between_same_bg() {
+test_thin_bar_between_same_bg() {
     export COLORTERM=truecolor
     # Adjacent warn blocks share the amber background: ctx at warn next to a
     # 5h block at warn (segment order trimmed so the two are neighbors).
@@ -182,18 +183,18 @@ test_thin_chevron_between_same_bg() {
     local json='{"workspace":{"current_dir":"/none"},"context_window":{"used_percentage":55},"rate_limits":{"five_hour":{"used_percentage":75}}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "›" "same-bg neighbors should join with a thin chevron" || return 1
+    assert_output_contains "$out" "│" "same-bg neighbors should join with a thin bar" || return 1
 }
 
-test_solid_arrow_between_different_bg() {
+test_abut_between_different_bg() {
     export COLORTERM=truecolor
-    # session grey then the periwinkle model accent: differing neighbors keep
-    # the solid arrow.
+    # session grey then the periwinkle model accent: differing neighbors abut,
+    # with no separator glyph and no powerline arrow.
     local json='{"session_name":"s","model":{"display_name":"Opus"},"workspace":{"current_dir":"/none"}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" ">" "different-bg neighbors should keep the solid arrow" || return 1
-    assert_output_not_contains "$out" "›" "no thin chevron when backgrounds differ" || return 1
+    assert_output_not_contains "$out" "│" "no thin bar between differing backgrounds" || return 1
+    assert_output_not_contains "$out" $'\xee\x82\xb0' "no powerline arrow without CS_NERD_FONTS=1" || return 1
 }
 
 # ============================================================================
@@ -741,8 +742,8 @@ run_test test_all_segments_ordering_plain
 run_test test_limits_neutral_when_healthy
 run_test test_two_accents_default
 run_test test_limits_threshold_per_block
-run_test test_thin_chevron_between_same_bg
-run_test test_solid_arrow_between_different_bg
+run_test test_thin_bar_between_same_bg
+run_test test_abut_between_different_bg
 run_test test_segment_icons_are_unicode
 run_test test_tab_color_palette_matches_statusline
 run_test test_no_powerline_arrow_without_nerd_fonts

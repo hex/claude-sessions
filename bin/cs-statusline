@@ -363,7 +363,11 @@ _render() {
         return 0
     fi
 
-    local esc=$'\033' reset=$'\033[0m' glyph=">" thin="›"
+    # Minimal style by default: blocks abut (the background-color change is the
+    # divider) and same-background neighbors get a thin bar. Both render in any
+    # font, so nothing tofus without a Nerd Font. CS_NERD_FONTS=1 upgrades the
+    # divider to the powerline arrow/chevron (private-use glyphs, Nerd Font only).
+    local esc=$'\033' reset=$'\033[0m' glyph="" thin=$'\xe2\x94\x82'   # U+2502 │
     if [ "${CS_NERD_FONTS:-}" = "1" ]; then
         glyph=$'\xee\x82\xb0'   # U+E0B0 solid arrow
         thin=$'\xee\x82\xb1'    # U+E0B1 outline chevron
