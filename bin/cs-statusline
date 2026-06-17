@@ -28,9 +28,9 @@ _SGR=""; _COLOR=""
 # in any monospace font — not Nerd Font private-use glyphs — so the bar looks
 # right without a patched font. CS_NERD_FONTS only upgrades the segment
 # separators to the powerline arrow (see _render); the icons are unaffected.
-ICON_SESSION=$'\xe2\x8c\x82 '   # U+2302 house
+ICON_SESSION=$'\xe2\xac\xa3 '   # U+2B23 horizontal hexagon
 ICON_CTX=$'\xe2\x97\x94 '       # U+25D4 quadrant circle (gauge)
-ICON_MODEL=$'\xe2\x9c\xb1 '     # U+2731 heavy asterisk
+ICON_MODEL=$'\xe2\x9c\xa6 '     # U+2726 four-pointed star
 ICON_GIT=$'\xe2\x8e\x87 '       # U+2387 branch
 ICON_5H=$'\xe2\x97\xb7 '        # U+25F7 clock
 ICON_WK=$'\xe2\x97\x91 '        # U+25D1 half circle

@@ -90,7 +90,7 @@ test_happy_path_docs_fixture_plain() {
     local out
     out=$(run_sl "$FIXTURE_DOCS")
     # git absent (non-git dir) and disc absent (no cs session).
-    assert_eq "⌂ my-session > ✱ Opus high > ◔ ctx 8% > ◷ 5h 23% > ◑ wk 41% > \$0.01" "$out" \
+    assert_eq "⬣ my-session > ✦ Opus high > ◔ ctx 8% > ◷ 5h 23% > ◑ wk 41% > \$0.01" "$out" \
         "docs fixture should render identity first, then gauges"
 }
 
@@ -116,7 +116,7 @@ test_all_segments_ordering_plain() {
     }')
     local out
     out=$(run_sl "$json")
-    assert_eq "⌂ mysess > ✱ Opus high > ◔ ctx 34% > ⎇ main +1!1 > ◷ 5h 23% > ◑ wk 41% > \$1.23" "$out" \
+    assert_eq "⬣ mysess > ✦ Opus high > ◔ ctx 34% > ⎇ main +1!1 > ◷ 5h 23% > ◑ wk 41% > \$1.23" "$out" \
         "all segments should render in order: identity pair, then gauges"
 }
 
@@ -349,7 +349,7 @@ test_missing_session_name_dir_fallback() {
     local json='{"model":{"display_name":"Opus"},"workspace":{"current_dir":"/tmp/alpha/beta"},"context_window":{"used_percentage":5}}'
     local out
     out=$(run_sl "$json")
-    assert_eq "⌂ beta > ✱ Opus > ◔ ctx 5%" "$out" \
+    assert_eq "⬣ beta > ✦ Opus > ◔ ctx 5%" "$out" \
         "session label should fall back to basename of current_dir"
 }
 
@@ -416,7 +416,7 @@ test_non_git_workspace_absent() {
     out=$(run_sl "$json")
     # current_dir is a real, non-git directory; output must end at the ctx
     # segment with no git slot appended.
-    assert_eq "⌂ s > ✱ Opus > ◔ ctx 5%" "$out" \
+    assert_eq "⬣ s > ✦ Opus > ◔ ctx 5%" "$out" \
         "git segment should be absent for a non-git workspace"
 }
 
@@ -512,7 +512,7 @@ test_segments_subset() {
     export CS_STATUSLINE_SEGMENTS="model,cost"
     local out
     out=$(run_sl "$FIXTURE_DOCS")
-    assert_eq "✱ Opus high > \$0.01" "$out" \
+    assert_eq "✦ Opus high > \$0.01" "$out" \
         "subset should render only the named segments in order"
     assert_output_not_contains "$out" "ctx" "excluded segments must not appear"
 }
@@ -688,9 +688,9 @@ EOF
 test_ctx_zero_vs_absent() {
     export NO_COLOR=1
     local with0='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":0}}'
-    assert_eq "⌂ s > ◔ ctx 0%" "$(run_sl "$with0")" "ctx 0% should render explicitly"
+    assert_eq "⬣ s > ◔ ctx 0%" "$(run_sl "$with0")" "ctx 0% should render explicitly"
     local without='{"session_name":"s","workspace":{"current_dir":"/none"}}'
-    assert_eq "⌂ s" "$(run_sl "$without")" "absent used_percentage should omit the ctx segment"
+    assert_eq "⬣ s" "$(run_sl "$without")" "absent used_percentage should omit the ctx segment"
 }
 
 # ============================================================================
@@ -701,7 +701,7 @@ test_unknown_segment_ignored() {
     export NO_COLOR=1
     export CS_STATUSLINE_SEGMENTS="session,bogus,model"
     local json='{"session_name":"s","model":{"display_name":"Opus"},"workspace":{"current_dir":"/none"}}'
-    assert_eq "⌂ s > ✱ Opus" "$(run_sl "$json")" "unknown segment tokens should be skipped"
+    assert_eq "⬣ s > ✦ Opus" "$(run_sl "$json")" "unknown segment tokens should be skipped"
 }
 
 # ============================================================================
