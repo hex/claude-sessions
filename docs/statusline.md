@@ -45,7 +45,7 @@ Adjacent segments that share a background join with a thin chevron (U+E0B1, `›
 
 cs detects the terminal's light/dark theme once at session launch, while it still owns the tty: an OSC 11 background query classified by BT.709 luminance first, falling back to `COLORFGBG` only when the query gets no answer. The query outranks the variable because `COLORFGBG` goes stale across theme changes; OSC 11 asks the live terminal. Inside tmux neither signal is honest — tmux answers the OSC query itself with its default (black) background instead of the outer terminal's color, and `COLORFGBG` is a snapshot of the tmux server's start-time environment — so under `$TMUX` cs reads the OS appearance instead (`defaults read -g AppleInterfaceStyle` on macOS; `unknown` elsewhere), which is right whenever the terminal theme follows the system. The result is exported as `CS_TERM_THEME` for the statusline and hooks; detection runs at launch because an OSC query fired from a render hook would race its reply into claude's input stream. On dark terminals the statusline lifts its neutral grey and softens white text; all other colors are self-backgrounded and theme-independent. Set `CS_TERM_THEME=light|dark` to override detection, and run `cs -detect-theme` to see what detection yields.
 
-`CS_NERD_FONTS=1` enables the powerline arrow separator (U+E0B0) and per-segment icons (home, gauge, microchip, branch, clock, calendar, book, from the Font Awesome and powerline glyph ranges). Without it, separators are `>` and segments are plain text.
+Per-segment icons are standard Unicode glyphs (house `⌂`, gauge `◔`, model `✱`, branch `⎇`, clock `◷`, half-circle `◑`) from the Geometric Shapes and dingbat ranges, so they render in any monospace font without a patched Nerd Font. `CS_NERD_FONTS=1` only upgrades the segment separator to the powerline arrow (U+E0B0); without it the separator is `>` (and the same-background chevron is `›` instead of U+E0B1). The colored blocks and icons are the same either way.
 
 ## Configuration
 
@@ -60,7 +60,8 @@ export CS_STATUSLINE_SEGMENTS="session,ctx,git,limits"
 export CS_STATUSLINE_CTX_WARN=50
 export CS_STATUSLINE_CTX_CRIT=80
 
-# Powerline glyphs and segment icons (otherwise ASCII '>' and plain text)
+# Upgrade the segment separator to the powerline arrow (needs a Nerd Font);
+# icons are standard Unicode and render either way
 export CS_NERD_FONTS=1
 
 # Plain text, no colors

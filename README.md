@@ -232,7 +232,8 @@ export CS_SECRETS_BACKEND="keychain"
 # Override Claude Code binary (default: claude)
 export CLAUDE_CODE_BIN="claude"
 
-# Use Nerd Font icons (requires a Nerd Font in your terminal)
+# Upgrade the statusline separator to the powerline arrow (needs a Nerd Font);
+# segment icons are standard Unicode and render in any font regardless
 export CS_NERD_FONTS="1"
 
 # Disable colors (see https://no-color.org)

@@ -90,7 +90,7 @@ test_happy_path_docs_fixture_plain() {
     local out
     out=$(run_sl "$FIXTURE_DOCS")
     # git absent (non-git dir) and disc absent (no cs session).
-    assert_eq "my-session > Opus high > ctx 8% > 5h 23% > wk 41% > \$0.01" "$out" \
+    assert_eq "⌂ my-session > ✱ Opus high > ◔ ctx 8% > ◷ 5h 23% > ◑ wk 41% > \$0.01" "$out" \
         "docs fixture should render identity first, then gauges"
 }
 
@@ -116,7 +116,7 @@ test_all_segments_ordering_plain() {
     }')
     local out
     out=$(run_sl "$json")
-    assert_eq "mysess > Opus high > ctx 34% > main +1!1 > 5h 23% > wk 41% > \$1.23" "$out" \
+    assert_eq "⌂ mysess > ✱ Opus high > ◔ ctx 34% > ⎇ main +1!1 > ◷ 5h 23% > ◑ wk 41% > \$1.23" "$out" \
         "all segments should render in order: identity pair, then gauges"
 }
 
@@ -197,12 +197,12 @@ test_solid_arrow_between_different_bg() {
 }
 
 # ============================================================================
-# Nerd Font segment icons appear only behind CS_NERD_FONTS=1
+# Segment icons are standard Unicode (render without a Nerd Font);
+# CS_NERD_FONTS only changes the separator, not the icons
 # ============================================================================
 
-test_nerd_font_segment_icons() {
+test_segment_icons_are_unicode() {
     export NO_COLOR=1
-    export CS_NERD_FONTS=1
     local work
     work=$(make_git_work)
     local json
@@ -215,14 +215,14 @@ test_nerd_font_segment_icons() {
     }')
     local out branch_glyph clock_glyph
     out=$(run_sl "$json")
-    branch_glyph=$'\xee\x82\xa0'
-    clock_glyph=$'\xef\x80\x97'
-    assert_output_contains "$out" "$branch_glyph" "git segment should carry the branch glyph" || return 1
-    assert_output_contains "$out" "$clock_glyph" "5h segment should carry the clock glyph" || return 1
+    branch_glyph=$'\xe2\x8e\x87'   # U+2387 branch
+    clock_glyph=$'\xe2\x97\xb7'    # U+25F7 clock
+    assert_output_contains "$out" "$branch_glyph" "git segment should carry the branch icon" || return 1
+    assert_output_contains "$out" "$clock_glyph" "5h segment should carry the clock icon" || return 1
 }
 
-test_no_segment_icons_without_nerd_fonts() {
-    export NO_COLOR=1
+test_no_powerline_arrow_without_nerd_fonts() {
+    export COLORTERM=truecolor
     local work
     work=$(make_git_work)
     local json
@@ -233,14 +233,12 @@ test_no_segment_icons_without_nerd_fonts() {
         context_window:{used_percentage:34},
         rate_limits:{five_hour:{used_percentage:23},seven_day:{used_percentage:41}}
     }')
-    local out branch_glyph
+    local out arrow branch_icon
     out=$(run_sl "$json")
-    if [ -z "$out" ]; then
-        echo "  FAIL: no output at all"
-        return 1
-    fi
-    branch_glyph=$'\xee\x82\xa0'
-    assert_output_not_contains "$out" "$branch_glyph" "no glyphs without CS_NERD_FONTS=1"
+    arrow=$'\xee\x82\xb0'        # U+E0B0 powerline arrow (Nerd Font only)
+    branch_icon=$'\xe2\x8e\x87'  # U+2387 branch (standard Unicode)
+    assert_output_not_contains "$out" "$arrow" "powerline arrow must not appear without CS_NERD_FONTS=1" || return 1
+    assert_output_contains "$out" "$branch_icon" "Unicode icons still render without CS_NERD_FONTS=1" || return 1
 }
 
 # ============================================================================
@@ -351,7 +349,7 @@ test_missing_session_name_dir_fallback() {
     local json='{"model":{"display_name":"Opus"},"workspace":{"current_dir":"/tmp/alpha/beta"},"context_window":{"used_percentage":5}}'
     local out
     out=$(run_sl "$json")
-    assert_eq "beta > Opus > ctx 5%" "$out" \
+    assert_eq "⌂ beta > ✱ Opus > ◔ ctx 5%" "$out" \
         "session label should fall back to basename of current_dir"
 }
 
@@ -418,7 +416,7 @@ test_non_git_workspace_absent() {
     out=$(run_sl "$json")
     # current_dir is a real, non-git directory; output must end at the ctx
     # segment with no git slot appended.
-    assert_eq "s > Opus > ctx 5%" "$out" \
+    assert_eq "⌂ s > ✱ Opus > ◔ ctx 5%" "$out" \
         "git segment should be absent for a non-git workspace"
 }
 
@@ -514,7 +512,7 @@ test_segments_subset() {
     export CS_STATUSLINE_SEGMENTS="model,cost"
     local out
     out=$(run_sl "$FIXTURE_DOCS")
-    assert_eq "Opus high > \$0.01" "$out" \
+    assert_eq "✱ Opus high > \$0.01" "$out" \
         "subset should render only the named segments in order"
     assert_output_not_contains "$out" "ctx" "excluded segments must not appear"
 }
@@ -541,7 +539,7 @@ test_git_untracked_not_modified() {
     json=$(jq -nc --arg dir "$work" '{session_name:"s",workspace:{current_dir:$dir}}')
     local out
     out=$(run_sl "$json")
-    assert_eq "main" "$out" "untracked-only repo should render a clean branch, no markers"
+    assert_eq "⎇ main" "$out" "untracked-only repo should render a clean branch, no markers"
 }
 
 # ============================================================================
@@ -690,9 +688,9 @@ EOF
 test_ctx_zero_vs_absent() {
     export NO_COLOR=1
     local with0='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":0}}'
-    assert_eq "s > ctx 0%" "$(run_sl "$with0")" "ctx 0% should render explicitly"
+    assert_eq "⌂ s > ◔ ctx 0%" "$(run_sl "$with0")" "ctx 0% should render explicitly"
     local without='{"session_name":"s","workspace":{"current_dir":"/none"}}'
-    assert_eq "s" "$(run_sl "$without")" "absent used_percentage should omit the ctx segment"
+    assert_eq "⌂ s" "$(run_sl "$without")" "absent used_percentage should omit the ctx segment"
 }
 
 # ============================================================================
@@ -703,7 +701,7 @@ test_unknown_segment_ignored() {
     export NO_COLOR=1
     export CS_STATUSLINE_SEGMENTS="session,bogus,model"
     local json='{"session_name":"s","model":{"display_name":"Opus"},"workspace":{"current_dir":"/none"}}'
-    assert_eq "s > Opus" "$(run_sl "$json")" "unknown segment tokens should be skipped"
+    assert_eq "⌂ s > ✱ Opus" "$(run_sl "$json")" "unknown segment tokens should be skipped"
 }
 
 # ============================================================================
@@ -733,8 +731,8 @@ run_test test_two_accents_default
 run_test test_limits_threshold_per_block
 run_test test_thin_chevron_between_same_bg
 run_test test_solid_arrow_between_different_bg
-run_test test_nerd_font_segment_icons
-run_test test_no_segment_icons_without_nerd_fonts
+run_test test_segment_icons_are_unicode
+run_test test_no_powerline_arrow_without_nerd_fonts
 run_test test_detect_theme_colorfgbg_dark
 run_test test_detect_theme_colorfgbg_light
 run_test test_detect_theme_konsole_three_part
