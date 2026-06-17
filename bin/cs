@@ -183,6 +183,23 @@ _color_from_name() {
     echo "${colors[$index]}"
 }
 
+# Map a claude_session_color name to its RGB (comma form for set_tab_title), so
+# the terminal tab color matches the statusline session block exactly.
+# KEEP IN SYNC with cs-statusline's truecolor session palette.
+_session_color_rgb() {
+    case "$1" in
+        red)    echo "211,47,47" ;;
+        blue)   echo "30,107,200" ;;
+        green)  echo "46,125,50" ;;
+        yellow) echo "154,120,20" ;;
+        purple) echo "126,87,194" ;;
+        orange) echo "216,107,28" ;;
+        pink)   echo "194,58,130" ;;
+        cyan)   echo "0,131,143" ;;
+        *)      echo "" ;;
+    esac
+}
+
 # Set terminal tab title and optional tab color.
 # Uses standard xterm escape sequences (works in iTerm2, Terminal.app, Ghostty, Alacritty, WezTerm, etc.)
 # Also sets tmux window name when running inside tmux.
@@ -2571,8 +2588,12 @@ launch_claude_code() {
     fi
     echo ""
 
-    # Set terminal tab title and color
-    set_tab_title "cs: $session_name" "auto:$session_name"
+    # Set terminal tab title and color. The tab color is the session's
+    # claude_session_color (same RGB as the statusline block); fall back to a
+    # name hash only if no color is recorded.
+    local _tab_color
+    _tab_color=$(_session_color_rgb "$claude_session_color")
+    set_tab_title "cs: $session_name" "${_tab_color:-auto:$session_name}"
 
     cd "$session_dir"
 

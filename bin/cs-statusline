@@ -125,14 +125,16 @@ _sgr() {
         truecolor)
             local rgb
             case "$name" in
-                red)    rgb="215;0;0" ;;
-                blue)   rgb="0;95;175" ;;
-                green)  rgb="0;135;0" ;;
-                yellow) rgb="175;135;0" ;;
-                purple) rgb="95;0;175" ;;
-                orange) rgb="215;95;0" ;;
-                pink)   rgb="175;0;135" ;;
-                cyan)   rgb="0;135;135" ;;
+                # Session-color palette: tuned dark enough for white text.
+                # KEEP IN SYNC with _session_color_rgb in bin/cs (tab color).
+                red)    rgb="211;47;47" ;;
+                blue)   rgb="30;107;200" ;;
+                green)  rgb="46;125;50" ;;
+                yellow) rgb="154;120;20" ;;
+                purple) rgb="126;87;194" ;;
+                orange) rgb="216;107;28" ;;
+                pink)   rgb="194;58;130" ;;
+                cyan)   rgb="0;131;143" ;;
                 periwinkle) rgb="153;152;255" ;;
                 chiptext) rgb="240;242;255" ;;
                 amber)  rgb="255;183;77" ;;
@@ -378,7 +380,7 @@ _render() {
         # every segment emits its intensity explicitly (1 accent, 22 normal)
         # or it would inherit bold from the accent before it.
         case "$bg" in
-            amber|yellow|white) _sgr 38 black ;;
+            amber|white) _sgr 38 black ;;
             *)
                 if [ -n "${_SEG_BOLD[i]}" ]; then _sgr 38 chiptext; else _sgr 38 white; fi ;;
         esac

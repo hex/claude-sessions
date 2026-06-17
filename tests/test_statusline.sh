@@ -147,7 +147,7 @@ test_two_accents_default() {
     local json='{"session_name":"accents","model":{"display_name":"Opus"},"workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8},"cost":{"total_cost_usd":1.0},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":40}}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;0;135;135" "session block should carry the session color (cyan)" || return 1
+    assert_output_contains "$out" "48;2;0;131;143" "session block should carry the session color (cyan)" || return 1
     assert_output_contains "$out" "48;2;153;152;255;38;2;240;242;255" "model should be the usage-chip periwinkle with the chip's text color" || return 1
     local greys
     greys=$(printf '%s' "$out" | grep -o '48;2;88;88;88' | grep -c . ) || greys=0
@@ -166,7 +166,7 @@ test_limits_threshold_per_block() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":95}}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;215;0;0" "wk 95% block should go red" || return 1
+    assert_output_contains "$out" "48;2;211;47;47" "wk 95% block should go red" || return 1
     assert_output_not_contains "$out" "48;2;255;183;77" "healthy 5h block must not show amber" || return 1
 }
 
@@ -219,6 +219,18 @@ test_segment_icons_are_unicode() {
     clock_glyph=$'\xe2\x97\xb7'    # U+25F7 clock
     assert_output_contains "$out" "$branch_glyph" "git segment should carry the branch icon" || return 1
     assert_output_contains "$out" "$clock_glyph" "5h segment should carry the clock icon" || return 1
+}
+
+test_tab_color_palette_matches_statusline() {
+    # The tab color (bin/cs _session_color_rgb, comma form) must equal the
+    # statusline session palette (cs-statusline truecolor rgb, semicolon form)
+    # for all 8 names, or the tab and the session block drift apart.
+    local c sl cs
+    for c in red blue green yellow purple orange pink cyan; do
+        sl=$(grep -E "^[[:space:]]*$c\)[[:space:]]*rgb=" "$SL" | grep -oE '[0-9]+;[0-9]+;[0-9]+' | tr ';' ',')
+        cs=$(grep -E "$c\).*echo \"[0-9]+,[0-9]+,[0-9]+\"" "$CS_BIN" | grep -oE '[0-9]+,[0-9]+,[0-9]+')
+        assert_eq "$sl" "$cs" "tab color RGB for '$c' must match the statusline palette" || return 1
+    done
 }
 
 test_no_powerline_arrow_without_nerd_fonts() {
@@ -429,7 +441,7 @@ test_ctx_threshold_red() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":84}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "215;0;0" "ctx 84% should use the red background rgb"
+    assert_output_contains "$out" "211;47;47" "ctx 84% should use the red background rgb"
     if ! printf '%s' "$out" | grep -qF "$(printf '\033[0m')"; then
         echo "  FAIL: colored line must contain a reset"
         return 1
@@ -442,7 +454,7 @@ test_ctx_normal_neutral_not_red() {
     local out
     out=$(run_sl "$json")
     assert_output_not_contains "$out" "0;135;0" "healthy ctx must not shout green" || return 1
-    assert_output_not_contains "$out" "215;0;0" "ctx 8% must not use red" || return 1
+    assert_output_not_contains "$out" "211;47;47" "ctx 8% must not use red" || return 1
 }
 
 test_model_neutral_not_blue() {
@@ -470,7 +482,7 @@ test_accent_segments_bold() {
     local json='{"session_name":"boldsess","model":{"display_name":"Opus"},"workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;0;135;135;38;2;240;242;255;1" \
+    assert_output_contains "$out" "48;2;0;131;143;38;2;240;242;255;1" \
         "the session accent should render bold in the chip text color" || return 1
     assert_output_contains "$out" "48;2;153;152;255;38;2;240;242;255;1" \
         "the model accent should render bold in the chip text color" || return 1
@@ -500,7 +512,7 @@ test_limits_threshold_red() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":95}}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "215;0;0" "wk 95% should drive the limits bg red"
+    assert_output_contains "$out" "211;47;47" "wk 95% should drive the limits bg red"
 }
 
 # ============================================================================
@@ -732,6 +744,7 @@ run_test test_limits_threshold_per_block
 run_test test_thin_chevron_between_same_bg
 run_test test_solid_arrow_between_different_bg
 run_test test_segment_icons_are_unicode
+run_test test_tab_color_palette_matches_statusline
 run_test test_no_powerline_arrow_without_nerd_fonts
 run_test test_detect_theme_colorfgbg_dark
 run_test test_detect_theme_colorfgbg_light
