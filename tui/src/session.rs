@@ -47,8 +47,18 @@ pub fn load_preview(session_dir: &Path) -> SessionPreview {
                     continue;
                 }
                 if after_objective {
+                    // End of the Objective section without real content.
+                    if line.starts_with("## ") {
+                        return None;
+                    }
                     let trimmed = line.trim();
                     if !trimmed.is_empty() {
+                        // The README template seeds a bracketed placeholder
+                        // (`[Describe ...]`); treat any whole-line `[...]` as
+                        // "not filled in", matching the session-start hook.
+                        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+                            return None;
+                        }
                         return Some(trimmed.to_string());
                     }
                 }
@@ -126,14 +136,19 @@ pub fn sessions_root() -> PathBuf {
 }
 
 pub fn scan_sessions() -> Vec<Session> {
-    let root = sessions_root();
+    scan_sessions_in(&sessions_root())
+}
+
+/// Scan a specific sessions root. Tests call this directly so they never have to
+/// mutate the process-global `CS_SESSIONS_ROOT` (which races across parallel tests).
+fn scan_sessions_in(root: &Path) -> Vec<Session> {
     if !root.is_dir() {
         return Vec::new();
     }
 
     let secret_counts = count_secrets_from_keychain();
 
-    let mut sessions: Vec<Session> = match fs::read_dir(&root) {
+    let mut sessions: Vec<Session> = match fs::read_dir(root) {
         Ok(entries) => entries
             .filter_map(|e| e.ok())
             .filter(|e| {
@@ -580,9 +595,7 @@ mod tests {
         setup_session(&root, "alpha");
         setup_session(&root, "beta");
 
-        std::env::set_var("CS_SESSIONS_ROOT", &root);
-        let sessions = scan_sessions();
-        std::env::remove_var("CS_SESSIONS_ROOT");
+        let sessions = scan_sessions_in(&root);
 
         assert_eq!(sessions.len(), 2);
         assert_eq!(sessions[0].name, "alpha");
@@ -594,10 +607,7 @@ mod tests {
 
     #[test]
     fn scan_sessions_returns_empty_for_missing_root() {
-        std::env::set_var("CS_SESSIONS_ROOT", "/tmp/cs-nonexistent-dir-12345");
-        let sessions = scan_sessions();
-        std::env::remove_var("CS_SESSIONS_ROOT");
-
+        let sessions = scan_sessions_in(Path::new("/tmp/cs-nonexistent-dir-12345"));
         assert!(sessions.is_empty());
     }
 
@@ -673,6 +683,25 @@ mod tests {
         );
         assert!(preview.last_discovery.is_none());
         assert_eq!(preview.artifact_count, 0);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn load_preview_suppresses_objective_placeholder() {
+        let dir = std::env::temp_dir().join(format!("cs-test-preview-ph-{}", std::process::id()));
+        let cs = dir.join(".cs");
+        fs::create_dir_all(&cs).unwrap();
+        // The unedited README template — its bracketed placeholder is not a real
+        // objective and must not surface in the preview.
+        fs::write(
+            cs.join("README.md"),
+            "# Session\n\n## Objective\n\n[Describe what you're trying to accomplish in this session]\n\n## Outcome\n\n[Describe the result]\n",
+        )
+        .unwrap();
+
+        let preview = load_preview(&dir);
+        assert!(preview.objective.is_none());
 
         fs::remove_dir_all(&dir).unwrap();
     }

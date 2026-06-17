@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# ABOUTME: UserPromptSubmit hook that grounds code-work prompts in the real codebase
-# ABOUTME: Injects a bounded "Scope (auto-grounded)" block: relevant files, recent commits, diff
+# ABOUTME: UserPromptSubmit hook: records the first prompt as the session Objective, then
+# ABOUTME: grounds code-work prompts in a bounded "Scope (auto-grounded)" block
 
 # No `set -e`: this hook must NEVER block the prompt. Every error path exits 0.
 set -uo pipefail
@@ -9,16 +9,58 @@ set -uo pipefail
 
 # Only run inside a cs session.
 [ -n "${CLAUDE_SESSION_NAME:-}" ] || exit 0
+
+# Read the prompt purely as DATA: jq decodes it, and it is only ever fed to other
+# commands as quoted stdin or written to a file via awk ENVIRON — never eval'd or
+# expanded into a shell context.
+INPUT=$(cat 2>/dev/null) || exit 0
+PROMPT=$(printf '%s' "$INPUT" | jq -r '.prompt // empty' 2>/dev/null) || exit 0
+
+# --- Objective capture (independent of the scope grounding below) ---
+# Record the first substantive prompt as the session Objective, but only while
+# the Objective is still a template placeholder — a whole line wrapped in [...].
+# Matching the bracket SHAPE (not the exact template wording) stays robust if the
+# template text changes; scoping to the Objective section leaves the Outcome
+# placeholder untouched. First real prompt wins; a hand-written objective (not
+# bracketed) is never overwritten.
+_obj_readme="${CLAUDE_SESSION_META_DIR:-}/README.md"
+if [ "${CS_OBJECTIVE_CAPTURE_DISABLE:-}" != "1" ] \
+    && [ -n "${CLAUDE_SESSION_META_DIR:-}" ] \
+    && [ -f "$_obj_readme" ] \
+    && awk '
+        /^## / { in_obj = ($0 ~ /^## Objective/) }
+        in_obj && /^\[.*\]$/ { found = 1 }
+        END { exit !found }
+       ' "$_obj_readme" 2>/dev/null; then
+    # Collapse whitespace; skip slash commands, shell passthrough, trivially short.
+    _obj=$(printf '%s' "$PROMPT" | tr '\n\r\t' '   ' | tr -s ' ' | sed -E 's/^ +//; s/ +$//')
+    case "$_obj" in /*|!*) _obj="" ;; esac
+    if [ -n "$_obj" ] && [ "${#_obj}" -ge 8 ]; then
+        [ "${#_obj}" -gt 100 ] && _obj="${_obj:0:100}…"
+        # ENVIRON sidesteps awk -v escape processing of arbitrary prompt text;
+        # only the Objective-section placeholder line is replaced, all others
+        # pass through verbatim; tmp+mv keeps the write atomic.
+        _obj_tmp=$(mktemp 2>/dev/null) || _obj_tmp=""
+        if [ -n "$_obj_tmp" ] && OBJ="$_obj" awk '
+                /^## / { in_obj = ($0 ~ /^## Objective/) }
+                in_obj && /^\[.*\]$/ { print ENVIRON["OBJ"]; next }
+                { print }
+            ' "$_obj_readme" > "$_obj_tmp" 2>/dev/null; then
+            mv "$_obj_tmp" "$_obj_readme" 2>/dev/null || rm -f "$_obj_tmp" 2>/dev/null
+        else
+            [ -n "$_obj_tmp" ] && rm -f "$_obj_tmp" 2>/dev/null
+        fi
+    fi
+fi
+
+# --- Scope grounding (code-work prompts only) ---
+
 # Per-session opt-out.
 [ "${CS_SCOPE_DISABLE:-}" = "1" ] && exit 0
 
 SESSION_DIR="${CLAUDE_SESSION_DIR:-}"
 [ -n "$SESSION_DIR" ] && [ -d "$SESSION_DIR" ] || exit 0
 
-# Read the prompt purely as DATA: jq decodes it, and it is only ever fed to other
-# commands as quoted stdin — never eval'd or expanded into a shell context.
-INPUT=$(cat 2>/dev/null) || exit 0
-PROMPT=$(printf '%s' "$INPUT" | jq -r '.prompt // empty' 2>/dev/null) || exit 0
 [ -n "$PROMPT" ] || exit 0
 
 # --- Classifier: positive iff a base-form work verb OR a source-file extension appears ---

@@ -2,6 +2,26 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
+## 2026.6.6
+
+### Added
+
+- **Session-picker TUI adapts to light terminals.** The warm rust/gold palette now has a light variant tuned for paper backgrounds, with the foreground accents desaturated so they read on a light canvas. The TUI picks light or dark from the terminal background `cs` already detects at launch (`CS_TERM_THEME` — OSC 11 with tmux DCS passthrough, macOS appearance, then `COLORFGBG`) and exports before the picker runs, rather than re-detecting itself. Dark terminals are unchanged — the canvas uses `Color::Reset`, preserving the terminal's native background, transparency, and images. Force it with `CS_TERM_THEME=light|dark`; `cs-tui --print-theme` shows what the binary resolved.
+- **Session Objective is auto-captured from your first prompt.** The first substantive prompt of a session is recorded as `## Objective` in `.cs/README.md`, folded into the `scope-prompt.sh` UserPromptSubmit hook (no new hook). It writes once while the Objective is still a bracketed placeholder, never overwrites a real or hand-written objective, is scoped to the Objective section (the Outcome placeholder is left untouched), skips slash-commands / `!`-passthrough / trivially short prompts, and writes prompt text strictly as data (never executed). Opt out per-session with `CS_OBJECTIVE_CAPTURE_DISABLE=1`.
+
+### Changed
+
+- **Statusline model background deepened** from `rgb(153,152,255)` to `rgb(138,134,236)` to match Claude Code's current usage-chip color (pixel-sampled).
+
+### Fixed
+
+- **The TUI no longer shows the unfilled Objective template placeholder.** An unedited `[Describe what you're trying to accomplish in this session]` is suppressed in the preview (any whole-line `[...]` under `## Objective`), matching the session-start hook, so an empty Objective renders as nothing instead of boilerplate.
+- **Fixed a flaky test.** The `scan_sessions` tests mutated the process-global `CS_SESSIONS_ROOT`, racing each other under parallel `cargo test` and intermittently reading the real sessions directory; they now inject the path via a `scan_sessions_in(root)` helper instead of touching global env.
+
+### Docs
+
+- Updated `README.md` and `docs/hooks.md` for the adaptive TUI palette, the auto-captured Objective, and the `CS_TERM_THEME` / `CS_OBJECTIVE_CAPTURE_DISABLE` env vars.
+
 ## 2026.6.5
 
 ### Changed

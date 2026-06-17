@@ -10,9 +10,7 @@ use ratatui::Frame;
 use ratatui::layout::Alignment;
 
 use crate::app::{App, FlashKind, Mode, SortColumn, SortDirection, StatusLevel};
-use crate::theme::{self, COMMENT, FLASH_ERROR, FLASH_SUCCESS, GOLD, GREEN, ORANGE, RED, RUST, WHITE, YELLOW};
-
-const ZEBRA_DIM: ratatui::style::Color = ratatui::style::Color::Rgb(32, 29, 28);
+use crate::theme::{self, Palette};
 
 const PREVIEW_MIN_WIDTH: u16 = 120;
 
@@ -32,6 +30,16 @@ fn truncate_str(s: &str, max_width: usize) -> String {
 }
 
 pub fn render(app: &mut App, frame: &mut Frame) {
+    let p = app.theme;
+
+    // Paint the canvas so light themes composite over paper instead of the
+    // terminal's own background. Dark uses Color::Reset — a deliberate no-op that
+    // keeps the terminal's native background, transparency, and images intact.
+    frame.render_widget(
+        Block::default().style(Style::default().bg(p.base_bg)),
+        frame.area(),
+    );
+
     // When in SessionMenu mode, allocate an extra line for the inline action bar
     let action_bar_height = if app.mode == Mode::SessionMenu { 1u16 } else { 0 };
 
@@ -72,12 +80,13 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         Mode::CreateSession => render_create_dialog(app, frame),
         Mode::MoveToRemote => render_move_to_dialog(app, frame),
         Mode::Secrets => render_secrets_popup(app, frame),
-        Mode::SyncOutput(text) => render_sync_output(text, frame),
+        Mode::SyncOutput(text) => render_sync_output(text, p, frame),
         _ => {}
     }
 }
 
 fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool) {
+    let p = app.theme;
     let icons = theme::icons();
 
     app.table_area = area;
@@ -120,7 +129,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
     }
 
     let header = Row::new(header_cells)
-        .style(Style::default().fg(RUST).add_modifier(Modifier::BOLD))
+        .style(Style::default().fg(p.rust).add_modifier(Modifier::BOLD))
         .bottom_margin(1);
 
     let is_searching = app.mode == Mode::Search && !app.search_input.text().is_empty();
@@ -137,21 +146,21 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             // Build gutter indicators as colored prefix spans
             let mut name_spans: Vec<Span> = Vec::new();
             if app.marked_sessions.contains(&s.name) {
-                let mark_color = if dimmed { COMMENT } else { GOLD };
+                let mark_color = if dimmed { p.comment } else { p.gold };
                 name_spans.push(Span::styled(
                     "* ",
                     Style::default().fg(mark_color).add_modifier(Modifier::BOLD),
                 ));
             }
             if s.is_locked {
-                let lock_color = if dimmed { COMMENT } else { RED };
+                let lock_color = if dimmed { p.comment } else { p.red };
                 name_spans.push(Span::styled(
                     format!("{} ", icons.lock),
                     Style::default().fg(lock_color),
                 ));
             }
             if s.location.is_some() {
-                let remote_icon_color = if dimmed { COMMENT } else { ORANGE };
+                let remote_icon_color = if dimmed { p.comment } else { p.orange };
                 name_spans.push(Span::styled(
                     format!("{} ", icons.remote),
                     Style::default().fg(remote_icon_color),
@@ -159,7 +168,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             }
             if s.secrets_count > 0 && !show_secrets {
                 // Show secrets indicator in gutter only when secrets column is hidden
-                let secrets_color = if dimmed { COMMENT } else { GOLD };
+                let secrets_color = if dimmed { p.comment } else { p.gold };
                 name_spans.push(Span::styled(
                     format!("{} ", icons.lock),
                     Style::default().fg(secrets_color),
@@ -167,11 +176,11 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             }
 
             let name_color = if dimmed {
-                COMMENT
+                p.comment
             } else if s.location.is_some() {
-                ratatui::style::Color::Cyan
+                p.remote
             } else {
-                GOLD
+                p.gold
             };
 
             // Highlight matched characters from fuzzy search
@@ -210,9 +219,9 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             }
 
             let meta_color = if dimmed {
-                COMMENT
+                p.comment
             } else {
-                theme::recency_color(s.modified_ts)
+                p.recency_color(s.modified_ts)
             };
 
             // Build the name cell — may include section header and/or preview lines
@@ -224,7 +233,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             if let Some(label) = section_label {
                 name_lines.push(Line::from(Span::styled(
                     format!("── {} ──", label),
-                    Style::default().fg(COMMENT).add_modifier(Modifier::DIM),
+                    Style::default().fg(p.comment).add_modifier(Modifier::DIM),
                 )));
             }
 
@@ -241,8 +250,8 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
                             obj.clone()
                         };
                         name_lines.push(Line::from(vec![
-                            Span::styled("  goal: ", Style::default().fg(COMMENT)),
-                            Span::styled(truncated, Style::default().fg(WHITE)),
+                            Span::styled("  goal: ", Style::default().fg(p.comment)),
+                            Span::styled(truncated, Style::default().fg(p.fg)),
                         ]));
                         preview_lines += 1;
                     }
@@ -253,15 +262,15 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
                             disc.clone()
                         };
                         name_lines.push(Line::from(vec![
-                            Span::styled("  last: ", Style::default().fg(COMMENT)),
-                            Span::styled(truncated, Style::default().fg(YELLOW)),
+                            Span::styled("  last: ", Style::default().fg(p.comment)),
+                            Span::styled(truncated, Style::default().fg(p.yellow)),
                         ]));
                         preview_lines += 1;
                     }
                     if preview.artifact_count > 0 {
                         name_lines.push(Line::from(Span::styled(
                             format!("  {} artifacts", preview.artifact_count),
-                            Style::default().fg(COMMENT),
+                            Style::default().fg(p.comment),
                         )));
                         preview_lines += 1;
                     }
@@ -269,7 +278,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
                     if preview_lines == 0 {
                         name_lines.push(Line::from(Span::styled(
                             "  (no metadata)",
-                            Style::default().fg(COMMENT).add_modifier(Modifier::DIM),
+                            Style::default().fg(p.comment).add_modifier(Modifier::DIM),
                         )));
                         preview_lines += 1;
                     }
@@ -302,13 +311,13 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
                     .as_ref()
                     .map(|l| format!("{} {}", icons.remote, l))
                     .unwrap_or_default();
-                let remote_color = if dimmed { COMMENT } else { ORANGE };
+                let remote_color = if dimmed { p.comment } else { p.orange };
                 cells.push(Cell::from(remote).style(Style::default().fg(remote_color)));
             }
 
             if show_github {
                 let github = s.git_repo.clone().unwrap_or_default();
-                let github_color = if dimmed { COMMENT } else { GREEN };
+                let github_color = if dimmed { p.comment } else { p.green };
                 cells.push(Cell::from(github).style(Style::default().fg(github_color)));
             }
 
@@ -322,12 +331,12 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             // Flash background takes priority, then zebra striping
             if let Some(flash) = app.active_flash(&s.name) {
                 let bg = match flash {
-                    FlashKind::Success => FLASH_SUCCESS,
-                    FlashKind::Error => FLASH_ERROR,
+                    FlashKind::Success => p.flash_success,
+                    FlashKind::Error => p.flash_error,
                 };
                 row.style(Style::default().bg(bg))
             } else if row_idx % 2 == 1 {
-                row.style(Style::default().bg(ZEBRA_DIM))
+                row.style(Style::default().bg(p.zebra))
             } else {
                 row
             }
@@ -353,7 +362,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
     let session_count = app.filtered.len();
     let version = std::env::var("CS_VERSION").unwrap_or_default();
 
-    let title = gradient_title(&version, session_count);
+    let title = gradient_title(p, &version, session_count);
 
     let table = Table::new(rows, widths)
         .header(header)
@@ -361,12 +370,12 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(RUST))
+                .border_style(Style::default().fg(p.rust))
                 .title(title),
         )
         .row_highlight_style(
             Style::default()
-                .fg(WHITE)
+                .fg(p.fg)
                 .add_modifier(Modifier::REVERSED),
         )
         .highlight_symbol(">> ");
@@ -374,7 +383,6 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
     frame.render_stateful_widget(table, area, &mut app.table_state);
 
     // Draw discrete column separators in the middle of each column gap
-    const SEP: ratatui::style::Color = ratatui::style::Color::Rgb(50, 45, 42);
     let y_start = area.y + 1;
     let y_end = area.y + area.height.saturating_sub(1);
     let mut x = area.x + 1 + 3; // border + highlight symbol width
@@ -387,7 +395,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
                 for y in y_start..y_end {
                     if let Some(cell) = buf.cell_mut(ratatui::layout::Position::new(sep_x, y)) {
                         cell.set_char('\u{2502}');
-                        cell.set_fg(SEP);
+                        cell.set_fg(p.sep);
                     }
                 }
             }
@@ -430,10 +438,10 @@ fn resolve_widths(constraints: &[Constraint], available: u16) -> Vec<u16> {
         .collect()
 }
 
-fn gradient_title<'a>(version: &str, session_count: usize) -> Line<'a> {
-    // Rust (#e64a19) → Gold (#ffc107) gradient matching install.sh banner
-    const START: (u8, u8, u8) = (230, 74, 25);
-    const END: (u8, u8, u8) = (255, 193, 7);
+fn gradient_title<'a>(p: Palette, version: &str, session_count: usize) -> Line<'a> {
+    // Rust → Gold gradient matching install.sh banner, themed for the background
+    let start = theme::rgb_of(p.rust);
+    let end = theme::rgb_of(p.gold);
     let text = "claude-sessions";
     let len = text.len() as f32 - 1.0;
 
@@ -442,9 +450,9 @@ fn gradient_title<'a>(version: &str, session_count: usize) -> Line<'a> {
 
     for (i, ch) in text.chars().enumerate() {
         let t = if len > 0.0 { i as f32 / len } else { 0.0 };
-        let r = START.0 as f32 + t * (END.0 as f32 - START.0 as f32);
-        let g = START.1 as f32 + t * (END.1 as f32 - START.1 as f32);
-        let b = START.2 as f32 + t * (END.2 as f32 - START.2 as f32);
+        let r = start.0 as f32 + t * (end.0 as f32 - start.0 as f32);
+        let g = start.1 as f32 + t * (end.1 as f32 - start.1 as f32);
+        let b = start.2 as f32 + t * (end.2 as f32 - start.2 as f32);
         spans.push(Span::styled(
             ch.to_string(),
             Style::default()
@@ -455,24 +463,25 @@ fn gradient_title<'a>(version: &str, session_count: usize) -> Line<'a> {
 
     spans.push(Span::styled(
         format!(" v{} ", version),
-        Style::default().fg(COMMENT),
+        Style::default().fg(p.comment),
     ));
     spans.push(Span::styled(
         format!("[{} sessions] ", session_count),
-        Style::default().fg(WHITE).add_modifier(Modifier::BOLD),
+        Style::default().fg(p.fg).add_modifier(Modifier::BOLD),
     ));
 
     Line::from(spans)
 }
 
 fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
+    let p = app.theme;
     // Status message takes priority in Normal mode
     if app.mode == Mode::Normal {
         if let Some(msg) = &app.status_message {
             let color = match msg.level {
-                StatusLevel::Success => GREEN,
-                StatusLevel::Error => RED,
-                StatusLevel::Info => YELLOW,
+                StatusLevel::Success => p.green,
+                StatusLevel::Error => p.red,
+                StatusLevel::Info => p.yellow,
             };
             let footer = Paragraph::new(Line::from(vec![Span::styled(
                 &msg.text,
@@ -497,12 +506,12 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
             .map(|j| j.session_name.as_str())
             .unwrap_or("?");
         let footer = Paragraph::new(Line::from(vec![
-            Span::styled(format!("{} ", spinner), Style::default().fg(GOLD)),
+            Span::styled(format!("{} ", spinner), Style::default().fg(p.gold)),
             Span::styled(
                 format!("{}ing {}...", subcmd, session),
-                Style::default().fg(WHITE),
+                Style::default().fg(p.fg),
             ),
-            Span::styled("  Esc:cancel", Style::default().fg(COMMENT)),
+            Span::styled("  Esc:cancel", Style::default().fg(p.comment)),
         ]));
         frame.render_widget(footer, area);
         return;
@@ -528,26 +537,28 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
     if !app.marked_sessions.is_empty() && matches!(app.mode, Mode::Normal) {
         footer_spans.push(Span::styled(
             format!("{} marked  ", app.marked_sessions.len()),
-            Style::default().fg(GOLD).add_modifier(Modifier::BOLD),
+            Style::default().fg(p.gold).add_modifier(Modifier::BOLD),
         ));
     }
-    footer_spans.push(Span::styled(keys, Style::default().fg(COMMENT)));
+    footer_spans.push(Span::styled(keys, Style::default().fg(p.comment)));
     let footer = Paragraph::new(Line::from(footer_spans));
     frame.render_widget(footer, area);
 }
 
 fn render_search_bar(app: &App, frame: &mut Frame, area: Rect) {
+    let p = app.theme;
     let line = Line::from(vec![
-        Span::styled("/ ", Style::default().fg(GOLD)),
-        Span::styled(app.search_input.before_cursor(), Style::default().fg(WHITE)),
-        Span::styled("\u{2588}", Style::default().fg(WHITE)),
-        Span::styled(app.search_input.after_cursor(), Style::default().fg(WHITE)),
+        Span::styled("/ ", Style::default().fg(p.gold)),
+        Span::styled(app.search_input.before_cursor(), Style::default().fg(p.fg)),
+        Span::styled("\u{2588}", Style::default().fg(p.fg)),
+        Span::styled(app.search_input.after_cursor(), Style::default().fg(p.fg)),
     ]);
     let paragraph = Paragraph::new(line);
     frame.render_widget(paragraph, area);
 }
 
 fn render_action_bar(app: &App, frame: &mut Frame, area: Rect) {
+    let p = app.theme;
     let session = app.selected_session();
     let is_remote = session.as_ref().map(|s| s.location.is_some()).unwrap_or(false);
     let has_git = session.as_ref().map(|s| s.has_git).unwrap_or(false);
@@ -576,11 +587,11 @@ fn render_action_bar(app: &App, frame: &mut Frame, area: Rect) {
         }
 
         let (key_color, label_color) = if !available {
-            (COMMENT, COMMENT)
+            (p.comment, p.comment)
         } else if is_selected {
-            (GOLD, WHITE)
+            (p.gold, p.fg)
         } else {
-            (GOLD, COMMENT)
+            (p.gold, p.comment)
         };
 
         let key_style = Style::default().fg(key_color).add_modifier(Modifier::BOLD);
@@ -596,14 +607,15 @@ fn render_action_bar(app: &App, frame: &mut Frame, area: Rect) {
         spans.push(Span::styled(*label, label_style));
     }
 
-    spans.push(Span::styled("  Esc:close", Style::default().fg(COMMENT)));
+    spans.push(Span::styled("  Esc:close", Style::default().fg(p.comment)));
 
     let bar = Paragraph::new(Line::from(spans))
-        .style(Style::default().bg(ZEBRA_DIM));
+        .style(Style::default().bg(p.zebra));
     frame.render_widget(bar, area);
 }
 
 fn render_confirm_delete(app: &App, frame: &mut Frame) {
+    let p = app.theme;
     let session = match app.selected_session() {
         Some(s) => s,
         None => return,
@@ -625,18 +637,18 @@ fn render_confirm_delete(app: &App, frame: &mut Frame) {
     } else {
         "[y] Confirm  [n/Esc] Cancel".to_string()
     };
-    let hint_color = if remaining > 0 { COMMENT } else { WHITE };
+    let hint_color = if remaining > 0 { p.comment } else { p.fg };
 
     let popup_area = centered_rect(50, 7, frame.area());
     frame.render_widget(Clear, popup_area);
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(RED))
+        .border_style(Style::default().fg(p.red))
         .title(" Confirm Delete ")
-        .title_style(Style::default().fg(RED).add_modifier(Modifier::BOLD));
+        .title_style(Style::default().fg(p.red).add_modifier(Modifier::BOLD));
 
     let lines = vec![
-        Line::from(Span::styled(action_msg, Style::default().fg(WHITE))),
+        Line::from(Span::styled(action_msg, Style::default().fg(p.fg))),
         Line::from(""),
         Line::from(Span::styled(hint, Style::default().fg(hint_color))),
     ];
@@ -647,6 +659,7 @@ fn render_confirm_delete(app: &App, frame: &mut Frame) {
 }
 
 fn render_confirm_batch_delete(app: &App, frame: &mut Frame) {
+    let p = app.theme;
     let count = app.marked_sessions.len();
     let remaining = app.delete_countdown_remaining();
 
@@ -664,25 +677,25 @@ fn render_confirm_batch_delete(app: &App, frame: &mut Frame) {
     } else {
         "[y] Confirm  [n/Esc] Cancel".to_string()
     };
-    let hint_color = if remaining > 0 { COMMENT } else { WHITE };
+    let hint_color = if remaining > 0 { p.comment } else { p.fg };
 
     let height = if names.len() <= 5 { 7 } else { 7 };
     let popup_area = centered_rect(55, height, frame.area());
     frame.render_widget(Clear, popup_area);
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(RED))
+        .border_style(Style::default().fg(p.red))
         .title(format!(" Delete {} sessions ", count))
-        .title_style(Style::default().fg(RED).add_modifier(Modifier::BOLD));
+        .title_style(Style::default().fg(p.red).add_modifier(Modifier::BOLD));
 
     let lines = vec![
         Line::from(Span::styled(
             format!("Delete {} sessions?", count),
-            Style::default().fg(WHITE),
+            Style::default().fg(p.fg),
         )),
-        Line::from(Span::styled(list, Style::default().fg(COMMENT))),
+        Line::from(Span::styled(list, Style::default().fg(p.comment))),
         Line::from(""),
-        Line::from(Span::styled("This cannot be undone.", Style::default().fg(RED))),
+        Line::from(Span::styled("This cannot be undone.", Style::default().fg(p.red))),
         Line::from(Span::styled(hint, Style::default().fg(hint_color))),
     ];
     let text = Paragraph::new(lines)
@@ -692,6 +705,7 @@ fn render_confirm_batch_delete(app: &App, frame: &mut Frame) {
 }
 
 fn render_confirm_force_open(app: &App, frame: &mut Frame) {
+    let p = app.theme;
     let session = match app.selected_session() {
         Some(s) => s,
         None => return,
@@ -711,57 +725,60 @@ fn render_confirm_force_open(app: &App, frame: &mut Frame) {
     frame.render_widget(Clear, popup_area);
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(YELLOW))
+        .border_style(Style::default().fg(p.yellow))
         .title(" Locked Session ")
-        .title_style(Style::default().fg(YELLOW).add_modifier(Modifier::BOLD));
+        .title_style(Style::default().fg(p.yellow).add_modifier(Modifier::BOLD));
     let text = Paragraph::new(msg)
-        .style(Style::default().fg(WHITE))
+        .style(Style::default().fg(p.fg))
         .block(block)
         .wrap(Wrap { trim: true });
     frame.render_widget(text, popup_area);
 }
 
 fn render_rename_dialog(app: &App, frame: &mut Frame) {
+    let p = app.theme;
     let popup_area = centered_rect(50, 5, frame.area());
     frame.render_widget(Clear, popup_area);
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(GOLD))
+        .border_style(Style::default().fg(p.gold))
         .title(" Rename Session ")
-        .title_style(Style::default().fg(GOLD).add_modifier(Modifier::BOLD));
+        .title_style(Style::default().fg(p.gold).add_modifier(Modifier::BOLD));
 
     let line = Line::from(vec![
-        Span::styled(app.rename_input.before_cursor(), Style::default().fg(WHITE)),
-        Span::styled("\u{2588}", Style::default().fg(WHITE)),
-        Span::styled(app.rename_input.after_cursor(), Style::default().fg(WHITE)),
+        Span::styled(app.rename_input.before_cursor(), Style::default().fg(p.fg)),
+        Span::styled("\u{2588}", Style::default().fg(p.fg)),
+        Span::styled(app.rename_input.after_cursor(), Style::default().fg(p.fg)),
     ]);
     let text = Paragraph::new(line)
-        .style(Style::default().fg(WHITE))
+        .style(Style::default().fg(p.fg))
         .block(block);
     frame.render_widget(text, popup_area);
 }
 
 fn render_create_dialog(app: &App, frame: &mut Frame) {
+    let p = app.theme;
     let popup_area = centered_rect(50, 5, frame.area());
     frame.render_widget(Clear, popup_area);
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(GREEN))
+        .border_style(Style::default().fg(p.green))
         .title(" New Session ")
-        .title_style(Style::default().fg(GREEN).add_modifier(Modifier::BOLD));
+        .title_style(Style::default().fg(p.green).add_modifier(Modifier::BOLD));
 
     let line = Line::from(vec![
-        Span::styled(app.create_input.before_cursor(), Style::default().fg(WHITE)),
-        Span::styled("\u{2588}", Style::default().fg(WHITE)),
-        Span::styled(app.create_input.after_cursor(), Style::default().fg(WHITE)),
+        Span::styled(app.create_input.before_cursor(), Style::default().fg(p.fg)),
+        Span::styled("\u{2588}", Style::default().fg(p.fg)),
+        Span::styled(app.create_input.after_cursor(), Style::default().fg(p.fg)),
     ]);
     let text = Paragraph::new(line)
-        .style(Style::default().fg(WHITE))
+        .style(Style::default().fg(p.fg))
         .block(block);
     frame.render_widget(text, popup_area);
 }
 
 fn render_move_to_dialog(app: &App, frame: &mut Frame) {
+    let p = app.theme;
     let session = match app.selected_session() {
         Some(s) => s,
         None => return,
@@ -771,26 +788,27 @@ fn render_move_to_dialog(app: &App, frame: &mut Frame) {
     frame.render_widget(Clear, popup_area);
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(ORANGE))
+        .border_style(Style::default().fg(p.orange))
         .title(" Move to Remote ")
-        .title_style(Style::default().fg(ORANGE).add_modifier(Modifier::BOLD));
+        .title_style(Style::default().fg(p.orange).add_modifier(Modifier::BOLD));
 
     let line = Line::from(vec![
         Span::styled(
             format!("Move '{}' to: ", session.name),
-            Style::default().fg(COMMENT),
+            Style::default().fg(p.comment),
         ),
-        Span::styled(app.move_to_input.before_cursor(), Style::default().fg(WHITE)),
-        Span::styled("\u{2588}", Style::default().fg(WHITE)),
-        Span::styled(app.move_to_input.after_cursor(), Style::default().fg(WHITE)),
+        Span::styled(app.move_to_input.before_cursor(), Style::default().fg(p.fg)),
+        Span::styled("\u{2588}", Style::default().fg(p.fg)),
+        Span::styled(app.move_to_input.after_cursor(), Style::default().fg(p.fg)),
     ]);
     let text = Paragraph::new(line)
-        .style(Style::default().fg(WHITE))
+        .style(Style::default().fg(p.fg))
         .block(block);
     frame.render_widget(text, popup_area);
 }
 
 fn render_secrets_popup(app: &App, frame: &mut Frame) {
+    let p = app.theme;
     let session_name = app
         .selected_session()
         .map(|s| s.name.as_str())
@@ -801,13 +819,13 @@ fn render_secrets_popup(app: &App, frame: &mut Frame) {
     frame.render_widget(Clear, popup_area);
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(ORANGE))
+        .border_style(Style::default().fg(p.orange))
         .title(format!(" Secrets - {} ", session_name))
-        .title_style(Style::default().fg(ORANGE).add_modifier(Modifier::BOLD));
+        .title_style(Style::default().fg(p.orange).add_modifier(Modifier::BOLD));
 
     if app.secrets_names.is_empty() {
         let paragraph = Paragraph::new("No secrets stored")
-            .style(Style::default().fg(COMMENT))
+            .style(Style::default().fg(p.comment))
             .block(block);
         frame.render_widget(paragraph, popup_area);
         return;
@@ -829,15 +847,15 @@ fn render_secrets_popup(app: &App, frame: &mut Frame) {
             if is_selected {
                 spans.push(Span::styled(
                     ">> ",
-                    Style::default().fg(GOLD).add_modifier(Modifier::BOLD),
+                    Style::default().fg(p.gold).add_modifier(Modifier::BOLD),
                 ));
                 spans.push(Span::styled(
                     name.as_str(),
-                    Style::default().fg(WHITE).add_modifier(Modifier::BOLD),
+                    Style::default().fg(p.fg).add_modifier(Modifier::BOLD),
                 ));
             } else {
                 spans.push(Span::styled("   ", Style::default()));
-                spans.push(Span::styled(name.as_str(), Style::default().fg(COMMENT)));
+                spans.push(Span::styled(name.as_str(), Style::default().fg(p.comment)));
             }
 
             if is_revealed {
@@ -851,11 +869,11 @@ fn render_secrets_popup(app: &App, frame: &mut Frame) {
                     spans.push(Span::styled("  ", Style::default()));
                     spans.push(Span::styled(
                         display_val,
-                        Style::default().fg(YELLOW),
+                        Style::default().fg(p.yellow),
                     ));
                     spans.push(Span::styled(
                         format!(" ({}s)", remaining),
-                        Style::default().fg(COMMENT),
+                        Style::default().fg(p.comment),
                     ));
                 }
             }
@@ -868,32 +886,33 @@ fn render_secrets_popup(app: &App, frame: &mut Frame) {
     frame.render_widget(paragraph, popup_area);
 }
 
-fn render_sync_output(text: &str, frame: &mut Frame) {
+fn render_sync_output(text: &str, p: Palette, frame: &mut Frame) {
     let popup_area = centered_rect(80, 20, frame.area());
     frame.render_widget(Clear, popup_area);
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(ORANGE))
+        .border_style(Style::default().fg(p.orange))
         .title(" Sync Output ")
-        .title_style(Style::default().fg(ORANGE).add_modifier(Modifier::BOLD));
+        .title_style(Style::default().fg(p.orange).add_modifier(Modifier::BOLD));
     let paragraph = Paragraph::new(text.to_string())
-        .style(Style::default().fg(WHITE))
+        .style(Style::default().fg(p.fg))
         .block(block)
         .wrap(Wrap { trim: false });
     frame.render_widget(paragraph, popup_area);
 }
 
 fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
+    let p = app.theme;
     let session = match app.selected_session() {
         Some(s) => s,
         None => {
             let block = Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(RUST))
+                .border_style(Style::default().fg(p.rust))
                 .title(" Preview ")
-                .title_style(Style::default().fg(RUST));
+                .title_style(Style::default().fg(p.rust));
             let p = Paragraph::new("No session selected")
-                .style(Style::default().fg(COMMENT))
+                .style(Style::default().fg(p.comment))
                 .block(block);
             frame.render_widget(p, area);
             return;
@@ -902,43 +921,43 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(RUST))
+        .border_style(Style::default().fg(p.rust))
         .title(format!(" {} ", session.name))
-        .title_style(Style::default().fg(GOLD).add_modifier(Modifier::BOLD));
+        .title_style(Style::default().fg(p.gold).add_modifier(Modifier::BOLD));
 
     let mut lines: Vec<Line> = Vec::new();
 
     // Session metadata
     if let Some(ref created) = session.created {
         lines.push(Line::from(vec![
-            Span::styled("Created:  ", Style::default().fg(COMMENT)),
-            Span::styled(created.as_str(), Style::default().fg(WHITE)),
+            Span::styled("Created:  ", Style::default().fg(p.comment)),
+            Span::styled(created.as_str(), Style::default().fg(p.fg)),
         ]));
     }
     if let Some(ref modified) = session.modified {
         lines.push(Line::from(vec![
-            Span::styled("Modified: ", Style::default().fg(COMMENT)),
-            Span::styled(modified.as_str(), Style::default().fg(WHITE)),
+            Span::styled("Modified: ", Style::default().fg(p.comment)),
+            Span::styled(modified.as_str(), Style::default().fg(p.fg)),
         ]));
     }
     if let Some(ref loc) = session.location {
         lines.push(Line::from(vec![
-            Span::styled("Remote:   ", Style::default().fg(COMMENT)),
-            Span::styled(loc.as_str(), Style::default().fg(ORANGE)),
+            Span::styled("Remote:   ", Style::default().fg(p.comment)),
+            Span::styled(loc.as_str(), Style::default().fg(p.orange)),
         ]));
     }
     if let Some(ref repo) = session.git_repo {
         lines.push(Line::from(vec![
-            Span::styled("Github:   ", Style::default().fg(COMMENT)),
-            Span::styled(repo.as_str(), Style::default().fg(GREEN)),
+            Span::styled("Github:   ", Style::default().fg(p.comment)),
+            Span::styled(repo.as_str(), Style::default().fg(p.green)),
         ]));
     }
     if session.secrets_count > 0 {
         lines.push(Line::from(vec![
-            Span::styled("Secrets:  ", Style::default().fg(COMMENT)),
+            Span::styled("Secrets:  ", Style::default().fg(p.comment)),
             Span::styled(
                 format!("{}", session.secrets_count),
-                Style::default().fg(YELLOW),
+                Style::default().fg(p.yellow),
             ),
         ]));
     }
@@ -949,7 +968,7 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
             .unwrap_or_else(|| "Locked".to_string());
         lines.push(Line::from(Span::styled(
             pid_text,
-            Style::default().fg(RED),
+            Style::default().fg(p.red),
         )));
     }
 
@@ -960,11 +979,11 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
         if let Some(ref obj) = preview.objective {
             lines.push(Line::from(Span::styled(
                 "Objective",
-                Style::default().fg(GOLD).add_modifier(Modifier::BOLD),
+                Style::default().fg(p.gold).add_modifier(Modifier::BOLD),
             )));
             lines.push(Line::from(Span::styled(
                 obj.as_str(),
-                Style::default().fg(WHITE),
+                Style::default().fg(p.fg),
             )));
             lines.push(Line::from(""));
         }
@@ -972,13 +991,13 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
         if !preview.discoveries.is_empty() {
             lines.push(Line::from(Span::styled(
                 "Narrative",
-                Style::default().fg(GOLD).add_modifier(Modifier::BOLD),
+                Style::default().fg(p.gold).add_modifier(Modifier::BOLD),
             )));
             for disc in &preview.discoveries {
                 let truncated = truncate_str(disc, (area.width as usize).saturating_sub(6));
                 lines.push(Line::from(vec![
-                    Span::styled("  - ", Style::default().fg(COMMENT)),
-                    Span::styled(truncated, Style::default().fg(YELLOW)),
+                    Span::styled("  - ", Style::default().fg(p.comment)),
+                    Span::styled(truncated, Style::default().fg(p.yellow)),
                 ]));
             }
             lines.push(Line::from(""));
@@ -987,13 +1006,13 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
         if !preview.memory_entries.is_empty() {
             lines.push(Line::from(Span::styled(
                 "Memory",
-                Style::default().fg(GOLD).add_modifier(Modifier::BOLD),
+                Style::default().fg(p.gold).add_modifier(Modifier::BOLD),
             )));
             for entry in &preview.memory_entries {
                 let truncated = truncate_str(entry, (area.width as usize).saturating_sub(6));
                 lines.push(Line::from(vec![
                     Span::styled("  ", Style::default()),
-                    Span::styled(truncated, Style::default().fg(COMMENT)),
+                    Span::styled(truncated, Style::default().fg(p.comment)),
                 ]));
             }
             lines.push(Line::from(""));
@@ -1002,19 +1021,19 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
         if preview.artifact_count > 0 {
             lines.push(Line::from(Span::styled(
                 format!("Artifacts ({})", preview.artifact_count),
-                Style::default().fg(GOLD).add_modifier(Modifier::BOLD),
+                Style::default().fg(p.gold).add_modifier(Modifier::BOLD),
             )));
             let max_names = (area.height as usize).saturating_sub(lines.len() + 3);
             for name in preview.artifact_names.iter().take(max_names) {
                 lines.push(Line::from(vec![
                     Span::styled("  ", Style::default()),
-                    Span::styled(name.as_str(), Style::default().fg(COMMENT)),
+                    Span::styled(name.as_str(), Style::default().fg(p.comment)),
                 ]));
             }
             if preview.artifact_names.len() > max_names {
                 lines.push(Line::from(Span::styled(
                     format!("  ... and {} more", preview.artifact_names.len() - max_names),
-                    Style::default().fg(COMMENT).add_modifier(Modifier::DIM),
+                    Style::default().fg(p.comment).add_modifier(Modifier::DIM),
                 )));
             }
         }
@@ -1022,7 +1041,7 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
         if preview.objective.is_none() && preview.discoveries.is_empty() && preview.memory_entries.is_empty() && preview.artifact_count == 0 {
             lines.push(Line::from(Span::styled(
                 "No .cs/ metadata",
-                Style::default().fg(COMMENT).add_modifier(Modifier::DIM),
+                Style::default().fg(p.comment).add_modifier(Modifier::DIM),
             )));
         }
     }
@@ -1046,4 +1065,61 @@ fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
         Constraint::Percentage((100 - percent_x) / 2),
     ])
     .split(popup_layout[1])[1]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::App;
+    use crate::session::Session;
+    use crate::theme::Palette;
+    use ratatui::backend::TestBackend;
+    use ratatui::style::Color;
+    use ratatui::Terminal;
+
+    fn one_session() -> Vec<Session> {
+        vec![Session {
+            name: "alpha".into(),
+            is_adopted: false,
+            created: Some("2026-01-01 10:00".into()),
+            modified: Some("2026-02-20 14:00".into()),
+            modified_ts: None,
+            location: None,
+            lock_pid: None,
+            is_locked: false,
+            secrets_count: 0,
+            has_git: false,
+            git_repo: None,
+            sync_auto: None,
+        }]
+    }
+
+    /// Render to an in-memory buffer with the given palette and return whether
+    /// any cell is painted with the light paper background.
+    fn renders_with_paper_bg(palette: Palette) -> bool {
+        let mut app = App::new(one_session());
+        app.theme = palette;
+        // Width < PREVIEW_MIN_WIDTH so the preview pane (which reads files) stays closed.
+        let backend = TestBackend::new(100, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let paper = Color::Rgb(250, 247, 242);
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .any(|cell| cell.bg == paper)
+    }
+
+    #[test]
+    fn light_theme_paints_paper_canvas() {
+        assert!(renders_with_paper_bg(Palette::light()));
+    }
+
+    #[test]
+    fn dark_theme_leaves_canvas_unpainted() {
+        // Dark uses Color::Reset for the canvas, so no paper-colored cells appear.
+        assert!(!renders_with_paper_bg(Palette::dark()));
+    }
 }

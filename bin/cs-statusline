@@ -135,7 +135,7 @@ _sgr() {
                 orange) rgb="216;107;28" ;;
                 pink)   rgb="194;58;130" ;;
                 cyan)   rgb="0;131;143" ;;
-                periwinkle) rgb="139;135;255" ;;
+                periwinkle) rgb="138;134;236" ;;
                 chiptext) rgb="240;242;255" ;;
                 amber)  rgb="255;183;77" ;;
                 white)

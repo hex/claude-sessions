@@ -17,6 +17,16 @@ mod ui;
 type Tui = Terminal<CrosstermBackend<BufWriter<io::Stderr>>>;
 
 fn main() {
+    // Diagnostic: report the detected terminal theme and exit.
+    if std::env::args().any(|a| a == "--print-theme") {
+        let theme = match theme::detect_theme() {
+            theme::Theme::Light => "light",
+            theme::Theme::Dark => "dark",
+        };
+        println!("{}", theme);
+        return;
+    }
+
     if !io::stderr().is_terminal() {
         eprintln!("cs-tui requires an interactive terminal");
         std::process::exit(1);
@@ -29,6 +39,7 @@ fn main() {
     }
 
     let mut app = app::App::new(sessions);
+    app.theme = theme::Palette::for_theme(theme::detect_theme());
 
     let mut terminal = init_terminal().expect("failed to initialize terminal");
     let result = run_event_loop(&mut app, &mut terminal);

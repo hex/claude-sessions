@@ -7,6 +7,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKi
 use ratatui::widgets::TableState;
 
 use crate::session::{self, Session};
+use crate::theme::Palette;
 
 /// Editable text buffer with cursor position tracking.
 /// Cursor is stored as a byte offset, always on a char boundary.
@@ -341,6 +342,8 @@ pub struct App {
     pub sync_job: Option<SyncJob>,
     /// Whether to show the preview pane on wide terminals (toggled with `p`).
     pub show_preview: bool,
+    /// Resolved color palette for the detected terminal background.
+    pub theme: Palette,
 }
 
 impl App {
@@ -380,6 +383,7 @@ impl App {
             preview_cache: HashMap::new(),
             sync_job: None,
             show_preview: true,
+            theme: Palette::dark(),
         }
     }
 

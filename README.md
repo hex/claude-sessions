@@ -102,7 +102,7 @@ Running `cs` with no arguments launches an interactive TUI for browsing and mana
 - **Time-based sections** — sessions grouped under Today, Yesterday, This Week, This Month, Older when sorted by date
 - **Action bar** with `Enter` — inline bar shows available actions with shortcut keys
 - **Preview pane** — appears automatically on wide terminals (>120 cols); toggle with `p`
-- **Expand row** with `Tab` — shows session objective, narrative, and artifact count inline
+- **Expand row** with `Tab` — shows session objective (auto-captured from your first prompt), narrative, and artifact count inline
 - **Create session** with `n` — opens inline dialog to create a new session
 - **Delete** with `d` (confirmation required)
 - **Batch operations** — mark sessions with `Space`, then `D` to batch delete
@@ -111,8 +111,9 @@ Running `cs` with no arguments launches an interactive TUI for browsing and mana
 - **Manage secrets** with `s` (view values with `v`, auto-redacts after 5 seconds)
 - **Async sync** with `P` (push), `L` (pull), `S` (status) — runs in background with spinner; `Esc` to cancel
 - **Quit** with `q` or `Esc`
+- **Light/dark palette** — the warm palette adapts to the terminal background detected at launch (`CS_TERM_THEME`); set the env var to force `light` or `dark`
 
-The TUI requires `cs-tui` (an ~817 KB Rust binary). Build from source: `cd tui && cargo build --release`.
+The TUI requires `cs-tui` (an ~820 KB Rust binary). Build from source: `cd tui && cargo build --release`.
 
 ### Session Commands
 
@@ -235,6 +236,12 @@ export CLAUDE_CODE_BIN="claude"
 # Upgrade the statusline separator to the powerline arrow (needs a Nerd Font);
 # segment icons are standard Unicode and render in any font regardless
 export CS_NERD_FONTS="1"
+
+# Force the light/dark theme (session-picker TUI palette, statusline, hooks).
+# Unset (default), cs auto-detects the terminal background before launch
+# (OSC 11 with tmux passthrough, macOS appearance, then COLORFGBG). Set this
+# to override; `cs -detect-theme` prints what detection yields.
+export CS_TERM_THEME="light"   # or "dark"
 
 # Disable colors (see https://no-color.org)
 export NO_COLOR="1"

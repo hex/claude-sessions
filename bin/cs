@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.6.5"
+VERSION="2026.6.6"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -3954,6 +3954,14 @@ main() {
             local tui_bin
             tui_bin="$(command -v cs-tui 2>/dev/null || echo "$(dirname "$0")/cs-tui")"
             if [ -x "$tui_bin" ]; then
+                # Detect the terminal theme while cs still owns the tty, so the
+                # picker can pick a light/dark palette. Exported here, it's also
+                # reused by the session we launch next (skips re-detection).
+                if [ -z "${CS_TERM_THEME:-}" ]; then
+                    local _tui_theme
+                    _tui_theme=$(detect_term_theme)
+                    [ "$_tui_theme" != "unknown" ] && export CS_TERM_THEME="$_tui_theme"
+                fi
                 local tui_output
                 tui_output=$(CS_VERSION="$VERSION" "$tui_bin") || exit $?
                 if [ -n "$tui_output" ]; then
