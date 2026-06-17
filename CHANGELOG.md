@@ -2,6 +2,27 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
+## 2026.6.5
+
+### Changed
+
+- **Statusline renders without a Nerd Font by default.** Segment icons are now standard Unicode glyphs (hexagon `⬣` session, star `✦` model, `◔` context, `⎇` git, `◷` 5h, `◑` weekly) from the Geometric Shapes and dingbat ranges, so they render in any monospace font instead of as missing-glyph (tofu) boxes. The separator defaults to a minimal style: differing-background blocks abut so the color change is the divider, and same-background neighbors join with a thin bar `│`. `CS_NERD_FONTS=1` still upgrades the separator to the powerline arrow (U+E0B0) and same-background chevron (U+E0B1); it no longer gates the icons.
+- **Re-picked the 8-color session palette for white-text contrast.** The session-color shades (statusline blocks and the tab color) were re-tuned so white text reads cleanly on every one — the muddy olive `yellow` became a darker gold, and the black-text special case for `yellow` is removed.
+- **Terminal tab color is synced to the session color.** The tab color now derives from `claude_session_color` using the exact RGB the statusline block uses (`_session_color_rgb` in `bin/cs`), instead of a hash of the session name. The session block, the tab color, and Claude Code's `/color` now all reflect one color; `test_tab_color_palette_matches_statusline` guards the two palettes against drift.
+
+### Fixed
+
+- **Statusline no longer renders tofu boxes in terminals without a Nerd Font.** Icons and the default separator are standard Unicode; only the `CS_NERD_FONTS=1` powerline arrow needs a patched font. (Under tmux the outer terminal is undetectable — every client reports `xterm-256color` — so the Nerd Font arrow stays an explicit opt-in via `CS_NERD_FONTS`.)
+- **Yellow sessions showed unreadable black-on-olive text** in the statusline; they now use white text on a darker gold.
+
+### CI
+
+- **Release workflow bumped to Node 24 action majors** (`actions/checkout@v5`, `actions/upload-artifact@v6`, `actions/download-artifact@v7`, `softprops/action-gh-release@v3`) ahead of GitHub's Node-24 migration; v5 of the artifact actions still run Node 20, so v6/v7 were required.
+
+### Docs
+
+- Updated `docs/statusline.md` and `README.md` for the standard-Unicode icons, the re-picked palette, the tab-color sync, and the minimal separator.
+
 ## 2026.6.4
 
 ### Fixed
