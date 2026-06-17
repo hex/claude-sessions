@@ -131,7 +131,7 @@ test_limits_neutral_when_healthy() {
     out=$(run_sl "$json")
     assert_output_contains "$out" "5h 23%" "5h block should render" || return 1
     assert_output_contains "$out" "wk 41%" "wk block should render" || return 1
-    assert_output_not_contains "$out" "48;2;153;152;255" "healthy limits must not take the accent periwinkle" || return 1
+    assert_output_not_contains "$out" "48;2;139;135;255" "healthy limits must not take the accent periwinkle" || return 1
     assert_output_not_contains "$out" "48;2;255;183;77" "healthy limits must not show amber" || return 1
 }
 
@@ -148,7 +148,7 @@ test_two_accents_default() {
     local out
     out=$(run_sl "$json")
     assert_output_contains "$out" "48;2;0;131;143" "session block should carry the session color (cyan)" || return 1
-    assert_output_contains "$out" "48;2;153;152;255;38;2;240;242;255" "model should be the usage-chip periwinkle with the chip's text color" || return 1
+    assert_output_contains "$out" "48;2;139;135;255;38;2;240;242;255" "model should be the usage-chip periwinkle with the chip's text color" || return 1
     local greys
     greys=$(printf '%s' "$out" | grep -o '48;2;88;88;88' | grep -c . ) || greys=0
     if [ "$greys" -lt 4 ]; then
@@ -472,7 +472,7 @@ test_white_text_on_periwinkle() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"model":{"display_name":"Opus"}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;153;152;255;38;2;240;242;255" \
+    assert_output_contains "$out" "48;2;139;135;255;38;2;240;242;255" \
         "the periwinkle model accent carries the chip's text color rgb(240,242,255)" || return 1
 }
 
@@ -485,7 +485,7 @@ test_accent_segments_bold() {
     out=$(run_sl "$json")
     assert_output_contains "$out" "48;2;0;131;143;38;2;240;242;255;1" \
         "the session accent should render bold in the chip text color" || return 1
-    assert_output_contains "$out" "48;2;153;152;255;38;2;240;242;255;1" \
+    assert_output_contains "$out" "48;2;139;135;255;38;2;240;242;255;1" \
         "the model accent should render bold in the chip text color" || return 1
     # SGR bold is stateful: a segment that does not explicitly emit normal
     # intensity (22) inherits bold from the accent before it.
