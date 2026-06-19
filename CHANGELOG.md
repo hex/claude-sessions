@@ -2,6 +2,21 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
+## 2026.6.7
+
+A focused round of `cs-statusline` refinements.
+
+### Added
+
+- **5-hour window reset countdown.** The `5h` block now appends the time until the rolling window resets, e.g. `5h 23% · 2h14m` (`<1m` / `45m` / `2h14m` forms). Derived from the statusline schema's `rate_limits.five_hour.resets_at` (Unix epoch seconds) using a fork-free `printf` clock; absent when the field is missing or the window already reset.
+
+### Changed
+
+- **Squared pills replace the powerline look.** Segments now render as square, abutting blocks — the background-color change is the divider between differing neighbors, and same-colored neighbors get a faint `▏` (U+258F) bar. The powerline arrow and its `CS_NERD_FONTS` statusline path are retired (the variable still controls cs banner/listing icons). No Nerd Font or private-use glyphs are used.
+- **Warmer neutral.** The quiet segment background shifts from steel grey to a warm taupe (`rgb(96,90,82)` light / `rgb(108,101,92)` dark).
+- **Branch moves ahead of the model and becomes a bold accent.** Default order is now `session,git,model,ctx,limits,cost`, and the branch renders bold in slate-blue `rgb(79,91,140)` — a hue in the model periwinkle's family so the three identity accents read as one cool gradient.
+- **Session pill drops its icon.** The session name now sits on its `claude_session_color` background with no leading glyph — the color is identity enough.
+
 ## 2026.6.6
 
 ### Added

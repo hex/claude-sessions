@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ABOUTME: Tests for bin/cs-statusline, the Claude Code powerline statusline
+# ABOUTME: Tests for bin/cs-statusline, the Claude Code squared-pill statusline
 # ABOUTME: Covers segment rendering, ordering, thresholds, color ladder, and defensive fallbacks
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -36,7 +36,7 @@ teardown() {
     fi
     unset CS_SESSIONS_ROOT CLAUDE_SESSION_NAME NO_COLOR COLORTERM TERM_PROGRAM \
         FORCE_COLOR CS_STATUSLINE_DISABLE CS_STATUSLINE_SEGMENTS CS_STATUSLINE_CTX_WARN \
-        CS_STATUSLINE_CTX_CRIT CS_NERD_FONTS CS_DISCOVERIES_MAX_SIZE 2>/dev/null || true
+        CS_STATUSLINE_CTX_CRIT CS_DISCOVERIES_MAX_SIZE 2>/dev/null || true
 }
 
 # --- Helpers ---
@@ -90,7 +90,7 @@ test_happy_path_docs_fixture_plain() {
     local out
     out=$(run_sl "$FIXTURE_DOCS")
     # git absent (non-git dir) and disc absent (no cs session).
-    assert_eq "⬣ my-session > ✦ Opus high > ◔ ctx 8% > ◷ 5h 23% > ◑ wk 41% > \$0.01" "$out" \
+    assert_eq "my-session > ✦ Opus high > ◔ ctx 8% > ◷ 5h 23% > ◑ wk 41% > \$0.01" "$out" \
         "docs fixture should render identity first, then gauges"
 }
 
@@ -116,8 +116,8 @@ test_all_segments_ordering_plain() {
     }')
     local out
     out=$(run_sl "$json")
-    assert_eq "⬣ mysess > ✦ Opus high > ◔ ctx 34% > ⎇ main +1!1 > ◷ 5h 23% > ◑ wk 41% > \$1.23" "$out" \
-        "all segments should render in order: identity pair, then gauges"
+    assert_eq "mysess > ⎇ main +1!1 > ✦ Opus high > ◔ ctx 34% > ◷ 5h 23% > ◑ wk 41% > \$1.23" "$out" \
+        "all segments should render in order: session, branch, model, then gauges"
 }
 
 # ============================================================================
@@ -150,11 +150,40 @@ test_two_accents_default() {
     assert_output_contains "$out" "48;2;0;131;143" "session block should carry the session color (cyan)" || return 1
     assert_output_contains "$out" "48;2;138;134;236;38;2;240;242;255" "model should be the usage-chip periwinkle with the chip's text color" || return 1
     local greys
-    greys=$(printf '%s' "$out" | grep -o '48;2;88;88;88' | grep -c . ) || greys=0
+    greys=$(printf '%s' "$out" | grep -o '48;2;96;90;82' | grep -c . ) || greys=0
     if [ "$greys" -lt 4 ]; then
         echo "  FAIL: expected ctx, git-less run, 5h, wk, cost on grey (got $greys grey blocks)"
         return 1
     fi
+}
+
+# ============================================================================
+# The branch pill is a bold slate-blue accent, ordered before the model
+# ============================================================================
+
+test_git_branch_bold_slate_accent() {
+    export COLORTERM=truecolor
+    local work
+    work=$(make_git_work)
+    local json
+    json=$(jq -nc --arg dir "$work" '{
+        session_name:"s",
+        model:{display_name:"Opus"},
+        workspace:{current_dir:$dir}
+    }')
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "48;2;79;91;140;38;2;240;242;255;1" \
+        "branch should render bold in slate-blue with the chip text color" || return 1
+    # Branch sits before the model: the slate branch bg appears earlier in the
+    # output stream than the periwinkle model bg.
+    local slate_pos peri_pos
+    slate_pos=$(printf '%s' "$out" | grep -bo '48;2;79;91;140' | head -1 | cut -d: -f1)
+    peri_pos=$(printf '%s' "$out" | grep -bo '48;2;138;134;236' | head -1 | cut -d: -f1)
+    [ -n "$slate_pos" ] && [ -n "$peri_pos" ] && [ "$slate_pos" -lt "$peri_pos" ] || {
+        echo "  FAIL: branch (slate@$slate_pos) should appear before model (periwinkle@$peri_pos)"
+        return 1
+    }
 }
 
 # ============================================================================
@@ -171,7 +200,7 @@ test_limits_threshold_per_block() {
 }
 
 # ============================================================================
-# Minimal style (no Nerd Font): same-bg neighbors join with a thin bar, and
+# Squared pills: same-bg neighbors join with a faint bar, and
 # differing-bg neighbors abut so the color change itself is the divider
 # ============================================================================
 
@@ -183,23 +212,21 @@ test_thin_bar_between_same_bg() {
     local json='{"workspace":{"current_dir":"/none"},"context_window":{"used_percentage":55},"rate_limits":{"five_hour":{"used_percentage":75}}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "│" "same-bg neighbors should join with a thin bar" || return 1
+    assert_output_contains "$out" "▏" "same-bg neighbors should join with a faint bar" || return 1
 }
 
 test_abut_between_different_bg() {
     export COLORTERM=truecolor
-    # session grey then the periwinkle model accent: differing neighbors abut,
-    # with no separator glyph and no powerline arrow.
+    # session grey then the periwinkle model accent: differing neighbors abut
+    # squarely, with no divider glyph — the color change is the boundary.
     local json='{"session_name":"s","model":{"display_name":"Opus"},"workspace":{"current_dir":"/none"}}'
     local out
     out=$(run_sl "$json")
-    assert_output_not_contains "$out" "│" "no thin bar between differing backgrounds" || return 1
-    assert_output_not_contains "$out" $'\xee\x82\xb0' "no powerline arrow without CS_NERD_FONTS=1" || return 1
+    assert_output_not_contains "$out" "▏" "no faint bar between differing backgrounds" || return 1
 }
 
 # ============================================================================
-# Segment icons are standard Unicode (render without a Nerd Font);
-# CS_NERD_FONTS only changes the separator, not the icons
+# Segment icons are standard Unicode (render in any monospace font)
 # ============================================================================
 
 test_segment_icons_are_unicode() {
@@ -234,7 +261,7 @@ test_tab_color_palette_matches_statusline() {
     done
 }
 
-test_no_powerline_arrow_without_nerd_fonts() {
+test_no_powerline_arrow() {
     export COLORTERM=truecolor
     local work
     work=$(make_git_work)
@@ -246,12 +273,14 @@ test_no_powerline_arrow_without_nerd_fonts() {
         context_window:{used_percentage:34},
         rate_limits:{five_hour:{used_percentage:23},seven_day:{used_percentage:41}}
     }')
-    local out arrow branch_icon
+    local out arrow chevron branch_icon
     out=$(run_sl "$json")
-    arrow=$'\xee\x82\xb0'        # U+E0B0 powerline arrow (Nerd Font only)
+    arrow=$'\xee\x82\xb0'        # U+E0B0 powerline arrow (private-use glyph)
+    chevron=$'\xee\x82\xb1'      # U+E0B1 powerline chevron (private-use glyph)
     branch_icon=$'\xe2\x8e\x87'  # U+2387 branch (standard Unicode)
-    assert_output_not_contains "$out" "$arrow" "powerline arrow must not appear without CS_NERD_FONTS=1" || return 1
-    assert_output_contains "$out" "$branch_icon" "Unicode icons still render without CS_NERD_FONTS=1" || return 1
+    assert_output_not_contains "$out" "$arrow" "squared pills must not use the powerline arrow" || return 1
+    assert_output_not_contains "$out" "$chevron" "squared pills must not use the powerline chevron" || return 1
+    assert_output_contains "$out" "$branch_icon" "standard Unicode icons still render" || return 1
 }
 
 # ============================================================================
@@ -335,9 +364,9 @@ test_statusline_dark_theme_variant() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;100;100;108" "dark theme should lift the neutral grey" || return 1
+    assert_output_contains "$out" "48;2;108;101;92" "dark theme should lift the neutral grey" || return 1
     assert_output_contains "$out" "38;2;230;230;230" "dark theme should soften white text" || return 1
-    assert_output_not_contains "$out" "48;2;88;88;88" "dark theme must not use the light-theme grey" || return 1
+    assert_output_not_contains "$out" "48;2;96;90;82" "dark theme must not use the light-theme grey" || return 1
 }
 
 # ============================================================================
@@ -354,6 +383,72 @@ test_missing_rate_limits_absent() {
 }
 
 # ============================================================================
+# 5h block appends time until the window resets, computed from resets_at
+# ============================================================================
+
+test_5h_rest_time_appended() {
+    export NO_COLOR=1
+    local now reset_at
+    printf -v now '%(%s)T' -1
+    reset_at=$(( now + 2 * 3600 + 14 * 60 + 30 ))   # 2h14m30s out -> "2h14m"
+    local json
+    json=$(jq -nc --argjson r "$reset_at" '{
+        session_name:"s",
+        workspace:{current_dir:"/none"},
+        rate_limits:{five_hour:{used_percentage:23,resets_at:$r}}
+    }')
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "5h 23% · 2h14m" "5h block should append time until reset"
+}
+
+# Under an hour the rest time is minutes-only, with no zero-hour prefix.
+test_5h_rest_time_minutes_only() {
+    export NO_COLOR=1
+    local now reset_at
+    printf -v now '%(%s)T' -1
+    reset_at=$(( now + 45 * 60 + 30 ))   # 45m30s -> "45m"
+    local json
+    json=$(jq -nc --argjson r "$reset_at" '{
+        session_name:"s",
+        workspace:{current_dir:"/none"},
+        rate_limits:{five_hour:{used_percentage:50,resets_at:$r}}
+    }')
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "5h 50% · 45m" "5h block should show minutes-only rest time under an hour" || return 1
+    assert_output_not_contains "$out" "0h" "minutes-only rest time must not carry a zero-hour prefix"
+}
+
+# No reset suffix when resets_at is missing.
+test_5h_rest_time_absent_without_resets_at() {
+    export NO_COLOR=1
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":23}}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "5h 23%" "5h percentage should render" || return 1
+    assert_output_not_contains "$out" "·" "no reset separator when resets_at is absent"
+}
+
+# No reset suffix once the window has already reset (resets_at in the past).
+test_5h_rest_time_absent_when_past() {
+    export NO_COLOR=1
+    local now reset_at
+    printf -v now '%(%s)T' -1
+    reset_at=$(( now - 60 ))
+    local json
+    json=$(jq -nc --argjson r "$reset_at" '{
+        session_name:"s",
+        workspace:{current_dir:"/none"},
+        rate_limits:{five_hour:{used_percentage:5,resets_at:$r}}
+    }')
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "5h 5%" "5h percentage should still render" || return 1
+    assert_output_not_contains "$out" "·" "no reset separator when the window already reset"
+}
+
+# ============================================================================
 # Missing session_name outside a cs session -> basename of current_dir
 # ============================================================================
 
@@ -362,7 +457,7 @@ test_missing_session_name_dir_fallback() {
     local json='{"model":{"display_name":"Opus"},"workspace":{"current_dir":"/tmp/alpha/beta"},"context_window":{"used_percentage":5}}'
     local out
     out=$(run_sl "$json")
-    assert_eq "⬣ beta > ✦ Opus > ◔ ctx 5%" "$out" \
+    assert_eq "beta > ✦ Opus > ◔ ctx 5%" "$out" \
         "session label should fall back to basename of current_dir"
 }
 
@@ -429,7 +524,7 @@ test_non_git_workspace_absent() {
     out=$(run_sl "$json")
     # current_dir is a real, non-git directory; output must end at the ctx
     # segment with no git slot appended.
-    assert_eq "⬣ s > ✦ Opus > ◔ ctx 5%" "$out" \
+    assert_eq "s > ✦ Opus > ◔ ctx 5%" "$out" \
         "git segment should be absent for a non-git workspace"
 }
 
@@ -489,9 +584,9 @@ test_accent_segments_bold() {
         "the model accent should render bold in the chip text color" || return 1
     # SGR bold is stateful: a segment that does not explicitly emit normal
     # intensity (22) inherits bold from the accent before it.
-    assert_output_contains "$out" "48;2;88;88;88;38;2;255;255;255;22" \
+    assert_output_contains "$out" "48;2;96;90;82;38;2;255;255;255;22" \
         "grey segments must explicitly reset to normal intensity" || return 1
-    assert_output_not_contains "$out" "48;2;88;88;88;38;2;255;255;255;1m" \
+    assert_output_not_contains "$out" "48;2;96;90;82;38;2;255;255;255;1m" \
         "grey segments must not render bold" || return 1
 }
 
@@ -602,21 +697,6 @@ test_term_dumb_is_plain() {
 }
 
 # ============================================================================
-# Nerd-font glyph toggle: CS_NERD_FONTS=1 emits the U+E0B0 powerline arrow
-# ============================================================================
-
-test_nerd_font_glyph() {
-    export COLORTERM="truecolor"
-    export CS_NERD_FONTS=1
-    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8}}'
-    local out glyph
-    glyph=$(printf '\xee\x82\xb0')
-    out=$(run_sl "$json")
-    assert_output_contains "$out" "$glyph" "nerd fonts should render the powerline arrow"
-    assert_output_not_contains "$out" ">" "nerd glyph should replace the ASCII '>' arrow"
-}
-
-# ============================================================================
 # Git ahead-of-upstream renders the ahead arrow
 # ============================================================================
 
@@ -701,9 +781,9 @@ EOF
 test_ctx_zero_vs_absent() {
     export NO_COLOR=1
     local with0='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":0}}'
-    assert_eq "⬣ s > ◔ ctx 0%" "$(run_sl "$with0")" "ctx 0% should render explicitly"
+    assert_eq "s > ◔ ctx 0%" "$(run_sl "$with0")" "ctx 0% should render explicitly"
     local without='{"session_name":"s","workspace":{"current_dir":"/none"}}'
-    assert_eq "⬣ s" "$(run_sl "$without")" "absent used_percentage should omit the ctx segment"
+    assert_eq "s" "$(run_sl "$without")" "absent used_percentage should omit the ctx segment"
 }
 
 # ============================================================================
@@ -714,7 +794,7 @@ test_unknown_segment_ignored() {
     export NO_COLOR=1
     export CS_STATUSLINE_SEGMENTS="session,bogus,model"
     local json='{"session_name":"s","model":{"display_name":"Opus"},"workspace":{"current_dir":"/none"}}'
-    assert_eq "⬣ s > ✦ Opus" "$(run_sl "$json")" "unknown segment tokens should be skipped"
+    assert_eq "s > ✦ Opus" "$(run_sl "$json")" "unknown segment tokens should be skipped"
 }
 
 # ============================================================================
@@ -728,7 +808,7 @@ test_unknown_session_color_falls_back() {
     local json='{"session_name":"weird","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":5}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;88;88;88" \
+    assert_output_contains "$out" "48;2;96;90;82" \
         "unknown session color should fall back to neutral grey"
 }
 
@@ -741,12 +821,13 @@ run_test test_happy_path_docs_fixture_plain
 run_test test_all_segments_ordering_plain
 run_test test_limits_neutral_when_healthy
 run_test test_two_accents_default
+run_test test_git_branch_bold_slate_accent
 run_test test_limits_threshold_per_block
 run_test test_thin_bar_between_same_bg
 run_test test_abut_between_different_bg
 run_test test_segment_icons_are_unicode
 run_test test_tab_color_palette_matches_statusline
-run_test test_no_powerline_arrow_without_nerd_fonts
+run_test test_no_powerline_arrow
 run_test test_detect_theme_colorfgbg_dark
 run_test test_detect_theme_colorfgbg_light
 run_test test_detect_theme_konsole_three_part
@@ -756,6 +837,10 @@ run_test test_detect_theme_tmux_appearance_light
 run_test test_detect_theme_tmux_non_darwin_unknown
 run_test test_statusline_dark_theme_variant
 run_test test_missing_rate_limits_absent
+run_test test_5h_rest_time_appended
+run_test test_5h_rest_time_minutes_only
+run_test test_5h_rest_time_absent_without_resets_at
+run_test test_5h_rest_time_absent_when_past
 run_test test_missing_session_name_dir_fallback
 run_test test_no_color_emits_no_escapes
 run_test test_disable_prints_nothing
@@ -773,7 +858,6 @@ run_test test_git_untracked_not_modified
 run_test test_color_level_256
 run_test test_color_level_basic
 run_test test_term_dumb_is_plain
-run_test test_nerd_font_glyph
 run_test test_git_ahead_arrow
 run_test test_force_color_zero_is_plain
 run_test test_io_gating_git_subprocess

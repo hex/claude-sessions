@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ABOUTME: Claude Code statusLine command — renders a one-line powerline status bar
+# ABOUTME: Claude Code statusLine command — renders one line of squared, abutting pills
 # ABOUTME: Reads the statusline JSON on stdin and prints session/ctx/model/git/limits/cost
 
 set -uo pipefail
@@ -15,7 +15,7 @@ SL_THEME="${CS_TERM_THEME:-light}"
 
 # Parsed stdin fields (filled by _parse_stdin).
 SL_SESSION=""; SL_CTX=""; SL_MODEL=""; SL_EFFORT=""
-SL_5H=""; SL_WK=""; SL_COST=""; SL_DIR=""
+SL_5H=""; SL_5H_RESET=""; SL_WK=""; SL_COST=""; SL_DIR=""
 
 # Collected segments (parallel arrays) and chosen color level.
 _SEG_TEXT=(); _SEG_BG=(); _SEG_BOLD=(); LEVEL="basic"
@@ -26,9 +26,7 @@ _SGR=""; _COLOR=""
 
 # Per-segment icons. Standard Unicode (Geometric Shapes + dingbats) that render
 # in any monospace font — not Nerd Font private-use glyphs — so the bar looks
-# right without a patched font. CS_NERD_FONTS only upgrades the segment
-# separators to the powerline arrow (see _render); the icons are unaffected.
-ICON_SESSION=$'\xe2\xac\xa3 '   # U+2B23 horizontal hexagon
+# right without a patched font. The session segment carries no icon.
 ICON_CTX=$'\xe2\x97\x94 '       # U+25D4 quadrant circle (gauge)
 ICON_MODEL=$'\xe2\x9c\xa6 '     # U+2726 four-pointed star
 ICON_GIT=$'\xe2\x8e\x87 '       # U+2387 branch
@@ -76,6 +74,7 @@ _parse_stdin() {
           (.model.display_name // ""),
           (.effort.level // ""),
           (.rate_limits.five_hour.used_percentage // "" | tostring),
+          (.rate_limits.five_hour.resets_at // "" | tostring),
           (.rate_limits.seven_day.used_percentage // "" | tostring),
           (.cost.total_cost_usd // "" | tostring),
           (.workspace.current_dir // .cwd // "")
@@ -86,6 +85,7 @@ _parse_stdin() {
         IFS= read -r SL_MODEL
         IFS= read -r SL_EFFORT
         IFS= read -r SL_5H
+        IFS= read -r SL_5H_RESET
         IFS= read -r SL_WK
         IFS= read -r SL_COST
         IFS= read -r SL_DIR
@@ -136,6 +136,7 @@ _sgr() {
                 pink)   rgb="194;58;130" ;;
                 cyan)   rgb="0;131;143" ;;
                 periwinkle) rgb="138;134;236" ;;
+                slate)  rgb="79;91;140" ;;
                 chiptext) rgb="240;242;255" ;;
                 amber)  rgb="255;183;77" ;;
                 white)
@@ -143,8 +144,10 @@ _sgr() {
                     [ "$SL_THEME" = "dark" ] && rgb="230;230;230" || rgb="255;255;255" ;;
                 black)  rgb="30;30;30" ;;
                 *)
-                    # Neutral lifts on dark terminals to separate from the bg.
-                    [ "$SL_THEME" = "dark" ] && rgb="100;100;108" || rgb="88;88;88" ;;
+                    # Warm neutral (R>G>B) so the quiet blocks read as taupe,
+                    # not steel; lifted a touch on dark terminals to separate
+                    # from the background.
+                    [ "$SL_THEME" = "dark" ] && rgb="108;101;92" || rgb="96;90;82" ;;
             esac
             _SGR="${kind};2;${rgb}" ;;
         256)
@@ -159,6 +162,7 @@ _sgr() {
                 pink)   idx=162 ;;
                 cyan)   idx=30 ;;
                 periwinkle) idx=105 ;;
+                slate)  idx=60 ;;
                 chiptext) idx=231 ;;
                 amber)  idx=215 ;;
                 white)
@@ -180,6 +184,7 @@ _sgr() {
                 pink)   base=95 ;;
                 cyan)   base=36 ;;
                 periwinkle) base=94 ;;
+                slate)  base=34 ;;
                 chiptext) base=97 ;;
                 amber)  base=33 ;;
                 white)  base=97 ;;
@@ -209,6 +214,31 @@ _thresh_color() {
         _COLOR=amber
     else
         _COLOR="$healthy"
+    fi
+}
+
+# Format seconds-until-reset into a compact "2h14m" / "45m" countdown in _REST.
+# $1 is the resets_at value (Unix epoch seconds, per the statusline schema).
+# Empty when it is missing, non-numeric, or already in the past. `now` comes
+# from the printf builtin (bash 4.2+) so the hot path stays fork-free; on an
+# older bash the format string passes through as text and the numeric guard
+# leaves _REST empty.
+_fmt_rest() {
+    _REST=""
+    local at="$1" now rem h m
+    [[ "$at" =~ ^[0-9]+$ ]] || return 0
+    printf -v now '%(%s)T' -1 2>/dev/null || return 0
+    [[ "$now" =~ ^[0-9]+$ ]] || return 0
+    rem=$(( at - now ))
+    [ "$rem" -gt 0 ] || return 0
+    h=$(( rem / 3600 ))
+    m=$(( (rem % 3600) / 60 ))
+    if [ "$h" -gt 0 ]; then
+        _REST="${h}h${m}m"
+    elif [ "$m" -gt 0 ]; then
+        _REST="${m}m"
+    else
+        _REST="<1m"
     fi
 }
 
@@ -302,7 +332,7 @@ _seg_session() {
         color="$_SESSION_COLOR"
         [ -n "$color" ] && bg="$color"
     fi
-    _add "${ICON_SESSION}${name}" "$bg" bold
+    _add "${name}" "$bg" bold
 }
 
 _seg_ctx() {
@@ -324,7 +354,7 @@ _seg_git() {
     _git_text "$SL_DIR"
     local t="$_GIT_TEXT"
     [ -n "$t" ] || return 0
-    _add "${ICON_GIT}${t}" "grey"
+    _add "${ICON_GIT}${t}" "slate" bold
 }
 
 # Each limits block escalates on its own value; both rest on grey.
@@ -332,7 +362,10 @@ _seg_limits() {
     local h="${SL_5H%%.*}" w="${SL_WK%%.*}"
     if [ -n "$h" ]; then
         _thresh_color "$h" 70 90
-        _add "${ICON_5H}5h ${h}%" "$_COLOR"
+        _fmt_rest "$SL_5H_RESET"
+        local label="5h ${h}%"
+        [ -n "$_REST" ] && label="$label · $_REST"
+        _add "${ICON_5H}${label}" "$_COLOR"
     fi
     if [ -n "$w" ]; then
         _thresh_color "$w" 70 90
@@ -363,19 +396,16 @@ _render() {
         return 0
     fi
 
-    # Minimal style by default: blocks abut (the background-color change is the
-    # divider) and same-background neighbors get a thin bar. Both render in any
-    # font, so nothing tofus without a Nerd Font. CS_NERD_FONTS=1 upgrades the
-    # divider to the powerline arrow/chevron (private-use glyphs, Nerd Font only).
-    local esc=$'\033' reset=$'\033[0m' glyph="" thin=$'\xe2\x94\x82'   # U+2502 │
-    if [ "${CS_NERD_FONTS:-}" = "1" ]; then
-        glyph=$'\xee\x82\xb0'   # U+E0B0 solid arrow
-        thin=$'\xee\x82\xb1'    # U+E0B1 outline chevron
-    fi
+    # Squared pills that abut: each segment is a flat block with square edges,
+    # and the divider between differing backgrounds is just the color change —
+    # the most discreet separator there is. Only same-background neighbors need
+    # a mark, a faint one-eighth bar in the block's own text color. Renders in
+    # any monospace font; no Nerd Font or private-use glyphs.
+    local esc=$'\033' reset=$'\033[0m' thin=$'\xe2\x96\x8f'   # U+258F ▏
 
     # Lead with a reset so any residual SGR state from the caller's terminal
     # cannot bleed into the first segment's text.
-    local i out="$reset" bg nbg bgsgr fgtext fgseg nbgsgr
+    local i out="$reset" bg nbg bgsgr fgtext
     for ((i = 0; i < n; i++)); do
         bg="${_SEG_BG[i]}"
         _sgr 48 "$bg"; bgsgr="$_SGR"
@@ -391,21 +421,14 @@ _render() {
         fgtext="$_SGR"
         if [ -n "${_SEG_BOLD[i]}" ]; then fgtext+=";1"; else fgtext+=";22"; fi
         out+="${esc}[${bgsgr};${fgtext}m ${_SEG_TEXT[i]} "
-        _sgr 38 "$bg"; fgseg="$_SGR"
         if [ $((i + 1)) -lt "$n" ]; then
             nbg="${_SEG_BG[i + 1]}"
-            if [ "$nbg" = "$bg" ]; then
-                # A solid arrow vanishes between equal backgrounds; draw a thin
-                # chevron in the segment's text color to keep the boundary.
-                out+="${esc}[${bgsgr};${fgtext}m${thin}"
-            else
-                _sgr 48 "$nbg"; nbgsgr="$_SGR"
-                out+="${esc}[22;${fgseg};${nbgsgr}m${glyph}"
-            fi
-        else
-            out+="${reset}${esc}[${fgseg}m${glyph}${reset}"
+            # Differing backgrounds abut; the color change is the divider. Equal
+            # backgrounds get the faint bar so the boundary does not vanish.
+            [ "$nbg" = "$bg" ] && out+="${esc}[${bgsgr};${fgtext}m${thin}"
         fi
     done
+    out+="$reset"
     printf '%s\n' "$out"
 }
 
@@ -419,7 +442,7 @@ main() {
 
     _detect_level
 
-    local segments="${CS_STATUSLINE_SEGMENTS:-session,model,ctx,git,limits,cost}"
+    local segments="${CS_STATUSLINE_SEGMENTS:-session,git,model,ctx,limits,cost}"
     local name names
     IFS=',' read -ra names <<< "$segments"
     for name in "${names[@]}"; do
