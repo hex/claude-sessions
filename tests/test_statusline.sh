@@ -420,6 +420,24 @@ test_5h_rest_time_minutes_only() {
     assert_output_not_contains "$out" "0h" "minutes-only rest time must not carry a zero-hour prefix"
 }
 
+# Sub-minute rest time collapses to a fixed "<1m" marker.
+test_5h_rest_time_sub_minute() {
+    export NO_COLOR=1
+    local now reset_at
+    printf -v now '%(%s)T' -1
+    reset_at=$(( now + 30 ))   # 30s out -> "<1m"
+    local json
+    json=$(jq -nc --argjson r "$reset_at" '{
+        session_name:"s",
+        workspace:{current_dir:"/none"},
+        rate_limits:{five_hour:{used_percentage:88,resets_at:$r}}
+    }')
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "5h 88% · <1m" "5h block should show <1m when under a minute remains" || return 1
+    assert_output_not_contains "$out" "0m" "sub-minute rest time must not render a zero-minute count"
+}
+
 # No reset suffix when resets_at is missing.
 test_5h_rest_time_absent_without_resets_at() {
     export NO_COLOR=1
@@ -839,6 +857,7 @@ run_test test_statusline_dark_theme_variant
 run_test test_missing_rate_limits_absent
 run_test test_5h_rest_time_appended
 run_test test_5h_rest_time_minutes_only
+run_test test_5h_rest_time_sub_minute
 run_test test_5h_rest_time_absent_without_resets_at
 run_test test_5h_rest_time_absent_when_past
 run_test test_missing_session_name_dir_fallback
