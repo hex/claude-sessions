@@ -221,13 +221,16 @@ _thresh_color() {
 # $1 is the resets_at value (Unix epoch seconds, per the statusline schema).
 # Empty when it is missing, non-numeric, or already in the past. `now` comes
 # from the printf builtin (bash 4.2+) so the hot path stays fork-free; on an
-# older bash the format string passes through as text and the numeric guard
-# leaves _REST empty.
+# older bash (e.g. macOS stock 3.2) the builtin is unavailable, so it falls
+# back to a `date +%s` fork so the countdown still renders.
 _fmt_rest() {
     _REST=""
     local at="$1" now rem h m
     [[ "$at" =~ ^[0-9]+$ ]] || return 0
-    printf -v now '%(%s)T' -1 2>/dev/null || return 0
+    # bash 3.2's printf -v leaves `now` UNSET when the %(...)T format is
+    # unsupported, so guard with ${now:-} (set -u) before the date fallback.
+    printf -v now '%(%s)T' -1 2>/dev/null
+    [[ "${now:-}" =~ ^[0-9]+$ ]] || now=$(date +%s 2>/dev/null)
     [[ "$now" =~ ^[0-9]+$ ]] || return 0
     rem=$(( at - now ))
     [ "$rem" -gt 0 ] || return 0

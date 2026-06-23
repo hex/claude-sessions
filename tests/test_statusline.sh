@@ -402,6 +402,31 @@ test_5h_rest_time_appended() {
     assert_output_contains "$out" "5h 23% · 2h14m" "5h block should append time until reset"
 }
 
+# The reset countdown must render even under bash <4.2, which lacks the
+# printf '%(%s)T' epoch builtin (e.g. macOS stock /bin/bash 3.2). Regression:
+# _fmt_rest silently produced an empty countdown there, so the bar showed
+# "5h 23%" with no "· 2h14m" suffix. Skips when no old bash is available.
+test_5h_rest_time_on_old_bash() {
+    export NO_COLOR=1
+    local old_bash=/bin/bash
+    if [ ! -x "$old_bash" ] || "$old_bash" -c 'printf -v n "%(%s)T" -1 2>/dev/null; [[ "$n" =~ ^[0-9]+$ ]]' 2>/dev/null; then
+        echo "    SKIP: no bash lacking the %(%s)T builtin available to exercise the fallback"
+        return 0
+    fi
+    local now reset_at
+    printf -v now '%(%s)T' -1
+    reset_at=$(( now + 2 * 3600 + 14 * 60 + 30 ))   # 2h14m30s out -> "2h14m"
+    local json
+    json=$(jq -nc --argjson r "$reset_at" '{
+        session_name:"s",
+        workspace:{current_dir:"/none"},
+        rate_limits:{five_hour:{used_percentage:23,resets_at:$r}}
+    }')
+    local out
+    out=$(printf '%s' "$json" | "$old_bash" "$SL")
+    assert_output_contains "$out" "5h 23% · 2h14m" "reset countdown must render under bash <4.2 via date fallback"
+}
+
 # Under an hour the rest time is minutes-only, with no zero-hour prefix.
 test_5h_rest_time_minutes_only() {
     export NO_COLOR=1
@@ -856,6 +881,7 @@ run_test test_detect_theme_tmux_non_darwin_unknown
 run_test test_statusline_dark_theme_variant
 run_test test_missing_rate_limits_absent
 run_test test_5h_rest_time_appended
+run_test test_5h_rest_time_on_old_bash
 run_test test_5h_rest_time_minutes_only
 run_test test_5h_rest_time_sub_minute
 run_test test_5h_rest_time_absent_without_resets_at
