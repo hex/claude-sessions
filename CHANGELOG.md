@@ -2,6 +2,21 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
+## 2026.6.8
+
+bash 3.2 (macOS system bash) compatibility.
+
+### Fixed
+
+- **Statusline reset countdown on bash 3.2.** The `5h 23% · 2h14m` countdown relied on the bash 4.2+ `printf '%(%s)T'` clock and rendered blank on bash 3.2 — the statusline runs under whatever `bash` is first on Claude Code's (often minimal) PATH, frequently `/bin/bash` 3.2 even when Homebrew bash is installed. `_fmt_rest` now falls back to `date +%s` when the builtin is unavailable; the bash 4.2+ path stays fork-free.
+- **`cs -list` aborted on bash 3.2.** `list_sessions` used associative arrays (`local -A`), which abort under stock `/bin/bash` 3.2 with `local: -A: invalid option`. Reworked to drop them (inline secret count, shared remote-config helpers) — output is unchanged.
+- **`cs -help` printed a spurious `allow-passthrough: command not found`.** The help text is an unquoted `cat << EOF` heredoc and a backtick-quoted phrase was being executed as a command (on every bash version); fixed to plain text.
+
+### Changed
+
+- **Minimum bash is now 3.2** (was documented as 4.0+) — macOS system bash is supported.
+- Statusline default-segment docs corrected and the `<1m` reset countdown covered by tests.
+
 ## 2026.6.7
 
 A focused round of `cs-statusline` refinements.

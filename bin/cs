@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.6.7"
+VERSION="2026.6.8"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -350,7 +350,7 @@ Environment:
   CS_TERM_THEME           Override terminal theme detection (light|dark);
                           cs -detect-theme shows what detection yields.
                           Under tmux, detection queries the outer terminal via
-                          DCS passthrough (needs `allow-passthrough on`), else
+                          DCS passthrough (needs 'allow-passthrough on'), else
                           falls back to the OS appearance — set this to override.
 
 Examples:
@@ -2096,20 +2096,17 @@ search_sessions() {
 # Used by list_sessions for both column-width measurement and row rendering,
 # replacing a per-session associative array (unavailable on bash 3.2).
 _session_location() {
-    local session_dir="$1" host_spec resolved
-    [ -f "$session_dir/.cs/remote.conf" ] || return 0
-    host_spec=$(grep "^host=" "$session_dir/.cs/remote.conf" 2>/dev/null | cut -d= -f2- || true)
+    local session_dir="$1" host_spec resolved label
+    is_remote_session "$session_dir" || return 0
+    host_spec=$(get_session_remote "$session_dir")
     [ -n "$host_spec" ] || return 0
+    label="$host_spec"
+    # Registered names (no '@') resolve to "name (address)"; raw user@host as-is.
     if [[ "$host_spec" != *"@"* ]]; then
         resolved=$(get_remote_host "$host_spec")
-        if [ -n "$resolved" ]; then
-            echo "${ICON_REMOTE} ${host_spec} (${resolved})"
-        else
-            echo "${ICON_REMOTE} ${host_spec}"
-        fi
-    else
-        echo "${ICON_REMOTE} ${host_spec}"
+        [ -n "$resolved" ] && label="${host_spec} (${resolved})"
     fi
+    echo "${ICON_REMOTE} ${label}"
 }
 
 list_sessions() {
@@ -2209,7 +2206,6 @@ list_sessions() {
         local secret_count=0
         if [ -n "$keychain_dump" ]; then
             secret_count=$(printf '%s\n' "$keychain_dump" | grep -cF "\"cs:${session}:" || true)
-            [ -n "$secret_count" ] || secret_count=0
         fi
 
         # Build secret indicator (accounts for display width in padding)

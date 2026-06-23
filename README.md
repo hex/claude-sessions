@@ -331,7 +331,7 @@ WHERE file.name = "README" AND status = "active"
 ## Requirements
 
 - [Claude Code](https://github.com/anthropics/claude-code)
-- Bash 4.0+
+- Bash 3.2+ (macOS system bash supported)
 - `jq` for hook configuration
 - `git` for session sync
 
