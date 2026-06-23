@@ -2092,6 +2092,26 @@ search_sessions() {
 }
 
 # List all sessions
+# Echo the LOCATION column cell for a remote session, empty if not remote.
+# Used by list_sessions for both column-width measurement and row rendering,
+# replacing a per-session associative array (unavailable on bash 3.2).
+_session_location() {
+    local session_dir="$1" host_spec resolved
+    [ -f "$session_dir/.cs/remote.conf" ] || return 0
+    host_spec=$(grep "^host=" "$session_dir/.cs/remote.conf" 2>/dev/null | cut -d= -f2- || true)
+    [ -n "$host_spec" ] || return 0
+    if [[ "$host_spec" != *"@"* ]]; then
+        resolved=$(get_remote_host "$host_spec")
+        if [ -n "$resolved" ]; then
+            echo "${ICON_REMOTE} ${host_spec} (${resolved})"
+        else
+            echo "${ICON_REMOTE} ${host_spec}"
+        fi
+    else
+        echo "${ICON_REMOTE} ${host_spec}"
+    fi
+}
+
 list_sessions() {
     if [ ! -d "$SESSIONS_ROOT" ]; then
         info "No sessions found"
@@ -2108,19 +2128,11 @@ list_sessions() {
         return 0
     fi
 
-    # Dump keychain once and count secrets per session using bash builtins
-    local -A secret_counts
+    # Dump the keychain once; per-session counts are computed inline in the
+    # display loop. No associative array — bash 3.2 lacks `local -A`.
+    local keychain_dump=""
     if command -v cs-secrets >/dev/null 2>&1; then
-        local keychain_dump
         keychain_dump=$(security dump-keychain 2>/dev/null | grep -o '"svce"<blob>="cs:[^"]*"' || true)
-        if [ -n "$keychain_dump" ]; then
-            local kc_line kc_session
-            while IFS= read -r kc_line; do
-                kc_session="${kc_line#*\"cs:}"
-                kc_session="${kc_session%%:*}"
-                secret_counts["$kc_session"]=$(( ${secret_counts["$kc_session"]:-0} + 1 ))
-            done <<< "$keychain_dump"
-        fi
     fi
 
     # Find max session name length for column alignment
@@ -2131,44 +2143,18 @@ list_sessions() {
         fi
     done
 
-    # Check if any sessions are remote (to decide whether to show LOCATION column)
+    # Check if any sessions are remote (to decide whether to show LOCATION
+    # column) and measure the column width. Per-session location is recomputed
+    # in the display loop via _session_location — no associative array, so this
+    # works under bash 3.2.
     local has_remote=false
-    local -A remote_locations
     local max_loc_len=8  # minimum "LOCATION" header length
     for session in "${sessions[@]}"; do
-        local session_dir="$SESSIONS_ROOT/$session"
-        if [ -f "$session_dir/.cs/remote.conf" ]; then
+        local loc
+        loc=$(_session_location "$SESSIONS_ROOT/$session")
+        if [ -n "$loc" ]; then
             has_remote=true
-            local host_spec loc_display
-            host_spec=$(grep "^host=" "$session_dir/.cs/remote.conf" 2>/dev/null | cut -d= -f2- || true)
-            if [ -n "$host_spec" ] && [[ "$host_spec" != *"@"* ]]; then
-                # Registered name — resolve to show both
-                local resolved
-                resolved=$(get_remote_host "$host_spec")
-                if [ -n "$resolved" ]; then
-                    loc_display="${ICON_REMOTE} ${host_spec} (${resolved})"
-                else
-                    loc_display="${ICON_REMOTE} ${host_spec}"
-                fi
-            elif [ -n "$host_spec" ]; then
-                loc_display="${ICON_REMOTE} ${host_spec}"
-            fi
-            remote_locations["$session"]="$loc_display"
-            # Track plain-text length for alignment
-            local plain_loc
-            if [[ "$host_spec" != *"@"* ]]; then
-                resolved=$(get_remote_host "$host_spec")
-                if [ -n "$resolved" ]; then
-                    plain_loc="${ICON_REMOTE} ${host_spec} (${resolved})"
-                else
-                    plain_loc="${ICON_REMOTE} ${host_spec}"
-                fi
-            else
-                plain_loc="${ICON_REMOTE} ${host_spec}"
-            fi
-            if [ ${#plain_loc} -gt $max_loc_len ]; then
-                max_loc_len=${#plain_loc}
-            fi
+            [ ${#loc} -gt $max_loc_len ] && max_loc_len=${#loc}
         fi
     done
 
@@ -2217,7 +2203,14 @@ list_sessions() {
             modified=$(get_file_mtime "$log_file")
         fi
 
-        local secret_count=${secret_counts["$session"]:-0}
+        # Count this session's secrets from the one-time keychain dump. The
+        # trailing ':' keeps 'foo' from matching 'foobar' entries; grep -F so
+        # session names with '.'/'-' are matched literally.
+        local secret_count=0
+        if [ -n "$keychain_dump" ]; then
+            secret_count=$(printf '%s\n' "$keychain_dump" | grep -cF "\"cs:${session}:" || true)
+            [ -n "$secret_count" ] || secret_count=0
+        fi
 
         # Build secret indicator (accounts for display width in padding)
         local secret_indicator=""
@@ -2235,7 +2228,7 @@ list_sessions() {
         # Build location display for remote sessions
         local location=""
         if $has_remote; then
-            location="${remote_locations["$session"]:-}"
+            location=$(_session_location "$session_dir")
         fi
 
         # Print with proper alignment
