@@ -11,13 +11,10 @@ pub struct Session {
     pub created: Option<String>,
     pub modified: Option<String>,
     pub modified_ts: Option<std::time::SystemTime>,
-    pub location: Option<String>,
     pub lock_pid: Option<u32>,
     pub is_locked: bool,
     pub secrets_count: u32,
-    pub has_git: bool,
     pub git_repo: Option<String>,
-    pub sync_auto: Option<bool>,
 }
 
 pub struct SessionPreview {
@@ -181,7 +178,6 @@ fn read_session(path: &Path, secret_counts: &HashMap<String, u32>) -> Session {
         .as_ref()
         .map(|f| parse_modified(f))
         .unwrap_or((None, None));
-    let location = parse_remote_conf(&meta_dir);
     let lock_pid = read_lock_pid(&meta_dir);
     let is_locked = lock_pid.is_some();
     let secrets_count = secret_counts.get(&name).copied().unwrap_or(0);
@@ -191,7 +187,6 @@ fn read_session(path: &Path, secret_counts: &HashMap<String, u32>) -> Session {
     } else {
         None
     };
-    let sync_auto = parse_sync_conf(&meta_dir);
 
     Session {
         name,
@@ -199,13 +194,10 @@ fn read_session(path: &Path, secret_counts: &HashMap<String, u32>) -> Session {
         created,
         modified,
         modified_ts,
-        location,
         lock_pid,
         is_locked,
         secrets_count,
-        has_git,
         git_repo,
-        sync_auto,
     }
 }
 
@@ -353,20 +345,6 @@ fn local_utc_offset_secs() -> i64 {
     }
 }
 
-fn parse_remote_conf(meta_dir: &Path) -> Option<String> {
-    let conf = meta_dir.join("remote.conf");
-    let content = fs::read_to_string(conf).ok()?;
-    for line in content.lines() {
-        if let Some(host) = line.strip_prefix("host=") {
-            let host = host.trim();
-            if !host.is_empty() {
-                return Some(host.to_string());
-            }
-        }
-    }
-    None
-}
-
 fn read_lock_pid(meta_dir: &Path) -> Option<u32> {
     let lock_file = meta_dir.join("session.lock");
     let content = fs::read_to_string(&lock_file).ok()?;
@@ -381,17 +359,6 @@ fn is_pid_alive(pid: u32) -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
-}
-
-fn parse_sync_conf(meta_dir: &Path) -> Option<bool> {
-    let conf = meta_dir.join("sync.conf");
-    let content = fs::read_to_string(conf).ok()?;
-    for line in content.lines() {
-        if let Some(val) = line.strip_prefix("auto_sync=") {
-            return Some(val.trim() == "on");
-        }
-    }
-    None
 }
 
 fn parse_git_remote(session_dir: &Path) -> Option<String> {
@@ -508,43 +475,6 @@ mod tests {
 
         let result = parse_created(&log);
         assert_eq!(result, None);
-
-        fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
-    fn parse_remote_conf_extracts_host() {
-        let dir = std::env::temp_dir().join(format!("cs-test-remote-{}", std::process::id()));
-        fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("remote.conf"), "host=hex@mac-mini.local\n").unwrap();
-
-        let result = parse_remote_conf(&dir);
-        assert_eq!(result, Some("hex@mac-mini.local".to_string()));
-
-        fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
-    fn parse_remote_conf_returns_none_when_missing() {
-        let dir = std::env::temp_dir().join(format!("cs-test-noremote-{}", std::process::id()));
-        fs::create_dir_all(&dir).unwrap();
-
-        let result = parse_remote_conf(&dir);
-        assert_eq!(result, None);
-
-        fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
-    fn parse_sync_conf_reads_auto_setting() {
-        let dir = std::env::temp_dir().join(format!("cs-test-sync-{}", std::process::id()));
-        fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("sync.conf"), "auto_sync=on\n").unwrap();
-
-        assert_eq!(parse_sync_conf(&dir), Some(true));
-
-        fs::write(dir.join("sync.conf"), "auto_sync=off\n").unwrap();
-        assert_eq!(parse_sync_conf(&dir), Some(false));
 
         fs::remove_dir_all(&dir).unwrap();
     }

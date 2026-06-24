@@ -27,8 +27,6 @@ pub struct Palette {
     pub orange: Color,
     pub gold: Color,
     pub rust: Color,
-    /// Remote session names.
-    pub remote: Color,
     /// Alternating row background.
     pub zebra: Color,
     pub flash_success: Color,
@@ -49,7 +47,6 @@ impl Palette {
             orange: Color::Rgb(255, 138, 101),
             gold: Color::Rgb(255, 193, 7),
             rust: Color::Rgb(230, 74, 25),
-            remote: Color::Cyan,
             zebra: Color::Rgb(32, 29, 28),
             flash_success: Color::Rgb(30, 50, 30),
             flash_error: Color::Rgb(55, 25, 25),
@@ -70,7 +67,6 @@ impl Palette {
             orange: Color::Rgb(190, 110, 74),
             gold: Color::Rgb(156, 118, 56),
             rust: Color::Rgb(166, 86, 60),
-            remote: Color::Rgb(64, 124, 130),
             zebra: Color::Rgb(238, 232, 224),
             flash_success: Color::Rgb(214, 236, 206),
             flash_error: Color::Rgb(246, 214, 210),
@@ -224,19 +220,16 @@ mod tests {
 
 pub struct Icons {
     pub lock: &'static str,
-    pub remote: &'static str,
 }
 
 pub fn icons() -> Icons {
     if std::env::var("CS_NERD_FONTS").as_deref() == Ok("1") {
         Icons {
             lock: "\u{f033e}",
-            remote: "\u{f0318}",
         }
     } else {
         Icons {
             lock: "\u{26bf}",
-            remote: "\u{21dd}",
         }
     }
 }

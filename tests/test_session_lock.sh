@@ -24,7 +24,6 @@ create_lock_test_session() {
     mkdir -p "$session_dir/.cs"/{artifacts,logs}
     echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
     touch "$session_dir/.cs/logs/session.log"
-    echo "auto_sync=on" > "$session_dir/.cs/sync.conf"
     echo "# test" > "$session_dir/CLAUDE.md"
     (cd "$session_dir" && git init -q 2>/dev/null && git add -A 2>/dev/null && git commit -q -m "init" 2>/dev/null) || true
 }

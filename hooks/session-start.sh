@@ -55,52 +55,6 @@ jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
 # Skip on clear/compact since the session is already running
 if [ "$SOURCE" = "startup" ] || [ "$SOURCE" = "resume" ]; then
 
-# Auto-pull if enabled (runs in background to not block session start)
-SYNC_CONFIG="$META_DIR/sync.conf"
-if [ -f "$SYNC_CONFIG" ] && [ -d "$SESSION_DIR/.git" ]; then
-    AUTO_SYNC=$(grep "^auto_sync=" "$SYNC_CONFIG" 2>/dev/null | cut -d= -f2)
-    if [ "$AUTO_SYNC" = "on" ]; then
-        (
-            cd "$SESSION_DIR" || exit 0
-
-            # Check if remote exists
-            if ! git remote get-url origin >/dev/null 2>&1; then
-                # Local-only mode - skip auto-pull
-                exit 0
-            fi
-
-            if git fetch -q origin 2>/dev/null; then
-                # Check if upstream is configured
-                if ! git rev-parse --abbrev-ref '@{upstream}' >/dev/null 2>&1; then
-                    # Try to set up upstream tracking automatically
-                    CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "main")
-                    if ! git branch --set-upstream-to=origin/$CURRENT_BRANCH $CURRENT_BRANCH 2>/dev/null; then
-                        echo "$(date '+%Y-%m-%d %H:%M:%S') - Auto-pull skipped: upstream tracking not configured" >> "$META_DIR/logs/session.log"
-                        exit 0
-                    fi
-                fi
-
-                BEHIND=$(git rev-list --count 'HEAD..@{upstream}' 2>/dev/null || echo "0")
-                if [ "$BEHIND" -gt 0 ]; then
-                    if git pull --rebase -q origin main 2>/dev/null; then
-                        echo "$(date '+%Y-%m-%d %H:%M:%S') - Auto-pulled $BEHIND commit(s) from remote" >> "$META_DIR/logs/session.log"
-
-                        # Import secrets if secrets.enc was updated and password is set
-                        if [ -f "$META_DIR/secrets.enc" ] && [ -n "${CS_SECRETS_PASSWORD:-}" ]; then
-                            for loc in "$(dirname "$0")/cs-secrets" "$HOME/.local/bin/cs-secrets"; do
-                                if [ -x "$loc" ]; then
-                                    "$loc" --session "$CLAUDE_SESSION_NAME" import-file 2>/dev/null || true
-                                    break
-                                fi
-                            done
-                        fi
-                    fi
-                fi
-            fi
-        ) > /dev/null 2>&1 &
-    fi
-fi
-
 # Shadow ref: crash recovery and push protection
 if [ -d "$SESSION_DIR/.git" ]; then
     # Ensure shadow refs are never pushed
@@ -239,7 +193,6 @@ if [ "$SOURCE" = "resume" ] && [ -d "$SESSION_DIR/.git" ]; then
             [ -d "$sibling_dir/.cs" ] || continue
             sibling_name=$(basename "$sibling_dir")
             [ "$sibling_name" = "$CLAUDE_SESSION_NAME" ] && continue
-            [ -f "$sibling_dir/.cs/remote.conf" ] && continue
             sibling_obj=$(sed -n '/^## Objective/,/^## /{/^## Objective/d;/^## /d;/^$/d;p;}' "$sibling_dir/.cs/README.md" 2>/dev/null | head -1 || true)
             [ -z "$sibling_obj" ] && continue
             [[ "$sibling_obj" == "["*"]" ]] && continue

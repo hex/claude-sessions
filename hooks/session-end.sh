@@ -85,71 +85,6 @@ if [ "$ARTIFACT_COUNT" -gt 0 ] && [ "$SOURCE" != "sigint" ]; then
     fi
 fi
 
-# Auto-push if enabled
-SYNC_CONFIG="$META_DIR/sync.conf"
-if [ -f "$SYNC_CONFIG" ] && [ -d "$SESSION_DIR/.git" ]; then
-    AUTO_SYNC=$(grep "^auto_sync=" "$SYNC_CONFIG" 2>/dev/null | cut -d= -f2)
-    if [ "$AUTO_SYNC" = "on" ]; then
-        cd "$SESSION_DIR" || true
-
-        # Check if remote exists
-        HAS_REMOTE=0
-        if git remote get-url origin >/dev/null 2>&1; then
-            HAS_REMOTE=1
-        fi
-
-        # Export secrets if password is set
-        if [ -n "${CS_SECRETS_PASSWORD:-}" ]; then
-            for loc in "$(dirname "$0")/cs-secrets" "$HOME/.local/bin/cs-secrets"; do
-                if [ -x "$loc" ]; then
-                    "$loc" --session "$CLAUDE_SESSION_NAME" export-file >/dev/null 2>&1 || true
-                    break
-                fi
-            done
-        fi
-
-        # Scan memory files for suspicious patterns (warn only, don't block auto-sync)
-        if [ -d "$SESSION_DIR/.cs/memory" ]; then
-            for _memfile in "$SESSION_DIR"/.cs/memory/*.md; do
-                [ -f "$_memfile" ] || continue
-                if grep -qiE 'ignore\s+(previous|all|above)\s+instructions|system\s+prompt\s+override|disregard\s+(your|all)\s+(instructions|rules)' "$_memfile" 2>/dev/null; then
-                    echo "$(date '+%Y-%m-%d %H:%M:%S') - WARNING: suspicious pattern in memory file: $(basename "$_memfile")" >> "$META_DIR/logs/session.log"
-                fi
-            done
-        fi
-
-        # Stage, commit, and push (or commit locally)
-        git add -A 2>/dev/null || true
-        if ! git diff --cached --quiet 2>/dev/null; then
-            # Build descriptive commit message from changed files
-            CHANGED_FILES=$(git diff --cached --name-only 2>/dev/null)
-            FILE_COUNT=$(echo "$CHANGED_FILES" | wc -l | tr -d ' ')
-            if [ "$FILE_COUNT" -eq 1 ]; then
-                COMMIT_MSG="Session update: $(basename "$CHANGED_FILES")"
-            else
-                # head -5 closes its input early, causing SIGPIPE upstream;
-                # || true protects against pipefail killing the script
-                FILE_LIST=$(echo "$CHANGED_FILES" | xargs -n1 basename 2>/dev/null | head -5 | paste -sd', ' - || true)
-                if [ "$FILE_COUNT" -gt 5 ]; then
-                    FILE_LIST="$FILE_LIST +$((FILE_COUNT - 5)) more"
-                fi
-                COMMIT_MSG="Session update: ${FILE_COUNT} files ($FILE_LIST)"
-            fi
-            if git commit -q -m "$COMMIT_MSG" 2>/dev/null; then
-                if [ $HAS_REMOTE -eq 1 ]; then
-                    if git push -q origin main 2>/dev/null; then
-                        echo "$(date '+%Y-%m-%d %H:%M:%S') - Auto-pushed to remote" >> "$META_DIR/logs/session.log"
-                    else
-                        echo "$(date '+%Y-%m-%d %H:%M:%S') - Auto-push failed (will retry next session)" >> "$META_DIR/logs/session.log"
-                    fi
-                else
-                    echo "$(date '+%Y-%m-%d %H:%M:%S') - Auto-committed locally (no remote)" >> "$META_DIR/logs/session.log"
-                fi
-            fi
-        fi
-    fi
-fi
-
 # Delete shadow autosave ref (no longer needed after clean session end)
 if [ -d "$SESSION_DIR/.git" ]; then
     git -C "$SESSION_DIR" update-ref -d refs/cs/auto 2>/dev/null || true
@@ -173,8 +108,6 @@ if [ -d "$SESSIONS_ROOT" ]; then
         for dir in "$SESSIONS_ROOT"/*/; do
             [ -d "$dir/.cs" ] || continue
             local_name=$(basename "$dir")
-            # Skip remote stubs
-            [ -f "$dir/.cs/remote.conf" ] && continue
             local_readme="$dir/.cs/README.md"
             [ -f "$local_readme" ] || continue
             # Extract frontmatter fields (always in first few lines)

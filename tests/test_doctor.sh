@@ -51,7 +51,6 @@ test_doctor_runs_default_checks_from_session() {
     local output
     output=$("$CS_BIN" -doctor 2>&1) || true
     assert_output_contains "$output" "Keychain" "should report Keychain check" || return 1
-    assert_output_contains "$output" "Git" "should report git sync check" || return 1
     assert_output_contains "$output" "Hooks" "should report hooks check" || return 1
 }
 

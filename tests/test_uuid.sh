@@ -104,7 +104,6 @@ test_lazy_migration_backfills_uuid() {
     local session_dir="$CS_SESSIONS_ROOT/legacy-session"
     mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
     echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
-    echo "auto_sync=on" > "$session_dir/.cs/sync.conf"
     cat > "$session_dir/.cs/README.md" << 'EOF'
 ---
 status: active

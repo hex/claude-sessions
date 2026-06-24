@@ -78,9 +78,8 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         Mode::ConfirmForceOpen => render_confirm_force_open(app, frame),
         Mode::Rename => render_rename_dialog(app, frame),
         Mode::CreateSession => render_create_dialog(app, frame),
-        Mode::MoveToRemote => render_move_to_dialog(app, frame),
         Mode::Secrets => render_secrets_popup(app, frame),
-        Mode::SyncOutput(text) => render_sync_output(text, p, frame),
+        Mode::CommandOutput(text) => render_command_output(text, p, frame),
         _ => {}
     }
 }
@@ -92,14 +91,12 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
     app.table_area = area;
 
     let show_secrets = app.has_secrets();
-    // Hide Remote and Github columns when preview pane is open (they're shown in the preview)
-    let show_remote = app.has_remote_sessions() && !preview_open;
+    // Hide Github column when preview pane is open (it's shown in the preview)
     let show_github = app.has_git_sessions() && !preview_open;
 
     // Track which sort columns are visible (for mouse click-to-sort)
     let mut visible_cols = vec![SortColumn::Name, SortColumn::Created, SortColumn::Modified];
     if show_secrets { visible_cols.push(SortColumn::Secrets); }
-    if show_remote { visible_cols.push(SortColumn::Remote); }
     if show_github { visible_cols.push(SortColumn::Github); }
     app.visible_sort_columns = visible_cols;
 
@@ -120,9 +117,6 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
     ];
     if show_secrets {
         header_cells.push(Cell::from(format!("Secrets{}", sort_indicator(SortColumn::Secrets))));
-    }
-    if show_remote {
-        header_cells.push(Cell::from(format!("Remote{}", sort_indicator(SortColumn::Remote))));
     }
     if show_github {
         header_cells.push(Cell::from(format!("Github{}", sort_indicator(SortColumn::Github))));
@@ -159,13 +153,6 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
                     Style::default().fg(lock_color),
                 ));
             }
-            if s.location.is_some() {
-                let remote_icon_color = if dimmed { p.comment } else { p.orange };
-                name_spans.push(Span::styled(
-                    format!("{} ", icons.remote),
-                    Style::default().fg(remote_icon_color),
-                ));
-            }
             if s.secrets_count > 0 && !show_secrets {
                 // Show secrets indicator in gutter only when secrets column is hidden
                 let secrets_color = if dimmed { p.comment } else { p.gold };
@@ -177,8 +164,6 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
 
             let name_color = if dimmed {
                 p.comment
-            } else if s.location.is_some() {
-                p.remote
             } else {
                 p.gold
             };
@@ -305,16 +290,6 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
                 cells.push(Cell::from(secrets_line).style(Style::default().fg(meta_color)));
             }
 
-            if show_remote {
-                let remote = s
-                    .location
-                    .as_ref()
-                    .map(|l| format!("{} {}", icons.remote, l))
-                    .unwrap_or_default();
-                let remote_color = if dimmed { p.comment } else { p.orange };
-                cells.push(Cell::from(remote).style(Style::default().fg(remote_color)));
-            }
-
             if show_github {
                 let github = s.git_repo.clone().unwrap_or_default();
                 let github_color = if dimmed { p.comment } else { p.green };
@@ -349,7 +324,6 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
         Constraint::Length(16),
     ];
     if show_secrets { widths.push(Constraint::Length(9)); }
-    if show_remote { widths.push(Constraint::Length(20)); }
     if show_github { widths.push(Constraint::Min(15)); }
 
     // Store resolved column widths for mouse click-to-sort
@@ -492,45 +466,19 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
         }
     }
 
-    // Syncing mode renders its own spinner footer
-    if app.mode == Mode::Syncing {
-        let spinner = app.spinner_frame();
-        let subcmd = app
-            .sync_job
-            .as_ref()
-            .map(|j| j.subcommand.as_str())
-            .unwrap_or("sync");
-        let session = app
-            .sync_job
-            .as_ref()
-            .map(|j| j.session_name.as_str())
-            .unwrap_or("?");
-        let footer = Paragraph::new(Line::from(vec![
-            Span::styled(format!("{} ", spinner), Style::default().fg(p.gold)),
-            Span::styled(
-                format!("{}ing {}...", subcmd, session),
-                Style::default().fg(p.fg),
-            ),
-            Span::styled("  Esc:cancel", Style::default().fg(p.comment)),
-        ]));
-        frame.render_widget(footer, area);
-        return;
-    }
-
     let keys = match app.mode {
         Mode::Normal if !app.marked_sessions.is_empty() => {
             "Space:mark  D:delete marked  Esc:clear marks  q:quit  Enter:open  /:search"
         }
         Mode::Normal => {
-            "q:quit  Enter:open  n:new  d:delete  r:rename  Tab:preview  Space:mark  /:search  1-6:sort"
+            "q:quit  Enter:open  n:new  d:delete  r:rename  Tab:preview  Space:mark  /:search  1-5:sort"
         }
         Mode::SessionMenu => "j/k:navigate  Enter:select  Esc:cancel",
         Mode::ConfirmDelete | Mode::ConfirmBatchDelete => "y:confirm  n:cancel",
         Mode::ConfirmForceOpen => "y:force open  n:cancel",
-        Mode::Rename | Mode::MoveToRemote | Mode::CreateSession => "Enter:confirm  Esc:cancel",
+        Mode::Rename | Mode::CreateSession => "Enter:confirm  Esc:cancel",
         Mode::Secrets => "j/k:navigate  v/Enter:view  d:remove  Esc:close",
-        Mode::SyncOutput(_) => "Press any key to dismiss",
-        Mode::Syncing => unreachable!(), // handled above
+        Mode::CommandOutput(_) => "Press any key to dismiss",
         Mode::Search => unreachable!(),
     };
     let mut footer_spans = Vec::new();
@@ -560,8 +508,6 @@ fn render_search_bar(app: &App, frame: &mut Frame, area: Rect) {
 fn render_action_bar(app: &App, frame: &mut Frame, area: Rect) {
     let p = app.theme;
     let session = app.selected_session();
-    let is_remote = session.as_ref().map(|s| s.location.is_some()).unwrap_or(false);
-    let has_git = session.as_ref().map(|s| s.has_git).unwrap_or(false);
     let has_secrets = session.as_ref().map(|s| s.secrets_count > 0).unwrap_or(false);
 
     let mut spans: Vec<Span> = Vec::new();
@@ -572,11 +518,7 @@ fn render_action_bar(app: &App, frame: &mut Frame, area: Rect) {
         ("Enter", "open", true),
         ("d", "delete", true),
         ("r", "rename", true),
-        ("m", "move", !is_remote),
         ("s", "secrets", has_secrets),
-        ("P", "push", has_git),
-        ("L", "pull", has_git),
-        ("S", "status", has_git),
     ];
 
     for (i, (key, label, available)) in actions.iter().enumerate() {
@@ -777,36 +719,6 @@ fn render_create_dialog(app: &App, frame: &mut Frame) {
     frame.render_widget(text, popup_area);
 }
 
-fn render_move_to_dialog(app: &App, frame: &mut Frame) {
-    let p = app.theme;
-    let session = match app.selected_session() {
-        Some(s) => s,
-        None => return,
-    };
-
-    let popup_area = centered_rect(50, 5, frame.area());
-    frame.render_widget(Clear, popup_area);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(p.orange))
-        .title(" Move to Remote ")
-        .title_style(Style::default().fg(p.orange).add_modifier(Modifier::BOLD));
-
-    let line = Line::from(vec![
-        Span::styled(
-            format!("Move '{}' to: ", session.name),
-            Style::default().fg(p.comment),
-        ),
-        Span::styled(app.move_to_input.before_cursor(), Style::default().fg(p.fg)),
-        Span::styled("\u{2588}", Style::default().fg(p.fg)),
-        Span::styled(app.move_to_input.after_cursor(), Style::default().fg(p.fg)),
-    ]);
-    let text = Paragraph::new(line)
-        .style(Style::default().fg(p.fg))
-        .block(block);
-    frame.render_widget(text, popup_area);
-}
-
 fn render_secrets_popup(app: &App, frame: &mut Frame) {
     let p = app.theme;
     let session_name = app
@@ -886,13 +798,13 @@ fn render_secrets_popup(app: &App, frame: &mut Frame) {
     frame.render_widget(paragraph, popup_area);
 }
 
-fn render_sync_output(text: &str, p: Palette, frame: &mut Frame) {
+fn render_command_output(text: &str, p: Palette, frame: &mut Frame) {
     let popup_area = centered_rect(80, 20, frame.area());
     frame.render_widget(Clear, popup_area);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(p.orange))
-        .title(" Sync Output ")
+        .title(" Output ")
         .title_style(Style::default().fg(p.orange).add_modifier(Modifier::BOLD));
     let paragraph = Paragraph::new(text.to_string())
         .style(Style::default().fg(p.fg))
@@ -938,12 +850,6 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
         lines.push(Line::from(vec![
             Span::styled("Modified: ", Style::default().fg(p.comment)),
             Span::styled(modified.as_str(), Style::default().fg(p.fg)),
-        ]));
-    }
-    if let Some(ref loc) = session.location {
-        lines.push(Line::from(vec![
-            Span::styled("Remote:   ", Style::default().fg(p.comment)),
-            Span::styled(loc.as_str(), Style::default().fg(p.orange)),
         ]));
     }
     if let Some(ref repo) = session.git_repo {
@@ -1084,13 +990,10 @@ mod tests {
             created: Some("2026-01-01 10:00".into()),
             modified: Some("2026-02-20 14:00".into()),
             modified_ts: None,
-            location: None,
             lock_pid: None,
             is_locked: false,
             secrets_count: 0,
-            has_git: false,
             git_repo: None,
-            sync_auto: None,
         }]
     }
 

@@ -16,7 +16,6 @@ setup() {
     local session_dir="$CS_SESSIONS_ROOT/test-session"
     mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
     echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
-    echo "auto_sync=off" > "$session_dir/.cs/sync.conf"
     cat > "$session_dir/.cs/README.md" << 'EOF'
 ---
 status: active

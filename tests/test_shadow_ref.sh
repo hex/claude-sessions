@@ -128,25 +128,6 @@ test_session_end_deletes_shadow_ref() {
     fi
 }
 
-test_session_end_commits_to_main() {
-    local commit_count_before commit_count_after
-    commit_count_before=$(git -C "$CLAUDE_SESSION_DIR" rev-list --count HEAD)
-
-    echo "new content" > "$CLAUDE_SESSION_DIR/notes.txt"
-    echo "auto_sync=on" > "$CLAUDE_SESSION_DIR/.cs/sync.conf"
-
-    echo '{"session_id":"test-456"}' | bash "$HOOKS_DIR/session-end.sh"
-
-    commit_count_after=$(git -C "$CLAUDE_SESSION_DIR" rev-list --count HEAD)
-
-    if [[ "$commit_count_after" -le "$commit_count_before" ]]; then
-        echo "  FAIL: session end should create one commit on main"
-        echo "    before: $commit_count_before"
-        echo "    after:  $commit_count_after"
-        return 1
-    fi
-}
-
 # ============================================================================
 # session-start.sh: crash recovery + push protection
 # ============================================================================
@@ -220,7 +201,6 @@ run_test test_autosave_creates_shadow_ref
 run_test test_autosave_does_not_touch_main
 run_test test_autosave_chains_multiple_saves
 run_test test_session_end_deletes_shadow_ref
-run_test test_session_end_commits_to_main
 run_test test_recovery_detects_crash_and_injects_context
 run_test test_shadow_ref_not_pushed
 

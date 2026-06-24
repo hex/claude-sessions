@@ -58,7 +58,6 @@ _seed_legacy_session() {
     local session_dir="$CS_SESSIONS_ROOT/$name"
     mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
     echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
-    echo "auto_sync=on" > "$session_dir/.cs/sync.conf"
     cat > "$session_dir/.cs/README.md" << EOF
 ---
 status: active

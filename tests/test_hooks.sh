@@ -644,20 +644,6 @@ test_index_shows_status() {
     index_teardown
 }
 
-test_index_skips_remote_stubs() {
-    index_setup
-
-    create_indexed_session "remote-sess" "active" "Remote work"
-    echo "host=hex@mac-mini.local" > "$CS_SESSIONS_ROOT/remote-sess/.cs/remote.conf"
-
-    echo '{"session_id":"test-123"}' | bash "$HOOKS_DIR/session-end.sh"
-
-    assert_file_not_contains "$CS_SESSIONS_ROOT/index.md" "remote-sess" \
-        "Should skip remote stubs" || { index_teardown; return 1; }
-
-    index_teardown
-}
-
 test_index_has_auto_generated_notice() {
     index_setup
 
@@ -778,9 +764,6 @@ test_session_end_generates_index_with_many_changes() {
     # was generated.
     index_setup
 
-    # Enable auto-sync so the buggy block runs
-    echo "auto_sync=on" > "$CLAUDE_SESSION_META_DIR/sync.conf"
-
     # Create more than 5 uncommitted files in the session repo
     for i in 1 2 3 4 5 6 7 8; do
         echo "content $i" > "$CLAUDE_SESSION_DIR/file_$i.txt"
@@ -866,7 +849,6 @@ run_test test_session_end_generates_index
 run_test test_index_lists_all_sessions
 run_test test_index_shows_objectives
 run_test test_index_shows_status
-run_test test_index_skips_remote_stubs
 run_test test_index_has_auto_generated_notice
 
 # Timeline

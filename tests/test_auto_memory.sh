@@ -71,7 +71,6 @@ test_migration_creates_memory_and_settings() {
     local session_dir="$CS_SESSIONS_ROOT/old-session"
     mkdir -p "$session_dir/.cs"/{artifacts,logs}
     echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
-    echo "auto_sync=on" > "$session_dir/.cs/sync.conf"
     cat > "$session_dir/CLAUDE.md" << 'EOF'
 # Session Documentation Protocol
 
@@ -90,7 +89,6 @@ test_migration_moves_existing_auto_memory() {
     local session_dir="$CS_SESSIONS_ROOT/mem-session"
     mkdir -p "$session_dir/.cs"/{artifacts,logs}
     echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
-    echo "auto_sync=on" > "$session_dir/.cs/sync.conf"
     cat > "$session_dir/CLAUDE.md" << 'EOF'
 # Session Documentation Protocol
 
@@ -134,7 +132,6 @@ create_old_session() {
     local session_dir="$CS_SESSIONS_ROOT/$name"
     mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
     echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
-    echo "auto_sync=on" > "$session_dir/.cs/sync.conf"
     # Old README.md: no frontmatter, starts with heading
     cat > "$session_dir/.cs/README.md" << 'EOF'
 # Session: test-old
@@ -275,7 +272,6 @@ test_resume_folds_discoveries_into_narrative() {
     local session_dir="$CS_SESSIONS_ROOT/disc-session"
     mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
     echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
-    echo "auto_sync=on" > "$session_dir/.cs/sync.conf"
     cat > "$session_dir/.cs/discoveries.md" << 'EOF'
 # Discoveries & Notes
 
@@ -305,7 +301,6 @@ test_resume_folds_compact_when_discoveries_header_only() {
     local session_dir="$CS_SESSIONS_ROOT/compact-session"
     mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
     echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
-    echo "auto_sync=on" > "$session_dir/.cs/sync.conf"
     # Active file is header-only, but the compact companion holds real content
     printf '# Discoveries & Notes\n\n' > "$session_dir/.cs/discoveries.md"
     cat > "$session_dir/.cs/discoveries.compact.md" << 'EOF'

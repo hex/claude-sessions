@@ -148,7 +148,7 @@ cs -secrets import-file --replace
 - `.cs/secrets.age` - age-encrypted (preferred when recipients configured)
 - `.cs/secrets.enc` - password-encrypted (legacy, requires `CS_SECRETS_PASSWORD`)
 
-Both files are automatically included in git sync. See [Sync](sync.md) for details.
+Both files are produced by `cs-secrets export-file` and can be copied between machines manually; run `cs-secrets import-file` on the other end to load them.
 
 ## Migrating Between Backends
 

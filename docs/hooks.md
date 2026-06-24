@@ -7,7 +7,7 @@ The installer configures Claude Code hooks that enable session management featur
 Runs when Claude Code starts a session:
 - Logs session start (including source: `startup`, `resume`, `clear`, `compact`) to `.cs/logs/session.log` and appends a `session_start` event to `.cs/timeline.jsonl`
 - On all sources: rebinds the README's `claude_session_id` to the live conversation UUID from the hook input. Claude Code forks a new UUID when a conversation is continued past the context limit (the old transcript stays on disk), so the recorded binding can silently go stale and `cs` would resume the pre-fork conversation. Non-UUID session ids are ignored; each rebind is logged to `session.log`
-- On `startup`/`resume` only: configures `transfer.hideRefs`, recovers autosaved changes from crashed sessions, auto-pulls from remote
+- On `startup`/`resume` only: configures `transfer.hideRefs`, recovers autosaved changes from crashed sessions
 - On `resume` only: injects dynamic context (last activity, recent commits, objective, up to 5 most recently active sibling sessions with their objectives)
 - On all sources: exports session environment variables, injects session context into Claude's system prompt
 
@@ -53,8 +53,6 @@ Runs when Claude pauses for user input:
 Runs when Claude Code session ends:
 - Logs session end time and exit reason (`user_exit`, `sigint`, `error`, `timeout`) and appends a `session_end` event to `.cs/timeline.jsonl`
 - Creates `.cs/archives/artifacts-YYYYMMDD-HHMMSS.tar.gz` archive (skipped on `sigint` for faster exit)
-- Exports secrets to encrypted file if `CS_SECRETS_PASSWORD` is set
-- Auto-commits all accumulated changes with one clean commit and pushes to remote if sync is enabled
 - Deletes the shadow autosave ref (`refs/cs/auto`)
 - Cleans up lock files
 

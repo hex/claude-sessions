@@ -193,7 +193,6 @@ pub enum SortColumn {
     Created,
     Modified,
     Secrets,
-    Remote,
     Github,
 }
 
@@ -212,22 +211,16 @@ pub enum Mode {
     ConfirmBatchDelete,
     ConfirmForceOpen,
     Rename,
-    MoveToRemote,
     CreateSession,
     Secrets,
-    Syncing,
-    SyncOutput(String),
+    CommandOutput(String),
 }
 
 pub const MENU_ITEMS: &[(&str, &str)] = &[
     ("Open", "Enter"),
     ("Delete", "d"),
     ("Rename", "r"),
-    ("Move to Remote", "m"),
     ("Secrets", "s"),
-    ("Push", "P"),
-    ("Pull", "L"),
-    ("Status", "S"),
 ];
 
 pub enum Action {
@@ -235,7 +228,6 @@ pub enum Action {
     Quit,
     Open(String),
     ForceOpen(String),
-    MoveTo(String, String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -282,20 +274,6 @@ pub enum FlashKind {
     Error,
 }
 
-pub struct SyncJob {
-    pub session_name: String,
-    pub subcommand: String,
-    pub receiver: std::sync::mpsc::Receiver<SyncResult>,
-    pub started: std::time::Instant,
-}
-
-pub struct SyncResult {
-    pub success: bool,
-    pub output: String,
-}
-
-pub const SPINNER_FRAMES: &[char] = &['\u{280b}', '\u{2819}', '\u{2839}', '\u{2838}', '\u{283c}', '\u{2834}', '\u{2826}', '\u{2827}', '\u{2807}', '\u{280f}'];
-
 pub struct StatusMessage {
     pub text: String,
     pub level: StatusLevel,
@@ -311,7 +289,6 @@ pub struct App {
     pub sort_dir: SortDirection,
     pub search_input: TextInput,
     pub rename_input: TextInput,
-    pub move_to_input: TextInput,
     pub create_input: TextInput,
     pub secrets_names: Vec<String>,
     pub secrets_selected: usize,
@@ -338,8 +315,6 @@ pub struct App {
     pub expanded_session: Option<String>,
     /// Cached session previews (by session name).
     pub preview_cache: HashMap<String, session::SessionPreview>,
-    /// Background sync operation in progress.
-    pub sync_job: Option<SyncJob>,
     /// Whether to show the preview pane on wide terminals (toggled with `p`).
     pub show_preview: bool,
     /// Resolved color palette for the detected terminal background.
@@ -364,7 +339,6 @@ impl App {
             sort_dir: SortDirection::Asc,
             search_input: TextInput::new(),
             rename_input: TextInput::new(),
-            move_to_input: TextInput::new(),
             create_input: TextInput::new(),
             secrets_names: Vec::new(),
             secrets_selected: 0,
@@ -381,7 +355,6 @@ impl App {
             marked_sessions: std::collections::HashSet::new(),
             expanded_session: None,
             preview_cache: HashMap::new(),
-            sync_job: None,
             show_preview: true,
             theme: Palette::dark(),
         }
@@ -564,7 +537,6 @@ impl App {
                     SortColumn::Created => sa.created.cmp(&sb.created),
                     SortColumn::Modified => sa.modified.cmp(&sb.modified),
                     SortColumn::Secrets => sa.secrets_count.cmp(&sb.secrets_count),
-                    SortColumn::Remote => sa.location.cmp(&sb.location),
                     SortColumn::Github => sa.git_repo.cmp(&sb.git_repo),
                 };
                 match sort_dir {
@@ -620,17 +592,8 @@ impl App {
             Mode::ConfirmForceOpen => self.handle_confirm_force_open(key),
             Mode::Rename => self.handle_rename(key),
             Mode::CreateSession => self.handle_create_session(key),
-            Mode::MoveToRemote => self.handle_move_to_remote(key),
             Mode::Secrets => self.handle_secrets(key),
-            Mode::Syncing => {
-                if key.code == KeyCode::Esc {
-                    self.sync_job = None;
-                    self.mode = Mode::Normal;
-                    self.set_status("Sync cancelled", StatusLevel::Info);
-                }
-                Action::None
-            }
-            Mode::SyncOutput(_) => {
+            Mode::CommandOutput(_) => {
                 if self.return_to_secrets {
                     self.return_to_secrets = false;
                     if self.secrets_names.is_empty() {
@@ -701,30 +664,6 @@ impl App {
                 }
                 Action::None
             }
-            KeyCode::Char('P') => {
-                self.start_sync("push");
-                Action::None
-            }
-            KeyCode::Char('L') => {
-                self.start_sync("pull");
-                Action::None
-            }
-            KeyCode::Char('S') => {
-                self.start_sync("status");
-                Action::None
-            }
-            KeyCode::Char('m') => {
-                if let Some(session) = self.selected_session() {
-                    if session.location.is_some() {
-                        self.set_status("Session is already remote", StatusLevel::Info);
-                    } else {
-                        self.move_to_input.clear();
-                        self.mode = Mode::MoveToRemote;
-                    }
-                }
-                Action::None
-            }
-
             KeyCode::Char('s') => {
                 self.run_secrets_command();
                 Action::None
@@ -751,10 +690,6 @@ impl App {
                 Action::None
             }
             KeyCode::Char('5') => {
-                self.cycle_sort(SortColumn::Remote);
-                Action::None
-            }
-            KeyCode::Char('6') => {
                 self.cycle_sort(SortColumn::Github);
                 Action::None
             }
@@ -823,11 +758,7 @@ impl App {
             // Direct shortcut keys
             KeyCode::Char('d') => self.execute_menu_action(1),
             KeyCode::Char('r') => self.execute_menu_action(2),
-            KeyCode::Char('m') => self.execute_menu_action(3),
-            KeyCode::Char('s') => self.execute_menu_action(4),
-            KeyCode::Char('P') => self.execute_menu_action(5),
-            KeyCode::Char('L') => self.execute_menu_action(6),
-            KeyCode::Char('S') => self.execute_menu_action(7),
+            KeyCode::Char('s') => self.execute_menu_action(3),
             _ => Action::None,
         }
     }
@@ -865,35 +796,8 @@ impl App {
                 Action::None
             }
             3 => {
-                // Move to Remote
-                if let Some(session) = self.selected_session() {
-                    if session.location.is_some() {
-                        self.set_status("Session is already remote", StatusLevel::Info);
-                    } else {
-                        self.move_to_input.clear();
-                        self.mode = Mode::MoveToRemote;
-                    }
-                }
-                Action::None
-            }
-            4 => {
                 // Secrets
                 self.run_secrets_command();
-                Action::None
-            }
-            5 => {
-                // Push
-                self.start_sync("push");
-                Action::None
-            }
-            6 => {
-                // Pull
-                self.start_sync("pull");
-                Action::None
-            }
-            7 => {
-                // Status
-                self.start_sync("status");
                 Action::None
             }
             _ => Action::None,
@@ -1093,40 +997,6 @@ impl App {
         Action::Open(name)
     }
 
-    fn handle_move_to_remote(&mut self, key: KeyEvent) -> Action {
-        match key.code {
-            KeyCode::Esc => {
-                self.mode = Mode::Normal;
-            }
-            KeyCode::Enter => {
-                return self.execute_move_to();
-            }
-            KeyCode::Left => {
-                self.move_to_input.move_left();
-            }
-            KeyCode::Right => {
-                self.move_to_input.move_right();
-            }
-            KeyCode::Home => {
-                self.move_to_input.move_home();
-            }
-            KeyCode::End => {
-                self.move_to_input.move_end();
-            }
-            KeyCode::Delete => {
-                self.move_to_input.delete_forward();
-            }
-            KeyCode::Backspace => {
-                self.move_to_input.delete_back();
-            }
-            KeyCode::Char(c) => {
-                self.move_to_input.insert(c);
-            }
-            _ => {}
-        }
-        Action::None
-    }
-
     fn handle_secrets(&mut self, key: KeyEvent) -> Action {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => {
@@ -1297,114 +1167,6 @@ impl App {
         self.mode = Mode::Normal;
     }
 
-    fn start_sync(&mut self, subcommand: &str) {
-        if let Some(session) = self.selected_session() {
-            let name = session.name.clone();
-            let subcmd = subcommand.to_string();
-            let (tx, rx) = std::sync::mpsc::channel();
-
-            let session_name = name.clone();
-            std::thread::spawn(move || {
-                let output = std::process::Command::new("cs")
-                    .args([&session_name, "-sync", &subcmd])
-                    .output();
-                let result = match output {
-                    Ok(out) => {
-                        let text = String::from_utf8_lossy(&out.stdout).to_string()
-                            + &String::from_utf8_lossy(&out.stderr).to_string();
-                        SyncResult {
-                            success: out.status.success(),
-                            output: text,
-                        }
-                    }
-                    Err(e) => SyncResult {
-                        success: false,
-                        output: format!("Sync failed: {}", e),
-                    },
-                };
-                let _ = tx.send(result);
-            });
-
-            self.sync_job = Some(SyncJob {
-                session_name: name,
-                subcommand: subcommand.to_string(),
-                receiver: rx,
-                started: std::time::Instant::now(),
-            });
-            self.mode = Mode::Syncing;
-        }
-    }
-
-    /// Poll the background sync job. Called each event loop tick.
-    pub fn check_sync(&mut self) {
-        let job = match self.sync_job.take() {
-            Some(j) => j,
-            None => return,
-        };
-
-        match job.receiver.try_recv() {
-            Ok(result) => {
-                let kind = if result.success {
-                    FlashKind::Success
-                } else {
-                    FlashKind::Error
-                };
-                self.flash_row(&job.session_name, kind);
-                if result.output.trim().is_empty() {
-                    let label = if result.success { "completed" } else { "failed" };
-                    self.set_status(
-                        format!("Sync {} {}", job.subcommand, label),
-                        if result.success { StatusLevel::Success } else { StatusLevel::Error },
-                    );
-                    self.mode = Mode::Normal;
-                } else {
-                    self.mode = Mode::SyncOutput(result.output);
-                }
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                // Still running — put the job back
-                self.sync_job = Some(job);
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                // Thread panicked or dropped sender
-                self.flash_row(&job.session_name, FlashKind::Error);
-                self.set_status("Sync process lost", StatusLevel::Error);
-                self.mode = Mode::Normal;
-            }
-        }
-    }
-
-    /// Current spinner frame character for the active sync job.
-    pub fn spinner_frame(&self) -> char {
-        if let Some(ref job) = self.sync_job {
-            let elapsed_ms = job.started.elapsed().as_millis() as usize;
-            let idx = (elapsed_ms / 80) % SPINNER_FRAMES.len();
-            SPINNER_FRAMES[idx]
-        } else {
-            SPINNER_FRAMES[0]
-        }
-    }
-
-    fn execute_move_to(&mut self) -> Action {
-        let host = self.move_to_input.text().trim().to_string();
-        if host.is_empty() {
-            self.set_status("Host cannot be empty", StatusLevel::Error);
-            self.mode = Mode::Normal;
-            return Action::None;
-        }
-        if host.contains(char::is_whitespace) {
-            self.set_status("Host cannot contain spaces", StatusLevel::Error);
-            self.mode = Mode::Normal;
-            return Action::None;
-        }
-        if let Some(name) = self.selected_session_name() {
-            self.mode = Mode::Normal;
-            return Action::MoveTo(name, host);
-        }
-        self.mode = Mode::Normal;
-        Action::None
-    }
-
     fn run_secrets_command(&mut self) {
         if let Some(session) = self.selected_session() {
             let name = session.name.clone();
@@ -1448,7 +1210,7 @@ impl App {
                     let text = String::from_utf8_lossy(&out.stdout).to_string()
                         + &String::from_utf8_lossy(&out.stderr).to_string();
                     self.return_to_secrets = true;
-                    self.mode = Mode::SyncOutput(text);
+                    self.mode = Mode::CommandOutput(text);
                 }
                 Err(e) => {
                     self.set_status(format!("Secrets failed: {}", e), StatusLevel::Error);
@@ -1475,10 +1237,6 @@ impl App {
                 }
             }
         }
-    }
-
-    pub fn has_remote_sessions(&self) -> bool {
-        self.sessions.iter().any(|s| s.location.is_some())
     }
 
     pub fn has_git_sessions(&self) -> bool {
@@ -1589,13 +1347,10 @@ mod tests {
                 created: Some("2026-01-01 10:00".into()),
                 modified: Some("2026-02-20 14:00".into()),
                 modified_ts: None,
-                location: None,
                 lock_pid: None,
                 is_locked: false,
                 secrets_count: 0,
-                has_git: true,
                 git_repo: Some("hex/alpha".into()),
-                sync_auto: None,
             },
             Session {
                 name: "beta".into(),
@@ -1603,13 +1358,10 @@ mod tests {
                 created: Some("2026-02-01 10:00".into()),
                 modified: Some("2026-02-15 09:00".into()),
                 modified_ts: None,
-                location: Some("hex@mini".into()),
                 lock_pid: None,
                 is_locked: false,
                 secrets_count: 2,
-                has_git: true,
                 git_repo: Some("hex/beta".into()),
-                sync_auto: Some(true),
             },
             Session {
                 name: "gamma".into(),
@@ -1617,13 +1369,10 @@ mod tests {
                 created: Some("2025-12-01 10:00".into()),
                 modified: Some("2026-01-10 08:00".into()),
                 modified_ts: None,
-                location: None,
                 lock_pid: Some(12345),
                 is_locked: true,
                 secrets_count: 0,
-                has_git: false,
                 git_repo: None,
-                sync_auto: None,
             },
         ]
     }
@@ -1861,12 +1610,6 @@ mod tests {
     }
 
     #[test]
-    fn has_remote_sessions_detects_remotes() {
-        let app = App::new(sample_sessions());
-        assert!(app.has_remote_sessions());
-    }
-
-    #[test]
     fn selection_clamps_after_filter() {
         let mut app = App::new(sample_sessions());
         app.table_state.select(Some(2)); // select "gamma"
@@ -1928,86 +1671,6 @@ mod tests {
     }
 
     #[test]
-    fn m_on_local_session_enters_move_to_remote() {
-        let mut app = App::new(sample_sessions());
-        // alpha (index 0) is local (location=None)
-        app.handle_key(KeyEvent::from(KeyCode::Char('m')));
-        assert_eq!(app.mode, Mode::MoveToRemote);
-        assert_eq!(app.move_to_input.text(), "");
-    }
-
-    #[test]
-    fn m_on_remote_session_shows_status() {
-        let mut app = App::new(sample_sessions());
-        // beta (index 1) is remote (location=Some)
-        app.table_state.select(Some(1));
-        app.handle_key(KeyEvent::from(KeyCode::Char('m')));
-        assert_eq!(app.mode, Mode::Normal);
-        assert!(app.status_message.as_ref().unwrap().text.contains("already remote"));
-    }
-
-    #[test]
-    fn move_to_remote_esc_cancels() {
-        let mut app = App::new(sample_sessions());
-        app.mode = Mode::MoveToRemote;
-        app.move_to_input.set("somehost");
-        app.handle_key(KeyEvent::from(KeyCode::Esc));
-        assert_eq!(app.mode, Mode::Normal);
-    }
-
-    #[test]
-    fn move_to_remote_chars_accumulate() {
-        let mut app = App::new(sample_sessions());
-        app.mode = Mode::MoveToRemote;
-        app.handle_key(KeyEvent::from(KeyCode::Char('m')));
-        app.handle_key(KeyEvent::from(KeyCode::Char('i')));
-        app.handle_key(KeyEvent::from(KeyCode::Char('n')));
-        app.handle_key(KeyEvent::from(KeyCode::Char('i')));
-        assert_eq!(app.move_to_input.text(), "mini");
-    }
-
-    #[test]
-    fn move_to_remote_backspace_removes() {
-        let mut app = App::new(sample_sessions());
-        app.mode = Mode::MoveToRemote;
-        app.move_to_input.set("min");
-        app.handle_key(KeyEvent::from(KeyCode::Backspace));
-        assert_eq!(app.move_to_input.text(), "mi");
-    }
-
-    #[test]
-    fn move_to_remote_enter_returns_move_to_action() {
-        let mut app = App::new(sample_sessions());
-        // alpha (index 0) is selected
-        app.mode = Mode::MoveToRemote;
-        app.move_to_input.set("mini");
-        let action = app.handle_key(KeyEvent::from(KeyCode::Enter));
-        assert!(matches!(action, Action::MoveTo(name, host) if name == "alpha" && host == "mini"));
-    }
-
-    #[test]
-    fn move_to_remote_empty_input_shows_error() {
-        let mut app = App::new(sample_sessions());
-        app.mode = Mode::MoveToRemote;
-        app.move_to_input.set("");
-        let action = app.handle_key(KeyEvent::from(KeyCode::Enter));
-        assert!(matches!(action, Action::None));
-        assert_eq!(app.mode, Mode::Normal);
-        assert!(app.status_message.as_ref().unwrap().text.contains("empty"));
-    }
-
-    #[test]
-    fn move_to_remote_whitespace_input_shows_error() {
-        let mut app = App::new(sample_sessions());
-        app.mode = Mode::MoveToRemote;
-        app.move_to_input.set("bad host");
-        let action = app.handle_key(KeyEvent::from(KeyCode::Enter));
-        assert!(matches!(action, Action::None));
-        assert_eq!(app.mode, Mode::Normal);
-        assert!(app.status_message.as_ref().unwrap().text.contains("spaces"));
-    }
-
-    #[test]
     fn secrets_esc_returns_to_normal() {
         let mut app = App::new(sample_sessions());
         app.mode = Mode::Secrets;
@@ -2052,21 +1715,21 @@ mod tests {
     }
 
     #[test]
-    fn sync_output_returns_to_secrets_when_flagged() {
+    fn command_output_returns_to_secrets_when_flagged() {
         let mut app = App::new(sample_sessions());
         app.secrets_names = vec!["KEY1".into(), "KEY2".into()];
         app.secrets_selected = 0;
         app.return_to_secrets = true;
-        app.mode = Mode::SyncOutput("value: 123".into());
+        app.mode = Mode::CommandOutput("value: 123".into());
         app.handle_key(KeyEvent::from(KeyCode::Char(' ')));
         assert_eq!(app.mode, Mode::Secrets);
         assert!(!app.return_to_secrets);
     }
 
     #[test]
-    fn sync_output_returns_to_normal_when_not_flagged() {
+    fn command_output_returns_to_normal_when_not_flagged() {
         let mut app = App::new(sample_sessions());
-        app.mode = Mode::SyncOutput("some output".into());
+        app.mode = Mode::CommandOutput("some output".into());
         app.handle_key(KeyEvent::from(KeyCode::Char(' ')));
         assert_eq!(app.mode, Mode::Normal);
     }
@@ -2202,26 +1865,6 @@ mod tests {
         app.handle_key(KeyEvent::from(KeyCode::Enter));
         assert_eq!(app.mode, Mode::Rename);
         assert_eq!(app.rename_input.text(), "alpha");
-    }
-
-    #[test]
-    fn menu_shortcut_m_on_local_enters_move() {
-        let mut app = App::new(sample_sessions());
-        // alpha (index 0) is local
-        app.mode = Mode::SessionMenu;
-        app.handle_key(KeyEvent::from(KeyCode::Char('m')));
-        assert_eq!(app.mode, Mode::MoveToRemote);
-    }
-
-    #[test]
-    fn menu_shortcut_m_on_remote_shows_status() {
-        let mut app = App::new(sample_sessions());
-        // beta (index 1) is remote
-        app.table_state.select(Some(1));
-        app.mode = Mode::SessionMenu;
-        app.handle_key(KeyEvent::from(KeyCode::Char('m')));
-        assert_eq!(app.mode, Mode::Normal);
-        assert!(app.status_message.as_ref().unwrap().text.contains("already remote"));
     }
 
     #[test]
@@ -2905,137 +2548,6 @@ mod tests {
         app.handle_key(KeyEvent::from(KeyCode::Tab));
         // Preview was loaded (even if empty, the key exists)
         assert!(app.preview_cache.contains_key("alpha"));
-    }
-
-    // --- Async sync with spinner ---
-
-    fn make_sync_job(session_name: &str, subcommand: &str) -> (std::sync::mpsc::Sender<SyncResult>, SyncJob) {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let job = SyncJob {
-            session_name: session_name.to_string(),
-            subcommand: subcommand.to_string(),
-            receiver: rx,
-            started: std::time::Instant::now(),
-        };
-        (tx, job)
-    }
-
-    #[test]
-    fn check_sync_noop_when_no_job() {
-        let mut app = App::new(sample_sessions());
-        app.check_sync(); // should not panic
-        assert_eq!(app.mode, Mode::Normal);
-    }
-
-    #[test]
-    fn check_sync_stays_syncing_while_pending() {
-        let mut app = App::new(sample_sessions());
-        let (_tx, job) = make_sync_job("alpha", "push");
-        app.sync_job = Some(job);
-        app.mode = Mode::Syncing;
-        app.check_sync();
-        assert_eq!(app.mode, Mode::Syncing);
-        assert!(app.sync_job.is_some());
-    }
-
-    #[test]
-    fn check_sync_transitions_to_output_on_success() {
-        let mut app = App::new(sample_sessions());
-        let (tx, job) = make_sync_job("alpha", "push");
-        app.sync_job = Some(job);
-        app.mode = Mode::Syncing;
-
-        tx.send(SyncResult {
-            success: true,
-            output: "Pushed OK".to_string(),
-        })
-        .unwrap();
-
-        app.check_sync();
-        assert!(matches!(app.mode, Mode::SyncOutput(ref s) if s == "Pushed OK"));
-        assert!(app.sync_job.is_none());
-    }
-
-    #[test]
-    fn check_sync_transitions_to_normal_on_empty_output() {
-        let mut app = App::new(sample_sessions());
-        let (tx, job) = make_sync_job("alpha", "push");
-        app.sync_job = Some(job);
-        app.mode = Mode::Syncing;
-
-        tx.send(SyncResult {
-            success: true,
-            output: "  ".to_string(),
-        })
-        .unwrap();
-
-        app.check_sync();
-        assert_eq!(app.mode, Mode::Normal);
-        assert!(app.status_message.is_some());
-    }
-
-    #[test]
-    fn check_sync_flashes_error_on_failure() {
-        let mut app = App::new(sample_sessions());
-        let (tx, job) = make_sync_job("alpha", "pull");
-        app.sync_job = Some(job);
-        app.mode = Mode::Syncing;
-
-        tx.send(SyncResult {
-            success: false,
-            output: "Error: no remote".to_string(),
-        })
-        .unwrap();
-
-        app.check_sync();
-        assert!(matches!(app.mode, Mode::SyncOutput(ref s) if s == "Error: no remote"));
-        assert!(app.row_flashes.contains_key("alpha"));
-    }
-
-    #[test]
-    fn check_sync_handles_disconnected_sender() {
-        let mut app = App::new(sample_sessions());
-        let (tx, job) = make_sync_job("alpha", "status");
-        drop(tx); // simulate thread panic / drop
-        app.sync_job = Some(job);
-        app.mode = Mode::Syncing;
-
-        app.check_sync();
-        assert_eq!(app.mode, Mode::Normal);
-        assert!(app.status_message.is_some());
-    }
-
-    #[test]
-    fn syncing_mode_esc_cancels() {
-        let mut app = App::new(sample_sessions());
-        let (_tx, job) = make_sync_job("alpha", "push");
-        app.sync_job = Some(job);
-        app.mode = Mode::Syncing;
-
-        app.handle_key(KeyEvent::from(KeyCode::Esc));
-        assert_eq!(app.mode, Mode::Normal);
-        assert!(app.sync_job.is_none());
-    }
-
-    #[test]
-    fn syncing_mode_ignores_other_keys() {
-        let mut app = App::new(sample_sessions());
-        let (_tx, job) = make_sync_job("alpha", "push");
-        app.sync_job = Some(job);
-        app.mode = Mode::Syncing;
-
-        app.handle_key(KeyEvent::from(KeyCode::Char('j')));
-        assert_eq!(app.mode, Mode::Syncing); // not normal
-        assert!(app.sync_job.is_some());
-    }
-
-    #[test]
-    fn spinner_frame_returns_valid_char() {
-        let mut app = App::new(sample_sessions());
-        let (_tx, job) = make_sync_job("alpha", "push");
-        app.sync_job = Some(job);
-        let frame = app.spinner_frame();
-        assert!(SPINNER_FRAMES.contains(&frame));
     }
 
     #[test]

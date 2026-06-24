@@ -31,7 +31,7 @@ test_adopt_creates_cs_structure() {
     assert_exists "$project_dir/.cs/logs/session.log" "session.log should exist" || return 1
     assert_exists "$project_dir/.cs/README.md" ".cs/README.md should exist" || return 1
     assert_exists "$project_dir/.cs/memory/narrative.md" "narrative.md should exist" || return 1
-    assert_exists "$project_dir/.cs/sync.conf" "sync.conf should exist" || return 1
+    assert_not_exists "$project_dir/.cs/sync.conf" "sync.conf must not be created (sync subsystem removed)" || return 1
 }
 
 test_adopt_creates_symlink() {

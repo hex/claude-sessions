@@ -107,15 +107,9 @@ fi
 # Icons - Nerd Font with Unicode fallback
 if [[ "${CS_NERD_FONTS:-}" == "1" ]]; then
     ICON_LOCK='󰌾'      # mdi-lock
-    ICON_SYNC='󰓦'      # mdi-sync
-    ICON_LOCAL='󰋜'     # mdi-home
-    ICON_REMOTE='󰌘'    # mdi-remote-desktop
     ICON_HOST='󰟀'      # mdi-monitor
 else
     ICON_LOCK='⚿'      # Unicode lock with key
-    ICON_SYNC='⇄'      # Unicode arrows
-    ICON_LOCAL='⌂'     # Unicode house
-    ICON_REMOTE='⇝'    # Unicode rightwards squiggle arrow
     ICON_HOST='⌘'      # Unicode command/place of interest
 fi
 
@@ -282,30 +276,23 @@ show_help() {
 cs $VERSION - Claude Code session manager
 
 Usage: cs <session-name>              Create or resume a session
-       cs <session-name> -sync <cmd>  Run sync command on session
        cs <session-name> -secrets <cmd>  Run secrets command on session
        cs -<command>                  Run a global subcommand
 
 Commands:
   <name>              Create or resume session <name> (locks session)
   <name> --force      Override active session lock
-  <name> --on <host>  Create/connect session on a remote host
-  <name> --move-to <host>  Move local session to remote host
-  user@host:name      Connect to remote session (auto-remembered)
-  <name> -sync <cmd>  Run sync command on <name> without launching session
   <name> -secrets <cmd>  Run secrets command on <name> without launching session
   -search <query>     Search across all sessions (narrative, memory, README)
   -checkpoint "<label>"  Save labelled state snapshot (run from inside a session)
   -checkpoint list    List checkpoints for current session
   -checkpoint show <name>  Print a specific checkpoint
-  -doctor, -diag      Run health checks (Keychain, hooks, sync, memory, audit, tokens)
+  -doctor, -diag      Run health checks (Keychain, hooks, memory, audit, tokens)
   -lint <file>...     Flag AI-slop prose tells (em-dashes, banned phrases); 0=clean 1=issues 2=error
   -statusline <cmd>   enable|disable the cs status line in Claude Code settings
-  -list, -ls          List all sessions (shows remote location)
+  -list, -ls          List all sessions
   -adopt <name>       Adopt current directory as a cs session
-  -remote <cmd>       Manage remote hosts
   -remove, -rm <name> Remove a session
-  -sync, -s <cmd>     Sync current session (requires CLAUDE_SESSION_NAME)
   -secrets <cmd>      Manage current session secrets (requires CLAUDE_SESSION_NAME)
   -update             Update cs to latest version
     --check, -c       Check for updates without installing
@@ -323,25 +310,11 @@ Secrets Commands:
   export              Export secrets as environment variables
   backend             Show which storage backend is active
 
-Remote Commands: (cs -remote ...)
-  add <name> <user@host>  Register a remote host
-  list, ls             List registered remote hosts
-  remove, rm <name>    Remove a registered host
-
-Sync Commands:
-  remote [url]        Add remote to git repo (uses CS_SYNC_PREFIX if URL not provided)
-  push                Commit changes (pushes to remote if configured)
-  pull                Pull changes from remote (skips if local-only)
-  status, st          Show sync status
-  auto [on|off]       Toggle/show auto-sync setting
-  clone <session|url> [name]  Clone session from remote (uses CS_SYNC_PREFIX if session name)
-
 Environment:
   CS_SESSIONS_ROOT    Override sessions directory (default: ~/.claude-sessions)
   CLAUDE_CODE_BIN     Override claude binary name (default: claude)
   CLAUDE_SESSION_NAME Current session name (set automatically)
   CS_SECRETS_PASSWORD Master password for encrypted secrets backend
-  CS_SYNC_PREFIX      Git remote prefix (e.g., git@github.com:user/)
   CS_NERD_FONTS       Set to 1 for Nerd Font icons (default: Unicode)
   NO_COLOR            Disable all colors (see no-color.org)
   CS_STATUSLINE_DISABLE   Set to 1 to render nothing in the status line
@@ -354,16 +327,8 @@ Environment:
                           falls back to the OS appearance — set this to override.
 
 Examples:
-  cs debug-api                      Create or resume 'debug-api' session (git + auto-sync)
-  cs my-session -sync push          Commit changes manually during session
-  cs my-session -sync remote <url>  Add remote to existing local repo
-  cs my-session -sync auto off      Disable auto-commit (on by default)
-  cs -sync clone other-session      Clone session (uses CS_SYNC_PREFIX)
+  cs debug-api                      Create or resume 'debug-api' session
   cs my-session -secrets list       List secrets for 'my-session'
-  cs -remote add mini hex@mac-mini.local  Register a remote host
-  cs my-session --on mini           Run session on registered remote
-  cs hex@mac-mini.local:debug       Connect via host:session syntax
-  cs my-session --move-to mini      Move local session to remote
   cs -search "postgres migration"   Search across all sessions
   cs -list                          List all sessions
   cs -rm old-session                Remove 'old-session'
@@ -1069,11 +1034,6 @@ Location: $(hostname):$(pwd)
 
 EOF
 
-    # Initialize sync config with auto-sync enabled by default
-    cat > "$session_dir/.cs/sync.conf" << EOF
-auto_sync=on
-EOF
-
     # Redirect Claude Code auto memory into the session directory
     setup_auto_memory "$session_dir"
 
@@ -1146,7 +1106,6 @@ migrate_session() {
         # Move metadata files
         migrate_if_exists "$session_dir/README.md" "$session_dir/.cs/README.md"
         migrate_if_exists "$session_dir/discoveries.md" "$session_dir/.cs/discoveries.md"
-        migrate_if_exists "$session_dir/sync.conf" "$session_dir/.cs/sync.conf"
         migrate_if_exists "$session_dir/summary.md" "$session_dir/.cs/summary.md"
         migrate_if_exists "$session_dir/secrets.enc" "$session_dir/.cs/secrets.enc"
         migrate_if_exists "$session_dir/secrets.age" "$session_dir/.cs/secrets.age"
@@ -1179,12 +1138,9 @@ migrate_session() {
         echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
     fi
 
-    if [ ! -f "$session_dir/.cs/sync.conf" ]; then
-        cat > "$session_dir/.cs/sync.conf" << EOF
-auto_sync=on
-EOF
-        warn "Added sync.conf with auto-sync enabled"
-    fi
+    # Remove inert sync/remote metadata left by older versions (the sync
+    # subsystem was removed; nothing reads these files anymore)
+    rm -f "$session_dir/.cs/sync.conf" "$session_dir/.cs/remote.conf"
 
     # Phase 4: Ensure auto memory and plans are configured
     if [ ! -d "$session_dir/.cs/memory" ] || [ ! -d "$session_dir/.cs/plans" ] || [ ! -f "$session_dir/.claude/settings.local.json" ]; then
@@ -1835,37 +1791,6 @@ _doctor_check_settings_hooks_resolve() {
     fi
 }
 
-_doctor_check_git_sync() {
-    local dir="${CLAUDE_SESSION_DIR:-$PWD}"
-    if ! git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
-        _doctor_warn "Git: session directory is not a git repo"
-        return
-    fi
-    if ! git -C "$dir" remote get-url origin >/dev/null 2>&1; then
-        _doctor_warn "Git: no origin remote (local-only session)"
-        return
-    fi
-    local branch
-    branch=$(git -C "$dir" branch --show-current 2>/dev/null || echo "")
-    if [ -z "$branch" ]; then
-        _doctor_warn "Git: detached HEAD"
-        return
-    fi
-    local counts ahead behind
-    counts=$(git -C "$dir" rev-list --left-right --count '@{upstream}...HEAD' 2>/dev/null || true)
-    if [ -z "$counts" ]; then
-        _doctor_warn "Git: $branch has no tracked upstream (try: cs -sync)"
-        return
-    fi
-    behind=$(echo "$counts" | cut -f1)
-    ahead=$(echo "$counts" | cut -f2)
-    if [ "$ahead" = "0" ] && [ "$behind" = "0" ]; then
-        _doctor_ok "Git: $branch in sync with upstream"
-    else
-        _doctor_warn "Git: $branch is $ahead ahead, $behind behind upstream"
-    fi
-}
-
 _doctor_check_shadow_ref() {
     local dir="${CLAUDE_SESSION_DIR:-$PWD}"
     if ! git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
@@ -2016,7 +1941,6 @@ run_doctor() {
     _doctor_check_statusline
 
     if [ -n "${CLAUDE_SESSION_META_DIR:-}" ] && [ -d "${CLAUDE_SESSION_META_DIR:-}" ]; then
-        _doctor_check_git_sync
         _doctor_check_shadow_ref
         _doctor_check_auto_memory
         _doctor_check_session_id_match
@@ -2092,23 +2016,6 @@ search_sessions() {
 }
 
 # List all sessions
-# Echo the LOCATION column cell for a remote session, empty if not remote.
-# Used by list_sessions for both column-width measurement and row rendering,
-# replacing a per-session associative array (unavailable on bash 3.2).
-_session_location() {
-    local session_dir="$1" host_spec resolved label
-    is_remote_session "$session_dir" || return 0
-    host_spec=$(get_session_remote "$session_dir")
-    [ -n "$host_spec" ] || return 0
-    label="$host_spec"
-    # Registered names (no '@') resolve to "name (address)"; raw user@host as-is.
-    if [[ "$host_spec" != *"@"* ]]; then
-        resolved=$(get_remote_host "$host_spec")
-        [ -n "$resolved" ] && label="${host_spec} (${resolved})"
-    fi
-    echo "${ICON_REMOTE} ${label}"
-}
-
 list_sessions() {
     if [ ! -d "$SESSIONS_ROOT" ]; then
         info "No sessions found"
@@ -2140,31 +2047,9 @@ list_sessions() {
         fi
     done
 
-    # Check if any sessions are remote (to decide whether to show LOCATION
-    # column) and measure the column width. Per-session location is recomputed
-    # in the display loop via _session_location — no associative array, so this
-    # works under bash 3.2.
-    local has_remote=false
-    local max_loc_len=8  # minimum "LOCATION" header length
-    for session in "${sessions[@]}"; do
-        local loc
-        loc=$(_session_location "$SESSIONS_ROOT/$session")
-        if [ -n "$loc" ]; then
-            has_remote=true
-            [ ${#loc} -gt $max_loc_len ] && max_loc_len=${#loc}
-        fi
-    done
-
     # Print header
-    if $has_remote; then
-        printf "${RUST}%-${max_len}s  %-16s  %-16s  %s${NC}\n" "SESSION" "CREATED" "MODIFIED" "LOCATION"
-        printf "${COMMENT}%-${max_len}s  %-16s  %-16s  %s${NC}\n" \
-            "$(printf '%*s' "$max_len" '' | tr ' ' '-')" "----------------" "----------------" \
-            "$(printf '%*s' "$max_loc_len" '' | tr ' ' '-')"
-    else
-        printf "${RUST}%-${max_len}s  %-16s  %s${NC}\n" "SESSION" "CREATED" "MODIFIED"
-        printf "${COMMENT}%-${max_len}s  %-16s  %s${NC}\n" "$(printf '%*s' "$max_len" '' | tr ' ' '-')" "----------------" "----------------"
-    fi
+    printf "${RUST}%-${max_len}s  %-16s  %s${NC}\n" "SESSION" "CREATED" "MODIFIED"
+    printf "${COMMENT}%-${max_len}s  %-16s  %s${NC}\n" "$(printf '%*s' "$max_len" '' | tr ' ' '-')" "----------------" "----------------"
 
     # Print sessions
     for session in "${sessions[@]}"; do
@@ -2221,25 +2106,11 @@ list_sessions() {
         [ $pad_len -lt 0 ] && pad_len=0
         local padding=$(printf '%*s' "$pad_len" '')
 
-        # Build location display for remote sessions
-        local location=""
-        if $has_remote; then
-            location=$(_session_location "$session_dir")
-        fi
-
         # Print with proper alignment
         if [ "$secret_count" -gt 0 ]; then
-            if $has_remote; then
-                printf "${GOLD}%s${NC}${COMMENT}%s${NC}%s  ${COMMENT}%-16s  %-16s${NC}  %s\n" "$session" "$secret_indicator" "$padding" "$created" "$modified" "$location"
-            else
-                printf "${GOLD}%s${NC}${COMMENT}%s${NC}%s  ${COMMENT}%-16s  %s${NC}\n" "$session" "$secret_indicator" "$padding" "$created" "$modified"
-            fi
+            printf "${GOLD}%s${NC}${COMMENT}%s${NC}%s  ${COMMENT}%-16s  %s${NC}\n" "$session" "$secret_indicator" "$padding" "$created" "$modified"
         else
-            if $has_remote; then
-                printf "${GOLD}%s${NC}%s  ${COMMENT}%-16s  %-16s${NC}  %s\n" "$session" "$padding" "$created" "$modified" "$location"
-            else
-                printf "${GOLD}%s${NC}%s  ${COMMENT}%-16s  %s${NC}\n" "$session" "$padding" "$created" "$modified"
-            fi
+            printf "${GOLD}%s${NC}%s  ${COMMENT}%-16s  %s${NC}\n" "$session" "$padding" "$created" "$modified"
         fi
     done
 }
@@ -2536,18 +2407,6 @@ launch_claude_code() {
         [[ "$secret_count" =~ ^[0-9]+$ ]] || secret_count=0
     fi
 
-    # Check git remote status
-    local remote_display=""
-    if [ -d "$session_dir/.git" ]; then
-        local remote_url
-        remote_url=$(cd "$session_dir" && git remote get-url origin 2>/dev/null || echo "")
-        if [ -n "$remote_url" ]; then
-            remote_display="${GOLD}${ICON_SYNC}${NC} ${DIM}$remote_url${NC}"
-        else
-            remote_display="${GOLD}${ICON_LOCAL}${NC} ${DIM}local-only${NC}"
-        fi
-    fi
-
     # Display banner with gradient bar (rust → gold)
     # Gradient colors for left bar
     local BAR1='\033[38;2;230;74;25m▌'    # rust #e64a19
@@ -2563,9 +2422,6 @@ launch_claude_code() {
     echo -e "${bars[$bar_idx]}${NC} ${ORANGE}cs${NC} ${GREEN}$VERSION${NC}"; ((++bar_idx))
     echo -e "${bars[$bar_idx]}${NC} ${WHITE}${BOLD}$session_name${NC} ${COMMENT}($status_icon $status_text)${NC} ${DIM}${ICON_HOST} $(hostname -s)${NC}"; ((++bar_idx))
     echo -e "${bars[$bar_idx]}${NC} ${GOLD}$session_dir${NC}"; ((++bar_idx))
-    if [ -n "$remote_display" ]; then
-        echo -e "${bars[$bar_idx]}${NC} $remote_display"; ((++bar_idx))
-    fi
     if [ "$secret_count" -gt 0 ]; then
         local secret_word="secret"
         [ "$secret_count" -gt 1 ] && secret_word="secrets"
@@ -2657,10 +2513,8 @@ run_secrets() {
 }
 
 # ============================================================================
-# SYNC FUNCTIONS
+# SECRETS HELPER
 # ============================================================================
-
-SYNC_CONFIG_FILE="sync.conf"
 
 # Find the secrets helper script
 find_secrets_script() {
@@ -2674,330 +2528,6 @@ find_secrets_script() {
         fi
     done
     return 1
-}
-
-# Read sync config value
-get_sync_config() {
-    local session_dir="$1"
-    local key="$2"
-    local default="${3:-}"
-    local config_file="$session_dir/.cs/$SYNC_CONFIG_FILE"
-
-    if [ -f "$config_file" ]; then
-        local value
-        value=$(grep "^${key}=" "$config_file" 2>/dev/null | cut -d= -f2- || true)
-        echo "${value:-$default}"
-    else
-        echo "$default"
-    fi
-}
-
-# Write sync config value
-set_sync_config() {
-    local session_dir="$1"
-    local key="$2"
-    local value="$3"
-    local config_file="$session_dir/.cs/$SYNC_CONFIG_FILE"
-
-    if [ -f "$config_file" ]; then
-        if grep -q "^${key}=" "$config_file" 2>/dev/null; then
-            # Update existing key (cross-platform: write to temp then move)
-            local tmp_file="${config_file}.tmp"
-            grep -v "^${key}=" "$config_file" > "$tmp_file" || true
-            echo "${key}=${value}" >> "$tmp_file"
-            mv "$tmp_file" "$config_file"
-        else
-            echo "${key}=${value}" >> "$config_file"
-        fi
-    else
-        echo "${key}=${value}" > "$config_file"
-    fi
-}
-
-# Remote host registry file
-REMOTES_FILE=".remotes"
-
-# Look up a registered remote host by name
-get_remote_host() {
-    local name="$1"
-    local remotes_file="$SESSIONS_ROOT/$REMOTES_FILE"
-
-    if [ -f "$remotes_file" ]; then
-        local value
-        value=$(grep "^${name}=" "$remotes_file" 2>/dev/null | cut -d= -f2- || true)
-        echo "$value"
-    fi
-}
-
-# Register or update a remote host
-set_remote_host() {
-    local name="$1"
-    local host="$2"
-    local remotes_file="$SESSIONS_ROOT/$REMOTES_FILE"
-
-    if [ -f "$remotes_file" ]; then
-        if grep -q "^${name}=" "$remotes_file" 2>/dev/null; then
-            local tmp_file="${remotes_file}.tmp"
-            grep -v "^${name}=" "$remotes_file" > "$tmp_file" || true
-            echo "${name}=${host}" >> "$tmp_file"
-            mv "$tmp_file" "$remotes_file"
-        else
-            echo "${name}=${host}" >> "$remotes_file"
-        fi
-    else
-        echo "${name}=${host}" > "$remotes_file"
-    fi
-}
-
-# Remove a registered remote host
-remove_remote_host() {
-    local name="$1"
-    local remotes_file="$SESSIONS_ROOT/$REMOTES_FILE"
-
-    if [ ! -f "$remotes_file" ] || ! grep -q "^${name}=" "$remotes_file" 2>/dev/null; then
-        error "Remote host '$name' not found"
-    fi
-
-    local tmp_file="${remotes_file}.tmp"
-    grep -v "^${name}=" "$remotes_file" > "$tmp_file" || true
-    mv "$tmp_file" "$remotes_file"
-    info "Removed remote host: $name"
-}
-
-# List all registered remote hosts
-list_remote_hosts() {
-    local remotes_file="$SESSIONS_ROOT/$REMOTES_FILE"
-
-    if [ ! -f "$remotes_file" ] || [ ! -s "$remotes_file" ]; then
-        echo "No remote hosts registered."
-        echo ""
-        echo -e "Register one with: cs ${ORANGE}-remote add${NC} ${GOLD}<name>${NC} ${GOLD}<user@host>${NC}"
-        return 0
-    fi
-
-    local max_name_len=4  # minimum "NAME" header
-    local name host
-    while IFS='=' read -r name host; do
-        [ -z "$name" ] && continue
-        if [ ${#name} -gt $max_name_len ]; then
-            max_name_len=${#name}
-        fi
-    done < "$remotes_file"
-
-    printf "${RUST}%-${max_name_len}s  %s${NC}\n" "NAME" "HOST"
-    printf "${COMMENT}%-${max_name_len}s  %s${NC}\n" \
-        "$(printf '%*s' "$max_name_len" '' | tr ' ' '-')" "--------------------"
-
-    while IFS='=' read -r name host; do
-        [ -z "$name" ] && continue
-        printf "${GOLD}%-${max_name_len}s${NC}  ${COMMENT}%s${NC}\n" "$name" "$host"
-    done < "$remotes_file"
-}
-
-# Dispatcher for cs -remote subcommands
-run_remote() {
-    local subcommand="${1:-}"
-
-    case "$subcommand" in
-        add)
-            local name="${2:-}"
-            local host="${3:-}"
-            if [ -z "$name" ] || [ -z "$host" ]; then
-                error "Usage: cs -remote add <name> <user@host>"
-            fi
-            if [[ "$host" != *"@"* ]]; then
-                error "Host must be in user@hostname format (e.g., hex@mac-mini.local)"
-            fi
-            set_remote_host "$name" "$host"
-            info "Registered remote host: $name -> $host"
-            ;;
-        list|ls)
-            list_remote_hosts
-            ;;
-        remove|rm)
-            local name="${2:-}"
-            if [ -z "$name" ]; then
-                error "Usage: cs -remote remove <name>"
-            fi
-            remove_remote_host "$name"
-            ;;
-        "")
-            error "Usage: cs -remote <add|list|remove> [args...]"
-            ;;
-        *)
-            error "Unknown remote command: $subcommand. Use: add, list, remove"
-            ;;
-    esac
-}
-
-# Check if a session directory is a remote session
-is_remote_session() {
-    local session_dir="$1"
-    [ -f "$session_dir/.cs/remote.conf" ]
-}
-
-# Read the host from a remote session's remote.conf
-get_session_remote() {
-    local session_dir="$1"
-    local config_file="$session_dir/.cs/remote.conf"
-    if [ -f "$config_file" ]; then
-        grep "^host=" "$config_file" 2>/dev/null | cut -d= -f2- || true
-    fi
-}
-
-# Create a remote session stub directory with remote.conf
-create_remote_stub() {
-    local session_name="$1"
-    local host="$2"
-    local session_dir="$SESSIONS_ROOT/$session_name"
-
-    mkdir -p "$session_dir/.cs"
-    echo "host=$host" > "$session_dir/.cs/remote.conf"
-}
-
-# Resolve a host spec to a connectable address
-# If it contains @, use directly (inline host). Otherwise, look up in registry.
-resolve_remote_host() {
-    local host_spec="$1"
-
-    if [[ "$host_spec" == *"@"* ]]; then
-        echo "$host_spec"
-        return 0
-    fi
-
-    # Look up in registry
-    local resolved
-    resolved=$(get_remote_host "$host_spec")
-    if [ -n "$resolved" ]; then
-        echo "$resolved"
-        return 0
-    fi
-
-    return 1
-}
-
-# Query the remote machine's CS_SESSIONS_ROOT via ssh
-detect_remote_sessions_root() {
-    local resolved_host="$1"
-
-    # Query via ssh with short timeout
-    local remote_root
-    if remote_root=$(ssh -o ConnectTimeout=3 -o BatchMode=yes "$resolved_host" \
-        'echo ${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}' 2>/dev/null); then
-        [ -n "$remote_root" ] && echo "$remote_root" && return 0
-    fi
-
-    echo "$HOME/.claude-sessions"
-}
-
-# Connect to a remote session via et (preferred) or ssh, wrapped in tmux
-connect_remote() {
-    local session_name="$1"
-    local host_spec="$2"
-
-    local resolved_host
-    resolved_host=$(resolve_remote_host "$host_spec") || \
-        error "Host '$host_spec' not found in registry. Register it with: cs -remote add <name> <user@host>"
-
-    # Pick transport: prefer et, fall back to ssh
-    local transport=""
-    if command -v et >/dev/null 2>&1; then
-        transport="et"
-    elif command -v ssh >/dev/null 2>&1; then
-        transport="ssh"
-    else
-        error "Neither et nor ssh found. Install one to connect to remote sessions."
-    fi
-
-    # tmux session name on the remote
-    local tmux_session="cs-${session_name}"
-
-    # Remote command: tmux attach-or-create running cs (absolute path avoids PATH issues in non-interactive shells)
-    local remote_cmd="tmux new-session -As ${tmux_session} '\$HOME/.local/bin/cs ${session_name}'"
-
-    # Connection banner
-    echo ""
-    echo -e "${RUST}Connecting to remote session${NC}"
-    echo -e "  Session:   ${GOLD}${session_name}${NC}"
-    echo -e "  Host:      ${GOLD}${resolved_host}${NC}"
-    echo -e "  Transport: ${COMMENT}${transport}${NC}"
-    echo ""
-
-    # Set terminal tab title and color
-    set_tab_title "cs: $session_name @ $resolved_host" "blue"
-
-    # Transport-specific flag: et uses -c (command), ssh uses -t (TTY)
-    local transport_flag="-t"
-    if [ "$transport" = "et" ]; then
-        transport_flag="-c"
-    fi
-
-    # Dry run mode for testing
-    if [ "${CS_TEST_DRY_RUN:-}" = "1" ]; then
-        echo "DRY_RUN: $transport $resolved_host $transport_flag $remote_cmd"
-        echo "DRY_RUN: tmux session=$tmux_session"
-        return 0
-    fi
-
-    # Execute connection (replaces this process)
-    exec "$transport" "$resolved_host" "$transport_flag" "$remote_cmd"
-}
-
-# Move a local session to a remote host
-move_session_to_remote() {
-    local session_name="$1"
-    local host_spec="$2"
-
-    local session_dir="$SESSIONS_ROOT/$session_name"
-
-    if [ ! -d "$session_dir" ]; then
-        error "Session not found: $session_name"
-    fi
-
-    if is_remote_session "$session_dir"; then
-        error "Session '$session_name' is already remote"
-    fi
-
-    local resolved_host
-    resolved_host=$(resolve_remote_host "$host_spec") || \
-        error "Host '$host_spec' not found in registry. Register it with: cs -remote add <name> <user@host>"
-
-    echo -e "Moving session ${GOLD}${session_name}${NC} to ${GOLD}${resolved_host}${NC}..."
-
-    # Step 1: Detect remote sessions root via ssh
-    echo -e "  ${DIM}Detecting remote sessions directory...${NC}"
-    local remote_root
-    remote_root=$(detect_remote_sessions_root "$resolved_host")
-
-    # Step 2: rsync session to remote
-    local rsync_cmd="rsync -az ${session_dir}/ ${resolved_host}:${remote_root}/${session_name}/"
-
-    if [ "${CS_TEST_DRY_RUN:-}" = "1" ]; then
-        echo "DRY_RUN: $rsync_cmd"
-    else
-        echo -e "  ${DIM}Syncing files to ${resolved_host}...${NC}"
-        if ! eval "$rsync_cmd"; then
-            error "rsync failed. Local session was not modified."
-        fi
-    fi
-
-    # Step 3: Clean local files and write remote stub
-    echo -e "  ${DIM}Creating remote stub...${NC}"
-    if [ -L "$session_dir" ]; then
-        # Adopted session (symlink to project) — keep project files, just add remote.conf
-        mkdir -p "$session_dir/.cs"
-        printf 'host=%s\nroot=%s\n' "$host_spec" "$remote_root" > "$session_dir/.cs/remote.conf"
-    else
-        # Regular session — replace contents with minimal stub
-        local tmp_conf
-        tmp_conf=$(mktemp)
-        printf 'host=%s\nroot=%s\n' "$host_spec" "$remote_root" > "$tmp_conf"
-        rm -rf "${session_dir:?}"
-        mkdir -p "$session_dir/.cs"
-        mv "$tmp_conf" "$session_dir/.cs/remote.conf"
-    fi
-    info "Session '$session_name' moved to $resolved_host"
-    echo -e "${DIM}Connect with: cs $session_name${NC}"
 }
 
 # Create session .gitignore
@@ -3118,555 +2648,6 @@ ENTRIES
     info "Adopted $(basename "$target_dir") as session '$session_name'"
     echo -e "${DIM}Symlink: $session_link -> $target_dir${NC}"
     echo -e "${DIM}Resume with: cs $session_name${NC}"
-}
-
-# Construct remote URL from prefix and session name
-construct_remote_url() {
-    local session_name="$1"
-    local prefix="${CS_SYNC_PREFIX:-}"
-
-    if [ -z "$prefix" ]; then
-        return 1
-    fi
-
-    # Normalize prefix: ensure it ends with / or : (for git@host:path style)
-    if [[ "$prefix" == *"@"* ]] && [[ "$prefix" != *"/" ]] && [[ "$prefix" != *":" ]]; then
-        # git@host style without trailing separator - add /
-        prefix="${prefix}/"
-    elif [[ "$prefix" != *"/" ]] && [[ "$prefix" != *":" ]]; then
-        # https:// style without trailing / - add /
-        prefix="${prefix}/"
-    fi
-
-    echo "${prefix}${session_name}.git"
-}
-
-# Add remote to session git repo
-sync_remote() {
-    local session_name="$1"
-    local remote_url="${2:-}"
-    local is_local_only=0
-
-    if [ -z "$session_name" ]; then
-        error "No session specified. Use: cs <session> -sync remote [url]"
-    fi
-
-    # If no URL provided, try to construct from prefix
-    if [ -z "$remote_url" ]; then
-        if remote_url=$(construct_remote_url "$session_name" 2>/dev/null); then
-            info "Using remote: $remote_url"
-        else
-            # No URL and no prefix - create local-only repo
-            is_local_only=1
-        fi
-    fi
-
-    local session_dir="$SESSIONS_ROOT/$session_name"
-
-    if [ ! -d "$session_dir" ]; then
-        error "Session not found: $session_name"
-    fi
-
-    cd "$session_dir" || error "Cannot access session directory"
-
-    # Security notice (only for remote repos)
-    if [ $is_local_only -eq 0 ]; then
-        echo ""
-        echo -e "${DIM}┌─────────────────────────────────────────────────────────────┐${NC}"
-        echo -e "${DIM}│${NC} ${YELLOW}${BOLD}SECURITY NOTICE${NC}                                            ${DIM}│${NC}"
-        echo -e "${DIM}│${NC}                                                             ${DIM}│${NC}"
-        echo -e "${DIM}│${NC} Session data may contain sensitive information.             ${DIM}│${NC}"
-        echo -e "${DIM}│${NC} ${WHITE}${BOLD}Use a PRIVATE repository${NC} to protect your data.             ${DIM}│${NC}"
-        echo -e "${DIM}│${NC} Secrets are encrypted, but session files are ${RED}not${NC}.          ${DIM}│${NC}"
-        echo -e "${DIM}└─────────────────────────────────────────────────────────────┘${NC}"
-        echo ""
-    fi
-
-    # Check if already a git repo
-    if [ -d ".git" ]; then
-        warn "Session is already a git repository"
-
-        if [ $is_local_only -eq 1 ]; then
-            # Local-only mode - don't add remote
-            if git remote get-url origin >/dev/null 2>&1; then
-                info "Session already has a remote. Use 'cs -sync remote <url>' to change it."
-            else
-                info "Session is local-only (no remote configured)"
-            fi
-        else
-            # Remote mode - add or update remote
-            if git remote get-url origin >/dev/null 2>&1; then
-                git remote set-url origin "$remote_url"
-                info "Updated remote origin to: $remote_url"
-            else
-                git remote add origin "$remote_url"
-                info "Added remote origin: $remote_url"
-            fi
-        fi
-        return 0
-    fi
-
-    # Create .gitignore
-    create_session_gitignore "$session_dir"
-
-    # Initialize git repo
-    git init -q
-
-    # Set default branch to main
-    git branch -M main
-
-    if [ $is_local_only -eq 1 ]; then
-        # Local-only mode
-        info "Initialized local git repo for session: $session_name"
-        echo ""
-        info "This is a local-only repository (no remote)"
-        echo ""
-        info "Next steps:"
-        echo "  cs -sync push          # Commit changes locally"
-        echo "  cs -sync auto on       # Enable auto-commit on session end"
-        echo ""
-        info "To add a remote later:"
-        echo "  cs -sync remote <url>  # Add remote and push"
-    else
-        # Remote mode
-        git remote add origin "$remote_url"
-
-        info "Initialized git repo for session: $session_name"
-        info "Remote: $remote_url"
-        echo ""
-        info "Next steps:"
-        echo "  cs -sync push          # Push to remote"
-        echo "  cs -sync auto on       # Enable auto-sync"
-
-        if [ -z "${CS_SECRETS_PASSWORD:-}" ]; then
-            echo ""
-            warn "Note: Set CS_SECRETS_PASSWORD for secrets sync across machines"
-        fi
-    fi
-}
-
-# Scan memory files for injection/exfiltration patterns before syncing
-scan_memory_files() {
-    local session_dir="$1"
-    local memory_dir="$session_dir/.cs/memory"
-    local found=0
-
-    [ -d "$memory_dir" ] || return 0
-
-    for file in "$memory_dir"/*.md; do
-        [ -f "$file" ] || continue
-        local filename
-        filename=$(basename "$file")
-
-        # Invisible unicode characters (perl for portability — grep -P is unavailable on macOS)
-        if perl -e 'use open ":std",":encoding(UTF-8)"; while(<ARGV>){ exit 0 if /[\x{200b}\x{200c}\x{200d}\x{2060}\x{feff}\x{202a}-\x{202e}]/; } exit 1;' "$file" 2>/dev/null; then
-            warn "  $filename: contains invisible unicode characters (possible injection)"
-            found=$((found + 1))
-        fi
-
-        # Prompt injection patterns
-        while IFS= read -r match; do
-            warn "  $filename: $match"
-            found=$((found + 1))
-        done < <(grep -inE 'ignore\s+(previous|all|above)(\s+\w+)*\s+instructions|you\s+are\s+now\s+|system\s+prompt\s+override|disregard\s+(your|all|any)(\s+\w+)*\s+(instructions|rules|guidelines)' "$file" 2>/dev/null || true)
-
-        # Credential exfiltration via curl/wget
-        while IFS= read -r match; do
-            warn "  $filename: $match"
-            found=$((found + 1))
-        done < <(grep -inE 'curl\s+.*\$\{?\w*(KEY|TOKEN|SECRET|PASSWORD)|wget\s+.*\$\{?\w*(KEY|TOKEN|SECRET|PASSWORD)' "$file" 2>/dev/null || true)
-
-        # Secret file reads
-        while IFS= read -r match; do
-            warn "  $filename: $match"
-            found=$((found + 1))
-        done < <(grep -inE 'cat\s+.*(\.env|credentials|\.netrc|\.pgpass|authorized_keys)' "$file" 2>/dev/null || true)
-    done
-
-    if [ "$found" -gt 0 ]; then
-        warn ""
-        warn "Found $found suspicious pattern(s) in memory files."
-        warn "Review the content above. Use --force to push anyway."
-        return 1
-    fi
-    return 0
-}
-
-# Push session to remote
-sync_push() {
-    local session_name="$1"
-
-    if [ -z "$session_name" ]; then
-        error "No session specified."
-    fi
-
-    local session_dir="$SESSIONS_ROOT/$session_name"
-
-    if [ ! -d "$session_dir/.git" ]; then
-        error "Session git repo not found. This shouldn't happen for new sessions."
-    fi
-
-    cd "$session_dir" || error "Cannot access session directory"
-
-    # Check if remote exists
-    local has_remote=0
-    if git remote get-url origin >/dev/null 2>&1; then
-        has_remote=1
-    fi
-
-    # Export secrets to encrypted file if password is set
-    if [ -n "${CS_SECRETS_PASSWORD:-}" ]; then
-        local secrets_script
-        if secrets_script=$(find_secrets_script); then
-            if "$secrets_script" --session "$session_name" export-file 2>/dev/null; then
-                info "Exported secrets to secrets.enc"
-            fi
-        fi
-    fi
-
-    # Scan memory files for injection patterns
-    if ! scan_memory_files "$session_dir"; then
-        return 1
-    fi
-
-    # Stage all changes
-    git add -A
-
-    # Check if there are changes to commit
-    if git diff --cached --quiet; then
-        echo "No changes to commit"
-
-        if [ $has_remote -eq 1 ]; then
-            # Still try to push in case there are unpushed commits
-            if git rev-parse --abbrev-ref '@{upstream}' >/dev/null 2>&1; then
-                local ahead
-                ahead=$(git rev-list --count '@{upstream}..HEAD' 2>/dev/null || echo "0")
-                if [ "$ahead" -gt 0 ]; then
-                    git push origin main
-                    info "Pushed $ahead commit(s) to remote"
-                else
-                    echo "Already up to date with remote"
-                fi
-            else
-                # No upstream set, try initial push
-                git push -u origin main 2>/dev/null || echo "No commits to push"
-            fi
-        else
-            # Local-only mode
-            local total_commits
-            total_commits=$(git rev-list --count HEAD 2>/dev/null || echo "0")
-            info "Repository is local-only ($total_commits commit(s))"
-        fi
-        return 0
-    fi
-
-    # Commit with timestamp
-    local timestamp short_hostname
-    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    short_hostname=$(get_short_hostname)
-
-    git commit -q -m "Sync: $timestamp ($short_hostname)"
-
-    # Push or inform based on remote status
-    if [ $has_remote -eq 1 ]; then
-        if git push -u origin main; then
-            info "Pushed session to remote"
-        else
-            error "Push failed. Check your remote configuration."
-        fi
-    else
-        info "Committed locally (no remote configured)"
-        local total_commits
-        total_commits=$(git rev-list --count HEAD 2>/dev/null || echo "0")
-        echo "  Total commits: $total_commits"
-        echo ""
-        info "To push to a remote, run: cs -sync remote <url>"
-    fi
-}
-
-# Pull session from remote
-sync_pull() {
-    local session_name="$1"
-
-    if [ -z "$session_name" ]; then
-        error "No session specified."
-    fi
-
-    local session_dir="$SESSIONS_ROOT/$session_name"
-
-    if [ ! -d "$session_dir/.git" ]; then
-        error "Session git repo not found. This shouldn't happen for new sessions."
-    fi
-
-    cd "$session_dir" || error "Cannot access session directory"
-
-    # Check if remote exists
-    if ! git remote get-url origin >/dev/null 2>&1; then
-        info "Repository is local-only (no remote to pull from)"
-        local total_commits
-        total_commits=$(git rev-list --count HEAD 2>/dev/null || echo "0")
-        echo "  Total commits: $total_commits"
-        echo ""
-        info "To add a remote, run: cs -sync remote <url>"
-        return 0
-    fi
-
-    # Stash any local changes
-    local had_changes=0
-    if ! git diff --quiet || ! git diff --cached --quiet; then
-        git stash -q
-        had_changes=1
-    fi
-
-    # Pull with rebase to avoid merge commits
-    if git pull --rebase origin main 2>/dev/null; then
-        info "Pulled latest changes"
-    else
-        warn "Pull failed - may need manual resolution"
-        if [ $had_changes -eq 1 ]; then
-            git stash pop -q 2>/dev/null || true
-        fi
-        return 1
-    fi
-
-    # Restore stashed changes
-    if [ $had_changes -eq 1 ]; then
-        if ! git stash pop -q 2>/dev/null; then
-            warn "Local changes conflicted - saved in git stash"
-        fi
-    fi
-
-    # Import secrets from sync file (prefer age over enc)
-    local secrets_script
-    if secrets_script=$(find_secrets_script); then
-        local age_file="$session_dir/.cs/secrets.age"
-        local enc_file="$session_dir/.cs/secrets.enc"
-
-        if [ -f "$age_file" ]; then
-            # Prefer age-encrypted file
-            if "$secrets_script" --session "$session_name" import-file "$age_file" 2>/dev/null; then
-                info "Imported secrets from secrets.age"
-            else
-                warn "Failed to import secrets.age - your key may not be in recipients list"
-            fi
-        elif [ -f "$enc_file" ]; then
-            # Legacy password-encrypted file
-            if [ -n "${CS_SECRETS_PASSWORD:-}" ]; then
-                if "$secrets_script" --session "$session_name" import-file "$enc_file" 2>/dev/null; then
-                    info "Imported secrets from secrets.enc"
-                    # Offer migration to age if available
-                    if "$secrets_script" age init >/dev/null 2>&1; then
-                        echo ""
-                        info "Tip: Migrate to age encryption for easier sync (no shared password needed)"
-                        echo "  Run: cs $session_name -secrets export-file"
-                    fi
-                fi
-            else
-                warn "secrets.enc found but CS_SECRETS_PASSWORD not set"
-            fi
-        fi
-    fi
-
-    info "Session synced"
-}
-
-# Show sync status
-sync_status() {
-    local session_name="$1"
-
-    if [ -z "$session_name" ]; then
-        error "No session specified."
-    fi
-
-    local session_dir="$SESSIONS_ROOT/$session_name"
-
-    echo -e "${BOLD}Session:${NC} $session_name"
-    echo -e "${BOLD}Path:${NC} $session_dir"
-    echo ""
-
-    if [ ! -d "$session_dir/.git" ]; then
-        echo -e "${YELLOW}Git not initialized${NC} - This shouldn't happen for new sessions"
-        return 0
-    fi
-
-    cd "$session_dir" || error "Cannot access session directory"
-
-    local remote
-    remote=$(git remote get-url origin 2>/dev/null || echo "none")
-    echo -e "${BOLD}Remote:${NC} $remote"
-
-    local branch
-    branch=$(git branch --show-current 2>/dev/null || echo "unknown")
-    echo -e "${BOLD}Branch:${NC} $branch"
-
-    local auto_sync
-    auto_sync=$(get_sync_config "$session_dir" "auto_sync" "off")
-    echo -e "${BOLD}Auto-sync:${NC} $auto_sync"
-
-    local secrets_backend script_dir
-    script_dir="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")"
-    secrets_backend=$(CLAUDE_SESSION_NAME="$session_name" "$script_dir/cs-secrets" backend 2>/dev/null | head -1 | sed 's/Storage backend: //')
-    echo -e "${BOLD}Secrets:${NC} $secrets_backend"
-
-    echo ""
-
-    # Show local changes status
-    local changes
-    changes=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')
-    if [ "$changes" -gt 0 ]; then
-        echo -e "${YELLOW}$changes uncommitted change(s)${NC}"
-    else
-        echo -e "${GREEN}No local changes${NC}"
-    fi
-
-    # Check if remote exists
-    if [ "$remote" = "none" ]; then
-        # Local-only mode
-        local total_commits
-        total_commits=$(git rev-list --count HEAD 2>/dev/null || echo "0")
-        echo -e "${GOLD}Local-only repository ($total_commits commit(s))${NC}"
-        echo ""
-        info "To add a remote, run: cs $session_name -sync remote <url>"
-    else
-        # Remote mode - check remote status
-        # Check remote status (fetch quietly)
-        git fetch -q origin 2>/dev/null || true
-
-        # Check if upstream is configured
-        if ! git rev-parse --abbrev-ref '@{upstream}' >/dev/null 2>&1; then
-            echo -e "${YELLOW}Warning: No upstream tracking configured for branch '$branch'${NC}"
-            echo -e "${YELLOW}Run: git branch --set-upstream-to=origin/$branch $branch${NC}"
-        else
-            local ahead behind
-            ahead=$(git rev-list --count '@{upstream}..HEAD' 2>/dev/null || echo "0")
-            behind=$(git rev-list --count 'HEAD..@{upstream}' 2>/dev/null || echo "0")
-
-            if [ "$ahead" -gt 0 ]; then
-                echo -e "${GOLD}$ahead commit(s) ahead of remote${NC}"
-            fi
-            if [ "$behind" -gt 0 ]; then
-                echo -e "${GOLD}$behind commit(s) behind remote${NC}"
-            fi
-            if [ "$ahead" -eq 0 ] && [ "$behind" -eq 0 ]; then
-                echo -e "${GREEN}Up to date with remote${NC}"
-            fi
-        fi
-    fi
-
-    # Secrets status
-    echo ""
-    if [ -f "$session_dir/.cs/secrets.enc" ]; then
-        local enc_time
-        enc_time=$(get_file_mtime "$session_dir/.cs/secrets.enc")
-        echo -e "${BOLD}Secrets file:${NC} secrets.enc (modified: $enc_time)"
-    else
-        echo -e "${BOLD}Secrets file:${NC} not exported"
-    fi
-}
-
-# Toggle auto-sync
-sync_auto() {
-    local session_name="$1"
-    local setting="$2"
-
-    if [ -z "$session_name" ]; then
-        error "No session specified."
-    fi
-
-    local session_dir="$SESSIONS_ROOT/$session_name"
-
-    if [ ! -d "$session_dir" ]; then
-        error "Session not found: $session_name"
-    fi
-
-    if [ -z "$setting" ]; then
-        # Show current setting
-        local current
-        current=$(get_sync_config "$session_dir" "auto_sync" "off")
-        echo "Auto-sync: $current"
-        return 0
-    fi
-
-    case "$setting" in
-        on|off)
-            set_sync_config "$session_dir" "auto_sync" "$setting"
-            info "Auto-sync set to: $setting"
-            ;;
-        *)
-            error "Usage: cs -sync auto [on|off]"
-            ;;
-    esac
-}
-
-# Check if argument looks like a URL
-is_remote_url() {
-    local arg="$1"
-    # URLs contain :// or have @ followed by :
-    [[ "$arg" == *"://"* ]] || [[ "$arg" == *"@"*":"* ]]
-}
-
-# Clone session from remote
-sync_clone() {
-    local first_arg="$1"
-    local second_arg="${2:-}"
-    local remote_url=""
-    local session_name=""
-
-    if [ -z "$first_arg" ]; then
-        error "Usage: cs -sync clone <session-name|remote-url> [session-name]"
-    fi
-
-    # Detect if first arg is URL or session name
-    if is_remote_url "$first_arg"; then
-        # First arg is a URL
-        remote_url="$first_arg"
-        session_name="${second_arg:-$(basename "$remote_url" .git)}"
-    else
-        # First arg is a session name - construct URL from prefix
-        session_name="$first_arg"
-        if remote_url=$(construct_remote_url "$session_name"); then
-            info "Using remote: $remote_url"
-        else
-            error "No URL provided. Either specify a URL or set CS_SYNC_PREFIX."
-        fi
-    fi
-
-    validate_session_name "$session_name"
-
-    local session_dir="$SESSIONS_ROOT/$session_name"
-
-    if [ -d "$session_dir" ]; then
-        error "Session already exists: $session_name"
-    fi
-
-    # Clone the repo
-    info "Cloning session: $session_name"
-    if ! git clone "$remote_url" "$session_dir"; then
-        error "Clone failed. Check the remote URL."
-    fi
-
-    info "Cloned session to: $session_dir"
-
-    # Migrate cloned session if it uses old flat layout
-    migrate_session "$session_dir"
-
-    # Import secrets if available
-    local secrets_file="$session_dir/.cs/secrets.enc"
-    if [ -f "$secrets_file" ]; then
-        if [ -z "${CS_SECRETS_PASSWORD:-}" ]; then
-            warn "secrets.enc found but CS_SECRETS_PASSWORD not set"
-            warn "Set CS_SECRETS_PASSWORD and run: cs -secrets --session $session_name import-file"
-        else
-            local secrets_script
-            if secrets_script=$(find_secrets_script); then
-                "$secrets_script" --session "$session_name" import-file 2>/dev/null && \
-                    info "Imported secrets"
-            fi
-        fi
-    fi
-
-    echo ""
-    info "Start session with: cs $session_name"
 }
 
 # Remove a hook registration from any event in a settings JSON string,
@@ -3882,60 +2863,6 @@ run_uninstall() {
     info "Uninstall complete!"
 }
 
-# Main sync command router
-run_sync() {
-    local subcommand="${1:-}"
-    shift 2>/dev/null || true
-
-    # Determine session name from environment or --session flag
-    local session_name="${CLAUDE_SESSION_NAME:-}"
-
-    # Parse --session flag if present
-    while [ $# -gt 0 ]; do
-        case "$1" in
-            -s|--session)
-                session_name="$2"
-                shift 2
-                ;;
-            *)
-                break
-                ;;
-        esac
-    done
-
-    case "$subcommand" in
-        remote)
-            sync_remote "$session_name" "${1:-}"
-            ;;
-        push)
-            sync_push "$session_name"
-            ;;
-        pull)
-            sync_pull "$session_name"
-            ;;
-        status|st)
-            sync_status "$session_name"
-            ;;
-        auto)
-            sync_auto "$session_name" "${1:-}"
-            ;;
-        clone)
-            sync_clone "${1:-}" "${2:-}"
-            ;;
-        "")
-            # Default to status if in a session, otherwise show help
-            if [ -n "$session_name" ]; then
-                sync_status "$session_name"
-            else
-                error "Usage: cs -sync <remote|push|pull|status|auto|clone>"
-            fi
-            ;;
-        *)
-            error "Unknown sync command: $subcommand. Use: remote, push, pull, status, auto, clone"
-            ;;
-    esac
-}
-
 # Main function
 main() {
     if [ $# -eq 0 ]; then
@@ -4007,11 +2934,6 @@ main() {
             run_secrets "$@"
             return 0
             ;;
-        -sync|-s)
-            shift
-            run_sync "$@"
-            return 0
-            ;;
         -uninstall)
             run_uninstall
             return 0
@@ -4061,11 +2983,6 @@ main() {
             run_lint "$@"
             return $?
             ;;
-        -remote)
-            shift
-            run_remote "$@"
-            return 0
-            ;;
         -*)
             error "Unknown command: $cmd. Run 'cs -help' for usage."
             ;;
@@ -4073,14 +2990,6 @@ main() {
 
     local session_name="$cmd"
     local force_flag=""
-    local remote_host=""
-    local move_to_host=""
-
-    # Detect host:session syntax (user@host:session)
-    if [[ "$session_name" == *"@"*":"* ]]; then
-        remote_host="${session_name%:*}"
-        session_name="${session_name##*:}"
-    fi
 
     # Validate inputs
     validate_session_name "$session_name"
@@ -4089,25 +2998,8 @@ main() {
     shift  # Remove session name / cmd
     while [ $# -gt 0 ]; do
         case "$1" in
-            -sync|-s)
-                shift
-                # Block -sync on remote sessions
-                if [ -f "$SESSIONS_ROOT/$session_name/.cs/remote.conf" ]; then
-                    error "Cannot run -sync on a remote session. Connect first with: cs $session_name"
-                fi
-                export CLAUDE_SESSION_NAME="$session_name"
-                export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
-                export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
-                export CLAUDE_ARTIFACT_DIR="$SESSIONS_ROOT/$session_name/.cs/artifacts"
-                run_sync "$@"
-                return 0
-                ;;
             -secrets)
                 shift
-                # Block -secrets on remote sessions
-                if [ -f "$SESSIONS_ROOT/$session_name/.cs/remote.conf" ]; then
-                    error "Cannot run -secrets on a remote session. Connect first with: cs $session_name"
-                fi
                 export CLAUDE_SESSION_NAME="$session_name"
                 export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
                 export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
@@ -4119,74 +3011,13 @@ main() {
                 force_flag="true"
                 shift
                 ;;
-            --on)
-                remote_host="${2:-}"
-                if [ -z "$remote_host" ]; then
-                    error "Usage: cs <session> --on <host>"
-                fi
-                shift 2
-                ;;
-            --move-to)
-                move_to_host="${2:-}"
-                if [ -z "$move_to_host" ]; then
-                    error "Usage: cs <session> --move-to <host>"
-                fi
-                shift 2
-                ;;
             *)
-                error "Unknown session command: $1. Use -sync, -secrets, --on, --move-to, or --force."
+                error "Unknown session command: $1. Use -secrets or --force."
                 ;;
         esac
     done
 
-    # Handle --move-to: move a local session to a remote host
-    if [ -n "$move_to_host" ]; then
-        move_session_to_remote "$session_name" "$move_to_host"
-        return 0
-    fi
-
-    # Handle --on or host:session: create/update remote stub and connect
-    if [ -n "$remote_host" ]; then
-        local session_dir="$SESSIONS_ROOT/$session_name"
-
-        # Validate the host spec (must contain @ or be in registry)
-        if [[ "$remote_host" != *"@"* ]]; then
-            if ! resolve_remote_host "$remote_host" >/dev/null 2>&1; then
-                error "Host '$remote_host' not found. Register it with: cs -remote add <name> <user@host>"
-            fi
-        fi
-
-        if [ -d "$session_dir" ] && ! is_remote_session "$session_dir"; then
-            # Local session exists, can't use --on
-            error "Session '$session_name' exists locally. Use --move-to to migrate it."
-        fi
-
-        if is_remote_session "$session_dir"; then
-            local current_host
-            current_host=$(get_session_remote "$session_dir")
-            local current_resolved new_resolved
-            current_resolved=$(resolve_remote_host "$current_host" 2>/dev/null || echo "$current_host")
-            new_resolved=$(resolve_remote_host "$remote_host" 2>/dev/null || echo "$remote_host")
-            if [ "$current_resolved" != "$new_resolved" ]; then
-                warn "Updating remote host from $current_host to $remote_host"
-                echo "host=$remote_host" > "$session_dir/.cs/remote.conf"
-            fi
-        else
-            create_remote_stub "$session_name" "$remote_host"
-        fi
-
-        connect_remote "$session_name" "$remote_host"
-        return 0
-    fi
-
-    # Check if existing session is remote
     local session_dir="$SESSIONS_ROOT/$session_name"
-    if [ -d "$session_dir" ] && is_remote_session "$session_dir"; then
-        local host
-        host=$(get_session_remote "$session_dir")
-        connect_remote "$session_name" "$host"
-        return 0
-    fi
 
     check_dependencies
 

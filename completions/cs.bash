@@ -13,10 +13,7 @@ _cs_completions() {
     local sessions_root="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 
     # Global flags
-    local global_flags="-list -ls -remove -rm -remote -sync -s -secrets -checkpoint -search -update -uninstall -help -h -version -v"
-
-    # Sync subcommands
-    local sync_cmds="remote push pull status st auto clone"
+    local global_flags="-list -ls -remove -rm -secrets -checkpoint -search -update -uninstall -help -h -version -v"
 
     # Secrets subcommands
     local secrets_cmds="set store get list ls delete rm purge export export-file import-file migrate backend"
@@ -24,14 +21,11 @@ _cs_completions() {
     # Checkpoint subcommands
     local checkpoint_cmds="list show"
 
-    # Remote subcommands
-    local remote_cmds="add list ls remove rm"
-
     # Update subcommands
     local update_cmds="--check -c --force -f"
 
     # Session-level options
-    local session_opts="-sync -s -secrets --on --move-to --force"
+    local session_opts="-secrets --force"
 
     # Get list of session names
     _cs_sessions() {
@@ -41,9 +35,7 @@ _cs_completions() {
     }
 
     # Determine context based on previous words
-    local in_sync=false
     local in_secrets=false
-    local in_remote=false
     local in_update=false
     local in_checkpoint=false
     local has_session=false
@@ -51,39 +43,19 @@ _cs_completions() {
 
     for ((i=1; i < cword; i++)); do
         case "${words[i]}" in
-            -sync|-s)
-                in_sync=true
-                in_secrets=false
-                in_remote=false
-                in_update=false
-                in_checkpoint=false
-                ;;
             -secrets)
                 in_secrets=true
-                in_sync=false
-                in_remote=false
-                in_update=false
-                in_checkpoint=false
-                ;;
-            -remote)
-                in_remote=true
-                in_sync=false
-                in_secrets=false
                 in_update=false
                 in_checkpoint=false
                 ;;
             -update)
                 in_update=true
-                in_sync=false
                 in_secrets=false
-                in_remote=false
                 in_checkpoint=false
                 ;;
             -checkpoint)
                 in_checkpoint=true
-                in_sync=false
                 in_secrets=false
-                in_remote=false
                 in_update=false
                 ;;
             -remove|-rm)
@@ -94,7 +66,7 @@ _cs_completions() {
                 ;;
             *)
                 # A non-flag word that's not a subcommand is likely a session name
-                if ! $in_sync && ! $in_secrets && ! $after_remove && ! $in_remote && ! $in_update && ! $in_checkpoint; then
+                if ! $in_secrets && ! $after_remove && ! $in_update && ! $in_checkpoint; then
                     has_session=true
                 fi
                 ;;
@@ -107,21 +79,9 @@ _cs_completions() {
         return
     fi
 
-    # Context: after -remote, complete with remote subcommands
-    if $in_remote; then
-        COMPREPLY=($(compgen -W "$remote_cmds" -- "$cur"))
-        return
-    fi
-
     # Context: after -update, complete with update subcommands
     if $in_update; then
         COMPREPLY=($(compgen -W "$update_cmds" -- "$cur"))
-        return
-    fi
-
-    # Context: after -sync or -s, complete with sync subcommands
-    if $in_sync; then
-        COMPREPLY=($(compgen -W "$sync_cmds" -- "$cur"))
         return
     fi
 
