@@ -2,6 +2,25 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
+## 2026.6.9
+
+cs is now a local-only tool: the cross-machine sync and remote-session subsystems have been removed.
+
+### Removed
+
+- **Git cross-machine sync** — `cs -sync` (push/pull/status/clone/remote) and the `auto_sync` setting. Sessions are no longer auto-committed or pushed at session end (this stops cs from writing "Session update" commits into an adopted project's real branch).
+- **SSH remote sessions** — `cs -remote`, `cs <name> --on <host>`, `cs <name> --move-to <host>`, the `user@host:name` connect form, and the remote-host registry. The TUI's Move-to-remote (`m`), async push/pull/status (`P`/`L`/`S`), and the Remote column are removed.
+
+### Kept
+
+- **Crash recovery** via the shadow autosave ref (`refs/cs/auto`) — unchanged.
+- **Secrets** — `cs-secrets export-file` / `import-file` (age-encrypted) remain as a manual backup/transfer mechanism.
+- **Software updates** — `cs -update` is unaffected.
+
+### Migration
+
+- Inert `.cs/sync.conf` / `.cs/remote.conf` files are removed automatically on next session resume.
+
 ## 2026.6.8
 
 bash 3.2 (macOS system bash) compatibility.
