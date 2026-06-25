@@ -980,6 +980,43 @@ _exec_fresh_rebind() {
     exec $CLAUDE_CODE_BIN --name "$session_name" --session-id "$new_uuid" ${color_arg:+"$color_arg"}
 }
 
+# Normalize an arbitrary identity string to a filesystem-safe slug.
+_slugify() {
+    printf '%s' "$1" \
+        | tr '[:upper:]' '[:lower:]' \
+        | sed 's/[^a-z0-9][^a-z0-9]*/-/g; s/^-//; s/-*$//'
+}
+
+# Resolve the current actor as a slug.
+# Precedence: $CS_ACTOR > .cs/local/identity (first line) > git user.email > git user.name > "unknown"
+cs_actor_slug() {
+    local raw=""
+    if [ -n "${CS_ACTOR:-}" ]; then
+        raw="$CS_ACTOR"
+    elif [ -n "${CLAUDE_SESSION_META_DIR:-}" ] && [ -f "$CLAUDE_SESSION_META_DIR/local/identity" ]; then
+        IFS= read -r raw < "$CLAUDE_SESSION_META_DIR/local/identity"
+    else
+        raw=$(git config user.email 2>/dev/null || true)
+        [ -z "$raw" ] && raw=$(git config user.name 2>/dev/null || true)
+    fi
+    [ -z "$raw" ] && raw="unknown"
+    _slugify "$raw"
+}
+
+# Print the resolved actor slug; warn if the pinned local identity disagrees with git.
+cmd_whoami() {
+    echo "actor: $(cs_actor_slug)"
+    if [ -n "${CLAUDE_SESSION_META_DIR:-}" ] && [ -f "$CLAUDE_SESSION_META_DIR/local/identity" ]; then
+        local file_slug="" git_raw="" git_slug=""
+        file_slug=$(_slugify "$(head -1 "$CLAUDE_SESSION_META_DIR/local/identity")")
+        git_raw=$(git config user.email 2>/dev/null || git config user.name 2>/dev/null || true)
+        git_slug=$(_slugify "$git_raw")
+        if [ -n "$git_slug" ] && [ "$file_slug" != "$git_slug" ]; then
+            warn "cs actor '$file_slug' differs from git identity '$git_slug' (using cs actor)"
+        fi
+    fi
+}
+
 # Create session directory structure
 create_session_structure() {
     local session_dir="$1"
@@ -2926,6 +2963,10 @@ main() {
             ;;
         -adopt)
             adopt_session "${2:-}"
+            return 0
+            ;;
+        -whoami)
+            cmd_whoami
             return 0
             ;;
         -secrets)
