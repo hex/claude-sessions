@@ -2,6 +2,12 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
+## 2026.6.11
+
+### Fixes
+
+- **Migration:** resuming an older session now backfills the `.cs/local/` ignore rule into its `.gitignore`. Before this, a pre-existing `.cs/` session never gained that rule, so its per-actor state (watermark, lock) could be committed, which then tripped the v2026.6.10 leak guard and blocked the next resume. The `.gitignore` update is idempotent and never clobbers a project's existing entries.
+
 ## 2026.6.10
 
 cs gains multi-person co-development awareness: when a project's `.cs/` is committed to git, multiple people can collaborate with attributed, conflict-free, and visible contributions, all derived from git history with no servers or coordination.
