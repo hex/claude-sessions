@@ -29,6 +29,14 @@ pub struct Palette {
     pub rust: Color,
     /// Alternating row background.
     pub zebra: Color,
+    /// Selected-row background — one elevation step warmer/lighter than zebra.
+    pub sel_bg: Color,
+    /// Header band background gradient stops (left → right): rust → orange → amber.
+    pub header_bg_lo: Color,
+    pub header_bg_mid: Color,
+    pub header_bg_hi: Color,
+    /// Header label text — near-white, sits on the saturated band.
+    pub header_fg: Color,
     pub flash_success: Color,
     pub flash_error: Color,
     /// Column separator glyphs.
@@ -48,6 +56,11 @@ impl Palette {
             gold: Color::Rgb(255, 193, 7),
             rust: Color::Rgb(230, 74, 25),
             zebra: Color::Rgb(32, 29, 28),
+            sel_bg: Color::Rgb(60, 46, 36),
+            header_bg_lo: Color::Rgb(221, 80, 20),
+            header_bg_mid: Color::Rgb(237, 128, 0),
+            header_bg_hi: Color::Rgb(246, 154, 0),
+            header_fg: Color::Rgb(252, 250, 246),
             flash_success: Color::Rgb(30, 50, 30),
             flash_error: Color::Rgb(55, 25, 25),
             sep: Color::Rgb(50, 45, 42),
@@ -68,6 +81,11 @@ impl Palette {
             gold: Color::Rgb(156, 118, 56),
             rust: Color::Rgb(166, 86, 60),
             zebra: Color::Rgb(238, 232, 224),
+            sel_bg: Color::Rgb(231, 215, 195),
+            header_bg_lo: Color::Rgb(221, 80, 20),
+            header_bg_mid: Color::Rgb(237, 128, 0),
+            header_bg_hi: Color::Rgb(246, 154, 0),
+            header_fg: Color::Rgb(252, 250, 246),
             flash_success: Color::Rgb(214, 236, 206),
             flash_error: Color::Rgb(246, 214, 210),
             sep: Color::Rgb(216, 207, 196),
@@ -107,10 +125,41 @@ impl Palette {
         } else {
             1.0
         };
-        let (fr, fg_, fb) = rgb_of(self.fg);
-        let (cr, cg, cb) = rgb_of(self.comment);
-        let lerp = |a: u8, b: u8| -> u8 { (a as f32 + t * (b as f32 - a as f32)) as u8 };
-        Color::Rgb(lerp(fr, cr), lerp(fg_, cg), lerp(fb, cb))
+        let (r, g, b) = lerp_rgb(rgb_of(self.fg), rgb_of(self.comment), t);
+        Color::Rgb(r, g, b)
+    }
+
+    /// Categorical "aliveness" hue for a session's last activity: green when live,
+    /// warming down through gold and orange, then settling to muted grey once
+    /// dormant. Drives the recency heat dot and the Age column.
+    pub fn heat_color(&self, modified_ts: Option<SystemTime>) -> Color {
+        let ts = match modified_ts {
+            Some(t) => t,
+            None => return self.comment,
+        };
+        let secs = match SystemTime::now().duration_since(ts) {
+            Ok(d) => d.as_secs(),
+            Err(_) => return self.green, // future timestamp — treat as live
+        };
+        const HOUR: u64 = 3600;
+        const DAY: u64 = 86400;
+        if secs < HOUR {
+            self.green
+        } else if secs < DAY {
+            self.gold
+        } else if secs < 30 * DAY {
+            self.orange
+        } else {
+            self.comment
+        }
+    }
+
+    /// A point on a rust↔gold triangle wave for the selected-row shimmer.
+    /// `phase` is expected in [0, 1); the wave peaks at gold around phase 0.5.
+    pub fn shimmer_color(&self, phase: f32) -> Color {
+        let tri = if phase < 0.5 { phase * 2.0 } else { (1.0 - phase) * 2.0 };
+        let (r, g, b) = lerp_rgb(rgb_of(self.rust), rgb_of(self.gold), tri);
+        Color::Rgb(r, g, b)
     }
 }
 
@@ -120,6 +169,12 @@ pub fn rgb_of(c: Color) -> (u8, u8, u8) {
         Color::Rgb(r, g, b) => (r, g, b),
         _ => (128, 128, 128),
     }
+}
+
+/// Linearly blend two RGB triples by `t` in [0, 1] (truncating to u8).
+pub fn lerp_rgb(a: (u8, u8, u8), b: (u8, u8, u8), t: f32) -> (u8, u8, u8) {
+    let lerp = |x: u8, y: u8| -> u8 { (x as f32 + t * (y as f32 - x as f32)) as u8 };
+    (lerp(a.0, b.0), lerp(a.1, b.1), lerp(a.2, b.2))
 }
 
 /// Parse a `light`/`dark` string (case-insensitive).
@@ -210,6 +265,24 @@ mod tests {
     }
 
     #[test]
+    fn heat_color_buckets() {
+        let p = Palette::dark();
+        let ago = |s: u64| SystemTime::now() - Duration::from_secs(s);
+        assert_eq!(p.heat_color(None), p.comment);
+        assert_eq!(p.heat_color(Some(ago(60))), p.green); // < 1h → live
+        assert_eq!(p.heat_color(Some(ago(5 * 3600))), p.gold); // < 1d
+        assert_eq!(p.heat_color(Some(ago(5 * 86400))), p.orange); // < 30d
+        assert_eq!(p.heat_color(Some(ago(60 * 86400))), p.comment); // dormant
+    }
+
+    #[test]
+    fn shimmer_endpoints_are_rust_and_gold() {
+        let p = Palette::dark();
+        assert_eq!(p.shimmer_color(0.0), p.rust); // trough → rust
+        assert_eq!(p.shimmer_color(0.5), p.gold); // peak → gold
+    }
+
+    #[test]
     fn theme_override_parsing() {
         assert_eq!(theme_from_str("light"), Some(Theme::Light));
         assert_eq!(theme_from_str("DARK"), Some(Theme::Dark));
@@ -220,16 +293,20 @@ mod tests {
 
 pub struct Icons {
     pub lock: &'static str,
+    /// Glyph shown before a Github repository slug.
+    pub branch: &'static str,
 }
 
 pub fn icons() -> Icons {
     if std::env::var("CS_NERD_FONTS").as_deref() == Ok("1") {
         Icons {
             lock: "\u{f033e}",
+            branch: "\u{e0a0}",
         }
     } else {
         Icons {
             lock: "\u{26bf}",
+            branch: "\u{2387}",
         }
     }
 }

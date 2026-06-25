@@ -323,20 +323,19 @@ pub struct App {
 
 impl App {
     pub fn new(sessions: Vec<Session>) -> Self {
-        let filtered: Vec<usize> = (0..sessions.len()).collect();
         let mut table_state = TableState::default();
         if !sessions.is_empty() {
             table_state.select(Some(0));
         }
-        App {
+        let mut app = App {
             sessions,
-            filtered,
+            filtered: Vec::new(),
             table_state,
             mode: Mode::Normal,
             table_area: ratatui::layout::Rect::default(),
             column_widths: Vec::new(),
-            sort_col: SortColumn::Name,
-            sort_dir: SortDirection::Asc,
+            sort_col: SortColumn::Modified,
+            sort_dir: SortDirection::Desc,
             search_input: TextInput::new(),
             rename_input: TextInput::new(),
             create_input: TextInput::new(),
@@ -357,7 +356,11 @@ impl App {
             preview_cache: HashMap::new(),
             show_preview: true,
             theme: Palette::dark(),
-        }
+        };
+        // Apply the default sort (recency) so the initial view is ordered, not
+        // just scan order. Also seeds section labels for the grouped view.
+        app.apply_filter_and_sort();
+        app
     }
 
     pub fn set_status(&mut self, text: impl Into<String>, level: StatusLevel) {
@@ -1299,13 +1302,16 @@ impl App {
     }
 
     fn column_at_x(&self, x: u16) -> Option<SortColumn> {
-        let mut offset = self.table_area.x + 1; // +1 for border
-        offset += 3; // highlight_symbol ">> " width
+        // Mirrors the layout in ui::render_session_table: border, then the
+        // selection symbol, then columns separated by COL_SPACING. Half the gap
+        // on each side counts toward the neighbouring column for hit-testing.
+        let mut offset = self.table_area.x + 1 + crate::ui::SELECT_WIDTH;
+        let span = crate::ui::COL_SPACING;
         for (i, &width) in self.column_widths.iter().enumerate() {
-            if x >= offset && x < offset + width + 3 {
+            if x >= offset && x < offset + width + span {
                 return self.visible_sort_columns.get(i).copied();
             }
-            offset += width + 3; // +3 for column_spacing(3)
+            offset += width + span;
         }
         None
     }
@@ -1491,14 +1497,16 @@ mod tests {
     #[test]
     fn cycle_sort_toggles_direction() {
         let mut app = App::new(sample_sessions());
-        assert_eq!(app.sort_col, SortColumn::Name);
-        assert_eq!(app.sort_dir, SortDirection::Asc);
-
-        app.cycle_sort(SortColumn::Name);
+        // Default sort is recency — most-recently-modified first.
+        assert_eq!(app.sort_col, SortColumn::Modified);
         assert_eq!(app.sort_dir, SortDirection::Desc);
 
-        app.cycle_sort(SortColumn::Name);
+        // Re-selecting the active column toggles its direction.
+        app.cycle_sort(SortColumn::Modified);
         assert_eq!(app.sort_dir, SortDirection::Asc);
+
+        app.cycle_sort(SortColumn::Modified);
+        assert_eq!(app.sort_dir, SortDirection::Desc);
     }
 
     #[test]
@@ -1507,6 +1515,33 @@ mod tests {
         app.cycle_sort(SortColumn::Created);
         assert_eq!(app.sort_col, SortColumn::Created);
         assert_eq!(app.sort_dir, SortDirection::Asc);
+    }
+
+    #[test]
+    fn default_view_is_sorted_by_recency() {
+        let mk = |name: &str, modified: &str| Session {
+            name: name.into(),
+            is_adopted: false,
+            created: Some("2026-01-01 10:00".into()),
+            modified: Some(modified.into()),
+            modified_ts: None,
+            lock_pid: None,
+            is_locked: false,
+            secrets_count: 0,
+            git_repo: None,
+        };
+        // Insertion order deliberately differs from recency order.
+        let app = App::new(vec![
+            mk("old", "2026-01-01 09:00"),
+            mk("newest", "2026-06-20 09:00"),
+            mk("mid", "2026-03-15 09:00"),
+        ]);
+        let order: Vec<&str> = app
+            .filtered
+            .iter()
+            .map(|&i| app.sessions[i].name.as_str())
+            .collect();
+        assert_eq!(order, vec!["newest", "mid", "old"]);
     }
 
     #[test]

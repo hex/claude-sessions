@@ -4,7 +4,9 @@
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, Wrap};
+use ratatui::widgets::{
+    Block, BorderType, Borders, Cell, Clear, HighlightSpacing, Paragraph, Row, Table, Wrap,
+};
 use ratatui::Frame;
 
 use ratatui::layout::Alignment;
@@ -13,6 +15,15 @@ use crate::app::{App, FlashKind, Mode, SortColumn, SortDirection, StatusLevel};
 use crate::theme::{self, Palette};
 
 const PREVIEW_MIN_WIDTH: u16 = 120;
+
+/// Blank cells between table columns. Structure is carried by alignment, zebra
+/// striping, and the header rule — not by vertical divider glyphs.
+pub const COL_SPACING: u16 = 2;
+/// Width reserved at the left of each row for the selection accent bar ("▌ ").
+pub const SELECT_WIDTH: u16 = 2;
+/// The selection accent-bar glyph. Set as the row highlight symbol and located
+/// again post-render to shimmer it — kept here so the two sites can't drift.
+const SELECT_BAR: &str = "\u{258c}";
 
 /// Truncate a string to fit within max_width, respecting UTF-8 char boundaries.
 fn truncate_str(s: &str, max_width: usize) -> String {
@@ -113,7 +124,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
     let mut header_cells = vec![
         Cell::from(format!("Session{}", sort_indicator(SortColumn::Name))),
         Cell::from(format!("Created{}", sort_indicator(SortColumn::Created))),
-        Cell::from(format!("Modified{}", sort_indicator(SortColumn::Modified))),
+        Cell::from(format!("Age{}", sort_indicator(SortColumn::Modified))),
     ];
     if show_secrets {
         header_cells.push(Cell::from(format!("Secrets{}", sort_indicator(SortColumn::Secrets))));
@@ -123,10 +134,13 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
     }
 
     let header = Row::new(header_cells)
-        .style(Style::default().fg(p.rust).add_modifier(Modifier::BOLD))
+        .style(Style::default().fg(p.header_fg).add_modifier(Modifier::BOLD))
         .bottom_margin(1);
 
     let is_searching = app.mode == Mode::Search && !app.search_input.text().is_empty();
+
+    // One wall-clock read per frame, shared by every row's recency math.
+    let now = std::time::SystemTime::now();
 
     let rows: Vec<Row> = app
         .filtered
@@ -137,8 +151,13 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             // During search typing, dim rows that don't match
             let dimmed = is_searching && !app.fuzzy_indices.contains_key(&i);
 
+            // Recency heat: green when live, fading to grey when dormant. Computed
+            // once and reused for the dot and the Age column.
+            let heat = if dimmed { p.comment } else { p.heat_color(s.modified_ts) };
+
             // Build gutter indicators as colored prefix spans
             let mut name_spans: Vec<Span> = Vec::new();
+            name_spans.push(Span::styled("\u{25cf} ", Style::default().fg(heat)));
             if app.marked_sessions.contains(&s.name) {
                 let mark_color = if dimmed { p.comment } else { p.gold };
                 name_spans.push(Span::styled(
@@ -272,12 +291,31 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
 
             let name_cell = Cell::from(ratatui::text::Text::from(name_lines));
 
+            // Created is reference context — show the date only (the preview
+            // pane carries the full timestamp). Modified is the hot column —
+            // show a compact age that pairs with the recency colour.
+            let created_date = s
+                .created
+                .as_deref()
+                .map(|c| c.get(..10).unwrap_or(c).to_string())
+                .unwrap_or_else(|| "-".into());
+            let modified_rel = match s.modified_ts {
+                Some(ts) => crate::session::relative_age(ts, now),
+                None => "-".into(),
+            };
+
+            // Age rides the heat ramp and goes bold while the session is recent
+            // (any heat tone other than the dormant grey), so live work pops out
+            // of a list that is mostly dormant.
+            let mut age_style = Style::default().fg(heat);
+            if heat != p.comment {
+                age_style = age_style.add_modifier(Modifier::BOLD);
+            }
+
             let mut cells = vec![
                 name_cell,
-                Cell::from(s.created.clone().unwrap_or_else(|| "-".into()))
-                    .style(Style::default().fg(meta_color)),
-                Cell::from(s.modified.clone().unwrap_or_else(|| "-".into()))
-                    .style(Style::default().fg(meta_color)),
+                Cell::from(created_date).style(Style::default().fg(meta_color)),
+                Cell::from(modified_rel).style(age_style),
             ];
 
             if show_secrets {
@@ -293,7 +331,18 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             if show_github {
                 let github = s.git_repo.clone().unwrap_or_default();
                 let github_color = if dimmed { p.comment } else { p.green };
-                cells.push(Cell::from(github).style(Style::default().fg(github_color)));
+                if github.is_empty() {
+                    cells.push(Cell::from(String::new()));
+                } else {
+                    let repo = Line::from(vec![
+                        Span::styled(
+                            format!("{} ", icons.branch),
+                            Style::default().fg(github_color).add_modifier(Modifier::DIM),
+                        ),
+                        Span::styled(github, Style::default().fg(github_color)),
+                    ]);
+                    cells.push(Cell::from(repo));
+                }
             }
 
             let extra_height = if section_label.is_some() { 1u16 } else { 0 } + preview_lines;
@@ -319,130 +368,144 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
         .collect();
 
     let mut widths: Vec<Constraint> = vec![
-        Constraint::Min(20),
-        Constraint::Length(16),
-        Constraint::Length(16),
+        Constraint::Min(20),    // Session
+        Constraint::Length(10), // Created (date)
+        Constraint::Length(6),  // Age (relative)
     ];
     if show_secrets { widths.push(Constraint::Length(9)); }
     if show_github { widths.push(Constraint::Min(15)); }
 
-    // Store resolved column widths for mouse click-to-sort
-    let inner_width = area.width.saturating_sub(2); // borders
-    let col_spacing = 7u16;
-    let spacing_total = col_spacing * (widths.len() as u16 - 1);
-    let resolved = resolve_widths(&widths, inner_width.saturating_sub(3).saturating_sub(spacing_total));
-    app.column_widths = resolved;
-
     let session_count = app.filtered.len();
     let version = std::env::var("CS_VERSION").unwrap_or_default();
-
     let title = gradient_title(p, &version, session_count);
+
+    // Resolve column geometry with ratatui's own solver so mouse hit-testing
+    // never drifts from where the Table actually draws. (Drift between a
+    // hand-rolled approximation and the real layout is what made the old
+    // dividers slice through cells.) The Table reserves SELECT_WIDTH at the left
+    // for the selection symbol, then lays the columns out across the remainder.
+    let inner = Rect {
+        x: area.x + 1,
+        y: area.y + 1,
+        width: area.width.saturating_sub(2),
+        height: area.height.saturating_sub(2),
+    };
+    let cols_area = Rect {
+        x: inner.x + SELECT_WIDTH,
+        width: inner.width.saturating_sub(SELECT_WIDTH),
+        ..inner
+    };
+    let col_rects = Layout::horizontal(widths.clone())
+        .spacing(COL_SPACING)
+        .split(cols_area);
+    app.column_widths = col_rects.iter().map(|r| r.width).collect();
 
     let table = Table::new(rows, widths)
         .header(header)
-        .column_spacing(col_spacing)
+        .column_spacing(COL_SPACING)
         .block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(p.rust))
                 .title(title),
         )
-        .row_highlight_style(
-            Style::default()
-                .fg(p.fg)
-                .add_modifier(Modifier::REVERSED),
-        )
-        .highlight_symbol(">> ");
+        .row_highlight_style(Style::default().bg(p.sel_bg).add_modifier(Modifier::BOLD))
+        .highlight_symbol(format!("{SELECT_BAR} "))
+        .highlight_spacing(HighlightSpacing::Always);
 
     frame.render_stateful_widget(table, area, &mut app.table_state);
 
-    // Draw discrete column separators in the middle of each column gap
-    let y_start = area.y + 1;
-    let y_end = area.y + area.height.saturating_sub(1);
-    let mut x = area.x + 1 + 3; // border + highlight symbol width
+    // Warm rust→orange→amber gradient band behind the header labels. Painted
+    // per-cell because a terminal background can only be a flat color per cell;
+    // the ramp across cells is the band. The same vivid stops are used on both
+    // themes (sampled from the live render); the near-white label stays bold.
     let buf = frame.buffer_mut();
-    for (i, &w) in app.column_widths.iter().enumerate() {
-        x += w;
-        if i < app.column_widths.len() - 1 {
-            let sep_x = x + col_spacing / 2; // center of gap
-            if sep_x < area.x + area.width.saturating_sub(1) {
-                for y in y_start..y_end {
-                    if let Some(cell) = buf.cell_mut(ratatui::layout::Position::new(sep_x, y)) {
-                        cell.set_char('\u{2502}');
-                        cell.set_fg(p.sep);
-                    }
-                }
+    let lo = theme::rgb_of(p.header_bg_lo);
+    let mid = theme::rgb_of(p.header_bg_mid);
+    let hi = theme::rgb_of(p.header_bg_hi);
+    let band_span = (inner.width.max(2) - 1) as f32;
+    for x in inner.x..inner.x.saturating_add(inner.width) {
+        let t = (x - inner.x) as f32 / band_span;
+        let (r, g, b) = warm_ramp(lo, mid, hi, t);
+        if let Some(cell) = buf.cell_mut(ratatui::layout::Position::new(x, inner.y)) {
+            cell.set_bg(ratatui::style::Color::Rgb(r, g, b));
+        }
+    }
+
+    // A single hairline rule beneath the header, drawn into the header's blank
+    // bottom-margin row. Structure stays quiet — no vertical dividers; alignment
+    // and zebra striping carry the columns.
+    let rule_y = inner.y + 1;
+    for x in inner.x..inner.x.saturating_add(inner.width) {
+        if let Some(cell) = buf.cell_mut(ratatui::layout::Position::new(x, rule_y)) {
+            cell.set_char('\u{2500}');
+            cell.set_fg(p.sep);
+        }
+    }
+    // Tee the rule into the side borders so it reads as frame, not a stray line.
+    for (x, glyph) in [(area.x, '\u{251c}'), (area.x + area.width.saturating_sub(1), '\u{2524}')] {
+        if let Some(cell) = buf.cell_mut(ratatui::layout::Position::new(x, rule_y)) {
+            cell.set_char(glyph);
+            cell.set_fg(p.rust);
+        }
+    }
+
+    // Shimmer the selection accent bar along a rust↔gold triangle wave. We locate
+    // the bar by its glyph in the selection column rather than recomputing the
+    // selected row's y (rows have variable height), which keeps this robust.
+    let phase = {
+        const PERIOD_MS: u128 = 1400;
+        let ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        (ms % PERIOD_MS) as f32 / PERIOD_MS as f32
+    };
+    let shimmer = p.shimmer_color(phase);
+    for y in (inner.y + 2)..inner.y.saturating_add(inner.height) {
+        if let Some(cell) = buf.cell_mut(ratatui::layout::Position::new(inner.x, y)) {
+            if cell.symbol() == SELECT_BAR {
+                cell.set_fg(shimmer);
+                break;
             }
-            x += col_spacing;
         }
     }
 }
 
-fn resolve_widths(constraints: &[Constraint], available: u16) -> Vec<u16> {
-    // Approximate constraint resolution for mouse hit-testing
-    let mut fixed_total: u16 = 0;
-    let mut min_total: u16 = 0;
-    let mut flex_count: u16 = 0;
-
-    for c in constraints {
-        match c {
-            Constraint::Length(l) => fixed_total += l,
-            Constraint::Min(m) => {
-                min_total += m;
-                flex_count += 1;
-            }
-            _ => flex_count += 1,
-        }
-    }
-
-    let remaining = available.saturating_sub(fixed_total).saturating_sub(min_total);
-    let flex_extra = if flex_count > 0 {
-        remaining / flex_count
+/// Three-stop warm ramp (a → b → c) sampled at `t` in [0, 1]. Arcing through a
+/// midpoint keeps the sweep vivid instead of fading through a muddy blend.
+fn warm_ramp(a: (u8, u8, u8), b: (u8, u8, u8), c: (u8, u8, u8), t: f32) -> (u8, u8, u8) {
+    if t < 0.5 {
+        theme::lerp_rgb(a, b, t * 2.0)
     } else {
-        0
-    };
-
-    constraints
-        .iter()
-        .map(|c| match c {
-            Constraint::Length(l) => *l,
-            Constraint::Min(m) => m + flex_extra,
-            _ => flex_extra,
-        })
-        .collect()
+        theme::lerp_rgb(b, c, (t - 0.5) * 2.0)
+    }
 }
 
 fn gradient_title<'a>(p: Palette, version: &str, session_count: usize) -> Line<'a> {
-    // Rust → Gold gradient matching install.sh banner, themed for the background
-    let start = theme::rgb_of(p.rust);
-    let end = theme::rgb_of(p.gold);
-    let text = "claude-sessions";
-    let len = text.len() as f32 - 1.0;
+    // Vivid rust → orange → gold sweep across the whole title — name, version,
+    // and count all ride the same ramp so the header reads as one warm band.
+    let rust = theme::rgb_of(p.rust);
+    let orange = theme::rgb_of(p.orange);
+    let gold = theme::rgb_of(p.gold);
 
-    let mut spans: Vec<Span<'a>> = Vec::with_capacity(text.len() + 4);
+    let title = format!("claude-sessions v{} [{} sessions] ", version, session_count);
+    let total = title.chars().count().max(2) as f32;
+
+    let mut spans: Vec<Span<'a>> = Vec::with_capacity(title.chars().count() + 1);
     spans.push(Span::styled(" ", Style::default()));
 
-    for (i, ch) in text.chars().enumerate() {
-        let t = if len > 0.0 { i as f32 / len } else { 0.0 };
-        let r = start.0 as f32 + t * (end.0 as f32 - start.0 as f32);
-        let g = start.1 as f32 + t * (end.1 as f32 - start.1 as f32);
-        let b = start.2 as f32 + t * (end.2 as f32 - start.2 as f32);
+    for (i, ch) in title.chars().enumerate() {
+        let t = i as f32 / (total - 1.0);
+        let (r, g, b) = warm_ramp(rust, orange, gold, t);
         spans.push(Span::styled(
             ch.to_string(),
             Style::default()
-                .fg(ratatui::style::Color::Rgb(r as u8, g as u8, b as u8))
+                .fg(ratatui::style::Color::Rgb(r, g, b))
                 .add_modifier(Modifier::BOLD),
         ));
     }
-
-    spans.push(Span::styled(
-        format!(" v{} ", version),
-        Style::default().fg(p.comment),
-    ));
-    spans.push(Span::styled(
-        format!("[{} sessions] ", session_count),
-        Style::default().fg(p.fg).add_modifier(Modifier::BOLD),
-    ));
 
     Line::from(spans)
 }
@@ -1039,5 +1102,53 @@ mod tests {
     fn dark_theme_leaves_canvas_unpainted() {
         // Dark uses Color::Reset for the canvas, so no paper-colored cells appear.
         assert!(!renders_with_paper_bg(Palette::dark()));
+    }
+
+    /// Render and return each buffer row as a string.
+    fn render_rows() -> Vec<String> {
+        use std::time::{Duration, SystemTime};
+        let mut sessions = one_session();
+        sessions[0].modified_ts = Some(SystemTime::now() - Duration::from_secs(3 * 86400));
+        let mut app = App::new(sessions);
+        app.theme = Palette::dark();
+        let backend = TestBackend::new(100, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        (0..buf.area.height)
+            .map(|y| {
+                (0..buf.area.width)
+                    .filter_map(|x| buf.cell((x, y)).map(|c| c.symbol().to_string()))
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn no_interior_vertical_dividers() {
+        // The rounded panel contributes exactly two '│' per row (its left and
+        // right edges). Any third means a column divider has leaked back in —
+        // the regression that sliced cells like "M│dified".
+        for (y, row) in render_rows().iter().enumerate() {
+            let bars = row.matches('\u{2502}').count();
+            assert!(bars <= 2, "row {y} has {bars} vertical bars: {row:?}");
+        }
+    }
+
+    #[test]
+    fn header_uses_age_and_created_is_date_only() {
+        let rows = render_rows();
+        let joined = rows.join("\n");
+        assert!(joined.contains("Age"), "header should label the column 'Age'");
+        assert!(joined.contains("Created"), "header keeps 'Created'");
+        assert!(
+            joined.contains("2026-01-01"),
+            "created date should render: {joined}"
+        );
+        assert!(
+            !joined.contains("2026-01-01 10:00"),
+            "created cell must drop the time component"
+        );
+        assert!(joined.contains("3d"), "modified should render as relative age");
     }
 }

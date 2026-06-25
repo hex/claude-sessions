@@ -154,6 +154,10 @@ fn scan_sessions_in(root: &Path) -> Vec<Session> {
         Ok(entries) => entries
             .filter_map(|e| e.ok())
             .filter(|e| {
+                // Skip hidden dirs (.obsidian, .git, …) — never cs sessions.
+                if e.file_name().to_string_lossy().starts_with('.') {
+                    return false;
+                }
                 let ft = e.file_type().ok();
                 ft.map(|t| t.is_dir() || t.is_symlink()).unwrap_or(false)
             })
@@ -282,6 +286,35 @@ fn parse_modified(log_file: &Path) -> (Option<String>, Option<std::time::SystemT
     let (year, month, day, hour, minute) = unix_to_datetime(secs);
     let formatted = format!("{:04}-{:02}-{:02} {:02}:{:02}", year, month, day, hour, minute);
     (Some(formatted), Some(mtime))
+}
+
+/// Compact human duration since `ts` ("now", "45m", "5h", "6d", "4w", "6mo", "2y").
+/// Future timestamps clamp to "now". The list trades exactness for scannability;
+/// the preview pane still shows the full `YYYY-MM-DD HH:MM` modified time.
+pub fn relative_age(ts: std::time::SystemTime, now: std::time::SystemTime) -> String {
+    let secs = match now.duration_since(ts) {
+        Ok(d) => d.as_secs(),
+        Err(_) => return "now".to_string(),
+    };
+    const MIN: u64 = 60;
+    const HOUR: u64 = 3600;
+    const DAY: u64 = 86400;
+    const WEEK: u64 = 7 * DAY;
+    if secs < MIN {
+        "now".to_string()
+    } else if secs < HOUR {
+        format!("{}m", secs / MIN)
+    } else if secs < DAY {
+        format!("{}h", secs / HOUR)
+    } else if secs < WEEK {
+        format!("{}d", secs / DAY)
+    } else if secs < 35 * DAY {
+        format!("{}w", secs / WEEK)
+    } else if secs < 365 * DAY {
+        format!("{}mo", secs / (30 * DAY))
+    } else {
+        format!("{}y", secs / (365 * DAY))
+    }
 }
 
 fn unix_to_datetime(timestamp: i64) -> (i64, u32, u32, u32, u32) {
@@ -455,6 +488,7 @@ fn count_secrets_from_keychain() -> HashMap<String, u32> {
 mod tests {
     use super::*;
     use std::fs;
+    use std::time::Duration;
 
     fn setup_session(root: &Path, name: &str) -> PathBuf {
         let dir = root.join(name);
@@ -465,6 +499,28 @@ mod tests {
         )
         .unwrap();
         dir
+    }
+
+    #[test]
+    fn relative_age_buckets() {
+        let now = std::time::UNIX_EPOCH + Duration::from_secs(1_000_000_000);
+        let ago = |secs: u64| now - Duration::from_secs(secs);
+        assert_eq!(relative_age(ago(5), now), "now");
+        assert_eq!(relative_age(ago(59), now), "now");
+        assert_eq!(relative_age(ago(60), now), "1m");
+        assert_eq!(relative_age(ago(45 * 60), now), "45m");
+        assert_eq!(relative_age(ago(3600), now), "1h");
+        assert_eq!(relative_age(ago(5 * 3600), now), "5h");
+        assert_eq!(relative_age(ago(86400), now), "1d");
+        assert_eq!(relative_age(ago(6 * 86400), now), "6d");
+        assert_eq!(relative_age(ago(7 * 86400), now), "1w");
+        assert_eq!(relative_age(ago(34 * 86400), now), "4w");
+        assert_eq!(relative_age(ago(35 * 86400), now), "1mo");
+        assert_eq!(relative_age(ago(200 * 86400), now), "6mo");
+        assert_eq!(relative_age(ago(365 * 86400), now), "1y");
+        assert_eq!(relative_age(ago(800 * 86400), now), "2y");
+        // Future timestamps clamp to "now" rather than underflowing.
+        assert_eq!(relative_age(now + Duration::from_secs(3600), now), "now");
     }
 
     #[test]
@@ -570,6 +626,23 @@ mod tests {
     fn scan_sessions_returns_empty_for_missing_root() {
         let sessions = scan_sessions_in(Path::new("/tmp/cs-nonexistent-dir-12345"));
         assert!(sessions.is_empty());
+    }
+
+    #[test]
+    fn scan_sessions_skips_hidden_dirs() {
+        let root = std::env::temp_dir().join(format!("cs-test-hidden-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        setup_session(&root, "real-session");
+        // Hidden dirs that are not cs sessions (Obsidian vault, git metadata).
+        fs::create_dir_all(root.join(".obsidian")).unwrap();
+        fs::create_dir_all(root.join(".git")).unwrap();
+
+        let sessions = scan_sessions_in(&root);
+
+        assert_eq!(sessions.len(), 1, "only the real session should be listed");
+        assert_eq!(sessions[0].name, "real-session");
+
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

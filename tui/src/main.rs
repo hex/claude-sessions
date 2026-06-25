@@ -80,7 +80,9 @@ fn restore_terminal() -> io::Result<()> {
 }
 
 fn run_event_loop(app: &mut app::App, terminal: &mut Tui) -> io::Result<app::Action> {
-    const TICK: std::time::Duration = std::time::Duration::from_millis(500);
+    // ~10 fps idle redraw so the selection shimmer animates smoothly; input
+    // still wakes the loop immediately via poll.
+    const TICK: std::time::Duration = std::time::Duration::from_millis(100);
     loop {
         terminal.draw(|frame| ui::render(app, frame))?;
 

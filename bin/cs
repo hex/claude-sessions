@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.6.11"
+VERSION="2026.6.12"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 REPO_URL="https://github.com/hex/claude-sessions"
@@ -76,33 +76,41 @@ _claude_encode_path() {
 
 # Minisign public key for verifying signed releases
 CS_SIGN_PUBKEY="RWQvs3IVdvrS8PJs0V0gwdJGPw/x5waQ6z6iqPQm90JfpxfcsSy9b9Vo"
-# Colors - Claude warm palette (rust → orange → gold)
-# Disable colors if NO_COLOR is set (https://no-color.org) or not a TTY
-if [[ -n "${NO_COLOR:-}" ]] || [[ ! -t 1 ]]; then
-    RED=''
-    GREEN=''
-    YELLOW=''
-    ORANGE=''
-    GOLD=''
-    RUST=''
-    COMMENT=''
-    WHITE=''
-    DIM=''
-    BOLD=''
-    NC=''
-else
-    RED='\033[38;2;239;83;80m'        # #ef5350 - warm red
-    GREEN='\033[38;2;139;195;74m'     # #8bc34a - vibrant green
-    YELLOW='\033[38;2;255;183;77m'    # #ffb74d - warm amber
-    ORANGE='\033[38;2;255;138;101m'   # #ff8a65 - coral orange
-    GOLD='\033[38;2;255;193;7m'       # #ffc107 - golden
-    RUST='\033[38;2;230;74;25m'       # #e64a19 - terracotta
-    COMMENT='\033[38;2;161;136;127m'  # #a1887f - warm taupe
-    WHITE='\033[38;2;245;230;211m'    # #f5e6d3 - warm cream
-    DIM='\033[2m'
+# Colors - Claude warm palette (rust → orange → gold). Theme-aware: the dark
+# values assume a dark canvas; on a light terminal the muted tones (comment,
+# white, dim) would wash out, so light gets darker ink mirroring the TUI palette.
+# Re-run setup_palette after CS_TERM_THEME is detected so banners pick up light.
+setup_palette() {
+    if [[ -n "${NO_COLOR:-}" ]] || [[ ! -t 1 ]]; then
+        RED=''; GREEN=''; YELLOW=''; ORANGE=''; GOLD=''; RUST=''
+        COMMENT=''; WHITE=''; DIM=''; BOLD=''; NC=''
+        return
+    fi
     BOLD='\033[1m'
     NC='\033[0m'
-fi
+    if [ "${CS_TERM_THEME:-dark}" = "light" ]; then
+        RED='\033[38;2;188;74;66m'        # muted red on paper
+        GREEN='\033[38;2;92;140;84m'      # muted green
+        YELLOW='\033[38;2;162;122;58m'    # muted amber
+        ORANGE='\033[38;2;190;110;74m'    # muted coral
+        GOLD='\033[38;2;156;118;56m'      # muted gold
+        RUST='\033[38;2;166;86;60m'       # muted terracotta
+        COMMENT='\033[38;2;128;116;106m'  # readable taupe on cream
+        WHITE='\033[38;2;48;42;36m'       # dark ink (primary text)
+        DIM='\033[38;2;120;108;98m'       # darker grey instead of fade-to-bg
+    else
+        RED='\033[38;2;239;83;80m'        # #ef5350 - warm red
+        GREEN='\033[38;2;139;195;74m'     # #8bc34a - vibrant green
+        YELLOW='\033[38;2;255;183;77m'    # #ffb74d - warm amber
+        ORANGE='\033[38;2;255;138;101m'   # #ff8a65 - coral orange
+        GOLD='\033[38;2;255;193;7m'       # #ffc107 - golden
+        RUST='\033[38;2;230;74;25m'       # #e64a19 - terracotta
+        COMMENT='\033[38;2;161;136;127m'  # #a1887f - warm taupe
+        WHITE='\033[38;2;245;230;211m'    # #f5e6d3 - warm cream
+        DIM='\033[2m'
+    fi
+}
+setup_palette
 
 # Icons - Nerd Font with Unicode fallback
 if [[ "${CS_NERD_FONTS:-}" == "1" ]]; then
@@ -2502,6 +2510,9 @@ launch_claude_code() {
             export CS_TERM_THEME="$_term_theme"
         fi
     fi
+    # Refresh the palette now that the theme is known so the banner below reads
+    # on a light canvas (colors were first set at startup, defaulting to dark).
+    setup_palette
 
     # Status indicator
     local status_icon status_text

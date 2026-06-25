@@ -97,9 +97,10 @@ cs -version, -v             # Show version
 Running `cs` with no arguments launches an interactive TUI for browsing and managing sessions:
 
 - **Navigate** with `j`/`k` or arrow keys; `g`/`G` for first/last; mouse scroll and click supported
-- **Sort** by column with `1`-`6` (toggles ascending/descending)
+- **Sort** by column with `1`-`6` (toggles ascending/descending); opens sorted by recency — most-recently-modified first
+- **Recency at a glance** — a heat dot beside each session (green when live, fading to grey when dormant) and a relative `Age` column (`2h`, `3d`, `1mo`) so active work stands out; the exact timestamp stays in the preview pane
 - **Fuzzy search** with `/` — matches characters in order with highlighting; Enter commits the filter
-- **Time-based sections** — sessions grouped under Today, Yesterday, This Week, This Month, Older when sorted by date
+- **Time-based sections** — sessions grouped under Today, Yesterday, This Week, This Month, Older when sorted by date (the default view)
 - **Action bar** with `Enter` — inline bar shows available actions with shortcut keys
 - **Preview pane** — appears automatically on wide terminals (>120 cols); toggle with `p`
 - **Expand row** with `Tab` — shows session objective (auto-captured from your first prompt), narrative, and artifact count inline
@@ -111,7 +112,7 @@ Running `cs` with no arguments launches an interactive TUI for browsing and mana
 - **Quit** with `q` or `Esc`
 - **Light/dark palette** — the warm palette adapts to the terminal background detected at launch (`CS_TERM_THEME`); set the env var to force `light` or `dark`
 
-The TUI requires `cs-tui` (an ~820 KB Rust binary). Build from source: `cd tui && cargo build --release`.
+The TUI requires `cs-tui` (an ~785 KB Rust binary). Build from source: `cd tui && cargo build --release`.
 
 ### Session Commands
 
