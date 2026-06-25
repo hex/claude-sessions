@@ -87,6 +87,43 @@ test_guard_blocks_tracked_local() {
     assert_output_contains "$out" ".cs/local/ is tracked" "guard should report tracked .cs/local/" || return 1
 }
 
+test_narrative_is_per_actor() {
+    local project_dir="$TEST_TMPDIR/proj"
+    mkdir -p "$project_dir"
+    ( cd "$project_dir" && git init -q && git config user.email "alex@example.com" && git config user.name "Alex" )
+    ( cd "$project_dir" && "$CS_BIN" -adopt s1 >/dev/null 2>&1 )
+
+    assert_exists "$project_dir/.cs/memory/narrative.alex-example-com.md" \
+        "per-actor narrative file should exist" || return 1
+    assert_not_exists "$project_dir/.cs/memory/narrative.md" \
+        "generic narrative.md should not be created for a new session" || return 1
+    assert_file_contains "$project_dir/.cs/memory/MEMORY.md" "narrative.alex-example-com.md" \
+        "index should point at the per-actor narrative" || return 1
+}
+
+test_legacy_narrative_migrates_to_actor() {
+    local project_dir="$TEST_TMPDIR/proj"
+    mkdir -p "$project_dir"
+    ( cd "$project_dir" && git init -q && git config user.email "bob@team.io" && git config user.name "Bob" )
+    ( cd "$project_dir" && "$CS_BIN" -adopt s1 >/dev/null 2>&1 )
+    # Revert to a pre-Phase-2 legacy state: a single narrative.md + legacy index pointer.
+    rm -f "$project_dir/.cs/memory/narrative.bob-team-io.md"
+    printf '%s\n' '# Session narrative' 'OLD ENTRY ABC' > "$project_dir/.cs/memory/narrative.md"
+    printf '%s\n' '- [Session narrative (lab notebook)](narrative.md): old' > "$project_dir/.cs/memory/MEMORY.md"
+
+    # Resume the session -> migrate_session -> ensure_narrative_file migrates it.
+    ( "$CS_BIN" s1 <<< "" >/dev/null 2>&1 || true )
+
+    assert_exists "$project_dir/.cs/memory/narrative.bob-team-io.md" \
+        "legacy narrative.md should migrate to the actor's file" || return 1
+    assert_not_exists "$project_dir/.cs/memory/narrative.md" \
+        "legacy narrative.md should be gone after migration" || return 1
+    assert_file_contains "$project_dir/.cs/memory/narrative.bob-team-io.md" "OLD ENTRY ABC" \
+        "migrated narrative should keep its content" || return 1
+    assert_file_not_contains "$project_dir/.cs/memory/MEMORY.md" "(narrative.md)" \
+        "stale legacy index pointer should be removed" || return 1
+}
+
 echo ""
 echo "cs actor identity tests"
 echo "======================="
@@ -98,5 +135,7 @@ run_test test_actor_slug_local_file_over_git
 run_test test_whoami_warns_on_identity_mismatch
 run_test test_local_dir_created_on_adopt
 run_test test_guard_blocks_tracked_local
+run_test test_narrative_is_per_actor
+run_test test_legacy_narrative_migrates_to_actor
 
 report_results

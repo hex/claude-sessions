@@ -661,24 +661,37 @@ SETTINGS
 ensure_narrative_file() {
     local session_dir="$1"
     local mem_dir="$session_dir/.cs/memory"
-    local narrative="$mem_dir/narrative.md"
     local index="$mem_dir/MEMORY.md"
     mkdir -p "$mem_dir"
 
+    local actor
+    actor=$(cs_actor_slug "$session_dir")
+    local narrative="$mem_dir/narrative.$actor.md"
+
+    # One-time migration: a pre-per-actor narrative.md becomes this actor's file.
+    if [ -f "$mem_dir/narrative.md" ] && [ ! -f "$narrative" ]; then
+        mv "$mem_dir/narrative.md" "$narrative"
+    fi
+
     if [ ! -f "$narrative" ]; then
-        cat > "$narrative" << 'EOF'
+        cat > "$narrative" << EOF
 ---
-name: session-narrative
-description: Session lab-notebook and work-in-progress narrative. Looser bar than durable memory. Read on resume.
+name: session-narrative-$actor
+description: Session lab-notebook and work-in-progress narrative for $actor. Looser bar than durable memory. Read all narrative.*.md on resume.
 type: narrative
 ---
-# Session narrative
+# Session narrative ($actor)
 
 EOF
     fi
 
-    if [ ! -f "$index" ] || ! grep -q '(narrative.md)' "$index" 2>/dev/null; then
-        printf -- '- [Session narrative (lab notebook)](narrative.md): looser-bar work-in-progress; read on resume\n' >> "$index"
+    # Drop the legacy single-narrative index pointer if a migration left it stale.
+    if [ -f "$index" ] && grep -q '(narrative\.md)' "$index" 2>/dev/null; then
+        sed -i '' '/(narrative\.md)/d' "$index"
+    fi
+
+    if [ ! -f "$index" ] || ! grep -q "(narrative\.$actor\.md)" "$index" 2>/dev/null; then
+        printf -- '- [Session narrative — %s (lab notebook)](narrative.%s.md): looser-bar work-in-progress; read all narrative.*.md on resume\n' "$actor" "$actor" >> "$index"
     fi
 }
 
@@ -703,7 +716,7 @@ migrate_discoveries_to_narrative() {
     fi
 
     ensure_narrative_file "$session_dir"
-    local narrative="$meta/memory/narrative.md"
+    local narrative="$meta/memory/narrative.$(cs_actor_slug "$session_dir").md"
     {
         if [ -n "$disc_body" ]; then
             echo ""
@@ -988,17 +1001,27 @@ _slugify() {
         | sed 's/[^a-z0-9][^a-z0-9]*/-/g; s/^-//; s/-*$//'
 }
 
-# Resolve the current actor as a slug.
-# Precedence: $CS_ACTOR > .cs/local/identity (first line) > git user.email > git user.name > "unknown"
+# Resolve the current actor as a slug. With a session_dir arg, resolve the
+# pinned identity and git config from that dir (callers may run before
+# CLAUDE_SESSION_META_DIR is exported). Without, use env + cwd.
+# Precedence: $CS_ACTOR > <meta>/local/identity > git user.email > git user.name > "unknown"
 cs_actor_slug() {
+    local sdir="${1:-}"
+    local meta=""
+    if [ -n "$sdir" ]; then
+        meta="$sdir/.cs"
+    else
+        meta="${CLAUDE_SESSION_META_DIR:-}"
+    fi
     local raw=""
     if [ -n "${CS_ACTOR:-}" ]; then
         raw="$CS_ACTOR"
-    elif [ -n "${CLAUDE_SESSION_META_DIR:-}" ] && [ -f "$CLAUDE_SESSION_META_DIR/local/identity" ]; then
-        IFS= read -r raw < "$CLAUDE_SESSION_META_DIR/local/identity"
+    elif [ -n "$meta" ] && [ -f "$meta/local/identity" ]; then
+        IFS= read -r raw < "$meta/local/identity"
     else
-        raw=$(git config user.email 2>/dev/null || true)
-        [ -z "$raw" ] && raw=$(git config user.name 2>/dev/null || true)
+        local gitdir="${sdir:-.}"
+        raw=$(git -C "$gitdir" config user.email 2>/dev/null || true)
+        [ -z "$raw" ] && raw=$(git -C "$gitdir" config user.name 2>/dev/null || true)
     fi
     [ -z "$raw" ] && raw="unknown"
     _slugify "$raw"
