@@ -108,8 +108,10 @@ test_prune_preserves_other_session_data() {
 
     "$CS_BIN" legacy <<< "" >/dev/null 2>&1 || true
 
-    assert_file_exists   "$session_dir/.cs/memory/narrative.md"      "narrative.md must survive" || return 1
-    assert_file_contains "$session_dir/.cs/memory/narrative.md" "Important finding" "discovery content must survive (folded into narrative)" || return 1
+    local narrative
+    narrative=$(ls "$session_dir/.cs/memory/"narrative.*.md 2>/dev/null | head -1)
+    assert_file_exists   "$narrative"      "the per-actor narrative must survive" || return 1
+    assert_file_contains "$narrative" "Important finding" "discovery content must survive (folded into narrative)" || return 1
     assert_file_exists   "$session_dir/.cs/artifacts/MANIFEST.json"  "MANIFEST.json must survive" || return 1
 }
 

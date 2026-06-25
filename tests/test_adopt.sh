@@ -30,7 +30,9 @@ test_adopt_creates_cs_structure() {
     assert_exists "$project_dir/.cs/artifacts/MANIFEST.json" "MANIFEST.json should exist" || return 1
     assert_exists "$project_dir/.cs/logs/session.log" "session.log should exist" || return 1
     assert_exists "$project_dir/.cs/README.md" ".cs/README.md should exist" || return 1
-    assert_exists "$project_dir/.cs/memory/narrative.md" "narrative.md should exist" || return 1
+    local nf
+    nf=$(ls "$project_dir"/.cs/memory/narrative.*.md 2>/dev/null | head -1)
+    assert_exists "$nf" "a per-actor narrative file should exist" || return 1
     assert_not_exists "$project_dir/.cs/sync.conf" "sync.conf must not be created (sync subsystem removed)" || return 1
 }
 
@@ -225,6 +227,19 @@ test_readme_objective_still_extractable() {
         "Objective should still be extractable with existing sed pattern" || return 1
 }
 
+test_adopt_sets_memory_merge_driver() {
+    local project_dir="$TEST_TMPDIR/my-project"
+    mkdir -p "$project_dir"
+    (cd "$project_dir" && git init -q && git config user.email a@b.c && git config user.name A)
+    (cd "$project_dir" && "$CS_BIN" -adopt my-session >/dev/null 2>&1)
+
+    assert_file_contains "$project_dir/.gitattributes" "MEMORY.md merge=ours" \
+        ".gitattributes should mark MEMORY.md merge=ours" || return 1
+    local drv
+    drv=$(git -C "$project_dir" config merge.ours.driver 2>/dev/null || echo "")
+    assert_eq "true" "$drv" "merge.ours.driver should be configured" || return 1
+}
+
 test_adopt_gitignores_cs_local() {
     local project_dir="$TEST_TMPDIR/my-project"
     mkdir -p "$project_dir"
@@ -243,6 +258,7 @@ echo "==============="
 echo ""
 
 run_test test_adopt_gitignores_cs_local
+run_test test_adopt_sets_memory_merge_driver
 
 run_test test_adopt_creates_cs_structure
 run_test test_adopt_creates_symlink

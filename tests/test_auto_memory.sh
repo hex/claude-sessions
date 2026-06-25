@@ -236,18 +236,19 @@ test_migration_skips_if_frontmatter_exists() {
 test_new_session_creates_narrative_file() {
     "$CS_BIN" test-session <<< "" 2>&1 || true
 
-    local narrative="$CS_SESSIONS_ROOT/test-session/.cs/memory/narrative.md"
-    assert_exists "$narrative" "narrative.md should be created in .cs/memory/" || return 1
+    local narrative
+    narrative=$(ls "$CS_SESSIONS_ROOT/test-session/.cs/memory/"narrative.*.md 2>/dev/null | head -1)
+    assert_exists "$narrative" "a per-actor narrative file should be created in .cs/memory/" || return 1
     assert_file_contains "$narrative" "type: narrative" \
-        "narrative.md should carry the narrative type" || return 1
+        "narrative should carry the narrative type" || return 1
 }
 
 test_new_session_adds_narrative_pointer() {
     "$CS_BIN" test-session <<< "" 2>&1 || true
 
     local index="$CS_SESSIONS_ROOT/test-session/.cs/memory/MEMORY.md"
-    assert_file_contains "$index" "(narrative.md)" \
-        "MEMORY.md should carry a pointer to narrative.md" || return 1
+    assert_file_contains "$index" "](narrative." \
+        "MEMORY.md should carry a pointer to the per-actor narrative" || return 1
 }
 
 test_narrative_pointer_idempotent_readd() {
@@ -260,11 +261,11 @@ test_narrative_pointer_idempotent_readd() {
     "$CS_BIN" test-session <<< "" 2>&1 || true
 
     local index="$session_dir/.cs/memory/MEMORY.md"
-    assert_file_contains "$index" "(narrative.md)" \
+    assert_file_contains "$index" "](narrative." \
         "Dropped narrative pointer should be re-added on resume" || return 1
     # Must not duplicate when already present
     local count
-    count=$(grep -c '(narrative.md)' "$index")
+    count=$(grep -c '](narrative\.' "$index")
     assert_eq "1" "$count" "narrative pointer should appear exactly once" || return 1
 }
 
@@ -287,9 +288,10 @@ EOF
 
     "$CS_BIN" disc-session <<< "" 2>&1 || true
 
-    local narrative="$session_dir/.cs/memory/narrative.md"
+    local narrative
+    narrative=$(ls "$session_dir/.cs/memory/"narrative.*.md 2>/dev/null | head -1)
     assert_file_contains "$narrative" "frobnicator needs a retry on EAGAIN" \
-        "discoveries content should be folded into narrative.md on resume" || return 1
+        "discoveries content should be folded into the narrative on resume" || return 1
     # One-shot: the original is consumed so it is not re-folded
     if [ -f "$session_dir/.cs/discoveries.md" ]; then
         echo "  FAIL: discoveries.md should be consumed after fold"
@@ -316,7 +318,8 @@ EOF
 
     "$CS_BIN" compact-session <<< "" 2>&1 || true
 
-    local narrative="$session_dir/.cs/memory/narrative.md"
+    local narrative
+    narrative=$(ls "$session_dir/.cs/memory/"narrative.*.md 2>/dev/null | head -1)
     assert_file_contains "$narrative" "invalidated on tenant switch" \
         "compact.md content must be folded even when discoveries.md is header-only" || return 1
     if [ -f "$session_dir/.cs/discoveries.compact.md" ]; then
