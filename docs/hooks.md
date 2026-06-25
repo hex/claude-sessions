@@ -8,7 +8,7 @@ Runs when Claude Code starts a session:
 - Logs session start (including source: `startup`, `resume`, `clear`, `compact`) to `.cs/logs/session.log` and appends a `session_start` event to `.cs/timeline.jsonl`
 - On all sources: rebinds the README's `claude_session_id` to the live conversation UUID from the hook input. Claude Code forks a new UUID when a conversation is continued past the context limit (the old transcript stays on disk), so the recorded binding can silently go stale and `cs` would resume the pre-fork conversation. Non-UUID session ids are ignored; each rebind is logged to `session.log`
 - On `startup`/`resume` only: configures `transfer.hideRefs`, recovers autosaved changes from crashed sessions
-- On `resume` only: injects dynamic context (last activity, recent commits, objective, up to 5 most recently active sibling sessions with their objectives)
+- On `resume` only: injects dynamic context (last activity, recent commits, objective, up to 5 most recently active sibling sessions with their objectives), and a per-actor digest of shared memory/narrative activity since this actor's `.cs/local/watermark` (grouped by git author), then advances the watermark
 - On all sources: exports session environment variables, injects session context into Claude's system prompt
 
 ## artifact-tracker.sh (PreToolUse on Write)
@@ -36,8 +36,8 @@ Runs after any file modification (Write or Edit), providing crash recovery for a
 ## narrative-reminder.sh (Stop)
 
 Runs when Claude pauses for user input:
-- Reminds Claude to review and update `.cs/memory/narrative.md` (the session lab notebook) when it has not been touched recently
-- Cooldown-gated via `.cs/.narrative-reminder-cooldown` (at most once per 5 minutes); no size budget — narrative.md is a native memory topic file that lazy-loads
+- Reminds Claude to review and update its per-actor narrative (`.cs/memory/narrative.<actor>.md`, the session lab notebook), keyed on the most recently modified `narrative.*.md`, when it has not been touched recently
+- Cooldown-gated via `.cs/.narrative-reminder-cooldown` (at most once per 5 minutes); no size budget — narratives are native memory topic files that lazy-load
 - Approves silently inside subagents and outside cs sessions, and when the narrative was modified within the cooldown window
 
 ## prose-lint.sh (Stop)

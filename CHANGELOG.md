@@ -2,6 +2,29 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
+## 2026.6.10
+
+cs gains multi-person co-development awareness: when a project's `.cs/` is committed to git, multiple people can collaborate with attributed, conflict-free, and visible contributions, all derived from git history with no servers or coordination.
+
+### Features
+
+- **Per-actor identity** (`cs -whoami`): each contributor is identified from git identity (with a `.cs/local/identity` override), normalized to a filesystem-safe slug.
+- **Per-actor narratives**: the session lab notebook splits into `narrative.<actor>.md` files so co-developers never conflict; everyone reads all on resume. Legacy `narrative.md` migrates automatically.
+- **On-resume digest**: cs reports shared memory/narrative activity since you last looked ("Since your last session, Bob (2)"), tracked by a per-actor `.cs/local/watermark`.
+- **`cs -who`**: on-demand contributor feed from git history over `.cs/memory`.
+- **TUI contributors**: the session preview pane lists who contributed.
+- **Conflict-free memory index**: a `merge=ours` gitattribute keeps the hand-maintained `MEMORY.md` from blocking merges.
+- **Leak guard**: a gitignored `.cs/local/` holds per-machine state (lock, watermark, logs); cs refuses to resume a session whose `.cs/local/` was committed.
+
+### Fixes
+
+- Shell completions were stale (missing `-adopt`, `-whoami`, `-who`, `-lint`, `-statusline`, `-doctor`/`-diag`, `-detect-theme`); all added, plus a drift test that asserts completions match the command dispatch.
+- Autosave log entries no longer show raw `##` heading markers on macOS (BSD `sed` `\+` fix).
+
+### Docs
+
+- README, hooks docs, and the session template updated for per-actor narratives and the new commands.
+
 ## 2026.6.9
 
 cs is now a local-only tool: the cross-machine sync and remote-session subsystems have been removed.
