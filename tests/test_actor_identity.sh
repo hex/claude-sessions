@@ -73,6 +73,20 @@ test_local_dir_created_on_adopt() {
     assert_dir "$project_dir/.cs/local" ".cs/local/ should be created on adopt" || return 1
 }
 
+test_guard_blocks_tracked_local() {
+    local project_dir="$TEST_TMPDIR/proj"
+    mkdir -p "$project_dir"
+    ( cd "$project_dir" && git init -q && git config user.email a@b.c && git config user.name A )
+    ( cd "$project_dir" && "$CS_BIN" -adopt s1 >/dev/null 2>&1 )
+    # Simulate the bad state: per-actor local state committed to git.
+    ( cd "$project_dir" && echo leak > .cs/local/oops && git add -f .cs/local/oops && git commit -q -m bad )
+
+    # Resuming the session must refuse while .cs/local is tracked.
+    local out
+    out=$( "$CS_BIN" s1 <<< "" 2>&1 || true )
+    assert_output_contains "$out" ".cs/local/ is tracked" "guard should report tracked .cs/local/" || return 1
+}
+
 echo ""
 echo "cs actor identity tests"
 echo "======================="
@@ -83,5 +97,6 @@ run_test test_actor_slug_env_override_wins
 run_test test_actor_slug_local_file_over_git
 run_test test_whoami_warns_on_identity_mismatch
 run_test test_local_dir_created_on_adopt
+run_test test_guard_blocks_tracked_local
 
 report_results

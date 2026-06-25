@@ -79,6 +79,7 @@ cs                          # Interactive session manager (TUI)
 cs <session-name>           # Create or resume a session
 cs <session-name> --force   # Override active session lock
 cs -adopt <name>            # Adopt current directory as a session
+cs -whoami                  # Show the current actor (for shared, multi-person sessions)
 cs -search <query>          # Search across all sessions
 cs -doctor, -diag           # Run health checks (Keychain, hooks, memory, audit, leaks, tokens)
 cs -lint <file>...          # Flag AI-slop prose tells (em-dashes, banned phrases); 0 clean 1 issues 2 error

@@ -292,6 +292,7 @@ Commands:
   -statusline <cmd>   enable|disable the cs status line in Claude Code settings
   -list, -ls          List all sessions
   -adopt <name>       Adopt current directory as a cs session
+  -whoami             Show the current actor (for shared, multi-person sessions)
   -remove, -rm <name> Remove a session
   -secrets <cmd>      Manage current session secrets (requires CLAUDE_SESSION_NAME)
   -update             Update cs to latest version
@@ -1017,6 +1018,15 @@ cmd_whoami() {
     fi
 }
 
+# Refuse to proceed if per-actor local state has been committed to git.
+cs_assert_local_untracked() {
+    local dir="$1"
+    [ -d "$dir/.git" ] || return 0
+    if [ -n "$(git -C "$dir" ls-files -- .cs/local 2>/dev/null)" ]; then
+        error ".cs/local/ is tracked in git (per-actor state must stay local). Fix with: git -C \"$dir\" rm -r --cached .cs/local && git commit -m 'stop tracking .cs/local'"
+    fi
+}
+
 # Create session directory structure
 create_session_structure() {
     local session_dir="$1"
@@ -1129,6 +1139,9 @@ needs_cs_migration() {
 # Migrate existing session to latest format
 migrate_session() {
     local session_dir="$1"
+
+    # Per-actor local state must never be committed; refuse if it has been.
+    cs_assert_local_untracked "$session_dir"
 
     # Phase 1: Structural migration (flat layout -> .cs/ directory)
     if needs_cs_migration "$session_dir"; then
