@@ -58,6 +58,17 @@ test_narrative_reminder_blocks_when_stale() {
     assert_output_contains "$output" "narrative.md" "Reminder should point at narrative.md" || return 1
 }
 
+test_narrative_reminder_tracks_per_actor() {
+    rm -f "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    echo "# Session narrative (alex)" > "$CLAUDE_SESSION_META_DIR/memory/narrative.alex.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.alex.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    local output
+    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
+    assert_output_contains "$output" "block" "Should block on stale per-actor narrative" || return 1
+    assert_output_contains "$output" "narrative.alex.md" "Reminder should point at the per-actor narrative" || return 1
+}
+
 test_narrative_reminder_respects_cooldown() {
     echo "# Session narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
     _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
@@ -810,6 +821,7 @@ echo ""
 run_test test_narrative_reminder_approves_outside_session
 run_test test_narrative_reminder_approves_when_recently_modified
 run_test test_narrative_reminder_blocks_when_stale
+run_test test_narrative_reminder_tracks_per_actor
 run_test test_narrative_reminder_respects_cooldown
 run_test test_narrative_reminder_approves_for_subagent
 run_test test_auto_approve_allows_cs_metadata_write

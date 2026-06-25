@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: Stop hook that reminds Claude to update the session narrative periodically
-# ABOUTME: Cooldown-gated (at most once per 5 minutes); points at .cs/memory/narrative.md
+# ABOUTME: Cooldown-gated (at most once per 5 minutes); tracks the newest .cs/memory/narrative.*.md
 
 set -euo pipefail
 
@@ -27,7 +27,6 @@ if [ -z "$SESSION_DIR" ] || [ ! -d "$SESSION_DIR" ]; then
     exit 0
 fi
 
-NARRATIVE_FILE="$META_DIR/memory/narrative.md"
 COOLDOWN_FILE="$META_DIR/.narrative-reminder-cooldown"
 COOLDOWN_SECONDS=300  # 5 minutes
 
@@ -43,17 +42,26 @@ if [ -f "$COOLDOWN_FILE" ]; then
     fi
 fi
 
-# Nothing to nag about until the narrative file exists
-if [ ! -f "$NARRATIVE_FILE" ]; then
+# Per-actor narratives: track the most recently modified narrative.*.md.
+NARRATIVE_FILE=""
+NARRATIVE_MTIME=0
+for _nf in "$META_DIR"/memory/narrative*.md; do
+    [ -f "$_nf" ] || continue
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        _m=$(stat -f %m "$_nf" 2>/dev/null || echo 0)
+    else
+        _m=$(stat -c %Y "$_nf" 2>/dev/null || echo 0)
+    fi
+    if [ "$_m" -ge "$NARRATIVE_MTIME" ]; then
+        NARRATIVE_MTIME="$_m"
+        NARRATIVE_FILE="$_nf"
+    fi
+done
+
+# Nothing to nag about until a narrative file exists
+if [ -z "$NARRATIVE_FILE" ]; then
     echo '{"decision": "approve"}'
     exit 0
-fi
-
-# File modification time (cross-platform)
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    NARRATIVE_MTIME=$(stat -f %m "$NARRATIVE_FILE" 2>/dev/null || echo "0")
-else
-    NARRATIVE_MTIME=$(stat -c %Y "$NARRATIVE_FILE" 2>/dev/null || echo "0")
 fi
 
 # Recently updated — no reminder needed
