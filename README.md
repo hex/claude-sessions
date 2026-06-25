@@ -26,7 +26,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 ## Concepts
 
 - **Sessions** — Isolated workspaces, each with their own git repo, documentation, and artifact tracking. `cs debug-api` creates one; running it again resumes it.
-- **Narrative** (`.cs/memory/narrative.md`) — A lab notebook for recording findings, observations, and ideas during a session. Held as a native Claude Code memory topic file, so it inherits lazy-loading (the `MEMORY.md` index pointer loads at startup; the body is read on demand) and shows up in the `/memory` tooling.
+- **Narrative** (`.cs/memory/narrative.<actor>.md`) — A per-actor lab notebook for recording findings, observations, and ideas during a session. Each co-developer writes their own file (so shared sessions never conflict) and everyone reads all of them on resume. Held as native Claude Code memory topic files, so they inherit lazy-loading (the `MEMORY.md` index pointers load at startup; bodies are read on demand) and show up in the `/memory` tooling.
 - **Artifacts** (`.cs/artifacts/`) — Scripts and config files are automatically intercepted and saved here, tracked in a `MANIFEST.json` with metadata.
 - **Checkpoints** (`.cs/checkpoints/`) — Labelled narrative snapshots you can save mid-session with `/checkpoint`, capturing the narrative, changes, and the current git HEAD.
 - **Timeline** (`.cs/timeline.jsonl`) — A structured event log recording session starts, ends, and checkpoints as newline-delimited JSON.
@@ -148,7 +148,7 @@ This converts the current directory into a cs session in place:
 ~/.claude-sessions/<session-name>/
 ├── .cs/                    # Session metadata
 │   ├── README.md           # Objective, environment, outcome
-│   ├── memory/             # Claude Code auto memory + narrative.md lab notebook
+│   ├── memory/             # Claude Code auto memory + per-actor narrative.<actor>.md lab notebooks
 │   ├── plans/              # Claude Code plans
 │   ├── timeline.jsonl      # Session event log (starts, ends, checkpoints)
 │   ├── artifacts/          # Auto-tracked scripts and configs

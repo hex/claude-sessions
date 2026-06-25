@@ -762,12 +762,13 @@ When resuming this session, read the following files to restore context:
 
 1. **.cs/summary.md** - If exists, read first for previous session overview
 2. **.cs/README.md** - Session objective, environment, and outcome
-3. **.cs/memory/narrative.md** - Session lab notebook: findings, in-progress state, observations
+3. **.cs/memory/narrative.*.md** - Per-actor lab notebooks (yours + teammates'): findings, in-progress state, observations
 4. **.cs/artifacts/MANIFEST.json** - List of tracked artifacts
 
-Note: narrative.md is a native memory topic file — its `MEMORY.md` index pointer
-loads at startup, but its body is read on demand, so read it explicitly on resume
-to restore the working narrative.
+Note: narratives are per-actor (narrative.<actor>.md) so co-developers never
+conflict. Append only to your own (run `cs -whoami` for your actor); read all
+narrative.*.md on resume to restore your working narrative and see teammates'
+in-progress findings.
 
 ## Artifact Auto-Tracking
 
@@ -1473,12 +1474,14 @@ save_checkpoint() {
             echo '```'
             echo ""
         fi
-        if [ -f "$meta_dir/memory/narrative.md" ]; then
-            echo "## Narrative snapshot"
+        local _nf
+        for _nf in "$meta_dir"/memory/narrative*.md; do
+            [ -f "$_nf" ] || continue
+            echo "## Narrative snapshot ($(basename "$_nf"))"
             echo ""
-            cat "$meta_dir/memory/narrative.md"
+            cat "$_nf"
             echo ""
-        fi
+        done
     } > "$checkpoint_path"
 
     # Append to timeline.jsonl

@@ -93,6 +93,16 @@ test_checkpoint_snapshots_narrative() {
         "Checkpoint should snapshot narrative" || return 1
 }
 
+test_checkpoint_includes_all_actor_narratives() {
+    printf '%s\n' '# narrative (alex)' 'ALEX_MARKER' > "$CLAUDE_SESSION_META_DIR/memory/narrative.alex.md"
+    printf '%s\n' '# narrative (bob)'  'BOB_MARKER'  > "$CLAUDE_SESSION_META_DIR/memory/narrative.bob.md"
+    "$CS_BIN" -checkpoint "two actors" > /dev/null 2>&1
+    local f
+    f=$(find "$CLAUDE_SESSION_META_DIR/checkpoints" -name "*.md" | head -1)
+    assert_file_contains "$f" "ALEX_MARKER" "checkpoint should include alex's narrative" || return 1
+    assert_file_contains "$f" "BOB_MARKER" "checkpoint should include bob's narrative" || return 1
+}
+
 test_checkpoint_records_git_head() {
     "$CS_BIN" -checkpoint "test" > /dev/null 2>&1
     local f
@@ -204,6 +214,7 @@ run_test test_checkpoint_creates_file
 run_test test_checkpoint_filename_has_timestamp
 run_test test_checkpoint_includes_label
 run_test test_checkpoint_snapshots_narrative
+run_test test_checkpoint_includes_all_actor_narratives
 run_test test_checkpoint_records_git_head
 run_test test_checkpoint_requires_label
 run_test test_checkpoint_requires_active_session
