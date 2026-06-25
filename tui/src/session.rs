@@ -27,6 +27,8 @@ pub struct SessionPreview {
     pub artifact_names: Vec<String>,
     /// First few lines from auto memory MEMORY.md.
     pub memory_entries: Vec<String>,
+    /// "<author> (<n>)" lines from git history over .cs/memory, most active first.
+    pub contributors: Vec<String>,
 }
 
 /// Load preview info for a session by reading .cs/ metadata files.
@@ -113,6 +115,8 @@ pub fn load_preview(session_dir: &Path) -> SessionPreview {
         })
         .unwrap_or_default();
 
+    let contributors = load_contributors(session_dir);
+
     SessionPreview {
         objective,
         last_discovery,
@@ -120,6 +124,7 @@ pub fn load_preview(session_dir: &Path) -> SessionPreview {
         discoveries,
         artifact_names,
         memory_entries,
+        contributors,
     }
 }
 
@@ -359,6 +364,32 @@ fn is_pid_alive(pid: u32) -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+fn load_contributors(session_dir: &Path) -> Vec<String> {
+    if !session_dir.join(".git").is_dir() {
+        return Vec::new();
+    }
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(session_dir)
+        .args(["log", "--format=%an", "--", ".cs/memory"])
+        .output();
+    let stdout = match output {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).into_owned(),
+        _ => return Vec::new(),
+    };
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for line in stdout.lines() {
+        let name = line.trim();
+        if name.is_empty() {
+            continue;
+        }
+        *counts.entry(name.to_string()).or_insert(0) += 1;
+    }
+    let mut pairs: Vec<(String, usize)> = counts.into_iter().collect();
+    pairs.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    pairs.into_iter().map(|(name, n)| format!("{} ({})", name, n)).collect()
 }
 
 fn parse_git_remote(session_dir: &Path) -> Option<String> {
@@ -684,6 +715,31 @@ mod tests {
         assert_eq!(preview.artifact_count, 0);
         assert!(preview.discoveries.is_empty());
         assert!(preview.artifact_names.is_empty());
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn load_preview_reads_contributors() {
+        let dir = std::env::temp_dir().join(format!("cs-test-preview-contrib-{}", std::process::id()));
+        let cs = dir.join(".cs/memory");
+        fs::create_dir_all(&cs).unwrap();
+        let run = |args: &[&str]| {
+            std::process::Command::new("git").arg("-C").arg(&dir).args(args).output().unwrap();
+        };
+        run(&["init", "-q"]);
+        run(&["config", "user.email", "a@b.c"]);
+        run(&["config", "user.name", "Alice"]);
+        fs::write(cs.join("m1.md"), "one").unwrap();
+        run(&["add", "-A"]);
+        run(&["commit", "-q", "-m", "m1"]);
+        fs::write(cs.join("m2.md"), "two").unwrap();
+        run(&["add", "-A"]);
+        run(&["commit", "-q", "-m", "m2", "--author=Bob <bob@x.io>"]);
+
+        let preview = load_preview(&dir);
+        assert!(preview.contributors.iter().any(|c| c.contains("Alice")));
+        assert!(preview.contributors.iter().any(|c| c.contains("Bob")));
 
         fs::remove_dir_all(&dir).unwrap();
     }

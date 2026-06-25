@@ -2564,6 +2564,7 @@ mod tests {
                 discoveries: Vec::new(),
                 artifact_names: Vec::new(),
                 memory_entries: Vec::new(),
+                contributors: Vec::new(),
             },
         );
         app.handle_key(KeyEvent::from(KeyCode::Tab));
@@ -2608,6 +2609,7 @@ mod tests {
                 discoveries: Vec::new(),
                 artifact_names: Vec::new(),
                 memory_entries: Vec::new(),
+                contributors: Vec::new(),
             },
         );
         app.ensure_preview_loaded();
