@@ -34,9 +34,9 @@ fi
 # Extract a log entry if this is a narrative file edit
 LATEST_ENTRY=""
 case "$FILE_PATH" in
-    "$META_DIR/memory/narrative.md")
+    "$META_DIR"/memory/narrative*.md)
         # Try to find last heading (## Something)
-        LATEST_HEADING=$(grep "^##" "$FILE_PATH" 2>/dev/null | tail -1 | sed 's/^##\+[[:space:]]*//' || true)
+        LATEST_HEADING=$(grep "^##" "$FILE_PATH" 2>/dev/null | tail -1 | sed 's/^#\{1,\}[[:space:]]*//' || true)
         # Try to find last bullet point (- Something)
         LATEST_BULLET=$(grep "^[[:space:]]*-" "$FILE_PATH" 2>/dev/null | tail -1 | sed 's/^[[:space:]]*-[[:space:]]*//' || true)
         if [ -n "$LATEST_HEADING" ]; then

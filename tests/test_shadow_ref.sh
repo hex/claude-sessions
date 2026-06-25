@@ -188,6 +188,18 @@ test_shadow_ref_not_pushed() {
     fi
 }
 
+test_autosave_logs_per_actor_narrative_edit() {
+    local nf="$CLAUDE_SESSION_DIR/.cs/memory/narrative.alex.md"
+    printf '%s\n' '# Session narrative (alex)' '' '## A New Finding' 'detail' > "$nf"
+
+    echo '{"tool_name":"Edit","tool_input":{"file_path":"'"$nf"'"}}' \
+        | bash "$HOOKS_DIR/autosave-commits.sh"
+    sleep 1
+
+    assert_file_contains "$CLAUDE_SESSION_DIR/.cs/logs/session.log" "Autosave: A New Finding" \
+        "autosave should log the per-actor narrative heading" || return 1
+}
+
 # ============================================================================
 # Runner
 # ============================================================================
@@ -203,5 +215,6 @@ run_test test_autosave_chains_multiple_saves
 run_test test_session_end_deletes_shadow_ref
 run_test test_recovery_detects_crash_and_injects_context
 run_test test_shadow_ref_not_pushed
+run_test test_autosave_logs_per_actor_narrative_edit
 
 report_results
