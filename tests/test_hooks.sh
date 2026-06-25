@@ -325,6 +325,37 @@ EOF
     echo "$(date '+%Y-%m-%d %H:%M:%S') - Session started" > "$dir/.cs/logs/session.log"
 }
 
+test_resume_digest_reports_memory_activity() {
+    session_start_setup
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    git -C "$CLAUDE_SESSION_DIR" rev-parse HEAD > "$CLAUDE_SESSION_META_DIR/local/watermark"
+    ( cd "$CLAUDE_SESSION_DIR" && mkdir -p .cs/memory && echo "fact" > .cs/memory/new-fact.md \
+        && git add -A && git commit -q -m "add memory" --author="Bob <bob@x.io>" )
+
+    local output context
+    output=$(echo '{"session_id":"s","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+    assert_output_contains "$context" "Since your last session" "resume should inject the activity digest" || return 1
+    assert_output_contains "$context" "Bob" "digest should name the contributing author" || return 1
+
+    local head wm
+    head=$(git -C "$CLAUDE_SESSION_DIR" rev-parse HEAD)
+    wm=$(cat "$CLAUDE_SESSION_META_DIR/local/watermark")
+    assert_eq "$head" "$wm" "watermark should advance to HEAD after resume" || return 1
+}
+
+test_resume_digest_silent_without_watermark() {
+    session_start_setup
+    rm -f "$CLAUDE_SESSION_META_DIR/local/watermark"
+
+    local output
+    output=$(echo '{"session_id":"s","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    assert_output_not_contains "$output" "Since your last session" "no digest on first resume (no watermark)" || return 1
+    assert_file_exists "$CLAUDE_SESSION_META_DIR/local/watermark" "watermark should be seeded on first resume" || return 1
+}
+
 test_session_start_includes_sibling_sessions() {
     session_start_setup
 
@@ -845,6 +876,8 @@ run_test test_failure_skips_outside_session
 run_test test_failure_handles_missing_error
 
 # Session start: cross-session context
+run_test test_resume_digest_reports_memory_activity
+run_test test_resume_digest_silent_without_watermark
 run_test test_session_start_includes_sibling_sessions
 run_test test_session_start_excludes_current_session
 run_test test_session_start_shows_objectives

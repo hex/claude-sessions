@@ -176,6 +176,25 @@ if [ "$SOURCE" = "resume" ] && [ -d "$SESSION_DIR/.git" ]; then
         DYNAMIC="${DYNAMIC}\n"
     fi
 
+    # Per-actor digest: shared memory/narrative activity since this actor last looked.
+    mkdir -p "$META_DIR/local" 2>/dev/null || true
+    WATERMARK_FILE="$META_DIR/local/watermark"
+    LAST_SEEN=""
+    [ -f "$WATERMARK_FILE" ] && LAST_SEEN=$(cat "$WATERMARK_FILE" 2>/dev/null || true)
+    HEAD_SHA=$(git -C "$SESSION_DIR" rev-parse -q --verify HEAD 2>/dev/null || true)
+    if [ -n "$LAST_SEEN" ] && [ -n "$HEAD_SHA" ] && [ "$LAST_SEEN" != "$HEAD_SHA" ] \
+        && git -C "$SESSION_DIR" rev-parse -q --verify "$LAST_SEEN" >/dev/null 2>&1; then
+        DIGEST=$(git -C "$SESSION_DIR" log --no-merges --format='%an' "$LAST_SEEN..HEAD" -- .cs/memory 2>/dev/null \
+            | sort | uniq -c | sort -rn \
+            | sed 's/^[[:space:]]*\([0-9][0-9]*\)[[:space:]]*\(.*\)$/\2 (\1)/' \
+            | paste -sd', ' - 2>/dev/null || true)
+        if [ -n "$DIGEST" ]; then
+            DYNAMIC="${DYNAMIC}Since your last session — shared memory/narrative activity: ${DIGEST}\n"
+        fi
+    fi
+    # Advance the watermark to current HEAD (also seeds it on first resume).
+    [ -n "$HEAD_SHA" ] && echo "$HEAD_SHA" > "$WATERMARK_FILE"
+
     # Objective from README.md
     OBJECTIVE=$(sed -n '/^## Objective/,/^## /{/^## Objective/d;/^## /d;/^$/d;p;}' "$META_DIR/README.md" 2>/dev/null | head -1 | sed 's/^\[.*\]$//' || true)
     if [ -n "$OBJECTIVE" ] && [ "$OBJECTIVE" != "[Describe what you're trying to accomplish in this session]" ]; then
