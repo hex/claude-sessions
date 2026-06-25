@@ -138,6 +138,23 @@ test_who_lists_contributors() {
     assert_output_contains "$out" "Bob" "who should list a contributing author" || return 1
 }
 
+test_migrate_adds_local_to_existing_gitignore() {
+    local project_dir="$TEST_TMPDIR/proj"
+    mkdir -p "$project_dir"
+    ( cd "$project_dir" && git init -q && git config user.email a@b.c && git config user.name A )
+    ( cd "$project_dir" && "$CS_BIN" -adopt s1 >/dev/null 2>&1 )
+    # Simulate a pre-6.10 session: a .gitignore that predates the .cs/local/ rule.
+    printf '%s\n' '*.log' 'node_modules/' > "$project_dir/.gitignore"
+
+    # Resume the session -> migrate_session should backfill the ignore entry.
+    ( "$CS_BIN" s1 <<< "" >/dev/null 2>&1 || true )
+
+    assert_file_contains "$project_dir/.gitignore" ".cs/local/" \
+        "resume should add .cs/local/ to an existing .gitignore" || return 1
+    assert_file_contains "$project_dir/.gitignore" "node_modules/" \
+        "resume must not clobber existing .gitignore entries" || return 1
+}
+
 echo ""
 echo "cs actor identity tests"
 echo "======================="
@@ -152,5 +169,6 @@ run_test test_guard_blocks_tracked_local
 run_test test_narrative_is_per_actor
 run_test test_legacy_narrative_migrates_to_actor
 run_test test_who_lists_contributors
+run_test test_migrate_adds_local_to_existing_gitignore
 
 report_results

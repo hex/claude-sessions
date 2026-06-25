@@ -1200,6 +1200,11 @@ migrate_session() {
     # Backfill the memory-index merge driver on existing sessions.
     setup_memory_merge_driver "$session_dir"
 
+    # Backfill the .cs/local/ ignore rule on older sessions whose .gitignore
+    # predates it, so per-actor local state never gets committed (which would
+    # otherwise trip cs_assert_local_untracked and block the next resume).
+    ensure_cs_gitignore_entries "$session_dir"
+
     # Phase 1: Structural migration (flat layout -> .cs/ directory)
     if needs_cs_migration "$session_dir"; then
         mkdir -p "$session_dir/.cs"
@@ -2673,6 +2678,36 @@ Thumbs.db
 GITIGNORE
 }
 
+# Append cs's .gitignore entries to a session's .gitignore if absent
+# (idempotent; never clobbers a project's existing .gitignore). Writes a fresh
+# cs .gitignore when none exists. Used by adopt and by migrate_session so older
+# sessions gain the .cs/local/ rule (per-actor state must never be committed).
+ensure_cs_gitignore_entries() {
+    local target_dir="$1"
+    local gitignore="$target_dir/.gitignore"
+    if [ ! -f "$gitignore" ]; then
+        create_session_gitignore "$target_dir"
+        return 0
+    fi
+    local entries
+    entries=$(cat << 'ENTRIES'
+.cs/local/
+.cs/archives/
+.cs/.narrative-reminder-cooldown
+.claude/settings.local.json
+.obsidian/
+ENTRIES
+    )
+    local line
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        [[ "$line" == \#* ]] && continue
+        if ! grep -qF "$line" "$gitignore" 2>/dev/null; then
+            echo "$line" >> "$gitignore"
+        fi
+    done <<< "$entries"
+}
+
 # Adopt an existing project directory as a cs session
 adopt_session() {
     local session_name="$1"
@@ -2724,29 +2759,8 @@ adopt_session() {
             git commit -q -m "Adopt as cs session: $session_name" 2>/dev/null || true
         )
     else
-        # Merge .cs/ gitignore entries into existing .gitignore
-        local cs_gitignore_entries
-        cs_gitignore_entries=$(cat << 'ENTRIES'
-# cs session metadata
-.cs/local/
-.cs/archives/
-.cs/.narrative-reminder-cooldown
-.claude/settings.local.json
-.obsidian/
-ENTRIES
-        )
-        if [ -f "$target_dir/.gitignore" ]; then
-            # Append entries not already present
-            while IFS= read -r line; do
-                [ -z "$line" ] && continue
-                [[ "$line" == \#* ]] && continue
-                if ! grep -qF "$line" "$target_dir/.gitignore" 2>/dev/null; then
-                    echo "$line" >> "$target_dir/.gitignore"
-                fi
-            done <<< "$cs_gitignore_entries"
-        else
-            create_session_gitignore "$target_dir"
-        fi
+        # Merge cs's .gitignore entries into the project's existing .gitignore
+        ensure_cs_gitignore_entries "$target_dir"
 
         # Commit the adoption
         (
