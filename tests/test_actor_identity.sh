@@ -124,6 +124,20 @@ test_legacy_narrative_migrates_to_actor() {
         "stale legacy index pointer should be removed" || return 1
 }
 
+test_who_lists_contributors() {
+    local project_dir="$TEST_TMPDIR/proj"
+    mkdir -p "$project_dir"
+    ( cd "$project_dir" && git init -q && git config user.email a@b.c && git config user.name Alice )
+    ( cd "$project_dir" && "$CS_BIN" -adopt s1 >/dev/null 2>&1 )
+    ( cd "$project_dir" && mkdir -p .cs/memory && echo m1 > .cs/memory/m1.md \
+        && git add -A && git commit -q -m m1 --author="Bob <bob@x.io>" )
+
+    local out
+    out=$( cd "$project_dir" && "$CS_BIN" -who 2>&1 )
+    assert_output_contains "$out" "Contributors" "who should print a contributors header" || return 1
+    assert_output_contains "$out" "Bob" "who should list a contributing author" || return 1
+}
+
 echo ""
 echo "cs actor identity tests"
 echo "======================="
@@ -137,5 +151,6 @@ run_test test_local_dir_created_on_adopt
 run_test test_guard_blocks_tracked_local
 run_test test_narrative_is_per_actor
 run_test test_legacy_narrative_migrates_to_actor
+run_test test_who_lists_contributors
 
 report_results

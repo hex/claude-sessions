@@ -293,6 +293,7 @@ Commands:
   -list, -ls          List all sessions
   -adopt <name>       Adopt current directory as a cs session
   -whoami             Show the current actor (for shared, multi-person sessions)
+  -who                Show who contributed to shared memory/narrative (git history)
   -remove, -rm <name> Remove a session
   -secrets <cmd>      Manage current session secrets (requires CLAUDE_SESSION_NAME)
   -update             Update cs to latest version
@@ -1040,6 +1041,22 @@ cmd_whoami() {
             warn "cs actor '$file_slug' differs from git identity '$git_slug' (using cs actor)"
         fi
     fi
+}
+
+# Summarize shared memory/narrative contributors from git history (recent
+# activity, by author). Not presence — purely a read over git log.
+cmd_who() {
+    local dir="${CLAUDE_SESSION_DIR:-$PWD}"
+    [ -d "$dir/.cs" ] || error "Not in a cs session (no .cs/ in $dir)"
+    [ -d "$dir/.git" ] || error "Session is not a git repo; nothing to summarize"
+    echo "Contributors to shared memory/narrative (recent activity):"
+    git -C "$dir" log --format='%an|%ad' --date=short -- .cs/memory 2>/dev/null \
+        | awk -F'|' '
+            { count[$1]++; if ($2 > last[$1]) last[$1] = $2 }
+            END {
+                for (a in count) printf "%6d  %s  (last %s)\n", count[a], a, last[a]
+            }' \
+        | sort -rn
 }
 
 # Configure a conflict-free merge for the Claude-Code-maintained memory index.
@@ -3028,6 +3045,10 @@ main() {
             ;;
         -whoami)
             cmd_whoami
+            return 0
+            ;;
+        -who)
+            cmd_who
             return 0
             ;;
         -secrets)
