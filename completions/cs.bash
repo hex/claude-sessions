@@ -13,7 +13,7 @@ _cs_completions() {
     local sessions_root="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 
     # Global flags
-    local global_flags="-list -ls -remove -rm -secrets -checkpoint -search -update -uninstall -help -h -version -v"
+    local global_flags="-list -ls -adopt -remove -rm -whoami -who -secrets -checkpoint -search -lint -statusline -detect-theme -doctor -diag -update -uninstall -help -h -version -v"
 
     # Secrets subcommands
     local secrets_cmds="set store get list ls delete rm purge export export-file import-file migrate backend"
