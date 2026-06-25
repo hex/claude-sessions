@@ -1024,7 +1024,7 @@ create_session_structure() {
     claude_session_id=$(_alloc_uuid)
     claude_session_color=$(_alloc_random_color)
 
-    mkdir -p "$session_dir/.cs"/{artifacts,logs}
+    mkdir -p "$session_dir/.cs"/{artifacts,logs,local}
 
     # Create README.md with YAML frontmatter for structured queries
     cat > "$session_dir/.cs/README.md" << EOF
@@ -1168,7 +1168,7 @@ migrate_session() {
     fi
 
     # Phase 2: Ensure .cs/ subdirectories exist (handles partial migrations and edge cases)
-    mkdir -p "$session_dir/.cs"/{artifacts,logs}
+    mkdir -p "$session_dir/.cs"/{artifacts,logs,local}
 
     # Phase 3: Ensure required files exist
     if [ ! -f "$session_dir/.cs/artifacts/MANIFEST.json" ]; then

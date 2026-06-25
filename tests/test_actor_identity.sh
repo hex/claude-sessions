@@ -66,6 +66,12 @@ test_whoami_warns_on_identity_mismatch() {
     out=$( cd "$project_dir" && CLAUDE_SESSION_META_DIR="$project_dir/.cs" "$CS_BIN" -whoami 2>&1 )
     assert_output_contains "$out" "differs from git identity" "whoami should warn when local identity != git identity" || return 1
 }
+test_local_dir_created_on_adopt() {
+    local project_dir="$TEST_TMPDIR/proj"
+    mkdir -p "$project_dir"
+    ( cd "$project_dir" && "$CS_BIN" -adopt s1 >/dev/null 2>&1 )
+    assert_dir "$project_dir/.cs/local" ".cs/local/ should be created on adopt" || return 1
+}
 
 echo ""
 echo "cs actor identity tests"
@@ -76,5 +82,6 @@ run_test test_actor_slug_from_git_email
 run_test test_actor_slug_env_override_wins
 run_test test_actor_slug_local_file_over_git
 run_test test_whoami_warns_on_identity_mismatch
+run_test test_local_dir_created_on_adopt
 
 report_results
