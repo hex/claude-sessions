@@ -2575,6 +2575,9 @@ create_session_gitignore() {
 *.tmp
 *.bak
 
+# Per-actor local state (never shared)
+.cs/local/
+
 # Archives (large, regenerated from artifacts)
 .cs/archives/
 
@@ -2652,6 +2655,7 @@ adopt_session() {
         local cs_gitignore_entries
         cs_gitignore_entries=$(cat << 'ENTRIES'
 # cs session metadata
+.cs/local/
 .cs/archives/
 .cs/.narrative-reminder-cooldown
 .claude/settings.local.json

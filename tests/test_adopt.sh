@@ -225,6 +225,14 @@ test_readme_objective_still_extractable() {
         "Objective should still be extractable with existing sed pattern" || return 1
 }
 
+test_adopt_gitignores_cs_local() {
+    local project_dir="$TEST_TMPDIR/my-project"
+    mkdir -p "$project_dir"
+    (cd "$project_dir" && "$CS_BIN" -adopt my-session)
+    assert_file_contains "$project_dir/.gitignore" ".cs/local/" \
+        ".gitignore should ignore .cs/local/" || return 1
+}
+
 # ============================================================================
 # Runner
 # ============================================================================
@@ -233,6 +241,8 @@ echo ""
 echo "cs -adopt tests"
 echo "==============="
 echo ""
+
+run_test test_adopt_gitignores_cs_local
 
 run_test test_adopt_creates_cs_structure
 run_test test_adopt_creates_symlink
