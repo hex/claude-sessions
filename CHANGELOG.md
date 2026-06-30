@@ -18,6 +18,22 @@ All notable changes to cs are documented here. Release notes are also available 
 
 - Statusline docs and README updated for the logo badge, the exact `/color` palette match, and the tmux truecolor behavior.
 
+## 2026.6.12
+
+A session-picker (TUI) glow-up plus a light-terminal contrast fix.
+
+### Features
+
+- **Session list redesign** — a relative `Age` column (`2h`, `3d`, `1mo`), recency **heat dots** (green = live → grey = dormant), and **recency as the default sort** so live sessions surface first.
+- **Refined chrome** — rounded panel, a warm rust→orange→amber **gradient header band** with a hairline header rule, a softened selection (accent bar + subtle tint instead of full reverse-video), a vivid 3-stop gradient title, a **shimmering** selection bar, and branch glyphs on Github repos.
+
+### Fixes
+
+- **Column alignment** — table dividers no longer slice through headers/cells (`M│dified`, `hex/ba│ger`); geometry now comes from ratatui's own layout solver, which also fixes mouse click-to-sort drift.
+- **Default sort actually applies** — the picker sorts by recency on open (it was previously declared but never applied to the initial list).
+- **Hidden dirs excluded** — `.obsidian`/`.git` and friends are no longer listed as sessions.
+- **Light-terminal contrast** — the `cs` resume banner uses a theme-aware palette (readable ink/greys on a light background) instead of dark-tuned colours that washed out.
+
 ## 2026.6.11
 
 ### Fixes
