@@ -2,6 +2,22 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
+## 2026.6.13
+
+### Features
+
+- **Statusline logo badge** — the bar now opens with a Claude mark (`✳`) on a Claude-coral square (color modes only).
+- **Exact Claude Code `/color` palette** — the session-name pill and the terminal tab color now use Claude Code's own `/color` RGB values (its default dark/light agent-color palette), so cs's accents match what Claude Code shows for the same color name. The quiet gauge sections (ctx/5h/wk/cost) use a lighter warm grey.
+- **Truecolor in tmux** — cs sets `CLAUDE_CODE_TMUX_TRUECOLOR=1` in Claude Code's environment at launch (respecting a value you've set yourself), so Claude Code's branding and any truecolor status line render at full saturation inside tmux instead of the muted fallback.
+
+### Fixes
+
+- **prose-lint hook** — per-actor narrative notebooks (`narrative.<actor>.md`) are now excluded from prose linting, the same as `narrative.md` always was. Previously the stop hook would loop on the lab notebook's accumulated em-dashes.
+
+### Docs
+
+- Statusline docs and README updated for the logo badge, the exact `/color` palette match, and the tmux truecolor behavior.
+
 ## 2026.6.11
 
 ### Fixes

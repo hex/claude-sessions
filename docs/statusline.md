@@ -10,10 +10,11 @@ With colors enabled, each segment renders as a square colored block; blocks abut
 
 ## Segments
 
-Default order: `session,git,model,ctx,limits,cost`. Identity first (which session, which branch, which model), then the gauges.
+Default order: `logo,session,git,model,ctx,limits,cost`. A brand badge opens the bar, then identity (which session, which branch, which model), then the gauges.
 
 | Segment | Shows | Source | Color |
 |---|---|---|---|
+| `logo` | A Claude mark (`✳`) badge | none — always present in color modes | Claude coral `rgb(217,119,87)`, white mark. Omitted in plain (`NO_COLOR`) mode, where there is no background |
 | `session` | Session name | stdin `session_name`, falling back to `CLAUDE_SESSION_NAME`, then the workspace dir basename | The session's `claude_session_color` from `.cs/README.md` frontmatter; grey outside cs sessions |
 | `git` | Branch, ahead/behind arrows, staged `+N` and modified `!N` counts | One `git status --porcelain=v1 -b` call | Bold slate-blue accent `rgb(79,91,140)`, chip text color |
 | `model` | Model display name plus effort level when present | stdin `model.display_name`, `effort.level` | Periwinkle accent (claude's usage-chip purple), white text |
@@ -35,11 +36,13 @@ Failure posture is fail-open: malformed stdin, a missing `jq`, or any internal e
 
 Color depth is detected per render, in priority order: `FORCE_COLOR=0`, `NO_COLOR`, or `TERM=dumb` force plain text (segments joined with ` > `, no escape codes); `COLORTERM=truecolor`/`24bit` or iTerm2/WezTerm select truecolor; a `*256color*` `TERM` selects 256-color; anything else gets basic ANSI.
 
-The `session` segment's background is the same color claude shows for the session (`/color`), read from `claude_session_color:` in the session's `.cs/README.md` frontmatter.
+The `session` segment's background is the same color claude shows for the session (`/color`), read from `claude_session_color:` in the session's `.cs/README.md` frontmatter. The eight session colors use Claude Code's own `/color` RGB values (its default dark/light agent-color palette), so the pill, the terminal tab color, and claude's own session accent all agree exactly.
 
 The healthy bar carries the identity blocks as bold accents: the session name in its `claude_session_color`, the branch in slate-blue `rgb(79,91,140)`, and the model in periwinkle `rgb(138,134,236)`, the last matching claude's own usage chip. All three render bold text in the chip's own near-white `rgb(240,242,255)`; the identity segments are also the typographically loudest. Every other segment explicitly resets to normal intensity, since SGR bold is stateful and would otherwise leak rightward across the bar. Everything else rests on a warm neutral (R>G>B taupe rather than steel grey) with white text. Color beyond the identity accents is state: warm amber `rgb(255,183,77)` (cs's warning color) past warn thresholds, red past crit. A glance answers in order: which session, which branch, which model, and is anything on fire.
 
-Adjacent segments that share a background join with a faint one-eighth bar (`▏`, U+258F), since a plain color-change divider would vanish between equal colors. Differing backgrounds need no glyph — the color change is the divider.
+Adjacent segments that share a background join with a faint one-eighth bar (`▏`, U+258F) in a light warm grey, since a plain color-change divider would vanish between equal colors. Differing backgrounds need no glyph — the color change is the divider.
+
+Inside tmux, Claude Code mutes its own branding and any truecolor status line to a fallback palette. cs sets `CLAUDE_CODE_TMUX_TRUECOLOR=1` in claude's environment at launch (unless you set it yourself) to keep these colors at full saturation.
 
 ## Terminal theme
 

@@ -321,13 +321,7 @@ run_test test_decline_resume_rebinds_to_fresh_uuid
 test_decline_resume_exports_fresh_rebind_signal() {
     # The CS_FRESH_REBIND=1 env signals to hooks (session-start.sh) that the
     # user declined to resume — used to tailor SessionStart additionalContext.
-    local stub="$TEST_TMPDIR/claude-env-stub"
-    cat > "$stub" << 'STUB_EOF'
-#!/usr/bin/env bash
-env
-STUB_EOF
-    chmod +x "$stub"
-    export CLAUDE_CODE_BIN="$stub"
+    export CLAUDE_CODE_BIN="$(_make_env_stub)"
 
     local old_uuid="abcd1234-5678-4abc-9def-fedcba987654"
     local session_dir
@@ -351,13 +345,7 @@ test_env_var_exported_with_uuid() {
     # Override CLAUDE_CODE_BIN with a stub that prints `env`. This captures
     # what variables are exported into claude's process environment — echo
     # (the default test stub) doesn't show env at all.
-    local stub="$TEST_TMPDIR/claude-stub"
-    cat > "$stub" << 'STUB_EOF'
-#!/usr/bin/env bash
-env
-STUB_EOF
-    chmod +x "$stub"
-    export CLAUDE_CODE_BIN="$stub"
+    export CLAUDE_CODE_BIN="$(_make_env_stub)"
 
     local output
     output=$("$CS_BIN" test-session <<< "" 2>&1) || true

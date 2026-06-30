@@ -66,6 +66,26 @@ test_cs_term_theme_override_wins() {
     esac
 }
 
+# Claude Code mutes its own branding (logo, thinking animation) and statusline
+# truecolor when it detects tmux; CLAUDE_CODE_TMUX_TRUECOLOR=1 restores it.
+# cs owns the env before exec, so it sets the override at launch (issue #35148).
+test_tmux_truecolor_exported_at_launch() {
+    unset CLAUDE_CODE_TMUX_TRUECOLOR 2>/dev/null || true
+    export CLAUDE_CODE_BIN="$(_make_env_stub)"
+    local output
+    output=$("$CS_BIN" truecolor-session <<< "" 2>&1) || true
+    assert_output_contains "$output" "CLAUDE_CODE_TMUX_TRUECOLOR=1" \
+        "cs should export CLAUDE_CODE_TMUX_TRUECOLOR=1 into the claude env" || return 1
+}
+
+test_tmux_truecolor_respects_user_value() {
+    export CLAUDE_CODE_BIN="$(_make_env_stub)"
+    local output
+    output=$(CLAUDE_CODE_TMUX_TRUECOLOR=0 "$CS_BIN" truecolor-optout <<< "" 2>&1) || true
+    assert_output_contains "$output" "CLAUDE_CODE_TMUX_TRUECOLOR=0" \
+        "a user-set CLAUDE_CODE_TMUX_TRUECOLOR must be left untouched" || return 1
+}
+
 echo ""
 echo "cs theme detection tests"
 echo "========================"
@@ -76,5 +96,7 @@ run_test test_tmux_passthrough_doubles_all_escapes
 run_test test_detect_theme_graceful_under_tmux
 run_test test_detect_theme_graceful_no_tmux
 run_test test_cs_term_theme_override_wins
+run_test test_tmux_truecolor_exported_at_launch
+run_test test_tmux_truecolor_respects_user_value
 
 report_results

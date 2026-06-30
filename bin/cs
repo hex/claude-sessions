@@ -5,9 +5,20 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.6.12"
+VERSION="2026.6.13"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
+
+# Claude Code downgrades its branding (logo, "thinking" animation) and statusline
+# truecolor to a muted palette when it detects tmux, regardless of actual color
+# support (anthropics/claude-code#35148). cs owns the environment before it execs
+# claude, so it restores the documented override here for every launch path,
+# unless the user has already set the variable themselves. (`if`, not `[ ] &&`,
+# so the false branch does not trip `set -e` at top level.)
+if [ -z "${CLAUDE_CODE_TMUX_TRUECOLOR+x}" ]; then
+    export CLAUDE_CODE_TMUX_TRUECOLOR=1
+fi
+
 REPO_URL="https://github.com/hex/claude-sessions"
 RELEASES_BASE="https://github.com/hex/claude-sessions/releases"
 
@@ -187,17 +198,20 @@ _color_from_name() {
 
 # Map a claude_session_color name to its RGB (comma form for set_tab_title), so
 # the terminal tab color matches the statusline session block exactly.
-# KEEP IN SYNC with cs-statusline's truecolor session palette.
+# These are Claude Code's own /color palette (the shared dark/light theme
+# `*_FOR_SUBAGENTS_ONLY` tokens) so the tab, the session pill, and Claude Code's
+# own session accent all agree. KEEP IN SYNC with cs-statusline's truecolor
+# session palette.
 _session_color_rgb() {
     case "$1" in
-        red)    echo "211,47,47" ;;
-        blue)   echo "30,107,200" ;;
-        green)  echo "46,125,50" ;;
-        yellow) echo "154,120,20" ;;
-        purple) echo "126,87,194" ;;
-        orange) echo "216,107,28" ;;
-        pink)   echo "194,58,130" ;;
-        cyan)   echo "0,131,143" ;;
+        red)    echo "220,38,38" ;;
+        blue)   echo "106,155,204" ;;
+        green)  echo "22,163,74" ;;
+        yellow) echo "202,138,4" ;;
+        purple) echo "130,125,189" ;;
+        orange) echo "217,119,87" ;;
+        pink)   echo "196,102,134" ;;
+        cyan)   echo "8,145,178" ;;
         *)      echo "" ;;
     esac
 }

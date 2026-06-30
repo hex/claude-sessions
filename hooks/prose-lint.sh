@@ -41,15 +41,16 @@ CUTOFF=$(_mtime "$LOCK")
 # Candidate prose surfaces with no cross-session in-file backlog:
 #   summary.md   — regenerated wholesale by /summary and /wrap
 #   memory/*.md  — individual durable-fact entries (the prose bodies)
-# narrative.md is intentionally excluded (append-heavy lab notebook; needs line-level diffing).
-# MEMORY.md is excluded: it is the index, whose prescribed format uses em-dash
-# separators by convention, not prose.
+# Every narrative notebook (narrative.md and the per-actor narrative.<actor>.md)
+# is intentionally excluded (append-heavy lab notebooks; need line-level diffing,
+# not whole-file lint). MEMORY.md is excluded: it is the index, whose prescribed
+# format uses em-dash separators by convention, not prose.
 CANDIDATES=()
 [ -f "$META_DIR/summary.md" ] && CANDIDATES+=("$META_DIR/summary.md")
 if [ -d "$META_DIR/memory" ]; then
     while IFS= read -r m; do
         [ -n "$m" ] && CANDIDATES+=("$m")
-    done < <(find "$META_DIR/memory" -type f -name '*.md' ! -name 'MEMORY.md' ! -name 'narrative.md' 2>/dev/null)
+    done < <(find "$META_DIR/memory" -type f -name '*.md' ! -name 'MEMORY.md' ! -name 'narrative*.md' 2>/dev/null)
 fi
 [ ${#CANDIDATES[@]} -eq 0 ] && approve
 

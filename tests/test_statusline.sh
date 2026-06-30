@@ -91,7 +91,7 @@ test_happy_path_docs_fixture_plain() {
     out=$(run_sl "$FIXTURE_DOCS")
     # git absent (non-git dir) and disc absent (no cs session).
     assert_eq "my-session > ✦ Opus high > ◔ ctx 8% > ◷ 5h 23% > ◑ wk 41% > \$0.01" "$out" \
-        "docs fixture should render identity first, then gauges"
+        "docs fixture should render identity first, then gauges (no badge in plain mode)"
 }
 
 # ============================================================================
@@ -117,7 +117,7 @@ test_all_segments_ordering_plain() {
     local out
     out=$(run_sl "$json")
     assert_eq "mysess > ⎇ main +1!1 > ✦ Opus high > ◔ ctx 34% > ◷ 5h 23% > ◑ wk 41% > \$1.23" "$out" \
-        "all segments should render in order: session, branch, model, then gauges"
+        "all segments should render in order: session, branch, model, then gauges (no badge in plain mode)"
 }
 
 # ============================================================================
@@ -147,10 +147,10 @@ test_two_accents_default() {
     local json='{"session_name":"accents","model":{"display_name":"Opus"},"workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8},"cost":{"total_cost_usd":1.0},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":40}}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;0;131;143" "session block should carry the session color (cyan)" || return 1
+    assert_output_contains "$out" "48;2;8;145;178" "session block should carry the session color (cyan)" || return 1
     assert_output_contains "$out" "48;2;138;134;236;38;2;240;242;255" "model should be the usage-chip periwinkle with the chip's text color" || return 1
     local greys
-    greys=$(printf '%s' "$out" | grep -o '48;2;96;90;82' | grep -c . ) || greys=0
+    greys=$(printf '%s' "$out" | grep -o '48;2;128;120;110' | grep -c . ) || greys=0
     if [ "$greys" -lt 4 ]; then
         echo "  FAIL: expected ctx, git-less run, 5h, wk, cost on grey (got $greys grey blocks)"
         return 1
@@ -195,7 +195,7 @@ test_limits_threshold_per_block() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":95}}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;211;47;47" "wk 95% block should go red" || return 1
+    assert_output_contains "$out" "48;2;220;38;38" "wk 95% block should go red" || return 1
     assert_output_not_contains "$out" "48;2;255;183;77" "healthy 5h block must not show amber" || return 1
 }
 
@@ -206,13 +206,15 @@ test_limits_threshold_per_block() {
 
 test_thin_bar_between_same_bg() {
     export COLORTERM=truecolor
-    # Adjacent warn blocks share the amber background: ctx at warn next to a
-    # 5h block at warn (segment order trimmed so the two are neighbors).
+    # Two healthy gauges share the quiet grey background: ctx next to a 5h block,
+    # both grey (segment order trimmed so the two are neighbors). They are split
+    # by a thin one-eighth bar in the pills' own light text color, not a wide gap.
     export CS_STATUSLINE_SEGMENTS="ctx,limits"
-    local json='{"workspace":{"current_dir":"/none"},"context_window":{"used_percentage":55},"rate_limits":{"five_hour":{"used_percentage":75}}}'
+    local json='{"workspace":{"current_dir":"/none"},"context_window":{"used_percentage":10},"rate_limits":{"five_hour":{"used_percentage":20}}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "▏" "same-bg neighbors should join with a faint bar" || return 1
+    assert_output_contains "$out" "▏" "same-bg neighbors should join with a thin light bar" || return 1
+    assert_output_contains "$out" "38;2;170;161;148" "the divider bar should be a light warm grey, not white" || return 1
 }
 
 test_abut_between_different_bg() {
@@ -223,6 +225,16 @@ test_abut_between_different_bg() {
     local out
     out=$(run_sl "$json")
     assert_output_not_contains "$out" "▏" "no faint bar between differing backgrounds" || return 1
+}
+
+test_logo_badge_is_brand_coral() {
+    export COLORTERM=truecolor
+    # The bar opens with a brand badge: the Claude mark on the Claude-coral bg.
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "✳" "logo badge glyph should render" || return 1
+    assert_output_contains "$out" "48;2;217;119;87" "logo badge should sit on the Claude-coral background" || return 1
 }
 
 # ============================================================================
@@ -364,9 +376,9 @@ test_statusline_dark_theme_variant() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;108;101;92" "dark theme should lift the neutral grey" || return 1
+    assert_output_contains "$out" "48;2;140;132;122" "dark theme should lift the neutral grey" || return 1
     assert_output_contains "$out" "38;2;230;230;230" "dark theme should soften white text" || return 1
-    assert_output_not_contains "$out" "48;2;96;90;82" "dark theme must not use the light-theme grey" || return 1
+    assert_output_not_contains "$out" "48;2;128;120;110" "dark theme must not use the light-theme grey" || return 1
 }
 
 # ============================================================================
@@ -580,7 +592,7 @@ test_ctx_threshold_red() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":84}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "211;47;47" "ctx 84% should use the red background rgb"
+    assert_output_contains "$out" "220;38;38" "ctx 84% should use the red background rgb"
     if ! printf '%s' "$out" | grep -qF "$(printf '\033[0m')"; then
         echo "  FAIL: colored line must contain a reset"
         return 1
@@ -593,7 +605,7 @@ test_ctx_normal_neutral_not_red() {
     local out
     out=$(run_sl "$json")
     assert_output_not_contains "$out" "0;135;0" "healthy ctx must not shout green" || return 1
-    assert_output_not_contains "$out" "211;47;47" "ctx 8% must not use red" || return 1
+    assert_output_not_contains "$out" "220;38;38" "ctx 8% must not use red" || return 1
 }
 
 test_model_neutral_not_blue() {
@@ -621,15 +633,15 @@ test_accent_segments_bold() {
     local json='{"session_name":"boldsess","model":{"display_name":"Opus"},"workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;0;131;143;38;2;240;242;255;1" \
+    assert_output_contains "$out" "48;2;8;145;178;38;2;240;242;255;1" \
         "the session accent should render bold in the chip text color" || return 1
     assert_output_contains "$out" "48;2;138;134;236;38;2;240;242;255;1" \
         "the model accent should render bold in the chip text color" || return 1
     # SGR bold is stateful: a segment that does not explicitly emit normal
     # intensity (22) inherits bold from the accent before it.
-    assert_output_contains "$out" "48;2;96;90;82;38;2;255;255;255;22" \
+    assert_output_contains "$out" "48;2;128;120;110;38;2;255;255;255;22" \
         "grey segments must explicitly reset to normal intensity" || return 1
-    assert_output_not_contains "$out" "48;2;96;90;82;38;2;255;255;255;1m" \
+    assert_output_not_contains "$out" "48;2;128;120;110;38;2;255;255;255;1m" \
         "grey segments must not render bold" || return 1
 }
 
@@ -651,7 +663,7 @@ test_limits_threshold_red() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":95}}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "211;47;47" "wk 95% should drive the limits bg red"
+    assert_output_contains "$out" "220;38;38" "wk 95% should drive the limits bg red"
 }
 
 # ============================================================================
@@ -851,7 +863,7 @@ test_unknown_session_color_falls_back() {
     local json='{"session_name":"weird","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":5}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;96;90;82" \
+    assert_output_contains "$out" "48;2;128;120;110" \
         "unknown session color should fall back to neutral grey"
 }
 
@@ -867,6 +879,7 @@ run_test test_two_accents_default
 run_test test_git_branch_bold_slate_accent
 run_test test_limits_threshold_per_block
 run_test test_thin_bar_between_same_bg
+run_test test_logo_badge_is_brand_coral
 run_test test_abut_between_different_bg
 run_test test_segment_icons_are_unicode
 run_test test_tab_color_palette_matches_statusline

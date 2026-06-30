@@ -32,6 +32,7 @@ ICON_MODEL=$'\xe2\x9c\xa6 '     # U+2726 four-pointed star
 ICON_GIT=$'\xe2\x8e\x87 '       # U+2387 branch
 ICON_5H=$'\xe2\x97\xb7 '        # U+25F7 clock
 ICON_WK=$'\xe2\x97\x91 '        # U+25D1 half circle
+ICON_LOGO=$'\xe2\x9c\xb3'       # U+2733 eight-spoked asterisk (Claude mark)
 
 # --- stdin -----------------------------------------------------------------
 
@@ -125,29 +126,37 @@ _sgr() {
         truecolor)
             local rgb
             case "$name" in
-                # Session-color palette: tuned dark enough for white text.
+                # Session-color palette: Claude Code's own /color values (the
+                # shared dark/light theme `*_FOR_SUBAGENTS_ONLY` tokens), so the
+                # session pill matches CC's session accent and the terminal tab.
                 # KEEP IN SYNC with _session_color_rgb in bin/cs (tab color).
-                red)    rgb="211;47;47" ;;
-                blue)   rgb="30;107;200" ;;
-                green)  rgb="46;125;50" ;;
-                yellow) rgb="154;120;20" ;;
-                purple) rgb="126;87;194" ;;
-                orange) rgb="216;107;28" ;;
-                pink)   rgb="194;58;130" ;;
-                cyan)   rgb="0;131;143" ;;
+                red)    rgb="220;38;38" ;;
+                blue)   rgb="106;155;204" ;;
+                green)  rgb="22;163;74" ;;
+                yellow) rgb="202;138;4" ;;
+                purple) rgb="130;125;189" ;;
+                orange) rgb="217;119;87" ;;
+                pink)   rgb="196;102;134" ;;
+                cyan)   rgb="8;145;178" ;;
                 periwinkle) rgb="138;134;236" ;;
                 slate)  rgb="79;91;140" ;;
                 chiptext) rgb="240;242;255" ;;
                 amber)  rgb="255;183;77" ;;
+                brand)  rgb="217;119;87" ;;   # Claude coral (#D97757)
                 white)
                     # Softer text on dark terminals to avoid glare.
                     [ "$SL_THEME" = "dark" ] && rgb="230;230;230" || rgb="255;255;255" ;;
                 black)  rgb="30;30;30" ;;
+                hairline)
+                    # The thin divider between same-background pills: a light
+                    # warm grey, lighter than the taupe block but softer than
+                    # the white label text, so it reads as a faint line.
+                    rgb="170;161;148" ;;
                 *)
                     # Warm neutral (R>G>B) so the quiet blocks read as taupe,
-                    # not steel; lifted a touch on dark terminals to separate
-                    # from the background.
-                    [ "$SL_THEME" = "dark" ] && rgb="108;101;92" || rgb="96;90;82" ;;
+                    # not steel; light enough that the gauges recede beside the
+                    # vivid session/model accents while white label text holds.
+                    [ "$SL_THEME" = "dark" ] && rgb="140;132;122" || rgb="128;120;110" ;;
             esac
             _SGR="${kind};2;${rgb}" ;;
         256)
@@ -165,11 +174,13 @@ _sgr() {
                 slate)  idx=60 ;;
                 chiptext) idx=231 ;;
                 amber)  idx=215 ;;
+                brand)  idx=173 ;;
+                hairline) idx=248 ;;
                 white)
                     [ "$SL_THEME" = "dark" ] && idx=254 || idx=255 ;;
                 black)  idx=235 ;;
                 *)
-                    [ "$SL_THEME" = "dark" ] && idx=242 || idx=240 ;;
+                    [ "$SL_THEME" = "dark" ] && idx=245 || idx=244 ;;
             esac
             _SGR="${kind};5;${idx}" ;;
         *)
@@ -189,6 +200,8 @@ _sgr() {
                 amber)  base=33 ;;
                 white)  base=97 ;;
                 black)  base=30 ;;
+                brand)  base=33 ;;
+                hairline) base=90 ;;
                 *)      base=90 ;;
             esac
             if [ "$kind" = "48" ]; then _SGR=$((base + 10)); else _SGR="$base"; fi ;;
@@ -322,6 +335,14 @@ EOF
 
 # --- segments --------------------------------------------------------------
 
+# A brand badge: the Claude mark on the Claude-coral background, opening the
+# bar. Icon only, no label; the render's own padding squares it off. The badge
+# is the background, so it is omitted when color is off (plain has none).
+_seg_logo() {
+    [ "$LEVEL" = "plain" ] && return 0
+    _add "${ICON_LOGO}" "brand" bold
+}
+
 _seg_session() {
     local name="$SL_SESSION"
     [ -n "$name" ] || name="${CLAUDE_SESSION_NAME:-}"
@@ -400,11 +421,14 @@ _render() {
     fi
 
     # Squared pills that abut: each segment is a flat block with square edges,
-    # and the divider between differing backgrounds is just the color change —
-    # the most discreet separator there is. Only same-background neighbors need
-    # a mark, a faint one-eighth bar in the block's own text color. Renders in
-    # any monospace font; no Nerd Font or private-use glyphs.
+    # and the divider between differing backgrounds is just the color change,
+    # the most discreet separator there is. Same-background neighbors get a thin
+    # one-eighth bar in a light warm grey so the boundary does not vanish.
+    # Renders in any monospace font.
     local esc=$'\033' reset=$'\033[0m' thin=$'\xe2\x96\x8f'   # U+258F ▏
+    # The divider color is loop-invariant (a fixed light warm grey), so resolve
+    # it once rather than per same-background boundary.
+    _sgr 38 hairline; local hairfg="$_SGR"
 
     # Lead with a reset so any residual SGR state from the caller's terminal
     # cannot bleed into the first segment's text.
@@ -427,8 +451,9 @@ _render() {
         if [ $((i + 1)) -lt "$n" ]; then
             nbg="${_SEG_BG[i + 1]}"
             # Differing backgrounds abut; the color change is the divider. Equal
-            # backgrounds get the faint bar so the boundary does not vanish.
-            [ "$nbg" = "$bg" ] && out+="${esc}[${bgsgr};${fgtext}m${thin}"
+            # backgrounds get a thin bar in the light warm grey (lighter than the
+            # block, softer than the white label) so the boundary does not vanish.
+            [ "$nbg" = "$bg" ] && out+="${esc}[${bgsgr};${hairfg}m${thin}"
         fi
     done
     out+="$reset"
@@ -445,11 +470,12 @@ main() {
 
     _detect_level
 
-    local segments="${CS_STATUSLINE_SEGMENTS:-session,git,model,ctx,limits,cost}"
+    local segments="${CS_STATUSLINE_SEGMENTS:-logo,session,git,model,ctx,limits,cost}"
     local name names
     IFS=',' read -ra names <<< "$segments"
     for name in "${names[@]}"; do
         case "$name" in
+            logo)    _seg_logo ;;
             session) _seg_session ;;
             ctx)     _seg_ctx ;;
             model)   _seg_model ;;

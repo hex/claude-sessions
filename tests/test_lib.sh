@@ -170,6 +170,22 @@ assert_output_not_contains() {
     fi
 }
 
+# --- Launch Helpers ---
+
+# Create an executable stub that prints its environment, so a test can assert
+# what cs exported into the claude process. Point CLAUDE_CODE_BIN at the echoed
+# path. Used by launch/theme tests in place of the default "echo" stub, which
+# does not show env.
+_make_env_stub() {
+    local stub="$TEST_TMPDIR/claude-env-stub"
+    cat > "$stub" << 'STUB_EOF'
+#!/usr/bin/env bash
+env
+STUB_EOF
+    chmod +x "$stub"
+    echo "$stub"
+}
+
 # --- Session Helpers ---
 
 # Create a minimal cs session directory structure
