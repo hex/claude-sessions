@@ -216,15 +216,19 @@ test_limits_threshold_per_block() {
 
 test_thin_bar_between_same_bg() {
     export COLORTERM=truecolor
-    # Two healthy gauges share the quiet grey background: ctx next to a 5h block,
-    # both grey (segment order trimmed so the two are neighbors). They are split
-    # by a thin one-eighth bar in the pills' own light text color, not a wide gap.
+    export CS_TERM_BG_RGB="250;248;242"
+    # Two healthy gauges share the bg-derived surface: ctx next to a 5h block,
+    # both the surface shade (segment order trimmed so the two are neighbors).
+    # They are split by a thin one-eighth bar inked in a faint shade of that
+    # surface — a discreet tonal step, not a wide gap and not a foreign grey.
     export CS_STATUSLINE_SEGMENTS="ctx,limits"
     local json='{"workspace":{"current_dir":"/none"},"context_window":{"used_percentage":10},"rate_limits":{"five_hour":{"used_percentage":20}}}'
-    local out
+    local out surface ink
+    surface=$( ( _load_sl_functions; _bg_shade "250;248;242"; echo "$_R;$_G;$_B" ) )
+    ink=$( ( _load_sl_functions; _bg_shade "$surface"; echo "$_R;$_G;$_B" ) )
     out=$(run_sl "$json")
-    assert_output_contains "$out" "▏" "same-bg neighbors should join with a thin light bar" || return 1
-    assert_output_contains "$out" "38;2;170;161;148" "the divider bar should be a light warm grey, not white" || return 1
+    assert_output_contains "$out" "48;2;${surface};38;2;${ink}m▏" \
+        "same-surface neighbors should join with a thin bar inked in a faint shade of the surface" || return 1
 }
 
 test_abut_between_different_bg() {
@@ -1056,6 +1060,62 @@ test_no_gradient_outside_truecolor() {
 }
 
 # ============================================================================
+# Background-derived gauge surface: the quiet gauges tint from the terminal
+# background instead of a fixed grey, with contrast-aware text
+# ============================================================================
+
+test_bg_shade_darkens_light_background() {
+    ( _load_sl_functions
+      _bg_shade "250;248;242" || exit 1
+      { [ "$_R" -lt 250 ] && [ "$_G" -lt 248 ] && [ "$_B" -lt 242 ]; } \
+        || { echo "  FAIL: a light background should darken (got $_R;$_G;$_B)"; exit 1; }
+      { [ "$_R" -gt 200 ] && [ "$_G" -gt 200 ] && [ "$_B" -gt 190 ]; } \
+        || { echo "  FAIL: the darkened shade drifted too far from the bg (got $_R;$_G;$_B)"; exit 1; } )
+}
+
+test_bg_shade_lightens_dark_background() {
+    ( _load_sl_functions
+      _bg_shade "30;30;30" || exit 1
+      { [ "$_R" -gt 30 ] && [ "$_G" -gt 30 ] && [ "$_B" -gt 30 ]; } \
+        || { echo "  FAIL: a dark background should lighten (got $_R;$_G;$_B)"; exit 1; }
+      { [ "$_R" -lt 90 ] && [ "$_G" -lt 90 ] && [ "$_B" -lt 90 ]; } \
+        || { echo "  FAIL: the lightened shade drifted too far from the bg (got $_R;$_G;$_B)"; exit 1; } )
+}
+
+test_bg_shade_noop_on_malformed() {
+    ( _load_sl_functions
+      if _bg_shade "not-a-color"; then echo "  FAIL: a malformed bg must not yield a shade"; exit 1; fi )
+}
+
+test_gauge_uses_bg_derived_surface() {
+    export COLORTERM=truecolor CS_TERM_THEME=light CS_TERM_BG_RGB="250;248;242"
+    # A colored session so the only thing that could show the fixed grey is a
+    # gauge wrongly ignoring the derived surface.
+    export CLAUDE_SESSION_NAME="s"
+    make_cs_session "s" 1024 red
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":10}}'
+    local out surface sr sg sb tr tg tb
+    surface=$( ( _load_sl_functions; _bg_shade "250;248;242"; echo "$_R;$_G;$_B" ) )
+    IFS=';' read -r sr sg sb <<< "$surface"
+    tr=$((sr * 35 / 100)); tg=$((sg * 35 / 100)); tb=$((sb * 35 / 100))
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "48;2;${surface};38;2;${tr};${tg};${tb}" \
+        "a healthy gauge should render on the bg-derived surface with softened tonal text" || return 1
+    assert_output_not_contains "$out" "48;2;128;120;110" \
+        "a gauge with a known background must not use the fixed grey" || return 1
+}
+
+test_gauge_falls_back_to_grey_without_bg() {
+    export COLORTERM=truecolor CS_TERM_THEME=light
+    unset CS_TERM_BG_RGB
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":10}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "48;2;128;120;110;38;2;255;255;255" \
+        "with no known background a gauge falls back to the warm neutral grey with light text" || return 1
+}
+
+# ============================================================================
 # Runner
 # ============================================================================
 echo "Running test_statusline.sh"
@@ -1067,6 +1127,11 @@ run_test test_two_accents_default
 run_test test_git_branch_bold_slate_accent
 run_test test_limits_threshold_per_block
 run_test test_thin_bar_between_same_bg
+run_test test_bg_shade_darkens_light_background
+run_test test_bg_shade_lightens_dark_background
+run_test test_bg_shade_noop_on_malformed
+run_test test_gauge_uses_bg_derived_surface
+run_test test_gauge_falls_back_to_grey_without_bg
 run_test test_logo_badge_is_brand_coral
 run_test test_logo_boundary_gets_thin_darker_coral_hairline
 run_test test_segment_after_logo_divider_drops_redundant_leading_pad

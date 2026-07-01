@@ -159,6 +159,15 @@ _sgr() {
                     # warm grey, lighter than the taupe block but softer than
                     # the white label text, so it reads as a faint line.
                     rgb="170;161;148" ;;
+                surface)
+                    # The quiet gauge pills, tinted from the terminal background
+                    # so they harmonize with it instead of sitting on top: a
+                    # shade of CS_TERM_BG_RGB (darker on a light terminal,
+                    # lighter on a dark one). Falls back to the warm neutral when
+                    # the real background is unknown (no OSC 11 result at launch).
+                    if _bg_shade "${CS_TERM_BG_RGB:-}"; then rgb="$_R;$_G;$_B"
+                    elif [ "$SL_THEME" = "dark" ]; then rgb="140;132;122"
+                    else rgb="128;120;110"; fi ;;
                 *)
                     # Warm neutral (R>G>B) so the quiet blocks read as taupe,
                     # not steel; light enough that the gauges recede beside the
@@ -227,9 +236,9 @@ _add() {
 }
 
 # Set _COLOR by mapping a value against warn/crit thresholds; below warn it
-# takes the healthy color ($4, default grey).
+# takes the healthy color ($4, default the bg-derived surface).
 _thresh_color() {
-    local v="$1" warn="$2" crit="$3" healthy="${4:-grey}"
+    local v="$1" warn="$2" crit="$3" healthy="${4:-surface}"
     if [ "$v" -ge "$crit" ]; then
         _COLOR=red
     elif [ "$v" -ge "$warn" ]; then
@@ -410,7 +419,7 @@ _seg_cost() {
     [ -n "$SL_COST" ] || return 0
     local formatted
     printf -v formatted '$%.2f' "$SL_COST" 2>/dev/null || return 0
-    _add "$formatted" "grey"
+    _add "$formatted" "surface"
 }
 
 # --- full-width gradient -----------------------------------------------------
@@ -486,6 +495,26 @@ _build_gradient() {
     done
 }
 
+# Set _R/_G/_B to a shade of the terminal background "$1": nudged away from
+# itself so the quiet gauge pills read as a surface derived from the terminal
+# rather than a fixed grey. Darker on a light background, lighter on a dark
+# one, classified by BT.709 luminance. Returns non-zero on a background that
+# does not parse, so callers can fall back to the neutral grey.
+_bg_shade() {
+    _parse_rgb_triplet "$1" || return 1
+    local r="$_R" g="$_G" b="$_B" lum shift=10
+    lum=$((2126 * r + 7152 * g + 722 * b))   # BT.709 luminance, scaled by 10000
+    if [ "$lum" -ge 1275000 ]; then
+        _R=$((r * (100 - shift) / 100))
+        _G=$((g * (100 - shift) / 100))
+        _B=$((b * (100 - shift) / 100))
+    else
+        _R=$((r + (255 - r) * shift / 100))
+        _G=$((g + (255 - g) * shift / 100))
+        _B=$((b + (255 - b) * shift / 100))
+    fi
+}
+
 # --- render ----------------------------------------------------------------
 
 _render() {
@@ -532,6 +561,20 @@ _render() {
         # or it would inherit bold from the accent before it.
         case "$bg" in
             amber|white) _sgr 38 black ;;
+            surface)
+                # Contrast against the resolved surface: dark text only on a
+                # clearly light shade, light text otherwise. The pivot sits at
+                # ~0.6 luminance (not 0.5) so the mid taupe greys of the
+                # unknown-background fallback keep their light text; only the
+                # genuinely light bg-derived surfaces flip to dark text.
+                if [ "$LEVEL" = "truecolor" ] && _parse_rgb_triplet "$lastrgb" \
+                    && [ $((2126 * _R + 7152 * _G + 722 * _B)) -ge 1530000 ]; then
+                    # A heavily darkened shade of the surface: dark enough to
+                    # read, but a warm tonal ink rather than a harsh near-black.
+                    _SGR="38;2;$((_R * 35 / 100));$((_G * 35 / 100));$((_B * 35 / 100))"
+                else
+                    _sgr 38 white
+                fi ;;
             *)
                 if [ -n "${_SEG_BOLD[i]}" ]; then _sgr 38 chiptext; else _sgr 38 white; fi ;;
         esac
@@ -578,7 +621,16 @@ _render() {
                     same=1
                 fi
                 if [ -n "$same" ]; then
-                    out+="${esc}[${bgsgr};${hairfg}m${thin}"
+                    # Ink the sliver in a faint shade of the pill's own
+                    # background so the separator reads as a tonal step rather
+                    # than a foreign grey line — more discreet, and it follows
+                    # whatever color the neighbors share. The warm grey stays as
+                    # the fallback where there is no per-channel background.
+                    local hairink="$hairfg"
+                    if [ "$LEVEL" = "truecolor" ] && _bg_shade "$lastrgb"; then
+                        hairink="38;2;${_R};${_G};${_B}"
+                    fi
+                    out+="${esc}[${bgsgr};${hairink}m${thin}"
                     width=$((width + 1))
                 fi
             fi
