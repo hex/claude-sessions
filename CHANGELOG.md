@@ -2,6 +2,16 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
+## 2026.7.2
+
+### Features
+
+- **Background-derived gauge surface** — the quiet statusline gauges (`ctx`, `5h`/`wk` limits, `$` cost) now take their background from a shade of the terminal's own background instead of a fixed grey, so they harmonize with the terminal: darker on a light terminal, lighter on a dark one. Their text is picked for contrast against that surface (a soft warm-dark tone, not harsh near-black), and the separators ink in a faint shade of the surface — a discreet tonal step rather than a foreign grey line. Falls back to the warm neutral grey when the terminal background is unknown or outside truecolor.
+
+### Other
+
+- Test-harness isolation: the shared test setup now clears the terminal-theme env vars a real cs session exports at launch, fixing an intermittent failure.
+
 ## 2026.7.1
 
 ### Features

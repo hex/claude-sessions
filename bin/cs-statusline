@@ -23,7 +23,10 @@ _SEG_TEXT=(); _SEG_BG=(); _SEG_BOLD=(); LEVEL="basic"
 # Scratch globals used in place of command substitution (keeps the per-render
 # hot path fork-free; this script runs on every assistant message).
 _SGR=""; _COLOR=""; _RGB=""
-_WIDTH=""; _LC=""; _R=""; _G=""; _B=""; _GRADIENT=""
+_WIDTH=""; _LC=""; _R=""; _G=""; _B=""; _GRADIENT=""; _LUM=""
+# The gauge surface is a shade of the terminal background — the same for every
+# gauge — so it is resolved once per render (process) and cached here.
+_SURFACE_RGB=""
 
 # Per-segment icons. Standard Unicode (Geometric Shapes + dingbats) that render
 # in any monospace font — not Nerd Font private-use glyphs — so the bar looks
@@ -163,11 +166,15 @@ _sgr() {
                     # The quiet gauge pills, tinted from the terminal background
                     # so they harmonize with it instead of sitting on top: a
                     # shade of CS_TERM_BG_RGB (darker on a light terminal,
-                    # lighter on a dark one). Falls back to the warm neutral when
-                    # the real background is unknown (no OSC 11 result at launch).
-                    if _bg_shade "${CS_TERM_BG_RGB:-}"; then rgb="$_R;$_G;$_B"
-                    elif [ "$SL_THEME" = "dark" ]; then rgb="140;132;122"
-                    else rgb="128;120;110"; fi ;;
+                    # lighter on a dark one), resolved once per render and cached
+                    # since every gauge shares it. Falls back to the warm neutral
+                    # when the real background is unknown (no OSC 11 at launch).
+                    if [ -z "$_SURFACE_RGB" ]; then
+                        if _bg_shade "${CS_TERM_BG_RGB:-}"; then _SURFACE_RGB="$_R;$_G;$_B"
+                        elif [ "$SL_THEME" = "dark" ]; then _SURFACE_RGB="140;132;122"
+                        else _SURFACE_RGB="128;120;110"; fi
+                    fi
+                    rgb="$_SURFACE_RGB" ;;
                 *)
                     # Warm neutral (R>G>B) so the quiet blocks read as taupe,
                     # not steel; light enough that the gauges recede beside the
@@ -495,16 +502,23 @@ _build_gradient() {
     done
 }
 
-# Set _R/_G/_B to a shade of the terminal background "$1": nudged away from
-# itself so the quiet gauge pills read as a surface derived from the terminal
-# rather than a fixed grey. Darker on a light background, lighter on a dark
-# one, classified by BT.709 luminance. Returns non-zero on a background that
-# does not parse, so callers can fall back to the neutral grey.
+# Set _LUM to the BT.709 relative luminance of _R/_G/_B, scaled by 10000 (so
+# the mid-grey pivot is 1275000). Reads the channels _parse_rgb_triplet leaves
+# behind; fork-free.
+_luminance() {
+    _LUM=$((2126 * _R + 7152 * _G + 722 * _B))
+}
+
+# Set _R/_G/_B to a shade of the color "$1", nudged away from itself: darker
+# when it is light, lighter when it is dark, classified by BT.709 luminance.
+# Used both for the gauge surface (a shade of the terminal background) and for
+# the divider sliver (a shade of the pill's own background). Returns non-zero
+# on a color that does not parse, so callers can fall back.
 _bg_shade() {
     _parse_rgb_triplet "$1" || return 1
-    local r="$_R" g="$_G" b="$_B" lum shift=10
-    lum=$((2126 * r + 7152 * g + 722 * b))   # BT.709 luminance, scaled by 10000
-    if [ "$lum" -ge 1275000 ]; then
+    local r="$_R" g="$_G" b="$_B" shift=10
+    _luminance
+    if [ "$_LUM" -ge 1275000 ]; then
         _R=$((r * (100 - shift) / 100))
         _G=$((g * (100 - shift) / 100))
         _B=$((b * (100 - shift) / 100))
@@ -568,7 +582,7 @@ _render() {
                 # unknown-background fallback keep their light text; only the
                 # genuinely light bg-derived surfaces flip to dark text.
                 if [ "$LEVEL" = "truecolor" ] && _parse_rgb_triplet "$lastrgb" \
-                    && [ $((2126 * _R + 7152 * _G + 722 * _B)) -ge 1530000 ]; then
+                    && { _luminance; [ "$_LUM" -ge 1530000 ]; }; then
                     # A heavily darkened shade of the surface: dark enough to
                     # read, but a warm tonal ink rather than a harsh near-black.
                     _SGR="38;2;$((_R * 35 / 100));$((_G * 35 / 100));$((_B * 35 / 100))"
