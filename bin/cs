@@ -2367,24 +2367,13 @@ _tmux_passthrough() {
     printf '\033Ptmux;%s\033\\' "$escaped"
 }
 
-# Query the terminal background via OSC 11 and classify by BT.709 luminance.
-# Safe only while cs owns the tty (before claude takes over stdin). With a
-# "tmux" argument the query is wrapped for DCS passthrough so it reaches the
-# real outer terminal from inside a tmux pane.
-_theme_from_osc11() {
-    local via_tmux="${1:-}"
-    if [ ! -t 0 ] || [ ! -t 1 ] || [ ! -e /dev/tty ]; then
-        echo "unknown"
-        return
-    fi
-    local saved reply="" rgb r4 g4 b4 r g b lum query
-    query=$'\033]11;?\033\\'
-    [ "$via_tmux" = "tmux" ] && query=$(_tmux_passthrough "$query")
-    saved=$(stty -g < /dev/tty 2>/dev/null) || { echo "unknown"; return; }
-    stty raw -echo < /dev/tty 2>/dev/null
-    printf '%s' "$query" > /dev/tty
-    IFS= read -r -t 1 -d '\' reply < /dev/tty 2>/dev/null || true
-    stty "$saved" < /dev/tty 2>/dev/null
+# Classify an OSC 11 reply body (e.g. "rgb:fafa/f8f8/f2f2") by BT.709
+# luminance and report the parsed 8-bit RGB alongside it. Pure string logic,
+# no tty I/O, so it is unit-testable independent of a real terminal — unlike
+# the query itself, which can't be exercised without a pty. Echoes
+# "<light|dark> <r>;<g>;<b>" on success, "unknown" if the reply doesn't parse.
+_parse_osc11_reply() {
+    local reply="$1" rgb r4 g4 b4 r g b lum
     rgb="${reply#*rgb:}"
     if [ "$rgb" = "$reply" ]; then
         echo "unknown"
@@ -2399,34 +2388,80 @@ _theme_from_osc11() {
     # BT.709 luminance scaled by 10000; threshold is 0.5 * 255 * 10000.
     lum=$((2126 * r + 7152 * g + 722 * b))
     if [ "$lum" -ge 1275000 ]; then
-        echo "light"
+        echo "light $r;$g;$b"
     else
-        echo "dark"
+        echo "dark $r;$g;$b"
     fi
 }
 
-# Detect the terminal theme. The OSC 11 query comes first because it asks the
-# live terminal; COLORFGBG is only a fallback since tmux panes inherit it from
-# the tmux server's start-time environment, where it goes stale across theme
-# changes (observed: 15;0 under a light terminal).
-detect_term_theme() {
-    local theme
+# Query the terminal background via OSC 11. Safe only while cs owns the tty
+# (before claude takes over stdin). With a "tmux" argument the query is
+# wrapped for DCS passthrough so it reaches the real outer terminal from
+# inside a tmux pane. Echoes _parse_osc11_reply's result.
+_theme_from_osc11() {
+    local via_tmux="${1:-}"
+    # All I/O below is on /dev/tty, and every caller captures this function's
+    # stdout via $(...), which makes fd 1 a pipe. So gate on stdin — a tty in an
+    # interactive launch, and command substitution leaves it untouched — and on
+    # /dev/tty being present, never on stdout.
+    if [ ! -t 0 ] || [ ! -e /dev/tty ]; then
+        echo "unknown"
+        return
+    fi
+    local saved reply="" query
+    query=$'\033]11;?\033\\'
+    [ "$via_tmux" = "tmux" ] && query=$(_tmux_passthrough "$query")
+    saved=$(stty -g < /dev/tty 2>/dev/null) || { echo "unknown"; return; }
+    stty raw -echo < /dev/tty 2>/dev/null
+    printf '%s' "$query" > /dev/tty
+    IFS= read -r -t 1 -d '\' reply < /dev/tty 2>/dev/null || true
+    stty "$saved" < /dev/tty 2>/dev/null
+    _parse_osc11_reply "$reply"
+}
+
+# Detect the terminal theme plus, when known, the real background RGB. The
+# OSC 11 query comes first because it asks the live terminal; COLORFGBG is
+# only a fallback since tmux panes inherit it from the tmux server's
+# start-time environment, where it goes stale across theme changes (observed:
+# 15;0 under a light terminal). Only the OSC 11 path ever learns the actual
+# RGB — the OS-appearance and COLORFGBG fallbacks classify light/dark without
+# it. Echoes "<theme>" or "<theme> <r>;<g>;<b>" when the RGB is known.
+detect_term_theme_and_bg() {
+    local out
     if [ -n "${TMUX:-}" ]; then
-        # Inside tmux a direct OSC 11 query is answered by tmux itself (its
-        # default black bg), not the outer terminal. Ask the real terminal via
-        # DCS passthrough first — it reads the actual background even when the
-        # OS appearance disagrees (e.g. a light terminal theme under macOS Dark
-        # Mode). Fall back to OS appearance only when passthrough can't answer
-        # (allow-passthrough off, or the reply doesn't round-trip).
-        theme=$(_theme_from_osc11 tmux)
-        [ "$theme" = "unknown" ] && theme=$(_theme_from_os_appearance)
+        # Under tmux the real background can arrive on either of two OSC 11
+        # channels, and which one answers depends on the tmux version. tmux
+        # that proxies OSC 11 forwards a plain query to the client terminal, so
+        # the plain query returns the true background and a DCS-passthrough
+        # response never round-trips back to the pane. tmux that does not proxy
+        # answers the plain query with its own default (black) and only the
+        # passthrough reaches the real terminal. So try the plain query first
+        # and trust any non-black RGB; a pure-black reply is tmux's own default,
+        # indistinguishable from a genuine black background, so drop it and try
+        # passthrough, then classify by OS appearance (which carries no RGB, so
+        # the trailing gradient fails closed rather than fading toward black).
+        out=$(_theme_from_osc11)
+        case "$out" in
+            *" 0;0;0") out="unknown" ;;
+        esac
+        [ "$out" = "unknown" ] && out=$(_theme_from_osc11 tmux)
+        [ "$out" = "unknown" ] && out=$(_theme_from_os_appearance)
     else
-        theme=$(_theme_from_osc11)
-        if [ "$theme" = "unknown" ] && [ -n "${COLORFGBG:-}" ]; then
-            theme=$(_theme_from_colorfgbg "$COLORFGBG")
+        out=$(_theme_from_osc11)
+        if [ "$out" = "unknown" ] && [ -n "${COLORFGBG:-}" ]; then
+            out=$(_theme_from_colorfgbg "$COLORFGBG")
         fi
     fi
-    echo "$theme"
+    echo "$out"
+}
+
+# Thin wrapper over detect_term_theme_and_bg that keeps the original
+# single-word contract (`cs -detect-theme`, and any caller that only needs the
+# light/dark/unknown classification, not the RGB).
+detect_term_theme() {
+    local out
+    out=$(detect_term_theme_and_bg)
+    echo "${out%% *}"
 }
 
 # macOS reports dark mode by the presence of the AppleInterfaceStyle key;
@@ -2514,14 +2549,19 @@ launch_claude_code() {
     if [ -n "$claude_session_id" ]; then
         export CS_CLAUDE_SESSION_ID="$claude_session_id"
     fi
-    # Terminal theme for the statusline and hooks. Detected once here while
-    # cs still owns the tty (an OSC query from a hook would race its reply
-    # into claude's input). A preset CS_TERM_THEME is a manual override.
+    # Terminal theme (and, when known, the real background RGB) for the
+    # statusline and hooks. Detected once here while cs still owns the tty (an
+    # OSC query from a hook would race its reply into claude's input). Preset
+    # CS_TERM_THEME/CS_TERM_BG_RGB values are manual overrides.
     if [ -z "${CS_TERM_THEME:-}" ]; then
-        local _term_theme
-        _term_theme=$(detect_term_theme)
+        local _term_out _term_theme
+        _term_out=$(detect_term_theme_and_bg)
+        _term_theme="${_term_out%% *}"
         if [ "$_term_theme" != "unknown" ]; then
             export CS_TERM_THEME="$_term_theme"
+            case "$_term_out" in
+                *' '*) [ -z "${CS_TERM_BG_RGB:-}" ] && export CS_TERM_BG_RGB="${_term_out#* }" ;;
+            esac
         fi
     fi
     # Refresh the palette now that the theme is known so the banner below reads
@@ -3024,12 +3064,19 @@ main() {
             tui_bin="$(command -v cs-tui 2>/dev/null || echo "$(dirname "$0")/cs-tui")"
             if [ -x "$tui_bin" ]; then
                 # Detect the terminal theme while cs still owns the tty, so the
-                # picker can pick a light/dark palette. Exported here, it's also
-                # reused by the session we launch next (skips re-detection).
+                # picker can pick a light/dark palette. Exported here (theme and,
+                # when known, the real background RGB), it's also reused by the
+                # session we launch next (skips re-detection).
                 if [ -z "${CS_TERM_THEME:-}" ]; then
-                    local _tui_theme
-                    _tui_theme=$(detect_term_theme)
-                    [ "$_tui_theme" != "unknown" ] && export CS_TERM_THEME="$_tui_theme"
+                    local _tui_out _tui_theme
+                    _tui_out=$(detect_term_theme_and_bg)
+                    _tui_theme="${_tui_out%% *}"
+                    if [ "$_tui_theme" != "unknown" ]; then
+                        export CS_TERM_THEME="$_tui_theme"
+                        case "$_tui_out" in
+                            *' '*) [ -z "${CS_TERM_BG_RGB:-}" ] && export CS_TERM_BG_RGB="${_tui_out#* }" ;;
+                        esac
+                    fi
                 fi
                 local tui_output
                 tui_output=$(CS_VERSION="$VERSION" "$tui_bin") || exit $?
