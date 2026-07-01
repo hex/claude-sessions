@@ -31,6 +31,10 @@ setup() {
     # _doctor_check_token_cost and the Phase 8 binding helpers.
     export CS_TRANSCRIPTS_DIR="$TEST_TMPDIR/claude-projects"
     mkdir -p "$CS_SESSIONS_ROOT" "$CS_TRANSCRIPTS_DIR"
+    # cs's terminal-theme signals are env-based, and a real cs session exports
+    # them at launch. Clear them so a test controls its own inputs instead of
+    # inheriting the developer's session.
+    unset CS_TERM_THEME CS_TERM_BG_RGB 2>/dev/null || true
 }
 
 teardown() {
