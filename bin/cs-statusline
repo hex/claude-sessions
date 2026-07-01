@@ -22,7 +22,8 @@ _SEG_TEXT=(); _SEG_BG=(); _SEG_BOLD=(); LEVEL="basic"
 
 # Scratch globals used in place of command substitution (keeps the per-render
 # hot path fork-free; this script runs on every assistant message).
-_SGR=""; _COLOR=""
+_SGR=""; _COLOR=""; _RGB=""
+_WIDTH=""; _LC=""; _R=""; _G=""; _B=""; _GRADIENT=""
 
 # Per-segment icons. Standard Unicode (Geometric Shapes + dingbats) that render
 # in any monospace font — not Nerd Font private-use glyphs — so the bar looks
@@ -143,6 +144,12 @@ _sgr() {
                 chiptext) rgb="240;242;255" ;;
                 amber)  rgb="255;183;77" ;;
                 brand)  rgb="217;119;87" ;;   # Claude coral (#D97757)
+                brandshade)
+                    # The logo badge's own divider ink: a coral a shade darker
+                    # than the badge, distinct enough to read as a divider
+                    # sliver against both the badge and the session pill,
+                    # without being so dark it looks like a foreign color.
+                    rgb="184;101;74" ;;
                 white)
                     # Softer text on dark terminals to avoid glare.
                     [ "$SL_THEME" = "dark" ] && rgb="230;230;230" || rgb="255;255;255" ;;
@@ -158,7 +165,7 @@ _sgr() {
                     # vivid session/model accents while white label text holds.
                     [ "$SL_THEME" = "dark" ] && rgb="140;132;122" || rgb="128;120;110" ;;
             esac
-            _SGR="${kind};2;${rgb}" ;;
+            _SGR="${kind};2;${rgb}"; _RGB="$rgb" ;;
         256)
             local idx
             case "$name" in
@@ -175,6 +182,7 @@ _sgr() {
                 chiptext) idx=231 ;;
                 amber)  idx=215 ;;
                 brand)  idx=173 ;;
+                brandshade) idx=167 ;;
                 hairline) idx=248 ;;
                 white)
                     [ "$SL_THEME" = "dark" ] && idx=254 || idx=255 ;;
@@ -201,6 +209,7 @@ _sgr() {
                 white)  base=97 ;;
                 black)  base=30 ;;
                 brand)  base=33 ;;
+                brandshade) base=33 ;;
                 hairline) base=90 ;;
                 *)      base=90 ;;
             esac
@@ -404,6 +413,81 @@ _seg_cost() {
     _add "$formatted" "grey"
 }
 
+# --- full-width gradient -----------------------------------------------------
+
+# Set _WIDTH to the display width (cells) of "$1": UTF-8 codepoints, not
+# bytes — every icon and label this script emits is single-width, so
+# codepoint count equals cell count. LC_ALL=C forces byte-wise indexing for
+# the duration of this function regardless of the ambient locale or this
+# bash's own multibyte awareness, so continuation bytes (the 0x80-0xBF range)
+# can be counted and subtracted out: every codepoint has exactly one leading
+# (non-continuation) byte. No subprocess.
+_display_width() {
+    local LC_ALL=C s="$1" i n=0
+    local len=${#s}
+    for ((i = 0; i < len; i++)); do
+        case "${s:i:1}" in
+            [$'\x80'-$'\xBF']) ;;
+            *) n=$((n + 1)) ;;
+        esac
+    done
+    _WIDTH=$n
+}
+
+# Parse "$1" as an "r;g;b" triplet of 0-255 integers into _R/_G/_B. Returns 1
+# (leaving _R/_G/_B unset) if the string doesn't parse — a missing field, an
+# extra field, a non-numeric value, and an out-of-range channel are all
+# rejected by the same width/format check, so callers need no separate
+# validation step: a failed parse is the single "this isn't usable" signal.
+_parse_rgb_triplet() {
+    local rgb="$1" r g b
+    IFS=';' read -r r g b <<< "$rgb"
+    [[ "$r" =~ ^[0-9]{1,3}$ ]] || return 1
+    [[ "$g" =~ ^[0-9]{1,3}$ ]] || return 1
+    [[ "$b" =~ ^[0-9]{1,3}$ ]] || return 1
+    [ "$r" -le 255 ] && [ "$g" -le 255 ] && [ "$b" -le 255 ] || return 1
+    _R="$r"; _G="$g"; _B="$b"
+}
+
+# Set _LC to the integer channel value at index $3 of $4 total steps, lerping
+# from $1 to $2 (round-to-nearest). Bash's integer division truncates toward
+# zero, which would bias every intermediate step toward $1 — the
+# doubled-numerator trick corrects that without floats or a fork. i=0 hits $1
+# exactly; i=steps-1 hits $2 exactly.
+_lerp_channel() {
+    local c0="$1" c1="$2" i="$3" steps="$4"
+    local last=$((steps - 1))
+    if [ "$last" -le 0 ]; then _LC="$c1"; return; fi
+    local delta=$(( (c1 - c0) * i )) num den
+    num=$((delta * 2)); den=$((last * 2))
+    if [ "$delta" -ge 0 ]; then
+        _LC=$(( c0 + (num + last) / den ))
+    else
+        _LC=$(( c0 + (num - last) / den ))
+    fi
+}
+
+# Set _GRADIENT to "$3" background-only SGR cells fading from "$1" (an r;g;b
+# triplet) to "$2". Empty (no cells) if either triplet fails to parse, so a
+# caller can unconditionally append _GRADIENT with no separate validation
+# gate. Fork-free: no command substitution beyond the here-string splits
+# already used elsewhere in this script for delimited fields.
+_build_gradient() {
+    local src="$1" dst="$2" cells="$3"
+    _GRADIENT=""
+    _parse_rgb_triplet "$src" || return 0
+    local sr="$_R" sg="$_G" sb="$_B"
+    _parse_rgb_triplet "$dst" || return 0
+    local dr="$_R" dg="$_G" db="$_B"
+    local esc=$'\033' i r g b
+    for ((i = 0; i < cells; i++)); do
+        _lerp_channel "$sr" "$dr" "$i" "$cells"; r="$_LC"
+        _lerp_channel "$sg" "$dg" "$i" "$cells"; g="$_LC"
+        _lerp_channel "$sb" "$db" "$i" "$cells"; b="$_LC"
+        _GRADIENT+="${esc}[48;2;${r};${g};${b}m "
+    done
+}
+
 # --- render ----------------------------------------------------------------
 
 _render() {
@@ -426,16 +510,24 @@ _render() {
     # one-eighth bar in a light warm grey so the boundary does not vanish.
     # Renders in any monospace font.
     local esc=$'\033' reset=$'\033[0m' thin=$'\xe2\x96\x8f'   # U+258F ▏
-    # The divider color is loop-invariant (a fixed light warm grey), so resolve
-    # it once rather than per same-background boundary.
+    # The divider ink colors are loop-invariant, so resolve them once: the
+    # light warm grey for same-color pairs, and a darker coral for the logo's
+    # boundary. A hairline reads as *thin* only because its cell background
+    # matches a neighbor — U+258F inks just its left ~1/8, so the other ~7/8
+    # must disappear into an adjacent pill or the whole one-column cell shows
+    # as a solid block. Same-color pairs share a background, so their divider
+    # cell takes that shared color; the logo boundary sits between two
+    # differing colors, so its divider cell takes the NON-logo neighbor's
+    # color (resolved per boundary, below), leaving only the thin ink sliver.
     _sgr 38 hairline; local hairfg="$_SGR"
+    _sgr 38 brandshade; local logosepfg="$_SGR"
 
     # Lead with a reset so any residual SGR state from the caller's terminal
     # cannot bleed into the first segment's text.
-    local i out="$reset" bg nbg bgsgr fgtext
+    local i out="$reset" bg nbg bgsgr fgtext width=0 lastrgb="" nextrgb sepbg lead drop_lead=""
     for ((i = 0; i < n; i++)); do
         bg="${_SEG_BG[i]}"
-        _sgr 48 "$bg"; bgsgr="$_SGR"
+        _sgr 48 "$bg"; bgsgr="$_SGR"; lastrgb="$_RGB"
         # Light backgrounds take dark text; accents take the usage chip's
         # text color, everything else plain white. SGR bold is stateful, so
         # every segment emits its intensity explicitly (1 accent, 22 normal)
@@ -447,15 +539,70 @@ _render() {
         esac
         fgtext="$_SGR"
         if [ -n "${_SEG_BOLD[i]}" ]; then fgtext+=";1"; else fgtext+=";22"; fi
-        out+="${esc}[${bgsgr};${fgtext}m ${_SEG_TEXT[i]} "
+        # A segment immediately after the logo divider inherits that divider
+        # cell as its leading pad — the cell already carries this segment's
+        # background — so it drops its own leading space to stay symmetric with
+        # every other pill. The trailing space is always emitted.
+        lead=" "
+        if [ -n "$drop_lead" ]; then lead=""; drop_lead=""; fi
+        out+="${esc}[${bgsgr};${fgtext}m${lead}${_SEG_TEXT[i]} "
+        _display_width "${_SEG_TEXT[i]}"; width=$((width + 1 + ${#lead} + _WIDTH))
         if [ $((i + 1)) -lt "$n" ]; then
             nbg="${_SEG_BG[i + 1]}"
-            # Differing backgrounds abut; the color change is the divider. Equal
-            # backgrounds get a thin bar in the light warm grey (lighter than the
-            # block, softer than the white label) so the boundary does not vanish.
-            [ "$nbg" = "$bg" ] && out+="${esc}[${bgsgr};${hairfg}m${thin}"
+            if [ "$bg" = "brand" ] || [ "$nbg" = "brand" ]; then
+                # The logo is a fixed brand mark, not part of the flowing
+                # identity/gauge segments, so its boundary always shows a
+                # divider: the same thin `▏` glyph every other divider uses,
+                # inked in darker coral, on a background matching the non-logo
+                # neighbor so the glyph's uninked ~7/8 merges into that pill
+                # and only the thin sliver shows.
+                if [ "$bg" = "brand" ]; then _sgr 48 "$nbg"; drop_lead=1; else _sgr 48 "$bg"; fi
+                sepbg="$_SGR"
+                out+="${esc}[${sepbg};${logosepfg}m${thin}"
+                width=$((width + 1))
+            else
+                # Differing backgrounds abut; the color change is the divider.
+                # Backgrounds that resolve to the SAME rendered color get a
+                # thin bar in the light warm grey (lighter than the block,
+                # softer than the white label) so the boundary does not
+                # vanish. Comparing resolved RGB rather than color names is
+                # what this needs: a `claude_session_color` of "orange"
+                # renders identically to the logo's "brand" coral under a
+                # different name, so a name-equality check would miss that
+                # collision — moot here since the logo branch above already
+                # covers every logo boundary, but the same principle applies
+                # to any other pair of segments that might one day share an
+                # RGB under different names.
+                nextrgb=""
+                if [ "$LEVEL" = "truecolor" ]; then
+                    _sgr 48 "$nbg"; nextrgb="$_RGB"
+                fi
+                if { [ "$LEVEL" = "truecolor" ] && [ "$nextrgb" = "$lastrgb" ]; } \
+                    || { [ "$LEVEL" != "truecolor" ] && [ "$nbg" = "$bg" ]; }; then
+                    out+="${esc}[${bgsgr};${hairfg}m${thin}"
+                    width=$((width + 1))
+                fi
+            fi
         fi
     done
+    # Stretch the bar to the full terminal width by fading the trailing edge
+    # from the last pill's own background into the terminal's real background
+    # color. Both pieces of information are prerequisites Claude Code and cs
+    # may not provide: $COLUMNS is only set on Claude Code >= 2.1.153, and
+    # CS_TERM_BG_RGB is only known when cs's own OSC 11 query succeeded at
+    # launch. Truecolor-only — 256-color/basic modes don't have the per-channel
+    # precision for a gradient to look like anything but banding.
+    if [ "$LEVEL" = "truecolor" ] && [ -n "$lastrgb" ] \
+        && [[ "${COLUMNS:-}" =~ ^[0-9]+$ ]] && [ "$COLUMNS" -ge 1 ] && [ "$COLUMNS" -le 2000 ]; then
+        local remaining=$((COLUMNS - width))
+        # Bounded independent of $COLUMNS itself: defense in depth for a loop
+        # that runs on every render.
+        [ "$remaining" -gt 500 ] && remaining=500
+        if [ "$remaining" -gt 0 ]; then
+            _build_gradient "$lastrgb" "${CS_TERM_BG_RGB:-}" "$remaining"
+            out+="$_GRADIENT"
+        fi
+    fi
     out+="$reset"
     printf '%s\n' "$out"
 }

@@ -24,6 +24,9 @@ setup() {
                 unset "$_v" 2>/dev/null || true ;;
         esac
     done < <(env)
+    # COLUMNS drives the full-width gradient; unset so tests never inherit
+    # whatever width the ambient terminal running the suite happens to have.
+    unset COLUMNS 2>/dev/null || true
     export CS_SESSIONS_ROOT="$TEST_TMPDIR/sessions"
     mkdir -p "$CS_SESSIONS_ROOT"
     # Neutral terminal by default; per-test overrides as needed.
@@ -36,7 +39,7 @@ teardown() {
     fi
     unset CS_SESSIONS_ROOT CLAUDE_SESSION_NAME NO_COLOR COLORTERM TERM_PROGRAM \
         FORCE_COLOR CS_STATUSLINE_DISABLE CS_STATUSLINE_SEGMENTS CS_STATUSLINE_CTX_WARN \
-        CS_STATUSLINE_CTX_CRIT CS_DISCOVERIES_MAX_SIZE 2>/dev/null || true
+        CS_STATUSLINE_CTX_CRIT CS_DISCOVERIES_MAX_SIZE COLUMNS CS_TERM_BG_RGB 2>/dev/null || true
 }
 
 # --- Helpers ---
@@ -44,6 +47,13 @@ teardown() {
 # Run the statusline with $1 as stdin JSON; prints its stdout.
 run_sl() {
     printf '%s' "$1" | bash "$SL"
+}
+
+# Source cs-statusline's functions without running main (the unconditional
+# `main "$@"` tail is neutralized to `:`), so internal helpers can be unit
+# tested directly instead of only through a full run_sl invocation.
+_load_sl_functions() {
+    eval "$(sed 's/^main "\$@"$/:/' "$SL")" 2>/dev/null
 }
 
 # Build a git working tree on branch main with one staged + one modified file.
@@ -219,8 +229,10 @@ test_thin_bar_between_same_bg() {
 
 test_abut_between_different_bg() {
     export COLORTERM=truecolor
-    # session grey then the periwinkle model accent: differing neighbors abut
-    # squarely, with no divider glyph — the color change is the boundary.
+    # session grey then the periwinkle model accent (logo excluded — it always
+    # gets its own hairline, tested separately below): differing neighbors
+    # abut squarely, with no divider glyph — the color change is the boundary.
+    export CS_STATUSLINE_SEGMENTS="session,model"
     local json='{"session_name":"s","model":{"display_name":"Opus"},"workspace":{"current_dir":"/none"}}'
     local out
     out=$(run_sl "$json")
@@ -235,6 +247,67 @@ test_logo_badge_is_brand_coral() {
     out=$(run_sl "$json")
     assert_output_contains "$out" "✳" "logo badge glyph should render" || return 1
     assert_output_contains "$out" "48;2;217;119;87" "logo badge should sit on the Claude-coral background" || return 1
+}
+
+test_logo_boundary_gets_thin_darker_coral_hairline() {
+    export COLORTERM=truecolor
+    # The logo (coral) and a blue session pill are visibly different colors,
+    # but the logo is a fixed brand mark, so its boundary always gets a
+    # divider. It works exactly like every other hairline in the bar: a
+    # `▏` (U+258F) glyph, which inks only its LEFT ~1/8 with the foreground
+    # color and shows the cell BACKGROUND in the other ~7/8. The one thing
+    # that makes any hairline read as *thin* is that its background matches a
+    # neighbor, so 7/8 of the cell disappears into that pill and only the 1/8
+    # ink sliver is visible. Here the non-logo neighbor is the session pill,
+    # so the divider's background is the session color (blue) and the ink is
+    # the darker coral. Every earlier attempt gave the cell a distinct
+    # background (bright coral, darker coral, grey, black), which made the
+    # whole one-column cell read as a solid block, not a thin line.
+    export CLAUDE_SESSION_NAME="s"
+    make_cs_session "s" 1024 blue
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "48;2;106;155;204;38;2;184;101;74m▏" \
+        "the divider background should be the session color with a thin darker-coral ink sliver" || return 1
+    assert_output_not_contains "$out" "48;2;184;101;74" \
+        "the darker coral must never be a background (that is the full-width block bug), only the thin ink" || return 1
+    assert_output_not_contains "$out" "38;2;30;30;30m▏" "the logo boundary must not use near-black" || return 1
+    assert_output_not_contains "$out" "38;2;170;161;148m▏" "the logo boundary must not use the light hairline grey" || return 1
+}
+
+test_segment_after_logo_divider_drops_redundant_leading_pad() {
+    export COLORTERM=truecolor
+    # The logo divider is a full cell painted in the session's background, so
+    # the session pill's own leading pad space would stack a second
+    # session-colored cell to the left of the name — making it sit one column
+    # right of centre while every other pill is symmetric. The divider cell IS
+    # the leading pad, so the name must start immediately after it: the session
+    # SGR is followed directly by the name character, never by a space.
+    export CLAUDE_SESSION_NAME="s"
+    make_cs_session "s" 1024 blue
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "48;2;106;155;204;38;2;240;242;255;1ms" \
+        "the session name must start immediately after the logo divider (no redundant leading pad)" || return 1
+    assert_output_not_contains "$out" "48;2;106;155;204;38;2;240;242;255;1m s" \
+        "the session pill after the logo divider must not add its own leading pad space" || return 1
+}
+
+test_logo_divider_survives_orange_session_color_collision() {
+    export COLORTERM=truecolor
+    # The "orange" session color and the logo's "brand" color share the exact
+    # same RGB (217;119;87). The divider background is the session's color
+    # (bright coral here), so its 7/8 merges into the orange session pill; the
+    # thin darker-coral ink sliver is still visibly distinct from both, so the
+    # logo and an identically-colored session never merge into one block.
+    export CLAUDE_SESSION_NAME="s"
+    make_cs_session "s" 1024 orange
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "48;2;217;119;87;38;2;184;101;74m▏" "logo and an orange session pill must still show a visible ink sliver" || return 1
 }
 
 # ============================================================================
@@ -868,6 +941,121 @@ test_unknown_session_color_falls_back() {
 }
 
 # ============================================================================
+# Full-width gradient: display-width counting, RGB lerp, and the fade itself
+# ============================================================================
+
+test_display_width_counts_codepoints_not_bytes() {
+    ( _load_sl_functions
+      _display_width "ctx 42%"
+      assert_eq "7" "$_WIDTH" "plain ASCII width should equal its character count" || exit 1
+      _display_width ""
+      assert_eq "0" "$_WIDTH" "empty string should be zero width" || exit 1
+      _display_width "$ICON_LOGO"
+      assert_eq "1" "$_WIDTH" "a bare 3-byte UTF-8 icon should count as one cell" || exit 1
+      _display_width $'caf\xc3\xa9'
+      assert_eq "4" "$_WIDTH" "a multibyte session name should count codepoints, not bytes" )
+}
+
+test_parse_rgb_triplet_accepts_valid_and_rejects_malformed() {
+    ( _load_sl_functions
+      _parse_rgb_triplet "250;248;242"
+      assert_eq "0" "$?" "a well-formed triplet should parse" || exit 1
+      assert_eq "250" "$_R" "R channel should parse correctly" || exit 1
+      assert_eq "248" "$_G" "G channel should parse correctly" || exit 1
+      assert_eq "242" "$_B" "B channel should parse correctly" || exit 1
+      _parse_rgb_triplet ""; assert_eq "1" "$?" "an empty string should be rejected" || exit 1
+      _parse_rgb_triplet "1;2"; assert_eq "1" "$?" "a missing channel should be rejected" || exit 1
+      _parse_rgb_triplet "1;2;3;4"; assert_eq "1" "$?" "an extra field should be rejected" || exit 1
+      _parse_rgb_triplet "1;2;300"; assert_eq "1" "$?" "an out-of-range channel should be rejected" || exit 1
+      _parse_rgb_triplet "r;g;b"; assert_eq "1" "$?" "non-numeric channels should be rejected" )
+}
+
+test_lerp_channel_hits_exact_endpoints() {
+    ( _load_sl_functions
+      _lerp_channel 20 200 0 8
+      assert_eq "20" "$_LC" "the first cell (i=0) must equal the source channel exactly" || exit 1
+      _lerp_channel 20 200 7 8
+      assert_eq "200" "$_LC" "the last cell (i=steps-1) must equal the destination channel exactly" || exit 1
+      _lerp_channel 20 200 0 1
+      assert_eq "200" "$_LC" "a single-cell gradient should jump straight to the destination" )
+}
+
+test_build_gradient_cell_count_and_endpoints() {
+    ( _load_sl_functions
+      _build_gradient "128;120;110" "250;248;242" 4
+      local count
+      count=$(printf '%s' "$_GRADIENT" | grep -o '48;2;' | grep -c .)
+      assert_eq "4" "$count" "requesting 4 cells should emit exactly 4 background SGRs" || exit 1
+      assert_output_contains "$_GRADIENT" "48;2;128;120;110" "the gradient should start at the source color" || exit 1
+      assert_output_contains "$_GRADIENT" "48;2;250;248;242" "the gradient should end at the destination color" )
+}
+
+test_build_gradient_noop_on_malformed_target() {
+    ( _load_sl_functions
+      _build_gradient "128;120;110" "not-a-color" 10
+      assert_eq "" "$_GRADIENT" "a malformed destination should produce no gradient at all" )
+}
+
+test_full_width_gradient_reaches_columns() {
+    export COLORTERM=truecolor
+    export COLUMNS=80
+    export CS_TERM_BG_RGB="250;248;242"
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":5}}'
+    local out stripped width
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "48;2;250;248;242" \
+        "a wide terminal with a known bg should render a gradient reaching that color" || return 1
+    stripped=$(printf '%s' "$out" | sed -E $'s/\033\\[[0-9;]*m//g')
+    width=$( ( _load_sl_functions; _display_width "$stripped"; echo "$_WIDTH" ) )
+    assert_eq "80" "$width" "the bar plus its gradient should fill exactly COLUMNS cells"
+}
+
+test_narrow_terminal_no_gradient() {
+    export COLORTERM=truecolor
+    export COLUMNS=5
+    export CS_TERM_BG_RGB="250;248;242"
+    local json='{"session_name":"averylongsessionnamethatfillsthebar","workspace":{"current_dir":"/none"}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_not_contains "$out" "48;2;250;248;242" \
+        "a bar already wider than COLUMNS should add no gradient" || return 1
+}
+
+test_no_gradient_without_columns() {
+    export COLORTERM=truecolor
+    export CS_TERM_BG_RGB="250;248;242"
+    unset COLUMNS
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_not_contains "$out" "48;2;250;248;242" \
+        "no gradient should render when COLUMNS is unknown" || return 1
+}
+
+test_no_gradient_without_bg_rgb() {
+    export COLORTERM=truecolor
+    unset CS_TERM_BG_RGB
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
+    local out_unset out_wide
+    out_unset=$(run_sl "$json")
+    out_wide=$(COLUMNS=80 run_sl "$json")
+    assert_eq "$out_unset" "$out_wide" \
+        "COLUMNS must have no effect on rendering when CS_TERM_BG_RGB is unknown" || return 1
+}
+
+test_no_gradient_outside_truecolor() {
+    export TERM="xterm-256color"
+    unset COLORTERM
+    export COLUMNS=80
+    export CS_TERM_BG_RGB="250;248;242"
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_not_contains "$out" "48;2;250;248;242" \
+        "256-color/basic modes should not attempt a truecolor gradient" || return 1
+}
+
+# ============================================================================
 # Runner
 # ============================================================================
 echo "Running test_statusline.sh"
@@ -880,6 +1068,9 @@ run_test test_git_branch_bold_slate_accent
 run_test test_limits_threshold_per_block
 run_test test_thin_bar_between_same_bg
 run_test test_logo_badge_is_brand_coral
+run_test test_logo_boundary_gets_thin_darker_coral_hairline
+run_test test_segment_after_logo_divider_drops_redundant_leading_pad
+run_test test_logo_divider_survives_orange_session_color_collision
 run_test test_abut_between_different_bg
 run_test test_segment_icons_are_unicode
 run_test test_tab_color_palette_matches_statusline
@@ -922,4 +1113,14 @@ run_test test_io_gating_git_subprocess
 run_test test_ctx_zero_vs_absent
 run_test test_unknown_segment_ignored
 run_test test_unknown_session_color_falls_back
+run_test test_display_width_counts_codepoints_not_bytes
+run_test test_parse_rgb_triplet_accepts_valid_and_rejects_malformed
+run_test test_lerp_channel_hits_exact_endpoints
+run_test test_build_gradient_cell_count_and_endpoints
+run_test test_build_gradient_noop_on_malformed_target
+run_test test_full_width_gradient_reaches_columns
+run_test test_narrow_terminal_no_gradient
+run_test test_no_gradient_without_columns
+run_test test_no_gradient_without_bg_rgb
+run_test test_no_gradient_outside_truecolor
 report_results
