@@ -441,10 +441,8 @@ _display_width() {
 # validation step: a failed parse is the single "this isn't usable" signal.
 _parse_rgb_triplet() {
     local rgb="$1" r g b
+    [[ "$rgb" =~ ^[0-9]{1,3}\;[0-9]{1,3}\;[0-9]{1,3}$ ]] || return 1
     IFS=';' read -r r g b <<< "$rgb"
-    [[ "$r" =~ ^[0-9]{1,3}$ ]] || return 1
-    [[ "$g" =~ ^[0-9]{1,3}$ ]] || return 1
-    [[ "$b" =~ ^[0-9]{1,3}$ ]] || return 1
     [ "$r" -le 255 ] && [ "$g" -le 255 ] && [ "$b" -le 255 ] || return 1
     _R="$r"; _G="$g"; _B="$b"
 }
@@ -524,7 +522,7 @@ _render() {
 
     # Lead with a reset so any residual SGR state from the caller's terminal
     # cannot bleed into the first segment's text.
-    local i out="$reset" bg nbg bgsgr fgtext width=0 lastrgb="" nextrgb sepbg lead drop_lead=""
+    local i out="$reset" bg nbg bgsgr fgtext width=0 lastrgb="" sepbg lead same
     for ((i = 0; i < n; i++)); do
         bg="${_SEG_BG[i]}"
         _sgr 48 "$bg"; bgsgr="$_SGR"; lastrgb="$_RGB"
@@ -539,12 +537,12 @@ _render() {
         esac
         fgtext="$_SGR"
         if [ -n "${_SEG_BOLD[i]}" ]; then fgtext+=";1"; else fgtext+=";22"; fi
-        # A segment immediately after the logo divider inherits that divider
+        # A segment immediately after the logo inherits that boundary's divider
         # cell as its leading pad — the cell already carries this segment's
         # background — so it drops its own leading space to stay symmetric with
         # every other pill. The trailing space is always emitted.
         lead=" "
-        if [ -n "$drop_lead" ]; then lead=""; drop_lead=""; fi
+        [ "$i" -gt 0 ] && [ "${_SEG_BG[i - 1]}" = "brand" ] && lead=""
         out+="${esc}[${bgsgr};${fgtext}m${lead}${_SEG_TEXT[i]} "
         _display_width "${_SEG_TEXT[i]}"; width=$((width + 1 + ${#lead} + _WIDTH))
         if [ $((i + 1)) -lt "$n" ]; then
@@ -556,7 +554,7 @@ _render() {
                 # inked in darker coral, on a background matching the non-logo
                 # neighbor so the glyph's uninked ~7/8 merges into that pill
                 # and only the thin sliver shows.
-                if [ "$bg" = "brand" ]; then _sgr 48 "$nbg"; drop_lead=1; else _sgr 48 "$bg"; fi
+                if [ "$bg" = "brand" ]; then _sgr 48 "$nbg"; else _sgr 48 "$bg"; fi
                 sepbg="$_SGR"
                 out+="${esc}[${sepbg};${logosepfg}m${thin}"
                 width=$((width + 1))
@@ -573,12 +571,13 @@ _render() {
                 # covers every logo boundary, but the same principle applies
                 # to any other pair of segments that might one day share an
                 # RGB under different names.
-                nextrgb=""
+                same=""
                 if [ "$LEVEL" = "truecolor" ]; then
-                    _sgr 48 "$nbg"; nextrgb="$_RGB"
+                    _sgr 48 "$nbg"; [ "$_RGB" = "$lastrgb" ] && same=1
+                elif [ "$nbg" = "$bg" ]; then
+                    same=1
                 fi
-                if { [ "$LEVEL" = "truecolor" ] && [ "$nextrgb" = "$lastrgb" ]; } \
-                    || { [ "$LEVEL" != "truecolor" ] && [ "$nbg" = "$bg" ]; }; then
+                if [ -n "$same" ]; then
                     out+="${esc}[${bgsgr};${hairfg}m${thin}"
                     width=$((width + 1))
                 fi

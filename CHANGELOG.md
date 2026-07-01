@@ -2,6 +2,22 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
+## 2026.7.1
+
+### Features
+
+- **Full-width statusline gradient** — in truecolor terminals the bar stretches to full width, fading its trailing edge into the terminal's real background color so it reads as floating rather than stopping short of a blank terminal.
+- **Logo divider** — the coral logo badge is now set off from the session name by a thin darker-coral divider.
+
+### Fixes
+
+- **Terminal background detection under tmux** — cs reads the real outer-terminal background via OSC 11 (a plain query when tmux proxies it, DCS passthrough otherwise), which is what enables the gradient. Fixes a guard that silently blocked the query whenever detection output was captured, so the background was never actually learned in a real session.
+- **Symmetric session-name padding** — the name no longer sits one column off-center after the logo divider.
+
+### Docs
+
+- Statusline docs and README updated for the full-width gradient and the tmux background-detection behavior.
+
 ## 2026.6.13
 
 ### Features

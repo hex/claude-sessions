@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.6.13"
+VERSION="2026.7.1"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 
@@ -2441,9 +2441,7 @@ detect_term_theme_and_bg() {
         # passthrough, then classify by OS appearance (which carries no RGB, so
         # the trailing gradient fails closed rather than fading toward black).
         out=$(_theme_from_osc11)
-        case "$out" in
-            *" 0;0;0") out="unknown" ;;
-        esac
+        [[ "$out" == *" 0;0;0" ]] && out="unknown"
         [ "$out" = "unknown" ] && out=$(_theme_from_osc11 tmux)
         [ "$out" = "unknown" ] && out=$(_theme_from_os_appearance)
     else
@@ -2462,6 +2460,23 @@ detect_term_theme() {
     local out
     out=$(detect_term_theme_and_bg)
     echo "${out%% *}"
+}
+
+# Detect the terminal theme (and its real background RGB when known) while cs
+# still owns the tty, and export both for the statusline, hooks, and the session
+# launched next. A no-op when CS_TERM_THEME is already set, so a manual override
+# or an earlier detection wins. The OSC query must run here, never from a hook,
+# where its reply would race into claude's input stream.
+_export_term_theme() {
+    [ -n "${CS_TERM_THEME:-}" ] && return 0
+    local out theme
+    out=$(detect_term_theme_and_bg)
+    theme="${out%% *}"
+    [ "$theme" = "unknown" ] && return 0
+    export CS_TERM_THEME="$theme"
+    if [[ "$out" == *" "* ]] && [ -z "${CS_TERM_BG_RGB:-}" ]; then
+        export CS_TERM_BG_RGB="${out#* }"
+    fi
 }
 
 # macOS reports dark mode by the presence of the AppleInterfaceStyle key;
@@ -2549,21 +2564,10 @@ launch_claude_code() {
     if [ -n "$claude_session_id" ]; then
         export CS_CLAUDE_SESSION_ID="$claude_session_id"
     fi
-    # Terminal theme (and, when known, the real background RGB) for the
-    # statusline and hooks. Detected once here while cs still owns the tty (an
-    # OSC query from a hook would race its reply into claude's input). Preset
-    # CS_TERM_THEME/CS_TERM_BG_RGB values are manual overrides.
-    if [ -z "${CS_TERM_THEME:-}" ]; then
-        local _term_out _term_theme
-        _term_out=$(detect_term_theme_and_bg)
-        _term_theme="${_term_out%% *}"
-        if [ "$_term_theme" != "unknown" ]; then
-            export CS_TERM_THEME="$_term_theme"
-            case "$_term_out" in
-                *' '*) [ -z "${CS_TERM_BG_RGB:-}" ] && export CS_TERM_BG_RGB="${_term_out#* }" ;;
-            esac
-        fi
-    fi
+    # Terminal theme (and its real background RGB when known) for the statusline
+    # and hooks, detected while cs still owns the tty and reused by the session
+    # launched next.
+    _export_term_theme
     # Refresh the palette now that the theme is known so the banner below reads
     # on a light canvas (colors were first set at startup, defaulting to dark).
     setup_palette
@@ -3063,21 +3067,10 @@ main() {
             local tui_bin
             tui_bin="$(command -v cs-tui 2>/dev/null || echo "$(dirname "$0")/cs-tui")"
             if [ -x "$tui_bin" ]; then
-                # Detect the terminal theme while cs still owns the tty, so the
-                # picker can pick a light/dark palette. Exported here (theme and,
-                # when known, the real background RGB), it's also reused by the
-                # session we launch next (skips re-detection).
-                if [ -z "${CS_TERM_THEME:-}" ]; then
-                    local _tui_out _tui_theme
-                    _tui_out=$(detect_term_theme_and_bg)
-                    _tui_theme="${_tui_out%% *}"
-                    if [ "$_tui_theme" != "unknown" ]; then
-                        export CS_TERM_THEME="$_tui_theme"
-                        case "$_tui_out" in
-                            *' '*) [ -z "${CS_TERM_BG_RGB:-}" ] && export CS_TERM_BG_RGB="${_tui_out#* }" ;;
-                        esac
-                    fi
-                fi
+                # Detect the terminal theme while cs still owns the tty so the
+                # picker gets a light/dark palette; reused by the session we
+                # launch next.
+                _export_term_theme
                 local tui_output
                 tui_output=$(CS_VERSION="$VERSION" "$tui_bin") || exit $?
                 if [ -n "$tui_output" ]; then
