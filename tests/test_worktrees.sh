@@ -10,20 +10,20 @@ source "$SCRIPT_DIR/test_lib.sh"
 test_worktree_name_rejected_without_base() {
     local output
     output=$("$CS_BIN" "@fix-auth" 2>&1 || true)
-    assert_output_contains "$output" "Session name" "empty base half must be rejected"
+    assert_output_contains "$output" "Session name" "empty base half must be rejected" || return 1
 }
 
 test_worktree_name_rejects_bad_task_half() {
     create_test_session_with_git "myproj" > /dev/null
     local output
     output=$("$CS_BIN" "myproj@fix/auth" 2>&1 || true)
-    assert_output_contains "$output" "task name" "slash in task half must be rejected"
+    assert_output_contains "$output" "task name" "slash in task half must be rejected" || return 1
 }
 
 test_plain_names_still_work() {
     local output
     output=$("$CS_BIN" "-list" 2>&1)
-    assert_output_not_contains "$output" "Unknown" "plain subcommands unaffected"
+    assert_output_not_contains "$output" "Unknown" "plain subcommands unaffected" || return 1
 }
 
 # Launch cs against a session/worktree with stdin closed; the echo stub
@@ -39,13 +39,13 @@ test_worktree_create_tracked_mode() {
     printf 'claude_session_id: 00000000-0000-4000-8000-000000000000\n' > "$base_dir/.cs/local/state"
     cs_launch "myproj@fix-auth"
     local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
-    assert_dir "$wt" "worktree dir should exist"
-    assert_file_exists "$wt/.git" "linked worktree .git should be a file"
-    assert_eq "cs/fix-auth" "$(git -C "$wt" branch --show-current)" "worktree on task branch"
-    assert_file_exists "$wt/.cs/artifacts/MANIFEST.json" "tracked .cs rides the checkout"
-    assert_file_contains "$wt/.cs/local/state" "task_branch: cs/fix-auth"
-    assert_file_contains "$wt/.cs/local/state" "cs_mode: tracked"
-    assert_file_contains "$wt/.cs/local/state" "cs_base: myproj"
+    assert_dir "$wt" "worktree dir should exist" || return 1
+    assert_file_exists "$wt/.git" "linked worktree .git should be a file" || return 1
+    assert_eq "cs/fix-auth" "$(git -C "$wt" branch --show-current)" "worktree on task branch" || return 1
+    assert_file_exists "$wt/.cs/artifacts/MANIFEST.json" "tracked .cs rides the checkout" || return 1
+    assert_file_contains "$wt/.cs/local/state" "task_branch: cs/fix-auth" || return 1
+    assert_file_contains "$wt/.cs/local/state" "cs_mode: tracked" || return 1
+    assert_file_contains "$wt/.cs/local/state" "cs_base: myproj" || return 1
     # Fresh identity, not the base's
     local base_uuid wt_uuid
     base_uuid=$(awk -F': ' '/^claude_session_id/{print $2}' "$base_dir/.cs/local/state")
@@ -59,8 +59,8 @@ test_worktree_create_refuses_dirty_base() {
     echo "change" >> "$base_dir/CLAUDE.md"
     local output
     output=$("$CS_BIN" "myproj@fix-auth" < /dev/null 2>&1 || true)
-    assert_output_contains "$output" "uncommitted" "dirty base must refuse"
-    assert_not_exists "$CS_SESSIONS_ROOT/myproj@fix-auth" "no worktree on refusal"
+    assert_output_contains "$output" "uncommitted" "dirty base must refuse" || return 1
+    assert_not_exists "$CS_SESSIONS_ROOT/myproj@fix-auth" "no worktree on refusal" || return 1
 }
 
 test_worktree_create_reuses_existing_branch() {
@@ -69,7 +69,7 @@ test_worktree_create_reuses_existing_branch() {
     git -C "$base_dir" branch cs/fix-auth
     cs_launch "myproj@fix-auth"
     assert_eq "cs/fix-auth" "$(git -C "$CS_SESSIONS_ROOT/myproj@fix-auth" branch --show-current)" \
-        "existing branch is reused, not errored on"
+        "existing branch is reused, not errored on" || return 1
 }
 
 test_worktree_create_ignored_mode_bootstraps_cs() {
@@ -83,10 +83,10 @@ test_worktree_create_ignored_mode_bootstraps_cs() {
     (cd "$base_dir" && git init -q && git add -A && git commit -q -m init)
     cs_launch "proj@task1"
     local wt="$CS_SESSIONS_ROOT/proj@task1"
-    assert_dir "$wt/.cs/artifacts" "ignored mode bootstraps .cs skeleton"
-    assert_file_contains "$wt/.cs/local/state" "cs_mode: ignored"
+    assert_dir "$wt/.cs/artifacts" "ignored mode bootstraps .cs skeleton" || return 1
+    assert_file_contains "$wt/.cs/local/state" "cs_mode: ignored" || return 1
     assert_eq "# Project CLAUDE.md" "$(cat "$wt/CLAUDE.md")" \
-        "bootstrap must not overwrite the project's CLAUDE.md"
+        "bootstrap must not overwrite the project's CLAUDE.md" || return 1
 }
 
 test_worktree_of_worktree_refused() {
@@ -94,7 +94,7 @@ test_worktree_of_worktree_refused() {
     cs_launch "myproj@fix-auth"
     local output
     output=$("$CS_BIN" "myproj@fix-auth@deeper" 2>&1 || true)
-    assert_output_contains "$output" "task name" "second @ lands in the task half and is rejected"
+    assert_output_contains "$output" "task name" "second @ lands in the task half and is rejected" || return 1
 }
 
 test_worktree_create_succeeds_with_untracked_base() {
@@ -103,10 +103,10 @@ test_worktree_create_succeeds_with_untracked_base() {
     echo "stray" > "$base_dir/stray.txt"   # untracked, must not corrupt the captured path
     local output status=0
     output=$("$CS_BIN" "myproj@fix-auth" < /dev/null 2>&1) || status=$?
-    assert_eq "0" "$status" "cs must exit 0 despite the untracked-files warning"
+    assert_eq "0" "$status" "cs must exit 0 despite the untracked-files warning" || return 1
     assert_output_not_contains "$output" "No such file" \
-        "captured worktree path must not be corrupted by the warning"
-    assert_dir "$CS_SESSIONS_ROOT/myproj@fix-auth" "worktree created"
+        "captured worktree path must not be corrupted by the warning" || return 1
+    assert_dir "$CS_SESSIONS_ROOT/myproj@fix-auth" "worktree created" || return 1
 }
 
 test_worktree_reopen_preserves_project_claude_md() {
@@ -119,7 +119,7 @@ test_worktree_reopen_preserves_project_claude_md() {
     cs_launch "proj@task1"
     cs_launch "proj@task1"   # reopen — the path that used to run migrate_session
     assert_eq "# Project CLAUDE.md" "$(cat "$CS_SESSIONS_ROOT/proj@task1/CLAUDE.md")" \
-        "reopen must not rewrite the project's CLAUDE.md"
+        "reopen must not rewrite the project's CLAUDE.md" || return 1
 }
 
 test_worktree_launch_exports_base_identity() {
@@ -128,10 +128,10 @@ test_worktree_launch_exports_base_identity() {
     local stub env_out
     stub=$(_make_env_stub)
     env_out=$(CLAUDE_CODE_BIN="$stub" "$CS_BIN" "myproj@fix-auth" <<< "n" 2>/dev/null || true)
-    assert_output_contains "$env_out" "CLAUDE_SESSION_NAME=myproj@fix-auth" "display identity is the task name"
-    assert_output_contains "$env_out" "CLAUDE_CODE_TASK_LIST_ID=myproj" "task list is shared with the base"
-    assert_output_not_contains "$env_out" "CLAUDE_CODE_TASK_LIST_ID=myproj@" "task list id must be the base, not the worktree name"
-    assert_output_contains "$env_out" "CS_SECRETS_SESSION=myproj" "secrets stay keyed to the base"
+    assert_output_contains "$env_out" "CLAUDE_SESSION_NAME=myproj@fix-auth" "display identity is the task name" || return 1
+    assert_output_contains "$env_out" "CLAUDE_CODE_TASK_LIST_ID=myproj" "task list is shared with the base" || return 1
+    assert_output_not_contains "$env_out" "CLAUDE_CODE_TASK_LIST_ID=myproj@" "task list id must be the base, not the worktree name" || return 1
+    assert_output_contains "$env_out" "CS_SECRETS_SESSION=myproj" "secrets stay keyed to the base" || return 1
 }
 
 test_merge_tracked_worktree_fuses_and_cleans_up() {
@@ -145,11 +145,11 @@ test_merge_tracked_worktree_fuses_and_cleans_up() {
     (cd "$wt" && git add -A && git commit -q -m "task work")
     local output
     output=$("$CS_BIN" "myproj" --merge "fix-auth" 2>&1)
-    assert_file_exists "$base_dir/auth.txt" "code merged into base"
-    assert_file_contains "$base_dir/.cs/timeline.jsonl" '"event":"task"' "timeline union-merged"
-    assert_not_exists "$wt" "worktree removed after merge"
-    assert_eq "" "$(git -C "$base_dir" branch --list cs/fix-auth)" "branch deleted"
-    assert_file_contains "$base_dir/.cs/timeline.jsonl" "worktree-merged" "merge recorded"
+    assert_file_exists "$base_dir/auth.txt" "code merged into base" || return 1
+    assert_file_contains "$base_dir/.cs/timeline.jsonl" '"event":"task"' "timeline union-merged" || return 1
+    assert_not_exists "$wt" "worktree removed after merge" || return 1
+    assert_eq "" "$(git -C "$base_dir" branch --list cs/fix-auth)" "branch deleted" || return 1
+    assert_file_contains "$base_dir/.cs/timeline.jsonl" "worktree-merged" "merge recorded" || return 1
 }
 
 test_merge_refuses_dirty_worktree() {
@@ -160,8 +160,8 @@ test_merge_refuses_dirty_worktree() {
     echo "uncommitted" >> "$wt/CLAUDE.md"
     local output
     output=$("$CS_BIN" "myproj" --merge "fix-auth" 2>&1 || true)
-    assert_output_contains "$output" "uncommitted" "dirty worktree refused"
-    assert_dir "$wt" "worktree preserved on refusal"
+    assert_output_contains "$output" "uncommitted" "dirty worktree refused" || return 1
+    assert_dir "$wt" "worktree preserved on refusal" || return 1
 }
 
 test_merge_refuses_live_session() {
@@ -172,7 +172,7 @@ test_merge_refuses_live_session() {
     echo "$$" > "$wt/.cs/session.lock"   # this test process is alive
     local output
     output=$("$CS_BIN" "myproj" --merge "fix-auth" 2>&1 || true)
-    assert_output_contains "$output" "session is open" "live lock refused"
+    assert_output_contains "$output" "session is open" "live lock refused" || return 1
     rm -f "$wt/.cs/session.lock"
 }
 
@@ -189,8 +189,8 @@ test_merge_conflict_stops_and_preserves() {
     (cd "$base_dir" && git add shared.txt && git commit -q -m "base edit")
     local output
     output=$("$CS_BIN" "myproj" --merge "fix-auth" 2>&1 || true)
-    assert_output_contains "$output" "conflict" "conflict reported"
-    assert_dir "$wt" "worktree preserved on conflict"
+    assert_output_contains "$output" "conflict" "conflict reported" || return 1
+    assert_dir "$wt" "worktree preserved on conflict" || return 1
     (cd "$base_dir" && git merge --abort 2>/dev/null || true)
 }
 
