@@ -89,7 +89,9 @@ explicitly, applying the same semantics the drivers would have).
   compare `git rev-parse --abbrev-ref HEAD` against the pinned branch; warn
   loudly on mismatch (someone ran `git switch` inside the worktree).
 - Open thereafter: identical to opening any session (resume prompt, UUID
-  rebind, migrate_session), because the worktree IS a session dir.
+  rebind), except migrate_session is skipped — worktree checkouts never
+  predate the worktree feature, and its CLAUDE.md rewrite must never touch a
+  project's own file in ignored-.cs repos.
 
 **Merge-back: `cs myproj --merge fix-auth`**
 
