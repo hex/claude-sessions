@@ -2680,7 +2680,14 @@ launch_claude_code() {
     export CLAUDE_SESSION_DIR="$session_dir"
     export CLAUDE_SESSION_META_DIR="$session_dir/.cs"
     export CLAUDE_ARTIFACT_DIR="$session_dir/.cs/artifacts"
-    export CLAUDE_CODE_TASK_LIST_ID="$session_name"
+    # Worktree sessions coordinate through the base session's task list and
+    # keychain namespace; cs_base is only set in worktree local state.
+    local cs_base
+    cs_base=$(_read_local_state "$session_dir/.cs/local/state" cs_base)
+    export CLAUDE_CODE_TASK_LIST_ID="${cs_base:-$session_name}"
+    if [ -n "$cs_base" ]; then
+        export CS_SECRETS_SESSION="$cs_base"
+    fi
     # Export both names defensively: Claude Code's auto-memory resolver reads
     # CLAUDE_COWORK_MEMORY_PATH_OVERRIDE; the older CLAUDE_CODE_AUTO_MEMORY_PATH
     # is kept in case other Claude Code versions honor it instead.

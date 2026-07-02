@@ -122,6 +122,18 @@ test_worktree_reopen_preserves_project_claude_md() {
         "reopen must not rewrite the project's CLAUDE.md"
 }
 
+test_worktree_launch_exports_base_identity() {
+    create_test_session_with_git "myproj" > /dev/null
+    cs_launch "myproj@fix-auth"   # create first
+    local stub env_out
+    stub=$(_make_env_stub)
+    env_out=$(CLAUDE_CODE_BIN="$stub" "$CS_BIN" "myproj@fix-auth" <<< "n" 2>/dev/null || true)
+    assert_output_contains "$env_out" "CLAUDE_SESSION_NAME=myproj@fix-auth" "display identity is the task name"
+    assert_output_contains "$env_out" "CLAUDE_CODE_TASK_LIST_ID=myproj" "task list is shared with the base"
+    assert_output_not_contains "$env_out" "CLAUDE_CODE_TASK_LIST_ID=myproj@" "task list id must be the base, not the worktree name"
+    assert_output_contains "$env_out" "CS_SECRETS_SESSION=myproj" "secrets stay keyed to the base"
+}
+
 run_test test_worktree_name_rejected_without_base
 run_test test_worktree_name_rejects_bad_task_half
 run_test test_plain_names_still_work
@@ -132,4 +144,5 @@ run_test test_worktree_create_ignored_mode_bootstraps_cs
 run_test test_worktree_of_worktree_refused
 run_test test_worktree_create_succeeds_with_untracked_base
 run_test test_worktree_reopen_preserves_project_claude_md
+run_test test_worktree_launch_exports_base_identity
 report_results

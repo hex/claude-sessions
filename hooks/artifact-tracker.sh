@@ -135,7 +135,7 @@ store_secret() {
     else
         # Fallback to direct keychain access on macOS
         if [[ "$OSTYPE" == darwin* ]] && command -v security >/dev/null 2>&1; then
-            local service="cs:${CLAUDE_SESSION_NAME}:${name}"
+            local service="cs:${CS_SECRETS_SESSION:-$CLAUDE_SESSION_NAME}:${name}"
             security add-generic-password -a "$USER" -s "$service" -w "$value" -U 2>/dev/null || true
         fi
     fi
