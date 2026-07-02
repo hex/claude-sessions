@@ -134,6 +134,66 @@ test_worktree_launch_exports_base_identity() {
     assert_output_contains "$env_out" "CS_SECRETS_SESSION=myproj" "secrets stay keyed to the base"
 }
 
+test_merge_tracked_worktree_fuses_and_cleans_up() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    # Simulate task work: code + session records, committed on the branch
+    echo "fix" > "$wt/auth.txt"
+    echo '{"ts":"2026-07-02T00:00:00Z","event":"task"}' >> "$wt/.cs/timeline.jsonl"
+    (cd "$wt" && git add -A && git commit -q -m "task work")
+    local output
+    output=$("$CS_BIN" "myproj" --merge "fix-auth" 2>&1)
+    assert_file_exists "$base_dir/auth.txt" "code merged into base"
+    assert_file_contains "$base_dir/.cs/timeline.jsonl" '"event":"task"' "timeline union-merged"
+    assert_not_exists "$wt" "worktree removed after merge"
+    assert_eq "" "$(git -C "$base_dir" branch --list cs/fix-auth)" "branch deleted"
+    assert_file_contains "$base_dir/.cs/timeline.jsonl" "worktree-merged" "merge recorded"
+}
+
+test_merge_refuses_dirty_worktree() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "uncommitted" >> "$wt/CLAUDE.md"
+    local output
+    output=$("$CS_BIN" "myproj" --merge "fix-auth" 2>&1 || true)
+    assert_output_contains "$output" "uncommitted" "dirty worktree refused"
+    assert_dir "$wt" "worktree preserved on refusal"
+}
+
+test_merge_refuses_live_session() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "$$" > "$wt/.cs/session.lock"   # this test process is alive
+    local output
+    output=$("$CS_BIN" "myproj" --merge "fix-auth" 2>&1 || true)
+    assert_output_contains "$output" "session is open" "live lock refused"
+    rm -f "$wt/.cs/session.lock"
+}
+
+test_merge_conflict_stops_and_preserves() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    echo "base line" > "$base_dir/shared.txt"
+    (cd "$base_dir" && git add shared.txt && git commit -q -m "base file")
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "task line" > "$wt/shared.txt"
+    (cd "$wt" && git add shared.txt && git commit -q -m "task edit")
+    echo "conflicting base line" > "$base_dir/shared.txt"
+    (cd "$base_dir" && git add shared.txt && git commit -q -m "base edit")
+    local output
+    output=$("$CS_BIN" "myproj" --merge "fix-auth" 2>&1 || true)
+    assert_output_contains "$output" "conflict" "conflict reported"
+    assert_dir "$wt" "worktree preserved on conflict"
+    (cd "$base_dir" && git merge --abort 2>/dev/null || true)
+}
+
 run_test test_worktree_name_rejected_without_base
 run_test test_worktree_name_rejects_bad_task_half
 run_test test_plain_names_still_work
@@ -145,4 +205,8 @@ run_test test_worktree_of_worktree_refused
 run_test test_worktree_create_succeeds_with_untracked_base
 run_test test_worktree_reopen_preserves_project_claude_md
 run_test test_worktree_launch_exports_base_identity
+run_test test_merge_tracked_worktree_fuses_and_cleans_up
+run_test test_merge_refuses_dirty_worktree
+run_test test_merge_refuses_live_session
+run_test test_merge_conflict_stops_and_preserves
 report_results

@@ -745,6 +745,86 @@ create_worktree_session() {
     echo "$wt_dir"
 }
 
+# Merge a task worktree's branch back into the base session, fuse session
+# records, and remove the worktree. Explicit and user-invoked only; every
+# preflight refuses rather than committing on the user's behalf.
+merge_worktree_session() {
+    local base_name="$1" task="$2"
+    local base_dir="$SESSIONS_ROOT/$base_name"
+    [ -L "$base_dir" ] && base_dir="$(readlink -f "$base_dir")"
+    local wt_dir="$SESSIONS_ROOT/$base_name@$task"
+    local branch="cs/$task"
+
+    [ -d "$base_dir" ] || error "Base session not found: $base_name"
+    [ -d "$wt_dir" ] || error "No worktree for task '$task' (expected $wt_dir)"
+
+    local lock pid
+    for lock in "$base_dir/.cs/session.lock" "$wt_dir/.cs/session.lock"; do
+        if [ -f "$lock" ]; then
+            pid=$(cat "$lock" 2>/dev/null || echo "")
+            if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+                error "A session is open (PID $pid, $lock); close it before merging"
+            fi
+        fi
+    done
+
+    if ! git -C "$wt_dir" diff --quiet 2>/dev/null \
+        || ! git -C "$wt_dir" diff --cached --quiet 2>/dev/null; then
+        error "Worktree has uncommitted changes; commit them in $wt_dir first (cs never commits for you)"
+    fi
+    if ! git -C "$base_dir" diff --quiet 2>/dev/null \
+        || ! git -C "$base_dir" diff --cached --quiet 2>/dev/null; then
+        error "Base session has uncommitted changes; commit them in $base_dir first"
+    fi
+
+    setup_merge_attributes "$base_dir"
+
+    local mode
+    mode=$(_read_local_state "$wt_dir/.cs/local/state" cs_mode)
+
+    if git -C "$base_dir" merge-base --is-ancestor "$branch" HEAD 2>/dev/null; then
+        info "Branch $branch is already merged; cleaning up"
+    else
+        if [ "$mode" = "tracked" ]; then
+            local mb
+            mb=$(git -C "$base_dir" merge-base HEAD "$branch" 2>/dev/null || echo "")
+            if [ -n "$mb" ] \
+                && ! git -C "$base_dir" diff --quiet "$mb" "$branch" -- .cs/memory/MEMORY.md 2>/dev/null; then
+                warn "MEMORY.md changed on $branch; merge=ours keeps the base copy. Review: git -C \"$base_dir\" diff $mb $branch -- .cs/memory/MEMORY.md"
+            fi
+        fi
+        if ! git -C "$base_dir" merge --no-edit "$branch"; then
+            error "Merge conflicts in $base_dir; resolve and commit (or git merge --abort), then re-run: cs $base_name --merge $task"
+        fi
+    fi
+
+    if [ "$mode" = "ignored" ]; then
+        fuse_session_records "$wt_dir/.cs" "$base_dir/.cs"
+    fi
+
+    # --force: the worktree legitimately holds untracked files (.cs/local,
+    # settings.local.json, the whole .cs in ignored mode) that our preflight
+    # deliberately does not count as dirt.
+    git -C "$base_dir" worktree remove --force "$wt_dir" 2>/dev/null \
+        || error "git worktree remove failed for $wt_dir"
+    git -C "$base_dir" branch -d "$branch" >/dev/null 2>&1 \
+        || warn "Branch $branch was not deleted (not fully merged?)"
+
+    jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+           --arg event "worktree-merged" \
+           --arg task "$task" \
+        '{ts: $ts, event: $event, task: $task}' \
+        >> "$base_dir/.cs/timeline.jsonl" 2>/dev/null || true
+    info "Merged $branch and removed worktree $base_name@$task"
+}
+
+# Fuse session records from a worktree .cs into the base .cs (ignored mode).
+fuse_session_records() {
+    local src="$1" dst="$2"
+    [ -f "$src/timeline.jsonl" ] && cat "$src/timeline.jsonl" >> "$dst/timeline.jsonl"
+    warn "Session-record fuse is partial pending full implementation; review $src manually"
+}
+
 # Ensure auto memory directory exists and migrate from default location
 setup_auto_memory() {
     local session_dir="$1"
@@ -3352,6 +3432,12 @@ main() {
                 export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
                 export CLAUDE_ARTIFACT_DIR="$SESSIONS_ROOT/$session_name/.cs/artifacts"
                 run_secrets "$@"
+                return 0
+                ;;
+            --merge)
+                shift
+                [ -n "${1:-}" ] || error "Usage: cs <base> --merge <task>"
+                merge_worktree_session "$session_name" "$1"
                 return 0
                 ;;
             --force)
