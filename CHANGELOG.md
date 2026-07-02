@@ -17,7 +17,9 @@ All notable changes to cs are documented here. Release notes are also available 
   now offers to start a parallel task worktree, force a second launch, or
   cancel, instead of a hard refusal. Creating a task from a dirty base asks
   for consent interactively (branches from the last commit) and still
-  refuses in scripts.
+  refuses in scripts. The non-interactive refusal's --force hint now names
+  the registered session (adopted sessions previously showed the project
+  folder's name).
 
 ## 2026.7.2
 
