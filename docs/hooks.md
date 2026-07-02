@@ -37,7 +37,7 @@ Runs after any file modification (Write or Edit), providing crash recovery for a
 ## narrative-reminder.sh (Stop)
 
 Runs when Claude pauses for user input:
-- Raises the statusline's attention marker (`.cs/local/attention`, machine-local) so the Claude mark's color pulses until the user next interacts; skipped inside subagents
+- Raises the statusline's attention marker (`.cs/local/attention`, machine-local) so the Claude mark holds amber until the user next interacts; skipped inside subagents
 - Reminds Claude to review and update its per-actor narrative (`.cs/memory/narrative.<actor>.md`, the session lab notebook), keyed on the most recently modified `narrative.*.md`, when it has not been touched recently
 - Cooldown-gated via `.cs/.narrative-reminder-cooldown` (at most once per 5 minutes); no size budget — narratives are native memory topic files that lazy-load
 - Approves silently inside subagents and outside cs sessions, and when the narrative was modified within the cooldown window
