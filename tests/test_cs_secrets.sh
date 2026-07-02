@@ -331,6 +331,18 @@ test_no_session_errors() {
     fi
 }
 
+test_explicit_session_arg_outranks_ambient_namespace() {
+    # A launched worktree session carries CS_SECRETS_SESSION=<base> in its
+    # environment; `cs <name> -secrets ...` names its target explicitly and
+    # must resolve <name>, not the ambient base namespace.
+    local output
+    output=$(CS_SECRETS_SESSION="ambient-base" "$CS_BIN" "plainsession" -secrets list 2>&1)
+    assert_output_contains "$output" "session: plainsession" \
+        "explicit -secrets target must outrank ambient CS_SECRETS_SESSION" || return 1
+    assert_output_not_contains "$output" "ambient-base" \
+        "ambient worktree namespace must not leak into an explicit -secrets call" || return 1
+}
+
 test_help_shows_usage() {
     local output
     output=$("$CS_SECRETS_BIN" --help 2>&1) || true
@@ -466,6 +478,7 @@ run_test test_ls_alias_works
 run_test test_rm_alias_works
 run_test test_session_flag_overrides_env
 run_test test_no_session_errors
+run_test test_explicit_session_arg_outranks_ambient_namespace
 run_test test_help_shows_usage
 
 # Per-machine sync files

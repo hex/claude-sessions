@@ -3345,6 +3345,9 @@ main() {
             -secrets)
                 shift
                 export CLAUDE_SESSION_NAME="$session_name"
+                # The named session is the target; a worktree session's
+                # ambient CS_SECRETS_SESSION must not redirect it to the base.
+                export CS_SECRETS_SESSION="$session_name"
                 export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
                 export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
                 export CLAUDE_ARTIFACT_DIR="$SESSIONS_ROOT/$session_name/.cs/artifacts"
