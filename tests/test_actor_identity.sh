@@ -138,6 +138,23 @@ test_who_lists_contributors() {
     assert_output_contains "$out" "Bob" "who should list a contributing author" || return 1
 }
 
+test_who_lists_contributors_in_linked_worktree() {
+    local project_dir="$TEST_TMPDIR/proj"
+    mkdir -p "$project_dir"
+    ( cd "$project_dir" && git init -q && git config user.email a@b.c && git config user.name Alice )
+    ( cd "$project_dir" && "$CS_BIN" -adopt s1 >/dev/null 2>&1 )
+    ( cd "$project_dir" && mkdir -p .cs/memory && echo m1 > .cs/memory/m1.md \
+        && git add -A && git commit -q -m m1 --author="Bob <bob@x.io>" )
+    git -C "$project_dir" worktree add -b cs/t1 "$TEST_TMPDIR/proj-t1" -q
+
+    local out
+    out=$( CLAUDE_SESSION_DIR="$TEST_TMPDIR/proj-t1" "$CS_BIN" -who 2>&1 )
+    assert_output_contains "$out" "Contributors" \
+        "who should print a contributors header from a linked worktree (.git is a file)" || return 1
+    assert_output_contains "$out" "Bob" \
+        "who should list a contributing author from a linked worktree" || return 1
+}
+
 test_migrate_adds_local_to_existing_gitignore() {
     local project_dir="$TEST_TMPDIR/proj"
     mkdir -p "$project_dir"
@@ -169,6 +186,7 @@ run_test test_guard_blocks_tracked_local
 run_test test_narrative_is_per_actor
 run_test test_legacy_narrative_migrates_to_actor
 run_test test_who_lists_contributors
+run_test test_who_lists_contributors_in_linked_worktree
 run_test test_migrate_adds_local_to_existing_gitignore
 
 report_results
