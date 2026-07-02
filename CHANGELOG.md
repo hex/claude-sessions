@@ -2,6 +2,18 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
+## Unreleased
+
+### Features
+
+- **Parallel task worktrees** — `cs <base>@<task>` opens an isolated worktree
+  session on branch `cs/<task>`; `cs <base> --merge <task>` merges it back,
+  fuses session records, and removes the worktree; `cs -rm <base>@<task>`
+  abandons one. Autosave crash-recovery moved to per-worktree
+  `refs/worktree/cs/auto` (legacy `refs/cs/auto` migrates on resume). The
+  artifact tracker no longer redirects writes targeting paths outside the
+  session checkout. Doctor gains worktree health checks.
+
 ## 2026.7.2
 
 ### Features

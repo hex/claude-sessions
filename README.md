@@ -176,6 +176,25 @@ Sessions are designed to be shared through git (push/pull the whole session dire
 
 One caveat: the custom merge drivers (`manifest`, `ours`) are per-clone git config, installed by every `cs <name>` launch. If you pull on a brand-new clone *before* ever launching the session through cs, those two files fall back to ordinary text merges.
 
+### Parallel task worktrees
+
+Work two tasks on one session at the same time, each in its own Claude
+conversation:
+
+    cs myproj@fix-auth     # creates a git worktree of myproj on branch cs/fix-auth
+    cs myproj@perf         # a second, independent working copy
+
+Each worktree is a full cs session (own conversation, color, artifacts, crash
+recovery) that shares the base session's task list and secrets. Session
+records fork with the branch and re-fuse at merge:
+
+    cs myproj --merge fix-auth   # merge cs/fix-auth, fuse records, remove worktree
+
+cs never commits for you: creation and merge refuse dirty checkouts and tell
+you what to commit. Abandon a task with `cs -rm myproj@fix-auth`. Repos that
+gitignore `.cs/` get a per-worktree `.cs/` whose records are fused explicitly
+at merge. Requires git >= 2.20.
+
 ## Slash Commands
 
 - `/wrap` — The canonical end-of-session command: runs the `/sweep` memory pass, then the `/summary` narrative, then the prose gate
