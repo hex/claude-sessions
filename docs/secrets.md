@@ -124,6 +124,7 @@ cs -secrets age remove colleague
 - Each machine has a keypair stored in `~/.cs-secrets/age.key`
 - Session recipients are stored in `<session>/.cs/age-recipients/*.pub`
 - Secrets are encrypted to all recipients' public keys
+- Each machine writes its own sync file (see [Per-machine sync files](#per-machine-sync-files) below)
 - Anyone with their private key + being in recipients can decrypt
 
 ### Password-Based Encryption (Legacy)
@@ -144,11 +145,38 @@ cs -secrets import-file
 cs -secrets import-file --replace
 ```
 
-**Sync files:**
-- `.cs/secrets.age` - age-encrypted (preferred when recipients configured)
-- `.cs/secrets.enc` - password-encrypted (legacy, requires `CS_SECRETS_PASSWORD`)
+### Per-machine sync files
 
-Both files are produced by `cs-secrets export-file` and can be copied between machines manually; run `cs-secrets import-file` on the other end to load them.
+Sessions are shared between machines via git, so the sync files live under `.cs/`
+and are committed. To keep two machines from clobbering each other, **each machine
+writes its own sync file**, named after its hostname-derived machine id:
+
+- `.cs/secrets.<machine-id>.age` - age-encrypted (preferred when recipients configured)
+- `.cs/secrets.<machine-id>.enc` - password-encrypted (requires `CS_SECRETS_PASSWORD`)
+
+The `<machine-id>` is `${USER}@<short-hostname>` (the same id used to name age
+recipients under `.cs/age-recipients/`).
+
+Because every machine exports to a distinct file, concurrent exports produce
+*added* files rather than competing edits to one shared file — git merges
+additions of different paths without conflict, and no machine's secrets get
+silently dropped.
+
+`export-file` also **skips the write when nothing changed**: it decrypts the
+existing file and compares the plaintext, so re-exporting an unchanged store
+does not churn the file's bytes (each encryption pass would otherwise emit fresh
+ciphertext from a random salt / ephemeral key).
+
+`import-file` (with no path argument) **merges every sync file it can decrypt** —
+all `.cs/secrets.*.age` / `.cs/secrets.*.enc` from every machine, plus the legacy
+unsuffixed `.cs/secrets.age` / `.cs/secrets.enc` (a one-shot migration for
+sessions created before per-machine naming). Files it cannot decrypt (another
+machine's age key, a different password) are skipped, not fatal. Per-machine
+files win key collisions over the legacy files; local secrets are preserved
+unless you pass `--replace`.
+
+Passing an explicit path (`cs -secrets import-file <file>`) imports just that
+one file, as before.
 
 ## Migrating Between Backends
 

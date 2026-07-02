@@ -31,6 +31,38 @@ teardown() {
 # Save real HOME before tests override it
 ORIGINAL_HOME="$HOME"
 
+# --- Sync-file test helpers ---
+
+# Reproduce the machine identifier cs-secrets uses to name per-machine sync
+# files (hostname-derived, matches age_get_machine_id in bin/cs-secrets).
+_machine_id() {
+    echo "${USER}@$(hostname -s 2>/dev/null || hostname)"
+}
+
+# Build a PATH containing every tool cs-secrets needs EXCEPT age, so export-file
+# deterministically takes the password (.enc) path even on hosts where age is
+# installed. Returns the sandbox bin directory.
+_ageless_path() {
+    local bindir="$TEST_TMPDIR/ageless-bin"
+    if [[ ! -d "$bindir" ]]; then
+        mkdir -p "$bindir"
+        local tool resolved
+        for tool in bash env basename dirname openssl jq hostname cat mkdir chmod ls rm grep sed tr cut head date; do
+            resolved=$(command -v "$tool" 2>/dev/null) && ln -sf "$resolved" "$bindir/$tool"
+        done
+    fi
+    echo "$bindir"
+}
+
+# Encrypt a JSON payload into a sync file with the shared test password, to
+# simulate a file another machine (or a legacy export) committed to git.
+_seed_enc_sync_file() {
+    local path="$1" json="$2"
+    mkdir -p "$(dirname "$path")"
+    printf '%s\n' "$json" | openssl enc -aes-256-cbc -e -pbkdf2 -iter 100000 \
+        -out "$path" -pass "pass:$CS_SECRETS_PASSWORD"
+}
+
 # ============================================================================
 # Backend detection
 # ============================================================================
@@ -306,6 +338,82 @@ test_help_shows_usage() {
 }
 
 # ============================================================================
+# Per-machine sync files (export-file / import-file)
+# ============================================================================
+
+test_export_file_writes_per_machine_enc() {
+    local meta="$CS_SESSIONS_ROOT/test-session/.cs"
+    "$CS_SECRETS_BIN" set api_key "sk_123" >/dev/null 2>&1
+    PATH="$(_ageless_path)" "$CS_SECRETS_BIN" export-file >/dev/null 2>&1
+    local mid
+    mid=$(_machine_id)
+    assert_file_exists "$meta/secrets.${mid}.enc" "export-file must write a per-machine sync file" || return 1
+    assert_file_not_exists "$meta/secrets.enc" "export-file must NOT write the shared/unsuffixed name" || return 1
+}
+
+test_export_file_skips_rewrite_when_unchanged() {
+    local meta="$CS_SESSIONS_ROOT/test-session/.cs"
+    local mid
+    mid=$(_machine_id)
+    local f="$meta/secrets.${mid}.enc"
+    "$CS_SECRETS_BIN" set api_key "sk_123" >/dev/null 2>&1
+    PATH="$(_ageless_path)" "$CS_SECRETS_BIN" export-file >/dev/null 2>&1
+    assert_file_exists "$f" "first export should create the file" || return 1
+    cp "$f" "$TEST_TMPDIR/before.enc"
+    # Re-export with an unchanged store: bytes must be identical (no random-salt churn).
+    PATH="$(_ageless_path)" "$CS_SECRETS_BIN" export-file >/dev/null 2>&1
+    if ! cmp -s "$f" "$TEST_TMPDIR/before.enc"; then
+        echo "  FAIL: unchanged re-export rewrote the sync file (byte churn)"
+        return 1
+    fi
+}
+
+test_export_file_rewrites_when_changed() {
+    local meta="$CS_SESSIONS_ROOT/test-session/.cs"
+    local mid
+    mid=$(_machine_id)
+    local f="$meta/secrets.${mid}.enc"
+    "$CS_SECRETS_BIN" set api_key "sk_123" >/dev/null 2>&1
+    PATH="$(_ageless_path)" "$CS_SECRETS_BIN" export-file >/dev/null 2>&1
+    cp "$f" "$TEST_TMPDIR/before.enc"
+    "$CS_SECRETS_BIN" set api_key "sk_changed" >/dev/null 2>&1
+    PATH="$(_ageless_path)" "$CS_SECRETS_BIN" export-file >/dev/null 2>&1
+    if cmp -s "$f" "$TEST_TMPDIR/before.enc"; then
+        echo "  FAIL: changed store did not rewrite the sync file"
+        return 1
+    fi
+    local dec
+    dec=$(openssl enc -aes-256-cbc -d -pbkdf2 -iter 100000 -in "$f" -pass "pass:$CS_SECRETS_PASSWORD" 2>/dev/null)
+    assert_output_contains "$dec" "sk_changed" "re-export should contain the updated value" || return 1
+}
+
+test_import_file_merges_all_machines_and_legacy() {
+    local meta="$CS_SESSIONS_ROOT/test-session/.cs"
+    _seed_enc_sync_file "$meta/secrets.machine-b.enc" '{"from_machine_b":"vb"}'
+    _seed_enc_sync_file "$meta/secrets.enc" '{"from_legacy":"vl"}'
+    # A locally pre-existing secret must survive a merge import.
+    "$CS_SECRETS_BIN" set local_key "vlocal" >/dev/null 2>&1
+
+    PATH="$(_ageless_path)" "$CS_SECRETS_BIN" import-file >/dev/null 2>&1
+
+    assert_eq "vb" "$("$CS_SECRETS_BIN" get from_machine_b 2>&1)" "should import per-machine sync file" || return 1
+    assert_eq "vl" "$("$CS_SECRETS_BIN" get from_legacy 2>&1)" "should import legacy unsuffixed sync file" || return 1
+    assert_eq "vlocal" "$("$CS_SECRETS_BIN" get local_key 2>&1)" "merge import should preserve local secrets" || return 1
+}
+
+test_import_file_skips_undecryptable_files() {
+    local meta="$CS_SESSIONS_ROOT/test-session/.cs"
+    _seed_enc_sync_file "$meta/secrets.machine-a.enc" '{"good_key":"vg"}'
+    # An .age file we cannot decrypt (no age binary under the sandbox, bogus bytes).
+    mkdir -p "$meta"
+    printf 'not-a-valid-age-file' > "$meta/secrets.machine-a.age"
+
+    PATH="$(_ageless_path)" "$CS_SECRETS_BIN" import-file >/dev/null 2>&1
+
+    assert_eq "vg" "$("$CS_SECRETS_BIN" get good_key 2>&1)" "should import the decryptable file despite an undecryptable one" || return 1
+}
+
+# ============================================================================
 # Runner
 # ============================================================================
 
@@ -359,5 +467,12 @@ run_test test_rm_alias_works
 run_test test_session_flag_overrides_env
 run_test test_no_session_errors
 run_test test_help_shows_usage
+
+# Per-machine sync files
+run_test test_export_file_writes_per_machine_enc
+run_test test_export_file_skips_rewrite_when_unchanged
+run_test test_export_file_rewrites_when_changed
+run_test test_import_file_merges_all_machines_and_legacy
+run_test test_import_file_skips_undecryptable_files
 
 report_results
