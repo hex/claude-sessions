@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: PostToolUse hook that autosaves to a shadow git ref on every Write/Edit
-# ABOUTME: Crash recovery for all session files via refs/cs/auto, logs narrative edits
+# ABOUTME: Crash recovery for all session files via refs/worktree/cs/auto, logs narrative edits
 
 set -euo pipefail
 
@@ -15,8 +15,8 @@ if [ -z "$SESSION_DIR" ] || [ ! -d "$SESSION_DIR" ]; then
     exit 0
 fi
 
-# Check if session has git repo
-if [ ! -d "$SESSION_DIR/.git" ]; then
+# Check if session has git repo (worktree-tolerant: .git may be a file)
+if ! git -C "$SESSION_DIR" rev-parse --git-dir >/dev/null 2>&1; then
     exit 0
 fi
 
@@ -73,14 +73,16 @@ autosave_to_shadow_ref() {
     rm -f "$TEMP_INDEX"
 
     # Chain onto previous autosave if it exists
-    parent=$(git rev-parse -q --verify refs/cs/auto 2>/dev/null || true)
+    parent=$(git rev-parse -q --verify refs/worktree/cs/auto 2>/dev/null || true)
     if [ -n "$parent" ]; then
         commit=$(echo "autosave: $TIMESTAMP" | git commit-tree "$tree" -p "$parent" 2>/dev/null) || return 0
     else
         commit=$(echo "autosave: $TIMESTAMP" | git commit-tree "$tree" 2>/dev/null) || return 0
     fi
 
-    git update-ref refs/cs/auto "$commit" 2>/dev/null || return 0
+    git update-ref refs/worktree/cs/auto "$commit" 2>/dev/null || return 0
+    # One-time cleanup of the pre-namespaced ref
+    git update-ref -d refs/cs/auto 2>/dev/null || true
 
     if [ -n "$LATEST_ENTRY" ]; then
         echo "[$TIMESTAMP] Autosave: $LATEST_ENTRY" >> "$META_DIR/logs/session.log"

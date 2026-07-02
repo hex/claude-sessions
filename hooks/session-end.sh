@@ -73,8 +73,10 @@ if [ "$ARTIFACT_COUNT" -gt 0 ] && [ "$SOURCE" != "sigint" ]; then
     fi
 fi
 
-# Delete shadow autosave ref (no longer needed after clean session end)
-if [ -d "$SESSION_DIR/.git" ]; then
+# Delete shadow autosave refs (no longer needed after clean session end);
+# refs/worktree/* deletion only affects this checkout's ref.
+if git -C "$SESSION_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+    git -C "$SESSION_DIR" update-ref -d refs/worktree/cs/auto 2>/dev/null || true
     git -C "$SESSION_DIR" update-ref -d refs/cs/auto 2>/dev/null || true
 fi
 
