@@ -661,6 +661,90 @@ cs_split_worktree_name() {
     return 0
 }
 
+# Create the .cs/ skeleton inside a worktree whose repo does not track .cs/
+# (ignored mode). Leaves the checkout's CLAUDE.md alone — in these repos it
+# is the project's own tracked file.
+bootstrap_worktree_meta() {
+    local wt_dir="$1" base_name="$2" task="$3"
+    mkdir -p "$wt_dir/.cs"/{artifacts,logs,local,memory}
+    cat > "$wt_dir/.cs/README.md" << EOF
+---
+status: active
+created: $(date '+%Y-%m-%d')
+tags: [worktree]
+aliases: ["$base_name@$task"]
+---
+# Session: $base_name@$task
+
+Task worktree of session '$base_name' on branch cs/$task.
+
+## Objective
+
+[Describe this task]
+EOF
+    echo "[]" > "$wt_dir/.cs/artifacts/MANIFEST.json"
+    cat > "$wt_dir/.cs/logs/session.log" << EOF
+Claude Code Session Log
+Session: $base_name@$task
+Started: $(date '+%Y-%m-%d %H:%M:%S')
+
+================================================================================
+
+EOF
+    ensure_narrative_file "$wt_dir"
+}
+
+# Create a linked git worktree of a base session as a sibling session dir.
+# Refuses on dirty tracked files (a worktree materializes committed state
+# only). Prints the new worktree path.
+create_worktree_session() {
+    local base_dir="$1" base_name="$2" task="$3"
+    local wt_dir="$SESSIONS_ROOT/$base_name@$task"
+    local branch="cs/$task"
+
+    if ! git -C "$base_dir" rev-parse --git-dir >/dev/null 2>&1; then
+        error "Session '$base_name' has no git repo; worktrees need one"
+    fi
+    if [ -f "$base_dir/.git" ]; then
+        error "Session '$base_name' is itself a worktree; create tasks from the main checkout"
+    fi
+    if ! git -C "$base_dir" diff --quiet 2>/dev/null \
+        || ! git -C "$base_dir" diff --cached --quiet 2>/dev/null; then
+        error "Session '$base_name' has uncommitted changes; commit them first (a worktree materializes committed state only)"
+    fi
+    local untracked
+    untracked=$(git -C "$base_dir" ls-files --others --exclude-standard 2>/dev/null | head -5 || true)
+    if [ -n "$untracked" ]; then
+        warn "Untracked files will not appear in the worktree:"
+        printf '%s\n' "$untracked" >&2
+    fi
+
+    if git -C "$base_dir" rev-parse -q --verify "refs/heads/$branch" >/dev/null 2>&1; then
+        git -C "$base_dir" worktree add "$wt_dir" "$branch" >/dev/null 2>&1 \
+            || error "git worktree add failed (is branch '$branch' checked out in another worktree?)"
+    else
+        git -C "$base_dir" worktree add -b "$branch" "$wt_dir" >/dev/null 2>&1 \
+            || error "git worktree add failed"
+    fi
+
+    local mode="tracked"
+    if [ -z "$(git -C "$base_dir" ls-files -- .cs 2>/dev/null)" ]; then
+        mode="ignored"
+        bootstrap_worktree_meta "$wt_dir" "$base_name" "$task"
+    fi
+
+    local state="$wt_dir/.cs/local/state"
+    _set_local_state "$state" claude_session_id "$(_alloc_uuid)"
+    _set_local_state "$state" claude_session_color "$(_alloc_random_color)"
+    _set_local_state "$state" task_branch "$branch"
+    _set_local_state "$state" cs_mode "$mode"
+    _set_local_state "$state" cs_base "$base_name"
+
+    setup_auto_memory "$wt_dir"
+
+    echo "$wt_dir"
+}
+
 # Ensure auto memory directory exists and migrate from default location
 setup_auto_memory() {
     local session_dir="$1"
@@ -3284,8 +3368,28 @@ main() {
     fi
     local is_new="false"
 
-    # Create session structure if needed
-    if [ ! -d "$session_dir" ]; then
+    if [ -n "$wt_base" ]; then
+        # Worktree session: create from the base, or open the existing one.
+        local base_dir="$SESSIONS_ROOT/$wt_base"
+        if [ ! -e "$base_dir" ]; then
+            error "Base session not found: $wt_base"
+        fi
+        if [ -L "$base_dir" ]; then
+            base_dir="$(readlink -f "$base_dir")"
+        fi
+        if [ ! -d "$session_dir" ]; then
+            is_new="true"
+            session_dir=$(create_worktree_session "$base_dir" "$wt_base" "$wt_task")
+        else
+            local pinned head_branch
+            pinned=$(_read_local_state "$session_dir/.cs/local/state" task_branch)
+            head_branch=$(git -C "$session_dir" branch --show-current 2>/dev/null || echo "")
+            if [ -n "$pinned" ] && [ "$head_branch" != "$pinned" ]; then
+                warn "Worktree HEAD is '$head_branch' but this task expects '$pinned' (did something run git switch here?)"
+            fi
+            migrate_session "$session_dir"
+        fi
+    elif [ ! -d "$session_dir" ]; then
         is_new="true"
         create_session_structure "$session_dir"
 
