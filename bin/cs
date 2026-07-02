@@ -740,10 +740,19 @@ migrate_discoveries_to_narrative() {
 
     ensure_narrative_file "$session_dir"
     local narrative="$meta/memory/narrative.$(cs_actor_slug "$session_dir").md"
+    # Date the fold from shared git history, not the local clock: two clones
+    # folding the same legacy file must produce byte-identical blocks so a
+    # later merge collapses them instead of conflicting.
+    local fold_date
+    fold_date=$(git -C "$session_dir" log -1 --format=%as -- .cs/discoveries.md 2>/dev/null || true)
     {
         if [ -n "$disc_body" ]; then
             echo ""
-            echo "## Folded from discoveries.md ($(date '+%Y-%m-%d'))"
+            if [ -n "$fold_date" ]; then
+                echo "## Folded from discoveries.md ($fold_date)"
+            else
+                echo "## Folded from discoveries.md"
+            fi
             echo ""
             cat "$disc"
         fi
@@ -1062,12 +1071,18 @@ cmd_who() {
 # machines write independently. The Claude-Code-maintained memory index gets
 # merge=ours (it is hand-maintained; two branches editing it would conflict,
 # and the local copy re-accumulates entries through normal use). The
-# append-only log and timeline get merge=union (git's built-in driver, no
-# per-clone config) so divergent per-machine appends keep both sides.
+# append-only log, timeline, and per-actor narratives get merge=union (git's
+# built-in driver, no per-clone config) so divergent appends keep both sides.
+# The artifact manifest is a JSON array, which union would corrupt; it gets a
+# jq-based driver (configured per clone, like merge.ours) that combines both
+# sides' entries and dedups on filename+timestamp.
 setup_merge_attributes() {
     local dir="$1"
     [ -d "$dir/.git" ] || return 0
     git -C "$dir" config merge.ours.driver true 2>/dev/null || true
+    git -C "$dir" config merge.manifest.driver \
+        'jq -s ".[0] + .[1] | unique_by([.filename, .timestamp]) | sort_by(.timestamp)" %A %B > %A.csmerge && mv %A.csmerge %A' \
+        2>/dev/null || true
     local ga="$dir/.gitattributes"
     if ! grep -q 'MEMORY\.md merge=ours' "$ga" 2>/dev/null; then
         printf '.cs/memory/MEMORY.md merge=ours\n' >> "$ga"
@@ -1077,6 +1092,12 @@ setup_merge_attributes() {
     fi
     if ! grep -q 'timeline\.jsonl merge=union' "$ga" 2>/dev/null; then
         printf '.cs/timeline.jsonl merge=union\n' >> "$ga"
+    fi
+    if ! grep -q 'narrative\.\*\.md merge=union' "$ga" 2>/dev/null; then
+        printf '.cs/memory/narrative.*.md merge=union\n' >> "$ga"
+    fi
+    if ! grep -q 'MANIFEST\.json merge=manifest' "$ga" 2>/dev/null; then
+        printf '.cs/artifacts/MANIFEST.json merge=manifest\n' >> "$ga"
     fi
 }
 
@@ -1289,9 +1310,16 @@ migrate_session() {
     if [ -f "$readme" ] && ! head -1 "$readme" | grep -q '^---$'; then
         local session_name
         session_name=$(basename "$session_dir")
-        # Derive created date from "Started:" line, fall back to file mtime
+        # Derive created date from the "Started:" line, then from the git
+        # date the README was added (shared history — every clone derives
+        # the same value), then from file mtime (non-git sessions only;
+        # mtime is not preserved across clones so it must never feed a
+        # value that another machine could contradict on merge).
         local created_date
         created_date=$(grep -oE 'Started:\*\* [0-9]{4}-[0-9]{2}-[0-9]{2}' "$readme" 2>/dev/null | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1 || true)
+        if [ -z "$created_date" ]; then
+            created_date=$(git -C "$session_dir" log --diff-filter=A --format=%as -- .cs/README.md 2>/dev/null | tail -1 || true)
+        fi
         if [ -z "$created_date" ]; then
             if [[ "$OSTYPE" == "darwin"* ]]; then
                 created_date=$(stat -f '%Sm' -t '%Y-%m-%d' "$readme" 2>/dev/null || date '+%Y-%m-%d')

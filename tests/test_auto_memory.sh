@@ -299,6 +299,34 @@ EOF
     fi
 }
 
+test_discoveries_fold_header_uses_git_date() {
+    # The fold header date must come from shared git history, not the local
+    # clock — two machines folding the same legacy discoveries.md on
+    # different days would otherwise write divergent blocks into the same
+    # tracked narrative and conflict on merge.
+    local session_dir="$CS_SESSIONS_ROOT/disc-dated"
+    mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
+    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
+    cat > "$session_dir/.cs/discoveries.md" << 'EOF'
+# Discoveries & Notes
+
+## A dated finding
+Dated content.
+EOF
+    echo "# Session" > "$session_dir/CLAUDE.md"
+    (cd "$session_dir" && git init -q && git config user.email t@t \
+        && git config user.name T && git add -A \
+        && GIT_AUTHOR_DATE="2026-01-15T09:00:00" GIT_COMMITTER_DATE="2026-01-15T09:00:00" \
+           git commit -q -m init)
+
+    "$CS_BIN" disc-dated <<< "" 2>&1 || true
+
+    local narrative
+    narrative=$(ls "$session_dir/.cs/memory/"narrative.*.md 2>/dev/null | head -1)
+    assert_file_contains "$narrative" "Folded from discoveries.md (2026-01-15)" \
+        "fold header should carry the git date of discoveries.md, not today" || return 1
+}
+
 test_resume_folds_compact_when_discoveries_header_only() {
     local session_dir="$CS_SESSIONS_ROOT/compact-session"
     mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
@@ -357,6 +385,7 @@ run_test test_new_session_creates_narrative_file
 run_test test_new_session_adds_narrative_pointer
 run_test test_narrative_pointer_idempotent_readd
 run_test test_resume_folds_discoveries_into_narrative
+run_test test_discoveries_fold_header_uses_git_date
 run_test test_resume_folds_compact_when_discoveries_header_only
 
 report_results
