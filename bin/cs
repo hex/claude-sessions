@@ -1058,16 +1058,25 @@ cmd_who() {
         | sort -rn
 }
 
-# Configure a conflict-free merge for the Claude-Code-maintained memory index.
-# The index is hand-maintained, so two branches editing it would conflict;
-# merge=ours keeps the local copy (new entries are re-added by normal use).
-setup_memory_merge_driver() {
+# Configure conflict-free merges for the session files that multiple
+# machines write independently. The Claude-Code-maintained memory index gets
+# merge=ours (it is hand-maintained; two branches editing it would conflict,
+# and the local copy re-accumulates entries through normal use). The
+# append-only log and timeline get merge=union (git's built-in driver, no
+# per-clone config) so divergent per-machine appends keep both sides.
+setup_merge_attributes() {
     local dir="$1"
     [ -d "$dir/.git" ] || return 0
     git -C "$dir" config merge.ours.driver true 2>/dev/null || true
     local ga="$dir/.gitattributes"
     if ! grep -q 'MEMORY\.md merge=ours' "$ga" 2>/dev/null; then
         printf '.cs/memory/MEMORY.md merge=ours\n' >> "$ga"
+    fi
+    if ! grep -q 'session\.log merge=union' "$ga" 2>/dev/null; then
+        printf '.cs/logs/session.log merge=union\n' >> "$ga"
+    fi
+    if ! grep -q 'timeline\.jsonl merge=union' "$ga" 2>/dev/null; then
+        printf '.cs/timeline.jsonl merge=union\n' >> "$ga"
     fi
 }
 
@@ -1198,8 +1207,8 @@ migrate_session() {
     # Per-actor local state must never be committed; refuse if it has been.
     cs_assert_local_untracked "$session_dir"
 
-    # Backfill the memory-index merge driver on existing sessions.
-    setup_memory_merge_driver "$session_dir"
+    # Backfill the merge attributes on existing sessions.
+    setup_merge_attributes "$session_dir"
 
     # Backfill the .cs/local/ ignore rule on older sessions whose .gitignore
     # predates it, so per-actor local state never gets committed (which would
@@ -2808,7 +2817,7 @@ adopt_session() {
             create_session_gitignore "$target_dir"
             git init -q 2>/dev/null || true
             git branch -M main 2>/dev/null || true
-            setup_memory_merge_driver "$target_dir"
+            setup_merge_attributes "$target_dir"
             git add -A 2>/dev/null || true
             git commit -q -m "Adopt as cs session: $session_name" 2>/dev/null || true
         )
@@ -2819,7 +2828,7 @@ adopt_session() {
         # Commit the adoption
         (
             cd "$target_dir" || exit 0
-            setup_memory_merge_driver "$target_dir"
+            setup_merge_attributes "$target_dir"
             git add .cs/ CLAUDE.md .gitignore .gitattributes 2>/dev/null || true
             if ! git diff --cached --quiet 2>/dev/null; then
                 git commit -q -m "Adopt as cs session: $session_name" 2>/dev/null || true
@@ -3228,7 +3237,7 @@ main() {
             create_session_gitignore "$session_dir"
             git init -q 2>/dev/null || true
             git branch -M main 2>/dev/null || true
-            setup_memory_merge_driver "$session_dir"
+            setup_merge_attributes "$session_dir"
             git add -A 2>/dev/null || true
             git commit -q -m "Initial session structure" 2>/dev/null || true
         )

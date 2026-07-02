@@ -226,6 +226,55 @@ test_session_end_leaves_readme_untouched() {
 }
 
 # ============================================================================
+# Cycle 6: append-only session files (logs, timeline) carry a union merge
+# attribute so divergent per-machine appends merge without conflict
+# ============================================================================
+
+test_union_merge_attributes_written() {
+    "$CS_BIN" state-session <<< "" >/dev/null 2>&1 || true
+
+    local ga="$CS_SESSIONS_ROOT/state-session/.gitattributes"
+    assert_file_contains "$ga" ".cs/logs/session.log merge=union" \
+        "session.log should merge with the union driver" || return 1
+    assert_file_contains "$ga" ".cs/timeline.jsonl merge=union" \
+        "timeline.jsonl should merge with the union driver" || return 1
+}
+
+test_divergent_appends_merge_clean() {
+    # Two machines share one session through git; each appends its own log
+    # and timeline lines. The merge must keep both sides without conflict.
+    "$CS_BIN" state-session <<< "" >/dev/null 2>&1 || true
+    local origin_dir="$CS_SESSIONS_ROOT/state-session"
+    (cd "$origin_dir" && git init -q -b main && git config user.email a@x \
+        && git config user.name A && git add -A && git commit -q -m seed)
+
+    local clone_a="$TEST_TMPDIR/clone-a" clone_b="$TEST_TMPDIR/clone-b"
+    git clone -q "$origin_dir" "$clone_a"
+    git clone -q "$origin_dir" "$clone_b"
+
+    echo "2026-07-02 10:00:00 - machine A event" >> "$clone_a/.cs/logs/session.log"
+    echo '{"ts":"2026-07-02T10:00:00Z","event":"started","machine":"A"}' >> "$clone_a/.cs/timeline.jsonl"
+    (cd "$clone_a" && git config user.email a@x && git config user.name A \
+        && git add -A && git commit -q -m "A work")
+
+    echo "2026-07-02 11:00:00 - machine B event" >> "$clone_b/.cs/logs/session.log"
+    echo '{"ts":"2026-07-02T11:00:00Z","event":"started","machine":"B"}' >> "$clone_b/.cs/timeline.jsonl"
+    (cd "$clone_b" && git config user.email b@x && git config user.name B \
+        && git add -A && git commit -q -m "B work")
+
+    (cd "$clone_b" && git fetch -q "$clone_a" main && git merge -q --no-edit FETCH_HEAD >/dev/null 2>&1) || {
+        echo "  FAIL: divergent appends should merge without conflict"
+        (cd "$clone_b" && git status --short | head -5)
+        return 1
+    }
+
+    assert_file_contains "$clone_b/.cs/logs/session.log" "machine A event" || return 1
+    assert_file_contains "$clone_b/.cs/logs/session.log" "machine B event" || return 1
+    assert_file_contains "$clone_b/.cs/timeline.jsonl" '"machine":"A"' || return 1
+    assert_file_contains "$clone_b/.cs/timeline.jsonl" '"machine":"B"' || return 1
+}
+
+# ============================================================================
 
 run_test test_new_session_records_state_in_local_not_readme
 run_test test_resume_leaves_readme_untouched
@@ -233,4 +282,6 @@ run_test test_migration_moves_fields_from_readme_to_local_state
 run_test test_session_start_rebinds_uuid_in_local_state
 run_test test_session_start_writes_last_resumed_to_local_state
 run_test test_session_end_leaves_readme_untouched
+run_test test_union_merge_attributes_written
+run_test test_divergent_appends_merge_clean
 report_results
