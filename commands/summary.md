@@ -1,3 +1,7 @@
+---
+model: claude-sonnet-5
+---
+
 Generate an intelligent summary of this cs session by synthesizing all documentation files.
 
 You are working in a cs session. Your task is to create a comprehensive summary of the entire session by reading and synthesizing all documentation files.

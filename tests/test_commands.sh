@@ -63,6 +63,20 @@ test_sweep_updates_memory_index() {
         "sweep.md must instruct updating the MEMORY.md index after writing an entry" || return 1
 }
 
+test_wrap_family_pinned_to_sonnet() {
+    # The wrap/sweep/summary passes are distillation work, not development;
+    # they run on Sonnet so a wrap never burns the heavyweight model.
+    local cmd
+    for cmd in wrap.md sweep.md summary.md; do
+        assert_file_contains "$COMMANDS_DIR/$cmd" "^model: claude-sonnet-5" \
+            "$cmd must pin model: claude-sonnet-5 in frontmatter" || return 1
+        if [ "$(head -1 "$COMMANDS_DIR/$cmd")" != "---" ]; then
+            echo "  FAIL: $cmd must open with a YAML frontmatter block"
+            return 1
+        fi
+    done
+}
+
 test_wrap_references_deployed_commands() {
     assert_file_contains "$COMMANDS_DIR/wrap.md" "~/.claude/commands/sweep.md" \
         "wrap.md must reference the deployed sweep.md path" || return 1
@@ -127,6 +141,7 @@ run_test test_store_secret_backend_neutral
 run_test test_no_dangling_bucket_guidance_reference
 run_test test_sweep_owns_bucket_routing_table
 run_test test_sweep_updates_memory_index
+run_test test_wrap_family_pinned_to_sonnet
 run_test test_wrap_references_deployed_commands
 run_test test_wrap_does_not_duplicate_memory_bars
 run_test test_wrap_does_not_duplicate_summary_skeleton

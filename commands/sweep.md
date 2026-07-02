@@ -1,3 +1,7 @@
+---
+model: claude-sonnet-5
+---
+
 Distill the current session into durable auto-memory entries with a strict bar.
 
 You are working in a cs session. Your task is to review the conversation in your current context and write durable facts into the four auto-memory bucket files at `.cs/memory/`.

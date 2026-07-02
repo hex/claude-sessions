@@ -1,3 +1,7 @@
+---
+model: claude-sonnet-5
+---
+
 Wrap up this session: distill durable memory entries, then write a comprehensive summary. Run both passes back-to-back.
 
 You are working in a cs session. The user has signaled they're winding down. Do both passes in order — memory first (so durable facts land in the right place before the narrative absorbs them), summary second (so the narrative reflects the final state including any memory entries just written).
