@@ -24,6 +24,13 @@ MANIFEST.json, `merge=ours` for MEMORY.md — plus untracked machine-local
 "another machine's clone that shares the object store": git materializes the
 tracked half in every checkout and the untracked half stays per-checkout.
 
+One caveat discovered during spec review: not every session tracks `.cs/`. An
+adopted repo may gitignore it wholesale — the cs dev repo itself does
+(.gitignore:18) — so the design defines two modes: **tracked-`.cs`** (state
+forks with the branch, git drivers fuse it at merge) and **ignored-`.cs`**
+(each worktree bootstraps its own untracked `.cs/`; `--merge` fuses records
+explicitly, applying the same semantics the drivers would have).
+
 ## Decisions (approved by Alex 2026-07-02)
 
 1. **One session identity, N worktrees** — not N independent sessions. The
@@ -110,6 +117,31 @@ Then, in the base checkout:
 Manual-merge reconciliation: if the user merged `cs/fix-auth` by hand, `--merge`
 detects "branch already merged" (`git merge-base --is-ancestor`) and skips to
 cleanup (7).
+
+**Ignored-`.cs` repos (e.g. the cs dev repo, .gitignore:18):**
+
+- Create: the worktree materializes without `.cs/`; first open detects this and
+  bootstraps a fresh untracked `.cs/` via the existing
+  `create_session_structure` path (README stub naming the base session and
+  task, fresh `.cs/local/`, empty manifest, narrative file). Full cs tooling
+  works from the first prompt.
+- Merge (replaces step 5's driver reliance for `.cs` records; code still merges
+  via git as normal): `--merge` fuses the worktree's session records into the
+  base's `.cs` explicitly, mirroring driver semantics — append `timeline.jsonl`
+  and `session.log` (union), append per-actor `narrative.*.md` bodies (union),
+  jq-merge `MANIFEST.json` (same dedupe as the driver), copy new memory files
+  and artifacts (skip collisions with a warning; never overwrite). MEMORY.md
+  index lines from the worktree are reported, not merged (parity with
+  merge=ours).
+- The clean-worktree preflight applies to *tracked* files only in these repos;
+  the untracked `.cs/` is consumed by the fuse step and removed with the
+  worktree.
+- Dirty-base preflight at create is unnecessary for `.cs` (nothing to carry)
+  but still applies to project files.
+- Mode detection: `git check-ignore -q .cs` in the base checkout, evaluated at
+  create time and recorded in the worktree's `.cs/local/state`
+  (`cs_mode: ignored`), so open/merge do not re-derive it against a possibly
+  edited .gitignore mid-task.
 
 **Abandon: `cs -rm myproj@fix-auth`**
 
@@ -214,8 +246,11 @@ order worktree-then-branch); rm (unmerged prompt); doctor (dangling,
 merged-but-present, HEAD mismatch). Hook tests extend test_hooks.sh: autosave
 writes refs/worktree/cs/auto in both main and linked checkouts without
 cross-talk; legacy ref migration; artifact-tracker inside-vs-outside path
-guard. All tests drive real `bin/cs` against temp dirs with
-`CLAUDE_CODE_BIN=echo`, per test_lib.sh conventions.
+guard. Ignored-`.cs` mode: create bootstraps fresh `.cs/`; mode recorded in
+local state; `--merge` fuse appends timeline/narrative, jq-merges manifest,
+copies memory/artifacts without overwriting, reports MEMORY.md lines. All
+tests drive real `bin/cs` against temp dirs with `CLAUDE_CODE_BIN=echo`, per
+test_lib.sh conventions.
 
 ## Verified assumptions
 
@@ -224,7 +259,9 @@ guard. All tests drive real `bin/cs` against temp dirs with
 - Linked worktree `.git` is a file containing `gitdir:` — confirmed same
   experiment; the `-d .git` hook guards are dead in worktrees today.
 - `-adopt` commits `.cs/` into existing repos (bin/cs:2861-2867) — worktrees of
-  adopted sessions carry session state.
+  adopted sessions carry session state — UNLESS the repo gitignores `.cs/`,
+  which the cs dev repo itself does (.gitignore:18; discovered 2026-07-02 when
+  a narrative commit was refused). Hence the two-mode design.
 - Conversation transcripts are discovered per encoded cwd
   (`~/.claude/projects/<encoded-path>/`), so each worktree binds its own
   conversation with no changes.
