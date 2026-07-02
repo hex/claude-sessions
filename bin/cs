@@ -818,11 +818,69 @@ merge_worktree_session() {
     info "Merged $branch and removed worktree $base_name@$task"
 }
 
-# Fuse session records from a worktree .cs into the base .cs (ignored mode).
+# Fuse session records from a worktree .cs into the base .cs (ignored mode:
+# the repo does not track .cs/, so git merge cannot carry these). Applies the
+# same semantics the merge drivers give tracked repos: union append for
+# timeline/log/narratives, jq manifest merge, copy-never-overwrite for memory
+# topic files and artifacts, base-wins for MEMORY.md.
 fuse_session_records() {
     local src="$1" dst="$2"
+    local f base
+
     [ -f "$src/timeline.jsonl" ] && cat "$src/timeline.jsonl" >> "$dst/timeline.jsonl"
-    warn "Session-record fuse is partial pending full implementation; review $src manually"
+    if [ -f "$src/logs/session.log" ]; then
+        mkdir -p "$dst/logs"
+        { echo ""; cat "$src/logs/session.log"; } >> "$dst/logs/session.log"
+    fi
+
+    mkdir -p "$dst/memory"
+    for f in "$src"/memory/narrative.*.md; do
+        [ -f "$f" ] || continue
+        base=$(basename "$f")
+        if [ -f "$dst/memory/$base" ]; then
+            # Append the body past the closing --- of the YAML frontmatter
+            awk 'c==2 {print} /^---$/ {c++}' "$f" >> "$dst/memory/$base"
+        else
+            cp "$f" "$dst/memory/$base"
+        fi
+    done
+
+    for f in "$src"/memory/*.md; do
+        [ -f "$f" ] || continue
+        base=$(basename "$f")
+        case "$base" in
+            MEMORY.md) continue ;;
+            narrative.*.md) continue ;;
+        esac
+        if [ -f "$dst/memory/$base" ]; then
+            warn "memory/$base already exists in the base; skipped"
+        else
+            cp "$f" "$dst/memory/$base"
+        fi
+    done
+
+    mkdir -p "$dst/artifacts"
+    for f in "$src"/artifacts/*; do
+        [ -f "$f" ] || continue
+        base=$(basename "$f")
+        [ "$base" = "MANIFEST.json" ] && continue
+        if [ -f "$dst/artifacts/$base" ]; then
+            warn "artifacts/$base already exists in the base; skipped"
+        else
+            cp "$f" "$dst/artifacts/$base"
+        fi
+    done
+    if [ -f "$src/artifacts/MANIFEST.json" ] && [ -f "$dst/artifacts/MANIFEST.json" ]; then
+        jq -s '.[0] + .[1] | unique_by([.filename, .timestamp]) | sort_by(.timestamp)' \
+            "$dst/artifacts/MANIFEST.json" "$src/artifacts/MANIFEST.json" \
+            > "$dst/artifacts/MANIFEST.json.csmerge" 2>/dev/null \
+            && mv "$dst/artifacts/MANIFEST.json.csmerge" "$dst/artifacts/MANIFEST.json" \
+            || rm -f "$dst/artifacts/MANIFEST.json.csmerge"
+    fi
+
+    if [ -f "$src/memory/MEMORY.md" ]; then
+        info "MEMORY.md index lines from the task were not merged (base copy kept)"
+    fi
 }
 
 # Ensure auto memory directory exists and migrate from default location

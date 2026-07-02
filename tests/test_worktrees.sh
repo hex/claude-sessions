@@ -209,4 +209,45 @@ run_test test_merge_tracked_worktree_fuses_and_cleans_up
 run_test test_merge_refuses_dirty_worktree
 run_test test_merge_refuses_live_session
 run_test test_merge_conflict_stops_and_preserves
+
+test_merge_ignored_mode_fuses_records() {
+    local base_dir="$CS_SESSIONS_ROOT/proj"
+    mkdir -p "$base_dir/.cs"/{memory,artifacts,logs,local}
+    echo "[]" > "$base_dir/.cs/artifacts/MANIFEST.json"
+    echo "base note" > "$base_dir/.cs/memory/note-base.md"
+    printf -- '---\ndescription: seed\n---\n# Session narrative (tester)\n\n## Prior finding\n' \
+        > "$base_dir/.cs/memory/narrative.tester.md"
+    echo "# P" > "$base_dir/README.md"
+    printf '.cs/\n' > "$base_dir/.gitignore"
+    (cd "$base_dir" && git init -q && git add -A && git commit -q -m init)
+    cs_launch "proj@t1"
+    local wt="$CS_SESSIONS_ROOT/proj@t1"
+    # Task work: code (committed) + session records (untracked .cs)
+    echo "done" > "$wt/result.txt"
+    (cd "$wt" && git add result.txt && git commit -q -m "task")
+    echo '{"event":"from-task"}' >> "$wt/.cs/timeline.jsonl"
+    echo "task memory" > "$wt/.cs/memory/note-task.md"
+    echo "artifact body" > "$wt/.cs/artifacts/run.sh"
+    echo '[{"filename":"run.sh","timestamp":"2026-07-02T00:00:00Z"}]' \
+        > "$wt/.cs/artifacts/MANIFEST.json"
+    printf -- '---\nname: n\n---\n# Session narrative (tester)\n\n## Task finding\n' \
+        > "$wt/.cs/memory/narrative.tester.md"
+    printf -- '---\nname: other-n\n---\n# Session narrative (other)\n\n## Other finding\n' \
+        > "$wt/.cs/memory/narrative.other.md"
+    "$CS_BIN" "proj" --merge "t1" > /dev/null 2>&1
+    assert_file_contains "$base_dir/.cs/timeline.jsonl" "from-task" "timeline appended" || return 1
+    assert_file_exists "$base_dir/.cs/memory/note-task.md" "memory file copied" || return 1
+    assert_file_exists "$base_dir/.cs/memory/note-base.md" "base memory untouched" || return 1
+    assert_file_exists "$base_dir/.cs/artifacts/run.sh" "artifact copied" || return 1
+    assert_file_contains "$base_dir/.cs/artifacts/MANIFEST.json" "run.sh" "manifest jq-merged" || return 1
+    assert_file_contains "$base_dir/.cs/memory/narrative.tester.md" "Task finding" "narrative body appended" || return 1
+    assert_file_not_contains "$base_dir/.cs/memory/narrative.tester.md" "name: n" "frontmatter not duplicated" || return 1
+    assert_file_contains "$base_dir/.cs/memory/narrative.tester.md" "description: seed" "base frontmatter kept" || return 1
+    assert_file_exists "$base_dir/.cs/memory/narrative.other.md" "unseen narrative copied" || return 1
+    assert_file_contains "$base_dir/.cs/memory/narrative.other.md" "name: other-n" "first copy keeps frontmatter" || return 1
+    assert_not_exists "$wt" "worktree removed" || return 1
+    assert_file_exists "$base_dir/result.txt" "code merged" || return 1
+}
+
+run_test test_merge_ignored_mode_fuses_records
 report_results
