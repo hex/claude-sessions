@@ -25,7 +25,7 @@ _cs_completions() {
     local update_cmds="--check -c --force -f"
 
     # Session-level options
-    local session_opts="-secrets --force"
+    local session_opts="-secrets --force --merge"
 
     # Get list of session names
     _cs_sessions() {

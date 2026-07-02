@@ -304,6 +304,8 @@ Usage: cs <session-name>              Create or resume a session
 Commands:
   <name>              Create or resume session <name> (locks session)
   <name> --force      Override active session lock
+  <base>@<task>       Open a parallel task worktree of session <base>
+  <base> --merge <task>  Merge a task worktree back into <base> and remove it
   <name> -secrets <cmd>  Run secrets command on <name> without launching session
   -search <query>     Search across all sessions (narrative, memory, README)
   -checkpoint "<label>"  Save labelled state snapshot (run from inside a session)
@@ -720,10 +722,10 @@ create_worktree_session() {
     fi
 
     if git -C "$base_dir" rev-parse -q --verify "refs/heads/$branch" >/dev/null 2>&1; then
-        git -C "$base_dir" worktree add "$wt_dir" "$branch" >/dev/null 2>&1 \
+        git -C "$base_dir" worktree add "$wt_dir" "$branch" >/dev/null \
             || error "git worktree add failed (is branch '$branch' checked out in another worktree?)"
     else
-        git -C "$base_dir" worktree add -b "$branch" "$wt_dir" >/dev/null 2>&1 \
+        git -C "$base_dir" worktree add -b "$branch" "$wt_dir" >/dev/null \
             || error "git worktree add failed"
     fi
 
@@ -772,6 +774,12 @@ merge_worktree_session() {
         || ! git -C "$wt_dir" diff --cached --quiet 2>/dev/null; then
         error "Worktree has uncommitted changes; commit them in $wt_dir first (cs never commits for you)"
     fi
+    local wt_untracked
+    wt_untracked=$(git -C "$wt_dir" ls-files --others --exclude-standard 2>/dev/null || true)
+    if [ -n "$wt_untracked" ]; then
+        error "Worktree has untracked files that removal would destroy; commit or remove them first:
+$wt_untracked"
+    fi
     if ! git -C "$base_dir" diff --quiet 2>/dev/null \
         || ! git -C "$base_dir" diff --cached --quiet 2>/dev/null; then
         error "Base session has uncommitted changes; commit them in $base_dir first"
@@ -805,7 +813,7 @@ merge_worktree_session() {
     # --force: the worktree legitimately holds untracked files (.cs/local,
     # settings.local.json, the whole .cs in ignored mode) that our preflight
     # deliberately does not count as dirt.
-    git -C "$base_dir" worktree remove --force "$wt_dir" 2>/dev/null \
+    git -C "$base_dir" worktree remove --force "$wt_dir" \
         || error "git worktree remove failed for $wt_dir"
     git -C "$base_dir" branch -d "$branch" >/dev/null 2>&1 \
         || warn "Branch $branch was not deleted (not fully merged?)"
@@ -2590,7 +2598,7 @@ remove_session() {
                     info "Cancelled"
                     return 0
                 fi
-                git -C "$wt_base_dir" worktree remove --force "$session_dir" 2>/dev/null \
+                git -C "$wt_base_dir" worktree remove --force "$session_dir" \
                     || error "git worktree remove failed for $session_dir"
                 if [ -n "$wt_branch" ] \
                     && git -C "$wt_base_dir" rev-parse -q --verify "refs/heads/$wt_branch" >/dev/null 2>&1; then
@@ -3554,9 +3562,10 @@ main() {
             -secrets)
                 shift
                 export CLAUDE_SESSION_NAME="$session_name"
-                # The named session is the target; a worktree session's
-                # ambient CS_SECRETS_SESSION must not redirect it to the base.
-                export CS_SECRETS_SESSION="$session_name"
+                # Worktree secrets live under the base session's namespace
+                # (no launched session ever uses cs:<base>@<task>:*); a plain
+                # session name is its own target.
+                export CS_SECRETS_SESSION="${wt_base:-$session_name}"
                 export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
                 export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
                 export CLAUDE_ARTIFACT_DIR="$SESSIONS_ROOT/$session_name/.cs/artifacts"
@@ -3574,7 +3583,7 @@ main() {
                 shift
                 ;;
             *)
-                error "Unknown session command: $1. Use -secrets or --force."
+                error "Unknown session command: $1. Use -secrets, --merge, or --force."
                 ;;
         esac
     done

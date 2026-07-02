@@ -221,7 +221,7 @@ test_merge_ignored_mode_fuses_records() {
         > "$base_dir/.cs/memory/narrative.plain.md"
     echo "base artifact" > "$base_dir/.cs/artifacts/shared.sh"
     echo "# P" > "$base_dir/README.md"
-    printf '.cs/\n' > "$base_dir/.gitignore"
+    printf '.cs/\n.claude/settings.local.json\n' > "$base_dir/.gitignore"
     (cd "$base_dir" && git init -q && git add -A && git commit -q -m init)
     cs_launch "proj@t1"
     local wt="$CS_SESSIONS_ROOT/proj@t1"
@@ -322,4 +322,37 @@ test_doctor_fresh_worktree_not_flagged_merged() {
 }
 
 run_test test_doctor_fresh_worktree_not_flagged_merged
+
+test_merge_refuses_untracked_worktree() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "committed" > "$wt/done.txt"
+    (cd "$wt" && git add done.txt && git commit -q -m work)
+    echo "precious" > "$wt/never-added.txt"   # untracked user work
+    local output status=0
+    output=$("$CS_BIN" "myproj" --merge "fix-auth" 2>&1) || status=$?
+    [ "$status" -ne 0 ] || { echo "  FAIL: merge must refuse"; return 1; }
+    assert_output_contains "$output" "untracked" "refusal names the problem" || return 1
+    assert_output_contains "$output" "never-added.txt" "refusal names the exact path" || return 1
+    assert_dir "$wt" "worktree preserved" || return 1
+    assert_eq "precious" "$(cat "$wt/never-added.txt")" "untracked work survives" || return 1
+}
+
+run_test test_merge_refuses_untracked_worktree
+
+test_worktree_secrets_flag_targets_base_namespace() {
+    create_test_session_with_git "myproj" > /dev/null
+    cs_launch "myproj@fix-auth"   # create the worktree first
+    local output
+    output=$("$CS_BIN" "myproj@fix-auth" -secrets list 2>&1)
+    assert_output_contains "$output" "session: myproj" \
+        "worktree -secrets flag must target the base namespace" || return 1
+    assert_output_not_contains "$output" "session: myproj@fix-auth" \
+        "must not target the nonexistent worktree namespace" || return 1
+}
+
+run_test test_worktree_secrets_flag_targets_base_namespace
+
 report_results

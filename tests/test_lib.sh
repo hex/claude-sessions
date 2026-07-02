@@ -202,11 +202,31 @@ create_test_session() {
     echo "$session_dir"
 }
 
-# Create a session with a git repo initialized
+# Create a session with a git repo initialized. Ships the same .gitignore
+# a real `cs <name>` launch writes (see create_session_gitignore in bin/cs)
+# so per-machine state (.cs/local/, *.lock, .claude/settings.local.json)
+# reads as ignored rather than untracked, matching a real base session.
 create_test_session_with_git() {
     local name="$1"
     local session_dir
     session_dir=$(create_test_session "$name")
+    cat > "$session_dir/.gitignore" << 'GITIGNORE'
+*.lock
+*.tmp
+*.bak
+.cs/local/
+.cs/archives/
+.cs/.narrative-reminder-cooldown
+.claude/settings.local.json
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.obsidian/
+*.swp
+*.swo
+*~
+GITIGNORE
     (cd "$session_dir" && git init -q && git add -A && git commit -q -m "init")
     echo "$session_dir"
 }

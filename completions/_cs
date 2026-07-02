@@ -131,6 +131,7 @@ _cs() {
         session_opts=(
             '-secrets:Run secrets command'
             '--force:Override active session lock'
+            '--merge:Merge a task worktree back and remove it'
         )
         _describe 'option' session_opts
         return
