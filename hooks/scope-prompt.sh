@@ -10,6 +10,11 @@ set -uo pipefail
 # Only run inside a cs session.
 [ -n "${CLAUDE_SESSION_NAME:-}" ] || exit 0
 
+# The user is back: drop the statusline's finished-blink marker before any
+# other gate (slash commands and short prompts clear it too).
+[ -n "${CLAUDE_SESSION_META_DIR:-}" ] \
+    && rm -f "$CLAUDE_SESSION_META_DIR/local/attention" 2>/dev/null
+
 # Read the prompt purely as DATA: jq decodes it, and it is only ever fed to other
 # commands as quoted stdin or written to a file via awk ENVIRON — never eval'd or
 # expanded into a shell context.

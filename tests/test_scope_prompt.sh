@@ -96,6 +96,16 @@ seed_repo() {
 # Classifier behaviour (data-driven over the inline corpus snapshot)
 # ============================================================================
 
+test_prompt_clears_attention_marker() {
+    # Any prompt (even a slash command) means the user is back; the
+    # statusline's finished-blink marker must drop immediately.
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    touch "$CLAUDE_SESSION_META_DIR/local/attention"
+    run_hook "/color red" >/dev/null 2>&1 || true
+    assert_file_not_exists "$CLAUDE_SESSION_META_DIR/local/attention" \
+        "a submitted prompt should clear the attention marker" || return 1
+}
+
 test_classifier_fires_emit_scope_block() {
     local line p cat out rc fails=0
     while IFS= read -r line; do
@@ -405,6 +415,7 @@ echo "cs scope-prompt tests"
 echo "====================="
 echo ""
 
+run_test test_prompt_clears_attention_marker
 run_test test_classifier_fires_emit_scope_block
 run_test test_classifier_silent_passthrough
 run_test test_classifier_borderline_fires_as_documented

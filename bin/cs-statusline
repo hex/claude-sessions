@@ -363,9 +363,15 @@ EOF
 # A brand badge: the Claude mark on the Claude-coral background, opening the
 # bar. Icon only, no label; the render's own padding squares it off. The badge
 # is the background, so it is omitted when color is off (plain has none).
+# While the session's attention marker exists (raised by the Stop hook when
+# Claude finishes a turn, cleared on the next prompt) the mark blinks.
 _seg_logo() {
     [ "$LEVEL" = "plain" ] && return 0
-    _add "${ICON_LOGO}" "brand" bold
+    local attr=bold
+    [ -n "${CLAUDE_SESSION_NAME:-}" ] \
+        && [ -f "$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/local/attention" ] \
+        && attr=boldblink
+    _add "${ICON_LOGO}" "brand" "$attr"
 }
 
 _seg_session() {
@@ -565,7 +571,7 @@ _render() {
 
     # Lead with a reset so any residual SGR state from the caller's terminal
     # cannot bleed into the first segment's text.
-    local i out="$reset" bg nbg bgsgr fgtext width=0 lastrgb="" sepbg lead same
+    local i out="$reset" bg nbg bgsgr fgtext width=0 lastrgb="" sepbg lead same blinkon blinkoff
     for ((i = 0; i < n; i++)); do
         bg="${_SEG_BG[i]}"
         _sgr 48 "$bg"; bgsgr="$_SGR"; lastrgb="$_RGB"
@@ -594,13 +600,20 @@ _render() {
         esac
         fgtext="$_SGR"
         if [ -n "${_SEG_BOLD[i]}" ]; then fgtext+=";1"; else fgtext+=";22"; fi
+        # Blink is scoped to the segment text alone (SGR 5 on, 25 off) so it
+        # never leaks into the divider or the next pill the way stateful bold
+        # would; only the attention-flagged logo ever carries it.
+        blinkon=""; blinkoff=""
+        if [ "${_SEG_BOLD[i]}" = "boldblink" ]; then
+            blinkon="${esc}[5m"; blinkoff="${esc}[25m"
+        fi
         # A segment immediately after the logo inherits that boundary's divider
         # cell as its leading pad — the cell already carries this segment's
         # background — so it drops its own leading space to stay symmetric with
         # every other pill. The trailing space is always emitted.
         lead=" "
         [ "$i" -gt 0 ] && [ "${_SEG_BG[i - 1]}" = "brand" ] && lead=""
-        out+="${esc}[${bgsgr};${fgtext}m${lead}${_SEG_TEXT[i]} "
+        out+="${esc}[${bgsgr};${fgtext}m${lead}${blinkon}${_SEG_TEXT[i]}${blinkoff} "
         _display_width "${_SEG_TEXT[i]}"; width=$((width + 1 + ${#lead} + _WIDTH))
         if [ $((i + 1)) -lt "$n" ]; then
             nbg="${_SEG_BG[i + 1]}"

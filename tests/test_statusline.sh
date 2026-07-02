@@ -253,6 +253,34 @@ test_logo_badge_is_brand_coral() {
     assert_output_contains "$out" "48;2;217;119;87" "logo badge should sit on the Claude-coral background" || return 1
 }
 
+test_logo_blinks_while_attention_marker_present() {
+    export COLORTERM=truecolor
+    export CLAUDE_SESSION_NAME="blinksess"
+    make_cs_session "blinksess" 1024 blue
+    mkdir -p "$CS_SESSIONS_ROOT/blinksess/.cs/local"
+    touch "$CS_SESSIONS_ROOT/blinksess/.cs/local/attention"
+    local json='{"session_name":"blinksess","workspace":{"current_dir":"/none"}}'
+    local out
+    out=$(run_sl "$json")
+    # SGR 5 opens right before the glyph and SGR 25 closes right after it,
+    # so the blink never leaks into the divider or the next pill.
+    assert_output_contains "$out" '\[5m✳' \
+        "logo glyph should blink while the attention marker exists" || return 1
+    assert_output_contains "$out" '✳.\[25m' \
+        "blink must be reset immediately after the glyph" || return 1
+}
+
+test_logo_steady_without_attention_marker() {
+    export COLORTERM=truecolor
+    export CLAUDE_SESSION_NAME="steadysess"
+    make_cs_session "steadysess" 1024 blue
+    local json='{"session_name":"steadysess","workspace":{"current_dir":"/none"}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_not_contains "$out" '\[5m' \
+        "logo must not blink without the attention marker" || return 1
+}
+
 test_logo_boundary_gets_thin_darker_coral_hairline() {
     export COLORTERM=truecolor
     # The logo (coral) and a blue session pill are visibly different colors,
@@ -1133,6 +1161,8 @@ run_test test_bg_shade_noop_on_malformed
 run_test test_gauge_uses_bg_derived_surface
 run_test test_gauge_falls_back_to_grey_without_bg
 run_test test_logo_badge_is_brand_coral
+run_test test_logo_blinks_while_attention_marker_present
+run_test test_logo_steady_without_attention_marker
 run_test test_logo_boundary_gets_thin_darker_coral_hairline
 run_test test_segment_after_logo_divider_drops_redundant_leading_pad
 run_test test_logo_divider_survives_orange_session_color_collision

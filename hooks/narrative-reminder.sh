@@ -27,6 +27,14 @@ if [ -z "$SESSION_DIR" ] || [ ! -d "$SESSION_DIR" ]; then
     exit 0
 fi
 
+# Claude just finished a turn: raise the machine-local attention flag the
+# statusline blinks until the user next interacts. Cleared by scope-prompt.sh
+# on the next prompt and by session-start.sh at launch. Lives in .cs/local/
+# (per-machine state, never git-synced). Raised before the cooldown gates so
+# every turn end signals, not just the ones that remind.
+mkdir -p "$META_DIR/local" 2>/dev/null || true
+touch "$META_DIR/local/attention" 2>/dev/null || true
+
 COOLDOWN_FILE="$META_DIR/.narrative-reminder-cooldown"
 COOLDOWN_SECONDS=300  # 5 minutes
 

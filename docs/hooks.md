@@ -6,6 +6,7 @@ The installer configures Claude Code hooks that enable session management featur
 
 Runs when Claude Code starts a session:
 - Logs session start (including source: `startup`, `resume`, `clear`, `compact`) to `.cs/logs/session.log` and appends a `session_start` event to `.cs/timeline.jsonl`
+- On all sources: clears the statusline's finished-blink marker (`.cs/local/attention`) — a fresh session is attended by definition
 - On all sources: rebinds `claude_session_id` in the machine-local `.cs/local/state` to the live conversation UUID from the hook input. Claude Code forks a new UUID when a conversation is continued past the context limit (the old transcript stays on disk), so the recorded binding can silently go stale and `cs` would resume the pre-fork conversation. Non-UUID session ids are ignored; each rebind is logged to `session.log`
 - On `startup`/`resume` only: configures `transfer.hideRefs`, recovers autosaved changes from crashed sessions
 - On `resume` only: injects dynamic context (last activity, recent commits, objective, up to 5 most recently active sibling sessions with their objectives), and a per-actor digest of shared memory/narrative activity since this actor's `.cs/local/watermark` (grouped by git author), then advances the watermark
@@ -36,6 +37,7 @@ Runs after any file modification (Write or Edit), providing crash recovery for a
 ## narrative-reminder.sh (Stop)
 
 Runs when Claude pauses for user input:
+- Raises the statusline's finished-blink marker (`.cs/local/attention`, machine-local) so the Claude logo blinks until the user next interacts; skipped inside subagents
 - Reminds Claude to review and update its per-actor narrative (`.cs/memory/narrative.<actor>.md`, the session lab notebook), keyed on the most recently modified `narrative.*.md`, when it has not been touched recently
 - Cooldown-gated via `.cs/.narrative-reminder-cooldown` (at most once per 5 minutes); no size budget — narratives are native memory topic files that lazy-load
 - Approves silently inside subagents and outside cs sessions, and when the narrative was modified within the cooldown window
@@ -86,7 +88,7 @@ Runs before every Bash tool call (sync, fast):
 
 ## scope-prompt.sh (UserPromptSubmit)
 
-Runs before each user prompt is sent to Claude. Two independent responsibilities:
+Runs before each user prompt is sent to Claude. First it clears the statusline's finished-blink marker (`.cs/local/attention`) — any prompt, including slash commands, means the user is back. Then two independent responsibilities:
 
 **Objective capture.** Records the first substantive prompt of a session as the `## Objective` in `.cs/README.md`, but only while it still holds the unedited template placeholder — so the first real prompt wins, nothing afterwards churns it, and a hand-written objective is never overwritten. Skips slash commands, `!` shell passthrough, and trivially short prompts; collapses to one line and truncates to ~100 chars. The prompt is written via `awk` `ENVIRON` (no escape/replacement processing of arbitrary text), atomically via tmp+rename. Opt-out per-session: `export CS_OBJECTIVE_CAPTURE_DISABLE=1`.
 

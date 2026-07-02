@@ -69,6 +69,22 @@ test_narrative_reminder_tracks_per_actor() {
     assert_output_contains "$output" "narrative.alex.md" "Reminder should point at the per-actor narrative" || return 1
 }
 
+test_stop_raises_attention_marker() {
+    # Turn end raises the machine-local attention flag the statusline blinks
+    # until the user next interacts. Lives in .cs/local/ (never git-synced).
+    rm -rf "$CLAUDE_SESSION_META_DIR/local"
+    echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh" >/dev/null 2>&1 || true
+    assert_file_exists "$CLAUDE_SESSION_META_DIR/local/attention" \
+        "Stop hook should raise the attention marker" || return 1
+}
+
+test_stop_no_attention_marker_for_subagents() {
+    rm -rf "$CLAUDE_SESSION_META_DIR/local"
+    echo '{"agent_id":"sub-1"}' | bash "$HOOKS_DIR/narrative-reminder.sh" >/dev/null 2>&1 || true
+    assert_file_not_exists "$CLAUDE_SESSION_META_DIR/local/attention" \
+        "subagent stops must not raise the attention marker" || return 1
+}
+
 test_narrative_reminder_respects_cooldown() {
     echo "# Session narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
     _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
@@ -516,6 +532,20 @@ seed_recorded_uuid() {
     echo "claude_session_id: $uuid" > "$CLAUDE_SESSION_META_DIR/local/state"
 }
 
+test_session_start_clears_attention_marker() {
+    session_start_setup
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    touch "$CLAUDE_SESSION_META_DIR/local/attention"
+
+    echo '{"session_id":"test","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>&1
+
+    assert_file_not_exists "$CLAUDE_SESSION_META_DIR/local/attention" \
+        "session start should clear a stale attention marker" || { session_start_teardown; return 1; }
+
+    session_start_teardown
+}
+
 test_session_start_rebinds_uuid_to_live_session() {
     session_start_setup
 
@@ -854,6 +884,8 @@ run_test test_narrative_reminder_approves_when_recently_modified
 run_test test_narrative_reminder_blocks_when_stale
 run_test test_narrative_reminder_tracks_per_actor
 run_test test_narrative_reminder_respects_cooldown
+run_test test_stop_raises_attention_marker
+run_test test_stop_no_attention_marker_for_subagents
 run_test test_narrative_reminder_approves_for_subagent
 run_test test_auto_approve_allows_cs_metadata_write
 run_test test_auto_approve_allows_cs_edit
@@ -885,6 +917,7 @@ run_test test_session_start_limits_sibling_count
 run_test test_session_start_updates_last_resumed
 run_test test_session_start_last_resumed_not_set_on_startup
 run_test test_session_start_skips_siblings_on_startup
+run_test test_session_start_clears_attention_marker
 run_test test_session_start_rebinds_uuid_to_live_session
 run_test test_session_start_rebinds_uuid_on_startup
 run_test test_session_start_rebind_ignores_invalid_session_id
