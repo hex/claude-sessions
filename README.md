@@ -163,6 +163,18 @@ This converts the current directory into a cs session in place:
 
 Claude Code's [auto memory](https://code.claude.com/docs/en/memory) is redirected into `.cs/memory/` via the `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE` env var (set at launch). This means auto memory is cleaned up with `cs -rm`.
 
+### Sharing a session between machines
+
+Sessions are designed to be shared through git (push/pull the whole session directory). Everything cs writes automatically is partitioned so independent work on two clones merges cleanly:
+
+- **Machine-local state never syncs.** The Claude conversation UUID, session color, and resume timestamps live in gitignored `.cs/local/state` — each machine binds its own conversation. A launch guard refuses to run if `.cs/local/` ever becomes tracked.
+- **Append-only files union-merge.** `session.log`, `timeline.jsonl`, and the per-actor `narrative.*.md` notebooks carry `merge=union` in the session `.gitattributes`, so divergent appends interleave instead of conflicting.
+- **The artifact manifest merges structurally.** `MANIFEST.json` uses a jq merge driver (configured per clone on every cs launch) that combines both sides' entries and dedups them, keeping the JSON valid.
+- **`MEMORY.md` resolves to the local copy** (`merge=ours`); each actor's pointer line is re-added idempotently on the next launch.
+- **What can still conflict is real content**: the README objective/outcome, memory entries, and your project files — places where two humans genuinely disagree and should reconcile by hand.
+
+One caveat: the custom merge drivers (`manifest`, `ours`) are per-clone git config, installed by every `cs <name>` launch. If you pull on a brand-new clone *before* ever launching the session through cs, those two files fall back to ordinary text merges.
+
 ## Slash Commands
 
 - `/wrap` — The canonical end-of-session command: runs the `/sweep` memory pass, then the `/summary` narrative, then the prose gate
