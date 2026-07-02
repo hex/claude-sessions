@@ -2538,6 +2538,35 @@ remove_session() {
         error "Session not found: $session_name"
     fi
 
+    # Worktree sessions: unregister from git, not just delete the directory.
+    case "$session_name" in
+        *@*)
+            local wt_base_name="${session_name%%@*}"
+            local wt_base_dir="$SESSIONS_ROOT/$wt_base_name"
+            [ -L "$wt_base_dir" ] && wt_base_dir="$(readlink -f "$wt_base_dir")"
+            if [ -d "$wt_base_dir" ] && [ -f "$session_dir/.git" ]; then
+                local wt_branch
+                wt_branch=$(_read_local_state "$session_dir/.cs/local/state" task_branch)
+                read -r -p $'\033[0;31mRemove worktree session '"'$session_name'"$'? Uncommitted work in it is discarded. [y/N] \033[0m' confirm
+                if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+                    info "Cancelled"
+                    return 0
+                fi
+                git -C "$wt_base_dir" worktree remove --force "$session_dir" 2>/dev/null \
+                    || error "git worktree remove failed for $session_dir"
+                if [ -n "$wt_branch" ] \
+                    && git -C "$wt_base_dir" rev-parse -q --verify "refs/heads/$wt_branch" >/dev/null 2>&1; then
+                    read -r -p "Delete branch $wt_branch too? [y/N] " confirm
+                    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                        git -C "$wt_base_dir" branch -D "$wt_branch" 2>/dev/null || true
+                    fi
+                fi
+                info "Removed worktree session: $session_name"
+                return 0
+            fi
+            ;;
+    esac
+
     # Confirm deletion
     if [ -L "$session_dir" ]; then
         local target

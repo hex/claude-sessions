@@ -272,4 +272,20 @@ test_merge_ignored_mode_fuses_records() {
 }
 
 run_test test_merge_ignored_mode_fuses_records
+
+test_rm_worktree_unregisters_and_prompts_branch() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    # Confirm removal, decline branch deletion
+    printf 'y\nn\n' | "$CS_BIN" -rm "myproj@fix-auth" > /dev/null 2>&1
+    assert_not_exists "$wt" "worktree dir removed" || return 1
+    git -C "$base_dir" worktree list --porcelain | grep -q "myproj@fix-auth" \
+        && { echo "  FAIL: worktree still registered"; return 1; }
+    assert_eq "  cs/fix-auth" "$(git -C "$base_dir" branch --list cs/fix-auth)" \
+        "branch kept when declined" || return 1
+}
+
+run_test test_rm_worktree_unregisters_and_prompts_branch
 report_results
