@@ -13,6 +13,11 @@ All notable changes to cs are documented here. Release notes are also available 
   `refs/worktree/cs/auto` (legacy `refs/cs/auto` migrates on resume). The
   artifact tracker no longer redirects writes targeting paths outside the
   session checkout. Doctor gains worktree health checks.
+- **Lock-collision menu** — typing `cs <name>` while that session is open
+  now offers to start a parallel task worktree, force a second launch, or
+  cancel, instead of a hard refusal. Creating a task from a dirty base asks
+  for consent interactively (branches from the last commit) and still
+  refuses in scripts.
 
 ## 2026.7.2
 

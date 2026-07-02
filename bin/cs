@@ -367,10 +367,49 @@ warn() {
     echo -e "${YELLOW}$1${NC}"
 }
 
+# Offer a way forward when the session is already open elsewhere: start a
+# parallel task in a worktree, force a second launch into the same checkout,
+# or cancel. Returns only when the user chose force; the new-task choice
+# re-execs cs as <session>@<task>; cancel exits 0. Worktree sessions get no
+# new-task option (tasks always branch from the base). CS_ASSUME_TTY lets
+# tests drive the menu with piped stdin.
+_lock_collision_menu() {
+    local session_name="$1" lock_pid="$2"
+    local choice="" task=""
+    echo -e "${YELLOW}Session '$session_name' is already open (PID $lock_pid).${NC}"
+    case "$session_name" in
+        *@*) ;;
+        *) echo "  [n] start a parallel task in a worktree (cs $session_name@<task>)" ;;
+    esac
+    echo "  [f] force a second launch here (two sessions will share one checkout)"
+    echo "  [c] cancel (default)"
+    read -r -p "> " choice || choice="c"
+    case "$choice" in
+        [nN])
+            case "$session_name" in
+                *@*) info "Cancelled"; exit 0 ;;
+            esac
+            read -r -p "Task name: " task || task=""
+            if [ -z "$task" ] || ! [[ "$task" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+                error "Task name must contain only alphanumeric characters, hyphens, underscores, and dots"
+            fi
+            exec "$0" "$session_name@$task"
+            ;;
+        [fF])
+            return 0
+            ;;
+        *)
+            info "Cancelled"
+            exit 0
+            ;;
+    esac
+}
+
 # Acquire a PID-based session lock to prevent concurrent access
 acquire_session_lock() {
     local meta_dir="$1"
     local force="${2:-}"
+    local session_name="${3:-$(basename "$(dirname "$meta_dir")")}"
     local lock_file="$meta_dir/session.lock"
 
     if [ -f "$lock_file" ]; then
@@ -381,9 +420,13 @@ acquire_session_lock() {
             # PID is alive — session is in use
             if [ "$force" = "true" ]; then
                 warn "Overriding active session lock (PID $lock_pid)"
+            elif [ -t 0 ] || [ "${CS_ASSUME_TTY:-}" = "1" ]; then
+                _lock_collision_menu "$session_name" "$lock_pid"
+                # The menu returns only when the user chose force
+                warn "Overriding active session lock (PID $lock_pid)"
             else
                 echo -e "${RED}Error: Session is already open (PID $lock_pid)${NC}" >&2
-                echo -e "${DIM}Use --force to override: cs $(basename "$(dirname "$meta_dir")") --force${NC}" >&2
+                echo -e "${DIM}Use --force to override: cs $session_name --force${NC}" >&2
                 exit 1
             fi
         else
@@ -696,9 +739,35 @@ EOF
     ensure_narrative_file "$wt_dir"
 }
 
+# Gate worktree creation on the base checkout's tracked state. Runs in the
+# main shell so a declined consent can exit cs cleanly (the creator is
+# command-substituted, where an exit only leaves the subshell). Clean base
+# returns; dirty base asks for informed consent on interactive terminals
+# (the task branches from the last commit and will not include uncommitted
+# changes) and refuses everywhere else.
+confirm_clean_worktree_base() {
+    local base_dir="$1" base_name="$2"
+    git -C "$base_dir" rev-parse --git-dir >/dev/null 2>&1 || return 0
+    if git -C "$base_dir" diff --quiet 2>/dev/null \
+        && git -C "$base_dir" diff --cached --quiet 2>/dev/null; then
+        return 0
+    fi
+    if [ -t 0 ] || [ "${CS_ASSUME_TTY:-}" = "1" ]; then
+        warn "Session '$base_name' has uncommitted changes; the new task will branch from the last commit and will not include them."
+        local consent=""
+        read -r -p "Continue? [y/N] " consent || consent=""
+        if [[ ! "$consent" =~ ^[Yy]$ ]]; then
+            info "Cancelled"
+            exit 0
+        fi
+    else
+        error "Session '$base_name' has uncommitted changes; commit them first (a worktree materializes committed state only)"
+    fi
+}
+
 # Create a linked git worktree of a base session as a sibling session dir.
-# Refuses on dirty tracked files (a worktree materializes committed state
-# only). Prints the new worktree path.
+# The caller gates dirty base state via confirm_clean_worktree_base. Prints
+# the new worktree path.
 create_worktree_session() {
     local base_dir="$1" base_name="$2" task="$3"
     local wt_dir="$SESSIONS_ROOT/$base_name@$task"
@@ -710,10 +779,8 @@ create_worktree_session() {
     if [ -f "$base_dir/.git" ]; then
         error "Session '$base_name' is itself a worktree; create tasks from the main checkout"
     fi
-    if ! git -C "$base_dir" diff --quiet 2>/dev/null \
-        || ! git -C "$base_dir" diff --cached --quiet 2>/dev/null; then
-        error "Session '$base_name' has uncommitted changes; commit them first (a worktree materializes committed state only)"
-    fi
+    # Dirty-state gating happens in the caller (confirm_clean_worktree_base):
+    # this function runs command-substituted, where an exit cannot stop cs.
     local untracked
     untracked=$(git -C "$base_dir" ls-files --others --exclude-standard 2>/dev/null | head -5 || true)
     if [ -n "$untracked" ]; then
@@ -2847,7 +2914,7 @@ launch_claude_code() {
     local force="${4:-}"
 
     # Acquire session lock before anything else
-    acquire_session_lock "$session_dir/.cs" "$force"
+    acquire_session_lock "$session_dir/.cs" "$force" "$session_name"
     trap 'reset_tab_title; release_session_lock "'"$session_dir/.cs"'"' EXIT
     trap 'reset_tab_title; release_session_lock "'"$session_dir/.cs"'"; exit 130' INT TERM
 
@@ -3613,6 +3680,7 @@ main() {
         fi
         if [ ! -d "$session_dir" ]; then
             is_new="true"
+            confirm_clean_worktree_base "$base_dir" "$wt_base"
             session_dir=$(create_worktree_session "$base_dir" "$wt_base" "$wt_task")
         else
             local pinned head_branch

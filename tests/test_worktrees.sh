@@ -355,4 +355,31 @@ test_worktree_secrets_flag_targets_base_namespace() {
 
 run_test test_worktree_secrets_flag_targets_base_namespace
 
+
+test_worktree_create_dirty_base_consent_yes() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    echo "wip" >> "$base_dir/CLAUDE.md"
+    local output status=0
+    output=$(printf 'y\n' | CS_ASSUME_TTY=1 "$CS_BIN" "myproj@t1" 2>&1) || status=$?
+    assert_eq "0" "$status" "consented creation should launch, got: $output" || return 1
+    assert_dir "$CS_SESSIONS_ROOT/myproj@t1" "worktree created after consent" || return 1
+    assert_file_contains "$CS_SESSIONS_ROOT/myproj@t1/.cs/local/state" "task_branch: cs/t1" \
+        "worktree fully initialized" || return 1
+}
+
+test_worktree_create_dirty_base_consent_no() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    echo "wip" >> "$base_dir/CLAUDE.md"
+    local output status=0
+    output=$(printf 'n\n' | CS_ASSUME_TTY=1 "$CS_BIN" "myproj@t1" 2>&1) || status=$?
+    assert_eq "0" "$status" "declined consent cancels cleanly, got: $output" || return 1
+    assert_output_contains "$output" "Cancelled" "cancel message shown" || return 1
+    assert_not_exists "$CS_SESSIONS_ROOT/myproj@t1" "no worktree without consent" || return 1
+}
+
+run_test test_worktree_create_dirty_base_consent_yes
+run_test test_worktree_create_dirty_base_consent_no
+
 report_results

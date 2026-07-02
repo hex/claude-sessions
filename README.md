@@ -184,14 +184,20 @@ conversation:
     cs myproj@fix-auth     # creates a git worktree of myproj on branch cs/fix-auth
     cs myproj@perf         # a second, independent working copy
 
+You don't have to remember the syntax: typing `cs myproj` while that session
+is already open offers to start a parallel task from right there (or force a
+second launch, or cancel).
+
 Each worktree is a full cs session (own conversation, color, artifacts, crash
 recovery) that shares the base session's task list and secrets. Session
 records fork with the branch and re-fuse at merge:
 
     cs myproj --merge fix-auth   # merge cs/fix-auth, fuse records, remove worktree
 
-cs never commits for you: creation and merge refuse dirty checkouts and tell
-you what to commit. Abandon a task with `cs -rm myproj@fix-auth`. Repos that
+cs never commits for you: merge refuses dirty checkouts and tells you what
+to commit, and creating a task from a base with uncommitted changes asks
+before branching from the last commit (interactive sessions) or refuses
+(scripts). Abandon a task with `cs -rm myproj@fix-auth`. Repos that
 gitignore `.cs/` get a per-worktree `.cs/` whose records are fused explicitly
 at merge. Requires git >= 2.20.
 
