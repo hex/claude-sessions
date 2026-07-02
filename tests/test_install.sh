@@ -380,6 +380,14 @@ test_statusline_enable_registers() {
             return 1
             ;;
     esac
+    # The attention pulse animates on Claude Code's refresh timer; without
+    # refreshInterval the bar only repaints on events and freezes when idle.
+    local interval
+    interval=$(jq -r '.statusLine.refreshInterval // ""' "$fake_home/.claude/settings.json")
+    if [ "$interval" != "1" ]; then
+        echo "  FAIL: enable should register refreshInterval 1 (got '$interval')"
+        return 1
+    fi
 }
 
 test_statusline_disable_strips_only_ours() {

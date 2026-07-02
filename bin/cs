@@ -2345,7 +2345,9 @@ run_statusline_cmd() {
             [ -f "$settings" ] || echo '{}' > "$settings"
             local _tmp
             _tmp=$(mktemp)
-            if jq --arg cmd "$bin" '.statusLine = {type: "command", command: $cmd}' \
+            # refreshInterval keeps the bar repainting once a second while
+            # idle; the logo's attention pulse animates on that timer.
+            if jq --arg cmd "$bin" '.statusLine = {type: "command", command: $cmd, refreshInterval: 1}' \
                 "$settings" > "$_tmp" 2>/dev/null; then
                 mv "$_tmp" "$settings"
                 info "Registered cs-statusline as the Claude Code status line"

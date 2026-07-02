@@ -364,7 +364,7 @@ EOF
 # bar. Icon only, no label; the render's own padding squares it off. The badge
 # is the background, so it is omitted when color is off (plain has none).
 # While the session's attention marker exists (raised by the Stop hook when
-# Claude finishes a turn, cleared on the next prompt) the mark holds amber.
+# Claude finishes a turn, cleared on the next prompt) the mark's color pulses.
 _seg_logo() {
     [ "$LEVEL" = "plain" ] && return 0
     local attr=bold
@@ -571,7 +571,7 @@ _render() {
 
     # Lead with a reset so any residual SGR state from the caller's terminal
     # cannot bleed into the first segment's text.
-    local i out="$reset" bg nbg bgsgr fgtext width=0 lastrgb="" sepbg lead same
+    local i out="$reset" bg nbg bgsgr fgtext width=0 lastrgb="" sepbg lead same pulse
     for ((i = 0; i < n; i++)); do
         bg="${_SEG_BG[i]}"
         _sgr 48 "$bg"; bgsgr="$_SGR"; lastrgb="$_RGB"
@@ -597,14 +597,20 @@ _render() {
                 fi ;;
             *)
                 # Claude Code's TUI re-emits only bold/fg/bg from the
-                # statusline's ANSI (terminal blink never reaches the screen)
-                # and stops repainting once the bar is idle (any animation
-                # freezes at an arbitrary frame). The attention signal is
-                # therefore a steady state: the flagged mark holds amber, the
-                # bar's attention accent, until the user's next prompt drops
-                # the marker.
+                # statusline's ANSI, so terminal blink (SGR 5) never reaches
+                # the screen. The attention pulse is software-driven instead:
+                # the flagged mark alternates chiptext/brandshade by epoch-
+                # second parity, and the statusLine registration's
+                # refreshInterval repaints the bar every second while idle so
+                # the phase keeps advancing. CS_STATUSLINE_NOW pins the clock
+                # for tests.
                 if [ "${_SEG_BOLD[i]}" = "boldattention" ]; then
-                    _sgr 38 amber
+                    pulse="${CS_STATUSLINE_NOW:-}"
+                    if [ -z "$pulse" ]; then
+                        printf -v pulse '%(%s)T' -1 2>/dev/null
+                        [[ "${pulse:-}" =~ ^[0-9]+$ ]] || pulse=$(date +%s 2>/dev/null) || pulse=0
+                    fi
+                    if [ $(( pulse % 2 )) -eq 1 ]; then _sgr 38 brandshade; else _sgr 38 chiptext; fi
                 elif [ -n "${_SEG_BOLD[i]}" ]; then _sgr 38 chiptext; else _sgr 38 white; fi ;;
         esac
         fgtext="$_SGR"

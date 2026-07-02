@@ -253,12 +253,13 @@ test_logo_badge_is_brand_coral() {
     assert_output_contains "$out" "48;2;217;119;87" "logo badge should sit on the Claude-coral background" || return 1
 }
 
-# Claude Code's TUI parses the statusline ANSI and re-emits only bold/fg/bg
-# (terminal blink is dropped), and its repaints stop once the bar is truly
-# idle (any animation freezes at an arbitrary frame). The attention signal is
-# therefore a steady state: while the marker exists the mark holds amber,
-# reverting to chiptext when the user returns.
-test_logo_mark_turns_amber_with_attention_marker() {
+# Claude Code's TUI parses the statusline ANSI and re-emits only bold/fg/bg,
+# so terminal blink (SGR 5) can never reach the screen. The pulse is instead
+# software-driven: while the attention marker exists the mark's foreground
+# alternates chiptext/brandshade by epoch-second parity, and the statusLine
+# registration's refreshInterval repaints the bar every second while idle so
+# the phase keeps advancing. CS_STATUSLINE_NOW pins the clock for tests.
+test_logo_pulses_bright_phase_with_attention_marker() {
     export COLORTERM=truecolor
     export CLAUDE_SESSION_NAME="blinksess"
     make_cs_session "blinksess" 1024 blue
@@ -266,9 +267,22 @@ test_logo_mark_turns_amber_with_attention_marker() {
     touch "$CS_SESSIONS_ROOT/blinksess/.cs/local/attention"
     local json='{"session_name":"blinksess","workspace":{"current_dir":"/none"}}'
     local out
-    out=$(run_sl "$json")
-    assert_output_contains "$out" '255;183;77;1m ✳' \
-        "the mark should hold amber while the attention marker exists" || return 1
+    out=$(CS_STATUSLINE_NOW=1000 run_sl "$json")
+    assert_output_contains "$out" '240;242;255;1m ✳' \
+        "even-second phase should render the mark in chiptext" || return 1
+}
+
+test_logo_pulses_dim_phase_with_attention_marker() {
+    export COLORTERM=truecolor
+    export CLAUDE_SESSION_NAME="blinksess"
+    make_cs_session "blinksess" 1024 blue
+    mkdir -p "$CS_SESSIONS_ROOT/blinksess/.cs/local"
+    touch "$CS_SESSIONS_ROOT/blinksess/.cs/local/attention"
+    local json='{"session_name":"blinksess","workspace":{"current_dir":"/none"}}'
+    local out
+    out=$(CS_STATUSLINE_NOW=1001 run_sl "$json")
+    assert_output_contains "$out" '184;101;74;1m ✳' \
+        "odd-second phase should dim the mark to brandshade" || return 1
 }
 
 test_logo_steady_without_attention_marker() {
@@ -277,9 +291,9 @@ test_logo_steady_without_attention_marker() {
     make_cs_session "steadysess" 1024 blue
     local json='{"session_name":"steadysess","workspace":{"current_dir":"/none"}}'
     local out
-    out=$(run_sl "$json")
+    out=$(CS_STATUSLINE_NOW=1001 run_sl "$json")
     assert_output_contains "$out" '240;242;255;1m ✳' \
-        "without the marker the mark stays chiptext" || return 1
+        "without the marker the mark stays chiptext on every phase" || return 1
 }
 
 test_logo_boundary_gets_thin_darker_coral_hairline() {
@@ -1162,7 +1176,8 @@ run_test test_bg_shade_noop_on_malformed
 run_test test_gauge_uses_bg_derived_surface
 run_test test_gauge_falls_back_to_grey_without_bg
 run_test test_logo_badge_is_brand_coral
-run_test test_logo_mark_turns_amber_with_attention_marker
+run_test test_logo_pulses_bright_phase_with_attention_marker
+run_test test_logo_pulses_dim_phase_with_attention_marker
 run_test test_logo_steady_without_attention_marker
 run_test test_logo_boundary_gets_thin_darker_coral_hairline
 run_test test_segment_after_logo_divider_drops_redundant_leading_pad

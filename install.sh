@@ -533,8 +533,10 @@ else
             ;;
     esac
     if [ -n "$_register_statusline" ]; then
+        # refreshInterval keeps the bar repainting once a second while idle;
+        # the logo's attention pulse animates on that timer.
         SETTINGS=$(echo "$SETTINGS" | jq --arg cmd "$_statusline_cmd" \
-            '.statusLine = {type: "command", command: $cmd}')
+            '.statusLine = {type: "command", command: $cmd, refreshInterval: 1}')
         if [ "$_register_statusline" = "1" ]; then
             installed "status line" "cs-statusline"
         fi
