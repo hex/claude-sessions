@@ -715,7 +715,7 @@ create_worktree_session() {
     local untracked
     untracked=$(git -C "$base_dir" ls-files --others --exclude-standard 2>/dev/null | head -5 || true)
     if [ -n "$untracked" ]; then
-        warn "Untracked files will not appear in the worktree:"
+        warn "Untracked files will not appear in the worktree:" >&2
         printf '%s\n' "$untracked" >&2
     fi
 

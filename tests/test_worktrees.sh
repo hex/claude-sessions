@@ -46,8 +46,8 @@ test_worktree_create_tracked_mode() {
     assert_file_contains "$wt/.cs/local/state" "cs_base: myproj"
     # Fresh identity, not the base's
     local base_uuid wt_uuid
-    base_uuid=$(awk -F': ' '/^claude_session_id/{print $2}' "$base_dir/.cs/local/state")
-    wt_uuid=$(awk -F': ' '/^claude_session_id/{print $2}' "$wt/.cs/local/state")
+    base_uuid=$(awk -F': ' '/^claude_session_id/{print $2}' "$base_dir/.cs/local/state" 2>/dev/null)
+    wt_uuid=$(awk -F': ' '/^claude_session_id/{print $2}' "$wt/.cs/local/state" 2>/dev/null)
     [ "$base_uuid" != "$wt_uuid" ] || { echo "  FAIL: worktree must get its own UUID"; return 1; }
 }
 
@@ -95,6 +95,17 @@ test_worktree_of_worktree_refused() {
     assert_output_contains "$output" "task name" "second @ lands in the task half and is rejected"
 }
 
+test_worktree_create_succeeds_with_untracked_base() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    echo "stray" > "$base_dir/stray.txt"   # untracked, must not corrupt the captured path
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    assert_dir "$wt" "worktree created despite untracked file in base"
+    assert_file_contains "$wt/.cs/local/state" "task_branch: cs/fix-auth" \
+        "local state written to the real worktree path"
+}
+
 run_test test_worktree_name_rejected_without_base
 run_test test_worktree_name_rejects_bad_task_half
 run_test test_plain_names_still_work
@@ -103,4 +114,5 @@ run_test test_worktree_create_refuses_dirty_base
 run_test test_worktree_create_reuses_existing_branch
 run_test test_worktree_create_ignored_mode_bootstraps_cs
 run_test test_worktree_of_worktree_refused
+run_test test_worktree_create_succeeds_with_untracked_base
 report_results
