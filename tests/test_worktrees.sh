@@ -293,16 +293,33 @@ test_doctor_flags_dangling_and_merged_worktrees() {
     local base_dir
     base_dir=$(create_test_session_with_git "myproj")
     cs_launch "myproj@done-task"
-    # Simulate a completed-but-unmerged-cleanup state: merge manually
+    # Simulate a completed-but-unmerged-cleanup state: merge manually.
+    # --no-ff so the base HEAD moves past the branch tip; a fast-forward
+    # would leave tip == HEAD, indistinguishable from a fresh worktree.
     (cd "$CS_SESSIONS_ROOT/myproj@done-task" && echo x > f && git add f && git commit -q -m t)
-    (cd "$base_dir" && git merge -q --no-edit cs/done-task)
+    (cd "$base_dir" && git merge -q --no-ff --no-edit cs/done-task)
     # And a dangling dir that git does not know about
     mkdir -p "$CS_SESSIONS_ROOT/myproj@ghost/.cs/local"
     local output
-    output=$(cd "$base_dir" && CLAUDE_SESSION_DIR="$base_dir" "$CS_BIN" -doctor 2>&1 || true)
+    output=$(cd "$base_dir" && CLAUDE_SESSION_DIR="$base_dir" CLAUDE_SESSION_META_DIR="$base_dir/.cs" "$CS_BIN" -doctor 2>&1 || true)
     assert_output_contains "$output" "ghost" "dangling @-dir flagged" || return 1
-    assert_output_contains "$output" "done-task" "merged-but-present worktree flagged" || return 1
+    assert_output_contains "$output" "myproj@done-task branch cs/done-task is fully merged" \
+        "merged-but-present worktree flagged" || return 1
 }
 
 run_test test_doctor_flags_dangling_and_merged_worktrees
+
+test_doctor_fresh_worktree_not_flagged_merged() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fresh-task"
+    local output
+    output=$(cd "$base_dir" && CLAUDE_SESSION_DIR="$base_dir" CLAUDE_SESSION_META_DIR="$base_dir/.cs" "$CS_BIN" -doctor 2>&1 || true)
+    assert_output_not_contains "$output" "fully merged" \
+        "fresh worktree (tip == base HEAD) must not read as merged" || return 1
+    assert_output_contains "$output" "Worktrees: myproj@fresh-task on cs/fresh-task" \
+        "fresh worktree reported OK" || return 1
+}
+
+run_test test_doctor_fresh_worktree_not_flagged_merged
 report_results

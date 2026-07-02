@@ -2229,8 +2229,11 @@ _doctor_check_worktrees() {
             _doctor_warn "Worktrees: $name HEAD is '$head_branch', expected '$pinned'"
             continue
         fi
+        # "Fully merged" needs the tip strictly behind base HEAD: a fresh
+        # worktree's branch sits AT base HEAD, where is-ancestor is also true.
         if [ -n "$pinned" ] \
-            && git -C "$base_dir" merge-base --is-ancestor "$pinned" HEAD 2>/dev/null; then
+            && git -C "$base_dir" merge-base --is-ancestor "$pinned" HEAD 2>/dev/null \
+            && [ "$(git -C "$base_dir" rev-parse "$pinned" 2>/dev/null)" != "$(git -C "$base_dir" rev-parse HEAD 2>/dev/null)" ]; then
             _doctor_warn "Worktrees: $name branch $pinned is fully merged; finish with: cs $base_name --merge ${name#*@}"
         else
             _doctor_ok "Worktrees: $name on ${head_branch:-<detached>}"
