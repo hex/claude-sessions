@@ -36,20 +36,15 @@ tests are guarded; historical suites were never audited.
   `|| true`.
 - Fold in: assert session-end deletes refs/worktree/cs/auto (not just the
   legacy name); META_DIR ambient-env gating gap in 3 doctor checks.
-
-## C: Legacy-ref transition hardening (undecided)
-
-During the one-upgrade window where a pre-upgrade `refs/cs/auto` may still
-exist: (a) a worktree session's crash-recovery fallback can adopt the BASE's
-crash ref and offer to restore the base's snapshot into the worktree checkout;
-(b) whichever checkout autosaves first deletes the shared legacy ref,
-potentially before the base session got its recovery offer.
-
-- Gate the legacy fallback in hooks/session-start.sh to main checkouts only
-  (`[ -d "$SESSION_DIR/.git" ]` — a linked worktree cannot have pre-upgrade
-  history).
-- Add doctor observability for an un-migrated legacy ref.
-- Alternative: accept the one-release exposure window and skip this entirely.
+- Fold in legacy-ref transition hardening (decided 2026-07-02): during the
+  one-upgrade window where a pre-upgrade `refs/cs/auto` may still exist, a
+  worktree session's crash-recovery fallback can adopt the BASE's crash ref
+  and offer to restore the base's snapshot into the worktree checkout, and
+  whichever checkout autosaves first deletes the shared legacy ref before the
+  base got its recovery offer. Gate the legacy fallback in
+  hooks/session-start.sh to main checkouts only (`[ -d "$SESSION_DIR/.git" ]`
+  — a linked worktree cannot have pre-upgrade history) and add doctor
+  observability for an un-migrated legacy ref.
 
 ## Loose ends (small, no branch needed)
 
