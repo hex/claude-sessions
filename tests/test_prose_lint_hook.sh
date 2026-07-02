@@ -103,6 +103,19 @@ test_loop_guard_allows_after_cap() {
     run_hook '{}'; assert_output_contains "$OUT" "approve" "4th attempt allows stop (loop guard)" || return 1
 }
 
+test_attempts_counter_is_machine_local() {
+    # The retry counter is transient per-machine state. It must live under the
+    # gitignored .cs/local/ dir so two machines merging a shared session never
+    # conflict on it, and never under the git-tracked .cs/ root.
+    printf '%s\n' "# Summary" "Slop — persists." > "$CLAUDE_SESSION_META_DIR/summary.md"
+    run_hook '{}'
+    assert_output_contains "$OUT" "block" "slop should block and record a retry attempt" || return 1
+    assert_file_exists "$CLAUDE_SESSION_META_DIR/local/.prose-lint-attempts" \
+        "attempts counter must live under the gitignored .cs/local/ dir" || return 1
+    assert_file_not_exists "$CLAUDE_SESSION_META_DIR/.prose-lint-attempts" \
+        "attempts counter must NOT be written to the git-tracked .cs/ root" || return 1
+}
+
 echo "Running prose-lint hook tests..."
 run_test test_blocks_on_em_dash_in_summary
 run_test test_blocks_on_phrase_in_memory_entry
@@ -116,5 +129,6 @@ run_test test_memory_index_is_excluded
 run_test test_narrative_md_is_excluded
 run_test test_per_actor_narrative_is_excluded
 run_test test_loop_guard_allows_after_cap
+run_test test_attempts_counter_is_machine_local
 
 report_results

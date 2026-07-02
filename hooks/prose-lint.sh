@@ -64,7 +64,9 @@ done
 # Lint this session's prose
 LINT_OUT=$("$CS_CMD" -lint "${TARGETS[@]}" 2>/dev/null) && LINT_RC=0 || LINT_RC=$?
 
-ATTEMPTS_FILE="$META_DIR/.prose-lint-attempts"
+# Machine-local transient state: the retry counter lives under the gitignored
+# .cs/local/ dir so co-developers merging a shared session never conflict on it.
+ATTEMPTS_FILE="$META_DIR/local/.prose-lint-attempts"
 
 # rc 0 = clean, rc 2 = unreadable/usage; only rc 1 (violations) blocks
 if [ "${LINT_RC:-0}" -ne 1 ]; then
@@ -77,6 +79,7 @@ fi
 ATTEMPTS=0
 [ -f "$ATTEMPTS_FILE" ] && ATTEMPTS=$(cat "$ATTEMPTS_FILE" 2>/dev/null || echo 0)
 ATTEMPTS=$((ATTEMPTS + 1))
+mkdir -p "$META_DIR/local" 2>/dev/null || true  # older sessions may lack it
 echo "$ATTEMPTS" > "$ATTEMPTS_FILE"
 if [ "$ATTEMPTS" -gt 3 ]; then
     rm -f "$ATTEMPTS_FILE" 2>/dev/null || true
