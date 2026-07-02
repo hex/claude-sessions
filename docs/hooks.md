@@ -16,7 +16,7 @@ Runs when Claude Code starts a session:
 
 Runs before any file write operation:
 - Detects script and config files by extension
-- Redirects tracked files to `.cs/artifacts/` directory
+- Redirects tracked files to `.cs/artifacts/` — only when the write targets a path inside the session checkout; writes elsewhere (Claude-native worktree sandboxes, `/tmp`, other repos) pass through untouched
 - Updates `.cs/artifacts/MANIFEST.json` with metadata
 - Handles duplicate filenames automatically
 - **Detects and secures sensitive data** (see [Secrets](secrets.md))
@@ -28,7 +28,7 @@ Runs before any file write operation:
 ## autosave-commits.sh (PostToolUse on Write/Edit)
 
 Runs after any file modification (Write or Edit), providing crash recovery for all session files:
-- Autosaves entire working tree to `refs/cs/auto` shadow ref using git plumbing commands
+- Autosaves entire working tree to the `refs/worktree/cs/auto` shadow ref using git plumbing commands (per-checkout, so parallel worktree sessions never clobber each other; a legacy `refs/cs/auto` is cleaned up after the first successful write)
 - Does not create commits on `main` or touch the working tree index
 - Each autosave chains onto the previous one (linked list of snapshots)
 - For narrative file edits, also logs the latest heading/bullet to `session.log`
@@ -55,7 +55,7 @@ Runs when Claude pauses for user input:
 Runs when Claude Code session ends:
 - Logs session end time and exit reason (`user_exit`, `sigint`, `error`, `timeout`) and appends a `session_end` event to `.cs/timeline.jsonl`
 - Creates `.cs/archives/artifacts-YYYYMMDD-HHMMSS.tar.gz` archive (skipped on `sigint` for faster exit)
-- Deletes the shadow autosave ref (`refs/cs/auto`)
+- Deletes the shadow autosave refs (`refs/worktree/cs/auto` for this checkout, plus any legacy `refs/cs/auto`)
 - Cleans up lock files
 
 ## subagent-context.sh (SubagentStart)

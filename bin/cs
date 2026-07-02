@@ -5,8 +5,12 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.7.2"
+VERSION="2026.7.3"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
+# Manifest merge semantics shared by the git merge driver (tracked-.cs
+# repos) and the explicit fuse (ignored-.cs repos): combine both sides,
+# dedup on filename+timestamp, keep chronological order.
+CS_MANIFEST_MERGE_FILTER='.[0] + .[1] | unique_by([.filename, .timestamp]) | sort_by(.timestamp)'
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 
 # Claude Code downgrades its branding (logo, "thinking" animation) and statusline
@@ -373,6 +377,13 @@ warn() {
 # re-execs cs as <session>@<task>; cancel exits 0. Worktree sessions get no
 # new-task option (tasks always branch from the base). CS_ASSUME_TTY lets
 # tests drive the menu with piped stdin.
+# True when a human can answer prompts: stdin is a terminal, or a test
+# drives stdin through a pipe with CS_ASSUME_TTY=1. Every interactive gate
+# must use this predicate — a bare [ -t 0 ] is untestable from the harness.
+cs_interactive() {
+    [ -t 0 ] || [ "${CS_ASSUME_TTY:-}" = "1" ]
+}
+
 _lock_collision_menu() {
     local session_name="$1" lock_pid="$2"
     local choice="" task=""
@@ -390,9 +401,8 @@ _lock_collision_menu() {
                 *@*) info "Cancelled"; exit 0 ;;
             esac
             read -r -p "Task name: " task || task=""
-            if [ -z "$task" ] || ! [[ "$task" =~ ^[a-zA-Z0-9._-]+$ ]]; then
-                error "Task name must contain only alphanumeric characters, hyphens, underscores, and dots"
-            fi
+            # cs_split_worktree_name validates the task after the re-exec;
+            # keeping a second copy of its regex here would just drift.
             exec "$0" "$session_name@$task"
             ;;
         [fF])
@@ -409,7 +419,7 @@ _lock_collision_menu() {
 acquire_session_lock() {
     local meta_dir="$1"
     local force="${2:-}"
-    local session_name="${3:-$(basename "$(dirname "$meta_dir")")}"
+    local session_name="$3"
     local lock_file="$meta_dir/session.lock"
 
     if [ -f "$lock_file" ]; then
@@ -420,7 +430,7 @@ acquire_session_lock() {
             # PID is alive — session is in use
             if [ "$force" = "true" ]; then
                 warn "Overriding active session lock (PID $lock_pid)"
-            elif [ -t 0 ] || [ "${CS_ASSUME_TTY:-}" = "1" ]; then
+            elif cs_interactive; then
                 _lock_collision_menu "$session_name" "$lock_pid"
                 # The menu returns only when the user chose force
                 warn "Overriding active session lock (PID $lock_pid)"
@@ -739,6 +749,21 @@ EOF
     ensure_narrative_file "$wt_dir"
 }
 
+# True when a checkout has uncommitted changes to tracked files (staged or
+# unstaged). Untracked files are a separate question with per-site messages.
+_tree_is_dirty() {
+    ! git -C "$1" diff --quiet 2>/dev/null \
+        || ! git -C "$1" diff --cached --quiet 2>/dev/null
+}
+
+# Resolve a session name to its real directory (adopted sessions are
+# symlinks into the project checkout). Prints the resolved path.
+_resolve_session_dir() {
+    local dir="$SESSIONS_ROOT/$1"
+    [ -L "$dir" ] && dir="$(readlink -f "$dir")"
+    printf '%s\n' "$dir"
+}
+
 # Gate worktree creation on the base checkout's tracked state. Runs in the
 # main shell so a declined consent can exit cs cleanly (the creator is
 # command-substituted, where an exit only leaves the subshell). Clean base
@@ -748,11 +773,8 @@ EOF
 confirm_clean_worktree_base() {
     local base_dir="$1" base_name="$2"
     git -C "$base_dir" rev-parse --git-dir >/dev/null 2>&1 || return 0
-    if git -C "$base_dir" diff --quiet 2>/dev/null \
-        && git -C "$base_dir" diff --cached --quiet 2>/dev/null; then
-        return 0
-    fi
-    if [ -t 0 ] || [ "${CS_ASSUME_TTY:-}" = "1" ]; then
+    _tree_is_dirty "$base_dir" || return 0
+    if cs_interactive; then
         warn "Session '$base_name' has uncommitted changes; the new task will branch from the last commit and will not include them."
         local consent=""
         read -r -p "Continue? [y/N] " consent || consent=""
@@ -819,8 +841,8 @@ create_worktree_session() {
 # preflight refuses rather than committing on the user's behalf.
 merge_worktree_session() {
     local base_name="$1" task="$2"
-    local base_dir="$SESSIONS_ROOT/$base_name"
-    [ -L "$base_dir" ] && base_dir="$(readlink -f "$base_dir")"
+    local base_dir
+    base_dir=$(_resolve_session_dir "$base_name")
     local wt_dir="$SESSIONS_ROOT/$base_name@$task"
     local branch="cs/$task"
 
@@ -837,8 +859,7 @@ merge_worktree_session() {
         fi
     done
 
-    if ! git -C "$wt_dir" diff --quiet 2>/dev/null \
-        || ! git -C "$wt_dir" diff --cached --quiet 2>/dev/null; then
+    if _tree_is_dirty "$wt_dir"; then
         error "Worktree has uncommitted changes; commit them in $wt_dir first (cs never commits for you)"
     fi
     local wt_untracked
@@ -847,8 +868,7 @@ merge_worktree_session() {
         error "Worktree has untracked files that removal would destroy; commit or remove them first:
 $wt_untracked"
     fi
-    if ! git -C "$base_dir" diff --quiet 2>/dev/null \
-        || ! git -C "$base_dir" diff --cached --quiet 2>/dev/null; then
+    if _tree_is_dirty "$base_dir"; then
         error "Base session has uncommitted changes; commit them in $base_dir first"
     fi
 
@@ -950,7 +970,7 @@ fuse_session_records() {
         fi
     done
     if [ -f "$src/artifacts/MANIFEST.json" ] && [ -f "$dst/artifacts/MANIFEST.json" ]; then
-        jq -s '.[0] + .[1] | unique_by([.filename, .timestamp]) | sort_by(.timestamp)' \
+        jq -s "$CS_MANIFEST_MERGE_FILTER" \
             "$dst/artifacts/MANIFEST.json" "$src/artifacts/MANIFEST.json" \
             > "$dst/artifacts/MANIFEST.json.csmerge" 2>/dev/null \
             && mv "$dst/artifacts/MANIFEST.json.csmerge" "$dst/artifacts/MANIFEST.json" \
@@ -1404,7 +1424,7 @@ setup_merge_attributes() {
     git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 || return 0
     git -C "$dir" config merge.ours.driver true 2>/dev/null || true
     git -C "$dir" config merge.manifest.driver \
-        'jq -s ".[0] + .[1] | unique_by([.filename, .timestamp]) | sort_by(.timestamp)" %A %B > %A.csmerge && mv %A.csmerge %A' \
+        "jq -s \"$CS_MANIFEST_MERGE_FILTER\" %A %B > %A.csmerge && mv %A.csmerge %A" \
         2>/dev/null || true
     local ga="$dir/.gitattributes"
     if ! grep -q 'MEMORY\.md merge=ours' "$ga" 2>/dev/null; then
@@ -2286,8 +2306,7 @@ _doctor_check_worktrees() {
         [ -d "$d" ] || continue
         name=$(basename "$d")
         base_name="${name%%@*}"
-        base_dir="$root/$base_name"
-        [ -L "$base_dir" ] && base_dir="$(readlink -f "$base_dir")"
+        base_dir=$(_resolve_session_dir "$base_name")
         if [ ! -d "$base_dir" ]; then
             _doctor_warn "Worktrees: $name has no base session '$base_name'"
             continue
@@ -2655,8 +2674,8 @@ remove_session() {
     case "$session_name" in
         *@*)
             local wt_base_name="${session_name%%@*}"
-            local wt_base_dir="$SESSIONS_ROOT/$wt_base_name"
-            [ -L "$wt_base_dir" ] && wt_base_dir="$(readlink -f "$wt_base_dir")"
+            local wt_base_dir
+            wt_base_dir=$(_resolve_session_dir "$wt_base_name")
             if [ -d "$wt_base_dir" ] && [ -f "$session_dir/.git" ]; then
                 local wt_branch
                 wt_branch=$(_read_local_state "$session_dir/.cs/local/state" task_branch)
@@ -3671,12 +3690,10 @@ main() {
 
     if [ -n "$wt_base" ]; then
         # Worktree session: create from the base, or open the existing one.
-        local base_dir="$SESSIONS_ROOT/$wt_base"
+        local base_dir
+        base_dir=$(_resolve_session_dir "$wt_base")
         if [ ! -e "$base_dir" ]; then
             error "Base session not found: $wt_base"
-        fi
-        if [ -L "$base_dir" ]; then
-            base_dir="$(readlink -f "$base_dir")"
         fi
         if [ ! -d "$session_dir" ]; then
             is_new="true"

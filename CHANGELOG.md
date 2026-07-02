@@ -2,7 +2,7 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
-## Unreleased
+## 2026.7.3
 
 ### Features
 
@@ -20,6 +20,27 @@ All notable changes to cs are documented here. Release notes are also available 
   refuses in scripts. The non-interactive refusal's --force hint now names
   the registered session (adopted sessions previously showed the project
   folder's name).
+- **Conflict-free session sharing** — machine-local state (conversation
+  UUID, session color, resume timestamps) lives in gitignored
+  `.cs/local/state`; the append-only session log and timeline union-merge;
+  narratives, the artifact manifest, and the created date merge without
+  conflicts; per-machine age-encrypted secrets sync files; the sharing
+  model is documented in the README.
+- **Statusline attention mark** — the Claude mark pulses while a finished
+  turn is waiting for you (driven by `statusLine.refreshInterval`), raised
+  when Claude stops and cleared when you interact.
+- **Wrap-up passes on Sonnet 5** — `/wrap`, `/sweep`, and `/summary` now
+  run on `claude-sonnet-5`.
+
+### Other
+
+- Simplify pass over the release: shared helpers for the interactive gate,
+  dirty-tree check, and session-dir resolution; one shared manifest-merge
+  filter for the git driver and the explicit fuse; fewer subprocess forks
+  in the Write/Edit hook hot paths; autosave's legacy-ref cleanup now runs
+  exactly once.
+- Docs refreshed (`hooks.md`, `secrets.md`) for the new ref names, artifact
+  scoping, and `CS_SECRETS_SESSION`; 525+ tests green across 34 suites.
 
 ## 2026.7.2
 

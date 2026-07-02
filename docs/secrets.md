@@ -233,5 +233,6 @@ cs -secrets age remove <name>
 ## Environment Variables
 
 - `CLAUDE_SESSION_NAME` - Current session (set automatically by `cs`)
+- `CS_SECRETS_SESSION` - Overrides the session namespace; worktree task sessions export it so their secrets land in the base session's store, and `cs <name> -secrets` sets it so an explicit target outranks ambient env
 - `CS_SECRETS_BACKEND` - Force a specific backend (`keychain` or `encrypted`)
 - `CS_SECRETS_PASSWORD` - Master password for legacy sync (only needed if not using age)

@@ -66,7 +66,7 @@ fi
 # Only redirect writes that target the session checkout itself. Writes into
 # native harness worktrees, /tmp, or other repos land where the tool asked;
 # resolve the parent dir so symlinked spellings of the session path match.
-FILE_DIR=$(cd "$(dirname "$FILE_PATH")" 2>/dev/null && pwd -P || dirname "$FILE_PATH")
+FILE_DIR=$(cd "${FILE_PATH%/*}" 2>/dev/null && pwd -P || echo "${FILE_PATH%/*}")
 SESSION_DIR_REAL=$(cd "$SESSION_DIR" 2>/dev/null && pwd -P || echo "$SESSION_DIR")
 case "$FILE_DIR/" in
     "$SESSION_DIR_REAL"/*) : ;;

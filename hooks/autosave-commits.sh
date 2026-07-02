@@ -15,10 +15,11 @@ if [ -z "$SESSION_DIR" ] || [ ! -d "$SESSION_DIR" ]; then
     exit 0
 fi
 
-# Check if session has git repo (worktree-tolerant: .git may be a file)
-if ! git -C "$SESSION_DIR" rev-parse --git-dir >/dev/null 2>&1; then
-    exit 0
-fi
+# Check if session has git repo (worktree-tolerant: .git may be a file).
+# The resolved git dir is reused for the temp-index copy below; it can be
+# relative to SESSION_DIR, which is fine since the autosave cd's there.
+GIT_DIR=$(git -C "$SESSION_DIR" rev-parse --git-dir 2>/dev/null) || exit 0
+[ -n "$GIT_DIR" ] || exit 0
 
 # Read hook input
 INPUT=$(cat)
@@ -59,7 +60,6 @@ autosave_to_shadow_ref() {
     cd "$SESSION_DIR" || return 0
 
     TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
-    GIT_DIR=$(git rev-parse --git-dir 2>/dev/null) || return 0
 
     # Create temporary index from current index
     TEMP_INDEX=$(mktemp)
@@ -81,8 +81,11 @@ autosave_to_shadow_ref() {
     fi
 
     git update-ref refs/worktree/cs/auto "$commit" 2>/dev/null || return 0
-    # One-time cleanup of the pre-namespaced ref
-    git update-ref -d refs/cs/auto 2>/dev/null || true
+    if [ -z "$parent" ]; then
+        # First autosave of this checkout's chain: the pre-namespaced ref is
+        # no longer needed for crash recovery, clean it up once.
+        git update-ref -d refs/cs/auto 2>/dev/null || true
+    fi
 
     if [ -n "$LATEST_ENTRY" ]; then
         echo "[$TIMESTAMP] Autosave: $LATEST_ENTRY" >> "$META_DIR/logs/session.log"
