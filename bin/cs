@@ -2204,6 +2204,40 @@ _doctor_check_settings_hooks_resolve() {
     fi
 }
 
+_doctor_check_worktrees() {
+    local root="$SESSIONS_ROOT"
+    local d name base_name base_dir d_real pinned head_branch
+    for d in "$root"/*@*; do
+        [ -d "$d" ] || continue
+        name=$(basename "$d")
+        base_name="${name%%@*}"
+        base_dir="$root/$base_name"
+        [ -L "$base_dir" ] && base_dir="$(readlink -f "$base_dir")"
+        if [ ! -d "$base_dir" ]; then
+            _doctor_warn "Worktrees: $name has no base session '$base_name'"
+            continue
+        fi
+        d_real=$(cd "$d" 2>/dev/null && pwd -P || echo "$d")
+        if ! git -C "$base_dir" worktree list --porcelain 2>/dev/null \
+            | grep -qx "worktree $d_real"; then
+            _doctor_warn "Worktrees: $name is not a registered worktree of $base_name (pruned or created by hand?)"
+            continue
+        fi
+        pinned=$(_read_local_state "$d/.cs/local/state" task_branch)
+        head_branch=$(git -C "$d" branch --show-current 2>/dev/null || echo "")
+        if [ -n "$pinned" ] && [ "$head_branch" != "$pinned" ]; then
+            _doctor_warn "Worktrees: $name HEAD is '$head_branch', expected '$pinned'"
+            continue
+        fi
+        if [ -n "$pinned" ] \
+            && git -C "$base_dir" merge-base --is-ancestor "$pinned" HEAD 2>/dev/null; then
+            _doctor_warn "Worktrees: $name branch $pinned is fully merged; finish with: cs $base_name --merge ${name#*@}"
+        else
+            _doctor_ok "Worktrees: $name on ${head_branch:-<detached>}"
+        fi
+    done
+}
+
 _doctor_check_shadow_ref() {
     local dir="${CLAUDE_SESSION_DIR:-$PWD}"
     if ! git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
@@ -2351,6 +2385,7 @@ run_doctor() {
 
     if [ -n "${CLAUDE_SESSION_META_DIR:-}" ] && [ -d "${CLAUDE_SESSION_META_DIR:-}" ]; then
         _doctor_check_shadow_ref
+        _doctor_check_worktrees
         _doctor_check_auto_memory
         _doctor_check_session_id_match
         _doctor_check_token_cost

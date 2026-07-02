@@ -288,4 +288,21 @@ test_rm_worktree_unregisters_and_prompts_branch() {
 }
 
 run_test test_rm_worktree_unregisters_and_prompts_branch
+
+test_doctor_flags_dangling_and_merged_worktrees() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@done-task"
+    # Simulate a completed-but-unmerged-cleanup state: merge manually
+    (cd "$CS_SESSIONS_ROOT/myproj@done-task" && echo x > f && git add f && git commit -q -m t)
+    (cd "$base_dir" && git merge -q --no-edit cs/done-task)
+    # And a dangling dir that git does not know about
+    mkdir -p "$CS_SESSIONS_ROOT/myproj@ghost/.cs/local"
+    local output
+    output=$(cd "$base_dir" && CLAUDE_SESSION_DIR="$base_dir" "$CS_BIN" -doctor 2>&1 || true)
+    assert_output_contains "$output" "ghost" "dangling @-dir flagged" || return 1
+    assert_output_contains "$output" "done-task" "merged-but-present worktree flagged" || return 1
+}
+
+run_test test_doctor_flags_dangling_and_merged_worktrees
 report_results
