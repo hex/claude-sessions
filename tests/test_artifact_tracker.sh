@@ -10,6 +10,7 @@ HOOK="$SCRIPT_DIR/../hooks/artifact-tracker.sh"
 # Override setup for hook-specific env vars
 setup() {
     TEST_TMPDIR="$(mktemp -d)"
+    export CS_SESSIONS_ROOT="$TEST_TMPDIR/sessions"
     export CLAUDE_SESSION_NAME="test-session"
     export CLAUDE_SESSION_DIR="$TEST_TMPDIR/session"
     export CLAUDE_SESSION_META_DIR="$CLAUDE_SESSION_DIR/.cs"
@@ -34,7 +35,7 @@ teardown() {
     if [[ -n "$TEST_TMPDIR" ]] && [[ -d "$TEST_TMPDIR" ]]; then
         rm -rf "$TEST_TMPDIR"
     fi
-    unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR CLAUDE_ARTIFACT_DIR 2>/dev/null || true
+    unset CS_SESSIONS_ROOT CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR CLAUDE_ARTIFACT_DIR 2>/dev/null || true
 }
 
 # Helper: send a Write tool use to the hook
@@ -72,7 +73,7 @@ test_non_write_tool_passes_through() {
 test_outside_session_passes_through() {
     unset CLAUDE_SESSION_NAME
     local output
-    output=$(send_write "/tmp/test.sh" "#!/bin/bash\necho hello")
+    output=$(send_write "$CLAUDE_SESSION_DIR/test.sh" "#!/bin/bash\necho hello")
     assert_output_contains "$output" '"permissionDecision": "allow"' \
         "Outside session should pass through" || return 1
     assert_output_not_contains "$output" "updatedInput" \
@@ -81,7 +82,7 @@ test_outside_session_passes_through() {
 
 test_non_artifact_extension_passes_through() {
     local output
-    output=$(send_write "/tmp/document.txt" "Just plain text")
+    output=$(send_write "$CLAUDE_SESSION_DIR/document.txt" "Just plain text")
     assert_output_contains "$output" '"permissionDecision": "allow"' \
         ".txt should pass through" || return 1
     assert_output_not_contains "$output" "updatedInput" \
@@ -94,7 +95,7 @@ test_non_artifact_extension_passes_through() {
 
 test_sh_file_redirected_to_artifacts() {
     local output
-    output=$(send_write "/tmp/build.sh" "#!/bin/bash\necho building")
+    output=$(send_write "$CLAUDE_SESSION_DIR/build.sh" "#!/bin/bash\necho building")
     local new_path
     new_path=$(echo "$output" | jq -r '.updatedInput.file_path')
     assert_eq "$CLAUDE_ARTIFACT_DIR/build.sh" "$new_path" "Should redirect to artifacts dir" || return 1
@@ -102,7 +103,7 @@ test_sh_file_redirected_to_artifacts() {
 
 test_py_file_redirected_to_artifacts() {
     local output
-    output=$(send_write "/home/user/script.py" "print('hello')")
+    output=$(send_write "$CLAUDE_SESSION_DIR/script.py" "print('hello')")
     local new_path
     new_path=$(echo "$output" | jq -r '.updatedInput.file_path')
     assert_eq "$CLAUDE_ARTIFACT_DIR/script.py" "$new_path" "Python file should redirect" || return 1
@@ -110,7 +111,7 @@ test_py_file_redirected_to_artifacts() {
 
 test_json_file_redirected_to_artifacts() {
     local output
-    output=$(send_write "/tmp/config.json" '{"key": "value"}')
+    output=$(send_write "$CLAUDE_SESSION_DIR/config.json" '{"key": "value"}')
     local new_path
     new_path=$(echo "$output" | jq -r '.updatedInput.file_path')
     assert_eq "$CLAUDE_ARTIFACT_DIR/config.json" "$new_path" "JSON file should redirect" || return 1
@@ -118,7 +119,7 @@ test_json_file_redirected_to_artifacts() {
 
 test_yaml_file_redirected_to_artifacts() {
     local output
-    output=$(send_write "/tmp/config.yaml" "key: value")
+    output=$(send_write "$CLAUDE_SESSION_DIR/config.yaml" "key: value")
     local new_path
     new_path=$(echo "$output" | jq -r '.updatedInput.file_path')
     assert_eq "$CLAUDE_ARTIFACT_DIR/config.yaml" "$new_path" "YAML file should redirect" || return 1
@@ -126,7 +127,7 @@ test_yaml_file_redirected_to_artifacts() {
 
 test_env_file_redirected_to_artifacts() {
     local output
-    output=$(send_write "/tmp/.env" "DATABASE_URL=postgres://localhost/db")
+    output=$(send_write "$CLAUDE_SESSION_DIR/.env" "DATABASE_URL=postgres://localhost/db")
     local new_path
     new_path=$(echo "$output" | jq -r '.updatedInput.file_path')
     assert_eq "$CLAUDE_ARTIFACT_DIR/.env" "$new_path" ".env file should redirect" || return 1
@@ -138,13 +139,13 @@ test_env_file_redirected_to_artifacts() {
 
 test_duplicate_filename_gets_counter() {
     # First write creates build.sh
-    send_write "/tmp/build.sh" "#!/bin/bash\necho v1" > /dev/null
+    send_write "$CLAUDE_SESSION_DIR/build.sh" "#!/bin/bash\necho v1" > /dev/null
     # Actually create the file so the hook sees it exists
     echo "v1" > "$CLAUDE_ARTIFACT_DIR/build.sh"
 
     # Second write should get build_1.sh
     local output
-    output=$(send_write "/tmp/build.sh" "#!/bin/bash\necho v2")
+    output=$(send_write "$CLAUDE_SESSION_DIR/build.sh" "#!/bin/bash\necho v2")
     local new_path
     new_path=$(echo "$output" | jq -r '.updatedInput.file_path')
     assert_eq "$CLAUDE_ARTIFACT_DIR/build_1.sh" "$new_path" "Duplicate should get _1 suffix" || return 1
@@ -155,7 +156,7 @@ test_multiple_duplicates_increment() {
     echo "v2" > "$CLAUDE_ARTIFACT_DIR/deploy_1.sh"
 
     local output
-    output=$(send_write "/tmp/deploy.sh" "#!/bin/bash\necho v3")
+    output=$(send_write "$CLAUDE_SESSION_DIR/deploy.sh" "#!/bin/bash\necho v3")
     local new_path
     new_path=$(echo "$output" | jq -r '.updatedInput.file_path')
     assert_eq "$CLAUDE_ARTIFACT_DIR/deploy_2.sh" "$new_path" "Should increment to _2" || return 1
@@ -167,7 +168,7 @@ test_multiple_duplicates_increment() {
 
 test_env_extension_detected_as_sensitive() {
     local output
-    output=$(send_write "/tmp/.env" "NORMAL_VAR=hello")
+    output=$(send_write "$CLAUDE_SESSION_DIR/.env" "NORMAL_VAR=hello")
     # .env files are always flagged as sensitive by extension
     local manifest
     manifest=$(cat "$CLAUDE_ARTIFACT_DIR/MANIFEST.json")
@@ -178,7 +179,7 @@ test_env_extension_detected_as_sensitive() {
 
 test_filename_with_secret_detected() {
     local output
-    output=$(send_write "/tmp/api-secret.yaml" "endpoint: https://api.example.com")
+    output=$(send_write "$CLAUDE_SESSION_DIR/api-secret.yaml" "endpoint: https://api.example.com")
     local manifest
     manifest=$(cat "$CLAUDE_ARTIFACT_DIR/MANIFEST.json")
     local is_sensitive
@@ -188,7 +189,7 @@ test_filename_with_secret_detected() {
 
 test_filename_with_key_detected() {
     local output
-    output=$(send_write "/tmp/ssh-key.conf" "host: example.com")
+    output=$(send_write "$CLAUDE_SESSION_DIR/ssh-key.conf" "host: example.com")
     local manifest
     manifest=$(cat "$CLAUDE_ARTIFACT_DIR/MANIFEST.json")
     local is_sensitive
@@ -198,7 +199,7 @@ test_filename_with_key_detected() {
 
 test_normal_script_not_flagged() {
     local output
-    output=$(send_write "/tmp/build.sh" "#!/bin/bash\necho building")
+    output=$(send_write "$CLAUDE_SESSION_DIR/build.sh" "#!/bin/bash\necho building")
     local manifest
     manifest=$(cat "$CLAUDE_ARTIFACT_DIR/MANIFEST.json")
     local is_sensitive
@@ -214,7 +215,7 @@ test_api_key_in_content_detected() {
     local content='API_KEY=sk_live_abc123
 DATABASE_URL=postgres://localhost/db'
     local output
-    output=$(send_write "/tmp/config.sh" "$content")
+    output=$(send_write "$CLAUDE_SESSION_DIR/config.sh" "$content")
     local redacted_content
     redacted_content=$(echo "$output" | jq -r '.updatedInput.content')
     assert_output_contains "$redacted_content" "REDACTED" \
@@ -227,7 +228,7 @@ test_secret_token_in_content_detected() {
     local content='SECRET_TOKEN=mysupersecretvalue
 APP_NAME=myapp'
     local output
-    output=$(send_write "/tmp/app.conf" "$content")
+    output=$(send_write "$CLAUDE_SESSION_DIR/app.conf" "$content")
     local redacted_content
     redacted_content=$(echo "$output" | jq -r '.updatedInput.content')
     assert_output_contains "$redacted_content" "REDACTED" \
@@ -240,7 +241,7 @@ test_password_in_content_detected() {
     local content='DB_PASSWORD=hunter2
 DB_HOST=localhost'
     local output
-    output=$(send_write "/tmp/db.conf" "$content")
+    output=$(send_write "$CLAUDE_SESSION_DIR/db.conf" "$content")
     local redacted_content
     redacted_content=$(echo "$output" | jq -r '.updatedInput.content')
     assert_output_contains "$redacted_content" "REDACTED" \
@@ -254,7 +255,7 @@ test_non_sensitive_content_not_redacted() {
 APP_PORT=3000
 DEBUG=true'
     local output
-    output=$(send_write "/tmp/config.sh" "$content")
+    output=$(send_write "$CLAUDE_SESSION_DIR/config.sh" "$content")
     local returned_content
     returned_content=$(echo "$output" | jq -r '.updatedInput.content')
     assert_output_contains "$returned_content" "APP_NAME=myapp" \
@@ -270,7 +271,7 @@ DEBUG=true'
 test_redacts_unquoted_value() {
     local content='API_KEY=sk_live_abc123'
     local output
-    output=$(send_write "/tmp/test.sh" "$content")
+    output=$(send_write "$CLAUDE_SESSION_DIR/test.sh" "$content")
     local redacted
     redacted=$(echo "$output" | jq -r '.updatedInput.content')
     assert_output_contains "$redacted" "API_KEY=" "Key should be preserved" || return 1
@@ -280,7 +281,7 @@ test_redacts_unquoted_value() {
 test_redacts_double_quoted_value() {
     local content='API_KEY="sk_live_abc123"'
     local output
-    output=$(send_write "/tmp/test.sh" "$content")
+    output=$(send_write "$CLAUDE_SESSION_DIR/test.sh" "$content")
     local redacted
     redacted=$(echo "$output" | jq -r '.updatedInput.content')
     assert_output_not_contains "$redacted" "sk_live_abc123" \
@@ -290,7 +291,7 @@ test_redacts_double_quoted_value() {
 test_redacts_single_quoted_value() {
     local content="API_KEY='sk_live_abc123'"
     local output
-    output=$(send_write "/tmp/test.sh" "$content")
+    output=$(send_write "$CLAUDE_SESSION_DIR/test.sh" "$content")
     local redacted
     redacted=$(echo "$output" | jq -r '.updatedInput.content')
     assert_output_not_contains "$redacted" "sk_live_abc123" \
@@ -300,7 +301,7 @@ test_redacts_single_quoted_value() {
 test_redacts_yaml_style_value() {
     local content='api_key: sk_live_abc123'
     local output
-    output=$(send_write "/tmp/config.yaml" "$content")
+    output=$(send_write "$CLAUDE_SESSION_DIR/config.yaml" "$content")
     local redacted
     redacted=$(echo "$output" | jq -r '.updatedInput.content')
     assert_output_not_contains "$redacted" "sk_live_abc123" \
@@ -312,7 +313,7 @@ test_redacts_yaml_style_value() {
 # ============================================================================
 
 test_manifest_updated_with_artifact() {
-    send_write "/tmp/build.sh" "#!/bin/bash\necho hello" > /dev/null
+    send_write "$CLAUDE_SESSION_DIR/build.sh" "#!/bin/bash\necho hello" > /dev/null
     local manifest
     manifest=$(cat "$CLAUDE_ARTIFACT_DIR/MANIFEST.json")
     local count
@@ -325,17 +326,18 @@ test_manifest_updated_with_artifact() {
 }
 
 test_manifest_records_original_path() {
-    send_write "/home/user/scripts/deploy.py" "print('deploying')" > /dev/null
+    mkdir -p "$CLAUDE_SESSION_DIR/scripts"
+    send_write "$CLAUDE_SESSION_DIR/scripts/deploy.py" "print('deploying')" > /dev/null
     local manifest
     manifest=$(cat "$CLAUDE_ARTIFACT_DIR/MANIFEST.json")
     local original_path
     original_path=$(echo "$manifest" | jq -r '.[0].original_path')
-    assert_eq "/home/user/scripts/deploy.py" "$original_path" \
+    assert_eq "$CLAUDE_SESSION_DIR/scripts/deploy.py" "$original_path" \
         "Should record original path" || return 1
 }
 
 test_manifest_has_timestamp() {
-    send_write "/tmp/test.sh" "echo hi" > /dev/null
+    send_write "$CLAUDE_SESSION_DIR/test.sh" "echo hi" > /dev/null
     local manifest
     manifest=$(cat "$CLAUDE_ARTIFACT_DIR/MANIFEST.json")
     local timestamp
@@ -350,7 +352,7 @@ test_manifest_has_timestamp() {
 test_manifest_lists_secret_names() {
     local content='API_KEY=abc123
 SECRET_TOKEN=xyz789'
-    send_write "/tmp/secrets.env" "$content" > /dev/null
+    send_write "$CLAUDE_SESSION_DIR/secrets.env" "$content" > /dev/null
     local manifest
     manifest=$(cat "$CLAUDE_ARTIFACT_DIR/MANIFEST.json")
     local secrets
@@ -360,9 +362,9 @@ SECRET_TOKEN=xyz789'
 }
 
 test_manifest_accumulates_entries() {
-    send_write "/tmp/a.sh" "echo a" > /dev/null
-    send_write "/tmp/b.py" "print('b')" > /dev/null
-    send_write "/tmp/c.yaml" "key: c" > /dev/null
+    send_write "$CLAUDE_SESSION_DIR/a.sh" "echo a" > /dev/null
+    send_write "$CLAUDE_SESSION_DIR/b.py" "print('b')" > /dev/null
+    send_write "$CLAUDE_SESSION_DIR/c.yaml" "key: c" > /dev/null
     local manifest
     manifest=$(cat "$CLAUDE_ARTIFACT_DIR/MANIFEST.json")
     local count
@@ -375,7 +377,7 @@ test_manifest_accumulates_entries() {
 # ============================================================================
 
 test_artifact_logged_to_session_log() {
-    send_write "/tmp/build.sh" "#!/bin/bash" > /dev/null
+    send_write "$CLAUDE_SESSION_DIR/build.sh" "#!/bin/bash" > /dev/null
     assert_file_contains "$CLAUDE_SESSION_META_DIR/logs/session.log" "Artifact captured: build.sh" \
         "Session log should record artifact capture" || return 1
 }
@@ -383,7 +385,7 @@ test_artifact_logged_to_session_log() {
 test_secret_count_logged() {
     local content='API_KEY=abc123
 SECRET_TOKEN=xyz789'
-    send_write "/tmp/secrets.env" "$content" > /dev/null
+    send_write "$CLAUDE_SESSION_DIR/secrets.env" "$content" > /dev/null
     assert_file_contains "$CLAUDE_SESSION_META_DIR/logs/session.log" "secrets stored" \
         "Session log should mention secrets stored" || return 1
 }
@@ -396,7 +398,7 @@ test_comments_not_treated_as_secrets() {
     local content='# API_KEY=this_is_a_comment
 APP_NAME=myapp'
     local output
-    output=$(send_write "/tmp/config.sh" "$content")
+    output=$(send_write "$CLAUDE_SESSION_DIR/config.sh" "$content")
     local returned_content
     returned_content=$(echo "$output" | jq -r '.updatedInput.content')
     assert_output_contains "$returned_content" "# API_KEY=this_is_a_comment" \
@@ -407,12 +409,33 @@ test_all_tracked_extensions() {
     # Verify all documented extensions are tracked
     for ext in sh bash zsh py js ts rb pl conf config json yaml yml toml ini env; do
         local output
-        output=$(send_write "/tmp/test.$ext" "content")
+        output=$(send_write "$CLAUDE_SESSION_DIR/test.$ext" "content")
         if ! echo "$output" | jq -e '.updatedInput.file_path' > /dev/null 2>&1; then
             echo "  FAIL: .$ext should be tracked as artifact"
             return 1
         fi
     done
+}
+
+# ============================================================================
+# Path guard: writes outside the session checkout
+# ============================================================================
+
+test_write_outside_session_dir_passes_through() {
+    local session_dir
+    session_dir=$(create_test_session "s1")
+    local outside="$TEST_TMPDIR/native-worktree"
+    mkdir -p "$outside"
+    local input output
+    input=$(jq -nc --arg p "$outside/setup.sh" \
+        '{tool_name:"Write", tool_input:{file_path:$p, content:"echo hi"}}')
+    output=$(echo "$input" | CLAUDE_SESSION_NAME=s1 \
+        CLAUDE_SESSION_DIR="$session_dir" \
+        CLAUDE_ARTIFACT_DIR="$session_dir/.cs/artifacts" \
+        bash "$SCRIPT_DIR/../hooks/artifact-tracker.sh")
+    assert_output_not_contains "$output" "updatedInput" \
+        "writes outside the session checkout must not be redirected" || return 1
+    assert_output_contains "$output" '"permissionDecision": "allow"' "plain allow" || return 1
 }
 
 # ============================================================================
@@ -472,5 +495,8 @@ run_test test_secret_count_logged
 # Edge cases
 run_test test_comments_not_treated_as_secrets
 run_test test_all_tracked_extensions
+
+# Path guard
+run_test test_write_outside_session_dir_passes_through
 
 report_results
