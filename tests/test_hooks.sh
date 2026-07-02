@@ -460,15 +460,15 @@ test_session_start_updates_last_resumed() {
     session_start_setup
 
     # Verify no last_resumed yet
-    assert_file_not_contains "$CLAUDE_SESSION_META_DIR/README.md" "last_resumed:" \
+    assert_file_not_contains "$CLAUDE_SESSION_META_DIR/local/state" "last_resumed:" \
         "Should not have last_resumed before resume" || { session_start_teardown; return 1; }
 
     # Trigger resume
     echo '{"session_id":"test","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
         | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null > /dev/null
 
-    assert_file_contains "$CLAUDE_SESSION_META_DIR/README.md" "last_resumed: 20" \
-        "Should set last_resumed after resume" || { session_start_teardown; return 1; }
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/local/state" "last_resumed: 20" \
+        "Should set last_resumed in local state after resume" || { session_start_teardown; return 1; }
 
     session_start_teardown
 }
@@ -480,7 +480,7 @@ test_session_start_last_resumed_not_set_on_startup() {
     echo '{"session_id":"test","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
         | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null > /dev/null
 
-    assert_file_not_contains "$CLAUDE_SESSION_META_DIR/README.md" "last_resumed:" \
+    assert_file_not_contains "$CLAUDE_SESSION_META_DIR/local/state" "last_resumed:" \
         "Should not set last_resumed on startup" || { session_start_teardown; return 1; }
 
     session_start_teardown
@@ -509,27 +509,27 @@ test_session_start_skips_siblings_on_startup() {
     session_start_teardown
 }
 
-# Helper: seed README frontmatter with a recorded claude_session_id
+# Helper: seed local state with a recorded claude_session_id
 seed_recorded_uuid() {
     local uuid="$1"
-    sed -i.bak "/^created:/a\\
-claude_session_id: $uuid" "$CLAUDE_SESSION_META_DIR/README.md" && rm -f "$CLAUDE_SESSION_META_DIR/README.md.bak"
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    echo "claude_session_id: $uuid" > "$CLAUDE_SESSION_META_DIR/local/state"
 }
 
 test_session_start_rebinds_uuid_to_live_session() {
     session_start_setup
 
-    # README records an old conversation; the hook reports a different live one
-    # (claude forks a new UUID on context-limit continuation, leaving the old
-    # transcript on disk — the recorded binding goes stale)
+    # Local state records an old conversation; the hook reports a different
+    # live one (claude forks a new UUID on context-limit continuation, leaving
+    # the old transcript on disk — the recorded binding goes stale)
     seed_recorded_uuid "aaaaaaaa-1111-2222-3333-444444444444"
 
     echo '{"session_id":"bbbbbbbb-5555-6666-7777-888888888888","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
         | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null > /dev/null
 
-    assert_file_contains "$CLAUDE_SESSION_META_DIR/README.md" "claude_session_id: bbbbbbbb-5555-6666-7777-888888888888" \
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/local/state" "claude_session_id: bbbbbbbb-5555-6666-7777-888888888888" \
         "Should rebind claude_session_id to the live session UUID" || { session_start_teardown; return 1; }
-    assert_file_not_contains "$CLAUDE_SESSION_META_DIR/README.md" "aaaaaaaa-1111-2222-3333-444444444444" \
+    assert_file_not_contains "$CLAUDE_SESSION_META_DIR/local/state" "aaaaaaaa-1111-2222-3333-444444444444" \
         "Stale UUID should be gone after rebind" || { session_start_teardown; return 1; }
 
     session_start_teardown
@@ -543,7 +543,7 @@ test_session_start_rebinds_uuid_on_startup() {
     echo '{"session_id":"bbbbbbbb-5555-6666-7777-888888888888","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
         | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null > /dev/null
 
-    assert_file_contains "$CLAUDE_SESSION_META_DIR/README.md" "claude_session_id: bbbbbbbb-5555-6666-7777-888888888888" \
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/local/state" "claude_session_id: bbbbbbbb-5555-6666-7777-888888888888" \
         "Should rebind on startup too (live UUID is authoritative on every source)" || { session_start_teardown; return 1; }
 
     session_start_teardown
@@ -559,7 +559,7 @@ test_session_start_rebind_ignores_invalid_session_id() {
     echo '{"session_id":"not-a-uuid","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
         | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null > /dev/null
 
-    assert_file_contains "$CLAUDE_SESSION_META_DIR/README.md" "claude_session_id: aaaaaaaa-1111-2222-3333-444444444444" \
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/local/state" "claude_session_id: aaaaaaaa-1111-2222-3333-444444444444" \
         "Recorded UUID should survive an invalid live session_id" || { session_start_teardown; return 1; }
 
     session_start_teardown
@@ -783,19 +783,21 @@ test_timeline_subagent_skipped() {
 }
 
 # ============================================================================
-# session-end.sh: updated timestamp in frontmatter
+# session-end.sh: the git-synced README must never receive machine-local
+# timestamps — divergent per-machine writes made merge conflicts inevitable
+# when a session is shared through git
 # ============================================================================
 
-test_session_end_sets_updated_timestamp() {
+test_session_end_never_stamps_readme() {
     index_setup
 
-    assert_file_not_contains "$CLAUDE_SESSION_META_DIR/README.md" "updated:" \
-        "Should not have updated before session end" || { index_teardown; return 1; }
+    local before
+    before=$(cat "$CLAUDE_SESSION_META_DIR/README.md")
 
     echo '{"session_id":"test-123"}' | bash "$HOOKS_DIR/session-end.sh"
 
-    assert_file_contains "$CLAUDE_SESSION_META_DIR/README.md" "updated: 20" \
-        "Should set updated after session end" || { index_teardown; return 1; }
+    assert_eq "$before" "$(cat "$CLAUDE_SESSION_META_DIR/README.md")" \
+        "session end must leave README byte-identical" || { index_teardown; return 1; }
 
     index_teardown
 }
@@ -819,20 +821,18 @@ test_session_end_generates_index_with_many_changes() {
     index_teardown
 }
 
-test_session_end_updates_existing_timestamp() {
+test_session_end_leaves_legacy_updated_line_alone() {
     index_setup
 
-    # Add an old updated timestamp
+    # A legacy 'updated:' line (pre-dating the .cs/local/state split) is
+    # migrate_session's to remove — the hook must not touch it either way
     sed -i.bak '/^tags:/a\
 updated: 2026-01-01' "$CLAUDE_SESSION_META_DIR/README.md" && rm -f "$CLAUDE_SESSION_META_DIR/README.md.bak"
 
     echo '{"session_id":"test-123"}' | bash "$HOOKS_DIR/session-end.sh"
 
-    # Should be today, not the old date
-    assert_file_not_contains "$CLAUDE_SESSION_META_DIR/README.md" "updated: 2026-01-01" \
-        "Should overwrite old date" || { index_teardown; return 1; }
-    assert_file_contains "$CLAUDE_SESSION_META_DIR/README.md" "updated: $(date '+%Y-%m-%d')" \
-        "Should have today's date" || { index_teardown; return 1; }
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/README.md" "updated: 2026-01-01" \
+        "Hook must not rewrite a legacy updated line" || { index_teardown; return 1; }
 
     index_teardown
 }
@@ -953,9 +953,9 @@ run_test test_timeline_events_are_valid_jsonl
 run_test test_timeline_subagent_skipped
 
 # Session end: updated timestamp
-run_test test_session_end_sets_updated_timestamp
+run_test test_session_end_never_stamps_readme
 run_test test_session_end_generates_index_with_many_changes
-run_test test_session_end_updates_existing_timestamp
+run_test test_session_end_leaves_legacy_updated_line_alone
 
 # ============================================================================
 # Retired-hooks cleanup (install.sh + run_uninstall)

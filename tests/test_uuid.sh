@@ -20,12 +20,12 @@ teardown() {
 # Used both to validate generated UUIDs and to anchor regex assertions in tests.
 UUID_V4_RE='^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
 
-# Extract claude_session_id value from a session README. Prints empty string
-# if absent. Mirrors _read_session_uuid in bin/cs so the test can introspect
-# the frontmatter without sourcing bin/cs.
+# Extract claude_session_id value from a session's .cs/local/state file.
+# Prints empty string if absent. Mirrors _read_local_state in bin/cs so the
+# test can introspect the state without sourcing bin/cs.
 _extract_session_uuid() {
-    local readme="$1"
-    grep -E '^claude_session_id:' "$readme" 2>/dev/null \
+    local state="$1"
+    grep -E '^claude_session_id:' "$state" 2>/dev/null \
         | head -1 \
         | sed -E 's/^claude_session_id:[[:space:]]*//; s/^"//; s/"$//' \
         || true
@@ -47,11 +47,11 @@ test_new_session_allocates_and_records_uuid() {
     assert_file_exists "$session_dir/.cs/README.md" \
         "session README should exist after first cs launch" || return 1
 
-    assert_file_contains "$session_dir/.cs/README.md" "^claude_session_id:" \
-        "README frontmatter should record claude_session_id" || return 1
+    assert_file_contains "$session_dir/.cs/local/state" "^claude_session_id:" \
+        "local state should record claude_session_id" || return 1
 
     local recorded_uuid
-    recorded_uuid=$(_extract_session_uuid "$session_dir/.cs/README.md")
+    recorded_uuid=$(_extract_session_uuid "$session_dir/.cs/local/state")
 
     if [[ ! "$recorded_uuid" =~ $UUID_V4_RE ]]; then
         echo "  FAIL: recorded claude_session_id is not a valid v4 UUID"
@@ -73,7 +73,7 @@ test_resume_uses_recorded_uuid() {
 
     local session_dir="$CS_SESSIONS_ROOT/test-session"
     local recorded_uuid
-    recorded_uuid=$(_extract_session_uuid "$session_dir/.cs/README.md")
+    recorded_uuid=$(_extract_session_uuid "$session_dir/.cs/local/state")
 
     if [[ ! "$recorded_uuid" =~ $UUID_V4_RE ]]; then
         echo "  FAIL: precondition - first launch did not record a v4 UUID"
@@ -89,7 +89,7 @@ test_resume_uses_recorded_uuid() {
 
     # Resume must not rewrite the UUID.
     local recorded_after
-    recorded_after=$(_extract_session_uuid "$session_dir/.cs/README.md")
+    recorded_after=$(_extract_session_uuid "$session_dir/.cs/local/state")
     assert_eq "$recorded_uuid" "$recorded_after" \
         "frontmatter UUID should remain stable across resumes" || return 1
 }
@@ -124,17 +124,17 @@ EOF
     (cd "$session_dir" && git init -q && git add -A && git commit -q -m "init")
 
     # Precondition.
-    assert_file_not_contains "$session_dir/.cs/README.md" "^claude_session_id:" \
+    assert_file_not_contains "$session_dir/.cs/local/state" "^claude_session_id:" \
         "precondition: legacy session must lack claude_session_id" || return 1
 
     # First resume backfills.
     "$CS_BIN" legacy-session <<< "" >/dev/null 2>&1 || true
 
-    assert_file_contains "$session_dir/.cs/README.md" "^claude_session_id:" \
+    assert_file_contains "$session_dir/.cs/local/state" "^claude_session_id:" \
         "lazy migration should backfill claude_session_id" || return 1
 
     local backfilled
-    backfilled=$(_extract_session_uuid "$session_dir/.cs/README.md")
+    backfilled=$(_extract_session_uuid "$session_dir/.cs/local/state")
 
     if [[ ! "$backfilled" =~ $UUID_V4_RE ]]; then
         echo "  FAIL: backfilled value is not a valid v4 UUID: '$backfilled'"
@@ -145,14 +145,14 @@ EOF
     "$CS_BIN" legacy-session <<< "" >/dev/null 2>&1 || true
 
     local after
-    after=$(_extract_session_uuid "$session_dir/.cs/README.md")
+    after=$(_extract_session_uuid "$session_dir/.cs/local/state")
     assert_eq "$backfilled" "$after" \
         "second resume must not rewrite the backfilled UUID" || return 1
 
     local count
-    count=$(grep -cE '^claude_session_id:' "$session_dir/.cs/README.md")
+    count=$(grep -cE '^claude_session_id:' "$session_dir/.cs/local/state")
     assert_eq "1" "$count" \
-        "claude_session_id must appear exactly once in frontmatter" || return 1
+        "claude_session_id must appear exactly once in local state" || return 1
 }
 
 # ============================================================================
@@ -216,7 +216,7 @@ test_lazy_migration_binds_to_existing_transcript() {
     "$CS_BIN" legacy-session <<< "" >/dev/null 2>&1 || true
 
     local recorded
-    recorded=$(_extract_session_uuid "$session_dir/.cs/README.md")
+    recorded=$(_extract_session_uuid "$session_dir/.cs/local/state")
     assert_eq "$existing_uuid" "$recorded" \
         "backfill should bind to the existing transcript UUID, not allocate fresh" || return 1
 }
@@ -237,14 +237,14 @@ test_lazy_migration_self_heals_orphan_uuid() {
     "$CS_BIN" legacy-session <<< "" >/dev/null 2>&1 || true
 
     local recorded
-    recorded=$(_extract_session_uuid "$session_dir/.cs/README.md")
+    recorded=$(_extract_session_uuid "$session_dir/.cs/local/state")
     assert_eq "$real_uuid" "$recorded" \
         "self-heal should rewrite orphan claude_session_id to the existing transcript UUID" || return 1
 
     # Idempotent: a second resume must not flip the value back.
     "$CS_BIN" legacy-session <<< "" >/dev/null 2>&1 || true
     local after
-    after=$(_extract_session_uuid "$session_dir/.cs/README.md")
+    after=$(_extract_session_uuid "$session_dir/.cs/local/state")
     assert_eq "$real_uuid" "$after" \
         "second resume must keep the healed UUID stable" || return 1
 }
@@ -267,7 +267,7 @@ test_lazy_migration_preserves_uuid_when_transcript_matches() {
     "$CS_BIN" bound-session <<< "" >/dev/null 2>&1 || true
 
     local recorded
-    recorded=$(_extract_session_uuid "$session_dir/.cs/README.md")
+    recorded=$(_extract_session_uuid "$session_dir/.cs/local/state")
     assert_eq "$good_uuid" "$recorded" \
         "recorded UUID with a matching transcript must not be rewritten" || return 1
 }
@@ -301,7 +301,7 @@ test_decline_resume_rebinds_to_fresh_uuid() {
     output=$("$CS_BIN" test-session <<< "n" 2>&1) || true
 
     local recorded
-    recorded=$(_extract_session_uuid "$session_dir/.cs/README.md")
+    recorded=$(_extract_session_uuid "$session_dir/.cs/local/state")
 
     if [ "$recorded" = "$old_uuid" ]; then
         echo "  FAIL: declining resume should rewrite claude_session_id"
@@ -352,7 +352,7 @@ test_env_var_exported_with_uuid() {
 
     local session_dir="$CS_SESSIONS_ROOT/test-session"
     local recorded
-    recorded=$(_extract_session_uuid "$session_dir/.cs/README.md")
+    recorded=$(_extract_session_uuid "$session_dir/.cs/local/state")
 
     if [[ ! "$recorded" =~ $UUID_V4_RE ]]; then
         echo "  FAIL: precondition - cs did not record a v4 UUID"
@@ -369,19 +369,18 @@ run_test test_env_var_exported_with_uuid
 # Cycle 5: doctor check verifies recorded UUID against $CLAUDE_CODE_SESSION_ID
 # ============================================================================
 
-# Build a session with a fixed UUID in frontmatter and the minimal layout
+# Build a session with a fixed UUID in local state and the minimal layout
 # needed for `cs -doctor` to run its in-session checks. Returns the path.
 _seed_doctor_session() {
     local name="$1"
     local uuid="$2"
     local session_dir="$CS_SESSIONS_ROOT/$name"
-    mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
+    mkdir -p "$session_dir/.cs"/{artifacts,logs,memory,local}
     echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
     cat > "$session_dir/.cs/README.md" << EOF
 ---
 status: active
 created: 2026-04-21
-claude_session_id: $uuid
 tags: []
 aliases: ["$name"]
 ---
@@ -391,6 +390,9 @@ EOF
     echo "# Session" > "$session_dir/CLAUDE.md"
     (cd "$session_dir" && git init -q -b main && git config user.email t@t \
         && git config user.name T && git add -A && git commit -q -m init)
+    # Seed after the commit — .cs/local/ must never be tracked in git
+    # (cs refuses to launch when it is).
+    echo "claude_session_id: $uuid" > "$session_dir/.cs/local/state"
     echo "$session_dir"
 }
 
@@ -548,23 +550,23 @@ run_test test_decline_resume_launch_passes_name
 VALID_COLORS_RE='^(red|blue|green|yellow|purple|orange|pink|cyan)$'
 
 _extract_session_color() {
-    local readme="$1"
-    grep -E '^claude_session_color:' "$readme" 2>/dev/null \
+    local state="$1"
+    grep -E '^claude_session_color:' "$state" 2>/dev/null \
         | head -1 \
         | sed -E 's/^claude_session_color:[[:space:]]*//; s/^"//; s/"$//' \
         || true
 }
 
-test_new_session_records_random_color_in_frontmatter() {
+test_new_session_records_random_color_in_local_state() {
     "$CS_BIN" my-test-session <<< "" >/dev/null 2>&1 || true
 
-    local readme="$CS_SESSIONS_ROOT/my-test-session/.cs/README.md"
+    local state="$CS_SESSIONS_ROOT/my-test-session/.cs/local/state"
 
-    assert_file_contains "$readme" '^claude_session_color:' \
-        "README frontmatter should record claude_session_color" || return 1
+    assert_file_contains "$state" '^claude_session_color:' \
+        "local state should record claude_session_color" || return 1
 
     local color
-    color=$(_extract_session_color "$readme")
+    color=$(_extract_session_color "$state")
 
     if [[ ! "$color" =~ $VALID_COLORS_RE ]]; then
         echo "  FAIL: recorded color is not in the valid 8-color set"
@@ -577,9 +579,9 @@ test_new_session_launch_passes_color_slash_command() {
     local output
     output=$("$CS_BIN" my-test-session <<< "" 2>&1) || true
 
-    local readme="$CS_SESSIONS_ROOT/my-test-session/.cs/README.md"
+    local state="$CS_SESSIONS_ROOT/my-test-session/.cs/local/state"
     local color
-    color=$(_extract_session_color "$readme")
+    color=$(_extract_session_color "$state")
 
     assert_output_contains "$output" "/color $color" \
         "new-session launch must pass /color <color> as a positional prompt" || return 1
@@ -588,9 +590,9 @@ test_new_session_launch_passes_color_slash_command() {
 test_resume_launch_passes_color_slash_command() {
     "$CS_BIN" my-test-session <<< "" >/dev/null 2>&1 || true
 
-    local readme="$CS_SESSIONS_ROOT/my-test-session/.cs/README.md"
+    local state="$CS_SESSIONS_ROOT/my-test-session/.cs/local/state"
     local color
-    color=$(_extract_session_color "$readme")
+    color=$(_extract_session_color "$state")
 
     local output
     output=$("$CS_BIN" my-test-session <<< "" 2>&1) || true
@@ -602,9 +604,9 @@ test_resume_launch_passes_color_slash_command() {
 test_decline_resume_launch_passes_color_slash_command() {
     "$CS_BIN" my-test-session <<< "" >/dev/null 2>&1 || true
 
-    local readme="$CS_SESSIONS_ROOT/my-test-session/.cs/README.md"
+    local state="$CS_SESSIONS_ROOT/my-test-session/.cs/local/state"
     local color
-    color=$(_extract_session_color "$readme")
+    color=$(_extract_session_color "$state")
 
     local output
     output=$("$CS_BIN" my-test-session <<< "n" 2>&1) || true
@@ -618,13 +620,13 @@ test_color_persists_across_resumes() {
     # across subsequent resumes — never re-randomized.
     "$CS_BIN" my-test-session <<< "" >/dev/null 2>&1 || true
 
-    local readme="$CS_SESSIONS_ROOT/my-test-session/.cs/README.md"
+    local state="$CS_SESSIONS_ROOT/my-test-session/.cs/local/state"
     local first_color
-    first_color=$(_extract_session_color "$readme")
+    first_color=$(_extract_session_color "$state")
 
     "$CS_BIN" my-test-session <<< "" >/dev/null 2>&1 || true
     local second_color
-    second_color=$(_extract_session_color "$readme")
+    second_color=$(_extract_session_color "$state")
 
     assert_eq "$first_color" "$second_color" \
         "color must remain stable across resumes (never re-randomized)" || return 1
@@ -652,16 +654,16 @@ EOF
     echo "# Session" > "$session_dir/CLAUDE.md"
     (cd "$session_dir" && git init -q && git add -A && git commit -q -m "init")
 
-    assert_file_not_contains "$session_dir/.cs/README.md" '^claude_session_color:' \
+    assert_file_not_contains "$session_dir/.cs/local/state" '^claude_session_color:' \
         "precondition: legacy session must lack claude_session_color" || return 1
 
     "$CS_BIN" legacy-no-color <<< "" >/dev/null 2>&1 || true
 
-    assert_file_contains "$session_dir/.cs/README.md" '^claude_session_color:' \
+    assert_file_contains "$session_dir/.cs/local/state" '^claude_session_color:' \
         "Phase 11 should backfill claude_session_color on legacy session" || return 1
 
     local color
-    color=$(_extract_session_color "$session_dir/.cs/README.md")
+    color=$(_extract_session_color "$session_dir/.cs/local/state")
     if [[ ! "$color" =~ $VALID_COLORS_RE ]]; then
         echo "  FAIL: backfilled color is not in the valid 8-color set: '$color'"
         return 1
@@ -670,17 +672,17 @@ EOF
     # Idempotent: second launch must NOT re-randomize.
     "$CS_BIN" legacy-no-color <<< "" >/dev/null 2>&1 || true
     local color_after
-    color_after=$(_extract_session_color "$session_dir/.cs/README.md")
+    color_after=$(_extract_session_color "$session_dir/.cs/local/state")
     assert_eq "$color" "$color_after" \
         "second migration must not change the backfilled color" || return 1
 
     local count
-    count=$(grep -cE '^claude_session_color:' "$session_dir/.cs/README.md")
+    count=$(grep -cE '^claude_session_color:' "$session_dir/.cs/local/state")
     assert_eq "1" "$count" \
-        "claude_session_color must appear exactly once in frontmatter" || return 1
+        "claude_session_color must appear exactly once in local state" || return 1
 }
 
-run_test test_new_session_records_random_color_in_frontmatter
+run_test test_new_session_records_random_color_in_local_state
 run_test test_new_session_launch_passes_color_slash_command
 run_test test_resume_launch_passes_color_slash_command
 run_test test_decline_resume_launch_passes_color_slash_command

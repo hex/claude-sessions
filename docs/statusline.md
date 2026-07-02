@@ -15,7 +15,7 @@ Default order: `logo,session,git,model,ctx,limits,cost`. A brand badge opens the
 | Segment | Shows | Source | Color |
 |---|---|---|---|
 | `logo` | A Claude mark (`✳`) badge | none — always present in color modes | Claude coral `rgb(217,119,87)`, white mark. Omitted in plain (`NO_COLOR`) mode, where there is no background |
-| `session` | Session name | stdin `session_name`, falling back to `CLAUDE_SESSION_NAME`, then the workspace dir basename | The session's `claude_session_color` from `.cs/README.md` frontmatter; grey outside cs sessions |
+| `session` | Session name | stdin `session_name`, falling back to `CLAUDE_SESSION_NAME`, then the workspace dir basename | The session's `claude_session_color` from `.cs/local/state`; grey outside cs sessions |
 | `git` | Branch, ahead/behind arrows, staged `+N` and modified `!N` counts | One `git status --porcelain=v1 -b` call | Bold slate-blue accent `rgb(79,91,140)`, chip text color |
 | `model` | Model display name plus effort level when present | stdin `model.display_name`, `effort.level` | Periwinkle accent (claude's usage-chip purple), white text |
 | `ctx` | Context window usage, `ctx 42%` | stdin `context_window.used_percentage` | Grey; amber at 50%, red at 80% (tunable) |
@@ -26,7 +26,7 @@ Every segment is null-when-nothing: missing data means the segment and its separ
 
 ## Data sources and performance
 
-The render path is deliberately thin: one `jq` pass over stdin, at most one git subprocess, and one small file read (`README.md` frontmatter for the session color). There is no transcript parsing, no network access, no caching, and the script never writes anything. Data gathering is gated per segment, so disabling `git` in `CS_STATUSLINE_SEGMENTS` means the git subprocess never forks.
+The render path is deliberately thin: one `jq` pass over stdin, at most one git subprocess, and one small file read (`.cs/local/state` for the session color). There is no transcript parsing, no network access, no caching, and the script never writes anything. Data gathering is gated per segment, so disabling `git` in `CS_STATUSLINE_SEGMENTS` means the git subprocess never forks.
 
 The git call runs with `GIT_OPTIONAL_LOCKS=0` (no index locking for a read-only query) under a 2-second timeout, and is skipped entirely when the workspace has no `.git`.
 
@@ -36,7 +36,7 @@ Failure posture is fail-open: malformed stdin, a missing `jq`, or any internal e
 
 Color depth is detected per render, in priority order: `FORCE_COLOR=0`, `NO_COLOR`, or `TERM=dumb` force plain text (segments joined with ` > `, no escape codes); `COLORTERM=truecolor`/`24bit` or iTerm2/WezTerm select truecolor; a `*256color*` `TERM` selects 256-color; anything else gets basic ANSI.
 
-The `session` segment's background is the same color claude shows for the session (`/color`), read from `claude_session_color:` in the session's `.cs/README.md` frontmatter. The eight session colors use Claude Code's own `/color` RGB values (its default dark/light agent-color palette), so the pill, the terminal tab color, and claude's own session accent all agree exactly.
+The `session` segment's background is the same color claude shows for the session (`/color`), read from `claude_session_color:` in the session's `.cs/local/state`. The eight session colors use Claude Code's own `/color` RGB values (its default dark/light agent-color palette), so the pill, the terminal tab color, and claude's own session accent all agree exactly.
 
 The healthy bar carries the identity blocks as bold accents: the session name in its `claude_session_color`, the branch in slate-blue `rgb(79,91,140)`, and the model in periwinkle `rgb(138,134,236)`, the last matching claude's own usage chip. All three render bold text in the chip's own near-white `rgb(240,242,255)`; the identity segments are also the typographically loudest. Every other segment explicitly resets to normal intensity, since SGR bold is stateful and would otherwise leak rightward across the bar. The quiet gauges (ctx, the rate limits, and cost) rest on a surface derived from the terminal's own background — a shade of `CS_TERM_BG_RGB`, darker on a light terminal and lighter on a dark one — so they harmonize with the terminal instead of sitting on a fixed grey. Their text is picked for contrast against that surface: a soft warm-dark tone (a heavily darkened shade of the surface, not a harsh near-black) on a light surface, light text on a dark one. When the terminal background is unknown (no OSC 11 result at launch, or outside truecolor) the gauges fall back to a warm neutral taupe with white text. Color beyond the identity accents is state: warm amber `rgb(255,183,77)` (cs's warning color) past warn thresholds, red past crit. A glance answers in order: which session, which branch, which model, and is anything on fire.
 

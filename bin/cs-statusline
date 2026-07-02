@@ -283,14 +283,14 @@ _fmt_rest() {
     fi
 }
 
-# Read claude_session_color from a session README's frontmatter into
-# _SESSION_COLOR (empty if none). Pure bash: this runs once per render, where
-# an awk fork is real cost. KEEP THE FRONTMATTER FORMAT IN SYNC WITH bin/cs's
-# _read_session_color.
+# Read claude_session_color from a session's machine-local state file
+# (.cs/local/state) into _SESSION_COLOR (empty if none). Pure bash: this runs
+# once per render, where an awk fork is real cost. KEEP THE FORMAT IN SYNC
+# WITH bin/cs's _read_local_state.
 _read_session_color() {
     _SESSION_COLOR=""
-    local readme="$1" line v
-    [ -f "$readme" ] || return 0
+    local state="$1" line v
+    [ -f "$state" ] || return 0
     while IFS= read -r line; do
         case "$line" in
             claude_session_color:*)
@@ -300,7 +300,7 @@ _read_session_color() {
                 return 0
                 ;;
         esac
-    done < "$readme"
+    done < "$state"
 }
 
 # Byte size of a file into _FILESIZE (0 on failure); arithmetic evaluation
@@ -377,7 +377,7 @@ _seg_session() {
     fi
     local bg="grey" color=""
     if [ -n "${CLAUDE_SESSION_NAME:-}" ]; then
-        _read_session_color "$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/README.md"
+        _read_session_color "$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/local/state"
         color="$_SESSION_COLOR"
         [ -n "$color" ] && bg="$color"
     fi

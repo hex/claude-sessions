@@ -79,14 +79,14 @@ make_git_work() {
 make_cs_session() {
     local name="$1" bytes="$2" color="$3"
     local sdir="$CS_SESSIONS_ROOT/$name"
-    mkdir -p "$sdir/.cs"
+    mkdir -p "$sdir/.cs/local"
     cat > "$sdir/.cs/README.md" <<EOF
 ---
 created: 2026-06-11
-claude_session_color: $color
 ---
 # $name
 EOF
+    echo "claude_session_color: $color" > "$sdir/.cs/local/state"
     dd if=/dev/zero of="$sdir/.cs/discoveries.md" bs=1024 \
         count="$((bytes / 1024))" 2>/dev/null
 }

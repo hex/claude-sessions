@@ -120,39 +120,41 @@ See CLAUDE.md in the session directory for complete documentation protocol.
 EOF
 )
 
-# Set a key in README frontmatter, replacing any existing line and inserting
-# after 'created:' if absent. Atomic (tmp+mv), collapses duplicate key lines.
-# No-op when README is missing or has no frontmatter block.
-README_FILE="$META_DIR/README.md"
-frontmatter_set() {
+# Set a key in the machine-local state file (.cs/local/state, gitignored —
+# these values differ per machine, so they must never reach the git-synced
+# README). Replaces any existing line for the key, collapses duplicates.
+# Atomic (tmp+mv). KEEP THE FORMAT IN SYNC WITH bin/cs's _set_local_state.
+STATE_FILE="$META_DIR/local/state"
+local_state_set() {
     local key="$1" value="$2"
-    [ -f "$README_FILE" ] && head -1 "$README_FILE" | grep -q '^---$' || return 0
-    local tmp="$README_FILE.tmp"
-    awk -v new_line="$key: $value" -v key="$key" '
-        index($0, key ":") == 1 { next }
-        /^created:/ { print; print new_line; next }
-        { print }
-    ' "$README_FILE" > "$tmp" && mv "$tmp" "$README_FILE"
+    mkdir -p "$META_DIR/local"
+    local tmp="$STATE_FILE.tmp"
+    {
+        if [ -f "$STATE_FILE" ]; then
+            awk -v key="$key" 'index($0, key ":") != 1' "$STATE_FILE"
+        fi
+        printf '%s: %s\n' "$key" "$value"
+    } > "$tmp" && mv "$tmp" "$STATE_FILE"
 }
 
-# Bind claude_session_id in README frontmatter to the live conversation.
+# Bind claude_session_id in local state to the live conversation.
 # Claude Code forks a new UUID when a conversation is continued past the
 # context limit; the old transcript stays on disk, so the recorded UUID
 # looks healthy while naming the pre-fork conversation and `cs` resumes
 # stale history. The hook input names the conversation actually running,
 # so it is authoritative on every source.
 UUID_RE='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
-if [ -f "$README_FILE" ] && [[ "$SESSION_ID" =~ $UUID_RE ]]; then
-    RECORDED_UUID=$(awk '/^claude_session_id:/ { print $2; exit }' "$README_FILE")
-    if [ "$RECORDED_UUID" != "$SESSION_ID" ] && head -1 "$README_FILE" | grep -q '^---$'; then
-        frontmatter_set claude_session_id "$SESSION_ID"
+if [[ "$SESSION_ID" =~ $UUID_RE ]]; then
+    RECORDED_UUID=$(awk '/^claude_session_id:/ { print $2; exit }' "$STATE_FILE" 2>/dev/null || true)
+    if [ "$RECORDED_UUID" != "$SESSION_ID" ]; then
+        local_state_set claude_session_id "$SESSION_ID"
         echo "$(date '+%Y-%m-%d %H:%M:%S') - Rebound claude_session_id: ${RECORDED_UUID:-none} -> $SESSION_ID" >> "$META_DIR/logs/session.log"
     fi
 fi
 
-# Update last_resumed in README.md frontmatter on resume
+# Update last_resumed in local state on resume
 if [ "$SOURCE" = "resume" ]; then
-    frontmatter_set last_resumed "$(date '+%Y-%m-%d')"
+    local_state_set last_resumed "$(date '+%Y-%m-%d')"
 fi
 
 # Dynamic context: add session state info on resume

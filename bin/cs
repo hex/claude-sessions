@@ -906,37 +906,42 @@ _alloc_random_color() {
     echo "${CS_VALID_COLORS[$((RANDOM % ${#CS_VALID_COLORS[@]}))]}"
 }
 
-# Read claude_session_color from a session's .cs/README.md frontmatter.
-# Prints the color name to stdout, or empty if absent or unreadable.
-# KEEP THE FRONTMATTER FORMAT IN SYNC WITH bin/cs-statusline's
-# _read_session_color (a pure-bash copy on the render hot path).
-_read_session_color() {
-    local readme="$1"
-    [ -f "$readme" ] || return 0
-    awk '
-        /^claude_session_color:/ {
-            sub(/^claude_session_color:[[:space:]]*/, "")
+# Machine-local session state lives in .cs/local/state as 'key: value' lines
+# (claude_session_id, claude_session_color, last_resumed). It is gitignored
+# (see create_session_gitignore) because these values legitimately differ per
+# machine — recording them in the git-synced README caused merge conflicts
+# whenever two machines resumed the same session.
+
+# Read a key's value from a machine-local state file. Prints the value to
+# stdout, or empty if absent or unreadable. Never errors. KEEP THE FORMAT IN
+# SYNC WITH bin/cs-statusline's _read_session_color (a pure-bash copy on the
+# render hot path) and hooks/session-start.sh's local_state_set.
+_read_local_state() {
+    local state="$1" key="$2"
+    [ -f "$state" ] || return 0
+    awk -v key="$key" '
+        index($0, key ":") == 1 {
+            sub(/^[^:]*:[[:space:]]*/, "")
             gsub(/"/, "")
             print
             exit
         }
-    ' "$readme" 2>/dev/null || true
+    ' "$state" 2>/dev/null || true
 }
 
-# Read claude_session_id from a session's .cs/README.md frontmatter.
-# Prints the UUID to stdout, or empty if absent or unreadable. Never errors.
-# Single-awk implementation: one fork, prints first match, exits.
-_read_session_uuid() {
-    local readme="$1"
-    [ -f "$readme" ] || return 0
-    awk '
-        /^claude_session_id:/ {
-            sub(/^claude_session_id:[[:space:]]*/, "")
-            gsub(/"/, "")
-            print
-            exit
-        }
-    ' "$readme" 2>/dev/null || true
+# Write 'key: value' into a machine-local state file, replacing any existing
+# line for that key. Creates .cs/local/ and the file on first write. Atomic
+# (tmp+mv), idempotent.
+_set_local_state() {
+    local state="$1" key="$2" value="$3"
+    mkdir -p "$(dirname "$state")"
+    local tmp="$state.tmp"
+    {
+        if [ -f "$state" ]; then
+            awk -v key="$key" 'index($0, key ":") != 1' "$state"
+        fi
+        printf '%s: %s\n' "$key" "$value"
+    } > "$tmp" && mv "$tmp" "$state"
 }
 
 # Return the path to claude's per-cwd transcript directory. Symlinks in the
@@ -967,35 +972,7 @@ _discover_session_uuid_in() {
     basename "$newest" .jsonl
 }
 
-# Write claude_session_id: <uuid> into README frontmatter, replacing any
-# existing line and inserting after 'created:' if absent. Idempotent.
-_set_session_uuid() {
-    local readme="$1"
-    local uuid="$2"
-    [ -f "$readme" ] || return 0
-    local tmp="$readme.tmp"
-    awk -v new_line="claude_session_id: $uuid" '
-        /^claude_session_id:/ { next }
-        /^created:/ { print; print new_line; next }
-        { print }
-    ' "$readme" > "$tmp" && mv "$tmp" "$readme"
-}
-
-# Write claude_session_color: <color> into README frontmatter, replacing any
-# existing line and inserting after 'claude_session_id:' if absent. Idempotent.
-_set_session_color() {
-    local readme="$1"
-    local color="$2"
-    [ -f "$readme" ] || return 0
-    local tmp="$readme.tmp"
-    awk -v new_line="claude_session_color: $color" '
-        /^claude_session_color:/ { next }
-        /^claude_session_id:/ { print; print new_line; next }
-        { print }
-    ' "$readme" > "$tmp" && mv "$tmp" "$readme"
-}
-
-# Allocate a fresh UUID, rewrite README's claude_session_id to it, export
+# Allocate a fresh UUID, rewrite the local state's claude_session_id to it, export
 # CS_CLAUDE_SESSION_ID + CS_FRESH_REBIND, and exec claude --session-id <new>.
 # Used on the "user declined resume" path and the "resume failed" fallback
 # so cs's recorded UUID always tracks the conversation claude is about to
@@ -1007,9 +984,9 @@ _exec_fresh_rebind() {
     session_name=$(basename "$session_dir")
     local new_uuid
     new_uuid=$(_alloc_uuid)
-    _set_session_uuid "$session_dir/.cs/README.md" "$new_uuid"
+    _set_local_state "$session_dir/.cs/local/state" claude_session_id "$new_uuid"
     local session_color
-    session_color=$(_read_session_color "$session_dir/.cs/README.md")
+    session_color=$(_read_local_state "$session_dir/.cs/local/state" claude_session_color)
     local color_arg=""
     [ -n "$session_color" ] && color_arg="/color $session_color"
     export CS_CLAUDE_SESSION_ID="$new_uuid"
@@ -1112,13 +1089,15 @@ create_session_structure() {
 
     mkdir -p "$session_dir/.cs"/{artifacts,logs,local}
 
+    # Machine-local values go to .cs/local/state, never the git-synced README.
+    _set_local_state "$session_dir/.cs/local/state" claude_session_id "$claude_session_id"
+    _set_local_state "$session_dir/.cs/local/state" claude_session_color "$claude_session_color"
+
     # Create README.md with YAML frontmatter for structured queries
     cat > "$session_dir/.cs/README.md" << EOF
 ---
 status: active
 created: $(date '+%Y-%m-%d')
-claude_session_id: $claude_session_id
-claude_session_color: $claude_session_color
 tags: []
 aliases: ["$(basename "$session_dir")"]
 ---
@@ -1325,17 +1304,40 @@ migrate_session() {
         warn "Added frontmatter to .cs/README.md"
     fi
 
-    # Phase 8: Bind claude_session_id in README frontmatter to a real claude
+    # Phase 12: Move machine-local fields out of README frontmatter into
+    # .cs/local/state. claude_session_id / claude_session_color are copied
+    # (unless the state file already has its own value — the local machine's
+    # binding wins over whatever another machine last pushed); last_resumed
+    # and updated are dropped, they are regenerated activity stamps. The
+    # README then loses all four lines: hooks on every machine rewrote them
+    # with divergent values, which made merge conflicts inevitable whenever
+    # a session was shared through git.
+    local _state="$session_dir/.cs/local/state"
+    if [ -f "$readme" ] && grep -qE '^(claude_session_id|claude_session_color|last_resumed|updated):' "$readme"; then
+        local _legacy_uuid _legacy_color
+        _legacy_uuid=$(awk '/^claude_session_id:/ { sub(/^claude_session_id:[[:space:]]*/, ""); gsub(/"/, ""); print; exit }' "$readme")
+        _legacy_color=$(awk '/^claude_session_color:/ { sub(/^claude_session_color:[[:space:]]*/, ""); gsub(/"/, ""); print; exit }' "$readme")
+        if [ -n "$_legacy_uuid" ] && [ -z "$(_read_local_state "$_state" claude_session_id)" ]; then
+            _set_local_state "$_state" claude_session_id "$_legacy_uuid"
+        fi
+        if [ -n "$_legacy_color" ] && [ -z "$(_read_local_state "$_state" claude_session_color)" ]; then
+            _set_local_state "$_state" claude_session_color "$_legacy_color"
+        fi
+        local _tmp="$readme.tmp"
+        awk '/^(claude_session_id|claude_session_color|last_resumed|updated):/ { next } { print }' \
+            "$readme" > "$_tmp" && mv "$_tmp" "$readme"
+        warn "Moved machine-local fields from .cs/README.md to .cs/local/state"
+    fi
+
+    # Phase 8: Bind claude_session_id in local state to a real claude
     # transcript on disk so `claude --resume <uuid>` resolves to an actual
     # conversation. A recorded UUID with no matching transcript file is an
     # orphan — the cs hooks/doctor cross-checks will warn about it on every
     # launch, and `--resume` will fail. Steady state ("recorded UUID present,
     # transcript exists") is the fast path; cold paths run discovery.
-    #
-    # Phase 6 guarantees the frontmatter block exists.
-    if [ -f "$readme" ] && head -1 "$readme" | grep -q '^---$'; then
+    {
         local _existing _proj _bind_uuid=""
-        _existing=$(_read_session_uuid "$readme")
+        _existing=$(_read_local_state "$_state" claude_session_id)
         _proj=$(_claude_project_dir "$session_dir")
 
         if [ -n "$_existing" ] && [ -f "$_proj/$_existing.jsonl" ]; then
@@ -1355,22 +1357,14 @@ migrate_session() {
         fi
 
         if [ -n "$_bind_uuid" ]; then
-            local _tmp="$readme.tmp"
-            # Strip any existing claude_session_id: line, then insert the
-            # bound value after 'created:'. One awk handles both insert and
-            # replace; no branching on whether the line was already present.
-            awk -v new_line="claude_session_id: $_bind_uuid" '
-                /^claude_session_id:/ { next }
-                /^created:/ { print; print new_line; next }
-                { print }
-            ' "$readme" > "$_tmp" && mv "$_tmp" "$readme"
+            _set_local_state "$_state" claude_session_id "$_bind_uuid"
             if [ -z "$_existing" ]; then
-                warn "Bound claude_session_id in .cs/README.md to $_bind_uuid"
+                warn "Bound claude_session_id in .cs/local/state to $_bind_uuid"
             else
                 warn "Repaired orphan claude_session_id (was $_existing)"
             fi
         fi
-    fi
+    }
 
     # Phase 9: Manage the cs:memory-note section in CLAUDE.md. Four states:
     #
@@ -1457,17 +1451,15 @@ EOF
         warn "Appended session wrap-up cues to CLAUDE.md"
     fi
 
-    # Phase 11: Backfill claude_session_color in README frontmatter when
-    # absent. Picks one of the 8 colors claude's /color command accepts and
-    # writes it after claude_session_id. Idempotent — runs only when the
-    # field is missing. Legacy sessions (pre-v2026.5.7) get a randomly-chosen
-    # color on next launch and stay on it from then on.
-    if [ -f "$readme" ] && head -1 "$readme" | grep -q '^---$' \
-       && ! grep -qE '^claude_session_color:' "$readme"; then
+    # Phase 11: Backfill claude_session_color in local state when absent.
+    # Picks one of the 8 colors claude's /color command accepts. Idempotent —
+    # runs only when the field is missing. Legacy sessions (pre-v2026.5.7)
+    # get a randomly-chosen color on next launch and stay on it from then on.
+    if [ -z "$(_read_local_state "$_state" claude_session_color)" ]; then
         local _new_color
         _new_color=$(_alloc_random_color)
-        _set_session_color "$readme" "$_new_color"
-        warn "Backfilled claude_session_color in .cs/README.md ($_new_color)"
+        _set_local_state "$_state" claude_session_color "$_new_color"
+        warn "Backfilled claude_session_color in .cs/local/state ($_new_color)"
     fi
 }
 
@@ -2028,7 +2020,7 @@ _doctor_check_auto_memory() {
     fi
 }
 
-# Cross-check the session UUID recorded in .cs/README.md frontmatter against
+# Cross-check the session UUID recorded in .cs/local/state against
 # the live $CLAUDE_CODE_SESSION_ID (set by Claude Code inside its own session).
 # A mismatch means the running claude conversation is not the one cs thinks
 # it is — usually because the user launched claude outside cs in this dir,
@@ -2037,15 +2029,11 @@ _doctor_check_auto_memory() {
 # cs and hooks; doctor surfaces the divergence so the user can decide whether
 # to relaunch via cs or accept the drift.
 _doctor_check_session_id_match() {
-    local readme="$CLAUDE_SESSION_META_DIR/README.md"
-    if [ ! -f "$readme" ]; then
-        _doctor_warn "Session UUID: $readme missing"
-        return
-    fi
+    local state="$CLAUDE_SESSION_META_DIR/local/state"
     local recorded
-    recorded=$(_read_session_uuid "$readme")
+    recorded=$(_read_local_state "$state" claude_session_id)
     if [ -z "$recorded" ]; then
-        _doctor_warn "Session UUID: not recorded in frontmatter — next cs launch will backfill"
+        _doctor_warn "Session UUID: not recorded in .cs/local/state — next cs launch will backfill"
         return
     fi
     local current="${CLAUDE_CODE_SESSION_ID:-}"
@@ -2504,14 +2492,11 @@ launch_claude_code() {
     # Read the session's recorded UUID (allocated by create_session_structure
     # on new sessions or backfilled by migrate_session Phase 8 on legacy ones).
     # Used for both the CS_CLAUDE_SESSION_ID env export below and for the
-    # spawn args at exec time. Empty only if the README is somehow missing —
-    # exec paths fall back gracefully.
-    local claude_session_id=""
-    local claude_session_color=""
-    if [ -f "$session_dir/.cs/README.md" ]; then
-        claude_session_id=$(_read_session_uuid "$session_dir/.cs/README.md")
-        claude_session_color=$(_read_session_color "$session_dir/.cs/README.md")
-    fi
+    # spawn args at exec time. Empty only if the state file is somehow
+    # missing — exec paths fall back gracefully.
+    local claude_session_id claude_session_color
+    claude_session_id=$(_read_local_state "$session_dir/.cs/local/state" claude_session_id)
+    claude_session_color=$(_read_local_state "$session_dir/.cs/local/state" claude_session_color)
 
     # Build the trailing positional prompt arg that applies the session's
     # color at launch. Claude has no --color CLI flag (verified through
@@ -2657,7 +2642,7 @@ launch_claude_code() {
         if [ $rc -ne 0 ] && [ $SECONDS -lt 3 ]; then
             # Quick failure suggests no conversation to continue. Rebind so
             # the fresh transcript claude is about to create is tracked by
-            # cs (otherwise the README's claude_session_id keeps pointing at
+            # cs (otherwise the recorded claude_session_id keeps pointing at
             # a transcript that doesn't resolve, and the next launch repeats
             # the same failure).
             echo -e "${DIM}No previous conversation found. Starting fresh...${NC}"
