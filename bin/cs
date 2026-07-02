@@ -639,6 +639,28 @@ validate_session_name() {
     fi
 }
 
+# Split a worktree session name <base>@<task> into CS_WT_BASE / CS_WT_TASK.
+# Returns 1 for plain names (no @). Errors out when either half is invalid.
+# @ is safe as a separator: validate_session_name has never admitted it, so
+# no existing session name can contain one.
+cs_split_worktree_name() {
+    local name="$1"
+    case "$name" in
+        *@*) ;;
+        *) return 1 ;;
+    esac
+    CS_WT_BASE="${name%%@*}"
+    CS_WT_TASK="${name#*@}"
+    if [ -z "$CS_WT_BASE" ]; then
+        error "Session name cannot be empty before '@' (expected <base>@<task>)"
+    fi
+    validate_session_name "$CS_WT_BASE"
+    if [ -z "$CS_WT_TASK" ] || ! [[ "$CS_WT_TASK" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+        error "Worktree task name must contain only alphanumeric characters, hyphens, underscores, and dots"
+    fi
+    return 0
+}
+
 # Ensure auto memory directory exists and migrate from default location
 setup_auto_memory() {
     local session_dir="$1"
@@ -3217,7 +3239,13 @@ main() {
     local force_flag=""
 
     # Validate inputs
-    validate_session_name "$session_name"
+    local wt_base="" wt_task=""
+    if cs_split_worktree_name "$session_name"; then
+        wt_base="$CS_WT_BASE"
+        wt_task="$CS_WT_TASK"
+    else
+        validate_session_name "$session_name"
+    fi
 
     # Parse session subcommands with a while loop to support flag combinations
     shift  # Remove session name / cmd
