@@ -217,6 +217,9 @@ test_merge_ignored_mode_fuses_records() {
     echo "base note" > "$base_dir/.cs/memory/note-base.md"
     printf -- '---\ndescription: seed\n---\n# Session narrative (tester)\n\n## Prior finding\n' \
         > "$base_dir/.cs/memory/narrative.tester.md"
+    printf -- '---\ndescription: plain-seed\n---\n# Session narrative (plain)\n' \
+        > "$base_dir/.cs/memory/narrative.plain.md"
+    echo "base artifact" > "$base_dir/.cs/artifacts/shared.sh"
     echo "# P" > "$base_dir/README.md"
     printf '.cs/\n' > "$base_dir/.gitignore"
     (cd "$base_dir" && git init -q && git add -A && git commit -q -m init)
@@ -230,11 +233,24 @@ test_merge_ignored_mode_fuses_records() {
     echo "artifact body" > "$wt/.cs/artifacts/run.sh"
     echo '[{"filename":"run.sh","timestamp":"2026-07-02T00:00:00Z"}]' \
         > "$wt/.cs/artifacts/MANIFEST.json"
-    printf -- '---\nname: n\n---\n# Session narrative (tester)\n\n## Task finding\n' \
+    printf -- '---\nname: n\n---\n# Session narrative (tester)\n\n## Task finding\n\n---\n\n## After rule\n' \
         > "$wt/.cs/memory/narrative.tester.md"
     printf -- '---\nname: other-n\n---\n# Session narrative (other)\n\n## Other finding\n' \
         > "$wt/.cs/memory/narrative.other.md"
-    "$CS_BIN" "proj" --merge "t1" > /dev/null 2>&1
+    printf -- '# Session narrative (plain)\n\n## Plain finding\n' \
+        > "$wt/.cs/memory/narrative.plain.md"
+    echo "task version" > "$wt/.cs/memory/note-base.md"
+    echo "task artifact" > "$wt/.cs/artifacts/shared.sh"
+    local output merge_status
+    output=$("$CS_BIN" "proj" --merge "t1" 2>&1)
+    merge_status=$?
+    assert_eq "0" "$merge_status" "merge exits 0" || return 1
+    assert_output_contains "$output" "memory/note-base.md already exists in the base; skipped" \
+        "memory collision warned" || return 1
+    assert_output_contains "$output" "artifacts/shared.sh already exists in the base; skipped" \
+        "artifact collision warned" || return 1
+    assert_eq "base note" "$(cat "$base_dir/.cs/memory/note-base.md")" "memory collision keeps base copy" || return 1
+    assert_eq "base artifact" "$(cat "$base_dir/.cs/artifacts/shared.sh")" "artifact collision keeps base copy" || return 1
     assert_file_contains "$base_dir/.cs/timeline.jsonl" "from-task" "timeline appended" || return 1
     assert_file_exists "$base_dir/.cs/memory/note-task.md" "memory file copied" || return 1
     assert_file_exists "$base_dir/.cs/memory/note-base.md" "base memory untouched" || return 1
@@ -243,6 +259,12 @@ test_merge_ignored_mode_fuses_records() {
     assert_file_contains "$base_dir/.cs/memory/narrative.tester.md" "Task finding" "narrative body appended" || return 1
     assert_file_not_contains "$base_dir/.cs/memory/narrative.tester.md" "name: n" "frontmatter not duplicated" || return 1
     assert_file_contains "$base_dir/.cs/memory/narrative.tester.md" "description: seed" "base frontmatter kept" || return 1
+    assert_file_contains "$base_dir/.cs/memory/narrative.tester.md" "After rule" \
+        "body after horizontal rule survives" || return 1
+    assert_file_contains "$base_dir/.cs/memory/narrative.plain.md" "Plain finding" \
+        "no-frontmatter body appended" || return 1
+    assert_file_contains "$base_dir/.cs/memory/narrative.plain.md" "description: plain-seed" \
+        "plain base frontmatter kept" || return 1
     assert_file_exists "$base_dir/.cs/memory/narrative.other.md" "unseen narrative copied" || return 1
     assert_file_contains "$base_dir/.cs/memory/narrative.other.md" "name: other-n" "first copy keeps frontmatter" || return 1
     assert_not_exists "$wt" "worktree removed" || return 1

@@ -838,8 +838,12 @@ fuse_session_records() {
         [ -f "$f" ] || continue
         base=$(basename "$f")
         if [ -f "$dst/memory/$base" ]; then
-            # Append the body past the closing --- of the YAML frontmatter
-            awk 'c==2 {print} /^---$/ {c++}' "$f" >> "$dst/memory/$base"
+            # Append the body past the closing --- of the YAML frontmatter.
+            # A file not opening with --- has no frontmatter (whole file is
+            # body); counting stops at 2 so a --- horizontal rule in the
+            # body stays body instead of truncating the append.
+            awk 'NR==1 && $0 != "---" {c=2} /^---$/ && c < 2 {c++; next} c >= 2 {print}' \
+                "$f" >> "$dst/memory/$base"
         else
             cp "$f" "$dst/memory/$base"
         fi
