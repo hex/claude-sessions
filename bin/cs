@@ -3387,7 +3387,9 @@ main() {
             if [ -n "$pinned" ] && [ "$head_branch" != "$pinned" ]; then
                 warn "Worktree HEAD is '$head_branch' but this task expects '$pinned' (did something run git switch here?)"
             fi
-            migrate_session "$session_dir"
+            # No migrate_session here: worktree checkouts never predate the
+            # worktree feature, and its CLAUDE.md rewrite must never touch a
+            # project's own file (ignored-.cs repos track their real CLAUDE.md).
         fi
     elif [ ! -d "$session_dir" ]; then
         is_new="true"
