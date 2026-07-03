@@ -77,6 +77,16 @@ test_queue_requires_session() {
     assert_output_contains "$out" "session" "explains it needs a session" || return 1
 }
 
+test_queue_add_via_session_scoped_arm() {
+    # cs <session> -queue ... resolves the target from the name arg, not the
+    # ambient env, so clear the env a launched session would export.
+    unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR
+    local sdir="$CS_SESSIONS_ROOT/scoped-session"
+    mkdir -p "$sdir/.cs"
+    "$CS_BIN" scoped-session -queue add "from outside" >/dev/null 2>&1
+    assert_file_contains "$sdir/.cs/local/queue" "from outside" "session-scoped add lands in the named session" || return 1
+}
+
 run_test test_queue_add_appends_a_line
 run_test test_queue_list_numbers_pending
 run_test test_queue_rm_removes_by_index
@@ -85,4 +95,5 @@ run_test test_queue_start_sets_armed
 run_test test_queue_defer_writes_declined_epoch
 run_test test_queue_add_clears_declined
 run_test test_queue_requires_session
+run_test test_queue_add_via_session_scoped_arm
 report_results

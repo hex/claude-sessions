@@ -2186,7 +2186,8 @@ run_queue() {
         rm)    shift; _queue_rm "$qdir" "${1:-}";;
         clear) _queue_clear "$qdir";;
         start) _queue_set_state "$qdir" armed;;
-        defer) mkdir -p "$qdir"; printf '%s\n' "$(date +%s)" > "$qdir/queue.declined";;
+        defer) mkdir -p "$qdir"; printf '%s\n' "$(date +%s)" > "$qdir/queue.declined.tmp" \
+                   && mv "$qdir/queue.declined.tmp" "$qdir/queue.declined";;
         *)     error "Usage: cs -queue [add \"<task>\" | list | rm <n> | clear]";;
     esac
 }
