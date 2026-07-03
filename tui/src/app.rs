@@ -1065,6 +1065,10 @@ impl App {
                 .and_then(|mut f| writeln!(f, "{}", text))
             {
                 Ok(()) => {
+                    // Queue changed: let the Stop-hook gate re-ask even if it was
+                    // recently declined. Mirrors the CLI's `rm -f queue.declined`
+                    // in bin/cs `_queue_add`.
+                    let _ = std::fs::remove_file(dir.join("queue.declined"));
                     self.set_status(format!("Queued task for {}", name), StatusLevel::Success);
                 }
                 Err(e) => {
@@ -1419,6 +1423,11 @@ fn rename_claude_projects_dir(old_session_path: &std::path::Path, new_session_pa
 mod tests {
     use super::*;
     use crate::session::Session;
+
+    /// Serializes tests that mutate the process-global `CS_SESSIONS_ROOT` so they
+    /// don't race under the default parallel test runner. session.rs documents why
+    /// the codebase otherwise avoids mutating this global.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn sample_sessions() -> Vec<Session> {
         vec![
@@ -2750,6 +2759,7 @@ mod tests {
 
     #[test]
     fn queue_add_enter_appends_to_queue_file() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = std::env::temp_dir().join(format!("cs-tui-q-{}", std::process::id()));
         std::env::set_var("CS_SESSIONS_ROOT", &tmp);
         let name = "alpha"; // matches sample_sessions()[0].name
@@ -2764,6 +2774,31 @@ mod tests {
         let q = std::fs::read_to_string(tmp.join(name).join(".cs/local/queue")).unwrap();
         assert!(q.contains("do X"));
         assert_eq!(app.mode, Mode::Normal);
+        std::fs::remove_dir_all(&tmp).ok();
+        std::env::remove_var("CS_SESSIONS_ROOT");
+    }
+
+    #[test]
+    fn queue_add_clears_declined() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = std::env::temp_dir().join(format!("cs-tui-qd-{}", std::process::id()));
+        std::env::set_var("CS_SESSIONS_ROOT", &tmp);
+        let name = "alpha"; // matches sample_sessions()[0].name
+        let local = tmp.join(name).join(".cs/local");
+        std::fs::create_dir_all(&local).unwrap();
+        // A prior gate decline left this cooldown marker behind.
+        std::fs::write(local.join("queue.declined"), "1234567890\n").unwrap();
+        let mut app = App::new(sample_sessions());
+        app.table_state.select(Some(0));
+        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        for c in "do Y".chars() {
+            app.handle_key(KeyEvent::from(KeyCode::Char(c)));
+        }
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        assert!(
+            !local.join("queue.declined").exists(),
+            "adding a task must clear queue.declined so the gate can re-ask"
+        );
         std::fs::remove_dir_all(&tmp).ok();
         std::env::remove_var("CS_SESSIONS_ROOT");
     }
