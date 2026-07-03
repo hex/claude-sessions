@@ -46,6 +46,18 @@ _cs() {
         'show:Print a specific checkpoint'
     )
 
+    # Queue subcommands with descriptions
+    local -a queue_cmds
+    queue_cmds=(
+        'add:Add a task to the walk-away queue'
+        'list:Show pending and completed queued tasks'
+        'ls:Show pending and completed queued tasks (alias)'
+        'rm:Remove a pending task by index'
+        'clear:Empty the queue and stop draining'
+        'start:Arm the queue for draining'
+        'defer:Decline draining for now'
+    )
+
     # Update subcommands with descriptions
     local -a update_cmds
     update_cmds=(
@@ -67,6 +79,7 @@ _cs() {
         '-who:Show who contributed to shared memory/narrative'
         '-secrets:Manage session secrets'
         '-checkpoint:Save or manage session checkpoints'
+        '-queue:Manage the session walk-away queue'
         '-search:Search across all sessions'
         '-lint:Flag AI-slop prose tells in files'
         '-statusline:Manage the cs status line (enable|disable)'
@@ -82,19 +95,20 @@ _cs() {
     )
 
     # Determine context
-    local in_secrets=false in_update=false in_checkpoint=false has_session=false after_remove=false
+    local in_secrets=false in_update=false in_checkpoint=false in_queue=false has_session=false after_remove=false
     local i word
 
     for ((i=2; i < CURRENT; i++)); do
         word="${words[i]}"
         case "$word" in
-            -secrets) in_secrets=true; in_update=false; in_checkpoint=false ;;
-            -update) in_update=true; in_secrets=false; in_checkpoint=false ;;
-            -checkpoint) in_checkpoint=true; in_secrets=false; in_update=false ;;
+            -secrets) in_secrets=true; in_update=false; in_checkpoint=false; in_queue=false ;;
+            -update) in_update=true; in_secrets=false; in_checkpoint=false; in_queue=false ;;
+            -checkpoint) in_checkpoint=true; in_secrets=false; in_update=false; in_queue=false ;;
+            -queue) in_queue=true; in_secrets=false; in_update=false; in_checkpoint=false ;;
             -remove|-rm) after_remove=true ;;
             -*) ;;
             *)
-                if ! $in_secrets && ! $after_remove && ! $in_update && ! $in_checkpoint; then
+                if ! $in_secrets && ! $after_remove && ! $in_update && ! $in_checkpoint && ! $in_queue; then
                     has_session=true
                 fi
                 ;;
@@ -125,11 +139,18 @@ _cs() {
         return
     fi
 
+    # Context: after -queue
+    if $in_queue; then
+        _describe 'queue command' queue_cmds
+        return
+    fi
+
     # Context: after session name
     if $has_session; then
         local -a session_opts
         session_opts=(
             '-secrets:Run secrets command'
+            '-queue:Manage the session walk-away queue'
             '--force:Override active session lock'
             '--merge:Merge a task worktree back and remove it'
         )

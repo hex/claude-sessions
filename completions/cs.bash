@@ -13,7 +13,7 @@ _cs_completions() {
     local sessions_root="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 
     # Global flags
-    local global_flags="-list -ls -adopt -remove -rm -whoami -who -secrets -checkpoint -search -lint -statusline -detect-theme -doctor -diag -update -uninstall -help -h -version -v"
+    local global_flags="-list -ls -adopt -remove -rm -whoami -who -secrets -checkpoint -queue -search -lint -statusline -detect-theme -doctor -diag -update -uninstall -help -h -version -v"
 
     # Secrets subcommands
     local secrets_cmds="set store get list ls delete rm purge export export-file import-file migrate backend"
@@ -21,11 +21,14 @@ _cs_completions() {
     # Checkpoint subcommands
     local checkpoint_cmds="list show"
 
+    # Queue subcommands
+    local queue_cmds="add list ls rm clear start defer"
+
     # Update subcommands
     local update_cmds="--check -c --force -f"
 
     # Session-level options
-    local session_opts="-secrets --force --merge"
+    local session_opts="-secrets -queue --force --merge"
 
     # Get list of session names
     _cs_sessions() {
@@ -38,6 +41,7 @@ _cs_completions() {
     local in_secrets=false
     local in_update=false
     local in_checkpoint=false
+    local in_queue=false
     local has_session=false
     local after_remove=false
 
@@ -47,16 +51,25 @@ _cs_completions() {
                 in_secrets=true
                 in_update=false
                 in_checkpoint=false
+                in_queue=false
                 ;;
             -update)
                 in_update=true
                 in_secrets=false
                 in_checkpoint=false
+                in_queue=false
                 ;;
             -checkpoint)
                 in_checkpoint=true
                 in_secrets=false
                 in_update=false
+                in_queue=false
+                ;;
+            -queue)
+                in_queue=true
+                in_secrets=false
+                in_update=false
+                in_checkpoint=false
                 ;;
             -remove|-rm)
                 after_remove=true
@@ -66,7 +79,7 @@ _cs_completions() {
                 ;;
             *)
                 # A non-flag word that's not a subcommand is likely a session name
-                if ! $in_secrets && ! $after_remove && ! $in_update && ! $in_checkpoint; then
+                if ! $in_secrets && ! $after_remove && ! $in_update && ! $in_checkpoint && ! $in_queue; then
                     has_session=true
                 fi
                 ;;
@@ -94,6 +107,12 @@ _cs_completions() {
     # Context: after -checkpoint, complete with checkpoint subcommands
     if $in_checkpoint; then
         COMPREPLY=($(compgen -W "$checkpoint_cmds" -- "$cur"))
+        return
+    fi
+
+    # Context: after -queue, complete with queue subcommands
+    if $in_queue; then
+        COMPREPLY=($(compgen -W "$queue_cmds" -- "$cur"))
         return
     fi
 

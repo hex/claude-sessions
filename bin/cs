@@ -315,6 +315,10 @@ Commands:
   -checkpoint "<label>"  Save labelled state snapshot (run from inside a session)
   -checkpoint list    List checkpoints for current session
   -checkpoint show <name>  Print a specific checkpoint
+  -queue add "<task>" Add a task to the session's walk-away queue
+  -queue list         Show pending and completed queued tasks
+  -queue rm <n>       Remove pending task n
+  -queue clear        Empty the queue and stop draining
   -doctor, -diag      Run health checks (Keychain, hooks, memory, audit, tokens)
   -lint <file>...     Flag AI-slop prose tells (em-dashes, banned phrases); 0=clean 1=issues 2=error
   -statusline <cmd>   enable|disable the cs status line in Claude Code settings
@@ -2118,6 +2122,75 @@ run_checkpoint() {
     esac
 }
 
+# --- Task queue (cs -queue) ---------------------------------------------------
+# Machine-local queue of prompts drained by the Stop hook. Files live in
+# <session>/.cs/local/: queue (one prompt/line), queue.done, queue.state
+# (idle|armed|draining), queue.declined (epoch). Plain files so the standalone
+# Stop hook can read them without bin/cs's helpers.
+
+_queue_set_state() {  # atomic single-word write; "" removes the file
+    local qdir="$1" val="$2"
+    mkdir -p "$qdir"
+    if [ -z "$val" ]; then rm -f "$qdir/queue.state"; return 0; fi
+    printf '%s\n' "$val" > "$qdir/queue.state.tmp" && mv "$qdir/queue.state.tmp" "$qdir/queue.state"
+}
+
+_queue_add() {  # qdir, text
+    local qdir="$1" text="$2"
+    text="${text#"${text%%[![:space:]]*}"}"  # ltrim
+    text="${text%"${text##*[![:space:]]}"}"  # rtrim
+    [ -n "$text" ] || { error "cs -queue add needs a non-empty task"; }
+    mkdir -p "$qdir"
+    printf '%s\n' "$text" >> "$qdir/queue"
+    rm -f "$qdir/queue.declined"   # queue changed: allow the gate to re-ask
+}
+
+_queue_list() {  # qdir
+    local qdir="$1"
+    if [ -s "$qdir/queue" ]; then
+        echo "Pending:"
+        awk 'NF{ printf "  %d. %s\n", ++n, $0 }' "$qdir/queue"
+    else
+        echo "Queue is empty."
+    fi
+    if [ -s "$qdir/queue.done" ]; then
+        echo "Done:"
+        awk 'NF{ printf "  - %s\n", $0 }' "$qdir/queue.done"
+    fi
+}
+
+_queue_rm() {  # qdir, index
+    local qdir="$1" n="$2"
+    case "$n" in ''|*[!0-9]*) error "cs -queue rm needs a line number";; esac
+    [ -f "$qdir/queue" ] || { error "queue is empty"; }
+    awk -v target="$n" 'NF{ c++ } { if (c==target && NF) next; print }' "$qdir/queue" \
+        > "$qdir/queue.tmp" && mv "$qdir/queue.tmp" "$qdir/queue"
+    rm -f "$qdir/queue.declined"
+}
+
+_queue_clear() {  # qdir
+    local qdir="$1"
+    rm -f "$qdir/queue" "$qdir/queue.state" "$qdir/queue.declined"
+}
+
+# Dispatcher. Runs inside a session (env) or via the session-scoped arm.
+run_queue() {
+    if [ -z "${CLAUDE_SESSION_META_DIR:-}" ]; then
+        error "cs -queue must be run inside a cs session, or as: cs <session> -queue ..."
+    fi
+    local qdir="$CLAUDE_SESSION_META_DIR/local"
+    local sub="${1:-list}"
+    case "$sub" in
+        add)   shift; _queue_add "$qdir" "$*";;
+        list|ls) _queue_list "$qdir";;
+        rm)    shift; _queue_rm "$qdir" "${1:-}";;
+        clear) _queue_clear "$qdir";;
+        start) _queue_set_state "$qdir" armed;;
+        defer) mkdir -p "$qdir"; printf '%s\n' "$(date +%s)" > "$qdir/queue.declined";;
+        *)     error "Usage: cs -queue [add \"<task>\" | list | rm <n> | clear]";;
+    esac
+}
+
 _doctor_ok()   { printf "  ${GREEN}[ OK ]${NC} %s\n" "$1"; }
 _doctor_warn() { printf "  ${YELLOW}[WARN]${NC} %s\n" "$1"; DOCTOR_WARN=$((DOCTOR_WARN+1)); }
 _doctor_fail() { printf "  ${RED}[FAIL]${NC} %s\n" "$1"; DOCTOR_FAIL=$((DOCTOR_FAIL+1)); }
@@ -3606,6 +3679,11 @@ main() {
             run_checkpoint "$@"
             return 0
             ;;
+        -queue)
+            shift
+            run_queue "$@"
+            return 0
+            ;;
         -doctor|-diag)
             run_doctor
             return $?
@@ -3658,6 +3736,14 @@ main() {
                 run_secrets "$@"
                 return 0
                 ;;
+            -queue)
+                shift
+                export CLAUDE_SESSION_NAME="$session_name"
+                export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
+                export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
+                run_queue "$@"
+                return 0
+                ;;
             --merge)
                 shift
                 [ -n "${1:-}" ] || error "Usage: cs <base> --merge <task>"
@@ -3669,7 +3755,7 @@ main() {
                 shift
                 ;;
             *)
-                error "Unknown session command: $1. Use -secrets, --merge, or --force."
+                error "Unknown session command: $1. Use -secrets, -queue, --merge, or --force."
                 ;;
         esac
     done
