@@ -313,6 +313,10 @@ pub struct App {
     pub row_flashes: HashMap<String, (FlashKind, std::time::Instant)>,
     pub table_area: ratatui::layout::Rect,
     pub column_widths: Vec<u16>,
+    /// Click hit-map for the visible table rows, published by the renderer since
+    /// rows are variable height. Each entry is `(start_y, height, filtered_idx)`
+    /// where `start_y`/`height` are rows relative to `table_area.y`.
+    pub row_hit_spans: Vec<(u16, u16, usize)>,
     pub visible_sort_columns: Vec<SortColumn>,
     pub delete_countdown_start: Option<std::time::Instant>,
     /// Fuzzy match indices per session index (for highlighting matched chars in names).
@@ -358,6 +362,7 @@ impl App {
             mode: Mode::Normal,
             table_area: ratatui::layout::Rect::default(),
             column_widths: Vec::new(),
+            row_hit_spans: Vec::new(),
             sort_col: SortColumn::Modified,
             sort_dir: SortDirection::Desc,
             search_input: TextInput::new(),
@@ -1517,12 +1522,15 @@ impl App {
                         if let Some(sort_col) = self.column_at_x(col) {
                             self.cycle_sort(sort_col);
                         }
-                    } else if relative_row >= 4 {
-                        // Data row click
-                        let data_row = (relative_row - 4) as usize + self.table_state.offset();
-                        if data_row < self.filtered.len() {
-                            self.table_state.select(Some(data_row));
-                        }
+                    } else if let Some(&(_, _, idx)) = self.row_hit_spans.iter().find(
+                        |(start_y, height, _)| {
+                            relative_row >= *start_y && relative_row < start_y + height
+                        },
+                    ) {
+                        // Rows are variable height; consult the renderer's hit-map
+                        // so clicks below a group header or expanded row still land
+                        // on the right session.
+                        self.table_state.select(Some(idx));
                     }
                 }
                 Action::None
@@ -3129,5 +3137,66 @@ mod tests {
         assert_eq!(lines, vec!["one", "two", "three"], "queue unchanged after cancel");
         std::fs::remove_dir_all(&tmp).ok();
         std::env::remove_var("CS_SESSIONS_ROOT");
+    }
+
+    // --- Mouse hit-testing with variable-height rows ---
+
+    /// Render once through the real UI at the given size so the renderer
+    /// publishes `row_hit_spans` (and `table_area`), then leave `app` ready for
+    /// a synthetic mouse event. Width < PREVIEW_MIN_WIDTH keeps the preview pane
+    /// (which reads files) closed.
+    fn render_for_hit_map(app: &mut App, w: u16, h: u16) {
+        let backend = ratatui::backend::TestBackend::new(w, h);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| crate::ui::render(app, frame))
+            .unwrap();
+    }
+
+    fn left_click(app: &mut App, relative_row: u16, relative_col: u16) -> Action {
+        app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: app.table_area.x + relative_col,
+            row: app.table_area.y + relative_row,
+            modifiers: KeyModifiers::empty(),
+        })
+    }
+
+    #[test]
+    fn mouse_click_below_group_header_selects_correct_session() {
+        // Default sort is Modified, and all sample sessions share the "Older"
+        // time section, so row 0 carries a "── Older ──" label and is 2 lines
+        // tall. That pushes the 2nd session's line to relative row 6, where the
+        // old fixed-stride math (relative-4) mis-selected index 2.
+        let mut app = App::new(sample_sessions());
+        render_for_hit_map(&mut app, 100, 24);
+        assert_eq!(
+            app.row_hit_spans[0].1, 2,
+            "row 0 should be 2 lines tall (section label present)"
+        );
+        // Second session renders one line below where a naive stride expects it.
+        let action = left_click(&mut app, 6, 3);
+        assert!(matches!(action, Action::None));
+        assert_eq!(
+            app.table_state.selected(),
+            Some(1),
+            "click on the 2nd session's line must select index 1, not 0 or 2"
+        );
+    }
+
+    #[test]
+    fn mouse_click_on_group_label_line_selects_that_row() {
+        let mut app = App::new(sample_sessions());
+        // Start elsewhere so selecting row 0 is a real change.
+        app.table_state.select(Some(2));
+        render_for_hit_map(&mut app, 100, 24);
+        // Relative row 4 is the "── Older ──" label line belonging to row 0.
+        let action = left_click(&mut app, 4, 3);
+        assert!(matches!(action, Action::None));
+        assert_eq!(
+            app.table_state.selected(),
+            Some(0),
+            "clicking a row's group-label line selects that row's session"
+        );
     }
 }

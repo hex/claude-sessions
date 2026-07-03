@@ -145,6 +145,11 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
     // One wall-clock read per frame, shared by every row's recency math.
     let now = std::time::SystemTime::now();
 
+    // Total drawn height of each row, parallel to `app.filtered`. Captured here —
+    // the one place the `1 + extra_height` math lives — so mouse hit-testing can
+    // reconstruct exact row spans without duplicating the geometry.
+    let mut row_heights: Vec<u16> = Vec::with_capacity(app.filtered.len());
+
     let rows: Vec<Row> = app
         .filtered
         .iter()
@@ -356,11 +361,9 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             }
 
             let extra_height = if section_label.is_some() { 1u16 } else { 0 } + preview_lines;
-            let row = if extra_height > 0 {
-                Row::new(cells).height(1 + extra_height)
-            } else {
-                Row::new(cells)
-            };
+            let height = 1 + extra_height;
+            row_heights.push(height);
+            let row = Row::new(cells).height(height);
 
             // Flash background takes priority, then zebra striping
             if let Some(flash) = app.active_flash(&s.name) {
@@ -429,6 +432,25 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
         .highlight_spacing(HighlightSpacing::Always);
 
     frame.render_stateful_widget(table, area, &mut app.table_state);
+
+    // Publish the row hit-map now that ratatui has finalized the scroll offset.
+    // Data rows begin at relative y = 4 (border, title, header, header rule) and
+    // stack by their true heights, so clicks below a group header or an expanded
+    // row still resolve to the right session. Only on-screen rows are recorded.
+    app.row_hit_spans.clear();
+    let bottom = area.height.saturating_sub(1); // relative y of the bottom border
+    let mut y = 4u16;
+    for (idx, &h) in row_heights
+        .iter()
+        .enumerate()
+        .skip(app.table_state.offset())
+    {
+        if y >= bottom {
+            break;
+        }
+        app.row_hit_spans.push((y, h, idx));
+        y = y.saturating_add(h);
+    }
 
     // Warm rust→orange→amber gradient band behind the header labels. Painted
     // per-cell because a terminal background can only be a flat color per cell;
