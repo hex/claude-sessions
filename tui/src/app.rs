@@ -193,6 +193,7 @@ pub enum SortColumn {
     Created,
     Modified,
     Secrets,
+    Todo,
     Github,
 }
 
@@ -574,6 +575,7 @@ impl App {
                     SortColumn::Created => sa.created.cmp(&sb.created),
                     SortColumn::Modified => sa.modified.cmp(&sb.modified),
                     SortColumn::Secrets => sa.secrets_count.cmp(&sb.secrets_count),
+                    SortColumn::Todo => sa.queue_depth.cmp(&sb.queue_depth),
                     SortColumn::Github => sa.git_repo.cmp(&sb.git_repo),
                 };
                 match sort_dir {
@@ -731,6 +733,10 @@ impl App {
             }
             KeyCode::Char('5') => {
                 self.cycle_sort(SortColumn::Github);
+                Action::None
+            }
+            KeyCode::Char('6') => {
+                self.cycle_sort(SortColumn::Todo);
                 Action::None
             }
             KeyCode::Tab => {
@@ -1491,6 +1497,10 @@ impl App {
 
     pub fn has_secrets(&self) -> bool {
         self.sessions.iter().any(|s| s.secrets_count > 0)
+    }
+
+    pub fn has_todos(&self) -> bool {
+        self.sessions.iter().any(|s| s.queue_depth > 0)
     }
 
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> Action {

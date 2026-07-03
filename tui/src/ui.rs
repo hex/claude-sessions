@@ -105,12 +105,14 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
     app.table_area = area;
 
     let show_secrets = app.has_secrets();
+    let show_todos = app.has_todos();
     // Hide Github column when preview pane is open (it's shown in the preview)
     let show_github = app.has_git_sessions() && !preview_open;
 
     // Track which sort columns are visible (for mouse click-to-sort)
     let mut visible_cols = vec![SortColumn::Name, SortColumn::Created, SortColumn::Modified];
     if show_secrets { visible_cols.push(SortColumn::Secrets); }
+    if show_todos { visible_cols.push(SortColumn::Todo); }
     if show_github { visible_cols.push(SortColumn::Github); }
     app.visible_sort_columns = visible_cols;
 
@@ -131,6 +133,9 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
     ];
     if show_secrets {
         header_cells.push(Cell::from(format!("Secrets{}", sort_indicator(SortColumn::Secrets))));
+    }
+    if show_todos {
+        header_cells.push(Cell::from(format!("To-Do{}", sort_indicator(SortColumn::Todo))));
     }
     if show_github {
         header_cells.push(Cell::from(format!("Github{}", sort_indicator(SortColumn::Github))));
@@ -186,13 +191,6 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
                 name_spans.push(Span::styled(
                     format!("{} ", icons.lock),
                     Style::default().fg(secrets_color),
-                ));
-            }
-            if s.queue_depth > 0 {
-                let queue_color = if dimmed { p.comment } else { p.gold };
-                name_spans.push(Span::styled(
-                    format!("[{}q] ", s.queue_depth),
-                    Style::default().fg(queue_color),
                 ));
             }
 
@@ -343,6 +341,15 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
                 cells.push(Cell::from(secrets_line).style(Style::default().fg(meta_color)));
             }
 
+            if show_todos {
+                let todo = if s.queue_depth > 0 {
+                    format!("{} {}", '\u{25a4}', s.queue_depth)
+                } else {
+                    String::new()
+                };
+                cells.push(Cell::from(todo).style(Style::default().fg(p.yellow)));
+            }
+
             if show_github {
                 let github = s.git_repo.clone().unwrap_or_default();
                 let github_color = if dimmed { p.comment } else { p.green };
@@ -386,6 +393,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
         Constraint::Length(6),  // Age (relative)
     ];
     if show_secrets { widths.push(Constraint::Length(9)); }
+    if show_todos { widths.push(Constraint::Length(7)); }
     if show_github { widths.push(Constraint::Min(15)); }
 
     let session_count = app.filtered.len();
@@ -579,7 +587,7 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
                 "Space:mark  D:delete marked  Esc:clear marks  q:quit  Enter:open  /:search"
             }
             Mode::Normal => {
-                "q:quit  Enter:open  n:new  d:delete  r:rename  Tab:to-do  Space:mark  /:search  1-5:sort"
+                "q:quit  Enter:open  n:new  d:delete  r:rename  Tab:to-do  Space:mark  /:search  1-6:sort"
             }
             Mode::SessionMenu => "j/k:navigate  Enter:select  Esc:cancel",
             Mode::ConfirmDelete | Mode::ConfirmBatchDelete => "y:confirm  n:cancel",
@@ -922,6 +930,18 @@ fn render_command_output(text: &str, p: Palette, frame: &mut Frame) {
     frame.render_widget(paragraph, popup_area);
 }
 
+/// A body-section header for the preview pane: a muted rust accent bar, then
+/// the label in bold gold. Shared by every section so the accent stays uniform.
+fn section_header(label: impl Into<String>, p: Palette) -> Line<'static> {
+    Line::from(vec![
+        Span::styled("\u{258f} ", Style::default().fg(p.rust)),
+        Span::styled(
+            label.into(),
+            Style::default().fg(p.gold).add_modifier(Modifier::BOLD),
+        ),
+    ])
+}
+
 fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
     let p = app.theme;
     let session = match app.selected_session() {
@@ -977,10 +997,11 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
         ]));
     }
     if session.is_locked {
+        let lock = theme::icons().lock;
         let pid_text = session
             .lock_pid
-            .map(|pid| format!("Locked (PID {})", pid))
-            .unwrap_or_else(|| "Locked".to_string());
+            .map(|pid| format!("{} Locked (PID {})", lock, pid))
+            .unwrap_or_else(|| format!("{} Locked", lock));
         lines.push(Line::from(Span::styled(
             pid_text,
             Style::default().fg(p.red),
@@ -989,13 +1010,15 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
 
     // Preview content from .cs/ files
     if let Some(preview) = app.preview_cache.get(&session.name) {
-        lines.push(Line::from(""));
+        // Thin rule separating front-matter (metadata) from body (content).
+        let inner_width = (area.width as usize).saturating_sub(2);
+        lines.push(Line::from(Span::styled(
+            "\u{2500}".repeat(inner_width),
+            Style::default().fg(p.comment),
+        )));
 
         if let Some(ref obj) = preview.objective {
-            lines.push(Line::from(Span::styled(
-                "Objective",
-                Style::default().fg(p.gold).add_modifier(Modifier::BOLD),
-            )));
+            lines.push(section_header("Objective", p));
             lines.push(Line::from(Span::styled(
                 obj.as_str(),
                 Style::default().fg(p.fg),
@@ -1004,10 +1027,7 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
         }
 
         if !preview.discoveries.is_empty() {
-            lines.push(Line::from(Span::styled(
-                "Narrative",
-                Style::default().fg(p.gold).add_modifier(Modifier::BOLD),
-            )));
+            lines.push(section_header("Narrative", p));
             for disc in &preview.discoveries {
                 let truncated = truncate_str(disc, (area.width as usize).saturating_sub(6));
                 lines.push(Line::from(vec![
@@ -1019,10 +1039,7 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
         }
 
         if !preview.memory_entries.is_empty() {
-            lines.push(Line::from(Span::styled(
-                "Memory",
-                Style::default().fg(p.gold).add_modifier(Modifier::BOLD),
-            )));
+            lines.push(section_header("Memory", p));
             for entry in &preview.memory_entries {
                 let truncated = truncate_str(entry, (area.width as usize).saturating_sub(6));
                 lines.push(Line::from(vec![
@@ -1034,10 +1051,7 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
         }
 
         if !preview.contributors.is_empty() {
-            lines.push(Line::from(Span::styled(
-                "Contributors",
-                Style::default().fg(p.gold).add_modifier(Modifier::BOLD),
-            )));
+            lines.push(section_header("Contributors", p));
             for c in &preview.contributors {
                 let truncated = truncate_str(c, (area.width as usize).saturating_sub(6));
                 lines.push(Line::from(vec![
@@ -1049,10 +1063,10 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
         }
 
         if preview.artifact_count > 0 {
-            lines.push(Line::from(Span::styled(
+            lines.push(section_header(
                 format!("Artifacts ({})", preview.artifact_count),
-                Style::default().fg(p.gold).add_modifier(Modifier::BOLD),
-            )));
+                p,
+            ));
             let max_names = (area.height as usize).saturating_sub(lines.len() + 3);
             for name in preview.artifact_names.iter().take(max_names) {
                 lines.push(Line::from(vec![
@@ -1299,7 +1313,13 @@ mod tests {
 
     #[test]
     fn wide_terminal_renders_notes_pane() {
-        let mut app = App::new(one_session());
+        // The To-Do panel reads the selected session's queue live from
+        // CS_SESSIONS_ROOT. Use a session name no other test seeds on disk so the
+        // "no queued tasks" assertion can't race the ENV_LOCK'd queue tests (which
+        // transiently point the root at temp dirs holding an "alpha" queue).
+        let mut sessions = one_session();
+        sessions[0].name = "cs-tui-render-probe".into();
+        let mut app = App::new(sessions);
         app.theme = Palette::dark();
         let joined = render_wide(&mut app);
         assert!(joined.contains("To-Do"), "To-Do panel title should render: {joined}");
@@ -1337,5 +1357,45 @@ mod tests {
             "created cell must drop the time component"
         );
         assert!(joined.contains("3d"), "modified should render as relative age");
+    }
+
+    #[test]
+    fn todo_column_renders_when_a_session_has_queued_tasks() {
+        use std::time::{Duration, SystemTime};
+        let mut sessions = one_session();
+        sessions[0].queue_depth = 3;
+        sessions[0].modified_ts = Some(SystemTime::now() - Duration::from_secs(3 * 86400));
+        let mut app = App::new(sessions);
+        app.theme = Palette::dark();
+        // Width 100 < PREVIEW_MIN_WIDTH keeps the To-Do panel closed, so the only
+        // "To-Do" text in the buffer comes from the table column under test.
+        let backend = TestBackend::new(100, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let joined: String = (0..buf.area.height)
+            .map(|y| {
+                (0..buf.area.width)
+                    .filter_map(|x| buf.cell((x, y)).map(|c| c.symbol().to_string()))
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("To-Do"), "To-Do column header should render: {joined}");
+        assert!(
+            joined.contains("\u{25a4} 3"),
+            "todo cell should show the glyph and count: {joined}"
+        );
+    }
+
+    #[test]
+    fn todo_column_hidden_when_no_session_has_queued_tasks() {
+        // render_rows() uses one_session() (queue_depth 0) at width 100 (no panel),
+        // so "To-Do" must not appear anywhere.
+        let joined = render_rows().join("\n");
+        assert!(
+            !joined.contains("To-Do"),
+            "To-Do column is hidden when no session has queued tasks: {joined}"
+        );
     }
 }
