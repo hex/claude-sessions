@@ -87,6 +87,15 @@ _parse_stdin() {
     {
         IFS= read -r SL_SESSION
         IFS= read -r SL_CTX
+        # Stamp context % for the task-queue gate (the Stop hook reads this file).
+        # Machine-local, per the .cs/local partition; truncated to an integer.
+        if [ -n "${CLAUDE_SESSION_NAME:-}" ] && [ -n "${SL_CTX:-}" ]; then
+            _pctdir="$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/local"
+            if mkdir -p "$_pctdir" 2>/dev/null; then
+                printf '%s\n' "${SL_CTX%%.*}" > "$_pctdir/context-pct.tmp" 2>/dev/null \
+                    && mv "$_pctdir/context-pct.tmp" "$_pctdir/context-pct" 2>/dev/null || true
+            fi
+        fi
         IFS= read -r SL_MODEL
         IFS= read -r SL_EFFORT
         IFS= read -r SL_5H

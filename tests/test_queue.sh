@@ -163,4 +163,13 @@ run_test test_drain_declined_within_cooldown_falls_through
 run_test test_drain_ignores_subagents
 run_test test_drain_gate_mentions_high_context
 
+test_statusline_stamps_context_pct() {
+    local sl="$SCRIPT_DIR/../bin/cs-statusline"
+    echo '{"context_window":{"used_percentage":73.4}}' | bash "$sl" >/dev/null 2>&1 || true
+    assert_file_exists "$(QDIR)/context-pct" "statusline stamps context-pct" || return 1
+    assert_file_contains "$(QDIR)/context-pct" "73" "stamps truncated integer" || return 1
+}
+
+run_test test_statusline_stamps_context_pct
+
 report_results
