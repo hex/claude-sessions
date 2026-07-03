@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.7.3"
+VERSION="2026.7.4"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 # Manifest merge semantics shared by the git merge driver (tracked-.cs
 # repos) and the explicit fuse (ignored-.cs repos): combine both sides,

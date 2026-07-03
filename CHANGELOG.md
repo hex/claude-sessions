@@ -2,22 +2,45 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
-## Unreleased
+## 2026.7.4
 
 ### Features
 
+- **Task queue** — `cs -queue add "<task>"` queues prompts for a walk-away
+  run; the Stop hook asks once (context % shown, with a compact nudge at
+  60% or above) then drains the queue in order at each stop boundary until
+  it's empty, with no further prompts, mirroring progress into the native
+  task list. Manage with `cs -queue list`/`rm`/`clear`, or target any
+  session from another terminal with `cs <session> -queue …`.
+- **TUI To-Do panel and column** — the session picker's right pane has a
+  To-Do panel for the highlighted session: `Tab` focuses the input, `Enter`
+  queues a task, `Down` enters the list where `d` deletes and `e` edits a
+  task in place, `Esc` returns to the session list. Sessions with queued
+  tasks get a sortable `▤ N` To-Do column, and the status line shows `▤ N`
+  after the session name.
 - **Worktree sessions are self-aware** — a task worktree session's Claude is
   told at launch (and after /clear or compaction) that it runs in a worktree
   of its base session, that `cs <base> --merge <task>` integrates it, and
   that merging the task branch by hand bypasses the record fuse. Subagents
   inherit the same contract.
-- **Task queue** — `cs -queue add "<task>"` queues prompts for a walk-away
-  run; the Stop hook asks once (context % shown, with a compact nudge above
-  60%) then drains the queue in order at each stop boundary until it's
-  empty, with no further prompts, mirroring progress into the native task
-  list. Manage with `cs -queue list`/`rm`/`clear`; in the TUI, `a` queues a
-  task on the highlighted session and a `[Nq]` badge marks non-empty
-  queues.
+
+### Performance
+
+- **Faster session picker** — the TUI scans sessions across a bounded worker
+  pool instead of forking `git` serially per repo; on ~56 git sessions,
+  picker startup dropped from ~1.1s to ~0.27s.
+
+### Fixes
+
+- TUI mouse clicks now select the correct session across variable-height
+  rows (time-group headers and expanded previews).
+- The queue's decline cooldown and the To-Do column stay consistent across
+  the CLI, the Stop hook, and the TUI panel.
+
+### Docs
+
+- README, `docs/statusline.md`, and `docs/hooks.md` updated for the queue,
+  the To-Do panel and column, and the status line notes segment.
 
 ## 2026.7.3
 
