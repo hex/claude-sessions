@@ -359,6 +359,24 @@ test_session_start_announces_worktree_task() {
         "manual merges must be warned against" || return 1
 }
 
+
+test_session_start_worktree_block_needs_at_shaped_name() {
+    session_start_setup
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    printf 'task_branch: cs/fix-auth\ncs_base: myproj\n' >> "$CLAUDE_SESSION_META_DIR/local/state"
+
+    # task_branch present but the session name lost its @ (corrupted state
+    # or env set outside the launcher): emitting commands would misfire —
+    # cs -rm on a plain name rm -rf's the BASE session. No block at all.
+    local output
+    output=$(echo '{"session_id":"s","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | CLAUDE_SESSION_NAME="myproj" bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    assert_output_not_contains "$output" "cs -rm" \
+        "no destructive command suggestions without a parseable name" || return 1
+    assert_output_not_contains "$output" "task worktree" \
+        "no worktree block when the name shape does not parse" || return 1
+}
+
 test_session_start_no_worktree_block_for_plain_sessions() {
     session_start_setup
 
@@ -950,6 +968,7 @@ run_test test_failure_handles_missing_error
 
 # Session start: cross-session context
 run_test test_session_start_announces_worktree_task
+run_test test_session_start_worktree_block_needs_at_shaped_name
 run_test test_session_start_no_worktree_block_for_plain_sessions
 run_test test_subagent_context_announces_worktree_task
 run_test test_resume_digest_reports_memory_activity

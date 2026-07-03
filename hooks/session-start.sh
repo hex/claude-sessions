@@ -250,7 +250,10 @@ fi
 # so this fires in both tracked- and ignored-.cs modes, on every source
 # (the awareness must survive /clear and compaction).
 TASK_BRANCH=$(awk '/^task_branch:/ { print $2; exit }' "$STATE_FILE" 2>/dev/null || true)
-if [ -n "$TASK_BRANCH" ]; then
+# The commands below embed the session name; without its <base>@<task>
+# shape they would misfire (cs -rm on a bare name deletes a whole session),
+# so an unparseable name gets no block at all.
+if [ -n "$TASK_BRANCH" ] && [[ "$CLAUDE_SESSION_NAME" == *@* ]]; then
     CS_BASE=$(awk '/^cs_base:/ { print $2; exit }' "$STATE_FILE" 2>/dev/null || true)
     CS_BASE="${CS_BASE:-${CLAUDE_SESSION_NAME%%@*}}"
     TASK_NAME="${CLAUDE_SESSION_NAME#*@}"
