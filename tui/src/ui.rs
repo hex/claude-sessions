@@ -11,7 +11,7 @@ use ratatui::Frame;
 
 use ratatui::layout::Alignment;
 
-use crate::app::{App, FlashKind, Mode, SortColumn, SortDirection, StatusLevel};
+use crate::app::{App, FlashKind, Focus, Mode, SortColumn, SortDirection, StatusLevel};
 use crate::theme::{self, Palette};
 
 const PREVIEW_MIN_WIDTH: u16 = 120;
@@ -68,7 +68,10 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         let cols = Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
             .split(chunks[0]);
         render_table(app, frame, cols[0], true);
-        render_preview_pane(app, frame, cols[1]);
+        let right_rows = Layout::vertical([Constraint::Percentage(55), Constraint::Percentage(45)])
+            .split(cols[1]);
+        render_preview_pane(app, frame, right_rows[0]);
+        render_notes_pane(app, frame, right_rows[1]);
     } else {
         render_table(app, frame, chunks[0], false);
     }
@@ -407,6 +410,10 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
         .split(cols_area);
     app.column_widths = col_rects.iter().map(|r| r.width).collect();
 
+    // Dim the border when focus has moved to the Notes input, mirroring how
+    // the Notes panel itself brightens its border when it gains focus.
+    let list_border = if app.focus == Focus::Notes { p.comment } else { p.rust };
+
     let table = Table::new(rows, widths)
         .header(header)
         .column_spacing(COL_SPACING)
@@ -414,7 +421,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(p.rust))
+                .border_style(Style::default().fg(list_border))
                 .title(title),
         )
         .row_highlight_style(Style::default().bg(p.sel_bg).add_modifier(Modifier::BOLD))
@@ -536,20 +543,24 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
         }
     }
 
-    let keys = match app.mode {
-        Mode::Normal if !app.marked_sessions.is_empty() => {
-            "Space:mark  D:delete marked  Esc:clear marks  q:quit  Enter:open  /:search"
+    let keys = if app.mode == Mode::Normal && app.focus == Focus::Notes {
+        "type a task  Enter:add  Esc:back"
+    } else {
+        match app.mode {
+            Mode::Normal if !app.marked_sessions.is_empty() => {
+                "Space:mark  D:delete marked  Esc:clear marks  q:quit  Enter:open  /:search"
+            }
+            Mode::Normal => {
+                "q:quit  Enter:open  n:new  d:delete  r:rename  Tab:notes  Space:mark  /:search  1-5:sort"
+            }
+            Mode::SessionMenu => "j/k:navigate  Enter:select  Esc:cancel",
+            Mode::ConfirmDelete | Mode::ConfirmBatchDelete => "y:confirm  n:cancel",
+            Mode::ConfirmForceOpen => "y:force open  n:cancel",
+            Mode::Rename | Mode::CreateSession => "Enter:confirm  Esc:cancel",
+            Mode::Secrets => "j/k:navigate  v/Enter:view  d:remove  Esc:close",
+            Mode::CommandOutput(_) => "Press any key to dismiss",
+            Mode::Search => unreachable!(),
         }
-        Mode::Normal => {
-            "q:quit  Enter:open  n:new  d:delete  r:rename  Tab:preview  Space:mark  /:search  1-5:sort"
-        }
-        Mode::SessionMenu => "j/k:navigate  Enter:select  Esc:cancel",
-        Mode::ConfirmDelete | Mode::ConfirmBatchDelete => "y:confirm  n:cancel",
-        Mode::ConfirmForceOpen => "y:force open  n:cancel",
-        Mode::Rename | Mode::CreateSession | Mode::QueueAdd => "Enter:confirm  Esc:cancel",
-        Mode::Secrets => "j/k:navigate  v/Enter:view  d:remove  Esc:close",
-        Mode::CommandOutput(_) => "Press any key to dismiss",
-        Mode::Search => unreachable!(),
     };
     let mut footer_spans = Vec::new();
     if !app.marked_sessions.is_empty() && matches!(app.mode, Mode::Normal) {
@@ -1043,6 +1054,87 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
+/// Read the highlighted session's queued tasks straight from disk so the
+/// Notes list always reflects the latest state — no cache to invalidate.
+fn read_queue_lines(name: &str) -> Vec<String> {
+    let path = crate::session::sessions_root()
+        .join(name)
+        .join(".cs/local/queue");
+    std::fs::read_to_string(path)
+        .map(|text| {
+            text.lines()
+                .filter(|line| !line.trim().is_empty())
+                .map(|line| line.to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
+    let p = app.theme;
+    let focused = app.focus == Focus::Notes;
+
+    let border_color = if focused { p.gold } else { p.rust };
+    let mut title_style = Style::default().fg(p.gold);
+    if focused {
+        title_style = title_style.add_modifier(Modifier::BOLD);
+    }
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(border_color))
+        .title(" Notes ")
+        .title_style(title_style);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let rows = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(inner);
+
+    // Single-line task input, with a block cursor when focused.
+    let input_line = if focused {
+        Line::from(vec![
+            Span::styled(app.queue_input.before_cursor(), Style::default().fg(p.fg)),
+            Span::styled("\u{2588}", Style::default().fg(p.gold)),
+            Span::styled(app.queue_input.after_cursor(), Style::default().fg(p.fg)),
+        ])
+    } else if app.queue_input.text().is_empty() {
+        Line::from(Span::styled(
+            "Tab to add a task\u{2026}",
+            Style::default().fg(p.comment).add_modifier(Modifier::DIM),
+        ))
+    } else {
+        Line::from(Span::styled(app.queue_input.text(), Style::default().fg(p.fg)))
+    };
+    frame.render_widget(Paragraph::new(input_line), rows[0]);
+
+    // Numbered list of queued tasks for the highlighted session, read live.
+    let tasks = app
+        .selected_session()
+        .map(|s| read_queue_lines(&s.name))
+        .unwrap_or_default();
+
+    let list_lines: Vec<Line> = if tasks.is_empty() {
+        vec![Line::from(Span::styled(
+            "(no queued tasks)",
+            Style::default().fg(p.comment).add_modifier(Modifier::DIM),
+        ))]
+    } else {
+        tasks
+            .iter()
+            .enumerate()
+            .map(|(i, task)| {
+                Line::from(vec![
+                    Span::styled(format!("{}. ", i + 1), Style::default().fg(p.comment)),
+                    Span::styled(task.as_str(), Style::default().fg(p.fg)),
+                ])
+            })
+            .collect()
+    };
+    let list = Paragraph::new(list_lines).wrap(Wrap { trim: true });
+    frame.render_widget(list, rows[1]);
+}
+
 fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
     let popup_layout = Layout::vertical([
         Constraint::Fill(1),
@@ -1064,6 +1156,8 @@ mod tests {
     use crate::app::App;
     use crate::session::Session;
     use crate::theme::Palette;
+    use crate::app::Focus;
+    use crossterm::event::{KeyCode, KeyEvent};
     use ratatui::backend::TestBackend;
     use ratatui::style::Color;
     use ratatui::Terminal;
@@ -1141,6 +1235,48 @@ mod tests {
             let bars = row.matches('\u{2502}').count();
             assert!(bars <= 2, "row {y} has {bars} vertical bars: {row:?}");
         }
+    }
+
+    /// Render on a wide terminal (preview + Notes pane both visible) and
+    /// return the buffer as newline-joined rows.
+    fn render_wide(app: &mut App) -> String {
+        let backend = TestBackend::new(140, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        (0..buf.area.height)
+            .map(|y| {
+                (0..buf.area.width)
+                    .filter_map(|x| buf.cell((x, y)).map(|c| c.symbol().to_string()))
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn wide_terminal_renders_notes_pane() {
+        let mut app = App::new(one_session());
+        app.theme = Palette::dark();
+        let joined = render_wide(&mut app);
+        assert!(joined.contains("Notes"), "Notes panel title should render: {joined}");
+        assert!(
+            joined.contains("no queued tasks"),
+            "empty queue should show placeholder: {joined}"
+        );
+    }
+
+    #[test]
+    fn tab_focused_notes_pane_shows_input_footer_hint() {
+        let mut app = App::new(one_session());
+        app.theme = Palette::dark();
+        app.handle_key(KeyEvent::from(KeyCode::Tab));
+        assert_eq!(app.focus, Focus::Notes);
+        let joined = render_wide(&mut app);
+        assert!(
+            joined.contains("Enter:add"),
+            "footer should show the Notes-focused hint: {joined}"
+        );
     }
 
     #[test]

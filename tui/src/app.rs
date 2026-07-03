@@ -212,9 +212,15 @@ pub enum Mode {
     ConfirmForceOpen,
     Rename,
     CreateSession,
-    QueueAdd,
     Secrets,
     CommandOutput(String),
+}
+
+/// Which panel receives keyboard input while in `Mode::Normal`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Focus {
+    List,
+    Notes,
 }
 
 pub const MENU_ITEMS: &[(&str, &str)] = &[
@@ -319,6 +325,8 @@ pub struct App {
     pub preview_cache: HashMap<String, session::SessionPreview>,
     /// Whether to show the preview pane on wide terminals (toggled with `p`).
     pub show_preview: bool,
+    /// Which panel receives keyboard input: the session list or the Notes input.
+    pub focus: Focus,
     /// Resolved color palette for the detected terminal background.
     pub theme: Palette,
 }
@@ -358,6 +366,7 @@ impl App {
             expanded_session: None,
             preview_cache: HashMap::new(),
             show_preview: true,
+            focus: Focus::List,
             theme: Palette::dark(),
         };
         // Apply the default sort (recency) so the initial view is ordered, not
@@ -598,7 +607,6 @@ impl App {
             Mode::ConfirmForceOpen => self.handle_confirm_force_open(key),
             Mode::Rename => self.handle_rename(key),
             Mode::CreateSession => self.handle_create_session(key),
-            Mode::QueueAdd => self.handle_queue_add(key),
             Mode::Secrets => self.handle_secrets(key),
             Mode::CommandOutput(_) => {
                 if self.return_to_secrets {
@@ -618,6 +626,9 @@ impl App {
     }
 
     fn handle_normal(&mut self, key: KeyEvent) -> Action {
+        if self.focus == Focus::Notes {
+            return self.handle_notes_input(key);
+        }
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => Action::Quit,
             KeyCode::Enter => {
@@ -680,13 +691,6 @@ impl App {
                 self.mode = Mode::CreateSession;
                 Action::None
             }
-            KeyCode::Char('a') => {
-                if self.selected_session().is_some() {
-                    self.queue_input.clear();
-                    self.mode = Mode::QueueAdd;
-                }
-                Action::None
-            }
             KeyCode::Char('1') => {
                 self.cycle_sort(SortColumn::Name);
                 Action::None
@@ -708,18 +712,9 @@ impl App {
                 Action::None
             }
             KeyCode::Tab => {
-                if let Some(name) = self.selected_session_name() {
-                    if self.expanded_session.as_deref() == Some(&name) {
-                        self.expanded_session = None;
-                    } else {
-                        // Load preview if not cached
-                        if !self.preview_cache.contains_key(&name) {
-                            let root = session::sessions_root();
-                            let preview = session::load_preview(&root.join(&name));
-                            self.preview_cache.insert(name.clone(), preview);
-                        }
-                        self.expanded_session = Some(name);
-                    }
+                if self.selected_session().is_some() {
+                    self.show_preview = true;
+                    self.focus = Focus::Notes;
                 }
                 Action::None
             }
@@ -744,10 +739,60 @@ impl App {
             }
             KeyCode::Char('p') => {
                 self.show_preview = !self.show_preview;
+                if let Some(name) = self.selected_session_name() {
+                    if self.expanded_session.as_deref() == Some(&name) {
+                        self.expanded_session = None;
+                    } else {
+                        // Load preview if not cached
+                        if !self.preview_cache.contains_key(&name) {
+                            let root = session::sessions_root();
+                            let preview = session::load_preview(&root.join(&name));
+                            self.preview_cache.insert(name.clone(), preview);
+                        }
+                        self.expanded_session = Some(name);
+                    }
+                }
                 Action::None
             }
             _ => Action::None,
         }
+    }
+
+    /// Handle keys while the Notes input has focus. Character keys append to
+    /// `queue_input`; navigation keys that would otherwise move the session
+    /// list are swallowed so the list stays put while typing.
+    fn handle_notes_input(&mut self, key: KeyEvent) -> Action {
+        match key.code {
+            KeyCode::Esc => {
+                self.focus = Focus::List;
+            }
+            KeyCode::Enter => {
+                return self.execute_queue_add();
+            }
+            KeyCode::Left => {
+                self.queue_input.move_left();
+            }
+            KeyCode::Right => {
+                self.queue_input.move_right();
+            }
+            KeyCode::Home => {
+                self.queue_input.move_home();
+            }
+            KeyCode::End => {
+                self.queue_input.move_end();
+            }
+            KeyCode::Delete => {
+                self.queue_input.delete_forward();
+            }
+            KeyCode::Backspace => {
+                self.queue_input.delete_back();
+            }
+            KeyCode::Char(c) => {
+                self.queue_input.insert(c);
+            }
+            _ => {}
+        }
+        Action::None
     }
 
     fn handle_session_menu(&mut self, key: KeyEvent) -> Action {
@@ -1011,43 +1056,11 @@ impl App {
         Action::Open(name)
     }
 
-    fn handle_queue_add(&mut self, key: KeyEvent) -> Action {
-        match key.code {
-            KeyCode::Esc => {
-                self.mode = Mode::Normal;
-            }
-            KeyCode::Enter => {
-                return self.execute_queue_add();
-            }
-            KeyCode::Left => {
-                self.queue_input.move_left();
-            }
-            KeyCode::Right => {
-                self.queue_input.move_right();
-            }
-            KeyCode::Home => {
-                self.queue_input.move_home();
-            }
-            KeyCode::End => {
-                self.queue_input.move_end();
-            }
-            KeyCode::Delete => {
-                self.queue_input.delete_forward();
-            }
-            KeyCode::Backspace => {
-                self.queue_input.delete_back();
-            }
-            KeyCode::Char(c) => {
-                self.queue_input.insert(c);
-            }
-            _ => {}
-        }
-        Action::None
-    }
-
+    /// Append the trimmed Notes input as a new queued task for the highlighted
+    /// session, then clear the input. Leaves focus on the Notes input so
+    /// several tasks can be queued in a row.
     fn execute_queue_add(&mut self) -> Action {
         let text = self.queue_input.text().trim().to_string();
-        self.mode = Mode::Normal;
         if text.is_empty() {
             return Action::None;
         }
@@ -1069,6 +1082,7 @@ impl App {
                     // recently declined. Mirrors the CLI's `rm -f queue.declined`
                     // in bin/cs `_queue_add`.
                     let _ = std::fs::remove_file(dir.join("queue.declined"));
+                    self.queue_input.clear();
                     self.set_status(format!("Queued task for {}", name), StatusLevel::Success);
                 }
                 Err(e) => {
@@ -2623,34 +2637,34 @@ mod tests {
         assert!(app.marked_sessions.contains("alpha"));
     }
 
-    // --- Row expand/collapse with Tab ---
+    // --- Row expand/collapse with 'p' ---
 
     #[test]
-    fn tab_expands_selected_session() {
+    fn p_expands_selected_session() {
         let mut app = App::new(sample_sessions());
         app.table_state.select(Some(0));
         assert!(app.expanded_session.is_none());
-        app.handle_key(KeyEvent::from(KeyCode::Tab));
+        app.handle_key(KeyEvent::from(KeyCode::Char('p')));
         assert_eq!(app.expanded_session, Some("alpha".into()));
     }
 
     #[test]
-    fn tab_collapses_already_expanded() {
+    fn p_collapses_already_expanded() {
         let mut app = App::new(sample_sessions());
         app.table_state.select(Some(0));
         app.expanded_session = Some("alpha".into());
-        app.handle_key(KeyEvent::from(KeyCode::Tab));
+        app.handle_key(KeyEvent::from(KeyCode::Char('p')));
         assert!(app.expanded_session.is_none());
     }
 
     #[test]
-    fn tab_switches_expansion_to_different_row() {
+    fn p_switches_expansion_to_different_row() {
         let mut app = App::new(sample_sessions());
         app.table_state.select(Some(0));
         app.expanded_session = Some("alpha".into());
-        // Move to row 1 and press Tab
+        // Move to row 1 and press 'p'
         app.table_state.select(Some(1));
-        app.handle_key(KeyEvent::from(KeyCode::Tab));
+        app.handle_key(KeyEvent::from(KeyCode::Char('p')));
         assert_eq!(app.expanded_session, Some("beta".into()));
     }
 
@@ -2664,17 +2678,17 @@ mod tests {
     }
 
     #[test]
-    fn tab_caches_preview() {
+    fn p_caches_preview() {
         let mut app = App::new(sample_sessions());
         app.table_state.select(Some(0));
         assert!(app.preview_cache.is_empty());
-        app.handle_key(KeyEvent::from(KeyCode::Tab));
+        app.handle_key(KeyEvent::from(KeyCode::Char('p')));
         // Preview was loaded (even if empty, the key exists)
         assert!(app.preview_cache.contains_key("alpha"));
     }
 
     #[test]
-    fn tab_reuses_cached_preview() {
+    fn p_reuses_cached_preview() {
         let mut app = App::new(sample_sessions());
         app.table_state.select(Some(0));
         // Pre-populate cache
@@ -2690,7 +2704,7 @@ mod tests {
                 contributors: Vec::new(),
             },
         );
-        app.handle_key(KeyEvent::from(KeyCode::Tab));
+        app.handle_key(KeyEvent::from(KeyCode::Char('p')));
         // Should use cached value, not overwrite
         let preview = app.preview_cache.get("alpha").unwrap();
         assert_eq!(preview.objective.as_deref(), Some("test objective"));
@@ -2743,49 +2757,77 @@ mod tests {
         );
     }
 
-    // --- Task queue ---
+    // --- Notes panel focus ---
 
     #[test]
-    fn key_a_enters_queue_add_mode() {
+    fn tab_focuses_notes_input() {
         let mut app = App::new(sample_sessions());
-        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
-        assert_eq!(app.mode, Mode::QueueAdd);
+        assert_eq!(app.focus, Focus::List);
+        app.handle_key(KeyEvent::from(KeyCode::Tab));
+        assert_eq!(app.focus, Focus::Notes);
     }
 
     #[test]
-    fn queue_add_typing_accumulates() {
+    fn tab_opens_preview_pane_if_collapsed() {
         let mut app = App::new(sample_sessions());
-        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        app.show_preview = false;
+        app.handle_key(KeyEvent::from(KeyCode::Tab));
+        assert!(app.show_preview);
+    }
+
+    #[test]
+    fn notes_focused_typing_accumulates() {
+        let mut app = App::new(sample_sessions());
+        app.handle_key(KeyEvent::from(KeyCode::Tab));
         app.handle_key(KeyEvent::from(KeyCode::Char('h')));
         app.handle_key(KeyEvent::from(KeyCode::Char('i')));
         assert_eq!(app.queue_input.text(), "hi");
     }
 
     #[test]
-    fn queue_add_enter_appends_to_queue_file() {
+    fn notes_focused_navigation_keys_do_not_move_list_selection() {
+        let mut app = App::new(sample_sessions());
+        app.handle_key(KeyEvent::from(KeyCode::Tab));
+        app.handle_key(KeyEvent::from(KeyCode::Char('j')));
+        // 'j' is typed into the Notes input, not treated as a navigation key.
+        assert_eq!(app.table_state.selected(), Some(0));
+        assert_eq!(app.queue_input.text(), "j");
+    }
+
+    #[test]
+    fn esc_returns_focus_to_list_from_notes() {
+        let mut app = App::new(sample_sessions());
+        app.handle_key(KeyEvent::from(KeyCode::Tab));
+        assert_eq!(app.focus, Focus::Notes);
+        app.handle_key(KeyEvent::from(KeyCode::Esc));
+        assert_eq!(app.focus, Focus::List);
+    }
+
+    #[test]
+    fn notes_enter_appends_to_queue_file_and_clears_input() {
         let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let tmp = std::env::temp_dir().join(format!("cs-tui-q-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("cs-tui-notes-{}", std::process::id()));
         std::env::set_var("CS_SESSIONS_ROOT", &tmp);
         let name = "alpha"; // matches sample_sessions()[0].name
         std::fs::create_dir_all(tmp.join(name).join(".cs/local")).unwrap();
         let mut app = App::new(sample_sessions());
         app.table_state.select(Some(0));
-        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        app.handle_key(KeyEvent::from(KeyCode::Tab));
         for c in "do X".chars() {
             app.handle_key(KeyEvent::from(KeyCode::Char(c)));
         }
         app.handle_key(KeyEvent::from(KeyCode::Enter));
         let q = std::fs::read_to_string(tmp.join(name).join(".cs/local/queue")).unwrap();
         assert!(q.contains("do X"));
-        assert_eq!(app.mode, Mode::Normal);
+        assert_eq!(app.queue_input.text(), "", "Enter must clear the Notes input");
         std::fs::remove_dir_all(&tmp).ok();
         std::env::remove_var("CS_SESSIONS_ROOT");
     }
 
     #[test]
-    fn queue_add_clears_declined() {
+    fn notes_enter_clears_declined() {
         let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let tmp = std::env::temp_dir().join(format!("cs-tui-qd-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("cs-tui-notes-declined-{}", std::process::id()));
         std::env::set_var("CS_SESSIONS_ROOT", &tmp);
         let name = "alpha"; // matches sample_sessions()[0].name
         let local = tmp.join(name).join(".cs/local");
@@ -2794,7 +2836,7 @@ mod tests {
         std::fs::write(local.join("queue.declined"), "1234567890\n").unwrap();
         let mut app = App::new(sample_sessions());
         app.table_state.select(Some(0));
-        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        app.handle_key(KeyEvent::from(KeyCode::Tab));
         for c in "do Y".chars() {
             app.handle_key(KeyEvent::from(KeyCode::Char(c)));
         }
