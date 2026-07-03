@@ -170,7 +170,12 @@ fn scan_sessions_in(root: &Path) -> Vec<Session> {
 
     let secret_counts = count_secrets_from_keychain();
 
-    let mut sessions: Vec<Session> = match fs::read_dir(root) {
+    // Collect candidate session dirs first, then read them in parallel. Each
+    // git-repo session forks `git remote get-url origin`; doing ~50 of those
+    // serially dominated startup. read_session is pure (its only shared state
+    // is the read-only secret_counts), so it parallelizes cleanly across a
+    // bounded worker pool.
+    let paths: Vec<PathBuf> = match fs::read_dir(root) {
         Ok(entries) => entries
             .filter_map(|e| e.ok())
             .filter(|e| {
@@ -181,9 +186,38 @@ fn scan_sessions_in(root: &Path) -> Vec<Session> {
                 let ft = e.file_type().ok();
                 ft.map(|t| t.is_dir() || t.is_symlink()).unwrap_or(false)
             })
-            .map(|e| read_session(&e.path(), &secret_counts))
+            .map(|e| e.path())
             .collect(),
-        Err(_) => Vec::new(),
+        Err(_) => return Vec::new(),
+    };
+
+    let workers = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .min(paths.len().max(1));
+
+    let mut sessions: Vec<Session> = if workers <= 1 {
+        paths.iter().map(|p| read_session(p, &secret_counts)).collect()
+    } else {
+        let secret_counts = &secret_counts;
+        let chunk_size = (paths.len() + workers - 1) / workers;
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = paths
+                .chunks(chunk_size)
+                .map(|chunk| {
+                    scope.spawn(move || {
+                        chunk
+                            .iter()
+                            .map(|p| read_session(p, secret_counts))
+                            .collect::<Vec<Session>>()
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .flat_map(|h| h.join().unwrap_or_default())
+                .collect()
+        })
     };
 
     sessions.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
