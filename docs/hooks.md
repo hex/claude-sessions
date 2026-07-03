@@ -38,7 +38,7 @@ Runs after any file modification (Write or Edit), providing crash recovery for a
 
 Runs when Claude pauses for user input:
 - Raises the statusline's attention marker (`.cs/local/attention`, machine-local) so the Claude mark's color pulses until the user next interacts; skipped inside subagents
-- Drains the task queue (`.cs/local/queue`) at each stop boundary when armed — pops and injects one task at a time and mirrors progress into the native task list — taking priority over the narrative reminder below while a drain is armed or running (returns early)
+- Drains the task queue (`.cs/local/queue`) at each stop boundary when armed — pops and injects one task at a time and instructs Claude to mirror progress into the native task list — taking priority over the narrative reminder below while a drain is armed or running (returns early)
 - When idle with tasks queued, gates a one-time `AskUserQuestion` (Start/Not yet), reading the statusline's stamped `.cs/local/context-pct` (see [Status line](statusline.md)) to suggest compacting above 60% context; a decline cools down 10 minutes via `.cs/local/queue.declined`, cleared as soon as the queue changes. Task text is arbitrary, so the injected `block` reason is emitted via `jq -nc --arg` rather than string interpolation, keeping the JSON valid regardless of quotes or newlines in the task
 - Reminds Claude to review and update its per-actor narrative (`.cs/memory/narrative.<actor>.md`, the session lab notebook), keyed on the most recently modified `narrative.*.md`, when it has not been touched recently
 - Cooldown-gated via `.cs/.narrative-reminder-cooldown` (at most once per 5 minutes); no size budget — narratives are native memory topic files that lazy-load

@@ -219,14 +219,15 @@ cs -queue clear                       # empty the queue and stop draining
 
 When you finish a turn with tasks queued, the Stop hook asks once (via
 `AskUserQuestion`) whether to work through them — showing the current
-context % and, above 60%, offering to compact first. Choosing "Start"
+context % and, at 60% or above, offering to compact first. Choosing "Start"
 drains every task in order (FIFO, top to bottom) at each stop boundary with
 no further prompts until the queue is empty; "Not yet" waits and re-asks
 after about 10 minutes, or as soon as the queue changes. There's no
 mid-drain pause — once started it runs to the end, trusting Claude Code's
-own auto-compact. As it drains, cs mirrors the queue into the native task
-list so progress stays visible. (The gate itself runs `cs -queue start` /
-`cs -queue defer` on your behalf — you don't need to run those directly.)
+own auto-compact. As it drains, cs instructs Claude to mirror the queue
+into the native task list so progress stays visible. (The gate itself
+runs `cs -queue start` / `cs -queue defer` on your behalf — you don't
+need to run those directly.)
 
 In the TUI, press `a` in the session picker to queue a task on the
 highlighted session; each row shows a `[Nq]` badge while its queue is
