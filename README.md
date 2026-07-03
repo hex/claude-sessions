@@ -186,7 +186,10 @@ conversation:
 
 You don't have to remember the syntax: typing `cs myproj` while that session
 is already open offers to start a parallel task from right there (or force a
-second launch, or cancel).
+second launch, or cancel). A worktree session also knows what it is: Claude
+is told at launch that it runs in a task worktree and that
+`cs myproj --merge <task>` is the way back, so it won't merge the branch by
+hand.
 
 Each worktree is a full cs session (own conversation, color, artifacts, crash
 recovery) that shares the base session's task list and secrets. Session

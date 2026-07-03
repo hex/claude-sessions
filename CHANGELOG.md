@@ -2,6 +2,16 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
+## Unreleased
+
+### Features
+
+- **Worktree sessions are self-aware** — a task worktree session's Claude is
+  told at launch (and after /clear or compaction) that it runs in a worktree
+  of its base session, that `cs <base> --merge <task>` integrates it, and
+  that merging the task branch by hand bypasses the record fuse. Subagents
+  inherit the same contract.
+
 ## 2026.7.3
 
 ### Features

@@ -245,6 +245,26 @@ $(printf '%b' "$DYNAMIC")"
     fi
 fi
 
+# Worktree task sessions: tell Claude what this checkout is and how it
+# integrates back. task_branch lands in machine-local state at creation,
+# so this fires in both tracked- and ignored-.cs modes, on every source
+# (the awareness must survive /clear and compaction).
+TASK_BRANCH=$(awk '/^task_branch:/ { print $2; exit }' "$STATE_FILE" 2>/dev/null || true)
+if [ -n "$TASK_BRANCH" ]; then
+    CS_BASE=$(awk '/^cs_base:/ { print $2; exit }' "$STATE_FILE" 2>/dev/null || true)
+    CS_BASE="${CS_BASE:-${CLAUDE_SESSION_NAME%%@*}}"
+    TASK_NAME="${CLAUDE_SESSION_NAME#*@}"
+    CONTEXT="${CONTEXT}
+
+--- Task Worktree ---
+This session is a task worktree of session '$CS_BASE' on branch $TASK_BRANCH. Work and commit here as normal; the checkout is disposable once the task is integrated.
+
+When the task is complete, ask the user to run: cs $CS_BASE --merge $TASK_NAME
+That command merges the branch into the base session, fuses the session records (timeline, narrative, artifacts), and removes this worktree. It refuses while either session is open, so it runs from a free terminal after this session closes.
+
+Do NOT merge $TASK_BRANCH into the base branch manually and do not delete the branch — that bypasses the record fuse and the cleanup. To abandon the task instead: cs -rm $CLAUDE_SESSION_NAME"
+fi
+
 # Append fresh-rebind notice if cs flagged that the user declined to resume
 # the prior conversation. Tells claude not to assume continuity with prior
 # turns and points at the lazy-read .cs/ files for prior context. Set by

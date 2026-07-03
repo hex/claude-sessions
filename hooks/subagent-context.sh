@@ -32,6 +32,13 @@ Key rules:
 EOF
 )
 
+# Worktree task sessions: subagents inherit the integration contract.
+TASK_BRANCH=$(awk '/^task_branch:/ { print $2; exit }' "$SESSION_DIR/.cs/local/state" 2>/dev/null || true)
+if [ -n "$TASK_BRANCH" ]; then
+    CONTEXT="${CONTEXT}
+- This session is a task worktree on branch $TASK_BRANCH; integration happens only via cs --merge (run by the user) — never merge or delete that branch yourself"
+fi
+
 jq -n --arg context "$CONTEXT" '{
     hookSpecificOutput: {
         hookEventName: "SubagentStart",

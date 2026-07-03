@@ -341,6 +341,47 @@ EOF
     echo "$(date '+%Y-%m-%d %H:%M:%S') - Session started" > "$dir/.cs/logs/session.log"
 }
 
+
+test_session_start_announces_worktree_task() {
+    session_start_setup
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    printf 'task_branch: cs/fix-auth\ncs_base: myproj\n' >> "$CLAUDE_SESSION_META_DIR/local/state"
+
+    local output context
+    output=$(echo '{"session_id":"s","source":"clear","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | CLAUDE_SESSION_NAME="myproj@fix-auth" bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+    assert_output_contains "$context" "task worktree of session 'myproj'" \
+        "worktree sessions must be told what they are (on every source)" || return 1
+    assert_output_contains "$context" "cs myproj --merge fix-auth" \
+        "the integration command must be spelled out" || return 1
+    assert_output_contains "$context" "Do NOT merge" \
+        "manual merges must be warned against" || return 1
+}
+
+test_session_start_no_worktree_block_for_plain_sessions() {
+    session_start_setup
+
+    local output
+    output=$(echo '{"session_id":"s","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    assert_output_not_contains "$output" "task worktree" \
+        "plain sessions must not get the worktree block" || return 1
+}
+
+test_subagent_context_announces_worktree_task() {
+    session_start_setup
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    printf 'task_branch: cs/fix-auth\n' >> "$CLAUDE_SESSION_META_DIR/local/state"
+
+    local output
+    output=$(echo '{}' | CLAUDE_SESSION_NAME="myproj@fix-auth" bash "$HOOKS_DIR/subagent-context.sh" 2>/dev/null)
+    assert_output_contains "$output" "task worktree" \
+        "subagents must inherit worktree awareness" || return 1
+    assert_output_contains "$output" "cs --merge" \
+        "subagents must know integration goes through cs --merge" || return 1
+}
+
 test_resume_digest_reports_memory_activity() {
     session_start_setup
     mkdir -p "$CLAUDE_SESSION_META_DIR/local"
@@ -908,6 +949,9 @@ run_test test_failure_skips_outside_session
 run_test test_failure_handles_missing_error
 
 # Session start: cross-session context
+run_test test_session_start_announces_worktree_task
+run_test test_session_start_no_worktree_block_for_plain_sessions
+run_test test_subagent_context_announces_worktree_task
 run_test test_resume_digest_reports_memory_activity
 run_test test_resume_digest_silent_without_watermark
 run_test test_session_start_includes_sibling_sessions
