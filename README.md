@@ -109,6 +109,7 @@ Running `cs` with no arguments launches an interactive TUI for browsing and mana
 - **Batch operations** — mark sessions with `Space`, then `D` to batch delete
 - **Rename** with `r`
 - **Manage secrets** with `s` (view values with `v`, auto-redacts after 5 seconds)
+- **Queue a task** with `a` — adds a prompt to the highlighted session's task queue for a walk-away run; a `[Nq]` badge appears in the row while that session's queue is non-empty
 - **Quit** with `q` or `Esc`
 - **Light/dark palette** — the warm palette adapts to the terminal background detected at launch (`CS_TERM_THEME`); set the env var to force `light` or `dark`
 
@@ -203,6 +204,33 @@ before branching from the last commit (interactive sessions) or refuses
 (scripts). Abandon a task with `cs -rm myproj@fix-auth`. Repos that
 gitignore `.cs/` get a per-worktree `.cs/` whose records are fused explicitly
 at merge. Requires git >= 2.20.
+
+### Task queue
+
+Queue up prompts and step away — cs drains them on its own at turn
+boundaries, once you've confirmed:
+
+```bash
+cs -queue add "refactor the parser"   # add a task (or: cs <session> -queue add "..." from another terminal)
+cs -queue                             # or `cs -queue list` — show pending + completed tasks
+cs -queue rm 2                        # remove pending task 2
+cs -queue clear                       # empty the queue and stop draining
+```
+
+When you finish a turn with tasks queued, the Stop hook asks once (via
+`AskUserQuestion`) whether to work through them — showing the current
+context % and, above 60%, offering to compact first. Choosing "Start"
+drains every task in order (FIFO, top to bottom) at each stop boundary with
+no further prompts until the queue is empty; "Not yet" waits and re-asks
+after about 10 minutes, or as soon as the queue changes. There's no
+mid-drain pause — once started it runs to the end, trusting Claude Code's
+own auto-compact. As it drains, cs mirrors the queue into the native task
+list so progress stays visible. (The gate itself runs `cs -queue start` /
+`cs -queue defer` on your behalf — you don't need to run those directly.)
+
+In the TUI, press `a` in the session picker to queue a task on the
+highlighted session; each row shows a `[Nq]` badge while its queue is
+non-empty.
 
 ## Slash Commands
 

@@ -11,6 +11,13 @@ All notable changes to cs are documented here. Release notes are also available 
   of its base session, that `cs <base> --merge <task>` integrates it, and
   that merging the task branch by hand bypasses the record fuse. Subagents
   inherit the same contract.
+- **Task queue** — `cs -queue add "<task>"` queues prompts for a walk-away
+  run; the Stop hook asks once (context % shown, with a compact nudge above
+  60%) then drains the queue in order at each stop boundary until it's
+  empty, with no further prompts, mirroring progress into the native task
+  list. Manage with `cs -queue list`/`rm`/`clear`; in the TUI, `a` queues a
+  task on the highlighted session and a `[Nq]` badge marks non-empty
+  queues.
 
 ## 2026.7.3
 
