@@ -180,6 +180,13 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
                     Style::default().fg(secrets_color),
                 ));
             }
+            if s.queue_depth > 0 {
+                let queue_color = if dimmed { p.comment } else { p.gold };
+                name_spans.push(Span::styled(
+                    format!("[{}q] ", s.queue_depth),
+                    Style::default().fg(queue_color),
+                ));
+            }
 
             let name_color = if dimmed {
                 p.comment
@@ -1071,6 +1078,7 @@ mod tests {
             lock_pid: None,
             is_locked: false,
             secrets_count: 0,
+            queue_depth: 0,
             git_repo: None,
         }]
     }

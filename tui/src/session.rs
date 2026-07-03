@@ -14,6 +14,7 @@ pub struct Session {
     pub lock_pid: Option<u32>,
     pub is_locked: bool,
     pub secrets_count: u32,
+    pub queue_depth: u32,
     pub git_repo: Option<String>,
 }
 
@@ -190,6 +191,9 @@ fn read_session(path: &Path, secret_counts: &HashMap<String, u32>) -> Session {
     let lock_pid = read_lock_pid(&meta_dir);
     let is_locked = lock_pid.is_some();
     let secrets_count = secret_counts.get(&name).copied().unwrap_or(0);
+    let queue_depth = fs::read_to_string(meta_dir.join("local/queue"))
+        .map(|s| s.lines().filter(|l| !l.trim().is_empty()).count() as u32)
+        .unwrap_or(0);
     let has_git = path.join(".git").is_dir();
     let git_repo = if has_git {
         parse_git_remote(path)
@@ -206,6 +210,7 @@ fn read_session(path: &Path, secret_counts: &HashMap<String, u32>) -> Session {
         lock_pid,
         is_locked,
         secrets_count,
+        queue_depth,
         git_repo,
     }
 }
@@ -643,6 +648,20 @@ mod tests {
         assert_eq!(sessions[0].name, "real-session");
 
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn scan_counts_queue_depth() {
+        let tmp = std::env::temp_dir().join(format!("cs-qd-{}", std::process::id()));
+        let root = tmp.as_path();
+        setup_session(root, "beta");
+        let local = root.join("beta").join(".cs/local");
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::write(local.join("queue"), "t1\nt2\nt3\n").unwrap();
+        let sessions = scan_sessions_in(root);
+        let beta = sessions.iter().find(|s| s.name == "beta").unwrap();
+        assert_eq!(beta.queue_depth, 3);
+        std::fs::remove_dir_all(&tmp).ok();
     }
 
     #[test]

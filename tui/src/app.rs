@@ -1440,6 +1440,7 @@ mod tests {
                 lock_pid: None,
                 is_locked: false,
                 secrets_count: 0,
+                queue_depth: 0,
                 git_repo: Some("hex/alpha".into()),
             },
             Session {
@@ -1451,6 +1452,7 @@ mod tests {
                 lock_pid: None,
                 is_locked: false,
                 secrets_count: 2,
+                queue_depth: 0,
                 git_repo: Some("hex/beta".into()),
             },
             Session {
@@ -1462,6 +1464,7 @@ mod tests {
                 lock_pid: Some(12345),
                 is_locked: true,
                 secrets_count: 0,
+                queue_depth: 0,
                 git_repo: None,
             },
         ]
@@ -1612,6 +1615,7 @@ mod tests {
             lock_pid: None,
             is_locked: false,
             secrets_count: 0,
+            queue_depth: 0,
             git_repo: None,
         };
         // Insertion order deliberately differs from recency order.
