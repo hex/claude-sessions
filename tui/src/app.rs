@@ -1173,6 +1173,19 @@ impl App {
         Action::None
     }
 
+    /// Sync the affected session's in-memory `queue_depth` with the queue file,
+    /// then re-sort. `queue_depth` drives the To-Do column's count, sort, and
+    /// visibility, and is otherwise only refreshed by a full `scan_sessions()`
+    /// (which re-forks every git remote) — so a queue edit must patch it
+    /// directly, without a rescan.
+    fn refresh_queue_depth(&mut self, name: &str) {
+        let depth = session::read_queue(name).len() as u32;
+        if let Some(s) = self.sessions.iter_mut().find(|s| s.name == name) {
+            s.queue_depth = depth;
+        }
+        self.apply_filter_and_sort();
+    }
+
     /// Append `text` as a new queued task and clear the input, leaving focus on
     /// the input so several tasks can be queued in a row.
     fn append_notes_task(&mut self, name: &str, text: &str) {
@@ -1191,6 +1204,7 @@ impl App {
                     // in bin/cs `_queue_add`.
                     let _ = std::fs::remove_file(dir.join("queue.declined"));
                     self.queue_input.clear();
+                    self.refresh_queue_depth(name);
                     self.set_status(format!("Queued task for {}", name), StatusLevel::Success);
                 }
                 Err(e) => {
@@ -1216,6 +1230,7 @@ impl App {
                 } else {
                     self.notes_selected = idx.min(len - 1);
                 }
+                self.refresh_queue_depth(name);
                 self.set_status(format!("Updated task for {}", name), StatusLevel::Success);
             }
             Err(e) => {
@@ -1241,6 +1256,7 @@ impl App {
                 } else if self.notes_selected >= len {
                     self.notes_selected = len - 1;
                 }
+                self.refresh_queue_depth(&name);
                 self.set_status(format!("Removed task from {}", name), StatusLevel::Success);
             }
             Err(e) => {
@@ -1540,6 +1556,10 @@ impl App {
                         // Rows are variable height; consult the renderer's hit-map
                         // so clicks below a group header or expanded row still land
                         // on the right session.
+                        if self.table_state.selected() != Some(idx) {
+                            // Switching sessions invalidates the Notes list highlight.
+                            self.notes_selected = 0;
+                        }
                         self.table_state.select(Some(idx));
                     }
                 }
@@ -2327,6 +2347,9 @@ mod tests {
 
     #[test]
     fn rename_claude_projects_dir_moves_matching_dir() {
+        // Mutating HOME reallocs the process-global environ; serialize with the
+        // other env-mutating tests so a concurrent setenv can't race their reads.
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = std::env::temp_dir().join(format!("cs-test-proj-rename-{}", std::process::id()));
         let fake_projects = tmp.join(".claude/projects");
         let sessions = tmp.join("sessions");
@@ -2366,6 +2389,9 @@ mod tests {
 
     #[test]
     fn rename_claude_projects_dir_noop_when_no_projects_dir() {
+        // Mutating HOME reallocs the process-global environ; serialize with the
+        // other env-mutating tests so a concurrent setenv can't race their reads.
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = std::env::temp_dir().join(format!("cs-test-proj-noop-{}", std::process::id()));
         std::fs::create_dir_all(&tmp).unwrap();
 
@@ -3208,5 +3234,67 @@ mod tests {
             Some(0),
             "clicking a row's group-label line selects that row's session"
         );
+    }
+
+    #[test]
+    fn mouse_click_selecting_a_row_resets_notes_selected() {
+        let mut app = App::new(sample_sessions());
+        render_for_hit_map(&mut app, 100, 24);
+        // A stale Notes list highlight from a prior panel interaction.
+        app.notes_selected = 3;
+        assert_eq!(app.table_state.selected(), Some(0));
+        // Click the 2nd session's line (relative row 6 given row 0's 2-line span).
+        let action = left_click(&mut app, 6, 3);
+        assert!(matches!(action, Action::None));
+        assert_eq!(app.table_state.selected(), Some(1));
+        assert_eq!(
+            app.notes_selected, 0,
+            "switching sessions by click resets the Notes list highlight"
+        );
+    }
+
+    // --- Queue mutations keep the To-Do column in sync ---
+
+    #[test]
+    fn append_notes_task_updates_queue_depth_and_todo_visibility() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let (tmp, _local) = seed_queue("depth-append", "alpha", &[]);
+        let mut app = App::new(sample_sessions());
+        app.table_state.select(Some(0));
+        // sample_sessions()[0] (alpha) starts with no queued tasks.
+        assert_eq!(app.selected_session().unwrap().queue_depth, 0);
+        assert!(!app.has_todos());
+        app.append_notes_task("alpha", "first task");
+        assert_eq!(
+            app.selected_session().unwrap().queue_depth,
+            1,
+            "append must bump the in-memory queue_depth"
+        );
+        assert!(
+            app.has_todos(),
+            "queuing the first task makes the To-Do column appear"
+        );
+        std::fs::remove_dir_all(&tmp).ok();
+        std::env::remove_var("CS_SESSIONS_ROOT");
+    }
+
+    #[test]
+    fn delete_notes_task_decrements_queue_depth() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let (tmp, _local) = seed_queue("depth-del", "alpha", &["one", "two"]);
+        let mut app = App::new(sample_sessions());
+        app.table_state.select(Some(0));
+        // Prime the in-memory depth to match the seeded file (two tasks).
+        app.refresh_queue_depth("alpha");
+        assert_eq!(app.selected_session().unwrap().queue_depth, 2);
+        app.notes_selected = 0;
+        app.delete_notes_task(0); // remove "one"
+        assert_eq!(
+            app.selected_session().unwrap().queue_depth,
+            1,
+            "delete must decrement the in-memory queue_depth"
+        );
+        std::fs::remove_dir_all(&tmp).ok();
+        std::env::remove_var("CS_SESSIONS_ROOT");
     }
 }
