@@ -96,4 +96,71 @@ run_test test_queue_defer_writes_declined_epoch
 run_test test_queue_add_clears_declined
 run_test test_queue_requires_session
 run_test test_queue_add_via_session_scoped_arm
+
+QDIR() { printf '%s' "$CLAUDE_SESSION_META_DIR/local"; }
+drain() { echo "${1:-{}}" | bash "$HOOKS_DIR/narrative-reminder.sh" 2>/dev/null; }
+
+test_drain_gates_when_idle_nonempty() {
+    printf 'do the thing\n' > "$(QDIR)/queue"
+    local out; out=$(drain)
+    assert_output_contains "$out" '"block"' "idle+nonempty blocks to gate" || return 1
+    assert_output_contains "$out" "AskUserQuestion" "gate tells agent to ask" || return 1
+    assert_file_not_exists "$(QDIR)/queue.state" "gate does not change state" || return 1
+}
+
+test_drain_armed_injects_first_task_no_pop() {
+    printf 'task one\ntask two\n' > "$(QDIR)/queue"
+    printf 'armed\n' > "$(QDIR)/queue.state"
+    local out; out=$(drain)
+    assert_output_contains "$out" "task one" "armed injects first task" || return 1
+    assert_eq "draining" "$(cat "$(QDIR)/queue.state" | tr -d '[:space:]')" "armed -> draining" || return 1
+    assert_eq "2" "$(grep -c . "$(QDIR)/queue")" "no pop on first injection" || return 1
+}
+
+test_drain_draining_pops_and_injects_next() {
+    printf 'task one\ntask two\n' > "$(QDIR)/queue"
+    printf 'draining\n' > "$(QDIR)/queue.state"
+    local out; out=$(drain)
+    assert_output_contains "$out" "task two" "draining injects the next task" || return 1
+    assert_file_contains "$(QDIR)/queue.done" "task one" "finished task logged to done" || return 1
+    assert_eq "1" "$(grep -c . "$(QDIR)/queue")" "one task popped" || return 1
+}
+
+test_drain_empties_and_returns_idle() {
+    printf 'last task\n' > "$(QDIR)/queue"
+    printf 'draining\n' > "$(QDIR)/queue.state"
+    local out; out=$(drain)
+    assert_output_contains "$out" "complete" "announces completion" || return 1
+    assert_eq "idle" "$(cat "$(QDIR)/queue.state" | tr -d '[:space:]')" "returns to idle" || return 1
+}
+
+test_drain_declined_within_cooldown_falls_through() {
+    printf 'queued\n' > "$(QDIR)/queue"
+    printf '%s\n' "$(date +%s)" > "$(QDIR)/queue.declined"
+    local out; out=$(drain)
+    assert_output_not_contains "$out" "AskUserQuestion" "recent decline suppresses the gate" || return 1
+}
+
+test_drain_ignores_subagents() {
+    printf 'queued\n' > "$(QDIR)/queue"
+    local out; out=$(drain '{"agent_id":"sub-1"}')
+    assert_output_not_contains "$out" "AskUserQuestion" "subagent stop never drains" || return 1
+}
+
+test_drain_gate_mentions_high_context() {
+    printf 'queued\n' > "$(QDIR)/queue"
+    printf '82\n' > "$(QDIR)/context-pct"
+    local out; out=$(drain)
+    assert_output_contains "$out" "82" "gate surfaces context %" || return 1
+    assert_output_contains "$out" "compact" "gate recommends compaction when high" || return 1
+}
+
+run_test test_drain_gates_when_idle_nonempty
+run_test test_drain_armed_injects_first_task_no_pop
+run_test test_drain_draining_pops_and_injects_next
+run_test test_drain_empties_and_returns_idle
+run_test test_drain_declined_within_cooldown_falls_through
+run_test test_drain_ignores_subagents
+run_test test_drain_gate_mentions_high_context
+
 report_results

@@ -35,6 +35,88 @@ fi
 mkdir -p "$META_DIR/local" 2>/dev/null || true
 touch "$META_DIR/local/attention" 2>/dev/null || true
 
+# --- Task queue drain (walk-away mode) ---------------------------------------
+# Hands the agent its next queued task when armed; asks once when idle. Wins
+# over the narrative nag (returns early). Queue text is arbitrary -> jq emit.
+QDIR="$META_DIR/local"
+QUEUE="$QDIR/queue"
+QSTATE_FILE="$QDIR/queue.state"
+
+_qlen() {
+    if [ -f "$1" ]; then
+        grep -c '[^[:space:]]' "$1" 2>/dev/null || true
+    else
+        echo 0
+    fi
+}
+
+QLEN=$(_qlen "$QUEUE")
+if [ "$QLEN" -gt 0 ]; then
+    QSTATE=$(cat "$QSTATE_FILE" 2>/dev/null | tr -d '[:space:]' || true)
+    [ -n "$QSTATE" ] || QSTATE="idle"
+
+    if [ "$QSTATE" = "armed" ]; then
+        TASK=$(awk 'NF{print; exit}' "$QUEUE")
+        printf 'draining\n' > "$QSTATE_FILE.tmp" && mv "$QSTATE_FILE.tmp" "$QSTATE_FILE"
+        REASON="cs task queue — starting a walk-away run. Work through the queued tasks one at a time; I will hand you the next after each finishes. Mirror the queue into your native task list: create one task per queued item and mark each completed as you finish it.
+
+First task: $TASK"
+        jq -nc --arg r "$REASON" '{decision:"block", reason:$r}'
+        exit 0
+    fi
+
+    if [ "$QSTATE" = "draining" ]; then
+        DONE_TASK=$(awk 'NF{print; exit}' "$QUEUE")
+        if awk 'popped==0 && NF { popped=1; next } { print }' "$QUEUE" \
+                > "$QUEUE.tmp" && mv "$QUEUE.tmp" "$QUEUE"; then
+            printf '%s\n' "$DONE_TASK" >> "$QDIR/queue.done"
+            NEWLEN=$(_qlen "$QUEUE")
+            if [ "$NEWLEN" -le 0 ]; then
+                printf 'idle\n' > "$QSTATE_FILE.tmp" && mv "$QSTATE_FILE.tmp" "$QSTATE_FILE"
+                jq -nc '{decision:"block", reason:"cs task queue — all tasks complete. The queue is now empty."}'
+                exit 0
+            fi
+            NEXT=$(awk 'NF{print; exit}' "$QUEUE")
+            REASON="cs task queue — next task ($NEWLEN remaining). Mark the previous native task completed and this one in-progress, then do it.
+
+Task: $NEXT"
+            jq -nc --arg r "$REASON" '{decision:"block", reason:$r}'
+            exit 0
+        else
+            # pop failed: disarm rather than re-inject the same task (fail-safe)
+            printf 'idle\n' > "$QSTATE_FILE.tmp" && mv "$QSTATE_FILE.tmp" "$QSTATE_FILE"
+        fi
+    fi
+
+    if [ "$QSTATE" = "idle" ]; then
+        DECLINED="$QDIR/queue.declined"
+        GATE=1
+        if [ -f "$DECLINED" ]; then
+            DECL_AT=$(cat "$DECLINED" 2>/dev/null | tr -d '[:space:]')
+            NOW=$(date +%s)
+            if [ -n "$DECL_AT" ] && [ $((NOW - DECL_AT)) -lt 600 ]; then
+                GATE=0            # within cooldown: fall through to narrative
+            else
+                rm -f "$DECLINED"
+            fi
+        fi
+        if [ "$GATE" = "1" ]; then
+            CTX=$(cat "$QDIR/context-pct" 2>/dev/null | tr -d '[:space:]' || true)
+            CTX_LINE="Context usage is unknown."
+            COMPACT=""
+            case "$CTX" in
+                ''|*[!0-9]*) : ;;
+                *) CTX_LINE="Context is at ${CTX}%."
+                   [ "$CTX" -ge 60 ] && COMPACT=" Context is heavy — offer the user a 'Compact first' option (they run /compact) before starting." ;;
+            esac
+            REASON="cs task queue — $QLEN task(s) are queued for a walk-away run. $CTX_LINE$COMPACT Use AskUserQuestion to ask whether to work through them now (options: Start / Not yet). On Start, run: cs -queue start (then stop; I will hand you each task). On Not yet, run: cs -queue defer."
+            jq -nc --arg r "$REASON" '{decision:"block", reason:$r}'
+            exit 0
+        fi
+    fi
+fi
+# (falls through to the narrative reminder below when not gating/draining)
+
 COOLDOWN_FILE="$META_DIR/.narrative-reminder-cooldown"
 COOLDOWN_SECONDS=300  # 5 minutes
 
