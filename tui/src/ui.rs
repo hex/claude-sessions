@@ -539,7 +539,7 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
         Mode::SessionMenu => "j/k:navigate  Enter:select  Esc:cancel",
         Mode::ConfirmDelete | Mode::ConfirmBatchDelete => "y:confirm  n:cancel",
         Mode::ConfirmForceOpen => "y:force open  n:cancel",
-        Mode::Rename | Mode::CreateSession => "Enter:confirm  Esc:cancel",
+        Mode::Rename | Mode::CreateSession | Mode::QueueAdd => "Enter:confirm  Esc:cancel",
         Mode::Secrets => "j/k:navigate  v/Enter:view  d:remove  Esc:close",
         Mode::CommandOutput(_) => "Press any key to dismiss",
         Mode::Search => unreachable!(),

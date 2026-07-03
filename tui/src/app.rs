@@ -212,6 +212,7 @@ pub enum Mode {
     ConfirmForceOpen,
     Rename,
     CreateSession,
+    QueueAdd,
     Secrets,
     CommandOutput(String),
 }
@@ -290,6 +291,7 @@ pub struct App {
     pub search_input: TextInput,
     pub rename_input: TextInput,
     pub create_input: TextInput,
+    pub queue_input: TextInput,
     pub secrets_names: Vec<String>,
     pub secrets_selected: usize,
     pub return_to_secrets: bool,
@@ -339,6 +341,7 @@ impl App {
             search_input: TextInput::new(),
             rename_input: TextInput::new(),
             create_input: TextInput::new(),
+            queue_input: TextInput::new(),
             secrets_names: Vec::new(),
             secrets_selected: 0,
             return_to_secrets: false,
@@ -595,6 +598,7 @@ impl App {
             Mode::ConfirmForceOpen => self.handle_confirm_force_open(key),
             Mode::Rename => self.handle_rename(key),
             Mode::CreateSession => self.handle_create_session(key),
+            Mode::QueueAdd => self.handle_queue_add(key),
             Mode::Secrets => self.handle_secrets(key),
             Mode::CommandOutput(_) => {
                 if self.return_to_secrets {
@@ -674,6 +678,13 @@ impl App {
             KeyCode::Char('n') => {
                 self.create_input.clear();
                 self.mode = Mode::CreateSession;
+                Action::None
+            }
+            KeyCode::Char('a') => {
+                if self.selected_session().is_some() {
+                    self.queue_input.clear();
+                    self.mode = Mode::QueueAdd;
+                }
                 Action::None
             }
             KeyCode::Char('1') => {
@@ -998,6 +1009,70 @@ impl App {
         }
         self.mode = Mode::Normal;
         Action::Open(name)
+    }
+
+    fn handle_queue_add(&mut self, key: KeyEvent) -> Action {
+        match key.code {
+            KeyCode::Esc => {
+                self.mode = Mode::Normal;
+            }
+            KeyCode::Enter => {
+                return self.execute_queue_add();
+            }
+            KeyCode::Left => {
+                self.queue_input.move_left();
+            }
+            KeyCode::Right => {
+                self.queue_input.move_right();
+            }
+            KeyCode::Home => {
+                self.queue_input.move_home();
+            }
+            KeyCode::End => {
+                self.queue_input.move_end();
+            }
+            KeyCode::Delete => {
+                self.queue_input.delete_forward();
+            }
+            KeyCode::Backspace => {
+                self.queue_input.delete_back();
+            }
+            KeyCode::Char(c) => {
+                self.queue_input.insert(c);
+            }
+            _ => {}
+        }
+        Action::None
+    }
+
+    fn execute_queue_add(&mut self) -> Action {
+        let text = self.queue_input.text().trim().to_string();
+        self.mode = Mode::Normal;
+        if text.is_empty() {
+            return Action::None;
+        }
+        let name = match self.selected_session() {
+            Some(session) => session.name.clone(),
+            None => return Action::None,
+        };
+        let dir = session::sessions_root().join(&name).join(".cs").join("local");
+        if std::fs::create_dir_all(&dir).is_ok() {
+            use std::io::Write;
+            match std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(dir.join("queue"))
+                .and_then(|mut f| writeln!(f, "{}", text))
+            {
+                Ok(()) => {
+                    self.set_status(format!("Queued task for {}", name), StatusLevel::Success);
+                }
+                Err(e) => {
+                    self.set_status(format!("Queue write failed: {}", e), StatusLevel::Error);
+                }
+            }
+        }
+        Action::None
     }
 
     fn handle_secrets(&mut self, key: KeyEvent) -> Action {
@@ -2653,5 +2728,43 @@ mod tests {
             app.preview_cache.get("alpha").unwrap().objective.as_deref(),
             Some("cached")
         );
+    }
+
+    // --- Task queue ---
+
+    #[test]
+    fn key_a_enters_queue_add_mode() {
+        let mut app = App::new(sample_sessions());
+        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        assert_eq!(app.mode, Mode::QueueAdd);
+    }
+
+    #[test]
+    fn queue_add_typing_accumulates() {
+        let mut app = App::new(sample_sessions());
+        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        app.handle_key(KeyEvent::from(KeyCode::Char('h')));
+        app.handle_key(KeyEvent::from(KeyCode::Char('i')));
+        assert_eq!(app.queue_input.text(), "hi");
+    }
+
+    #[test]
+    fn queue_add_enter_appends_to_queue_file() {
+        let tmp = std::env::temp_dir().join(format!("cs-tui-q-{}", std::process::id()));
+        std::env::set_var("CS_SESSIONS_ROOT", &tmp);
+        let name = "alpha"; // matches sample_sessions()[0].name
+        std::fs::create_dir_all(tmp.join(name).join(".cs/local")).unwrap();
+        let mut app = App::new(sample_sessions());
+        app.table_state.select(Some(0));
+        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        for c in "do X".chars() {
+            app.handle_key(KeyEvent::from(KeyCode::Char(c)));
+        }
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        let q = std::fs::read_to_string(tmp.join(name).join(".cs/local/queue")).unwrap();
+        assert!(q.contains("do X"));
+        assert_eq!(app.mode, Mode::Normal);
+        std::fs::remove_dir_all(&tmp).ok();
+        std::env::remove_var("CS_SESSIONS_ROOT");
     }
 }
