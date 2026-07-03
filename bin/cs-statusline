@@ -36,6 +36,7 @@ ICON_MODEL=$'\xe2\x9c\xa6 '     # U+2726 four-pointed star
 ICON_GIT=$'\xe2\x8e\x87 '       # U+2387 branch
 ICON_5H=$'\xe2\x97\xb7 '        # U+25F7 clock
 ICON_WK=$'\xe2\x97\x91 '        # U+25D1 half circle
+ICON_NOTES=$'\xe2\x96\xa4 '     # U+25A4 square with horizontal fill (notes queue)
 ICON_LOGO=$'\xe2\x9c\xb3'       # U+2733 eight-spoked asterisk (Claude mark)
 
 # --- stdin -----------------------------------------------------------------
@@ -399,6 +400,19 @@ _seg_session() {
     _add "${name}" "$bg" bold
 }
 
+# Count of queued tasks for the current session (.cs/local/queue), shown right
+# after the session name. Hidden when the queue is empty or absent.
+_seg_notes() {
+    [ -n "${CLAUDE_SESSION_NAME:-}" ] || return 0
+    local qf="$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/local/queue"
+    [ -f "$qf" ] || return 0
+    local n
+    n=$(awk 'NF{c++} END{print c+0}' "$qf" 2>/dev/null)
+    [ -n "$n" ] || n=0
+    [ "$n" -gt 0 ] || return 0
+    _add "${ICON_NOTES}${n}" "amber"
+}
+
 _seg_ctx() {
     local v="${SL_CTX%%.*}"
     [ -n "$v" ] || return 0
@@ -712,13 +726,14 @@ main() {
 
     _detect_level
 
-    local segments="${CS_STATUSLINE_SEGMENTS:-logo,session,git,model,ctx,limits,cost}"
+    local segments="${CS_STATUSLINE_SEGMENTS:-logo,session,notes,git,model,ctx,limits,cost}"
     local name names
     IFS=',' read -ra names <<< "$segments"
     for name in "${names[@]}"; do
         case "$name" in
             logo)    _seg_logo ;;
             session) _seg_session ;;
+            notes)   _seg_notes ;;
             ctx)     _seg_ctx ;;
             model)   _seg_model ;;
             git)     _seg_git ;;

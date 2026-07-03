@@ -1234,4 +1234,31 @@ run_test test_narrow_terminal_no_gradient
 run_test test_no_gradient_without_columns
 run_test test_no_gradient_without_bg_rgb
 run_test test_no_gradient_outside_truecolor
+
+# ============================================================================
+# Notes segment: queue depth after the session name
+# ============================================================================
+
+test_notes_segment_shows_queue_depth() {
+    export NO_COLOR=1
+    export CLAUDE_SESSION_NAME="notesess"
+    make_cs_session "notesess" 0 cyan
+    printf 'task a\ntask b\ntask c\n' > "$CS_SESSIONS_ROOT/notesess/.cs/local/queue"
+    local out
+    out=$(run_sl "$FIXTURE_DOCS")
+    assert_output_contains "$out" "▤ 3" "notes segment shows the queue depth" || return 1
+}
+
+test_notes_segment_absent_when_queue_empty() {
+    export NO_COLOR=1
+    export CLAUDE_SESSION_NAME="emptyq"
+    make_cs_session "emptyq" 0 cyan
+    : > "$CS_SESSIONS_ROOT/emptyq/.cs/local/queue"
+    local out
+    out=$(run_sl "$FIXTURE_DOCS")
+    assert_output_not_contains "$out" "▤" "notes segment hidden when queue empty" || return 1
+}
+
+run_test test_notes_segment_shows_queue_depth
+run_test test_notes_segment_absent_when_queue_empty
 report_results
