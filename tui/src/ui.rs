@@ -557,7 +557,7 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
                 "Space:mark  D:delete marked  Esc:clear marks  q:quit  Enter:open  /:search"
             }
             Mode::Normal => {
-                "q:quit  Enter:open  n:new  d:delete  r:rename  Tab:notes  Space:mark  /:search  1-5:sort"
+                "q:quit  Enter:open  n:new  d:delete  r:rename  Tab:to-do  Space:mark  /:search  1-5:sort"
             }
             Mode::SessionMenu => "j/k:navigate  Enter:select  Esc:cancel",
             Mode::ConfirmDelete | Mode::ConfirmBatchDelete => "y:confirm  n:cancel",
@@ -1072,11 +1072,15 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
         title_style = title_style.add_modifier(Modifier::BOLD);
     }
 
+    let title = match app.selected_session() {
+        Some(s) => format!(" To-Do · {} ", s.name),
+        None => " To-Do ".to_string(),
+    };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(border_color))
-        .title(" Notes ")
+        .title(title)
         .title_style(title_style);
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -1276,7 +1280,7 @@ mod tests {
         let mut app = App::new(one_session());
         app.theme = Palette::dark();
         let joined = render_wide(&mut app);
-        assert!(joined.contains("Notes"), "Notes panel title should render: {joined}");
+        assert!(joined.contains("To-Do"), "To-Do panel title should render: {joined}");
         assert!(
             joined.contains("no queued tasks"),
             "empty queue should show placeholder: {joined}"
