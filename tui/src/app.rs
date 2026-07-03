@@ -223,6 +223,13 @@ pub enum Focus {
     Notes,
 }
 
+/// Sub-focus within the Notes panel: the task input line or the task list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NotesFocus {
+    Input,
+    List,
+}
+
 pub const MENU_ITEMS: &[(&str, &str)] = &[
     ("Open", "Enter"),
     ("Delete", "d"),
@@ -327,6 +334,13 @@ pub struct App {
     pub show_preview: bool,
     /// Which panel receives keyboard input: the session list or the Notes input.
     pub focus: Focus,
+    /// Sub-focus within the Notes panel (only meaningful while `focus == Notes`).
+    pub notes_focus: NotesFocus,
+    /// Highlighted task index while `notes_focus == List`.
+    pub notes_selected: usize,
+    /// Index of the task currently being edited in place, if any. When set, the
+    /// Notes input's Enter replaces that task line instead of appending a new one.
+    pub editing: Option<usize>,
     /// Resolved color palette for the detected terminal background.
     pub theme: Palette,
 }
@@ -367,6 +381,9 @@ impl App {
             preview_cache: HashMap::new(),
             show_preview: true,
             focus: Focus::List,
+            notes_focus: NotesFocus::Input,
+            notes_selected: 0,
+            editing: None,
             theme: Palette::dark(),
         };
         // Apply the default sort (recency) so the initial view is ordered, not
@@ -715,6 +732,8 @@ impl App {
                 if self.selected_session().is_some() {
                     self.show_preview = true;
                     self.focus = Focus::Notes;
+                    self.notes_focus = NotesFocus::Input;
+                    self.editing = None;
                 }
                 Action::None
             }
@@ -758,16 +777,46 @@ impl App {
         }
     }
 
-    /// Handle keys while the Notes input has focus. Character keys append to
-    /// `queue_input`; navigation keys that would otherwise move the session
-    /// list are swallowed so the list stays put while typing.
+    /// Route Notes-panel keys to the input line or the task list depending on
+    /// the current sub-focus. Navigation keys never reach the session list here,
+    /// so the highlighted session stays put while the panel is active.
     fn handle_notes_input(&mut self, key: KeyEvent) -> Action {
+        match self.notes_focus {
+            NotesFocus::Input => self.handle_notes_input_field(key),
+            NotesFocus::List => self.handle_notes_list(key),
+        }
+    }
+
+    /// Keys while the Notes input line is focused. Enter appends a new task, or
+    /// replaces the task at `editing` when editing in place. Down drops into the
+    /// task list. Esc cancels an in-progress edit, or leaves the panel entirely.
+    fn handle_notes_input_field(&mut self, key: KeyEvent) -> Action {
         match key.code {
             KeyCode::Esc => {
-                self.focus = Focus::List;
+                if self.editing.is_some() {
+                    self.editing = None;
+                    self.queue_input.clear();
+                    self.notes_focus = NotesFocus::List;
+                } else {
+                    self.queue_input.clear();
+                    self.notes_focus = NotesFocus::Input;
+                    self.focus = Focus::List;
+                }
             }
             KeyCode::Enter => {
-                return self.execute_queue_add();
+                return self.submit_notes_input();
+            }
+            KeyCode::Down => {
+                // Drop into the task list only when there is something to select
+                // and we are not mid-edit.
+                if self.editing.is_none() {
+                    if let Some(name) = self.selected_session_name() {
+                        if !session::read_queue(&name).is_empty() {
+                            self.notes_focus = NotesFocus::List;
+                            self.notes_selected = 0;
+                        }
+                    }
+                }
             }
             KeyCode::Left => {
                 self.queue_input.move_left();
@@ -789,6 +838,45 @@ impl App {
             }
             KeyCode::Char(c) => {
                 self.queue_input.insert(c);
+            }
+            _ => {}
+        }
+        Action::None
+    }
+
+    /// Keys while a task in the list is highlighted: move the highlight, delete
+    /// or edit the task, or leave. Up off the first task returns to the input.
+    fn handle_notes_list(&mut self, key: KeyEvent) -> Action {
+        let tasks = match self.selected_session_name() {
+            Some(name) => session::read_queue(&name),
+            None => Vec::new(),
+        };
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                if self.notes_selected == 0 {
+                    self.notes_focus = NotesFocus::Input;
+                } else {
+                    self.notes_selected -= 1;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if self.notes_selected + 1 < tasks.len() {
+                    self.notes_selected += 1;
+                }
+            }
+            KeyCode::Char('d') => {
+                self.delete_notes_task(self.notes_selected);
+            }
+            KeyCode::Char('e') | KeyCode::Enter => {
+                if let Some(task) = tasks.get(self.notes_selected) {
+                    self.queue_input.set(task);
+                    self.editing = Some(self.notes_selected);
+                    self.notes_focus = NotesFocus::Input;
+                }
+            }
+            KeyCode::Esc => {
+                self.notes_focus = NotesFocus::Input;
+                self.focus = Focus::List;
             }
             _ => {}
         }
@@ -1056,10 +1144,9 @@ impl App {
         Action::Open(name)
     }
 
-    /// Append the trimmed Notes input as a new queued task for the highlighted
-    /// session, then clear the input. Leaves focus on the Notes input so
-    /// several tasks can be queued in a row.
-    fn execute_queue_add(&mut self) -> Action {
+    /// Commit the Notes input: replace the task at `editing` when editing in
+    /// place, otherwise append a new task. Ignores empty input.
+    fn submit_notes_input(&mut self) -> Action {
         let text = self.queue_input.text().trim().to_string();
         if text.is_empty() {
             return Action::None;
@@ -1068,7 +1155,17 @@ impl App {
             Some(session) => session.name.clone(),
             None => return Action::None,
         };
-        let dir = session::sessions_root().join(&name).join(".cs").join("local");
+        match self.editing {
+            Some(idx) => self.replace_notes_task(&name, idx, &text),
+            None => self.append_notes_task(&name, &text),
+        }
+        Action::None
+    }
+
+    /// Append `text` as a new queued task and clear the input, leaving focus on
+    /// the input so several tasks can be queued in a row.
+    fn append_notes_task(&mut self, name: &str, text: &str) {
+        let dir = session::queue_dir(name);
         if std::fs::create_dir_all(&dir).is_ok() {
             use std::io::Write;
             match std::fs::OpenOptions::new()
@@ -1090,7 +1187,55 @@ impl App {
                 }
             }
         }
-        Action::None
+    }
+
+    /// Replace the task at `idx` in place, preserving its position, then return
+    /// to the list with the edited task still highlighted.
+    fn replace_notes_task(&mut self, name: &str, idx: usize, text: &str) {
+        match rewrite_queue_line(name, idx, Some(text)) {
+            Ok(()) => {
+                let _ = std::fs::remove_file(session::queue_dir(name).join("queue.declined"));
+                self.queue_input.clear();
+                self.editing = None;
+                self.notes_focus = NotesFocus::List;
+                let len = session::read_queue(name).len();
+                if len == 0 {
+                    self.notes_focus = NotesFocus::Input;
+                    self.notes_selected = 0;
+                } else {
+                    self.notes_selected = idx.min(len - 1);
+                }
+                self.set_status(format!("Updated task for {}", name), StatusLevel::Success);
+            }
+            Err(e) => {
+                self.set_status(format!("Queue update failed: {}", e), StatusLevel::Error);
+            }
+        }
+    }
+
+    /// Remove the highlighted task, clamp the highlight to the shortened list,
+    /// and fall back to the input when the list becomes empty.
+    fn delete_notes_task(&mut self, idx: usize) {
+        let name = match self.selected_session() {
+            Some(session) => session.name.clone(),
+            None => return,
+        };
+        match rewrite_queue_line(&name, idx, None) {
+            Ok(()) => {
+                let _ = std::fs::remove_file(session::queue_dir(&name).join("queue.declined"));
+                let len = session::read_queue(&name).len();
+                if len == 0 {
+                    self.notes_focus = NotesFocus::Input;
+                    self.notes_selected = 0;
+                } else if self.notes_selected >= len {
+                    self.notes_selected = len - 1;
+                }
+                self.set_status(format!("Removed task from {}", name), StatusLevel::Success);
+            }
+            Err(e) => {
+                self.set_status(format!("Queue delete failed: {}", e), StatusLevel::Error);
+            }
+        }
     }
 
     fn handle_secrets(&mut self, key: KeyEvent) -> Action {
@@ -1408,6 +1553,44 @@ impl App {
         }
         None
     }
+}
+
+/// Rewrite a session's queue file, targeting the `target`-th non-blank line
+/// (0-based). `Some(text)` replaces that line's content; `None` drops it.
+/// Blank lines and every other task keep their position, mirroring the CLI's
+/// `_queue_rm` in bin/cs. Writes via a temp file then renames, as the CLI does.
+fn rewrite_queue_line(
+    name: &str,
+    target: usize,
+    replacement: Option<&str>,
+) -> std::io::Result<()> {
+    let dir = session::queue_dir(name);
+    let path = dir.join("queue");
+    let content = std::fs::read_to_string(&path)?;
+
+    let mut out = String::new();
+    let mut idx = 0usize;
+    for line in content.lines() {
+        if line.trim().is_empty() {
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        if idx == target {
+            if let Some(text) = replacement {
+                out.push_str(text);
+                out.push('\n');
+            }
+        } else {
+            out.push_str(line);
+            out.push('\n');
+        }
+        idx += 1;
+    }
+
+    let tmp = dir.join("queue.tmp");
+    std::fs::write(&tmp, out)?;
+    std::fs::rename(&tmp, &path)
 }
 
 /// Rename the Claude Code conversation history directory to match the session rename.
@@ -2845,6 +3028,105 @@ mod tests {
             !local.join("queue.declined").exists(),
             "adding a task must clear queue.declined so the gate can re-ask"
         );
+        std::fs::remove_dir_all(&tmp).ok();
+        std::env::remove_var("CS_SESSIONS_ROOT");
+    }
+
+    // --- Notes panel: delete + edit ---
+
+    /// Seed a session's queue file with the given tasks and return (tmp root, dir).
+    fn seed_queue(slug: &str, name: &str, tasks: &[&str]) -> (std::path::PathBuf, std::path::PathBuf) {
+        let tmp = std::env::temp_dir().join(format!("cs-tui-{}-{}", slug, std::process::id()));
+        std::env::set_var("CS_SESSIONS_ROOT", &tmp);
+        let local = tmp.join(name).join(".cs/local");
+        std::fs::create_dir_all(&local).unwrap();
+        let mut body = String::new();
+        for t in tasks {
+            body.push_str(t);
+            body.push('\n');
+        }
+        std::fs::write(local.join("queue"), body).unwrap();
+        (tmp, local)
+    }
+
+    #[test]
+    fn down_enters_list_and_up_returns_to_input() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let (tmp, _local) = seed_queue("notes-nav", "alpha", &["task one", "task two"]);
+        let mut app = App::new(sample_sessions());
+        app.table_state.select(Some(0));
+        app.handle_key(KeyEvent::from(KeyCode::Tab));
+        assert_eq!(app.notes_focus, NotesFocus::Input);
+        app.handle_key(KeyEvent::from(KeyCode::Down));
+        assert_eq!(app.notes_focus, NotesFocus::List);
+        assert_eq!(app.notes_selected, 0);
+        app.handle_key(KeyEvent::from(KeyCode::Up));
+        assert_eq!(app.notes_focus, NotesFocus::Input);
+        std::fs::remove_dir_all(&tmp).ok();
+        std::env::remove_var("CS_SESSIONS_ROOT");
+    }
+
+    #[test]
+    fn notes_list_d_removes_highlighted_task() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let (tmp, local) = seed_queue("notes-del", "alpha", &["one", "two", "three"]);
+        let mut app = App::new(sample_sessions());
+        app.table_state.select(Some(0));
+        app.handle_key(KeyEvent::from(KeyCode::Tab));
+        app.handle_key(KeyEvent::from(KeyCode::Down)); // into list, highlight #1
+        app.handle_key(KeyEvent::from(KeyCode::Down)); // highlight #2 ("two")
+        app.handle_key(KeyEvent::from(KeyCode::Char('d')));
+        let q = std::fs::read_to_string(local.join("queue")).unwrap();
+        let lines: Vec<&str> = q.lines().filter(|l| !l.trim().is_empty()).collect();
+        assert_eq!(lines, vec!["one", "three"], "deletes exactly the #2 line, order preserved");
+        std::fs::remove_dir_all(&tmp).ok();
+        std::env::remove_var("CS_SESSIONS_ROOT");
+    }
+
+    #[test]
+    fn notes_list_e_loads_task_and_enter_replaces_in_place() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let (tmp, local) = seed_queue("notes-edit", "alpha", &["one", "two", "three"]);
+        let mut app = App::new(sample_sessions());
+        app.table_state.select(Some(0));
+        app.handle_key(KeyEvent::from(KeyCode::Tab));
+        app.handle_key(KeyEvent::from(KeyCode::Down)); // highlight #1
+        app.handle_key(KeyEvent::from(KeyCode::Down)); // highlight #2 ("two")
+        app.handle_key(KeyEvent::from(KeyCode::Char('e')));
+        assert_eq!(app.editing, Some(1), "editing index remembered");
+        assert_eq!(app.queue_input.text(), "two", "task text loaded into the input");
+        assert_eq!(app.notes_focus, NotesFocus::Input, "focus moved to the input");
+        for c in " X".chars() {
+            app.handle_key(KeyEvent::from(KeyCode::Char(c)));
+        }
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        let q = std::fs::read_to_string(local.join("queue")).unwrap();
+        let lines: Vec<&str> = q.lines().filter(|l| !l.trim().is_empty()).collect();
+        assert_eq!(lines, vec!["one", "two X", "three"], "replaces in place, position preserved");
+        assert_eq!(app.editing, None, "editing cleared after save");
+        std::fs::remove_dir_all(&tmp).ok();
+        std::env::remove_var("CS_SESSIONS_ROOT");
+    }
+
+    #[test]
+    fn notes_list_e_then_esc_cancels_edit_unchanged() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let (tmp, local) = seed_queue("notes-edit-cancel", "alpha", &["one", "two", "three"]);
+        let mut app = App::new(sample_sessions());
+        app.table_state.select(Some(0));
+        app.handle_key(KeyEvent::from(KeyCode::Tab));
+        app.handle_key(KeyEvent::from(KeyCode::Down));
+        app.handle_key(KeyEvent::from(KeyCode::Down)); // highlight #2
+        app.handle_key(KeyEvent::from(KeyCode::Char('e')));
+        for c in "zzz".chars() {
+            app.handle_key(KeyEvent::from(KeyCode::Char(c)));
+        }
+        app.handle_key(KeyEvent::from(KeyCode::Esc)); // cancel edit
+        assert_eq!(app.editing, None, "edit cancelled");
+        assert_eq!(app.notes_focus, NotesFocus::List, "Esc returns to the list");
+        let q = std::fs::read_to_string(local.join("queue")).unwrap();
+        let lines: Vec<&str> = q.lines().filter(|l| !l.trim().is_empty()).collect();
+        assert_eq!(lines, vec!["one", "two", "three"], "queue unchanged after cancel");
         std::fs::remove_dir_all(&tmp).ok();
         std::env::remove_var("CS_SESSIONS_ROOT");
     }

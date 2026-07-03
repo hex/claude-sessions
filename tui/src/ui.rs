@@ -11,7 +11,7 @@ use ratatui::Frame;
 
 use ratatui::layout::Alignment;
 
-use crate::app::{App, FlashKind, Focus, Mode, SortColumn, SortDirection, StatusLevel};
+use crate::app::{App, FlashKind, Focus, Mode, NotesFocus, SortColumn, SortDirection, StatusLevel};
 use crate::theme::{self, Palette};
 
 const PREVIEW_MIN_WIDTH: u16 = 120;
@@ -544,7 +544,13 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
     }
 
     let keys = if app.mode == Mode::Normal && app.focus == Focus::Notes {
-        "type a task  Enter:add  Esc:back"
+        if app.editing.is_some() {
+            "editing   Enter:save   Esc:cancel"
+        } else if app.notes_focus == NotesFocus::List {
+            "\u{2191}\u{2193}:select   d:delete   e:edit   Esc:back"
+        } else {
+            "type a task   \u{2193}:list   Enter:add   Esc:back"
+        }
     } else {
         match app.mode {
             Mode::Normal if !app.marked_sessions.is_empty() => {
@@ -1054,25 +1060,11 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
-/// Read the highlighted session's queued tasks straight from disk so the
-/// Notes list always reflects the latest state — no cache to invalidate.
-fn read_queue_lines(name: &str) -> Vec<String> {
-    let path = crate::session::sessions_root()
-        .join(name)
-        .join(".cs/local/queue");
-    std::fs::read_to_string(path)
-        .map(|text| {
-            text.lines()
-                .filter(|line| !line.trim().is_empty())
-                .map(|line| line.to_string())
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
     let p = app.theme;
     let focused = app.focus == Focus::Notes;
+    let input_focused = focused && app.notes_focus == NotesFocus::Input;
+    let list_focused = focused && app.notes_focus == NotesFocus::List;
 
     let border_color = if focused { p.gold } else { p.rust };
     let mut title_style = Style::default().fg(p.gold);
@@ -1089,10 +1081,16 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let rows = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(inner);
+    // Input line on top, a full-width separator rule, then the task list.
+    let rows = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Min(0),
+    ])
+    .split(inner);
 
-    // Single-line task input, with a block cursor when focused.
-    let input_line = if focused {
+    // Single-line task input, with a block cursor while the input is focused.
+    let input_line = if input_focused {
         Line::from(vec![
             Span::styled(app.queue_input.before_cursor(), Style::default().fg(p.fg)),
             Span::styled("\u{2588}", Style::default().fg(p.gold)),
@@ -1108,10 +1106,17 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
     };
     frame.render_widget(Paragraph::new(input_line), rows[0]);
 
+    // Separator between the input and the list, matching the panel border.
+    let rule = "\u{2500}".repeat(rows[1].width as usize);
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(rule, Style::default().fg(border_color)))),
+        rows[1],
+    );
+
     // Numbered list of queued tasks for the highlighted session, read live.
     let tasks = app
         .selected_session()
-        .map(|s| read_queue_lines(&s.name))
+        .map(|s| crate::session::read_queue(&s.name))
         .unwrap_or_default();
 
     let list_lines: Vec<Line> = if tasks.is_empty() {
@@ -1124,15 +1129,27 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
             .iter()
             .enumerate()
             .map(|(i, task)| {
+                let highlighted = list_focused && i == app.notes_selected;
+                let (marker, marker_color) = if highlighted {
+                    ("\u{25b8} ", p.gold)
+                } else {
+                    ("  ", p.comment)
+                };
+                let num_style = Style::default().fg(marker_color);
+                let mut text_style = Style::default().fg(p.fg);
+                if highlighted {
+                    text_style = text_style.add_modifier(Modifier::BOLD);
+                }
                 Line::from(vec![
-                    Span::styled(format!("{}. ", i + 1), Style::default().fg(p.comment)),
-                    Span::styled(task.as_str(), Style::default().fg(p.fg)),
+                    Span::styled(marker, Style::default().fg(marker_color)),
+                    Span::styled(format!("{}. ", i + 1), num_style),
+                    Span::styled(task.as_str(), text_style),
                 ])
             })
             .collect()
     };
     let list = Paragraph::new(list_lines).wrap(Wrap { trim: true });
-    frame.render_widget(list, rows[1]);
+    frame.render_widget(list, rows[2]);
 }
 
 fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {

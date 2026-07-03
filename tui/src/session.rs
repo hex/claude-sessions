@@ -138,6 +138,25 @@ pub fn sessions_root() -> PathBuf {
         })
 }
 
+/// Directory holding a session's per-machine queue files (`.cs/local`).
+pub fn queue_dir(name: &str) -> PathBuf {
+    sessions_root().join(name).join(".cs").join("local")
+}
+
+/// The highlighted session's queued tasks, one per non-blank line, in order.
+/// Read fresh from disk so callers always see the latest queue.
+pub fn read_queue(name: &str) -> Vec<String> {
+    let path = queue_dir(name).join("queue");
+    fs::read_to_string(path)
+        .map(|text| {
+            text.lines()
+                .filter(|line| !line.trim().is_empty())
+                .map(|line| line.to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 pub fn scan_sessions() -> Vec<Session> {
     scan_sessions_in(&sessions_root())
 }
