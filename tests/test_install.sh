@@ -50,6 +50,23 @@ test_install_completes_when_zshrc_has_no_fpath() {
     fi
 }
 
+# An empty or invalid settings.json must not abort the install; it should be
+# backed up and replaced with a valid object so hook registration proceeds.
+test_install_recovers_from_invalid_settings_json() {
+    command -v jq >/dev/null 2>&1 || return 0  # jq path only
+    local fake_home="$TEST_TMPDIR/home"
+    mkdir -p "$fake_home/.claude"
+    printf 'not json at all {{{' > "$fake_home/.claude/settings.json"
+
+    local rc=0
+    HOME="$fake_home" bash "$INSTALL_SH" > /dev/null 2>&1 || rc=$?
+    assert_eq "0" "$rc" "install must not abort on invalid settings.json" || return 1
+    assert_file_exists "$fake_home/.claude/settings.json.cs-bak" \
+        "invalid settings.json should be backed up" || return 1
+    jq -e . "$fake_home/.claude/settings.json" >/dev/null 2>&1 \
+        || { echo "  FAIL: settings.json is not valid JSON after install"; return 1; }
+}
+
 # ============================================================================
 # Cycle 2: install.sh respects a user-defined fpath when present in .zshrc
 # (happy path — verifies the fpath-detection logic still works after the fix)
@@ -493,4 +510,5 @@ run_test test_statusline_disable_strips_only_ours
 run_test test_install_preserves_foreign_statusline
 run_test test_uninstall_removes_statusline
 run_test test_uninstall_preserves_foreign_statusline
+run_test test_install_recovers_from_invalid_settings_json
 report_results

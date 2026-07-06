@@ -69,7 +69,10 @@ if [ -f "$HOME/.zshrc" ]; then
 fi
 CLAUDE_SETTINGS="${HOME}/.claude/settings.json"
 SESSIONS_DIR="${HOME}/.claude-sessions"
-REPO_URL="https://raw.githubusercontent.com/hex/claude-sessions/main"
+# Payload ref: `cs -update` pins this to the release tag (v<version>) so the
+# downloaded scripts/hooks match the verified installer; a fresh curl|bash
+# install defaults to main.
+REPO_URL="https://raw.githubusercontent.com/hex/claude-sessions/${CS_INSTALL_REF:-main}"
 RELEASES_URL="https://github.com/hex/claude-sessions/releases/download"
 CS_URL="${REPO_URL}/bin/cs"
 CS_SECRETS_URL="${REPO_URL}/bin/cs-secrets"
@@ -218,9 +221,9 @@ elif [ "$INSTALL_METHOD" = "web" ]; then
     _arch=$(uname -m)
     [ "$_arch" = "x86_64" ] && _arch="amd64"
     _tui_url="${RELEASES_URL}/v${_cs_version}/cs-tui-${_os}-${_arch}"
-    if [ -n "$_cs_version" ] && curl -fsSL --head "$_tui_url" >/dev/null 2>&1; then
+    if [ -n "$_cs_version" ] && curl -fsSL --head "$_tui_url" >/dev/null 2>&1 \
+        && curl -fsSL "$_tui_url" -o "$INSTALL_DIR/cs-tui"; then
         installed "cs-tui" "$INSTALL_DIR/cs-tui"
-        curl -fsSL "$_tui_url" -o "$INSTALL_DIR/cs-tui" || warn "Failed to download cs-tui — skipping"
         chmod +x "$INSTALL_DIR/cs-tui"
 
         # Verify cs-tui checksum (hard gate)
@@ -395,6 +398,13 @@ else
     # Start with existing settings or empty object
     if [ -f "$CLAUDE_SETTINGS" ]; then
         SETTINGS=$(cat "$CLAUDE_SETTINGS")
+        # An empty or invalid-JSON settings.json would make every jq stage below
+        # silently produce nothing; back it up and start fresh instead.
+        if [ -z "${SETTINGS//[[:space:]]/}" ] || ! printf '%s' "$SETTINGS" | jq -e . >/dev/null 2>&1; then
+            cp "$CLAUDE_SETTINGS" "$CLAUDE_SETTINGS.cs-bak" 2>/dev/null || true
+            warn "settings.json was empty or invalid JSON — backed up to settings.json.cs-bak and starting fresh"
+            SETTINGS='{}'
+        fi
     else
         SETTINGS='{}'
     fi

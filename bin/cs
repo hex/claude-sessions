@@ -479,8 +479,9 @@ verify_checksum() {
     elif command -v shasum &>/dev/null; then
         actual=$(shasum -a 256 "$file" | awk '{print $1}')
     else
-        echo "Warning: No sha256sum or shasum found, skipping checksum" >&2
-        return 0
+        # Fail closed: a verification gate that can't verify must not pass.
+        echo "Error: no sha256sum or shasum found — cannot verify download. Install one and retry." >&2
+        return 1
     fi
     [ "$expected" = "$actual" ]
 }
@@ -599,8 +600,11 @@ do_update() {
 
     info "Verified"
 
-    # Run the verified installer
-    bash "$tmpdir/install.sh"
+    # Run the verified installer, pinning the payload (cs, cs-secrets, hooks,
+    # …) to the same immutable release tag rather than letting it fetch from the
+    # mutable main branch. The installer is signature-verified, so it is trusted
+    # to fetch its payload from the tag it was published at.
+    CS_INSTALL_REF="v${remote_version}" bash "$tmpdir/install.sh"
     rm -rf "$tmpdir"
 
     # Clear update cache so notification disappears
