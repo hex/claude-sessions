@@ -75,7 +75,7 @@ test_worktree_create_reuses_existing_branch() {
 test_worktree_create_ignored_mode_bootstraps_cs() {
     # A repo whose .gitignore excludes .cs/ entirely (like the cs dev repo)
     local base_dir="$CS_SESSIONS_ROOT/proj"
-    mkdir -p "$base_dir/.cs"/{memory,logs,local}
+    mkdir -p "$base_dir/.cs"/{memory,local}
     echo "# Project readme" > "$base_dir/README.md"
     echo "# Project CLAUDE.md" > "$base_dir/CLAUDE.md"
     printf '.cs/\n' > "$base_dir/.gitignore"
@@ -110,7 +110,7 @@ test_worktree_create_succeeds_with_untracked_base() {
 
 test_worktree_reopen_preserves_project_claude_md() {
     local base_dir="$CS_SESSIONS_ROOT/proj"
-    mkdir -p "$base_dir/.cs"/{memory,logs,local}
+    mkdir -p "$base_dir/.cs"/{memory,local}
     echo "# Project CLAUDE.md" > "$base_dir/CLAUDE.md"
     printf '.cs/\n' > "$base_dir/.gitignore"
     (cd "$base_dir" && git init -q && git add -A && git commit -q -m init)
@@ -210,7 +210,7 @@ run_test test_merge_conflict_stops_and_preserves
 
 test_merge_ignored_mode_fuses_records() {
     local base_dir="$CS_SESSIONS_ROOT/proj"
-    mkdir -p "$base_dir/.cs"/{memory,logs,local}
+    mkdir -p "$base_dir/.cs"/{memory,local}
     echo "base note" > "$base_dir/.cs/memory/note-base.md"
     printf -- '---\ndescription: seed\n---\n# Session narrative (tester)\n\n## Prior finding\n' \
         > "$base_dir/.cs/memory/narrative.tester.md"

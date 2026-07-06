@@ -102,7 +102,7 @@ test_lazy_migration_backfills_uuid() {
     # Build a "legacy" session — has .cs/README.md with frontmatter but no
     # claude_session_id (created on a cs version before this feature).
     local session_dir="$CS_SESSIONS_ROOT/legacy-session"
-    mkdir -p "$session_dir/.cs"/{logs,memory}
+    mkdir -p "$session_dir/.cs"/{local,memory}
     cat > "$session_dir/.cs/README.md" << 'EOF'
 ---
 status: active
@@ -187,7 +187,7 @@ _seed_legacy_session() {
     local name="$1"
     local uuid="${2:-}"
     local session_dir="$CS_SESSIONS_ROOT/$name"
-    mkdir -p "$session_dir/.cs"/{logs,memory}
+    mkdir -p "$session_dir/.cs"/{local,memory}
     {
         echo "---"
         echo "status: active"
@@ -373,7 +373,7 @@ _seed_doctor_session() {
     local name="$1"
     local uuid="$2"
     local session_dir="$CS_SESSIONS_ROOT/$name"
-    mkdir -p "$session_dir/.cs"/{logs,memory,local}
+    mkdir -p "$session_dir/.cs"/{memory,local}
     cat > "$session_dir/.cs/README.md" << EOF
 ---
 status: active
@@ -635,7 +635,7 @@ test_legacy_session_backfills_color_on_next_launch() {
     # before v2026.5.7 shipped. Phase 11 should allocate + persist a color
     # on first launch under v5.7.
     local session_dir="$CS_SESSIONS_ROOT/legacy-no-color"
-    mkdir -p "$session_dir/.cs"/{logs,memory}
+    mkdir -p "$session_dir/.cs"/{local,memory}
     cat > "$session_dir/.cs/README.md" << 'EOF'
 ---
 status: active

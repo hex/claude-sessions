@@ -132,7 +132,7 @@ test_prune_is_idempotent() {
 # A modern session (no legacy artifacts, modern CLAUDE.md) is untouched
 test_prune_noop_on_clean_session() {
     local session_dir="$CS_SESSIONS_ROOT/clean"
-    mkdir -p "$session_dir/.cs"/{logs,memory}
+    mkdir -p "$session_dir/.cs"/{local,memory}
     # Mention .cs/ so Phase 5 leaves CLAUDE.md alone
     cat > "$session_dir/CLAUDE.md" << 'EOF'
 # Session Documentation Protocol

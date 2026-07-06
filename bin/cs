@@ -738,7 +738,7 @@ cs_split_worktree_name() {
 # is the project's own tracked file.
 bootstrap_worktree_meta() {
     local wt_dir="$1" base_name="$2" task="$3"
-    mkdir -p "$wt_dir/.cs"/{logs,local,memory}
+    mkdir -p "$wt_dir/.cs"/{local,memory}
     cat > "$wt_dir/.cs/README.md" << EOF
 ---
 status: active
@@ -754,7 +754,7 @@ Task worktree of session '$base_name' on branch cs/$task.
 
 [Describe this task]
 EOF
-    cat > "$wt_dir/.cs/logs/session.log" << EOF
+    cat > "$wt_dir/.cs/local/session.log" << EOF
 Claude Code Session Log
 Session: $base_name@$task
 Started: $(date '+%Y-%m-%d %H:%M:%S')
@@ -946,9 +946,9 @@ fuse_session_records() {
     local f base
 
     [ -f "$src/timeline.jsonl" ] && cat "$src/timeline.jsonl" >> "$dst/timeline.jsonl"
-    if [ -f "$src/logs/session.log" ]; then
-        mkdir -p "$dst/logs"
-        { echo ""; cat "$src/logs/session.log"; } >> "$dst/logs/session.log"
+    if [ -f "$src/local/session.log" ]; then
+        mkdir -p "$dst/local"
+        { echo ""; cat "$src/local/session.log"; } >> "$dst/local/session.log"
     fi
 
     mkdir -p "$dst/memory"
@@ -1423,9 +1423,6 @@ setup_merge_attributes() {
     if ! grep -q 'MEMORY\.md merge=ours' "$ga" 2>/dev/null; then
         printf '.cs/memory/MEMORY.md merge=ours\n' >> "$ga"
     fi
-    if ! grep -q 'session\.log merge=union' "$ga" 2>/dev/null; then
-        printf '.cs/logs/session.log merge=union\n' >> "$ga"
-    fi
     if ! grep -q 'timeline\.jsonl merge=union' "$ga" 2>/dev/null; then
         printf '.cs/timeline.jsonl merge=union\n' >> "$ga"
     fi
@@ -1450,7 +1447,7 @@ create_session_structure() {
     claude_session_id=$(_alloc_uuid)
     claude_session_color=$(_alloc_random_color)
 
-    mkdir -p "$session_dir/.cs"/{logs,local}
+    mkdir -p "$session_dir/.cs/local"
 
     # Machine-local values go to .cs/local/state, never the git-synced README.
     _set_local_state "$session_dir/.cs/local/state" claude_session_id "$claude_session_id"
@@ -1485,8 +1482,8 @@ EOF
 
     write_session_claude_md "$session_dir"
 
-    # Initialize session log
-    cat > "$session_dir/.cs/logs/session.log" << EOF
+    # Initialize session log (machine-local; never git-synced)
+    cat > "$session_dir/.cs/local/session.log" << EOF
 Claude Code Session Log
 Session: $(basename "$session_dir")
 Started: $(date '+%Y-%m-%d %H:%M:%S')
@@ -1603,7 +1600,28 @@ migrate_session() {
     fi
 
     # Phase 2: Ensure .cs/ subdirectories exist (handles partial migrations and edge cases)
-    mkdir -p "$session_dir/.cs"/{logs,local}
+    mkdir -p "$session_dir/.cs/local"
+
+    # Phase 2b: Relocate the session log to machine-local state. The audit trail
+    # (bash commands, lifecycle events, autosave notes) is per-checkout, not
+    # shared — keeping it git-synced with merge=union interleaved every machine's
+    # commands into the one shared repo. Move it under .cs/local/ (gitignored) so
+    # it stays with the machine that produced it; the shared structured record
+    # lives in timeline.jsonl. The tracked deletion is left for the next normal
+    # commit, as with the README-frontmatter move below. One-time, idempotent:
+    # once the old file is gone the block is a no-op.
+    if [ -f "$session_dir/.cs/logs/session.log" ]; then
+        { [ -f "$session_dir/.cs/local/session.log" ] && echo ""
+          cat "$session_dir/.cs/logs/session.log"; } >> "$session_dir/.cs/local/session.log"
+        rm -f "$session_dir/.cs/logs/session.log"
+        rmdir "$session_dir/.cs/logs" 2>/dev/null || true
+        if [ -f "$session_dir/.gitattributes" ]; then
+            grep -v 'logs/session\.log merge=union' "$session_dir/.gitattributes" \
+                > "$session_dir/.gitattributes.tmp" 2>/dev/null \
+                && mv "$session_dir/.gitattributes.tmp" "$session_dir/.gitattributes"
+        fi
+        warn "Moved .cs/logs/session.log to machine-local .cs/local/session.log"
+    fi
 
     # Remove inert sync/remote metadata left by older versions (the sync
     # subsystem was removed; nothing reads these files anymore)
@@ -2656,8 +2674,9 @@ list_sessions() {
         local created="-"
         local modified="-"
 
-        local log_file="$session_dir/.cs/logs/session.log"
-        # Fall back to old location for unmigrated sessions
+        local log_file="$session_dir/.cs/local/session.log"
+        # Fall back to older locations for unmigrated sessions
+        [ ! -f "$log_file" ] && log_file="$session_dir/.cs/logs/session.log"
         [ ! -f "$log_file" ] && log_file="$session_dir/logs/session.log"
         if [ -f "$log_file" ]; then
             # Parse created timestamp using bash builtins (avoids forking head|grep|cut)

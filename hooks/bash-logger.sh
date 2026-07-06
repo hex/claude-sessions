@@ -11,7 +11,7 @@ if [ -z "${CLAUDE_SESSION_NAME:-}" ]; then
 fi
 
 META_DIR="${CLAUDE_SESSION_META_DIR:-${CLAUDE_SESSION_DIR:-}/.cs}"
-if [ -z "$META_DIR" ] || [ ! -d "$META_DIR/logs" ]; then
+if [ -z "$META_DIR" ] || [ ! -d "$META_DIR/local" ]; then
     exit 0
 fi
 
@@ -33,6 +33,6 @@ if [ ${#COMMAND} -gt 200 ]; then
     COMMAND="${COMMAND:0:200}..."
 fi
 
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] BASH: $COMMAND" >> "$META_DIR/logs/session.log"
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] BASH: $COMMAND" >> "$META_DIR/local/session.log"
 
 exit 0

@@ -13,8 +13,8 @@ setup() {
     export CLAUDE_SESSION_NAME="test-session"
     export CLAUDE_SESSION_DIR="$TEST_TMPDIR/session"
     export CLAUDE_SESSION_META_DIR="$CLAUDE_SESSION_DIR/.cs"
-    mkdir -p "$CLAUDE_SESSION_META_DIR"/{logs,memory}
-    touch "$CLAUDE_SESSION_META_DIR/logs/session.log"
+    mkdir -p "$CLAUDE_SESSION_META_DIR"/{local,memory}
+    touch "$CLAUDE_SESSION_META_DIR/local/session.log"
 }
 
 teardown() {
@@ -226,9 +226,9 @@ test_failure_logged_to_session_log() {
     local input='{"tool_name":"Bash","error":"Command failed with exit code 1"}'
     echo "$input" | bash "$HOOKS_DIR/tool-failure-logger.sh"
 
-    assert_file_contains "$CLAUDE_SESSION_META_DIR/logs/session.log" "Tool failure: Bash" \
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/local/session.log" "Tool failure: Bash" \
         "Should log tool name" || return 1
-    assert_file_contains "$CLAUDE_SESSION_META_DIR/logs/session.log" "Command failed" \
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/local/session.log" "Command failed" \
         "Should log error message" || return 1
 }
 
@@ -236,7 +236,7 @@ test_failure_log_has_timestamp() {
     local input='{"tool_name":"Write","error":"Permission denied"}'
     echo "$input" | bash "$HOOKS_DIR/tool-failure-logger.sh"
 
-    grep -qE '^\[20[0-9]{2}-[0-9]{2}-[0-9]{2}' "$CLAUDE_SESSION_META_DIR/logs/session.log" || {
+    grep -qE '^\[20[0-9]{2}-[0-9]{2}-[0-9]{2}' "$CLAUDE_SESSION_META_DIR/local/session.log" || {
         echo "  FAIL: Log should have timestamp"
         return 1
     }
@@ -250,7 +250,7 @@ test_failure_truncates_long_errors() {
     echo "$input" | bash "$HOOKS_DIR/tool-failure-logger.sh"
 
     local log_line
-    log_line=$(grep "Tool failure" "$CLAUDE_SESSION_META_DIR/logs/session.log" | head -1)
+    log_line=$(grep "Tool failure" "$CLAUDE_SESSION_META_DIR/local/session.log" | head -1)
     local line_len=${#log_line}
     if [[ "$line_len" -gt 280 ]]; then
         echo "  FAIL: Log line should be truncated ($line_len chars)"
@@ -268,7 +268,7 @@ test_failure_handles_huge_multiline_error() {
     input=$(jq -n --arg err "$huge_error" '{tool_name: "Bash", error: $err}')
     echo "$input" | bash "$HOOKS_DIR/tool-failure-logger.sh"
 
-    assert_file_contains "$CLAUDE_SESSION_META_DIR/logs/session.log" "Tool failure: Bash" \
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/local/session.log" "Tool failure: Bash" \
         "Should log huge multi-line error without crashing" || return 1
 }
 
@@ -277,9 +277,9 @@ test_failure_skips_outside_session() {
     local input='{"tool_name":"Bash","error":"fail"}'
     echo "$input" | bash "$HOOKS_DIR/tool-failure-logger.sh"
     # Should exit cleanly without writing anything
-    if [[ -s "$CLAUDE_SESSION_META_DIR/logs/session.log" ]]; then
+    if [[ -s "$CLAUDE_SESSION_META_DIR/local/session.log" ]]; then
         local content
-        content=$(cat "$CLAUDE_SESSION_META_DIR/logs/session.log")
+        content=$(cat "$CLAUDE_SESSION_META_DIR/local/session.log")
         if [[ -n "$content" ]]; then
             echo "  FAIL: Should not log outside session"
             return 1
@@ -290,7 +290,7 @@ test_failure_skips_outside_session() {
 test_failure_handles_missing_error() {
     local input='{"tool_name":"Read"}'
     echo "$input" | bash "$HOOKS_DIR/tool-failure-logger.sh"
-    assert_file_contains "$CLAUDE_SESSION_META_DIR/logs/session.log" "Tool failure: Read" \
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/local/session.log" "Tool failure: Read" \
         "Should handle missing error field" || return 1
 }
 
@@ -311,8 +311,8 @@ session_start_setup() {
     export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/current-session"
     export CLAUDE_SESSION_META_DIR="$CLAUDE_SESSION_DIR/.cs"
     export CLAUDE_SESSION_NAME="current-session"
-    mkdir -p "$CLAUDE_SESSION_META_DIR"/{logs,memory}
-    touch "$CLAUDE_SESSION_META_DIR/logs/session.log"
+    mkdir -p "$CLAUDE_SESSION_META_DIR"/{local,memory}
+    touch "$CLAUDE_SESSION_META_DIR/local/session.log"
 
     # Initialize git so the dynamic context block runs
     (cd "$CLAUDE_SESSION_DIR" && git init -q -b main && git config user.email t@t && git config user.name T && echo init > README.md && git add -A && git commit -q -m init)
@@ -343,14 +343,14 @@ create_sibling_session() {
     local name="$1"
     local objective="$2"
     local dir="$CS_SESSIONS_ROOT/$name"
-    mkdir -p "$dir/.cs/logs"
+    mkdir -p "$dir/.cs/local"
     cat > "$dir/.cs/README.md" << EOF
 ## Objective
 
 $objective
 EOF
     # Touch log to set modification time
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - Session started" > "$dir/.cs/logs/session.log"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - Session started" > "$dir/.cs/local/session.log"
 }
 
 
@@ -680,8 +680,8 @@ index_setup() {
     export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/current-session"
     export CLAUDE_SESSION_META_DIR="$CLAUDE_SESSION_DIR/.cs"
     export CLAUDE_SESSION_NAME="current-session"
-    mkdir -p "$CLAUDE_SESSION_META_DIR/logs"
-    touch "$CLAUDE_SESSION_META_DIR/logs/session.log"
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    touch "$CLAUDE_SESSION_META_DIR/local/session.log"
     cat > "$CLAUDE_SESSION_META_DIR/README.md" << 'EOF'
 ---
 status: active
@@ -713,8 +713,8 @@ create_indexed_session() {
     local objective="$3"
     local tags="${4:-}"
     local dir="$CS_SESSIONS_ROOT/$name"
-    mkdir -p "$dir/.cs/logs"
-    touch "$dir/.cs/logs/session.log"
+    mkdir -p "$dir/.cs/local"
+    touch "$dir/.cs/local/session.log"
     cat > "$dir/.cs/README.md" << EOF
 ---
 status: $status

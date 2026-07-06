@@ -114,7 +114,7 @@ test_resume_leaves_readme_untouched() {
 
 test_migration_moves_fields_from_readme_to_local_state() {
     local session_dir="$CS_SESSIONS_ROOT/legacy-frontmatter"
-    mkdir -p "$session_dir/.cs"/{logs,memory}
+    mkdir -p "$session_dir/.cs"/{local,memory}
     cat > "$session_dir/.cs/README.md" << 'EOF'
 ---
 status: active
@@ -151,6 +151,39 @@ EOF
 }
 
 # ============================================================================
+# Cycle 3b: migration relocates the session log to machine-local .cs/local/
+# ============================================================================
+
+test_migration_moves_session_log_to_local() {
+    local session_dir="$CS_SESSIONS_ROOT/legacy-log"
+    mkdir -p "$session_dir/.cs"/{logs,memory}
+    printf '# Session: legacy-log\n' > "$session_dir/.cs/README.md"
+    echo "# Session narrative" > "$session_dir/.cs/memory/narrative.md"
+    echo "# Session" > "$session_dir/CLAUDE.md"
+    cat > "$session_dir/.cs/logs/session.log" << 'EOF'
+Claude Code Session Log
+Started: 2026-01-01 10:00:00
+[2026-01-01 10:01:00] BASH: echo hello
+EOF
+    printf '.cs/logs/session.log merge=union\n.cs/timeline.jsonl merge=union\n' \
+        > "$session_dir/.gitattributes"
+    (cd "$session_dir" && git init -q && git add -A && git commit -q -m "init")
+
+    "$CS_BIN" legacy-log <<< "" >/dev/null 2>&1 || true
+
+    assert_file_exists "$session_dir/.cs/local/session.log" \
+        "migration should create the log at .cs/local/session.log" || return 1
+    assert_file_contains "$session_dir/.cs/local/session.log" "BASH: echo hello" \
+        "relocated log should carry the old content" || return 1
+    assert_file_not_exists "$session_dir/.cs/logs/session.log" \
+        "old .cs/logs/session.log should be gone after migration" || return 1
+    assert_file_not_contains "$session_dir/.gitattributes" "logs/session.log merge=union" \
+        "obsolete session.log union rule should be stripped from .gitattributes" || return 1
+    assert_file_contains "$session_dir/.gitattributes" "timeline.jsonl merge=union" \
+        "unrelated merge rules must survive the strip" || return 1
+}
+
+# ============================================================================
 # Cycle 4: session-start.sh rebinds the uuid in local state, not the README
 # ============================================================================
 
@@ -158,8 +191,8 @@ hook_setup() {
     export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/current-session"
     export CLAUDE_SESSION_META_DIR="$CLAUDE_SESSION_DIR/.cs"
     export CLAUDE_SESSION_NAME="current-session"
-    mkdir -p "$CLAUDE_SESSION_META_DIR"/{logs,memory,local}
-    touch "$CLAUDE_SESSION_META_DIR/logs/session.log"
+    mkdir -p "$CLAUDE_SESSION_META_DIR"/{memory,local}
+    touch "$CLAUDE_SESSION_META_DIR/local/session.log"
     cat > "$CLAUDE_SESSION_META_DIR/README.md" << 'EOF'
 ---
 status: active
@@ -233,8 +266,6 @@ test_union_merge_attributes_written() {
 
     local sdir="$CS_SESSIONS_ROOT/state-session"
     local ga="$sdir/.gitattributes"
-    assert_file_contains "$ga" ".cs/logs/session.log merge=union" \
-        "session.log should merge with the union driver" || return 1
     assert_file_contains "$ga" ".cs/timeline.jsonl merge=union" \
         "timeline.jsonl should merge with the union driver" || return 1
     assert_file_contains "$ga" 'narrative\.\*\.md merge=union' \
@@ -246,7 +277,7 @@ test_frontmatter_backfill_created_uses_git_date() {
     # get its created: date from shared git history, not from local mtime
     # (git does not preserve mtime across clones, so mtime diverges).
     local session_dir="$CS_SESSIONS_ROOT/legacy-created"
-    mkdir -p "$session_dir/.cs"/{logs,memory}
+    mkdir -p "$session_dir/.cs"/{local,memory}
     printf '# Session: legacy-created\n\nSome notes without a Started line.\n' \
         > "$session_dir/.cs/README.md"
     echo "# Session" > "$session_dir/CLAUDE.md"
@@ -262,8 +293,9 @@ test_frontmatter_backfill_created_uses_git_date() {
 }
 
 test_divergent_appends_merge_clean() {
-    # Two machines share one session through git; each appends its own log
-    # and timeline lines. The merge must keep both sides without conflict.
+    # Two machines share one session through git; each appends its own timeline
+    # lines. The union merge must keep both sides without conflict. (session.log
+    # is machine-local and gitignored, so it never participates in this merge.)
     "$CS_BIN" state-session <<< "" >/dev/null 2>&1 || true
     local origin_dir="$CS_SESSIONS_ROOT/state-session"
     (cd "$origin_dir" && git init -q -b main && git config user.email a@x \
@@ -273,12 +305,10 @@ test_divergent_appends_merge_clean() {
     git clone -q "$origin_dir" "$clone_a"
     git clone -q "$origin_dir" "$clone_b"
 
-    echo "2026-07-02 10:00:00 - machine A event" >> "$clone_a/.cs/logs/session.log"
     echo '{"ts":"2026-07-02T10:00:00Z","event":"started","machine":"A"}' >> "$clone_a/.cs/timeline.jsonl"
     (cd "$clone_a" && git config user.email a@x && git config user.name A \
         && git add -A && git commit -q -m "A work")
 
-    echo "2026-07-02 11:00:00 - machine B event" >> "$clone_b/.cs/logs/session.log"
     echo '{"ts":"2026-07-02T11:00:00Z","event":"started","machine":"B"}' >> "$clone_b/.cs/timeline.jsonl"
     (cd "$clone_b" && git config user.email b@x && git config user.name B \
         && git add -A && git commit -q -m "B work")
@@ -289,8 +319,6 @@ test_divergent_appends_merge_clean() {
         return 1
     }
 
-    assert_file_contains "$clone_b/.cs/logs/session.log" "machine A event" || return 1
-    assert_file_contains "$clone_b/.cs/logs/session.log" "machine B event" || return 1
     assert_file_contains "$clone_b/.cs/timeline.jsonl" '"machine":"A"' || return 1
     assert_file_contains "$clone_b/.cs/timeline.jsonl" '"machine":"B"' || return 1
 }
@@ -300,6 +328,7 @@ test_divergent_appends_merge_clean() {
 run_test test_new_session_records_state_in_local_not_readme
 run_test test_resume_leaves_readme_untouched
 run_test test_migration_moves_fields_from_readme_to_local_state
+run_test test_migration_moves_session_log_to_local
 run_test test_session_start_rebinds_uuid_in_local_state
 run_test test_session_start_writes_last_resumed_to_local_state
 run_test test_session_end_leaves_readme_untouched

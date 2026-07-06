@@ -5,7 +5,7 @@ The installer configures Claude Code hooks that enable session management featur
 ## session-start.sh (SessionStart)
 
 Runs when Claude Code starts a session:
-- Logs session start (including source: `startup`, `resume`, `clear`, `compact`) to `.cs/logs/session.log` and appends a `session_start` event to `.cs/timeline.jsonl`
+- Logs session start (including source: `startup`, `resume`, `clear`, `compact`) to `.cs/local/session.log` and appends a `session_start` event to `.cs/timeline.jsonl`
 - On all sources: clears the statusline's attention marker (`.cs/local/attention`) — a fresh session is attended by definition
 - On all sources: rebinds `claude_session_id` in the machine-local `.cs/local/state` to the live conversation UUID from the hook input. Claude Code forks a new UUID when a conversation is continued past the context limit (the old transcript stays on disk), so the recorded binding can silently go stale and `cs` would resume the pre-fork conversation. Non-UUID session ids are ignored; each rebind is logged to `session.log`
 - On `startup`/`resume` only: configures `transfer.hideRefs`, recovers autosaved changes from crashed sessions
@@ -56,7 +56,7 @@ Runs when Claude Code spawns a subagent (via the Agent tool):
 ## tool-failure-logger.sh (PostToolUseFailure)
 
 Runs when a tool call fails (async, non-blocking):
-- Logs tool name and truncated error message to `.cs/logs/session.log`
+- Logs tool name and truncated error message to `.cs/local/session.log`
 - Helps debug build failures, test errors, and other tool issues after the fact
 
 ## session-auto-approve.sh (PermissionRequest on Write/Edit)
@@ -69,7 +69,7 @@ Runs when Claude Code would show a permission dialog for Write or Edit:
 ## bash-logger.sh (PreToolUse on Bash)
 
 Runs before every Bash tool call (sync, fast):
-- Logs `[timestamp] BASH: command` to `.cs/logs/session.log`
+- Logs `[timestamp] BASH: command` to `.cs/local/session.log`
 - Creates a complete audit trail of all commands Claude runs
 - Truncates long commands at 200 chars
 - Never blocks — uses `set -uo pipefail` without `set -e`

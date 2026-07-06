@@ -198,7 +198,7 @@ STUB_EOF
 create_test_session() {
     local name="$1"
     local session_dir="$CS_SESSIONS_ROOT/$name"
-    mkdir -p "$session_dir/.cs"/{memory,logs}
+    mkdir -p "$session_dir/.cs"/{memory,local}
     printf '# Session: %s\n' "$name" > "$session_dir/.cs/README.md"
     echo "# Session" > "$session_dir/CLAUDE.md"
     echo "$session_dir"

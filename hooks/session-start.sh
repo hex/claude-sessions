@@ -35,9 +35,9 @@ if [ ! -d "$SESSION_DIR" ]; then
 fi
 
 # Log session start
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Session started (source: $SOURCE, ID: $SESSION_ID)" >> "$META_DIR/logs/session.log"
-echo "  Working directory: $CWD" >> "$META_DIR/logs/session.log"
-echo "" >> "$META_DIR/logs/session.log"
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Session started (source: $SOURCE, ID: $SESSION_ID)" >> "$META_DIR/local/session.log"
+echo "  Working directory: $CWD" >> "$META_DIR/local/session.log"
+echo "" >> "$META_DIR/local/session.log"
 
 # Append structured event to timeline.jsonl (machine-readable narrative log)
 TIMELINE_FILE="$META_DIR/timeline.jsonl"
@@ -77,7 +77,7 @@ if git -C "$SESSION_DIR" rev-parse --git-dir >/dev/null 2>&1; then
             # Don't auto-restore — inject into context so Claude can ask the user
             CRASH_CONTEXT="CRASH RECOVERY: The previous session ended without saving (crash or timeout). Autosaved changes were found in ${CRASH_FILE_COUNT} file(s):\n\n${CRASH_FILES}\n\nDiff summary:\n${CRASH_DIFF}\n\nIMPORTANT: Ask the user if they want to restore these changes. To restore, run: git -C \"$SESSION_DIR\" checkout $SHADOW_REF -- . && git -C \"$SESSION_DIR\" update-ref -d $SHADOW_REF\nTo discard, run: git -C \"$SESSION_DIR\" update-ref -d $SHADOW_REF"
             echo "[$(date '+%Y-%m-%d %H:%M:%S')] Crash recovery: found ${CRASH_FILE_COUNT} unsaved file(s), awaiting user decision" \
-                >> "$META_DIR/logs/session.log"
+                >> "$META_DIR/local/session.log"
         else
             # No actual changes — just clean up the orphaned ref
             git -C "$SESSION_DIR" update-ref -d "$SHADOW_REF" 2>/dev/null || true
@@ -107,7 +107,7 @@ Session metadata is in the .cs/ directory. The session root is your workspace.
 
 This session has:
 - Documentation templates in .cs/ markdown files
-- Command logging to .cs/logs/session.log
+- Command logging to .cs/local/session.log
 
 Key files to maintain:
 - .cs/README.md: Update objective and outcome
@@ -149,7 +149,7 @@ if [[ "$SESSION_ID" =~ $UUID_RE ]]; then
     RECORDED_UUID=$(awk '/^claude_session_id:/ { print $2; exit }' "$STATE_FILE" 2>/dev/null || true)
     if [ "$RECORDED_UUID" != "$SESSION_ID" ]; then
         local_state_set claude_session_id "$SESSION_ID"
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - Rebound claude_session_id: ${RECORDED_UUID:-none} -> $SESSION_ID" >> "$META_DIR/logs/session.log"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - Rebound claude_session_id: ${RECORDED_UUID:-none} -> $SESSION_ID" >> "$META_DIR/local/session.log"
     fi
 fi
 
@@ -167,7 +167,7 @@ if [ "$SOURCE" = "resume" ] && [ -d "$SESSION_DIR/.git" ]; then
     DYNAMIC=""
 
     # Time since last session activity
-    LAST_LOG_TIME=$(tail -1 "$META_DIR/logs/session.log" 2>/dev/null | grep -oE '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}' | head -1 || true)
+    LAST_LOG_TIME=$(tail -1 "$META_DIR/local/session.log" 2>/dev/null | grep -oE '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}' | head -1 || true)
     if [ -n "$LAST_LOG_TIME" ]; then
         DYNAMIC="${DYNAMIC}Last activity: ${LAST_LOG_TIME}\n"
     fi
@@ -225,7 +225,7 @@ if [ "$SOURCE" = "resume" ] && [ -d "$SESSION_DIR/.git" ]; then
             SIBLINGS="${SIBLINGS}  ${sibling_name}: ${sibling_obj}\n"
             SIBLING_COUNT=$((SIBLING_COUNT + 1))
             [ "$SIBLING_COUNT" -ge 5 ] && break
-        done < <(ls -t "$SESSIONS_ROOT"/*/.cs/logs/session.log 2>/dev/null || true)
+        done < <(ls -t "$SESSIONS_ROOT"/*/.cs/local/session.log "$SESSIONS_ROOT"/*/.cs/logs/session.log 2>/dev/null || true)
         if [ -n "$SIBLINGS" ]; then
             DYNAMIC="${DYNAMIC}Other Sessions:\n${SIBLINGS}"
         fi

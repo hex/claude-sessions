@@ -243,13 +243,17 @@ fn read_session(path: &Path, secret_counts: &HashMap<String, u32>) -> Session {
 }
 
 fn find_log_file(session_dir: &Path) -> Option<PathBuf> {
-    let primary = session_dir.join(".cs/logs/session.log");
-    if primary.is_file() {
-        return Some(primary);
-    }
-    let fallback = session_dir.join("logs/session.log");
-    if fallback.is_file() {
-        return Some(fallback);
+    // Machine-local is the current home; the older .cs/logs/ and flat logs/
+    // locations are kept as fallbacks for sessions not yet migrated.
+    for candidate in [
+        ".cs/local/session.log",
+        ".cs/logs/session.log",
+        "logs/session.log",
+    ] {
+        let path = session_dir.join(candidate);
+        if path.is_file() {
+            return Some(path);
+        }
     }
     None
 }
@@ -524,9 +528,9 @@ mod tests {
 
     fn setup_session(root: &Path, name: &str) -> PathBuf {
         let dir = root.join(name);
-        fs::create_dir_all(dir.join(".cs/logs")).unwrap();
+        fs::create_dir_all(dir.join(".cs/local")).unwrap();
         fs::write(
-            dir.join(".cs/logs/session.log"),
+            dir.join(".cs/local/session.log"),
             "Claude Code Session Log\nSession: test\nStarted: 2026-01-15 10:30:00\n",
         )
         .unwrap();

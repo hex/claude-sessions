@@ -35,7 +35,7 @@ If empty, inform the user that secrets storage requires a cs session and skip st
 
 4. **Store each secret** — feed the value on **stdin**, never on the command
    line. A value passed as an argument is visible via `ps` and is captured
-   verbatim by the bash-logger hook into the git-tracked `.cs/logs/session.log`.
+   verbatim by the bash-logger hook into `.cs/local/session.log`.
    The Bash command itself must not contain the secret:
    - Write the raw value to a scratch file with the **Write** tool (Write is not
      logged by bash-logger; a Bash heredoc would be), e.g. `<scratchdir>/.secret`

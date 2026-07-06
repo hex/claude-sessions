@@ -38,7 +38,7 @@ test_new_session_has_wrap_cues_block() {
 _seed_legacy_session_wrap() {
     local name="$1"
     local session_dir="$CS_SESSIONS_ROOT/$name"
-    mkdir -p "$session_dir/.cs"/{logs,memory}
+    mkdir -p "$session_dir/.cs"/{local,memory}
     cat > "$session_dir/.cs/README.md" << EOF
 ---
 status: active
@@ -112,7 +112,7 @@ test_lazy_migration_wrap_cues_idempotent() {
 test_wrap_cues_opt_out_respected() {
     local name="opted-out-wrap"
     local session_dir="$CS_SESSIONS_ROOT/$name"
-    mkdir -p "$session_dir/.cs"/{logs,memory}
+    mkdir -p "$session_dir/.cs"/{local,memory}
     cat > "$session_dir/.cs/README.md" << EOF
 ---
 status: active

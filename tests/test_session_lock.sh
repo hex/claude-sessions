@@ -21,9 +21,12 @@ teardown() {
 create_lock_test_session() {
     local name="$1"
     local session_dir="$CS_SESSIONS_ROOT/$name"
-    mkdir -p "$session_dir/.cs/logs"
-    touch "$session_dir/.cs/logs/session.log"
+    mkdir -p "$session_dir/.cs/local"
+    touch "$session_dir/.cs/local/session.log"
     echo "# test" > "$session_dir/CLAUDE.md"
+    # Machine-local state must never be committed, as a real session's .gitignore
+    # ensures; otherwise cs_assert_local_untracked refuses to open the session.
+    printf '.cs/local/\n' > "$session_dir/.gitignore"
     (cd "$session_dir" && git init -q 2>/dev/null && git add -A 2>/dev/null && git commit -q -m "init" 2>/dev/null) || true
 }
 

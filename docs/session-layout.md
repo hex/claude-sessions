@@ -22,7 +22,6 @@ The one distinction that governs everything below is **shared vs machine-local**
 | `.cs/README.md` | Session objective (captured from the first prompt) and outcome. Human-edited. | default |
 | `.cs/summary.md` | Distilled session summary, written by `/wrap` and `/summary`. | default |
 | `.cs/timeline.jsonl` | Structured event log — `session_start`, `session_end`, and checkpoint events as newline-delimited JSON. | `union` |
-| `.cs/logs/session.log` | Human-readable audit trail — bash commands, lifecycle events, autosave notes, UUID rebinds. | `union` |
 | `.cs/memory/MEMORY.md` | Index of Claude Code's native auto-memory (one line per fact). | `ours` |
 | `.cs/memory/<bucket>_*.md` | Native auto-memory fact files (user, feedback, project, reference). Written by the harness. | default |
 | `.cs/memory/narrative.<actor>.md` | Per-actor lab notebook. Each co-developer writes their own file; everyone reads all of them on resume. | `union` |
@@ -43,6 +42,7 @@ is open and is cleaned up on exit.
 
 | File | Purpose |
 |------|---------|
+| `session.log` | Human-readable audit trail — bash commands, session lifecycle, autosave notes, UUID rebinds. Per-checkout by nature; the shared structured record is `timeline.jsonl`. |
 | `state` | Session state bound to this checkout: `claude_session_id` (the conversation UUID to resume) and `claude_session_color` (the `/color` palette entry). Each machine binds its own conversation, so this must not sync. |
 | `identity` | Overrides the actor name for shared memory/narrative attribution (precedence: `$CS_ACTOR` > `local/identity` > git `user.email` > git `user.name`). |
 | `attention` | Status-line attention marker — raised by the `Stop` hook when Claude finishes, cleared on the next prompt. |
@@ -56,8 +56,8 @@ is open and is cleaned up on exit.
 The session repo ships a `.gitattributes` that keeps append-heavy shared files
 conflict-free:
 
-- `merge=union` — `session.log`, `timeline.jsonl`, `narrative.*.md`: concurrent
-  additions from different writers are both kept.
+- `merge=union` — `timeline.jsonl`, `narrative.*.md`: concurrent additions from
+  different writers are both kept.
 - `merge=ours` — `MEMORY.md`: the index is regenerated, so a machine keeps its
   own version rather than conflicting.
 

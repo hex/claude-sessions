@@ -84,7 +84,7 @@ echo "$ATTEMPTS" > "$ATTEMPTS_FILE"
 if [ "$ATTEMPTS" -gt 3 ]; then
     rm -f "$ATTEMPTS_FILE" 2>/dev/null || true
     echo "$(date '+%Y-%m-%d %H:%M:%S') - prose-lint: ${ATTEMPTS} attempts with unresolved issues; allowing stop" \
-        >> "$META_DIR/logs/session.log" 2>/dev/null || true
+        >> "$META_DIR/local/session.log" 2>/dev/null || true
     approve
 fi
 

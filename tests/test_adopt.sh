@@ -25,8 +25,8 @@ test_adopt_creates_cs_structure() {
     (cd "$project_dir" && "$CS_BIN" -adopt my-session)
 
     assert_dir "$project_dir/.cs" ".cs/ directory should exist" || return 1
-    assert_dir "$project_dir/.cs/logs" ".cs/logs/ should exist" || return 1
-    assert_exists "$project_dir/.cs/logs/session.log" "session.log should exist" || return 1
+    assert_dir "$project_dir/.cs/local" ".cs/local/ should exist" || return 1
+    assert_exists "$project_dir/.cs/local/session.log" "session.log should exist" || return 1
     assert_exists "$project_dir/.cs/README.md" ".cs/README.md should exist" || return 1
     local nf
     nf=$(ls "$project_dir"/.cs/memory/narrative.*.md 2>/dev/null | head -1)

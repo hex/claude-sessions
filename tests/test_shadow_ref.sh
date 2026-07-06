@@ -16,7 +16,7 @@ setup() {
     export CS_TEST_SYNC=1  # Run hook git operations in foreground for testing
     export CS_SESSIONS_ROOT="$TEST_TMPDIR/sessions"  # for create_test_session_with_git
 
-    mkdir -p "$CLAUDE_SESSION_DIR/.cs/logs"
+    mkdir -p "$CLAUDE_SESSION_DIR/.cs/local"
     mkdir -p "$CS_SESSIONS_ROOT"
 
     (
@@ -200,7 +200,7 @@ test_autosave_logs_per_actor_narrative_edit() {
         | bash "$HOOKS_DIR/autosave-commits.sh"
     sleep 1
 
-    assert_file_contains "$CLAUDE_SESSION_DIR/.cs/logs/session.log" "Autosave: A New Finding" \
+    assert_file_contains "$CLAUDE_SESSION_DIR/.cs/local/session.log" "Autosave: A New Finding" \
         "autosave should log the per-actor narrative heading" || return 1
 }
 

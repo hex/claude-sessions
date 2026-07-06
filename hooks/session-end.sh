@@ -32,8 +32,8 @@ if [ ! -d "$SESSION_DIR" ]; then
 fi
 
 # Log session end
-echo "" >> "$META_DIR/logs/session.log"
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Session ended (source: $SOURCE, ID: $SESSION_ID)" >> "$META_DIR/logs/session.log"
+echo "" >> "$META_DIR/local/session.log"
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Session ended (source: $SOURCE, ID: $SESSION_ID)" >> "$META_DIR/local/session.log"
 
 # Append structured event to timeline.jsonl
 TIMELINE_FILE="$META_DIR/timeline.jsonl"
@@ -83,7 +83,7 @@ if [ -d "$SESSIONS_ROOT" ]; then
     } > "$INDEX_FILE" 2>/dev/null || true
 fi
 
-echo "Session management cleanup complete" >> "$META_DIR/logs/session.log"
-echo "================================================================================" >> "$META_DIR/logs/session.log"
+echo "Session management cleanup complete" >> "$META_DIR/local/session.log"
+echo "================================================================================" >> "$META_DIR/local/session.log"
 
 exit 0
