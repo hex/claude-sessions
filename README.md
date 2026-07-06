@@ -312,6 +312,7 @@ Completions support:
 
 ## Documentation
 
+- **[Session layout](docs/session-layout.md)** - The `.cs/` directory schema: shared vs machine-local files and merge policy
 - **[Hooks](docs/hooks.md)** - How the Claude Code hooks work
 - **[Secrets](docs/secrets.md)** - Secure secrets handling and storage backends
 - **[Statusline](docs/statusline.md)** - The cs status line: segments, colors, configuration
