@@ -56,8 +56,7 @@ test_new_session_has_no_legacy_rules_block() {
 _seed_legacy_session() {
     local name="$1"
     local session_dir="$CS_SESSIONS_ROOT/$name"
-    mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
-    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
+    mkdir -p "$session_dir/.cs"/{logs,memory}
     cat > "$session_dir/.cs/README.md" << EOF
 ---
 status: active
@@ -129,8 +128,7 @@ test_lazy_migration_idempotent() {
 test_legacy_rules_tombstone_prevents_note_addition() {
     local name="opted-out"
     local session_dir="$CS_SESSIONS_ROOT/$name"
-    mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
-    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
+    mkdir -p "$session_dir/.cs"/{logs,memory}
     cat > "$session_dir/.cs/README.md" << EOF
 ---
 status: active
@@ -176,8 +174,7 @@ _seed_session_with_legacy_rules_block() {
     local name="$1"
     local variant="$2"
     local session_dir="$CS_SESSIONS_ROOT/$name"
-    mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
-    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
+    mkdir -p "$session_dir/.cs"/{logs,memory}
     cat > "$session_dir/.cs/README.md" << EOF
 ---
 status: active

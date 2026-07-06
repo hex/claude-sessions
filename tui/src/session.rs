@@ -21,11 +21,8 @@ pub struct Session {
 pub struct SessionPreview {
     pub objective: Option<String>,
     pub last_discovery: Option<String>,
-    pub artifact_count: usize,
     /// Last N discovery headings (most recent first) for preview pane.
     pub discoveries: Vec<String>,
-    /// Artifact file names for preview pane.
-    pub artifact_names: Vec<String>,
     /// First few lines from auto memory MEMORY.md.
     pub memory_entries: Vec<String>,
     /// "<author> (<n>)" lines from git history over .cs/memory, most active first.
@@ -82,27 +79,6 @@ pub fn load_preview(session_dir: &Path) -> SessionPreview {
         })
         .unwrap_or((None, Vec::new()));
 
-    // Artifacts from MANIFEST.json
-    let (artifact_count, artifact_names) = fs::read_to_string(cs_dir.join("artifacts/MANIFEST.json"))
-        .ok()
-        .map(|content| {
-            let count = content.matches("\"path\"").count();
-            // Extract path values: naive parse for "path":"<value>"
-            let names: Vec<String> = content
-                .split("\"path\"")
-                .skip(1)
-                .filter_map(|chunk| {
-                    // Find the next quoted value after the colon
-                    let rest = chunk.trim_start().strip_prefix(':')?;
-                    let rest = rest.trim_start().strip_prefix('"')?;
-                    let end = rest.find('"')?;
-                    Some(rest[..end].to_string())
-                })
-                .collect();
-            (count, names)
-        })
-        .unwrap_or((0, Vec::new()));
-
     // Memory entries from .cs/memory/MEMORY.md (first few non-empty lines)
     let memory_entries = fs::read_to_string(cs_dir.join("memory/MEMORY.md"))
         .ok()
@@ -121,9 +97,7 @@ pub fn load_preview(session_dir: &Path) -> SessionPreview {
     SessionPreview {
         objective,
         last_discovery,
-        artifact_count,
         discoveries,
-        artifact_names,
         memory_entries,
         contributors,
     }
@@ -788,7 +762,6 @@ mod tests {
             Some("Build a TUI for session management")
         );
         assert!(preview.last_discovery.is_none());
-        assert_eq!(preview.artifact_count, 0);
 
         fs::remove_dir_all(&dir).unwrap();
     }
@@ -832,24 +805,6 @@ mod tests {
     }
 
     #[test]
-    fn load_preview_counts_artifacts() {
-        let dir = std::env::temp_dir().join(format!("cs-test-preview-art-{}", std::process::id()));
-        let cs = dir.join(".cs/artifacts");
-        fs::create_dir_all(&cs).unwrap();
-        fs::write(
-            cs.join("MANIFEST.json"),
-            r#"[{"path":"a.sh"},{"path":"b.py"},{"path":"c.json"}]"#,
-        )
-        .unwrap();
-
-        let preview = load_preview(&dir);
-        assert_eq!(preview.artifact_count, 3);
-        assert_eq!(preview.artifact_names, vec!["a.sh", "b.py", "c.json"]);
-
-        fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
     fn load_preview_handles_missing_files() {
         let dir = std::env::temp_dir().join(format!("cs-test-preview-empty-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
@@ -857,9 +812,7 @@ mod tests {
         let preview = load_preview(&dir);
         assert!(preview.objective.is_none());
         assert!(preview.last_discovery.is_none());
-        assert_eq!(preview.artifact_count, 0);
         assert!(preview.discoveries.is_empty());
-        assert!(preview.artifact_names.is_empty());
 
         fs::remove_dir_all(&dir).unwrap();
     }

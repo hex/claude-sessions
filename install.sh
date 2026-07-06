@@ -82,7 +82,6 @@ CS_STATUSLINE_URL="${REPO_URL}/bin/cs-statusline"
 # KEEP THIS LIST IN SYNC WITH bin/cs's CS_HOOKS.
 CS_HOOKS=(
     session-start.sh
-    artifact-tracker.sh
     autosave-commits.sh
     narrative-reminder.sh
     prose-lint.sh
@@ -109,6 +108,7 @@ RETIRED_HOOKS=(
     files-scan.sh             # retired: workspace file indexer for .cs/files.md (assumption that the agent can't introspect file sizes has expired)
     files-context.sh          # retired: PreToolUse:Read context injector that surfaced files.md token estimates
     changes-tracker.sh        # retired: PostToolUse change log re-narrating git history into .cs/changes.md; git log/diff/status is authoritative
+    artifact-tracker.sh       # retired: PreToolUse:Write redirect was inert (updatedInput path rewrite is not honored by the harness); tracking removed entirely
 )
 
 # Slash commands cs ships; deployed to COMMANDS_DIR.
@@ -493,7 +493,6 @@ else
 
     # Registration table: event, file, timeout, [matcher], [async]
     _merge_cs_hook SessionStart       session-start.sh       30
-    _merge_cs_hook PreToolUse         artifact-tracker.sh    10 "Write"
     _merge_cs_hook PostToolUse        autosave-commits.sh    10 "Write|Edit" true
     _merge_cs_hook Stop               narrative-reminder.sh  10
     _merge_cs_hook Stop               prose-lint.sh          15

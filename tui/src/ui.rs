@@ -276,13 +276,6 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
                         ]));
                         preview_lines += 1;
                     }
-                    if preview.artifact_count > 0 {
-                        name_lines.push(Line::from(Span::styled(
-                            format!("  {} artifacts", preview.artifact_count),
-                            Style::default().fg(p.comment),
-                        )));
-                        preview_lines += 1;
-                    }
                     // Show at least a "no metadata" line if everything is empty
                     if preview_lines == 0 {
                         name_lines.push(Line::from(Span::styled(
@@ -1050,27 +1043,7 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
             lines.push(Line::from(""));
         }
 
-        if preview.artifact_count > 0 {
-            lines.push(section_header(
-                format!("Artifacts ({})", preview.artifact_count),
-                p,
-            ));
-            let max_names = (area.height as usize).saturating_sub(lines.len() + 3);
-            for name in preview.artifact_names.iter().take(max_names) {
-                lines.push(Line::from(vec![
-                    Span::styled("  ", Style::default()),
-                    Span::styled(name.as_str(), Style::default().fg(p.comment)),
-                ]));
-            }
-            if preview.artifact_names.len() > max_names {
-                lines.push(Line::from(Span::styled(
-                    format!("  ... and {} more", preview.artifact_names.len() - max_names),
-                    Style::default().fg(p.comment).add_modifier(Modifier::DIM),
-                )));
-            }
-        }
-
-        if preview.objective.is_none() && preview.discoveries.is_empty() && preview.memory_entries.is_empty() && preview.artifact_count == 0 && preview.contributors.is_empty() {
+        if preview.objective.is_none() && preview.discoveries.is_empty() && preview.memory_entries.is_empty() && preview.contributors.is_empty() {
             lines.push(Line::from(Span::styled(
                 "No .cs/ metadata",
                 Style::default().fg(p.comment).add_modifier(Modifier::DIM),

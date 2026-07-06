@@ -13,8 +13,7 @@ setup() {
     export CLAUDE_SESSION_NAME="test-session"
     export CLAUDE_SESSION_DIR="$TEST_TMPDIR/session"
     export CLAUDE_SESSION_META_DIR="$CLAUDE_SESSION_DIR/.cs"
-    export CLAUDE_ARTIFACT_DIR="$CLAUDE_SESSION_DIR/.cs/artifacts"
-    mkdir -p "$CLAUDE_SESSION_META_DIR"/{logs,artifacts,memory}
+    mkdir -p "$CLAUDE_SESSION_META_DIR"/{logs,memory}
     touch "$CLAUDE_SESSION_META_DIR/logs/session.log"
 }
 
@@ -22,7 +21,7 @@ teardown() {
     if [[ -n "$TEST_TMPDIR" ]] && [[ -d "$TEST_TMPDIR" ]]; then
         rm -rf "$TEST_TMPDIR"
     fi
-    unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR CLAUDE_ARTIFACT_DIR 2>/dev/null || true
+    unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR 2>/dev/null || true
 }
 
 # ============================================================================
@@ -311,9 +310,8 @@ session_start_setup() {
     # Current session lives inside SESSIONS_ROOT
     export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/current-session"
     export CLAUDE_SESSION_META_DIR="$CLAUDE_SESSION_DIR/.cs"
-    export CLAUDE_ARTIFACT_DIR="$CLAUDE_SESSION_DIR/.cs/artifacts"
     export CLAUDE_SESSION_NAME="current-session"
-    mkdir -p "$CLAUDE_SESSION_META_DIR"/{logs,artifacts,memory}
+    mkdir -p "$CLAUDE_SESSION_META_DIR"/{logs,memory}
     touch "$CLAUDE_SESSION_META_DIR/logs/session.log"
 
     # Initialize git so the dynamic context block runs
@@ -345,7 +343,7 @@ create_sibling_session() {
     local name="$1"
     local objective="$2"
     local dir="$CS_SESSIONS_ROOT/$name"
-    mkdir -p "$dir/.cs"/{logs,artifacts}
+    mkdir -p "$dir/.cs/logs"
     cat > "$dir/.cs/README.md" << EOF
 ## Objective
 
@@ -681,9 +679,8 @@ index_setup() {
     # Current session
     export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/current-session"
     export CLAUDE_SESSION_META_DIR="$CLAUDE_SESSION_DIR/.cs"
-    export CLAUDE_ARTIFACT_DIR="$CLAUDE_SESSION_DIR/.cs/artifacts"
     export CLAUDE_SESSION_NAME="current-session"
-    mkdir -p "$CLAUDE_SESSION_META_DIR"/{logs,artifacts}
+    mkdir -p "$CLAUDE_SESSION_META_DIR/logs"
     touch "$CLAUDE_SESSION_META_DIR/logs/session.log"
     cat > "$CLAUDE_SESSION_META_DIR/README.md" << 'EOF'
 ---
@@ -716,7 +713,7 @@ create_indexed_session() {
     local objective="$3"
     local tags="${4:-}"
     local dir="$CS_SESSIONS_ROOT/$name"
-    mkdir -p "$dir/.cs"/{logs,artifacts}
+    mkdir -p "$dir/.cs/logs"
     touch "$dir/.cs/logs/session.log"
     cat > "$dir/.cs/README.md" << EOF
 ---

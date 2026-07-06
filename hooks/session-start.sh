@@ -26,7 +26,6 @@ if [ -z "${CLAUDE_SESSION_NAME:-}" ]; then
 fi
 
 SESSION_DIR="${CLAUDE_SESSION_DIR:-}"
-ARTIFACT_DIR="${CLAUDE_ARTIFACT_DIR:-}"
 META_DIR="${CLAUDE_SESSION_META_DIR:-$SESSION_DIR/.cs}"
 
 # Verify session directory exists
@@ -94,7 +93,6 @@ if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
 export CLAUDE_SESSION_NAME="$CLAUDE_SESSION_NAME"
 export CLAUDE_SESSION_DIR="$SESSION_DIR"
 export CLAUDE_SESSION_META_DIR="$META_DIR"
-export CLAUDE_ARTIFACT_DIR="$ARTIFACT_DIR"
 EOF
 fi
 
@@ -104,20 +102,16 @@ You are working in a managed Claude Code session: $CLAUDE_SESSION_NAME
 Session started: $(date '+%Y-%m-%d %H:%M:%S %Z') ($(date -u +%Y-%m-%dT%H:%M:%SZ))
 
 Session directory: $CLAUDE_SESSION_DIR
-Artifacts directory: $CLAUDE_ARTIFACT_DIR
 
 Session metadata is in the .cs/ directory. The session root is your workspace.
 
 This session has:
-- Automatic artifact tracking for scripts and configs
 - Documentation templates in .cs/ markdown files
 - Command logging to .cs/logs/session.log
 
 Key files to maintain:
 - .cs/README.md: Update objective and outcome
 - .cs/memory/narrative.md: Document findings, observations, and ideas
-
-All scripts and config files are automatically saved to .cs/artifacts/.
 
 IMPORTANT: Secrets (API keys, tokens, passwords) are stored securely in the OS keychain.
 Use 'cs -secrets list' to see stored secrets, 'cs -secrets get <name>' to retrieve values.
@@ -263,7 +257,7 @@ if [ -n "$TASK_BRANCH" ] && [[ "$CLAUDE_SESSION_NAME" == *@* ]]; then
 This session is a task worktree of session '$CS_BASE' on branch $TASK_BRANCH. Work and commit here as normal; the checkout is disposable once the task is integrated.
 
 When the task is complete, ask the user to run: cs $CS_BASE --merge $TASK_NAME
-That command merges the branch into the base session, fuses the session records (timeline, narrative, artifacts), and removes this worktree. It refuses while either session is open, so it runs from a free terminal after this session closes.
+That command merges the branch into the base session, fuses the session records (timeline, narrative), and removes this worktree. It refuses while either session is open, so it runs from a free terminal after this session closes.
 
 Do NOT merge $TASK_BRANCH into the base branch manually and do not delete the branch — that bypasses the record fuse and the cleanup. To abandon the task instead: cs -rm $CLAUDE_SESSION_NAME"
 fi

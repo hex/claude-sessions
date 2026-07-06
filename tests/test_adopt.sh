@@ -11,7 +11,7 @@ teardown() {
         rm -rf "$TEST_TMPDIR"
     fi
     unset CS_SESSIONS_ROOT CLAUDE_CODE_BIN
-    unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR CLAUDE_ARTIFACT_DIR 2>/dev/null || true
+    unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR 2>/dev/null || true
 }
 
 # ============================================================================
@@ -25,9 +25,7 @@ test_adopt_creates_cs_structure() {
     (cd "$project_dir" && "$CS_BIN" -adopt my-session)
 
     assert_dir "$project_dir/.cs" ".cs/ directory should exist" || return 1
-    assert_dir "$project_dir/.cs/artifacts" ".cs/artifacts/ should exist" || return 1
     assert_dir "$project_dir/.cs/logs" ".cs/logs/ should exist" || return 1
-    assert_exists "$project_dir/.cs/artifacts/MANIFEST.json" "MANIFEST.json should exist" || return 1
     assert_exists "$project_dir/.cs/logs/session.log" "session.log should exist" || return 1
     assert_exists "$project_dir/.cs/README.md" ".cs/README.md should exist" || return 1
     local nf

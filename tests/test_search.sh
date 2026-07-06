@@ -95,7 +95,7 @@ test_search_no_query() {
 
 test_search_follows_symlinks() {
     local real_dir="$TEST_TMPDIR/real-project"
-    mkdir -p "$real_dir/.cs"/{memory,artifacts,logs}
+    mkdir -p "$real_dir/.cs"/{memory,logs}
     echo "Real project uses Rust nightly" > "$real_dir/.cs/memory/narrative.md"
     ln -s "$real_dir" "$CS_SESSIONS_ROOT/adopted-proj"
 

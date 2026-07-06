@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: SessionEnd hook for cs session management
-# ABOUTME: Archives artifacts and logs session completion
+# ABOUTME: Logs session completion, records the timeline event, regenerates the sessions index
 
 set -euo pipefail
 
@@ -24,7 +24,6 @@ if [ -z "${CLAUDE_SESSION_NAME:-}" ]; then
 fi
 
 SESSION_DIR="${CLAUDE_SESSION_DIR:-}"
-ARTIFACT_DIR="${CLAUDE_ARTIFACT_DIR:-}"
 META_DIR="${CLAUDE_SESSION_META_DIR:-$SESSION_DIR/.cs}"
 
 # Verify session directory exists
@@ -47,32 +46,6 @@ jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
        '{ts: $ts, event: $event, source: $source, session_id: $session_id, branch: $branch}' \
     >> "$TIMELINE_FILE" 2>/dev/null || true
 
-# Skip artifact archiving on sigint for faster exit
-if [ "$SOURCE" = "sigint" ]; then
-    echo "  Skipping artifact archive (interrupted)" >> "$META_DIR/logs/session.log"
-fi
-
-# Count artifacts
-ARTIFACT_COUNT=0
-if [ -d "$ARTIFACT_DIR" ]; then
-    ARTIFACT_COUNT=$(find "$ARTIFACT_DIR" -type f ! -name "MANIFEST.json" ! -name "*.lock" | wc -l | tr -d ' ')
-fi
-
-echo "  Artifacts collected: $ARTIFACT_COUNT" >> "$META_DIR/logs/session.log"
-
-# Create archive if artifacts exist (skip on sigint for faster exit)
-if [ "$ARTIFACT_COUNT" -gt 0 ] && [ "$SOURCE" != "sigint" ]; then
-    ARCHIVE_DIR="$META_DIR/archives"
-    mkdir -p "$ARCHIVE_DIR"
-    ARCHIVE_PATH="$ARCHIVE_DIR/artifacts-$(date +%Y%m%d-%H%M%S).tar.gz"
-    tar -czf "$ARCHIVE_PATH" -C "$META_DIR" artifacts/ 2>/dev/null || true
-
-    if [ -f "$ARCHIVE_PATH" ]; then
-        ARCHIVE_SIZE=$(du -h "$ARCHIVE_PATH" | cut -f1)
-        echo "  Archive created: $(basename "$ARCHIVE_PATH") ($ARCHIVE_SIZE)" >> "$META_DIR/logs/session.log"
-    fi
-fi
-
 # Delete shadow autosave refs (no longer needed after clean session end);
 # refs/worktree/* deletion only affects this checkout's ref.
 if git -C "$SESSION_DIR" rev-parse --git-dir >/dev/null 2>&1; then
@@ -81,7 +54,6 @@ if git -C "$SESSION_DIR" rev-parse --git-dir >/dev/null 2>&1; then
 fi
 
 # Clean up lock files
-find "$ARTIFACT_DIR" -name "*.lock" -delete 2>/dev/null || true
 rm -f "$META_DIR/session.lock" 2>/dev/null || true
 
 # Regenerate sessions index.md at the sessions root

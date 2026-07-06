@@ -3006,9 +3006,7 @@ mod tests {
             session::SessionPreview {
                 objective: Some("test objective".into()),
                 last_discovery: None,
-                artifact_count: 3,
                 discoveries: Vec::new(),
-                artifact_names: Vec::new(),
                 memory_entries: Vec::new(),
                 contributors: Vec::new(),
             },
@@ -3017,7 +3015,6 @@ mod tests {
         // Should use cached value, not overwrite
         let preview = app.preview_cache.get("alpha").unwrap();
         assert_eq!(preview.objective.as_deref(), Some("test objective"));
-        assert_eq!(preview.artifact_count, 3);
     }
 
     // --- Preview pane ---
@@ -3051,9 +3048,7 @@ mod tests {
             session::SessionPreview {
                 objective: Some("cached".into()),
                 last_discovery: None,
-                artifact_count: 0,
                 discoveries: Vec::new(),
-                artifact_names: Vec::new(),
                 memory_entries: Vec::new(),
                 contributors: Vec::new(),
             },

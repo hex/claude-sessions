@@ -13,7 +13,7 @@ teardown() {
         rm -rf "$TEST_TMPDIR"
     fi
     unset CS_SESSIONS_ROOT CLAUDE_CODE_BIN CS_TRANSCRIPTS_DIR
-    unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR CLAUDE_ARTIFACT_DIR 2>/dev/null || true
+    unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR 2>/dev/null || true
     unset CS_CLAUDE_SESSION_ID 2>/dev/null || true
 }
 
@@ -114,8 +114,7 @@ test_resume_leaves_readme_untouched() {
 
 test_migration_moves_fields_from_readme_to_local_state() {
     local session_dir="$CS_SESSIONS_ROOT/legacy-frontmatter"
-    mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
-    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
+    mkdir -p "$session_dir/.cs"/{logs,memory}
     cat > "$session_dir/.cs/README.md" << 'EOF'
 ---
 status: active
@@ -158,9 +157,8 @@ EOF
 hook_setup() {
     export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/current-session"
     export CLAUDE_SESSION_META_DIR="$CLAUDE_SESSION_DIR/.cs"
-    export CLAUDE_ARTIFACT_DIR="$CLAUDE_SESSION_DIR/.cs/artifacts"
     export CLAUDE_SESSION_NAME="current-session"
-    mkdir -p "$CLAUDE_SESSION_META_DIR"/{logs,artifacts,memory,local}
+    mkdir -p "$CLAUDE_SESSION_META_DIR"/{logs,memory,local}
     touch "$CLAUDE_SESSION_META_DIR/logs/session.log"
     cat > "$CLAUDE_SESSION_META_DIR/README.md" << 'EOF'
 ---
@@ -241,59 +239,6 @@ test_union_merge_attributes_written() {
         "timeline.jsonl should merge with the union driver" || return 1
     assert_file_contains "$ga" 'narrative\.\*\.md merge=union' \
         "per-actor narratives should merge with the union driver" || return 1
-    assert_file_contains "$ga" ".cs/artifacts/MANIFEST.json merge=manifest" \
-        "MANIFEST.json should use the manifest merge driver" || return 1
-
-    local driver
-    driver=$(git -C "$sdir" config merge.manifest.driver 2>/dev/null || true)
-    if [ -z "$driver" ]; then
-        echo "  FAIL: merge.manifest.driver should be configured in the session repo"
-        return 1
-    fi
-}
-
-test_divergent_manifest_appends_merge_clean() {
-    # Two machines each track an artifact; the manifest merge driver must
-    # combine both entries into one valid JSON array instead of conflicting.
-    "$CS_BIN" state-session <<< "" >/dev/null 2>&1 || true
-    local origin_dir="$CS_SESSIONS_ROOT/state-session"
-    (cd "$origin_dir" && git init -q -b main && git config user.email a@x \
-        && git config user.name A && git add -A && git commit -q -m seed) 2>/dev/null
-
-    local clone_a="$TEST_TMPDIR/mclone-a" clone_b="$TEST_TMPDIR/mclone-b"
-    git clone -q "$origin_dir" "$clone_a"
-    git clone -q "$origin_dir" "$clone_b"
-    # Each machine runs cs at least once before merging; mirror the driver
-    # config cs installs rather than re-deriving it in the test.
-    local driver
-    driver=$(git -C "$origin_dir" config merge.manifest.driver)
-    git -C "$clone_a" config merge.manifest.driver "$driver"
-    git -C "$clone_b" config merge.manifest.driver "$driver"
-
-    local mf=".cs/artifacts/MANIFEST.json"
-    jq '. += [{"filename":"a.sh","original_path":"/a/a.sh","timestamp":"2026-07-02T10:00:00Z","contains_secrets":false}]' \
-        "$clone_a/$mf" > "$clone_a/$mf.tmp" && mv "$clone_a/$mf.tmp" "$clone_a/$mf"
-    (cd "$clone_a" && git config user.email a@x && git config user.name A \
-        && git add -A && git commit -q -m "A artifact")
-
-    jq '. += [{"filename":"b.py","original_path":"/b/b.py","timestamp":"2026-07-02T11:00:00Z","contains_secrets":false}]' \
-        "$clone_b/$mf" > "$clone_b/$mf.tmp" && mv "$clone_b/$mf.tmp" "$clone_b/$mf"
-    (cd "$clone_b" && git config user.email b@x && git config user.name B \
-        && git add -A && git commit -q -m "B artifact")
-
-    (cd "$clone_b" && git fetch -q "$clone_a" main && git merge -q --no-edit FETCH_HEAD >/dev/null 2>&1) || {
-        echo "  FAIL: divergent manifest appends should merge without conflict"
-        (cd "$clone_b" && git status --short | head -5)
-        return 1
-    }
-
-    jq -e . "$clone_b/$mf" >/dev/null 2>&1 || {
-        echo "  FAIL: merged MANIFEST.json must be valid JSON"
-        head -20 "$clone_b/$mf"
-        return 1
-    }
-    assert_file_contains "$clone_b/$mf" '"a.sh"' || return 1
-    assert_file_contains "$clone_b/$mf" '"b.py"' || return 1
 }
 
 test_frontmatter_backfill_created_uses_git_date() {
@@ -301,8 +246,7 @@ test_frontmatter_backfill_created_uses_git_date() {
     # get its created: date from shared git history, not from local mtime
     # (git does not preserve mtime across clones, so mtime diverges).
     local session_dir="$CS_SESSIONS_ROOT/legacy-created"
-    mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
-    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
+    mkdir -p "$session_dir/.cs"/{logs,memory}
     printf '# Session: legacy-created\n\nSome notes without a Started line.\n' \
         > "$session_dir/.cs/README.md"
     echo "# Session" > "$session_dir/CLAUDE.md"
@@ -361,6 +305,5 @@ run_test test_session_start_writes_last_resumed_to_local_state
 run_test test_session_end_leaves_readme_untouched
 run_test test_union_merge_attributes_written
 run_test test_divergent_appends_merge_clean
-run_test test_divergent_manifest_appends_merge_clean
 run_test test_frontmatter_backfill_created_uses_git_date
 report_results

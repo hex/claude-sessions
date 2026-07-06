@@ -1,6 +1,6 @@
 # cs - Claude Code Session Manager
 
-A session manager for [Claude Code](https://github.com/anthropics/claude-code) that creates isolated workspaces with automatic documentation and artifact tracking.
+A session manager for [Claude Code](https://github.com/anthropics/claude-code) that creates isolated workspaces with automatic documentation.
 
 ![cs session demo](assets/screenshot.png)
 
@@ -19,15 +19,14 @@ cs router-config      # Document your network settings
 cs research-llms      # Explore a topic, keep your notes
 ```
 
-Each session is a persistent workspace - documentation, artifacts, and secrets that survive across conversations.
+Each session is a persistent workspace - documentation and secrets that survive across conversations.
 
 No git repo required. No project structure needed. Just a name for what you're working on.
 
 ## Concepts
 
-- **Sessions** — Isolated workspaces, each with their own git repo, documentation, and artifact tracking. `cs debug-api` creates one; running it again resumes it.
+- **Sessions** — Isolated workspaces, each with their own git repo and documentation. `cs debug-api` creates one; running it again resumes it.
 - **Narrative** (`.cs/memory/narrative.<actor>.md`) — A per-actor lab notebook for recording findings, observations, and ideas during a session. Each co-developer writes their own file (so shared sessions never conflict) and everyone reads all of them on resume. Held as native Claude Code memory topic files, so they inherit lazy-loading (the `MEMORY.md` index pointers load at startup; bodies are read on demand) and show up in the `/memory` tooling.
-- **Artifacts** (`.cs/artifacts/`) — Scripts and config files are automatically intercepted and saved here, tracked in a `MANIFEST.json` with metadata.
 - **Checkpoints** (`.cs/checkpoints/`) — Labelled narrative snapshots you can save mid-session with `/checkpoint`, capturing the narrative, changes, and the current git HEAD.
 - **Timeline** (`.cs/timeline.jsonl`) — A structured event log recording session starts, ends, and checkpoints as newline-delimited JSON.
 - **Auto-memory** (`.cs/memory/`) — Claude Code's persistent operational notes, redirected into the session and cleaned up with `cs -rm`.
@@ -35,8 +34,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 ## Features
 
 - **Isolated session workspaces** - Each session has its own directory with structured documentation
-- **Automatic artifact tracking** - Scripts and configs are auto-saved to `artifacts/`
-- **Secure secrets handling** - Sensitive data auto-detected and stored in OS keychain; exportable as [age](https://github.com/FiloSottile/age)-encrypted files for backup
+- **Secure secrets handling** - Store sensitive data in the OS keychain (value read from stdin, never written to a file); exportable as [age](https://github.com/FiloSottile/age)-encrypted files for backup
 - **Documentation templates** - Pre-configured markdown files for the session narrative and outcome
 - **Automatic git version control** - Every session gets a local git repo; in-session edits are autosaved to a shadow ref for crash recovery
 - **Session locking** - PID-based lock prevents the same session from being opened in two terminals simultaneously; use `--force` to override
@@ -103,7 +101,7 @@ Running `cs` with no arguments launches an interactive TUI for browsing and mana
 - **Time-based sections** — sessions grouped under Today, Yesterday, This Week, This Month, Older when sorted by date (the default view)
 - **Action bar** with `Enter` — inline bar shows available actions with shortcut keys
 - **Preview pane** — appears automatically on wide terminals (>120 cols); toggle with `p`
-- **Expand row** with `Tab` — shows session objective (auto-captured from your first prompt), narrative, and artifact count inline
+- **Expand row** with `Tab` — shows session objective (auto-captured from your first prompt) and narrative inline
 - **Create session** with `n` — opens inline dialog to create a new session
 - **Delete** with `d` (confirmation required)
 - **Batch operations** — mark sessions with `Space`, then `D` to batch delete
@@ -154,7 +152,6 @@ This converts the current directory into a cs session in place:
 │   ├── memory/             # Claude Code auto memory + per-actor narrative.<actor>.md lab notebooks
 │   ├── plans/              # Claude Code plans
 │   ├── timeline.jsonl      # Session event log (starts, ends, checkpoints)
-│   ├── artifacts/          # Auto-tracked scripts and configs
 │   └── logs/session.log    # Bash command audit trail + session log
 ├── .claude/
 │   └── settings.local.json # Redirects auto memory into .cs/memory
@@ -170,12 +167,11 @@ Sessions are designed to be shared through git (push/pull the whole session dire
 
 - **Machine-local state never syncs.** The Claude conversation UUID, session color, and resume timestamps live in gitignored `.cs/local/state` — each machine binds its own conversation. A launch guard refuses to run if `.cs/local/` ever becomes tracked.
 - **Append-only files union-merge.** `session.log`, `timeline.jsonl`, and the per-actor `narrative.*.md` notebooks carry `merge=union` in the session `.gitattributes`, so divergent appends interleave instead of conflicting.
-- **The artifact manifest merges structurally.** `MANIFEST.json` uses a jq merge driver (configured per clone on every cs launch) that combines both sides' entries and dedups them, keeping the JSON valid.
 - **`MEMORY.md` resolves to the local copy** (`merge=ours`); each actor's pointer line is re-added idempotently on the next launch.
 - **Secrets sync per machine.** `cs -secrets export-file` writes `.cs/secrets.<machine-id>.age/.enc` — distinct files per machine instead of one shared encrypted blob whose bytes change every export — and `import-file` merges every sync file it can decrypt. See [docs/secrets.md](docs/secrets.md).
 - **What can still conflict is real content**: the README objective/outcome, memory entries, and your project files — places where two humans genuinely disagree and should reconcile by hand.
 
-One caveat: the custom merge drivers (`manifest`, `ours`) are per-clone git config, installed by every `cs <name>` launch. If you pull on a brand-new clone *before* ever launching the session through cs, those two files fall back to ordinary text merges.
+One caveat: the custom `merge=ours` driver is per-clone git config, installed by every `cs <name>` launch. If you pull on a brand-new clone *before* ever launching the session through cs, `MEMORY.md` falls back to an ordinary text merge.
 
 ### Parallel task worktrees
 
@@ -192,7 +188,7 @@ is told at launch that it runs in a task worktree and that
 `cs myproj --merge <task>` is the way back, so it won't merge the branch by
 hand.
 
-Each worktree is a full cs session (own conversation, color, artifacts, crash
+Each worktree is a full cs session (own conversation, color, crash
 recovery) that shares the base session's task list and secrets. Session
 records fork with the branch and re-fuse at merge:
 
@@ -290,7 +286,6 @@ The following environment variables are set automatically when you start a sessi
 - `CLAUDE_SESSION_NAME` - The session name (e.g., `myproject`)
 - `CLAUDE_SESSION_DIR` - Full path to the session directory (workspace root)
 - `CLAUDE_SESSION_META_DIR` - Path to the `.cs/` metadata directory
-- `CLAUDE_ARTIFACT_DIR` - Path to the artifacts subdirectory (`.cs/artifacts`)
 - `CLAUDE_CODE_TASK_LIST_ID` - Set to the session name for task list persistence
 
 ## Shell Completion
@@ -359,7 +354,7 @@ WHERE file.name = "README" AND status = "active"
 ```
 ````
 
-**Graph view tip:** In Obsidian's graph settings, add `.cs/artifacts` and `.cs/logs` to the folder exclusion filter to reduce clutter.
+**Graph view tip:** In Obsidian's graph settings, add `.cs/logs` to the folder exclusion filter to reduce clutter.
 
 ## Requirements
 

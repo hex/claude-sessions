@@ -1,6 +1,6 @@
 # Secrets Handling
 
-Sensitive data is automatically detected and stored securely instead of being written to artifact files in plaintext.
+Store sensitive data (API keys, tokens, passwords) in a secure backend instead of writing it into project files in plaintext. The value is always read from stdin, so it never appears in argv or the command log.
 
 ## Storage Backends
 
@@ -22,35 +22,17 @@ For additional security, set `CS_SECRETS_PASSWORD` to use an explicit master pas
 
 Check which backend is active: `cs -secrets backend`
 
-## Auto-Detection
+## Conversational capture
 
-Secrets are detected and stored automatically in two ways:
-
-**1. File-based detection** (via `artifact-tracker.sh` hook):
-
-When writing files, secrets are detected by:
-- File type: `.env` files
-- Filename patterns: Files containing `key`, `secret`, `password`, `token`, `credential`, `auth`, `apikey`, `api_key`
-- Content patterns: Variables like `API_KEY=`, `SECRET_TOKEN=`, `PASSWORD=`, etc.
-
-**2. Conversational detection** (via `store-secret` skill):
-
-When you share secrets in chat, Claude automatically invokes the `store-secret` skill to capture them:
+When you share a secret in chat, Claude invokes the `store-secret` skill to
+capture it:
 - "Here's my OpenAI key: sk-abc123..."
 - "The password is hunter2"
 - "Use this token: ghp_xxxx"
 
-Claude identifies appropriate key names and stores secrets securely, then confirms what was stored.
-
-## What Happens
-
-When sensitive data is detected:
-1. The actual values are extracted and stored securely
-2. The artifact file is written with redacted placeholders:
-   ```
-   API_KEY=[REDACTED: stored in keychain as API_KEY]
-   ```
-3. MANIFEST.json records which secrets exist (not the values)
+Claude picks an appropriate key name, writes the value to a scratch file and
+pipes it into `cs -secrets set <name>` on stdin (never on argv), then removes the
+scratch file and confirms what was stored.
 
 ## Using cs -secrets
 
@@ -66,8 +48,8 @@ cs -secrets list
 # Get a specific secret value
 cs -secrets get API_KEY
 
-# Store a secret manually
-cs -secrets set my_secret "secret-value"
+# Store a secret manually (value read from stdin, never argv)
+printf '%s' "secret-value" | cs -secrets set my_secret
 
 # Delete a secret
 cs -secrets rm API_KEY

@@ -15,8 +15,7 @@ setup() {
     mkdir -p "$CS_SESSIONS_ROOT" "$CS_CLAUDE_DIR"
 
     local session_dir="$CS_SESSIONS_ROOT/test-session"
-    mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
-    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
+    mkdir -p "$session_dir/.cs"/{logs,memory}
     cat > "$session_dir/.cs/README.md" << 'EOF'
 ---
 status: active

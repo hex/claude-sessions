@@ -13,12 +13,10 @@ setup() {
     export CLAUDE_SESSION_NAME="test-session"
     export CLAUDE_SESSION_DIR="$TEST_TMPDIR/session"
     export CLAUDE_SESSION_META_DIR="$CLAUDE_SESSION_DIR/.cs"
-    export CLAUDE_ARTIFACT_DIR="$CLAUDE_SESSION_DIR/.cs/artifacts"
     export CS_TEST_SYNC=1  # Run hook git operations in foreground for testing
     export CS_SESSIONS_ROOT="$TEST_TMPDIR/sessions"  # for create_test_session_with_git
 
     mkdir -p "$CLAUDE_SESSION_DIR/.cs/logs"
-    mkdir -p "$CLAUDE_SESSION_DIR/.cs/artifacts"
     mkdir -p "$CS_SESSIONS_ROOT"
 
     (
@@ -38,7 +36,7 @@ teardown() {
     if [[ -n "$TEST_TMPDIR" ]] && [[ -d "$TEST_TMPDIR" ]]; then
         rm -rf "$TEST_TMPDIR"
     fi
-    unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR CLAUDE_ARTIFACT_DIR CS_TEST_SYNC CS_SESSIONS_ROOT 2>/dev/null || true
+    unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR CS_TEST_SYNC CS_SESSIONS_ROOT 2>/dev/null || true
 }
 
 # ============================================================================

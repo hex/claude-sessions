@@ -5,4 +5,3 @@
 .cs/logs/session.log merge=union
 .cs/timeline.jsonl merge=union
 .cs/memory/narrative.*.md merge=union
-.cs/artifacts/MANIFEST.json merge=manifest

@@ -12,19 +12,6 @@ Runs when Claude Code starts a session:
 - On `resume` only: injects dynamic context (last activity, recent commits, objective, up to 5 most recently active sibling sessions with their objectives), and a per-actor digest of shared memory/narrative activity since this actor's `.cs/local/watermark` (grouped by git author), then advances the watermark
 - On all sources: exports session environment variables, injects session context into Claude's system prompt
 
-## artifact-tracker.sh (PreToolUse on Write)
-
-Runs before any file write operation:
-- Detects script and config files by extension
-- Redirects tracked files to `.cs/artifacts/` — only when the write targets a path inside the session checkout; writes elsewhere (Claude-native worktree sandboxes, `/tmp`, other repos) pass through untouched
-- Updates `.cs/artifacts/MANIFEST.json` with metadata
-- Handles duplicate filenames automatically
-- **Detects and secures sensitive data** (see [Secrets](secrets.md))
-
-**Tracked extensions:**
-- Scripts: `.sh`, `.bash`, `.zsh`, `.py`, `.js`, `.ts`, `.rb`, `.pl`
-- Configs: `.conf`, `.config`, `.json`, `.yaml`, `.yml`, `.toml`, `.ini`, `.env`
-
 ## autosave-commits.sh (PostToolUse on Write/Edit)
 
 Runs after any file modification (Write or Edit), providing crash recovery for all session files:
@@ -56,7 +43,6 @@ Runs when Claude pauses for user input:
 
 Runs when Claude Code session ends:
 - Logs session end time and exit reason (`user_exit`, `sigint`, `error`, `timeout`) and appends a `session_end` event to `.cs/timeline.jsonl`
-- Creates `.cs/archives/artifacts-YYYYMMDD-HHMMSS.tar.gz` archive (skipped on `sigint` for faster exit)
 - Deletes the shadow autosave refs (`refs/worktree/cs/auto` for this checkout, plus any legacy `refs/cs/auto`)
 - Cleans up lock files
 
@@ -64,7 +50,7 @@ Runs when Claude Code session ends:
 
 Runs when Claude Code spawns a subagent (via the Agent tool):
 - Injects session context into subagents so they know about the cs session
-- Provides session directory, artifacts directory, and key rules (secrets handling, documentation protocol)
+- Provides the session directory and key rules (secrets handling, documentation protocol)
 - Uses `additionalContext` in the same format as SessionStart
 
 ## tool-failure-logger.sh (PostToolUseFailure)
@@ -118,7 +104,6 @@ The hooks are configured in `~/.claude/settings.json`:
       { "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/session-start.sh", "timeout": 30 }] }
     ],
     "PreToolUse": [
-      { "matcher": "Write", "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/artifact-tracker.sh", "timeout": 10 }] },
       { "matcher": "Bash", "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/bash-logger.sh", "timeout": 5 }] }
     ],
     "PostToolUse": [

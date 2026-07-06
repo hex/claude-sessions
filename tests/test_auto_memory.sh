@@ -11,7 +11,7 @@ teardown() {
         rm -rf "$TEST_TMPDIR"
     fi
     unset CS_SESSIONS_ROOT CLAUDE_CODE_BIN
-    unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR CLAUDE_ARTIFACT_DIR 2>/dev/null || true
+    unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR 2>/dev/null || true
 }
 
 # ============================================================================
@@ -69,8 +69,7 @@ test_adopt_adds_settings_to_gitignore() {
 
 test_migration_creates_memory_and_settings() {
     local session_dir="$CS_SESSIONS_ROOT/old-session"
-    mkdir -p "$session_dir/.cs"/{artifacts,logs}
-    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
+    mkdir -p "$session_dir/.cs/logs"
     cat > "$session_dir/CLAUDE.md" << 'EOF'
 # Session Documentation Protocol
 
@@ -87,8 +86,7 @@ EOF
 
 test_migration_moves_existing_auto_memory() {
     local session_dir="$CS_SESSIONS_ROOT/mem-session"
-    mkdir -p "$session_dir/.cs"/{artifacts,logs}
-    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
+    mkdir -p "$session_dir/.cs/logs"
     cat > "$session_dir/CLAUDE.md" << 'EOF'
 # Session Documentation Protocol
 
@@ -130,8 +128,7 @@ EOF
 create_old_session() {
     local name="$1"
     local session_dir="$CS_SESSIONS_ROOT/$name"
-    mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
-    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
+    mkdir -p "$session_dir/.cs"/{logs,memory}
     # Old README.md: no frontmatter, starts with heading
     cat > "$session_dir/.cs/README.md" << 'EOF'
 # Session: test-old
@@ -271,8 +268,7 @@ test_narrative_pointer_idempotent_readd() {
 
 test_resume_folds_discoveries_into_narrative() {
     local session_dir="$CS_SESSIONS_ROOT/disc-session"
-    mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
-    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
+    mkdir -p "$session_dir/.cs"/{logs,memory}
     cat > "$session_dir/.cs/discoveries.md" << 'EOF'
 # Discoveries & Notes
 
@@ -305,8 +301,7 @@ test_discoveries_fold_header_uses_git_date() {
     # different days would otherwise write divergent blocks into the same
     # tracked narrative and conflict on merge.
     local session_dir="$CS_SESSIONS_ROOT/disc-dated"
-    mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
-    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
+    mkdir -p "$session_dir/.cs"/{logs,memory}
     cat > "$session_dir/.cs/discoveries.md" << 'EOF'
 # Discoveries & Notes
 
@@ -329,8 +324,7 @@ EOF
 
 test_resume_folds_compact_when_discoveries_header_only() {
     local session_dir="$CS_SESSIONS_ROOT/compact-session"
-    mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
-    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
+    mkdir -p "$session_dir/.cs"/{logs,memory}
     # Active file is header-only, but the compact companion holds real content
     printf '# Discoveries & Notes\n\n' > "$session_dir/.cs/discoveries.md"
     cat > "$session_dir/.cs/discoveries.compact.md" << 'EOF'
