@@ -693,6 +693,10 @@ validate_session_name() {
         error "Session name cannot be empty"
     fi
 
+    case "$name" in
+        .|..) error "Session name cannot be '.' or '..'" ;;
+    esac
+
     if ! [[ "$name" =~ ^[a-zA-Z0-9._-]+$ ]]; then
         error "Session name must contain only alphanumeric characters, hyphens, underscores, and dots"
     fi
@@ -2737,6 +2741,13 @@ remove_session() {
     if [ -z "$session_name" ]; then
         error "Usage: cs -remove <session-name>"
     fi
+
+    # Reject path traversal before any filesystem action: '.'/'..' and any
+    # name with a slash would resolve rm -rf outside the sessions root. A
+    # worktree name (<base>@<task>) has an @ but never a slash, so it passes.
+    case "$session_name" in
+        .|..|*/*) error "Invalid session name: $session_name" ;;
+    esac
 
     local session_dir="$SESSIONS_ROOT/$session_name"
 
