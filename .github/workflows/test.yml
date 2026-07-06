@@ -25,6 +25,17 @@ jobs:
       - name: Run bash test suites
         run: bash tests/run_all.sh
 
+  build-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Verify bin/cs is in sync with lib/
+        run: |
+          bash build.sh
+          git diff --exit-code bin/cs \
+            || { echo "::error::bin/cs is out of sync with lib/. Run ./build.sh and commit bin/cs."; exit 1; }
+
   rust:
     runs-on: macos-latest
     steps:

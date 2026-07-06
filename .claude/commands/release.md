@@ -25,7 +25,7 @@ Examples: `2026.1.42`, `2026.12.1`
 
 ### 1. Bump Version Number
 
-Read `bin/cs` and find the VERSION line (near the top). Calculate the new version:
+Read `lib/00-header.sh` and find the VERSION line (near the top). Calculate the new version:
 
 ```bash
 # Get current date
@@ -36,7 +36,8 @@ MONTH=$(date +%-m)  # No leading zero
 - If current version's YYYY.MM matches today's YYYY.M: increment BUILD by 1
 - If current version's YYYY.MM is older: reset to YYYY.M.1
 
-Update the VERSION line in `bin/cs`.
+Update the VERSION line in `lib/00-header.sh`, then run `./build.sh` to regenerate
+`bin/cs` from the `lib/` fragments. `bin/cs` is assembled — never edit it directly.
 
 ### 2. Verify Install/Uninstall Parity
 

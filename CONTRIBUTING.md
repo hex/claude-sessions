@@ -9,7 +9,19 @@ git clone https://github.com/hex/claude-sessions.git
 cd claude-sessions
 ```
 
-The main script is `bin/cs`. Hooks live in `hooks/`, commands in `commands/`, and tests in `tests/`.
+The `cs` command is **assembled** from ordered fragments in `lib/*.sh` into the
+single `bin/cs` that ships. **Edit the `lib/` fragments, never `bin/cs` directly**,
+then rebuild and commit the regenerated `bin/cs`:
+
+```bash
+./build.sh   # concatenates lib/*.sh (in numeric-prefix order) into bin/cs
+```
+
+CI rebuilds and fails if the committed `bin/cs` is out of sync with `lib/`. Each
+fragment has a numeric prefix (`00`, `05`, …, `99`) that fixes its position; the
+`bin/cs` blob stays byte-identical whether you edit a fragment or the assembled
+file, so a build is transparent. Hooks live in `hooks/`, commands in `commands/`,
+and tests in `tests/`.
 
 ## Running Tests
 
@@ -45,7 +57,7 @@ masked; `run_all.sh` reports every failing suite.
    - Add a tilde variant: `YOUR_HOOK_TILDE="$HOOKS_TILDE_DIR/your-hook.sh"`
    - Add a `_merge_cs_hook` call to register the hook in `settings.json` under the appropriate event (`SessionStart`, `PreToolUse`, `PostToolUse`, etc.)
 
-3. **Add to `CS_HOOKS` in `bin/cs`** — uninstall and doctor derive from it. `tests/test_install.sh` fails if the two arrays disagree with each other or with the actual contents of `hooks/`.
+3. **Add to `CS_HOOKS` in `lib/00-header.sh`** (assembled into `bin/cs`) — uninstall and doctor derive from it. `tests/test_install.sh` fails if the two arrays disagree with each other or with the actual contents of `hooks/`.
 
 4. **Document in `docs/hooks.md`** — add a section following the existing format: hook name, event type, description, and behavior.
 
@@ -60,7 +72,7 @@ masked; `run_all.sh` reports every failing suite.
    - Add the download step (uses `curl` with `wget` fallback)
    - Add the `cp` line for the command file
 
-3. **Add to `run_uninstall()`** in `bin/cs` — include the command file in the cleanup.
+3. **Add to `run_uninstall()`** in `lib/85-adopt-uninstall.sh` (assembled into `bin/cs`) — include the command file in the cleanup.
 
 ## Code Style
 
