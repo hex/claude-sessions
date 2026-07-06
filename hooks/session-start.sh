@@ -34,7 +34,10 @@ if [ ! -d "$SESSION_DIR" ]; then
     exit 0
 fi
 
-# Log session start
+# Log session start. Ensure the machine-local dir exists first: it is gitignored,
+# so a freshly-cloned session has none until cs creates it, and an unguarded
+# append into a missing dir would abort this hook under set -e.
+mkdir -p "$META_DIR/local" 2>/dev/null || true
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Session started (source: $SOURCE, ID: $SESSION_ID)" >> "$META_DIR/local/session.log"
 echo "  Working directory: $CWD" >> "$META_DIR/local/session.log"
 echo "" >> "$META_DIR/local/session.log"
@@ -213,12 +216,17 @@ if [ "$SOURCE" = "resume" ] && [ -d "$SESSION_DIR/.git" ]; then
     if [ -d "$SESSIONS_ROOT" ]; then
         SIBLINGS=""
         SIBLING_COUNT=0
+        seen_siblings=""
         # Sort sibling sessions by session.log mtime (most recent first)
         while IFS= read -r log_file; do
             sibling_dir=$(dirname "$(dirname "$(dirname "$log_file")")")
             [ -d "$sibling_dir/.cs" ] || continue
             sibling_name=$(basename "$sibling_dir")
             [ "$sibling_name" = "$CLAUDE_SESSION_NAME" ] && continue
+            # The glob lists both .cs/local/ and .cs/logs/ logs, so a session
+            # mid-migration (both present) surfaces twice — skip repeats.
+            case " $seen_siblings " in *" $sibling_name "*) continue ;; esac
+            seen_siblings="$seen_siblings $sibling_name"
             sibling_obj=$(sed -n '/^## Objective/,/^## /{/^## Objective/d;/^## /d;/^$/d;p;}' "$sibling_dir/.cs/README.md" 2>/dev/null | head -1 || true)
             [ -z "$sibling_obj" ] && continue
             [[ "$sibling_obj" == "["*"]" ]] && continue

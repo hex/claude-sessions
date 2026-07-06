@@ -175,6 +175,9 @@ EOF
         "migration should create the log at .cs/local/session.log" || return 1
     assert_file_contains "$session_dir/.cs/local/session.log" "BASH: echo hello" \
         "relocated log should carry the old content" || return 1
+    assert_eq "Claude Code Session Log" \
+        "$(head -1 "$session_dir/.cs/local/session.log")" \
+        "relocated log must not gain a spurious leading blank line" || return 1
     assert_file_not_exists "$session_dir/.cs/logs/session.log" \
         "old .cs/logs/session.log should be gone after migration" || return 1
     assert_file_not_contains "$session_dir/.gitattributes" "logs/session.log merge=union" \

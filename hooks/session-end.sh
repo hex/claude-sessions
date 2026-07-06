@@ -31,7 +31,9 @@ if [ ! -d "$SESSION_DIR" ]; then
     exit 0
 fi
 
-# Log session end
+# Log session end. Ensure the gitignored machine-local dir exists first so an
+# append into a missing dir cannot abort this hook (and its cleanup) under set -e.
+mkdir -p "$META_DIR/local" 2>/dev/null || true
 echo "" >> "$META_DIR/local/session.log"
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Session ended (source: $SOURCE, ID: $SESSION_ID)" >> "$META_DIR/local/session.log"
 

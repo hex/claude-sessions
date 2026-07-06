@@ -946,10 +946,17 @@ fuse_session_records() {
     local f base
 
     [ -f "$src/timeline.jsonl" ] && cat "$src/timeline.jsonl" >> "$dst/timeline.jsonl"
-    if [ -f "$src/local/session.log" ]; then
-        mkdir -p "$dst/local"
-        { echo ""; cat "$src/local/session.log"; } >> "$dst/local/session.log"
-    fi
+    # Worktrees never run migrate_session, so a task branch created before the
+    # log moved to .cs/local/ still keeps its audit trail at .cs/logs/; fuse
+    # whichever the worktree has into the base's machine-local log.
+    local srclog
+    for srclog in "$src/local/session.log" "$src/logs/session.log"; do
+        if [ -f "$srclog" ]; then
+            mkdir -p "$dst/local"
+            { echo ""; cat "$srclog"; } >> "$dst/local/session.log"
+            break
+        fi
+    done
 
     mkdir -p "$dst/memory"
     for f in "$src"/memory/narrative.*.md; do
@@ -1609,16 +1616,21 @@ migrate_session() {
     # it stays with the machine that produced it; the shared structured record
     # lives in timeline.jsonl. The tracked deletion is left for the next normal
     # commit, as with the README-frontmatter move below. One-time, idempotent:
-    # once the old file is gone the block is a no-op.
+    # once the old file is gone the block is a no-op. During the upgrade window a
+    # peer still on the old cs may keep appending to the tracked log, so a
+    # one-time modify/delete conflict on this low-stakes file is possible — take
+    # either side.
     if [ -f "$session_dir/.cs/logs/session.log" ]; then
-        { [ -f "$session_dir/.cs/local/session.log" ] && echo ""
-          cat "$session_dir/.cs/logs/session.log"; } >> "$session_dir/.cs/local/session.log"
+        cat "$session_dir/.cs/logs/session.log" >> "$session_dir/.cs/local/session.log"
         rm -f "$session_dir/.cs/logs/session.log"
         rmdir "$session_dir/.cs/logs" 2>/dev/null || true
-        if [ -f "$session_dir/.gitattributes" ]; then
-            grep -v 'logs/session\.log merge=union' "$session_dir/.gitattributes" \
-                > "$session_dir/.gitattributes.tmp" 2>/dev/null \
-                && mv "$session_dir/.gitattributes.tmp" "$session_dir/.gitattributes"
+        # Drop the obsolete union rule for the relocated log. grep -v exits 1 when
+        # that was the only line, so guard on presence and tolerate the exit code
+        # rather than leaving the rule (and a stray .tmp) behind.
+        local ga="$session_dir/.gitattributes"
+        if [ -f "$ga" ] && grep -q 'logs/session\.log merge=union' "$ga"; then
+            grep -v 'logs/session\.log merge=union' "$ga" > "$ga.tmp" 2>/dev/null || true
+            mv "$ga.tmp" "$ga" 2>/dev/null || rm -f "$ga.tmp"
         fi
         warn "Moved .cs/logs/session.log to machine-local .cs/local/session.log"
     fi
