@@ -29,7 +29,7 @@ bash tests/test_hooks.sh test_session_start_creates_log
 cargo test --manifest-path tui/Cargo.toml
 ```
 
-There are 560+ tests across 35 bash suites plus the Rust TUI tests. All must
+There are 530+ tests across 34 bash suites plus the Rust TUI tests. All must
 pass before submitting changes; CI (`.github/workflows/test.yml`) runs them on
 every push and pull request. Do not use a bare `for f in tests/*; do bash "$f";
 done` loop — its exit status reflects only the last suite, so failures are
