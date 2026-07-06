@@ -9,7 +9,10 @@ setup() {
     TEST_TMPDIR="$(mktemp -d)"
     export CS_SESSIONS_ROOT="$TEST_TMPDIR/sessions"
     export CLAUDE_CODE_BIN="echo"
-    mkdir -p "$CS_SESSIONS_ROOT"
+    # Isolate the doctor's ~/.claude probes from the developer's real install
+    # (tests that need specific settings/hooks seed this dir themselves).
+    export CS_CLAUDE_DIR="$TEST_TMPDIR/claude"
+    mkdir -p "$CS_SESSIONS_ROOT" "$CS_CLAUDE_DIR"
 
     local session_dir="$CS_SESSIONS_ROOT/test-session"
     mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
@@ -38,7 +41,7 @@ teardown() {
     if [[ -n "$TEST_TMPDIR" ]] && [[ -d "$TEST_TMPDIR" ]]; then
         rm -rf "$TEST_TMPDIR"
     fi
-    unset CS_SESSIONS_ROOT CLAUDE_CODE_BIN CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR 2>/dev/null || true
+    unset CS_SESSIONS_ROOT CLAUDE_CODE_BIN CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR CS_CLAUDE_DIR 2>/dev/null || true
 }
 
 test_doctor_subcommand_exists() {

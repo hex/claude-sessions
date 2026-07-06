@@ -16,17 +16,24 @@ The main script is `bin/cs`. Hooks live in `hooks/`, commands in `commands/`, an
 Tests use a shared library (`tests/test_lib.sh`) that provides assertions, temporary directories, and test isolation.
 
 ```bash
-# Run all tests
-for f in tests/test_*.sh; do bash "$f"; done
+# Run all tests (aggregates per-suite results and exits non-zero on any failure)
+bash tests/run_all.sh
 
 # Run a single test file
 bash tests/test_hooks.sh
 
 # Run a specific test function
 bash tests/test_hooks.sh test_session_start_creates_log
+
+# Run the Rust TUI tests
+cargo test --manifest-path tui/Cargo.toml
 ```
 
-There are 283+ tests across 17 test suites. All tests must pass before submitting changes.
+There are 560+ tests across 35 bash suites plus the Rust TUI tests. All must
+pass before submitting changes; CI (`.github/workflows/test.yml`) runs them on
+every push and pull request. Do not use a bare `for f in tests/*; do bash "$f";
+done` loop — its exit status reflects only the last suite, so failures are
+masked; `run_all.sh` reports every failing suite.
 
 ## Adding a Hook
 

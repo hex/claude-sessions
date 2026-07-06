@@ -636,6 +636,10 @@ UPDATE_CHECK_INTERVAL=3600  # 1 hour in seconds
 UPDATE_AVAILABLE=""  # Set by check_update_notify if update available
 
 check_update_notify() {
+    # Opt out of the network check + cache write (tests set this so a session
+    # launch never hits GitHub or touches the real ~/.cache/cs).
+    [ -n "${CS_NO_UPDATE_CHECK:-}" ] && return 0
+
     local cache_dir
     cache_dir="$(dirname "$UPDATE_CACHE")"
     mkdir -p "$cache_dir"
@@ -2242,7 +2246,7 @@ _doctor_check_keychain() {
 
 _doctor_check_hooks_registered() {
     local hooks_dir="$HOOKS_DEPLOY_DIR"
-    local settings="$HOME/.claude/settings.json"
+    local settings="${CS_CLAUDE_DIR:-$HOME/.claude}/settings.json"
     if [ ! -f "$settings" ]; then
         _doctor_warn "Hooks: $settings not found (cs may not be installed via install.sh)"
         return

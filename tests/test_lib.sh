@@ -26,6 +26,8 @@ setup() {
     TEST_TMPDIR="$(mktemp -d)"
     export CS_SESSIONS_ROOT="$TEST_TMPDIR/sessions"
     export CLAUDE_CODE_BIN="echo"
+    # Never hit GitHub or the real ~/.cache/cs from a test session launch.
+    export CS_NO_UPDATE_CHECK=1
     # Isolate from the developer's real ~/.claude/projects/ so transcript
     # discovery sees only what the test seeds. Same env var used by
     # _doctor_check_token_cost and the Phase 8 binding helpers.
@@ -41,7 +43,7 @@ teardown() {
     if [[ -n "$TEST_TMPDIR" ]] && [[ -d "$TEST_TMPDIR" ]]; then
         rm -rf "$TEST_TMPDIR"
     fi
-    unset CS_SESSIONS_ROOT CLAUDE_CODE_BIN CS_TRANSCRIPTS_DIR
+    unset CS_SESSIONS_ROOT CLAUDE_CODE_BIN CS_TRANSCRIPTS_DIR CS_NO_UPDATE_CHECK
 }
 
 # --- Test Runner ---
