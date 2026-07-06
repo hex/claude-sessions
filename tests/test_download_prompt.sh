@@ -56,8 +56,13 @@ test_age_has_manual_install_hint() {
 }
 
 test_age_has_download_source_disclosure() {
-    assert_file_contains "$CS_SECRETS_BIN" 'dl.filippo.io/age' \
-        "age prompt should disclose download source" || return 1
+    assert_file_contains "$CS_SECRETS_BIN" 'github.com/FiloSottile/age' \
+        "age prompt should disclose the download source" || return 1
+}
+
+test_age_download_is_checksum_pinned() {
+    assert_file_contains "$CS_SECRETS_BIN" '_age_expected_sha' \
+        "age download must be verified against a pinned checksum" || return 1
 }
 
 # ============================================================================
@@ -80,5 +85,6 @@ run_test test_age_has_consent_prompt
 run_test test_age_has_noninteractive_guard
 run_test test_age_has_manual_install_hint
 run_test test_age_has_download_source_disclosure
+run_test test_age_download_is_checksum_pinned
 
 report_results
