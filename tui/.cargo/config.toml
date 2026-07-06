@@ -1,0 +1,5 @@
+# The test suite mutates the process-global CS_SESSIONS_ROOT (via set_var), which
+# is a data race against any concurrent env read in Rust. Run tests on a single
+# thread so those tests are serialized rather than racing.
+[env]
+RUST_TEST_THREADS = "1"

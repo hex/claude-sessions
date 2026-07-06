@@ -295,7 +295,7 @@ fn parse_created(log_file: &Path) -> Option<String> {
 
     // Fallback: parse "YYYY-MM-DD HH:MM:SS" from first line
     let first_line = content.lines().next()?;
-    if first_line.len() >= 19 {
+    if first_line.len() >= 19 && first_line.is_char_boundary(19) {
         let candidate = &first_line[..19];
         if is_timestamp_format(candidate) {
             return trim_timestamp(candidate);
@@ -307,7 +307,7 @@ fn parse_created(log_file: &Path) -> Option<String> {
 
 fn trim_timestamp(ts: &str) -> Option<String> {
     let trimmed = ts.trim();
-    if trimmed.len() >= 16 {
+    if trimmed.len() >= 16 && trimmed.is_char_boundary(16) {
         Some(trimmed[..16].to_string())
     } else {
         Some(trimmed.to_string())

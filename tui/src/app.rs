@@ -129,15 +129,18 @@ pub fn fuzzy_match(pattern: &str, text: &str) -> Option<(i32, Vec<usize>)> {
 
     let pattern_lower: Vec<char> = pattern.to_lowercase().chars().collect();
     let text_chars: Vec<(usize, char)> = text.char_indices().collect();
-    let text_lower: Vec<char> = text.to_lowercase().chars().collect();
 
     let mut indices = Vec::with_capacity(pattern_lower.len());
     let mut ti = 0;
 
     for &pc in &pattern_lower {
         let mut found = false;
-        while ti < text_lower.len() {
-            if text_lower[ti] == pc {
+        // Lowercase each original char inline (first lowercase char) so the
+        // index stays aligned with text_chars — a whole-string to_lowercase()
+        // can change the char count and desync the two, panicking on index.
+        while ti < text_chars.len() {
+            let tc = text_chars[ti].1.to_lowercase().next().unwrap_or(text_chars[ti].1);
+            if tc == pc {
                 indices.push(text_chars[ti].0);
                 ti += 1;
                 found = true;
@@ -185,6 +188,18 @@ pub fn fuzzy_match(pattern: &str, text: &str) -> Option<(i32, Vec<usize>)> {
     }
 
     Some((score, indices))
+}
+
+/// Whether a name is one the `cs` CLI would accept, mirroring bash
+/// validate_session_name: non-empty, not "."/"..", and only ASCII
+/// alphanumerics plus `-` `_` `.`. Keeps TUI-created/renamed sessions openable
+/// by `cs` (Unicode letters or spaces would produce a dir cs rejects).
+pub fn is_valid_session_name(name: &str) -> bool {
+    if name.is_empty() || name == "." || name == ".." {
+        return false;
+    }
+    name.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -348,6 +363,10 @@ pub struct App {
     pub editing: Option<usize>,
     /// Resolved color palette for the detected terminal background.
     pub theme: Palette,
+    /// Sessions root captured once at construction. Reading it here instead of
+    /// calling session::sessions_root() (a process-global env read) on every
+    /// preview/create/delete keeps a test's env mutation from racing the reads.
+    pub sessions_root: std::path::PathBuf,
 }
 
 impl App {
@@ -356,7 +375,9 @@ impl App {
         if !sessions.is_empty() {
             table_state.select(Some(0));
         }
+        let sessions_root = session::sessions_root();
         let mut app = App {
+            sessions_root,
             sessions,
             filtered: Vec::new(),
             table_state,
@@ -508,7 +529,7 @@ impl App {
     pub fn ensure_preview_loaded(&mut self) {
         if let Some(name) = self.selected_session_name() {
             if !self.preview_cache.contains_key(&name) {
-                let root = session::sessions_root();
+                let root = self.sessions_root.clone();
                 let preview = session::load_preview(&root.join(&name));
                 self.preview_cache.insert(name, preview);
             }
@@ -775,7 +796,7 @@ impl App {
                     } else {
                         // Load preview if not cached
                         if !self.preview_cache.contains_key(&name) {
-                            let root = session::sessions_root();
+                            let root = self.sessions_root.clone();
                             let preview = session::load_preview(&root.join(&name));
                             self.preview_cache.insert(name.clone(), preview);
                         }
@@ -1137,15 +1158,15 @@ impl App {
             self.mode = Mode::Normal;
             return Action::None;
         }
-        if !name
-            .chars()
-            .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == ' ')
-        {
-            self.set_status("Invalid characters in name", StatusLevel::Error);
+        if !is_valid_session_name(&name) {
+            self.set_status(
+                "Invalid name: use letters, digits, - _ . only",
+                StatusLevel::Error,
+            );
             self.mode = Mode::Normal;
             return Action::None;
         }
-        let root = session::sessions_root();
+        let root = self.sessions_root.clone();
         if root.join(&name).exists() {
             self.set_status("Session already exists", StatusLevel::Error);
             self.mode = Mode::Normal;
@@ -1327,7 +1348,7 @@ impl App {
 
     fn execute_delete(&mut self) {
         if let Some(session) = self.selected_session() {
-            let root = session::sessions_root();
+            let root = self.sessions_root.clone();
             let path = root.join(&session.name);
             let result = if path
                 .symlink_metadata()
@@ -1354,7 +1375,7 @@ impl App {
     }
 
     fn execute_batch_delete(&mut self) {
-        let root = session::sessions_root();
+        let root = self.sessions_root.clone();
         let mut deleted = 0;
         let mut errors = 0;
         let names: Vec<String> = self.marked_sessions.iter().cloned().collect();
@@ -1402,17 +1423,30 @@ impl App {
             self.mode = Mode::Normal;
             return;
         }
-        if !new_name
-            .chars()
-            .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == ' ')
-        {
-            self.set_status("Invalid characters in name", StatusLevel::Error);
+        if !is_valid_session_name(&new_name) {
+            self.set_status(
+                "Invalid name: use letters, digits, - _ . only",
+                StatusLevel::Error,
+            );
             self.mode = Mode::Normal;
             return;
         }
 
+        // Renaming a worktree session (<base>@<task>) via fs::rename would
+        // desync git's worktree registration; refuse it here.
         if let Some(session) = self.selected_session() {
-            let root = session::sessions_root();
+            if session.name.contains('@') {
+                self.set_status(
+                    "Can't rename a worktree session from the TUI",
+                    StatusLevel::Error,
+                );
+                self.mode = Mode::Normal;
+                return;
+            }
+        }
+
+        if let Some(session) = self.selected_session() {
+            let root = self.sessions_root.clone();
             let old = root.join(&session.name);
             let new = root.join(&new_name);
             if new.exists() {
@@ -1442,11 +1476,18 @@ impl App {
                 .args([&name, "-secrets", "list"])
                 .output();
             match output {
-                Ok(out) => {
+                Ok(out) if out.status.success() => {
                     let text = String::from_utf8_lossy(&out.stdout).to_string();
                     self.secrets_names = Self::parse_secrets_list(&text);
                     self.secrets_selected = 0;
                     self.mode = Mode::Secrets;
+                }
+                Ok(out) => {
+                    let err = String::from_utf8_lossy(&out.stderr);
+                    self.set_status(
+                        format!("Secrets failed: {}", err.trim()),
+                        StatusLevel::Error,
+                    );
                 }
                 Err(e) => {
                     self.set_status(format!("Secrets failed: {}", e), StatusLevel::Error);
@@ -1495,10 +1536,14 @@ impl App {
                 .args([&name, "-secrets", "get", key_name])
                 .output();
             match output {
-                Ok(out) => {
+                Ok(out) if out.status.success() => {
                     let value = String::from_utf8_lossy(&out.stdout).trim().to_string();
                     self.revealed_secret =
                         Some((key_name.to_string(), value, std::time::Instant::now()));
+                }
+                Ok(out) => {
+                    let err = String::from_utf8_lossy(&out.stderr);
+                    self.set_status(format!("Peek failed: {}", err.trim()), StatusLevel::Error);
                 }
                 Err(e) => {
                     self.set_status(format!("Peek failed: {}", e), StatusLevel::Error);
@@ -2475,11 +2520,21 @@ mod tests {
 
     #[test]
     fn create_session_valid_name_returns_open_action() {
+        // execute_create reads sessions_root() (CS_SESSIONS_ROOT); hold ENV_LOCK
+        // and point it at a temp dir so this read can't race another test's
+        // set_var/remove_var (a data race on the process environment) and so the
+        // .exists() check never touches the developer's real sessions root.
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = std::env::temp_dir().join(format!("cs-tui-create-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).ok();
+        std::env::set_var("CS_SESSIONS_ROOT", &tmp);
         let mut app = App::new(sample_sessions());
         app.mode = Mode::CreateSession;
         app.create_input.set("brand-new-session");
         let action = app.handle_key(KeyEvent::from(KeyCode::Enter));
         assert!(matches!(action, Action::Open(name) if name == "brand-new-session"));
+        std::env::remove_var("CS_SESSIONS_ROOT");
+        std::fs::remove_dir_all(&tmp).ok();
     }
 
     #[test]
@@ -2634,6 +2689,33 @@ mod tests {
         // Both should have reasonable scores
         assert!(score_boundary > 0);
         assert!(score_consecutive > 0);
+    }
+
+    #[test]
+    fn fuzzy_match_multibyte_does_not_panic() {
+        // to_lowercase() can change the char count (e.g. 'İ' -> two code points),
+        // which previously desynced text_lower from text_chars and panicked on
+        // an out-of-bounds index. These must complete without panicking.
+        let _ = fuzzy_match("s", "İstanbul-café—session");
+        let _ = fuzzy_match("x", "İİİ");
+        let r = fuzzy_match("ca", "café-app");
+        assert!(r.is_some());
+    }
+
+    #[test]
+    fn is_valid_session_name_matches_cs_rules() {
+        // Accepted by bash cs validate_session_name.
+        assert!(is_valid_session_name("debug-api"));
+        assert!(is_valid_session_name("v2026.7.4"));
+        assert!(is_valid_session_name("my_session"));
+        // Rejected — these would produce a dir the cs CLI can't open, or traverse.
+        assert!(!is_valid_session_name(""));
+        assert!(!is_valid_session_name("."));
+        assert!(!is_valid_session_name(".."));
+        assert!(!is_valid_session_name("has space"));
+        assert!(!is_valid_session_name("café")); // non-ASCII letter
+        assert!(!is_valid_session_name("base@task")); // worktree separator
+        assert!(!is_valid_session_name("a/b"));
     }
 
     #[test]
