@@ -498,7 +498,8 @@ verify_signature() {
 
 # Fetch latest version from GitHub Releases
 get_remote_version() {
-    curl -fsSL "${RELEASES_BASE}/latest" -o /dev/null -w '%{url_effective}' 2>/dev/null \
+    curl -fsSL --connect-timeout 2 --max-time 4 \
+        "${RELEASES_BASE}/latest" -o /dev/null -w '%{url_effective}' 2>/dev/null \
         | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/^v//'
 }
 
@@ -764,11 +765,18 @@ _tree_is_dirty() {
         || ! git -C "$1" diff --cached --quiet 2>/dev/null
 }
 
+# Resolve a symlinked directory to its real path, portably. BSD readlink gained
+# -f only in macOS 12.3; cd+pwd -P follows the link on every platform, and the
+# fallback keeps the original path rather than aborting under set -e.
+_resolve_symlink_dir() {
+    (cd "$1" 2>/dev/null && pwd -P) || printf '%s\n' "$1"
+}
+
 # Resolve a session name to its real directory (adopted sessions are
 # symlinks into the project checkout). Prints the resolved path.
 _resolve_session_dir() {
     local dir="$SESSIONS_ROOT/$1"
-    [ -L "$dir" ] && dir="$(readlink -f "$dir")"
+    [ -L "$dir" ] && dir="$(_resolve_symlink_dir "$dir")"
     printf '%s\n' "$dir"
 }
 
@@ -1131,10 +1139,12 @@ Claude's built-in memory writes durable facts to `.cs/memory/` (cs redirects via
 EOF
 }
 
-# Write the session CLAUDE.md template to the given directory
-write_session_claude_md() {
-    local session_dir="$1"
-    cat > "$session_dir/CLAUDE.md" << 'EOF'
+# Emit the session CLAUDE.md template to stdout. The leading sentinel lets both
+# the create path (overwrite) and the migrate path (guarded append) detect
+# whether the protocol is already present.
+_emit_session_claude_md() {
+    cat << 'EOF'
+<!-- cs:session-protocol -->
 # Session Documentation Protocol
 
 This is a Claude Code session managed by the cs tool. Session metadata lives in the .cs/ directory. The session root is your workspace for project files.
@@ -1203,8 +1213,8 @@ cs -secrets set <name> <value>     # Store manually
 ```
 
 EOF
-    _emit_memory_note_block >> "$session_dir/CLAUDE.md"
-    cat >> "$session_dir/CLAUDE.md" << 'EOF'
+    _emit_memory_note_block
+    cat << 'EOF'
 
 <!-- cs:wrap-cues -->
 ## Session wrap-up cues
@@ -1236,6 +1246,12 @@ To opt out, delete the prose above but keep the `cs:wrap-cues` HTML comment as a
 - Run `/wrap` at the end to distill memory and create a cohesive record
 - Never write raw API keys or passwords to artifact files - use cs -secrets
 EOF
+}
+
+# Write the session CLAUDE.md template to the given directory (create path).
+write_session_claude_md() {
+    local session_dir="$1"
+    _emit_session_claude_md > "$session_dir/CLAUDE.md"
 }
 
 # Generate a v4 UUID, lowercased. uuidgen on BSD (macOS) returns uppercase;
@@ -1646,11 +1662,17 @@ migrate_session() {
     migrate_discoveries_to_narrative "$session_dir"
     ensure_narrative_file "$session_dir"
 
-    # Phase 5: Update CLAUDE.md to reference .cs/ paths if needed
+    # Phase 5: ensure the cs session protocol is present in CLAUDE.md. Append it
+    # (never overwrite) so a user-authored or project CLAUDE.md is preserved; the
+    # sentinel keeps it idempotent, and a file that already references .cs/ is a
+    # prior cs template that needs nothing.
     local claude_md="$session_dir/CLAUDE.md"
-    if [ -f "$claude_md" ] && ! grep -q '\.cs/' "$claude_md"; then
-        write_session_claude_md "$session_dir"
-        warn "Updated CLAUDE.md to reference .cs/ paths"
+    if [ -f "$claude_md" ] \
+        && ! grep -q 'cs:session-protocol' "$claude_md" \
+        && ! grep -q '\.cs/' "$claude_md"; then
+        printf '\n' >> "$claude_md"
+        _emit_session_claude_md >> "$claude_md"
+        warn "Appended the cs session protocol to your existing CLAUDE.md"
     fi
 
     # Phase 7: prune retired command-tracker artifacts.
@@ -1953,12 +1975,13 @@ list_checkpoints() {
     fi
     echo "Checkpoints for session: $CLAUDE_SESSION_NAME"
     echo ""
-    for f in $(ls -t "$checkpoints_dir"/*.md 2>/dev/null); do
-        local name label
+    local f name label
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
         name=$(basename "$f" .md)
         label=$(grep -m1 '^# Checkpoint:' "$f" 2>/dev/null | sed 's/^# Checkpoint: //' || echo "-")
         printf "  %s\n    %s\n" "$name" "$label"
-    done
+    done < <(ls -t "$checkpoints_dir"/*.md 2>/dev/null)
 }
 
 # Print a specific checkpoint file
@@ -2609,7 +2632,7 @@ search_sessions() {
             local filepath="$real_dir/$relpath"
             [ -f "$filepath" ] || continue
             local matches
-            matches=$(grep -in "$query" "$filepath" 2>/dev/null) || continue
+            matches=$(grep -in -- "$query" "$filepath" 2>/dev/null) || continue
             while IFS= read -r line; do
                 echo -e "${GOLD}${session_name}${NC}: ${DIM}${relpath}${NC}: ${line}"
                 found=$((found + 1))
@@ -2621,7 +2644,7 @@ search_sessions() {
             [ -f "$filepath" ] || continue
             local relpath="${filepath#"$real_dir"/}"
             local matches
-            matches=$(grep -in "$query" "$filepath" 2>/dev/null) || continue
+            matches=$(grep -in -- "$query" "$filepath" 2>/dev/null) || continue
             while IFS= read -r line; do
                 echo -e "${GOLD}${session_name}${NC}: ${DIM}${relpath}${NC}: ${line}"
                 found=$((found + 1))
@@ -2787,7 +2810,7 @@ remove_session() {
     # Confirm deletion
     if [ -L "$session_dir" ]; then
         local target
-        target="$(readlink -f "$session_dir")"
+        target="$(_resolve_symlink_dir "$session_dir")"
         read -r -p $'\033[0;31mRemove adopted session '"'$session_name'"$'? (removes symlink only, project at '"$target"$' is preserved) [y/N] \033[0m' confirm
     else
         read -r -p $'\033[0;31mRemove session '"'$session_name'"$'? [y/N] \033[0m' confirm
@@ -3782,7 +3805,7 @@ main() {
     # Define paths (resolve symlinks for adopted sessions so Claude Code
     # sees the original project path, preserving conversation continuity)
     if [ -L "$session_dir" ]; then
-        session_dir="$(readlink -f "$session_dir")"
+        session_dir="$(_resolve_symlink_dir "$session_dir")"
     fi
     local is_new="false"
 
