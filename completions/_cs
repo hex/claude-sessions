@@ -36,7 +36,9 @@ _cs() {
         'export-file:Export to encrypted file'
         'import-file:Import from encrypted file'
         'migrate:Migrate plaintext secrets'
+        'migrate-backend:Migrate secrets to another backend'
         'backend:Show storage backend'
+        'age:Manage age public-key encryption for sync'
     )
 
     # Checkpoint subcommands with descriptions

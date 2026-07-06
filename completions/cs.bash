@@ -16,7 +16,7 @@ _cs_completions() {
     local global_flags="-list -ls -adopt -remove -rm -whoami -who -secrets -checkpoint -queue -search -lint -statusline -detect-theme -doctor -diag -update -uninstall -help -h -version -v"
 
     # Secrets subcommands
-    local secrets_cmds="set store get list ls delete rm purge export export-file import-file migrate backend"
+    local secrets_cmds="set store get list ls delete rm purge export export-file import-file migrate migrate-backend backend age"
 
     # Checkpoint subcommands
     local checkpoint_cmds="list show"
