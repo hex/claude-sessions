@@ -1068,8 +1068,10 @@ EOF
     fi
 
     # Drop the legacy single-narrative index pointer if a migration left it stale.
+    # Temp+mv instead of sed -i: the BSD `sed -i ''` form errors on GNU sed and
+    # would abort session resume on Linux under set -e.
     if [ -f "$index" ] && grep -q '(narrative\.md)' "$index" 2>/dev/null; then
-        sed -i '' '/(narrative\.md)/d' "$index"
+        sed '/(narrative\.md)/d' "$index" > "$index.tmp" && mv "$index.tmp" "$index"
     fi
 
     if [ ! -f "$index" ] || ! grep -q "(narrative\.$actor\.md)" "$index" 2>/dev/null; then
