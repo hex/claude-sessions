@@ -73,10 +73,22 @@ SESSION_DIR="${CLAUDE_SESSION_DIR:-}"
 VERB_RE='\b(implement|add|fix|refactor|debug|edit|modify|rename|remove|delete|write|build|create|update|change|extract|inline|split|merge|migrate|port|wire|hook up|optimize)\b'
 EXT_RE='\.(ts|tsx|js|jsx|py|sh|bash|md|json|yaml|yml|toml|rs|go|swift|java|c|cpp|h|hpp)\b'
 
-# One rg spawn: verbs match case-insensitively via the inline (?i:) group,
-# extensions stay case-sensitive (.TS is not a TypeScript file).
-if ! printf '%s' "$PROMPT" | rg -q "(?i:$VERB_RE)|$EXT_RE" 2>/dev/null; then
-    exit 0   # negative classification: silent pass-through
+# Prefer ripgrep, but fall back to grep -E so scope grounding still works on a
+# stock macOS/BSD box without ripgrep installed (rather than silently classifying
+# every prompt negative). Both accept the -q/-v/-i flags used below; the
+# classifier's inline (?i:) group becomes two grep passes in the fallback.
+if command -v rg >/dev/null 2>&1; then
+    _scan() { rg "$@"; }
+    # Verbs match case-insensitively via (?i:); extensions stay case-sensitive.
+    if ! printf '%s' "$PROMPT" | rg -q "(?i:$VERB_RE)|$EXT_RE" 2>/dev/null; then
+        exit 0   # negative classification: silent pass-through
+    fi
+else
+    _scan() { grep -E "$@"; }
+    if ! { printf '%s' "$PROMPT" | grep -qiE "$VERB_RE" 2>/dev/null \
+        || printf '%s' "$PROMPT" | grep -qE "$EXT_RE" 2>/dev/null; }; then
+        exit 0   # negative classification: silent pass-through
+    fi
 fi
 
 # No cache: a grounding hook must reflect the CURRENT tree. A prompt-only cache key served
@@ -97,20 +109,20 @@ STOP_RE='^(the|this|that|with|from|into|when|then|than|will|just|some|like|need|
 TOKENS=$(printf '%s' "$PROMPT" \
     | tr -cs '[:alnum:]_/.-' '\n' \
     | sed -E 's#^[./_-]+##; s#[./_-]+$##' \
-    | rg -v '^.{0,1}$' 2>/dev/null \
-    | rg '[a-zA-Z]' 2>/dev/null \
+    | _scan -v '^.{0,1}$' 2>/dev/null \
+    | _scan '[a-zA-Z]' 2>/dev/null \
     | sort -u)
 
 # Hybrid matching. Path-like tokens (containing / or .) are explicit paths/filenames and match
 # as ordered SUBSTRINGS — this keeps "src/api.ts" from also matching "api/src/x.ts". Bare words
 # match by path-COMPONENT equality, so "api" grounds api/handler.ts and apiHandler.ts but "me"
 # does NOT ground README.md. Bare words are first split on camelCase + _ - into parts, refiltered.
-PATH_TOKENS=$(printf '%s' "$TOKENS" | rg '[/.]' 2>/dev/null || true)
-WORD_PARTS=$(printf '%s' "$TOKENS" | rg -v '[/.]' 2>/dev/null \
+PATH_TOKENS=$(printf '%s' "$TOKENS" | _scan '[/.]' 2>/dev/null || true)
+WORD_PARTS=$(printf '%s' "$TOKENS" | _scan -v '[/.]' 2>/dev/null \
     | sed -E 's/([a-z0-9])([A-Z])/\1 \2/g' \
     | tr '_-' '  ' | tr '[:upper:]' '[:lower:]' | tr ' ' '\n' \
-    | rg -v '^.{0,1}$' 2>/dev/null | rg '[a-z]' 2>/dev/null \
-    | rg -vi "$STOP_RE" 2>/dev/null | sort -u || true)
+    | _scan -v '^.{0,1}$' 2>/dev/null | _scan '[a-z]' 2>/dev/null \
+    | _scan -vi "$STOP_RE" 2>/dev/null | sort -u || true)
 
 # Build/vendor/meta dirs that must never be injected. The \.cs/ entry is load-bearing:
 # without it /scope would surface the session's own metadata (memory, narrative, ...).
@@ -129,7 +141,7 @@ if [ -n "$PATH_TOKENS" ] || [ -n "$WORD_PARTS" ]; then
     # splitcamel() is a hand-rolled char loop ON PURPOSE: BSD awk (macOS) has no gensub /
     # backreferences, so the GNU `gsub(/.../, "\\1 \\2")` trick is non-portable. Do not simplify.
     RELEVANT_FILES=$(git -C "$SESSION_DIR" ls-files 2>/dev/null \
-        | rg -v "$EXCLUDE_RE" 2>/dev/null \
+        | _scan -v "$EXCLUDE_RE" 2>/dev/null \
         | awk -v ptoks="${PATH_TOKENS//$'\n'/ }" \
               -v wtoks="${WORD_PARTS//$'\n'/ }" '
             function splitcamel(s,   out, i, c, p, n) {

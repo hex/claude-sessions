@@ -155,6 +155,20 @@ test_auto_approve_ignores_non_write_tools() {
     fi
 }
 
+# A ../ traversal spelling that resolves outside .cs/ must NOT be auto-approved.
+test_auto_approve_rejects_traversal() {
+    local input
+    input=$(jq -n --arg path "$CLAUDE_SESSION_META_DIR/../../../etc/evil.conf" \
+        '{tool_name: "Write", tool_input: {file_path: $path}}')
+
+    local output
+    output=$(echo "$input" | bash "$HOOKS_DIR/session-auto-approve.sh")
+    if [[ -n "$output" ]]; then
+        echo "  FAIL: traversal path must fall through to the prompt, got: $output"
+        return 1
+    fi
+}
+
 test_auto_approve_skips_outside_session() {
     unset CLAUDE_SESSION_NAME
     local input='{"tool_name":"Write","tool_input":{"file_path":"/tmp/anything.md"}}'
@@ -950,6 +964,7 @@ run_test test_auto_approve_allows_cs_metadata_write
 run_test test_auto_approve_allows_cs_edit
 run_test test_auto_approve_ignores_non_cs_path
 run_test test_auto_approve_ignores_non_write_tools
+run_test test_auto_approve_rejects_traversal
 run_test test_auto_approve_skips_outside_session
 
 # Subagent context
