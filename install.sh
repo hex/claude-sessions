@@ -69,7 +69,10 @@ if [ -f "$HOME/.zshrc" ]; then
 fi
 CLAUDE_SETTINGS="${HOME}/.claude/settings.json"
 SESSIONS_DIR="${HOME}/.claude-sessions"
-REPO_URL="https://raw.githubusercontent.com/hex/claude-sessions/main"
+# Payload ref: `cs -update` pins this to the release tag (v<version>) so the
+# downloaded scripts/hooks match the verified installer; a fresh curl|bash
+# install defaults to main.
+REPO_URL="https://raw.githubusercontent.com/hex/claude-sessions/${CS_INSTALL_REF:-main}"
 RELEASES_URL="https://github.com/hex/claude-sessions/releases/download"
 CS_URL="${REPO_URL}/bin/cs"
 CS_SECRETS_URL="${REPO_URL}/bin/cs-secrets"
@@ -79,7 +82,6 @@ CS_STATUSLINE_URL="${REPO_URL}/bin/cs-statusline"
 # KEEP THIS LIST IN SYNC WITH bin/cs's CS_HOOKS.
 CS_HOOKS=(
     session-start.sh
-    artifact-tracker.sh
     autosave-commits.sh
     narrative-reminder.sh
     prose-lint.sh
@@ -106,6 +108,7 @@ RETIRED_HOOKS=(
     files-scan.sh             # retired: workspace file indexer for .cs/files.md (assumption that the agent can't introspect file sizes has expired)
     files-context.sh          # retired: PreToolUse:Read context injector that surfaced files.md token estimates
     changes-tracker.sh        # retired: PostToolUse change log re-narrating git history into .cs/changes.md; git log/diff/status is authoritative
+    artifact-tracker.sh       # retired: PreToolUse:Write redirect was inert (updatedInput path rewrite is not honored by the harness); tracking removed entirely
 )
 
 # Slash commands cs ships; deployed to COMMANDS_DIR.
@@ -218,9 +221,9 @@ elif [ "$INSTALL_METHOD" = "web" ]; then
     _arch=$(uname -m)
     [ "$_arch" = "x86_64" ] && _arch="amd64"
     _tui_url="${RELEASES_URL}/v${_cs_version}/cs-tui-${_os}-${_arch}"
-    if [ -n "$_cs_version" ] && curl -fsSL --head "$_tui_url" >/dev/null 2>&1; then
+    if [ -n "$_cs_version" ] && curl -fsSL --head "$_tui_url" >/dev/null 2>&1 \
+        && curl -fsSL "$_tui_url" -o "$INSTALL_DIR/cs-tui"; then
         installed "cs-tui" "$INSTALL_DIR/cs-tui"
-        curl -fsSL "$_tui_url" -o "$INSTALL_DIR/cs-tui" || warn "Failed to download cs-tui — skipping"
         chmod +x "$INSTALL_DIR/cs-tui"
 
         # Verify cs-tui checksum (hard gate)
@@ -395,6 +398,13 @@ else
     # Start with existing settings or empty object
     if [ -f "$CLAUDE_SETTINGS" ]; then
         SETTINGS=$(cat "$CLAUDE_SETTINGS")
+        # An empty or invalid-JSON settings.json would make every jq stage below
+        # silently produce nothing; back it up and start fresh instead.
+        if [ -z "${SETTINGS//[[:space:]]/}" ] || ! printf '%s' "$SETTINGS" | jq -e . >/dev/null 2>&1; then
+            cp "$CLAUDE_SETTINGS" "$CLAUDE_SETTINGS.cs-bak" 2>/dev/null || true
+            warn "settings.json was empty or invalid JSON — backed up to settings.json.cs-bak and starting fresh"
+            SETTINGS='{}'
+        fi
     else
         SETTINGS='{}'
     fi
@@ -483,7 +493,6 @@ else
 
     # Registration table: event, file, timeout, [matcher], [async]
     _merge_cs_hook SessionStart       session-start.sh       30
-    _merge_cs_hook PreToolUse         artifact-tracker.sh    10 "Write"
     _merge_cs_hook PostToolUse        autosave-commits.sh    10 "Write|Edit" true
     _merge_cs_hook Stop               narrative-reminder.sh  10
     _merge_cs_hook Stop               prose-lint.sh          15

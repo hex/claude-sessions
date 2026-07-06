@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: PostToolUseFailure hook that logs failed tool calls for debugging
-# ABOUTME: Writes tool name, error, and timestamp to .cs/logs/session.log
+# ABOUTME: Writes tool name, error, and timestamp to .cs/local/session.log
 
 set -euo pipefail
 
@@ -19,7 +19,7 @@ if [ -z "$SESSION_DIR" ] || [ ! -d "$SESSION_DIR" ]; then
     exit 0
 fi
 
-LOG_FILE="$META_DIR/logs/session.log"
+LOG_FILE="$META_DIR/local/session.log"
 if [ ! -d "$(dirname "$LOG_FILE")" ]; then
     exit 0
 fi

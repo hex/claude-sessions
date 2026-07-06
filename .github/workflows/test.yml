@@ -1,0 +1,47 @@
+# ABOUTME: Runs the bash test suites (macOS + Linux) and the Rust TUI tests on push/PR
+# ABOUTME: The release workflow only builds binaries; this is the gate that runs tests
+
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  bash:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install jq (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Run bash test suites
+        run: bash tests/run_all.sh
+
+  build-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Verify bin/cs is in sync with lib/
+        run: |
+          bash build.sh
+          git diff --exit-code bin/cs \
+            || { echo "::error::bin/cs is out of sync with lib/. Run ./build.sh and commit bin/cs."; exit 1; }
+
+  rust:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Run TUI tests
+        run: cargo test --manifest-path tui/Cargo.toml

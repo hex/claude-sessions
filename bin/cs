@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ABOUTME: Claude Code session manager with artifact tracking and git sync
+# ABOUTME: Claude Code session manager with git-synced isolated workspaces
 # ABOUTME: Creates isolated session workspaces with automatic documentation and file organization
 
 set -euo pipefail
@@ -7,10 +7,6 @@ set -euo pipefail
 # Configuration
 VERSION="2026.7.4"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
-# Manifest merge semantics shared by the git merge driver (tracked-.cs
-# repos) and the explicit fuse (ignored-.cs repos): combine both sides,
-# dedup on filename+timestamp, keep chronological order.
-CS_MANIFEST_MERGE_FILTER='.[0] + .[1] | unique_by([.filename, .timestamp]) | sort_by(.timestamp)'
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 
 # Claude Code downgrades its branding (logo, "thinking" animation) and statusline
@@ -41,13 +37,13 @@ RETIRED_HOOKS=(
     files-scan.sh             # retired: workspace file indexer for .cs/files.md (assumption that the agent can't introspect file sizes has expired)
     files-context.sh          # retired: PreToolUse:Read context injector that surfaced files.md token estimates
     changes-tracker.sh        # retired: PostToolUse change log re-narrating git history into .cs/changes.md; git log/diff/status is authoritative
+    artifact-tracker.sh       # retired: PreToolUse:Write redirect was inert (updatedInput path rewrite is not honored by the harness); tracking removed entirely
 )
 
 # Hook scripts cs ships; deployed to ~/.claude/hooks/cs/ and registered in
 # settings.json. KEEP THIS LIST IN SYNC WITH install.sh's CS_HOOKS.
 CS_HOOKS=(
     session-start.sh
-    artifact-tracker.sh
     autosave-commits.sh
     narrative-reminder.sh
     prose-lint.sh
@@ -322,6 +318,7 @@ Commands:
   -doctor, -diag      Run health checks (Keychain, hooks, memory, audit, tokens)
   -lint <file>...     Flag AI-slop prose tells (em-dashes, banned phrases); 0=clean 1=issues 2=error
   -statusline <cmd>   enable|disable the cs status line in Claude Code settings
+  -detect-theme       Show the detected terminal theme (light|dark)
   -list, -ls          List all sessions
   -adopt <name>       Adopt current directory as a cs session
   -whoami             Show the current actor (for shared, multi-person sessions)
@@ -343,6 +340,9 @@ Secrets Commands:
   purge               Delete ALL secrets for session
   export              Export secrets as environment variables
   backend             Show which storage backend is active
+
+  For encrypted-file sync (export-file/import-file), age public-key setup,
+  and legacy migration, run 'cs -secrets' to see the full secrets reference.
 
 Environment:
   CS_SESSIONS_ROOT    Override sessions directory (default: ~/.claude-sessions)
@@ -479,8 +479,9 @@ verify_checksum() {
     elif command -v shasum &>/dev/null; then
         actual=$(shasum -a 256 "$file" | awk '{print $1}')
     else
-        echo "Warning: No sha256sum or shasum found, skipping checksum" >&2
-        return 0
+        # Fail closed: a verification gate that can't verify must not pass.
+        echo "Error: no sha256sum or shasum found — cannot verify download. Install one and retry." >&2
+        return 1
     fi
     [ "$expected" = "$actual" ]
 }
@@ -498,7 +499,8 @@ verify_signature() {
 
 # Fetch latest version from GitHub Releases
 get_remote_version() {
-    curl -fsSL "${RELEASES_BASE}/latest" -o /dev/null -w '%{url_effective}' 2>/dev/null \
+    curl -fsSL --connect-timeout 2 --max-time 4 \
+        "${RELEASES_BASE}/latest" -o /dev/null -w '%{url_effective}' 2>/dev/null \
         | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/^v//'
 }
 
@@ -598,8 +600,11 @@ do_update() {
 
     info "Verified"
 
-    # Run the verified installer
-    bash "$tmpdir/install.sh"
+    # Run the verified installer, pinning the payload (cs, cs-secrets, hooks,
+    # …) to the same immutable release tag rather than letting it fetch from the
+    # mutable main branch. The installer is signature-verified, so it is trusted
+    # to fetch its payload from the tag it was published at.
+    CS_INSTALL_REF="v${remote_version}" bash "$tmpdir/install.sh"
     rm -rf "$tmpdir"
 
     # Clear update cache so notification disappears
@@ -635,6 +640,10 @@ UPDATE_CHECK_INTERVAL=3600  # 1 hour in seconds
 UPDATE_AVAILABLE=""  # Set by check_update_notify if update available
 
 check_update_notify() {
+    # Opt out of the network check + cache write (tests set this so a session
+    # launch never hits GitHub or touches the real ~/.cache/cs).
+    [ -n "${CS_NO_UPDATE_CHECK:-}" ] && return 0
+
     local cache_dir
     cache_dir="$(dirname "$UPDATE_CACHE")"
     mkdir -p "$cache_dir"
@@ -693,6 +702,10 @@ validate_session_name() {
         error "Session name cannot be empty"
     fi
 
+    case "$name" in
+        .|..) error "Session name cannot be '.' or '..'" ;;
+    esac
+
     if ! [[ "$name" =~ ^[a-zA-Z0-9._-]+$ ]]; then
         error "Session name must contain only alphanumeric characters, hyphens, underscores, and dots"
     fi
@@ -725,7 +738,7 @@ cs_split_worktree_name() {
 # is the project's own tracked file.
 bootstrap_worktree_meta() {
     local wt_dir="$1" base_name="$2" task="$3"
-    mkdir -p "$wt_dir/.cs"/{artifacts,logs,local,memory}
+    mkdir -p "$wt_dir/.cs"/{local,memory}
     cat > "$wt_dir/.cs/README.md" << EOF
 ---
 status: active
@@ -741,8 +754,7 @@ Task worktree of session '$base_name' on branch cs/$task.
 
 [Describe this task]
 EOF
-    echo "[]" > "$wt_dir/.cs/artifacts/MANIFEST.json"
-    cat > "$wt_dir/.cs/logs/session.log" << EOF
+    cat > "$wt_dir/.cs/local/session.log" << EOF
 Claude Code Session Log
 Session: $base_name@$task
 Started: $(date '+%Y-%m-%d %H:%M:%S')
@@ -760,11 +772,18 @@ _tree_is_dirty() {
         || ! git -C "$1" diff --cached --quiet 2>/dev/null
 }
 
+# Resolve a symlinked directory to its real path, portably. BSD readlink gained
+# -f only in macOS 12.3; cd+pwd -P follows the link on every platform, and the
+# fallback keeps the original path rather than aborting under set -e.
+_resolve_symlink_dir() {
+    (cd "$1" 2>/dev/null && pwd -P) || printf '%s\n' "$1"
+}
+
 # Resolve a session name to its real directory (adopted sessions are
 # symlinks into the project checkout). Prints the resolved path.
 _resolve_session_dir() {
     local dir="$SESSIONS_ROOT/$1"
-    [ -L "$dir" ] && dir="$(readlink -f "$dir")"
+    [ -L "$dir" ] && dir="$(_resolve_symlink_dir "$dir")"
     printf '%s\n' "$dir"
 }
 
@@ -920,17 +939,24 @@ $wt_untracked"
 # Fuse session records from a worktree .cs into the base .cs (ignored mode:
 # the repo does not track .cs/, so git merge cannot carry these). Applies the
 # same semantics the merge drivers give tracked repos: union append for
-# timeline/log/narratives, jq manifest merge, copy-never-overwrite for memory
-# topic files and artifacts, base-wins for MEMORY.md.
+# timeline/log/narratives, copy-never-overwrite for memory topic files,
+# base-wins for MEMORY.md.
 fuse_session_records() {
     local src="$1" dst="$2"
     local f base
 
     [ -f "$src/timeline.jsonl" ] && cat "$src/timeline.jsonl" >> "$dst/timeline.jsonl"
-    if [ -f "$src/logs/session.log" ]; then
-        mkdir -p "$dst/logs"
-        { echo ""; cat "$src/logs/session.log"; } >> "$dst/logs/session.log"
-    fi
+    # Worktrees never run migrate_session, so a task branch created before the
+    # log moved to .cs/local/ still keeps its audit trail at .cs/logs/; fuse
+    # whichever the worktree has into the base's machine-local log.
+    local srclog
+    for srclog in "$src/local/session.log" "$src/logs/session.log"; do
+        if [ -f "$srclog" ]; then
+            mkdir -p "$dst/local"
+            { echo ""; cat "$srclog"; } >> "$dst/local/session.log"
+            break
+        fi
+    done
 
     mkdir -p "$dst/memory"
     for f in "$src"/memory/narrative.*.md; do
@@ -961,25 +987,6 @@ fuse_session_records() {
             cp "$f" "$dst/memory/$base"
         fi
     done
-
-    mkdir -p "$dst/artifacts"
-    for f in "$src"/artifacts/*; do
-        [ -f "$f" ] || continue
-        base=$(basename "$f")
-        [ "$base" = "MANIFEST.json" ] && continue
-        if [ -f "$dst/artifacts/$base" ]; then
-            warn "artifacts/$base already exists in the base; skipped"
-        else
-            cp "$f" "$dst/artifacts/$base"
-        fi
-    done
-    if [ -f "$src/artifacts/MANIFEST.json" ] && [ -f "$dst/artifacts/MANIFEST.json" ]; then
-        jq -s "$CS_MANIFEST_MERGE_FILTER" \
-            "$dst/artifacts/MANIFEST.json" "$src/artifacts/MANIFEST.json" \
-            > "$dst/artifacts/MANIFEST.json.csmerge" 2>/dev/null \
-            && mv "$dst/artifacts/MANIFEST.json.csmerge" "$dst/artifacts/MANIFEST.json" \
-            || rm -f "$dst/artifacts/MANIFEST.json.csmerge"
-    fi
 
     if [ -f "$src/memory/MEMORY.md" ]; then
         info "MEMORY.md index lines from the task were not merged (base copy kept)"
@@ -1056,8 +1063,10 @@ EOF
     fi
 
     # Drop the legacy single-narrative index pointer if a migration left it stale.
+    # Temp+mv instead of sed -i: the BSD `sed -i ''` form errors on GNU sed and
+    # would abort session resume on Linux under set -e.
     if [ -f "$index" ] && grep -q '(narrative\.md)' "$index" 2>/dev/null; then
-        sed -i '' '/(narrative\.md)/d' "$index"
+        sed '/(narrative\.md)/d' "$index" > "$index.tmp" && mv "$index.tmp" "$index"
     fi
 
     if [ ! -f "$index" ] || ! grep -q "(narrative\.$actor\.md)" "$index" 2>/dev/null; then
@@ -1127,10 +1136,12 @@ Claude's built-in memory writes durable facts to `.cs/memory/` (cs redirects via
 EOF
 }
 
-# Write the session CLAUDE.md template to the given directory
-write_session_claude_md() {
-    local session_dir="$1"
-    cat > "$session_dir/CLAUDE.md" << 'EOF'
+# Emit the session CLAUDE.md template to stdout. The leading sentinel lets both
+# the create path (overwrite) and the migrate path (guarded append) detect
+# whether the protocol is already present.
+_emit_session_claude_md() {
+    cat << 'EOF'
+<!-- cs:session-protocol -->
 # Session Documentation Protocol
 
 This is a Claude Code session managed by the cs tool. Session metadata lives in the .cs/ directory. The session root is your workspace for project files.
@@ -1142,21 +1153,11 @@ When resuming this session, read the following files to restore context:
 1. **.cs/summary.md** - If exists, read first for previous session overview
 2. **.cs/README.md** - Session objective, environment, and outcome
 3. **.cs/memory/narrative.*.md** - Per-actor lab notebooks (yours + teammates'): findings, in-progress state, observations
-4. **.cs/artifacts/MANIFEST.json** - List of tracked artifacts
 
 Note: narratives are per-actor (narrative.<actor>.md) so co-developers never
 conflict. Append only to your own (run `cs -whoami` for your actor); read all
 narrative.*.md on resume to restore your working narrative and see teammates'
 in-progress findings.
-
-## Artifact Auto-Tracking
-
-Scripts and configuration files you create are **automatically saved to .cs/artifacts/**:
-
-- Scripts: .sh, .bash, .zsh, .py, .js, .ts, .rb, .pl
-- Configs: .conf, .config, .json, .yaml, .yml, .toml, .ini, .env
-
-When you use the Write tool for these file types, they are automatically redirected to the .cs/artifacts/ directory and tracked in MANIFEST.json.
 
 ## Documentation Discipline
 
@@ -1174,16 +1175,10 @@ When the session is complete, use the `/wrap` command to distill durable memory 
 
 ## Secure Secrets Handling
 
-Sensitive data is automatically detected and stored securely (macOS Keychain or encrypted file):
-
-**Auto-detected patterns:**
-- Files: .env, filenames containing key, secret, password, token, credential, auth
-- Content: Variables like API_KEY, SECRET_TOKEN, PASSWORD, etc.
-
-**What happens:**
-1. Sensitive values are extracted and stored securely
-2. The artifact file contains redacted placeholders
-3. MANIFEST.json lists which secrets exist (not the values)
+Store sensitive data (API keys, tokens, passwords) securely (macOS Keychain or
+encrypted file) instead of writing it into project files. The `store-secret`
+skill and `cs -secrets set` read the value from stdin so it never lands in a
+file or the command log.
 
 **Retrieving secrets:**
 ```bash
@@ -1193,14 +1188,16 @@ cs -secrets get API_KEY            # Get a specific secret value
 cs -secrets export                 # Export as environment variables
 ```
 
-**If you detect sensitive data** that wasn't auto-captured (unusual patterns, embedded credentials, etc.), use cs -secrets directly:
+**If you detect sensitive data** in the workspace (embedded credentials, a
+committed token, etc.), store it and replace it with a reference. Pass the value
+on stdin so it never hits argv or the command log:
 ```bash
-cs -secrets set <name> <value>     # Store manually
+printf '%s' "the-secret-value" | cs -secrets set <name>
 ```
 
 EOF
-    _emit_memory_note_block >> "$session_dir/CLAUDE.md"
-    cat >> "$session_dir/CLAUDE.md" << 'EOF'
+    _emit_memory_note_block
+    cat << 'EOF'
 
 <!-- cs:wrap-cues -->
 ## Session wrap-up cues
@@ -1228,10 +1225,15 @@ To opt out, delete the prose above but keep the `cs:wrap-cues` HTML comment as a
 ## Best Practices
 
 - Document findings in .cs/memory/narrative.md as you go - don't wait until the end
-- Use .cs/artifacts/ for any reusable scripts or configs
 - Run `/wrap` at the end to distill memory and create a cohesive record
-- Never write raw API keys or passwords to artifact files - use cs -secrets
+- Never write raw API keys or passwords to project files - use cs -secrets
 EOF
+}
+
+# Write the session CLAUDE.md template to the given directory (create path).
+write_session_claude_md() {
+    local session_dir="$1"
+    _emit_session_claude_md > "$session_dir/CLAUDE.md"
 }
 
 # Generate a v4 UUID, lowercased. uuidgen on BSD (macOS) returns uppercase;
@@ -1420,31 +1422,19 @@ cmd_who() {
 # and the local copy re-accumulates entries through normal use). The
 # append-only log, timeline, and per-actor narratives get merge=union (git's
 # built-in driver, no per-clone config) so divergent appends keep both sides.
-# The artifact manifest is a JSON array, which union would corrupt; it gets a
-# jq-based driver (configured per clone, like merge.ours) that combines both
-# sides' entries and dedups on filename+timestamp.
 setup_merge_attributes() {
     local dir="$1"
     git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 || return 0
     git -C "$dir" config merge.ours.driver true 2>/dev/null || true
-    git -C "$dir" config merge.manifest.driver \
-        "jq -s \"$CS_MANIFEST_MERGE_FILTER\" %A %B > %A.csmerge && mv %A.csmerge %A" \
-        2>/dev/null || true
     local ga="$dir/.gitattributes"
     if ! grep -q 'MEMORY\.md merge=ours' "$ga" 2>/dev/null; then
         printf '.cs/memory/MEMORY.md merge=ours\n' >> "$ga"
-    fi
-    if ! grep -q 'session\.log merge=union' "$ga" 2>/dev/null; then
-        printf '.cs/logs/session.log merge=union\n' >> "$ga"
     fi
     if ! grep -q 'timeline\.jsonl merge=union' "$ga" 2>/dev/null; then
         printf '.cs/timeline.jsonl merge=union\n' >> "$ga"
     fi
     if ! grep -q 'narrative\.\*\.md merge=union' "$ga" 2>/dev/null; then
         printf '.cs/memory/narrative.*.md merge=union\n' >> "$ga"
-    fi
-    if ! grep -q 'MANIFEST\.json merge=manifest' "$ga" 2>/dev/null; then
-        printf '.cs/artifacts/MANIFEST.json merge=manifest\n' >> "$ga"
     fi
 }
 
@@ -1464,7 +1454,7 @@ create_session_structure() {
     claude_session_id=$(_alloc_uuid)
     claude_session_color=$(_alloc_random_color)
 
-    mkdir -p "$session_dir/.cs"/{artifacts,logs,local}
+    mkdir -p "$session_dir/.cs/local"
 
     # Machine-local values go to .cs/local/state, never the git-synced README.
     _set_local_state "$session_dir/.cs/local/state" claude_session_id "$claude_session_id"
@@ -1499,11 +1489,8 @@ EOF
 
     write_session_claude_md "$session_dir"
 
-    # Initialize empty MANIFEST.json
-    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
-
-    # Initialize session log
-    cat > "$session_dir/.cs/logs/session.log" << EOF
+    # Initialize session log (machine-local; never git-synced)
+    cat > "$session_dir/.cs/local/session.log" << EOF
 Claude Code Session Log
 Session: $(basename "$session_dir")
 Started: $(date '+%Y-%m-%d %H:%M:%S')
@@ -1565,7 +1552,7 @@ migrate_if_exists() {
 # Check if session needs migration from flat layout to .cs/ directory
 needs_cs_migration() {
     local session_dir="$1"
-    [[ ! -d "$session_dir/.cs" ]] && { [[ -d "$session_dir/artifacts" ]] || [[ -d "$session_dir/logs" ]] || [[ -f "$session_dir/discoveries.md" ]]; }
+    [[ ! -d "$session_dir/.cs" ]] && { [[ -d "$session_dir/logs" ]] || [[ -f "$session_dir/discoveries.md" ]]; }
 }
 
 # Migrate existing session to latest format
@@ -1588,7 +1575,6 @@ migrate_session() {
         mkdir -p "$session_dir/.cs"
 
         # Move directories
-        migrate_if_exists "$session_dir/artifacts" "$session_dir/.cs/artifacts"
         migrate_if_exists "$session_dir/logs" "$session_dir/.cs/logs"
         migrate_if_exists "$session_dir/archives" "$session_dir/.cs/archives"
         migrate_if_exists "$session_dir/age-recipients" "$session_dir/.cs/age-recipients"
@@ -1621,11 +1607,32 @@ migrate_session() {
     fi
 
     # Phase 2: Ensure .cs/ subdirectories exist (handles partial migrations and edge cases)
-    mkdir -p "$session_dir/.cs"/{artifacts,logs,local}
+    mkdir -p "$session_dir/.cs/local"
 
-    # Phase 3: Ensure required files exist
-    if [ ! -f "$session_dir/.cs/artifacts/MANIFEST.json" ]; then
-        echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
+    # Phase 2b: Relocate the session log to machine-local state. The audit trail
+    # (bash commands, lifecycle events, autosave notes) is per-checkout, not
+    # shared — keeping it git-synced with merge=union interleaved every machine's
+    # commands into the one shared repo. Move it under .cs/local/ (gitignored) so
+    # it stays with the machine that produced it; the shared structured record
+    # lives in timeline.jsonl. The tracked deletion is left for the next normal
+    # commit, as with the README-frontmatter move below. One-time, idempotent:
+    # once the old file is gone the block is a no-op. During the upgrade window a
+    # peer still on the old cs may keep appending to the tracked log, so a
+    # one-time modify/delete conflict on this low-stakes file is possible — take
+    # either side.
+    if [ -f "$session_dir/.cs/logs/session.log" ]; then
+        cat "$session_dir/.cs/logs/session.log" >> "$session_dir/.cs/local/session.log"
+        rm -f "$session_dir/.cs/logs/session.log"
+        rmdir "$session_dir/.cs/logs" 2>/dev/null || true
+        # Drop the obsolete union rule for the relocated log. grep -v exits 1 when
+        # that was the only line, so guard on presence and tolerate the exit code
+        # rather than leaving the rule (and a stray .tmp) behind.
+        local ga="$session_dir/.gitattributes"
+        if [ -f "$ga" ] && grep -q 'logs/session\.log merge=union' "$ga"; then
+            grep -v 'logs/session\.log merge=union' "$ga" > "$ga.tmp" 2>/dev/null || true
+            mv "$ga.tmp" "$ga" 2>/dev/null || rm -f "$ga.tmp"
+        fi
+        warn "Moved .cs/logs/session.log to machine-local .cs/local/session.log"
     fi
 
     # Remove inert sync/remote metadata left by older versions (the sync
@@ -1642,11 +1649,17 @@ migrate_session() {
     migrate_discoveries_to_narrative "$session_dir"
     ensure_narrative_file "$session_dir"
 
-    # Phase 5: Update CLAUDE.md to reference .cs/ paths if needed
+    # Phase 5: ensure the cs session protocol is present in CLAUDE.md. Append it
+    # (never overwrite) so a user-authored or project CLAUDE.md is preserved; the
+    # sentinel keeps it idempotent, and a file that already references .cs/ is a
+    # prior cs template that needs nothing.
     local claude_md="$session_dir/CLAUDE.md"
-    if [ -f "$claude_md" ] && ! grep -q '\.cs/' "$claude_md"; then
-        write_session_claude_md "$session_dir"
-        warn "Updated CLAUDE.md to reference .cs/ paths"
+    if [ -f "$claude_md" ] \
+        && ! grep -q 'cs:session-protocol' "$claude_md" \
+        && ! grep -q '\.cs/' "$claude_md"; then
+        printf '\n' >> "$claude_md"
+        _emit_session_claude_md >> "$claude_md"
+        warn "Appended the cs session protocol to your existing CLAUDE.md"
     fi
 
     # Phase 7: prune retired command-tracker artifacts.
@@ -1949,12 +1962,13 @@ list_checkpoints() {
     fi
     echo "Checkpoints for session: $CLAUDE_SESSION_NAME"
     echo ""
-    for f in $(ls -t "$checkpoints_dir"/*.md 2>/dev/null); do
-        local name label
+    local f name label
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
         name=$(basename "$f" .md)
         label=$(grep -m1 '^# Checkpoint:' "$f" 2>/dev/null | sed 's/^# Checkpoint: //' || echo "-")
         printf "  %s\n    %s\n" "$name" "$label"
-    done
+    done < <(ls -t "$checkpoints_dir"/*.md 2>/dev/null)
 }
 
 # Print a specific checkpoint file
@@ -2213,7 +2227,7 @@ _doctor_check_keychain() {
 
 _doctor_check_hooks_registered() {
     local hooks_dir="$HOOKS_DEPLOY_DIR"
-    local settings="$HOME/.claude/settings.json"
+    local settings="${CS_CLAUDE_DIR:-$HOME/.claude}/settings.json"
     if [ ! -f "$settings" ]; then
         _doctor_warn "Hooks: $settings not found (cs may not be installed via install.sh)"
         return
@@ -2605,7 +2619,7 @@ search_sessions() {
             local filepath="$real_dir/$relpath"
             [ -f "$filepath" ] || continue
             local matches
-            matches=$(grep -in "$query" "$filepath" 2>/dev/null) || continue
+            matches=$(grep -in -- "$query" "$filepath" 2>/dev/null) || continue
             while IFS= read -r line; do
                 echo -e "${GOLD}${session_name}${NC}: ${DIM}${relpath}${NC}: ${line}"
                 found=$((found + 1))
@@ -2617,7 +2631,7 @@ search_sessions() {
             [ -f "$filepath" ] || continue
             local relpath="${filepath#"$real_dir"/}"
             local matches
-            matches=$(grep -in "$query" "$filepath" 2>/dev/null) || continue
+            matches=$(grep -in -- "$query" "$filepath" 2>/dev/null) || continue
             while IFS= read -r line; do
                 echo -e "${GOLD}${session_name}${NC}: ${DIM}${relpath}${NC}: ${line}"
                 found=$((found + 1))
@@ -2672,8 +2686,9 @@ list_sessions() {
         local created="-"
         local modified="-"
 
-        local log_file="$session_dir/.cs/logs/session.log"
-        # Fall back to old location for unmigrated sessions
+        local log_file="$session_dir/.cs/local/session.log"
+        # Fall back to older locations for unmigrated sessions
+        [ ! -f "$log_file" ] && log_file="$session_dir/.cs/logs/session.log"
         [ ! -f "$log_file" ] && log_file="$session_dir/logs/session.log"
         if [ -f "$log_file" ]; then
             # Parse created timestamp using bash builtins (avoids forking head|grep|cut)
@@ -2738,6 +2753,13 @@ remove_session() {
         error "Usage: cs -remove <session-name>"
     fi
 
+    # Reject path traversal before any filesystem action: '.'/'..' and any
+    # name with a slash would resolve rm -rf outside the sessions root. A
+    # worktree name (<base>@<task>) has an @ but never a slash, so it passes.
+    case "$session_name" in
+        .|..|*/*) error "Invalid session name: $session_name" ;;
+    esac
+
     local session_dir="$SESSIONS_ROOT/$session_name"
 
     if [ ! -d "$session_dir" ] && [ ! -L "$session_dir" ]; then
@@ -2776,7 +2798,7 @@ remove_session() {
     # Confirm deletion
     if [ -L "$session_dir" ]; then
         local target
-        target="$(readlink -f "$session_dir")"
+        target="$(_resolve_symlink_dir "$session_dir")"
         read -r -p $'\033[0;31mRemove adopted session '"'$session_name'"$'? (removes symlink only, project at '"$target"$' is preserved) [y/N] \033[0m' confirm
     else
         read -r -p $'\033[0;31mRemove session '"'$session_name'"$'? [y/N] \033[0m' confirm
@@ -3056,7 +3078,6 @@ launch_claude_code() {
     export CLAUDE_SESSION_NAME="$session_name"
     export CLAUDE_SESSION_DIR="$session_dir"
     export CLAUDE_SESSION_META_DIR="$session_dir/.cs"
-    export CLAUDE_ARTIFACT_DIR="$session_dir/.cs/artifacts"
     # Worktree sessions coordinate through the base session's task list and
     # keychain namespace; cs_base is only set in worktree local state.
     local cs_base
@@ -3238,7 +3259,7 @@ create_session_gitignore() {
 # Per-actor local state (never shared)
 .cs/local/
 
-# Archives (large, regenerated from artifacts)
+# Session archives (large binaries)
 .cs/archives/
 
 # Session cooldown markers
@@ -3733,7 +3754,6 @@ main() {
                 export CS_SECRETS_SESSION="${wt_base:-$session_name}"
                 export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
                 export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
-                export CLAUDE_ARTIFACT_DIR="$SESSIONS_ROOT/$session_name/.cs/artifacts"
                 run_secrets "$@"
                 return 0
                 ;;
@@ -3771,7 +3791,7 @@ main() {
     # Define paths (resolve symlinks for adopted sessions so Claude Code
     # sees the original project path, preserving conversation continuity)
     if [ -L "$session_dir" ]; then
-        session_dir="$(readlink -f "$session_dir")"
+        session_dir="$(_resolve_symlink_dir "$session_dir")"
     fi
     local is_new="false"
 

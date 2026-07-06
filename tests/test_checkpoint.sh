@@ -14,8 +14,7 @@ setup() {
 
     # Create a session
     local session_dir="$CS_SESSIONS_ROOT/test-session"
-    mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
-    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
+    mkdir -p "$session_dir/.cs"/{local,memory}
     cat > "$session_dir/.cs/README.md" << 'EOF'
 ---
 status: active
@@ -43,7 +42,6 @@ EOF
     export CLAUDE_SESSION_NAME="test-session"
     export CLAUDE_SESSION_DIR="$session_dir"
     export CLAUDE_SESSION_META_DIR="$session_dir/.cs"
-    export CLAUDE_ARTIFACT_DIR="$session_dir/.cs/artifacts"
 }
 
 teardown() {
@@ -51,7 +49,7 @@ teardown() {
         rm -rf "$TEST_TMPDIR"
     fi
     unset CS_SESSIONS_ROOT CLAUDE_CODE_BIN 2>/dev/null || true
-    unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR CLAUDE_ARTIFACT_DIR 2>/dev/null || true
+    unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR 2>/dev/null || true
 }
 
 # ============================================================================

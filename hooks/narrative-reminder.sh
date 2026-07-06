@@ -166,11 +166,6 @@ echo "$CURRENT_TIME" > "$COOLDOWN_FILE"
 
 REASON="Narrative check: (1) Review existing entries in $NARRATIVE_FILE — if any have been disproven or superseded by your recent work, correct or remove them now. (2) If you have new findings to add, append them as regular content. If nothing to change, just acknowledge and continue."
 
-cat << EOF
-{
-  "decision": "block",
-  "reason": "$REASON"
-}
-EOF
+jq -nc --arg r "$REASON" '{decision: "block", reason: $r}'
 
 exit 0

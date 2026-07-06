@@ -13,16 +13,15 @@ setup() {
     export CLAUDE_SESSION_NAME="test-session"
     export CLAUDE_SESSION_DIR="$TEST_TMPDIR/session"
     export CLAUDE_SESSION_META_DIR="$CLAUDE_SESSION_DIR/.cs"
-    export CLAUDE_ARTIFACT_DIR="$CLAUDE_SESSION_DIR/.cs/artifacts"
-    mkdir -p "$CLAUDE_SESSION_META_DIR"/{logs,artifacts,memory}
-    touch "$CLAUDE_SESSION_META_DIR/logs/session.log"
+    mkdir -p "$CLAUDE_SESSION_META_DIR"/{local,memory}
+    touch "$CLAUDE_SESSION_META_DIR/local/session.log"
 }
 
 teardown() {
     if [[ -n "$TEST_TMPDIR" ]] && [[ -d "$TEST_TMPDIR" ]]; then
         rm -rf "$TEST_TMPDIR"
     fi
-    unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR CLAUDE_ARTIFACT_DIR 2>/dev/null || true
+    unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR 2>/dev/null || true
 }
 
 # ============================================================================
@@ -155,6 +154,20 @@ test_auto_approve_ignores_non_write_tools() {
     fi
 }
 
+# A ../ traversal spelling that resolves outside .cs/ must NOT be auto-approved.
+test_auto_approve_rejects_traversal() {
+    local input
+    input=$(jq -n --arg path "$CLAUDE_SESSION_META_DIR/../../../etc/evil.conf" \
+        '{tool_name: "Write", tool_input: {file_path: $path}}')
+
+    local output
+    output=$(echo "$input" | bash "$HOOKS_DIR/session-auto-approve.sh")
+    if [[ -n "$output" ]]; then
+        echo "  FAIL: traversal path must fall through to the prompt, got: $output"
+        return 1
+    fi
+}
+
 test_auto_approve_skips_outside_session() {
     unset CLAUDE_SESSION_NAME
     local input='{"tool_name":"Write","tool_input":{"file_path":"/tmp/anything.md"}}'
@@ -213,9 +226,9 @@ test_failure_logged_to_session_log() {
     local input='{"tool_name":"Bash","error":"Command failed with exit code 1"}'
     echo "$input" | bash "$HOOKS_DIR/tool-failure-logger.sh"
 
-    assert_file_contains "$CLAUDE_SESSION_META_DIR/logs/session.log" "Tool failure: Bash" \
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/local/session.log" "Tool failure: Bash" \
         "Should log tool name" || return 1
-    assert_file_contains "$CLAUDE_SESSION_META_DIR/logs/session.log" "Command failed" \
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/local/session.log" "Command failed" \
         "Should log error message" || return 1
 }
 
@@ -223,7 +236,7 @@ test_failure_log_has_timestamp() {
     local input='{"tool_name":"Write","error":"Permission denied"}'
     echo "$input" | bash "$HOOKS_DIR/tool-failure-logger.sh"
 
-    grep -qE '^\[20[0-9]{2}-[0-9]{2}-[0-9]{2}' "$CLAUDE_SESSION_META_DIR/logs/session.log" || {
+    grep -qE '^\[20[0-9]{2}-[0-9]{2}-[0-9]{2}' "$CLAUDE_SESSION_META_DIR/local/session.log" || {
         echo "  FAIL: Log should have timestamp"
         return 1
     }
@@ -237,7 +250,7 @@ test_failure_truncates_long_errors() {
     echo "$input" | bash "$HOOKS_DIR/tool-failure-logger.sh"
 
     local log_line
-    log_line=$(grep "Tool failure" "$CLAUDE_SESSION_META_DIR/logs/session.log" | head -1)
+    log_line=$(grep "Tool failure" "$CLAUDE_SESSION_META_DIR/local/session.log" | head -1)
     local line_len=${#log_line}
     if [[ "$line_len" -gt 280 ]]; then
         echo "  FAIL: Log line should be truncated ($line_len chars)"
@@ -255,7 +268,7 @@ test_failure_handles_huge_multiline_error() {
     input=$(jq -n --arg err "$huge_error" '{tool_name: "Bash", error: $err}')
     echo "$input" | bash "$HOOKS_DIR/tool-failure-logger.sh"
 
-    assert_file_contains "$CLAUDE_SESSION_META_DIR/logs/session.log" "Tool failure: Bash" \
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/local/session.log" "Tool failure: Bash" \
         "Should log huge multi-line error without crashing" || return 1
 }
 
@@ -264,9 +277,9 @@ test_failure_skips_outside_session() {
     local input='{"tool_name":"Bash","error":"fail"}'
     echo "$input" | bash "$HOOKS_DIR/tool-failure-logger.sh"
     # Should exit cleanly without writing anything
-    if [[ -s "$CLAUDE_SESSION_META_DIR/logs/session.log" ]]; then
+    if [[ -s "$CLAUDE_SESSION_META_DIR/local/session.log" ]]; then
         local content
-        content=$(cat "$CLAUDE_SESSION_META_DIR/logs/session.log")
+        content=$(cat "$CLAUDE_SESSION_META_DIR/local/session.log")
         if [[ -n "$content" ]]; then
             echo "  FAIL: Should not log outside session"
             return 1
@@ -277,7 +290,7 @@ test_failure_skips_outside_session() {
 test_failure_handles_missing_error() {
     local input='{"tool_name":"Read"}'
     echo "$input" | bash "$HOOKS_DIR/tool-failure-logger.sh"
-    assert_file_contains "$CLAUDE_SESSION_META_DIR/logs/session.log" "Tool failure: Read" \
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/local/session.log" "Tool failure: Read" \
         "Should handle missing error field" || return 1
 }
 
@@ -297,10 +310,9 @@ session_start_setup() {
     # Current session lives inside SESSIONS_ROOT
     export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/current-session"
     export CLAUDE_SESSION_META_DIR="$CLAUDE_SESSION_DIR/.cs"
-    export CLAUDE_ARTIFACT_DIR="$CLAUDE_SESSION_DIR/.cs/artifacts"
     export CLAUDE_SESSION_NAME="current-session"
-    mkdir -p "$CLAUDE_SESSION_META_DIR"/{logs,artifacts,memory}
-    touch "$CLAUDE_SESSION_META_DIR/logs/session.log"
+    mkdir -p "$CLAUDE_SESSION_META_DIR"/{local,memory}
+    touch "$CLAUDE_SESSION_META_DIR/local/session.log"
 
     # Initialize git so the dynamic context block runs
     (cd "$CLAUDE_SESSION_DIR" && git init -q -b main && git config user.email t@t && git config user.name T && echo init > README.md && git add -A && git commit -q -m init)
@@ -331,14 +343,14 @@ create_sibling_session() {
     local name="$1"
     local objective="$2"
     local dir="$CS_SESSIONS_ROOT/$name"
-    mkdir -p "$dir/.cs"/{logs,artifacts}
+    mkdir -p "$dir/.cs/local"
     cat > "$dir/.cs/README.md" << EOF
 ## Objective
 
 $objective
 EOF
     # Touch log to set modification time
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - Session started" > "$dir/.cs/logs/session.log"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - Session started" > "$dir/.cs/local/session.log"
 }
 
 
@@ -667,10 +679,9 @@ index_setup() {
     # Current session
     export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/current-session"
     export CLAUDE_SESSION_META_DIR="$CLAUDE_SESSION_DIR/.cs"
-    export CLAUDE_ARTIFACT_DIR="$CLAUDE_SESSION_DIR/.cs/artifacts"
     export CLAUDE_SESSION_NAME="current-session"
-    mkdir -p "$CLAUDE_SESSION_META_DIR"/{logs,artifacts}
-    touch "$CLAUDE_SESSION_META_DIR/logs/session.log"
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    touch "$CLAUDE_SESSION_META_DIR/local/session.log"
     cat > "$CLAUDE_SESSION_META_DIR/README.md" << 'EOF'
 ---
 status: active
@@ -702,8 +713,8 @@ create_indexed_session() {
     local objective="$3"
     local tags="${4:-}"
     local dir="$CS_SESSIONS_ROOT/$name"
-    mkdir -p "$dir/.cs"/{logs,artifacts}
-    touch "$dir/.cs/logs/session.log"
+    mkdir -p "$dir/.cs/local"
+    touch "$dir/.cs/local/session.log"
     cat > "$dir/.cs/README.md" << EOF
 ---
 status: $status
@@ -950,6 +961,7 @@ run_test test_auto_approve_allows_cs_metadata_write
 run_test test_auto_approve_allows_cs_edit
 run_test test_auto_approve_ignores_non_cs_path
 run_test test_auto_approve_ignores_non_write_tools
+run_test test_auto_approve_rejects_traversal
 run_test test_auto_approve_skips_outside_session
 
 # Subagent context

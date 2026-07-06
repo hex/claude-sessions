@@ -1,0 +1,351 @@
+# ABOUTME: Session .gitignore setup, adopting an existing project, and full uninstall.
+# ABOUTME: Backs 'cs -adopt' and 'cs -uninstall'.
+
+create_session_gitignore() {
+    local session_dir="$1"
+    cat > "$session_dir/.gitignore" << 'GITIGNORE'
+# Transient files
+*.lock
+*.tmp
+*.bak
+
+# Per-actor local state (never shared)
+.cs/local/
+
+# Session archives (large binaries)
+.cs/archives/
+
+# Session cooldown markers
+.cs/.narrative-reminder-cooldown
+
+# Claude Code local settings (recreated by cs on each machine)
+.claude/settings.local.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor and tool config
+.vscode/
+.idea/
+.obsidian/
+*.swp
+*.swo
+*~
+GITIGNORE
+}
+
+# Append cs's .gitignore entries to a session's .gitignore if absent
+# (idempotent; never clobbers a project's existing .gitignore). Writes a fresh
+# cs .gitignore when none exists. Used by adopt and by migrate_session so older
+# sessions gain the .cs/local/ rule (per-actor state must never be committed).
+ensure_cs_gitignore_entries() {
+    local target_dir="$1"
+    local gitignore="$target_dir/.gitignore"
+    if [ ! -f "$gitignore" ]; then
+        create_session_gitignore "$target_dir"
+        return 0
+    fi
+    local entries
+    entries=$(cat << 'ENTRIES'
+.cs/local/
+.cs/archives/
+.cs/.narrative-reminder-cooldown
+.claude/settings.local.json
+.obsidian/
+ENTRIES
+    )
+    local line
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        [[ "$line" == \#* ]] && continue
+        if ! grep -qF "$line" "$gitignore" 2>/dev/null; then
+            echo "$line" >> "$gitignore"
+        fi
+    done <<< "$entries"
+}
+
+# Adopt an existing project directory as a cs session
+adopt_session() {
+    local session_name="$1"
+    local target_dir
+    target_dir="$(pwd -P)"
+
+    validate_session_name "$session_name"
+
+    # Check if already a cs session
+    if [ -d "$target_dir/.cs" ]; then
+        error "Directory is already a cs session (found .cs/ directory)"
+    fi
+
+    # Check if session name is taken
+    local session_link="$SESSIONS_ROOT/$session_name"
+    if [ -e "$session_link" ] || [ -L "$session_link" ]; then
+        error "Session '$session_name' already exists"
+    fi
+
+    # Back up existing CLAUDE.md before create_session_structure overwrites it
+    local had_claude_md="false"
+    local original_claude_md=""
+    if [ -f "$target_dir/CLAUDE.md" ]; then
+        had_claude_md="true"
+        original_claude_md=$(cat "$target_dir/CLAUDE.md")
+    fi
+
+    # Create .cs/ structure and CLAUDE.md
+    create_session_structure "$target_dir"
+
+    # Merge original CLAUDE.md content if it existed
+    if [ "$had_claude_md" = "true" ]; then
+        printf '\n\n---\n\n# Project Instructions\n\n%s\n' "$original_claude_md" >> "$target_dir/CLAUDE.md"
+    fi
+
+    # Create symlink from sessions root
+    mkdir -p "$SESSIONS_ROOT"
+    ln -s "$target_dir" "$session_link"
+
+    # Initialize git if not already a repo
+    if [ ! -d "$target_dir/.git" ]; then
+        (
+            cd "$target_dir" || exit 0
+            create_session_gitignore "$target_dir"
+            git init -q 2>/dev/null || true
+            git branch -M main 2>/dev/null || true
+            setup_merge_attributes "$target_dir"
+            git add -A 2>/dev/null || true
+            git commit -q -m "Adopt as cs session: $session_name" 2>/dev/null || true
+        )
+    else
+        # Merge cs's .gitignore entries into the project's existing .gitignore
+        ensure_cs_gitignore_entries "$target_dir"
+
+        # Commit the adoption
+        (
+            cd "$target_dir" || exit 0
+            setup_merge_attributes "$target_dir"
+            git add .cs/ CLAUDE.md .gitignore .gitattributes 2>/dev/null || true
+            if ! git diff --cached --quiet 2>/dev/null; then
+                git commit -q -m "Adopt as cs session: $session_name" 2>/dev/null || true
+            fi
+        )
+    fi
+
+    info "Adopted $(basename "$target_dir") as session '$session_name'"
+    echo -e "${DIM}Symlink: $session_link -> $target_dir${NC}"
+    echo -e "${DIM}Resume with: cs $session_name${NC}"
+}
+
+# Remove a hook registration from any event in a settings JSON string,
+# matching either path spelling; drops wrappers that empty out. Prints the
+# updated JSON.
+# KEEP THE jq FILTER IN SYNC WITH install.sh's _strip_hook_registration —
+# tests/test_install.sh diffs the two filter bodies.
+_strip_hook_registration() {
+    local settings="$1" p="$2" t="$3"
+    echo "$settings" | jq --arg p "$p" --arg t "$t" '
+        if .hooks then
+            .hooks |= with_entries(
+                .value |= (
+                    map(.hooks |= map(select(.command != $p and .command != $t)))
+                    | map(select(.hooks | length > 0))
+                )
+            )
+        else . end
+    '
+}
+
+# Uninstall cs and all components
+run_uninstall() {
+    local install_dir="$HOME/.local/bin"
+    local hooks_parent_dir="$HOME/.claude/hooks"
+    local hooks_dir="$hooks_parent_dir/cs"
+    local commands_dir="$HOME/.claude/commands"
+    local skills_dir="$HOME/.claude/skills"
+    local settings_file="${CS_CLAUDE_DIR:-$HOME/.claude}/settings.json"
+    local bash_completion_dir="$HOME/.bash_completion.d"
+    local zsh_completion_dir="$HOME/.zsh/completions"
+
+    warn "This will uninstall cs and all its components:"
+    echo "  - $install_dir/cs, $install_dir/cs-secrets, $install_dir/cs-statusline, $install_dir/cs-tui"
+    echo "  - Hooks in $hooks_dir/"
+    echo "  - Commands in $commands_dir/"
+    echo "  - Skills in $skills_dir/"
+    echo "  - Shell completions"
+    echo "  - Hook entries in $settings_file"
+    echo ""
+    read -p "Continue with uninstall? [y/N] " -n 1 -r
+    echo ""
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        info "Uninstall cancelled."
+        return 0
+    fi
+
+    echo ""
+    info "Uninstalling cs..."
+    echo ""
+
+    # Remove binaries
+    if [ -f "$install_dir/cs" ]; then
+        rm "$install_dir/cs"
+        info "Removed $install_dir/cs"
+    fi
+
+    if [ -f "$install_dir/cs-secrets" ]; then
+        rm "$install_dir/cs-secrets"
+        info "Removed $install_dir/cs-secrets"
+    fi
+
+    if [ -f "$install_dir/cs-statusline" ]; then
+        rm "$install_dir/cs-statusline"
+        info "Removed $install_dir/cs-statusline"
+    fi
+
+    # Remove the statusLine registration only when it points at cs-statusline;
+    # a status line the user configured themselves is left untouched.
+    if command -v jq >/dev/null 2>&1 && _strip_statusline_registration "$settings_file"; then
+        info "Removed cs-statusline registration from settings.json"
+    fi
+
+    if [ -f "$install_dir/cs-tui" ]; then
+        rm "$install_dir/cs-tui"
+        info "Removed $install_dir/cs-tui"
+    fi
+
+    # Remove hooks from both deployment layouts (subdirectory and flat)
+    local hook dir
+    for hook in "${CS_HOOKS[@]}"; do
+        for dir in "$hooks_dir" "$hooks_parent_dir"; do
+            if [ -f "$dir/$hook" ]; then
+                rm "$dir/$hook"
+                info "Removed $dir/$hook"
+            fi
+        done
+    done
+
+    # Remove retired hook files left behind from older cs versions
+    local retired
+    for retired in "${RETIRED_HOOKS[@]}"; do
+        for dir in "$hooks_dir" "$hooks_parent_dir"; do
+            if [ -f "$dir/$retired" ]; then
+                rm "$dir/$retired"
+                info "Removed retired $dir/$retired"
+            fi
+        done
+    done
+    rm -f "$hooks_dir/.version"
+    rmdir "$hooks_dir" 2>/dev/null || true
+
+    # Remove commands
+    for cmd in "${CS_COMMANDS[@]}"; do
+        if [ -f "$commands_dir/$cmd" ]; then
+            rm "$commands_dir/$cmd"
+            info "Removed $commands_dir/$cmd"
+        fi
+    done
+
+    # Remove skills
+    local skill
+    for skill in "${CS_SKILLS[@]}"; do
+        if [ -d "$skills_dir/$skill" ]; then
+            rm -rf "$skills_dir/$skill"
+            info "Removed $skills_dir/$skill/"
+        fi
+    done
+
+    # Remove shell completions
+    if [ -f "$bash_completion_dir/cs.bash" ]; then
+        rm "$bash_completion_dir/cs.bash"
+        info "Removed $bash_completion_dir/cs.bash"
+    fi
+
+    if [ -f "$zsh_completion_dir/_cs" ]; then
+        rm "$zsh_completion_dir/_cs"
+        info "Removed $zsh_completion_dir/_cs"
+    fi
+
+    # Clean up settings.json (remove cs hooks, preserve others)
+    if [ -f "$settings_file" ] && command -v jq >/dev/null 2>&1; then
+        local settings
+        settings=$(cat "$settings_file")
+
+        # Strip every cs hook (current and retired) from any event,
+        # event-agnostic, matching both path spellings ($HOME and ~) in both
+        # deployment layouts (subdirectory and flat). Drops wrappers that
+        # empty out; sibling user hooks co-shipped in a wrapper survive.
+        local strip_name
+        for strip_name in "${CS_HOOKS[@]}" "${RETIRED_HOOKS[@]}"; do
+            settings=$(_strip_hook_registration "$settings" "$hooks_dir/$strip_name" "~/.claude/hooks/cs/$strip_name")
+            settings=$(_strip_hook_registration "$settings" "$hooks_parent_dir/$strip_name" "~/.claude/hooks/$strip_name")
+        done
+
+        # Clean up empty hook arrays
+        settings=$(echo "$settings" | jq '
+            if .hooks then
+                .hooks |= with_entries(select(.value | length > 0))
+                | if .hooks == {} then del(.hooks) else . end
+            else . end
+        ')
+
+        echo "$settings" > "$settings_file"
+        info "Cleaned up $settings_file"
+    elif [ -f "$settings_file" ]; then
+        warn "jq not found - cannot clean up $settings_file automatically"
+        warn "Manually remove cs hook entries from $settings_file"
+    fi
+
+    # Ask about secrets in keychain
+    if [ -d "$SESSIONS_ROOT" ]; then
+        local sessions
+        sessions=$(ls -1 "$SESSIONS_ROOT" 2>/dev/null || true)
+
+        if [ -n "$sessions" ]; then
+            echo ""
+            warn "Secrets may exist in OS keychain for these sessions:"
+            echo "$sessions" | while read -r s; do
+                echo "  - $s"
+            done
+            echo ""
+            read -p "Delete secrets from keychain? [y/N] " -n 1 -r
+            echo ""
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                # Find cs-secrets script
+                local secrets_script=""
+                for loc in "$install_dir/cs-secrets" "/usr/local/bin/cs-secrets"; do
+                    if [ -x "$loc" ]; then
+                        secrets_script="$loc"
+                        break
+                    fi
+                done
+
+                if [ -n "$secrets_script" ]; then
+                    echo "$sessions" | while read -r s; do
+                        "$secrets_script" --session "$s" purge 2>/dev/null || true
+                    done
+                else
+                    warn "cs-secrets not found - cannot purge secrets automatically"
+                fi
+            else
+                info "Kept secrets in keychain"
+            fi
+        fi
+    fi
+
+    # Ask about session data
+    if [ -d "$SESSIONS_ROOT" ]; then
+        echo ""
+        warn "Session data exists at $SESSIONS_ROOT"
+        read -p "Delete session data? This cannot be undone. [y/N] " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            rm -rf "$SESSIONS_ROOT"
+            info "Removed $SESSIONS_ROOT"
+        else
+            info "Kept $SESSIONS_ROOT"
+        fi
+    fi
+
+    echo ""
+    info "Uninstall complete!"
+}
+
+# Main function

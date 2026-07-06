@@ -14,17 +14,19 @@ teardown() {
         rm -rf "$TEST_TMPDIR"
     fi
     unset CS_SESSIONS_ROOT CLAUDE_CODE_BIN
-    unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR CLAUDE_ARTIFACT_DIR 2>/dev/null || true
+    unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR 2>/dev/null || true
 }
 
 # Helper: create a session directory structure without launching claude
 create_lock_test_session() {
     local name="$1"
     local session_dir="$CS_SESSIONS_ROOT/$name"
-    mkdir -p "$session_dir/.cs"/{artifacts,logs}
-    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
-    touch "$session_dir/.cs/logs/session.log"
+    mkdir -p "$session_dir/.cs/local"
+    touch "$session_dir/.cs/local/session.log"
     echo "# test" > "$session_dir/CLAUDE.md"
+    # Machine-local state must never be committed, as a real session's .gitignore
+    # ensures; otherwise cs_assert_local_untracked refuses to open the session.
+    printf '.cs/local/\n' > "$session_dir/.gitignore"
     (cd "$session_dir" && git init -q 2>/dev/null && git add -A 2>/dev/null && git commit -q -m "init" 2>/dev/null) || true
 }
 
@@ -125,7 +127,6 @@ test_lock_cleaned_on_session_end() {
     export CLAUDE_SESSION_NAME="test-session"
     export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/test-session"
     export CLAUDE_SESSION_META_DIR="$meta_dir"
-    export CLAUDE_ARTIFACT_DIR="$meta_dir/artifacts"
 
     echo '{"session_id": "test-123"}' | "$SCRIPT_DIR/../hooks/session-end.sh"
 

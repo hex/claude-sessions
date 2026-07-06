@@ -98,6 +98,23 @@ test_store_with_spaces_in_value() {
     assert_eq "postgres://user:pass@localhost/my db" "$value" "Should handle spaces" || return 1
 }
 
+# The value can be supplied on stdin (never argv) so it stays out of ps and the
+# bash-logger session.log capture.
+test_set_reads_value_from_stdin() {
+    printf 'sk_from_stdin' | "$CS_SECRETS_BIN" set api_key >/dev/null 2>&1
+    local value
+    value=$("$CS_SECRETS_BIN" get api_key 2>&1)
+    assert_eq "sk_from_stdin" "$value" "Should store the value read from stdin" || return 1
+}
+
+test_set_reads_value_from_file_redirect() {
+    printf 'sk_from_file\n' > "$TEST_TMPDIR/secret.txt"
+    "$CS_SECRETS_BIN" set api_key < "$TEST_TMPDIR/secret.txt" >/dev/null 2>&1
+    local value
+    value=$("$CS_SECRETS_BIN" get api_key 2>&1)
+    assert_eq "sk_from_file" "$value" "Should store the value from a redirected file" || return 1
+}
+
 test_store_with_special_chars() {
     "$CS_SECRETS_BIN" set token 'abc!@#$%^&*()_+' 2>&1
     local value
@@ -440,6 +457,8 @@ run_test test_backend_override_via_env
 
 # Store and retrieve
 run_test test_store_and_get
+run_test test_set_reads_value_from_stdin
+run_test test_set_reads_value_from_file_redirect
 run_test test_store_with_spaces_in_value
 run_test test_store_with_special_chars
 run_test test_store_overwrites_existing

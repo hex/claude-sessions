@@ -42,7 +42,7 @@ test_worktree_create_tracked_mode() {
     assert_dir "$wt" "worktree dir should exist" || return 1
     assert_file_exists "$wt/.git" "linked worktree .git should be a file" || return 1
     assert_eq "cs/fix-auth" "$(git -C "$wt" branch --show-current)" "worktree on task branch" || return 1
-    assert_file_exists "$wt/.cs/artifacts/MANIFEST.json" "tracked .cs rides the checkout" || return 1
+    assert_file_exists "$wt/.cs/README.md" "tracked .cs rides the checkout" || return 1
     assert_file_contains "$wt/.cs/local/state" "task_branch: cs/fix-auth" || return 1
     assert_file_contains "$wt/.cs/local/state" "cs_mode: tracked" || return 1
     assert_file_contains "$wt/.cs/local/state" "cs_base: myproj" || return 1
@@ -75,15 +75,14 @@ test_worktree_create_reuses_existing_branch() {
 test_worktree_create_ignored_mode_bootstraps_cs() {
     # A repo whose .gitignore excludes .cs/ entirely (like the cs dev repo)
     local base_dir="$CS_SESSIONS_ROOT/proj"
-    mkdir -p "$base_dir/.cs"/{memory,artifacts,logs,local}
-    echo "[]" > "$base_dir/.cs/artifacts/MANIFEST.json"
+    mkdir -p "$base_dir/.cs"/{memory,local}
     echo "# Project readme" > "$base_dir/README.md"
     echo "# Project CLAUDE.md" > "$base_dir/CLAUDE.md"
     printf '.cs/\n' > "$base_dir/.gitignore"
     (cd "$base_dir" && git init -q && git add -A && git commit -q -m init)
     cs_launch "proj@task1"
     local wt="$CS_SESSIONS_ROOT/proj@task1"
-    assert_dir "$wt/.cs/artifacts" "ignored mode bootstraps .cs skeleton" || return 1
+    assert_dir "$wt/.cs/memory" "ignored mode bootstraps .cs skeleton" || return 1
     assert_file_contains "$wt/.cs/local/state" "cs_mode: ignored" || return 1
     assert_eq "# Project CLAUDE.md" "$(cat "$wt/CLAUDE.md")" \
         "bootstrap must not overwrite the project's CLAUDE.md" || return 1
@@ -111,8 +110,7 @@ test_worktree_create_succeeds_with_untracked_base() {
 
 test_worktree_reopen_preserves_project_claude_md() {
     local base_dir="$CS_SESSIONS_ROOT/proj"
-    mkdir -p "$base_dir/.cs"/{memory,artifacts,logs,local}
-    echo "[]" > "$base_dir/.cs/artifacts/MANIFEST.json"
+    mkdir -p "$base_dir/.cs"/{memory,local}
     echo "# Project CLAUDE.md" > "$base_dir/CLAUDE.md"
     printf '.cs/\n' > "$base_dir/.gitignore"
     (cd "$base_dir" && git init -q && git add -A && git commit -q -m init)
@@ -212,14 +210,12 @@ run_test test_merge_conflict_stops_and_preserves
 
 test_merge_ignored_mode_fuses_records() {
     local base_dir="$CS_SESSIONS_ROOT/proj"
-    mkdir -p "$base_dir/.cs"/{memory,artifacts,logs,local}
-    echo "[]" > "$base_dir/.cs/artifacts/MANIFEST.json"
+    mkdir -p "$base_dir/.cs"/{memory,local}
     echo "base note" > "$base_dir/.cs/memory/note-base.md"
     printf -- '---\ndescription: seed\n---\n# Session narrative (tester)\n\n## Prior finding\n' \
         > "$base_dir/.cs/memory/narrative.tester.md"
     printf -- '---\ndescription: plain-seed\n---\n# Session narrative (plain)\n' \
         > "$base_dir/.cs/memory/narrative.plain.md"
-    echo "base artifact" > "$base_dir/.cs/artifacts/shared.sh"
     echo "# P" > "$base_dir/README.md"
     printf '.cs/\n.claude/settings.local.json\n' > "$base_dir/.gitignore"
     (cd "$base_dir" && git init -q && git add -A && git commit -q -m init)
@@ -230,9 +226,6 @@ test_merge_ignored_mode_fuses_records() {
     (cd "$wt" && git add result.txt && git commit -q -m "task")
     echo '{"event":"from-task"}' >> "$wt/.cs/timeline.jsonl"
     echo "task memory" > "$wt/.cs/memory/note-task.md"
-    echo "artifact body" > "$wt/.cs/artifacts/run.sh"
-    echo '[{"filename":"run.sh","timestamp":"2026-07-02T00:00:00Z"}]' \
-        > "$wt/.cs/artifacts/MANIFEST.json"
     printf -- '---\nname: n\n---\n# Session narrative (tester)\n\n## Task finding\n\n---\n\n## After rule\n' \
         > "$wt/.cs/memory/narrative.tester.md"
     printf -- '---\nname: other-n\n---\n# Session narrative (other)\n\n## Other finding\n' \
@@ -240,22 +233,16 @@ test_merge_ignored_mode_fuses_records() {
     printf -- '# Session narrative (plain)\n\n## Plain finding\n' \
         > "$wt/.cs/memory/narrative.plain.md"
     echo "task version" > "$wt/.cs/memory/note-base.md"
-    echo "task artifact" > "$wt/.cs/artifacts/shared.sh"
     local output merge_status
     output=$("$CS_BIN" "proj" --merge "t1" 2>&1)
     merge_status=$?
     assert_eq "0" "$merge_status" "merge exits 0" || return 1
     assert_output_contains "$output" "memory/note-base.md already exists in the base; skipped" \
         "memory collision warned" || return 1
-    assert_output_contains "$output" "artifacts/shared.sh already exists in the base; skipped" \
-        "artifact collision warned" || return 1
     assert_eq "base note" "$(cat "$base_dir/.cs/memory/note-base.md")" "memory collision keeps base copy" || return 1
-    assert_eq "base artifact" "$(cat "$base_dir/.cs/artifacts/shared.sh")" "artifact collision keeps base copy" || return 1
     assert_file_contains "$base_dir/.cs/timeline.jsonl" "from-task" "timeline appended" || return 1
     assert_file_exists "$base_dir/.cs/memory/note-task.md" "memory file copied" || return 1
     assert_file_exists "$base_dir/.cs/memory/note-base.md" "base memory untouched" || return 1
-    assert_file_exists "$base_dir/.cs/artifacts/run.sh" "artifact copied" || return 1
-    assert_file_contains "$base_dir/.cs/artifacts/MANIFEST.json" "run.sh" "manifest jq-merged" || return 1
     assert_file_contains "$base_dir/.cs/memory/narrative.tester.md" "Task finding" "narrative body appended" || return 1
     assert_file_not_contains "$base_dir/.cs/memory/narrative.tester.md" "name: n" "frontmatter not duplicated" || return 1
     assert_file_contains "$base_dir/.cs/memory/narrative.tester.md" "description: seed" "base frontmatter kept" || return 1

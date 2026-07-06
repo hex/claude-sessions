@@ -2,7 +2,5 @@
 # Use bd merge for beads JSONL files
 .beads/issues.jsonl merge=beads
 .cs/memory/MEMORY.md merge=ours
-.cs/logs/session.log merge=union
 .cs/timeline.jsonl merge=union
 .cs/memory/narrative.*.md merge=union
-.cs/artifacts/MANIFEST.json merge=manifest

@@ -26,7 +26,6 @@ if [ -z "${CLAUDE_SESSION_NAME:-}" ]; then
 fi
 
 SESSION_DIR="${CLAUDE_SESSION_DIR:-}"
-ARTIFACT_DIR="${CLAUDE_ARTIFACT_DIR:-}"
 META_DIR="${CLAUDE_SESSION_META_DIR:-$SESSION_DIR/.cs}"
 
 # Verify session directory exists
@@ -35,10 +34,13 @@ if [ ! -d "$SESSION_DIR" ]; then
     exit 0
 fi
 
-# Log session start
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Session started (source: $SOURCE, ID: $SESSION_ID)" >> "$META_DIR/logs/session.log"
-echo "  Working directory: $CWD" >> "$META_DIR/logs/session.log"
-echo "" >> "$META_DIR/logs/session.log"
+# Log session start. Ensure the machine-local dir exists first: it is gitignored,
+# so a freshly-cloned session has none until cs creates it, and an unguarded
+# append into a missing dir would abort this hook under set -e.
+mkdir -p "$META_DIR/local" 2>/dev/null || true
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Session started (source: $SOURCE, ID: $SESSION_ID)" >> "$META_DIR/local/session.log"
+echo "  Working directory: $CWD" >> "$META_DIR/local/session.log"
+echo "" >> "$META_DIR/local/session.log"
 
 # Append structured event to timeline.jsonl (machine-readable narrative log)
 TIMELINE_FILE="$META_DIR/timeline.jsonl"
@@ -78,7 +80,7 @@ if git -C "$SESSION_DIR" rev-parse --git-dir >/dev/null 2>&1; then
             # Don't auto-restore — inject into context so Claude can ask the user
             CRASH_CONTEXT="CRASH RECOVERY: The previous session ended without saving (crash or timeout). Autosaved changes were found in ${CRASH_FILE_COUNT} file(s):\n\n${CRASH_FILES}\n\nDiff summary:\n${CRASH_DIFF}\n\nIMPORTANT: Ask the user if they want to restore these changes. To restore, run: git -C \"$SESSION_DIR\" checkout $SHADOW_REF -- . && git -C \"$SESSION_DIR\" update-ref -d $SHADOW_REF\nTo discard, run: git -C \"$SESSION_DIR\" update-ref -d $SHADOW_REF"
             echo "[$(date '+%Y-%m-%d %H:%M:%S')] Crash recovery: found ${CRASH_FILE_COUNT} unsaved file(s), awaiting user decision" \
-                >> "$META_DIR/logs/session.log"
+                >> "$META_DIR/local/session.log"
         else
             # No actual changes — just clean up the orphaned ref
             git -C "$SESSION_DIR" update-ref -d "$SHADOW_REF" 2>/dev/null || true
@@ -94,7 +96,6 @@ if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
 export CLAUDE_SESSION_NAME="$CLAUDE_SESSION_NAME"
 export CLAUDE_SESSION_DIR="$SESSION_DIR"
 export CLAUDE_SESSION_META_DIR="$META_DIR"
-export CLAUDE_ARTIFACT_DIR="$ARTIFACT_DIR"
 EOF
 fi
 
@@ -104,20 +105,16 @@ You are working in a managed Claude Code session: $CLAUDE_SESSION_NAME
 Session started: $(date '+%Y-%m-%d %H:%M:%S %Z') ($(date -u +%Y-%m-%dT%H:%M:%SZ))
 
 Session directory: $CLAUDE_SESSION_DIR
-Artifacts directory: $CLAUDE_ARTIFACT_DIR
 
 Session metadata is in the .cs/ directory. The session root is your workspace.
 
 This session has:
-- Automatic artifact tracking for scripts and configs
 - Documentation templates in .cs/ markdown files
-- Command logging to .cs/logs/session.log
+- Command logging to .cs/local/session.log
 
 Key files to maintain:
 - .cs/README.md: Update objective and outcome
 - .cs/memory/narrative.md: Document findings, observations, and ideas
-
-All scripts and config files are automatically saved to .cs/artifacts/.
 
 IMPORTANT: Secrets (API keys, tokens, passwords) are stored securely in the OS keychain.
 Use 'cs -secrets list' to see stored secrets, 'cs -secrets get <name>' to retrieve values.
@@ -155,7 +152,7 @@ if [[ "$SESSION_ID" =~ $UUID_RE ]]; then
     RECORDED_UUID=$(awk '/^claude_session_id:/ { print $2; exit }' "$STATE_FILE" 2>/dev/null || true)
     if [ "$RECORDED_UUID" != "$SESSION_ID" ]; then
         local_state_set claude_session_id "$SESSION_ID"
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - Rebound claude_session_id: ${RECORDED_UUID:-none} -> $SESSION_ID" >> "$META_DIR/logs/session.log"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - Rebound claude_session_id: ${RECORDED_UUID:-none} -> $SESSION_ID" >> "$META_DIR/local/session.log"
     fi
 fi
 
@@ -173,7 +170,7 @@ if [ "$SOURCE" = "resume" ] && [ -d "$SESSION_DIR/.git" ]; then
     DYNAMIC=""
 
     # Time since last session activity
-    LAST_LOG_TIME=$(tail -1 "$META_DIR/logs/session.log" 2>/dev/null | grep -oE '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}' | head -1 || true)
+    LAST_LOG_TIME=$(tail -1 "$META_DIR/local/session.log" 2>/dev/null | grep -oE '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}' | head -1 || true)
     if [ -n "$LAST_LOG_TIME" ]; then
         DYNAMIC="${DYNAMIC}Last activity: ${LAST_LOG_TIME}\n"
     fi
@@ -219,19 +216,24 @@ if [ "$SOURCE" = "resume" ] && [ -d "$SESSION_DIR/.git" ]; then
     if [ -d "$SESSIONS_ROOT" ]; then
         SIBLINGS=""
         SIBLING_COUNT=0
+        seen_siblings=""
         # Sort sibling sessions by session.log mtime (most recent first)
         while IFS= read -r log_file; do
             sibling_dir=$(dirname "$(dirname "$(dirname "$log_file")")")
             [ -d "$sibling_dir/.cs" ] || continue
             sibling_name=$(basename "$sibling_dir")
             [ "$sibling_name" = "$CLAUDE_SESSION_NAME" ] && continue
+            # The glob lists both .cs/local/ and .cs/logs/ logs, so a session
+            # mid-migration (both present) surfaces twice — skip repeats.
+            case " $seen_siblings " in *" $sibling_name "*) continue ;; esac
+            seen_siblings="$seen_siblings $sibling_name"
             sibling_obj=$(sed -n '/^## Objective/,/^## /{/^## Objective/d;/^## /d;/^$/d;p;}' "$sibling_dir/.cs/README.md" 2>/dev/null | head -1 || true)
             [ -z "$sibling_obj" ] && continue
             [[ "$sibling_obj" == "["*"]" ]] && continue
             SIBLINGS="${SIBLINGS}  ${sibling_name}: ${sibling_obj}\n"
             SIBLING_COUNT=$((SIBLING_COUNT + 1))
             [ "$SIBLING_COUNT" -ge 5 ] && break
-        done < <(ls -t "$SESSIONS_ROOT"/*/.cs/logs/session.log 2>/dev/null || true)
+        done < <(ls -t "$SESSIONS_ROOT"/*/.cs/local/session.log "$SESSIONS_ROOT"/*/.cs/logs/session.log 2>/dev/null || true)
         if [ -n "$SIBLINGS" ]; then
             DYNAMIC="${DYNAMIC}Other Sessions:\n${SIBLINGS}"
         fi
@@ -263,7 +265,7 @@ if [ -n "$TASK_BRANCH" ] && [[ "$CLAUDE_SESSION_NAME" == *@* ]]; then
 This session is a task worktree of session '$CS_BASE' on branch $TASK_BRANCH. Work and commit here as normal; the checkout is disposable once the task is integrated.
 
 When the task is complete, ask the user to run: cs $CS_BASE --merge $TASK_NAME
-That command merges the branch into the base session, fuses the session records (timeline, narrative, artifacts), and removes this worktree. It refuses while either session is open, so it runs from a free terminal after this session closes.
+That command merges the branch into the base session, fuses the session records (timeline, narrative), and removes this worktree. It refuses while either session is open, so it runs from a free terminal after this session closes.
 
 Do NOT merge $TASK_BRANCH into the base branch manually and do not delete the branch — that bypasses the record fuse and the cleanup. To abandon the task instead: cs -rm $CLAUDE_SESSION_NAME"
 fi

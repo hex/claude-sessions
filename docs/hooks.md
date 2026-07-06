@@ -5,25 +5,12 @@ The installer configures Claude Code hooks that enable session management featur
 ## session-start.sh (SessionStart)
 
 Runs when Claude Code starts a session:
-- Logs session start (including source: `startup`, `resume`, `clear`, `compact`) to `.cs/logs/session.log` and appends a `session_start` event to `.cs/timeline.jsonl`
+- Logs session start (including source: `startup`, `resume`, `clear`, `compact`) to `.cs/local/session.log` and appends a `session_start` event to `.cs/timeline.jsonl`
 - On all sources: clears the statusline's attention marker (`.cs/local/attention`) — a fresh session is attended by definition
 - On all sources: rebinds `claude_session_id` in the machine-local `.cs/local/state` to the live conversation UUID from the hook input. Claude Code forks a new UUID when a conversation is continued past the context limit (the old transcript stays on disk), so the recorded binding can silently go stale and `cs` would resume the pre-fork conversation. Non-UUID session ids are ignored; each rebind is logged to `session.log`
 - On `startup`/`resume` only: configures `transfer.hideRefs`, recovers autosaved changes from crashed sessions
 - On `resume` only: injects dynamic context (last activity, recent commits, objective, up to 5 most recently active sibling sessions with their objectives), and a per-actor digest of shared memory/narrative activity since this actor's `.cs/local/watermark` (grouped by git author), then advances the watermark
 - On all sources: exports session environment variables, injects session context into Claude's system prompt
-
-## artifact-tracker.sh (PreToolUse on Write)
-
-Runs before any file write operation:
-- Detects script and config files by extension
-- Redirects tracked files to `.cs/artifacts/` — only when the write targets a path inside the session checkout; writes elsewhere (Claude-native worktree sandboxes, `/tmp`, other repos) pass through untouched
-- Updates `.cs/artifacts/MANIFEST.json` with metadata
-- Handles duplicate filenames automatically
-- **Detects and secures sensitive data** (see [Secrets](secrets.md))
-
-**Tracked extensions:**
-- Scripts: `.sh`, `.bash`, `.zsh`, `.py`, `.js`, `.ts`, `.rb`, `.pl`
-- Configs: `.conf`, `.config`, `.json`, `.yaml`, `.yml`, `.toml`, `.ini`, `.env`
 
 ## autosave-commits.sh (PostToolUse on Write/Edit)
 
@@ -56,7 +43,6 @@ Runs when Claude pauses for user input:
 
 Runs when Claude Code session ends:
 - Logs session end time and exit reason (`user_exit`, `sigint`, `error`, `timeout`) and appends a `session_end` event to `.cs/timeline.jsonl`
-- Creates `.cs/archives/artifacts-YYYYMMDD-HHMMSS.tar.gz` archive (skipped on `sigint` for faster exit)
 - Deletes the shadow autosave refs (`refs/worktree/cs/auto` for this checkout, plus any legacy `refs/cs/auto`)
 - Cleans up lock files
 
@@ -64,13 +50,13 @@ Runs when Claude Code session ends:
 
 Runs when Claude Code spawns a subagent (via the Agent tool):
 - Injects session context into subagents so they know about the cs session
-- Provides session directory, artifacts directory, and key rules (secrets handling, documentation protocol)
+- Provides the session directory and key rules (secrets handling, documentation protocol)
 - Uses `additionalContext` in the same format as SessionStart
 
 ## tool-failure-logger.sh (PostToolUseFailure)
 
 Runs when a tool call fails (async, non-blocking):
-- Logs tool name and truncated error message to `.cs/logs/session.log`
+- Logs tool name and truncated error message to `.cs/local/session.log`
 - Helps debug build failures, test errors, and other tool issues after the fact
 
 ## session-auto-approve.sh (PermissionRequest on Write/Edit)
@@ -83,7 +69,7 @@ Runs when Claude Code would show a permission dialog for Write or Edit:
 ## bash-logger.sh (PreToolUse on Bash)
 
 Runs before every Bash tool call (sync, fast):
-- Logs `[timestamp] BASH: command` to `.cs/logs/session.log`
+- Logs `[timestamp] BASH: command` to `.cs/local/session.log`
 - Creates a complete audit trail of all commands Claude runs
 - Truncates long commands at 200 chars
 - Never blocks — uses `set -uo pipefail` without `set -e`
@@ -118,7 +104,6 @@ The hooks are configured in `~/.claude/settings.json`:
       { "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/session-start.sh", "timeout": 30 }] }
     ],
     "PreToolUse": [
-      { "matcher": "Write", "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/artifact-tracker.sh", "timeout": 10 }] },
       { "matcher": "Bash", "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/bash-logger.sh", "timeout": 5 }] }
     ],
     "PostToolUse": [

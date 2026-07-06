@@ -88,7 +88,7 @@ autosave_to_shadow_ref() {
     fi
 
     if [ -n "$LATEST_ENTRY" ]; then
-        echo "[$TIMESTAMP] Autosave: $LATEST_ENTRY" >> "$META_DIR/logs/session.log"
+        echo "[$TIMESTAMP] Autosave: $LATEST_ENTRY" >> "$META_DIR/local/session.log"
     fi
 }
 

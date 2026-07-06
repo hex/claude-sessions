@@ -95,7 +95,7 @@ test_search_no_query() {
 
 test_search_follows_symlinks() {
     local real_dir="$TEST_TMPDIR/real-project"
-    mkdir -p "$real_dir/.cs"/{memory,artifacts,logs}
+    mkdir -p "$real_dir/.cs"/{memory,local}
     echo "Real project uses Rust nightly" > "$real_dir/.cs/memory/narrative.md"
     ln -s "$real_dir" "$CS_SESSIONS_ROOT/adopted-proj"
 
@@ -116,11 +116,23 @@ echo ""
 
 run_test test_search_finds_in_narrative
 run_test test_search_finds_in_memory
+# A dash-prefixed query must be treated as a search term, not a grep option.
+test_search_dash_prefixed_query() {
+    create_test_session "flags"
+    echo "the --verbose flag enables debug output" > "$CS_SESSIONS_ROOT/flags/.cs/memory/narrative.md"
+
+    local output status=0
+    output=$("$CS_BIN" -search "--verbose" 2>&1) || status=$?
+    assert_eq "0" "$status" "dash-prefixed query must not error, got: $output" || return 1
+    assert_output_contains "$output" "flags" "dash-prefixed query still matches content" || return 1
+}
+
 run_test test_search_finds_in_readme
 run_test test_search_across_multiple_sessions
 run_test test_search_case_insensitive
 run_test test_search_no_results
 run_test test_search_no_query
 run_test test_search_follows_symlinks
+run_test test_search_dash_prefixed_query
 
 report_results

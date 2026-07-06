@@ -42,6 +42,15 @@ fn main() {
     app.theme = theme::Palette::for_theme(theme::detect_theme());
 
     let mut terminal = init_terminal().expect("failed to initialize terminal");
+
+    // Restore the terminal before a panic prints, so a crash never leaves the
+    // user's shell in raw mode + alternate screen with mouse capture on.
+    let original_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = restore_terminal();
+        original_hook(info);
+    }));
+
     let result = run_event_loop(&mut app, &mut terminal);
     restore_terminal().expect("failed to restore terminal");
 

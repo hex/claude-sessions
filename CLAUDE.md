@@ -9,21 +9,11 @@ When resuming this session, read the following files to restore context:
 1. **.cs/summary.md** - If exists, read first for previous session overview
 2. **.cs/README.md** - Session objective, environment, and outcome
 3. **.cs/memory/narrative.*.md** - Per-actor lab notebooks (yours + teammates'): findings, in-progress state, observations
-4. **.cs/artifacts/MANIFEST.json** - List of tracked artifacts
 
 Note: narratives are per-actor (narrative.<actor>.md) so co-developers never
 conflict. Append only to your own (run `cs -whoami` for your actor); read all
 narrative.*.md on resume to restore your working narrative and see teammates'
 in-progress findings.
-
-## Artifact Auto-Tracking
-
-Scripts and configuration files you create are **automatically saved to .cs/artifacts/**:
-
-- Scripts: .sh, .bash, .zsh, .py, .js, .ts, .rb, .pl
-- Configs: .conf, .config, .json, .yaml, .yml, .toml, .ini, .env
-
-When you use the Write tool for these file types, they are automatically redirected to the .cs/artifacts/ directory and tracked in MANIFEST.json.
 
 ## Documentation Discipline
 
@@ -41,16 +31,10 @@ When the session is complete, use the `/wrap` command to distill durable memory 
 
 ## Secure Secrets Handling
 
-Sensitive data is automatically detected and stored securely (macOS Keychain or encrypted file):
-
-**Auto-detected patterns:**
-- Files: .env, filenames containing key, secret, password, token, credential, auth
-- Content: Variables like API_KEY, SECRET_TOKEN, PASSWORD, etc.
-
-**What happens:**
-1. Sensitive values are extracted and stored securely
-2. The artifact file contains redacted placeholders
-3. MANIFEST.json lists which secrets exist (not the values)
+Store sensitive data (API keys, tokens, passwords) securely (macOS Keychain or
+encrypted file) instead of writing it into project files. The `store-secret`
+skill and `cs -secrets set` read the value from stdin so it never lands in a
+file or the command log.
 
 **Retrieving secrets:**
 ```bash
@@ -60,17 +44,18 @@ cs -secrets get API_KEY            # Get a specific secret value
 cs -secrets export                 # Export as environment variables
 ```
 
-**If you detect sensitive data** that wasn't auto-captured (unusual patterns, embedded credentials, etc.), use cs -secrets directly:
+**If you detect sensitive data** in the workspace (embedded credentials, a
+committed token, etc.), store it and replace it with a reference. Pass the value
+on stdin so it never hits argv or the command log:
 ```bash
-cs -secrets set <name> <value>     # Store manually
+printf '%s' "the-secret-value" | cs -secrets set <name>
 ```
 
 ## Best Practices
 
 - Document findings in your narrative (.cs/memory/narrative.<actor>.md) as you go - don't wait until the end
-- Use .cs/artifacts/ for any reusable scripts or configs
 - Run `/wrap` at the end to distill memory and create a cohesive record
-- Never write raw API keys or passwords to artifact files - use cs -secrets
+- Never write raw API keys or passwords to project files - use cs -secrets
 
 <!-- cs:memory-note -->
 Claude's built-in memory writes durable facts to `.cs/memory/` (cs redirects via `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE`); the `MEMORY.md` index lists entries and individual `<bucket>_*.md` files are loaded lazily.

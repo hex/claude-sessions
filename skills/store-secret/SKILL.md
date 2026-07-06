@@ -33,10 +33,17 @@ If empty, inform the user that secrets storage requires a cs session and skip st
    - If from key=value: use the key name
    - Otherwise: infer from context (e.g., "GitHub token" → `GITHUB_TOKEN`)
 
-4. **Store each secret**:
-   ```bash
-   cs -secrets set KEY_NAME "the-actual-value"
-   ```
+4. **Store each secret** — feed the value on **stdin**, never on the command
+   line. A value passed as an argument is visible via `ps` and is captured
+   verbatim by the bash-logger hook into `.cs/local/session.log`.
+   The Bash command itself must not contain the secret:
+   - Write the raw value to a scratch file with the **Write** tool (Write is not
+     logged by bash-logger; a Bash heredoc would be), e.g. `<scratchdir>/.secret`
+   - Store it by redirecting that file into stdin:
+     ```bash
+     cs -secrets set KEY_NAME < <scratchdir>/.secret
+     ```
+   - Delete the scratch file: `rm -f <scratchdir>/.secret`
 
 5. **Confirm storage** - Tell the user:
    - Which secrets were stored and under what names

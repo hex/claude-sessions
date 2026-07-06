@@ -261,11 +261,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             if is_expanded {
                 if let Some(preview) = app.preview_cache.get(&s.name) {
                     if let Some(ref obj) = preview.objective {
-                        let truncated = if obj.len() > 60 {
-                            format!("{}...", &obj[..57])
-                        } else {
-                            obj.clone()
-                        };
+                        let truncated = truncate_str(obj, 60);
                         name_lines.push(Line::from(vec![
                             Span::styled("  goal: ", Style::default().fg(p.comment)),
                             Span::styled(truncated, Style::default().fg(p.fg)),
@@ -273,22 +269,11 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
                         preview_lines += 1;
                     }
                     if let Some(ref disc) = preview.last_discovery {
-                        let truncated = if disc.len() > 58 {
-                            format!("{}...", &disc[..55])
-                        } else {
-                            disc.clone()
-                        };
+                        let truncated = truncate_str(disc, 58);
                         name_lines.push(Line::from(vec![
                             Span::styled("  last: ", Style::default().fg(p.comment)),
                             Span::styled(truncated, Style::default().fg(p.yellow)),
                         ]));
-                        preview_lines += 1;
-                    }
-                    if preview.artifact_count > 0 {
-                        name_lines.push(Line::from(Span::styled(
-                            format!("  {} artifacts", preview.artifact_count),
-                            Style::default().fg(p.comment),
-                        )));
                         preview_lines += 1;
                     }
                     // Show at least a "no metadata" line if everything is empty
@@ -890,11 +875,7 @@ fn render_secrets_popup(app: &App, frame: &mut Frame) {
             if is_revealed {
                 if let Some((_, ref value, _)) = app.revealed_secret {
                     let remaining = app.peek_remaining();
-                    let display_val = if value.len() > 30 {
-                        format!("{}...", &value[..27])
-                    } else {
-                        value.clone()
-                    };
+                    let display_val = truncate_str(value, 30);
                     spans.push(Span::styled("  ", Style::default()));
                     spans.push(Span::styled(
                         display_val,
@@ -1062,27 +1043,7 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
             lines.push(Line::from(""));
         }
 
-        if preview.artifact_count > 0 {
-            lines.push(section_header(
-                format!("Artifacts ({})", preview.artifact_count),
-                p,
-            ));
-            let max_names = (area.height as usize).saturating_sub(lines.len() + 3);
-            for name in preview.artifact_names.iter().take(max_names) {
-                lines.push(Line::from(vec![
-                    Span::styled("  ", Style::default()),
-                    Span::styled(name.as_str(), Style::default().fg(p.comment)),
-                ]));
-            }
-            if preview.artifact_names.len() > max_names {
-                lines.push(Line::from(Span::styled(
-                    format!("  ... and {} more", preview.artifact_names.len() - max_names),
-                    Style::default().fg(p.comment).add_modifier(Modifier::DIM),
-                )));
-            }
-        }
-
-        if preview.objective.is_none() && preview.discoveries.is_empty() && preview.memory_entries.is_empty() && preview.artifact_count == 0 && preview.contributors.is_empty() {
+        if preview.objective.is_none() && preview.discoveries.is_empty() && preview.memory_entries.is_empty() && preview.contributors.is_empty() {
             lines.push(Line::from(Span::styled(
                 "No .cs/ metadata",
                 Style::default().fg(p.comment).add_modifier(Modifier::DIM),
@@ -1210,6 +1171,19 @@ fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn truncate_str_multibyte_boundary_does_not_panic() {
+        // A 3-byte em-dash straddling the byte cutoff must not panic (naive
+        // &s[..n] slicing would). truncate_str respects char boundaries.
+        let s = format!("{}—tail", "a".repeat(56));
+        let out = truncate_str(&s, 60);
+        assert!(out.ends_with("..."));
+        // Longer all-multibyte input, cut mid-run.
+        let emo = "🚀".repeat(40);
+        let _ = truncate_str(&emo, 30);
+    }
+
     use crate::app::App;
     use crate::session::Session;
     use crate::theme::Palette;

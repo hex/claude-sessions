@@ -112,7 +112,6 @@ test_prune_preserves_other_session_data() {
     narrative=$(ls "$session_dir/.cs/memory/"narrative.*.md 2>/dev/null | head -1)
     assert_file_exists   "$narrative"      "the per-actor narrative must survive" || return 1
     assert_file_contains "$narrative" "Important finding" "discovery content must survive (folded into narrative)" || return 1
-    assert_file_exists   "$session_dir/.cs/artifacts/MANIFEST.json"  "MANIFEST.json must survive" || return 1
 }
 
 # Idempotent: a second open does no further work and emits no migration message
@@ -133,8 +132,7 @@ test_prune_is_idempotent() {
 # A modern session (no legacy artifacts, modern CLAUDE.md) is untouched
 test_prune_noop_on_clean_session() {
     local session_dir="$CS_SESSIONS_ROOT/clean"
-    mkdir -p "$session_dir/.cs"/{artifacts,logs,memory}
-    echo "[]" > "$session_dir/.cs/artifacts/MANIFEST.json"
+    mkdir -p "$session_dir/.cs"/{local,memory}
     # Mention .cs/ so Phase 5 leaves CLAUDE.md alone
     cat > "$session_dir/CLAUDE.md" << 'EOF'
 # Session Documentation Protocol

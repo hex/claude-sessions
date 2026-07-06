@@ -85,7 +85,7 @@ export CS_STATUSLINE_CTX_CRIT=80
 export NO_COLOR=1
 ```
 
-`CS_SESSIONS_ROOT` and `CS_DISCOVERIES_MAX_SIZE` are honored the same way the rest of cs honors them.
+`CS_SESSIONS_ROOT` is honored the same way the rest of cs honors it.
 
 ## Install, uninstall, doctor
 

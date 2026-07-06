@@ -9,24 +9,43 @@ git clone https://github.com/hex/claude-sessions.git
 cd claude-sessions
 ```
 
-The main script is `bin/cs`. Hooks live in `hooks/`, commands in `commands/`, and tests in `tests/`.
+The `cs` command is **assembled** from ordered fragments in `lib/*.sh` into the
+single `bin/cs` that ships. **Edit the `lib/` fragments, never `bin/cs` directly**,
+then rebuild and commit the regenerated `bin/cs`:
+
+```bash
+./build.sh   # concatenates lib/*.sh (in numeric-prefix order) into bin/cs
+```
+
+CI rebuilds and fails if the committed `bin/cs` is out of sync with `lib/`. Each
+fragment has a numeric prefix (`00`, `05`, …, `99`) that fixes its position; the
+`bin/cs` blob stays byte-identical whether you edit a fragment or the assembled
+file, so a build is transparent. Hooks live in `hooks/`, commands in `commands/`,
+and tests in `tests/`.
 
 ## Running Tests
 
 Tests use a shared library (`tests/test_lib.sh`) that provides assertions, temporary directories, and test isolation.
 
 ```bash
-# Run all tests
-for f in tests/test_*.sh; do bash "$f"; done
+# Run all tests (aggregates per-suite results and exits non-zero on any failure)
+bash tests/run_all.sh
 
 # Run a single test file
 bash tests/test_hooks.sh
 
 # Run a specific test function
 bash tests/test_hooks.sh test_session_start_creates_log
+
+# Run the Rust TUI tests
+cargo test --manifest-path tui/Cargo.toml
 ```
 
-There are 283+ tests across 17 test suites. All tests must pass before submitting changes.
+There are 530+ tests across 34 bash suites plus the Rust TUI tests. All must
+pass before submitting changes; CI (`.github/workflows/test.yml`) runs them on
+every push and pull request. Do not use a bare `for f in tests/*; do bash "$f";
+done` loop — its exit status reflects only the last suite, so failures are
+masked; `run_all.sh` reports every failing suite.
 
 ## Adding a Hook
 
@@ -38,7 +57,7 @@ There are 283+ tests across 17 test suites. All tests must pass before submittin
    - Add a tilde variant: `YOUR_HOOK_TILDE="$HOOKS_TILDE_DIR/your-hook.sh"`
    - Add a `_merge_cs_hook` call to register the hook in `settings.json` under the appropriate event (`SessionStart`, `PreToolUse`, `PostToolUse`, etc.)
 
-3. **Add to `CS_HOOKS` in `bin/cs`** — uninstall and doctor derive from it. `tests/test_install.sh` fails if the two arrays disagree with each other or with the actual contents of `hooks/`.
+3. **Add to `CS_HOOKS` in `lib/00-header.sh`** (assembled into `bin/cs`) — uninstall and doctor derive from it. `tests/test_install.sh` fails if the two arrays disagree with each other or with the actual contents of `hooks/`.
 
 4. **Document in `docs/hooks.md`** — add a section following the existing format: hook name, event type, description, and behavior.
 
@@ -53,7 +72,7 @@ There are 283+ tests across 17 test suites. All tests must pass before submittin
    - Add the download step (uses `curl` with `wget` fallback)
    - Add the `cp` line for the command file
 
-3. **Add to `run_uninstall()`** in `bin/cs` — include the command file in the cleanup.
+3. **Add to `run_uninstall()`** in `lib/85-adopt-uninstall.sh` (assembled into `bin/cs`) — include the command file in the cleanup.
 
 ## Code Style
 
