@@ -34,9 +34,6 @@ bash tests/run_all.sh
 # Run a single test file
 bash tests/test_hooks.sh
 
-# Run a specific test function
-bash tests/test_hooks.sh test_session_start_creates_log
-
 # Run the Rust TUI tests
 cargo test --manifest-path tui/Cargo.toml
 ```
@@ -53,9 +50,7 @@ masked; `run_all.sh` reports every failing suite.
 
 2. **Register in `install.sh`**:
    - Add the filename to the `CS_HOOKS` array (deploy, flat-layout cleanup, and registration stripping all derive from it)
-   - Add a path variable: `YOUR_HOOK_PATH="$HOOKS_DIR/your-hook.sh"`
-   - Add a tilde variant: `YOUR_HOOK_TILDE="$HOOKS_TILDE_DIR/your-hook.sh"`
-   - Add a `_merge_cs_hook` call to register the hook in `settings.json` under the appropriate event (`SessionStart`, `PreToolUse`, `PostToolUse`, etc.)
+   - Add a `_merge_cs_hook <Event> your-hook.sh <timeout> [matcher] [async]` call alongside the existing ones (see the block around `install.sh`'s `_merge_cs_hook SessionStart ...` calls) to register it in `settings.json` under the appropriate event (`SessionStart`, `PreToolUse`, `PostToolUse`, etc.); it derives the deploy and `~`-relative paths from the filename
 
 3. **Add to `CS_HOOKS` in `lib/00-header.sh`** (assembled into `bin/cs`) — uninstall and doctor derive from it. `tests/test_install.sh` fails if the two arrays disagree with each other or with the actual contents of `hooks/`.
 
@@ -65,14 +60,9 @@ masked; `run_all.sh` reports every failing suite.
 
 ## Adding a Command
 
-1. **Create `commands/name.md`** with YAML frontmatter specifying `allowed_tools`.
+1. **Create `commands/name.md`** with YAML frontmatter specifying `allowed-tools` (hyphen — Claude Code ignores the `allowed_tools` underscore form).
 
-2. **Register in `install.sh`**:
-   - Add a URL variable: `CMD_NAME_URL="${REPO_URL}/commands/name.md"`
-   - Add the download step (uses `curl` with `wget` fallback)
-   - Add the `cp` line for the command file
-
-3. **Add to `run_uninstall()`** in `lib/85-adopt-uninstall.sh` (assembled into `bin/cs`) — include the command file in the cleanup.
+2. **Add the filename to the `CS_COMMANDS` array** in both `install.sh` and `lib/00-header.sh` (assembled into `bin/cs`) — the two carry KEEP IN SYNC comments. Install (download + copy), `run_uninstall()`, and doctor all loop over the array, so no per-command variable or cleanup edit is needed. `tests/test_install.sh` fails if the arrays disagree with each other or with the actual `commands/` files.
 
 ## Code Style
 
