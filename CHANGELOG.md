@@ -2,6 +2,28 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
+<!-- New entries use the Features / Fixes / Docs / Performance / Other headings (the scheme in use since 2026.6.10). -->
+
+## Unreleased
+
+### Removed
+
+- **Automatic artifact tracking** — the `artifact-tracker` hook, `.cs/artifacts/` auto-saving, the artifact merge driver, and the TUI artifact preview are gone.
+
+### Changed
+
+- **`session.log` is machine-local** — the command audit trail now lives at `.cs/local/session.log` (gitignored), no longer git-tracked or `merge=union`. The shared structured record is `.cs/timeline.jsonl`.
+- **`bin/cs` is assembled from `lib/*.sh`** by `build.sh` (byte-identical output); edit the fragments and rebuild. CI fails if `bin/cs` drifts from `lib/`.
+
+### Fixes
+
+- Hardened session-name validation (rejects `.`/`..`/path traversal), the Rust TUI (panic restore, multibyte safety), hook contract boundaries, and shell portability.
+- Secret values are read from stdin; the `-update` payload is pinned and verified against the release tag; the generated CLAUDE.md no longer demonstrates a secret pattern that would land the value in the command log.
+
+### Docs
+
+- Broad accuracy and completeness pass: `session.log` paths, per-actor narratives, timeline event names, undocumented hook behaviors, and the contributor/release guides.
+
 ## 2026.7.4
 
 ### Features
