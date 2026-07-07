@@ -1,5 +1,5 @@
 ---
-allowed_tools:
+allowed-tools:
   - Read
   - Edit
   - Grep
@@ -64,7 +64,8 @@ Check these files for accuracy against the current code:
 - `README.md` - Verify features list matches actual functionality
 - `docs/hooks.md` - Verify hook descriptions match actual hook files
 - `docs/secrets.md` - Verify backend descriptions and commands
-- `docs/sync.md` - Verify sync commands and workflow
+- `docs/session-layout.md` - Verify the .cs/ layout and paths (.cs/local/, timeline.jsonl)
+- `docs/statusline.md` - Verify status line segments, flags, and behavior
 
 **What to look for:**
 - Commands or flags mentioned in docs that don't exist in code
@@ -93,8 +94,12 @@ The CHANGELOG entry is committed as part of the release commit in Step 8.
 Run the full test suite to verify nothing is broken before releasing:
 
 ```bash
-bash tests/test_*.sh
+bash tests/run_all.sh                        # aggregates every suite; fails if any suite fails
+cargo test --manifest-path tui/Cargo.toml    # cs-tui binaries ship in the release
 ```
+
+(Do not use `bash tests/test_*.sh` — bash runs only the first glob match and
+passes the rest as ignored arguments, so all but one suite silently never run.)
 
 Stop immediately if any tests fail. Do not proceed with the release until all tests pass.
 
@@ -170,7 +175,7 @@ No manual signing is needed — CI handles everything on tag push.
 
 - Do NOT skip the documentation review - it's the most important part
 - If you find significant documentation issues, list them before fixing
-- The version bump should be a single Edit to bin/cs
+- The version bump is a single Edit to the VERSION line in `lib/00-header.sh`, followed by `./build.sh` — never edit `bin/cs` directly (it is assembled, and CI fails if it drifts from `lib/`)
 - Run `git status` before committing to verify what's being included
 - Always create the GitHub release after pushing
 - Do NOT commit or push until release notes are approved
