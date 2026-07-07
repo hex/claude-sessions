@@ -45,11 +45,15 @@ cs -secrets export                 # Export as environment variables
 ```
 
 **If you detect sensitive data** in the workspace (embedded credentials, a
-committed token, etc.), store it and replace it with a reference. Pass the value
-on stdin so it never hits argv or the command log:
+committed token, etc.), store it with the `store-secret` skill and replace it
+with a reference. The skill writes the value to a scratch file with the Write
+tool (which the bash-logger does not capture) and feeds it in via a stdin
+redirect, so the plaintext never reaches argv or the command log:
 ```bash
-printf '%s' "the-secret-value" | cs -secrets set <name>
+cs -secrets set <name> < /path/to/scratch-file   # value on stdin, not in argv
 ```
+Never `echo`/`printf` a secret into a pipe — the bash-logger records the whole
+Bash command (secret and all) in `.cs/local/session.log`.
 
 ## Best Practices
 

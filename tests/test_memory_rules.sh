@@ -52,6 +52,20 @@ test_new_session_has_no_legacy_rules_block() {
         "new sessions must not ship behavioral instruction prose" || return 1
 }
 
+# The secrets guidance must not teach piping a value into `cs -secrets set`: the
+# bash-logger captures the whole Bash command into .cs/local/session.log, so a
+# `printf '%s' secret | cs -secrets set` lands the plaintext in the log. The safe
+# form (per the store-secret skill) feeds the value in via a stdin redirect.
+test_new_session_secret_guidance_is_log_safe() {
+    "$CS_BIN" test-session <<< "" >/dev/null 2>&1 || true
+    local claude_md="$CS_SESSIONS_ROOT/test-session/CLAUDE.md"
+
+    assert_file_not_contains "$claude_md" "| cs -secrets set" \
+        "must not pipe a secret into cs -secrets set (bash-logger logs the command)" || return 1
+    assert_file_contains "$claude_md" "store-secret" \
+        "should point at the store-secret skill's log-safe procedure" || return 1
+}
+
 # Build a "legacy" session whose CLAUDE.md predates any cs memory documentation.
 _seed_legacy_session() {
     local name="$1"
@@ -317,6 +331,7 @@ echo "Running test_memory_rules.sh"
 echo ""
 run_test test_new_session_has_memory_note
 run_test test_new_session_has_no_legacy_rules_block
+run_test test_new_session_secret_guidance_is_log_safe
 run_test test_lazy_migration_appends_note
 run_test test_lazy_migration_idempotent
 run_test test_legacy_rules_tombstone_prevents_note_addition
