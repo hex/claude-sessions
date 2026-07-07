@@ -73,12 +73,19 @@ if git -C "$SESSION_DIR" rev-parse --git-dir >/dev/null 2>&1; then
     if [ -n "$SHADOW_REF" ]; then
         # Generate a summary of what would be restored
         CRASH_DIFF=$(git -C "$SESSION_DIR" diff --stat HEAD "$SHADOW_REF" -- . 2>/dev/null || true)
-        CRASH_FILES=$(git -C "$SESSION_DIR" diff --name-only HEAD "$SHADOW_REF" -- . 2>/dev/null | head -10 || true)
-        CRASH_FILE_COUNT=$(echo "$CRASH_FILES" | grep -c . 2>/dev/null || echo "0")
+        # Count from the full diff, then cap the list — a head -10 before
+        # counting would understate the scope (report 10 when 30 changed).
+        CRASH_ALL_FILES=$(git -C "$SESSION_DIR" diff --name-only HEAD "$SHADOW_REF" -- . 2>/dev/null || true)
+        CRASH_FILE_COUNT=$(printf '%s\n' "$CRASH_ALL_FILES" | grep -c . 2>/dev/null || echo "0")
+        CRASH_FILES=$(printf '%s\n' "$CRASH_ALL_FILES" | head -10 || true)
 
         if [ -n "$CRASH_FILES" ] && [ "$CRASH_FILE_COUNT" -gt 0 ]; then
             # Don't auto-restore — inject into context so Claude can ask the user
-            CRASH_CONTEXT="CRASH RECOVERY: The previous session ended without saving (crash or timeout). Autosaved changes were found in ${CRASH_FILE_COUNT} file(s):\n\n${CRASH_FILES}\n\nDiff summary:\n${CRASH_DIFF}\n\nIMPORTANT: Ask the user if they want to restore these changes. To restore, run: git -C \"$SESSION_DIR\" checkout $SHADOW_REF -- . && git -C \"$SESSION_DIR\" update-ref -d $SHADOW_REF\nTo discard, run: git -C \"$SESSION_DIR\" update-ref -d $SHADOW_REF"
+            CRASH_LIST_NOTE=""
+            if [ "$CRASH_FILE_COUNT" -gt 10 ]; then
+                CRASH_LIST_NOTE=" (first 10 listed)"
+            fi
+            CRASH_CONTEXT="CRASH RECOVERY: The previous session ended without saving (crash or timeout). Autosaved changes were found in ${CRASH_FILE_COUNT} file(s)${CRASH_LIST_NOTE}:\n\n${CRASH_FILES}\n\nDiff summary:\n${CRASH_DIFF}\n\nIMPORTANT: Before starting any other work, ask the user (use AskUserQuestion) whether to restore or discard these changes. Warning: restoring overwrites any current uncommitted changes to the listed files. To restore, run: git -C \"$SESSION_DIR\" checkout $SHADOW_REF -- . && git -C \"$SESSION_DIR\" update-ref -d $SHADOW_REF\nTo discard, run: git -C \"$SESSION_DIR\" update-ref -d $SHADOW_REF"
             echo "[$(date '+%Y-%m-%d %H:%M:%S')] Crash recovery: found ${CRASH_FILE_COUNT} unsaved file(s), awaiting user decision" \
                 >> "$META_DIR/local/session.log"
         else
@@ -102,24 +109,17 @@ fi
 # Provide context to Claude about the session
 CONTEXT=$(cat << EOF
 You are working in a managed Claude Code session: $CLAUDE_SESSION_NAME
-Session started: $(date '+%Y-%m-%d %H:%M:%S %Z') ($(date -u +%Y-%m-%dT%H:%M:%SZ))
+Context loaded: $(date '+%Y-%m-%d %H:%M:%S %Z') ($(date -u +%Y-%m-%dT%H:%M:%SZ))
 
 Session directory: $CLAUDE_SESSION_DIR
 
 Session metadata is in the .cs/ directory. The session root is your workspace.
 
-This session has:
-- Documentation templates in .cs/ markdown files
-- Command logging to .cs/local/session.log
-
 Key files to maintain:
 - .cs/README.md: Update objective and outcome
 - .cs/memory/narrative.<actor>.md: append findings as you go (run 'cs -whoami' for your actor; read all narrative.*.md on resume)
 
-IMPORTANT: Secrets (API keys, tokens, passwords) live in the session secret store.
-Use 'cs -secrets list' / 'cs -secrets get <name>' to retrieve them. Never write raw
-credentials to files - pipe the value to 'cs -secrets set <name>' on stdin (argv and
-heredocs are captured verbatim by the command log).
+Secrets: never write credentials to files — pipe the value to 'cs -secrets set <name>' on stdin (argv/heredocs are logged verbatim); retrieve with 'cs -secrets get <name>'. See CLAUDE.md, Secure Secrets Handling.
 
 See CLAUDE.md in the session directory for complete documentation protocol.
 EOF
@@ -200,7 +200,7 @@ if [ "$SOURCE" = "resume" ] && [ -d "$SESSION_DIR/.git" ]; then
             | sed 's/^[[:space:]]*\([0-9][0-9]*\)[[:space:]]*\(.*\)$/\2 (\1)/' \
             | paste -sd', ' - 2>/dev/null || true)
         if [ -n "$DIGEST" ]; then
-            DYNAMIC="${DYNAMIC}Since your last session — shared memory/narrative activity: ${DIGEST}\n"
+            DYNAMIC="${DYNAMIC}Since your last session, teammates committed to shared memory/narrative (author: commits): ${DIGEST}. Skim their narrative.*.md before working in overlapping areas.\n"
         fi
     fi
     # Advance the watermark to current HEAD (also seeds it on first resume).
@@ -236,7 +236,7 @@ if [ "$SOURCE" = "resume" ] && [ -d "$SESSION_DIR/.git" ]; then
             [ "$SIBLING_COUNT" -ge 5 ] && break
         done < <(ls -t "$SESSIONS_ROOT"/*/.cs/local/session.log "$SESSIONS_ROOT"/*/.cs/logs/session.log 2>/dev/null || true)
         if [ -n "$SIBLINGS" ]; then
-            DYNAMIC="${DYNAMIC}Other Sessions:\n${SIBLINGS}"
+            DYNAMIC="${DYNAMIC}Other Sessions (awareness only — if a request belongs to one of these, say so rather than duplicating work here):\n${SIBLINGS}"
         fi
     fi
 
@@ -268,7 +268,7 @@ This session is a task worktree of session '$CS_BASE' on branch $TASK_BRANCH. Wo
 When the task is complete, ask the user to run: cs $CS_BASE --merge $TASK_NAME
 That command merges the branch into the base session, fuses the session records (timeline, narrative), and removes this worktree. It refuses while either session is open, so it runs from a free terminal after this session closes.
 
-Do NOT merge $TASK_BRANCH into the base branch manually and do not delete the branch — that bypasses the record fuse and the cleanup. To abandon the task instead: cs -rm $CLAUDE_SESSION_NAME"
+Do NOT merge $TASK_BRANCH into the base branch manually and do not delete the branch — that bypasses the record fuse and the cleanup. To abandon the task instead, ask the user to run: cs -rm $CLAUDE_SESSION_NAME — never run this yourself; it deletes this worktree and its session records."
 fi
 
 # Append fresh-rebind notice if cs flagged that the user declined to resume
@@ -285,7 +285,7 @@ For prior context, lazily consult as needed:
 - .cs/memory/narrative.*.md — findings and decisions from earlier work (append only to your own actor's file)
 - .cs/README.md            — session objective
 
-The new conversation has its own UUID (\$CS_CLAUDE_SESSION_ID). Do not assume continuity with previous turns."
+Do not assume continuity with previous turns."
 fi
 
 # Append crash recovery info if present
