@@ -85,7 +85,10 @@ test_verify_checksum_catches_mismatch() {
     echo "0000000000000000000000000000000000000000000000000000000000000000  test.txt" > "$tmpdir/test.txt.sha256"
 
     local result
-    if ( source <(grep -A 15 '^verify_checksum()' "$CS_BIN"); verify_checksum "$tmpdir/test.txt" "$tmpdir/test.txt.sha256" ); then
+    # source from a temp file: bash 3.2 (macOS stock) does not reliably define a
+    # function via `source <(...)` process substitution.
+    grep -A 15 '^verify_checksum()' "$CS_BIN" > "$tmpdir/_vc.sh"
+    if ( source "$tmpdir/_vc.sh"; verify_checksum "$tmpdir/test.txt" "$tmpdir/test.txt.sha256" ); then
         rm -rf "$tmpdir"
         echo "  FAIL: verify_checksum should reject mismatched checksum"
         return 1
@@ -109,7 +112,8 @@ test_verify_checksum_accepts_match() {
         return 0
     fi
 
-    if ! ( source <(grep -A 15 '^verify_checksum()' "$CS_BIN"); verify_checksum "$tmpdir/test.txt" "$tmpdir/test.txt.sha256" ); then
+    grep -A 15 '^verify_checksum()' "$CS_BIN" > "$tmpdir/_vc.sh"
+    if ! ( source "$tmpdir/_vc.sh"; verify_checksum "$tmpdir/test.txt" "$tmpdir/test.txt.sha256" ); then
         rm -rf "$tmpdir"
         echo "  FAIL: verify_checksum should accept matching checksum"
         return 1

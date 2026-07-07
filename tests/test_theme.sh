@@ -5,6 +5,20 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/test_lib.sh"
 
+# Bound a command with a wall-clock limit when a timeout tool is available;
+# otherwise run it directly. macOS stock ships no `timeout` (GNU coreutils
+# installs it as `gtimeout`), so these detection tests must not hard-depend on
+# it — detect-theme is designed to always terminate on its own.
+_bounded() {
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 5 "$@"
+    elif command -v gtimeout >/dev/null 2>&1; then
+        gtimeout 5 "$@"
+    else
+        "$@"
+    fi
+}
+
 # Source cs's functions without running main (the unconditional `main "$@"`
 # tail is neutralized to `:`), so internal helpers can be unit-tested.
 _load_cs_functions() {
@@ -123,7 +137,7 @@ test_detect_under_tmux_black_everywhere_falls_back_to_os_appearance() {
 
 test_detect_theme_graceful_under_tmux() {
     local out rc
-    out=$(TMUX="fake,1,0" timeout 5 "$CS_BIN" -detect-theme); rc=$?
+    out=$(TMUX="fake,1,0" _bounded "$CS_BIN" -detect-theme); rc=$?
     assert_eq "0" "$rc" "detect-theme must exit 0 under tmux (no hang)" || return 1
     case "$out" in
         light|dark|unknown) : ;;
@@ -133,7 +147,7 @@ test_detect_theme_graceful_under_tmux() {
 
 test_detect_theme_graceful_no_tmux() {
     local out rc
-    out=$(timeout 5 "$CS_BIN" -detect-theme); rc=$?
+    out=$(_bounded "$CS_BIN" -detect-theme); rc=$?
     assert_eq "0" "$rc" "detect-theme must exit 0 outside tmux" || return 1
     case "$out" in
         light|dark|unknown) : ;;
@@ -146,7 +160,7 @@ test_cs_term_theme_override_wins() {
     # detect-theme always re-detects, but the override is what launch_claude_code
     # honors — assert the override is respected by the documented contract.
     local out
-    out=$(CS_TERM_THEME=dark timeout 5 "$CS_BIN" -detect-theme)
+    out=$(CS_TERM_THEME=dark _bounded "$CS_BIN" -detect-theme)
     # -detect-theme re-detects live and ignores the override by design;
     # this documents that behavior so a future change doesn't break it silently.
     case "$out" in

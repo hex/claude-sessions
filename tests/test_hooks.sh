@@ -278,13 +278,15 @@ test_failure_truncates_long_errors() {
 }
 
 test_failure_handles_huge_multiline_error() {
-    # Regression: echo "$err" | head -1 | cut writes >64KB before head closes,
-    # causing SIGPIPE in echo. With pipefail, this killed the hook silently.
-    # Reproduce with a large multi-line error like a long stack trace.
-    local huge_error
-    huge_error=$(python3 -c "print('\n'.join(['x' * 500 for _ in range(500)]))")
+    # A large multi-line error (long stack trace) must be logged without crashing
+    # the hook: its `echo "$err" | head -1 | cut` truncation SIGPIPEs on >64KB and
+    # is guarded by `|| true`. Feed jq via --rawfile, NOT --arg — a ~250KB value on
+    # jq's command line exceeds Linux's per-arg limit (MAX_ARG_STRLEN, 128KB) and
+    # dies with "Argument list too long" before the hook ever runs.
+    local errfile="$TEST_TMPDIR/huge_err.txt"
+    python3 -c "print('\n'.join(['x' * 500 for _ in range(500)]))" > "$errfile"
     local input
-    input=$(jq -n --arg err "$huge_error" '{tool_name: "Bash", error: $err}')
+    input=$(jq -n --rawfile err "$errfile" '{tool_name: "Bash", error: $err}')
     echo "$input" | bash "$HOOKS_DIR/tool-failure-logger.sh"
 
     assert_file_contains "$CLAUDE_SESSION_META_DIR/local/session.log" "Tool failure: Bash" \

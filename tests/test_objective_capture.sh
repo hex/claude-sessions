@@ -37,8 +37,12 @@ make_readme() {
 
 # Feed a prompt to the hook as the harness would (JSON on stdin).
 run_hook() {
-    local prompt="$1"
-    jq -n --arg p "$prompt" '{prompt: $p, hook_event_name: "UserPromptSubmit"}' | "$HOOK"
+    # Feed the hook via a herestring, not a live `jq | hook` pipe: outside a session
+    # the hook exits 0 before draining stdin, so a pipe would leave jq writing into a
+    # closed fd (SIGPIPE) and `set -o pipefail` would surface that as a non-zero exit.
+    local prompt="$1" _in
+    _in=$(jq -n --arg p "$prompt" '{prompt: $p, hook_event_name: "UserPromptSubmit"}')
+    "$HOOK" <<< "$_in"
 }
 
 # The current Objective line (first non-empty, non-heading line under ## Objective).

@@ -72,7 +72,12 @@ teardown() {
 # Build the hook's stdin JSON safely (jq encodes ANY adversarial prompt — quotes, backticks,
 # $(...), UTF-8) and run the hook. Prints the hook's stdout.
 run_hook() {
-    jq -n --arg p "$1" '{prompt: $p, hook_event_name: "UserPromptSubmit"}' | bash "$HOOK"
+    # Feed the hook via a herestring, not a live `jq | hook` pipe: outside a session
+    # the hook exits 0 before draining stdin, so a pipe would leave jq writing into a
+    # closed fd (SIGPIPE) and `set -o pipefail` would surface that as a non-zero exit.
+    local _in
+    _in=$(jq -n --arg p "$1" '{prompt: $p, hook_event_name: "UserPromptSubmit"}')
+    bash "$HOOK" <<< "$_in"
 }
 
 # Extract additionalContext from the hook's output JSON (empty if absent/invalid).
