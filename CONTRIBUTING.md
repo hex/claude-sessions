@@ -79,7 +79,7 @@ masked; `run_all.sh` reports every failing suite.
 - Match the style of surrounding code.
 - Every code file starts with a 2-line `ABOUTME:` comment explaining what the file does:
   ```bash
-  # ABOUTME: Logs every Bash tool call to .cs/logs/session.log with timestamp.
+  # ABOUTME: Logs every Bash tool call to .cs/local/session.log with timestamp.
   # ABOUTME: Truncates long commands at 200 chars; never blocks on errors.
   ```
 - No emojis in code or documentation (unless part of a functional emoji set).

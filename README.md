@@ -47,7 +47,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 
   ![cs-statusline: session and model accents, amber rate-limit warnings, standard-Unicode segment icons](assets/screenshot2.png)
 - **Health checks** - `cs -doctor` reports status of Keychain backend, hook registration, shadow-ref freshness, auto-memory writability, status line registration, Claude Code settings audit (hooks/MCPs/permissions/env vars counts), and cumulative token usage for the current project
-- **Bash command audit trail** - Every Bash command Claude runs is logged to `.cs/logs/session.log` with timestamps
+- **Bash command audit trail** - Every Bash command Claude runs is logged to `.cs/local/session.log` (machine-local, never git-synced) with timestamps
 - **Update notifications** - Checks for updates and notifies when new versions are available
 - **Verified updates** - Updates are downloaded from GitHub Releases and verified with SHA-256 checksums; additionally verified with [minisign](https://jedisct1.github.io/minisign/) signatures when available
 
@@ -152,7 +152,8 @@ This converts the current directory into a cs session in place:
 │   ├── memory/             # Claude Code auto memory + per-actor narrative.<actor>.md lab notebooks
 │   ├── plans/              # Claude Code plans
 │   ├── timeline.jsonl      # Session event log (starts, ends, checkpoints)
-│   └── logs/session.log    # Bash command audit trail + session log
+│   ├── checkpoints/        # Labelled narrative snapshots (/checkpoint)
+│   └── local/              # Machine-local state + session.log audit trail (gitignored)
 ├── .claude/
 │   └── settings.local.json # Redirects auto memory into .cs/memory
 ├── CLAUDE.md               # Session instructions for Claude
@@ -165,8 +166,8 @@ Claude Code's [auto memory](https://code.claude.com/docs/en/memory) is redirecte
 
 Sessions are designed to be shared through git (push/pull the whole session directory). Everything cs writes automatically is partitioned so independent work on two clones merges cleanly:
 
-- **Machine-local state never syncs.** The Claude conversation UUID, session color, and resume timestamps live in gitignored `.cs/local/state` — each machine binds its own conversation. A launch guard refuses to run if `.cs/local/` ever becomes tracked.
-- **Append-only files union-merge.** `session.log`, `timeline.jsonl`, and the per-actor `narrative.*.md` notebooks carry `merge=union` in the session `.gitattributes`, so divergent appends interleave instead of conflicting.
+- **Machine-local state never syncs.** The Claude conversation UUID, session color, and resume timestamps (in `.cs/local/state`) and the `session.log` command audit trail live under gitignored `.cs/local/` — each machine binds its own conversation and keeps its own log. A launch guard refuses to run if `.cs/local/` ever becomes tracked.
+- **Append-only files union-merge.** `timeline.jsonl` and the per-actor `narrative.*.md` notebooks carry `merge=union` in the session `.gitattributes`, so divergent appends interleave instead of conflicting.
 - **`MEMORY.md` resolves to the local copy** (`merge=ours`); each actor's pointer line is re-added idempotently on the next launch.
 - **Secrets sync per machine.** `cs -secrets export-file` writes `.cs/secrets.<machine-id>.age/.enc` — distinct files per machine instead of one shared encrypted blob whose bytes change every export — and `import-file` merges every sync file it can decrypt. See [docs/secrets.md](docs/secrets.md).
 - **What can still conflict is real content**: the README objective/outcome, memory entries, and your project files — places where two humans genuinely disagree and should reconcile by hand.
@@ -355,7 +356,7 @@ WHERE file.name = "README" AND status = "active"
 ```
 ````
 
-**Graph view tip:** In Obsidian's graph settings, add `.cs/logs` to the folder exclusion filter to reduce clutter.
+**Graph view tip:** In Obsidian's graph settings, add `.cs/local` to the folder exclusion filter to reduce clutter.
 
 ## Requirements
 
