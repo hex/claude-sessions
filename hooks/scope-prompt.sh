@@ -174,6 +174,7 @@ TOMBSTONE='Scope: no tracked files matched (grounding from prompt only).'
 
 if [ -n "$RELEVANT_FILES" ]; then
     BLOCK="## Scope (auto-grounded)
+Keyword matches from your prompt — orientation, not a task boundary or a complete list. Ignore anything off-target.
 
 ### Relevant files
 $RELEVANT_FILES"

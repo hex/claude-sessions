@@ -152,6 +152,17 @@ test_classifier_borderline_fires_as_documented() {
 # Grounded scan
 # ============================================================================
 
+test_scope_block_frames_matches_as_non_authoritative() {
+    seed_repo "src/api.ts" "src/unrelated.ts"
+    local out ac
+    out=$(run_hook "implement a retry wrapper around the fetch call in src/api.ts")
+    ac=$(additional_context "$out")
+    printf '%s' "$ac" | grep -q "src/api.ts" \
+        || { echo "  FAIL: precondition — block should fire with the file"; return 1; }
+    printf '%s' "$ac" | grep -q "not a task boundary" \
+        || { echo "  FAIL: scope block must frame the list as orientation, not a task boundary"; return 1; }
+}
+
 test_scan_surfaces_relevant_file() {
     seed_repo "src/api.ts" "src/unrelated.ts"
     local out ac
@@ -419,6 +430,7 @@ run_test test_prompt_clears_attention_marker
 run_test test_classifier_fires_emit_scope_block
 run_test test_classifier_silent_passthrough
 run_test test_classifier_borderline_fires_as_documented
+run_test test_scope_block_frames_matches_as_non_authoritative
 run_test test_scan_surfaces_relevant_file
 run_test test_scan_includes_recent_commits
 run_test test_scan_excludes_build_and_meta_dirs
