@@ -406,12 +406,12 @@ migrate_session() {
 
 When the conversation reaches a natural stopping point — work shipped, a PR merged, a deploy completed, a bug fixed, or the user signaling they're winding down — proactively offer to distill the session via AskUserQuestion BEFORE the conversation drifts.
 
-**Strong triggers (fire on any single occurrence):**
+**Strong signals (sufficient on their own — but only when the phrase describes work that actually completed; never fire when it reports a problem, is negated, or is part of a plan for later):**
 - "shipped", "PR merged", "PR up", "deployed", "released"
 - "let's call it", "wraps up", "done for the day", "good place to stop"
 - "all good now", "that did it", "ready to ship"
 
-**Soft triggers (require a corroborating signal — a recent commit, an explicit "done", or two or more soft signals in succession):**
+**Soft signals (require a corroborating signal — a recent commit, an explicit "done", or two or more soft signals in succession):**
 - "that works", "looks good", "we're good", "all set"
 
 **When fired**, use AskUserQuestion with header "Wrap up?" and these options:

@@ -340,6 +340,50 @@ test_note_has_no_behavioral_instruction() {
 }
 
 # ============================================================================
+# Cycle 6: secrets read-path + scratch-cleanup guardrails, memory-note structure
+# ============================================================================
+
+# The retrieval block invites `cs -secrets get` / `cs -secrets export`; on its
+# own that leaks plaintext into the tool result and transcript. The guidance
+# must also demonstrate consuming the value inline via command substitution
+# ($(cs -secrets get ...)) so the read path is as log-safe as the write path.
+test_new_session_secret_retrieval_is_transcript_safe() {
+    "$CS_BIN" test-session <<< "" >/dev/null 2>&1 || true
+    local claude_md="$CS_SESSIONS_ROOT/test-session/CLAUDE.md"
+
+    assert_file_exists "$claude_md" "session CLAUDE.md should exist" || return 1
+    assert_file_contains "$claude_md" '\$(cs -secrets get' \
+        "retrieval guidance must show the inline-substitution safe form" || return 1
+}
+
+# Detecting a secret and hand-rolling the store (the snippet is right there)
+# leaves the plaintext scratch file on disk unless the guidance mandates its
+# removal — the very leak the section exists to prevent.
+test_new_session_secret_detection_mandates_scratch_cleanup() {
+    "$CS_BIN" test-session <<< "" >/dev/null 2>&1 || true
+    local claude_md="$CS_SESSIONS_ROOT/test-session/CLAUDE.md"
+
+    assert_file_contains "$claude_md" "delete the scratch file" \
+        "detection guidance must mandate deleting the scratch file" || return 1
+}
+
+# Structure invariant: the memory-note is a peer section, not a headingless
+# sentence orphaned between two headed sections — the line after its sentinel
+# must be a markdown heading.
+test_memory_note_renders_under_heading() {
+    "$CS_BIN" test-session <<< "" >/dev/null 2>&1 || true
+    local claude_md="$CS_SESSIONS_ROOT/test-session/CLAUDE.md"
+
+    assert_file_exists "$claude_md" "session CLAUDE.md should exist" || return 1
+    local after
+    after=$(awk '/<!-- cs:memory-note -->/{getline; print; exit}' "$claude_md")
+    case "$after" in
+        "## "*) : ;;
+        *) echo "  FAIL: memory-note must be introduced by a '## ' heading, got: $after"; return 1 ;;
+    esac
+}
+
+# ============================================================================
 # Runner
 # ============================================================================
 echo "Running test_memory_rules.sh"
@@ -356,4 +400,7 @@ run_test test_phase9_retires_v2_block_to_note
 run_test test_phase9_idempotent_when_already_on_note
 run_test test_note_single_source_of_truth_in_bin_cs
 run_test test_note_has_no_behavioral_instruction
+run_test test_new_session_secret_retrieval_is_transcript_safe
+run_test test_new_session_secret_detection_mandates_scratch_cleanup
+run_test test_memory_note_renders_under_heading
 report_results

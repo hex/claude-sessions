@@ -193,6 +193,16 @@ test_subagent_context_deliverable_is_final_message() {
         "subagent context must tell the subagent its final message is the deliverable" || return 1
 }
 
+test_subagent_context_points_to_secret_store() {
+    # The secrets rule must give the subagent the right action (store it), not
+    # just ban the wrong one — otherwise a subagent that meets a credential
+    # improvises instead of using the session secret store.
+    local output
+    output=$(echo '{}' | bash "$HOOKS_DIR/subagent-context.sh")
+    assert_output_contains "$output" "cs -secrets set" \
+        "the secrets rule must point the subagent at the session secret store" || return 1
+}
+
 test_subagent_injects_session_name() {
     local output
     output=$(echo '{}' | bash "$HOOKS_DIR/subagent-context.sh")
@@ -406,6 +416,67 @@ test_session_start_no_worktree_block_for_plain_sessions() {
         | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
     assert_output_not_contains "$output" "task worktree" \
         "plain sessions must not get the worktree block" || return 1
+}
+
+test_session_start_worktree_abandon_is_user_gated() {
+    session_start_setup
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    printf 'task_branch: cs/fix-auth\ncs_base: myproj\n' >> "$CLAUDE_SESSION_META_DIR/local/state"
+
+    # The abandon command rm -rf's the whole worktree session. Like the merge
+    # command, it must be routed through the user — never left looking self-serve.
+    local output context
+    output=$(echo '{"session_id":"s","source":"clear","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | CLAUDE_SESSION_NAME="myproj@fix-auth" bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+    assert_output_contains "$context" "ask the user to run: cs -rm" \
+        "the destructive abandon command must be gated behind the user, like the merge command" || return 1
+    assert_output_contains "$context" "never run this yourself" \
+        "the abandon command must warn Claude not to self-serve the worktree deletion" || return 1
+}
+
+# Helper: build a refs/worktree/cs/auto shadow ref whose tree differs from HEAD
+# in $1 files (simulates the unsaved crash state the recovery path detects).
+_seed_crash_shadow() {
+    local n="$1" i
+    # Stage only the crash files — git add -A would also sweep in the untracked
+    # .cs/README.md session_start_setup leaves behind, inflating the file count.
+    ( cd "$CLAUDE_SESSION_DIR" \
+        && for i in $(seq 1 "$n"); do echo "autosave $i" > "crash_$i.txt"; done \
+        && git add crash_*.txt && git commit -q -m "autosaved crash state" \
+        && git update-ref refs/worktree/cs/auto HEAD \
+        && git reset -q --hard HEAD~1 )
+}
+
+test_session_start_crash_recovery_warns_before_overwrite() {
+    session_start_setup
+    _seed_crash_shadow 2
+
+    local output context
+    output=$(echo '{"session_id":"s","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+    assert_output_contains "$context" "CRASH RECOVERY" \
+        "crash recovery context must be injected when a shadow ref has changes" || return 1
+    assert_output_contains "$context" "Before starting any other work" \
+        "crash recovery must anchor the ask BEFORE Claude starts the first task" || return 1
+    assert_output_contains "$context" "overwrites any current uncommitted changes" \
+        "crash recovery must warn that restoring clobbers uncommitted work" || return 1
+}
+
+test_session_start_crash_count_reflects_all_files() {
+    session_start_setup
+    # 12 changed files: the count must report 12, not the 10 the list is capped at.
+    _seed_crash_shadow 12
+
+    local output context
+    output=$(echo '{"session_id":"s","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+    assert_output_contains "$context" "12 file(s)" \
+        "the crash file count must reflect all changed files, not the capped list length" || return 1
+    assert_output_contains "$context" "first 10 listed" \
+        "when the list is capped the context must say so" || return 1
 }
 
 test_subagent_context_announces_worktree_task() {
@@ -1010,6 +1081,7 @@ run_test test_subagent_injects_session_name
 run_test test_subagent_injects_session_dir
 run_test test_subagent_returns_valid_json
 run_test test_subagent_skips_outside_session
+run_test test_subagent_context_points_to_secret_store
 
 # Tool failure logger
 run_test test_failure_logged_to_session_log
@@ -1023,6 +1095,9 @@ run_test test_failure_handles_missing_error
 run_test test_session_start_announces_worktree_task
 run_test test_session_start_worktree_block_needs_at_shaped_name
 run_test test_session_start_no_worktree_block_for_plain_sessions
+run_test test_session_start_worktree_abandon_is_user_gated
+run_test test_session_start_crash_recovery_warns_before_overwrite
+run_test test_session_start_crash_count_reflects_all_files
 run_test test_subagent_context_announces_worktree_task
 run_test test_subagent_context_deliverable_is_final_message
 run_test test_session_start_narrative_is_per_actor

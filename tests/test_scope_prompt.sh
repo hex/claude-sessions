@@ -338,6 +338,33 @@ test_scan_acronym_component_match() {
     printf '%s' "$ac" | grep -q "src/HTMLParser.ts" || { echo "  FAIL: 'html' should match HTMLParser.ts (acronym split)"; return 1; }
 }
 
+test_working_tree_truncation_cue() {
+    # finding: `git diff --stat HEAD | tail -10` silently drops leading stat lines when the tree
+    # has >10 changed paths, so a file absent from the list reads as unmodified. The Working tree
+    # header must flag the truncation — and a small diff must NOT be falsely flagged.
+    seed_repo "src/loader.ts"
+
+    # Small dirty tree: one changed file -> no truncation, plain header.
+    printf '// edit\n' >> "$CLAUDE_SESSION_DIR/src/loader.ts"
+    local out ac
+    out=$(run_hook "refactor the loader module")
+    ac=$(additional_context "$out")
+    printf '%s' "$ac" | grep -q "### Working tree" \
+        || { echo "  FAIL: expected a Working tree section for a dirty tree"; return 1; }
+    if printf '%s' "$ac" | grep -q "truncated"; then
+        echo "  FAIL: a small (<=10 line) diff must not carry a truncation cue"; return 1
+    fi
+
+    # Large dirty tree: >10 changed files -> tail drops lines, header must say so.
+    local i
+    for i in $(seq 1 15); do printf 'x\n' > "$CLAUDE_SESSION_DIR/extra$i.txt"; done
+    git -C "$CLAUDE_SESSION_DIR" add -A >/dev/null 2>&1
+    out=$(run_hook "refactor the loader module")
+    ac=$(additional_context "$out")
+    printf '%s' "$ac" | grep -q "### Working tree (truncated" \
+        || { echo "  FAIL: truncated diff --stat must carry a truncation cue in the Working tree header"; return 1; }
+}
+
 # ============================================================================
 # Token cap
 # ============================================================================
@@ -360,6 +387,30 @@ test_token_cap_under_8000_bytes() {
     bytes=$(printf '%s' "$ac" | wc -c | tr -d ' ')
     [ "$bytes" -gt 0 ] || { echo "  FAIL: expected a non-empty scope block"; return 1; }
     [ "$bytes" -le 8000 ] || { echo "  FAIL: additionalContext is $bytes bytes (> 8000 cap)"; return 1; }
+}
+
+test_token_cap_marks_truncation() {
+    # finding: head -c 8000 can sever a path/commit mid-token with no marker, so a truncated tail
+    # reads as a real (but nonexistent) path. When the block overflows the cap it must end with an
+    # explicit truncation marker on its own final line. Same over-cap setup as the byte-cap test.
+    local seg i
+    seg=$(printf 'x%.0s' $(seq 1 200))
+    mkdir -p "$CLAUDE_SESSION_DIR/src/loader/$seg/$seg"
+    for i in $(seq 1 35); do
+        printf 'x\n' > "$CLAUDE_SESSION_DIR/src/loader/$seg/$seg/f$i.ts"
+    done
+    git -C "$CLAUDE_SESSION_DIR" add -A >/dev/null 2>&1
+    git -C "$CLAUDE_SESSION_DIR" commit -q -m seed >/dev/null 2>&1
+    local out ac bytes
+    out=$(run_hook "refactor the loader module")
+    ac=$(additional_context "$out")
+    bytes=$(printf '%s' "$ac" | wc -c | tr -d ' ')
+    [ "$bytes" -le 8000 ] || { echo "  FAIL: capped block is $bytes bytes (> 8000)"; return 1; }
+    printf '%s' "$ac" | grep -qF "[scope block truncated]" \
+        || { echo "  FAIL: a truncated scope block must carry the truncation marker"; return 1; }
+    # The marker must be the LAST line — nothing severed after it.
+    [ "$(printf '%s' "$ac" | tail -1)" = "[scope block truncated]" ] \
+        || { echo "  FAIL: truncation marker must be the final line of the block"; return 1; }
 }
 
 # ============================================================================
@@ -443,7 +494,9 @@ run_test test_scan_component_matches_unexcluded_dir
 run_test test_scan_camelcase_component_match
 run_test test_scan_trailing_punctuation_recall
 run_test test_scan_acronym_component_match
+run_test test_working_tree_truncation_cue
 run_test test_token_cap_under_8000_bytes
+run_test test_token_cap_marks_truncation
 run_test test_noop_outside_cs_session
 run_test test_opt_out_via_disable_env
 run_test test_graceful_malformed_input

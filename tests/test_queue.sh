@@ -163,6 +163,51 @@ test_drain_gate_mentions_high_context() {
     assert_output_contains "$out" "compact" "gate recommends compaction when high" || return 1
 }
 
+test_drain_armed_states_stop_mechanic() {
+    # The armed message must make the turn-driven contract explicit: end the turn
+    # and the next task arrives automatically; the agent must never pop or edit the
+    # queue file itself. Without this the agent may ask "what's next?" or hand-pop.
+    printf 'task one\ntask two\n' > "$(QDIR)/queue"
+    printf 'armed\n' > "$(QDIR)/queue.state"
+    local out; out=$(drain)
+    assert_output_contains "$out" "end your turn" "armed message must instruct ending the turn" || return 1
+    assert_output_contains "$out" "Do not read or edit the queue" "armed message must forbid manual queue edits" || return 1
+}
+
+test_drain_completion_asks_for_debrief() {
+    # Popping the last task must close the final native task and prompt a debrief,
+    # not merely announce that the queue is empty (which leaves a dangling in-progress).
+    printf 'last task\n' > "$(QDIR)/queue"
+    printf 'draining\n' > "$(QDIR)/queue.state"
+    local out; out=$(drain)
+    assert_output_contains "$out" "final native task" "completion must close the final native task" || return 1
+    assert_output_contains "$out" "summary" "completion must ask for a walk-away summary" || return 1
+}
+
+test_drain_high_context_defines_compact_action() {
+    # The heavy-context gate offers a third 'Compact first' option; that option must
+    # define its follow-through (run no queue command) so the agent does not guess
+    # start/defer and either mis-arm or suppress the re-ask.
+    printf 'queued\n' > "$(QDIR)/queue"
+    printf '82\n' > "$(QDIR)/context-pct"
+    local out; out=$(drain)
+    assert_output_contains "$out" "Compact first" "heavy-context gate offers a Compact first option" || return 1
+    assert_output_contains "$out" "run no queue command" "Compact first must define its follow-through" || return 1
+}
+
+test_drain_narrative_reminder_scopes_to_own() {
+    # With no queue the hook falls through to the narrative nag. In a shared session
+    # the newest narrative may belong to a teammate, so the reminder must scope edits
+    # to the actor's OWN narrative and never target a teammate's notebook.
+    mkdir -p "$CLAUDE_SESSION_META_DIR/memory"
+    printf '# narrative\n' > "$CLAUDE_SESSION_META_DIR/memory/narrative.colleague.md"
+    touch -t 202001010000 "$CLAUDE_SESSION_META_DIR/memory/narrative.colleague.md"
+    local out; out=$(drain)
+    assert_output_contains "$out" '"block"' "stale narrative blocks with a reminder" || return 1
+    assert_output_contains "$out" "cs -whoami" "reminder tells the agent how to resolve its own actor" || return 1
+    assert_output_contains "$out" "teammate" "reminder must warn against editing a teammate's narrative" || return 1
+}
+
 run_test test_drain_gates_when_idle_nonempty
 run_test test_drain_armed_injects_first_task_no_pop
 run_test test_drain_armed_mentions_queue_list
@@ -171,6 +216,10 @@ run_test test_drain_empties_and_returns_idle
 run_test test_drain_declined_within_cooldown_falls_through
 run_test test_drain_ignores_subagents
 run_test test_drain_gate_mentions_high_context
+run_test test_drain_armed_states_stop_mechanic
+run_test test_drain_completion_asks_for_debrief
+run_test test_drain_high_context_defines_compact_action
+run_test test_drain_narrative_reminder_scopes_to_own
 
 test_statusline_stamps_context_pct() {
     local sl="$SCRIPT_DIR/../bin/cs-statusline"

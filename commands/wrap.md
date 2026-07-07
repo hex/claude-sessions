@@ -22,7 +22,7 @@ Apply summary.md's two-layer prose gate (its step 5) with one extension: the lex
 
 ## Report
 
-Output a brief two-line report. No long prose; the summary IS the prose.
+Output a brief two-section report (the two labeled items below). No long prose; the summary IS the prose.
 
 1. **Memory:** list the file paths you wrote in Pass 1, one per line. Or write `nothing to add` if the session didn't warrant memory entries.
 2. **Summary:** confirm `.cs/summary.md` was created.

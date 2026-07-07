@@ -23,6 +23,20 @@ Examples: `2026.1.42`, `2026.12.1`
 
 ## Release Steps
 
+### 0. Preflight: Confirm Branch and Sync
+
+Before touching anything, verify you are releasing from the right point:
+
+```bash
+git fetch origin 2>/dev/null
+git status -sb   # shows current branch and ahead/behind vs origin
+```
+
+If you are not on `main`, or `main` is behind `origin/main`, STOP and ask the user
+via **AskUserQuestion** before proceeding — bumping, committing, and tagging from a
+feature branch or a stale `main` puts the tag on the wrong commit (and Step 8's bare
+`git push` may fail). Only continue once you are on `main` and up to date with origin.
+
 ### 1. Bump Version Number
 
 Read `lib/00-header.sh` and find the VERSION line (near the top). Calculate the new version:
@@ -73,6 +87,17 @@ Check these files for accuracy against the current code:
 - Incorrect examples or outdated syntax
 - Missing new features added since last release
 
+**How to verify (do not skim):** for each doc, extract the commands, flags, and paths
+it names and grep them against the source to confirm each still exists — e.g.
+`grep -n -- '-secrets' bin/cs lib/*.sh`, or check a flag with `rg` across `bin/` and
+`lib/`. Then cross-check what changed since the previous release
+(`git log <PREV_TAG>..HEAD --oneline`, where PREV_TAG is
+`git tag --list 'v*' --sort=-version:refname | head -1`) against `README.md` so newly
+added features are documented. This turns "docs look accurate" into a checked claim.
+
+**Report before proceeding:** one line per doc — `checked / issues found / fixed` — so
+the review is auditable rather than a skim.
+
 **Fix any issues found** - update the documentation to match current code.
 
 ### 4. Simplify Code
@@ -81,7 +106,13 @@ Invoke the `/simplify` skill via the Skill tool to review all pending changes fo
 
 The skill fans out three parallel review agents (reuse, quality, efficiency) over the diff and auto-applies fixes it finds. The subsequent test run (Step 5) validates that nothing was broken.
 
-If `/simplify` reports an empty diff, verify this is intentional — a release with zero code changes is unusual unless it's a pure docs/changelog release.
+An empty working-tree diff is expected, not an anomaly, when the release's changes were
+already committed in earlier sessions (the normal case) — `/simplify` reviews only the
+uncommitted diff, not the release's shipped content. Confirm the release content exists
+via `git log <PREV_TAG>..HEAD --oneline` (PREV_TAG =
+`git tag --list 'v*' --sort=-version:refname | head -1`) and move on. Only if BOTH the
+working-tree diff and that commit range are empty, stop and confirm with the user via
+**AskUserQuestion** whether a zero-change release is intended.
 
 ### 5. Run Tests
 
@@ -115,6 +146,10 @@ git log "$PREV_TAG"..HEAD --oneline --no-merges
 # some releases may have only working tree changes with no intermediate commits
 ```
 
+If `PREV_TAG` is empty (first release, or the tag fetch failed), treat this as the
+first release: use the full `git log` and omit the Full Changelog compare link below —
+do not run `git log ""..HEAD`, which errors.
+
 **Cross-check against CHANGELOG.md** to avoid duplicating already-released features. Read the previous release entry in CHANGELOG.md and verify that nothing in your draft was already shipped. This is critical when working tree changes accumulate across multiple sessions — features from earlier sessions may already be released even though the files show as modified in `git diff`.
 
 - Group the commits into categories: **Features**, **Fixes**, **Docs**, **Other**
@@ -124,8 +159,12 @@ git log "$PREV_TAG"..HEAD --oneline --no-merges
 Show the draft to the user via **AskUserQuestion** with options:
 - **Approve** - proceed with commit and release
 - **Edit** - let the user provide revised release notes
+- **Cancel release** - abort; make no commit, push, tag, or GitHub release
 
-Do NOT proceed to commit until the user approves.
+Do NOT proceed to commit until the user explicitly approves. **Edit** does not count as
+approval: after the user provides edits, show the revised notes and ask again via
+**AskUserQuestion**, looping until you get an explicit **Approve**. Only that unlocks
+Step 8.
 
 ### 7. Update Changelog
 
@@ -149,6 +188,12 @@ git commit -m "Release vX.Y.Z"
 git push
 ```
 
+**Inspect the `git status` output before `git add -A`.** If it shows files unrelated to
+the release — scratch scripts, test artifacts, `.DS_Store`, stray build output — do NOT
+use `-A`: stage the release files explicitly (`git add lib/00-header.sh bin/cs
+CHANGELOG.md <docs you touched>`) and ask the user about the strays before committing.
+`-A` is only safe when status shows exactly the release's own changes.
+
 ### 9. Create GitHub Release
 
 Create a GitHub release with the approved release notes using the `gh` CLI:
@@ -159,6 +204,21 @@ gh release create vX.Y.Z --title "vX.Y.Z" --notes "$(cat <<'EOF'
 EOF
 )"
 ```
+
+### 10. Verify the Release Workflow Succeeded
+
+`gh release create` returning is NOT the finish line — the tag push kicks off the CI
+release workflow that signs and attaches the assets, and it can still fail (signing,
+asset upload). Watch it to completion:
+
+```bash
+gh run list --workflow=release.yml --limit 1   # or: gh run watch
+gh release view vX.Y.Z --json assets --jq '.assets[].name'
+```
+
+The release is not done until the `.minisig` signature files and `install.sh` appear as
+release assets. If the workflow fails, report it to the user before stopping — a green
+`gh release create` with a red workflow ships a release that installers cannot verify.
 
 ## Signed Releases
 
