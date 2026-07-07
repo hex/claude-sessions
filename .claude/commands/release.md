@@ -51,7 +51,7 @@ bash tests/test_install.sh
 ```
 
 **Check these specifically (not covered by the sync tests):**
-- Every binary installed (`cs`, `cs-secrets`, `cs-tui`) is removed by `run_uninstall()`
+- Every binary installed (`cs`, `cs-secrets`, `cs-statusline`, `cs-tui`) is removed by `run_uninstall()`
 - Every settings.json hook event configured by `install.sh` is cleaned up by `run_uninstall()`
 
 **Fix any drift immediately** — update all three locations (install.sh, run_uninstall, docs/hooks.md) before proceeding.

@@ -64,6 +64,12 @@ masked; `run_all.sh` reports every failing suite.
 
 2. **Add the filename to the `CS_COMMANDS` array** in both `install.sh` and `lib/00-header.sh` (assembled into `bin/cs`) — the two carry KEEP IN SYNC comments. Install (download + copy), `run_uninstall()`, and doctor all loop over the array, so no per-command variable or cleanup edit is needed. `tests/test_install.sh` fails if the arrays disagree with each other or with the actual `commands/` files.
 
+## Adding a Skill
+
+1. **Create `skills/name/SKILL.md`** with the skill's frontmatter (`name`, `description`) and instructions. Copy an existing skill (e.g., `skills/store-secret/`) as a template.
+
+2. **Add the directory name to the `CS_SKILLS` array** in both `install.sh` and `lib/00-header.sh` (KEEP IN SYNC comments) — install, `run_uninstall()`, and doctor all loop over it. `tests/test_install.sh` fails if the array disagrees with the `skills/` directory contents.
+
 ## Code Style
 
 - Match the style of surrounding code.
