@@ -45,7 +45,7 @@ Both are written in parallel from the conversation — narrative is not the upst
 
 4. **Narrative sweep — looser bar.** If a substantive finding from this session is not yet in your narrative (`.cs/memory/narrative.<actor>.md`), append it as a dated section. Substantive = something a future session resuming this work would want to know.
 
-5. **Write quietly.** No chat summary. List the files you wrote (one line each) or say "nothing to add" if the session didn't warrant entries. Empty output is a successful sweep when the conversation didn't surface durable facts.
+5. **Write quietly.** No chat summary. List the files you wrote (one line each) or say "nothing to add" if the session didn't warrant entries.
 
 ## When NOT to write
 
@@ -54,5 +54,3 @@ Both are written in parallel from the conversation — narrative is not the upst
 - Restatements of existing memory entries.
 - Anything you'd document as "we did X" — that's a discovery, not a memory.
 - Anything inferring beyond what was literally said or clearly implied.
-
-The default for most sessions is "nothing to add." Resist the urge to manufacture entries.
