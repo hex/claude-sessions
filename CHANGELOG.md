@@ -4,6 +4,14 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.7.7
+
+The interactive session manager (TUI) now adapts to the terminal's shape. When the window is taller than it is wide, the preview and To-Do panes stack vertically below the session list — list on top, details in the middle, notes at the bottom — instead of sitting beside it. Wide terminals keep the side-by-side layout, and small windows still show the list alone.
+
+### Features
+
+- **Responsive TUI layout** — the session list, details/preview, and To-Do panes now arrange themselves by the terminal's aspect ratio (accounting for the ~2:1 terminal-cell shape): stacked top-to-bottom on portrait windows, side-by-side on landscape ones. The `p` key still toggles the detail panes.
+
 ## 2026.7.6
 
 A CI-reliability release. The first run of the Test workflow on `main` surfaced environment gaps in the **test suite itself** — not product bugs. This release makes the suite portable across the CI runners and removes a parallel-test flake. **No user-facing behavior changes**; there is nothing to do on upgrade.
