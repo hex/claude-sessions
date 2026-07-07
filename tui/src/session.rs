@@ -104,12 +104,49 @@ pub fn load_preview(session_dir: &Path) -> SessionPreview {
 }
 
 pub fn sessions_root() -> PathBuf {
+    #[cfg(test)]
+    if let Some(root) = test_root::current() {
+        return root;
+    }
     std::env::var("CS_SESSIONS_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
             let home = std::env::var("HOME").expect("HOME not set");
             PathBuf::from(home).join(".claude-sessions")
         })
+}
+
+/// Test-only sessions-root override. `set_var("CS_SESSIONS_ROOT")` is a
+/// process-global mutation that races the many parallel tests reading env
+/// through `sessions_root()` (a logical data race on shared state). Cargo runs
+/// each test on its own thread, so a thread-local root is naturally isolated per
+/// test: `scoped(root)` sets it for the life of the returned guard and clears it
+/// on drop (panic-safe, so a reused test thread never leaks it).
+#[cfg(test)]
+pub mod test_root {
+    use std::cell::RefCell;
+    use std::path::PathBuf;
+
+    thread_local! {
+        static ROOT: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+    }
+
+    pub(super) fn current() -> Option<PathBuf> {
+        ROOT.with(|c| c.borrow().clone())
+    }
+
+    #[must_use]
+    pub fn scoped(root: PathBuf) -> Guard {
+        ROOT.with(|c| *c.borrow_mut() = Some(root));
+        Guard
+    }
+
+    pub struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            ROOT.with(|c| *c.borrow_mut() = None);
+        }
+    }
 }
 
 /// Directory holding a session's per-machine queue files (`.cs/local`).
