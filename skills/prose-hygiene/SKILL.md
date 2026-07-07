@@ -11,8 +11,9 @@ The complete checklist for removing AI writing tells from prose. While drafting,
 avoid the patterns below. A reviewer applying this reads the prose, flags every match
 below with the quoted text and a concrete rewrite, then scores it (see Scoring). A
 regex can only catch the lexical items; the structural and voice rules need a model
-judging meaning. cs applies this to /summary and /wrap narratives; the lexical subset
-is enforced by `cs -lint`.
+judging meaning. cs applies this to /summary and /wrap output (`.cs/summary.md` and the memory
+entries; the narrative notebooks are exempt); the lexical subset is enforced by
+`cs -lint` and the prose-lint Stop hook.
 
 ## Core principles
 
@@ -33,13 +34,13 @@ Announcements before the point. Cut them and state the point.
 
 ### Emphasis crutches
 Add no meaning. Delete them.
-"Full stop.", "Period.", "Let that sink in.", "This matters because", "Make no mistake", "Here's why that matters".
+"Full stop.", "Period.", "Let that sink in.", "This matters because", "Make no mistake", "Here's why that matters", "Needless to say", "Rest assured", "Without a doubt", "The fact of the matter is".
 
 ### Business jargon
 Replace with plain language: navigate → handle; unpack → explain; lean into → accept; landscape → situation; game-changer → significant; double down → commit; deep dive → analysis; take a step back → reconsider; moving forward → next; circle back → revisit; on the same page → aligned.
 
 ### Adverbs
-Cut all of them. No -ly words, no softeners, no intensifiers, no hedges. Specific offenders: really, just, literally, genuinely, honestly, simply, actually, deeply, truly, fundamentally, inherently, inevitably, interestingly, importantly, crucially. Also cut these fillers: "at its core", "in today's [X]", "it's worth noting", "at the end of the day", "when it comes to", "in a world where", "the reality is".
+Cut all of them. No -ly words, no softeners, no intensifiers, no hedges. Specific offenders: really, just, literally, genuinely, honestly, simply, actually, deeply, truly, fundamentally, inherently, inevitably, interestingly, importantly, crucially. Also cut these fillers: "at its core", "in today's [X]", "it's worth noting", "at the end of the day", "when it comes to", "in a world where", "the reality is", "last but not least", "when all is said and done".
 
 ### Meta-commentary
 Remove self-referential asides. The text should move, not announce its own structure.

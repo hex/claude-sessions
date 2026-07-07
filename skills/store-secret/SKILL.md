@@ -38,7 +38,11 @@ If empty, inform the user that secrets storage requires a cs session and skip st
    verbatim by the bash-logger hook into `.cs/local/session.log`.
    The Bash command itself must not contain the secret:
    - Write the raw value to a scratch file with the **Write** tool (Write is not
-     logged by bash-logger; a Bash heredoc would be), e.g. `<scratchdir>/.secret`
+     logged by bash-logger; a Bash heredoc would be). The scratch file MUST live
+     OUTSIDE the session workspace (the harness scratchpad dir, or `mktemp` under
+     `$TMPDIR`), e.g. `<scratchdir>/.secret` — any Write inside the session
+     directory is immediately snapshotted into the `refs/worktree/cs/auto` autosave
+     ref by the autosave-commits hook, and that snapshot survives the later `rm`
    - Store it by redirecting that file into stdin:
      ```bash
      cs -secrets set KEY_NAME < <scratchdir>/.secret
