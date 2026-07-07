@@ -1,6 +1,6 @@
 # Secrets Handling
 
-Store sensitive data (API keys, tokens, passwords) in a secure backend instead of writing it into project files in plaintext. The value is always read from stdin, so it never appears in argv or the command log.
+Store sensitive data (API keys, tokens, passwords) in a secure backend instead of writing it into project files in plaintext. Pipe the value on stdin (the recommended path) so it never appears in argv or the command log; a value passed on the command line is honoured but warned against, since it is visible via `ps` and captured verbatim by the bash-logger hook.
 
 ## Storage Backends
 
@@ -177,20 +177,20 @@ cs -secrets migrate-backend encrypted --from keychain --delete-source
 
 ## Migrating Existing Secrets
 
-If you have sessions created before the secrets feature was added, plaintext secrets may exist in artifact files. Use the migrate command to move them to secure storage:
+Sessions created before the secrets feature may hold plaintext secrets in the retired `.cs/artifacts/` directory (cs no longer creates it, but old sessions still have it). Use the migrate command to move them to secure storage:
 
 ```bash
-# Scan artifacts and migrate secrets to keychain (keeps original files)
+# Scan the legacy .cs/artifacts/ files and migrate secrets (keeps originals)
 cs -secrets migrate
 
-# Migrate and redact plaintext values in artifact files
+# Migrate and redact plaintext values in place
 cs -secrets migrate --redact
 ```
 
 The migrate command:
-1. Scans all artifact files in the session
+1. Scans the legacy `.cs/artifacts/` files in the session
 2. Detects KEY=value patterns with sensitive key names
-3. Stores values securely in the keychain
+3. Stores values in the active backend
 4. Optionally replaces plaintext with `[REDACTED: stored in keychain as KEY]`
 
 ## Age Commands Reference

@@ -9,7 +9,9 @@ Runs when Claude Code starts a session:
 - On all sources: clears the statusline's attention marker (`.cs/local/attention`) — a fresh session is attended by definition
 - On all sources: rebinds `claude_session_id` in the machine-local `.cs/local/state` to the live conversation UUID from the hook input. Claude Code forks a new UUID when a conversation is continued past the context limit (the old transcript stays on disk), so the recorded binding can silently go stale and `cs` would resume the pre-fork conversation. Non-UUID session ids are ignored; each rebind is logged to `session.log`
 - On `startup`/`resume` only: configures `transfer.hideRefs`, recovers autosaved changes from crashed sessions
-- On `resume` only: injects dynamic context (last activity, recent commits, objective, up to 5 most recently active sibling sessions with their objectives), and a per-actor digest of shared memory/narrative activity since this actor's `.cs/local/watermark` (grouped by git author), then advances the watermark
+- On `resume` only: injects dynamic context (last activity, recent commits, objective, up to 5 most recently active sibling sessions with their objectives), and a per-actor digest of shared memory/narrative activity since this actor's `.cs/local/watermark` (grouped by git author), then advances the watermark and stamps the day's date into `last_resumed`
+- In a task worktree (when `task_branch` is in machine-local state): injects a Task Worktree contract instructing Claude to integrate only via `cs <base> --merge <task>` and never merge the branch manually
+- On a fresh rebind (`CS_FRESH_REBIND=1`, e.g. after a forked-conversation rebind): injects a Fresh Conversation notice so Claude treats the turn as a clean break
 - On all sources: exports session environment variables, injects session context into Claude's system prompt
 
 ## autosave-commits.sh (PostToolUse on Write/Edit)
@@ -35,7 +37,7 @@ Runs when Claude pauses for user input:
 
 Runs when Claude pauses for user input:
 - Lints prose written this session via `cs -lint` and blocks turn-end (`decision: block`) when AI-slop tells are found, feeding the file:line violations back so Claude fixes them before stopping
-- Scope is `.cs/summary.md` and `.cs/memory/*.md` (surfaces with no cross-session in-file backlog); the append-heavy `narrative.md` and the `MEMORY.md` index are excluded
+- Scope is `.cs/summary.md` and `.cs/memory/*.md` (surfaces with no cross-session in-file backlog); the append-heavy narrative notebooks (`narrative.md` and the per-actor `narrative.<actor>.md`) and the `MEMORY.md` index are excluded
 - Only files modified at/after `session.lock` mtime are checked, so a resumed session never re-flags prose written in earlier sessions
 - After 3 consecutive unresolved blocks, allows the stop with a `session.log` warning rather than trapping the session
 
@@ -45,6 +47,8 @@ Runs when Claude Code session ends:
 - Logs session end time and the exit source reported by Claude Code (defaulting to `user_exit` when none is given) and appends an `ended` event to `.cs/timeline.jsonl`
 - Deletes the shadow autosave refs (`refs/worktree/cs/auto` for this checkout, plus any legacy `refs/cs/auto`)
 - Cleans up lock files
+- Regenerates the sessions index (`<sessions-root>/index.md`) — a table of every session's status, objective, and created date
+- Skipped entirely inside subagents (guarded on the hook input's `agent_id`)
 
 ## subagent-context.sh (SubagentStart)
 
