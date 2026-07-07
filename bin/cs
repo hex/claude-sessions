@@ -1164,14 +1164,14 @@ in-progress findings.
 Update the markdown documentation files throughout the session:
 
 1. **Start of session:** Fill in .cs/README.md objective and environment
-2. **As you work:** Update .cs/memory/narrative.md with findings
+2. **As you work:** Update your narrative (.cs/memory/narrative.<actor>.md — run `cs -whoami` for your actor) with findings
 3. **End of session:** Complete the .cs/README.md outcome section
 
 Treat these files as a lab notebook - document as you go, not just at the end.
 
 ## Wrap-up Command
 
-When the session is complete, use the `/wrap` command to distill durable memory entries and generate an intelligent summary of the entire session (.cs/summary.md). Use `/summary` for the narrative alone, or `/sweep` for the memory pass alone.
+When the session is complete, use the `/wrap` command to distill durable memory entries and generate an intelligent summary of the entire session (.cs/summary.md). Use `/summary` for the narrative alone, or `/sweep` for the memory pass alone. Mid-session, use `/checkpoint <label>` to snapshot git state and the narrative at meaningful moments (saved under .cs/checkpoints/).
 
 ## Secure Secrets Handling
 
@@ -1189,11 +1189,15 @@ cs -secrets export                 # Export as environment variables
 ```
 
 **If you detect sensitive data** in the workspace (embedded credentials, a
-committed token, etc.), store it and replace it with a reference. Pass the value
-on stdin so it never hits argv or the command log:
+committed token, etc.), store it with the `store-secret` skill and replace it
+with a reference. The skill writes the value to a scratch file with the Write
+tool (which the bash-logger does not capture) and feeds it in via a stdin
+redirect, so the plaintext never reaches argv or the command log:
 ```bash
-printf '%s' "the-secret-value" | cs -secrets set <name>
+cs -secrets set <name> < /path/to/scratch-file   # value on stdin, not in argv
 ```
+Never `echo`/`printf` a secret into a pipe — the bash-logger records the whole
+Bash command (secret and all) in `.cs/local/session.log`.
 
 EOF
     _emit_memory_note_block
@@ -1224,7 +1228,7 @@ To opt out, delete the prose above but keep the `cs:wrap-cues` HTML comment as a
 
 ## Best Practices
 
-- Document findings in .cs/memory/narrative.md as you go - don't wait until the end
+- Document findings in your narrative (.cs/memory/narrative.<actor>.md) as you go - don't wait until the end
 - Run `/wrap` at the end to distill memory and create a cohesive record
 - Never write raw API keys or passwords to project files - use cs -secrets
 EOF

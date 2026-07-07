@@ -10,15 +10,15 @@ You are working in a cs session. Your task is to create a comprehensive summary 
 
 1. **Read all session documentation:**
    - .cs/README.md (objective, environment, outcome)
-   - .cs/memory/narrative.md (session lab notebook: findings, observations, in-progress state)
-   - .cs/artifacts/MANIFEST.json (list of created files)
+   - .cs/memory/narrative.*.md (per-actor lab notebooks — read all of them: findings, observations, in-progress state)
+   - .cs/timeline.jsonl (structured session events: starts, ends, checkpoints)
 
 2. **Synthesize into a cohesive summary** that tells the story of this session. The summary should:
    - Explain what you were trying to accomplish
    - Describe the environment and context
    - Highlight key discoveries and insights
    - Summarize the changes and modifications made
-   - List important artifacts created
+   - List notable files or outputs produced (derive from git history)
    - Conclude with the outcome and results
 
 3. **Write the summary to .cs/summary.md** in the session metadata directory. Use this structure:
@@ -45,9 +45,9 @@ You are working in a cs session. Your task is to create a comprehensive summary 
 
 [What modifications were made? Organize by category if appropriate]
 
-## Artifacts Created
+## Key Files & Outputs
 
-[List scripts, configs, or other files created with brief descriptions]
+[List notable files created or changed during the session — derive from git history and your own record — with brief descriptions]
 
 ## Outcome
 

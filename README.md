@@ -38,7 +38,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 - **Documentation templates** - Pre-configured markdown files for the session narrative and outcome
 - **Automatic git version control** - Every session gets a local git repo; in-session edits are autosaved to a shadow ref for crash recovery
 - **Session locking** - PID-based lock prevents the same session from being opened in two terminals simultaneously; use `--force` to override
-- **Deterministic Claude-session resume** - Each session pre-allocates a conversation UUID, recorded per-machine in the gitignored `.cs/local/state` (so shared sessions never merge-conflict on it). `cs <name>` resumes the *exact* conversation via `claude --resume <uuid>`, not the most-recent one that `--continue` might pick from a sibling. A `ps`-based guard refuses to launch a second claude for the same conversation (`--force` overrides), `cs -doctor` cross-checks the recorded UUID against the live one, and every launch passes `--name <session>` plus a per-session `/color` so parallel sessions stay visually distinct in Claude Code's UI.
+- **Deterministic Claude-session resume** - Each session pre-allocates a conversation UUID in the gitignored `.cs/local/state`, so `cs <name>` resumes the *exact* conversation via `claude --resume <uuid>`, not the most-recent one `--continue` might pick from a sibling. A `ps`-based guard refuses to launch a second claude for the same conversation (`--force` overrides), and every launch passes `--name` plus a per-session `/color` so parallel sessions stay visually distinct.
 - **Per-session memory path redirect** - cs points Claude Code's built-in auto-memory writer at `<session>/.cs/memory/` (via `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE`) so durable facts land in the session instead of the global project store. The harness owns how memory files are written (naming, frontmatter, `MEMORY.md` index); cs owns only the storage path.
 - **Cross-session search** - `cs -search <query>` greps across all sessions' narrative, memory, and README
 - **Prose hygiene enforcement** - `cs -lint <file>` flags AI-slop tells (em-dashes, a curated banned-phrase list) outside code fences; the `prose-lint` Stop hook blocks turn-end when prose written this session carries them. `/summary` and `/wrap` add a subagent judge that applies the full `prose-hygiene` taxonomy a regex can't catch. See [docs/hooks.md](docs/hooks.md)
@@ -47,7 +47,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 
   ![cs-statusline: session and model accents, amber rate-limit warnings, standard-Unicode segment icons](assets/screenshot2.png)
 - **Health checks** - `cs -doctor` reports status of Keychain backend, hook registration, shadow-ref freshness, auto-memory writability, status line registration, Claude Code settings audit (hooks/MCPs/permissions/env vars counts), and cumulative token usage for the current project
-- **Bash command audit trail** - Every Bash command Claude runs is logged to `.cs/logs/session.log` with timestamps
+- **Bash command audit trail** - Every Bash command Claude runs is logged to `.cs/local/session.log` (machine-local, never git-synced) with timestamps
 - **Update notifications** - Checks for updates and notifies when new versions are available
 - **Verified updates** - Updates are downloaded from GitHub Releases and verified with SHA-256 checksums; additionally verified with [minisign](https://jedisct1.github.io/minisign/) signatures when available
 
@@ -64,8 +64,8 @@ Or clone and run `./install.sh`.
 > :warning: Always review [install.sh](install.sh) before running scripts from the internet.
 
 The installer:
-- Adds `cs`, `cs-secrets`, and `cs-tui` to `~/.local/bin/`
-- Installs eleven [hooks](docs/hooks.md) to `~/.claude/hooks/cs/` for session tracking (including the `/scope` auto-grounding hook on UserPromptSubmit)
+- Adds `cs`, `cs-secrets`, `cs-statusline`, and `cs-tui` to `~/.local/bin/`
+- Installs the cs [hooks](docs/hooks.md) to `~/.claude/hooks/cs/` for session tracking (including the `scope-prompt` auto-grounding hook on UserPromptSubmit)
 - Adds `/summary`, `/checkpoint`, `/sweep`, and `/wrap` commands, and the `store-secret` and `prose-hygiene` skills to `~/.claude/`
 - Installs shell completions for bash and zsh
 - Configures hook entries in `~/.claude/settings.json`
@@ -76,12 +76,18 @@ The installer:
 cs                          # Interactive session manager (TUI)
 cs <session-name>           # Create or resume a session
 cs <session-name> --force   # Override active session lock
+cs <base>@<task>            # Create/resume a parallel task worktree off <base>
+cs <base> --merge <task>    # Merge a task worktree back into <base>
 cs -adopt <name>            # Adopt current directory as a session
 cs -whoami                  # Show the current actor (for shared, multi-person sessions)
 cs -who                     # Show who contributed to shared memory/narrative (git history)
 cs -search <query>          # Search across all sessions
-cs -doctor, -diag           # Run health checks (Keychain, hooks, memory, audit, leaks, tokens)
+cs -checkpoint "<label>"    # Snapshot git state + narrative (also: list, show <name>)
+cs -queue add "<task>"      # Walk-away task queue (also: list, rm <n>, clear)
+cs -doctor, -diag           # Run health checks (Keychain, hooks, memory, audit, tokens)
 cs -lint <file>...          # Flag AI-slop prose tells (em-dashes, banned phrases); 0 clean 1 issues 2 error
+cs -statusline enable|disable  # Enable or remove the cs status line
+cs -detect-theme            # Show the detected terminal light/dark theme
 cs -list, -ls               # List all sessions
 cs -remove, -rm <name>      # Remove a session
 cs -update                  # Update to latest version
@@ -111,7 +117,7 @@ Running `cs` with no arguments launches an interactive TUI for browsing and mana
 - **Quit** with `q` or `Esc`
 - **Light/dark palette** — the warm palette adapts to the terminal background detected at launch (`CS_TERM_THEME`); set the env var to force `light` or `dark`
 
-The TUI requires `cs-tui` (an ~785 KB Rust binary). Build from source: `cd tui && cargo build --release`.
+The TUI requires `cs-tui` (a small standalone Rust binary). Build from source: `cd tui && cargo build --release`.
 
 ### Session Commands
 
@@ -152,7 +158,8 @@ This converts the current directory into a cs session in place:
 │   ├── memory/             # Claude Code auto memory + per-actor narrative.<actor>.md lab notebooks
 │   ├── plans/              # Claude Code plans
 │   ├── timeline.jsonl      # Session event log (starts, ends, checkpoints)
-│   └── logs/session.log    # Bash command audit trail + session log
+│   ├── checkpoints/        # Labelled narrative snapshots (/checkpoint)
+│   └── local/              # Machine-local state + session.log audit trail (gitignored)
 ├── .claude/
 │   └── settings.local.json # Redirects auto memory into .cs/memory
 ├── CLAUDE.md               # Session instructions for Claude
@@ -165,8 +172,8 @@ Claude Code's [auto memory](https://code.claude.com/docs/en/memory) is redirecte
 
 Sessions are designed to be shared through git (push/pull the whole session directory). Everything cs writes automatically is partitioned so independent work on two clones merges cleanly:
 
-- **Machine-local state never syncs.** The Claude conversation UUID, session color, and resume timestamps live in gitignored `.cs/local/state` — each machine binds its own conversation. A launch guard refuses to run if `.cs/local/` ever becomes tracked.
-- **Append-only files union-merge.** `session.log`, `timeline.jsonl`, and the per-actor `narrative.*.md` notebooks carry `merge=union` in the session `.gitattributes`, so divergent appends interleave instead of conflicting.
+- **Machine-local state never syncs.** The Claude conversation UUID, session color, and resume timestamps (in `.cs/local/state`) and the `session.log` command audit trail live under gitignored `.cs/local/` — each machine binds its own conversation and keeps its own log. A launch guard refuses to run if `.cs/local/` ever becomes tracked.
+- **Append-only files union-merge.** `timeline.jsonl` and the per-actor `narrative.*.md` notebooks carry `merge=union` in the session `.gitattributes`, so divergent appends interleave instead of conflicting.
 - **`MEMORY.md` resolves to the local copy** (`merge=ours`); each actor's pointer line is re-added idempotently on the next launch.
 - **Secrets sync per machine.** `cs -secrets export-file` writes `.cs/secrets.<machine-id>.age/.enc` — distinct files per machine instead of one shared encrypted blob whose bytes change every export — and `import-file` merges every sync file it can decrypt. See [docs/secrets.md](docs/secrets.md).
 - **What can still conflict is real content**: the README objective/outcome, memory entries, and your project files — places where two humans genuinely disagree and should reconcile by hand.
@@ -277,7 +284,7 @@ export CS_TERM_BG_RGB="250;248;242"   # r;g;b, 0-255 each
 export NO_COLOR="1"
 
 # Status line: choose/order segments, or disable entirely
-export CS_STATUSLINE_SEGMENTS="session,notes,git,model,ctx,limits,cost"
+export CS_STATUSLINE_SEGMENTS="logo,session,notes,git,model,ctx,limits,cost"  # this is the default
 export CS_STATUSLINE_DISABLE="1"
 ```
 
@@ -287,6 +294,7 @@ The following environment variables are set automatically when you start a sessi
 - `CLAUDE_SESSION_DIR` - Full path to the session directory (workspace root)
 - `CLAUDE_SESSION_META_DIR` - Path to the `.cs/` metadata directory
 - `CLAUDE_CODE_TASK_LIST_ID` - Set to the session name for task list persistence
+- `CLAUDE_CODE_AUTO_MEMORY_PATH` / `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE` - Redirect Claude Code's auto-memory writer into `<session>/.cs/memory/`
 
 ## Shell Completion
 
@@ -355,7 +363,7 @@ WHERE file.name = "README" AND status = "active"
 ```
 ````
 
-**Graph view tip:** In Obsidian's graph settings, add `.cs/logs` to the folder exclusion filter to reduce clutter.
+**Graph view tip:** In Obsidian's graph settings, add `.cs/local` to the folder exclusion filter to reduce clutter.
 
 ## Requirements
 

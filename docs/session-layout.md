@@ -21,7 +21,7 @@ The one distinction that governs everything below is **shared vs machine-local**
 |------|---------|-------|
 | `.cs/README.md` | Session objective (captured from the first prompt) and outcome. Human-edited. | default |
 | `.cs/summary.md` | Distilled session summary, written by `/wrap` and `/summary`. | default |
-| `.cs/timeline.jsonl` | Structured event log — `session_start`, `session_end`, and checkpoint events as newline-delimited JSON. | `union` |
+| `.cs/timeline.jsonl` | Structured event log — `started`, `ended`, and `checkpoint` events as newline-delimited JSON. | `union` |
 | `.cs/memory/MEMORY.md` | Index of Claude Code's native auto-memory (one line per fact). | `ours` |
 | `.cs/memory/<bucket>_*.md` | Native auto-memory fact files (user, feedback, project, reference). Written by the harness. | default |
 | `.cs/memory/narrative.<actor>.md` | Per-actor lab notebook. Each co-developer writes their own file; everyone reads all of them on resume. | `union` |
@@ -36,18 +36,23 @@ recipients. See [secrets.md](secrets.md) for the sync model.
 
 `.cs/session.lock` is a PID-based lock written at the session root (not under
 `local/`). It is ephemeral and machine-specific; it exists only while a session
-is open and is cleaned up on exit.
+is open and is cleaned up on exit. `.cs/.narrative-reminder-cooldown` is a
+similar gitignored transient at the `.cs/` root — the narrative reminder's
+5-minute cooldown stamp.
 
 ## Machine-local files (`.cs/local/`, gitignored)
 
 | File | Purpose |
 |------|---------|
 | `session.log` | Human-readable audit trail — bash commands, session lifecycle, autosave notes, UUID rebinds. Per-checkout by nature; the shared structured record is `timeline.jsonl`. |
-| `state` | Session state bound to this checkout: `claude_session_id` (the conversation UUID to resume) and `claude_session_color` (the `/color` palette entry). Each machine binds its own conversation, so this must not sync. |
+| `state` | Session state bound to this checkout: `claude_session_id` (the conversation UUID to resume), `claude_session_color` (the `/color` palette entry), `last_resumed` (last resume date), and, for task worktrees, `task_branch` and `cs_base`. Each machine binds its own conversation, so this must not sync. |
 | `identity` | Overrides the actor name for shared memory/narrative attribution (precedence: `$CS_ACTOR` > `local/identity` > git `user.email` > git `user.name`). |
 | `attention` | Status-line attention marker — raised by the `Stop` hook when Claude finishes, cleared on the next prompt. |
 | `queue` | The walk-away task queue (`cs -queue`). |
+| `queue.state` | Drain state machine for the queue: `idle`, `armed`, or `draining`. |
+| `queue.done` | Log of completed queued tasks, appended as each is drained. |
 | `queue.declined` | Cooldown stamp after declining the queue-drain prompt. |
+| `.prose-lint-attempts` | Loop-guard counter for the `prose-lint` Stop hook (allows the stop after repeated unresolved blocks). |
 | `watermark` | Per-actor high-water mark for the "shared memory/narrative activity since you were last here" digest injected on resume. |
 | `context-pct` | Latest context-window percentage, stamped by the status line and read by the narrative reminder to suggest compaction. |
 
