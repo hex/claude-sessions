@@ -54,7 +54,7 @@ bash tests/test_install.sh
 - Every binary installed (`cs`, `cs-secrets`, `cs-statusline`, `cs-tui`) is removed by `run_uninstall()`
 - Every settings.json hook event configured by `install.sh` is cleaned up by `run_uninstall()`
 
-**Fix any drift immediately** — update all three locations (install.sh, run_uninstall, docs/hooks.md) before proceeding.
+**Fix any drift immediately** — update install.sh, the `run_uninstall()` source in `lib/85-adopt-uninstall.sh` (then re-run `./build.sh` to regenerate bin/cs), and docs/hooks.md before proceeding. Never hand-edit bin/cs; it is assembled from lib/.
 
 ### 3. Review Documentation
 
@@ -79,17 +79,11 @@ Check these files for accuracy against the current code:
 
 Invoke the `/simplify` skill via the Skill tool to review all pending changes for reuse, quality, and efficiency. This catches duplicated logic, hacky patterns, and inefficiencies before they ship.
 
-The skill fans out three parallel review agents (reuse, quality, efficiency) over the diff and auto-applies fixes it finds. The subsequent test run (Step 6) validates that nothing was broken.
+The skill fans out three parallel review agents (reuse, quality, efficiency) over the diff and auto-applies fixes it finds. The subsequent test run (Step 5) validates that nothing was broken.
 
 If `/simplify` reports an empty diff, verify this is intentional — a release with zero code changes is unusual unless it's a pure docs/changelog release.
 
-### 5. Update Changelog
-
-CHANGELOG.md exists at the repo root. After generating release notes (Step 7) and getting approval, insert the approved notes as a new `## X.Y.Z` section at the top of the file (after the header, before the previous version's section). Use the version number WITHOUT the `v` prefix to match existing entries. Include all the same content as the GitHub Release notes.
-
-The CHANGELOG entry is committed as part of the release commit in Step 8.
-
-### 6. Run Tests
+### 5. Run Tests
 
 Run the full test suite to verify nothing is broken before releasing:
 
@@ -103,7 +97,7 @@ passes the rest as ignored arguments, so all but one suite silently never run.)
 
 Stop immediately if any tests fail. Do not proceed with the release until all tests pass.
 
-### 7. Generate Release Notes and Get Approval
+### 6. Generate Release Notes and Get Approval
 
 Generate release notes by looking at what changed since the last release:
 
@@ -132,6 +126,12 @@ Show the draft to the user via **AskUserQuestion** with options:
 - **Edit** - let the user provide revised release notes
 
 Do NOT proceed to commit until the user approves.
+
+### 7. Update Changelog
+
+CHANGELOG.md exists at the repo root. Now that the release notes are approved (Step 6), insert them as a new `## X.Y.Z` section at the top of the file (after the header, before the previous version's section). Use the version number WITHOUT the `v` prefix to match existing entries. Include all the same content as the GitHub Release notes. If a `## Unreleased` section exists, fold its entries into this new version section rather than leaving a duplicate.
+
+The CHANGELOG entry is committed as part of the release commit in Step 8.
 
 ### 8. Commit and Push
 

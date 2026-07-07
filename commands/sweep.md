@@ -27,14 +27,16 @@ Both are written in parallel from the conversation — narrative is not the upst
 
    Most sessions produce nothing here. The expected answer for most files on most sessions is "no." Don't reach.
 
-   Route each fact that passes by what the user actually said:
+   Route each fact that passes to a bucket. Most are things the user said; a durable
+   constraint you discover while working routes by topic:
 
-   | User says... | Goes to |
+   | Trigger | Goes to |
    |---|---|
    | "I'm the / my role is / I prefer / I always / I hate / I never" | `user_*.md` |
    | "don't do X / stop doing Y / not like that" — corrections | `feedback_*.md` |
    | "yes exactly / keep that approach / that worked" — validated choices | `feedback_*.md` |
    | "we're shipping / deadline is / X is driving this / freeze on..." | `project_*.md` |
+   | A durable constraint you discover while working ("X silently fails on Y", "the harness disables Z") | `project_*.md` |
    | "Linear project X / Grafana board at Y / the #channel for Z / docs at URL" | `reference_*.md` |
 
 3. **Writing memory entries — INTERPRET, don't transcribe.**
@@ -52,5 +54,5 @@ Both are written in parallel from the conversation — narrative is not the upst
 - Routine debugging that produced a fix — the fix is in the code; the commit message has the context.
 - Boilerplate code or simple CRUD work.
 - Restatements of existing memory entries.
-- Anything you'd document as "we did X" — that's a discovery, not a memory.
+- A play-by-play of what you did ("we refactored X", "fixed the bug in Y") — the code and the commit already carry that. A constraint you *discovered* while doing it still qualifies; route it to `project_*.md`.
 - Anything inferring beyond what was literally said or clearly implied.

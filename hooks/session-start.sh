@@ -114,11 +114,12 @@ This session has:
 
 Key files to maintain:
 - .cs/README.md: Update objective and outcome
-- .cs/memory/narrative.md: Document findings, observations, and ideas
+- .cs/memory/narrative.<actor>.md: append findings as you go (run 'cs -whoami' for your actor; read all narrative.*.md on resume)
 
-IMPORTANT: Secrets (API keys, tokens, passwords) are stored securely in the OS keychain.
-Use 'cs -secrets list' to see stored secrets, 'cs -secrets get <name>' to retrieve values.
-Never write raw credentials to files - use 'cs -secrets set <name>' to store them securely.
+IMPORTANT: Secrets (API keys, tokens, passwords) live in the session secret store.
+Use 'cs -secrets list' / 'cs -secrets get <name>' to retrieve them. Never write raw
+credentials to files - pipe the value to 'cs -secrets set <name>' on stdin (argv and
+heredocs are captured verbatim by the command log).
 
 See CLAUDE.md in the session directory for complete documentation protocol.
 EOF
@@ -281,7 +282,7 @@ if [ "${CS_FRESH_REBIND:-}" = "1" ]; then
 The user explicitly started a fresh conversation in this cs session — the prior conversation's transcript is not loaded. Treat this as a clean break, not a continuation.
 
 For prior context, lazily consult as needed:
-- .cs/memory/narrative.md  — findings and decisions from earlier work
+- .cs/memory/narrative.*.md — findings and decisions from earlier work (append only to your own actor's file)
 - .cs/README.md            — session objective
 
 The new conversation has its own UUID (\$CS_CLAUDE_SESSION_ID). Do not assume continuity with previous turns."

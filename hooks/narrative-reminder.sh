@@ -58,7 +58,7 @@ if [ "$QLEN" -gt 0 ]; then
     if [ "$QSTATE" = "armed" ]; then
         TASK=$(awk 'NF{print; exit}' "$QUEUE")
         printf 'draining\n' > "$QSTATE_FILE.tmp" && mv "$QSTATE_FILE.tmp" "$QSTATE_FILE"
-        REASON="cs task queue — starting a walk-away run. Work through the queued tasks one at a time; I will hand you the next after each finishes. Mirror the queue into your native task list: create one task per queued item and mark each completed as you finish it.
+        REASON="cs task queue — starting a walk-away run. Work through the queued tasks one at a time; I will hand you the next after each finishes. Mirror the whole queue into your native task list now: run \`cs -queue list\` to see every queued item (this message shows only the first), create one task each, and mark each completed as you finish it.
 
 First task: $TASK"
         jq -nc --arg r "$REASON" '{decision:"block", reason:$r}'

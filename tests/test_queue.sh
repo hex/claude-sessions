@@ -117,6 +117,14 @@ test_drain_armed_injects_first_task_no_pop() {
     assert_eq "2" "$(grep -c . "$(QDIR)/queue")" "no pop on first injection" || return 1
 }
 
+test_drain_armed_mentions_queue_list() {
+    printf 'task one\ntask two\ntask three\n' > "$(QDIR)/queue"
+    printf 'armed\n' > "$(QDIR)/queue.state"
+    local out; out=$(drain)
+    assert_output_contains "$out" "cs -queue list" \
+        "mirror instruction must name cs -queue list (the message shows only the first task)" || return 1
+}
+
 test_drain_draining_pops_and_injects_next() {
     printf 'task one\ntask two\n' > "$(QDIR)/queue"
     printf 'draining\n' > "$(QDIR)/queue.state"
@@ -157,6 +165,7 @@ test_drain_gate_mentions_high_context() {
 
 run_test test_drain_gates_when_idle_nonempty
 run_test test_drain_armed_injects_first_task_no_pop
+run_test test_drain_armed_mentions_queue_list
 run_test test_drain_draining_pops_and_injects_next
 run_test test_drain_empties_and_returns_idle
 run_test test_drain_declined_within_cooldown_falls_through

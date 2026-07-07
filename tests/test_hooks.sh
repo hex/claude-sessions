@@ -184,6 +184,15 @@ test_auto_approve_skips_outside_session() {
 # subagent-context.sh
 # ============================================================================
 
+test_subagent_context_deliverable_is_final_message() {
+    local output
+    output=$(echo '{}' | bash "$HOOKS_DIR/subagent-context.sh")
+    assert_output_not_contains "$output" "Document findings in .cs/memory/narrative.md" \
+        "a subagent's deliverable is its final message, not a shared narrative file" || return 1
+    assert_output_contains "$output" "final message" \
+        "subagent context must tell the subagent its final message is the deliverable" || return 1
+}
+
 test_subagent_injects_session_name() {
     local output
     output=$(echo '{}' | bash "$HOOKS_DIR/subagent-context.sh")
@@ -490,6 +499,38 @@ test_session_start_excludes_current_session() {
         session_start_teardown
         return 1
     fi
+
+    session_start_teardown
+}
+
+test_session_start_narrative_is_per_actor() {
+    session_start_setup
+
+    local output context
+    output=$(echo '{"session_id":"test","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+
+    assert_output_not_contains "$context" "narrative.md: Document" \
+        "session-start must not steer findings to the shared narrative.md" || { session_start_teardown; return 1; }
+    assert_output_contains "$context" "narrative.<actor>.md" \
+        "session-start must name the per-actor narrative" || { session_start_teardown; return 1; }
+
+    session_start_teardown
+}
+
+test_session_start_secrets_guidance_is_stdin_and_backend_neutral() {
+    session_start_setup
+
+    local output context
+    output=$(echo '{"session_id":"test","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+
+    assert_output_not_contains "$context" "stored securely in the OS keychain" \
+        "secrets backend may be the encrypted-file fallback, not a keychain" || { session_start_teardown; return 1; }
+    assert_output_contains "$context" "on stdin" \
+        "secrets guidance must direct the value to stdin (argv/heredoc leak to the log)" || { session_start_teardown; return 1; }
 
     session_start_teardown
 }
@@ -983,6 +1024,9 @@ run_test test_session_start_announces_worktree_task
 run_test test_session_start_worktree_block_needs_at_shaped_name
 run_test test_session_start_no_worktree_block_for_plain_sessions
 run_test test_subagent_context_announces_worktree_task
+run_test test_subagent_context_deliverable_is_final_message
+run_test test_session_start_narrative_is_per_actor
+run_test test_session_start_secrets_guidance_is_stdin_and_backend_neutral
 run_test test_resume_digest_reports_memory_activity
 run_test test_resume_digest_silent_without_watermark
 run_test test_session_start_includes_sibling_sessions

@@ -7,13 +7,27 @@ metadata:
 
 # Prose Hygiene
 
-The complete checklist for removing AI writing tells from prose. While drafting,
-avoid the patterns below. A reviewer applying this reads the prose, flags every match
-below with the quoted text and a concrete rewrite, then scores it (see Scoring). A
-regex can only catch the lexical items; the structural and voice rules need a model
-judging meaning. cs applies this to /summary and /wrap output (`.cs/summary.md` and the memory
-entries; the narrative notebooks are exempt); the lexical subset is enforced by
-`cs -lint` and the prose-lint Stop hook.
+The complete checklist for removing AI writing tells from prose.
+
+## How to apply
+
+- **Drafting:** avoid every pattern below as you write.
+- **Reviewing:** read the prose and, for each match, output the quoted text, the rule
+  it breaks, and a concrete rewrite. Then score per the rubric (see Scoring) and
+  report the per-dimension scores and total. Judge only — do not edit the file.
+
+**Technical prose** (`.cs/summary.md`, memory entries) is the usual target here, so
+apply the rules with these carve-outs: a technical subject performing its function is
+not false agency ("the hook fires", "the test fails", "the ref survives the rm"); keep
+adverbs that carry technical meaning (asynchronously, atomically, locally); factual
+enumerations keep their true count (the three-item rule targets rhetorical triads, not
+a real list of three files); conditional openers are fine in procedural text (the
+starter ban targets rhetorical questions, not "When X, do Y").
+
+**Scope:** cs applies this to `/summary` and `/wrap` output (`.cs/summary.md` and the
+memory entries; the narrative notebooks are exempt). A regex catches only the lexical
+items — the structural and voice rules need a model judging meaning — so `cs -lint`
+and the prose-lint Stop hook enforce just the lexical subset.
 
 ## Core principles
 

@@ -9,6 +9,7 @@ source "$SCRIPT_DIR/test_lib.sh"
 COMMANDS_DIR="$SCRIPT_DIR/../commands"
 SKILLS_DIR="$SCRIPT_DIR/../skills"
 HOOKS_DIR="$SCRIPT_DIR/../hooks"
+RELEASE_MD="$SCRIPT_DIR/../.claude/commands/release.md"
 
 # ============================================================================
 # Frontmatter correctness
@@ -56,6 +57,15 @@ test_sweep_owns_bucket_routing_table() {
         "sweep.md must carry the bucket routing table (user row)" || return 1
     assert_file_contains "$COMMANDS_DIR/sweep.md" 'reference_\*.md' \
         "sweep.md must carry the bucket routing table (reference row)" || return 1
+}
+
+test_sweep_routes_discovered_constraints() {
+    # The project_* bucket is dominated by constraints found through work, not user
+    # utterances. sweep must route them and must NOT blanket-drop them as "just a discovery".
+    assert_file_not_contains "$COMMANDS_DIR/sweep.md" "that's a discovery, not a memory" \
+        "the blanket 'discovery is not a memory' exclusion drops the project_* class" || return 1
+    assert_file_contains "$COMMANDS_DIR/sweep.md" "discover while working" \
+        "sweep must carry a routing path for constraints discovered through work" || return 1
 }
 
 test_sweep_updates_memory_index() {
@@ -125,6 +135,36 @@ test_prose_critic_pinned_and_contracted() {
         "the critic's deliverable must be demanded in its final message" || return 1
 }
 
+test_prose_hygiene_has_modes_and_technical_carveout() {
+    # A cold Skill invocation must be able to tell drafting from reviewing, and the
+    # absolutist rules must not flag correct technical sentences (summary.md applies EVERY rule).
+    assert_file_contains "$SKILLS_DIR/prose-hygiene/SKILL.md" "## How to apply" \
+        "the skill must surface drafting-vs-reviewing modes, not bury them in prose" || return 1
+    assert_file_contains "$SKILLS_DIR/prose-hygiene/SKILL.md" "not false agency" \
+        "the skill must carve out technical subjects from the false-agency/absolutist rules" || return 1
+}
+
+test_release_names_uninstall_source_not_bincs() {
+    # run_uninstall lives in a lib/ fragment and bin/cs is assembled — the runbook must
+    # name the editable source, since Step 1 and Important both forbid editing bin/cs.
+    assert_file_contains "$RELEASE_MD" "lib/85-adopt-uninstall.sh" \
+        "release.md must name the editable run_uninstall source, not bin/cs" || return 1
+}
+
+test_release_changelog_step_follows_approval() {
+    # The changelog insertion needs the approved notes, so its step must come AFTER the
+    # notes/approval step in the file — not forward-reference a later step.
+    local notes_line changelog_line
+    notes_line=$(grep -n 'Generate Release Notes' "$RELEASE_MD" | head -1 | cut -d: -f1)
+    changelog_line=$(grep -n 'Update Changelog' "$RELEASE_MD" | head -1 | cut -d: -f1)
+    if [ -z "$notes_line" ] || [ -z "$changelog_line" ]; then
+        echo "  FAIL: could not find both the notes and changelog step headers"; return 1
+    fi
+    if [ "$changelog_line" -le "$notes_line" ]; then
+        echo "  FAIL: 'Update Changelog' (line $changelog_line) must follow 'Generate Release Notes' (line $notes_line)"; return 1
+    fi
+}
+
 test_prose_hygiene_records_upstream_sync() {
     assert_file_contains "$SKILLS_DIR/prose-hygiene/SKILL.md" "synced at upstream" \
         "the skill must record which stop-slop commit it was synced against" || return 1
@@ -140,6 +180,7 @@ run_test test_store_secret_has_frontmatter
 run_test test_store_secret_backend_neutral
 run_test test_no_dangling_bucket_guidance_reference
 run_test test_sweep_owns_bucket_routing_table
+run_test test_sweep_routes_discovered_constraints
 run_test test_sweep_updates_memory_index
 run_test test_wrap_family_pinned_to_sonnet
 run_test test_wrap_references_deployed_commands
@@ -148,5 +189,8 @@ run_test test_wrap_does_not_duplicate_summary_skeleton
 run_test test_scoring_threshold_owned_by_skill
 run_test test_summary_reads_narrative
 run_test test_prose_critic_pinned_and_contracted
+run_test test_prose_hygiene_has_modes_and_technical_carveout
+run_test test_release_names_uninstall_source_not_bincs
+run_test test_release_changelog_step_follows_approval
 run_test test_prose_hygiene_records_upstream_sync
 report_results
