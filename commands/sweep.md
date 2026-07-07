@@ -40,16 +40,18 @@ Both are written in parallel from the conversation — narrative is not the upst
    | "Linear project X / Grafana board at Y / the #channel for Z / docs at URL" | `reference_*.md` |
 
 3. **Writing memory entries — INTERPRET, don't transcribe.**
-   - Read the matching `.cs/memory/<bucket>_*.md` file first to check for duplicates in any form — paraphrase, near-duplicate, superset. If something similar exists, skip; do not append.
-   - For new entries, match the frontmatter shape of the existing entries in that bucket (the dedup read above shows you the current format), then a concise paraphrase capturing the essence in your own words.
+   - Read the matching `.cs/memory/<bucket>_*.md` file first to check for duplicates in any form — paraphrase, near-duplicate, superset. If something similar exists, skip; do not append. But if the new fact contradicts or materially extends an existing entry, update that entry in place (and its `MEMORY.md` pointer) rather than skipping or writing a duplicate.
+   - For new entries, name the file `<bucket>_<short_slug>.md` and match the frontmatter shape of the existing entries in that bucket (the dedup read above shows you the current format); if the bucket has no existing entries, copy the frontmatter shape from any other bucket's entries. Then write a concise paraphrase capturing the essence in your own words.
    - One entry per durable fact. If a fact plausibly fits two buckets, pick the more specific one — do not cross-post.
-   - After writing an entry, add a one-line pointer for it to `.cs/memory/MEMORY.md`. The index is what future sessions load; an unindexed entry is never read again.
+   - After writing an entry, add a one-line pointer for it to `.cs/memory/MEMORY.md`, matching the existing `- [title](file.md): one-line summary` lines and appending to the list. The index is what future sessions load; an unindexed entry is never read again.
 
-4. **Narrative sweep — looser bar.** If a substantive finding from this session is not yet in your narrative (`.cs/memory/narrative.<actor>.md`), append it as a dated section. Substantive = something a future session resuming this work would want to know.
+4. **Narrative sweep — looser bar.** Resolve `<actor>` with `cs -whoami` first, then append only to your own narrative file. If a substantive finding from this session is not yet in your narrative (`.cs/memory/narrative.<actor>.md`), append it as a dated section. Substantive = something a future session resuming this work would want to know.
 
 5. **Write quietly.** No chat summary. List the files you wrote (one line each) or say "nothing to add" if the session didn't warrant entries.
 
-## When NOT to write
+## When NOT to write a strict-bucket entry
+
+(These exclusions apply to the strict buckets; the narrative keeps its looser bar from step 4.)
 
 - Routine debugging that produced a fix — the fix is in the code; the commit message has the context.
 - Boilerplate code or simple CRUD work.

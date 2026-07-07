@@ -107,15 +107,19 @@ Lazy extremes (every, always, never, everyone, everybody, nobody) assert false a
 
 ## Scoring
 
-Rate 1-10 on each dimension. Total below 35/50 means revise.
+Rate 1-10 on each dimension using the anchors below. Total below 35/50 means the
+prose needs revision. This skill only judges: report the per-dimension scores, the
+total, and the violation list (quoted text + rule + rewrite) whether or not it
+passes, then stop. Revising and any re-score loop belong to the caller (the
+`/summary` pass caps the re-runs) — do not edit the file here.
 
-| Dimension | Question |
-|-----------|----------|
-| Directness | Statements, or announcements? |
-| Rhythm | Varied, or metronomic? |
-| Trust | Respects the reader's intelligence? |
-| Authenticity | Sounds human? |
-| Density | Anything cuttable? |
+| Dimension | Low end (score 1-3) | High end (score 8-10) |
+|-----------|---------------------|------------------------|
+| Directness | Most sentences open with a setup phrase before the point | Every sentence leads with its claim |
+| Rhythm | Lengths are uniform; endings are metronomic | Lengths vary; endings differ |
+| Trust | Softens, justifies, hand-holds | States facts and stops |
+| Authenticity | Reads as generated — formulas, false agency | Reads as a person wrote it |
+| Density | Cuttable filler in most sentences | Nothing cuttable remains |
 
 ## Before / after
 
