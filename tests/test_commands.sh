@@ -114,8 +114,8 @@ test_scoring_threshold_owned_by_skill() {
 # ============================================================================
 
 test_summary_reads_narrative() {
-    assert_file_contains "$COMMANDS_DIR/summary.md" "memory/narrative.md" \
-        "summary must read the session narrative" || return 1
+    assert_file_contains "$COMMANDS_DIR/summary.md" 'memory/narrative\.\*\.md' \
+        "summary must read the per-actor session narratives" || return 1
 }
 
 test_prose_critic_pinned_and_contracted() {

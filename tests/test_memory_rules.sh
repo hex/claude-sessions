@@ -66,6 +66,21 @@ test_new_session_secret_guidance_is_log_safe() {
         "should point at the store-secret skill's log-safe procedure" || return 1
 }
 
+# Narratives are per-actor (narrative.<actor>.md) so co-developers never conflict;
+# the generated CLAUDE.md must not instruct writing to the bare, pre-per-actor
+# .cs/memory/narrative.md — that recreates an orphaned notebook hidden from resume.
+test_new_session_narrative_guidance_is_per_actor() {
+    "$CS_BIN" test-session <<< "" >/dev/null 2>&1 || true
+    local claude_md="$CS_SESSIONS_ROOT/test-session/CLAUDE.md"
+
+    assert_file_not_contains "$claude_md" 'narrative\.md with findings' \
+        "must not tell agents to write the bare narrative.md" || return 1
+    assert_file_not_contains "$claude_md" 'narrative\.md as you go' \
+        "must not tell agents to write the bare narrative.md" || return 1
+    assert_file_contains "$claude_md" 'narrative\.<actor>\.md' \
+        "should direct writes to the per-actor narrative.<actor>.md" || return 1
+}
+
 # Build a "legacy" session whose CLAUDE.md predates any cs memory documentation.
 _seed_legacy_session() {
     local name="$1"
@@ -332,6 +347,7 @@ echo ""
 run_test test_new_session_has_memory_note
 run_test test_new_session_has_no_legacy_rules_block
 run_test test_new_session_secret_guidance_is_log_safe
+run_test test_new_session_narrative_guidance_is_per_actor
 run_test test_lazy_migration_appends_note
 run_test test_lazy_migration_idempotent
 run_test test_legacy_rules_tombstone_prevents_note_addition

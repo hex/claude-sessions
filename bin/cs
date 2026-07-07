@@ -1164,7 +1164,7 @@ in-progress findings.
 Update the markdown documentation files throughout the session:
 
 1. **Start of session:** Fill in .cs/README.md objective and environment
-2. **As you work:** Update .cs/memory/narrative.md with findings
+2. **As you work:** Update your narrative (.cs/memory/narrative.<actor>.md — run `cs -whoami` for your actor) with findings
 3. **End of session:** Complete the .cs/README.md outcome section
 
 Treat these files as a lab notebook - document as you go, not just at the end.
@@ -1228,7 +1228,7 @@ To opt out, delete the prose above but keep the `cs:wrap-cues` HTML comment as a
 
 ## Best Practices
 
-- Document findings in .cs/memory/narrative.md as you go - don't wait until the end
+- Document findings in your narrative (.cs/memory/narrative.<actor>.md) as you go - don't wait until the end
 - Run `/wrap` at the end to distill memory and create a cohesive record
 - Never write raw API keys or passwords to project files - use cs -secrets
 EOF

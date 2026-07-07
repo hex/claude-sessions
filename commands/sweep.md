@@ -11,7 +11,7 @@ You are working in a cs session. Your task is to review the conversation in your
 Two write surfaces, deliberately DIFFERENT bars:
 
 - **The strict buckets (`.cs/memory/{user,feedback,project,reference}_*.md`) are forever** — they sit in Claude's persistent memory and inform every future session. **Bar: very strict. Default: write nothing.**
-- **`.cs/memory/narrative.md` is the session-local lab notebook** — a native memory topic file, looser bar. Substantive observations welcome. Default: write if the session surfaced a non-obvious finding worth keeping.
+- **`.cs/memory/narrative.<actor>.md` is your session-local lab notebook** (per-actor — run `cs -whoami` for your actor) — a native memory topic file, looser bar. Substantive observations welcome. Default: write if the session surfaced a non-obvious finding worth keeping.
 
 Both are written in parallel from the conversation — narrative is not the upstream of the strict buckets.
 
@@ -43,7 +43,7 @@ Both are written in parallel from the conversation — narrative is not the upst
    - One entry per durable fact. If a fact plausibly fits two buckets, pick the more specific one — do not cross-post.
    - After writing an entry, add a one-line pointer for it to `.cs/memory/MEMORY.md`. The index is what future sessions load; an unindexed entry is never read again.
 
-4. **Narrative sweep — looser bar.** If a substantive finding from this session is not yet in `.cs/memory/narrative.md`, append it as a dated section. Substantive = something a future session resuming this work would want to know.
+4. **Narrative sweep — looser bar.** If a substantive finding from this session is not yet in your narrative (`.cs/memory/narrative.<actor>.md`), append it as a dated section. Substantive = something a future session resuming this work would want to know.
 
 5. **Write quietly.** No chat summary. List the files you wrote (one line each) or say "nothing to add" if the session didn't warrant entries. Empty output is a successful sweep when the conversation didn't surface durable facts.
 
