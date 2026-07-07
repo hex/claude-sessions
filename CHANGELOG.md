@@ -2,9 +2,11 @@
 
 All notable changes to cs are documented here. Release notes are also available on [GitHub Releases](https://github.com/hex/claude-sessions/releases).
 
-<!-- New entries use the Features / Fixes / Docs / Performance / Other headings (the scheme in use since 2026.6.10). -->
+<!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
-## Unreleased
+## 2026.7.5
+
+A full improvement audit (#1–#268) plus a two-pass Fable-model prompt-engineering review of every slash-command, skill, and hook-injected prompt.
 
 ### Removed
 
@@ -12,17 +14,18 @@ All notable changes to cs are documented here. Release notes are also available 
 
 ### Changed
 
-- **`session.log` is machine-local** — the command audit trail now lives at `.cs/local/session.log` (gitignored), no longer git-tracked or `merge=union`. The shared structured record is `.cs/timeline.jsonl`.
+- **`session.log` is machine-local** — the command audit trail now lives at `.cs/local/session.log` (gitignored), no longer git-tracked or `merge=union`. `.cs/timeline.jsonl` is the shared structured record.
 - **`bin/cs` is assembled from `lib/*.sh`** by `build.sh` (byte-identical output); edit the fragments and rebuild. CI fails if `bin/cs` drifts from `lib/`.
 
 ### Fixes
 
-- Hardened session-name validation (rejects `.`/`..`/path traversal), the Rust TUI (panic restore, multibyte safety), hook contract boundaries, and shell portability.
-- Secret values are read from stdin; the `-update` payload is pinned and verified against the release tag; the generated CLAUDE.md no longer demonstrates a secret pattern that would land the value in the command log.
+- **Security:** the generated session `CLAUDE.md` no longer demonstrates a secret pattern that lands the value in the command log; secret values are read from stdin; the `-update` payload is pinned and verified against the release tag.
+- **Prompt quality (Fable review, 74 findings):** session-context injection now teaches the per-actor narrative and stdin-secrets, and tells a subagent its final message is the deliverable; the auto-grounded scope block reads as orientation (not a task boundary) and never truncates silently; the task-queue walk-away run enumerates every task via `cs -queue list`; `/sweep` routes constraints discovered through work; `checkpoint` routes its `list`/`show` subcommands instead of saving them as labels; prose-hygiene separates drafting from review with a technical-prose carve-out; the `/release` runbook runs in numbered order with a branch/sync preflight.
+- **Robustness:** hardened session-name validation (rejects `.`/`..`/path traversal), the Rust TUI (panic restore, multibyte safety), hook contract boundaries, and shell portability.
 
 ### Docs
 
-- Broad accuracy and completeness pass: `session.log` paths, per-actor narratives, timeline event names, undocumented hook behaviors, and the contributor/release guides.
+- Broad accuracy + completeness pass: `session.log` paths, per-actor narratives, timeline event names (`started`/`ended`/`checkpoint`), undocumented hook behaviors, a new `.cs/` session-layout schema doc, and the contributor + release guides.
 
 ## 2026.7.4
 
