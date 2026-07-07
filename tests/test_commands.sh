@@ -134,6 +134,15 @@ test_prose_critic_pinned_and_contracted() {
         "the critic's deliverable must be demanded in its final message" || return 1
 }
 
+test_prose_hygiene_has_modes_and_technical_carveout() {
+    # A cold Skill invocation must be able to tell drafting from reviewing, and the
+    # absolutist rules must not flag correct technical sentences (summary.md applies EVERY rule).
+    assert_file_contains "$SKILLS_DIR/prose-hygiene/SKILL.md" "## How to apply" \
+        "the skill must surface drafting-vs-reviewing modes, not bury them in prose" || return 1
+    assert_file_contains "$SKILLS_DIR/prose-hygiene/SKILL.md" "not false agency" \
+        "the skill must carve out technical subjects from the false-agency/absolutist rules" || return 1
+}
+
 test_prose_hygiene_records_upstream_sync() {
     assert_file_contains "$SKILLS_DIR/prose-hygiene/SKILL.md" "synced at upstream" \
         "the skill must record which stop-slop commit it was synced against" || return 1
@@ -158,5 +167,6 @@ run_test test_wrap_does_not_duplicate_summary_skeleton
 run_test test_scoring_threshold_owned_by_skill
 run_test test_summary_reads_narrative
 run_test test_prose_critic_pinned_and_contracted
+run_test test_prose_hygiene_has_modes_and_technical_carveout
 run_test test_prose_hygiene_records_upstream_sync
 report_results
