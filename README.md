@@ -106,7 +106,7 @@ Running `cs` with no arguments launches an interactive TUI for browsing and mana
 - **Fuzzy search** with `/` — matches characters in order with highlighting; Enter commits the filter
 - **Time-based sections** — sessions grouped under Today, Yesterday, This Week, This Month, Older when sorted by date (the default view)
 - **Action bar** with `Enter` — inline bar shows available actions with shortcut keys
-- **Preview pane** — appears automatically on wide terminals (>120 cols); toggle with `p`
+- **Preview & To-Do panes** — appear beside the list on wide terminals (>120 cols), or stacked below it (list, then details, then notes) when the window is taller than it is wide; toggle with `p`
 - **Expand row** with `Tab` — shows session objective (auto-captured from your first prompt) and narrative inline
 - **Create session** with `n` — opens inline dialog to create a new session
 - **Delete** with `d` (confirmation required)

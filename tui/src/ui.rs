@@ -16,6 +16,45 @@ use crate::theme::{self, Palette};
 
 const PREVIEW_MIN_WIDTH: u16 = 120;
 
+/// Minimum width for the stacked layout: below this the three full-width panes
+/// and the table's columns are too cramped, so a narrow-but-tall window falls
+/// back to the table alone. No separate height floor is needed — a portrait
+/// window (`2*height > width`) this wide is already ≥21 rows tall, room enough
+/// for three panes. Lowering this below ~40 would reopen the need for one.
+const STACK_MIN_WIDTH: u16 = 40;
+
+/// How the main content area is divided among the session table and the
+/// preview/notes detail panes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PaneLayout {
+    /// Just the session table, full width — the detail panes are hidden.
+    TableOnly,
+    /// Table on the left, preview stacked over notes on the right (landscape).
+    SideBySide,
+    /// Table, preview, then notes stacked top-to-bottom (portrait).
+    Stacked,
+}
+
+/// Pick the pane layout for `area`. When the detail panes are on, a window that
+/// reads as taller than wide stacks them; a wide window sets them beside the
+/// table; anything too small shows the table alone.
+///
+/// Terminal cells are roughly twice as tall as they are wide, so "visually
+/// taller than wide" is `2 * height > width`, not a raw row-vs-column compare.
+fn choose_layout(area: Rect, show_preview: bool) -> PaneLayout {
+    if !show_preview {
+        return PaneLayout::TableOnly;
+    }
+    let portrait = 2 * area.height as u32 > area.width as u32;
+    if portrait && area.width >= STACK_MIN_WIDTH {
+        PaneLayout::Stacked
+    } else if area.width >= PREVIEW_MIN_WIDTH {
+        PaneLayout::SideBySide
+    } else {
+        PaneLayout::TableOnly
+    }
+}
+
 /// Blank cells between table columns. Structure is carried by alignment, zebra
 /// striping, and the header rule — not by vertical divider glyphs.
 pub const COL_SPACING: u16 = 2;
@@ -61,19 +100,33 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     ])
     .split(frame.area());
 
-    let show_preview = app.show_preview && chunks[0].width >= PREVIEW_MIN_WIDTH;
-
-    if show_preview {
-        app.ensure_preview_loaded();
-        let cols = Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
+    match choose_layout(chunks[0], app.show_preview) {
+        PaneLayout::SideBySide => {
+            app.ensure_preview_loaded();
+            let cols = Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
+                .split(chunks[0]);
+            render_table(app, frame, cols[0], true);
+            let right_rows =
+                Layout::vertical([Constraint::Percentage(55), Constraint::Percentage(45)])
+                    .split(cols[1]);
+            render_preview_pane(app, frame, right_rows[0]);
+            render_notes_pane(app, frame, right_rows[1]);
+        }
+        PaneLayout::Stacked => {
+            app.ensure_preview_loaded();
+            let rows = Layout::vertical([
+                Constraint::Percentage(50),
+                Constraint::Percentage(30),
+                Constraint::Percentage(20),
+            ])
             .split(chunks[0]);
-        render_table(app, frame, cols[0], true);
-        let right_rows = Layout::vertical([Constraint::Percentage(55), Constraint::Percentage(45)])
-            .split(cols[1]);
-        render_preview_pane(app, frame, right_rows[0]);
-        render_notes_pane(app, frame, right_rows[1]);
-    } else {
-        render_table(app, frame, chunks[0], false);
+            render_table(app, frame, rows[0], true);
+            render_preview_pane(app, frame, rows[1]);
+            render_notes_pane(app, frame, rows[2]);
+        }
+        PaneLayout::TableOnly => {
+            render_table(app, frame, chunks[0], false);
+        }
     }
 
     if app.mode == Mode::SessionMenu {
@@ -1268,10 +1321,9 @@ mod tests {
         }
     }
 
-    /// Render on a wide terminal (preview + Notes pane both visible) and
-    /// return the buffer as newline-joined rows.
-    fn render_wide(app: &mut App) -> String {
-        let backend = TestBackend::new(140, 30);
+    /// Render into a buffer of the given size and return it as newline-joined rows.
+    fn render_at(app: &mut App, width: u16, height: u16) -> String {
+        let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| render(app, frame)).unwrap();
         let buf = terminal.backend().buffer().clone();
@@ -1283,6 +1335,35 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    /// Render on a wide terminal (preview + Notes pane both visible) and
+    /// return the buffer as newline-joined rows.
+    fn render_wide(app: &mut App) -> String {
+        render_at(app, 140, 30)
+    }
+
+    #[test]
+    fn portrait_terminal_stacks_list_details_and_notes() {
+        // 80×50 reads as portrait, so the panes stack. At width 80 — below
+        // PREVIEW_MIN_WIDTH — the side-by-side layout can't fire, so the To-Do
+        // panel and the preview's "Created:" label appearing at all proves the
+        // vertical split engaged. A probe name no other test seeds on disk keeps
+        // the empty-queue assertion from racing the queue tests.
+        let mut sessions = one_session();
+        sessions[0].name = "cs-tui-stack-probe".into();
+        let mut app = App::new(sessions);
+        app.theme = Palette::dark();
+        let joined = render_at(&mut app, 80, 50);
+        assert!(joined.contains("To-Do"), "notes panel title should render: {joined}");
+        assert!(
+            joined.contains("no queued tasks"),
+            "empty queue placeholder should render: {joined}"
+        );
+        assert!(
+            joined.contains("Created:"),
+            "preview pane metadata should render: {joined}"
+        );
     }
 
     #[test]
@@ -1370,6 +1451,67 @@ mod tests {
         assert!(
             !joined.contains("To-Do"),
             "To-Do column is hidden when no session has queued tasks: {joined}"
+        );
+    }
+
+    #[test]
+    fn portrait_area_chooses_stacked_layout() {
+        // 80×50 reads as taller than wide once the ~2:1 cell shape is accounted
+        // for (2*50 = 100 > 80), and clears the min-size floors, so the panes
+        // stack vertically.
+        assert_eq!(
+            choose_layout(Rect::new(0, 0, 80, 50), true),
+            PaneLayout::Stacked
+        );
+    }
+
+    #[test]
+    fn wide_landscape_area_chooses_side_by_side() {
+        // 200×50 is clearly wider than tall (2*50 = 100 < 200) and past the
+        // side-by-side width floor.
+        assert_eq!(
+            choose_layout(Rect::new(0, 0, 200, 50), true),
+            PaneLayout::SideBySide
+        );
+    }
+
+    #[test]
+    fn wide_and_tall_area_still_stacks() {
+        // Even a roomy window stacks when it reads as portrait: 150×90 clears the
+        // side-by-side width but 2*90 = 180 > 150, so vertical space wins.
+        assert_eq!(
+            choose_layout(Rect::new(0, 0, 150, 90), true),
+            PaneLayout::Stacked
+        );
+    }
+
+    #[test]
+    fn short_narrow_area_falls_back_to_table_only() {
+        // 80×24 is neither tall enough to stack nor wide enough for side-by-side.
+        assert_eq!(
+            choose_layout(Rect::new(0, 0, 80, 24), true),
+            PaneLayout::TableOnly
+        );
+    }
+
+    #[test]
+    fn narrow_tall_area_is_rejected_by_the_width_floor() {
+        // 30×50 reads as portrait (2*50 > 30) but is too narrow for three usable
+        // panes, so the width floor sends it to the table alone rather than a
+        // cramped stack. This is the sole guard now that there is no height floor.
+        assert_eq!(
+            choose_layout(Rect::new(0, 0, 30, 50), true),
+            PaneLayout::TableOnly
+        );
+    }
+
+    #[test]
+    fn preview_disabled_forces_table_only_regardless_of_shape() {
+        // A portrait window that would otherwise stack shows the table alone when
+        // the detail panes are toggled off.
+        assert_eq!(
+            choose_layout(Rect::new(0, 0, 80, 50), false),
+            PaneLayout::TableOnly
         );
     }
 }
