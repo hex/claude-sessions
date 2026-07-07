@@ -155,10 +155,25 @@ EOF
 # ============================================================================
 # Runner
 # ============================================================================
+test_wrap_cues_wording_parity_between_emit_and_migrate() {
+    # The wrap-cues block is duplicated in the new-session template (35-claudemd.sh)
+    # and the legacy-session migration heredoc (45-migrate.sh). They must not drift —
+    # otherwise new and migrated sessions get different wrap-up guidance.
+    local emit="$SCRIPT_DIR/../lib/35-claudemd.sh"
+    local migrate="$SCRIPT_DIR/../lib/45-migrate.sh"
+    assert_file_contains "$emit" "Strong signals (sufficient on their own" \
+        "the template must carry the recast strong-signal wording" || return 1
+    assert_file_contains "$migrate" "Strong signals (sufficient on their own" \
+        "the migration heredoc must carry the same wording (no drift with the template)" || return 1
+    assert_file_not_contains "$migrate" "Strong triggers (fire on any single occurrence)" \
+        "the migration must not keep the old literal-match wording" || return 1
+}
+
 echo "Running test_wrap_cues.sh"
 echo ""
 run_test test_new_session_has_wrap_cues_block
 run_test test_lazy_migration_appends_wrap_cues
 run_test test_lazy_migration_wrap_cues_idempotent
 run_test test_wrap_cues_opt_out_respected
+run_test test_wrap_cues_wording_parity_between_emit_and_migrate
 report_results
