@@ -265,14 +265,14 @@ test_encrypted_file_permissions() {
     "$CS_SECRETS_BIN" set api_key "abc" 2>&1
     local enc_file="$HOME/.cs-secrets/test-session.enc"
     local perms
-    perms=$(stat -f "%Lp" "$enc_file" 2>/dev/null || stat -c "%a" "$enc_file" 2>/dev/null)
+    perms=$(_file_mode "$enc_file")
     assert_eq "600" "$perms" "Encrypted file should be 600" || return 1
 }
 
 test_secrets_dir_permissions() {
     "$CS_SECRETS_BIN" set api_key "abc" 2>&1
     local perms
-    perms=$(stat -f "%Lp" "$HOME/.cs-secrets" 2>/dev/null || stat -c "%a" "$HOME/.cs-secrets" 2>/dev/null)
+    perms=$(_file_mode "$HOME/.cs-secrets")
     assert_eq "700" "$perms" "Secrets dir should be 700" || return 1
 }
 

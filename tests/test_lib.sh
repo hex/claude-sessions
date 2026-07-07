@@ -20,6 +20,20 @@ FAILURES=()
 CS_BIN="${SCRIPT_DIR:?SCRIPT_DIR must be set before sourcing test_lib.sh}/../bin/cs"
 TEST_TMPDIR=""
 
+# Portable octal file-mode reader. BSD (macOS) uses `stat -f "%Lp"`; GNU (Linux)
+# uses `stat -c "%a"`. They are NOT interchangeable via a `stat -f ... || stat -c`
+# fallback: GNU's `-f` is --file-system, which prints a block of text to stdout
+# and only THEN errors on the bogus `%Lp` operand — so `$(A || B)` captures that
+# leaked text concatenated with B's output. Select the implementation up front;
+# only GNU stat carries --version.
+_file_mode() {
+    if stat --version >/dev/null 2>&1; then
+        stat -c "%a" "$1"
+    else
+        stat -f "%Lp" "$1"
+    fi
+}
+
 # --- Setup / Teardown ---
 
 setup() {

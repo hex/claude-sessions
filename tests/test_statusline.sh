@@ -521,7 +521,7 @@ test_missing_rate_limits_absent() {
 test_5h_rest_time_appended() {
     export NO_COLOR=1
     local now reset_at
-    printf -v now '%(%s)T' -1
+    now=$(date +%s)   # not the %(%s)T builtin: empty under the bash 3.2 that runs this suite on macOS
     reset_at=$(( now + 2 * 3600 + 14 * 60 + 30 ))   # 2h14m30s out -> "2h14m"
     local json
     json=$(jq -nc --argjson r "$reset_at" '{
@@ -546,7 +546,7 @@ test_5h_rest_time_on_old_bash() {
         return 0
     fi
     local now reset_at
-    printf -v now '%(%s)T' -1
+    now=$(date +%s)   # not the %(%s)T builtin: empty under the bash 3.2 that runs this suite on macOS
     reset_at=$(( now + 2 * 3600 + 14 * 60 + 30 ))   # 2h14m30s out -> "2h14m"
     local json
     json=$(jq -nc --argjson r "$reset_at" '{
@@ -563,7 +563,7 @@ test_5h_rest_time_on_old_bash() {
 test_5h_rest_time_minutes_only() {
     export NO_COLOR=1
     local now reset_at
-    printf -v now '%(%s)T' -1
+    now=$(date +%s)   # not the %(%s)T builtin: empty under the bash 3.2 that runs this suite on macOS
     reset_at=$(( now + 45 * 60 + 30 ))   # 45m30s -> "45m"
     local json
     json=$(jq -nc --argjson r "$reset_at" '{
@@ -581,7 +581,7 @@ test_5h_rest_time_minutes_only() {
 test_5h_rest_time_sub_minute() {
     export NO_COLOR=1
     local now reset_at
-    printf -v now '%(%s)T' -1
+    now=$(date +%s)   # not the %(%s)T builtin: empty under the bash 3.2 that runs this suite on macOS
     reset_at=$(( now + 30 ))   # 30s out -> "<1m"
     local json
     json=$(jq -nc --argjson r "$reset_at" '{
@@ -609,7 +609,7 @@ test_5h_rest_time_absent_without_resets_at() {
 test_5h_rest_time_absent_when_past() {
     export NO_COLOR=1
     local now reset_at
-    printf -v now '%(%s)T' -1
+    now=$(date +%s)   # not the %(%s)T builtin: empty under the bash 3.2 that runs this suite on macOS
     reset_at=$(( now - 60 ))
     local json
     json=$(jq -nc --argjson r "$reset_at" '{

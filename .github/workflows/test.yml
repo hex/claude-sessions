@@ -18,6 +18,13 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Bare runners have no global git identity; cs creates commits when it
+      # initializes a session, so the session-lifecycle suites need one.
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@claude-sessions.test"
+          git config --global user.name "cs CI"
+
       - name: Install jq (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y jq
