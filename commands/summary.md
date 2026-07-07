@@ -62,7 +62,11 @@ You are working in a cs session. Your task is to create a comprehensive summary 
 
 5. **Gate the prose on quality before finalizing** (two layers):
    - **Lexical (deterministic):** run `cs -lint .cs/summary.md` and fix every em-dash and flagged phrase it reports. The prose-lint Stop hook enforces this on turn-end anyway; clearing it now avoids the block.
-   - **Structural (independent judge):** use the Task tool to spawn a subagent (`model: opus`, `subagent_type: general-purpose`) as an impartial prose critic of `.cs/summary.md`. The subagent MUST read `~/.claude/skills/prose-hygiene/SKILL.md` and apply EVERY rule in it (the full taxonomy of phrases, structures, voice rules, and the scoring rubric). It only judges, never edits. Its final message must contain only the deliverable: the per-dimension scores and total from the skill's rubric, then a numbered list giving, for every violation, the quoted text, the rule it breaks, and a concrete rewrite — no preamble, nothing else. Apply every rewrite it returns to `.cs/summary.md`; if the total falls below the skill's revise threshold, run the critic once more after applying them.
+   - **Structural (independent judge):** spawn a subagent as an impartial prose critic of `.cs/summary.md`:
+     - **Spawn:** Task tool, `model: opus`, `subagent_type: general-purpose`.
+     - **Reading:** it MUST read `~/.claude/skills/prose-hygiene/SKILL.md` and apply EVERY rule (the full taxonomy of phrases, structures, voice rules, and the scoring rubric).
+     - **Judge only, never edit.** Its final message contains only the deliverable: the per-dimension scores and total from the skill's rubric, then a numbered list giving, for every violation, the quoted text, the rule it breaks, and a concrete rewrite. No preamble, nothing else.
+     - **Apply + re-run:** apply every rewrite it returns to `.cs/summary.md`; if the total falls below the skill's revise threshold, run the critic once more after applying them.
 
 6. **Inform the user** when the summary is complete and where it was saved.
 
