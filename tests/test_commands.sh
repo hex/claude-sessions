@@ -58,6 +58,15 @@ test_sweep_owns_bucket_routing_table() {
         "sweep.md must carry the bucket routing table (reference row)" || return 1
 }
 
+test_sweep_routes_discovered_constraints() {
+    # The project_* bucket is dominated by constraints found through work, not user
+    # utterances. sweep must route them and must NOT blanket-drop them as "just a discovery".
+    assert_file_not_contains "$COMMANDS_DIR/sweep.md" "that's a discovery, not a memory" \
+        "the blanket 'discovery is not a memory' exclusion drops the project_* class" || return 1
+    assert_file_contains "$COMMANDS_DIR/sweep.md" "discover while working" \
+        "sweep must carry a routing path for constraints discovered through work" || return 1
+}
+
 test_sweep_updates_memory_index() {
     assert_file_contains "$COMMANDS_DIR/sweep.md" "MEMORY.md" \
         "sweep.md must instruct updating the MEMORY.md index after writing an entry" || return 1
@@ -140,6 +149,7 @@ run_test test_store_secret_has_frontmatter
 run_test test_store_secret_backend_neutral
 run_test test_no_dangling_bucket_guidance_reference
 run_test test_sweep_owns_bucket_routing_table
+run_test test_sweep_routes_discovered_constraints
 run_test test_sweep_updates_memory_index
 run_test test_wrap_family_pinned_to_sonnet
 run_test test_wrap_references_deployed_commands
