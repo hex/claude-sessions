@@ -170,7 +170,7 @@ fi
 
 # --- Build the scope block ---
 
-TOMBSTONE='Scope: no tracked files matched (grounding from prompt only).'
+TOMBSTONE='Scope: no tracked files matched — locate the relevant files yourself before editing.'
 
 if [ -n "$RELEVANT_FILES" ]; then
     BLOCK="## Scope (auto-grounded)
@@ -191,20 +191,35 @@ $RELEVANT_FILES"
 ### Recent commits
 $RECENT_COMMITS"
 
-    LATEST_DIFF=$(git -C "$SESSION_DIR" diff --stat HEAD 2>/dev/null | tail -10)
-    [ -n "$LATEST_DIFF" ] && BLOCK="$BLOCK
+    # `tail -10` bounds the diff, but silently dropping leading stat lines would let Claude
+    # read a file absent from the list as unmodified. Flag the truncation in the header so an
+    # absent file reads as "maybe cut", not "clean".
+    _full_diff=$(git -C "$SESSION_DIR" diff --stat HEAD 2>/dev/null)
+    if [ -n "$_full_diff" ]; then
+        LATEST_DIFF=$(printf '%s\n' "$_full_diff" | tail -10)
+        _wt_header="### Working tree"
+        [ "$(printf '%s\n' "$_full_diff" | awk 'END{print NR}')" -gt 10 ] \
+            && _wt_header="$_wt_header (truncated to last 10 lines)"
+        BLOCK="$BLOCK
 
-### Working tree
+$_wt_header
 $LATEST_DIFF"
+    fi
 else
     BLOCK="## Scope (auto-grounded)
 
 $TOMBSTONE"
 fi
 
-# Token cap: keep the injected context bounded (better thin signal than none).
-# head -c is the identity on shorter input, so no size pre-check is needed.
-BLOCK=$(printf '%s' "$BLOCK" | head -c 8000)
+# Token cap: keep the injected context bounded (better thin signal than none). When the block
+# overflows, cut back to the last whole line (so no path/commit is severed mid-token) and append
+# an explicit marker — a truncated tail must never read as a real, complete list. Reserve headroom
+# for the marker so the result still fits the 8000-byte cap.
+if [ "$(printf '%s' "$BLOCK" | wc -c | tr -d ' ')" -gt 8000 ]; then
+    BLOCK=$(printf '%s' "$BLOCK" | head -c 7900)
+    BLOCK="${BLOCK%$'\n'*}
+[scope block truncated]"
+fi
 
 jq -n --arg c "$BLOCK" \
     '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: $c}}'
