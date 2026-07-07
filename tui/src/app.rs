@@ -1677,6 +1677,47 @@ fn rewrite_queue_line(
 }
 
 /// Rename the Claude Code conversation history directory to match the session rename.
+/// The Claude home dir (`$HOME`), honoring a test-only thread-local override so
+/// tests exercise the projects-dir logic without mutating the process-global
+/// `HOME` (which races parallel tests' env reads). See [`test_home`].
+fn claude_home() -> Option<String> {
+    #[cfg(test)]
+    if let Some(h) = test_home::current() {
+        return Some(h.to_string_lossy().into_owned());
+    }
+    std::env::var("HOME").ok()
+}
+
+/// Test-only override for [`claude_home`]. Same rationale as
+/// `session::test_root`: scope the value to the current test thread instead of
+/// mutating process-global `HOME`. The returned guard clears it on drop.
+#[cfg(test)]
+pub mod test_home {
+    use std::cell::RefCell;
+    use std::path::PathBuf;
+
+    thread_local! {
+        static HOME: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+    }
+
+    pub(super) fn current() -> Option<PathBuf> {
+        HOME.with(|c| c.borrow().clone())
+    }
+
+    #[must_use]
+    pub fn scoped(home: PathBuf) -> Guard {
+        HOME.with(|c| *c.borrow_mut() = Some(home));
+        Guard
+    }
+
+    pub struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            HOME.with(|c| *c.borrow_mut() = None);
+        }
+    }
+}
+
 /// Claude stores conversations under ~/.claude/projects/ keyed by encoded absolute path.
 /// Path encoding: replace '/' and '.' with '-'.
 fn rename_claude_projects_dir(old_session_path: &std::path::Path, new_session_path: &std::path::Path) {
@@ -1684,9 +1725,9 @@ fn rename_claude_projects_dir(old_session_path: &std::path::Path, new_session_pa
         p.to_string_lossy().replace('/', "-").replace('.', "-")
     }
 
-    let home = match std::env::var("HOME") {
-        Ok(h) => h,
-        Err(_) => return,
+    let home = match claude_home() {
+        Some(h) => h,
+        None => return,
     };
     let projects_dir = std::path::PathBuf::from(&home).join(".claude/projects");
     let old_encoded = encode_path(old_session_path);
@@ -1703,11 +1744,6 @@ fn rename_claude_projects_dir(old_session_path: &std::path::Path, new_session_pa
 mod tests {
     use super::*;
     use crate::session::Session;
-
-    /// Serializes tests that mutate the process-global `CS_SESSIONS_ROOT` so they
-    /// don't race under the default parallel test runner. session.rs documents why
-    /// the codebase otherwise avoids mutating this global.
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn sample_sessions() -> Vec<Session> {
         vec![
@@ -2392,9 +2428,6 @@ mod tests {
 
     #[test]
     fn rename_claude_projects_dir_moves_matching_dir() {
-        // Mutating HOME reallocs the process-global environ; serialize with the
-        // other env-mutating tests so a concurrent setenv can't race their reads.
-        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = std::env::temp_dir().join(format!("cs-test-proj-rename-{}", std::process::id()));
         let fake_projects = tmp.join(".claude/projects");
         let sessions = tmp.join("sessions");
@@ -2412,13 +2445,10 @@ mod tests {
         // Put a marker file inside to verify it moved
         std::fs::write(old_proj.join("conv.jsonl"), "test").unwrap();
 
-        // Override HOME so the function finds our fake .claude/projects
-        let real_home = std::env::var("HOME").unwrap();
-        std::env::set_var("HOME", &tmp);
+        // Override the Claude home so the function finds our fake .claude/projects
+        let _home = test_home::scoped(tmp.clone());
 
         rename_claude_projects_dir(&old_session, &new_session);
-
-        std::env::set_var("HOME", &real_home);
 
         let new_encoded = encode_path(&new_session);
         let new_proj = fake_projects.join(&new_encoded);
@@ -2434,14 +2464,10 @@ mod tests {
 
     #[test]
     fn rename_claude_projects_dir_noop_when_no_projects_dir() {
-        // Mutating HOME reallocs the process-global environ; serialize with the
-        // other env-mutating tests so a concurrent setenv can't race their reads.
-        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = std::env::temp_dir().join(format!("cs-test-proj-noop-{}", std::process::id()));
         std::fs::create_dir_all(&tmp).unwrap();
 
-        let real_home = std::env::var("HOME").unwrap();
-        std::env::set_var("HOME", &tmp);
+        let _home = test_home::scoped(tmp.clone());
 
         // Should not panic even if .claude/projects doesn't exist
         rename_claude_projects_dir(
@@ -2449,7 +2475,6 @@ mod tests {
             &std::path::PathBuf::from("/fake/new"),
         );
 
-        std::env::set_var("HOME", &real_home);
         std::fs::remove_dir_all(&tmp).unwrap();
     }
 
@@ -2520,20 +2545,17 @@ mod tests {
 
     #[test]
     fn create_session_valid_name_returns_open_action() {
-        // execute_create reads sessions_root() (CS_SESSIONS_ROOT); hold ENV_LOCK
-        // and point it at a temp dir so this read can't race another test's
-        // set_var/remove_var (a data race on the process environment) and so the
-        // .exists() check never touches the developer's real sessions root.
-        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // execute_create reads sessions_root(); scope it to a temp dir (per test
+        // thread, so parallel tests can't collide) and keep the .exists() check
+        // off the developer's real sessions root.
         let tmp = std::env::temp_dir().join(format!("cs-tui-create-{}", std::process::id()));
         std::fs::create_dir_all(&tmp).ok();
-        std::env::set_var("CS_SESSIONS_ROOT", &tmp);
+        let _root = session::test_root::scoped(tmp.clone());
         let mut app = App::new(sample_sessions());
         app.mode = Mode::CreateSession;
         app.create_input.set("brand-new-session");
         let action = app.handle_key(KeyEvent::from(KeyCode::Enter));
         assert!(matches!(action, Action::Open(name) if name == "brand-new-session"));
-        std::env::remove_var("CS_SESSIONS_ROOT");
         std::fs::remove_dir_all(&tmp).ok();
     }
 
@@ -3109,9 +3131,8 @@ mod tests {
 
     #[test]
     fn notes_enter_appends_to_queue_file_and_clears_input() {
-        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = std::env::temp_dir().join(format!("cs-tui-notes-{}", std::process::id()));
-        std::env::set_var("CS_SESSIONS_ROOT", &tmp);
+        let _root = session::test_root::scoped(tmp.clone());
         let name = "alpha"; // matches sample_sessions()[0].name
         std::fs::create_dir_all(tmp.join(name).join(".cs/local")).unwrap();
         let mut app = App::new(sample_sessions());
@@ -3125,14 +3146,12 @@ mod tests {
         assert!(q.contains("do X"));
         assert_eq!(app.queue_input.text(), "", "Enter must clear the Notes input");
         std::fs::remove_dir_all(&tmp).ok();
-        std::env::remove_var("CS_SESSIONS_ROOT");
     }
 
     #[test]
     fn notes_enter_clears_declined() {
-        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = std::env::temp_dir().join(format!("cs-tui-notes-declined-{}", std::process::id()));
-        std::env::set_var("CS_SESSIONS_ROOT", &tmp);
+        let _root = session::test_root::scoped(tmp.clone());
         let name = "alpha"; // matches sample_sessions()[0].name
         let local = tmp.join(name).join(".cs/local");
         std::fs::create_dir_all(&local).unwrap();
@@ -3150,15 +3169,18 @@ mod tests {
             "adding a task must clear queue.declined so the gate can re-ask"
         );
         std::fs::remove_dir_all(&tmp).ok();
-        std::env::remove_var("CS_SESSIONS_ROOT");
     }
 
     // --- Notes panel: delete + edit ---
 
     /// Seed a session's queue file with the given tasks and return (tmp root, dir).
-    fn seed_queue(slug: &str, name: &str, tasks: &[&str]) -> (std::path::PathBuf, std::path::PathBuf) {
+    fn seed_queue(
+        slug: &str,
+        name: &str,
+        tasks: &[&str],
+    ) -> (std::path::PathBuf, std::path::PathBuf, session::test_root::Guard) {
         let tmp = std::env::temp_dir().join(format!("cs-tui-{}-{}", slug, std::process::id()));
-        std::env::set_var("CS_SESSIONS_ROOT", &tmp);
+        let root = session::test_root::scoped(tmp.clone());
         let local = tmp.join(name).join(".cs/local");
         std::fs::create_dir_all(&local).unwrap();
         let mut body = String::new();
@@ -3167,13 +3189,12 @@ mod tests {
             body.push('\n');
         }
         std::fs::write(local.join("queue"), body).unwrap();
-        (tmp, local)
+        (tmp, local, root)
     }
 
     #[test]
     fn down_enters_list_and_up_returns_to_input() {
-        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let (tmp, _local) = seed_queue("notes-nav", "alpha", &["task one", "task two"]);
+        let (tmp, _local, _root) = seed_queue("notes-nav", "alpha", &["task one", "task two"]);
         let mut app = App::new(sample_sessions());
         app.table_state.select(Some(0));
         app.handle_key(KeyEvent::from(KeyCode::Tab));
@@ -3184,13 +3205,11 @@ mod tests {
         app.handle_key(KeyEvent::from(KeyCode::Up));
         assert_eq!(app.notes_focus, NotesFocus::Input);
         std::fs::remove_dir_all(&tmp).ok();
-        std::env::remove_var("CS_SESSIONS_ROOT");
     }
 
     #[test]
     fn notes_list_d_removes_highlighted_task() {
-        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let (tmp, local) = seed_queue("notes-del", "alpha", &["one", "two", "three"]);
+        let (tmp, local, _root) = seed_queue("notes-del", "alpha", &["one", "two", "three"]);
         let mut app = App::new(sample_sessions());
         app.table_state.select(Some(0));
         app.handle_key(KeyEvent::from(KeyCode::Tab));
@@ -3201,13 +3220,11 @@ mod tests {
         let lines: Vec<&str> = q.lines().filter(|l| !l.trim().is_empty()).collect();
         assert_eq!(lines, vec!["one", "three"], "deletes exactly the #2 line, order preserved");
         std::fs::remove_dir_all(&tmp).ok();
-        std::env::remove_var("CS_SESSIONS_ROOT");
     }
 
     #[test]
     fn notes_list_e_loads_task_and_enter_replaces_in_place() {
-        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let (tmp, local) = seed_queue("notes-edit", "alpha", &["one", "two", "three"]);
+        let (tmp, local, _root) = seed_queue("notes-edit", "alpha", &["one", "two", "three"]);
         let mut app = App::new(sample_sessions());
         app.table_state.select(Some(0));
         app.handle_key(KeyEvent::from(KeyCode::Tab));
@@ -3226,13 +3243,11 @@ mod tests {
         assert_eq!(lines, vec!["one", "two X", "three"], "replaces in place, position preserved");
         assert_eq!(app.editing, None, "editing cleared after save");
         std::fs::remove_dir_all(&tmp).ok();
-        std::env::remove_var("CS_SESSIONS_ROOT");
     }
 
     #[test]
     fn notes_list_e_then_esc_cancels_edit_unchanged() {
-        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let (tmp, local) = seed_queue("notes-edit-cancel", "alpha", &["one", "two", "three"]);
+        let (tmp, local, _root) = seed_queue("notes-edit-cancel", "alpha", &["one", "two", "three"]);
         let mut app = App::new(sample_sessions());
         app.table_state.select(Some(0));
         app.handle_key(KeyEvent::from(KeyCode::Tab));
@@ -3249,7 +3264,6 @@ mod tests {
         let lines: Vec<&str> = q.lines().filter(|l| !l.trim().is_empty()).collect();
         assert_eq!(lines, vec!["one", "two", "three"], "queue unchanged after cancel");
         std::fs::remove_dir_all(&tmp).ok();
-        std::env::remove_var("CS_SESSIONS_ROOT");
     }
 
     // --- Mouse hit-testing with variable-height rows ---
@@ -3334,8 +3348,7 @@ mod tests {
 
     #[test]
     fn append_notes_task_updates_queue_depth_and_todo_visibility() {
-        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let (tmp, _local) = seed_queue("depth-append", "alpha", &[]);
+        let (tmp, _local, _root) = seed_queue("depth-append", "alpha", &[]);
         let mut app = App::new(sample_sessions());
         app.table_state.select(Some(0));
         // sample_sessions()[0] (alpha) starts with no queued tasks.
@@ -3352,13 +3365,11 @@ mod tests {
             "queuing the first task makes the To-Do column appear"
         );
         std::fs::remove_dir_all(&tmp).ok();
-        std::env::remove_var("CS_SESSIONS_ROOT");
     }
 
     #[test]
     fn delete_notes_task_decrements_queue_depth() {
-        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let (tmp, _local) = seed_queue("depth-del", "alpha", &["one", "two"]);
+        let (tmp, _local, _root) = seed_queue("depth-del", "alpha", &["one", "two"]);
         let mut app = App::new(sample_sessions());
         app.table_state.select(Some(0));
         // Prime the in-memory depth to match the seeded file (two tasks).
@@ -3372,6 +3383,5 @@ mod tests {
             "delete must decrement the in-memory queue_depth"
         );
         std::fs::remove_dir_all(&tmp).ok();
-        std::env::remove_var("CS_SESSIONS_ROOT");
     }
 }
