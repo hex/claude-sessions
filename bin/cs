@@ -1171,7 +1171,7 @@ Treat these files as a lab notebook - document as you go, not just at the end.
 
 ## Wrap-up Command
 
-When the session is complete, use the `/wrap` command to distill durable memory entries and generate an intelligent summary of the entire session (.cs/summary.md). Use `/summary` for the narrative alone, or `/sweep` for the memory pass alone.
+When the session is complete, use the `/wrap` command to distill durable memory entries and generate an intelligent summary of the entire session (.cs/summary.md). Use `/summary` for the narrative alone, or `/sweep` for the memory pass alone. Mid-session, use `/checkpoint <label>` to snapshot git state and the narrative at meaningful moments (saved under .cs/checkpoints/).
 
 ## Secure Secrets Handling
 
