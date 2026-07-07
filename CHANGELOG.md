@@ -4,6 +4,15 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.7.6
+
+A CI-reliability release. The first run of the Test workflow on `main` surfaced environment gaps in the **test suite itself** — not product bugs. This release makes the suite portable across the CI runners and removes a parallel-test flake. **No user-facing behavior changes**; there is nothing to do on upgrade.
+
+### Fixes
+
+- **Bash suites run cleanly on bare CI runners.** Configure a git identity in the Test workflow (bare runners auto-detect an empty ident name, so `cs`'s internal commits failed); source `verify_checksum` from a temp file (macOS stock bash 3.2 can't define a function via `source <(…)`); a portable `timeout` shim (stock macOS ships none); compute the countdown `now` via `date +%s` (bash 3.2 lacks the `%(%s)T` builtin); feed hooks via a herestring to avoid a `pipefail`-surfaced SIGPIPE; jq `--rawfile` for large payloads (a ~250 KB `--arg` exceeds Linux's per-argument limit); and a `stat` helper that selects the GNU/BSD implementation up front.
+- **TUI tests no longer flake under parallel execution.** Env-mutating tests raced the many parallel tests reading `sessions_root()`. The shared process-global `CS_SESSIONS_ROOT`/`HOME` (in tests) is replaced with `#[cfg(test)]`-gated thread-local overrides, so each test's sessions root is isolated per thread. Production code paths are unchanged.
+
 ## 2026.7.5
 
 A full improvement audit (#1–#268) plus a two-pass Fable-model prompt-engineering review of every slash-command, skill, and hook-injected prompt.
