@@ -116,6 +116,16 @@ test_attempts_counter_is_machine_local() {
         "attempts counter must NOT be written to the git-tracked .cs/ root" || return 1
 }
 
+test_block_reason_offers_verbatim_backtick_escape() {
+    # Flagged text that must stay verbatim (a quote or a title) should be wrappable
+    # in backticks rather than reworded — the linter ignores inline-code spans — so
+    # the block message must surface that escape instead of demanding a reword.
+    printf '%s\n' "# Summary" "The fix shipped — clean." > "$CLAUDE_SESSION_META_DIR/summary.md"
+    run_hook '{}'
+    assert_output_contains "$OUT" "block" "slop should block" || return 1
+    assert_output_contains "$OUT" "backtick" "block message must offer the backtick escape for verbatim material" || return 1
+}
+
 echo "Running prose-lint hook tests..."
 run_test test_blocks_on_em_dash_in_summary
 run_test test_blocks_on_phrase_in_memory_entry
@@ -130,5 +140,6 @@ run_test test_narrative_md_is_excluded
 run_test test_per_actor_narrative_is_excluded
 run_test test_loop_guard_allows_after_cap
 run_test test_attempts_counter_is_machine_local
+run_test test_block_reason_offers_verbatim_backtick_escape
 
 report_results

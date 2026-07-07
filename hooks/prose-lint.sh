@@ -92,7 +92,7 @@ REASON="prose-lint: AI-slop tells in prose written this session. Fix each line, 
 
 $LINT_OUT
 
-Replace em-dashes with a comma or period; reword flagged phrases in plain language. Recheck with: cs -lint <file>"
+Reword flagged phrases in plain language (per-line guidance above). If a flagged string is verbatim material that must stay exact (a quote or a title), wrap it in backticks instead of rewording it. Recheck with: cs -lint <file>"
 
 jq -nc --arg r "$REASON" '{decision: "block", reason: $r}'
 exit 0
