@@ -21,7 +21,7 @@ The one distinction that governs everything below is **shared vs machine-local**
 |------|---------|-------|
 | `.cs/README.md` | Session objective (captured from the first prompt) and outcome. Human-edited. | default |
 | `.cs/summary.md` | Distilled session summary, written by `/wrap` and `/summary`. | default |
-| `.cs/timeline.jsonl` | Structured event log — `session_start`, `session_end`, and checkpoint events as newline-delimited JSON. | `union` |
+| `.cs/timeline.jsonl` | Structured event log — `started`, `ended`, and `checkpoint` events as newline-delimited JSON. | `union` |
 | `.cs/memory/MEMORY.md` | Index of Claude Code's native auto-memory (one line per fact). | `ours` |
 | `.cs/memory/<bucket>_*.md` | Native auto-memory fact files (user, feedback, project, reference). Written by the harness. | default |
 | `.cs/memory/narrative.<actor>.md` | Per-actor lab notebook. Each co-developer writes their own file; everyone reads all of them on resume. | `union` |

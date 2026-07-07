@@ -5,7 +5,7 @@ The installer configures Claude Code hooks that enable session management featur
 ## session-start.sh (SessionStart)
 
 Runs when Claude Code starts a session:
-- Logs session start (including source: `startup`, `resume`, `clear`, `compact`) to `.cs/local/session.log` and appends a `session_start` event to `.cs/timeline.jsonl`
+- Logs session start (including source: `startup`, `resume`, `clear`, `compact`) to `.cs/local/session.log` and appends a `started` event to `.cs/timeline.jsonl`
 - On all sources: clears the statusline's attention marker (`.cs/local/attention`) — a fresh session is attended by definition
 - On all sources: rebinds `claude_session_id` in the machine-local `.cs/local/state` to the live conversation UUID from the hook input. Claude Code forks a new UUID when a conversation is continued past the context limit (the old transcript stays on disk), so the recorded binding can silently go stale and `cs` would resume the pre-fork conversation. Non-UUID session ids are ignored; each rebind is logged to `session.log`
 - On `startup`/`resume` only: configures `transfer.hideRefs`, recovers autosaved changes from crashed sessions
@@ -42,7 +42,7 @@ Runs when Claude pauses for user input:
 ## session-end.sh (SessionEnd)
 
 Runs when Claude Code session ends:
-- Logs session end time and exit reason (`user_exit`, `sigint`, `error`, `timeout`) and appends a `session_end` event to `.cs/timeline.jsonl`
+- Logs session end time and the exit source reported by Claude Code (defaulting to `user_exit` when none is given) and appends an `ended` event to `.cs/timeline.jsonl`
 - Deletes the shadow autosave refs (`refs/worktree/cs/auto` for this checkout, plus any legacy `refs/cs/auto`)
 - Cleans up lock files
 
