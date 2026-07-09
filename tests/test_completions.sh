@@ -119,17 +119,57 @@ link_test_session() {
     ln -s "$target" "$CS_SESSIONS_ROOT/$name"
 }
 
+# `cs -complete` emits one candidate per line, so match whole lines: a substring
+# match would let "real-session" satisfy an assertion about "not-a-session", and
+# the dot in ".obsidian" would otherwise be read as a regex wildcard.
+assert_candidate() {
+    local output="$1" name="$2" msg="$3"
+    if ! printf '%s\n' "$output" | grep -qxF -- "$name"; then
+        echo "  FAIL: $msg"
+        echo "    candidates: $(printf '%s' "$output" | tr '\n' ' ')"
+        return 1
+    fi
+}
+
+assert_not_candidate() {
+    local output="$1" name="$2" msg="$3"
+    if printf '%s\n' "$output" | grep -qxF -- "$name"; then
+        echo "  FAIL: $msg"
+        echo "    candidates: $(printf '%s' "$output" | tr '\n' ' ')"
+        return 1
+    fi
+}
+
+complete_sessions_output() {
+    "$CS_BIN" -complete sessions 2>&1
+}
+
 test_complete_sessions_includes_symlinked_session() {
     create_test_session "real-session" >/dev/null
     link_test_session "linked-session"
 
     local out
-    out=$("$CS_BIN" -complete sessions 2>&1) || {
+    out=$(complete_sessions_output) || {
         echo "  FAIL: cs -complete sessions exited nonzero: $out"
         return 1
     }
-    assert_output_contains "$out" "linked-session" "a symlinked session must complete" || return 1
-    assert_output_contains "$out" "real-session" "a plain session must complete" || return 1
+    assert_candidate "$out" "linked-session" "a symlinked session must complete" || return 1
+    assert_candidate "$out" "real-session" "a plain session must complete" || return 1
+}
+
+test_complete_sessions_excludes_directories_without_a_cs_marker() {
+    create_test_session "real-session" >/dev/null
+    mkdir -p "$CS_SESSIONS_ROOT/scratch-dir"
+    mkdir -p "$CS_SESSIONS_ROOT/.obsidian"
+
+    local out
+    out=$(complete_sessions_output) || {
+        echo "  FAIL: cs -complete sessions exited nonzero: $out"
+        return 1
+    }
+    assert_candidate "$out" "real-session" "a session with a .cs/ marker must complete" || return 1
+    assert_not_candidate "$out" "scratch-dir" "a directory without a .cs/ marker is not a session" || return 1
+    assert_not_candidate "$out" ".obsidian" "a dotted config directory is not a session" || return 1
 }
 
 echo ""
@@ -138,6 +178,7 @@ echo "========================="
 echo ""
 
 run_test test_complete_sessions_includes_symlinked_session
+run_test test_complete_sessions_excludes_directories_without_a_cs_marker
 run_test test_dispatch_extraction_is_sane
 run_test test_hidden_commands_are_exempt_from_completion_coverage
 run_test test_zsh_completion_covers_all_commands

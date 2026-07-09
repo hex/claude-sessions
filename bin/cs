@@ -2648,13 +2648,16 @@ search_sessions() {
 }
 
 # Print every session name, one per line, as completion candidates.
-# Symlinks count: `cs -adopt` links repos that live elsewhere on disk into
-# SESSIONS_ROOT. Kept free of git and keychain lookups so a TAB press stays fast.
+# A .cs/ marker is what makes a directory a session; SESSIONS_ROOT also holds
+# unrelated directories such as editor config. Symlinks count: `cs -adopt` links
+# repos that live elsewhere on disk into SESSIONS_ROOT, and `-d` resolves through
+# the link. Kept free of git and keychain lookups so a TAB press stays fast.
 complete_sessions() {
     [ -d "$SESSIONS_ROOT" ] || return 0
 
     local dir
     while IFS= read -r -d '' dir; do
+        [ -d "$dir/.cs" ] || continue
         printf '%s\n' "${dir##*/}"
     done < <(find "$SESSIONS_ROOT" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) -print0 | sort -z)
 }
