@@ -93,6 +93,10 @@ fn run_event_loop(app: &mut app::App, terminal: &mut Tui) -> io::Result<app::Act
     // still wakes the loop immediately via poll.
     const TICK: std::time::Duration = std::time::Duration::from_millis(100);
     loop {
+        // Previews the worker finished since the last frame. The idle redraw
+        // below means a result is on screen within one tick of arriving.
+        app.drain_previews();
+
         terminal.draw(|frame| ui::render(app, frame))?;
 
         if event::poll(TICK)? {
