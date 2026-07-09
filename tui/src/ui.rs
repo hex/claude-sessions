@@ -1567,6 +1567,42 @@ mod tests {
     }
 
     #[test]
+    fn top_input_line_keeps_cursor_visible_for_overflowing_text() {
+        use crate::session::test_root;
+        let tmp = std::env::temp_dir().join(format!("cs-ui-inputwin-{}", std::process::id()));
+        let name = "solo-input";
+        std::fs::create_dir_all(tmp.join(name).join(".cs/local")).unwrap();
+        let _guard = test_root::scoped(tmp.clone());
+
+        let mut sessions = one_session();
+        sessions[0].name = name.to_string();
+        let mut app = App::new(sessions);
+        app.theme = Palette::dark();
+        app.show_preview = true;
+        app.focus = Focus::Notes;
+        app.notes_focus = NotesFocus::Input;
+        // Type a string far wider than any pane column count.
+        for c in "the quick brown fox jumps over the lazy dog and then keeps on running far past the visible right edge of this narrow input field and onward zzz".chars() {
+            app.handle_key(KeyEvent::from(KeyCode::Char(c)));
+        }
+
+        let backend = TestBackend::new(90, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let joined: String = (0..buf.area.height)
+            .flat_map(|y| (0..buf.area.width).map(move |x| (x, y)))
+            .map(|(x, y)| buf[(x, y)].symbol().to_string())
+            .collect();
+        // The block cursor is on screen, and the tail (nearest the cursor) is shown
+        // while the head has scrolled off.
+        assert!(joined.contains('\u{2588}'), "block cursor must be visible");
+        assert!(joined.contains("zzz"), "the tail nearest the cursor is shown");
+        assert!(!joined.contains("the quick brown"), "the head scrolled out of the field");
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
     fn editing_row_text_is_italic_but_number_is_not() {
         use crate::session::test_root;
         use ratatui::style::Modifier;
