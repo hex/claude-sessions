@@ -35,6 +35,20 @@ _cs_completions() {
         cs -complete sessions 2>/dev/null
     }
 
+    # Append the session names that prefix-match $1 to COMPREPLY. Names are matched
+    # as data with a case glob rather than fed to `compgen -W`, whose word list is
+    # split on IFS and expanded: an unquoted name with a space would split into
+    # pieces and one with a star would pathname-expand against the cwd.
+    _cs_add_session_matches() {
+        local cur="$1" line
+        while IFS= read -r line; do
+            [ -n "$line" ] || continue
+            case "$line" in
+                "$cur"*) COMPREPLY+=("$line") ;;
+            esac
+        done < <(_cs_sessions)
+    }
+
     # Determine context based on previous words
     local in_secrets=false
     local in_update=false
@@ -86,7 +100,8 @@ _cs_completions() {
 
     # Context: after -remove/-rm, complete with session names
     if $after_remove && [[ $cword -eq 2 ]]; then
-        COMPREPLY=($(compgen -W "$(_cs_sessions)" -- "$cur"))
+        COMPREPLY=()
+        _cs_add_session_matches "$cur"
         return
     fi
 
@@ -124,10 +139,9 @@ _cs_completions() {
     # `cs <TAB>` answers "what can I type here" in full. A leading dash rules out
     # every session name, so skip the enumeration entirely in that case.
     if [[ $cword -eq 1 ]]; then
-        if [[ "$cur" == -* ]]; then
-            COMPREPLY=($(compgen -W "$global_flags" -- "$cur"))
-        else
-            COMPREPLY=($(compgen -W "$(_cs_sessions) $global_flags" -- "$cur"))
+        COMPREPLY=($(compgen -W "$global_flags" -- "$cur"))
+        if [[ "$cur" != -* ]]; then
+            _cs_add_session_matches "$cur"
         fi
         return
     fi

@@ -153,6 +153,32 @@ REC
     printf '%s' "$marker"
 }
 
+# A session name is validated to `^[a-zA-Z0-9._-]+$`, but the completion must not
+# mangle one that slips in by hand: an unquoted `COMPREPLY=($(compgen ...))` word-
+# splits a spaced name into pieces and glob-expands a name with a star against the
+# cwd. Populate COMPREPLY without those expansions instead.
+test_bash_completion_does_not_split_a_session_name_with_spaces() {
+    mkdir -p "$CS_SESSIONS_ROOT/my session/.cs"
+    put_built_cs_on_path
+
+    local out
+    out=$(bash_candidates_for "$BASH_COMP" "my")
+    assert_candidate "$out" "my session" "a spaced name must stay one candidate" || return 1
+    assert_not_candidate "$out" "session" "a spaced name must not split into pieces" || return 1
+}
+
+test_bash_completion_does_not_glob_a_session_name_with_a_star() {
+    mkdir -p "$CS_SESSIONS_ROOT/star*name/.cs"
+    # A decoy file the star would expand to if the name reached the shell unquoted.
+    ( cd "$TEST_TMPDIR" && : > "starHITname" )
+    put_built_cs_on_path
+
+    local out
+    out=$(cd "$TEST_TMPDIR" && bash_candidates_for "$BASH_COMP" "star")
+    assert_candidate "$out" 'star*name' "the literal starred name must be the candidate" || return 1
+    assert_not_candidate "$out" "starHITname" "completion must not glob cwd files into candidates" || return 1
+}
+
 test_bash_completion_does_not_enumerate_when_completing_a_flag() {
     local marker; marker=$(recording_cs_on_path)
     bash_candidates_for "$BASH_COMP" "-" >/dev/null
@@ -348,6 +374,8 @@ run_test test_bash_completion_before_the_fix_missed_symlinked_sessions
 run_test test_zsh_completion_offers_a_symlinked_session
 run_test test_bash_completion_offers_sessions_and_flags_on_an_empty_word
 run_test test_zsh_completion_offers_sessions_and_flags_on_an_empty_word
+run_test test_bash_completion_does_not_split_a_session_name_with_spaces
+run_test test_bash_completion_does_not_glob_a_session_name_with_a_star
 run_test test_bash_completion_does_not_enumerate_when_completing_a_flag
 run_test test_zsh_completion_does_not_enumerate_when_completing_a_flag
 run_test test_completions_delegate_session_enumeration_to_cs
