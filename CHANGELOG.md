@@ -4,6 +4,26 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.7.8
+
+Tab-completion now finds every session. Sessions adopted by symlink from a repo elsewhere on disk never used to tab-complete, because both completion scripts enumerated sessions themselves and neither followed symlinks. They now delegate to one internal enumerator, so completion can never disagree with `cs -list` about what a session is. The rest of the release cleans up completion edge cases, corrects a few documentation errors, and reshapes the README so newcomers meet the pitch before the glossary.
+
+### Features
+
+- **Symlinked sessions complete.** `find -type d` (bash) and `*(N/)` (zsh) both reject a symlink to a directory, so a session created with `cs -adopt` from a repo elsewhere on disk was invisible to the Tab key. Both scripts now call a new internal `cs -complete sessions` enumerator that follows symlinks and defines a session the same way `cs -list` does (a `.cs/` directory or a root `CLAUDE.md`).
+- **Bare `cs <TAB>` offers sessions and flags together**, so the available commands are discoverable without knowing to type a leading `-` first.
+
+### Fixes
+
+- **Completion no longer mangles unusual session names.** An unquoted `compgen -W` word-split a name containing a space and glob-expanded one containing a `*` against the working directory; names are now matched as data.
+- **Corrected TUI keybindings in the README.** Expand a row with `p` (the README said `Tab`); queue a task by focusing the To-Do input with `Tab` and pressing `Enter` (there was no `a` binding, and the badge is `▤ N`, not `[Nq]`).
+- **Corrected the `CS_STATUSLINE_SEGMENTS` default** printed by `cs -help` (it omitted the `logo` and `notes` segments).
+
+### Docs
+
+- **README restructured for readability.** Resequenced so the pitch and quickstart come before the concepts glossary; advanced features (worktrees, task queue, machine-sharing) grouped under one heading; and the full environment-variable reference moved to a new [docs/configuration.md](docs/configuration.md).
+- Added a CI status badge.
+
 ## 2026.7.7
 
 The interactive session manager (TUI) now adapts to the terminal's shape. When the window is taller than it is wide, the preview and To-Do panes stack vertically below the session list — list on top, details in the middle, notes at the bottom — instead of sitting beside it. Wide terminals keep the side-by-side layout, and small windows still show the list alone.

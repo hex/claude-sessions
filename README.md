@@ -1,5 +1,7 @@
 # cs - Claude Code Session Manager
 
+[![Test](https://github.com/hex/claude-sessions/actions/workflows/test.yml/badge.svg)](https://github.com/hex/claude-sessions/actions/workflows/test.yml)
+
 A session manager for [Claude Code](https://github.com/anthropics/claude-code) that creates isolated workspaces with automatic documentation.
 
 ![cs session demo](assets/screenshot.png)
@@ -22,14 +24,6 @@ cs research-llms      # Explore a topic, keep your notes
 Each session is a persistent workspace - documentation and secrets that survive across conversations.
 
 No git repo required. No project structure needed. Just a name for what you're working on.
-
-## Concepts
-
-- **Sessions** — Isolated workspaces, each with their own git repo and documentation. `cs debug-api` creates one; running it again resumes it.
-- **Narrative** (`.cs/memory/narrative.<actor>.md`) — A per-actor lab notebook for recording findings, observations, and ideas during a session. Each co-developer writes their own file (so shared sessions never conflict) and everyone reads all of them on resume. Held as native Claude Code memory topic files, so they inherit lazy-loading (the `MEMORY.md` index pointers load at startup; bodies are read on demand) and show up in the `/memory` tooling.
-- **Checkpoints** (`.cs/checkpoints/`) — Labelled narrative snapshots you can save mid-session with `/checkpoint`, capturing the narrative, changes, and the current git HEAD.
-- **Timeline** (`.cs/timeline.jsonl`) — A structured event log recording session starts, ends, and checkpoints as newline-delimited JSON.
-- **Auto-memory** (`.cs/memory/`) — Claude Code's persistent operational notes, redirected into the session and cleaned up with `cs -rm`.
 
 ## Features
 
@@ -90,7 +84,7 @@ cs -statusline enable|disable  # Enable or remove the cs status line
 cs -detect-theme            # Show the detected terminal light/dark theme
 cs -list, -ls               # List all sessions
 cs -remove, -rm <name>      # Remove a session
-cs -update                  # Update to latest version
+cs -update [--check|--force]   # Update to latest (--check: check only; --force: reinstall)
 cs -uninstall               # Uninstall cs
 cs -help, -h                # Show help message
 cs -version, -v             # Show version
@@ -107,13 +101,13 @@ Running `cs` with no arguments launches an interactive TUI for browsing and mana
 - **Time-based sections** — sessions grouped under Today, Yesterday, This Week, This Month, Older when sorted by date (the default view)
 - **Action bar** with `Enter` — inline bar shows available actions with shortcut keys
 - **Preview & To-Do panes** — appear beside the list on wide terminals (>120 cols), or stacked below it (list, then details, then notes) when the window is taller than it is wide; toggle with `p`
-- **Expand row** with `Tab` — shows session objective (auto-captured from your first prompt) and narrative inline
+- **Expand row** with `p` — shows session objective (auto-captured from your first prompt) and narrative inline
 - **Create session** with `n` — opens inline dialog to create a new session
 - **Delete** with `d` (confirmation required)
 - **Batch operations** — mark sessions with `Space`, then `D` to batch delete
 - **Rename** with `r`
 - **Manage secrets** with `s` (view values with `v`, auto-redacts after 5 seconds)
-- **Queue a task** with `a` — adds a prompt to the highlighted session's task queue for a walk-away run; a `[Nq]` badge appears in the row while that session's queue is non-empty
+- **Queue a task** — focus the To-Do input with `Tab`, type a prompt, and press `Enter` to add it to the highlighted session's queue for a walk-away run; a `▤ N` badge appears in the To-Do column while that session's queue is non-empty
 - **Quit** with `q` or `Esc`
 - **Light/dark palette** — the warm palette adapts to the terminal background detected at launch (`CS_TERM_THEME`); set the env var to force `light` or `dark`
 
@@ -122,9 +116,11 @@ The TUI requires `cs-tui` (a small standalone Rust binary). Build from source: `
 ### Session Commands
 
 ```bash
-cs <session> -secrets <cmd>   # Manage secrets
+cs <session> -secrets <cmd>   # Manage secrets for a session by name
 cs <session> --force          # Override active session lock
 ```
+
+From inside a running session, `cs -secrets <cmd>` acts on the current session directly (it reads `CLAUDE_SESSION_NAME`), so you can drop the session name.
 
 ### Examples
 
@@ -149,6 +145,14 @@ This converts the current directory into a cs session in place:
 - Initializes a git repo if one doesn't exist (preserves existing repos)
 - Since the working directory doesn't change, `claude --continue` picks up previous conversations
 
+## Concepts
+
+- **Sessions** — Isolated workspaces, each with their own git repo and documentation. `cs debug-api` creates one; running it again resumes it.
+- **Narrative** (`.cs/memory/narrative.<actor>.md`) — A per-actor lab notebook for findings, observations, and ideas during a session. Each co-developer writes their own file (so shared sessions never conflict) and everyone reads all of them on resume. Stored as native Claude Code memory files; see [docs/session-layout.md](docs/session-layout.md) for how that works.
+- **Checkpoints** (`.cs/checkpoints/`) — Labelled narrative snapshots you can save mid-session with `/checkpoint`, capturing the narrative, changes, and the current git HEAD.
+- **Timeline** (`.cs/timeline.jsonl`) — A structured event log recording session starts, ends, and checkpoints as newline-delimited JSON.
+- **Auto-memory** (`.cs/memory/`) — Claude Code's persistent operational notes, redirected into the session and cleaned up with `cs -rm`.
+
 ## Session Structure
 
 ```
@@ -167,6 +171,8 @@ This converts the current directory into a cs session in place:
 ```
 
 Claude Code's [auto memory](https://code.claude.com/docs/en/memory) is redirected into `.cs/memory/` via the `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE` env var (set at launch). This means auto memory is cleaned up with `cs -rm`.
+
+## Advanced
 
 ### Sharing a session between machines
 
@@ -247,55 +253,6 @@ session name.
 - `/summary` — Generate a narrative summary of the current session
 - `/checkpoint <label>` — Save a labelled state snapshot (narrative, changes, git HEAD)
 
-## Configuration
-
-Add to `~/.bashrc` or `~/.zshrc`:
-
-```bash
-# Sessions directory (default: ~/.claude-sessions)
-export CS_SESSIONS_ROOT="/path/to/sessions"
-
-# Legacy password for secrets sync (age encryption preferred - see docs/secrets.md)
-export CS_SECRETS_PASSWORD="your-secure-password"
-
-# Override secrets backend (keychain or encrypted)
-export CS_SECRETS_BACKEND="keychain"
-
-# Override Claude Code binary (default: claude)
-export CLAUDE_CODE_BIN="claude"
-
-# Nerd Font icons in cs banners and session listings (lock, host);
-# the status line uses standard Unicode and is unaffected by this
-export CS_NERD_FONTS="1"
-
-# Force the light/dark theme (session-picker TUI palette, statusline, hooks).
-# Unset (default), cs auto-detects the terminal background before launch
-# (OSC 11 — plain, or DCS passthrough under tmux — then macOS appearance,
-# then COLORFGBG). Set this
-# to override; `cs -detect-theme` prints what detection yields.
-export CS_TERM_THEME="light"   # or "dark"
-
-# Override the terminal's real background color (default: auto-detected via
-# the same OSC 11 query as CS_TERM_THEME, when it succeeds). Drives the
-# statusline's full-width gradient fade; unset means no gradient.
-export CS_TERM_BG_RGB="250;248;242"   # r;g;b, 0-255 each
-
-# Disable colors (see https://no-color.org)
-export NO_COLOR="1"
-
-# Status line: choose/order segments, or disable entirely
-export CS_STATUSLINE_SEGMENTS="logo,session,notes,git,model,ctx,limits,cost"  # this is the default
-export CS_STATUSLINE_DISABLE="1"
-```
-
-The following environment variables are set automatically when you start a session:
-
-- `CLAUDE_SESSION_NAME` - The session name (e.g., `myproject`)
-- `CLAUDE_SESSION_DIR` - Full path to the session directory (workspace root)
-- `CLAUDE_SESSION_META_DIR` - Path to the `.cs/` metadata directory
-- `CLAUDE_CODE_TASK_LIST_ID` - Set to the session name for task list persistence
-- `CLAUDE_CODE_AUTO_MEMORY_PATH` / `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE` - Redirect Claude Code's auto-memory writer into `<session>/.cs/memory/`
-
 ## Shell Completion
 
 Tab completion for session names and commands is installed automatically. To enable it:
@@ -321,8 +278,19 @@ Completions support:
 
 Session names come from `cs` itself, so tab completion always matches what `cs -list` shows.
 
+## Configuration
+
+cs runs with sensible defaults and needs no configuration. The one you're most likely to set is the sessions directory:
+
+```bash
+export CS_SESSIONS_ROOT="/path/to/sessions"   # default: ~/.claude-sessions
+```
+
+For the full list — secrets backend, theme detection, status-line segments, Nerd Font icons, and the variables cs sets for you at launch — see [docs/configuration.md](docs/configuration.md).
+
 ## Documentation
 
+- **[Configuration](docs/configuration.md)** - Every environment variable cs reads and the ones it sets for you
 - **[Session layout](docs/session-layout.md)** - The `.cs/` directory schema: shared vs machine-local files and merge policy
 - **[Hooks](docs/hooks.md)** - How the Claude Code hooks work
 - **[Secrets](docs/secrets.md)** - Secure secrets handling and storage backends
