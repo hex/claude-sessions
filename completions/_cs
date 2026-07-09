@@ -163,9 +163,13 @@ _cs() {
     fi
 
     # First argument: session names and global flags. Offer both, so that a bare
-    # `cs <TAB>` answers "what can I type here" in full; zsh narrows the set once
-    # a leading dash rules the session names out.
+    # `cs <TAB>` answers "what can I type here" in full. A leading dash rules out
+    # every session name, so skip enumerating them (and the cs call it costs).
     if [[ $CURRENT -eq 2 ]]; then
+        if [[ "$words[CURRENT]" == -* ]]; then
+            _describe 'command' global_flags
+            return
+        fi
         local ret=1
         _cs_sessions && ret=0
         _describe 'command' global_flags && ret=0

@@ -138,6 +138,37 @@ test_bash_completion_offers_sessions_and_flags_on_an_empty_word() {
     assert_candidate "$out" "-list" "bare TAB must offer flags" || return 1
 }
 
+# A word beginning with a dash can only be a flag, so neither script should pay
+# to enumerate sessions there. Shadow cs with a recorder and assert it stays
+# untouched while a flag is being completed.
+recording_cs_on_path() {
+    mkdir -p "$TEST_TMPDIR/bin"
+    local marker="$TEST_TMPDIR/cs-was-called"
+    cat > "$TEST_TMPDIR/bin/cs" <<REC
+#!/usr/bin/env bash
+echo called >> "$marker"
+REC
+    chmod +x "$TEST_TMPDIR/bin/cs"
+    PATH="$TEST_TMPDIR/bin:$PATH"
+    printf '%s' "$marker"
+}
+
+test_bash_completion_does_not_enumerate_when_completing_a_flag() {
+    local marker; marker=$(recording_cs_on_path)
+    bash_candidates_for "$BASH_COMP" "-" >/dev/null
+    assert_file_not_exists "$marker" "bash must not call cs to complete a flag" || return 1
+}
+
+test_zsh_completion_does_not_enumerate_when_completing_a_flag() {
+    if ! command -v zsh >/dev/null 2>&1; then
+        echo "    (zsh not installed, skipping)"
+        return 0
+    fi
+    local marker; marker=$(recording_cs_on_path)
+    zsh_candidates_for_first_word "-" >/dev/null
+    assert_file_not_exists "$marker" "zsh must not call cs to complete a flag" || return 1
+}
+
 test_zsh_completion_offers_sessions_and_flags_on_an_empty_word() {
     if ! command -v zsh >/dev/null 2>&1; then
         echo "    (zsh not installed, skipping)"
@@ -317,6 +348,8 @@ run_test test_bash_completion_before_the_fix_missed_symlinked_sessions
 run_test test_zsh_completion_offers_a_symlinked_session
 run_test test_bash_completion_offers_sessions_and_flags_on_an_empty_word
 run_test test_zsh_completion_offers_sessions_and_flags_on_an_empty_word
+run_test test_bash_completion_does_not_enumerate_when_completing_a_flag
+run_test test_zsh_completion_does_not_enumerate_when_completing_a_flag
 run_test test_completions_delegate_session_enumeration_to_cs
 run_test test_dispatch_extraction_is_sane
 run_test test_hidden_commands_are_exempt_from_completion_coverage
