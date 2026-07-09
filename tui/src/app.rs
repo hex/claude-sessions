@@ -284,11 +284,13 @@ pub enum Focus {
     Notes,
 }
 
-/// Sub-focus within the Notes panel: the task input line or the task list.
+/// Sub-focus within the Notes panel: the task input line, the task list, or
+/// an in-place task edit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NotesFocus {
     Input,
     List,
+    Editing,
 }
 
 pub const MENU_ITEMS: &[(&str, &str)] = &[
@@ -410,9 +412,6 @@ pub struct App {
     pub notes_focus: NotesFocus,
     /// Highlighted task index while `notes_focus == List`.
     pub notes_selected: usize,
-    /// Index of the task currently being edited in place, if any. When set, the
-    /// Notes input's Enter replaces that task line instead of appending a new one.
-    pub editing: Option<usize>,
     /// Resolved color palette for the detected terminal background.
     pub theme: Palette,
     /// Sessions root captured once at construction. Reading it here instead of
@@ -496,7 +495,6 @@ impl App {
             focus: Focus::List,
             notes_focus: NotesFocus::Input,
             notes_selected: 0,
-            editing: None,
             theme: Palette::dark(),
         };
         // Apply the default sort (recency) so the initial view is ordered, not
@@ -876,7 +874,6 @@ impl App {
                     self.show_preview = true;
                     self.focus = Focus::Notes;
                     self.notes_focus = NotesFocus::Input;
-                    self.editing = None;
                 }
                 Action::None
             }
@@ -915,44 +912,36 @@ impl App {
         }
     }
 
-    /// Route Notes-panel keys to the input line or the task list depending on
-    /// the current sub-focus. Navigation keys never reach the session list here,
-    /// so the highlighted session stays put while the panel is active.
+    /// Route Notes-panel keys to the input line, the task list, or an
+    /// in-place edit depending on the current sub-focus. Navigation keys
+    /// never reach the session list here, so the highlighted session stays
+    /// put while the panel is active.
     fn handle_notes_input(&mut self, key: KeyEvent) -> Action {
         match self.notes_focus {
             NotesFocus::Input => self.handle_notes_input_field(key),
             NotesFocus::List => self.handle_notes_list(key),
+            NotesFocus::Editing => self.handle_notes_editing(key),
         }
     }
 
-    /// Keys while the Notes input line is focused. Enter appends a new task, or
-    /// replaces the task at `editing` when editing in place. Down drops into the
-    /// task list. Esc cancels an in-progress edit, or leaves the panel entirely.
+    /// Keys while the Notes input line is focused, composing a new task. Enter
+    /// appends it. Down drops into the task list. Esc leaves the panel entirely.
     fn handle_notes_input_field(&mut self, key: KeyEvent) -> Action {
         match key.code {
             KeyCode::Esc => {
-                if self.editing.is_some() {
-                    self.editing = None;
-                    self.queue_input.clear();
-                    self.notes_focus = NotesFocus::List;
-                } else {
-                    self.queue_input.clear();
-                    self.notes_focus = NotesFocus::Input;
-                    self.focus = Focus::List;
-                }
+                self.queue_input.clear();
+                self.notes_focus = NotesFocus::Input;
+                self.focus = Focus::List;
             }
             KeyCode::Enter => {
                 return self.submit_notes_input();
             }
             KeyCode::Down => {
-                // Drop into the task list only when there is something to select
-                // and we are not mid-edit.
-                if self.editing.is_none() {
-                    if let Some(name) = self.selected_session_name() {
-                        if !session::read_queue(&name).is_empty() {
-                            self.notes_focus = NotesFocus::List;
-                            self.notes_selected = 0;
-                        }
+                // Drop into the task list only when there is something to select.
+                if let Some(name) = self.selected_session_name() {
+                    if !session::read_queue(&name).is_empty() {
+                        self.notes_focus = NotesFocus::List;
+                        self.notes_selected = 0;
                     }
                 }
             }
@@ -1008,8 +997,7 @@ impl App {
             KeyCode::Char('e') | KeyCode::Enter => {
                 if let Some(task) = tasks.get(self.notes_selected) {
                     self.queue_input.set(task);
-                    self.editing = Some(self.notes_selected);
-                    self.notes_focus = NotesFocus::Input;
+                    self.notes_focus = NotesFocus::Editing;
                 }
             }
             KeyCode::Esc => {
@@ -1017,6 +1005,28 @@ impl App {
                 self.focus = Focus::List;
             }
             _ => {}
+        }
+        Action::None
+    }
+
+    /// Keys while a task is being edited in place. Text keys go to the buffer;
+    /// Enter commits via submit (which returns to the list only on a successful
+    /// write); Esc cancels; Up/Down are ignored — this is a single-line field.
+    fn handle_notes_editing(&mut self, key: KeyEvent) -> Action {
+        match key.code {
+            KeyCode::Enter => return self.submit_notes_input(),
+            KeyCode::Esc => {
+                self.queue_input.clear();
+                self.notes_focus = NotesFocus::List;
+            }
+            KeyCode::Left => self.queue_input.move_left(),
+            KeyCode::Right => self.queue_input.move_right(),
+            KeyCode::Home => self.queue_input.move_home(),
+            KeyCode::End => self.queue_input.move_end(),
+            KeyCode::Delete => self.queue_input.delete_forward(),
+            KeyCode::Backspace => self.queue_input.delete_back(),
+            KeyCode::Char(c) => self.queue_input.insert(c),
+            _ => {}   // Up/Down and everything else ignored
         }
         Action::None
     }
@@ -1282,7 +1292,7 @@ impl App {
         Action::Open(name)
     }
 
-    /// Commit the Notes input: replace the task at `editing` when editing in
+    /// Commit the Notes input: replace the highlighted task when editing in
     /// place, otherwise append a new task. Ignores empty input.
     fn submit_notes_input(&mut self) -> Action {
         let text = self.queue_input.text().trim().to_string();
@@ -1293,9 +1303,9 @@ impl App {
             Some(session) => session.name.clone(),
             None => return Action::None,
         };
-        match self.editing {
-            Some(idx) => self.replace_notes_task(&name, idx, &text),
-            None => self.append_notes_task(&name, &text),
+        match self.notes_focus {
+            NotesFocus::Editing => self.replace_notes_task(&name, self.notes_selected, &text),
+            _ => self.append_notes_task(&name, &text),
         }
         Action::None
     }
@@ -1348,7 +1358,6 @@ impl App {
             Ok(()) => {
                 let _ = std::fs::remove_file(session::queue_dir(name).join("queue.declined"));
                 self.queue_input.clear();
-                self.editing = None;
                 self.notes_focus = NotesFocus::List;
                 let len = session::read_queue(name).len();
                 if len == 0 {
@@ -1442,14 +1451,6 @@ impl App {
             self.sort_dir = SortDirection::Asc;
         }
         self.apply_filter_and_sort();
-    }
-
-    fn clamp_selection(&mut self) {
-        if let Some(sel) = self.table_state.selected() {
-            if sel >= self.filtered.len() && !self.filtered.is_empty() {
-                self.table_state.select(Some(self.filtered.len() - 1));
-            }
-        }
     }
 
     fn execute_delete(&mut self) {
@@ -1670,6 +1671,21 @@ impl App {
         self.sessions.iter().any(|s| s.queue_depth > 0)
     }
 
+    /// Select session `idx`. If an in-place To-Do edit is open, cancel it — a
+    /// mouse-driven session change must never leave the edit target pointing at
+    /// a different session's queue. Resets the Notes highlight when the session
+    /// actually changes.
+    fn switch_selected_session(&mut self, idx: usize) {
+        if self.notes_focus == NotesFocus::Editing {
+            self.queue_input.clear();
+            self.notes_focus = NotesFocus::List;
+        }
+        if self.table_state.selected() != Some(idx) {
+            self.notes_selected = 0;
+        }
+        self.table_state.select(Some(idx));
+    }
+
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> Action {
         if self.mode != Mode::Normal {
             return Action::None;
@@ -1677,12 +1693,14 @@ impl App {
 
         match mouse.kind {
             MouseEventKind::ScrollUp => {
-                self.table_state.select_previous();
+                let cur = self.table_state.selected().unwrap_or(0);
+                self.switch_selected_session(cur.saturating_sub(1));
                 Action::None
             }
             MouseEventKind::ScrollDown => {
-                self.table_state.select_next();
-                self.clamp_selection();
+                let cur = self.table_state.selected().unwrap_or(0);
+                let max = self.filtered.len().saturating_sub(1);
+                self.switch_selected_session((cur + 1).min(max));
                 Action::None
             }
             MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
@@ -1707,11 +1725,7 @@ impl App {
                         // Rows are variable height; consult the renderer's hit-map
                         // so clicks below a group header or expanded row still land
                         // on the right session.
-                        if self.table_state.selected() != Some(idx) {
-                            // Switching sessions invalidates the Notes list highlight.
-                            self.notes_selected = 0;
-                        }
-                        self.table_state.select(Some(idx));
+                        self.switch_selected_session(idx);
                     }
                 }
                 Action::None
@@ -3425,9 +3439,8 @@ mod tests {
         app.handle_key(KeyEvent::from(KeyCode::Down)); // highlight #1
         app.handle_key(KeyEvent::from(KeyCode::Down)); // highlight #2 ("two")
         app.handle_key(KeyEvent::from(KeyCode::Char('e')));
-        assert_eq!(app.editing, Some(1), "editing index remembered");
+        assert_eq!(app.notes_focus, NotesFocus::Editing, "in edit mode on row 1");
         assert_eq!(app.queue_input.text(), "two", "task text loaded into the input");
-        assert_eq!(app.notes_focus, NotesFocus::Input, "focus moved to the input");
         for c in " X".chars() {
             app.handle_key(KeyEvent::from(KeyCode::Char(c)));
         }
@@ -3435,7 +3448,7 @@ mod tests {
         let q = std::fs::read_to_string(local.join("queue")).unwrap();
         let lines: Vec<&str> = q.lines().filter(|l| !l.trim().is_empty()).collect();
         assert_eq!(lines, vec!["one", "two X", "three"], "replaces in place, position preserved");
-        assert_eq!(app.editing, None, "editing cleared after save");
+        assert_eq!(app.notes_focus, NotesFocus::List, "back to list after save");
         std::fs::remove_dir_all(&tmp).ok();
     }
 
@@ -3452,11 +3465,51 @@ mod tests {
             app.handle_key(KeyEvent::from(KeyCode::Char(c)));
         }
         app.handle_key(KeyEvent::from(KeyCode::Esc)); // cancel edit
-        assert_eq!(app.editing, None, "edit cancelled");
-        assert_eq!(app.notes_focus, NotesFocus::List, "Esc returns to the list");
+        assert_eq!(app.notes_focus, NotesFocus::List, "edit cancelled, back to list");
         let q = std::fs::read_to_string(local.join("queue")).unwrap();
         let lines: Vec<&str> = q.lines().filter(|l| !l.trim().is_empty()).collect();
         assert_eq!(lines, vec!["one", "two", "three"], "queue unchanged after cancel");
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn editing_ignores_up_and_down() {
+        let (tmp, _local, _root) = seed_queue("notes-edit-updown", "alpha", &["one", "two", "three"]);
+        let mut app = App::new(sample_sessions());
+        app.table_state.select(Some(0));
+        app.handle_key(KeyEvent::from(KeyCode::Tab));
+        app.handle_key(KeyEvent::from(KeyCode::Down)); // list, row 0
+        app.handle_key(KeyEvent::from(KeyCode::Down)); // list, row 1 ("two")
+        app.handle_key(KeyEvent::from(KeyCode::Char('e'))); // edit row 1
+        assert_eq!(app.notes_focus, NotesFocus::Editing);
+        app.handle_key(KeyEvent::from(KeyCode::Up));
+        app.handle_key(KeyEvent::from(KeyCode::Down));
+        assert_eq!(app.notes_selected, 1, "selection frozen while editing");
+        assert_eq!(app.notes_focus, NotesFocus::Editing, "still editing");
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn mouse_scroll_during_edit_cancels_it() {
+        let (tmp, local, _root) = seed_queue("notes-edit-mouse", "alpha", &["one", "two", "three"]);
+        let mut app = App::new(sample_sessions());
+        app.table_state.select(Some(0));
+        app.handle_key(KeyEvent::from(KeyCode::Tab));
+        app.handle_key(KeyEvent::from(KeyCode::Down));
+        app.handle_key(KeyEvent::from(KeyCode::Down)); // row 1
+        app.handle_key(KeyEvent::from(KeyCode::Char('e')));
+        for c in "zzz".chars() { app.handle_key(KeyEvent::from(KeyCode::Char(c))); }
+        let mouse = MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 0, row: 0,
+            modifiers: crossterm::event::KeyModifiers::empty(),
+        };
+        app.handle_mouse(mouse);
+        assert_eq!(app.notes_focus, NotesFocus::List, "edit cancelled by mouse switch");
+        // Original session's queue is untouched.
+        let q = std::fs::read_to_string(local.join("queue")).unwrap();
+        let lines: Vec<&str> = q.lines().filter(|l| !l.trim().is_empty()).collect();
+        assert_eq!(lines, vec!["one", "two", "three"], "no write from a cancelled edit");
         std::fs::remove_dir_all(&tmp).ok();
     }
 

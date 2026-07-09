@@ -618,7 +618,7 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
     }
 
     let keys = if app.mode == Mode::Normal && app.focus == Focus::Notes {
-        if app.editing.is_some() {
+        if app.notes_focus == NotesFocus::Editing {
             "editing   Enter:save   Esc:cancel"
         } else if app.notes_focus == NotesFocus::List {
             "\u{2191}\u{2193}:select   d:delete   e:edit   Esc:back"
@@ -1125,7 +1125,7 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
 fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
     let p = app.theme;
     let focused = app.focus == Focus::Notes;
-    let input_focused = focused && app.notes_focus == NotesFocus::Input;
+    let input_focused = focused && matches!(app.notes_focus, NotesFocus::Input | NotesFocus::Editing);
     let list_focused = focused && app.notes_focus == NotesFocus::List;
 
     let border_color = if focused { p.gold } else { p.rust };
