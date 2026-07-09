@@ -12,8 +12,11 @@ BASH_COMP="$SCRIPT_DIR/../completions/cs.bash"
 
 # Extract single-dash top-level command tokens from the main dispatch case
 # (the 8-space-indented arms only, so nested case arms like -update's are excluded).
+# Arms tagged `# hidden` are plumbing invoked by scripts rather than typed by a
+# user, so they are exempt from the requirement to appear in the completions.
 dispatch_commands() {
     awk '/# Handle subcommands \(with - prefix\)/,/^    esac/' "$CS_FILE" \
+        | grep -v '# hidden' \
         | grep -oE '^ {8}-[a-zA-Z|-]+\)' \
         | tr -d ' )' \
         | tr '|' '\n' \
@@ -39,6 +42,12 @@ secrets_subcommands() {
             | tr '|' '\n'
         echo "age"
     } | grep -E '^[a-z]' | sort -u
+}
+
+test_hidden_commands_are_exempt_from_completion_coverage() {
+    local cmds
+    cmds=$(dispatch_commands)
+    assert_output_not_contains "$cmds" "-complete" "-complete is plumbing and must stay out of the user-facing flag list" || return 1
 }
 
 test_secrets_extraction_is_sane() {
@@ -101,12 +110,36 @@ test_bash_completion_covers_all_secrets_subcommands() {
     fi
 }
 
+# Link a directory outside the sessions root in as a session, the way `cs -adopt`
+# does for a repo that lives elsewhere on disk.
+link_test_session() {
+    local name="$1"
+    local target="$TEST_TMPDIR/external/$name"
+    mkdir -p "$target/.cs"
+    ln -s "$target" "$CS_SESSIONS_ROOT/$name"
+}
+
+test_complete_sessions_includes_symlinked_session() {
+    create_test_session "real-session" >/dev/null
+    link_test_session "linked-session"
+
+    local out
+    out=$("$CS_BIN" -complete sessions 2>&1) || {
+        echo "  FAIL: cs -complete sessions exited nonzero: $out"
+        return 1
+    }
+    assert_output_contains "$out" "linked-session" "a symlinked session must complete" || return 1
+    assert_output_contains "$out" "real-session" "a plain session must complete" || return 1
+}
+
 echo ""
 echo "cs completion drift tests"
 echo "========================="
 echo ""
 
+run_test test_complete_sessions_includes_symlinked_session
 run_test test_dispatch_extraction_is_sane
+run_test test_hidden_commands_are_exempt_from_completion_coverage
 run_test test_zsh_completion_covers_all_commands
 run_test test_bash_completion_covers_all_commands
 run_test test_secrets_extraction_is_sane
