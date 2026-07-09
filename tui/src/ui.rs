@@ -1690,6 +1690,25 @@ mod tests {
             }
         }
         assert!(padded_ok, "task row should have a blank padding column after the border");
+
+        // The other half of the contract: the To-Do separator rule stays
+        // full-bleed. It is the row directly below the input line, and its first
+        // cell inside the border must be the rule glyph, not a padding space — so
+        // a regression that padded every row (e.g. moving the inset into the
+        // shared layout) would flip this to a space and fail here.
+        let mut rule_full_bleed = false;
+        for y in 0..buf.area.height {
+            let line: String = (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect();
+            if line.contains("Tab to add a task") {
+                let ry = y + 1;
+                let rule: String = (0..buf.area.width).map(|x| buf[(x, ry)].symbol()).collect();
+                if let Some(bpos) = rule.find("│") {
+                    let inner_x = bpos + "│".len();
+                    rule_full_bleed = rule[inner_x..].starts_with('─');
+                }
+            }
+        }
+        assert!(rule_full_bleed, "the To-Do separator rule should touch the border with no padding column");
         std::fs::remove_dir_all(&tmp).ok();
     }
 
