@@ -8,6 +8,7 @@ use ratatui::widgets::{
     Block, BorderType, Borders, Cell, Clear, HighlightSpacing, Paragraph, Row, Table, Wrap,
 };
 use ratatui::Frame;
+use unicode_width::UnicodeWidthStr;
 
 use ratatui::layout::Alignment;
 
@@ -83,6 +84,31 @@ fn truncate_str(s: &str, max_width: usize) -> String {
         .last()
         .unwrap_or(0);
     format!("{}...", &s[..end])
+}
+
+/// Clip `s` to at most `max_cols` display columns, appending `…` when clipped.
+/// Display-width aware — never splits a wide char.
+fn truncate_cols(s: &str, max_cols: usize) -> String {
+    use unicode_width::UnicodeWidthChar;
+    if s.width() <= max_cols {
+        return s.to_string();
+    }
+    if max_cols == 0 {
+        return String::new();
+    }
+    let budget = max_cols - 1; // leave one column for the ellipsis
+    let mut out = String::new();
+    let mut used = 0usize;
+    for ch in s.chars() {
+        let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if used + cw > budget {
+            break;
+        }
+        out.push(ch);
+        used += cw;
+    }
+    out.push('\u{2026}');
+    out
 }
 
 pub fn render(app: &mut App, frame: &mut Frame) {
@@ -1125,7 +1151,7 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
 fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
     let p = app.theme;
     let focused = app.focus == Focus::Notes;
-    let input_focused = focused && matches!(app.notes_focus, NotesFocus::Input | NotesFocus::Editing);
+    let input_focused = focused && app.notes_focus == NotesFocus::Input;
     let list_focused = focused && app.notes_focus == NotesFocus::List;
 
     let border_color = if focused { p.gold } else { p.rust };
@@ -1155,20 +1181,31 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
     ])
     .split(inner);
 
-    // Single-line task input, with a block cursor while the input is focused.
-    let input_line = if input_focused {
+    // Input line: the new-task field, or a dim hint while editing a row in place.
+    let input_inner = rows[0].width.saturating_sub(2) as usize; // 1-col padding each side
+    let input_line = if app.notes_focus == NotesFocus::Editing {
+        Line::from(Span::styled(
+            format!(" editing {} \u{b7} Enter saves \u{b7} Esc cancels", app.notes_selected + 1),
+            Style::default().fg(p.comment).add_modifier(Modifier::DIM),
+        ))
+    } else if input_focused {
+        let win = app.queue_input.window(input_inner);
         Line::from(vec![
-            Span::styled(app.queue_input.before_cursor(), Style::default().fg(p.fg)),
+            Span::raw(" "),
+            Span::styled(win.before, Style::default().fg(p.fg)),
             Span::styled("\u{2588}", Style::default().fg(p.gold)),
-            Span::styled(app.queue_input.after_cursor(), Style::default().fg(p.fg)),
+            Span::styled(win.after, Style::default().fg(p.fg)),
         ])
     } else if app.queue_input.text().is_empty() {
         Line::from(Span::styled(
-            "Tab to add a task\u{2026}",
+            " Tab to add a task\u{2026}",
             Style::default().fg(p.comment).add_modifier(Modifier::DIM),
         ))
     } else {
-        Line::from(Span::styled(app.queue_input.text(), Style::default().fg(p.fg)))
+        Line::from(vec![
+            Span::raw(" "),
+            Span::styled(app.queue_input.text(), Style::default().fg(p.fg)),
+        ])
     };
     frame.render_widget(Paragraph::new(input_line), rows[0]);
 
@@ -1179,15 +1216,18 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
         rows[1],
     );
 
-    // Numbered list of queued tasks for the highlighted session, read live.
+    // Numbered list of queued tasks, one line each. The highlighted row shows a
+    // gold marker; the row being edited becomes an italic text field with a
+    // scrolling block cursor.
     let tasks = app
         .selected_session()
         .map(|s| crate::session::read_queue(&s.name))
         .unwrap_or_default();
 
+    let inner_cols = rows[2].width as usize;
     let list_lines: Vec<Line> = if tasks.is_empty() {
         vec![Line::from(Span::styled(
-            "(no queued tasks)",
+            " (no queued tasks)",
             Style::default().fg(p.comment).add_modifier(Modifier::DIM),
         ))]
     } else {
@@ -1195,26 +1235,41 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
             .iter()
             .enumerate()
             .map(|(i, task)| {
-                let highlighted = list_focused && i == app.notes_selected;
+                let editing = app.notes_focus == NotesFocus::Editing && i == app.notes_selected;
+                let highlighted =
+                    editing || (list_focused && i == app.notes_selected);
                 let (marker, marker_color) = if highlighted {
                     ("\u{25b8} ", p.gold)
                 } else {
                     ("  ", p.comment)
                 };
-                let num_style = Style::default().fg(marker_color);
-                let mut text_style = Style::default().fg(p.fg);
-                if highlighted {
-                    text_style = text_style.add_modifier(Modifier::BOLD);
-                }
-                Line::from(vec![
+                let num = format!("{}. ", i + 1);
+                // Columns available for the task text: pad(1) + marker(2) + number.
+                let prefix_cols = 1 + 2 + num.chars().count();
+                let avail = inner_cols.saturating_sub(prefix_cols);
+                let mut spans = vec![
+                    Span::raw(" "), // left padding
                     Span::styled(marker, Style::default().fg(marker_color)),
-                    Span::styled(format!("{}. ", i + 1), num_style),
-                    Span::styled(task.as_str(), text_style),
-                ])
+                    Span::styled(num, Style::default().fg(marker_color)),
+                ];
+                if editing {
+                    let win = app.queue_input.window(avail);
+                    let italic = Style::default().fg(p.fg).add_modifier(Modifier::ITALIC);
+                    spans.push(Span::styled(win.before, italic));
+                    spans.push(Span::styled("\u{2588}", Style::default().fg(p.gold)));
+                    spans.push(Span::styled(win.after, italic));
+                } else {
+                    let mut text_style = Style::default().fg(p.fg);
+                    if highlighted {
+                        text_style = text_style.add_modifier(Modifier::BOLD);
+                    }
+                    spans.push(Span::styled(truncate_cols(task, avail), text_style));
+                }
+                Line::from(spans)
             })
             .collect()
     };
-    let list = Paragraph::new(list_lines).wrap(Wrap { trim: true });
+    let list = Paragraph::new(list_lines);
     frame.render_widget(list, rows[2]);
 }
 
@@ -1464,6 +1519,142 @@ mod tests {
             !joined.contains("To-Do"),
             "To-Do column is hidden when no session has queued tasks: {joined}"
         );
+    }
+
+    #[test]
+    fn long_task_renders_on_one_line_with_ellipsis() {
+        use crate::session::test_root;
+        let tmp = std::env::temp_dir().join(format!("cs-ui-longtask-{}", std::process::id()));
+        let name = "solo-long";
+        let local = tmp.join(name).join(".cs/local");
+        std::fs::create_dir_all(&local).unwrap();
+        let long = "Refactor the preview worker so that the contributor git walk is bounded by a date window";
+        std::fs::write(local.join("queue"), format!("{}\n", long)).unwrap();
+        let _guard = test_root::scoped(tmp.clone());
+
+        let mut sessions = one_session();
+        sessions[0].name = name.to_string();
+        sessions[0].queue_depth = 1;
+        let mut app = App::new(sessions);
+        app.theme = Palette::dark();
+        app.show_preview = true;
+        app.focus = Focus::Notes;
+        app.notes_focus = NotesFocus::List;
+
+        // Wide + tall enough to force the stacked layout (panes visible).
+        let backend = TestBackend::new(90, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let rows: Vec<String> = (0..buf.area.height)
+            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
+            .collect();
+        // Truncation puts the ellipsis on the task's own row; the old wrap never did.
+        let task_row = rows
+            .iter()
+            .find(|r| r.contains("Refactor"))
+            .expect("the long task's row should render");
+        assert!(
+            task_row.contains('\u{2026}'),
+            "the task row must end with an ellipsis when truncated: {task_row}"
+        );
+        // The clipped tail must not survive anywhere on that row.
+        assert!(
+            !task_row.contains("window"),
+            "the tail past the width must be clipped, not wrapped: {task_row}"
+        );
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn editing_row_text_is_italic_but_number_is_not() {
+        use crate::session::test_root;
+        use ratatui::style::Modifier;
+        let tmp = std::env::temp_dir().join(format!("cs-ui-italic-{}", std::process::id()));
+        let name = "solo-italic";
+        let local = tmp.join(name).join(".cs/local");
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::write(local.join("queue"), "alpha task\nbeta task\n").unwrap();
+        let _guard = test_root::scoped(tmp.clone());
+
+        let mut sessions = one_session();
+        sessions[0].name = name.to_string();
+        sessions[0].queue_depth = 2;
+        let mut app = App::new(sessions);
+        app.theme = Palette::dark();
+        app.show_preview = true;
+        app.focus = Focus::Notes;
+        app.notes_focus = NotesFocus::List;
+        app.handle_key(KeyEvent::from(KeyCode::Char('e'))); // edit row 0
+
+        let backend = TestBackend::new(90, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+
+        // Find a cell of the task text ('a' from "alpha") and a cell of the number
+        // ('1' from "1.") on the edited row; text italic, number not.
+        let mut saw_italic_text = false;
+        let mut saw_upright_number = false;
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                let cell = &buf[(x, y)];
+                if cell.symbol() == "l" && cell.modifier.contains(Modifier::ITALIC) {
+                    saw_italic_text = true;
+                }
+                if cell.symbol() == "1" && !cell.modifier.contains(Modifier::ITALIC) {
+                    saw_upright_number = true;
+                }
+            }
+        }
+        assert!(saw_italic_text, "edited task text should be italic");
+        assert!(saw_upright_number, "the row number should stay upright");
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn task_rows_are_padded_but_the_rule_is_full_bleed() {
+        use crate::session::test_root;
+        let tmp = std::env::temp_dir().join(format!("cs-ui-pad-{}", std::process::id()));
+        let name = "solo-pad";
+        let local = tmp.join(name).join(".cs/local");
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::write(local.join("queue"), "one\ntwo\n").unwrap();
+        let _guard = test_root::scoped(tmp.clone());
+
+        let mut sessions = one_session();
+        sessions[0].name = name.to_string();
+        sessions[0].queue_depth = 2;
+        let mut app = App::new(sessions);
+        app.theme = Palette::dark();
+        app.show_preview = true;
+        app.focus = Focus::Notes;
+        app.notes_focus = NotesFocus::List;
+
+        let backend = TestBackend::new(90, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+
+        // Locate the To-Do pane's left border column on the row holding "1." and on
+        // the rule row; assert the cell just inside the border is blank on the task
+        // row (padding) and a horizontal line on the rule row (full-bleed).
+        // (Scan for the row containing "1." — its inner-left cell must be a space.)
+        let mut padded_ok = false;
+        for y in 0..buf.area.height {
+            let line: String = (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect();
+            if let Some(bpos) = line.find("│") {
+                // cell right after a left border on a task row
+                if line[bpos..].contains("1.") && line[bpos..].contains("one") {
+                    let inner_x = bpos + "│".len();
+                    if line[inner_x..].starts_with(' ') {
+                        padded_ok = true;
+                    }
+                }
+            }
+        }
+        assert!(padded_ok, "task row should have a blank padding column after the border");
+        std::fs::remove_dir_all(&tmp).ok();
     }
 
     #[test]
