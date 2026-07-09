@@ -274,7 +274,7 @@ test_complete_sessions_includes_symlinked_session() {
     assert_candidate "$out" "real-session" "a plain session must complete" || return 1
 }
 
-test_complete_sessions_excludes_directories_without_a_cs_marker() {
+test_complete_sessions_excludes_directories_without_a_session_marker() {
     create_test_session "real-session" >/dev/null
     mkdir -p "$CS_SESSIONS_ROOT/scratch-dir"
     mkdir -p "$CS_SESSIONS_ROOT/.obsidian"
@@ -285,8 +285,23 @@ test_complete_sessions_excludes_directories_without_a_cs_marker() {
         return 1
     }
     assert_candidate "$out" "real-session" "a session with a .cs/ marker must complete" || return 1
-    assert_not_candidate "$out" "scratch-dir" "a directory without a .cs/ marker is not a session" || return 1
+    assert_not_candidate "$out" "scratch-dir" "a bare directory is not a session" || return 1
     assert_not_candidate "$out" ".obsidian" "a dotted config directory is not a session" || return 1
+}
+
+# Sessions created before the .cs/ layout keep their state beside a root
+# CLAUDE.md, and cs still lists them; completion must not lose them.
+test_complete_sessions_includes_a_legacy_session() {
+    local legacy="$CS_SESSIONS_ROOT/legacy-session"
+    mkdir -p "$legacy/logs"
+    echo "# Session" > "$legacy/CLAUDE.md"
+
+    local out
+    out=$(complete_sessions_output) || {
+        echo "  FAIL: cs -complete sessions exited nonzero: $out"
+        return 1
+    }
+    assert_candidate "$out" "legacy-session" "a pre-.cs/ session with a root CLAUDE.md must complete" || return 1
 }
 
 echo ""
@@ -295,7 +310,8 @@ echo "========================="
 echo ""
 
 run_test test_complete_sessions_includes_symlinked_session
-run_test test_complete_sessions_excludes_directories_without_a_cs_marker
+run_test test_complete_sessions_excludes_directories_without_a_session_marker
+run_test test_complete_sessions_includes_a_legacy_session
 run_test test_bash_completion_offers_a_symlinked_session
 run_test test_bash_completion_before_the_fix_missed_symlinked_sessions
 run_test test_zsh_completion_offers_a_symlinked_session
