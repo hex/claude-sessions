@@ -17,11 +17,14 @@ use crate::theme::{self, Palette};
 const PREVIEW_MIN_WIDTH: u16 = 120;
 
 /// Minimum width for the stacked layout: below this the three full-width panes
-/// and the table's columns are too cramped, so a narrow-but-tall window falls
-/// back to the table alone. No separate height floor is needed — a portrait
-/// window (`2*height > width`) this wide is already ≥21 rows tall, room enough
-/// for three panes. Lowering this below ~40 would reopen the need for one.
+/// and the table's columns are too cramped, so a narrow window falls back to the
+/// table alone.
 const STACK_MIN_WIDTH: u16 = 40;
+
+/// Minimum height for the stacked layout. The three panes take 50/30/20 of the
+/// area, and the To-Do pane needs 5 rows (two borders, the input, its rule, and
+/// one task). 20% of 25 is the first height that clears that floor.
+const STACK_MIN_HEIGHT: u16 = 25;
 
 /// How the main content area is divided among the session table and the
 /// preview/notes detail panes.
@@ -35,21 +38,24 @@ enum PaneLayout {
     Stacked,
 }
 
-/// Pick the pane layout for `area`. When the detail panes are on, a window that
-/// reads as taller than wide stacks them; a wide window sets them beside the
-/// table; anything too small shows the table alone.
+/// Pick the pane layout for `area`. When the detail panes are on, a wide window
+/// that reads as wider than tall sets them beside the table; otherwise they
+/// stack above one another as long as the area clears both floors; anything
+/// smaller shows the table alone.
 ///
 /// Terminal cells are roughly twice as tall as they are wide, so "visually
 /// taller than wide" is `2 * height > width`, not a raw row-vs-column compare.
+/// A portrait window never sits the panes beside the table even when it is wide
+/// enough to: vertical space is the more useful axis for them.
 fn choose_layout(area: Rect, show_preview: bool) -> PaneLayout {
     if !show_preview {
         return PaneLayout::TableOnly;
     }
     let portrait = 2 * area.height as u32 > area.width as u32;
-    if portrait && area.width >= STACK_MIN_WIDTH {
-        PaneLayout::Stacked
-    } else if area.width >= PREVIEW_MIN_WIDTH {
+    if !portrait && area.width >= PREVIEW_MIN_WIDTH {
         PaneLayout::SideBySide
+    } else if area.width >= STACK_MIN_WIDTH && area.height >= STACK_MIN_HEIGHT {
+        PaneLayout::Stacked
     } else {
         PaneLayout::TableOnly
     }
@@ -1495,10 +1501,31 @@ mod tests {
     }
 
     #[test]
+    fn landscape_area_too_narrow_for_side_by_side_stacks() {
+        // 100×29 reads as landscape (2*29 = 58 < 100) so it cannot sit the panes
+        // beside a table at this width, but 29 rows is ample to stack all three.
+        assert_eq!(
+            choose_layout(Rect::new(0, 0, 100, 29), true),
+            PaneLayout::Stacked
+        );
+    }
+
+    #[test]
+    fn landscape_area_wide_enough_to_stack_but_too_short_is_table_only() {
+        // 100×20 clears the stack width floor but not the height floor: three
+        // panes in 20 rows leaves the To-Do pane below its border+input+rule+row
+        // minimum, so the table takes the whole area instead.
+        assert_eq!(
+            choose_layout(Rect::new(0, 0, 100, 20), true),
+            PaneLayout::TableOnly
+        );
+    }
+
+    #[test]
     fn narrow_tall_area_is_rejected_by_the_width_floor() {
         // 30×50 reads as portrait (2*50 > 30) but is too narrow for three usable
         // panes, so the width floor sends it to the table alone rather than a
-        // cramped stack. This is the sole guard now that there is no height floor.
+        // cramped stack.
         assert_eq!(
             choose_layout(Rect::new(0, 0, 30, 50), true),
             PaneLayout::TableOnly
