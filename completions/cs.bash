@@ -120,14 +120,14 @@ _cs_completions() {
         return
     fi
 
-    # First argument: session names and global flags
+    # First argument: session names and global flags. Offer both, so that a bare
+    # `cs <TAB>` answers "what can I type here" in full. A leading dash rules out
+    # every session name, so skip the enumeration entirely in that case.
     if [[ $cword -eq 1 ]]; then
         if [[ "$cur" == -* ]]; then
-            # Completing a flag
             COMPREPLY=($(compgen -W "$global_flags" -- "$cur"))
         else
-            # Completing a session name
-            COMPREPLY=($(compgen -W "$(_cs_sessions)" -- "$cur"))
+            COMPREPLY=($(compgen -W "$(_cs_sessions) $global_flags" -- "$cur"))
         fi
         return
     fi

@@ -105,11 +105,11 @@ zsh_candidates_for_first_word() {
     local word="$1"
     zsh -f -c '
         PATH="$1:$PATH"
-        _describe() { local arr=${@[-1]}; print -l ${(P)arr} }
+        _describe() { local arr=${@[-1]}; print -rl -- ${(P)arr} }
         words=(cs "$2")
         CURRENT=2
         source "$3"
-    ' _ "$TEST_TMPDIR/bin" "$word" "$ZSH_COMP" 2>/dev/null | sed 's/:session$//'
+    ' _ "$TEST_TMPDIR/bin" "$word" "$ZSH_COMP" 2>/dev/null | sed 's/:.*//'
 }
 
 test_zsh_completion_offers_a_symlinked_session() {
@@ -124,6 +124,32 @@ test_zsh_completion_offers_a_symlinked_session() {
     local out
     out=$(zsh_candidates_for_first_word "linked")
     assert_candidate "$out" "linked-session" "zsh must offer a symlinked session" || return 1
+}
+
+# An empty first word is the one moment a user is asking "what can I even type
+# here", so it must answer with both halves of the answer, not just sessions.
+test_bash_completion_offers_sessions_and_flags_on_an_empty_word() {
+    create_test_session "real-session" >/dev/null
+    put_built_cs_on_path
+
+    local out
+    out=$(bash_candidates_for "$BASH_COMP" "")
+    assert_candidate "$out" "real-session" "bare TAB must offer sessions" || return 1
+    assert_candidate "$out" "-list" "bare TAB must offer flags" || return 1
+}
+
+test_zsh_completion_offers_sessions_and_flags_on_an_empty_word() {
+    if ! command -v zsh >/dev/null 2>&1; then
+        echo "    (zsh not installed, skipping)"
+        return 0
+    fi
+    create_test_session "real-session" >/dev/null
+    put_built_cs_on_path
+
+    local out
+    out=$(zsh_candidates_for_first_word "")
+    assert_candidate "$out" "real-session" "bare TAB must offer sessions" || return 1
+    assert_candidate "$out" "-list" "bare TAB must offer flags" || return 1
 }
 
 # The symlink bug existed because each completion script enumerated sessions in
@@ -273,6 +299,8 @@ run_test test_complete_sessions_excludes_directories_without_a_cs_marker
 run_test test_bash_completion_offers_a_symlinked_session
 run_test test_bash_completion_before_the_fix_missed_symlinked_sessions
 run_test test_zsh_completion_offers_a_symlinked_session
+run_test test_bash_completion_offers_sessions_and_flags_on_an_empty_word
+run_test test_zsh_completion_offers_sessions_and_flags_on_an_empty_word
 run_test test_completions_delegate_session_enumeration_to_cs
 run_test test_dispatch_extraction_is_sane
 run_test test_hidden_commands_are_exempt_from_completion_coverage
