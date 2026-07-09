@@ -62,6 +62,10 @@ main() {
             adopt_session "${2:-}"
             return 0
             ;;
+        -complete) # hidden: shell-completion plumbing, not a user-facing command
+            cmd_complete "${2:-}"
+            return 0
+            ;;
         -whoami)
             cmd_whoami
             return 0

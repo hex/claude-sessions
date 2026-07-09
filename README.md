@@ -314,9 +314,12 @@ autoload -Uz compinit && compinit
 Then restart your shell or run `source ~/.bashrc` / `source ~/.zshrc`.
 
 Completions support:
-- Session names: `cs home<TAB>` → `cs homeassistant`
+- Everything at once: `cs <TAB>` → every session name plus the global flags
+- Session names: `cs home<TAB>` → `cs homeassistant`, including sessions adopted by symlink from elsewhere on disk
 - Global flags: `cs -<TAB>` → `-list`, `-secrets`, etc.
 - Secrets commands: `cs session -secrets <TAB>` → `set`, `get`, `list`, etc.
+
+Session names come from `cs` itself, so tab completion always matches what `cs -list` shows.
 
 ## Documentation
 

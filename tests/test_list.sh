@@ -42,12 +42,46 @@ test_list_runs_under_old_bash() {
     assert_output_contains "$out" "beta" "cs -list should list beta under bash <4"
 }
 
+# A non-session directory under the sessions root (editor config, an empty cs
+# artifact) must not be listed, so that -list and tab-completion agree on what a
+# session is.
+test_list_omits_non_session_directories() {
+    create_test_session alpha >/dev/null
+    mkdir -p "$CS_SESSIONS_ROOT/.obsidian"
+    mkdir -p "$CS_SESSIONS_ROOT/worktrees"
+    local out
+    out=$("$CS_BIN" -list 2>&1) || {
+        echo "  FAIL: cs -list exited non-zero"
+        echo "    output: $out"
+        return 1
+    }
+    assert_output_contains "$out" "alpha" "cs -list should list a real session" || return 1
+    assert_output_not_contains "$out" ".obsidian" "cs -list should omit editor config" || return 1
+    assert_output_not_contains "$out" "worktrees" "cs -list should omit the empty worktrees holder" || return 1
+}
+
+# A pre-.cs/ session keeps its state beside a root CLAUDE.md; -list still shows it.
+test_list_includes_a_legacy_session() {
+    local legacy="$CS_SESSIONS_ROOT/legacy"
+    mkdir -p "$legacy/logs"
+    echo "# Session" > "$legacy/CLAUDE.md"
+    local out
+    out=$("$CS_BIN" -list 2>&1) || {
+        echo "  FAIL: cs -list exited non-zero"
+        echo "    output: $out"
+        return 1
+    }
+    assert_output_contains "$out" "legacy" "cs -list should list a pre-.cs/ session" || return 1
+}
+
 echo ""
 echo "cs -list tests"
 echo "=============="
 echo ""
 
 run_test test_list_renders_sessions
+run_test test_list_omits_non_session_directories
+run_test test_list_includes_a_legacy_session
 run_test test_list_runs_under_old_bash
 
 report_results

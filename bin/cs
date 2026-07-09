@@ -2647,6 +2647,37 @@ search_sessions() {
     fi
 }
 
+# True when a directory is a cs session. A .cs/ directory marks the current
+# layout; a root CLAUDE.md marks a pre-.cs/ session that has not been migrated.
+# SESSIONS_ROOT also holds unrelated directories (editor config, an empty
+# worktrees holder) that carry neither.
+is_session_dir() {
+    [ -d "$1/.cs" ] || [ -f "$1/CLAUDE.md" ]
+}
+
+# Print every session name, one per line, as completion candidates. Symlinks
+# count: `cs -adopt` links repos that live elsewhere on disk into SESSIONS_ROOT,
+# and the marker tests resolve through the link. Kept free of git and keychain
+# lookups so a TAB press stays fast.
+complete_sessions() {
+    [ -d "$SESSIONS_ROOT" ] || return 0
+
+    local dir
+    while IFS= read -r -d '' dir; do
+        is_session_dir "$dir" || continue
+        printf '%s\n' "${dir##*/}"
+    done < <(find "$SESSIONS_ROOT" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) -print0 | sort -z)
+}
+
+# Emit completion candidates for a given subject. Shell completion scripts call
+# this instead of reimplementing enumeration in zsh glob and bash find dialects.
+cmd_complete() {
+    case "${1:-}" in
+        sessions) complete_sessions ;;
+        *) error "Unknown completion subject: ${1:-<none>}" ;;
+    esac
+}
+
 # List all sessions
 list_sessions() {
     if [ ! -d "$SESSIONS_ROOT" ]; then
@@ -2656,6 +2687,7 @@ list_sessions() {
 
     local sessions=()
     while IFS= read -r -d '' dir; do
+        is_session_dir "$dir" || continue
         sessions+=("$(basename "$dir")")
     done < <(find "$SESSIONS_ROOT" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) -print0 | sort -z)
 
@@ -3658,6 +3690,10 @@ main() {
             ;;
         -adopt)
             adopt_session "${2:-}"
+            return 0
+            ;;
+        -complete) # hidden: shell-completion plumbing, not a user-facing command
+            cmd_complete "${2:-}"
             return 0
             ;;
         -whoami)

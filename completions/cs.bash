@@ -10,8 +10,6 @@ _cs_completions() {
         cword=$COMP_CWORD
     }
 
-    local sessions_root="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
-
     # Global flags
     local global_flags="-list -ls -adopt -remove -rm -whoami -who -secrets -checkpoint -queue -search -lint -statusline -detect-theme -doctor -diag -update -uninstall -help -h -version -v"
 
@@ -30,11 +28,25 @@ _cs_completions() {
     # Session-level options
     local session_opts="-secrets -queue --force --merge"
 
-    # Get list of session names
+    # Get list of session names. cs owns the definition of a session, including
+    # which symlinks and marker directories count; asking it keeps this script
+    # from drifting out of step with `cs -list`.
     _cs_sessions() {
-        if [[ -d "$sessions_root" ]]; then
-            find "$sessions_root" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null
-        fi
+        cs -complete sessions 2>/dev/null
+    }
+
+    # Append the session names that prefix-match $1 to COMPREPLY. Names are matched
+    # as data with a case glob rather than fed to `compgen -W`, whose word list is
+    # split on IFS and expanded: an unquoted name with a space would split into
+    # pieces and one with a star would pathname-expand against the cwd.
+    _cs_add_session_matches() {
+        local cur="$1" line
+        while IFS= read -r line; do
+            [ -n "$line" ] || continue
+            case "$line" in
+                "$cur"*) COMPREPLY+=("$line") ;;
+            esac
+        done < <(_cs_sessions)
     }
 
     # Determine context based on previous words
@@ -88,7 +100,8 @@ _cs_completions() {
 
     # Context: after -remove/-rm, complete with session names
     if $after_remove && [[ $cword -eq 2 ]]; then
-        COMPREPLY=($(compgen -W "$(_cs_sessions)" -- "$cur"))
+        COMPREPLY=()
+        _cs_add_session_matches "$cur"
         return
     fi
 
@@ -122,14 +135,13 @@ _cs_completions() {
         return
     fi
 
-    # First argument: session names and global flags
+    # First argument: session names and global flags. Offer both, so that a bare
+    # `cs <TAB>` answers "what can I type here" in full. A leading dash rules out
+    # every session name, so skip the enumeration entirely in that case.
     if [[ $cword -eq 1 ]]; then
-        if [[ "$cur" == -* ]]; then
-            # Completing a flag
-            COMPREPLY=($(compgen -W "$global_flags" -- "$cur"))
-        else
-            # Completing a session name
-            COMPREPLY=($(compgen -W "$(_cs_sessions)" -- "$cur"))
+        COMPREPLY=($(compgen -W "$global_flags" -- "$cur"))
+        if [[ "$cur" != -* ]]; then
+            _cs_add_session_matches "$cur"
         fi
         return
     fi
