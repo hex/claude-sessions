@@ -6,13 +6,15 @@ _cs() {
     local curcontext="$curcontext" state line
     typeset -A opt_args
 
-    # Helper: get session names
+    # Helper: get session names. cs owns the definition of a session, including
+    # which symlinks and marker directories count; asking it keeps this script
+    # from drifting out of step with `cs -list`.
     _cs_sessions() {
-        local sessions_root="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
         local -a sessions session_descs
-        if [[ -d "$sessions_root" ]]; then
-            sessions=("$sessions_root"/*(N/:t))
-        fi
+        local s
+        sessions=(${(f)"$(cs -complete sessions 2>/dev/null)"})
+        sessions=(${sessions:#})
+        (( ${#sessions} )) || return 1
         # Use _describe so zsh shows a menu even when one name is an
         # exact prefix of another (e.g., "comfy" and "comfy-nodes")
         for s in "${sessions[@]}"; do

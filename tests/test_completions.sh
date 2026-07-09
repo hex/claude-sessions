@@ -44,6 +44,97 @@ secrets_subcommands() {
     } | grep -E '^[a-z]' | sort -u
 }
 
+# Both completion scripts shell out to `cs`, so a functional test has to shadow
+# the installed cs with the one just built from lib/.
+put_built_cs_on_path() {
+    mkdir -p "$TEST_TMPDIR/bin"
+    ln -sf "$(cd "$(dirname "$CS_BIN")" && pwd)/$(basename "$CS_BIN")" "$TEST_TMPDIR/bin/cs"
+    PATH="$TEST_TMPDIR/bin:$PATH"
+}
+
+# Drive bash's completion the way bash does: seed COMP_WORDS/COMP_CWORD, call the
+# function, read back COMPREPLY. The completion script under test is passed in so
+# a pre-fix copy can be checked against the same assertions.
+bash_candidates_for() {
+    local script="$1" word="$2"
+    bash --norc --noprofile -c '
+        PATH="$1:$PATH"
+        source "$2"
+        COMP_WORDS=(cs "$3")
+        COMP_CWORD=1
+        _cs_completions
+        printf "%s\n" "${COMPREPLY[@]}"
+    ' _ "$TEST_TMPDIR/bin" "$script" "$word" 2>/dev/null
+}
+
+test_bash_completion_offers_a_symlinked_session() {
+    create_test_session "real-session" >/dev/null
+    link_test_session "linked-session"
+    put_built_cs_on_path
+
+    local out
+    out=$(bash_candidates_for "$BASH_COMP" "linked")
+    assert_candidate "$out" "linked-session" "bash must offer a symlinked session" || return 1
+}
+
+# Proves the assertion above has teeth: the enumeration this replaced cannot pass it.
+test_bash_completion_before_the_fix_missed_symlinked_sessions() {
+    create_test_session "real-session" >/dev/null
+    link_test_session "linked-session"
+    put_built_cs_on_path
+
+    local old_script="$TEST_TMPDIR/cs.bash.pre-fix"
+    cat > "$old_script" <<'PREFIX'
+_cs_completions() {
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+    local sessions_root="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
+    COMPREPLY=($(compgen -W "$(find "$sessions_root" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null)" -- "$cur"))
+}
+PREFIX
+
+    local out
+    out=$(bash_candidates_for "$old_script" "linked")
+    assert_not_candidate "$out" "linked-session" "the pre-fix enumeration is expected to miss symlinks" || return 1
+}
+
+# Drive zsh's completion by stubbing _describe, which is where _cs hands off its
+# candidates. _describe takes the NAME of an array, so the stub expands it with
+# the (P) parameter-name flag. Filtering against the typed word is zsh's job, not
+# _cs's, so what this captures is the full candidate set.
+zsh_candidates_for_first_word() {
+    local word="$1"
+    zsh -f -c '
+        PATH="$1:$PATH"
+        _describe() { local arr=${@[-1]}; print -l ${(P)arr} }
+        words=(cs "$2")
+        CURRENT=2
+        source "$3"
+    ' _ "$TEST_TMPDIR/bin" "$word" "$ZSH_COMP" 2>/dev/null | sed 's/:session$//'
+}
+
+test_zsh_completion_offers_a_symlinked_session() {
+    if ! command -v zsh >/dev/null 2>&1; then
+        echo "    (zsh not installed, skipping)"
+        return 0
+    fi
+    create_test_session "real-session" >/dev/null
+    link_test_session "linked-session"
+    put_built_cs_on_path
+
+    local out
+    out=$(zsh_candidates_for_first_word "linked")
+    assert_candidate "$out" "linked-session" "zsh must offer a symlinked session" || return 1
+}
+
+# The symlink bug existed because each completion script enumerated sessions in
+# its own dialect. Neither should know where sessions live or what marks one.
+test_completions_delegate_session_enumeration_to_cs() {
+    assert_file_contains "$ZSH_COMP" 'cs -complete sessions' "_cs must ask cs for session names" || return 1
+    assert_file_contains "$BASH_COMP" 'cs -complete sessions' "cs.bash must ask cs for session names" || return 1
+    assert_file_not_contains "$ZSH_COMP" 'sessions_root' "_cs must not locate the sessions root itself" || return 1
+    assert_file_not_contains "$BASH_COMP" 'sessions_root' "cs.bash must not locate the sessions root itself" || return 1
+}
+
 test_hidden_commands_are_exempt_from_completion_coverage() {
     local cmds
     cmds=$(dispatch_commands)
@@ -179,6 +270,10 @@ echo ""
 
 run_test test_complete_sessions_includes_symlinked_session
 run_test test_complete_sessions_excludes_directories_without_a_cs_marker
+run_test test_bash_completion_offers_a_symlinked_session
+run_test test_bash_completion_before_the_fix_missed_symlinked_sessions
+run_test test_zsh_completion_offers_a_symlinked_session
+run_test test_completions_delegate_session_enumeration_to_cs
 run_test test_dispatch_extraction_is_sane
 run_test test_hidden_commands_are_exempt_from_completion_coverage
 run_test test_zsh_completion_covers_all_commands

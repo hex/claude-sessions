@@ -10,8 +10,6 @@ _cs_completions() {
         cword=$COMP_CWORD
     }
 
-    local sessions_root="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
-
     # Global flags
     local global_flags="-list -ls -adopt -remove -rm -whoami -who -secrets -checkpoint -queue -search -lint -statusline -detect-theme -doctor -diag -update -uninstall -help -h -version -v"
 
@@ -30,11 +28,11 @@ _cs_completions() {
     # Session-level options
     local session_opts="-secrets -queue --force --merge"
 
-    # Get list of session names
+    # Get list of session names. cs owns the definition of a session, including
+    # which symlinks and marker directories count; asking it keeps this script
+    # from drifting out of step with `cs -list`.
     _cs_sessions() {
-        if [[ -d "$sessions_root" ]]; then
-            find "$sessions_root" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null
-        fi
+        cs -complete sessions 2>/dev/null
     }
 
     # Determine context based on previous words
