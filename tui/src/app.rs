@@ -2584,13 +2584,17 @@ mod tests {
     #[test]
     fn window_drops_a_wide_char_straddling_the_left_edge_never_splitting_it() {
         let mut t = TextInput::new();
-        // Each CJK char is 2 columns wide.
-        t.set("編集する日本語タスク"); // 10 chars, 20 cols, cursor at end
-        let w = t.window(9);
-        let vis: usize = w.before.chars().map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0)).sum::<usize>()
-            + w.after.chars().map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0)).sum::<usize>();
-        assert!(vis <= 9, "visible cols {} > 9 — a wide char was split or half-kept", vis);
+        // Each CJK char is 2 columns wide: 10 chars, 20 cols, cursor at end.
+        t.set("編集する日本語タスク");
+        // width 8 => offset_w = 20 - 7 = 13, which lands *inside* 語 (cols 12-13).
+        // The left-edge drop rule discards 語 whole rather than showing its right
+        // half, so exactly タ(14) ス(16) ク(18) remain — 6 visible columns, not 8.
+        // A right-edge rule would keep 語 and render "語タスク" at cursor_col 8,
+        // overflowing the box; this exact-content assertion fails under that bug.
+        let w = t.window(8);
+        assert_eq!(w.before, "タスク");
         assert_eq!(w.after, "");
+        assert_eq!(w.cursor_col, 6);
     }
 
     #[test]
@@ -2600,7 +2604,9 @@ mod tests {
         let w0 = t.window(0);
         assert_eq!(w0.cursor_col, 0);
         let w1 = t.window(1);
-        assert!(w1.cursor_col <= 1);
+        // The invariant is cursor_col < width, i.e. exactly 0 at width 1 — a
+        // looser `<= 1` would not catch an off-by-one that pushed it to width.
+        assert_eq!(w1.cursor_col, 0);
     }
 
     #[test]
