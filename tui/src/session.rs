@@ -63,21 +63,12 @@ pub fn load_preview(session_dir: &Path) -> SessionPreview {
             None
         });
 
-    // Narrative headings from memory/narrative.md (all ## headings, most recent last in file)
-    let (last_discovery, discoveries) = fs::read_to_string(cs_dir.join("memory/narrative.md"))
-        .ok()
-        .map(|content| {
-            let headings: Vec<String> = content
-                .lines()
-                .filter(|line| line.starts_with("## "))
-                .map(|line| line.trim_start_matches("## ").to_string())
-                .collect();
-            let last = headings.last().cloned();
-            // Last 4 discoveries, most recent first
-            let recent: Vec<String> = headings.into_iter().rev().take(4).collect();
-            (last, recent)
-        })
-        .unwrap_or((None, Vec::new()));
+    // Narrative headings from every actor's lab notebook (all ## headings, most
+    // recent last within each file)
+    let headings = narrative_headings(&cs_dir.join("memory"));
+    let last_discovery = headings.last().cloned();
+    // Last 4 discoveries, most recent first
+    let discoveries: Vec<String> = headings.into_iter().rev().take(4).collect();
 
     // Memory entries from .cs/memory/MEMORY.md (first few non-empty lines)
     let memory_entries = fs::read_to_string(cs_dir.join("memory/MEMORY.md"))
@@ -101,6 +92,41 @@ pub fn load_preview(session_dir: &Path) -> SessionPreview {
         memory_entries,
         contributors,
     }
+}
+
+/// Every "## " heading across the session's narratives, in filename order.
+///
+/// Narratives are per-actor (`narrative.<actor>.md`), so a shared session holds
+/// one notebook per co-developer. Sorting by filename keeps the preview stable
+/// no matter what order the directory enumerates in. Sibling files in the memory
+/// directory — the `MEMORY.md` index and the individual entries — carry their
+/// own headings and are not discoveries.
+fn narrative_headings(memory_dir: &Path) -> Vec<String> {
+    let mut files: Vec<PathBuf> = match fs::read_dir(memory_dir) {
+        Ok(entries) => entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("narrative") && n.ends_with(".md"))
+            })
+            .collect(),
+        Err(_) => return Vec::new(),
+    };
+    files.sort();
+
+    files
+        .iter()
+        .filter_map(|path| fs::read_to_string(path).ok())
+        .flat_map(|content| {
+            content
+                .lines()
+                .filter(|line| line.starts_with("## "))
+                .map(|line| line.trim_start_matches("## ").to_string())
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 pub fn sessions_root() -> PathBuf {
@@ -841,6 +867,58 @@ mod tests {
         assert_eq!(preview.last_discovery.as_deref(), Some("Second thing"));
         // discoveries: most recent first
         assert_eq!(preview.discoveries, vec!["Second thing", "First thing"]);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn load_preview_reads_per_actor_narrative() {
+        let dir = std::env::temp_dir().join(format!("cs-test-preview-actor-{}", std::process::id()));
+        let cs = dir.join(".cs/memory");
+        fs::create_dir_all(&cs).unwrap();
+        fs::write(
+            cs.join("narrative.alex-example-com.md"),
+            "# Session narrative\n\n## Found the leak\nSome text\n\n## Shipped the fix\nMore text\n",
+        )
+        .unwrap();
+
+        let preview = load_preview(&dir);
+        assert_eq!(preview.last_discovery.as_deref(), Some("Shipped the fix"));
+        assert_eq!(preview.discoveries, vec!["Shipped the fix", "Found the leak"]);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn load_preview_merges_narratives_from_every_actor() {
+        let dir = std::env::temp_dir().join(format!("cs-test-preview-actors-{}", std::process::id()));
+        let cs = dir.join(".cs/memory");
+        fs::create_dir_all(&cs).unwrap();
+        // Read in filename order so two co-developers always produce the same
+        // preview, whatever order the directory happens to enumerate in.
+        fs::write(cs.join("narrative.bea-example-com.md"), "## Bea one\ntext\n").unwrap();
+        fs::write(cs.join("narrative.abe-example-com.md"), "## Abe one\ntext\n").unwrap();
+
+        let preview = load_preview(&dir);
+        assert_eq!(preview.last_discovery.as_deref(), Some("Bea one"));
+        assert_eq!(preview.discoveries, vec!["Bea one", "Abe one"]);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn load_preview_ignores_non_narrative_memory_files() {
+        let dir = std::env::temp_dir().join(format!("cs-test-preview-nonnarr-{}", std::process::id()));
+        let cs = dir.join(".cs/memory");
+        fs::create_dir_all(&cs).unwrap();
+        fs::write(cs.join("narrative.abe-example-com.md"), "## Real heading\ntext\n").unwrap();
+        // Memory entries and the index live alongside the narratives and carry
+        // their own "## " headings; neither is a discovery.
+        fs::write(cs.join("MEMORY.md"), "## Not a discovery\n").unwrap();
+        fs::write(cs.join("project_something.md"), "## Also not one\n").unwrap();
+
+        let preview = load_preview(&dir);
+        assert_eq!(preview.discoveries, vec!["Real heading"]);
 
         fs::remove_dir_all(&dir).unwrap();
     }
