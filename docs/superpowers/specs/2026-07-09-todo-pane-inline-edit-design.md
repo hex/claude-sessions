@@ -38,6 +38,12 @@ own row* with an italic slant and a visible block cursor, however long the text.
   `notes_selected`, so the selection and the edit target cannot drift.
 - **Up/Down while editing:** ignored. This is a single-line field; moving the
   list selection mid-edit would let the typed row and the commit target diverge.
+- **Mouse session-switch while editing:** any mouse event that changes the
+  selected session (left-click on another row, scroll wheel) first cancels the
+  in-progress edit — buffer discarded, `notes_focus = List` — then switches. The
+  keyboard cannot switch sessions while the Notes pane is focused, but the mouse
+  handler gates only on `mode`, not focus (`app.rs:1628`), so this guard is
+  required to keep `notes_selected` a valid edit target.
 
 ## Non-goals
 
@@ -88,13 +94,21 @@ Offset is *derived*, never stored:
 
 ```
 before_w = display_width(text[..cursor])
-offset_w = before_w.saturating_sub(width - 1)   // keep cursor in the last column
+offset_w = before_w.saturating_sub(width.saturating_sub(1))  // cursor in last col
 ```
 
-then walk chars accumulating display width, dropping those whose right edge is
-`<= offset_w` and taking until the box is full. No scroll state to hold or reset;
-recomputed each frame from the cursor. `width` is the field's inner columns after
-padding and any marker/number prefix.
+`width.saturating_sub(1)`, not `width - 1`: `width` can be 0 in a narrow stacked
+pane once padding, marker, and number columns are subtracted, and a bare
+`width - 1` panics in debug at 0.
+
+Then walk chars accumulating display width, **dropping every char whose left
+edge is `< offset_w`** (so a wide char straddling the left boundary is dropped
+whole, never rendered half-scrolled — keeping it would push visible content one
+column past the box, the exact overflow the helper exists to prevent), and taking
+chars until the box is full. No scroll state to hold or reset; recomputed each
+frame from the cursor. `width` is the field's inner columns after padding and any
+marker/number prefix. At `width == 0` the result is empty (cursor col 0), no
+panic.
 
 The top input line switches to `window()` too — it has silently clipped its
 cursor past the pane edge all along.
@@ -147,8 +161,14 @@ at the row; no `editing` assignment.)
 New `handle_notes_editing`:
 - text editing keys (`Char`, `Backspace`, `Delete`, `Left`, `Right`, `Home`,
   `End`) → `queue_input`.
-- `Enter` → `submit_notes_input()` (replaces at `notes_selected`), then
-  `notes_focus = List`, `queue_input.clear()`.
+- `Enter` → commit. `submit_notes_input()` returns whether the write committed;
+  **only on success** do we `notes_focus = List; queue_input.clear()`. On a write
+  error the status message is set (as today) and we stay in `Editing` with the
+  typed text intact — matching today's behaviour, where a failed
+  `replace_notes_task` leaves the user in edit mode (`app.rs:1318-1321`). This
+  requires `submit_notes_input` (and the `replace_notes_task`/`append_notes_task`
+  it calls) to signal success up to the caller instead of returning bare
+  `Action::None`.
 - `Esc` → cancel: `queue_input.clear(); notes_focus = List`. Queue file untouched.
 - `Up` | `Down` → ignored (single-line field).
 
@@ -156,6 +176,13 @@ New `handle_notes_editing`:
 `handle_notes_input_field` loses its two `editing`-special-cases (the `Esc`
 branch that checked `editing.is_some()`, and the `Down` guard) — it only ever
 appends now.
+
+`handle_mouse` (`app.rs:1628`): before any session switch (`ScrollUp`/`ScrollDown`
+at `1634-1641`, left-click at `1665-1669`), if `notes_focus == Editing` cancel the
+edit (`queue_input.clear(); notes_focus = List`). The click path already resets
+`notes_selected = 0` on switch; the scroll path currently does not — it must, now
+that a stale index could be a live edit target. Fold both into a single
+"switch to session N" helper so the two paths cannot diverge again.
 
 Footer (`ui.rs:620`): the `app.editing.is_some()` check becomes
 `app.notes_focus == NotesFocus::Editing`. Text unchanged.
@@ -173,10 +200,21 @@ Footer (`ui.rs:620`): the `app.editing.is_some()` check becomes
   column, so a 2-column char that would half-cross the boundary is dropped whole,
   never split.
 - **Very narrow pane** (`avail` 0 or 1): `window` returns at most the cursor
-  cell; truncation returns `…` or empty. No panic (all `saturating_sub`).
-- **Selection cleared / queue emptied under an edit:** entering `Editing`
-  requires a highlighted task, and Up/Down are ignored, so `notes_selected`
-  stays valid for the edit's lifetime.
+  cell; truncation returns `…` or empty. No panic — the offset uses
+  `width.saturating_sub(1)` (see the viewport section; a bare `width - 1` would
+  panic here in debug).
+- **Keyboard selection under an edit:** entering `Editing` requires a highlighted
+  task; keyboard keys all route to the notes handlers while the pane is focused
+  (`app.rs:740-741`) and Up/Down are ignored, so no keyboard path moves
+  `notes_selected` mid-edit. Mouse session-switch is handled by the cancel guard
+  above.
+- **External queue mutation mid-edit:** the Stop-hook drain or a `cs -queue` in
+  another process can shorten `.cs/local/queue` while an edit is open. Committing
+  then targets a line index that may no longer exist; `rewrite_queue_line`
+  no-ops and returns `Ok` when the target is past the end (`app.rs:1717-1731`),
+  so the UI reports success for a write that landed nowhere. This is pre-existing
+  (today's `editing` index has the identical exposure) and out of scope here —
+  noted so the "valid for the edit's lifetime" wording is not read as a guarantee.
 
 ## Testing (TDD, Rust)
 
@@ -184,7 +222,11 @@ Unit — `TextInput::window`:
 - short text (fits): `before`+`after` == text, no scroll.
 - cursor at end of long text: cursor in last column, tail visible.
 - cursor at home of long text: head visible from column 0.
-- CJK wide char at the boundary: not split; columns sum correctly.
+- CJK wide char at the boundary: dropped whole, visible width never exceeds
+  `width`.
+- `width == 0` and `width == 1`: no panic; ≤ 1 visible column. (Guards the
+  formula's `saturating_sub` claim at the value where a bare `width - 1` would
+  panic.)
 
 State machine — `handle_notes_*`:
 - `e` on row 2 → `notes_focus == Editing`, `queue_input` holds the task,
@@ -192,20 +234,41 @@ State machine — `handle_notes_*`:
 - Enter commits: queue file line 2 replaced in place, `notes_focus == List`.
 - Esc cancels: queue file unchanged, `notes_focus == List`.
 - Up/Down while `Editing`: `notes_selected` unchanged, still `Editing`.
+- mouse scroll / left-click on another session while `Editing`: edit cancelled
+  (`notes_focus == List`), `notes_selected` valid for the new session, the queue
+  file of the original session untouched.
+- commit on a write error: `notes_focus` stays `Editing`, buffer intact, status
+  set (drive by pointing the queue dir at a read-only path or a missing parent).
 - (Rewrite the 3 existing edit tests' field assertions `editing == …` →
   `notes_focus == …`; behavioural assertions unchanged.)
 
-Render — `TestBackend` buffer:
+Render — `TestBackend` buffer (read cell modifiers as the existing tests read
+`cell.bg`, `ui.rs:1291`; follow the unique-session-name / env-isolation discipline
+the current queue render-tests document, `ui.rs:1362-1390`, or they flake against
+the `app.rs` queue tests):
 - a task longer than the pane occupies one row and ends in `…`.
 - while editing, the edited row's text cells carry `Modifier::ITALIC` and its
   number cells do not.
 - column 0 is blank on a task row and non-blank on the rule row (padding proof).
+- the top input line, given text wider than the pane with the cursor at the end,
+  shows the tail with the block cursor on screen (covers build-order step 4 — the
+  clipped-cursor bug that motivated the feature).
 
 ## Compatibility and constraints
 
 - bash 3.2 / BSD userland: N/A (Rust only).
-- `.cs/local/queue` format unchanged; `read_queue`/`replace_notes_task`/
-  `append_notes_task` unchanged.
+- `.cs/local/queue` format unchanged; `read_queue`, `rewrite_queue_line`, and the
+  queue file contract are unchanged.
+- `replace_notes_task` / `append_notes_task` change signature only: they now
+  return whether the write committed (was implicit `Action::None`), so the
+  `Editing` Enter arm can stay in edit mode on failure. Their queue-file effect is
+  unchanged.
+- Every writer of the deleted `editing` field must go — the field is removed:
+  `app.rs:834` (Tab; provably `None` when reachable, harmless delete),
+  `app.rs:889-897` (Esc special-case), `app.rs:966` (the `e`/Enter that set it),
+  `app.rs:1306` (inside `replace_notes_task`). The doc comments at
+  `app.rs:883-885` and `app.rs:1240-1241` describe `editing` semantics and must be
+  reworded for the `NotesFocus::Editing` model.
 - `queue_depth` sync path (`refresh_queue_depth`) unchanged.
 - No rustfmt run (repo is not rustfmt-clean); match surrounding style.
 
