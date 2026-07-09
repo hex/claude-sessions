@@ -108,7 +108,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 
     match choose_layout(chunks[0], app.show_preview) {
         PaneLayout::SideBySide => {
-            app.ensure_preview_loaded();
+            app.request_preview();
             let cols = Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
                 .split(chunks[0]);
             render_table(app, frame, cols[0], true);
@@ -119,7 +119,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
             render_notes_pane(app, frame, right_rows[1]);
         }
         PaneLayout::Stacked => {
-            app.ensure_preview_loaded();
+            app.request_preview();
             let rows = Layout::vertical([
                 Constraint::Percentage(50),
                 Constraint::Percentage(30),
@@ -1048,15 +1048,15 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
         )));
     }
 
-    // Preview content from .cs/ files
-    if let Some(preview) = app.preview_cache.get(&session.name) {
-        // Thin rule separating front-matter (metadata) from body (content).
-        let inner_width = (area.width as usize).saturating_sub(2);
-        lines.push(Line::from(Span::styled(
-            "\u{2500}".repeat(inner_width),
-            Style::default().fg(p.comment),
-        )));
+    // Thin rule separating front-matter (metadata) from body (content).
+    let inner_width = (area.width as usize).saturating_sub(2);
+    lines.push(Line::from(Span::styled(
+        "\u{2500}".repeat(inner_width),
+        Style::default().fg(p.comment),
+    )));
 
+    // Preview content from .cs/ files, once the worker has read them.
+    if let Some(preview) = app.preview_cache.get(&session.name) {
         if let Some(ref obj) = preview.objective {
             lines.push(section_header("Objective", p));
             lines.push(Line::from(Span::styled(
@@ -1108,6 +1108,12 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
                 Style::default().fg(p.comment).add_modifier(Modifier::DIM),
             )));
         }
+    } else {
+        // The worker holds this session and has not answered yet.
+        lines.push(Line::from(Span::styled(
+            "Loading\u{2026}",
+            Style::default().fg(p.comment).add_modifier(Modifier::DIM),
+        )));
     }
 
     let paragraph = Paragraph::new(lines)

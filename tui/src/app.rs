@@ -350,6 +350,13 @@ pub struct App {
     pub expanded_session: Option<String>,
     /// Cached session previews (by session name).
     pub preview_cache: HashMap<String, session::SessionPreview>,
+    /// Session names handed to the preview worker, awaiting a result. Guards
+    /// against re-queueing the selected session on every frame.
+    preview_pending: std::collections::HashSet<String>,
+    /// Session names to load, drained by the preview worker.
+    preview_requests: std::sync::mpsc::Sender<String>,
+    /// Previews the worker has finished, drained once per event-loop tick.
+    preview_results: std::sync::mpsc::Receiver<(String, session::SessionPreview)>,
     /// Whether to show the preview pane on wide terminals (toggled with `p`).
     pub show_preview: bool,
     /// Which panel receives keyboard input: the session list or the Notes input.
@@ -369,6 +376,36 @@ pub struct App {
     pub sessions_root: std::path::PathBuf,
 }
 
+/// Start the thread that reads session previews off the render path.
+///
+/// Loading a preview walks `.cs/` and shells out to `git log` for the
+/// contributor list, which costs seconds on a repository with a long history —
+/// far too long to sit inside a draw call, where it would stall the cursor
+/// itself. The worker loads one session at a time and posts each result back;
+/// the event loop picks them up on its next tick.
+///
+/// `root` is passed in already resolved: tests override the sessions root
+/// through a thread-local, which a spawned thread would not see.
+fn spawn_preview_worker(
+    root: std::path::PathBuf,
+) -> (
+    std::sync::mpsc::Sender<String>,
+    std::sync::mpsc::Receiver<(String, session::SessionPreview)>,
+) {
+    let (request_tx, request_rx) = std::sync::mpsc::channel::<String>();
+    let (result_tx, result_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        // Ends when the App drops its sender.
+        for name in request_rx {
+            let preview = session::load_preview(&root.join(&name));
+            if result_tx.send((name, preview)).is_err() {
+                break;
+            }
+        }
+    });
+    (request_tx, result_rx)
+}
+
 impl App {
     pub fn new(sessions: Vec<Session>) -> Self {
         let mut table_state = TableState::default();
@@ -376,6 +413,7 @@ impl App {
             table_state.select(Some(0));
         }
         let sessions_root = session::sessions_root();
+        let (preview_requests, preview_results) = spawn_preview_worker(sessions_root.clone());
         let mut app = App {
             sessions_root,
             sessions,
@@ -406,6 +444,9 @@ impl App {
             marked_sessions: std::collections::HashSet::new(),
             expanded_session: None,
             preview_cache: HashMap::new(),
+            preview_pending: std::collections::HashSet::new(),
+            preview_requests,
+            preview_results,
             show_preview: true,
             focus: Focus::List,
             notes_focus: NotesFocus::Input,
@@ -525,13 +566,38 @@ impl App {
         self.selected_session().map(|s| s.name.clone())
     }
 
-    /// Ensure the selected session's preview is loaded into the cache.
-    pub fn ensure_preview_loaded(&mut self) {
-        if let Some(name) = self.selected_session_name() {
-            if !self.preview_cache.contains_key(&name) {
-                let root = self.sessions_root.clone();
-                let preview = session::load_preview(&root.join(&name));
-                self.preview_cache.insert(name, preview);
+    /// Ask the worker for the selected session's preview, unless it is already
+    /// cached or already queued. Never touches the filesystem on this thread.
+    pub fn request_preview(&mut self) {
+        let Some(name) = self.selected_session_name() else {
+            return;
+        };
+        if self.preview_cache.contains_key(&name) || self.preview_pending.contains(&name) {
+            return;
+        }
+        if self.preview_requests.send(name.clone()).is_ok() {
+            self.preview_pending.insert(name);
+        }
+    }
+
+    /// Move every preview the worker has finished into the cache.
+    pub fn drain_previews(&mut self) {
+        while let Ok((name, preview)) = self.preview_results.try_recv() {
+            self.preview_pending.remove(&name);
+            self.preview_cache.insert(name, preview);
+        }
+    }
+
+    /// Block until every requested preview has landed in the cache.
+    #[cfg(test)]
+    fn wait_for_previews(&mut self) {
+        while !self.preview_pending.is_empty() {
+            match self.preview_results.recv() {
+                Ok((name, preview)) => {
+                    self.preview_pending.remove(&name);
+                    self.preview_cache.insert(name, preview);
+                }
+                Err(_) => break,
             }
         }
     }
@@ -794,12 +860,7 @@ impl App {
                     if self.expanded_session.as_deref() == Some(&name) {
                         self.expanded_session = None;
                     } else {
-                        // Load preview if not cached
-                        if !self.preview_cache.contains_key(&name) {
-                            let root = self.sessions_root.clone();
-                            let preview = session::load_preview(&root.join(&name));
-                            self.preview_cache.insert(name.clone(), preview);
-                        }
+                        self.request_preview();
                         self.expanded_session = Some(name);
                     }
                 }
@@ -3014,6 +3075,7 @@ mod tests {
         app.table_state.select(Some(0));
         assert!(app.preview_cache.is_empty());
         app.handle_key(KeyEvent::from(KeyCode::Char('p')));
+        app.wait_for_previews();
         // Preview was loaded (even if empty, the key exists)
         assert!(app.preview_cache.contains_key("alpha"));
     }
@@ -3052,17 +3114,30 @@ mod tests {
     }
 
     #[test]
-    fn ensure_preview_loaded_caches_on_first_call() {
+    fn request_preview_does_not_load_on_the_calling_thread() {
         let mut app = App::new(sample_sessions());
         app.table_state.select(Some(0));
-        assert!(app.preview_cache.is_empty());
-        app.ensure_preview_loaded();
-        // Preview was loaded for "alpha" (even if empty metadata)
+        app.request_preview();
+        // The render path calls this every frame; a preview that appeared here
+        // would mean the draw blocked on a filesystem read and a `git log`.
+        assert!(
+            app.preview_cache.is_empty(),
+            "request_preview must hand the load to the worker, not run it here"
+        );
+    }
+
+    #[test]
+    fn a_requested_preview_reaches_the_cache() {
+        let mut app = App::new(sample_sessions());
+        app.table_state.select(Some(0));
+        app.request_preview();
+        app.wait_for_previews();
+        // Loaded for "alpha" (empty metadata, but the entry exists)
         assert!(app.preview_cache.contains_key("alpha"));
     }
 
     #[test]
-    fn ensure_preview_loaded_skips_if_cached() {
+    fn request_preview_skips_a_cached_session() {
         let mut app = App::new(sample_sessions());
         app.table_state.select(Some(0));
         app.preview_cache.insert(
@@ -3075,12 +3150,29 @@ mod tests {
                 contributors: Vec::new(),
             },
         );
-        app.ensure_preview_loaded();
-        // Should not overwrite cached value
+        app.request_preview();
+        app.wait_for_previews();
+        // The worker never ran, so the cached value stands.
         assert_eq!(
             app.preview_cache.get("alpha").unwrap().objective.as_deref(),
             Some("cached")
         );
+    }
+
+    #[test]
+    fn request_preview_queues_a_session_only_once() {
+        let mut app = App::new(sample_sessions());
+        app.table_state.select(Some(0));
+        // Every frame re-requests the selected session while the worker is busy.
+        app.request_preview();
+        app.request_preview();
+        app.request_preview();
+        app.wait_for_previews();
+        assert!(app.preview_cache.contains_key("alpha"));
+        // A second result for the same session would still be sitting in the
+        // channel after the first drained it.
+        app.drain_previews();
+        assert_eq!(app.preview_cache.len(), 1);
     }
 
     // --- Notes panel focus ---
