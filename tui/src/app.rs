@@ -318,6 +318,9 @@ const STATUS_EXPIRE_SECS: u64 = 4;
 const FLASH_DURATION_MS: u64 = 400;
 const DELETE_COUNTDOWN_SECS: u64 = 2;
 const PEEK_DURATION_SECS: u64 = 5;
+/// After this long without input the selection shimmer pauses so the event loop
+/// can block until the next key or mouse event, costing no CPU while unattended.
+const IDLE_PAUSE_SECS: u64 = 30;
 
 /// Classify a timestamp into a time section for grouping display.
 fn time_section(ts: Option<std::time::SystemTime>) -> &'static str {
@@ -418,6 +421,10 @@ pub struct App {
     /// calling session::sessions_root() (a process-global env read) on every
     /// preview/create/delete keeps a test's env mutation from racing the reads.
     pub sessions_root: std::path::PathBuf,
+    /// When the user last pressed a key or moved the mouse. The selection
+    /// shimmer animates only while this is recent; after `IDLE_PAUSE_SECS` the
+    /// event loop stops repainting and blocks until the next event.
+    last_input: std::time::Instant,
 }
 
 /// Start the thread that reads session previews off the render path.
@@ -496,6 +503,7 @@ impl App {
             notes_focus: NotesFocus::Input,
             notes_selected: 0,
             theme: Palette::dark(),
+            last_input: std::time::Instant::now(),
         };
         // Apply the default sort (recency) so the initial view is ordered, not
         // just scan order. Also seeds section labels for the grouped view.
@@ -578,6 +586,46 @@ impl App {
             }
             None => 0,
         }
+    }
+
+    /// Whether any short-lived visual state still needs the animation heartbeat
+    /// to advance or expire it: a status message, row flash, revealed secret,
+    /// delete countdown, or an in-flight preview request. All are triggered by
+    /// user input and clear within seconds, so they never keep the loop awake
+    /// once the user walks away.
+    pub fn has_timed_state(&self) -> bool {
+        self.status_message.is_some()
+            || !self.row_flashes.is_empty()
+            || self.revealed_secret.is_some()
+            || self.delete_countdown_start.is_some()
+            || !self.preview_pending.is_empty()
+    }
+
+    /// Record that the user just interacted, restarting the idle timer.
+    pub fn note_input(&mut self) {
+        self.last_input = std::time::Instant::now();
+    }
+
+    /// Time since the last key press or mouse event.
+    pub fn idle_elapsed(&self) -> std::time::Duration {
+        self.last_input.elapsed()
+    }
+
+    /// Whether a row is selected, so a selection bar exists to shimmer.
+    pub fn has_selection(&self) -> bool {
+        self.table_state.selected().is_some()
+    }
+
+    /// Whether the event loop should keep ticking at the animation heartbeat.
+    /// The selection shimmer animates while the user is recently active; timed
+    /// state holds the heartbeat open until it clears. When neither applies the
+    /// loop can block until the next event, so an idle TUI costs no CPU. `idle`
+    /// is passed in rather than read from the clock so the decision is pure and
+    /// unit-testable.
+    pub fn is_animating(&self, idle: std::time::Duration) -> bool {
+        let shimmer_active =
+            self.has_selection() && idle < std::time::Duration::from_secs(IDLE_PAUSE_SECS);
+        shimmer_active || self.has_timed_state()
     }
 
     /// Track a navigation key press and return the step size based on repeat velocity.
@@ -1916,6 +1964,57 @@ mod tests {
         let app = App::new(sample_sessions());
         assert_eq!(app.table_state.selected(), Some(0));
         assert_eq!(app.filtered.len(), 3);
+    }
+
+    #[test]
+    fn has_timed_state_tracks_each_transient_state() {
+        let mut app = App::new(sample_sessions());
+        // Nothing is pending on a freshly built app.
+        assert!(!app.has_timed_state());
+
+        // Each transient state, set on its own, holds the heartbeat open.
+        app.set_status("saved", StatusLevel::Info);
+        assert!(app.has_timed_state());
+        app.status_message = None;
+        assert!(!app.has_timed_state());
+
+        app.flash_row("alpha", FlashKind::Success);
+        assert!(app.has_timed_state());
+        app.row_flashes.clear();
+        assert!(!app.has_timed_state());
+
+        app.revealed_secret =
+            Some(("KEY".into(), "value".into(), std::time::Instant::now()));
+        assert!(app.has_timed_state());
+        app.revealed_secret = None;
+        assert!(!app.has_timed_state());
+
+        app.delete_countdown_start = Some(std::time::Instant::now());
+        assert!(app.has_timed_state());
+        app.delete_countdown_start = None;
+        assert!(!app.has_timed_state());
+    }
+
+    #[test]
+    fn is_animating_pauses_after_idle_but_holds_for_timed_state() {
+        use std::time::Duration;
+        let mut app = App::new(sample_sessions());
+        let recent = Duration::from_secs(1);
+        let idle = Duration::from_secs(IDLE_PAUSE_SECS + 5);
+
+        // A selected row shimmers while the user is recently active.
+        assert!(app.is_animating(recent));
+        // Once idle past the pause, with nothing pending, the loop can block.
+        assert!(!app.is_animating(idle));
+
+        // A pending timed state holds the heartbeat open even when idle.
+        app.set_status("saved", StatusLevel::Info);
+        assert!(app.is_animating(idle));
+        app.status_message = None;
+
+        // With no selection there is no shimmer to animate.
+        app.table_state.select(None);
+        assert!(!app.is_animating(recent));
     }
 
     #[test]
