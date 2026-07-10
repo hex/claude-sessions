@@ -91,6 +91,28 @@ _paint() {
     _PAINTED=$'\033['"$_SGR"'m'"$1"$'\033[0m'
 }
 
+# Cut $1 to at most $2 display columns, marking the cut with a single ellipsis.
+# `${s%?}` removes one character (not one byte) under a UTF-8 locale, and
+# _display_width counts characters by skipping UTF-8 continuation bytes.
+_truncate() {
+    local s="$1" max="$2"
+    _display_width "$s"
+    if [ "$_WIDTH" -le "$max" ]; then
+        _TRUNC="$s"
+        return 0
+    fi
+    if [ "$max" -lt 2 ]; then
+        _TRUNC=""
+        return 0
+    fi
+    while [ -n "$s" ]; do
+        s="${s%?}"
+        _display_width "$s"
+        [ "$_WIDTH" -le $((max - 1)) ] && break
+    done
+    _TRUNC="${s}…"
+}
+
 render_rows() {
     [ "${CS_SUBAGENT_STATUSLINE_DISABLE:-}" = "1" ] && exit 0
     _read_all_stdin
@@ -118,6 +140,25 @@ render_rows() {
 
         _model_display "$model"
         _fmt_elapsed "$elapsed"
+
+        # The description is the only elastic field. Everything else is measured
+        # first; what is left over is its budget. Below the floor it is dropped
+        # rather than reduced to an ellipsis and one letter.
+        if [ -n "$desc" ] && [ "${cols:-0}" -gt 0 ]; then
+            local fixed="$ICON_ROW"
+            [ -n "$_MODEL" ]   && fixed="${fixed}${ICON_MODEL}${_MODEL}  "
+            [ -n "$name" ]     && fixed="${fixed}${name}"
+            [ -n "$ctx" ]      && fixed="${fixed}  ${ICON_CTX}ctx ${ctx}%"
+            [ -n "$_ELAPSED" ] && fixed="${fixed}  ${ICON_5H}${_ELAPSED}"
+            _display_width "$fixed"
+            local avail=$((cols - _WIDTH - 3))   # 3 = the " · " that joins it
+            if [ "$avail" -lt 7 ]; then
+                desc=""
+            else
+                _truncate "$desc" "$avail"
+                desc="$_TRUNC"
+            fi
+        fi
 
         local content="$ICON_ROW"
         if [ -n "$_MODEL" ]; then

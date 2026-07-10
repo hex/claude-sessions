@@ -161,6 +161,38 @@ test_plain_mode_has_no_escape_sequences() {
     assert_output_contains "$c" "ctx 12%" "text survives in plain mode" || return 1
 }
 
+test_narrow_columns_truncates_description_keeps_ctx() {
+    export NO_COLOR=1
+    local fx out c
+    fx='{"columns":56,"tasks":[{"id":"t1","name":"bundle-recon","description":"Spelunk the Claude Code bundle for the row contract","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":24000,"startTime":1752148800000}]}'
+    out=$(run_ssl "$fx")
+    c=$(row_content "$out" "t1")
+    assert_output_contains "$c" "ctx 12%" "the ctx gauge survives a narrow row" || return 1
+    assert_output_contains "$c" "…" "an over-long description is elided" || return 1
+    assert_output_not_contains "$c" "row contract" "the description tail is cut" || return 1
+    printf '%s\n' "$out" | jq -e . >/dev/null 2>&1 || {
+        echo "  FAIL: truncated row is not valid JSON"; return 1; }
+}
+
+test_very_narrow_columns_drops_description_entirely() {
+    export NO_COLOR=1
+    local fx out c
+    fx='{"columns":34,"tasks":[{"id":"t1","name":"bundle-recon","description":"Spelunk the bundle","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":24000}]}'
+    out=$(run_ssl "$fx")
+    c=$(row_content "$out" "t1")
+    assert_output_not_contains "$c" "Spelunk" "no room for a description" || return 1
+    assert_output_contains "$c" "ctx 12%" "the gauge is kept over the description" || return 1
+}
+
+test_absent_columns_renders_untruncated() {
+    export NO_COLOR=1
+    local fx out c
+    fx='{"tasks":[{"id":"t1","name":"a","description":"a description that is not short"}]}'
+    out=$(run_ssl "$fx")
+    c=$(row_content "$out" "t1")
+    assert_output_contains "$c" "a description that is not short" "no columns means no budget to enforce" || return 1
+}
+
 run_test test_empty_tasks_prints_nothing
 run_test test_malformed_stdin_exits_clean
 run_test test_disable_env_prints_nothing
@@ -173,4 +205,7 @@ run_test test_elapsed_over_an_hour_uses_hours
 run_test test_content_escapes_esc_as_unicode
 run_test test_ctx_escalates_to_amber_then_red
 run_test test_plain_mode_has_no_escape_sequences
+run_test test_narrow_columns_truncates_description_keeps_ctx
+run_test test_very_narrow_columns_drops_description_entirely
+run_test test_absent_columns_renders_untruncated
 report_results
