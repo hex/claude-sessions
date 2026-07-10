@@ -324,7 +324,7 @@ Commands:
   -whoami             Show the current actor (for shared, multi-person sessions)
   -who                Show who contributed to shared memory/narrative (git history)
   -live               List sessions running right now on this machine
-  -status "<text>"    Set this session's advertised status (also: -status, -status --clear)
+  -status "<text>"    Set this session's advertised status (also: -status, -status --clear/-c)
   -remove, -rm <name> Remove a session
   -secrets <cmd>      Manage current session secrets (requires CLAUDE_SESSION_NAME)
   -update             Update cs to latest version
