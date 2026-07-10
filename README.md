@@ -37,7 +37,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 - **Cross-session search** - `cs -search <query>` greps across all sessions' narrative, memory, and README
 - **Prose hygiene enforcement** - `cs -lint <file>` flags AI-slop tells (em-dashes, a curated banned-phrase list) outside code fences; the `prose-lint` Stop hook blocks turn-end when prose written this session carries them. `/summary` and `/wrap` add a subagent judge that applies the full `prose-hygiene` taxonomy a regex can't catch. See [docs/hooks.md](docs/hooks.md)
 - **Auto-grounded scope** - On each code-work prompt, the `scope-prompt` hook injects a bounded context block — matching tracked files, recent commits, and a working-tree diff — grounding Claude in the current codebase before it acts. Capped at 8000 bytes; opt out per-session with `CS_SCOPE_DISABLE=1`. See [docs/hooks.md](docs/hooks.md)
-- **Status line** - `cs-statusline` renders Claude Code's status bar as one line of squared pills: a Claude logo badge (pulsing until your next prompt), the session name in its `/color`, a queued-task count, git branch with ahead/behind and dirty counts, model + effort, context %, 5-hour/weekly rate limits, and session cost — all from the status-line JSON plus one bounded git call, with no transcript parsing, network, or writes. Enable or remove it any time with `cs -statusline enable|disable`; choose and order segments with `CS_STATUSLINE_SEGMENTS`. cs auto-detects the terminal's light/dark theme (override with `CS_TERM_THEME`; `cs -detect-theme` shows the result). See [docs/statusline.md](docs/statusline.md)
+- **Status line** - `cs-statusline` renders Claude Code's status bar as one line of squared pills: a Claude logo badge (pulsing until your next prompt), the session name in its `/color`, a queued-task count, git branch with ahead/behind and dirty counts, model + effort, context %, 5-hour/weekly rate limits, and session cost — all from the status-line JSON plus one bounded git call, with no transcript parsing, network, or writes. Enable or remove it any time with `cs -statusline enable|disable`; choose and order segments with `CS_STATUSLINE_SEGMENTS`. cs auto-detects the terminal's light/dark theme (override with `CS_TERM_THEME`; `cs -detect-theme` shows the result). A companion `cs-subagent-statusline` styles the agent-panel rows so each running subagent shows the model driving it, its own context %, and elapsed time; `cs -statusline enable` registers both (Claude Code reads the registration at startup, so restart it to see them). See [docs/statusline.md](docs/statusline.md)
 
   ![cs-statusline: session and model accents, amber rate-limit warnings, standard-Unicode segment icons](assets/screenshot2.png)
 - **Health checks** - `cs -doctor` reports status of Keychain backend, hook registration, shadow-ref freshness, auto-memory writability, status line registration, Claude Code settings audit (hooks/MCPs/permissions/env vars counts), and cumulative token usage for the current project
@@ -58,7 +58,7 @@ Or clone and run `./install.sh`.
 > :warning: Always review [install.sh](install.sh) before running scripts from the internet.
 
 The installer:
-- Adds `cs`, `cs-secrets`, `cs-statusline`, and `cs-tui` to `~/.local/bin/`
+- Adds `cs`, `cs-secrets`, `cs-statusline`, `cs-subagent-statusline`, and `cs-tui` to `~/.local/bin/`
 - Installs the cs [hooks](docs/hooks.md) to `~/.claude/hooks/cs/` for session tracking (including the `scope-prompt` auto-grounding hook on UserPromptSubmit)
 - Adds `/summary`, `/checkpoint`, `/sweep`, and `/wrap` commands, and the `store-secret` and `prose-hygiene` skills to `~/.claude/`
 - Installs shell completions for bash and zsh
@@ -80,7 +80,7 @@ cs -checkpoint "<label>"    # Snapshot git state + narrative (also: list, show <
 cs -queue add "<task>"      # Walk-away task queue (also: list, rm <n>, clear)
 cs -doctor, -diag           # Run health checks (Keychain, hooks, memory, audit, tokens)
 cs -lint <file>...          # Flag AI-slop prose tells (em-dashes, banned phrases); 0 clean 1 issues 2 error
-cs -statusline enable|disable  # Enable or remove the cs status line
+cs -statusline enable|disable  # Enable or remove the cs status line + agent-panel rows
 cs -detect-theme            # Show the detected terminal light/dark theme
 cs -list, -ls               # List all sessions
 cs -live                    # List sessions running right now on this machine
