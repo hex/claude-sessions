@@ -174,14 +174,109 @@ test_narrow_columns_truncates_description_keeps_ctx() {
         echo "  FAIL: truncated row is not valid JSON"; return 1; }
 }
 
+# columns 37 is the exact width of this row's incompressible core (glyph, model
+# chip, name, gauge). The description gets no budget and is dropped whole.
 test_very_narrow_columns_drops_description_entirely() {
     export NO_COLOR=1
     local fx out c
-    fx='{"columns":34,"tasks":[{"id":"t1","name":"bundle-recon","description":"Spelunk the bundle","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":24000}]}'
+    fx='{"columns":37,"tasks":[{"id":"t1","name":"bundle-recon","description":"Spelunk the bundle","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":24000}]}'
     out=$(run_ssl "$fx")
     c=$(row_content "$out" "t1")
     assert_output_not_contains "$c" "Spelunk" "no room for a description" || return 1
     assert_output_contains "$c" "ctx 12%" "the gauge is kept over the description" || return 1
+}
+
+# The row must never be wider than the budget Claude Code hands us: a row that
+# overflows wraps the agent panel. Measured in codepoints, which is what
+# _display_width counts.
+test_row_never_exceeds_its_columns_budget() {
+    export NO_COLOR=1
+    local fx out w c
+    for c in 46 47 56 80 100; do
+        fx="{\"columns\":$c,\"tasks\":[{\"id\":\"t1\",\"name\":\"bundle-recon\",\"description\":\"Spelunk the Claude Code bundle for the row contract\",\"model\":\"claude-sonnet-5\",\"contextWindowSize\":200000,\"tokenCount\":24000,\"startTime\":1752148800000}]}"
+        out=$(run_ssl "$fx")
+        [ -n "$out" ] || continue
+        w=$(printf '%s\n' "$out" | jq -r '.content | length')
+        if [ "$w" -gt "$c" ]; then
+            echo "  FAIL: row of width $w exceeds columns=$c"
+            return 1
+        fi
+    done
+}
+
+# This fixture's core measures 46 columns with elapsed and 37 without, so:
+#   cols < 37       -> no row at all
+#   37 <= cols < 46 -> row with elapsed shed
+#   cols >= 46      -> row intact
+# Elapsed is the first thing sacrificed; the row itself is the last.
+test_columns_below_the_core_width_emits_no_row() {
+    export NO_COLOR=1
+    local fx out c
+    for c in 1 20 34 36; do
+        fx="{\"columns\":$c,\"tasks\":[{\"id\":\"t1\",\"name\":\"bundle-recon\",\"description\":\"Spelunk the Claude Code bundle for the row contract\",\"model\":\"claude-sonnet-5\",\"contextWindowSize\":200000,\"tokenCount\":24000,\"startTime\":1752148800000}]}"
+        out=$(run_ssl "$fx")
+        if [ -n "$out" ]; then
+            echo "  FAIL: columns=$c emitted a row that cannot fit: $(printf '%s\n' "$out" | jq -r '.content')"
+            return 1
+        fi
+    done
+}
+
+test_elapsed_is_shed_before_the_row_is_dropped() {
+    export NO_COLOR=1
+    local fx out c w
+    for c in 37 40 45; do
+        fx="{\"columns\":$c,\"tasks\":[{\"id\":\"t1\",\"name\":\"bundle-recon\",\"description\":\"Spelunk the Claude Code bundle for the row contract\",\"model\":\"claude-sonnet-5\",\"contextWindowSize\":200000,\"tokenCount\":24000,\"startTime\":1752148800000}]}"
+        out=$(run_ssl "$fx")
+        [ -n "$out" ] || { echo "  FAIL: columns=$c should still render a row"; return 1; }
+        c2=$(row_content "$out" "t1")
+        assert_output_contains "$c2" "ctx 12%" "columns=$c keeps the gauge" || return 1
+        assert_output_not_contains "$c2" "2m14s" "columns=$c sheds elapsed" || return 1
+        w=$(printf '%s\n' "$out" | jq -r '.content | length')
+        [ "$w" -le "$c" ] || { echo "  FAIL: columns=$c row is $w wide"; return 1; }
+    done
+}
+
+# jq's @tsv escapes a tab as the two characters \t so the field split stays
+# exact. Those escapes are a transport detail and must never reach the panel.
+test_control_chars_in_description_are_sanitized() {
+    export NO_COLOR=1
+    local fx out c
+    fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"line1\nline2\tend"}]}'
+    out=$(run_ssl "$fx")
+    c=$(row_content "$out" "t1")
+    assert_output_not_contains "$c" '\\n' "a newline must not render as a literal escape" || return 1
+    assert_output_not_contains "$c" '\\t' "a tab must not render as a literal escape" || return 1
+    assert_output_contains "$c" "line1 line2 end" "control characters collapse to spaces" || return 1
+}
+
+# @tsv also escapes a backslash by doubling it. Undo that, or a Windows path in
+# a description renders with two separators.
+test_backslash_in_description_is_not_doubled() {
+    export NO_COLOR=1
+    local fx out c
+    fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"path C:\\dir"}]}'
+    out=$(run_ssl "$fx")
+    c=$(row_content "$out" "t1")
+    assert_output_contains "$c" 'C:\\dir' "a single backslash survives as one" || return 1
+    assert_output_not_contains "$c" 'C:\\\\dir' "the @tsv escape must be undone" || return 1
+}
+
+test_negative_start_time_yields_no_elapsed() {
+    export NO_COLOR=1
+    local fx out c
+    fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","startTime":-5000}]}'
+    out=$(run_ssl "$fx")
+    c=$(row_content "$out" "t1")
+    assert_output_not_contains "$c" "◷" "a negative startTime yields no elapsed, not a 486708h one" || return 1
+}
+
+test_non_numeric_columns_is_silent_on_stderr() {
+    export NO_COLOR=1
+    local fx err
+    fx='{"columns":"abc","tasks":[{"id":"t1","name":"a","description":"d"}]}'
+    err=$(printf '%s' "$fx" | bash "$SSL" 2>&1 >/dev/null)
+    assert_eq "" "$err" "a non-numeric columns must not leak a shell error" || return 1
 }
 
 test_absent_columns_renders_untruncated() {
@@ -207,5 +302,12 @@ run_test test_ctx_escalates_to_amber_then_red
 run_test test_plain_mode_has_no_escape_sequences
 run_test test_narrow_columns_truncates_description_keeps_ctx
 run_test test_very_narrow_columns_drops_description_entirely
+run_test test_row_never_exceeds_its_columns_budget
+run_test test_columns_below_the_core_width_emits_no_row
+run_test test_elapsed_is_shed_before_the_row_is_dropped
+run_test test_control_chars_in_description_are_sanitized
+run_test test_backslash_in_description_is_not_doubled
+run_test test_negative_start_time_yields_no_elapsed
+run_test test_non_numeric_columns_is_silent_on_stderr
 run_test test_absent_columns_renders_untruncated
 report_results

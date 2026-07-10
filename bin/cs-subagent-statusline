@@ -20,8 +20,11 @@ _read_all_stdin() {
     IFS= read -r -d '' _STDIN 2>/dev/null || true
 }
 
-# One jq pass: every field the rows need, one TSV line per task. @tsv escapes
-# any literal tab or newline inside a description, so the fields stay aligned.
+# One jq pass: every field the rows need, one TSV line per task. Tabs, newlines
+# and carriage returns are collapsed to spaces before @tsv sees them, because
+# @tsv would otherwise encode them as the two-character sequences \t \n \r and
+# those escapes would render literally in the panel. A backslash still gets
+# doubled by @tsv; _unescape_tsv undoes that on the way out.
 # ctx% and elapsed are computed here to keep the hot path fork-free.
 # CS_SUBAGENT_NOW_MS pins the clock for tests; production uses jq's `now`.
 _parse_tasks() {
@@ -29,19 +32,40 @@ _parse_tasks() {
     command -v jq >/dev/null 2>&1 || return 1
     [ -n "$input" ] || return 1
     _TASKS=$(printf '%s' "$input" | jq -r --arg nowms "${CS_SUBAGENT_NOW_MS:-}" '
+        def clean: tostring | gsub("[\\t\\n\\r]"; " ");
         ($nowms | if . == "" then (now * 1000) else tonumber end) as $now
         | (.columns // 0) as $cols
         | .tasks[]?
         | [ (.id // ""),
             ($cols | tostring),
             (.model // ""),
-            (.name // .type // ""),
-            (.description // ""),
+            (.name // .type // "" | clean),
+            (.description // "" | clean),
             (if (.contextWindowSize // 0) > 0
              then ((.tokenCount // 0) * 100 / .contextWindowSize | floor | tostring)
              else "" end),
-            (if .startTime then (($now - .startTime) / 1000 | floor | tostring) else "" end)
+            (if (.startTime // 0) > 0
+             then (($now - .startTime) / 1000 | floor | tostring)
+             else "" end)
           ] | @tsv' 2>/dev/null) || return 1
+}
+
+# @tsv doubles a backslash so the field split stays exact. Undo it, or a path in
+# a description renders with two separators.
+_unescape_tsv() {
+    local s="$1"
+    _UNESC="${s//\\\\/\\}"
+}
+
+# Display width of everything except the description: the row's incompressible
+# core. $1 model, $2 name, $3 ctx, $4 elapsed. Sets _WIDTH.
+_fixed_width() {
+    local f="$ICON_ROW"
+    [ -n "$1" ] && f="${f}${ICON_MODEL}${1}  "
+    [ -n "$2" ] && f="${f}${2}"
+    [ -n "$3" ] && f="${f}  ${ICON_CTX}ctx ${3}%"
+    [ -n "$4" ] && f="${f}  ${ICON_5H}${4}"
+    _display_width "$f"
 }
 
 # Resolved model ids arrive here, not the display names the main bar receives.
@@ -140,23 +164,33 @@ render_rows() {
 
         _model_display "$model"
         _fmt_elapsed "$elapsed"
+        _unescape_tsv "$name"; name="$_UNESC"
+        _unescape_tsv "$desc"; desc="$_UNESC"
 
-        # The description is the only elastic field. Everything else is measured
-        # first; what is left over is its budget. Below the floor it is dropped
-        # rather than reduced to an ellipsis and one letter.
-        if [ -n "$desc" ] && [ "${cols:-0}" -gt 0 ]; then
-            local fixed="$ICON_ROW"
-            [ -n "$_MODEL" ]   && fixed="${fixed}${ICON_MODEL}${_MODEL}  "
-            [ -n "$name" ]     && fixed="${fixed}${name}"
-            [ -n "$ctx" ]      && fixed="${fixed}  ${ICON_CTX}ctx ${ctx}%"
-            [ -n "$_ELAPSED" ] && fixed="${fixed}  ${ICON_5H}${_ELAPSED}"
-            _display_width "$fixed"
-            local avail=$((cols - _WIDTH - 3))   # 3 = the " · " that joins it
-            if [ "$avail" -lt 7 ]; then
-                desc=""
-            else
-                _truncate "$desc" "$avail"
-                desc="$_TRUNC"
+        # A non-numeric columns is not a budget, it is an unknown; treat it as
+        # absent rather than letting `[ -gt ]` complain to stderr.
+        case "$cols" in ''|*[!0-9]*) cols=0 ;; esac
+
+        # A row wider than its budget wraps the agent panel. Shed the elastic
+        # parts in order of what is worth least: the description's tail, then
+        # the description, then elapsed. If the core still does not fit there is
+        # nothing left to give, and Claude Code's own default row beats a
+        # wrapped one.
+        if [ "$cols" -gt 0 ]; then
+            _fixed_width "$_MODEL" "$name" "$ctx" "$_ELAPSED"
+            if [ "$_WIDTH" -gt "$cols" ]; then
+                _ELAPSED=""
+                _fixed_width "$_MODEL" "$name" "$ctx" ""
+                [ "$_WIDTH" -gt "$cols" ] && continue
+            fi
+            if [ -n "$desc" ]; then
+                local avail=$((cols - _WIDTH - 3))   # 3 = the " · " that joins it
+                if [ "$avail" -lt 7 ]; then
+                    desc=""
+                else
+                    _truncate "$desc" "$avail"
+                    desc="$_TRUNC"
+                fi
             fi
         fi
 
