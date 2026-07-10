@@ -745,4 +745,7 @@ main() {
     _render
 }
 
-main "$@"
+# Sourced with CS_STATUSLINE_LIB=1, this file is a library: the palette, color
+# ladder, and width helpers load without rendering. `return` is not usable here
+# because it is an error outside a function in an executed script.
+[ "${CS_STATUSLINE_LIB:-}" = "1" ] || main "$@"
