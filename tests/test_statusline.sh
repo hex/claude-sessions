@@ -1281,9 +1281,44 @@ test_executed_directly_still_renders() {
     assert_output_contains "$out" "my-session" "guard must not break direct execution" || return 1
 }
 
+test_enable_registers_both_status_lines() {
+    export CS_CLAUDE_DIR="$TEST_TMPDIR/claude"
+    mkdir -p "$CS_CLAUDE_DIR"
+    echo '{}' > "$CS_CLAUDE_DIR/settings.json"
+    bash "$CS_BIN" -statusline enable >/dev/null 2>&1
+    local sl ssl
+    sl=$(jq -r '.statusLine.command' "$CS_CLAUDE_DIR/settings.json")
+    ssl=$(jq -r '.subagentStatusLine.command' "$CS_CLAUDE_DIR/settings.json")
+    assert_output_contains "$sl" "/cs-statusline" "statusLine registered" || return 1
+    assert_output_contains "$ssl" "/cs-subagent-statusline" "subagentStatusLine registered" || return 1
+}
+
+test_disable_leaves_a_foreign_subagent_statusline_alone() {
+    export CS_CLAUDE_DIR="$TEST_TMPDIR/claude"
+    mkdir -p "$CS_CLAUDE_DIR"
+    jq -n '{subagentStatusLine: {type: "command", command: "/opt/theirs/rows.sh"}}' \
+        > "$CS_CLAUDE_DIR/settings.json"
+    bash "$CS_BIN" -statusline disable >/dev/null 2>&1
+    local ssl
+    ssl=$(jq -r '.subagentStatusLine.command' "$CS_CLAUDE_DIR/settings.json")
+    assert_eq "/opt/theirs/rows.sh" "$ssl" "a foreign row renderer is never stripped" || return 1
+}
+
+test_enable_warns_that_a_restart_is_required() {
+    export CS_CLAUDE_DIR="$TEST_TMPDIR/claude"
+    mkdir -p "$CS_CLAUDE_DIR"
+    echo '{}' > "$CS_CLAUDE_DIR/settings.json"
+    local out
+    out=$(bash "$CS_BIN" -statusline enable 2>&1)
+    assert_output_contains "$out" "restart" "enabling must mention the restart requirement" || return 1
+}
+
 run_test test_notes_segment_shows_queue_depth
 run_test test_notes_segment_absent_when_queue_empty
 run_test test_library_mode_defines_helpers_without_rendering
 run_test test_library_mode_prints_nothing
 run_test test_executed_directly_still_renders
+run_test test_enable_registers_both_status_lines
+run_test test_disable_leaves_a_foreign_subagent_statusline_alone
+run_test test_enable_warns_that_a_restart_is_required
 report_results

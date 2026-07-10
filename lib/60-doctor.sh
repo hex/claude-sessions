@@ -286,6 +286,32 @@ _doctor_check_statusline() {
     esac
 }
 
+_doctor_check_subagent_statusline() {
+    local claude_dir="${CS_CLAUDE_DIR:-$HOME/.claude}"
+    local settings="$claude_dir/settings.json"
+    local cmd=""
+    if [ -f "$settings" ]; then
+        cmd=$(jq -r '.subagentStatusLine.command // ""' "$settings" 2>/dev/null) || cmd=""
+    fi
+    if [ -z "$cmd" ]; then
+        _doctor_ok "Subagent statusline: not registered (optional; enable with: cs -statusline enable)"
+        return
+    fi
+    case "$cmd" in
+        */cs-subagent-statusline)
+            local bin="${cmd/#\~/$HOME}"
+            if [ -x "$bin" ]; then
+                _doctor_ok "Subagent statusline: cs-subagent-statusline registered and executable"
+            else
+                _doctor_fail "Subagent statusline: registered as $cmd but the binary is missing or not executable"
+            fi
+            ;;
+        *)
+            _doctor_ok "Subagent statusline: using a non-cs row renderer ($cmd)"
+            ;;
+    esac
+}
+
 _doctor_check_token_cost() {
     local cwd="${CLAUDE_SESSION_DIR:-$PWD}"
     local encoded
@@ -362,6 +388,7 @@ run_doctor() {
     _doctor_check_settings_hooks_resolve
     _doctor_check_claude_audit
     _doctor_check_statusline
+    _doctor_check_subagent_statusline
 
     if [ -n "${CLAUDE_SESSION_META_DIR:-}" ] && [ -d "${CLAUDE_SESSION_META_DIR:-}" ]; then
         _doctor_check_shadow_ref

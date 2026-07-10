@@ -15,25 +15,49 @@ _strip_statusline_registration() {
     return 2
 }
 
+# endswith("/cs-subagent-statusline") never matches "/cs-statusline", so this
+# stripper and _strip_statusline_registration cannot cross-fire on each other's
+# registration. Returns 0 stripped, 1 foreign-or-absent, 2 write failure.
+_strip_subagent_statusline_registration() {
+    local settings_file="$1"
+    [ -f "$settings_file" ] || return 1
+    jq -e '.subagentStatusLine.command // "" | endswith("/cs-subagent-statusline")' \
+        "$settings_file" >/dev/null 2>&1 || return 1
+    local _tmp
+    _tmp=$(mktemp)
+    if jq 'del(.subagentStatusLine)' "$settings_file" > "$_tmp" 2>/dev/null; then
+        mv "$_tmp" "$settings_file"
+        return 0
+    fi
+    rm -f "$_tmp"
+    return 2
+}
+
 # disable strips only a cs-statusline registration, never a foreign one.
 run_statusline_cmd() {
     local action="${1:-}"
     local settings="${CS_CLAUDE_DIR:-$HOME/.claude}/settings.json"
     local bin="$HOME/.local/bin/cs-statusline"
+    local subbin="$HOME/.local/bin/cs-subagent-statusline"
     command -v jq >/dev/null 2>&1 || error "jq is required for cs -statusline"
     case "$action" in
         enable)
             [ -x "$bin" ] || warn "cs-statusline binary not found at $bin (run install.sh first)"
+            [ -x "$subbin" ] || warn "cs-subagent-statusline binary not found at $subbin (run install.sh first)"
             mkdir -p "$(dirname "$settings")"
             [ -f "$settings" ] || echo '{}' > "$settings"
             local _tmp
             _tmp=$(mktemp)
             # refreshInterval keeps the bar repainting once a second while
             # idle; the logo's attention pulse animates on that timer.
-            if jq --arg cmd "$bin" '.statusLine = {type: "command", command: $cmd, refreshInterval: 1}' \
+            if jq --arg cmd "$bin" --arg subcmd "$subbin" \
+                '.statusLine = {type: "command", command: $cmd, refreshInterval: 1}
+                 | .subagentStatusLine = {type: "command", command: $subcmd}' \
                 "$settings" > "$_tmp" 2>/dev/null; then
                 mv "$_tmp" "$settings"
                 info "Registered cs-statusline as the Claude Code status line"
+                info "Registered cs-subagent-statusline for the agent panel rows"
+                info "Claude Code reads both at startup: restart it to see them."
             else
                 rm -f "$_tmp"
                 error "Could not update $settings"
@@ -41,10 +65,20 @@ run_statusline_cmd() {
             ;;
         disable)
             [ -f "$settings" ] || { info "No settings.json; nothing to disable."; return 0; }
-            _strip_statusline_registration "$settings"
-            case $? in
+            # Capture each stripper's exit code with `|| rc=$?`: a bare call
+            # returning non-zero (foreign or absent registration) would trip
+            # `set -e` before the following case ran, aborting the second strip.
+            local slrc=0 subrc=0
+            _strip_statusline_registration "$settings" || slrc=$?
+            case $slrc in
                 0) info "Removed the cs-statusline registration" ;;
                 1) info "Status line is not cs-statusline; leaving it untouched." ;;
+                *) error "Could not update $settings" ;;
+            esac
+            _strip_subagent_statusline_registration "$settings" || subrc=$?
+            case $subrc in
+                0) info "Removed the cs-subagent-statusline registration" ;;
+                1) : ;;
                 *) error "Could not update $settings" ;;
             esac
             ;;

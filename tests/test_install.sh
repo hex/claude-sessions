@@ -360,6 +360,19 @@ test_install_deploys_statusline_binary() {
     fi
 }
 
+test_install_deploys_subagent_statusline_binary() {
+    local fake_home="$TEST_TMPDIR/home-ssl"
+    mkdir -p "$fake_home"
+    HOME="$fake_home" bash "$INSTALL_SH" > /dev/null 2>&1 || {
+        echo "  FAIL: install.sh exited non-zero"
+        return 1
+    }
+    if [ ! -x "$fake_home/.local/bin/cs-subagent-statusline" ]; then
+        echo "  FAIL: cs-subagent-statusline not deployed executable to ~/.local/bin"
+        return 1
+    fi
+}
+
 test_install_skips_statusline_noninteractive() {
     local fake_home="$TEST_TMPDIR/home-sl-reg"
     mkdir -p "$fake_home"
@@ -471,6 +484,27 @@ EOF
     fi
 }
 
+test_uninstall_removes_subagent_statusline() {
+    local fake_home="$TEST_TMPDIR/uninstall-ssl"
+    mkdir -p "$fake_home/.local/bin" "$fake_home/.claude"
+    echo '#!/bin/sh' > "$fake_home/.local/bin/cs-subagent-statusline"
+    cat > "$fake_home/.claude/settings.json" << EOF
+{"subagentStatusLine":{"type":"command","command":"$fake_home/.local/bin/cs-subagent-statusline"}}
+EOF
+    printf 'y\n' | HOME="$fake_home" "$CS_BIN" -uninstall > /dev/null 2>&1 || {
+        echo "  FAIL: cs -uninstall exited non-zero"
+        return 1
+    }
+    if [ -f "$fake_home/.local/bin/cs-subagent-statusline" ]; then
+        echo "  FAIL: cs-subagent-statusline binary not removed"
+        return 1
+    fi
+    if jq -e '.subagentStatusLine' "$fake_home/.claude/settings.json" > /dev/null 2>&1; then
+        echo "  FAIL: subagentStatusLine registration survived uninstall"
+        return 1
+    fi
+}
+
 test_uninstall_preserves_foreign_statusline() {
     local fake_home="$TEST_TMPDIR/uninstall-sl-foreign"
     mkdir -p "$fake_home/.claude"
@@ -504,11 +538,13 @@ run_test test_install_migrates_flat_hook_layout
 run_test test_install_writes_version_stamp
 run_test test_uninstall_strips_hook_registrations
 run_test test_install_deploys_statusline_binary
+run_test test_install_deploys_subagent_statusline_binary
 run_test test_install_skips_statusline_noninteractive
 run_test test_statusline_enable_registers
 run_test test_statusline_disable_strips_only_ours
 run_test test_install_preserves_foreign_statusline
 run_test test_uninstall_removes_statusline
+run_test test_uninstall_removes_subagent_statusline
 run_test test_uninstall_preserves_foreign_statusline
 run_test test_install_recovers_from_invalid_settings_json
 report_results
