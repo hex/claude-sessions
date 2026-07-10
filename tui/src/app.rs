@@ -1707,8 +1707,13 @@ impl App {
                 let row = mouse.row;
                 let col = mouse.column;
 
-                // Check if click is within the table area
-                if row >= self.table_area.y && col >= self.table_area.x {
+                // Only hit-test clicks that land inside the session table's
+                // rectangle. Checking just the top-left corner let right-pane
+                // (To-Do/detail) clicks fall through and mis-select a session.
+                if self
+                    .table_area
+                    .contains(ratatui::layout::Position { x: col, y: row })
+                {
                     let relative_row = row - self.table_area.y;
 
                     // Row 0 is the border, row 1 is the title, row 2 is header, row 3 is separator
@@ -3577,6 +3582,36 @@ mod tests {
             app.table_state.selected(),
             Some(0),
             "clicking a row's group-label line selects that row's session"
+        );
+    }
+
+    #[test]
+    fn mouse_click_in_right_pane_does_not_select_a_session() {
+        // At >= PREVIEW_MIN_WIDTH (120), with the detail panes on, the layout is
+        // SideBySide: the session table is the left ~60%, the To-Do/detail views
+        // the right ~40%. A left-click in that right region must not hit-test
+        // against the left session list.
+        let mut app = App::new(sample_sessions());
+        app.table_state.select(Some(2));
+        render_for_hit_map(&mut app, 140, 24);
+        assert!(
+            app.table_area.width < 140,
+            "test needs a side-by-side split (table narrower than the window)"
+        );
+        // Absolute column just past the table's right edge, inside the right pane,
+        // on a row that aligns to a session line.
+        let right_col = app.table_area.x + app.table_area.width + 2;
+        let action = app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: right_col,
+            row: app.table_area.y + 4,
+            modifiers: KeyModifiers::empty(),
+        });
+        assert!(matches!(action, Action::None));
+        assert_eq!(
+            app.table_state.selected(),
+            Some(2),
+            "a click in the right (To-Do/detail) pane must not change the left session selection"
         );
     }
 
