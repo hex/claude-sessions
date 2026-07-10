@@ -1244,9 +1244,11 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
                     ("  ", p.comment)
                 };
                 let num = format!("{}. ", i + 1);
-                // Columns available for the task text: pad(1) + marker(2) + number.
+                // Columns available for the task text: left pad(1) + marker(2) +
+                // number, plus a matching 1-column right margin so a truncated
+                // task's ellipsis and the edit cursor stay off the border.
                 let prefix_cols = 1 + 2 + num.chars().count();
-                let avail = inner_cols.saturating_sub(prefix_cols);
+                let avail = inner_cols.saturating_sub(prefix_cols + 1);
                 let mut spans = vec![
                     Span::raw(" "), // left padding
                     Span::styled(marker, Style::default().fg(marker_color)),
