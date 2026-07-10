@@ -83,6 +83,8 @@ cs -lint <file>...          # Flag AI-slop prose tells (em-dashes, banned phrase
 cs -statusline enable|disable  # Enable or remove the cs status line
 cs -detect-theme            # Show the detected terminal light/dark theme
 cs -list, -ls               # List all sessions
+cs -live                    # List sessions running right now on this machine
+cs -status "<text>"         # Set this session's status (also: cs -status, cs -status --clear)
 cs -remove, -rm <name>      # Remove a session
 cs -update [--check|--force]   # Update to latest (--check: check only; --force: reinstall)
 cs -uninstall               # Uninstall cs
@@ -245,6 +247,23 @@ list where `d` deletes and `e` edits a task in place, and `Esc` returns
 to the session list. Sessions with queued tasks get a sortable **To-Do**
 column (`▤ N`) in the table, and the status line shows `▤ N` after the
 session name.
+
+### Live sessions & status
+
+See which cs sessions are running right now on this machine, and let each one
+say what it's working on:
+
+```bash
+cs -live                       # list live sessions: name, actor, uptime, status
+cs -status "refactoring auth"  # set this session's status
+cs -status                     # show this session's status (falls back to the README objective)
+cs -status --clear             # clear it (revert to the objective)
+```
+
+Liveness is a local fact — a session is "live" when its process is running on
+this machine (the same `.cs/session.lock` signal the TUI uses). There is no
+network or cross-machine presence. A session that never sets a status shows its
+README objective instead.
 
 ## Slash Commands
 

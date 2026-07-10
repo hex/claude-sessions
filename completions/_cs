@@ -84,6 +84,8 @@ _cs() {
         '-secrets:Manage session secrets'
         '-checkpoint:Save or manage session checkpoints'
         '-queue:Manage the session walk-away queue'
+        '-live:List sessions running right now on this machine'
+        '-status:Set or show this session'\''s advertised status'
         '-search:Search across all sessions'
         '-lint:Flag AI-slop prose tells in files'
         '-statusline:Manage the cs status line (enable|disable)'
