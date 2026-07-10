@@ -127,6 +127,40 @@ test_elapsed_over_an_hour_uses_hours() {
     assert_output_contains "$c" "1h05m" "3900 seconds is 1h05m" || return 1
 }
 
+test_content_escapes_esc_as_unicode() {
+    export COLORTERM=truecolor
+    local out
+    out=$(run_ssl "$FIXTURE_ONE")
+    assert_output_contains "$out" 'u001b' "the raw line must carry the escaped form" || return 1
+    printf '%s' "$out" | LC_ALL=C grep -q $'\033' && {
+        echo "  FAIL: raw ESC byte leaked into the JSON line"; return 1; }
+    printf '%s\n' "$out" | jq -e . >/dev/null 2>&1 || {
+        echo "  FAIL: emitted line is not valid JSON"; return 1; }
+}
+
+test_ctx_escalates_to_amber_then_red() {
+    export COLORTERM=truecolor
+    local fx out c
+    # 110000/200000 = 55% -> past warn (50), below crit (80) -> amber 255;183;77
+    fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":110000}]}'
+    out=$(run_ssl "$fx"); c=$(row_content "$out" "t1")
+    assert_output_contains "$c" "38;2;255;183;77" "55% context renders amber" || return 1
+
+    # 170000/200000 = 85% -> past crit (80) -> red 220;38;38
+    fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":170000}]}'
+    out=$(run_ssl "$fx"); c=$(row_content "$out" "t1")
+    assert_output_contains "$c" "38;2;220;38;38" "85% context renders red" || return 1
+}
+
+test_plain_mode_has_no_escape_sequences() {
+    export NO_COLOR=1
+    local out c
+    out=$(run_ssl "$FIXTURE_ONE")
+    c=$(row_content "$out" "t1")
+    assert_output_not_contains "$c" "38;2;" "NO_COLOR must suppress SGR parameters" || return 1
+    assert_output_contains "$c" "ctx 12%" "text survives in plain mode" || return 1
+}
+
 run_test test_empty_tasks_prints_nothing
 run_test test_malformed_stdin_exits_clean
 run_test test_disable_env_prints_nothing
@@ -136,4 +170,7 @@ run_test test_zero_context_window_is_not_a_divide_by_zero
 run_test test_unknown_model_id_renders_verbatim
 run_test test_missing_name_falls_back_to_type
 run_test test_elapsed_over_an_hour_uses_hours
+run_test test_content_escapes_esc_as_unicode
+run_test test_ctx_escalates_to_amber_then_red
+run_test test_plain_mode_has_no_escape_sequences
 report_results

@@ -79,6 +79,18 @@ _emit_row() {
     jq -cn --arg id "$1" --arg content "$2" '{id: $id, content: $content}' 2>/dev/null
 }
 
+# Rows sit on the terminal background inside Claude Code's own panel, not on
+# self-backgrounded pills, so only foreground colors are used. LEVEL=plain is
+# handled here, not in _sgr, whose case falls through to basic ANSI.
+_paint() {
+    if [ "$LEVEL" = "plain" ]; then
+        _PAINTED="$1"
+        return 0
+    fi
+    _sgr 38 "$2"
+    _PAINTED=$'\033['"$_SGR"'m'"$1"$'\033[0m'
+}
+
 render_rows() {
     [ "${CS_SUBAGENT_STATUSLINE_DISABLE:-}" = "1" ] && exit 0
     _read_all_stdin
@@ -108,11 +120,27 @@ render_rows() {
         _fmt_elapsed "$elapsed"
 
         local content="$ICON_ROW"
-        [ -n "$_MODEL" ] && content="${content}${ICON_MODEL}${_MODEL}  "
-        [ -n "$name" ]   && content="${content}${name}"
-        [ -n "$desc" ]   && content="${content} · ${desc}"
-        [ -n "$ctx" ]    && content="${content}  ${ICON_CTX}ctx ${ctx}%"
-        [ -n "$_ELAPSED" ] && content="${content}  ${ICON_5H}${_ELAPSED}"
+        if [ -n "$_MODEL" ]; then
+            _paint "${ICON_MODEL}${_MODEL}" periwinkle
+            content="${content}${_PAINTED}  "
+        fi
+        if [ -n "$name" ]; then
+            _paint "$name" chiptext
+            content="${content}${_PAINTED}"
+        fi
+        if [ -n "$desc" ]; then
+            _paint "· ${desc}" hairline
+            content="${content} ${_PAINTED}"
+        fi
+        if [ -n "$ctx" ]; then
+            _thresh_color "$ctx" "${CS_STATUSLINE_CTX_WARN:-50}" "${CS_STATUSLINE_CTX_CRIT:-80}" hairline
+            _paint "${ICON_CTX}ctx ${ctx}%" "$_COLOR"
+            content="${content}  ${_PAINTED}"
+        fi
+        if [ -n "$_ELAPSED" ]; then
+            _paint "${ICON_5H}${_ELAPSED}" hairline
+            content="${content}  ${_PAINTED}"
+        fi
 
         _emit_row "$id" "$content"
     done <<< "$_TASKS"
