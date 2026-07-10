@@ -48,6 +48,7 @@ similar gitignored transient at the `.cs/` root — the narrative reminder's
 | `state` | Session state bound to this checkout: `claude_session_id` (the conversation UUID to resume), `claude_session_color` (the `/color` palette entry), `last_resumed` (last resume date), and, for task worktrees, `task_branch` and `cs_base`. Each machine binds its own conversation, so this must not sync. |
 | `identity` | Overrides the actor name for shared memory/narrative attribution (precedence: `$CS_ACTOR` > `local/identity` > git `user.email` > git `user.name`). |
 | `attention` | Status-line attention marker — raised by the `Stop` hook when Claude finishes, cleared on the next prompt. |
+| `presence` | This session's advertised status (`cs -status`): a single line read by `cs -live`. Falls back to the README objective when unset. |
 | `queue` | The walk-away task queue (`cs -queue`). |
 | `queue.state` | Drain state machine for the queue: `idle`, `armed`, or `draining`. |
 | `queue.done` | Log of completed queued tasks, appended as each is drained. |

@@ -4,6 +4,30 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.7.9
+
+Two features and a batch of TUI fixes. `cs -live` and `cs -status` add the first phase of cross-session presence: see which cs sessions are running on this machine and what each is doing, all machine-local with no networked coordination. The interactive session manager gains in-place To-Do editing and full-width date dividers, plus fixes to mouse hit-testing, narrow-window layout, narrative reading, and preview loading.
+
+### Features
+
+- **See and share what your sessions are doing.** `cs -live` lists the cs sessions running right now on this machine, each with its actor, uptime, and a short status. `cs -status "…"` sets that status (`cs -status` reads it, `--clear` resets); when unset it falls back to the session's README objective. Machine-local by design: liveness is a local process fact, with no networked or cross-machine presence. This is Phase 1 of a planned cross-session communication feature.
+- **Edit To-Do tasks in place.** The To-Do input is padded, long tasks render on one line with an ellipsis instead of wrapping, and editing a long task happens on its own row with a scrolling cursor and italic text so you can see where you are in the line.
+
+### Fixes
+
+- **Clicking the To-Do or detail pane no longer selects the wrong session.** The mouse hit-test checked only the session table's top-left corner, so right-pane clicks fell through and mis-selected a session by row. It now uses full rectangle containment.
+- **Date separators in the session list span the full width.** The Today / Yesterday / Older group dividers render as full-width rules, and each session's date and age moved onto its own line, which also fixed a misalignment where a session's date sat on the divider above it.
+- **Detail panes stack on narrow landscape windows,** with a height floor, instead of being squeezed beside the list.
+- **The TUI reads every co-developer's narrative,** not just a single `narrative.md`, so shared-session activity from all actors shows in the preview.
+
+### Performance
+
+- **Session previews load off the render path** on a worker thread, so moving through the list stays responsive instead of stalling while a preview is read from disk.
+
+### Docs
+
+- Documented `cs -live` and `cs -status` in the README and the `.cs/local/` layout.
+
 ## 2026.7.8
 
 Tab-completion now finds every session. Sessions adopted by symlink from a repo elsewhere on disk never used to tab-complete, because both completion scripts enumerated sessions themselves and neither followed symlinks. They now delegate to one internal enumerator, so completion can never disagree with `cs -list` about what a session is. The rest of the release cleans up completion edge cases, corrects a few documentation errors, and reshapes the README so newcomers meet the pitch before the glossary.
