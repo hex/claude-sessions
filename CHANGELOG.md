@@ -4,6 +4,18 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.7.10
+
+One feature: a companion status line for Claude Code's agent panel. When you run subagents, the tree under your prompt now shows the model driving each one, its own context-window usage, and how long it's been running — the columns Claude Code's default `name · description · token count` row lacks. A recon agent at ctx 12% and a synthesizer dying at ctx 84% stop looking identical.
+
+### Features
+
+- **Styled subagent rows.** `cs-subagent-statusline` renders each running subagent with its model chip (in the bar's periwinkle), name, description, its own ctx% (escalating amber/red on the same thresholds the bar uses), and elapsed time. `cs -statusline enable` now registers both the bar and the rows; `cs -doctor` reports both. The rows keep rendering while you view an agent's transcript. Claude Code reads the registration at startup, so restart it to see them. Disable with `CS_SUBAGENT_STATUSLINE_DISABLE=1`.
+
+### Internal
+
+- `cs-subagent-statusline` sources `cs-statusline` in library mode (`CS_STATUSLINE_LIB=1`) for the shared palette and width helpers, rather than a third hand-synced copy.
+
 ## 2026.7.9
 
 Two features and a batch of TUI fixes. `cs -live` and `cs -status` add the first phase of cross-session presence: see which cs sessions are running on this machine and what each is doing, all machine-local with no networked coordination. The interactive session manager gains in-place To-Do editing and full-width date dividers, plus fixes to mouse hit-testing, narrow-window layout, narrative reading, and preview loading.
