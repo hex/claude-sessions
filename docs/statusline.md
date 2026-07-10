@@ -55,6 +55,36 @@ The `logo` badge's own boundary is the one exception, and always shows a divider
 
 Inside tmux, Claude Code mutes its own branding and any truecolor status line to a fallback palette. cs sets `CLAUDE_CODE_TMUX_TRUECOLOR=1` in claude's environment at launch (unless you set it yourself) to keep these colors at full saturation.
 
+## Subagent rows
+
+`cs-subagent-statusline` styles Claude Code's agent panel — the task tree under the prompt while subagents run — the way `cs-statusline` styles the bar. Claude Code pipes `{columns, tasks[]}` to the registered `subagentStatusLine.command` on every panel repaint; the script prints one `{"id","content"}` JSON line per row it overrides. An omitted `id` keeps that row's default rendering, which is why printing nothing is always safe.
+
+```
+⤷ ✦ Sonnet 5  bundle-recon · Spelunk CC bundle  ◔ ctx 12%  ◷ 2m14s
+⤷ ✦ Opus 4.8  code-reviewer · Review the diff  ◔ ctx 61%  ◷ 0m18s
+```
+
+Left to right: a descent glyph marking the row as spawned work, the model chip in the bar's periwinkle, the agent's name (falling back to its `type`), the description, the agent's **own** context-window usage, and time since it started. Model, context, and elapsed are the three columns Claude Code's default row (`name · description · token count`) lacks, and they are what make agents at different tiers distinguishable — a recon agent at ctx 12% and a synthesizer dying at ctx 84% otherwise look identical. The gauge escalates amber/red on the same `CS_STATUSLINE_CTX_WARN`/`CS_STATUSLINE_CTX_CRIT` thresholds the bar uses.
+
+Rows are null-when-nothing like the bar's segments: no `model` means no chip and no gauge (`contextWindowSize` arrives only once the model is resolved, Claude Code ≥ 2.1.205), a `contextWindowSize` of 0 means no gauge, no `startTime` means no clock. Model ids arrive resolved (`claude-sonnet-5`), not as the display names the main bar receives, and are matched on a prefix so dated suffixes and `[1m]` context markers resolve; an unrecognised id renders verbatim — a new model must degrade to ugly, never to invisible.
+
+A row never exceeds the payload's `columns`, because one that does wraps the panel. Parts are shed in order of what they are worth: first the description's tail, cut with a single ellipsis; then the description entirely, once its remainder falls under a small floor; then elapsed. The ctx gauge outranks all of them, because a runaway agent's percentage is the thing worth seeing. When even the core — glyph, model chip, name, gauge — will not fit, the row is not emitted at all, and Claude Code's default rendering stands; a default row beats a wrapped one. Unlike the bar, rows are not self-backgrounded pills: they sit on the terminal background inside Claude Code's own panel, so only foreground colors are used.
+
+Tabs, newlines, and carriage returns in a name or description are collapsed to spaces before the fields are packed. The pack is `jq`'s `@tsv`, which would otherwise encode them as the two-character sequences `\t` and `\n` — a transport detail that would then render literally in the panel. `@tsv` also doubles a backslash, which the reader undoes, so a Windows path in a description keeps one separator.
+
+Each row's `content` is emitted with `jq -c`, which escapes the ESC byte as the six-character sequence `\u001b`. That is the contract, not a nicety: Claude Code `JSON.parse`s every stdout line and schema-checks it against `{id, content}`, and a hand-rolled JSON string carrying a raw control byte fails that check and is silently skipped.
+
+The rest of the contract was established by reading the Claude Code bundle (2.1.206); none of it is in the public docs:
+
+- **Rows keep rendering while you view an agent's transcript.** Entering that view marks the task `retain: true` and clears its `evictAfter`, so it stays in the row set and keeps ticking.
+- **A "you are here" marker is impossible.** Claude Code passes `viewingAgentTaskId` into its own row builder but never into the command's stdin, so the script cannot know which agent you are looking at — and does not pretend to.
+- **The command is not invoked when the last agent exits.** The invoker short-circuits on an empty row set before running it, so this script can never clear state it wrote. That is why the rows feed nothing to the main bar: an `agents` segment sourced from here would stay stale forever after the last agent exits.
+- **The registration is read at Claude Code startup.** `cs -statusline enable` registers `subagentStatusLine` alongside `statusLine`, and Claude Code must be restarted before a new registration takes effect; a mid-session edit is silently ignored.
+
+Failure posture matches the bar: fail-open, always exit 0, print nothing rather than something wrong. Claude Code kills the command at 5 seconds; the hot path is one `jq` pass over stdin and one `jq -c` per row — no git, no network, no file reads. `CS_SUBAGENT_STATUSLINE_DISABLE=1` silences the rows without touching the bar.
+
+`bin/cs-subagent-statusline` sources `bin/cs-statusline` in library mode (`CS_STATUSLINE_LIB=1`) for the color ladder, palette, and width measurement — the alternative was a third hand-synced copy of the palette, which would rot — so it must sit beside `cs-statusline`; `install.sh` installs both into the same directory.
+
 ## Full-width gradient
 
 In truecolor mode the bar stretches to the terminal's full width: after the last segment, a trailing run of cells fades from that segment's own background into the terminal's real background color, so the bar reads as floating rather than stopping short in a sea of blank terminal.
@@ -78,6 +108,9 @@ Only the OSC 11 path ever learns the terminal's actual background RGB — the `C
 # Disable entirely (prints nothing)
 export CS_STATUSLINE_DISABLE=1
 
+# Disable only the agent-panel rows (the bar is untouched)
+export CS_SUBAGENT_STATUSLINE_DISABLE=1
+
 # Choose and order segments
 export CS_STATUSLINE_SEGMENTS="session,ctx,git,limits"
 
@@ -93,16 +126,18 @@ export NO_COLOR=1
 
 ## Install, uninstall, doctor
 
-`install.sh` deploys the `cs-statusline` binary to `~/.local/bin` unconditionally, but the status bar itself is claimed only with consent: with a terminal attached the installer asks before registering (default yes; it also asks before replacing an existing status line), and a non-interactive install registers nothing and prints how to enable later. Turn it on or off any time:
+`install.sh` deploys the `cs-statusline` and `cs-subagent-statusline` binaries to `~/.local/bin` unconditionally, but the status bar itself is claimed only with consent: with a terminal attached the installer asks before registering (default yes; it also asks before replacing an existing status line), and a non-interactive install registers nothing and prints how to enable later. The installer's prompt claims only the bar; the [subagent rows](#subagent-rows) are registered by `cs -statusline enable`. Turn both on or off any time:
 
 ```bash
-cs -statusline enable    # register (overwrites the current status line; the command is your consent)
-cs -statusline disable   # remove the registration, only if it points at cs-statusline
+cs -statusline enable    # register bar + subagent rows (overwrites the current status line; the command is your consent)
+cs -statusline disable   # remove both registrations, each only if it points at the cs binary
 ```
 
-`cs -uninstall` removes the binary and strips the `statusLine` registration only when it points at `cs-statusline`; a status line you configured yourself is left untouched.
+Claude Code reads both registrations at startup, so `enable` takes effect after the next restart — the command says so when it runs.
 
-`cs -doctor` includes a Statusline check: OK when registered and executable, FAIL when the registration points at a missing binary, and informational otherwise (the status line is optional).
+`cs -uninstall` removes both binaries and strips the `statusLine` and `subagentStatusLine` registrations only when they point at the cs binaries; a status line or row renderer you configured yourself is left untouched.
+
+`cs -doctor` includes a Statusline check and a parallel Subagent statusline check: OK when registered and executable, FAIL when a registration points at a missing binary, and informational otherwise (both are optional).
 
 ## Design notes
 

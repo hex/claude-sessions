@@ -1,0 +1,225 @@
+#!/usr/bin/env bash
+# ABOUTME: Claude Code subagentStatusLine command — one styled row per running subagent
+# ABOUTME: Reads {columns,tasks[]} on stdin, prints one {"id","content"} JSON line per row
+
+# cs-statusline owns the palette, the color ladder, and width measurement.
+# Sourcing it in library mode defines them without rendering the main bar, so
+# the two scripts cannot drift. It also applies `set -uo pipefail`.
+CS_STATUSLINE_LIB=1 . "$(dirname "$0")/cs-statusline" 2>/dev/null || exit 0
+
+# U+2937 arrow pointing rightwards then curving downwards: the row hangs off the
+# main thread. ICON_MODEL (✦), ICON_CTX (◔) and ICON_5H (◷) come from the source.
+ICON_ROW=$'\xe2\xa4\xb7 '
+
+_STDIN=""
+_TASKS=""
+
+_read_all_stdin() {
+    _STDIN=""
+    [ -t 0 ] && return 0
+    IFS= read -r -d '' _STDIN 2>/dev/null || true
+}
+
+# One jq pass: every field the rows need, one TSV line per task. Tabs, newlines
+# and carriage returns are collapsed to spaces before @tsv sees them, because
+# @tsv would otherwise encode them as the two-character sequences \t \n \r and
+# those escapes would render literally in the panel. A backslash still gets
+# doubled by @tsv; _unescape_tsv undoes that on the way out.
+# ctx% and elapsed are computed here to keep the hot path fork-free.
+# CS_SUBAGENT_NOW_MS pins the clock for tests; production uses jq's `now`.
+_parse_tasks() {
+    local input="$1"
+    command -v jq >/dev/null 2>&1 || return 1
+    [ -n "$input" ] || return 1
+    _TASKS=$(printf '%s' "$input" | jq -r --arg nowms "${CS_SUBAGENT_NOW_MS:-}" '
+        def clean: tostring | gsub("[\\t\\n\\r]"; " ");
+        ($nowms | if . == "" then (now * 1000) else tonumber end) as $now
+        | (.columns // 0) as $cols
+        | .tasks[]?
+        | [ (.id // ""),
+            ($cols | tostring),
+            (.model // ""),
+            (.name // .type // "" | clean),
+            (.description // "" | clean),
+            (if (.contextWindowSize // 0) > 0
+             then ((.tokenCount // 0) * 100 / .contextWindowSize | floor | tostring)
+             else "" end),
+            (if (.startTime // 0) > 0
+             then (($now - .startTime) / 1000 | floor | tostring)
+             else "" end)
+          ] | @tsv' 2>/dev/null) || return 1
+}
+
+# @tsv doubles a backslash so the field split stays exact. Undo it, or a path in
+# a description renders with two separators.
+_unescape_tsv() {
+    local s="$1"
+    _UNESC="${s//\\\\/\\}"
+}
+
+# Display width of everything except the description: the row's incompressible
+# core. $1 model, $2 name, $3 ctx, $4 elapsed. Sets _WIDTH.
+_fixed_width() {
+    local f="$ICON_ROW"
+    [ -n "$1" ] && f="${f}${ICON_MODEL}${1}  "
+    [ -n "$2" ] && f="${f}${2}"
+    [ -n "$3" ] && f="${f}  ${ICON_CTX}ctx ${3}%"
+    [ -n "$4" ] && f="${f}  ${ICON_5H}${4}"
+    _display_width "$f"
+}
+
+# Resolved model ids arrive here, not the display names the main bar receives.
+# Prefix matching so dated suffixes and `[1m]` context markers resolve. An
+# unrecognised id renders verbatim: a new model must degrade to ugly, not absent.
+_model_display() {
+    case "$1" in
+        "")                _MODEL="" ;;
+        claude-fable-5*)   _MODEL="Fable 5" ;;
+        claude-opus-4-8*)  _MODEL="Opus 4.8" ;;
+        claude-sonnet-5*)  _MODEL="Sonnet 5" ;;
+        claude-haiku-4-5*) _MODEL="Haiku 4.5" ;;
+        *)                 _MODEL="$1" ;;
+    esac
+}
+
+# Seconds since the agent started, as "2m14s" or "1h05m". A negative value
+# (clock skew) is rejected by the digit guard along with every non-number.
+_fmt_elapsed() {
+    _ELAPSED=""
+    case "${1:-}" in ''|*[!0-9]*) return 0 ;; esac
+    local s="$1" h m
+    if [ "$s" -ge 3600 ]; then
+        h=$((s / 3600)); m=$(((s % 3600) / 60))
+        _ELAPSED="${h}h$(printf '%02d' "$m")m"
+    else
+        m=$((s / 60))
+        _ELAPSED="${m}m$(printf '%02d' $((s % 60)))s"
+    fi
+}
+
+# jq -c escapes the ESC byte as \u001b. A hand-rolled JSON string would embed a
+# raw control character, fail Claude Code's schema check, and drop the row.
+_emit_row() {
+    jq -cn --arg id "$1" --arg content "$2" '{id: $id, content: $content}' 2>/dev/null
+}
+
+# Rows sit on the terminal background inside Claude Code's own panel, not on
+# self-backgrounded pills, so only foreground colors are used. LEVEL=plain is
+# handled here, not in _sgr, whose case falls through to basic ANSI.
+_paint() {
+    if [ "$LEVEL" = "plain" ]; then
+        _PAINTED="$1"
+        return 0
+    fi
+    _sgr 38 "$2"
+    _PAINTED=$'\033['"$_SGR"'m'"$1"$'\033[0m'
+}
+
+# Cut $1 to at most $2 display columns, marking the cut with a single ellipsis.
+# `${s%?}` removes one character (not one byte) under a UTF-8 locale, and
+# _display_width counts characters by skipping UTF-8 continuation bytes.
+_truncate() {
+    local s="$1" max="$2"
+    _display_width "$s"
+    if [ "$_WIDTH" -le "$max" ]; then
+        _TRUNC="$s"
+        return 0
+    fi
+    if [ "$max" -lt 2 ]; then
+        _TRUNC=""
+        return 0
+    fi
+    while [ -n "$s" ]; do
+        s="${s%?}"
+        _display_width "$s"
+        [ "$_WIDTH" -le $((max - 1)) ] && break
+    done
+    _TRUNC="${s}…"
+}
+
+render_rows() {
+    [ "${CS_SUBAGENT_STATUSLINE_DISABLE:-}" = "1" ] && exit 0
+    _read_all_stdin
+    _parse_tasks "$_STDIN" || exit 0
+    [ -n "$_TASKS" ] || exit 0
+    _detect_level
+
+    # Peel the seven @tsv fields on tab with parameter expansion. `IFS=$'\t'
+    # read` cannot be used: tab is IFS whitespace, so a run of tabs (an empty
+    # field like a missing model) collapses to one delimiter and shifts every
+    # later column left. @tsv guarantees no literal tab survives inside a value,
+    # so splitting on tab is exact and fork-free.
+    local tab=$'\t'
+    local line id cols model name desc ctx elapsed
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        id="${line%%$tab*}";    line="${line#*$tab}"
+        cols="${line%%$tab*}";  line="${line#*$tab}"
+        model="${line%%$tab*}"; line="${line#*$tab}"
+        name="${line%%$tab*}";  line="${line#*$tab}"
+        desc="${line%%$tab*}";  line="${line#*$tab}"
+        ctx="${line%%$tab*}";   line="${line#*$tab}"
+        elapsed="$line"
+        [ -n "$id" ] || continue
+
+        _model_display "$model"
+        _fmt_elapsed "$elapsed"
+        _unescape_tsv "$name"; name="$_UNESC"
+        _unescape_tsv "$desc"; desc="$_UNESC"
+
+        # A non-numeric columns is not a budget, it is an unknown; treat it as
+        # absent rather than letting `[ -gt ]` complain to stderr.
+        case "$cols" in ''|*[!0-9]*) cols=0 ;; esac
+
+        # A row wider than its budget wraps the agent panel. Shed the elastic
+        # parts in order of what is worth least: the description's tail, then
+        # the description, then elapsed. If the core still does not fit there is
+        # nothing left to give, and Claude Code's own default row beats a
+        # wrapped one.
+        if [ "$cols" -gt 0 ]; then
+            _fixed_width "$_MODEL" "$name" "$ctx" "$_ELAPSED"
+            if [ "$_WIDTH" -gt "$cols" ]; then
+                _ELAPSED=""
+                _fixed_width "$_MODEL" "$name" "$ctx" ""
+                [ "$_WIDTH" -gt "$cols" ] && continue
+            fi
+            if [ -n "$desc" ]; then
+                local avail=$((cols - _WIDTH - 3))   # 3 = the " · " that joins it
+                if [ "$avail" -lt 7 ]; then
+                    desc=""
+                else
+                    _truncate "$desc" "$avail"
+                    desc="$_TRUNC"
+                fi
+            fi
+        fi
+
+        local content="$ICON_ROW"
+        if [ -n "$_MODEL" ]; then
+            _paint "${ICON_MODEL}${_MODEL}" periwinkle
+            content="${content}${_PAINTED}  "
+        fi
+        if [ -n "$name" ]; then
+            _paint "$name" chiptext
+            content="${content}${_PAINTED}"
+        fi
+        if [ -n "$desc" ]; then
+            _paint "· ${desc}" hairline
+            content="${content} ${_PAINTED}"
+        fi
+        if [ -n "$ctx" ]; then
+            _thresh_color "$ctx" "${CS_STATUSLINE_CTX_WARN:-50}" "${CS_STATUSLINE_CTX_CRIT:-80}" hairline
+            _paint "${ICON_CTX}ctx ${ctx}%" "$_COLOR"
+            content="${content}  ${_PAINTED}"
+        fi
+        if [ -n "$_ELAPSED" ]; then
+            _paint "${ICON_5H}${_ELAPSED}" hairline
+            content="${content}  ${_PAINTED}"
+        fi
+
+        _emit_row "$id" "$content"
+    done <<< "$_TASKS"
+}
+
+render_rows "$@"
+exit 0

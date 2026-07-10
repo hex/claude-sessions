@@ -166,7 +166,7 @@ run_uninstall() {
     local zsh_completion_dir="$HOME/.zsh/completions"
 
     warn "This will uninstall cs and all its components:"
-    echo "  - $install_dir/cs, $install_dir/cs-secrets, $install_dir/cs-statusline, $install_dir/cs-tui"
+    echo "  - $install_dir/cs, $install_dir/cs-secrets, $install_dir/cs-statusline, $install_dir/cs-subagent-statusline, $install_dir/cs-tui"
     echo "  - Hooks in $hooks_dir/"
     echo "  - Commands in $commands_dir/"
     echo "  - Skills in $skills_dir/"
@@ -200,10 +200,21 @@ run_uninstall() {
         info "Removed $install_dir/cs-statusline"
     fi
 
+    if [ -f "$install_dir/cs-subagent-statusline" ]; then
+        rm "$install_dir/cs-subagent-statusline"
+        info "Removed $install_dir/cs-subagent-statusline"
+    fi
+
     # Remove the statusLine registration only when it points at cs-statusline;
     # a status line the user configured themselves is left untouched.
     if command -v jq >/dev/null 2>&1 && _strip_statusline_registration "$settings_file"; then
         info "Removed cs-statusline registration from settings.json"
+    fi
+
+    # Remove the subagentStatusLine registration only when it points at
+    # cs-subagent-statusline; a row renderer the user configured is left alone.
+    if command -v jq >/dev/null 2>&1 && _strip_subagent_statusline_registration "$settings_file"; then
+        info "Removed cs-subagent-statusline registration from settings.json"
     fi
 
     if [ -f "$install_dir/cs-tui" ]; then

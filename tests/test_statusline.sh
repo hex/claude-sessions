@@ -49,11 +49,10 @@ run_sl() {
     printf '%s' "$1" | bash "$SL"
 }
 
-# Source cs-statusline's functions without running main (the unconditional
-# `main "$@"` tail is neutralized to `:`), so internal helpers can be unit
-# tested directly instead of only through a full run_sl invocation.
+# Source cs-statusline's functions without running main, so internal helpers can
+# be unit tested directly instead of only through a full run_sl invocation.
 _load_sl_functions() {
-    eval "$(sed 's/^main "\$@"$/:/' "$SL")" 2>/dev/null
+    CS_STATUSLINE_LIB=1 . "$SL" 2>/dev/null
 }
 
 # Build a git working tree on branch main with one staged + one modified file.
@@ -1259,6 +1258,67 @@ test_notes_segment_absent_when_queue_empty() {
     assert_output_not_contains "$out" "▤" "notes segment hidden when queue empty" || return 1
 }
 
+test_library_mode_defines_helpers_without_rendering() {
+    local out
+    out=$( CS_STATUSLINE_LIB=1 . "$SL" >/dev/null 2>&1; \
+           _detect_level; \
+           _sgr 38 periwinkle; \
+           printf 'LEVEL=%s SGR=%s' "$LEVEL" "$_SGR" )
+    assert_output_contains "$out" "LEVEL=256" "library mode runs _detect_level" || return 1
+    assert_output_contains "$out" "SGR=38;5;105" "library mode exposes _sgr's periwinkle" || return 1
+}
+
+test_library_mode_prints_nothing() {
+    local out
+    out=$( CS_STATUSLINE_LIB=1 . "$SL" )
+    assert_eq "" "$out" "sourcing in library mode must not render" || return 1
+}
+
+test_executed_directly_still_renders() {
+    export NO_COLOR=1
+    local out
+    out=$(run_sl "$FIXTURE_DOCS")
+    assert_output_contains "$out" "my-session" "guard must not break direct execution" || return 1
+}
+
+test_enable_registers_both_status_lines() {
+    export CS_CLAUDE_DIR="$TEST_TMPDIR/claude"
+    mkdir -p "$CS_CLAUDE_DIR"
+    echo '{}' > "$CS_CLAUDE_DIR/settings.json"
+    bash "$CS_BIN" -statusline enable >/dev/null 2>&1
+    local sl ssl
+    sl=$(jq -r '.statusLine.command' "$CS_CLAUDE_DIR/settings.json")
+    ssl=$(jq -r '.subagentStatusLine.command' "$CS_CLAUDE_DIR/settings.json")
+    assert_output_contains "$sl" "/cs-statusline" "statusLine registered" || return 1
+    assert_output_contains "$ssl" "/cs-subagent-statusline" "subagentStatusLine registered" || return 1
+}
+
+test_disable_leaves_a_foreign_subagent_statusline_alone() {
+    export CS_CLAUDE_DIR="$TEST_TMPDIR/claude"
+    mkdir -p "$CS_CLAUDE_DIR"
+    jq -n '{subagentStatusLine: {type: "command", command: "/opt/theirs/rows.sh"}}' \
+        > "$CS_CLAUDE_DIR/settings.json"
+    bash "$CS_BIN" -statusline disable >/dev/null 2>&1
+    local ssl
+    ssl=$(jq -r '.subagentStatusLine.command' "$CS_CLAUDE_DIR/settings.json")
+    assert_eq "/opt/theirs/rows.sh" "$ssl" "a foreign row renderer is never stripped" || return 1
+}
+
+test_enable_warns_that_a_restart_is_required() {
+    export CS_CLAUDE_DIR="$TEST_TMPDIR/claude"
+    mkdir -p "$CS_CLAUDE_DIR"
+    echo '{}' > "$CS_CLAUDE_DIR/settings.json"
+    local out
+    out=$(bash "$CS_BIN" -statusline enable 2>&1)
+    assert_output_contains "$out" "restart" "enabling must mention the restart requirement" || return 1
+}
+
 run_test test_notes_segment_shows_queue_depth
 run_test test_notes_segment_absent_when_queue_empty
+run_test test_library_mode_defines_helpers_without_rendering
+run_test test_library_mode_prints_nothing
+run_test test_executed_directly_still_renders
+run_test test_enable_registers_both_status_lines
+run_test test_disable_leaves_a_foreign_subagent_statusline_alone
+run_test test_enable_warns_that_a_restart_is_required
 report_results

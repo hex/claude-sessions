@@ -77,6 +77,7 @@ RELEASES_URL="https://github.com/hex/claude-sessions/releases/download"
 CS_URL="${REPO_URL}/bin/cs"
 CS_SECRETS_URL="${REPO_URL}/bin/cs-secrets"
 CS_STATUSLINE_URL="${REPO_URL}/bin/cs-statusline"
+CS_SUBAGENT_STATUSLINE_URL="${REPO_URL}/bin/cs-subagent-statusline"
 
 # Hook scripts cs ships; deployed to HOOKS_DIR and registered in settings.json.
 # KEEP THIS LIST IN SYNC WITH bin/cs's CS_HOOKS.
@@ -209,6 +210,22 @@ else
 fi
 
 chmod +x "$INSTALL_DIR/cs-statusline"
+
+# Install cs-subagent-statusline (Claude Code agent-panel rows). It sources
+# cs-statusline for the shared palette, so the two must land in the same dir.
+installed "cs-subagent-statusline" "$INSTALL_DIR/cs-subagent-statusline"
+
+if [ "$INSTALL_METHOD" = "local" ]; then
+    cp "$SCRIPT_DIR/bin/cs-subagent-statusline" "$INSTALL_DIR/cs-subagent-statusline"
+else
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$CS_SUBAGENT_STATUSLINE_URL" -o "$INSTALL_DIR/cs-subagent-statusline" || error "Failed to download cs-subagent-statusline"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q "$CS_SUBAGENT_STATUSLINE_URL" -O "$INSTALL_DIR/cs-subagent-statusline" || error "Failed to download cs-subagent-statusline"
+    fi
+fi
+
+chmod +x "$INSTALL_DIR/cs-subagent-statusline"
 
 # Install cs-tui (interactive session manager)
 if [ "$INSTALL_METHOD" = "local" ] && [ -f "$SCRIPT_DIR/bin/cs-tui" ]; then

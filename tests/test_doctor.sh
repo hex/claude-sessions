@@ -457,6 +457,48 @@ test_doctor_statusline_no_fail_when_not_registered() {
     fi
 }
 
+test_doctor_subagent_statusline_ok_when_registered_and_executable() {
+    local fake_claude="$TEST_TMPDIR/ssl-claude"
+    local fake_bin="$TEST_TMPDIR/ssl-bin"
+    mkdir -p "$fake_claude" "$fake_bin"
+    printf '#!/bin/sh\n' > "$fake_bin/cs-subagent-statusline"
+    chmod +x "$fake_bin/cs-subagent-statusline"
+    printf '{"subagentStatusLine":{"type":"command","command":"%s"}}\n' "$fake_bin/cs-subagent-statusline" > "$fake_claude/settings.json"
+    local output
+    output=$(CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Subagent statusline" "doctor should run a Subagent statusline check" || return 1
+    if echo "$output" | grep "Subagent statusline" | grep -q "FAIL"; then
+        echo "  FAIL: Subagent statusline check failed for a healthy registration"
+        return 1
+    fi
+}
+
+test_doctor_subagent_statusline_fails_when_binary_missing() {
+    local fake_claude="$TEST_TMPDIR/ssl-claude-missing"
+    mkdir -p "$fake_claude"
+    printf '{"subagentStatusLine":{"type":"command","command":"%s"}}\n' "$TEST_TMPDIR/absent/cs-subagent-statusline" > "$fake_claude/settings.json"
+    local output
+    output=$(CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
+    if ! echo "$output" | grep "Subagent statusline" | grep -q "FAIL"; then
+        echo "  FAIL: missing cs-subagent-statusline binary not reported as FAIL"
+        echo "$output" | grep "Subagent statusline" || echo "  (no Subagent statusline line at all)"
+        return 1
+    fi
+}
+
+test_doctor_subagent_statusline_no_fail_when_not_registered() {
+    local fake_claude="$TEST_TMPDIR/ssl-claude-none"
+    mkdir -p "$fake_claude"
+    echo '{}' > "$fake_claude/settings.json"
+    local output
+    output=$(CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Subagent statusline" "doctor should mention the Subagent statusline check even when unregistered" || return 1
+    if echo "$output" | grep "Subagent statusline" | grep -q "FAIL"; then
+        echo "  FAIL: unregistered subagent statusline must not FAIL (it is optional)"
+        return 1
+    fi
+}
+
 echo "Running doctor tests..."
 run_test test_doctor_subcommand_exists
 run_test test_doctor_runs_default_checks_from_session
@@ -484,6 +526,9 @@ run_test test_doctor_skips_inline_shell_hook_commands
 run_test test_doctor_statusline_ok_when_registered_and_executable
 run_test test_doctor_statusline_fails_when_binary_missing
 run_test test_doctor_statusline_no_fail_when_not_registered
+run_test test_doctor_subagent_statusline_ok_when_registered_and_executable
+run_test test_doctor_subagent_statusline_fails_when_binary_missing
+run_test test_doctor_subagent_statusline_no_fail_when_not_registered
 run_test test_doctor_runs_token_cost_check
 run_test test_doctor_token_cost_sums_jsonl
 run_test test_doctor_token_cost_handles_no_transcripts
