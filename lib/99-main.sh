@@ -115,6 +115,11 @@ main() {
             run_queue "$@"
             return 0
             ;;
+        -status)
+            shift
+            run_status "$@"
+            return 0
+            ;;
         -doctor|-diag)
             run_doctor
             return $?

@@ -31,6 +31,7 @@ Commands:
   -adopt <name>       Adopt current directory as a cs session
   -whoami             Show the current actor (for shared, multi-person sessions)
   -who                Show who contributed to shared memory/narrative (git history)
+  -status "<text>"    Set this session's advertised status (also: -status, -status --clear)
   -remove, -rm <name> Remove a session
   -secrets <cmd>      Manage current session secrets (requires CLAUDE_SESSION_NAME)
   -update             Update cs to latest version
