@@ -28,6 +28,7 @@
 | `lib/40-state.sh` | modify | add `session_actor_slug` (per-session actor, bypassing `$CS_ACTOR`) |
 | `lib/65-sessions.sh` | modify | add `_humanize_secs` + `cmd_live` (`cs -live`) |
 | `lib/99-main.sh` | modify | wire `-status` and `-live` in the top-level arm |
+| `lib/10-help.sh` | modify | add `-status` (Task 1) and `-live` (Task 2) to `show_help` |
 | `completions/_cs`, `completions/cs.bash` | modify | add `-live`, `-status` to the global-flag lists |
 | `README.md` | modify | document both commands |
 | `bin/cs` | regenerated | `./build.sh` output, committed each lib-touching task |
@@ -41,6 +42,7 @@
 **Files:**
 - Create: `lib/56-presence.sh`
 - Modify: `lib/99-main.sh` (top-level arm, before the `-*)` catch-all at ~`:136`)
+- Modify: `lib/10-help.sh` (add the `-status` line to `show_help`)
 - Regenerate + commit: `bin/cs` (via `./build.sh`)
 - Test: `tests/test_presence.sh`
 
@@ -90,6 +92,9 @@ test_status_set_writes_presence_file() {
     assert_eq "1" "$(grep -c . "$(PFILE)")" "presence is a single line" || return 1
 }
 
+# assert_file_contains matches with grep BRE; the string below has no BRE
+# metacharacters, so it matches literally. The point is to prove quotes and '='
+# survive the write (unlike _read_local_state, which would strip the quotes).
 test_status_preserves_quotes_and_equals() {
     "$CS_BIN" -status 'fix the "auth" bug = hard' >/dev/null 2>&1
     assert_file_contains "$(PFILE)" 'fix the "auth" bug = hard' "special chars preserved verbatim" || return 1
@@ -138,6 +143,25 @@ test_status_requires_session() {
     assert_output_contains "$out" "session" "explains it needs a session" || return 1
 }
 
+test_status_set_leaves_no_temp() {
+    "$CS_BIN" -status "hello" >/dev/null 2>&1
+    assert_file_not_exists "$CLAUDE_SESSION_META_DIR/local/presence.tmp" "no temp file remains after set" || return 1
+}
+
+test_status_clear_reverts_to_objective() {
+    seed_readme "Ship the presence feature"
+    "$CS_BIN" -status "temporary note" >/dev/null 2>&1
+    "$CS_BIN" -status --clear >/dev/null 2>&1
+    local out; out="$("$CS_BIN" -status 2>&1)"
+    assert_output_contains "$out" "Ship the presence feature" "clear reverts get to the README objective" || return 1
+}
+
+test_status_get_filters_readme_placeholder() {
+    printf '# test-session\n\n## Objective\n\n[Describe what you are trying to accomplish]\n' > "$CLAUDE_SESSION_DIR/.cs/README.md"
+    local out; out="$("$CS_BIN" -status 2>&1)"
+    assert_output_contains "$out" "(none)" "unfilled placeholder objective yields (none)" || return 1
+}
+
 run_test test_status_set_writes_presence_file
 run_test test_status_preserves_quotes_and_equals
 run_test test_status_joins_multiple_words
@@ -147,6 +171,9 @@ run_test test_status_get_none_when_empty
 run_test test_status_clear_removes_file
 run_test test_status_empty_string_is_usage_error
 run_test test_status_requires_session
+run_test test_status_set_leaves_no_temp
+run_test test_status_clear_reverts_to_objective
+run_test test_status_get_filters_readme_placeholder
 
 report_results
 ```
@@ -253,6 +280,20 @@ In `lib/99-main.sh`, inside the top-level `case "$cmd" in` block, add this arm i
             ;;
 ```
 
+Then add `-status` to `cs -help`. In `lib/10-help.sh`'s `show_help` heredoc, insert the `-status` line after the `-who` line:
+
+Change:
+```
+  -who                Show who contributed to shared memory/narrative (git history)
+  -remove, -rm <name> Remove a session
+```
+to:
+```
+  -who                Show who contributed to shared memory/narrative (git history)
+  -status "<text>"    Set this session's advertised status (also: -status, -status --clear)
+  -remove, -rm <name> Remove a session
+```
+
 - [ ] **Step 5: Rebuild `bin/cs`**
 
 Run: `./build.sh`
@@ -266,7 +307,7 @@ Expected: PASS — all 9 tests OK.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add lib/56-presence.sh lib/99-main.sh bin/cs tests/test_presence.sh
+git add lib/56-presence.sh lib/99-main.sh lib/10-help.sh bin/cs tests/test_presence.sh
 git commit -m "feat(cs): add cs -status (per-session presence)"
 ```
 
@@ -279,6 +320,7 @@ git commit -m "feat(cs): add cs -status (per-session presence)"
 - Modify: `lib/40-state.sh` (add `session_actor_slug`)
 - Modify: `lib/65-sessions.sh` (add `_humanize_secs`, `cmd_live`)
 - Modify: `lib/99-main.sh` (top-level arm: wire `-live`)
+- Modify: `lib/10-help.sh` (add the `-live` line to `show_help`)
 - Regenerate + commit: `bin/cs` (via `./build.sh`)
 - Test: `tests/test_live.sh`
 
@@ -300,40 +342,46 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/test_lib.sh"
 CS_BIN="$SCRIPT_DIR/../bin/cs"
 
-# PIDs of sleepers we start so we can reap them in teardown.
-LIVE_PIDS=()
-
 setup() {
     TEST_TMPDIR="$(mktemp -d)"
     export CS_SESSIONS_ROOT="$TEST_TMPDIR/sessions"
     export CLAUDE_CODE_BIN="echo"
     mkdir -p "$CS_SESSIONS_ROOT"
-    LIVE_PIDS=()
     unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR CS_ACTOR 2>/dev/null || true
 }
 teardown() {
-    local p
-    for p in "${LIVE_PIDS[@]:-}"; do [ -n "$p" ] && kill "$p" 2>/dev/null || true; done
+    # Reap sleepers by reading PIDs from the lock files the fixtures wrote (a
+    # subshell-safe alternative to a shell array), then drop the temp tree.
+    local lf pid
+    if [ -n "${CS_SESSIONS_ROOT:-}" ]; then
+        for lf in "$CS_SESSIONS_ROOT"/*/.cs/session.lock; do
+            [ -f "$lf" ] || continue
+            pid="$(cat "$lf" 2>/dev/null || true)"
+            [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+        done
+    fi
     [ -n "${TEST_TMPDIR:-}" ] && [ -d "$TEST_TMPDIR" ] && rm -rf "$TEST_TMPDIR"
 }
 
-# Make a session dir that counts as live: real .cs/, lock holding a running PID.
+# Create a live session: real .cs/, lock holding a RUNNING pid. NEVER call this
+# via $(...) — the backgrounded sleep inherits the command-substitution's pipe
+# write end, so the substitution would block ~300s. Call it directly; the path
+# is deterministic ($CS_SESSIONS_ROOT/<name>).
 make_live_session() { # name
-    local sdir="$CS_SESSIONS_ROOT/$1"
+    local sdir="$CS_SESSIONS_ROOT/$1" p
     mkdir -p "$sdir/.cs/local"
-    sleep 300 & local p=$!
-    LIVE_PIDS+=("$p")
+    sleep 300 >/dev/null 2>&1 &
+    p=$!
     printf '%s\n' "$p" > "$sdir/.cs/session.lock"
-    printf '%s' "$sdir"
 }
-# Make a session dir with a lock holding a dead PID.
+# Create a session whose lock holds a dead pid (started, then killed+reaped).
 make_dead_session() { # name
-    local sdir="$CS_SESSIONS_ROOT/$1"
+    local sdir="$CS_SESSIONS_ROOT/$1" p
     mkdir -p "$sdir/.cs/local"
-    sleep 300 & local p=$!
+    sleep 300 >/dev/null 2>&1 &
+    p=$!
     kill "$p" 2>/dev/null; wait "$p" 2>/dev/null || true
     printf '%s\n' "$p" > "$sdir/.cs/session.lock"
-    printf '%s' "$sdir"
 }
 
 test_live_includes_live_excludes_dead() {
@@ -346,22 +394,22 @@ test_live_includes_live_excludes_dead() {
 }
 
 test_live_shows_presence_status() {
-    local sdir; sdir="$(make_live_session busy-one)"
-    printf 'wiring the mailbox\n' > "$sdir/.cs/local/presence"
+    make_live_session busy-one
+    printf 'wiring the mailbox\n' > "$CS_SESSIONS_ROOT/busy-one/.cs/local/presence"
     local out; out="$("$CS_BIN" -live 2>&1)"
     assert_output_contains "$out" "wiring the mailbox" "status column shows presence" || return 1
 }
 
 test_live_falls_back_to_readme_objective() {
-    local sdir; sdir="$(make_live_session obj-one)"
-    printf '# obj-one\n\n## Objective\n\nShip presence\n' > "$sdir/.cs/README.md"
+    make_live_session obj-one
+    printf '# obj-one\n\n## Objective\n\nShip presence\n' > "$CS_SESSIONS_ROOT/obj-one/.cs/README.md"
     local out; out="$("$CS_BIN" -live 2>&1)"
     assert_output_contains "$out" "Ship presence" "status falls back to objective" || return 1
 }
 
 test_live_filters_readme_placeholder() {
-    local sdir; sdir="$(make_live_session ph-one)"
-    printf '# ph-one\n\n## Objective\n\n[Describe what you are trying to accomplish]\n' > "$sdir/.cs/README.md"
+    make_live_session ph-one
+    printf '# ph-one\n\n## Objective\n\n[Describe what you are trying to accomplish]\n' > "$CS_SESSIONS_ROOT/ph-one/.cs/README.md"
     local out; out="$("$CS_BIN" -live 2>&1)"
     case "$out" in *Describe*) echo "  FAIL: placeholder shown as status"; return 1;; esac
     return 0
@@ -376,8 +424,8 @@ test_live_marks_current_session() {
 }
 
 test_live_actor_is_sessions_own_not_invoker() {
-    local sdir; sdir="$(make_live_session actor-one)"
-    printf 'alice@example.com\n' > "$sdir/.cs/local/identity"
+    make_live_session actor-one
+    printf 'alice@example.com\n' > "$CS_SESSIONS_ROOT/actor-one/.cs/local/identity"
     export CS_ACTOR="bob@invoker.com"
     local out; out="$("$CS_BIN" -live 2>&1)"
     assert_output_contains "$out" "alice" "row shows the session's own actor" || return 1
@@ -386,9 +434,44 @@ test_live_actor_is_sessions_own_not_invoker() {
 }
 
 test_live_none_message_when_no_live() {
-    make_dead_session only-dead >/dev/null
+    make_dead_session only-dead
     local out; out="$("$CS_BIN" -live 2>&1)"
     assert_output_contains "$out" "No other live cs sessions" "prints the empty message" || return 1
+}
+
+test_live_marks_current_via_symlink() {
+    # Reached through a symlink; the marker matches by CLAUDE_SESSION_NAME
+    # (basename), not by resolved path, so the row is still marked.
+    local target="$TEST_TMPDIR/real-target" p
+    mkdir -p "$target/.cs/local"
+    sleep 300 >/dev/null 2>&1 &
+    p=$!
+    printf '%s\n' "$p" > "$target/.cs/session.lock"
+    ln -s "$target" "$CS_SESSIONS_ROOT/linked-one"
+    export CLAUDE_SESSION_NAME="linked-one"
+    export CLAUDE_SESSION_DIR="$target"   # resolved path, differs from the symlink path
+    local out; out="$("$CS_BIN" -live 2>&1)"
+    kill "$p" 2>/dev/null || true
+    assert_output_contains "$out" "(this session)" "symlinked current session marked by name" || return 1
+}
+
+test_live_uptime_from_lock_mtime() {
+    make_live_session up-one
+    local lock="$CS_SESSIONS_ROOT/up-one/.cs/session.lock"
+    # Back-date the lock ~2h. BSD: touch -A -HHMMSS; GNU: touch -d "2 hours ago".
+    if ! touch -A -020000 "$lock" 2>/dev/null; then
+        touch -d "2 hours ago" "$lock" 2>/dev/null || true
+    fi
+    local out; out="$("$CS_BIN" -live 2>&1)"
+    assert_output_contains "$out" "2h" "uptime reflects the lock mtime (~2h)" || return 1
+}
+
+test_live_empty_root_message_and_exit0() {
+    rm -rf "$CS_SESSIONS_ROOT"   # exercise the [ ! -d "$SESSIONS_ROOT" ] branch
+    local out rc
+    out="$("$CS_BIN" -live 2>&1)"; rc=$?
+    assert_output_contains "$out" "No other live cs sessions" "empty root prints the message" || return 1
+    assert_eq "0" "$rc" "empty root exits 0" || return 1
 }
 
 run_test test_live_includes_live_excludes_dead
@@ -396,7 +479,10 @@ run_test test_live_shows_presence_status
 run_test test_live_falls_back_to_readme_objective
 run_test test_live_filters_readme_placeholder
 run_test test_live_marks_current_session
+run_test test_live_marks_current_via_symlink
 run_test test_live_actor_is_sessions_own_not_invoker
+run_test test_live_uptime_from_lock_mtime
+run_test test_live_empty_root_message_and_exit0
 run_test test_live_none_message_when_no_live
 
 report_results
@@ -517,7 +603,7 @@ cmd_live() {
 }
 ```
 
-> Note on `${GREEN}`: confirm a `GREEN` color var exists in `lib/05-term.sh`. If it does not, use an existing one (e.g. `${GOLD}` for the dot) or add `GREEN` alongside the other palette vars — do NOT reference an undefined variable (it would print empty, harmless, but prefer a real one). The test asserts on the text fields, not color, so either choice passes.
+> `${GREEN}` exists in `lib/05-term.sh` (alongside `GOLD`, `COMMENT`, `NC`), and every palette var renders empty under a non-TTY, so test assertions see plain text.
 
 - [ ] **Step 6: Wire `-live` into the top-level dispatch**
 
@@ -530,6 +616,20 @@ In `lib/99-main.sh`, add this arm before the `-*)` catch-all (next to `-status` 
             ;;
 ```
 
+Then add `-live` to `cs -help`. In `lib/10-help.sh`'s `show_help` heredoc, insert the `-live` line above the `-status` line added in Task 1:
+
+Change:
+```
+  -who                Show who contributed to shared memory/narrative (git history)
+  -status "<text>"    Set this session's advertised status (also: -status, -status --clear)
+```
+to:
+```
+  -who                Show who contributed to shared memory/narrative (git history)
+  -live               List sessions running right now on this machine
+  -status "<text>"    Set this session's advertised status (also: -status, -status --clear)
+```
+
 - [ ] **Step 7: Rebuild and test**
 
 Run: `./build.sh && bash tests/test_live.sh`
@@ -538,7 +638,7 @@ Expected: `Built bin/cs ...` then all 7 `cs -live` tests PASS. Also re-run Task 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add lib/15-lock.sh lib/40-state.sh lib/65-sessions.sh lib/99-main.sh bin/cs tests/test_live.sh
+git add lib/15-lock.sh lib/40-state.sh lib/65-sessions.sh lib/99-main.sh lib/10-help.sh bin/cs tests/test_live.sh
 git commit -m "feat(cs): add cs -live (list live sessions on this machine)"
 ```
 
@@ -550,7 +650,7 @@ git commit -m "feat(cs): add cs -live (list live sessions on this machine)"
 - Modify: `completions/_cs` (zsh global-flag list)
 - Modify: `completions/cs.bash` (bash global-flag string)
 - Modify: `README.md` (Usage block + a short subsection)
-- No `lib/` change → no `build.sh` needed.
+- No `lib/` change → no `build.sh` needed. (The `cs -help` text was already updated in Tasks 1 & 2 — do NOT touch `lib/10-help.sh` here, or you would need a rebuild + `bin/cs` commit and the "no build" claim breaks.)
 
 **Interfaces:** none produced/consumed (documentation + completion only).
 
@@ -626,12 +726,20 @@ git commit -m "docs(cs): document and complete cs -live / cs -status"
 - `cs -status` set/get/clear, multi-word, empty-error, session guard → Task 1. ✓
 - Presence file single-line under `.cs/local/`, atomic write → Task 1. ✓
 - Liveness via `.cs/session.lock` + `kill -0` → Task 2 (`session_is_live`). ✓
-- Uptime from lock mtime → Task 2 (`session_uptime_secs`). ✓
+- Uptime from lock mtime → Task 2 (`session_uptime_secs`), tested via a back-dated lock. ✓
 - Per-session actor bypassing `$CS_ACTOR` → Task 2 (`session_actor_slug`), tested. ✓
 - README objective fallback with placeholder filter → Task 1 (`_session_objective`), tested in both suites. ✓
+- Atomic write leaves no temp / clear reverts to objective / empty root / symlinked current marker → tested (Fable-mandated additions). ✓
 - No hooks changed; no seed/clear → confirmed (no hook files in any task). ✓
-- Completions + README → Task 3. ✓
+- Completions + README → Task 3; `cs -help` → Tasks 1 & 2. ✓
 - `build.sh` re-run + `bin/cs` committed on every lib-touching task → Tasks 1 & 2. ✓
+
+**Fable 5 plan-validation fixes folded in (verdict was EXECUTE-WITH-FIXES):**
+- CRITICAL: removed the `sdir="$(make_live_session …)"` capture that would hang ~300s (the backgrounded `sleep` inherits the command-substitution pipe) — fixtures are now called directly with deterministic paths.
+- Teardown reaps sleepers from the on-disk lock files (subshell-safe) instead of a lost `LIVE_PIDS` array.
+- Added the four spec tests that had been dropped (uptime, no-temp, clear-reverts, empty-root) plus a symlinked-current-marker test.
+- Added `-status`/`-live` to `cs -help` (repo convention: help enumerates all verbs) inside the lib-touching tasks, keeping Task 3 build-free.
+- Confirmed clean and left as-is: `GREEN` exists, no function-name collisions, dispatch wiring, bash 3.2/BSD constructs.
 
 **Placeholder scan:** none — every code and test step contains complete code.
 
