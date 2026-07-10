@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# ABOUTME: Claude Code subagentStatusLine command — one styled row per running subagent
+# ABOUTME: Reads {columns,tasks[]} on stdin, prints one {"id","content"} JSON line per row
+
+# cs-statusline owns the palette, the color ladder, and width measurement.
+# Sourcing it in library mode defines them without rendering the main bar, so
+# the two scripts cannot drift. It also applies `set -uo pipefail`.
+CS_STATUSLINE_LIB=1 . "$(dirname "$0")/cs-statusline" 2>/dev/null || exit 0
+
+# U+2937 arrow pointing rightwards then curving downwards: the row hangs off the
+# main thread. ICON_MODEL (✦), ICON_CTX (◔) and ICON_5H (◷) come from the source.
+ICON_ROW=$'\xe2\xa4\xb7 '
+
+_STDIN=""
+_TASKS=""
+
+_read_all_stdin() {
+    _STDIN=""
+    [ -t 0 ] && return 0
+    IFS= read -r -d '' _STDIN 2>/dev/null || true
+}
+
+# One jq pass: every field the rows need, one TSV line per task. @tsv escapes
+# any literal tab or newline inside a description, so the fields stay aligned.
+# ctx% and elapsed are computed here to keep the hot path fork-free.
+# CS_SUBAGENT_NOW_MS pins the clock for tests; production uses jq's `now`.
+_parse_tasks() {
+    local input="$1"
+    command -v jq >/dev/null 2>&1 || return 1
+    [ -n "$input" ] || return 1
+    _TASKS=$(printf '%s' "$input" | jq -r --arg nowms "${CS_SUBAGENT_NOW_MS:-}" '
+        ($nowms | if . == "" then (now * 1000) else tonumber end) as $now
+        | (.columns // 0) as $cols
+        | .tasks[]?
+        | [ (.id // ""),
+            ($cols | tostring),
+            (.model // ""),
+            (.name // .type // ""),
+            (.description // ""),
+            (if (.contextWindowSize // 0) > 0
+             then ((.tokenCount // 0) * 100 / .contextWindowSize | floor | tostring)
+             else "" end),
+            (if .startTime then (($now - .startTime) / 1000 | floor | tostring) else "" end)
+          ] | @tsv' 2>/dev/null) || return 1
+}
+
+render_rows() {
+    [ "${CS_SUBAGENT_STATUSLINE_DISABLE:-}" = "1" ] && exit 0
+    _read_all_stdin
+    _parse_tasks "$_STDIN" || exit 0
+    [ -n "$_TASKS" ] || exit 0
+    _detect_level
+}
+
+render_rows "$@"
+exit 0
