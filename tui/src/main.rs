@@ -89,41 +89,71 @@ fn restore_terminal() -> io::Result<()> {
 }
 
 fn run_event_loop(app: &mut app::App, terminal: &mut Tui) -> io::Result<app::Action> {
-    // ~10 fps idle redraw so the selection shimmer animates smoothly; input
-    // still wakes the loop immediately via poll.
-    const TICK: std::time::Duration = std::time::Duration::from_millis(100);
+    // While the user is recently active, redraw at ~10 fps so the selection
+    // shimmer animates. Once idle (see App::is_animating) the loop blocks on
+    // input instead, so an unattended TUI costs no CPU.
+    const HEARTBEAT: std::time::Duration = std::time::Duration::from_millis(100);
+    const IDLE_BLOCK: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+    // Draw the first frame before waiting for input.
+    app.drain_previews();
+    terminal.draw(|frame| ui::render(app, frame))?;
+
     loop {
-        // Previews the worker finished since the last frame. The idle redraw
-        // below means a result is on screen within one tick of arriving.
-        app.drain_previews();
+        let animating = app.is_animating(app.idle_elapsed());
+        let timeout = if animating { HEARTBEAT } else { IDLE_BLOCK };
+        let mut redraw = false;
 
-        terminal.draw(|frame| ui::render(app, frame))?;
-
-        if event::poll(TICK)? {
-            match event::read()? {
-                Event::Key(key) => {
-                    if key.kind == KeyEventKind::Press {
-                        let action = app.handle_key(key);
+        if event::poll(timeout)? {
+            // Coalesce every queued event before painting once, so a mouse-motion
+            // storm or a key-repeat backlog collapses into a single frame instead
+            // of one redraw (and one input-to-paint lag) per event.
+            loop {
+                redraw = true;
+                match event::read()? {
+                    Event::Key(key) => {
+                        if key.kind == KeyEventKind::Press {
+                            app.note_input();
+                            let action = app.handle_key(key);
+                            match action {
+                                app::Action::Quit | app::Action::Open(_) | app::Action::ForceOpen(_) => return Ok(action),
+                                app::Action::None => {}
+                            }
+                        }
+                    }
+                    Event::Mouse(mouse) => {
+                        app.note_input();
+                        let action = app.handle_mouse(mouse);
                         match action {
                             app::Action::Quit | app::Action::Open(_) | app::Action::ForceOpen(_) => return Ok(action),
                             app::Action::None => {}
                         }
                     }
+                    _ => {}
                 }
-                Event::Mouse(mouse) => {
-                    let action = app.handle_mouse(mouse);
-                    match action {
-                        app::Action::Quit | app::Action::Open(_) | app::Action::ForceOpen(_) => return Ok(action),
-                        app::Action::None => {}
-                    }
+                if !event::poll(std::time::Duration::ZERO)? {
+                    break;
                 }
-                _ => {}
             }
+        } else if animating {
+            // Heartbeat elapsed with no input: advance the shimmer and countdowns.
+            redraw = true;
         }
 
-        // Expire timed states
-        app.expire_status();
-        app.expire_flashes();
-        app.expire_peek();
+        // Timed states advance on every wake; any change means repaint.
+        if app.expire_status() {
+            redraw = true;
+        }
+        if app.expire_flashes() {
+            redraw = true;
+        }
+        if app.expire_peek() {
+            redraw = true;
+        }
+
+        if redraw {
+            app.drain_previews();
+            terminal.draw(|frame| ui::render(app, frame))?;
+        }
     }
 }
