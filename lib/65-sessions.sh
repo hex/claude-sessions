@@ -267,3 +267,47 @@ remove_session() {
 # Strip the statusLine registration when (and only when) it points at
 # cs-statusline; a status line the user configured themselves is left alone.
 # Returns 0 when stripped, 1 when absent or foreign, 2 when the write failed.
+
+# Compact duration string from seconds: 45s, 12m, 3h, 2d. Arg: secs.
+_humanize_secs() {  # secs
+    local s="$1"
+    case "$s" in ''|*[!0-9]*) echo "0s"; return 0;; esac
+    if   [ "$s" -lt 60 ];    then echo "${s}s"
+    elif [ "$s" -lt 3600 ];  then echo "$(( s / 60 ))m"
+    elif [ "$s" -lt 86400 ]; then echo "$(( s / 3600 ))h"
+    else echo "$(( s / 86400 ))d"
+    fi
+}
+
+# List cs sessions whose process is currently alive on THIS machine.
+cmd_live() {
+    if [ ! -d "$SESSIONS_ROOT" ]; then
+        echo "No other live cs sessions."
+        return 0
+    fi
+    local now current others=0
+    now="$(date +%s)"
+    current="${CLAUDE_SESSION_NAME:-}"
+
+    local dir name meta actor up status
+    while IFS= read -r -d '' dir; do
+        is_session_dir "$dir" || continue
+        meta="$dir/.cs"
+        session_is_live "$meta" || continue
+        name="$(basename "$dir")"
+        actor="$(session_actor_slug "$dir")"
+        up="$(_humanize_secs "$(session_uptime_secs "$meta" "$now")")"
+        if [ "$name" = "$current" ]; then
+            status="(this session)"
+        else
+            others=$(( others + 1 ))
+            status="$(session_status "$dir")"
+        fi
+        printf "${GREEN}●${NC} ${GOLD}%-18s${NC} ${COMMENT}%-10s %-5s${NC} %s\n" \
+            "$name" "$actor" "$up" "$status"
+    done < <(find "$SESSIONS_ROOT" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) -print0 | sort -z)
+
+    if [ "$others" -eq 0 ]; then
+        echo "No other live cs sessions."
+    fi
+}

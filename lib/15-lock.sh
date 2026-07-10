@@ -80,3 +80,38 @@ release_session_lock() {
     fi
 }
 
+# Print the PID recorded in a session's lock file (empty if none). Arg: meta_dir.
+read_lock_pid() {  # meta_dir
+    local f="$1/session.lock"
+    [ -f "$f" ] || return 0
+    cat "$f" 2>/dev/null || true
+}
+
+# True (exit 0) when a session's process is currently alive on this machine.
+# Arg: meta_dir (the session's .cs dir).
+session_is_live() {  # meta_dir
+    local pid
+    pid="$(read_lock_pid "$1")"
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+
+# Epoch mtime of a file (BSD/GNU stat), 0 on error. Arg: path.
+_epoch_mtime() {  # path
+    if [[ "${OSTYPE:-}" == darwin* ]]; then
+        stat -f %m "$1" 2>/dev/null || echo 0
+    else
+        stat -c %Y "$1" 2>/dev/null || echo 0
+    fi
+}
+
+# Seconds since a session was last launched (its lock file's mtime).
+# Args: meta_dir, now_epoch. Prints 0 if the lock is absent/unreadable.
+session_uptime_secs() {  # meta_dir, now_epoch
+    local f="$1/session.lock" now="$2" started
+    [ -f "$f" ] || { echo 0; return 0; }
+    started="$(_epoch_mtime "$f")"
+    case "$started" in ''|*[!0-9]*) echo 0; return 0;; esac
+    [ "$started" -gt 0 ] || { echo 0; return 0; }
+    echo $(( now - started ))
+}
+

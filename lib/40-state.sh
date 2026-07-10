@@ -148,6 +148,19 @@ cs_actor_slug() {
     _slugify "$raw"
 }
 
+# Resolve a SPECIFIC session's actor slug from its own dir, bypassing $CS_ACTOR
+# (which cs_actor_slug honours first and would otherwise stamp the caller's
+# identity onto every 'cs -live' row). Arg: session_dir (session root).
+# Falls back to git config in that dir, then 'unknown'. Always slugified.
+session_actor_slug() {  # session_dir
+    local session_dir="$1" raw="" id_file="$1/.cs/local/identity"
+    if [ -f "$id_file" ]; then IFS= read -r raw < "$id_file" || true; fi
+    [ -n "$raw" ] || raw="$(git -C "$session_dir" config user.email 2>/dev/null || true)"
+    [ -n "$raw" ] || raw="$(git -C "$session_dir" config user.name 2>/dev/null || true)"
+    [ -n "$raw" ] || raw="unknown"
+    _slugify "$raw"
+}
+
 # Print the resolved actor slug; warn if the pinned local identity disagrees with git.
 cmd_whoami() {
     echo "actor: $(cs_actor_slug)"

@@ -323,6 +323,7 @@ Commands:
   -adopt <name>       Adopt current directory as a cs session
   -whoami             Show the current actor (for shared, multi-person sessions)
   -who                Show who contributed to shared memory/narrative (git history)
+  -live               List sessions running right now on this machine
   -status "<text>"    Set this session's advertised status (also: -status, -status --clear)
   -remove, -rm <name> Remove a session
   -secrets <cmd>      Manage current session secrets (requires CLAUDE_SESSION_NAME)
@@ -466,6 +467,41 @@ release_session_lock() {
             rm -f "$lock_file"
         fi
     fi
+}
+
+# Print the PID recorded in a session's lock file (empty if none). Arg: meta_dir.
+read_lock_pid() {  # meta_dir
+    local f="$1/session.lock"
+    [ -f "$f" ] || return 0
+    cat "$f" 2>/dev/null || true
+}
+
+# True (exit 0) when a session's process is currently alive on this machine.
+# Arg: meta_dir (the session's .cs dir).
+session_is_live() {  # meta_dir
+    local pid
+    pid="$(read_lock_pid "$1")"
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+
+# Epoch mtime of a file (BSD/GNU stat), 0 on error. Arg: path.
+_epoch_mtime() {  # path
+    if [[ "${OSTYPE:-}" == darwin* ]]; then
+        stat -f %m "$1" 2>/dev/null || echo 0
+    else
+        stat -c %Y "$1" 2>/dev/null || echo 0
+    fi
+}
+
+# Seconds since a session was last launched (its lock file's mtime).
+# Args: meta_dir, now_epoch. Prints 0 if the lock is absent/unreadable.
+session_uptime_secs() {  # meta_dir, now_epoch
+    local f="$1/session.lock" now="$2" started
+    [ -f "$f" ] || { echo 0; return 0; }
+    started="$(_epoch_mtime "$f")"
+    case "$started" in ''|*[!0-9]*) echo 0; return 0;; esac
+    [ "$started" -gt 0 ] || { echo 0; return 0; }
+    echo $(( now - started ))
 }
 
 # --- Release verification ---
@@ -1387,6 +1423,19 @@ cs_actor_slug() {
         [ -z "$raw" ] && raw=$(git -C "$gitdir" config user.name 2>/dev/null || true)
     fi
     [ -z "$raw" ] && raw="unknown"
+    _slugify "$raw"
+}
+
+# Resolve a SPECIFIC session's actor slug from its own dir, bypassing $CS_ACTOR
+# (which cs_actor_slug honours first and would otherwise stamp the caller's
+# identity onto every 'cs -live' row). Arg: session_dir (session root).
+# Falls back to git config in that dir, then 'unknown'. Always slugified.
+session_actor_slug() {  # session_dir
+    local session_dir="$1" raw="" id_file="$1/.cs/local/identity"
+    if [ -f "$id_file" ]; then IFS= read -r raw < "$id_file" || true; fi
+    [ -n "$raw" ] || raw="$(git -C "$session_dir" config user.email 2>/dev/null || true)"
+    [ -n "$raw" ] || raw="$(git -C "$session_dir" config user.name 2>/dev/null || true)"
+    [ -n "$raw" ] || raw="unknown"
     _slugify "$raw"
 }
 
@@ -2936,6 +2985,50 @@ remove_session() {
 # Strip the statusLine registration when (and only when) it points at
 # cs-statusline; a status line the user configured themselves is left alone.
 # Returns 0 when stripped, 1 when absent or foreign, 2 when the write failed.
+
+# Compact duration string from seconds: 45s, 12m, 3h, 2d. Arg: secs.
+_humanize_secs() {  # secs
+    local s="$1"
+    case "$s" in ''|*[!0-9]*) echo "0s"; return 0;; esac
+    if   [ "$s" -lt 60 ];    then echo "${s}s"
+    elif [ "$s" -lt 3600 ];  then echo "$(( s / 60 ))m"
+    elif [ "$s" -lt 86400 ]; then echo "$(( s / 3600 ))h"
+    else echo "$(( s / 86400 ))d"
+    fi
+}
+
+# List cs sessions whose process is currently alive on THIS machine.
+cmd_live() {
+    if [ ! -d "$SESSIONS_ROOT" ]; then
+        echo "No other live cs sessions."
+        return 0
+    fi
+    local now current others=0
+    now="$(date +%s)"
+    current="${CLAUDE_SESSION_NAME:-}"
+
+    local dir name meta actor up status
+    while IFS= read -r -d '' dir; do
+        is_session_dir "$dir" || continue
+        meta="$dir/.cs"
+        session_is_live "$meta" || continue
+        name="$(basename "$dir")"
+        actor="$(session_actor_slug "$dir")"
+        up="$(_humanize_secs "$(session_uptime_secs "$meta" "$now")")"
+        if [ "$name" = "$current" ]; then
+            status="(this session)"
+        else
+            others=$(( others + 1 ))
+            status="$(session_status "$dir")"
+        fi
+        printf "${GREEN}●${NC} ${GOLD}%-18s${NC} ${COMMENT}%-10s %-5s${NC} %s\n" \
+            "$name" "$actor" "$up" "$status"
+    done < <(find "$SESSIONS_ROOT" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) -print0 | sort -z)
+
+    if [ "$others" -eq 0 ]; then
+        echo "No other live cs sessions."
+    fi
+}
 _strip_statusline_registration() {
     local settings_file="$1"
     [ -f "$settings_file" ] || return 1
@@ -3826,6 +3919,10 @@ main() {
         -status)
             shift
             run_status "$@"
+            return 0
+            ;;
+        -live)
+            cmd_live
             return 0
             ;;
         -doctor|-diag)
