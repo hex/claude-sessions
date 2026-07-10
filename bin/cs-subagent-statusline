@@ -44,12 +44,78 @@ _parse_tasks() {
           ] | @tsv' 2>/dev/null) || return 1
 }
 
+# Resolved model ids arrive here, not the display names the main bar receives.
+# Prefix matching so dated suffixes and `[1m]` context markers resolve. An
+# unrecognised id renders verbatim: a new model must degrade to ugly, not absent.
+_model_display() {
+    case "$1" in
+        "")                _MODEL="" ;;
+        claude-fable-5*)   _MODEL="Fable 5" ;;
+        claude-opus-4-8*)  _MODEL="Opus 4.8" ;;
+        claude-sonnet-5*)  _MODEL="Sonnet 5" ;;
+        claude-haiku-4-5*) _MODEL="Haiku 4.5" ;;
+        *)                 _MODEL="$1" ;;
+    esac
+}
+
+# Seconds since the agent started, as "2m14s" or "1h05m". A negative value
+# (clock skew) is rejected by the digit guard along with every non-number.
+_fmt_elapsed() {
+    _ELAPSED=""
+    case "${1:-}" in ''|*[!0-9]*) return 0 ;; esac
+    local s="$1" h m
+    if [ "$s" -ge 3600 ]; then
+        h=$((s / 3600)); m=$(((s % 3600) / 60))
+        _ELAPSED="${h}h$(printf '%02d' "$m")m"
+    else
+        m=$((s / 60))
+        _ELAPSED="${m}m$(printf '%02d' $((s % 60)))s"
+    fi
+}
+
+# jq -c escapes the ESC byte as \u001b. A hand-rolled JSON string would embed a
+# raw control character, fail Claude Code's schema check, and drop the row.
+_emit_row() {
+    jq -cn --arg id "$1" --arg content "$2" '{id: $id, content: $content}' 2>/dev/null
+}
+
 render_rows() {
     [ "${CS_SUBAGENT_STATUSLINE_DISABLE:-}" = "1" ] && exit 0
     _read_all_stdin
     _parse_tasks "$_STDIN" || exit 0
     [ -n "$_TASKS" ] || exit 0
     _detect_level
+
+    # Peel the seven @tsv fields on tab with parameter expansion. `IFS=$'\t'
+    # read` cannot be used: tab is IFS whitespace, so a run of tabs (an empty
+    # field like a missing model) collapses to one delimiter and shifts every
+    # later column left. @tsv guarantees no literal tab survives inside a value,
+    # so splitting on tab is exact and fork-free.
+    local tab=$'\t'
+    local line id cols model name desc ctx elapsed
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        id="${line%%$tab*}";    line="${line#*$tab}"
+        cols="${line%%$tab*}";  line="${line#*$tab}"
+        model="${line%%$tab*}"; line="${line#*$tab}"
+        name="${line%%$tab*}";  line="${line#*$tab}"
+        desc="${line%%$tab*}";  line="${line#*$tab}"
+        ctx="${line%%$tab*}";   line="${line#*$tab}"
+        elapsed="$line"
+        [ -n "$id" ] || continue
+
+        _model_display "$model"
+        _fmt_elapsed "$elapsed"
+
+        local content="$ICON_ROW"
+        [ -n "$_MODEL" ] && content="${content}${ICON_MODEL}${_MODEL}  "
+        [ -n "$name" ]   && content="${content}${name}"
+        [ -n "$desc" ]   && content="${content} · ${desc}"
+        [ -n "$ctx" ]    && content="${content}  ${ICON_CTX}ctx ${ctx}%"
+        [ -n "$_ELAPSED" ] && content="${content}  ${ICON_5H}${_ELAPSED}"
+
+        _emit_row "$id" "$content"
+    done <<< "$_TASKS"
 }
 
 render_rows "$@"
