@@ -333,8 +333,12 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             let mut name_lines: Vec<Line> = Vec::new();
 
             if let Some(label) = section_label {
+                // Full-width divider: "── <label> " then dashes to fill the
+                // Session column. The line is clipped to the column width by the
+                // table, so a generous fixed run reaches the right edge at any
+                // terminal size without needing the (not-yet-computed) width here.
                 name_lines.push(Line::from(Span::styled(
-                    format!("── {} ──", label),
+                    format!("── {} {}", label, "─".repeat(200)),
                     Style::default().fg(p.comment).add_modifier(Modifier::DIM),
                 )));
             }
@@ -395,10 +399,21 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
                 age_style = age_style.add_modifier(Modifier::BOLD);
             }
 
+            // On a section-start row, line 0 of every non-name column is blank so
+            // the divider reads as a pure full-width rule; the real values drop to
+            // line 1, aligning with the session name below the divider.
+            let with_lead = |line: Line<'static>| -> ratatui::text::Text<'static> {
+                if section_label.is_some() {
+                    ratatui::text::Text::from(vec![Line::from(""), line])
+                } else {
+                    ratatui::text::Text::from(line)
+                }
+            };
+
             let mut cells = vec![
                 name_cell,
-                Cell::from(created_date).style(Style::default().fg(meta_color)),
-                Cell::from(modified_rel).style(age_style),
+                Cell::from(with_lead(Line::from(created_date))).style(Style::default().fg(meta_color)),
+                Cell::from(with_lead(Line::from(modified_rel))).style(age_style),
             ];
 
             if show_secrets {
@@ -408,7 +423,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
                     String::new()
                 };
                 let secrets_line = Line::from(secrets).alignment(Alignment::Center);
-                cells.push(Cell::from(secrets_line).style(Style::default().fg(meta_color)));
+                cells.push(Cell::from(with_lead(secrets_line)).style(Style::default().fg(meta_color)));
             }
 
             if show_todos {
@@ -417,14 +432,14 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
                 } else {
                     String::new()
                 };
-                cells.push(Cell::from(todo).style(Style::default().fg(p.yellow)));
+                cells.push(Cell::from(with_lead(Line::from(todo))).style(Style::default().fg(p.yellow)));
             }
 
             if show_github {
                 let github = s.git_repo.clone().unwrap_or_default();
                 let github_color = if dimmed { p.comment } else { p.green };
                 if github.is_empty() {
-                    cells.push(Cell::from(String::new()));
+                    cells.push(Cell::from(with_lead(Line::from(String::new()))));
                 } else {
                     let repo = Line::from(vec![
                         Span::styled(
@@ -433,7 +448,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
                         ),
                         Span::styled(github, Style::default().fg(github_color)),
                     ]);
-                    cells.push(Cell::from(repo));
+                    cells.push(Cell::from(with_lead(repo)));
                 }
             }
 
@@ -1410,6 +1425,58 @@ mod tests {
     /// return the buffer as newline-joined rows.
     fn render_wide(app: &mut App) -> String {
         render_at(app, 140, 30)
+    }
+
+    #[test]
+    fn section_divider_fills_the_session_column() {
+        use std::time::{Duration, SystemTime};
+        let mut sessions = one_session();
+        sessions[0].name = "recent-session".into();
+        sessions[0].modified_ts = Some(SystemTime::now());
+        let mut old = one_session();
+        old[0].name = "legacy-session".into();
+        old[0].modified_ts = Some(SystemTime::now() - Duration::from_secs(400 * 86400));
+        sessions.push(old.into_iter().next().unwrap());
+        let mut app = App::new(sessions);
+        app.theme = Palette::dark();
+        let out = render_at(&mut app, 140, 24);
+
+        let today_row = out
+            .lines()
+            .find(|l| l.contains("Today"))
+            .expect("a Today section divider should render");
+        // The divider is now a long run of dashes filling the Session column,
+        // not the old stubby "── Today ──" whose dash runs were length 2.
+        let longest_dash_run = today_row
+            .chars()
+            .fold((0usize, 0usize), |(cur, max), c| {
+                if c == '\u{2500}' {
+                    (cur + 1, max.max(cur + 1))
+                } else {
+                    (0, max)
+                }
+            })
+            .1;
+        assert!(
+            longest_dash_run >= 30,
+            "section divider should fill the column with dashes (run={longest_dash_run}): {today_row:?}"
+        );
+        // The divider line is a pure rule — the session's date/age moved off it.
+        assert!(
+            !today_row.contains("2026"),
+            "the divider line must carry no date/age: {today_row:?}"
+        );
+        // ...and now sit on the session's own name line instead. Match the table
+        // row by its "●" marker so we don't hit the preview pane's title, which
+        // shares the same visual line in the side-by-side layout.
+        let session_row = out
+            .lines()
+            .find(|l| l.contains("\u{25cf} recent-session"))
+            .expect("the recent-session table row should render");
+        assert!(
+            session_row.contains("2026-01-01") && session_row.contains("now"),
+            "date/age should sit on the session's own line, not the divider: {session_row:?}"
+        );
     }
 
     #[test]
