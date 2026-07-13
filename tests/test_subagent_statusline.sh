@@ -288,6 +288,27 @@ test_absent_columns_renders_untruncated() {
     assert_output_contains "$c" "a description that is not short" "no columns means no budget to enforce" || return 1
 }
 
+test_light_theme_row_paints_dark_ink() {
+    export COLORTERM=truecolor CS_TERM_THEME=light
+    local out c
+    out=$(run_ssl "$FIXTURE_ONE"); c=$(row_content "$out" "t1")
+    # The row sits on the cream terminal background, so its name and meta must be
+    # dark ink; the pill tokens (near-white name, light taupe meta) wash out there.
+    assert_output_contains "$c" "38;2;48;42;36" "light theme paints the agent name in dark ink" || return 1
+    assert_output_contains "$c" "38;2;128;116;106" "light theme paints row meta in readable taupe" || return 1
+    assert_output_not_contains "$c" "38;2;240;242;255" "no near-white name on a light terminal" || return 1
+    assert_output_not_contains "$c" "38;2;170;161;148" "no light hairline meta on a light terminal" || return 1
+}
+
+test_dark_theme_row_keeps_light_ink() {
+    export COLORTERM=truecolor CS_TERM_THEME=dark
+    local out c
+    out=$(run_ssl "$FIXTURE_ONE"); c=$(row_content "$out" "t1")
+    # On a dark terminal the light foregrounds are correct and must be kept.
+    assert_output_contains "$c" "38;2;240;242;255" "dark theme keeps the light name ink" || return 1
+    assert_output_contains "$c" "38;2;170;161;148" "dark theme keeps the light meta taupe" || return 1
+}
+
 run_test test_empty_tasks_prints_nothing
 run_test test_malformed_stdin_exits_clean
 run_test test_disable_env_prints_nothing
@@ -310,4 +331,6 @@ run_test test_backslash_in_description_is_not_doubled
 run_test test_negative_start_time_yields_no_elapsed
 run_test test_non_numeric_columns_is_silent_on_stderr
 run_test test_absent_columns_renders_untruncated
+run_test test_light_theme_row_paints_dark_ink
+run_test test_dark_theme_row_keeps_light_ink
 report_results

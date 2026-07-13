@@ -4,6 +4,14 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.7.13
+
+One fix: the subagent statusline is now readable on light terminals.
+
+### Fixes
+
+- **Subagent statusline: readable on light terminals.** The agent-panel rows (`cs-subagent-statusline`) painted the agent name and meta with tokens meant for the main bar's dark pills (`chiptext` near-white, `hairline` light taupe), so on a light/cream terminal the name was near-invisible and the rest was faint. The row's foreground now adapts to the terminal theme — dark ink on a light terminal, unchanged light ink on dark.
+
 ## 2026.7.12
 
 One change: the "session already open" prompt is now a single-keypress menu and looks the part.

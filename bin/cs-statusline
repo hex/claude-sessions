@@ -155,6 +155,15 @@ _sgr() {
                 periwinkle) rgb="138;134;236" ;;
                 slate)  rgb="79;91;140" ;;
                 chiptext) rgb="240;242;255" ;;
+                rowname)
+                    # A subagent row's agent name sits on the bare terminal, not
+                    # a pill, so it takes ink that contrasts the canvas: near-white
+                    # on a dark terminal, dark on a light one.
+                    [ "$SL_THEME" = "dark" ] && rgb="240;242;255" || rgb="48;42;36" ;;
+                rowmeta)
+                    # The row's description, ctx and elapsed: quieter than the
+                    # name, still readable against the terminal on either theme.
+                    [ "$SL_THEME" = "dark" ] && rgb="170;161;148" || rgb="128;116;106" ;;
                 amber)  rgb="255;183;77" ;;
                 brand)  rgb="217;119;87" ;;   # Claude coral (#D97757)
                 brandshade)
@@ -206,6 +215,8 @@ _sgr() {
                 periwinkle) idx=105 ;;
                 slate)  idx=60 ;;
                 chiptext) idx=231 ;;
+                rowname) [ "$SL_THEME" = "dark" ] && idx=231 || idx=235 ;;
+                rowmeta) [ "$SL_THEME" = "dark" ] && idx=248 || idx=244 ;;
                 amber)  idx=215 ;;
                 brand)  idx=173 ;;
                 brandshade) idx=167 ;;
@@ -231,6 +242,8 @@ _sgr() {
                 periwinkle) base=94 ;;
                 slate)  base=34 ;;
                 chiptext) base=97 ;;
+                rowname) [ "$SL_THEME" = "dark" ] && base=97 || base=30 ;;
+                rowmeta) base=90 ;;
                 amber)  base=33 ;;
                 white)  base=97 ;;
                 black)  base=30 ;;

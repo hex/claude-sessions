@@ -200,20 +200,20 @@ render_rows() {
             content="${content}${_PAINTED}  "
         fi
         if [ -n "$name" ]; then
-            _paint "$name" chiptext
+            _paint "$name" rowname
             content="${content}${_PAINTED}"
         fi
         if [ -n "$desc" ]; then
-            _paint "· ${desc}" hairline
+            _paint "· ${desc}" rowmeta
             content="${content} ${_PAINTED}"
         fi
         if [ -n "$ctx" ]; then
-            _thresh_color "$ctx" "${CS_STATUSLINE_CTX_WARN:-50}" "${CS_STATUSLINE_CTX_CRIT:-80}" hairline
+            _thresh_color "$ctx" "${CS_STATUSLINE_CTX_WARN:-50}" "${CS_STATUSLINE_CTX_CRIT:-80}" rowmeta
             _paint "${ICON_CTX}ctx ${ctx}%" "$_COLOR"
             content="${content}  ${_PAINTED}"
         fi
         if [ -n "$_ELAPSED" ]; then
-            _paint "${ICON_5H}${_ELAPSED}" hairline
+            _paint "${ICON_5H}${_ELAPSED}" rowmeta
             content="${content}  ${_PAINTED}"
         fi
 
