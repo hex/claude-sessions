@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.7.11"
+VERSION="2026.7.12"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 
@@ -392,32 +392,47 @@ cs_interactive() {
 
 _lock_collision_menu() {
     local session_name="$1" lock_pid="$2"
-    local choice="" task=""
-    echo -e "${YELLOW}Session '$session_name' is already open (PID $lock_pid).${NC}"
+    local choice="" task="" offers_worktree=1
+    # Worktrees can't nest: a worktree session offers only force/cancel.
     case "$session_name" in
-        *@*) ;;
-        *) echo "  [n] start a parallel task in a worktree (cs $session_name@<task>)" ;;
+        *@*) offers_worktree=0 ;;
     esac
-    echo "  [f] force a second launch here (two sessions will share one checkout)"
-    echo "  [c] cancel (default)"
-    read -r -p "> " choice || choice="c"
+
+    # Pad action labels to a common width so the dim consequence column aligns.
+    local force_l worktree_l cancel_l
+    printf -v force_l    '%-14s' 'force start'
+    printf -v worktree_l '%-14s' 'new worktree'
+    printf -v cancel_l   '%-14s' 'cancel'
+
+    echo
+    echo -e "  ${YELLOW}${ICON_LOCK}${NC}  ${BOLD}${WHITE}${session_name}${NC} ${COMMENT}is already open${NC} ${DIM}· PID ${lock_pid}${NC}"
+    echo
+    echo -e "    ${BOLD}${ORANGE}1${NC}  ${WHITE}${force_l}${NC}${DIM}two sessions share one checkout${NC}"
+    if [ "$offers_worktree" -eq 1 ]; then
+        echo -e "    ${BOLD}${GREEN}2${NC}  ${WHITE}${worktree_l}${NC}${DIM}parallel task on its own branch${NC}"
+        echo -e "    ${BOLD}${COMMENT}3${NC}  ${WHITE}${cancel_l}${NC}${DIM}(default)${NC}"
+    else
+        echo -e "    ${BOLD}${COMMENT}2${NC}  ${WHITE}${cancel_l}${NC}${DIM}(default)${NC}"
+    fi
+    echo
+    printf '    %b›%b ' "$GOLD" "$NC"
+    # Single keypress, no Enter. EOF (piped close) falls through to cancel.
+    read -rsn1 choice || choice=""
+    echo
+
     case "$choice" in
-        [nN])
-            case "$session_name" in
-                *@*) info "Cancelled"; exit 0 ;;
-            esac
-            read -r -p "Task name: " task || task=""
+        1) return 0 ;;                                  # force a second launch here
+        2)
+            # '2' is cancel on a worktree session, which can't nest another.
+            if [ "$offers_worktree" -eq 0 ]; then
+                info "Cancelled"; exit 0
+            fi
+            read -r -p "    Task name: " task || task=""
             # cs_split_worktree_name validates the task after the re-exec;
             # keeping a second copy of its regex here would just drift.
             exec "$0" "$session_name@$task"
             ;;
-        [fF])
-            return 0
-            ;;
-        *)
-            info "Cancelled"
-            exit 0
-            ;;
+        *) info "Cancelled"; exit 0 ;;                  # 3 / Enter / any other key
     esac
 }
 

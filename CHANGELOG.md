@@ -4,6 +4,14 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.7.12
+
+One change: the "session already open" prompt is now a single-keypress menu and looks the part.
+
+### Changed
+
+- **Locked-session menu: single-keypress `1`/`2`/`3`, restyled.** Opening a session that's already running now shows a prompt that reacts to one keypress with no Enter — `1` force start · `2` new worktree · `3` cancel (worktree sessions show just `1` force / `2` cancel) — restyled with the warm palette: a lock-icon header, colored option digits, and an aligned consequence column. Cancel stays the default, so a stray key never force-launches. Replaces the previous `f`/`n`/`c` letter keys.
+
 ## 2026.7.11
 
 One fix: the interactive session picker (`cs-tui`) no longer feels laggy. Fast key-repeat, mouse-motion, and an unattended window all now behave.

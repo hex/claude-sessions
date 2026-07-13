@@ -161,9 +161,11 @@ test_collision_menu_new_task_creates_worktree() {
     echo "$live_pid" > "$CS_SESSIONS_ROOT/test-session/.cs/session.lock"
 
     local output status=0
-    # Three answers: menu choice, task name, dirty-base consent (the first
-    # launch's migration leaves uncommitted backfill in the fixture repo).
-    output=$(printf 'n\nfix-auth\ny\n' | CS_ASSUME_TTY=1 "$CS_BIN" test-session 2>&1) || status=$?
+    # Menu key '2' = new worktree, then task name, then dirty-base consent (the
+    # first launch's migration leaves uncommitted backfill in the fixture repo).
+    # No newline after '2': the menu reads a single keypress, so the digit must
+    # not share a line with the task name.
+    output=$(printf '2fix-auth\ny\n' | CS_ASSUME_TTY=1 "$CS_BIN" test-session 2>&1) || status=$?
     assert_eq "0" "$status" "new-task path should launch cleanly, got: $output" || return 1
     assert_dir "$CS_SESSIONS_ROOT/test-session@fix-auth" "worktree session created from the menu" || return 1
     assert_eq "$live_pid" "$(cat "$CS_SESSIONS_ROOT/test-session/.cs/session.lock")" \
@@ -192,9 +194,39 @@ test_collision_menu_force_proceeds() {
     echo "$live_pid" > "$CS_SESSIONS_ROOT/test-session/.cs/session.lock"
 
     local output status=0
-    output=$(printf 'f\nn\n' | CS_ASSUME_TTY=1 "$CS_BIN" test-session 2>&1) || status=$?
+    # Menu key '1' = force (single keypress, no Enter); the trailing 'n' answers
+    # the downstream launch prompt.
+    output=$(printf '1n\n' | CS_ASSUME_TTY=1 "$CS_BIN" test-session 2>&1) || status=$?
     assert_eq "0" "$status" "force path should launch, got: $output" || return 1
     assert_output_contains "$output" "Overriding active session lock" "force warning shown" || return 1
+}
+
+test_collision_menu_three_cancels() {
+    create_lock_test_session "test-session"
+    sleep 300 &
+    local live_pid=$!
+    echo "$live_pid" > "$CS_SESSIONS_ROOT/test-session/.cs/session.lock"
+
+    local output status=0
+    # Key '3' is the explicit cancel; a single keypress, no Enter required.
+    output=$(printf '3' | CS_ASSUME_TTY=1 "$CS_BIN" test-session 2>&1) || status=$?
+    assert_eq "0" "$status" "key 3 cancels and exits cleanly" || return 1
+    assert_output_contains "$output" "Cancelled" "cancel message shown for key 3" || return 1
+    assert_eq "$live_pid" "$(cat "$CS_SESSIONS_ROOT/test-session/.cs/session.lock")" \
+        "lock untouched on key-3 cancel" || return 1
+}
+
+test_collision_menu_shows_numbered_options() {
+    create_lock_test_session "test-session"
+    sleep 300 &
+    local live_pid=$!
+    echo "$live_pid" > "$CS_SESSIONS_ROOT/test-session/.cs/session.lock"
+
+    local output status=0
+    output=$(CS_ASSUME_TTY=1 "$CS_BIN" test-session < /dev/null 2>&1) || status=$?
+    assert_output_contains "$output" "force start" "menu offers force start" || return 1
+    assert_output_contains "$output" "new worktree" "menu offers new worktree" || return 1
+    assert_output_contains "$output" "cancel" "menu offers cancel" || return 1
 }
 
 test_collision_menu_on_worktree_session_offers_no_new_task() {
@@ -205,7 +237,8 @@ test_collision_menu_on_worktree_session_offers_no_new_task() {
     echo "$live_pid" > "$CS_SESSIONS_ROOT/test-session@t1/.cs/session.lock"
 
     local output status=0
-    output=$(printf 'n\n' | CS_ASSUME_TTY=1 "$CS_BIN" "test-session@t1" 2>&1) || status=$?
+    # A worktree session offers only force/cancel; '2' is cancel in that context.
+    output=$(printf '2' | CS_ASSUME_TTY=1 "$CS_BIN" "test-session@t1" 2>&1) || status=$?
     assert_eq "0" "$status" "worktree collision exits cleanly" || return 1
     assert_output_not_contains "$output" "parallel task" "no new-task option for a worktree session" || return 1
     assert_not_exists "$CS_SESSIONS_ROOT/test-session@t1@n" "no nested worktree possible" || return 1
@@ -228,6 +261,8 @@ run_test test_lock_cleaned_on_session_end
 run_test test_lock_contains_valid_pid
 run_test test_collision_menu_new_task_creates_worktree
 run_test test_collision_menu_cancel_is_default
+run_test test_collision_menu_three_cancels
+run_test test_collision_menu_shows_numbered_options
 run_test test_collision_menu_force_proceeds
 run_test test_collision_menu_on_worktree_session_offers_no_new_task
 
