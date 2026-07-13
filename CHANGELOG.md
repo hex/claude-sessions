@@ -4,6 +4,14 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.7.11
+
+One fix: the interactive session picker (`cs-tui`) no longer feels laggy. Fast key-repeat, mouse-motion, and an unattended window all now behave.
+
+### Fixes
+
+- **cs-tui: killed the input lag and idle CPU churn.** The picker now drains the whole input queue before repainting — so fast key-repeat and mouse-motion no longer back up behind one-draw-per-event — redraws only when something actually changed, and blocks until the next event once the selection shimmer pauses after ~30s idle (an unattended picker now sits at 0% CPU). No key or behavior changes; it just feels responsive. Full renders were already sub-millisecond, so the fix is the loop architecture, not the render cost.
+
 ## 2026.7.10
 
 One feature: a companion status line for Claude Code's agent panel. When you run subagents, the tree under your prompt now shows the model driving each one, its own context-window usage, and how long it's been running — the columns Claude Code's default `name · description · token count` row lacks. A recon agent at ctx 12% and a synthesizer dying at ctx 84% stop looking identical.
