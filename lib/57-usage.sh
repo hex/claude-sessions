@@ -114,35 +114,52 @@ run_usage() {
     echo "$header"
     echo ""
 
-    local shown=0 dir name proj sums
-    local in5 cc5 out5 inW ccW outW rest
+    local all_flag=""
+    case "${1:-}" in
+        --all) all_flag=1; shift ;;
+        '') : ;;
+        *) error "Unknown usage option: $1. Use 'cs -usage [--all]'" ;;
+    esac
+
     printf '%-24s  %-15s  %-15s  %s\n' "SESSION" "5H IN/OUT" "WEEK IN/OUT" "LAST ACTIVE"
-    while IFS= read -r -d '' dir; do
+    local rows dir name proj files sums marker age newest old_ifs
+    local in5 cc5 out5 inW ccW outW rest
+    rows=$(while IFS= read -r -d '' dir; do
         is_session_dir "$dir" || continue
         name=$(basename "$dir")
         proj=$(_claude_project_dir "$dir")
-        local files
         files=$(_usage_window_files "$proj")
-        [ -n "$files" ] || continue
-        local old_ifs="$IFS"
-        IFS=$'\n'
-        # shellcheck disable=SC2086
-        set -- $files
-        IFS="$old_ifs"
-        sums=$(_usage_scan "$w5_iso" "$wk_iso" "$@")
-        read -r in5 cc5 out5 inW ccW outW rest <<EOF
+        in5=0; cc5=0; out5=0; inW=0; ccW=0; outW=0
+        if [ -n "$files" ]; then
+            old_ifs="$IFS"; IFS=$'\n'
+            # shellcheck disable=SC2086
+            set -- $files
+            IFS="$old_ifs"
+            sums=$(_usage_scan "$w5_iso" "$wk_iso" "$@")
+            read -r in5 cc5 out5 inW ccW outW rest <<EOF
 $sums
 EOF
-        [ $((in5 + cc5 + out5 + inW + ccW + outW)) -gt 0 ] || continue
-        shown=$((shown + 1))
-        printf '%-24s  %-15s  %-15s  %s\n' \
-            "$name" \
-            "$(_usage_cell $((in5 + cc5)) "$out5")" \
-            "$(_usage_cell $((inW + ccW)) "$outW")" \
-            "-"
-    done < <(find "$SESSIONS_ROOT" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) -print0 2>/dev/null | sort -z)
+        fi
+        if [ $((in5 + cc5 + out5 + inW + ccW + outW)) -eq 0 ] && [ -z "$all_flag" ]; then
+            continue
+        fi
+        marker=" "
+        session_is_live "$dir/.cs" && marker="${GREEN}●${NC}"
+        age="-"
+        newest=$(ls -t "$proj"/*.jsonl 2>/dev/null | head -1 || true)
+        if [ -n "$newest" ]; then
+            age=$(_humanize_secs $(( now - $(_epoch_mtime "$newest") )))
+        fi
+        printf '%s\t%s\t%s\n' "$((in5 + cc5 + out5))" "$((inW + ccW + outW))" \
+            "$(printf '%-22s %s  %-15s  %-15s  %s' "$name" "$marker" \
+                "$(_usage_cell $((in5 + cc5)) "$out5")" \
+                "$(_usage_cell $((inW + ccW)) "$outW")" \
+                "$age")"
+    done < <(find "$SESSIONS_ROOT" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) -print0 2>/dev/null | sort -z))
 
-    if [ "$shown" -eq 0 ]; then
+    if [ -z "$rows" ]; then
         echo "No usage in the current windows."
+        return 0
     fi
+    printf '%s\n' "$rows" | sort -t"$(printf '\t')" -k1,1rn -k2,2rn | cut -f3-
 }

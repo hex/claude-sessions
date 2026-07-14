@@ -132,4 +132,62 @@ EOF
 
 run_test test_usage_header_anchored_by_limits_file
 run_test test_usage_window_start_is_resets_minus_span
+
+# Two sessions: bigger 5h usage sorts first; each row shows only its own tokens.
+test_usage_attribution_and_sort() {
+    local a="$CS_SESSIONS_ROOT/aa-small" b="$CS_SESSIONS_ROOT/bb-big"
+    mkdir -p "$a/.cs/local" "$b/.cs/local"
+    local pa pb now
+    pa=$(_transcripts_for "$a"); pb=$(_transcripts_for "$b")
+    now=$(_iso_mins_ago 5)
+    cat > "$pa/c.jsonl" << EOF
+{"type":"assistant","requestId":"ra","timestamp":"$now","message":{"model":"m","usage":{"input_tokens":100,"cache_creation_input_tokens":0,"output_tokens":10}}}
+EOF
+    cat > "$pb/c.jsonl" << EOF
+{"type":"assistant","requestId":"rb","timestamp":"$now","message":{"model":"m","usage":{"input_tokens":900000,"cache_creation_input_tokens":0,"output_tokens":90000}}}
+EOF
+    local output
+    output=$("$CS_BIN" -usage 2>&1) || true
+    assert_output_contains "$output" "aa-small" "small session listed" || return 1
+    assert_output_contains "$output" "bb-big" "big session listed" || return 1
+    # bb-big sorts above aa-small despite aa < bb alphabetically
+    local first
+    first=$(echo "$output" | grep -n -e "aa-small" -e "bb-big" | sort -t: -k1,1n | head -1)
+    case "$first" in
+        *bb-big*) : ;;
+        *) echo "  FAIL: bb-big should sort first (5h usage desc), got: $first"; return 1 ;;
+    esac
+}
+
+# Sessions with no window usage are hidden by default and shown with --all.
+test_usage_hides_zero_rows_unless_all() {
+    create_test_session "idle-sess" || return 1
+    local output
+    output=$("$CS_BIN" -usage 2>&1) || true
+    assert_output_not_contains "$output" "idle-sess" "zero-usage session hidden by default" || return 1
+    output=$("$CS_BIN" -usage --all 2>&1) || true
+    assert_output_contains "$output" "idle-sess" "--all shows zero-usage session" || return 1
+}
+
+# A live session (lock held by a running pid) gets the live marker.
+test_usage_live_marker() {
+    local sdir="$CS_SESSIONS_ROOT/live-sess"
+    mkdir -p "$sdir/.cs/local"
+    printf '%s\n' "$$" > "$sdir/.cs/session.lock"
+    local proj
+    proj=$(_transcripts_for "$sdir")
+    cat > "$proj/c.jsonl" << EOF
+{"type":"assistant","requestId":"rl","timestamp":"$(_iso_mins_ago 5)","message":{"model":"m","usage":{"input_tokens":100,"cache_creation_input_tokens":0,"output_tokens":10}}}
+EOF
+    local output
+    output=$(NO_COLOR=1 "$CS_BIN" -usage 2>&1) || true
+    echo "$output" | grep "live-sess" | grep -q "●" || {
+        echo "  FAIL: live session row should carry the ● marker"
+        return 1
+    }
+}
+
+run_test test_usage_attribution_and_sort
+run_test test_usage_hides_zero_rows_unless_all
+run_test test_usage_live_marker
 report_results
