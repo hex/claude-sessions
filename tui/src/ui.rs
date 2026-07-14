@@ -666,14 +666,19 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
         // the rule reaches across the meta columns too. A section-start row
         // carries its divider as the first line of the row, one line lower
         // when it also has the blank spacer above it (every section but the
-        // first — see section_lead_count above).
+        // first — see section_lead_count above). The Table clips a partially
+        // visible row's lines at the table's bottom edge; this paint must
+        // clip the same way, or a divider whose row tops the last visible
+        // line would land one row past the table (in the footer).
         if app.section_labels.get(idx).copied().flatten().is_some() {
             let divider_offset = if idx == 0 { 0 } else { 1 };
-            let divider_y = inner.y + y + divider_offset;
-            for x in session_col_right..inner.x.saturating_add(inner.width) {
-                if let Some(cell) = buf.cell_mut(ratatui::layout::Position::new(x, divider_y)) {
-                    cell.set_char('\u{2500}');
-                    cell.set_fg(p.soft);
+            if y + divider_offset < bottom {
+                let divider_y = inner.y + y + divider_offset;
+                for x in session_col_right..inner.x.saturating_add(inner.width) {
+                    if let Some(cell) = buf.cell_mut(ratatui::layout::Position::new(x, divider_y)) {
+                        cell.set_char('\u{2500}');
+                        cell.set_fg(p.soft);
+                    }
                 }
             }
         }
@@ -1770,6 +1775,57 @@ mod tests {
         assert_eq!(
             cell.fg, p.soft,
             "divider rule beyond the Session column should be painted SOFT"
+        );
+    }
+
+    #[test]
+    fn section_divider_paint_never_escapes_the_table_bottom() {
+        // A later section whose row top lands on the table's last visible
+        // line carries its divider one line below that top (spacer, then
+        // divider) — the Table clips that divider line, but the direct
+        // buffer paint must too, or the rule lands in the footer.
+        //
+        // Geometry at 100×12, TableOnly: masthead rows 0-1, content pane
+        // y=2 height 9, footer row 11. Data walk starts at relative y=2;
+        // the "Today" section-start row (height 2) puts four plain rows at
+        // relative 4-7, so the "Older" section-start row (spacer+divider+
+        // name, height 3) tops at relative y=8 — the last table line. Its
+        // divider's relative y=9 == bottom, one row past the table.
+        use std::time::{Duration, SystemTime};
+        let mut sessions = Vec::new();
+        for i in 0..5u64 {
+            let mut s = one_session();
+            s[0].name = format!("today-{i}");
+            s[0].modified_ts = Some(SystemTime::now() - Duration::from_secs(i * 60));
+            sessions.push(s.into_iter().next().unwrap());
+        }
+        let mut old = one_session();
+        old[0].name = "older-one".into();
+        old[0].modified_ts = Some(SystemTime::now() - Duration::from_secs(400 * 86400));
+        sessions.push(old.into_iter().next().unwrap());
+        let mut app = App::new(sessions);
+        app.theme = Palette::dark();
+        app.show_preview = false;
+        let p = app.theme;
+
+        let backend = TestBackend::new(100, 12);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(&mut app, f)).unwrap();
+        let buf = term.backend().buffer();
+
+        let footer_y = 11u16;
+        let stray: Vec<u16> = (0..100u16)
+            .filter(|&x| {
+                let cell = buf.cell(ratatui::layout::Position::new(x, footer_y)).unwrap();
+                cell.symbol() == "\u{2500}" && cell.fg == p.soft
+            })
+            .collect();
+        assert!(
+            stray.is_empty(),
+            "divider rule must not be painted into the footer (soft \u{2500} at x={stray:?}): {:?}",
+            (0..100u16)
+                .map(|x| buf.cell(ratatui::layout::Position::new(x, footer_y)).unwrap().symbol())
+                .collect::<String>()
         );
     }
 
