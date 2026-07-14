@@ -324,6 +324,7 @@ Commands:
   -whoami             Show the current actor (for shared, multi-person sessions)
   -who                Show who contributed to shared memory/narrative (git history)
   -live               List sessions running right now on this machine
+  -usage              Per-session token usage over the 5h/weekly rate-limit windows
   -status "<text>"    Set this session's advertised status (also: -status, -status --clear/-c)
   -remove, -rm <name> Remove a session
   -secrets <cmd>      Manage current session secrets (requires CLAUDE_SESSION_NAME)
@@ -2351,6 +2352,11 @@ run_status() {
             ;;
     esac
 }
+run_usage() {
+    echo "Rate limits: unknown (statusline not running); windows are rolling"
+    echo ""
+    echo "No usage in the current windows."
+}
 _doctor_ok()   { printf "  ${GREEN}[ OK ]${NC} %s\n" "$1"; }
 _doctor_warn() { printf "  ${YELLOW}[WARN]${NC} %s\n" "$1"; DOCTOR_WARN=$((DOCTOR_WARN+1)); }
 _doctor_fail() { printf "  ${RED}[FAIL]${NC} %s\n" "$1"; DOCTOR_FAIL=$((DOCTOR_FAIL+1)); }
@@ -4011,6 +4017,11 @@ main() {
         -live)
             cmd_live
             return 0
+            ;;
+        -usage)
+            shift
+            run_usage "$@"
+            return $?
             ;;
         -doctor|-diag)
             run_doctor

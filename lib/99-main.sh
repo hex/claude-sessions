@@ -124,6 +124,11 @@ main() {
             cmd_live
             return 0
             ;;
+        -usage)
+            shift
+            run_usage "$@"
+            return $?
+            ;;
         -doctor|-diag)
             run_doctor
             return $?
