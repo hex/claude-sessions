@@ -161,7 +161,7 @@ EOF
 
 # Sessions with no window usage are hidden by default and shown with --all.
 test_usage_hides_zero_rows_unless_all() {
-    create_test_session "idle-sess" || return 1
+    create_test_session "idle-sess" >/dev/null || return 1
     local output
     output=$("$CS_BIN" -usage 2>&1) || true
     assert_output_not_contains "$output" "idle-sess" "zero-usage session hidden by default" || return 1
