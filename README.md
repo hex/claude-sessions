@@ -41,6 +41,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 
   ![cs-statusline: session and model accents, amber rate-limit warnings, standard-Unicode segment icons](assets/screenshot2.png)
 - **Health checks** - `cs -doctor` reports status of Keychain backend, hook registration, shadow-ref freshness, auto-memory writability, status line registration, Claude Code settings audit (hooks/MCPs/permissions/env vars counts), and cumulative token usage for the current project
+- **Usage attribution** - `cs -usage` shows which sessions are consuming the 5-hour and weekly rate-limit windows: per-session input/output token sums (deduplicated by API request, cache-read excluded), anchored at the true reset boundaries when the cs status line is active. `cs -usage <name>` breaks one session down per conversation with a lifetime column.
 - **Bash command audit trail** - Every Bash command Claude runs is logged to `.cs/local/session.log` (machine-local, never git-synced) with timestamps
 - **Update notifications** - Checks for updates and notifies when new versions are available
 - **Verified updates** - Updates are downloaded from GitHub Releases and verified with SHA-256 checksums; additionally verified with [minisign](https://jedisct1.github.io/minisign/) signatures when available
@@ -79,6 +80,7 @@ cs -search <query>          # Search across all sessions
 cs -checkpoint "<label>"    # Snapshot git state + narrative (also: list, show <name>)
 cs -queue add "<task>"      # Walk-away task queue (also: list, rm <n>, clear)
 cs -doctor, -diag           # Run health checks (Keychain, hooks, memory, audit, tokens)
+cs -usage [--all] [<name>]  # Per-session token usage over the 5h/weekly rate-limit windows
 cs -lint <file>...          # Flag AI-slop prose tells (em-dashes, banned phrases); 0 clean 1 issues 2 error
 cs -statusline enable|disable  # Enable or remove the cs status line + agent-panel rows
 cs -detect-theme            # Show the detected terminal light/dark theme

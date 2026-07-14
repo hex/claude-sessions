@@ -124,6 +124,11 @@ main() {
             cmd_live
             return 0
             ;;
+        -usage)
+            shift
+            run_usage "$@"
+            return $?
+            ;;
         -doctor|-diag)
             run_doctor
             return $?
@@ -183,6 +188,14 @@ main() {
                 run_queue "$@"
                 return 0
                 ;;
+            -usage)
+                shift
+                export CLAUDE_SESSION_NAME="$session_name"
+                export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
+                export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
+                run_usage "$session_name"
+                return 0
+                ;;
             --merge)
                 shift
                 [ -n "${1:-}" ] || error "Usage: cs <base> --merge <task>"
@@ -194,7 +207,7 @@ main() {
                 shift
                 ;;
             *)
-                error "Unknown session command: $1. Use -secrets, -queue, --merge, or --force."
+                error "Unknown session command: $1. Use -secrets, -queue, -usage, --merge, or --force."
                 ;;
         esac
     done

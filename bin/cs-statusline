@@ -15,7 +15,7 @@ SL_THEME="${CS_TERM_THEME:-light}"
 
 # Parsed stdin fields (filled by _parse_stdin).
 SL_SESSION=""; SL_CTX=""; SL_MODEL=""; SL_EFFORT=""
-SL_5H=""; SL_5H_RESET=""; SL_WK=""; SL_COST=""; SL_DIR=""
+SL_5H=""; SL_5H_RESET=""; SL_WK=""; SL_WK_RESET=""; SL_COST=""; SL_DIR=""
 
 # Collected segments (parallel arrays) and chosen color level.
 _SEG_TEXT=(); _SEG_BG=(); _SEG_BOLD=(); LEVEL="basic"
@@ -82,6 +82,7 @@ _parse_stdin() {
           (.rate_limits.five_hour.used_percentage // "" | tostring),
           (.rate_limits.five_hour.resets_at // "" | tostring),
           (.rate_limits.seven_day.used_percentage // "" | tostring),
+          (.rate_limits.seven_day.resets_at // "" | tostring),
           (.cost.total_cost_usd // "" | tostring),
           (.workspace.current_dir // .cwd // "")
         ] | .[]' 2>/dev/null) || return 1
@@ -102,11 +103,27 @@ _parse_stdin() {
         IFS= read -r SL_5H
         IFS= read -r SL_5H_RESET
         IFS= read -r SL_WK
+        IFS= read -r SL_WK_RESET
         IFS= read -r SL_COST
         IFS= read -r SL_DIR
     } <<EOF
 $fields
 EOF
+    # Stamp rate-limit state for cs -usage window anchoring. Same partition
+    # rules as context-pct: machine-local, atomic, best-effort.
+    if [ -n "${CLAUDE_SESSION_NAME:-}" ] && { [ -n "${SL_5H:-}" ] || [ -n "${SL_WK:-}" ]; }; then
+        _limdir="$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/local"
+        if mkdir -p "$_limdir" 2>/dev/null; then
+            {
+                printf 'five_hour_used_pct: %s\n' "${SL_5H%%.*}"
+                printf 'five_hour_resets_at: %s\n' "${SL_5H_RESET:-}"
+                printf 'seven_day_used_pct: %s\n' "${SL_WK%%.*}"
+                printf 'seven_day_resets_at: %s\n' "${SL_WK_RESET:-}"
+                printf 'stamped_at: %s\n' "$(date +%s)"
+            } > "$_limdir/limits.tmp" 2>/dev/null \
+                && mv "$_limdir/limits.tmp" "$_limdir/limits" 2>/dev/null || true
+        fi
+    fi
     return 0
 }
 

@@ -254,23 +254,27 @@ test_doctor_runs_token_cost_check() {
 
 test_doctor_token_cost_sums_jsonl() {
     local fake_transcripts="$TEST_TMPDIR/transcripts"
-    local encoded
-    encoded=$(echo "$CLAUDE_SESSION_DIR" | sed 's|/|-|g; s|\.|-|g')
+    local resolved encoded
+    resolved=$( (cd "$CLAUDE_SESSION_DIR" && pwd -P) || printf '%s' "$CLAUDE_SESSION_DIR" )
+    encoded=$(echo "$resolved" | sed 's|/|-|g; s|\.|-|g')
     local proj_dir="$fake_transcripts/$encoded"
     mkdir -p "$proj_dir"
+    # req_dup appears twice (streamed content blocks repeat usage): its tokens
+    # must count once. Naive sum would be 7.0K input / 1.75K output.
     cat > "$proj_dir/session1.jsonl" << 'EOF'
 {"type":"user","message":{"role":"user","content":"hi"}}
-{"type":"assistant","message":{"usage":{"input_tokens":1000,"output_tokens":250}}}
-{"type":"assistant","message":{"usage":{"input_tokens":2000,"output_tokens":500}}}
+{"type":"assistant","requestId":"req_dup","message":{"usage":{"input_tokens":1000,"output_tokens":250}}}
+{"type":"assistant","requestId":"req_dup","message":{"usage":{"input_tokens":1000,"output_tokens":250}}}
+{"type":"assistant","requestId":"req_two","message":{"usage":{"input_tokens":2000,"output_tokens":500}}}
 EOF
     cat > "$proj_dir/session2.jsonl" << 'EOF'
-{"type":"assistant","message":{"usage":{"input_tokens":3000,"output_tokens":750}}}
+{"type":"assistant","requestId":"req_three","message":{"usage":{"input_tokens":3000,"output_tokens":750}}}
 EOF
     local output
     output=$(CS_TRANSCRIPTS_DIR="$fake_transcripts" "$CS_BIN" -doctor 2>&1) || true
-    # Expected: 6000 input, 1500 output
-    assert_output_contains "$output" "6.0K input" "should sum input_tokens to 6000 across files" || return 1
-    assert_output_contains "$output" "1.5K output" "should sum output_tokens to 1500" || return 1
+    # Deduped: 6000 input, 1500 output
+    assert_output_contains "$output" "6.0K input" "should dedup by requestId then sum input to 6000" || return 1
+    assert_output_contains "$output" "1.5K output" "should dedup by requestId then sum output to 1500" || return 1
 }
 
 test_doctor_token_cost_handles_no_transcripts() {
