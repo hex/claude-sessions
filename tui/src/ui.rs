@@ -63,8 +63,8 @@ fn choose_layout(area: Rect, show_preview: bool) -> PaneLayout {
     }
 }
 
-/// Blank cells between table columns. Structure is carried by alignment, zebra
-/// striping, and the header rule — not by vertical divider glyphs.
+/// Blank cells between table columns. Structure is carried by alignment,
+/// section dividers, and the header rule — not by vertical divider glyphs.
 pub const COL_SPACING: u16 = 2;
 /// Width reserved at the left of each row for the selection accent bar ("▌ ").
 pub const SELECT_WIDTH: u16 = 2;
@@ -349,8 +349,6 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             }
             if s.secrets_count > 0 && !show_secrets {
                 // Show secrets indicator in gutter only when secrets column is hidden.
-                // Nerd-font `icons.lock` is tofu on the target font here, so this
-                // fallback always uses the plain glyph regardless of CS_NERD_FONTS.
                 let secrets_color = if dimmed { p.comment } else { p.gold };
                 name_spans.push(Span::styled(
                     "\u{25aa} ",
@@ -833,7 +831,7 @@ fn render_action_bar(app: &App, frame: &mut Frame, area: Rect) {
     spans.push(Span::styled("  Esc:close", Style::default().fg(p.comment)));
 
     let bar = Paragraph::new(Line::from(spans))
-        .style(Style::default().bg(p.zebra));
+        .style(Style::default().bg(p.soft));
     frame.render_widget(bar, area);
 }
 
@@ -1733,6 +1731,59 @@ mod tests {
             joined.contains("Enter:add"),
             "footer should show the Notes-focused hint: {joined}"
         );
+    }
+
+    #[test]
+    fn todo_card_side_border_brightens_when_notes_pane_focused() {
+        let p = Palette::dark();
+
+        // Renders at render_wide's dimensions, but returns the raw buffer
+        // (not the joined string) so side-border cell fg can be inspected.
+        let render_and_find_todo_side = |app: &mut App| -> (Color, Color) {
+            let backend = TestBackend::new(140, 30);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal.draw(|frame| render(app, frame)).unwrap();
+            let buf = terminal.backend().buffer().clone();
+            let mut coords = None;
+            for y in 0..buf.area.height {
+                let cells: Vec<String> = (0..buf.area.width)
+                    .map(|x| {
+                        buf.cell(ratatui::layout::Position::new(x, y))
+                            .unwrap()
+                            .symbol()
+                            .to_string()
+                    })
+                    .collect();
+                if cells.concat().contains("to-do") {
+                    let left = cells.iter().position(|s| s == "\u{256d}").unwrap() as u16;
+                    let right = cells.iter().rposition(|s| s == "\u{256e}").unwrap() as u16;
+                    coords = Some((left, right, y + 1));
+                    break;
+                }
+            }
+            let (left_x, right_x, side_y) =
+                coords.expect("to-do card top border should render");
+            let left_fg = buf
+                .cell(ratatui::layout::Position::new(left_x, side_y))
+                .unwrap()
+                .fg;
+            let right_fg = buf
+                .cell(ratatui::layout::Position::new(right_x, side_y))
+                .unwrap()
+                .fg;
+            (left_fg, right_fg)
+        };
+
+        let mut app = App::new(one_session());
+        app.theme = p;
+        let (left, right) = render_and_find_todo_side(&mut app);
+        assert_eq!(left, p.soft, "unfocused to-do card side border should be SOFT");
+        assert_eq!(right, p.soft, "unfocused to-do card side border should be SOFT");
+
+        app.focus = Focus::Notes;
+        let (left, right) = render_and_find_todo_side(&mut app);
+        assert_eq!(left, p.strong, "focused to-do card side border should brighten to STRONG");
+        assert_eq!(right, p.strong, "focused to-do card side border should brighten to STRONG");
     }
 
     #[test]
