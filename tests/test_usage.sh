@@ -240,7 +240,32 @@ test_usage_scoped_unknown_session_errors() {
     assert_output_contains "$output" "No such session" "clear error for unknown session" || return 1
 }
 
+# A subagent transcript lives in a subdir named after its parent conversation's
+# uuid; the scoped view must fold its tokens into that conversation's row.
+test_usage_scoped_folds_subagent_transcripts() {
+    local sdir="$CS_SESSIONS_ROOT/subagent-sess"
+    mkdir -p "$sdir/.cs/local"
+    local proj
+    proj=$(_transcripts_for "$sdir")
+    cat > "$proj/cccc1111-2222-3333-4444-555566667777.jsonl" << EOF
+{"type":"assistant","requestId":"r1","timestamp":"$(_iso_mins_ago 5)","message":{"model":"claude-fable-5","usage":{"input_tokens":1000,"cache_creation_input_tokens":0,"output_tokens":100}}}
+EOF
+    mkdir -p "$proj/cccc1111-2222-3333-4444-555566667777"
+    cat > "$proj/cccc1111-2222-3333-4444-555566667777/agent-x.jsonl" << EOF
+{"type":"assistant","requestId":"r2","timestamp":"$(_iso_mins_ago 5)","message":{"model":"claude-fable-5","usage":{"input_tokens":500,"cache_creation_input_tokens":0,"output_tokens":50}}}
+EOF
+    local output
+    output=$("$CS_BIN" -usage subagent-sess 2>&1) || true
+    assert_output_contains "$output" "cccc1111" "conversation row present" || return 1
+    # Combined: in 1000+500=1500 -> 1.5K, out 100+50=150.
+    echo "$output" | grep "cccc1111" | grep -q "1.5K / 150" || {
+        echo "  FAIL: 5h cell should fold subagent tokens into 1.5K / 150"
+        return 1
+    }
+}
+
 run_test test_usage_scoped_per_conversation
 run_test test_usage_scoped_site_b
 run_test test_usage_scoped_unknown_session_errors
+run_test test_usage_scoped_folds_subagent_transcripts
 report_results

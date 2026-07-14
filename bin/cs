@@ -2445,6 +2445,24 @@ _usage_epoch_to_hhmm() {
     date -r "$1" +%H:%M 2>/dev/null || date -d "@$1" +%H:%M 2>/dev/null
 }
 
+# Compute the 5h/week window-start boundaries, anchored at the newest
+# rate-limit stamp when one exists. Sets globals: U_NOW, U_W5_ISO, U_WK_ISO
+# (globals, not stdout — callers need several values and the limits read
+# already sets U_* the same way).
+_usage_window_anchors() {
+    U_NOW=$(date +%s)
+    _usage_read_limits
+    local start5 startw
+    start5=$((U_NOW - 18000))
+    startw=$((U_NOW - 604800))
+    if [ "$U_STAMP" -gt 0 ]; then
+        case "$U_5H_RESET" in *[!0-9]*|'') ;; *) start5=$((U_5H_RESET - 18000)) ;; esac
+        case "$U_WK_RESET" in *[!0-9]*|'') ;; *) startw=$((U_WK_RESET - 604800)) ;; esac
+    fi
+    U_W5_ISO=$(_usage_epoch_to_iso "$start5")
+    U_WK_ISO=$(_usage_epoch_to_iso "$startw")
+}
+
 # Per-conversation breakdown for one session: a row per transcript file with
 # window sums plus a lifetime column (single-dir scan; no mtime prefilter).
 _usage_session_detail() {
@@ -2452,16 +2470,7 @@ _usage_session_detail() {
     local dir="$SESSIONS_ROOT/$name"
     [ -d "$dir" ] || [ -L "$dir" ] || error "No such session: $name"
 
-    local now start5 startw w5_iso wk_iso
-    now=$(date +%s)
-    _usage_read_limits
-    start5=$((now - 18000)); startw=$((now - 604800))
-    if [ "$U_STAMP" -gt 0 ]; then
-        case "$U_5H_RESET" in *[!0-9]*|'') ;; *) start5=$((U_5H_RESET - 18000)) ;; esac
-        case "$U_WK_RESET" in *[!0-9]*|'') ;; *) startw=$((U_WK_RESET - 604800)) ;; esac
-    fi
-    w5_iso=$(_usage_epoch_to_iso "$start5")
-    wk_iso=$(_usage_epoch_to_iso "$startw")
+    _usage_window_anchors
 
     local proj
     proj=$(_claude_project_dir "$dir")
@@ -2486,11 +2495,11 @@ _usage_session_detail() {
                 [ -e "$sub" ] && extra+=("$sub")
             done
         fi
-        sums=$(_usage_scan "$w5_iso" "$wk_iso" "$f" ${extra[@]+"${extra[@]}"})
+        sums=$(_usage_scan "$U_W5_ISO" "$U_WK_ISO" "$f" ${extra[@]+"${extra[@]}"})
         read -r in5 cc5 out5 inW ccW outW inL ccL outL model <<EOF
 $sums
 EOF
-        age=$(_humanize_secs $(( now - $(_epoch_mtime "$f") )))
+        age=$(_humanize_secs $(( U_NOW - $(_epoch_mtime "$f") )))
         printf '%-10s  %-22s  %-15s  %-15s  %-15s  %s\n' \
             "$(printf '%.8s' "$uuid")" "$model" \
             "$(_usage_cell $((in5 + cc5)) "$out5")" \
@@ -2501,22 +2510,6 @@ EOF
 }
 
 run_usage() {
-    local now start5 startw w5_iso wk_iso
-    now=$(date +%s)
-    _usage_read_limits
-    start5=$((now - 18000))
-    startw=$((now - 604800))
-    local header="Rate limits: unknown (statusline not running); windows are rolling"
-    if [ "$U_STAMP" -gt 0 ]; then
-        case "$U_5H_RESET" in *[!0-9]*|'') ;; *) start5=$((U_5H_RESET - 18000)) ;; esac
-        case "$U_WK_RESET" in *[!0-9]*|'') ;; *) startw=$((U_WK_RESET - 604800)) ;; esac
-        header="Rate limits: 5h ${U_5H_PCT:-?}%"
-        case "$U_5H_RESET" in *[!0-9]*|'') ;; *) header="$header (resets $(_usage_epoch_to_hhmm "$U_5H_RESET"))" ;; esac
-        header="$header · week ${U_WK_PCT:-?}%"
-    fi
-    w5_iso=$(_usage_epoch_to_iso "$start5")
-    wk_iso=$(_usage_epoch_to_iso "$startw")
-
     local all_flag="" target=""
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -2530,6 +2523,14 @@ run_usage() {
     if [ -n "$target" ]; then
         _usage_session_detail "$target"
         return $?
+    fi
+
+    _usage_window_anchors
+    local header="Rate limits: unknown (statusline not running); windows are rolling"
+    if [ "$U_STAMP" -gt 0 ]; then
+        header="Rate limits: 5h ${U_5H_PCT:-?}%"
+        case "$U_5H_RESET" in *[!0-9]*|'') ;; *) header="$header (resets $(_usage_epoch_to_hhmm "$U_5H_RESET"))" ;; esac
+        header="$header · week ${U_WK_PCT:-?}%"
     fi
 
     echo "$header"
@@ -2549,7 +2550,7 @@ run_usage() {
             # shellcheck disable=SC2086
             set -- $files
             IFS="$old_ifs"
-            sums=$(_usage_scan "$w5_iso" "$wk_iso" "$@")
+            sums=$(_usage_scan "$U_W5_ISO" "$U_WK_ISO" "$@")
             read -r in5 cc5 out5 inW ccW outW rest <<EOF
 $sums
 EOF
@@ -2562,7 +2563,7 @@ EOF
         age="-"
         newest=$(ls -t "$proj"/*.jsonl 2>/dev/null | head -1 || true)
         if [ -n "$newest" ]; then
-            age=$(_humanize_secs $(( now - $(_epoch_mtime "$newest") )))
+            age=$(_humanize_secs $(( U_NOW - $(_epoch_mtime "$newest") )))
         fi
         printf '%s\t%s\t%s\n' "$((in5 + cc5 + out5))" "$((inW + ccW + outW))" \
             "$(printf '%-22s %s  %-15s  %-15s  %s' "$name" "$marker" \
