@@ -94,6 +94,61 @@ _usage_epoch_to_hhmm() {
     date -r "$1" +%H:%M 2>/dev/null || date -d "@$1" +%H:%M 2>/dev/null
 }
 
+# Per-conversation breakdown for one session: a row per transcript file with
+# window sums plus a lifetime column (single-dir scan; no mtime prefilter).
+_usage_session_detail() {
+    local name="$1"
+    local dir="$SESSIONS_ROOT/$name"
+    [ -d "$dir" ] || [ -L "$dir" ] || error "No such session: $name"
+
+    local now start5 startw w5_iso wk_iso
+    now=$(date +%s)
+    _usage_read_limits
+    start5=$((now - 18000)); startw=$((now - 604800))
+    if [ "$U_STAMP" -gt 0 ]; then
+        case "$U_5H_RESET" in *[!0-9]*|'') ;; *) start5=$((U_5H_RESET - 18000)) ;; esac
+        case "$U_WK_RESET" in *[!0-9]*|'') ;; *) startw=$((U_WK_RESET - 604800)) ;; esac
+    fi
+    w5_iso=$(_usage_epoch_to_iso "$start5")
+    wk_iso=$(_usage_epoch_to_iso "$startw")
+
+    local proj
+    proj=$(_claude_project_dir "$dir")
+    local files=("$proj"/*.jsonl)
+    if [ ! -e "${files[0]:-}" ]; then
+        echo "No transcripts for session: $name"
+        return 0
+    fi
+
+    printf '%-10s  %-22s  %-15s  %-15s  %-15s  %s\n' \
+        "CONV" "MODEL" "5H IN/OUT" "WEEK IN/OUT" "LIFETIME" "LAST ACTIVE"
+    local f uuid sums model age
+    local in5 cc5 out5 inW ccW outW inL ccL outL
+    for f in "${files[@]}"; do
+        uuid=$(basename "$f" .jsonl)
+        # Subagent transcripts for this conversation live in a sibling subdir
+        # named after the conversation; include them when present.
+        local extra=()
+        if [ -d "$proj/$uuid" ]; then
+            local sub
+            for sub in "$proj/$uuid"/*.jsonl; do
+                [ -e "$sub" ] && extra+=("$sub")
+            done
+        fi
+        sums=$(_usage_scan "$w5_iso" "$wk_iso" "$f" ${extra[@]+"${extra[@]}"})
+        read -r in5 cc5 out5 inW ccW outW inL ccL outL model <<EOF
+$sums
+EOF
+        age=$(_humanize_secs $(( now - $(_epoch_mtime "$f") )))
+        printf '%-10s  %-22s  %-15s  %-15s  %-15s  %s\n' \
+            "$(printf '%.8s' "$uuid")" "$model" \
+            "$(_usage_cell $((in5 + cc5)) "$out5")" \
+            "$(_usage_cell $((inW + ccW)) "$outW")" \
+            "$(_usage_cell $((inL + ccL)) "$outL")" \
+            "$age"
+    done
+}
+
 run_usage() {
     local now start5 startw w5_iso wk_iso
     now=$(date +%s)
@@ -111,15 +166,23 @@ run_usage() {
     w5_iso=$(_usage_epoch_to_iso "$start5")
     wk_iso=$(_usage_epoch_to_iso "$startw")
 
+    local all_flag="" target=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --all) all_flag=1; shift ;;
+            -*) error "Unknown usage option: $1. Use 'cs -usage [--all] [<session>]'" ;;
+            *)
+                [ -z "$target" ] || error "Unknown usage option: $1. Use 'cs -usage [--all] [<session>]'"
+                target="$1"; shift ;;
+        esac
+    done
+    if [ -n "$target" ]; then
+        _usage_session_detail "$target"
+        return $?
+    fi
+
     echo "$header"
     echo ""
-
-    local all_flag=""
-    case "${1:-}" in
-        --all) all_flag=1; shift ;;
-        '') : ;;
-        *) error "Unknown usage option: $1. Use 'cs -usage [--all]'" ;;
-    esac
 
     printf '%-24s  %-15s  %-15s  %s\n' "SESSION" "5H IN/OUT" "WEEK IN/OUT" "LAST ACTIVE"
     local rows dir name proj files sums marker age newest old_ifs

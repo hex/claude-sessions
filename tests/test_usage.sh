@@ -190,4 +190,57 @@ EOF
 run_test test_usage_attribution_and_sort
 run_test test_usage_hides_zero_rows_unless_all
 run_test test_usage_live_marker
+
+# Scoped form: one row per conversation file with a LIFETIME column.
+test_usage_scoped_per_conversation() {
+    local sdir="$CS_SESSIONS_ROOT/scoped-sess"
+    mkdir -p "$sdir/.cs/local"
+    local proj
+    proj=$(_transcripts_for "$sdir")
+    cat > "$proj/aaaa1111-2222-3333-4444-555566667777.jsonl" << EOF
+{"type":"assistant","requestId":"r1","timestamp":"$(_iso_mins_ago 5)","message":{"model":"claude-fable-5","usage":{"input_tokens":1000,"cache_creation_input_tokens":0,"output_tokens":100}}}
+EOF
+    cat > "$proj/bbbb1111-2222-3333-4444-555566667777.jsonl" << EOF
+{"type":"assistant","requestId":"r2","timestamp":"$(_iso_mins_ago 20000)","message":{"model":"claude-opus-4-8","usage":{"input_tokens":50000,"cache_creation_input_tokens":0,"output_tokens":5000}}}
+EOF
+    local output
+    output=$("$CS_BIN" -usage scoped-sess 2>&1) || true
+    assert_output_contains "$output" "aaaa1111" "recent conversation row present" || return 1
+    assert_output_contains "$output" "bbbb1111" "old conversation row present (lifetime view has no prefilter)" || return 1
+    assert_output_contains "$output" "claude-opus-4-8" "model column shows per-conversation model" || return 1
+    assert_output_contains "$output" "LIFETIME" "scoped view has a lifetime column" || return 1
+    # Old conversation: zero in both windows, 50.0K / 5.0K lifetime.
+    echo "$output" | grep "bbbb1111" | grep -q "50.0K / 5.0K" || {
+        echo "  FAIL: lifetime column should show 50.0K / 5.0K for the old conversation"
+        return 1
+    }
+}
+
+# Site-B arm: cs <name> -usage works and unknown session errors cleanly.
+test_usage_scoped_site_b() {
+    local sdir="$CS_SESSIONS_ROOT/siteb-sess"
+    mkdir -p "$sdir/.cs/local"
+    local proj
+    proj=$(_transcripts_for "$sdir")
+    cat > "$proj/c.jsonl" << EOF
+{"type":"assistant","requestId":"r1","timestamp":"$(_iso_mins_ago 5)","message":{"model":"m","usage":{"input_tokens":100,"cache_creation_input_tokens":0,"output_tokens":10}}}
+EOF
+    local output
+    output=$("$CS_BIN" siteb-sess -usage 2>&1) || true
+    assert_output_not_contains "$output" "Unknown session command" "site-B arm accepts -usage" || return 1
+    assert_output_contains "$output" "LIFETIME" "site-B form renders the scoped view" || return 1
+}
+
+test_usage_scoped_unknown_session_errors() {
+    local output
+    if output=$("$CS_BIN" -usage no-such-session 2>&1); then
+        echo "  FAIL: expected non-zero exit for unknown session"
+        return 1
+    fi
+    assert_output_contains "$output" "No such session" "clear error for unknown session" || return 1
+}
+
+run_test test_usage_scoped_per_conversation
+run_test test_usage_scoped_site_b
+run_test test_usage_scoped_unknown_session_errors
 report_results
