@@ -229,6 +229,35 @@ test_collision_menu_shows_numbered_options() {
     assert_output_contains "$output" "cancel" "menu offers cancel" || return 1
 }
 
+# The menu's force choice must carry through to the live-duplicate UUID guard:
+# choosing "force start" and then being refused with "use --force" is a dead end.
+test_collision_menu_force_bypasses_live_duplicate_guard() {
+    create_lock_test_session "test-session"
+    local uuid="11111111-2222-4333-8444-555555555555"
+    printf 'claude_session_id: %s\n' "$uuid" > "$CS_SESSIONS_ROOT/test-session/.cs/local/state"
+
+    # ps stub reports a claude process already holding this UUID.
+    local stub="$TEST_TMPDIR/ps-stub"
+    cat > "$stub" << STUB
+#!/usr/bin/env bash
+echo "  47533 ??       0:00.42 claude --resume $uuid"
+STUB
+    chmod +x "$stub"
+
+    sleep 300 &
+    local live_pid=$!
+    echo "$live_pid" > "$CS_SESSIONS_ROOT/test-session/.cs/session.lock"
+
+    local output status=0
+    output=$(printf '1n\n' | CS_ASSUME_TTY=1 CS_PS_BIN="$stub" "$CS_BIN" test-session 2>&1) || status=$?
+    kill "$live_pid" 2>/dev/null || true
+    wait "$live_pid" 2>/dev/null || true
+
+    assert_output_not_contains "$output" "already running elsewhere" \
+        "menu force must bypass the live-duplicate guard like --force" || return 1
+    assert_eq "0" "$status" "menu-forced launch should proceed, got: $output" || return 1
+}
+
 test_collision_menu_on_worktree_session_offers_no_new_task() {
     create_lock_test_session "test-session"
     "$CS_BIN" "test-session@t1" < /dev/null > /dev/null 2>&1 || true
@@ -264,6 +293,7 @@ run_test test_collision_menu_cancel_is_default
 run_test test_collision_menu_three_cancels
 run_test test_collision_menu_shows_numbered_options
 run_test test_collision_menu_force_proceeds
+run_test test_collision_menu_force_bypasses_live_duplicate_guard
 run_test test_collision_menu_on_worktree_session_offers_no_new_task
 
 report_results

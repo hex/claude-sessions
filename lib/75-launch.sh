@@ -7,8 +7,20 @@ launch_claude_code() {
     local is_new="$3"
     local force="${4:-}"
 
+    # Terminal theme (and its real background RGB when known) for the statusline
+    # and hooks, detected while cs still owns the tty and reused by the session
+    # launched next.
+    _export_term_theme
+    # Refresh the palette now that the theme is known so everything below —
+    # the collision menu and the launch banner — reads on a light canvas
+    # (colors were first set at startup, defaulting to dark).
+    setup_palette
+
     # Acquire session lock before anything else
     acquire_session_lock "$session_dir/.cs" "$force" "$session_name"
+    # A force chosen at the collision menu is equivalent to --force for the
+    # rest of the launch.
+    [ "${CS_COLLISION_FORCE:-}" = "1" ] && force="true"
     trap 'reset_tab_title; release_session_lock "'"$session_dir/.cs"'"' EXIT
     trap 'reset_tab_title; release_session_lock "'"$session_dir/.cs"'"; exit 130' INT TERM
 
@@ -78,14 +90,6 @@ launch_claude_code() {
     if [ -n "$claude_session_id" ]; then
         export CS_CLAUDE_SESSION_ID="$claude_session_id"
     fi
-    # Terminal theme (and its real background RGB when known) for the statusline
-    # and hooks, detected while cs still owns the tty and reused by the session
-    # launched next.
-    _export_term_theme
-    # Refresh the palette now that the theme is known so the banner below reads
-    # on a light canvas (colors were first set at startup, defaulting to dark).
-    setup_palette
-
     # Status indicator
     local status_icon status_text
     if [ "$is_new" = "true" ]; then

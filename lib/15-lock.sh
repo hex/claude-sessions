@@ -64,7 +64,10 @@ acquire_session_lock() {
                 warn "Overriding active session lock (PID $lock_pid)"
             elif cs_interactive; then
                 _lock_collision_menu "$session_name" "$lock_pid"
-                # The menu returns only when the user chose force
+                # The menu returns only when the user chose force. Record the
+                # choice so the rest of the launch (live-duplicate UUID guard
+                # included) honors it exactly like an explicit --force.
+                CS_COLLISION_FORCE=1
                 warn "Overriding active session lock (PID $lock_pid)"
             else
                 echo -e "${RED}Error: Session is already open (PID $lock_pid)${NC}" >&2
