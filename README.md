@@ -104,14 +104,14 @@ Running `cs` with no arguments launches an interactive TUI for browsing and mana
 - **Fuzzy search** with `/` — matches characters in order with highlighting; Enter commits the filter
 - **Time-based sections** — sessions grouped under Today, Yesterday, This Week, This Month, Older when sorted by date (the default view)
 - **Action bar** with `Enter` — inline bar shows available actions with shortcut keys
-- **Preview & To-Do panes** — appear beside the list on wide landscape terminals (≥120 cols), or stacked below it (list, then details, then notes) on any window at least 40 cols by 25 rows; toggle with `p`
+- **Preview & To-Do panes** — appear beside the list on wide landscape terminals (≥120 cols), or stacked below it (list, then details, then notes) on any window at least 40 cols by 26 rows; toggle with `p`
 - **Expand row** with `p` — shows session objective (auto-captured from your first prompt) and narrative inline
 - **Create session** with `n` — opens inline dialog to create a new session
 - **Delete** with `d` (confirmation required)
 - **Batch operations** — mark sessions with `Space`, then `D` to batch delete
 - **Rename** with `r`
 - **Manage secrets** with `s` (view values with `v`, auto-redacts after 5 seconds)
-- **Queue a task** — focus the To-Do input with `Tab`, type a prompt, and press `Enter` to add it to the highlighted session's queue for a walk-away run; a `▤ N` badge appears in the To-Do column while that session's queue is non-empty
+- **Queue a task** — focus the To-Do input with `Tab`, type a prompt, and press `Enter` to add it to the highlighted session's queue for a walk-away run; a `▰▱` meter with the count appears in the Queue column while that session's queue is non-empty
 - **Quit** with `q` or `Esc`
 - **Light/dark palette** — the warm palette adapts to the terminal background detected at launch (`CS_TERM_THEME`); set the env var to force `light` or `dark`
 
@@ -246,9 +246,9 @@ In the session picker (`cs` with no argument), the right pane shows a
 **To-Do** panel for the highlighted session: press `Tab` to focus its
 input, type a task and press `Enter` to queue it; `Down` moves into the
 list where `d` deletes and `e` edits a task in place, and `Esc` returns
-to the session list. Sessions with queued tasks get a sortable **To-Do**
-column (`▤ N`) in the table, and the status line shows `▤ N` after the
-session name.
+to the session list. Sessions with queued tasks get a sortable **Queue**
+column (`▰▱` meter and count) in the table, and the status line shows `▤ N`
+after the session name.
 
 ### Live sessions & status
 

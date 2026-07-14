@@ -1,5 +1,5 @@
-// ABOUTME: Color palette and icon definitions matching the cs bash script theme
-// ABOUTME: Provides light/dark palettes keyed off CS_TERM_THEME and Unicode/Nerd Font icons
+// ABOUTME: Color palette definitions matching the cs bash script theme
+// ABOUTME: Provides light/dark B′ token palettes keyed off CS_TERM_THEME
 
 use std::time::SystemTime;
 
@@ -27,20 +27,22 @@ pub struct Palette {
     pub orange: Color,
     pub gold: Color,
     pub rust: Color,
-    /// Alternating row background.
-    pub zebra: Color,
-    /// Selected-row background — one elevation step warmer/lighter than zebra.
-    pub sel_bg: Color,
-    /// Header band background gradient stops (left → right): rust → orange → amber.
-    pub header_bg_lo: Color,
-    pub header_bg_mid: Color,
-    pub header_bg_hi: Color,
-    /// Header label text — near-white, sits on the saturated band.
-    pub header_fg: Color,
     pub flash_success: Color,
     pub flash_error: Color,
-    /// Column separator glyphs.
-    pub sep: Color,
+    /// B′ tokens (spec: docs/superpowers/specs/2026-07-14-tui-bprime-design.md).
+    pub ink: Color,
+    pub mut_: Color,
+    pub faint: Color,
+    pub soft: Color,
+    pub strong: Color,
+    pub ember: Color,
+    pub amber: Color,
+    pub wash: Color,
+    pub teal: Color,
+    /// Masthead-rule / card-border gradient stops.
+    pub hero: [Color; 4],
+    /// Selection-rail gradient stops.
+    pub rail: [Color; 3],
 }
 
 impl Palette {
@@ -55,15 +57,28 @@ impl Palette {
             orange: Color::Rgb(255, 138, 101),
             gold: Color::Rgb(255, 193, 7),
             rust: Color::Rgb(230, 74, 25),
-            zebra: Color::Rgb(32, 29, 28),
-            sel_bg: Color::Rgb(60, 46, 36),
-            header_bg_lo: Color::Rgb(221, 80, 20),
-            header_bg_mid: Color::Rgb(237, 128, 0),
-            header_bg_hi: Color::Rgb(246, 154, 0),
-            header_fg: Color::Rgb(252, 250, 246),
             flash_success: Color::Rgb(30, 50, 30),
             flash_error: Color::Rgb(55, 25, 25),
-            sep: Color::Rgb(50, 45, 42),
+            ink: Color::Rgb(245, 230, 211),
+            mut_: Color::Rgb(161, 136, 127),
+            faint: Color::Rgb(120, 104, 96),
+            soft: Color::Rgb(56, 50, 46),
+            strong: Color::Rgb(90, 78, 66),
+            ember: Color::Rgb(230, 100, 40),
+            amber: Color::Rgb(246, 154, 0),
+            wash: Color::Rgb(60, 46, 36),
+            teal: Color::Rgb(45, 212, 191),
+            hero: [
+                Color::Rgb(221, 80, 20),
+                Color::Rgb(237, 128, 0),
+                Color::Rgb(246, 154, 0),
+                Color::Rgb(214, 162, 30),
+            ],
+            rail: [
+                Color::Rgb(221, 80, 20),
+                Color::Rgb(246, 154, 0),
+                Color::Rgb(250, 180, 60),
+            ],
         }
     }
 
@@ -78,17 +93,30 @@ impl Palette {
             green: Color::Rgb(92, 140, 84),
             yellow: Color::Rgb(162, 122, 58),
             orange: Color::Rgb(190, 110, 74),
-            gold: Color::Rgb(156, 118, 56),
-            rust: Color::Rgb(166, 86, 60),
-            zebra: Color::Rgb(238, 232, 224),
-            sel_bg: Color::Rgb(231, 215, 195),
-            header_bg_lo: Color::Rgb(221, 80, 20),
-            header_bg_mid: Color::Rgb(237, 128, 0),
-            header_bg_hi: Color::Rgb(246, 154, 0),
-            header_fg: Color::Rgb(252, 250, 246),
+            gold: Color::Rgb(176, 132, 40),
+            rust: Color::Rgb(183, 71, 34),
             flash_success: Color::Rgb(214, 236, 206),
             flash_error: Color::Rgb(246, 214, 210),
-            sep: Color::Rgb(216, 207, 196),
+            ink: Color::Rgb(43, 33, 24),
+            mut_: Color::Rgb(122, 106, 88),
+            faint: Color::Rgb(168, 151, 130),
+            soft: Color::Rgb(226, 213, 196),
+            strong: Color::Rgb(201, 180, 155),
+            ember: Color::Rgb(216, 90, 36),
+            amber: Color::Rgb(242, 167, 53),
+            wash: Color::Rgb(255, 240, 218),
+            teal: Color::Rgb(15, 118, 110),
+            hero: [
+                Color::Rgb(143, 50, 28),
+                Color::Rgb(216, 90, 36),
+                Color::Rgb(242, 167, 53),
+                Color::Rgb(214, 162, 30),
+            ],
+            rail: [
+                Color::Rgb(193, 58, 29),
+                Color::Rgb(228, 91, 34),
+                Color::Rgb(232, 167, 46),
+            ],
         }
     }
 
@@ -153,14 +181,6 @@ impl Palette {
             self.comment
         }
     }
-
-    /// A point on a rust↔gold triangle wave for the selected-row shimmer.
-    /// `phase` is expected in [0, 1); the wave peaks at gold around phase 0.5.
-    pub fn shimmer_color(&self, phase: f32) -> Color {
-        let tri = if phase < 0.5 { phase * 2.0 } else { (1.0 - phase) * 2.0 };
-        let (r, g, b) = lerp_rgb(rgb_of(self.rust), rgb_of(self.gold), tri);
-        Color::Rgb(r, g, b)
-    }
 }
 
 /// Extract RGB components from a `Color::Rgb`, falling back to a neutral grey.
@@ -175,6 +195,19 @@ pub fn rgb_of(c: Color) -> (u8, u8, u8) {
 pub fn lerp_rgb(a: (u8, u8, u8), b: (u8, u8, u8), t: f32) -> (u8, u8, u8) {
     let lerp = |x: u8, y: u8| -> u8 { (x as f32 + t * (y as f32 - x as f32)) as u8 };
     (lerp(a.0, b.0), lerp(a.1, b.1), lerp(a.2, b.2))
+}
+
+/// Sample a multi-stop gradient at cell `i` of `n`. Piecewise-linear across
+/// the stops; `n <= 1` returns the first stop.
+pub fn ramp(stops: &[(u8, u8, u8)], n: u16, i: u16) -> (u8, u8, u8) {
+    if n <= 1 || stops.len() == 1 {
+        return stops[0];
+    }
+    let t = i as f32 / (n - 1) as f32;
+    let pos = t * (stops.len() - 1) as f32;
+    let a = pos.floor() as usize;
+    let b = (a + 1).min(stops.len() - 1);
+    lerp_rgb(stops[a], stops[b], pos - a as f32)
 }
 
 /// Parse a `light`/`dark` string (case-insensitive).
@@ -276,37 +309,44 @@ mod tests {
     }
 
     #[test]
-    fn shimmer_endpoints_are_rust_and_gold() {
-        let p = Palette::dark();
-        assert_eq!(p.shimmer_color(0.0), p.rust); // trough → rust
-        assert_eq!(p.shimmer_color(0.5), p.gold); // peak → gold
-    }
-
-    #[test]
     fn theme_override_parsing() {
         assert_eq!(theme_from_str("light"), Some(Theme::Light));
         assert_eq!(theme_from_str("DARK"), Some(Theme::Dark));
         assert_eq!(theme_from_str(" Light "), Some(Theme::Light));
         assert_eq!(theme_from_str("auto"), None);
     }
-}
 
-pub struct Icons {
-    pub lock: &'static str,
-    /// Glyph shown before a Github repository slug.
-    pub branch: &'static str,
-}
+    #[test]
+    fn bprime_light_tokens_are_council_values() {
+        let p = Palette::light();
+        assert_eq!(p.ink, Color::Rgb(43, 33, 24));
+        assert_eq!(p.wash, Color::Rgb(255, 240, 218));
+        assert_eq!(p.teal, Color::Rgb(15, 118, 110));
+        assert_eq!(p.ember, Color::Rgb(216, 90, 36));
+        assert_eq!(p.rust, Color::Rgb(183, 71, 34));
+        assert_eq!(p.gold, Color::Rgb(176, 132, 40));
+        assert_eq!(p.hero[0], Color::Rgb(143, 50, 28));
+        assert_eq!(p.hero[3], Color::Rgb(214, 162, 30));
+        assert_eq!(p.rail[1], Color::Rgb(228, 91, 34));
+    }
 
-pub fn icons() -> Icons {
-    if std::env::var("CS_NERD_FONTS").as_deref() == Ok("1") {
-        Icons {
-            lock: "\u{f033e}",
-            branch: "\u{e0a0}",
-        }
-    } else {
-        Icons {
-            lock: "\u{26bf}",
-            branch: "\u{2387}",
-        }
+    #[test]
+    fn bprime_dark_tokens_exist_and_differ() {
+        let l = Palette::light();
+        let d = Palette::dark();
+        assert_ne!(d.wash, l.wash);
+        assert_ne!(d.teal, l.teal);
+        assert_eq!(d.hero[1], Color::Rgb(237, 128, 0));
+        assert_eq!(d.rail[2], Color::Rgb(250, 180, 60));
+    }
+
+    #[test]
+    fn ramp_hits_endpoints_and_interpolates() {
+        let stops = [(0u8, 0u8, 0u8), (100, 100, 100)];
+        assert_eq!(ramp(&stops, 5, 0), (0, 0, 0));
+        assert_eq!(ramp(&stops, 5, 4), (100, 100, 100));
+        assert_eq!(ramp(&stops, 5, 2), (50, 50, 50));
+        // n <= 1 degenerates to the first stop
+        assert_eq!(ramp(&stops, 1, 0), (0, 0, 0));
     }
 }
