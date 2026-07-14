@@ -313,23 +313,19 @@ _doctor_check_subagent_statusline() {
 }
 
 _doctor_check_token_cost() {
-    local cwd="${CLAUDE_SESSION_DIR:-$PWD}"
-    local encoded
-    encoded=$(_claude_encode_path "$cwd")
-    local transcripts_dir="${CS_TRANSCRIPTS_DIR:-$HOME/.claude/projects}/$encoded"
+    local proj_dir
+    proj_dir=$(_claude_project_dir "${CLAUDE_SESSION_DIR:-$PWD}")
 
-    local files=("$transcripts_dir"/*.jsonl)
+    local files=("$proj_dir"/*.jsonl)
     if [ ! -e "${files[0]:-}" ]; then
         _doctor_ok "Tokens (this project): no transcripts found yet"
         return
     fi
-    local h_in h_out
-    read -r h_in h_out < <(jq -r '.message.usage // empty | "\(.input_tokens // 0) \(.output_tokens // 0)"' "${files[@]}" 2>/dev/null \
-        | awk '
-            function fmt(n) { if (n>=1000000) return sprintf("%.1fM",n/1000000); else if (n>=1000) return sprintf("%.1fK",n/1000); else return sprintf("%d",n) }
-            {i+=$1; o+=$2}
-            END {print fmt(i+0), fmt(o+0)}')
-    _doctor_ok "Tokens (this project): ${h_in} input, ${h_out} output"
+    local sums in_l out_l
+    sums=$(_usage_scan "" "" "${files[@]}")
+    in_l=$(printf '%s' "$sums" | awk '{print $7}')
+    out_l=$(printf '%s' "$sums" | awk '{print $9}')
+    _doctor_ok "Tokens (this project): $(_usage_fmt "$in_l") input, $(_usage_fmt "$out_l") output"
 }
 
 _doctor_check_auto_memory() {
