@@ -126,17 +126,20 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     let action_bar_height = if app.mode == Mode::SessionMenu { 1u16 } else { 0 };
 
     let chunks = Layout::vertical([
+        Constraint::Length(2), // masthead: brand row + gradient rule
         Constraint::Min(5),
         Constraint::Length(action_bar_height),
         Constraint::Length(1),
     ])
     .split(frame.area());
 
-    match choose_layout(chunks[0], app.show_preview) {
+    render_masthead(app, frame, chunks[0]);
+
+    match choose_layout(chunks[1], app.show_preview) {
         PaneLayout::SideBySide => {
             app.request_preview();
             let cols = Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
-                .split(chunks[0]);
+                .split(chunks[1]);
             render_table(app, frame, cols[0], true);
             let right_rows =
                 Layout::vertical([Constraint::Percentage(55), Constraint::Percentage(45)])
@@ -151,23 +154,23 @@ pub fn render(app: &mut App, frame: &mut Frame) {
                 Constraint::Percentage(30),
                 Constraint::Percentage(20),
             ])
-            .split(chunks[0]);
+            .split(chunks[1]);
             render_table(app, frame, rows[0], true);
             render_preview_pane(app, frame, rows[1]);
             render_notes_pane(app, frame, rows[2]);
         }
         PaneLayout::TableOnly => {
-            render_table(app, frame, chunks[0], false);
+            render_table(app, frame, chunks[1], false);
         }
     }
 
     if app.mode == Mode::SessionMenu {
-        render_action_bar(app, frame, chunks[1]);
+        render_action_bar(app, frame, chunks[2]);
     }
 
     match &app.mode {
-        Mode::Search => render_search_bar(app, frame, chunks[2]),
-        _ => render_footer(app, frame, chunks[2]),
+        Mode::Search => render_search_bar(app, frame, chunks[3]),
+        _ => render_footer(app, frame, chunks[3]),
     }
 
     // Overlay dialogs on top
@@ -180,6 +183,55 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         Mode::Secrets => render_secrets_popup(app, frame),
         Mode::CommandOutput(text) => render_command_output(text, p, frame),
         _ => {}
+    }
+}
+
+/// B′ masthead: brand, prominent counts, explicit sort readout, and a
+/// full-width HERO gradient rule beneath.
+fn render_masthead(app: &App, frame: &mut Frame, area: Rect) {
+    let p = app.theme;
+    if area.height < 2 {
+        return;
+    }
+    let live = app.sessions.iter().filter(|s| s.is_locked).count();
+    let dir = match app.sort_dir {
+        SortDirection::Asc => "\u{25b2}",
+        SortDirection::Desc => "\u{25bc}",
+    };
+    let line = Line::from(vec![
+        Span::styled("\u{258c} ", Style::default().fg(p.rail[0])),
+        Span::styled("cs-tui", Style::default().fg(p.rust).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!("  {} sessions", app.filtered.len()),
+            Style::default().fg(p.ink).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(format!("  \u{b7}  {} live", live), Style::default().fg(p.teal)),
+        Span::styled(
+            format!("  \u{b7}  sorted by {} {}", sort_label(app.sort_col), dir),
+            Style::default().fg(p.mut_),
+        ),
+    ]);
+    frame.render_widget(Paragraph::new(line), Rect { height: 1, ..area });
+
+    let stops: Vec<(u8, u8, u8)> = p.hero.iter().map(|c| theme::rgb_of(*c)).collect();
+    let buf = frame.buffer_mut();
+    for i in 0..area.width {
+        let (r, g, b) = theme::ramp(&stops, area.width, i);
+        if let Some(cell) = buf.cell_mut(ratatui::layout::Position::new(area.x + i, area.y + 1)) {
+            cell.set_char('\u{2501}');
+            cell.set_fg(ratatui::style::Color::Rgb(r, g, b));
+        }
+    }
+}
+
+fn sort_label(col: SortColumn) -> &'static str {
+    match col {
+        SortColumn::Name => "session",
+        SortColumn::Created => "created",
+        SortColumn::Modified => "age",
+        SortColumn::Secrets => "secrets",
+        SortColumn::Todo => "queue",
+        SortColumn::Github => "github",
     }
 }
 
@@ -481,10 +533,6 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
     if show_todos { widths.push(Constraint::Length(7)); }
     if show_github { widths.push(Constraint::Min(15)); }
 
-    let session_count = app.filtered.len();
-    let version = std::env::var("CS_VERSION").unwrap_or_default();
-    let title = gradient_title(p, &version, session_count);
-
     // Resolve column geometry with ratatui's own solver so mouse hit-testing
     // never drifts from where the Table actually draws. (Drift between a
     // hand-rolled approximation and the real layout is what made the old
@@ -517,8 +565,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(list_border))
-                .title(title),
+                .border_style(Style::default().fg(list_border)),
         )
         .row_highlight_style(Style::default().bg(p.sel_bg).add_modifier(Modifier::BOLD))
         .highlight_symbol(format!("{SELECT_BAR} "))
@@ -612,33 +659,6 @@ fn warm_ramp(a: (u8, u8, u8), b: (u8, u8, u8), c: (u8, u8, u8), t: f32) -> (u8, 
     }
 }
 
-fn gradient_title<'a>(p: Palette, version: &str, session_count: usize) -> Line<'a> {
-    // Vivid rust → orange → gold sweep across the whole title — name, version,
-    // and count all ride the same ramp so the header reads as one warm band.
-    let rust = theme::rgb_of(p.rust);
-    let orange = theme::rgb_of(p.orange);
-    let gold = theme::rgb_of(p.gold);
-
-    let title = format!("claude-sessions v{} [{} sessions] ", version, session_count);
-    let total = title.chars().count().max(2) as f32;
-
-    let mut spans: Vec<Span<'a>> = Vec::with_capacity(title.chars().count() + 1);
-    spans.push(Span::styled(" ", Style::default()));
-
-    for (i, ch) in title.chars().enumerate() {
-        let t = i as f32 / (total - 1.0);
-        let (r, g, b) = warm_ramp(rust, orange, gold, t);
-        spans.push(Span::styled(
-            ch.to_string(),
-            Style::default()
-                .fg(ratatui::style::Color::Rgb(r, g, b))
-                .add_modifier(Modifier::BOLD),
-        ));
-    }
-
-    Line::from(spans)
-}
-
 fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
     let p = app.theme;
     // Status message takes priority in Normal mode
@@ -690,9 +710,38 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
             Style::default().fg(p.gold).add_modifier(Modifier::BOLD),
         ));
     }
-    footer_spans.push(Span::styled(keys, Style::default().fg(p.comment)));
+    for (i, part) in keys.split("  ").filter(|s| !s.is_empty()).enumerate() {
+        if i > 0 {
+            footer_spans.push(Span::raw("   "));
+        }
+        match part.split_once(':') {
+            Some((k, label)) => {
+                footer_spans.push(Span::styled(
+                    format!("{k}:"),
+                    Style::default().fg(p.rust).add_modifier(Modifier::BOLD),
+                ));
+                footer_spans.push(Span::styled(
+                    label.to_string(),
+                    Style::default().fg(p.mut_),
+                ));
+            }
+            None => footer_spans.push(Span::styled(part.to_string(), Style::default().fg(p.mut_))),
+        }
+    }
+    let version = std::env::var("CS_VERSION").unwrap_or_default();
     let footer = Paragraph::new(Line::from(footer_spans));
     frame.render_widget(footer, area);
+    if !version.is_empty() {
+        let vtext = format!("v{version}");
+        let w = vtext.chars().count() as u16;
+        if area.width > w + 2 {
+            let vrect = Rect { x: area.x + area.width - w, width: w, ..area };
+            frame.render_widget(
+                Paragraph::new(Span::styled(vtext, Style::default().fg(p.faint))),
+                vrect,
+            );
+        }
+    }
 }
 
 fn render_search_bar(app: &App, frame: &mut Frame, area: Rect) {
@@ -1861,5 +1910,43 @@ mod tests {
             choose_layout(Rect::new(0, 0, 80, 50), false),
             PaneLayout::TableOnly
         );
+    }
+
+    #[test]
+    fn masthead_shows_brand_counts_and_sort() {
+        let mut app = App::new(one_session());
+        app.theme = Palette::dark();
+        let text = render_wide(&mut app);
+        assert!(text.contains("cs-tui"), "masthead brand missing:\n{text}");
+        assert!(text.contains("sessions"), "session count missing:\n{text}");
+        assert!(text.contains("live"), "live count missing:\n{text}");
+        assert!(text.contains("sorted by"), "sort readout missing:\n{text}");
+    }
+
+    #[test]
+    fn masthead_rule_spans_width_with_hero_ramp() {
+        let mut app = App::new(one_session());
+        app.theme = Palette::dark();
+        // Render into a TestBackend and inspect row 1 directly.
+        let backend = TestBackend::new(80, 24);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(&mut app, f)).unwrap();
+        let buf = term.backend().buffer();
+        let first = buf.cell(ratatui::layout::Position::new(0, 1)).unwrap();
+        let last = buf.cell(ratatui::layout::Position::new(79, 1)).unwrap();
+        assert_eq!(first.symbol(), "\u{2501}");
+        assert_eq!(last.symbol(), "\u{2501}");
+        assert_ne!(first.fg, last.fg, "rule must be a ramp, not one color");
+    }
+
+    #[test]
+    fn footer_styles_keys_and_right_aligns_version() {
+        std::env::set_var("CS_VERSION", "9.9.9");
+        let mut app = App::new(one_session());
+        app.theme = Palette::dark();
+        let text = render_wide(&mut app);
+        std::env::remove_var("CS_VERSION");
+        assert!(text.contains("q:quit"), "key hints missing:\n{text}");
+        assert!(text.contains("9.9.9"), "version missing from footer:\n{text}");
     }
 }
