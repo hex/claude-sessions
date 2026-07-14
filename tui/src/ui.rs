@@ -23,10 +23,12 @@ const PREVIEW_MIN_WIDTH: u16 = 120;
 /// table alone.
 const STACK_MIN_WIDTH: u16 = 40;
 
-/// Minimum height for the stacked layout. The three panes take 50/30/20 of the
-/// area, and the To-Do pane needs 5 rows (two borders, the input, its rule, and
-/// one task). 20% of 25 is the first height that clears that floor.
-const STACK_MIN_HEIGHT: u16 = 25;
+/// Minimum height for the stacked layout, measured against the content pane —
+/// the terminal height minus the masthead's 2 rows and the footer's 1 row.
+/// The three panes take 50/30/20 of that pane, and the To-Do pane needs 5 rows
+/// (two borders, the input, its rule, and one task). 20% of 23 is the first
+/// height that clears that floor.
+const STACK_MIN_HEIGHT: u16 = 23;
 
 /// How the main content area is divided among the session table and the
 /// preview/notes detail panes.
@@ -523,7 +525,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
 
             if show_secrets {
                 let (secrets, secrets_color) = if s.secrets_count > 0 {
-                    (s.secrets_count.to_string(), meta_color)
+                    (s.secrets_count.to_string(), p.ink)
                 } else if dimmed {
                     ("\u{b7}".to_string(), p.comment)
                 } else {
@@ -534,11 +536,6 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             }
 
             if show_todos {
-                let todo = if s.queue_depth > 0 {
-                    format!("{} {}", qbar(s.queue_depth), s.queue_depth)
-                } else {
-                    qbar(0)
-                };
                 let qcolor = if dimmed {
                     p.comment
                 } else if s.queue_depth > 3 {
@@ -548,7 +545,19 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
                 } else {
                     p.faint
                 };
-                cells.push(Cell::from(with_lead(Line::from(todo))).style(Style::default().fg(qcolor)));
+                // The digit is a count, not part of the meter — it stays MUT
+                // rather than riding the bar's depth-driven accent color.
+                let todo_line = if s.queue_depth > 0 {
+                    let digit_color = if dimmed { p.comment } else { p.mut_ };
+                    Line::from(vec![
+                        Span::styled(qbar(s.queue_depth), Style::default().fg(qcolor)),
+                        Span::raw(" "),
+                        Span::styled(s.queue_depth.to_string(), Style::default().fg(digit_color)),
+                    ])
+                } else {
+                    Line::from(Span::styled(qbar(0), Style::default().fg(qcolor)))
+                };
+                cells.push(Cell::from(with_lead(todo_line)));
             }
 
             if show_github {
@@ -636,7 +645,9 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
     // their true heights, so clicks below a group header or an expanded row
     // still resolve to the right session. Only on-screen rows are recorded.
     app.row_hit_spans.clear();
+    let buf = frame.buffer_mut();
     let bottom = area.height; // no border to reserve a bottom row for
+    let session_col_right = col_rects[0].x + col_rects[0].width;
     let mut y = 2u16;
     for (idx, &h) in row_heights
         .iter()
@@ -647,13 +658,32 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             break;
         }
         app.row_hit_spans.push((y, h, idx));
+
+        // The in-cell dash run (name_lines, above) only ever fills the Session
+        // column — the Table clips each cell's Text to that column's width.
+        // Paint the rest of a divider row's width, from the Session column's
+        // right edge to the table's right edge, directly into the buffer so
+        // the rule reaches across the meta columns too. A section-start row
+        // carries its divider as the first line of the row, one line lower
+        // when it also has the blank spacer above it (every section but the
+        // first — see section_lead_count above).
+        if app.section_labels.get(idx).copied().flatten().is_some() {
+            let divider_offset = if idx == 0 { 0 } else { 1 };
+            let divider_y = inner.y + y + divider_offset;
+            for x in session_col_right..inner.x.saturating_add(inner.width) {
+                if let Some(cell) = buf.cell_mut(ratatui::layout::Position::new(x, divider_y)) {
+                    cell.set_char('\u{2500}');
+                    cell.set_fg(p.soft);
+                }
+            }
+        }
+
         y = y.saturating_add(h);
     }
 
     // A single hairline rule beneath the header, drawn into the header's blank
     // bottom-margin row. Structure stays quiet — no vertical dividers or table
     // border; alignment and the wash selection carry the columns.
-    let buf = frame.buffer_mut();
     let rule_y = inner.y + 1;
     for x in inner.x..inner.x.saturating_add(inner.width) {
         if let Some(cell) = buf.cell_mut(ratatui::layout::Position::new(x, rule_y)) {
@@ -663,9 +693,10 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
     }
 
     // Recolor the selection accent bar along the rail gradient, sampled by a
-    // triangle-wave phase. We locate the bar by its glyph in the selection
-    // column rather than recomputing the selected row's y (rows have variable
-    // height), which keeps this robust.
+    // sawtooth phase (rises linearly across PERIOD_MS, then resets to 0). We
+    // locate the bar by its glyph in the selection column rather than
+    // recomputing the selected row's y (rows have variable height), which
+    // keeps this robust.
     let phase = {
         const PERIOD_MS: u128 = 1400;
         let ms = std::time::SystemTime::now()
@@ -738,7 +769,11 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
             Style::default().fg(p.gold).add_modifier(Modifier::BOLD),
         ));
     }
-    for (i, part) in keys.split("  ").filter(|s| !s.is_empty()).enumerate() {
+    // Parts are trimmed before rejoining: the Notes-focus hint strings above
+    // use 3-space separators, which split("  ") leaves a stray leading space
+    // on (e.g. "editing" then " Enter:save") — trimming normalizes every
+    // part so the loop below can rejoin them with one standard 3-space gap.
+    for (i, part) in keys.split("  ").map(str::trim).filter(|s| !s.is_empty()).enumerate() {
         if i > 0 {
             footer_spans.push(Span::raw("   "));
         }
@@ -756,19 +791,30 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
             None => footer_spans.push(Span::styled(part.to_string(), Style::default().fg(p.mut_))),
         }
     }
+
     let version = std::env::var("CS_VERSION").unwrap_or_default();
+    let vtext = if version.is_empty() { String::new() } else { format!("v{version}") };
+    let vw = vtext.chars().count() as u16;
+    let show_version = !vtext.is_empty() && area.width > vw + 2;
+
+    // When the version will be painted, clip the hints to leave its column
+    // range (plus a 3-col gap) untouched, so the version can never land on
+    // top of hint text — it used to be painted over whatever the hints
+    // Paragraph had already drawn there.
+    let hints_area = if show_version {
+        Rect { width: area.width.saturating_sub(vw + 3), ..area }
+    } else {
+        area
+    };
     let footer = Paragraph::new(Line::from(footer_spans));
-    frame.render_widget(footer, area);
-    if !version.is_empty() {
-        let vtext = format!("v{version}");
-        let w = vtext.chars().count() as u16;
-        if area.width > w + 2 {
-            let vrect = Rect { x: area.x + area.width - w, width: w, ..area };
-            frame.render_widget(
-                Paragraph::new(Span::styled(vtext, Style::default().fg(p.faint))),
-                vrect,
-            );
-        }
+    frame.render_widget(footer, hints_area);
+
+    if show_version {
+        let vrect = Rect { x: area.x + area.width - vw, width: vw, ..area };
+        frame.render_widget(
+            Paragraph::new(Span::styled(vtext, Style::default().fg(p.faint))),
+            vrect,
+        );
     }
 }
 
@@ -1672,6 +1718,62 @@ mod tests {
     }
 
     #[test]
+    fn section_divider_reaches_the_table_right_edge_past_meta_columns() {
+        // The in-cell dash run (previous test) only ever fills the Session
+        // column, because the Table clips each cell's Text to that column's
+        // width. With a Queue meta column visible, the divider rule must
+        // still reach past it to the table's own right edge.
+        use std::time::{Duration, SystemTime};
+        let mut recent = one_session();
+        recent[0].name = "recent-session".into();
+        recent[0].modified_ts = Some(SystemTime::now());
+        recent[0].queue_depth = 2; // pulls the Queue meta column into view
+        let mut old = one_session();
+        old[0].name = "legacy-session".into();
+        old[0].modified_ts = Some(SystemTime::now() - Duration::from_secs(400 * 86400));
+        let sessions = vec![recent.into_iter().next().unwrap(), old.into_iter().next().unwrap()];
+        let mut app = App::new(sessions);
+        app.theme = Palette::dark();
+        app.show_preview = false; // TableOnly: the table spans the full width
+        let p = app.theme;
+
+        let backend = TestBackend::new(100, 24);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(&mut app, f)).unwrap();
+        let buf = term.backend().buffer();
+
+        let cell_at = |x: u16, y: u16| buf.cell(ratatui::layout::Position::new(x, y)).unwrap();
+        let row_text = |y: u16| -> String {
+            (0..100u16).map(|x| cell_at(x, y).symbol()).collect()
+        };
+
+        let header_row = (0..24u16)
+            .map(row_text)
+            .find(|r| r.contains("Queue"))
+            .expect("Queue column header should render when a session has a queued task");
+        let queue_x = header_row.find("Queue").unwrap() as u16;
+
+        let divider_y = (0..24u16)
+            .find(|&y| row_text(y).contains("── Today \u{b7}"))
+            .expect("a Today section divider should render") as u16;
+
+        // Probe well inside the Queue column's span, past where the old
+        // in-cell dash run was clipped.
+        let probe_x = queue_x + 2;
+        let cell = cell_at(probe_x, divider_y);
+        assert_eq!(
+            cell.symbol(),
+            "\u{2500}",
+            "divider rule should reach past the Age/Queue columns at x={probe_x}, row={:?}",
+            row_text(divider_y)
+        );
+        assert_eq!(
+            cell.fg, p.soft,
+            "divider rule beyond the Session column should be painted SOFT"
+        );
+    }
+
+    #[test]
     fn portrait_terminal_stacks_list_details_and_notes() {
         // 80×50 reads as portrait, so the panes stack. At width 80 — below
         // PREVIEW_MIN_WIDTH — the side-by-side layout can't fire, so the to-do
@@ -2067,10 +2169,43 @@ mod tests {
 
     #[test]
     fn short_narrow_area_falls_back_to_table_only() {
-        // 80×24 is neither tall enough to stack nor wide enough for side-by-side.
+        // 80×22 is one row below STACK_MIN_HEIGHT and nowhere near wide
+        // enough for side-by-side.
         assert_eq!(
-            choose_layout(Rect::new(0, 0, 80, 24), true),
+            choose_layout(Rect::new(0, 0, 80, 22), true),
             PaneLayout::TableOnly
+        );
+    }
+
+    #[test]
+    fn stacked_layout_floor_accounts_for_masthead_and_footer_rows() {
+        // choose_layout sees the content pane after the 2-row masthead and
+        // 1-row footer are already carved off the terminal — not the raw
+        // terminal height. STACK_MIN_HEIGHT is sized against that content
+        // pane, so the terminal-height floor for entering Stacked layout is
+        // 3 rows higher than STACK_MIN_HEIGHT itself: 26 total rows.
+        let has_card_corner = |text: &str| text.contains('\u{256d}');
+
+        let probe_session = |name: &str| {
+            let mut s = one_session();
+            s[0].name = name.into();
+            s
+        };
+
+        let mut app = App::new(probe_session("cs-tui-floor-probe-26"));
+        app.theme = Palette::dark();
+        let stacked = render_at(&mut app, 80, 26);
+        assert!(
+            has_card_corner(&stacked),
+            "26 terminal rows should clear the stacked-layout floor: {stacked}"
+        );
+
+        let mut app = App::new(probe_session("cs-tui-floor-probe-25"));
+        app.theme = Palette::dark();
+        let not_stacked = render_at(&mut app, 80, 25);
+        assert!(
+            !has_card_corner(&not_stacked),
+            "25 terminal rows should stay below the stacked-layout floor: {not_stacked}"
         );
     }
 
@@ -2152,6 +2287,18 @@ mod tests {
         std::env::remove_var("CS_VERSION");
         assert!(text.contains("q:quit"), "key hints missing:\n{text}");
         assert!(text.contains("9.9.9"), "version missing from footer:\n{text}");
+        // 140 cols is wide enough for the full hint line plus the version
+        // with room to spare, so the version should sit flush against the
+        // row's right edge, not just somewhere in the row.
+        let footer_row = text.lines().last().unwrap();
+        assert!(
+            footer_row.ends_with("v9.9.9"),
+            "version should be right-aligned to the footer's last column: {footer_row:?}"
+        );
+        assert!(
+            footer_row.contains("1-6:sort"),
+            "full hint line should render intact at 140 cols: {footer_row:?}"
+        );
     }
 
     #[test]
@@ -2161,6 +2308,45 @@ mod tests {
         assert_eq!(qbar(3), "\u{25b0}\u{25b0}\u{25b1}\u{25b1}");
         assert_eq!(qbar(5), "\u{25b0}\u{25b0}\u{25b0}\u{25b1}");
         assert_eq!(qbar(9), "\u{25b0}\u{25b0}\u{25b0}\u{25b0}");
+    }
+
+    #[test]
+    fn queue_digit_uses_mut_not_the_bar_color() {
+        // The queue-depth number is a count, not the meter itself — it should
+        // read as MUT text beside the depth-colored ▰▱ bar, not ride the same
+        // accent color the bar uses.
+        let mut sessions = one_session();
+        sessions[0].name = "queue-probe".into();
+        sessions[0].queue_depth = 5; // > 3 => bar color is RUST
+        let mut app = App::new(sessions);
+        app.theme = Palette::dark();
+        app.show_preview = false;
+        let p = app.theme;
+        let backend = TestBackend::new(100, 24);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(&mut app, f)).unwrap();
+        let buf = term.backend().buffer();
+
+        let row_text = |y: u16| -> String {
+            (0..100u16)
+                .map(|x| buf.cell(ratatui::layout::Position::new(x, y)).unwrap().symbol())
+                .collect()
+        };
+        let session_y = (0..24u16)
+            .find(|&y| row_text(y).contains("queue-probe"))
+            .expect("the session row should render");
+        let bar_x = (0..100u16)
+            .find(|&x| {
+                buf.cell(ratatui::layout::Position::new(x, session_y)).unwrap().symbol() == "\u{25b0}"
+            })
+            .expect("the queue bar should render on the session's row");
+        let digit_x = (0..100u16)
+            .find(|&x| buf.cell(ratatui::layout::Position::new(x, session_y)).unwrap().symbol() == "5")
+            .expect("the queue depth digit should render on the session's row");
+        let bar_fg = buf.cell(ratatui::layout::Position::new(bar_x, session_y)).unwrap().fg;
+        let digit_fg = buf.cell(ratatui::layout::Position::new(digit_x, session_y)).unwrap().fg;
+        assert_eq!(bar_fg, p.rust, "bar should stay depth-colored (depth 5 > 3 => RUST)");
+        assert_eq!(digit_fg, p.mut_, "digit should use MUT, not ride the bar color");
     }
 
     #[test]
@@ -2183,6 +2369,46 @@ mod tests {
             }
         }
         assert_eq!(corners, 0, "table must render without a bordered Block");
+
+        // "zebra free" is a claim about row backgrounds, not just borders —
+        // assert it directly: two adjacent, unselected, non-flashed rows
+        // must share the same background instead of alternating.
+        let mut sessions = vec![one_session().into_iter().next().unwrap()];
+        sessions[0].name = "alpha".into();
+        let mut bravo = one_session();
+        bravo[0].name = "bravo".into();
+        let mut charlie = one_session();
+        charlie[0].name = "charlie".into();
+        sessions.push(bravo.into_iter().next().unwrap());
+        sessions.push(charlie.into_iter().next().unwrap());
+        let mut app = App::new(sessions);
+        app.theme = Palette::dark();
+        app.sort_col = SortColumn::Name;
+        app.sort_dir = SortDirection::Asc;
+        app.apply_filter_and_sort();
+        app.table_state.select(Some(0)); // leaves "bravo" and "charlie" unselected
+        let backend = TestBackend::new(80, 24);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(&mut app, f)).unwrap();
+        let buf = term.backend().buffer();
+        let row_text = |y: u16| -> String {
+            (0..80u16)
+                .map(|x| buf.cell(ratatui::layout::Position::new(x, y)).unwrap().symbol())
+                .collect()
+        };
+        let bravo_y = (0..24u16)
+            .find(|&y| row_text(y).contains("bravo"))
+            .expect("bravo row should render");
+        let charlie_y = (0..24u16)
+            .find(|&y| row_text(y).contains("charlie"))
+            .expect("charlie row should render");
+        let probe_x = app.table_area.x + SELECT_WIDTH;
+        let bravo_bg = buf.cell(ratatui::layout::Position::new(probe_x, bravo_y)).unwrap().bg;
+        let charlie_bg = buf.cell(ratatui::layout::Position::new(probe_x, charlie_y)).unwrap().bg;
+        assert_eq!(
+            bravo_bg, charlie_bg,
+            "adjacent unselected rows must share the same background, not alternate"
+        );
     }
 
     #[test]
@@ -2251,6 +2477,88 @@ mod tests {
     }
 
     #[test]
+    fn selected_row_rail_bar_uses_a_rail_stop_color() {
+        // The selection accent bar is recolored post-render by sampling the
+        // 3-stop rail gradient at a time-driven phase, so the exact color
+        // varies frame to frame — but ramp() lands exactly on a stop at each
+        // of the 3 phase indices (0/1/2), so the bar's fg must always be a
+        // member of the rail set, never an in-between blend or an unrelated
+        // color.
+        let mut app = App::new(locked_and_recent_sessions());
+        app.theme = Palette::dark();
+        app.sort_col = SortColumn::Name;
+        app.sort_dir = SortDirection::Asc;
+        app.apply_filter_and_sort();
+        app.table_state.select(Some(0));
+        let p = app.theme;
+        let backend = TestBackend::new(80, 24);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(&mut app, f)).unwrap();
+        let buf = term.backend().buffer();
+
+        let bar_fg = (0..24u16)
+            .find_map(|y| {
+                let cell = buf.cell(ratatui::layout::Position::new(app.table_area.x, y))?;
+                (cell.symbol() == SELECT_BAR).then_some(cell.fg)
+            })
+            .expect("selected row should render the rail accent bar glyph");
+        assert!(
+            p.rail.contains(&bar_fg),
+            "rail bar color {bar_fg:?} should be one of the 3 rail stops {:?}",
+            p.rail
+        );
+    }
+
+    #[test]
+    fn secrets_count_uses_ink_not_recency_color() {
+        // The Secrets column's digit is a count, not a metadata timestamp —
+        // it should read as primary INK, not ride the recency-driven meta
+        // color the Created column uses. Age the session so recency_color
+        // diverges from ink, or the assertion couldn't tell the two apart.
+        use std::time::{Duration, SystemTime};
+        let ts = SystemTime::now() - Duration::from_secs(3 * 86400);
+        let mut sessions = one_session();
+        sessions[0].name = "secrets-probe".into();
+        sessions[0].secrets_count = 9;
+        sessions[0].modified_ts = Some(ts);
+        let mut app = App::new(sessions);
+        app.theme = Palette::dark();
+        let p = app.theme;
+        assert_ne!(
+            p.recency_color(Some(ts)),
+            p.ink,
+            "fixture sanity: recency and ink must differ at this age for the assertion to discriminate"
+        );
+
+        let backend = TestBackend::new(100, 24);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(&mut app, f)).unwrap();
+        let buf = term.backend().buffer();
+
+        let row_text = |y: u16| -> String {
+            (0..100u16)
+                .map(|x| buf.cell(ratatui::layout::Position::new(x, y)).unwrap().symbol())
+                .collect()
+        };
+        let session_y = (0..24u16)
+            .find(|&y| row_text(y).contains("secrets-probe"))
+            .expect("the session row should render");
+        let secrets_x = (0..100u16)
+            .find(|&x| {
+                buf.cell(ratatui::layout::Position::new(x, session_y))
+                    .unwrap()
+                    .symbol()
+                    == "9"
+            })
+            .expect("the secrets count should render on the session's row");
+        let cell = buf.cell(ratatui::layout::Position::new(secrets_x, session_y)).unwrap();
+        assert_eq!(
+            cell.fg, p.ink,
+            "secrets count should use INK, not the recency-driven meta color"
+        );
+    }
+
+    #[test]
     fn card_frame_top_border_carries_title_and_ramp() {
         let p = Palette::light();
         let backend = ratatui::backend::TestBackend::new(40, 8);
@@ -2279,5 +2587,65 @@ mod tests {
         for label in ["created", "modified", "state", "repo", "objective"] {
             assert!(text.contains(label), "missing meta label {label}:\n{text}");
         }
+    }
+
+    #[test]
+    fn footer_version_never_overwrites_hints_at_80_cols() {
+        // At 80 cols the full hint line doesn't fit even without a version —
+        // the bug was that the version Paragraph painted over whatever hint
+        // text landed at the row's right edge instead of that space being
+        // reserved for it. With the fix, the hints Paragraph is clipped to
+        // leave a gap (3 cols) plus the version's own width before it's
+        // drawn, so the two can never share a cell.
+        std::env::set_var("CS_VERSION", "9.9.9");
+        let mut app = App::new(one_session());
+        app.theme = Palette::dark();
+        let text = render_at(&mut app, 80, 24);
+        std::env::remove_var("CS_VERSION");
+        let footer_row = text.lines().last().unwrap();
+        assert_eq!(footer_row.chars().count(), 80);
+
+        let version_width = 6; // "v9.9.9"
+        let gap_start = 80 - version_width - 3; // 71
+        let gap_end = 80 - version_width; // 74
+        let hints_part = &footer_row[..gap_start];
+        let gap_part = &footer_row[gap_start..gap_end];
+        let version_part = &footer_row[gap_end..];
+
+        assert!(
+            hints_part.contains("q:quit"),
+            "key hints should still render: {footer_row:?}"
+        );
+        assert!(
+            !hints_part.contains("9.9.9"),
+            "version must not bleed into the hints region: {footer_row:?}"
+        );
+        assert_eq!(
+            gap_part, "   ",
+            "the reserved gap between hints and version must be blank, not clipped hint text: {footer_row:?}"
+        );
+        assert_eq!(
+            version_part, "v9.9.9",
+            "version should be painted whole in its own reserved region: {footer_row:?}"
+        );
+    }
+
+    #[test]
+    fn notes_editing_footer_hints_have_uniform_spacing() {
+        // The Notes-focus hint strings use 3-space separators internally,
+        // which used to leave a stray leading space on every part after the
+        // first once split on 2-space boundaries (e.g. "editing" then
+        // " Enter:save", rendering as a 4-space gap). Parts are trimmed
+        // before rejoining so every gap is the same 3 spaces.
+        let mut app = App::new(one_session());
+        app.theme = Palette::dark();
+        app.focus = Focus::Notes;
+        app.notes_focus = NotesFocus::Editing;
+        let text = render_wide(&mut app);
+        let footer_row = text.lines().last().unwrap();
+        assert!(
+            footer_row.contains("editing   Enter:save   Esc:cancel"),
+            "hint parts should be joined by a uniform 3-space gap: {footer_row:?}"
+        );
     }
 }
