@@ -1321,4 +1321,35 @@ run_test test_executed_directly_still_renders
 run_test test_enable_registers_both_status_lines
 run_test test_disable_leaves_a_foreign_subagent_statusline_alone
 run_test test_enable_warns_that_a_restart_is_required
+
+# ============================================================================
+# Rate-limit stamp: the render writes .cs/local/limits for cs -usage anchoring
+# ============================================================================
+
+# rate_limits present + a session context: the render stamps .cs/local/limits.
+test_limits_file_written_from_rate_limits() {
+    export CLAUDE_SESSION_NAME="limsess"
+    mkdir -p "$CS_SESSIONS_ROOT/limsess/.cs/local"
+    local fixture='{"session_name":"limsess","model":{"display_name":"Opus"},"context_window":{"used_percentage":8},"cost":{"total_cost_usd":0},"rate_limits":{"five_hour":{"used_percentage":23.5,"resets_at":1784041200},"seven_day":{"used_percentage":41.2,"resets_at":1784457600}},"workspace":{"current_dir":"/tmp"}}'
+    run_sl "$fixture" > /dev/null
+    local lim="$CS_SESSIONS_ROOT/limsess/.cs/local/limits"
+    assert_file_exists "$lim" "limits file should be written" || return 1
+    assert_file_contains "$lim" "five_hour_used_pct: 23" "5h pct stamped (integer)" || return 1
+    assert_file_contains "$lim" "five_hour_resets_at: 1784041200" "5h reset stamped" || return 1
+    assert_file_contains "$lim" "seven_day_used_pct: 41" "week pct stamped (integer)" || return 1
+    assert_file_contains "$lim" "seven_day_resets_at: 1784457600" "week reset stamped" || return 1
+    assert_file_contains "$lim" "stamped_at: " "stamp present" || return 1
+}
+
+# No rate_limits in the stdin JSON (older Claude Code): no limits file.
+test_limits_file_skipped_without_rate_limits() {
+    export CLAUDE_SESSION_NAME="limsess2"
+    mkdir -p "$CS_SESSIONS_ROOT/limsess2/.cs/local"
+    local fixture='{"session_name":"limsess2","model":{"display_name":"Opus"},"context_window":{"used_percentage":8},"workspace":{"current_dir":"/tmp"}}'
+    run_sl "$fixture" > /dev/null
+    assert_file_not_exists "$CS_SESSIONS_ROOT/limsess2/.cs/local/limits" "no limits file without rate_limits" || return 1
+}
+
+run_test test_limits_file_written_from_rate_limits
+run_test test_limits_file_skipped_without_rate_limits
 report_results

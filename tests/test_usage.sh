@@ -74,4 +74,62 @@ EOF
 
 run_test test_usage_dedups_by_request_id
 run_test test_usage_window_boundaries
+
+# A seeded limits file anchors the header and the 5h window at resets_at - 5h.
+test_usage_header_anchored_by_limits_file() {
+    local sdir="$CS_SESSIONS_ROOT/anchor-sess"
+    mkdir -p "$sdir/.cs/local"
+    local now reset5 resetw
+    now=$(date +%s)
+    reset5=$((now + 3600))    # 5h window began 4h ago
+    resetw=$((now + 86400))
+    cat > "$sdir/.cs/local/limits" << EOF
+five_hour_used_pct: 62
+five_hour_resets_at: $reset5
+seven_day_used_pct: 41
+seven_day_resets_at: $resetw
+stamped_at: $now
+EOF
+    local output
+    output=$("$CS_BIN" -usage 2>&1) || true
+    assert_output_contains "$output" "5h 62%" "header shows 5h used pct" || return 1
+    assert_output_contains "$output" "week 41%" "header shows week used pct" || return 1
+    assert_output_contains "$output" "resets" "header shows reset time" || return 1
+    assert_output_not_contains "$output" "windows are rolling" "anchored header replaces rolling label" || return 1
+}
+
+# Anchoring is real: a request 4.5h old is OUTSIDE a 5h window that began 4h
+# ago (resets_at = now+1h), but inside a rolling now-5h window. The fixture
+# session name deliberately has no hyphen: the grep proves the 5h cell is '-',
+# and a hyphen in the name would satisfy the pattern regardless of the cells.
+test_usage_window_start_is_resets_minus_span() {
+    local sdir="$CS_SESSIONS_ROOT/anchormath"
+    mkdir -p "$sdir/.cs/local"
+    local now
+    now=$(date +%s)
+    cat > "$sdir/.cs/local/limits" << EOF
+five_hour_used_pct: 10
+five_hour_resets_at: $((now + 3600))
+seven_day_used_pct: 10
+seven_day_resets_at: $((now + 86400))
+stamped_at: $now
+EOF
+    local proj
+    proj=$(_transcripts_for "$sdir")
+    cat > "$proj/conv1.jsonl" << EOF
+{"type":"assistant","requestId":"r1","timestamp":"$(_iso_mins_ago 270)","message":{"model":"m","usage":{"input_tokens":7000,"cache_creation_input_tokens":0,"output_tokens":700}}}
+EOF
+    local output
+    output=$("$CS_BIN" -usage 2>&1) || true
+    # 5h cell renders '-' (request predates the anchored window start) while
+    # the week cell carries the tokens — that ordering proves the anchor math.
+    assert_output_contains "$output" "anchormath" "row appears via week usage" || return 1
+    echo "$output" | grep "anchormath" | grep -q -- "-.*7.0K / 700" || {
+        echo "  FAIL: 5h cell should be '-' while week cell has 7.0K / 700"
+        return 1
+    }
+}
+
+run_test test_usage_header_anchored_by_limits_file
+run_test test_usage_window_start_is_resets_minus_span
 report_results

@@ -69,15 +69,49 @@ _usage_cell() {
     fi
 }
 
+# Newest rate-limit stamp across all sessions (account limits are global, so
+# the freshest statusline render wins). Sets globals rather than printing:
+# callers need multiple values and command substitution runs in a subshell.
+_usage_read_limits() {
+    U_5H_PCT=""; U_5H_RESET=""; U_WK_PCT=""; U_WK_RESET=""; U_STAMP=0
+    local f stamp
+    for f in "$SESSIONS_ROOT"/*/.cs/local/limits; do
+        [ -f "$f" ] || continue
+        stamp=$(_read_local_state "$f" stamped_at)
+        case "$stamp" in ''|*[!0-9]*) continue ;; esac
+        if [ "$stamp" -gt "$U_STAMP" ]; then
+            U_STAMP=$stamp
+            U_5H_PCT=$(_read_local_state "$f" five_hour_used_pct)
+            U_5H_RESET=$(_read_local_state "$f" five_hour_resets_at)
+            U_WK_PCT=$(_read_local_state "$f" seven_day_used_pct)
+            U_WK_RESET=$(_read_local_state "$f" seven_day_resets_at)
+        fi
+    done
+}
+
+# Epoch -> local HH:MM for the header's reset display.
+_usage_epoch_to_hhmm() {
+    date -r "$1" +%H:%M 2>/dev/null || date -d "@$1" +%H:%M 2>/dev/null
+}
+
 run_usage() {
     local now start5 startw w5_iso wk_iso
     now=$(date +%s)
+    _usage_read_limits
     start5=$((now - 18000))
     startw=$((now - 604800))
+    local header="Rate limits: unknown (statusline not running); windows are rolling"
+    if [ "$U_STAMP" -gt 0 ]; then
+        case "$U_5H_RESET" in *[!0-9]*|'') ;; *) start5=$((U_5H_RESET - 18000)) ;; esac
+        case "$U_WK_RESET" in *[!0-9]*|'') ;; *) startw=$((U_WK_RESET - 604800)) ;; esac
+        header="Rate limits: 5h ${U_5H_PCT:-?}%"
+        case "$U_5H_RESET" in *[!0-9]*|'') ;; *) header="$header (resets $(_usage_epoch_to_hhmm "$U_5H_RESET"))" ;; esac
+        header="$header · week ${U_WK_PCT:-?}%"
+    fi
     w5_iso=$(_usage_epoch_to_iso "$start5")
     wk_iso=$(_usage_epoch_to_iso "$startw")
 
-    echo "Rate limits: unknown (statusline not running); windows are rolling"
+    echo "$header"
     echo ""
 
     local shown=0 dir name proj sums
