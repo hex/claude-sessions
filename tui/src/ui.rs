@@ -1,11 +1,12 @@
 // ABOUTME: Renders the session table, header, footer, and modal dialogs using Ratatui widgets
 // ABOUTME: Handles layout splitting, column sizing, sort indicators, and search input display
 
-use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::buffer::Buffer;
+use ratatui::layout::{Constraint, Layout, Margin, Rect};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
-    Block, BorderType, Borders, Cell, Clear, HighlightSpacing, Paragraph, Row, Table, Wrap,
+    Block, Borders, Cell, Clear, HighlightSpacing, Paragraph, Row, Table, Wrap,
 };
 use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
@@ -1089,156 +1090,184 @@ fn render_command_output(text: &str, p: Palette, frame: &mut Frame) {
     frame.render_widget(paragraph, popup_area);
 }
 
-/// A body-section header for the preview pane: a muted rust accent bar, then
-/// the label in bold gold. Shared by every section so the accent stays uniform.
+/// A body-section header for the preview pane: a muted accent bar, then the
+/// label in bold. Shared by every section so the accent stays uniform.
 fn section_header(label: impl Into<String>, p: Palette) -> Line<'static> {
     Line::from(vec![
-        Span::styled("\u{258f} ", Style::default().fg(p.rust)),
+        Span::styled("\u{258f} ", Style::default().fg(p.ember)),
         Span::styled(
             label.into(),
-            Style::default().fg(p.gold).add_modifier(Modifier::BOLD),
+            Style::default().fg(p.mut_).add_modifier(Modifier::BOLD),
         ),
     ])
 }
 
+/// Rounded card with a HERO-ramp top border and the title set into the frame.
+/// Paints over the edge cells of `area`; callers render content in the inset
+/// interior first.
+fn card_frame(buf: &mut Buffer, area: Rect, title: &str, side: Color, p: Palette) {
+    if area.width < 4 || area.height < 2 {
+        return;
+    }
+    let stops: Vec<(u8, u8, u8)> = p.hero.iter().map(|c| theme::rgb_of(*c)).collect();
+    let mut top: Vec<char> = vec!['\u{256d}'];
+    top.extend(format!(" {} ", title).chars());
+    while (top.len() as u16) < area.width - 1 {
+        top.push('\u{2500}');
+    }
+    top.truncate(area.width as usize - 1);
+    top.push('\u{256e}');
+    for (i, ch) in top.iter().enumerate() {
+        let (r, g, b) = theme::ramp(&stops, area.width, i as u16);
+        if let Some(cell) = buf.cell_mut(ratatui::layout::Position::new(area.x + i as u16, area.y))
+        {
+            cell.set_char(*ch).set_fg(Color::Rgb(r, g, b));
+        }
+    }
+    for y in (area.y + 1)..(area.y + area.height - 1) {
+        for x in [area.x, area.x + area.width - 1] {
+            if let Some(cell) = buf.cell_mut(ratatui::layout::Position::new(x, y)) {
+                cell.set_char('\u{2502}').set_fg(side);
+            }
+        }
+    }
+    let by = area.y + area.height - 1;
+    for x in area.x..area.x + area.width {
+        let ch = if x == area.x {
+            '\u{2570}'
+        } else if x == area.x + area.width - 1 {
+            '\u{256f}'
+        } else {
+            '\u{2500}'
+        };
+        if let Some(cell) = buf.cell_mut(ratatui::layout::Position::new(x, by)) {
+            cell.set_char(ch).set_fg(side);
+        }
+    }
+}
+
 fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
     let p = app.theme;
+    let inner = area.inner(Margin::new(1, 1));
+
     let session = match app.selected_session() {
         Some(s) => s,
         None => {
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(p.rust))
-                .title(" Preview ")
-                .title_style(Style::default().fg(p.rust));
-            let p = Paragraph::new("No session selected")
-                .style(Style::default().fg(p.comment))
-                .block(block);
-            frame.render_widget(p, area);
+            let paragraph =
+                Paragraph::new("No session selected").style(Style::default().fg(p.faint));
+            frame.render_widget(paragraph, inner);
+            card_frame(frame.buffer_mut(), area, "preview", p.strong, p);
             return;
         }
     };
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(p.rust))
-        .title(format!(" {} ", session.name))
-        .title_style(Style::default().fg(p.gold).add_modifier(Modifier::BOLD));
-
     let mut lines: Vec<Line> = Vec::new();
-
-    // Session metadata
-    if let Some(ref created) = session.created {
-        lines.push(Line::from(vec![
-            Span::styled("Created:  ", Style::default().fg(p.comment)),
-            Span::styled(created.as_str(), Style::default().fg(p.fg)),
-        ]));
-    }
-    if let Some(ref modified) = session.modified {
-        lines.push(Line::from(vec![
-            Span::styled("Modified: ", Style::default().fg(p.comment)),
-            Span::styled(modified.as_str(), Style::default().fg(p.fg)),
-        ]));
-    }
-    if let Some(ref repo) = session.git_repo {
-        lines.push(Line::from(vec![
-            Span::styled("Github:   ", Style::default().fg(p.comment)),
-            Span::styled(repo.as_str(), Style::default().fg(p.green)),
-        ]));
-    }
-    if session.secrets_count > 0 {
-        lines.push(Line::from(vec![
-            Span::styled("Secrets:  ", Style::default().fg(p.comment)),
-            Span::styled(
-                format!("{}", session.secrets_count),
-                Style::default().fg(p.yellow),
-            ),
-        ]));
-    }
-    if session.is_locked {
-        let lock = theme::icons().lock;
-        let pid_text = session
-            .lock_pid
-            .map(|pid| format!("{} Locked (PID {})", lock, pid))
-            .unwrap_or_else(|| format!("{} Locked", lock));
-        lines.push(Line::from(Span::styled(
-            pid_text,
-            Style::default().fg(p.red),
-        )));
-    }
-
-    // Thin rule separating front-matter (metadata) from body (content).
-    let inner_width = (area.width as usize).saturating_sub(2);
     lines.push(Line::from(Span::styled(
-        "\u{2500}".repeat(inner_width),
-        Style::default().fg(p.comment),
+        session.name.as_str(),
+        Style::default().fg(p.ink).add_modifier(Modifier::BOLD),
     )));
 
-    // Preview content from .cs/ files, once the worker has read them.
-    if let Some(preview) = app.preview_cache.get(&session.name) {
-        if let Some(ref obj) = preview.objective {
-            lines.push(section_header("Objective", p));
-            lines.push(Line::from(Span::styled(
-                obj.as_str(),
-                Style::default().fg(p.fg),
-            )));
-            lines.push(Line::from(""));
-        }
-
-        if !preview.discoveries.is_empty() {
-            lines.push(section_header("Narrative", p));
-            for disc in &preview.discoveries {
-                let truncated = truncate_str(disc, (area.width as usize).saturating_sub(6));
-                lines.push(Line::from(vec![
-                    Span::styled("  - ", Style::default().fg(p.comment)),
-                    Span::styled(truncated, Style::default().fg(p.yellow)),
-                ]));
-            }
-            lines.push(Line::from(""));
-        }
-
-        if !preview.memory_entries.is_empty() {
-            lines.push(section_header("Memory", p));
-            for entry in &preview.memory_entries {
-                let truncated = truncate_str(entry, (area.width as usize).saturating_sub(6));
-                lines.push(Line::from(vec![
-                    Span::styled("  ", Style::default()),
-                    Span::styled(truncated, Style::default().fg(p.comment)),
-                ]));
-            }
-            lines.push(Line::from(""));
-        }
-
-        if !preview.contributors.is_empty() {
-            lines.push(section_header("Contributors", p));
-            for c in &preview.contributors {
-                let truncated = truncate_str(c, (area.width as usize).saturating_sub(6));
-                lines.push(Line::from(vec![
-                    Span::styled("  ", Style::default()),
-                    Span::styled(truncated, Style::default().fg(p.comment)),
-                ]));
-            }
-            lines.push(Line::from(""));
-        }
-
-        if preview.objective.is_none() && preview.discoveries.is_empty() && preview.memory_entries.is_empty() && preview.contributors.is_empty() {
-            lines.push(Line::from(Span::styled(
-                "No .cs/ metadata",
-                Style::default().fg(p.comment).add_modifier(Modifier::DIM),
-            )));
+    // Labeled meta rows: label FAINT at the pane's left edge, value at a fixed
+    // column so the block reads as a table even without rules between rows.
+    let state_value = if session.is_locked {
+        match session.lock_pid {
+            Some(pid) => format!("\u{25cf} live \u{b7} locked {}", pid),
+            None => "\u{25cf} live \u{b7} locked".to_string(),
         }
     } else {
-        // The worker holds this session and has not answered yet.
-        lines.push(Line::from(Span::styled(
-            "Loading\u{2026}",
-            Style::default().fg(p.comment).add_modifier(Modifier::DIM),
-        )));
+        "dormant".to_string()
+    };
+    let mut meta: Vec<(&str, String, Color)> = vec![
+        ("created", session.created.clone().unwrap_or_else(|| "\u{2014}".into()), p.ink),
+        ("modified", session.modified.clone().unwrap_or_else(|| "\u{2014}".into()), p.ink),
+        ("state", state_value, p.teal),
+        ("repo", session.git_repo.clone().unwrap_or_else(|| "\u{2014}".into()), p.ink),
+    ];
+    let cached_preview = app.preview_cache.get(&session.name);
+    if let Some(preview) = cached_preview {
+        meta.push((
+            "objective",
+            preview.objective.clone().unwrap_or_else(|| "\u{2014}".into()),
+            p.ink,
+        ));
+        meta.push((
+            "narrative",
+            preview.last_discovery.clone().unwrap_or_else(|| "\u{2014}".into()),
+            p.mut_,
+        ));
+    }
+    const VALUE_COL: usize = 11;
+    let value_width = (inner.width as usize).saturating_sub(VALUE_COL);
+    for (label, value, color) in &meta {
+        let pad = VALUE_COL.saturating_sub(label.len());
+        lines.push(Line::from(vec![
+            Span::styled(*label, Style::default().fg(p.faint)),
+            Span::raw(" ".repeat(pad)),
+            Span::styled(truncate_str(value, value_width), Style::default().fg(*color)),
+        ]));
+    }
+    lines.push(Line::from(""));
+
+    // Body sections from .cs/ files, once the worker has read them.
+    match cached_preview {
+        Some(preview) => {
+            if !preview.discoveries.is_empty() {
+                lines.push(section_header("Discoveries", p));
+                for disc in &preview.discoveries {
+                    let truncated = truncate_str(disc, (inner.width as usize).saturating_sub(4));
+                    lines.push(Line::from(vec![
+                        Span::styled("  - ", Style::default().fg(p.faint)),
+                        Span::styled(truncated, Style::default().fg(p.mut_)),
+                    ]));
+                }
+                lines.push(Line::from(""));
+            }
+
+            if !preview.memory_entries.is_empty() {
+                lines.push(section_header("Memory", p));
+                for entry in &preview.memory_entries {
+                    let truncated = truncate_str(entry, (inner.width as usize).saturating_sub(4));
+                    lines.push(Line::from(vec![
+                        Span::raw("  "),
+                        Span::styled(truncated, Style::default().fg(p.faint)),
+                    ]));
+                }
+                lines.push(Line::from(""));
+            }
+
+            if !preview.contributors.is_empty() {
+                lines.push(section_header("Contributors", p));
+                for c in &preview.contributors {
+                    let truncated = truncate_str(c, (inner.width as usize).saturating_sub(4));
+                    lines.push(Line::from(vec![
+                        Span::raw("  "),
+                        Span::styled(truncated, Style::default().fg(p.faint)),
+                    ]));
+                }
+            }
+
+            if preview.discoveries.is_empty()
+                && preview.memory_entries.is_empty()
+                && preview.contributors.is_empty()
+            {
+                lines.push(Line::from(Span::styled(
+                    "no additional metadata",
+                    Style::default().fg(p.faint).add_modifier(Modifier::DIM),
+                )));
+            }
+        }
+        None => {
+            // The worker holds this session and has not answered yet.
+            lines.push(Line::from(Span::styled(
+                "loading\u{2026}",
+                Style::default().fg(p.faint).add_modifier(Modifier::DIM),
+            )));
+        }
     }
 
-    let paragraph = Paragraph::new(lines)
-        .block(block)
-        .wrap(Wrap { trim: true });
-    frame.render_widget(paragraph, area);
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
+    frame.render_widget(paragraph, inner);
+    card_frame(frame.buffer_mut(), area, "preview", p.strong, p);
 }
 
 fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
@@ -1247,24 +1276,10 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
     let input_focused = focused && app.notes_focus == NotesFocus::Input;
     let list_focused = focused && app.notes_focus == NotesFocus::List;
 
-    let border_color = if focused { p.gold } else { p.rust };
-    let mut title_style = Style::default().fg(p.gold);
-    if focused {
-        title_style = title_style.add_modifier(Modifier::BOLD);
-    }
-
-    let title = match app.selected_session() {
-        Some(s) => format!(" To-Do · {} ", s.name),
-        None => " To-Do ".to_string(),
-    };
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(border_color))
-        .title(title)
-        .title_style(title_style);
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+    // Focus brightens the card's side/bottom border from soft to strong; the
+    // top border always carries the HERO ramp regardless of focus.
+    let side = if focused { p.strong } else { p.soft };
+    let inner = area.inner(Margin::new(1, 1));
 
     // Input line on top, a full-width separator rule, then the task list.
     let rows = Layout::vertical([
@@ -1279,25 +1294,25 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
     let input_line = if app.notes_focus == NotesFocus::Editing {
         Line::from(Span::styled(
             format!(" editing {} \u{b7} Enter saves \u{b7} Esc cancels", app.notes_selected + 1),
-            Style::default().fg(p.comment).add_modifier(Modifier::DIM),
+            Style::default().fg(p.faint).add_modifier(Modifier::DIM),
         ))
     } else if input_focused {
         let win = app.queue_input.window(input_inner);
         Line::from(vec![
             Span::raw(" "),
-            Span::styled(win.before, Style::default().fg(p.fg)),
-            Span::styled("\u{2588}", Style::default().fg(p.gold)),
-            Span::styled(win.after, Style::default().fg(p.fg)),
+            Span::styled(win.before, Style::default().fg(p.ink)),
+            Span::styled("\u{2588}", Style::default().fg(p.amber)),
+            Span::styled(win.after, Style::default().fg(p.ink)),
         ])
     } else if app.queue_input.text().is_empty() {
         Line::from(Span::styled(
             " Tab to add a task\u{2026}",
-            Style::default().fg(p.comment).add_modifier(Modifier::DIM),
+            Style::default().fg(p.faint).add_modifier(Modifier::DIM),
         ))
     } else {
         Line::from(vec![
             Span::raw(" "),
-            Span::styled(app.queue_input.text(), Style::default().fg(p.fg)),
+            Span::styled(app.queue_input.text(), Style::default().fg(p.ink)),
         ])
     };
     frame.render_widget(Paragraph::new(input_line), rows[0]);
@@ -1305,12 +1320,12 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
     // Separator between the input and the list, matching the panel border.
     let rule = "\u{2500}".repeat(rows[1].width as usize);
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(rule, Style::default().fg(border_color)))),
+        Paragraph::new(Line::from(Span::styled(rule, Style::default().fg(side)))),
         rows[1],
     );
 
-    // Numbered list of queued tasks, one line each. The highlighted row shows a
-    // gold marker; the row being edited becomes an italic text field with a
+    // Numbered list of queued tasks, one line each. The highlighted row shows an
+    // amber marker; the row being edited becomes an italic text field with a
     // scrolling block cursor.
     let tasks = app
         .selected_session()
@@ -1321,7 +1336,7 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
     let list_lines: Vec<Line> = if tasks.is_empty() {
         vec![Line::from(Span::styled(
             " (no queued tasks)",
-            Style::default().fg(p.comment).add_modifier(Modifier::DIM),
+            Style::default().fg(p.faint).add_modifier(Modifier::DIM),
         ))]
     } else {
         tasks
@@ -1332,9 +1347,9 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
                 let highlighted =
                     editing || (list_focused && i == app.notes_selected);
                 let (marker, marker_color) = if highlighted {
-                    ("\u{25b8} ", p.gold)
+                    ("\u{25b8} ", p.amber)
                 } else {
-                    ("  ", p.comment)
+                    ("  ", p.faint)
                 };
                 let num = format!("{}. ", i + 1);
                 // Columns available for the task text: left pad(1) + marker(2) +
@@ -1349,12 +1364,12 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
                 ];
                 if editing {
                     let win = app.queue_input.window(avail);
-                    let italic = Style::default().fg(p.fg).add_modifier(Modifier::ITALIC);
+                    let italic = Style::default().fg(p.ink).add_modifier(Modifier::ITALIC);
                     spans.push(Span::styled(win.before, italic));
-                    spans.push(Span::styled("\u{2588}", Style::default().fg(p.gold)));
+                    spans.push(Span::styled("\u{2588}", Style::default().fg(p.amber)));
                     spans.push(Span::styled(win.after, italic));
                 } else {
-                    let mut text_style = Style::default().fg(p.fg);
+                    let mut text_style = Style::default().fg(p.ink);
                     if highlighted {
                         text_style = text_style.add_modifier(Modifier::BOLD);
                     }
@@ -1366,6 +1381,8 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
     };
     let list = Paragraph::new(list_lines);
     frame.render_widget(list, rows[2]);
+
+    card_frame(frame.buffer_mut(), area, "to-do", side, p);
 }
 
 fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
@@ -1537,6 +1554,31 @@ mod tests {
         render_at(app, 140, 30)
     }
 
+    /// A session with a pre-populated preview cache, so the preview pane's
+    /// labeled meta block renders fully without waiting on the background
+    /// preview worker.
+    fn preview_test_app() -> App {
+        let mut sessions = one_session();
+        sessions[0].name = "cs-tui-preview-meta-probe".into();
+        sessions[0].git_repo = Some("hex/claude-sessions".into());
+        sessions[0].is_locked = true;
+        sessions[0].lock_pid = Some(4242);
+        let mut app = App::new(sessions);
+        app.theme = Palette::dark();
+        app.show_preview = true;
+        app.preview_cache.insert(
+            "cs-tui-preview-meta-probe".into(),
+            crate::session::SessionPreview {
+                objective: Some("redesign the picker".into()),
+                last_discovery: Some("council: cut braille, group".into()),
+                discoveries: Vec::new(),
+                memory_entries: Vec::new(),
+                contributors: Vec::new(),
+            },
+        );
+        app
+    }
+
     /// Two sessions in "Today", one in "Older", default-sorted by Modified —
     /// the section-divider fixture for label/count and spacer-row assertions.
     fn sectioned_test_app() -> App {
@@ -1610,8 +1652,8 @@ mod tests {
         // Scope the check to the table's own columns: at this width the table
         // sits beside the preview pane, and borderless the table's rows now
         // land on the same absolute terminal row as unrelated preview-pane
-        // text (e.g. "Modified: ..."), which would otherwise false-positive
-        // a "2026" match that has nothing to do with the divider.
+        // text (e.g. the "modified" meta row), which would otherwise
+        // false-positive a "2026" match that has nothing to do with the divider.
         let table_width = app.table_area.width as usize;
         let today_table_slice: String = today_row.chars().take(table_width).collect();
         assert!(
@@ -1634,8 +1676,8 @@ mod tests {
     #[test]
     fn portrait_terminal_stacks_list_details_and_notes() {
         // 80×50 reads as portrait, so the panes stack. At width 80 — below
-        // PREVIEW_MIN_WIDTH — the side-by-side layout can't fire, so the To-Do
-        // panel and the preview's "Created:" label appearing at all proves the
+        // PREVIEW_MIN_WIDTH — the side-by-side layout can't fire, so the to-do
+        // card and the preview's "created" label appearing at all proves the
         // vertical split engaged. A probe name no other test seeds on disk keeps
         // the empty-queue assertion from racing the queue tests.
         let mut sessions = one_session();
@@ -1643,13 +1685,17 @@ mod tests {
         let mut app = App::new(sessions);
         app.theme = Palette::dark();
         let joined = render_at(&mut app, 80, 50);
-        assert!(joined.contains("To-Do"), "notes panel title should render: {joined}");
+        assert!(joined.contains("to-do"), "notes card title should render: {joined}");
+        assert!(
+            joined.contains('\u{256d}'),
+            "card corners should render once the panes open: {joined}"
+        );
         assert!(
             joined.contains("no queued tasks"),
             "empty queue placeholder should render: {joined}"
         );
         assert!(
-            joined.contains("Created:"),
+            joined.contains("created"),
             "preview pane metadata should render: {joined}"
         );
     }
@@ -1665,7 +1711,11 @@ mod tests {
         let mut app = App::new(sessions);
         app.theme = Palette::dark();
         let joined = render_wide(&mut app);
-        assert!(joined.contains("To-Do"), "To-Do panel title should render: {joined}");
+        assert!(joined.contains("to-do"), "to-do card title should render: {joined}");
+        assert!(
+            joined.contains('\u{256d}'),
+            "card corners should render once the panes open: {joined}"
+        );
         assert!(
             joined.contains("no queued tasks"),
             "empty queue should show placeholder: {joined}"
@@ -2147,5 +2197,36 @@ mod tests {
             .symbol();
         assert_eq!(locked_gutter, "\u{25aa}", "locked row shows the locked square at the gutter x");
         assert_eq!(recent_gutter, "\u{25cf}", "unlocked row shows the recency dot at the gutter x");
+    }
+
+    #[test]
+    fn card_frame_top_border_carries_title_and_ramp() {
+        let p = Palette::light();
+        let backend = ratatui::backend::TestBackend::new(40, 8);
+        let mut term = ratatui::Terminal::new(backend).unwrap();
+        term.draw(|f| {
+            let area = ratatui::layout::Rect::new(0, 0, 40, 8);
+            card_frame(f.buffer_mut(), area, "preview", p.strong, p);
+        })
+        .unwrap();
+        let buf = term.backend().buffer();
+        let cell = |x: u16, y: u16| buf.cell(ratatui::layout::Position::new(x, y)).unwrap();
+        assert_eq!(cell(0, 0).symbol(), "\u{256d}");
+        assert_eq!(cell(39, 0).symbol(), "\u{256e}");
+        assert_eq!(cell(0, 7).symbol(), "\u{2570}");
+        assert_eq!(cell(39, 7).symbol(), "\u{256f}");
+        // title chars sit in the top border starting at x=1: " preview "
+        assert_eq!(cell(2, 0).symbol(), "p");
+        // ramp: fg differs across the top row
+        assert_ne!(cell(1, 0).fg, cell(38, 0).fg);
+    }
+
+    #[test]
+    fn preview_pane_shows_labeled_meta() {
+        let mut app = preview_test_app();
+        let text = render_wide(&mut app);
+        for label in ["created", "modified", "state", "repo", "objective"] {
+            assert!(text.contains(label), "missing meta label {label}:\n{text}");
+        }
     }
 }
