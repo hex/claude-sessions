@@ -217,7 +217,7 @@ fn render_masthead(app: &App, frame: &mut Frame, area: Rect) {
         Span::styled("\u{258c} ", Style::default().fg(p.rail[0])),
         Span::styled("cs-tui", Style::default().fg(p.rust).add_modifier(Modifier::BOLD)),
         Span::styled(
-            format!("  {} sessions", app.filtered.len()),
+            format!("  {} sessions", app.sessions.len()),
             Style::default().fg(p.ink).add_modifier(Modifier::BOLD),
         ),
         Span::styled(format!("  \u{b7}  {} live", live), Style::default().fg(p.teal)),
@@ -293,18 +293,18 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
     };
 
     let mut header_cells = vec![
-        header_cell("Session", SortColumn::Name),
-        header_cell("Created", SortColumn::Created),
-        header_cell("Age", SortColumn::Modified),
+        header_cell("SESSION", SortColumn::Name),
+        header_cell("CREATED", SortColumn::Created),
+        header_cell("AGE", SortColumn::Modified),
     ];
     if show_secrets {
-        header_cells.push(header_cell("Secrets", SortColumn::Secrets));
+        header_cells.push(header_cell("SECRETS", SortColumn::Secrets));
     }
     if show_todos {
-        header_cells.push(header_cell("Queue", SortColumn::Todo));
+        header_cells.push(header_cell("QUEUE", SortColumn::Todo));
     }
     if show_github {
-        header_cells.push(header_cell("Github", SortColumn::Github));
+        header_cells.push(header_cell("GITHUB", SortColumn::Github));
     }
 
     let header = Row::new(header_cells).bottom_margin(1);
@@ -785,11 +785,11 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
         match part.split_once(':') {
             Some((k, label)) => {
                 footer_spans.push(Span::styled(
-                    format!("{k}:"),
+                    k.to_string(),
                     Style::default().fg(p.rust).add_modifier(Modifier::BOLD),
                 ));
                 footer_spans.push(Span::styled(
-                    label.to_string(),
+                    format!(" {label}"),
                     Style::default().fg(p.mut_),
                 ));
             }
@@ -1754,9 +1754,9 @@ mod tests {
 
         let header_row = (0..24u16)
             .map(row_text)
-            .find(|r| r.contains("Queue"))
-            .expect("Queue column header should render when a session has a queued task");
-        let queue_x = header_row.find("Queue").unwrap() as u16;
+            .find(|r| r.contains("QUEUE"))
+            .expect("QUEUE column header should render when a session has a queued task");
+        let queue_x = header_row.find("QUEUE").unwrap() as u16;
 
         let divider_y = (0..24u16)
             .find(|&y| row_text(y).contains("── Today \u{b7}"))
@@ -1886,7 +1886,7 @@ mod tests {
         assert_eq!(app.focus, Focus::Notes);
         let joined = render_wide(&mut app);
         assert!(
-            joined.contains("Enter:add"),
+            joined.contains("Enter add"),
             "footer should show the Notes-focused hint: {joined}"
         );
     }
@@ -1948,8 +1948,8 @@ mod tests {
     fn header_uses_age_and_created_is_date_only() {
         let rows = render_rows();
         let joined = rows.join("\n");
-        assert!(joined.contains("Age"), "header should label the column 'Age'");
-        assert!(joined.contains("Created"), "header keeps 'Created'");
+        assert!(joined.contains("AGE"), "header should label the column 'AGE'");
+        assert!(joined.contains("CREATED"), "header keeps 'CREATED'");
         assert!(
             joined.contains("2026-01-01"),
             "created date should render: {joined}"
@@ -1970,7 +1970,7 @@ mod tests {
         let mut app = App::new(sessions);
         app.theme = Palette::dark();
         // Width 100 < PREVIEW_MIN_WIDTH keeps the To-Do panel closed, so the only
-        // "Queue" text in the buffer comes from the table column under test.
+        // "QUEUE" text in the buffer comes from the table column under test.
         let backend = TestBackend::new(100, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| render(&mut app, frame)).unwrap();
@@ -1983,7 +1983,7 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(joined.contains("Queue"), "Queue column header should render: {joined}");
+        assert!(joined.contains("QUEUE"), "QUEUE column header should render: {joined}");
         assert!(
             joined.contains("\u{25b0}\u{25b0}\u{25b1}\u{25b1} 3"),
             "queue cell should show the qbar meter and count: {joined}"
@@ -1993,11 +1993,11 @@ mod tests {
     #[test]
     fn todo_column_hidden_when_no_session_has_queued_tasks() {
         // render_rows() uses one_session() (queue_depth 0) at width 100 (no panel),
-        // so "Queue" must not appear anywhere.
+        // so "QUEUE" must not appear anywhere.
         let joined = render_rows().join("\n");
         assert!(
-            !joined.contains("Queue"),
-            "Queue column is hidden when no session has queued tasks: {joined}"
+            !joined.contains("QUEUE"),
+            "QUEUE column is hidden when no session has queued tasks: {joined}"
         );
     }
 
@@ -2319,6 +2319,38 @@ mod tests {
     }
 
     #[test]
+    fn masthead_count_uses_all_sessions_not_the_filtered_set() {
+        // A narrowing search should not shrink the masthead's session count —
+        // it reads app.sessions (the full roster), not app.filtered.
+        let mut sessions = one_session();
+        for name in ["beta-session", "gamma-session"] {
+            sessions.push(Session {
+                name: name.into(),
+                is_adopted: false,
+                created: Some("2026-01-01 10:00".into()),
+                modified: Some("2026-02-20 14:00".into()),
+                modified_ts: None,
+                lock_pid: None,
+                is_locked: false,
+                secrets_count: 0,
+                queue_depth: 0,
+                git_repo: None,
+            });
+        }
+        let mut app = App::new(sessions);
+        app.theme = Palette::dark();
+        app.search_input.set("alpha");
+        app.apply_filter_and_sort();
+        assert_eq!(app.filtered.len(), 1, "search should narrow the visible rows");
+        assert_eq!(app.sessions.len(), 3);
+        let text = render_wide(&mut app);
+        assert!(
+            text.contains("3 sessions"),
+            "masthead should show the all-sessions count, not the filtered count: {text}"
+        );
+    }
+
+    #[test]
     fn masthead_rule_spans_width_with_hero_ramp() {
         let mut app = App::new(one_session());
         app.theme = Palette::dark();
@@ -2341,7 +2373,7 @@ mod tests {
         app.theme = Palette::dark();
         let text = render_wide(&mut app);
         std::env::remove_var("CS_VERSION");
-        assert!(text.contains("q:quit"), "key hints missing:\n{text}");
+        assert!(text.contains("q quit"), "key hints missing:\n{text}");
         assert!(text.contains("9.9.9"), "version missing from footer:\n{text}");
         // 140 cols is wide enough for the full hint line plus the version
         // with room to spare, so the version should sit flush against the
@@ -2352,7 +2384,7 @@ mod tests {
             "version should be right-aligned to the footer's last column: {footer_row:?}"
         );
         assert!(
-            footer_row.contains("1-6:sort"),
+            footer_row.contains("1-6 sort"),
             "full hint line should render intact at 140 cols: {footer_row:?}"
         );
     }
@@ -2669,7 +2701,7 @@ mod tests {
         let version_part = &footer_row[gap_end..];
 
         assert!(
-            hints_part.contains("q:quit"),
+            hints_part.contains("q quit"),
             "key hints should still render: {footer_row:?}"
         );
         assert!(
@@ -2700,7 +2732,7 @@ mod tests {
         let text = render_wide(&mut app);
         let footer_row = text.lines().last().unwrap();
         assert!(
-            footer_row.contains("editing   Enter:save   Esc:cancel"),
+            footer_row.contains("editing   Enter save   Esc cancel"),
             "hint parts should be joined by a uniform 3-space gap: {footer_row:?}"
         );
     }
