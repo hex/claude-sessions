@@ -408,17 +408,43 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             let section_label = app.section_labels.get(row_idx).copied().flatten();
             let is_expanded = app.expanded_session.as_deref() == Some(&s.name);
 
+            // Number of lead lines a section-start row prepends before its own
+            // content: 0 for a plain row, 1 for the divider on the first
+            // section (flush with the header rule), 2 for the blank spacer plus
+            // divider on every later section.
+            let section_lead_count: u16 = match section_label {
+                Some(_) if row_idx != 0 => 2,
+                Some(_) => 1,
+                None => 0,
+            };
+
             let mut name_lines: Vec<Line> = Vec::new();
 
             if let Some(label) = section_label {
-                // Full-width divider: "── <label> " then dashes to fill the
-                // Session column. The line is clipped to the column width by the
-                // table, so a generous fixed run reaches the right edge at any
+                // Section size: rows from this divider up to (not including) the
+                // next section's divider, or the end of the filtered list.
+                let count = app
+                    .section_labels
+                    .iter()
+                    .enumerate()
+                    .skip(row_idx + 1)
+                    .find(|(_, l)| l.is_some())
+                    .map(|(next, _)| next - row_idx)
+                    .unwrap_or(app.section_labels.len() - row_idx);
+                if row_idx != 0 {
+                    name_lines.push(Line::from(""));
+                }
+                // Full-width divider: "── <label> · <count> " then dashes to fill
+                // the Session column. The line is clipped to the column width by
+                // the table, so a generous fixed run reaches the right edge at any
                 // terminal size without needing the (not-yet-computed) width here.
-                name_lines.push(Line::from(Span::styled(
-                    format!("── {} {}", label, "─".repeat(200)),
-                    Style::default().fg(p.comment).add_modifier(Modifier::DIM),
-                )));
+                name_lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("── {} \u{b7} {} ", label, count),
+                        Style::default().fg(p.mut_).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("─".repeat(200), Style::default().fg(p.soft)),
+                ]));
             }
 
             name_lines.push(Line::from(name_spans));
@@ -477,12 +503,14 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
                 age_style = age_style.add_modifier(Modifier::BOLD);
             }
 
-            // On a section-start row, line 0 of every non-name column is blank so
-            // the divider reads as a pure full-width rule; the real values drop to
-            // line 1, aligning with the session name below the divider.
+            // On a section-start row, every non-name column leads with the same
+            // number of blank lines as the name column's spacer + divider, so
+            // the real values drop into alignment with the session name below.
             let with_lead = |line: Line<'static>| -> ratatui::text::Text<'static> {
-                if section_label.is_some() {
-                    ratatui::text::Text::from(vec![Line::from(""), line])
+                if section_lead_count > 0 {
+                    let mut lines = vec![Line::from(""); section_lead_count as usize];
+                    lines.push(line);
+                    ratatui::text::Text::from(lines)
                 } else {
                     ratatui::text::Text::from(line)
                 }
@@ -550,7 +578,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
                 }
             }
 
-            let extra_height = if section_label.is_some() { 1u16 } else { 0 } + preview_lines;
+            let extra_height = section_lead_count + preview_lines;
             let height = 1 + extra_height;
             row_heights.push(height);
             let row = Row::new(cells).height(height);
@@ -1507,6 +1535,41 @@ mod tests {
     /// return the buffer as newline-joined rows.
     fn render_wide(app: &mut App) -> String {
         render_at(app, 140, 30)
+    }
+
+    /// Two sessions in "Today", one in "Older", default-sorted by Modified —
+    /// the section-divider fixture for label/count and spacer-row assertions.
+    fn sectioned_test_app() -> App {
+        use std::time::{Duration, SystemTime};
+        let mut today_one = one_session();
+        today_one[0].name = "today-one".into();
+        today_one[0].modified_ts = Some(SystemTime::now());
+        let mut today_two = one_session();
+        today_two[0].name = "today-two".into();
+        today_two[0].modified_ts = Some(SystemTime::now() - Duration::from_secs(3600));
+        let mut older = one_session();
+        older[0].name = "older-one".into();
+        older[0].modified_ts = Some(SystemTime::now() - Duration::from_secs(400 * 86400));
+        let sessions = vec![
+            today_one.into_iter().next().unwrap(),
+            today_two.into_iter().next().unwrap(),
+            older.into_iter().next().unwrap(),
+        ];
+        let mut app = App::new(sessions);
+        app.theme = Palette::dark();
+        app
+    }
+
+    #[test]
+    fn section_divider_shows_label_and_count() {
+        // Fixture: sessions spanning two time sections while date-sorted
+        // (reuse the existing section-label test fixture in this module).
+        let mut app = sectioned_test_app();
+        let text = render_wide(&mut app);
+        assert!(
+            text.contains("── Today \u{b7} 2 "),
+            "divider must carry '── Today · 2 ':\n{text}"
+        );
     }
 
     #[test]

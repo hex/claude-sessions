@@ -3649,7 +3649,7 @@ mod tests {
     #[test]
     fn mouse_click_below_group_header_selects_correct_session() {
         // Default sort is Modified, and all sample sessions share the "Older"
-        // time section, so row 0 carries a "── Older ──" label and is 2 lines
+        // time section, so row 0 carries the section divider and is 2 lines
         // tall. That pushes the 2nd session's line to relative row 4 (base 2 +
         // row 0's height 2), where a naive fixed-stride (base + idx*1) would
         // mis-predict relative row 3 and mis-select index 0.
@@ -3675,8 +3675,8 @@ mod tests {
         // Start elsewhere so selecting row 0 is a real change.
         app.table_state.select(Some(2));
         render_for_hit_map(&mut app, 100, 24);
-        // Relative row 2 is the "── Older ──" label line belonging to row 0
-        // (the borderless table's header sits at relative row 0, its rule at
+        // Relative row 2 is the section divider line belonging to row 0 (the
+        // borderless table's header sits at relative row 0, its rule at
         // relative row 1, so data starts at relative row 2).
         let action = left_click(&mut app, 2, 3);
         assert!(matches!(action, Action::None));
@@ -3684,6 +3684,54 @@ mod tests {
             app.table_state.selected(),
             Some(0),
             "clicking a row's group-label line selects that row's session"
+        );
+    }
+
+    /// Two sessions in "Today" (rows 0-1), two in "Older" (rows 2-3) — the
+    /// second section opens with a blank spacer line ahead of its divider,
+    /// unlike the first section which has none.
+    fn two_section_sessions() -> Vec<Session> {
+        use std::time::{Duration, SystemTime};
+        let session = |name: &str, age_secs: u64| Session {
+            name: name.into(),
+            is_adopted: false,
+            created: Some("2026-01-01 10:00".into()),
+            modified: Some("2026-02-20 14:00".into()),
+            modified_ts: Some(SystemTime::now() - Duration::from_secs(age_secs)),
+            lock_pid: None,
+            is_locked: false,
+            secrets_count: 0,
+            queue_depth: 0,
+            git_repo: None,
+        };
+        vec![
+            session("today-a", 0),
+            session("today-b", 3600),
+            session("older-c", 400 * 86400),
+            session("older-d", 401 * 86400),
+        ]
+    }
+
+    #[test]
+    fn mouse_click_on_spacer_row_before_later_section_selects_that_row() {
+        // Row 2 ("older-c") opens the second section, so it leads with a blank
+        // spacer line *and* the divider (height 3), not just the divider (height
+        // 2) the first section gets. A hit-map that forgot the spacer would
+        // under-count every later row's start, mis-selecting on click.
+        let mut app = App::new(two_section_sessions());
+        render_for_hit_map(&mut app, 100, 24);
+        assert_eq!(
+            app.row_hit_spans,
+            vec![(2, 2, 0), (4, 1, 1), (5, 3, 2), (8, 1, 3)],
+            "row heights/offsets must include the spacer before the second section"
+        );
+        // Relative row 5 is the blank spacer line ahead of "older-c"'s divider.
+        let action = left_click(&mut app, 5, 3);
+        assert!(matches!(action, Action::None));
+        assert_eq!(
+            app.table_state.selected(),
+            Some(2),
+            "clicking the spacer line above a later section must select that section's first row"
         );
     }
 
