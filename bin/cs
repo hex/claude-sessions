@@ -2378,7 +2378,7 @@ _usage_scan() {
     local w5="$1" wk="$2"
     shift 2
     [ $# -gt 0 ] || { echo "0 0 0 0 0 0 0 0 0 -"; return 0; }
-    jq -r 'select(.type == "assistant" and (.message.usage? != null)) |
+    jq -R -r 'fromjson? // empty | select(.type == "assistant" and (.message.usage? != null)) |
         [ (.timestamp // ""),
           (.requestId // .message.id // .uuid // ""),
           (.message.usage.input_tokens // 0),
@@ -2446,18 +2446,27 @@ _usage_epoch_to_hhmm() {
 }
 
 # Compute the 5h/week window-start boundaries, anchored at the newest
-# rate-limit stamp when one exists. Sets globals: U_NOW, U_W5_ISO, U_WK_ISO
-# (globals, not stdout — callers need several values and the limits read
-# already sets U_* the same way).
+# rate-limit stamp when one exists AND its reset epoch is still in the future
+# (a past resets_at means a stale limits file, which must not smear the
+# rolling window). Sets globals: U_NOW, U_W5_ISO, U_WK_ISO, U_5H_ANCHORED,
+# U_WK_ANCHORED (globals, not stdout — callers need several values and the
+# limits read already sets U_* the same way).
 _usage_window_anchors() {
     U_NOW=$(date +%s)
     _usage_read_limits
     local start5 startw
     start5=$((U_NOW - 18000))
     startw=$((U_NOW - 604800))
+    U_5H_ANCHORED=""; U_WK_ANCHORED=""
     if [ "$U_STAMP" -gt 0 ]; then
-        case "$U_5H_RESET" in *[!0-9]*|'') ;; *) start5=$((U_5H_RESET - 18000)) ;; esac
-        case "$U_WK_RESET" in *[!0-9]*|'') ;; *) startw=$((U_WK_RESET - 604800)) ;; esac
+        case "$U_5H_RESET" in
+            *[!0-9]*|'') ;;
+            *) [ "$U_5H_RESET" -gt "$U_NOW" ] && { start5=$((U_5H_RESET - 18000)); U_5H_ANCHORED=1; } ;;
+        esac
+        case "$U_WK_RESET" in
+            *[!0-9]*|'') ;;
+            *) [ "$U_WK_RESET" -gt "$U_NOW" ] && { startw=$((U_WK_RESET - 604800)); U_WK_ANCHORED=1; } ;;
+        esac
     fi
     U_W5_ISO=$(_usage_epoch_to_iso "$start5")
     U_WK_ISO=$(_usage_epoch_to_iso "$startw")
@@ -2528,9 +2537,13 @@ run_usage() {
     _usage_window_anchors
     local header="Rate limits: unknown (statusline not running); windows are rolling"
     if [ "$U_STAMP" -gt 0 ]; then
-        header="Rate limits: 5h ${U_5H_PCT:-?}%"
-        case "$U_5H_RESET" in *[!0-9]*|'') ;; *) header="$header (resets $(_usage_epoch_to_hhmm "$U_5H_RESET"))" ;; esac
-        header="$header · week ${U_WK_PCT:-?}%"
+        if [ -n "$U_5H_ANCHORED" ] || [ -n "$U_WK_ANCHORED" ]; then
+            header="Rate limits: 5h ${U_5H_PCT:-?}%"
+            [ -n "$U_5H_ANCHORED" ] && header="$header (resets $(_usage_epoch_to_hhmm "$U_5H_RESET"))"
+            header="$header · week ${U_WK_PCT:-?}%"
+        else
+            header="Rate limits: unknown (stale rate-limit stamp); windows are rolling"
+        fi
     fi
 
     echo "$header"
@@ -2559,7 +2572,7 @@ EOF
             continue
         fi
         marker=" "
-        session_is_live "$dir/.cs" && marker="${GREEN}●${NC}"
+        session_is_live "$dir/.cs" && marker=$(printf "${GREEN}●${NC}")
         age="-"
         newest=$(ls -t "$proj"/*.jsonl 2>/dev/null | head -1 || true)
         if [ -n "$newest" ]; then

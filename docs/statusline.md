@@ -31,7 +31,7 @@ Per-segment icons are standard Unicode glyphs (gauge `◔`, star `✦`, branch `
 
 The render path is deliberately thin: one `jq` pass over stdin, at most one git subprocess, and one small file read (`.cs/local/state` for the session color). There is no transcript parsing, no network access, and no caching. Data gathering is gated per segment, so disabling `git` in `CS_STATUSLINE_SEGMENTS` means the git subprocess never forks.
 
-The one write in the render path: each render stamps the current context-window usage, truncated to an integer, to `.cs/local/context-pct` (machine-local). The task-queue gate (the `narrative-reminder.sh` Stop hook, see [hooks.md](hooks.md)) reads this file to decide whether to suggest compacting before a walk-away drain. Skipped outside a cs session or when the stdin JSON carries no context percentage.
+The writes in the render path are machine-local and best-effort: each render stamps the current context-window usage, truncated to an integer, to `.cs/local/context-pct`. The task-queue gate (the `narrative-reminder.sh` Stop hook, see [hooks.md](hooks.md)) reads this file to decide whether to suggest compacting before a walk-away drain. Skipped outside a cs session or when the stdin JSON carries no context percentage.
 
 The same render also stamps `.cs/local/limits` (5-hour and weekly used percentages and reset epochs) so `cs -usage` can anchor its windows at the true reset boundaries; both files are machine-local and best-effort.
 

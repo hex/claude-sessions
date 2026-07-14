@@ -27,12 +27,15 @@ test_usage_subcommand_exists() {
     local output
     output=$("$CS_BIN" -usage 2>&1) || true
     assert_output_not_contains "$output" "Unknown command" "cs -usage should be a recognized verb" || return 1
+    assert_output_contains "$output" "windows are rolling" "no-limits-file header states rolling windows" || return 1
 }
 
 run_test test_usage_subcommand_exists
 
 # Three lines share requestId req_A (streamed content blocks repeat usage);
-# a naive sum triples req_A. Deduped: in 1000+2000=3000, out 250+500=750.
+# a naive sum triples req_A. Deduped IN = input + cache_creation =
+# (1000+100) + (2000+200) = 3300 (3.3K); naive IN would be
+# (1000+100)*3 + (2000+200) = 5500 (5.5K). Deduped OUT = 250+500=750.
 test_usage_dedups_by_request_id() {
     local sdir="$CS_SESSIONS_ROOT/dedup-sess"
     mkdir -p "$sdir/.cs/local"
@@ -50,7 +53,7 @@ EOF
     output=$("$CS_BIN" -usage 2>&1) || true
     # IN = input + cache_creation = 3000+300 = 3.3K; OUT = 750
     assert_output_contains "$output" "dedup-sess" "session with usage should appear" || return 1
-    assert_output_contains "$output" "3.3K" "deduped IN should be 3.3K (naive would be 9.9K)" || return 1
+    assert_output_contains "$output" "3.3K" "deduped IN should be 3.3K (naive would be 5.5K)" || return 1
     assert_output_contains "$output" "750" "deduped OUT should be 750" || return 1
 }
 
@@ -72,8 +75,39 @@ EOF
     assert_output_contains "$output" "6.0K / 1.0K" "week column shows both requests" || return 1
 }
 
+# A truncated line (a torn write from a concurrently-appended live transcript)
+# sits between two valid lines in one file, with a second valid file
+# lexicographically after it in the same session. Garbage must be skipped,
+# never fatal to the rest of the scan: the sums must include the valid lines
+# from BOTH files, a total impossible if the scan died at the garbage line.
+test_usage_tolerates_truncated_transcript_line() {
+    local sdir="$CS_SESSIONS_ROOT/garbage-sess"
+    mkdir -p "$sdir/.cs/local"
+    local proj now
+    proj=$(_transcripts_for "$sdir")
+    now=$(_iso_mins_ago 5)
+    cat > "$proj/a-conv1.jsonl" << EOF
+{"type":"assistant","requestId":"r1","timestamp":"$now","message":{"model":"m","usage":{"input_tokens":1000,"cache_creation_input_tokens":0,"output_tokens":100}}}
+{"type":"assistant","requestId":"rX","timestamp":"$now","mess
+{"type":"assistant","requestId":"r2","timestamp":"$now","message":{"model":"m","usage":{"input_tokens":2000,"cache_creation_input_tokens":0,"output_tokens":200}}}
+EOF
+    cat > "$proj/b-conv2.jsonl" << EOF
+{"type":"assistant","requestId":"r3","timestamp":"$now","message":{"model":"m","usage":{"input_tokens":4000,"cache_creation_input_tokens":0,"output_tokens":400}}}
+EOF
+    local output
+    output=$("$CS_BIN" -usage 2>&1) || true
+    assert_output_contains "$output" "garbage-sess" "session with a truncated line still appears" || return 1
+    # Sum across both files, skipping the garbage line: in 1000+2000+4000=7000,
+    # out 100+200+400=700.
+    echo "$output" | grep "garbage-sess" | grep -q "7.0K / 700" || {
+        echo "  FAIL: sums should include valid lines from both files despite the truncated line (7.0K / 700)"
+        return 1
+    }
+}
+
 run_test test_usage_dedups_by_request_id
 run_test test_usage_window_boundaries
+run_test test_usage_tolerates_truncated_transcript_line
 
 # A seeded limits file anchors the header and the 5h window at resets_at - 5h.
 test_usage_header_anchored_by_limits_file() {
@@ -130,8 +164,44 @@ EOF
     }
 }
 
+# Both resets_at epochs are in the past (a stale limits file, e.g. left behind
+# by a statusline that stopped rendering). Anchoring must not trust an expired
+# reset: the header falls back to the stale-stamp message, and the 5h window
+# stays rolling rather than smearing to [expired-reset - 5h, now]. Fixture
+# session name deliberately has no hyphen — see anchormath above for why.
+test_usage_expired_anchor_falls_back_to_rolling() {
+    local sdir="$CS_SESSIONS_ROOT/stalesess"
+    mkdir -p "$sdir/.cs/local"
+    local now
+    now=$(date +%s)
+    cat > "$sdir/.cs/local/limits" << EOF
+five_hour_used_pct: 80
+five_hour_resets_at: $((now - 7200))
+seven_day_used_pct: 55
+seven_day_resets_at: $((now - 3600))
+stamped_at: $now
+EOF
+    local proj
+    proj=$(_transcripts_for "$sdir")
+    cat > "$proj/conv1.jsonl" << EOF
+{"type":"assistant","requestId":"r1","timestamp":"$(_iso_mins_ago 360)","message":{"model":"m","usage":{"input_tokens":7000,"cache_creation_input_tokens":0,"output_tokens":700}}}
+EOF
+    local output
+    output=$("$CS_BIN" -usage 2>&1) || true
+    assert_output_contains "$output" "stale rate-limit stamp" "expired resets produce the stale-stamp header" || return 1
+    assert_output_contains "$output" "windows are rolling" "stale header still states rolling windows" || return 1
+    # Rolling 5h correctly excludes a 6h-old request (cell '-'); the old
+    # smeared window (expired-reset - 5h) wrongly included it. This ordering
+    # is the discriminating assertion for the fix.
+    echo "$output" | grep "stalesess" | grep -q -- "-.*7.0K / 700" || {
+        echo "  FAIL: 5h cell should be '-' (rolling 5h excludes a 6h-old request) while week cell has 7.0K / 700"
+        return 1
+    }
+}
+
 run_test test_usage_header_anchored_by_limits_file
 run_test test_usage_window_start_is_resets_minus_span
+run_test test_usage_expired_anchor_falls_back_to_rolling
 
 # Two sessions: bigger 5h usage sorts first; each row shows only its own tokens.
 test_usage_attribution_and_sort() {
