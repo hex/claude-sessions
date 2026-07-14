@@ -416,6 +416,32 @@ pub fn relative_age(ts: std::time::SystemTime, now: std::time::SystemTime) -> St
     }
 }
 
+/// Repo-first truncation: prefer owner/repo, else the repo alone, else a
+/// middle-elided repo. Never tail-clips (the repo name is what matters).
+pub fn truncate_repo(repo: &str, w: usize) -> String {
+    if repo.is_empty() {
+        return String::new();
+    }
+    if repo.chars().count() <= w {
+        return repo.into();
+    }
+    let name = repo.split('/').next_back().unwrap_or(repo);
+    if name.chars().count() <= w {
+        return name.into();
+    }
+    if w <= 1 {
+        return "\u{2026}".into();
+    }
+    let ch: Vec<char> = name.chars().collect();
+    let keep = w - 1;
+    let head = keep / 2;
+    let tail = keep - head;
+    let mut out: String = ch[..head].iter().collect();
+    out.push('\u{2026}');
+    out.extend(ch[ch.len() - tail..].iter());
+    out
+}
+
 fn unix_to_datetime(timestamp: i64) -> (i64, u32, u32, u32, u32) {
     // Account for local timezone offset
     let offset = local_utc_offset_secs();
@@ -620,6 +646,23 @@ mod tests {
         assert_eq!(relative_age(ago(800 * 86400), now), "2y");
         // Future timestamps clamp to "now" rather than underflowing.
         assert_eq!(relative_age(now + Duration::from_secs(3600), now), "now");
+    }
+
+    #[test]
+    fn truncate_repo_fits_owner_repo() {
+        assert_eq!(truncate_repo("hex/claude-sessions", 25), "hex/claude-sessions");
+    }
+    #[test]
+    fn truncate_repo_falls_back_to_repo_name() {
+        assert_eq!(truncate_repo("hex/claude-sessions", 15), "claude-sessions");
+    }
+    #[test]
+    fn truncate_repo_middle_elides_long_repo() {
+        assert_eq!(truncate_repo("erp/firstborn-server", 10), "firs\u{2026}erver");
+    }
+    #[test]
+    fn truncate_repo_one_char_is_ellipsis() {
+        assert_eq!(truncate_repo("erp/firstborn-server", 1), "\u{2026}");
     }
 
     #[test]

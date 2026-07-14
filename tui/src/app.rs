@@ -1764,8 +1764,8 @@ impl App {
                 {
                     let relative_row = row - self.table_area.y;
 
-                    // Row 0 is the border, row 1 is the title, row 2 is header, row 3 is separator
-                    if relative_row == 2 {
+                    // The table is borderless: row 0 is the header, row 1 the rule.
+                    if relative_row == 0 {
                         // Header click — determine which column
                         if let Some(sort_col) = self.column_at_x(col) {
                             self.cycle_sort(sort_col);
@@ -1796,10 +1796,10 @@ impl App {
     }
 
     fn column_at_x(&self, x: u16) -> Option<SortColumn> {
-        // Mirrors the layout in ui::render_session_table: border, then the
-        // selection symbol, then columns separated by COL_SPACING. Half the gap
-        // on each side counts toward the neighbouring column for hit-testing.
-        let mut offset = self.table_area.x + 1 + crate::ui::SELECT_WIDTH;
+        // Mirrors the borderless layout in ui::render_table: the selection
+        // symbol, then columns separated by COL_SPACING. Half the gap on each
+        // side counts toward the neighbouring column for hit-testing.
+        let mut offset = self.table_area.x + crate::ui::SELECT_WIDTH;
         let span = crate::ui::COL_SPACING;
         for (i, &width) in self.column_widths.iter().enumerate() {
             if x >= offset && x < offset + width + span {
@@ -3650,8 +3650,9 @@ mod tests {
     fn mouse_click_below_group_header_selects_correct_session() {
         // Default sort is Modified, and all sample sessions share the "Older"
         // time section, so row 0 carries a "── Older ──" label and is 2 lines
-        // tall. That pushes the 2nd session's line to relative row 6, where the
-        // old fixed-stride math (relative-4) mis-selected index 2.
+        // tall. That pushes the 2nd session's line to relative row 4 (base 2 +
+        // row 0's height 2), where a naive fixed-stride (base + idx*1) would
+        // mis-predict relative row 3 and mis-select index 0.
         let mut app = App::new(sample_sessions());
         render_for_hit_map(&mut app, 100, 24);
         assert_eq!(
@@ -3659,7 +3660,7 @@ mod tests {
             "row 0 should be 2 lines tall (section label present)"
         );
         // Second session renders one line below where a naive stride expects it.
-        let action = left_click(&mut app, 6, 3);
+        let action = left_click(&mut app, 4, 3);
         assert!(matches!(action, Action::None));
         assert_eq!(
             app.table_state.selected(),
@@ -3674,8 +3675,10 @@ mod tests {
         // Start elsewhere so selecting row 0 is a real change.
         app.table_state.select(Some(2));
         render_for_hit_map(&mut app, 100, 24);
-        // Relative row 4 is the "── Older ──" label line belonging to row 0.
-        let action = left_click(&mut app, 4, 3);
+        // Relative row 2 is the "── Older ──" label line belonging to row 0
+        // (the borderless table's header sits at relative row 0, its rule at
+        // relative row 1, so data starts at relative row 2).
+        let action = left_click(&mut app, 2, 3);
         assert!(matches!(action, Action::None));
         assert_eq!(
             app.table_state.selected(),
@@ -3721,8 +3724,8 @@ mod tests {
         // A stale Notes list highlight from a prior panel interaction.
         app.notes_selected = 3;
         assert_eq!(app.table_state.selected(), Some(0));
-        // Click the 2nd session's line (relative row 6 given row 0's 2-line span).
-        let action = left_click(&mut app, 6, 3);
+        // Click the 2nd session's line (relative row 4 given row 0's 2-line span).
+        let action = left_click(&mut app, 4, 3);
         assert!(matches!(action, Action::None));
         assert_eq!(app.table_state.selected(), Some(1));
         assert_eq!(
@@ -3770,5 +3773,24 @@ mod tests {
             "delete must decrement the in-memory queue_depth"
         );
         std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn mouse_click_on_header_row_cycles_sort_on_borderless_table() {
+        // The table has no Block/border, so the header sits at relative row 0
+        // (not the old bordered layout's relative row 2). A click there must
+        // still resolve to the clicked column and cycle its sort.
+        let mut app = App::new(sample_sessions());
+        render_for_hit_map(&mut app, 100, 24);
+        assert_eq!(app.sort_col, SortColumn::Modified, "default sort is Modified");
+        // Column 3 (just past the highlight gutter) is inside the Session
+        // column's header cell.
+        let action = left_click(&mut app, 0, 3);
+        assert!(matches!(action, Action::None));
+        assert_eq!(
+            app.sort_col,
+            SortColumn::Name,
+            "clicking the Session header cell should sort by Name"
+        );
     }
 }

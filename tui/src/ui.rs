@@ -111,6 +111,18 @@ fn truncate_cols(s: &str, max_cols: usize) -> String {
     out
 }
 
+/// 4-segment queue-depth meter: 0→empty, 1→1, 2-3→2, 4-5→3, 6+→4 filled.
+fn qbar(n: u32) -> String {
+    let f = match n {
+        0 => 0,
+        1 => 1,
+        2..=3 => 2,
+        4..=5 => 3,
+        _ => 4,
+    };
+    (0..4).map(|i| if i < f { '\u{25b0}' } else { '\u{25b1}' }).collect()
+}
+
 pub fn render(app: &mut App, frame: &mut Frame) {
     let p = app.theme;
 
@@ -237,7 +249,6 @@ fn sort_label(col: SortColumn) -> &'static str {
 
 fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool) {
     let p = app.theme;
-    let icons = theme::icons();
 
     app.table_area = area;
 
@@ -263,24 +274,37 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
         }
     };
 
+    // Label span styled MUT bold; sort indicator (when this is the active
+    // sort column) styled RUST as its own span, so only the arrow picks up
+    // the accent color.
+    let header_cell = |label: &str, col: SortColumn| -> Cell<'static> {
+        let mut spans = vec![Span::styled(
+            label.to_string(),
+            Style::default().fg(p.mut_).add_modifier(Modifier::BOLD),
+        )];
+        let indicator = sort_indicator(col);
+        if !indicator.is_empty() {
+            spans.push(Span::styled(indicator, Style::default().fg(p.rust)));
+        }
+        Cell::from(Line::from(spans))
+    };
+
     let mut header_cells = vec![
-        Cell::from(format!("Session{}", sort_indicator(SortColumn::Name))),
-        Cell::from(format!("Created{}", sort_indicator(SortColumn::Created))),
-        Cell::from(format!("Age{}", sort_indicator(SortColumn::Modified))),
+        header_cell("Session", SortColumn::Name),
+        header_cell("Created", SortColumn::Created),
+        header_cell("Age", SortColumn::Modified),
     ];
     if show_secrets {
-        header_cells.push(Cell::from(format!("Secrets{}", sort_indicator(SortColumn::Secrets))));
+        header_cells.push(header_cell("Secrets", SortColumn::Secrets));
     }
     if show_todos {
-        header_cells.push(Cell::from(format!("To-Do{}", sort_indicator(SortColumn::Todo))));
+        header_cells.push(header_cell("Queue", SortColumn::Todo));
     }
     if show_github {
-        header_cells.push(Cell::from(format!("Github{}", sort_indicator(SortColumn::Github))));
+        header_cells.push(header_cell("Github", SortColumn::Github));
     }
 
-    let header = Row::new(header_cells)
-        .style(Style::default().fg(p.header_fg).add_modifier(Modifier::BOLD))
-        .bottom_margin(1);
+    let header = Row::new(header_cells).bottom_margin(1);
 
     let is_searching = app.mode == Mode::Search && !app.search_input.text().is_empty();
 
@@ -305,9 +329,16 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             // once and reused for the dot and the Age column.
             let heat = if dimmed { p.comment } else { p.heat_color(s.modified_ts) };
 
-            // Build gutter indicators as colored prefix spans
+            // Build gutter indicators as colored prefix spans. A locked session
+            // shows a filled square in place of the recency dot — the square
+            // itself is the lock signal, so no separate lock glyph follows it.
             let mut name_spans: Vec<Span> = Vec::new();
-            name_spans.push(Span::styled("\u{25cf} ", Style::default().fg(heat)));
+            if s.is_locked {
+                let sq = if dimmed { p.comment } else { p.ember };
+                name_spans.push(Span::styled("\u{25aa} ", Style::default().fg(sq)));
+            } else {
+                name_spans.push(Span::styled("\u{25cf} ", Style::default().fg(heat)));
+            }
             if app.marked_sessions.contains(&s.name) {
                 let mark_color = if dimmed { p.comment } else { p.gold };
                 name_spans.push(Span::styled(
@@ -315,18 +346,13 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
                     Style::default().fg(mark_color).add_modifier(Modifier::BOLD),
                 ));
             }
-            if s.is_locked {
-                let lock_color = if dimmed { p.comment } else { p.red };
-                name_spans.push(Span::styled(
-                    format!("{} ", icons.lock),
-                    Style::default().fg(lock_color),
-                ));
-            }
             if s.secrets_count > 0 && !show_secrets {
-                // Show secrets indicator in gutter only when secrets column is hidden
+                // Show secrets indicator in gutter only when secrets column is hidden.
+                // Nerd-font `icons.lock` is tofu on the target font here, so this
+                // fallback always uses the plain glyph regardless of CS_NERD_FONTS.
                 let secrets_color = if dimmed { p.comment } else { p.gold };
                 name_spans.push(Span::styled(
-                    format!("{} ", icons.lock),
+                    "\u{25aa} ",
                     Style::default().fg(secrets_color),
                 ));
             }
@@ -334,7 +360,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             let name_color = if dimmed {
                 p.comment
             } else {
-                p.gold
+                p.ink
             };
 
             // Highlight matched characters from fuzzy search
@@ -469,38 +495,58 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             ];
 
             if show_secrets {
-                let secrets = if s.secrets_count > 0 {
-                    format!("{} {}", icons.lock, s.secrets_count)
+                let (secrets, secrets_color) = if s.secrets_count > 0 {
+                    (s.secrets_count.to_string(), meta_color)
+                } else if dimmed {
+                    ("\u{b7}".to_string(), p.comment)
                 } else {
-                    String::new()
+                    ("\u{b7}".to_string(), p.faint)
                 };
                 let secrets_line = Line::from(secrets).alignment(Alignment::Center);
-                cells.push(Cell::from(with_lead(secrets_line)).style(Style::default().fg(meta_color)));
+                cells.push(Cell::from(with_lead(secrets_line)).style(Style::default().fg(secrets_color)));
             }
 
             if show_todos {
                 let todo = if s.queue_depth > 0 {
-                    format!("{} {}", '\u{25a4}', s.queue_depth)
+                    format!("{} {}", qbar(s.queue_depth), s.queue_depth)
                 } else {
-                    String::new()
+                    qbar(0)
                 };
-                cells.push(Cell::from(with_lead(Line::from(todo))).style(Style::default().fg(p.yellow)));
+                let qcolor = if dimmed {
+                    p.comment
+                } else if s.queue_depth > 3 {
+                    p.rust
+                } else if s.queue_depth > 0 {
+                    p.amber
+                } else {
+                    p.faint
+                };
+                cells.push(Cell::from(with_lead(Line::from(todo))).style(Style::default().fg(qcolor)));
             }
 
             if show_github {
                 let github = s.git_repo.clone().unwrap_or_default();
-                let github_color = if dimmed { p.comment } else { p.green };
+                let github_color = if dimmed {
+                    p.comment
+                } else if app.table_state.selected() == Some(row_idx) {
+                    p.rust
+                } else {
+                    p.faint
+                };
                 if github.is_empty() {
                     cells.push(Cell::from(with_lead(Line::from(String::new()))));
                 } else {
-                    let repo = Line::from(vec![
-                        Span::styled(
-                            format!("{} ", icons.branch),
-                            Style::default().fg(github_color).add_modifier(Modifier::DIM),
-                        ),
-                        Span::styled(github, Style::default().fg(github_color)),
-                    ]);
-                    cells.push(Cell::from(with_lead(repo)));
+                    // Width comes from the previous frame's solved layout —
+                    // widths are stable frame-to-frame — so skip truncation
+                    // when it isn't known yet (first frame, or an empty table).
+                    let text = match app.column_widths.last() {
+                        Some(&w) if w > 0 => crate::session::truncate_repo(&github, w as usize),
+                        _ => github,
+                    };
+                    cells.push(Cell::from(with_lead(Line::from(Span::styled(
+                        text,
+                        Style::default().fg(github_color),
+                    )))));
                 }
             }
 
@@ -509,15 +555,15 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             row_heights.push(height);
             let row = Row::new(cells).height(height);
 
-            // Flash background takes priority, then zebra striping
+            // Flash background takes priority; otherwise the row is unstyled —
+            // B′ carries row structure through the wash selection and the
+            // header rule, not zebra striping.
             if let Some(flash) = app.active_flash(&s.name) {
                 let bg = match flash {
                     FlashKind::Success => p.flash_success,
                     FlashKind::Error => p.flash_error,
                 };
                 row.style(Style::default().bg(bg))
-            } else if row_idx % 2 == 1 {
-                row.style(Style::default().bg(p.zebra))
             } else {
                 row
             }
@@ -538,12 +584,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
     // hand-rolled approximation and the real layout is what made the old
     // dividers slice through cells.) The Table reserves SELECT_WIDTH at the left
     // for the selection symbol, then lays the columns out across the remainder.
-    let inner = Rect {
-        x: area.x + 1,
-        y: area.y + 1,
-        width: area.width.saturating_sub(2),
-        height: area.height.saturating_sub(2),
-    };
+    let inner = area; // no border insets — the table is borderless
     let cols_area = Rect {
         x: inner.x + SELECT_WIDTH,
         width: inner.width.saturating_sub(SELECT_WIDTH),
@@ -554,32 +595,22 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
         .split(cols_area);
     app.column_widths = col_rects.iter().map(|r| r.width).collect();
 
-    // Dim the border when focus has moved to the Notes input, mirroring how
-    // the Notes panel itself brightens its border when it gains focus.
-    let list_border = if app.focus == Focus::Notes { p.comment } else { p.rust };
-
     let table = Table::new(rows, widths)
         .header(header)
         .column_spacing(COL_SPACING)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(list_border)),
-        )
-        .row_highlight_style(Style::default().bg(p.sel_bg).add_modifier(Modifier::BOLD))
+        .row_highlight_style(Style::default().bg(p.wash).add_modifier(Modifier::BOLD))
         .highlight_symbol(format!("{SELECT_BAR} "))
         .highlight_spacing(HighlightSpacing::Always);
 
     frame.render_stateful_widget(table, area, &mut app.table_state);
 
     // Publish the row hit-map now that ratatui has finalized the scroll offset.
-    // Data rows begin at relative y = 4 (border, title, header, header rule) and
-    // stack by their true heights, so clicks below a group header or an expanded
-    // row still resolve to the right session. Only on-screen rows are recorded.
+    // Data rows begin at relative y = 2 (header, header rule) and stack by
+    // their true heights, so clicks below a group header or an expanded row
+    // still resolve to the right session. Only on-screen rows are recorded.
     app.row_hit_spans.clear();
-    let bottom = area.height.saturating_sub(1); // relative y of the bottom border
-    let mut y = 4u16;
+    let bottom = area.height; // no border to reserve a bottom row for
+    let mut y = 2u16;
     for (idx, &h) in row_heights
         .iter()
         .enumerate()
@@ -592,44 +623,22 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
         y = y.saturating_add(h);
     }
 
-    // Warm rust→orange→amber gradient band behind the header labels. Painted
-    // per-cell because a terminal background can only be a flat color per cell;
-    // the ramp across cells is the band. The same vivid stops are used on both
-    // themes (sampled from the live render); the near-white label stays bold.
-    let buf = frame.buffer_mut();
-    let lo = theme::rgb_of(p.header_bg_lo);
-    let mid = theme::rgb_of(p.header_bg_mid);
-    let hi = theme::rgb_of(p.header_bg_hi);
-    let band_span = (inner.width.max(2) - 1) as f32;
-    for x in inner.x..inner.x.saturating_add(inner.width) {
-        let t = (x - inner.x) as f32 / band_span;
-        let (r, g, b) = warm_ramp(lo, mid, hi, t);
-        if let Some(cell) = buf.cell_mut(ratatui::layout::Position::new(x, inner.y)) {
-            cell.set_bg(ratatui::style::Color::Rgb(r, g, b));
-        }
-    }
-
     // A single hairline rule beneath the header, drawn into the header's blank
-    // bottom-margin row. Structure stays quiet — no vertical dividers; alignment
-    // and zebra striping carry the columns.
+    // bottom-margin row. Structure stays quiet — no vertical dividers or table
+    // border; alignment and the wash selection carry the columns.
+    let buf = frame.buffer_mut();
     let rule_y = inner.y + 1;
     for x in inner.x..inner.x.saturating_add(inner.width) {
         if let Some(cell) = buf.cell_mut(ratatui::layout::Position::new(x, rule_y)) {
             cell.set_char('\u{2500}');
-            cell.set_fg(p.sep);
-        }
-    }
-    // Tee the rule into the side borders so it reads as frame, not a stray line.
-    for (x, glyph) in [(area.x, '\u{251c}'), (area.x + area.width.saturating_sub(1), '\u{2524}')] {
-        if let Some(cell) = buf.cell_mut(ratatui::layout::Position::new(x, rule_y)) {
-            cell.set_char(glyph);
-            cell.set_fg(p.rust);
+            cell.set_fg(p.soft);
         }
     }
 
-    // Shimmer the selection accent bar along a rust↔gold triangle wave. We locate
-    // the bar by its glyph in the selection column rather than recomputing the
-    // selected row's y (rows have variable height), which keeps this robust.
+    // Recolor the selection accent bar along the rail gradient, sampled by a
+    // triangle-wave phase. We locate the bar by its glyph in the selection
+    // column rather than recomputing the selected row's y (rows have variable
+    // height), which keeps this robust.
     let phase = {
         const PERIOD_MS: u128 = 1400;
         let ms = std::time::SystemTime::now()
@@ -638,24 +647,16 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             .unwrap_or(0);
         (ms % PERIOD_MS) as f32 / PERIOD_MS as f32
     };
-    let shimmer = p.shimmer_color(phase);
     for y in (inner.y + 2)..inner.y.saturating_add(inner.height) {
         if let Some(cell) = buf.cell_mut(ratatui::layout::Position::new(inner.x, y)) {
             if cell.symbol() == SELECT_BAR {
-                cell.set_fg(shimmer);
+                let stops: Vec<(u8, u8, u8)> = p.rail.iter().map(|c| theme::rgb_of(*c)).collect();
+                let idx = (phase * (stops.len() as f32 - 1.0)).round() as u16;
+                let (r, g, b) = theme::ramp(&stops, stops.len() as u16, idx.min(stops.len() as u16 - 1));
+                cell.set_fg(ratatui::style::Color::Rgb(r, g, b));
                 break;
             }
         }
-    }
-}
-
-/// Three-stop warm ramp (a → b → c) sampled at `t` in [0, 1]. Arcing through a
-/// midpoint keeps the sweep vivid instead of fading through a muddy blend.
-fn warm_ramp(a: (u8, u8, u8), b: (u8, u8, u8), c: (u8, u8, u8), t: f32) -> (u8, u8, u8) {
-    if t < 0.5 {
-        theme::lerp_rgb(a, b, t * 2.0)
-    } else {
-        theme::lerp_rgb(b, c, (t - 0.5) * 2.0)
     }
 }
 
@@ -1394,6 +1395,38 @@ mod tests {
         }]
     }
 
+    /// Two sessions — one locked, one not — for gutter-glyph assertions. Names
+    /// sort "locked" before "recent" under Name/Asc, which keeps the fixture
+    /// free of the time-section divider that Created/Modified sort injects.
+    fn locked_and_recent_sessions() -> Vec<Session> {
+        vec![
+            Session {
+                name: "locked".into(),
+                is_adopted: false,
+                created: Some("2026-01-01 10:00".into()),
+                modified: Some("2026-02-20 14:00".into()),
+                modified_ts: Some(std::time::SystemTime::now()),
+                lock_pid: Some(123),
+                is_locked: true,
+                secrets_count: 0,
+                queue_depth: 0,
+                git_repo: None,
+            },
+            Session {
+                name: "recent".into(),
+                is_adopted: false,
+                created: Some("2026-01-01 10:00".into()),
+                modified: Some("2026-02-20 14:00".into()),
+                modified_ts: Some(std::time::SystemTime::now()),
+                lock_pid: None,
+                is_locked: false,
+                secrets_count: 0,
+                queue_depth: 0,
+                git_repo: None,
+            },
+        ]
+    }
+
     /// Render to an in-memory buffer with the given palette and return whether
     /// any cell is painted with the light paper background.
     fn renders_with_paper_bg(palette: Palette) -> bool {
@@ -1511,9 +1544,16 @@ mod tests {
             "section divider should fill the column with dashes (run={longest_dash_run}): {today_row:?}"
         );
         // The divider line is a pure rule — the session's date/age moved off it.
+        // Scope the check to the table's own columns: at this width the table
+        // sits beside the preview pane, and borderless the table's rows now
+        // land on the same absolute terminal row as unrelated preview-pane
+        // text (e.g. "Modified: ..."), which would otherwise false-positive
+        // a "2026" match that has nothing to do with the divider.
+        let table_width = app.table_area.width as usize;
+        let today_table_slice: String = today_row.chars().take(table_width).collect();
         assert!(
-            !today_row.contains("2026"),
-            "the divider line must carry no date/age: {today_row:?}"
+            !today_table_slice.contains("2026"),
+            "the divider line must carry no date/age: {today_table_slice:?}"
         );
         // ...and now sit on the session's own name line instead. Match the table
         // row by its "●" marker so we don't hit the preview pane's title, which
@@ -1608,7 +1648,7 @@ mod tests {
         let mut app = App::new(sessions);
         app.theme = Palette::dark();
         // Width 100 < PREVIEW_MIN_WIDTH keeps the To-Do panel closed, so the only
-        // "To-Do" text in the buffer comes from the table column under test.
+        // "Queue" text in the buffer comes from the table column under test.
         let backend = TestBackend::new(100, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| render(&mut app, frame)).unwrap();
@@ -1621,21 +1661,21 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(joined.contains("To-Do"), "To-Do column header should render: {joined}");
+        assert!(joined.contains("Queue"), "Queue column header should render: {joined}");
         assert!(
-            joined.contains("\u{25a4} 3"),
-            "todo cell should show the glyph and count: {joined}"
+            joined.contains("\u{25b0}\u{25b0}\u{25b1}\u{25b1} 3"),
+            "queue cell should show the qbar meter and count: {joined}"
         );
     }
 
     #[test]
     fn todo_column_hidden_when_no_session_has_queued_tasks() {
         // render_rows() uses one_session() (queue_depth 0) at width 100 (no panel),
-        // so "To-Do" must not appear anywhere.
+        // so "Queue" must not appear anywhere.
         let joined = render_rows().join("\n");
         assert!(
-            !joined.contains("To-Do"),
-            "To-Do column is hidden when no session has queued tasks: {joined}"
+            !joined.contains("Queue"),
+            "Queue column is hidden when no session has queued tasks: {joined}"
         );
     }
 
@@ -1948,5 +1988,101 @@ mod tests {
         std::env::remove_var("CS_VERSION");
         assert!(text.contains("q:quit"), "key hints missing:\n{text}");
         assert!(text.contains("9.9.9"), "version missing from footer:\n{text}");
+    }
+
+    #[test]
+    fn qbar_fill_levels() {
+        assert_eq!(qbar(0), "\u{25b1}\u{25b1}\u{25b1}\u{25b1}");
+        assert_eq!(qbar(1), "\u{25b0}\u{25b1}\u{25b1}\u{25b1}");
+        assert_eq!(qbar(3), "\u{25b0}\u{25b0}\u{25b1}\u{25b1}");
+        assert_eq!(qbar(5), "\u{25b0}\u{25b0}\u{25b0}\u{25b1}");
+        assert_eq!(qbar(9), "\u{25b0}\u{25b0}\u{25b0}\u{25b0}");
+    }
+
+    #[test]
+    fn table_is_borderless_and_zebra_free() {
+        let mut app = App::new(one_session());
+        app.theme = Palette::dark();
+        let backend = TestBackend::new(80, 24);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(&mut app, f)).unwrap();
+        let buf = term.backend().buffer();
+        let mut corners = 0;
+        for y in 0..24u16 {
+            for x in 0..80u16 {
+                let sym = buf.cell(ratatui::layout::Position::new(x, y)).unwrap().symbol();
+                // Table corners are gone; card corners (Task 5) render only when
+                // the preview pane is open, which test_app() does not open.
+                if sym == "\u{256d}" || sym == "\u{2570}" {
+                    corners += 1;
+                }
+            }
+        }
+        assert_eq!(corners, 0, "table must render without a bordered Block");
+    }
+
+    #[test]
+    fn selected_row_gets_wash_and_locked_row_gets_square() {
+        let mut app = App::new(locked_and_recent_sessions());
+        app.theme = Palette::dark();
+        // Sort by Name so the fixture's two sessions render as plain rows —
+        // Created/Modified sort (the default) would inject a time-section
+        // divider above row 0 and complicate the gutter-x math below.
+        app.sort_col = SortColumn::Name;
+        app.sort_dir = SortDirection::Asc;
+        app.apply_filter_and_sort();
+        // Ensure a deterministic selection on the first row.
+        app.table_state.select(Some(0));
+        let backend = TestBackend::new(80, 24);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(&mut app, f)).unwrap();
+        let buf = term.backend().buffer();
+        let p = app.theme;
+        // Find the selected row by scanning for a cell whose bg == p.wash;
+        // the wash must exist somewhere in the table region.
+        let mut wash_found = false;
+        let mut dot_found = false;
+        for y in 0..24u16 {
+            for x in 0..80u16 {
+                let cell = buf.cell(ratatui::layout::Position::new(x, y)).unwrap();
+                if cell.bg == p.wash {
+                    wash_found = true;
+                }
+                if cell.symbol() == "\u{25cf}" || cell.symbol() == "\u{25aa}" {
+                    dot_found = true;
+                }
+            }
+        }
+        assert!(wash_found, "selected row must carry the wash background");
+        assert!(dot_found, "gutter must carry a status dot or locked square");
+
+        // Strengthen: the fixture offers a locked and an unlocked session, so
+        // assert the exact gutter glyph on each row at the exact gutter x.
+        let rows: Vec<String> = (0..24u16)
+            .map(|y| {
+                (0..80u16)
+                    .map(|x| buf.cell(ratatui::layout::Position::new(x, y)).unwrap().symbol())
+                    .collect::<String>()
+            })
+            .collect();
+        let locked_y = rows
+            .iter()
+            .position(|r| r.contains("locked"))
+            .expect("the locked session row should render") as u16;
+        let recent_y = rows
+            .iter()
+            .position(|r| r.contains("recent"))
+            .expect("the recent session row should render") as u16;
+        let gutter_x = app.table_area.x + SELECT_WIDTH;
+        let locked_gutter = buf
+            .cell(ratatui::layout::Position::new(gutter_x, locked_y))
+            .unwrap()
+            .symbol();
+        let recent_gutter = buf
+            .cell(ratatui::layout::Position::new(gutter_x, recent_y))
+            .unwrap()
+            .symbol();
+        assert_eq!(locked_gutter, "\u{25aa}", "locked row shows the locked square at the gutter x");
+        assert_eq!(recent_gutter, "\u{25cf}", "unlocked row shows the recency dot at the gutter x");
     }
 }
