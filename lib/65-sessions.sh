@@ -95,7 +95,10 @@ list_sessions() {
             --tag)
                 shift
                 [ -n "${1:-}" ] || error "Usage: cs -list [--tag <tag>]"
-                tag_filter="$1"
+                # Stored tags are always lowercase (cs -tag add lowercases on
+                # write); lowercase the filter too so it matches regardless
+                # of case, mirroring the TUI's parse_tag_query.
+                tag_filter=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
                 shift
                 ;;
             *) error "Unknown list option: $1. Usage: cs -list [--tag <tag>]" ;;

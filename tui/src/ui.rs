@@ -832,13 +832,20 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
 
 fn render_search_bar(app: &App, frame: &mut Frame, area: Rect) {
     let p = app.theme;
-    let line = Line::from(vec![
+    let mut spans = vec![
         Span::styled("/ ", Style::default().fg(p.gold)),
         Span::styled(app.search_input.before_cursor(), Style::default().fg(p.fg)),
         Span::styled("\u{2588}", Style::default().fg(p.fg)),
         Span::styled(app.search_input.after_cursor(), Style::default().fg(p.fg)),
-    ]);
-    let paragraph = Paragraph::new(line);
+    ];
+    // Only hinted while the input is empty, so it never crowds a real query.
+    if app.search_input.text().is_empty() {
+        spans.push(Span::styled(
+            "  #tag filters",
+            Style::default().fg(p.faint).add_modifier(Modifier::DIM),
+        ));
+    }
+    let paragraph = Paragraph::new(Line::from(spans));
     frame.render_widget(paragraph, area);
 }
 
@@ -2498,6 +2505,31 @@ mod tests {
         assert_ne!(
             name_fg, p.comment,
             "a tag-only query should not dim rows that already passed the tag filter"
+        );
+    }
+
+    #[test]
+    fn search_bar_hints_tag_syntax_when_input_is_empty() {
+        let mut app = App::new(one_session());
+        app.theme = Palette::dark();
+        app.mode = Mode::Search;
+        let text = render_wide(&mut app);
+        assert!(
+            text.contains("#tag filters"),
+            "empty search input should hint the #tag syntax: {text}"
+        );
+    }
+
+    #[test]
+    fn search_bar_hides_tag_hint_once_typing_starts() {
+        let mut app = App::new(one_session());
+        app.theme = Palette::dark();
+        app.mode = Mode::Search;
+        app.search_input.set("alpha");
+        let text = render_wide(&mut app);
+        assert!(
+            !text.contains("#tag filters"),
+            "a real query should not be crowded by the hint: {text}"
         );
     }
 

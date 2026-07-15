@@ -26,6 +26,16 @@ _tags_read() {
     ' "$readme" 2>/dev/null
 }
 
+# True when line 1 is exactly the opening frontmatter fence "---". A
+# frontmatter-less file (no fence at all) or a CRLF fence ("---\r", which is
+# not the exact string "---") both fail this check — either would otherwise
+# make _tags_write's insert branch silently pass the file through unchanged.
+_tags_has_frontmatter() {
+    local readme="$1"
+    [ -f "$readme" ] || return 1
+    awk 'NR==1 && $0=="---" {exit 0} NR==1 {exit 1}' "$readme"
+}
+
 # True when the frontmatter carries a bare "tags:" line (block-style list) —
 # a structure we refuse to rewrite rather than guess at.
 _tags_has_block_style() {
@@ -109,6 +119,7 @@ _tag_mutate() {
     local readme
     readme=$(_tag_target_readme)
     [ -f "$readme" ] || error "No README frontmatter for this session: $readme"
+    _tags_has_frontmatter "$readme" || error "Cannot edit $readme: no YAML frontmatter fence found (CRLF line endings also defeat it); cs edits only the inline 'tags: [...]' form"
     if _tags_has_block_style "$readme"; then
         error "Cannot edit $readme: its tags are a block-style YAML list; cs writes only the inline form 'tags: [a, b]'"
     fi
@@ -155,8 +166,6 @@ run_tag() {
         list|ls)
             if [ -n "${1:-}" ]; then
                 _tag_list_session "$1"
-            elif [ -n "${CLAUDE_SESSION_META_DIR:-}" ]; then
-                _tags_read "$CLAUDE_SESSION_META_DIR/README.md"
             else
                 _tag_list_all
             fi
