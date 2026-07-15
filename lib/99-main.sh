@@ -129,6 +129,11 @@ main() {
             run_usage "$@"
             return $?
             ;;
+        -tag)
+            shift
+            run_tag "$@"
+            return $?
+            ;;
         -doctor|-diag)
             run_doctor
             return $?
