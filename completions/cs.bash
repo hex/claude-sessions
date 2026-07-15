@@ -11,7 +11,7 @@ _cs_completions() {
     }
 
     # Global flags
-    local global_flags="-list -ls -adopt -remove -rm -whoami -who -secrets -checkpoint -queue -search -lint -statusline -detect-theme -doctor -diag -update -uninstall -help -h -version -v -live -usage -status -tag"
+    local global_flags="-list -ls -adopt -remove -rm -whoami -who -secrets -checkpoint -queue -search -lint -statusline -detect-theme -doctor -diag -update -uninstall -help -h -version -v -live -usage -status -tag -archive -unarchive"
 
     # Secrets subcommands
     local secrets_cmds="set store get list ls delete rm purge export export-file import-file migrate migrate-backend backend age"
@@ -61,6 +61,7 @@ _cs_completions() {
     local in_list=false
     local has_session=false
     local after_remove=false
+    local after_archive=false
 
     for ((i=1; i < cword; i++)); do
         case "${words[i]}" in
@@ -115,12 +116,15 @@ _cs_completions() {
             -remove|-rm)
                 after_remove=true
                 ;;
+            -archive|-unarchive)
+                after_archive=true
+                ;;
             -*)
                 # Other flags don't change context
                 ;;
             *)
                 # A non-flag word that's not a subcommand is likely a session name
-                if ! $in_secrets && ! $after_remove && ! $in_update && ! $in_checkpoint && ! $in_queue && ! $in_tag; then
+                if ! $in_secrets && ! $after_remove && ! $in_update && ! $in_checkpoint && ! $in_queue && ! $in_tag && ! $after_archive; then
                     has_session=true
                 fi
                 ;;
@@ -129,6 +133,13 @@ _cs_completions() {
 
     # Context: after -remove/-rm, complete with session names
     if $after_remove && [[ $cword -eq 2 ]]; then
+        COMPREPLY=()
+        _cs_add_session_matches "$cur"
+        return
+    fi
+
+    # Context: after -archive/-unarchive, complete with session names
+    if $after_archive && [[ $cword -eq 2 ]]; then
         COMPREPLY=()
         _cs_add_session_matches "$cur"
         return

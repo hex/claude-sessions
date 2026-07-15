@@ -34,6 +34,8 @@ Commands:
   -live               List sessions running right now on this machine
   -usage              Per-session token usage over the 5h/weekly rate-limit windows
   -tag add|rm <tag>   Tag the current session (frontmatter); -tag list [<name>] to view
+  -archive <name>     Archive a session: hidden from listings until reopened
+  -unarchive <name>   Restore an archived session to the listings
   -status "<text>"    Set this session's advertised status (also: -status, -status --clear/-c)
   -remove, -rm <name> Remove a session
   -secrets <cmd>      Manage current session secrets (requires CLAUDE_SESSION_NAME)

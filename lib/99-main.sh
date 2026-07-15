@@ -135,6 +135,16 @@ main() {
             run_tag "$@"
             return $?
             ;;
+        -archive)
+            shift
+            run_archive "$@"
+            return $?
+            ;;
+        -unarchive)
+            shift
+            run_unarchive "$@"
+            return $?
+            ;;
         -doctor|-diag)
             run_doctor
             return $?

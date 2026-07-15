@@ -101,6 +101,8 @@ _cs() {
         '-live:List sessions running right now on this machine'
         '-usage:Per-session token usage over rate-limit windows'
         '-tag:Manage session tags'
+        '-archive:Archive a session (hidden from listings)'
+        '-unarchive:Restore an archived session'
         '-status:Set or show this session'\''s advertised status'
         '-search:Search across all sessions'
         '-lint:Flag AI-slop prose tells in files'
@@ -117,7 +119,7 @@ _cs() {
     )
 
     # Determine context
-    local in_secrets=false in_update=false in_checkpoint=false in_queue=false in_tag=false in_list=false has_session=false after_remove=false
+    local in_secrets=false in_update=false in_checkpoint=false in_queue=false in_tag=false in_list=false has_session=false after_remove=false after_archive=false
     local i word
 
     for ((i=2; i < CURRENT; i++)); do
@@ -130,9 +132,10 @@ _cs() {
             -tag) in_tag=true; in_secrets=false; in_update=false; in_checkpoint=false; in_queue=false; in_list=false ;;
             -list|-ls) in_list=true; in_secrets=false; in_update=false; in_checkpoint=false; in_queue=false; in_tag=false ;;
             -remove|-rm) after_remove=true ;;
+            -archive|-unarchive) after_archive=true ;;
             -*) ;;
             *)
-                if ! $in_secrets && ! $after_remove && ! $in_update && ! $in_checkpoint && ! $in_queue && ! $in_tag && ! $in_list; then
+                if ! $in_secrets && ! $after_remove && ! $in_update && ! $in_checkpoint && ! $in_queue && ! $in_tag && ! $in_list && ! $after_archive; then
                     has_session=true
                 fi
                 ;;
@@ -141,6 +144,12 @@ _cs() {
 
     # Context: after -remove/-rm
     if $after_remove && [[ $CURRENT -eq 3 ]]; then
+        _cs_sessions
+        return
+    fi
+
+    # Context: after -archive/-unarchive
+    if $after_archive && [[ $CURRENT -eq 3 ]]; then
         _cs_sessions
         return
     fi
