@@ -50,6 +50,53 @@ _qlen() {
     fi
 }
 
+# Append one event to the notification inbox. Task text is arbitrary -> jq.
+# Best-effort: inbox failure must never break the drain.
+_inbox_append() {  # jq --arg/--argjson pairs..., then the jq object program
+    jq -nc "$@" >> "$QDIR/notifications.jsonl" 2>/dev/null || true
+}
+
+_num_or() {  # value, default -> prints value if a plain integer, else default
+    case "${1:-}" in ''|*[!0-9]*) echo "$2";; *) echo "$1";; esac
+}
+
+# Evaluate the circuit breakers. Prints "reason reading limit" and returns 0
+# when one trips; returns 1 otherwise. Order: failures, context, five_hour.
+_breaker_check() {
+    local max_fail max_ctx max_5h fails ctx fiveh stamped now
+    max_fail=$(_num_or "${CS_QUEUE_MAX_FAILURES:-}" 5)
+    max_ctx=$(_num_or "${CS_QUEUE_MAX_CTX:-}" 85)
+    max_5h=$(_num_or "${CS_QUEUE_MAX_5H:-}" 85)
+
+    fails=$(_num_or "$(cat "$QDIR/failures" 2>/dev/null | tr -d '[:space:]')" 0)
+    if [ "$fails" -ge "$max_fail" ]; then
+        echo "failures $fails $max_fail"
+        return 0
+    fi
+
+    ctx=$(cat "$QDIR/context-pct" 2>/dev/null | tr -d '[:space:]' || true)
+    case "$ctx" in
+        ''|*[!0-9]*) : ;;
+        *) if [ "$ctx" -ge "$max_ctx" ]; then
+               echo "context $ctx $max_ctx"
+               return 0
+           fi ;;
+    esac
+
+    if [ -f "$QDIR/limits" ]; then
+        fiveh=$(awk -F': ' '/^five_hour_used_pct:/ {print $2; exit}' "$QDIR/limits" 2>/dev/null | tr -d '[:space:]')
+        stamped=$(awk -F': ' '/^stamped_at:/ {print $2; exit}' "$QDIR/limits" 2>/dev/null | tr -d '[:space:]')
+        now=$(date +%s)
+        case "$fiveh$stamped" in *[!0-9]*|'') : ;; *)
+            if [ $((now - stamped)) -le 1800 ] && [ "$fiveh" -ge "$max_5h" ]; then
+                echo "five_hour $fiveh $max_5h"
+                return 0
+            fi ;;
+        esac
+    fi
+    return 1
+}
+
 QLEN=$(_qlen "$QUEUE")
 if [ "$QLEN" -gt 0 ]; then
     QSTATE=$(cat "$QSTATE_FILE" 2>/dev/null | tr -d '[:space:]' || true)
@@ -58,6 +105,9 @@ if [ "$QLEN" -gt 0 ]; then
     if [ "$QSTATE" = "armed" ]; then
         TASK=$(awk 'NF{print; exit}' "$QUEUE")
         printf 'draining\n' > "$QSTATE_FILE.tmp" && mv "$QSTATE_FILE.tmp" "$QSTATE_FILE"
+        rm -f "$QDIR/failures"
+        _inbox_append --arg ts "$(date +%s)" --arg q "$QLEN" \
+            '{ts: ($ts|tonumber), event: "drain_started", queued: ($q|tonumber)}'
         REASON="cs task queue: starting a walk-away run. Work through the queued tasks one at a time; I will hand you the next after each finishes. Mirror the whole queue into your native task list now: run \`cs -queue list\` to see every queued item (this message shows only the first), create one task each, and mark each completed as you finish it. When a task is done, mark it completed and simply end your turn; the next task is delivered automatically on the next turn. Do not read or edit the queue file yourself.
 
 First task: $TASK"
@@ -70,12 +120,31 @@ First task: $TASK"
         if awk 'popped==0 && NF { popped=1; next } { print }' "$QUEUE" \
                 > "$QUEUE.tmp" && mv "$QUEUE.tmp" "$QUEUE"; then
             printf '%s\n' "$DONE_TASK" >> "$QDIR/queue.done"
+            _inbox_append --arg ts "$(date +%s)" --arg task "$DONE_TASK" \
+                '{ts: ($ts|tonumber), event: "task_done", task: $task}'
             NEWLEN=$(_qlen "$QUEUE")
             if [ "$NEWLEN" -le 0 ]; then
                 printf 'idle\n' > "$QSTATE_FILE.tmp" && mv "$QSTATE_FILE.tmp" "$QSTATE_FILE"
+                DONE_COUNT=$(_qlen "$QDIR/queue.done")
+                _inbox_append --arg ts "$(date +%s)" --arg d "$DONE_COUNT" \
+                    '{ts: ($ts|tonumber), event: "drain_finished", done: ($d|tonumber)}'
+                rm -f "$QDIR/failures"
                 jq -nc '{decision:"block", reason:"cs task queue: all tasks complete. Mark the final native task completed, then give the user a brief summary of what the walk-away run accomplished and anything that needs their attention."}'
                 exit 0
             fi
+            if TRIP=$(_breaker_check); then
+                set -- $TRIP
+                REASON_KIND="$1"; READING="$2"; LIMIT="$3"
+                printf 'idle\n' > "$QSTATE_FILE.tmp" && mv "$QSTATE_FILE.tmp" "$QSTATE_FILE"
+                _inbox_append --arg ts "$(date +%s)" --arg r "$REASON_KIND" \
+                    --arg v "$READING" --arg l "$LIMIT" --arg n "$NEWLEN" \
+                    '{ts: ($ts|tonumber), event: "breaker_tripped", reason: $r, reading: ($v|tonumber), limit: ($l|tonumber), remaining: ($n|tonumber)}'
+                rm -f "$QDIR/failures"
+                REASON="cs task queue: circuit breaker tripped — $REASON_KIND at $READING (threshold $LIMIT). The queue is parked with $NEWLEN task(s) remaining; nothing was lost. Summarize the walk-away run so far and anything that needs the user's attention. They can re-arm with: cs -queue start."
+                jq -nc --arg r "$REASON" '{decision:"block", reason:$r}'
+                exit 0
+            fi
+            rm -f "$QDIR/failures"
             NEXT=$(awk 'NF{print; exit}' "$QUEUE")
             REASON="cs task queue: next task ($NEWLEN remaining). Mark the previous native task completed and this one in-progress (create it if missing), then do it.
 
