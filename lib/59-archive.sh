@@ -56,3 +56,9 @@ run_unarchive() {
     rm -f "$ARCHIVE_MARKER"
     info "Unarchived: $name"
 }
+
+# One dimmed line noting how many archived sessions the default listing hid.
+_list_archived_trailer() {  # count
+    [ "$1" -gt 0 ] || return 0
+    echo -e "${COMMENT}$1 archived (cs -list --archived)${NC}"
+}

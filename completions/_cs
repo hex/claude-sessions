@@ -74,6 +74,7 @@ _cs() {
     local -a list_opts
     list_opts=(
         '--tag:List only sessions carrying a tag'
+        '--archived:List only archived sessions'
     )
 
     # Update subcommands with descriptions

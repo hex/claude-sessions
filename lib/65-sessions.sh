@@ -89,19 +89,23 @@ cmd_complete() {
 
 # List all sessions
 list_sessions() {
-    local tag_filter=""
+    local tag_filter="" archived_only=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --tag)
                 shift
-                [ -n "${1:-}" ] || error "Usage: cs -list [--tag <tag>]"
+                [ -n "${1:-}" ] || error "Usage: cs -list [--archived] [--tag <tag>]"
                 # Stored tags are always lowercase (cs -tag add lowercases on
                 # write); lowercase the filter too so it matches regardless
                 # of case, mirroring the TUI's parse_tag_query.
                 tag_filter=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
                 shift
                 ;;
-            *) error "Unknown list option: $1. Usage: cs -list [--tag <tag>]" ;;
+            --archived)
+                archived_only="true"
+                shift
+                ;;
+            *) error "Unknown list option: $1. Usage: cs -list [--archived] [--tag <tag>]" ;;
         esac
     done
 
@@ -111,16 +115,24 @@ list_sessions() {
     fi
 
     local sessions=()
+    local hidden_archived=0
     while IFS= read -r -d '' dir; do
         is_session_dir "$dir" || continue
         if [ -n "$tag_filter" ]; then
             _tags_read "$dir/.cs/README.md" | grep -Fqx "$tag_filter" || continue
+        fi
+        if [ -n "$archived_only" ]; then
+            _session_is_archived "$dir" || continue
+        elif _session_is_archived "$dir"; then
+            hidden_archived=$((hidden_archived + 1))
+            continue
         fi
         sessions+=("$(basename "$dir")")
     done < <(find "$SESSIONS_ROOT" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) -print0 | sort -z)
 
     if [ ${#sessions[@]} -eq 0 ]; then
         info "No sessions found"
+        _list_archived_trailer "$hidden_archived"
         return 0
     fi
 
@@ -206,6 +218,8 @@ list_sessions() {
             printf "${GOLD}%s${NC}%s  ${COMMENT}%-16s  %s${NC}\n" "$session" "$padding" "$created" "$modified"
         fi
     done
+
+    _list_archived_trailer "$hidden_archived"
 }
 
 # Remove a session

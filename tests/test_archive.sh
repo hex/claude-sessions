@@ -99,10 +99,57 @@ test_archive_refuses_live_session_without_force() {
     [ -f "$CS_SESSIONS_ROOT/livesess/.cs/archived" ] || { echo "  FAIL: --force marker missing"; return 1; }
 }
 
+test_list_hides_archived_and_prints_trailer() {
+    _archive_session "visible-a"
+    _archive_session "hidden-a"
+    "$CS_BIN" -archive hidden-a >/dev/null 2>&1 || return 1
+    local output
+    output=$("$CS_BIN" -list 2>&1) || true
+    assert_output_contains "$output" "visible-a" "plain session listed" || return 1
+    assert_output_not_contains "$output" "hidden-a" "archived session hidden" || return 1
+    assert_output_contains "$output" "1 archived (cs -list --archived)" "trailer counts the hidden" || return 1
+}
+
+test_list_archived_shows_only_archived() {
+    _archive_session "plain-b"
+    _archive_session "arch-b"
+    "$CS_BIN" -archive arch-b >/dev/null 2>&1 || return 1
+    local output
+    output=$("$CS_BIN" -list --archived 2>&1) || true
+    assert_output_contains "$output" "arch-b" "archived session listed" || return 1
+    assert_output_not_contains "$output" "plain-b" "plain session excluded" || return 1
+    # No trailer in the --archived view — nothing is hidden by the archive rule.
+    assert_output_not_contains "$output" "cs -list --archived)" "no trailer when showing archived" || return 1
+}
+
+test_list_archived_composes_with_tag() {
+    _archive_session "arch-tagged" "tags: [api]"
+    _archive_session "arch-untagged" "tags: []"
+    "$CS_BIN" -archive arch-tagged >/dev/null 2>&1 || return 1
+    "$CS_BIN" -archive arch-untagged >/dev/null 2>&1 || return 1
+    local output
+    output=$("$CS_BIN" -list --archived --tag api 2>&1) || true
+    assert_output_contains "$output" "arch-tagged" "archived+tagged listed" || return 1
+    assert_output_not_contains "$output" "arch-untagged" "archived without the tag excluded" || return 1
+}
+
+test_list_trailer_prints_even_when_all_sessions_archived() {
+    _archive_session "only-one"
+    "$CS_BIN" -archive only-one >/dev/null 2>&1 || return 1
+    local output
+    output=$("$CS_BIN" -list 2>&1) || true
+    assert_output_contains "$output" "No sessions found" "empty default view says so" || return 1
+    assert_output_contains "$output" "1 archived (cs -list --archived)" "trailer still points at the archive" || return 1
+}
+
 run_test test_archive_subcommand_exists
 run_test test_archive_roundtrip_and_marker_content
 run_test test_archive_is_idempotent
 run_test test_archive_unknown_session_errors
 run_test test_archive_no_name_errors_with_usage
 run_test test_archive_refuses_live_session_without_force
+run_test test_list_hides_archived_and_prints_trailer
+run_test test_list_archived_shows_only_archived
+run_test test_list_archived_composes_with_tag
+run_test test_list_trailer_prints_even_when_all_sessions_archived
 report_results
