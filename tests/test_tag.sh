@@ -146,6 +146,18 @@ test_list_filters_by_tag() {
     fi
 }
 
+test_list_tag_filter_matches_dots_literally() {
+    # --tag reaches grep as a BRE pattern; an unescaped "." matches any char,
+    # so "v1.2" would wrongly also match a tag literally spelled "v1x2".
+    unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR
+    _session_with_readme "sess-real-dot" "tags: [v1.2]" >/dev/null
+    _session_with_readme "sess-fake-dot" "tags: [v1x2]" >/dev/null
+    local output
+    output=$("$CS_BIN" -list --tag v1.2 2>&1) || true
+    assert_output_contains "$output" "sess-real-dot" "exact dotted-tag session listed" || return 1
+    assert_output_not_contains "$output" "sess-fake-dot" "dot must match literally, not as a wildcard" || return 1
+}
+
 run_test test_tag_subcommand_exists
 run_test test_tag_add_and_list_roundtrip
 run_test test_tag_add_inserts_line_and_preserves_rest_byte_for_byte
@@ -155,4 +167,5 @@ run_test test_tag_add_outside_session_errors
 run_test test_tag_site_b_targets_named_session
 run_test test_tag_list_bare_counts_across_sessions
 run_test test_list_filters_by_tag
+run_test test_list_tag_filter_matches_dots_literally
 report_results

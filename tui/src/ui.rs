@@ -13,7 +13,10 @@ use unicode_width::UnicodeWidthStr;
 
 use ratatui::layout::Alignment;
 
-use crate::app::{App, FlashKind, Focus, Mode, NotesFocus, SortColumn, SortDirection, StatusLevel};
+use crate::app::{
+    parse_tag_query, App, FlashKind, Focus, Mode, NotesFocus, SortColumn, SortDirection,
+    StatusLevel,
+};
 use crate::theme::{self, Palette};
 
 const PREVIEW_MIN_WIDTH: u16 = 120;
@@ -309,7 +312,11 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
 
     let header = Row::new(header_cells).bottom_margin(1);
 
-    let is_searching = app.mode == Mode::Search && !app.search_input.text().is_empty();
+    // Dimming keys on the fuzzy remainder, not the raw search text: a
+    // tag-only query like "#api" has already narrowed `filtered` via the tag
+    // predicate and leaves no fuzzy match to dim against.
+    let (_, fuzzy_remainder) = parse_tag_query(app.search_input.text());
+    let is_searching = app.mode == Mode::Search && !fuzzy_remainder.is_empty();
 
     // One wall-clock read per frame, shared by every row's recency math.
     let now = std::time::SystemTime::now();
@@ -2450,6 +2457,48 @@ mod tests {
         let digit_fg = buf.cell(ratatui::layout::Position::new(digit_x, session_y)).unwrap().fg;
         assert_eq!(bar_fg, p.rust, "bar should stay depth-colored (depth 5 > 3 => RUST)");
         assert_eq!(digit_fg, p.mut_, "digit should use MUT, not ride the bar color");
+    }
+
+    #[test]
+    fn tag_only_search_query_does_not_dim_matches() {
+        // A tag-only query like "#api" leaves no fuzzy remainder, so
+        // fuzzy_indices stays empty even though the tag filter already
+        // narrowed the rows. Dimming must key on the fuzzy remainder, not on
+        // whether a fuzzy match was recorded, or every row renders grey
+        // while search is focused.
+        let mut sessions = one_session();
+        sessions[0].name = "svc-api".into();
+        sessions[0].tags = vec!["api".into()];
+        let mut app = App::new(sessions);
+        app.theme = Palette::dark();
+        app.show_preview = false;
+        let p = app.theme;
+        app.mode = Mode::Search;
+        app.search_input.set("#api");
+        app.apply_filter_and_sort();
+        assert_eq!(app.filtered.len(), 1, "the tag filter should keep the matching session");
+
+        let backend = TestBackend::new(100, 24);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(&mut app, f)).unwrap();
+        let buf = term.backend().buffer();
+
+        let row_text = |y: u16| -> String {
+            (0..100u16)
+                .map(|x| buf.cell(ratatui::layout::Position::new(x, y)).unwrap().symbol())
+                .collect()
+        };
+        let session_y = (0..24u16)
+            .find(|&y| row_text(y).contains("svc-api"))
+            .expect("the session row should render");
+        let name_x = (0..100u16)
+            .find(|&x| buf.cell(ratatui::layout::Position::new(x, session_y)).unwrap().symbol() == "s")
+            .expect("the session name should render");
+        let name_fg = buf.cell(ratatui::layout::Position::new(name_x, session_y)).unwrap().fg;
+        assert_ne!(
+            name_fg, p.comment,
+            "a tag-only query should not dim rows that already passed the tag filter"
+        );
     }
 
     #[test]

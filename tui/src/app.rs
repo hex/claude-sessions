@@ -168,7 +168,7 @@ impl TextInput {
 /// the remainder rejoins as the fuzzy name query. A bare `#` yields an empty
 /// tag, which matches nothing — typing feedback handles it like any
 /// non-matching query.
-fn parse_tag_query(query: &str) -> (Vec<String>, String) {
+pub(crate) fn parse_tag_query(query: &str) -> (Vec<String>, String) {
     let mut tags = Vec::new();
     let mut rest: Vec<&str> = Vec::new();
     for tok in query.split_whitespace() {
