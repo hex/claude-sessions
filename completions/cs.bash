@@ -29,7 +29,7 @@ _cs_completions() {
     local update_cmds="--check -c --force -f"
 
     # Session-level options
-    local session_opts="-secrets -queue -usage --force --merge"
+    local session_opts="-secrets -queue -usage -tag --force --merge"
 
     # Get list of session names. cs owns the definition of a session, including
     # which symlinks and marker directories count; asking it keeps this script
@@ -58,6 +58,7 @@ _cs_completions() {
     local in_checkpoint=false
     local in_queue=false
     local in_tag=false
+    local in_list=false
     local has_session=false
     local after_remove=false
 
@@ -69,6 +70,7 @@ _cs_completions() {
                 in_checkpoint=false
                 in_queue=false
                 in_tag=false
+                in_list=false
                 ;;
             -update)
                 in_update=true
@@ -76,6 +78,7 @@ _cs_completions() {
                 in_checkpoint=false
                 in_queue=false
                 in_tag=false
+                in_list=false
                 ;;
             -checkpoint)
                 in_checkpoint=true
@@ -83,6 +86,7 @@ _cs_completions() {
                 in_update=false
                 in_queue=false
                 in_tag=false
+                in_list=false
                 ;;
             -queue)
                 in_queue=true
@@ -90,6 +94,7 @@ _cs_completions() {
                 in_update=false
                 in_checkpoint=false
                 in_tag=false
+                in_list=false
                 ;;
             -tag)
                 in_tag=true
@@ -97,6 +102,15 @@ _cs_completions() {
                 in_update=false
                 in_checkpoint=false
                 in_queue=false
+                in_list=false
+                ;;
+            -list|-ls)
+                in_list=true
+                in_secrets=false
+                in_update=false
+                in_checkpoint=false
+                in_queue=false
+                in_tag=false
                 ;;
             -remove|-rm)
                 after_remove=true
@@ -135,6 +149,12 @@ _cs_completions() {
     # Context: after -tag, complete with tag subcommands
     if $in_tag; then
         COMPREPLY=($(compgen -W "$tag_cmds" -- "$cur"))
+        return
+    fi
+
+    # Context: after -list/-ls, offer the --tag filter
+    if $in_list; then
+        COMPREPLY=($(compgen -W "--tag" -- "$cur"))
         return
     fi
 

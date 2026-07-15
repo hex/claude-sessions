@@ -51,7 +51,8 @@ main() {
             if command -v cs-tui >/dev/null 2>&1; then
                 info "Hint: run bare 'cs' for the interactive session manager"
             fi
-            list_sessions
+            shift
+            list_sessions "$@"
             return 0
             ;;
         -remove|-rm)
@@ -201,6 +202,14 @@ main() {
                 run_usage "$session_name"
                 return 0
                 ;;
+            -tag)
+                shift
+                export CLAUDE_SESSION_NAME="$session_name"
+                export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
+                export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
+                run_tag "$@"
+                return 0
+                ;;
             --merge)
                 shift
                 [ -n "${1:-}" ] || error "Usage: cs <base> --merge <task>"
@@ -212,7 +221,7 @@ main() {
                 shift
                 ;;
             *)
-                error "Unknown session command: $1. Use -secrets, -queue, -usage, --merge, or --force."
+                error "Unknown session command: $1. Use -secrets, -queue, -usage, -tag, --merge, or --force."
                 ;;
         esac
     done

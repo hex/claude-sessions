@@ -175,6 +175,7 @@ _cs() {
             '-secrets:Run secrets command'
             '-queue:Manage the session walk-away queue'
             '-usage:Show per-conversation token usage for this session'
+            '-tag:Manage session tags'
             '--force:Override active session lock'
             '--merge:Merge a task worktree back and remove it'
         )

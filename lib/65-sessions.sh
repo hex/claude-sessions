@@ -89,6 +89,19 @@ cmd_complete() {
 
 # List all sessions
 list_sessions() {
+    local tag_filter=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --tag)
+                shift
+                [ -n "${1:-}" ] || error "Usage: cs -list [--tag <tag>]"
+                tag_filter="$1"
+                shift
+                ;;
+            *) error "Unknown list option: $1. Usage: cs -list [--tag <tag>]" ;;
+        esac
+    done
+
     if [ ! -d "$SESSIONS_ROOT" ]; then
         info "No sessions found"
         return 0
@@ -97,6 +110,9 @@ list_sessions() {
     local sessions=()
     while IFS= read -r -d '' dir; do
         is_session_dir "$dir" || continue
+        if [ -n "$tag_filter" ]; then
+            _tags_read "$dir/.cs/README.md" | grep -qx "$tag_filter" || continue
+        fi
         sessions+=("$(basename "$dir")")
     done < <(find "$SESSIONS_ROOT" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) -print0 | sort -z)
 

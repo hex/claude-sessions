@@ -115,10 +115,44 @@ test_tag_add_outside_session_errors() {
     assert_output_contains "$output" "In-session only" "error explains the site-B form" || return 1
 }
 
+test_tag_site_b_targets_named_session() {
+    unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR
+    _session_with_readme "siteb" "tags: []" >/dev/null
+    "$CS_BIN" siteb -tag add api >/dev/null 2>&1 || { echo "  FAIL: site-B add exited non-zero"; return 1; }
+    assert_file_contains "$CS_SESSIONS_ROOT/siteb/.cs/README.md" "tags: \[api\]" "site-B form tags the named session" || return 1
+}
+
+test_tag_list_bare_counts_across_sessions() {
+    unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR
+    _session_with_readme "c1" "tags: [api, infra]" >/dev/null
+    _session_with_readme "c2" "tags: [api]" >/dev/null
+    local output
+    output=$("$CS_BIN" -tag list 2>&1) || true
+    assert_output_contains "$output" "api (2)" "api counted across both sessions" || return 1
+    assert_output_contains "$output" "infra (1)" "infra counted once" || return 1
+}
+
+test_list_filters_by_tag() {
+    unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR
+    _session_with_readme "tagged" "tags: [api]" >/dev/null
+    _session_with_readme "untagged" "tags: []" >/dev/null
+    local output
+    output=$("$CS_BIN" -list --tag api 2>&1) || true
+    assert_output_contains "$output" "tagged" "tagged session listed" || return 1
+    assert_output_not_contains "$output" "untagged" "untagged session filtered out" || return 1
+    if output=$("$CS_BIN" -list --tag 2>&1); then
+        echo "  FAIL: --tag without a value should error"
+        return 1
+    fi
+}
+
 run_test test_tag_subcommand_exists
 run_test test_tag_add_and_list_roundtrip
 run_test test_tag_add_inserts_line_and_preserves_rest_byte_for_byte
 run_test test_tag_validation
 run_test test_tag_refuses_block_style_lists
 run_test test_tag_add_outside_session_errors
+run_test test_tag_site_b_targets_named_session
+run_test test_tag_list_bare_counts_across_sessions
+run_test test_list_filters_by_tag
 report_results
