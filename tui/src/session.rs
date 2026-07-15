@@ -17,6 +17,7 @@ pub struct Session {
     pub queue_depth: u32,
     pub git_repo: Option<String>,
     pub tags: Vec<String>,
+    pub archived: bool,
 }
 
 pub struct SessionPreview {
@@ -321,6 +322,7 @@ fn read_session(path: &Path, secret_counts: &HashMap<String, u32>) -> Session {
     let tags = fs::read_to_string(meta_dir.join("README.md"))
         .map(|s| parse_frontmatter_tags(&s))
         .unwrap_or_default();
+    let archived = meta_dir.join("archived").is_file();
 
     Session {
         name,
@@ -334,6 +336,7 @@ fn read_session(path: &Path, secret_counts: &HashMap<String, u32>) -> Session {
         queue_depth,
         git_repo,
         tags,
+        archived,
     }
 }
 
@@ -1069,5 +1072,21 @@ mod tests {
         assert_eq!(s.tags, vec!["api", "infra"]);
 
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn read_session_detects_archived_marker() {
+        let dir = std::env::temp_dir().join(format!("cs-test-arch-{}", std::process::id()));
+        fs::create_dir_all(dir.join(".cs")).unwrap();
+        let counts = HashMap::new();
+
+        let s = read_session(&dir, &counts);
+        assert!(!s.archived);
+
+        fs::write(dir.join(".cs/archived"), "archived: 2026-07-15 by test\n").unwrap();
+        let s = read_session(&dir, &counts);
+        assert!(s.archived);
+
+        fs::remove_dir_all(&dir).unwrap();
     }
 }
