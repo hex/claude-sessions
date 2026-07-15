@@ -1232,6 +1232,9 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
         ("state", state_value, p.teal),
         ("repo", session.git_repo.clone().unwrap_or_else(|| "\u{2014}".into()), p.ink),
     ];
+    if !session.tags.is_empty() {
+        meta.push(("tags", session.tags.join(", "), p.mut_));
+    }
     let cached_preview = app.preview_cache.get(&session.name);
     if let Some(preview) = cached_preview {
         meta.push((
@@ -1628,6 +1631,14 @@ mod tests {
                 contributors: Vec::new(),
             },
         );
+        app
+    }
+
+    /// Like `preview_test_app`, but with the given tags on the session, for
+    /// asserting the preview pane's tags meta row.
+    fn preview_test_app_with_tags(tags: Vec<String>) -> App {
+        let mut app = preview_test_app();
+        app.sessions[0].tags = tags;
         app
     }
 
@@ -2679,6 +2690,21 @@ mod tests {
         for label in ["created", "modified", "state", "repo", "objective"] {
             assert!(text.contains(label), "missing meta label {label}:\n{text}");
         }
+    }
+
+    #[test]
+    fn preview_shows_tags_row_when_tagged() {
+        let mut app = preview_test_app_with_tags(vec!["api".into(), "infra".into()]);
+        let text = render_wide(&mut app);
+        assert!(text.contains("tags"), "tags label missing:\n{text}");
+        assert!(text.contains("api, infra"), "joined tag values missing:\n{text}");
+    }
+
+    #[test]
+    fn preview_omits_tags_row_when_untagged() {
+        let mut app = preview_test_app();
+        let text = render_wide(&mut app);
+        assert!(!text.contains("\ntags"), "tags row must be absent for untagged sessions:\n{text}");
     }
 
     #[test]

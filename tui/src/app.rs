@@ -164,6 +164,22 @@ impl TextInput {
     }
 }
 
+/// Split `#tag` predicate tokens out of a search query. Tags are lowercased;
+/// the remainder rejoins as the fuzzy name query. A bare `#` yields an empty
+/// tag, which matches nothing — typing feedback handles it like any
+/// non-matching query.
+fn parse_tag_query(query: &str) -> (Vec<String>, String) {
+    let mut tags = Vec::new();
+    let mut rest: Vec<&str> = Vec::new();
+    for tok in query.split_whitespace() {
+        match tok.strip_prefix('#') {
+            Some(t) => tags.push(t.to_ascii_lowercase()),
+            None => rest.push(tok),
+        }
+    }
+    (tags, rest.join(" "))
+}
+
 /// Fuzzy-match `pattern` against `text` (case-insensitive).
 /// Returns (score, matched_indices) or None if no match.
 /// Indices refer to byte positions of matched characters in `text`.
@@ -713,11 +729,16 @@ impl App {
         // Remember the selected session name so we can restore it after re-sorting
         let prev_name = self.selected_session().map(|s| s.name.clone());
 
-        let query = self.search_input.text();
+        let raw_query = self.search_input.text().to_string();
+        let (tag_filters, query) = parse_tag_query(&raw_query);
+        let query = query.as_str();
+        let tag_ok = |s: &Session| tag_filters.iter().all(|t| s.tags.iter().any(|st| st == t));
         self.fuzzy_indices.clear();
 
         if query.is_empty() {
-            self.filtered = (0..self.sessions.len()).collect();
+            self.filtered = (0..self.sessions.len())
+                .filter(|&i| tag_ok(&self.sessions[i]))
+                .collect();
         } else {
             // Fuzzy match and collect (index, score, matched_indices)
             let mut matches: Vec<(usize, i32, Vec<usize>)> = self
@@ -725,6 +746,9 @@ impl App {
                 .iter()
                 .enumerate()
                 .filter_map(|(i, s)| {
+                    if !tag_ok(s) {
+                        return None;
+                    }
                     fuzzy_match(query, &s.name).map(|(score, indices)| (i, score, indices))
                 })
                 .collect();
@@ -2044,6 +2068,60 @@ mod tests {
         app.search_input.set("");
         app.apply_filter_and_sort();
         assert_eq!(app.filtered.len(), 3);
+    }
+
+    #[test]
+    fn parse_tag_query_worked_examples() {
+        assert_eq!(parse_tag_query("#api"), (vec!["api".into()], String::new()));
+        assert_eq!(parse_tag_query("#api auth"), (vec!["api".into()], "auth".into()));
+        assert_eq!(
+            parse_tag_query("#api #infra srv"),
+            (vec!["api".into(), "infra".into()], "srv".into())
+        );
+        assert_eq!(parse_tag_query("plain"), (vec![], "plain".into()));
+        // A bare '#' produces an empty tag predicate that matches nothing
+        assert_eq!(parse_tag_query("#"), (vec![String::new()], String::new()));
+        assert_eq!(parse_tag_query("#API"), (vec!["api".into()], String::new()));
+    }
+
+    fn session_with_tags(name: &str, tags: &[&str]) -> Session {
+        Session {
+            name: name.into(),
+            is_adopted: false,
+            created: None,
+            modified: None,
+            modified_ts: None,
+            lock_pid: None,
+            is_locked: false,
+            secrets_count: 0,
+            queue_depth: 0,
+            git_repo: None,
+            tags: tags.iter().map(|t| t.to_string()).collect(),
+        }
+    }
+
+    fn filtered_names(app: &App) -> Vec<String> {
+        app.filtered.iter().map(|&i| app.sessions[i].name.clone()).collect()
+    }
+
+    #[test]
+    fn tag_filter_ands_and_composes_with_fuzzy() {
+        // Three sessions: a(tags api,infra), b(tags api), c(no tags).
+        // "#api" -> a and b; "#api #infra" -> a only; "#api b" -> b only.
+        let mut app = App::new(vec![
+            session_with_tags("a", &["api", "infra"]),
+            session_with_tags("b", &["api"]),
+            session_with_tags("c", &[]),
+        ]);
+        app.search_input.set("#api");
+        app.apply_filter_and_sort();
+        assert_eq!(filtered_names(&app), vec!["a", "b"]);
+        app.search_input.set("#api #infra");
+        app.apply_filter_and_sort();
+        assert_eq!(filtered_names(&app), vec!["a"]);
+        app.search_input.set("#api b");
+        app.apply_filter_and_sort();
+        assert_eq!(filtered_names(&app), vec!["b"]);
     }
 
     #[test]
