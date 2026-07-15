@@ -202,6 +202,73 @@ test_queue_log_empty_message() {
     assert_output_contains "$out" "No queue activity recorded." "empty inbox message" || return 1
 }
 
+_prompt_turn() {  # prompt-text -> hook stdout
+    printf '{"prompt": "%s"}' "$1" | bash "$HOOKS_DIR/scope-prompt.sh"
+}
+
+test_digest_surfaces_once_at_prompt() {
+    _qs_session "dg"
+    _arm_queue "only task"
+    _stop_turn >/dev/null || return 1
+    _stop_turn >/dev/null || return 1              # drain finishes: 3 events queued
+    local out
+    out=$(_prompt_turn "hello") || return 1
+    assert_output_contains "$out" "while you were away" "digest injected" || return 1
+    assert_output_contains "$out" "1 task(s) done" "digest counts tasks" || return 1
+    out=$(_prompt_turn "hello again") || return 1
+    assert_output_not_contains "$out" "while you were away" "second prompt injects nothing" || return 1
+}
+
+test_digest_includes_breaker_reason() {
+    _qs_session "dgb"
+    _arm_queue "a" "b"
+    _stop_turn >/dev/null || return 1
+    printf '9\n' > "$CLAUDE_SESSION_META_DIR/local/failures"
+    _stop_turn >/dev/null || return 1              # trips
+    local out
+    out=$(_prompt_turn "hi") || return 1
+    assert_output_contains "$out" "breaker tripped: failures" "digest names the trip" || return 1
+}
+
+test_declined_only_inbox_stays_silent_but_cursor_advances() {
+    _qs_session "dgs"
+    "$CS_BIN" -queue defer >/dev/null 2>&1 || return 1
+    local out
+    out=$(_prompt_turn "hello") || return 1
+    assert_output_not_contains "$out" "while you were away" "decline alone is not digest-worthy" || return 1
+    assert_eq "1" "$(cat "$CLAUDE_SESSION_META_DIR/local/notifications.seen")" "cursor still advanced" || return 1
+}
+
+test_digest_on_code_prompt_splices_with_scope_block() {
+    _qs_session "dgc"
+    # A real git repo with a token-matching file so scope grounding has
+    # something to inject (the splice needs both payloads present).
+    (cd "$CLAUDE_SESSION_DIR" && git init -q && echo x > login.ts \
+        && git add login.ts && git commit -qm init) 2>/dev/null
+    _arm_queue "only task"
+    _stop_turn >/dev/null || return 1
+    _stop_turn >/dev/null || return 1
+    # A prompt that classifies positive for scope grounding (work verb).
+    local out
+    out=$(_prompt_turn "fix the login bug") || return 1
+    assert_output_contains "$out" "while you were away" "digest present on code prompts" || return 1
+    assert_output_contains "$out" "Scope (auto-grounded)" "scope block still present (spliced, not replaced)" || return 1
+}
+
+test_digest_at_session_start() {
+    _qs_session "dgr"
+    _arm_queue "only task"
+    _stop_turn >/dev/null || return 1
+    _stop_turn >/dev/null || return 1
+    local out
+    out=$(printf '{"source":"resume","session_id":"s1","cwd":"%s"}' "$CLAUDE_SESSION_DIR" \
+        | bash "$HOOKS_DIR/session-start.sh") || return 1
+    assert_output_contains "$out" "while you were away" "resume surfaces the digest" || return 1
+    out=$(printf '{"source":"resume","session_id":"s1","cwd":"%s"}' "$CLAUDE_SESSION_DIR" \
+        | bash "$HOOKS_DIR/session-start.sh") || return 1
+    assert_output_not_contains "$out" "while you were away" "second start injects nothing" || return 1
+}
+
 run_test test_failure_counter_increments
 run_test test_failure_counter_recovers_from_garbage
 run_test test_failure_counter_still_logs_to_session_log
@@ -215,4 +282,9 @@ run_test test_threshold_env_overrides
 run_test test_defer_records_gate_declined
 run_test test_queue_log_prints_events_oldest_first
 run_test test_queue_log_empty_message
+run_test test_digest_surfaces_once_at_prompt
+run_test test_digest_includes_breaker_reason
+run_test test_declined_only_inbox_stays_silent_but_cursor_advances
+run_test test_digest_on_code_prompt_splices_with_scope_block
+run_test test_digest_at_session_start
 report_results
