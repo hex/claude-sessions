@@ -307,7 +307,7 @@ Commands:
   <base>@<task>       Open a parallel task worktree of session <base>
   <base> --merge <task>  Merge a task worktree back into <base> and remove it
   <name> -secrets <cmd>  Run secrets command on <name> without launching session
-  -search <query>     Search across all sessions (narrative, memory, README)
+  -search <query>     Search across all sessions (--include-archived searches archived too)
   -checkpoint "<label>"  Save labelled state snapshot (run from inside a session)
   -checkpoint list    List checkpoints for current session
   -checkpoint show <name>  Print a specific checkpoint
@@ -3255,10 +3255,16 @@ run_doctor() {
 
 # Search across all sessions' metadata
 search_sessions() {
-    local query="$1"
+    local query="" include_archived="" arg
+    for arg in "$@"; do
+        case "$arg" in
+            --include-archived) include_archived="true" ;;
+            *) [ -n "$query" ] || query="$arg" ;;
+        esac
+    done
 
     if [ -z "$query" ]; then
-        error "Usage: cs -search <query>"
+        error "Usage: cs -search <query> [--include-archived]"
     fi
 
     if [ ! -d "$SESSIONS_ROOT" ]; then
@@ -3272,6 +3278,9 @@ search_sessions() {
 
     for session_dir in "$SESSIONS_ROOT"/*/; do
         [ -d "$session_dir" ] || continue
+        if [ -z "$include_archived" ] && _session_is_archived "$session_dir"; then
+            continue
+        fi
         local session_name
         session_name=$(basename "$session_dir")
 
@@ -4521,7 +4530,8 @@ main() {
             return 0
             ;;
         -search)
-            search_sessions "${2:-}"
+            shift
+            search_sessions "$@"
             return 0
             ;;
         -checkpoint)

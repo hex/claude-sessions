@@ -142,6 +142,30 @@ test_list_trailer_prints_even_when_all_sessions_archived() {
     assert_output_contains "$output" "1 archived (cs -list --archived)" "trailer still points at the archive" || return 1
 }
 
+test_search_skips_archived_by_default() {
+    _archive_session "srch-plain"
+    _archive_session "srch-arch"
+    echo "needle-xyzzy in plain" >> "$CS_SESSIONS_ROOT/srch-plain/.cs/README.md"
+    echo "needle-xyzzy in archived" >> "$CS_SESSIONS_ROOT/srch-arch/.cs/README.md"
+    "$CS_BIN" -archive srch-arch >/dev/null 2>&1 || return 1
+    local output
+    output=$("$CS_BIN" -search "needle-xyzzy" 2>&1) || true
+    assert_output_contains "$output" "srch-plain" "plain session searched" || return 1
+    assert_output_not_contains "$output" "srch-arch" "archived session skipped" || return 1
+    output=$("$CS_BIN" -search "needle-xyzzy" --include-archived 2>&1) || true
+    assert_output_contains "$output" "srch-plain" "plain still found with flag" || return 1
+    assert_output_contains "$output" "srch-arch" "archived found with flag" || return 1
+}
+
+test_search_empty_query_still_errors() {
+    local output
+    if output=$("$CS_BIN" -search --include-archived 2>&1); then
+        echo "  FAIL: flag without a query should error"
+        return 1
+    fi
+    assert_output_contains "$output" "Usage" "usage error preserved" || return 1
+}
+
 run_test test_archive_subcommand_exists
 run_test test_archive_roundtrip_and_marker_content
 run_test test_archive_is_idempotent
@@ -152,4 +176,6 @@ run_test test_list_hides_archived_and_prints_trailer
 run_test test_list_archived_shows_only_archived
 run_test test_list_archived_composes_with_tag
 run_test test_list_trailer_prints_even_when_all_sessions_archived
+run_test test_search_skips_archived_by_default
+run_test test_search_empty_query_still_errors
 report_results

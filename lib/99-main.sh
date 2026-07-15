@@ -103,7 +103,8 @@ main() {
             return 0
             ;;
         -search)
-            search_sessions "${2:-}"
+            shift
+            search_sessions "$@"
             return 0
             ;;
         -checkpoint)

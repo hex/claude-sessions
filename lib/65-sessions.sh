@@ -2,10 +2,16 @@
 # ABOUTME: Backs 'cs -search', 'cs -list', and 'cs -rm'.
 
 search_sessions() {
-    local query="$1"
+    local query="" include_archived="" arg
+    for arg in "$@"; do
+        case "$arg" in
+            --include-archived) include_archived="true" ;;
+            *) [ -n "$query" ] || query="$arg" ;;
+        esac
+    done
 
     if [ -z "$query" ]; then
-        error "Usage: cs -search <query>"
+        error "Usage: cs -search <query> [--include-archived]"
     fi
 
     if [ ! -d "$SESSIONS_ROOT" ]; then
@@ -19,6 +25,9 @@ search_sessions() {
 
     for session_dir in "$SESSIONS_ROOT"/*/; do
         [ -d "$session_dir" ] || continue
+        if [ -z "$include_archived" ] && _session_is_archived "$session_dir"; then
+            continue
+        fi
         local session_name
         session_name=$(basename "$session_dir")
 

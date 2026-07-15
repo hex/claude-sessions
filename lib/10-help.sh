@@ -15,7 +15,7 @@ Commands:
   <base>@<task>       Open a parallel task worktree of session <base>
   <base> --merge <task>  Merge a task worktree back into <base> and remove it
   <name> -secrets <cmd>  Run secrets command on <name> without launching session
-  -search <query>     Search across all sessions (narrative, memory, README)
+  -search <query>     Search across all sessions (--include-archived searches archived too)
   -checkpoint "<label>"  Save labelled state snapshot (run from inside a session)
   -checkpoint list    List checkpoints for current session
   -checkpoint show <name>  Print a specific checkpoint
