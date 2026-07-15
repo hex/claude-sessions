@@ -138,6 +138,24 @@ test_tag_add_errors_on_crlf_frontmatter_fence() {
     assert_eq "$before" "$(cat "$dir/.cs/README.md")" "file left untouched" || return 1
 }
 
+test_tag_add_errors_on_empty_readme() {
+    # A 0-byte README (realistic path: a truncated file from a crashed write)
+    # passes the -f guard, and awk's default exit on empty input is 0 — so a
+    # naive fence check would wave it through into the silent-no-op class the
+    # fence guard exists to kill. Empty must read as "no frontmatter".
+    local dir="$CS_SESSIONS_ROOT/emptyrm"
+    mkdir -p "$dir/.cs/local"
+    printf '' > "$dir/.cs/README.md"
+    local output
+    _in_session "emptyrm"
+    if output=$("$CS_BIN" -tag add api 2>&1); then
+        echo "  FAIL: empty README must be refused"
+        return 1
+    fi
+    assert_output_contains "$output" "README.md" "error names the file" || return 1
+    assert_eq "0" "$(wc -c < "$dir/.cs/README.md" | tr -d ' ')" "file still 0 bytes" || return 1
+}
+
 test_tag_add_inserts_before_closing_fence_when_no_status_line() {
     local dir="$CS_SESSIONS_ROOT/nostatus"
     mkdir -p "$dir/.cs/local"
@@ -244,6 +262,7 @@ run_test test_tag_validation
 run_test test_tag_refuses_block_style_lists
 run_test test_tag_add_errors_when_no_frontmatter_fence
 run_test test_tag_add_errors_on_crlf_frontmatter_fence
+run_test test_tag_add_errors_on_empty_readme
 run_test test_tag_add_inserts_before_closing_fence_when_no_status_line
 run_test test_tag_add_outside_session_errors
 run_test test_tag_site_b_targets_named_session

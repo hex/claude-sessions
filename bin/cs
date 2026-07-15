@@ -2621,13 +2621,20 @@ _tags_read() {
 }
 
 # True when line 1 is exactly the opening frontmatter fence "---". A
-# frontmatter-less file (no fence at all) or a CRLF fence ("---\r", which is
-# not the exact string "---") both fail this check — either would otherwise
-# make _tags_write's insert branch silently pass the file through unchanged.
+# frontmatter-less file (no fence at all), a CRLF fence ("---\r", which is
+# not the exact string "---"), and an empty file (awk reads no lines, so a
+# rule-body exit would never run and awk's default exit 0 would lie) all
+# fail this check — each would otherwise make _tags_write's insert branch
+# silently pass the file through unchanged. END must decide, via the same
+# flag+END pattern _tags_read_line_exists documents.
 _tags_has_frontmatter() {
     local readme="$1"
     [ -f "$readme" ] || return 1
-    awk 'NR==1 && $0=="---" {exit 0} NR==1 {exit 1}' "$readme"
+    awk '
+        NR == 1 && $0 == "---" { found = 1 }
+        NR == 1 { exit }
+        END { exit found ? 0 : 1 }
+    ' "$readme" 2>/dev/null
 }
 
 # True when the frontmatter carries a bare "tags:" line (block-style list) —
