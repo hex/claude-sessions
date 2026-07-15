@@ -1486,6 +1486,7 @@ mod tests {
             secrets_count: 0,
             queue_depth: 0,
             git_repo: None,
+            tags: Vec::new(),
         }]
     }
 
@@ -1505,6 +1506,7 @@ mod tests {
                 secrets_count: 0,
                 queue_depth: 0,
                 git_repo: None,
+                tags: Vec::new(),
             },
             Session {
                 name: "recent".into(),
@@ -1517,6 +1519,7 @@ mod tests {
                 secrets_count: 0,
                 queue_depth: 0,
                 git_repo: None,
+                tags: Vec::new(),
             },
         ]
     }
@@ -2335,6 +2338,7 @@ mod tests {
                 secrets_count: 0,
                 queue_depth: 0,
                 git_repo: None,
+                tags: Vec::new(),
             });
         }
         let mut app = App::new(sessions);

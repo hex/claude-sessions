@@ -16,6 +16,7 @@ pub struct Session {
     pub secrets_count: u32,
     pub queue_depth: u32,
     pub git_repo: Option<String>,
+    pub tags: Vec<String>,
 }
 
 pub struct SessionPreview {
@@ -261,6 +262,33 @@ fn scan_sessions_in(root: &Path) -> Vec<Session> {
     sessions
 }
 
+/// Tags from the README's leading frontmatter block: the inline-array form
+/// only (`tags: [a, b]`, spacing and double quotes tolerated). Block-style
+/// lists and absent frontmatter read as empty, mirroring the bash reader.
+pub fn parse_frontmatter_tags(readme: &str) -> Vec<String> {
+    let mut lines = readme.lines();
+    if lines.next().map(str::trim_end) != Some("---") {
+        return Vec::new();
+    }
+    for line in lines {
+        if line.trim_end() == "---" {
+            break;
+        }
+        if let Some(rest) = line.strip_prefix("tags:") {
+            let rest = rest.trim();
+            if !(rest.starts_with('[') && rest.ends_with(']')) {
+                return Vec::new();
+            }
+            return rest[1..rest.len() - 1]
+                .split(',')
+                .map(|t| t.trim().trim_matches('"').to_string())
+                .filter(|t| !t.is_empty())
+                .collect();
+        }
+    }
+    Vec::new()
+}
+
 fn read_session(path: &Path, secret_counts: &HashMap<String, u32>) -> Session {
     let name = path
         .file_name()
@@ -290,6 +318,9 @@ fn read_session(path: &Path, secret_counts: &HashMap<String, u32>) -> Session {
     } else {
         None
     };
+    let tags = fs::read_to_string(meta_dir.join("README.md"))
+        .map(|s| parse_frontmatter_tags(&s))
+        .unwrap_or_default();
 
     Session {
         name,
@@ -302,6 +333,7 @@ fn read_session(path: &Path, secret_counts: &HashMap<String, u32>) -> Session {
         secrets_count,
         queue_depth,
         git_repo,
+        tags,
     }
 }
 
@@ -1002,5 +1034,40 @@ mod tests {
         assert!(preview.contributors.iter().any(|c| c.contains("Bob")));
 
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn frontmatter_tags_worked_examples() {
+        let doc = |line: &str| format!("---\nstatus: active\n{line}\n---\nbody");
+        assert!(parse_frontmatter_tags(&doc("tags: []")).is_empty());
+        assert_eq!(parse_frontmatter_tags(&doc("tags: [api]")), vec!["api"]);
+        assert_eq!(
+            parse_frontmatter_tags(&doc("tags: [api, infra-migration]")),
+            vec!["api", "infra-migration"]
+        );
+        assert_eq!(parse_frontmatter_tags(&doc("tags: [ \"api\" ,  infra ]")), vec!["api", "infra"]);
+        // Block-style reads as empty (unsupported, mirrors bash)
+        assert!(parse_frontmatter_tags("---\ntags:\n  - api\n---\n").is_empty());
+        // Missing line / no frontmatter
+        assert!(parse_frontmatter_tags(&doc("status: x")).is_empty());
+        assert!(parse_frontmatter_tags("no frontmatter here").is_empty());
+    }
+
+    #[test]
+    fn read_session_populates_tags() {
+        let root = std::env::temp_dir().join(format!("cs-test-tags-{}", std::process::id()));
+        let _guard = test_root::scoped(root.clone());
+        let dir = root.join("tagged");
+        fs::create_dir_all(dir.join(".cs/local")).unwrap();
+        fs::write(
+            dir.join(".cs/README.md"),
+            "---\nstatus: active\ntags: [api, infra]\n---\n## Objective\nx\n",
+        )
+        .unwrap();
+        let sessions = scan_sessions_in(&root);
+        let s = sessions.iter().find(|s| s.name == "tagged").unwrap();
+        assert_eq!(s.tags, vec!["api", "infra"]);
+
+        fs::remove_dir_all(&root).unwrap();
     }
 }

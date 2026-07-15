@@ -1931,6 +1931,7 @@ mod tests {
                 secrets_count: 0,
                 queue_depth: 0,
                 git_repo: Some("hex/alpha".into()),
+                tags: Vec::new(),
             },
             Session {
                 name: "beta".into(),
@@ -1943,6 +1944,7 @@ mod tests {
                 secrets_count: 2,
                 queue_depth: 0,
                 git_repo: Some("hex/beta".into()),
+                tags: Vec::new(),
             },
             Session {
                 name: "gamma".into(),
@@ -1955,6 +1957,7 @@ mod tests {
                 secrets_count: 0,
                 queue_depth: 0,
                 git_repo: None,
+                tags: Vec::new(),
             },
         ]
     }
@@ -2157,6 +2160,7 @@ mod tests {
             secrets_count: 0,
             queue_depth: 0,
             git_repo: None,
+            tags: Vec::new(),
         };
         // Insertion order deliberately differs from recency order.
         let app = App::new(vec![
@@ -3703,6 +3707,7 @@ mod tests {
             secrets_count: 0,
             queue_depth: 0,
             git_repo: None,
+            tags: Vec::new(),
         };
         vec![
             session("today-a", 0),
