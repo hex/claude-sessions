@@ -168,6 +168,40 @@ test_threshold_env_overrides() {
     assert_output_contains "$out" "circuit breaker" "garbage override falls back to default 5" || return 1
 }
 
+test_defer_records_gate_declined() {
+    _qs_session "gd"
+    "$CS_BIN" -queue defer >/dev/null 2>&1 || { echo "  FAIL: defer exited non-zero"; return 1; }
+    assert_output_contains "$(_inbox)" '"event":"gate_declined"' "defer writes the event" || return 1
+    [ -f "$CLAUDE_SESSION_META_DIR/local/queue.declined" ] \
+        || { echo "  FAIL: existing declined stamp must still be written"; return 1; }
+}
+
+test_queue_log_prints_events_oldest_first() {
+    _qs_session "ql"
+    _arm_queue "only task"
+    _stop_turn >/dev/null || return 1
+    _stop_turn >/dev/null || return 1
+    local out
+    out=$("$CS_BIN" -queue log 2>&1) || { echo "  FAIL: log exited non-zero"; return 1; }
+    assert_output_contains "$out" "drain_started" "log shows the start" || return 1
+    assert_output_contains "$out" "task_done" "log shows the task" || return 1
+    assert_output_contains "$out" "only task" "log shows the task text" || return 1
+    assert_output_contains "$out" "drain_finished" "log shows the finish" || return 1
+    # oldest first: drain_started line appears before drain_finished line
+    printf '%s\n' "$out" | awk '/drain_started/{s=NR} /drain_finished/{f=NR} END{exit !(s && f && s < f)}' \
+        || { echo "  FAIL: log must print oldest-first"; return 1; }
+    # log never advances the surfacing cursor
+    [ ! -f "$CLAUDE_SESSION_META_DIR/local/notifications.seen" ] \
+        || { echo "  FAIL: log must not touch the cursor"; return 1; }
+}
+
+test_queue_log_empty_message() {
+    _qs_session "qle"
+    local out
+    out=$("$CS_BIN" -queue log 2>&1) || return 1
+    assert_output_contains "$out" "No queue activity recorded." "empty inbox message" || return 1
+}
+
 run_test test_failure_counter_increments
 run_test test_failure_counter_recovers_from_garbage
 run_test test_failure_counter_still_logs_to_session_log
@@ -178,4 +212,7 @@ run_test test_failures_reset_at_arm_and_each_advance
 run_test test_context_breaker_parks_and_missing_ctx_never_trips
 run_test test_five_hour_breaker_fresh_trips_stale_skips
 run_test test_threshold_env_overrides
+run_test test_defer_records_gate_declined
+run_test test_queue_log_prints_events_oldest_first
+run_test test_queue_log_empty_message
 report_results

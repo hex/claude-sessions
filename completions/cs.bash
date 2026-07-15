@@ -20,7 +20,7 @@ _cs_completions() {
     local checkpoint_cmds="list show"
 
     # Queue subcommands
-    local queue_cmds="add list ls rm clear start defer"
+    local queue_cmds="add list ls rm clear start defer log"
 
     # Tag subcommands
     local tag_cmds="add rm list"
