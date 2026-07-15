@@ -27,12 +27,13 @@ Commands:
   -lint <file>...     Flag AI-slop prose tells (em-dashes, banned phrases); 0=clean 1=issues 2=error
   -statusline <cmd>   enable|disable the cs status line in Claude Code settings
   -detect-theme       Show the detected terminal theme (light|dark)
-  -list, -ls          List all sessions
+  -list, -ls [--tag <tag>]  List all sessions, optionally filtered by tag
   -adopt <name>       Adopt current directory as a cs session
   -whoami             Show the current actor (for shared, multi-person sessions)
   -who                Show who contributed to shared memory/narrative (git history)
   -live               List sessions running right now on this machine
   -usage              Per-session token usage over the 5h/weekly rate-limit windows
+  -tag add|rm <tag>   Tag the current session (frontmatter); -tag list [<name>] to view
   -status "<text>"    Set this session's advertised status (also: -status, -status --clear/-c)
   -remove, -rm <name> Remove a session
   -secrets <cmd>      Manage current session secrets (requires CLAUDE_SESSION_NAME)

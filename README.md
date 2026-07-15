@@ -42,6 +42,7 @@ No git repo required. No project structure needed. Just a name for what you're w
   ![cs-statusline: session and model accents, amber rate-limit warnings, standard-Unicode segment icons](assets/screenshot2.png)
 - **Health checks** - `cs -doctor` reports status of Keychain backend, hook registration, shadow-ref freshness, auto-memory writability, status line registration, Claude Code settings audit (hooks/MCPs/permissions/env vars counts), and cumulative token usage for the current project
 - **Usage attribution** - `cs -usage` shows which sessions are consuming the 5-hour and weekly rate-limit windows: per-session input/output token sums (deduplicated by API request, cache-read excluded), anchored at the true reset boundaries when the cs status line is active. `cs -usage <name>` breaks one session down per conversation with a lifetime column.
+- **Session tags** - `cs -tag add api` tags the current session in its README frontmatter (`tags: [api]` — the same field Obsidian indexes); `cs -list --tag api` filters the listing, and the picker filters live with `#api` in the search query (combining with fuzzy name search). Tags show in the preview card.
 - **Bash command audit trail** - Every Bash command Claude runs is logged to `.cs/local/session.log` (machine-local, never git-synced) with timestamps
 - **Update notifications** - Checks for updates and notifies when new versions are available
 - **Verified updates** - Updates are downloaded from GitHub Releases and verified with SHA-256 checksums; additionally verified with [minisign](https://jedisct1.github.io/minisign/) signatures when available
@@ -81,6 +82,8 @@ cs -checkpoint "<label>"    # Snapshot git state + narrative (also: list, show <
 cs -queue add "<task>"      # Walk-away task queue (also: list, rm <n>, clear)
 cs -doctor, -diag           # Run health checks (Keychain, hooks, memory, audit, tokens)
 cs -usage [--all] [<name>]  # Per-session token usage over the 5h/weekly rate-limit windows
+cs -tag add|rm <tag>        # Tag the current session (also: cs <name> -tag ..., -tag list)
+cs -list --tag <tag>        # List only sessions carrying a tag
 cs -lint <file>...          # Flag AI-slop prose tells (em-dashes, banned phrases); 0 clean 1 issues 2 error
 cs -statusline enable|disable  # Enable or remove the cs status line + agent-panel rows
 cs -detect-theme            # Show the detected terminal light/dark theme
@@ -101,7 +104,7 @@ Running `cs` with no arguments launches an interactive TUI for browsing and mana
 - **Navigate** with `j`/`k` or arrow keys; `g`/`G` for first/last; mouse scroll and click supported
 - **Sort** by column with `1`-`6` (toggles ascending/descending); opens sorted by recency — most-recently-modified first
 - **Recency at a glance** — a heat dot beside each session (green when live, fading to grey when dormant) and a relative `Age` column (`2h`, `3d`, `1mo`) so active work stands out; the exact timestamp stays in the preview pane
-- **Fuzzy search** with `/` — matches characters in order with highlighting; Enter commits the filter
+- **Fuzzy search** with `/` — matches characters in order with highlighting; Enter commits the filter. Add `#tag` anywhere in the query to AND-filter by tag (e.g. `#api backend`); combine multiple `#tag`s or mix with a fuzzy name remainder
 - **Time-based sections** — sessions grouped under Today, Yesterday, This Week, This Month, Older when sorted by date (the default view)
 - **Action bar** with `Enter` — inline bar shows available actions with shortcut keys
 - **Preview & To-Do panes** — appear beside the list on wide landscape terminals (≥120 cols), or stacked below it (list, then details, then notes) on any window at least 40 cols by 26 rows; toggle with `p`

@@ -62,6 +62,20 @@ _cs() {
         'defer:Decline draining for now'
     )
 
+    # Tag subcommands with descriptions
+    local -a tag_cmds
+    tag_cmds=(
+        'add:Add a tag to the current session'
+        'rm:Remove a tag from the current session'
+        'list:Show tags for a session'
+    )
+
+    # -list/-ls options with descriptions
+    local -a list_opts
+    list_opts=(
+        '--tag:List only sessions carrying a tag'
+    )
+
     # Update subcommands with descriptions
     local -a update_cmds
     update_cmds=(
@@ -86,6 +100,7 @@ _cs() {
         '-queue:Manage the session walk-away queue'
         '-live:List sessions running right now on this machine'
         '-usage:Per-session token usage over rate-limit windows'
+        '-tag:Manage session tags'
         '-status:Set or show this session'\''s advertised status'
         '-search:Search across all sessions'
         '-lint:Flag AI-slop prose tells in files'
@@ -102,20 +117,22 @@ _cs() {
     )
 
     # Determine context
-    local in_secrets=false in_update=false in_checkpoint=false in_queue=false has_session=false after_remove=false
+    local in_secrets=false in_update=false in_checkpoint=false in_queue=false in_tag=false in_list=false has_session=false after_remove=false
     local i word
 
     for ((i=2; i < CURRENT; i++)); do
         word="${words[i]}"
         case "$word" in
-            -secrets) in_secrets=true; in_update=false; in_checkpoint=false; in_queue=false ;;
-            -update) in_update=true; in_secrets=false; in_checkpoint=false; in_queue=false ;;
-            -checkpoint) in_checkpoint=true; in_secrets=false; in_update=false; in_queue=false ;;
-            -queue) in_queue=true; in_secrets=false; in_update=false; in_checkpoint=false ;;
+            -secrets) in_secrets=true; in_update=false; in_checkpoint=false; in_queue=false; in_tag=false; in_list=false ;;
+            -update) in_update=true; in_secrets=false; in_checkpoint=false; in_queue=false; in_tag=false; in_list=false ;;
+            -checkpoint) in_checkpoint=true; in_secrets=false; in_update=false; in_queue=false; in_tag=false; in_list=false ;;
+            -queue) in_queue=true; in_secrets=false; in_update=false; in_checkpoint=false; in_tag=false; in_list=false ;;
+            -tag) in_tag=true; in_secrets=false; in_update=false; in_checkpoint=false; in_queue=false; in_list=false ;;
+            -list|-ls) in_list=true; in_secrets=false; in_update=false; in_checkpoint=false; in_queue=false; in_tag=false ;;
             -remove|-rm) after_remove=true ;;
             -*) ;;
             *)
-                if ! $in_secrets && ! $after_remove && ! $in_update && ! $in_checkpoint && ! $in_queue; then
+                if ! $in_secrets && ! $after_remove && ! $in_update && ! $in_checkpoint && ! $in_queue && ! $in_tag && ! $in_list; then
                     has_session=true
                 fi
                 ;;
@@ -152,6 +169,18 @@ _cs() {
         return
     fi
 
+    # Context: after -tag
+    if $in_tag; then
+        _describe 'tag command' tag_cmds
+        return
+    fi
+
+    # Context: after -list/-ls
+    if $in_list; then
+        _describe 'list option' list_opts
+        return
+    fi
+
     # Context: after session name
     if $has_session; then
         local -a session_opts
@@ -159,6 +188,7 @@ _cs() {
             '-secrets:Run secrets command'
             '-queue:Manage the session walk-away queue'
             '-usage:Show per-conversation token usage for this session'
+            '-tag:Manage session tags'
             '--force:Override active session lock'
             '--merge:Merge a task worktree back and remove it'
         )

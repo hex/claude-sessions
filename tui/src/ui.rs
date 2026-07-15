@@ -13,7 +13,10 @@ use unicode_width::UnicodeWidthStr;
 
 use ratatui::layout::Alignment;
 
-use crate::app::{App, FlashKind, Focus, Mode, NotesFocus, SortColumn, SortDirection, StatusLevel};
+use crate::app::{
+    parse_tag_query, App, FlashKind, Focus, Mode, NotesFocus, SortColumn, SortDirection,
+    StatusLevel,
+};
 use crate::theme::{self, Palette};
 
 const PREVIEW_MIN_WIDTH: u16 = 120;
@@ -309,7 +312,11 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
 
     let header = Row::new(header_cells).bottom_margin(1);
 
-    let is_searching = app.mode == Mode::Search && !app.search_input.text().is_empty();
+    // Dimming keys on the fuzzy remainder, not the raw search text: a
+    // tag-only query like "#api" has already narrowed `filtered` via the tag
+    // predicate and leaves no fuzzy match to dim against.
+    let (_, fuzzy_remainder) = parse_tag_query(app.search_input.text());
+    let is_searching = app.mode == Mode::Search && !fuzzy_remainder.is_empty();
 
     // One wall-clock read per frame, shared by every row's recency math.
     let now = std::time::SystemTime::now();
@@ -825,13 +832,20 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
 
 fn render_search_bar(app: &App, frame: &mut Frame, area: Rect) {
     let p = app.theme;
-    let line = Line::from(vec![
+    let mut spans = vec![
         Span::styled("/ ", Style::default().fg(p.gold)),
         Span::styled(app.search_input.before_cursor(), Style::default().fg(p.fg)),
         Span::styled("\u{2588}", Style::default().fg(p.fg)),
         Span::styled(app.search_input.after_cursor(), Style::default().fg(p.fg)),
-    ]);
-    let paragraph = Paragraph::new(line);
+    ];
+    // Only hinted while the input is empty, so it never crowds a real query.
+    if app.search_input.text().is_empty() {
+        spans.push(Span::styled(
+            "  #tag filters",
+            Style::default().fg(p.faint).add_modifier(Modifier::DIM),
+        ));
+    }
+    let paragraph = Paragraph::new(Line::from(spans));
     frame.render_widget(paragraph, area);
 }
 
@@ -1232,6 +1246,9 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
         ("state", state_value, p.teal),
         ("repo", session.git_repo.clone().unwrap_or_else(|| "\u{2014}".into()), p.ink),
     ];
+    if !session.tags.is_empty() {
+        meta.push(("tags", session.tags.join(", "), p.mut_));
+    }
     let cached_preview = app.preview_cache.get(&session.name);
     if let Some(preview) = cached_preview {
         meta.push((
@@ -1486,6 +1503,7 @@ mod tests {
             secrets_count: 0,
             queue_depth: 0,
             git_repo: None,
+            tags: Vec::new(),
         }]
     }
 
@@ -1505,6 +1523,7 @@ mod tests {
                 secrets_count: 0,
                 queue_depth: 0,
                 git_repo: None,
+                tags: Vec::new(),
             },
             Session {
                 name: "recent".into(),
@@ -1517,6 +1536,7 @@ mod tests {
                 secrets_count: 0,
                 queue_depth: 0,
                 git_repo: None,
+                tags: Vec::new(),
             },
         ]
     }
@@ -1625,6 +1645,14 @@ mod tests {
                 contributors: Vec::new(),
             },
         );
+        app
+    }
+
+    /// Like `preview_test_app`, but with the given tags on the session, for
+    /// asserting the preview pane's tags meta row.
+    fn preview_test_app_with_tags(tags: Vec<String>) -> App {
+        let mut app = preview_test_app();
+        app.sessions[0].tags = tags;
         app
     }
 
@@ -2335,6 +2363,7 @@ mod tests {
                 secrets_count: 0,
                 queue_depth: 0,
                 git_repo: None,
+                tags: Vec::new(),
             });
         }
         let mut app = App::new(sessions);
@@ -2435,6 +2464,73 @@ mod tests {
         let digit_fg = buf.cell(ratatui::layout::Position::new(digit_x, session_y)).unwrap().fg;
         assert_eq!(bar_fg, p.rust, "bar should stay depth-colored (depth 5 > 3 => RUST)");
         assert_eq!(digit_fg, p.mut_, "digit should use MUT, not ride the bar color");
+    }
+
+    #[test]
+    fn tag_only_search_query_does_not_dim_matches() {
+        // A tag-only query like "#api" leaves no fuzzy remainder, so
+        // fuzzy_indices stays empty even though the tag filter already
+        // narrowed the rows. Dimming must key on the fuzzy remainder, not on
+        // whether a fuzzy match was recorded, or every row renders grey
+        // while search is focused.
+        let mut sessions = one_session();
+        sessions[0].name = "svc-api".into();
+        sessions[0].tags = vec!["api".into()];
+        let mut app = App::new(sessions);
+        app.theme = Palette::dark();
+        app.show_preview = false;
+        let p = app.theme;
+        app.mode = Mode::Search;
+        app.search_input.set("#api");
+        app.apply_filter_and_sort();
+        assert_eq!(app.filtered.len(), 1, "the tag filter should keep the matching session");
+
+        let backend = TestBackend::new(100, 24);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(&mut app, f)).unwrap();
+        let buf = term.backend().buffer();
+
+        let row_text = |y: u16| -> String {
+            (0..100u16)
+                .map(|x| buf.cell(ratatui::layout::Position::new(x, y)).unwrap().symbol())
+                .collect()
+        };
+        let session_y = (0..24u16)
+            .find(|&y| row_text(y).contains("svc-api"))
+            .expect("the session row should render");
+        let name_x = (0..100u16)
+            .find(|&x| buf.cell(ratatui::layout::Position::new(x, session_y)).unwrap().symbol() == "s")
+            .expect("the session name should render");
+        let name_fg = buf.cell(ratatui::layout::Position::new(name_x, session_y)).unwrap().fg;
+        assert_ne!(
+            name_fg, p.comment,
+            "a tag-only query should not dim rows that already passed the tag filter"
+        );
+    }
+
+    #[test]
+    fn search_bar_hints_tag_syntax_when_input_is_empty() {
+        let mut app = App::new(one_session());
+        app.theme = Palette::dark();
+        app.mode = Mode::Search;
+        let text = render_wide(&mut app);
+        assert!(
+            text.contains("#tag filters"),
+            "empty search input should hint the #tag syntax: {text}"
+        );
+    }
+
+    #[test]
+    fn search_bar_hides_tag_hint_once_typing_starts() {
+        let mut app = App::new(one_session());
+        app.theme = Palette::dark();
+        app.mode = Mode::Search;
+        app.search_input.set("alpha");
+        let text = render_wide(&mut app);
+        assert!(
+            !text.contains("#tag filters"),
+            "a real query should not be crowded by the hint: {text}"
+        );
     }
 
     #[test]
@@ -2675,6 +2771,21 @@ mod tests {
         for label in ["created", "modified", "state", "repo", "objective"] {
             assert!(text.contains(label), "missing meta label {label}:\n{text}");
         }
+    }
+
+    #[test]
+    fn preview_shows_tags_row_when_tagged() {
+        let mut app = preview_test_app_with_tags(vec!["api".into(), "infra".into()]);
+        let text = render_wide(&mut app);
+        assert!(text.contains("tags"), "tags label missing:\n{text}");
+        assert!(text.contains("api, infra"), "joined tag values missing:\n{text}");
+    }
+
+    #[test]
+    fn preview_omits_tags_row_when_untagged() {
+        let mut app = preview_test_app();
+        let text = render_wide(&mut app);
+        assert!(!text.contains("\ntags"), "tags row must be absent for untagged sessions:\n{text}");
     }
 
     #[test]
