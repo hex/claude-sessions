@@ -212,11 +212,12 @@ fn render_masthead(app: &App, frame: &mut Frame, area: Rect) {
         return;
     }
     let live = app.sessions.iter().filter(|s| s.is_locked).count();
+    let archived = app.sessions.iter().filter(|s| s.archived).count();
     let dir = match app.sort_dir {
         SortDirection::Asc => "\u{25b2}",
         SortDirection::Desc => "\u{25bc}",
     };
-    let line = Line::from(vec![
+    let mut spans = vec![
         Span::styled("\u{258c} ", Style::default().fg(p.rail[0])),
         Span::styled("cs-tui", Style::default().fg(p.rust).add_modifier(Modifier::BOLD)),
         Span::styled(
@@ -224,11 +225,18 @@ fn render_masthead(app: &App, frame: &mut Frame, area: Rect) {
             Style::default().fg(p.ink).add_modifier(Modifier::BOLD),
         ),
         Span::styled(format!("  \u{b7}  {} live", live), Style::default().fg(p.teal)),
-        Span::styled(
-            format!("  \u{b7}  sorted by {} {}", sort_label(app.sort_col), dir),
-            Style::default().fg(p.mut_),
-        ),
-    ]);
+    ];
+    if archived > 0 {
+        spans.push(Span::styled(
+            format!("  \u{b7}  {} archived", archived),
+            Style::default().fg(p.faint),
+        ));
+    }
+    spans.push(Span::styled(
+        format!("  \u{b7}  sorted by {} {}", sort_label(app.sort_col), dir),
+        Style::default().fg(p.mut_),
+    ));
+    let line = Line::from(spans);
     frame.render_widget(Paragraph::new(line), Rect { height: 1, ..area });
 
     let stops: Vec<(u8, u8, u8)> = p.hero.iter().map(|c| theme::rgb_of(*c)).collect();
@@ -333,7 +341,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
         .map(|(row_idx, &i)| {
             let s = &app.sessions[i];
             // During search typing, dim rows that don't match
-            let dimmed = is_searching && !app.fuzzy_indices.contains_key(&i);
+            let dimmed = (is_searching && !app.fuzzy_indices.contains_key(&i)) || s.archived;
 
             // Recency heat: green when live, fading to grey when dormant. Computed
             // once and reused for the dot and the Age column.
@@ -763,7 +771,7 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
                 "Space:mark  D:delete marked  Esc:clear marks  q:quit  Enter:open  /:search"
             }
             Mode::Normal => {
-                "q:quit  Enter:open  n:new  d:delete  r:rename  Tab:to-do  Space:mark  /:search  1-6:sort"
+                "q:quit  Enter:open  n:new  d:delete  r:rename  Tab:to-do  Space:mark  /:search  1-6:sort  A:archived"
             }
             Mode::SessionMenu => "j/k:navigate  Enter:select  Esc:cancel",
             Mode::ConfirmDelete | Mode::ConfirmBatchDelete => "y:confirm  n:cancel",
@@ -1232,18 +1240,23 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
 
     // Labeled meta rows: label FAINT at the pane's left edge, value at a fixed
     // column so the block reads as a table even without rules between rows.
-    let state_value = if session.is_locked {
-        match session.lock_pid {
-            Some(pid) => format!("\u{25cf} live \u{b7} locked {}", pid),
-            None => "\u{25cf} live \u{b7} locked".to_string(),
-        }
+    let (state_value, state_color) = if session.is_locked {
+        (
+            match session.lock_pid {
+                Some(pid) => format!("\u{25cf} live \u{b7} locked {}", pid),
+                None => "\u{25cf} live \u{b7} locked".to_string(),
+            },
+            p.teal,
+        )
+    } else if session.archived {
+        ("archived".to_string(), p.faint)
     } else {
-        "dormant".to_string()
+        ("dormant".to_string(), p.teal)
     };
     let mut meta: Vec<(&str, String, Color)> = vec![
         ("created", session.created.clone().unwrap_or_else(|| "\u{2014}".into()), p.ink),
         ("modified", session.modified.clone().unwrap_or_else(|| "\u{2014}".into()), p.ink),
-        ("state", state_value, p.teal),
+        ("state", state_value, state_color),
         ("repo", session.git_repo.clone().unwrap_or_else(|| "\u{2014}".into()), p.ink),
     ];
     if !session.tags.is_empty() {
@@ -1504,6 +1517,7 @@ mod tests {
             queue_depth: 0,
             git_repo: None,
             tags: Vec::new(),
+            archived: false,
         }]
     }
 
@@ -1524,6 +1538,7 @@ mod tests {
                 queue_depth: 0,
                 git_repo: None,
                 tags: Vec::new(),
+                archived: false,
             },
             Session {
                 name: "recent".into(),
@@ -1537,6 +1552,7 @@ mod tests {
                 queue_depth: 0,
                 git_repo: None,
                 tags: Vec::new(),
+                archived: false,
             },
         ]
     }
@@ -2364,6 +2380,7 @@ mod tests {
                 queue_depth: 0,
                 git_repo: None,
                 tags: Vec::new(),
+                archived: false,
             });
         }
         let mut app = App::new(sessions);
@@ -2845,6 +2862,121 @@ mod tests {
         assert!(
             footer_row.contains("editing   Enter save   Esc cancel"),
             "hint parts should be joined by a uniform 3-space gap: {footer_row:?}"
+        );
+    }
+
+    fn sessions_with_one_archived() -> Vec<Session> {
+        let mut v = locked_and_recent_sessions();
+        v.push(Session {
+            name: "shelved".into(),
+            is_adopted: false,
+            created: Some("2026-01-01 10:00".into()),
+            modified: Some("2026-02-20 14:00".into()),
+            modified_ts: Some(std::time::SystemTime::now()),
+            lock_pid: None,
+            is_locked: false,
+            secrets_count: 0,
+            queue_depth: 0,
+            git_repo: None,
+            tags: Vec::new(),
+            archived: true,
+        });
+        v
+    }
+
+    /// Render the given app and return (buffer, rows-as-strings). 115 cols —
+    /// wide enough that the Normal-mode footer hint (with its "k label"
+    /// expansion and 3-space gaps) doesn't clip, but still short of
+    /// PREVIEW_MIN_WIDTH (120) so the layout stays table-only.
+    fn render_app(app: &mut App) -> (ratatui::buffer::Buffer, Vec<String>) {
+        let backend = TestBackend::new(115, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let rows = (0..buf.area.height)
+            .map(|y| {
+                (0..buf.area.width)
+                    .filter_map(|x| buf.cell((x, y)).map(|c| c.symbol().to_string()))
+                    .collect::<String>()
+            })
+            .collect();
+        (buf, rows)
+    }
+
+    #[test]
+    fn masthead_counts_archived_when_present() {
+        let mut app = App::new(sessions_with_one_archived());
+        app.theme = Palette::light();
+        let (_, rows) = render_app(&mut app);
+        assert!(rows[0].contains("1 archived"), "masthead row: {}", rows[0]);
+
+        let mut app = App::new(locked_and_recent_sessions());
+        app.theme = Palette::light();
+        let (_, rows) = render_app(&mut app);
+        assert!(!rows[0].contains("archived"), "no archived count when none exist");
+    }
+
+    #[test]
+    fn archived_row_hidden_until_toggled_then_dimmed() {
+        let mut app = App::new(sessions_with_one_archived());
+        app.theme = Palette::light();
+        let (_, rows) = render_app(&mut app);
+        assert!(!rows.iter().any(|r| r.contains("shelved")), "hidden by default");
+
+        app.handle_key(KeyEvent::from(KeyCode::Char('A')));
+        let (buf, rows) = render_app(&mut app);
+        let y = rows
+            .iter()
+            .position(|r| r.contains("shelved"))
+            .expect("archived row visible after toggle") as u16;
+        // The name is not the selected row (selection restores to the previous
+        // top session), so its ink must be the dimmed comment tone, not INK.
+        let row_cells: Vec<String> = (0..buf.area.width)
+            .map(|cx| buf.cell((cx, y)).unwrap().symbol().to_string())
+            .collect();
+        let x = (0..row_cells.len())
+            .find(|&i| row_cells[i..].concat().starts_with("shelved"))
+            .expect("shelved cell run") as u16;
+        let cell = buf.cell((x, y)).unwrap();
+        assert_eq!(cell.fg, Palette::light().comment);
+    }
+
+    #[test]
+    fn footer_normal_hint_names_archived_toggle() {
+        let mut app = App::new(locked_and_recent_sessions());
+        app.theme = Palette::light();
+        let (_, rows) = render_app(&mut app);
+        let footer = rows.last().unwrap();
+        assert!(footer.contains("archived"), "footer: {}", footer);
+    }
+
+    #[test]
+    fn preview_state_reads_archived() {
+        let mut app = App::new(sessions_with_one_archived());
+        app.theme = Palette::light();
+        app.show_archived = true;
+        app.apply_filter_and_sort();
+        // Select the archived session by finding it in filtered order.
+        let pos = app
+            .filtered
+            .iter()
+            .position(|&i| app.sessions[i].name == "shelved")
+            .unwrap();
+        app.table_state.select(Some(pos));
+        let backend = TestBackend::new(160, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let rows: Vec<String> = (0..buf.area.height)
+            .map(|y| {
+                (0..buf.area.width)
+                    .filter_map(|x| buf.cell((x, y)).map(|c| c.symbol().to_string()))
+                    .collect::<String>()
+            })
+            .collect();
+        assert!(
+            rows.iter().any(|r| r.contains("state") && r.contains("archived")),
+            "preview should label state archived"
         );
     }
 }

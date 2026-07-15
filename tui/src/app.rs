@@ -425,6 +425,8 @@ pub struct App {
     preview_results: std::sync::mpsc::Receiver<(String, session::SessionPreview)>,
     /// Whether to show the preview pane on wide terminals (toggled with `p`).
     pub show_preview: bool,
+    /// Whether archived sessions appear in the table (toggled with `A`).
+    pub show_archived: bool,
     /// Which panel receives keyboard input: the session list or the Notes input.
     pub focus: Focus,
     /// Sub-focus within the Notes panel (only meaningful while `focus == Notes`).
@@ -515,6 +517,7 @@ impl App {
             preview_requests,
             preview_results,
             show_preview: true,
+            show_archived: false,
             focus: Focus::List,
             notes_focus: NotesFocus::Input,
             notes_selected: 0,
@@ -733,11 +736,13 @@ impl App {
         let (tag_filters, query) = parse_tag_query(&raw_query);
         let query = query.as_str();
         let tag_ok = |s: &Session| tag_filters.iter().all(|t| s.tags.iter().any(|st| st == t));
+        let show_archived = self.show_archived;
+        let visible = |s: &Session| show_archived || !s.archived;
         self.fuzzy_indices.clear();
 
         if query.is_empty() {
             self.filtered = (0..self.sessions.len())
-                .filter(|&i| tag_ok(&self.sessions[i]))
+                .filter(|&i| tag_ok(&self.sessions[i]) && visible(&self.sessions[i]))
                 .collect();
         } else {
             // Fuzzy match and collect (index, score, matched_indices)
@@ -746,7 +751,7 @@ impl App {
                 .iter()
                 .enumerate()
                 .filter_map(|(i, s)| {
-                    if !tag_ok(s) {
+                    if !tag_ok(s) || !visible(s) {
                         return None;
                     }
                     fuzzy_match(query, &s.name).map(|(score, indices)| (i, score, indices))
@@ -978,6 +983,11 @@ impl App {
                         self.expanded_session = Some(name);
                     }
                 }
+                Action::None
+            }
+            KeyCode::Char('A') => {
+                self.show_archived = !self.show_archived;
+                self.apply_filter_and_sort();
                 Action::None
             }
             _ => Action::None,
@@ -1956,6 +1966,7 @@ mod tests {
                 queue_depth: 0,
                 git_repo: Some("hex/alpha".into()),
                 tags: Vec::new(),
+                archived: false,
             },
             Session {
                 name: "beta".into(),
@@ -1969,6 +1980,7 @@ mod tests {
                 queue_depth: 0,
                 git_repo: Some("hex/beta".into()),
                 tags: Vec::new(),
+                archived: false,
             },
             Session {
                 name: "gamma".into(),
@@ -1982,6 +1994,7 @@ mod tests {
                 queue_depth: 0,
                 git_repo: None,
                 tags: Vec::new(),
+                archived: false,
             },
         ]
     }
@@ -2097,7 +2110,63 @@ mod tests {
             queue_depth: 0,
             git_repo: None,
             tags: tags.iter().map(|t| t.to_string()).collect(),
+            archived: false,
         }
+    }
+
+    fn archived_session(name: &str) -> Session {
+        Session {
+            name: name.into(),
+            is_adopted: false,
+            created: Some("2026-01-01 10:00".into()),
+            modified: Some("2026-02-20 14:00".into()),
+            modified_ts: None,
+            lock_pid: None,
+            is_locked: false,
+            secrets_count: 0,
+            queue_depth: 0,
+            git_repo: None,
+            tags: Vec::new(),
+            archived: true,
+        }
+    }
+
+    #[test]
+    fn archived_sessions_hidden_by_default() {
+        let mut sessions = sample_sessions();
+        sessions.push(archived_session("olddone"));
+        let app = App::new(sessions);
+        assert_eq!(app.filtered.len(), 3);
+        assert!(!app
+            .filtered
+            .iter()
+            .any(|&i| app.sessions[i].name == "olddone"));
+    }
+
+    #[test]
+    fn capital_a_toggles_archived_visibility() {
+        let mut sessions = sample_sessions();
+        sessions.push(archived_session("olddone"));
+        let mut app = App::new(sessions);
+        app.handle_key(KeyEvent::from(KeyCode::Char('A')));
+        assert!(app.show_archived);
+        assert_eq!(app.filtered.len(), 4);
+        app.handle_key(KeyEvent::from(KeyCode::Char('A')));
+        assert!(!app.show_archived);
+        assert_eq!(app.filtered.len(), 3);
+    }
+
+    #[test]
+    fn archived_hidden_from_fuzzy_search_too() {
+        let mut sessions = sample_sessions();
+        sessions.push(archived_session("alphadone"));
+        let mut app = App::new(sessions);
+        app.search_input.set("alpha");
+        app.apply_filter_and_sort();
+        assert!(app
+            .filtered
+            .iter()
+            .all(|&i| app.sessions[i].name != "alphadone"));
     }
 
     fn filtered_names(app: &App) -> Vec<String> {
@@ -2239,6 +2308,7 @@ mod tests {
             queue_depth: 0,
             git_repo: None,
             tags: Vec::new(),
+            archived: false,
         };
         // Insertion order deliberately differs from recency order.
         let app = App::new(vec![
@@ -3786,6 +3856,7 @@ mod tests {
             queue_depth: 0,
             git_repo: None,
             tags: Vec::new(),
+            archived: false,
         };
         vec![
             session("today-a", 0),

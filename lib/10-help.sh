@@ -15,7 +15,7 @@ Commands:
   <base>@<task>       Open a parallel task worktree of session <base>
   <base> --merge <task>  Merge a task worktree back into <base> and remove it
   <name> -secrets <cmd>  Run secrets command on <name> without launching session
-  -search <query>     Search across all sessions (narrative, memory, README)
+  -search <query>     Search across all sessions (--include-archived searches archived too)
   -checkpoint "<label>"  Save labelled state snapshot (run from inside a session)
   -checkpoint list    List checkpoints for current session
   -checkpoint show <name>  Print a specific checkpoint
@@ -27,13 +27,15 @@ Commands:
   -lint <file>...     Flag AI-slop prose tells (em-dashes, banned phrases); 0=clean 1=issues 2=error
   -statusline <cmd>   enable|disable the cs status line in Claude Code settings
   -detect-theme       Show the detected terminal theme (light|dark)
-  -list, -ls [--tag <tag>]  List all sessions, optionally filtered by tag
+  -list, -ls          List sessions (--tag <tag> filters; --archived shows only archived)
   -adopt <name>       Adopt current directory as a cs session
   -whoami             Show the current actor (for shared, multi-person sessions)
   -who                Show who contributed to shared memory/narrative (git history)
   -live               List sessions running right now on this machine
   -usage              Per-session token usage over the 5h/weekly rate-limit windows
   -tag add|rm <tag>   Tag the current session (frontmatter); -tag list [<name>] to view
+  -archive <name> [--force]  Archive a session (hidden until reopened; --force if live)
+  -unarchive <name>   Restore an archived session to the listings
   -status "<text>"    Set this session's advertised status (also: -status, -status --clear/-c)
   -remove, -rm <name> Remove a session
   -secrets <cmd>      Manage current session secrets (requires CLAUDE_SESSION_NAME)

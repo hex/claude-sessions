@@ -12,7 +12,7 @@ create_session_gitignore() {
 # Per-actor local state (never shared)
 .cs/local/
 
-# Session archives (large binaries)
+# Session archives (large binaries; unrelated to the tracked .cs/archived marker)
 .cs/archives/
 
 # Session cooldown markers

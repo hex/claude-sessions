@@ -103,7 +103,8 @@ main() {
             return 0
             ;;
         -search)
-            search_sessions "${2:-}"
+            shift
+            search_sessions "$@"
             return 0
             ;;
         -checkpoint)
@@ -133,6 +134,16 @@ main() {
         -tag)
             shift
             run_tag "$@"
+            return $?
+            ;;
+        -archive)
+            shift
+            run_archive "$@"
+            return $?
+            ;;
+        -unarchive)
+            shift
+            run_unarchive "$@"
             return $?
             ;;
         -doctor|-diag)
