@@ -207,7 +207,52 @@ SCRIPT
     assert_output_contains "$output" "Unarchived: reopen" "launch prints the notice" || return 1
 }
 
+test_unarchive_rejects_flags_and_extra_names() {
+    _archive_session "ua1"
+    _archive_session "ua2"
+    "$CS_BIN" -archive ua1 >/dev/null 2>&1 || return 1
+    "$CS_BIN" -archive ua2 >/dev/null 2>&1 || return 1
+    local output
+    if output=$("$CS_BIN" -unarchive --force ua1 2>&1); then
+        echo "  FAIL: flag must be rejected"
+        return 1
+    fi
+    assert_output_contains "$output" "Unknown unarchive option" "flag rejection names the option" || return 1
+    if output=$("$CS_BIN" -unarchive ua1 ua2 2>&1); then
+        echo "  FAIL: extra name must error"
+        return 1
+    fi
+    [ -f "$CS_SESSIONS_ROOT/ua1/.cs/archived" ] || { echo "  FAIL: refused call must not unarchive"; return 1; }
+    "$CS_BIN" -unarchive ua1 >/dev/null 2>&1 || return 1
+    [ ! -f "$CS_SESSIONS_ROOT/ua1/.cs/archived" ] || { echo "  FAIL: single-name unarchive must still work"; return 1; }
+}
+
+test_list_tag_trailer_counts_only_tagged_archived() {
+    _archive_session "tagged-arch" "tags: [api]"
+    _archive_session "untagged-arch" "tags: []"
+    _archive_session "tagged-live" "tags: [api]"
+    "$CS_BIN" -archive tagged-arch >/dev/null 2>&1 || return 1
+    "$CS_BIN" -archive untagged-arch >/dev/null 2>&1 || return 1
+    local output
+    output=$("$CS_BIN" -list --tag api 2>&1) || true
+    assert_output_contains "$output" "tagged-live" "unarchived tagged session listed" || return 1
+    assert_output_not_contains "$output" "tagged-arch" "archived tagged session hidden" || return 1
+    assert_output_contains "$output" "1 archived (cs -list --archived)" "trailer counts only the tag-matching archived session" || return 1
+}
+
+test_search_flag_before_query() {
+    _archive_session "ffq"
+    echo "needle-ffq here" >> "$CS_SESSIONS_ROOT/ffq/.cs/README.md"
+    "$CS_BIN" -archive ffq >/dev/null 2>&1 || return 1
+    local output
+    output=$("$CS_BIN" -search --include-archived "needle-ffq" 2>&1) || true
+    assert_output_contains "$output" "ffq" "flag-first order finds the archived session" || return 1
+}
+
 run_test test_search_skips_archived_by_default
 run_test test_search_empty_query_still_errors
 run_test test_open_auto_unarchives_with_notice
+run_test test_unarchive_rejects_flags_and_extra_names
+run_test test_list_tag_trailer_counts_only_tagged_archived
+run_test test_search_flag_before_query
 report_results

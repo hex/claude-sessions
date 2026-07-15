@@ -2931,7 +2931,12 @@ mod tests {
             .expect("archived row visible after toggle") as u16;
         // The name is not the selected row (selection restores to the previous
         // top session), so its ink must be the dimmed comment tone, not INK.
-        let x = rows[y as usize].find("shelved").unwrap() as u16;
+        let row_cells: Vec<String> = (0..buf.area.width)
+            .map(|cx| buf.cell((cx, y)).unwrap().symbol().to_string())
+            .collect();
+        let x = (0..row_cells.len())
+            .find(|&i| row_cells[i..].concat().starts_with("shelved"))
+            .expect("shelved cell run") as u16;
         let cell = buf.cell((x, y)).unwrap();
         assert_eq!(cell.fg, Palette::light().comment);
     }

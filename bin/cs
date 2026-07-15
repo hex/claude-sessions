@@ -326,7 +326,7 @@ Commands:
   -live               List sessions running right now on this machine
   -usage              Per-session token usage over the 5h/weekly rate-limit windows
   -tag add|rm <tag>   Tag the current session (frontmatter); -tag list [<name>] to view
-  -archive <name>     Archive a session: hidden from listings until reopened
+  -archive <name> [--force]  Archive a session (hidden until reopened; --force if live)
   -unarchive <name>   Restore an archived session to the listings
   -status "<text>"    Set this session's advertised status (also: -status, -status --clear/-c)
   -remove, -rm <name> Remove a session
@@ -2832,7 +2832,16 @@ run_archive() {
 }
 
 run_unarchive() {
-    local name="${1:-}"
+    local name="" arg
+    for arg in "$@"; do
+        case "$arg" in
+            -*) error "Unknown unarchive option: $arg. Usage: cs -unarchive <name>" ;;
+            *)
+                [ -z "$name" ] || error "Usage: cs -unarchive <name>"
+                name="$arg"
+                ;;
+        esac
+    done
     [ -n "$name" ] || error "Usage: cs -unarchive <name>"
     _archive_resolve "$name"
     if [ ! -f "$ARCHIVE_MARKER" ]; then
@@ -4088,7 +4097,7 @@ create_session_gitignore() {
 # Per-actor local state (never shared)
 .cs/local/
 
-# Session archives (large binaries)
+# Session archives (large binaries; unrelated to the tracked .cs/archived marker)
 .cs/archives/
 
 # Session cooldown markers

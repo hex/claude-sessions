@@ -46,7 +46,16 @@ run_archive() {
 }
 
 run_unarchive() {
-    local name="${1:-}"
+    local name="" arg
+    for arg in "$@"; do
+        case "$arg" in
+            -*) error "Unknown unarchive option: $arg. Usage: cs -unarchive <name>" ;;
+            *)
+                [ -z "$name" ] || error "Usage: cs -unarchive <name>"
+                name="$arg"
+                ;;
+        esac
+    done
     [ -n "$name" ] || error "Usage: cs -unarchive <name>"
     _archive_resolve "$name"
     if [ ! -f "$ARCHIVE_MARKER" ]; then
