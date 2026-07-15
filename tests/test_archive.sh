@@ -176,6 +176,38 @@ run_test test_list_hides_archived_and_prints_trailer
 run_test test_list_archived_shows_only_archived
 run_test test_list_archived_composes_with_tag
 run_test test_list_trailer_prints_even_when_all_sessions_archived
+test_open_auto_unarchives_with_notice() {
+    local dir="$CS_SESSIONS_ROOT/reopen"
+    mkdir -p "$dir/.cs/local"
+    touch "$dir/.cs/local/session.log"
+    echo "# test" > "$dir/CLAUDE.md"
+    # Machine-local state must never be committed, as a real session's
+    # .gitignore ensures; otherwise cs_assert_local_untracked refuses to open.
+    printf '.cs/local/\n' > "$dir/.gitignore"
+    (cd "$dir" && git init -q 2>/dev/null && git add -A 2>/dev/null && git commit -q -m "init" 2>/dev/null) || true
+
+    "$CS_BIN" -archive reopen >/dev/null 2>&1 || return 1
+    [ -f "$dir/.cs/archived" ] || { echo "  FAIL: setup: marker missing"; return 1; }
+
+    cat > "$TEST_TMPDIR/claude-stub" << 'SCRIPT'
+#!/bin/bash
+exit 0
+SCRIPT
+    chmod +x "$TEST_TMPDIR/claude-stub"
+    export CLAUDE_CODE_BIN="$TEST_TMPDIR/claude-stub"
+
+    # Reopening an existing session dir means is_new=false, which triggers the
+    # "Continue previous conversation?" prompt (see tests/test_session_lock.sh
+    # for the same pattern); answer "n" so the launch proceeds non-interactively.
+    local output rc=0
+    output=$(echo "n" | "$CS_BIN" reopen 2>&1) || rc=$?
+    unset CLAUDE_CODE_BIN
+    [ "$rc" -eq 0 ] || { echo "  FAIL: open exited non-zero: $output"; return 1; }
+    [ ! -f "$dir/.cs/archived" ] || { echo "  FAIL: marker should be removed at launch"; return 1; }
+    assert_output_contains "$output" "Unarchived: reopen" "launch prints the notice" || return 1
+}
+
 run_test test_search_skips_archived_by_default
 run_test test_search_empty_query_still_errors
+run_test test_open_auto_unarchives_with_notice
 report_results

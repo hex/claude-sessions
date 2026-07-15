@@ -3862,6 +3862,14 @@ launch_claude_code() {
     trap 'reset_tab_title; release_session_lock "'"$session_dir/.cs"'"' EXIT
     trap 'reset_tab_title; release_session_lock "'"$session_dir/.cs"'"; exit 130' INT TERM
 
+    # Opening an archived session revives it. Placed after lock acquisition so
+    # a cancelled collision menu leaves the marker in place; the removal is
+    # left uncommitted, like every cs edit to session content.
+    if [ -f "$session_dir/.cs/archived" ]; then
+        rm -f "$session_dir/.cs/archived"
+        info "Unarchived: $session_name"
+    fi
+
     # Read the session's recorded UUID (allocated by create_session_structure
     # on new sessions or backfilled by migrate_session Phase 8 on legacy ones).
     # Used for both the CS_CLAUDE_SESSION_ID env export below and for the
