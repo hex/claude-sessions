@@ -186,6 +186,31 @@ Old release that must never be emitted.
 EOF
 }
 
+_write_fixture_changelog_oldstyle() {
+    cat > "$1" << 'EOF'
+# Changelog
+
+## 2026.99.7
+
+### Fixes
+
+- **Bullet-first: no summary line.** Body text.
+
+## 2026.99.6
+
+- **Hard-wrapped bullet.** This bullet line is
+  wrapped across two source lines by hand.
+
+## 2026.99.5
+
+One fix: normal section for contrast.
+
+## 2026.99.4
+
+Old release that must never be emitted.
+EOF
+}
+
 test_span_extracts_versions_above_installed() {
     _source_update_fragment
     local fix="$TEST_TMPDIR/CHANGELOG-fixture.md" out
@@ -268,6 +293,28 @@ test_render_emits_escape_bytes_not_literal_backslash() {
         echo "  FAIL: code span must be wrapped in the expanded escape byte sequence"
         return 1
     fi
+}
+
+test_render_flushes_headers_for_bullet_first_sections() {
+    _source_update_fragment
+    local fix="$TEST_TMPDIR/CHANGELOG-oldstyle.md" out
+    _write_fixture_changelog_oldstyle "$fix"
+    out=$(changelog_span "$fix" "2026.99.4" | render_changelog) || return 1
+    assert_output_contains "$out" "2026.99.7" "bullet-first section header renders" || return 1
+    assert_output_contains "$out" "2026.99.6" "hard-wrapped section header renders" || return 1
+    assert_output_contains "$out" "2026.99.5 One fix: normal section for contrast." "prose summary still joins its header" || return 1
+    assert_output_contains "$out" "Bullet-first: no summary line." "bullet renders under its own header" || return 1
+}
+
+test_render_width_floor_survives_tiny_terminals() {
+    _source_update_fragment
+    local fix="$TEST_TMPDIR/CHANGELOG-oldstyle.md" out
+    _write_fixture_changelog_oldstyle "$fix"
+    COLUMNS=3
+    export COLUMNS
+    out=$(changelog_span "$fix" "2026.99.4" | render_changelog) || { unset COLUMNS; return 1; }
+    unset COLUMNS
+    assert_output_contains "$out" "2026.99.7" "renderer survives tiny width" || return 1
 }
 
 # ============================================================================
@@ -416,6 +463,8 @@ run_test test_span_empty_when_up_to_date
 run_test test_summaries_cap_and_collapse
 run_test test_render_strips_markdown_and_joins_summary
 run_test test_render_emits_escape_bytes_not_literal_backslash
+run_test test_render_flushes_headers_for_bullet_first_sections
+run_test test_render_width_floor_survives_tiny_terminals
 run_test test_check_shows_rendered_span
 run_test test_check_falls_back_when_fetch_fails
 run_test test_launch_banner_shows_notes_card

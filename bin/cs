@@ -700,6 +700,18 @@ _render_bullet() {
     return 0
 }
 
+# Print the pending version header (with an optional summary joined on the
+# line) and its dim rule, then clear it. Called from render_changelog.
+_flush_version_header() {
+    printf '\n%b▌%b %b%s%b' "$YELLOW" "$NC" "${GREEN}${BOLD}" "$pending_ver" "$NC"
+    if [ -n "$1" ]; then
+        printf ' %s' "$1"
+    fi
+    printf '\n'
+    printf '%b%s%b\n' "$DIM" "────────────────────────────────────────────────────────" "$NC"
+    pending_ver=""
+}
+
 # Render a changelog markdown stream (stdin) in house style: version + its
 # summary on one line under a colored bar, subsection labels tinted,
 # bold-title bullets with dimmed wrapped bodies.
@@ -710,6 +722,9 @@ render_changelog() {
     if [ "$width" -gt 100 ]; then
         width=100
     fi
+    if [ "$width" -lt 20 ]; then
+        width=20
+    fi
     local line pending_ver=""
     while IFS= read -r line; do
         case "$line" in
@@ -717,26 +732,32 @@ render_changelog() {
                 pending_ver="${line#\#\# }"
                 ;;
             "### "*)
+                if [ -n "$pending_ver" ]; then
+                    _flush_version_header ""
+                fi
                 printf '  %b%s%b\n' "$YELLOW" "${line#\#\#\# }" "$NC"
                 ;;
             "<!--"*|"")
                 :
                 ;;
             "- "*)
+                if [ -n "$pending_ver" ]; then
+                    _flush_version_header ""
+                fi
                 _render_bullet "${line#- }" "$width"
                 ;;
             *)
                 if [ -n "$pending_ver" ]; then
-                    printf '\n%b▌%b %b%s%b %s\n' "$YELLOW" "$NC" "${GREEN}${BOLD}" \
-                        "$pending_ver" "$NC" "$(_md_strip_inline "$line")"
-                    printf '%b%s%b\n' "$DIM" "────────────────────────────────────────────────────────" "$NC"
-                    pending_ver=""
+                    _flush_version_header "$(_md_strip_inline "$line")"
                 else
                     printf '  %s\n' "$(_md_strip_inline "$line")"
                 fi
                 ;;
         esac
     done
+    if [ -n "$pending_ver" ]; then
+        _flush_version_header ""
+    fi
     return 0
 }
 
