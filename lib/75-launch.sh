@@ -153,11 +153,51 @@ launch_claude_code() {
     # For existing sessions, ask if user wants to continue previous conversation
     local continue_flag=""
     if [ "$is_new" = "false" ]; then
-        printf "${DIM}Continue previous conversation?${NC} [Y/n] "
+        # Deliberate rotation: an unconsumed handoff written by the rotate
+        # skill adds a third answer. Lexicographically last basename wins
+        # (the YYYY-MM-DD- prefix makes that the newest date).
+        local pending_handoff="" _hf
+        for _hf in "$session_dir/.cs/handoffs"/*.md; do
+            [ -f "$_hf" ] || continue
+            # Scope the scan to the YAML frontmatter (line 1 "---" through the
+            # next "---"): a body that quotes the contract line flush-left
+            # (the rotate skill's own doc does) must not count as a match.
+            awk '
+                NR==1 {
+                    if ($0 != "---") { rc=1; closed=1; exit }
+                    next
+                }
+                !closed && $0 == "---" { rc = (matched ? 0 : 1); closed=1; exit }
+                !closed && $0 == "status: unconsumed" { matched=1 }
+                END { if (!closed) rc=1; exit rc }
+            ' "$_hf" 2>/dev/null || continue
+            pending_handoff="$_hf"
+        done
+        if [ -n "$pending_handoff" ]; then
+            printf "${DIM}Rotation handoff pending:${NC} %s\n" "$(basename "$pending_handoff")"
+            printf "${DIM}Continue previous conversation?${NC} [Y/n/r] ${DIM}(r = fresh conversation with handoff)${NC} "
+        else
+            printf "${DIM}Continue previous conversation?${NC} [Y/n] "
+        fi
         read -r response || exit 130
         case "$response" in
             [nN]|[nN][oO])
                 continue_flag=""
+                ;;
+            [rR])
+                if [ -n "$pending_handoff" ]; then
+                    mkdir -p "$session_dir/.cs/local"
+                    printf '%s\n' "$(basename "$pending_handoff")" > "$session_dir/.cs/local/pending-handoff"
+                    echo ""
+                    _exec_fresh_rebind "$session_dir" handoff "$(basename "$pending_handoff")"
+                fi
+                # r without a pending handoff was never offered: treat as the
+                # default resume answer.
+                if [ -n "$claude_session_id" ]; then
+                    continue_flag="--resume $claude_session_id"
+                else
+                    continue_flag="--continue"
+                fi
                 ;;
             *)
                 # Prefer --resume <uuid> when the session has a recorded UUID:
@@ -188,7 +228,7 @@ launch_claude_code() {
             # the same failure).
             echo -e "${DIM}No previous conversation found. Starting fresh...${NC}"
             echo ""
-            _exec_fresh_rebind "$session_dir"
+            _exec_fresh_rebind "$session_dir" resume-failed
         fi
         exit $rc
     else
@@ -205,7 +245,7 @@ launch_claude_code() {
             # shellcheck disable=SC2086
             exec $CLAUDE_CODE_BIN --name "$session_name" --session-id "$claude_session_id" ${color_arg:+"$color_arg"}
         elif [ "$is_new" = "false" ]; then
-            _exec_fresh_rebind "$session_dir"
+            _exec_fresh_rebind "$session_dir" declined-resume
         else
             # shellcheck disable=SC2086
             exec $CLAUDE_CODE_BIN --name "$session_name" ${color_arg:+"$color_arg"}

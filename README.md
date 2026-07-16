@@ -45,6 +45,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 - **Session tags** - `cs -tag add api` tags the current session in its README frontmatter (`tags: [api]` — the same field Obsidian indexes); `cs -list --tag api` filters the listing, and the picker filters live with `#api` in the search query (combining with fuzzy name search). Tags show in the preview card.
 - **Session archive** - `cs -archive <name>` drops a tracked `.cs/archived` marker that hides a finished session from the picker, `cs -list`, and `cs -search` (the marker syncs with the session, so archiving on one machine archives everywhere). `cs -list --archived` lists only archived sessions, `cs -search <q> --include-archived` searches them, and the picker toggles visibility with `A` (archived rows render dimmed). Opening an archived session unarchives it.
 - **Walk-away supervision** - a draining queue is watched by circuit breakers: too many tool failures in one task (default 5, `CS_QUEUE_MAX_FAILURES`), context past 85% (`CS_QUEUE_MAX_CTX`), or the 5-hour rate-limit window past 85% (`CS_QUEUE_MAX_5H`) parks the queue with a debrief instead of feeding the next task — nothing is lost, `cs -queue start` re-arms. Everything that happened while you were away (tasks done, breaker trips) lands in a per-machine journal: a one-line digest surfaces once on your return, and `cs -queue log` shows the full history.
+- **Conversation rotation** - a heavy conversation can hand off to a fresh one without losing context: the `rotate` skill (self-invoked, or nudged once per conversation past 80% context) writes a lineage-stamped handoff to `.cs/handoffs/`, and the next `cs <name>` launch offers a third answer — `[Y/n/r]` — to start clean from it. `cs -conversations` shows the resulting chain.
 - **Bash command audit trail** - Every Bash command Claude runs is logged to `.cs/local/session.log` (machine-local, never git-synced) with timestamps
 - **Update notifications** - Checks for updates and notifies when new versions are available
 - **Verified updates** - Updates are downloaded from GitHub Releases and verified with SHA-256 checksums; additionally verified with [minisign](https://jedisct1.github.io/minisign/) signatures when available
@@ -258,6 +259,51 @@ list where `d` deletes and `e` edits a task in place, and `Esc` returns
 to the session list. Sessions with queued tasks get a sortable **Queue**
 column (`▰▱` meter and count) in the table, and the status line shows `▤ N`
 after the session name.
+
+### Conversation rotation
+
+A long-running conversation eventually gets too heavy to keep working in —
+context fills up, or a work phase just wraps. Rotation hands off to a fresh
+conversation without losing the thread:
+
+```bash
+cs -conversations                     # show this session's conversation chain
+```
+
+Invoke the `rotate` skill yourself, or accept it when the narrative-reminder
+nudges you (see below). It distills the live conversation into a
+lineage-stamped handoff — parent UUID, purpose, and a continuation plan — and
+commits it to `.cs/handoffs/YYYY-MM-DD-<slug>.md`. The handoff only gets
+written; the conversation keeps running until you leave it.
+
+The next `cs <name>` launch notices the pending handoff and adds a third
+answer to the resume prompt:
+
+```
+Rotation handoff pending: 2026-07-16-continue-f5-plan.md
+Continue previous conversation? [Y/n/r] (r = fresh conversation with handoff)
+```
+
+`Y` (or Enter) resumes as usual and leaves the handoff waiting; `n` starts
+fresh with no memory of it; `r` starts a fresh conversation seeded with the
+handoff's continuation plan (the old transcript is not loaded). With more
+than one unconsumed handoff, the lexicographically last basename wins — the
+`YYYY-MM-DD-` prefix makes that the newest.
+
+Past 80% context, the narrative-reminder Stop hook nudges once per
+conversation to invoke the rotate skill (`CS_ROTATE_NUDGE_CTX` overrides the
+threshold; a non-numeric value falls back to 80). The nudge yields to an
+armed or draining task queue, which owns the turn loop while it runs.
+
+Every rotation, deliberate or not, appends a `rotated` event to
+`.cs/timeline.jsonl` with the old and new conversation UUIDs and a reason:
+`handoff` (the `r` answer), `declined-resume` (`n` at the resume prompt),
+`resume-failed` (`--resume`/`--continue` errored and cs fell back to fresh),
+or `rebind` (SessionStart found a UUID mismatch — Claude Code forked a new
+conversation, e.g. past its own context limit). `cs -conversations` reads
+this log and renders each conversation's `started` events (folded into a
+single line with a resume count) and each `rotated` event as a `from > to`
+arrow, marking the live conversation `[current]`.
 
 ### Live sessions & status
 

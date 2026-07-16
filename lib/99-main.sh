@@ -117,6 +117,11 @@ main() {
             run_queue "$@"
             return 0
             ;;
+        -conversations)
+            shift
+            run_conversations "$@"
+            return 0
+            ;;
         -status)
             shift
             run_status "$@"
@@ -205,6 +210,14 @@ main() {
                 run_queue "$@"
                 return 0
                 ;;
+            -conversations)
+                shift
+                export CLAUDE_SESSION_NAME="$session_name"
+                export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
+                export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
+                run_conversations "$@"
+                return 0
+                ;;
             -usage)
                 shift
                 export CLAUDE_SESSION_NAME="$session_name"
@@ -232,7 +245,7 @@ main() {
                 shift
                 ;;
             *)
-                error "Unknown session command: $1. Use -secrets, -queue, -usage, -tag, --merge, or --force."
+                error "Unknown session command: $1. Use -secrets, -queue, -conversations, -usage, -tag, --merge, or --force."
                 ;;
         esac
     done

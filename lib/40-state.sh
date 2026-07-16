@@ -92,6 +92,22 @@ _discover_session_uuid_in() {
     basename "$newest" .jsonl
 }
 
+# Append a rotated event to the tracked timeline: the durable link between
+# the conversation being left and the one about to start. Shape shared with
+# hooks/session-start.sh's rebind emitter (hooks cannot source bin/cs).
+# Best-effort — a timeline failure must never break a launch.
+_timeline_rotated() {  # session_dir, from, to, reason, [handoff]
+    local session_dir="$1" from="$2" to="$3" reason="$4" handoff="${5:-}"
+    jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+           --arg from "$from" \
+           --arg to "$to" \
+           --arg reason "$reason" \
+           --arg handoff "$handoff" \
+           '{ts: $ts, event: "rotated", from: $from, to: $to, reason: $reason}
+            + (if $handoff == "" then {} else {handoff: $handoff} end)' \
+        >> "$session_dir/.cs/timeline.jsonl" 2>/dev/null || true
+}
+
 # Allocate a fresh UUID, rewrite the local state's claude_session_id to it, export
 # CS_CLAUDE_SESSION_ID + CS_FRESH_REBIND, and exec claude --session-id <new>.
 # Used on the "user declined resume" path and the "resume failed" fallback
@@ -100,11 +116,16 @@ _discover_session_uuid_in() {
 # tailor its additionalContext (the user is starting fresh, not cold-booting).
 _exec_fresh_rebind() {
     local session_dir="$1"
+    local reason="${2:-declined-resume}"
+    local handoff="${3:-}"
     local session_name
     session_name=$(basename "$session_dir")
+    local old_uuid
+    old_uuid=$(_read_local_state "$session_dir/.cs/local/state" claude_session_id)
     local new_uuid
     new_uuid=$(_alloc_uuid)
     _set_local_state "$session_dir/.cs/local/state" claude_session_id "$new_uuid"
+    _timeline_rotated "$session_dir" "$old_uuid" "$new_uuid" "$reason" "$handoff"
     local session_color
     session_color=$(_read_local_state "$session_dir/.cs/local/state" claude_session_color)
     local color_arg=""

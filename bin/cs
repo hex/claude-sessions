@@ -69,6 +69,7 @@ CS_COMMANDS=(
 CS_SKILLS=(
     store-secret
     prose-hygiene
+    rotate
 )
 
 # Deployed-hooks directory; CS_HOOKS_DIR overrides it for tests.
@@ -316,6 +317,7 @@ Commands:
   -queue rm <n>       Remove pending task n
   -queue clear        Empty the queue and stop draining
   -queue log          Show the walk-away run journal (drains, breaker trips)
+  -conversations      Show the session's conversation chain (rotations, lineage)
   -doctor, -diag      Run health checks (Keychain, hooks, memory, audit, tokens)
   -lint <file>...     Flag AI-slop prose tells (em-dashes, banned phrases); 0=clean 1=issues 2=error
   -statusline <cmd>   enable|disable the cs status line in Claude Code settings
@@ -1235,6 +1237,8 @@ Treat these files as a lab notebook - document as you go, not just at the end.
 
 When the session is complete, use the `/wrap` command to distill durable memory entries and generate an intelligent summary of the entire session (.cs/summary.md). Use `/summary` for the narrative alone, or `/sweep` for the memory pass alone. Mid-session, use `/checkpoint <label>` to snapshot git state and the narrative — e.g. before a risky refactor or destructive operation, and after reaching a green milestone (tests passing, a feature working) — saved under .cs/checkpoints/.
 
+When a conversation's context grows heavy or a work phase completes, invoke the `rotate` skill: it writes a handoff to .cs/handoffs/ so the user can reopen the session and answer `r` for a fresh conversation that continues from it. `cs -conversations` shows the session's conversation chain.
+
 ## Secure Secrets Handling
 
 Store sensitive data (API keys, tokens, passwords) securely (macOS Keychain or
@@ -1393,6 +1397,22 @@ _discover_session_uuid_in() {
     basename "$newest" .jsonl
 }
 
+# Append a rotated event to the tracked timeline: the durable link between
+# the conversation being left and the one about to start. Shape shared with
+# hooks/session-start.sh's rebind emitter (hooks cannot source bin/cs).
+# Best-effort — a timeline failure must never break a launch.
+_timeline_rotated() {  # session_dir, from, to, reason, [handoff]
+    local session_dir="$1" from="$2" to="$3" reason="$4" handoff="${5:-}"
+    jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+           --arg from "$from" \
+           --arg to "$to" \
+           --arg reason "$reason" \
+           --arg handoff "$handoff" \
+           '{ts: $ts, event: "rotated", from: $from, to: $to, reason: $reason}
+            + (if $handoff == "" then {} else {handoff: $handoff} end)' \
+        >> "$session_dir/.cs/timeline.jsonl" 2>/dev/null || true
+}
+
 # Allocate a fresh UUID, rewrite the local state's claude_session_id to it, export
 # CS_CLAUDE_SESSION_ID + CS_FRESH_REBIND, and exec claude --session-id <new>.
 # Used on the "user declined resume" path and the "resume failed" fallback
@@ -1401,11 +1421,16 @@ _discover_session_uuid_in() {
 # tailor its additionalContext (the user is starting fresh, not cold-booting).
 _exec_fresh_rebind() {
     local session_dir="$1"
+    local reason="${2:-declined-resume}"
+    local handoff="${3:-}"
     local session_name
     session_name=$(basename "$session_dir")
+    local old_uuid
+    old_uuid=$(_read_local_state "$session_dir/.cs/local/state" claude_session_id)
     local new_uuid
     new_uuid=$(_alloc_uuid)
     _set_local_state "$session_dir/.cs/local/state" claude_session_id "$new_uuid"
+    _timeline_rotated "$session_dir" "$old_uuid" "$new_uuid" "$reason" "$handoff"
     local session_color
     session_color=$(_read_local_state "$session_dir/.cs/local/state" claude_session_color)
     local color_arg=""
@@ -2218,6 +2243,52 @@ run_checkpoint() {
 # (idle|armed|draining), queue.declined (epoch). Plain files so the standalone
 # Stop hook can read them without bin/cs's helpers.
 
+run_conversations() {
+    [ $# -eq 0 ] || error "Usage: cs -conversations"
+    if [ -z "${CLAUDE_SESSION_META_DIR:-}" ]; then
+        error "cs -conversations must be run inside a cs session, or as: cs <session> -conversations"
+    fi
+    local timeline="$CLAUDE_SESSION_META_DIR/timeline.jsonl"
+    if [ ! -s "$timeline" ]; then
+        echo "No conversation history recorded."
+        return 0
+    fi
+    local current
+    current=$(_read_local_state "$CLAUDE_SESSION_META_DIR/local/state" claude_session_id)
+    # One line per conversation's first started event (later starteds fold
+    # into a resumed-count suffix); one line per rotated event. Torn or
+    # foreign lines are skipped by the tolerant per-line parse.
+    jq -rRs --arg current "$current" '
+        [split("\n")[] | select(length > 0) | (fromjson? // empty)
+         | select(.event == "started" or .event == "rotated")] as $ev |
+        (reduce $ev[] as $e ({};
+            if $e.event == "started"
+            then .[$e.session_id] = (.[$e.session_id] // 0) + 1
+            else . end)) as $n |
+        (reduce $ev[] as $e ({seen: {}, out: []};
+            if $e.event == "started" then
+                if .seen[$e.session_id] then . else
+                    .seen[$e.session_id] = true |
+                    .out += [{ts: $e.ts,
+                        txt: ($e.session_id[0:8] + "  started (" + ($e.source // "?")
+                            + (if ($n[$e.session_id] // 1) > 1
+                               then ", resumed " + (($n[$e.session_id] - 1) | tostring) + "x"
+                               else "" end)
+                            + ")"
+                            + (if $current != "" and $e.session_id == $current
+                               then "  [current]" else "" end))}]
+                end
+            else
+                .out += [{ts: $e.ts,
+                    txt: ((if ($e.from // "") == "" then "?" else $e.from[0:8] end)
+                        + " > " + ($e.to[0:8]) + "  rotated (" + ($e.reason // "?")
+                        + (if ($e.handoff // "") != "" then ": " + $e.handoff else "" end)
+                        + ")")}]
+            end)).out[] |
+        ((try (.ts | fromdateiso8601 | strflocaltime("%Y-%m-%d %H:%M")) catch .ts))
+            + "  " + .txt
+    ' "$timeline"
+}
 _queue_set_state() {  # atomic single-word write; "" removes the file
     local qdir="$1" val="$2"
     mkdir -p "$qdir"
@@ -4021,11 +4092,51 @@ launch_claude_code() {
     # For existing sessions, ask if user wants to continue previous conversation
     local continue_flag=""
     if [ "$is_new" = "false" ]; then
-        printf "${DIM}Continue previous conversation?${NC} [Y/n] "
+        # Deliberate rotation: an unconsumed handoff written by the rotate
+        # skill adds a third answer. Lexicographically last basename wins
+        # (the YYYY-MM-DD- prefix makes that the newest date).
+        local pending_handoff="" _hf
+        for _hf in "$session_dir/.cs/handoffs"/*.md; do
+            [ -f "$_hf" ] || continue
+            # Scope the scan to the YAML frontmatter (line 1 "---" through the
+            # next "---"): a body that quotes the contract line flush-left
+            # (the rotate skill's own doc does) must not count as a match.
+            awk '
+                NR==1 {
+                    if ($0 != "---") { rc=1; closed=1; exit }
+                    next
+                }
+                !closed && $0 == "---" { rc = (matched ? 0 : 1); closed=1; exit }
+                !closed && $0 == "status: unconsumed" { matched=1 }
+                END { if (!closed) rc=1; exit rc }
+            ' "$_hf" 2>/dev/null || continue
+            pending_handoff="$_hf"
+        done
+        if [ -n "$pending_handoff" ]; then
+            printf "${DIM}Rotation handoff pending:${NC} %s\n" "$(basename "$pending_handoff")"
+            printf "${DIM}Continue previous conversation?${NC} [Y/n/r] ${DIM}(r = fresh conversation with handoff)${NC} "
+        else
+            printf "${DIM}Continue previous conversation?${NC} [Y/n] "
+        fi
         read -r response || exit 130
         case "$response" in
             [nN]|[nN][oO])
                 continue_flag=""
+                ;;
+            [rR])
+                if [ -n "$pending_handoff" ]; then
+                    mkdir -p "$session_dir/.cs/local"
+                    printf '%s\n' "$(basename "$pending_handoff")" > "$session_dir/.cs/local/pending-handoff"
+                    echo ""
+                    _exec_fresh_rebind "$session_dir" handoff "$(basename "$pending_handoff")"
+                fi
+                # r without a pending handoff was never offered: treat as the
+                # default resume answer.
+                if [ -n "$claude_session_id" ]; then
+                    continue_flag="--resume $claude_session_id"
+                else
+                    continue_flag="--continue"
+                fi
                 ;;
             *)
                 # Prefer --resume <uuid> when the session has a recorded UUID:
@@ -4056,7 +4167,7 @@ launch_claude_code() {
             # the same failure).
             echo -e "${DIM}No previous conversation found. Starting fresh...${NC}"
             echo ""
-            _exec_fresh_rebind "$session_dir"
+            _exec_fresh_rebind "$session_dir" resume-failed
         fi
         exit $rc
     else
@@ -4073,7 +4184,7 @@ launch_claude_code() {
             # shellcheck disable=SC2086
             exec $CLAUDE_CODE_BIN --name "$session_name" --session-id "$claude_session_id" ${color_arg:+"$color_arg"}
         elif [ "$is_new" = "false" ]; then
-            _exec_fresh_rebind "$session_dir"
+            _exec_fresh_rebind "$session_dir" declined-resume
         else
             # shellcheck disable=SC2086
             exec $CLAUDE_CODE_BIN --name "$session_name" ${color_arg:+"$color_arg"}
@@ -4582,6 +4693,11 @@ main() {
             run_queue "$@"
             return 0
             ;;
+        -conversations)
+            shift
+            run_conversations "$@"
+            return 0
+            ;;
         -status)
             shift
             run_status "$@"
@@ -4670,6 +4786,14 @@ main() {
                 run_queue "$@"
                 return 0
                 ;;
+            -conversations)
+                shift
+                export CLAUDE_SESSION_NAME="$session_name"
+                export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
+                export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
+                run_conversations "$@"
+                return 0
+                ;;
             -usage)
                 shift
                 export CLAUDE_SESSION_NAME="$session_name"
@@ -4697,7 +4821,7 @@ main() {
                 shift
                 ;;
             *)
-                error "Unknown session command: $1. Use -secrets, -queue, -usage, -tag, --merge, or --force."
+                error "Unknown session command: $1. Use -secrets, -queue, -conversations, -usage, -tag, --merge, or --force."
                 ;;
         esac
     done

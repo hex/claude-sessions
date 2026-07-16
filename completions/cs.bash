@@ -11,7 +11,7 @@ _cs_completions() {
     }
 
     # Global flags
-    local global_flags="-list -ls -adopt -remove -rm -whoami -who -secrets -checkpoint -queue -search -lint -statusline -detect-theme -doctor -diag -update -uninstall -help -h -version -v -live -usage -status -tag -archive -unarchive"
+    local global_flags="-list -ls -adopt -remove -rm -whoami -who -secrets -checkpoint -queue -conversations -search -lint -statusline -detect-theme -doctor -diag -update -uninstall -help -h -version -v -live -usage -status -tag -archive -unarchive"
 
     # Secrets subcommands
     local secrets_cmds="set store get list ls delete rm purge export export-file import-file migrate migrate-backend backend age"
@@ -29,7 +29,7 @@ _cs_completions() {
     local update_cmds="--check -c --force -f"
 
     # Session-level options
-    local session_opts="-secrets -queue -usage -tag --force --merge"
+    local session_opts="-secrets -queue -conversations -usage -tag --force --merge"
 
     # Get list of session names. cs owns the definition of a session, including
     # which symlinks and marker directories count; asking it keeps this script

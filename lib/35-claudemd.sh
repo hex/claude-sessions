@@ -182,6 +182,8 @@ Treat these files as a lab notebook - document as you go, not just at the end.
 
 When the session is complete, use the `/wrap` command to distill durable memory entries and generate an intelligent summary of the entire session (.cs/summary.md). Use `/summary` for the narrative alone, or `/sweep` for the memory pass alone. Mid-session, use `/checkpoint <label>` to snapshot git state and the narrative — e.g. before a risky refactor or destructive operation, and after reaching a green milestone (tests passing, a feature working) — saved under .cs/checkpoints/.
 
+When a conversation's context grows heavy or a work phase completes, invoke the `rotate` skill: it writes a handoff to .cs/handoffs/ so the user can reopen the session and answer `r` for a fresh conversation that continues from it. `cs -conversations` shows the session's conversation chain.
+
 ## Secure Secrets Handling
 
 Store sensitive data (API keys, tokens, passwords) securely (macOS Keychain or

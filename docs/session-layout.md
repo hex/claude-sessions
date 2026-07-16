@@ -21,11 +21,12 @@ The one distinction that governs everything below is **shared vs machine-local**
 |------|---------|-------|
 | `.cs/README.md` | Session objective (captured from the first prompt) and outcome. Human-edited. | default |
 | `.cs/summary.md` | Distilled session summary, written by `/wrap` and `/summary`. | default |
-| `.cs/timeline.jsonl` | Structured event log — `started`, `ended`, and `checkpoint` events as newline-delimited JSON. | `union` |
+| `.cs/timeline.jsonl` | Structured event log — `started`, `ended`, `checkpoint`, and `rotated` events as newline-delimited JSON. | `union` |
 | `.cs/memory/MEMORY.md` | Index of Claude Code's native auto-memory (one line per fact). | `ours` |
 | `.cs/memory/<bucket>_*.md` | Native auto-memory fact files (user, feedback, project, reference). Written by the harness. | default |
 | `.cs/memory/narrative.<actor>.md` | Per-actor lab notebook. Each co-developer writes their own file; everyone reads all of them on resume. | `union` |
 | `.cs/checkpoints/` | Labelled state snapshots from `/checkpoint` (narrative + changes + git HEAD). | default |
+| `.cs/handoffs/` | Lineage-stamped conversation handoffs written by the `rotate` skill (parent UUID, purpose, continuation plan). Consumed by the next launch's `r` answer. | default |
 | `.cs/plans/` | Design plans and specs kept with the session. | default |
 | `.cs/age-recipients/*.pub` | age public keys of everyone allowed to decrypt the session's synced secrets. | default |
 | `.cs/secrets.<machine-id>.age` | Per-machine encrypted secret sync file (age; preferred). Each machine writes its own so exports never collide. | default |
@@ -49,6 +50,8 @@ similar gitignored transient at the `.cs/` root — the narrative reminder's
 | `identity` | Overrides the actor name for shared memory/narrative attribution (precedence: `$CS_ACTOR` > `local/identity` > git `user.email` > git `user.name`). |
 | `attention` | Status-line attention marker — raised by the `Stop` hook when Claude finishes, cleared on the next prompt. |
 | `presence` | This session's advertised status (`cs -status`): a single line read by `cs -live`. Falls back to the README objective when unset. |
+| `pending-handoff` | Basename of the `.cs/handoffs/` file the user chose with `r` at the resume prompt; consumed and cleared by the next SessionStart. |
+| `rotate-nudged` | Conversation UUID last nudged to rotate by the narrative reminder — keeps the 80%-context nudge to once per conversation. |
 | `queue` | The walk-away task queue (`cs -queue`). |
 | `queue.state` | Drain state machine for the queue: `idle`, `armed`, or `draining`. |
 | `queue.done` | Log of completed queued tasks, appended as each is drained. |

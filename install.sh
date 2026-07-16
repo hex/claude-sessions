@@ -126,6 +126,7 @@ CS_COMMANDS=(
 CS_SKILLS=(
     store-secret
     prose-hygiene
+    rotate
 )
 
 # Completion URLs for web install
