@@ -138,6 +138,20 @@ launch_claude_code() {
 
     if [ -n "$UPDATE_AVAILABLE" ]; then
         echo -e "${YELLOW}▌${NC} ${YELLOW}Update available:${NC} $VERSION ${COMMENT}→${NC} ${GREEN}$UPDATE_AVAILABLE${NC} ${COMMENT}(cs -update)${NC}"
+        local notes_cache="$HOME/.cache/cs/update-notes-$UPDATE_AVAILABLE"
+        if [ -s "$notes_cache" ]; then
+            local card_w nver nsum
+            card_w=$(tput cols 2>/dev/null) || card_w=80
+            case "$card_w" in ''|*[!0-9]*) card_w=80 ;; esac
+            while IFS=$'\t' read -r nver nsum; do
+                if [ "$nver" = "+" ]; then
+                    echo -e "${YELLOW}▌${NC}   ${COMMENT}${nsum}${NC}"
+                elif [ -n "$nsum" ]; then
+                    nsum=$(printf '%.*s' $((card_w - ${#nver} - 6)) "$nsum")
+                    echo -e "${YELLOW}▌${NC}   ${GREEN}${nver}${NC} ${COMMENT}${nsum}${NC}"
+                fi
+            done < "$notes_cache"
+        fi
     fi
     echo ""
 
