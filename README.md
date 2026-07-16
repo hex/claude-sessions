@@ -65,7 +65,7 @@ Or clone and run `./install.sh`.
 The installer:
 - Adds `cs`, `cs-secrets`, `cs-statusline`, `cs-subagent-statusline`, and `cs-tui` to `~/.local/bin/`
 - Installs the cs [hooks](docs/hooks.md) to `~/.claude/hooks/cs/` for session tracking (including the `scope-prompt` auto-grounding hook on UserPromptSubmit)
-- Adds `/summary`, `/checkpoint`, `/sweep`, and `/wrap` commands, and the `store-secret` and `prose-hygiene` skills to `~/.claude/`
+- Adds `/summary`, `/checkpoint`, `/sweep`, and `/wrap` commands, and the `store-secret`, `prose-hygiene`, `rotate`, and `merge` skills to `~/.claude/`
 - Installs shell completions for bash and zsh
 - Configures hook entries in `~/.claude/settings.json`
 
@@ -213,6 +213,10 @@ second launch, or cancel). A worktree session also knows what it is: Claude
 is told at launch that it runs in a task worktree and that
 `cs myproj --merge <task>` is the way back, so it won't merge the branch by
 hand.
+
+The `merge` skill (`/merge` in a conversation) wraps this — and ordinary
+feature branches — in the full gated ritual: tests before, `--no-ff` merge,
+tests again on the merged result, cleanup only when green.
 
 Each worktree is a full cs session (own conversation, color, crash
 recovery) that shares the base session's task list and secrets. Session
