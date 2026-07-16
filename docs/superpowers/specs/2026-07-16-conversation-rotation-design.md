@@ -178,7 +178,10 @@ In the same hook, after the existing rebind/bind logic: if
    instructing Claude to read `.cs/handoffs/<file>` FIRST and continue per
    its next-step section. The hook injects the instruction and path, not
    the file body (handoffs can be large; the read costs one tool call in
-   the new conversation).
+   the new conversation). The rotation preamble takes precedence over the
+   `CS_FRESH_REBIND` "Fresh Conversation" block: the rotate path also
+   exports that flag, and injecting both would tell Claude "clean break"
+   and "continue per the handoff" in the same breath.
 2. Flip the frontmatter `status: unconsumed` → `consumed` and set
    `consumed_by: <live uuid>` (awk in-place via tmp+mv, the hook's
    existing atomic-write pattern).
@@ -190,14 +193,20 @@ so the marker is machine-local state with a one-exec lifespan).
 
 ### Context nudge (hooks/narrative-reminder.sh)
 
-In the Stop hook's non-queue path, after the narrative check: if
-`context-pct` ≥ `CS_ROTATE_NUDGE_CTX` (default 80; non-numeric override
-falls back, the F4 defensive-parse rule) and `.cs/local/rotate-nudged`
-does not name the live conversation UUID, append one informational line to
-the Stop feedback — context percentage, the suggestion to invoke the
-`rotate` skill, and what rotation does — then write the live UUID to
-`rotate-nudged`. Once per conversation; never blocks; missing or
-non-numeric `context-pct` never fires.
+A Stop hook surfaces text to Claude only through a `{decision: block,
+reason}` response — an approve is silent — so the nudge is delivered as a
+one-time block, the narrative check's own mechanism. Placement: after the
+queue section (whose armed/draining/gate branches exit early, so an active
+queue owns the turn loop and the drain's context breaker owns hot-context
+handling there) and before the narrative cooldown logic (a fresh narrative
+must not swallow the nudge). Condition: `context-pct` ≥
+`CS_ROTATE_NUDGE_CTX` (default 80; non-numeric override falls back, the F4
+defensive-parse rule) and `.cs/local/rotate-nudged` does not already name
+the live conversation UUID (taken from the Stop payload's `session_id`;
+absent means never fire). On firing: write the UUID to `rotate-nudged`,
+emit the block naming the context percentage, the `rotate` skill, and what
+rotation does. Once per conversation; missing or non-numeric `context-pct`
+never fires.
 
 ### The view: `cs -conversations`
 
