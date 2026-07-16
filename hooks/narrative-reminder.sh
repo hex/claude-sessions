@@ -188,6 +188,27 @@ Task: $NEXT"
 fi
 # (falls through to the narrative reminder below when not gating/draining)
 
+# --- Rotation nudge -----------------------------------------------------------
+# One-time suggestion to rotate when context runs hot. Delivered as a block
+# (the only Stop-hook surface Claude sees); an armed or draining queue never
+# reaches here (its branches exit above), so the drain's context breaker owns
+# hot-context handling during walk-away runs. Cursor: the conversation UUID
+# last nudged, machine-local.
+NUDGE_CTX=$(_num_or "${CS_ROTATE_NUDGE_CTX:-}" 80)
+NUDGE_UUID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)
+NUDGE_PCT=$(cat "$QDIR/context-pct" 2>/dev/null | tr -d '[:space:]' || true)
+case "$NUDGE_PCT" in ''|*[!0-9]*) NUDGE_PCT="";; esac
+if [ -n "$NUDGE_PCT" ] && [ -n "$NUDGE_UUID" ] && [ "$NUDGE_PCT" -ge "$NUDGE_CTX" ]; then
+    NUDGED=$(cat "$QDIR/rotate-nudged" 2>/dev/null | tr -d '[:space:]' || true)
+    if [ "$NUDGED" != "$NUDGE_UUID" ]; then
+        printf '%s\n' "$NUDGE_UUID" > "$QDIR/rotate-nudged.tmp" \
+            && mv "$QDIR/rotate-nudged.tmp" "$QDIR/rotate-nudged"
+        REASON="Context is at ${NUDGE_PCT}% — consider rotating this conversation. Invoke the rotate skill to distill a handoff into .cs/handoffs/; the user can then reopen the session and answer r for a fresh conversation that continues from it. One-time notice for this conversation; if now is a bad time, simply continue."
+        jq -nc --arg r "$REASON" '{decision: "block", reason: $r}'
+        exit 0
+    fi
+fi
+
 COOLDOWN_FILE="$META_DIR/.narrative-reminder-cooldown"
 COOLDOWN_SECONDS=300  # 5 minutes
 

@@ -327,4 +327,100 @@ run_test test_fresh_rebind_block_survives_without_handoff
 run_test test_stale_marker_is_removed_silently
 run_test test_handoff_with_hostile_purpose_survives_flip
 
+# ============================================================================
+# Cycle 5: context nudge (Stop hook)
+# ============================================================================
+
+_stop_with_ctx() {  # ctx-pct-or-empty, session_id
+    if [ -n "$1" ]; then
+        printf '%s\n' "$1" > "$CLAUDE_SESSION_META_DIR/local/context-pct"
+    else
+        rm -f "$CLAUDE_SESSION_META_DIR/local/context-pct"
+    fi
+    echo "{\"session_id\":\"$2\"}" | bash "$HOOKS_DIR/narrative-reminder.sh"
+}
+
+test_nudge_fires_once_at_threshold() {
+    _rot_hook_session "rot-nudge"
+    local out
+    out=$(_stop_with_ctx 80 "$UUID_A") || return 1
+    assert_output_contains "$out" '"decision":"block"' "nudge delivered as a block" || return 1
+    assert_output_contains "$out" "rotate" "nudge names the rotate skill" || return 1
+    assert_output_contains "$out" "80%" "nudge names the reading" || return 1
+    assert_eq "$UUID_A" "$(cat "$CLAUDE_SESSION_META_DIR/local/rotate-nudged" | tr -d '[:space:]')" \
+        "cursor records the nudged conversation" || return 1
+    out=$(_stop_with_ctx 85 "$UUID_A") || return 1
+    if printf '%s' "$out" | grep -q "rotate skill"; then
+        echo "  FAIL: same conversation must not be nudged twice"
+        return 1
+    fi
+}
+
+test_nudge_rearms_for_new_conversation() {
+    _rot_hook_session "rot-nudge-rearm"
+    _stop_with_ctx 80 "$UUID_A" >/dev/null || return 1
+    local out
+    out=$(_stop_with_ctx 80 "$UUID_B") || return 1
+    assert_output_contains "$out" "rotate" "new conversation UUID re-arms the nudge" || return 1
+}
+
+test_nudge_silent_below_threshold_and_without_signal() {
+    _rot_hook_session "rot-nudge-quiet"
+    local out
+    out=$(_stop_with_ctx 79 "$UUID_A") || return 1
+    if printf '%s' "$out" | grep -q "rotate skill"; then
+        echo "  FAIL: 79 must not nudge at default threshold"
+        return 1
+    fi
+    out=$(_stop_with_ctx "" "$UUID_A") || return 1
+    if printf '%s' "$out" | grep -q "rotate skill"; then
+        echo "  FAIL: missing context-pct must never nudge"
+        return 1
+    fi
+    out=$(_stop_with_ctx "hot" "$UUID_A") || return 1
+    if printf '%s' "$out" | grep -q "rotate skill"; then
+        echo "  FAIL: non-numeric context-pct must never nudge"
+        return 1
+    fi
+}
+
+test_nudge_threshold_override() {
+    _rot_hook_session "rot-nudge-env"
+    export CS_ROTATE_NUDGE_CTX=90
+    local out
+    out=$(_stop_with_ctx 85 "$UUID_A") || { unset CS_ROTATE_NUDGE_CTX; return 1; }
+    if printf '%s' "$out" | grep -q "rotate skill"; then
+        unset CS_ROTATE_NUDGE_CTX
+        echo "  FAIL: 85 under a 90 override must not nudge"
+        return 1
+    fi
+    out=$(_stop_with_ctx 90 "$UUID_A") || { unset CS_ROTATE_NUDGE_CTX; return 1; }
+    unset CS_ROTATE_NUDGE_CTX
+    assert_output_contains "$out" "rotate" "90 at a 90 override nudges" || return 1
+    _rot_hook_session "rot-nudge-env2"
+    export CS_ROTATE_NUDGE_CTX=banana
+    out=$(_stop_with_ctx 80 "$UUID_B") || { unset CS_ROTATE_NUDGE_CTX; return 1; }
+    unset CS_ROTATE_NUDGE_CTX
+    assert_output_contains "$out" "rotate" "non-numeric override falls back to 80" || return 1
+}
+
+test_nudge_yields_to_queue_drain() {
+    _rot_hook_session "rot-nudge-queue"
+    printf 'task one\n' > "$CLAUDE_SESSION_META_DIR/local/queue"
+    printf 'armed\n' > "$CLAUDE_SESSION_META_DIR/local/queue.state"
+    local out
+    out=$(_stop_with_ctx 80 "$UUID_A") || return 1
+    assert_output_contains "$out" "cs task queue" "queue owns the turn loop" || return 1
+    if printf '%s' "$out" | grep -q "rotate skill"; then
+        echo "  FAIL: nudge must yield to an armed queue"
+        return 1
+    fi
+}
+
+run_test test_nudge_fires_once_at_threshold
+run_test test_nudge_rearms_for_new_conversation
+run_test test_nudge_silent_below_threshold_and_without_signal
+run_test test_nudge_threshold_override
+run_test test_nudge_yields_to_queue_drain
+
 report_results
