@@ -271,6 +271,128 @@ test_render_emits_escape_bytes_not_literal_backslash() {
 }
 
 # ============================================================================
+# Release-notes surfaces (curl stubbed via PATH; HOME faked)
+# ============================================================================
+
+# The e2e tests fake HOME; save the real one ONCE at file scope. test_lib.sh
+# does NOT save it (only test_cs_secrets.sh does, locally to that file), and
+# under set -u an unbound restore would abort the whole suite.
+ORIGINAL_HOME="$HOME"
+
+# Stub curl: the version probe (-w) reports v2026.99.3; the changelog fetch
+# (-o) copies the fixture, or fails when no fixture path was baked in.
+_make_curl_stub() {  # stub-dir, fixture-path-or-empty
+    cat > "$1/curl" << STUB
+#!/usr/bin/env bash
+case "\$*" in
+    *" -w "*|*"-w"*)
+        printf '%s' "https://github.com/hex/claude-sessions/releases/tag/v2026.99.3"
+        exit 0
+        ;;
+esac
+out=""
+prev=""
+for a in "\$@"; do
+    if [ "\$prev" = "-o" ]; then out="\$a"; fi
+    prev="\$a"
+done
+if [ -n "$2" ] && [ -n "\$out" ]; then
+    cp "$2" "\$out"
+    exit 0
+fi
+exit 22
+STUB
+    chmod +x "$1/curl"
+}
+
+test_check_shows_rendered_span() {
+    local fix="$TEST_TMPDIR/CHANGELOG-fixture.md" stub="$TEST_TMPDIR/stub-bin" out
+    _write_fixture_changelog "$fix"
+    mkdir -p "$stub"
+    _make_curl_stub "$stub" "$fix"
+    export HOME="$TEST_TMPDIR/home"
+    mkdir -p "$HOME"
+    out=$(PATH="$stub:$PATH" "$CS_BIN" -update --check 2>&1) || { export HOME="$ORIGINAL_HOME"; return 1; }
+    export HOME="$ORIGINAL_HOME"
+    assert_output_contains "$out" "Update available" "check still announces" || return 1
+    assert_output_contains "$out" "2026.99.3 One fix: the statusline is readable on light terminals." \
+        "check renders the span" || return 1
+    assert_output_contains "$out" "Menu: keypress." "older pending section included" || return 1
+    assert_output_not_contains "$out" "##" "no raw markdown in check output" || return 1
+}
+
+test_check_falls_back_when_fetch_fails() {
+    local stub="$TEST_TMPDIR/stub-bin" out
+    mkdir -p "$stub"
+    _make_curl_stub "$stub" ""
+    export HOME="$TEST_TMPDIR/home"
+    mkdir -p "$HOME"
+    out=$(PATH="$stub:$PATH" "$CS_BIN" -update --check 2>&1) || { export HOME="$ORIGINAL_HOME"; return 1; }
+    export HOME="$ORIGINAL_HOME"
+    assert_output_contains "$out" "Update available" "check still announces" || return 1
+    assert_output_contains "$out" "releases" "fallback names the releases page" || return 1
+}
+
+test_launch_banner_shows_notes_card() {
+    export HOME="$TEST_TMPDIR/home"
+    mkdir -p "$HOME/.cache/cs"
+    printf '%s 2026.99.3\n' "$(date +%s)" > "$HOME/.cache/cs/update-check"
+    printf '2026.99.3\tOne fix: the statusline is readable.\n2026.99.2\tOne change: the menu is single-keypress.\n+\t… and 1 earlier versions\n' \
+        > "$HOME/.cache/cs/update-notes-2026.99.3"
+    unset CS_NO_UPDATE_CHECK
+    local out
+    out=$("$CS_BIN" "notes-card-session" < /dev/null 2>&1) || {
+        export CS_NO_UPDATE_CHECK=1 HOME="$ORIGINAL_HOME"
+        return 1
+    }
+    export CS_NO_UPDATE_CHECK=1 HOME="$ORIGINAL_HOME"
+    assert_output_contains "$out" "Update available:" "banner one-liner intact" || return 1
+    assert_output_contains "$out" "2026.99.3" "card shows the newest version" || return 1
+    assert_output_contains "$out" "One fix: the statusline is readable." "card shows its summary" || return 1
+    assert_output_contains "$out" "and 1 earlier versions" "card shows the collapse line" || return 1
+}
+
+test_launch_banner_quiet_on_empty_notes_cache() {
+    export HOME="$TEST_TMPDIR/home"
+    mkdir -p "$HOME/.cache/cs"
+    printf '%s 2026.99.3\n' "$(date +%s)" > "$HOME/.cache/cs/update-check"
+    : > "$HOME/.cache/cs/update-notes-2026.99.3"
+    unset CS_NO_UPDATE_CHECK
+    local out
+    out=$("$CS_BIN" "notes-quiet-session" < /dev/null 2>&1) || {
+        export CS_NO_UPDATE_CHECK=1 HOME="$ORIGINAL_HOME"
+        return 1
+    }
+    export CS_NO_UPDATE_CHECK=1 HOME="$ORIGINAL_HOME"
+    assert_output_contains "$out" "Update available:" "one-liner still shown" || return 1
+    assert_output_not_contains "$out" "One fix: the statusline is readable." \
+        "no card rows from the tombstone (the populated-cache test proves this string DOES render when present)" || return 1
+    assert_output_not_contains "$out" "earlier versions" "no collapse line from the tombstone" || return 1
+}
+
+test_notify_writes_notes_cache() {
+    local fix="$TEST_TMPDIR/CHANGELOG-fixture.md" stub="$TEST_TMPDIR/stub-bin"
+    _write_fixture_changelog "$fix"
+    mkdir -p "$stub"
+    _make_curl_stub "$stub" "$fix"
+    export HOME="$TEST_TMPDIR/home"
+    mkdir -p "$HOME/.cache/cs"
+    printf 'stale\n' > "$HOME/.cache/cs/update-notes-2026.90.0"
+    unset CS_NO_UPDATE_CHECK
+    PATH="$stub:$PATH" "$CS_BIN" "notes-notify-session" < /dev/null > /dev/null 2>&1 || {
+        export CS_NO_UPDATE_CHECK=1 HOME="$ORIGINAL_HOME"
+        return 1
+    }
+    export CS_NO_UPDATE_CHECK=1
+    local cache="$HOME/.cache/cs/update-notes-2026.99.3"
+    assert_file_exists "$cache" "notify writes the notes cache" || { export HOME="$ORIGINAL_HOME"; return 1; }
+    assert_file_contains "$cache" "2026.99.3	One fix: the statusline is readable on light terminals." \
+        "cache holds tab-separated summaries" || { export HOME="$ORIGINAL_HOME"; return 1; }
+    assert_not_exists "$HOME/.cache/cs/update-notes-2026.90.0" "stale notes caches pruned" || { export HOME="$ORIGINAL_HOME"; return 1; }
+    export HOME="$ORIGINAL_HOME"
+}
+
+# ============================================================================
 # Runner
 # ============================================================================
 
@@ -294,5 +416,10 @@ run_test test_span_empty_when_up_to_date
 run_test test_summaries_cap_and_collapse
 run_test test_render_strips_markdown_and_joins_summary
 run_test test_render_emits_escape_bytes_not_literal_backslash
+run_test test_check_shows_rendered_span
+run_test test_check_falls_back_when_fetch_fails
+run_test test_launch_banner_shows_notes_card
+run_test test_launch_banner_quiet_on_empty_notes_cache
+run_test test_notify_writes_notes_cache
 
 report_results

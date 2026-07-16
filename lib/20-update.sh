@@ -238,6 +238,14 @@ check_update() {
     if version_greater "$remote_version" "$VERSION"; then
         echo ""
         info "Update available. Run 'cs -update' to install."
+        local notes
+        if notes=$(fetch_remote_changelog); then
+            changelog_span "$notes" "$VERSION" | render_changelog
+            rm -f "$notes"
+        else
+            echo ""
+            echo "  See ${RELEASES_BASE} for what's new."
+        fi
         return 0
     else
         echo ""
@@ -250,6 +258,7 @@ check_update() {
 do_update() {
     local force="${1:-false}"
     local remote_version
+    local from_version="$VERSION"
 
     remote_version=$(get_remote_version) || {
         error "Failed to fetch update. Check your internet connection."
@@ -318,9 +327,7 @@ do_update() {
         changelog="$(dirname "$script_dir")/CHANGELOG.md"
         if [ -f "$changelog" ]; then
             echo ""
-            # Extract section between "## $new_version" and next "## "
-            sed -n "/^## ${new_version}$/,/^## [0-9]/{ /^## [0-9]/!p; }" "$changelog" \
-                | sed '/^$/N;/^\n$/d'
+            changelog_span "$changelog" "$from_version" | render_changelog
         else
             echo ""
             echo "  See ${RELEASES_BASE} for what's new."
@@ -376,6 +383,29 @@ check_update_notify() {
         fi
     fi
 
+    # Build the launch card's notes cache once per pending remote version;
+    # an empty file records a failed fetch so launches don't retry the
+    # network until the version changes (or an explicit --check/-update).
+    if [ -n "$UPDATE_AVAILABLE" ]; then
+        local notes_cache="$cache_dir/update-notes-$UPDATE_AVAILABLE"
+        if [ ! -f "$notes_cache" ]; then
+            local notes
+            if notes=$(fetch_remote_changelog); then
+                changelog_summaries "$notes" "$VERSION" 5 > "$notes_cache.tmp" \
+                    && mv "$notes_cache.tmp" "$notes_cache"
+                rm -f "$notes"
+            else
+                : > "$notes_cache"
+            fi
+            local stale
+            for stale in "$cache_dir"/update-notes-*; do
+                [ -e "$stale" ] || continue
+                if [ "$stale" != "$notes_cache" ]; then
+                    rm -f "$stale"
+                fi
+            done
+        fi
+    fi
 }
 
 # Check dependencies
