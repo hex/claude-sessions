@@ -290,10 +290,14 @@ handoff's continuation plan (the old transcript is not loaded). With more
 than one unconsumed handoff, the lexicographically last basename wins — the
 `YYYY-MM-DD-` prefix makes that the newest.
 
-Past 80% context, the narrative-reminder Stop hook nudges once per
-conversation to invoke the rotate skill (`CS_ROTATE_NUDGE_CTX` overrides the
-threshold; a non-numeric value falls back to 80). The nudge yields to an
-armed or draining task queue, which owns the turn loop while it runs.
+At 60% context, the narrative-reminder Stop hook surfaces a
+once-per-conversation heads-up so you can steer toward a natural stopping
+point (`CS_CTX_WARN_CTX` overrides it; the warning stays silent at or above
+the nudge threshold, where rotation takes over). Past 80% context, the same
+hook nudges once per conversation to invoke the rotate skill
+(`CS_ROTATE_NUDGE_CTX` overrides the threshold; a non-numeric value falls
+back to 80). Both tiers yield to an armed or draining task queue, which
+owns the turn loop while it runs.
 
 Every rotation, deliberate or not, appends a `rotated` event to
 `.cs/timeline.jsonl` with the old and new conversation UUIDs and a reason:
