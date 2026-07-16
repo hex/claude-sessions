@@ -21,6 +21,7 @@ fi
 
 REPO_URL="https://github.com/hex/claude-sessions"
 RELEASES_BASE="https://github.com/hex/claude-sessions/releases"
+CHANGELOG_RAW_URL="https://raw.githubusercontent.com/hex/claude-sessions/main/CHANGELOG.md"
 
 # Hooks retired in past versions but possibly still installed from older cs versions.
 # install.sh and run_uninstall both clean these up. KEEP IN SYNC WITH install.sh's RETIRED_HOOKS.

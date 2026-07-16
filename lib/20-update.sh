@@ -61,6 +61,166 @@ version_greater() {
     return 1
 }
 
+# Strip bold markers and links (keeping the link text); backticks survive
+# for the renderer's code-span tinting.
+_md_strip_links_bold() {
+    printf '%s' "$1" | sed -e 's/\*\*//g' \
+        -e 's/\[\([^]]*\)\]([^)]*)/\1/g'
+}
+
+# Strip inline markdown to plain text: bold markers, backticks, and links
+# (keeping the link text).
+_md_strip_inline() {
+    _md_strip_links_bold "$1" | sed -e 's/`//g'
+}
+
+# Emit the changelog sections for every version newer than $2 from file $1,
+# newest first (file order). Sections are delimited by '## X.Y.Z' headings;
+# emission stops at the first heading that is not newer.
+changelog_span() {
+    local file="$1" installed="$2"
+    local line ver keep=""
+    while IFS= read -r line; do
+        case "$line" in
+            "## "*)
+                ver="${line#\#\# }"
+                if version_greater "$ver" "$installed"; then
+                    keep=1
+                else
+                    break
+                fi
+                ;;
+        esac
+        if [ -n "$keep" ]; then
+            printf '%s\n' "$line"
+        fi
+    done < "$file"
+    return 0
+}
+
+# Emit up to $3 'version<TAB>summary' lines for versions newer than $2 in
+# file $1, plus a '+<TAB>… and N earlier versions' line when capped. The
+# summary is a section's first non-empty prose line (headings, comments,
+# and subsection labels don't qualify), markdown-stripped.
+changelog_summaries() {
+    local file="$1" installed="$2" cap="$3"
+    local line ver="" want="" total=0
+    while IFS= read -r line; do
+        case "$line" in
+            "## "*)
+                ver="${line#\#\# }"
+                if version_greater "$ver" "$installed"; then
+                    total=$((total + 1))
+                    want=""
+                    if [ "$total" -le "$cap" ]; then
+                        want="$ver"
+                    fi
+                else
+                    break
+                fi
+                ;;
+            ""|"### "*|"<!--"*)
+                :
+                ;;
+            *)
+                if [ -n "$want" ]; then
+                    printf '%s\t%s\n' "$want" "$(_md_strip_inline "$line")"
+                    want=""
+                fi
+                ;;
+        esac
+    done < "$file"
+    if [ "$total" -gt "$cap" ]; then
+        printf '+\t… and %d earlier versions\n' $((total - cap))
+    fi
+    return 0
+}
+
+# Render one bullet: '**Title.** body' becomes a bold title line with the
+# dimmed body wrapped and indented beneath it; anything else wraps plain.
+_render_bullet() {
+    local text="$1" width="$2"
+    local title="" body=""
+    case "$text" in
+        "**"*"**"*)
+            title="${text#\*\*}"
+            title="${title%%\*\**}"
+            body="${text#*\*\*"$title"\*\*}"
+            body="${body# }"
+            ;;
+        *)
+            body="$text"
+            ;;
+    esac
+    body="$(_md_strip_links_bold "$body")"
+    if [ -n "$title" ]; then
+        printf '  %b•%b %b%s%b\n' "$YELLOW" "$NC" "$BOLD" "$(_md_strip_inline "$title")" "$NC"
+        if [ -n "$body" ]; then
+            printf '%b' "$DIM"
+            printf '%s\n' "$body" | fold -s -w $((width - 4)) | sed 's/^/    /' \
+                | sed "s/\`\([^\`]*\)\`/${GOLD}\1${NC}${DIM}/g" | sed 's/`//g'
+            printf '%b' "$NC"
+        fi
+    else
+        printf '%s\n' "$body" | sed 's/`//g' | fold -s -w $((width - 4)) | sed 's/^/  /'
+    fi
+    return 0
+}
+
+# Render a changelog markdown stream (stdin) in house style: version + its
+# summary on one line under a colored bar, subsection labels tinted,
+# bold-title bullets with dimmed wrapped bodies.
+render_changelog() {
+    local width
+    width=$(tput cols 2>/dev/null) || width=80
+    case "$width" in ''|*[!0-9]*) width=80 ;; esac
+    if [ "$width" -gt 100 ]; then
+        width=100
+    fi
+    local line pending_ver=""
+    while IFS= read -r line; do
+        case "$line" in
+            "## "*)
+                pending_ver="${line#\#\# }"
+                ;;
+            "### "*)
+                printf '  %b%s%b\n' "$YELLOW" "${line#\#\#\# }" "$NC"
+                ;;
+            "<!--"*|"")
+                :
+                ;;
+            "- "*)
+                _render_bullet "${line#- }" "$width"
+                ;;
+            *)
+                if [ -n "$pending_ver" ]; then
+                    printf '\n%b▌%b %b%s%b %s\n' "$YELLOW" "$NC" "${GREEN}${BOLD}" \
+                        "$pending_ver" "$NC" "$(_md_strip_inline "$line")"
+                    printf '%b%s%b\n' "$DIM" "────────────────────────────────────────────────────────" "$NC"
+                    pending_ver=""
+                else
+                    printf '  %s\n' "$(_md_strip_inline "$line")"
+                fi
+                ;;
+        esac
+    done
+    return 0
+}
+
+# Fetch the remote changelog to a tmp file; echo the path (caller removes
+# it) or return 1.
+fetch_remote_changelog() {
+    local tmp
+    tmp=$(mktemp "${TMPDIR:-/tmp}/cs-changelog.XXXXXX") || return 1
+    if curl -fsSL --connect-timeout 2 --max-time 4 \
+        "$CHANGELOG_RAW_URL" -o "$tmp" 2>/dev/null; then
+        echo "$tmp"
+        return 0
+    fi
+    rm -f "$tmp"
+    return 1
+}
+
 # Check for updates
 check_update() {
     local remote_version
