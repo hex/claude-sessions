@@ -573,4 +573,88 @@ test_launch_grep_scoped_to_frontmatter_and_body_survives_consumption() {
 run_test test_launch_grep_ignores_body_status_line
 run_test test_launch_grep_scoped_to_frontmatter_and_body_survives_consumption
 
+# ============================================================================
+# Cycle 8: context warning (Stop hook, [warn, nudge) band)
+# ============================================================================
+
+test_ctx_warning_fires_once_in_band() {
+    _rot_hook_session "rot-warn"
+    local out
+    out=$(_stop_with_ctx 60 "$UUID_A") || return 1
+    assert_output_contains "$out" '"decision":"block"' "warning delivered as a block" || return 1
+    assert_output_contains "$out" "Context is at 60%" "warning names the reading" || return 1
+    assert_output_contains "$out" "natural stopping point" "warning carries the frozen copy" || return 1
+    assert_eq "$UUID_A" "$(cat "$CLAUDE_SESSION_META_DIR/local/ctx-warned" | tr -d '[:space:]')" \
+        "cursor records the warned conversation" || return 1
+    out=$(_stop_with_ctx 60 "$UUID_A") || return 1
+    if printf '%s' "$out" | grep -q "stopping point"; then
+        echo "  FAIL: same conversation must not be warned twice"
+        return 1
+    fi
+}
+
+test_ctx_warning_rearms_for_new_conversation() {
+    _rot_hook_session "rot-warn-rearm"
+    _stop_with_ctx 60 "$UUID_A" >/dev/null || return 1
+    local out
+    out=$(_stop_with_ctx 60 "$UUID_B") || return 1
+    assert_output_contains "$out" "stopping point" "new conversation UUID re-arms the warning" || return 1
+}
+
+test_ctx_warning_silent_below_band() {
+    _rot_hook_session "rot-warn-low"
+    local out
+    out=$(_stop_with_ctx 59 "$UUID_A") || return 1
+    if printf '%s' "$out" | grep -q "stopping point"; then
+        echo "  FAIL: 59 must not warn at default threshold"
+        return 1
+    fi
+}
+
+test_ctx_warning_yields_to_nudge_at_high_ctx() {
+    _rot_hook_session "rot-warn-high"
+    local out
+    out=$(_stop_with_ctx 80 "$UUID_A") || return 1
+    assert_output_contains "$out" "rotate skill" "nudge owns readings at its threshold" || return 1
+    if printf '%s' "$out" | grep -q "stopping point"; then
+        echo "  FAIL: warning must not fire at or above the nudge threshold"
+        return 1
+    fi
+    out=$(_stop_with_ctx 85 "$UUID_A") || return 1
+    if printf '%s' "$out" | grep -q "stopping point"; then
+        echo "  FAIL: after the nudge, the warning may not fire"
+        return 1
+    fi
+    if printf '%s' "$out" | grep -q "rotate skill"; then
+        echo "  FAIL: after the nudge, the nudge may not fire again"
+        return 1
+    fi
+}
+
+test_ctx_warning_threshold_override() {
+    _rot_hook_session "rot-warn-env"
+    export CS_CTX_WARN_CTX=70
+    local out
+    out=$(_stop_with_ctx 65 "$UUID_A") || { unset CS_CTX_WARN_CTX; return 1; }
+    if printf '%s' "$out" | grep -q "stopping point"; then
+        unset CS_CTX_WARN_CTX
+        echo "  FAIL: 65 under a 70 override must not warn"
+        return 1
+    fi
+    out=$(_stop_with_ctx 70 "$UUID_A") || { unset CS_CTX_WARN_CTX; return 1; }
+    unset CS_CTX_WARN_CTX
+    assert_output_contains "$out" "stopping point" "70 at a 70 override warns" || return 1
+    _rot_hook_session "rot-warn-env2"
+    export CS_CTX_WARN_CTX=banana
+    out=$(_stop_with_ctx 60 "$UUID_B") || { unset CS_CTX_WARN_CTX; return 1; }
+    unset CS_CTX_WARN_CTX
+    assert_output_contains "$out" "stopping point" "non-numeric override falls back to 60" || return 1
+}
+
+run_test test_ctx_warning_fires_once_in_band
+run_test test_ctx_warning_rearms_for_new_conversation
+run_test test_ctx_warning_silent_below_band
+run_test test_ctx_warning_yields_to_nudge_at_high_ctx
+run_test test_ctx_warning_threshold_override
+
 report_results
