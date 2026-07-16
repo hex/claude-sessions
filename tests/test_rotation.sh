@@ -109,4 +109,28 @@ run_test test_hook_matching_uuid_emits_nothing
 run_test test_decline_resume_emits_declined_event
 run_test test_resume_failure_emits_resume_failed_event
 
+# ============================================================================
+# Cycle 2: the rotate skill ships and is registered
+# ============================================================================
+
+test_rotate_skill_exists_with_frontmatter() {
+    local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
+    [ -f "$skill" ] || { echo "  FAIL: skills/rotate/SKILL.md missing"; return 1; }
+    assert_eq "---" "$(head -1 "$skill")" "SKILL.md opens with YAML frontmatter" || return 1
+    assert_file_contains "$skill" "name: rotate" "frontmatter names the skill" || return 1
+    assert_file_contains "$skill" "description:" "frontmatter has a description" || return 1
+    assert_file_contains "$skill" "status: unconsumed" "skill teaches the frontmatter contract" || return 1
+    assert_file_contains "$skill" ".cs/handoffs/" "skill targets the tracked handoff store" || return 1
+}
+
+test_rotate_skill_registered_in_both_manifests() {
+    grep -A 5 '^CS_SKILLS=(' "$SCRIPT_DIR/../lib/00-header.sh" | grep -q 'rotate' \
+        || { echo "  FAIL: rotate missing from lib/00-header.sh CS_SKILLS"; return 1; }
+    grep -A 5 '^CS_SKILLS=(' "$SCRIPT_DIR/../install.sh" | grep -q 'rotate' \
+        || { echo "  FAIL: rotate missing from install.sh CS_SKILLS"; return 1; }
+}
+
+run_test test_rotate_skill_exists_with_frontmatter
+run_test test_rotate_skill_registered_in_both_manifests
+
 report_results
