@@ -2272,7 +2272,7 @@ _queue_log() {  # qdir
     # Tolerant per-line parse (torn lines skipped); oldest-first is file order.
     jq -rR '
         fromjson? // empty |
-        (.ts | strftime("%Y-%m-%d %H:%M")) + "  " + .event +
+        (.ts | strflocaltime("%Y-%m-%d %H:%M")) + "  " + .event +
         (if .task then ": " + .task
          elif .reason then ": " + .reason + " (" + (.reading|tostring) + " >= " + (.limit|tostring) + "), " + (.remaining|tostring) + " remaining"
          elif .done then ": " + (.done|tostring) + " done"

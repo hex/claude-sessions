@@ -86,13 +86,15 @@ _breaker_check() {
     if [ -f "$QDIR/limits" ]; then
         fiveh=$(awk -F': ' '/^five_hour_used_pct:/ {print $2; exit}' "$QDIR/limits" 2>/dev/null | tr -d '[:space:]')
         stamped=$(awk -F': ' '/^stamped_at:/ {print $2; exit}' "$QDIR/limits" 2>/dev/null | tr -d '[:space:]')
-        now=$(date +%s)
-        case "$fiveh$stamped" in *[!0-9]*|'') : ;; *)
+        case "$fiveh" in ''|*[!0-9]*) fiveh="";; esac
+        case "$stamped" in ''|*[!0-9]*) stamped="";; esac
+        if [ -n "$fiveh" ] && [ -n "$stamped" ]; then
+            now=$(date +%s)
             if [ $((now - stamped)) -le 1800 ] && [ "$fiveh" -ge "$max_5h" ]; then
                 echo "five_hour $fiveh $max_5h"
                 return 0
-            fi ;;
-        esac
+            fi
+        fi
     fi
     return 1
 }

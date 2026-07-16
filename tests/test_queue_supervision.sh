@@ -269,6 +269,39 @@ test_digest_at_session_start() {
     assert_output_not_contains "$out" "while you were away" "second start injects nothing" || return 1
 }
 
+test_partial_limits_skips_silently_without_stderr() {
+    _qs_session "pl"
+    _arm_queue "a" "b"
+    _stop_turn >/dev/null 2>&1 || return 1
+    printf 'stamped_at: %s\n' "$(date +%s)" > "$CLAUDE_SESSION_META_DIR/local/limits"
+    local out err_file="$CLAUDE_SESSION_META_DIR/local/stderr.capture"
+    out=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh" 2>"$err_file") || return 1
+    assert_output_contains "$out" "next task" "partial limits drains on" || return 1
+    [ ! -s "$err_file" ] || { echo "  FAIL: hook leaked stderr: $(cat "$err_file")"; return 1; }
+}
+
+test_ctx_threshold_env_override() {
+    _qs_session "ovc"
+    _arm_queue "a" "b"
+    _stop_turn >/dev/null || return 1
+    printf '50\n' > "$CLAUDE_SESSION_META_DIR/local/context-pct"
+    local out
+    out=$(echo '{}' | CS_QUEUE_MAX_CTX=40 bash "$HOOKS_DIR/narrative-reminder.sh") || return 1
+    assert_output_contains "$out" "circuit breaker" "CTX override lowers the threshold" || return 1
+    assert_output_contains "$out" "context" "trip names context" || return 1
+}
+
+test_5h_threshold_env_override() {
+    _qs_session "ovh"
+    _arm_queue "a" "b"
+    _stop_turn >/dev/null || return 1
+    printf 'five_hour_used_pct: 40\nstamped_at: %s\n' "$(date +%s)" > "$CLAUDE_SESSION_META_DIR/local/limits"
+    local out
+    out=$(echo '{}' | CS_QUEUE_MAX_5H=30 bash "$HOOKS_DIR/narrative-reminder.sh") || return 1
+    assert_output_contains "$out" "circuit breaker" "5H override lowers the threshold" || return 1
+    assert_output_contains "$out" "five" "trip names five_hour" || return 1
+}
+
 run_test test_failure_counter_increments
 run_test test_failure_counter_recovers_from_garbage
 run_test test_failure_counter_still_logs_to_session_log
@@ -287,4 +320,7 @@ run_test test_digest_includes_breaker_reason
 run_test test_declined_only_inbox_stays_silent_but_cursor_advances
 run_test test_digest_on_code_prompt_splices_with_scope_block
 run_test test_digest_at_session_start
+run_test test_partial_limits_skips_silently_without_stderr
+run_test test_ctx_threshold_env_override
+run_test test_5h_threshold_env_override
 report_results
