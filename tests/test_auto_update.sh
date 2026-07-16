@@ -246,6 +246,30 @@ test_render_strips_markdown_and_joins_summary() {
     fi
 }
 
+test_render_emits_escape_bytes_not_literal_backslash() {
+    _source_update_fragment
+    local fix="$TEST_TMPDIR/CHANGELOG-fixture.md" out expected_esc
+    _write_fixture_changelog "$fix"
+    GOLD='\033[33m'
+    expected_esc=$(printf '%b' "$GOLD")
+    out=$(changelog_span "$fix" "2026.99.0" | render_changelog) || { GOLD=""; return 1; }
+    GOLD=""
+    if printf '%s' "$out" | grep -q -- '\\033'; then
+        echo "  FAIL: color codes must be emitted as escape bytes, not literal backslash-033 text"
+        return 1
+    fi
+    # BSD sed's replacement-string parser silently drops a literal backslash
+    # before a digit (see 's/x/[\0]/' on a match), so the check above passes
+    # vacuously on this platform even when the sed splice never expands the
+    # escape: the leading backslash is eaten and only a bare '0' leaks into
+    # the text. Assert byte-for-byte that the expanded escape sequence itself
+    # (not a mangled remnant of it) wraps the code span.
+    if ! printf '%s' "$out" | grep -qF -- "${expected_esc}chiptext"; then
+        echo "  FAIL: code span must be wrapped in the expanded escape byte sequence"
+        return 1
+    fi
+}
+
 # ============================================================================
 # Runner
 # ============================================================================
@@ -269,5 +293,6 @@ run_test test_span_extracts_versions_above_installed
 run_test test_span_empty_when_up_to_date
 run_test test_summaries_cap_and_collapse
 run_test test_render_strips_markdown_and_joins_summary
+run_test test_render_emits_escape_bytes_not_literal_backslash
 
 report_results

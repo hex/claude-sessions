@@ -685,9 +685,13 @@ _render_bullet() {
     if [ -n "$title" ]; then
         printf '  %b•%b %b%s%b\n' "$YELLOW" "$NC" "$BOLD" "$(_md_strip_inline "$title")" "$NC"
         if [ -n "$body" ]; then
+            local gold_esc nc_esc dim_esc
+            gold_esc=$(printf '%b' "$GOLD")
+            nc_esc=$(printf '%b' "$NC")
+            dim_esc=$(printf '%b' "$DIM")
             printf '%b' "$DIM"
             printf '%s\n' "$body" | fold -s -w $((width - 4)) | sed 's/^/    /' \
-                | sed "s/\`\([^\`]*\)\`/${GOLD}\1${NC}${DIM}/g" | sed 's/`//g'
+                | sed "s/\`\([^\`]*\)\`/${gold_esc}\1${nc_esc}${dim_esc}/g" | sed 's/`//g'
             printf '%b' "$NC"
         fi
     else
