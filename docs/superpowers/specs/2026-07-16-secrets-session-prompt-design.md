@@ -92,18 +92,24 @@ never in `$(...)`).
 1. Enumerate `"$sessions_root"/*/` (glob order = sorted, bash 3.2 safe)
    where `sessions_root="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"`.
    Keep directories that contain `.cs/`; skip names containing `@`; skip
-   those with `.cs/archived`. Zero survivors → return with `SESSION_NAME`
-   empty (caller errors as today).
+   those with `.cs/archived`.
 2. Derive the default: `pwd -P` compared against the resolved sessions
    root; if inside it, the first path component below the root, with any
    `@<task>` suffix stripped. The derived name must contain a `.cs/`
-   directory to qualify; archived is allowed.
+   directory to qualify; archived is allowed. Zero list survivors AND no
+   default → return with `SESSION_NAME` empty (caller errors as today);
+   zero survivors WITH a default still prompts (header and default
+   prompt, no numbered entries) so Decision 5's standing-in-the-directory
+   promise holds even when every session is archived.
 3. Print to stderr: a header line, the numbered list, then the prompt —
    `Session number [<default>]: ` with a default, `Session number: `
    without.
-4. `read -r` from stdin. Empty + default → default. A number `1..N` →
-   that entry. Anything else (including empty without default, `q`, EOF)
-   → return with `SESSION_NAME` empty.
+4. `read -r` from stdin. An entered empty line + default → default. A
+   number `1..N` → that entry. Anything else (empty without default, `q`,
+   out of range) → return with `SESSION_NAME` empty. EOF (stream closed,
+   `read` fails) aborts even when a default exists — a closed stdin is a
+   cancel gesture, never an acceptance; only a deliberate Enter takes the
+   default.
 
 Prompt copy (frozen for tests):
 
@@ -149,6 +155,11 @@ assert carries `|| return 1`; new cases insert above `report_results`.
    input with no default → verbatim existing error.
 8. No sessions under root → verbatim existing error even with
    `CS_ASSUME_TTY=1`.
+9. EOF aborts despite a default: from inside a fake session dir with
+   stdin closed (`</dev/null`) and `CS_ASSUME_TTY=1` → verbatim existing
+   error, nonzero exit.
+10. All sessions archived, CWD inside one → Enter still resolves to it
+    (empty list, default prompt).
 
 ## Files
 
