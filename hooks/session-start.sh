@@ -28,6 +28,33 @@ fi
 SESSION_DIR="${CLAUDE_SESSION_DIR:-}"
 META_DIR="${CLAUDE_SESSION_META_DIR:-$SESSION_DIR/.cs}"
 
+# Build the surface-once digest from unseen inbox lines. Sets DIGEST (may be
+# empty) and, when there were unseen lines, advances the cursor — surfacing is
+# at-most-once even when the digest itself is empty (decline-only content).
+_build_digest() {  # meta_local_dir
+    local qdir="$1" inbox seen total
+    DIGEST=""
+    inbox="$qdir/notifications.jsonl"
+    [ -s "$inbox" ] || return 0
+    total=$(grep -c '' "$inbox" 2>/dev/null) || return 0
+    seen=$(cat "$qdir/notifications.seen" 2>/dev/null | tr -d '[:space:]') || true
+    case "$seen" in ''|*[!0-9]*) seen=0;; esac
+    [ "$total" -gt "$seen" ] || return 0
+    DIGEST=$(tail -n +$((seen + 1)) "$inbox" 2>/dev/null | jq -rRs '
+        [split("\n")[] | select(length > 0) | (fromjson? // empty)] as $e |
+        ($e | map(select(.event == "task_done")) | length) as $done |
+        ($e | map(select(.event == "breaker_tripped")) | .[-1]) as $trip |
+        ($e | map(select(.event == "drain_finished")) | length) as $fin |
+        if ($done + $fin) == 0 and $trip == null then "" else
+            "cs queue while you were away: \($done) task(s) done" +
+            (if $trip != null then "; breaker tripped: \($trip.reason) (\($trip.reading) >= \($trip.limit)), \($trip.remaining) remaining" else "" end) +
+            (if $fin > 0 then "; drain finished" else "" end) +
+            ". Run cs -queue log for detail."
+        end' 2>/dev/null) || DIGEST=""
+    printf '%s\n' "$total" > "$qdir/notifications.seen.tmp" 2>/dev/null \
+        && mv "$qdir/notifications.seen.tmp" "$qdir/notifications.seen" 2>/dev/null || true
+}
+
 # Verify session directory exists
 if [ ! -d "$SESSION_DIR" ]; then
     # Session directory doesn't exist, something is wrong
@@ -293,6 +320,15 @@ if [ -n "${CRASH_CONTEXT:-}" ]; then
     CONTEXT="${CONTEXT}
 
 --- $(printf '%b' "$CRASH_CONTEXT")"
+fi
+
+# Queue inbox digest (surface-once; same recipe as scope-prompt.sh).
+DIGEST=""
+_build_digest "$META_DIR/local"
+if [ -n "$DIGEST" ]; then
+    CONTEXT="${CONTEXT}
+
+--- $DIGEST"
 fi
 
 # Return additional context as JSON

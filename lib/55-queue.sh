@@ -46,6 +46,23 @@ _queue_clear() {  # qdir
     rm -f "$qdir/queue" "$qdir/queue.state" "$qdir/queue.declined"
 }
 
+_queue_log() {  # qdir
+    local inbox="$1/notifications.jsonl"
+    if [ ! -s "$inbox" ]; then
+        echo "No queue activity recorded."
+        return 0
+    fi
+    # Tolerant per-line parse (torn lines skipped); oldest-first is file order.
+    jq -rR '
+        fromjson? // empty |
+        (.ts | strflocaltime("%Y-%m-%d %H:%M")) + "  " + .event +
+        (if .task then ": " + .task
+         elif .reason then ": " + .reason + " (" + (.reading|tostring) + " >= " + (.limit|tostring) + "), " + (.remaining|tostring) + " remaining"
+         elif .done then ": " + (.done|tostring) + " done"
+         else "" end)
+    ' "$inbox"
+}
+
 # Dispatcher. Runs inside a session (env) or via the session-scoped arm.
 run_queue() {
     if [ -z "${CLAUDE_SESSION_META_DIR:-}" ]; then
@@ -60,8 +77,11 @@ run_queue() {
         clear) _queue_clear "$qdir";;
         start) _queue_set_state "$qdir" armed;;
         defer) mkdir -p "$qdir"; printf '%s\n' "$(date +%s)" > "$qdir/queue.declined.tmp" \
-                   && mv "$qdir/queue.declined.tmp" "$qdir/queue.declined";;
-        *)     error "Usage: cs -queue [add \"<task>\" | list | rm <n> | clear]";;
+                   && mv "$qdir/queue.declined.tmp" "$qdir/queue.declined"
+               jq -nc --arg ts "$(date +%s)" '{ts: ($ts|tonumber), event: "gate_declined"}' \
+                   >> "$qdir/notifications.jsonl" 2>/dev/null || true;;
+        log)   _queue_log "$qdir";;
+        *)     error "Usage: cs -queue [add \"<task>\" | list | rm <n> | clear | log]";;
     esac
 }
 

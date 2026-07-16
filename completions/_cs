@@ -60,6 +60,7 @@ _cs() {
         'clear:Empty the queue and stop draining'
         'start:Arm the queue for draining'
         'defer:Decline draining for now'
+        'log:Show the walk-away run journal (drains, breaker trips)'
     )
 
     # Tag subcommands with descriptions

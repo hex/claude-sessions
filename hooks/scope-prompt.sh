@@ -21,6 +21,48 @@ set -uo pipefail
 INPUT=$(cat 2>/dev/null) || exit 0
 PROMPT=$(printf '%s' "$INPUT" | jq -r '.prompt // empty' 2>/dev/null) || exit 0
 
+# --- Queue inbox digest (surface-once) ---
+
+# Build the surface-once digest from unseen inbox lines. Sets DIGEST (may be
+# empty) and, when there were unseen lines, advances the cursor — surfacing is
+# at-most-once even when the digest itself is empty (decline-only content).
+_build_digest() {  # meta_local_dir
+    local qdir="$1" inbox seen total
+    DIGEST=""
+    inbox="$qdir/notifications.jsonl"
+    [ -s "$inbox" ] || return 0
+    total=$(grep -c '' "$inbox" 2>/dev/null) || return 0
+    seen=$(cat "$qdir/notifications.seen" 2>/dev/null | tr -d '[:space:]') || true
+    case "$seen" in ''|*[!0-9]*) seen=0;; esac
+    [ "$total" -gt "$seen" ] || return 0
+    DIGEST=$(tail -n +$((seen + 1)) "$inbox" 2>/dev/null | jq -rRs '
+        [split("\n")[] | select(length > 0) | (fromjson? // empty)] as $e |
+        ($e | map(select(.event == "task_done")) | length) as $done |
+        ($e | map(select(.event == "breaker_tripped")) | .[-1]) as $trip |
+        ($e | map(select(.event == "drain_finished")) | length) as $fin |
+        if ($done + $fin) == 0 and $trip == null then "" else
+            "cs queue while you were away: \($done) task(s) done" +
+            (if $trip != null then "; breaker tripped: \($trip.reason) (\($trip.reading) >= \($trip.limit)), \($trip.remaining) remaining" else "" end) +
+            (if $fin > 0 then "; drain finished" else "" end) +
+            ". Run cs -queue log for detail."
+        end' 2>/dev/null) || DIGEST=""
+    printf '%s\n' "$total" > "$qdir/notifications.seen.tmp" 2>/dev/null \
+        && mv "$qdir/notifications.seen.tmp" "$qdir/notifications.seen" 2>/dev/null || true
+}
+
+DIGEST=""
+[ -n "${CLAUDE_SESSION_META_DIR:-}" ] && _build_digest "$CLAUDE_SESSION_META_DIR/local"
+
+# Every pass-through exit below this point must still deliver a pending
+# digest; a digest-only prompt turn emits just the digest as context.
+_digest_exit() {
+    if [ -n "$DIGEST" ]; then
+        jq -n --arg c "$DIGEST" \
+            '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: $c}}'
+    fi
+    exit 0
+}
+
 # --- Objective capture (independent of the scope grounding below) ---
 # Record the first substantive prompt as the session Objective, but only while
 # the Objective is still a template placeholder — a whole line wrapped in [...].
@@ -61,12 +103,12 @@ fi
 # --- Scope grounding (code-work prompts only) ---
 
 # Per-session opt-out.
-[ "${CS_SCOPE_DISABLE:-}" = "1" ] && exit 0
+[ "${CS_SCOPE_DISABLE:-}" = "1" ] && _digest_exit
 
 SESSION_DIR="${CLAUDE_SESSION_DIR:-}"
-[ -n "$SESSION_DIR" ] && [ -d "$SESSION_DIR" ] || exit 0
+[ -n "$SESSION_DIR" ] && [ -d "$SESSION_DIR" ] || _digest_exit
 
-[ -n "$PROMPT" ] || exit 0
+[ -n "$PROMPT" ] || _digest_exit
 
 # --- Classifier: positive iff a base-form work verb OR a source-file extension appears ---
 
@@ -81,13 +123,13 @@ if command -v rg >/dev/null 2>&1; then
     _scan() { rg "$@"; }
     # Verbs match case-insensitively via (?i:); extensions stay case-sensitive.
     if ! printf '%s' "$PROMPT" | rg -q "(?i:$VERB_RE)|$EXT_RE" 2>/dev/null; then
-        exit 0   # negative classification: silent pass-through
+        _digest_exit   # negative classification: silent pass-through
     fi
 else
     _scan() { grep -E "$@"; }
     if ! { printf '%s' "$PROMPT" | grep -qiE "$VERB_RE" 2>/dev/null \
         || printf '%s' "$PROMPT" | grep -qE "$EXT_RE" 2>/dev/null; }; then
-        exit 0   # negative classification: silent pass-through
+        _digest_exit   # negative classification: silent pass-through
     fi
 fi
 
@@ -219,6 +261,12 @@ if [ "$(printf '%s' "$BLOCK" | wc -c | tr -d ' ')" -gt 8000 ]; then
     BLOCK=$(printf '%s' "$BLOCK" | head -c 7900)
     BLOCK="${BLOCK%$'\n'*}
 [scope block truncated]"
+fi
+
+if [ -n "$DIGEST" ]; then
+    BLOCK="$DIGEST
+
+$BLOCK"
 fi
 
 jq -n --arg c "$BLOCK" \
