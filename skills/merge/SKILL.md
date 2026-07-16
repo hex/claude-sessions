@@ -54,16 +54,15 @@ conversation.
    - Feature branch: `git checkout <target>`, then
      `git merge --no-ff <branch>` with a merge message summarizing the
      feature.
-   - Task worktree: the verb refuses while either session's lock is
-     live, so where you are decides who runs it. From the BASE session
-     (worktree session closed): run `cs <base> --merge <task>` yourself;
-     it merges and cleans up the worktree. From INSIDE the worktree
-     session: after the preflight gates pass, hand off — give the user
-     the exact command to run from a free terminal once this session
-     closes (`cs <base> --merge <task>`), plus the post-merge gate
-     command to run in the base session afterward. Never try to run the
-     verb from inside the worktree session; it will refuse against the
-     live lock.
+   - Task worktree: `cs <base> --merge <task>` merges and cleans up the
+     worktree, but it refuses while either session's lock is live — and
+     inside a cs conversation at least one always is (a cs-launched
+     base session holds its own lock too). So: run the preflight gates
+     where you are, then hand off — give the user the exact verb to run
+     from a free terminal once the session closes, plus the post-merge
+     gate command to run in the base session afterward. Never run the
+     verb from inside a cs session; it will refuse against the live
+     lock.
 3. **Gates again on the merged result** (worktree context: in the base
    session checkout). A merge that was green on the branch can still
    break the target.
