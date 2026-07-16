@@ -340,12 +340,128 @@ test_session_flag_overrides_env() {
 }
 
 test_no_session_errors() {
-    unset CLAUDE_SESSION_NAME
+    unset CLAUDE_SESSION_NAME CS_SECRETS_SESSION
     local output
-    if output=$("$CS_SECRETS_BIN" set api_key "abc" 2>&1); then
+    if output=$("$CS_SECRETS_BIN" set api_key "abc" </dev/null 2>&1); then
         echo "  FAIL: Should fail without session name"
         return 1
     fi
+    assert_output_contains "$output" "No session specified. Set CLAUDE_SESSION_NAME or use --session" || return 1
+}
+
+test_picker_selects_numbered_session() {
+    unset CLAUDE_SESSION_NAME CS_SECRETS_SESSION
+    mkdir -p "$CS_SESSIONS_ROOT/alpha/.cs" "$CS_SESSIONS_ROOT/beta/.cs"
+    local out
+    out=$(printf '2\n' | CS_ASSUME_TTY=1 "$CS_SECRETS_BIN" list 2>/dev/null) || return 1
+    assert_output_contains "$out" "No secrets stored for session: beta" || return 1
+}
+
+test_picker_prompt_stays_off_stdout() {
+    unset CLAUDE_SESSION_NAME CS_SECRETS_SESSION
+    mkdir -p "$CS_SESSIONS_ROOT/alpha/.cs" "$CS_SESSIONS_ROOT/beta/.cs"
+    local out err
+    out=$(printf '1\n' | CS_ASSUME_TTY=1 "$CS_SECRETS_BIN" list 2>"$TEST_TMPDIR/picker-err") || return 1
+    err=$(cat "$TEST_TMPDIR/picker-err")
+    assert_output_contains "$err" "No session specified. Pick one:" || return 1
+    assert_output_contains "$err" "1) alpha" || return 1
+    assert_output_not_contains "$out" "Pick one" || return 1
+    assert_output_contains "$out" "No secrets stored for session: alpha" || return 1
+}
+
+test_picker_enter_takes_cwd_default() {
+    unset CLAUDE_SESSION_NAME CS_SECRETS_SESSION
+    mkdir -p "$CS_SESSIONS_ROOT/alpha/.cs" "$CS_SESSIONS_ROOT/beta/.cs"
+    (
+        cd "$CS_SESSIONS_ROOT/beta" || exit 1
+        local out err
+        out=$(printf '\n' | CS_ASSUME_TTY=1 "$CS_SECRETS_BIN" list 2>"$TEST_TMPDIR/picker-err") || exit 1
+        err=$(cat "$TEST_TMPDIR/picker-err")
+        assert_output_contains "$err" "Session number \[beta\]" || exit 1
+        assert_output_contains "$out" "No secrets stored for session: beta" || exit 1
+    ) || return 1
+}
+
+test_picker_worktree_dir_defaults_to_base() {
+    unset CLAUDE_SESSION_NAME CS_SECRETS_SESSION
+    mkdir -p "$CS_SESSIONS_ROOT/alpha/.cs" "$CS_SESSIONS_ROOT/alpha@task1/.cs"
+    (
+        cd "$CS_SESSIONS_ROOT/alpha@task1" || exit 1
+        local out err
+        out=$(printf '\n' | CS_ASSUME_TTY=1 "$CS_SECRETS_BIN" list 2>"$TEST_TMPDIR/picker-err") || exit 1
+        err=$(cat "$TEST_TMPDIR/picker-err")
+        assert_output_not_contains "$err" "alpha@task1" || exit 1
+        assert_output_contains "$out" "No secrets stored for session: alpha" || exit 1
+    ) || return 1
+}
+
+test_picker_hides_archived_but_cwd_defaults() {
+    unset CLAUDE_SESSION_NAME CS_SECRETS_SESSION
+    mkdir -p "$CS_SESSIONS_ROOT/alpha/.cs" "$CS_SESSIONS_ROOT/beta/.cs"
+    touch "$CS_SESSIONS_ROOT/alpha/.cs/archived"
+    local err
+    printf '1\n' | CS_ASSUME_TTY=1 "$CS_SECRETS_BIN" list >/dev/null 2>"$TEST_TMPDIR/picker-err" || return 1
+    err=$(cat "$TEST_TMPDIR/picker-err")
+    assert_output_not_contains "$err" "alpha" || return 1
+    (
+        cd "$CS_SESSIONS_ROOT/alpha" || exit 1
+        local out
+        out=$(printf '\n' | CS_ASSUME_TTY=1 "$CS_SECRETS_BIN" list 2>/dev/null) || exit 1
+        assert_output_contains "$out" "No secrets stored for session: alpha" || exit 1
+    ) || return 1
+}
+
+test_picker_eof_aborts_despite_default() {
+    unset CLAUDE_SESSION_NAME CS_SECRETS_SESSION
+    mkdir -p "$CS_SESSIONS_ROOT/alpha/.cs"
+    (
+        cd "$CS_SESSIONS_ROOT/alpha" || exit 1
+        local out
+        if out=$(CS_ASSUME_TTY=1 "$CS_SECRETS_BIN" list </dev/null 2>&1); then
+            echo "  FAIL: EOF should abort even with a CWD default"
+            exit 1
+        fi
+        assert_output_contains "$out" "No session specified. Set CLAUDE_SESSION_NAME or use --session" || exit 1
+    ) || return 1
+}
+
+test_picker_all_archived_cwd_still_defaults() {
+    unset CLAUDE_SESSION_NAME CS_SECRETS_SESSION
+    mkdir -p "$CS_SESSIONS_ROOT/alpha/.cs"
+    touch "$CS_SESSIONS_ROOT/alpha/.cs/archived"
+    (
+        cd "$CS_SESSIONS_ROOT/alpha" || exit 1
+        local out
+        out=$(printf '\n' | CS_ASSUME_TTY=1 "$CS_SECRETS_BIN" list 2>/dev/null) || exit 1
+        assert_output_contains "$out" "No secrets stored for session: alpha" || exit 1
+    ) || return 1
+}
+
+test_picker_rejects_invalid_choice() {
+    unset CLAUDE_SESSION_NAME CS_SECRETS_SESSION
+    mkdir -p "$CS_SESSIONS_ROOT/alpha/.cs"
+    local out
+    if out=$(printf '99\n' | CS_ASSUME_TTY=1 "$CS_SECRETS_BIN" list 2>&1); then
+        echo "  FAIL: out-of-range choice should error"
+        return 1
+    fi
+    assert_output_contains "$out" "No session specified. Set CLAUDE_SESSION_NAME or use --session" || return 1
+    if out=$(printf '\n' | CS_ASSUME_TTY=1 "$CS_SECRETS_BIN" list 2>&1); then
+        echo "  FAIL: empty input with no default should error"
+        return 1
+    fi
+    assert_output_contains "$out" "No session specified. Set CLAUDE_SESSION_NAME or use --session" || return 1
+}
+
+test_picker_empty_root_errors() {
+    unset CLAUDE_SESSION_NAME CS_SECRETS_SESSION
+    local out
+    if out=$(printf '1\n' | CS_ASSUME_TTY=1 "$CS_SECRETS_BIN" list 2>&1); then
+        echo "  FAIL: empty sessions root should error"
+        return 1
+    fi
+    assert_output_contains "$out" "No session specified. Set CLAUDE_SESSION_NAME or use --session" || return 1
+    assert_output_not_contains "$out" "Pick one" || return 1
 }
 
 test_explicit_session_arg_outranks_ambient_namespace() {
@@ -497,6 +613,15 @@ run_test test_ls_alias_works
 run_test test_rm_alias_works
 run_test test_session_flag_overrides_env
 run_test test_no_session_errors
+run_test test_picker_selects_numbered_session
+run_test test_picker_prompt_stays_off_stdout
+run_test test_picker_enter_takes_cwd_default
+run_test test_picker_worktree_dir_defaults_to_base
+run_test test_picker_hides_archived_but_cwd_defaults
+run_test test_picker_eof_aborts_despite_default
+run_test test_picker_all_archived_cwd_still_defaults
+run_test test_picker_rejects_invalid_choice
+run_test test_picker_empty_root_errors
 run_test test_explicit_session_arg_outranks_ambient_namespace
 run_test test_help_shows_usage
 

@@ -64,6 +64,17 @@ eval "$(cs -secrets export)"
 cs -secrets --session my-session list
 ```
 
+### No session name?
+
+Run interactively with no session name and `cs -secrets` lists your
+sessions and asks which one to use — plain Enter accepts the default when
+you are standing inside a session directory (a worktree directory defaults
+to its base session). Archived sessions stay out of the list; reach them
+with `--session` or by running from inside their directory. Worktree
+sessions never appear — they have no secrets of their own; their secrets
+live in the base session's store. Scripts and hooks are unaffected: without
+a TTY the command still fails with `No session specified`.
+
 ## Syncing Secrets Across Machines
 
 There are two ways to sync secrets: **age encryption** (recommended) or **password-based encryption** (legacy).
