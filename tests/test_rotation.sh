@@ -234,4 +234,97 @@ run_test test_continue_and_no_leave_handoff_unconsumed
 run_test test_consumed_handoffs_do_not_trigger_prompt
 run_test test_newest_of_multiple_handoffs_wins
 
+# ============================================================================
+# Cycle 4: SessionStart consumes the pending handoff
+# ============================================================================
+
+_start_hook() {  # session_id [extra env pre-exported by caller]
+    echo "{\"session_id\":\"$1\",\"cwd\":\"$CLAUDE_SESSION_DIR\",\"source\":\"startup\"}" \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null
+}
+
+test_pending_handoff_is_consumed_and_injected() {
+    _rot_hook_session "rot-consume"
+    _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "unconsumed"
+    printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_B" > "$CLAUDE_SESSION_META_DIR/local/state"
+    local out
+    out=$(_start_hook "$UUID_B") || return 1
+    assert_output_contains "$out" "Conversation Rotation" "rotation preamble injected" || return 1
+    assert_output_contains "$out" ".cs/handoffs/2026-07-16-test.md" "preamble names the handoff path" || return 1
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/handoffs/2026-07-16-test.md" "status: consumed" \
+        "frontmatter flipped" || return 1
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/handoffs/2026-07-16-test.md" "consumed_by: $UUID_B" \
+        "consumer recorded" || return 1
+    [ ! -f "$CLAUDE_SESSION_META_DIR/local/pending-handoff" ] || { echo "  FAIL: marker must be removed"; return 1; }
+    assert_output_contains "$out" "managed Claude Code session" "existing context spliced, not replaced" || return 1
+}
+
+test_rotation_preamble_wins_over_fresh_rebind_block() {
+    _rot_hook_session "rot-precedence"
+    _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "unconsumed"
+    printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_B" > "$CLAUDE_SESSION_META_DIR/local/state"
+    export CS_FRESH_REBIND=1
+    local out
+    out=$(_start_hook "$UUID_B") || { unset CS_FRESH_REBIND; return 1; }
+    unset CS_FRESH_REBIND
+    assert_output_contains "$out" "Conversation Rotation" "rotation preamble present" || return 1
+    if printf '%s' "$out" | grep -q "Fresh Conversation"; then
+        echo "  FAIL: fresh-rebind block must yield to the rotation preamble"
+        return 1
+    fi
+}
+
+test_fresh_rebind_block_survives_without_handoff() {
+    _rot_hook_session "rot-fresh-only"
+    printf 'claude_session_id: %s\n' "$UUID_B" > "$CLAUDE_SESSION_META_DIR/local/state"
+    export CS_FRESH_REBIND=1
+    local out
+    out=$(_start_hook "$UUID_B") || { unset CS_FRESH_REBIND; return 1; }
+    unset CS_FRESH_REBIND
+    assert_output_contains "$out" "Fresh Conversation" "fresh block still fires alone" || return 1
+}
+
+test_stale_marker_is_removed_silently() {
+    _rot_hook_session "rot-stale"
+    printf '%s\n' "2026-01-01-gone.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_B" > "$CLAUDE_SESSION_META_DIR/local/state"
+    local out
+    out=$(_start_hook "$UUID_B") || return 1
+    [ ! -f "$CLAUDE_SESSION_META_DIR/local/pending-handoff" ] || { echo "  FAIL: stale marker must be removed"; return 1; }
+    if printf '%s' "$out" | grep -q "Conversation Rotation"; then
+        echo "  FAIL: stale marker must not inject a preamble"
+        return 1
+    fi
+}
+
+test_handoff_with_hostile_purpose_survives_flip() {
+    _rot_hook_session "rot-hostile"
+    mkdir -p "$CLAUDE_SESSION_DIR/.cs/handoffs"
+    cat > "$CLAUDE_SESSION_DIR/.cs/handoffs/2026-07-16-hostile.md" << 'EOF'
+---
+parent: 11111111-1111-4111-8111-111111111111
+created: 2026-07-16T10:00:00Z
+purpose: continue "phase 2" of $(dangerous) `work`
+status: unconsumed
+---
+
+Body with $(subshell) and "quotes".
+EOF
+    printf '%s\n' "2026-07-16-hostile.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_B" > "$CLAUDE_SESSION_META_DIR/local/state"
+    _start_hook "$UUID_B" >/dev/null || return 1
+    local f="$CLAUDE_SESSION_META_DIR/handoffs/2026-07-16-hostile.md"
+    assert_file_contains "$f" "status: consumed" "flip succeeded despite hostile content" || return 1
+    assert_file_contains "$f" 'continue "phase 2" of .(dangerous)' "purpose intact (quotes, subshell)" || return 1
+    assert_file_contains "$f" 'Body with .(subshell) and "quotes".' "body intact" || return 1
+}
+
+run_test test_pending_handoff_is_consumed_and_injected
+run_test test_rotation_preamble_wins_over_fresh_rebind_block
+run_test test_fresh_rebind_block_survives_without_handoff
+run_test test_stale_marker_is_removed_silently
+run_test test_handoff_with_hostile_purpose_survives_flip
+
 report_results

@@ -307,11 +307,41 @@ That command merges the branch into the base session, fuses the session records 
 Do NOT merge $TASK_BRANCH into the base branch manually and do not delete the branch — that bypasses the record fuse and the cleanup. To abandon the task instead, ask the user to run: cs -rm $CLAUDE_SESSION_NAME — never run this yourself; it deletes this worktree and its session records."
 fi
 
-# Append fresh-rebind notice if cs flagged that the user declined to resume
-# the prior conversation. Tells claude not to assume continuity with prior
-# turns and points at the lazy-read .cs/ files for prior context. Set by
-# bin/cs's _exec_fresh_rebind helper just before exec.
-if [ "${CS_FRESH_REBIND:-}" = "1" ]; then
+# Deliberate rotation: the launch's r answer left a pending-handoff marker.
+# Consume it — flip the handoff's frontmatter to consumed, record the
+# consumer, remove the marker — and inject a preamble pointing Claude at the
+# handoff file. A stale marker (file gone) is removed silently.
+ROTATION_HANDOFF=""
+PENDING_MARKER="$META_DIR/local/pending-handoff"
+if [ -f "$PENDING_MARKER" ]; then
+    HANDOFF_BASENAME=$(cat "$PENDING_MARKER" 2>/dev/null | tr -d '[:space:]' || true)
+    HANDOFF_FILE="$META_DIR/handoffs/$HANDOFF_BASENAME"
+    if [ -n "$HANDOFF_BASENAME" ] && [ -f "$HANDOFF_FILE" ]; then
+        ROTATION_HANDOFF="$HANDOFF_BASENAME"
+        awk -v uuid="$SESSION_ID" '
+            !flipped && $0 == "status: unconsumed" {
+                print "status: consumed"
+                print "consumed_by: " uuid
+                flipped = 1
+                next
+            }
+            { print }
+        ' "$HANDOFF_FILE" > "$HANDOFF_FILE.tmp" 2>/dev/null \
+            && mv "$HANDOFF_FILE.tmp" "$HANDOFF_FILE" 2>/dev/null \
+            || rm -f "$HANDOFF_FILE.tmp" 2>/dev/null || true
+    fi
+    rm -f "$PENDING_MARKER" 2>/dev/null || true
+fi
+
+# The rotation preamble and the fresh-rebind notice are mutually exclusive:
+# the rotate path also exports CS_FRESH_REBIND, and "clean break" plus
+# "continue per the handoff" would contradict each other.
+if [ -n "$ROTATION_HANDOFF" ]; then
+    CONTEXT="${CONTEXT}
+
+--- Conversation Rotation ---
+This fresh conversation continues rotated work. Read .cs/handoffs/$ROTATION_HANDOFF FIRST — it is the previous conversation's handoff; continue per its next-step section. The prior transcript is not loaded; the handoff plus .cs/memory/narrative.*.md carry the context."
+elif [ "${CS_FRESH_REBIND:-}" = "1" ]; then
     CONTEXT="${CONTEXT}
 
 --- Fresh Conversation ---
