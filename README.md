@@ -133,7 +133,7 @@ cs <session> -secrets <cmd>   # Manage secrets for a session by name
 cs <session> --force          # Override active session lock
 ```
 
-From inside a running session, `cs -secrets <cmd>` acts on the current session directly (it reads `CLAUDE_SESSION_NAME`), so you can drop the session name.
+From inside a running session, `cs -secrets <cmd>` acts on the current session directly (it reads `CLAUDE_SESSION_NAME`), so you can drop the session name. From an interactive terminal outside any session, it lists your sessions and asks which one to use.
 
 ### Examples
 
