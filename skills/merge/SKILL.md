@@ -31,11 +31,13 @@ a quality gate or a review.
 
 ## Discover the gates
 
-Project instructions govern absolutely. Read CLAUDE.md (and the rules
-it imports) for build steps, test commands, generated artifacts, and
-deploy steps — a repo that generates a file from source fragments needs
-its build run BEFORE tests and the generated file committed with the
-branch, exactly as its instructions say.
+Project instructions govern absolutely. Read the project's instruction
+files — CLAUDE.md and anything it imports, CONTRIBUTING.md, and the
+README's development section — for build steps, test commands,
+generated artifacts, and deploy steps. A repo that generates a file
+from source fragments needs its build run BEFORE tests and the
+generated file committed with the branch, exactly as its instructions
+say.
 
 Without instructions, use the first conventional entry point that
 exists: `tests/run_all.sh`, a `Makefile` test target, `package.json`
@@ -52,8 +54,16 @@ conversation.
    - Feature branch: `git checkout <target>`, then
      `git merge --no-ff <branch>` with a merge message summarizing the
      feature.
-   - Task worktree: run `cs <base> --merge <task>` from outside the
-     worktree; it merges and cleans up the worktree itself.
+   - Task worktree: the verb refuses while either session's lock is
+     live, so where you are decides who runs it. From the BASE session
+     (worktree session closed): run `cs <base> --merge <task>` yourself;
+     it merges and cleans up the worktree. From INSIDE the worktree
+     session: after the preflight gates pass, hand off — give the user
+     the exact command to run from a free terminal once this session
+     closes (`cs <base> --merge <task>`), plus the post-merge gate
+     command to run in the base session afterward. Never try to run the
+     verb from inside the worktree session; it will refuse against the
+     live lock.
 3. **Gates again on the merged result** (worktree context: in the base
    session checkout). A merge that was green on the branch can still
    break the target.
