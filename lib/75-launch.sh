@@ -188,7 +188,7 @@ launch_claude_code() {
             # the same failure).
             echo -e "${DIM}No previous conversation found. Starting fresh...${NC}"
             echo ""
-            _exec_fresh_rebind "$session_dir"
+            _exec_fresh_rebind "$session_dir" resume-failed
         fi
         exit $rc
     else
@@ -205,7 +205,7 @@ launch_claude_code() {
             # shellcheck disable=SC2086
             exec $CLAUDE_CODE_BIN --name "$session_name" --session-id "$claude_session_id" ${color_arg:+"$color_arg"}
         elif [ "$is_new" = "false" ]; then
-            _exec_fresh_rebind "$session_dir"
+            _exec_fresh_rebind "$session_dir" declined-resume
         else
             # shellcheck disable=SC2086
             exec $CLAUDE_CODE_BIN --name "$session_name" ${color_arg:+"$color_arg"}
