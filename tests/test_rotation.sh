@@ -651,10 +651,39 @@ test_ctx_warning_threshold_override() {
     assert_output_contains "$out" "stopping point" "non-numeric override falls back to 60" || return 1
 }
 
+test_ctx_warning_escalates_to_nudge_same_conversation() {
+    _rot_hook_session "rot-warn-escalate"
+    local out
+    out=$(_stop_with_ctx 60 "$UUID_A") || return 1
+    assert_output_contains "$out" "stopping point" "warning fires first at 60" || return 1
+    out=$(_stop_with_ctx 80 "$UUID_A") || return 1
+    assert_output_contains "$out" "rotate skill" "nudge still escalates after the warning" || return 1
+    if printf '%s' "$out" | grep -q "stopping point"; then
+        echo "  FAIL: the 80 reading belongs to the nudge alone"
+        return 1
+    fi
+}
+
+test_ctx_warning_band_edges() {
+    _rot_hook_session "rot-warn-edges"
+    local out
+    out=$(_stop_with_ctx 79 "$UUID_A") || return 1
+    assert_output_contains "$out" "stopping point" "79 is inside the band" || return 1
+    _rot_hook_session "rot-warn-edge80"
+    _stop_with_ctx 80 "$UUID_B" >/dev/null || return 1
+    out=$(_stop_with_ctx 80 "$UUID_B") || return 1
+    if printf '%s' "$out" | grep -q "stopping point"; then
+        echo "  FAIL: exactly the nudge threshold is outside the band even when the nudge is spent"
+        return 1
+    fi
+}
+
 run_test test_ctx_warning_fires_once_in_band
 run_test test_ctx_warning_rearms_for_new_conversation
 run_test test_ctx_warning_silent_below_band
 run_test test_ctx_warning_yields_to_nudge_at_high_ctx
 run_test test_ctx_warning_threshold_override
+run_test test_ctx_warning_escalates_to_nudge_same_conversation
+run_test test_ctx_warning_band_edges
 
 report_results
