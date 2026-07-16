@@ -411,6 +411,32 @@ test_picker_hides_archived_but_cwd_defaults() {
     ) || return 1
 }
 
+test_picker_eof_aborts_despite_default() {
+    unset CLAUDE_SESSION_NAME CS_SECRETS_SESSION
+    mkdir -p "$CS_SESSIONS_ROOT/alpha/.cs"
+    (
+        cd "$CS_SESSIONS_ROOT/alpha" || exit 1
+        local out
+        if out=$(CS_ASSUME_TTY=1 "$CS_SECRETS_BIN" list </dev/null 2>&1); then
+            echo "  FAIL: EOF should abort even with a CWD default"
+            exit 1
+        fi
+        assert_output_contains "$out" "No session specified. Set CLAUDE_SESSION_NAME or use --session" || exit 1
+    ) || return 1
+}
+
+test_picker_all_archived_cwd_still_defaults() {
+    unset CLAUDE_SESSION_NAME CS_SECRETS_SESSION
+    mkdir -p "$CS_SESSIONS_ROOT/alpha/.cs"
+    touch "$CS_SESSIONS_ROOT/alpha/.cs/archived"
+    (
+        cd "$CS_SESSIONS_ROOT/alpha" || exit 1
+        local out
+        out=$(printf '\n' | CS_ASSUME_TTY=1 "$CS_SECRETS_BIN" list 2>/dev/null) || exit 1
+        assert_output_contains "$out" "No secrets stored for session: alpha" || exit 1
+    ) || return 1
+}
+
 test_picker_rejects_invalid_choice() {
     unset CLAUDE_SESSION_NAME CS_SECRETS_SESSION
     mkdir -p "$CS_SESSIONS_ROOT/alpha/.cs"
@@ -592,6 +618,8 @@ run_test test_picker_prompt_stays_off_stdout
 run_test test_picker_enter_takes_cwd_default
 run_test test_picker_worktree_dir_defaults_to_base
 run_test test_picker_hides_archived_but_cwd_defaults
+run_test test_picker_eof_aborts_despite_default
+run_test test_picker_all_archived_cwd_still_defaults
 run_test test_picker_rejects_invalid_choice
 run_test test_picker_empty_root_errors
 run_test test_explicit_session_arg_outranks_ambient_namespace
