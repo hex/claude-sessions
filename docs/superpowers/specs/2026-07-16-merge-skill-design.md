@@ -10,7 +10,9 @@ can diagnose a failing gate instead of stopping), over a deterministic cs
 verb or a verb+skill split. Scope approved: GENERIC WITH DISCOVERY — the
 skill discovers each repo's gates from the repo itself; cs's own rules
 (build.sh before tests, deploy surfaces) keep living in cs's CLAUDE.md,
-not in the skill.
+not in the skill. (Final-review correction: this repo's own gate
+documentation lives in CONTRIBUTING.md, not CLAUDE.md — discovery reads
+the project's instruction files broadly.)
 
 ## Context and goal
 
@@ -30,9 +32,10 @@ session, correct in any repo.
    NEVER bypasses a gate, never forces, never deletes a branch after a
    failure.
 2. **Generic with discovery.** Gate discovery order, taught by the
-   skill: (a) project instructions (CLAUDE.md and the rules it imports)
-   govern absolutely — build steps, test commands, generated artifacts,
-   deploy steps; (b) failing that, conventional entry points in
+   skill: (a) the project's instruction files govern absolutely —
+   CLAUDE.md and anything it imports, CONTRIBUTING.md, and the README's
+   development section — for build steps, test commands, generated
+   artifacts, deploy steps; (b) failing that, conventional entry points in
    preference order: `tests/run_all.sh`, `Makefile` test target,
    `package.json` scripts.test, `cargo test`, `go test ./...`,
    `pytest`; (c) nothing found → ask the user once for the gate command
@@ -47,7 +50,11 @@ session, correct in any repo.
      `--git-common-dir` inside a cs worktree session): gates run in the
      worktree; the merge itself is `cs <base> --merge <task>` (record
      fusion + git merge + worktree cleanup, already implemented); the
-     post-merge gates run in the base session checkout.
+     post-merge gates run in the base session checkout. (Final-review
+     correction: the verb refuses while either session's lock is live,
+     so from inside the worktree session the skill runs the preflight
+     gates and then hands the verb to the user — close the session, run
+     it from a free terminal — rather than running it itself.)
    - **Feature branch** in an ordinary checkout: preflight gates on the
      branch → `git merge --no-ff <branch>` into the base branch (the
      branch it forked from; `git merge-base` + the repo's default branch
