@@ -61,8 +61,10 @@ the protocol keeps working and nothing is lost even mid-transition.
      `CLAUDE.local.md`.
    - `CLAUDE.local.md` already present with the sentinel: no-op
      (idempotence; second run of any case above is silent).
-   - Existing Phase 5 (protocol append) and Phase 9 (memory-note
-     management) retarget to `CLAUDE.local.md` and never write to
+   - Existing Phase 5 (protocol append), Phase 9 (memory-note
+     management), and Phase 10 (wrap-cues) retarget to the protocol
+     file — `CLAUDE.local.md` when present, else the legacy `CLAUDE.md`
+     for pre-sentinel-era sessions — and never write to a user's
      `CLAUDE.md` again.
 4. **Determinism across machines.** The extraction is a pure function
    of the file's content (sentinel line boundaries, no timestamps, no
@@ -73,7 +75,10 @@ the protocol keeps working and nothing is lost even mid-transition.
    gitignored, so a new worktree does NOT inherit it through git: the
    worktree bootstrap must invoke the create path in the new worktree
    (today it "leaves the checkout's CLAUDE.md alone"; it now writes the
-   worktree's `CLAUDE.local.md` and its `.gitignore` entry).
+   worktree's `CLAUDE.local.md`). It writes the FILE only — never a
+   `.gitignore` entry: ignored-mode worktrees check out project repos,
+   and mutating a project's tracked `.gitignore` would pollute the task
+   branch.
 6. **Known consequence for this repo (the cs dev session):** its
    tracked `CLAUDE.md` is a pure cs template and will migrate — moved
    to the gitignored local file, the tracked file deleted from the
