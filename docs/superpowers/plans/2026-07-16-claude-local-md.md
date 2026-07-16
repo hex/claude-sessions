@@ -26,7 +26,7 @@
 **Files:**
 - Modify: `lib/35-claudemd.sh` (`write_session_claude_md` ~line 246; new `migrate_claude_md_to_local` after it)
 - Modify: `lib/45-migrate.sh` (new phase call + Phase 5 replacement ~line 231; `protocol_file` + Phase 9 retarget ~line 365; Phase 10 retarget just below)
-- Modify: `lib/85-adopt-uninstall.sh` (`create_session_gitignore` heredoc; `ensure_cs_gitignore_entries` ENTRIES list)
+- Modify: `lib/85-adopt-uninstall.sh` (`create_session_gitignore` heredoc; `ensure_cs_gitignore_entries` ENTRIES list; `adopt_session` backup/re-append removal)
 - Modify: `bin/cs` (regenerated)
 - Test: `tests/test_migrate_claude_md.sh`
 
@@ -108,7 +108,42 @@ test_pre_sentinel_template_left_alone() {
     printf '# Session Documentation Protocol\n\nSession metadata lives in the .cs/ directory.\n' > "$dir/CLAUDE.md"
     "$CS_BIN" "presentinel" < /dev/null > /dev/null 2>&1 || true
     assert_file_contains "$dir/CLAUDE.md" ".cs/ directory" "pre-sentinel file untouched" || return 1
+    assert_file_not_contains "$dir/CLAUDE.md" "cs:memory-note" \
+        "no managed sections scribbled into the legacy file" || return 1
+    assert_file_not_contains "$dir/CLAUDE.md" "cs:wrap-cues" \
+        "no wrap-cues appended to the legacy file either" || return 1
     assert_file_not_exists "$dir/CLAUDE.local.md" "no second protocol file for pre-sentinel sessions" || return 1
+}
+
+test_user_local_md_never_overwritten() {
+    local dir
+    dir=$(create_test_session "userlocal")
+    printf 'MY-PERSONAL-LOCAL-NOTES\n' > "$dir/CLAUDE.local.md"
+    printf '<!-- cs:session-protocol -->\nprotocol body .cs/\n' > "$dir/CLAUDE.md"
+    "$CS_BIN" "userlocal" < /dev/null > /dev/null 2>&1 || true
+    assert_file_contains "$dir/CLAUDE.local.md" "MY-PERSONAL-LOCAL-NOTES" \
+        "a user-authored CLAUDE.local.md survives migration" || return 1
+    assert_file_contains "$dir/CLAUDE.local.md" "cs:session-protocol" \
+        "cs content appended after the user's" || return 1
+    assert_file_not_exists "$dir/CLAUDE.md" "the pure-cs CLAUDE.md is still consumed" || return 1
+}
+
+test_adopt_leaves_project_claude_md_alone() {
+    local dir="$CS_SESSIONS_ROOT/adoptme"
+    mkdir -p "$dir"
+    printf '# Project Rules\nADOPT-KEEP-ONCE\n' > "$dir/CLAUDE.md"
+    ( cd "$dir" && git init -q . 2>/dev/null ) || return 1
+    # Read the -adopt dispatch (rg -- '-adopt' lib/99-main.sh) and invoke it
+    # exactly as cs expects (verb + name, or from inside the directory); the
+    # assertions below are the contract regardless of invocation shape.
+    "$CS_BIN" -adopt "adoptme" < /dev/null > /dev/null 2>&1 || true
+    local n
+    n=$(grep -c 'ADOPT-KEEP-ONCE' "$dir/CLAUDE.md")
+    assert_eq "1" "$n" "adopt must not duplicate the project CLAUDE.md" || return 1
+    assert_file_not_contains "$dir/CLAUDE.md" "cs:session-protocol" \
+        "the protocol stays out of the project file" || return 1
+    assert_file_contains "$dir/CLAUDE.local.md" "cs:session-protocol" \
+        "adopt writes the local protocol file" || return 1
 }
 
 test_migration_idempotent_byte_for_byte() {
@@ -151,6 +186,8 @@ run_test test_create_path_writes_local_md
 run_test test_pure_cs_claude_md_moves_wholesale
 run_test test_mixed_claude_md_splits_at_first_sentinel
 run_test test_pre_sentinel_template_left_alone
+run_test test_user_local_md_never_overwritten
+run_test test_adopt_leaves_project_claude_md_alone
 run_test test_migration_idempotent_byte_for_byte
 run_test test_memory_note_lands_in_local_md
 run_test test_gitignore_backfill_idempotent
@@ -159,7 +196,7 @@ run_test test_gitignore_backfill_idempotent
 - [ ] **Step 2: Run the suite to verify the RED pattern**
 
 Run: `/bin/bash tests/test_migrate_claude_md.sh`
-Expected: ALL nine tests FAIL (the two updated ones now expect the new contract; the seven new ones have no implementation). Confirm and record the exact pattern.
+Expected: ALL eleven tests FAIL. The two updated tests and eight of the new ones fail on missing implementation; `test_pre_sentinel_template_left_alone` fails pre-implementation because TODAY'S Phase 9/10 append `cs:memory-note` and `cs:wrap-cues` to that legacy file (the strengthened not_contains asserts catch the mutation); `test_adopt_leaves_project_claude_md_alone` fails because today's adopt overwrites the project CLAUDE.md with the protocol. Confirm and record the exact pattern; if any test unexpectedly passes, flag it rather than proceeding.
 
 - [ ] **Step 3: Implement**
 
@@ -187,13 +224,20 @@ write_session_claude_md() {
 # Move cs-managed content from a session's CLAUDE.md into CLAUDE.local.md.
 # A pure function of the file's content (no timestamps, no local state), so
 # two clones migrating the same tracked file produce byte-identical edits.
+# SAFETY: cs never wrote CLAUDE.local.md before this feature, so an existing
+# CLAUDE.local.md without the protocol sentinel is USER content — it is only
+# ever APPENDED to, never overwritten. No pipes feed a grep -q whose early
+# exit could SIGPIPE the producer under pipefail (GNU grep exits on first
+# match; BSD drains) — head detection uses a case glob on captured text.
 # Cases:
 #   - CLAUDE.md absent, sentinel-free, or CLAUDE.local.md already carries
 #     the protocol: no-op.
-#   - The first cs sentinel is on line 1, or nothing but whitespace precedes
-#     it (nothing of the user's): the whole file moves; CLAUDE.md is removed.
-#   - User head above the first sentinel: head stays in CLAUDE.md,
-#     sentinel-to-EOF moves; both files kept.
+#   - Nothing but whitespace above the first cs sentinel (nothing of the
+#     user's): the whole file moves; CLAUDE.md is removed. Appended, not
+#     moved, when a user CLAUDE.local.md exists.
+#   - User head above the first sentinel: head stays in CLAUDE.md (trailing
+#     blank lines of the head collapse — deterministic), sentinel-to-EOF
+#     moves (or appends); both files kept.
 migrate_claude_md_to_local() {
     local session_dir="$1"
     local claude_md="$session_dir/CLAUDE.md"
@@ -205,17 +249,34 @@ migrate_claude_md_to_local() {
         return 0
     fi
     local split_line
-    split_line=$(grep -n '<!-- cs:' "$claude_md" | head -1 | cut -d: -f1)
-    if [ "$split_line" -le 1 ] \
-        || ! sed -n "1,$((split_line - 1))p" "$claude_md" | grep -q '[^[:space:]]'; then
-        mv "$claude_md" "$local_md"
-        warn "Moved the cs session protocol from CLAUDE.md to CLAUDE.local.md"
-        return 0
+    split_line=$(awk '/<!-- cs:/{print NR; exit}' "$claude_md")
+    local head_text=""
+    if [ "$split_line" -gt 1 ]; then
+        head_text=$(sed -n "1,$((split_line - 1))p" "$claude_md")
     fi
-    sed -n "${split_line},\$p" "$claude_md" > "$local_md"
-    sed -n "1,$((split_line - 1))p" "$claude_md" > "$claude_md.tmp" \
-        && mv "$claude_md.tmp" "$claude_md"
-    warn "Moved cs-managed sections from CLAUDE.md to CLAUDE.local.md; your own content stays in CLAUDE.md"
+    case "$head_text" in
+        *[![:space:]]*)
+            if [ -f "$local_md" ]; then
+                printf '\n' >> "$local_md"
+                sed -n "${split_line},\$p" "$claude_md" >> "$local_md"
+            else
+                sed -n "${split_line},\$p" "$claude_md" > "$local_md"
+            fi
+            printf '%s\n' "$head_text" > "$claude_md.tmp" \
+                && mv "$claude_md.tmp" "$claude_md"
+            warn "Moved cs-managed sections from CLAUDE.md to CLAUDE.local.md; your own content stays in CLAUDE.md"
+            ;;
+        *)
+            if [ -f "$local_md" ]; then
+                printf '\n' >> "$local_md"
+                cat "$claude_md" >> "$local_md"
+                rm "$claude_md"
+            else
+                mv "$claude_md" "$local_md"
+            fi
+            warn "Moved the cs session protocol from CLAUDE.md to CLAUDE.local.md"
+            ;;
+    esac
     return 0
 }
 ```
@@ -261,19 +322,24 @@ with:
     fi
 ```
 
-Edit 3 — `lib/45-migrate.sh`, directly above the Phase 9 comment block, insert:
+Edit 3 — `lib/45-migrate.sh`, Phase 9. Replace the declaration line
 
 ```bash
-    # Phases 9 and 10 manage sections in the protocol file: CLAUDE.local.md
-    # when it exists, else the legacy CLAUDE.md (pre-sentinel-era sessions
-    # stay entirely there).
-    local protocol_file="$session_dir/CLAUDE.local.md"
-    if [ ! -f "$protocol_file" ]; then
-        protocol_file="$session_dir/CLAUDE.md"
-    fi
+    local claude_md_p9="$session_dir/CLAUDE.md"
 ```
 
-Then in Phase 9, replace `local claude_md_p9="$session_dir/CLAUDE.md"` with `local claude_md_p9="$protocol_file"`, and its two warn strings `"... to CLAUDE.md"` / mentions of CLAUDE.md become `"... to the session protocol file"`. In Phase 10 (the wrap-cues block that follows), point its CLAUDE.md path variable at `"$protocol_file"` the same way and update its warn text likewise; read the block and keep every other line intact — quote the changed lines in your report.
+with
+
+```bash
+    # Phases 9 and 10 manage sections in CLAUDE.local.md ONLY. Sessions
+    # still on a legacy CLAUDE.md (pre-sentinel era, or a user file that
+    # merely mentions .cs/) are left entirely alone — cs never writes to
+    # CLAUDE.md again. Both phases' existing [ -f ] guards make them
+    # no-ops when the local file is absent.
+    local claude_md_p9="$session_dir/CLAUDE.local.md"
+```
+
+Phase 10 reuses `claude_md_p9`, so this single retarget covers both phases — do NOT introduce a new variable. Update the two warn strings that name CLAUDE.md in Phases 9/10 (e.g. `"Added cs:memory-note to CLAUDE.md"`) to say `CLAUDE.local.md`; keep every other line intact and quote the changed lines in your report. Also update the Phase 9 comment sentence "Phase 6 guarantees CLAUDE.md exists" to reflect the new reality (Phase 5 guarantees the local file for migrated sessions; legacy sessions skip these phases).
 
 Edit 4 — `lib/85-adopt-uninstall.sh`. In the `create_session_gitignore` heredoc, after the block:
 
@@ -291,11 +357,14 @@ CLAUDE.local.md
 
 And in `ensure_cs_gitignore_entries`, the ENTRIES heredoc gains the line `CLAUDE.local.md` (after `.claude/settings.local.json`).
 
+Edit 5 — `lib/85-adopt-uninstall.sh`, `adopt_session()`. It currently backs up an existing project `CLAUDE.md`, expects `create_session_structure` to overwrite it with the protocol, then re-appends the backup under a `# Project Instructions` separator. With the protocol now landing in `CLAUDE.local.md`, that dance would DUPLICATE the user's content (the original is never overwritten, then the backup is appended on top of it). Remove the backup/re-append logic entirely — the user's `CLAUDE.md` stays untouched; `create_session_structure` already writes `CLAUDE.local.md`. Also update its now-false comment (`# Back up existing CLAUDE.md before create_session_structure overwrites it`). Quote the removed block in your report.
+
 - [ ] **Step 4: Build and run the suites**
 
 Run: `./build.sh && git status --porcelain` — `bin/cs` modified, plus THIS REPO's own `CLAUDE.md` is NOT yet affected (migration only runs at session launch, not at build) — confirm no unexpected files.
-Run: `/bin/bash tests/test_migrate_claude_md.sh` — expected 9/9 PASS.
+Run: `/bin/bash tests/test_migrate_claude_md.sh` — expected 11/11 PASS.
 Run: `/bin/bash tests/test_commands.sh` — expected PASS (launch path exercised).
+Run: `/bin/bash tests/test_worktrees.sh` — expected PASS (nothing here should disturb it yet).
 
 - [ ] **Step 5: Commit**
 
@@ -344,24 +413,25 @@ run_test test_worktree_bootstrap_writes_local_md
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `/bin/bash tests/test_migrate_claude_md.sh`
-Expected: only the new test FAILS (either no `CLAUDE.local.md` in the worktree, or the worktree creation path needs the call). If worktree creation itself fails in the harness for an unrelated reason, report NEEDS_CONTEXT with the output instead of forcing the fixture.
+Expected: only the new test FAILS. Note the fixture commits `.cs/` (via `git add -A`), which makes this a TRACKED-mode worktree — the common case — so `bootstrap_worktree_meta` (ignored mode only) is never involved. If worktree creation itself fails in the harness for an unrelated reason, report NEEDS_CONTEXT with the output instead of forcing the fixture.
 
 - [ ] **Step 3: Implement**
 
-In `lib/30-worktree.sh`, `bootstrap_worktree_meta()`, after the `ensure_narrative_file "$wt_dir"` line, add:
+In `lib/30-worktree.sh`, `create_worktree_session()`, AFTER the mode-specific setup (the if/else that either relies on tracked `.cs/` or calls `bootstrap_worktree_meta` for ignored mode) and before the launch handoff, add unconditionally for BOTH modes:
 
 ```bash
-    # The protocol file is gitignored, so a fresh worktree never inherits
-    # it; write this worktree's own copy. Never touch a project repo's
-    # .gitignore here — ignored-mode worktrees check out project repos.
+    # The protocol file is gitignored, so no worktree inherits it through
+    # git in either mode; write this worktree's own copy. The FILE only —
+    # never touch a .gitignore here (ignored-mode worktrees check out
+    # project repos whose .gitignore is theirs).
     write_session_claude_md "$wt_dir"
 ```
 
-If the failing test shows tracked-mode worktrees (repos that track .cs/) skip `bootstrap_worktree_meta`, add the same guarded call to the tracked-mode branch of the worktree create path — quote the exact insertion in your report.
+Read the function to pick the exact insertion point (after `.cs` exists in the worktree, before any exec/launch); quote the surrounding lines in your report. Do NOT put the call inside `bootstrap_worktree_meta` — that runs only in ignored mode and the tracked-mode worktree would never get the file.
 
 - [ ] **Step 4: Build, run, commit**
 
-Run: `./build.sh` then `/bin/bash tests/test_migrate_claude_md.sh` (10/10) and `/bin/bash tests/test_worktrees.sh` (all green).
+Run: `./build.sh` then `/bin/bash tests/test_migrate_claude_md.sh` (12/12) and `/bin/bash tests/test_worktrees.sh` (all green).
 
 ```bash
 git add lib/30-worktree.sh bin/cs tests/test_migrate_claude_md.sh
@@ -392,7 +462,9 @@ In `README.md` and `docs/session-layout.md`: find every session-layout reference
 
 - [ ] **Step 3: Verify and commit**
 
-Run: `/bin/bash tests/test_migrate_claude_md.sh` (10/10 — docs only) and `/bin/bash tests/run_all.sh` (all suites).
+Run: `/bin/bash tests/test_migrate_claude_md.sh` (12/12 — docs only) and `/bin/bash tests/run_all.sh` (all suites).
+
+Accepted rarity, for the record (final review treats as designed): a legacy `CLAUDE.md` whose only sentinel is `cs:wrap-cues`/`cs:memory-note` migrates that fragment and then receives the full template beside it — duplicate managed sections in `CLAUDE.local.md`, no content loss, no growth on re-runs.
 
 ```bash
 git add hooks/session-start.sh README.md docs/session-layout.md
