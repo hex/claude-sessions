@@ -159,7 +159,18 @@ launch_claude_code() {
         local pending_handoff="" _hf
         for _hf in "$session_dir/.cs/handoffs"/*.md; do
             [ -f "$_hf" ] || continue
-            grep -q '^status: unconsumed$' "$_hf" 2>/dev/null || continue
+            # Scope the scan to the YAML frontmatter (line 1 "---" through the
+            # next "---"): a body that quotes the contract line flush-left
+            # (the rotate skill's own doc does) must not count as a match.
+            awk '
+                NR==1 {
+                    if ($0 != "---") { rc=1; closed=1; exit }
+                    next
+                }
+                !closed && $0 == "---" { rc = (matched ? 0 : 1); closed=1; exit }
+                !closed && $0 == "status: unconsumed" { matched=1 }
+                END { if (!closed) rc=1; exit rc }
+            ' "$_hf" 2>/dev/null || continue
             pending_handoff="$_hf"
         done
         if [ -n "$pending_handoff" ]; then

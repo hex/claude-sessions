@@ -69,17 +69,6 @@ echo "$(date '+%Y-%m-%d %H:%M:%S') - Session started (source: $SOURCE, ID: $SESS
 echo "  Working directory: $CWD" >> "$META_DIR/local/session.log"
 echo "" >> "$META_DIR/local/session.log"
 
-# Append structured event to timeline.jsonl (machine-readable narrative log)
-TIMELINE_FILE="$META_DIR/timeline.jsonl"
-TIMELINE_BRANCH=$(git -C "$SESSION_DIR" branch --show-current 2>/dev/null || echo "")
-jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-       --arg event "started" \
-       --arg source "$SOURCE" \
-       --arg session_id "$SESSION_ID" \
-       --arg branch "$TIMELINE_BRANCH" \
-       '{ts: $ts, event: $event, source: $source, session_id: $session_id, branch: $branch}' \
-    >> "$TIMELINE_FILE" 2>/dev/null || true
-
 # Auto-pull and crash recovery only on fresh start or resume
 # Skip on clear/compact since the session is already running
 if [ "$SOURCE" = "startup" ] || [ "$SOURCE" = "resume" ]; then
@@ -189,9 +178,22 @@ if [[ "$SESSION_ID" =~ $UUID_RE ]]; then
                --arg from "${RECORDED_UUID:-}" \
                --arg to "$SESSION_ID" \
                '{ts: $ts, event: "rotated", from: $from, to: $to, reason: "rebind"}' \
-            >> "$TIMELINE_FILE" 2>/dev/null || true
+            >> "$META_DIR/timeline.jsonl" 2>/dev/null || true
     fi
 fi
+
+# Append structured event to timeline.jsonl (machine-readable narrative log).
+# Runs after the rebind block above so a rebind's rotated event lands before
+# this conversation's started event — cs -conversations renders file order.
+TIMELINE_FILE="$META_DIR/timeline.jsonl"
+TIMELINE_BRANCH=$(git -C "$SESSION_DIR" branch --show-current 2>/dev/null || echo "")
+jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+       --arg event "started" \
+       --arg source "$SOURCE" \
+       --arg session_id "$SESSION_ID" \
+       --arg branch "$TIMELINE_BRANCH" \
+       '{ts: $ts, event: $event, source: $source, session_id: $session_id, branch: $branch}' \
+    >> "$TIMELINE_FILE" 2>/dev/null || true
 
 # Update last_resumed in local state on resume
 if [ "$SOURCE" = "resume" ]; then

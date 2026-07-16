@@ -479,4 +479,98 @@ run_test test_conversations_empty_timeline
 run_test test_conversations_requires_session_context
 run_test test_conversations_session_scoped_form
 
+# ============================================================================
+# Cycle 7: final-review fixes — rebind ordering (I1), frontmatter scoping (M-new)
+# ============================================================================
+
+test_rebind_orders_rotated_before_started() {
+    _rot_hook_session "rot-order"
+    printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
+    echo "{\"session_id\":\"$UUID_B\",\"cwd\":\"$CLAUDE_SESSION_DIR\",\"source\":\"resume\"}" \
+        | bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>&1 || return 1
+    local rotated_line started_line
+    rotated_line=$(grep -n '"event":"rotated"' "$CLAUDE_SESSION_META_DIR/timeline.jsonl" | head -1 | cut -d: -f1)
+    started_line=$(grep -n "\"event\":\"started\".*\"session_id\":\"$UUID_B\"" "$CLAUDE_SESSION_META_DIR/timeline.jsonl" | head -1 | cut -d: -f1)
+    [ -n "$rotated_line" ] || { echo "  FAIL: no rotated line found in timeline.jsonl"; return 1; }
+    [ -n "$started_line" ] || { echo "  FAIL: no started line for $UUID_B found in timeline.jsonl"; return 1; }
+    if [ "$rotated_line" -ge "$started_line" ]; then
+        echo "  FAIL: rotated event (line $rotated_line) must precede the new conversation's started event (line $started_line)"
+        return 1
+    fi
+
+    local out
+    out=$("$CS_BIN" -conversations 2>&1) || return 1
+    local arrow_line started_out_line
+    arrow_line=$(printf '%s\n' "$out" | awk '/ > /{print NR; exit}')
+    started_out_line=$(printf '%s\n' "$out" | awk '/22222222  started/{print NR; exit}')
+    [ -n "$arrow_line" ] || { echo "  FAIL: no rotated arrow line in cs -conversations output"; return 1; }
+    [ -n "$started_out_line" ] || { echo "  FAIL: no '22222222  started' line in cs -conversations output"; return 1; }
+    if [ "$arrow_line" -ge "$started_out_line" ]; then
+        echo "  FAIL: rendered rotated arrow (line $arrow_line) must precede the started line (line $started_out_line)"
+        return 1
+    fi
+}
+
+run_test test_rebind_orders_rotated_before_started
+
+# A handoff's body may legitimately quote the frontmatter contract (the
+# rotate skill's own doc does). The launch-side scan must only look at the
+# frontmatter block, not the whole file.
+_seed_handoff_body_echoes_contract() {  # session_dir, basename, frontmatter_status
+    mkdir -p "$1/.cs/handoffs"
+    cat > "$1/.cs/handoffs/$2" << EOF
+---
+parent: $UUID_A
+created: 2026-07-16T10:00:00Z
+purpose: test rotation
+status: $3
+---
+
+## 3. Contract
+The handoff frontmatter must contain a line reading exactly:
+status: unconsumed
+
+## 7. Next Step
+Continue the test.
+EOF
+}
+
+test_launch_grep_ignores_body_status_line() {
+    _rot_session "rot-body-consumed"
+    local dir="$CS_SESSIONS_ROOT/rot-body-consumed"
+    _seed_handoff_body_echoes_contract "$dir" "2026-07-16-consumed.md" "consumed"
+    local output
+    output=$("$CS_BIN" rot-body-consumed <<< "n" 2>&1) || true
+    if printf '%s' "$output" | grep -q "Rotation handoff pending"; then
+        echo "  FAIL: consumed handoff must not resurface because its body echoes the contract line"
+        return 1
+    fi
+}
+
+test_launch_grep_scoped_to_frontmatter_and_body_survives_consumption() {
+    _rot_session "rot-body-unconsumed"
+    local dir="$CS_SESSIONS_ROOT/rot-body-unconsumed"
+    _seed_handoff_body_echoes_contract "$dir" "2026-07-16-active.md" "unconsumed"
+    local output
+    output=$("$CS_BIN" rot-body-unconsumed <<< "r" 2>&1) || true
+    assert_output_contains "$output" "Rotation handoff pending" "genuinely unconsumed handoff is still offered" || return 1
+    assert_output_contains "$output" "2026-07-16-active.md" "notice names the handoff" || return 1
+
+    local new
+    new=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+    _rot_hook_session "rot-body-unconsumed"
+    _start_hook "$new" >/dev/null || return 1
+
+    local f="$dir/.cs/handoffs/2026-07-16-active.md"
+    assert_file_contains "$f" "status: consumed" "frontmatter flipped" || return 1
+    assert_file_contains "$f" "consumed_by: $new" "consumer recorded" || return 1
+    local n
+    n=$(grep -c '^status: unconsumed$' "$f" 2>/dev/null || true)
+    assert_eq "1" "$n" "only the body's quoted contract line remains; frontmatter's own line was flipped" || return 1
+    [ ! -f "$dir/.cs/local/pending-handoff" ] || { echo "  FAIL: marker must be removed"; return 1; }
+}
+
+run_test test_launch_grep_ignores_body_status_line
+run_test test_launch_grep_scoped_to_frontmatter_and_body_survives_consumption
+
 report_results
