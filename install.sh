@@ -127,6 +127,7 @@ CS_SKILLS=(
     store-secret
     prose-hygiene
     rotate
+    merge
 )
 
 # Completion URLs for web install

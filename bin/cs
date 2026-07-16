@@ -71,6 +71,7 @@ CS_SKILLS=(
     store-secret
     prose-hygiene
     rotate
+    merge
 )
 
 # Deployed-hooks directory; CS_HOOKS_DIR overrides it for tests.
