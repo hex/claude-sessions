@@ -423,4 +423,60 @@ run_test test_nudge_silent_below_threshold_and_without_signal
 run_test test_nudge_threshold_override
 run_test test_nudge_yields_to_queue_drain
 
+# ============================================================================
+# Cycle 6: cs -conversations
+# ============================================================================
+
+test_conversations_renders_chain() {
+    _rot_hook_session "rot-view"
+    printf 'claude_session_id: %s\n' "$UUID_B" > "$CLAUDE_SESSION_META_DIR/local/state"
+    cat > "$CLAUDE_SESSION_META_DIR/timeline.jsonl" << EOF
+{"ts":"2026-07-14T09:00:00Z","event":"started","source":"startup","session_id":"$UUID_A","branch":"main"}
+{"ts":"2026-07-14T12:00:00Z","event":"started","source":"resume","session_id":"$UUID_A","branch":"main"}
+{"ts":"2026-07-15T08:00:00Z","event":"checkpoint","label":"x","file":"y","branch":"main"}
+{"ts":"2026-07-16T10:00:00Z","event":"rotated","from":"$UUID_A","to":"$UUID_B","reason":"handoff","handoff":"2026-07-16-test.md"}
+{"ts":"2026-07-16T10:00:05Z","event":"started","source":"startup","session_id":"$UUID_B","branch":"main"}
+EOF
+    local out
+    out=$("$CS_BIN" -conversations 2>&1) || return 1
+    assert_output_contains "$out" "11111111  started (startup, resumed 1x)" "first conversation folds resumes" || return 1
+    assert_output_contains "$out" "11111111 > 22222222  rotated (handoff: 2026-07-16-test.md)" "rotation arrow with handoff" || return 1
+    assert_output_contains "$out" "[current]" "live conversation marked" || return 1
+    if printf '%s' "$out" | grep -q "checkpoint"; then
+        echo "  FAIL: non-conversation events must not render"
+        return 1
+    fi
+}
+
+test_conversations_empty_timeline() {
+    _rot_hook_session "rot-view-empty"
+    rm -f "$CLAUDE_SESSION_META_DIR/timeline.jsonl"
+    local out
+    out=$("$CS_BIN" -conversations 2>&1) || return 1
+    assert_output_contains "$out" "No conversation history recorded." "empty message" || return 1
+}
+
+test_conversations_requires_session_context() {
+    local out rc=0
+    out=$(env -u CLAUDE_SESSION_META_DIR -u CLAUDE_SESSION_NAME -u CLAUDE_SESSION_DIR "$CS_BIN" -conversations 2>&1) || rc=$?
+    [ "$rc" -ne 0 ] || { echo "  FAIL: must error outside a session"; return 1; }
+    assert_output_contains "$out" "inside a cs session" "error names the requirement" || return 1
+}
+
+test_conversations_session_scoped_form() {
+    _rot_hook_session "rot-view-scoped"
+    printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
+    printf '{"ts":"2026-07-14T09:00:00Z","event":"started","source":"startup","session_id":"%s","branch":"main"}\n' "$UUID_A" \
+        > "$CLAUDE_SESSION_META_DIR/timeline.jsonl"
+    local out
+    out=$(env -u CLAUDE_SESSION_META_DIR -u CLAUDE_SESSION_NAME -u CLAUDE_SESSION_DIR \
+        "$CS_BIN" rot-view-scoped -conversations 2>&1) || return 1
+    assert_output_contains "$out" "11111111  started (startup)" "scoped form renders" || return 1
+}
+
+run_test test_conversations_renders_chain
+run_test test_conversations_empty_timeline
+run_test test_conversations_requires_session_context
+run_test test_conversations_session_scoped_form
+
 report_results
