@@ -133,4 +133,105 @@ test_rotate_skill_registered_in_both_manifests() {
 run_test test_rotate_skill_exists_with_frontmatter
 run_test test_rotate_skill_registered_in_both_manifests
 
+# ============================================================================
+# Cycle 3: three-way launch prompt
+# ============================================================================
+
+_seed_handoff() {  # session_dir, basename, status
+    mkdir -p "$1/.cs/handoffs"
+    cat > "$1/.cs/handoffs/$2" << EOF
+---
+parent: $UUID_A
+created: 2026-07-16T10:00:00Z
+purpose: test rotation
+status: $3
+---
+
+## 7. Next Step
+Continue the test.
+EOF
+}
+
+test_prompt_unchanged_without_handoff() {
+    _rot_session "rot-plain"
+    local output
+    output=$("$CS_BIN" rot-plain <<< "n" 2>&1) || true
+    assert_output_contains "$output" "Continue previous conversation?" "prompt present" || return 1
+    printf '%s' "$output" | grep -q '\[Y/n\] ' \
+        || { echo "  FAIL: two-way prompt suffix must stay byte-identical"; return 1; }
+    if printf '%s' "$output" | grep -q '\[Y/n/r\]'; then
+        echo "  FAIL: three-way prompt must not appear without a pending handoff"
+        return 1
+    fi
+    if printf '%s' "$output" | grep -q "Rotation handoff pending"; then
+        echo "  FAIL: pending notice must not appear without a pending handoff"
+        return 1
+    fi
+}
+
+test_rotate_answer_consumes_pending_handoff() {
+    _rot_session "rot-r"
+    local dir="$CS_SESSIONS_ROOT/rot-r"
+    _seed_handoff "$dir" "2026-07-16-test.md" "unconsumed"
+    local old
+    old=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+    local output
+    output=$("$CS_BIN" rot-r <<< "r" 2>&1) || true
+    assert_output_contains "$output" "Rotation handoff pending" "notice names the pending handoff" || return 1
+    assert_output_contains "$output" "2026-07-16-test.md" "notice carries the basename" || return 1
+    assert_output_contains "$output" "[Y/n/r]" "prompt is three-way" || return 1
+    local new
+    new=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+    [ "$new" != "$old" ] || { echo "  FAIL: r must rebind to a fresh UUID"; return 1; }
+    assert_eq "2026-07-16-test.md" "$(cat "$dir/.cs/local/pending-handoff" 2>/dev/null | tr -d '[:space:]')" \
+        "marker names the handoff for the SessionStart hook" || return 1
+    assert_output_contains "$output" "STUB_ARGS: " "stub launched" || return 1
+    assert_output_contains "$output" "--session-id $new" "fresh conversation via --session-id" || return 1
+    local ev
+    ev=$(jq -c 'select(.event == "rotated")' "$dir/.cs/timeline.jsonl" 2>/dev/null | tail -1)
+    assert_output_contains "$ev" '"reason":"handoff"' "deliberate rotation reason" || return 1
+    assert_output_contains "$ev" '"handoff":"2026-07-16-test.md"' "event names the handoff" || return 1
+}
+
+test_continue_and_no_leave_handoff_unconsumed() {
+    _rot_session "rot-yn"
+    local dir="$CS_SESSIONS_ROOT/rot-yn"
+    _seed_handoff "$dir" "2026-07-16-test.md" "unconsumed"
+    "$CS_BIN" rot-yn <<< "n" >/dev/null 2>&1 || true
+    assert_file_contains "$dir/.cs/handoffs/2026-07-16-test.md" "status: unconsumed" \
+        "n leaves the handoff pending" || return 1
+    [ ! -f "$dir/.cs/local/pending-handoff" ] || { echo "  FAIL: n must not set the marker"; return 1; }
+}
+
+test_consumed_handoffs_do_not_trigger_prompt() {
+    _rot_session "rot-consumed"
+    local dir="$CS_SESSIONS_ROOT/rot-consumed"
+    _seed_handoff "$dir" "2026-07-16-done.md" "consumed"
+    local output
+    output=$("$CS_BIN" rot-consumed <<< "n" 2>&1) || true
+    if printf '%s' "$output" | grep -q "Rotation handoff pending"; then
+        echo "  FAIL: consumed handoff must not resurface"
+        return 1
+    fi
+}
+
+test_newest_of_multiple_handoffs_wins() {
+    _rot_session "rot-multi"
+    local dir="$CS_SESSIONS_ROOT/rot-multi"
+    _seed_handoff "$dir" "2026-07-14-old.md" "unconsumed"
+    _seed_handoff "$dir" "2026-07-16-new.md" "unconsumed"
+    local output
+    output=$("$CS_BIN" rot-multi <<< "r" 2>&1) || true
+    assert_eq "2026-07-16-new.md" "$(cat "$dir/.cs/local/pending-handoff" 2>/dev/null | tr -d '[:space:]')" \
+        "lexicographically last basename wins" || return 1
+    assert_file_contains "$dir/.cs/handoffs/2026-07-14-old.md" "status: unconsumed" \
+        "older handoff untouched" || return 1
+}
+
+run_test test_prompt_unchanged_without_handoff
+run_test test_rotate_answer_consumes_pending_handoff
+run_test test_continue_and_no_leave_handoff_unconsumed
+run_test test_consumed_handoffs_do_not_trigger_prompt
+run_test test_newest_of_multiple_handoffs_wins
+
 report_results
