@@ -234,6 +234,7 @@ create_test_session_with_git() {
 .cs/archives/
 .cs/.narrative-reminder-cooldown
 .claude/settings.local.json
+CLAUDE.local.md
 .DS_Store
 Thumbs.db
 .vscode/
