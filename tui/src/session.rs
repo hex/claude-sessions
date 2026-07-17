@@ -20,6 +20,57 @@ pub struct Session {
     pub archived: bool,
 }
 
+/// A pending cs update: the newer version and its release-note summaries as
+/// (version, summary) pairs parsed from cs's notes cache. `notes` is empty
+/// when the cache is missing or holds a failed-fetch tombstone; the overflow
+/// line arrives as a pair whose version field is "+".
+pub struct UpdateNotice {
+    pub version: String,
+    pub notes: Vec<(String, String)>,
+}
+
+/// True when dotted calver `a` is newer than `b` (year.month.patch compared
+/// numerically fieldwise, mirroring cs's version_greater).
+fn version_newer(a: &str, b: &str) -> bool {
+    let parse = |v: &str| -> Vec<u64> {
+        v.split('.').map(|part| part.parse().unwrap_or(0)).collect()
+    };
+    let (a, b) = (parse(a), parse(b));
+    for i in 0..3 {
+        let (x, y) = (a.get(i).copied().unwrap_or(0), b.get(i).copied().unwrap_or(0));
+        if x != y {
+            return x > y;
+        }
+    }
+    false
+}
+
+/// Read cs's update caches from `cache_dir`: Some when `update-check` (one
+/// line, `<epoch> <version>`) names a version newer than `installed`.
+pub fn update_notice_in(cache_dir: &Path, installed: &str) -> Option<UpdateNotice> {
+    let line = fs::read_to_string(cache_dir.join("update-check")).ok()?;
+    let latest = line.split_whitespace().nth(1)?.to_string();
+    if installed.is_empty() || !version_newer(&latest, installed) {
+        return None;
+    }
+    let notes = fs::read_to_string(cache_dir.join(format!("update-notes-{latest}")))
+        .map(|text| {
+            text.lines()
+                .filter_map(|l| l.split_once('\t').map(|(v, s)| (v.to_string(), s.to_string())))
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(UpdateNotice { version: latest, notes })
+}
+
+/// The pending-update notice for this process: cs exports CS_VERSION at
+/// launch and its own update check maintains ~/.cache/cs.
+pub fn update_notice() -> Option<UpdateNotice> {
+    let installed = std::env::var("CS_VERSION").ok()?;
+    let home = std::env::var("HOME").ok()?;
+    update_notice_in(&PathBuf::from(home).join(".cache").join("cs"), &installed)
+}
+
 pub struct SessionPreview {
     pub objective: Option<String>,
     pub last_discovery: Option<String>,
@@ -1072,6 +1123,48 @@ mod tests {
         assert_eq!(s.tags, vec!["api", "infra"]);
 
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn version_newer_compares_numerically_not_lexically() {
+        assert!(version_newer("2026.8.0", "2026.7.13"));
+        assert!(!version_newer("2026.7.13", "2026.7.13"));
+        // Lexically "9" > "13"; numerically 9 < 13 — the compare must be numeric.
+        assert!(!version_newer("2026.7.9", "2026.7.13"));
+        assert!(version_newer("2027.1.0", "2026.12.9"));
+    }
+
+    #[test]
+    fn update_notice_reads_cache_and_notes() {
+        let dir = std::env::temp_dir().join(format!("cs-test-notice-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("update-check"), "1784287083 2026.8.0\n").unwrap();
+        fs::write(
+            dir.join("update-notes-2026.8.0"),
+            "2026.8.0\tvoice skill and queue fixes\n2026.7.14\tpreview padding\n+\t\u{2026} and 3 earlier versions\n",
+        )
+        .unwrap();
+
+        let n = update_notice_in(&dir, "2026.7.13").expect("newer version should notify");
+        assert_eq!(n.version, "2026.8.0");
+        assert_eq!(n.notes.len(), 3);
+        assert_eq!(n.notes[0], ("2026.8.0".to_string(), "voice skill and queue fixes".to_string()));
+        assert_eq!(n.notes[2].0, "+");
+
+        // Same or older installed version: no notice.
+        assert!(update_notice_in(&dir, "2026.8.0").is_none());
+        assert!(update_notice_in(&dir, "2026.9.0").is_none());
+        // Empty installed version (env missing at launch): no notice.
+        assert!(update_notice_in(&dir, "").is_none());
+
+        // Tombstone: notes file empty — notice still fires, notes empty.
+        fs::write(dir.join("update-notes-2026.8.0"), "").unwrap();
+        let n = update_notice_in(&dir, "2026.7.13").unwrap();
+        assert!(n.notes.is_empty());
+
+        // Missing cache entirely: no notice.
+        fs::remove_dir_all(&dir).unwrap();
+        assert!(update_notice_in(&dir, "2026.7.13").is_none());
     }
 
     #[test]
