@@ -67,6 +67,8 @@ user-owned `CLAUDE.md` is never touched.
 | `.prose-lint-attempts` | Loop-guard counter for the `prose-lint` Stop hook (allows the stop after repeated unresolved blocks). |
 | `watermark` | Per-actor high-water mark for the "shared memory/narrative activity since you were last here" digest injected on resume. |
 | `context-pct` | Latest context-window percentage, stamped by the status line and read by the narrative reminder to suggest compaction. |
+| `limits` | Latest 5-hour/weekly rate-limit readings, stamped by the status line; read by `cs -usage` window anchoring and the queue's rate-limit breaker. |
+| `failures` | Per-task tool-failure counter written by `tool-failure-logger.sh`; feeds the queue's failures circuit breaker, reset at each drain advance. |
 
 ## Merge policy
 

@@ -321,6 +321,22 @@ run_test test_declined_only_inbox_stays_silent_but_cursor_advances
 run_test test_digest_on_code_prompt_splices_with_scope_block
 run_test test_digest_at_session_start
 run_test test_partial_limits_skips_silently_without_stderr
+test_build_digest_fn_in_sync_across_hooks() {
+    # _build_digest is duplicated verbatim between the two injection hooks by
+    # the standalone-hook law; this diff is the machine check that the copies
+    # have not drifted (the sanctioned-copy pattern used for manifest arrays).
+    local a b
+    a=$(awk '/^_build_digest\(\)/,/^\}/' "$HOOKS_DIR/scope-prompt.sh")
+    b=$(awk '/^_build_digest\(\)/,/^\}/' "$HOOKS_DIR/session-start.sh")
+    [ -n "$a" ] || { echo "  FAIL: _build_digest not found in scope-prompt.sh"; return 1; }
+    [ -n "$b" ] || { echo "  FAIL: _build_digest not found in session-start.sh"; return 1; }
+    if [ "$a" != "$b" ]; then
+        echo "  FAIL: _build_digest bodies differ between the two hooks"
+        return 1
+    fi
+}
+
 run_test test_ctx_threshold_env_override
 run_test test_5h_threshold_env_override
+run_test test_build_digest_fn_in_sync_across_hooks
 report_results

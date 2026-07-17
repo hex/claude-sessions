@@ -1037,8 +1037,7 @@ fn render_confirm_batch_delete(app: &App, frame: &mut Frame) {
     };
     let hint_color = if remaining > 0 { p.comment } else { p.fg };
 
-    let height = if names.len() <= 5 { 7 } else { 7 };
-    let popup_area = centered_rect(55, height, frame.area());
+    let popup_area = centered_rect(55, 7, frame.area());
     frame.render_widget(Clear, popup_area);
     let block = Block::default()
         .borders(Borders::ALL)

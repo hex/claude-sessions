@@ -384,7 +384,39 @@ run_test test_hidden_commands_are_exempt_from_completion_coverage
 run_test test_zsh_completion_covers_all_commands
 run_test test_bash_completion_covers_all_commands
 run_test test_secrets_extraction_is_sane
+# Extract the queue subcommand tokens from run_queue's dispatch case in the
+# built bin/cs, so completions can be checked against the real verb set.
+queue_subcommands() {
+    awk '/^run_queue\(\)/,/^\}/' "$CS_FILE" \
+        | grep -oE '^ +[a-z|-]+\)' \
+        | tr -d ' )' \
+        | tr '|' '\n' \
+        | sort -u
+}
+
+test_queue_extraction_is_sane() {
+    local cmds
+    cmds=$(queue_subcommands)
+    assert_output_contains "$cmds" "add" "extraction should find add" || return 1
+    assert_output_contains "$cmds" "log" "extraction should find log" || return 1
+}
+
+test_completions_cover_all_queue_subcommands() {
+    # queue grew start/defer/log by hand-edit; this is the drift net the
+    # top-level and secrets lists already have.
+    local cmds c
+    cmds=$(queue_subcommands)
+    for c in $cmds; do
+        grep -qE "(^|[^a-z-])${c}([^a-z-]|$)" "$ZSH_COMP" || {
+            echo "  FAIL: completions/_cs missing queue subcommand: $c"; return 1; }
+        grep -qE "(^|[^a-z-])${c}([^a-z-]|$)" "$BASH_COMP" || {
+            echo "  FAIL: completions/cs.bash missing queue subcommand: $c"; return 1; }
+    done
+}
+
 run_test test_zsh_completion_covers_all_secrets_subcommands
 run_test test_bash_completion_covers_all_secrets_subcommands
+run_test test_queue_extraction_is_sane
+run_test test_completions_cover_all_queue_subcommands
 
 report_results

@@ -1,10 +1,6 @@
 # ABOUTME: Labelled state checkpoints (save/list/show) and the prose-slop linter.
 # ABOUTME: Backs 'cs -checkpoint' and 'cs -lint'.
 
-get_short_hostname() {
-    hostname | cut -d. -f1
-}
-
 get_file_mtime() {
     local file="$1"
     if [[ "$OSTYPE" == darwin* ]]; then

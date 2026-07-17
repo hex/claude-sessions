@@ -344,15 +344,6 @@ _read_session_color() {
     done < "$state"
 }
 
-# Byte size of a file into _FILESIZE (0 on failure); arithmetic evaluation
-# strips wc's leading whitespace without a tr fork, and an empty result
-# evaluates to 0 instead of erroring.
-_filesize() {
-    local n
-    n=$(wc -c < "$1" 2>/dev/null) || n=0
-    _FILESIZE=$(( n ))
-}
-
 # Format the git segment text for a workspace dir into _GIT_TEXT, empty when
 # it is not a git repo / git is unavailable / git times out.
 _git_text() {

@@ -84,7 +84,7 @@ cs -whoami                  # Show the current actor (for shared, multi-person s
 cs -who                     # Show who contributed to shared memory/narrative (git history)
 cs -search <query>          # Search across all sessions
 cs -checkpoint "<label>"    # Snapshot git state + narrative (also: list, show <name>)
-cs -queue add "<task>"      # Walk-away task queue (also: list, rm <n>, clear)
+cs -queue add "<task>"      # Walk-away task queue (also: list, rm <n>, clear, log)
 cs -doctor, -diag           # Run health checks (Keychain, hooks, memory, audit, tokens)
 cs -usage [--all] [<name>]  # Per-session token usage over the 5h/weekly rate-limit windows
 cs -tag add|rm <tag>        # Tag the current session (also: cs <name> -tag ..., -tag list)

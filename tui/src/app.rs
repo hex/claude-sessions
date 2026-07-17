@@ -307,7 +307,6 @@ fn time_section(ts: Option<std::time::SystemTime>) -> &'static str {
         Err(_) => return "Today", // future timestamp
     };
     let secs = age.as_secs();
-    const HOUR: u64 = 3600;
     const DAY: u64 = 86400;
     if secs < DAY {
         "Today"
@@ -669,22 +668,6 @@ impl App {
                     self.preview_cache.insert(name, preview);
                 }
                 Err(_) => break,
-            }
-        }
-    }
-
-    /// Compute fuzzy match indices for highlighting without filtering the session list.
-    /// Used during search typing phase to show all sessions with matches highlighted.
-    pub fn update_search_highlights(&mut self) {
-        let query = self.search_input.text();
-        self.fuzzy_indices.clear();
-        if !query.is_empty() {
-            for (i, s) in self.sessions.iter().enumerate() {
-                if let Some((_score, indices)) = fuzzy_match(query, &s.name) {
-                    if !indices.is_empty() {
-                        self.fuzzy_indices.insert(i, indices);
-                    }
-                }
             }
         }
     }

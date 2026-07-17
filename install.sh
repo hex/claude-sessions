@@ -583,11 +583,15 @@ else
     esac
     if [ -n "$_register_statusline" ]; then
         # refreshInterval keeps the bar repainting once a second while idle;
-        # the logo's attention pulse animates on that timer.
+        # the logo's attention pulse animates on that timer. Registers BOTH
+        # settings keys, same as `cs -statusline enable` — the two recipes
+        # must stay equivalent (KEEP IN SYNC with lib/70-statusline.sh).
         SETTINGS=$(echo "$SETTINGS" | jq --arg cmd "$_statusline_cmd" \
-            '.statusLine = {type: "command", command: $cmd, refreshInterval: 1}')
+            --arg subcmd "$INSTALL_DIR/cs-subagent-statusline" \
+            '.statusLine = {type: "command", command: $cmd, refreshInterval: 1}
+             | .subagentStatusLine = {type: "command", command: $subcmd}')
         if [ "$_register_statusline" = "1" ]; then
-            installed "status line" "cs-statusline"
+            installed "status line" "cs-statusline + cs-subagent-statusline"
         fi
     fi
 
