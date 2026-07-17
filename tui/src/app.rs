@@ -5,7 +5,6 @@ use std::collections::HashMap;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::widgets::TableState;
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::session::{self, Session};
 use crate::theme::Palette;
@@ -15,13 +14,6 @@ use crate::theme::Palette;
 pub struct TextInput {
     text: String,
     cursor: usize,
-}
-
-/// A horizontally-scrolled view of a `TextInput` for a fixed-width box.
-pub struct TextWindow {
-    pub before: String,
-    pub after: String,
-    pub cursor_col: usize,
 }
 
 impl TextInput {
@@ -126,42 +118,6 @@ impl TextInput {
         &self.text[self.cursor..]
     }
 
-    /// The visible slice of the field for a box `width` columns wide, scrolled so
-    /// the cursor cell is always shown. `before`/`after` are split at the cursor;
-    /// render as `before` + block cursor + `after`. Display-width aware: a wide
-    /// char straddling the left edge is dropped whole rather than half-shown, so
-    /// the visible width never exceeds `width`.
-    pub fn window(&self, width: usize) -> TextWindow {
-        if width == 0 {
-            return TextWindow { before: String::new(), after: String::new(), cursor_col: 0 };
-        }
-        let before_w = self.text[..self.cursor].width();
-        let offset_w = before_w.saturating_sub(width.saturating_sub(1));
-
-        let mut before = String::new();
-        let mut after = String::new();
-        let mut used = 0usize; // display columns taken so far
-        let mut left = 0usize; // left edge of the current char, in columns
-        for (i, ch) in self.text.char_indices() {
-            let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
-            let this_left = left;
-            left += cw;
-            if this_left < offset_w {
-                continue; // char's left edge is scrolled off — drop whole
-            }
-            if used + cw > width {
-                break; // box full
-            }
-            if i < self.cursor {
-                before.push(ch);
-            } else {
-                after.push(ch);
-            }
-            used += cw;
-        }
-        let cursor_col = before.as_str().width();
-        TextWindow { before, after, cursor_col }
-    }
 }
 
 /// Split `#tag` predicate tokens out of a search query. Tags are lowercased;
@@ -2800,69 +2756,6 @@ mod tests {
         input.clear();
         assert_eq!(input.text(), "");
         assert_eq!(input.before_cursor(), "");
-    }
-
-    #[test]
-    fn window_short_text_fits_whole() {
-        let mut t = TextInput::new();
-        t.set("hello"); // cursor at end (5)
-        let w = t.window(20);
-        assert_eq!(w.before, "hello");
-        assert_eq!(w.after, "");
-        assert_eq!(w.cursor_col, 5);
-    }
-
-    #[test]
-    fn window_cursor_at_end_of_long_text_keeps_cursor_in_last_column() {
-        let mut t = TextInput::new();
-        let long = "Refactor the preview worker so that the git walk is bounded";
-        t.set(long); // cursor at end
-        let w = t.window(20);
-        // Visible width never exceeds the box, and the cursor sits in the last column.
-        let vis = w.before.chars().count() + w.after.chars().count();
-        assert!(vis <= 20, "visible {} > 20", vis);
-        assert_eq!(w.cursor_col, 19);
-        assert_eq!(w.after, "");
-        assert!(long.ends_with(&w.before));
-    }
-
-    #[test]
-    fn window_cursor_at_home_shows_head_from_column_zero() {
-        let mut t = TextInput::new();
-        t.set("Refactor the preview worker");
-        t.move_home(); // cursor at 0
-        let w = t.window(10);
-        assert_eq!(w.cursor_col, 0);
-        assert_eq!(w.before, "");
-        assert_eq!(w.after, "Refactor t"); // 10 columns
-    }
-
-    #[test]
-    fn window_drops_a_wide_char_straddling_the_left_edge_never_splitting_it() {
-        let mut t = TextInput::new();
-        // Each CJK char is 2 columns wide: 10 chars, 20 cols, cursor at end.
-        t.set("編集する日本語タスク");
-        // width 8 => offset_w = 20 - 7 = 13, which lands *inside* 語 (cols 12-13).
-        // The left-edge drop rule discards 語 whole rather than showing its right
-        // half, so exactly タ(14) ス(16) ク(18) remain — 6 visible columns, not 8.
-        // A right-edge rule would keep 語 and render "語タスク" at cursor_col 8,
-        // overflowing the box; this exact-content assertion fails under that bug.
-        let w = t.window(8);
-        assert_eq!(w.before, "タスク");
-        assert_eq!(w.after, "");
-        assert_eq!(w.cursor_col, 6);
-    }
-
-    #[test]
-    fn window_zero_and_one_width_do_not_panic() {
-        let mut t = TextInput::new();
-        t.set("anything long enough to scroll");
-        let w0 = t.window(0);
-        assert_eq!(w0.cursor_col, 0);
-        let w1 = t.window(1);
-        // The invariant is cursor_col < width, i.e. exactly 0 at width 1 — a
-        // looser `<= 1` would not catch an off-by-one that pushed it to width.
-        assert_eq!(w1.cursor_col, 0);
     }
 
     #[test]
