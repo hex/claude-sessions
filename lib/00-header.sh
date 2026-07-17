@@ -72,6 +72,13 @@ CS_SKILLS=(
     prose-hygiene
     rotate
     merge
+    voice
+)
+
+# Support files skills ship beyond SKILL.md, as skills/<skill>/<path> entries.
+# KEEP THIS LIST IN SYNC WITH install.sh's CS_SKILL_FILES.
+CS_SKILL_FILES=(
+    voice/scripts/build-corpus.sh
 )
 
 # Deployed-hooks directory; CS_HOOKS_DIR overrides it for tests.

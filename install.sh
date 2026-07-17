@@ -128,6 +128,13 @@ CS_SKILLS=(
     prose-hygiene
     rotate
     merge
+    voice
+)
+
+# Support files skills ship beyond SKILL.md, as skills/<skill>/<path> entries.
+# KEEP THIS LIST IN SYNC WITH bin/cs's CS_SKILL_FILES.
+CS_SKILL_FILES=(
+    voice/scripts/build-corpus.sh
 )
 
 # Completion URLs for web install
@@ -361,14 +368,28 @@ if [ "$INSTALL_METHOD" = "local" ]; then
     for skill in "${CS_SKILLS[@]}"; do
         cp "$SKILLS_SOURCE/$skill/SKILL.md" "$SKILLS_DIR/$skill/"
     done
+    for skill_file in "${CS_SKILL_FILES[@]}"; do
+        mkdir -p "$SKILLS_DIR/$(dirname "$skill_file")"
+        cp -p "$SKILLS_SOURCE/$skill_file" "$SKILLS_DIR/$skill_file"
+    done
 else
     if command -v curl >/dev/null 2>&1; then
         for skill in "${CS_SKILLS[@]}"; do
             curl -fsSL "$REPO_URL/skills/$skill/SKILL.md" -o "$SKILLS_DIR/$skill/SKILL.md" || error "Failed to download $skill skill"
         done
+        for skill_file in "${CS_SKILL_FILES[@]}"; do
+            mkdir -p "$SKILLS_DIR/$(dirname "$skill_file")"
+            curl -fsSL "$REPO_URL/skills/$skill_file" -o "$SKILLS_DIR/$skill_file" || error "Failed to download $skill_file"
+            chmod +x "$SKILLS_DIR/$skill_file"
+        done
     elif command -v wget >/dev/null 2>&1; then
         for skill in "${CS_SKILLS[@]}"; do
             wget -q "$REPO_URL/skills/$skill/SKILL.md" -O "$SKILLS_DIR/$skill/SKILL.md" || error "Failed to download $skill skill"
+        done
+        for skill_file in "${CS_SKILL_FILES[@]}"; do
+            mkdir -p "$SKILLS_DIR/$(dirname "$skill_file")"
+            wget -q "$REPO_URL/skills/$skill_file" -O "$SKILLS_DIR/$skill_file" || error "Failed to download $skill_file"
+            chmod +x "$SKILLS_DIR/$skill_file"
         done
     fi
 fi

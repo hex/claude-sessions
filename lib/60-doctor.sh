@@ -96,6 +96,9 @@ _doctor_check_hook_drift() {
             if [[ "$src" == */SKILL.md ]]; then
                 name=$(basename "$(dirname "$src")")
                 deployed="$deploy_root/$name/SKILL.md"
+            elif [[ "$src" == skills/*/scripts/* ]]; then
+                name="${src#skills/}"
+                deployed="$deploy_root/$name"
             else
                 name=$(basename "$src")
                 deployed="$deploy_root/$name"
@@ -118,7 +121,7 @@ _doctor_check_hook_drift() {
 
     _drift_scan "Hook" "$hooks_dir" hooks/*.sh
     _drift_scan "Command" "$commands_dir" commands/*.md
-    _drift_scan "Skill" "$skills_dir" skills/*/SKILL.md
+    _drift_scan "Skill" "$skills_dir" skills/*/SKILL.md skills/*/scripts/*.sh
 
     if [ "$clean" = "1" ]; then
         _doctor_ok "Deploy drift: hooks, commands, and skills match checkout source"

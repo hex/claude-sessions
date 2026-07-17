@@ -166,6 +166,23 @@ test_doctor_warns_on_command_drift() {
         "doctor should warn when a deployed command differs from checkout source" || return 1
 }
 
+test_doctor_warns_on_skill_script_drift() {
+    local checkout="$TEST_TMPDIR/checkout" deployed_skills="$TEST_TMPDIR/skills"
+    make_fake_checkout "$checkout"
+    mkdir -p "$checkout/skills/voice/scripts" "$deployed_skills/voice/scripts" \
+        "$TEST_TMPDIR/deployed-hooks"
+    echo 'source version' > "$checkout/skills/voice/scripts/build-corpus.sh"
+    echo 'deployed version' > "$deployed_skills/voice/scripts/build-corpus.sh"
+
+    local output
+    output=$(cd "$checkout" && CS_HOOKS_DIR="$TEST_TMPDIR/deployed-hooks" \
+        CS_SKILLS_DIR="$deployed_skills" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "voice/scripts/build-corpus.sh" \
+        "doctor should name the drifted skill script" || return 1
+    assert_output_contains "$output" "differs from source" \
+        "drifted support script should warn" || return 1
+}
+
 test_doctor_warns_on_skill_drift() {
     local checkout="$TEST_TMPDIR/checkout" deployed_skills="$TEST_TMPDIR/skills"
     make_fake_checkout "$checkout"
@@ -514,6 +531,7 @@ run_test test_doctor_warns_on_undeployed_hook
 run_test test_doctor_drift_silent_when_in_sync
 run_test test_doctor_drift_skipped_outside_checkout
 run_test test_doctor_warns_on_command_drift
+run_test test_doctor_warns_on_skill_script_drift
 run_test test_doctor_warns_on_skill_drift
 run_test test_doctor_warns_on_version_mismatch
 run_test test_doctor_version_silent_without_stamp
