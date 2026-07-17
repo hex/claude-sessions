@@ -41,6 +41,10 @@ is open and is cleaned up on exit. `.cs/.narrative-reminder-cooldown` is a
 similar gitignored transient at the `.cs/` root — the narrative reminder's
 5-minute cooldown stamp.
 
+`CLAUDE.local.md`, also at the session root, carries the cs session protocol:
+it is machine-local and gitignored, cs regenerates it on each machine, and a
+user-owned `CLAUDE.md` is never touched.
+
 ## Machine-local files (`.cs/local/`, gitignored)
 
 | File | Purpose |

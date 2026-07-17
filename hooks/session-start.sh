@@ -135,9 +135,9 @@ Key files to maintain:
 - .cs/README.md: Update objective and outcome
 - .cs/memory/narrative.<actor>.md: append findings as you go (run 'cs -whoami' for your actor; read all narrative.*.md on resume)
 
-Secrets: never write credentials to files — pipe the value to 'cs -secrets set <name>' on stdin (argv/heredocs are logged verbatim); retrieve with 'cs -secrets get <name>'. See CLAUDE.md, Secure Secrets Handling.
+Secrets: never write credentials to files — pipe the value to 'cs -secrets set <name>' on stdin (argv/heredocs are logged verbatim); retrieve with 'cs -secrets get <name>'. See CLAUDE.local.md, Secure Secrets Handling.
 
-See CLAUDE.md in the session directory for complete documentation protocol.
+See CLAUDE.local.md in the session directory for complete documentation protocol.
 EOF
 )
 

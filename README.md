@@ -154,7 +154,7 @@ cs -adopt my-project
 This converts the current directory into a cs session in place:
 - Creates the `.cs/` metadata structure in the current directory
 - Symlinks `~/.claude-sessions/<name>` to the current directory
-- Merges session protocol into existing `CLAUDE.md` if one exists
+- Writes the session protocol to `CLAUDE.local.md` (machine-local, gitignored, regenerated per machine); a project's existing `CLAUDE.md` is never touched
 - Initializes a git repo if one doesn't exist (preserves existing repos)
 - Since the working directory doesn't change, `claude --continue` picks up previous conversations
 
@@ -179,9 +179,11 @@ This converts the current directory into a cs session in place:
 │   └── local/              # Machine-local state + session.log audit trail (gitignored)
 ├── .claude/
 │   └── settings.local.json # Redirects auto memory into .cs/memory
-├── CLAUDE.md               # Session instructions for Claude
+├── CLAUDE.local.md         # Session protocol for Claude (machine-local, gitignored)
 └── [your project files]    # Clean workspace
 ```
+
+`CLAUDE.local.md` carries the cs session protocol: it is machine-local and gitignored, cs regenerates it on each machine, and a user-owned `CLAUDE.md` is never touched.
 
 Claude Code's [auto memory](https://code.claude.com/docs/en/memory) is redirected into `.cs/memory/` via the `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE` env var (set at launch). This means auto memory is cleaned up with `cs -rm`.
 
