@@ -39,9 +39,13 @@ the protocol keeps working and nothing is lost even mid-transition.
    machine-local state stays out of the session git.
 3. **Full lazy migration of existing sessions**, as a new migrate phase
    running before today's Phase 5 logic:
-   - `CLAUDE.md` starts with `<!-- cs:session-protocol -->` (the pure
-     cs-written file — the overwhelmingly common case): move the entire
-     file to `CLAUDE.local.md` and delete `CLAUDE.md` (plain `rm`; the
+   - `CLAUDE.md` is entirely cs's: nothing but whitespace above the
+     first `<!-- cs:` sentinel, OR the head's first non-blank line is
+     `# Session Documentation Protocol` (the pre-leading-sentinel
+     template era wrote the protocol heading first and gained sentinels
+     only for later sections — final-review correction: roughly a third
+     of real sessions, including this repo's, have that shape). Move
+     the entire file to `CLAUDE.local.md` and delete `CLAUDE.md` (the
      deletion rides the working tree like every other lazy-migration
      edit, protected by autosave — cs has no internal commit machinery
      and this phase does not add one).
@@ -78,7 +82,11 @@ the protocol keeps working and nothing is lost even mid-transition.
    worktree's `CLAUDE.local.md`). It writes the FILE only — never a
    `.gitignore` entry: ignored-mode worktrees check out project repos,
    and mutating a project's tracked `.gitignore` would pollute the task
-   branch.
+   branch. The clone-local `info/exclude` entry is written for BOTH
+   modes (final-review correction: a worktree cut from a
+   not-yet-migrated tracked base inherits a `.gitignore` without the
+   entry, and the untracked file would block `cs <base> --merge`'s
+   preflight until the base's next launch).
 6. **Known consequence for this repo (the cs dev session):** its
    tracked `CLAUDE.md` is a pure cs template and will migrate — moved
    to the gitignored local file, the tracked file deleted from the
