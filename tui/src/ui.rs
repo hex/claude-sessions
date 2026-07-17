@@ -1273,7 +1273,9 @@ fn card_frame(buf: &mut Buffer, area: Rect, title: &str, side: Color, p: Palette
 
 fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
     let p = app.theme;
-    let inner = area.inner(Margin::new(1, 1));
+    // One clear column inside each border so the content never touches the
+    // frame; the blank lead line below gives the title row headroom.
+    let inner = area.inner(Margin::new(2, 1));
 
     let session = match app.selected_session() {
         Some(s) => s,
@@ -1287,6 +1289,7 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
     };
 
     let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::default());
     lines.push(Line::from(Span::styled(
         session.name.as_str(),
         Style::default().fg(p.ink).add_modifier(Modifier::BOLD),
@@ -2136,6 +2139,53 @@ mod tests {
         assert!(
             !joined.contains("QUEUE"),
             "QUEUE column is hidden when no session has queued tasks: {joined}"
+        );
+    }
+
+    #[test]
+    fn preview_pane_content_is_padded_from_the_border() {
+        let mut app = App::new(one_session());
+        app.theme = Palette::dark();
+        app.show_preview = true;
+
+        let backend = TestBackend::new(90, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let rows: Vec<String> = (0..buf.area.height)
+            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
+            .collect();
+
+        // Horizontal padding: the "created" meta label sits one clear column
+        // inside the card's left border instead of touching it.
+        let created_row = rows
+            .iter()
+            .find(|r| r.contains("created"))
+            .expect("preview meta rows should render");
+        let border_x = created_row
+            .chars()
+            .position(|c| c == '\u{2502}')
+            .expect("the meta row should start at the card border");
+        let after_border: String = created_row.chars().skip(border_x + 1).take(2).collect();
+        assert!(
+            after_border.starts_with(' '),
+            "content must not touch the left border: {created_row:?}"
+        );
+
+        // Vertical headroom: the first row under the card's title border is
+        // blank, so the session name does not press against the frame.
+        let title_y = rows
+            .iter()
+            .position(|r| r.contains("preview"))
+            .expect("preview card title should render");
+        let headroom: String = rows[title_y + 1]
+            .chars()
+            .filter(|c| c.is_alphanumeric())
+            .collect();
+        assert!(
+            headroom.is_empty(),
+            "row under the preview title should be blank, got: {:?}",
+            rows[title_y + 1]
         );
     }
 
