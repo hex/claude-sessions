@@ -117,6 +117,85 @@ fn truncate_cols(s: &str, max_cols: usize) -> String {
     out
 }
 
+/// Most rows the to-do input (or an in-place edit) may grow to before it
+/// scrolls vertically to follow the cursor.
+const MAX_INPUT_ROWS: usize = 4;
+
+/// Display-width-aware word wrap: byte ranges of `s` split into lines no wider
+/// than `width` columns. Breaks at the last space on the line when one exists
+/// (the space itself is swallowed), hard-breaks runs longer than a line, and
+/// never splits a char. Always returns at least one (possibly empty) range.
+fn wrap_cols_ranges(s: &str, width: usize) -> Vec<(usize, usize)> {
+    use unicode_width::UnicodeWidthChar;
+    if width == 0 {
+        return vec![(0, s.len())];
+    }
+    let mut lines = Vec::new();
+    let mut start = 0usize;
+    let mut used = 0usize;
+    let mut last_space: Option<usize> = None;
+    for (i, ch) in s.char_indices() {
+        let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if used + cw > width && used > 0 {
+            if let Some(sp) = last_space {
+                lines.push((start, sp));
+                start = sp + 1; // the break swallows the space
+                used = s[start..i].width();
+            } else {
+                lines.push((start, i));
+                start = i;
+                used = 0;
+            }
+            last_space = None;
+        }
+        if ch == ' ' {
+            last_space = Some(i);
+        }
+        used += cw;
+    }
+    lines.push((start, s.len()));
+    lines
+}
+
+/// Wrapped rows for an editable field: character wrap at `width` columns with
+/// the block cursor placed at `cursor` (a byte offset on a char boundary). At
+/// most `max_rows` rows come back, scrolled so the cursor's row is included.
+fn cursor_wrap_spans(
+    text: &str,
+    cursor: usize,
+    width: usize,
+    max_rows: usize,
+    text_style: Style,
+    cursor_style: Style,
+) -> Vec<Vec<Span<'static>>> {
+    let ranges = wrap_cols_ranges(text, width);
+    // First row whose range covers the cursor inclusively; a cursor sitting on
+    // a swallowed break-space renders at that row's end.
+    let cursor_row = ranges
+        .iter()
+        .position(|&(s, e)| cursor >= s && cursor <= e)
+        .unwrap_or(ranges.len() - 1);
+    let first = (cursor_row + 1).saturating_sub(max_rows);
+    ranges
+        .iter()
+        .enumerate()
+        .skip(first)
+        .take(max_rows)
+        .map(|(row, &(s, e))| {
+            if row == cursor_row {
+                let cur = cursor.clamp(s, e);
+                vec![
+                    Span::styled(text[s..cur].to_string(), text_style),
+                    Span::styled("\u{2588}".to_string(), cursor_style),
+                    Span::styled(text[cur..e].to_string(), text_style),
+                ]
+            } else {
+                vec![Span::styled(text[s..e].to_string(), text_style)]
+            }
+        })
+        .collect()
+}
+
 /// 4-segment queue-depth meter: 0→empty, 1→1, 2-3→2, 4-5→3, 6+→4 filled.
 fn qbar(n: u32) -> String {
     let f = match n {
@@ -1360,41 +1439,61 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
     let side = if focused { p.strong } else { p.soft };
     let inner = area.inner(Margin::new(1, 1));
 
-    // Input line on top, a full-width separator rule, then the task list.
+    // Input block on top (grows with wrapped text, capped), a full-width
+    // separator rule, then the task list. The input's height must be known
+    // before the layout splits, so its lines are built first.
+    let input_inner = inner.width.saturating_sub(2) as usize; // 1-col padding each side
+    let input_lines: Vec<Line> = if app.notes_focus == NotesFocus::Editing {
+        vec![Line::from(Span::styled(
+            format!(" editing {} \u{b7} Enter saves \u{b7} Esc cancels", app.notes_selected + 1),
+            Style::default().fg(p.faint).add_modifier(Modifier::DIM),
+        ))]
+    } else if input_focused {
+        cursor_wrap_spans(
+            app.queue_input.text(),
+            app.queue_input.before_cursor().len(),
+            input_inner,
+            MAX_INPUT_ROWS,
+            Style::default().fg(p.ink),
+            Style::default().fg(p.amber),
+        )
+        .into_iter()
+        .map(|mut spans| {
+            let mut cells = vec![Span::raw(" ")];
+            cells.append(&mut spans);
+            Line::from(cells)
+        })
+        .collect()
+    } else if app.queue_input.text().is_empty() {
+        vec![Line::from(Span::styled(
+            " Tab to add a task\u{2026}",
+            Style::default().fg(p.faint).add_modifier(Modifier::DIM),
+        ))]
+    } else {
+        wrap_cols_ranges(app.queue_input.text(), input_inner)
+            .into_iter()
+            .take(MAX_INPUT_ROWS)
+            .map(|(s, e)| {
+                Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled(
+                        app.queue_input.text()[s..e].to_string(),
+                        Style::default().fg(p.ink),
+                    ),
+                ])
+            })
+            .collect()
+    };
+    let input_height = input_lines.len().max(1) as u16;
+
     let rows = Layout::vertical([
-        Constraint::Length(1),
+        Constraint::Length(input_height),
         Constraint::Length(1),
         Constraint::Min(0),
     ])
     .split(inner);
 
-    // Input line: the new-task field, or a dim hint while editing a row in place.
-    let input_inner = rows[0].width.saturating_sub(2) as usize; // 1-col padding each side
-    let input_line = if app.notes_focus == NotesFocus::Editing {
-        Line::from(Span::styled(
-            format!(" editing {} \u{b7} Enter saves \u{b7} Esc cancels", app.notes_selected + 1),
-            Style::default().fg(p.faint).add_modifier(Modifier::DIM),
-        ))
-    } else if input_focused {
-        let win = app.queue_input.window(input_inner);
-        Line::from(vec![
-            Span::raw(" "),
-            Span::styled(win.before, Style::default().fg(p.ink)),
-            Span::styled("\u{2588}", Style::default().fg(p.amber)),
-            Span::styled(win.after, Style::default().fg(p.ink)),
-        ])
-    } else if app.queue_input.text().is_empty() {
-        Line::from(Span::styled(
-            " Tab to add a task\u{2026}",
-            Style::default().fg(p.faint).add_modifier(Modifier::DIM),
-        ))
-    } else {
-        Line::from(vec![
-            Span::raw(" "),
-            Span::styled(app.queue_input.text(), Style::default().fg(p.ink)),
-        ])
-    };
-    frame.render_widget(Paragraph::new(input_line), rows[0]);
+    frame.render_widget(Paragraph::new(input_lines), rows[0]);
 
     // Separator between the input and the list, matching the panel border.
     let rule = "\u{2500}".repeat(rows[1].width as usize);
@@ -1403,9 +1502,10 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
         rows[1],
     );
 
-    // Numbered list of queued tasks, one line each. The highlighted row shows an
-    // amber marker; the row being edited becomes an italic text field with a
-    // scrolling block cursor.
+    // Numbered list of queued tasks, each shown in full: long tasks wrap onto
+    // continuation rows indented under the text column. The highlighted row
+    // shows an amber marker; the row being edited becomes an italic text field
+    // whose block cursor wraps with the text.
     let tasks = app
         .selected_session()
         .map(|s| crate::session::read_queue(&s.name))
@@ -1421,7 +1521,7 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
         tasks
             .iter()
             .enumerate()
-            .map(|(i, task)| {
+            .flat_map(|(i, task)| {
                 let editing = app.notes_focus == NotesFocus::Editing && i == app.notes_selected;
                 let highlighted =
                     editing || (list_focused && i == app.notes_selected);
@@ -1432,29 +1532,48 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
                 };
                 let num = format!("{}. ", i + 1);
                 // Columns available for the task text: left pad(1) + marker(2) +
-                // number, plus a matching 1-column right margin so a truncated
-                // task's ellipsis and the edit cursor stay off the border.
+                // number, plus a matching 1-column right margin so wrapped text
+                // and the edit cursor stay off the border.
                 let prefix_cols = 1 + 2 + num.chars().count();
                 let avail = inner_cols.saturating_sub(prefix_cols + 1);
-                let mut spans = vec![
+                let prefix = vec![
                     Span::raw(" "), // left padding
                     Span::styled(marker, Style::default().fg(marker_color)),
                     Span::styled(num, Style::default().fg(marker_color)),
                 ];
-                if editing {
-                    let win = app.queue_input.window(avail);
+                let indent = " ".repeat(prefix_cols);
+                let body: Vec<Vec<Span>> = if editing {
                     let italic = Style::default().fg(p.ink).add_modifier(Modifier::ITALIC);
-                    spans.push(Span::styled(win.before, italic));
-                    spans.push(Span::styled("\u{2588}", Style::default().fg(p.amber)));
-                    spans.push(Span::styled(win.after, italic));
+                    cursor_wrap_spans(
+                        app.queue_input.text(),
+                        app.queue_input.before_cursor().len(),
+                        avail,
+                        MAX_INPUT_ROWS,
+                        italic,
+                        Style::default().fg(p.amber),
+                    )
                 } else {
                     let mut text_style = Style::default().fg(p.ink);
                     if highlighted {
                         text_style = text_style.add_modifier(Modifier::BOLD);
                     }
-                    spans.push(Span::styled(truncate_cols(task, avail), text_style));
-                }
-                Line::from(spans)
+                    wrap_cols_ranges(task, avail)
+                        .into_iter()
+                        .map(|(s, e)| vec![Span::styled(task[s..e].to_string(), text_style)])
+                        .collect()
+                };
+                body.into_iter()
+                    .enumerate()
+                    .map(|(row, mut spans)| {
+                        let mut cells = if row == 0 {
+                            prefix.clone()
+                        } else {
+                            vec![Span::raw(indent.clone())]
+                        };
+                        cells.append(&mut spans);
+                        Line::from(cells)
+                    })
+                    .collect::<Vec<_>>()
             })
             .collect()
     };
@@ -2046,7 +2165,7 @@ mod tests {
     }
 
     #[test]
-    fn long_task_renders_on_one_line_with_ellipsis() {
+    fn long_task_wraps_to_show_its_full_text() {
         use crate::session::test_root;
         let tmp = std::env::temp_dir().join(format!("cs-ui-longtask-{}", std::process::id()));
         let name = "solo-long";
@@ -2073,25 +2192,30 @@ mod tests {
         let rows: Vec<String> = (0..buf.area.height)
             .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
             .collect();
-        // Truncation puts the ellipsis on the task's own row; the old wrap never did.
-        let task_row = rows
+        // The task wraps: its head renders on one row, its tail on a later row,
+        // and no ellipsis truncates it.
+        let head_y = rows
             .iter()
-            .find(|r| r.contains("Refactor"))
-            .expect("the long task's row should render");
+            .position(|r| r.contains("Refactor"))
+            .expect("the long task's first row should render");
         assert!(
-            task_row.contains('\u{2026}'),
-            "the task row must end with an ellipsis when truncated: {task_row}"
+            !rows[head_y].contains('\u{2026}'),
+            "a wrapped task row must not carry a truncation ellipsis: {}",
+            rows[head_y]
         );
-        // The clipped tail must not survive anywhere on that row.
+        let tail_y = rows
+            .iter()
+            .position(|r| r.contains("window"))
+            .expect("the task's tail must render somewhere (full text shown)");
         assert!(
-            !task_row.contains("window"),
-            "the tail past the width must be clipped, not wrapped: {task_row}"
+            tail_y > head_y,
+            "the tail continues on a later row (wrap), head at {head_y}, tail at {tail_y}"
         );
         std::fs::remove_dir_all(&tmp).ok();
     }
 
     #[test]
-    fn top_input_line_keeps_cursor_visible_for_overflowing_text() {
+    fn top_input_wraps_overflowing_text_and_keeps_cursor_visible() {
         use crate::session::test_root;
         let tmp = std::env::temp_dir().join(format!("cs-ui-inputwin-{}", std::process::id()));
         let name = "solo-input";
@@ -2118,11 +2242,15 @@ mod tests {
             .flat_map(|y| (0..buf.area.width).map(move |x| (x, y)))
             .map(|(x, y)| buf[(x, y)].symbol().to_string())
             .collect();
-        // The block cursor is on screen, and the tail (nearest the cursor) is shown
-        // while the head has scrolled off.
+        // The input wraps instead of windowing: the block cursor is on screen,
+        // the tail nearest the cursor is shown, AND the head is still visible
+        // on an earlier wrapped row.
         assert!(joined.contains('\u{2588}'), "block cursor must be visible");
         assert!(joined.contains("zzz"), "the tail nearest the cursor is shown");
-        assert!(!joined.contains("the quick brown"), "the head scrolled out of the field");
+        assert!(
+            joined.contains("the quick brown"),
+            "the head stays visible on a wrapped row instead of scrolling off"
+        );
         std::fs::remove_dir_all(&tmp).ok();
     }
 
