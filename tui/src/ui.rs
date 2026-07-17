@@ -92,31 +92,6 @@ fn truncate_str(s: &str, max_width: usize) -> String {
     format!("{}...", &s[..end])
 }
 
-/// Clip `s` to at most `max_cols` display columns, appending `…` when clipped.
-/// Display-width aware — never splits a wide char.
-fn truncate_cols(s: &str, max_cols: usize) -> String {
-    use unicode_width::UnicodeWidthChar;
-    if s.width() <= max_cols {
-        return s.to_string();
-    }
-    if max_cols == 0 {
-        return String::new();
-    }
-    let budget = max_cols - 1; // leave one column for the ellipsis
-    let mut out = String::new();
-    let mut used = 0usize;
-    for ch in s.chars() {
-        let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
-        if used + cw > budget {
-            break;
-        }
-        out.push(ch);
-        used += cw;
-    }
-    out.push('\u{2026}');
-    out
-}
-
 /// Most rows the to-do input (or an in-place edit) may grow to before it
 /// scrolls vertically to follow the cursor.
 const MAX_INPUT_ROWS: usize = 4;
