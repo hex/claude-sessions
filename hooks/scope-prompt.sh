@@ -15,6 +15,13 @@ set -uo pipefail
 [ -n "${CLAUDE_SESSION_META_DIR:-}" ] \
     && rm -f "$CLAUDE_SESSION_META_DIR/local/attention" 2>/dev/null
 
+# iTerm2: the bounce raised at turn end stops the moment the user prompts.
+# Mirrors the guard in narrative-reminder.sh (hooks are standalone).
+if [ -z "${CS_NO_ITERM2:-}" ] && [ "${TERM_PROGRAM:-}" = "iTerm.app" ]; then
+    _it2="${CS_IT2_DIR:-$HOME/.iterm2}/it2attention"
+    { [ -x "$_it2" ] && "$_it2" stop > "${CS_IT2_TTY:-/dev/tty}"; } 2>/dev/null || true
+fi
+
 # Read the prompt purely as DATA: jq decodes it, and it is only ever fed to other
 # commands as quoted stdin or written to a file via awk ENVIRON — never eval'd or
 # expanded into a shell context.
