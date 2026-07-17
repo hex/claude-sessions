@@ -255,6 +255,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         Mode::Secrets => render_secrets_popup(app, frame),
         Mode::CommandOutput(text) => render_command_output(text, p, frame),
         Mode::Changelog => render_changelog(app, frame),
+        Mode::Legend => render_legend(app, frame),
         _ => {}
     }
 }
@@ -826,7 +827,7 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
                 "Space:mark  D:delete marked  Esc:clear marks  q:quit  Enter:open  /:search"
             }
             Mode::Normal => {
-                "q:quit  Enter:open  n:new  d:delete  r:rename  Tab:to-do  Space:mark  /:search  1-6:sort  A:archived"
+                "q:quit  Enter:open  n:new  d:delete  r:rename  Tab:to-do  Space:mark  /:search  1-6:sort  A:archived  ?:legend"
             }
             Mode::SessionMenu => "j/k:navigate  Enter:select  Esc:cancel",
             Mode::ConfirmDelete | Mode::ConfirmBatchDelete => "y:confirm  n:cancel",
@@ -835,6 +836,7 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
             Mode::Secrets => "j/k:navigate  v/Enter:view  d:remove  Esc:close",
             Mode::CommandOutput(_) => "Press any key to dismiss",
             Mode::Changelog => "Esc:close",
+            Mode::Legend => "Esc:close",
             Mode::Search => unreachable!(),
         }
     };
@@ -1273,6 +1275,43 @@ fn render_changelog(app: &App, frame: &mut Frame) {
     let paragraph = Paragraph::new(lines)
         .block(block)
         .wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, popup_area);
+}
+
+/// Centered overlay explaining the gutter glyphs and row colors of the
+/// session table. Swatches use the same palette colors the rows use, so the
+/// legend stays true in both themes.
+fn render_legend(app: &App, frame: &mut Frame) {
+    let p = app.theme;
+    let entry = |glyph: &str, color: Color, bold: bool, label: &str| -> Line<'static> {
+        let mut style = Style::default().fg(color);
+        if bold {
+            style = style.add_modifier(Modifier::BOLD);
+        }
+        Line::from(vec![
+            Span::styled(format!("  {glyph:^3} "), style),
+            Span::styled(label.to_string(), Style::default().fg(p.ink)),
+        ])
+    };
+    let lines: Vec<Line> = vec![
+        Line::default(),
+        entry("\u{25cf}", p.green, false, "recency dot \u{2014} green when recently active, fading to grey as the session goes dormant"),
+        entry("\u{25aa}", p.ember, false, "locked \u{2014} a conversation is live in this session right now"),
+        entry("*", p.gold, true, "marked with Space for batch actions (D deletes the marked set)"),
+        entry("\u{25aa}", p.gold, false, "has stored secrets (shown here when the SECRETS column is hidden)"),
+        entry("\u{2500}", p.comment, false, "dim grey row \u{2014} archived session, or not matching the current search"),
+        Line::default(),
+    ];
+
+    let height = (lines.len() as u16 + 2).min(frame.area().height.saturating_sub(2));
+    let popup_area = centered_rect(80, height, frame.area());
+    frame.render_widget(Clear, popup_area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(p.strong))
+        .title(" legend ")
+        .title_style(Style::default().fg(p.ink).add_modifier(Modifier::BOLD));
+    let paragraph = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
     frame.render_widget(paragraph, popup_area);
 }
 
@@ -2254,6 +2293,26 @@ mod tests {
         let mut app = App::new(one_session());
         app.theme = Palette::dark();
         app.handle_key(KeyEvent::from(KeyCode::Char('C')));
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn legend_overlay_opens_on_question_mark_and_explains_the_gutter() {
+        let mut app = App::new(one_session());
+        app.theme = Palette::dark();
+
+        let joined = render_wide(&mut app);
+        assert!(joined.contains("?"), "footer should advertise the legend key");
+        assert!(!joined.contains("recency dot"), "legend hidden until asked for");
+
+        app.handle_key(KeyEvent::from(KeyCode::Char('?')));
+        assert_eq!(app.mode, Mode::Legend);
+        let joined = render_wide(&mut app);
+        for label in ["recency dot", "locked", "marked with Space", "stored secrets", "archived"] {
+            assert!(joined.contains(label), "legend should explain {label}: {joined}");
+        }
+
+        app.handle_key(KeyEvent::from(KeyCode::Esc));
         assert_eq!(app.mode, Mode::Normal);
     }
 

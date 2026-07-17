@@ -248,6 +248,7 @@ pub enum Mode {
     Secrets,
     CommandOutput(String),
     Changelog,
+    Legend,
 }
 
 /// Which panel receives keyboard input while in `Mode::Normal`.
@@ -800,6 +801,7 @@ impl App {
             Mode::CreateSession => self.handle_create_session(key),
             Mode::Secrets => self.handle_secrets(key),
             Mode::Changelog => self.handle_changelog(key),
+            Mode::Legend => self.handle_legend(key),
             Mode::CommandOutput(_) => {
                 if self.return_to_secrets {
                     self.return_to_secrets = false;
@@ -864,6 +866,10 @@ impl App {
                 if self.update_notice.is_some() {
                     self.mode = Mode::Changelog;
                 }
+                Action::None
+            }
+            KeyCode::Char('?') => {
+                self.mode = Mode::Legend;
                 Action::None
             }
             KeyCode::Char('d') => {
@@ -1083,6 +1089,16 @@ impl App {
     fn handle_changelog(&mut self, key: KeyEvent) -> Action {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('C') | KeyCode::Enter => {
+                self.mode = Mode::Normal;
+            }
+            _ => {}
+        }
+        Action::None
+    }
+
+    fn handle_legend(&mut self, key: KeyEvent) -> Action {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') | KeyCode::Enter => {
                 self.mode = Mode::Normal;
             }
             _ => {}
