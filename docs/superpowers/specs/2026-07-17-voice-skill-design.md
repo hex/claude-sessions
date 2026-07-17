@@ -100,9 +100,10 @@ commands to a bot.
 
 Inputs: every `*.jsonl` directly under `~/.claude/projects/*/`. The
 script is standalone (it does not source bin/cs), so it derives its paths
-itself: transcripts root `${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}`,
-output root `${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}/.voice` — both
-env-overridable, which is also how tests isolate it. Skipped entirely: any
+itself: transcripts root `${CS_TRANSCRIPTS_DIR:-$HOME/.claude/projects}`
+(the same override cs's doctor and test harness already use for transcript
+isolation), output root `${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}/.voice`
+— both env-overridable, which is also how tests isolate it. Skipped entirely: any
 path containing `/subagents/` and any file named `agent-*.jsonl` — their
 "user" messages are dispatch prompts written by Claude, not the user.
 
