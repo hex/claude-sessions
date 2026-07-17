@@ -262,8 +262,17 @@ write_session_claude_md() {
 #   - CLAUDE.md absent, sentinel-free, or CLAUDE.local.md already carries
 #     the protocol: no-op.
 #   - Nothing but whitespace above the first cs sentinel (nothing of the
-#     user's): the whole file moves; CLAUDE.md is removed. Appended, not
-#     moved, when a user CLAUDE.local.md exists.
+#     user's), OR the head's first non-blank line is exactly
+#     "# Session Documentation Protocol" AND the first sentinel is not the
+#     legacy cs:memory-rules block (the pre-leading-sentinel template era
+#     wrote that heading first and gained sentinels only for later
+#     sections, so the whole head is cs's, not the user's): the whole file
+#     moves; CLAUDE.md is removed. Appended, not moved, when a user
+#     CLAUDE.local.md exists.
+#   - Old head immediately followed by an unretired cs:memory-rules block:
+#     mixed-split as below, unmoved — Phase 9 still needs the split layout
+#     to retire that block in place before the file can be a wholesale-move
+#     candidate.
 #   - User head above the first sentinel: head stays in CLAUDE.md (trailing
 #     blank lines of the head collapse — deterministic), sentinel-to-EOF
 #     moves (or appends); both files kept.
@@ -283,29 +292,45 @@ migrate_claude_md_to_local() {
     if [ "$split_line" -gt 1 ]; then
         head_text=$(sed -n "1,$((split_line - 1))p" "$claude_md")
     fi
+    # sed -n '...;q' on its own single-shot stdin is safe under pipefail:
+    # the producer (printf) writes once and is done, so sed quitting early
+    # never SIGPIPEs anything still writing.
+    local first_head_line
+    first_head_line=$(printf '%s\n' "$head_text" | sed -n '/[^[:space:]]/{p;q;}')
+    local first_sentinel
+    first_sentinel=$(awk '/<!-- cs:/{print; exit}' "$claude_md")
+    local wholesale=0
     case "$head_text" in
         *[![:space:]]*)
-            if [ -f "$local_md" ]; then
-                printf '\n' >> "$local_md"
-                sed -n "${split_line},\$p" "$claude_md" >> "$local_md"
-            else
-                sed -n "${split_line},\$p" "$claude_md" > "$local_md"
+            if [ "$first_head_line" = "# Session Documentation Protocol" ] \
+                && [ "$first_sentinel" != "<!-- cs:memory-rules -->" ]; then
+                wholesale=1
             fi
-            printf '%s\n' "$head_text" > "$claude_md.tmp" \
-                && mv "$claude_md.tmp" "$claude_md"
-            warn "Moved cs-managed sections from CLAUDE.md to CLAUDE.local.md; your own content stays in CLAUDE.md"
             ;;
         *)
-            if [ -f "$local_md" ]; then
-                printf '\n' >> "$local_md"
-                cat "$claude_md" >> "$local_md"
-                rm "$claude_md"
-            else
-                mv "$claude_md" "$local_md"
-            fi
-            warn "Moved the cs session protocol from CLAUDE.md to CLAUDE.local.md"
+            wholesale=1
             ;;
     esac
+    if [ "$wholesale" -eq 1 ]; then
+        if [ -f "$local_md" ]; then
+            printf '\n' >> "$local_md"
+            cat "$claude_md" >> "$local_md"
+            rm "$claude_md"
+        else
+            mv "$claude_md" "$local_md"
+        fi
+        warn "Moved the cs session protocol from CLAUDE.md to CLAUDE.local.md"
+    else
+        if [ -f "$local_md" ]; then
+            printf '\n' >> "$local_md"
+            sed -n "${split_line},\$p" "$claude_md" >> "$local_md"
+        else
+            sed -n "${split_line},\$p" "$claude_md" > "$local_md"
+        fi
+        printf '%s\n' "$head_text" > "$claude_md.tmp" \
+            && mv "$claude_md.tmp" "$claude_md"
+        warn "Moved cs-managed sections from CLAUDE.md to CLAUDE.local.md; your own content stays in CLAUDE.md"
+    fi
     return 0
 }
 

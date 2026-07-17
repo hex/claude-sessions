@@ -233,11 +233,16 @@ migrate_session() {
     # sentinel-free CLAUDE.md that references .cs/ is a pre-sentinel-era cs
     # template: that session stays entirely on CLAUDE.md — extraction cannot
     # be surgical without sentinels, and a second protocol file would
-    # duplicate instructions.
+    # duplicate instructions. A wholesale-moved old-template head lacks the
+    # leading cs:session-protocol sentinel by definition (that absence is
+    # what made it a wholesale-move candidate), so "protocol already
+    # present" in CLAUDE.local.md is any cs sentinel at all, not just the
+    # leading one — otherwise this fallback would re-append a duplicate
+    # fresh template on top of it.
     migrate_claude_md_to_local "$session_dir"
     local claude_md="$session_dir/CLAUDE.md"
     local claude_local="$session_dir/CLAUDE.local.md"
-    if ! { [ -f "$claude_local" ] && grep -q 'cs:session-protocol' "$claude_local"; } \
+    if ! { [ -f "$claude_local" ] && grep -q '<!-- cs:' "$claude_local"; } \
         && ! { [ -f "$claude_md" ] && grep -q '\.cs/' "$claude_md"; }; then
         if [ -f "$claude_local" ]; then
             printf '\n' >> "$claude_local"

@@ -161,6 +161,45 @@ test_worktree_bootstrap_writes_local_md() {
 # CLAUDE.local.md (a real project repo has no reason to know about it) — the
 # worktree bootstrap must keep the protocol file out of `git status` via the
 # clone-local info/exclude instead of touching that .gitignore.
+test_old_template_head_moves_wholesale() {
+    local dir
+    dir=$(create_test_session "oldtemplate")
+    printf '# Session Documentation Protocol\n\nold body referencing .cs/\n\n<!-- cs:memory-note -->\nnote body\n' > "$dir/CLAUDE.md"
+    "$CS_BIN" "oldtemplate" < /dev/null > /dev/null 2>&1 || true
+    assert_file_not_exists "$dir/CLAUDE.md" "old-template head moves wholesale, CLAUDE.md is gone" || return 1
+    assert_file_contains "$dir/CLAUDE.local.md" "# Session Documentation Protocol" \
+        "old-template heading moved to CLAUDE.local.md" || return 1
+    assert_file_contains "$dir/CLAUDE.local.md" "cs:memory-note" \
+        "memory-note sentinel moved to CLAUDE.local.md" || return 1
+}
+
+# The final reviewer's repro: a tracked base created and committed before the
+# CLAUDE.local.md backfill existed, never launched since (worktree creation
+# does not migrate the base). Its checked-out .gitignore has no
+# CLAUDE.local.md entry, so the worktree's own copy of the file must be
+# covered by the clone-local info/exclude in tracked mode too, or it reads
+# as untracked and blocks `cs base --merge task`'s preflight.
+test_worktree_from_unmigrated_base_can_merge() {
+    local dir
+    dir=$(create_test_session "unmigrated")
+    ( cd "$dir" && git init -q . 2>/dev/null && git add -A 2>/dev/null && git -c user.email=t@t -c user.name=t commit -qm init 2>/dev/null ) || return 1
+    "$CS_BIN" "unmigrated@task1" < /dev/null > /dev/null 2>&1 || true
+    local wt="$CS_SESSIONS_ROOT/unmigrated@task1"
+    if [ -d "$wt" ]; then
+        local exclude
+        exclude=$( (cd "$wt" && git rev-parse --git-path info/exclude) 2>/dev/null || echo "" )
+        case "$exclude" in
+            /*) : ;;
+            *) exclude="$wt/$exclude" ;;
+        esac
+        assert_file_contains "$exclude" "CLAUDE.local.md" \
+            "tracked-mode worktree from an unmigrated base still excludes CLAUDE.local.md, unblocking the merge preflight" || return 1
+    else
+        echo "  FAIL: worktree session was not created"
+        return 1
+    fi
+}
+
 test_worktree_ignored_mode_excludes_local_md_via_clone_exclude() {
     local dir
     dir=$(create_test_session "wtignored")
@@ -197,6 +236,8 @@ run_test test_migration_idempotent_byte_for_byte
 run_test test_memory_note_lands_in_local_md
 run_test test_gitignore_backfill_idempotent
 run_test test_worktree_bootstrap_writes_local_md
+run_test test_old_template_head_moves_wholesale
+run_test test_worktree_from_unmigrated_base_can_merge
 run_test test_worktree_ignored_mode_excludes_local_md_via_clone_exclude
 
 report_results

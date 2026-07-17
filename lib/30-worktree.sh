@@ -133,29 +133,38 @@ create_worktree_session() {
         bootstrap_worktree_meta "$wt_dir" "$base_name" "$task"
     fi
 
-    # The protocol file is gitignored, so no worktree inherits it through
-    # git in either mode; write this worktree's own copy. The FILE only —
-    # never touch a .gitignore here (ignored-mode worktrees check out
-    # project repos whose .gitignore is theirs).
-    write_session_claude_md "$wt_dir"
+    # The protocol file is normally gitignored, so no worktree inherits it
+    # through git in either mode; write this worktree's own copy. The FILE
+    # only — never touch a .gitignore here (ignored-mode worktrees check out
+    # project repos whose .gitignore is theirs). Guarded: a repo that
+    # (against CC convention) TRACKS CLAUDE.local.md checks its own copy
+    # into the worktree; only overwrite when absent or already cs's own.
+    if [ ! -f "$wt_dir/CLAUDE.local.md" ] \
+        || grep -q 'cs:session-protocol' "$wt_dir/CLAUDE.local.md"; then
+        write_session_claude_md "$wt_dir"
+    fi
 
-    if [ "$mode" = "ignored" ]; then
-        # The checkout's .gitignore belongs to the project; keep the
-        # protocol file invisible to git via the clone-local exclude
-        # instead (never tracked, never dirties the task branch; shared
-        # with the base checkout through the common git dir).
-        local exclude
-        exclude=$( (cd "$wt_dir" && git rev-parse --git-path info/exclude) 2>/dev/null || echo "" )
-        case "$exclude" in
-            "") : ;;
-            /*) : ;;
-            *) exclude="$wt_dir/$exclude" ;;
-        esac
-        if [ -n "$exclude" ]; then
-            mkdir -p "${exclude%/*}" 2>/dev/null || true
-            if ! grep -qF 'CLAUDE.local.md' "$exclude" 2>/dev/null; then
-                echo 'CLAUDE.local.md' >> "$exclude"
-            fi
+    # Cover the protocol file via the clone-local info/exclude in BOTH
+    # modes. In ignored mode the checkout's .gitignore belongs to the
+    # project and is never touched. In tracked mode the file is normally
+    # covered by the base's own .gitignore entry — but a base committed
+    # before the CLAUDE.local.md backfill (and never relaunched since)
+    # checks out a .gitignore missing it, which would otherwise leave the
+    # file untracked and block `cs <base> --merge`'s preflight. The exclude
+    # entry is clone-local and harmless alongside a .gitignore entry (never
+    # tracked, never dirties the task branch; shared with the base checkout
+    # through the common git dir).
+    local exclude
+    exclude=$( (cd "$wt_dir" && git rev-parse --git-path info/exclude) 2>/dev/null || echo "" )
+    case "$exclude" in
+        "") : ;;
+        /*) : ;;
+        *) exclude="$wt_dir/$exclude" ;;
+    esac
+    if [ -n "$exclude" ]; then
+        mkdir -p "${exclude%/*}" 2>/dev/null || true
+        if ! grep -qF 'CLAUDE.local.md' "$exclude" 2>/dev/null; then
+            echo 'CLAUDE.local.md' >> "$exclude"
         fi
     fi
 
