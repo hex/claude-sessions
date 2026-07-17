@@ -228,17 +228,24 @@ migrate_session() {
     migrate_discoveries_to_narrative "$session_dir"
     ensure_narrative_file "$session_dir"
 
-    # Phase 5: ensure the cs session protocol is present in CLAUDE.md. Append it
-    # (never overwrite) so a user-authored or project CLAUDE.md is preserved; the
-    # sentinel keeps it idempotent, and a file that already references .cs/ is a
-    # prior cs template that needs nothing.
+    # Phase 5: move cs-managed sections out of CLAUDE.md, then ensure the
+    # protocol is present in CLAUDE.local.md (machine-local, gitignored). A
+    # sentinel-free CLAUDE.md that references .cs/ is a pre-sentinel-era cs
+    # template: that session stays entirely on CLAUDE.md — extraction cannot
+    # be surgical without sentinels, and a second protocol file would
+    # duplicate instructions.
+    migrate_claude_md_to_local "$session_dir"
     local claude_md="$session_dir/CLAUDE.md"
-    if [ -f "$claude_md" ] \
-        && ! grep -q 'cs:session-protocol' "$claude_md" \
-        && ! grep -q '\.cs/' "$claude_md"; then
-        printf '\n' >> "$claude_md"
-        _emit_session_claude_md >> "$claude_md"
-        warn "Appended the cs session protocol to your existing CLAUDE.md"
+    local claude_local="$session_dir/CLAUDE.local.md"
+    if ! { [ -f "$claude_local" ] && grep -q 'cs:session-protocol' "$claude_local"; } \
+        && ! { [ -f "$claude_md" ] && grep -q '\.cs/' "$claude_md"; }; then
+        if [ -f "$claude_local" ]; then
+            printf '\n' >> "$claude_local"
+            _emit_session_claude_md >> "$claude_local"
+            warn "Appended the cs session protocol to your existing CLAUDE.local.md"
+        else
+            write_session_claude_md "$session_dir"
+        fi
     fi
 
     # Phase 7: prune retired command-tracker artifacts.
@@ -361,8 +368,14 @@ migrate_session() {
     #   4. Neither sentinel present — append the note fresh.
     #
     # Note content lives in _emit_memory_note_block (shared with
-    # write_session_claude_md). Phase 6 guarantees CLAUDE.md exists.
-    local claude_md_p9="$session_dir/CLAUDE.md"
+    # write_session_claude_md). Phase 5 guarantees the local file for
+    # migrated sessions; legacy sessions skip these phases.
+    # Phases 9 and 10 manage sections in CLAUDE.local.md ONLY. Sessions
+    # still on a legacy CLAUDE.md (pre-sentinel era, or a user file that
+    # merely mentions .cs/) are left entirely alone — cs never writes to
+    # CLAUDE.md again. Both phases' existing [ -f ] guards make them
+    # no-ops when the local file is absent.
+    local claude_md_p9="$session_dir/CLAUDE.local.md"
     if [ -f "$claude_md_p9" ]; then
         if grep -q '<!-- cs:memory-note -->' "$claude_md_p9"; then
             : # State 1: already on the note
@@ -390,7 +403,7 @@ migrate_session() {
                 echo ""
                 _emit_memory_note_block
             } >> "$claude_md_p9"
-            warn "Added cs:memory-note to CLAUDE.md"
+            warn "Added cs:memory-note to CLAUDE.local.md"
         fi
     fi
 
@@ -424,7 +437,7 @@ Do not fire on every short affirmative ("yes", "ok", "thanks"). Fire when the *w
 
 To opt out, delete the prose above but keep the `cs:wrap-cues` HTML comment as a tombstone — cs treats the sentinel's presence as "managed, do not re-add."
 EOF
-        warn "Appended session wrap-up cues to CLAUDE.md"
+        warn "Appended session wrap-up cues to CLAUDE.local.md"
     fi
 
     # Phase 11: Backfill claude_session_color in local state when absent.

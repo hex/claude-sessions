@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ABOUTME: Tests for session wrap-up cues block in CLAUDE.md
+# ABOUTME: Tests for session wrap-up cues block in the session protocol file
 # ABOUTME: Validates new-session insertion, lazy migration, and tombstone opt-out
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -21,13 +21,13 @@ teardown() {
 test_new_session_has_wrap_cues_block() {
     "$CS_BIN" test-session <<< "" >/dev/null 2>&1 || true
 
-    local claude_md="$CS_SESSIONS_ROOT/test-session/CLAUDE.md"
+    local claude_md="$CS_SESSIONS_ROOT/test-session/CLAUDE.local.md"
 
-    assert_file_exists "$claude_md" "session CLAUDE.md should exist" || return 1
+    assert_file_exists "$claude_md" "session CLAUDE.local.md should exist" || return 1
     assert_file_contains "$claude_md" "cs:wrap-cues" \
-        "CLAUDE.md should contain the cs:wrap-cues sentinel" || return 1
+        "CLAUDE.local.md should contain the cs:wrap-cues sentinel" || return 1
     assert_file_contains "$claude_md" "Session wrap-up cues" \
-        "CLAUDE.md should contain the section header" || return 1
+        "CLAUDE.local.md should contain the section header" || return 1
     assert_file_contains "$claude_md" "AskUserQuestion" \
         "block should instruct Claude to use AskUserQuestion" || return 1
     assert_file_contains "$claude_md" "/wrap" \
@@ -49,8 +49,12 @@ aliases: ["$name"]
 # Session: $name
 EOF
     echo "# Session narrative" > "$session_dir/.cs/memory/narrative.md"
-    # Legacy CLAUDE.md: mentions .cs/ paths (Phase 5 doesn't fire) and has
-    # the cs:memory-rules sentinel (Phase 9 doesn't fire), but no cs:wrap-cues.
+    # Legacy CLAUDE.md: a .cs/-referencing head with no sentinel of its own,
+    # followed by a cs:memory-rules sentinel with header but no cs:wrap-cues.
+    # Phase 5 extracts everything from the first sentinel onward into
+    # CLAUDE.local.md, leaving the head in CLAUDE.md; Phase 9 then retires
+    # the memory-rules block there into a memory-note, and Phase 10 appends
+    # wrap-cues there since none exists yet.
     cat > "$session_dir/CLAUDE.md" << 'EOF'
 # Session Documentation Protocol
 
@@ -78,9 +82,11 @@ test_lazy_migration_appends_wrap_cues() {
 
     "$CS_BIN" legacy-wrap <<< "" >/dev/null 2>&1 || true
 
-    assert_file_contains "$session_dir/CLAUDE.md" "cs:wrap-cues" \
+    assert_file_contains "$session_dir/CLAUDE.md" "Session Documentation Protocol" \
+        "the head above the sentinel stays in CLAUDE.md" || return 1
+    assert_file_contains "$session_dir/CLAUDE.local.md" "cs:wrap-cues" \
         "Phase 10 migration should append the sentinel" || return 1
-    assert_file_contains "$session_dir/CLAUDE.md" "Session wrap-up cues" \
+    assert_file_contains "$session_dir/CLAUDE.local.md" "Session wrap-up cues" \
         "appended block should include the section header" || return 1
 }
 
@@ -90,17 +96,17 @@ test_lazy_migration_wrap_cues_idempotent() {
 
     "$CS_BIN" legacy-wrap <<< "" >/dev/null 2>&1 || true
     local first_size
-    first_size=$(wc -c < "$session_dir/CLAUDE.md" | tr -d ' ')
+    first_size=$(wc -c < "$session_dir/CLAUDE.local.md" | tr -d ' ')
 
     "$CS_BIN" legacy-wrap <<< "" >/dev/null 2>&1 || true
     local second_size
-    second_size=$(wc -c < "$session_dir/CLAUDE.md" | tr -d ' ')
+    second_size=$(wc -c < "$session_dir/CLAUDE.local.md" | tr -d ' ')
 
     assert_eq "$first_size" "$second_size" \
-        "second migration should not change CLAUDE.md size" || return 1
+        "second migration should not change CLAUDE.local.md size" || return 1
 
     local sentinel_count
-    sentinel_count=$(grep -cF '<!-- cs:wrap-cues -->' "$session_dir/CLAUDE.md")
+    sentinel_count=$(grep -cF '<!-- cs:wrap-cues -->' "$session_dir/CLAUDE.local.md")
     assert_eq "1" "$sentinel_count" \
         "HTML sentinel must appear exactly once after repeated migrations" || return 1
 }
@@ -143,11 +149,13 @@ EOF
 
     "$CS_BIN" opted-out-wrap <<< "" >/dev/null 2>&1 || true
 
-    assert_file_not_contains "$session_dir/CLAUDE.md" "Session wrap-up cues" \
+    assert_file_contains "$session_dir/CLAUDE.md" "Session Documentation Protocol" \
+        "the head above the sentinel stays in CLAUDE.md" || return 1
+    assert_file_not_contains "$session_dir/CLAUDE.local.md" "Session wrap-up cues" \
         "tombstone sentinel must prevent re-addition of the block" || return 1
 
     local sentinel_count
-    sentinel_count=$(grep -cF '<!-- cs:wrap-cues -->' "$session_dir/CLAUDE.md")
+    sentinel_count=$(grep -cF '<!-- cs:wrap-cues -->' "$session_dir/CLAUDE.local.md")
     assert_eq "1" "$sentinel_count" \
         "tombstone sentinel must not duplicate" || return 1
 }

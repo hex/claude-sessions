@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: Tests for the cs -adopt command that converts existing projects to cs sessions
-# ABOUTME: Validates symlink creation, .cs/ structure, CLAUDE.md merging, and edge cases
+# ABOUTME: Validates symlink creation, .cs/ structure, CLAUDE.local.md protocol placement, and edge cases
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/test_lib.sh"
@@ -49,18 +49,19 @@ test_adopt_creates_symlink() {
     assert_eq "$real_project" "$target" "Symlink should point to project directory" || return 1
 }
 
-test_adopt_creates_claude_md_when_none_exists() {
+test_adopt_creates_claude_local_md_when_none_exists() {
     local project_dir="$TEST_TMPDIR/my-project"
     mkdir -p "$project_dir"
 
     (cd "$project_dir" && "$CS_BIN" -adopt my-session)
 
-    assert_exists "$project_dir/CLAUDE.md" "CLAUDE.md should be created" || return 1
-    assert_file_contains "$project_dir/CLAUDE.md" "Session Documentation Protocol" \
-        "CLAUDE.md should contain session protocol" || return 1
+    assert_exists "$project_dir/CLAUDE.local.md" "CLAUDE.local.md should be created" || return 1
+    assert_file_contains "$project_dir/CLAUDE.local.md" "Session Documentation Protocol" \
+        "CLAUDE.local.md should contain session protocol" || return 1
+    assert_not_exists "$project_dir/CLAUDE.md" "CLAUDE.md should not be created when none existed" || return 1
 }
 
-test_adopt_merges_existing_claude_md() {
+test_adopt_leaves_existing_claude_md_untouched() {
     local project_dir="$TEST_TMPDIR/my-project"
     mkdir -p "$project_dir"
 
@@ -73,10 +74,12 @@ EOF
 
     (cd "$project_dir" && "$CS_BIN" -adopt my-session)
 
-    assert_file_contains "$project_dir/CLAUDE.md" "Session Documentation Protocol" \
-        "CLAUDE.md should contain session protocol after merge" || return 1
+    assert_file_contains "$project_dir/CLAUDE.local.md" "Session Documentation Protocol" \
+        "CLAUDE.local.md should contain session protocol" || return 1
     assert_file_contains "$project_dir/CLAUDE.md" "Use TypeScript for all files" \
-        "CLAUDE.md should preserve original content after merge" || return 1
+        "CLAUDE.md should preserve original content" || return 1
+    assert_file_not_contains "$project_dir/CLAUDE.md" "Session Documentation Protocol" \
+        "CLAUDE.md must not gain the protocol" || return 1
 }
 
 test_adopt_fails_if_already_cs_session() {
@@ -260,8 +263,8 @@ run_test test_adopt_sets_memory_merge_driver
 
 run_test test_adopt_creates_cs_structure
 run_test test_adopt_creates_symlink
-run_test test_adopt_creates_claude_md_when_none_exists
-run_test test_adopt_merges_existing_claude_md
+run_test test_adopt_creates_claude_local_md_when_none_exists
+run_test test_adopt_leaves_existing_claude_md_untouched
 run_test test_adopt_fails_if_already_cs_session
 run_test test_adopt_fails_if_session_name_exists
 run_test test_adopt_validates_session_name
