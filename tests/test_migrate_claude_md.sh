@@ -157,6 +157,34 @@ test_worktree_bootstrap_writes_local_md() {
     fi
 }
 
+# Ignored mode: the base's .gitignore excludes .cs/ but says nothing about
+# CLAUDE.local.md (a real project repo has no reason to know about it) — the
+# worktree bootstrap must keep the protocol file out of `git status` via the
+# clone-local info/exclude instead of touching that .gitignore.
+test_worktree_ignored_mode_excludes_local_md_via_clone_exclude() {
+    local dir
+    dir=$(create_test_session "wtignored")
+    printf '.cs/\n' > "$dir/.gitignore"
+    ( cd "$dir" && git init -q . 2>/dev/null && git add -A 2>/dev/null && git -c user.email=t@t -c user.name=t commit -qm init 2>/dev/null ) || return 1
+    "$CS_BIN" "wtignored@task1" < /dev/null > /dev/null 2>&1 || true
+    local wt="$CS_SESSIONS_ROOT/wtignored@task1"
+    if [ -d "$wt" ]; then
+        local exclude
+        exclude=$( (cd "$wt" && git rev-parse --git-path info/exclude) 2>/dev/null || echo "")
+        case "$exclude" in
+            /*) : ;;
+            *) exclude="$wt/$exclude" ;;
+        esac
+        assert_file_contains "$exclude" "CLAUDE.local.md" \
+            "ignored-mode worktree excludes the protocol file via the clone-local exclude" || return 1
+        assert_file_not_contains "$wt/.gitignore" "CLAUDE.local.md" \
+            "the project's own .gitignore is never touched" || return 1
+    else
+        echo "  FAIL: ignored-mode worktree session was not created"
+        return 1
+    fi
+}
+
 run_test test_migrate_preserves_user_claude_md
 run_test test_migrate_claude_md_idempotent
 run_test test_create_path_writes_local_md
@@ -169,5 +197,6 @@ run_test test_migration_idempotent_byte_for_byte
 run_test test_memory_note_lands_in_local_md
 run_test test_gitignore_backfill_idempotent
 run_test test_worktree_bootstrap_writes_local_md
+run_test test_worktree_ignored_mode_excludes_local_md_via_clone_exclude
 
 report_results

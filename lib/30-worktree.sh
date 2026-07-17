@@ -139,6 +139,26 @@ create_worktree_session() {
     # project repos whose .gitignore is theirs).
     write_session_claude_md "$wt_dir"
 
+    if [ "$mode" = "ignored" ]; then
+        # The checkout's .gitignore belongs to the project; keep the
+        # protocol file invisible to git via the clone-local exclude
+        # instead (never tracked, never dirties the task branch; shared
+        # with the base checkout through the common git dir).
+        local exclude
+        exclude=$( (cd "$wt_dir" && git rev-parse --git-path info/exclude) 2>/dev/null || echo "" )
+        case "$exclude" in
+            "") : ;;
+            /*) : ;;
+            *) exclude="$wt_dir/$exclude" ;;
+        esac
+        if [ -n "$exclude" ]; then
+            mkdir -p "${exclude%/*}" 2>/dev/null || true
+            if ! grep -qF 'CLAUDE.local.md' "$exclude" 2>/dev/null; then
+                echo 'CLAUDE.local.md' >> "$exclude"
+            fi
+        fi
+    fi
+
     local state="$wt_dir/.cs/local/state"
     _set_local_state "$state" claude_session_id "$(_alloc_uuid)"
     _set_local_state "$state" claude_session_color "$(_alloc_random_color)"
