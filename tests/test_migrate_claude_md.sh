@@ -143,6 +143,20 @@ test_gitignore_backfill_idempotent() {
     assert_eq "1" "$n" "gitignore entry added exactly once" || return 1
 }
 
+test_worktree_bootstrap_writes_local_md() {
+    local dir
+    dir=$(create_test_session "wtbase")
+    ( cd "$dir" && git init -q . 2>/dev/null && git add -A 2>/dev/null && git -c user.email=t@t -c user.name=t commit -qm init 2>/dev/null ) || return 1
+    "$CS_BIN" "wtbase@task1" < /dev/null > /dev/null 2>&1 || true
+    if [ -d "$CS_SESSIONS_ROOT/wtbase@task1" ]; then
+        assert_file_contains "$CS_SESSIONS_ROOT/wtbase@task1/CLAUDE.local.md" "cs:session-protocol" \
+            "worktree session gets its own protocol file" || return 1
+    else
+        echo "  FAIL: worktree session was not created"
+        return 1
+    fi
+}
+
 run_test test_migrate_preserves_user_claude_md
 run_test test_migrate_claude_md_idempotent
 run_test test_create_path_writes_local_md
@@ -154,5 +168,6 @@ run_test test_adopt_leaves_project_claude_md_alone
 run_test test_migration_idempotent_byte_for_byte
 run_test test_memory_note_lands_in_local_md
 run_test test_gitignore_backfill_idempotent
+run_test test_worktree_bootstrap_writes_local_md
 
 report_results

@@ -1126,6 +1126,12 @@ create_worktree_session() {
         bootstrap_worktree_meta "$wt_dir" "$base_name" "$task"
     fi
 
+    # The protocol file is gitignored, so no worktree inherits it through
+    # git in either mode; write this worktree's own copy. The FILE only —
+    # never touch a .gitignore here (ignored-mode worktrees check out
+    # project repos whose .gitignore is theirs).
+    write_session_claude_md "$wt_dir"
+
     local state="$wt_dir/.cs/local/state"
     _set_local_state "$state" claude_session_id "$(_alloc_uuid)"
     _set_local_state "$state" claude_session_color "$(_alloc_random_color)"
