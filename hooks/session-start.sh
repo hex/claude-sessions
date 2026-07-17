@@ -204,6 +204,13 @@ fi
 # marker left by the previous conversation's final Stop.
 rm -f "$META_DIR/local/attention" 2>/dev/null || true
 
+# iTerm2: also cancel any dock bounce the previous conversation left running.
+# Mirrors the guard in narrative-reminder.sh (hooks are standalone).
+if [ -z "${CS_NO_ITERM2:-}" ] && [ "${TERM_PROGRAM:-}" = "iTerm.app" ]; then
+    _it2="${CS_IT2_DIR:-$HOME/.iterm2}/it2attention"
+    { [ -x "$_it2" ] && "$_it2" stop > "${CS_IT2_TTY:-/dev/tty}"; } 2>/dev/null || true
+fi
+
 # Dynamic context: add session state info on resume
 if [ "$SOURCE" = "resume" ] && [ -d "$SESSION_DIR/.git" ]; then
     DYNAMIC=""

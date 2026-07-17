@@ -35,6 +35,16 @@ fi
 mkdir -p "$META_DIR/local" 2>/dev/null || true
 touch "$META_DIR/local/attention" 2>/dev/null || true
 
+# iTerm2: bounce the dock while attention is raised, so a finished turn
+# reaches the user in another app. The it2 utilities live in ~/.iterm2 (shell
+# aliases, not on PATH); escapes go to the tty directly because hook stdout is
+# captured by Claude Code. CS_NO_ITERM2=1 disables; CS_IT2_DIR/CS_IT2_TTY are
+# test seams. Silent everywhere it cannot apply.
+if [ -z "${CS_NO_ITERM2:-}" ] && [ "${TERM_PROGRAM:-}" = "iTerm.app" ]; then
+    _it2="${CS_IT2_DIR:-$HOME/.iterm2}/it2attention"
+    { [ -x "$_it2" ] && "$_it2" start > "${CS_IT2_TTY:-/dev/tty}"; } 2>/dev/null || true
+fi
+
 # --- Task queue drain (walk-away mode) ---------------------------------------
 # Hands the agent its next queued task when armed; asks once when idle. Wins
 # over the narrative nag (returns early). Queue text is arbitrary -> jq emit.
