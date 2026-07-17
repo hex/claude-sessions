@@ -2805,6 +2805,7 @@ mod tests {
 
     #[test]
     fn footer_styles_keys_and_right_aligns_version() {
+        let _env = VERSION_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("CS_VERSION", "9.9.9");
         let mut app = App::new(one_session());
         app.theme = Palette::dark();
@@ -3204,6 +3205,7 @@ mod tests {
         // reserved for it. With the fix, the hints Paragraph is clipped to
         // leave a gap (3 cols) plus the version's own width before it's
         // drawn, so the two can never share a cell.
+        let _env = VERSION_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("CS_VERSION", "9.9.9");
         let mut app = App::new(one_session());
         app.theme = Palette::dark();
@@ -3279,6 +3281,11 @@ mod tests {
     /// wide enough that the Normal-mode footer hint (with its "k label"
     /// expansion and 3-space gaps) doesn't clip, but still short of
     /// PREVIEW_MIN_WIDTH (120) so the layout stays table-only.
+    /// Serializes every test that sets, removes, or asserts on the absence of
+    /// the process-global CS_VERSION env var. Cargo runs tests on parallel
+    /// threads, so an unguarded set_var races every concurrent footer render.
+    static VERSION_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn render_app(app: &mut App) -> (ratatui::buffer::Buffer, Vec<String>) {
         let backend = TestBackend::new(115, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -3334,6 +3341,10 @@ mod tests {
 
     #[test]
     fn footer_normal_hint_names_archived_toggle() {
+        // The hint line barely fits render_app's 115 cols; a version corner
+        // (leaked CS_VERSION) would clip "archived", so render without one.
+        let _env = VERSION_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("CS_VERSION");
         let mut app = App::new(locked_and_recent_sessions());
         app.theme = Palette::light();
         let (_, rows) = render_app(&mut app);
