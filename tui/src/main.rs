@@ -40,6 +40,7 @@ fn main() {
 
     let mut app = app::App::new(sessions);
     app.theme = theme::Palette::for_theme(theme::detect_theme());
+    app.update_notice = session::update_notice();
 
     let mut terminal = init_terminal().expect("failed to initialize terminal");
 

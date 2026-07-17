@@ -254,6 +254,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         Mode::CreateSession => render_create_dialog(app, frame),
         Mode::Secrets => render_secrets_popup(app, frame),
         Mode::CommandOutput(text) => render_command_output(text, p, frame),
+        Mode::Changelog => render_changelog(app, frame),
         _ => {}
     }
 }
@@ -833,6 +834,7 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
             Mode::Rename | Mode::CreateSession => "Enter:confirm  Esc:cancel",
             Mode::Secrets => "j/k:navigate  v/Enter:view  d:remove  Esc:close",
             Mode::CommandOutput(_) => "Press any key to dismiss",
+            Mode::Changelog => "Esc:close",
             Mode::Search => unreachable!(),
         }
     };
@@ -866,8 +868,17 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
         }
     }
 
+    // The version corner doubles as the update badge: amber and actionable
+    // when cs's caches say a newer version exists, faint otherwise.
     let version = std::env::var("CS_VERSION").unwrap_or_default();
-    let vtext = if version.is_empty() { String::new() } else { format!("v{version}") };
+    let (vtext, vstyle) = match &app.update_notice {
+        Some(notice) => (
+            format!("\u{2191} v{} available \u{b7} C:changelog", notice.version),
+            Style::default().fg(p.amber).add_modifier(Modifier::BOLD),
+        ),
+        None if version.is_empty() => (String::new(), Style::default().fg(p.faint)),
+        None => (format!("v{version}"), Style::default().fg(p.faint)),
+    };
     let vw = vtext.chars().count() as u16;
     let show_version = !vtext.is_empty() && area.width > vw + 2;
 
@@ -885,10 +896,7 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
 
     if show_version {
         let vrect = Rect { x: area.x + area.width - vw, width: vw, ..area };
-        frame.render_widget(
-            Paragraph::new(Span::styled(vtext, Style::default().fg(p.faint))),
-            vrect,
-        );
+        frame.render_widget(Paragraph::new(Span::styled(vtext, vstyle)), vrect);
     }
 }
 
@@ -1210,6 +1218,59 @@ fn render_command_output(text: &str, p: Palette, frame: &mut Frame) {
         .title_style(Style::default().fg(p.orange).add_modifier(Modifier::BOLD));
     let paragraph = Paragraph::new(text.to_string())
         .style(Style::default().fg(p.fg))
+        .block(block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, popup_area);
+}
+
+/// Centered overlay listing the pending update's release-note summaries from
+/// cs's notes cache; a tombstoned or missing cache gets a pointer to the CLI.
+fn render_changelog(app: &App, frame: &mut Frame) {
+    let p = app.theme;
+    let notice = match &app.update_notice {
+        Some(n) => n,
+        None => return,
+    };
+
+    let mut lines: Vec<Line> = vec![Line::default()];
+    if notice.notes.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  release notes unavailable \u{2014} run cs -update --check",
+            Style::default().fg(p.faint),
+        )));
+    } else {
+        for (ver, summary) in &notice.notes {
+            if ver == "+" {
+                lines.push(Line::from(Span::styled(
+                    format!("       {summary}"),
+                    Style::default().fg(p.faint).add_modifier(Modifier::DIM),
+                )));
+            } else {
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("  {ver:>9}  "),
+                        Style::default().fg(p.gold).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(summary.clone(), Style::default().fg(p.ink)),
+                ]));
+            }
+        }
+    }
+    lines.push(Line::default());
+    lines.push(Line::from(Span::styled(
+        "  update with: cs -update",
+        Style::default().fg(p.faint).add_modifier(Modifier::DIM),
+    )));
+
+    let height = (lines.len() as u16 + 2).min(frame.area().height.saturating_sub(2));
+    let popup_area = centered_rect(70, height, frame.area());
+    frame.render_widget(Clear, popup_area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(p.amber))
+        .title(format!(" update available \u{2014} v{} ", notice.version))
+        .title_style(Style::default().fg(p.amber).add_modifier(Modifier::BOLD));
+    let paragraph = Paragraph::new(lines)
         .block(block)
         .wrap(Wrap { trim: false });
     frame.render_widget(paragraph, popup_area);
@@ -2140,6 +2201,60 @@ mod tests {
             !joined.contains("QUEUE"),
             "QUEUE column is hidden when no session has queued tasks: {joined}"
         );
+    }
+
+    fn notice() -> crate::session::UpdateNotice {
+        crate::session::UpdateNotice {
+            version: "2026.8.0".to_string(),
+            notes: vec![
+                ("2026.8.0".to_string(), "voice skill and queue fixes".to_string()),
+                ("+".to_string(), "\u{2026} and 3 earlier versions".to_string()),
+            ],
+        }
+    }
+
+    #[test]
+    fn update_badge_renders_only_when_a_newer_version_is_cached() {
+        let mut app = App::new(one_session());
+        app.theme = Palette::dark();
+        let joined = render_wide(&mut app);
+        assert!(!joined.contains("C:changelog"), "no badge without a notice");
+
+        app.update_notice = Some(notice());
+        let joined = render_wide(&mut app);
+        assert!(
+            joined.contains("v2026.8.0 available") && joined.contains("C:changelog"),
+            "badge should name the version and the key: {joined}"
+        );
+    }
+
+    #[test]
+    fn changelog_overlay_opens_on_key_and_closes_on_esc() {
+        let mut app = App::new(one_session());
+        app.theme = Palette::dark();
+        app.update_notice = Some(notice());
+
+        // 'C' opens the overlay; the notes and the update hint render.
+        app.handle_key(KeyEvent::from(KeyCode::Char('C')));
+        assert_eq!(app.mode, Mode::Changelog);
+        let joined = render_wide(&mut app);
+        assert!(
+            joined.contains("voice skill and queue fixes"),
+            "note summary should render: {joined}"
+        );
+        assert!(joined.contains("and 3 earlier versions"), "overflow line renders dim");
+        assert!(joined.contains("cs -update"), "update instruction renders");
+
+        app.handle_key(KeyEvent::from(KeyCode::Esc));
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn changelog_key_is_inert_without_a_notice() {
+        let mut app = App::new(one_session());
+        app.theme = Palette::dark();
+        app.handle_key(KeyEvent::from(KeyCode::Char('C')));
+        assert_eq!(app.mode, Mode::Normal);
     }
 
     #[test]

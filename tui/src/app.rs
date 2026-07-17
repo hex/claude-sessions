@@ -247,6 +247,7 @@ pub enum Mode {
     CreateSession,
     Secrets,
     CommandOutput(String),
+    Changelog,
 }
 
 /// Which panel receives keyboard input while in `Mode::Normal`.
@@ -337,6 +338,8 @@ pub struct App {
     pub filtered: Vec<usize>,
     pub table_state: TableState,
     pub mode: Mode,
+    /// Pending cs update read from cs's caches at startup; None when current.
+    pub update_notice: Option<session::UpdateNotice>,
     pub sort_col: SortColumn,
     pub sort_dir: SortDirection,
     pub search_input: TextInput,
@@ -445,6 +448,7 @@ impl App {
             filtered: Vec::new(),
             table_state,
             mode: Mode::Normal,
+            update_notice: None,
             table_area: ratatui::layout::Rect::default(),
             column_widths: Vec::new(),
             row_hit_spans: Vec::new(),
@@ -795,6 +799,7 @@ impl App {
             Mode::Rename => self.handle_rename(key),
             Mode::CreateSession => self.handle_create_session(key),
             Mode::Secrets => self.handle_secrets(key),
+            Mode::Changelog => self.handle_changelog(key),
             Mode::CommandOutput(_) => {
                 if self.return_to_secrets {
                     self.return_to_secrets = false;
@@ -853,6 +858,12 @@ impl App {
             KeyCode::Char('/') => {
                 self.mode = Mode::Search;
                 self.search_input.clear();
+                Action::None
+            }
+            KeyCode::Char('C') => {
+                if self.update_notice.is_some() {
+                    self.mode = Mode::Changelog;
+                }
                 Action::None
             }
             KeyCode::Char('d') => {
@@ -1065,6 +1076,16 @@ impl App {
             KeyCode::Backspace => self.queue_input.delete_back(),
             KeyCode::Char(c) => self.queue_input.insert(c),
             _ => {}   // Up/Down and everything else ignored
+        }
+        Action::None
+    }
+
+    fn handle_changelog(&mut self, key: KeyEvent) -> Action {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('C') | KeyCode::Enter => {
+                self.mode = Mode::Normal;
+            }
+            _ => {}
         }
         Action::None
     }
