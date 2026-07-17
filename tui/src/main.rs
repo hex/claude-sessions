@@ -91,18 +91,21 @@ fn restore_terminal() -> io::Result<()> {
 
 fn run_event_loop(app: &mut app::App, terminal: &mut Tui) -> io::Result<app::Action> {
     // While the user is recently active, redraw at ~10 fps so the selection
-    // shimmer animates. Once idle (see App::is_animating) the loop blocks on
-    // input instead, so an unattended TUI costs no CPU.
+    // shimmer animates. Once idle (see App::is_animating) the loop wakes only
+    // for the periodic session rescan, so an unattended TUI costs one scan
+    // per interval instead of a busy loop.
     const HEARTBEAT: std::time::Duration = std::time::Duration::from_millis(100);
-    const IDLE_BLOCK: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+    const REFRESH: std::time::Duration = std::time::Duration::from_secs(10);
 
     // Draw the first frame before waiting for input.
     app.drain_previews();
     terminal.draw(|frame| ui::render(app, frame))?;
 
+    let mut last_refresh = std::time::Instant::now();
     loop {
         let animating = app.is_animating(app.idle_elapsed());
-        let timeout = if animating { HEARTBEAT } else { IDLE_BLOCK };
+        let refresh_due = REFRESH.saturating_sub(last_refresh.elapsed());
+        let timeout = if animating { HEARTBEAT.min(refresh_due) } else { refresh_due };
         let mut redraw = false;
 
         if event::poll(timeout)? {
@@ -139,6 +142,17 @@ fn run_event_loop(app: &mut app::App, terminal: &mut Tui) -> io::Result<app::Act
         } else if animating {
             // Heartbeat elapsed with no input: advance the shimmer and countdowns.
             redraw = true;
+        }
+
+        // Periodic rescan so the table tracks locks, queue depth, and recency
+        // without input. The timer resets even when a modal suppresses the
+        // rescan — a zero remaining timeout must never turn into a spin.
+        if last_refresh.elapsed() >= REFRESH {
+            last_refresh = std::time::Instant::now();
+            if app.mode == app::Mode::Normal {
+                app.auto_refresh();
+                redraw = true;
+            }
         }
 
         // Timed states advance on every wake; any change means repaint.

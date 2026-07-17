@@ -1086,6 +1086,24 @@ impl App {
         Action::None
     }
 
+    /// Re-scan sessions from disk and re-derive the visible list, keeping the
+    /// highlight pinned to the same session by name (a new row appearing above
+    /// must not shift the selection). Callers gate this on `Mode::Normal`.
+    pub fn auto_refresh(&mut self) {
+        let selected_name = self.selected_session_name();
+        self.sessions = session::scan_sessions();
+        self.apply_filter_and_sort();
+        if let Some(name) = selected_name {
+            if let Some(pos) = self
+                .filtered
+                .iter()
+                .position(|&i| self.sessions[i].name == name)
+            {
+                self.table_state.select(Some(pos));
+            }
+        }
+    }
+
     fn handle_changelog(&mut self, key: KeyEvent) -> Action {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('C') | KeyCode::Enter => {
@@ -2793,6 +2811,33 @@ mod tests {
         input.clear();
         assert_eq!(input.text(), "");
         assert_eq!(input.before_cursor(), "");
+    }
+
+    #[test]
+    fn auto_refresh_rescans_and_keeps_selection_by_name() {
+        use crate::session::test_root;
+        let root = std::env::temp_dir().join(format!("cs-test-refresh-{}", std::process::id()));
+        for name in ["alpha", "bravo"] {
+            std::fs::create_dir_all(root.join(name).join(".cs/local")).unwrap();
+        }
+        let _guard = test_root::scoped(root.clone());
+
+        let mut app = App::new(crate::session::scan_sessions());
+        assert_eq!(app.sessions.len(), 2);
+        let pos = app
+            .filtered
+            .iter()
+            .position(|&i| app.sessions[i].name == "bravo")
+            .unwrap();
+        app.table_state.select(Some(pos));
+
+        std::fs::create_dir_all(root.join("charlie").join(".cs/local")).unwrap();
+        app.auto_refresh();
+
+        assert_eq!(app.sessions.len(), 3, "new session should appear after refresh");
+        assert_eq!(app.selected_session_name().as_deref(), Some("bravo"));
+
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]
