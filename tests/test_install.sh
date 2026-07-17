@@ -120,7 +120,7 @@ extract_array() {
 
 test_manifest_arrays_in_sync() {
     local arr a b
-    for arr in CS_HOOKS RETIRED_HOOKS CS_COMMANDS CS_SKILLS; do
+    for arr in CS_HOOKS RETIRED_HOOKS CS_COMMANDS CS_SKILLS CS_SKILL_FILES; do
         a=$(extract_array "$SCRIPT_DIR/../install.sh" "$arr" | sort)
         b=$(extract_array "$CS_BIN" "$arr" | sort)
         if [ -z "$a" ]; then
@@ -199,6 +199,20 @@ test_manifest_arrays_match_repo_files() {
         diff <(echo "$listed") <(echo "$actual") | head -10
         return 1
     fi
+}
+
+test_skill_files_exist_in_repo() {
+    local entry
+    for entry in $(extract_array "$SCRIPT_DIR/../install.sh" CS_SKILL_FILES); do
+        if [ ! -f "$SCRIPT_DIR/../skills/$entry" ]; then
+            echo "  FAIL: CS_SKILL_FILES entry missing from repo: skills/$entry"
+            return 1
+        fi
+        if [ ! -x "$SCRIPT_DIR/../skills/$entry" ]; then
+            echo "  FAIL: skill support script not executable: skills/$entry"
+            return 1
+        fi
+    done
 }
 
 # ============================================================================
@@ -532,6 +546,7 @@ run_test test_install_completes_when_zshrc_has_no_fpath
 run_test test_install_respects_custom_fpath_dir
 run_test test_manifest_arrays_in_sync
 run_test test_manifest_arrays_match_repo_files
+run_test test_skill_files_exist_in_repo
 run_test test_strip_filters_in_sync
 run_test test_install_deploys_hooks_to_cs_subdir
 run_test test_install_migrates_flat_hook_layout
