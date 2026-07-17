@@ -26,6 +26,7 @@ The one distinction that governs everything below is **shared vs machine-local**
 | `.cs/memory/<bucket>_*.md` | Native auto-memory fact files (user, feedback, project, reference). Written by the harness. | default |
 | `.cs/memory/narrative.<actor>.md` | Per-actor lab notebook. Each co-developer writes their own file; everyone reads all of them on resume. | `union` |
 | `.cs/checkpoints/` | Labelled state snapshots from `/checkpoint` (narrative + changes + git HEAD). | default |
+| `.cs/archived` | Archive marker written by `cs -archive` (date + actor). Tracked so the archived state syncs; removed on open or `cs -unarchive`. | default |
 | `.cs/handoffs/` | Lineage-stamped conversation handoffs written by the `rotate` skill (parent UUID, purpose, continuation plan). Consumed by the next launch's `r` answer. | default |
 | `.cs/plans/` | Design plans and specs kept with the session. | default |
 | `.cs/age-recipients/*.pub` | age public keys of everyone allowed to decrypt the session's synced secrets. | default |
@@ -60,6 +61,9 @@ user-owned `CLAUDE.md` is never touched.
 | `queue.state` | Drain state machine for the queue: `idle`, `armed`, or `draining`. |
 | `queue.done` | Log of completed queued tasks, appended as each is drained. |
 | `queue.declined` | Cooldown stamp after declining the queue-drain prompt. |
+| `notifications.jsonl` | Per-machine queue inbox — drain lifecycle events (`drain_started`, `task_done`, `breaker_tripped`, `drain_finished`) read by `cs -queue log` and the surface-once digest. |
+| `notifications.seen` | Cursor for that digest, so unseen inbox entries surface at most once. |
+| `ctx-warned` | Conversation UUID already given the one-time 60% context warning (the tier below the rotation nudge). |
 | `.prose-lint-attempts` | Loop-guard counter for the `prose-lint` Stop hook (allows the stop after repeated unresolved blocks). |
 | `watermark` | Per-actor high-water mark for the "shared memory/narrative activity since you were last here" digest injected on resume. |
 | `context-pct` | Latest context-window percentage, stamped by the status line and read by the narrative reminder to suggest compaction. |

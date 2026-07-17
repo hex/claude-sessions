@@ -4,6 +4,42 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.7.14
+
+Nineteen features across three arcs: the council batch (five capabilities picked by a four-provider AI council), a post-batch arc of five, and a nine-task walk-away queue drain — the queue supervision built in this release running its own first production drain.
+
+### Features
+
+- **`cs -usage`** — per-session token attribution over rate-limit windows: fleet table with sorting and live markers, `cs -usage <name>` scoped view, windows anchored at rate-limit resets via the statusline's limits stamp.
+- **Session tags** — `cs -tag` verbs on the README frontmatter, `cs -list --tag` filtering, TUI `#tag` search and preview tags row.
+- **Session archive** — `cs -archive`/`-unarchive` with a tracked marker; archived sessions hide from lists, search, and the TUI (`A` toggles), and auto-unarchive on open.
+- **Walk-away queue supervision** — circuit breakers (tool failures, context, rate-limit) park a bad drain; a notification inbox with a surface-once digest; `cs -queue log`.
+- **Conversation rotation** — the `rotate` skill writes lineage-stamped handoffs to `.cs/handoffs/`, the launch prompt gains a third `[Y/n/r]` answer, SessionStart consumes the handoff, an 80% context nudge fires once per conversation, and `cs -conversations` shows the chain.
+- **cs-tui B-prime redesign** — borderless table with wash/rail selection, masthead with hero rule, gradient-top cards, section dividers, palette tokens.
+- **`/voice` skill** — distills your typed messages from Claude Code transcripts into an editable two-layer voice profile and drafts messages, replies, PR text, or docs as you; skills can now ship support files (`CS_SKILL_FILES`).
+- **`/merge` skill** — the gated merge ritual: repo-discovered gates before, `--no-ff`, gates again on the merged result, cleanup only when green.
+- **Session protocol moves to `CLAUDE.local.md`** — machine-local and gitignored, with lazy migration that never touches user-owned `CLAUDE.md` content.
+- **TUI batch** — to-do input wraps to multiple rows and tasks display untruncated; preview pane padding; update badge with a `C` changelog overlay; `?` legend for gutter glyphs; 10-second auto-refresh with the selection pinned by name; the in-flight queue task carries a teal marker.
+- **Statusline pane segment** — `◫ %7` tmux pane id from inherited environment, zero forks, usable verbatim as a tmux target.
+- **iTerm2 awareness** — a finished turn bounces the dock until your next prompt (`CS_NO_ITERM2=1` disables); `cs -doctor` reports the surface.
+- **Release notes on update surfaces** — the launch banner shows a summary card for a pending update, `cs -update --check` renders the full span.
+- **`cs -secrets` session picker** — no session name on a TTY lists sessions and asks, with a CWD default.
+- **60% context warning** — a one-time heads-up a tier below the rotation nudge.
+
+### Fixes
+
+- Usage: live-marker escapes, stale window anchors, torn transcript lines; doctor token sums deduped by requestId.
+- Launch: terminal theme detected before the collision menu; the menu's force choice carries through the UUID guard.
+- Worktrees: the merge verb hands off across the session lock instead of deadlocking.
+- TUI: footer clipping, divider paint, input-lag loop; flaky `CS_VERSION` env tests serialized.
+- Migration hardening: SIGPIPE-safe head probe, adopt pathspec, old-template heads migrate wholesale.
+
+### Docs
+
+Specs and plans for every feature under `docs/superpowers/`; `hooks.md`, `session-layout.md`, `statusline.md`, `configuration.md`, and the README refreshed to match.
+
+**Full Changelog**: https://github.com/hex/claude-sessions/compare/v2026.7.13...v2026.7.14
+
 ## 2026.7.13
 
 One fix: the subagent statusline is now readable on light terminals.
