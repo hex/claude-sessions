@@ -292,11 +292,11 @@ migrate_claude_md_to_local() {
     if [ "$split_line" -gt 1 ]; then
         head_text=$(sed -n "1,$((split_line - 1))p" "$claude_md")
     fi
-    # sed -n '...;q' on its own single-shot stdin is safe under pipefail:
-    # the producer (printf) writes once and is done, so sed quitting early
-    # never SIGPIPEs anything still writing.
+    # The head's first non-blank line, read from the file directly (no
+    # pipe: a consumer quitting early would SIGPIPE a producer still
+    # writing a >64KB head, and under pipefail that kills the launch).
     local first_head_line
-    first_head_line=$(printf '%s\n' "$head_text" | sed -n '/[^[:space:]]/{p;q;}')
+    first_head_line=$(awk -v n="$split_line" 'NR >= n { exit } /[^[:space:]]/ { print; exit }' "$claude_md")
     local first_sentinel
     first_sentinel=$(awk '/<!-- cs:/{print; exit}' "$claude_md")
     local wholesale=0
