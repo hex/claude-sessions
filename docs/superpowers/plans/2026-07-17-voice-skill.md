@@ -81,7 +81,7 @@ test_typed_string_message_lands_in_corpus() {
     run_build > /dev/null || { echo "  FAIL: build exited non-zero"; return 1; }
     assert_file_contains "$(corpus_path)" "genuinely typed message about the build" \
         "typed string message should be kept" || return 1
-    assert_file_contains "$(corpus_path)" "[projA, 2026-07-01]" \
+    assert_file_contains "$(corpus_path)" "\[projA, 2026-07-01\]" \
         "block carries project and date attribution" || return 1
 }
 
@@ -137,10 +137,13 @@ test_harness_sentinels_dropped() {
     add_msg "$f" "Stop hook feedback: the hook says to do more work right now"
     add_msg "$f" "[Request interrupted by user] and some trailing content here"
     add_msg "$f" "TASKMASTER (1/20): Completion signal not found anywhere at all"
+    add_msg "$f" "<task-notification> subagent completion payload with tool ids </task-notification>"
+    add_msg "$f" "<teammate-message teammate_id=\"lead\"> agent-team envelope body here"
+    add_msg "$f" "<bash-input>ls -la</bash-input> <bash-stdout>total 0</bash-stdout>"
     add_msg "$f" "one real message so the build has something to keep"
     run_build > /dev/null || { echo "  FAIL: build exited non-zero"; return 1; }
-    assert_file_contains "$(corpus_path)" "8 harness-injected" \
-        "stats should count all eight sentinel classes" || return 1
+    assert_file_contains "$(corpus_path)" "11 harness-injected" \
+        "stats should count all eleven sentinel classes" || return 1
     if grep -q "Completion signal not found" "$(corpus_path)"; then
         echo "  FAIL: sentinel message leaked into corpus"; return 1
     fi
@@ -181,7 +184,7 @@ test_credential_lines_redacted() {
     add_msg "$(proj_file projA)" "$msg"
     add_msg "$(proj_file projA)" "the token parser handles this case fine in ordinary prose"
     run_build > /dev/null || { echo "  FAIL: build exited non-zero"; return 1; }
-    assert_file_contains "$(corpus_path)" "[redacted line]" \
+    assert_file_contains "$(corpus_path)" "\[redacted line\]" \
         "credential-shaped line should be replaced" || return 1
     assert_file_contains "$(corpus_path)" "line one is ordinary prose" \
         "surrounding prose should survive redaction" || return 1
@@ -199,7 +202,7 @@ test_duplicates_collapse_to_newest() {
     local n
     n=$(grep -c "the duplicated message body typed twice" "$(corpus_path)")
     assert_eq "1" "$n" "duplicate should collapse to one occurrence" || return 1
-    assert_file_contains "$(corpus_path)" "[projB, 2026-06-05]" \
+    assert_file_contains "$(corpus_path)" "\[projB, 2026-06-05\]" \
         "collapsed duplicate should keep the newest attribution" || return 1
 }
 
@@ -210,6 +213,10 @@ test_newest_first_ordering() {
     local first second
     first=$(grep -n "june era message" "$(corpus_path)" | cut -d: -f1)
     second=$(grep -n "january era message" "$(corpus_path)" | cut -d: -f1)
+    if [ -z "$first" ] || [ -z "$second" ]; then
+        echo "  FAIL: expected messages missing from corpus"
+        return 1
+    fi
     if [ "$first" -ge "$second" ]; then
         echo "  FAIL: newest message should appear before older ones ($first vs $second)"
         return 1
@@ -263,6 +270,20 @@ test_voice_dir_permissions() {
     assert_eq "700" "$mode" ".voice directory should be private" || return 1
 }
 
+test_corrupt_line_skipped_not_fatal() {
+    local f; f="$(proj_file projA)"
+    add_msg "$f" "first valid message before the corrupt line arrives"
+    printf '%s\n' '{"type":"user","timestamp":"2026-07-01T10:0' >> "$f"
+    add_msg "$f" "second valid message after the corrupt line survives"
+    run_build > /dev/null || { echo "  FAIL: build died on a corrupt line"; return 1; }
+    assert_file_contains "$(corpus_path)" "first valid message before" \
+        "message before the corrupt line should be kept" || return 1
+    assert_file_contains "$(corpus_path)" "second valid message after" \
+        "message after the corrupt line should be kept" || return 1
+    assert_file_contains "$(corpus_path)" "(0 unreadable)" \
+        "a file with one bad line is not counted unreadable" || return 1
+}
+
 run_test test_typed_string_message_lands_in_corpus
 run_test test_array_text_parts_join
 run_test test_tool_result_only_entry_dropped
@@ -278,6 +299,7 @@ run_test test_cap_enforced_at_4000
 run_test test_empty_transcripts_root_errors
 run_test test_large_transcript_builds_cleanly
 run_test test_voice_dir_permissions
+run_test test_corrupt_line_skipped_not_fatal
 
 report_results
 ```
@@ -330,8 +352,9 @@ while IFS= read -r f; do
     [ -n "$f" ] || continue
     files_scanned=$((files_scanned + 1))
     proj="$(basename "$(dirname "$f")")"
-    if ! jq -c --arg proj "$proj" --argjson paste "$PASTE_CHARS" '
-        select(.type == "user")
+    if ! jq -cR --arg proj "$proj" --argjson paste "$PASTE_CHARS" '
+        fromjson? | select(type == "object")
+        | select(.type == "user")
         | select((.isMeta // false) | not)
         | select((.isSidechain // false) | not)
         | (.message.content // "") as $c
@@ -343,7 +366,7 @@ while IFS= read -r f; do
         | (if ($t | length) == 0 then "not-typed"
            elif ($t | startswith("Caveat:")) then "sentinel"
            elif ($t | startswith("This session is being continued")) then "sentinel"
-           elif ($t | test("<command-name>|<local-command-stdout>|<system-reminder>|Stop hook feedback:|\\[Request interrupted|TASKMASTER")) then "sentinel"
+           elif ($t | test("<command-name>|<local-command-stdout>|<system-reminder>|Stop hook feedback:|\\[Request interrupted|TASKMASTER|<task-notification>|<teammate-message|<bash-input>|<bash-stdout>|<bash-stderr>")) then "sentinel"
            elif ($t | length) > $paste then "paste"
            else null end) as $drop
         | {ts: (.timestamp // ""), proj: $proj, drop: $drop,
@@ -376,7 +399,7 @@ jq -r -s \
     | (map(select(.drop == "sentinel")) | length) as $n_sentinel
     | (map(select(.drop == "paste")) | length) as $n_paste
     | (map(select(.drop == "not-typed")) | length) as $n_nottyped
-    | ($typed | map(select((.text | length) < $short))) as $acks
+    | ($typed | map(select((.text | length) < $short and (.text != "[redacted line]")))) as $acks
     | ($typed | map(select((.text | length) >= $short))) as $long
     | ($long | group_by(.text) | map(max_by(.ts)) | sort_by(.ts) | reverse) as $uniq
     | ($uniq[0:$max]) as $body
@@ -409,12 +432,12 @@ echo "voice: corpus built at $VOICE_DIR/corpus.md ($kept typed messages consider
 
 Then: `chmod +x skills/voice/scripts/build-corpus.sh`
 
-Design notes the implementer should not "fix": drops are tagged (not filtered) in pass 1 so pass 2 can report counts by reason; dropped entries carry `text: ""` so the temp file never holds pasted payloads; hex secrets are covered by the base64 character-class alternation; the final `mv` keeps interrupted runs from leaving a truncated corpus.
+Design notes the implementer should not "fix": drops are tagged (not filtered) in pass 1 so pass 2 can report counts by reason; dropped entries carry `text: ""` so the temp file never holds pasted payloads; hex secrets are covered by the base64 character-class alternation; the final `mv` keeps interrupted runs from leaving a truncated corpus; `-R` + `fromjson?` makes a corrupt jsonl line skip instead of aborting the rest of the file, so `files_failed` counts only wholesale read failures; fully-redacted short messages are excluded from the ack appendix so the phrase bank never learns the redaction marker as a phrase.
 
 - [ ] **Step 4: Run the suite to verify it passes**
 
 Run: `/bin/bash tests/test_voice_corpus.sh`
-Expected: `Results: 15/15 passed, 0 failed`
+Expected: `Results: 16/16 passed, 0 failed`
 
 - [ ] **Step 5: Commit**
 
@@ -422,6 +445,8 @@ Expected: `Results: 15/15 passed, 0 failed`
 git add skills/voice/scripts/build-corpus.sh tests/test_voice_corpus.sh
 git commit -m "feat: /voice corpus extractor — typed-message mining with redaction"
 ```
+
+KNOWN INTERMEDIATE RED: from this commit until Task 3 lands, `tests/test_install.sh`'s `test_manifest_arrays_match_repo_files` fails (skills/voice/ exists, `voice` not yet in CS_SKILLS — registration cannot move earlier because install.sh's end-to-end tests need SKILL.md to exist first). Run this task's own suite, not run_all.sh; reviewers must not report that failure as a Task 1 defect. Task 3's full gate closes it.
 
 ---
 
@@ -461,7 +486,7 @@ test_voice_skill_teaches_the_drafting_rules() {
     assert_file_contains "$SKILL" "single source of style truth" "profile governs the voice" || return 1
     assert_file_contains "$SKILL" "Never fabricate" "no invented quotes or commitments" || return 1
     assert_file_contains "$SKILL" "spelled correctly" "typos are described, not reproduced" || return 1
-    assert_file_contains "$SKILL" "[redacted line]" "redacted content stays redacted" || return 1
+    assert_file_contains "$SKILL" "\[redacted line\]" "redacted content stays redacted" || return 1
     assert_file_contains "$SKILL" "older than 30 days" "staleness policy stated" || return 1
     assert_file_contains "$SKILL" "never send" "drafts are delivered, not sent" || return 1
     assert_file_contains "$SKILL" "nothing to learn from" "empty-corpus outcome handled" || return 1
@@ -579,6 +604,8 @@ git add skills/voice/SKILL.md tests/test_voice_skill.sh
 git commit -m "feat: /voice skill — profile-driven drafting in the user's voice"
 ```
 
+KNOWN INTERMEDIATE RED: test_install.sh's manifest-vs-repo test remains red until Task 3 registers `voice` (see Task 1 Step 5's note). Run this task's own suite, not run_all.sh.
+
 ---
 
 ### Task 3: Registration, deployment, doctor drift, README
@@ -658,8 +685,9 @@ and register it: `run_test test_doctor_warns_on_skill_script_drift`
 
 - [ ] **Step 2: Run both suites to verify the new tests fail**
 
-Run: `/bin/bash tests/test_install.sh && /bin/bash tests/test_doctor.sh`
-Expected: `test_manifest_arrays_in_sync` FAILs (CS_SKILL_FILES not found), `test_skill_files_exist_in_repo` passes vacuously or fails, `test_doctor_warns_on_skill_script_drift` FAILs (no warning emitted).
+Run: `/bin/bash tests/test_install.sh; /bin/bash tests/test_doctor.sh`
+(`;`, not `&&` — the first suite exits non-zero at this stage and must not short-circuit the second.)
+Expected failures: `test_manifest_arrays_in_sync` (CS_SKILL_FILES not found), `test_manifest_arrays_match_repo_files` (skills/voice/ exists, voice unregistered — the known intermediate red), and `test_doctor_warns_on_skill_script_drift` (no warning emitted yet). `test_skill_files_exist_in_repo` is vacuous until the array exists.
 
 - [ ] **Step 3: Implement the manifests and deploy loops**
 
@@ -773,7 +801,18 @@ git add lib/00-header.sh install.sh lib/60-doctor.sh bin/cs tests/test_install.s
 git commit -m "feat: register /voice skill; CS_SKILL_FILES support-file deployment and drift check"
 ```
 
-Expected: all suites green (44 suites after the two new ones).
+Expected: all suites green — 45 suites (43 existing + test_voice_corpus.sh + test_voice_skill.sh). This gate also closes the known intermediate red from Tasks 1 and 2.
+
+- [ ] **Step 7: Empirical review input (spec-mandated, not an automated test)**
+
+Run the extractor against this machine's real transcripts and stash the outputs for the final review:
+
+```bash
+skills/voice/scripts/build-corpus.sh
+head -12 "${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}/.voice/corpus.md"
+```
+
+Expected: exit 0; the stats header reports thousands of kept messages; spot-check the body for leaked harness text (task-notification payloads, teammate-message envelopes, tool ids) and unredacted credential shapes. The final whole-branch review must then distill a real profile via the skill flow and produce one draft per register, judged against the profile — that step is the reviewer's, not the implementer's.
 
 ---
 
@@ -783,3 +822,7 @@ Expected: all suites green (44 suites after the two new ones).
 - Placeholders: none; every step carries complete code.
 - Type consistency: script path `skills/voice/scripts/build-corpus.sh` is identical in Task 1 (create), Task 2 (SKILL.md reference + pin), Task 3 (manifest entry, doctor fixture); env vars CS_TRANSCRIPTS_DIR/CS_SESSIONS_ROOT match test_lib setup exports; "nothing to learn from" is pinned in Task 1's error test and Task 2's SKILL.md pin.
 - Fixture-reaches-branch: each Task 1 test seeds input that exercises exactly the asserted branch, and every "leak" assert has a positive companion (a kept message) so an empty corpus cannot vacuously pass; the paste, sentinel, and non-typed counts assert exact stats-line literals derived from fixture arithmetic.
+
+## Plan-verify amendments (3-lens adversarial pass, applied 2026-07-17)
+
+The pre-execution verify workflow (runtime, tests, integration lenses — all probes run against the real repo and real transcripts) found and this plan now incorporates: (1) all square-bracket literals passed to `assert_file_contains` are escaped — unescaped they are grep bracket expressions, two with descending ranges that error (making the asserts unpassable) and `[redacted line]` matching almost any text (making those pins vacuous); (2) three additional sentinel classes (`<task-notification>`, `<teammate-message`, `<bash-input>/<bash-stdout>/<bash-stderr>`) — without them ~40% of the real corpus body was machine text; (3) tolerant jsonl parsing via `-R` + `fromjson?` with a corrupt-line test, matching the spec's error-handling promise; (4) documented intermediate red on test_install.sh between Tasks 1-3 (registration cannot land earlier without breaking install.sh's end-to-end tests); (5) the spec's empirical final-review input became Task 3 Step 7; (6) the redaction marker is excluded from the ack appendix; (7) suite-count and RED-verification command corrections in Task 3.
