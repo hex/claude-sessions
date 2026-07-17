@@ -15,10 +15,10 @@ from a distilled profile document, never from improvisation.
 ## Flow
 
 1. Read the profile. If it exists, go to step 4.
-2. No profile: run the builder script, then distill the corpus into a
-   profile (next section), then continue.
-3. If the builder exits with "nothing to learn from", tell the user exactly
-   that — there are no transcripts to distill on this machine — and stop.
+2. No profile: run the builder script. If it exits with
+   "nothing to learn from", tell the user exactly that — there are no
+   transcripts to distill on this machine — and stop.
+3. Distill the corpus into a profile (next section), then continue.
 4. Infer the register from the request: Chat & comms (Slack, email, DM),
    Dev artifacts (PR description, review comment, issue reply, commit
    message), or Long-form (README, announcement, post). If genuinely
