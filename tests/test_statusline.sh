@@ -1284,6 +1284,39 @@ test_pane_segment_needs_both_tmux_vars() {
     assert_output_not_contains "$out" "◫" "pane segment needs the live TMUX socket too" || return 1
 }
 
+test_segment_default_in_sync_across_docs_and_help() {
+    # The default segment list is spelled in four sites: the code fallback
+    # (authoritative) plus three prose copies. The help copy drifted once.
+    local code_default
+    code_default=$(sed -n 's/.*CS_STATUSLINE_SEGMENTS:-\([a-z,]*\).*/\1/p' "$SL" | head -1)
+    [ -n "$code_default" ] || { echo "  FAIL: could not extract segment default from cs-statusline"; return 1; }
+    local f
+    for f in "$SCRIPT_DIR/../lib/10-help.sh" \
+             "$SCRIPT_DIR/../docs/configuration.md" \
+             "$SCRIPT_DIR/../docs/statusline.md"; do
+        grep -qF "$code_default" "$f" || {
+            echo "  FAIL: $(basename "$f") does not carry the code's segment default: $code_default"
+            return 1
+        }
+    done
+}
+
+test_session_state_color_roundtrip() {
+    # cs's _set_local_state is the writer; the statusline's _read_session_color
+    # re-implements the parser (documented standalone necessity). This pins the
+    # format so a serialization change in cs fails here instead of silently
+    # stripping session colors.
+    local state="$TEST_TMPDIR/state"
+    ( source "$SCRIPT_DIR/../lib/40-state.sh" 2>/dev/null \
+        && _set_local_state "$state" claude_session_color cyan ) || {
+        echo "  FAIL: could not write state via lib/40-state.sh _set_local_state"
+        return 1
+    }
+    local got
+    got=$( CS_STATUSLINE_LIB=1 . "$SL" >/dev/null 2>&1; _read_session_color "$state"; printf '%s' "$_SESSION_COLOR" )
+    assert_eq "cyan" "$got" "statusline reader must parse cs's state writer output" || return 1
+}
+
 test_library_mode_defines_helpers_without_rendering() {
     local out
     out=$( CS_STATUSLINE_LIB=1 . "$SL" >/dev/null 2>&1; \
@@ -1344,6 +1377,8 @@ run_test test_notes_segment_absent_when_queue_empty
 run_test test_pane_segment_shows_tmux_pane_id
 run_test test_pane_segment_absent_outside_tmux
 run_test test_pane_segment_needs_both_tmux_vars
+run_test test_segment_default_in_sync_across_docs_and_help
+run_test test_session_state_color_roundtrip
 run_test test_library_mode_defines_helpers_without_rendering
 run_test test_library_mode_prints_nothing
 run_test test_executed_directly_still_renders

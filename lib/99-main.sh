@@ -223,7 +223,7 @@ main() {
                 export CLAUDE_SESSION_NAME="$session_name"
                 export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
                 export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
-                run_usage "$session_name"
+                run_usage "$session_name" "$@"
                 return 0
                 ;;
             -tag)

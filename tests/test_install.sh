@@ -560,6 +560,23 @@ run_test test_statusline_disable_strips_only_ours
 run_test test_install_preserves_foreign_statusline
 run_test test_uninstall_removes_statusline
 run_test test_uninstall_removes_subagent_statusline
+test_hook_registration_doc_matches_install() {
+    # docs/hooks.md restates install.sh's _merge_cs_hook registrations as a
+    # JSON block readers trust for timeouts; pin file+timeout pairs so an
+    # install.sh change fails here instead of silently outdating the doc.
+    local doc="$SCRIPT_DIR/../docs/hooks.md" regs file timeout rest
+    regs=$(grep -E '^ +_merge_cs_hook ' "$SCRIPT_DIR/../install.sh")
+    [ -n "$regs" ] || { echo "  FAIL: no _merge_cs_hook registrations found in install.sh"; return 1; }
+    while read -r _ _ file timeout rest; do
+        [ -n "$file" ] || continue
+        grep -qF "cs/${file}\", \"timeout\": ${timeout}" "$doc" || {
+            echo "  FAIL: docs/hooks.md registration block missing/stale for $file (timeout $timeout)"
+            return 1
+        }
+    done <<< "$regs"
+}
+
 run_test test_uninstall_preserves_foreign_statusline
 run_test test_install_recovers_from_invalid_settings_json
+run_test test_hook_registration_doc_matches_install
 report_results
