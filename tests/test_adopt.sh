@@ -181,6 +181,30 @@ test_adopt_inits_git_when_none_exists() {
     assert_dir "$project_dir/.git" "Git repo should be initialized" || return 1
 }
 
+test_adopt_into_git_repo_without_claude_md_stages_bookkeeping() {
+    local project_dir="$TEST_TMPDIR/my-project"
+    mkdir -p "$project_dir"
+
+    (cd "$project_dir" && git init -q && git config user.email a@b.c && git config user.name A && git commit --allow-empty -m "initial" -q)
+
+    (cd "$project_dir" && "$CS_BIN" -adopt my-session)
+
+    local tracked
+    tracked=$(git -C "$project_dir" ls-files .cs/README.md)
+    if [[ -z "$tracked" ]]; then
+        echo "  FAIL: .cs/README.md should be tracked by git after adopting a repo with no CLAUDE.md"
+        return 1
+    fi
+
+    local log_output
+    log_output=$(git -C "$project_dir" log --oneline --format="%s")
+    if ! echo "$log_output" | grep -q "^Adopt as cs session: my-session$"; then
+        echo "  FAIL: Adopt commit 'Adopt as cs session: my-session' not found in history"
+        echo "  History: $log_output"
+        return 1
+    fi
+}
+
 # ============================================================================
 # README.md frontmatter
 # ============================================================================
@@ -272,6 +296,7 @@ run_test test_list_shows_adopted_sessions
 run_test test_remove_adopted_session_removes_symlink_only
 run_test test_adopt_preserves_existing_git_repo
 run_test test_adopt_inits_git_when_none_exists
+run_test test_adopt_into_git_repo_without_claude_md_stages_bookkeeping
 
 # README frontmatter
 run_test test_readme_has_yaml_frontmatter
