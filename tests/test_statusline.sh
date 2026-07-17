@@ -20,7 +20,7 @@ setup() {
     local _v
     while IFS='=' read -r _v _; do
         case "$_v" in
-            CS_*|CLAUDE_*|NO_COLOR|COLORTERM|TERM_PROGRAM|FORCE_COLOR)
+            CS_*|CLAUDE_*|NO_COLOR|COLORTERM|TERM_PROGRAM|FORCE_COLOR|TMUX|TMUX_PANE)
                 unset "$_v" 2>/dev/null || true ;;
         esac
     done < <(env)
@@ -39,7 +39,8 @@ teardown() {
     fi
     unset CS_SESSIONS_ROOT CLAUDE_SESSION_NAME NO_COLOR COLORTERM TERM_PROGRAM \
         FORCE_COLOR CS_STATUSLINE_DISABLE CS_STATUSLINE_SEGMENTS CS_STATUSLINE_CTX_WARN \
-        CS_STATUSLINE_CTX_CRIT CS_DISCOVERIES_MAX_SIZE COLUMNS CS_TERM_BG_RGB 2>/dev/null || true
+        CS_STATUSLINE_CTX_CRIT CS_DISCOVERIES_MAX_SIZE COLUMNS CS_TERM_BG_RGB \
+        TMUX TMUX_PANE 2>/dev/null || true
 }
 
 # --- Helpers ---
@@ -1258,6 +1259,31 @@ test_notes_segment_absent_when_queue_empty() {
     assert_output_not_contains "$out" "▤" "notes segment hidden when queue empty" || return 1
 }
 
+test_pane_segment_shows_tmux_pane_id() {
+    export NO_COLOR=1
+    export TMUX="/tmp/tmux-1000/default,12345,0"
+    export TMUX_PANE="%7"
+    local out
+    out=$(run_sl "$FIXTURE_DOCS")
+    assert_output_contains "$out" "◫ %7" "pane segment shows the tmux pane id" || return 1
+}
+
+test_pane_segment_absent_outside_tmux() {
+    export NO_COLOR=1
+    local out
+    out=$(run_sl "$FIXTURE_DOCS")
+    assert_output_not_contains "$out" "◫" "pane segment hidden outside tmux" || return 1
+}
+
+test_pane_segment_needs_both_tmux_vars() {
+    # A stale TMUX_PANE without TMUX (e.g. env leaked past a detach) must not render.
+    export NO_COLOR=1
+    export TMUX_PANE="%7"
+    local out
+    out=$(run_sl "$FIXTURE_DOCS")
+    assert_output_not_contains "$out" "◫" "pane segment needs the live TMUX socket too" || return 1
+}
+
 test_library_mode_defines_helpers_without_rendering() {
     local out
     out=$( CS_STATUSLINE_LIB=1 . "$SL" >/dev/null 2>&1; \
@@ -1315,6 +1341,9 @@ test_enable_warns_that_a_restart_is_required() {
 
 run_test test_notes_segment_shows_queue_depth
 run_test test_notes_segment_absent_when_queue_empty
+run_test test_pane_segment_shows_tmux_pane_id
+run_test test_pane_segment_absent_outside_tmux
+run_test test_pane_segment_needs_both_tmux_vars
 run_test test_library_mode_defines_helpers_without_rendering
 run_test test_library_mode_prints_nothing
 run_test test_executed_directly_still_renders

@@ -10,13 +10,14 @@ With colors enabled, each segment renders as a square colored block; blocks abut
 
 ## Segments
 
-Default order: `logo,session,notes,git,model,ctx,limits,cost`. A brand badge opens the bar, then identity (which session, which branch, which model), then the gauges.
+Default order: `logo,session,notes,pane,git,model,ctx,limits,cost`. A brand badge opens the bar, then identity (which session, which pane, which branch, which model), then the gauges.
 
 | Segment | Shows | Source | Color |
 |---|---|---|---|
 | `logo` | A Claude mark (`✳`) badge; the mark's color pulses while Claude has finished and awaits input | `.cs/local/attention` marker (raised by the Stop hook, cleared on the next prompt or session start) | Claude coral `rgb(217,119,87)`, white mark; the pulse alternates the mark between chiptext and the darker brandshade by epoch-second parity. Claude Code's TUI re-emits only bold/fg/bg from statusline ANSI (terminal blink is dropped) and repaints only on events, so the registration sets `statusLine.refreshInterval: 1` to repaint once a second while idle — that timer animates the pulse. Omitted in plain (`NO_COLOR`) mode |
 | `session` | Session name | stdin `session_name`, falling back to `CLAUDE_SESSION_NAME`, then the workspace dir basename | The session's `claude_session_color` from `.cs/local/state`; grey outside cs sessions |
 | `notes` | Queued-task count for the current session, `▤ N` | Non-blank lines of `.cs/local/queue` | Amber `rgb(255,183,77)`; hidden when the queue is empty or absent |
+| `pane` | The tmux pane hosting the conversation, `◫ %7` — a target usable verbatim in tmux commands and other chats | `TMUX_PANE` from inherited environment (no fork); requires a live `TMUX` socket var too, so a stale pane id never renders | Grey; hidden outside tmux |
 | `git` | Branch, ahead/behind arrows, staged `+N` and modified `!N` counts | One `git status --porcelain=v1 -b` call | Bold slate-blue accent `rgb(79,91,140)`, chip text color |
 | `model` | Model display name plus effort level when present | stdin `model.display_name`, `effort.level` | Periwinkle accent (claude's usage-chip purple), white text |
 | `ctx` | Context window usage, `ctx 42%` | stdin `context_window.used_percentage` | Grey; amber at 50%, red at 80% (tunable) |
@@ -25,7 +26,7 @@ Default order: `logo,session,notes,git,model,ctx,limits,cost`. A brand badge ope
 
 Every segment is null-when-nothing: missing data means the segment and its separator simply do not render. Outside a cs session, `session` falls back to the directory name.
 
-Per-segment icons are standard Unicode glyphs (gauge `◔`, star `✦`, branch `⎇`, clock `◷`, half-circle `◑`) from the Geometric Shapes and dingbat ranges, so they render in any monospace font without a patched Nerd Font. The `session` segment carries no icon — its `claude_session_color` background is identity enough. No Nerd Font or private-use glyphs are used.
+Per-segment icons are standard Unicode glyphs (gauge `◔`, star `✦`, branch `⎇`, clock `◷`, half-circle `◑`, pane `◫`) from the Geometric Shapes and dingbat ranges, so they render in any monospace font without a patched Nerd Font. The `session` segment carries no icon — its `claude_session_color` background is identity enough. No Nerd Font or private-use glyphs are used.
 
 ## Data sources and performance
 
