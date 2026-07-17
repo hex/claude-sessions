@@ -38,6 +38,7 @@ ICON_5H=$'\xe2\x97\xb7 '        # U+25F7 clock
 ICON_WK=$'\xe2\x97\x91 '        # U+25D1 half circle
 ICON_NOTES=$'\xe2\x96\xa4 '     # U+25A4 square with horizontal fill (notes queue)
 ICON_LOGO=$'\xe2\x9c\xb3'       # U+2733 eight-spoked asterisk (Claude mark)
+ICON_PANE=$'\xe2\x97\xab '      # U+25EB square with vertical bisect (tmux pane)
 
 # --- stdin -----------------------------------------------------------------
 
@@ -443,6 +444,15 @@ _seg_notes() {
     _add "${ICON_NOTES}${n}" "amber"
 }
 
+# The tmux pane hosting this conversation, as a target usable verbatim in
+# tmux commands and other chats ("%7"). TMUX_PANE is inherited environment,
+# so this adds zero forks to the render hot path; both vars are required so
+# a stale TMUX_PANE outside a live tmux client never renders.
+_seg_pane() {
+    [ -n "${TMUX:-}" ] && [ -n "${TMUX_PANE:-}" ] || return 0
+    _add "${ICON_PANE}${TMUX_PANE}" "grey"
+}
+
 _seg_ctx() {
     local v="${SL_CTX%%.*}"
     [ -n "$v" ] || return 0
@@ -756,7 +766,7 @@ main() {
 
     _detect_level
 
-    local segments="${CS_STATUSLINE_SEGMENTS:-logo,session,notes,git,model,ctx,limits,cost}"
+    local segments="${CS_STATUSLINE_SEGMENTS:-logo,session,notes,pane,git,model,ctx,limits,cost}"
     local name names
     IFS=',' read -ra names <<< "$segments"
     for name in "${names[@]}"; do
@@ -764,6 +774,7 @@ main() {
             logo)    _seg_logo ;;
             session) _seg_session ;;
             notes)   _seg_notes ;;
+            pane)    _seg_pane ;;
             ctx)     _seg_ctx ;;
             model)   _seg_model ;;
             git)     _seg_git ;;
