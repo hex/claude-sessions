@@ -233,6 +233,15 @@ pub fn queue_dir(name: &str) -> PathBuf {
     sessions_root().join(name).join(".cs").join("local")
 }
 
+/// True while the session's queue drain is live: cs's Stop hook writes
+/// `draining` to queue.state when it hands tasks to the agent, and the first
+/// queued line is the task currently being worked.
+pub fn queue_active(name: &str) -> bool {
+    fs::read_to_string(queue_dir(name).join("queue.state"))
+        .map(|s| s.trim() == "draining")
+        .unwrap_or(false)
+}
+
 /// The highlighted session's queued tasks, one per non-blank line, in order.
 /// Read fresh from disk so callers always see the latest queue.
 pub fn read_queue(name: &str) -> Vec<String> {

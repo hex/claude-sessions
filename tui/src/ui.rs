@@ -1300,6 +1300,7 @@ fn render_legend(app: &App, frame: &mut Frame) {
         entry("*", p.gold, true, "marked with Space for batch actions (D deletes the marked set)"),
         entry("\u{25aa}", p.gold, false, "has stored secrets (shown here when the SECRETS column is hidden)"),
         entry("\u{2500}", p.comment, false, "dim grey row \u{2014} archived session, or not matching the current search"),
+        entry("\u{25b6}", p.teal, false, "to-do pane: the queue task Claude is actively working right now"),
         Line::default(),
     ];
 
@@ -1588,6 +1589,13 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
         .selected_session()
         .map(|s| crate::session::read_queue(&s.name))
         .unwrap_or_default();
+    // While the drain is live, the first queued line is the task Claude is
+    // working right now; it gets the teal working marker below.
+    let drain_active = !tasks.is_empty()
+        && app
+            .selected_session()
+            .map(|s| crate::session::queue_active(&s.name))
+            .unwrap_or(false);
 
     let inner_cols = rows[2].width as usize;
     let list_lines: Vec<Line> = if tasks.is_empty() {
@@ -1603,11 +1611,15 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
                 let editing = app.notes_focus == NotesFocus::Editing && i == app.notes_selected;
                 let highlighted =
                     editing || (list_focused && i == app.notes_selected);
+                let working = drain_active && i == 0;
                 let (marker, marker_color) = if highlighted {
                     ("\u{25b8} ", p.amber)
+                } else if working {
+                    ("\u{25b6} ", p.teal)
                 } else {
                     ("  ", p.faint)
                 };
+                let num_color = if working { p.teal } else { marker_color };
                 let num = format!("{}. ", i + 1);
                 // Columns available for the task text: left pad(1) + marker(2) +
                 // number, plus a matching 1-column right margin so wrapped text
@@ -1617,7 +1629,7 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
                 let prefix = vec![
                     Span::raw(" "), // left padding
                     Span::styled(marker, Style::default().fg(marker_color)),
-                    Span::styled(num, Style::default().fg(marker_color)),
+                    Span::styled(num, Style::default().fg(num_color)),
                 ];
                 let indent = " ".repeat(prefix_cols);
                 let body: Vec<Vec<Span>> = if editing {
@@ -2314,6 +2326,58 @@ mod tests {
 
         app.handle_key(KeyEvent::from(KeyCode::Esc));
         assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn draining_queue_marks_only_the_first_task_as_working() {
+        use crate::session::test_root;
+        let tmp = std::env::temp_dir().join(format!("cs-ui-working-{}", std::process::id()));
+        let name = "solo-working";
+        let local = tmp.join(name).join(".cs/local");
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::write(local.join("queue"), "first queued task\nsecond queued task\n").unwrap();
+        let _guard = test_root::scoped(tmp.clone());
+
+        let mut sessions = one_session();
+        sessions[0].name = name.to_string();
+        sessions[0].queue_depth = 2;
+        let mut app = App::new(sessions);
+        app.theme = Palette::dark();
+        app.show_preview = true;
+
+        // Idle queue: no working marker anywhere.
+        let backend = TestBackend::new(90, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let joined: String = (0..buf.area.height)
+            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect::<String>() + "\n")
+            .collect();
+        assert!(
+            !joined.contains('\u{25b6}'),
+            "no working marker while the queue is idle: {joined}"
+        );
+
+        // Draining: the first task's row carries the marker, the second does not.
+        std::fs::write(local.join("queue.state"), "draining\n").unwrap();
+        let backend = TestBackend::new(90, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let rows: Vec<String> = (0..buf.area.height)
+            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
+            .collect();
+        let first_row = rows.iter().find(|r| r.contains("first queued task")).unwrap();
+        assert!(
+            first_row.contains('\u{25b6}'),
+            "the in-flight task should carry the working marker: {first_row}"
+        );
+        let second_row = rows.iter().find(|r| r.contains("second queued task")).unwrap();
+        assert!(
+            !second_row.contains('\u{25b6}'),
+            "waiting tasks must not carry the marker: {second_row}"
+        );
+        std::fs::remove_dir_all(&tmp).ok();
     }
 
     #[test]
