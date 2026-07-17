@@ -4,6 +4,27 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.7.15
+
+A maintenance release: a five-area redundancy audit executed end to end — drifted facts fixed, dead code removed, and five new drift tests so the fixed facts stay fixed.
+
+### Fixes
+
+- **Installer registers the full status line.** The install-time consent prompt registered only the main bar while `cs -statusline enable` also registered the agent-panel rows; consent now applies the same registration as the enable command, and the two recipes are marked KEEP-IN-SYNC.
+- **`cs <name> -usage` forwards flags** like its sibling per-session verbs, so unknown options error instead of being silently swallowed.
+- Help text names the `pane` segment in the statusline default.
+- Stale doc facts corrected: the theme-detection cascade is stated once (statusline.md), README's queue verb list gains `log`, CONTRIBUTING drops a stale test census, configuration.md now lists every env var it claims to (queue breakers, context tiers, the iTerm2 kill switch, and more), and session-layout.md gains the `limits` and `failures` rows.
+
+### Removed
+
+- Dead code swept: an unused hostname helper, the statusline's leftover `_filesize` from the retired disc segment, two dead TUI items plus a no-op conditional, and the `b_preview` design spike whose frozen palette drifted from the shipped theme. The TUI build is warning-free again.
+
+### Added
+
+- Five sync tests turn accepted duplication into machine-checked duplication: the statusline segment default across its four sites, queue verbs vs both shell completions, the `_build_digest` hook twins, a state-writer/statusline-reader round trip, and hooks.md's registration JSON vs install.sh.
+
+**Full Changelog**: https://github.com/hex/claude-sessions/compare/v2026.7.14...v2026.7.15
+
 ## 2026.7.14
 
 Nineteen features across three arcs: the council batch (five capabilities picked by a four-provider AI council), a post-batch arc of five, and a nine-task walk-away queue drain — the queue supervision built in this release running its own first production drain.
