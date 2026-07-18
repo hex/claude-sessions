@@ -1492,7 +1492,8 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
         ("archived".to_string(), p.faint)
     } else {
         // Dormant borrows the dormant heat grey, never teal: teal is liveness.
-        ("dormant".to_string(), p.comment)
+        // The dot keeps the state line in the list's symbol vocabulary.
+        ("\u{25cf} dormant".to_string(), p.comment)
     };
     let mut meta: Vec<(&str, String, Color)> = vec![
         ("created", session.created.clone().unwrap_or_else(|| "\u{2014}".into()), p.ink),
@@ -2589,6 +2590,13 @@ mod tests {
             .iter()
             .position(|r| r.contains("dormant"))
             .expect("preview state row should render") as u16;
+        // Same vocabulary as the list: the state line carries the legend's
+        // dot glyph, not a bare word.
+        assert!(
+            rows[y as usize].contains("\u{25cf} dormant"),
+            "state line should read '● dormant': {:?}",
+            rows[y as usize]
+        );
         let x = rows[y as usize]
             .chars()
             .collect::<Vec<_>>()
