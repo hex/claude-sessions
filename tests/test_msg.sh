@@ -63,7 +63,9 @@ test_send_rejects_slash_in_target() {
 }
 
 test_send_rejects_dot_and_dotdot_targets() {
+    touch "$TEST_TMPDIR/CLAUDE.md"   # makes ".." session-shaped; only the name guard may reject it
     ! "$CS_BIN" -msg .. "escape" >/dev/null 2>&1 || return 1
+    [ ! -d "$TEST_TMPDIR/.cs" ] || { echo "  traversal write escaped the root"; return 1; }
     ! "$CS_BIN" -msg . "escape" >/dev/null 2>&1 || return 1
 }
 
