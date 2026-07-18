@@ -13,6 +13,10 @@ pub struct Session {
     pub modified_ts: Option<std::time::SystemTime>,
     pub lock_pid: Option<u32>,
     pub is_locked: bool,
+    /// Locked, or breathing via the statusline heartbeat: a conversation
+    /// opened outside cs writes no lock, but its statusline still touches
+    /// .cs/local/context-pct every few seconds while active.
+    pub is_live: bool,
     pub secrets_count: u32,
     pub queue_depth: u32,
     pub git_repo: Option<String>,
@@ -369,6 +373,8 @@ fn read_session(path: &Path, secret_counts: &HashMap<String, u32>) -> Session {
         .unwrap_or((None, None));
     let lock_pid = read_lock_pid(&meta_dir);
     let is_locked = lock_pid.is_some();
+    let is_live =
+        is_locked || heartbeat_alive(&meta_dir, std::time::SystemTime::now());
     let secrets_count = secret_counts.get(&name).copied().unwrap_or(0);
     let queue_depth = fs::read_to_string(meta_dir.join("local/queue"))
         .map(|s| s.lines().filter(|l| !l.trim().is_empty()).count() as u32)
@@ -392,6 +398,7 @@ fn read_session(path: &Path, secret_counts: &HashMap<String, u32>) -> Session {
         modified_ts,
         lock_pid,
         is_locked,
+        is_live,
         secrets_count,
         queue_depth,
         git_repo,
@@ -603,6 +610,26 @@ fn local_utc_offset_secs() -> i64 {
     }
 }
 
+/// How long after the last statusline write a lockless conversation still
+/// counts as live. The statusline touches context-pct every few seconds
+/// while a conversation is active, locked or not.
+const HEARTBEAT_WINDOW_SECS: u64 = 120;
+
+/// True when .cs/local/context-pct was written within the heartbeat window
+/// of `now`. Detects conversations opened outside cs (no session.lock).
+/// A future mtime counts as live, matching the recency math's clamping.
+fn heartbeat_alive(meta_dir: &Path, now: std::time::SystemTime) -> bool {
+    let Ok(md) = fs::metadata(meta_dir.join("context-pct")) else {
+        return false;
+    };
+    let Ok(mtime) = md.modified() else {
+        return false;
+    };
+    now.duration_since(mtime)
+        .map(|d| d.as_secs() <= HEARTBEAT_WINDOW_SECS)
+        .unwrap_or(true)
+}
+
 fn read_lock_pid(meta_dir: &Path) -> Option<u32> {
     let lock_file = meta_dir.join("session.lock");
     let content = fs::read_to_string(&lock_file).ok()?;
@@ -801,6 +828,30 @@ mod tests {
         assert_eq!(result, None);
 
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn heartbeat_alive_tracks_context_pct_freshness() {
+        let tmp = std::env::temp_dir().join(format!("cs-hb-test-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        // No context-pct at all: not live.
+        assert!(!heartbeat_alive(&tmp, std::time::SystemTime::now()));
+
+        std::fs::write(tmp.join("context-pct"), "42").unwrap();
+        let mtime = std::fs::metadata(tmp.join("context-pct")).unwrap().modified().unwrap();
+
+        // Written within the window: live.
+        let soon = mtime + std::time::Duration::from_secs(30);
+        assert!(heartbeat_alive(&tmp, soon));
+        // Window edge passed: dormant again.
+        let late = mtime + std::time::Duration::from_secs(HEARTBEAT_WINDOW_SECS + 1);
+        assert!(!heartbeat_alive(&tmp, late));
+        // A future mtime clamps to live, like the recency math.
+        let before = mtime - std::time::Duration::from_secs(60);
+        assert!(heartbeat_alive(&tmp, before));
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

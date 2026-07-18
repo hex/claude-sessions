@@ -281,7 +281,7 @@ fn render_masthead(app: &App, frame: &mut Frame, area: Rect) {
     if area.height < 2 {
         return;
     }
-    let live = app.sessions.iter().filter(|s| s.is_locked).count();
+    let live = app.sessions.iter().filter(|s| s.is_live).count();
     let archived = app.sessions.iter().filter(|s| s.archived).count();
     let dir = match app.sort_dir {
         SortDirection::Asc => "\u{25b2}",
@@ -511,7 +511,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             // shows a filled square in place of the recency dot — the square
             // itself is the lock signal, so no separate lock glyph follows it.
             let mut name_spans: Vec<Span> = Vec::new();
-            if s.is_locked {
+            if s.is_live {
                 let sq = if dimmed {
                     p.comment
                 } else {
@@ -1378,7 +1378,7 @@ fn render_legend(app: &App, frame: &mut Frame) {
     let lines: Vec<Line> = vec![
         Line::default(),
         entry("\u{25cf}", p.green, false, "recency dot \u{2014} green when recently active, fading to grey as the session goes dormant"),
-        entry("\u{25a0}", p.teal, false, "locked \u{2014} a conversation is live in this session right now (shown in place of the recency dot)"),
+        entry("\u{25a0}", p.teal, false, "live \u{2014} conversation open right now, locked or not (in place of the recency dot)"),
         entry("*", p.gold, true, "marked with Space for batch actions (D deletes the marked set)"),
         entry("\u{25aa}", p.gold, false, "has stored secrets (shown here when the SECRETS column is hidden)"),
         entry("\u{2500}", p.comment, false, "dim grey row \u{2014} archived session, or not matching the current search"),
@@ -1488,6 +1488,9 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
             },
             p.teal,
         )
+    } else if session.is_live {
+        // Breathing without a lock: opened outside cs, no PID to show.
+        ("\u{25a0} live \u{b7} unlocked".to_string(), p.teal)
     } else if session.archived {
         ("archived".to_string(), p.faint)
     } else {
@@ -1828,7 +1831,7 @@ mod tests {
             modified: Some("2026-02-20 14:00".into()),
             modified_ts: None,
             lock_pid: None,
-            is_locked: false,
+            is_locked: false, is_live: false,
             secrets_count: 0,
             queue_depth: 0,
             git_repo: None,
@@ -1849,7 +1852,7 @@ mod tests {
                 modified: Some("2026-02-20 14:00".into()),
                 modified_ts: Some(std::time::SystemTime::now()),
                 lock_pid: Some(123),
-                is_locked: true,
+                is_locked: true, is_live: true,
                 secrets_count: 0,
                 queue_depth: 0,
                 git_repo: None,
@@ -1863,7 +1866,7 @@ mod tests {
                 modified: Some("2026-02-20 14:00".into()),
                 modified_ts: Some(std::time::SystemTime::now()),
                 lock_pid: None,
-                is_locked: false,
+                is_locked: false, is_live: false,
                 secrets_count: 0,
                 queue_depth: 0,
                 git_repo: None,
@@ -2628,6 +2631,46 @@ mod tests {
     }
 
     #[test]
+    fn heartbeat_live_session_gets_the_square_and_unlocked_state() {
+        let mut app = App::new(one_session());
+        app.theme = Palette::dark();
+        app.show_preview = true;
+        // Live via statusline heartbeat, but no cs lock and no PID.
+        app.sessions[0].is_live = true;
+        app.sessions[0].is_locked = false;
+        app.sessions[0].lock_pid = None;
+        let p = app.theme;
+
+        let backend = TestBackend::new(90, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let rows: Vec<String> = (0..buf.area.height)
+            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
+            .collect();
+
+        // The preview names the state honestly: live, but not cs-locked.
+        assert!(
+            rows.iter().any(|r| r.contains("\u{25a0} live \u{b7} unlocked")),
+            "preview should read '■ live · unlocked' for a heartbeat-live session"
+        );
+        // The gutter carries the live square, teal like every liveness surface.
+        let row_y = rows
+            .iter()
+            .position(|r| r.contains(app.sessions[0].name.as_str()) && !r.contains("SESSION"))
+            .expect("session row should render") as u16;
+        let gutter_x = app.table_area.x + SELECT_WIDTH;
+        let cell = &buf[(gutter_x, row_y)];
+        assert_eq!(cell.symbol(), "\u{25a0}", "heartbeat-live row shows the live square");
+        let light_teal = Color::Rgb(139, 231, 219);
+        assert!(
+            cell.fg == p.teal || cell.fg == light_teal,
+            "the square stays in the teal liveness phases, got {:?}",
+            cell.fg
+        );
+    }
+
+    #[test]
     fn narrow_header_omits_the_inline_legend() {
         let mut app = App::new(one_session());
         app.theme = Palette::dark();
@@ -3092,7 +3135,7 @@ mod tests {
                 modified: Some("2026-02-20 14:00".into()),
                 modified_ts: None,
                 lock_pid: None,
-                is_locked: false,
+                is_locked: false, is_live: false,
                 secrets_count: 0,
                 queue_depth: 0,
                 git_repo: None,
@@ -3619,7 +3662,7 @@ mod tests {
             modified: Some("2026-02-20 14:00".into()),
             modified_ts: Some(std::time::SystemTime::now()),
             lock_pid: None,
-            is_locked: false,
+            is_locked: false, is_live: false,
             secrets_count: 0,
             queue_depth: 0,
             git_repo: None,
