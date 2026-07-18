@@ -5,6 +5,11 @@ Every cs session is a directory under `~/.claude-sessions/` (override with
 project files there. All session *metadata* lives in a single `.cs/`
 subdirectory, and the whole session directory is its own local git repo.
 
+`.spawn/` at the sessions root stages `<name>.seed` files written by
+`cs -spawn --task`: line 1 is the spawner, remaining lines are tasks. The
+launch consumes fresh seeds (queued, armed, kick prompt); seeds older than an
+hour are set aside as `<name>.seed.stale` and never applied silently.
+
 The one distinction that governs everything below is **shared vs machine-local**:
 
 - **Shared** — committed to the session's git repo. When a session is cloned or
@@ -72,6 +77,7 @@ user-owned `CLAUDE.md` is never touched.
 | `mail/inbox.jsonl` | Cross-session mailbox: one JSON message per line, appended by senders (`cs -msg`). |
 | `mail/notified` | Digest cursor: inbox line count already announced by a hook digest. |
 | `mail/seen` | Read cursor: inbox line count already printed by `cs -msg`. |
+| `spawned-by` | Spawner session name for a `cs -spawn`ed worker; deleted after the drain-finished notify (one-shot). |
 
 ## Merge policy
 
