@@ -362,6 +362,9 @@ pub struct App {
     pub delete_countdown_start: Option<std::time::Instant>,
     /// Fuzzy match indices per session index (for highlighting matched chars in names).
     pub fuzzy_indices: HashMap<usize, Vec<usize>>,
+    /// Worktree rows (`base@task`) currently attached under their base in
+    /// `filtered`; the renderer shows these as indented `@task` children.
+    pub attached_worktrees: std::collections::HashSet<usize>,
     /// Revealed secret: (key_name, value, reveal_time). Auto-expires after PEEK_DURATION_SECS.
     pub revealed_secret: Option<(String, String, std::time::Instant)>,
     /// Section labels for time-based grouping (parallel to `filtered`).
@@ -467,6 +470,7 @@ impl App {
             visible_sort_columns: Vec::new(),
             delete_countdown_start: None,
             fuzzy_indices: HashMap::new(),
+            attached_worktrees: std::collections::HashSet::new(),
             revealed_secret: None,
             section_labels: Vec::new(),
             nav_repeat: ('\0', 0, std::time::Instant::now()),
@@ -736,13 +740,59 @@ impl App {
             });
         }
 
+        // Task worktrees (`base@task`) ride under their base session: pull
+        // each one out of the flat order and reinsert it directly after its
+        // base, preserving the worktrees' own relative order. A worktree
+        // whose base is filtered out stays where the sort put it and renders
+        // under its full name. Search keeps the flat order so fuzzy scores
+        // and highlight indices stay honest.
+        self.attached_worktrees.clear();
+        if query.is_empty() {
+            let in_order: std::collections::HashSet<String> = self
+                .filtered
+                .iter()
+                .map(|&i| self.sessions[i].name.clone())
+                .collect();
+            let mut children: std::collections::HashMap<String, Vec<usize>> =
+                std::collections::HashMap::new();
+            for &i in &self.filtered {
+                if let Some((base, _)) = self.sessions[i].name.split_once('@') {
+                    if in_order.contains(base) {
+                        children.entry(base.to_string()).or_default().push(i);
+                        self.attached_worktrees.insert(i);
+                    }
+                }
+            }
+            if !children.is_empty() {
+                let mut out = Vec::with_capacity(self.filtered.len());
+                for &i in &self.filtered {
+                    if self.attached_worktrees.contains(&i) {
+                        continue;
+                    }
+                    out.push(i);
+                    if let Some(kids) = children.get(self.sessions[i].name.as_str()) {
+                        out.extend(kids);
+                    }
+                }
+                self.filtered = out;
+            }
+        }
+
         // Compute section labels for time-based grouping
         self.section_labels.clear();
         let show_sections = matches!(self.sort_col, SortColumn::Created | SortColumn::Modified);
         if show_sections && !self.filtered.is_empty() {
             let mut prev_section = "";
+            let mut base_ts: Option<std::time::SystemTime> = None;
             for &idx in &self.filtered {
-                let ts = self.sessions[idx].modified_ts;
+                // An attached worktree inherits its base's section so the
+                // group never splits across a divider.
+                let ts = if self.attached_worktrees.contains(&idx) {
+                    base_ts
+                } else {
+                    base_ts = self.sessions[idx].modified_ts;
+                    self.sessions[idx].modified_ts
+                };
                 let section = time_section(ts);
                 if section != prev_section {
                     self.section_labels.push(Some(section));
