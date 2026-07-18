@@ -511,6 +511,23 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             // shows a filled square in place of the recency dot — the square
             // itself is the lock signal, so no separate lock glyph follows it.
             let mut name_spans: Vec<Span> = Vec::new();
+            // Attached worktrees hang off their base with a tree connector,
+            // placed before the status marker so the marker stays glued to
+            // the name. └─ closes the group; ├─ continues it.
+            if app.attached_worktrees.contains(&i) {
+                let my_base = s.name.split_once('@').map(|(b, _)| b);
+                let sibling_follows = app
+                    .filtered
+                    .get(row_idx + 1)
+                    .map(|&n| {
+                        app.attached_worktrees.contains(&n)
+                            && app.sessions[n].name.split_once('@').map(|(b, _)| b) == my_base
+                    })
+                    .unwrap_or(false);
+                let connector = if sibling_follows { "\u{251c}\u{2500} " } else { "\u{2514}\u{2500} " };
+                let rail_color = if dimmed { p.comment } else { p.faint };
+                name_spans.push(Span::styled(connector, Style::default().fg(rail_color)));
+            }
             if s.is_live {
                 let sq = if dimmed {
                     p.comment
@@ -575,10 +592,9 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
                     ));
                 }
             } else if app.attached_worktrees.contains(&i) {
-                // Attached under its base: indent and show only the @task
-                // part; repeating the base name would just be noise.
+                // Attached under its base: show only the @task part; the
+                // connector already carries the indent and the lineage.
                 let task = s.name.split_once('@').map(|(_, t)| t).unwrap_or(&s.name);
-                name_spans.push(Span::raw("  "));
                 name_spans.push(Span::styled(
                     format!("@{task}"),
                     Style::default().fg(name_color),
@@ -2717,18 +2733,24 @@ mod tests {
 
     #[test]
     fn worktree_rows_nest_under_their_base_without_the_base_name() {
-        let mut app = App::new(worktree_fixture());
+        use std::time::{Duration, SystemTime};
+        let mut sessions = worktree_fixture();
+        let mut beta = one_session().remove(0);
+        beta.name = "snip@beta".into();
+        beta.modified_ts = Some(SystemTime::now() - Duration::from_secs(40 * 3600));
+        sessions.push(beta);
+        let mut app = App::new(sessions);
         app.theme = Palette::dark();
         app.show_preview = false;
 
-        // Flat age order would be snip, zzz-later, snip@test; the attach
-        // pass pulls the task directly under its base.
+        // Flat age order would be snip, zzz-later, snip@test, snip@beta; the
+        // attach pass pulls both tasks directly under their base, in order.
         let names: Vec<&str> =
             app.filtered.iter().map(|&i| app.sessions[i].name.as_str()).collect();
         assert_eq!(
             names,
-            ["snip", "snip@test", "zzz-later"],
-            "worktree should attach under its base"
+            ["snip", "snip@test", "snip@beta", "zzz-later"],
+            "worktrees should attach under their base"
         );
 
         let backend = TestBackend::new(100, 30);
@@ -2739,10 +2761,24 @@ mod tests {
             .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
             .collect();
 
+        // Tree connectors put the status marker directly in front of the
+        // name: ├─ while siblings follow, └─ on the last child.
         let task_row = rows
             .iter()
             .find(|r| r.contains("@test"))
             .expect("the worktree row should render");
+        assert!(
+            task_row.contains("\u{251c}\u{2500} \u{25cf} @test"),
+            "first child carries the continuing connector: {task_row:?}"
+        );
+        let beta_row = rows
+            .iter()
+            .find(|r| r.contains("@beta"))
+            .expect("the second worktree row should render");
+        assert!(
+            beta_row.contains("\u{2514}\u{2500} \u{25cf} @beta"),
+            "last child carries the closing connector: {beta_row:?}"
+        );
         assert!(
             !task_row.contains("snip@test"),
             "attached worktree must not repeat the base name: {task_row:?}"
