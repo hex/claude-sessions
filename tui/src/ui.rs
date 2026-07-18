@@ -399,7 +399,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
         }
         let legend: [(&str, Color, &str); 4] = [
             ("\u{25cf}", p.green, "recency"),
-            ("\u{25aa}", p.ember, "locked"),
+            ("\u{25aa}", p.ember, "locked (live now)"),
             ("*", p.gold, "marked"),
             ("\u{2500}", p.comment, "archived"),
         ];
@@ -1340,7 +1340,7 @@ fn render_legend(app: &App, frame: &mut Frame) {
     let lines: Vec<Line> = vec![
         Line::default(),
         entry("\u{25cf}", p.green, false, "recency dot \u{2014} green when recently active, fading to grey as the session goes dormant"),
-        entry("\u{25aa}", p.ember, false, "locked \u{2014} a conversation is live in this session right now"),
+        entry("\u{25aa}", p.ember, false, "locked \u{2014} a conversation is live in this session right now (shown in place of the recency dot)"),
         entry("*", p.gold, true, "marked with Space for batch actions (D deletes the marked set)"),
         entry("\u{25aa}", p.gold, false, "has stored secrets (shown here when the SECRETS column is hidden)"),
         entry("\u{2500}", p.comment, false, "dim grey row \u{2014} archived session, or not matching the current search"),
@@ -2376,7 +2376,7 @@ mod tests {
         app.handle_key(KeyEvent::from(KeyCode::Char('?')));
         assert_eq!(app.mode, Mode::Legend);
         let joined = render_wide(&mut app);
-        for label in ["recency dot", "locked", "marked with Space", "stored secrets", "archived"] {
+        for label in ["recency dot", "locked", "marked with Space", "stored secrets", "archived", "in place of the recency dot"] {
             assert!(joined.contains(label), "legend should explain {label}: {joined}");
         }
 
@@ -2504,6 +2504,10 @@ mod tests {
         for label in ["recency", "locked", "marked", "archived"] {
             assert!(header.contains(label), "header legend should name {label}: {header:?}");
         }
+        assert!(
+            header.contains("live now"),
+            "the locked entry should say the square means live now: {header:?}"
+        );
         let s = header.find("SESSION").unwrap();
         let l = header.find("recency").unwrap();
         let c = header.find("CREATED").unwrap();
