@@ -621,7 +621,7 @@ const HEARTBEAT_WINDOW_SECS: u64 = 900;
 /// of `now`. Detects conversations opened outside cs (no session.lock).
 /// A future mtime counts as live, matching the recency math's clamping.
 fn heartbeat_alive(meta_dir: &Path, now: std::time::SystemTime) -> bool {
-    let Ok(md) = fs::metadata(meta_dir.join("context-pct")) else {
+    let Ok(md) = fs::metadata(meta_dir.join("local/context-pct")) else {
         return false;
     };
     let Ok(mtime) = md.modified() else {
@@ -840,8 +840,12 @@ mod tests {
         // No context-pct at all: not live.
         assert!(!heartbeat_alive(&tmp, std::time::SystemTime::now()));
 
-        std::fs::write(tmp.join("context-pct"), "42").unwrap();
-        let mtime = std::fs::metadata(tmp.join("context-pct")).unwrap().modified().unwrap();
+        // Production layout: the heartbeat lives under .cs/local/, one level
+        // below the lock's meta dir.
+        std::fs::create_dir_all(tmp.join("local")).unwrap();
+        std::fs::write(tmp.join("local/context-pct"), "42").unwrap();
+        let mtime =
+            std::fs::metadata(tmp.join("local/context-pct")).unwrap().modified().unwrap();
 
         // Written within the window: live.
         let soon = mtime + std::time::Duration::from_secs(30);
