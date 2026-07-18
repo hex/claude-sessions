@@ -72,7 +72,13 @@ immediately before the exec branching:
      surprise-arms a queue days later; recovery is explicit (read the .stale
      file, re-spawn).
 2. Kick prompt (only when a seed was consumed) rides the exec as claude's
-   positional initial prompt, threaded to whichever exec arm runs. With a
+   positional initial prompt, threaded to whichever exec arm runs. Claude has
+   a single positional-prompt slot, which the color re-apply (`/color ...`)
+   normally occupies: the kick displaces it for that one launch (the color
+   returns on the next open). A launch that consumed a seed also never blocks
+   on the interactive "Continue previous conversation?" ask — it takes the
+   default resume path, because a spawned tmux window has nobody at the
+   keyboard. With a
    spawner: "Spawned by <spawner>. Your walk-away queue is armed with N
    task(s); begin. Send results with: cs -msg <spawner> -k result \"...\"".
    Without: "Your walk-away queue is armed with N task(s); begin." (no reply
@@ -145,7 +151,8 @@ not against a hostile same-user process.
 | File | Change |
 |---|---|
 | `lib/52-spawn.sh` | new: `run_spawn`, seed writer, tmux wrapper |
-| `lib/75-launch.sh` | seed consumption + kick prompt threading |
+| `lib/75-launch.sh` | seed consumption, kick prompt threading, resume-ask bypass |
+| `lib/40-state.sh` | `_exec_fresh_rebind` honors the kick prompt |
 | `lib/99-main.sh` | `-spawn` in both dispatch arms |
 | `lib/10-help.sh` | help lines |
 | `hooks/narrative-reminder.sh` | spawned-by notify on drain_finished / breaker_tripped |
@@ -173,8 +180,8 @@ the suite runs without touching any real tmux server. Coverage:
   new-session collision retry.
 - result-up: drain_finished with spawned-by sends the notify into the
   spawner's inbox and deletes spawned-by; second drain sends nothing;
-  breaker_tripped notifies and keeps spawned-by; missing cs binary or send
-  failure leaves the drain unaffected.
+  breaker_tripped notifies and keeps spawned-by; send failures leave the
+  drain unaffected by construction (guarded best-effort calls).
 
 ## Non-goals
 
