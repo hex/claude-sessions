@@ -48,6 +48,11 @@ test_send_session_scoped_alias() {
     assert_file_contains "$(INBOX)" "via alias" "session-scoped arm sends" || return 1
 }
 
+test_send_joins_unquoted_multiword_body() {
+    "$CS_BIN" -msg receiver hello there world >/dev/null 2>&1 || return 1
+    assert_eq "hello there world" "$(head -1 "$(INBOX)" | jq -r .body)" "unquoted words joined" || return 1
+}
+
 test_send_rejects_unknown_target() {
     ! "$CS_BIN" -msg nosuch "x" >/dev/null 2>&1 || return 1
 }
@@ -82,6 +87,7 @@ test_send_rejects_empty_and_oversize_body() {
 run_test test_send_writes_full_record
 run_test test_send_from_outside_session_has_empty_from
 run_test test_send_session_scoped_alias
+run_test test_send_joins_unquoted_multiword_body
 run_test test_send_rejects_unknown_target
 run_test test_send_rejects_slash_in_target
 run_test test_send_rejects_self

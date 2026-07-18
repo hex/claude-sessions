@@ -43,10 +43,11 @@ _mail_send() {  # target, [--kind|-k KIND] [--ref ID] body
         case "$1" in
             --kind|-k) shift; kind="${1:-}";;
             --ref)     shift; ref="${1:-}";;
-            *)         body="$1";;
+            *)         body="${body:+$body }$1";;
         esac
         shift
     done
+    command -v jq >/dev/null 2>&1 || error "jq is required for cs -msg"
     case "$target" in ''|*/*) error "cs -msg needs a plain session name as target";; esac
     local target_dir="$SESSIONS_ROOT/$target"
     is_session_dir "$target_dir" || error "No such session: $target"
