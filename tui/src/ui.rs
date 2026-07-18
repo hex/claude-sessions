@@ -574,6 +574,15 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
                         Style::default().fg(name_color),
                     ));
                 }
+            } else if app.attached_worktrees.contains(&i) {
+                // Attached under its base: indent and show only the @task
+                // part; repeating the base name would just be noise.
+                let task = s.name.split_once('@').map(|(_, t)| t).unwrap_or(&s.name);
+                name_spans.push(Span::raw("  "));
+                name_spans.push(Span::styled(
+                    format!("@{task}"),
+                    Style::default().fg(name_color),
+                ));
             } else {
                 name_spans.push(Span::styled(s.name.clone(), Style::default().fg(name_color)));
             }
@@ -1504,6 +1513,24 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
         ("state", state_value, state_color),
         ("repo", session.git_repo.clone().unwrap_or_else(|| "\u{2014}".into()), p.ink),
     ];
+    // Worktree lineage: a task session names its base; a base session lists
+    // its task worktrees.
+    if let Some((base, task)) = session.name.split_once('@') {
+        meta.push(("worktree", format!("@{task} \u{b7} off {base}"), p.ink));
+    } else {
+        let tasks: Vec<String> = app
+            .sessions
+            .iter()
+            .filter_map(|s| {
+                s.name
+                    .split_once('@')
+                    .and_then(|(b, t)| (b == session.name).then(|| format!("@{t}")))
+            })
+            .collect();
+        if !tasks.is_empty() {
+            meta.push(("tasks", tasks.join(", "), p.ink));
+        }
+    }
     if !session.tags.is_empty() {
         meta.push(("tags", session.tags.join(", "), p.mut_));
     }
@@ -2667,6 +2694,126 @@ mod tests {
             cell.fg == p.teal || cell.fg == light_teal,
             "the square stays in the teal liveness phases, got {:?}",
             cell.fg
+        );
+    }
+
+    fn worktree_fixture() -> Vec<crate::session::Session> {
+        use std::time::{Duration, SystemTime};
+        let mut sessions = one_session();
+        sessions[0].name = "snip".into();
+        sessions[0].modified_ts = Some(SystemTime::now());
+        let mut task = one_session().remove(0);
+        task.name = "snip@test".into();
+        // Older than the base: without section inheritance this row would
+        // open a divider of its own once attached.
+        task.modified_ts = Some(SystemTime::now() - Duration::from_secs(30 * 3600));
+        let mut other = one_session().remove(0);
+        other.name = "zzz-later".into();
+        other.modified_ts = Some(SystemTime::now() - Duration::from_secs(5 * 3600));
+        sessions.push(task);
+        sessions.push(other);
+        sessions
+    }
+
+    #[test]
+    fn worktree_rows_nest_under_their_base_without_the_base_name() {
+        let mut app = App::new(worktree_fixture());
+        app.theme = Palette::dark();
+        app.show_preview = false;
+
+        // Flat age order would be snip, zzz-later, snip@test; the attach
+        // pass pulls the task directly under its base.
+        let names: Vec<&str> =
+            app.filtered.iter().map(|&i| app.sessions[i].name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["snip", "snip@test", "zzz-later"],
+            "worktree should attach under its base"
+        );
+
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let rows: Vec<String> = (0..buf.area.height)
+            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
+            .collect();
+
+        let task_row = rows
+            .iter()
+            .find(|r| r.contains("@test"))
+            .expect("the worktree row should render");
+        assert!(
+            !task_row.contains("snip@test"),
+            "attached worktree must not repeat the base name: {task_row:?}"
+        );
+        // Section inheritance: the 30h-old task stays inside the base's
+        // Today group instead of opening a Yesterday divider.
+        assert!(
+            !rows.iter().any(|r| r.contains("Yesterday")),
+            "an attached worktree must not split its base's section"
+        );
+    }
+
+    #[test]
+    fn searching_shows_worktrees_flat_with_full_names() {
+        let mut app = App::new(worktree_fixture());
+        app.theme = Palette::dark();
+        app.show_preview = false;
+        for c in "snip".chars() {
+            app.search_input.insert(c);
+        }
+        app.apply_filter_and_sort();
+
+        assert!(
+            app.attached_worktrees.is_empty(),
+            "search keeps the flat order for honest fuzzy highlighting"
+        );
+
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let rows: Vec<String> = (0..buf.area.height)
+            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
+            .collect();
+        assert!(
+            rows.iter().any(|r| r.contains("snip@test")),
+            "search results show the full worktree name"
+        );
+    }
+
+    #[test]
+    fn preview_names_worktree_lineage_on_both_sides() {
+        let mut app = App::new(worktree_fixture());
+        app.theme = Palette::dark();
+        app.show_preview = true;
+
+        // Base selected (row 0): the preview lists its task worktrees.
+        let backend = TestBackend::new(200, 50);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let text: String = (0..buf.area.height)
+            .flat_map(|y| (0..buf.area.width).map(move |x| (x, y)))
+            .map(|(x, y)| buf[(x, y)].symbol().to_string())
+            .collect();
+        assert!(text.contains("tasks"), "base preview lists its worktrees");
+        assert!(text.contains("@test"), "base preview names the task");
+
+        // Task selected (row 1 after attach): the preview names its base.
+        app.table_state.select(Some(1));
+        let backend = TestBackend::new(200, 50);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let text: String = (0..buf.area.height)
+            .flat_map(|y| (0..buf.area.width).map(move |x| (x, y)))
+            .map(|(x, y)| buf[(x, y)].symbol().to_string())
+            .collect();
+        assert!(
+            text.contains("worktree") && text.contains("off snip"),
+            "task preview names its base session"
         );
     }
 
