@@ -23,6 +23,8 @@ test_voice_skill_teaches_the_drafting_rules() {
     assert_file_contains "$SKILL" "older than 30 days" "staleness policy stated" || return 1
     assert_file_contains "$SKILL" "never send" "drafts are delivered, not sent" || return 1
     assert_file_contains "$SKILL" "nothing to learn from" "empty-corpus outcome handled" || return 1
+    assert_file_contains "$SKILL" "anti-slop pass" "drafts get the anti-slop pass before delivery" || return 1
+    assert_file_contains "$SKILL" "no em dashes" "the pass bans em dashes" || return 1
 }
 
 test_voice_skill_defines_the_profile_shape() {
