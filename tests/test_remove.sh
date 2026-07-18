@@ -48,6 +48,15 @@ test_remove_unknown_name_fails_fast() {
     [ -d "$CS_SESSIONS_ROOT/r6" ] || { echo "  fail-fast still removed a later name"; return 1; }
 }
 
+test_remove_empty_name_rejected_before_any_deletion() {
+    create_test_session r7 >/dev/null
+    ! printf 'y\ny\n' | "$CS_BIN" -rm r7 "" >/dev/null 2>&1 || return 1
+    [ -d "$CS_SESSIONS_ROOT" ] || { echo "  sessions root deleted"; return 1; }
+    [ -d "$CS_SESSIONS_ROOT/r7" ] || { echo "  r7 removed despite invalid list"; return 1; }
+    ! "$CS_BIN" -rm "" >/dev/null 2>&1 || return 1
+}
+
+run_test test_remove_empty_name_rejected_before_any_deletion
 run_test test_remove_multiple_names_each_confirmed
 run_test test_remove_decline_skips_that_session_only
 run_test test_remove_single_name_still_works

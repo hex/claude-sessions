@@ -6,6 +6,7 @@
 # session. Called directly, never in command substitution — error must exit
 # the caller, not a subshell.
 _archive_resolve() {  # name
+    [ -n "${1:-}" ] || error "Empty session name"
     ARCHIVE_DIR="$SESSIONS_ROOT/$1"
     if [ ! -d "$ARCHIVE_DIR" ] && [ ! -L "$ARCHIVE_DIR" ]; then
         error "No such session: $1"
@@ -28,7 +29,9 @@ run_archive() {
         case "$arg" in
             --force|-f) force="true" ;;
             -*) error "Unknown archive option: $arg. Usage: cs -archive <name>... [--force]" ;;
-            *) names+=("$arg") ;;
+            *)
+                [ -n "$arg" ] || error "Usage: cs -archive <name>... [--force] (empty session name)"
+                names+=("$arg") ;;
         esac
     done
     [ "${#names[@]}" -ge 1 ] || error "Usage: cs -archive <name>... [--force]"
@@ -53,7 +56,9 @@ run_unarchive() {
     for arg in "$@"; do
         case "$arg" in
             -*) error "Unknown unarchive option: $arg. Usage: cs -unarchive <name>..." ;;
-            *) names+=("$arg") ;;
+            *)
+                [ -n "$arg" ] || error "Usage: cs -unarchive <name>... (empty session name)"
+                names+=("$arg") ;;
         esac
     done
     [ "${#names[@]}" -ge 1 ] || error "Usage: cs -unarchive <name>..."

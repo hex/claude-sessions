@@ -233,11 +233,14 @@ list_sessions() {
 
 # Remove a session
 # Remove each named session in turn; every deletion keeps its own confirm.
+# All names are validated before anything is deleted: an empty name would
+# resolve to the sessions root itself and rm -rf every session.
 remove_session() {
-    if [ $# -eq 0 ] || [ -z "$1" ]; then
-        error "Usage: cs -remove <session-name>..."
-    fi
+    [ $# -ge 1 ] || error "Usage: cs -remove <session-name>..."
     local _name
+    for _name in "$@"; do
+        [ -n "$_name" ] || error "Usage: cs -remove <session-name>... (empty session name)"
+    done
     for _name in "$@"; do
         _remove_one_session "$_name"
     done
@@ -245,6 +248,7 @@ remove_session() {
 
 _remove_one_session() {
     local session_name="$1"
+    [ -n "$session_name" ] || error "Refusing to remove an empty session name"
 
     # Reject path traversal before any filesystem action: '.'/'..' and any
     # name with a slash would resolve rm -rf outside the sessions root. A

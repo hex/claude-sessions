@@ -221,6 +221,13 @@ test_unarchive_rejects_flags() {
     [ ! -f "$CS_SESSIONS_ROOT/ua1/.cs/archived" ] || { echo "  FAIL: single-name unarchive must still work"; return 1; }
 }
 
+test_archive_rejects_empty_name_before_acting() {
+    _archive_session "ea1"
+    ! "$CS_BIN" -archive ea1 "" >/dev/null 2>&1 || return 1
+    [ ! -f "$CS_SESSIONS_ROOT/ea1/.cs/archived" ] || { echo "  FAIL: archived before empty-name rejection"; return 1; }
+    ! "$CS_BIN" -unarchive "" >/dev/null 2>&1 || return 1
+}
+
 test_archive_multiple_names() {
     _archive_session "ma1"
     _archive_session "ma2"
@@ -264,6 +271,7 @@ run_test test_search_skips_archived_by_default
 run_test test_search_empty_query_still_errors
 run_test test_open_auto_unarchives_with_notice
 run_test test_unarchive_rejects_flags
+run_test test_archive_rejects_empty_name_before_acting
 run_test test_archive_multiple_names
 run_test test_unarchive_multiple_names
 run_test test_list_tag_trailer_counts_only_tagged_archived
