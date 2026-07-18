@@ -38,7 +38,8 @@ _build_digest() {  # meta_local_dir
     DIGEST=""
     inbox="$qdir/notifications.jsonl"
     [ -s "$inbox" ] || return 0
-    total=$(grep -c '' "$inbox" 2>/dev/null) || return 0
+    total=$(wc -l < "$inbox" 2>/dev/null | tr -d '[:space:]') || return 0
+    case "$total" in ''|*[!0-9]*) return 0;; esac
     seen=$(cat "$qdir/notifications.seen" 2>/dev/null | tr -d '[:space:]') || true
     case "$seen" in ''|*[!0-9]*) seen=0;; esac
     [ "$total" -gt "$seen" ] || return 0
@@ -57,8 +58,48 @@ _build_digest() {  # meta_local_dir
         && mv "$qdir/notifications.seen.tmp" "$qdir/notifications.seen" 2>/dev/null || true
 }
 
+# Build the surface-once mail digest from unseen inbox lines. Sets MAIL_DIGEST
+# (may be empty) and advances the notified cursor to the pre-counted total, so
+# a line appended mid-build is never skipped (wc -l also excludes a torn,
+# still-unterminated final line). Best-effort throughout: never breaks the hook.
+_build_mail_digest() {  # meta_local_dir
+    local mdir="$1/mail" inbox total seen
+    MAIL_DIGEST=""
+    inbox="$mdir/inbox.jsonl"
+    [ -s "$inbox" ] || return 0
+    total=$(wc -l < "$inbox" 2>/dev/null | tr -d '[:space:]') || return 0
+    case "$total" in ''|*[!0-9]*) return 0;; esac
+    seen=$(cat "$mdir/notified" 2>/dev/null | tr -d '[:space:]') || true
+    case "$seen" in ''|*[!0-9]*) seen=0;; esac
+    [ "$total" -gt "$seen" ] || return 0
+    MAIL_DIGEST=$(awk -v a=$((seen + 1)) -v b="$total" 'NR>=a && NR<=b' "$inbox" 2>/dev/null | jq -rRs '
+        [split("\n")[] | select(length > 0) | (fromjson? // empty)] as $m |
+        [$m[] | select(.kind == "notify")] as $n |
+        [$m[] | select(.kind != "notify")] as $r |
+        (( [ ($n[0:3])[] | "mail from " + (if .from == "" then .actor else .from end) + ": "
+              + (.body | gsub("[\n\r]"; " ")) ] )
+         + (if ($n | length) > 3 then ["... and \(($n | length) - 3) more notifies"] else [] end)
+         + (if ($r | length) > 0 then
+              ["mail: \($r | length) message(s) from "
+               + ([ $r[] | if .from == "" then .actor else .from end ] | unique | join(", "))
+               + ". Run cs -msg to read."]
+            else [] end)) | join("\n")
+    ' 2>/dev/null) || MAIL_DIGEST=""
+    MAIL_DIGEST=$(printf '%s' "$MAIL_DIGEST" | LC_ALL=C tr -d '\000-\010\013-\037\177')
+    printf '%s\n' "$total" > "$mdir/notified.tmp" 2>/dev/null \
+        && mv "$mdir/notified.tmp" "$mdir/notified" 2>/dev/null || true
+}
+
 DIGEST=""
-[ -n "${CLAUDE_SESSION_META_DIR:-}" ] && _build_digest "$CLAUDE_SESSION_META_DIR/local"
+MAIL_DIGEST=""
+if [ -n "${CLAUDE_SESSION_META_DIR:-}" ]; then
+    _build_digest "$CLAUDE_SESSION_META_DIR/local"
+    _build_mail_digest "$CLAUDE_SESSION_META_DIR/local"
+fi
+if [ -n "$MAIL_DIGEST" ]; then
+    DIGEST="${DIGEST:+$DIGEST
+}$MAIL_DIGEST"
+fi
 
 # Every pass-through exit below this point must still deliver a pending
 # digest; a digest-only prompt turn emits just the digest as context.

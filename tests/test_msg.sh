@@ -193,4 +193,61 @@ run_test test_read_strips_control_characters
 run_test test_read_ignores_torn_final_line_until_completed
 run_test test_read_survives_corrupt_line_and_big_inbox
 
+_prompt_as_receiver() {  # prompt-text
+    printf '{"prompt": "%s"}' "$1" | \
+    CLAUDE_SESSION_NAME="receiver" \
+    CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/receiver" \
+    CLAUDE_SESSION_META_DIR="$CS_SESSIONS_ROOT/receiver/.cs" \
+    bash "$HOOKS_DIR/scope-prompt.sh"
+}
+
+test_digest_notify_inline_and_text_counted() {
+    "$CS_BIN" -msg receiver -k notify "build is green" >/dev/null 2>&1
+    "$CS_BIN" -msg receiver "long body that must stay out of hook context" >/dev/null 2>&1
+    local out; out=$(_prompt_as_receiver "hello") || return 1
+    assert_output_contains "$out" "mail from sender: build is green" "notify body inline" || return 1
+    assert_output_contains "$out" "1 message(s) from sender" "text counted" || return 1
+    assert_output_contains "$out" "Run cs -msg to read" "read pointer present" || return 1
+    assert_output_not_contains "$out" "stay out of hook context" "text body absent" || return 1
+}
+
+test_digest_surfaces_once_and_read_cursor_independent() {
+    "$CS_BIN" -msg receiver -k notify "ping" >/dev/null 2>&1
+    local out; out=$(_prompt_as_receiver "hello") || return 1
+    assert_output_contains "$out" "ping" "first prompt announces" || return 1
+    out=$(_prompt_as_receiver "again") || return 1
+    assert_output_not_contains "$out" "ping" "second prompt silent" || return 1
+    out=$(_as_receiver -msg 2>&1) || return 1
+    assert_output_contains "$out" "ping" "digest did not consume the read cursor" || return 1
+}
+
+test_digest_caps_notifies_at_three() {
+    local i=1
+    while [ "$i" -le 5 ]; do
+        "$CS_BIN" -msg receiver -k notify "note $i" >/dev/null 2>&1
+        i=$((i + 1))
+    done
+    local out; out=$(_prompt_as_receiver "hello") || return 1
+    assert_output_contains "$out" "note 3" "third notify shown" || return 1
+    assert_output_not_contains "$out" "note 4" "fourth notify capped" || return 1
+    assert_output_contains "$out" "2 more" "overflow counted" || return 1
+}
+
+test_session_start_hook_also_delivers() {
+    "$CS_BIN" -msg receiver -k notify "seen at start" >/dev/null 2>&1
+    local out
+    out=$(printf '{"hook_event_name":"SessionStart","source":"startup"}' | \
+        CLAUDE_SESSION_NAME="receiver" \
+        CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/receiver" \
+        CLAUDE_SESSION_META_DIR="$CS_SESSIONS_ROOT/receiver/.cs" \
+        CS_SESSIONS_ROOT="$CS_SESSIONS_ROOT" \
+        bash "$HOOKS_DIR/session-start.sh") || return 1
+    assert_output_contains "$out" "seen at start" "session-start delivers mail digest" || return 1
+}
+
+run_test test_digest_notify_inline_and_text_counted
+run_test test_digest_surfaces_once_and_read_cursor_independent
+run_test test_digest_caps_notifies_at_three
+run_test test_session_start_hook_also_delivers
+
 report_results
