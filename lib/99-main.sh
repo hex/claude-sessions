@@ -56,7 +56,8 @@ main() {
             return 0
             ;;
         -remove|-rm)
-            remove_session "${2:-}"
+            shift
+            remove_session "$@"
             return 0
             ;;
         -adopt)

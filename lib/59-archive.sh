@@ -21,49 +21,51 @@ _session_is_archived() {  # session_dir
 }
 
 run_archive() {
-    local name="" force="" arg
+    local force="" arg name
+    local names
+    names=()
     for arg in "$@"; do
         case "$arg" in
             --force|-f) force="true" ;;
-            -*) error "Unknown archive option: $arg. Usage: cs -archive <name> [--force]" ;;
-            *)
-                [ -z "$name" ] || error "Usage: cs -archive <name> [--force]"
-                name="$arg"
-                ;;
+            -*) error "Unknown archive option: $arg. Usage: cs -archive <name>... [--force]" ;;
+            *) names+=("$arg") ;;
         esac
     done
-    [ -n "$name" ] || error "Usage: cs -archive <name> [--force]"
-    _archive_resolve "$name"
-    if [ -f "$ARCHIVE_MARKER" ]; then
-        info "Already archived: $name"
-        return 0
-    fi
-    if [ -z "$force" ] && session_is_live "$ARCHIVE_DIR/.cs"; then
-        error "Session '$name' is live (pid $(read_lock_pid "$ARCHIVE_DIR/.cs")); use --force to archive anyway"
-    fi
-    printf 'archived: %s by %s\n' "$(date +%Y-%m-%d)" "$(cs_actor_slug)" > "$ARCHIVE_MARKER"
-    info "Archived: $name (opening it restores it; or run 'cs -unarchive $name')"
+    [ "${#names[@]}" -ge 1 ] || error "Usage: cs -archive <name>... [--force]"
+    for name in "${names[@]}"; do
+        _archive_resolve "$name"
+        if [ -f "$ARCHIVE_MARKER" ]; then
+            info "Already archived: $name"
+            continue
+        fi
+        if [ -z "$force" ] && session_is_live "$ARCHIVE_DIR/.cs"; then
+            error "Session '$name' is live (pid $(read_lock_pid "$ARCHIVE_DIR/.cs")); use --force to archive anyway"
+        fi
+        printf 'archived: %s by %s\n' "$(date +%Y-%m-%d)" "$(cs_actor_slug)" > "$ARCHIVE_MARKER"
+        info "Archived: $name (opening it restores it; or run 'cs -unarchive $name')"
+    done
 }
 
 run_unarchive() {
-    local name="" arg
+    local arg name
+    local names
+    names=()
     for arg in "$@"; do
         case "$arg" in
-            -*) error "Unknown unarchive option: $arg. Usage: cs -unarchive <name>" ;;
-            *)
-                [ -z "$name" ] || error "Usage: cs -unarchive <name>"
-                name="$arg"
-                ;;
+            -*) error "Unknown unarchive option: $arg. Usage: cs -unarchive <name>..." ;;
+            *) names+=("$arg") ;;
         esac
     done
-    [ -n "$name" ] || error "Usage: cs -unarchive <name>"
-    _archive_resolve "$name"
-    if [ ! -f "$ARCHIVE_MARKER" ]; then
-        info "Not archived: $name"
-        return 0
-    fi
-    rm -f "$ARCHIVE_MARKER"
-    info "Unarchived: $name"
+    [ "${#names[@]}" -ge 1 ] || error "Usage: cs -unarchive <name>..."
+    for name in "${names[@]}"; do
+        _archive_resolve "$name"
+        if [ ! -f "$ARCHIVE_MARKER" ]; then
+            info "Not archived: $name"
+            continue
+        fi
+        rm -f "$ARCHIVE_MARKER"
+        info "Unarchived: $name"
+    done
 }
 
 # One dimmed line noting how many archived sessions the default listing hid.

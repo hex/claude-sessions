@@ -207,24 +207,35 @@ SCRIPT
     assert_output_contains "$output" "Unarchived: reopen" "launch prints the notice" || return 1
 }
 
-test_unarchive_rejects_flags_and_extra_names() {
+test_unarchive_rejects_flags() {
     _archive_session "ua1"
-    _archive_session "ua2"
     "$CS_BIN" -archive ua1 >/dev/null 2>&1 || return 1
-    "$CS_BIN" -archive ua2 >/dev/null 2>&1 || return 1
     local output
     if output=$("$CS_BIN" -unarchive --force ua1 2>&1); then
         echo "  FAIL: flag must be rejected"
         return 1
     fi
     assert_output_contains "$output" "Unknown unarchive option" "flag rejection names the option" || return 1
-    if output=$("$CS_BIN" -unarchive ua1 ua2 2>&1); then
-        echo "  FAIL: extra name must error"
-        return 1
-    fi
     [ -f "$CS_SESSIONS_ROOT/ua1/.cs/archived" ] || { echo "  FAIL: refused call must not unarchive"; return 1; }
     "$CS_BIN" -unarchive ua1 >/dev/null 2>&1 || return 1
     [ ! -f "$CS_SESSIONS_ROOT/ua1/.cs/archived" ] || { echo "  FAIL: single-name unarchive must still work"; return 1; }
+}
+
+test_archive_multiple_names() {
+    _archive_session "ma1"
+    _archive_session "ma2"
+    "$CS_BIN" -archive ma1 ma2 >/dev/null 2>&1 || return 1
+    [ -f "$CS_SESSIONS_ROOT/ma1/.cs/archived" ] || { echo "  FAIL: ma1 not archived"; return 1; }
+    [ -f "$CS_SESSIONS_ROOT/ma2/.cs/archived" ] || { echo "  FAIL: ma2 not archived"; return 1; }
+}
+
+test_unarchive_multiple_names() {
+    _archive_session "mu1"
+    _archive_session "mu2"
+    "$CS_BIN" -archive mu1 mu2 >/dev/null 2>&1 || return 1
+    "$CS_BIN" -unarchive mu1 mu2 >/dev/null 2>&1 || return 1
+    [ ! -f "$CS_SESSIONS_ROOT/mu1/.cs/archived" ] || { echo "  FAIL: mu1 still archived"; return 1; }
+    [ ! -f "$CS_SESSIONS_ROOT/mu2/.cs/archived" ] || { echo "  FAIL: mu2 still archived"; return 1; }
 }
 
 test_list_tag_trailer_counts_only_tagged_archived() {
@@ -252,7 +263,9 @@ test_search_flag_before_query() {
 run_test test_search_skips_archived_by_default
 run_test test_search_empty_query_still_errors
 run_test test_open_auto_unarchives_with_notice
-run_test test_unarchive_rejects_flags_and_extra_names
+run_test test_unarchive_rejects_flags
+run_test test_archive_multiple_names
+run_test test_unarchive_multiple_names
 run_test test_list_tag_trailer_counts_only_tagged_archived
 run_test test_search_flag_before_query
 report_results

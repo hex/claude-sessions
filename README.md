@@ -91,8 +91,8 @@ cs -doctor, -diag           # Run health checks (Keychain, hooks, memory, audit,
 cs -usage [--all] [<name>]  # Per-session token usage over the 5h/weekly rate-limit windows
 cs -tag add|rm <tag>        # Tag the current session (also: cs <name> -tag ..., -tag list)
 cs -list --tag <tag>        # List only sessions carrying a tag
-cs -archive <name>          # Archive a session (hidden from listings; --force if live)
-cs -unarchive <name>        # Restore an archived session
+cs -archive <name>...       # Archive sessions (hidden from listings; --force if live)
+cs -unarchive <name>...     # Restore archived sessions
 cs -list --archived         # List only archived sessions
 cs -lint <file>...          # Flag AI-slop prose tells (em-dashes, banned phrases); 0 clean 1 issues 2 error
 cs -statusline enable|disable  # Enable or remove the cs status line + agent-panel rows
@@ -100,7 +100,7 @@ cs -detect-theme            # Show the detected terminal light/dark theme
 cs -list, -ls               # List all sessions
 cs -live                    # List sessions running right now on this machine
 cs -status "<text>"         # Set this session's status (also: cs -status, cs -status --clear)
-cs -remove, -rm <name>      # Remove a session
+cs -remove, -rm <name>...   # Remove sessions (each asks its own confirm)
 cs -update [--check|--force]   # Update to latest (--check: check only; --force: reinstall)
 cs -uninstall               # Uninstall cs
 cs -help, -h                # Show help message

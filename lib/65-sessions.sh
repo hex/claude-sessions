@@ -232,12 +232,19 @@ list_sessions() {
 }
 
 # Remove a session
+# Remove each named session in turn; every deletion keeps its own confirm.
 remove_session() {
-    local session_name="$1"
-
-    if [ -z "$session_name" ]; then
-        error "Usage: cs -remove <session-name>"
+    if [ $# -eq 0 ] || [ -z "$1" ]; then
+        error "Usage: cs -remove <session-name>..."
     fi
+    local _name
+    for _name in "$@"; do
+        _remove_one_session "$_name"
+    done
+}
+
+_remove_one_session() {
+    local session_name="$1"
 
     # Reject path traversal before any filesystem action: '.'/'..' and any
     # name with a slash would resolve rm -rf outside the sessions root. A
