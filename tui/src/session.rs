@@ -632,12 +632,31 @@ fn heartbeat_alive(meta_dir: &Path, now: std::time::SystemTime) -> bool {
         .unwrap_or(true)
 }
 
+/// Split a worktree session name (`base@task`) into base and task. This is
+/// the single home of the naming convention; every consumer goes through it.
+pub fn worktree_parts(name: &str) -> Option<(&str, &str)> {
+    name.split_once('@')
+}
+
+/// Remove a session at `path` by whatever means its kind requires: symlinks
+/// are unlinked, worktree sessions are unregistered through git, and plain
+/// directories are removed outright.
+pub fn remove_session_path(root: &Path, name: &str, path: &Path) -> std::io::Result<()> {
+    if path.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+        fs::remove_file(path)
+    } else if worktree_parts(name).is_some() && path.join(".git").is_file() {
+        remove_worktree_session(root, name, path)
+    } else {
+        fs::remove_dir_all(path)
+    }
+}
+
 /// Remove a worktree session (`base@task`) through git so the base repo's
 /// worktree registration goes with it; the task branch is left alone,
 /// matching `cs -rm` when its branch prompt is declined. Falls back to
 /// plain directory removal when the base session is gone.
-pub fn remove_worktree_session(root: &Path, name: &str, path: &Path) -> std::io::Result<()> {
-    let base = name.split_once('@').map(|(b, _)| b).unwrap_or(name);
+fn remove_worktree_session(root: &Path, name: &str, path: &Path) -> std::io::Result<()> {
+    let base = worktree_parts(name).map(|(b, _)| b).unwrap_or(name);
     let base_dir = root.join(base);
     if base_dir.is_dir() {
         let ok = std::process::Command::new("git")

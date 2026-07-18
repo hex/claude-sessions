@@ -1,7 +1,7 @@
 // ABOUTME: Application state machine that processes keyboard input and manages UI modes
 // ABOUTME: Tracks table selection, sort order, search filter, and modal dialog state
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::widgets::TableState;
@@ -364,7 +364,7 @@ pub struct App {
     pub fuzzy_indices: HashMap<usize, Vec<usize>>,
     /// Worktree rows (`base@task`) currently attached under their base in
     /// `filtered`; the renderer shows these as indented `@task` children.
-    pub attached_worktrees: std::collections::HashSet<usize>,
+    pub attached_worktrees: HashSet<usize>,
     /// Revealed secret: (key_name, value, reveal_time). Auto-expires after PEEK_DURATION_SECS.
     pub revealed_secret: Option<(String, String, std::time::Instant)>,
     /// Section labels for time-based grouping (parallel to `filtered`).
@@ -470,7 +470,7 @@ impl App {
             visible_sort_columns: Vec::new(),
             delete_countdown_start: None,
             fuzzy_indices: HashMap::new(),
-            attached_worktrees: std::collections::HashSet::new(),
+            attached_worktrees: HashSet::new(),
             revealed_secret: None,
             section_labels: Vec::new(),
             nav_repeat: ('\0', 0, std::time::Instant::now()),
@@ -747,34 +747,37 @@ impl App {
         // under its full name. Search keeps the flat order so fuzzy scores
         // and highlight indices stay honest.
         self.attached_worktrees.clear();
-        if query.is_empty() {
-            let in_order: std::collections::HashSet<String> = self
+        if query.is_empty()
+            && self
                 .filtered
                 .iter()
-                .map(|&i| self.sessions[i].name.clone())
-                .collect();
-            let mut children: std::collections::HashMap<String, Vec<usize>> =
-                std::collections::HashMap::new();
+                .any(|&i| crate::session::worktree_parts(&self.sessions[i].name).is_some())
+        {
+            let sessions = &self.sessions;
+            let in_order: HashSet<&str> =
+                self.filtered.iter().map(|&i| sessions[i].name.as_str()).collect();
+            let mut children: HashMap<&str, Vec<usize>> = HashMap::new();
             for &i in &self.filtered {
-                if let Some((base, _)) = self.sessions[i].name.split_once('@') {
+                if let Some((base, _)) = crate::session::worktree_parts(&sessions[i].name) {
                     if in_order.contains(base) {
-                        children.entry(base.to_string()).or_default().push(i);
-                        self.attached_worktrees.insert(i);
+                        children.entry(base).or_default().push(i);
                     }
                 }
             }
             if !children.is_empty() {
+                let attached: HashSet<usize> = children.values().flatten().copied().collect();
                 let mut out = Vec::with_capacity(self.filtered.len());
                 for &i in &self.filtered {
-                    if self.attached_worktrees.contains(&i) {
+                    if attached.contains(&i) {
                         continue;
                     }
                     out.push(i);
-                    if let Some(kids) = children.get(self.sessions[i].name.as_str()) {
+                    if let Some(kids) = children.get(sessions[i].name.as_str()) {
                         out.extend(kids);
                     }
                 }
                 self.filtered = out;
+                self.attached_worktrees = attached;
             }
         }
 
@@ -791,7 +794,7 @@ impl App {
                     base_ts
                 } else {
                     base_ts = self.sessions[idx].modified_ts;
-                    self.sessions[idx].modified_ts
+                    base_ts
                 };
                 let section = time_section(ts);
                 if section != prev_section {
@@ -1583,19 +1586,7 @@ impl App {
         if let Some(session) = self.selected_session() {
             let root = self.sessions_root.clone();
             let path = root.join(&session.name);
-            let result = if path
-                .symlink_metadata()
-                .map(|m| m.is_symlink())
-                .unwrap_or(false)
-            {
-                std::fs::remove_file(&path)
-            } else if session.name.contains('@') && path.join(".git").is_file() {
-                // Worktree session: unregister from the base repo's git,
-                // not just delete the directory (mirrors cs -rm).
-                session::remove_worktree_session(&root, &session.name, &path)
-            } else {
-                std::fs::remove_dir_all(&path)
-            };
+            let result = session::remove_session_path(&root, &session.name, &path);
             match result {
                 Ok(()) => {
                     self.set_status(format!("Deleted: {}", session.name), StatusLevel::Success);
@@ -1618,19 +1609,7 @@ impl App {
         let names: Vec<String> = self.marked_sessions.iter().cloned().collect();
         for name in &names {
             let path = root.join(name);
-            let result = if path
-                .symlink_metadata()
-                .map(|m| m.is_symlink())
-                .unwrap_or(false)
-            {
-                std::fs::remove_file(&path)
-            } else if name.contains('@') && path.join(".git").is_file() {
-                // Worktree session: unregister from the base repo's git,
-                // not just delete the directory (mirrors cs -rm).
-                session::remove_worktree_session(&root, name, &path)
-            } else {
-                std::fs::remove_dir_all(&path)
-            };
+            let result = session::remove_session_path(&root, name, &path);
             match result {
                 Ok(()) => {
                     deleted += 1;

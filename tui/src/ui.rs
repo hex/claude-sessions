@@ -386,73 +386,53 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
     // Label span styled MUT bold; sort indicator (when this is the active
     // sort column) styled RUST as its own span, so only the arrow picks up
     // the accent color.
-    let header_cell = |label: &str, col: SortColumn| -> Cell<'static> {
+    let header_spans = |label: &'static str, col: SortColumn| -> Vec<Span<'static>> {
         let mut spans = vec![Span::styled(
-            label.to_string(),
+            label,
             Style::default().fg(p.mut_).add_modifier(Modifier::BOLD),
         )];
         let indicator = sort_indicator(col);
         if !indicator.is_empty() {
             spans.push(Span::styled(indicator, Style::default().fg(p.rust)));
         }
-        Cell::from(Line::from(spans))
+        spans
+    };
+    let header_cell = |label: &'static str, col: SortColumn| -> Cell<'static> {
+        Cell::from(Line::from(header_spans(label, col)))
     };
 
     // Inline symbol legend in the SESSION column's free width (wide headers
     // only): the glyphs the rows actually use, keyed where the symbols live.
     // A fixed gap after the label keeps it beside SESSION, reading as
-    // annotation rather than a column of its own.
+    // annotation rather than a column of its own. Labels are compact — the
+    // SESSION column is ~50 cols once the preview pane takes its 55% share —
+    // and the `?` overlay carries the long-form wording. The archived entry
+    // is the word itself in the dim colour: archived rows have no gutter
+    // glyph to advertise, they just dim.
     let session_cell = || -> Cell<'static> {
-        let mut spans = vec![Span::styled(
-            "SESSION".to_string(),
-            Style::default().fg(p.mut_).add_modifier(Modifier::BOLD),
-        )];
-        let indicator = sort_indicator(SortColumn::Name);
-        if !indicator.is_empty() {
-            spans.push(Span::styled(indicator, Style::default().fg(p.rust)));
-        }
-        // Compact labels: the SESSION column is ~50 cols once the preview
-        // pane takes its 55% share, so every character here is rationed.
-        // The `?` overlay carries the long-form wording.
-        // Archived rows have no gutter glyph — they just dim — so its legend
-        // entry is the word itself in the dim colour, demonstrating the
-        // treatment instead of advertising a glyph that never renders.
-        let legend: [(&str, Color, &str, Color); 4] = [
-            ("\u{25cf}", p.green, "activity", p.faint),
-            ("\u{25a0}", p.teal, "live", p.faint),
-            ("*", p.gold, "marked", p.faint),
-            ("", p.comment, "archived", p.comment),
+        let mut spans = header_spans("SESSION", SortColumn::Name);
+        let mut legend = vec![
+            Span::styled("\u{25cf}", Style::default().fg(p.green)),
+            Span::raw(" "),
+            Span::styled("activity", Style::default().fg(p.faint)),
+            Span::raw("  "),
+            Span::styled("\u{25a0}", Style::default().fg(p.teal)),
+            Span::raw(" "),
+            Span::styled("live", Style::default().fg(p.faint)),
+            Span::raw("  "),
+            Span::styled("*", Style::default().fg(p.gold).add_modifier(Modifier::BOLD)),
+            Span::raw(" "),
+            Span::styled("marked", Style::default().fg(p.faint)),
+            Span::raw("  "),
+            Span::styled("archived", Style::default().fg(p.comment)),
         ];
-        let legend_w: usize = legend
-            .iter()
-            .map(|(g, _, l, _)| {
-                if g.is_empty() {
-                    l.len()
-                } else {
-                    g.chars().count() + 1 + l.len()
-                }
-            })
-            .sum::<usize>()
-            + 2 * (legend.len() - 1);
-        let used = "SESSION".len() + indicator.chars().count();
+        let legend_w: usize = legend.iter().map(|s| s.width()).sum();
+        let used: usize = spans.iter().map(|s| s.width()).sum();
         let name_col_w = app.column_widths.first().copied().unwrap_or(0) as usize;
         // Render only when the legend keeps clear air on both sides.
         if name_col_w >= used + 3 + legend_w + 1 {
             spans.push(Span::raw("   "));
-            for (i, (glyph, color, label, label_color)) in legend.iter().enumerate() {
-                if i > 0 {
-                    spans.push(Span::raw("  "));
-                }
-                if !glyph.is_empty() {
-                    let mut style = Style::default().fg(*color);
-                    if *glyph == "*" {
-                        style = style.add_modifier(Modifier::BOLD);
-                    }
-                    spans.push(Span::styled(glyph.to_string(), style));
-                    spans.push(Span::raw(" "));
-                }
-                spans.push(Span::styled(label.to_string(), Style::default().fg(*label_color)));
-            }
+            spans.append(&mut legend);
         }
         Cell::from(Line::from(spans))
     };
@@ -515,13 +495,13 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             // placed before the status marker so the marker stays glued to
             // the name. └─ closes the group; ├─ continues it.
             if app.attached_worktrees.contains(&i) {
-                let my_base = s.name.split_once('@').map(|(b, _)| b);
+                let my_base = crate::session::worktree_parts(&s.name).map(|(b, _)| b);
                 let sibling_follows = app
                     .filtered
                     .get(row_idx + 1)
                     .map(|&n| {
                         app.attached_worktrees.contains(&n)
-                            && app.sessions[n].name.split_once('@').map(|(b, _)| b) == my_base
+                            && crate::session::worktree_parts(&app.sessions[n].name).map(|(b, _)| b) == my_base
                     })
                     .unwrap_or(false);
                 let connector = if sibling_follows { "\u{251c}\u{2500} " } else { "\u{2514}\u{2500} " };
@@ -594,7 +574,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             } else if app.attached_worktrees.contains(&i) {
                 // Attached under its base: show only the @task part; the
                 // connector already carries the indent and the lineage.
-                let task = s.name.split_once('@').map(|(_, t)| t).unwrap_or(&s.name);
+                let task = crate::session::worktree_parts(&s.name).map(|(_, t)| t).unwrap_or(&s.name);
                 name_spans.push(Span::styled(
                     format!("@{task}"),
                     Style::default().fg(name_color),
@@ -883,11 +863,8 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
     // keeps this robust.
     let phase = {
         const PERIOD_MS: u128 = 1400;
-        let ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or(0);
-        (ms % PERIOD_MS) as f32 / PERIOD_MS as f32
+        // Shares the frame's single wall-clock read with heat and blink.
+        (now_ms % PERIOD_MS) as f32 / PERIOD_MS as f32
     };
     for y in (inner.y + 2)..inner.y.saturating_add(inner.height) {
         if let Some(cell) = buf.cell_mut(ratatui::layout::Position::new(inner.x, y)) {
@@ -1505,50 +1482,55 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
 
     // Labeled meta rows: label FAINT at the pane's left edge, value at a fixed
     // column so the block reads as a table even without rules between rows.
-    let (state_value, state_color) = if session.is_locked {
+    // (value, colour, optional leading dot in its own colour)
+    let (state_value, state_color, state_dot) = if session.is_locked {
         (
             match session.lock_pid {
                 Some(pid) => format!("\u{25a0} live \u{b7} locked {}", pid),
                 None => "\u{25a0} live \u{b7} locked".to_string(),
             },
             p.teal,
+            None,
         )
     } else if session.is_live {
         // Breathing without a lock: opened outside cs, no PID to show.
-        ("\u{25a0} live \u{b7} unlocked".to_string(), p.teal)
+        ("\u{25a0} live \u{b7} unlocked".to_string(), p.teal, None)
     } else if session.archived {
-        ("archived".to_string(), p.faint)
+        ("archived".to_string(), p.faint, None)
     } else {
-        // Dormant: the dot mirrors the row's heat colour (recolored in the
-        // meta loop below); the word keeps the state grey, never teal.
-        ("\u{25cf} dormant".to_string(), p.comment)
+        // Dormant: the dot mirrors the row's heat colour; the word keeps
+        // the state grey, never teal.
+        (
+            "dormant".to_string(),
+            p.comment,
+            Some(p.heat_color(session.modified_ts)),
+        )
     };
-    let mut meta: Vec<(&str, String, Color)> = vec![
-        ("created", session.created.clone().unwrap_or_else(|| "\u{2014}".into()), p.ink),
-        ("modified", session.modified.clone().unwrap_or_else(|| "\u{2014}".into()), p.ink),
-        ("state", state_value, state_color),
-        ("repo", session.git_repo.clone().unwrap_or_else(|| "\u{2014}".into()), p.ink),
+    let mut meta: Vec<(&str, String, Color, Option<Color>)> = vec![
+        ("created", session.created.clone().unwrap_or_else(|| "\u{2014}".into()), p.ink, None),
+        ("modified", session.modified.clone().unwrap_or_else(|| "\u{2014}".into()), p.ink, None),
+        ("state", state_value, state_color, state_dot),
+        ("repo", session.git_repo.clone().unwrap_or_else(|| "\u{2014}".into()), p.ink, None),
     ];
     // Worktree lineage: a task session names its base; a base session lists
     // its task worktrees.
-    if let Some((base, task)) = session.name.split_once('@') {
-        meta.push(("worktree", format!("@{task} \u{b7} off {base}"), p.ink));
+    if let Some((base, task)) = crate::session::worktree_parts(&session.name) {
+        meta.push(("worktree", format!("@{task} \u{b7} off {base}"), p.ink, None));
     } else {
         let tasks: Vec<String> = app
             .sessions
             .iter()
             .filter_map(|s| {
-                s.name
-                    .split_once('@')
+                crate::session::worktree_parts(&s.name)
                     .and_then(|(b, t)| (b == session.name).then(|| format!("@{t}")))
             })
             .collect();
         if !tasks.is_empty() {
-            meta.push(("tasks", tasks.join(", "), p.ink));
+            meta.push(("tasks", tasks.join(", "), p.ink, None));
         }
     }
     if !session.tags.is_empty() {
-        meta.push(("tags", session.tags.join(", "), p.mut_));
+        meta.push(("tags", session.tags.join(", "), p.mut_, None));
     }
     let cached_preview = app.preview_cache.get(&session.name);
     if let Some(preview) = cached_preview {
@@ -1556,36 +1538,32 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
             "objective",
             preview.objective.clone().unwrap_or_else(|| "\u{2014}".into()),
             p.ink,
+            None,
         ));
         meta.push((
             "narrative",
             preview.last_discovery.clone().unwrap_or_else(|| "\u{2014}".into()),
             p.mut_,
+            None,
         ));
     }
     const VALUE_COL: usize = 11;
     let value_width = (inner.width as usize).saturating_sub(VALUE_COL);
-    for (label, value, color) in &meta {
+    for (label, value, color, dot) in &meta {
         let pad = VALUE_COL.saturating_sub(label.len());
-        // The state row mirrors the list row's marker: the dot carries the
-        // session's heat colour while the state word keeps its own colour.
-        if *label == "state" {
-            if let Some(word) = value.strip_prefix("\u{25cf} ") {
-                let heat = p.heat_color(session.modified_ts);
-                lines.push(Line::from(vec![
-                    Span::styled(*label, Style::default().fg(p.faint)),
-                    Span::raw(" ".repeat(pad)),
-                    Span::styled("\u{25cf} ", Style::default().fg(heat)),
-                    Span::styled(word.to_string(), Style::default().fg(*color)),
-                ]));
-                continue;
-            }
-        }
-        lines.push(Line::from(vec![
+        let mut spans = vec![
             Span::styled(*label, Style::default().fg(p.faint)),
             Span::raw(" ".repeat(pad)),
-            Span::styled(truncate_str(value, value_width), Style::default().fg(*color)),
-        ]));
+        ];
+        // A dot colour renders as its own leading span; the state row uses
+        // it to mirror the list row's heat marker.
+        let mut width = value_width;
+        if let Some(dot_color) = dot {
+            spans.push(Span::styled("\u{25cf} ", Style::default().fg(*dot_color)));
+            width = width.saturating_sub(2);
+        }
+        spans.push(Span::styled(truncate_str(value, width), Style::default().fg(*color)));
+        lines.push(Line::from(spans));
     }
     lines.push(Line::from(""));
 
@@ -1664,11 +1642,7 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
     // Input and list rows sit one clear column inside the frame on each side
     // (their own leading-space spans add the second); the separator rule keeps
     // full bleed to the border.
-    let pad_h = |r: Rect| Rect {
-        x: r.x + 1,
-        width: r.width.saturating_sub(2),
-        ..r
-    };
+    let pad_h = |r: Rect| r.inner(Margin::new(1, 0));
 
     // Input block on top (grows with wrapped text, capped), a full-width
     // separator rule, then the task list. The input's height must be known
@@ -1844,6 +1818,9 @@ fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Known-good blink phase: dark teal (45,212,191) lifted 45% toward white.
+    const LIGHT_TEAL: Color = Color::Rgb(139, 231, 219);
 
     #[test]
     fn truncate_str_multibyte_boundary_does_not_panic() {
@@ -2516,13 +2493,7 @@ mod tests {
 
         // Draining: the first task's row carries the marker, the second does not.
         std::fs::write(local.join("queue.state"), "draining\n").unwrap();
-        let backend = TestBackend::new(90, 40);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|frame| render(&mut app, frame)).unwrap();
-        let buf = terminal.backend().buffer().clone();
-        let rows: Vec<String> = (0..buf.area.height)
-            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
-            .collect();
+        let rows = rows_at(&mut app, 90, 40);
         let first_row = rows.iter().find(|r| r.contains("first queued task")).unwrap();
         assert!(
             first_row.contains('\u{25b6}'),
@@ -2542,13 +2513,7 @@ mod tests {
         app.theme = Palette::dark();
         app.show_preview = true;
 
-        let backend = TestBackend::new(90, 40);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|frame| render(&mut app, frame)).unwrap();
-        let buf = terminal.backend().buffer().clone();
-        let rows: Vec<String> = (0..buf.area.height)
-            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
-            .collect();
+        let rows = rows_at(&mut app, 90, 40);
 
         // Horizontal padding: the "created" meta label sits one clear column
         // inside the card's left border instead of touching it.
@@ -2589,13 +2554,7 @@ mod tests {
         app.theme = Palette::dark();
         app.show_preview = true;
 
-        let backend = TestBackend::new(200, 50);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|frame| render(&mut app, frame)).unwrap();
-        let buf = terminal.backend().buffer().clone();
-        let rows: Vec<String> = (0..buf.area.height)
-            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
-            .collect();
+        let rows = rows_at(&mut app, 200, 50);
 
         let header = rows
             .iter()
@@ -2638,6 +2597,7 @@ mod tests {
         app.sessions[0].modified_ts = Some(std::time::SystemTime::now());
         let p = app.theme;
 
+        // Cell-level color asserts below need the buffer, not just row text.
         let backend = TestBackend::new(90, 40);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| render(&mut app, frame)).unwrap();
@@ -2705,12 +2665,23 @@ mod tests {
         let gutter_x = app.table_area.x + SELECT_WIDTH;
         let cell = &buf[(gutter_x, row_y)];
         assert_eq!(cell.symbol(), "\u{25a0}", "heartbeat-live row shows the live square");
-        let light_teal = Color::Rgb(139, 231, 219);
         assert!(
-            cell.fg == p.teal || cell.fg == light_teal,
+            cell.fg == p.teal || cell.fg == LIGHT_TEAL,
             "the square stays in the teal liveness phases, got {:?}",
             cell.fg
         );
+    }
+
+    /// Render into a fresh width x height terminal and return the buffer as
+    /// one string per row.
+    fn rows_at(app: &mut App, width: u16, height: u16) -> Vec<String> {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        (0..buf.area.height)
+            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
+            .collect()
     }
 
     fn worktree_fixture() -> Vec<crate::session::Session> {
@@ -2753,13 +2724,7 @@ mod tests {
             "worktrees should attach under their base"
         );
 
-        let backend = TestBackend::new(100, 30);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|frame| render(&mut app, frame)).unwrap();
-        let buf = terminal.backend().buffer().clone();
-        let rows: Vec<String> = (0..buf.area.height)
-            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
-            .collect();
+        let rows = rows_at(&mut app, 100, 30);
 
         // Tree connectors put the status marker directly in front of the
         // name: ├─ while siblings follow, └─ on the last child.
@@ -2806,13 +2771,7 @@ mod tests {
             "search keeps the flat order for honest fuzzy highlighting"
         );
 
-        let backend = TestBackend::new(100, 30);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|frame| render(&mut app, frame)).unwrap();
-        let buf = terminal.backend().buffer().clone();
-        let rows: Vec<String> = (0..buf.area.height)
-            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
-            .collect();
+        let rows = rows_at(&mut app, 100, 30);
         assert!(
             rows.iter().any(|r| r.contains("snip@test")),
             "search results show the full worktree name"
@@ -2859,13 +2818,7 @@ mod tests {
         app.theme = Palette::dark();
         app.show_preview = true;
 
-        let backend = TestBackend::new(60, 50);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|frame| render(&mut app, frame)).unwrap();
-        let buf = terminal.backend().buffer().clone();
-        let rows: Vec<String> = (0..buf.area.height)
-            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
-            .collect();
+        let rows = rows_at(&mut app, 60, 50);
 
         let header = rows
             .iter()
@@ -2883,13 +2836,7 @@ mod tests {
         app.theme = Palette::dark();
         app.show_preview = true;
 
-        let backend = TestBackend::new(90, 40);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|frame| render(&mut app, frame)).unwrap();
-        let buf = terminal.backend().buffer().clone();
-        let rows: Vec<String> = (0..buf.area.height)
-            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
-            .collect();
+        let rows = rows_at(&mut app, 90, 40);
 
         // Horizontal padding: the input placeholder sits two clear columns
         // inside the card's left border, matching the preview pane.
@@ -2929,13 +2876,7 @@ mod tests {
         app.theme = Palette::dark();
         app.show_preview = true;
 
-        let backend = TestBackend::new(80, 50);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|frame| render(&mut app, frame)).unwrap();
-        let buf = terminal.backend().buffer().clone();
-        let rows: Vec<String> = (0..buf.area.height)
-            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
-            .collect();
+        let rows = rows_at(&mut app, 80, 50);
 
         let y_preview = rows
             .iter()
@@ -2959,13 +2900,7 @@ mod tests {
         app.theme = Palette::dark();
         app.show_preview = true;
 
-        let backend = TestBackend::new(200, 50);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|frame| render(&mut app, frame)).unwrap();
-        let buf = terminal.backend().buffer().clone();
-        let rows: Vec<String> = (0..buf.area.height)
-            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
-            .collect();
+        let rows = rows_at(&mut app, 200, 50);
 
         let title_row = rows
             .iter()
@@ -3000,13 +2935,7 @@ mod tests {
         app.notes_focus = NotesFocus::List;
 
         // Wide + tall enough to force the stacked layout (panes visible).
-        let backend = TestBackend::new(90, 40);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|frame| render(&mut app, frame)).unwrap();
-        let buf = terminal.backend().buffer().clone();
-        let rows: Vec<String> = (0..buf.area.height)
-            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
-            .collect();
+        let rows = rows_at(&mut app, 90, 40);
         // The task wraps: its head renders on one row, its tail on a later row,
         // and no ellipsis truncates it.
         let head_y = rows
@@ -3626,9 +3555,8 @@ mod tests {
             .cell(ratatui::layout::Position::new(gutter_x, locked_y))
             .unwrap()
             .fg;
-        let light_teal = Color::Rgb(139, 231, 219); // dark-theme teal lifted 45% toward white
         assert!(
-            locked_fg == p.teal || locked_fg == light_teal,
+            locked_fg == p.teal || locked_fg == LIGHT_TEAL,
             "the lock square carries a liveness teal phase, got {locked_fg:?}"
         );
         assert_eq!(recent_gutter, "\u{25cf}", "unlocked row shows the recency dot at the gutter x");
@@ -3642,7 +3570,7 @@ mod tests {
         assert_eq!(lock_square_color(p, true, 1100), p.teal);
         // Second half: the lightened phase (dark teal 45,212,191 lifted 45%
         // toward white — known-good literal, not recomputed).
-        assert_eq!(lock_square_color(p, true, 1300), Color::Rgb(139, 231, 219));
+        assert_eq!(lock_square_color(p, true, 1300), LIGHT_TEAL);
         // Idle (heartbeat paused): steady teal in any phase.
         assert_eq!(lock_square_color(p, false, 1300), p.teal);
     }
