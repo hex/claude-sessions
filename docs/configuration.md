@@ -65,6 +65,9 @@ export CS_QUEUE_MAX_5H="85"
 
 # Disable the iTerm2 integrations (tab color, attention dock bounce)
 export CS_NO_ITERM2="1"
+
+# Override the tmux binary cs -spawn uses (default: tmux on PATH)
+export CS_TMUX_BIN="/opt/homebrew/bin/tmux"
 ```
 
 ## Environment variables cs sets for you

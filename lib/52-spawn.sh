@@ -28,11 +28,11 @@ _spawn_precheck() {  # name
     if session_is_live "$SESSIONS_ROOT/$name/.cs"; then
         error "Session $name is already live"
     fi
-    if _tmux has-session -t cs 2>/dev/null; then
+    if _tmux has-session -t =cs 2>/dev/null; then
         local owned
-        owned=$(_tmux show-option -t cs -v @cs_managed 2>/dev/null || true)
+        owned=$(_tmux show-option -t =cs -v @cs_managed 2>/dev/null || true)
         [ "$owned" = "1" ] || error "A tmux session named 'cs' exists but was not created by cs; close or rename it"
-        if _tmux list-windows -t cs -F '#{window_name}' 2>/dev/null | grep -Fxq "$name"; then
+        if _tmux list-windows -t =cs -F '#{window_name}' 2>/dev/null | grep -Fxq "$name"; then
             error "A window named $name already exists in tmux session cs"
         fi
     fi
@@ -41,16 +41,16 @@ _spawn_precheck() {  # name
 _spawn_window() {  # name
     local name="$1" cmd wid
     cmd="$(_sq "$(_cs_self)") $(_sq "$name")"
-    if ! _tmux has-session -t cs 2>/dev/null; then
+    if ! _tmux has-session -t =cs 2>/dev/null; then
         if wid=$(_tmux new-session -d -s cs -n "$name" -P -F '#{window_id}' "$cmd" 2>/dev/null); then
-            _tmux set-option -t cs @cs_managed 1
+            _tmux set-option -t =cs @cs_managed 1
             info "spawned $name in tmux session cs (window $wid). Attach: tmux attach -t cs"
             return 0
         fi
         # A concurrent spawner won the new-session race: fall through and add
         # a window to the session it just created.
     fi
-    wid=$(_tmux new-window -t cs -n "$name" -P -F '#{window_id}' "$cmd") \
+    wid=$(_tmux new-window -t =cs -n "$name" -P -F '#{window_id}' "$cmd") \
         || error "tmux new-window failed for $name"
     info "spawned $name in tmux session cs (window $wid). Attach: tmux attach -t cs"
 }

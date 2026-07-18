@@ -77,7 +77,19 @@ test_spawn_writes_seed_and_opens_window() {
     assert_output_contains "$out" "@0" "window id echoed" || return 1
     assert_output_contains "$out" "tmux attach -t cs" "attach hint" || return 1
     assert_file_contains "$FAKE_TMUX_DIR/log" "new-session -d -s cs" "created cs session" || return 1
-    assert_file_contains "$FAKE_TMUX_DIR/log" "set-option -t cs @cs_managed 1" "ownership stamped" || return 1
+    assert_file_contains "$FAKE_TMUX_DIR/log" "set-option -t =cs @cs_managed 1" "ownership stamped" || return 1
+}
+
+test_spawn_tmux_targets_are_exact_match_anchored() {
+    "$CS_BIN" -spawn worker >/dev/null 2>&1 || return 1
+    ! grep -E -- '-t cs( |$)' "$FAKE_TMUX_DIR/log" >/dev/null || { echo "  unanchored -t cs target found"; return 1; }
+    grep -F -- '-t =cs' "$FAKE_TMUX_DIR/log" >/dev/null || { echo "  no anchored target"; return 1; }
+}
+
+test_spawn_empty_spawner_writes_blank_first_line() {
+    env -u CLAUDE_SESSION_NAME "$CS_BIN" -spawn worker --task "solo" >/dev/null 2>&1 || return 1
+    assert_eq "" "$(sed -n 1p "$(SEED)")" "blank spawner line" || return 1
+    assert_eq "solo" "$(sed -n 2p "$(SEED)")" "task on line 2" || return 1
 }
 
 test_spawn_without_task_writes_no_seed() {
@@ -182,6 +194,24 @@ test_launch_sets_aside_stale_seed() {
     assert_output_not_contains "$out" "armed with" "no kick from stale seed" || return 1
 }
 
+test_launch_stale_warning_names_the_stale_file() {
+    mkdir -p "$CS_SESSIONS_ROOT/.spawn"
+    printf 'boss\nold job\n' > "$CS_SESSIONS_ROOT/.spawn/worker.seed"
+    touch -t 202401010000 "$CS_SESSIONS_ROOT/.spawn/worker.seed"
+    local out; out=$("$CS_BIN" worker <<< "" 2>&1) || return 1
+    assert_output_contains "$out" "worker.seed.stale" "warning names the stale file" || return 1
+}
+
+test_launch_fresh_boundary_seed_is_consumed() {
+    # A seed 30 minutes old is comfortably inside the 3600s TTL.
+    mkdir -p "$CS_SESSIONS_ROOT/.spawn"
+    printf 'boss\nboundary job\n' > "$CS_SESSIONS_ROOT/.spawn/worker.seed"
+    touch -t "$(date -v-30M +%Y%m%d%H%M 2>/dev/null || date -d '-30 minutes' +%Y%m%d%H%M)" \
+        "$CS_SESSIONS_ROOT/.spawn/worker.seed"
+    local out; out=$("$CS_BIN" worker <<< "" 2>&1) || return 1
+    assert_output_contains "$out" "armed with 1 task(s)" "fresh-side seed consumed" || return 1
+}
+
 test_launch_seed_bypasses_resume_ask() {
     # First launch creates the session; second would normally ask "Continue
     # previous conversation? [Y/n]". With a seed, no ask: stdin is closed so
@@ -205,10 +235,14 @@ run_test test_spawn_refuses_duplicate_window
 run_test test_spawn_window_command_is_quoted_absolute
 run_test test_spawn_accepts_worktree_name
 run_test test_spawn_new_session_race_falls_through_to_new_window
+run_test test_spawn_tmux_targets_are_exact_match_anchored
+run_test test_spawn_empty_spawner_writes_blank_first_line
 run_test test_launch_consumes_seed_queues_arms_and_kicks
 run_test test_launch_empty_spawner_gets_no_reply_wiring
 run_test test_launch_without_seed_keeps_color_behavior
 run_test test_launch_sets_aside_stale_seed
+run_test test_launch_stale_warning_names_the_stale_file
+run_test test_launch_fresh_boundary_seed_is_consumed
 run_test test_launch_seed_bypasses_resume_ask
 
 # Drain harness (same recipe as tests/test_queue_supervision.sh): the Stop
