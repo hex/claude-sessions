@@ -2670,6 +2670,18 @@ _mail_send() {  # target, [--kind|-k KIND] [--ref ID] body
     if [ "$bytes" -gt "$MAIL_BODY_MAX" ]; then
         error "Message body exceeds ${MAIL_BODY_MAX} bytes"
     fi
+    if [ "$kind" = "task" ]; then
+        # $(printf '\n') would collapse to "" (command substitution strips
+        # trailing newlines); the literal embedded newline below does not.
+        local nl='
+'
+        case "$body" in
+            *"$nl"*) error "task bodies must be a single line (the queue file is line-oriented)";;
+        esac
+        # Queue first, attribution second: if the queue write fails nothing is
+        # sent; if the inbox write fails the work is still delivered.
+        _queue_add "$target_dir/.cs/local" "$body"
+    fi
     local maildir="$target_dir/.cs/local/mail"
     mkdir -p "$maildir"
     local now line
@@ -2679,8 +2691,13 @@ _mail_send() {  # target, [--kind|-k KIND] [--ref ID] body
         --arg kind "$kind" --arg body "$body" --arg ref "$ref" \
         '{id:$id, ts:$ts, from:$from, actor:$actor, kind:$kind, body:$body,
           ref:(if $ref == "" then null else $ref end)}')
-    printf '%s\n' "$line" >> "$maildir/inbox.jsonl" \
-        || error "Failed to write to ${target}'s mailbox"
+    if ! printf '%s\n' "$line" >> "$maildir/inbox.jsonl"; then
+        if [ "$kind" = "task" ]; then
+            warn "task queued in $target, but recording the mail attribution failed"
+            return 0
+        fi
+        error "Failed to write to ${target}'s mailbox"
+    fi
     info "sent to $target; surfaces at their next turn"
 }
 
