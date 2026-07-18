@@ -405,7 +405,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
         // treatment instead of advertising a glyph that never renders.
         let legend: [(&str, Color, &str, Color); 4] = [
             ("\u{25cf}", p.green, "activity", p.faint),
-            ("\u{25a0}", p.ember, "live", p.faint),
+            ("\u{25a0}", p.teal, "live", p.faint),
             ("*", p.gold, "marked", p.faint),
             ("", p.comment, "archived", p.comment),
         ];
@@ -492,7 +492,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             // itself is the lock signal, so no separate lock glyph follows it.
             let mut name_spans: Vec<Span> = Vec::new();
             if s.is_locked {
-                let sq = if dimmed { p.comment } else { p.ember };
+                let sq = if dimmed { p.comment } else { p.teal };
                 name_spans.push(Span::styled("\u{25a0} ", Style::default().fg(sq)));
             } else {
                 name_spans.push(Span::styled("\u{25cf} ", Style::default().fg(heat)));
@@ -1354,7 +1354,7 @@ fn render_legend(app: &App, frame: &mut Frame) {
     let lines: Vec<Line> = vec![
         Line::default(),
         entry("\u{25cf}", p.green, false, "recency dot \u{2014} green when recently active, fading to grey as the session goes dormant"),
-        entry("\u{25a0}", p.ember, false, "locked \u{2014} a conversation is live in this session right now (shown in place of the recency dot)"),
+        entry("\u{25a0}", p.teal, false, "locked \u{2014} a conversation is live in this session right now (shown in place of the recency dot)"),
         entry("*", p.gold, true, "marked with Space for batch actions (D deletes the marked set)"),
         entry("\u{25aa}", p.gold, false, "has stored secrets (shown here when the SECRETS column is hidden)"),
         entry("\u{2500}", p.comment, false, "dim grey row \u{2014} archived session, or not matching the current search"),
@@ -3342,6 +3342,13 @@ mod tests {
             .unwrap()
             .symbol();
         assert_eq!(locked_gutter, "\u{25a0}", "locked row shows the locked square at the gutter x");
+        // Live = teal everywhere: the square matches the masthead live count,
+        // the preview state line, and the working-task marker.
+        let locked_fg = buf
+            .cell(ratatui::layout::Position::new(gutter_x, locked_y))
+            .unwrap()
+            .fg;
+        assert_eq!(locked_fg, p.teal, "the lock square carries the liveness teal");
         assert_eq!(recent_gutter, "\u{25cf}", "unlocked row shows the recency dot at the gutter x");
     }
 
