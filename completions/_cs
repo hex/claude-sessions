@@ -100,6 +100,7 @@ _cs() {
         '-secrets:Manage session secrets'
         '-checkpoint:Save or manage session checkpoints'
         '-queue:Manage the session walk-away queue'
+        '-msg:Send a message to another session'
         '-conversations:Show the session'\''s conversation chain'
         '-live:List sessions running right now on this machine'
         '-usage:Per-session token usage over rate-limit windows'
@@ -199,6 +200,7 @@ _cs() {
         session_opts=(
             '-secrets:Run secrets command'
             '-queue:Manage the session walk-away queue'
+            '-msg:Send a message to another session'
             '-conversations:Show the session'\''s conversation chain'
             '-usage:Show per-conversation token usage for this session'
             '-tag:Manage session tags'

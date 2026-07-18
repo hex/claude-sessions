@@ -117,6 +117,11 @@ main() {
             run_queue "$@"
             return 0
             ;;
+        -msg)
+            shift
+            run_mail "$@"
+            return 0
+            ;;
         -conversations)
             shift
             run_conversations "$@"
@@ -208,6 +213,13 @@ main() {
                 export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
                 export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
                 run_queue "$@"
+                return 0
+                ;;
+            -msg)
+                shift
+                # Send-only: the positional session is the TARGET. The sender's
+                # own identity comes from the caller's environment (or none).
+                run_mail "$session_name" "$@"
                 return 0
                 ;;
             -conversations)
