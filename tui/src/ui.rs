@@ -402,7 +402,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
         // The `?` overlay carries the long-form wording.
         let legend: [(&str, Color, &str); 4] = [
             ("\u{25cf}", p.green, "recent"),
-            ("\u{25aa}", p.ember, "live"),
+            ("\u{25a0}", p.ember, "live"),
             ("*", p.gold, "marked"),
             ("\u{2500}", p.comment, "archived"),
         ];
@@ -482,7 +482,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             let mut name_spans: Vec<Span> = Vec::new();
             if s.is_locked {
                 let sq = if dimmed { p.comment } else { p.ember };
-                name_spans.push(Span::styled("\u{25aa} ", Style::default().fg(sq)));
+                name_spans.push(Span::styled("\u{25a0} ", Style::default().fg(sq)));
             } else {
                 name_spans.push(Span::styled("\u{25cf} ", Style::default().fg(heat)));
             }
@@ -1343,7 +1343,7 @@ fn render_legend(app: &App, frame: &mut Frame) {
     let lines: Vec<Line> = vec![
         Line::default(),
         entry("\u{25cf}", p.green, false, "recency dot \u{2014} green when recently active, fading to grey as the session goes dormant"),
-        entry("\u{25aa}", p.ember, false, "locked \u{2014} a conversation is live in this session right now (shown in place of the recency dot)"),
+        entry("\u{25a0}", p.ember, false, "locked \u{2014} a conversation is live in this session right now (shown in place of the recency dot)"),
         entry("*", p.gold, true, "marked with Space for batch actions (D deletes the marked set)"),
         entry("\u{25aa}", p.gold, false, "has stored secrets (shown here when the SECRETS column is hidden)"),
         entry("\u{2500}", p.comment, false, "dim grey row \u{2014} archived session, or not matching the current search"),
@@ -2508,7 +2508,7 @@ mod tests {
             assert!(header.contains(label), "header legend should name {label}: {header:?}");
         }
         assert!(
-            header.contains("\u{25aa} live"),
+            header.contains("\u{25a0} live"),
             "the lock square should be keyed as live: {header:?}"
         );
         let s = header.find("SESSION").unwrap();
@@ -3258,7 +3258,7 @@ mod tests {
                 if cell.bg == p.wash {
                     wash_found = true;
                 }
-                if cell.symbol() == "\u{25cf}" || cell.symbol() == "\u{25aa}" {
+                if cell.symbol() == "\u{25cf}" || cell.symbol() == "\u{25a0}" {
                     dot_found = true;
                 }
             }
@@ -3293,7 +3293,7 @@ mod tests {
             .cell(ratatui::layout::Position::new(gutter_x, recent_y))
             .unwrap()
             .symbol();
-        assert_eq!(locked_gutter, "\u{25aa}", "locked row shows the locked square at the gutter x");
+        assert_eq!(locked_gutter, "\u{25a0}", "locked row shows the locked square at the gutter x");
         assert_eq!(recent_gutter, "\u{25cf}", "unlocked row shows the recency dot at the gutter x");
     }
 
