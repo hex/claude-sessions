@@ -131,6 +131,69 @@ test_spawn_new_session_race_falls_through_to_new_window() {
     assert_output_contains "$out" "@7" "window id from the fallthrough" || return 1
 }
 
+WQ() { printf '%s' "$CS_SESSIONS_ROOT/worker/.cs/local"; }
+
+# Launch recipe (same as tests/test_uuid.sh): CLAUDE_CODE_BIN=echo makes cs's
+# `exec $CLAUDE_CODE_BIN <args>` print claude's argv; <<< "" answers any read.
+_launch_worker() {
+    "$CS_BIN" worker <<< "" 2>&1
+}
+
+test_launch_consumes_seed_queues_arms_and_kicks() {
+    mkdir -p "$CS_SESSIONS_ROOT/.spawn"
+    printf 'boss\nfirst job\nsecond job\n' > "$CS_SESSIONS_ROOT/.spawn/worker.seed"
+    local out; out=$(_launch_worker) || return 1
+    assert_file_contains "$(WQ)/queue" "first job" "task 1 queued" || return 1
+    assert_file_contains "$(WQ)/queue" "second job" "task 2 queued" || return 1
+    assert_eq "first job" "$(sed -n 1p "$(WQ)/queue")" "queue order kept" || return 1
+    assert_file_contains "$(WQ)/queue.state" "armed" "queue armed" || return 1
+    assert_file_contains "$(WQ)/spawned-by" "boss" "spawned-by recorded" || return 1
+    [ ! -f "$CS_SESSIONS_ROOT/.spawn/worker.seed" ] || { echo "  seed not deleted"; return 1; }
+    assert_output_contains "$out" "Spawned by boss" "kick prompt in claude argv" || return 1
+    assert_output_contains "$out" "2 task(s)" "kick counts tasks" || return 1
+    assert_output_contains "$out" "cs -msg boss -k result" "reply instructions present" || return 1
+}
+
+test_launch_empty_spawner_gets_no_reply_wiring() {
+    mkdir -p "$CS_SESSIONS_ROOT/.spawn"
+    printf '\nonly job\n' > "$CS_SESSIONS_ROOT/.spawn/worker.seed"
+    local out; out=$(_launch_worker) || return 1
+    assert_file_contains "$(WQ)/queue" "only job" "task queued" || return 1
+    [ ! -f "$(WQ)/spawned-by" ] || { echo "  spawned-by written for empty spawner"; return 1; }
+    assert_output_contains "$out" "armed with 1 task(s)" "kick present" || return 1
+    assert_output_not_contains "$out" "Spawned by" "no spawner attribution" || return 1
+    assert_output_not_contains "$out" "-k result" "no reply instructions" || return 1
+}
+
+test_launch_without_seed_keeps_color_behavior() {
+    local out; out=$(_launch_worker) || return 1
+    assert_output_not_contains "$out" "armed with" "no kick without seed" || return 1
+    [ ! -f "$(WQ)/queue.state" ] || { echo "  queue armed without seed"; return 1; }
+}
+
+test_launch_sets_aside_stale_seed() {
+    mkdir -p "$CS_SESSIONS_ROOT/.spawn"
+    printf 'boss\nold job\n' > "$CS_SESSIONS_ROOT/.spawn/worker.seed"
+    touch -t 202401010000 "$CS_SESSIONS_ROOT/.spawn/worker.seed"
+    local out; out=$(_launch_worker) || return 1
+    [ ! -f "$CS_SESSIONS_ROOT/.spawn/worker.seed" ] || { echo "  stale seed still active"; return 1; }
+    assert_file_exists "$CS_SESSIONS_ROOT/.spawn/worker.seed.stale" "stale set aside" || return 1
+    [ ! -f "$(WQ)/queue" ] || { echo "  stale seed queued work"; return 1; }
+    assert_output_not_contains "$out" "armed with" "no kick from stale seed" || return 1
+}
+
+test_launch_seed_bypasses_resume_ask() {
+    # First launch creates the session; second would normally ask "Continue
+    # previous conversation? [Y/n]". With a seed, no ask: stdin is closed so
+    # a read would die, proving the prompt was skipped.
+    _launch_worker >/dev/null || return 1
+    mkdir -p "$CS_SESSIONS_ROOT/.spawn"
+    printf 'boss\nresume job\n' > "$CS_SESSIONS_ROOT/.spawn/worker.seed"
+    local out; out=$("$CS_BIN" worker < /dev/null 2>&1) || return 1
+    assert_output_contains "$out" "armed with 1 task(s)" "seed consumed on resume" || return 1
+    assert_output_not_contains "$out" "Continue previous conversation" "resume ask bypassed" || return 1
+}
+
 run_test test_spawn_rejects_bad_names_and_missing_tmux
 run_test test_spawn_rejects_live_target
 run_test test_spawn_writes_seed_and_opens_window
@@ -142,5 +205,10 @@ run_test test_spawn_refuses_duplicate_window
 run_test test_spawn_window_command_is_quoted_absolute
 run_test test_spawn_accepts_worktree_name
 run_test test_spawn_new_session_race_falls_through_to_new_window
+run_test test_launch_consumes_seed_queues_arms_and_kicks
+run_test test_launch_empty_spawner_gets_no_reply_wiring
+run_test test_launch_without_seed_keeps_color_behavior
+run_test test_launch_sets_aside_stale_seed
+run_test test_launch_seed_bypasses_resume_ask
 
 report_results

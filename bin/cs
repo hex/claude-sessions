@@ -1792,10 +1792,13 @@ _exec_fresh_rebind() {
     session_color=$(_read_local_state "$session_dir/.cs/local/state" claude_session_color)
     local color_arg=""
     [ -n "$session_color" ] && color_arg="/color $session_color"
+    # A spawn kick (exported by launch_claude_code) outranks the color
+    # re-apply for this launch; both ride claude's single prompt slot.
+    local launch_prompt="${CS_SPAWN_KICK:-$color_arg}"
     export CS_CLAUDE_SESSION_ID="$new_uuid"
     export CS_FRESH_REBIND=1
     # shellcheck disable=SC2086
-    exec $CLAUDE_CODE_BIN --name "$session_name" --session-id "$new_uuid" ${color_arg:+"$color_arg"}
+    exec $CLAUDE_CODE_BIN --name "$session_name" --session-id "$new_uuid" ${launch_prompt:+"$launch_prompt"}
 }
 
 # Normalize an arbitrary identity string to a filesystem-safe slug.
@@ -4660,6 +4663,46 @@ launch_claude_code() {
     if [ -n "$claude_session_id" ]; then
         export CS_CLAUDE_SESSION_ID="$claude_session_id"
     fi
+
+    # Spawn seed: tasks staged by cs -spawn for this session. Consumed here,
+    # after the already-running guard and before any exec arm, so a window
+    # that died before launching self-heals on the session's next open. A
+    # stale seed (>1h) is set aside, never silently armed days later.
+    local spawn_kick=""
+    local _seed="$SESSIONS_ROOT/.spawn/$session_name.seed"
+    if [ -f "$_seed" ]; then
+        local _now _age
+        _now=$(date +%s)
+        _age=$(( _now - $(_epoch_mtime "$_seed") ))
+        if [ "$_age" -gt 3600 ]; then
+            mv "$_seed" "$_seed.stale" 2>/dev/null || true
+            warn "Stale spawn seed set aside: $_seed.stale (re-run cs -spawn if still wanted)"
+        else
+            local _spawner="" _line _n=0 _first=1
+            while IFS= read -r _line || [ -n "$_line" ]; do
+                if [ "$_first" = 1 ]; then _spawner="$_line"; _first=0; continue; fi
+                [ -n "$_line" ] || continue
+                _queue_add "$session_dir/.cs/local" "$_line"
+                _n=$((_n + 1))
+            done < "$_seed"
+            if [ "$_n" -gt 0 ]; then
+                printf 'armed\n' > "$session_dir/.cs/local/queue.state.tmp" \
+                    && mv "$session_dir/.cs/local/queue.state.tmp" "$session_dir/.cs/local/queue.state"
+                if [ -n "$_spawner" ]; then
+                    printf '%s\n' "$_spawner" > "$session_dir/.cs/local/spawned-by"
+                    spawn_kick="Spawned by $_spawner. Your walk-away queue is armed with $_n task(s); begin. Send results with: cs -msg $_spawner -k result \"...\""
+                else
+                    spawn_kick="Your walk-away queue is armed with $_n task(s); begin."
+                fi
+            fi
+            rm -f "$_seed"
+        fi
+    fi
+    # The kick prompt takes claude's single positional-prompt slot, displacing
+    # the /color re-apply for this one launch (color returns next open).
+    local launch_prompt="${spawn_kick:-$color_arg}"
+    export CS_SPAWN_KICK="$spawn_kick"
+
     # Status indicator
     local status_icon status_text
     if [ "$is_new" = "true" ]; then
@@ -4749,13 +4792,19 @@ launch_claude_code() {
             ' "$_hf" 2>/dev/null || continue
             pending_handoff="$_hf"
         done
-        if [ -n "$pending_handoff" ]; then
-            printf "${DIM}Rotation handoff pending:${NC} %s\n" "$(basename "$pending_handoff")"
-            printf "${DIM}Continue previous conversation?${NC} [Y/n/r] ${DIM}(r = fresh conversation with handoff)${NC} "
+        # A spawned launch is unattended: take the default (resume) instead
+        # of parking the tmux window on an interactive ask.
+        if [ -n "$spawn_kick" ]; then
+            response=""
         else
-            printf "${DIM}Continue previous conversation?${NC} [Y/n] "
+            if [ -n "$pending_handoff" ]; then
+                printf "${DIM}Rotation handoff pending:${NC} %s\n" "$(basename "$pending_handoff")"
+                printf "${DIM}Continue previous conversation?${NC} [Y/n/r] ${DIM}(r = fresh conversation with handoff)${NC} "
+            else
+                printf "${DIM}Continue previous conversation?${NC} [Y/n] "
+            fi
+            read -r response || exit 130
         fi
-        read -r response || exit 130
         case "$response" in
             [nN]|[nN][oO])
                 continue_flag=""
@@ -4795,7 +4844,7 @@ launch_claude_code() {
         SECONDS=0
         local rc=0
         # shellcheck disable=SC2086
-        $CLAUDE_CODE_BIN --name "$session_name" $continue_flag ${color_arg:+"$color_arg"} || rc=$?
+        $CLAUDE_CODE_BIN --name "$session_name" $continue_flag ${launch_prompt:+"$launch_prompt"} || rc=$?
         if [ $rc -ne 0 ] && [ $SECONDS -lt 3 ]; then
             # Quick failure suggests no conversation to continue. Rebind so
             # the fresh transcript claude is about to create is tracked by
@@ -4819,12 +4868,12 @@ launch_claude_code() {
         #     post-Phase-8 but handled defensively): naked exec.
         if [ "$is_new" = "true" ] && [ -n "$claude_session_id" ]; then
             # shellcheck disable=SC2086
-            exec $CLAUDE_CODE_BIN --name "$session_name" --session-id "$claude_session_id" ${color_arg:+"$color_arg"}
+            exec $CLAUDE_CODE_BIN --name "$session_name" --session-id "$claude_session_id" ${launch_prompt:+"$launch_prompt"}
         elif [ "$is_new" = "false" ]; then
             _exec_fresh_rebind "$session_dir" declined-resume
         else
             # shellcheck disable=SC2086
-            exec $CLAUDE_CODE_BIN --name "$session_name" ${color_arg:+"$color_arg"}
+            exec $CLAUDE_CODE_BIN --name "$session_name" ${launch_prompt:+"$launch_prompt"}
         fi
     fi
 }

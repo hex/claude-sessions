@@ -130,10 +130,13 @@ _exec_fresh_rebind() {
     session_color=$(_read_local_state "$session_dir/.cs/local/state" claude_session_color)
     local color_arg=""
     [ -n "$session_color" ] && color_arg="/color $session_color"
+    # A spawn kick (exported by launch_claude_code) outranks the color
+    # re-apply for this launch; both ride claude's single prompt slot.
+    local launch_prompt="${CS_SPAWN_KICK:-$color_arg}"
     export CS_CLAUDE_SESSION_ID="$new_uuid"
     export CS_FRESH_REBIND=1
     # shellcheck disable=SC2086
-    exec $CLAUDE_CODE_BIN --name "$session_name" --session-id "$new_uuid" ${color_arg:+"$color_arg"}
+    exec $CLAUDE_CODE_BIN --name "$session_name" --session-id "$new_uuid" ${launch_prompt:+"$launch_prompt"}
 }
 
 # Normalize an arbitrary identity string to a filesystem-safe slug.
