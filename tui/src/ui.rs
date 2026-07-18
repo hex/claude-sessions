@@ -1373,9 +1373,9 @@ fn card_frame(buf: &mut Buffer, area: Rect, title: &str, side: Color, p: Palette
 
 fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
     let p = app.theme;
-    // One clear column inside each border so the content never touches the
+    // Two clear columns inside each border so the content never touches the
     // frame; the blank lead line below gives the title row headroom.
-    let inner = area.inner(Margin::new(2, 1));
+    let inner = area.inner(Margin::new(3, 1));
 
     let session = match app.selected_session() {
         Some(s) => s,
@@ -1516,11 +1516,19 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
     // top border always carries the HERO ramp regardless of focus.
     let side = if focused { p.strong } else { p.soft };
     let inner = area.inner(Margin::new(1, 1));
+    // Input and list rows sit one clear column inside the frame on each side
+    // (their own leading-space spans add the second); the separator rule keeps
+    // full bleed to the border.
+    let pad_h = |r: Rect| Rect {
+        x: r.x + 1,
+        width: r.width.saturating_sub(2),
+        ..r
+    };
 
     // Input block on top (grows with wrapped text, capped), a full-width
     // separator rule, then the task list. The input's height must be known
     // before the layout splits, so its lines are built first.
-    let input_inner = inner.width.saturating_sub(2) as usize; // 1-col padding each side
+    let input_inner = inner.width.saturating_sub(4) as usize; // rect inset + pad column each side
     let input_lines: Vec<Line> = if app.notes_focus == NotesFocus::Editing {
         vec![Line::from(Span::styled(
             format!(" editing {} \u{b7} Enter saves \u{b7} Esc cancels", app.notes_selected + 1),
@@ -1565,19 +1573,20 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
     let input_height = input_lines.len().max(1) as u16;
 
     let rows = Layout::vertical([
+        Constraint::Length(1), // headroom under the title
         Constraint::Length(input_height),
         Constraint::Length(1),
         Constraint::Min(0),
     ])
     .split(inner);
 
-    frame.render_widget(Paragraph::new(input_lines), rows[0]);
+    frame.render_widget(Paragraph::new(input_lines), pad_h(rows[1]));
 
     // Separator between the input and the list, matching the panel border.
-    let rule = "\u{2500}".repeat(rows[1].width as usize);
+    let rule = "\u{2500}".repeat(rows[2].width as usize);
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(rule, Style::default().fg(side)))),
-        rows[1],
+        rows[2],
     );
 
     // Numbered list of queued tasks, each shown in full: long tasks wrap onto
@@ -1596,7 +1605,7 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
             .map(|s| crate::session::queue_active(&s.name))
             .unwrap_or(false);
 
-    let inner_cols = rows[2].width as usize;
+    let inner_cols = pad_h(rows[3]).width as usize;
     let list_lines: Vec<Line> = if tasks.is_empty() {
         vec![Line::from(Span::styled(
             " (no queued tasks)",
@@ -1667,7 +1676,7 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
             .collect()
     };
     let list = Paragraph::new(list_lines);
-    frame.render_widget(list, rows[2]);
+    frame.render_widget(list, pad_h(rows[3]));
 
     card_frame(frame.buffer_mut(), area, "to-do", side, p);
 }
@@ -2404,9 +2413,9 @@ mod tests {
             .position(|c| c == '\u{2502}')
             .expect("the meta row should start at the card border");
         let after_border: String = created_row.chars().skip(border_x + 1).take(2).collect();
-        assert!(
-            after_border.starts_with(' '),
-            "content must not touch the left border: {created_row:?}"
+        assert_eq!(
+            after_border, "  ",
+            "content should sit two clear columns inside the left border: {created_row:?}"
         );
 
         // Vertical headroom: the first row under the card's title border is
@@ -2422,6 +2431,52 @@ mod tests {
         assert!(
             headroom.is_empty(),
             "row under the preview title should be blank, got: {:?}",
+            rows[title_y + 1]
+        );
+    }
+
+    #[test]
+    fn todo_pane_content_is_padded_from_the_border() {
+        let mut app = App::new(one_session());
+        app.theme = Palette::dark();
+        app.show_preview = true;
+
+        let backend = TestBackend::new(90, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let rows: Vec<String> = (0..buf.area.height)
+            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
+            .collect();
+
+        // Horizontal padding: the input placeholder sits two clear columns
+        // inside the card's left border, matching the preview pane.
+        let input_row = rows
+            .iter()
+            .find(|r| r.contains("Tab to add"))
+            .expect("to-do input placeholder should render");
+        let border_x = input_row
+            .chars()
+            .position(|c| c == '\u{2502}')
+            .expect("the input row should start at the card border");
+        let after_border: String = input_row.chars().skip(border_x + 1).take(2).collect();
+        assert_eq!(
+            after_border, "  ",
+            "to-do content should sit two clear columns inside the left border: {input_row:?}"
+        );
+
+        // Vertical headroom: the row under the to-do title is blank.
+        let title_y = rows
+            .iter()
+            .position(|r| r.contains("to-do"))
+            .expect("to-do card title should render");
+        let headroom: String = rows[title_y + 1]
+            .chars()
+            .filter(|c| c.is_alphanumeric())
+            .collect();
+        assert!(
+            headroom.is_empty(),
+            "row under the to-do title should be blank, got: {:?}",
             rows[title_y + 1]
         );
     }
