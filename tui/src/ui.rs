@@ -77,6 +77,20 @@ pub const SELECT_WIDTH: u16 = 2;
 /// again post-render to shimmer it — kept here so the two sites can't drift.
 const SELECT_BAR: &str = "\u{258c}";
 
+/// Two-phase liveness blink for the gutter lock square: base teal on the
+/// first half of the period, a lightened teal on the second. `blinking`
+/// follows the animation heartbeat, so an idle picker freezes on steady
+/// teal instead of pulsing unattended.
+fn lock_square_color(p: theme::Palette, blinking: bool, now_ms: u128) -> Color {
+    const PERIOD_MS: u128 = 1200;
+    if blinking && (now_ms % PERIOD_MS) >= PERIOD_MS / 2 {
+        let (r, g, b) = theme::lerp_rgb(theme::rgb_of(p.teal), (255, 255, 255), 0.45);
+        Color::Rgb(r, g, b)
+    } else {
+        p.teal
+    }
+}
+
 /// Truncate a string to fit within max_width, respecting UTF-8 char boundaries.
 fn truncate_str(s: &str, max_width: usize) -> String {
     if s.len() <= max_width {
@@ -466,8 +480,14 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
     let (_, fuzzy_remainder) = parse_tag_query(app.search_input.text());
     let is_searching = app.mode == Mode::Search && !fuzzy_remainder.is_empty();
 
-    // One wall-clock read per frame, shared by every row's recency math.
+    // One wall-clock read per frame, shared by every row's recency math and
+    // the lock-square blink phase.
     let now = std::time::SystemTime::now();
+    let blinking = app.is_animating(app.idle_elapsed());
+    let now_ms = now
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
 
     // Total drawn height of each row, parallel to `app.filtered`. Captured here —
     // the one place the `1 + extra_height` math lives — so mouse hit-testing can
@@ -492,7 +512,11 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             // itself is the lock signal, so no separate lock glyph follows it.
             let mut name_spans: Vec<Span> = Vec::new();
             if s.is_locked {
-                let sq = if dimmed { p.comment } else { p.teal };
+                let sq = if dimmed {
+                    p.comment
+                } else {
+                    lock_square_color(p, blinking, now_ms)
+                };
                 name_spans.push(Span::styled("\u{25a0} ", Style::default().fg(sq)));
             } else {
                 name_spans.push(Span::styled("\u{25cf} ", Style::default().fg(heat)));
@@ -3343,13 +3367,30 @@ mod tests {
             .symbol();
         assert_eq!(locked_gutter, "\u{25a0}", "locked row shows the locked square at the gutter x");
         // Live = teal everywhere: the square matches the masthead live count,
-        // the preview state line, and the working-task marker.
+        // the preview state line, and the working-task marker. While the
+        // animation heartbeat runs it may sit on the lightened blink phase.
         let locked_fg = buf
             .cell(ratatui::layout::Position::new(gutter_x, locked_y))
             .unwrap()
             .fg;
-        assert_eq!(locked_fg, p.teal, "the lock square carries the liveness teal");
+        let light_teal = Color::Rgb(139, 231, 219); // dark-theme teal lifted 45% toward white
+        assert!(
+            locked_fg == p.teal || locked_fg == light_teal,
+            "the lock square carries a liveness teal phase, got {locked_fg:?}"
+        );
         assert_eq!(recent_gutter, "\u{25cf}", "unlocked row shows the recency dot at the gutter x");
+    }
+
+    #[test]
+    fn lock_square_blinks_between_teal_phases_only_while_animating() {
+        let p = Palette::dark();
+        // First half of the period: base teal.
+        assert_eq!(lock_square_color(p, true, 0), p.teal);
+        // Second half: the lightened phase (dark teal 45,212,191 lifted 45%
+        // toward white — known-good literal, not recomputed).
+        assert_eq!(lock_square_color(p, true, 700), Color::Rgb(139, 231, 219));
+        // Idle (heartbeat paused): steady teal in any phase.
+        assert_eq!(lock_square_color(p, false, 700), p.teal);
     }
 
     #[test]
