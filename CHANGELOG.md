@@ -4,6 +4,22 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.7.17
+
+### Features
+- **Cross-session mail** — `cs -msg <session> "body"` drops a typed message (`--kind notify|task|text|result`) into another session's machine-local mailbox; `task` also lands in its walk-away queue. Recipients see a short digest at their next turn and read with `cs -msg` / `cs -msg log`.
+- **tmux spawner** — `cs -spawn <name> [--task "..."]...` opens a session in a cs-owned tmux session (`tmux attach -t cs`); `--task` seeds and arms its walk-away queue so it works unattended, and the spawner hears back over cross-session mail when the queue drains. Completes the machine-local comms roadmap: presence → mail → spawner.
+- **Multi-name session verbs** — `cs -rm`, `cs -archive`, `cs -unarchive` accept several names; each removal keeps its own confirmation.
+- **/release correctness gate** — the release ritual gains a code-review step between /simplify and the test run.
+
+### Fixes
+- tmux targets are anchored to the exact `cs` session on resolver commands, with plain targets on `set-option`/`show-option` — tmux 3.6a rejects `=` anchors there (found by live smoke test).
+- Empty session names are rejected before any multi-name verb acts (release-gate catch: `cs -rm name ""` previously resolved the empty name to the sessions root itself).
+- Queue digest reads are bounded to a pre-counted newline total, so a torn final notification line can no longer be silently skipped.
+
+### Docs
+- Mailbox and spawner coverage across README, session layout, and hooks; `CS_TMUX_BIN` override documented.
+
 ## 2026.7.16
 
 ### Features
