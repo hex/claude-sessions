@@ -107,7 +107,12 @@ All tmux calls behind a thin wrapper function so tests can stub them.
 3. If session `cs` exists: require `tmux show-option -t cs -v @cs_managed`
    to return `1`; an unmarked pre-existing session named `cs` belongs to the
    human — refuse with guidance rather than adding windows to it (the
-   personal tmux server is never colonized).
+   personal tmux server is never colonized). Target anchoring nuance, found
+   by live smoke test on tmux 3.6a: the resolver commands (`has-session`,
+   `list-windows`, `new-window`) take `=cs` exact-match targets, but the
+   options commands (`show-option`, `set-option`) reject `=` anchors — they
+   use plain `cs`, which cannot prefix-misfire because both only run once an
+   exact `cs` session is known to exist.
 4. Add the window with `tmux new-window -t cs -n <name> -P -F '#{window_id}'
    <cmd>` — the printed window ID is captured and echoed to the user.
 5. Confirmation: `spawned <name> in tmux session cs (window %ID). Attach:

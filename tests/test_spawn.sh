@@ -37,8 +37,13 @@ case "$1" in
                   if [ -f "$FAKE_TMUX_DIR/race" ] || [ -f "$FAKE_TMUX_DIR/session-exists" ]; then exit 1; fi
                   touch "$FAKE_TMUX_DIR/session-exists"
                   case "$*" in *" -P "*) echo '@0';; esac ;;
-    set-option)   printf '1\n' > "$FAKE_TMUX_DIR/managed" ;;
-    show-option)  [ -f "$FAKE_TMUX_DIR/managed" ] && cat "$FAKE_TMUX_DIR/managed" ;;
+    # tmux 3.6a rejects '='-anchored targets on the options commands (verified
+    # live 2026-07-18: "no such session: =cs"); model that so the suite pins
+    # the plain-target requirement for these two.
+    set-option)   case "$*" in *"-t =cs"*) echo "no such session: =cs" >&2; exit 1;; esac
+                  printf '1\n' > "$FAKE_TMUX_DIR/managed" ;;
+    show-option)  case "$*" in *"-t =cs"*) echo "no such session: =cs" >&2; exit 1;; esac
+                  [ -f "$FAKE_TMUX_DIR/managed" ] && cat "$FAKE_TMUX_DIR/managed" ;;
     list-windows) [ -f "$FAKE_TMUX_DIR/windows" ] && cat "$FAKE_TMUX_DIR/windows" ;;
     new-window)   case "$*" in *" -P "*) echo '@7';; esac ;;
 esac
@@ -78,13 +83,19 @@ test_spawn_writes_seed_and_opens_window() {
     assert_output_contains "$out" "@0" "window id echoed" || return 1
     assert_output_contains "$out" "tmux attach -t cs" "attach hint" || return 1
     assert_file_contains "$FAKE_TMUX_DIR/log" "new-session -d -s cs" "created cs session" || return 1
-    assert_file_contains "$FAKE_TMUX_DIR/log" "set-option -t =cs @cs_managed 1" "ownership stamped" || return 1
+    assert_file_contains "$FAKE_TMUX_DIR/log" "set-option -t cs @cs_managed 1" "ownership stamped" || return 1
 }
 
 test_spawn_tmux_targets_are_exact_match_anchored() {
     "$CS_BIN" -spawn worker >/dev/null 2>&1 || return 1
-    ! grep -E -- '-t cs( |$)' "$FAKE_TMUX_DIR/log" >/dev/null || { echo "  unanchored -t cs target found"; return 1; }
-    grep -F -- '-t =cs' "$FAKE_TMUX_DIR/log" >/dev/null || { echo "  no anchored target"; return 1; }
+    # Resolver commands must anchor with =; the options commands must NOT
+    # (tmux 3.6a rejects '=' targets on set-option/show-option), and they are
+    # unambiguous anyway because they only run once exact 'cs' exists.
+    ! grep -E -- '^(has-session|list-windows|new-window) .*-t cs( |$)' "$FAKE_TMUX_DIR/log" >/dev/null \
+        || { echo "  unanchored resolver target found"; return 1; }
+    grep -F -- '-t =cs' "$FAKE_TMUX_DIR/log" >/dev/null || { echo "  no anchored resolver target"; return 1; }
+    ! grep -E -- '^(set-option|show-option) .*-t =cs' "$FAKE_TMUX_DIR/log" >/dev/null \
+        || { echo "  anchored options-command target found"; return 1; }
 }
 
 test_spawn_empty_spawner_writes_blank_first_line() {

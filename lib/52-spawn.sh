@@ -30,7 +30,10 @@ _spawn_precheck() {  # name
     fi
     if _tmux has-session -t =cs 2>/dev/null; then
         local owned
-        owned=$(_tmux show-option -t =cs -v @cs_managed 2>/dev/null || true)
+        # Plain target: tmux 3.6a rejects '=' anchors on the options commands,
+        # and this only runs after has-session confirmed exact 'cs' exists,
+        # so prefix matching cannot misfire.
+        owned=$(_tmux show-option -t cs -v @cs_managed 2>/dev/null || true)
         [ "$owned" = "1" ] || error "A tmux session named 'cs' exists but was not created by cs; close or rename it"
         if _tmux list-windows -t =cs -F '#{window_name}' 2>/dev/null | grep -Fxq "$name"; then
             error "A window named $name already exists in tmux session cs"
@@ -45,7 +48,9 @@ _spawn_window() {  # name
     # so "already exists" and "a concurrent spawner just created it" collapse
     # into the same fallthrough to new-window.
     if wid=$(_tmux new-session -d -s cs -n "$name" -P -F '#{window_id}' "$cmd" 2>/dev/null); then
-        _tmux set-option -t =cs @cs_managed 1
+        # Plain target: tmux 3.6a rejects '=' anchors on the options commands;
+        # exact 'cs' was just created by new-session, so this cannot misfire.
+        _tmux set-option -t cs @cs_managed 1
         info "spawned $name in tmux session cs (window $wid). Attach: tmux attach -t cs"
         return 0
     fi
