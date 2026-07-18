@@ -211,4 +211,63 @@ run_test test_launch_without_seed_keeps_color_behavior
 run_test test_launch_sets_aside_stale_seed
 run_test test_launch_seed_bypasses_resume_ask
 
+# Drain harness (same recipe as tests/test_queue_supervision.sh): the Stop
+# hook is narrative-reminder.sh; CLAUDE_SESSION_* env selects the session.
+_worker_env() {
+    CLAUDE_SESSION_NAME="worker" \
+    CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/worker" \
+    CLAUDE_SESSION_META_DIR="$CS_SESSIONS_ROOT/worker/.cs" \
+    "$@"
+}
+_worker_stop_turn() {
+    echo '{}' | PATH="$SCRIPT_DIR/../bin:$PATH" _worker_env bash "$HOOKS_DIR/narrative-reminder.sh"
+}
+_arm_worker_queue() {  # tasks...
+    create_test_session worker >/dev/null 2>&1 || true
+    create_test_session boss >/dev/null 2>&1 || true
+    local t
+    for t in "$@"; do printf '%s\n' "$t" >> "$CS_SESSIONS_ROOT/worker/.cs/local/queue"; done
+    printf 'armed\n' > "$CS_SESSIONS_ROOT/worker/.cs/local/queue.state"
+    printf 'boss\n' > "$CS_SESSIONS_ROOT/worker/.cs/local/spawned-by"
+}
+BOSS_INBOX() { printf '%s' "$CS_SESSIONS_ROOT/boss/.cs/local/mail/inbox.jsonl"; }
+
+test_drain_finished_notifies_spawner_once() {
+    _arm_worker_queue "only task"
+    _worker_stop_turn >/dev/null || return 1        # armed -> draining, task 1 injected
+    _worker_stop_turn >/dev/null || return 1        # task done -> drain_finished
+    assert_file_exists "$(BOSS_INBOX)" "spawner inbox written" || return 1
+    assert_file_contains "$(BOSS_INBOX)" "queue drained: 1 task(s) done" "notify body" || return 1
+    assert_eq "notify" "$(head -1 "$(BOSS_INBOX)" | jq -r .kind)" "kind notify" || return 1
+    assert_eq "worker" "$(head -1 "$(BOSS_INBOX)" | jq -r .from)" "from worker" || return 1
+    [ ! -f "$CS_SESSIONS_ROOT/worker/.cs/local/spawned-by" ] || { echo "  spawned-by not one-shot"; return 1; }
+    # A later, unrelated drain must not re-notify.
+    printf 'later task\n' >> "$CS_SESSIONS_ROOT/worker/.cs/local/queue"
+    printf 'armed\n' > "$CS_SESSIONS_ROOT/worker/.cs/local/queue.state"
+    _worker_stop_turn >/dev/null || return 1
+    _worker_stop_turn >/dev/null || return 1
+    assert_eq "1" "$(wc -l < "$(BOSS_INBOX)" | tr -d '[:space:]')" "no second notify" || return 1
+}
+
+test_breaker_trip_notifies_and_keeps_spawned_by() {
+    _arm_worker_queue "task a" "task b"
+    _worker_stop_turn >/dev/null || return 1        # draining, task a injected
+    printf '9\n' > "$CS_SESSIONS_ROOT/worker/.cs/local/failures"
+    _worker_stop_turn >/dev/null || return 1        # trips the failure breaker
+    assert_file_contains "$(BOSS_INBOX)" "breaker tripped" "trip notified" || return 1
+    assert_file_exists "$CS_SESSIONS_ROOT/worker/.cs/local/spawned-by" "spawned-by kept on trip" || return 1
+}
+
+test_drain_without_spawned_by_sends_nothing() {
+    _arm_worker_queue "solo task"
+    rm -f "$CS_SESSIONS_ROOT/worker/.cs/local/spawned-by"
+    _worker_stop_turn >/dev/null || return 1
+    _worker_stop_turn >/dev/null || return 1
+    [ ! -f "$(BOSS_INBOX)" ] || { echo "  notify sent without spawned-by"; return 1; }
+}
+
+run_test test_drain_finished_notifies_spawner_once
+run_test test_breaker_trip_notifies_and_keeps_spawned_by
+run_test test_drain_without_spawned_by_sends_nothing
+
 report_results

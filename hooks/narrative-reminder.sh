@@ -140,6 +140,17 @@ First task: $TASK"
                 DONE_COUNT=$(_qlen "$QDIR/queue.done")
                 _inbox_append --arg ts "$(date +%s)" --arg d "$DONE_COUNT" \
                     '{ts: ($ts|tonumber), event: "drain_finished", done: ($d|tonumber)}'
+                # Spawned worker: tell the spawner its batch is done. One-shot
+                # (spawned-by is deleted) so later unrelated drains stay
+                # silent. Best-effort: a failed send never breaks the drain.
+                if [ -s "$QDIR/spawned-by" ]; then
+                    SPAWNER=""
+                    IFS= read -r SPAWNER < "$QDIR/spawned-by" || true
+                    if [ -n "$SPAWNER" ] && command -v cs >/dev/null 2>&1; then
+                        cs -msg "$SPAWNER" -k notify "queue drained: $DONE_COUNT task(s) done" >/dev/null 2>&1 || true
+                    fi
+                    rm -f "$QDIR/spawned-by"
+                fi
                 rm -f "$QDIR/failures"
                 jq -nc '{decision:"block", reason:"cs task queue: all tasks complete. Mark the final native task completed, then give the user a brief summary of what the walk-away run accomplished and anything that needs their attention."}'
                 exit 0
@@ -151,6 +162,15 @@ First task: $TASK"
                 _inbox_append --arg ts "$(date +%s)" --arg r "$REASON_KIND" \
                     --arg v "$READING" --arg l "$LIMIT" --arg n "$NEWLEN" \
                     '{ts: ($ts|tonumber), event: "breaker_tripped", reason: $r, reading: ($v|tonumber), limit: ($l|tonumber), remaining: ($n|tonumber)}'
+                # Spawned worker: surface the trip to the spawner but KEEP
+                # spawned-by, so the eventual real drain still reports.
+                if [ -s "$QDIR/spawned-by" ]; then
+                    SPAWNER=""
+                    IFS= read -r SPAWNER < "$QDIR/spawned-by" || true
+                    if [ -n "$SPAWNER" ] && command -v cs >/dev/null 2>&1; then
+                        cs -msg "$SPAWNER" -k notify "breaker tripped: $REASON_KIND ($READING >= $LIMIT), $NEWLEN task(s) remaining" >/dev/null 2>&1 || true
+                    fi
+                fi
                 rm -f "$QDIR/failures"
                 REASON="cs task queue: circuit breaker tripped — $REASON_KIND at $READING (threshold $LIMIT). The queue is parked with $NEWLEN task(s) remaining; nothing was lost. Summarize the walk-away run so far and anything that needs the user's attention. They can re-arm with: cs -queue start."
                 jq -nc --arg r "$REASON" '{decision:"block", reason:$r}'
