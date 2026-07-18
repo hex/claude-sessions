@@ -1589,6 +1589,10 @@ impl App {
                 .unwrap_or(false)
             {
                 std::fs::remove_file(&path)
+            } else if session.name.contains('@') && path.join(".git").is_file() {
+                // Worktree session: unregister from the base repo's git,
+                // not just delete the directory (mirrors cs -rm).
+                session::remove_worktree_session(&root, &session.name, &path)
             } else {
                 std::fs::remove_dir_all(&path)
             };
@@ -1620,6 +1624,10 @@ impl App {
                 .unwrap_or(false)
             {
                 std::fs::remove_file(&path)
+            } else if name.contains('@') && path.join(".git").is_file() {
+                // Worktree session: unregister from the base repo's git,
+                // not just delete the directory (mirrors cs -rm).
+                session::remove_worktree_session(&root, name, &path)
             } else {
                 std::fs::remove_dir_all(&path)
             };

@@ -632,6 +632,29 @@ fn heartbeat_alive(meta_dir: &Path, now: std::time::SystemTime) -> bool {
         .unwrap_or(true)
 }
 
+/// Remove a worktree session (`base@task`) through git so the base repo's
+/// worktree registration goes with it; the task branch is left alone,
+/// matching `cs -rm` when its branch prompt is declined. Falls back to
+/// plain directory removal when the base session is gone.
+pub fn remove_worktree_session(root: &Path, name: &str, path: &Path) -> std::io::Result<()> {
+    let base = name.split_once('@').map(|(b, _)| b).unwrap_or(name);
+    let base_dir = root.join(base);
+    if base_dir.is_dir() {
+        let ok = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&base_dir)
+            .args(["worktree", "remove", "--force"])
+            .arg(path)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if ok {
+            return Ok(());
+        }
+    }
+    fs::remove_dir_all(path)
+}
+
 fn read_lock_pid(meta_dir: &Path) -> Option<u32> {
     let lock_file = meta_dir.join("session.lock");
     let content = fs::read_to_string(&lock_file).ok()?;
@@ -830,6 +853,45 @@ mod tests {
         assert_eq!(result, None);
 
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn remove_worktree_session_unregisters_from_the_base_repo() {
+        let git = |dir: &Path, args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(["-c", "user.email=t@t", "-c", "user.name=t"])
+                .args(args)
+                .output()
+                .expect("git runs");
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        };
+        let root = std::env::temp_dir().join(format!("cs-wt-rm-{}", std::process::id()));
+        let base = root.join("proj");
+        std::fs::create_dir_all(&base).unwrap();
+        git(&base, &["init", "-q"]);
+        std::fs::write(base.join("f"), "x").unwrap();
+        git(&base, &["add", "f"]);
+        git(&base, &["commit", "-qm", "seed"]);
+        let wt = root.join("proj@task");
+        git(&base, &["worktree", "add", "-q", wt.to_str().unwrap(), "-b", "cs/task"]);
+        assert!(wt.join(".git").is_file(), "worktree marker file expected");
+
+        remove_worktree_session(&root, "proj@task", &wt).unwrap();
+
+        assert!(!wt.exists(), "worktree directory should be gone");
+        let list = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&base)
+            .args(["worktree", "list"])
+            .output()
+            .unwrap();
+        assert!(
+            !String::from_utf8_lossy(&list.stdout).contains("proj@task"),
+            "base repo must not keep a stale worktree registration"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
