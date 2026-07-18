@@ -69,6 +69,9 @@ user-owned `CLAUDE.md` is never touched.
 | `context-pct` | Latest context-window percentage, stamped by the status line; the narrative reminder reads it to suggest compaction, and cs-tui uses its mtime as the liveness heartbeat for conversations opened outside cs. |
 | `limits` | Latest 5-hour/weekly rate-limit readings, stamped by the status line; read by `cs -usage` window anchoring and the queue's rate-limit breaker. |
 | `failures` | Per-task tool-failure counter written by `tool-failure-logger.sh`; feeds the queue's failures circuit breaker, reset at each drain advance. |
+| `local/mail/inbox.jsonl` | Cross-session mailbox: one JSON message per line, appended by senders (`cs -msg`) |
+| `local/mail/notified` | Digest cursor: inbox line count already announced by a hook digest |
+| `local/mail/seen` | Read cursor: inbox line count already printed by `cs -msg` |
 
 ## Merge policy
 
