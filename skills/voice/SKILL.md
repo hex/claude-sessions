@@ -67,5 +67,10 @@ edits are authoritative on the next draft.
 - Typos in the corpus are a described trait; drafts are spelled correctly.
 - Never reproduce `[redacted line]` markers or anything credential-shaped
   from the corpus into a draft.
+- Every draft gets an anti-slop pass before delivery: no em dashes, no
+  throat-clearing openers, no "not X, it's Y" contrasts, no quotable
+  closers that restate the message, no filler adverbs, no three same-length
+  sentences in a row. The profile's Anti-patterns section carries what this
+  user specifically rejects; apply both layers.
 - Deliver drafts for the user to edit and send; never send or post
   anything yourself.
