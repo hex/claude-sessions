@@ -27,6 +27,7 @@ Commands:
   -msg <session> "<body>"  Send a message to another session (--kind notify|task|text|result)
   -msg                Read this session's unread mail
   -msg log            Show this session's full mail history
+  -spawn <name>       Open a session in the cs tmux session (--task "..." seeds and arms its queue)
   -conversations      Show the session's conversation chain (rotations, lineage)
   -doctor, -diag      Run health checks (Keychain, hooks, memory, audit, tokens)
   -lint <file>...     Flag AI-slop prose tells (em-dashes, banned phrases); 0=clean 1=issues 2=error

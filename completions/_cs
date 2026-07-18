@@ -101,6 +101,7 @@ _cs() {
         '-checkpoint:Save or manage session checkpoints'
         '-queue:Manage the session walk-away queue'
         '-msg:Send a message to another session'
+        '-spawn:Open a session in a cs-owned tmux window'
         '-conversations:Show the session'\''s conversation chain'
         '-live:List sessions running right now on this machine'
         '-usage:Per-session token usage over rate-limit windows'

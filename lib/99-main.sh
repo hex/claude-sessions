@@ -122,6 +122,11 @@ main() {
             run_mail "$@"
             return 0
             ;;
+        -spawn)
+            shift
+            run_spawn "$@"
+            return 0
+            ;;
         -conversations)
             shift
             run_conversations "$@"
