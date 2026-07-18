@@ -334,6 +334,31 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
     if show_github { visible_cols.push(SortColumn::Github); }
     app.visible_sort_columns = visible_cols;
 
+    let mut widths: Vec<Constraint> = vec![
+        Constraint::Min(20),    // Session
+        Constraint::Length(10), // Created (date)
+        Constraint::Length(6),  // Age (relative)
+    ];
+    if show_secrets { widths.push(Constraint::Length(9)); }
+    if show_todos { widths.push(Constraint::Length(7)); }
+    if show_github { widths.push(Constraint::Min(15)); }
+
+    // Resolve column geometry with ratatui's own solver so mouse hit-testing
+    // never drifts from where the Table actually draws. (Drift between a
+    // hand-rolled approximation and the real layout is what made the old
+    // dividers slice through cells.) The Table reserves SELECT_WIDTH at the left
+    // for the selection symbol, then lays the columns out across the remainder.
+    let inner = area; // no border insets — the table is borderless
+    let cols_area = Rect {
+        x: inner.x + SELECT_WIDTH,
+        width: inner.width.saturating_sub(SELECT_WIDTH),
+        ..inner
+    };
+    let col_rects = Layout::horizontal(widths.clone())
+        .spacing(COL_SPACING)
+        .split(cols_area);
+    app.column_widths = col_rects.iter().map(|r| r.width).collect();
+
     let sort_indicator = |col: SortColumn| -> &'static str {
         if app.sort_col != col {
             return "";
@@ -359,8 +384,52 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
         Cell::from(Line::from(spans))
     };
 
+    // Inline symbol legend in the SESSION column's free width (wide headers
+    // only): the glyphs the rows actually use, keyed where the symbols live.
+    // Right-aligned toward CREATED so it reads as annotation, not a column.
+    let session_cell = || -> Cell<'static> {
+        let mut spans = vec![Span::styled(
+            "SESSION".to_string(),
+            Style::default().fg(p.mut_).add_modifier(Modifier::BOLD),
+        )];
+        let indicator = sort_indicator(SortColumn::Name);
+        if !indicator.is_empty() {
+            spans.push(Span::styled(indicator, Style::default().fg(p.rust)));
+        }
+        let legend: [(&str, Color, &str); 4] = [
+            ("\u{25cf}", p.green, "recency"),
+            ("\u{25aa}", p.ember, "locked"),
+            ("*", p.gold, "marked"),
+            ("\u{2500}", p.comment, "archived"),
+        ];
+        let legend_w: usize = legend
+            .iter()
+            .map(|(g, _, l)| g.chars().count() + 1 + l.len())
+            .sum::<usize>()
+            + 3 * (legend.len() - 1);
+        let used = "SESSION".len() + indicator.chars().count();
+        let name_col_w = app.column_widths.first().copied().unwrap_or(0) as usize;
+        // Render only when the legend keeps clear air on both sides.
+        if name_col_w >= used + 4 + legend_w + 2 {
+            spans.push(Span::raw(" ".repeat(name_col_w - used - legend_w - 2)));
+            for (i, (glyph, color, label)) in legend.iter().enumerate() {
+                if i > 0 {
+                    spans.push(Span::raw("   "));
+                }
+                let mut style = Style::default().fg(*color);
+                if *glyph == "*" {
+                    style = style.add_modifier(Modifier::BOLD);
+                }
+                spans.push(Span::styled(glyph.to_string(), style));
+                spans.push(Span::raw(" "));
+                spans.push(Span::styled(label.to_string(), Style::default().fg(p.faint)));
+            }
+        }
+        Cell::from(Line::from(spans))
+    };
+
     let mut header_cells = vec![
-        header_cell("SESSION", SortColumn::Name),
+        session_cell(),
         header_cell("CREATED", SortColumn::Created),
         header_cell("AGE", SortColumn::Modified),
     ];
@@ -676,31 +745,6 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             }
         })
         .collect();
-
-    let mut widths: Vec<Constraint> = vec![
-        Constraint::Min(20),    // Session
-        Constraint::Length(10), // Created (date)
-        Constraint::Length(6),  // Age (relative)
-    ];
-    if show_secrets { widths.push(Constraint::Length(9)); }
-    if show_todos { widths.push(Constraint::Length(7)); }
-    if show_github { widths.push(Constraint::Min(15)); }
-
-    // Resolve column geometry with ratatui's own solver so mouse hit-testing
-    // never drifts from where the Table actually draws. (Drift between a
-    // hand-rolled approximation and the real layout is what made the old
-    // dividers slice through cells.) The Table reserves SELECT_WIDTH at the left
-    // for the selection symbol, then lays the columns out across the remainder.
-    let inner = area; // no border insets — the table is borderless
-    let cols_area = Rect {
-        x: inner.x + SELECT_WIDTH,
-        width: inner.width.saturating_sub(SELECT_WIDTH),
-        ..inner
-    };
-    let col_rects = Layout::horizontal(widths.clone())
-        .spacing(COL_SPACING)
-        .split(cols_area);
-    app.column_widths = col_rects.iter().map(|r| r.width).collect();
 
     let table = Table::new(rows, widths)
         .header(header)
@@ -2017,7 +2061,10 @@ mod tests {
             .map(row_text)
             .find(|r| r.contains("QUEUE"))
             .expect("QUEUE column header should render when a session has a queued task");
-        let queue_x = header_row.find("QUEUE").unwrap() as u16;
+        // Char count, not byte offset: the header's inline legend carries
+        // multibyte glyphs before QUEUE, so bytes overshoot the column.
+        let queue_byte = header_row.find("QUEUE").unwrap();
+        let queue_x = header_row[..queue_byte].chars().count() as u16;
 
         let divider_y = (0..24u16)
             .find(|&y| row_text(y).contains("── Today \u{b7}"))
@@ -2432,6 +2479,60 @@ mod tests {
             headroom.is_empty(),
             "row under the preview title should be blank, got: {:?}",
             rows[title_y + 1]
+        );
+    }
+
+    #[test]
+    fn wide_header_carries_the_symbol_legend_between_session_and_created() {
+        let mut app = App::new(one_session());
+        app.theme = Palette::dark();
+        app.show_preview = true;
+
+        let backend = TestBackend::new(200, 50);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let rows: Vec<String> = (0..buf.area.height)
+            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
+            .collect();
+
+        let header = rows
+            .iter()
+            .find(|r| r.contains("SESSION"))
+            .expect("table header should render");
+        for label in ["recency", "locked", "marked", "archived"] {
+            assert!(header.contains(label), "header legend should name {label}: {header:?}");
+        }
+        let s = header.find("SESSION").unwrap();
+        let l = header.find("recency").unwrap();
+        let c = header.find("CREATED").unwrap();
+        assert!(
+            s < l && l < c,
+            "the legend should sit between SESSION and CREATED: {header:?}"
+        );
+    }
+
+    #[test]
+    fn narrow_header_omits_the_inline_legend() {
+        let mut app = App::new(one_session());
+        app.theme = Palette::dark();
+        app.show_preview = true;
+
+        let backend = TestBackend::new(60, 50);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let rows: Vec<String> = (0..buf.area.height)
+            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
+            .collect();
+
+        let header = rows
+            .iter()
+            .find(|r| r.contains("SESSION"))
+            .expect("table header should render");
+        assert!(
+            !header.contains("recency"),
+            "a narrow header has no room for the legend: {header:?}"
         );
     }
 
