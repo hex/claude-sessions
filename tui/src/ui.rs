@@ -210,7 +210,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     match choose_layout(chunks[1], app.show_preview) {
         PaneLayout::SideBySide => {
             app.request_preview();
-            let cols = Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
+            let cols = Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)])
                 .split(chunks[1]);
             render_table(app, frame, cols[0], true);
             let right_rows =
@@ -222,9 +222,9 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         PaneLayout::Stacked => {
             app.request_preview();
             let rows = Layout::vertical([
-                Constraint::Percentage(50),
+                Constraint::Percentage(25),
+                Constraint::Percentage(45),
                 Constraint::Percentage(30),
-                Constraint::Percentage(20),
             ])
             .split(chunks[1]);
             render_table(app, frame, rows[0], true);
@@ -2423,6 +2423,62 @@ mod tests {
             headroom.is_empty(),
             "row under the preview title should be blank, got: {:?}",
             rows[title_y + 1]
+        );
+    }
+
+    #[test]
+    fn stacked_list_is_shorter_than_the_preview_pane() {
+        let mut app = App::new(one_session());
+        app.theme = Palette::dark();
+        app.show_preview = true;
+
+        let backend = TestBackend::new(80, 50);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let rows: Vec<String> = (0..buf.area.height)
+            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
+            .collect();
+
+        let y_preview = rows
+            .iter()
+            .position(|r| r.contains("preview"))
+            .expect("preview card should render in stacked layout");
+        let y_todo = rows
+            .iter()
+            .position(|r| r.contains("to-do"))
+            .expect("to-do card should render in stacked layout");
+        let list_rows = y_preview.saturating_sub(2); // content starts under the 2-row masthead
+        let preview_rows = y_todo - y_preview;
+        assert!(
+            list_rows < preview_rows,
+            "the listing ({list_rows} rows) should give up height to the preview pane ({preview_rows} rows)"
+        );
+    }
+
+    #[test]
+    fn side_by_side_gives_the_panes_more_width_than_the_table() {
+        let mut app = App::new(one_session());
+        app.theme = Palette::dark();
+        app.show_preview = true;
+
+        let backend = TestBackend::new(200, 50);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let rows: Vec<String> = (0..buf.area.height)
+            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
+            .collect();
+
+        let title_row = rows
+            .iter()
+            .find(|r| r.contains("preview"))
+            .expect("preview card should render in side-by-side layout");
+        let byte = title_row.find("preview").unwrap();
+        let col = title_row[..byte].chars().count();
+        assert!(
+            col < 100,
+            "the panes column should start left of the midline (preview title at col {col})"
         );
     }
 
