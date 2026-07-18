@@ -611,9 +611,11 @@ fn local_utc_offset_secs() -> i64 {
 }
 
 /// How long after the last statusline write a lockless conversation still
-/// counts as live. The statusline touches context-pct every few seconds
-/// while a conversation is active, locked or not.
-const HEARTBEAT_WINDOW_SECS: u64 = 120;
+/// counts as live. Ticks are bursty: seconds apart while the conversation
+/// works, minutes apart while it idles open (fignity showed 5m+ gaps), so
+/// a wide window prevents live/dormant flapping; the cost is a closed
+/// outside-conversation lingering live for at most this long.
+const HEARTBEAT_WINDOW_SECS: u64 = 900;
 
 /// True when .cs/local/context-pct was written within the heartbeat window
 /// of `now`. Detects conversations opened outside cs (no session.lock).
