@@ -62,6 +62,11 @@ test_send_rejects_slash_in_target() {
     ! "$CS_BIN" -msg "a/b" "x" >/dev/null 2>&1 || return 1
 }
 
+test_send_rejects_dot_and_dotdot_targets() {
+    ! "$CS_BIN" -msg .. "escape" >/dev/null 2>&1 || return 1
+    ! "$CS_BIN" -msg . "escape" >/dev/null 2>&1 || return 1
+}
+
 test_send_rejects_self() {
     mkdir -p "$CS_SESSIONS_ROOT/sender/.cs/local"
     ! "$CS_BIN" -msg sender "me to me" >/dev/null 2>&1 || return 1
@@ -75,6 +80,11 @@ test_send_rejects_ref_without_result() {
     ! "$CS_BIN" -msg receiver --ref some-id "x" >/dev/null 2>&1 || return 1
     "$CS_BIN" -msg receiver -k result --ref some-id "ok" >/dev/null 2>&1 || return 1
     assert_eq "some-id" "$(head -1 "$(INBOX)" | jq -r .ref)" "ref stored on result" || return 1
+}
+
+test_send_trailing_flag_errors_loudly() {
+    local out; out=$("$CS_BIN" -msg receiver --kind 2>&1) && return 1
+    assert_output_contains "$out" "needs a value" "trailing flag errors with a message" || return 1
 }
 
 test_send_rejects_empty_and_oversize_body() {
@@ -112,9 +122,11 @@ run_test test_send_session_scoped_alias
 run_test test_send_joins_unquoted_multiword_body
 run_test test_send_rejects_unknown_target
 run_test test_send_rejects_slash_in_target
+run_test test_send_rejects_dot_and_dotdot_targets
 run_test test_send_rejects_self
 run_test test_send_rejects_bad_kind
 run_test test_send_rejects_ref_without_result
+run_test test_send_trailing_flag_errors_loudly
 run_test test_send_rejects_empty_and_oversize_body
 run_test test_task_kind_lands_in_recipient_queue
 run_test test_task_kind_clears_declined_flag
@@ -135,7 +147,7 @@ test_read_prints_unread_then_advances() {
     assert_output_contains "$out" "first" "first body shown" || return 1
     assert_output_contains "$out" "second" "second body shown" || return 1
     assert_output_contains "$out" "sender" "sender attributed" || return 1
-    assert_output_contains "$out" "[text]" "kind tagged" || return 1
+    assert_output_contains "$out" "\[text\]" "kind tagged" || return 1
     out=$(_as_receiver -msg 2>&1) || return 1
     assert_output_contains "$out" "No unread mail" "second read is empty" || return 1
 }
@@ -245,9 +257,22 @@ test_session_start_hook_also_delivers() {
     assert_output_contains "$out" "seen at start" "session-start delivers mail digest" || return 1
 }
 
+test_digest_ignores_torn_final_line_until_completed() {
+    "$CS_BIN" -msg receiver -k notify "solid" >/dev/null 2>&1
+    printf '{"id":"t","ts":1,"from":"sender","actor":"a","kind":"notify","body":"tornnote' \
+        >> "$CS_SESSIONS_ROOT/receiver/.cs/local/mail/inbox.jsonl"
+    local out; out=$(_prompt_as_receiver "hello") || return 1
+    assert_output_contains "$out" "solid" "complete notify announced" || return 1
+    assert_output_not_contains "$out" "tornnote" "torn line not announced" || return 1
+    printf '"}\n' >> "$CS_SESSIONS_ROOT/receiver/.cs/local/mail/inbox.jsonl"
+    out=$(_prompt_as_receiver "again") || return 1
+    assert_output_contains "$out" "tornnote" "completed line announced once whole" || return 1
+}
+
 run_test test_digest_notify_inline_and_text_counted
 run_test test_digest_surfaces_once_and_read_cursor_independent
 run_test test_digest_caps_notifies_at_three
 run_test test_session_start_hook_also_delivers
+run_test test_digest_ignores_torn_final_line_until_completed
 
 report_results

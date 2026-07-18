@@ -41,14 +41,14 @@ _mail_send() {  # target, [--kind|-k KIND] [--ref ID] body
     local kind="text" ref="" body=""
     while [ $# -gt 0 ]; do
         case "$1" in
-            --kind|-k) shift; kind="${1:-}";;
-            --ref)     shift; ref="${1:-}";;
+            --kind|-k) [ $# -ge 2 ] || error "--kind needs a value"; shift; kind="$1";;
+            --ref)     [ $# -ge 2 ] || error "--ref needs a value"; shift; ref="$1";;
             *)         body="${body:+$body }$1";;
         esac
         shift
     done
     command -v jq >/dev/null 2>&1 || error "jq is required for cs -msg"
-    case "$target" in ''|*/*) error "cs -msg needs a plain session name as target";; esac
+    case "$target" in ''|.|..|*/*) error "cs -msg needs a plain session name as target";; esac
     local target_dir="$SESSIONS_ROOT/$target"
     is_session_dir "$target_dir" || error "No such session: $target"
     if [ "$target" = "${CLAUDE_SESSION_NAME:-}" ]; then
@@ -101,8 +101,9 @@ _mail_send() {  # target, [--kind|-k KIND] [--ref ID] body
 _mail_print() {  # from_line, to_line, inbox
     _mail_slice "$3" "$1" "$2" | jq -rR '
         fromjson? // empty |
-        (.ts | strflocaltime("%H:%M")) + "  " +
-        (if .from == "" then .actor else .from end) + "  [" + .kind + "]  " + .body
+        (.ts | if type == "number" then strflocaltime("%H:%M") else "--:--" end) + "  " +
+        (if .from == "" then .actor else .from end) + "  [" + .kind + "]  " +
+        (.body | gsub("[\n\r]"; " "))
     ' | _mail_scrub
 }
 
