@@ -4,6 +4,28 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.7.16
+
+### Features
+- **TUI pane-first layouts** — the stacked view gives the list 25% and the panes the rest; the side-by-side view gives the panes column 55%
+- **Header symbol legend** — `● activity  ■ live  * marked  archived` sits beside SESSION in the header's free width (auto-hidden when narrow); the `?` overlay reworded to match, with the archived entry self-demonstrating its dimming
+- **Liveness** — the lock square is teal on every surface and breathes between two teal phases while the picker is active; a statusline heartbeat (`context-pct` mtime, 15-minute window) marks conversations opened outside cs as `■ live · unlocked` in the gutter, masthead count, and preview
+- **Worktree nesting** — `base@task` sessions attach under their base with `├─`/`└─` connectors as indented `@task` rows, inherit the base's time section, and the preview names the lineage both ways (`worktree @task · off base` on the task, a `tasks` list on the base)
+- **Voice** — every `/voice` draft gets a built-in anti-slop pass before delivery
+
+### Fixes
+- Both TUI panes carry two clear columns and title headroom (the to-do separator rule stays full-bleed)
+- Full-size teal lock square replaces the tiny `▪`, which now uniquely means stored secrets; the preview state line uses the same square, and `dormant` shows a heat-colored dot with the word in grey, never teal
+- Deleting a worktree session in the TUI (single or batch) unregisters it from the base repo's git instead of leaving a stale registration; the task branch is preserved
+- Heartbeat probes the path production actually writes (`.cs/local/context-pct`)
+
+### Docs
+- README documents liveness, worktree nesting, and the header legend; heat-dot wording untangled from "live"; the session-locking bullet notes the heartbeat fallback
+- session-layout records `context-pct`'s liveness-heartbeat role
+
+### Other
+- Simplify pass over the release stretch: shared session-removal path, single-sourced `base@task` parsing, borrowed attach-pass collections, typed state-row dot, one wall-clock read per frame, deduplicated test render boilerplate
+
 ## 2026.7.15
 
 A maintenance release: a five-area redundancy audit executed end to end — drifted facts fixed, dead code removed, and five new drift tests so the fixed facts stay fixed.
