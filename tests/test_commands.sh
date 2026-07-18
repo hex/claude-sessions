@@ -417,6 +417,15 @@ run_test test_store_secret_guards_silent_overwrite
 run_test test_store_secret_non_session_warns_and_forbids_file
 run_test test_store_secret_confirms_only_on_success
 run_test test_prose_hygiene_scoring_reports_either_way_and_defers_revision
+test_release_has_code_review_gate() {
+    assert_file_contains "$RELEASE_MD" "Code-Review the Release Range" \
+        "release.md must carry a correctness review step" || return 1
+    assert_file_contains "$RELEASE_MD" "Critical and Important findings are fixed" \
+        "the code-review step must block on Critical/Important findings" || return 1
+    assert_file_contains "$RELEASE_MD" "touches documentation alone" \
+        "the code-review step must state its docs-only skip condition" || return 1
+}
+
 run_test test_release_has_branch_sync_preflight
 run_test test_release_doc_review_has_procedure
 run_test test_release_empty_diff_expected_when_committed
@@ -424,4 +433,5 @@ run_test test_release_handles_empty_prev_tag
 run_test test_release_approval_has_cancel_and_reapproval_loop
 run_test test_release_guards_stray_files_before_add_all
 run_test test_release_verifies_ci_workflow
+run_test test_release_has_code_review_gate
 report_results

@@ -114,6 +114,35 @@ via `git log <PREV_TAG>..HEAD --oneline` (PREV_TAG =
 working-tree diff and that commit range are empty, stop and confirm with the user via
 **AskUserQuestion** whether a zero-change release is intended.
 
+### 4b. Code-Review the Release Range
+
+`/simplify` hunts quality problems and explicitly not correctness bugs; this
+step is the correctness gate. Skip it only when the release range
+touches documentation alone.
+
+Review everything the release ships — the committed range plus any
+working-tree changes:
+
+```bash
+PREV_TAG=$(git tag --list 'v*' --sort=-version:refname | head -1)
+git log "$PREV_TAG"..HEAD --oneline
+```
+
+Invoke the `/code-review` skill via the Skill tool over that range when the
+skill is available. When it is not, run an equivalent adversarial review:
+parallel finder agents over the range diff with a correctness lens (wrong
+paths, inverted conditions, test fixtures that diverge from production
+layouts), then an independent skeptic per finding that tries to refute it —
+only skeptic-confirmed findings count. A green test suite does not catch a
+test whose fixture builds the same wrong path the code probes; that
+fixture-reaches-branch class is what this step exists to catch.
+
+Do not proceed until the Critical and Important findings are fixed (or
+dismissed as false positives, each with a stated reason). Minor findings may
+ship as follow-ups noted in the release notes or the narrative. For an
+unusually large or risky range, suggest the user run `/code-review ultra` —
+it is user-triggered and billed; never attempt to launch it yourself.
+
 ### 5. Run Tests
 
 Run the full test suite to verify nothing is broken before releasing:
