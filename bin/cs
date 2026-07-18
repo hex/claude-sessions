@@ -2701,13 +2701,52 @@ _mail_send() {  # target, [--kind|-k KIND] [--ref ID] body
     info "sent to $target; surfaces at their next turn"
 }
 
+# Shared formatter: print inbox lines from..to as 'HH:MM  sender  [kind]  body'.
+_mail_print() {  # from_line, to_line, inbox
+    _mail_slice "$3" "$1" "$2" | jq -rR '
+        fromjson? // empty |
+        (.ts | strflocaltime("%H:%M")) + "  " +
+        (if .from == "" then .actor else .from end) + "  [" + .kind + "]  " + .body
+    ' | _mail_scrub
+}
+
+_mail_read() {
+    local maildir="$CLAUDE_SESSION_META_DIR/local/mail"
+    local inbox="$maildir/inbox.jsonl"
+    local total seen
+    total=$(_mail_total "$inbox")
+    seen=$(_mail_cursor "$maildir/seen")
+    if [ "$total" -le "$seen" ]; then
+        echo "No unread mail."
+        return 0
+    fi
+    _mail_print $((seen + 1)) "$total" "$inbox"
+    _mail_set_cursor "$maildir/seen" "$total"
+}
+
+_mail_log() {
+    local inbox="$CLAUDE_SESSION_META_DIR/local/mail/inbox.jsonl"
+    local total
+    total=$(_mail_total "$inbox")
+    if [ "$total" -eq 0 ]; then
+        echo "No mail."
+        return 0
+    fi
+    _mail_print 1 "$total" "$inbox"
+}
+
 # Dispatcher. Bare = read own inbox; 'log' = full history; else = send.
 run_mail() {
     local first="${1:-}"
     case "$first" in
-        "")  error "cs -msg: reading arrives in a later task";;
-        log) error "cs -msg log: reading arrives in a later task";;
-        *)   shift; _mail_send "$first" "$@";;
+        "")
+            [ -n "${CLAUDE_SESSION_META_DIR:-}" ] || error "cs -msg reads the current session's mail; run it inside a session"
+            _mail_read;;
+        log)
+            [ -n "${CLAUDE_SESSION_META_DIR:-}" ] || error "cs -msg reads the current session's mail; run it inside a session"
+            _mail_log;;
+        *)
+            shift; _mail_send "$first" "$@";;
     esac
 }
 run_conversations() {

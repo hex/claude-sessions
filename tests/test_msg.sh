@@ -120,4 +120,79 @@ run_test test_task_kind_lands_in_recipient_queue
 run_test test_task_kind_clears_declined_flag
 run_test test_task_kind_rejects_multiline_body
 
+# Read receiver's mail: point the ambient session env at receiver.
+_as_receiver() {
+    CLAUDE_SESSION_NAME="receiver" \
+    CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/receiver" \
+    CLAUDE_SESSION_META_DIR="$CS_SESSIONS_ROOT/receiver/.cs" \
+    "$CS_BIN" "$@"
+}
+
+test_read_prints_unread_then_advances() {
+    "$CS_BIN" -msg receiver "first" >/dev/null 2>&1
+    "$CS_BIN" -msg receiver "second" >/dev/null 2>&1
+    local out; out=$(_as_receiver -msg 2>&1) || return 1
+    assert_output_contains "$out" "first" "first body shown" || return 1
+    assert_output_contains "$out" "second" "second body shown" || return 1
+    assert_output_contains "$out" "sender" "sender attributed" || return 1
+    assert_output_contains "$out" "[text]" "kind tagged" || return 1
+    out=$(_as_receiver -msg 2>&1) || return 1
+    assert_output_contains "$out" "No unread mail" "second read is empty" || return 1
+}
+
+test_log_reprints_everything_without_moving_cursors() {
+    "$CS_BIN" -msg receiver "logged" >/dev/null 2>&1
+    _as_receiver -msg >/dev/null 2>&1 || return 1
+    local out; out=$(_as_receiver -msg log 2>&1) || return 1
+    assert_output_contains "$out" "logged" "log shows read mail" || return 1
+    assert_eq "1" "$(cat "$CS_SESSIONS_ROOT/receiver/.cs/local/mail/seen")" "seen cursor unmoved by log" || return 1
+}
+
+test_read_outside_session_errors() {
+    ! env -u CLAUDE_SESSION_META_DIR "$CS_BIN" -msg >/dev/null 2>&1 || return 1
+}
+
+test_read_strips_control_characters() {
+    "$CS_BIN" -msg receiver "$(printf 'evil \033[2J clear')" >/dev/null 2>&1 || return 1
+    local out; out=$(_as_receiver -msg 2>&1) || return 1
+    case "$out" in *"$(printf '\033')"*) echo "  ESC survived rendering"; return 1;; esac
+    assert_output_contains "$out" "evil" "body otherwise shown" || return 1
+}
+
+test_read_ignores_torn_final_line_until_completed() {
+    "$CS_BIN" -msg receiver "whole" >/dev/null 2>&1
+    printf '{"id":"x","ts":1,"from":"sender","actor":"a","kind":"text","body":"torn' \
+        >> "$CS_SESSIONS_ROOT/receiver/.cs/local/mail/inbox.jsonl"
+    local out; out=$(_as_receiver -msg 2>&1) || return 1
+    assert_output_contains "$out" "whole" "complete line shown" || return 1
+    assert_output_not_contains "$out" "torn" "torn line hidden" || return 1
+    assert_eq "1" "$(cat "$CS_SESSIONS_ROOT/receiver/.cs/local/mail/seen")" "cursor stops before torn line" || return 1
+    printf '","ref":null}\n' >> "$CS_SESSIONS_ROOT/receiver/.cs/local/mail/inbox.jsonl"
+    out=$(_as_receiver -msg 2>&1) || return 1
+    assert_output_contains "$out" "torn" "completed line delivered" || return 1
+}
+
+test_read_survives_corrupt_line_and_big_inbox() {
+    printf 'not json at all\n' >> "$CS_SESSIONS_ROOT/receiver/.cs/local/mail/inbox.jsonl" 2>/dev/null || {
+        mkdir -p "$CS_SESSIONS_ROOT/receiver/.cs/local/mail"
+        printf 'not json at all\n' >> "$CS_SESSIONS_ROOT/receiver/.cs/local/mail/inbox.jsonl"
+    }
+    local i=0
+    while [ "$i" -lt 400 ]; do
+        printf '{"id":"b%s","ts":1,"from":"s","actor":"a","kind":"text","body":"filler message %s padding padding padding padding padding padding padding padding padding padding padding padding padding padding","ref":null}\n' "$i" "$i"
+        i=$((i + 1))
+    done >> "$CS_SESSIONS_ROOT/receiver/.cs/local/mail/inbox.jsonl"
+    local out rc=0
+    out=$(_as_receiver -msg 2>&1) || rc=$?
+    assert_eq "0" "$rc" "big inbox read exits 0 (no SIGPIPE 141)" || return 1
+    assert_output_contains "$out" "filler message 399" "last message present" || return 1
+}
+
+run_test test_read_prints_unread_then_advances
+run_test test_log_reprints_everything_without_moving_cursors
+run_test test_read_outside_session_errors
+run_test test_read_strips_control_characters
+run_test test_read_ignores_torn_final_line_until_completed
+run_test test_read_survives_corrupt_line_and_big_inbox
+
 report_results
