@@ -386,7 +386,8 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
 
     // Inline symbol legend in the SESSION column's free width (wide headers
     // only): the glyphs the rows actually use, keyed where the symbols live.
-    // Right-aligned toward CREATED so it reads as annotation, not a column.
+    // A fixed gap after the label keeps it beside SESSION, reading as
+    // annotation rather than a column of its own.
     let session_cell = || -> Cell<'static> {
         let mut spans = vec![Span::styled(
             "SESSION".to_string(),
@@ -411,7 +412,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
         let name_col_w = app.column_widths.first().copied().unwrap_or(0) as usize;
         // Render only when the legend keeps clear air on both sides.
         if name_col_w >= used + 4 + legend_w + 2 {
-            spans.push(Span::raw(" ".repeat(name_col_w - used - legend_w - 2)));
+            spans.push(Span::raw("    "));
             for (i, (glyph, color, label)) in legend.iter().enumerate() {
                 if i > 0 {
                     spans.push(Span::raw("   "));
@@ -2509,6 +2510,14 @@ mod tests {
         assert!(
             s < l && l < c,
             "the legend should sit between SESSION and CREATED: {header:?}"
+        );
+        // Left-aligned: the legend starts a fixed gap after the SESSION
+        // label instead of being pushed toward CREATED.
+        let s_col = header[..s].chars().count();
+        let l_col = header[..l].chars().count();
+        assert!(
+            l_col - s_col <= "SESSION".len() + 8,
+            "the legend should hug SESSION (label col {s_col}, legend col {l_col}): {header:?}"
         );
     }
 
