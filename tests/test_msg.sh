@@ -173,10 +173,8 @@ test_read_ignores_torn_final_line_until_completed() {
 }
 
 test_read_survives_corrupt_line_and_big_inbox() {
-    printf 'not json at all\n' >> "$CS_SESSIONS_ROOT/receiver/.cs/local/mail/inbox.jsonl" 2>/dev/null || {
-        mkdir -p "$CS_SESSIONS_ROOT/receiver/.cs/local/mail"
-        printf 'not json at all\n' >> "$CS_SESSIONS_ROOT/receiver/.cs/local/mail/inbox.jsonl"
-    }
+    mkdir -p "$CS_SESSIONS_ROOT/receiver/.cs/local/mail"
+    printf 'not json at all\n' >> "$CS_SESSIONS_ROOT/receiver/.cs/local/mail/inbox.jsonl"
     local i=0
     while [ "$i" -lt 400 ]; do
         printf '{"id":"b%s","ts":1,"from":"s","actor":"a","kind":"text","body":"filler message %s padding padding padding padding padding padding padding padding padding padding padding padding padding padding","ref":null}\n' "$i" "$i"
