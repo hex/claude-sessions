@@ -210,7 +210,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     match choose_layout(chunks[1], app.show_preview) {
         PaneLayout::SideBySide => {
             app.request_preview();
-            let cols = Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
+            let cols = Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)])
                 .split(chunks[1]);
             render_table(app, frame, cols[0], true);
             let right_rows =
@@ -222,9 +222,9 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         PaneLayout::Stacked => {
             app.request_preview();
             let rows = Layout::vertical([
-                Constraint::Percentage(50),
+                Constraint::Percentage(25),
+                Constraint::Percentage(45),
                 Constraint::Percentage(30),
-                Constraint::Percentage(20),
             ])
             .split(chunks[1]);
             render_table(app, frame, rows[0], true);
@@ -334,6 +334,31 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
     if show_github { visible_cols.push(SortColumn::Github); }
     app.visible_sort_columns = visible_cols;
 
+    let mut widths: Vec<Constraint> = vec![
+        Constraint::Min(20),    // Session
+        Constraint::Length(10), // Created (date)
+        Constraint::Length(6),  // Age (relative)
+    ];
+    if show_secrets { widths.push(Constraint::Length(9)); }
+    if show_todos { widths.push(Constraint::Length(7)); }
+    if show_github { widths.push(Constraint::Min(15)); }
+
+    // Resolve column geometry with ratatui's own solver so mouse hit-testing
+    // never drifts from where the Table actually draws. (Drift between a
+    // hand-rolled approximation and the real layout is what made the old
+    // dividers slice through cells.) The Table reserves SELECT_WIDTH at the left
+    // for the selection symbol, then lays the columns out across the remainder.
+    let inner = area; // no border insets — the table is borderless
+    let cols_area = Rect {
+        x: inner.x + SELECT_WIDTH,
+        width: inner.width.saturating_sub(SELECT_WIDTH),
+        ..inner
+    };
+    let col_rects = Layout::horizontal(widths.clone())
+        .spacing(COL_SPACING)
+        .split(cols_area);
+    app.column_widths = col_rects.iter().map(|r| r.width).collect();
+
     let sort_indicator = |col: SortColumn| -> &'static str {
         if app.sort_col != col {
             return "";
@@ -359,8 +384,52 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
         Cell::from(Line::from(spans))
     };
 
+    // Inline symbol legend in the SESSION column's free width (wide headers
+    // only): the glyphs the rows actually use, keyed where the symbols live.
+    // Right-aligned toward CREATED so it reads as annotation, not a column.
+    let session_cell = || -> Cell<'static> {
+        let mut spans = vec![Span::styled(
+            "SESSION".to_string(),
+            Style::default().fg(p.mut_).add_modifier(Modifier::BOLD),
+        )];
+        let indicator = sort_indicator(SortColumn::Name);
+        if !indicator.is_empty() {
+            spans.push(Span::styled(indicator, Style::default().fg(p.rust)));
+        }
+        let legend: [(&str, Color, &str); 4] = [
+            ("\u{25cf}", p.green, "recency"),
+            ("\u{25aa}", p.ember, "locked"),
+            ("*", p.gold, "marked"),
+            ("\u{2500}", p.comment, "archived"),
+        ];
+        let legend_w: usize = legend
+            .iter()
+            .map(|(g, _, l)| g.chars().count() + 1 + l.len())
+            .sum::<usize>()
+            + 3 * (legend.len() - 1);
+        let used = "SESSION".len() + indicator.chars().count();
+        let name_col_w = app.column_widths.first().copied().unwrap_or(0) as usize;
+        // Render only when the legend keeps clear air on both sides.
+        if name_col_w >= used + 4 + legend_w + 2 {
+            spans.push(Span::raw(" ".repeat(name_col_w - used - legend_w - 2)));
+            for (i, (glyph, color, label)) in legend.iter().enumerate() {
+                if i > 0 {
+                    spans.push(Span::raw("   "));
+                }
+                let mut style = Style::default().fg(*color);
+                if *glyph == "*" {
+                    style = style.add_modifier(Modifier::BOLD);
+                }
+                spans.push(Span::styled(glyph.to_string(), style));
+                spans.push(Span::raw(" "));
+                spans.push(Span::styled(label.to_string(), Style::default().fg(p.faint)));
+            }
+        }
+        Cell::from(Line::from(spans))
+    };
+
     let mut header_cells = vec![
-        header_cell("SESSION", SortColumn::Name),
+        session_cell(),
         header_cell("CREATED", SortColumn::Created),
         header_cell("AGE", SortColumn::Modified),
     ];
@@ -676,31 +745,6 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             }
         })
         .collect();
-
-    let mut widths: Vec<Constraint> = vec![
-        Constraint::Min(20),    // Session
-        Constraint::Length(10), // Created (date)
-        Constraint::Length(6),  // Age (relative)
-    ];
-    if show_secrets { widths.push(Constraint::Length(9)); }
-    if show_todos { widths.push(Constraint::Length(7)); }
-    if show_github { widths.push(Constraint::Min(15)); }
-
-    // Resolve column geometry with ratatui's own solver so mouse hit-testing
-    // never drifts from where the Table actually draws. (Drift between a
-    // hand-rolled approximation and the real layout is what made the old
-    // dividers slice through cells.) The Table reserves SELECT_WIDTH at the left
-    // for the selection symbol, then lays the columns out across the remainder.
-    let inner = area; // no border insets — the table is borderless
-    let cols_area = Rect {
-        x: inner.x + SELECT_WIDTH,
-        width: inner.width.saturating_sub(SELECT_WIDTH),
-        ..inner
-    };
-    let col_rects = Layout::horizontal(widths.clone())
-        .spacing(COL_SPACING)
-        .split(cols_area);
-    app.column_widths = col_rects.iter().map(|r| r.width).collect();
 
     let table = Table::new(rows, widths)
         .header(header)
@@ -1373,9 +1417,9 @@ fn card_frame(buf: &mut Buffer, area: Rect, title: &str, side: Color, p: Palette
 
 fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
     let p = app.theme;
-    // One clear column inside each border so the content never touches the
+    // Two clear columns inside each border so the content never touches the
     // frame; the blank lead line below gives the title row headroom.
-    let inner = area.inner(Margin::new(2, 1));
+    let inner = area.inner(Margin::new(3, 1));
 
     let session = match app.selected_session() {
         Some(s) => s,
@@ -1516,11 +1560,19 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
     // top border always carries the HERO ramp regardless of focus.
     let side = if focused { p.strong } else { p.soft };
     let inner = area.inner(Margin::new(1, 1));
+    // Input and list rows sit one clear column inside the frame on each side
+    // (their own leading-space spans add the second); the separator rule keeps
+    // full bleed to the border.
+    let pad_h = |r: Rect| Rect {
+        x: r.x + 1,
+        width: r.width.saturating_sub(2),
+        ..r
+    };
 
     // Input block on top (grows with wrapped text, capped), a full-width
     // separator rule, then the task list. The input's height must be known
     // before the layout splits, so its lines are built first.
-    let input_inner = inner.width.saturating_sub(2) as usize; // 1-col padding each side
+    let input_inner = inner.width.saturating_sub(4) as usize; // rect inset + pad column each side
     let input_lines: Vec<Line> = if app.notes_focus == NotesFocus::Editing {
         vec![Line::from(Span::styled(
             format!(" editing {} \u{b7} Enter saves \u{b7} Esc cancels", app.notes_selected + 1),
@@ -1565,19 +1617,20 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
     let input_height = input_lines.len().max(1) as u16;
 
     let rows = Layout::vertical([
+        Constraint::Length(1), // headroom under the title
         Constraint::Length(input_height),
         Constraint::Length(1),
         Constraint::Min(0),
     ])
     .split(inner);
 
-    frame.render_widget(Paragraph::new(input_lines), rows[0]);
+    frame.render_widget(Paragraph::new(input_lines), pad_h(rows[1]));
 
     // Separator between the input and the list, matching the panel border.
-    let rule = "\u{2500}".repeat(rows[1].width as usize);
+    let rule = "\u{2500}".repeat(rows[2].width as usize);
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(rule, Style::default().fg(side)))),
-        rows[1],
+        rows[2],
     );
 
     // Numbered list of queued tasks, each shown in full: long tasks wrap onto
@@ -1596,7 +1649,7 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
             .map(|s| crate::session::queue_active(&s.name))
             .unwrap_or(false);
 
-    let inner_cols = rows[2].width as usize;
+    let inner_cols = pad_h(rows[3]).width as usize;
     let list_lines: Vec<Line> = if tasks.is_empty() {
         vec![Line::from(Span::styled(
             " (no queued tasks)",
@@ -1667,7 +1720,7 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
             .collect()
     };
     let list = Paragraph::new(list_lines);
-    frame.render_widget(list, rows[2]);
+    frame.render_widget(list, pad_h(rows[3]));
 
     card_frame(frame.buffer_mut(), area, "to-do", side, p);
 }
@@ -2008,7 +2061,10 @@ mod tests {
             .map(row_text)
             .find(|r| r.contains("QUEUE"))
             .expect("QUEUE column header should render when a session has a queued task");
-        let queue_x = header_row.find("QUEUE").unwrap() as u16;
+        // Char count, not byte offset: the header's inline legend carries
+        // multibyte glyphs before QUEUE, so bytes overshoot the column.
+        let queue_byte = header_row.find("QUEUE").unwrap();
+        let queue_x = header_row[..queue_byte].chars().count() as u16;
 
         let divider_y = (0..24u16)
             .find(|&y| row_text(y).contains("── Today \u{b7}"))
@@ -2404,9 +2460,9 @@ mod tests {
             .position(|c| c == '\u{2502}')
             .expect("the meta row should start at the card border");
         let after_border: String = created_row.chars().skip(border_x + 1).take(2).collect();
-        assert!(
-            after_border.starts_with(' '),
-            "content must not touch the left border: {created_row:?}"
+        assert_eq!(
+            after_border, "  ",
+            "content should sit two clear columns inside the left border: {created_row:?}"
         );
 
         // Vertical headroom: the first row under the card's title border is
@@ -2423,6 +2479,162 @@ mod tests {
             headroom.is_empty(),
             "row under the preview title should be blank, got: {:?}",
             rows[title_y + 1]
+        );
+    }
+
+    #[test]
+    fn wide_header_carries_the_symbol_legend_between_session_and_created() {
+        let mut app = App::new(one_session());
+        app.theme = Palette::dark();
+        app.show_preview = true;
+
+        let backend = TestBackend::new(200, 50);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let rows: Vec<String> = (0..buf.area.height)
+            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
+            .collect();
+
+        let header = rows
+            .iter()
+            .find(|r| r.contains("SESSION"))
+            .expect("table header should render");
+        for label in ["recency", "locked", "marked", "archived"] {
+            assert!(header.contains(label), "header legend should name {label}: {header:?}");
+        }
+        let s = header.find("SESSION").unwrap();
+        let l = header.find("recency").unwrap();
+        let c = header.find("CREATED").unwrap();
+        assert!(
+            s < l && l < c,
+            "the legend should sit between SESSION and CREATED: {header:?}"
+        );
+    }
+
+    #[test]
+    fn narrow_header_omits_the_inline_legend() {
+        let mut app = App::new(one_session());
+        app.theme = Palette::dark();
+        app.show_preview = true;
+
+        let backend = TestBackend::new(60, 50);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let rows: Vec<String> = (0..buf.area.height)
+            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
+            .collect();
+
+        let header = rows
+            .iter()
+            .find(|r| r.contains("SESSION"))
+            .expect("table header should render");
+        assert!(
+            !header.contains("recency"),
+            "a narrow header has no room for the legend: {header:?}"
+        );
+    }
+
+    #[test]
+    fn todo_pane_content_is_padded_from_the_border() {
+        let mut app = App::new(one_session());
+        app.theme = Palette::dark();
+        app.show_preview = true;
+
+        let backend = TestBackend::new(90, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let rows: Vec<String> = (0..buf.area.height)
+            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
+            .collect();
+
+        // Horizontal padding: the input placeholder sits two clear columns
+        // inside the card's left border, matching the preview pane.
+        let input_row = rows
+            .iter()
+            .find(|r| r.contains("Tab to add"))
+            .expect("to-do input placeholder should render");
+        let border_x = input_row
+            .chars()
+            .position(|c| c == '\u{2502}')
+            .expect("the input row should start at the card border");
+        let after_border: String = input_row.chars().skip(border_x + 1).take(2).collect();
+        assert_eq!(
+            after_border, "  ",
+            "to-do content should sit two clear columns inside the left border: {input_row:?}"
+        );
+
+        // Vertical headroom: the row under the to-do title is blank.
+        let title_y = rows
+            .iter()
+            .position(|r| r.contains("to-do"))
+            .expect("to-do card title should render");
+        let headroom: String = rows[title_y + 1]
+            .chars()
+            .filter(|c| c.is_alphanumeric())
+            .collect();
+        assert!(
+            headroom.is_empty(),
+            "row under the to-do title should be blank, got: {:?}",
+            rows[title_y + 1]
+        );
+    }
+
+    #[test]
+    fn stacked_list_is_shorter_than_the_preview_pane() {
+        let mut app = App::new(one_session());
+        app.theme = Palette::dark();
+        app.show_preview = true;
+
+        let backend = TestBackend::new(80, 50);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let rows: Vec<String> = (0..buf.area.height)
+            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
+            .collect();
+
+        let y_preview = rows
+            .iter()
+            .position(|r| r.contains("preview"))
+            .expect("preview card should render in stacked layout");
+        let y_todo = rows
+            .iter()
+            .position(|r| r.contains("to-do"))
+            .expect("to-do card should render in stacked layout");
+        let list_rows = y_preview.saturating_sub(2); // content starts under the 2-row masthead
+        let preview_rows = y_todo - y_preview;
+        assert!(
+            list_rows < preview_rows,
+            "the listing ({list_rows} rows) should give up height to the preview pane ({preview_rows} rows)"
+        );
+    }
+
+    #[test]
+    fn side_by_side_gives_the_panes_more_width_than_the_table() {
+        let mut app = App::new(one_session());
+        app.theme = Palette::dark();
+        app.show_preview = true;
+
+        let backend = TestBackend::new(200, 50);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let rows: Vec<String> = (0..buf.area.height)
+            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
+            .collect();
+
+        let title_row = rows
+            .iter()
+            .find(|r| r.contains("preview"))
+            .expect("preview card should render in side-by-side layout");
+        let byte = title_row.find("preview").unwrap();
+        let col = title_row[..byte].chars().count();
+        assert!(
+            col < 100,
+            "the panes column should start left of the midline (preview title at col {col})"
         );
     }
 
