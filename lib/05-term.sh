@@ -65,6 +65,14 @@ info() {
     echo -e "${GREEN}$1${NC}"
 }
 
+# Strip leading and trailing whitespace from a string; prints the result.
+_trim() {  # text
+    local s="$1"
+    s="${s#"${s%%[![:space:]]*}"}"
+    s="${s%"${s##*[![:space:]]}"}"
+    printf '%s' "$s"
+}
+
 # Detect the outer terminal, even when running inside tmux.
 # tmux overrides TERM_PROGRAM, so we check LC_TERMINAL and ITERM_SESSION_ID as fallbacks.
 _detect_terminal() {

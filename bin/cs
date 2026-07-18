@@ -152,6 +152,14 @@ info() {
     echo -e "${GREEN}$1${NC}"
 }
 
+# Strip leading and trailing whitespace from a string; prints the result.
+_trim() {  # text
+    local s="$1"
+    s="${s#"${s%%[![:space:]]*}"}"
+    s="${s%"${s##*[![:space:]]}"}"
+    printf '%s' "$s"
+}
+
 # Detect the outer terminal, even when running inside tmux.
 # tmux overrides TERM_PROGRAM, so we check LC_TERMINAL and ITERM_SESSION_ID as fallbacks.
 _detect_terminal() {
@@ -2662,8 +2670,7 @@ _mail_send() {  # target, [--kind|-k KIND] [--ref ID] body
     if [ -n "$ref" ] && [ "$kind" != "result" ]; then
         error "--ref is only valid with --kind result"
     fi
-    body="${body#"${body%%[![:space:]]*}"}"  # ltrim
-    body="${body%"${body##*[![:space:]]}"}"  # rtrim
+    body="$(_trim "$body")"
     [ -n "$body" ] || error "cs -msg needs a non-empty body"
     local bytes
     bytes=$(LC_ALL=C printf '%s' "$body" | wc -c | tr -d '[:space:]')
@@ -2740,12 +2747,9 @@ _mail_log() {
 run_mail() {
     local first="${1:-}"
     case "$first" in
-        "")
+        ""|log)
             [ -n "${CLAUDE_SESSION_META_DIR:-}" ] || error "cs -msg reads the current session's mail; run it inside a session"
-            _mail_read;;
-        log)
-            [ -n "${CLAUDE_SESSION_META_DIR:-}" ] || error "cs -msg reads the current session's mail; run it inside a session"
-            _mail_log;;
+            if [ "$first" = "log" ]; then _mail_log; else _mail_read; fi;;
         *)
             shift; _mail_send "$first" "$@";;
     esac
@@ -2805,8 +2809,7 @@ _queue_set_state() {  # atomic single-word write; "" removes the file
 
 _queue_add() {  # qdir, text
     local qdir="$1" text="$2"
-    text="${text#"${text%%[![:space:]]*}"}"  # ltrim
-    text="${text%"${text##*[![:space:]]}"}"  # rtrim
+    text="$(_trim "$text")"
     [ -n "$text" ] || { error "cs -queue add needs a non-empty task"; }
     mkdir -p "$qdir"
     printf '%s\n' "$text" >> "$qdir/queue"

@@ -10,8 +10,7 @@ _queue_set_state() {  # atomic single-word write; "" removes the file
 
 _queue_add() {  # qdir, text
     local qdir="$1" text="$2"
-    text="${text#"${text%%[![:space:]]*}"}"  # ltrim
-    text="${text%"${text##*[![:space:]]}"}"  # rtrim
+    text="$(_trim "$text")"
     [ -n "$text" ] || { error "cs -queue add needs a non-empty task"; }
     mkdir -p "$qdir"
     printf '%s\n' "$text" >> "$qdir/queue"

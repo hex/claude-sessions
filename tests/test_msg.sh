@@ -13,8 +13,8 @@ setup() {
     export CLAUDE_SESSION_NAME="sender"
     export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/sender"
     export CLAUDE_SESSION_META_DIR="$CLAUDE_SESSION_DIR/.cs"
-    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
-    mkdir -p "$CS_SESSIONS_ROOT/receiver/.cs/local"
+    create_test_session sender >/dev/null
+    create_test_session receiver >/dev/null
 }
 teardown() {
     [ -n "${TEST_TMPDIR:-}" ] && [ -d "$TEST_TMPDIR" ] && rm -rf "$TEST_TMPDIR"
@@ -134,12 +134,17 @@ run_test test_task_kind_lands_in_recipient_queue
 run_test test_task_kind_clears_declined_flag
 run_test test_task_kind_rejects_multiline_body
 
-# Read receiver's mail: point the ambient session env at receiver.
-_as_receiver() {
+# Run any command with the ambient session env pointed at receiver.
+_receiver_env() {
     CLAUDE_SESSION_NAME="receiver" \
     CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/receiver" \
     CLAUDE_SESSION_META_DIR="$CS_SESSIONS_ROOT/receiver/.cs" \
-    "$CS_BIN" "$@"
+    "$@"
+}
+
+# Read receiver's mail through the cs binary.
+_as_receiver() {
+    _receiver_env "$CS_BIN" "$@"
 }
 
 test_read_prints_unread_then_advances() {
@@ -208,11 +213,7 @@ run_test test_read_ignores_torn_final_line_until_completed
 run_test test_read_survives_corrupt_line_and_big_inbox
 
 _prompt_as_receiver() {  # prompt-text
-    printf '{"prompt": "%s"}' "$1" | \
-    CLAUDE_SESSION_NAME="receiver" \
-    CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/receiver" \
-    CLAUDE_SESSION_META_DIR="$CS_SESSIONS_ROOT/receiver/.cs" \
-    bash "$HOOKS_DIR/scope-prompt.sh"
+    printf '{"prompt": "%s"}' "$1" | _receiver_env bash "$HOOKS_DIR/scope-prompt.sh"
 }
 
 test_digest_notify_inline_and_text_counted() {
@@ -251,11 +252,7 @@ test_session_start_hook_also_delivers() {
     "$CS_BIN" -msg receiver -k notify "seen at start" >/dev/null 2>&1
     local out
     out=$(printf '{"hook_event_name":"SessionStart","source":"startup"}' | \
-        CLAUDE_SESSION_NAME="receiver" \
-        CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/receiver" \
-        CLAUDE_SESSION_META_DIR="$CS_SESSIONS_ROOT/receiver/.cs" \
-        CS_SESSIONS_ROOT="$CS_SESSIONS_ROOT" \
-        bash "$HOOKS_DIR/session-start.sh") || return 1
+        _receiver_env bash "$HOOKS_DIR/session-start.sh") || return 1
     assert_output_contains "$out" "seen at start" "session-start delivers mail digest" || return 1
 }
 

@@ -41,7 +41,7 @@ _build_digest() {  # meta_local_dir
     seen=$(cat "$qdir/notifications.seen" 2>/dev/null | tr -d '[:space:]') || true
     case "$seen" in ''|*[!0-9]*) seen=0;; esac
     [ "$total" -gt "$seen" ] || return 0
-    DIGEST=$(tail -n +$((seen + 1)) "$inbox" 2>/dev/null | jq -rRs '
+    DIGEST=$(awk -v a=$((seen + 1)) -v b="$total" 'NR>=a && NR<=b' "$inbox" 2>/dev/null | jq -rRs '
         [split("\n")[] | select(length > 0) | (fromjson? // empty)] as $e |
         ($e | map(select(.event == "task_done")) | length) as $done |
         ($e | map(select(.event == "breaker_tripped")) | .[-1]) as $trip |

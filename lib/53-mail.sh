@@ -58,8 +58,7 @@ _mail_send() {  # target, [--kind|-k KIND] [--ref ID] body
     if [ -n "$ref" ] && [ "$kind" != "result" ]; then
         error "--ref is only valid with --kind result"
     fi
-    body="${body#"${body%%[![:space:]]*}"}"  # ltrim
-    body="${body%"${body##*[![:space:]]}"}"  # rtrim
+    body="$(_trim "$body")"
     [ -n "$body" ] || error "cs -msg needs a non-empty body"
     local bytes
     bytes=$(LC_ALL=C printf '%s' "$body" | wc -c | tr -d '[:space:]')
@@ -136,12 +135,9 @@ _mail_log() {
 run_mail() {
     local first="${1:-}"
     case "$first" in
-        "")
+        ""|log)
             [ -n "${CLAUDE_SESSION_META_DIR:-}" ] || error "cs -msg reads the current session's mail; run it inside a session"
-            _mail_read;;
-        log)
-            [ -n "${CLAUDE_SESSION_META_DIR:-}" ] || error "cs -msg reads the current session's mail; run it inside a session"
-            _mail_log;;
+            if [ "$first" = "log" ]; then _mail_log; else _mail_read; fi;;
         *)
             shift; _mail_send "$first" "$@";;
     esac
