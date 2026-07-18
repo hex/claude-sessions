@@ -82,7 +82,7 @@ const SELECT_BAR: &str = "\u{258c}";
 /// follows the animation heartbeat, so an idle picker freezes on steady
 /// teal instead of pulsing unattended.
 fn lock_square_color(p: theme::Palette, blinking: bool, now_ms: u128) -> Color {
-    const PERIOD_MS: u128 = 1200;
+    const PERIOD_MS: u128 = 2400;
     if blinking && (now_ms % PERIOD_MS) >= PERIOD_MS / 2 {
         let (r, g, b) = theme::lerp_rgb(theme::rgb_of(p.teal), (255, 255, 255), 0.45);
         Color::Rgb(r, g, b)
@@ -3384,13 +3384,14 @@ mod tests {
     #[test]
     fn lock_square_blinks_between_teal_phases_only_while_animating() {
         let p = Palette::dark();
-        // First half of the period: base teal.
+        // First half of the 2.4s period: base teal.
         assert_eq!(lock_square_color(p, true, 0), p.teal);
+        assert_eq!(lock_square_color(p, true, 1100), p.teal);
         // Second half: the lightened phase (dark teal 45,212,191 lifted 45%
         // toward white — known-good literal, not recomputed).
-        assert_eq!(lock_square_color(p, true, 700), Color::Rgb(139, 231, 219));
+        assert_eq!(lock_square_color(p, true, 1300), Color::Rgb(139, 231, 219));
         // Idle (heartbeat paused): steady teal in any phase.
-        assert_eq!(lock_square_color(p, false, 700), p.teal);
+        assert_eq!(lock_square_color(p, false, 1300), p.teal);
     }
 
     #[test]
