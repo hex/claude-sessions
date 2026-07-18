@@ -397,9 +397,12 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
         if !indicator.is_empty() {
             spans.push(Span::styled(indicator, Style::default().fg(p.rust)));
         }
+        // Compact labels: the SESSION column is ~50 cols once the preview
+        // pane takes its 55% share, so every character here is rationed.
+        // The `?` overlay carries the long-form wording.
         let legend: [(&str, Color, &str); 4] = [
-            ("\u{25cf}", p.green, "recency"),
-            ("\u{25aa}", p.ember, "locked (live now)"),
+            ("\u{25cf}", p.green, "recent"),
+            ("\u{25aa}", p.ember, "live"),
             ("*", p.gold, "marked"),
             ("\u{2500}", p.comment, "archived"),
         ];
@@ -407,15 +410,15 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
             .iter()
             .map(|(g, _, l)| g.chars().count() + 1 + l.len())
             .sum::<usize>()
-            + 3 * (legend.len() - 1);
+            + 2 * (legend.len() - 1);
         let used = "SESSION".len() + indicator.chars().count();
         let name_col_w = app.column_widths.first().copied().unwrap_or(0) as usize;
         // Render only when the legend keeps clear air on both sides.
-        if name_col_w >= used + 4 + legend_w + 2 {
-            spans.push(Span::raw("    "));
+        if name_col_w >= used + 3 + legend_w + 1 {
+            spans.push(Span::raw("   "));
             for (i, (glyph, color, label)) in legend.iter().enumerate() {
                 if i > 0 {
-                    spans.push(Span::raw("   "));
+                    spans.push(Span::raw("  "));
                 }
                 let mut style = Style::default().fg(*color);
                 if *glyph == "*" {
@@ -2501,15 +2504,15 @@ mod tests {
             .iter()
             .find(|r| r.contains("SESSION"))
             .expect("table header should render");
-        for label in ["recency", "locked", "marked", "archived"] {
+        for label in ["recent", "marked", "archived"] {
             assert!(header.contains(label), "header legend should name {label}: {header:?}");
         }
         assert!(
-            header.contains("live now"),
-            "the locked entry should say the square means live now: {header:?}"
+            header.contains("\u{25aa} live"),
+            "the lock square should be keyed as live: {header:?}"
         );
         let s = header.find("SESSION").unwrap();
-        let l = header.find("recency").unwrap();
+        let l = header.find("recent").unwrap();
         let c = header.find("CREATED").unwrap();
         assert!(
             s < l && l < c,
@@ -2544,7 +2547,7 @@ mod tests {
             .find(|r| r.contains("SESSION"))
             .expect("table header should render");
         assert!(
-            !header.contains("recency"),
+            !header.contains("recent"),
             "a narrow header has no room for the legend: {header:?}"
         );
     }
@@ -3272,13 +3275,14 @@ mod tests {
                     .collect::<String>()
             })
             .collect();
+        // Exclude the header row: its inline legend also says "recent"/"live".
         let locked_y = rows
             .iter()
-            .position(|r| r.contains("locked"))
+            .position(|r| r.contains("locked") && !r.contains("SESSION"))
             .expect("the locked session row should render") as u16;
         let recent_y = rows
             .iter()
-            .position(|r| r.contains("recent"))
+            .position(|r| r.contains("recent") && !r.contains("SESSION"))
             .expect("the recent session row should render") as u16;
         let gutter_x = app.table_area.x + SELECT_WIDTH;
         let locked_gutter = buf
