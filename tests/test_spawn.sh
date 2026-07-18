@@ -33,7 +33,8 @@ setup() {
 printf '%s\n' "$*" >> "$FAKE_TMUX_DIR/log"
 case "$1" in
     has-session)  [ -f "$FAKE_TMUX_DIR/session-exists" ]; exit $? ;;
-    new-session)  if [ -f "$FAKE_TMUX_DIR/race" ]; then exit 1; fi
+    new-session)  # real tmux rejects a duplicate -s name; model that too
+                  if [ -f "$FAKE_TMUX_DIR/race" ] || [ -f "$FAKE_TMUX_DIR/session-exists" ]; then exit 1; fi
                   touch "$FAKE_TMUX_DIR/session-exists"
                   case "$*" in *" -P "*) echo '@0';; esac ;;
     set-option)   printf '1\n' > "$FAKE_TMUX_DIR/managed" ;;

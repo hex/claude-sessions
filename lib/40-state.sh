@@ -118,6 +118,7 @@ _exec_fresh_rebind() {
     local session_dir="$1"
     local reason="${2:-declined-resume}"
     local handoff="${3:-}"
+    local spawn_kick="${4:-}"
     local session_name
     session_name=$(basename "$session_dir")
     local old_uuid
@@ -130,9 +131,9 @@ _exec_fresh_rebind() {
     session_color=$(_read_local_state "$session_dir/.cs/local/state" claude_session_color)
     local color_arg=""
     [ -n "$session_color" ] && color_arg="/color $session_color"
-    # A spawn kick (exported by launch_claude_code) outranks the color
-    # re-apply for this launch; both ride claude's single prompt slot.
-    local launch_prompt="${CS_SPAWN_KICK:-$color_arg}"
+    # A spawn kick outranks the color re-apply for this launch; both ride
+    # claude's single prompt slot.
+    local launch_prompt="${spawn_kick:-$color_arg}"
     export CS_CLAUDE_SESSION_ID="$new_uuid"
     export CS_FRESH_REBIND=1
     # shellcheck disable=SC2086

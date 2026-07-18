@@ -41,14 +41,13 @@ _spawn_precheck() {  # name
 _spawn_window() {  # name
     local name="$1" cmd wid
     cmd="$(_sq "$(_cs_self)") $(_sq "$name")"
-    if ! _tmux has-session -t =cs 2>/dev/null; then
-        if wid=$(_tmux new-session -d -s cs -n "$name" -P -F '#{window_id}' "$cmd" 2>/dev/null); then
-            _tmux set-option -t =cs @cs_managed 1
-            info "spawned $name in tmux session cs (window $wid). Attach: tmux attach -t cs"
-            return 0
-        fi
-        # A concurrent spawner won the new-session race: fall through and add
-        # a window to the session it just created.
+    # Try to create the cs session outright: tmux rejects a duplicate -s name,
+    # so "already exists" and "a concurrent spawner just created it" collapse
+    # into the same fallthrough to new-window.
+    if wid=$(_tmux new-session -d -s cs -n "$name" -P -F '#{window_id}' "$cmd" 2>/dev/null); then
+        _tmux set-option -t =cs @cs_managed 1
+        info "spawned $name in tmux session cs (window $wid). Attach: tmux attach -t cs"
+        return 0
     fi
     wid=$(_tmux new-window -t =cs -n "$name" -P -F '#{window_id}' "$cmd") \
         || error "tmux new-window failed for $name"

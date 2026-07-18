@@ -121,8 +121,7 @@ launch_claude_code() {
                 _n=$((_n + 1))
             done < "$_seed"
             if [ "$_n" -gt 0 ]; then
-                printf 'armed\n' > "$session_dir/.cs/local/queue.state.tmp" \
-                    && mv "$session_dir/.cs/local/queue.state.tmp" "$session_dir/.cs/local/queue.state"
+                _queue_set_state "$session_dir/.cs/local" armed
                 if [ -n "$_spawner" ]; then
                     printf '%s\n' "$_spawner" > "$session_dir/.cs/local/spawned-by"
                     spawn_kick="Spawned by $_spawner. Your walk-away queue is armed with $_n task(s); begin. Send results with: cs -msg $_spawner -k result \"...\""
@@ -136,7 +135,6 @@ launch_claude_code() {
     # The kick prompt takes claude's single positional-prompt slot, displacing
     # the /color re-apply for this one launch (color returns next open).
     local launch_prompt="${spawn_kick:-$color_arg}"
-    export CS_SPAWN_KICK="$spawn_kick"
 
     # Status indicator
     local status_icon status_text
@@ -249,7 +247,7 @@ launch_claude_code() {
                     mkdir -p "$session_dir/.cs/local"
                     printf '%s\n' "$(basename "$pending_handoff")" > "$session_dir/.cs/local/pending-handoff"
                     echo ""
-                    _exec_fresh_rebind "$session_dir" handoff "$(basename "$pending_handoff")"
+                    _exec_fresh_rebind "$session_dir" handoff "$(basename "$pending_handoff")" "$spawn_kick"
                 fi
                 # r without a pending handoff was never offered: treat as the
                 # default resume answer.
@@ -288,7 +286,7 @@ launch_claude_code() {
             # the same failure).
             echo -e "${DIM}No previous conversation found. Starting fresh...${NC}"
             echo ""
-            _exec_fresh_rebind "$session_dir" resume-failed
+            _exec_fresh_rebind "$session_dir" resume-failed "" "$spawn_kick"
         fi
         exit $rc
     else
@@ -305,7 +303,7 @@ launch_claude_code() {
             # shellcheck disable=SC2086
             exec $CLAUDE_CODE_BIN --name "$session_name" --session-id "$claude_session_id" ${launch_prompt:+"$launch_prompt"}
         elif [ "$is_new" = "false" ]; then
-            _exec_fresh_rebind "$session_dir" declined-resume
+            _exec_fresh_rebind "$session_dir" declined-resume "" "$spawn_kick"
         else
             # shellcheck disable=SC2086
             exec $CLAUDE_CODE_BIN --name "$session_name" ${launch_prompt:+"$launch_prompt"}
