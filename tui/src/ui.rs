@@ -400,15 +400,24 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
         // Compact labels: the SESSION column is ~50 cols once the preview
         // pane takes its 55% share, so every character here is rationed.
         // The `?` overlay carries the long-form wording.
-        let legend: [(&str, Color, &str); 4] = [
-            ("\u{25cf}", p.green, "recent"),
-            ("\u{25a0}", p.ember, "live"),
-            ("*", p.gold, "marked"),
-            ("\u{2500}", p.comment, "archived"),
+        // Archived rows have no gutter glyph — they just dim — so its legend
+        // entry is the word itself in the dim colour, demonstrating the
+        // treatment instead of advertising a glyph that never renders.
+        let legend: [(&str, Color, &str, Color); 4] = [
+            ("\u{25cf}", p.green, "activity", p.faint),
+            ("\u{25a0}", p.ember, "live", p.faint),
+            ("*", p.gold, "marked", p.faint),
+            ("", p.comment, "archived", p.comment),
         ];
         let legend_w: usize = legend
             .iter()
-            .map(|(g, _, l)| g.chars().count() + 1 + l.len())
+            .map(|(g, _, l, _)| {
+                if g.is_empty() {
+                    l.len()
+                } else {
+                    g.chars().count() + 1 + l.len()
+                }
+            })
             .sum::<usize>()
             + 2 * (legend.len() - 1);
         let used = "SESSION".len() + indicator.chars().count();
@@ -416,17 +425,19 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
         // Render only when the legend keeps clear air on both sides.
         if name_col_w >= used + 3 + legend_w + 1 {
             spans.push(Span::raw("   "));
-            for (i, (glyph, color, label)) in legend.iter().enumerate() {
+            for (i, (glyph, color, label, label_color)) in legend.iter().enumerate() {
                 if i > 0 {
                     spans.push(Span::raw("  "));
                 }
-                let mut style = Style::default().fg(*color);
-                if *glyph == "*" {
-                    style = style.add_modifier(Modifier::BOLD);
+                if !glyph.is_empty() {
+                    let mut style = Style::default().fg(*color);
+                    if *glyph == "*" {
+                        style = style.add_modifier(Modifier::BOLD);
+                    }
+                    spans.push(Span::styled(glyph.to_string(), style));
+                    spans.push(Span::raw(" "));
                 }
-                spans.push(Span::styled(glyph.to_string(), style));
-                spans.push(Span::raw(" "));
-                spans.push(Span::styled(label.to_string(), Style::default().fg(p.faint)));
+                spans.push(Span::styled(label.to_string(), Style::default().fg(*label_color)));
             }
         }
         Cell::from(Line::from(spans))
@@ -1448,15 +1459,16 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
     let (state_value, state_color) = if session.is_locked {
         (
             match session.lock_pid {
-                Some(pid) => format!("\u{25cf} live \u{b7} locked {}", pid),
-                None => "\u{25cf} live \u{b7} locked".to_string(),
+                Some(pid) => format!("\u{25a0} live \u{b7} locked {}", pid),
+                None => "\u{25a0} live \u{b7} locked".to_string(),
             },
             p.teal,
         )
     } else if session.archived {
         ("archived".to_string(), p.faint)
     } else {
-        ("dormant".to_string(), p.teal)
+        // Dormant borrows the dormant heat grey, never teal: teal is liveness.
+        ("dormant".to_string(), p.comment)
     };
     let mut meta: Vec<(&str, String, Color)> = vec![
         ("created", session.created.clone().unwrap_or_else(|| "\u{2014}".into()), p.ink),
@@ -2504,15 +2516,19 @@ mod tests {
             .iter()
             .find(|r| r.contains("SESSION"))
             .expect("table header should render");
-        for label in ["recent", "marked", "archived"] {
+        for label in ["activity", "marked", "archived"] {
             assert!(header.contains(label), "header legend should name {label}: {header:?}");
         }
         assert!(
             header.contains("\u{25a0} live"),
             "the lock square should be keyed as live: {header:?}"
         );
+        assert!(
+            !header.contains("\u{2500} archived"),
+            "archived must not advertise a dash glyph rows never render: {header:?}"
+        );
         let s = header.find("SESSION").unwrap();
-        let l = header.find("recent").unwrap();
+        let l = header.find("activity").unwrap();
         let c = header.find("CREATED").unwrap();
         assert!(
             s < l && l < c,
@@ -2526,6 +2542,38 @@ mod tests {
             l_col - s_col <= "SESSION".len() + 8,
             "the legend should hug SESSION (label col {s_col}, legend col {l_col}): {header:?}"
         );
+    }
+
+    #[test]
+    fn preview_state_uses_the_lock_square_and_grey_dormant() {
+        let mut app = App::new(one_session());
+        app.theme = Palette::dark();
+        app.show_preview = true;
+        let p = app.theme;
+
+        let backend = TestBackend::new(90, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let rows: Vec<String> = (0..buf.area.height)
+            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect())
+            .collect();
+
+        // An unlocked session's state reads "dormant" in the dormant grey,
+        // never teal — teal is reserved for liveness.
+        let y = rows
+            .iter()
+            .position(|r| r.contains("dormant"))
+            .expect("preview state row should render") as u16;
+        let x = rows[y as usize]
+            .chars()
+            .collect::<Vec<_>>()
+            .windows(7)
+            .position(|w| w.iter().collect::<String>() == "dormant")
+            .unwrap() as u16;
+        let fg = buf[(x, y)].fg;
+        assert_ne!(fg, p.teal, "dormant must not borrow the liveness teal");
+        assert_eq!(fg, p.comment, "dormant should match the dormant heat grey");
     }
 
     #[test]
@@ -2547,7 +2595,7 @@ mod tests {
             .find(|r| r.contains("SESSION"))
             .expect("table header should render");
         assert!(
-            !header.contains("recent"),
+            !header.contains("activity"),
             "a narrow header has no room for the legend: {header:?}"
         );
     }
