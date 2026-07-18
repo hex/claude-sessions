@@ -1491,8 +1491,8 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
     } else if session.archived {
         ("archived".to_string(), p.faint)
     } else {
-        // Dormant borrows the dormant heat grey, never teal: teal is liveness.
-        // The dot keeps the state line in the list's symbol vocabulary.
+        // Dormant: the dot mirrors the row's heat colour (recolored in the
+        // meta loop below); the word keeps the state grey, never teal.
         ("\u{25cf} dormant".to_string(), p.comment)
     };
     let mut meta: Vec<(&str, String, Color)> = vec![
@@ -1521,6 +1521,20 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
     let value_width = (inner.width as usize).saturating_sub(VALUE_COL);
     for (label, value, color) in &meta {
         let pad = VALUE_COL.saturating_sub(label.len());
+        // The state row mirrors the list row's marker: the dot carries the
+        // session's heat colour while the state word keeps its own colour.
+        if *label == "state" {
+            if let Some(word) = value.strip_prefix("\u{25cf} ") {
+                let heat = p.heat_color(session.modified_ts);
+                lines.push(Line::from(vec![
+                    Span::styled(*label, Style::default().fg(p.faint)),
+                    Span::raw(" ".repeat(pad)),
+                    Span::styled("\u{25cf} ", Style::default().fg(heat)),
+                    Span::styled(word.to_string(), Style::default().fg(*color)),
+                ]));
+                continue;
+            }
+        }
         lines.push(Line::from(vec![
             Span::styled(*label, Style::default().fg(p.faint)),
             Span::raw(" ".repeat(pad)),
@@ -2574,6 +2588,8 @@ mod tests {
         let mut app = App::new(one_session());
         app.theme = Palette::dark();
         app.show_preview = true;
+        // Freshly modified: the state dot must mirror the row's green heat.
+        app.sessions[0].modified_ts = Some(std::time::SystemTime::now());
         let p = app.theme;
 
         let backend = TestBackend::new(90, 40);
@@ -2605,7 +2621,10 @@ mod tests {
             .unwrap() as u16;
         let fg = buf[(x, y)].fg;
         assert_ne!(fg, p.teal, "dormant must not borrow the liveness teal");
-        assert_eq!(fg, p.comment, "dormant should match the dormant heat grey");
+        assert_eq!(fg, p.comment, "the dormant word stays in the state grey");
+        // The dot two columns left of the word mirrors the row's heat colour.
+        let dot_fg = buf[(x - 2, y)].fg;
+        assert_eq!(dot_fg, p.green, "the state dot mirrors the row's heat dot");
     }
 
     #[test]
