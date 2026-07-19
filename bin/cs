@@ -353,7 +353,7 @@ Commands:
   -archive <name>... [--force]  Archive sessions (hidden until reopened; --force if live)
   -unarchive <name>...  Restore archived sessions to the listings
   -status "<text>"    Set this session's advertised status (also: -status, -status --clear/-c)
-  -remove, -rm <name>...  Remove sessions (each asks its own confirm)
+  -remove, -rm <name>... [--force]  Remove sessions (each asks its own confirm; --force if live)
   -secrets <cmd>      Manage current session secrets (requires CLAUDE_SESSION_NAME)
   -update             Update cs to latest version
     --check, -c       Check for updates without installing
