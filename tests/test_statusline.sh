@@ -1425,12 +1425,14 @@ test_limits_file_skipped_without_rate_limits() {
 # else the frozen launch fallback. See _sl_detect_theme in cs-statusline.
 # ============================================================================
 
-# An explicit pin is CS_TERM_THEME set with NO auto marker; it wins everywhere.
+# _sl_detect_theme assigns SL_THEME (no subshell). An explicit pin is
+# CS_TERM_THEME set with NO auto marker; it wins everywhere.
 test_sl_theme_user_pin_overrides() {
     ( _load_sl_functions
       export CS_TERM_THEME=dark
       unset CS_TERM_THEME_AUTO 2>/dev/null || true
-      assert_eq "dark" "$(_sl_detect_theme)" "an explicit CS_TERM_THEME pin wins" || return 1 )
+      _sl_detect_theme
+      assert_eq "dark" "$SL_THEME" "an explicit CS_TERM_THEME pin wins" || return 1 )
 }
 
 # A pin beats the live OS appearance even on macOS (terminal decoupled from OS).
@@ -1440,60 +1442,72 @@ test_sl_theme_macos_pin_beats_live() {
       unset CS_TERM_THEME_AUTO 2>/dev/null || true
       OSTYPE="darwin24"
       defaults() { return 0; }   # OS is dark, but the pin says light
-      assert_eq "light" "$(_sl_detect_theme)" "a pin overrides live macOS detection" || return 1 )
+      _sl_detect_theme
+      assert_eq "light" "$SL_THEME" "a pin overrides live macOS detection" || return 1 )
 }
 
-# Auto-detected launch value (CS_TERM_THEME + matching AUTO marker) yields to the
-# live macOS appearance so a mid-session switch is tracked.
+# Auto-detected launch value (CS_TERM_THEME + the AUTO marker) yields to the live
+# macOS appearance so a mid-session switch is tracked.
 test_sl_theme_follows_macos_dark_appearance() {
     ( _load_sl_functions
-      export CS_TERM_THEME=light CS_TERM_THEME_AUTO=light   # launch detected light
+      export CS_TERM_THEME=light CS_TERM_THEME_AUTO=1   # launch detected light
       OSTYPE="darwin24"
       defaults() { return 0; }   # AppleInterfaceStyle key present => now dark
-      assert_eq "dark" "$(_sl_detect_theme)" "live macOS dark appearance overrides the auto marker" || return 1 )
+      _sl_detect_theme
+      assert_eq "dark" "$SL_THEME" "live macOS dark appearance overrides the launch theme" || return 1 )
 }
 
 test_sl_theme_follows_macos_light_appearance() {
     ( _load_sl_functions
-      export CS_TERM_THEME=dark CS_TERM_THEME_AUTO=dark   # launch detected dark
+      export CS_TERM_THEME=dark CS_TERM_THEME_AUTO=1   # launch detected dark
       OSTYPE="darwin24"
       defaults() { return 1; }   # key absent => now light
-      assert_eq "light" "$(_sl_detect_theme)" "live macOS light appearance overrides the auto marker" || return 1 )
+      _sl_detect_theme
+      assert_eq "light" "$SL_THEME" "live macOS light appearance overrides the launch theme" || return 1 )
 }
 
 test_sl_theme_non_macos_uses_frozen_launch_value() {
     ( _load_sl_functions
-      export CS_TERM_THEME=dark CS_TERM_THEME_AUTO=dark
+      export CS_TERM_THEME=dark CS_TERM_THEME_AUTO=1
       OSTYPE="linux-gnu"
-      assert_eq "dark" "$(_sl_detect_theme)" "non-macOS keeps the launch theme" || return 1 )
+      _sl_detect_theme
+      assert_eq "dark" "$SL_THEME" "non-macOS keeps the launch theme" || return 1 )
 }
 
 test_sl_theme_non_macos_defaults_light() {
     ( _load_sl_functions
       unset CS_TERM_THEME CS_TERM_THEME_AUTO 2>/dev/null || true
       OSTYPE="linux-gnu"
-      assert_eq "light" "$(_sl_detect_theme)" "non-macOS with no launch theme defaults light" || return 1 )
+      _sl_detect_theme
+      assert_eq "light" "$SL_THEME" "non-macOS with no launch theme defaults light" || return 1 )
 }
 
-# The launch-captured background RGB is dropped once the live theme has left the
-# theme cs detected at launch, so surfaces/gradient don't tint toward the old bg.
+# _sl_invalidate_stale_bg blanks CS_TERM_BG_RGB once the live theme (SL_THEME)
+# has left the launch theme (CS_TERM_THEME + auto marker), so surfaces/gradient
+# don't tint toward the old background.
 test_sl_bg_rgb_dropped_after_switch() {
     ( _load_sl_functions
-      export CS_TERM_THEME_AUTO=light CS_TERM_BG_RGB="250;248;242"
-      assert_eq "" "$(_sl_bg_rgb dark)" "stale RGB dropped when the live theme left the launch theme" || return 1 )
+      export CS_TERM_THEME=light CS_TERM_THEME_AUTO=1 CS_TERM_BG_RGB="250;248;242"
+      SL_THEME=dark   # live theme switched away from the launch light
+      _sl_invalidate_stale_bg
+      assert_eq "" "$CS_TERM_BG_RGB" "stale RGB dropped when the live theme left the launch theme" || return 1 )
 }
 
 test_sl_bg_rgb_kept_when_theme_matches() {
     ( _load_sl_functions
-      export CS_TERM_THEME_AUTO=light CS_TERM_BG_RGB="250;248;242"
-      assert_eq "250;248;242" "$(_sl_bg_rgb light)" "RGB kept when the live theme matches launch" || return 1 )
+      export CS_TERM_THEME=light CS_TERM_THEME_AUTO=1 CS_TERM_BG_RGB="250;248;242"
+      SL_THEME=light   # live theme still matches launch
+      _sl_invalidate_stale_bg
+      assert_eq "250;248;242" "$CS_TERM_BG_RGB" "RGB kept when the live theme matches launch" || return 1 )
 }
 
 test_sl_bg_rgb_kept_for_manual_value() {
     ( _load_sl_functions
-      unset CS_TERM_THEME_AUTO 2>/dev/null || true
+      unset CS_TERM_THEME_AUTO CS_TERM_THEME 2>/dev/null || true
       export CS_TERM_BG_RGB="1;2;3"
-      assert_eq "1;2;3" "$(_sl_bg_rgb dark)" "a manually-set RGB (no auto marker) is never dropped" || return 1 )
+      SL_THEME=dark
+      _sl_invalidate_stale_bg
+      assert_eq "1;2;3" "$CS_TERM_BG_RGB" "a manually-set RGB (no auto marker) is never dropped" || return 1 )
 }
 
 run_test test_limits_file_written_from_rate_limits

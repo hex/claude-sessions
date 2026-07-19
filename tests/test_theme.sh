@@ -220,7 +220,7 @@ test_export_term_theme_exports_theme_and_auto_marker() {
       _export_term_theme
       local child; child=$(env)
       case "$child" in *"CS_TERM_THEME=light"*) : ;; *) echo "  FAIL: CS_TERM_THEME not exported for cs's UI and the picker"; return 1;; esac
-      case "$child" in *"CS_TERM_THEME_AUTO=light"*) : ;; *) echo "  FAIL: CS_TERM_THEME_AUTO marker not exported"; return 1;; esac
+      case "$child" in *"CS_TERM_THEME_AUTO=1"*) : ;; *) echo "  FAIL: CS_TERM_THEME_AUTO presence marker not exported"; return 1;; esac
       case "$child" in *"CS_TERM_BG_RGB=250;248;242"*) : ;; *) echo "  FAIL: CS_TERM_BG_RGB not exported"; return 1;; esac )
 }
 

@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.7.18"
+VERSION="2026.7.19"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 
@@ -4705,21 +4705,23 @@ _export_term_theme() {
     theme="${out%% *}"
     [ "$theme" = "unknown" ] && return 0
     # Export the detected theme so cs's own UI and the TUI picker (both cs
-    # children) render with the right palette. CS_TERM_THEME_AUTO marks that this
-    # value came from launch auto-detection, not an explicit user pin: the
-    # statusline reads the marker to know it may override the frozen theme with
-    # the live OS appearance (macOS auto dark mode), which the launch value can't
-    # follow. A user-set CS_TERM_THEME returned above and carries no marker, so
-    # it stays a hard override everywhere.
+    # children) render with the right palette. CS_TERM_THEME_AUTO is a bare
+    # presence marker: it flags that CS_TERM_THEME came from launch auto-detection
+    # rather than an explicit user pin, so the statusline knows it may override
+    # the launch theme with the live OS appearance (macOS auto dark mode). A
+    # user-set CS_TERM_THEME returned above and carries no marker, so it stays a
+    # hard override everywhere.
     export CS_TERM_THEME="$theme"
-    export CS_TERM_THEME_AUTO="$theme"
+    export CS_TERM_THEME_AUTO=1
     if [[ "$out" == *" "* ]] && [ -z "${CS_TERM_BG_RGB:-}" ]; then
         export CS_TERM_BG_RGB="${out#* }"
     fi
 }
 
 # macOS reports dark mode by the presence of the AppleInterfaceStyle key;
-# the key is absent in light mode (including auto mode while light).
+# the key is absent in light mode (including auto mode while light). KEEP IN SYNC
+# with the macOS branch of _sl_detect_theme in bin/cs-statusline, which reads the
+# same key live per render (the statusline is standalone and sources nothing).
 _theme_from_os_appearance() {
     [[ "$OSTYPE" == darwin* ]] || { echo "unknown"; return; }
     if defaults read -g AppleInterfaceStyle >/dev/null 2>&1; then

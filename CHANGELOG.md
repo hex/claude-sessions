@@ -4,10 +4,10 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
-## Unreleased
+## 2026.7.19
 
 ### Fixes
-- The statusline follows a mid-session terminal theme switch on macOS (system auto dark mode). It reads the live OS appearance each render instead of a value frozen at launch, so the palette no longer stays light on a terminal that has gone dark. Setting `CS_TERM_THEME=light\|dark` yourself still pins the theme and wins everywhere, including against live detection; launch marks its auto-detected value (`CS_TERM_THEME_AUTO`) so the two are distinguished, and off macOS the launch value still applies. The stale launch background RGB is dropped after a live switch so the gauges and gradient fall back to theme-based colors instead of tinting toward the old background; a session already open on a non-macOS terminal keeps its launch palette until relaunched.
+- The statusline follows a mid-session terminal theme switch on macOS (system auto dark mode). It reads the live OS appearance each render instead of a value frozen at launch, so the palette no longer stays light on a terminal that has gone dark. Setting `CS_TERM_THEME=light\|dark` yourself still pins the theme and wins everywhere, including against live detection; launch marks its auto-detected value (a `CS_TERM_THEME_AUTO` presence marker) so the two are distinguished, and off macOS the launch value still applies. The stale launch background RGB is dropped after a live switch so the gauges and gradient fall back to theme-based colors instead of tinting toward the old background; a session already open on a non-macOS terminal keeps its launch palette until relaunched.
 
 ## 2026.7.18
 
