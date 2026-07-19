@@ -48,6 +48,17 @@ test_send_session_scoped_alias() {
     assert_file_contains "$(INBOX)" "via alias" "session-scoped arm sends" || return 1
 }
 
+test_alias_lone_log_errors_instead_of_sending() {
+    local out; out=$("$CS_BIN" receiver -msg log 2>&1) && return 1
+    assert_output_contains "$out" "cs -msg log" "hint points at the in-session read form" || return 1
+    [ ! -f "$(INBOX)" ] || { echo "  'log' was sent as a message body"; return 1; }
+}
+
+test_alias_empty_body_errors_with_read_hint() {
+    local out; out=$("$CS_BIN" receiver -msg 2>&1) && return 1
+    assert_output_contains "$out" "inside that session" "hint points at the read surface" || return 1
+}
+
 test_send_joins_unquoted_multiword_body() {
     "$CS_BIN" -msg receiver hello there world >/dev/null 2>&1 || return 1
     assert_eq "hello there world" "$(head -1 "$(INBOX)" | jq -r .body)" "unquoted words joined" || return 1
@@ -121,6 +132,8 @@ test_task_kind_rejects_multiline_body() {
 run_test test_send_writes_full_record
 run_test test_send_from_outside_session_has_empty_from
 run_test test_send_session_scoped_alias
+run_test test_alias_lone_log_errors_instead_of_sending
+run_test test_alias_empty_body_errors_with_read_hint
 run_test test_send_joins_unquoted_multiword_body
 run_test test_send_rejects_unknown_target
 run_test test_send_rejects_slash_in_target

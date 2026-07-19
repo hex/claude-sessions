@@ -5524,6 +5524,14 @@ main() {
                 shift
                 # Send-only: the positional session is the TARGET. The sender's
                 # own identity comes from the caller's environment (or none).
+                # A bare or lone-'log' invocation is a read attempt aimed at
+                # the send-only arm; catch it before 'log' becomes a body.
+                if [ $# -eq 0 ]; then
+                    error "cs $session_name -msg sends mail and needs a body; to read mail, run 'cs -msg' inside that session"
+                fi
+                if [ $# -eq 1 ] && [ "$1" = "log" ]; then
+                    error "cs $session_name -msg is send-only; to read the mail log, run 'cs -msg log' inside that session"
+                fi
                 run_mail "$session_name" "$@"
                 return 0
                 ;;
