@@ -56,7 +56,34 @@ test_remove_empty_name_rejected_before_any_deletion() {
     ! "$CS_BIN" -rm "" >/dev/null 2>&1 || return 1
 }
 
+test_remove_refuses_live_session_without_force() {
+    create_test_session live1 >/dev/null
+    sleep 300 &
+    local live_pid=$!
+    echo "$live_pid" > "$CS_SESSIONS_ROOT/live1/.cs/session.lock"
+
+    local out rc=0
+    out=$(printf 'y\n' | "$CS_BIN" -rm live1 2>&1) || rc=$?
+    if [ "$rc" -eq 0 ]; then
+        kill "$live_pid" 2>/dev/null; wait "$live_pid" 2>/dev/null
+        echo "  FAIL: live session must refuse removal without --force"
+        return 1
+    fi
+    assert_output_contains "$out" "--force" "refusal names the override" || {
+        kill "$live_pid" 2>/dev/null; wait "$live_pid" 2>/dev/null; return 1; }
+    [ -d "$CS_SESSIONS_ROOT/live1" ] || {
+        kill "$live_pid" 2>/dev/null; wait "$live_pid" 2>/dev/null
+        echo "  FAIL: refused removal still deleted the session"; return 1; }
+
+    printf 'y\n' | "$CS_BIN" -rm live1 --force >/dev/null 2>&1
+    rc=$?
+    kill "$live_pid" 2>/dev/null; wait "$live_pid" 2>/dev/null
+    [ "$rc" -eq 0 ] || { echo "  FAIL: --force should remove a live session"; return 1; }
+    [ ! -d "$CS_SESSIONS_ROOT/live1" ] || { echo "  FAIL: --force did not remove"; return 1; }
+}
+
 run_test test_remove_empty_name_rejected_before_any_deletion
+run_test test_remove_refuses_live_session_without_force
 run_test test_remove_multiple_names_each_confirmed
 run_test test_remove_decline_skips_that_session_only
 run_test test_remove_single_name_still_works

@@ -236,18 +236,27 @@ list_sessions() {
 # All names are validated before anything is deleted: an empty name would
 # resolve to the sessions root itself and rm -rf every session.
 remove_session() {
-    [ $# -ge 1 ] || error "Usage: cs -remove <session-name>..."
-    local _name
-    for _name in "$@"; do
-        [ -n "$_name" ] || error "Usage: cs -remove <session-name>... (empty session name)"
+    local force="" arg _name
+    local names
+    names=()
+    for arg in "$@"; do
+        case "$arg" in
+            --force|-f) force="true" ;;
+            -*) error "Unknown remove option: $arg. Usage: cs -remove <session-name>... [--force]" ;;
+            *)
+                [ -n "$arg" ] || error "Usage: cs -remove <session-name>... [--force] (empty session name)"
+                names+=("$arg") ;;
+        esac
     done
-    for _name in "$@"; do
-        _remove_one_session "$_name"
+    [ "${#names[@]}" -ge 1 ] || error "Usage: cs -remove <session-name>... [--force]"
+    for _name in "${names[@]}"; do
+        _remove_one_session "$_name" "$force"
     done
 }
 
 _remove_one_session() {
     local session_name="$1"
+    local force="${2:-}"
     [ -n "$session_name" ] || error "Refusing to remove an empty session name"
 
     # Reject path traversal before any filesystem action: '.'/'..' and any
@@ -261,6 +270,10 @@ _remove_one_session() {
 
     if [ ! -d "$session_dir" ] && [ ! -L "$session_dir" ]; then
         error "Session not found: $session_name"
+    fi
+
+    if [ -z "$force" ] && session_is_live "$session_dir/.cs"; then
+        error "Session '$session_name' is live (pid $(read_lock_pid "$session_dir/.cs")); use --force to remove anyway"
     fi
 
     # Worktree sessions: unregister from git, not just delete the directory.
