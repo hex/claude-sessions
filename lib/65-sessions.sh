@@ -361,7 +361,7 @@ cmd_live() {
     while IFS= read -r -d '' dir; do
         is_session_dir "$dir" || continue
         meta="$dir/.cs"
-        session_is_live "$meta" || continue
+        session_display_live "$meta" || continue
         name="$(basename "$dir")"
         actor="$(session_actor_slug "$dir")"
         up="$(_humanize_secs "$(session_uptime_secs "$meta" "$now")")"

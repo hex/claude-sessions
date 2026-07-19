@@ -221,7 +221,7 @@ EOF
             continue
         fi
         marker=" "
-        session_is_live "$dir/.cs" && marker=$(printf "${GREEN}●${NC}")
+        session_display_live "$dir/.cs" && marker=$(printf "${GREEN}●${NC}")
         age="-"
         newest=$(ls -t "$proj"/*.jsonl 2>/dev/null | head -1 || true)
         if [ -n "$newest" ]; then

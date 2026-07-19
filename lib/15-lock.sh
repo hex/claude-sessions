@@ -122,6 +122,33 @@ _epoch_mtime() {  # path
     fi
 }
 
+# How long after the last statusline write a lockless conversation still counts
+# as live, matching the TUI's HEARTBEAT_WINDOW_SECS. A conversation opened
+# outside cs writes no lock, but its statusline touches .cs/local/context-pct
+# every few seconds while active.
+HEARTBEAT_WINDOW_SECS=900
+
+# True when the statusline heartbeat is fresh: context-pct was written within
+# HEARTBEAT_WINDOW_SECS of now. Detects conversations open outside cs (no lock).
+# A future mtime counts as live, matching the TUI's clamping.
+session_heartbeat_alive() {  # meta_dir
+    local f="$1/local/context-pct"
+    [ -f "$f" ] || return 1
+    local now mtime
+    now="$(date +%s)"
+    mtime="$(_epoch_mtime "$f")"
+    [ "$(( now - mtime ))" -le "$HEARTBEAT_WINDOW_SECS" ]
+}
+
+# True when a session should DISPLAY as live: PID-locked, or breathing via the
+# statusline heartbeat. Display surfaces (cs -live, cs -usage) use this so they
+# match the TUI. The destructive guards (rm/archive/spawn) use strict
+# session_is_live, so a session whose process is gone can still be removed
+# without --force even if its statusline was touched recently.
+session_display_live() {  # meta_dir
+    session_is_live "$1" || session_heartbeat_alive "$1"
+}
+
 # Seconds since a session was last launched (its lock file's mtime).
 # Args: meta_dir, now_epoch. Prints 0 if the lock is absent/unreadable.
 session_uptime_secs() {  # meta_dir, now_epoch

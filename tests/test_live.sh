@@ -48,6 +48,36 @@ make_dead_session() { # name
     printf '%s\n' "$p" > "$sdir/.cs/session.lock"
 }
 
+# A session with no lock but a fresh statusline heartbeat (context-pct touched
+# now): live to the DISPLAY surfaces, matching the TUI, though cs never locked it.
+make_heartbeat_session() { # name
+    local sdir="$CS_SESSIONS_ROOT/$1"
+    mkdir -p "$sdir/.cs/local"
+    : > "$sdir/.cs/local/context-pct"   # mtime = now
+}
+# A session whose heartbeat has gone cold (context-pct older than the 900s window).
+make_cold_session() { # name
+    local sdir="$CS_SESSIONS_ROOT/$1"
+    mkdir -p "$sdir/.cs/local"
+    : > "$sdir/.cs/local/context-pct"
+    if ! touch -A -003000 "$sdir/.cs/local/context-pct" 2>/dev/null; then
+        touch -d "30 minutes ago" "$sdir/.cs/local/context-pct" 2>/dev/null || true
+    fi
+}
+
+test_live_includes_heartbeat_session() {
+    make_heartbeat_session breathing
+    local out; out="$("$CS_BIN" -live 2>&1)"
+    assert_output_contains "$out" "breathing" "heartbeat-live (unlocked) session listed" || return 1
+}
+
+test_live_excludes_cold_heartbeat_session() {
+    make_cold_session gone-cold
+    local out; out="$("$CS_BIN" -live 2>&1)"
+    case "$out" in *gone-cold*) echo "  FAIL: cold-heartbeat session listed"; return 1;; esac
+    return 0
+}
+
 test_live_includes_live_excludes_dead() {
     make_live_session alive-one >/dev/null
     make_dead_session dead-one >/dev/null
@@ -138,6 +168,8 @@ test_live_empty_root_message_and_exit0() {
     assert_eq "0" "$rc" "empty root exits 0" || return 1
 }
 
+run_test test_live_includes_heartbeat_session
+run_test test_live_excludes_cold_heartbeat_session
 run_test test_live_includes_live_excludes_dead
 run_test test_live_shows_presence_status
 run_test test_live_falls_back_to_readme_objective

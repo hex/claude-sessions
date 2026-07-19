@@ -114,8 +114,20 @@ test_remove_worktree_session_discards_seeds() {
     [ ! -f "$CS_SESSIONS_ROOT/.spawn/wbase@t.seed" ] || { echo "  worktree seed survived removal"; return 1; }
 }
 
+test_remove_allows_heartbeat_only_session_without_force() {
+    # The live guard is strict PID-lock by decision: a heartbeat-live but
+    # unlocked session (fresh context-pct, no session.lock) is still removable
+    # without --force. cs -live shows it; cs -rm does not refuse it.
+    create_test_session breathing >/dev/null
+    mkdir -p "$CS_SESSIONS_ROOT/breathing/.cs/local"
+    : > "$CS_SESSIONS_ROOT/breathing/.cs/local/context-pct"
+    printf 'y\n' | "$CS_BIN" -rm breathing >/dev/null 2>&1 || return 1
+    [ ! -d "$CS_SESSIONS_ROOT/breathing" ] || { echo "  heartbeat-only session wrongly refused rm"; return 1; }
+}
+
 run_test test_remove_empty_name_rejected_before_any_deletion
 run_test test_remove_refuses_live_session_without_force
+run_test test_remove_allows_heartbeat_only_session_without_force
 run_test test_remove_discards_pending_spawn_seeds
 run_test test_remove_worktree_session_discards_seeds
 run_test test_remove_multiple_names_each_confirmed
