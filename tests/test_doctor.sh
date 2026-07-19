@@ -571,6 +571,18 @@ test_doctor_spawn_ok_when_seeds_clean() {
     fi
 }
 
+test_doctor_completes_after_spawn_warning() {
+    # A spawn warning sets clean=0; the check must still return 0 so `set -e`
+    # does not abort the run before its later checks and the summary.
+    mkdir -p "$CS_SESSIONS_ROOT/.spawn"
+    : > "$CS_SESSIONS_ROOT/.spawn/gone.seed.stale"
+    local output
+    output=$(CS_TMUX_BIN="$(_doctor_tmux_fake '' '')" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Spawn seeds" "the spawn warning still fires" || return 1
+    assert_output_contains "$output" "Auto-memory" \
+        "session-gated checks after the spawn check must still run (no set -e abort)" || return 1
+}
+
 test_doctor_warns_on_dangling_spawned_by() {
     local child="$CS_SESSIONS_ROOT/child"
     mkdir -p "$child/.cs/local"
@@ -647,6 +659,7 @@ run_test test_doctor_runs_token_cost_check
 run_test test_doctor_token_cost_sums_jsonl
 run_test test_doctor_token_cost_handles_no_transcripts
 run_test test_doctor_warns_on_stale_spawn_seeds
+run_test test_doctor_completes_after_spawn_warning
 run_test test_doctor_warns_on_orphaned_spawn_seed
 run_test test_doctor_spawn_ok_when_seeds_clean
 run_test test_doctor_warns_on_dangling_spawned_by

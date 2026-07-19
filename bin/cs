@@ -3784,7 +3784,12 @@ _doctor_check_spawn() {
         fi
     fi
 
-    [ "$clean" = "1" ] && _doctor_ok "Spawn: no stale seeds, dangling spawned-by links, or foreign 'cs' tmux session"
+    # An `if` (not `[ ... ] && ...`) so the function returns 0 even when a
+    # warning fired: under `set -e` a non-zero return here would abort the
+    # whole `cs -doctor` run before its later checks and the summary.
+    if [ "$clean" = "1" ]; then
+        _doctor_ok "Spawn: no stale seeds, dangling spawned-by links, or foreign 'cs' tmux session"
+    fi
 }
 
 # Compares the version stamped into the deployed hooks directory at install
