@@ -228,11 +228,48 @@ test_newest_of_multiple_handoffs_wins() {
         "older handoff untouched" || return 1
 }
 
+test_discard_answer_dismisses_pending_handoff() {
+    _rot_session "rot-d"
+    local dir="$CS_SESSIONS_ROOT/rot-d"
+    _seed_handoff "$dir" "2026-07-16-test.md" "unconsumed"
+    local output
+    output=$("$CS_BIN" rot-d <<< "d" 2>&1) || true
+    printf '%s' "$output" | grep -q "d = discard handoff" \
+        || { echo "  FAIL: prompt must offer the d answer"; return 1; }
+    assert_file_contains "$dir/.cs/handoffs/2026-07-16-test.md" "status: discarded" \
+        "d flips the handoff to discarded" || return 1
+    assert_file_not_contains "$dir/.cs/handoffs/2026-07-16-test.md" "status: unconsumed" \
+        "unconsumed line replaced" || return 1
+    [ ! -f "$dir/.cs/local/pending-handoff" ] || { echo "  FAIL: d must not set the r marker"; return 1; }
+    assert_output_contains "$output" "STUB_ARGS: " "launch continues" || return 1
+    printf '%s' "$output" | grep -q -- '--resume' \
+        || { echo "  FAIL: d proceeds with the default resume"; return 1; }
+    output=$("$CS_BIN" rot-d <<< "n" 2>&1) || true
+    if printf '%s' "$output" | grep -q "Rotation handoff pending"; then
+        echo "  FAIL: discarded handoff must not re-prompt"
+        return 1
+    fi
+}
+
+test_discard_flip_spares_a_body_quote() {
+    _rot_session "rot-dq"
+    local dir="$CS_SESSIONS_ROOT/rot-dq"
+    _seed_handoff "$dir" "2026-07-16-test.md" "unconsumed"
+    printf 'status: unconsumed\n' >> "$dir/.cs/handoffs/2026-07-16-test.md"
+    "$CS_BIN" rot-dq <<< "d" >/dev/null 2>&1 || true
+    assert_file_contains "$dir/.cs/handoffs/2026-07-16-test.md" "status: discarded" \
+        "frontmatter status flipped" || return 1
+    assert_file_contains "$dir/.cs/handoffs/2026-07-16-test.md" "status: unconsumed" \
+        "flush-left body quote untouched" || return 1
+}
+
 run_test test_prompt_unchanged_without_handoff
 run_test test_rotate_answer_consumes_pending_handoff
 run_test test_continue_and_no_leave_handoff_unconsumed
 run_test test_consumed_handoffs_do_not_trigger_prompt
 run_test test_newest_of_multiple_handoffs_wins
+run_test test_discard_answer_dismisses_pending_handoff
+run_test test_discard_flip_spares_a_body_quote
 
 # ============================================================================
 # Cycle 4: SessionStart consumes the pending handoff

@@ -47,7 +47,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 - **Walk-away supervision** - a draining queue is watched by circuit breakers: too many tool failures in one task (default 5, `CS_QUEUE_MAX_FAILURES`), context past 85% (`CS_QUEUE_MAX_CTX`), or the 5-hour rate-limit window past 85% (`CS_QUEUE_MAX_5H`) parks the queue with a debrief instead of feeding the next task — nothing is lost, `cs -queue start` re-arms. Everything that happened while you were away (tasks done, breaker trips) lands in a per-machine journal: a one-line digest surfaces once on your return, and `cs -queue log` shows the full history.
 - **Cross-session mail** - `cs -msg <session> "note"` drops a message in another session's machine-local mailbox (`--kind notify|task|text|result`; `task` also lands in its walk-away queue). The recipient sees a short digest at its next turn and reads bodies with `cs -msg`. Same-machine only; attribution is unauthenticated by design.
 - **tmux spawner** - `cs -spawn <name>` opens a session in a cs-owned tmux session (`tmux attach -t cs`); `--task "..."` seeds and arms its walk-away queue so it starts working unattended, and the spawner hears back over cross-session mail when the queue drains. Same-machine only.
-- **Conversation rotation** - a heavy conversation can hand off to a fresh one without losing context: the `rotate` skill (self-invoked, or nudged once per conversation past 80% context) writes a lineage-stamped handoff to `.cs/handoffs/`, and the next `cs <name>` launch offers a third answer — `[Y/n/r]` — to start clean from it. `cs -conversations` shows the resulting chain.
+- **Conversation rotation** - a heavy conversation can hand off to a fresh one without losing context: the `rotate` skill (self-invoked, or nudged once per conversation past 80% context) writes a lineage-stamped handoff to `.cs/handoffs/`, and the next `cs <name>` launch offers `[Y/n/r/d]` — `r` starts clean from it, `d` discards it. `cs -conversations` shows the resulting chain.
 - **Voice drafting** - `/voice` drafts messages, replies, PR text, or docs in your own writing voice. On first use it distills your typed messages from Claude Code transcripts into an editable profile at `~/.claude-sessions/.voice/profile.md`; drafting loads the profile and writes as you.
 - **iTerm2 awareness** - inside iTerm2 the session color tints the tab (native escapes, reset on exit), and with iTerm2 shell integration installed a finished turn bounces the dock until your next prompt. `CS_NO_ITERM2=1` disables; `cs -doctor` reports the integration surface.
 - **Bash command audit trail** - Every Bash command Claude runs is logged to `.cs/local/session.log` (machine-local, never git-synced) with timestamps
@@ -294,7 +294,7 @@ answer to the resume prompt:
 
 ```
 Rotation handoff pending: 2026-07-16-continue-f5-plan.md
-Continue previous conversation? [Y/n/r] (r = fresh conversation with handoff)
+Continue previous conversation? [Y/n/r/d] (r = fresh conversation with handoff, d = discard handoff)
 ```
 
 `Y` (or Enter) resumes as usual and leaves the handoff waiting; `n` starts

@@ -232,7 +232,7 @@ launch_claude_code() {
         else
             if [ -n "$pending_handoff" ]; then
                 printf "${DIM}Rotation handoff pending:${NC} %s\n" "$(basename "$pending_handoff")"
-                printf "${DIM}Continue previous conversation?${NC} [Y/n/r] ${DIM}(r = fresh conversation with handoff)${NC} "
+                printf "${DIM}Continue previous conversation?${NC} [Y/n/r/d] ${DIM}(r = fresh conversation with handoff, d = discard handoff)${NC} "
             else
                 printf "${DIM}Continue previous conversation?${NC} [Y/n] "
             fi
@@ -250,6 +250,30 @@ launch_claude_code() {
                     _exec_fresh_rebind "$session_dir" handoff "$(basename "$pending_handoff")" "$spawn_kick"
                 fi
                 # r without a pending handoff was never offered: treat as the
+                # default resume answer.
+                if [ -n "$claude_session_id" ]; then
+                    continue_flag="--resume $claude_session_id"
+                else
+                    continue_flag="--continue"
+                fi
+                ;;
+            [dD])
+                if [ -n "$pending_handoff" ]; then
+                    # Flip only the first status line (the frontmatter's); a
+                    # body quoting the contract line flush-left stays intact.
+                    awk '
+                        !flipped && $0 == "status: unconsumed" {
+                            print "status: discarded"
+                            flipped = 1
+                            next
+                        }
+                        { print }
+                    ' "$pending_handoff" > "$pending_handoff.tmp" 2>/dev/null \
+                        && mv "$pending_handoff.tmp" "$pending_handoff" 2>/dev/null \
+                        || rm -f "$pending_handoff.tmp" 2>/dev/null || true
+                    printf "${DIM}Handoff discarded:${NC} %s\n" "$(basename "$pending_handoff")"
+                fi
+                # d without a pending handoff was never offered: treat as the
                 # default resume answer.
                 if [ -n "$claude_session_id" ]; then
                     continue_flag="--resume $claude_session_id"
