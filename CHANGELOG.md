@@ -17,6 +17,9 @@ All notable changes to cs are documented here. Release notes are also available 
 - Session deletion (`cs -rm` and the TUI) discards the session's pending spawn seeds, so a re-created same-name session no longer inherits dead armed tasks and `cs -spawn` stops refusing the name.
 - `cs <name> -msg log` and a bare `cs <name> -msg` now error with a read hint instead of sending the literal body `log` (the session-scoped alias is send-only).
 
+### Removed
+- The unused `--ref` flag and `ref` field from cross-session mail. The spawner correlates task-down/result-up via `spawned-by`; `ref` had no producer or consumer, so it was speculative storage.
+
 ### Docs
 - README command reference lists `cs -msg` and `cs -spawn`; the rotate skill and session-layout doc describe the `d` discard answer and the `status: discarded` handoff state.
 

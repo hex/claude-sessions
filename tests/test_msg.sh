@@ -30,12 +30,17 @@ test_send_writes_full_record() {
     assert_eq "sender" "$(printf '%s' "$line" | jq -r .from)" "from is sender session" || return 1
     assert_eq "text" "$(printf '%s' "$line" | jq -r .kind)" "kind defaults to text" || return 1
     assert_eq "hello there" "$(printf '%s' "$line" | jq -r .body)" "body preserved" || return 1
-    assert_eq "null" "$(printf '%s' "$line" | jq -r .ref)" "ref null" || return 1
     local id ts actor
     id=$(printf '%s' "$line" | jq -r .id); ts=$(printf '%s' "$line" | jq -r .ts); actor=$(printf '%s' "$line" | jq -r .actor)
     assert_output_contains "$id" "-" "id has epoch-pid-random shape" || return 1
     case "$ts" in ''|*[!0-9]*) echo "  ts not numeric: $ts"; return 1;; esac
     [ -n "$actor" ] || { echo "  actor empty"; return 1; }
+}
+
+test_record_has_no_ref_field() {
+    "$CS_BIN" -msg receiver "hi" >/dev/null 2>&1 || return 1
+    assert_eq "false" "$(head -1 "$(INBOX)" | jq 'has("ref")')" \
+        "the record carries no ref field (removed as speculative storage)" || return 1
 }
 
 test_send_from_outside_session_has_empty_from() {
@@ -89,12 +94,6 @@ test_send_rejects_bad_kind() {
     ! "$CS_BIN" -msg receiver -k bogus "x" >/dev/null 2>&1 || return 1
 }
 
-test_send_rejects_ref_without_result() {
-    ! "$CS_BIN" -msg receiver --ref some-id "x" >/dev/null 2>&1 || return 1
-    "$CS_BIN" -msg receiver -k result --ref some-id "ok" >/dev/null 2>&1 || return 1
-    assert_eq "some-id" "$(head -1 "$(INBOX)" | jq -r .ref)" "ref stored on result" || return 1
-}
-
 test_send_trailing_flag_errors_loudly() {
     local out; out=$("$CS_BIN" -msg receiver --kind 2>&1) && return 1
     assert_output_contains "$out" "needs a value" "trailing flag errors with a message" || return 1
@@ -130,6 +129,7 @@ test_task_kind_rejects_multiline_body() {
 }
 
 run_test test_send_writes_full_record
+run_test test_record_has_no_ref_field
 run_test test_send_from_outside_session_has_empty_from
 run_test test_send_session_scoped_alias
 run_test test_alias_lone_log_errors_instead_of_sending
@@ -140,7 +140,6 @@ run_test test_send_rejects_slash_in_target
 run_test test_send_rejects_dot_and_dotdot_targets
 run_test test_send_rejects_self
 run_test test_send_rejects_bad_kind
-run_test test_send_rejects_ref_without_result
 run_test test_send_trailing_flag_errors_loudly
 run_test test_send_rejects_empty_and_oversize_body
 run_test test_task_kind_lands_in_recipient_queue

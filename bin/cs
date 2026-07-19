@@ -2768,13 +2768,12 @@ _mail_slice() {  # file, from_line, to_line
     awk -v a="$2" -v b="$3" 'NR>=a && NR<=b' "$1"
 }
 
-_mail_send() {  # target, [--kind|-k KIND] [--ref ID] body
+_mail_send() {  # target, [--kind|-k KIND] body
     local target="$1"; shift
-    local kind="text" ref="" body=""
+    local kind="text" body=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --kind|-k) [ $# -ge 2 ] || error "--kind needs a value"; shift; kind="$1";;
-            --ref)     [ $# -ge 2 ] || error "--ref needs a value"; shift; ref="$1";;
             *)         body="${body:+$body }$1";;
         esac
         shift
@@ -2787,9 +2786,6 @@ _mail_send() {  # target, [--kind|-k KIND] [--ref ID] body
         error "Refusing to send mail to the current session"
     fi
     case "$kind" in notify|task|text|result) : ;; *) error "Unknown kind: $kind (notify|task|text|result)";; esac
-    if [ -n "$ref" ] && [ "$kind" != "result" ]; then
-        error "--ref is only valid with --kind result"
-    fi
     body="$(_trim "$body")"
     [ -n "$body" ] || error "cs -msg needs a non-empty body"
     local bytes
@@ -2815,9 +2811,8 @@ _mail_send() {  # target, [--kind|-k KIND] [--ref ID] body
     now="$(date +%s)"
     line=$(jq -cn --arg id "${now}-$$-${RANDOM}" --argjson ts "$now" \
         --arg from "${CLAUDE_SESSION_NAME:-}" --arg actor "$(cs_actor_slug)" \
-        --arg kind "$kind" --arg body "$body" --arg ref "$ref" \
-        '{id:$id, ts:$ts, from:$from, actor:$actor, kind:$kind, body:$body,
-          ref:(if $ref == "" then null else $ref end)}')
+        --arg kind "$kind" --arg body "$body" \
+        '{id:$id, ts:$ts, from:$from, actor:$actor, kind:$kind, body:$body}')
     if ! printf '%s\n' "$line" >> "$maildir/inbox.jsonl"; then
         if [ "$kind" = "task" ]; then
             warn "task queued in $target, but recording the mail attribution failed"
