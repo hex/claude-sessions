@@ -722,8 +722,11 @@ fn remove_worktree_session(root: &Path, name: &str, path: &Path) -> std::io::Res
 /// `cs -msg` advances on read). Counts newline-terminated lines like the shell's
 /// `_mail_total`, so a half-written final line is not counted.
 fn unread_mail_count(meta_dir: &Path) -> u32 {
-    let inbox = fs::read_to_string(meta_dir.join("local/mail/inbox.jsonl")).unwrap_or_default();
-    let total = inbox.bytes().filter(|&b| b == b'\n').count() as u32;
+    // Count raw newline bytes, like the shell's `_mail_total` (wc -l): reading
+    // as UTF-8 would collapse the whole file to empty on an invalid-UTF-8 torn
+    // final line, silently hiding the complete messages before it.
+    let inbox = fs::read(meta_dir.join("local/mail/inbox.jsonl")).unwrap_or_default();
+    let total = inbox.iter().filter(|&&b| b == b'\n').count() as u32;
     let seen = fs::read_to_string(meta_dir.join("local/mail/seen"))
         .ok()
         .and_then(|s| s.trim().parse::<u32>().ok())
@@ -862,6 +865,26 @@ mod tests {
         // no seen cursor => 0 => all 3 complete lines are unread
         fs::remove_file(mail.join("seen")).unwrap();
         assert_eq!(unread_mail_count(&dir), 3);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn unread_mail_counts_past_an_invalid_utf8_torn_tail() {
+        let dir = std::env::temp_dir().join(format!("cs-unread-torn-{}", std::process::id()));
+        let mail = dir.join("local/mail");
+        fs::create_dir_all(&mail).unwrap();
+        // Two complete messages, then a torn final line whose bytes are invalid
+        // UTF-8 (a 4-byte emoji cut mid-sequence by an interrupted append). The
+        // shell's wc -l counts the two complete lines; the TUI must match, not
+        // read the whole file as UTF-8 and collapse the count to zero.
+        let mut bytes = b"{\"a\":1}\n{\"a\":2}\n".to_vec();
+        bytes.extend_from_slice(&[0xF0, 0x9F]);
+        fs::write(mail.join("inbox.jsonl"), &bytes).unwrap();
+        assert_eq!(
+            unread_mail_count(&dir),
+            2,
+            "complete lines stay counted despite an invalid-UTF-8 torn tail"
+        );
         fs::remove_dir_all(&dir).unwrap();
     }
 
