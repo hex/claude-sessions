@@ -314,7 +314,7 @@ if [ "$SOURCE" = "resume" ] && [ -d "$SESSION_DIR/.git" ]; then
             [ "$SIBLING_COUNT" -ge 5 ] && break
         done < <(ls -t "$SESSIONS_ROOT"/*/.cs/local/session.log "$SESSIONS_ROOT"/*/.cs/logs/session.log 2>/dev/null || true)
         if [ -n "$SIBLINGS" ]; then
-            DYNAMIC="${DYNAMIC}Other Sessions (awareness only — if a request belongs to one of these, say so rather than duplicating work here):\n${SIBLINGS}"
+            DYNAMIC="${DYNAMIC}Other Sessions (awareness only — if a request belongs to one of these, say so rather than duplicating work here; to hand one a task or note, run cs -msg <session>):\n${SIBLINGS}"
         fi
     fi
 

@@ -204,6 +204,18 @@ test_read_ignores_torn_final_line_until_completed() {
     assert_output_contains "$out" "torn" "completed line delivered" || return 1
 }
 
+test_read_renders_null_ts_and_flattens_multiline_body() {
+    mkdir -p "$CS_SESSIONS_ROOT/receiver/.cs/local/mail"
+    # ts:null must fall back to --:-- (not crash strflocaltime); an embedded
+    # newline in the body must render on one line, never breaking the display.
+    printf '{"id":"n","ts":null,"from":"sender","actor":"a","kind":"text","body":"line one\\nline two","ref":null}\n' \
+        >> "$CS_SESSIONS_ROOT/receiver/.cs/local/mail/inbox.jsonl"
+    local out; out=$(_as_receiver -msg 2>&1) || return 1
+    assert_output_contains "$out" "--:--" "null ts renders as --:--" || return 1
+    assert_output_contains "$out" "line one line two" "multiline body flattened to one line" || return 1
+    assert_eq "1" "$(printf '%s\n' "$out" | grep -c 'line one')" "body renders on a single line" || return 1
+}
+
 test_read_survives_corrupt_line_and_big_inbox() {
     mkdir -p "$CS_SESSIONS_ROOT/receiver/.cs/local/mail"
     printf 'not json at all\n' >> "$CS_SESSIONS_ROOT/receiver/.cs/local/mail/inbox.jsonl"
@@ -223,6 +235,7 @@ run_test test_log_reprints_everything_without_moving_cursors
 run_test test_read_outside_session_errors
 run_test test_read_strips_control_characters
 run_test test_read_ignores_torn_final_line_until_completed
+run_test test_read_renders_null_ts_and_flattens_multiline_body
 run_test test_read_survives_corrupt_line_and_big_inbox
 
 _prompt_as_receiver() {  # prompt-text

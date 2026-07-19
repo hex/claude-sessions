@@ -549,6 +549,11 @@ test_session_start_includes_sibling_sessions() {
         session_start_teardown
         return 1
     fi
+    if ! echo "$context" | grep -q "cs -msg"; then
+        echo "  FAIL: sibling block should name cs -msg as the way to reach another session"
+        session_start_teardown
+        return 1
+    fi
 
     session_start_teardown
 }

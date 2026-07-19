@@ -48,6 +48,16 @@ _spawn_precheck() {  # name
     fi
 }
 
+# How to reach the cs tmux session. tmux attach refuses to nest, so a caller
+# already inside tmux is told to switch-client instead.
+_spawn_attach_hint() {
+    if [ -n "${TMUX:-}" ]; then
+        printf 'tmux switch-client -t cs'
+    else
+        printf 'tmux attach -t cs'
+    fi
+}
+
 _spawn_window() {  # name
     local name="$1" cmd wid
     cmd="$(_sq "$(_cs_self)") $(_sq "$name")"
@@ -58,12 +68,12 @@ _spawn_window() {  # name
         # Plain target: tmux 3.6a rejects '=' anchors on the options commands;
         # exact 'cs' was just created by new-session, so this cannot misfire.
         _tmux set-option -t cs @cs_managed 1
-        info "spawned $name in tmux session cs (window $wid). Attach: tmux attach -t cs"
+        info "spawned $name in tmux session cs (window $wid). Attach: $(_spawn_attach_hint)"
         return 0
     fi
     wid=$(_tmux new-window -t =cs -n "$name" -P -F '#{window_id}' "$cmd") \
         || error "tmux new-window failed for $name"
-    info "spawned $name in tmux session cs (window $wid). Attach: tmux attach -t cs"
+    info "spawned $name in tmux session cs (window $wid). Attach: $(_spawn_attach_hint)"
 }
 
 run_spawn() {

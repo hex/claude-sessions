@@ -15,6 +15,9 @@ setup() {
     export CS_SESSIONS_ROOT="$TEST_TMPDIR/sessions"
     mkdir -p "$CS_SESSIONS_ROOT"
     export CLAUDE_CODE_BIN="echo"
+    # The attach hint keys on $TMUX; unset it so the baseline is deterministic
+    # regardless of whether the suite itself runs inside tmux.
+    unset TMUX 2>/dev/null || true
     # Recording tmux fake: logs argv, one call per line; behavior driven by
     # state files in $TEST_TMPDIR/tmux-state (see comments inside).
     export CS_TMUX_BIN="$TEST_TMPDIR/fake-tmux"
@@ -107,6 +110,14 @@ test_spawn_empty_spawner_writes_blank_first_line() {
 test_spawn_without_task_writes_no_seed() {
     "$CS_BIN" -spawn worker >/dev/null 2>&1 || return 1
     [ ! -f "$(SEED)" ] || { echo "  seed written without --task"; return 1; }
+}
+
+test_spawn_attach_hint_uses_switch_client_inside_tmux() {
+    # tmux attach refuses to nest; from inside tmux the user needs switch-client.
+    local out
+    out=$(TMUX="/tmp/tmux-1000/default,1234,0" "$CS_BIN" -spawn worker 2>&1) || return 1
+    assert_output_contains "$out" "tmux switch-client -t cs" "switch-client hint inside tmux" || return 1
+    assert_output_not_contains "$out" "tmux attach -t cs" "no attach hint inside tmux" || return 1
 }
 
 test_spawn_refuses_existing_seed() {
@@ -240,6 +251,7 @@ run_test test_spawn_rejects_bad_names_and_missing_tmux
 run_test test_spawn_rejects_live_target
 run_test test_spawn_writes_seed_and_opens_window
 run_test test_spawn_without_task_writes_no_seed
+run_test test_spawn_attach_hint_uses_switch_client_inside_tmux
 run_test test_spawn_refuses_existing_seed
 run_test test_spawn_rejects_multiline_and_empty_task
 run_test test_spawn_refuses_unmanaged_cs_session
