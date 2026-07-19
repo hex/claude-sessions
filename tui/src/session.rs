@@ -5,18 +5,48 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Whether a session is running, and whether cs owns the lock. Collapsing the
+/// old `lock_pid`/`is_locked`/`is_live` trio into one value keeps the illegal
+/// "locked but not live" combination unrepresentable.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Liveness {
+    /// cs holds the process lock; the PID is the running conversation.
+    Locked(u32),
+    /// No lock, but the statusline touched `.cs/local/context-pct` within the
+    /// heartbeat window — a conversation opened outside cs.
+    Heartbeat,
+    /// Neither locked nor breathing.
+    Dormant,
+}
+
+impl Liveness {
+    /// True on any live surface (locked or breathing).
+    pub fn is_live(self) -> bool {
+        !matches!(self, Liveness::Dormant)
+    }
+    /// True only when cs holds the process lock (not merely heartbeat-live).
+    pub fn is_locked(self) -> bool {
+        matches!(self, Liveness::Locked(_))
+    }
+    /// The locking process's PID, if cs holds the lock.
+    pub fn lock_pid(self) -> Option<u32> {
+        match self {
+            Liveness::Locked(pid) => Some(pid),
+            _ => None,
+        }
+    }
+}
+
 pub struct Session {
     pub name: String,
     pub is_adopted: bool,
     pub created: Option<String>,
     pub modified: Option<String>,
     pub modified_ts: Option<std::time::SystemTime>,
-    pub lock_pid: Option<u32>,
-    pub is_locked: bool,
-    /// Locked, or breathing via the statusline heartbeat: a conversation
-    /// opened outside cs writes no lock, but its statusline still touches
-    /// .cs/local/context-pct every few seconds while active.
-    pub is_live: bool,
+    /// Locked (cs owns the process), breathing via the statusline heartbeat (a
+    /// conversation opened outside cs touches context-pct while active), or
+    /// dormant.
+    pub liveness: Liveness,
     pub secrets_count: u32,
     pub queue_depth: u32,
     pub git_repo: Option<String>,
@@ -371,10 +401,11 @@ fn read_session(path: &Path, secret_counts: &HashMap<String, u32>) -> Session {
         .as_ref()
         .map(|f| parse_modified(f))
         .unwrap_or((None, None));
-    let lock_pid = read_lock_pid(&meta_dir);
-    let is_locked = lock_pid.is_some();
-    let is_live =
-        is_locked || heartbeat_alive(&meta_dir, std::time::SystemTime::now());
+    let liveness = match read_lock_pid(&meta_dir) {
+        Some(pid) => Liveness::Locked(pid),
+        None if heartbeat_alive(&meta_dir, std::time::SystemTime::now()) => Liveness::Heartbeat,
+        None => Liveness::Dormant,
+    };
     let secrets_count = secret_counts.get(&name).copied().unwrap_or(0);
     let queue_depth = fs::read_to_string(meta_dir.join("local/queue"))
         .map(|s| s.lines().filter(|l| !l.trim().is_empty()).count() as u32)
@@ -396,9 +427,7 @@ fn read_session(path: &Path, secret_counts: &HashMap<String, u32>) -> Session {
         created,
         modified,
         modified_ts,
-        lock_pid,
-        is_locked,
-        is_live,
+        liveness,
         secrets_count,
         queue_depth,
         git_repo,
@@ -801,6 +830,21 @@ mod tests {
         )
         .unwrap();
         dir
+    }
+
+    #[test]
+    fn liveness_helpers_map_each_variant() {
+        assert!(Liveness::Locked(42).is_live());
+        assert!(Liveness::Locked(42).is_locked());
+        assert_eq!(Liveness::Locked(42).lock_pid(), Some(42));
+
+        assert!(Liveness::Heartbeat.is_live());
+        assert!(!Liveness::Heartbeat.is_locked());
+        assert_eq!(Liveness::Heartbeat.lock_pid(), None);
+
+        assert!(!Liveness::Dormant.is_live());
+        assert!(!Liveness::Dormant.is_locked());
+        assert_eq!(Liveness::Dormant.lock_pid(), None);
     }
 
     #[test]

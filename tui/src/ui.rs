@@ -281,7 +281,7 @@ fn render_masthead(app: &App, frame: &mut Frame, area: Rect) {
     if area.height < 2 {
         return;
     }
-    let live = app.sessions.iter().filter(|s| s.is_live).count();
+    let live = app.sessions.iter().filter(|s| s.liveness.is_live()).count();
     let archived = app.sessions.iter().filter(|s| s.archived).count();
     let dir = match app.sort_dir {
         SortDirection::Asc => "\u{25b2}",
@@ -508,7 +508,7 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
                 let rail_color = if dimmed { p.comment } else { p.faint };
                 name_spans.push(Span::styled(connector, Style::default().fg(rail_color)));
             }
-            if s.is_live {
+            if s.liveness.is_live() {
                 let sq = if dimmed {
                     p.comment
                 } else {
@@ -1154,7 +1154,8 @@ fn render_confirm_force_open(app: &App, frame: &mut Frame) {
     };
 
     let pid_text = session
-        .lock_pid
+        .liveness
+        .lock_pid()
         .map(|pid| format!(" (PID {})", pid))
         .unwrap_or_default();
 
@@ -1483,16 +1484,16 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
     // Labeled meta rows: label FAINT at the pane's left edge, value at a fixed
     // column so the block reads as a table even without rules between rows.
     // (value, colour, optional leading dot in its own colour)
-    let (state_value, state_color, state_dot) = if session.is_locked {
+    let (state_value, state_color, state_dot) = if session.liveness.is_locked() {
         (
-            match session.lock_pid {
+            match session.liveness.lock_pid() {
                 Some(pid) => format!("\u{25a0} live \u{b7} locked {}", pid),
                 None => "\u{25a0} live \u{b7} locked".to_string(),
             },
             p.teal,
             None,
         )
-    } else if session.is_live {
+    } else if session.liveness.is_live() {
         // Breathing without a lock: opened outside cs, no PID to show.
         ("\u{25a0} live \u{b7} unlocked".to_string(), p.teal, None)
     } else if session.archived {
@@ -1835,7 +1836,7 @@ mod tests {
     }
 
     use crate::app::App;
-    use crate::session::Session;
+    use crate::session::{Liveness, Session};
     use crate::theme::Palette;
     use crate::app::Focus;
     use crossterm::event::{KeyCode, KeyEvent};
@@ -1850,8 +1851,7 @@ mod tests {
             created: Some("2026-01-01 10:00".into()),
             modified: Some("2026-02-20 14:00".into()),
             modified_ts: None,
-            lock_pid: None,
-            is_locked: false, is_live: false,
+            liveness: Liveness::Dormant,
             secrets_count: 0,
             queue_depth: 0,
             git_repo: None,
@@ -1871,8 +1871,7 @@ mod tests {
                 created: Some("2026-01-01 10:00".into()),
                 modified: Some("2026-02-20 14:00".into()),
                 modified_ts: Some(std::time::SystemTime::now()),
-                lock_pid: Some(123),
-                is_locked: true, is_live: true,
+                liveness: Liveness::Locked(123),
                 secrets_count: 0,
                 queue_depth: 0,
                 git_repo: None,
@@ -1885,8 +1884,7 @@ mod tests {
                 created: Some("2026-01-01 10:00".into()),
                 modified: Some("2026-02-20 14:00".into()),
                 modified_ts: Some(std::time::SystemTime::now()),
-                lock_pid: None,
-                is_locked: false, is_live: false,
+                liveness: Liveness::Dormant,
                 secrets_count: 0,
                 queue_depth: 0,
                 git_repo: None,
@@ -1985,8 +1983,7 @@ mod tests {
         let mut sessions = one_session();
         sessions[0].name = "cs-tui-preview-meta-probe".into();
         sessions[0].git_repo = Some("hex/claude-sessions".into());
-        sessions[0].is_locked = true;
-        sessions[0].lock_pid = Some(4242);
+        sessions[0].liveness = Liveness::Locked(4242);
         let mut app = App::new(sessions);
         app.theme = Palette::dark();
         app.show_preview = true;
@@ -2639,9 +2636,7 @@ mod tests {
         app.theme = Palette::dark();
         app.show_preview = true;
         // Live via statusline heartbeat, but no cs lock and no PID.
-        app.sessions[0].is_live = true;
-        app.sessions[0].is_locked = false;
-        app.sessions[0].lock_pid = None;
+        app.sessions[0].liveness = Liveness::Heartbeat;
         let p = app.theme;
 
         let backend = TestBackend::new(90, 40);
@@ -3246,8 +3241,7 @@ mod tests {
                 created: Some("2026-01-01 10:00".into()),
                 modified: Some("2026-02-20 14:00".into()),
                 modified_ts: None,
-                lock_pid: None,
-                is_locked: false, is_live: false,
+                liveness: Liveness::Dormant,
                 secrets_count: 0,
                 queue_depth: 0,
                 git_repo: None,
@@ -3772,8 +3766,7 @@ mod tests {
             created: Some("2026-01-01 10:00".into()),
             modified: Some("2026-02-20 14:00".into()),
             modified_ts: Some(std::time::SystemTime::now()),
-            lock_pid: None,
-            is_locked: false, is_live: false,
+            liveness: Liveness::Dormant,
             secrets_count: 0,
             queue_depth: 0,
             git_repo: None,

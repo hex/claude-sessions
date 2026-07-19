@@ -1193,7 +1193,7 @@ impl App {
             0 => {
                 // Open: same as old Enter logic
                 if let Some(session) = self.selected_session() {
-                    if session.is_locked {
+                    if session.liveness.is_locked() {
                         self.mode = Mode::ConfirmForceOpen;
                         Action::None
                     } else {
@@ -1981,7 +1981,7 @@ fn rename_claude_projects_dir(old_session_path: &std::path::Path, new_session_pa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::Session;
+    use crate::session::{Liveness, Session};
 
     fn sample_sessions() -> Vec<Session> {
         vec![
@@ -1991,8 +1991,7 @@ mod tests {
                 created: Some("2026-01-01 10:00".into()),
                 modified: Some("2026-02-20 14:00".into()),
                 modified_ts: None,
-                lock_pid: None,
-                is_locked: false, is_live: false,
+                liveness: Liveness::Dormant,
                 secrets_count: 0,
                 queue_depth: 0,
                 git_repo: Some("hex/alpha".into()),
@@ -2005,8 +2004,7 @@ mod tests {
                 created: Some("2026-02-01 10:00".into()),
                 modified: Some("2026-02-15 09:00".into()),
                 modified_ts: None,
-                lock_pid: None,
-                is_locked: false, is_live: false,
+                liveness: Liveness::Dormant,
                 secrets_count: 2,
                 queue_depth: 0,
                 git_repo: Some("hex/beta".into()),
@@ -2019,8 +2017,7 @@ mod tests {
                 created: Some("2025-12-01 10:00".into()),
                 modified: Some("2026-01-10 08:00".into()),
                 modified_ts: None,
-                lock_pid: Some(12345),
-                is_locked: true, is_live: true,
+                liveness: Liveness::Locked(12345),
                 secrets_count: 0,
                 queue_depth: 0,
                 git_repo: None,
@@ -2135,8 +2132,7 @@ mod tests {
             created: None,
             modified: None,
             modified_ts: None,
-            lock_pid: None,
-            is_locked: false, is_live: false,
+            liveness: Liveness::Dormant,
             secrets_count: 0,
             queue_depth: 0,
             git_repo: None,
@@ -2152,8 +2148,7 @@ mod tests {
             created: Some("2026-01-01 10:00".into()),
             modified: Some("2026-02-20 14:00".into()),
             modified_ts: None,
-            lock_pid: None,
-            is_locked: false, is_live: false,
+            liveness: Liveness::Dormant,
             secrets_count: 0,
             queue_depth: 0,
             git_repo: None,
@@ -2333,8 +2328,7 @@ mod tests {
             created: Some("2026-01-01 10:00".into()),
             modified: Some(modified.into()),
             modified_ts: None,
-            lock_pid: None,
-            is_locked: false, is_live: false,
+            liveness: Liveness::Dormant,
             secrets_count: 0,
             queue_depth: 0,
             git_repo: None,
@@ -3845,8 +3839,7 @@ mod tests {
             created: Some("2026-01-01 10:00".into()),
             modified: Some("2026-02-20 14:00".into()),
             modified_ts: Some(SystemTime::now() - Duration::from_secs(age_secs)),
-            lock_pid: None,
-            is_locked: false, is_live: false,
+            liveness: Liveness::Dormant,
             secrets_count: 0,
             queue_depth: 0,
             git_repo: None,
