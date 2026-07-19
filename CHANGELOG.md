@@ -4,6 +4,22 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## Unreleased
+
+### Features
+- **Discard a pending rotation handoff** — the resume prompt gains a `d` answer (`[Y/n/r/d]`) that flips a pending handoff to `status: discarded` and resumes normally, so a handoff you no longer want stops being offered.
+- **`cs -doctor` spawn hygiene** — new checks warn on accumulated `.spawn/*.seed.stale` files (nothing prunes them), a pending seed with no session (blocks re-spawning the name), a `spawned-by` pointer at a deleted session, and a tmux session named `cs` that cs did not create.
+- **switch-client attach hint** — `cs -spawn` from inside tmux suggests `tmux switch-client -t cs` (attach refuses to nest); plain `tmux attach -t cs` otherwise.
+- **Completions** — `cs -msg`/`cs -spawn` complete a target session as the first argument; `-rm`/`-archive`/`-unarchive` complete session names at every position, not just the first.
+
+### Fixes
+- `cs -rm` refuses a live (PID-locked) session unless `--force`, matching `cs -archive`.
+- Session deletion (`cs -rm` and the TUI) discards the session's pending spawn seeds, so a re-created same-name session no longer inherits dead armed tasks and `cs -spawn` stops refusing the name.
+- `cs <name> -msg log` and a bare `cs <name> -msg` now error with a read hint instead of sending the literal body `log` (the session-scoped alias is send-only).
+
+### Docs
+- README command reference lists `cs -msg` and `cs -spawn`; the rotate skill and session-layout doc describe the `d` discard answer and the `status: discarded` handoff state.
+
 ## 2026.7.17
 
 ### Features

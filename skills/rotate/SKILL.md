@@ -43,4 +43,6 @@ should do. If the user did not give one, ask before writing anything.
 5. Tell the user: exit this conversation, run `cs <session-name>`, and
    answer `r` at the "Continue previous conversation?" prompt to start
    fresh from this handoff. Until then the handoff stays pending; answering
-   `Y` keeps this conversation resumable and the handoff waits.
+   `Y` keeps this conversation resumable and the handoff waits, and `d`
+   discards the pending handoff (flips it to `status: discarded`) and
+   resumes normally — use it to drop a handoff you no longer want.

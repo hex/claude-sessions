@@ -32,7 +32,7 @@ The one distinction that governs everything below is **shared vs machine-local**
 | `.cs/memory/narrative.<actor>.md` | Per-actor lab notebook. Each co-developer writes their own file; everyone reads all of them on resume. | `union` |
 | `.cs/checkpoints/` | Labelled state snapshots from `/checkpoint` (narrative + changes + git HEAD). | default |
 | `.cs/archived` | Archive marker written by `cs -archive` (date + actor). Tracked so the archived state syncs; removed on open or `cs -unarchive`. | default |
-| `.cs/handoffs/` | Lineage-stamped conversation handoffs written by the `rotate` skill (parent UUID, purpose, continuation plan). Consumed by the next launch's `r` answer. | default |
+| `.cs/handoffs/` | Lineage-stamped conversation handoffs written by the `rotate` skill (parent UUID, purpose, continuation plan). Each carries a `status:` field — `unconsumed` while pending, flipped to `discarded` by the resume prompt's `d` answer; the launch's `r` answer consumes the pending one. | default |
 | `.cs/plans/` | Design plans and specs kept with the session. | default |
 | `.cs/age-recipients/*.pub` | age public keys of everyone allowed to decrypt the session's synced secrets. | default |
 | `.cs/secrets.<machine-id>.age` | Per-machine encrypted secret sync file (age; preferred). Each machine writes its own so exports never collide. | default |
