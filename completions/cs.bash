@@ -131,15 +131,26 @@ _cs_completions() {
         esac
     done
 
-    # Context: after -remove/-rm, complete with session names
-    if $after_remove && [[ $cword -eq 2 ]]; then
+    # Context: global `cs -msg <session>` / `cs -spawn <session>` — the first arg
+    # is a session name (the mail target, or the session to open in tmux). Only
+    # the first positional; later -msg args are free-text body.
+    if [[ $cword -eq 2 && ( "${words[1]}" == "-msg" || "${words[1]}" == "-spawn" ) ]]; then
         COMPREPLY=()
         _cs_add_session_matches "$cur"
         return
     fi
 
-    # Context: after -archive/-unarchive, complete with session names
-    if $after_archive && [[ $cword -eq 2 ]]; then
+    # Context: after -remove/-rm, complete with session names. These verbs take
+    # several names, so every positional past the flag completes, not just the
+    # first.
+    if $after_remove; then
+        COMPREPLY=()
+        _cs_add_session_matches "$cur"
+        return
+    fi
+
+    # Context: after -archive/-unarchive, complete with session names (multi-name).
+    if $after_archive; then
         COMPREPLY=()
         _cs_add_session_matches "$cur"
         return

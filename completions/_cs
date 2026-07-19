@@ -147,14 +147,23 @@ _cs() {
         esac
     done
 
-    # Context: after -remove/-rm
-    if $after_remove && [[ $CURRENT -eq 3 ]]; then
+    # Context: global `cs -msg <session>` / `cs -spawn <session>` — the first arg
+    # is a session name (the mail target, or the session to open in tmux). Only
+    # the first positional; later -msg args are free-text body.
+    if [[ $CURRENT -eq 3 && ( "${words[2]}" == "-msg" || "${words[2]}" == "-spawn" ) ]]; then
         _cs_sessions
         return
     fi
 
-    # Context: after -archive/-unarchive
-    if $after_archive && [[ $CURRENT -eq 3 ]]; then
+    # Context: after -remove/-rm. These verbs take several names, so every
+    # positional past the flag completes, not just the first.
+    if $after_remove; then
+        _cs_sessions
+        return
+    fi
+
+    # Context: after -archive/-unarchive (multi-name)
+    if $after_archive; then
         _cs_sessions
         return
     fi

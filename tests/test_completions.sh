@@ -67,6 +67,33 @@ bash_candidates_for() {
     ' _ "$TEST_TMPDIR/bin" "$script" "$word" 2>/dev/null
 }
 
+# Drive bash completion with an explicit word list (cs first; the final element
+# is the word being completed). COMP_CWORD points at that final element.
+bash_candidates_words() {  # script word...
+    local script="$1"; shift
+    bash --norc --noprofile -c '
+        PATH="$1:$PATH"
+        source "$2"
+        shift 2
+        COMP_WORDS=("$@")
+        COMP_CWORD=$(( $# - 1 ))
+        _cs_completions
+        printf "%s\n" "${COMPREPLY[@]}"
+    ' _ "$TEST_TMPDIR/bin" "$script" "$@" 2>/dev/null
+}
+
+# Drive zsh completion with an explicit word list (cs first; the final element
+# is the word being completed). CURRENT points at that final element.
+zsh_candidates_words() {  # word...
+    zsh -f -c '
+        PATH="$1:$PATH"; comp="$2"; shift 2
+        _describe() { local arr=${@[-1]}; print -rl -- ${(P)arr} }
+        words=("$@")
+        CURRENT=$#
+        source "$comp"
+    ' _ "$TEST_TMPDIR/bin" "$ZSH_COMP" "$@" 2>/dev/null | sed 's/:.*//'
+}
+
 test_bash_completion_offers_a_symlinked_session() {
     create_test_session "real-session" >/dev/null
     link_test_session "linked-session"
@@ -361,6 +388,55 @@ test_complete_sessions_includes_a_legacy_session() {
     assert_candidate "$out" "legacy-session" "a pre-.cs/ session with a root CLAUDE.md must complete" || return 1
 }
 
+# --- Multi-name verbs and -msg/-spawn first-arg completion ---
+
+test_bash_msg_completes_target_session() {
+    create_test_session "target-sess" >/dev/null
+    put_built_cs_on_path
+    local out; out=$(bash_candidates_words "$BASH_COMP" cs -msg "")
+    assert_candidate "$out" "target-sess" "cs -msg <TAB> must offer a target session" || return 1
+}
+
+test_bash_spawn_completes_session_name() {
+    create_test_session "spawn-me" >/dev/null
+    put_built_cs_on_path
+    local out; out=$(bash_candidates_words "$BASH_COMP" cs -spawn "")
+    assert_candidate "$out" "spawn-me" "cs -spawn <TAB> must offer a session name" || return 1
+}
+
+test_bash_rm_completes_beyond_first_name() {
+    create_test_session "keep-one" >/dev/null
+    create_test_session "keep-two" >/dev/null
+    put_built_cs_on_path
+    local out; out=$(bash_candidates_words "$BASH_COMP" cs -rm keep-one "")
+    assert_candidate "$out" "keep-two" "cs -rm <name> <TAB> must offer a second session" || return 1
+}
+
+test_bash_archive_completes_beyond_first_name() {
+    create_test_session "arch-one" >/dev/null
+    create_test_session "arch-two" >/dev/null
+    put_built_cs_on_path
+    local out; out=$(bash_candidates_words "$BASH_COMP" cs -archive arch-one "")
+    assert_candidate "$out" "arch-two" "cs -archive <name> <TAB> must offer a second session" || return 1
+}
+
+test_zsh_msg_completes_target_session() {
+    command -v zsh >/dev/null 2>&1 || { echo "    (zsh not installed, skipping)"; return 0; }
+    create_test_session "ztarget" >/dev/null
+    put_built_cs_on_path
+    local out; out=$(zsh_candidates_words cs -msg "")
+    assert_candidate "$out" "ztarget" "zsh cs -msg <TAB> must offer a target session" || return 1
+}
+
+test_zsh_rm_completes_beyond_first_name() {
+    command -v zsh >/dev/null 2>&1 || { echo "    (zsh not installed, skipping)"; return 0; }
+    create_test_session "zkeep-one" >/dev/null
+    create_test_session "zkeep-two" >/dev/null
+    put_built_cs_on_path
+    local out; out=$(zsh_candidates_words cs -rm zkeep-one "")
+    assert_candidate "$out" "zkeep-two" "zsh cs -rm <name> <TAB> must offer a second session" || return 1
+}
+
 echo ""
 echo "cs completion drift tests"
 echo "========================="
@@ -418,5 +494,11 @@ run_test test_zsh_completion_covers_all_secrets_subcommands
 run_test test_bash_completion_covers_all_secrets_subcommands
 run_test test_queue_extraction_is_sane
 run_test test_completions_cover_all_queue_subcommands
+run_test test_bash_msg_completes_target_session
+run_test test_bash_spawn_completes_session_name
+run_test test_bash_rm_completes_beyond_first_name
+run_test test_bash_archive_completes_beyond_first_name
+run_test test_zsh_msg_completes_target_session
+run_test test_zsh_rm_completes_beyond_first_name
 
 report_results
