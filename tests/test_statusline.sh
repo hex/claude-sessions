@@ -31,6 +31,11 @@ setup() {
     mkdir -p "$CS_SESSIONS_ROOT"
     # Neutral terminal by default; per-test overrides as needed.
     export TERM="xterm-256color"
+    # Pin the theme so render tests are deterministic regardless of the runner's
+    # OS appearance: _sl_detect_theme now reads the live macOS appearance when
+    # CS_TERM_THEME is unset, which setup() strips above. The theme-resolution
+    # tests unset this in their own subshells to exercise the live path.
+    export CS_TERM_THEME="light"
 }
 
 teardown() {
@@ -1414,6 +1419,92 @@ test_limits_file_skipped_without_rate_limits() {
     assert_file_not_exists "$CS_SESSIONS_ROOT/limsess2/.cs/local/limits" "no limits file without rate_limits" || return 1
 }
 
+# ============================================================================
+# Theme resolution: CS_TERM_THEME pin wins; else follow the terminal live
+# (macOS OS appearance, tty-safe) so a mid-session dark-mode switch is tracked;
+# else the frozen launch fallback. See _sl_detect_theme in cs-statusline.
+# ============================================================================
+
+# An explicit pin is CS_TERM_THEME set with NO auto marker; it wins everywhere.
+test_sl_theme_user_pin_overrides() {
+    ( _load_sl_functions
+      export CS_TERM_THEME=dark
+      unset CS_TERM_THEME_AUTO 2>/dev/null || true
+      assert_eq "dark" "$(_sl_detect_theme)" "an explicit CS_TERM_THEME pin wins" || return 1 )
+}
+
+# A pin beats the live OS appearance even on macOS (terminal decoupled from OS).
+test_sl_theme_macos_pin_beats_live() {
+    ( _load_sl_functions
+      export CS_TERM_THEME=light
+      unset CS_TERM_THEME_AUTO 2>/dev/null || true
+      OSTYPE="darwin24"
+      defaults() { return 0; }   # OS is dark, but the pin says light
+      assert_eq "light" "$(_sl_detect_theme)" "a pin overrides live macOS detection" || return 1 )
+}
+
+# Auto-detected launch value (CS_TERM_THEME + matching AUTO marker) yields to the
+# live macOS appearance so a mid-session switch is tracked.
+test_sl_theme_follows_macos_dark_appearance() {
+    ( _load_sl_functions
+      export CS_TERM_THEME=light CS_TERM_THEME_AUTO=light   # launch detected light
+      OSTYPE="darwin24"
+      defaults() { return 0; }   # AppleInterfaceStyle key present => now dark
+      assert_eq "dark" "$(_sl_detect_theme)" "live macOS dark appearance overrides the auto marker" || return 1 )
+}
+
+test_sl_theme_follows_macos_light_appearance() {
+    ( _load_sl_functions
+      export CS_TERM_THEME=dark CS_TERM_THEME_AUTO=dark   # launch detected dark
+      OSTYPE="darwin24"
+      defaults() { return 1; }   # key absent => now light
+      assert_eq "light" "$(_sl_detect_theme)" "live macOS light appearance overrides the auto marker" || return 1 )
+}
+
+test_sl_theme_non_macos_uses_frozen_launch_value() {
+    ( _load_sl_functions
+      export CS_TERM_THEME=dark CS_TERM_THEME_AUTO=dark
+      OSTYPE="linux-gnu"
+      assert_eq "dark" "$(_sl_detect_theme)" "non-macOS keeps the launch theme" || return 1 )
+}
+
+test_sl_theme_non_macos_defaults_light() {
+    ( _load_sl_functions
+      unset CS_TERM_THEME CS_TERM_THEME_AUTO 2>/dev/null || true
+      OSTYPE="linux-gnu"
+      assert_eq "light" "$(_sl_detect_theme)" "non-macOS with no launch theme defaults light" || return 1 )
+}
+
+# The launch-captured background RGB is dropped once the live theme has left the
+# theme cs detected at launch, so surfaces/gradient don't tint toward the old bg.
+test_sl_bg_rgb_dropped_after_switch() {
+    ( _load_sl_functions
+      export CS_TERM_THEME_AUTO=light CS_TERM_BG_RGB="250;248;242"
+      assert_eq "" "$(_sl_bg_rgb dark)" "stale RGB dropped when the live theme left the launch theme" || return 1 )
+}
+
+test_sl_bg_rgb_kept_when_theme_matches() {
+    ( _load_sl_functions
+      export CS_TERM_THEME_AUTO=light CS_TERM_BG_RGB="250;248;242"
+      assert_eq "250;248;242" "$(_sl_bg_rgb light)" "RGB kept when the live theme matches launch" || return 1 )
+}
+
+test_sl_bg_rgb_kept_for_manual_value() {
+    ( _load_sl_functions
+      unset CS_TERM_THEME_AUTO 2>/dev/null || true
+      export CS_TERM_BG_RGB="1;2;3"
+      assert_eq "1;2;3" "$(_sl_bg_rgb dark)" "a manually-set RGB (no auto marker) is never dropped" || return 1 )
+}
+
 run_test test_limits_file_written_from_rate_limits
 run_test test_limits_file_skipped_without_rate_limits
+run_test test_sl_theme_user_pin_overrides
+run_test test_sl_theme_macos_pin_beats_live
+run_test test_sl_theme_follows_macos_dark_appearance
+run_test test_sl_theme_follows_macos_light_appearance
+run_test test_sl_theme_non_macos_uses_frozen_launch_value
+run_test test_sl_theme_non_macos_defaults_light
+run_test test_sl_bg_rgb_dropped_after_switch
+run_test test_sl_bg_rgb_kept_when_theme_matches
+run_test test_sl_bg_rgb_kept_for_manual_value
 report_results

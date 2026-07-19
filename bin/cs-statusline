@@ -9,9 +9,47 @@ SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 # Read-only status query; never take the index lock from a render.
 export GIT_OPTIONAL_LOCKS=0
 
-# Terminal theme, exported by cs at launch (detected via COLORFGBG/OSC 11
-# while cs still owned the tty). Anything but "dark" renders the light set.
-SL_THEME="${CS_TERM_THEME:-light}"
+# Resolve the terminal theme for this render. CS_TERM_THEME, when set, is an
+# explicit user override (see `cs -help`) and wins. Otherwise the launch-time
+# detection cannot follow a mid-session terminal theme switch (macOS auto dark
+# mode) because an env var in the running claude process can't change, and
+# re-querying the terminal here would corrupt claude's TUI. So on macOS read the
+# live OS appearance each render (tty-safe: the AppleInterfaceStyle key is
+# present in dark, absent in light, tracking Auto mode), and elsewhere fall back
+# to the theme cs detected at launch (CS_TERM_THEME_AUTO), defaulting to light.
+_sl_detect_theme() {
+    # An explicit user pin — CS_TERM_THEME set with no CS_TERM_THEME_AUTO marker
+    # from launch auto-detection — wins everywhere (see `cs -help`).
+    if [ -n "${CS_TERM_THEME:-}" ] && [ -z "${CS_TERM_THEME_AUTO:-}" ]; then
+        printf '%s' "$CS_TERM_THEME"
+    # Otherwise follow the terminal live where safe. Re-querying it here would
+    # corrupt claude's TUI, so on macOS read the OS appearance (tty-safe: the
+    # AppleInterfaceStyle key is present in dark, absent in light, tracking Auto
+    # mode), since the launch value can't follow a mid-session switch.
+    elif [[ "${OSTYPE:-}" == darwin* ]]; then
+        if defaults read -g AppleInterfaceStyle >/dev/null 2>&1; then printf 'dark'; else printf 'light'; fi
+    # Off macOS keep the theme cs detected at launch.
+    else
+        printf '%s' "${CS_TERM_THEME_AUTO:-${CS_TERM_THEME:-light}}"
+    fi
+}
+
+# Echo the launch-captured terminal background RGB, or empty when it is stale:
+# once the live theme has switched away from what cs detected at launch
+# (CS_TERM_THEME_AUTO), the RGB no longer matches the terminal, so drop it and
+# let the gauge surface and gradient fall back to theme-based values instead of
+# tinting toward the old background (which could leave light text on a near-light
+# surface). A manually-set RGB carries no auto marker and is never dropped.
+_sl_bg_rgb() {  # resolved_theme
+    if [ -n "${CS_TERM_BG_RGB:-}" ] && [ -n "${CS_TERM_THEME_AUTO:-}" ] && [ "$1" != "$CS_TERM_THEME_AUTO" ]; then
+        printf ''
+    else
+        printf '%s' "${CS_TERM_BG_RGB:-}"
+    fi
+}
+
+SL_THEME="$(_sl_detect_theme)"
+CS_TERM_BG_RGB="$(_sl_bg_rgb "$SL_THEME")"
 
 # Parsed stdin fields (filled by _parse_stdin).
 SL_SESSION=""; SL_CTX=""; SL_MODEL=""; SL_EFFORT=""

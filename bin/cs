@@ -4704,7 +4704,15 @@ _export_term_theme() {
     out=$(detect_term_theme_and_bg)
     theme="${out%% *}"
     [ "$theme" = "unknown" ] && return 0
+    # Export the detected theme so cs's own UI and the TUI picker (both cs
+    # children) render with the right palette. CS_TERM_THEME_AUTO marks that this
+    # value came from launch auto-detection, not an explicit user pin: the
+    # statusline reads the marker to know it may override the frozen theme with
+    # the live OS appearance (macOS auto dark mode), which the launch value can't
+    # follow. A user-set CS_TERM_THEME returned above and carries no marker, so
+    # it stays a hard override everywhere.
     export CS_TERM_THEME="$theme"
+    export CS_TERM_THEME_AUTO="$theme"
     if [[ "$out" == *" "* ]] && [ -z "${CS_TERM_BG_RGB:-}" ]; then
         export CS_TERM_BG_RGB="${out#* }"
     fi

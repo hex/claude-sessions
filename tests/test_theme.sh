@@ -210,6 +210,33 @@ test_cs_term_bg_rgb_respects_user_value() {
         "a user-set CS_TERM_BG_RGB must be left untouched" || return 1
 }
 
+# Auto-detection exports CS_TERM_THEME (so cs's own UI and the TUI picker render
+# right) plus the CS_TERM_THEME_AUTO marker (so the statusline knows it may
+# override the frozen theme with the live OS appearance) and the background RGB.
+test_export_term_theme_exports_theme_and_auto_marker() {
+    ( _load_cs_functions
+      unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_BG_RGB 2>/dev/null || true
+      detect_term_theme_and_bg() { echo "light 250;248;242"; }
+      _export_term_theme
+      local child; child=$(env)
+      case "$child" in *"CS_TERM_THEME=light"*) : ;; *) echo "  FAIL: CS_TERM_THEME not exported for cs's UI and the picker"; return 1;; esac
+      case "$child" in *"CS_TERM_THEME_AUTO=light"*) : ;; *) echo "  FAIL: CS_TERM_THEME_AUTO marker not exported"; return 1;; esac
+      case "$child" in *"CS_TERM_BG_RGB=250;248;242"*) : ;; *) echo "  FAIL: CS_TERM_BG_RGB not exported"; return 1;; esac )
+}
+
+# A user-set CS_TERM_THEME is an explicit override: it propagates to children
+# unchanged and suppresses the auto fallback.
+test_export_term_theme_user_pin_passes_through() {
+    ( _load_cs_functions
+      export CS_TERM_THEME=dark
+      unset CS_TERM_THEME_AUTO CS_TERM_BG_RGB 2>/dev/null || true
+      detect_term_theme_and_bg() { echo "light 250;248;242"; }
+      _export_term_theme
+      local child; child=$(env)
+      case "$child" in *"CS_TERM_THEME=dark"*) : ;; *) echo "  FAIL: user pin not propagated to children"; return 1;; esac
+      case "$child" in *"CS_TERM_THEME_AUTO="*) echo "  FAIL: AUTO fallback set despite a user pin"; return 1;; esac )
+}
+
 echo ""
 echo "cs theme detection tests"
 echo "========================"
@@ -228,6 +255,8 @@ run_test test_detect_under_tmux_black_everywhere_falls_back_to_os_appearance
 run_test test_detect_theme_graceful_under_tmux
 run_test test_detect_theme_graceful_no_tmux
 run_test test_cs_term_theme_override_wins
+run_test test_export_term_theme_exports_theme_and_auto_marker
+run_test test_export_term_theme_user_pin_passes_through
 run_test test_tmux_truecolor_exported_at_launch
 run_test test_tmux_truecolor_respects_user_value
 run_test test_cs_term_bg_rgb_absent_when_theme_unknown
