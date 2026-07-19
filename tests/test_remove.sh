@@ -82,8 +82,42 @@ test_remove_refuses_live_session_without_force() {
     [ ! -d "$CS_SESSIONS_ROOT/live1" ] || { echo "  FAIL: --force did not remove"; return 1; }
 }
 
+test_remove_discards_pending_spawn_seeds() {
+    create_test_session seeded >/dev/null
+    mkdir -p "$CS_SESSIONS_ROOT/.spawn"
+    printf 'spawner\ndo a task\n' > "$CS_SESSIONS_ROOT/.spawn/seeded.seed"
+    printf 'old\n' > "$CS_SESSIONS_ROOT/.spawn/seeded.seed.stale"
+    printf 'other\n' > "$CS_SESSIONS_ROOT/.spawn/other.seed"
+
+    printf 'n\n' | "$CS_BIN" -rm seeded >/dev/null 2>&1 || return 1
+    [ -f "$CS_SESSIONS_ROOT/.spawn/seeded.seed" ] || { echo "  declined removal still discarded the seed"; return 1; }
+
+    printf 'y\n' | "$CS_BIN" -rm seeded >/dev/null 2>&1 || return 1
+    [ ! -f "$CS_SESSIONS_ROOT/.spawn/seeded.seed" ] || { echo "  seed survived removal"; return 1; }
+    [ ! -f "$CS_SESSIONS_ROOT/.spawn/seeded.seed.stale" ] || { echo "  stale seed survived removal"; return 1; }
+    [ -f "$CS_SESSIONS_ROOT/.spawn/other.seed" ] || { echo "  another session's seed was deleted"; return 1; }
+}
+
+test_remove_worktree_session_discards_seeds() {
+    local base="$CS_SESSIONS_ROOT/wbase"
+    create_test_session wbase >/dev/null
+    git -C "$base" init -q
+    git -C "$base" add CLAUDE.md
+    git -C "$base" -c user.email=t@t -c user.name=t commit -qm seed
+    git -C "$base" worktree add -q "$CS_SESSIONS_ROOT/wbase@t" -b cs/t
+    mkdir -p "$CS_SESSIONS_ROOT/wbase@t/.cs/local"
+    mkdir -p "$CS_SESSIONS_ROOT/.spawn"
+    printf 'spawner\n' > "$CS_SESSIONS_ROOT/.spawn/wbase@t.seed"
+
+    printf 'y\n' | "$CS_BIN" -rm "wbase@t" >/dev/null 2>&1 || return 1
+    [ ! -d "$CS_SESSIONS_ROOT/wbase@t" ] || { echo "  worktree session survived"; return 1; }
+    [ ! -f "$CS_SESSIONS_ROOT/.spawn/wbase@t.seed" ] || { echo "  worktree seed survived removal"; return 1; }
+}
+
 run_test test_remove_empty_name_rejected_before_any_deletion
 run_test test_remove_refuses_live_session_without_force
+run_test test_remove_discards_pending_spawn_seeds
+run_test test_remove_worktree_session_discards_seeds
 run_test test_remove_multiple_names_each_confirmed
 run_test test_remove_decline_skips_that_session_only
 run_test test_remove_single_name_still_works

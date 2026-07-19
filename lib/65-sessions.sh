@@ -299,6 +299,7 @@ _remove_one_session() {
                         git -C "$wt_base_dir" branch -D "$wt_branch" 2>/dev/null || true
                     fi
                 fi
+                _spawn_discard_seeds "$session_name"
                 info "Removed worktree session: $session_name"
                 return 0
             fi
@@ -325,6 +326,7 @@ _remove_one_session() {
         rm -rf "$session_dir"
         info "Removed session: $session_name"
     fi
+    _spawn_discard_seeds "$session_name"
 }
 
 # Launch Claude Code

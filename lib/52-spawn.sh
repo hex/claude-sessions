@@ -20,6 +20,13 @@ _cs_self() {
     esac
 }
 
+# Delete any staged or stale seed for a name. Called when the session is
+# deleted: a leftover seed would block re-spawning the name and arm a
+# future same-name session with dead tasks.
+_spawn_discard_seeds() {  # name
+    rm -f "$SESSIONS_ROOT/.spawn/$1.seed" "$SESSIONS_ROOT/.spawn/$1.seed.stale"
+}
+
 # Pre-window checks that must pass BEFORE the seed is written, so a refused
 # spawn never leaves a pending seed behind.
 _spawn_precheck() {  # name

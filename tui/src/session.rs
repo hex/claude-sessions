@@ -643,12 +643,23 @@ pub fn worktree_parts(name: &str) -> Option<(&str, &str)> {
 /// directories are removed outright.
 pub fn remove_session_path(root: &Path, name: &str, path: &Path) -> std::io::Result<()> {
     if path.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false) {
-        fs::remove_file(path)
+        fs::remove_file(path)?;
     } else if worktree_parts(name).is_some() && path.join(".git").is_file() {
-        remove_worktree_session(root, name, path)
+        remove_worktree_session(root, name, path)?;
     } else {
-        fs::remove_dir_all(path)
+        fs::remove_dir_all(path)?;
     }
+    discard_spawn_seeds(root, name);
+    Ok(())
+}
+
+/// Delete any staged or stale spawn seed for `name`. A deleted session must
+/// not leave a seed behind: it would block re-spawning the name and arm a
+/// future same-name session with dead tasks. Best-effort by design.
+fn discard_spawn_seeds(root: &Path, name: &str) {
+    let spawn = root.join(".spawn");
+    let _ = fs::remove_file(spawn.join(format!("{name}.seed")));
+    let _ = fs::remove_file(spawn.join(format!("{name}.seed.stale")));
 }
 
 /// Remove a worktree session (`base@task`) through git so the base repo's
@@ -911,6 +922,25 @@ mod tests {
             "base repo must not keep a stale worktree registration"
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn remove_session_path_discards_spawn_seeds() {
+        let root = std::env::temp_dir().join(format!("cs-seed-rm-{}", std::process::id()));
+        let dir = root.join("seeded");
+        fs::create_dir_all(dir.join(".cs/local")).unwrap();
+        fs::create_dir_all(root.join(".spawn")).unwrap();
+        fs::write(root.join(".spawn/seeded.seed"), "spawner\ntask\n").unwrap();
+        fs::write(root.join(".spawn/seeded.seed.stale"), "old\n").unwrap();
+        fs::write(root.join(".spawn/other.seed"), "other\n").unwrap();
+
+        remove_session_path(&root, "seeded", &dir).unwrap();
+
+        assert!(!dir.exists(), "session directory should be gone");
+        assert!(!root.join(".spawn/seeded.seed").exists(), "seed must go with the session");
+        assert!(!root.join(".spawn/seeded.seed.stale").exists(), "stale seed must go too");
+        assert!(root.join(".spawn/other.seed").exists(), "other sessions' seeds stay");
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
