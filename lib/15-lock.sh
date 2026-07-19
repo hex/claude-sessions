@@ -129,15 +129,16 @@ _epoch_mtime() {  # path
 HEARTBEAT_WINDOW_SECS=900
 
 # True when the statusline heartbeat is fresh: context-pct was written within
-# HEARTBEAT_WINDOW_SECS of now. Detects conversations open outside cs (no lock).
-# A future mtime counts as live, matching the TUI's clamping.
-session_heartbeat_alive() {  # meta_dir
+# HEARTBEAT_WINDOW_SECS of now_epoch. Detects conversations open outside cs (no
+# lock). A future mtime counts as live, matching the TUI's clamping. Takes
+# now_epoch like session_uptime_secs so a loop over many sessions reads the
+# clock once.
+session_heartbeat_alive() {  # meta_dir, now_epoch
     local f="$1/local/context-pct"
     [ -f "$f" ] || return 1
-    local now mtime
-    now="$(date +%s)"
+    local mtime
     mtime="$(_epoch_mtime "$f")"
-    [ "$(( now - mtime ))" -le "$HEARTBEAT_WINDOW_SECS" ]
+    [ "$(( $2 - mtime ))" -le "$HEARTBEAT_WINDOW_SECS" ]
 }
 
 # True when a session should DISPLAY as live: PID-locked, or breathing via the
@@ -145,8 +146,8 @@ session_heartbeat_alive() {  # meta_dir
 # match the TUI. The destructive guards (rm/archive/spawn) use strict
 # session_is_live, so a session whose process is gone can still be removed
 # without --force even if its statusline was touched recently.
-session_display_live() {  # meta_dir
-    session_is_live "$1" || session_heartbeat_alive "$1"
+session_display_live() {  # meta_dir, now_epoch
+    session_is_live "$1" || session_heartbeat_alive "$1" "$2"
 }
 
 # Seconds since a session was last launched (its lock file's mtime).

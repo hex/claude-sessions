@@ -1494,12 +1494,9 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
     // Labeled meta rows: label FAINT at the pane's left edge, value at a fixed
     // column so the block reads as a table even without rules between rows.
     // (value, colour, optional leading dot in its own colour)
-    let (state_value, state_color, state_dot) = if session.liveness.is_locked() {
+    let (state_value, state_color, state_dot) = if let Some(pid) = session.liveness.lock_pid() {
         (
-            match session.liveness.lock_pid() {
-                Some(pid) => format!("\u{25a0} live \u{b7} locked {}", pid),
-                None => "\u{25a0} live \u{b7} locked".to_string(),
-            },
+            format!("\u{25a0} live \u{b7} locked {}", pid),
             p.teal,
             None,
         )

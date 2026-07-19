@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.7.17"
+VERSION="2026.7.18"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 
@@ -546,15 +546,16 @@ _epoch_mtime() {  # path
 HEARTBEAT_WINDOW_SECS=900
 
 # True when the statusline heartbeat is fresh: context-pct was written within
-# HEARTBEAT_WINDOW_SECS of now. Detects conversations open outside cs (no lock).
-# A future mtime counts as live, matching the TUI's clamping.
-session_heartbeat_alive() {  # meta_dir
+# HEARTBEAT_WINDOW_SECS of now_epoch. Detects conversations open outside cs (no
+# lock). A future mtime counts as live, matching the TUI's clamping. Takes
+# now_epoch like session_uptime_secs so a loop over many sessions reads the
+# clock once.
+session_heartbeat_alive() {  # meta_dir, now_epoch
     local f="$1/local/context-pct"
     [ -f "$f" ] || return 1
-    local now mtime
-    now="$(date +%s)"
+    local mtime
     mtime="$(_epoch_mtime "$f")"
-    [ "$(( now - mtime ))" -le "$HEARTBEAT_WINDOW_SECS" ]
+    [ "$(( $2 - mtime ))" -le "$HEARTBEAT_WINDOW_SECS" ]
 }
 
 # True when a session should DISPLAY as live: PID-locked, or breathing via the
@@ -562,8 +563,8 @@ session_heartbeat_alive() {  # meta_dir
 # match the TUI. The destructive guards (rm/archive/spawn) use strict
 # session_is_live, so a session whose process is gone can still be removed
 # without --force even if its statusline was touched recently.
-session_display_live() {  # meta_dir
-    session_is_live "$1" || session_heartbeat_alive "$1"
+session_display_live() {  # meta_dir, now_epoch
+    session_is_live "$1" || session_heartbeat_alive "$1" "$2"
 }
 
 # Seconds since a session was last launched (its lock file's mtime).
@@ -2671,6 +2672,15 @@ _spawn_discard_seeds() {  # name
     rm -f "$SESSIONS_ROOT/.spawn/$1.seed" "$SESSIONS_ROOT/.spawn/$1.seed.stale"
 }
 
+# True when the tmux session named 'cs' carries cs's ownership stamp. Only
+# meaningful once has-session has confirmed exact 'cs' exists: the plain '-t cs'
+# target is required because tmux 3.6a rejects '=' anchors on the options
+# commands. Shared by _spawn_precheck (errors on a foreign session) and the
+# doctor's spawn check (warns), so the @cs_managed contract lives in one place.
+_cs_tmux_managed() {
+    [ "$(_tmux show-option -t cs -v @cs_managed 2>/dev/null || true)" = "1" ]
+}
+
 # Pre-window checks that must pass BEFORE the seed is written, so a refused
 # spawn never leaves a pending seed behind.
 _spawn_precheck() {  # name
@@ -2680,12 +2690,7 @@ _spawn_precheck() {  # name
         error "Session $name is already live"
     fi
     if _tmux has-session -t =cs 2>/dev/null; then
-        local owned
-        # Plain target: tmux 3.6a rejects '=' anchors on the options commands,
-        # and this only runs after has-session confirmed exact 'cs' exists,
-        # so prefix matching cannot misfire.
-        owned=$(_tmux show-option -t cs -v @cs_managed 2>/dev/null || true)
-        [ "$owned" = "1" ] || error "A tmux session named 'cs' exists but was not created by cs; close or rename it"
+        _cs_tmux_managed || error "A tmux session named 'cs' exists but was not created by cs; close or rename it"
         # Best-effort tidiness check only. session_is_live above is the real
         # guard against double-launching a session; tmux automatic-rename can
         # rename a window out from under this name match, and the only cost of a
@@ -3331,7 +3336,7 @@ EOF
             continue
         fi
         marker=" "
-        session_display_live "$dir/.cs" && marker=$(printf "${GREEN}●${NC}")
+        session_display_live "$dir/.cs" "$U_NOW" && marker=$(printf "${GREEN}●${NC}")
         age="-"
         newest=$(ls -t "$proj"/*.jsonl 2>/dev/null | head -1 || true)
         if [ -n "$newest" ]; then
@@ -3807,9 +3812,7 @@ _doctor_check_spawn() {
     fi
 
     if command -v "${CS_TMUX_BIN:-tmux}" >/dev/null 2>&1 && _tmux has-session -t =cs 2>/dev/null; then
-        local owned
-        owned=$(_tmux show-option -t cs -v @cs_managed 2>/dev/null || true)
-        if [ "$owned" != "1" ]; then
+        if ! _cs_tmux_managed; then
             _doctor_warn "tmux: a session named 'cs' exists but is not cs-managed (@cs_managed unset); cs -spawn will refuse to use it"
             clean=0
         fi
@@ -4467,7 +4470,7 @@ cmd_live() {
     while IFS= read -r -d '' dir; do
         is_session_dir "$dir" || continue
         meta="$dir/.cs"
-        session_display_live "$meta" || continue
+        session_display_live "$meta" "$now" || continue
         name="$(basename "$dir")"
         actor="$(session_actor_slug "$dir")"
         up="$(_humanize_secs "$(session_uptime_secs "$meta" "$now")")"

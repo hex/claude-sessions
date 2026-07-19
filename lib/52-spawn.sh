@@ -27,6 +27,15 @@ _spawn_discard_seeds() {  # name
     rm -f "$SESSIONS_ROOT/.spawn/$1.seed" "$SESSIONS_ROOT/.spawn/$1.seed.stale"
 }
 
+# True when the tmux session named 'cs' carries cs's ownership stamp. Only
+# meaningful once has-session has confirmed exact 'cs' exists: the plain '-t cs'
+# target is required because tmux 3.6a rejects '=' anchors on the options
+# commands. Shared by _spawn_precheck (errors on a foreign session) and the
+# doctor's spawn check (warns), so the @cs_managed contract lives in one place.
+_cs_tmux_managed() {
+    [ "$(_tmux show-option -t cs -v @cs_managed 2>/dev/null || true)" = "1" ]
+}
+
 # Pre-window checks that must pass BEFORE the seed is written, so a refused
 # spawn never leaves a pending seed behind.
 _spawn_precheck() {  # name
@@ -36,12 +45,7 @@ _spawn_precheck() {  # name
         error "Session $name is already live"
     fi
     if _tmux has-session -t =cs 2>/dev/null; then
-        local owned
-        # Plain target: tmux 3.6a rejects '=' anchors on the options commands,
-        # and this only runs after has-session confirmed exact 'cs' exists,
-        # so prefix matching cannot misfire.
-        owned=$(_tmux show-option -t cs -v @cs_managed 2>/dev/null || true)
-        [ "$owned" = "1" ] || error "A tmux session named 'cs' exists but was not created by cs; close or rename it"
+        _cs_tmux_managed || error "A tmux session named 'cs' exists but was not created by cs; close or rename it"
         # Best-effort tidiness check only. session_is_live above is the real
         # guard against double-launching a session; tmux automatic-rename can
         # rename a window out from under this name match, and the only cost of a

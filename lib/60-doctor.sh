@@ -191,9 +191,7 @@ _doctor_check_spawn() {
     fi
 
     if command -v "${CS_TMUX_BIN:-tmux}" >/dev/null 2>&1 && _tmux has-session -t =cs 2>/dev/null; then
-        local owned
-        owned=$(_tmux show-option -t cs -v @cs_managed 2>/dev/null || true)
-        if [ "$owned" != "1" ]; then
+        if ! _cs_tmux_managed; then
             _doctor_warn "tmux: a session named 'cs' exists but is not cs-managed (@cs_managed unset); cs -spawn will refuse to use it"
             clean=0
         fi

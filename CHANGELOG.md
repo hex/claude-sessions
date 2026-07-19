@@ -4,24 +4,31 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
-## Unreleased
+## 2026.7.18
 
 ### Features
 - **Discard a pending rotation handoff** — the resume prompt gains a `d` answer (`[Y/n/r/d]`) that flips a pending handoff to `status: discarded` and resumes normally, so a handoff you no longer want stops being offered.
+- **`cs -live` and `cs -usage` show heartbeat-live sessions** — conversations opened outside cs (a fresh statusline heartbeat within the 900s window) now register as live on these display surfaces, matching the TUI. The destructive guards (`cs -rm`/`-archive`/`-spawn`) stay on the strict PID lock, so a session whose process is gone is still removable without `--force`.
+- **TUI unread-mail badge** — a session with unread cross-session mail (`cs -msg`) shows an amber `✉` and the count in its row, cleared as the recipient reads with `cs -msg`.
 - **`cs -doctor` spawn hygiene** — new checks warn on accumulated `.spawn/*.seed.stale` files (nothing prunes them), a pending seed with no session (blocks re-spawning the name), a `spawned-by` pointer at a deleted session, and a tmux session named `cs` that cs did not create.
-- **switch-client attach hint** — `cs -spawn` from inside tmux suggests `tmux switch-client -t cs` (attach refuses to nest); plain `tmux attach -t cs` otherwise.
 - **Completions** — `cs -msg`/`cs -spawn` complete a target session as the first argument; `-rm`/`-archive`/`-unarchive` complete session names at every position, not just the first.
+- **switch-client attach hint** — `cs -spawn` from inside tmux suggests `tmux switch-client -t cs` (attach refuses to nest); plain `tmux attach -t cs` otherwise. The SessionStart sibling block points at `cs -msg` for reaching another session.
 
 ### Fixes
 - `cs -rm` refuses a live (PID-locked) session unless `--force`, matching `cs -archive`.
 - Session deletion (`cs -rm` and the TUI) discards the session's pending spawn seeds, so a re-created same-name session no longer inherits dead armed tasks and `cs -spawn` stops refusing the name.
 - `cs <name> -msg log` and a bare `cs <name> -msg` now error with a read hint instead of sending the literal body `log` (the session-scoped alias is send-only).
+- `cs -doctor` no longer aborts before its later checks and summary when a spawn check warns (a `set -e` return-value bug).
+- The TUI unread-mail count reads raw newline bytes, so an invalid-UTF-8 torn inbox line no longer collapses the count and hides unread mail.
 
-### Removed
-- The unused `--ref` flag and `ref` field from cross-session mail. The spawner correlates task-down/result-up via `spawned-by`; `ref` had no producer or consumer, so it was speculative storage.
+### Internal
+- Removed the unused `--ref` flag and `ref` field from cross-session mail; the spawner correlates via `spawned-by` and `ref` had no producer or consumer.
+- TUI session liveness is modeled as a `Locked`/`Heartbeat`/`Dormant` enum, making the illegal "locked but not live" state unrepresentable.
+- Retired the benign spawner-hardening backlog (seed check-then-write race, `.stale` clobber, seed-format split, duplicate-window check) with in-code notes so no future review re-fixes a non-bug.
+- Liveness loops read the clock once (threaded `now`), and the `@cs_managed` ownership check is shared between the spawner and the doctor.
 
 ### Docs
-- README command reference lists `cs -msg` and `cs -spawn`; the rotate skill and session-layout doc describe the `d` discard answer and the `status: discarded` handoff state.
+- README lists `cs -msg`/`cs -spawn`, `-rm --force`, the heartbeat-aware `cs -live`, and the unread-mail badge; the rotate skill and session-layout doc describe the `d` discard answer and the `status: discarded` handoff state.
 
 ## 2026.7.17
 

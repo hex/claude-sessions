@@ -31,7 +31,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 - **Secure secrets handling** - Store sensitive data in the OS keychain (value read from stdin, never written to a file); exportable as [age](https://github.com/FiloSottile/age)-encrypted files for backup
 - **Documentation templates** - Pre-configured markdown files for the session narrative and outcome
 - **Automatic git version control** - Every session gets a local git repo; in-session edits are autosaved to a shadow ref for crash recovery
-- **Session locking** - PID-based lock prevents the same session from being opened in two terminals simultaneously; use `--force` to override. The TUI also treats a session as live when its statusline heartbeat is fresh, so a conversation opened outside cs still shows as `live · unlocked`
+- **Session locking** - PID-based lock prevents the same session from being opened in two terminals simultaneously; use `--force` to override. cs also treats a session as live when its statusline heartbeat is fresh — in the TUI (`■ live · unlocked`), `cs -live`, and the `cs -usage` marker — so a conversation opened outside cs still registers as live. The destructive guards (`cs -rm`/`-archive`/`-spawn`) stay on the strict PID lock, so a session whose process is gone is still removable without `--force`
 - **Deterministic Claude-session resume** - Each session pre-allocates a conversation UUID in the gitignored `.cs/local/state`, so `cs <name>` resumes the *exact* conversation via `claude --resume <uuid>`, not the most-recent one `--continue` might pick from a sibling. A `ps`-based guard refuses to launch a second claude for the same conversation (`--force` overrides), and every launch passes `--name` plus a per-session `/color` so parallel sessions stay visually distinct.
 - **Per-session memory path redirect** - cs points Claude Code's built-in auto-memory writer at `<session>/.cs/memory/` (via `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE`) so durable facts land in the session instead of the global project store. The harness owns how memory files are written (naming, frontmatter, `MEMORY.md` index); cs owns only the storage path.
 - **Cross-session search** - `cs -search <query>` greps across all sessions' narrative, memory, and README
@@ -117,6 +117,7 @@ Running `cs` with no arguments launches an interactive TUI for browsing and mana
 - **Sort** by column with `1`-`6` (toggles ascending/descending); opens sorted by recency — most-recently-modified first
 - **Recency at a glance** — a heat dot beside each session (green under an hour, cooling through gold and orange to grey once dormant) and a relative `Age` column (`2h`, `3d`, `1mo`) so active work stands out; the exact timestamp stays in the preview pane
 - **Liveness** — sessions with an open conversation carry a breathing teal `■` in place of the heat dot and count into the masthead's live tally. Detection is the cs lock plus a statusline heartbeat, so conversations opened outside cs register too; the preview state reads `■ live · locked <pid>` or `■ live · unlocked`
+- **Unread mail** — a session with unread cross-session mail (`cs -msg`) shows an amber `✉` and the count in its row; it clears as the recipient reads with `cs -msg`
 - **Worktree nesting** — `base@task` sessions attach under their base with tree connectors as indented `@task` rows, inherit the base's time section, and the preview names the lineage both ways (`worktree @task · off base` on the task, a `tasks` list on the base). Deleting a worktree row unregisters it from the base repo, like `cs -rm`
 - **Symbol legend** — `● activity  ■ live  * marked  archived` sits in the table header's free width on wide terminals
 - **Fuzzy search** with `/` — matches characters in order with highlighting; Enter commits the filter. Add `#tag` anywhere in the query to AND-filter by tag (e.g. `#api backend`); combine multiple `#tag`s or mix with a fuzzy name remainder
@@ -326,8 +327,9 @@ arrow, marking the live conversation `[current]`.
 
 ### Live sessions & status
 
-See which cs sessions are running right now on this machine, and let each one
-say what it's working on:
+See which cs sessions are running right now on this machine — PID-locked or
+breathing via the statusline heartbeat, so conversations opened outside cs
+appear too — and let each one say what it's working on:
 
 ```bash
 cs -live                       # list live sessions: name, actor, uptime, status

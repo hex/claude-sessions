@@ -52,19 +52,12 @@ put_built_cs_on_path() {
     PATH="$TEST_TMPDIR/bin:$PATH"
 }
 
-# Drive bash's completion the way bash does: seed COMP_WORDS/COMP_CWORD, call the
-# function, read back COMPREPLY. The completion script under test is passed in so
-# a pre-fix copy can be checked against the same assertions.
-bash_candidates_for() {
-    local script="$1" word="$2"
-    bash --norc --noprofile -c '
-        PATH="$1:$PATH"
-        source "$2"
-        COMP_WORDS=(cs "$3")
-        COMP_CWORD=1
-        _cs_completions
-        printf "%s\n" "${COMPREPLY[@]}"
-    ' _ "$TEST_TMPDIR/bin" "$script" "$word" 2>/dev/null
+# First-argument completion: `cs <word>`. Thin wrapper over the general
+# word-list driver below (COMP_WORDS=(cs "$word"), COMP_CWORD=1). The script
+# under test is passed in so a pre-fix copy can be checked against the same
+# assertions.
+bash_candidates_for() {  # script, word
+    bash_candidates_words "$1" cs "$2"
 }
 
 # Drive bash completion with an explicit word list (cs first; the final element
@@ -124,19 +117,10 @@ PREFIX
     assert_not_candidate "$out" "linked-session" "the pre-fix enumeration is expected to miss symlinks" || return 1
 }
 
-# Drive zsh's completion by stubbing _describe, which is where _cs hands off its
-# candidates. _describe takes the NAME of an array, so the stub expands it with
-# the (P) parameter-name flag. Filtering against the typed word is zsh's job, not
-# _cs's, so what this captures is the full candidate set.
-zsh_candidates_for_first_word() {
-    local word="$1"
-    zsh -f -c '
-        PATH="$1:$PATH"
-        _describe() { local arr=${@[-1]}; print -rl -- ${(P)arr} }
-        words=(cs "$2")
-        CURRENT=2
-        source "$3"
-    ' _ "$TEST_TMPDIR/bin" "$word" "$ZSH_COMP" 2>/dev/null | sed 's/:.*//'
+# First-argument completion: `cs <word>`. Thin wrapper over the general
+# word-list driver above (words=(cs "$word"), CURRENT=2).
+zsh_candidates_for_first_word() {  # word
+    zsh_candidates_words cs "$1"
 }
 
 test_zsh_completion_offers_a_symlinked_session() {
