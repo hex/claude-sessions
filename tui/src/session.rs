@@ -49,6 +49,8 @@ pub struct Session {
     pub liveness: Liveness,
     pub secrets_count: u32,
     pub queue_depth: u32,
+    /// Unread cross-session mail: inbox lines past the `seen` cursor.
+    pub unread_mail: u32,
     pub git_repo: Option<String>,
     pub tags: Vec<String>,
     pub archived: bool,
@@ -410,6 +412,7 @@ fn read_session(path: &Path, secret_counts: &HashMap<String, u32>) -> Session {
     let queue_depth = fs::read_to_string(meta_dir.join("local/queue"))
         .map(|s| s.lines().filter(|l| !l.trim().is_empty()).count() as u32)
         .unwrap_or(0);
+    let unread_mail = unread_mail_count(&meta_dir);
     let has_git = path.join(".git").is_dir();
     let git_repo = if has_git {
         parse_git_remote(path)
@@ -430,6 +433,7 @@ fn read_session(path: &Path, secret_counts: &HashMap<String, u32>) -> Session {
         liveness,
         secrets_count,
         queue_depth,
+        unread_mail,
         git_repo,
         tags,
         archived,
@@ -714,6 +718,19 @@ fn remove_worktree_session(root: &Path, name: &str, path: &Path) -> std::io::Res
     fs::remove_dir_all(path)
 }
 
+/// Unread cross-session mail: inbox lines past the `seen` cursor (the cursor
+/// `cs -msg` advances on read). Counts newline-terminated lines like the shell's
+/// `_mail_total`, so a half-written final line is not counted.
+fn unread_mail_count(meta_dir: &Path) -> u32 {
+    let inbox = fs::read_to_string(meta_dir.join("local/mail/inbox.jsonl")).unwrap_or_default();
+    let total = inbox.bytes().filter(|&b| b == b'\n').count() as u32;
+    let seen = fs::read_to_string(meta_dir.join("local/mail/seen"))
+        .ok()
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .unwrap_or(0);
+    total.saturating_sub(seen)
+}
+
 fn read_lock_pid(meta_dir: &Path) -> Option<u32> {
     let lock_file = meta_dir.join("session.lock");
     let content = fs::read_to_string(&lock_file).ok()?;
@@ -830,6 +847,30 @@ mod tests {
         )
         .unwrap();
         dir
+    }
+
+    #[test]
+    fn unread_mail_counts_lines_past_seen_cursor() {
+        let dir = std::env::temp_dir().join(format!("cs-unread-{}", std::process::id()));
+        let mail = dir.join("local/mail");
+        fs::create_dir_all(&mail).unwrap();
+        // three complete messages plus a torn final line (no trailing newline)
+        fs::write(mail.join("inbox.jsonl"), "{\"a\":1}\n{\"a\":2}\n{\"a\":3}\n{\"a\":4").unwrap();
+        fs::write(mail.join("seen"), "1\n").unwrap();
+        // 3 complete lines minus the seen cursor (1) = 2; the torn 4th is excluded
+        assert_eq!(unread_mail_count(&dir), 2);
+        // no seen cursor => 0 => all 3 complete lines are unread
+        fs::remove_file(mail.join("seen")).unwrap();
+        assert_eq!(unread_mail_count(&dir), 3);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn unread_mail_is_zero_without_inbox() {
+        let dir = std::env::temp_dir().join(format!("cs-unread-none-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        assert_eq!(unread_mail_count(&dir), 0);
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

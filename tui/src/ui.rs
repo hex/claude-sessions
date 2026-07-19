@@ -533,6 +533,15 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
                     Style::default().fg(secrets_color),
                 ));
             }
+            if s.unread_mail > 0 {
+                // Unread cross-session mail (cs -msg): envelope plus a count,
+                // glued to the name like the other gutter badges.
+                let mail_color = if dimmed { p.comment } else { p.amber };
+                name_spans.push(Span::styled(
+                    format!("\u{2709}{} ", s.unread_mail),
+                    Style::default().fg(mail_color),
+                ));
+            }
 
             let name_color = if dimmed {
                 p.comment
@@ -1384,6 +1393,7 @@ fn render_legend(app: &App, frame: &mut Frame) {
         entry("\u{25a0}", p.teal, false, "live \u{2014} conversation open right now, locked or not (in place of the recency dot)"),
         entry("*", p.gold, true, "marked with Space for batch actions (D deletes the marked set)"),
         entry("\u{25aa}", p.gold, false, "has stored secrets (shown here when the SECRETS column is hidden)"),
+        entry("\u{2709}", p.amber, false, "unread cross-session mail (cs -msg) \u{2014} the number is the count not yet read"),
         entry("\u{2500}", p.comment, false, "dim grey row \u{2014} archived session, or not matching the current search"),
         entry("\u{25b6}", p.teal, false, "to-do pane: the queue task Claude is actively working right now"),
         Line::default(),
@@ -1854,6 +1864,7 @@ mod tests {
             liveness: Liveness::Dormant,
             secrets_count: 0,
             queue_depth: 0,
+            unread_mail: 0,
             git_repo: None,
             tags: Vec::new(),
             archived: false,
@@ -1874,6 +1885,7 @@ mod tests {
                 liveness: Liveness::Locked(123),
                 secrets_count: 0,
                 queue_depth: 0,
+                unread_mail: 0,
                 git_repo: None,
                 tags: Vec::new(),
                 archived: false,
@@ -1887,6 +1899,7 @@ mod tests {
                 liveness: Liveness::Dormant,
                 secrets_count: 0,
                 queue_depth: 0,
+                unread_mail: 0,
                 git_repo: None,
                 tags: Vec::new(),
                 archived: false,
@@ -1941,6 +1954,36 @@ mod tests {
                     .collect::<String>()
             })
             .collect()
+    }
+
+    #[test]
+    fn unread_mail_badge_renders_with_count_when_nonzero() {
+        use std::time::{Duration, SystemTime};
+        let mut sessions = one_session();
+        sessions[0].modified_ts = Some(SystemTime::now() - Duration::from_secs(3 * 86400));
+        sessions[0].unread_mail = 3;
+        let mut app = App::new(sessions);
+        app.theme = Palette::dark();
+        let backend = TestBackend::new(100, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let joined: String = (0..buf.area.height)
+            .map(|y| {
+                (0..buf.area.width)
+                    .filter_map(|x| buf.cell((x, y)).map(|c| c.symbol().to_string()))
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("\u{2709}3"), "unread badge (envelope + count) should render; got:\n{joined}");
+    }
+
+    #[test]
+    fn unread_mail_badge_absent_when_zero() {
+        // render_rows() uses one_session(), whose unread_mail is 0.
+        let joined = render_rows().join("\n");
+        assert!(!joined.contains('\u{2709}'), "no envelope should render without unread mail");
     }
 
     #[test]
@@ -3244,6 +3287,7 @@ mod tests {
                 liveness: Liveness::Dormant,
                 secrets_count: 0,
                 queue_depth: 0,
+                unread_mail: 0,
                 git_repo: None,
                 tags: Vec::new(),
                 archived: false,
@@ -3769,6 +3813,7 @@ mod tests {
             liveness: Liveness::Dormant,
             secrets_count: 0,
             queue_depth: 0,
+            unread_mail: 0,
             git_repo: None,
             tags: Vec::new(),
             archived: true,
