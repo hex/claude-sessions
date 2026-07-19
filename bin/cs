@@ -3727,6 +3727,66 @@ _doctor_check_iterm2() {
     fi
 }
 
+# Spawn hygiene, all best-effort warnings:
+#   - .seed.stale files accumulate in .spawn/ (the launch path sets aged-out
+#     seeds aside but never deletes them),
+#   - a pending .seed for a session that does not exist blocks re-spawning
+#     that name until it is removed,
+#   - a spawned-by pointer at a deleted session sends the drain notify nowhere,
+#   - a tmux session named 'cs' without the @cs_managed stamp is one cs -spawn
+#     will refuse to reuse.
+_doctor_check_spawn() {
+    local spawn_dir="$SESSIONS_ROOT/.spawn"
+    local stale=() orphan=() dangling=() clean=1
+    local f name
+
+    if [ -d "$spawn_dir" ]; then
+        for f in "$spawn_dir"/*.seed.stale; do
+            [ -e "$f" ] || continue
+            stale+=("$(basename "$f")")
+        done
+        for f in "$spawn_dir"/*.seed; do
+            [ -e "$f" ] || continue
+            name=$(basename "$f" .seed)
+            is_session_dir "$SESSIONS_ROOT/$name" || orphan+=("$name")
+        done
+    fi
+    if [ ${#stale[@]} -gt 0 ]; then
+        _doctor_warn "Spawn seeds: ${#stale[@]} aged-out .seed.stale file(s) in .spawn/ (nothing prunes them; safe to delete): ${stale[*]}"
+        clean=0
+    fi
+    if [ ${#orphan[@]} -gt 0 ]; then
+        _doctor_warn "Spawn seeds: pending seed(s) with no session: ${orphan[*]} (cs -spawn refuses these names until the seed is removed)"
+        clean=0
+    fi
+
+    local dir sb spawner
+    while IFS= read -r -d '' dir; do
+        is_session_dir "$dir" || continue
+        sb="$dir/.cs/local/spawned-by"
+        [ -s "$sb" ] || continue
+        IFS= read -r spawner < "$sb" || true
+        spawner=$(printf '%s' "$spawner" | tr -d '[:space:]')
+        [ -n "$spawner" ] || continue
+        is_session_dir "$SESSIONS_ROOT/$spawner" || dangling+=("$(basename "$dir") -> $spawner")
+    done < <(find "$SESSIONS_ROOT" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) -print0 2>/dev/null | sort -z)
+    if [ ${#dangling[@]} -gt 0 ]; then
+        _doctor_warn "Spawn links: spawned-by names a missing session: ${dangling[*]} (the drain notify goes nowhere)"
+        clean=0
+    fi
+
+    if command -v "${CS_TMUX_BIN:-tmux}" >/dev/null 2>&1 && _tmux has-session -t =cs 2>/dev/null; then
+        local owned
+        owned=$(_tmux show-option -t cs -v @cs_managed 2>/dev/null || true)
+        if [ "$owned" != "1" ]; then
+            _doctor_warn "tmux: a session named 'cs' exists but is not cs-managed (@cs_managed unset); cs -spawn will refuse to use it"
+            clean=0
+        fi
+    fi
+
+    [ "$clean" = "1" ] && _doctor_ok "Spawn: no stale seeds, dangling spawned-by links, or foreign 'cs' tmux session"
+}
+
 # Compares the version stamped into the deployed hooks directory at install
 # time against this binary's VERSION. A mismatch means cs was updated without
 # re-deploying its artifacts (or vice versa). Skips silently when no stamp
@@ -3988,6 +4048,7 @@ run_doctor() {
     _doctor_check_statusline
     _doctor_check_subagent_statusline
     _doctor_check_iterm2
+    _doctor_check_spawn
 
     if [ -n "${CLAUDE_SESSION_META_DIR:-}" ] && [ -d "${CLAUDE_SESSION_META_DIR:-}" ]; then
         _doctor_check_shadow_ref

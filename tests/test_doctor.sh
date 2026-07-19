@@ -520,6 +520,98 @@ test_doctor_subagent_statusline_no_fail_when_not_registered() {
     fi
 }
 
+# --- Spawn hygiene checks ---
+# Leftover .spawn seeds (nothing prunes .seed.stale; an orphan .seed blocks the
+# name), spawned-by pointers at deleted sessions, and a tmux session named 'cs'
+# that cs did not create.
+
+# Minimal tmux fake for the doctor's spawn tmux check.
+#   arg1: "cs" if a session named cs exists, "" otherwise
+#   arg2: value returned for @cs_managed (e.g. "1" or "")
+_doctor_tmux_fake() {  # has_cs managed
+    local fake="$TEST_TMPDIR/fake-tmux"
+    {
+        printf '#!/usr/bin/env bash\n'
+        printf 'case "$1" in\n'
+        printf '  has-session) [ "%s" = cs ]; exit $? ;;\n' "$1"
+        printf '  show-option) printf "%%s" "%s" ;;\n' "$2"
+        printf 'esac\n'
+        printf 'exit 0\n'
+    } > "$fake"
+    chmod +x "$fake"
+    printf '%s' "$fake"
+}
+
+test_doctor_warns_on_stale_spawn_seeds() {
+    mkdir -p "$CS_SESSIONS_ROOT/.spawn"
+    : > "$CS_SESSIONS_ROOT/.spawn/gone.seed.stale"
+    local output
+    output=$(CS_TMUX_BIN="$(_doctor_tmux_fake '' '')" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "seed.stale" \
+        "doctor should warn about aged-out seeds that nothing prunes" || return 1
+}
+
+test_doctor_warns_on_orphaned_spawn_seed() {
+    mkdir -p "$CS_SESSIONS_ROOT/.spawn"
+    printf 'boss\ndo work\n' > "$CS_SESSIONS_ROOT/.spawn/ghost.seed"
+    local output
+    output=$(CS_TMUX_BIN="$(_doctor_tmux_fake '' '')" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "ghost" \
+        "doctor should warn about a pending seed whose session does not exist" || return 1
+}
+
+test_doctor_spawn_ok_when_seeds_clean() {
+    local output
+    output=$(CS_TMUX_BIN="$(_doctor_tmux_fake '' '')" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Spawn" "doctor should report a Spawn summary" || return 1
+    if echo "$output" | grep "Spawn" | grep -q "WARN"; then
+        echo "  FAIL: clean spawn state must not warn"
+        echo "$output" | grep "Spawn"
+        return 1
+    fi
+}
+
+test_doctor_warns_on_dangling_spawned_by() {
+    local child="$CS_SESSIONS_ROOT/child"
+    mkdir -p "$child/.cs/local"
+    echo "# Test" > "$child/CLAUDE.md"
+    printf 'ghost-boss\n' > "$child/.cs/local/spawned-by"
+    local output
+    output=$(CS_TMUX_BIN="$(_doctor_tmux_fake '' '')" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "ghost-boss" \
+        "doctor should warn when spawned-by names a session that no longer exists" || return 1
+}
+
+test_doctor_spawned_by_ok_when_spawner_exists() {
+    local child="$CS_SESSIONS_ROOT/child2"
+    mkdir -p "$child/.cs/local"
+    echo "# Test" > "$child/CLAUDE.md"
+    # test-session exists (created in setup); a live spawner is not dangling.
+    printf 'test-session\n' > "$child/.cs/local/spawned-by"
+    local output
+    output=$(CS_TMUX_BIN="$(_doctor_tmux_fake '' '')" "$CS_BIN" -doctor 2>&1) || true
+    if echo "$output" | grep -i "spawned-by\|Spawn links" | grep -q "WARN"; then
+        echo "  FAIL: an existing spawner must not be flagged as dangling"
+        return 1
+    fi
+}
+
+test_doctor_warns_on_unmarked_cs_tmux_session() {
+    local output
+    output=$(CS_TMUX_BIN="$(_doctor_tmux_fake cs '')" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "not cs-managed\|@cs_managed\|cs -spawn will refuse" \
+        "doctor should warn about a foreign tmux session named cs" || return 1
+}
+
+test_doctor_no_warning_when_cs_tmux_session_managed() {
+    local output
+    output=$(CS_TMUX_BIN="$(_doctor_tmux_fake cs 1)" "$CS_BIN" -doctor 2>&1) || true
+    if echo "$output" | grep -i "tmux" | grep -q "not cs-managed"; then
+        echo "  FAIL: a cs-managed tmux session must not warn"
+        return 1
+    fi
+}
+
 echo "Running doctor tests..."
 run_test test_doctor_subcommand_exists
 run_test test_doctor_runs_default_checks_from_session
@@ -554,4 +646,11 @@ run_test test_doctor_subagent_statusline_no_fail_when_not_registered
 run_test test_doctor_runs_token_cost_check
 run_test test_doctor_token_cost_sums_jsonl
 run_test test_doctor_token_cost_handles_no_transcripts
+run_test test_doctor_warns_on_stale_spawn_seeds
+run_test test_doctor_warns_on_orphaned_spawn_seed
+run_test test_doctor_spawn_ok_when_seeds_clean
+run_test test_doctor_warns_on_dangling_spawned_by
+run_test test_doctor_spawned_by_ok_when_spawner_exists
+run_test test_doctor_warns_on_unmarked_cs_tmux_session
+run_test test_doctor_no_warning_when_cs_tmux_session_managed
 report_results
