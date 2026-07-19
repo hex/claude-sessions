@@ -2686,6 +2686,11 @@ _spawn_precheck() {  # name
         # so prefix matching cannot misfire.
         owned=$(_tmux show-option -t cs -v @cs_managed 2>/dev/null || true)
         [ "$owned" = "1" ] || error "A tmux session named 'cs' exists but was not created by cs; close or rename it"
+        # Best-effort tidiness check only. session_is_live above is the real
+        # guard against double-launching a session; tmux automatic-rename can
+        # rename a window out from under this name match, and the only cost of a
+        # miss is a duplicate window name in the cs session, never a second live
+        # launch. Do not add locking here for that benign case.
         if _tmux list-windows -t =cs -F '#{window_name}' 2>/dev/null | grep -Fxq "$name"; then
             error "A window named $name already exists in tmux session cs"
         fi
@@ -2750,6 +2755,10 @@ run_spawn() {
     if [ "${#tasks[@]}" -gt 0 ]; then
         local sdir="$SESSIONS_ROOT/.spawn" seed
         seed="$sdir/$name.seed"
+        # The check-then-write below is deliberately unlocked. The tmp+mv makes
+        # the write atomic, so two concurrent spawns of the same name resolve to
+        # last-writer-wins with no torn or interleaved seed. Adding a lock would
+        # buy nothing for that benign race.
         [ ! -f "$seed" ] || error "A pending spawn for $name exists: $seed"
         mkdir -p "$sdir"
         {
