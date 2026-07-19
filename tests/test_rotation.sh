@@ -159,8 +159,8 @@ test_prompt_unchanged_without_handoff() {
     assert_output_contains "$output" "Continue previous conversation?" "prompt present" || return 1
     printf '%s' "$output" | grep -q '\[Y/n\] ' \
         || { echo "  FAIL: two-way prompt suffix must stay byte-identical"; return 1; }
-    if printf '%s' "$output" | grep -q '\[Y/n/r\]'; then
-        echo "  FAIL: three-way prompt must not appear without a pending handoff"
+    if printf '%s' "$output" | grep -q '\[Y/n/r/d\]'; then
+        echo "  FAIL: handoff prompt must not appear without a pending handoff"
         return 1
     fi
     if printf '%s' "$output" | grep -q "Rotation handoff pending"; then
@@ -179,7 +179,7 @@ test_rotate_answer_consumes_pending_handoff() {
     output=$("$CS_BIN" rot-r <<< "r" 2>&1) || true
     assert_output_contains "$output" "Rotation handoff pending" "notice names the pending handoff" || return 1
     assert_output_contains "$output" "2026-07-16-test.md" "notice carries the basename" || return 1
-    assert_output_contains "$output" "[Y/n/r]" "prompt is three-way" || return 1
+    assert_output_contains "$output" "\[Y/n/r/d\]" "prompt offers the handoff answers" || return 1
     local new
     new=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
     [ "$new" != "$old" ] || { echo "  FAIL: r must rebind to a fresh UUID"; return 1; }
