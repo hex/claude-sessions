@@ -193,6 +193,24 @@ test_rotate_answer_consumes_pending_handoff() {
     assert_output_contains "$ev" '"handoff":"2026-07-16-test.md"' "event names the handoff" || return 1
 }
 
+# The r launch auto-starts the handoff: its positional prompt is the handoff
+# continuation (displacing the /color re-apply for this one launch), so the fresh
+# conversation reads the handoff and continues without the user typing first.
+test_rotate_answer_auto_starts_handoff() {
+    _rot_session "rot-autostart"
+    local dir="$CS_SESSIONS_ROOT/rot-autostart"
+    _seed_handoff "$dir" "2026-07-16-test.md" "unconsumed"
+    local output
+    output=$("$CS_BIN" rot-autostart <<< "r" 2>&1) || true
+    assert_output_contains "$output" ".cs/handoffs/2026-07-16-test.md" \
+        "the launch prompt points claude at the pending handoff" || return 1
+    if printf '%s' "$output" | grep -q -- '/color'; then
+        echo "  FAIL: the handoff prompt must displace /color for this launch"
+        return 1
+    fi
+    return 0
+}
+
 test_continue_and_no_leave_handoff_unconsumed() {
     _rot_session "rot-yn"
     local dir="$CS_SESSIONS_ROOT/rot-yn"
@@ -265,6 +283,7 @@ test_discard_flip_spares_a_body_quote() {
 
 run_test test_prompt_unchanged_without_handoff
 run_test test_rotate_answer_consumes_pending_handoff
+run_test test_rotate_answer_auto_starts_handoff
 run_test test_continue_and_no_leave_handoff_unconsumed
 run_test test_consumed_handoffs_do_not_trigger_prompt
 run_test test_newest_of_multiple_handoffs_wins

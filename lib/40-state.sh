@@ -131,9 +131,14 @@ _exec_fresh_rebind() {
     session_color=$(_read_local_state "$session_dir/.cs/local/state" claude_session_color)
     local color_arg=""
     [ -n "$session_color" ] && color_arg="/color $session_color"
-    # A spawn kick outranks the color re-apply for this launch; both ride
-    # claude's single prompt slot.
-    local launch_prompt="${spawn_kick:-$color_arg}"
+    # A handoff continuation makes the fresh conversation start the pickup on its
+    # first turn instead of waiting for the user (the SessionStart hook still
+    # carries the detail + bookkeeping). A spawn kick outranks it, and both
+    # outrank the color re-apply; all three ride claude's single prompt slot, so
+    # the displaced color returns on the next open.
+    local handoff_arg=""
+    [ -n "$handoff" ] && handoff_arg="Read .cs/handoffs/$handoff first — it is the previous conversation's handoff; continue from its next-step section. The prior transcript is not loaded; the handoff plus .cs/memory/narrative.*.md carry the context."
+    local launch_prompt="${spawn_kick:-${handoff_arg:-$color_arg}}"
     export CS_CLAUDE_SESSION_ID="$new_uuid"
     export CS_FRESH_REBIND=1
     # shellcheck disable=SC2086
