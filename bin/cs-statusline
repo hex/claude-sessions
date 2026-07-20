@@ -99,6 +99,30 @@ _read_stdin() {
     _STDIN+="$line"   # trailing partial line (no newline) or empty
 }
 
+# Current epoch for this render, read at most once. Honors CS_STATUSLINE_NOW
+# (test/pin), then the fork-free printf builtin, then a date fork (macOS bash
+# 3.2 lacks %(...)T). Memoized so the limits stamp, countdown, and attention
+# pulse share one clock instead of forking date up to three times a render.
+# The memo gate is a dedicated in-process flag, never the value itself: an
+# inherited _NOW from the environment must not be trusted as initialized, or a
+# garbage/stale value would poison the stamp and crash the pulse arithmetic.
+# Always overwrites _NOW in-process and validates it numeric; leaves it empty
+# when every source fails, so callers apply their own fallback.
+_sl_now() {
+    [ -n "${_SL_NOW_READY:-}" ] && return 0
+    _SL_NOW_READY=1
+    if [ -n "${CS_STATUSLINE_NOW:-}" ]; then
+        _NOW="$CS_STATUSLINE_NOW"
+    else
+        printf -v _NOW '%(%s)T' -1 2>/dev/null
+        [[ "${_NOW:-}" =~ ^[0-9]+$ ]] || _NOW=$(date +%s 2>/dev/null)
+    fi
+    # Normalize to canonical base-10: a leading-zero value (e.g. a pin of 08) is
+    # read as octal by bash arithmetic and aborts on an 8/9 digit. 10# forces
+    # base-10 so the countdown, stamp, and pulse all get a safe integer.
+    if [[ "${_NOW:-}" =~ ^[0-9]+$ ]]; then _NOW=$((10#$_NOW)); else _NOW=""; fi
+}
+
 # Extract every field we need in one jq pass, one value per line. Returns
 # non-zero (caller falls back) when jq is missing, stdin is empty, or the JSON
 # does not parse. One value per line (not @tsv) because `read` collapses
@@ -147,12 +171,13 @@ EOF
     if [ -n "${CLAUDE_SESSION_NAME:-}" ] && { [ -n "${SL_5H:-}" ] || [ -n "${SL_WK:-}" ]; }; then
         _limdir="$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/local"
         if mkdir -p "$_limdir" 2>/dev/null; then
+            _sl_now
             {
                 printf 'five_hour_used_pct: %s\n' "${SL_5H%%.*}"
                 printf 'five_hour_resets_at: %s\n' "${SL_5H_RESET:-}"
                 printf 'seven_day_used_pct: %s\n' "${SL_WK%%.*}"
                 printf 'seven_day_resets_at: %s\n' "${SL_WK_RESET:-}"
-                printf 'stamped_at: %s\n' "$(date +%s)"
+                printf 'stamped_at: %s\n' "${_NOW}"
             } > "$_limdir/limits.tmp" 2>/dev/null \
                 && mv "$_limdir/limits.tmp" "$_limdir/limits" 2>/dev/null || true
         fi
@@ -338,10 +363,9 @@ _fmt_rest() {
     _REST=""
     local at="$1" now rem h m
     [[ "$at" =~ ^[0-9]+$ ]] || return 0
-    # bash 3.2's printf -v leaves `now` UNSET when the %(...)T format is
-    # unsupported, so guard with ${now:-} (set -u) before the date fallback.
-    printf -v now '%(%s)T' -1 2>/dev/null
-    [[ "${now:-}" =~ ^[0-9]+$ ]] || now=$(date +%s 2>/dev/null)
+    # Shared per-render clock (see _sl_now); empty only if every source failed.
+    _sl_now
+    now="${_NOW:-}"
     [[ "$now" =~ ^[0-9]+$ ]] || return 0
     rem=$(( at - now ))
     [ "$rem" -gt 0 ] || return 0
@@ -460,9 +484,15 @@ _seg_notes() {
     [ -n "${CLAUDE_SESSION_NAME:-}" ] || return 0
     local qf="$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/local/queue"
     [ -f "$qf" ] || return 0
-    local n
-    n=$(awk 'NF{c++} END{print c+0}' "$qf" 2>/dev/null)
-    [ -n "$n" ] || n=0
+    # Count non-blank lines (awk NF equivalent) without an awk fork; this runs
+    # every render. A whitespace-only line is not a task. `|| [ -n "$line" ]`
+    # counts a torn final line lacking a trailing newline, matching awk's read.
+    local n=0 line
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            *[![:space:]]*) n=$((n + 1)) ;;
+        esac
+    done < "$qf"
     [ "$n" -gt 0 ] || return 0
     _add "${ICON_NOTES}${n}" "amber"
 }
@@ -691,11 +721,8 @@ _render() {
                 # the phase keeps advancing. CS_STATUSLINE_NOW pins the clock
                 # for tests.
                 if [ "${_SEG_BOLD[i]}" = "boldattention" ]; then
-                    pulse="${CS_STATUSLINE_NOW:-}"
-                    if [ -z "$pulse" ]; then
-                        printf -v pulse '%(%s)T' -1 2>/dev/null
-                        [[ "${pulse:-}" =~ ^[0-9]+$ ]] || pulse=$(date +%s 2>/dev/null) || pulse=0
-                    fi
+                    _sl_now
+                    pulse="${_NOW:-0}"
                     if [ $(( pulse % 2 )) -eq 1 ]; then _sgr 38 brandshade; else _sgr 38 chiptext; fi
                 elif [ -n "${_SEG_BOLD[i]}" ]; then _sgr 38 chiptext; else _sgr 38 white; fi ;;
         esac
@@ -783,6 +810,13 @@ _render() {
 
 main() {
     [ "${CS_STATUSLINE_DISABLE:-}" = "1" ] && exit 0
+
+    # Sanitize the shared-clock memo at the start of every render: neither the
+    # value nor its ready flag may be seeded by an inherited environment variable
+    # of the same name. Otherwise a stale/garbage _NOW would poison the limits
+    # stamp and crash the pulse arithmetic (bash 3.2 set -u). Free, no fork.
+    _NOW=""
+    _SL_NOW_READY=""
 
     _read_stdin
     _parse_stdin "$_STDIN" || _fallback

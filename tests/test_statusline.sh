@@ -1264,6 +1264,18 @@ test_notes_segment_absent_when_queue_empty() {
     assert_output_not_contains "$out" "▤" "notes segment hidden when queue empty" || return 1
 }
 
+# The queue count skips whitespace-only lines (a blank line is not a task). The
+# pure-bash line loop must preserve awk's NF semantics.
+test_notes_segment_skips_whitespace_only_lines() {
+    export NO_COLOR=1
+    export CLAUDE_SESSION_NAME="wsq"
+    make_cs_session "wsq" 0 cyan
+    printf 'task a\n   \ntask b\n' > "$CS_SESSIONS_ROOT/wsq/.cs/local/queue"
+    local out
+    out=$(run_sl "$FIXTURE_DOCS")
+    assert_output_contains "$out" "▤ 2" "whitespace-only queue lines are not counted" || return 1
+}
+
 test_pane_segment_shows_tmux_pane_id() {
     export NO_COLOR=1
     export TMUX="/tmp/tmux-1000/default,12345,0"
@@ -1379,6 +1391,7 @@ test_enable_warns_that_a_restart_is_required() {
 
 run_test test_notes_segment_shows_queue_depth
 run_test test_notes_segment_absent_when_queue_empty
+run_test test_notes_segment_skips_whitespace_only_lines
 run_test test_pane_segment_shows_tmux_pane_id
 run_test test_pane_segment_absent_outside_tmux
 run_test test_pane_segment_needs_both_tmux_vars
@@ -1417,6 +1430,94 @@ test_limits_file_skipped_without_rate_limits() {
     local fixture='{"session_name":"limsess2","model":{"display_name":"Opus"},"context_window":{"used_percentage":8},"workspace":{"current_dir":"/tmp"}}'
     run_sl "$fixture" > /dev/null
     assert_file_not_exists "$CS_SESSIONS_ROOT/limsess2/.cs/local/limits" "no limits file without rate_limits" || return 1
+}
+
+# Every render-time epoch read (limits stamp, countdown, pulse) goes through one
+# shared clock; CS_STATUSLINE_NOW pins it, so the stamp reflects the pin rather
+# than a raw wall-clock fork.
+test_limits_stamp_uses_shared_clock() {
+    export CLAUDE_SESSION_NAME="clocksess"
+    mkdir -p "$CS_SESSIONS_ROOT/clocksess/.cs/local"
+    local fixture='{"session_name":"clocksess","workspace":{"current_dir":"/tmp"},"rate_limits":{"five_hour":{"used_percentage":23}}}'
+    CS_STATUSLINE_NOW=1234567890 run_sl "$fixture" > /dev/null
+    local lim="$CS_SESSIONS_ROOT/clocksess/.cs/local/limits"
+    assert_file_contains "$lim" "stamped_at: 1234567890" "stamp uses the pinned shared clock" || return 1
+}
+
+# _sl_now initializes the shared clock in-process; an inherited _NOW from the
+# environment must NOT be trusted as already-computed (that would bypass the pin
+# and let a garbage value reach the stamp and the pulse arithmetic).
+test_shared_clock_ignores_inherited_now() {
+    export CLAUDE_SESSION_NAME="inhsess"
+    mkdir -p "$CS_SESSIONS_ROOT/inhsess/.cs/local"
+    local fixture='{"session_name":"inhsess","workspace":{"current_dir":"/tmp"},"rate_limits":{"five_hour":{"used_percentage":23}}}'
+    _NOW=garbage CS_STATUSLINE_NOW=1234567890 run_sl "$fixture" > /dev/null
+    local lim="$CS_SESSIONS_ROOT/inhsess/.cs/local/limits"
+    assert_file_contains "$lim" "stamped_at: 1234567890" "inherited _NOW ignored; pin wins in the stamp" || return 1
+}
+
+# Without a pin, an inherited garbage _NOW must be replaced by a real epoch, never
+# persisted verbatim (a stale value would make the limits file look newest forever).
+test_shared_clock_replaces_inherited_garbage() {
+    export CLAUDE_SESSION_NAME="inhsess2"
+    mkdir -p "$CS_SESSIONS_ROOT/inhsess2/.cs/local"
+    local fixture='{"session_name":"inhsess2","workspace":{"current_dir":"/tmp"},"rate_limits":{"five_hour":{"used_percentage":23}}}'
+    _NOW=garbage run_sl "$fixture" > /dev/null
+    local lim="$CS_SESSIONS_ROOT/inhsess2/.cs/local/limits"
+    assert_file_contains "$lim" "stamped_at: [0-9]" "stamp is a real epoch, not inherited garbage" || return 1
+}
+
+# The attention pulse parity uses the shared clock; an inherited garbage _NOW must
+# not reach the arithmetic (crashes bash 3.2 under set -u). With the pin at an even
+# second the mark renders chiptext regardless of the inherited value.
+test_pulse_ignores_inherited_now() {
+    export COLORTERM=truecolor
+    export CLAUDE_SESSION_NAME="inhpulse"
+    make_cs_session "inhpulse" 1024 blue
+    mkdir -p "$CS_SESSIONS_ROOT/inhpulse/.cs/local"
+    touch "$CS_SESSIONS_ROOT/inhpulse/.cs/local/attention"
+    local json='{"session_name":"inhpulse","workspace":{"current_dir":"/none"}}'
+    local out
+    out=$(_NOW=garbage CS_STATUSLINE_NOW=1000 run_sl "$json")
+    assert_output_contains "$out" '240;242;255;1m ✳' "pin wins over inherited _NOW; even second stays chiptext" || return 1
+}
+
+# The memo ready-flag itself must not be trusted from the environment: with BOTH
+# _SL_NOW_READY and a garbage _NOW inherited, the render still sanitizes them and
+# honors the pin (not the inherited garbage) in the stamp.
+test_shared_clock_ignores_inherited_ready_flag() {
+    export CLAUDE_SESSION_NAME="inhready"
+    mkdir -p "$CS_SESSIONS_ROOT/inhready/.cs/local"
+    local fixture='{"session_name":"inhready","workspace":{"current_dir":"/tmp"},"rate_limits":{"five_hour":{"used_percentage":23}}}'
+    _SL_NOW_READY=1 _NOW=garbage CS_STATUSLINE_NOW=1234567890 run_sl "$fixture" > /dev/null
+    local lim="$CS_SESSIONS_ROOT/inhready/.cs/local/limits"
+    assert_file_contains "$lim" "stamped_at: 1234567890" "inherited ready flag + garbage _NOW sanitized; pin wins" || return 1
+}
+
+# Same both-inherited case on the pulse path: sanitized memo state means the
+# garbage _NOW never reaches the arithmetic (which would crash bash 3.2 set -u).
+test_pulse_ignores_inherited_ready_flag() {
+    export COLORTERM=truecolor
+    export CLAUDE_SESSION_NAME="inhrpulse"
+    make_cs_session "inhrpulse" 1024 blue
+    mkdir -p "$CS_SESSIONS_ROOT/inhrpulse/.cs/local"
+    touch "$CS_SESSIONS_ROOT/inhrpulse/.cs/local/attention"
+    local json='{"session_name":"inhrpulse","workspace":{"current_dir":"/none"}}'
+    local out
+    out=$(_SL_NOW_READY=1 _NOW=garbage CS_STATUSLINE_NOW=1000 run_sl "$json")
+    assert_output_contains "$out" '240;242;255;1m ✳' "inherited ready flag + garbage _NOW sanitized; pin parity holds" || return 1
+}
+
+# A leading-zero clock value (e.g. a pin of 08) passes a bare digit check but is
+# read as octal by bash arithmetic, aborting on an 8/9 digit. The clock must be
+# normalized to canonical base-10 before it reaches the stamp/countdown/pulse.
+test_shared_clock_normalizes_leading_zero_pin() {
+    export CLAUDE_SESSION_NAME="zeropin"
+    mkdir -p "$CS_SESSIONS_ROOT/zeropin/.cs/local"
+    local fixture='{"session_name":"zeropin","workspace":{"current_dir":"/tmp"},"rate_limits":{"five_hour":{"used_percentage":23}}}'
+    CS_STATUSLINE_NOW=08 run_sl "$fixture" > /dev/null
+    local lim="$CS_SESSIONS_ROOT/zeropin/.cs/local/limits"
+    assert_file_contains "$lim" "stamped_at: 8$" "leading-zero pin normalized to base-10" || return 1
 }
 
 # ============================================================================
@@ -1512,6 +1613,13 @@ test_sl_bg_rgb_kept_for_manual_value() {
 
 run_test test_limits_file_written_from_rate_limits
 run_test test_limits_file_skipped_without_rate_limits
+run_test test_limits_stamp_uses_shared_clock
+run_test test_shared_clock_ignores_inherited_now
+run_test test_shared_clock_replaces_inherited_garbage
+run_test test_pulse_ignores_inherited_now
+run_test test_shared_clock_ignores_inherited_ready_flag
+run_test test_pulse_ignores_inherited_ready_flag
+run_test test_shared_clock_normalizes_leading_zero_pin
 run_test test_sl_theme_user_pin_overrides
 run_test test_sl_theme_macos_pin_beats_live
 run_test test_sl_theme_follows_macos_dark_appearance

@@ -277,7 +277,6 @@ check_update() {
 
 # Perform update (downloads signed installer from GitHub Releases)
 do_update() {
-    local force="${1:-false}"
     local remote_version
     local from_version="$VERSION"
 
