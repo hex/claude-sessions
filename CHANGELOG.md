@@ -4,6 +4,15 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.7.21
+
+### Features
+- Open an existing feature from the already-open menu. Typing `cs <base>` while that session is already open now lists the base's existing feature worktrees as numbered options (pick one to resume it), alongside force / new feature / cancel.
+- Session-color header pill. The menu header renders the session name as its `/color` pill with the Claude mark, and the whole flow (menu, feature-name prompt with a result preview, and the uncommitted-changes warning) shares one indented frame.
+
+### Changed
+- Worktree terminology is now "feature," not "task," across every user-facing surface: the launch menu, `cs -h`, the SessionStart/SubagentStart contracts, the generated worktree README, validation errors, `--merge` usage, the README, docs, and the TUI base-preview label. The walk-away `-queue` task, the `cs -msg` task kind, and `cs -spawn --task` keep "task" (distinct concepts).
+
 ## 2026.7.20
 
 ### Features

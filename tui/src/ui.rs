@@ -1521,11 +1521,11 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
         ("repo", session.git_repo.clone().unwrap_or_else(|| "\u{2014}".into()), p.ink, None),
     ];
     // Worktree lineage: a task session names its base; a base session lists
-    // its task worktrees.
+    // its feature worktrees.
     if let Some((base, task)) = crate::session::worktree_parts(&session.name) {
         meta.push(("worktree", format!("@{task} \u{b7} off {base}"), p.ink, None));
     } else {
-        let tasks: Vec<String> = app
+        let features: Vec<String> = app
             .sessions
             .iter()
             .filter_map(|s| {
@@ -1533,8 +1533,8 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
                     .and_then(|(b, t)| (b == session.name).then(|| format!("@{t}")))
             })
             .collect();
-        if !tasks.is_empty() {
-            meta.push(("features", tasks.join(", "), p.ink, None));
+        if !features.is_empty() {
+            meta.push(("features", features.join(", "), p.ink, None));
         }
     }
     if !session.tags.is_empty() {

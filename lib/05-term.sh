@@ -161,7 +161,9 @@ _session_pill() {
         return
     fi
     rgb="${rgb//,/;}"   # comma form -> semicolon for SGR
-    # chiptext (240;242;255) reads on both the coral and the session-color bg.
+    # Claude-coral (217;119;87) and chiptext (240;242;255) match cs-statusline's
+    # brand/chiptext SGR; chiptext reads on both the coral and session-color bg.
+    # KEEP IN SYNC with cs-statusline's _seg_logo/_seg_session colors.
     printf '\033[48;2;217;119;87;38;2;240;242;255m %s \033[48;2;%s;38;2;240;242;255m %s \033[0m' \
         "$ICON_LOGO" "$rgb" "$name"
 }

@@ -1,8 +1,15 @@
 # ABOUTME: PID-based session lock: acquire, release, and the already-open collision menu.
 # ABOUTME: Prevents opening one session in two terminals without --force.
 
-# Pad an action label to the width the dim consequence column aligns against.
-_lock_menu_label() { printf -v "$1" '%-16s' "$2"; }
+# Emit one numbered menu row and register its action, keeping the printed number
+# and the dispatch table in lockstep so a keypress N maps to dispatch[N-1]. The
+# label is padded so the dim consequence column aligns. n and dispatch are the
+# caller's locals (bash dynamic scope), so a row can never desync the two.
+_lock_menu_row() {  # action color label consequence
+    n=$((n + 1)); dispatch+=("$1")
+    printf '    %b%b%d%b  %b%-16s%b%b%s%b\n' \
+        "$BOLD" "$2" "$n" "$NC" "$WHITE" "$3" "$NC" "$DIM" "$4" "$NC"
+}
 
 _lock_collision_menu() {
     local session_name="$1" lock_pid="$2"
@@ -22,7 +29,7 @@ _lock_collision_menu() {
     if [ "$offers_worktree" -eq 1 ]; then
         for f in "$SESSIONS_ROOT/$session_name"@*; do
             [ -d "$f" ] || continue          # literal glob when none exist
-            features+=("$(basename "$f")")
+            features+=("${f##*/}")           # basename, fork-free
         done
         [ "${#features[@]}" -gt 6 ] && features=("${features[@]:0:6}")
     fi
@@ -33,35 +40,24 @@ _lock_collision_menu() {
         "$COMMENT" "$NC" "$DIM" "$lock_pid" "$NC"
     echo
 
-    # Display order drives both the printed numbers and the dispatch table, so a
-    # keypress N maps to dispatch[N-1]. Sections are cosmetic; the counter is not.
-    local dispatch=() n=0 label feat
+    # Display order drives both the printed numbers and the dispatch table (a
+    # keypress N maps to dispatch[N-1]); _lock_menu_row keeps the two in lockstep.
+    # Sections are cosmetic.
+    local dispatch=() n=0 feat
     if [ "${#features[@]}" -gt 0 ]; then
         printf '    %bopen a feature%b\n' "$DIM" "$NC"
         for f in "${features[@]}"; do
-            n=$((n + 1)); dispatch+=("open:$f")
             feat="${f#*@}"
-            _lock_menu_label label "@$feat"
-            printf '    %b%b%d%b  %b%s%b%bresume · cs/%s%b\n' \
-                "$BOLD" "$GREEN" "$n" "$NC" "$WHITE" "$label" "$NC" "$DIM" "$feat" "$NC"
+            _lock_menu_row "open:$f" "$GREEN" "@$feat" "resume · cs/$feat"
         done
         echo
         printf '    %bor start here%b\n' "$DIM" "$NC"
     fi
-    n=$((n + 1)); dispatch+=("force")
-    _lock_menu_label label 'force start'
-    printf '    %b%b%d%b  %b%s%b%btwo sessions share one checkout%b\n' \
-        "$BOLD" "$ORANGE" "$n" "$NC" "$WHITE" "$label" "$NC" "$DIM" "$NC"
+    _lock_menu_row "force" "$ORANGE" 'force start' 'two sessions share one checkout'
     if [ "$offers_worktree" -eq 1 ]; then
-        n=$((n + 1)); dispatch+=("new")
-        _lock_menu_label label 'new feature'
-        printf '    %b%b%d%b  %b%s%b%bits own worktree + branch%b\n' \
-            "$BOLD" "$GREEN" "$n" "$NC" "$WHITE" "$label" "$NC" "$DIM" "$NC"
+        _lock_menu_row "new" "$GREEN" 'new feature' 'its own worktree + branch'
     fi
-    n=$((n + 1)); dispatch+=("cancel")
-    _lock_menu_label label 'cancel'
-    printf '    %b%b%d%b  %b%s%b%bdefault%b\n' \
-        "$BOLD" "$COMMENT" "$n" "$NC" "$WHITE" "$label" "$NC" "$DIM" "$NC"
+    _lock_menu_row "cancel" "$COMMENT" 'cancel' 'default'
 
     echo
     printf '    %b›%b ' "$GOLD" "$NC"
