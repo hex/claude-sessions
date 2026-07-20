@@ -1,49 +1,92 @@
 # ABOUTME: PID-based session lock: acquire, release, and the already-open collision menu.
 # ABOUTME: Prevents opening one session in two terminals without --force.
 
+# Pad an action label to the width the dim consequence column aligns against.
+_lock_menu_label() { printf -v "$1" '%-16s' "$2"; }
+
 _lock_collision_menu() {
     local session_name="$1" lock_pid="$2"
-    local choice="" task="" offers_worktree=1
+    local choice="" feature="" offers_worktree=1
     # Worktrees can't nest: a worktree session offers only force/cancel.
     case "$session_name" in
         *@*) offers_worktree=0 ;;
     esac
 
-    # Pad action labels to a common width so the dim consequence column aligns.
-    local force_l worktree_l cancel_l
-    printf -v force_l    '%-14s' 'force start'
-    printf -v worktree_l '%-14s' 'new worktree'
-    printf -v cancel_l   '%-14s' 'cancel'
+    local color
+    color=$(_read_local_state "$SESSIONS_ROOT/$session_name/.cs/local/state" claude_session_color 2>/dev/null || true)
+
+    # Existing feature worktrees of this base (sibling base@* dirs), so the user
+    # can jump back into one instead of only forcing or creating. Capped so the
+    # fixed actions stay single-keypress addressable (<= 9 total options).
+    local features=() f
+    if [ "$offers_worktree" -eq 1 ]; then
+        for f in "$SESSIONS_ROOT/$session_name"@*; do
+            [ -d "$f" ] || continue          # literal glob when none exist
+            features+=("$(basename "$f")")
+        done
+        [ "${#features[@]}" -gt 6 ] && features=("${features[@]:0:6}")
+    fi
 
     echo
-    echo -e "  ${YELLOW}${ICON_LOCK}${NC}  ${BOLD}${WHITE}${session_name}${NC} ${COMMENT}is already open${NC} ${DIM}· PID ${lock_pid}${NC}"
+    printf '  %b%b%b  %b %bis already open%b %b· PID %s%b\n' \
+        "$YELLOW" "$ICON_LOCK" "$NC" "$(_session_pill "$session_name" "$color")" \
+        "$COMMENT" "$NC" "$DIM" "$lock_pid" "$NC"
     echo
-    echo -e "    ${BOLD}${ORANGE}1${NC}  ${WHITE}${force_l}${NC}${DIM}two sessions share one checkout${NC}"
-    if [ "$offers_worktree" -eq 1 ]; then
-        echo -e "    ${BOLD}${GREEN}2${NC}  ${WHITE}${worktree_l}${NC}${DIM}parallel task on its own branch${NC}"
-        echo -e "    ${BOLD}${COMMENT}3${NC}  ${WHITE}${cancel_l}${NC}${DIM}(default)${NC}"
-    else
-        echo -e "    ${BOLD}${COMMENT}2${NC}  ${WHITE}${cancel_l}${NC}${DIM}(default)${NC}"
+
+    # Display order drives both the printed numbers and the dispatch table, so a
+    # keypress N maps to dispatch[N-1]. Sections are cosmetic; the counter is not.
+    local dispatch=() n=0 label feat
+    if [ "${#features[@]}" -gt 0 ]; then
+        printf '    %bopen a feature%b\n' "$DIM" "$NC"
+        for f in "${features[@]}"; do
+            n=$((n + 1)); dispatch+=("open:$f")
+            feat="${f#*@}"
+            _lock_menu_label label "@$feat"
+            printf '    %b%b%d%b  %b%s%b%bresume · cs/%s%b\n' \
+                "$BOLD" "$GREEN" "$n" "$NC" "$WHITE" "$label" "$NC" "$DIM" "$feat" "$NC"
+        done
+        echo
+        printf '    %bor start here%b\n' "$DIM" "$NC"
     fi
+    n=$((n + 1)); dispatch+=("force")
+    _lock_menu_label label 'force start'
+    printf '    %b%b%d%b  %b%s%b%btwo sessions share one checkout%b\n' \
+        "$BOLD" "$ORANGE" "$n" "$NC" "$WHITE" "$label" "$NC" "$DIM" "$NC"
+    if [ "$offers_worktree" -eq 1 ]; then
+        n=$((n + 1)); dispatch+=("new")
+        _lock_menu_label label 'new feature'
+        printf '    %b%b%d%b  %b%s%b%bits own worktree + branch%b\n' \
+            "$BOLD" "$GREEN" "$n" "$NC" "$WHITE" "$label" "$NC" "$DIM" "$NC"
+    fi
+    n=$((n + 1)); dispatch+=("cancel")
+    _lock_menu_label label 'cancel'
+    printf '    %b%b%d%b  %b%s%b%bdefault%b\n' \
+        "$BOLD" "$COMMENT" "$n" "$NC" "$WHITE" "$label" "$NC" "$DIM" "$NC"
+
     echo
     printf '    %b›%b ' "$GOLD" "$NC"
     # Single keypress, no Enter. EOF (piped close) falls through to cancel.
     read -rsn1 choice || choice=""
     echo
 
-    case "$choice" in
-        1) return 0 ;;                                  # force a second launch here
-        2)
-            # '2' is cancel on a worktree session, which can't nest another.
-            if [ "$offers_worktree" -eq 0 ]; then
-                info "Cancelled"; exit 0
-            fi
-            read -r -p "    Task name: " task || task=""
-            # cs_split_worktree_name validates the task after the re-exec;
+    local action="cancel"
+    if [[ "$choice" =~ ^[1-9]$ ]] && [ "$choice" -le "${#dispatch[@]}" ]; then
+        action="${dispatch[$((choice - 1))]}"
+    fi
+
+    case "$action" in
+        force) return 0 ;;                              # force a second launch here
+        open:*) exec "$0" "${action#open:}" ;;          # resume an existing feature
+        new)
+            printf '    %bFeature name%b  %b›%b ' "$WHITE" "$NC" "$GOLD" "$NC"
+            read -r feature || feature=""
+            [ -n "$feature" ] && printf '    %b→ creates %s@%s · branch cs/%s%b\n' \
+                "$DIM" "$session_name" "$feature" "$feature" "$NC"
+            # cs_split_worktree_name validates the name after the re-exec;
             # keeping a second copy of its regex here would just drift.
-            exec "$0" "$session_name@$task"
+            exec "$0" "$session_name@$feature"
             ;;
-        *) info "Cancelled"; exit 0 ;;                  # 3 / Enter / any other key
+        *) info "Cancelled"; exit 0 ;;
     esac
 }
 

@@ -17,7 +17,7 @@ test_worktree_name_rejects_bad_task_half() {
     create_test_session_with_git "myproj" > /dev/null
     local output
     output=$("$CS_BIN" "myproj@fix/auth" 2>&1 || true)
-    assert_output_contains "$output" "task name" "slash in task half must be rejected" || return 1
+    assert_output_contains "$output" "feature name" "slash in feature half must be rejected" || return 1
 }
 
 test_plain_names_still_work() {
@@ -93,7 +93,7 @@ test_worktree_of_worktree_refused() {
     cs_launch "myproj@fix-auth"
     local output
     output=$("$CS_BIN" "myproj@fix-auth@deeper" 2>&1 || true)
-    assert_output_contains "$output" "task name" "second @ lands in the task half and is rejected" || return 1
+    assert_output_contains "$output" "feature name" "second @ lands in the feature half and is rejected" || return 1
 }
 
 test_worktree_create_succeeds_with_untracked_base() {

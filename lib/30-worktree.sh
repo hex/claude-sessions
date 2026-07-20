@@ -1,5 +1,5 @@
-# ABOUTME: Parallel task worktrees: name parsing, bootstrap, create, merge, and record fusion.
-# ABOUTME: Backs 'cs <base>@<task>' and 'cs <base> --merge <task>'.
+# ABOUTME: Parallel feature worktrees: name parsing, bootstrap, create, merge, and record fusion.
+# ABOUTME: Backs 'cs <base>@<feature>' and 'cs <base> --merge <feature>'.
 
 cs_split_worktree_name() {
     local name="$1"
@@ -10,11 +10,11 @@ cs_split_worktree_name() {
     CS_WT_BASE="${name%%@*}"
     CS_WT_TASK="${name#*@}"
     if [ -z "$CS_WT_BASE" ]; then
-        error "Session name cannot be empty before '@' (expected <base>@<task>)"
+        error "Session name cannot be empty before '@' (expected <base>@<feature>)"
     fi
     validate_session_name "$CS_WT_BASE"
     if [ -z "$CS_WT_TASK" ] || ! [[ "$CS_WT_TASK" =~ ^[a-zA-Z0-9._-]+$ ]]; then
-        error "Worktree task name must contain only alphanumeric characters, hyphens, underscores, and dots"
+        error "Worktree feature name must contain only alphanumeric characters, hyphens, underscores, and dots"
     fi
     return 0
 }
@@ -34,11 +34,11 @@ aliases: ["$base_name@$task"]
 ---
 # Session: $base_name@$task
 
-Task worktree of session '$base_name' on branch cs/$task.
+Feature worktree of session '$base_name' on branch cs/$task.
 
 ## Objective
 
-[Describe this task]
+[Describe this feature]
 EOF
     cat > "$wt_dir/.cs/local/session.log" << EOF
 Claude Code Session Log
@@ -77,16 +77,18 @@ _resolve_session_dir() {
 # main shell so a declined consent can exit cs cleanly (the creator is
 # command-substituted, where an exit only leaves the subshell). Clean base
 # returns; dirty base asks for informed consent on interactive terminals
-# (the task branches from the last commit and will not include uncommitted
+# (the feature branches from the last commit and will not include uncommitted
 # changes) and refuses everywhere else.
 confirm_clean_worktree_base() {
     local base_dir="$1" base_name="$2"
     git -C "$base_dir" rev-parse --git-dir >/dev/null 2>&1 || return 0
     _tree_is_dirty "$base_dir" || return 0
     if cs_interactive; then
-        warn "Session '$base_name' has uncommitted changes; the new task will branch from the last commit and will not include them."
+        printf '\n    %b⚠%b  %s has uncommitted changes; the feature branches from the\n       last commit and will not include them.\n' \
+            "$YELLOW" "$NC" "$base_name"
+        printf '    Continue?  %b[y/N]%b %b›%b ' "$DIM" "$NC" "$GOLD" "$NC"
         local consent=""
-        read -r -p "Continue? [y/N] " consent || consent=""
+        read -r consent || consent=""
         if [[ ! "$consent" =~ ^[Yy]$ ]]; then
             info "Cancelled"
             exit 0
@@ -108,7 +110,7 @@ create_worktree_session() {
         error "Session '$base_name' has no git repo; worktrees need one"
     fi
     if [ -f "$base_dir/.git" ]; then
-        error "Session '$base_name' is itself a worktree; create tasks from the main checkout"
+        error "Session '$base_name' is itself a worktree; create features from the main checkout"
     fi
     # Dirty-state gating happens in the caller (confirm_clean_worktree_base):
     # this function runs command-substituted, where an exit cannot stop cs.
@@ -180,7 +182,7 @@ create_worktree_session() {
     echo "$wt_dir"
 }
 
-# Merge a task worktree's branch back into the base session, fuse session
+# Merge a feature worktree's branch back into the base session, fuse session
 # records, and remove the worktree. Explicit and user-invoked only; every
 # preflight refuses rather than committing on the user's behalf.
 merge_worktree_session() {
@@ -191,7 +193,7 @@ merge_worktree_session() {
     local branch="cs/$task"
 
     [ -d "$base_dir" ] || error "Base session not found: $base_name"
-    [ -d "$wt_dir" ] || error "No worktree for task '$task' (expected $wt_dir)"
+    [ -d "$wt_dir" ] || error "No worktree for feature '$task' (expected $wt_dir)"
 
     local lock pid
     for lock in "$base_dir/.cs/session.lock" "$wt_dir/.cs/session.lock"; do
@@ -310,7 +312,7 @@ fuse_session_records() {
     done
 
     if [ -f "$src/memory/MEMORY.md" ]; then
-        info "MEMORY.md index lines from the task were not merged (base copy kept)"
+        info "MEMORY.md index lines from the feature were not merged (base copy kept)"
     fi
 }
 

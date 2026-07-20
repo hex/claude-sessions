@@ -12,8 +12,8 @@ Usage: cs <session-name>              Create or resume a session
 Commands:
   <name>              Create or resume session <name> (locks session)
   <name> --force      Override active session lock
-  <base>@<task>       Open a parallel task worktree of session <base>
-  <base> --merge <task>  Merge a task worktree back into <base> and remove it
+  <base>@<feature>    Open a parallel feature worktree of session <base>
+  <base> --merge <feature>  Merge a feature worktree back into <base> and remove it
   <name> -secrets <cmd>  Run secrets command on <name> without launching session
   -search <query>     Search across all sessions (--include-archived searches archived too)
   -checkpoint "<label>"  Save labelled state snapshot (run from inside a session)
@@ -95,11 +95,12 @@ warn() {
     echo -e "${YELLOW}$1${NC}"
 }
 
-# Offer a way forward when the session is already open elsewhere: start a
-# parallel task in a worktree, force a second launch into the same checkout,
-# or cancel. Returns only when the user chose force; the new-task choice
-# re-execs cs as <session>@<task>; cancel exits 0. Worktree sessions get no
-# new-task option (tasks always branch from the base). CS_ASSUME_TTY lets
+# Offer a way forward when the session is already open elsewhere: open one of
+# its existing feature worktrees, start a new parallel feature, force a second
+# launch into the same checkout, or cancel. Returns only when the user chose
+# force; the open-feature and new-feature choices re-exec cs as
+# <session>@<feature>; cancel exits 0. Worktree sessions get no new-feature
+# option (features always branch from the base). CS_ASSUME_TTY lets
 # tests drive the menu with piped stdin.
 # True when a human can answer prompts: stdin is a terminal, or a test
 # drives stdin through a pipe with CS_ASSUME_TTY=1. Every interactive gate

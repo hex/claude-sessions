@@ -225,8 +225,39 @@ test_collision_menu_shows_numbered_options() {
     local output status=0
     output=$(CS_ASSUME_TTY=1 "$CS_BIN" test-session < /dev/null 2>&1) || status=$?
     assert_output_contains "$output" "force start" "menu offers force start" || return 1
-    assert_output_contains "$output" "new worktree" "menu offers new worktree" || return 1
+    assert_output_contains "$output" "new feature" "menu offers new feature" || return 1
     assert_output_contains "$output" "cancel" "menu offers cancel" || return 1
+}
+
+# A base with existing feature worktrees lists them as openable options above
+# the fixed actions, so the user can resume one instead of only forcing/creating.
+test_collision_menu_lists_existing_features() {
+    create_lock_test_session "test-session"
+    mkdir -p "$CS_SESSIONS_ROOT/test-session@fix-auth"
+    sleep 300 &
+    local live_pid=$!
+    echo "$live_pid" > "$CS_SESSIONS_ROOT/test-session/.cs/session.lock"
+
+    local output status=0
+    output=$(CS_ASSUME_TTY=1 "$CS_BIN" test-session < /dev/null 2>&1) || status=$?
+    assert_output_contains "$output" "open a feature" "menu shows the feature section" || return 1
+    assert_output_contains "$output" "@fix-auth" "menu lists the existing feature" || return 1
+}
+
+# Choosing a listed feature resumes it (re-exec base@feature), never the
+# new-feature prompt and never cancel.
+test_collision_menu_opens_existing_feature() {
+    create_lock_test_session "test-session"
+    "$CS_BIN" "test-session@fix-auth" < /dev/null > /dev/null 2>&1 || true
+    sleep 300 &
+    local live_pid=$!
+    echo "$live_pid" > "$CS_SESSIONS_ROOT/test-session/.cs/session.lock"
+
+    local output status=0
+    # '1' = the single listed feature (single keypress, no Enter).
+    output=$(printf '1' | CS_ASSUME_TTY=1 "$CS_BIN" test-session 2>&1) || status=$?
+    assert_output_not_contains "$output" "Feature name" "opening a feature must not prompt for a new name" || return 1
+    assert_output_not_contains "$output" "Cancelled" "opening a feature must not cancel" || return 1
 }
 
 # The menu's force choice must carry through to the live-duplicate UUID guard:
@@ -269,7 +300,7 @@ test_collision_menu_on_worktree_session_offers_no_new_task() {
     # A worktree session offers only force/cancel; '2' is cancel in that context.
     output=$(printf '2' | CS_ASSUME_TTY=1 "$CS_BIN" "test-session@t1" 2>&1) || status=$?
     assert_eq "0" "$status" "worktree collision exits cleanly" || return 1
-    assert_output_not_contains "$output" "parallel task" "no new-task option for a worktree session" || return 1
+    assert_output_not_contains "$output" "new feature" "no new-feature option for a worktree session" || return 1
     assert_not_exists "$CS_SESSIONS_ROOT/test-session@t1@n" "no nested worktree possible" || return 1
 }
 
@@ -292,6 +323,8 @@ run_test test_collision_menu_new_task_creates_worktree
 run_test test_collision_menu_cancel_is_default
 run_test test_collision_menu_three_cancels
 run_test test_collision_menu_shows_numbered_options
+run_test test_collision_menu_lists_existing_features
+run_test test_collision_menu_opens_existing_feature
 run_test test_collision_menu_force_proceeds
 run_test test_collision_menu_force_bypasses_live_duplicate_guard
 run_test test_collision_menu_on_worktree_session_offers_no_new_task

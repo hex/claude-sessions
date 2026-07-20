@@ -54,6 +54,7 @@ else
     ICON_LOCK='⚿'      # Unicode lock with key
     ICON_HOST='⌘'      # Unicode command/place of interest
 fi
+ICON_LOGO='✳'          # U+2733 eight-spoked asterisk (Claude mark); font-independent
 
 # Utility functions
 error() {
@@ -145,6 +146,24 @@ _session_color_rgb() {
         cyan)   echo "8,145,178" ;;
         *)      echo "" ;;
     esac
+}
+
+# Render a session-color pill: the Claude mark on Claude-coral, then the session
+# name on its /color background, matching the statusline's logo + session
+# segments. Falls back to the bold name when colors are off or the color name is
+# unknown. Truecolor bg is safe here: cs already emits 24-bit fg escapes when
+# colors are enabled.
+_session_pill() {
+    local name="$1" color="$2" rgb
+    rgb=$(_session_color_rgb "$color")
+    if [ -z "$NC" ] || [ -z "$rgb" ]; then
+        printf '%b%s%b' "${BOLD}${WHITE}" "$name" "$NC"
+        return
+    fi
+    rgb="${rgb//,/;}"   # comma form -> semicolon for SGR
+    # chiptext (240;242;255) reads on both the coral and the session-color bg.
+    printf '\033[48;2;217;119;87;38;2;240;242;255m %s \033[48;2;%s;38;2;240;242;255m %s \033[0m' \
+        "$ICON_LOGO" "$rgb" "$name"
 }
 
 # Set terminal tab title and optional tab color.

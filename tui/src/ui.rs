@@ -1534,7 +1534,7 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
             })
             .collect();
         if !tasks.is_empty() {
-            meta.push(("tasks", tasks.join(", "), p.ink, None));
+            meta.push(("features", tasks.join(", "), p.ink, None));
         }
     }
     if !session.tags.is_empty() {
@@ -2828,8 +2828,8 @@ mod tests {
             .flat_map(|y| (0..buf.area.width).map(move |x| (x, y)))
             .map(|(x, y)| buf[(x, y)].symbol().to_string())
             .collect();
-        assert!(text.contains("tasks"), "base preview lists its worktrees");
-        assert!(text.contains("@test"), "base preview names the task");
+        assert!(text.contains("features"), "base preview lists its worktrees");
+        assert!(text.contains("@test"), "base preview names the feature");
 
         // Task selected (row 1 after attach): the preview names its base.
         app.table_state.select(Some(1));

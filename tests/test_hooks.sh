@@ -384,7 +384,7 @@ test_session_start_announces_worktree_task() {
     output=$(echo '{"session_id":"s","source":"clear","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
         | CLAUDE_SESSION_NAME="myproj@fix-auth" bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
     context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
-    assert_output_contains "$context" "task worktree of session 'myproj'" \
+    assert_output_contains "$context" "feature worktree of session 'myproj'" \
         "worktree sessions must be told what they are (on every source)" || return 1
     assert_output_contains "$context" "cs myproj --merge fix-auth" \
         "the integration command must be spelled out" || return 1
@@ -406,7 +406,7 @@ test_session_start_worktree_block_needs_at_shaped_name() {
         | CLAUDE_SESSION_NAME="myproj" bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
     assert_output_not_contains "$output" "cs -rm" \
         "no destructive command suggestions without a parseable name" || return 1
-    assert_output_not_contains "$output" "task worktree" \
+    assert_output_not_contains "$output" "feature worktree" \
         "no worktree block when the name shape does not parse" || return 1
 }
 
@@ -416,7 +416,7 @@ test_session_start_no_worktree_block_for_plain_sessions() {
     local output
     output=$(echo '{"session_id":"s","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
         | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
-    assert_output_not_contains "$output" "task worktree" \
+    assert_output_not_contains "$output" "feature worktree" \
         "plain sessions must not get the worktree block" || return 1
 }
 
@@ -488,7 +488,7 @@ test_subagent_context_announces_worktree_task() {
 
     local output
     output=$(echo '{}' | CLAUDE_SESSION_NAME="myproj@fix-auth" bash "$HOOKS_DIR/subagent-context.sh" 2>/dev/null)
-    assert_output_contains "$output" "task worktree" \
+    assert_output_contains "$output" "feature worktree" \
         "subagents must inherit worktree awareness" || return 1
     assert_output_contains "$output" "cs --merge" \
         "subagents must know integration goes through cs --merge" || return 1

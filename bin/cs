@@ -141,6 +141,7 @@ else
     ICON_LOCK='⚿'      # Unicode lock with key
     ICON_HOST='⌘'      # Unicode command/place of interest
 fi
+ICON_LOGO='✳'          # U+2733 eight-spoked asterisk (Claude mark); font-independent
 
 # Utility functions
 error() {
@@ -234,6 +235,24 @@ _session_color_rgb() {
     esac
 }
 
+# Render a session-color pill: the Claude mark on Claude-coral, then the session
+# name on its /color background, matching the statusline's logo + session
+# segments. Falls back to the bold name when colors are off or the color name is
+# unknown. Truecolor bg is safe here: cs already emits 24-bit fg escapes when
+# colors are enabled.
+_session_pill() {
+    local name="$1" color="$2" rgb
+    rgb=$(_session_color_rgb "$color")
+    if [ -z "$NC" ] || [ -z "$rgb" ]; then
+        printf '%b%s%b' "${BOLD}${WHITE}" "$name" "$NC"
+        return
+    fi
+    rgb="${rgb//,/;}"   # comma form -> semicolon for SGR
+    # chiptext (240;242;255) reads on both the coral and the session-color bg.
+    printf '\033[48;2;217;119;87;38;2;240;242;255m %s \033[48;2;%s;38;2;240;242;255m %s \033[0m' \
+        "$ICON_LOGO" "$rgb" "$name"
+}
+
 # Set terminal tab title and optional tab color.
 # Uses standard xterm escape sequences (works in iTerm2, Terminal.app, Ghostty, Alacritty, WezTerm, etc.)
 # Also sets tmux window name when running inside tmux.
@@ -322,8 +341,8 @@ Usage: cs <session-name>              Create or resume a session
 Commands:
   <name>              Create or resume session <name> (locks session)
   <name> --force      Override active session lock
-  <base>@<task>       Open a parallel task worktree of session <base>
-  <base> --merge <task>  Merge a task worktree back into <base> and remove it
+  <base>@<feature>    Open a parallel feature worktree of session <base>
+  <base> --merge <feature>  Merge a feature worktree back into <base> and remove it
   <name> -secrets <cmd>  Run secrets command on <name> without launching session
   -search <query>     Search across all sessions (--include-archived searches archived too)
   -checkpoint "<label>"  Save labelled state snapshot (run from inside a session)
@@ -405,11 +424,12 @@ warn() {
     echo -e "${YELLOW}$1${NC}"
 }
 
-# Offer a way forward when the session is already open elsewhere: start a
-# parallel task in a worktree, force a second launch into the same checkout,
-# or cancel. Returns only when the user chose force; the new-task choice
-# re-execs cs as <session>@<task>; cancel exits 0. Worktree sessions get no
-# new-task option (tasks always branch from the base). CS_ASSUME_TTY lets
+# Offer a way forward when the session is already open elsewhere: open one of
+# its existing feature worktrees, start a new parallel feature, force a second
+# launch into the same checkout, or cancel. Returns only when the user chose
+# force; the open-feature and new-feature choices re-exec cs as
+# <session>@<feature>; cancel exits 0. Worktree sessions get no new-feature
+# option (features always branch from the base). CS_ASSUME_TTY lets
 # tests drive the menu with piped stdin.
 # True when a human can answer prompts: stdin is a terminal, or a test
 # drives stdin through a pipe with CS_ASSUME_TTY=1. Every interactive gate
@@ -418,49 +438,92 @@ cs_interactive() {
     [ -t 0 ] || [ "${CS_ASSUME_TTY:-}" = "1" ]
 }
 
+# Pad an action label to the width the dim consequence column aligns against.
+_lock_menu_label() { printf -v "$1" '%-16s' "$2"; }
+
 _lock_collision_menu() {
     local session_name="$1" lock_pid="$2"
-    local choice="" task="" offers_worktree=1
+    local choice="" feature="" offers_worktree=1
     # Worktrees can't nest: a worktree session offers only force/cancel.
     case "$session_name" in
         *@*) offers_worktree=0 ;;
     esac
 
-    # Pad action labels to a common width so the dim consequence column aligns.
-    local force_l worktree_l cancel_l
-    printf -v force_l    '%-14s' 'force start'
-    printf -v worktree_l '%-14s' 'new worktree'
-    printf -v cancel_l   '%-14s' 'cancel'
+    local color
+    color=$(_read_local_state "$SESSIONS_ROOT/$session_name/.cs/local/state" claude_session_color 2>/dev/null || true)
+
+    # Existing feature worktrees of this base (sibling base@* dirs), so the user
+    # can jump back into one instead of only forcing or creating. Capped so the
+    # fixed actions stay single-keypress addressable (<= 9 total options).
+    local features=() f
+    if [ "$offers_worktree" -eq 1 ]; then
+        for f in "$SESSIONS_ROOT/$session_name"@*; do
+            [ -d "$f" ] || continue          # literal glob when none exist
+            features+=("$(basename "$f")")
+        done
+        [ "${#features[@]}" -gt 6 ] && features=("${features[@]:0:6}")
+    fi
 
     echo
-    echo -e "  ${YELLOW}${ICON_LOCK}${NC}  ${BOLD}${WHITE}${session_name}${NC} ${COMMENT}is already open${NC} ${DIM}· PID ${lock_pid}${NC}"
+    printf '  %b%b%b  %b %bis already open%b %b· PID %s%b\n' \
+        "$YELLOW" "$ICON_LOCK" "$NC" "$(_session_pill "$session_name" "$color")" \
+        "$COMMENT" "$NC" "$DIM" "$lock_pid" "$NC"
     echo
-    echo -e "    ${BOLD}${ORANGE}1${NC}  ${WHITE}${force_l}${NC}${DIM}two sessions share one checkout${NC}"
-    if [ "$offers_worktree" -eq 1 ]; then
-        echo -e "    ${BOLD}${GREEN}2${NC}  ${WHITE}${worktree_l}${NC}${DIM}parallel task on its own branch${NC}"
-        echo -e "    ${BOLD}${COMMENT}3${NC}  ${WHITE}${cancel_l}${NC}${DIM}(default)${NC}"
-    else
-        echo -e "    ${BOLD}${COMMENT}2${NC}  ${WHITE}${cancel_l}${NC}${DIM}(default)${NC}"
+
+    # Display order drives both the printed numbers and the dispatch table, so a
+    # keypress N maps to dispatch[N-1]. Sections are cosmetic; the counter is not.
+    local dispatch=() n=0 label feat
+    if [ "${#features[@]}" -gt 0 ]; then
+        printf '    %bopen a feature%b\n' "$DIM" "$NC"
+        for f in "${features[@]}"; do
+            n=$((n + 1)); dispatch+=("open:$f")
+            feat="${f#*@}"
+            _lock_menu_label label "@$feat"
+            printf '    %b%b%d%b  %b%s%b%bresume · cs/%s%b\n' \
+                "$BOLD" "$GREEN" "$n" "$NC" "$WHITE" "$label" "$NC" "$DIM" "$feat" "$NC"
+        done
+        echo
+        printf '    %bor start here%b\n' "$DIM" "$NC"
     fi
+    n=$((n + 1)); dispatch+=("force")
+    _lock_menu_label label 'force start'
+    printf '    %b%b%d%b  %b%s%b%btwo sessions share one checkout%b\n' \
+        "$BOLD" "$ORANGE" "$n" "$NC" "$WHITE" "$label" "$NC" "$DIM" "$NC"
+    if [ "$offers_worktree" -eq 1 ]; then
+        n=$((n + 1)); dispatch+=("new")
+        _lock_menu_label label 'new feature'
+        printf '    %b%b%d%b  %b%s%b%bits own worktree + branch%b\n' \
+            "$BOLD" "$GREEN" "$n" "$NC" "$WHITE" "$label" "$NC" "$DIM" "$NC"
+    fi
+    n=$((n + 1)); dispatch+=("cancel")
+    _lock_menu_label label 'cancel'
+    printf '    %b%b%d%b  %b%s%b%bdefault%b\n' \
+        "$BOLD" "$COMMENT" "$n" "$NC" "$WHITE" "$label" "$NC" "$DIM" "$NC"
+
     echo
     printf '    %b›%b ' "$GOLD" "$NC"
     # Single keypress, no Enter. EOF (piped close) falls through to cancel.
     read -rsn1 choice || choice=""
     echo
 
-    case "$choice" in
-        1) return 0 ;;                                  # force a second launch here
-        2)
-            # '2' is cancel on a worktree session, which can't nest another.
-            if [ "$offers_worktree" -eq 0 ]; then
-                info "Cancelled"; exit 0
-            fi
-            read -r -p "    Task name: " task || task=""
-            # cs_split_worktree_name validates the task after the re-exec;
+    local action="cancel"
+    if [[ "$choice" =~ ^[1-9]$ ]] && [ "$choice" -le "${#dispatch[@]}" ]; then
+        action="${dispatch[$((choice - 1))]}"
+    fi
+
+    case "$action" in
+        force) return 0 ;;                              # force a second launch here
+        open:*) exec "$0" "${action#open:}" ;;          # resume an existing feature
+        new)
+            printf '    %bFeature name%b  %b›%b ' "$WHITE" "$NC" "$GOLD" "$NC"
+            read -r feature || feature=""
+            [ -n "$feature" ] && printf '    %b→ creates %s@%s · branch cs/%s%b\n' \
+                "$DIM" "$session_name" "$feature" "$feature" "$NC"
+            # cs_split_worktree_name validates the name after the re-exec;
             # keeping a second copy of its regex here would just drift.
-            exec "$0" "$session_name@$task"
+            exec "$0" "$session_name@$feature"
             ;;
-        *) info "Cancelled"; exit 0 ;;                  # 3 / Enter / any other key
+        *) info "Cancelled"; exit 0 ;;
     esac
 }
 
@@ -1049,11 +1112,11 @@ cs_split_worktree_name() {
     CS_WT_BASE="${name%%@*}"
     CS_WT_TASK="${name#*@}"
     if [ -z "$CS_WT_BASE" ]; then
-        error "Session name cannot be empty before '@' (expected <base>@<task>)"
+        error "Session name cannot be empty before '@' (expected <base>@<feature>)"
     fi
     validate_session_name "$CS_WT_BASE"
     if [ -z "$CS_WT_TASK" ] || ! [[ "$CS_WT_TASK" =~ ^[a-zA-Z0-9._-]+$ ]]; then
-        error "Worktree task name must contain only alphanumeric characters, hyphens, underscores, and dots"
+        error "Worktree feature name must contain only alphanumeric characters, hyphens, underscores, and dots"
     fi
     return 0
 }
@@ -1073,11 +1136,11 @@ aliases: ["$base_name@$task"]
 ---
 # Session: $base_name@$task
 
-Task worktree of session '$base_name' on branch cs/$task.
+Feature worktree of session '$base_name' on branch cs/$task.
 
 ## Objective
 
-[Describe this task]
+[Describe this feature]
 EOF
     cat > "$wt_dir/.cs/local/session.log" << EOF
 Claude Code Session Log
@@ -1116,16 +1179,18 @@ _resolve_session_dir() {
 # main shell so a declined consent can exit cs cleanly (the creator is
 # command-substituted, where an exit only leaves the subshell). Clean base
 # returns; dirty base asks for informed consent on interactive terminals
-# (the task branches from the last commit and will not include uncommitted
+# (the feature branches from the last commit and will not include uncommitted
 # changes) and refuses everywhere else.
 confirm_clean_worktree_base() {
     local base_dir="$1" base_name="$2"
     git -C "$base_dir" rev-parse --git-dir >/dev/null 2>&1 || return 0
     _tree_is_dirty "$base_dir" || return 0
     if cs_interactive; then
-        warn "Session '$base_name' has uncommitted changes; the new task will branch from the last commit and will not include them."
+        printf '\n    %b⚠%b  %s has uncommitted changes; the feature branches from the\n       last commit and will not include them.\n' \
+            "$YELLOW" "$NC" "$base_name"
+        printf '    Continue?  %b[y/N]%b %b›%b ' "$DIM" "$NC" "$GOLD" "$NC"
         local consent=""
-        read -r -p "Continue? [y/N] " consent || consent=""
+        read -r consent || consent=""
         if [[ ! "$consent" =~ ^[Yy]$ ]]; then
             info "Cancelled"
             exit 0
@@ -1147,7 +1212,7 @@ create_worktree_session() {
         error "Session '$base_name' has no git repo; worktrees need one"
     fi
     if [ -f "$base_dir/.git" ]; then
-        error "Session '$base_name' is itself a worktree; create tasks from the main checkout"
+        error "Session '$base_name' is itself a worktree; create features from the main checkout"
     fi
     # Dirty-state gating happens in the caller (confirm_clean_worktree_base):
     # this function runs command-substituted, where an exit cannot stop cs.
@@ -1219,7 +1284,7 @@ create_worktree_session() {
     echo "$wt_dir"
 }
 
-# Merge a task worktree's branch back into the base session, fuse session
+# Merge a feature worktree's branch back into the base session, fuse session
 # records, and remove the worktree. Explicit and user-invoked only; every
 # preflight refuses rather than committing on the user's behalf.
 merge_worktree_session() {
@@ -1230,7 +1295,7 @@ merge_worktree_session() {
     local branch="cs/$task"
 
     [ -d "$base_dir" ] || error "Base session not found: $base_name"
-    [ -d "$wt_dir" ] || error "No worktree for task '$task' (expected $wt_dir)"
+    [ -d "$wt_dir" ] || error "No worktree for feature '$task' (expected $wt_dir)"
 
     local lock pid
     for lock in "$base_dir/.cs/session.lock" "$wt_dir/.cs/session.lock"; do
@@ -1349,7 +1414,7 @@ fuse_session_records() {
     done
 
     if [ -f "$src/memory/MEMORY.md" ]; then
-        info "MEMORY.md index lines from the task were not merged (base copy kept)"
+        info "MEMORY.md index lines from the feature were not merged (base copy kept)"
     fi
 }
 
@@ -5709,7 +5774,7 @@ main() {
                 ;;
             --merge)
                 shift
-                [ -n "${1:-}" ] || error "Usage: cs <base> --merge <task>"
+                [ -n "${1:-}" ] || error "Usage: cs <base> --merge <feature>"
                 merge_worktree_session "$session_name" "$1"
                 return 0
                 ;;
@@ -5753,7 +5818,7 @@ main() {
             pinned=$(_read_local_state "$session_dir/.cs/local/state" task_branch)
             head_branch=$(git -C "$session_dir" branch --show-current 2>/dev/null || echo "")
             if [ -n "$pinned" ] && [ "$head_branch" != "$pinned" ]; then
-                warn "Worktree HEAD is '$head_branch' but this task expects '$pinned' (did something run git switch here?)"
+                warn "Worktree HEAD is '$head_branch' but this feature expects '$pinned' (did something run git switch here?)"
             fi
             # No migrate_session here: worktree checkouts never predate the
             # worktree feature, and its CLAUDE.md rewrite must never touch a

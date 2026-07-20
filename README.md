@@ -79,8 +79,8 @@ The installer:
 cs                          # Interactive session manager (TUI)
 cs <session-name>           # Create or resume a session
 cs <session-name> --force   # Override active session lock
-cs <base>@<task>            # Create/resume a parallel task worktree off <base>
-cs <base> --merge <task>    # Merge a task worktree back into <base>
+cs <base>@<feature>         # Create/resume a parallel feature worktree off <base>
+cs <base> --merge <feature> # Merge a feature worktree back into <base>
 cs -adopt <name>            # Adopt current directory as a session
 cs -whoami                  # Show the current actor (for shared, multi-person sessions)
 cs -who                     # Show who contributed to shared memory/narrative (git history)
@@ -118,7 +118,7 @@ Running `cs` with no arguments launches an interactive TUI for browsing and mana
 - **Recency at a glance** — a heat dot beside each session (green under an hour, cooling through gold and orange to grey once dormant) and a relative `Age` column (`2h`, `3d`, `1mo`) so active work stands out; the exact timestamp stays in the preview pane
 - **Liveness** — sessions with an open conversation carry a breathing teal `■` in place of the heat dot and count into the masthead's live tally. Detection is the cs lock plus a statusline heartbeat, so conversations opened outside cs register too; the preview state reads `■ live · locked <pid>` or `■ live · unlocked`
 - **Unread mail** — a session with unread cross-session mail (`cs -msg`) shows an amber `✉` and the count in its row; it clears as the recipient reads with `cs -msg`
-- **Worktree nesting** — `base@task` sessions attach under their base with tree connectors as indented `@task` rows, inherit the base's time section, and the preview names the lineage both ways (`worktree @task · off base` on the task, a `tasks` list on the base). Deleting a worktree row unregisters it from the base repo, like `cs -rm`
+- **Worktree nesting** — `base@feature` sessions attach under their base with tree connectors as indented `@feature` rows, inherit the base's time section, and the preview names the lineage both ways (`worktree @feature · off base` on the feature, a `features` list on the base). Deleting a worktree row unregisters it from the base repo, like `cs -rm`
 - **Symbol legend** — `● activity  ■ live  * marked  archived` sits in the table header's free width on wide terminals
 - **Fuzzy search** with `/` — matches characters in order with highlighting; Enter commits the filter. Add `#tag` anywhere in the query to AND-filter by tag (e.g. `#api backend`); combine multiple `#tag`s or mix with a fuzzy name remainder
 - **Time-based sections** — sessions grouped under Today, Yesterday, This Week, This Month, Older when sorted by date (the default view)
@@ -211,20 +211,20 @@ Sessions are designed to be shared through git (push/pull the whole session dire
 
 One caveat: the custom `merge=ours` driver is per-clone git config, installed by every `cs <name>` launch. If you pull on a brand-new clone *before* ever launching the session through cs, `MEMORY.md` falls back to an ordinary text merge.
 
-### Parallel task worktrees
+### Parallel feature worktrees
 
-Work two tasks on one session at the same time, each in its own Claude
+Work two features on one session at the same time, each in its own Claude
 conversation:
 
     cs myproj@fix-auth     # creates a git worktree of myproj on branch cs/fix-auth
     cs myproj@perf         # a second, independent working copy
 
 You don't have to remember the syntax: typing `cs myproj` while that session
-is already open offers to start a parallel task from right there (or force a
-second launch, or cancel). A worktree session also knows what it is: Claude
-is told at launch that it runs in a task worktree and that
-`cs myproj --merge <task>` is the way back, so it won't merge the branch by
-hand.
+is already open offers to open one of its existing features, start a new
+parallel feature, force a second launch, or cancel. A worktree session also
+knows what it is: Claude is told at launch that it runs in a feature worktree
+and that `cs myproj --merge <feature>` is the way back, so it won't merge the
+branch by hand.
 
 The `merge` skill (`/merge` in a conversation) wraps this — and ordinary
 feature branches — in the full gated ritual: tests before, `--no-ff` merge,
@@ -237,9 +237,9 @@ records fork with the branch and re-fuse at merge:
     cs myproj --merge fix-auth   # merge cs/fix-auth, fuse records, remove worktree
 
 cs never commits for you: merge refuses dirty checkouts and tells you what
-to commit, and creating a task from a base with uncommitted changes asks
+to commit, and creating a feature from a base with uncommitted changes asks
 before branching from the last commit (interactive sessions) or refuses
-(scripts). Abandon a task with `cs -rm myproj@fix-auth`. Repos that
+(scripts). Abandon a feature with `cs -rm myproj@fix-auth`. Repos that
 gitignore `.cs/` get a per-worktree `.cs/` whose records are fused explicitly
 at merge. Requires git >= 2.20.
 

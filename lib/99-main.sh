@@ -262,7 +262,7 @@ main() {
                 ;;
             --merge)
                 shift
-                [ -n "${1:-}" ] || error "Usage: cs <base> --merge <task>"
+                [ -n "${1:-}" ] || error "Usage: cs <base> --merge <feature>"
                 merge_worktree_session "$session_name" "$1"
                 return 0
                 ;;
@@ -306,7 +306,7 @@ main() {
             pinned=$(_read_local_state "$session_dir/.cs/local/state" task_branch)
             head_branch=$(git -C "$session_dir" branch --show-current 2>/dev/null || echo "")
             if [ -n "$pinned" ] && [ "$head_branch" != "$pinned" ]; then
-                warn "Worktree HEAD is '$head_branch' but this task expects '$pinned' (did something run git switch here?)"
+                warn "Worktree HEAD is '$head_branch' but this feature expects '$pinned' (did something run git switch here?)"
             fi
             # No migrate_session here: worktree checkouts never predate the
             # worktree feature, and its CLAUDE.md rewrite must never touch a

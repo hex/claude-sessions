@@ -326,7 +326,7 @@ $(printf '%b' "$DYNAMIC")"
     fi
 fi
 
-# Worktree task sessions: tell Claude what this checkout is and how it
+# Feature worktree sessions: tell Claude what this checkout is and how it
 # integrates back. task_branch lands in machine-local state at creation,
 # so this fires in both tracked- and ignored-.cs modes, on every source
 # (the awareness must survive /clear and compaction).
@@ -340,13 +340,13 @@ if [ -n "$TASK_BRANCH" ] && [[ "$CLAUDE_SESSION_NAME" == *@* ]]; then
     TASK_NAME="${CLAUDE_SESSION_NAME#*@}"
     CONTEXT="${CONTEXT}
 
---- Task Worktree ---
-This session is a task worktree of session '$CS_BASE' on branch $TASK_BRANCH. Work and commit here as normal; the checkout is disposable once the task is integrated.
+--- Feature Worktree ---
+This session is a feature worktree of session '$CS_BASE' on branch $TASK_BRANCH. Work and commit here as normal; the checkout is disposable once the feature is integrated.
 
-When the task is complete, ask the user to run: cs $CS_BASE --merge $TASK_NAME
+When the feature is complete, ask the user to run: cs $CS_BASE --merge $TASK_NAME
 That command merges the branch into the base session, fuses the session records (timeline, narrative), and removes this worktree. It refuses while either session is open, so it runs from a free terminal after this session closes.
 
-Do NOT merge $TASK_BRANCH into the base branch manually and do not delete the branch — that bypasses the record fuse and the cleanup. To abandon the task instead, ask the user to run: cs -rm $CLAUDE_SESSION_NAME — never run this yourself; it deletes this worktree and its session records."
+Do NOT merge $TASK_BRANCH into the base branch manually and do not delete the branch — that bypasses the record fuse and the cleanup. To abandon the feature instead, ask the user to run: cs -rm $CLAUDE_SESSION_NAME — never run this yourself; it deletes this worktree and its session records."
 fi
 
 # Deliberate rotation: the launch's r answer left a pending-handoff marker.
