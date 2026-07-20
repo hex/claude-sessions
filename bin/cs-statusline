@@ -103,11 +103,12 @@ _read_stdin() {
 # (test/pin), then the fork-free printf builtin, then a date fork (macOS bash
 # 3.2 lacks %(...)T). Memoized so the limits stamp, countdown, and attention
 # pulse share one clock instead of forking date up to three times a render.
-# The memo gate is a dedicated in-process flag, never the value itself: an
-# inherited _NOW from the environment must not be trusted as initialized, or a
-# garbage/stale value would poison the stamp and crash the pulse arithmetic.
-# Always overwrites _NOW in-process and validates it numeric; leaves it empty
-# when every source fails, so callers apply their own fallback.
+# The memo gate is a dedicated flag, not the value: even when every clock source
+# fails and _NOW ends empty, the flag records that this render already tried, so
+# a later caller does not re-fork date. main() zeroes both _NOW and the flag at
+# render start, so an inherited value can never seed the memo. Always overwrites
+# _NOW in-process and validates it numeric; leaves it empty when every source
+# fails, so callers apply their own fallback.
 _sl_now() {
     [ -n "${_SL_NOW_READY:-}" ] && return 0
     _SL_NOW_READY=1

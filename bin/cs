@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.7.19"
+VERSION="2026.7.20"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 
@@ -1820,13 +1820,15 @@ _exec_fresh_rebind() {
     session_color=$(_read_local_state "$session_dir/.cs/local/state" claude_session_color)
     local color_arg=""
     [ -n "$session_color" ] && color_arg="/color $session_color"
-    # A handoff continuation makes the fresh conversation start the pickup on its
-    # first turn instead of waiting for the user (the SessionStart hook still
-    # carries the detail + bookkeeping). A spawn kick outranks it, and both
-    # outrank the color re-apply; all three ride claude's single prompt slot, so
-    # the displaced color returns on the next open.
+    # A handoff kick makes the fresh conversation act on its first turn instead of
+    # waiting for the user. It stays a bare trigger on purpose: the SessionStart
+    # hook (which the same r answer arms via the pending-handoff marker) is the
+    # single owner of the how — next-step section, transcript-not-loaded, the
+    # narrative pointers — so the wording lives in one place. A spawn kick outranks
+    # the handoff, and both outrank the color re-apply; all three ride claude's
+    # single prompt slot, so the displaced color returns on the next open.
     local handoff_arg=""
-    [ -n "$handoff" ] && handoff_arg="Read .cs/handoffs/$handoff first — it is the previous conversation's handoff; continue from its next-step section. The prior transcript is not loaded; the handoff plus .cs/memory/narrative.*.md carry the context."
+    [ -n "$handoff" ] && handoff_arg="Continue from the pending rotation handoff: read .cs/handoffs/$handoff first."
     local launch_prompt="${spawn_kick:-${handoff_arg:-$color_arg}}"
     export CS_CLAUDE_SESSION_ID="$new_uuid"
     export CS_FRESH_REBIND=1

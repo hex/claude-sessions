@@ -4,6 +4,18 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.7.20
+
+### Features
+- Handoff launches auto-start. Answering `r` at the resume prompt (a fresh conversation continuing from a rotation handoff) now reads the handoff and continues on its first turn, no first message needed. It rides the same launch-prompt rail the `/color` re-apply already uses.
+
+### Performance
+- Lighter statusline hot path. Each per-render invocation now shares one clock across the limits stamp, countdown, and attention pulse (down from up to three `date` forks), and counts the task queue with a fork-free bash loop instead of an `awk` fork, taking roughly 9 to 10 external forks per render down toward 6 to 7.
+
+### Fixes
+- Statusline clock hardened: sanitized against inherited environment state and normalized to base-10, so a leading-zero pin cannot trip bash octal arithmetic.
+- Removed a dead `force` variable in `cs -update`.
+
 ## 2026.7.19
 
 ### Fixes

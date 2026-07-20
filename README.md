@@ -301,8 +301,9 @@ Continue previous conversation? [Y/n/r/d] (r = fresh conversation with handoff, 
 ```
 
 `Y` (or Enter) resumes as usual and leaves the handoff waiting; `n` starts
-fresh with no memory of it; `r` starts a fresh conversation seeded with the
-handoff's continuation plan (the old transcript is not loaded). With more
+fresh with no memory of it; `r` opens a fresh conversation that immediately
+reads the handoff and continues from its next-step section, no first message
+needed (the old transcript is not loaded). With more
 than one unconsumed handoff, the lexicographically last basename wins — the
 `YYYY-MM-DD-` prefix makes that the newest.
 
