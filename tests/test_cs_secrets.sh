@@ -87,6 +87,19 @@ test_backend_wsl_defaults_encrypted_not_keychain() {
     assert_output_contains "$output" "Storage backend: encrypted" "WSL should default to encrypted, not keychain" || return 1
 }
 
+test_backend_msys_falls_back_to_encrypted_until_wcm() {
+    # Even with powershell.exe present, MSYS must NOT select the not-yet-implemented
+    # wcm backend (which would be a silent no-op) — it falls back to encrypted.
+    local bindir; bindir=$(mktemp -d)
+    printf '#!/bin/sh\nexit 0\n' > "$bindir/powershell.exe"
+    chmod +x "$bindir/powershell.exe"
+    unset CS_SECRETS_BACKEND
+    local output
+    output=$(PATH="$bindir:$PATH" CS_PLATFORM_OVERRIDE=msys "$CS_SECRETS_BIN" backend 2>&1)
+    rm -rf "$bindir"
+    assert_output_contains "$output" "Storage backend: encrypted" "MSYS falls back to encrypted until WCM lands" || return 1
+}
+
 # ============================================================================
 # Store and retrieve
 # ============================================================================
@@ -578,6 +591,7 @@ echo ""
 run_test test_backend_shows_encrypted
 run_test test_backend_override_via_env
 run_test test_backend_wsl_defaults_encrypted_not_keychain
+run_test test_backend_msys_falls_back_to_encrypted_until_wcm
 
 # Store and retrieve
 run_test test_store_and_get
