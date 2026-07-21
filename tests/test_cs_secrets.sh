@@ -1530,6 +1530,46 @@ SHIM
         "the lock must be released after the signal" || return 1
 }
 
+# codex round 3 finding: encrypted_purge deleted the store without holding the
+# per-session mutex, so it raced concurrent store/delete. A store that read the
+# store under lock could rename its update into place AFTER purge deleted the
+# file, resurrecting purged secrets (or purge could drop a just-committed
+# update). Purge must hold the same lock across the whole operation. A slow-
+# encrypt store holds the lock while a purge is launched; serialized, the purge
+# runs after the store commits and leaves the store empty, not resurrected.
+test_encrypted_purge_serialized_with_concurrent_store() {
+    local sess="purge-race"
+    CLAUDE_SESSION_NAME="$sess" "$CS_SECRETS_BIN" set A vA >/dev/null 2>&1
+
+    local real_ssl shim
+    real_ssl=$(command -v openssl)
+    shim="$TEST_TMPDIR/purge-shim"
+    mkdir -p "$shim"
+    cat > "$shim/openssl" <<SHIM
+#!/usr/bin/env bash
+orig=("\$@"); is_enc=0
+for a in "\$@"; do [ "\$a" = "-e" ] && is_enc=1; done
+[ "\$is_enc" = 1 ] && sleep 2
+exec "$real_ssl" "\${orig[@]}"
+SHIM
+    chmod +x "$shim/openssl"
+
+    # Store B holds the lock through a slow encrypt; purge is launched during it.
+    PATH="$shim:$PATH" CLAUDE_SESSION_NAME="$sess" "$CS_SECRETS_BIN" set B vB >/dev/null 2>&1 &
+    sleep 0.6
+    CLAUDE_SESSION_NAME="$sess" "$CS_SECRETS_BIN" purge >/dev/null 2>&1
+    wait
+
+    # Serialized, purge runs after the store commits -> the store is empty. The
+    # bug lets store's rename resurrect the secrets after purge "succeeded".
+    local out
+    out=$(CLAUDE_SESSION_NAME="$sess" "$CS_SECRETS_BIN" list 2>&1)
+    assert_output_contains "$out" "No secrets" \
+        "a purge serialized with a concurrent store must leave the store empty, not resurrected" || return 1
+    assert_file_not_exists "$HOME/.cs-secrets/$sess.enc" \
+        "purge must remove the store file even against a concurrent store" || return 1
+}
+
 # ============================================================================
 # Runner
 # ============================================================================
@@ -1663,5 +1703,6 @@ run_test test_encrypted_salt_write_is_atomic_under_concurrency
 run_test test_export_file_atomic_preserves_prior_on_encrypt_failure
 run_test test_encrypted_stale_lock_fails_loud_not_reaped
 run_test test_encrypted_signal_terminates_writer_mid_critical_section
+run_test test_encrypted_purge_serialized_with_concurrent_store
 
 report_results
