@@ -63,6 +63,41 @@ _seed_enc_sync_file() {
         -out "$path" -pass "pass:$CS_SECRETS_PASSWORD"
 }
 
+# Build a sandbox bin dir with a fake `security` (never touches the real macOS
+# Keychain) plus the tools cs-secrets needs. FAKE_SECURITY_MODE selects the
+# behaviour of `dump-keychain`: "fail" exits nonzero (a real enumeration
+# failure), anything else succeeds with an empty keychain. Echoes the bin dir.
+_make_fake_security() {
+    local bindir="$TEST_TMPDIR/kc-bin"
+    mkdir -p "$bindir"
+    cat > "$bindir/security" <<'FAKE'
+#!/usr/bin/env bash
+set -u
+sub="${1:-}"
+case "$sub" in
+    dump-keychain)
+        if [ "${FAKE_SECURITY_MODE:-}" = "fail" ]; then
+            echo "security: keychain access failed" >&2
+            exit 1
+        fi
+        exit 0
+        ;;
+    find-generic-password)
+        exit 44
+        ;;
+    *)
+        exit 0
+        ;;
+esac
+FAKE
+    chmod +x "$bindir/security"
+    local tool resolved
+    for tool in bash env basename dirname openssl jq hostname cat mkdir chmod ls rm grep sed tr cut head date uname; do
+        resolved=$(command -v "$tool" 2>/dev/null) && ln -sf "$resolved" "$bindir/$tool"
+    done
+    echo "$bindir"
+}
+
 # --- WCM (Windows Credential Manager) test helpers ---
 #
 # The real WCM backend shells out to `powershell.exe -File helper.ps1 <verb>`,
@@ -868,6 +903,139 @@ test_unknown_backend_display_is_loud() {
 }
 
 # ============================================================================
+# Backup/migrate data integrity: a backend failure must FAIL LOUD, never
+# produce a partial/empty secret set (which silently loses secrets on restore).
+# ============================================================================
+
+# --- encrypted: a decrypt failure must not masquerade as an empty store ---
+
+test_encrypted_get_loud_on_decrypt_failure() {
+    "$CS_SECRETS_BIN" set api_key "sk_ok" >/dev/null 2>&1
+    printf 'corrupt-not-openssl-ciphertext' > "$HOME/.cs-secrets/test-session.enc"
+    local out
+    if out=$("$CS_SECRETS_BIN" get api_key 2>&1); then
+        echo "  FAIL: get on a corrupt store must be nonzero"
+        return 1
+    fi
+    assert_output_not_contains "$out" "not found" "decrypt failure must not read as 'not found'" || return 1
+    assert_output_contains "$out" "decrypt" "should explain the decrypt failure" || return 1
+}
+
+test_encrypted_list_loud_on_decrypt_failure() {
+    "$CS_SECRETS_BIN" set api_key "sk_ok" >/dev/null 2>&1
+    printf 'corrupt' > "$HOME/.cs-secrets/test-session.enc"
+    local out
+    if out=$("$CS_SECRETS_BIN" list 2>&1); then
+        echo "  FAIL: list on a corrupt store must be nonzero"
+        return 1
+    fi
+    assert_output_not_contains "$out" "No secrets" "decrypt failure must not read as an empty store" || return 1
+}
+
+test_encrypted_export_file_aborts_on_decrypt_failure() {
+    "$CS_SECRETS_BIN" set api_key "sk_ok" >/dev/null 2>&1
+    printf 'corrupt' > "$HOME/.cs-secrets/test-session.enc"
+    local meta="$CS_SESSIONS_ROOT/test-session/.cs"
+    local mid; mid=$(_machine_id)
+    local out
+    if out=$(PATH="$(_ageless_path)" "$CS_SECRETS_BIN" export-file 2>&1); then
+        echo "  FAIL: export-file must abort on a decrypt failure"
+        return 1
+    fi
+    assert_output_not_contains "$out" "No secrets to export" "must not claim empty on failure" || return 1
+    assert_file_not_exists "$meta/secrets.${mid}.enc" "no sync file may be written on a decrypt failure" || return 1
+}
+
+test_encrypted_migrate_aborts_on_decrypt_failure() {
+    "$CS_SECRETS_BIN" set api_key "sk_ok" >/dev/null 2>&1
+    printf 'corrupt' > "$HOME/.cs-secrets/test-session.enc"
+    local out
+    if out=$("$CS_SECRETS_BIN" migrate-backend keychain --from encrypted 2>&1); then
+        echo "  FAIL: migrate must abort on a decrypt failure"
+        return 1
+    fi
+    assert_output_not_contains "$out" "Migrated" "must not report a migration on a source failure" || return 1
+}
+
+test_encrypted_export_file_empty_store_is_clean() {
+    local out
+    out=$(PATH="$(_ageless_path)" "$CS_SECRETS_BIN" export-file 2>&1) || return 1
+    assert_output_contains "$out" "No secrets to export" "a genuinely-empty store must export cleanly" || return 1
+}
+
+# --- keychain: an enumeration failure must abort the backup ---
+
+test_keychain_export_file_aborts_on_enumeration_failure() {
+    local bindir; bindir=$(_make_fake_security)
+    local meta="$CS_SESSIONS_ROOT/test-session/.cs"
+    local mid; mid=$(_machine_id)
+    local out
+    if out=$(PATH="$bindir" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=fail \
+        "$CS_SECRETS_BIN" export-file 2>&1); then
+        echo "  FAIL: export-file must abort when keychain enumeration fails"
+        return 1
+    fi
+    assert_output_not_contains "$out" "No secrets to export" "must not claim empty on enumeration failure" || return 1
+    assert_file_not_exists "$meta/secrets.${mid}.enc" "no sync file on keychain enumeration failure" || return 1
+    assert_file_not_exists "$meta/secrets.${mid}.age" "no age sync file on keychain enumeration failure" || return 1
+}
+
+test_keychain_export_file_empty_store_is_clean() {
+    local bindir; bindir=$(_make_fake_security)
+    local out
+    out=$(PATH="$bindir" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=empty \
+        "$CS_SECRETS_BIN" export-file 2>&1) || return 1
+    assert_output_contains "$out" "No secrets to export" "an empty keychain must export cleanly" || return 1
+}
+
+# --- wcm: enumeration or per-item read failure must abort the backup ---
+
+test_wcm_export_file_aborts_on_enumeration_failure() {
+    _wcm_make_fake >/dev/null
+    local meta="$CS_SESSIONS_ROOT/test-session/.cs"
+    local mid; mid=$(_machine_id)
+    local out
+    if out=$(WCM_FAKE_FAIL=list _wcm_cs export-file 2>&1); then
+        echo "  FAIL: export-file must abort when WCM enumeration fails"
+        return 1
+    fi
+    assert_output_not_contains "$out" "No secrets to export" "must not claim empty on enumeration failure" || return 1
+    assert_file_not_exists "$meta/secrets.${mid}.enc" "no sync file on WCM enumeration failure" || return 1
+}
+
+test_wcm_export_file_aborts_on_read_failure() {
+    _wcm_make_fake >/dev/null
+    printf 'v1' | _wcm_cs set KEY_ONE >/dev/null 2>&1 || return 1
+    local out
+    # Enumeration (list) succeeds but the per-item get fails.
+    if out=$(WCM_FAKE_FAIL=get _wcm_cs export-file 2>&1); then
+        echo "  FAIL: export-file must abort when a WCM read fails"
+        return 1
+    fi
+    assert_output_not_contains "$out" "No secrets to export" "must not claim empty on a read failure" || return 1
+}
+
+test_wcm_export_file_empty_store_is_clean() {
+    _wcm_make_fake >/dev/null
+    local out
+    out=$(_wcm_cs export-file 2>&1) || return 1
+    assert_output_contains "$out" "No secrets to export" "an empty WCM store must export cleanly" || return 1
+}
+
+# The `export` command (env-var eval output) must also abort, not emit a partial
+# set, when a listed credential can't be read.
+test_wcm_export_command_aborts_on_read_failure() {
+    _wcm_make_fake >/dev/null
+    printf 'v1' | _wcm_cs set KEY_ONE >/dev/null 2>&1 || return 1
+    local out
+    if out=$(WCM_FAKE_FAIL=get _wcm_cs export 2>/dev/null); then
+        echo "  FAIL: export command must abort when a WCM read fails"
+        return 1
+    fi
+    assert_eq "" "$out" "export command must emit nothing on a read failure" || return 1
+}
+
+# ============================================================================
 # Runner
 # ============================================================================
 
@@ -963,5 +1131,18 @@ run_test test_wcm_export_enumeration_failure_is_loud
 run_test test_wcm_empty_store_lists_cleanly
 run_test test_unknown_backend_guard
 run_test test_unknown_backend_display_is_loud
+
+# Backup/migrate data integrity (fail loud, never partial/empty)
+run_test test_encrypted_get_loud_on_decrypt_failure
+run_test test_encrypted_list_loud_on_decrypt_failure
+run_test test_encrypted_export_file_aborts_on_decrypt_failure
+run_test test_encrypted_migrate_aborts_on_decrypt_failure
+run_test test_encrypted_export_file_empty_store_is_clean
+run_test test_keychain_export_file_aborts_on_enumeration_failure
+run_test test_keychain_export_file_empty_store_is_clean
+run_test test_wcm_export_file_aborts_on_enumeration_failure
+run_test test_wcm_export_file_aborts_on_read_failure
+run_test test_wcm_export_file_empty_store_is_clean
+run_test test_wcm_export_command_aborts_on_read_failure
 
 report_results
