@@ -60,8 +60,23 @@ test_msys_refuses_spawn_before_tmux() {
     grep -q "WSL" "$TEST_TMPDIR/out" || return 1
 }
 
+test_help_marks_wsl_only_under_msys() {
+    ( export CS_PLATFORM_OVERRIDE=msys
+      "$CS_BIN" -h 2>&1 | grep -q "WSL only" ) || return 1
+}
+
+# Control: without the msys override, the annotation must not appear — proves
+# it is msys-gated rather than always printed. Default platform on this
+# dev/CI box is macos, so plain -h naturally exercises the non-msys path.
+test_help_omits_wsl_only_off_msys() {
+    "$CS_BIN" -h 2>&1 | grep -q "WSL only" && return 1
+    return 0
+}
+
 run_test test_msys_prepares_but_does_not_launch
 run_test test_non_msys_still_launches
 run_test test_msys_refuses_spawn_before_tmux
+run_test test_help_marks_wsl_only_under_msys
+run_test test_help_omits_wsl_only_off_msys
 
 report_results

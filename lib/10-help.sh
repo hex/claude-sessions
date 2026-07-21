@@ -2,12 +2,20 @@
 # ABOUTME: Plus the warn helper and the cs_interactive TTY predicate.
 
 show_help() {
+    local wsl_only=""
+    local msys_launch_note=""
+    if [ "$(cs_platform)" = "msys" ]; then
+        wsl_only=" (WSL only on Windows)"
+        msys_launch_note="
+       (On Windows Git Bash, cs <session-name> prepares the session only;
+        the interactive Claude launch is WSL only)"
+    fi
     cat << EOF
 cs $VERSION - Claude Code session manager
 
 Usage: cs <session-name>              Create or resume a session
        cs <session-name> -secrets <cmd>  Run secrets command on session
-       cs -<command>                  Run a global subcommand
+       cs -<command>                  Run a global subcommand${msys_launch_note}
 
 Commands:
   <name>              Create or resume session <name> (locks session)
@@ -27,7 +35,7 @@ Commands:
   -msg <session> "<body>"  Send a message to another session (--kind notify|task|text|result)
   -msg                Read this session's unread mail
   -msg log            Show this session's full mail history
-  -spawn <name>       Open a session in the cs tmux session (--task "..." seeds and arms its queue)
+  -spawn <name>       Open a session in the cs tmux session (--task "..." seeds and arms its queue)${wsl_only}
   -conversations      Show the session's conversation chain (rotations, lineage)
   -doctor, -diag      Run health checks (Keychain, hooks, memory, audit, tokens)
   -lint <file>...     Flag AI-slop prose tells (em-dashes, banned phrases); 0=clean 1=issues 2=error
