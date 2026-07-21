@@ -80,6 +80,13 @@ test_backend_override_via_env() {
     assert_output_contains "$output" "encrypted" "Should respect CS_SECRETS_BACKEND" || return 1
 }
 
+test_backend_wsl_defaults_encrypted_not_keychain() {
+    unset CS_SECRETS_BACKEND
+    local output
+    output=$(CS_PLATFORM_OVERRIDE=wsl "$CS_SECRETS_BIN" backend 2>&1)
+    assert_output_contains "$output" "Storage backend: encrypted" "WSL should default to encrypted, not keychain" || return 1
+}
+
 # ============================================================================
 # Store and retrieve
 # ============================================================================
@@ -570,6 +577,7 @@ echo ""
 # Backend
 run_test test_backend_shows_encrypted
 run_test test_backend_override_via_env
+run_test test_backend_wsl_defaults_encrypted_not_keychain
 
 # Store and retrieve
 run_test test_store_and_get
