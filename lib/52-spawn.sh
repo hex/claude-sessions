@@ -86,6 +86,9 @@ _spawn_window() {  # name
 }
 
 run_spawn() {
+    if [ "$(cs_platform)" = "msys" ]; then
+        error "cs -spawn needs tmux; on Windows run it from WSL."
+    fi
     local name="" nl='
 '
     local tasks

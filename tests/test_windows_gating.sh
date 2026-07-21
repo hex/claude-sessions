@@ -36,7 +36,32 @@ test_non_msys_still_launches() {
     [ -f "$LAUNCH_SENTINEL" ] || return 1
 }
 
+# A fake tmux that proves it was invoked by touching a sentinel file. The seam
+# is CS_TMUX_BIN (an env var read by a subprocess), not a bash function stub —
+# a function defined in this test shell can't cross the subprocess boundary
+# into "$CS_BIN" -spawn.
+_install_fake_tmux() {
+    local stub="$TEST_TMPDIR/fake-tmux"
+    cat > "$stub" << 'STUB_EOF'
+#!/usr/bin/env bash
+touch "$TMUX_CALLED_SENTINEL"
+STUB_EOF
+    chmod +x "$stub"
+    export CS_TMUX_BIN="$stub"
+    export TMUX_CALLED_SENTINEL="$TEST_TMPDIR/tmux-called"
+}
+
+test_msys_refuses_spawn_before_tmux() {
+    _install_fake_tmux
+    local rc=0
+    CS_PLATFORM_OVERRIDE=msys "$CS_BIN" -spawn foo >"$TEST_TMPDIR/out" 2>&1 || rc=$?
+    [ "$rc" -ne 0 ] || return 1
+    [ ! -f "$TMUX_CALLED_SENTINEL" ] || return 1
+    grep -q "WSL" "$TEST_TMPDIR/out" || return 1
+}
+
 run_test test_msys_prepares_but_does_not_launch
 run_test test_non_msys_still_launches
+run_test test_msys_refuses_spawn_before_tmux
 
 report_results

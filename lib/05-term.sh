@@ -186,6 +186,10 @@ set_tab_title() {
     # Standard xterm OSC 0: set window and tab title (also sets tmux pane title)
     printf '\033]0;%s\007' "$title"
 
+    # Git Bash has no tmux, and neither iTerm2 nor WezTerm run as the outer
+    # terminal there; the plain title above is all msys gets.
+    [ "$(cs_platform)" = "msys" ] && return 0
+
     # tmux: set window name and pane title, then lock both so Claude Code can't overwrite
     if [ -n "${TMUX:-}" ]; then
         tmux rename-window "$title" 2>/dev/null || true
