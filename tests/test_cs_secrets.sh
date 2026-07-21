@@ -1344,6 +1344,30 @@ test_migrate_partial_write_fails_loud() {
 }
 
 # ============================================================================
+# Concurrency & durability (encrypted backend)
+# ============================================================================
+
+# D1: concurrent read-modify-write must not lose updates. Each writer reads the
+# store, adds its own key, and writes back. The per-write commit is atomic, but
+# the read-modify-write sequence is not: without a mutex, two writers read the
+# same base and the second rename clobbers the first writer's key, so keys
+# silently vanish. Every key must survive.
+test_encrypted_concurrent_stores_no_lost_update() {
+    local sess="d1-concurrent"
+    local n=15 i
+    for i in $(seq 1 "$n"); do
+        CLAUDE_SESSION_NAME="$sess" "$CS_SECRETS_BIN" set "key$i" "val$i" >/dev/null 2>&1 &
+    done
+    wait
+    local out
+    out=$(CLAUDE_SESSION_NAME="$sess" "$CS_SECRETS_BIN" list 2>&1)
+    for i in $(seq 1 "$n"); do
+        assert_output_contains "$out" "key$i" \
+            "key$i must survive $n concurrent stores (lost-update race)" || return 1
+    done
+}
+
+# ============================================================================
 # Runner
 # ============================================================================
 
@@ -1469,5 +1493,8 @@ run_test test_keychain_export_loud_on_read_failure
 run_test test_migrate_encrypted_to_wcm_succeeds
 run_test test_migrate_wcm_to_encrypted_succeeds
 run_test test_migrate_partial_write_fails_loud
+
+# Concurrency & durability
+run_test test_encrypted_concurrent_stores_no_lost_update
 
 report_results
