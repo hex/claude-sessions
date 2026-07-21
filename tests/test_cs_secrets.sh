@@ -65,8 +65,10 @@ _seed_enc_sync_file() {
 
 # Build a sandbox bin dir with a fake `security` (never touches the real macOS
 # Keychain) plus the tools cs-secrets needs. FAKE_SECURITY_MODE selects the
-# behaviour of `dump-keychain`: "fail" exits nonzero (a real enumeration
-# failure), anything else succeeds with an empty keychain. Echoes the bin dir.
+# behaviour: "fail" makes `dump-keychain` exit nonzero (a real enumeration
+# failure); "readfail" enumerates one credential but makes the per-item
+# `find-generic-password` read fail; anything else is a healthy empty keychain.
+# Echoes the bin dir.
 _make_fake_security() {
     local bindir="$TEST_TMPDIR/kc-bin"
     mkdir -p "$bindir"
@@ -74,15 +76,28 @@ _make_fake_security() {
 #!/usr/bin/env bash
 set -u
 sub="${1:-}"
+sess="${FAKE_SECURITY_SESSION:-test-session}"
 case "$sub" in
     dump-keychain)
-        if [ "${FAKE_SECURITY_MODE:-}" = "fail" ]; then
-            echo "security: keychain access failed" >&2
-            exit 1
-        fi
-        exit 0
+        case "${FAKE_SECURITY_MODE:-}" in
+            fail)
+                echo "security: keychain access failed" >&2
+                exit 1
+                ;;
+            readfail)
+                # Enumerate exactly one matching credential so the caller
+                # proceeds to read it (and then hits the read failure below).
+                printf '    "svce"<blob>="cs:%s:K1"\n' "$sess"
+                exit 0
+                ;;
+            *)
+                exit 0
+                ;;
+        esac
         ;;
     find-generic-password)
+        # A per-item read: fails under readfail, "not found" otherwise.
+        [ "${FAKE_SECURITY_MODE:-}" = "readfail" ] && exit 1
         exit 44
         ;;
     *)
@@ -152,6 +167,12 @@ case "$verb" in
         exit 0
         ;;
     get)
+        # Simulate a corrupt/truncated helper response: exit 0 but emit
+        # malformed base64 (openssl base64 -d would return 0 + empty for this).
+        if [ -n "${WCM_FAKE_CORRUPT_GET:-}" ]; then
+            printf '%s' '!!!not-valid-base64!!!'
+            exit 0
+        fi
         if [ -f "$cred_file" ]; then
             sed -n '2p' "$cred_file" | tr -d '\n'
             exit 0
@@ -192,6 +213,7 @@ _wcm_cs() {
         WCM_FAKE_STORE="$TEST_TMPDIR/wcm-store" \
         WCM_FAKE_ARGS="$TEST_TMPDIR/wcm-args" \
         WCM_FAKE_FAIL="${WCM_FAKE_FAIL:-}" \
+        WCM_FAKE_CORRUPT_GET="${WCM_FAKE_CORRUPT_GET:-}" \
         "$CS_SECRETS_BIN" "$@"
 }
 
@@ -1035,6 +1057,104 @@ test_wcm_export_command_aborts_on_read_failure() {
     assert_eq "" "$out" "export command must emit nothing on a read failure" || return 1
 }
 
+# --- strict base64 decode: a corrupt/truncated helper response is not empty ---
+
+test_wcm_get_loud_on_corrupt_base64() {
+    _wcm_make_fake >/dev/null
+    printf 'hunter2' | _wcm_cs set API_KEY >/dev/null 2>&1 || return 1
+    local out rc=0
+    out=$(WCM_FAKE_CORRUPT_GET=1 _wcm_cs get API_KEY 2>/dev/null) || rc=$?
+    [[ $rc -ne 0 ]] || { echo "  FAIL: get on a corrupt base64 response must be nonzero"; return 1; }
+    assert_eq "" "$out" "corrupt base64 must not decode to a (empty) secret" || return 1
+}
+
+# --- keychain: list/purge/export must fail loud on a backend command failure ---
+
+test_keychain_list_loud_on_enumeration_failure() {
+    local bindir; bindir=$(_make_fake_security)
+    local out
+    if out=$(PATH="$bindir" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=fail \
+        "$CS_SECRETS_BIN" list 2>&1); then
+        echo "  FAIL: list must be nonzero when keychain enumeration fails"
+        return 1
+    fi
+    assert_output_not_contains "$out" "No secrets" "enumeration failure must not read as an empty store" || return 1
+}
+
+test_keychain_list_empty_is_clean() {
+    local bindir; bindir=$(_make_fake_security)
+    local out
+    out=$(PATH="$bindir" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=empty \
+        "$CS_SECRETS_BIN" list 2>&1) || return 1
+    assert_output_contains "$out" "No secrets stored for session" "an empty keychain must list cleanly" || return 1
+}
+
+test_keychain_purge_loud_on_enumeration_failure() {
+    local bindir; bindir=$(_make_fake_security)
+    local out
+    if out=$(PATH="$bindir" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=fail \
+        "$CS_SECRETS_BIN" purge 2>&1); then
+        echo "  FAIL: purge must be nonzero when keychain enumeration fails"
+        return 1
+    fi
+    assert_output_not_contains "$out" "Purged" "enumeration failure must not report a purge" || return 1
+}
+
+test_keychain_export_loud_on_enumeration_failure() {
+    local bindir; bindir=$(_make_fake_security)
+    local out
+    if out=$(PATH="$bindir" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=fail \
+        "$CS_SECRETS_BIN" export 2>&1); then
+        echo "  FAIL: export must be nonzero when keychain enumeration fails"
+        return 1
+    fi
+}
+
+test_keychain_export_loud_on_read_failure() {
+    local bindir; bindir=$(_make_fake_security)
+    local out
+    # Enumeration lists one credential but the per-item read fails.
+    if out=$(PATH="$bindir" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=readfail \
+        FAKE_SECURITY_SESSION=test-session "$CS_SECRETS_BIN" export 2>/dev/null); then
+        echo "  FAIL: export must be nonzero when a keychain read fails"
+        return 1
+    fi
+    assert_eq "" "$out" "export must emit nothing on a read failure" || return 1
+}
+
+# --- migrate: wcm is a first-class source/target; a partial migration fails ---
+
+test_migrate_encrypted_to_wcm_succeeds() {
+    _wcm_make_fake >/dev/null
+    "$CS_SECRETS_BIN" set api_key "sk_ok" >/dev/null 2>&1
+    local out
+    out=$(_wcm_cs migrate-backend wcm --from encrypted 2>&1) || return 1
+    assert_output_contains "$out" "Migrated 1 of 1" "encrypted->wcm must migrate all" || return 1
+    assert_eq "sk_ok" "$(_wcm_cs get api_key 2>/dev/null)" "migrated secret must be readable from wcm" || return 1
+}
+
+test_migrate_wcm_to_encrypted_succeeds() {
+    _wcm_make_fake >/dev/null
+    printf 'v1' | _wcm_cs set w_key >/dev/null 2>&1 || return 1
+    local out
+    out=$(_wcm_cs migrate-backend encrypted --from wcm 2>&1) || return 1
+    assert_output_contains "$out" "Migrated 1 of 1" "wcm->encrypted must migrate all" || return 1
+    assert_eq "v1" "$("$CS_SECRETS_BIN" get w_key 2>/dev/null)" "migrated secret must be readable from encrypted" || return 1
+}
+
+test_migrate_partial_write_fails_loud() {
+    _wcm_make_fake >/dev/null
+    "$CS_SECRETS_BIN" set k1 "v1" >/dev/null 2>&1
+    "$CS_SECRETS_BIN" set k2 "v2" >/dev/null 2>&1
+    local out
+    # Target wcm store fails for every item -> migrated 0 of 2 -> nonzero.
+    if out=$(WCM_FAKE_FAIL=store _wcm_cs migrate-backend wcm --from encrypted 2>&1); then
+        echo "  FAIL: a partial/failed migration must exit nonzero"
+        return 1
+    fi
+    assert_output_contains "$out" "incomplete" "must report the migration as incomplete" || return 1
+}
+
 # ============================================================================
 # Runner
 # ============================================================================
@@ -1144,5 +1264,16 @@ run_test test_wcm_export_file_aborts_on_enumeration_failure
 run_test test_wcm_export_file_aborts_on_read_failure
 run_test test_wcm_export_file_empty_store_is_clean
 run_test test_wcm_export_command_aborts_on_read_failure
+
+# Comprehensive sweep: strict base64, keychain list/purge/export, wcm migrate
+run_test test_wcm_get_loud_on_corrupt_base64
+run_test test_keychain_list_loud_on_enumeration_failure
+run_test test_keychain_list_empty_is_clean
+run_test test_keychain_purge_loud_on_enumeration_failure
+run_test test_keychain_export_loud_on_enumeration_failure
+run_test test_keychain_export_loud_on_read_failure
+run_test test_migrate_encrypted_to_wcm_succeeds
+run_test test_migrate_wcm_to_encrypted_succeeds
+run_test test_migrate_partial_write_fails_loud
 
 report_results
