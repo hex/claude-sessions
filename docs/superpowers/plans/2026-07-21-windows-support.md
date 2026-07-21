@@ -146,7 +146,7 @@ test_cs_platform_copies_match_lib() {
 
 **Interfaces:**
 - Consumes: `cs_platform()`.
-- Produces: on `wsl`, `detect_backend` returns `encrypted` unless `CS_SECRETS_BACKEND` is set; on `msys` it returns `wcm` (wired in Task 9); `macos` unchanged (`keychain`).
+- Produces: on `wsl`, `detect_backend` returns `encrypted` unless `CS_SECRETS_BACKEND` is set; on `msys` it also returns `encrypted` **until Task 9 flips it to `wcm`** alongside the handlers (selecting `wcm` before its dispatch arms exist would make MSYS secrets a silent no-op); `macos` unchanged (`keychain`).
 
 - [ ] **Step 1: Failing test:**
 
@@ -165,7 +165,9 @@ detect_backend() {
     if [[ -n "${CS_SECRETS_BACKEND:-}" ]]; then echo "$CS_SECRETS_BACKEND"; return; fi
     case "$(cs_platform)" in
         macos) command -v security >/dev/null 2>&1 && { echo keychain; return; } ;;
-        msys)  command -v powershell.exe >/dev/null 2>&1 && { echo wcm; return; } ;;
+        # msys -> wcm is deferred to Task 9 (selected with the WCM handlers +
+        # unknown-backend guards); until then MSYS falls through to encrypted
+        # below, so a real Git Bash box is never a silent no-op.
         # wsl/linux: no OS keystore by default -> encrypted below
     esac
     command -v openssl >/dev/null 2>&1 && { echo encrypted; return; }
@@ -365,7 +367,7 @@ test_wcm_roundtrip_via_dispatch_mocked() {
 ```
 
 - [ ] **Step 2: Fail.**
-- [ ] **Step 3: Implement** `wcm_*` (base64-encode stdin before `_wcm_run store`; base64-decode after `_wcm_run get`), add `wcm)` arms to every `backend_*` dispatch `case`, and **fix `bin/cs-secrets:3`** ABOUTME to: `# ABOUTME: Supports macOS Keychain, Windows Credential Manager (PowerShell), and encrypted-file/age fallback`.
+- [ ] **Step 3: Implement** `wcm_*` (base64-encode stdin before `_wcm_run store`; base64-decode after `_wcm_run get`), add `wcm)` arms to every `backend_*` dispatch `case`, **flip `detect_backend`'s msys arm to select `wcm`** when `powershell.exe` is present (deferred from Task 3), **add an explicit `*)` unknown-backend error arm to every `backend_*` dispatcher** so an unimplemented/unknown backend fails loudly instead of silently no-op'ing, and **fix `bin/cs-secrets:3`** ABOUTME to: `# ABOUTME: Supports macOS Keychain, Windows Credential Manager (PowerShell), and encrypted-file/age fallback`.
 - [ ] **Step 4: Green** + edge-case tests (unicode, multiline, empty, over-size rejected) with the mock.
 - [ ] **Step 5: Commit.**
 
