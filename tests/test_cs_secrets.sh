@@ -1466,6 +1466,70 @@ SHIM
         "prior sync file must survive a failed export (non-atomic truncate)" || return 1
 }
 
+# codex finding 1: a lock left by a dead process must NOT be silently reaped.
+# The earlier reap read the holder PID, classified it dead, then renamed the
+# lock away without re-checking that the file still held that PID — a two-waiter
+# TOCTOU that could hand two writers the lock at once (the lost update this mutex
+# prevents). Acquisition now fails loud after the timeout instead, naming the
+# lock to remove. Deterministic: seed the lock with a definitely-dead PID.
+test_encrypted_stale_lock_fails_loud_not_reaped() {
+    local sess="stale-lock"
+    mkdir -p "$HOME/.cs-secrets"
+    chmod 700 "$HOME/.cs-secrets"
+    # A definitely-dead PID: spawn a child, reap it, reuse its now-free PID.
+    local dead
+    sh -c 'exit 0' & dead=$!
+    wait "$dead" 2>/dev/null
+    echo "$dead" > "$HOME/.cs-secrets/.lock.$sess"
+
+    local out rc=0
+    out=$(CS_SECRETS_LOCK_TIMEOUT=1 CLAUDE_SESSION_NAME="$sess" "$CS_SECRETS_BIN" set k v 2>&1) || rc=$?
+    assert_eq "1" "$rc" "store must fail when the lock is held" || return 1
+    assert_output_contains "$out" "timed out" "must fail loud, not silently reap the stale lock" || return 1
+    assert_output_contains "$out" "remove:" "must name the lock file to remove" || return 1
+    assert_file_not_exists "$HOME/.cs-secrets/$sess.enc" \
+        "no store may be written when the lock was never acquired" || return 1
+}
+
+# codex finding 2: a signal during the critical section must TERMINATE the
+# writer. Bash does not auto-exit after an INT/TERM/HUP trap handler returns; a
+# handler that only released the lock would let execution continue lock-less
+# through the write, so another process could interleave (the lost update this
+# mutex prevents). A slow-encrypt openssl shim holds the writer in the critical
+# section; we TERM it there and assert it did not go on to report success and
+# left no lock behind.
+test_encrypted_signal_terminates_writer_mid_critical_section() {
+    local sess="sig-term"
+    local real_ssl shim
+    real_ssl=$(command -v openssl)
+    shim="$TEST_TMPDIR/sig-shim"
+    mkdir -p "$shim"
+    cat > "$shim/openssl" <<SHIM
+#!/usr/bin/env bash
+# Slow only the encrypt so the writer sits in the critical section; decrypt and
+# everything else pass through to the real binary.
+orig=("\$@"); is_enc=0
+for a in "\$@"; do [ "\$a" = "-e" ] && is_enc=1; done
+[ "\$is_enc" = 1 ] && sleep 2
+exec "$real_ssl" "\${orig[@]}"
+SHIM
+    chmod +x "$shim/openssl"
+
+    local logf="$TEST_TMPDIR/sig-out.log"
+    PATH="$shim:$PATH" CLAUDE_SESSION_NAME="$sess" "$CS_SECRETS_BIN" set k v >"$logf" 2>&1 &
+    local pid=$!
+    sleep 0.6            # let it acquire and enter the slow encrypt
+    kill -TERM "$pid" 2>/dev/null
+    wait "$pid" 2>/dev/null
+    local rc=$?
+
+    assert_output_not_contains "$(cat "$logf")" "Stored secret" \
+        "a TERM in the critical section must terminate the writer, not complete the store" || return 1
+    [ "$rc" -ne 0 ] || { echo "  FAIL: writer must exit non-zero when TERMed mid-store (got $rc)"; return 1; }
+    assert_file_not_exists "$HOME/.cs-secrets/.lock.$sess" \
+        "the lock must be released after the signal" || return 1
+}
+
 # ============================================================================
 # Runner
 # ============================================================================
@@ -1597,5 +1661,7 @@ run_test test_migrate_partial_write_fails_loud
 run_test test_encrypted_concurrent_stores_no_lost_update
 run_test test_encrypted_salt_write_is_atomic_under_concurrency
 run_test test_export_file_atomic_preserves_prior_on_encrypt_failure
+run_test test_encrypted_stale_lock_fails_loud_not_reaped
+run_test test_encrypted_signal_terminates_writer_mid_critical_section
 
 report_results
