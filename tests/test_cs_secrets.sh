@@ -1406,6 +1406,66 @@ SHIM
     assert_eq "vB" "$got_b" "salt-B must decrypt (must not read a half-written salt)" || return 1
 }
 
+# D2: a failed sync export must not destroy the previous good backup. The old
+# code encrypted straight to `-out "$enc_output"`, which opens the live sync
+# file with O_TRUNC before openssl finishes; a failed/interrupted encrypt then
+# leaves the prior backup truncated (pipefail surfaces the failure, but too
+# late). A fake openssl truncates the output then fails only on encrypt (-e);
+# decrypt (-d), used to read the store and compare the existing file, passes
+# through to real openssl. The fix encrypts into a temp and renames on success,
+# so a failed export leaves the existing sync file untouched.
+test_export_file_atomic_preserves_prior_on_encrypt_failure() {
+    local sess="d2-atomic"
+    CLAUDE_SESSION_NAME="$sess" "$CS_SECRETS_BIN" set k1 v1 >/dev/null 2>&1
+
+    # Seed an existing, valid per-machine sync file (a prior successful export).
+    local mid meta sync
+    mid=$(_machine_id)
+    meta="$CS_SESSIONS_ROOT/$sess/.cs"
+    sync="$meta/secrets.${mid}.enc"
+    _seed_enc_sync_file "$sync" '{"prior":"good"}'
+
+    # Fake openssl: truncate the -out target then fail on encrypt; pass decrypt
+    # and everything else through to the real binary.
+    local real_ssl ageless fakedir
+    real_ssl=$(command -v openssl)
+    ageless=$(_ageless_path)
+    fakedir="$TEST_TMPDIR/d2-fakebin"
+    mkdir -p "$fakedir"
+    cat > "$fakedir/openssl" <<SHIM
+#!/usr/bin/env bash
+orig=("\$@"); is_enc=0; out=""
+while [ \$# -gt 0 ]; do
+    case "\$1" in
+        -e) is_enc=1 ;;
+        -out) shift; out="\$1" ;;
+    esac
+    shift
+done
+if [ "\$is_enc" = 1 ]; then
+    : > "\$out"                              # simulate openssl's O_TRUNC open...
+    echo "fake openssl: forced encrypt failure" >&2
+    exit 1                                   # ...then fail before writing bytes
+fi
+exec "$real_ssl" "\${orig[@]}"
+SHIM
+    chmod +x "$fakedir/openssl"
+
+    local out
+    if out=$(PATH="$fakedir:$ageless" CLAUDE_SESSION_NAME="$sess" "$CS_SECRETS_BIN" export-file 2>&1); then
+        echo "  FAIL: export must fail loud when encryption fails"
+        echo "    output: $out"
+        return 1
+    fi
+
+    # The prior sync file must still decrypt to its original content.
+    local restored
+    restored=$(openssl enc -aes-256-cbc -d -pbkdf2 -iter 100000 \
+        -in "$sync" -pass "pass:$CS_SECRETS_PASSWORD" 2>/dev/null)
+    assert_output_contains "$restored" '"prior":"good"' \
+        "prior sync file must survive a failed export (non-atomic truncate)" || return 1
+}
+
 # ============================================================================
 # Runner
 # ============================================================================
@@ -1536,5 +1596,6 @@ run_test test_migrate_partial_write_fails_loud
 # Concurrency & durability
 run_test test_encrypted_concurrent_stores_no_lost_update
 run_test test_encrypted_salt_write_is_atomic_under_concurrency
+run_test test_export_file_atomic_preserves_prior_on_encrypt_failure
 
 report_results
