@@ -47,7 +47,7 @@ _ageless_path() {
     if [[ ! -d "$bindir" ]]; then
         mkdir -p "$bindir"
         local tool resolved
-        for tool in bash env basename dirname openssl jq hostname cat mkdir chmod ls rm grep sed tr cut head date; do
+        for tool in bash env basename dirname openssl jq hostname cat mkdir chmod ls rm grep sed tr cut head date mktemp mv; do
             resolved=$(command -v "$tool" 2>/dev/null) && ln -sf "$resolved" "$bindir/$tool"
         done
     fi
@@ -473,6 +473,81 @@ test_secrets_dir_permissions() {
     local perms
     perms=$(_file_mode "$HOME/.cs-secrets")
     assert_eq "700" "$perms" "Secrets dir should be 700" || return 1
+}
+
+# Build a bin dir with a fake `openssl` that simulates a mid-write encryption
+# failure: on `enc -e` it truncates the -out target (as real openssl does when
+# it opens the output before erroring) and exits nonzero; all other invocations
+# (notably `enc -d` decrypt) pass through to the real openssl. Echoes the dir.
+_make_openssl_writefail_bin() {
+    local bindir="$TEST_TMPDIR/ossl-fail-bin"
+    mkdir -p "$bindir"
+    local real_openssl; real_openssl=$(command -v openssl)
+    cat > "$bindir/openssl" <<OSSL
+#!/usr/bin/env bash
+enc=0; e=0; out=""; prev=""
+for a in "\$@"; do
+    case "\$prev" in -out) out="\$a" ;; esac
+    case "\$a" in enc) enc=1 ;; -e) e=1 ;; esac
+    prev="\$a"
+done
+if [[ \$enc -eq 1 && \$e -eq 1 ]]; then
+    # Reproduce a real partial write: the -out file is opened (truncated) and
+    # partially written before openssl errors out.
+    [[ -n "\$out" ]] && printf 'PARTIAL' > "\$out"
+    echo "openssl: simulated write failure" >&2
+    exit 1
+fi
+exec "$real_openssl" "\$@"
+OSSL
+    chmod +x "$bindir/openssl"
+    echo "$bindir"
+}
+
+# A failed encrypted write must NEVER destroy the existing store: the prior
+# ciphertext must be byte-for-byte intact and still decryptable to the old value.
+test_encrypted_write_failure_preserves_prior_store() {
+    "$CS_SECRETS_BIN" set K1 v1 >/dev/null 2>&1
+    assert_eq "v1" "$("$CS_SECRETS_BIN" get K1 2>&1)" "precondition: K1=v1 stored" || return 1
+
+    local enc_file="$HOME/.cs-secrets/test-session.enc"
+    assert_file_exists "$enc_file" "precondition: store file exists" || return 1
+    local before; before=$(openssl dgst -sha256 < "$enc_file")
+
+    local bindir; bindir=$(_make_openssl_writefail_bin)
+    local out rc=0
+    out=$(PATH="$bindir:$PATH" "$CS_SECRETS_BIN" set K1 v2_should_fail 2>&1) || rc=$?
+
+    if [[ $rc -eq 0 ]]; then
+        echo "  FAIL: set must return nonzero when the encrypted write fails"
+        echo "    output: $out"
+        return 1
+    fi
+    local after; after=$(openssl dgst -sha256 < "$enc_file")
+    assert_eq "$before" "$after" "prior ciphertext must be byte-for-byte unchanged after a failed write" || return 1
+    assert_eq "v1" "$("$CS_SECRETS_BIN" get K1 2>&1)" "the old secret must still decrypt after a failed write" || return 1
+
+    local tmpcount
+    tmpcount=$(find "$HOME/.cs-secrets" -maxdepth 1 -name '.??????' -type f 2>/dev/null | wc -l | tr -d ' ')
+    assert_eq 0 "$tmpcount" "no stray temp file must remain after a failed write" || return 1
+}
+
+# The success path must persist updates, preserve other secrets, and leave no
+# temp file behind.
+test_encrypted_write_success_updates_and_leaves_no_temp() {
+    "$CS_SECRETS_BIN" set K1 v1 >/dev/null 2>&1
+    "$CS_SECRETS_BIN" set K1 v2 >/dev/null 2>&1
+    "$CS_SECRETS_BIN" set K2 w1 >/dev/null 2>&1
+
+    assert_eq "v2" "$("$CS_SECRETS_BIN" get K1 2>&1)" "update must persist" || return 1
+    assert_eq "w1" "$("$CS_SECRETS_BIN" get K2 2>&1)" "second secret must be stored" || return 1
+
+    local perms; perms=$(_file_mode "$HOME/.cs-secrets/test-session.enc")
+    assert_eq "600" "$perms" "committed store must keep mode 600" || return 1
+
+    local tmpcount
+    tmpcount=$(find "$HOME/.cs-secrets" -maxdepth 1 -name '.??????' -type f 2>/dev/null | wc -l | tr -d ' ')
+    assert_eq 0 "$tmpcount" "success path must leave no temp file" || return 1
 }
 
 # ============================================================================
@@ -1316,6 +1391,8 @@ run_test test_encrypted_file_created
 run_test test_encrypted_file_not_plaintext
 run_test test_encrypted_file_permissions
 run_test test_secrets_dir_permissions
+run_test test_encrypted_write_failure_preserves_prior_store
+run_test test_encrypted_write_success_updates_and_leaves_no_temp
 
 # Session isolation
 run_test test_sessions_are_isolated
