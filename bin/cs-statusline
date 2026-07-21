@@ -9,6 +9,32 @@ SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 # Read-only status query; never take the index lock from a render.
 export GIT_OPTIONAL_LOCKS=0
 
+# KEEP IN SYNC with lib/02-platform.sh
+# Returns one of: macos | wsl | msys | linux   (cached after first detect)
+cs_platform() {
+    # Test/override seam: FIRST branch, validated, cache-bypassing.
+    if [ -n "${CS_PLATFORM_OVERRIDE:-}" ]; then
+        case "$CS_PLATFORM_OVERRIDE" in
+            macos|wsl|msys|linux) printf '%s' "$CS_PLATFORM_OVERRIDE"; return 0 ;;
+            *) printf 'cs: invalid CS_PLATFORM_OVERRIDE: %s\n' "$CS_PLATFORM_OVERRIDE" >&2; return 1 ;;
+        esac
+    fi
+    [ -n "${_CS_PLATFORM:-}" ] && { printf '%s' "$_CS_PLATFORM"; return 0; }
+    local p
+    case "$(uname -s 2>/dev/null)" in
+        Darwin) p=macos ;;
+        MINGW*|MSYS*|CYGWIN*) p=msys ;;
+        Linux)
+            if [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null; then
+                p=wsl
+            else
+                p=linux
+            fi ;;
+        *) p=linux ;;
+    esac
+    _CS_PLATFORM="$p"; printf '%s' "$p"
+}
+
 # Resolve SL_THEME for this render. CS_TERM_THEME set on its own (no
 # CS_TERM_THEME_AUTO marker) is an explicit user pin (see `cs -help`) and wins.
 # When launch auto-detected the theme it exports CS_TERM_THEME plus the

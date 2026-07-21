@@ -22,6 +22,13 @@ test_platform_detects_macos_and_msys_from_uname() {
     ( _CS_PLATFORM=""; uname() { echo Darwin; }; [ "$(cs_platform)" = "macos" ] ) || return 1
     ( _CS_PLATFORM=""; uname() { echo MINGW64_NT-10.0; }; [ "$(cs_platform)" = "msys" ] ) || return 1
 }
+test_cs_platform_copies_match_lib() {
+    local ref; ref=$(sed -n '/^cs_platform() {/,/^}/p' lib/02-platform.sh)
+    for f in bin/cs-secrets bin/cs-statusline; do
+        local copy; copy=$(sed -n '/^cs_platform() {/,/^}/p' "$f")
+        [ "$copy" = "$ref" ] || { echo "drift in $f"; return 1; }
+    done
+}
 
 # ============================================================================
 # Runner
@@ -34,5 +41,6 @@ echo ""
 
 run_test test_platform_override_is_honored_and_validated
 run_test test_platform_detects_macos_and_msys_from_uname
+run_test test_cs_platform_copies_match_lib
 
 report_results
