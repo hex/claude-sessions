@@ -63,6 +63,90 @@ _seed_enc_sync_file() {
         -out "$path" -pass "pass:$CS_SECRETS_PASSWORD"
 }
 
+# --- WCM (Windows Credential Manager) test helpers ---
+#
+# The real WCM backend shells out to `powershell.exe -File helper.ps1 <verb>`,
+# passing session/name via env and the secret as base64 on stdin/stdout. We
+# cannot run the P/Invoke .ps1 off Windows, so we drop a functional fake
+# `powershell.exe` on PATH that simulates the credential store: it records its
+# argv (for the argv-safety assertion), reads CS_WCM_SESSION/CS_WCM_NAME from
+# env, and keys a per-credential file off the base64 of session/name.
+_wcm_make_fake() {
+    local bindir="$TEST_TMPDIR/wcm-bin"
+    mkdir -p "$bindir"
+    cat > "$bindir/powershell.exe" <<'FAKE'
+#!/usr/bin/env bash
+# Fake powershell.exe simulating Windows Credential Manager for cs-secrets tests.
+set -u
+# Record the full argv so a test can prove secrets/metadata never travel there.
+printf '%s\n' "$*" >> "$WCM_FAKE_ARGS"
+
+# cs-secrets invokes: -NoProfile -ExecutionPolicy Bypass -File <path> <verb>
+verb="${!#}"
+
+store_dir="$WCM_FAKE_STORE"
+sess="${CS_WCM_SESSION:-}"
+name="${CS_WCM_NAME:-}"
+
+_hash() { printf '%s' "$1" | openssl base64 -A | tr '/+=' '_.-'; }
+sess_dir="$store_dir/$(_hash "$sess")"
+cred_file="$sess_dir/$(_hash "$name")"
+
+case "$verb" in
+    store)
+        b64="$(cat)"
+        # Simulate the .ps1 blob-size cap (CRED_MAX_CREDENTIAL_BLOB_SIZE).
+        bytes=$(printf '%s' "$b64" | openssl base64 -d -A | wc -c | tr -d ' ')
+        if [ "$bytes" -gt 2560 ]; then
+            exit 2
+        fi
+        mkdir -p "$sess_dir"
+        printf '%s\n%s\n' "$name" "$b64" > "$cred_file"
+        exit 0
+        ;;
+    get)
+        if [ -f "$cred_file" ]; then
+            sed -n '2p' "$cred_file" | tr -d '\n'
+            exit 0
+        fi
+        exit 3
+        ;;
+    delete)
+        if [ -f "$cred_file" ]; then
+            rm -f "$cred_file"
+            exit 0
+        fi
+        exit 3
+        ;;
+    list)
+        if [ -d "$sess_dir" ]; then
+            for f in "$sess_dir"/*; do
+                [ -f "$f" ] || continue
+                sed -n '1p' "$f"
+            done
+        fi
+        exit 0
+        ;;
+    *)
+        echo "fake-powershell: unknown verb: $verb" >&2
+        exit 64
+        ;;
+esac
+FAKE
+    chmod +x "$bindir/powershell.exe"
+    echo "$bindir"
+}
+
+# Run cs-secrets against the fake WCM backend, passing stdin through.
+_wcm_cs() {
+    local bindir="$TEST_TMPDIR/wcm-bin"
+    PATH="$bindir:$PATH" \
+        CS_SECRETS_BACKEND=wcm CS_PLATFORM_OVERRIDE=msys \
+        WCM_FAKE_STORE="$TEST_TMPDIR/wcm-store" \
+        WCM_FAKE_ARGS="$TEST_TMPDIR/wcm-args" \
+        "$CS_SECRETS_BIN" "$@"
+}
+
 # ============================================================================
 # Backend detection
 # ============================================================================
@@ -87,9 +171,8 @@ test_backend_wsl_defaults_encrypted_not_keychain() {
     assert_output_contains "$output" "Storage backend: encrypted" "WSL should default to encrypted, not keychain" || return 1
 }
 
-test_backend_msys_falls_back_to_encrypted_until_wcm() {
-    # Even with powershell.exe present, MSYS must NOT select the not-yet-implemented
-    # wcm backend (which would be a silent no-op) — it falls back to encrypted.
+test_backend_msys_selects_wcm_when_powershell_present() {
+    # With powershell.exe on PATH, MSYS selects the Windows Credential Manager.
     local bindir; bindir=$(mktemp -d)
     printf '#!/bin/sh\nexit 0\n' > "$bindir/powershell.exe"
     chmod +x "$bindir/powershell.exe"
@@ -97,7 +180,22 @@ test_backend_msys_falls_back_to_encrypted_until_wcm() {
     local output
     output=$(PATH="$bindir:$PATH" CS_PLATFORM_OVERRIDE=msys "$CS_SECRETS_BIN" backend 2>&1)
     rm -rf "$bindir"
-    assert_output_contains "$output" "Storage backend: encrypted" "MSYS falls back to encrypted until WCM lands" || return 1
+    assert_output_contains "$output" "Storage backend: wcm" "MSYS should select wcm when powershell.exe is present" || return 1
+}
+
+test_backend_msys_falls_back_to_encrypted_without_powershell() {
+    # No powershell.exe on PATH: MSYS falls back to the encrypted-file backend.
+    # A sanitized PATH keeps any host-installed powershell.exe from leaking in.
+    local bindir; bindir=$(mktemp -d)
+    local tool resolved
+    for tool in bash env basename dirname openssl jq uname grep sed tr cut; do
+        resolved=$(command -v "$tool" 2>/dev/null) && ln -sf "$resolved" "$bindir/$tool"
+    done
+    unset CS_SECRETS_BACKEND
+    local output
+    output=$(PATH="$bindir" CS_PLATFORM_OVERRIDE=msys "$CS_SECRETS_BIN" backend 2>&1)
+    rm -rf "$bindir"
+    assert_output_contains "$output" "Storage backend: encrypted" "MSYS falls back to encrypted without powershell.exe" || return 1
 }
 
 # ============================================================================
@@ -579,6 +677,114 @@ test_import_file_skips_undecryptable_files() {
 }
 
 # ============================================================================
+# WCM backend (Windows Credential Manager, simulated via fake powershell.exe)
+# ============================================================================
+
+test_wcm_roundtrip() {
+    _wcm_make_fake >/dev/null
+    printf 'hunter2' | _wcm_cs set API_KEY >/dev/null 2>&1 || return 1
+    local value
+    value=$(_wcm_cs get API_KEY 2>/dev/null) || return 1
+    assert_eq "hunter2" "$value" "WCM should round-trip the stored value" || return 1
+}
+
+# The security property: the secret and the session:name metadata must NEVER
+# reach the powershell.exe argv — they travel via stdin (base64) and env only.
+test_wcm_never_puts_secret_or_meta_in_argv() {
+    _wcm_make_fake >/dev/null
+    printf 'hunter2' | _wcm_cs set API_KEY >/dev/null 2>&1 || return 1
+    local args_file="$TEST_TMPDIR/wcm-args"
+    assert_file_exists "$args_file" "fake powershell.exe should have recorded its argv" || return 1
+    assert_file_contains "$args_file" "Bypass -File" "argv must invoke the helper via -File" || return 1
+    assert_file_not_contains "$args_file" "hunter2" "plaintext secret must not appear in argv" || return 1
+    # base64('hunter2') == aHVudGVyMg== ; the base64 blob travels on stdin, not argv.
+    assert_file_not_contains "$args_file" "aHVudGVyMg" "base64 secret must not appear in argv" || return 1
+    assert_file_not_contains "$args_file" "API_KEY" "credential name must not appear in argv" || return 1
+    assert_file_not_contains "$args_file" "test-session" "session name must not appear in argv" || return 1
+}
+
+test_wcm_missing_key_fails() {
+    _wcm_make_fake >/dev/null
+    local out
+    if out=$(_wcm_cs get MISSING 2>/dev/null); then
+        echo "  FAIL: missing key should exit nonzero"
+        return 1
+    fi
+    assert_eq "" "$out" "missing key must produce empty stdout" || return 1
+}
+
+test_wcm_unicode_value() {
+    _wcm_make_fake >/dev/null
+    printf 'héllo-wörld-\xf0\x9f\x94\x91' | _wcm_cs set UNI >/dev/null 2>&1 || return 1
+    local value
+    value=$(_wcm_cs get UNI 2>/dev/null) || return 1
+    assert_eq "$(printf 'héllo-wörld-\xf0\x9f\x94\x91')" "$value" "WCM should round-trip unicode" || return 1
+}
+
+test_wcm_multiline_value() {
+    _wcm_make_fake >/dev/null
+    printf 'line1\nline2\nline3' | _wcm_cs set MULTI >/dev/null 2>&1 || return 1
+    local value
+    value=$(_wcm_cs get MULTI 2>/dev/null) || return 1
+    assert_eq "$(printf 'line1\nline2\nline3')" "$value" "WCM should round-trip multiline" || return 1
+}
+
+test_wcm_empty_value_rejected() {
+    _wcm_make_fake >/dev/null
+    # The CLI rejects an empty value before it reaches the backend.
+    if printf '' | _wcm_cs set EMPTY >/dev/null 2>&1; then
+        echo "  FAIL: empty value should be rejected"
+        return 1
+    fi
+}
+
+test_wcm_oversize_value_rejected() {
+    _wcm_make_fake >/dev/null
+    # >2560 bytes: the .ps1 (here, the fake) rejects the blob with exit 2.
+    local out
+    if out=$(head -c 3000 /dev/zero | tr '\0' 'a' | _wcm_cs set BIG 2>&1); then
+        echo "  FAIL: over-size value should be rejected"
+        return 1
+    fi
+    assert_output_contains "$out" "too large" "over-size rejection should explain itself" || return 1
+}
+
+test_wcm_list_and_delete() {
+    _wcm_make_fake >/dev/null
+    printf 'v1' | _wcm_cs set KEY_ONE >/dev/null 2>&1 || return 1
+    printf 'v2' | _wcm_cs set KEY_TWO >/dev/null 2>&1 || return 1
+    local out
+    out=$(_wcm_cs list 2>/dev/null) || return 1
+    assert_output_contains "$out" "KEY_ONE" "list should show KEY_ONE" || return 1
+    assert_output_contains "$out" "KEY_TWO" "list should show KEY_TWO" || return 1
+
+    _wcm_cs delete KEY_ONE >/dev/null 2>&1 || return 1
+    if _wcm_cs get KEY_ONE >/dev/null 2>&1; then
+        echo "  FAIL: deleted key should be gone"
+        return 1
+    fi
+    assert_eq "v2" "$(_wcm_cs get KEY_TWO 2>/dev/null)" "delete should preserve the other secret" || return 1
+}
+
+test_wcm_delete_nonexistent_fails() {
+    _wcm_make_fake >/dev/null
+    if _wcm_cs delete NOPE >/dev/null 2>&1; then
+        echo "  FAIL: deleting a nonexistent key should fail"
+        return 1
+    fi
+}
+
+# An unknown/unimplemented backend must fail loudly, never silently no-op.
+test_unknown_backend_guard() {
+    local out
+    if out=$(CS_SECRETS_BACKEND=bogus "$CS_SECRETS_BIN" get API_KEY 2>&1); then
+        echo "  FAIL: unknown backend should exit nonzero"
+        return 1
+    fi
+    assert_output_contains "$out" "Unknown backend" "unknown backend must error loudly" || return 1
+}
+
+# ============================================================================
 # Runner
 # ============================================================================
 
@@ -591,7 +797,8 @@ echo ""
 run_test test_backend_shows_encrypted
 run_test test_backend_override_via_env
 run_test test_backend_wsl_defaults_encrypted_not_keychain
-run_test test_backend_msys_falls_back_to_encrypted_until_wcm
+run_test test_backend_msys_selects_wcm_when_powershell_present
+run_test test_backend_msys_falls_back_to_encrypted_without_powershell
 
 # Store and retrieve
 run_test test_store_and_get
@@ -653,5 +860,17 @@ run_test test_export_file_skips_rewrite_when_unchanged
 run_test test_export_file_rewrites_when_changed
 run_test test_import_file_merges_all_machines_and_legacy
 run_test test_import_file_skips_undecryptable_files
+
+# WCM backend (simulated)
+run_test test_wcm_roundtrip
+run_test test_wcm_never_puts_secret_or_meta_in_argv
+run_test test_wcm_missing_key_fails
+run_test test_wcm_unicode_value
+run_test test_wcm_multiline_value
+run_test test_wcm_empty_value_rejected
+run_test test_wcm_oversize_value_rejected
+run_test test_wcm_list_and_delete
+run_test test_wcm_delete_nonexistent_fails
+run_test test_unknown_backend_guard
 
 report_results
