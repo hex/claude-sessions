@@ -1367,6 +1367,45 @@ test_encrypted_concurrent_stores_no_lost_update() {
     done
 }
 
+# D3: first-use salt creation must be atomic. get_encryption_password derives
+# the key from a machine id plus a random salt persisted on first use. The
+# original `openssl rand -hex 32 > SALT_FILE` opens the file EMPTY before
+# openssl fills it; a second process reading the salt in that window derives its
+# key from an empty salt and its store becomes permanently undecryptable. With
+# real openssl the window is microseconds and never observed, so a slow-`rand`
+# openssl shim widens it deterministically (real openssl still does the actual
+# encrypt/decrypt). The fix publishes a fully-written salt in one atomic step,
+# so the second writer either sees no salt (and creates its own, losing the
+# exclusive-create race) or reads the winner's COMPLETE salt — never an empty one.
+test_encrypted_salt_write_is_atomic_under_concurrency() {
+    unset CS_SECRETS_PASSWORD   # force the machine-id + salt derivation path
+    local real_ssl shim
+    real_ssl=$(command -v openssl)
+    shim="$TEST_TMPDIR/ssl-shim"
+    mkdir -p "$shim"
+    cat > "$shim/openssl" <<SHIM
+#!/usr/bin/env bash
+# Delay only the salt generation so SALT_FILE stays mid-write for a beat;
+# everything else (encrypt/decrypt) passes straight through to real openssl.
+if [ "\$1" = "rand" ]; then sleep 0.4; fi
+exec "$real_ssl" "\$@"
+SHIM
+    chmod +x "$shim/openssl"
+
+    PATH="$shim:$PATH" CLAUDE_SESSION_NAME="salt-A" "$CS_SECRETS_BIN" set k "vA" >/dev/null 2>&1 &
+    sleep 0.15   # B reaches the salt read while A's file is still mid-write
+    PATH="$shim:$PATH" CLAUDE_SESSION_NAME="salt-B" "$CS_SECRETS_BIN" set k "vB" >/dev/null 2>&1 &
+    wait
+
+    # Read back with the real (fast) openssl. Both stores must decrypt: neither
+    # may have been written under an empty or transient salt.
+    local got_a got_b
+    got_a=$(CLAUDE_SESSION_NAME="salt-A" "$CS_SECRETS_BIN" get k 2>&1)
+    got_b=$(CLAUDE_SESSION_NAME="salt-B" "$CS_SECRETS_BIN" get k 2>&1)
+    assert_eq "vA" "$got_a" "salt-A must decrypt after concurrent first-use salt write" || return 1
+    assert_eq "vB" "$got_b" "salt-B must decrypt (must not read a half-written salt)" || return 1
+}
+
 # ============================================================================
 # Runner
 # ============================================================================
@@ -1496,5 +1535,6 @@ run_test test_migrate_partial_write_fails_loud
 
 # Concurrency & durability
 run_test test_encrypted_concurrent_stores_no_lost_update
+run_test test_encrypted_salt_write_is_atomic_under_concurrency
 
 report_results
