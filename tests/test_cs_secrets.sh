@@ -84,6 +84,18 @@ printf '%s\n' "$*" >> "$WCM_FAKE_ARGS"
 # cs-secrets invokes: -NoProfile -ExecutionPolicy Bypass -File <path> <verb>
 verb="${!#}"
 
+# Injected failure seam: simulate a broken helper (PowerShell missing, Add-Type
+# compile error, or a CredEnumerate/CredRead that fails with something other
+# than ERROR_NOT_FOUND) by exiting nonzero for the named verb (or "all").
+if [ -n "${WCM_FAKE_FAIL:-}" ]; then
+    case "$WCM_FAKE_FAIL" in
+        all|"$verb")
+            echo "fake-powershell: simulated $verb failure" >&2
+            exit 1
+            ;;
+    esac
+fi
+
 store_dir="$WCM_FAKE_STORE"
 sess="${CS_WCM_SESSION:-}"
 name="${CS_WCM_NAME:-}"
@@ -144,6 +156,7 @@ _wcm_cs() {
         CS_SECRETS_BACKEND=wcm CS_PLATFORM_OVERRIDE=msys \
         WCM_FAKE_STORE="$TEST_TMPDIR/wcm-store" \
         WCM_FAKE_ARGS="$TEST_TMPDIR/wcm-args" \
+        WCM_FAKE_FAIL="${WCM_FAKE_FAIL:-}" \
         "$CS_SECRETS_BIN" "$@"
 }
 
@@ -774,6 +787,66 @@ test_wcm_delete_nonexistent_fails() {
     fi
 }
 
+# The WCM helper reports distinct exit codes: 2 = oversize blob, 3 = missing
+# credential. Those must propagate to the process exit so callers can react.
+test_wcm_oversize_returns_exit_2() {
+    _wcm_make_fake >/dev/null
+    local rc=0
+    head -c 3000 /dev/zero | tr '\0' 'a' | _wcm_cs set BIG >/dev/null 2>&1 || rc=$?
+    assert_eq "2" "$rc" "over-size store must exit exactly 2" || return 1
+}
+
+test_wcm_missing_returns_exit_3_empty_stdout() {
+    _wcm_make_fake >/dev/null
+    local out rc=0
+    out=$(_wcm_cs get MISSING 2>/dev/null) || rc=$?
+    assert_eq "3" "$rc" "missing get must exit exactly 3" || return 1
+    assert_eq "" "$out" "missing get must have empty stdout" || return 1
+}
+
+# A real enumeration/helper failure must NOT masquerade as an empty store.
+test_wcm_list_enumeration_failure_is_loud() {
+    _wcm_make_fake >/dev/null
+    local out rc=0
+    out=$(WCM_FAKE_FAIL=list _wcm_cs list 2>/dev/null) || rc=$?
+    [[ $rc -ne 0 ]] || { echo "  FAIL: list must be nonzero when enumeration fails"; return 1; }
+    assert_output_not_contains "$out" "No secrets" "list must not claim an empty store on failure" || return 1
+}
+
+test_wcm_purge_enumeration_failure_is_loud() {
+    _wcm_make_fake >/dev/null
+    local out rc=0
+    out=$(WCM_FAKE_FAIL=list _wcm_cs purge 2>/dev/null) || rc=$?
+    [[ $rc -ne 0 ]] || { echo "  FAIL: purge must be nonzero when enumeration fails"; return 1; }
+    assert_output_not_contains "$out" "Purged" "purge must not claim success on failure" || return 1
+    assert_output_not_contains "$out" "No secrets" "purge must not claim an empty store on failure" || return 1
+}
+
+# Enumeration succeeds but a per-item delete fails: purge must still be loud.
+test_wcm_purge_delete_failure_is_loud() {
+    _wcm_make_fake >/dev/null
+    printf 'v1' | _wcm_cs set KEY_ONE >/dev/null 2>&1 || return 1
+    local out rc=0
+    out=$(WCM_FAKE_FAIL=delete _wcm_cs purge 2>/dev/null) || rc=$?
+    [[ $rc -ne 0 ]] || { echo "  FAIL: purge must be nonzero when a delete fails"; return 1; }
+}
+
+test_wcm_export_enumeration_failure_is_loud() {
+    _wcm_make_fake >/dev/null
+    local out rc=0
+    out=$(WCM_FAKE_FAIL=list _wcm_cs export 2>/dev/null) || rc=$?
+    [[ $rc -ne 0 ]] || { echo "  FAIL: export must be nonzero when enumeration fails"; return 1; }
+    assert_eq "" "$out" "export must emit nothing on failure" || return 1
+}
+
+# The genuinely-empty store must still succeed quietly.
+test_wcm_empty_store_lists_cleanly() {
+    _wcm_make_fake >/dev/null
+    local out
+    out=$(_wcm_cs list 2>/dev/null) || return 1
+    assert_output_contains "$out" "No secrets stored for session" "empty store should list cleanly" || return 1
+}
+
 # An unknown/unimplemented backend must fail loudly, never silently no-op.
 test_unknown_backend_guard() {
     local out
@@ -782,6 +855,16 @@ test_unknown_backend_guard() {
         return 1
     fi
     assert_output_contains "$out" "Unknown backend" "unknown backend must error loudly" || return 1
+}
+
+# The `backend` display command must also reject an unknown backend loudly.
+test_unknown_backend_display_is_loud() {
+    local out
+    if out=$(CS_SECRETS_BACKEND=bogus "$CS_SECRETS_BIN" backend 2>&1); then
+        echo "  FAIL: backend display should exit nonzero for an unknown backend"
+        return 1
+    fi
+    assert_output_contains "$out" "Unknown backend" "backend display must error loudly" || return 1
 }
 
 # ============================================================================
@@ -871,6 +954,14 @@ run_test test_wcm_empty_value_rejected
 run_test test_wcm_oversize_value_rejected
 run_test test_wcm_list_and_delete
 run_test test_wcm_delete_nonexistent_fails
+run_test test_wcm_oversize_returns_exit_2
+run_test test_wcm_missing_returns_exit_3_empty_stdout
+run_test test_wcm_list_enumeration_failure_is_loud
+run_test test_wcm_purge_enumeration_failure_is_loud
+run_test test_wcm_purge_delete_failure_is_loud
+run_test test_wcm_export_enumeration_failure_is_loud
+run_test test_wcm_empty_store_lists_cleanly
 run_test test_unknown_backend_guard
+run_test test_unknown_backend_display_is_loud
 
 report_results
