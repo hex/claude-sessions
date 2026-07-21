@@ -84,9 +84,10 @@ case "$sub" in
                 echo "security: keychain access failed" >&2
                 exit 1
                 ;;
-            readfail)
+            readfail|readok)
                 # Enumerate exactly one matching credential so the caller
-                # proceeds to read it (and then hits the read failure below).
+                # proceeds to read it (readfail then hits a read failure,
+                # readok returns a value).
                 printf '    "svce"<blob>="cs:%s:K1"\n' "$sess"
                 exit 0
                 ;;
@@ -96,9 +97,19 @@ case "$sub" in
         esac
         ;;
     find-generic-password)
-        # A per-item read: fails under readfail, "not found" otherwise.
-        [ "${FAKE_SECURITY_MODE:-}" = "readfail" ] && exit 1
-        exit 44
+        # A per-item read. readfail = a real read error (exit 1); readok =
+        # success with a value; anything else = errSecItemNotFound (exit 44).
+        case "${FAKE_SECURITY_MODE:-}" in
+            readfail) exit 1 ;;
+            readok)   printf 'v_from_keychain\n'; exit 0 ;;
+            *)        exit 44 ;;
+        esac
+        ;;
+    add-generic-password)
+        # Record that a store was attempted (without recording the value) so a
+        # test can prove no overwrite happened when it should have aborted.
+        [ -n "${FAKE_SECURITY_ADDLOG:-}" ] && printf 'store\n' >> "$FAKE_SECURITY_ADDLOG"
+        exit 0
         ;;
     *)
         exit 0
@@ -746,6 +757,108 @@ test_import_file_skips_undecryptable_files() {
     assert_eq "vg" "$("$CS_SECRETS_BIN" get good_key 2>&1)" "should import the decryptable file despite an undecryptable one" || return 1
 }
 
+# A transient backend read failure during the merge-import existence probe must
+# ABORT the import nonzero and NOT overwrite the (unreadable) existing secret.
+# readfail makes the per-key `find-generic-password` probe fail with a
+# non-not-found error; the addlog proves no store was attempted.
+test_import_file_aborts_on_backend_read_failure_no_overwrite() {
+    local bindir; bindir=$(_make_fake_security)
+    local addlog="$TEST_TMPDIR/kc-addlog"
+    local meta="$CS_SESSIONS_ROOT/test-session/.cs"
+    _seed_enc_sync_file "$meta/secrets.machine-a.enc" '{"K1":"synced_value"}'
+
+    local out rc=0
+    out=$(PATH="$bindir" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=readfail \
+        FAKE_SECURITY_ADDLOG="$addlog" CS_SECRETS_PASSWORD="$CS_SECRETS_PASSWORD" \
+        "$CS_SECRETS_BIN" import-file 2>&1) || rc=$?
+
+    if [[ $rc -eq 0 ]]; then
+        echo "  FAIL: import must abort nonzero when the existence probe read fails"
+        echo "    output: $out"
+        return 1
+    fi
+    assert_file_not_exists "$addlog" "must NOT store/overwrite when the existence probe read fails" || return 1
+}
+
+# The genuine-not-found path must still store: when the probe reports the secret
+# is truly absent (errSecItemNotFound), the merge import proceeds to store it.
+test_import_file_stores_when_secret_genuinely_absent() {
+    local bindir; bindir=$(_make_fake_security)
+    local addlog="$TEST_TMPDIR/kc-addlog"
+    local meta="$CS_SESSIONS_ROOT/test-session/.cs"
+    _seed_enc_sync_file "$meta/secrets.machine-a.enc" '{"K1":"synced_value"}'
+
+    local out rc=0
+    out=$(PATH="$bindir" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=empty \
+        FAKE_SECURITY_ADDLOG="$addlog" CS_SECRETS_PASSWORD="$CS_SECRETS_PASSWORD" \
+        "$CS_SECRETS_BIN" import-file 2>&1) || rc=$?
+
+    assert_eq 0 "$rc" "import must succeed when the secret is genuinely absent" || return 1
+    assert_file_exists "$addlog" "a genuinely-absent secret must be stored" || return 1
+}
+
+# A jq failure while building the backup JSON must abort the export nonzero and
+# write no sync file -- never a partial/empty backup that silently loses secrets.
+# readok makes enumeration+read succeed so collection reaches the jq assignment;
+# a fake jq fails only on that assignment, leaving other jq calls intact.
+test_keychain_export_file_aborts_on_jq_failure() {
+    local bindir; bindir=$(_make_fake_security)
+    local real_jq; real_jq=$(command -v jq)
+    # _make_fake_security symlinks jq; replace the symlink with a real file so
+    # the fake applies (and we never write through the symlink to system jq).
+    rm -f "$bindir/jq"
+    cat > "$bindir/jq" <<JQFAKE
+#!/usr/bin/env bash
+for a in "\$@"; do
+    case "\$a" in *'= \$value'*) echo "jq: simulated failure" >&2; exit 5 ;; esac
+done
+exec "$real_jq" "\$@"
+JQFAKE
+    chmod +x "$bindir/jq"
+    local meta="$CS_SESSIONS_ROOT/test-session/.cs"
+    local mid; mid=$(_machine_id)
+
+    local out rc=0
+    out=$(PATH="$bindir" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=readok \
+        "$CS_SECRETS_BIN" export-file 2>&1) || rc=$?
+
+    if [[ $rc -eq 0 ]]; then
+        echo "  FAIL: export-file must abort when json construction (jq) fails"
+        echo "    output: $out"
+        return 1
+    fi
+    assert_file_not_exists "$meta/secrets.${mid}.enc" "no sync file on jq construction failure" || return 1
+    assert_file_not_exists "$meta/secrets.${mid}.age" "no age sync file on jq construction failure" || return 1
+}
+
+# A grep/sed execution failure in keychain enumeration must fail loud, not read
+# as an empty store. A fake sed fails only on the extraction script (svce).
+test_keychain_list_loud_on_extraction_failure() {
+    local bindir; bindir=$(_make_fake_security)
+    local real_sed; real_sed=$(command -v sed)
+    # Replace the symlinked sed with a real file so the fake applies.
+    rm -f "$bindir/sed"
+    cat > "$bindir/sed" <<SEDFAKE
+#!/usr/bin/env bash
+for a in "\$@"; do
+    case "\$a" in *svce*) echo "sed: simulated failure" >&2; exit 2 ;; esac
+done
+exec "$real_sed" "\$@"
+SEDFAKE
+    chmod +x "$bindir/sed"
+
+    local out rc=0
+    out=$(PATH="$bindir" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=readfail \
+        "$CS_SECRETS_BIN" list 2>&1) || rc=$?
+
+    if [[ $rc -eq 0 ]]; then
+        echo "  FAIL: list must be nonzero when enumeration extraction (sed) fails"
+        echo "    output: $out"
+        return 1
+    fi
+    assert_output_not_contains "$out" "No secrets stored" "an extraction failure must not read as an empty store" || return 1
+}
+
 # ============================================================================
 # WCM backend (Windows Credential Manager, simulated via fake powershell.exe)
 # ============================================================================
@@ -1231,6 +1344,10 @@ run_test test_export_file_skips_rewrite_when_unchanged
 run_test test_export_file_rewrites_when_changed
 run_test test_import_file_merges_all_machines_and_legacy
 run_test test_import_file_skips_undecryptable_files
+run_test test_import_file_aborts_on_backend_read_failure_no_overwrite
+run_test test_import_file_stores_when_secret_genuinely_absent
+run_test test_keychain_export_file_aborts_on_jq_failure
+run_test test_keychain_list_loud_on_extraction_failure
 
 # WCM backend (simulated)
 run_test test_wcm_roundtrip
