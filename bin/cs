@@ -5864,6 +5864,14 @@ main() {
         migrate_session "$session_dir"
     fi
 
+    # MSYS (Windows Git Bash) can manage sessions but cannot exec Claude Code
+    # itself; the session is prepared above, then handed off to WSL to launch.
+    if [ "$(cs_platform)" = "msys" ]; then
+        info "Session ready at $session_dir."
+        info "On Windows, launch it from WSL (Git Bash supports session management only)."
+        return 0
+    fi
+
     # Launch Claude Code
     launch_claude_code "$session_name" "$session_dir" "$is_new" "$force_flag"
 }
