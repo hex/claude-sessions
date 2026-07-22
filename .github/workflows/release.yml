@@ -1,5 +1,5 @@
-# ABOUTME: Builds cs-tui for macOS (arm64, amd64) and Linux (amd64) on version tags
-# ABOUTME: Creates a GitHub Release with pre-built binaries for each platform
+# ABOUTME: Builds cs-tui for macOS (arm64, amd64), Linux (amd64) and Windows (amd64) on version tags
+# ABOUTME: Creates a GitHub Release with signed, checksummed binaries for each platform
 
 name: Release
 
@@ -110,3 +110,6 @@ jobs:
             install.sh.sha256
             cs-tui-*
           generate_release_notes: true
+          # A hyphenated tag (v1.2.3-rc1, v0.0.0-smoke) is a pre-release: it must
+          # never become the repo's Latest, which is what installers resolve.
+          prerelease: ${{ contains(github.ref_name, '-') }}
