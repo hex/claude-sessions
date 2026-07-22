@@ -1677,6 +1677,36 @@ test_migrate_delete_source_preserves_concurrent_store() {
         "migrate --delete-source must preserve a concurrently-stored secret (delete migrated keys, not purge)" || return 1
 }
 
+# F2 (codex): a migrated key concurrently deleted from the source before the
+# delete-source cleanup runs must NOT abort the migration. backend_delete calls
+# error()/exit on a not-found key, and a bare `|| true` cannot catch a function's
+# exit — only a subshell boundary can. The migration copy already fully
+# succeeded, so a source key that vanished is fine; migrate must still exit 0.
+test_migrate_delete_source_tolerates_concurrently_deleted_key() {
+    _wcm_make_fake >/dev/null
+    "$CS_SECRETS_BIN" set A vA >/dev/null 2>&1
+
+    local marker="$TEST_TMPDIR/target-store-began-2"
+    local wcmbin="$TEST_TMPDIR/wcm-bin"
+    PATH="$wcmbin:$PATH" CS_SECRETS_BACKEND=wcm CS_PLATFORM_OVERRIDE=msys \
+        WCM_FAKE_STORE="$TEST_TMPDIR/wcm-store" WCM_FAKE_ARGS="$TEST_TMPDIR/wcm-args" \
+        WCM_FAKE_SLOW_STORE="$marker" \
+        "$CS_SECRETS_BIN" migrate-backend wcm --from encrypted --delete-source >/dev/null 2>&1 &
+    local mpid=$!
+    local waited=0
+    until [ -f "$marker" ]; do sleep 0.05; waited=$((waited + 1)); [ "$waited" -gt 200 ] && break; done
+    # Concurrently delete the migrated key A from the source before delete-source.
+    "$CS_SECRETS_BIN" delete A >/dev/null 2>&1
+    local rc=0
+    wait "$mpid" || rc=$?
+
+    assert_eq "0" "$rc" \
+        "migrate --delete-source must not abort when a migrated key was concurrently deleted from the source" || return 1
+    assert_eq "vA" "$(PATH="$wcmbin:$PATH" CS_SECRETS_BACKEND=wcm CS_PLATFORM_OVERRIDE=msys \
+        WCM_FAKE_STORE="$TEST_TMPDIR/wcm-store" WCM_FAKE_ARGS="$TEST_TMPDIR/wcm-args" \
+        "$CS_SECRETS_BIN" get A 2>/dev/null)" "migrated secret A must have reached the target" || return 1
+}
+
 # ============================================================================
 # Runner
 # ============================================================================
@@ -1814,5 +1844,6 @@ run_test test_encrypted_purge_serialized_with_concurrent_store
 run_test test_export_serialized_against_concurrent_store_no_stale_overwrite
 run_test test_keychain_export_does_not_require_cs_secrets_dir
 run_test test_migrate_delete_source_preserves_concurrent_store
+run_test test_migrate_delete_source_tolerates_concurrently_deleted_key
 
 report_results
