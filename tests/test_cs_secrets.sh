@@ -945,6 +945,53 @@ test_set_rejects_a_name_that_breaks_out_of_export() {
 # Exported names are namespaced so a secret can never land on a variable the
 # shell or the dynamic loader acts on. This closes the hijack class structurally
 # rather than by enumerating dangerous names, which leaked repeatedly.
+# Two distinct stored names can collapse onto ONE exported variable, because
+# export upper-cases and maps hyphens to underscores: `api_key` and `api-key`
+# both become CS_SECRET_API_KEY. Eval takes the last, so a sync file can shadow
+# a real secret with an attacker's value. Refuse rather than emit both.
+test_export_refuses_colliding_exported_names() {
+    local meta="$CS_SESSIONS_ROOT/test-session/.cs"
+    _seed_enc_sync_file "$meta/secrets.machine-c.enc" \
+        '{"api_key":"REAL","api-key":"SHADOW"}' || return 1
+    PATH="$(_ageless_path)" "$CS_SECRETS_BIN" import-file >/dev/null 2>&1
+
+    local out rc=0
+    out=$("$CS_SECRETS_BIN" export 2>&1) || rc=$?
+    if [[ $rc -eq 0 ]]; then
+        echo "  FAIL: export emitted two secrets under one variable name"
+        echo "    output: $out"
+        return 1
+    fi
+    assert_output_contains "$out" "CS_SECRET_API_KEY" "the refusal must name the collided variable" || return 1
+
+    # A refused export must emit NOTHING on stdout: `eval "$(cs -secrets
+    # export)"` evaluates whatever was printed regardless of exit status, so a
+    # partial emission would still set the shadowing value it just refused.
+    local emitted
+    emitted=$("$CS_SECRETS_BIN" export 2>/dev/null)
+    assert_eq "" "$emitted" "a refused export must emit no assignments at all" || return 1
+}
+
+# migrate writes to a backend without passing through the entry validation that
+# guards set and import-file, so it must validate too.
+test_migrate_refuses_an_invalid_name() {
+    _wcm_make_fake >/dev/null
+    "$CS_SECRETS_BIN" set good_key "v" >/dev/null 2>&1
+    # Poison the encrypted source directly, as a pre-validation store would be.
+    local store="$HOME/.cs-secrets/test-session.enc"
+    printf '%s\n' '{"good_key":"v","a;touch /tmp/cs_pwned_migrate;b":"x"}' \
+        | openssl enc -aes-256-cbc -e -pbkdf2 -iter 100000 \
+            -out "$store" -pass "pass:$CS_SECRETS_PASSWORD" || return 1
+
+    local out rc=0
+    out=$(_wcm_cs migrate-backend wcm --from encrypted 2>&1) || rc=$?
+    if [[ $rc -eq 0 ]]; then
+        echo "  FAIL: migrate carried an invalid secret name into another backend"
+        echo "    output: $out"
+        return 1
+    fi
+}
+
 test_export_namespaces_every_variable() {
     printf 'v' | "$CS_SECRETS_BIN" set api_key >/dev/null 2>&1
     local output; output=$("$CS_SECRETS_BIN" export 2>&1)
@@ -2078,6 +2125,8 @@ run_test test_export_file_skips_rewrite_when_unchanged
 run_test test_export_file_rewrites_when_changed
 run_test test_import_file_merges_all_machines_and_legacy
 run_test test_set_rejects_a_name_that_breaks_out_of_export
+run_test test_export_refuses_colliding_exported_names
+run_test test_migrate_refuses_an_invalid_name
 run_test test_export_namespaces_every_variable
 run_test test_export_namespace_neutralises_dangerous_names
 run_test test_import_file_refuses_a_hostile_key_name
