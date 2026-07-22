@@ -80,6 +80,12 @@ _report_import() {
     local rc="$1" out="$2" meta="$3"
     echo "    import rc=$rc, output: $out"
     ls -l "$meta"/secrets*.enc 2>&1 | sed 's/^/    /'
+    # Which keys actually landed. A key that lists but will not `get` is a name
+    # mangled on the way in; a key missing from the list never reached the
+    # store, whatever the import's own count claimed.
+    echo "    backend now holds:"
+    "$CS_SECRETS_BIN" list 2>&1 | sed 's/^/      /'
+    ls -l "$HOME/.cs-secrets" 2>&1 | sed 's/^/      /'
 }
 
 # Build a sandbox bin dir holding a fake `security` (never touches the real
@@ -881,6 +887,27 @@ test_import_file_merges_all_machines_and_legacy() {
         || { _report_import "$rc" "$out" "$meta"; return 1; }
     assert_eq "vlocal" "$("$CS_SECRETS_BIN" get local_key 2>&1)" "merge import should preserve local secrets" \
         || { _report_import "$rc" "$out" "$meta"; return 1; }
+}
+
+# A write failure while importing must ABORT and must never be reported as a
+# successful import: `import-file` calls backend_store under `|| error`, which
+# suppresses errexit for the whole call, so a store that ignores its write's
+# return value would report "Imported N secret(s)" having stored nothing.
+test_import_file_aborts_when_the_store_write_fails() {
+    local meta="$CS_SESSIONS_ROOT/test-session/.cs"
+    _seed_enc_sync_file "$meta/secrets.machine-b.enc" '{"from_machine_b":"vb"}' || return 1
+
+    local bindir; bindir=$(_make_openssl_writefail_bin)
+    local out rc=0
+    out=$(PATH="$bindir:$(_ageless_path)" "$CS_SECRETS_BIN" import-file 2>&1) || rc=$?
+
+    if [[ $rc -eq 0 ]]; then
+        echo "  FAIL: import must abort nonzero when a store write fails"
+        echo "    output: $out"
+        return 1
+    fi
+    assert_output_not_contains "$out" "Imported 1 secret" \
+        "a failed write must not be counted as an imported secret" || return 1
 }
 
 test_import_file_skips_undecryptable_files() {
@@ -1884,6 +1911,7 @@ run_test test_export_file_machine_id_survives_unset_user
 run_test test_export_file_skips_rewrite_when_unchanged
 run_test test_export_file_rewrites_when_changed
 run_test test_import_file_merges_all_machines_and_legacy
+run_test test_import_file_aborts_when_the_store_write_fails
 run_test test_import_file_skips_undecryptable_files
 run_test test_import_file_aborts_on_backend_read_failure_no_overwrite
 run_test test_import_file_stores_when_secret_genuinely_absent
