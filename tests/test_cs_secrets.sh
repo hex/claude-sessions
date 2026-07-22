@@ -459,8 +459,8 @@ test_export_produces_eval_format() {
     "$CS_SECRETS_BIN" set db_pass "hunter2" 2>&1
     local output
     output=$("$CS_SECRETS_BIN" export 2>&1)
-    assert_output_contains "$output" "export API_KEY=" "Should export API_KEY" || return 1
-    assert_output_contains "$output" "export DB_PASS=" "Should export DB_PASS" || return 1
+    assert_output_contains "$output" "export CS_SECRET_API_KEY=" "Should export api_key" || return 1
+    assert_output_contains "$output" "export CS_SECRET_DB_PASS=" "Should export db_pass" || return 1
 }
 
 # The eval'd export lines must carry no CR: jq.exe emits CRLF, and a command
@@ -475,11 +475,11 @@ test_export_values_survive_crlf_jq() {
     local shim; shim=$(_install_msys_jq) || return 0
     local output; output=$(PATH="$shim:$PATH" "$CS_SECRETS_BIN" export 2>&1)
     eval "$output" 2>/dev/null
-    assert_eq "va" "${A_KEY:-}" "the first exported value must not carry a CR" || {
+    assert_eq "va" "${CS_SECRET_A_KEY:-}" "the first exported value must not carry a CR" || {
         printf '%s' "$output" | cat -v | sed 's/^/    /'
         return 1
     }
-    assert_eq "vb" "${B_KEY:-}" "the last exported value must be clean too" || return 1
+    assert_eq "vb" "${CS_SECRET_B_KEY:-}" "the last exported value must be clean too" || return 1
 }
 
 test_export_is_eval_safe() {
@@ -488,7 +488,7 @@ test_export_is_eval_safe() {
     output=$("$CS_SECRETS_BIN" export 2>&1)
     # The export should be eval-safe (properly quoted)
     eval "$output" 2>/dev/null
-    assert_eq "value with spaces" "$TEST_KEY" "Eval'd export should set correct value" || return 1
+    assert_eq "value with spaces" "$CS_SECRET_TEST_KEY" "Eval'd export should set correct value" || return 1
 }
 
 # ============================================================================
@@ -942,35 +942,36 @@ test_set_rejects_a_name_that_breaks_out_of_export() {
 # to PATH, `ld_preload` to LD_PRELOAD. Eval'ing such an export hijacks the
 # caller's command resolution and process loading without a single shell
 # metacharacter.
-test_set_rejects_names_that_hijack_the_environment() {
-    local n out rc
-    for n in path ifs ld_preload dyld_insert_libraries bash_env cdpath PATH Ld_Library_Path; do
-        rc=0
-        out=$(printf 'v' | "$CS_SECRETS_BIN" set "$n" 2>&1) || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            echo "  FAIL: set accepted '$n', which exports as a shell/loader variable"
-            echo "    output: $out"
-            return 1
-        fi
+# Exported names are namespaced so a secret can never land on a variable the
+# shell or the dynamic loader acts on. This closes the hijack class structurally
+# rather than by enumerating dangerous names, which leaked repeatedly.
+test_export_namespaces_every_variable() {
+    printf 'v' | "$CS_SECRETS_BIN" set api_key >/dev/null 2>&1
+    local output; output=$("$CS_SECRETS_BIN" export 2>&1)
+    assert_output_contains "$output" "export CS_SECRET_API_KEY=" \
+        "an exported secret must carry the CS_SECRET_ namespace" || return 1
+    assert_output_not_contains "$output" "export API_KEY=" \
+        "the bare, collidable name must not be emitted" || return 1
+}
+
+# The point of the namespace: a name that would otherwise land on a shell or
+# loader variable is now inert, so storing it is safe again.
+test_export_namespace_neutralises_dangerous_names() {
+    local n
+    for n in path ifs prompt_command editor ld_preload; do
+        printf 'v' | "$CS_SECRETS_BIN" set "$n" >/dev/null 2>&1 \
+            || { echo "  FAIL: set rejected '$n', which the namespace makes safe"; return 1; }
+    done
+    local output; output=$("$CS_SECRETS_BIN" export 2>&1)
+    for n in PATH IFS PROMPT_COMMAND EDITOR LD_PRELOAD; do
+        assert_output_not_contains "$output" "export $n=" \
+            "export must never assign the bare $n" || return 1
+        assert_output_contains "$output" "export CS_SECRET_$n=" \
+            "$n must be namespaced, not dropped" || return 1
     done
 }
 
-# The realistic delivery path for the same attack.
-test_import_file_refuses_an_environment_hijacking_name() {
-    local meta="$CS_SESSIONS_ROOT/test-session/.cs"
-    _seed_enc_sync_file "$meta/secrets.machine-y.enc" \
-        '{"path":"/tmp/evil","real_key":"v"}' || return 1
 
-    local out rc=0
-    out=$(PATH="$(_ageless_path)" "$CS_SECRETS_BIN" import-file 2>&1) || rc=$?
-    if [[ $rc -eq 0 ]]; then
-        echo "  FAIL: import accepted a key that exports as PATH"
-        echo "    output: $out"
-        return 1
-    fi
-    assert_output_not_contains "$(PATH="$(_ageless_path)" "$CS_SECRETS_BIN" export 2>&1)" \
-        "export PATH=" "export must never emit an assignment to PATH" || return 1
-}
 
 test_import_file_refuses_a_hostile_key_name() {
     local meta="$CS_SESSIONS_ROOT/test-session/.cs"
@@ -1003,7 +1004,7 @@ test_export_refuses_a_hostile_name_already_in_the_store() {
         echo "    output: $out"
         return 1
     fi
-    assert_output_not_contains "$out" "export A;" "must not emit the injectable line" || return 1
+    assert_output_not_contains "$out" ";TOUCH " "must not emit the injectable line" || return 1
     assert_output_contains "$out" "a;touch" "the refusal must name the offending key" || return 1
 }
 
@@ -1033,8 +1034,8 @@ test_multiline_secret_exports_under_crlf_jq() {
     local shim; shim=$(_install_msys_jq) || return 0
     local output; output=$(PATH="$shim:$PATH" "$CS_SECRETS_BIN" export 2>&1)
     eval "$output" 2>/dev/null
-    assert_eq "$pem" "${PEM:-}" "an exported multi-line secret must eval byte-exact" || {
-        printf '%s' "${PEM:-}" | od -c | sed 's/^/      /'
+    assert_eq "$pem" "${CS_SECRET_PEM:-}" "an exported multi-line secret must eval byte-exact" || {
+        printf '%s' "${CS_SECRET_PEM:-}" | od -c | sed 's/^/      /'
         return 1
     }
 }
@@ -2077,8 +2078,8 @@ run_test test_export_file_skips_rewrite_when_unchanged
 run_test test_export_file_rewrites_when_changed
 run_test test_import_file_merges_all_machines_and_legacy
 run_test test_set_rejects_a_name_that_breaks_out_of_export
-run_test test_set_rejects_names_that_hijack_the_environment
-run_test test_import_file_refuses_an_environment_hijacking_name
+run_test test_export_namespaces_every_variable
+run_test test_export_namespace_neutralises_dangerous_names
 run_test test_import_file_refuses_a_hostile_key_name
 run_test test_export_refuses_a_hostile_name_already_in_the_store
 run_test test_multiline_secret_round_trips_under_crlf_jq

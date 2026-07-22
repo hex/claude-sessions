@@ -1654,7 +1654,7 @@ file or the command log.
 cs -secrets backend                # Check which storage backend is active
 cs -secrets list                   # List secrets for current session
 cs -secrets get API_KEY            # Get a specific secret value
-cs -secrets export                 # Export as environment variables
+cs -secrets export                 # Export as CS_SECRET_<NAME> environment variables
 ```
 Never print or echo a retrieved secret, and don't paste `cs -secrets export` output into a file — consume the value inline, e.g. `some-command --token "$(cs -secrets get API_KEY)"`, so the plaintext stays out of the tool result and the session transcript.
 

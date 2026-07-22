@@ -64,7 +64,9 @@ cs -secrets rm API_KEY
 # Delete ALL secrets for a session
 cs -secrets purge
 
-# Export all secrets as environment variables
+# Export all secrets as environment variables. Each is namespaced as
+# CS_SECRET_<NAME> (api_key becomes CS_SECRET_API_KEY), so a secret can never
+# land on PATH, PROMPT_COMMAND or another variable the shell acts on.
 eval "$(cs -secrets export)"
 
 # Use with a specific session
