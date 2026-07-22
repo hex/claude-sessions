@@ -792,12 +792,18 @@ test_help_shows_usage() {
 test_export_file_writes_per_machine_enc() {
     local meta="$CS_SESSIONS_ROOT/test-session/.cs"
     "$CS_SECRETS_BIN" set api_key "sk_123" >/dev/null 2>&1
-    local _exp_out
-    _exp_out=$(PATH="$(_ageless_path)" "$CS_SECRETS_BIN" export-file 2>&1) || true
+    local _exp_out _exp_rc=0
+    _exp_out=$(PATH="$(_ageless_path)" "$CS_SECRETS_BIN" export-file 2>&1) || _exp_rc=$?
     local mid
     mid=$(_machine_id)
     assert_file_exists "$meta/secrets.${mid}.enc" "export-file must write a per-machine sync file" \
-        || { echo "  export output: $_exp_out"; echo "  sandbox: $(ls "$(_ageless_path)" 2>&1 | tr '\n' ' ')"; return 1; }
+        || { echo "  export rc=$_exp_rc output: $_exp_out"
+             echo "  backend(sandbox): $(PATH="$(_ageless_path)" "$CS_SECRETS_BIN" backend 2>&1 | tr '\n' ' ')"
+             # Report only whether the read worked — never the value itself.
+             echo "  get(sandbox) rc: $(PATH="$(_ageless_path)" "$CS_SECRETS_BIN" get api_key >/dev/null 2>&1; echo $?)"
+             echo "  meta: $(ls -a "$meta" 2>&1 | tr '\n' ' ')"
+             echo "  store: $(ls -a "$HOME/.cs-secrets" 2>&1 | tr '\n' ' ')"
+             return 1; }
     assert_file_not_exists "$meta/secrets.enc" "export-file must NOT write the shared/unsuffixed name" || return 1
 }
 

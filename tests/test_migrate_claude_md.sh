@@ -188,10 +188,11 @@ test_worktree_from_unmigrated_base_can_merge() {
     if [ -d "$wt" ]; then
         local exclude
         exclude=$( (cd "$wt" && git rev-parse --git-path info/exclude) 2>/dev/null || echo "" )
-        case "$exclude" in
-            /*) : ;;
-            *) exclude="$wt/$exclude" ;;
-        esac
+        # git reports an absolute path for a worktree (drive-letter form under
+        # Git Bash) and a relative one for a plain repo. Resolve by existence
+        # rather than re-deriving cs's own classification here — duplicating it
+        # let a bug in both cancel out and the assertion pass regardless.
+        [ -f "$exclude" ] || exclude="$wt/$exclude"
         assert_file_contains "$exclude" "CLAUDE.local.md" \
             "tracked-mode worktree from an unmigrated base still excludes CLAUDE.local.md, unblocking the merge preflight" || return 1
     else
@@ -210,10 +211,11 @@ test_worktree_ignored_mode_excludes_local_md_via_clone_exclude() {
     if [ -d "$wt" ]; then
         local exclude
         exclude=$( (cd "$wt" && git rev-parse --git-path info/exclude) 2>/dev/null || echo "")
-        case "$exclude" in
-            /*) : ;;
-            *) exclude="$wt/$exclude" ;;
-        esac
+        # git reports an absolute path for a worktree (drive-letter form under
+        # Git Bash) and a relative one for a plain repo. Resolve by existence
+        # rather than re-deriving cs's own classification here — duplicating it
+        # let a bug in both cancel out and the assertion pass regardless.
+        [ -f "$exclude" ] || exclude="$wt/$exclude"
         assert_file_contains "$exclude" "CLAUDE.local.md" \
             "ignored-mode worktree excludes the protocol file via the clone-local exclude" || return 1
         assert_file_not_contains "$wt/.gitignore" "CLAUDE.local.md" \
