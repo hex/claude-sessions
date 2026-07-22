@@ -9,16 +9,25 @@ main() {
             if [ -z "$tui_bin" ]; then
                 # Not on PATH (cs may be run by explicit path with its own dir
                 # off PATH, which the installer permits): probe the sibling next
-                # to this script. The TUI is cs-tui on macOS/Linux and
-                # cs-tui.exe on native Windows — MSYS's .exe-suffix resolution
-                # only helps `command -v`, not this literal sibling path.
-                local _self_dir
+                # to this script. Try the platform's OWN name first so a stale
+                # other-platform binary left by a cross-platform reinstall can't
+                # shadow it — cs-tui.exe on native Windows, cs-tui elsewhere.
+                # MSYS's .exe-suffix resolution only helps `command -v`, not this
+                # literal sibling -x test.
+                local _self_dir _cand
                 _self_dir="$(dirname "$0")"
-                if [ -x "$_self_dir/cs-tui" ]; then
-                    tui_bin="$_self_dir/cs-tui"
-                elif [ -x "$_self_dir/cs-tui.exe" ]; then
-                    tui_bin="$_self_dir/cs-tui.exe"
-                fi
+                # Literal per-platform candidate lists (not a split variable, so
+                # the order holds regardless of IFS).
+                case "$(uname -s 2>/dev/null)" in
+                    MINGW*|MSYS*|CYGWIN*)
+                        for _cand in cs-tui.exe cs-tui; do
+                            if [ -x "$_self_dir/$_cand" ]; then tui_bin="$_self_dir/$_cand"; break; fi
+                        done ;;
+                    *)
+                        for _cand in cs-tui cs-tui.exe; do
+                            if [ -x "$_self_dir/$_cand" ]; then tui_bin="$_self_dir/$_cand"; break; fi
+                        done ;;
+                esac
             fi
             if [ -n "$tui_bin" ] && [ -x "$tui_bin" ]; then
                 # Detect the terminal theme while cs still owns the tty so the
