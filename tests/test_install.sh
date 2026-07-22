@@ -514,10 +514,9 @@ test_install_removes_stale_opposite_platform_tui() {
         echo "  FAIL: stale cs-tui.exe not removed on a non-Windows install"
         return 1
     fi
-    if [ ! -f "$fake_home/.local/bin/cs-tui" ]; then
-        echo "  FAIL: this platform's cs-tui was not installed"
-        return 1
-    fi
+    # NB: we do not assert cs-tui was installed — bin/cs-tui is a build artifact,
+    # not git-tracked, so it is absent from a fresh CI checkout. The behavior
+    # under test is that the opposite-platform binary is removed regardless.
 }
 
 # On native Windows the TUI installs as cs-tui.exe; uninstall must remove that

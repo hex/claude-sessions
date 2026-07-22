@@ -1923,7 +1923,7 @@ fn claude_home() -> Option<String> {
     if let Some(h) = test_home::current() {
         return Some(h.to_string_lossy().into_owned());
     }
-    std::env::var("HOME").ok()
+    session::home_dir()
 }
 
 /// Test-only override for [`claude_home`]. Same rationale as

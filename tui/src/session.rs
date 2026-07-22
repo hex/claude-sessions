@@ -99,11 +99,19 @@ pub fn update_notice_in(cache_dir: &Path, installed: &str) -> Option<UpdateNotic
     Some(UpdateNotice { version: latest, notes })
 }
 
+/// The user's home directory, portable across Unix (HOME) and native Windows,
+/// which sets USERPROFILE rather than HOME. None if neither is set.
+pub(crate) fn home_dir() -> Option<String> {
+    std::env::var("HOME")
+        .ok()
+        .or_else(|| std::env::var("USERPROFILE").ok())
+}
+
 /// The pending-update notice for this process: cs exports CS_VERSION at
 /// launch and its own update check maintains ~/.cache/cs.
 pub fn update_notice() -> Option<UpdateNotice> {
     let installed = std::env::var("CS_VERSION").ok()?;
-    let home = std::env::var("HOME").ok()?;
+    let home = home_dir()?;
     update_notice_in(&PathBuf::from(home).join(".cache").join("cs"), &installed)
 }
 
@@ -226,7 +234,7 @@ pub fn sessions_root() -> PathBuf {
     std::env::var("CS_SESSIONS_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
-            let home = std::env::var("HOME").expect("HOME not set");
+            let home = home_dir().expect("HOME or USERPROFILE not set");
             PathBuf::from(home).join(".claude-sessions")
         })
 }
