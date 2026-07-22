@@ -498,6 +498,28 @@ EOF
     fi
 }
 
+# A cross-platform reinstall must not leave cs-tui and cs-tui.exe side by side.
+# On this (non-Windows) platform, install must remove a stale cs-tui.exe so PATH
+# / sibling resolution cannot pick the wrong-platform binary.
+test_install_removes_stale_opposite_platform_tui() {
+    local fake_home="$TEST_TMPDIR/install-tui-clean"
+    mkdir -p "$fake_home/.local/bin"
+    echo '#!/bin/sh' > "$fake_home/.local/bin/cs-tui.exe"   # stale Windows binary
+    chmod +x "$fake_home/.local/bin/cs-tui.exe"
+    HOME="$fake_home" bash "$INSTALL_SH" > /dev/null 2>&1 || {
+        echo "  FAIL: install.sh exited non-zero"
+        return 1
+    }
+    if [ -f "$fake_home/.local/bin/cs-tui.exe" ]; then
+        echo "  FAIL: stale cs-tui.exe not removed on a non-Windows install"
+        return 1
+    fi
+    if [ ! -f "$fake_home/.local/bin/cs-tui" ]; then
+        echo "  FAIL: this platform's cs-tui was not installed"
+        return 1
+    fi
+}
+
 # On native Windows the TUI installs as cs-tui.exe; uninstall must remove that
 # filename too, not only the Unix-named cs-tui.
 test_uninstall_removes_windows_cs_tui_exe() {
@@ -575,6 +597,7 @@ run_test test_statusline_enable_registers
 run_test test_statusline_disable_strips_only_ours
 run_test test_install_preserves_foreign_statusline
 run_test test_uninstall_removes_statusline
+run_test test_install_removes_stale_opposite_platform_tui
 run_test test_uninstall_removes_windows_cs_tui_exe
 run_test test_uninstall_removes_subagent_statusline
 test_hook_registration_doc_matches_install() {

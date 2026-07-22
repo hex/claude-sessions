@@ -305,6 +305,15 @@ elif [ "$INSTALL_METHOD" = "web" ]; then
     fi
 fi
 
+# Remove a stale opposite-platform TUI binary so a cross-platform reinstall can
+# never leave cs-tui and cs-tui.exe side by side — which would let PATH lookup
+# or the sibling probe select the wrong one and fail to launch. Keep only the
+# name this platform installs.
+case "$(uname -s | tr '[:upper:]' '[:lower:]')" in
+    mingw*|msys*|cygwin*) rm -f "$INSTALL_DIR/cs-tui" ;;
+    *) rm -f "$INSTALL_DIR/cs-tui.exe" ;;
+esac
+
 # Install hooks
 installed "${#CS_HOOKS[@]} hooks" "$HOOKS_DIR/"
 mkdir -p "$HOOKS_DIR"
