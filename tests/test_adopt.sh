@@ -35,6 +35,7 @@ test_adopt_creates_cs_structure() {
 }
 
 test_adopt_creates_symlink() {
+    _skip_on_msys && return 0  # Git Bash makes `ln -s` a copy; no real symlink
     local project_dir="$TEST_TMPDIR/my-project"
     mkdir -p "$project_dir"
 

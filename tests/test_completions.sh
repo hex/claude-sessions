@@ -99,6 +99,7 @@ test_bash_completion_offers_a_symlinked_session() {
 
 # Proves the assertion above has teeth: the enumeration this replaced cannot pass it.
 test_bash_completion_before_the_fix_missed_symlinked_sessions() {
+    _skip_on_msys && return 0  # Git Bash makes the linked session a real dir, not a symlink
     create_test_session "real-session" >/dev/null
     link_test_session "linked-session"
     put_built_cs_on_path

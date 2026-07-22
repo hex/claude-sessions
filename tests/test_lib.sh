@@ -39,7 +39,10 @@ _file_mode() {
 # at the top of a test that drives launch/tmux/spawn:
 #     _skip_on_msys && return 0
 # Honors CS_PLATFORM_OVERRIDE so the skip path is exercisable off Windows.
-_skip_on_msys() {
+# Quiet predicate: true on native Windows / MSYS. Honors CS_PLATFORM_OVERRIDE so
+# it is exercisable off Windows. Use this to guard a single MSYS-invalid
+# assertion inside an otherwise-valid test; use _skip_on_msys to skip a whole one.
+_is_msys() {
     local p="${CS_PLATFORM_OVERRIDE:-}"
     if [ -z "$p" ]; then
         case "$(uname -s 2>/dev/null)" in
@@ -47,7 +50,11 @@ _skip_on_msys() {
             *) p=other ;;
         esac
     fi
-    if [ "$p" = "msys" ]; then
+    [ "$p" = "msys" ]
+}
+
+_skip_on_msys() {
+    if _is_msys; then
         echo "    SKIP (native Windows / MSYS: launch/tmux unavailable)"
         return 0
     fi

@@ -210,6 +210,7 @@ test_large_transcript_builds_cleanly() {
 }
 
 test_voice_dir_permissions() {
+    _skip_on_msys && return 0  # Windows FS doesn't enforce Unix 700 mode bits
     add_msg "$(proj_file projA)" "one real message so the build has something to keep"
     run_build > /dev/null || { echo "  FAIL: build exited non-zero"; return 1; }
     local mode

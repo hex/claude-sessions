@@ -74,6 +74,7 @@ test_local_dir_created_on_adopt() {
 }
 
 test_guard_blocks_tracked_local() {
+    _skip_on_msys && return 0  # adopt symlink→copy diverges from the project on Git Bash
     local project_dir="$TEST_TMPDIR/proj"
     mkdir -p "$project_dir"
     ( cd "$project_dir" && git init -q && git config user.email a@b.c && git config user.name A )
@@ -102,6 +103,7 @@ test_narrative_is_per_actor() {
 }
 
 test_legacy_narrative_migrates_to_actor() {
+    _skip_on_msys && return 0  # adopt symlink→copy diverges from the project on Git Bash
     local project_dir="$TEST_TMPDIR/proj"
     mkdir -p "$project_dir"
     ( cd "$project_dir" && git init -q && git config user.email "bob@team.io" && git config user.name "Bob" )
@@ -156,6 +158,7 @@ test_who_lists_contributors_in_linked_worktree() {
 }
 
 test_migrate_adds_local_to_existing_gitignore() {
+    _skip_on_msys && return 0  # adopt symlink→copy diverges from the project on Git Bash
     local project_dir="$TEST_TMPDIR/proj"
     mkdir -p "$project_dir"
     ( cd "$project_dir" && git init -q && git config user.email a@b.c && git config user.name A )

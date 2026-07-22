@@ -465,6 +465,7 @@ test_encrypted_file_not_plaintext() {
 }
 
 test_encrypted_file_permissions() {
+    _skip_on_msys && return 0  # Windows FS doesn't enforce Unix 600 mode bits
     "$CS_SECRETS_BIN" set api_key "abc" 2>&1
     local enc_file="$HOME/.cs-secrets/test-session.enc"
     local perms
@@ -473,6 +474,7 @@ test_encrypted_file_permissions() {
 }
 
 test_secrets_dir_permissions() {
+    _skip_on_msys && return 0  # Windows FS doesn't enforce Unix 700 mode bits
     "$CS_SECRETS_BIN" set api_key "abc" 2>&1
     local perms
     perms=$(_file_mode "$HOME/.cs-secrets")
@@ -546,8 +548,12 @@ test_encrypted_write_success_updates_and_leaves_no_temp() {
     assert_eq "v2" "$("$CS_SECRETS_BIN" get K1 2>&1)" "update must persist" || return 1
     assert_eq "w1" "$("$CS_SECRETS_BIN" get K2 2>&1)" "second secret must be stored" || return 1
 
-    local perms; perms=$(_file_mode "$HOME/.cs-secrets/test-session.enc")
-    assert_eq "600" "$perms" "committed store must keep mode 600" || return 1
+    # Windows FS doesn't enforce Unix mode bits; the update/no-temp logic below
+    # is still valid there, so guard only the mode assertion.
+    if ! _is_msys; then
+        local perms; perms=$(_file_mode "$HOME/.cs-secrets/test-session.enc")
+        assert_eq "600" "$perms" "committed store must keep mode 600" || return 1
+    fi
 
     local tmpcount
     tmpcount=$(find "$HOME/.cs-secrets" -maxdepth 1 -name '.??????' -type f 2>/dev/null | wc -l | tr -d ' ')
