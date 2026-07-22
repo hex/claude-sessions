@@ -236,11 +236,17 @@ fi
 
 chmod +x "$INSTALL_DIR/cs-subagent-statusline"
 
-# Install cs-tui (interactive session manager)
-if [ "$INSTALL_METHOD" = "local" ] && [ -f "$SCRIPT_DIR/bin/cs-tui" ]; then
-    installed "cs-tui" "$INSTALL_DIR/cs-tui"
-    cp "$SCRIPT_DIR/bin/cs-tui" "$INSTALL_DIR/cs-tui"
-    chmod +x "$INSTALL_DIR/cs-tui"
+# Install cs-tui (interactive session manager). The TUI is bin/cs-tui on
+# macOS/Linux and bin/cs-tui.exe on native Windows (Git Bash/MSYS2); pick the
+# source/dest name by platform so a local Windows clone installs its .exe.
+_tui_local_ext=""
+case "$(uname -s | tr '[:upper:]' '[:lower:]')" in
+    mingw*|msys*|cygwin*) _tui_local_ext=".exe" ;;
+esac
+if [ "$INSTALL_METHOD" = "local" ] && [ -f "$SCRIPT_DIR/bin/cs-tui${_tui_local_ext}" ]; then
+    installed "cs-tui" "$INSTALL_DIR/cs-tui${_tui_local_ext}"
+    cp "$SCRIPT_DIR/bin/cs-tui${_tui_local_ext}" "$INSTALL_DIR/cs-tui${_tui_local_ext}"
+    chmod +x "$INSTALL_DIR/cs-tui${_tui_local_ext}"
 elif [ "$INSTALL_METHOD" = "web" ]; then
     _cs_version=$(grep -m1 "^VERSION=" "$INSTALL_DIR/cs" 2>/dev/null | cut -d'"' -f2 || echo "")
     _os=$(uname -s | tr '[:upper:]' '[:lower:]')
