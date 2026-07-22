@@ -920,6 +920,59 @@ test_import_file_merges_all_machines_and_legacy() {
 # Values are read back through jq, and jq.exe emits CRLF, so every interior
 # newline would otherwise gain a CR -- and unlike a key, a value cannot simply
 # be stripped, since a secret may legitimately contain one.
+# A secret NAME becomes a shell variable name in the eval'd `export` output.
+# An unvalidated name breaks out of the assignment and executes -- and sync
+# files are designed to be committed and shared, so the name is attacker-
+# controlled in the worst case. Reject at the door.
+test_set_rejects_a_name_that_breaks_out_of_export() {
+    local out rc=0
+    out=$(printf 'v' | "$CS_SECRETS_BIN" set 'a;touch /tmp/cs_pwned_set;b' 2>&1) || rc=$?
+    if [[ $rc -eq 0 ]]; then
+        echo "  FAIL: set accepted a secret name that injects into export"
+        echo "    output: $out"
+        return 1
+    fi
+    assert_output_contains "$out" "name" "the refusal must name the problem" || return 1
+    assert_output_not_contains "$(PATH="$(_ageless_path)" "$CS_SECRETS_BIN" list 2>&1)" "touch" \
+        "a rejected name must not reach the store" || return 1
+}
+
+# The realistic vector: another machine commits a sync file whose KEY is hostile.
+test_import_file_refuses_a_hostile_key_name() {
+    local meta="$CS_SESSIONS_ROOT/test-session/.cs"
+    _seed_enc_sync_file "$meta/secrets.machine-x.enc" \
+        '{"a;touch /tmp/cs_pwned_import;b":"v"}' || return 1
+
+    local out rc=0
+    out=$(PATH="$(_ageless_path)" "$CS_SECRETS_BIN" import-file 2>&1) || rc=$?
+    if [[ $rc -eq 0 ]]; then
+        echo "  FAIL: import accepted a hostile key name from a sync file"
+        echo "    output: $out"
+        return 1
+    fi
+    assert_output_contains "$out" "name" "the refusal must name the problem" || return 1
+}
+
+# Defense in depth: a store written before the check existed must still not be
+# able to execute. Poison the encrypted store directly, bypassing `set`.
+test_export_refuses_a_hostile_name_already_in_the_store() {
+    printf 'ok' | "$CS_SECRETS_BIN" set good_key >/dev/null 2>&1
+    local store="$HOME/.cs-secrets/test-session.enc"
+    printf '%s\n' '{"good_key":"ok","a;touch /tmp/cs_pwned_store;b":"v"}' \
+        | openssl enc -aes-256-cbc -e -pbkdf2 -iter 100000 \
+            -out "$store" -pass "pass:$CS_SECRETS_PASSWORD" || return 1
+
+    local out rc=0
+    out=$("$CS_SECRETS_BIN" export 2>&1) || rc=$?
+    if [[ $rc -eq 0 ]]; then
+        echo "  FAIL: export emitted a store containing an injectable name"
+        echo "    output: $out"
+        return 1
+    fi
+    assert_output_not_contains "$out" "export A;" "must not emit the injectable line" || return 1
+    assert_output_contains "$out" "a;touch" "the refusal must name the offending key" || return 1
+}
+
 test_multiline_secret_round_trips_under_crlf_jq() {
     _skip_on_msys && return 0
     local pem
@@ -1989,6 +2042,9 @@ run_test test_export_file_machine_id_survives_unset_user
 run_test test_export_file_skips_rewrite_when_unchanged
 run_test test_export_file_rewrites_when_changed
 run_test test_import_file_merges_all_machines_and_legacy
+run_test test_set_rejects_a_name_that_breaks_out_of_export
+run_test test_import_file_refuses_a_hostile_key_name
+run_test test_export_refuses_a_hostile_name_already_in_the_store
 run_test test_multiline_secret_round_trips_under_crlf_jq
 run_test test_multiline_secret_exports_under_crlf_jq
 run_test test_import_file_keys_survive_crlf_jq
