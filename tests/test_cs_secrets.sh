@@ -168,6 +168,10 @@ cred_file="$sess_dir/$(_hash "$name")"
 case "$verb" in
     store)
         b64="$(cat)"
+        # Opt-in slow-store seam: touch the marker (store has begun, so the
+        # source collect is already done) then pause, so a test can commit a
+        # concurrent write in the window between collect and delete-source.
+        if [ -n "${WCM_FAKE_SLOW_STORE:-}" ]; then : > "$WCM_FAKE_SLOW_STORE"; sleep 3; fi
         # Simulate the .ps1 blob-size cap (CRED_MAX_CREDENTIAL_BLOB_SIZE).
         bytes=$(printf '%s' "$b64" | openssl base64 -d -A | wc -c | tr -d ' ')
         if [ "$bytes" -gt 2560 ]; then
@@ -1642,6 +1646,37 @@ test_keychain_export_does_not_require_cs_secrets_dir() {
         "keychain export must work without the encrypted backend's ~/.cs-secrets" || return 1
 }
 
+# F2: migrate-backend --delete-source must not blanket-purge the source. collect
+# reads the source unlocked; a secret stored AFTER that snapshot is not in the
+# migrated set, so a blanket purge would delete it without ever migrating it
+# (lost). Deleting only the migrated keys leaves the concurrently-added secret
+# intact. A slow source-decrypt holds migrate in its collect while B is stored;
+# after migrate, B must still be in the encrypted source.
+test_migrate_delete_source_preserves_concurrent_store() {
+    _wcm_make_fake >/dev/null
+    "$CS_SECRETS_BIN" set A vA >/dev/null 2>&1   # encrypted source starts with A
+
+    # The target (wcm) store runs AFTER the source collect and BEFORE
+    # delete-source. WCM_FAKE_SLOW_STORE makes that store touch a marker then
+    # pause, giving a deterministic window to commit B into the source between
+    # collect and delete-source (a bare sleep races migrate's ~0.8s startup).
+    local marker="$TEST_TMPDIR/target-store-began"
+    local wcmbin="$TEST_TMPDIR/wcm-bin"
+    PATH="$wcmbin:$PATH" CS_SECRETS_BACKEND=wcm CS_PLATFORM_OVERRIDE=msys \
+        WCM_FAKE_STORE="$TEST_TMPDIR/wcm-store" WCM_FAKE_ARGS="$TEST_TMPDIR/wcm-args" \
+        WCM_FAKE_SLOW_STORE="$marker" \
+        "$CS_SECRETS_BIN" migrate-backend wcm --from encrypted --delete-source >/dev/null 2>&1 &
+    # Collect (of {A}) is done once the target store begins; store B into the
+    # source now, so B is genuinely absent from the migrated set.
+    local waited=0
+    until [ -f "$marker" ]; do sleep 0.05; waited=$((waited + 1)); [ "$waited" -gt 200 ] && break; done
+    "$CS_SECRETS_BIN" set B vB >/dev/null 2>&1
+    wait
+
+    assert_eq "vB" "$("$CS_SECRETS_BIN" get B 2>/dev/null)" \
+        "migrate --delete-source must preserve a concurrently-stored secret (delete migrated keys, not purge)" || return 1
+}
+
 # ============================================================================
 # Runner
 # ============================================================================
@@ -1778,5 +1813,6 @@ run_test test_encrypted_signal_terminates_writer_mid_critical_section
 run_test test_encrypted_purge_serialized_with_concurrent_store
 run_test test_export_serialized_against_concurrent_store_no_stale_overwrite
 run_test test_keychain_export_does_not_require_cs_secrets_dir
+run_test test_migrate_delete_source_preserves_concurrent_store
 
 report_results

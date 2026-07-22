@@ -31,20 +31,33 @@ Test-harness note: the slow-encrypt shim must call `sleep`/`openssl` by ABSOLUTE
 path, and `_ageless_path` now includes `sleep` — the lock's contention-wait needs
 it, and the minimal sandbox omitting it silently no-op'd the injection at first.
 
-## F2 — Concurrency audit of the remaining backend read-modify-write paths
+## F2 — Concurrency audit of the remaining read-modify-write paths — DONE (2026-07-22)
 
-The mutex was added to the three live-store mutations only. Before calling the
-encrypted backend fully concurrency-safe, audit the other read-then-write paths
-for the same stale-writer / lost-update class and decide which need the mutex:
+Audited the three remaining read-then-write paths. Only one needed a change:
 
-- `import_from_sync_file` (merge mode) — reads the store, merges, writes back.
-- `migrate-backend` — reads source backend, writes destination.
-- `encrypted_export` (env-var export) — read-only, likely fine; confirm.
+- **`import_from_sync_file` (merge/replace)** — SAFE, no change. It composes
+  per-key `backend_store` calls, and for the encrypted backend each of those is
+  the D1-locked `encrypted_store` that re-reads under the lock. A concurrent
+  store's OTHER keys survive the re-read, so there is no D1-class lost update.
+  (The only residual is a narrow merge-mode probe-then-store TOCTOU on the SAME
+  key committed in the microscopic gap between the unlocked existence probe and
+  the locked store — benign: merge is best-effort "store if absent", and the
+  key genuinely wasn't there when the decision was made.)
+- **`encrypted_export` (env-var export)** — SAFE, no change. Single read, no
+  write-back; a concurrent store just makes the exported snapshot slightly
+  stale, never lost.
+- **`migrate_backend --delete-source`** — FIXED. `collect_secrets_json` reads
+  the source unlocked, then `--delete-source` ran a blanket `backend_purge`. A
+  secret stored to the source between collect and purge was never migrated AND
+  got purged (lost). Changed `--delete-source` to delete ONLY the migrated keys
+  (per-key `backend_delete`, each self-locking for the encrypted backend) —
+  a concurrently-added secret isn't in the migrated set, so it survives. No
+  long-held lock, so no self-deadlock against the per-key store/delete lock.
+  Invisible in normal use (migrated set == all source keys). Deterministic test
+  via a slow-target-store seam (`WCM_FAKE_SLOW_STORE`) + marker barrier.
 
-Keep the scope bounded: only serialize a path if a concrete lost-update/stale
-scenario exists, and prefer the same lock primitive already in place. codex
-confirmed the D3 salt hard-link publish and the D2 sync temp+rename are sound, so
-those are out of scope here.
+Not locked anywhere new: the audit found no other concrete lost-update. codex
+confirmed the D3 salt hard-link publish and the D2 sync temp+rename are sound.
 
 ## Notes
 
