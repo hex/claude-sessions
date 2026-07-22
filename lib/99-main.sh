@@ -5,8 +5,22 @@ main() {
     if [ $# -eq 0 ]; then
         if [ -t 1 ]; then
             local tui_bin
-            tui_bin="$(command -v cs-tui 2>/dev/null || echo "$(dirname "$0")/cs-tui")"
-            if [ -x "$tui_bin" ]; then
+            tui_bin="$(command -v cs-tui 2>/dev/null || true)"
+            if [ -z "$tui_bin" ]; then
+                # Not on PATH (cs may be run by explicit path with its own dir
+                # off PATH, which the installer permits): probe the sibling next
+                # to this script. The TUI is cs-tui on macOS/Linux and
+                # cs-tui.exe on native Windows — MSYS's .exe-suffix resolution
+                # only helps `command -v`, not this literal sibling path.
+                local _self_dir
+                _self_dir="$(dirname "$0")"
+                if [ -x "$_self_dir/cs-tui" ]; then
+                    tui_bin="$_self_dir/cs-tui"
+                elif [ -x "$_self_dir/cs-tui.exe" ]; then
+                    tui_bin="$_self_dir/cs-tui.exe"
+                fi
+            fi
+            if [ -n "$tui_bin" ] && [ -x "$tui_bin" ]; then
                 # Detect the terminal theme while cs still owns the tty so the
                 # picker gets a light/dark palette; reused by the session we
                 # launch next.
