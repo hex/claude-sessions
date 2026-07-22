@@ -79,6 +79,25 @@ STUB
     printf '%s' "$shimdir"
 }
 
+# Install a jq shim reproducing what a COMMAND SUBSTITUTION sees on Git Bash:
+# jq.exe emits CRLF, but MSYS bash strips the trailing \r\n along with the
+# trailing newline, so every line EXCEPT the last arrives carrying a \r. That
+# asymmetry is what makes a multi-key loop corrupt every key but the final one
+# while the final one looks perfectly healthy. Echoes the dir to prepend to
+# PATH; returns non-zero (skip) when jq is unavailable.
+_install_msys_jq() {
+    local real_jq shimdir
+    real_jq="$(command -v jq)" || return 1
+    shimdir="$TEST_TMPDIR/msysjqbin"
+    mkdir -p "$shimdir"
+    cat > "$shimdir/jq" <<STUB
+#!/usr/bin/env bash
+"$real_jq" "\$@" | awk 'NR>1 { printf "\r\n" } { printf "%s", \$0 } END { if (NR) printf "\n" }'
+STUB
+    chmod +x "$shimdir/jq"
+    printf '%s' "$shimdir"
+}
+
 # --- Setup / Teardown ---
 
 setup() {

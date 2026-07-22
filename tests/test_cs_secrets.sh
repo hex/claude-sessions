@@ -893,6 +893,28 @@ test_import_file_merges_all_machines_and_legacy() {
 # successful import: `import-file` calls backend_store under `|| error`, which
 # suppresses errexit for the whole call, so a store that ignores its write's
 # return value would report "Imported N secret(s)" having stored nothing.
+# jq.exe emits CRLF and MSYS bash strips only the TRAILING \r\n, so every key
+# but the last arrives with a trailing CR. Importing three secrets must land all
+# three under their real names -- not two CR-suffixed ghosts plus a healthy
+# final key, which is what makes this corruption read as "mostly working".
+test_import_file_keys_survive_crlf_jq() {
+    _skip_on_msys && return 0
+    local meta="$CS_SESSIONS_ROOT/test-session/.cs"
+    _seed_enc_sync_file "$meta/secrets.machine-a.enc" \
+        '{"k_alpha":"va","k_beta":"vb","k_gamma":"vg"}' || return 1
+
+    local shim; shim=$(_install_msys_jq) || return 0
+    local out rc=0
+    out=$(PATH="$shim:$(_ageless_path)" "$CS_SECRETS_BIN" import-file 2>&1) || rc=$?
+
+    local pair
+    for pair in k_alpha:va k_beta:vb k_gamma:vg; do
+        assert_eq "${pair#*:}" "$("$CS_SECRETS_BIN" get "${pair%%:*}" 2>&1)" \
+            "${pair%%:*} must import under its real name" \
+            || { _report_import "$rc" "$out" "$meta"; return 1; }
+    done
+}
+
 test_import_file_aborts_when_the_store_write_fails() {
     local meta="$CS_SESSIONS_ROOT/test-session/.cs"
     _seed_enc_sync_file "$meta/secrets.machine-b.enc" '{"from_machine_b":"vb"}' || return 1
@@ -1911,6 +1933,7 @@ run_test test_export_file_machine_id_survives_unset_user
 run_test test_export_file_skips_rewrite_when_unchanged
 run_test test_export_file_rewrites_when_changed
 run_test test_import_file_merges_all_machines_and_legacy
+run_test test_import_file_keys_survive_crlf_jq
 run_test test_import_file_aborts_when_the_store_write_fails
 run_test test_import_file_skips_undecryptable_files
 run_test test_import_file_aborts_on_backend_read_failure_no_overwrite
