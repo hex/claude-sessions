@@ -109,23 +109,6 @@ test_happy_path_docs_fixture_plain() {
         "docs fixture should render identity first, then gauges (no badge in plain mode)"
 }
 
-# Native jq.exe on Windows/MSYS runs stdout in text mode and emits CRLF line
-# terminators; Git Bash's `read` splits on \n and leaves a trailing \r on every
-# extracted field. This shim wraps the real jq and re-emits each line with \r\n
-# so the CR-handling path is exercisable on any platform (macOS/Linux jq is LF).
-_install_crlf_jq() {
-    local real_jq shimdir
-    real_jq="$(command -v jq)" || return 1
-    shimdir="$TEST_TMPDIR/crlfbin"
-    mkdir -p "$shimdir"
-    cat > "$shimdir/jq" <<STUB
-#!/usr/bin/env bash
-"$real_jq" "\$@" | while IFS= read -r _l; do printf '%s\r\n' "\$_l"; done
-STUB
-    chmod +x "$shimdir/jq"
-    printf '%s' "$shimdir"
-}
-
 # Under a CRLF-emitting jq (Windows), the extracted fields must be sanitized so
 # the pill renders as one clean line — not split at every field by a stray \r.
 test_crlf_jq_output_is_sanitized_plain() {

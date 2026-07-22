@@ -379,6 +379,32 @@ EOF
         "no warning should be raised when every hook file exists" || return 1
 }
 
+# On Windows the hook command paths are read from settings.json via jq.exe, whose
+# CRLF output leaves a trailing \r on each path -> `[ -f "$path\r" ]` fails and a
+# resolvable hook is mis-reported as missing. The doctor must sanitize the CR.
+test_doctor_hook_paths_resolve_under_crlf_jq() {
+    local shimdir fake_claude output
+    shimdir=$(_install_crlf_jq) || return 0   # no jq locally: nothing to simulate
+    fake_claude="$TEST_TMPDIR/claude-crlf"
+    mkdir -p "$fake_claude/hooks"
+    : > "$fake_claude/hooks/real.sh"
+    chmod +x "$fake_claude/hooks/real.sh"
+    cat > "$fake_claude/settings.json" << EOF
+{
+  "hooks": {
+    "PreToolUse": [
+      {"matcher": "Bash", "hooks": [{"type": "command", "command": "$fake_claude/hooks/real.sh"}]}
+    ]
+  }
+}
+EOF
+    output=$( export PATH="$shimdir:$PATH"; CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1 ) || true
+    assert_output_not_contains "$output" "registered hook.*missing" \
+        "CRLF jq (Windows) must not make a resolvable hook path look missing" || return 1
+    assert_output_contains "$output" "Hook paths.*OK\|Hook paths.*resolve\|Hook paths.*all" \
+        "hook paths should still resolve to OK under CRLF jq" || return 1
+}
+
 test_doctor_settings_hooks_resolve_handles_no_hooks_section() {
     local fake_claude="$TEST_TMPDIR/claude-nohooks"
     mkdir -p "$fake_claude"
@@ -646,6 +672,7 @@ run_test test_doctor_audit_handles_missing_settings
 run_test test_doctor_runs_settings_hooks_resolve_check
 run_test test_doctor_warns_on_settings_hook_missing_file
 run_test test_doctor_passes_when_all_settings_hooks_resolve
+run_test test_doctor_hook_paths_resolve_under_crlf_jq
 run_test test_doctor_settings_hooks_resolve_handles_no_hooks_section
 run_test test_doctor_settings_hooks_resolve_expands_tilde
 run_test test_doctor_skips_inline_shell_hook_commands

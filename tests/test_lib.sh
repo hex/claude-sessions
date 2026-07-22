@@ -54,6 +54,24 @@ _skip_on_msys() {
     return 1
 }
 
+# Install a jq shim (on $TEST_TMPDIR/crlfbin, echoed for prepending to PATH)
+# that wraps the real jq and re-emits every output line with CRLF, reproducing
+# native jq.exe under Git Bash — where stdout runs in text mode and `read`
+# leaves a trailing \r on each extracted field. Lets the CR-handling paths be
+# exercised on any platform. Returns non-zero (skip) when jq is unavailable.
+_install_crlf_jq() {
+    local real_jq shimdir
+    real_jq="$(command -v jq)" || return 1
+    shimdir="$TEST_TMPDIR/crlfbin"
+    mkdir -p "$shimdir"
+    cat > "$shimdir/jq" <<STUB
+#!/usr/bin/env bash
+"$real_jq" "\$@" | while IFS= read -r _l; do printf '%s\r\n' "\$_l"; done
+STUB
+    chmod +x "$shimdir/jq"
+    printf '%s' "$shimdir"
+}
+
 # --- Setup / Teardown ---
 
 setup() {

@@ -3963,6 +3963,9 @@ _doctor_check_settings_hooks_resolve() {
     fi
     local commands
     commands=$(jq -r '.hooks // {} | to_entries[].value[].hooks[]?.command // empty' "$settings" 2>/dev/null)
+    # Native jq.exe on Windows emits CRLF; strip the trailing \r so hook paths
+    # aren't tested as "/path\r" (which never exists) and mis-reported missing.
+    commands=${commands//$'\r'/}
     if [ -z "$commands" ]; then
         _doctor_ok "Hook paths: no hooks registered in settings.json"
         return
