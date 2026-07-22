@@ -75,8 +75,11 @@ run_hook() {
     # Feed the hook via a herestring, not a live `jq | hook` pipe: outside a session
     # the hook exits 0 before draining stdin, so a pipe would leave jq writing into a
     # closed fd (SIGPIPE) and `set -o pipefail` would surface that as a non-zero exit.
+    # Build the payload with the prompt on jq's STDIN, never as an argv value:
+    # MSYS rewrites a leading-slash argument to a Windows path before a native
+    # jq.exe sees it, so "/color red" would arrive as "C:/Program Files/Git/...".
     local _in
-    _in=$(jq -n --arg p "$1" '{prompt: $p, hook_event_name: "UserPromptSubmit"}')
+    _in=$(printf '%s' "$1" | jq -Rs '{prompt: ., hook_event_name: "UserPromptSubmit"}')
     bash "$HOOK" <<< "$_in"
 }
 
