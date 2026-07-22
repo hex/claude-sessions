@@ -277,7 +277,11 @@ _doctor_check_worktrees() {
             _doctor_warn "Worktrees: $name has no base session '$base_name'"
             continue
         fi
-        d_real=$(cd "$d" 2>/dev/null && pwd -P || echo "$d")
+        # Ask git for the path so both sides of the comparison come from the
+        # same binary: Git for Windows prints drive-letter (C:/...) paths that
+        # an MSYS `pwd -P` (/c/...) can never match.
+        d_real=$(git -C "$d" rev-parse --show-toplevel 2>/dev/null) \
+            || d_real=$(cd "$d" 2>/dev/null && pwd -P || echo "$d")
         if ! git -C "$base_dir" worktree list --porcelain 2>/dev/null \
             | grep -qx "worktree $d_real"; then
             _doctor_warn "Worktrees: $name is not a registered worktree of $base_name (pruned or created by hand?)"

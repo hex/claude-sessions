@@ -355,6 +355,45 @@ test_doctor_fresh_worktree_not_flagged_merged() {
 
 run_test test_doctor_fresh_worktree_not_flagged_merged
 
+# Git for Windows prints drive-letter paths (C:/...) everywhere, while MSYS
+# `pwd -P` yields /c/... form -- so a doctor check that compares one against the
+# other can never match. A git shim that rewrites both path outputs to
+# drive-letter form reproduces that divergence on any platform.
+_make_drive_letter_git() {
+    local bindir="$TEST_TMPDIR/dl-git"
+    local real_git; real_git=$(command -v git)
+    mkdir -p "$bindir"
+    cat > "$bindir/git" <<GITFAKE
+#!/usr/bin/env bash
+set -o pipefail
+case " \$* " in
+    *" worktree list --porcelain "*|*" rev-parse --show-toplevel "*)
+        "$real_git" "\$@" | sed -e 's|^worktree /|worktree C:/|' -e 's|^/|C:/|'
+        exit
+        ;;
+esac
+exec "$real_git" "\$@"
+GITFAKE
+    chmod +x "$bindir/git"
+    echo "$bindir"
+}
+
+test_doctor_classifies_worktrees_when_git_prints_drive_letter_paths() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fresh-task"
+    local bindir; bindir=$(_make_drive_letter_git)
+    local output
+    output=$(cd "$base_dir" && PATH="$bindir:$PATH" CLAUDE_SESSION_DIR="$base_dir" \
+        CLAUDE_SESSION_META_DIR="$base_dir/.cs" "$CS_BIN" -doctor 2>&1 || true)
+    assert_output_not_contains "$output" "not a registered worktree" \
+        "a live worktree must not read as unregistered on git's path form" || return 1
+    assert_output_contains "$output" "Worktrees: myproj@fresh-task on cs/fresh-task" \
+        "a registered worktree still classifies when git prints drive-letter paths" || return 1
+}
+
+run_test test_doctor_classifies_worktrees_when_git_prints_drive_letter_paths
+
 test_merge_refuses_untracked_worktree() {
     local base_dir
     base_dir=$(create_test_session_with_git "myproj")
