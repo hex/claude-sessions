@@ -102,6 +102,9 @@ adopt_session() {
             cd "$target_dir" || exit 0
             create_session_gitignore "$target_dir"
             git init -q 2>/dev/null || true
+            # See the session-init path: autocrlf would rewrite .gitignore to
+            # CRLF and its patterns would stop matching.
+            git config core.autocrlf false 2>/dev/null || true
             git branch -M main 2>/dev/null || true
             setup_merge_attributes "$target_dir"
             git add -A 2>/dev/null || true

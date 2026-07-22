@@ -201,6 +201,21 @@ test_merge_conflict_stops_and_preserves() {
     (cd "$base_dir" && git merge --abort 2>/dev/null || true)
 }
 
+# Git for Windows enables core.autocrlf by default. A CRLF-rewritten .gitignore
+# carries a trailing \r on every pattern and matches nothing, so files cs means
+# to ignore surface as untracked — which then blocks `cs --merge`.
+test_session_repo_pins_autocrlf_off() {
+    local cfg="$TEST_TMPDIR/gitconfig-autocrlf"
+    printf '[core]\n\tautocrlf = true\n' > "$cfg"
+    GIT_CONFIG_GLOBAL="$cfg" "$CS_BIN" acrlf <<< "" >/dev/null 2>&1
+    local repo="$CS_SESSIONS_ROOT/acrlf"
+    [ -d "$repo/.git" ] || { echo "  FAIL: session repo not created"; return 1; }
+    # --local, not the effective value: a global autocrlf=false on the dev box
+    # would otherwise satisfy this without cs having written anything.
+    assert_eq "false" "$(git -C "$repo" config --local --get core.autocrlf 2>/dev/null)" \
+        "a session repo must pin core.autocrlf off in its own config" || return 1
+}
+
 run_test test_worktree_name_rejected_without_base
 run_test test_worktree_name_rejects_bad_task_half
 run_test test_plain_names_still_work
@@ -380,5 +395,6 @@ test_worktree_create_dirty_base_consent_no() {
 
 run_test test_worktree_create_dirty_base_consent_yes
 run_test test_worktree_create_dirty_base_consent_no
+run_test test_session_repo_pins_autocrlf_off
 
 report_results

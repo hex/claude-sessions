@@ -344,6 +344,11 @@ main() {
             cd "$session_dir" || exit 0
             create_session_gitignore "$session_dir"
             git init -q 2>/dev/null || true
+            # cs writes its bookkeeping files with LF. Git for Windows enables
+            # core.autocrlf by default, which rewrites the checked-out .gitignore
+            # to CRLF — every pattern then carries a trailing \r and matches
+            # nothing, so files meant to be ignored surface as untracked.
+            git config core.autocrlf false 2>/dev/null || true
             git branch -M main 2>/dev/null || true
             setup_merge_attributes "$session_dir"
             git add -A 2>/dev/null || true
