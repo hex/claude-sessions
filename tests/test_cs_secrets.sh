@@ -463,6 +463,25 @@ test_export_produces_eval_format() {
     assert_output_contains "$output" "export DB_PASS=" "Should export DB_PASS" || return 1
 }
 
+# The eval'd export lines must carry no CR: jq.exe emits CRLF, and a command
+# substitution strips only the trailing pair, so every variable but the LAST
+# would eval to a value with a trailing CR -- an API key that fails auth for no
+# visible reason.
+test_export_values_survive_crlf_jq() {
+    _skip_on_msys && return 0
+    "$CS_SECRETS_BIN" set a_key "va" >/dev/null 2>&1
+    "$CS_SECRETS_BIN" set b_key "vb" >/dev/null 2>&1
+
+    local shim; shim=$(_install_msys_jq) || return 0
+    local output; output=$(PATH="$shim:$PATH" "$CS_SECRETS_BIN" export 2>&1)
+    eval "$output" 2>/dev/null
+    assert_eq "va" "${A_KEY:-}" "the first exported value must not carry a CR" || {
+        printf '%s' "$output" | cat -v | sed 's/^/    /'
+        return 1
+    }
+    assert_eq "vb" "${B_KEY:-}" "the last exported value must be clean too" || return 1
+}
+
 test_export_is_eval_safe() {
     "$CS_SECRETS_BIN" set test_key "value with spaces" 2>&1
     local output
@@ -1896,6 +1915,7 @@ run_test test_purge_empty_session
 
 # Export
 run_test test_export_produces_eval_format
+run_test test_export_values_survive_crlf_jq
 run_test test_export_is_eval_safe
 
 # Encrypted file internals
