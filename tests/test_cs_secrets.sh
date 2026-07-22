@@ -916,6 +916,42 @@ test_import_file_merges_all_machines_and_legacy() {
 # but the last arrives with a trailing CR. Importing three secrets must land all
 # three under their real names -- not two CR-suffixed ghosts plus a healthy
 # final key, which is what makes this corruption read as "mostly working".
+# A multi-line secret (a PEM key, a JSON blob) must round-trip byte-exactly.
+# Values are read back through jq, and jq.exe emits CRLF, so every interior
+# newline would otherwise gain a CR -- and unlike a key, a value cannot simply
+# be stripped, since a secret may legitimately contain one.
+test_multiline_secret_round_trips_under_crlf_jq() {
+    _skip_on_msys && return 0
+    local pem
+    pem=$(printf -- '-----BEGIN KEY-----\nabc\ndef\n-----END KEY-----')
+    printf '%s' "$pem" | "$CS_SECRETS_BIN" set pem >/dev/null 2>&1
+
+    local shim; shim=$(_install_msys_jq) || return 0
+    local got; got=$(PATH="$shim:$PATH" "$CS_SECRETS_BIN" get pem 2>&1)
+
+    assert_eq "$pem" "$got" "a multi-line secret must survive a jq.exe read" || {
+        echo "    got bytes:"; printf '%s' "$got" | od -c | sed 's/^/      /'
+        return 1
+    }
+}
+
+# The same value path feeds the eval'd export, where a CR lands inside the
+# quoted value rather than at the line end.
+test_multiline_secret_exports_under_crlf_jq() {
+    _skip_on_msys && return 0
+    local pem
+    pem=$(printf -- '-----BEGIN KEY-----\nabc\n-----END KEY-----')
+    printf '%s' "$pem" | "$CS_SECRETS_BIN" set pem >/dev/null 2>&1
+
+    local shim; shim=$(_install_msys_jq) || return 0
+    local output; output=$(PATH="$shim:$PATH" "$CS_SECRETS_BIN" export 2>&1)
+    eval "$output" 2>/dev/null
+    assert_eq "$pem" "${PEM:-}" "an exported multi-line secret must eval byte-exact" || {
+        printf '%s' "${PEM:-}" | od -c | sed 's/^/      /'
+        return 1
+    }
+}
+
 test_import_file_keys_survive_crlf_jq() {
     _skip_on_msys && return 0
     local meta="$CS_SESSIONS_ROOT/test-session/.cs"
@@ -1953,6 +1989,8 @@ run_test test_export_file_machine_id_survives_unset_user
 run_test test_export_file_skips_rewrite_when_unchanged
 run_test test_export_file_rewrites_when_changed
 run_test test_import_file_merges_all_machines_and_legacy
+run_test test_multiline_secret_round_trips_under_crlf_jq
+run_test test_multiline_secret_exports_under_crlf_jq
 run_test test_import_file_keys_survive_crlf_jq
 run_test test_import_file_aborts_when_the_store_write_fails
 run_test test_import_file_skips_undecryptable_files
