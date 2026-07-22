@@ -4,12 +4,19 @@ Store sensitive data (API keys, tokens, passwords) in a secure backend instead o
 
 ## Storage Backends
 
-The `cs -secrets` command auto-detects the best available backend (in priority order):
+The `cs -secrets` command auto-detects the best available backend for the platform:
 
-| Priority | Backend | Storage Location | Cross-Machine Sync |
-|----------|---------|------------------|-------------------|
-| 1 | macOS Keychain | Login keychain | Via export-file |
-| 2 | Encrypted file | `~/.cs-secrets/<session>.enc` | Manual |
+| Backend | Platform | Storage Location | Cross-Machine Sync |
+|---------|----------|------------------|-------------------|
+| macOS Keychain | macOS | Login keychain | Via export-file |
+| Windows Credential Manager (`wcm`) | Native Windows / Git Bash (when `powershell.exe` is available) | Windows Credential Manager | Via export-file |
+| Encrypted file | Linux, WSL, and the fallback everywhere else | `~/.cs-secrets/<session>.enc` | Manual / age |
+
+Override the choice with `CS_SECRETS_BACKEND=keychain|wcm|encrypted`.
+
+**Windows Credential Manager (`wcm`) Backend:**
+
+On Windows, secrets are stored in the OS Credential Manager via a PowerShell helper (P/Invoke of `CredWrite`/`CredRead`/`CredDelete`/`CredEnumerate`). Secret values travel on stdin/stdout (never argv), so they stay out of the command line and logs. Requires `powershell.exe` on `PATH` (present on native Windows and Git Bash/MSYS2).
 
 **Encrypted File Backend:**
 
