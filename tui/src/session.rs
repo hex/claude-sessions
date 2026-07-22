@@ -741,6 +741,12 @@ fn read_lock_pid(meta_dir: &Path) -> Option<u32> {
     if is_pid_alive(pid) { Some(pid) } else { None }
 }
 
+/// True when a process with `pid` is alive on this machine.
+///
+/// Unix uses `kill -0`; native Windows has no `kill`, so it probes `tasklist`.
+/// A missing tool or a spawn error is treated as "not alive" (the caller then
+/// falls back to the statusline heartbeat), never a crash.
+#[cfg(unix)]
 fn is_pid_alive(pid: u32) -> bool {
     std::process::Command::new("kill")
         .args(["-0", &pid.to_string()])
@@ -748,6 +754,20 @@ fn is_pid_alive(pid: u32) -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+/// Windows liveness via `tasklist`: a live PID appears (quoted) in the CSV
+/// output; a dead one yields "INFO: No tasks..." and the PID is absent.
+#[cfg(windows)]
+fn is_pid_alive(pid: u32) -> bool {
+    let out = std::process::Command::new("tasklist")
+        .args(["/NH", "/FO", "CSV", "/FI", &format!("PID eq {pid}")])
+        .stderr(std::process::Stdio::null())
+        .output();
+    match out {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).contains(&format!("\"{pid}\"")),
+        Err(_) => false,
+    }
 }
 
 fn load_contributors(session_dir: &Path) -> Vec<String> {
@@ -812,6 +832,14 @@ fn extract_user_repo(url: &str) -> Option<String> {
     }
 }
 
+/// Count cs secrets per session by scanning the macOS login keychain.
+///
+/// Only macOS ships the `security` tool and a keychain; on Linux and Windows
+/// the TUI's keychain panel is empty by design (secrets there live in the
+/// encrypted-file or Windows Credential Manager backend, which this view does
+/// not enumerate). Gated to macOS so non-macOS builds don't spawn a missing
+/// binary on every refresh.
+#[cfg(target_os = "macos")]
 fn count_secrets_from_keychain() -> HashMap<String, u32> {
     let mut counts = HashMap::new();
 
@@ -833,6 +861,13 @@ fn count_secrets_from_keychain() -> HashMap<String, u32> {
     }
 
     counts
+}
+
+/// Non-macOS: no keychain to scan, so the panel shows no keychain-backed
+/// secret counts. See the macOS variant for why.
+#[cfg(not(target_os = "macos"))]
+fn count_secrets_from_keychain() -> HashMap<String, u32> {
+    HashMap::new()
 }
 
 #[cfg(test)]
@@ -1466,5 +1501,25 @@ mod tests {
         assert!(s.archived);
 
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // The current process is always alive; a max-u32 PID is never a real one.
+    // Covers the platform-selected is_pid_alive (kill on unix, tasklist on
+    // Windows) without a fixture process.
+    #[test]
+    fn is_pid_alive_reports_self_alive_and_bogus_dead() {
+        assert!(is_pid_alive(std::process::id()));
+        assert!(!is_pid_alive(u32::MAX));
+    }
+
+    // On non-macOS there is no keychain to scan, so the count is always empty.
+    // On macOS the scan must at least run without panicking and return a map.
+    #[test]
+    fn keychain_secret_count_is_empty_off_macos() {
+        let counts = count_secrets_from_keychain();
+        #[cfg(not(target_os = "macos"))]
+        assert!(counts.is_empty());
+        #[cfg(target_os = "macos")]
+        let _ = counts; // content depends on the login keychain; only assert no panic
     }
 }
