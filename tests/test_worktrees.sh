@@ -5,6 +5,11 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/test_lib.sh"
 
+# Launch-gated suite: on a real MSYS runner the Claude launch short-circuits
+# (Tier 2 = session management only), so pin a supported platform there. See
+# _apply_suite_platform_pin in test_lib.sh (no-op on macOS/Linux lanes).
+SUITE_PIN_NONMSYS=1
+
 # --- Name parsing (via cs CLI behavior) ---
 
 test_worktree_name_rejected_without_base() {

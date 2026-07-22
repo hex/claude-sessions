@@ -4,6 +4,11 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/test_lib.sh"
+
+# Launch-gated suite: on a real MSYS runner the Claude launch short-circuits
+# (Tier 2 = session management only), so pin a supported platform there. See
+# _apply_suite_platform_pin in test_lib.sh (no-op on macOS/Linux lanes).
+SUITE_PIN_NONMSYS=1
 CS_BIN="$SCRIPT_DIR/../bin/cs"
 HOOKS_DIR="$SCRIPT_DIR/../hooks"
 # Hooks resolve `cs` via PATH (the drain notify calls it); point them at the

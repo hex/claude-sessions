@@ -6,6 +6,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=tests/test_lib.sh
 source "$SCRIPT_DIR/test_lib.sh"
 
+# Launch-gated suite: on a real MSYS runner the Claude launch short-circuits
+# (Tier 2 = session management only), so pin a supported platform there. See
+# _apply_suite_platform_pin in test_lib.sh (no-op on macOS/Linux lanes).
+SUITE_PIN_NONMSYS=1
+
 # A minimal session dir with the frontmatter README the tag filter reads.
 _archive_session() {  # name, tags_line ("" = default empty tags)
     local dir="$CS_SESSIONS_ROOT/$1"

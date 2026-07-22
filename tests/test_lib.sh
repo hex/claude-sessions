@@ -83,6 +83,21 @@ teardown() {
     unset CS_SESSIONS_ROOT CLAUDE_CODE_BIN CS_TRANSCRIPTS_DIR CS_NO_UPDATE_CHECK CS_NO_ITERM2
 }
 
+# Suites that drive the Claude launch path set SUITE_PIN_NONMSYS=1 at the top of
+# the file. On a real MSYS runner the launch short-circuits (Tier 2 is session
+# management only), so those tests would never reach the behavior they assert.
+# Pin a supported non-msys platform there so the launch path runs on Windows CI.
+# Fires ONLY when the real platform is msys and no explicit override is set, so
+# the macOS and Linux lanes keep exercising their own platform. linux (not macos)
+# is used: it reaches the launch path without any macOS-only tool calls.
+_apply_suite_platform_pin() {
+    [ "${SUITE_PIN_NONMSYS:-}" = "1" ] || return 0
+    [ -z "${CS_PLATFORM_OVERRIDE:-}" ] || return 0
+    case "$(uname -s 2>/dev/null)" in
+        MINGW*|MSYS*|CYGWIN*) export CS_PLATFORM_OVERRIDE=linux ;;
+    esac
+}
+
 # --- Test Runner ---
 
 run_test() {
@@ -90,6 +105,7 @@ run_test() {
     TESTS_RUN=$((TESTS_RUN + 1))
     echo "  $test_name..."
     setup
+    _apply_suite_platform_pin
     if "$test_name" 2>&1; then
         TESTS_PASSED=$((TESTS_PASSED + 1))
         echo "    OK"
