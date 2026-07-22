@@ -53,7 +53,18 @@ _ageless_path() {
         mkdir -p "$bindir"
         local tool resolved
         for tool in bash env basename dirname openssl jq hostname cat mkdir chmod ls rm grep sed tr cut head date mktemp mv sleep; do
-            resolved=$(command -v "$tool" 2>/dev/null) && ln -sf "$resolved" "$bindir/$tool"
+            resolved=$(command -v "$tool" 2>/dev/null) || continue
+            # Under MSYS `command -v` reports an extension-less path for a native
+            # .exe tool, so linking that path would fail and leave the sandbox
+            # missing the tool entirely. Fall back to the real .exe, keeping the
+            # .exe name so the sandbox can still execute it.
+            if [ ! -e "$resolved" ] && [ -e "$resolved.exe" ]; then
+                ln -sf "$resolved.exe" "$bindir/$tool.exe" 2>/dev/null \
+                    || cp -f "$resolved.exe" "$bindir/$tool.exe" 2>/dev/null || true
+                continue
+            fi
+            ln -sf "$resolved" "$bindir/$tool" 2>/dev/null \
+                || cp -f "$resolved" "$bindir/$tool" 2>/dev/null || true
         done
     fi
     echo "$bindir"
@@ -781,10 +792,12 @@ test_help_shows_usage() {
 test_export_file_writes_per_machine_enc() {
     local meta="$CS_SESSIONS_ROOT/test-session/.cs"
     "$CS_SECRETS_BIN" set api_key "sk_123" >/dev/null 2>&1
-    PATH="$(_ageless_path)" "$CS_SECRETS_BIN" export-file >/dev/null 2>&1
+    local _exp_out
+    _exp_out=$(PATH="$(_ageless_path)" "$CS_SECRETS_BIN" export-file 2>&1) || true
     local mid
     mid=$(_machine_id)
-    assert_file_exists "$meta/secrets.${mid}.enc" "export-file must write a per-machine sync file" || return 1
+    assert_file_exists "$meta/secrets.${mid}.enc" "export-file must write a per-machine sync file" \
+        || { echo "  export output: $_exp_out"; echo "  sandbox: $(ls "$(_ageless_path)" 2>&1 | tr '\n' ' ')"; return 1; }
     assert_file_not_exists "$meta/secrets.enc" "export-file must NOT write the shared/unsuffixed name" || return 1
 }
 
@@ -794,12 +807,14 @@ test_export_file_writes_per_machine_enc() {
 test_export_file_machine_id_survives_unset_user() {
     local meta="$CS_SESSIONS_ROOT/test-session/.cs"
     "$CS_SECRETS_BIN" set api_key "sk_123" >/dev/null 2>&1
-    ( unset USER; export USERNAME="winuser"
-      PATH="$(_ageless_path)" "$CS_SECRETS_BIN" export-file >/dev/null 2>&1 )
+    local _exp_out
+    _exp_out=$( unset USER; export USERNAME="winuser"
+                PATH="$(_ageless_path)" "$CS_SECRETS_BIN" export-file 2>&1 ) || true
     assert_file_not_exists "$meta/secrets..enc" \
         "an unset USER must not collapse the machine id to empty" || return 1
     ls "$meta"/secrets.*.enc >/dev/null 2>&1 \
-        || { echo "  FAIL: no per-machine sync file written with USER unset"; return 1; }
+        || { echo "  FAIL: no per-machine sync file written with USER unset"
+             echo "  export output: $_exp_out"; return 1; }
 }
 
 test_export_file_skips_rewrite_when_unchanged() {
