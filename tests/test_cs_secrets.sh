@@ -938,6 +938,40 @@ test_set_rejects_a_name_that_breaks_out_of_export() {
 }
 
 # The realistic vector: another machine commits a sync file whose KEY is hostile.
+# A name can be a valid identifier and still be dangerous: `path` upper-cases
+# to PATH, `ld_preload` to LD_PRELOAD. Eval'ing such an export hijacks the
+# caller's command resolution and process loading without a single shell
+# metacharacter.
+test_set_rejects_names_that_hijack_the_environment() {
+    local n out rc
+    for n in path ifs ld_preload dyld_insert_libraries bash_env cdpath PATH Ld_Library_Path; do
+        rc=0
+        out=$(printf 'v' | "$CS_SECRETS_BIN" set "$n" 2>&1) || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            echo "  FAIL: set accepted '$n', which exports as a shell/loader variable"
+            echo "    output: $out"
+            return 1
+        fi
+    done
+}
+
+# The realistic delivery path for the same attack.
+test_import_file_refuses_an_environment_hijacking_name() {
+    local meta="$CS_SESSIONS_ROOT/test-session/.cs"
+    _seed_enc_sync_file "$meta/secrets.machine-y.enc" \
+        '{"path":"/tmp/evil","real_key":"v"}' || return 1
+
+    local out rc=0
+    out=$(PATH="$(_ageless_path)" "$CS_SECRETS_BIN" import-file 2>&1) || rc=$?
+    if [[ $rc -eq 0 ]]; then
+        echo "  FAIL: import accepted a key that exports as PATH"
+        echo "    output: $out"
+        return 1
+    fi
+    assert_output_not_contains "$(PATH="$(_ageless_path)" "$CS_SECRETS_BIN" export 2>&1)" \
+        "export PATH=" "export must never emit an assignment to PATH" || return 1
+}
+
 test_import_file_refuses_a_hostile_key_name() {
     local meta="$CS_SESSIONS_ROOT/test-session/.cs"
     _seed_enc_sync_file "$meta/secrets.machine-x.enc" \
@@ -2043,6 +2077,8 @@ run_test test_export_file_skips_rewrite_when_unchanged
 run_test test_export_file_rewrites_when_changed
 run_test test_import_file_merges_all_machines_and_legacy
 run_test test_set_rejects_a_name_that_breaks_out_of_export
+run_test test_set_rejects_names_that_hijack_the_environment
+run_test test_import_file_refuses_an_environment_hijacking_name
 run_test test_import_file_refuses_a_hostile_key_name
 run_test test_export_refuses_a_hostile_name_already_in_the_store
 run_test test_multiline_secret_round_trips_under_crlf_jq
