@@ -246,32 +246,40 @@ elif [ "$INSTALL_METHOD" = "web" ]; then
     _os=$(uname -s | tr '[:upper:]' '[:lower:]')
     _arch=$(uname -m)
     [ "$_arch" = "x86_64" ] && _arch="amd64"
-    _tui_url="${RELEASES_URL}/v${_cs_version}/cs-tui-${_os}-${_arch}"
+    # Native Windows (Git Bash / MSYS2): uname reports mingw*/msys*. The release
+    # artifact is a .exe, installed as cs-tui.exe so MSYS resolves `cs-tui`.
+    _tui_ext=""
+    case "$_os" in
+        mingw*|msys*|cygwin*) _os="windows"; _tui_ext=".exe" ;;
+    esac
+    _tui_base="cs-tui-${_os}-${_arch}${_tui_ext}"
+    _tui_dst="$INSTALL_DIR/cs-tui${_tui_ext}"
+    _tui_url="${RELEASES_URL}/v${_cs_version}/${_tui_base}"
     if [ -n "$_cs_version" ] && curl -fsSL --head "$_tui_url" >/dev/null 2>&1 \
-        && curl -fsSL "$_tui_url" -o "$INSTALL_DIR/cs-tui"; then
-        installed "cs-tui" "$INSTALL_DIR/cs-tui"
-        chmod +x "$INSTALL_DIR/cs-tui"
+        && curl -fsSL "$_tui_url" -o "$_tui_dst"; then
+        installed "cs-tui" "$_tui_dst"
+        chmod +x "$_tui_dst"
 
         # Verify cs-tui checksum (hard gate)
-        _checksum_url="${RELEASES_URL}/v${_cs_version}/cs-tui-${_os}-${_arch}.sha256"
-        if curl -fsSL "$_checksum_url" -o "$INSTALL_DIR/cs-tui.sha256" 2>/dev/null; then
-            _expected=$(awk '{print $1}' "$INSTALL_DIR/cs-tui.sha256")
+        _checksum_url="${RELEASES_URL}/v${_cs_version}/${_tui_base}.sha256"
+        if curl -fsSL "$_checksum_url" -o "$_tui_dst.sha256" 2>/dev/null; then
+            _expected=$(awk '{print $1}' "$_tui_dst.sha256")
             _actual=""
             if command -v sha256sum >/dev/null 2>&1; then
-                _actual=$(sha256sum "$INSTALL_DIR/cs-tui" | awk '{print $1}')
+                _actual=$(sha256sum "$_tui_dst" | awk '{print $1}')
             elif command -v shasum >/dev/null 2>&1; then
-                _actual=$(shasum -a 256 "$INSTALL_DIR/cs-tui" | awk '{print $1}')
+                _actual=$(shasum -a 256 "$_tui_dst" | awk '{print $1}')
             fi
             if [ -n "$_actual" ] && [ "$_expected" != "$_actual" ]; then
-                rm -f "$INSTALL_DIR/cs-tui" "$INSTALL_DIR/cs-tui.sha256"
+                rm -f "$_tui_dst" "$_tui_dst.sha256"
                 warn "cs-tui checksum verification failed -- removed"
             fi
-            rm -f "$INSTALL_DIR/cs-tui.sha256"
+            rm -f "$_tui_dst.sha256"
         fi
 
         # Verify cs-tui signature (best-effort: minisign may not be installed)
-        _sig_url="${RELEASES_URL}/v${_cs_version}/cs-tui-${_os}-${_arch}.minisig"
-        if curl -fsSL "$_sig_url" -o "$INSTALL_DIR/cs-tui.minisig" 2>/dev/null; then
+        _sig_url="${RELEASES_URL}/v${_cs_version}/${_tui_base}.minisig"
+        if curl -fsSL "$_sig_url" -o "$_tui_dst.minisig" 2>/dev/null; then
             _ms_bin=""
             if command -v minisign >/dev/null 2>&1; then
                 _ms_bin=$(command -v minisign)
@@ -279,12 +287,12 @@ elif [ "$INSTALL_METHOD" = "web" ]; then
                 _ms_bin="$HOME/.local/bin/minisign"
             fi
             if [ -n "$_ms_bin" ]; then
-                if ! "$_ms_bin" -Vm "$INSTALL_DIR/cs-tui" -P "$CS_SIGN_PUBKEY" -x "$INSTALL_DIR/cs-tui.minisig" >/dev/null 2>&1; then
-                    rm -f "$INSTALL_DIR/cs-tui" "$INSTALL_DIR/cs-tui.minisig"
+                if ! "$_ms_bin" -Vm "$_tui_dst" -P "$CS_SIGN_PUBKEY" -x "$_tui_dst.minisig" >/dev/null 2>&1; then
+                    rm -f "$_tui_dst" "$_tui_dst.minisig"
                     warn "cs-tui signature verification failed -- removed"
                 fi
             fi
-            rm -f "$INSTALL_DIR/cs-tui.minisig"
+            rm -f "$_tui_dst.minisig"
         fi
     else
         info "cs-tui not available for ${_os}-${_arch} — run 'cs' for help, or build from source: cd tui && cargo build --release"
