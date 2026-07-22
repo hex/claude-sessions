@@ -57,20 +57,40 @@ _ageless_path() {
 }
 
 # Encrypt a JSON payload into a sync file with the shared test password, to
-# simulate a file another machine (or a legacy export) committed to git.
+# simulate a file another machine (or a legacy export) committed to git. Fails
+# loud: a seed that silently produced nothing turns every downstream assertion
+# into a lie about the import rather than about the seeding.
 _seed_enc_sync_file() {
-    local path="$1" json="$2"
+    local path="$1" json="$2" rc=0
     mkdir -p "$(dirname "$path")"
     printf '%s\n' "$json" | openssl enc -aes-256-cbc -e -pbkdf2 -iter 100000 \
-        -out "$path" -pass "pass:$CS_SECRETS_PASSWORD"
+        -out "$path" -pass "pass:$CS_SECRETS_PASSWORD" || rc=$?
+    if [ "$rc" -ne 0 ] || [ ! -s "$path" ]; then
+        echo "  FAIL: could not seed sync file $path (openssl exit $rc, $(ls -l "$path" 2>&1))"
+        return 1
+    fi
 }
 
-# Build a sandbox bin dir with a fake `security` (never touches the real macOS
-# Keychain) plus the tools cs-secrets needs. FAKE_SECURITY_MODE selects the
-# behaviour: "fail" makes `dump-keychain` exit nonzero (a real enumeration
-# failure); "readfail" enumerates one credential but makes the per-item
-# `find-generic-password` read fail; anything else is a healthy empty keychain.
-# Echoes the bin dir.
+# Print what an import actually did when an assertion about its result fails.
+# The import's own summary ("Imported N secret(s) from M sync file(s)" /
+# "Skipped X undecryptable file(s)") names which candidate files it accepted,
+# which distinguishes a file that was never a candidate from one that was
+# rejected during decrypt or validation.
+_report_import() {
+    local rc="$1" out="$2" meta="$3"
+    echo "    import rc=$rc, output: $out"
+    ls -l "$meta"/secrets*.enc 2>&1 | sed 's/^/    /'
+}
+
+# Build a sandbox bin dir holding a fake `security` (never touches the real
+# macOS Keychain). Callers PREPEND it to PATH so the fake shadows the real tool
+# while the rest of the system stays reachable -- a rebuilt PATH holding only
+# copies of the tools cannot start `#!/usr/bin/env bash` under Git Bash, where
+# `ln -s` copies rather than links, and surfaces as a bare exit 127.
+# FAKE_SECURITY_MODE selects the behaviour: "fail" makes `dump-keychain` exit
+# nonzero (a real enumeration failure); "readfail" enumerates one credential but
+# makes the per-item `find-generic-password` read fail; anything else is a
+# healthy empty keychain. Echoes the bin dir.
 _make_fake_security() {
     local bindir="$TEST_TMPDIR/kc-bin"
     mkdir -p "$bindir"
@@ -119,10 +139,6 @@ case "$sub" in
 esac
 FAKE
     chmod +x "$bindir/security"
-    local tool resolved
-    for tool in bash env basename dirname openssl jq hostname cat mkdir chmod ls rm grep sed tr cut head date uname; do
-        resolved=$(command -v "$tool" 2>/dev/null) && ln -sf "$resolved" "$bindir/$tool"
-    done
     echo "$bindir"
 }
 
@@ -847,21 +863,29 @@ test_export_file_rewrites_when_changed() {
 
 test_import_file_merges_all_machines_and_legacy() {
     local meta="$CS_SESSIONS_ROOT/test-session/.cs"
-    _seed_enc_sync_file "$meta/secrets.machine-b.enc" '{"from_machine_b":"vb"}'
-    _seed_enc_sync_file "$meta/secrets.enc" '{"from_legacy":"vl"}'
+    _seed_enc_sync_file "$meta/secrets.machine-b.enc" '{"from_machine_b":"vb"}' || return 1
+    _seed_enc_sync_file "$meta/secrets.enc" '{"from_legacy":"vl"}' || return 1
     # A locally pre-existing secret must survive a merge import.
     "$CS_SECRETS_BIN" set local_key "vlocal" >/dev/null 2>&1
 
-    PATH="$(_ageless_path)" "$CS_SECRETS_BIN" import-file >/dev/null 2>&1
+    # Keep the import's own report: its "Imported N secret(s) from M sync
+    # file(s)" / "Skipped X undecryptable file(s)" summary names which candidate
+    # files it accepted, which is the only way to tell a missed file apart from
+    # a rejected one when an assertion below fails.
+    local out rc=0
+    out=$(PATH="$(_ageless_path)" "$CS_SECRETS_BIN" import-file 2>&1) || rc=$?
 
-    assert_eq "vb" "$("$CS_SECRETS_BIN" get from_machine_b 2>&1)" "should import per-machine sync file" || return 1
-    assert_eq "vl" "$("$CS_SECRETS_BIN" get from_legacy 2>&1)" "should import legacy unsuffixed sync file" || return 1
-    assert_eq "vlocal" "$("$CS_SECRETS_BIN" get local_key 2>&1)" "merge import should preserve local secrets" || return 1
+    assert_eq "vb" "$("$CS_SECRETS_BIN" get from_machine_b 2>&1)" "should import per-machine sync file" \
+        || { _report_import "$rc" "$out" "$meta"; return 1; }
+    assert_eq "vl" "$("$CS_SECRETS_BIN" get from_legacy 2>&1)" "should import legacy unsuffixed sync file" \
+        || { _report_import "$rc" "$out" "$meta"; return 1; }
+    assert_eq "vlocal" "$("$CS_SECRETS_BIN" get local_key 2>&1)" "merge import should preserve local secrets" \
+        || { _report_import "$rc" "$out" "$meta"; return 1; }
 }
 
 test_import_file_skips_undecryptable_files() {
     local meta="$CS_SESSIONS_ROOT/test-session/.cs"
-    _seed_enc_sync_file "$meta/secrets.machine-a.enc" '{"good_key":"vg"}'
+    _seed_enc_sync_file "$meta/secrets.machine-a.enc" '{"good_key":"vg"}' || return 1
     # An .age file we cannot decrypt (no age binary under the sandbox, bogus bytes).
     mkdir -p "$meta"
     printf 'not-a-valid-age-file' > "$meta/secrets.machine-a.age"
@@ -879,10 +903,10 @@ test_import_file_aborts_on_backend_read_failure_no_overwrite() {
     local bindir; bindir=$(_make_fake_security)
     local addlog="$TEST_TMPDIR/kc-addlog"
     local meta="$CS_SESSIONS_ROOT/test-session/.cs"
-    _seed_enc_sync_file "$meta/secrets.machine-a.enc" '{"K1":"synced_value"}'
+    _seed_enc_sync_file "$meta/secrets.machine-a.enc" '{"K1":"synced_value"}' || return 1
 
     local out rc=0
-    out=$(PATH="$bindir" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=readfail \
+    out=$(PATH="$bindir:$PATH" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=readfail \
         FAKE_SECURITY_ADDLOG="$addlog" CS_SECRETS_PASSWORD="$CS_SECRETS_PASSWORD" \
         "$CS_SECRETS_BIN" import-file 2>&1) || rc=$?
 
@@ -891,6 +915,8 @@ test_import_file_aborts_on_backend_read_failure_no_overwrite() {
         echo "    output: $out"
         return 1
     fi
+    assert_output_contains "$out" "refusing to overwrite" \
+        "the abort must name the refusal, not just exit nonzero" || return 1
     assert_file_not_exists "$addlog" "must NOT store/overwrite when the existence probe read fails" || return 1
 }
 
@@ -900,15 +926,39 @@ test_import_file_stores_when_secret_genuinely_absent() {
     local bindir; bindir=$(_make_fake_security)
     local addlog="$TEST_TMPDIR/kc-addlog"
     local meta="$CS_SESSIONS_ROOT/test-session/.cs"
-    _seed_enc_sync_file "$meta/secrets.machine-a.enc" '{"K1":"synced_value"}'
+    _seed_enc_sync_file "$meta/secrets.machine-a.enc" '{"K1":"synced_value"}' || return 1
 
     local out rc=0
-    out=$(PATH="$bindir" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=empty \
+    out=$(PATH="$bindir:$PATH" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=empty \
         FAKE_SECURITY_ADDLOG="$addlog" CS_SECRETS_PASSWORD="$CS_SECRETS_PASSWORD" \
         "$CS_SECRETS_BIN" import-file 2>&1) || rc=$?
 
     assert_eq 0 "$rc" "import must succeed when the secret is genuinely absent" || return 1
     assert_file_exists "$addlog" "a genuinely-absent secret must be stored" || return 1
+}
+
+# Git Bash leaves USER unset (it exports USERNAME), so a bare "$USER" in the
+# keychain functions aborts the command substitution under `set -u` before
+# `security` ever runs. The merge-import probe then reads that as a backend READ
+# FAILURE rather than not-found and refuses to import.
+test_import_file_stores_when_secret_absent_and_user_unset() {
+    local bindir; bindir=$(_make_fake_security)
+    local addlog="$TEST_TMPDIR/kc-addlog"
+    local meta="$CS_SESSIONS_ROOT/test-session/.cs"
+    _seed_enc_sync_file "$meta/secrets.machine-a.enc" '{"K1":"synced_value"}' || return 1
+
+    local out rc=0
+    out=$(PATH="$bindir:$PATH" env -u USER USERNAME=winuser \
+        CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=empty \
+        FAKE_SECURITY_ADDLOG="$addlog" CS_SECRETS_PASSWORD="$CS_SECRETS_PASSWORD" \
+        "$CS_SECRETS_BIN" import-file 2>&1) || rc=$?
+
+    if [[ $rc -ne 0 ]]; then
+        echo "  FAIL: import must succeed with USER unset (rc=$rc)"
+        echo "    output: $out"
+        return 1
+    fi
+    assert_file_exists "$addlog" "a genuinely-absent secret must be stored with USER unset" || return 1
 }
 
 # A jq failure while building the backup JSON must abort the export nonzero and
@@ -918,9 +968,8 @@ test_import_file_stores_when_secret_genuinely_absent() {
 test_keychain_export_file_aborts_on_jq_failure() {
     local bindir; bindir=$(_make_fake_security)
     local real_jq; real_jq=$(command -v jq)
-    # _make_fake_security symlinks jq; replace the symlink with a real file so
-    # the fake applies (and we never write through the symlink to system jq).
-    rm -f "$bindir/jq"
+    # A fake jq in the sandbox dir shadows the real one, which it delegates to
+    # for every call except the one it simulates failing.
     cat > "$bindir/jq" <<JQFAKE
 #!/usr/bin/env bash
 for a in "\$@"; do
@@ -933,7 +982,7 @@ JQFAKE
     local mid; mid=$(_machine_id)
 
     local out rc=0
-    out=$(PATH="$bindir" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=readok \
+    out=$(PATH="$bindir:$PATH" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=readok \
         "$CS_SECRETS_BIN" export-file 2>&1) || rc=$?
 
     if [[ $rc -eq 0 ]]; then
@@ -941,6 +990,8 @@ JQFAKE
         echo "    output: $out"
         return 1
     fi
+    assert_output_contains "$out" "jq: simulated failure" \
+        "the abort must show jq actually ran and failed, not that cs-secrets never started" || return 1
     assert_file_not_exists "$meta/secrets.${mid}.enc" "no sync file on jq construction failure" || return 1
     assert_file_not_exists "$meta/secrets.${mid}.age" "no age sync file on jq construction failure" || return 1
 }
@@ -950,8 +1001,8 @@ JQFAKE
 test_keychain_list_loud_on_extraction_failure() {
     local bindir; bindir=$(_make_fake_security)
     local real_sed; real_sed=$(command -v sed)
-    # Replace the symlinked sed with a real file so the fake applies.
-    rm -f "$bindir/sed"
+    # A fake sed in the sandbox dir shadows the real one, which it delegates to
+    # for every call except the one it simulates failing.
     cat > "$bindir/sed" <<SEDFAKE
 #!/usr/bin/env bash
 for a in "\$@"; do
@@ -962,7 +1013,7 @@ SEDFAKE
     chmod +x "$bindir/sed"
 
     local out rc=0
-    out=$(PATH="$bindir" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=readfail \
+    out=$(PATH="$bindir:$PATH" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=readfail \
         "$CS_SECRETS_BIN" list 2>&1) || rc=$?
 
     if [[ $rc -eq 0 ]]; then
@@ -970,6 +1021,8 @@ SEDFAKE
         echo "    output: $out"
         return 1
     fi
+    assert_output_contains "$out" "sed: simulated failure" \
+        "the abort must show sed actually ran and failed, not that cs-secrets never started" || return 1
     assert_output_not_contains "$out" "No secrets stored" "an extraction failure must not read as an empty store" || return 1
 }
 
@@ -1219,11 +1272,13 @@ test_keychain_export_file_aborts_on_enumeration_failure() {
     local meta="$CS_SESSIONS_ROOT/test-session/.cs"
     local mid; mid=$(_machine_id)
     local out
-    if out=$(PATH="$bindir" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=fail \
+    if out=$(PATH="$bindir:$PATH" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=fail \
         "$CS_SECRETS_BIN" export-file 2>&1); then
         echo "  FAIL: export-file must abort when keychain enumeration fails"
         return 1
     fi
+    assert_output_contains "$out" "enumerate Keychain for session" \
+        "the abort must name the enumeration failure, not just exit nonzero" || return 1
     assert_output_not_contains "$out" "No secrets to export" "must not claim empty on enumeration failure" || return 1
     assert_file_not_exists "$meta/secrets.${mid}.enc" "no sync file on keychain enumeration failure" || return 1
     assert_file_not_exists "$meta/secrets.${mid}.age" "no age sync file on keychain enumeration failure" || return 1
@@ -1232,7 +1287,7 @@ test_keychain_export_file_aborts_on_enumeration_failure() {
 test_keychain_export_file_empty_store_is_clean() {
     local bindir; bindir=$(_make_fake_security)
     local out
-    out=$(PATH="$bindir" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=empty \
+    out=$(PATH="$bindir:$PATH" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=empty \
         "$CS_SECRETS_BIN" export-file 2>&1) || return 1
     assert_output_contains "$out" "No secrets to export" "an empty keychain must export cleanly" || return 1
 }
@@ -1300,18 +1355,20 @@ test_wcm_get_loud_on_corrupt_base64() {
 test_keychain_list_loud_on_enumeration_failure() {
     local bindir; bindir=$(_make_fake_security)
     local out
-    if out=$(PATH="$bindir" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=fail \
+    if out=$(PATH="$bindir:$PATH" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=fail \
         "$CS_SECRETS_BIN" list 2>&1); then
         echo "  FAIL: list must be nonzero when keychain enumeration fails"
         return 1
     fi
+    assert_output_contains "$out" "enumerate Keychain for session" \
+        "the abort must name the enumeration failure, not just exit nonzero" || return 1
     assert_output_not_contains "$out" "No secrets" "enumeration failure must not read as an empty store" || return 1
 }
 
 test_keychain_list_empty_is_clean() {
     local bindir; bindir=$(_make_fake_security)
     local out
-    out=$(PATH="$bindir" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=empty \
+    out=$(PATH="$bindir:$PATH" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=empty \
         "$CS_SECRETS_BIN" list 2>&1) || return 1
     assert_output_contains "$out" "No secrets stored for session" "an empty keychain must list cleanly" || return 1
 }
@@ -1319,34 +1376,41 @@ test_keychain_list_empty_is_clean() {
 test_keychain_purge_loud_on_enumeration_failure() {
     local bindir; bindir=$(_make_fake_security)
     local out
-    if out=$(PATH="$bindir" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=fail \
+    if out=$(PATH="$bindir:$PATH" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=fail \
         "$CS_SECRETS_BIN" purge 2>&1); then
         echo "  FAIL: purge must be nonzero when keychain enumeration fails"
         return 1
     fi
+    assert_output_contains "$out" "enumerate Keychain for session" \
+        "the abort must name the enumeration failure, not just exit nonzero" || return 1
     assert_output_not_contains "$out" "Purged" "enumeration failure must not report a purge" || return 1
 }
 
 test_keychain_export_loud_on_enumeration_failure() {
     local bindir; bindir=$(_make_fake_security)
     local out
-    if out=$(PATH="$bindir" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=fail \
+    if out=$(PATH="$bindir:$PATH" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=fail \
         "$CS_SECRETS_BIN" export 2>&1); then
         echo "  FAIL: export must be nonzero when keychain enumeration fails"
         return 1
     fi
+    assert_output_contains "$out" "enumerate Keychain for session" \
+        "the abort must name the enumeration failure, not just exit nonzero" || return 1
 }
 
 test_keychain_export_loud_on_read_failure() {
     local bindir; bindir=$(_make_fake_security)
     local out
     # Enumeration lists one credential but the per-item read fails.
-    if out=$(PATH="$bindir" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=readfail \
-        FAKE_SECURITY_SESSION=test-session "$CS_SECRETS_BIN" export 2>/dev/null); then
+    local errfile="$TEST_TMPDIR/kc-export-err"
+    if out=$(PATH="$bindir:$PATH" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=readfail \
+        FAKE_SECURITY_SESSION=test-session "$CS_SECRETS_BIN" export 2>"$errfile"); then
         echo "  FAIL: export must be nonzero when a keychain read fails"
         return 1
     fi
     assert_eq "" "$out" "export must emit nothing on a read failure" || return 1
+    assert_file_contains "$errfile" "failed to read Keychain secret" \
+        "the abort must name the read failure, not just exit nonzero" || return 1
 }
 
 # --- migrate: wcm is a first-class source/target; a partial migration fails ---
@@ -1462,7 +1526,7 @@ test_export_file_atomic_preserves_prior_on_encrypt_failure() {
     mid=$(_machine_id)
     meta="$CS_SESSIONS_ROOT/$sess/.cs"
     sync="$meta/secrets.${mid}.enc"
-    _seed_enc_sync_file "$sync" '{"prior":"good"}'
+    _seed_enc_sync_file "$sync" '{"prior":"good"}' || return 1
 
     # Fake openssl: truncate the -out target then fail on encrypt; pass decrypt
     # and everything else through to the real binary.
@@ -1671,7 +1735,7 @@ test_keychain_export_does_not_require_cs_secrets_dir() {
     rm -rf "$HOME/.cs-secrets"
     : > "$HOME/.cs-secrets"   # a file, so mkdir -p "$HOME/.cs-secrets" cannot succeed
     local out
-    out=$(PATH="$bindir" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=empty \
+    out=$(PATH="$bindir:$PATH" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=empty \
         CS_SECRETS_LOCK_TIMEOUT=1 "$CS_SECRETS_BIN" export-file 2>&1) || {
         echo "  FAIL: keychain export must not require a writable ~/.cs-secrets"
         echo "    output: $out"
@@ -1823,6 +1887,7 @@ run_test test_import_file_merges_all_machines_and_legacy
 run_test test_import_file_skips_undecryptable_files
 run_test test_import_file_aborts_on_backend_read_failure_no_overwrite
 run_test test_import_file_stores_when_secret_genuinely_absent
+run_test test_import_file_stores_when_secret_absent_and_user_unset
 run_test test_keychain_export_file_aborts_on_jq_failure
 run_test test_keychain_list_loud_on_extraction_failure
 
