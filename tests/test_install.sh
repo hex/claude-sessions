@@ -521,6 +521,91 @@ test_install_removes_stale_opposite_platform_tui() {
 
 # On native Windows the TUI installs as cs-tui.exe; uninstall must remove that
 # filename too, not only the Unix-named cs-tui.
+# The name the release workflow PUBLISHES for native Windows and the name
+# install.sh FETCHES there are set in two different files and only ever meet
+# during a real release -- which has never run the Windows matrix entry. Derive
+# each from its own source and pin them together.
+_release_windows_tui_artifact() {
+    local yml="$SCRIPT_DIR/../.github/workflows/release.yml"
+    local platform ext
+    platform=$(grep -o 'platform: windows-[a-z0-9]*' "$yml" | head -1 | sed 's/platform: //')
+    ext=$(grep -A3 'platform: windows-' "$yml" | grep -o 'ext: "[^"]*"' | head -1 | sed -e 's/ext: "//' -e 's/"$//')
+    [ -n "$platform" ] || return 1
+    printf 'cs-tui-%s%s' "$platform" "$ext"
+}
+
+# Run install.sh's WEB path as if on Git Bash, recording every URL it requests.
+# Copied to a bin/-less dir so install.sh selects INSTALL_METHOD=web; uname and
+# curl are stubbed so the run needs no network and no Windows host.
+_install_urls_on_msys() {
+    local sandbox="$TEST_TMPDIR/msys-install"
+    local bindir="$sandbox/stub" log="$sandbox/urls.txt"
+    mkdir -p "$bindir" "$sandbox/home"
+    cp "$INSTALL_SH" "$sandbox/install.sh"
+
+    cat > "$bindir/uname" <<'STUB'
+#!/usr/bin/env bash
+case "${1:-}" in
+    -s) echo "MINGW64_NT-10.0-22631" ;;
+    -m) echo "x86_64" ;;
+    *)  echo "MINGW64_NT-10.0-22631" ;;
+esac
+STUB
+
+    cat > "$bindir/curl" <<STUB
+#!/usr/bin/env bash
+# Record every requested URL, then satisfy the request with a stub payload so
+# install.sh proceeds far enough to reach the TUI fetch.
+out=""; url=""; prev=""
+for a in "\$@"; do
+    case "\$prev" in -o) out="\$a" ;; esac
+    case "\$a" in https://*) url="\$a" ;; esac
+    prev="\$a"
+done
+[ -n "\$url" ] && printf '%s\n' "\$url" >> "$log"
+if [ -n "\$out" ]; then
+    case "\$out" in
+        */cs) printf 'VERSION="9999.9.9"\n' > "\$out" ;;
+        *)    printf 'stub\n' > "\$out" ;;
+    esac
+fi
+exit 0
+STUB
+    chmod +x "$bindir/uname" "$bindir/curl"
+
+    PATH="$bindir:$PATH" HOME="$sandbox/home" bash "$sandbox/install.sh" >/dev/null 2>&1
+    cat "$log" 2>/dev/null
+}
+
+test_release_windows_tui_artifact_matches_what_install_fetches() {
+    local expected; expected=$(_release_windows_tui_artifact) || {
+        echo "  FAIL: release.yml has no windows platform matrix entry"
+        return 1
+    }
+
+    local urls; urls=$(_install_urls_on_msys)
+    local fetched
+    fetched=$(printf '%s\n' "$urls" | grep -o 'cs-tui-[a-z0-9-]*\(\.exe\)\{0,1\}$' | head -1)
+
+    if [ -z "$fetched" ]; then
+        echo "  FAIL: install.sh requested no cs-tui artifact on a Git Bash host"
+        printf '%s\n' "$urls" | sed 's/^/    /'
+        return 1
+    fi
+    assert_eq "$expected" "$fetched" \
+        "install.sh must fetch the artifact name release.yml publishes" || {
+        printf '%s\n' "$urls" | sed 's/^/    /'
+        return 1
+    }
+
+    # The signature and checksum siblings must be fetched under the SAME base,
+    # or verification silently no-ops and an unverified binary is kept.
+    printf '%s\n' "$urls" | grep -q "${expected}\.sha256\$" \
+        || { echo "  FAIL: no ${expected}.sha256 requested"; return 1; }
+    printf '%s\n' "$urls" | grep -q "${expected}\.minisig\$" \
+        || { echo "  FAIL: no ${expected}.minisig requested"; return 1; }
+}
+
 test_uninstall_removes_windows_cs_tui_exe() {
     local fake_home="$TEST_TMPDIR/uninstall-tui-exe"
     mkdir -p "$fake_home/.local/bin" "$fake_home/.claude"
@@ -597,6 +682,7 @@ run_test test_statusline_disable_strips_only_ours
 run_test test_install_preserves_foreign_statusline
 run_test test_uninstall_removes_statusline
 run_test test_install_removes_stale_opposite_platform_tui
+run_test test_release_windows_tui_artifact_matches_what_install_fetches
 run_test test_uninstall_removes_windows_cs_tui_exe
 run_test test_uninstall_removes_subagent_statusline
 test_hook_registration_doc_matches_install() {
