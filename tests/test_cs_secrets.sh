@@ -16,6 +16,10 @@ setup() {
     export CS_SECRETS_PASSWORD="test-password-for-ci"
     export HOME="$TEST_TMPDIR/home"
     export CLAUDE_SESSION_NAME="test-session"
+    # No age anywhere, so export-file deterministically takes the password
+    # (.enc) path even on a host that has age installed. The path does not
+    # exist, which the CS_AGE_BIN seam reads as "no age on this machine".
+    export CS_AGE_BIN="$TEST_TMPDIR/no-such-age"
     mkdir -p "$CS_SESSIONS_ROOT" "$HOME"
 }
 
@@ -44,30 +48,12 @@ _machine_id() {
     printf '%s@%s' "${user:-unknown}" "${host:-unknown}"
 }
 
-# Build a PATH containing every tool cs-secrets needs EXCEPT age, so export-file
-# deterministically takes the password (.enc) path even on hosts where age is
-# installed. Returns the sandbox bin directory.
+# The PATH to run cs-secrets under when a test needs the password (.enc) export
+# path. age is disabled through the CS_AGE_BIN seam that setup exports, so the
+# PATH itself needs no surgery: a whitelist-rebuilt PATH could not start the
+# interpreter under Git Bash at all, which surfaced as a bare exit 127.
 _ageless_path() {
-    local bindir="$TEST_TMPDIR/ageless-bin"
-    if [[ ! -d "$bindir" ]]; then
-        mkdir -p "$bindir"
-        local tool resolved
-        for tool in bash env basename dirname openssl jq hostname cat mkdir chmod ls rm grep sed tr cut head date mktemp mv sleep; do
-            resolved=$(command -v "$tool" 2>/dev/null) || continue
-            # Under MSYS `command -v` reports an extension-less path for a native
-            # .exe tool, so linking that path would fail and leave the sandbox
-            # missing the tool entirely. Fall back to the real .exe, keeping the
-            # .exe name so the sandbox can still execute it.
-            if [ ! -e "$resolved" ] && [ -e "$resolved.exe" ]; then
-                ln -sf "$resolved.exe" "$bindir/$tool.exe" 2>/dev/null \
-                    || cp -f "$resolved.exe" "$bindir/$tool.exe" 2>/dev/null || true
-                continue
-            fi
-            ln -sf "$resolved" "$bindir/$tool" 2>/dev/null \
-                || cp -f "$resolved" "$bindir/$tool" 2>/dev/null || true
-        done
-    fi
-    echo "$bindir"
+    printf '%s' "$PATH"
 }
 
 # Encrypt a JSON payload into a sync file with the shared test password, to
