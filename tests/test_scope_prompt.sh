@@ -386,6 +386,11 @@ test_token_cap_under_8000_bytes() {
     done
     git -C "$CLAUDE_SESSION_DIR" add -A >/dev/null 2>&1
     git -C "$CLAUDE_SESSION_DIR" commit -q -m seed >/dev/null 2>&1
+    # Both cap assertions are meaningless unless the fixture actually materialised:
+    # a filesystem that rejects this long path leaves a tiny block, which sails
+    # under the cap and lets `bytes -le 8000` pass while testing nothing.
+    [ "$(find "$CLAUDE_SESSION_DIR/src/loader" -name 'f*.ts' 2>/dev/null | wc -l | tr -d ' ')" -eq 35 ] \
+        || { echo "  FAIL: over-cap fixture did not materialise (cap assertion would be vacuous)"; return 1; }
     local out ac bytes
     out=$(run_hook "refactor the loader module")
     ac=$(additional_context "$out")
@@ -406,6 +411,11 @@ test_token_cap_marks_truncation() {
     done
     git -C "$CLAUDE_SESSION_DIR" add -A >/dev/null 2>&1
     git -C "$CLAUDE_SESSION_DIR" commit -q -m seed >/dev/null 2>&1
+    # Both cap assertions are meaningless unless the fixture actually materialised:
+    # a filesystem that rejects this long path leaves a tiny block, which sails
+    # under the cap and lets `bytes -le 8000` pass while testing nothing.
+    [ "$(find "$CLAUDE_SESSION_DIR/src/loader" -name 'f*.ts' 2>/dev/null | wc -l | tr -d ' ')" -eq 35 ] \
+        || { echo "  FAIL: over-cap fixture did not materialise (cap assertion would be vacuous)"; return 1; }
     local out ac bytes
     out=$(run_hook "refactor the loader module")
     ac=$(additional_context "$out")
