@@ -1621,6 +1621,27 @@ SHIM
         "export must not rename a stale snapshot over a newer sync backup (F1)" || return 1
 }
 
+# codex F1 review: the export mutex must not couple non-encrypted backends to the
+# encrypted backend's ~/.cs-secrets. A keychain/WCM store is atomic per credential
+# and never needed the lock; requiring a writable ~/.cs-secrets to export from
+# those backends is a regression. Block the path with a plain file where the dir
+# would go and confirm a keychain export still works (only the encrypted backend
+# takes the lock).
+test_keychain_export_does_not_require_cs_secrets_dir() {
+    local bindir; bindir=$(_make_fake_security)
+    rm -rf "$HOME/.cs-secrets"
+    : > "$HOME/.cs-secrets"   # a file, so mkdir -p "$HOME/.cs-secrets" cannot succeed
+    local out
+    out=$(PATH="$bindir" CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=empty \
+        CS_SECRETS_LOCK_TIMEOUT=1 "$CS_SECRETS_BIN" export-file 2>&1) || {
+        echo "  FAIL: keychain export must not require a writable ~/.cs-secrets"
+        echo "    output: $out"
+        return 1
+    }
+    assert_output_contains "$out" "No secrets to export" \
+        "keychain export must work without the encrypted backend's ~/.cs-secrets" || return 1
+}
+
 # ============================================================================
 # Runner
 # ============================================================================
@@ -1756,5 +1777,6 @@ run_test test_encrypted_stale_lock_fails_loud_not_reaped
 run_test test_encrypted_signal_terminates_writer_mid_critical_section
 run_test test_encrypted_purge_serialized_with_concurrent_store
 run_test test_export_serialized_against_concurrent_store_no_stale_overwrite
+run_test test_keychain_export_does_not_require_cs_secrets_dir
 
 report_results
