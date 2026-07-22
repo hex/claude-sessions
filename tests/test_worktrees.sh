@@ -216,6 +216,24 @@ test_session_repo_pins_autocrlf_off() {
         "a session repo must pin core.autocrlf off in its own config" || return 1
 }
 
+# cs records the protocol file in the worktree's info/exclude, at whatever path
+# git reports for it. A worktree's git-path is absolute, and in drive-letter form
+# under Git Bash; mis-reading that as relative sends the entry to a nonsense path,
+# leaves CLAUDE.local.md untracked, and blocks `cs <base> --merge`.
+test_worktree_excludes_protocol_file() {
+    local base_dir="$CS_SESSIONS_ROOT/proj"
+    mkdir -p "$base_dir/.cs"/{memory,local}
+    echo "# P" > "$base_dir/README.md"
+    printf '.cs/\n' > "$base_dir/.gitignore"
+    (cd "$base_dir" && git init -q && git config core.autocrlf false && git add -A && git commit -q -m init)
+    cs_launch "proj@t1"
+    local wt="$CS_SESSIONS_ROOT/proj@t1"
+    [ -f "$wt/CLAUDE.local.md" ] || { echo "  FAIL: protocol file not written to the worktree"; return 1; }
+    (cd "$wt" && git check-ignore -q CLAUDE.local.md) \
+        || { echo "  FAIL: CLAUDE.local.md is not ignored inside the worktree"
+             echo "  status: $( (cd "$wt" && git status --porcelain) | tr '\n' ' ')"; return 1; }
+}
+
 run_test test_worktree_name_rejected_without_base
 run_test test_worktree_name_rejects_bad_task_half
 run_test test_plain_names_still_work
@@ -396,5 +414,6 @@ test_worktree_create_dirty_base_consent_no() {
 run_test test_worktree_create_dirty_base_consent_yes
 run_test test_worktree_create_dirty_base_consent_no
 run_test test_session_repo_pins_autocrlf_off
+run_test test_worktree_excludes_protocol_file
 
 report_results

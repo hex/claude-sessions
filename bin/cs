@@ -1294,9 +1294,15 @@ create_worktree_session() {
     # through the common git dir).
     local exclude
     exclude=$( (cd "$wt_dir" && git rev-parse --git-path info/exclude) 2>/dev/null || echo "" )
+    # A worktree's git-path resolves to the common git dir, which git reports as
+    # an absolute path — drive-letter form (C:/... or C:\...) under Git Bash.
+    # Matching only /* would read that as relative and prepend $wt_dir, writing
+    # the exclude entry to a nonsense path and leaving the protocol file
+    # untracked, which then blocks `cs <base> --merge`.
     case "$exclude" in
         "") : ;;
         /*) : ;;
+        [A-Za-z]:[\\/]*) : ;;
         *) exclude="$wt_dir/$exclude" ;;
     esac
     if [ -n "$exclude" ]; then
