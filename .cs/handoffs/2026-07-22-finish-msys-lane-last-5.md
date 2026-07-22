@@ -2,7 +2,8 @@
 parent: d1d07c22-6787-4516-b5c2-03f94321178e
 created: 2026-07-22T13:36:43Z
 purpose: Apply the last 5 MSYS-lane fixes (all root-caused, patches specified) and drop continue-on-error so test-windows-msys becomes a required gate
-status: unconsumed
+status: consumed
+consumed_by: 06922490-ebf5-4e61-aba1-23faf26fbfba
 ---
 
 # MSYS lane calibration — 95 failures down to 5, all root-caused. Finish it.
