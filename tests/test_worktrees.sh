@@ -84,7 +84,9 @@ test_worktree_create_ignored_mode_bootstraps_cs() {
     echo "# Project readme" > "$base_dir/README.md"
     echo "# Project CLAUDE.md" > "$base_dir/CLAUDE.md"
     printf '.cs/\n' > "$base_dir/.gitignore"
-    (cd "$base_dir" && git init -q && git add -A && git commit -q -m init)
+    # autocrlf is on by default in Git for Windows and would rewrite the fixture's
+    # line endings, so the record fusion compares LF content against CRLF checkouts.
+    (cd "$base_dir" && git init -q && git config core.autocrlf false && git add -A && git commit -q -m init)
     cs_launch "proj@task1"
     local wt="$CS_SESSIONS_ROOT/proj@task1"
     assert_dir "$wt/.cs/memory" "ignored mode bootstraps .cs skeleton" || return 1
@@ -118,7 +120,9 @@ test_worktree_reopen_preserves_project_claude_md() {
     mkdir -p "$base_dir/.cs"/{memory,local}
     echo "# Project CLAUDE.md" > "$base_dir/CLAUDE.md"
     printf '.cs/\n' > "$base_dir/.gitignore"
-    (cd "$base_dir" && git init -q && git add -A && git commit -q -m init)
+    # autocrlf is on by default in Git for Windows and would rewrite the fixture's
+    # line endings, so the record fusion compares LF content against CRLF checkouts.
+    (cd "$base_dir" && git init -q && git config core.autocrlf false && git add -A && git commit -q -m init)
     cs_launch "proj@task1"
     cs_launch "proj@task1"   # reopen — the path that used to run migrate_session
     assert_eq "# Project CLAUDE.md" "$(cat "$CS_SESSIONS_ROOT/proj@task1/CLAUDE.md")" \
@@ -223,7 +227,9 @@ test_merge_ignored_mode_fuses_records() {
         > "$base_dir/.cs/memory/narrative.plain.md"
     echo "# P" > "$base_dir/README.md"
     printf '.cs/\n.claude/settings.local.json\n' > "$base_dir/.gitignore"
-    (cd "$base_dir" && git init -q && git add -A && git commit -q -m init)
+    # autocrlf is on by default in Git for Windows and would rewrite the fixture's
+    # line endings, so the record fusion compares LF content against CRLF checkouts.
+    (cd "$base_dir" && git init -q && git config core.autocrlf false && git add -A && git commit -q -m init)
     cs_launch "proj@t1"
     local wt="$CS_SESSIONS_ROOT/proj@t1"
     # Task work: code (committed) + session records (untracked .cs)
@@ -241,7 +247,8 @@ test_merge_ignored_mode_fuses_records() {
     local output merge_status
     output=$("$CS_BIN" "proj" --merge "t1" 2>&1)
     merge_status=$?
-    assert_eq "0" "$merge_status" "merge exits 0" || return 1
+    assert_eq "0" "$merge_status" "merge exits 0" \
+        || { echo "  merge output: $output"; return 1; }
     assert_output_contains "$output" "memory/note-base.md already exists in the base; skipped" \
         "memory collision warned" || return 1
     assert_eq "base note" "$(cat "$base_dir/.cs/memory/note-base.md")" "memory collision keeps base copy" || return 1
