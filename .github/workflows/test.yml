@@ -59,11 +59,10 @@ jobs:
 
   # Git Bash / MSYS2 lane: session management and secrets run here, but launch
   # and the tmux spawner do not (Tier 2), so those tests skip via _skip_on_msys.
-  # Informational (continue-on-error) until the full per-test skip-set is
-  # calibrated against a real runner — see docs/windows-manual-smoke.md.
+  # Required — see docs/windows-manual-smoke.md for what stays manual and how to
+  # triage a failure that only this lane sees.
   test-windows-msys:
     runs-on: windows-latest
-    continue-on-error: true
     defaults:
       run:
         shell: bash
