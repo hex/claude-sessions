@@ -5356,7 +5356,7 @@ run_uninstall() {
     local zsh_completion_dir="$HOME/.zsh/completions"
 
     warn "This will uninstall cs and all its components:"
-    echo "  - $install_dir/cs, $install_dir/cs-secrets, $install_dir/cs-statusline, $install_dir/cs-subagent-statusline, $install_dir/cs-tui"
+    echo "  - $install_dir/cs, $install_dir/cs-secrets, $install_dir/cs-statusline, $install_dir/cs-subagent-statusline, $install_dir/cs-tui(.exe)"
     echo "  - Hooks in $hooks_dir/"
     echo "  - Commands in $commands_dir/"
     echo "  - Skills in $skills_dir/"
@@ -5407,10 +5407,13 @@ run_uninstall() {
         info "Removed cs-subagent-statusline registration from settings.json"
     fi
 
-    if [ -f "$install_dir/cs-tui" ]; then
-        rm "$install_dir/cs-tui"
-        info "Removed $install_dir/cs-tui"
-    fi
+    # cs-tui on macOS/Linux, cs-tui.exe on native Windows (Git Bash/MSYS2).
+    for _tui in cs-tui cs-tui.exe; do
+        if [ -f "$install_dir/$_tui" ]; then
+            rm "$install_dir/$_tui"
+            info "Removed $install_dir/$_tui"
+        fi
+    done
 
     # Remove hooks from both deployment layouts (subdirectory and flat)
     local hook dir

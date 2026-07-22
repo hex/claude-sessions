@@ -498,6 +498,22 @@ EOF
     fi
 }
 
+# On native Windows the TUI installs as cs-tui.exe; uninstall must remove that
+# filename too, not only the Unix-named cs-tui.
+test_uninstall_removes_windows_cs_tui_exe() {
+    local fake_home="$TEST_TMPDIR/uninstall-tui-exe"
+    mkdir -p "$fake_home/.local/bin" "$fake_home/.claude"
+    echo '#!/bin/sh' > "$fake_home/.local/bin/cs-tui.exe"
+    printf 'y\n' | HOME="$fake_home" "$CS_BIN" -uninstall > /dev/null 2>&1 || {
+        echo "  FAIL: cs -uninstall exited non-zero"
+        return 1
+    }
+    if [ -f "$fake_home/.local/bin/cs-tui.exe" ]; then
+        echo "  FAIL: cs-tui.exe (Windows TUI) survived uninstall"
+        return 1
+    fi
+}
+
 test_uninstall_removes_subagent_statusline() {
     local fake_home="$TEST_TMPDIR/uninstall-ssl"
     mkdir -p "$fake_home/.local/bin" "$fake_home/.claude"
@@ -559,6 +575,7 @@ run_test test_statusline_enable_registers
 run_test test_statusline_disable_strips_only_ours
 run_test test_install_preserves_foreign_statusline
 run_test test_uninstall_removes_statusline
+run_test test_uninstall_removes_windows_cs_tui_exe
 run_test test_uninstall_removes_subagent_statusline
 test_hook_registration_doc_matches_install() {
     # docs/hooks.md restates install.sh's _merge_cs_hook registrations as a
