@@ -44,7 +44,11 @@ jobs:
             || { echo "::error::bin/cs is out of sync with lib/. Run ./build.sh and commit bin/cs."; exit 1; }
 
   rust:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
 
@@ -52,3 +56,24 @@ jobs:
 
       - name: Run TUI tests
         run: cargo test --manifest-path tui/Cargo.toml
+
+  # Git Bash / MSYS2 lane: session management and secrets run here, but launch
+  # and the tmux spawner do not (Tier 2), so those tests skip via _skip_on_msys.
+  # Informational (continue-on-error) until the full per-test skip-set is
+  # calibrated against a real runner — see docs/windows-manual-smoke.md.
+  test-windows-msys:
+    runs-on: windows-latest
+    continue-on-error: true
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@claude-sessions.test"
+          git config --global user.name "cs CI"
+
+      - name: Run bash test suites
+        run: bash tests/run_all.sh

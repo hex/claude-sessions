@@ -32,7 +32,9 @@ test_msys_prepares_but_does_not_launch() {
 # guards against the msys check firing unconditionally.
 test_non_msys_still_launches() {
     _install_fake_launcher
-    "$CS_BIN" winsess <<< "" >"$TEST_TMPDIR/out" 2>&1 || return 1
+    # Pin a non-msys platform so this exercises the launch path on any runner
+    # (including the MSYS CI lane, whose real platform is msys).
+    CS_PLATFORM_OVERRIDE=macos "$CS_BIN" winsess <<< "" >"$TEST_TMPDIR/out" 2>&1 || return 1
     [ -f "$LAUNCH_SENTINEL" ] || return 1
 }
 
@@ -65,11 +67,11 @@ test_help_marks_wsl_only_under_msys() {
       "$CS_BIN" -h 2>&1 | grep -q "WSL only" ) || return 1
 }
 
-# Control: without the msys override, the annotation must not appear — proves
-# it is msys-gated rather than always printed. Default platform on this
-# dev/CI box is macos, so plain -h naturally exercises the non-msys path.
+# Control: under a non-msys platform the annotation must not appear — proves it
+# is msys-gated rather than always printed. Pin macos so this holds on any
+# runner, including the MSYS CI lane (whose real platform is msys).
 test_help_omits_wsl_only_off_msys() {
-    "$CS_BIN" -h 2>&1 | grep -q "WSL only" && return 1
+    CS_PLATFORM_OVERRIDE=macos "$CS_BIN" -h 2>&1 | grep -q "WSL only" && return 1
     return 0
 }
 

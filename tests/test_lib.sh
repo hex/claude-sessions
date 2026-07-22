@@ -34,6 +34,26 @@ _file_mode() {
     fi
 }
 
+# Skip the calling test on native Windows (Git Bash / MSYS2), where tmux and
+# the Claude launch are unavailable (Tier 2 is session management only). Usage,
+# at the top of a test that drives launch/tmux/spawn:
+#     _skip_on_msys && return 0
+# Honors CS_PLATFORM_OVERRIDE so the skip path is exercisable off Windows.
+_skip_on_msys() {
+    local p="${CS_PLATFORM_OVERRIDE:-}"
+    if [ -z "$p" ]; then
+        case "$(uname -s 2>/dev/null)" in
+            MINGW*|MSYS*|CYGWIN*) p=msys ;;
+            *) p=other ;;
+        esac
+    fi
+    if [ "$p" = "msys" ]; then
+        echo "    SKIP (native Windows / MSYS: launch/tmux unavailable)"
+        return 0
+    fi
+    return 1
+}
+
 # --- Setup / Teardown ---
 
 setup() {
