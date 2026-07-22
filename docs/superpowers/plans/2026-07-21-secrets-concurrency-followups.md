@@ -10,29 +10,26 @@ The items below are PRE-EXISTING concurrency gaps in adjacent code paths, not
 regressions from that work. Alex chose to stop and log them rather than expand
 scope (matches the "bound the codex rounds on pre-existing bugs" preference).
 
-## F1 [high] — Concurrent export can publish a stale snapshot over a newer sync file
+## F1 [high] — Concurrent export can publish a stale snapshot over a newer sync file — DONE (2026-07-22)
 
-**Where:** `export_to_sync_file` (bin/cs-secrets) — openssl path ~:1732, age path ~:1683.
+**FIXED:** `export_to_sync_file` now holds the same per-session mutex across the
+whole collect → compare → encrypt → rename transaction (Alex chose the shared-
+mutex option over a separate export lock). Traps installed before acquire;
+because export has several early returns, the EXIT-trap release references a
+GLOBAL (`_CS_EXPORT_LOCK_SESSION`) so it survives to process exit under set -u.
+Deterministic test `test_export_serialized_against_concurrent_store_no_stale_overwrite`
+(slow-encrypt shim on export A + a concurrent store + re-export) — RED lost the
+secret, GREEN keeps it. Original race, for the record:
 
-**Race:** export reads the encrypted store WITHOUT the session mutex, then later
-renames its snapshot over the per-machine sync file. Export A reads `{A}` and
-pauses during encryption; a store adds `B`; export B reads `{A,B}` and commits;
-A resumes and renames `{A}` over B's newer backup. The **live store stays
-correct** — only the sync BACKUP silently loses `B`, and a later import can
-resurrect the stale state. The atomic temp+rename (D2) prevents partial/torn
-files, not a stale-writer overwrite.
+> export reads the store WITHOUT the mutex, then renames its snapshot over the
+> per-machine sync file. Export A reads `{A}`, pauses during encryption; a store
+> adds `B`; export B reads `{A,B}` and commits; A resumes and renames `{A}` over
+> B's newer backup — the live store stays correct, only the sync BACKUP loses
+> `B`. Atomic temp+rename (D2) prevents torn files, not a stale-writer overwrite.
 
-**Fix options (a design choice — discuss before implementing):**
-1. Hold the same per-session mutex across collect → unchanged-compare → encrypt →
-   rename/removal. Simplest and consistent, but holds the mutex across a
-   potentially-slow export (age encryption / recipient I/O), briefly blocking
-   store/delete/purge.
-2. A separate per-session EXPORT lock (so export never blocks the live-store
-   mutations) plus a snapshot/version guard so a stale writer is refused at
-   commit. Cleaner separation, more design + code, new primitive.
-
-**Test:** deterministic delayed-export test (slow-encrypt shim on export A) proving
-an older export cannot overwrite a newer snapshot — mirror the D2 injection style.
+Test-harness note: the slow-encrypt shim must call `sleep`/`openssl` by ABSOLUTE
+path, and `_ageless_path` now includes `sleep` — the lock's contention-wait needs
+it, and the minimal sandbox omitting it silently no-op'd the injection at first.
 
 ## F2 — Concurrency audit of the remaining backend read-modify-write paths
 

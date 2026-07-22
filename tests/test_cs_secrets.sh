@@ -47,7 +47,7 @@ _ageless_path() {
     if [[ ! -d "$bindir" ]]; then
         mkdir -p "$bindir"
         local tool resolved
-        for tool in bash env basename dirname openssl jq hostname cat mkdir chmod ls rm grep sed tr cut head date mktemp mv; do
+        for tool in bash env basename dirname openssl jq hostname cat mkdir chmod ls rm grep sed tr cut head date mktemp mv sleep; do
             resolved=$(command -v "$tool" 2>/dev/null) && ln -sf "$resolved" "$bindir/$tool"
         done
     fi
@@ -1570,6 +1570,57 @@ SHIM
         "purge must remove the store file even against a concurrent store" || return 1
 }
 
+# F1: export must serialize against store on the same session, or an older
+# export can rename a stale snapshot over a newer sync backup. Export A reads the
+# store, then a store adds a secret, then a second export commits the newer set;
+# without the mutex A resumes and overwrites the newer backup with its stale
+# snapshot, silently losing the secret. A slow-encrypt shim holds export A in its
+# encrypt while B is added and re-exported; serialized, the last export wins and
+# the backup keeps every secret.
+test_export_serialized_against_concurrent_store_no_stale_overwrite() {
+    local sess="export-race"
+    CLAUDE_SESSION_NAME="$sess" "$CS_SECRETS_BIN" set A vA >/dev/null 2>&1
+
+    # Force the .enc path (no age) and slow ONLY the export's encrypt. The shim
+    # uses ABSOLUTE openssl/sleep paths: it runs under the ageless sandbox PATH,
+    # which deliberately omits both, so a bare `sleep`/`openssl` would silently
+    # no-op the injection (and the race would never open).
+    local real_ssl real_sleep ageless slowdir
+    real_ssl=$(command -v openssl)
+    real_sleep=$(command -v sleep)
+    ageless=$(_ageless_path)
+    slowdir="$TEST_TMPDIR/export-slow"
+    mkdir -p "$slowdir"
+    cat > "$slowdir/openssl" <<SHIM
+#!/usr/bin/env bash
+orig=("\$@"); is_enc=0
+for a in "\$@"; do [ "\$a" = "-e" ] && is_enc=1; done
+[ "\$is_enc" = 1 ] && "$real_sleep" 2
+exec "$real_ssl" "\${orig[@]}"
+SHIM
+    chmod +x "$slowdir/openssl"
+
+    local mid meta sync
+    mid=$(_machine_id)
+    meta="$CS_SESSIONS_ROOT/$sess/.cs"
+    sync="$meta/secrets.${mid}.enc"
+
+    # Export A reads {A} and slow-encrypts (holds the lock ~2s with the fix).
+    PATH="$slowdir:$ageless" CLAUDE_SESSION_NAME="$sess" "$CS_SECRETS_BIN" export-file >/dev/null 2>&1 &
+    sleep 0.5
+    # Add B and re-export (fast). Serialized behind A's lock with the fix.
+    PATH="$ageless" CLAUDE_SESSION_NAME="$sess" "$CS_SECRETS_BIN" set B vB >/dev/null 2>&1
+    PATH="$ageless" CLAUDE_SESSION_NAME="$sess" "$CS_SECRETS_BIN" export-file >/dev/null 2>&1
+    wait
+
+    # The backup must still contain B: A's stale snapshot must not overwrite it.
+    local restored
+    restored=$(openssl enc -aes-256-cbc -d -pbkdf2 -iter 100000 \
+        -in "$sync" -pass "pass:$CS_SECRETS_PASSWORD" 2>/dev/null)
+    assert_output_contains "$restored" "vB" \
+        "export must not rename a stale snapshot over a newer sync backup (F1)" || return 1
+}
+
 # ============================================================================
 # Runner
 # ============================================================================
@@ -1704,5 +1755,6 @@ run_test test_export_file_atomic_preserves_prior_on_encrypt_failure
 run_test test_encrypted_stale_lock_fails_loud_not_reaped
 run_test test_encrypted_signal_terminates_writer_mid_critical_section
 run_test test_encrypted_purge_serialized_with_concurrent_store
+run_test test_export_serialized_against_concurrent_store_no_stale_overwrite
 
 report_results
