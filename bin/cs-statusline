@@ -170,6 +170,10 @@ _parse_stdin() {
           (.cost.total_cost_usd // "" | tostring),
           (.workspace.current_dir // .cwd // "")
         ] | .[]' 2>/dev/null) || return 1
+    # Native jq.exe on Windows emits CRLF line terminators; `read` splits on \n
+    # and would leave a trailing \r on every field. Strip them so numeric gauges
+    # stay numeric and text fields don't carry an invisible carriage return.
+    fields=${fields//$'\r'/}
     {
         IFS= read -r SL_SESSION
         IFS= read -r SL_CTX
