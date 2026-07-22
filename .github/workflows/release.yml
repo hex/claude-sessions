@@ -19,12 +19,19 @@ jobs:
           - platform: darwin-arm64
             runner: macos-latest
             target: aarch64-apple-darwin
+            ext: ""
           - platform: darwin-amd64
             runner: macos-15-large
             target: x86_64-apple-darwin
+            ext: ""
           - platform: linux-amd64
             runner: ubuntu-latest
             target: x86_64-unknown-linux-musl
+            ext: ""
+          - platform: windows-amd64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            ext: ".exe"
 
     runs-on: ${{ matrix.runner }}
 
@@ -39,16 +46,23 @@ jobs:
         if: contains(matrix.platform, 'linux')
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
+      # Gate the Windows artifact on the TUI behaving on Windows (Task 13):
+      # a broken kill/security path fails here and no cs-tui.exe is published.
+      - name: Test cs-tui (Windows gate)
+        if: contains(matrix.platform, 'windows')
+        run: cargo test --manifest-path tui/Cargo.toml --target ${{ matrix.target }}
+
       - name: Build cs-tui
         run: cargo build --release --manifest-path tui/Cargo.toml --target ${{ matrix.target }}
 
       - name: Rename binary
-        run: cp tui/target/${{ matrix.target }}/release/cs-tui cs-tui-${{ matrix.platform }}
+        shell: bash
+        run: cp "tui/target/${{ matrix.target }}/release/cs-tui${{ matrix.ext }}" "cs-tui-${{ matrix.platform }}${{ matrix.ext }}"
 
       - uses: actions/upload-artifact@v6
         with:
           name: cs-tui-${{ matrix.platform }}
-          path: cs-tui-${{ matrix.platform }}
+          path: cs-tui-${{ matrix.platform }}${{ matrix.ext }}
 
   release:
     needs: build
