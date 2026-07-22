@@ -36,7 +36,12 @@ ORIGINAL_HOME="$HOME"
 # Reproduce the machine identifier cs-secrets uses to name per-machine sync
 # files (hostname-derived, matches age_get_machine_id in bin/cs-secrets).
 _machine_id() {
-    echo "${USER}@$(hostname -s 2>/dev/null || hostname)"
+    local user host
+    user="${USER:-${USERNAME:-}}"
+    [ -n "$user" ] || user=$(id -un 2>/dev/null) || user=""
+    host=$(hostname -s 2>/dev/null || hostname 2>/dev/null) || host=""
+    host=${host//$'\r'/}
+    printf '%s@%s' "${user:-unknown}" "${host:-unknown}"
 }
 
 # Build a PATH containing every tool cs-secrets needs EXCEPT age, so export-file
@@ -269,6 +274,9 @@ test_backend_msys_selects_wcm_when_powershell_present() {
 }
 
 test_backend_msys_falls_back_to_encrypted_without_powershell() {
+    # The premise is an MSYS box WITHOUT powershell.exe; on a real Windows runner
+    # it is always resolvable, so the fallback can't be provoked there.
+    _skip_on_msys && return 0
     # No powershell.exe on PATH: MSYS falls back to the encrypted-file backend.
     # A sanitized PATH keeps any host-installed powershell.exe from leaking in.
     local bindir; bindir=$(mktemp -d)
@@ -778,6 +786,20 @@ test_export_file_writes_per_machine_enc() {
     mid=$(_machine_id)
     assert_file_exists "$meta/secrets.${mid}.enc" "export-file must write a per-machine sync file" || return 1
     assert_file_not_exists "$meta/secrets.enc" "export-file must NOT write the shared/unsuffixed name" || return 1
+}
+
+# Git Bash leaves USER unset (it exports USERNAME instead). Under `set -u` a bare
+# ${USER} aborts the machine-id derivation, so the per-machine sync file collapses
+# to the empty-id name "secrets..enc" and every machine then writes the same file.
+test_export_file_machine_id_survives_unset_user() {
+    local meta="$CS_SESSIONS_ROOT/test-session/.cs"
+    "$CS_SECRETS_BIN" set api_key "sk_123" >/dev/null 2>&1
+    ( unset USER; export USERNAME="winuser"
+      PATH="$(_ageless_path)" "$CS_SECRETS_BIN" export-file >/dev/null 2>&1 )
+    assert_file_not_exists "$meta/secrets..enc" \
+        "an unset USER must not collapse the machine id to empty" || return 1
+    ls "$meta"/secrets.*.enc >/dev/null 2>&1 \
+        || { echo "  FAIL: no per-machine sync file written with USER unset"; return 1; }
 }
 
 test_export_file_skips_rewrite_when_unchanged() {
@@ -1787,6 +1809,7 @@ run_test test_help_shows_usage
 
 # Per-machine sync files
 run_test test_export_file_writes_per_machine_enc
+run_test test_export_file_machine_id_survives_unset_user
 run_test test_export_file_skips_rewrite_when_unchanged
 run_test test_export_file_rewrites_when_changed
 run_test test_import_file_merges_all_machines_and_legacy

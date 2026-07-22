@@ -375,6 +375,8 @@ test_working_tree_truncation_cue() {
 # ============================================================================
 
 test_token_cap_under_8000_bytes() {
+    # The over-cap fixture needs a ~400-char path, past the Windows MAX_PATH limit.
+    _skip_on_msys && return 0
     # Force a pre-truncation block well over 8000 bytes: 35 long paths sharing a real "loader"
     # component. The long segments are separate nested dirs so each stays under the 255-char
     # filename limit while the full path is long enough that 30 of them exceed 8000 bytes.
@@ -400,6 +402,8 @@ test_token_cap_under_8000_bytes() {
 }
 
 test_token_cap_marks_truncation() {
+    # The over-cap fixture needs a ~400-char path, past the Windows MAX_PATH limit.
+    _skip_on_msys && return 0
     # finding: head -c 8000 can sever a path/commit mid-token with no marker, so a truncated tail
     # reads as a real (but nonexistent) path. When the block overflows the cap it must end with an
     # explicit truncation marker on its own final line. Same over-cap setup as the byte-cap test.
