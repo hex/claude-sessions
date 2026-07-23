@@ -1417,6 +1417,27 @@ test_wcm_purge_delete_failure_is_loud() {
 # rather than emitting a metacharacter or bare-variable assignment. wcm is the
 # backend only on native Windows, and the seen_vars crash already showed this
 # surface can diverge from the other two, so it gets its own live attack.
+# The outer `backend_store ... || error` guard in the import loop is redundant
+# for keychain/encrypted (they exit internally) but LOAD-BEARING for wcm, whose
+# store RETURNS a nonzero code rather than exiting. Without a test on the wcm
+# path, a "this guard is redundant" cleanup would let a failed wcm store be
+# counted as imported. Pin it: a wcm store failure during import must abort.
+test_import_file_aborts_on_wcm_store_failure() {
+    _wcm_make_fake >/dev/null
+    local meta="$CS_SESSIONS_ROOT/test-session/.cs"
+    _seed_enc_sync_file "$meta/secrets.machine-w.enc" '{"from_sync":"v"}' || return 1
+
+    local out rc=0
+    out=$(WCM_FAKE_FAIL=store PATH="$(_ageless_path)" _wcm_cs import-file 2>&1) || rc=$?
+    if [[ $rc -eq 0 ]]; then
+        echo "  FAIL: import must abort when the wcm store write fails"
+        echo "    output: $out"
+        return 1
+    fi
+    assert_output_not_contains "$out" "Imported 1 secret" \
+        "a failed wcm store must not be counted as imported" || return 1
+}
+
 test_wcm_export_refuses_hostile_stored_names() {
     _wcm_make_fake >/dev/null
     local store="$TEST_TMPDIR/wcm-store"
@@ -2210,6 +2231,7 @@ run_test test_wcm_missing_returns_exit_3_empty_stdout
 run_test test_wcm_list_enumeration_failure_is_loud
 run_test test_wcm_purge_enumeration_failure_is_loud
 run_test test_wcm_purge_delete_failure_is_loud
+run_test test_import_file_aborts_on_wcm_store_failure
 run_test test_wcm_export_refuses_hostile_stored_names
 run_test test_wcm_export_succeeds_and_namespaces
 run_test test_wcm_export_enumeration_failure_is_loud
