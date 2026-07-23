@@ -4,6 +4,34 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.7.23
+
+A crash-recovery correctness and data-safety pass, plus an in-session worktree merge, a snappier resume prompt, and faster Windows CI.
+
+### Fixes
+
+Crash recovery is now per-conversation and refuses unsafe restores:
+
+- **Autosave is keyed per conversation.** The single shared autosave ref (`refs/worktree/cs/auto`) is replaced by one ref per conversation (`refs/worktree/cs/session/<uuid>`). Two sessions open on the same checkout — or parallel worktree sessions — no longer read, write, or delete each other's snapshot chain. This removes a false "CRASH RECOVERY: previous session ended without saving" prompt that fired when a second concurrent session started, and the near-miss it set up: a blanket whole-tree restore over another session's divergent history.
+- **A whole-tree restore is refused when HEAD has moved.** Each snapshot records the HEAD it sits on (a `cs-base` commit trailer). Recovery offers the `checkout <ref> -- .` restore only when that base still matches the current HEAD; if HEAD moved (a commit or rebase) or the snapshot predates base recording, it warns and points at per-file inspection instead of overwriting committed work. The offered command self-guards, so it stays safe even if HEAD moves between the prompt and the run.
+- Each conversation recovers and deletes only its own ref; session-end deletes only the ending conversation's ref; a live sibling's in-flight ref is never misread as a crash. Foreign conversation refs older than 14 days are garbage-collected, the rebind across a context-fork UUID change is gated on process identity, and every ref mutation is a compare-and-swap so a concurrent session can't be clobbered.
+- De-flaked the worktree env-capture test (it could capture empty output under runner load).
+
+### Features
+
+- **In-session worktree merge.** `cs <base> --merge <task>` now runs from the owning base session instead of forcing a close-session → free-terminal → reopen hand-off. A live lock is exempted only when it is the invoker's own — the session name matches *and* the lock PID is in the caller's process ancestry — so a foreign session's lock, or a stale PID reused by an unrelated process, still refuses. A live feature worktree can never be exempted, so removing a worktree out from under a running session stays impossible. Merging from *inside* the feature session still hands off (it cannot delete its own working directory). The `--merge` task argument is now validated like the launch path.
+- **Single-keypress resume prompt.** The "Continue previous conversation? [Y/n/r/d]" prompt responds to one keypress with no Enter, and ESC cancels the launch.
+
+### Performance
+
+- **Windows CI test lane sharded four ways** (~18 min → ~8 min), and dead `sleep`s removed from the shadow-ref tests.
+
+### Docs
+
+- `README` documents the in-session merge; the `/merge` skill leads with it and hands off only from inside the feature session.
+
+**Full Changelog**: https://github.com/hex/claude-sessions/compare/v2026.7.22...v2026.7.23
+
 ## 2026.7.22
 
 Windows support, and a security and data-integrity pass over `cs -secrets` that matters on every platform.
