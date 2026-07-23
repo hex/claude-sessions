@@ -27,6 +27,8 @@ test_merge_skill_teaches_the_gated_ritual() {
     assert_file_contains "$SKILL" "merged result" "gates run again after the merge" || return 1
     assert_file_contains "$SKILL" "uncommitted" "clean-tree guard stated" || return 1
     assert_file_contains "$SKILL" "cs <base> --merge <task>" "wraps the worktree merge verb" || return 1
+    assert_file_contains "$SKILL" "from the base session" "allows the narrowed in-session merge" || return 1
+    assert_file_contains "$SKILL" "Close the feature session" "documents the self-worktree hand-off" || return 1
     assert_file_contains "$SKILL" "Never push" "publishing rail stated" || return 1
     assert_file_contains "$SKILL" "until the post-merge gates are green" "branch-deletion condition stated" || return 1
 }

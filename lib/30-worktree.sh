@@ -201,11 +201,24 @@ merge_worktree_session() {
     [ -d "$base_dir" ] || error "Base session not found: $base_name"
     [ -d "$wt_dir" ] || error "No worktree for feature '$task' (expected $wt_dir)"
 
-    local lock pid
-    for lock in "$base_dir/.cs/session.lock" "$wt_dir/.cs/session.lock"; do
+    local wt_name="$base_name@$task"
+    if [ "${CLAUDE_SESSION_NAME:-}" = "$wt_name" ]; then
+        error "Cannot merge '$wt_name' from inside that worktree session. Close '$wt_name', then run: cs $base_name --merge $task (from '$base_name' or a free terminal)"
+    fi
+
+    local lock lock_session pid
+    for lock_session in "$base_name" "$wt_name"; do
+        if [ "$lock_session" = "$base_name" ]; then
+            lock="$base_dir/.cs/session.lock"
+        else
+            lock="$wt_dir/.cs/session.lock"
+        fi
         if [ -f "$lock" ]; then
             pid=$(cat "$lock" 2>/dev/null || echo "")
             if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+                if session_lock_owned_by_invoker "$lock_session" "$pid"; then
+                    continue
+                fi
                 error "A session is open (PID $pid, $lock); close it before merging"
             fi
         fi
