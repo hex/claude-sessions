@@ -72,12 +72,22 @@ autosave_to_shadow_ref() {
     tree=$(GIT_INDEX_FILE="$TEMP_INDEX" git write-tree 2>/dev/null) || { rm -f "$TEMP_INDEX"; return 0; }
     rm -f "$TEMP_INDEX"
 
+    # Record the HEAD this snapshot sits on, so crash recovery can tell whether
+    # HEAD has since moved (commit/rebase) and the blanket restore would splice
+    # a stale snapshot over diverged history. Absent (unborn HEAD) => no trailer,
+    # which recovery reads as "unknown base" and refuses the blanket restore.
+    base=$(git rev-parse -q --verify HEAD 2>/dev/null || true)
+    msg="autosave: $TIMESTAMP"
+    [ -n "$base" ] && msg="$msg
+
+cs-base: $base"
+
     # Chain onto previous autosave if it exists
     parent=$(git rev-parse -q --verify refs/worktree/cs/auto 2>/dev/null || true)
     if [ -n "$parent" ]; then
-        commit=$(echo "autosave: $TIMESTAMP" | git commit-tree "$tree" -p "$parent" 2>/dev/null) || return 0
+        commit=$(printf '%s\n' "$msg" | git commit-tree "$tree" -p "$parent" 2>/dev/null) || return 0
     else
-        commit=$(echo "autosave: $TIMESTAMP" | git commit-tree "$tree" 2>/dev/null) || return 0
+        commit=$(printf '%s\n' "$msg" | git commit-tree "$tree" 2>/dev/null) || return 0
     fi
 
     git update-ref refs/worktree/cs/auto "$commit" 2>/dev/null || return 0

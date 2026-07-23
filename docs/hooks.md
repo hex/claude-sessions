@@ -8,7 +8,7 @@ Runs when Claude Code starts a session:
 - Logs session start (including source: `startup`, `resume`, `clear`, `compact`) to `.cs/local/session.log` and appends a `started` event to `.cs/timeline.jsonl`
 - On all sources: clears the statusline's attention marker (`.cs/local/attention`) — a fresh session is attended by definition — and, inside iTerm2 with shell integration installed, cancels any dock bounce the previous conversation left running (`CS_NO_ITERM2=1` disables)
 - On all sources: rebinds `claude_session_id` in the machine-local `.cs/local/state` to the live conversation UUID from the hook input. Claude Code forks a new UUID when a conversation is continued past the context limit (the old transcript stays on disk), so the recorded binding can silently go stale and `cs` would resume the pre-fork conversation. Non-UUID session ids are ignored; each rebind is logged to `session.log`
-- On `startup`/`resume` only: configures `transfer.hideRefs`, recovers autosaved changes from crashed sessions
+- On `startup`/`resume` only: configures `transfer.hideRefs`, recovers autosaved changes from crashed sessions. The whole-tree restore (`checkout <shadow ref> -- .`) is offered only when the snapshot's recorded base HEAD still matches the current HEAD; if HEAD has moved since the snapshot (a commit or rebase, e.g. by a concurrent session) or the snapshot predates base recording, it instead warns that HEAD has moved and points at per-file inspection — a blanket restore over diverged history would overwrite committed work
 - On `resume` only: injects dynamic context (last activity, recent commits, objective, up to 5 most recently active sibling sessions with their objectives), and a per-actor digest of shared memory/narrative activity since this actor's `.cs/local/watermark` (grouped by git author), then advances the watermark and stamps the day's date into `last_resumed`
 - In a feature worktree (when `task_branch` is in machine-local state): injects a Feature Worktree contract instructing Claude to integrate only via `cs <base> --merge <feature>` and never merge the branch manually
 - On a fresh rebind (`CS_FRESH_REBIND=1`, e.g. after a forked-conversation rebind): injects a Fresh Conversation notice so Claude treats the turn as a clean break
@@ -23,6 +23,7 @@ Runs after any file modification (Write or Edit), providing crash recovery for a
 - Autosaves entire working tree to the `refs/worktree/cs/auto` shadow ref using git plumbing commands (per-checkout, so parallel worktree sessions never clobber each other; a legacy `refs/cs/auto` is cleaned up after the first successful write)
 - Does not create commits on `main` or touch the working tree index
 - Each autosave chains onto the previous one (linked list of snapshots)
+- Records the HEAD the snapshot sits on as a `cs-base` commit trailer, so crash recovery can tell whether HEAD has since moved and refuse an unsafe whole-tree restore
 - For narrative file edits, also logs the latest heading/bullet to `session.log`
 - Runs in background to avoid blocking the session
 

@@ -108,6 +108,25 @@ test_autosave_chains_multiple_saves() {
     fi
 }
 
+test_autosave_stamps_base_head() {
+    local head
+    head=$(git -C "$CLAUDE_SESSION_DIR" rev-parse HEAD)
+
+    echo "## New Finding" >> "$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"
+    echo '{"tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
+        | bash "$HOOKS_DIR/autosave-commits.sh"
+    sleep 1
+
+    local msg
+    msg=$(git -C "$CLAUDE_SESSION_DIR" log -1 --format=%B refs/worktree/cs/auto 2>/dev/null || true)
+    case "$msg" in
+        *"cs-base: $head"*) return 0 ;;
+        *) echo "  FAIL: autosave commit should record the base HEAD as 'cs-base: $head'"
+           echo "    message: $msg"
+           return 1 ;;
+    esac
+}
+
 # ============================================================================
 # session-end.sh: clean commit + shadow ref cleanup
 # ============================================================================
@@ -176,6 +195,165 @@ test_recovery_detects_crash_and_injects_context() {
     fi
 
     git -C "$CLAUDE_SESSION_DIR" update-ref -d refs/cs/auto 2>/dev/null || true
+}
+
+# The data-safety guard: when HEAD has moved off the snapshot's recorded base
+# (the commit/rebase-in-the-meantime case), the blanket `checkout <ref> -- .`
+# would splice a stale snapshot over diverged history. Recovery must refuse it.
+test_recovery_refuses_blanket_restore_when_head_moved() {
+    local base_head
+    base_head=$(git -C "$CLAUDE_SESSION_DIR" rev-parse HEAD)
+
+    # Snapshot stamped against the current (soon-to-be-old) HEAD.
+    (
+        cd "$CLAUDE_SESSION_DIR"
+        echo "in-flight work" > wip.txt
+        TEMP_INDEX=$(mktemp)
+        cp .git/index "$TEMP_INDEX"
+        GIT_INDEX_FILE="$TEMP_INDEX" git add wip.txt
+        tree=$(GIT_INDEX_FILE="$TEMP_INDEX" git write-tree)
+        rm -f "$TEMP_INDEX"
+        commit=$(printf 'autosave\n\ncs-base: %s\n' "$base_head" | git commit-tree "$tree")
+        git update-ref refs/worktree/cs/auto "$commit"
+        rm -f wip.txt
+    )
+
+    # HEAD moves forward in the meantime (the commit/rebase this guard protects against).
+    (cd "$CLAUDE_SESSION_DIR" && echo "moved" >> README.md && git commit -aqm "meantime commit")
+
+    local output
+    output=$(echo '{"session_id":"t-moved","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+
+    if ! echo "$output" | grep -q "CRASH RECOVERY"; then
+        echo "  FAIL: should still surface CRASH RECOVERY context"; return 1
+    fi
+    if echo "$output" | grep -qF "checkout refs/worktree/cs/auto -- ."; then
+        echo "  FAIL: must NOT offer the blanket checkout restore once HEAD moved off the recorded base"; return 1
+    fi
+    if ! echo "$output" | grep -q "HEAD has moved"; then
+        echo "  FAIL: should warn that HEAD has moved since the snapshot"; return 1
+    fi
+    if ! git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify refs/worktree/cs/auto >/dev/null 2>&1; then
+        echo "  FAIL: ref should be preserved for manual inspection, not deleted"; return 1
+    fi
+    git -C "$CLAUDE_SESSION_DIR" update-ref -d refs/worktree/cs/auto 2>/dev/null || true
+}
+
+# The other half of the guard: when the snapshot still sits on the current HEAD
+# (the ordinary crash case, no meantime commit), the blanket restore is safe and
+# must still be offered — otherwise the guard is vacuous.
+test_recovery_offers_restore_when_base_matches() {
+    local head
+    head=$(git -C "$CLAUDE_SESSION_DIR" rev-parse HEAD)
+
+    (
+        cd "$CLAUDE_SESSION_DIR"
+        echo "in-flight work" > wip.txt
+        TEMP_INDEX=$(mktemp)
+        cp .git/index "$TEMP_INDEX"
+        GIT_INDEX_FILE="$TEMP_INDEX" git add wip.txt
+        tree=$(GIT_INDEX_FILE="$TEMP_INDEX" git write-tree)
+        rm -f "$TEMP_INDEX"
+        commit=$(printf 'autosave\n\ncs-base: %s\n' "$head" | git commit-tree "$tree")
+        git update-ref refs/worktree/cs/auto "$commit"
+        rm -f wip.txt
+    )
+
+    local output
+    output=$(echo '{"session_id":"t-match","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+
+    if ! echo "$output" | grep -q "CRASH RECOVERY"; then
+        echo "  FAIL: should surface CRASH RECOVERY context"; return 1
+    fi
+    if ! echo "$output" | grep -qF "checkout refs/worktree/cs/auto -- ."; then
+        echo "  FAIL: should offer the blanket restore when the snapshot sits on current HEAD"; return 1
+    fi
+    if echo "$output" | grep -q "HEAD has moved"; then
+        echo "  FAIL: should not warn about a moved HEAD when base matches"; return 1
+    fi
+    git -C "$CLAUDE_SESSION_DIR" update-ref -d refs/worktree/cs/auto 2>/dev/null || true
+}
+
+# TOCTOU: the blanket restore is offered as a copy-paste command run later. If
+# HEAD moves between the scan and the user answering "restore", the command must
+# refuse itself rather than splice the now-stale snapshot over moved history.
+test_recovery_offered_restore_refuses_when_head_moves_after_scan() {
+    local head
+    head=$(git -C "$CLAUDE_SESSION_DIR" rev-parse HEAD)
+
+    # Snapshot sits on the current HEAD at scan time => match branch offers the blanket.
+    (
+        cd "$CLAUDE_SESSION_DIR"
+        echo "snapshot-only" > toctou_wip.txt
+        TEMP_INDEX=$(mktemp)
+        cp .git/index "$TEMP_INDEX"
+        GIT_INDEX_FILE="$TEMP_INDEX" git add toctou_wip.txt
+        tree=$(GIT_INDEX_FILE="$TEMP_INDEX" git write-tree)
+        rm -f "$TEMP_INDEX"
+        commit=$(printf 'autosave\n\ncs-base: %s\n' "$head" | git commit-tree "$tree")
+        git update-ref refs/worktree/cs/auto "$commit"
+        rm -f toctou_wip.txt
+    )
+
+    local output context cmd
+    output=$(echo '{"session_id":"t-toctou","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+    cmd=$(printf '%s\n' "$context" | sed -n 's/.*To restore, run: //p' | head -1)
+    if [ -z "$cmd" ]; then echo "  FAIL: no restore command was offered in the match branch"; return 1; fi
+
+    # HEAD moves after the scan — the TOCTOU window this guard must close.
+    (cd "$CLAUDE_SESSION_DIR" && echo moved >> README.md && git commit -aqm "meantime commit")
+
+    # Running the offered command now must REFUSE, not restore the stale snapshot.
+    local run_out
+    run_out=$(cd "$CLAUDE_SESSION_DIR" && eval "$cmd" 2>&1)
+    if [ -f "$CLAUDE_SESSION_DIR/toctou_wip.txt" ]; then
+        echo "  FAIL: offered restore clobbered the tree after HEAD moved (TOCTOU)"; return 1
+    fi
+    case "$run_out" in
+        *REFUSED*) : ;;
+        *) echo "  FAIL: offered restore should refuse (print REFUSED) once HEAD moved; got: $run_out"; return 1 ;;
+    esac
+    git -C "$CLAUDE_SESSION_DIR" update-ref -d refs/worktree/cs/auto 2>/dev/null || true
+}
+
+# A pre-upgrade snapshot carries no cs-base trailer. Recovery must still refuse
+# the blanket restore (base unverifiable), but must NOT claim "HEAD has moved" —
+# that is a false factual assertion when HEAD is in fact unchanged.
+test_recovery_legacy_ref_warns_unverifiable_not_moved() {
+    (
+        cd "$CLAUDE_SESSION_DIR"
+        echo "legacy work" > legacy.txt
+        TEMP_INDEX=$(mktemp)
+        cp .git/index "$TEMP_INDEX"
+        GIT_INDEX_FILE="$TEMP_INDEX" git add legacy.txt
+        tree=$(GIT_INDEX_FILE="$TEMP_INDEX" git write-tree)
+        rm -f "$TEMP_INDEX"
+        commit=$(echo "autosave" | git commit-tree "$tree")   # no cs-base trailer
+        git update-ref refs/worktree/cs/auto "$commit"
+        rm -f legacy.txt
+    )
+
+    local output
+    output=$(echo '{"session_id":"t-legacy","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+
+    if ! echo "$output" | grep -q "CRASH RECOVERY"; then
+        echo "  FAIL: should surface CRASH RECOVERY context"; return 1
+    fi
+    if echo "$output" | grep -qF "checkout refs/worktree/cs/auto -- ."; then
+        echo "  FAIL: must NOT offer the blanket restore for an unverifiable (no-base) snapshot"; return 1
+    fi
+    if echo "$output" | grep -q "HEAD has moved"; then
+        echo "  FAIL: must NOT assert HEAD has moved when the base is merely unrecorded"; return 1
+    fi
+    if ! echo "$output" | grep -q "no recorded base"; then
+        echo "  FAIL: should explain the base is unrecorded (pre-upgrade autosave)"; return 1
+    fi
+    git -C "$CLAUDE_SESSION_DIR" update-ref -d refs/worktree/cs/auto 2>/dev/null || true
 }
 
 test_shadow_ref_not_pushed() {
@@ -252,8 +430,13 @@ echo ""
 run_test test_autosave_creates_shadow_ref
 run_test test_autosave_does_not_touch_main
 run_test test_autosave_chains_multiple_saves
+run_test test_autosave_stamps_base_head
 run_test test_session_end_deletes_shadow_ref
 run_test test_recovery_detects_crash_and_injects_context
+run_test test_recovery_refuses_blanket_restore_when_head_moved
+run_test test_recovery_offers_restore_when_base_matches
+run_test test_recovery_offered_restore_refuses_when_head_moves_after_scan
+run_test test_recovery_legacy_ref_warns_unverifiable_not_moved
 run_test test_shadow_ref_not_pushed
 run_test test_autosave_logs_per_actor_narrative_edit
 run_test test_autosave_refs_isolated_per_worktree

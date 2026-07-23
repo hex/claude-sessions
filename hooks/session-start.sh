@@ -134,7 +134,36 @@ if git -C "$SESSION_DIR" rev-parse --git-dir >/dev/null 2>&1; then
             if [ "$CRASH_FILE_COUNT" -gt 10 ]; then
                 CRASH_LIST_NOTE=" (first 10 listed)"
             fi
-            CRASH_CONTEXT="CRASH RECOVERY: The previous session ended without saving (crash or timeout). Autosaved changes were found in ${CRASH_FILE_COUNT} file(s)${CRASH_LIST_NOTE}:\n\n${CRASH_FILES}\n\nDiff summary:\n${CRASH_DIFF}\n\nIMPORTANT: Before starting any other work, ask the user (use AskUserQuestion) whether to restore or discard these changes. Warning: restoring overwrites any current uncommitted changes to the listed files. To restore, run: git -C \"$SESSION_DIR\" checkout $SHADOW_REF -- . && git -C \"$SESSION_DIR\" update-ref -d $SHADOW_REF\nTo discard, run: git -C \"$SESSION_DIR\" update-ref -d $SHADOW_REF"
+
+            # The blanket `checkout $SHADOW_REF -- .` is only safe when the
+            # snapshot sits on the current HEAD. The autosave records the HEAD it
+            # was taken against (cs-base trailer); if HEAD has since moved
+            # (commit/rebase in another session) or the base is unknown (a
+            # pre-stamp legacy ref), a blanket restore would splice a stale
+            # snapshot over diverged history and revert committed work. Refuse it
+            # in that case and point at per-file inspection instead.
+            CURRENT_HEAD=$(git -C "$SESSION_DIR" rev-parse -q --verify HEAD 2>/dev/null || true)
+            AUTO_MSG=$(git -C "$SESSION_DIR" log -1 --format=%B "$SHADOW_REF" 2>/dev/null || true)
+            RECORDED_BASE=$(printf '%s\n' "$AUTO_MSG" | sed -n 's/^cs-base:[[:space:]]*//p')
+
+            CRASH_HEAD="CRASH RECOVERY: The previous session ended without saving (crash or timeout). Autosaved changes were found in ${CRASH_FILE_COUNT} file(s)${CRASH_LIST_NOTE}:\n\n${CRASH_FILES}\n\nDiff summary:\n${CRASH_DIFF}\n\nIMPORTANT: Before starting any other work, ask the user (use AskUserQuestion) whether to restore or discard these changes."
+            if [ -n "$RECORDED_BASE" ] && [ -n "$CURRENT_HEAD" ] && [ "$RECORDED_BASE" = "$CURRENT_HEAD" ]; then
+                # The restore runs later (after the user answers), by which time
+                # HEAD may have moved. Bake the base check into the command so it
+                # re-verifies at execution and refuses rather than splicing a
+                # stale snapshot over moved history.
+                CRASH_CONTEXT="${CRASH_HEAD} Warning: restoring overwrites any current uncommitted changes to the listed files. To restore, run: git -C \"$SESSION_DIR\" rev-parse HEAD | grep -qx $RECORDED_BASE && git -C \"$SESSION_DIR\" checkout $SHADOW_REF -- . && git -C \"$SESSION_DIR\" update-ref -d $SHADOW_REF || echo \"REFUSED: HEAD moved since the snapshot; restore per file with: git -C $SESSION_DIR checkout $SHADOW_REF -- <file>\"\nTo discard, run: git -C \"$SESSION_DIR\" update-ref -d $SHADOW_REF"
+            else
+                # Distinguish a genuinely moved HEAD from a snapshot whose base
+                # is simply unrecorded (a pre-upgrade autosave): claiming "HEAD
+                # has moved" in the latter case is a false assertion.
+                if [ -z "$RECORDED_BASE" ]; then
+                    CRASH_WHY="The snapshot has no recorded base (a pre-upgrade autosave), so it cannot be verified to sit on the current HEAD."
+                else
+                    CRASH_WHY="HEAD has moved since this snapshot was taken (recorded base ${RECORDED_BASE}, current HEAD ${CURRENT_HEAD:-unknown})."
+                fi
+                CRASH_CONTEXT="${CRASH_HEAD} WARNING: ${CRASH_WHY} A blanket restore would overwrite committed work with a divergent snapshot, so it is NOT offered. Inspect and restore per file, e.g.: git -C \"$SESSION_DIR\" diff HEAD $SHADOW_REF -- <file> then git -C \"$SESSION_DIR\" checkout $SHADOW_REF -- <file>\nTo discard the snapshot once reviewed, run: git -C \"$SESSION_DIR\" update-ref -d $SHADOW_REF"
+            fi
             echo "[$(date '+%Y-%m-%d %H:%M:%S')] Crash recovery: found ${CRASH_FILE_COUNT} unsaved file(s), awaiting user decision" \
                 >> "$META_DIR/local/session.log"
         else
