@@ -149,22 +149,44 @@ test_autosave_writes_per_conversation_ref() {
 # session-end.sh: clean commit + shadow ref cleanup
 # ============================================================================
 
-# Uses the pre-namespaced ref name deliberately: session-end must still clean
-# up a shadow ref left behind by a pre-migration cs version.
+# A clean session end removes the ending conversation's own autosave ref.
 test_session_end_deletes_shadow_ref() {
+    local me="ffffffff-ffff-ffff-ffff-ffffffffffff"
     (
         cd "$CLAUDE_SESSION_DIR"
         tree=$(git write-tree)
         commit=$(echo "autosave" | git commit-tree "$tree")
-        git update-ref refs/cs/auto "$commit"
+        git update-ref "refs/worktree/cs/session/$me" "$commit"
     )
 
-    echo '{"session_id":"test-123"}' | bash "$HOOKS_DIR/session-end.sh"
+    echo '{"session_id":"'"$me"'"}' | bash "$HOOKS_DIR/session-end.sh"
 
-    if git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify refs/cs/auto >/dev/null 2>&1; then
-        echo "  FAIL: refs/cs/auto should be deleted after session end"
+    if git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$me" >/dev/null 2>&1; then
+        echo "  FAIL: the conversation's own ref should be deleted after session end"
         return 1
     fi
+}
+
+test_session_end_deletes_only_own_conversation_ref() {
+    local me="dddddddd-dddd-dddd-dddd-dddddddddddd"
+    local sib="eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
+    (
+        cd "$CLAUDE_SESSION_DIR"
+        tree=$(git write-tree)
+        for u in "$me" "$sib"; do
+            c=$(echo "autosave" | git commit-tree "$tree")
+            git update-ref "refs/worktree/cs/session/$u" "$c"
+        done
+    )
+    echo '{"session_id":"'"$me"'"}' | bash "$HOOKS_DIR/session-end.sh"
+
+    if git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$me" >/dev/null 2>&1; then
+        echo "  FAIL: session-end must delete the ending conversation's own ref"; return 1
+    fi
+    if ! git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$sib" >/dev/null 2>&1; then
+        echo "  FAIL: session-end must NOT delete a sibling conversation's ref"; return 1
+    fi
+    git -C "$CLAUDE_SESSION_DIR" update-ref -d "refs/worktree/cs/session/$sib" 2>/dev/null || true
 }
 
 # ============================================================================
@@ -547,6 +569,7 @@ run_test test_autosave_chains_multiple_saves
 run_test test_autosave_stamps_base_head
 run_test test_autosave_writes_per_conversation_ref
 run_test test_session_end_deletes_shadow_ref
+run_test test_session_end_deletes_only_own_conversation_ref
 run_test test_recovery_detects_crash_and_injects_context
 run_test test_recovery_refuses_blanket_restore_when_head_moved
 run_test test_recovery_offers_restore_when_base_matches
