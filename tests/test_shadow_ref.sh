@@ -492,6 +492,31 @@ test_recovery_detects_own_conversation_crash() {
     git -C "$CLAUDE_SESSION_DIR" update-ref -d "refs/worktree/cs/session/$me" 2>/dev/null || true
 }
 
+# A context-fork UUID rebind is a clean continuation: the conversation's ref
+# must follow the new UUID so a future crash is recoverable under the live id.
+test_rebind_renames_conversation_ref() {
+    local old="00000000-0000-0000-0000-0000000000aa"
+    local new="00000000-0000-0000-0000-0000000000bb"
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    printf 'claude_session_id: %s\n' "$old" > "$CLAUDE_SESSION_META_DIR/local/state"
+    local sha
+    sha=$( cd "$CLAUDE_SESSION_DIR" && tree=$(git write-tree) && echo autosave | git commit-tree "$tree" )
+    git -C "$CLAUDE_SESSION_DIR" update-ref "refs/worktree/cs/session/$old" "$sha"
+
+    echo '{"session_id":"'"$new"'","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>&1
+
+    if git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$old" >/dev/null 2>&1; then
+        echo "  FAIL: old-uuid ref must be removed after rebind"; return 1
+    fi
+    local moved
+    moved=$(git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$new" 2>/dev/null || true)
+    if [ "$moved" != "$sha" ]; then
+        echo "  FAIL: snapshot must be preserved under the new uuid (got '$moved', want '$sha')"; return 1
+    fi
+    git -C "$CLAUDE_SESSION_DIR" update-ref -d "refs/worktree/cs/session/$new" 2>/dev/null || true
+}
+
 test_shadow_ref_not_pushed() {
     echo '{"session_id":"test-abc","cwd":"'"$CLAUDE_SESSION_DIR"'"}' \
         | bash "$HOOKS_DIR/session-start.sh" > /dev/null
@@ -578,6 +603,7 @@ run_test test_recovery_offered_restore_executes_when_base_matches
 run_test test_recovery_legacy_ref_warns_unverifiable_not_moved
 run_test test_recovery_ignores_sibling_conversation_ref
 run_test test_recovery_detects_own_conversation_crash
+run_test test_rebind_renames_conversation_ref
 run_test test_shadow_ref_not_pushed
 run_test test_autosave_logs_per_actor_narrative_edit
 run_test test_autosave_refs_isolated_per_worktree

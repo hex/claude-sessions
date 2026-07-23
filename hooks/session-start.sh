@@ -241,6 +241,17 @@ if [[ "$SESSION_ID" =~ $UUID_RE ]]; then
                --arg to "$SESSION_ID" \
                '{ts: $ts, event: "rotated", from: $from, to: $to, reason: "rebind"}' \
             >> "$META_DIR/timeline.jsonl" 2>/dev/null || true
+        # Follow the autosave ref to the new UUID so a future crash of this
+        # (continued) conversation is recoverable under its live identity. A
+        # rebind is a clean continuation, so there is no crash to recover here.
+        if [[ "${RECORDED_UUID:-}" =~ $UUID_RE ]] \
+            && git -C "$SESSION_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+            _old_sha=$(git -C "$SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$RECORDED_UUID" 2>/dev/null || true)
+            if [ -n "$_old_sha" ]; then
+                git -C "$SESSION_DIR" update-ref "refs/worktree/cs/session/$SESSION_ID" "$_old_sha" 2>/dev/null \
+                    && git -C "$SESSION_DIR" update-ref -d "refs/worktree/cs/session/$RECORDED_UUID" "$_old_sha" 2>/dev/null || true
+            fi
+        fi
     fi
 fi
 
