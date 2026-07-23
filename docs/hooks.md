@@ -8,7 +8,7 @@ Runs when Claude Code starts a session:
 - Logs session start (including source: `startup`, `resume`, `clear`, `compact`) to `.cs/local/session.log` and appends a `started` event to `.cs/timeline.jsonl`
 - On all sources: clears the statusline's attention marker (`.cs/local/attention`) — a fresh session is attended by definition — and, inside iTerm2 with shell integration installed, cancels any dock bounce the previous conversation left running (`CS_NO_ITERM2=1` disables)
 - On all sources: rebinds `claude_session_id` in the machine-local `.cs/local/state` to the live conversation UUID from the hook input. Claude Code forks a new UUID when a conversation is continued past the context limit (the old transcript stays on disk), so the recorded binding can silently go stale and `cs` would resume the pre-fork conversation. Non-UUID session ids are ignored; each rebind is logged to `session.log`
-- On `startup`/`resume` only: configures `transfer.hideRefs`, recovers autosaved changes from crashed sessions. The whole-tree restore (`checkout <shadow ref> -- .`) is offered only when the snapshot's recorded base HEAD still matches the current HEAD; if HEAD has moved since the snapshot (a commit or rebase, e.g. by a concurrent session) or the snapshot predates base recording, it instead warns that HEAD has moved and points at per-file inspection — a blanket restore over diverged history would overwrite committed work
+- On `startup`/`resume` only: configures `transfer.hideRefs`, and recovers autosaved changes from a crash of **this conversation only** — it reads just the current conversation's own ref (`refs/worktree/cs/session/<conversation-uuid>`), so a live sibling session's in-flight ref is never misread as a crash. It also renames its ref across a context-fork UUID rebind (a clean continuation), claims any pre-upgrade shared ref once via a compare-and-swap delete, and garbage-collects other conversations' refs older than 14 days. The whole-tree restore (`checkout <shadow ref> -- .`) is offered only when the snapshot's recorded base HEAD still matches the current HEAD; if HEAD has moved since the snapshot (a commit or rebase) or the snapshot predates base recording, it instead warns and points at per-file inspection — a blanket restore over diverged history would overwrite committed work
 - On `resume` only: injects dynamic context (last activity, recent commits, objective, up to 5 most recently active sibling sessions with their objectives), and a per-actor digest of shared memory/narrative activity since this actor's `.cs/local/watermark` (grouped by git author), then advances the watermark and stamps the day's date into `last_resumed`
 - In a feature worktree (when `task_branch` is in machine-local state): injects a Feature Worktree contract instructing Claude to integrate only via `cs <base> --merge <feature>` and never merge the branch manually
 - On a fresh rebind (`CS_FRESH_REBIND=1`, e.g. after a forked-conversation rebind): injects a Fresh Conversation notice so Claude treats the turn as a clean break
@@ -20,9 +20,9 @@ Runs when Claude Code starts a session:
 ## autosave-commits.sh (PostToolUse on Write/Edit)
 
 Runs after any file modification (Write or Edit), providing crash recovery for all session files:
-- Autosaves entire working tree to the `refs/worktree/cs/auto` shadow ref using git plumbing commands (per-checkout, so parallel worktree sessions never clobber each other; a legacy `refs/cs/auto` is cleaned up after the first successful write)
+- Autosaves the entire working tree to the conversation's own shadow ref `refs/worktree/cs/session/<conversation-uuid>` (keyed on the hook input's `session_id`) using git plumbing commands. Each conversation writes, recovers, and deletes only its own ref, so concurrent sessions on one checkout — and parallel worktree sessions — never share or clobber each other's snapshot chain
 - Does not create commits on `main` or touch the working tree index
-- Each autosave chains onto the previous one (linked list of snapshots)
+- Chains each snapshot onto that conversation's previous one (a linked list per conversation)
 - Records the HEAD the snapshot sits on as a `cs-base` commit trailer, so crash recovery can tell whether HEAD has since moved and refuse an unsafe whole-tree restore
 - For narrative file edits, also logs the latest heading/bullet to `session.log`
 - Runs in background to avoid blocking the session
@@ -54,7 +54,7 @@ Runs when Claude pauses for user input:
 
 Runs when Claude Code session ends:
 - Logs session end time and the exit source reported by Claude Code (defaulting to `user_exit` when none is given) and appends an `ended` event to `.cs/timeline.jsonl`
-- Deletes the shadow autosave refs (`refs/worktree/cs/auto` for this checkout, plus any legacy `refs/cs/auto`)
+- Deletes only the ending conversation's own shadow ref (`refs/worktree/cs/session/<conversation-uuid>`); a concurrent sibling's ref is left untouched
 - Cleans up lock files
 - Regenerates the sessions index (`<sessions-root>/index.md`) — a table of every session's status, objective, and created date
 - Skipped entirely inside subagents (guarded on the hook input's `agent_id`)

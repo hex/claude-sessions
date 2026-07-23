@@ -48,11 +48,13 @@ jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
        '{ts: $ts, event: $event, source: $source, session_id: $session_id, branch: $branch}' \
     >> "$TIMELINE_FILE" 2>/dev/null || true
 
-# Delete shadow autosave refs (no longer needed after clean session end);
-# refs/worktree/* deletion only affects this checkout's ref.
+# Delete only the ending conversation's own autosave ref (no longer needed
+# after a clean end). A sibling conversation's ref is left untouched, so a
+# concurrent session's crash protection is never stripped by this exit.
 if git -C "$SESSION_DIR" rev-parse --git-dir >/dev/null 2>&1; then
-    git -C "$SESSION_DIR" update-ref -d refs/worktree/cs/auto 2>/dev/null || true
-    git -C "$SESSION_DIR" update-ref -d refs/cs/auto 2>/dev/null || true
+    if [[ "$SESSION_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+        git -C "$SESSION_DIR" update-ref -d "refs/worktree/cs/session/$SESSION_ID" 2>/dev/null || true
+    fi
 fi
 
 # Clean up lock files

@@ -111,13 +111,70 @@ if git -C "$SESSION_DIR" rev-parse --git-dir >/dev/null 2>&1; then
     # Ensure legacy shadow refs are never pushed (refs/worktree/* never are)
     git -C "$SESSION_DIR" config transfer.hideRefs refs/cs 2>/dev/null || true
 
-    # Detect an orphaned shadow ref (previous session crashed). Prefer the
-    # per-worktree ref; fall back to the legacy repo-global name.
+    # Claim a pre-upgrade shared ref once into this conversation's ref. The CAS
+    # delete (update-ref -d <ref> <old-sha>) succeeds for exactly one racing
+    # conversation — the second's delete fails because the expected old value is
+    # gone — and only that winner creates its own session ref from the sha.
+    if [[ "$SESSION_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+        for _legacy in refs/worktree/cs/auto refs/cs/auto; do
+            _lsha=$(git -C "$SESSION_DIR" rev-parse -q --verify "$_legacy" 2>/dev/null || true)
+            [ -n "$_lsha" ] || continue
+            if git -C "$SESSION_DIR" update-ref -d "$_legacy" "$_lsha" 2>/dev/null; then
+                # Create only when this conversation has no ref yet, so a second
+                # legacy ref (or a pre-existing own crashed ref) is never
+                # overwritten. Restore the legacy ref if the create fails, so a
+                # claimed snapshot is never lost to ref-lock contention.
+                if ! git -C "$SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$SESSION_ID" >/dev/null 2>&1; then
+                    # Re-stamp the claimed tree under a fresh commit so the ref's
+                    # tip date reflects claim time (liveness), not the stale
+                    # legacy commit date — otherwise a peer's 14-day GC would
+                    # prune this live, just-claimed ref. No cs-base trailer, so
+                    # recovery treats a legacy snapshot as unverifiable-base
+                    # (per-file guidance), which is correct for pre-upgrade work.
+                    _ltree=$(git -C "$SESSION_DIR" rev-parse -q --verify "$_lsha^{tree}" 2>/dev/null || true)
+                    _claimed=""
+                    [ -n "$_ltree" ] && _claimed=$(printf 'autosave: claimed legacy snapshot\n' | git -C "$SESSION_DIR" commit-tree "$_ltree" 2>/dev/null || true)
+                    if [ -n "$_claimed" ]; then
+                        git -C "$SESSION_DIR" update-ref "refs/worktree/cs/session/$SESSION_ID" "$_claimed" 2>/dev/null \
+                            || git -C "$SESSION_DIR" update-ref "$_legacy" "$_lsha" 2>/dev/null || true
+                    else
+                        git -C "$SESSION_DIR" update-ref "$_legacy" "$_lsha" 2>/dev/null || true
+                    fi
+                fi
+            fi
+        done
+    fi
+
+    # GC: prune foreign conversation refs whose tip is older than 14 days, so a
+    # conversation that crashed and was never reopened can't accumulate refs
+    # forever. Never touches the current conversation's own ref, nor this
+    # process's launch-UUID predecessor ref — the rebind rename below still needs
+    # that one to carry a context-fork's snapshot to the new UUID. The delete is
+    # a compare-and-swap on the tip whose age justified it, so a foreign ref its
+    # owner advances between the age read and the delete is not destroyed.
+    _gc_now=$(date +%s)
+    while IFS= read -r _ref; do
+        [ -n "$_ref" ] || continue
+        case "$_ref" in
+            "refs/worktree/cs/session/$SESSION_ID") continue ;;
+            "refs/worktree/cs/session/${CS_CLAUDE_SESSION_ID:-}") continue ;;
+        esac
+        _gc_meta=$(git -C "$SESSION_DIR" log -1 --format='%ct %H' "$_ref" 2>/dev/null || true)
+        _gc_ct=${_gc_meta%% *}
+        _gc_sha=${_gc_meta#* }
+        case "$_gc_ct" in ''|*[!0-9]*) _gc_ct=0 ;; esac
+        if [ -n "$_gc_sha" ] && [ "$(( _gc_now - _gc_ct ))" -gt "$(( 14*86400 ))" ]; then
+            git -C "$SESSION_DIR" update-ref -d "$_ref" "$_gc_sha" 2>/dev/null || true
+        fi
+    done < <(git -C "$SESSION_DIR" for-each-ref --format='%(refname)' 'refs/worktree/cs/session/' 2>/dev/null || true)
+
+    # Detect an orphaned shadow ref (this conversation crashed last run). A
+    # conversation only ever recovers its OWN per-conversation ref, so a live
+    # sibling's in-flight ref is never misread as a crash.
     SHADOW_REF=""
-    if git -C "$SESSION_DIR" rev-parse -q --verify refs/worktree/cs/auto >/dev/null 2>&1; then
-        SHADOW_REF="refs/worktree/cs/auto"
-    elif git -C "$SESSION_DIR" rev-parse -q --verify refs/cs/auto >/dev/null 2>&1; then
-        SHADOW_REF="refs/cs/auto"
+    if [[ "$SESSION_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] \
+        && git -C "$SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$SESSION_ID" >/dev/null 2>&1; then
+        SHADOW_REF="refs/worktree/cs/session/$SESSION_ID"
     fi
     if [ -n "$SHADOW_REF" ]; then
         # Generate a summary of what would be restored
@@ -241,6 +298,31 @@ if [[ "$SESSION_ID" =~ $UUID_RE ]]; then
                --arg to "$SESSION_ID" \
                '{ts: $ts, event: "rotated", from: $from, to: $to, reason: "rebind"}' \
             >> "$META_DIR/timeline.jsonl" 2>/dev/null || true
+        # Follow the autosave ref to the new UUID so a future crash of this
+        # (continued) conversation is recoverable under its live identity. A
+        # rebind is a clean continuation, so there is no crash to recover here.
+        #
+        # Gate on process identity: claude_session_id in state is a single shared
+        # slot per checkout, so "recorded != mine" is also true when a sibling
+        # conversation ran after me. A genuine context-fork keeps this process's
+        # launch UUID (CS_CLAUDE_SESSION_ID) equal to the recorded predecessor
+        # while the hook's session_id changes; a sibling's launch UUID is its own.
+        # Only rename when the recorded id is this process's own predecessor,
+        # never a sibling's — otherwise this would strip a live sibling's ref.
+        if [ "${CS_CLAUDE_SESSION_ID:-}" = "${RECORDED_UUID:-}" ] \
+            && [[ "${RECORDED_UUID:-}" =~ $UUID_RE ]] \
+            && git -C "$SESSION_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+            _old_sha=$(git -C "$SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$RECORDED_UUID" 2>/dev/null || true)
+            if [ -n "$_old_sha" ]; then
+                # Create-only CAS: the empty old-value requires the destination
+                # not to exist. A genuine fork's new UUID has no ref yet; an
+                # in-app /resume to a pre-existing (possibly crashed) conversation
+                # already owns its ref, so the create fails and the whole rename
+                # is skipped — never clobbering the resumed conversation's snapshot.
+                git -C "$SESSION_DIR" update-ref "refs/worktree/cs/session/$SESSION_ID" "$_old_sha" "" 2>/dev/null \
+                    && git -C "$SESSION_DIR" update-ref -d "refs/worktree/cs/session/$RECORDED_UUID" "$_old_sha" 2>/dev/null || true
+            fi
+        fi
     fi
 fi
 
