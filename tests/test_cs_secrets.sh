@@ -1407,6 +1407,20 @@ test_wcm_purge_delete_failure_is_loud() {
     [[ $rc -ne 0 ]] || { echo "  FAIL: purge must be nonzero when a delete fails"; return 1; }
 }
 
+# A plain successful WCM export must namespace the variable and exit clean.
+# Every other wcm export test drives a FAILURE mode, so the happy path -- and
+# with it the seen_vars declaration the collision guard relies on -- went
+# uncovered; under `set -u` a missing declaration crashes on the first secret.
+test_wcm_export_succeeds_and_namespaces() {
+    _wcm_make_fake >/dev/null
+    printf 'hunter2' | _wcm_cs set api_key >/dev/null 2>&1 || return 1
+    local out rc=0
+    out=$(_wcm_cs export 2>&1) || rc=$?
+    assert_eq 0 "$rc" "a successful wcm export must exit clean" || { echo "    output: $out"; return 1; }
+    assert_output_contains "$out" "export CS_SECRET_API_KEY=" \
+        "wcm export must namespace the variable" || return 1
+}
+
 test_wcm_export_enumeration_failure_is_loud() {
     _wcm_make_fake >/dev/null
     local out rc=0
@@ -2157,6 +2171,7 @@ run_test test_wcm_missing_returns_exit_3_empty_stdout
 run_test test_wcm_list_enumeration_failure_is_loud
 run_test test_wcm_purge_enumeration_failure_is_loud
 run_test test_wcm_purge_delete_failure_is_loud
+run_test test_wcm_export_succeeds_and_namespaces
 run_test test_wcm_export_enumeration_failure_is_loud
 run_test test_wcm_empty_store_lists_cleanly
 run_test test_unknown_backend_guard
