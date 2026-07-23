@@ -152,6 +152,47 @@ session_is_live() {  # meta_dir
     [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
 }
 
+# True when target_pid is this cs process or one of its live ancestors. A cs
+# launched from inside Claude is a descendant of the process recorded in the
+# session lock: fresh launches exec Claude in place, while resume launches keep
+# the lock-owning shell as Claude's parent. The bounded BSD/POSIX ps walk fails
+# closed on malformed output, disappearing processes, or an unexpectedly deep
+# chain. PID 1 can never be a cs lock owner.
+_pid_is_self_or_ancestor() {  # target_pid
+    local target="$1" current="$$" parent="" depth=0
+    case "$target" in
+        ""|*[!0-9]*) return 1 ;;
+    esac
+    [ "$target" -gt 1 ] || return 1
+
+    while [ "$depth" -lt 64 ]; do
+        [ "$current" = "$target" ] && return 0
+        case "$current" in
+            ""|*[!0-9]*) return 1 ;;
+        esac
+        [ "$current" -gt 1 ] || return 1
+        parent=$("${CS_PS_BIN:-ps}" -o ppid= -p "$current" 2>/dev/null \
+            | awk 'NR == 1 { print $1 }') || return 1
+        case "$parent" in
+            ""|*[!0-9]*) return 1 ;;
+        esac
+        [ "$parent" != "$current" ] || return 1
+        current="$parent"
+        depth=$((depth + 1))
+    done
+    return 1
+}
+
+# True only for the invoking conversation's own lock. Exact session identity
+# prevents a foreign alias of the same checkout from borrowing the ancestry
+# exemption; ancestry prevents a stale lock whose PID was reused by an
+# unrelated live process from borrowing the name.
+session_lock_owned_by_invoker() {  # session_name, lock_pid
+    [ -n "${CLAUDE_SESSION_NAME:-}" ] \
+        && [ "$CLAUDE_SESSION_NAME" = "$1" ] \
+        && _pid_is_self_or_ancestor "$2"
+}
+
 # Epoch mtime of a file (BSD/GNU stat), 0 on error. Arg: path.
 _epoch_mtime() {  # path
     if [[ "${OSTYPE:-}" == darwin* ]]; then
@@ -199,4 +240,3 @@ session_uptime_secs() {  # meta_dir, now_epoch
     [ "$started" -gt 0 ] || { echo 0; return 0; }
     echo $(( now - started ))
 }
-

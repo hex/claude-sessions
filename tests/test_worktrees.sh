@@ -37,6 +37,19 @@ cs_launch() {
     "$CS_BIN" "$1" < /dev/null > /dev/null 2>&1 || true
 }
 
+# Build a ps seam for the ownership walk. Process inspection may be restricted
+# in a test sandbox; production uses BSD ps, while these integration tests
+# inject the one parent edge relevant to the scenario.
+fixed_parent_ps_stub() {
+    local parent="$1" stub="$TEST_TMPDIR/parent-ps-stub"
+    cat > "$stub" << STUB
+#!/usr/bin/env bash
+printf '%s\n' "$parent"
+STUB
+    chmod +x "$stub"
+    echo "$stub"
+}
+
 test_worktree_create_tracked_mode() {
     local base_dir
     base_dir=$(create_test_session_with_git "myproj")
@@ -191,6 +204,104 @@ test_merge_refuses_live_session() {
     rm -f "$wt/.cs/session.lock"
 }
 
+test_merge_from_live_base_session_succeeds() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    local base_uuid="11111111-1111-4111-8111-111111111111"
+    mkdir -p "$base_dir/.cs/local"
+    printf 'claude_session_id: %s\n' "$base_uuid" > "$base_dir/.cs/local/state"
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "fix" > "$wt/auth.txt"
+    (cd "$wt" && git add auth.txt && git commit -q -m "task work")
+
+    # The lock owner is this test shell, an ancestor of the cs subprocess just
+    # like a cs launcher/Claude process is an ancestor of an in-session Bash tool.
+    echo "$$" > "$base_dir/.cs/session.lock"
+    local output status=0 ps_stub
+    ps_stub=$(fixed_parent_ps_stub "$$")
+    output=$(CLAUDE_SESSION_NAME="myproj" CS_PS_BIN="$ps_stub" \
+        CS_CLAUDE_SESSION_ID="$base_uuid" \
+        "$CS_BIN" "myproj" --merge "fix-auth" 2>&1) || status=$?
+
+    assert_eq "0" "$status" "the live base session should be allowed to merge: $output" || return 1
+    assert_file_exists "$base_dir/auth.txt" "feature code merged into the base" || return 1
+    assert_not_exists "$wt" "merged worktree removed" || return 1
+    assert_eq "" "$(git -C "$base_dir" branch --list cs/fix-auth)" "merged branch deleted" || return 1
+}
+
+test_merge_from_live_worktree_session_requires_handoff() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    local wt_uuid
+    wt_uuid=$(awk -F': ' '/^claude_session_id/{print $2; exit}' "$wt/.cs/local/state")
+    echo "fix" > "$wt/auth.txt"
+    (cd "$wt" && git add auth.txt && git commit -q -m "task work")
+
+    echo "$$" > "$wt/.cs/session.lock"
+    local output status=0
+    output=$(cd "$wt" && CLAUDE_SESSION_NAME="myproj@fix-auth" \
+        CS_CLAUDE_SESSION_ID="$wt_uuid" \
+        "$CS_BIN" "myproj" --merge "fix-auth" 2>&1) || status=$?
+
+    [ "$status" -ne 0 ] || { echo "  FAIL: a feature session must not remove its own live worktree"; return 1; }
+    assert_output_contains "$output" "Cannot merge 'myproj@fix-auth' from inside that worktree session" \
+        "self-merge refusal identifies the dangerous scenario" || return 1
+    assert_output_contains "$output" "Close 'myproj@fix-auth'" \
+        "self-merge refusal gives the narrowed hand-off" || return 1
+    assert_dir "$wt" "self-merge refusal preserves the worktree" || return 1
+    assert_file_not_exists "$base_dir/auth.txt" "self-merge refusal leaves the base unchanged" || return 1
+}
+
+test_merge_foreign_live_base_lock_still_refuses() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    local base_uuid="22222222-2222-4222-8222-222222222222"
+    mkdir -p "$base_dir/.cs/local"
+    printf 'claude_session_id: %s\n' "$base_uuid" > "$base_dir/.cs/local/state"
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "$$" > "$base_dir/.cs/session.lock"
+
+    local output status=0
+    output=$(CLAUDE_SESSION_NAME="foreign" \
+        CS_CLAUDE_SESSION_ID="$base_uuid" \
+        "$CS_BIN" "myproj" --merge "fix-auth" 2>&1) || status=$?
+
+    [ "$status" -ne 0 ] || { echo "  FAIL: a foreign live base lock must refuse"; return 1; }
+    assert_output_contains "$output" "session is open" "foreign live lock keeps the hard refusal" || return 1
+    assert_dir "$wt" "foreign-lock refusal preserves the worktree" || return 1
+}
+
+test_merge_reused_live_pid_is_not_treated_as_own_lock() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    local base_uuid="33333333-3333-4333-8333-333333333333"
+    mkdir -p "$base_dir/.cs/local"
+    printf 'claude_session_id: %s\n' "$base_uuid" > "$base_dir/.cs/local/state"
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+
+    # A stale lock can point at a PID later reused by an unrelated live process.
+    # The matching name and UUID are insufficient: that PID must own this cs call.
+    sleep 30 &
+    local reused_pid=$!
+    echo "$reused_pid" > "$base_dir/.cs/session.lock"
+    local output status=0 ps_stub
+    ps_stub=$(fixed_parent_ps_stub "1")
+    output=$(CLAUDE_SESSION_NAME="myproj" CS_PS_BIN="$ps_stub" \
+        CS_CLAUDE_SESSION_ID="$base_uuid" \
+        "$CS_BIN" "myproj" --merge "fix-auth" 2>&1) || status=$?
+    kill "$reused_pid" 2>/dev/null || true
+    wait "$reused_pid" 2>/dev/null || true
+
+    [ "$status" -ne 0 ] || { echo "  FAIL: a reused foreign PID must not be exempted"; return 1; }
+    assert_output_contains "$output" "session is open" "reused live PID keeps the hard refusal" || return 1
+    assert_dir "$wt" "reused-PID refusal preserves the worktree" || return 1
+}
+
 test_merge_conflict_stops_and_preserves() {
     local base_dir
     base_dir=$(create_test_session_with_git "myproj")
@@ -207,6 +318,18 @@ test_merge_conflict_stops_and_preserves() {
     assert_output_contains "$output" "conflict" "conflict reported" || return 1
     assert_dir "$wt" "worktree preserved on conflict" || return 1
     (cd "$base_dir" && git merge --abort 2>/dev/null || true)
+}
+
+test_merge_rejects_traversal_task_name() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    # A task argument with path separators would build an escaping worktree
+    # path; --merge must reject it with the feature-name charset error before
+    # touching the filesystem, matching the launch path's validation.
+    local output status=0
+    output=$("$CS_BIN" "myproj" --merge "e/../../x" 2>&1) || status=$?
+    [ "$status" -ne 0 ] || { echo "  FAIL: a task name with path separators must be rejected"; return 1; }
+    assert_output_contains "$output" "alphanumeric" "rejects a traversal task name with the charset error" || return 1
 }
 
 # Git for Windows enables core.autocrlf by default. A CRLF-rewritten .gitignore
@@ -256,7 +379,12 @@ run_test test_worktree_launch_exports_base_identity
 run_test test_merge_tracked_worktree_fuses_and_cleans_up
 run_test test_merge_refuses_dirty_worktree
 run_test test_merge_refuses_live_session
+run_test test_merge_from_live_base_session_succeeds
+run_test test_merge_from_live_worktree_session_requires_handoff
+run_test test_merge_foreign_live_base_lock_still_refuses
+run_test test_merge_reused_live_pid_is_not_treated_as_own_lock
 run_test test_merge_conflict_stops_and_preserves
+run_test test_merge_rejects_traversal_task_name
 
 test_merge_ignored_mode_fuses_records() {
     local base_dir="$CS_SESSIONS_ROOT/proj"
