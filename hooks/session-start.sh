@@ -125,8 +125,21 @@ if git -C "$SESSION_DIR" rev-parse --git-dir >/dev/null 2>&1; then
                 # overwritten. Restore the legacy ref if the create fails, so a
                 # claimed snapshot is never lost to ref-lock contention.
                 if ! git -C "$SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$SESSION_ID" >/dev/null 2>&1; then
-                    git -C "$SESSION_DIR" update-ref "refs/worktree/cs/session/$SESSION_ID" "$_lsha" 2>/dev/null \
-                        || git -C "$SESSION_DIR" update-ref "$_legacy" "$_lsha" 2>/dev/null || true
+                    # Re-stamp the claimed tree under a fresh commit so the ref's
+                    # tip date reflects claim time (liveness), not the stale
+                    # legacy commit date — otherwise a peer's 14-day GC would
+                    # prune this live, just-claimed ref. No cs-base trailer, so
+                    # recovery treats a legacy snapshot as unverifiable-base
+                    # (per-file guidance), which is correct for pre-upgrade work.
+                    _ltree=$(git -C "$SESSION_DIR" rev-parse -q --verify "$_lsha^{tree}" 2>/dev/null || true)
+                    _claimed=""
+                    [ -n "$_ltree" ] && _claimed=$(printf 'autosave: claimed legacy snapshot\n' | git -C "$SESSION_DIR" commit-tree "$_ltree" 2>/dev/null || true)
+                    if [ -n "$_claimed" ]; then
+                        git -C "$SESSION_DIR" update-ref "refs/worktree/cs/session/$SESSION_ID" "$_claimed" 2>/dev/null \
+                            || git -C "$SESSION_DIR" update-ref "$_legacy" "$_lsha" 2>/dev/null || true
+                    else
+                        git -C "$SESSION_DIR" update-ref "$_legacy" "$_lsha" 2>/dev/null || true
+                    fi
                 fi
             fi
         done
@@ -134,15 +147,24 @@ if git -C "$SESSION_DIR" rev-parse --git-dir >/dev/null 2>&1; then
 
     # GC: prune foreign conversation refs whose tip is older than 14 days, so a
     # conversation that crashed and was never reopened can't accumulate refs
-    # forever. Never touches the current conversation's own ref.
+    # forever. Never touches the current conversation's own ref, nor this
+    # process's launch-UUID predecessor ref — the rebind rename below still needs
+    # that one to carry a context-fork's snapshot to the new UUID. The delete is
+    # a compare-and-swap on the tip whose age justified it, so a foreign ref its
+    # owner advances between the age read and the delete is not destroyed.
     _gc_now=$(date +%s)
     while IFS= read -r _ref; do
         [ -n "$_ref" ] || continue
-        case "$_ref" in "refs/worktree/cs/session/$SESSION_ID") continue ;; esac
-        _gc_ct=$(git -C "$SESSION_DIR" log -1 --format=%ct "$_ref" 2>/dev/null || echo 0)
+        case "$_ref" in
+            "refs/worktree/cs/session/$SESSION_ID") continue ;;
+            "refs/worktree/cs/session/${CS_CLAUDE_SESSION_ID:-}") continue ;;
+        esac
+        _gc_meta=$(git -C "$SESSION_DIR" log -1 --format='%ct %H' "$_ref" 2>/dev/null || true)
+        _gc_ct=${_gc_meta%% *}
+        _gc_sha=${_gc_meta#* }
         case "$_gc_ct" in ''|*[!0-9]*) _gc_ct=0 ;; esac
-        if [ "$(( _gc_now - _gc_ct ))" -gt "$(( 14*86400 ))" ]; then
-            git -C "$SESSION_DIR" update-ref -d "$_ref" 2>/dev/null || true
+        if [ -n "$_gc_sha" ] && [ "$(( _gc_now - _gc_ct ))" -gt "$(( 14*86400 ))" ]; then
+            git -C "$SESSION_DIR" update-ref -d "$_ref" "$_gc_sha" 2>/dev/null || true
         fi
     done < <(git -C "$SESSION_DIR" for-each-ref --format='%(refname)' 'refs/worktree/cs/session/' 2>/dev/null || true)
 

@@ -95,6 +95,13 @@ gone), and only that winner then creates its own session ref from the captured
 sha. The base-HEAD guard still protects the resulting restore. This drains any
 pre-upgrade ref within one session, after which all state is per-conversation.
 
+The claimed snapshot's tree is **re-stamped under a fresh commit** at claim time
+(rather than repointing the ref at the old legacy commit), so the session ref's
+tip date reflects claim-time liveness, not the stale content date — otherwise a
+peer's 14-day GC would prune the live, just-claimed ref. The create is guarded
+so it never overwrites a pre-existing own ref, and the legacy ref is restored if
+the create fails, so a claimed snapshot is never lost.
+
 ### Garbage collection
 
 On startup, enumerate `refs/worktree/cs/session/*` (`for-each-ref`, which lists
@@ -103,7 +110,11 @@ checkouts). For each ref whose UUID is **not** the current conversation's, if it
 tip commit is older than 14 days (`git log -1 --format=%ct`), delete it. This
 bounds orphan accumulation from conversations that crashed and were never
 reopened, while keeping a two-week safety window for reopening a crashed
-conversation. GC never touches the current conversation's own ref.
+conversation. GC never touches the current conversation's own ref, nor this
+process's launch-UUID predecessor ref (which the rebind rename still needs to
+carry a context-fork's snapshot forward). The delete is a compare-and-swap on
+the tip whose age justified it (`update-ref -d <ref> <aged-sha>`), so a foreign
+ref its owner advances between the age read and the delete is not destroyed.
 
 Accepted tradeoff: a sibling conversation left *open* for more than 14 days
 without any Write/Edit (so its ref tip stops advancing) can have its ref pruned

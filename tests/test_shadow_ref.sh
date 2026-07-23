@@ -529,6 +529,33 @@ test_rebind_renames_conversation_ref() {
     git -C "$CLAUDE_SESSION_DIR" update-ref -d "refs/worktree/cs/session/$new" 2>/dev/null || true
 }
 
+# GC runs before the rebind rename in the same hook. A fork whose predecessor
+# ref is >14 days old must not be pruned by GC before the rename can carry it to
+# the new UUID — else the fork silently loses its own pre-fork snapshot.
+test_gc_preserves_forks_stale_predecessor_ref() {
+    local r="00000000-0000-0000-0000-0000000000b1"
+    local n="00000000-0000-0000-0000-0000000000b2"
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    printf 'claude_session_id: %s\n' "$r" > "$CLAUDE_SESSION_META_DIR/local/state"
+
+    # Predecessor ref, tip dated ~20 days ago (older than the 14d GC window).
+    local r_sha old_epoch
+    old_epoch=$(( $(date +%s) - 20*86400 ))
+    r_sha=$( cd "$CLAUDE_SESSION_DIR" && tree=$(git write-tree) && GIT_COMMITTER_DATE="@$old_epoch" git commit-tree "$tree" -m pre-fork )
+    git -C "$CLAUDE_SESSION_DIR" update-ref "refs/worktree/cs/session/$r" "$r_sha"
+
+    # Fork: launched as R (env=R), state records R, now running as new UUID N.
+    echo '{"session_id":"'"$n"'","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | CS_CLAUDE_SESSION_ID="$r" bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>&1
+
+    local moved
+    moved=$(git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$n" 2>/dev/null || true)
+    if [ "$moved" != "$r_sha" ]; then
+        echo "  FAIL: GC must not prune a fork's stale predecessor before the rename carries it (got '$moved', want '$r_sha')"; return 1
+    fi
+    git -C "$CLAUDE_SESSION_DIR" update-ref -d "refs/worktree/cs/session/$n" 2>/dev/null || true
+}
+
 # The rebind must never overwrite an EXISTING destination ref. In-app /resume to
 # a pre-existing crashed conversation X presents as env==recorded==U, session=X
 # (gate true), but X already owns a crashed ref — the rename must not clobber it.
@@ -631,10 +658,47 @@ test_legacy_shared_ref_claimed_into_conversation_ref() {
     if git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify refs/worktree/cs/auto >/dev/null 2>&1; then
         echo "  FAIL: legacy refs/worktree/cs/auto must be claimed (deleted)"; return 1
     fi
-    local claimed
-    claimed=$(git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$me" 2>/dev/null || true)
-    if [ "$claimed" != "$sha" ]; then
-        echo "  FAIL: legacy snapshot must be claimed into the conversation's ref (got '$claimed', want '$sha')"; return 1
+    # The claim re-stamps under a fresh commit (fresh tip date), so compare the
+    # preserved content (tree), not the commit sha.
+    local claimed_tree want_tree
+    claimed_tree=$(git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$me^{tree}" 2>/dev/null || true)
+    want_tree=$(git -C "$CLAUDE_SESSION_DIR" rev-parse "$sha^{tree}")
+    if [ "$claimed_tree" != "$want_tree" ]; then
+        echo "  FAIL: legacy snapshot content must be claimed into the conversation's ref (got '$claimed_tree', want '$want_tree')"; return 1
+    fi
+    git -C "$CLAUDE_SESSION_DIR" update-ref -d "refs/worktree/cs/session/$me" 2>/dev/null || true
+}
+
+# A claimed legacy snapshot must get a FRESH tip date (claim = liveness), not the
+# stale date of the old legacy commit — otherwise a peer's GC prunes a live
+# just-claimed ref as if it were >14d abandoned. Content (tree) is preserved.
+test_claimed_legacy_ref_gets_fresh_tip_date() {
+    local me="00000000-0000-0000-0000-0000000000c9"
+    local old_epoch legacy_sha tree_legacy
+    old_epoch=$(( $(date +%s) - 20*86400 ))
+    legacy_sha=$(
+        cd "$CLAUDE_SESSION_DIR"
+        echo "legacy work" > oldwork.txt
+        TEMP_INDEX=$(mktemp); cp .git/index "$TEMP_INDEX"
+        GIT_INDEX_FILE="$TEMP_INDEX" git add oldwork.txt
+        tree=$(GIT_INDEX_FILE="$TEMP_INDEX" git write-tree); rm -f "$TEMP_INDEX"
+        GIT_COMMITTER_DATE="@$old_epoch" git commit-tree "$tree" -m "legacy autosave"
+    )
+    rm -f "$CLAUDE_SESSION_DIR/oldwork.txt"
+    tree_legacy=$(git -C "$CLAUDE_SESSION_DIR" rev-parse "$legacy_sha^{tree}")
+    git -C "$CLAUDE_SESSION_DIR" update-ref refs/worktree/cs/auto "$legacy_sha"
+
+    echo '{"session_id":"'"$me"'","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>&1
+
+    local claimed_tree claimed_ct
+    claimed_tree=$(git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$me^{tree}" 2>/dev/null || true)
+    if [ "$claimed_tree" != "$tree_legacy" ]; then
+        echo "  FAIL: claimed ref must preserve the legacy snapshot's tree (got '$claimed_tree', want '$tree_legacy')"; return 1
+    fi
+    claimed_ct=$(git -C "$CLAUDE_SESSION_DIR" log -1 --format=%ct "refs/worktree/cs/session/$me" 2>/dev/null || echo 0)
+    if [ "$(( $(date +%s) - claimed_ct ))" -gt 3600 ]; then
+        echo "  FAIL: claimed ref's tip must be freshly dated at claim time, not the stale legacy date (age $(( $(date +%s) - claimed_ct ))s)"; return 1
     fi
     git -C "$CLAUDE_SESSION_DIR" update-ref -d "refs/worktree/cs/session/$me" 2>/dev/null || true
 }
@@ -661,10 +725,12 @@ test_legacy_claim_keeps_newer_when_both_present() {
     echo '{"session_id":"'"$me"'","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
         | bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>&1
 
-    local claimed
-    claimed=$(git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$me" 2>/dev/null || true)
-    if [ "$claimed" != "$sha_w" ]; then
-        echo "  FAIL: claim must keep the newer worktree-era snapshot (got '$claimed', want '$sha_w')"; return 1
+    # Compare content (tree), not sha — the claim re-stamps under a fresh commit.
+    local claimed_tree want_tree
+    claimed_tree=$(git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$me^{tree}" 2>/dev/null || true)
+    want_tree=$(git -C "$CLAUDE_SESSION_DIR" rev-parse "$sha_w^{tree}")
+    if [ "$claimed_tree" != "$want_tree" ]; then
+        echo "  FAIL: claim must keep the newer worktree-era snapshot's content (got '$claimed_tree', want '$want_tree')"; return 1
     fi
     if git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify refs/worktree/cs/auto >/dev/null 2>&1 \
         || git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify refs/cs/auto >/dev/null 2>&1; then
@@ -806,7 +872,9 @@ run_test test_recovery_detects_own_conversation_crash
 run_test test_rebind_renames_conversation_ref
 run_test test_rebind_does_not_touch_sibling_ref
 run_test test_rebind_does_not_clobber_existing_destination_ref
+run_test test_gc_preserves_forks_stale_predecessor_ref
 run_test test_legacy_shared_ref_claimed_into_conversation_ref
+run_test test_claimed_legacy_ref_gets_fresh_tip_date
 run_test test_legacy_claim_keeps_newer_when_both_present
 run_test test_gc_prunes_stale_foreign_refs_only
 run_test test_shadow_ref_not_pushed
