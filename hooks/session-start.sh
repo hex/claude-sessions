@@ -111,6 +111,20 @@ if git -C "$SESSION_DIR" rev-parse --git-dir >/dev/null 2>&1; then
     # Ensure legacy shadow refs are never pushed (refs/worktree/* never are)
     git -C "$SESSION_DIR" config transfer.hideRefs refs/cs 2>/dev/null || true
 
+    # Claim a pre-upgrade shared ref once into this conversation's ref. The CAS
+    # delete (update-ref -d <ref> <old-sha>) succeeds for exactly one racing
+    # conversation — the second's delete fails because the expected old value is
+    # gone — and only that winner creates its own session ref from the sha.
+    if [[ "$SESSION_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+        for _legacy in refs/worktree/cs/auto refs/cs/auto; do
+            _lsha=$(git -C "$SESSION_DIR" rev-parse -q --verify "$_legacy" 2>/dev/null || true)
+            [ -n "$_lsha" ] || continue
+            if git -C "$SESSION_DIR" update-ref -d "$_legacy" "$_lsha" 2>/dev/null; then
+                git -C "$SESSION_DIR" update-ref "refs/worktree/cs/session/$SESSION_ID" "$_lsha" 2>/dev/null || true
+            fi
+        done
+    fi
+
     # Detect an orphaned shadow ref (this conversation crashed last run). A
     # conversation only ever recovers its OWN per-conversation ref, so a live
     # sibling's in-flight ref is never misread as a crash.

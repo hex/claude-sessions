@@ -517,6 +517,36 @@ test_rebind_renames_conversation_ref() {
     git -C "$CLAUDE_SESSION_DIR" update-ref -d "refs/worktree/cs/session/$new" 2>/dev/null || true
 }
 
+# Migration: a pre-upgrade shared ref is claimed once, race-safely, into the
+# current conversation's ref, then drained.
+test_legacy_shared_ref_claimed_into_conversation_ref() {
+    local me="00000000-0000-0000-0000-0000000000cc"
+    local sha
+    sha=$(
+        cd "$CLAUDE_SESSION_DIR"
+        echo "legacy work" > legacy.txt
+        TEMP_INDEX=$(mktemp); cp .git/index "$TEMP_INDEX"
+        GIT_INDEX_FILE="$TEMP_INDEX" git add legacy.txt
+        tree=$(GIT_INDEX_FILE="$TEMP_INDEX" git write-tree); rm -f "$TEMP_INDEX"
+        echo autosave | git commit-tree "$tree"
+    )
+    rm -f "$CLAUDE_SESSION_DIR/legacy.txt"
+    git -C "$CLAUDE_SESSION_DIR" update-ref refs/worktree/cs/auto "$sha"
+
+    echo '{"session_id":"'"$me"'","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>&1
+
+    if git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify refs/worktree/cs/auto >/dev/null 2>&1; then
+        echo "  FAIL: legacy refs/worktree/cs/auto must be claimed (deleted)"; return 1
+    fi
+    local claimed
+    claimed=$(git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$me" 2>/dev/null || true)
+    if [ "$claimed" != "$sha" ]; then
+        echo "  FAIL: legacy snapshot must be claimed into the conversation's ref (got '$claimed', want '$sha')"; return 1
+    fi
+    git -C "$CLAUDE_SESSION_DIR" update-ref -d "refs/worktree/cs/session/$me" 2>/dev/null || true
+}
+
 test_shadow_ref_not_pushed() {
     echo '{"session_id":"test-abc","cwd":"'"$CLAUDE_SESSION_DIR"'"}' \
         | bash "$HOOKS_DIR/session-start.sh" > /dev/null
@@ -604,6 +634,7 @@ run_test test_recovery_legacy_ref_warns_unverifiable_not_moved
 run_test test_recovery_ignores_sibling_conversation_ref
 run_test test_recovery_detects_own_conversation_crash
 run_test test_rebind_renames_conversation_ref
+run_test test_legacy_shared_ref_claimed_into_conversation_ref
 run_test test_shadow_ref_not_pushed
 run_test test_autosave_logs_per_actor_narrative_edit
 run_test test_autosave_refs_isolated_per_worktree
