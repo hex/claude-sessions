@@ -174,6 +174,17 @@ test_prompt_unchanged_without_handoff() {
     fi
 }
 
+# ESC at the continue prompt cancels the launch: the stub must not run.
+test_esc_at_continue_prompt_cancels_launch() {
+    _rot_session "rot-esc"
+    local output rc=0
+    output=$("$CS_BIN" rot-esc <<< "$(printf '\033')" 2>&1) || rc=$?
+    if printf '%s' "$output" | grep -q 'STUB_ARGS:'; then
+        echo "  FAIL: ESC must cancel the launch — the stub must not run"; return 1
+    fi
+    [ "$rc" -ne 0 ] || { echo "  FAIL: ESC cancel should exit non-zero"; return 1; }
+}
+
 test_rotate_answer_consumes_pending_handoff() {
     _rot_session "rot-r"
     local dir="$CS_SESSIONS_ROOT/rot-r"
@@ -287,6 +298,7 @@ test_discard_flip_spares_a_body_quote() {
 }
 
 run_test test_prompt_unchanged_without_handoff
+run_test test_esc_at_continue_prompt_cancels_launch
 run_test test_rotate_answer_consumes_pending_handoff
 run_test test_rotate_answer_auto_starts_handoff
 run_test test_continue_and_no_leave_handoff_unconsumed
