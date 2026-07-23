@@ -451,7 +451,7 @@ _seed_crash_shadow() {
         && for i in $(seq 1 "$n"); do echo "autosave $i" > "crash_$i.txt"; done \
         && git add crash_*.txt \
         && git commit -q -m "$(printf 'autosaved crash state\n\ncs-base: %s' "$base")" \
-        && git update-ref refs/worktree/cs/auto HEAD \
+        && git update-ref refs/worktree/cs/session/40000000-0000-0000-0000-000000000001 HEAD \
         && git reset -q --hard HEAD~1 )
 }
 
@@ -460,7 +460,7 @@ test_session_start_crash_recovery_warns_before_overwrite() {
     _seed_crash_shadow 2
 
     local output context
-    output=$(echo '{"session_id":"s","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+    output=$(echo '{"session_id":"40000000-0000-0000-0000-000000000001","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
         | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
     context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
     assert_output_contains "$context" "CRASH RECOVERY" \
@@ -477,7 +477,7 @@ test_session_start_crash_count_reflects_all_files() {
     _seed_crash_shadow 12
 
     local output context
-    output=$(echo '{"session_id":"s","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+    output=$(echo '{"session_id":"40000000-0000-0000-0000-000000000001","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
         | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
     context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
     assert_output_contains "$context" "12 file(s)" \

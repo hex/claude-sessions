@@ -171,8 +171,8 @@ test_session_end_deletes_shadow_ref() {
 # session-start.sh: crash recovery + push protection
 # ============================================================================
 
-# Uses the pre-namespaced ref name deliberately: crash recovery must still
-# fall back to a shadow ref left behind by a pre-migration cs version.
+# Recovery injects context for the conversation's own crashed ref without
+# auto-restoring, and preserves the ref until the user decides.
 test_recovery_detects_crash_and_injects_context() {
     (
         cd "$CLAUDE_SESSION_DIR"
@@ -183,7 +183,7 @@ test_recovery_detects_crash_and_injects_context() {
         tree=$(GIT_INDEX_FILE="$TEMP_INDEX" git write-tree)
         rm -f "$TEMP_INDEX"
         commit=$(echo "autosave" | git commit-tree "$tree")
-        git update-ref refs/cs/auto "$commit"
+        git update-ref refs/worktree/cs/session/10000000-0000-0000-0000-000000000001 "$commit"
         rm recovered.txt
     )
 
@@ -193,7 +193,7 @@ test_recovery_detects_crash_and_injects_context() {
     fi
 
     local output
-    output=$(echo '{"session_id":"test-789","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+    output=$(echo '{"session_id":"10000000-0000-0000-0000-000000000001","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
         | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
 
     if [[ -f "$CLAUDE_SESSION_DIR/recovered.txt" ]]; then
@@ -201,8 +201,8 @@ test_recovery_detects_crash_and_injects_context() {
         return 1
     fi
 
-    if ! git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify refs/cs/auto >/dev/null 2>&1; then
-        echo "  FAIL: refs/cs/auto should still exist until user decides"
+    if ! git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify refs/worktree/cs/session/10000000-0000-0000-0000-000000000001 >/dev/null 2>&1; then
+        echo "  FAIL: refs/worktree/cs/session/10000000-0000-0000-0000-000000000001 should still exist until user decides"
         return 1
     fi
 
@@ -212,7 +212,7 @@ test_recovery_detects_crash_and_injects_context() {
         return 1
     fi
 
-    git -C "$CLAUDE_SESSION_DIR" update-ref -d refs/cs/auto 2>/dev/null || true
+    git -C "$CLAUDE_SESSION_DIR" update-ref -d refs/worktree/cs/session/10000000-0000-0000-0000-000000000001 2>/dev/null || true
 }
 
 # The data-safety guard: when HEAD has moved off the snapshot's recorded base
@@ -232,7 +232,7 @@ test_recovery_refuses_blanket_restore_when_head_moved() {
         tree=$(GIT_INDEX_FILE="$TEMP_INDEX" git write-tree)
         rm -f "$TEMP_INDEX"
         commit=$(printf 'autosave\n\ncs-base: %s\n' "$base_head" | git commit-tree "$tree")
-        git update-ref refs/worktree/cs/auto "$commit"
+        git update-ref refs/worktree/cs/session/10000000-0000-0000-0000-000000000001 "$commit"
         rm -f wip.txt
     )
 
@@ -240,22 +240,22 @@ test_recovery_refuses_blanket_restore_when_head_moved() {
     (cd "$CLAUDE_SESSION_DIR" && echo "moved" >> README.md && git commit -aqm "meantime commit")
 
     local output
-    output=$(echo '{"session_id":"t-moved","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+    output=$(echo '{"session_id":"10000000-0000-0000-0000-000000000001","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
         | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
 
     if ! echo "$output" | grep -q "CRASH RECOVERY"; then
         echo "  FAIL: should still surface CRASH RECOVERY context"; return 1
     fi
-    if echo "$output" | grep -qF "checkout refs/worktree/cs/auto -- ."; then
+    if echo "$output" | grep -qF "checkout refs/worktree/cs/session/10000000-0000-0000-0000-000000000001 -- ."; then
         echo "  FAIL: must NOT offer the blanket checkout restore once HEAD moved off the recorded base"; return 1
     fi
     if ! echo "$output" | grep -q "HEAD has moved"; then
         echo "  FAIL: should warn that HEAD has moved since the snapshot"; return 1
     fi
-    if ! git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify refs/worktree/cs/auto >/dev/null 2>&1; then
+    if ! git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify refs/worktree/cs/session/10000000-0000-0000-0000-000000000001 >/dev/null 2>&1; then
         echo "  FAIL: ref should be preserved for manual inspection, not deleted"; return 1
     fi
-    git -C "$CLAUDE_SESSION_DIR" update-ref -d refs/worktree/cs/auto 2>/dev/null || true
+    git -C "$CLAUDE_SESSION_DIR" update-ref -d refs/worktree/cs/session/10000000-0000-0000-0000-000000000001 2>/dev/null || true
 }
 
 # The other half of the guard: when the snapshot still sits on the current HEAD
@@ -274,24 +274,24 @@ test_recovery_offers_restore_when_base_matches() {
         tree=$(GIT_INDEX_FILE="$TEMP_INDEX" git write-tree)
         rm -f "$TEMP_INDEX"
         commit=$(printf 'autosave\n\ncs-base: %s\n' "$head" | git commit-tree "$tree")
-        git update-ref refs/worktree/cs/auto "$commit"
+        git update-ref refs/worktree/cs/session/10000000-0000-0000-0000-000000000001 "$commit"
         rm -f wip.txt
     )
 
     local output
-    output=$(echo '{"session_id":"t-match","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+    output=$(echo '{"session_id":"10000000-0000-0000-0000-000000000001","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
         | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
 
     if ! echo "$output" | grep -q "CRASH RECOVERY"; then
         echo "  FAIL: should surface CRASH RECOVERY context"; return 1
     fi
-    if ! echo "$output" | grep -qF "checkout refs/worktree/cs/auto -- ."; then
+    if ! echo "$output" | grep -qF "checkout refs/worktree/cs/session/10000000-0000-0000-0000-000000000001 -- ."; then
         echo "  FAIL: should offer the blanket restore when the snapshot sits on current HEAD"; return 1
     fi
     if echo "$output" | grep -q "HEAD has moved"; then
         echo "  FAIL: should not warn about a moved HEAD when base matches"; return 1
     fi
-    git -C "$CLAUDE_SESSION_DIR" update-ref -d refs/worktree/cs/auto 2>/dev/null || true
+    git -C "$CLAUDE_SESSION_DIR" update-ref -d refs/worktree/cs/session/10000000-0000-0000-0000-000000000001 2>/dev/null || true
 }
 
 # TOCTOU: the blanket restore is offered as a copy-paste command run later. If
@@ -311,12 +311,12 @@ test_recovery_offered_restore_refuses_when_head_moves_after_scan() {
         tree=$(GIT_INDEX_FILE="$TEMP_INDEX" git write-tree)
         rm -f "$TEMP_INDEX"
         commit=$(printf 'autosave\n\ncs-base: %s\n' "$head" | git commit-tree "$tree")
-        git update-ref refs/worktree/cs/auto "$commit"
+        git update-ref refs/worktree/cs/session/10000000-0000-0000-0000-000000000001 "$commit"
         rm -f toctou_wip.txt
     )
 
     local output context cmd
-    output=$(echo '{"session_id":"t-toctou","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+    output=$(echo '{"session_id":"10000000-0000-0000-0000-000000000001","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
         | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
     context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
     cmd=$(printf '%s\n' "$context" | sed -n 's/.*To restore, run: //p' | head -1)
@@ -335,7 +335,7 @@ test_recovery_offered_restore_refuses_when_head_moves_after_scan() {
         *REFUSED*) : ;;
         *) echo "  FAIL: offered restore should refuse (print REFUSED) once HEAD moved; got: $run_out"; return 1 ;;
     esac
-    git -C "$CLAUDE_SESSION_DIR" update-ref -d refs/worktree/cs/auto 2>/dev/null || true
+    git -C "$CLAUDE_SESSION_DIR" update-ref -d refs/worktree/cs/session/10000000-0000-0000-0000-000000000001 2>/dev/null || true
 }
 
 # The execute-direction guard against a vacuous self-check: when the base still
@@ -354,12 +354,12 @@ test_recovery_offered_restore_executes_when_base_matches() {
         tree=$(GIT_INDEX_FILE="$TEMP_INDEX" git write-tree)
         rm -f "$TEMP_INDEX"
         commit=$(printf 'autosave\n\ncs-base: %s\n' "$head" | git commit-tree "$tree")
-        git update-ref refs/worktree/cs/auto "$commit"
+        git update-ref refs/worktree/cs/session/10000000-0000-0000-0000-000000000001 "$commit"
         rm -f happy_wip.txt
     )
 
     local output context cmd
-    output=$(echo '{"session_id":"t-happy","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+    output=$(echo '{"session_id":"10000000-0000-0000-0000-000000000001","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
         | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
     context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
     cmd=$(printf '%s\n' "$context" | sed -n 's/.*To restore, run: //p' | head -1)
@@ -393,18 +393,18 @@ test_recovery_legacy_ref_warns_unverifiable_not_moved() {
         tree=$(GIT_INDEX_FILE="$TEMP_INDEX" git write-tree)
         rm -f "$TEMP_INDEX"
         commit=$(echo "autosave" | git commit-tree "$tree")   # no cs-base trailer
-        git update-ref refs/worktree/cs/auto "$commit"
+        git update-ref refs/worktree/cs/session/10000000-0000-0000-0000-000000000001 "$commit"
         rm -f legacy.txt
     )
 
     local output
-    output=$(echo '{"session_id":"t-legacy","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+    output=$(echo '{"session_id":"10000000-0000-0000-0000-000000000001","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
         | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
 
     if ! echo "$output" | grep -q "CRASH RECOVERY"; then
         echo "  FAIL: should surface CRASH RECOVERY context"; return 1
     fi
-    if echo "$output" | grep -qF "checkout refs/worktree/cs/auto -- ."; then
+    if echo "$output" | grep -qF "checkout refs/worktree/cs/session/10000000-0000-0000-0000-000000000001 -- ."; then
         echo "  FAIL: must NOT offer the blanket restore for an unverifiable (no-base) snapshot"; return 1
     fi
     if echo "$output" | grep -q "HEAD has moved"; then
@@ -413,7 +413,61 @@ test_recovery_legacy_ref_warns_unverifiable_not_moved() {
     if ! echo "$output" | grep -q "no recorded base"; then
         echo "  FAIL: should explain the base is unrecorded (pre-upgrade autosave)"; return 1
     fi
-    git -C "$CLAUDE_SESSION_DIR" update-ref -d refs/worktree/cs/auto 2>/dev/null || true
+    git -C "$CLAUDE_SESSION_DIR" update-ref -d refs/worktree/cs/session/10000000-0000-0000-0000-000000000001 2>/dev/null || true
+}
+
+# The 2026-07-22 incident, reproduced: a conversation must NOT read a SIBLING
+# conversation's autosave ref as its own crash.
+test_recovery_ignores_sibling_conversation_ref() {
+    local sib="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    local me="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    local head
+    head=$(git -C "$CLAUDE_SESSION_DIR" rev-parse HEAD)
+    (
+        cd "$CLAUDE_SESSION_DIR"
+        echo "sibling wip" > sib.txt
+        TEMP_INDEX=$(mktemp); cp .git/index "$TEMP_INDEX"
+        GIT_INDEX_FILE="$TEMP_INDEX" git add sib.txt
+        tree=$(GIT_INDEX_FILE="$TEMP_INDEX" git write-tree); rm -f "$TEMP_INDEX"
+        commit=$(printf 'autosave\n\ncs-base: %s\n' "$head" | git commit-tree "$tree")
+        git update-ref "refs/worktree/cs/session/$sib" "$commit"
+        rm -f sib.txt
+    )
+
+    local output
+    output=$(echo '{"session_id":"'"$me"'","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+
+    if echo "$output" | grep -q "CRASH RECOVERY"; then
+        echo "  FAIL: must NOT surface a crash for a sibling conversation's ref"; return 1
+    fi
+    if ! git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$sib" >/dev/null 2>&1; then
+        echo "  FAIL: a sibling's ref must not be deleted"; return 1
+    fi
+    git -C "$CLAUDE_SESSION_DIR" update-ref -d "refs/worktree/cs/session/$sib" 2>/dev/null || true
+}
+
+test_recovery_detects_own_conversation_crash() {
+    local me="cccccccc-cccc-cccc-cccc-cccccccccccc"
+    local head
+    head=$(git -C "$CLAUDE_SESSION_DIR" rev-parse HEAD)
+    (
+        cd "$CLAUDE_SESSION_DIR"
+        echo "my wip" > mine.txt
+        TEMP_INDEX=$(mktemp); cp .git/index "$TEMP_INDEX"
+        GIT_INDEX_FILE="$TEMP_INDEX" git add mine.txt
+        tree=$(GIT_INDEX_FILE="$TEMP_INDEX" git write-tree); rm -f "$TEMP_INDEX"
+        commit=$(printf 'autosave\n\ncs-base: %s\n' "$head" | git commit-tree "$tree")
+        git update-ref "refs/worktree/cs/session/$me" "$commit"
+        rm -f mine.txt
+    )
+    local output
+    output=$(echo '{"session_id":"'"$me"'","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    if ! echo "$output" | grep -q "CRASH RECOVERY"; then
+        echo "  FAIL: must surface a crash for the conversation's OWN ref"; return 1
+    fi
+    git -C "$CLAUDE_SESSION_DIR" update-ref -d "refs/worktree/cs/session/$me" 2>/dev/null || true
 }
 
 test_shadow_ref_not_pushed() {
@@ -499,6 +553,8 @@ run_test test_recovery_offers_restore_when_base_matches
 run_test test_recovery_offered_restore_refuses_when_head_moves_after_scan
 run_test test_recovery_offered_restore_executes_when_base_matches
 run_test test_recovery_legacy_ref_warns_unverifiable_not_moved
+run_test test_recovery_ignores_sibling_conversation_ref
+run_test test_recovery_detects_own_conversation_crash
 run_test test_shadow_ref_not_pushed
 run_test test_autosave_logs_per_actor_narrative_edit
 run_test test_autosave_refs_isolated_per_worktree

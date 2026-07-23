@@ -111,13 +111,13 @@ if git -C "$SESSION_DIR" rev-parse --git-dir >/dev/null 2>&1; then
     # Ensure legacy shadow refs are never pushed (refs/worktree/* never are)
     git -C "$SESSION_DIR" config transfer.hideRefs refs/cs 2>/dev/null || true
 
-    # Detect an orphaned shadow ref (previous session crashed). Prefer the
-    # per-worktree ref; fall back to the legacy repo-global name.
+    # Detect an orphaned shadow ref (this conversation crashed last run). A
+    # conversation only ever recovers its OWN per-conversation ref, so a live
+    # sibling's in-flight ref is never misread as a crash.
     SHADOW_REF=""
-    if git -C "$SESSION_DIR" rev-parse -q --verify refs/worktree/cs/auto >/dev/null 2>&1; then
-        SHADOW_REF="refs/worktree/cs/auto"
-    elif git -C "$SESSION_DIR" rev-parse -q --verify refs/cs/auto >/dev/null 2>&1; then
-        SHADOW_REF="refs/cs/auto"
+    if [[ "$SESSION_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] \
+        && git -C "$SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$SESSION_ID" >/dev/null 2>&1; then
+        SHADOW_REF="refs/worktree/cs/session/$SESSION_ID"
     fi
     if [ -n "$SHADOW_REF" ]; then
         # Generate a summary of what would be restored
