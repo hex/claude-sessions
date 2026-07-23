@@ -440,12 +440,17 @@ test_session_start_worktree_abandon_is_user_gated() {
 # Helper: build a refs/worktree/cs/auto shadow ref whose tree differs from HEAD
 # in $1 files (simulates the unsaved crash state the recovery path detects).
 _seed_crash_shadow() {
-    local n="$1" i
+    local n="$1" i base
     # Stage only the crash files — git add -A would also sweep in the untracked
     # .cs/README.md session_start_setup leaves behind, inflating the file count.
+    # Record the base HEAD in a cs-base trailer, as a real autosave does, so the
+    # snapshot reads as sitting on the current HEAD (the ordinary crash case
+    # where recovery's whole-tree restore is safe to offer).
     ( cd "$CLAUDE_SESSION_DIR" \
+        && base=$(git rev-parse HEAD) \
         && for i in $(seq 1 "$n"); do echo "autosave $i" > "crash_$i.txt"; done \
-        && git add crash_*.txt && git commit -q -m "autosaved crash state" \
+        && git add crash_*.txt \
+        && git commit -q -m "$(printf 'autosaved crash state\n\ncs-base: %s' "$base")" \
         && git update-ref refs/worktree/cs/auto HEAD \
         && git reset -q --hard HEAD~1 )
 }
