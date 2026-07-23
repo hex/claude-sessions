@@ -245,6 +245,11 @@ records fork with the branch and re-fuse at merge:
 
     cs myproj --merge fix-auth   # merge cs/fix-auth, fuse records, remove worktree
 
+Run this from the base session, which merges while holding its own lock, or
+from any free terminal once the feature session is closed; only merging from
+inside the feature session hands off, since it can't remove its own working
+directory.
+
 cs never commits for you: merge refuses dirty checkouts and tells you what
 to commit, and creating a feature from a base with uncommitted changes asks
 before branching from the last commit (interactive sessions) or refuses
