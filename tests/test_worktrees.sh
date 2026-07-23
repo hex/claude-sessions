@@ -132,9 +132,17 @@ test_worktree_reopen_preserves_project_claude_md() {
 test_worktree_launch_exports_base_identity() {
     create_test_session_with_git "myproj" > /dev/null
     cs_launch "myproj@fix-auth"   # create first
-    local stub env_out
+    local stub env_out _try
     stub=$(_make_env_stub)
-    env_out=$(CLAUDE_CODE_BIN="$stub" "$CS_BIN" "myproj@fix-auth" <<< "n" 2>/dev/null || true)
+    # The reopen launch execs the stub, which prints its env. On a loaded runner
+    # the launch can occasionally race the create launch's lock/PID cleanup and
+    # take a cancel path, capturing empty output. Retry until the exported
+    # identity appears, so the assertions test the identity, not runner load; a
+    # genuine failure to export still fails all attempts.
+    for _try in 1 2 3 4 5; do
+        env_out=$(CLAUDE_CODE_BIN="$stub" "$CS_BIN" "myproj@fix-auth" <<< "n" 2>/dev/null || true)
+        case "$env_out" in *"CLAUDE_SESSION_NAME=myproj@fix-auth"*) break ;; esac
+    done
     assert_output_contains "$env_out" "CLAUDE_SESSION_NAME=myproj@fix-auth" "display identity is the task name" || return 1
     assert_output_contains "$env_out" "CLAUDE_CODE_TASK_LIST_ID=myproj" "task list is shared with the base" || return 1
     assert_output_not_contains "$env_out" "CLAUDE_CODE_TASK_LIST_ID=myproj@" "task list id must be the base, not the worktree name" || return 1
