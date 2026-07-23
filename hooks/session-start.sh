@@ -125,6 +125,20 @@ if git -C "$SESSION_DIR" rev-parse --git-dir >/dev/null 2>&1; then
         done
     fi
 
+    # GC: prune foreign conversation refs whose tip is older than 14 days, so a
+    # conversation that crashed and was never reopened can't accumulate refs
+    # forever. Never touches the current conversation's own ref.
+    _gc_now=$(date +%s)
+    while IFS= read -r _ref; do
+        [ -n "$_ref" ] || continue
+        case "$_ref" in "refs/worktree/cs/session/$SESSION_ID") continue ;; esac
+        _gc_ct=$(git -C "$SESSION_DIR" log -1 --format=%ct "$_ref" 2>/dev/null || echo 0)
+        case "$_gc_ct" in ''|*[!0-9]*) _gc_ct=0 ;; esac
+        if [ "$(( _gc_now - _gc_ct ))" -gt "$(( 14*86400 ))" ]; then
+            git -C "$SESSION_DIR" update-ref -d "$_ref" 2>/dev/null || true
+        fi
+    done < <(git -C "$SESSION_DIR" for-each-ref --format='%(refname)' 'refs/worktree/cs/session/' 2>/dev/null || true)
+
     # Detect an orphaned shadow ref (this conversation crashed last run). A
     # conversation only ever recovers its OWN per-conversation ref, so a live
     # sibling's in-flight ref is never misread as a crash.

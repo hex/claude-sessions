@@ -547,6 +547,49 @@ test_legacy_shared_ref_claimed_into_conversation_ref() {
     git -C "$CLAUDE_SESSION_DIR" update-ref -d "refs/worktree/cs/session/$me" 2>/dev/null || true
 }
 
+# GC: a foreign conversation's ref older than 14 days is pruned; fresh foreign
+# refs and the current conversation's own ref (even if old) are preserved.
+test_gc_prunes_stale_foreign_refs_only() {
+    local me="00000000-0000-0000-0000-0000000000dd"
+    local stale="00000000-0000-0000-0000-00000000ee00"
+    local fresh="00000000-0000-0000-0000-00000000ff00"
+    local tree mine_tree stale_c fresh_c mine_c old_epoch
+    tree=$(cd "$CLAUDE_SESSION_DIR" && git write-tree)
+    old_epoch=$(( $(date +%s) - 20*86400 ))
+    stale_c=$(cd "$CLAUDE_SESSION_DIR" && GIT_COMMITTER_DATE="@$old_epoch" git commit-tree "$tree" -m old)
+    fresh_c=$(cd "$CLAUDE_SESSION_DIR" && echo new | git commit-tree "$tree")
+    # The current conversation's own ref carries real uncommitted work (a
+    # non-empty diff vs HEAD) so recovery preserves it — isolating GC's own-ref
+    # skip from recovery's empty-diff cleanup.
+    mine_tree=$(
+        cd "$CLAUDE_SESSION_DIR"
+        echo "my work" > mine_gc.txt
+        TEMP_INDEX=$(mktemp); cp .git/index "$TEMP_INDEX"
+        GIT_INDEX_FILE="$TEMP_INDEX" git add mine_gc.txt
+        GIT_INDEX_FILE="$TEMP_INDEX" git write-tree; rm -f "$TEMP_INDEX"
+    )
+    rm -f "$CLAUDE_SESSION_DIR/mine_gc.txt"
+    mine_c=$(cd "$CLAUDE_SESSION_DIR" && GIT_COMMITTER_DATE="@$old_epoch" git commit-tree "$mine_tree" -m mine)
+    git -C "$CLAUDE_SESSION_DIR" update-ref "refs/worktree/cs/session/$stale" "$stale_c"
+    git -C "$CLAUDE_SESSION_DIR" update-ref "refs/worktree/cs/session/$fresh" "$fresh_c"
+    git -C "$CLAUDE_SESSION_DIR" update-ref "refs/worktree/cs/session/$me" "$mine_c"
+
+    echo '{"session_id":"'"$me"'","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>&1
+
+    if git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$stale" >/dev/null 2>&1; then
+        echo "  FAIL: a stale (>14d) foreign ref must be GC'd"; return 1
+    fi
+    if ! git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$fresh" >/dev/null 2>&1; then
+        echo "  FAIL: a fresh foreign ref must be preserved"; return 1
+    fi
+    if ! git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$me" >/dev/null 2>&1; then
+        echo "  FAIL: the current conversation's own ref (even if old) must be preserved"; return 1
+    fi
+    git -C "$CLAUDE_SESSION_DIR" update-ref -d "refs/worktree/cs/session/$fresh" 2>/dev/null || true
+    git -C "$CLAUDE_SESSION_DIR" update-ref -d "refs/worktree/cs/session/$me" 2>/dev/null || true
+}
+
 test_shadow_ref_not_pushed() {
     echo '{"session_id":"test-abc","cwd":"'"$CLAUDE_SESSION_DIR"'"}' \
         | bash "$HOOKS_DIR/session-start.sh" > /dev/null
@@ -635,6 +678,7 @@ run_test test_recovery_ignores_sibling_conversation_ref
 run_test test_recovery_detects_own_conversation_crash
 run_test test_rebind_renames_conversation_ref
 run_test test_legacy_shared_ref_claimed_into_conversation_ref
+run_test test_gc_prunes_stale_foreign_refs_only
 run_test test_shadow_ref_not_pushed
 run_test test_autosave_logs_per_actor_narrative_edit
 run_test test_autosave_refs_isolated_per_worktree
