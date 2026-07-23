@@ -5093,7 +5093,12 @@ launch_claude_code() {
             else
                 printf "${DIM}Continue previous conversation?${NC} [Y/n] "
             fi
-            read -r response || exit 130
+            # Single keypress, no Enter needed (mirrors the collision menu).
+            # ESC or EOF (piped close) cancels the launch; Enter takes the
+            # default (resume) via the case's *) arm below.
+            IFS= read -rsn1 response || { echo; exit 130; }
+            echo
+            case "$response" in $'\e') exit 130 ;; esac
         fi
         case "$response" in
             [nN]|[nN][oO])
