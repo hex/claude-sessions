@@ -46,12 +46,12 @@ teardown() {
 test_autosave_creates_shadow_ref() {
     echo "## New Finding" >> "$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"
 
-    echo '{"tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
+    echo '{"session_id":"22222222-2222-2222-2222-222222222222","tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
         | bash "$HOOKS_DIR/autosave-commits.sh"
     sleep 1
 
-    if ! git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify refs/worktree/cs/auto >/dev/null 2>&1; then
-        echo "  FAIL: refs/worktree/cs/auto should exist after autosave"
+    if ! git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify refs/worktree/cs/session/22222222-2222-2222-2222-222222222222 >/dev/null 2>&1; then
+        echo "  FAIL: refs/worktree/cs/session/<uuid> should exist after autosave"
         return 1
     fi
 }
@@ -62,7 +62,7 @@ test_autosave_does_not_touch_main() {
 
     echo "## New Finding" >> "$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"
 
-    echo '{"tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
+    echo '{"session_id":"22222222-2222-2222-2222-222222222222","tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
         | bash "$HOOKS_DIR/autosave-commits.sh"
     sleep 1
 
@@ -78,20 +78,20 @@ test_autosave_does_not_touch_main() {
 
 test_autosave_chains_multiple_saves() {
     echo "## First" >> "$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"
-    echo '{"tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
+    echo '{"session_id":"22222222-2222-2222-2222-222222222222","tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
         | bash "$HOOKS_DIR/autosave-commits.sh"
     sleep 1
 
     local ref_after_first
-    ref_after_first=$(git -C "$CLAUDE_SESSION_DIR" rev-parse refs/worktree/cs/auto 2>/dev/null || echo "none")
+    ref_after_first=$(git -C "$CLAUDE_SESSION_DIR" rev-parse refs/worktree/cs/session/22222222-2222-2222-2222-222222222222 2>/dev/null || echo "none")
 
     echo "## Second" >> "$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"
-    echo '{"tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
+    echo '{"session_id":"22222222-2222-2222-2222-222222222222","tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
         | bash "$HOOKS_DIR/autosave-commits.sh"
     sleep 1
 
     local ref_after_second
-    ref_after_second=$(git -C "$CLAUDE_SESSION_DIR" rev-parse refs/worktree/cs/auto 2>/dev/null || echo "none")
+    ref_after_second=$(git -C "$CLAUDE_SESSION_DIR" rev-parse refs/worktree/cs/session/22222222-2222-2222-2222-222222222222 2>/dev/null || echo "none")
 
     if [[ "$ref_after_first" = "$ref_after_second" ]]; then
         echo "  FAIL: shadow ref should advance after second autosave"
@@ -99,7 +99,7 @@ test_autosave_chains_multiple_saves() {
     fi
 
     local parent
-    parent=$(git -C "$CLAUDE_SESSION_DIR" log --format=%P -1 refs/worktree/cs/auto 2>/dev/null || echo "")
+    parent=$(git -C "$CLAUDE_SESSION_DIR" log --format=%P -1 refs/worktree/cs/session/22222222-2222-2222-2222-222222222222 2>/dev/null || echo "")
     if [[ "$parent" != "$ref_after_first" ]]; then
         echo "  FAIL: second autosave should chain onto first"
         echo "    expected parent: $ref_after_first"
@@ -113,18 +113,36 @@ test_autosave_stamps_base_head() {
     head=$(git -C "$CLAUDE_SESSION_DIR" rev-parse HEAD)
 
     echo "## New Finding" >> "$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"
-    echo '{"tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
+    echo '{"session_id":"22222222-2222-2222-2222-222222222222","tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
         | bash "$HOOKS_DIR/autosave-commits.sh"
     sleep 1
 
     local msg
-    msg=$(git -C "$CLAUDE_SESSION_DIR" log -1 --format=%B refs/worktree/cs/auto 2>/dev/null || true)
+    msg=$(git -C "$CLAUDE_SESSION_DIR" log -1 --format=%B refs/worktree/cs/session/22222222-2222-2222-2222-222222222222 2>/dev/null || true)
     case "$msg" in
         *"cs-base: $head"*) return 0 ;;
         *) echo "  FAIL: autosave commit should record the base HEAD as 'cs-base: $head'"
            echo "    message: $msg"
            return 1 ;;
     esac
+}
+
+test_autosave_writes_per_conversation_ref() {
+    local uuid="11111111-1111-1111-1111-111111111111"
+    echo "## New Finding" >> "$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"
+    echo '{"session_id":"'"$uuid"'","tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
+        | bash "$HOOKS_DIR/autosave-commits.sh"
+    sleep 1
+
+    if ! git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$uuid" >/dev/null 2>&1; then
+        echo "  FAIL: autosave should write refs/worktree/cs/session/<uuid>"; return 1
+    fi
+    if git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify refs/worktree/cs/auto >/dev/null 2>&1; then
+        echo "  FAIL: autosave must no longer write the shared refs/worktree/cs/auto"; return 1
+    fi
+    local msg
+    msg=$(git -C "$CLAUDE_SESSION_DIR" log -1 --format=%B "refs/worktree/cs/session/$uuid" 2>/dev/null || true)
+    case "$msg" in *"cs-base: "*) : ;; *) echo "  FAIL: per-conversation autosave must keep the cs-base trailer"; return 1 ;; esac
 }
 
 # ============================================================================
@@ -416,7 +434,7 @@ test_autosave_logs_per_actor_narrative_edit() {
     local nf="$CLAUDE_SESSION_DIR/.cs/memory/narrative.alex.md"
     printf '%s\n' '# Session narrative (alex)' '' '## A New Finding' 'detail' > "$nf"
 
-    echo '{"tool_name":"Edit","tool_input":{"file_path":"'"$nf"'"}}' \
+    echo '{"session_id":"22222222-2222-2222-2222-222222222222","tool_name":"Edit","tool_input":{"file_path":"'"$nf"'"}}' \
         | bash "$HOOKS_DIR/autosave-commits.sh"
     sleep 1
 
@@ -436,15 +454,15 @@ test_autosave_refs_isolated_per_worktree() {
     (cd "$base_dir" && echo x > f.txt && \
         CS_TEST_SYNC=1 CLAUDE_SESSION_NAME=s1 CLAUDE_SESSION_DIR="$base_dir" \
         bash "$SCRIPT_DIR/../hooks/autosave-commits.sh" \
-        <<< '{"tool_name":"Write","tool_input":{"file_path":"f.txt"}}')
+        <<< '{"session_id":"33333333-3333-3333-3333-333333333333","tool_name":"Write","tool_input":{"file_path":"f.txt"}}')
     # Autosave in the worktree
     (cd "$CS_SESSIONS_ROOT/s1@t1" && echo y > g.txt && \
         CS_TEST_SYNC=1 CLAUDE_SESSION_NAME=s1@t1 CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/s1@t1" \
         bash "$SCRIPT_DIR/../hooks/autosave-commits.sh" \
-        <<< '{"tool_name":"Write","tool_input":{"file_path":"g.txt"}}')
+        <<< '{"session_id":"33333333-3333-3333-3333-333333333333","tool_name":"Write","tool_input":{"file_path":"g.txt"}}')
     local base_sha wt_sha
-    base_sha=$(git -C "$base_dir" rev-parse refs/worktree/cs/auto)
-    wt_sha=$(git -C "$CS_SESSIONS_ROOT/s1@t1" rev-parse refs/worktree/cs/auto)
+    base_sha=$(git -C "$base_dir" rev-parse refs/worktree/cs/session/33333333-3333-3333-3333-333333333333)
+    wt_sha=$(git -C "$CS_SESSIONS_ROOT/s1@t1" rev-parse refs/worktree/cs/session/33333333-3333-3333-3333-333333333333)
     [ "$base_sha" != "$wt_sha" ] || { echo "  FAIL: refs must be per-checkout"; return 1; }
 }
 
@@ -455,8 +473,8 @@ test_autosave_works_in_linked_worktree() {
     (cd "$CS_SESSIONS_ROOT/s1@t1" && echo y > g.txt && \
         CS_TEST_SYNC=1 CLAUDE_SESSION_NAME=s1@t1 CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/s1@t1" \
         bash "$SCRIPT_DIR/../hooks/autosave-commits.sh" \
-        <<< '{"tool_name":"Write","tool_input":{"file_path":"g.txt"}}')
-    git -C "$CS_SESSIONS_ROOT/s1@t1" rev-parse -q --verify refs/worktree/cs/auto > /dev/null \
+        <<< '{"session_id":"33333333-3333-3333-3333-333333333333","tool_name":"Write","tool_input":{"file_path":"g.txt"}}')
+    git -C "$CS_SESSIONS_ROOT/s1@t1" rev-parse -q --verify refs/worktree/cs/session/33333333-3333-3333-3333-333333333333 > /dev/null \
         || { echo "  FAIL: autosave must fire in a linked worktree (.git is a file)"; return 1; }
 }
 
@@ -473,6 +491,7 @@ run_test test_autosave_creates_shadow_ref
 run_test test_autosave_does_not_touch_main
 run_test test_autosave_chains_multiple_saves
 run_test test_autosave_stamps_base_head
+run_test test_autosave_writes_per_conversation_ref
 run_test test_session_end_deletes_shadow_ref
 run_test test_recovery_detects_crash_and_injects_context
 run_test test_recovery_refuses_blanket_restore_when_head_moved

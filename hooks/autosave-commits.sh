@@ -32,6 +32,14 @@ if [[ "$TOOL_NAME" != "Edit" && "$TOOL_NAME" != "Write" ]]; then
     exit 0
 fi
 
+# Each conversation autosaves to its own per-worktree ref, keyed on the live
+# conversation UUID, so concurrent sessions on one checkout never share or
+# clobber each other's snapshot chain. A missing/malformed id can't key a ref.
+SESSION_UUID=$(echo "$INPUT" | jq -r '.session_id // empty')
+_UUID_RE='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+[[ "$SESSION_UUID" =~ $_UUID_RE ]] || exit 0
+SESSION_REF="refs/worktree/cs/session/$SESSION_UUID"
+
 # Extract a log entry if this is a narrative file edit
 LATEST_ENTRY=""
 case "$FILE_PATH" in
@@ -82,20 +90,15 @@ autosave_to_shadow_ref() {
 
 cs-base: $base"
 
-    # Chain onto previous autosave if it exists
-    parent=$(git rev-parse -q --verify refs/worktree/cs/auto 2>/dev/null || true)
+    # Chain onto this conversation's previous autosave if it exists
+    parent=$(git rev-parse -q --verify "$SESSION_REF" 2>/dev/null || true)
     if [ -n "$parent" ]; then
         commit=$(printf '%s\n' "$msg" | git commit-tree "$tree" -p "$parent" 2>/dev/null) || return 0
     else
         commit=$(printf '%s\n' "$msg" | git commit-tree "$tree" 2>/dev/null) || return 0
     fi
 
-    git update-ref refs/worktree/cs/auto "$commit" 2>/dev/null || return 0
-    if [ -z "$parent" ]; then
-        # First autosave of this checkout's chain: the pre-namespaced ref is
-        # no longer needed for crash recovery, clean it up once.
-        git update-ref -d refs/cs/auto 2>/dev/null || true
-    fi
+    git update-ref "$SESSION_REF" "$commit" 2>/dev/null || return 0
 
     if [ -n "$LATEST_ENTRY" ]; then
         echo "[$TIMESTAMP] Autosave: $LATEST_ENTRY" >> "$META_DIR/local/session.log"
