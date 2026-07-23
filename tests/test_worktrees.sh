@@ -320,6 +320,18 @@ test_merge_conflict_stops_and_preserves() {
     (cd "$base_dir" && git merge --abort 2>/dev/null || true)
 }
 
+test_merge_rejects_traversal_task_name() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    # A task argument with path separators would build an escaping worktree
+    # path; --merge must reject it with the feature-name charset error before
+    # touching the filesystem, matching the launch path's validation.
+    local output status=0
+    output=$("$CS_BIN" "myproj" --merge "e/../../x" 2>&1) || status=$?
+    [ "$status" -ne 0 ] || { echo "  FAIL: a task name with path separators must be rejected"; return 1; }
+    assert_output_contains "$output" "alphanumeric" "rejects a traversal task name with the charset error" || return 1
+}
+
 # Git for Windows enables core.autocrlf by default. A CRLF-rewritten .gitignore
 # carries a trailing \r on every pattern and matches nothing, so files cs means
 # to ignore surface as untracked — which then blocks `cs --merge`.
@@ -372,6 +384,7 @@ run_test test_merge_from_live_worktree_session_requires_handoff
 run_test test_merge_foreign_live_base_lock_still_refuses
 run_test test_merge_reused_live_pid_is_not_treated_as_own_lock
 run_test test_merge_conflict_stops_and_preserves
+run_test test_merge_rejects_traversal_task_name
 
 test_merge_ignored_mode_fuses_records() {
     local base_dir="$CS_SESSIONS_ROOT/proj"
