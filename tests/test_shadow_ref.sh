@@ -145,6 +145,18 @@ test_autosave_writes_per_conversation_ref() {
     case "$msg" in *"cs-base: "*) : ;; *) echo "  FAIL: per-conversation autosave must keep the cs-base trailer"; return 1 ;; esac
 }
 
+test_autosave_skips_malformed_session_id() {
+    echo "## New Finding" >> "$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"
+    echo '{"session_id":"not-a-uuid","tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
+        | bash "$HOOKS_DIR/autosave-commits.sh"
+    sleep 1
+    local n
+    n=$(git -C "$CLAUDE_SESSION_DIR" for-each-ref --format='%(refname)' 'refs/worktree/cs/session/' 2>/dev/null | grep -c . || true)
+    if [ "${n:-0}" -ne 0 ]; then
+        echo "  FAIL: a non-UUID session_id must create no session ref (found $n)"; return 1
+    fi
+}
+
 # ============================================================================
 # session-end.sh: clean commit + shadow ref cleanup
 # ============================================================================
@@ -504,7 +516,7 @@ test_rebind_renames_conversation_ref() {
     git -C "$CLAUDE_SESSION_DIR" update-ref "refs/worktree/cs/session/$old" "$sha"
 
     echo '{"session_id":"'"$new"'","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
-        | bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>&1
+        | CS_CLAUDE_SESSION_ID="$old" bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>&1
 
     if git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$old" >/dev/null 2>&1; then
         echo "  FAIL: old-uuid ref must be removed after rebind"; return 1
@@ -515,6 +527,49 @@ test_rebind_renames_conversation_ref() {
         echo "  FAIL: snapshot must be preserved under the new uuid (got '$moved', want '$sha')"; return 1
     fi
     git -C "$CLAUDE_SESSION_DIR" update-ref -d "refs/worktree/cs/session/$new" 2>/dev/null || true
+}
+
+# The rebind must NOT fire for a live sibling. claude_session_id is a single
+# shared slot per checkout, so "recorded != mine" is also true when a sibling
+# conversation ran after me. Without the process-identity gate, my SessionStart
+# (e.g. on auto-compact) would rename the sibling's ref onto mine — deleting the
+# sibling's crash protection and orphaning my own snapshot: the 2026-07-22
+# incident class, reintroduced.
+test_rebind_does_not_touch_sibling_ref() {
+    local me="00000000-0000-0000-0000-0000000000f2"
+    local sib="00000000-0000-0000-0000-0000000000f1"
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    printf 'claude_session_id: %s\n' "$sib" > "$CLAUDE_SESSION_META_DIR/local/state"
+
+    # The sibling's ref, and my own ref (with real staged work so recovery keeps it).
+    local sib_sha my_sha
+    sib_sha=$( cd "$CLAUDE_SESSION_DIR" && tree=$(git write-tree) && echo autosave | git commit-tree "$tree" )
+    git -C "$CLAUDE_SESSION_DIR" update-ref "refs/worktree/cs/session/$sib" "$sib_sha"
+    my_sha=$(
+        cd "$CLAUDE_SESSION_DIR"
+        echo "mine" > mine_sib.txt
+        TEMP_INDEX=$(mktemp); cp .git/index "$TEMP_INDEX"
+        GIT_INDEX_FILE="$TEMP_INDEX" git add mine_sib.txt
+        tree=$(GIT_INDEX_FILE="$TEMP_INDEX" git write-tree); rm -f "$TEMP_INDEX"
+        echo autosave | git commit-tree "$tree"
+    )
+    rm -f "$CLAUDE_SESSION_DIR/mine_sib.txt"
+    git -C "$CLAUDE_SESSION_DIR" update-ref "refs/worktree/cs/session/$me" "$my_sha"
+
+    # My SessionStart, with my own launch identity in the env (not the sibling's).
+    echo '{"session_id":"'"$me"'","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | CS_CLAUDE_SESSION_ID="$me" bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>&1
+
+    if ! git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$sib" >/dev/null 2>&1; then
+        echo "  FAIL: a live sibling's ref must not be deleted by my rebind"; return 1
+    fi
+    local now_mine
+    now_mine=$(git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$me" 2>/dev/null || true)
+    if [ "$now_mine" != "$my_sha" ]; then
+        echo "  FAIL: my own ref must not be clobbered (got '$now_mine', want '$my_sha')"; return 1
+    fi
+    git -C "$CLAUDE_SESSION_DIR" update-ref -d "refs/worktree/cs/session/$sib" 2>/dev/null || true
+    git -C "$CLAUDE_SESSION_DIR" update-ref -d "refs/worktree/cs/session/$me" 2>/dev/null || true
 }
 
 # Migration: a pre-upgrade shared ref is claimed once, race-safely, into the
@@ -543,6 +598,40 @@ test_legacy_shared_ref_claimed_into_conversation_ref() {
     claimed=$(git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$me" 2>/dev/null || true)
     if [ "$claimed" != "$sha" ]; then
         echo "  FAIL: legacy snapshot must be claimed into the conversation's ref (got '$claimed', want '$sha')"; return 1
+    fi
+    git -C "$CLAUDE_SESSION_DIR" update-ref -d "refs/worktree/cs/session/$me" 2>/dev/null || true
+}
+
+# When both legacy refs coexist, claiming must not let the second iteration
+# overwrite the first-claimed (newer worktree-era) snapshot with the older one.
+test_legacy_claim_keeps_newer_when_both_present() {
+    local me="00000000-0000-0000-0000-0000000000c1"
+    local sha_w sha_c
+    # Newer worktree-era snapshot with real staged content (survives recovery).
+    sha_w=$(
+        cd "$CLAUDE_SESSION_DIR"
+        echo "worktree work" > wt.txt
+        TEMP_INDEX=$(mktemp); cp .git/index "$TEMP_INDEX"
+        GIT_INDEX_FILE="$TEMP_INDEX" git add wt.txt
+        tree=$(GIT_INDEX_FILE="$TEMP_INDEX" git write-tree); rm -f "$TEMP_INDEX"
+        echo autosave | git commit-tree "$tree"
+    )
+    rm -f "$CLAUDE_SESSION_DIR/wt.txt"
+    sha_c=$( cd "$CLAUDE_SESSION_DIR" && tree=$(git write-tree) && echo old | git commit-tree "$tree" )
+    git -C "$CLAUDE_SESSION_DIR" update-ref refs/worktree/cs/auto "$sha_w"
+    git -C "$CLAUDE_SESSION_DIR" update-ref refs/cs/auto "$sha_c"
+
+    echo '{"session_id":"'"$me"'","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>&1
+
+    local claimed
+    claimed=$(git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$me" 2>/dev/null || true)
+    if [ "$claimed" != "$sha_w" ]; then
+        echo "  FAIL: claim must keep the newer worktree-era snapshot (got '$claimed', want '$sha_w')"; return 1
+    fi
+    if git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify refs/worktree/cs/auto >/dev/null 2>&1 \
+        || git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify refs/cs/auto >/dev/null 2>&1; then
+        echo "  FAIL: both legacy refs must be drained"; return 1
     fi
     git -C "$CLAUDE_SESSION_DIR" update-ref -d "refs/worktree/cs/session/$me" 2>/dev/null || true
 }
@@ -666,6 +755,7 @@ run_test test_autosave_does_not_touch_main
 run_test test_autosave_chains_multiple_saves
 run_test test_autosave_stamps_base_head
 run_test test_autosave_writes_per_conversation_ref
+run_test test_autosave_skips_malformed_session_id
 run_test test_session_end_deletes_shadow_ref
 run_test test_session_end_deletes_only_own_conversation_ref
 run_test test_recovery_detects_crash_and_injects_context
@@ -677,7 +767,9 @@ run_test test_recovery_legacy_ref_warns_unverifiable_not_moved
 run_test test_recovery_ignores_sibling_conversation_ref
 run_test test_recovery_detects_own_conversation_crash
 run_test test_rebind_renames_conversation_ref
+run_test test_rebind_does_not_touch_sibling_ref
 run_test test_legacy_shared_ref_claimed_into_conversation_ref
+run_test test_legacy_claim_keeps_newer_when_both_present
 run_test test_gc_prunes_stale_foreign_refs_only
 run_test test_shadow_ref_not_pushed
 run_test test_autosave_logs_per_actor_narrative_edit

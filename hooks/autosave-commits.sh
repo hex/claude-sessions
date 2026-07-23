@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: PostToolUse hook that autosaves to a shadow git ref on every Write/Edit
-# ABOUTME: Crash recovery for all session files via refs/worktree/cs/auto, logs narrative edits
+# ABOUTME: Crash recovery for all session files via refs/worktree/cs/session/<uuid>, logs narrative edits
 
 set -euo pipefail
 

@@ -120,7 +120,14 @@ if git -C "$SESSION_DIR" rev-parse --git-dir >/dev/null 2>&1; then
             _lsha=$(git -C "$SESSION_DIR" rev-parse -q --verify "$_legacy" 2>/dev/null || true)
             [ -n "$_lsha" ] || continue
             if git -C "$SESSION_DIR" update-ref -d "$_legacy" "$_lsha" 2>/dev/null; then
-                git -C "$SESSION_DIR" update-ref "refs/worktree/cs/session/$SESSION_ID" "$_lsha" 2>/dev/null || true
+                # Create only when this conversation has no ref yet, so a second
+                # legacy ref (or a pre-existing own crashed ref) is never
+                # overwritten. Restore the legacy ref if the create fails, so a
+                # claimed snapshot is never lost to ref-lock contention.
+                if ! git -C "$SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$SESSION_ID" >/dev/null 2>&1; then
+                    git -C "$SESSION_DIR" update-ref "refs/worktree/cs/session/$SESSION_ID" "$_lsha" 2>/dev/null \
+                        || git -C "$SESSION_DIR" update-ref "$_legacy" "$_lsha" 2>/dev/null || true
+                fi
             fi
         done
     fi
@@ -272,7 +279,16 @@ if [[ "$SESSION_ID" =~ $UUID_RE ]]; then
         # Follow the autosave ref to the new UUID so a future crash of this
         # (continued) conversation is recoverable under its live identity. A
         # rebind is a clean continuation, so there is no crash to recover here.
-        if [[ "${RECORDED_UUID:-}" =~ $UUID_RE ]] \
+        #
+        # Gate on process identity: claude_session_id in state is a single shared
+        # slot per checkout, so "recorded != mine" is also true when a sibling
+        # conversation ran after me. A genuine context-fork keeps this process's
+        # launch UUID (CS_CLAUDE_SESSION_ID) equal to the recorded predecessor
+        # while the hook's session_id changes; a sibling's launch UUID is its own.
+        # Only rename when the recorded id is this process's own predecessor,
+        # never a sibling's — otherwise this would strip a live sibling's ref.
+        if [ "${CS_CLAUDE_SESSION_ID:-}" = "${RECORDED_UUID:-}" ] \
+            && [[ "${RECORDED_UUID:-}" =~ $UUID_RE ]] \
             && git -C "$SESSION_DIR" rev-parse --git-dir >/dev/null 2>&1; then
             _old_sha=$(git -C "$SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$RECORDED_UUID" 2>/dev/null || true)
             if [ -n "$_old_sha" ]; then

@@ -97,12 +97,19 @@ pre-upgrade ref within one session, after which all state is per-conversation.
 
 ### Garbage collection
 
-On startup, enumerate `refs/worktree/cs/session/*`. For each ref whose UUID is
-**not** the current conversation's, if its tip commit is older than 14 days
-(`git log -1 --format=%ct`), delete it. This bounds orphan accumulation from
-conversations that crashed and were never reopened, while keeping a two-week
-safety window for reopening a crashed conversation. GC never touches the current
-conversation's own ref.
+On startup, enumerate `refs/worktree/cs/session/*` (`for-each-ref`, which lists
+only the current worktree's per-worktree refs, so GC never reaches across
+checkouts). For each ref whose UUID is **not** the current conversation's, if its
+tip commit is older than 14 days (`git log -1 --format=%ct`), delete it. This
+bounds orphan accumulation from conversations that crashed and were never
+reopened, while keeping a two-week safety window for reopening a crashed
+conversation. GC never touches the current conversation's own ref.
+
+Accepted tradeoff: a sibling conversation left *open* for more than 14 days
+without any Write/Edit (so its ref tip stops advancing) can have its ref pruned
+by a peer conversation's startup GC. Reopening/editing that conversation
+re-establishes the ref; the window is generous enough that this is not expected
+in practice.
 
 ## Edge cases
 
@@ -140,3 +147,8 @@ conversation's own ref.
 - The ownership-blind `session-end.sh` `rm -f session.lock` — with per-session
   refs it no longer causes a false crash, so it is decoupled from this work.
 - Surfacing a dead sibling's crash to a bystander (declined by design).
+- `cs -doctor` keys its shadow-ref check on `CS_CLAUDE_SESSION_ID` (the launch
+  UUID). After a context-fork the ref lives under the new UUID while the env
+  still holds the pre-fork one, so doctor can cosmetically report "autosave may
+  be broken" for the rest of that conversation. Cosmetic only; a follow-up could
+  resolve the live UUID the way the hooks do.
