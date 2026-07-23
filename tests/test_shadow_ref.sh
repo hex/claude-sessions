@@ -529,6 +529,43 @@ test_rebind_renames_conversation_ref() {
     git -C "$CLAUDE_SESSION_DIR" update-ref -d "refs/worktree/cs/session/$new" 2>/dev/null || true
 }
 
+# The rebind must never overwrite an EXISTING destination ref. In-app /resume to
+# a pre-existing crashed conversation X presents as env==recorded==U, session=X
+# (gate true), but X already owns a crashed ref — the rename must not clobber it.
+test_rebind_does_not_clobber_existing_destination_ref() {
+    local u="00000000-0000-0000-0000-0000000000a1"
+    local x="00000000-0000-0000-0000-0000000000a2"
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    printf 'claude_session_id: %s\n' "$u" > "$CLAUDE_SESSION_META_DIR/local/state"
+
+    local u_sha x_sha
+    u_sha=$( cd "$CLAUDE_SESSION_DIR" && tree=$(git write-tree) && echo autosave | git commit-tree "$tree" )
+    git -C "$CLAUDE_SESSION_DIR" update-ref "refs/worktree/cs/session/$u" "$u_sha"
+    # X's own crashed snapshot (real staged work so recovery keeps it).
+    x_sha=$(
+        cd "$CLAUDE_SESSION_DIR"
+        echo "X work" > x_work.txt
+        TEMP_INDEX=$(mktemp); cp .git/index "$TEMP_INDEX"
+        GIT_INDEX_FILE="$TEMP_INDEX" git add x_work.txt
+        tree=$(GIT_INDEX_FILE="$TEMP_INDEX" git write-tree); rm -f "$TEMP_INDEX"
+        echo autosave | git commit-tree "$tree"
+    )
+    rm -f "$CLAUDE_SESSION_DIR/x_work.txt"
+    git -C "$CLAUDE_SESSION_DIR" update-ref "refs/worktree/cs/session/$x" "$x_sha"
+
+    # Launched as U (env=U), state records U, now resumed into conversation X.
+    echo '{"session_id":"'"$x"'","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | CS_CLAUDE_SESSION_ID="$u" bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>&1
+
+    local now_x
+    now_x=$(git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$x" 2>/dev/null || true)
+    if [ "$now_x" != "$x_sha" ]; then
+        echo "  FAIL: resumed conversation's crashed ref must not be clobbered (got '$now_x', want '$x_sha')"; return 1
+    fi
+    git -C "$CLAUDE_SESSION_DIR" update-ref -d "refs/worktree/cs/session/$x" 2>/dev/null || true
+    git -C "$CLAUDE_SESSION_DIR" update-ref -d "refs/worktree/cs/session/$u" 2>/dev/null || true
+}
+
 # The rebind must NOT fire for a live sibling. claude_session_id is a single
 # shared slot per checkout, so "recorded != mine" is also true when a sibling
 # conversation ran after me. Without the process-identity gate, my SessionStart
@@ -768,6 +805,7 @@ run_test test_recovery_ignores_sibling_conversation_ref
 run_test test_recovery_detects_own_conversation_crash
 run_test test_rebind_renames_conversation_ref
 run_test test_rebind_does_not_touch_sibling_ref
+run_test test_rebind_does_not_clobber_existing_destination_ref
 run_test test_legacy_shared_ref_claimed_into_conversation_ref
 run_test test_legacy_claim_keeps_newer_when_both_present
 run_test test_gc_prunes_stale_foreign_refs_only

@@ -292,7 +292,12 @@ if [[ "$SESSION_ID" =~ $UUID_RE ]]; then
             && git -C "$SESSION_DIR" rev-parse --git-dir >/dev/null 2>&1; then
             _old_sha=$(git -C "$SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$RECORDED_UUID" 2>/dev/null || true)
             if [ -n "$_old_sha" ]; then
-                git -C "$SESSION_DIR" update-ref "refs/worktree/cs/session/$SESSION_ID" "$_old_sha" 2>/dev/null \
+                # Create-only CAS: the empty old-value requires the destination
+                # not to exist. A genuine fork's new UUID has no ref yet; an
+                # in-app /resume to a pre-existing (possibly crashed) conversation
+                # already owns its ref, so the create fails and the whole rename
+                # is skipped — never clobbering the resumed conversation's snapshot.
+                git -C "$SESSION_DIR" update-ref "refs/worktree/cs/session/$SESSION_ID" "$_old_sha" "" 2>/dev/null \
                     && git -C "$SESSION_DIR" update-ref -d "refs/worktree/cs/session/$RECORDED_UUID" "$_old_sha" 2>/dev/null || true
             fi
         fi
