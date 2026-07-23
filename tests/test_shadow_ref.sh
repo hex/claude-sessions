@@ -48,7 +48,6 @@ test_autosave_creates_shadow_ref() {
 
     echo '{"session_id":"22222222-2222-2222-2222-222222222222","tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
         | bash "$HOOKS_DIR/autosave-commits.sh"
-    sleep 1
 
     if ! git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify refs/worktree/cs/session/22222222-2222-2222-2222-222222222222 >/dev/null 2>&1; then
         echo "  FAIL: refs/worktree/cs/session/<uuid> should exist after autosave"
@@ -64,7 +63,6 @@ test_autosave_does_not_touch_main() {
 
     echo '{"session_id":"22222222-2222-2222-2222-222222222222","tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
         | bash "$HOOKS_DIR/autosave-commits.sh"
-    sleep 1
 
     head_after=$(git -C "$CLAUDE_SESSION_DIR" rev-parse HEAD)
 
@@ -80,7 +78,6 @@ test_autosave_chains_multiple_saves() {
     echo "## First" >> "$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"
     echo '{"session_id":"22222222-2222-2222-2222-222222222222","tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
         | bash "$HOOKS_DIR/autosave-commits.sh"
-    sleep 1
 
     local ref_after_first
     ref_after_first=$(git -C "$CLAUDE_SESSION_DIR" rev-parse refs/worktree/cs/session/22222222-2222-2222-2222-222222222222 2>/dev/null || echo "none")
@@ -88,7 +85,6 @@ test_autosave_chains_multiple_saves() {
     echo "## Second" >> "$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"
     echo '{"session_id":"22222222-2222-2222-2222-222222222222","tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
         | bash "$HOOKS_DIR/autosave-commits.sh"
-    sleep 1
 
     local ref_after_second
     ref_after_second=$(git -C "$CLAUDE_SESSION_DIR" rev-parse refs/worktree/cs/session/22222222-2222-2222-2222-222222222222 2>/dev/null || echo "none")
@@ -115,7 +111,6 @@ test_autosave_stamps_base_head() {
     echo "## New Finding" >> "$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"
     echo '{"session_id":"22222222-2222-2222-2222-222222222222","tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
         | bash "$HOOKS_DIR/autosave-commits.sh"
-    sleep 1
 
     local msg
     msg=$(git -C "$CLAUDE_SESSION_DIR" log -1 --format=%B refs/worktree/cs/session/22222222-2222-2222-2222-222222222222 2>/dev/null || true)
@@ -132,7 +127,6 @@ test_autosave_writes_per_conversation_ref() {
     echo "## New Finding" >> "$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"
     echo '{"session_id":"'"$uuid"'","tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
         | bash "$HOOKS_DIR/autosave-commits.sh"
-    sleep 1
 
     if ! git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$uuid" >/dev/null 2>&1; then
         echo "  FAIL: autosave should write refs/worktree/cs/session/<uuid>"; return 1
@@ -149,7 +143,6 @@ test_autosave_skips_malformed_session_id() {
     echo "## New Finding" >> "$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"
     echo '{"session_id":"not-a-uuid","tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
         | bash "$HOOKS_DIR/autosave-commits.sh"
-    sleep 1
     local n
     n=$(git -C "$CLAUDE_SESSION_DIR" for-each-ref --format='%(refname)' 'refs/worktree/cs/session/' 2>/dev/null | grep -c . || true)
     if [ "${n:-0}" -ne 0 ]; then
@@ -802,7 +795,6 @@ test_autosave_logs_per_actor_narrative_edit() {
 
     echo '{"session_id":"22222222-2222-2222-2222-222222222222","tool_name":"Edit","tool_input":{"file_path":"'"$nf"'"}}' \
         | bash "$HOOKS_DIR/autosave-commits.sh"
-    sleep 1
 
     assert_file_contains "$CLAUDE_SESSION_DIR/.cs/local/session.log" "Autosave: A New Finding" \
         "autosave should log the per-actor narrative heading" || return 1
