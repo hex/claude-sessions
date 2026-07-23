@@ -320,6 +320,48 @@ test_recovery_offered_restore_refuses_when_head_moves_after_scan() {
     git -C "$CLAUDE_SESSION_DIR" update-ref -d refs/worktree/cs/auto 2>/dev/null || true
 }
 
+# The execute-direction guard against a vacuous self-check: when the base still
+# matches HEAD, the offered command must actually RESTORE (not just contain the
+# substring). A mangled self-guard that always refuses would fail this.
+test_recovery_offered_restore_executes_when_base_matches() {
+    local head
+    head=$(git -C "$CLAUDE_SESSION_DIR" rev-parse HEAD)
+
+    (
+        cd "$CLAUDE_SESSION_DIR"
+        echo "restore-me" > happy_wip.txt
+        TEMP_INDEX=$(mktemp)
+        cp .git/index "$TEMP_INDEX"
+        GIT_INDEX_FILE="$TEMP_INDEX" git add happy_wip.txt
+        tree=$(GIT_INDEX_FILE="$TEMP_INDEX" git write-tree)
+        rm -f "$TEMP_INDEX"
+        commit=$(printf 'autosave\n\ncs-base: %s\n' "$head" | git commit-tree "$tree")
+        git update-ref refs/worktree/cs/auto "$commit"
+        rm -f happy_wip.txt
+    )
+
+    local output context cmd
+    output=$(echo '{"session_id":"t-happy","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+    cmd=$(printf '%s\n' "$context" | sed -n 's/.*To restore, run: //p' | head -1)
+    if [ -z "$cmd" ]; then echo "  FAIL: no restore command was offered"; return 1; fi
+
+    # HEAD unchanged since the scan => the offered command must actually restore.
+    local run_out
+    run_out=$(cd "$CLAUDE_SESSION_DIR" && eval "$cmd" 2>&1)
+    if [ ! -f "$CLAUDE_SESSION_DIR/happy_wip.txt" ]; then
+        echo "  FAIL: offered restore should have applied the snapshot when base matches; out: $run_out"; return 1
+    fi
+    case "$run_out" in
+        *REFUSED*) echo "  FAIL: offered restore wrongly refused when base matches; out: $run_out"; return 1 ;;
+    esac
+    if git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify refs/worktree/cs/auto >/dev/null 2>&1; then
+        echo "  FAIL: a successful restore should delete the shadow ref"; return 1
+    fi
+    rm -f "$CLAUDE_SESSION_DIR/happy_wip.txt"
+}
+
 # A pre-upgrade snapshot carries no cs-base trailer. Recovery must still refuse
 # the blanket restore (base unverifiable), but must NOT claim "HEAD has moved" —
 # that is a false factual assertion when HEAD is in fact unchanged.
@@ -436,6 +478,7 @@ run_test test_recovery_detects_crash_and_injects_context
 run_test test_recovery_refuses_blanket_restore_when_head_moved
 run_test test_recovery_offers_restore_when_base_matches
 run_test test_recovery_offered_restore_refuses_when_head_moves_after_scan
+run_test test_recovery_offered_restore_executes_when_base_matches
 run_test test_recovery_legacy_ref_warns_unverifiable_not_moved
 run_test test_shadow_ref_not_pushed
 run_test test_autosave_logs_per_actor_narrative_edit
