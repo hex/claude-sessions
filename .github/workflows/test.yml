@@ -63,6 +63,14 @@ jobs:
   # triage a failure that only this lane sees.
   test-windows-msys:
     runs-on: windows-latest
+    # Git Bash on Windows has no native fork(), so each process spawn is
+    # emulated at ~10-50x the cost of Linux/macOS. The suite is spawn-heavy, so
+    # this lane dominates wall-clock. Shard it across parallel runners; each
+    # shard runs a round-robin slice of the suites (see tests/run_all.sh).
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     defaults:
       run:
         shell: bash
@@ -74,5 +82,7 @@ jobs:
           git config --global user.email "ci@claude-sessions.test"
           git config --global user.name "cs CI"
 
-      - name: Run bash test suites
+      - name: Run bash test suites (shard ${{ matrix.shard }}/4)
         run: bash tests/run_all.sh
+        env:
+          CS_TEST_SHARD: ${{ matrix.shard }}/4
