@@ -26,3 +26,4 @@ bin/cs-tui
 .cs/.narrative-reminder-cooldown
 .claude/settings.local.json
 .obsidian/
+CLAUDE.local.md

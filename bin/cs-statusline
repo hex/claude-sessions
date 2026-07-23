@@ -95,6 +95,7 @@ ICON_GIT=$'\xe2\x8e\x87 '       # U+2387 branch
 ICON_5H=$'\xe2\x97\xb7 '        # U+25F7 clock
 ICON_WK=$'\xe2\x97\x91 '        # U+25D1 half circle
 ICON_NOTES=$'\xe2\x96\xa4 '     # U+25A4 square with horizontal fill (notes queue)
+ICON_MAIL=$'\xe2\x9c\x89 '      # U+2709 envelope (unread cross-session mail)
 ICON_LOGO=$'\xe2\x9c\xb3'       # U+2733 eight-spoked asterisk (Claude mark)
 ICON_PANE=$'\xe2\x97\xab '      # U+25EB square with vertical bisect (tmux pane)
 
@@ -400,9 +401,15 @@ _fmt_rest() {
     [[ "$now" =~ ^[0-9]+$ ]] || return 0
     rem=$(( at - now ))
     [ "$rem" -gt 0 ] || return 0
-    h=$(( rem / 3600 ))
+    local d
+    d=$(( rem / 86400 ))
+    h=$(( (rem % 86400) / 3600 ))   # hours within the day; == rem/3600 when d==0
     m=$(( (rem % 3600) / 60 ))
-    if [ "$h" -gt 0 ]; then
+    if [ "$d" -gt 0 ]; then
+        # Past a day, read in days+hours (dropping minutes, which are noise at
+        # that scale) so a weekly window shows "5d16h", not "136h14m".
+        _REST="${d}d${h}h"
+    elif [ "$h" -gt 0 ]; then
         _REST="${h}h${m}m"
     elif [ "$m" -gt 0 ]; then
         _REST="${m}m"
@@ -528,6 +535,33 @@ _seg_notes() {
     _add "${ICON_NOTES}${n}" "amber"
 }
 
+# Unread cross-session mail for the current session, shown after the notes
+# queue. Hidden when nothing is unread or the inbox is absent. Unread is the
+# count of newline-terminated inbox lines past the `seen` cursor that `cs -msg`
+# advances on read — the same basis as the shell's _mail_total (wc -l) and the
+# TUI. A torn final line (message mid-write, no trailing newline) is not
+# counted, so it can't show a phantom unread that never clears.
+_seg_mail() {
+    [ -n "${CLAUDE_SESSION_NAME:-}" ] || return 0
+    local mdir="$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/local/mail"
+    local inbox="$mdir/inbox.jsonl"
+    [ -f "$inbox" ] || return 0
+    local total=0 line
+    while IFS= read -r line; do
+        total=$((total + 1))
+    done < "$inbox"
+    local seen=0
+    [ -r "$mdir/seen" ] && read -r seen < "$mdir/seen" 2>/dev/null
+    case "$seen" in
+        ''|*[!0-9]*) seen=0 ;;
+    esac
+    # Base-10 normalize the cursor so a zero-padded value (e.g. "08") is not
+    # read as octal by the arithmetic below.
+    local unread=$((total - 10#$seen))
+    [ "$unread" -gt 0 ] || return 0
+    _add "${ICON_MAIL}${unread}" "amber"
+}
+
 # The tmux pane hosting this conversation, as a target usable verbatim in
 # tmux commands and other chats ("%7"). TMUX_PANE is inherited environment,
 # so this adds zero forks to the render hot path; both vars are required so
@@ -564,14 +598,25 @@ _seg_limits() {
     local h="${SL_5H%%.*}" w="${SL_WK%%.*}"
     if [ -n "$h" ]; then
         _thresh_color "$h" 70 90
-        _fmt_rest "$SL_5H_RESET"
         local label="5h ${h}%"
-        [ -n "$_REST" ] && label="$label · $_REST"
+        # Show the reset countdown only once 5h usage is tight (>=50%), so the
+        # suffix appears as the window fills rather than while there's headroom.
+        if [ "$h" -ge 50 ]; then
+            _fmt_rest "$SL_5H_RESET"
+            [ -n "$_REST" ] && label="$label · $_REST"
+        fi
         _add "${ICON_5H}${label}" "$_COLOR"
     fi
     if [ -n "$w" ]; then
         _thresh_color "$w" 70 90
-        _add "${ICON_WK}wk ${w}%" "$_COLOR"
+        local wlabel="wk ${w}%"
+        # The weekly countdown gates higher (>=80%): the seven-day window is
+        # coarse, so time-to-reset only matters once it is nearly spent.
+        if [ "$w" -ge 80 ]; then
+            _fmt_rest "$SL_WK_RESET"
+            [ -n "$_REST" ] && wlabel="$wlabel · $_REST"
+        fi
+        _add "${ICON_WK}${wlabel}" "$_COLOR"
     fi
 }
 
@@ -816,12 +861,17 @@ _render() {
         fi
     done
     # Stretch the bar to the full terminal width by fading the trailing edge
-    # from the last pill's own background into the terminal's real background
-    # color. Both pieces of information are prerequisites Claude Code and cs
-    # may not provide: $COLUMNS is only set on Claude Code >= 2.1.153, and
-    # CS_TERM_BG_RGB is only known when cs's own OSC 11 query succeeded at
-    # launch. Truecolor-only — 256-color/basic modes don't have the per-channel
-    # precision for a gradient to look like anything but banding.
+    # from the neutral surface tone into the terminal's real background color.
+    # The fade anchors on `surface`, NOT the last pill's own color: the last
+    # segment is often a gauge that escalates to amber/red (e.g. a near-limit
+    # rate-limit block), and inheriting that would flood the whole empty tail
+    # with the alarm color. Keeping the tail on the quiet surface tone means the
+    # bar's empty end stays quiet regardless of usage. Both inputs are
+    # prerequisites Claude Code and cs may not provide: $COLUMNS is only set on
+    # Claude Code >= 2.1.153, and CS_TERM_BG_RGB is only known when cs's own OSC
+    # 11 query succeeded at launch. `lastrgb` gates on a resolved truecolor bg.
+    # Truecolor-only — 256-color/basic modes can't render a gradient without
+    # banding.
     if [ "$LEVEL" = "truecolor" ] && [ -n "$lastrgb" ] \
         && [[ "${COLUMNS:-}" =~ ^[0-9]+$ ]] && [ "$COLUMNS" -ge 1 ] && [ "$COLUMNS" -le 2000 ]; then
         local remaining=$((COLUMNS - width))
@@ -829,7 +879,9 @@ _render() {
         # that runs on every render.
         [ "$remaining" -gt 500 ] && remaining=500
         if [ "$remaining" -gt 0 ]; then
-            _build_gradient "$lastrgb" "${CS_TERM_BG_RGB:-}" "$remaining"
+            _sgr 48 surface; local tailrgb="$_RGB"
+            [ -n "$tailrgb" ] || tailrgb="$lastrgb"
+            _build_gradient "$tailrgb" "${CS_TERM_BG_RGB:-}" "$remaining"
             out+="$_GRADIENT"
         fi
     fi
@@ -854,7 +906,7 @@ main() {
 
     _detect_level
 
-    local segments="${CS_STATUSLINE_SEGMENTS:-logo,session,notes,pane,git,model,ctx,limits,cost}"
+    local segments="${CS_STATUSLINE_SEGMENTS:-logo,session,notes,mail,pane,git,model,ctx,limits}"
     local name names
     IFS=',' read -ra names <<< "$segments"
     for name in "${names[@]}"; do
@@ -862,6 +914,7 @@ main() {
             logo)    _seg_logo ;;
             session) _seg_session ;;
             notes)   _seg_notes ;;
+            mail)    _seg_mail ;;
             pane)    _seg_pane ;;
             ctx)     _seg_ctx ;;
             model)   _seg_model ;;

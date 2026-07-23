@@ -38,7 +38,7 @@ export CS_TERM_BG_RGB="250;248;242"   # r;g;b, 0-255 each
 export NO_COLOR="1"
 
 # Status line: choose/order segments, or disable entirely
-export CS_STATUSLINE_SEGMENTS="logo,session,notes,pane,git,model,ctx,limits,cost"  # this is the default
+export CS_STATUSLINE_SEGMENTS="logo,session,notes,mail,pane,git,model,ctx,limits"  # this is the default
 export CS_STATUSLINE_DISABLE="1"
 
 # Opt a session out of the scope-prompt auto-grounding hook

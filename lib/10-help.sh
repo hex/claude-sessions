@@ -81,7 +81,8 @@ Environment:
   NO_COLOR            Disable all colors (see no-color.org)
   CS_STATUSLINE_DISABLE   Set to 1 to render nothing in the status line
   CS_STATUSLINE_SEGMENTS  Status line segments, csv order (default:
-                          logo,session,notes,pane,git,model,ctx,limits,cost)
+                          logo,session,notes,mail,pane,git,model,ctx,limits;
+                          'cost' also available, off by default)
   CS_TERM_THEME           Override terminal theme detection (light|dark);
                           cs -detect-theme shows what detection yields.
                           Under tmux, detection queries the outer terminal via

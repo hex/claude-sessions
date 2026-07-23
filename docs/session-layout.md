@@ -75,8 +75,7 @@ user-owned `CLAUDE.md` is never touched.
 | `limits` | Latest 5-hour/weekly rate-limit readings, stamped by the status line; read by `cs -usage` window anchoring and the queue's rate-limit breaker. |
 | `failures` | Per-task tool-failure counter written by `tool-failure-logger.sh`; feeds the queue's failures circuit breaker, reset at each drain advance. |
 | `mail/inbox.jsonl` | Cross-session mailbox: one JSON message per line, appended by senders (`cs -msg`). |
-| `mail/notified` | Digest cursor: inbox line count already announced by a hook digest. |
-| `mail/seen` | Read cursor: inbox line count already printed by `cs -msg`. |
+| `mail/seen` | Read cursor: inbox line count already printed by `cs -msg`. Also the anchor for the prompt hook's unread-mail digest, which inlines every line past this cursor on each prompt until `cs -msg` advances it — so awareness persists until the mail is actually read. (The former `mail/notified` surface-once cursor is retired; a leftover file on old sessions is inert.) |
 | `spawned-by` | Spawner session name for a `cs -spawn`ed worker; deleted after the drain-finished notify (one-shot). |
 
 ## Merge policy

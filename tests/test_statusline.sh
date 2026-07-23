@@ -105,7 +105,7 @@ test_happy_path_docs_fixture_plain() {
     local out
     out=$(run_sl "$FIXTURE_DOCS")
     # git absent (non-git dir) and disc absent (no cs session).
-    assert_eq "my-session > ✦ Opus high > ◔ ctx 8% > ◷ 5h 23% > ◑ wk 41% > \$0.01" "$out" \
+    assert_eq "my-session > ✦ Opus high > ◔ ctx 8% > ◷ 5h 23% > ◑ wk 41%" "$out" \
         "docs fixture should render identity first, then gauges (no badge in plain mode)"
 }
 
@@ -116,12 +116,12 @@ test_crlf_jq_output_is_sanitized_plain() {
     local shimdir out
     shimdir=$(_install_crlf_jq) || return 0   # no jq locally: nothing to simulate
     out=$( export PATH="$shimdir:$PATH"; run_sl "$FIXTURE_DOCS" )
-    assert_eq "my-session > ✦ Opus high > ◔ ctx 8% > ◷ 5h 23% > ◑ wk 41% > \$0.01" "$out" \
+    assert_eq "my-session > ✦ Opus high > ◔ ctx 8% > ◷ 5h 23% > ◑ wk 41%" "$out" \
         "CRLF jq output (Windows) must be sanitized to a single clean pill line"
 }
 
 # ============================================================================
-# All six segments render in order with git present (plain)
+# All default segments render in order with git present (plain)
 # ============================================================================
 
 test_all_segments_ordering_plain() {
@@ -142,7 +142,7 @@ test_all_segments_ordering_plain() {
     }')
     local out
     out=$(run_sl "$json")
-    assert_eq "mysess > ⎇ main +1!1 > ✦ Opus high > ◔ ctx 34% > ◷ 5h 23% > ◑ wk 41% > \$1.23" "$out" \
+    assert_eq "mysess > ⎇ main +1!1 > ✦ Opus high > ◔ ctx 34% > ◷ 5h 23% > ◑ wk 41%" "$out" \
         "all segments should render in order: session, branch, model, then gauges (no badge in plain mode)"
 }
 
@@ -177,8 +177,8 @@ test_two_accents_default() {
     assert_output_contains "$out" "48;2;138;134;236;38;2;240;242;255" "model should be the usage-chip periwinkle with the chip's text color" || return 1
     local greys
     greys=$(printf '%s' "$out" | grep -o '48;2;128;120;110' | grep -c . ) || greys=0
-    if [ "$greys" -lt 4 ]; then
-        echo "  FAIL: expected ctx, git-less run, 5h, wk, cost on grey (got $greys grey blocks)"
+    if [ "$greys" -lt 3 ]; then
+        echo "  FAIL: expected ctx, 5h, wk on grey (got $greys grey blocks)"
         return 1
     fi
 }
@@ -543,11 +543,11 @@ test_5h_rest_time_appended() {
     json=$(jq -nc --argjson r "$reset_at" '{
         session_name:"s",
         workspace:{current_dir:"/none"},
-        rate_limits:{five_hour:{used_percentage:23,resets_at:$r}}
+        rate_limits:{five_hour:{used_percentage:55,resets_at:$r}}
     }')
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "5h 23% · 2h14m" "5h block should append time until reset"
+    assert_output_contains "$out" "5h 55% · 2h14m" "5h block should append time until reset"
 }
 
 # The reset countdown must render even under bash <4.2, which lacks the
@@ -568,11 +568,11 @@ test_5h_rest_time_on_old_bash() {
     json=$(jq -nc --argjson r "$reset_at" '{
         session_name:"s",
         workspace:{current_dir:"/none"},
-        rate_limits:{five_hour:{used_percentage:23,resets_at:$r}}
+        rate_limits:{five_hour:{used_percentage:55,resets_at:$r}}
     }')
     local out
     out=$(printf '%s' "$json" | "$old_bash" "$SL")
-    assert_output_contains "$out" "5h 23% · 2h14m" "reset countdown must render under bash <4.2 via date fallback"
+    assert_output_contains "$out" "5h 55% · 2h14m" "reset countdown must render under bash <4.2 via date fallback"
 }
 
 # Under an hour the rest time is minutes-only, with no zero-hour prefix.
@@ -614,10 +614,10 @@ test_5h_rest_time_sub_minute() {
 # No reset suffix when resets_at is missing.
 test_5h_rest_time_absent_without_resets_at() {
     export NO_COLOR=1
-    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":23}}}'
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":55}}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "5h 23%" "5h percentage should render" || return 1
+    assert_output_contains "$out" "5h 55%" "5h percentage should render" || return 1
     assert_output_not_contains "$out" "·" "no reset separator when resets_at is absent"
 }
 
@@ -631,12 +631,106 @@ test_5h_rest_time_absent_when_past() {
     json=$(jq -nc --argjson r "$reset_at" '{
         session_name:"s",
         workspace:{current_dir:"/none"},
-        rate_limits:{five_hour:{used_percentage:5,resets_at:$r}}
+        rate_limits:{five_hour:{used_percentage:55,resets_at:$r}}
     }')
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "5h 5%" "5h percentage should still render" || return 1
+    assert_output_contains "$out" "5h 55%" "5h percentage should still render" || return 1
     assert_output_not_contains "$out" "·" "no reset separator when the window already reset"
+}
+
+# The 5h reset countdown is gated on usage: below 50% it stays hidden even when
+# resets_at is known, so the suffix only appears as the window gets tight.
+test_5h_rest_hidden_below_50() {
+    export NO_COLOR=1
+    local now reset_at
+    now=$(date +%s)
+    reset_at=$(( now + 2 * 3600 + 14 * 60 + 30 ))
+    local json
+    json=$(jq -nc --argjson r "$reset_at" '{
+        session_name:"s",
+        workspace:{current_dir:"/none"},
+        rate_limits:{five_hour:{used_percentage:40,resets_at:$r}}
+    }')
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "5h 40%" "5h percentage should render" || return 1
+    assert_output_not_contains "$out" "·" "5h reset suffix is hidden below 50% usage"
+}
+
+# The weekly block gains a reset countdown, gated at 80%: at or above 80% it
+# appends the time until the seven-day window resets.
+test_wk_rest_shown_at_or_above_80() {
+    export NO_COLOR=1
+    local now reset_at
+    now=$(date +%s)
+    reset_at=$(( now + 2 * 3600 + 14 * 60 + 30 ))   # 2h14m30s -> "2h14m"
+    local json
+    json=$(jq -nc --argjson r "$reset_at" '{
+        session_name:"s",
+        workspace:{current_dir:"/none"},
+        rate_limits:{seven_day:{used_percentage:85,resets_at:$r}}
+    }')
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "wk 85% · 2h14m" "wk block appends reset countdown at or above 80%"
+}
+
+# A multi-day countdown reads in days+hours, not raw hours: a weekly window
+# resetting in 5d16h shows "5d16h", not the unfriendly "136h14m".
+test_wk_rest_time_days_format() {
+    export NO_COLOR=1
+    local now reset_at
+    now=$(date +%s)
+    reset_at=$(( now + 5 * 86400 + 16 * 3600 + 14 * 60 ))   # 5d16h14m -> "5d16h"
+    local json
+    json=$(jq -nc --argjson r "$reset_at" '{
+        session_name:"s",
+        workspace:{current_dir:"/none"},
+        rate_limits:{seven_day:{used_percentage:85,resets_at:$r}}
+    }')
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "wk 85% · 5d16h" "multi-day reset shows friendly day+hour format" || return 1
+    assert_output_not_contains "$out" "136h" "multi-day reset must not show raw hours"
+}
+
+# Just over a day still rolls into days: 25h30m -> "1d1h".
+test_rest_time_just_over_a_day() {
+    export NO_COLOR=1
+    local now reset_at
+    now=$(date +%s)
+    reset_at=$(( now + 25 * 3600 + 30 * 60 ))   # 1d1h30m -> "1d1h"
+    local json
+    json=$(jq -nc --argjson r "$reset_at" '{
+        session_name:"s",
+        workspace:{current_dir:"/none"},
+        rate_limits:{seven_day:{used_percentage:90,resets_at:$r}}
+    }')
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "wk 90% · 1d1h" "just over a day rolls into days+hours" || return 1
+    assert_output_not_contains "$out" "25h" "over-a-day reset must not show raw hours"
+}
+
+# Below 80% the weekly reset countdown stays hidden even when resets_at is known.
+# The fixture carries only the seven-day window, so the only possible reset
+# separator is the weekly one.
+test_wk_rest_hidden_below_80() {
+    export NO_COLOR=1
+    local now reset_at
+    now=$(date +%s)
+    reset_at=$(( now + 2 * 3600 + 14 * 60 + 30 ))
+    local json
+    json=$(jq -nc --argjson r "$reset_at" '{
+        session_name:"s",
+        workspace:{current_dir:"/none"},
+        rate_limits:{seven_day:{used_percentage:41,resets_at:$r}}
+    }')
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "wk 41%" "wk percentage should render" || return 1
+    assert_output_not_contains "$out" "·" "wk reset suffix is hidden below 80% usage"
 }
 
 # ============================================================================
@@ -1073,6 +1167,23 @@ test_full_width_gradient_reaches_columns() {
     assert_eq "80" "$width" "the bar plus its gradient should fill exactly COLUMNS cells"
 }
 
+# The trailing gradient anchors on the neutral surface color, never the last
+# segment's — otherwise an escalated limit (amber/red) would flood the empty
+# tail. 5h is kept low so only the wk block is amber: that amber (255;183;77)
+# must appear exactly once (its own pill), not a second time as the gradient's
+# start cell.
+test_tail_gradient_neutral_regardless_of_last_segment() {
+    export COLORTERM=truecolor
+    export COLUMNS=120
+    export CS_TERM_BG_RGB="250;248;242"
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8},"rate_limits":{"five_hour":{"used_percentage":20},"seven_day":{"used_percentage":83}}}'
+    local out amber
+    out=$(run_sl "$json")
+    amber=$(printf '%s' "$out" | grep -o '48;2;255;183;77' | grep -c .) || amber=0
+    assert_eq "1" "$amber" "tail gradient must not inherit the escalated wk amber (only the pill itself)" || return 1
+    assert_output_contains "$out" "48;2;250;248;242" "the gradient still fades to the terminal bg"
+}
+
 test_narrow_terminal_no_gradient() {
     export COLORTERM=truecolor
     export COLUMNS=5
@@ -1218,6 +1329,11 @@ run_test test_5h_rest_time_minutes_only
 run_test test_5h_rest_time_sub_minute
 run_test test_5h_rest_time_absent_without_resets_at
 run_test test_5h_rest_time_absent_when_past
+run_test test_5h_rest_hidden_below_50
+run_test test_wk_rest_shown_at_or_above_80
+run_test test_wk_rest_hidden_below_80
+run_test test_wk_rest_time_days_format
+run_test test_rest_time_just_over_a_day
 run_test test_missing_session_name_dir_fallback
 run_test test_no_color_emits_no_escapes
 run_test test_disable_prints_nothing
@@ -1247,6 +1363,7 @@ run_test test_lerp_channel_hits_exact_endpoints
 run_test test_build_gradient_cell_count_and_endpoints
 run_test test_build_gradient_noop_on_malformed_target
 run_test test_full_width_gradient_reaches_columns
+run_test test_tail_gradient_neutral_regardless_of_last_segment
 run_test test_narrow_terminal_no_gradient
 run_test test_no_gradient_without_columns
 run_test test_no_gradient_without_bg_rgb
@@ -1286,6 +1403,53 @@ test_notes_segment_skips_whitespace_only_lines() {
     local out
     out=$(run_sl "$FIXTURE_DOCS")
     assert_output_contains "$out" "▤ 2" "whitespace-only queue lines are not counted" || return 1
+}
+
+# Mail segment: unread cross-session mail after the notes queue. Unread =
+# newline-terminated inbox lines past the `seen` cursor (the cursor `cs -msg`
+# advances on read), matching the shell's _mail_total and the TUI.
+# ============================================================================
+
+test_mail_segment_shows_unread_count() {
+    export NO_COLOR=1
+    export CLAUDE_SESSION_NAME="mailsess"
+    make_cs_session "mailsess" 0 cyan
+    mkdir -p "$CS_SESSIONS_ROOT/mailsess/.cs/local/mail"
+    printf '{"a":1}\n{"a":2}\n{"a":3}\n{"a":4}\n' \
+        > "$CS_SESSIONS_ROOT/mailsess/.cs/local/mail/inbox.jsonl"
+    printf '1\n' > "$CS_SESSIONS_ROOT/mailsess/.cs/local/mail/seen"
+    local out
+    out=$(run_sl "$FIXTURE_DOCS")
+    assert_output_contains "$out" "✉ 3" "mail segment shows unread count (total 4 minus seen 1)" || return 1
+}
+
+test_mail_segment_absent_when_all_read() {
+    export NO_COLOR=1
+    export CLAUDE_SESSION_NAME="readmail"
+    make_cs_session "readmail" 0 cyan
+    mkdir -p "$CS_SESSIONS_ROOT/readmail/.cs/local/mail"
+    printf '{"a":1}\n{"a":2}\n' \
+        > "$CS_SESSIONS_ROOT/readmail/.cs/local/mail/inbox.jsonl"
+    printf '2\n' > "$CS_SESSIONS_ROOT/readmail/.cs/local/mail/seen"
+    local out
+    out=$(run_sl "$FIXTURE_DOCS")
+    assert_output_not_contains "$out" "✉" "mail segment hidden when all mail is read" || return 1
+}
+
+# A half-written final line (no trailing newline) must not inflate the count:
+# the `seen` cursor is set from _mail_total (wc -l), which excludes a torn line.
+# Counting it here would show a phantom unread that never clears.
+test_mail_segment_ignores_torn_final_line() {
+    export NO_COLOR=1
+    export CLAUDE_SESSION_NAME="tornmail"
+    make_cs_session "tornmail" 0 cyan
+    mkdir -p "$CS_SESSIONS_ROOT/tornmail/.cs/local/mail"
+    printf '{"a":1}\n{"a":2}\n{"a":3}\n{"a":4' \
+        > "$CS_SESSIONS_ROOT/tornmail/.cs/local/mail/inbox.jsonl"
+    printf '0\n' > "$CS_SESSIONS_ROOT/tornmail/.cs/local/mail/seen"
+    local out
+    out=$(run_sl "$FIXTURE_DOCS")
+    assert_output_contains "$out" "✉ 3" "torn final line is not counted (3 complete lines, none seen)" || return 1
 }
 
 test_pane_segment_shows_tmux_pane_id() {
@@ -1404,6 +1568,9 @@ test_enable_warns_that_a_restart_is_required() {
 run_test test_notes_segment_shows_queue_depth
 run_test test_notes_segment_absent_when_queue_empty
 run_test test_notes_segment_skips_whitespace_only_lines
+run_test test_mail_segment_shows_unread_count
+run_test test_mail_segment_absent_when_all_read
+run_test test_mail_segment_ignores_torn_final_line
 run_test test_pane_segment_shows_tmux_pane_id
 run_test test_pane_segment_absent_outside_tmux
 run_test test_pane_segment_needs_both_tmux_vars

@@ -241,62 +241,115 @@ _prompt_as_receiver() {  # prompt-text
     printf '{"prompt": "%s"}' "$1" | _receiver_env bash "$HOOKS_DIR/scope-prompt.sh"
 }
 
-test_digest_notify_inline_and_text_counted() {
-    "$CS_BIN" -msg receiver -k notify "build is green" >/dev/null 2>&1
-    "$CS_BIN" -msg receiver "long body that must stay out of hook context" >/dev/null 2>&1
+# Unread mail inlines its bodies on EVERY prompt until read (persistent, keyed
+# on the `seen` cursor) — not surface-once. text/notify/result bodies inline.
+test_mail_persists_inline_until_read() {
+    "$CS_BIN" -msg receiver "review the auth PR please" >/dev/null 2>&1
     local out; out=$(_prompt_as_receiver "hello") || return 1
-    assert_output_contains "$out" "mail from sender: build is green" "notify body inline" || return 1
-    assert_output_contains "$out" "1 message(s) from sender" "text counted" || return 1
-    assert_output_contains "$out" "Run cs -msg to read" "read pointer present" || return 1
-    assert_output_not_contains "$out" "stay out of hook context" "text body absent" || return 1
-}
-
-test_digest_surfaces_once_and_read_cursor_independent() {
-    "$CS_BIN" -msg receiver -k notify "ping" >/dev/null 2>&1
-    local out; out=$(_prompt_as_receiver "hello") || return 1
-    assert_output_contains "$out" "ping" "first prompt announces" || return 1
+    assert_output_contains "$out" "mail from sender" "sender shown" || return 1
+    assert_output_contains "$out" "review the auth PR please" "body inlined" || return 1
+    # Persistent: a second prompt still shows it (old behavior was surface-once).
     out=$(_prompt_as_receiver "again") || return 1
-    assert_output_not_contains "$out" "ping" "second prompt silent" || return 1
-    out=$(_as_receiver -msg 2>&1) || return 1
-    assert_output_contains "$out" "ping" "digest did not consume the read cursor" || return 1
+    assert_output_contains "$out" "review the auth PR please" "body still inlined next prompt" || return 1
 }
 
-test_digest_caps_notifies_at_three() {
+# Reading with cs -msg advances the `seen` cursor, which clears the digest.
+test_mail_read_clears_digest() {
+    "$CS_BIN" -msg receiver "transient note" >/dev/null 2>&1
+    local out; out=$(_prompt_as_receiver "hello") || return 1
+    assert_output_contains "$out" "transient note" "shown before read" || return 1
+    _as_receiver -msg >/dev/null 2>&1 || return 1
+    out=$(_prompt_as_receiver "after") || return 1
+    assert_output_not_contains "$out" "transient note" "cleared after cs -msg read" || return 1
+}
+
+# A task-kind message is already queued (cs -msg -k task enqueues it); the digest
+# must NOT inline its body, or Claude would act on it and the queue drain would
+# run it a second time. Surfaced as a count-only label instead.
+test_task_kind_counted_not_inlined() {
+    "$CS_BIN" -msg receiver -k task "delete merged branches" >/dev/null 2>&1
+    local out; out=$(_prompt_as_receiver "hello") || return 1
+    assert_output_not_contains "$out" "delete merged branches" "task body not inlined" || return 1
+    assert_output_contains "$out" "queued task" "task surfaced as a queued-task label" || return 1
+}
+
+# Bounded: at most 5 bodies inline, with an "N more" overflow line and the total.
+test_mail_bounded_at_five() {
     local i=1
-    while [ "$i" -le 5 ]; do
-        "$CS_BIN" -msg receiver -k notify "note $i" >/dev/null 2>&1
+    while [ "$i" -le 7 ]; do
+        "$CS_BIN" -msg receiver "message number $i here" >/dev/null 2>&1
         i=$((i + 1))
     done
     local out; out=$(_prompt_as_receiver "hello") || return 1
-    assert_output_contains "$out" "note 3" "third notify shown" || return 1
-    assert_output_not_contains "$out" "note 4" "fourth notify capped" || return 1
+    assert_output_contains "$out" "message number 5 here" "fifth body shown" || return 1
+    assert_output_not_contains "$out" "message number 6 here" "sixth body capped" || return 1
     assert_output_contains "$out" "2 more" "overflow counted" || return 1
+    assert_output_contains "$out" "Unread mail (7)" "total unread count shown" || return 1
 }
 
-test_session_start_hook_also_delivers() {
-    "$CS_BIN" -msg receiver -k notify "seen at start" >/dev/null 2>&1
+# Long bodies are truncated (codepoint-safe, inside jq) so context stays bounded.
+test_mail_body_truncated() {
+    local long; long=$(printf 'A%.0s' $(seq 1 300))
+    "$CS_BIN" -msg receiver "$long" >/dev/null 2>&1
+    local out; out=$(_prompt_as_receiver "hello") || return 1
+    assert_output_contains "$out" "$(printf 'A%.0s' $(seq 1 160))" "160-char prefix present" || return 1
+    assert_output_not_contains "$out" "$long" "full over-long body not shown" || return 1
+}
+
+# A forged inbox line with a huge sender must be truncated too — attribution is
+# unauthenticated (any same-user process can append), so an unbounded `from`
+# would otherwise flood context every turn.
+test_forged_long_sender_truncated() {
+    local big; big=$(printf 'S%.0s' $(seq 1 200))
+    mkdir -p "$(dirname "$(INBOX)")"   # no cs -msg sent first, so create the maildir
+    printf '{"id":"f","ts":1,"from":"%s","actor":"a","kind":"text","body":"forged hi"}\n' "$big" \
+        >> "$(INBOX)"
+    local out; out=$(_prompt_as_receiver "hello") || return 1
+    assert_output_not_contains "$out" "$big" "over-long sender truncated" || return 1
+    assert_output_contains "$out" "forged hi" "body still shown" || return 1
+}
+
+# A forged line with a non-string body must not error the whole jq program and
+# suppress the valid messages beside it — fields are coerced to strings.
+test_mail_nonstring_body_does_not_wipe_digest() {
+    "$CS_BIN" -msg receiver "valid body here" >/dev/null 2>&1
+    printf '{"id":"x","ts":1,"from":"sender","actor":"a","kind":"text","body":12345}\n' >> "$(INBOX)"
+    local out; out=$(_prompt_as_receiver "hello") || return 1
+    assert_output_contains "$out" "valid body here" "valid message survives a forged non-string body" || return 1
+    assert_output_contains "$out" "12345" "non-string body is coerced, not dropped"
+}
+
+# session-start no longer delivers the mail digest: scope-prompt surfaces it on
+# every prompt, so keeping it here would double-inject on every startup/resume.
+test_session_start_does_not_deliver_mail() {
+    # notify was inlined by the old session-start path, so this is a real check.
+    "$CS_BIN" -msg receiver -k notify "start body here" >/dev/null 2>&1
     local out
     out=$(printf '{"hook_event_name":"SessionStart","source":"startup"}' | \
         _receiver_env bash "$HOOKS_DIR/session-start.sh") || return 1
-    assert_output_contains "$out" "seen at start" "session-start delivers mail digest" || return 1
+    assert_output_not_contains "$out" "start body here" "session-start does not surface mail" || return 1
+    assert_output_not_contains "$out" "Unread mail" "no mail digest header from session-start" || return 1
 }
 
-test_digest_ignores_torn_final_line_until_completed() {
-    "$CS_BIN" -msg receiver -k notify "solid" >/dev/null 2>&1
-    printf '{"id":"t","ts":1,"from":"sender","actor":"a","kind":"notify","body":"tornnote' \
-        >> "$CS_SESSIONS_ROOT/receiver/.cs/local/mail/inbox.jsonl"
+# A torn final line (mid-write, no trailing newline) is excluded until complete;
+# wc -l counts newline bytes, matching the cursor math.
+test_mail_ignores_torn_final_line() {
+    "$CS_BIN" -msg receiver "solid body" >/dev/null 2>&1
+    printf '{"id":"t","ts":1,"from":"sender","actor":"a","kind":"text","body":"tornbody' \
+        >> "$(INBOX)"
     local out; out=$(_prompt_as_receiver "hello") || return 1
-    assert_output_contains "$out" "solid" "complete notify announced" || return 1
-    assert_output_not_contains "$out" "tornnote" "torn line not announced" || return 1
-    printf '"}\n' >> "$CS_SESSIONS_ROOT/receiver/.cs/local/mail/inbox.jsonl"
-    out=$(_prompt_as_receiver "again") || return 1
-    assert_output_contains "$out" "tornnote" "completed line announced once whole" || return 1
+    assert_output_contains "$out" "solid body" "complete message shown" || return 1
+    assert_output_not_contains "$out" "tornbody" "torn line excluded" || return 1
 }
 
-run_test test_digest_notify_inline_and_text_counted
-run_test test_digest_surfaces_once_and_read_cursor_independent
-run_test test_digest_caps_notifies_at_three
-run_test test_session_start_hook_also_delivers
-run_test test_digest_ignores_torn_final_line_until_completed
+run_test test_mail_persists_inline_until_read
+run_test test_mail_read_clears_digest
+run_test test_task_kind_counted_not_inlined
+run_test test_mail_bounded_at_five
+run_test test_mail_body_truncated
+run_test test_forged_long_sender_truncated
+run_test test_mail_nonstring_body_does_not_wipe_digest
+run_test test_session_start_does_not_deliver_mail
+run_test test_mail_ignores_torn_final_line
 
 report_results

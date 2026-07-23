@@ -58,10 +58,17 @@ _build_digest() {  # meta_local_dir
         && mv "$qdir/notifications.seen.tmp" "$qdir/notifications.seen" 2>/dev/null || true
 }
 
-# Build the surface-once mail digest from unseen inbox lines. Sets MAIL_DIGEST
-# (may be empty) and advances the notified cursor to the pre-counted total, so
-# a line appended mid-build is never skipped (wc -l also excludes a torn,
-# still-unterminated final line). Best-effort throughout: never breaks the hook.
+# Build the persistent unread-mail digest: on every prompt, inline the bodies of
+# mail past the `seen` cursor (which only `cs -msg` advances on read), so the
+# session stays aware of new mail until it actually reads it — not surface-once.
+# Bounded to keep context cheap: at most 5 messages, sender and body truncated
+# inside jq (codepoint-safe, so a torn multibyte char can never reach the shell
+# and poison the additionalContext), plus an "N more" overflow line. A task-kind
+# message is surfaced as a count-only label, never its body: the body is already
+# an imperative in the recipient's queue, so inlining it would double-execute.
+# No cursor is written here — persistence is anchored on `seen` — so this stays a
+# read-only view of the inbox (a multi-user-safety win: no hook-vs-hook race on a
+# mail cursor). Best-effort throughout: never breaks the hook.
 _build_mail_digest() {  # meta_local_dir
     local mdir="$1/mail" inbox total seen
     MAIL_DIGEST=""
@@ -69,25 +76,29 @@ _build_mail_digest() {  # meta_local_dir
     [ -s "$inbox" ] || return 0
     total=$(wc -l < "$inbox" 2>/dev/null | tr -d '[:space:]') || return 0
     case "$total" in ''|*[!0-9]*) return 0;; esac
-    seen=$(cat "$mdir/notified" 2>/dev/null | tr -d '[:space:]') || true
+    seen=$(cat "$mdir/seen" 2>/dev/null | tr -d '[:space:]') || true
     case "$seen" in ''|*[!0-9]*) seen=0;; esac
-    [ "$total" -gt "$seen" ] || return 0
-    MAIL_DIGEST=$(awk -v a=$((seen + 1)) -v b="$total" 'NR>=a && NR<=b' "$inbox" 2>/dev/null | jq -rRs '
+    # 10# so a zero-padded cursor ("08") is not read as octal by the arithmetic.
+    [ "$total" -gt "$((10#$seen))" ] || return 0
+    # tostr coerces any non-string field (a forged/hand-appended line could carry
+    # a number or object) to a string so a single bad line can't error the whole
+    # jq program and suppress every valid message beside it. The $n==0 guard keeps
+    # an all-unparseable window from emitting a bare "Unread mail (0)" nag.
+    MAIL_DIGEST=$(awk -v a=$((10#$seen + 1)) -v b="$total" 'NR>=a && NR<=b' "$inbox" 2>/dev/null | jq -rRs '
+        def tostr: if type == "string" then . else tostring end;
         [split("\n")[] | select(length > 0) | (fromjson? // empty)] as $m |
-        [$m[] | select(.kind == "notify")] as $n |
-        [$m[] | select(.kind != "notify")] as $r |
-        (( [ ($n[0:3])[] | "mail from " + (if .from == "" then .actor else .from end) + ": "
-              + (.body | gsub("[\n\r]"; " ")) ] )
-         + (if ($n | length) > 3 then ["... and \(($n | length) - 3) more notifies"] else [] end)
-         + (if ($r | length) > 0 then
-              ["mail: \($r | length) message(s) from "
-               + ([ $r[] | if .from == "" then .actor else .from end ] | unique | join(", "))
-               + ". Run cs -msg to read."]
-            else [] end)) | join("\n")
+        ($m | length) as $n |
+        if $n == 0 then "" else
+        ( [ $m[0:5][] |
+              ((((if (.from // "") == "" then .actor else .from end) // "") | tostr)[0:40]) as $who |
+              if .kind == "task" then "  queued task from \($who) (runs via cs -queue)"
+              else "  mail from \($who): \"\((((.body // "") | tostr) | gsub("[\n\r]"; " "))[0:160])\"" end ]
+          + (if $n > 5 then ["  ... and \($n - 5) more (cs -msg to read)"] else [] end)
+        ) as $lines |
+        "Unread mail (\($n)) - still unread, run cs -msg to clear:\n" + ($lines | join("\n"))
+        end
     ' 2>/dev/null) || MAIL_DIGEST=""
     MAIL_DIGEST=$(printf '%s' "$MAIL_DIGEST" | LC_ALL=C tr -d '\000-\010\013-\037\177')
-    printf '%s\n' "$total" > "$mdir/notified.tmp" 2>/dev/null \
-        && mv "$mdir/notified.tmp" "$mdir/notified" 2>/dev/null || true
 }
 
 DIGEST=""

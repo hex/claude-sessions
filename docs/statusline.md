@@ -10,23 +10,24 @@ With colors enabled, each segment renders as a square colored block; blocks abut
 
 ## Segments
 
-Default order: `logo,session,notes,pane,git,model,ctx,limits,cost`. A brand badge opens the bar, then identity (which session, which pane, which branch, which model), then the gauges.
+Default order: `logo,session,notes,mail,pane,git,model,ctx,limits`. A brand badge opens the bar, then identity (which session, which pane, which branch, which model), then the gauges. The `cost` segment ships but is off by default — add it to `CS_STATUSLINE_SEGMENTS` to show it.
 
 | Segment | Shows | Source | Color |
 |---|---|---|---|
 | `logo` | A Claude mark (`✳`) badge; the mark's color pulses while Claude has finished and awaits input | `.cs/local/attention` marker (raised by the Stop hook, cleared on the next prompt or session start) | Claude coral `rgb(217,119,87)`, white mark; the pulse alternates the mark between chiptext and the darker brandshade by epoch-second parity. Claude Code's TUI re-emits only bold/fg/bg from statusline ANSI (terminal blink is dropped) and repaints only on events, so the registration sets `statusLine.refreshInterval: 1` to repaint once a second while idle — that timer animates the pulse. Omitted in plain (`NO_COLOR`) mode |
 | `session` | Session name | stdin `session_name`, falling back to `CLAUDE_SESSION_NAME`, then the workspace dir basename | The session's `claude_session_color` from `.cs/local/state`; grey outside cs sessions |
 | `notes` | Queued-task count for the current session, `▤ N` | Non-blank lines of `.cs/local/queue` | Amber `rgb(255,183,77)`; hidden when the queue is empty or absent |
+| `mail` | Unread cross-session mail for the current session, `✉ N` | Newline-terminated lines of `.cs/local/mail/inbox.jsonl` past the `seen` cursor that `cs -msg` advances on read (a torn final line is not counted, matching `_mail_total`) | Amber `rgb(255,183,77)`; hidden when nothing is unread or the inbox is absent |
 | `pane` | The tmux pane hosting the conversation, `◫ %7` — a target usable verbatim in tmux commands and other chats | `TMUX_PANE` from inherited environment (no fork); requires a live `TMUX` socket var too, so a stale pane id never renders | Grey; hidden outside tmux |
 | `git` | Branch, ahead/behind arrows, staged `+N` and modified `!N` counts | One `git status --porcelain=v1 -b` call | Bold slate-blue accent `rgb(79,91,140)`, chip text color |
 | `model` | Model display name plus effort level when present | stdin `model.display_name`, `effort.level` | Periwinkle accent (claude's usage-chip purple), white text |
 | `ctx` | Context window usage, `ctx 42%` | stdin `context_window.used_percentage` | Grey; amber at 50%, red at 80% (tunable) |
-| `limits` | 5-hour and weekly rate limit usage as two adjacent blocks, `5h 23% · 2h14m` and `wk 41%`; the 5-hour block appends the time until the window resets when known | stdin `rate_limits.*.used_percentage`, `rate_limits.five_hour.resets_at` | Grey; each block escalates to amber at 70% and red at 90% on its own value |
-| `cost` | Session cost, `$1.23` | stdin `cost.total_cost_usd` | Grey |
+| `limits` | 5-hour and weekly rate limit usage as two adjacent blocks, `5h 62% · 2h14m` and `wk 85% · 5d16h`; each block appends the time until its window resets when known, but only once usage is tight — the 5-hour countdown shows at 50% and up, the weekly at 80% and up, so the suffix appears as the window fills rather than while there's headroom. The countdown reads compactly (`45m`, `2h14m`), rolling into days past 24 hours (`5d16h`) | stdin `rate_limits.*.used_percentage`, `rate_limits.five_hour.resets_at`, `rate_limits.seven_day.resets_at` | Grey; each block escalates to amber at 70% and red at 90% on its own value |
+| `cost` | Session cost, `$1.23` (opt-in; not in the default order) | stdin `cost.total_cost_usd` | Grey |
 
 Every segment is null-when-nothing: missing data means the segment and its separator simply do not render. Outside a cs session, `session` falls back to the directory name.
 
-Per-segment icons are standard Unicode glyphs (gauge `◔`, star `✦`, branch `⎇`, clock `◷`, half-circle `◑`, pane `◫`) from the Geometric Shapes and dingbat ranges, so they render in any monospace font without a patched Nerd Font. The `session` segment carries no icon — its `claude_session_color` background is identity enough. No Nerd Font or private-use glyphs are used.
+Per-segment icons are standard Unicode glyphs (gauge `◔`, star `✦`, branch `⎇`, clock `◷`, half-circle `◑`, pane `◫`, envelope `✉`) from the Geometric Shapes and dingbat ranges, so they render in any monospace font without a patched Nerd Font. The `session` segment carries no icon — its `claude_session_color` background is identity enough. No Nerd Font or private-use glyphs are used.
 
 ## Data sources and performance
 
@@ -90,7 +91,7 @@ Failure posture matches the bar: fail-open, always exit 0, print nothing rather 
 
 ## Full-width gradient
 
-In truecolor mode the bar stretches to the terminal's full width: after the last segment, a trailing run of cells fades from that segment's own background into the terminal's real background color, so the bar reads as floating rather than stopping short in a sea of blank terminal.
+In truecolor mode the bar stretches to the terminal's full width: after the last segment, a trailing run of cells fades from the neutral gauge-surface tone into the terminal's real background color, so the bar reads as floating rather than stopping short in a sea of blank terminal. The fade deliberately anchors on the quiet surface tone, **not** the last segment's own color — the final segment is often a gauge that escalates to amber or red near a limit, and inheriting that would flood the whole empty tail with the alarm color. Anchoring on surface keeps the empty end quiet regardless of usage.
 
 This needs two pieces of information the bar doesn't otherwise require, and degrades gracefully (renders exactly as it would without this feature) when either is missing:
 

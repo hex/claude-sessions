@@ -4,6 +4,23 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.7.24
+
+### Added
+
+- **`mail` status-line segment.** The status bar now shows unread cross-session mail for the current session as `✉ N`, right after the notes queue, matching the TUI's badge. Unread is the count of newline-terminated `inbox.jsonl` lines past the `seen` cursor that `cs -msg` advances on read (a half-written final line is not counted). Hidden when nothing is unread. Amber, like the notes badge.
+
+### Changed
+
+- **A session stays aware of unread mail until it reads it.** The prompt hook now inlines the bodies of unread cross-session mail on *every* prompt (bounded to 5 messages, sender and body truncated) until `cs -msg` reads them — replacing the old surface-once digest that announced each message a single time and then went silent while it was still unread. Keyed on the `mail/seen` cursor, so the awareness clears exactly when the mail is read. A `task`-kind message shows a count-only label (it is already queued; inlining the body would double-execute), and the session-start hook no longer duplicates the digest. The `mail/notified` cursor is retired.
+- **The status line's trailing gradient no longer floods with the limit color.** The full-width tail fade now anchors on the neutral surface tone instead of the last segment's own color, so an amber/red rate-limit block near a limit no longer paints the whole empty end of the bar. (Surfaced after `cost` was dropped from the default order, which had left the escalating `wk` block as the last segment.)
+- **Rate-limit reset countdowns are gated on usage.** The `· 2h14m`-style time-until-reset suffix now appears only as a window fills: the 5-hour block shows its countdown at 50% usage and up, and the weekly block gains a countdown of its own, shown at 80% and up. Below those thresholds the blocks read `5h 30%` / `wk 41%` with no suffix, so the bar stays quiet while there's headroom. Countdowns past a day read in days+hours (`5d16h`) instead of raw hours (`136h14m`).
+- **`cost` is off by default.** The default segment order drops `cost` (now `logo,session,notes,mail,pane,git,model,ctx,limits`). The segment still exists — add `cost` to `CS_STATUSLINE_SEGMENTS` to show session cost again.
+
+### Docs
+
+- Updated README and the statusline, hooks, session-layout, and configuration docs for the mail segment, persistent mail awareness, reset gating, and gradient behavior.
+
 ## 2026.7.23
 
 A crash-recovery correctness and data-safety pass, plus an in-session worktree merge, a snappier resume prompt, and faster Windows CI.
