@@ -1411,6 +1411,45 @@ test_wcm_purge_delete_failure_is_loud() {
 # Every other wcm export test drives a FAILURE mode, so the happy path -- and
 # with it the seen_vars declaration the collision guard relies on -- went
 # uncovered; under `set -u` a missing declaration crashes on the first secret.
+# The live poison-and-refuse check on the WCM backend specifically: seed hostile
+# credential NAMES directly into the fake store (bypassing set's validation, as
+# a store written before this release would be), then prove export refuses them
+# rather than emitting a metacharacter or bare-variable assignment. wcm is the
+# backend only on native Windows, and the seen_vars crash already showed this
+# surface can diverge from the other two, so it gets its own live attack.
+test_wcm_export_refuses_hostile_stored_names() {
+    _wcm_make_fake >/dev/null
+    local store="$TEST_TMPDIR/wcm-store"
+    _seed(){ # name value  -> write a cred file the fake's `list`/`get` will serve
+        local h_sess h_name sess_dir
+        h_sess=$(printf '%s' "test-session" | openssl base64 -A | tr '/+=' '_.-')
+        h_name=$(printf '%s' "$1" | openssl base64 -A | tr '/+=' '_.-')
+        sess_dir="$store/$h_sess"; mkdir -p "$sess_dir"
+        printf '%s\n%s\n' "$1" "$(printf '%s' "$2" | openssl base64 -A)" > "$sess_dir/$h_name"
+    }
+    # The security invariant holds regardless of exit code: a metacharacter name
+    # is refused, a dangerous-but-valid name (path) is namespaced -- either way
+    # STDOUT, which is all `eval` consumes, must never carry a bare dangerous
+    # assignment or a shell metacharacter. The refusal message goes to stderr.
+    local n stdout
+    for n in 'a;touch /tmp/cs_wcm_pwned;b' 'path' 'ld_preload'; do
+        _seed "$n" "evil"
+        stdout=$(_wcm_cs export 2>/dev/null || true)
+        assert_output_not_contains "$stdout" "export PATH=" "wcm export must never emit a bare PATH" || return 1
+        assert_output_not_contains "$stdout" "export LD_PRELOAD=" "wcm export must never emit a bare LD_PRELOAD" || return 1
+        assert_output_not_contains "$stdout" ";touch " "wcm export stdout must never carry a metacharacter name" || return 1
+        rm -rf "$store"
+    done
+
+    # And the metacharacter name specifically must make export FAIL, not merely
+    # sanitise -- a name that cannot be a safe identifier has no safe rendering.
+    _seed 'a;touch /tmp/cs_wcm_pwned;b' "evil"
+    local rc=0
+    _wcm_cs export >/dev/null 2>&1 || rc=$?
+    assert_eq 1 "$rc" "wcm export must refuse a metacharacter name outright" || return 1
+    rm -rf "$store"
+}
+
 test_wcm_export_succeeds_and_namespaces() {
     _wcm_make_fake >/dev/null
     printf 'hunter2' | _wcm_cs set api_key >/dev/null 2>&1 || return 1
@@ -2171,6 +2210,7 @@ run_test test_wcm_missing_returns_exit_3_empty_stdout
 run_test test_wcm_list_enumeration_failure_is_loud
 run_test test_wcm_purge_enumeration_failure_is_loud
 run_test test_wcm_purge_delete_failure_is_loud
+run_test test_wcm_export_refuses_hostile_stored_names
 run_test test_wcm_export_succeeds_and_namespaces
 run_test test_wcm_export_enumeration_failure_is_loud
 run_test test_wcm_empty_store_lists_cleanly
