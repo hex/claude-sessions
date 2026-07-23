@@ -4,6 +4,54 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.7.22
+
+Windows support, and a security and data-integrity pass over `cs -secrets` that matters on every platform.
+
+### Breaking
+
+- **`cs -secrets export` namespaces every variable.** A secret named `api_key` now exports as `CS_SECRET_API_KEY`, not `API_KEY`. Update anything that evals the output and reads the bare name.
+
+  This closes a code-execution hole rather than tidying the format. A secret name became a shell variable name directly, so a name like `path`, `prompt_command`, `editor` or `ld_preload` landed on the real `PATH`, `PROMPT_COMMAND`, `EDITOR` or `LD_PRELOAD` when the documented `eval "$(cs -secrets export)"` ran. Sync files are meant to be committed and shared, so a name could come from anyone who could write one. Refusing dangerous names was tried first and does not hold: they are ordinary words, and enumerating them leaked repeatedly. The namespace removes the collision entirely.
+
+### Security
+
+- Secret names are validated. A name must be an identifier, so it cannot carry shell metacharacters that break out of the assignment and execute when the export is eval'd. Enforced when storing, when importing a sync file, and when migrating between backends, and again at export so a store written before this release cannot execute either.
+- Two names that would export as the same variable (`api_key` and `api-key`) are refused instead of both emitted, since eval takes the last and a sync file could otherwise shadow a real secret with an attacker's value.
+- `cs -secrets export` emits nothing at all when it refuses. It previously printed assignments as it went, and `eval "$(...)"` applies whatever reached stdout regardless of exit status, so a refusal could still have applied the value it was refusing.
+
+### Features
+
+- **Windows support, in two tiers.** WSL2 is the recommended, full experience: session launch, the tmux spawner, secrets and the TUI all work. Git Bash / MSYS2 runs session management, secrets and the TUI, but refuses the Claude launch and the tmux spawner with a "use WSL" message rather than half-starting them. A `cs_platform()` seam detects `macos|wsl|msys|linux`, overridable with `CS_PLATFORM_OVERRIDE`.
+- **Windows Credential Manager backend for secrets.** Selected automatically on native Windows when `powershell.exe` is available, else the encrypted-file backend. Secrets and metadata travel by environment and stdin, never argv, so they stay out of the process list.
+- **`cs-tui.exe` on Windows.** The installer fetches it on Git Bash / MSYS2, and it ships as a signed, checksummed release asset alongside the macOS and Linux binaries. Installing on one platform removes a stale binary for the other, so PATH cannot resolve the wrong one.
+- **`cs -h` marks WSL-only commands** when running under MSYS, instead of listing commands that will refuse.
+
+### Fixes
+
+Secrets durability, on macOS and Linux too:
+
+- Concurrent stores no longer lose updates. Store, delete, purge and export serialize on a per-session mutex; previously two writers could read the same state and the later commit silently discarded the earlier one.
+- The encrypted store, the sync export and the first-use salt are written atomically. A failed encrypt, a full disk or an interrupt can no longer truncate an existing store or backup.
+- A store or delete whose write fails now aborts instead of reporting success.
+- A merge import aborts rather than overwriting a secret it merely failed to read.
+- `migrate --delete-source` removes only the keys it migrated, never a blanket purge that could drop a concurrently added secret.
+- Backend read failures are surfaced rather than swallowed or read as an empty store, across every backend.
+
+Windows correctness:
+
+- Multi-line secrets (PEM keys, JSON blobs) round-trip byte-exactly. Values are read through base64 rather than jq's text output, which emits CRLF on Windows and previously added a carriage return at every interior newline.
+- Secret names survive a read on Git Bash. jq emits CRLF and the shell strips only the trailing pair, so every name but the last carried an invisible carriage return into the backend.
+- The machine identifier no longer collapses when `USER` is unset (Git Bash exports `USERNAME`), which had made every machine share one sync file.
+- `cs -doctor` classifies worktrees correctly on Windows, where git prints drive-letter paths that never matched the shell's.
+- Repos cs creates pin `core.autocrlf` off, so a CRLF `.gitignore` cannot silently match nothing.
+- The status line and doctor strip CRLF from jq output.
+
+### CI
+
+- The Git Bash / MSYS2 suite is a required gate, running all suites on `windows-latest`. `cargo test` for the TUI runs on Windows too.
+- Hyphenated tags publish as pre-releases, so a release candidate never becomes the version installers resolve.
+
 ## 2026.7.21
 
 ### Features
