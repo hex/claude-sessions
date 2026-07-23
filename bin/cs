@@ -4044,18 +4044,26 @@ _doctor_check_shadow_ref() {
         _doctor_warn "Shadow ref: session directory is not a git repo"
         return
     fi
-    local shadow_sha
-    shadow_sha=$(git -C "$dir" show-ref --verify refs/worktree/cs/auto 2>/dev/null | awk '{print $1}' || true)
+    # Autosave is per-conversation: refs/worktree/cs/session/<uuid>. Check this
+    # conversation's own ref, keyed on the UUID exported at launch.
+    local uuid="${CS_CLAUDE_SESSION_ID:-}" ref=""
+    if [[ "$uuid" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+        ref="refs/worktree/cs/session/$uuid"
+    fi
+    local shadow_sha=""
+    [ -n "$ref" ] && shadow_sha=$(git -C "$dir" show-ref --verify "$ref" 2>/dev/null | awk '{print $1}' || true)
     local has_changes=0
     git -C "$dir" diff --quiet HEAD 2>/dev/null || has_changes=1
-    if [ "$has_changes" = "1" ] && [ -z "$shadow_sha" ]; then
-        _doctor_warn "Shadow ref: uncommitted changes but no refs/worktree/cs/auto (autosave may be broken)"
+    if [ -z "$ref" ]; then
+        _doctor_ok "Shadow ref: no conversation id in environment to check"
+    elif [ "$has_changes" = "1" ] && [ -z "$shadow_sha" ]; then
+        _doctor_warn "Shadow ref: uncommitted changes but no $ref (autosave may be broken)"
     elif [ -n "$shadow_sha" ]; then
         local ts now age
         ts=$(git -C "$dir" log -1 --format=%ct "$shadow_sha" 2>/dev/null || echo 0)
         now=$(date +%s)
         age=$((now - ts))
-        _doctor_ok "Shadow ref: refs/worktree/cs/auto present (${age}s old)"
+        _doctor_ok "Shadow ref: $ref present (${age}s old)"
     else
         _doctor_ok "Shadow ref: no uncommitted work to snapshot"
     fi
