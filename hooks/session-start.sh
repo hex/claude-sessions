@@ -299,14 +299,18 @@ if [[ "$SESSION_ID" =~ $UUID_RE ]]; then
     if [ "$RECORDED_UUID" != "$SESSION_ID" ]; then
         local_state_set claude_session_id "$SESSION_ID"
         echo "$(date '+%Y-%m-%d %H:%M:%S') - Rebound claude_session_id: ${RECORDED_UUID:-none} -> $SESSION_ID" >> "$META_DIR/local/session.log"
-        # Durable lineage: a UUID change the launch path did not pre-record is
-        # a rotation cs discovered (CC's context-limit fork, or a manual
-        # resume of a different conversation). Shape shared with bin/cs's
-        # _timeline_rotated.
+        # Durable lineage: a UUID change the launch path did not pre-record.
+        # With a marker resolved above it is a deliberate in-process rotation
+        # (/clear) and carries the handoff name; otherwise it is one cs
+        # discovered — CC's context-limit fork, or a manual resume of a
+        # different conversation. Shape shared with bin/cs's _timeline_rotated.
         jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
                --arg from "${RECORDED_UUID:-}" \
                --arg to "$SESSION_ID" \
-               '{ts: $ts, event: "rotated", from: $from, to: $to, reason: "rebind"}' \
+               --arg handoff "$ROTATION_HANDOFF" \
+               '{ts: $ts, event: "rotated", from: $from, to: $to,
+                 reason: (if $handoff == "" then "rebind" else "handoff" end)}
+                + (if $handoff == "" then {} else {handoff: $handoff} end)' \
             >> "$META_DIR/timeline.jsonl" 2>/dev/null || true
         # Follow the autosave ref to the new UUID so a future crash of this
         # (continued) conversation is recoverable under its live identity. A

@@ -469,10 +469,43 @@ run_test test_rotation_preamble_wins_over_fresh_rebind_block
 run_test test_fresh_rebind_block_survives_without_handoff
 run_test test_stale_marker_is_removed_silently
 run_test test_handoff_with_hostile_purpose_survives_flip
+# A /clear rotation has no launcher to emit the event, so the hook's rebind
+# block is the sole emitter and must not label a deliberate rotation "rebind".
+test_clear_rotation_records_handoff_reason() {
+    _rot_hook_session "rot-label"
+    _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "unconsumed"
+    printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
+    _start_hook "$UUID_B" clear >/dev/null || return 1
+    local ev
+    ev=$(_timeline | jq -c 'select(.event == "rotated")' 2>/dev/null | tail -1)
+    assert_output_contains "$ev" '"reason":"handoff"' "clear rotation is a handoff" || return 1
+    assert_output_contains "$ev" '"handoff":"2026-07-16-test.md"' "event names the handoff" || return 1
+}
+
+# A fork with an armed marker rebinds but does not rotate: labelling it
+# "handoff" would record a rotation that never happened, and the real /clear
+# would then emit a second event for the same file.
+test_fork_with_armed_marker_records_rebind() {
+    _rot_hook_session "rot-label-fork"
+    _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "unconsumed"
+    printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
+    _start_hook "$UUID_B" fork >/dev/null || return 1
+    local ev
+    ev=$(_timeline | jq -c 'select(.event == "rotated")' 2>/dev/null | tail -1)
+    assert_output_contains "$ev" '"reason":"rebind"' "a fork is not a handoff rotation" || return 1
+    if printf '%s' "$ev" | grep -q '"handoff"'; then
+        echo "  FAIL: a fork event must carry no handoff field"; return 1
+    fi
+}
+
 run_test test_clear_source_consumes_pending_handoff
 run_test test_compact_and_fork_leave_marker_armed
 run_test test_spent_handoff_is_not_reconsumed
 run_test test_body_quote_does_not_revive_a_discarded_handoff
+run_test test_clear_rotation_records_handoff_reason
+run_test test_fork_with_armed_marker_records_rebind
 
 # ============================================================================
 # Cycle 5: context nudge (Stop hook)
