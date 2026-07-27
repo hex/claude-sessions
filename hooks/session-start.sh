@@ -493,15 +493,35 @@ if [ -n "$ROTATION_HANDOFF" ]; then
     rm -f "$PENDING_MARKER" 2>/dev/null || true
 fi
 
-# The rotation preamble and the fresh-rebind notice are mutually exclusive:
-# the rotate path also exports CS_FRESH_REBIND, and "clean break" plus
+# The clean-break notice belongs only where the conversation genuinely starts
+# clean: a /clear, or a launch that rebound to a fresh UUID. CS_FRESH_REBIND is
+# exported before exec and so outlives the launch, which is why the source
+# matters too — on its own it would tell a later /compact of a rebound session
+# that its transcript is not loaded while it still is.
+#
+# An explicit if inside the case arm: `[ ... ] && VAR=1` as an arm's last
+# command returns 1 under set -e.
+FRESH_NOTICE=""
+case "$SOURCE" in
+    clear)
+        FRESH_NOTICE=1
+        ;;
+    startup)
+        if [ "${CS_FRESH_REBIND:-}" = "1" ]; then
+            FRESH_NOTICE=1
+        fi
+        ;;
+esac
+
+# The rotation preamble and the fresh-conversation notice are mutually
+# exclusive: the rotate path is also a fresh start, and "clean break" plus
 # "continue per the handoff" would contradict each other.
 if [ -n "$ROTATION_HANDOFF" ]; then
     CONTEXT="${CONTEXT}
 
 --- Conversation Rotation ---
 This fresh conversation continues rotated work. Read .cs/handoffs/$ROTATION_HANDOFF FIRST — it is the previous conversation's handoff; continue per its next-step section. The prior transcript is not loaded; the handoff plus .cs/memory/narrative.*.md carry the context."
-elif [ "${CS_FRESH_REBIND:-}" = "1" ]; then
+elif [ -n "$FRESH_NOTICE" ]; then
     CONTEXT="${CONTEXT}
 
 --- Fresh Conversation ---

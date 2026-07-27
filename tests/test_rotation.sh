@@ -504,8 +504,32 @@ run_test test_clear_source_consumes_pending_handoff
 run_test test_compact_and_fork_leave_marker_armed
 run_test test_spent_handoff_is_not_reconsumed
 run_test test_body_quote_does_not_revive_a_discarded_handoff
+test_fresh_notice_absent_on_compact() {
+    _rot_hook_session "rot-fresh-compact"
+    printf 'claude_session_id: %s\n' "$UUID_B" > "$CLAUDE_SESSION_META_DIR/local/state"
+    export CS_FRESH_REBIND=1
+    local out
+    out=$(_start_hook "$UUID_B" compact) || { unset CS_FRESH_REBIND; return 1; }
+    unset CS_FRESH_REBIND
+    if printf '%s' "$out" | grep -q "Fresh Conversation"; then
+        echo "  FAIL: a compaction continues the conversation — no clean-break notice"
+        return 1
+    fi
+}
+
+# A /clear IS a clean break, whether or not the launch was a rebind.
+test_fresh_notice_present_on_clear_without_rebind_env() {
+    _rot_hook_session "rot-fresh-clear"
+    printf 'claude_session_id: %s\n' "$UUID_B" > "$CLAUDE_SESSION_META_DIR/local/state"
+    local out
+    out=$(_start_hook "$UUID_B" clear) || return 1
+    assert_output_contains "$out" "Fresh Conversation" "clear is a clean break" || return 1
+}
+
 run_test test_clear_rotation_records_handoff_reason
 run_test test_fork_with_armed_marker_records_rebind
+run_test test_fresh_notice_absent_on_compact
+run_test test_fresh_notice_present_on_clear_without_rebind_env
 
 # ============================================================================
 # Cycle 5: context nudge (Stop hook)
