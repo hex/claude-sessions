@@ -380,6 +380,27 @@ run_test test_declining_resume_disarms_the_marker
 run_test test_marker_without_pending_handoff_is_disarmed
 run_test test_r_without_a_pending_handoff_disarms_the_marker
 run_test test_discard_does_not_offer_the_retired_handoff
+
+# An orphaned marker names a handoff that is already spent, so no handoff is
+# left to rotate into. Every answer that disarms one must say so, not offer r.
+test_orphaned_marker_disarm_does_not_offer_a_spent_handoff() {
+    local ans
+    for ans in "" n d r; do
+        local name="rot-orphan-${ans:-default}"
+        _rot_session "$name"
+        local dir="$CS_SESSIONS_ROOT/$name"
+        _seed_handoff "$dir" "2026-07-16-test.md" "consumed"
+        printf '%s\n' "2026-07-16-test.md" > "$dir/.cs/local/pending-handoff"
+        local output
+        output=$("$CS_BIN" "$name" <<< "$ans" 2>&1) || true
+        assert_output_contains "$output" "Rotation marker disarmed" \
+            "answer '${ans:-default}' announces the orphaned disarm" || return 1
+        assert_output_not_contains "$output" "stays pending" \
+            "answer '${ans:-default}' must not offer a handoff that is already spent" || return 1
+    done
+}
+
+run_test test_orphaned_marker_disarm_does_not_offer_a_spent_handoff
 run_test test_rotate_answer_consumes_pending_handoff
 run_test test_rotate_answer_auto_starts_handoff
 run_test test_continue_and_no_leave_handoff_unconsumed

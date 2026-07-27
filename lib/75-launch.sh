@@ -7,16 +7,18 @@
 # handoff the user already passed on. Announced, because a silent removal turns
 # the /clear route into a no-op the user cannot explain.
 #
-# Pass "retired" when the caller goes on to retire the handoff itself: the
-# rotate-into-it-later guidance holds for every decline that leaves the handoff
-# file untouched, and contradicts the caller's own discard notice otherwise.
-_disarm_rotation_marker() {  # session_dir [retired]
+# Pass the handoff that is still pending AFTER this answer, empty when none is.
+# Only then does pointing at r hold: an orphaned marker names a spent handoff,
+# the r fallthrough is reached precisely because no handoff was offered, and d
+# retires the one it had. Offering r in those cases sends the user back for
+# something that no longer exists.
+_disarm_rotation_marker() {  # session_dir [surviving_handoff]
     local marker="$1/.cs/local/pending-handoff"
     [ -f "$marker" ] || return 0
     rm -f "$marker" 2>/dev/null || true
     # An explicit if: `[ ... ] && return 0` as the last command returns 1 when
     # the test fails, which set -e reads as this function failing.
-    if [ "${2:-}" = "retired" ]; then
+    if [ -z "${2:-}" ]; then
         printf "${DIM}Rotation marker disarmed.${NC}\n"
         return 0
     fi
@@ -275,7 +277,7 @@ launch_claude_code() {
         fi
         case "$response" in
             [nN]|[nN][oO])
-                _disarm_rotation_marker "$session_dir"
+                _disarm_rotation_marker "$session_dir" "$pending_handoff"
                 continue_flag=""
                 ;;
             [rR])
@@ -295,8 +297,10 @@ launch_claude_code() {
                 fi
                 ;;
             [dD])
+                # Nothing survives d: it retires the handoff it was offered, and
+                # an orphaned marker had none to begin with.
+                _disarm_rotation_marker "$session_dir"
                 if [ -n "$pending_handoff" ]; then
-                    _disarm_rotation_marker "$session_dir" retired
                     # Flip only the first status line (the frontmatter's); a
                     # body quoting the contract line flush-left stays intact.
                     awk '
@@ -310,10 +314,6 @@ launch_claude_code() {
                         && mv "$pending_handoff.tmp" "$pending_handoff" 2>/dev/null \
                         || rm -f "$pending_handoff.tmp" 2>/dev/null || true
                     printf "${DIM}Handoff discarded:${NC} %s\n" "$(basename "$pending_handoff")"
-                else
-                    # An orphaned marker (its handoff already spent) leaves the
-                    # prompt at [Y/n], so nothing is retired here.
-                    _disarm_rotation_marker "$session_dir"
                 fi
                 # d without a pending handoff was never offered: treat as the
                 # default resume answer.
@@ -326,7 +326,7 @@ launch_claude_code() {
             *)
                 # Also the unattended spawn path, which takes this default
                 # without asking.
-                _disarm_rotation_marker "$session_dir"
+                _disarm_rotation_marker "$session_dir" "$pending_handoff"
                 # Prefer --resume <uuid> when the session has a recorded UUID:
                 # it names the exact conversation, vs --continue which means
                 # "most recent" and may resolve to a sibling Claude session

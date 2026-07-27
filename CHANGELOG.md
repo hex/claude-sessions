@@ -4,6 +4,12 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.7.26
+
+### Fixes
+
+- **A disarmed rotation marker no longer points at a handoff that is gone.** v2026.7.25 stopped the `d` answer claiming the handoff it had just discarded was still pending, but keyed the notice on which answer was given rather than on whether a handoff actually survives it. The wrong wording therefore remained on the `r` fallthrough (reached precisely because no handoff was offered) and on `n`, `Y`, and the unattended default whenever the marker was orphaned, meaning its handoff had already been consumed elsewhere. In each of those the notice offered `r` for something that no longer exists. The notice is now chosen by the handoff that is still pending after the answer, which is the condition it was always describing.
+
 ## 2026.7.25
 
 Rotating a heavy conversation into a fresh one no longer means leaving Claude Code.
