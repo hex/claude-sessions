@@ -276,7 +276,8 @@ launch_claude_code() {
                     _exec_fresh_rebind "$session_dir" handoff "$(basename "$pending_handoff")" "$spawn_kick"
                 fi
                 # r without a pending handoff was never offered: treat as the
-                # default resume answer.
+                # default resume answer, disarm included.
+                _disarm_rotation_marker "$session_dir"
                 if [ -n "$claude_session_id" ]; then
                     continue_flag="--resume $claude_session_id"
                 else

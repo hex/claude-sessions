@@ -40,9 +40,16 @@ should do. If the user did not give one, ask before writing anything.
    4. Problem Solving; 5. Pending Tasks; 6. Current Work; 7. Next Step.
    Write for a successor with zero conversation memory.
 4. Retire your own leftovers: for every OTHER file in `.cs/handoffs/` whose
-   frontmatter still says `status: unconsumed`, flip that one frontmatter
-   line to `status: superseded`. An older pending handoff otherwise keeps the
-   launch prompt offering `[Y/n/r/d]` for context that is out of date.
+   frontmatter still says `status: unconsumed` AND whose `parent:` is the
+   same UUID you wrote in step 3, flip that one frontmatter line to
+   `status: superseded`. Rotating twice from one conversation otherwise
+   leaves the first handoff pending forever, keeping the launch prompt
+   offering `[Y/n/r/d]` for context that is out of date.
+
+   Match on `parent:` and nothing else. A handoff from another conversation —
+   including a co-worker's, since `.cs/handoffs/` is shared — may be armed
+   and about to be consumed; superseding it would silently drop their
+   rotation.
 5. Commit the handoff and any supersedings (tracked session state, like
    narratives). Stage those paths by name.
 6. Arm the handoff: write its basename (no path) to

@@ -344,8 +344,21 @@ test_marker_without_pending_handoff_is_disarmed() {
 
 run_test test_prompt_unchanged_without_handoff
 run_test test_esc_at_continue_prompt_cancels_launch
+# r is only offered alongside a pending handoff. Pressed without one it falls
+# through to the resume default, which is a decline like any other.
+test_r_without_a_pending_handoff_disarms_the_marker() {
+    _rot_session "rot-disarm-r"
+    local dir="$CS_SESSIONS_ROOT/rot-disarm-r"
+    _seed_handoff "$dir" "2026-07-16-test.md" "consumed"
+    printf '%s\n' "2026-07-16-test.md" > "$dir/.cs/local/pending-handoff"
+    "$CS_BIN" rot-disarm-r <<< "r" >/dev/null 2>&1 || true
+    [ ! -f "$dir/.cs/local/pending-handoff" ] \
+        || { echo "  FAIL: r without a pending handoff must disarm like any decline"; return 1; }
+}
+
 run_test test_declining_resume_disarms_the_marker
 run_test test_marker_without_pending_handoff_is_disarmed
+run_test test_r_without_a_pending_handoff_disarms_the_marker
 run_test test_rotate_answer_consumes_pending_handoff
 run_test test_rotate_answer_auto_starts_handoff
 run_test test_continue_and_no_leave_handoff_unconsumed
@@ -573,10 +586,35 @@ test_fresh_notice_present_on_clear_without_rebind_env() {
     assert_output_contains "$out" "Fresh Conversation" "clear is a clean break" || return 1
 }
 
+# The marker names a basename. A path in it must not reach outside the
+# handoff store — the file it lands on would be rewritten and named to Claude.
+test_marker_with_a_path_is_rejected() {
+    _rot_hook_session "rot-traverse"
+    local outside="$CLAUDE_SESSION_DIR/outside.md"
+    cat > "$outside" << 'EOF'
+---
+status: unconsumed
+---
+EOF
+    mkdir -p "$CLAUDE_SESSION_DIR/.cs/handoffs"
+    printf '../../outside.md\n' > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_B" > "$CLAUDE_SESSION_META_DIR/local/state"
+    local out
+    out=$(_start_hook "$UUID_B" clear) || return 1
+    if printf '%s' "$out" | grep -q "Conversation Rotation"; then
+        echo "  FAIL: a marker naming a path must not rotate"; return 1
+    fi
+    assert_file_not_contains "$outside" "status: consumed" \
+        "a file outside the handoff store must not be rewritten" || return 1
+    [ ! -f "$CLAUDE_SESSION_META_DIR/local/pending-handoff" ] \
+        || { echo "  FAIL: a marker naming a path is stale and must be removed"; return 1; }
+}
+
 run_test test_clear_rotation_records_handoff_reason
 run_test test_fork_with_armed_marker_records_rebind
 run_test test_fresh_notice_absent_on_compact
 run_test test_fresh_notice_present_on_clear_without_rebind_env
+run_test test_marker_with_a_path_is_rejected
 
 # ============================================================================
 # Cycle 5: context nudge (Stop hook)

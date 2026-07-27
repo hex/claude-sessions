@@ -320,7 +320,9 @@ Rotation handoff pending: 2026-07-16-continue-f5-plan.md
 Continue previous conversation? [Y/n/r/d] (r = fresh conversation with handoff, d = discard handoff)
 ```
 
-`r` does exactly what `/clear` would have. `Y` (or Enter) resumes as usual and
+`r` rotates the same way, and additionally hands the fresh conversation a
+first prompt so it starts on the handoff without you typing anything — the one
+thing `/clear` cannot do. `Y` (or Enter) resumes as usual and
 `n` starts fresh — both disarm the marker and say so, leaving the handoff
 itself pending so a later rotate can re-arm it. `d` discards the handoff
 outright. With more than one unconsumed handoff, the lexicographically last

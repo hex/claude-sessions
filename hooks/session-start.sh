@@ -282,6 +282,12 @@ case "$SOURCE" in
     startup|clear)
         if [ -f "$PENDING_MARKER" ]; then
             HANDOFF_BASENAME=$(cat "$PENDING_MARKER" 2>/dev/null | tr -d '[:space:]' || true)
+            # The marker names a basename. Anything with a separator would
+            # resolve outside the handoff store, and the file it landed on
+            # would be rewritten and then named to Claude as the handoff.
+            case "$HANDOFF_BASENAME" in
+                */*) HANDOFF_BASENAME="" ;;
+            esac
             HANDOFF_FILE="$META_DIR/handoffs/$HANDOFF_BASENAME"
             if [ -n "$HANDOFF_BASENAME" ] && [ -f "$HANDOFF_FILE" ] \
                 && _handoff_is_unconsumed "$HANDOFF_FILE"; then
