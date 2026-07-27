@@ -135,8 +135,21 @@ test_rotate_skill_registered_in_both_manifests() {
         || { echo "  FAIL: rotate missing from install.sh CS_SKILLS"; return 1; }
 }
 
+test_rotate_skill_documents_the_clear_route() {
+    local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
+    assert_file_contains "$skill" "pending-handoff" \
+        "skill arms the marker itself" || return 1
+    assert_file_contains "$skill" "/clear" \
+        "skill points the user at the in-process route" || return 1
+    assert_file_contains "$skill" "superseded" \
+        "skill retires its own stale handoffs" || return 1
+    assert_file_not_contains "$skill" "never edits .cs/local/state" \
+        "the stale no-state contract is gone" || return 1
+}
+
 run_test test_rotate_skill_exists_with_frontmatter
 run_test test_rotate_skill_registered_in_both_manifests
+run_test test_rotate_skill_documents_the_clear_route
 
 # ============================================================================
 # Cycle 3: three-way launch prompt
