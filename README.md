@@ -47,7 +47,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 - **Walk-away supervision** - a draining queue is watched by circuit breakers: too many tool failures in one task (default 5, `CS_QUEUE_MAX_FAILURES`), context past 85% (`CS_QUEUE_MAX_CTX`), or the 5-hour rate-limit window past 85% (`CS_QUEUE_MAX_5H`) parks the queue with a debrief instead of feeding the next task — nothing is lost, `cs -queue start` re-arms. Everything that happened while you were away (tasks done, breaker trips) lands in a per-machine journal: a one-line digest surfaces once on your return, and `cs -queue log` shows the full history.
 - **Cross-session mail** - `cs -msg <session> "note"` drops a message in another session's machine-local mailbox (`--kind notify|task|text|result`; `task` also lands in its walk-away queue). The recipient sees the unread bodies inlined into its context on every prompt until it reads them with `cs -msg` (bounded to 5, truncated; `task` kind shows a count-only label since it is already queued). Same-machine only; attribution is unauthenticated by design.
 - **tmux spawner** - `cs -spawn <name>` opens a session in a cs-owned tmux session (`tmux attach -t cs`); `--task "..."` seeds and arms its walk-away queue so it starts working unattended, and the spawner hears back over cross-session mail when the queue drains. Same-machine only.
-- **Conversation rotation** - a heavy conversation can hand off to a fresh one without losing context: the `rotate` skill (self-invoked, or nudged once per conversation past 80% context) writes a lineage-stamped handoff to `.cs/handoffs/`, and the next `cs <name>` launch offers `[Y/n/r/d]` — `r` starts clean from it, `d` discards it. `cs -conversations` shows the resulting chain.
+- **Conversation rotation** - a heavy conversation can hand off to a fresh one without losing context: the `rotate` skill (self-invoked, or nudged once per conversation past 80% context) writes a lineage-stamped handoff to `.cs/handoffs/` and arms it, then `/clear` continues from it without leaving Claude Code. Exiting and answering `r` at the next `cs <name>` launch does the same; `d` discards the handoff. `cs -conversations` shows the resulting chain.
 - **Voice drafting** - `/voice` drafts messages, replies, PR text, or docs in your own writing voice. On first use it distills your typed messages from Claude Code transcripts into an editable profile at `~/.claude-sessions/.voice/profile.md`; drafting loads the profile and writes as you.
 - **iTerm2 awareness** - inside iTerm2 the session color tints the tab (native escapes, reset on exit), and with iTerm2 shell integration installed a finished turn bounces the dock until your next prompt. `CS_NO_ITERM2=1` disables; `cs -doctor` reports the integration surface.
 - **Bash command audit trail** - Every Bash command Claude runs is logged to `.cs/local/session.log` (machine-local, never git-synced) with timestamps
@@ -302,24 +302,32 @@ cs -conversations                     # show this session's conversation chain
 
 Invoke the `rotate` skill yourself, or accept it when the narrative-reminder
 nudges you (see below). It distills the live conversation into a
-lineage-stamped handoff — parent UUID, purpose, and a continuation plan — and
-commits it to `.cs/handoffs/YYYY-MM-DD-<slug>.md`. The handoff only gets
-written; the conversation keeps running until you leave it.
+lineage-stamped handoff — parent UUID, purpose, and a continuation plan —
+commits it to `.cs/handoffs/YYYY-MM-DD-<slug>.md`, and arms it by naming it in
+`.cs/local/pending-handoff`. Any earlier handoff of its own that is still
+pending is flipped to `superseded`. The conversation keeps running; nothing
+has ended yet.
 
-The next `cs <name>` launch notices the pending handoff and adds a third
-answer to the resume prompt:
+Then rotate with **`/clear`**. The fresh conversation reads the handoff and
+continues from its next-step section — the old transcript is not loaded. It
+waits for your next message, which can simply be what you want done next.
+
+If you would rather stop for the day, the handoff stays armed and the next
+`cs <name>` launch offers a third answer at the resume prompt:
 
 ```
 Rotation handoff pending: 2026-07-16-continue-f5-plan.md
 Continue previous conversation? [Y/n/r/d] (r = fresh conversation with handoff, d = discard handoff)
 ```
 
-`Y` (or Enter) resumes as usual and leaves the handoff waiting; `n` starts
-fresh with no memory of it; `r` opens a fresh conversation that immediately
-reads the handoff and continues from its next-step section, no first message
-needed (the old transcript is not loaded). With more
-than one unconsumed handoff, the lexicographically last basename wins — the
-`YYYY-MM-DD-` prefix makes that the newest.
+`r` does exactly what `/clear` would have. `Y` (or Enter) resumes as usual and
+`n` starts fresh — both disarm the marker and say so, leaving the handoff
+itself pending so a later rotate can re-arm it. `d` discards the handoff
+outright. With more than one unconsumed handoff, the lexicographically last
+basename wins — the `YYYY-MM-DD-` prefix makes that the newest.
+
+A compaction or a context-limit fork between arming and rotating leaves the
+marker alone, so a pending rotation survives either.
 
 At 60% context, the narrative-reminder Stop hook surfaces a
 once-per-conversation heads-up so you can steer toward a natural stopping
@@ -332,7 +340,8 @@ owns the turn loop while it runs.
 
 Every rotation, deliberate or not, appends a `rotated` event to
 `.cs/timeline.jsonl` with the old and new conversation UUIDs and a reason:
-`handoff` (the `r` answer), `declined-resume` (`n` at the resume prompt),
+`handoff` (a `/clear` or `r` rotation, naming the handoff), `declined-resume`
+(`n` at the resume prompt),
 `resume-failed` (`--resume`/`--continue` errored and cs fell back to fresh),
 or `rebind` (SessionStart found a UUID mismatch — Claude Code forked a new
 conversation, e.g. past its own context limit). `cs -conversations` reads

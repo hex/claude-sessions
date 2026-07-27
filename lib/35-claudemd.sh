@@ -182,7 +182,7 @@ Treat these files as a lab notebook - document as you go, not just at the end.
 
 When the session is complete, use the `/wrap` command to distill durable memory entries and generate an intelligent summary of the entire session (.cs/summary.md). Use `/summary` for the narrative alone, or `/sweep` for the memory pass alone. Mid-session, use `/checkpoint <label>` to snapshot git state and the narrative — e.g. before a risky refactor or destructive operation, and after reaching a green milestone (tests passing, a feature working) — saved under .cs/checkpoints/.
 
-When a conversation's context grows heavy or a work phase completes, invoke the `rotate` skill: it writes a handoff to .cs/handoffs/ so the user can reopen the session and answer `r` for a fresh conversation that continues from it. `cs -conversations` shows the session's conversation chain.
+When a conversation's context grows heavy or a work phase completes, invoke the `rotate` skill: it writes a handoff to .cs/handoffs/ and arms it, so the user can run `/clear` to continue in a fresh conversation without leaving Claude Code (exiting and answering `r` at the next launch does the same). `cs -conversations` shows the session's conversation chain.
 
 ## Secure Secrets Handling
 
