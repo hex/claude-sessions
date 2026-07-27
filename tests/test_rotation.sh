@@ -311,8 +311,8 @@ run_test test_discard_flip_spares_a_body_quote
 # Cycle 4: SessionStart consumes the pending handoff
 # ============================================================================
 
-_start_hook() {  # session_id [extra env pre-exported by caller]
-    echo "{\"session_id\":\"$1\",\"cwd\":\"$CLAUDE_SESSION_DIR\",\"source\":\"startup\"}" \
+_start_hook() {  # session_id [source] [extra env pre-exported by caller]
+    echo "{\"session_id\":\"$1\",\"cwd\":\"$CLAUDE_SESSION_DIR\",\"source\":\"${2:-startup}\"}" \
         | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null
 }
 
@@ -394,11 +394,85 @@ EOF
     assert_file_contains "$f" 'Body with .(subshell) and "quotes".' "body intact" || return 1
 }
 
+# The marker is consumable only where a genuinely fresh conversation begins.
+test_clear_source_consumes_pending_handoff() {
+    _rot_hook_session "rot-clear"
+    _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "unconsumed"
+    printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
+    local out
+    out=$(_start_hook "$UUID_B" clear) || return 1
+    assert_output_contains "$out" "Conversation Rotation" "clear consumes the marker" || return 1
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/handoffs/2026-07-16-test.md" "status: consumed" \
+        "frontmatter flipped on clear" || return 1
+    [ ! -f "$CLAUDE_SESSION_META_DIR/local/pending-handoff" ] \
+        || { echo "  FAIL: marker must be removed after a clear consumption"; return 1; }
+}
+
+# compact and fork keep the transcript loaded, so consuming there would inject
+# "the prior transcript is not loaded" into a conversation where it is. The
+# marker is left ARMED — the pending rotation is still legitimate.
+test_compact_and_fork_leave_marker_armed() {
+    local src
+    for src in compact fork resume; do
+        _rot_hook_session "rot-armed-$src"
+        _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "unconsumed"
+        printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+        printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
+        local out
+        out=$(_start_hook "$UUID_B" "$src") || return 1
+        if printf '%s' "$out" | grep -q "Conversation Rotation"; then
+            echo "  FAIL: source $src must not consume the marker"; return 1
+        fi
+        assert_file_contains "$CLAUDE_SESSION_META_DIR/handoffs/2026-07-16-test.md" "status: unconsumed" \
+            "$src leaves the handoff unconsumed" || return 1
+        [ -f "$CLAUDE_SESSION_META_DIR/local/pending-handoff" ] \
+            || { echo "  FAIL: source $src must leave the marker armed"; return 1; }
+    done
+}
+
+# A handoff consumed elsewhere (another machine, then pulled) must not
+# re-inject its preamble, and its status must not be rewritten.
+test_spent_handoff_is_not_reconsumed() {
+    _rot_hook_session "rot-spent"
+    _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "consumed"
+    printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_B" > "$CLAUDE_SESSION_META_DIR/local/state"
+    local out
+    out=$(_start_hook "$UUID_B") || return 1
+    if printf '%s' "$out" | grep -q "Conversation Rotation"; then
+        echo "  FAIL: a spent handoff must not inject a preamble"; return 1
+    fi
+    assert_file_not_contains "$CLAUDE_SESSION_META_DIR/handoffs/2026-07-16-test.md" "consumed_by:" \
+        "no consumer recorded for a spent handoff" || return 1
+    [ ! -f "$CLAUDE_SESSION_META_DIR/local/pending-handoff" ] \
+        || { echo "  FAIL: a marker naming a spent handoff is stale and must be removed"; return 1; }
+}
+
+# The status check is frontmatter-scoped: a body quoting the contract line
+# flush-left must not make a discarded handoff look pending.
+test_body_quote_does_not_revive_a_discarded_handoff() {
+    _rot_hook_session "rot-revive"
+    _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "discarded"
+    printf 'status: unconsumed\n' >> "$CLAUDE_SESSION_DIR/.cs/handoffs/2026-07-16-test.md"
+    printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_B" > "$CLAUDE_SESSION_META_DIR/local/state"
+    local out
+    out=$(_start_hook "$UUID_B") || return 1
+    if printf '%s' "$out" | grep -q "Conversation Rotation"; then
+        echo "  FAIL: a flush-left body quote must not revive a discarded handoff"; return 1
+    fi
+}
+
 run_test test_pending_handoff_is_consumed_and_injected
 run_test test_rotation_preamble_wins_over_fresh_rebind_block
 run_test test_fresh_rebind_block_survives_without_handoff
 run_test test_stale_marker_is_removed_silently
 run_test test_handoff_with_hostile_purpose_survives_flip
+run_test test_clear_source_consumes_pending_handoff
+run_test test_compact_and_fork_leave_marker_armed
+run_test test_spent_handoff_is_not_reconsumed
+run_test test_body_quote_does_not_revive_a_discarded_handoff
 
 # ============================================================================
 # Cycle 5: context nudge (Stop hook)

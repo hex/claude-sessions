@@ -56,6 +56,22 @@ _build_digest() {  # meta_local_dir
         && mv "$qdir/notifications.seen.tmp" "$qdir/notifications.seen" 2>/dev/null || true
 }
 
+# True when a handoff file's YAML frontmatter (line 1 "---" through the next
+# "---") carries status: unconsumed. Scoped to the frontmatter so a body that
+# quotes the contract line flush-left cannot match. Same scan as the launch
+# path's pending-handoff detection (hooks cannot source bin/cs).
+_handoff_is_unconsumed() {  # handoff_file
+    awk '
+        NR==1 {
+            if ($0 != "---") { rc=1; closed=1; exit }
+            next
+        }
+        !closed && $0 == "---" { rc = (matched ? 0 : 1); closed=1; exit }
+        !closed && $0 == "status: unconsumed" { matched=1 }
+        END { if (!closed) rc=1; exit rc }
+    ' "$1" 2>/dev/null
+}
+
 # Verify session directory exists
 if [ ! -d "$SESSION_DIR" ]; then
     # Session directory doesn't exist, something is wrong
@@ -251,6 +267,32 @@ local_state_set() {
 # looks healthy while naming the pre-fork conversation and `cs` resumes
 # stale history. The hook input names the conversation actually running,
 # so it is authoritative on every source.
+# Resolve the pending rotation marker's fate once: the rebind block's timeline
+# label and the consumption block far below both read ROTATION_HANDOFF, so the
+# two cannot drift apart.
+#
+# Source is tested first. On a source that continues an existing conversation
+# the marker is neither inspected nor changed, so a compaction or a
+# context-limit fork between the rotate skill and /clear cannot eat a pending
+# rotation. Only where a genuinely fresh conversation begins does a spent or
+# missing handoff make the marker stale and worth dropping.
+ROTATION_HANDOFF=""
+PENDING_MARKER="$META_DIR/local/pending-handoff"
+case "$SOURCE" in
+    startup|clear)
+        if [ -f "$PENDING_MARKER" ]; then
+            HANDOFF_BASENAME=$(cat "$PENDING_MARKER" 2>/dev/null | tr -d '[:space:]' || true)
+            HANDOFF_FILE="$META_DIR/handoffs/$HANDOFF_BASENAME"
+            if [ -n "$HANDOFF_BASENAME" ] && [ -f "$HANDOFF_FILE" ] \
+                && _handoff_is_unconsumed "$HANDOFF_FILE"; then
+                ROTATION_HANDOFF="$HANDOFF_BASENAME"
+            else
+                rm -f "$PENDING_MARKER" 2>/dev/null || true
+            fi
+        fi
+        ;;
+esac
+
 UUID_RE='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
 if [[ "$SESSION_ID" =~ $UUID_RE ]]; then
     RECORDED_UUID=$(awk '/^claude_session_id:/ { print $2; exit }' "$STATE_FILE" 2>/dev/null || true)
@@ -428,29 +470,22 @@ That command merges the branch into the base session, fuses the session records 
 Do NOT merge $TASK_BRANCH into the base branch manually and do not delete the branch — that bypasses the record fuse and the cleanup. To abandon the feature instead, ask the user to run: cs -rm $CLAUDE_SESSION_NAME — never run this yourself; it deletes this worktree and its session records."
 fi
 
-# Deliberate rotation: the launch's r answer left a pending-handoff marker.
-# Consume it — flip the handoff's frontmatter to consumed, record the
-# consumer, remove the marker — and inject a preamble pointing Claude at the
-# handoff file. A stale marker (file gone) is removed silently.
-ROTATION_HANDOFF=""
-PENDING_MARKER="$META_DIR/local/pending-handoff"
-if [ -f "$PENDING_MARKER" ]; then
-    HANDOFF_BASENAME=$(cat "$PENDING_MARKER" 2>/dev/null | tr -d '[:space:]' || true)
-    HANDOFF_FILE="$META_DIR/handoffs/$HANDOFF_BASENAME"
-    if [ -n "$HANDOFF_BASENAME" ] && [ -f "$HANDOFF_FILE" ]; then
-        ROTATION_HANDOFF="$HANDOFF_BASENAME"
-        awk -v uuid="$SESSION_ID" '
-            !flipped && $0 == "status: unconsumed" {
-                print "status: consumed"
-                print "consumed_by: " uuid
-                flipped = 1
-                next
-            }
-            { print }
-        ' "$HANDOFF_FILE" > "$HANDOFF_FILE.tmp" 2>/dev/null \
-            && mv "$HANDOFF_FILE.tmp" "$HANDOFF_FILE" 2>/dev/null \
-            || rm -f "$HANDOFF_FILE.tmp" 2>/dev/null || true
-    fi
+# Consume the rotation resolved above: flip the handoff's frontmatter to
+# consumed, record the consumer, and drop the marker. Only the first status
+# line (the frontmatter's) flips; a body quoting it flush-left stays intact.
+if [ -n "$ROTATION_HANDOFF" ]; then
+    HANDOFF_FILE="$META_DIR/handoffs/$ROTATION_HANDOFF"
+    awk -v uuid="$SESSION_ID" '
+        !flipped && $0 == "status: unconsumed" {
+            print "status: consumed"
+            print "consumed_by: " uuid
+            flipped = 1
+            next
+        }
+        { print }
+    ' "$HANDOFF_FILE" > "$HANDOFF_FILE.tmp" 2>/dev/null \
+        && mv "$HANDOFF_FILE.tmp" "$HANDOFF_FILE" 2>/dev/null \
+        || rm -f "$HANDOFF_FILE.tmp" 2>/dev/null || true
     rm -f "$PENDING_MARKER" 2>/dev/null || true
 fi
 
