@@ -358,9 +358,28 @@ test_r_without_a_pending_handoff_disarms_the_marker() {
         || { echo "  FAIL: r without a pending handoff must disarm like any decline"; return 1; }
 }
 
+# d retires the handoff, so the disarm notice must not also offer to rotate
+# into it later — that guidance is true for every other decline and false for
+# this one.
+test_discard_does_not_offer_the_retired_handoff() {
+    _rot_session "rot-disarm-discard"
+    local dir="$CS_SESSIONS_ROOT/rot-disarm-discard"
+    _seed_handoff "$dir" "2026-07-16-test.md" "unconsumed"
+    printf '%s\n' "2026-07-16-test.md" > "$dir/.cs/local/pending-handoff"
+    local output
+    output=$("$CS_BIN" rot-disarm-discard <<< "d" 2>&1) || true
+    assert_output_contains "$output" "Rotation marker disarmed" \
+        "d still announces the disarm" || return 1
+    assert_output_contains "$output" "Handoff discarded" \
+        "d retires the handoff" || return 1
+    assert_output_not_contains "$output" "stays pending" \
+        "a discarded handoff must not be described as still pending" || return 1
+}
+
 run_test test_declining_resume_disarms_the_marker
 run_test test_marker_without_pending_handoff_is_disarmed
 run_test test_r_without_a_pending_handoff_disarms_the_marker
+run_test test_discard_does_not_offer_the_retired_handoff
 run_test test_rotate_answer_consumes_pending_handoff
 run_test test_rotate_answer_auto_starts_handoff
 run_test test_continue_and_no_leave_handoff_unconsumed

@@ -4,12 +4,14 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
-## Unreleased
+## 2026.7.25
 
-### Changed
+Rotating a heavy conversation into a fresh one no longer means leaving Claude Code.
+
+### Features
 
 - **Rotation happens in-process.** The `rotate` skill now arms the handoff it writes (naming it in `.cs/local/pending-handoff`), so rotating is `rotate` then `/clear` — no exit, no relaunch, no keypress at the resume prompt. The old exit → relaunch → `r` route still works and is documented as the alternative for when you are stopping anyway; both converge on the same marker. A `/clear` rotation records `reason: handoff` with the handoff name in `cs -conversations`, where it previously appeared as a bare `rebind`.
-- **A second rotation retires the first.** The skill flips its own still-pending handoffs to `superseded`, so a stale one can no longer keep the launch prompt offering `[Y/n/r/d]` for context that is out of date.
+- **A second rotation retires the first.** The skill flips its own still-pending handoffs to `superseded`, so a stale one can no longer keep the launch prompt offering `[Y/n/r/d]` for context that is out of date. Superseding is scoped to the current checkout, so a co-developer's pending handoff is never touched.
 
 ### Fixes
 
@@ -17,6 +19,13 @@ All notable changes to cs are documented here. Release notes are also available 
 - **Handoff consumption checks the handoff's status.** It previously gated only on the marker naming a file that exists. With the marker now armed a turn or more before it is used, a handoff already consumed elsewhere would have re-injected its preamble while the status flip silently did nothing. Consumption additionally requires SessionStart source `startup` or `clear`; on any other source the marker is left untouched, so a compaction or a context-limit fork between arming and rotating cannot eat a pending rotation.
 - **A declined rotation is disarmed, and says so.** Answering `Y`, `n`, or `d` at the resume prompt — or the unattended `cs -spawn` default — drops the marker with a one-line notice. Left armed it would have been consumed by an unrelated `/clear` hours later.
 - **The already-running guard survives a `/clear`.** It matched only the recorded UUID against `ps` argv, which an in-app `/clear` rebinds while the live process's argv still names its launch UUID — so a second `cs <name>` could attach to a live conversation. The session name is matched too, delimited so a name that prefixes another cannot collide.
+- **Discarding a handoff no longer says it stays pending.** Answering `d` retires the handoff, but the disarm notice went on to offer rotating into it later — guidance that holds for every decline which leaves the handoff file untouched, and contradicted the discard notice printed on the very next line.
+- **A marker naming a path is rejected.** A `pending-handoff` containing a basename with `/` or `\` is refused rather than resolved, so a marker cannot direct the hook to rewrite a file outside `.cs/handoffs/`.
+
+### Docs
+
+- `README.md`, `docs/hooks.md`, and `docs/session-layout.md` document the in-process route, the consumption predicate, and the `pending-handoff` marker.
+- The design rationale is recorded in `docs/superpowers/specs/2026-07-27-in-process-rotation-design.md`, including why the `initialUserMessage` phase was dropped: the SessionStart hook output field is stored in a module global whose only reader runs once at REPL bootstrap, so a value emitted on source `clear` is never read. The post-`/clear` conversation therefore waits for your first message rather than acting on its own.
 
 ## 2026.7.24
 

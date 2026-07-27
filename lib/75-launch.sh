@@ -6,10 +6,20 @@
 # in place it would be consumed by an unrelated /clear hours later, injecting a
 # handoff the user already passed on. Announced, because a silent removal turns
 # the /clear route into a no-op the user cannot explain.
-_disarm_rotation_marker() {  # session_dir
+#
+# Pass "retired" when the caller goes on to retire the handoff itself: the
+# rotate-into-it-later guidance holds for every decline that leaves the handoff
+# file untouched, and contradicts the caller's own discard notice otherwise.
+_disarm_rotation_marker() {  # session_dir [retired]
     local marker="$1/.cs/local/pending-handoff"
     [ -f "$marker" ] || return 0
     rm -f "$marker" 2>/dev/null || true
+    # An explicit if: `[ ... ] && return 0` as the last command returns 1 when
+    # the test fails, which set -e reads as this function failing.
+    if [ "${2:-}" = "retired" ]; then
+        printf "${DIM}Rotation marker disarmed.${NC}\n"
+        return 0
+    fi
     printf "${DIM}Rotation marker disarmed; the handoff stays pending — answer r, or re-run the rotate skill.${NC}\n"
 }
 
@@ -285,8 +295,8 @@ launch_claude_code() {
                 fi
                 ;;
             [dD])
-                _disarm_rotation_marker "$session_dir"
                 if [ -n "$pending_handoff" ]; then
+                    _disarm_rotation_marker "$session_dir" retired
                     # Flip only the first status line (the frontmatter's); a
                     # body quoting the contract line flush-left stays intact.
                     awk '
@@ -300,6 +310,10 @@ launch_claude_code() {
                         && mv "$pending_handoff.tmp" "$pending_handoff" 2>/dev/null \
                         || rm -f "$pending_handoff.tmp" 2>/dev/null || true
                     printf "${DIM}Handoff discarded:${NC} %s\n" "$(basename "$pending_handoff")"
+                else
+                    # An orphaned marker (its handoff already spent) leaves the
+                    # prompt at [Y/n], so nothing is retired here.
+                    _disarm_rotation_marker "$session_dir"
                 fi
                 # d without a pending handoff was never offered: treat as the
                 # default resume answer.
