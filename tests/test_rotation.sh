@@ -297,8 +297,42 @@ test_discard_flip_spares_a_body_quote() {
         "flush-left body quote untouched" || return 1
 }
 
+# The allow-list stops a declined marker misfiring immediately (a resumed
+# conversation cannot consume). This closes the deferred misfire: left armed,
+# the marker would be consumed by an unrelated /clear hours later.
+test_declining_resume_disarms_the_marker() {
+    local ans
+    for ans in "" n d; do
+        local name="rot-disarm-${ans:-default}"
+        _rot_session "$name"
+        local dir="$CS_SESSIONS_ROOT/$name"
+        _seed_handoff "$dir" "2026-07-16-test.md" "unconsumed"
+        printf '%s\n' "2026-07-16-test.md" > "$dir/.cs/local/pending-handoff"
+        local output
+        output=$("$CS_BIN" "$name" <<< "$ans" 2>&1) || true
+        [ ! -f "$dir/.cs/local/pending-handoff" ] \
+            || { echo "  FAIL: answer '${ans:-default}' must disarm the marker"; return 1; }
+        assert_output_contains "$output" "Rotation marker disarmed" \
+            "answer '${ans:-default}' announces the disarm" || return 1
+    done
+}
+
+# A marker whose handoff was consumed elsewhere leaves the prompt at [Y/n] —
+# the disarm must not be nested inside the pending-handoff arms.
+test_marker_without_pending_handoff_is_disarmed() {
+    _rot_session "rot-disarm-orphan"
+    local dir="$CS_SESSIONS_ROOT/rot-disarm-orphan"
+    _seed_handoff "$dir" "2026-07-16-test.md" "consumed"
+    printf '%s\n' "2026-07-16-test.md" > "$dir/.cs/local/pending-handoff"
+    "$CS_BIN" rot-disarm-orphan <<< "n" >/dev/null 2>&1 || true
+    [ ! -f "$dir/.cs/local/pending-handoff" ] \
+        || { echo "  FAIL: an orphaned marker must be disarmed too"; return 1; }
+}
+
 run_test test_prompt_unchanged_without_handoff
 run_test test_esc_at_continue_prompt_cancels_launch
+run_test test_declining_resume_disarms_the_marker
+run_test test_marker_without_pending_handoff_is_disarmed
 run_test test_rotate_answer_consumes_pending_handoff
 run_test test_rotate_answer_auto_starts_handoff
 run_test test_continue_and_no_leave_handoff_unconsumed

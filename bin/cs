@@ -4912,6 +4912,18 @@ _theme_from_os_appearance() {
     fi
 }
 
+# Drop a rotation marker the user declined to consume. Armed by the rotate
+# skill for a /clear, or by an earlier r, it must not outlive the answer: left
+# in place it would be consumed by an unrelated /clear hours later, injecting a
+# handoff the user already passed on. Announced, because a silent removal turns
+# the /clear route into a no-op the user cannot explain.
+_disarm_rotation_marker() {  # session_dir
+    local marker="$1/.cs/local/pending-handoff"
+    [ -f "$marker" ] || return 0
+    rm -f "$marker" 2>/dev/null || true
+    printf "${DIM}Rotation marker disarmed; the handoff stays pending — answer r, or re-run the rotate skill.${NC}\n"
+}
+
 launch_claude_code() {
     local session_name="$1"
     local session_dir="$2"
@@ -5156,6 +5168,7 @@ launch_claude_code() {
         fi
         case "$response" in
             [nN]|[nN][oO])
+                _disarm_rotation_marker "$session_dir"
                 continue_flag=""
                 ;;
             [rR])
@@ -5174,6 +5187,7 @@ launch_claude_code() {
                 fi
                 ;;
             [dD])
+                _disarm_rotation_marker "$session_dir"
                 if [ -n "$pending_handoff" ]; then
                     # Flip only the first status line (the frontmatter's); a
                     # body quoting the contract line flush-left stays intact.
@@ -5198,6 +5212,9 @@ launch_claude_code() {
                 fi
                 ;;
             *)
+                # Also the unattended spawn path, which takes this default
+                # without asking.
+                _disarm_rotation_marker "$session_dir"
                 # Prefer --resume <uuid> when the session has a recorded UUID:
                 # it names the exact conversation, vs --continue which means
                 # "most recent" and may resolve to a sibling Claude session
