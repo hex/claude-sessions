@@ -496,8 +496,57 @@ test_live_duplicate_force_overrides() {
         "with --force the live-duplicate refusal must not fire" || return 1
 }
 
+# Build a ps stub whose argv names a session but carries an unrelated UUID —
+# the shape a live conversation takes after an in-app /clear rebinds state.
+_seed_ps_stub_with_name() {  # session_name, launch_uuid
+    local name="$1" uuid="$2"
+    local stub="$TEST_TMPDIR/ps-stub-name"
+    cat > "$stub" << STUB
+#!/usr/bin/env bash
+echo "  47533 ??       0:00.42 claude --name $name --session-id $uuid"
+STUB
+    chmod +x "$stub"
+    echo "$stub"
+}
+
+test_live_duplicate_detected_after_clear_rebind() {
+    local recorded="11111111-2222-4333-8444-555555555555"
+    local launched="99999999-8888-4777-8666-555555555555"
+    _seed_doctor_session "test-session" "$recorded" >/dev/null
+    local stub
+    stub=$(_seed_ps_stub_with_name "test-session" "$launched")
+
+    local output rc=0
+    output=$(CS_PS_BIN="$stub" "$CS_BIN" test-session <<< "" 2>&1) || rc=$?
+
+    if [ "$rc" -eq 0 ]; then
+        echo "  FAIL: a live conversation whose UUID was rebound by /clear must still be detected"
+        echo "    output: $(echo "$output" | tail -5)"
+        return 1
+    fi
+    assert_output_contains "$output" "already running" \
+        "error should call out the live duplicate" || return 1
+}
+
+# A session name that prefixes another session's must not collide.
+test_live_duplicate_ignores_a_longer_sibling_name() {
+    local recorded="11111111-2222-4333-8444-555555555555"
+    local launched="99999999-8888-4777-8666-555555555555"
+    _seed_doctor_session "test-session" "$recorded" >/dev/null
+    local stub
+    stub=$(_seed_ps_stub_with_name "test-session-extra" "$launched")
+
+    local output
+    output=$(CS_PS_BIN="$stub" "$CS_BIN" test-session <<< "" 2>&1) || true
+
+    assert_output_not_contains "$output" "already running" \
+        "a longer sibling name must not block the launch" || return 1
+}
+
 run_test test_live_duplicate_refuses_without_force
 run_test test_live_duplicate_force_overrides
+run_test test_live_duplicate_detected_after_clear_rebind
+run_test test_live_duplicate_ignores_a_longer_sibling_name
 
 # ============================================================================
 # Cycle 7: --name <session-name> passed to claude on every launch path.

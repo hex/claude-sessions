@@ -1,13 +1,13 @@
 ---
 name: rotate
-description: Rotate the current cs conversation - write a lineage-stamped handoff to .cs/handoffs/ so the user can continue in a fresh conversation with context. Invoke when the user asks to rotate, or accepts a context-heavy rotation suggestion.
+description: Rotate the current cs conversation - write a lineage-stamped handoff to .cs/handoffs/, arm it, and tell the user to run /clear so a fresh conversation continues from it. Invoke when the user asks to rotate, or accepts a context-heavy rotation suggestion.
 ---
 
 Rotation ends this conversation's useful life deliberately: you distill the
-work into a handoff file, and the next `cs` launch offers the user a fresh
-conversation seeded with it. This skill only WRITES the handoff — it never
-ends the conversation, never edits .cs/local/state, and never launches
-anything.
+work into a handoff file and arm it, and the next fresh conversation — most
+easily one the user starts with `/clear`, without leaving Claude Code —
+continues from it. This skill writes the handoff and the pending marker. It
+never ends the conversation and never launches anything.
 
 ## Prerequisites
 
@@ -39,10 +39,33 @@ should do. If the user did not give one, ask before writing anything.
    Concepts; 3. Files and Code Sections (with the snippets that matter);
    4. Problem Solving; 5. Pending Tasks; 6. Current Work; 7. Next Step.
    Write for a successor with zero conversation memory.
-4. Commit the handoff (it is tracked session state, like narratives).
-5. Tell the user: exit this conversation, run `cs <session-name>`, and
-   answer `r` at the "Continue previous conversation?" prompt to start
-   fresh from this handoff. Until then the handoff stays pending; answering
-   `Y` keeps this conversation resumable and the handoff waits, and `d`
-   discards the pending handoff (flips it to `status: discarded`) and
-   resumes normally — use it to drop a handoff you no longer want.
+4. Retire this machine's leftovers: for every OTHER file in `.cs/handoffs/`
+   whose frontmatter still says `status: unconsumed`, flip that one
+   frontmatter line to `status: superseded` — but only when its `parent:`
+   UUID appears in `.cs/local/session.log`, which records every conversation
+   this checkout has run (`Session started (... ID: <uuid>)`).
+
+   That file is machine-local, which is the whole point of using it.
+   `.cs/handoffs/` is shared, so a handoff whose parent is absent from the log
+   belongs to a co-worker's checkout, may be armed right now, and must be left
+   alone — superseding it would silently drop their rotation.
+
+   Without this step an abandoned handoff stays pending forever, and the
+   launch prompt keeps offering `[Y/n/r/d]` for context that is out of date.
+   Do not assume a newer handoff simply outranks it: the launcher picks the
+   lexicographically last basename, so among same-day files the slug decides
+   and a stale one can win.
+5. Commit the handoff and any supersedings (tracked session state, like
+   narratives). Stage those paths by name.
+6. Arm the handoff: write its basename (no path) to
+   `.cs/local/pending-handoff`. This is machine-local state — do not commit
+   it, and do not stage it in step 5.
+7. Tell the user: run `/clear` to rotate now — the fresh conversation picks
+   up this handoff automatically, without leaving Claude Code. It will not
+   act until they send their next message, which can simply be what they want
+   done next.
+
+   If they would rather stop for the day, exiting and answering `r` at the
+   next `cs <session-name>` launch does the same thing. Answering `Y` or `n`
+   there disarms the marker (the handoff itself stays pending, so a later
+   rotate can re-arm it), and `d` discards the handoff outright.

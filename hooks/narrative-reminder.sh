@@ -232,7 +232,7 @@ if [ -n "$NUDGE_PCT" ] && [ -n "$NUDGE_UUID" ] && [ "$NUDGE_PCT" -ge "$NUDGE_CTX
     if [ "$NUDGED" != "$NUDGE_UUID" ]; then
         printf '%s\n' "$NUDGE_UUID" > "$QDIR/rotate-nudged.tmp" \
             && mv "$QDIR/rotate-nudged.tmp" "$QDIR/rotate-nudged"
-        REASON="Context is at ${NUDGE_PCT}% — consider rotating this conversation. Invoke the rotate skill to distill a handoff into .cs/handoffs/; the user can then reopen the session and answer r for a fresh conversation that continues from it. One-time notice for this conversation; if now is a bad time, simply continue."
+        REASON="Context is at ${NUDGE_PCT}% — consider rotating this conversation. Invoke the rotate skill to distill a handoff into .cs/handoffs/ and arm it; the user then runs /clear to continue in a fresh conversation, without leaving Claude Code. One-time notice for this conversation; if now is a bad time, simply continue."
         jq -nc --arg r "$REASON" '{decision: "block", reason: $r}'
         exit 0
     fi

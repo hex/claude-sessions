@@ -135,8 +135,23 @@ test_rotate_skill_registered_in_both_manifests() {
         || { echo "  FAIL: rotate missing from install.sh CS_SKILLS"; return 1; }
 }
 
+test_rotate_skill_documents_the_clear_route() {
+    local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
+    assert_file_contains "$skill" "pending-handoff" \
+        "skill arms the marker itself" || return 1
+    assert_file_contains "$skill" "/clear" \
+        "skill points the user at the in-process route" || return 1
+    assert_file_contains "$skill" "superseded" \
+        "skill retires its own stale handoffs" || return 1
+    assert_file_contains "$skill" "session.log" \
+        "superseding is scoped by this machine's own conversation log" || return 1
+    assert_file_not_contains "$skill" "never edits .cs/local/state" \
+        "the stale no-state contract is gone" || return 1
+}
+
 run_test test_rotate_skill_exists_with_frontmatter
 run_test test_rotate_skill_registered_in_both_manifests
+run_test test_rotate_skill_documents_the_clear_route
 
 # ============================================================================
 # Cycle 3: three-way launch prompt
@@ -297,8 +312,55 @@ test_discard_flip_spares_a_body_quote() {
         "flush-left body quote untouched" || return 1
 }
 
+# The allow-list stops a declined marker misfiring immediately (a resumed
+# conversation cannot consume). This closes the deferred misfire: left armed,
+# the marker would be consumed by an unrelated /clear hours later.
+test_declining_resume_disarms_the_marker() {
+    local ans
+    for ans in "" n d; do
+        local name="rot-disarm-${ans:-default}"
+        _rot_session "$name"
+        local dir="$CS_SESSIONS_ROOT/$name"
+        _seed_handoff "$dir" "2026-07-16-test.md" "unconsumed"
+        printf '%s\n' "2026-07-16-test.md" > "$dir/.cs/local/pending-handoff"
+        local output
+        output=$("$CS_BIN" "$name" <<< "$ans" 2>&1) || true
+        [ ! -f "$dir/.cs/local/pending-handoff" ] \
+            || { echo "  FAIL: answer '${ans:-default}' must disarm the marker"; return 1; }
+        assert_output_contains "$output" "Rotation marker disarmed" \
+            "answer '${ans:-default}' announces the disarm" || return 1
+    done
+}
+
+# A marker whose handoff was consumed elsewhere leaves the prompt at [Y/n] —
+# the disarm must not be nested inside the pending-handoff arms.
+test_marker_without_pending_handoff_is_disarmed() {
+    _rot_session "rot-disarm-orphan"
+    local dir="$CS_SESSIONS_ROOT/rot-disarm-orphan"
+    _seed_handoff "$dir" "2026-07-16-test.md" "consumed"
+    printf '%s\n' "2026-07-16-test.md" > "$dir/.cs/local/pending-handoff"
+    "$CS_BIN" rot-disarm-orphan <<< "n" >/dev/null 2>&1 || true
+    [ ! -f "$dir/.cs/local/pending-handoff" ] \
+        || { echo "  FAIL: an orphaned marker must be disarmed too"; return 1; }
+}
+
 run_test test_prompt_unchanged_without_handoff
 run_test test_esc_at_continue_prompt_cancels_launch
+# r is only offered alongside a pending handoff. Pressed without one it falls
+# through to the resume default, which is a decline like any other.
+test_r_without_a_pending_handoff_disarms_the_marker() {
+    _rot_session "rot-disarm-r"
+    local dir="$CS_SESSIONS_ROOT/rot-disarm-r"
+    _seed_handoff "$dir" "2026-07-16-test.md" "consumed"
+    printf '%s\n' "2026-07-16-test.md" > "$dir/.cs/local/pending-handoff"
+    "$CS_BIN" rot-disarm-r <<< "r" >/dev/null 2>&1 || true
+    [ ! -f "$dir/.cs/local/pending-handoff" ] \
+        || { echo "  FAIL: r without a pending handoff must disarm like any decline"; return 1; }
+}
+
+run_test test_declining_resume_disarms_the_marker
+run_test test_marker_without_pending_handoff_is_disarmed
+run_test test_r_without_a_pending_handoff_disarms_the_marker
 run_test test_rotate_answer_consumes_pending_handoff
 run_test test_rotate_answer_auto_starts_handoff
 run_test test_continue_and_no_leave_handoff_unconsumed
@@ -311,8 +373,8 @@ run_test test_discard_flip_spares_a_body_quote
 # Cycle 4: SessionStart consumes the pending handoff
 # ============================================================================
 
-_start_hook() {  # session_id [extra env pre-exported by caller]
-    echo "{\"session_id\":\"$1\",\"cwd\":\"$CLAUDE_SESSION_DIR\",\"source\":\"startup\"}" \
+_start_hook() {  # session_id [source] [extra env pre-exported by caller]
+    echo "{\"session_id\":\"$1\",\"cwd\":\"$CLAUDE_SESSION_DIR\",\"source\":\"${2:-startup}\"}" \
         | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null
 }
 
@@ -394,11 +456,190 @@ EOF
     assert_file_contains "$f" 'Body with .(subshell) and "quotes".' "body intact" || return 1
 }
 
+# The marker is consumable only where a genuinely fresh conversation begins.
+test_clear_source_consumes_pending_handoff() {
+    _rot_hook_session "rot-clear"
+    _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "unconsumed"
+    printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
+    local out
+    out=$(_start_hook "$UUID_B" clear) || return 1
+    assert_output_contains "$out" "Conversation Rotation" "clear consumes the marker" || return 1
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/handoffs/2026-07-16-test.md" "status: consumed" \
+        "frontmatter flipped on clear" || return 1
+    [ ! -f "$CLAUDE_SESSION_META_DIR/local/pending-handoff" ] \
+        || { echo "  FAIL: marker must be removed after a clear consumption"; return 1; }
+}
+
+# compact and fork keep the transcript loaded, so consuming there would inject
+# "the prior transcript is not loaded" into a conversation where it is. The
+# marker is left ARMED — the pending rotation is still legitimate.
+test_compact_and_fork_leave_marker_armed() {
+    local src
+    for src in compact fork resume; do
+        _rot_hook_session "rot-armed-$src"
+        _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "unconsumed"
+        printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+        printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
+        local out
+        out=$(_start_hook "$UUID_B" "$src") || return 1
+        if printf '%s' "$out" | grep -q "Conversation Rotation"; then
+            echo "  FAIL: source $src must not consume the marker"; return 1
+        fi
+        assert_file_contains "$CLAUDE_SESSION_META_DIR/handoffs/2026-07-16-test.md" "status: unconsumed" \
+            "$src leaves the handoff unconsumed" || return 1
+        [ -f "$CLAUDE_SESSION_META_DIR/local/pending-handoff" ] \
+            || { echo "  FAIL: source $src must leave the marker armed"; return 1; }
+    done
+}
+
+# A handoff consumed elsewhere (another machine, then pulled) must not
+# re-inject its preamble, and its status must not be rewritten.
+test_spent_handoff_is_not_reconsumed() {
+    _rot_hook_session "rot-spent"
+    _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "consumed"
+    printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_B" > "$CLAUDE_SESSION_META_DIR/local/state"
+    local out
+    out=$(_start_hook "$UUID_B") || return 1
+    if printf '%s' "$out" | grep -q "Conversation Rotation"; then
+        echo "  FAIL: a spent handoff must not inject a preamble"; return 1
+    fi
+    assert_file_not_contains "$CLAUDE_SESSION_META_DIR/handoffs/2026-07-16-test.md" "consumed_by:" \
+        "no consumer recorded for a spent handoff" || return 1
+    [ ! -f "$CLAUDE_SESSION_META_DIR/local/pending-handoff" ] \
+        || { echo "  FAIL: a marker naming a spent handoff is stale and must be removed"; return 1; }
+}
+
+# The status check is frontmatter-scoped: a body quoting the contract line
+# flush-left must not make a discarded handoff look pending.
+test_body_quote_does_not_revive_a_discarded_handoff() {
+    _rot_hook_session "rot-revive"
+    _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "discarded"
+    printf 'status: unconsumed\n' >> "$CLAUDE_SESSION_DIR/.cs/handoffs/2026-07-16-test.md"
+    printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_B" > "$CLAUDE_SESSION_META_DIR/local/state"
+    local out
+    out=$(_start_hook "$UUID_B") || return 1
+    if printf '%s' "$out" | grep -q "Conversation Rotation"; then
+        echo "  FAIL: a flush-left body quote must not revive a discarded handoff"; return 1
+    fi
+}
+
 run_test test_pending_handoff_is_consumed_and_injected
 run_test test_rotation_preamble_wins_over_fresh_rebind_block
 run_test test_fresh_rebind_block_survives_without_handoff
 run_test test_stale_marker_is_removed_silently
 run_test test_handoff_with_hostile_purpose_survives_flip
+# A /clear rotation has no launcher to emit the event, so the hook's rebind
+# block is the sole emitter and must not label a deliberate rotation "rebind".
+test_clear_rotation_records_handoff_reason() {
+    _rot_hook_session "rot-label"
+    _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "unconsumed"
+    printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
+    _start_hook "$UUID_B" clear >/dev/null || return 1
+    local ev
+    ev=$(_timeline | jq -c 'select(.event == "rotated")' 2>/dev/null | tail -1)
+    assert_output_contains "$ev" '"reason":"handoff"' "clear rotation is a handoff" || return 1
+    assert_output_contains "$ev" '"handoff":"2026-07-16-test.md"' "event names the handoff" || return 1
+}
+
+# A fork with an armed marker rebinds but does not rotate: labelling it
+# "handoff" would record a rotation that never happened, and the real /clear
+# would then emit a second event for the same file.
+test_fork_with_armed_marker_records_rebind() {
+    _rot_hook_session "rot-label-fork"
+    _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "unconsumed"
+    printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
+    _start_hook "$UUID_B" fork >/dev/null || return 1
+    local ev
+    ev=$(_timeline | jq -c 'select(.event == "rotated")' 2>/dev/null | tail -1)
+    assert_output_contains "$ev" '"reason":"rebind"' "a fork is not a handoff rotation" || return 1
+    if printf '%s' "$ev" | grep -q '"handoff"'; then
+        echo "  FAIL: a fork event must carry no handoff field"; return 1
+    fi
+}
+
+run_test test_clear_source_consumes_pending_handoff
+run_test test_compact_and_fork_leave_marker_armed
+run_test test_spent_handoff_is_not_reconsumed
+run_test test_body_quote_does_not_revive_a_discarded_handoff
+test_fresh_notice_absent_on_compact() {
+    _rot_hook_session "rot-fresh-compact"
+    printf 'claude_session_id: %s\n' "$UUID_B" > "$CLAUDE_SESSION_META_DIR/local/state"
+    export CS_FRESH_REBIND=1
+    local out
+    out=$(_start_hook "$UUID_B" compact) || { unset CS_FRESH_REBIND; return 1; }
+    unset CS_FRESH_REBIND
+    if printf '%s' "$out" | grep -q "Fresh Conversation"; then
+        echo "  FAIL: a compaction continues the conversation — no clean-break notice"
+        return 1
+    fi
+}
+
+# A /clear IS a clean break, whether or not the launch was a rebind.
+test_fresh_notice_present_on_clear_without_rebind_env() {
+    _rot_hook_session "rot-fresh-clear"
+    printf 'claude_session_id: %s\n' "$UUID_B" > "$CLAUDE_SESSION_META_DIR/local/state"
+    local out
+    out=$(_start_hook "$UUID_B" clear) || return 1
+    assert_output_contains "$out" "Fresh Conversation" "clear is a clean break" || return 1
+}
+
+# The marker names a basename. A path in it must not reach outside the
+# handoff store — the file it lands on would be rewritten and named to Claude.
+test_marker_with_a_path_is_rejected() {
+    _rot_hook_session "rot-traverse"
+    local outside="$CLAUDE_SESSION_DIR/outside.md"
+    cat > "$outside" << 'EOF'
+---
+status: unconsumed
+---
+EOF
+    mkdir -p "$CLAUDE_SESSION_DIR/.cs/handoffs"
+    printf '../../outside.md\n' > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_B" > "$CLAUDE_SESSION_META_DIR/local/state"
+    local out
+    out=$(_start_hook "$UUID_B" clear) || return 1
+    if printf '%s' "$out" | grep -q "Conversation Rotation"; then
+        echo "  FAIL: a marker naming a path must not rotate"; return 1
+    fi
+    assert_file_not_contains "$outside" "status: consumed" \
+        "a file outside the handoff store must not be rewritten" || return 1
+    [ ! -f "$CLAUDE_SESSION_META_DIR/local/pending-handoff" ] \
+        || { echo "  FAIL: a marker naming a path is stale and must be removed"; return 1; }
+}
+
+run_test test_clear_rotation_records_handoff_reason
+run_test test_fork_with_armed_marker_records_rebind
+run_test test_fresh_notice_absent_on_compact
+run_test test_fresh_notice_present_on_clear_without_rebind_env
+# The msys runtime resolves backslashes as separators, and the required
+# test-windows-msys lane runs this suite there. Trivial on POSIX; the point is
+# the lane where the escape would otherwise work.
+test_marker_with_a_backslash_path_is_rejected() {
+    _rot_hook_session "rot-traverse-bs"
+    mkdir -p "$CLAUDE_SESSION_DIR/.cs/handoffs"
+    # Seed a file the marker would resolve to. On POSIX the backslashes are an
+    # ordinary filename, which is what makes this assertion able to fail here;
+    # on msys the same name resolves out of the store, which is the real target.
+    printf -- '---\nstatus: unconsumed\n---\n' \
+        > "$CLAUDE_SESSION_DIR/.cs/handoffs/..\\..\\outside.md" 2>/dev/null || true
+    printf '..\\..\\outside.md\n' > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_B" > "$CLAUDE_SESSION_META_DIR/local/state"
+    local out
+    out=$(_start_hook "$UUID_B" clear) || return 1
+    if printf '%s' "$out" | grep -q "Conversation Rotation"; then
+        echo "  FAIL: a marker naming a backslash path must not rotate"; return 1
+    fi
+    [ ! -f "$CLAUDE_SESSION_META_DIR/local/pending-handoff" ] \
+        || { echo "  FAIL: a marker naming a backslash path is stale and must be removed"; return 1; }
+}
+
+run_test test_marker_with_a_path_is_rejected
+run_test test_marker_with_a_backslash_path_is_rejected
 
 # ============================================================================
 # Cycle 5: context nudge (Stop hook)
