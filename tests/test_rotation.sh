@@ -143,6 +143,8 @@ test_rotate_skill_documents_the_clear_route() {
         "skill points the user at the in-process route" || return 1
     assert_file_contains "$skill" "superseded" \
         "skill retires its own stale handoffs" || return 1
+    assert_file_contains "$skill" "session.log" \
+        "superseding is scoped by this machine's own conversation log" || return 1
     assert_file_not_contains "$skill" "never edits .cs/local/state" \
         "the stale no-state contract is gone" || return 1
 }
@@ -614,7 +616,30 @@ run_test test_clear_rotation_records_handoff_reason
 run_test test_fork_with_armed_marker_records_rebind
 run_test test_fresh_notice_absent_on_compact
 run_test test_fresh_notice_present_on_clear_without_rebind_env
+# The msys runtime resolves backslashes as separators, and the required
+# test-windows-msys lane runs this suite there. Trivial on POSIX; the point is
+# the lane where the escape would otherwise work.
+test_marker_with_a_backslash_path_is_rejected() {
+    _rot_hook_session "rot-traverse-bs"
+    mkdir -p "$CLAUDE_SESSION_DIR/.cs/handoffs"
+    # Seed a file the marker would resolve to. On POSIX the backslashes are an
+    # ordinary filename, which is what makes this assertion able to fail here;
+    # on msys the same name resolves out of the store, which is the real target.
+    printf -- '---\nstatus: unconsumed\n---\n' \
+        > "$CLAUDE_SESSION_DIR/.cs/handoffs/..\\..\\outside.md" 2>/dev/null || true
+    printf '..\\..\\outside.md\n' > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_B" > "$CLAUDE_SESSION_META_DIR/local/state"
+    local out
+    out=$(_start_hook "$UUID_B" clear) || return 1
+    if printf '%s' "$out" | grep -q "Conversation Rotation"; then
+        echo "  FAIL: a marker naming a backslash path must not rotate"; return 1
+    fi
+    [ ! -f "$CLAUDE_SESSION_META_DIR/local/pending-handoff" ] \
+        || { echo "  FAIL: a marker naming a backslash path is stale and must be removed"; return 1; }
+}
+
 run_test test_marker_with_a_path_is_rejected
+run_test test_marker_with_a_backslash_path_is_rejected
 
 # ============================================================================
 # Cycle 5: context nudge (Stop hook)

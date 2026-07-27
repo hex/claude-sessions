@@ -39,17 +39,22 @@ should do. If the user did not give one, ask before writing anything.
    Concepts; 3. Files and Code Sections (with the snippets that matter);
    4. Problem Solving; 5. Pending Tasks; 6. Current Work; 7. Next Step.
    Write for a successor with zero conversation memory.
-4. Retire your own leftovers: for every OTHER file in `.cs/handoffs/` whose
-   frontmatter still says `status: unconsumed` AND whose `parent:` is the
-   same UUID you wrote in step 3, flip that one frontmatter line to
-   `status: superseded`. Rotating twice from one conversation otherwise
-   leaves the first handoff pending forever, keeping the launch prompt
-   offering `[Y/n/r/d]` for context that is out of date.
+4. Retire this machine's leftovers: for every OTHER file in `.cs/handoffs/`
+   whose frontmatter still says `status: unconsumed`, flip that one
+   frontmatter line to `status: superseded` — but only when its `parent:`
+   UUID appears in `.cs/local/session.log`, which records every conversation
+   this checkout has run (`Session started (... ID: <uuid>)`).
 
-   Match on `parent:` and nothing else. A handoff from another conversation —
-   including a co-worker's, since `.cs/handoffs/` is shared — may be armed
-   and about to be consumed; superseding it would silently drop their
-   rotation.
+   That file is machine-local, which is the whole point of using it.
+   `.cs/handoffs/` is shared, so a handoff whose parent is absent from the log
+   belongs to a co-worker's checkout, may be armed right now, and must be left
+   alone — superseding it would silently drop their rotation.
+
+   Without this step an abandoned handoff stays pending forever, and the
+   launch prompt keeps offering `[Y/n/r/d]` for context that is out of date.
+   Do not assume a newer handoff simply outranks it: the launcher picks the
+   lexicographically last basename, so among same-day files the slug decides
+   and a stale one can win.
 5. Commit the handoff and any supersedings (tracked session state, like
    narratives). Stage those paths by name.
 6. Arm the handoff: write its basename (no path) to
