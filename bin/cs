@@ -4991,7 +4991,15 @@ launch_claude_code() {
     if [ -n "$claude_session_id" ] && [ "$force" != "true" ] && [ "$is_new" != "true" ]; then
         local _ps_out
         _ps_out=$("${CS_PS_BIN:-ps}" -Ao args= 2>/dev/null || true)
-        if [[ "$_ps_out" == *"$claude_session_id"* ]]; then
+        # An in-app /clear rebinds the recorded UUID while the live process's
+        # argv still names its launch UUID, so the UUID test alone goes blind.
+        # --name is stable for the process's whole life. The trailing delimiter
+        # keeps a name that prefixes another (sym vs sym-comfy-nodes) from
+        # matching; the appended newline covers --name being the final argument.
+        _ps_out="$_ps_out"$'\n'
+        if [[ "$_ps_out" == *"$claude_session_id"* ]] \
+            || [[ "$_ps_out" == *"--name $session_name "* ]] \
+            || [[ "$_ps_out" == *"--name $session_name"$'\n'* ]]; then
             error "Session $session_name is already running elsewhere (UUID $claude_session_id). Use --force to override."
         fi
     fi
