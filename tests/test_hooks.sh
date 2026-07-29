@@ -10,6 +10,9 @@ HOOKS_DIR="$SCRIPT_DIR/../hooks"
 # Override setup for hook testing
 setup() {
     TEST_TMPDIR="$(mktemp -d)"
+    # CS_ACTOR is the top-precedence actor override, so an exported one on the
+    # developer's machine would decide the identity these tests pin.
+    unset CS_ACTOR
     export CLAUDE_SESSION_NAME="test-session"
     export CLAUDE_SESSION_DIR="$TEST_TMPDIR/session"
     export CLAUDE_SESSION_META_DIR="$CLAUDE_SESSION_DIR/.cs"
@@ -1428,8 +1431,24 @@ test_session_start_actor_honours_pinned_identity() {
         "the overridden git identity is not also announced" || return 1
 }
 
+# cs_actor_slug() ends its search on the identity file EXISTING, not on it
+# yielding a value, so a blank pin resolves to "unknown" with no git fallback.
+# The hook must stop at the same place: naming an actor cs never resolves would
+# point Claude at a narrative file cs does not write.
+test_session_start_actor_matches_cs_on_a_blank_pin() {
+    _seed_identity_git "john.doe@example.com"
+    printf '' > "$CLAUDE_SESSION_META_DIR/local/identity"
+    local out
+    out=$(_identity_hook)
+    assert_output_contains "$out" "Current actor: unknown" \
+        "a blank pin resolves to unknown, as cs_actor_slug does" || return 1
+    assert_output_not_contains "$out" "john-doe-example-com" \
+        "a blank pin must not fall through to git config" || return 1
+}
+
 run_test test_session_start_names_the_current_actor
 run_test test_session_start_warns_that_memory_is_shared
 run_test test_session_start_actor_honours_pinned_identity
+run_test test_session_start_actor_matches_cs_on_a_blank_pin
 
 report_results

@@ -229,11 +229,16 @@ fi
 # KEEP IN SYNC with cs_actor_slug()/_slugify() in lib/40-state.sh — hooks cannot
 # source lib/, and shelling out to cs would make the hook depend on cs being on
 # PATH. Same precedence: $CS_ACTOR, then the pinned identity, then git.
-ACTOR_RAW="${CS_ACTOR:-}"
-if [ -z "$ACTOR_RAW" ] && [ -f "$META_DIR/local/identity" ]; then
+# if/elif/else, not three independent tests: a pinned identity file ends the
+# search by EXISTING, so a blank pin resolves to "unknown" rather than falling
+# through to git. Naming an actor cs would not resolve is the whole defect this
+# anchor exists to prevent.
+ACTOR_RAW=""
+if [ -n "${CS_ACTOR:-}" ]; then
+    ACTOR_RAW="$CS_ACTOR"
+elif [ -f "$META_DIR/local/identity" ]; then
     IFS= read -r ACTOR_RAW < "$META_DIR/local/identity" || true
-fi
-if [ -z "$ACTOR_RAW" ]; then
+else
     ACTOR_RAW=$(git -C "$SESSION_DIR" config user.email 2>/dev/null || true)
     [ -n "$ACTOR_RAW" ] || ACTOR_RAW=$(git -C "$SESSION_DIR" config user.name 2>/dev/null || true)
 fi
