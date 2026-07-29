@@ -4,6 +4,21 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.7.27
+
+A durable memory entry can no longer tell Claude it is talking to the wrong person.
+
+### Fixes
+
+- **Session start names the current actor.** `.cs/memory/` is a single durable store shared by every actor on a git-synced session, while only `narrative.<actor>.md` files are partitioned per actor. A `type: user` entry written by one actor as an unconditional claim ("the user is X, not Y") therefore loads for every other actor and reads as settled fact — in one case out-arguing four contradicting live signals for a whole session, including a global instruction naming the right person. The hook now states the current actor and its narrative file up front, and adds the rule that an entry naming someone else was written by or for another actor. A bare identity line would not have been enough: the instruction that lost was already ambient in context, so the anchor carries its conflict-resolution rule with it.
+- **Identity facts must be keyed to a person.** `/sweep` now requires facts about a person to be written keyed (`actor <slug> is …`) rather than asserted about whoever is present. A keyed fact stays true on every machine and cannot be misapplied, because it never claims anyone is present. The rule covers `MEMORY.md` pointer lines as well as entry bodies: pointers load at startup while the entries they name are read lazily, so a poisoned pointer reaches context on its own even if nothing opens the file.
+- **The hook's actor resolution matches `cs`.** It tested emptiness where `cs_actor_slug()` uses `if/elif/else`, so a pinned `.cs/local/identity` that exists but is blank fell through to git config while `cs` stopped at the file existing and resolved `unknown`. The hook then named `narrative.<git-identity>.md`, a file `cs` never writes. Found by review before release.
+
+### Docs
+
+- `docs/hooks.md` documents the identity anchor and why the actor precedence is duplicated rather than sourced or shelled out.
+- `docs/session-layout.md` states that the durable buckets are shared across actors while the narratives beside them are not, which is the confusion behind the defect.
+
 ## 2026.7.26
 
 ### Fixes
