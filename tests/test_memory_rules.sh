@@ -408,4 +408,17 @@ run_test test_note_has_no_behavioral_instruction
 run_test test_new_session_secret_retrieval_is_transcript_safe
 run_test test_new_session_secret_detection_mandates_scratch_cleanup
 run_test test_memory_note_renders_under_heading
+
+# The note is descriptive, so this states the fact rather than instructing:
+# narratives are per-actor and the durable buckets are not. Without it, nothing
+# in the session protocol reveals that a memory entry may describe someone else.
+test_memory_note_discloses_shared_store() {
+    "$CS_BIN" test-session <<< "" >/dev/null 2>&1 || true
+    local claude_md="$CS_SESSIONS_ROOT/test-session/CLAUDE.local.md"
+
+    assert_file_contains "$claude_md" "shared by every actor" \
+        "the note must disclose that the durable store is not per-actor" || return 1
+}
+
+run_test test_memory_note_discloses_shared_store
 report_results

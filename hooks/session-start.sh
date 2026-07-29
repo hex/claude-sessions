@@ -225,6 +225,23 @@ export CLAUDE_SESSION_META_DIR="$META_DIR"
 EOF
 fi
 
+# Resolve who is driving this session, for the identity anchor below.
+# KEEP IN SYNC with cs_actor_slug()/_slugify() in lib/40-state.sh — hooks cannot
+# source lib/, and shelling out to cs would make the hook depend on cs being on
+# PATH. Same precedence: $CS_ACTOR, then the pinned identity, then git.
+ACTOR_RAW="${CS_ACTOR:-}"
+if [ -z "$ACTOR_RAW" ] && [ -f "$META_DIR/local/identity" ]; then
+    IFS= read -r ACTOR_RAW < "$META_DIR/local/identity" || true
+fi
+if [ -z "$ACTOR_RAW" ]; then
+    ACTOR_RAW=$(git -C "$SESSION_DIR" config user.email 2>/dev/null || true)
+    [ -n "$ACTOR_RAW" ] || ACTOR_RAW=$(git -C "$SESSION_DIR" config user.name 2>/dev/null || true)
+fi
+[ -n "$ACTOR_RAW" ] || ACTOR_RAW="unknown"
+ACTOR_SLUG=$(printf '%s' "$ACTOR_RAW" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed 's/[^a-z0-9][^a-z0-9]*/-/g; s/^-//; s/-*$//')
+
 # Provide context to Claude about the session
 CONTEXT=$(cat << EOF
 You are working in a managed Claude Code session: $CLAUDE_SESSION_NAME
@@ -233,6 +250,9 @@ Context loaded: $(date '+%Y-%m-%d %H:%M:%S %Z') ($(date -u +%Y-%m-%dT%H:%M:%SZ))
 Session directory: $CLAUDE_SESSION_DIR
 
 Session metadata is in the .cs/ directory. The session root is your workspace.
+
+Current actor: $ACTOR_SLUG ($ACTOR_RAW). Your narrative is .cs/memory/narrative.$ACTOR_SLUG.md.
+.cs/memory/ is shared by multiple actors, but only narratives are partitioned: a durable memory entry naming someone else as the user was written by or for another actor and does not describe who you are talking to. Identity comes from this line and the live environment, never from a memory entry.
 
 Key files to maintain:
 - .cs/README.md: Update objective and outcome
