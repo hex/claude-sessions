@@ -10,6 +10,9 @@ HOOKS_DIR="$SCRIPT_DIR/../hooks"
 # Override setup for hook testing
 setup() {
     TEST_TMPDIR="$(mktemp -d)"
+    # CS_ACTOR is the top-precedence actor override, so an exported one on the
+    # developer's machine would decide the identity these tests pin.
+    unset CS_ACTOR
     export CLAUDE_SESSION_NAME="test-session"
     export CLAUDE_SESSION_DIR="$TEST_TMPDIR/session"
     export CLAUDE_SESSION_META_DIR="$CLAUDE_SESSION_DIR/.cs"
@@ -1373,5 +1376,79 @@ test_install_leaves_flat_entries_alone() {
 run_test test_install_preserves_coshipped_hook_in_wrapper
 run_test test_install_drops_emptied_wrapper_when_only_cs_hook_present
 run_test test_install_leaves_flat_entries_alone
+
+# ============================================================================
+# session-start.sh: the actor identity anchor
+#
+# .cs/memory/ is one shared store for every actor on a git-synced session, but
+# only narratives are partitioned. A `type: user` memory written by one actor
+# ("the user is X, not Y") loads for all of them and reads as settled fact.
+# Naming the current actor up front is what keeps identity a question the live
+# signals answer, instead of one a stale memory has already closed.
+# ============================================================================
+
+_identity_hook() {  # [source]
+    echo "{\"session_id\":\"11111111-2222-4333-8444-555555555555\",\"cwd\":\"$CLAUDE_SESSION_DIR\",\"source\":\"${1:-startup}\"}" \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null
+}
+
+_seed_identity_git() {  # email
+    git -C "$CLAUDE_SESSION_DIR" init -q 2>/dev/null || mkdir -p "$CLAUDE_SESSION_DIR"
+    git -C "$CLAUDE_SESSION_DIR" config user.email "$1" 2>/dev/null
+}
+
+test_session_start_names_the_current_actor() {
+    _seed_identity_git "john.doe@example.com"
+    local out
+    out=$(_identity_hook)
+    assert_output_contains "$out" "john.doe@example.com" \
+        "the actor's identity is stated, not left to be looked up" || return 1
+    assert_output_contains "$out" "narrative.john-doe-example-com.md" \
+        "the actor's own narrative file is named" || return 1
+}
+
+test_session_start_warns_that_memory_is_shared() {
+    _seed_identity_git "john.doe@example.com"
+    local out
+    out=$(_identity_hook)
+    assert_output_contains "$out" "shared by multiple actors" \
+        "the store's multi-actor nature is disclosed" || return 1
+    assert_output_contains "$out" "was written by or for another actor" \
+        "a conflicting identity memory has an explicit resolution rule" || return 1
+}
+
+# A pinned .cs/local/identity outranks git config, matching cs_actor_slug's
+# precedence. Without this the anchor would name the wrong person on a machine
+# whose git identity differs from the session's pinned one.
+test_session_start_actor_honours_pinned_identity() {
+    _seed_identity_git "john.doe@example.com"
+    printf 'jane.roe@example.com\n' > "$CLAUDE_SESSION_META_DIR/local/identity"
+    local out
+    out=$(_identity_hook)
+    assert_output_contains "$out" "jane.roe@example.com" \
+        "pinned identity outranks git config" || return 1
+    assert_output_not_contains "$out" "john.doe@example.com" \
+        "the overridden git identity is not also announced" || return 1
+}
+
+# cs_actor_slug() ends its search on the identity file EXISTING, not on it
+# yielding a value, so a blank pin resolves to "unknown" with no git fallback.
+# The hook must stop at the same place: naming an actor cs never resolves would
+# point Claude at a narrative file cs does not write.
+test_session_start_actor_matches_cs_on_a_blank_pin() {
+    _seed_identity_git "john.doe@example.com"
+    printf '' > "$CLAUDE_SESSION_META_DIR/local/identity"
+    local out
+    out=$(_identity_hook)
+    assert_output_contains "$out" "Current actor: unknown" \
+        "a blank pin resolves to unknown, as cs_actor_slug does" || return 1
+    assert_output_not_contains "$out" "john-doe-example-com" \
+        "a blank pin must not fall through to git config" || return 1
+}
+
+run_test test_session_start_names_the_current_actor
+run_test test_session_start_warns_that_memory_is_shared
+run_test test_session_start_actor_honours_pinned_identity
+run_test test_session_start_actor_matches_cs_on_a_blank_pin
 
 report_results

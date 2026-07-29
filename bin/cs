@@ -1653,7 +1653,7 @@ _emit_memory_note_block() {
 <!-- cs:memory-note -->
 ## Where memory lives
 
-Claude's built-in memory writes durable facts to `.cs/memory/` (cs redirects via `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE`); the `MEMORY.md` index lists entries and individual `<bucket>_*.md` files are loaded lazily.
+Claude's built-in memory writes durable facts to `.cs/memory/` (cs redirects via `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE`); the `MEMORY.md` index lists entries and individual `<bucket>_*.md` files are loaded lazily. Only `narrative.<actor>.md` is per-actor: the durable buckets and their index are shared by every actor working in this session, so an entry may describe a different person than the one present.
 EOF
 }
 

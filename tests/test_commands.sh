@@ -434,4 +434,18 @@ run_test test_release_approval_has_cancel_and_reapproval_loop
 run_test test_release_guards_stray_files_before_add_all
 run_test test_release_verifies_ci_workflow
 run_test test_release_has_code_review_gate
+
+# A shared .cs/memory/ makes "the user is X" false on every other actor's
+# machine, while "actor <slug> is X" stays true everywhere. The rule has to
+# cover MEMORY.md pointer lines too: those load at startup, whereas the bucket
+# files they point at are only read lazily, so a poisoned pointer reaches
+# context even when nothing opens the entry.
+test_sweep_requires_identity_facts_to_be_keyed() {
+    assert_file_contains "$COMMANDS_DIR/sweep.md" "keyed" \
+        "sweep.md must require identity facts to be keyed to an actor" || return 1
+    assert_file_contains "$COMMANDS_DIR/sweep.md" "pointers load at startup" \
+        "the rule must govern index pointer lines, not just entry bodies" || return 1
+}
+
+run_test test_sweep_requires_identity_facts_to_be_keyed
 report_results
