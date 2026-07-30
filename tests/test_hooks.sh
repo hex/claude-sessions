@@ -1476,4 +1476,28 @@ test_session_end_does_not_write_index_beside_an_adopted_session() {
 
 run_test test_session_end_does_not_write_index_beside_an_adopted_session
 
+# The containment check compares SESSION_DIR against the sessions root. The
+# resolver reports physical paths but the CLI exports a logical SESSION_DIR
+# built from $HOME, so normalizing only one side stops the index being written
+# for any home reached through a symlink (/home -> /var/home, and every
+# /tmp-based test environment).
+test_session_end_writes_index_when_home_traverses_a_symlink() {
+    local fh="$TEST_TMPDIR/symhome" phys
+    mkdir -p "$fh/.claude-sessions/sess/.cs/local"
+    printf -- '---\nstatus: active\ncreated: 2026-07-30\n---\n# Session: sess\n' \
+        > "$fh/.claude-sessions/sess/.cs/README.md"
+    phys=$(cd "$fh" && pwd -P)
+
+    env -i HOME="$fh" PATH="$PATH" \
+        CLAUDE_SESSION_NAME=sess CLAUDE_SESSION_DIR="$fh/.claude-sessions/sess" \
+        /bin/bash "$HOOKS_DIR/session-end.sh" \
+        <<< "{\"session_id\":\"11111111-2222-4333-8444-555555555555\",\"cwd\":\"$fh\",\"source\":\"user_exit\"}" \
+        >/dev/null 2>&1 || true
+
+    [ -f "$phys/.claude-sessions/index.md" ] \
+        || { echo "  FAIL: index not written when \$HOME traverses a symlink"; return 1; }
+}
+
+run_test test_session_end_writes_index_when_home_traverses_a_symlink
+
 report_results

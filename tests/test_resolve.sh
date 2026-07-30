@@ -242,6 +242,18 @@ run_test test_derives_from_project_dir
 run_test test_derives_from_input_cwd_when_project_dir_absent
 run_test test_walks_up_from_a_subdirectory
 run_test test_nearest_session_wins
+# The walk is documented as stopping AT $HOME. It tested the boundary after
+# checking for .cs, so a stray ~/.cs would have adopted every project directly
+# under home into a phantom session named after the home directory.
+test_home_itself_is_not_a_session_root() {
+    local fh="$TEST_TMPDIR/fakehome"
+    mkdir -p "$fh/.cs/local" "$fh/proj"
+    local got
+    got=$(HOME="$fh" CLAUDE_PROJECT_DIR="$fh/proj" _resolve '{}')
+    assert_eq "FAIL" "$got" "a stray .cs at \$HOME must not capture a project under it" || return 1
+}
+
+run_test test_home_itself_is_not_a_session_root
 run_test test_no_session_anywhere_fails
 run_test test_name_comes_from_state_not_basename
 run_test test_name_falls_back_to_basename

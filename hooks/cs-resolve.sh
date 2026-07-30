@@ -65,11 +65,14 @@ _cs_find_session_root() {  # start_dir
     local home_p
     home_p=$(cd "${HOME:-/nonexistent}" 2>/dev/null && pwd -P || printf '/nonexistent')
     while [ -n "$d" ] && [ "$d" != "/" ]; do
+        # Boundary before the marker test, so $HOME itself is never a session
+        # root: a stray ~/.cs would otherwise adopt every project directly under
+        # home into a phantom session named after the home directory.
+        [ "$d" = "$home_p" ] && return 1
         if [ -d "$d/.cs" ]; then
             printf '%s\n' "$d"
             return 0
         fi
-        [ "$d" = "$home_p" ] && return 1
         d=$(dirname "$d")
     done
     return 1

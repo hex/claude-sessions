@@ -81,14 +81,16 @@ rm -f "$META_DIR/session.lock" 2>/dev/null || true
 # is an unrelated project path — the index landed in that project's parent.
 # Default to the sessions root itself, and only write an index where sessions
 # actually live.
-# Compare physical against physical: the resolver reports SESSION_DIR via
-# cd + pwd -P, so a symlinked $HOME (or /tmp, under test) would otherwise never
-# match its own sessions root and the index would silently stop being written.
+# Compare physical against physical, on BOTH sides. The resolver reports a
+# physical SESSION_DIR (cd + pwd -P) while the CLI exports a logical one built
+# from $HOME, so normalizing only the root stops the index being written for any
+# home reached through a symlink (/home -> /var/home, and every /tmp test env).
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 if [ -d "$SESSIONS_ROOT" ]; then
     SESSIONS_ROOT=$(cd "$SESSIONS_ROOT" 2>/dev/null && pwd -P) || SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 fi
-case "$SESSION_DIR" in
+SESSION_DIR_PHYS=$(cd "$SESSION_DIR" 2>/dev/null && pwd -P) || SESSION_DIR_PHYS="$SESSION_DIR"
+case "$SESSION_DIR_PHYS" in
     "$SESSIONS_ROOT"/*) : ;;
     *) [ -n "${CS_SESSIONS_ROOT:-}" ] || SESSIONS_ROOT="" ;;
 esac
