@@ -12,8 +12,10 @@ approve() { echo '{"decision": "approve"}'; exit 0; }
 AGENT_ID=$(echo "$INPUT" | jq -r '.agent_id // empty' 2>/dev/null || true)
 [ -n "$AGENT_ID" ] && approve
 
+# shellcheck source=cs-resolve.sh
+. "$(dirname "$0")/cs-resolve.sh"
 # Only run in cs sessions
-[ -z "${CLAUDE_SESSION_NAME:-}" ] && approve
+cs_resolve_session "$INPUT" || approve
 SESSION_DIR="${CLAUDE_SESSION_DIR:-}"
 META_DIR="${CLAUDE_SESSION_META_DIR:-$SESSION_DIR/.cs}"
 { [ -z "$SESSION_DIR" ] || [ ! -d "$META_DIR" ]; } && approve

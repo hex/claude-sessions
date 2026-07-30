@@ -17,11 +17,11 @@ fi
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id')
 SOURCE=$(echo "$INPUT" | jq -r '.source // "user_exit"')
 
-# Check if we're in a cs session
-if [ -z "${CLAUDE_SESSION_NAME:-}" ]; then
-    # Not in a cs session, do nothing
-    exit 0
-fi
+# shellcheck source=cs-resolve.sh
+. "$(dirname "$0")/cs-resolve.sh"
+# Not in a cs session, do nothing. Resolves from the env under the CLI and
+# from the opened directory under front ends that cannot export one.
+cs_resolve_session "$INPUT" || exit 0
 
 SESSION_DIR="${CLAUDE_SESSION_DIR:-}"
 META_DIR="${CLAUDE_SESSION_META_DIR:-$SESSION_DIR/.cs}"
@@ -61,8 +61,18 @@ fi
 rm -f "$META_DIR/session.lock" 2>/dev/null || true
 
 # Regenerate sessions index.md at the sessions root
-SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$(dirname "$SESSION_DIR")}"
-if [ -d "$SESSIONS_ROOT" ]; then
+# CS_SESSIONS_ROOT is not exported into a session, so this used to fall back to
+# the session's parent directory unconditionally. That is right for a session
+# living under the sessions root and wrong for an adopted one, whose directory
+# is an unrelated project path — the index landed in that project's parent.
+# Default to the sessions root itself, and only write an index where sessions
+# actually live.
+SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
+case "$SESSION_DIR" in
+    "$SESSIONS_ROOT"/*) : ;;
+    *) [ -n "${CS_SESSIONS_ROOT:-}" ] || SESSIONS_ROOT="" ;;
+esac
+if [ -n "$SESSIONS_ROOT" ] && [ -d "$SESSIONS_ROOT" ]; then
     INDEX_FILE="$SESSIONS_ROOT/index.md"
     {
         echo "# Sessions"

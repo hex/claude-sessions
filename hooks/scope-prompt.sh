@@ -7,8 +7,11 @@ set -uo pipefail
 
 # --- Defensive early exits (silent pass-through) ---
 
-# Only run inside a cs session.
-[ -n "${CLAUDE_SESSION_NAME:-}" ] || exit 0
+# shellcheck source=cs-resolve.sh
+. "$(dirname "$0")/cs-resolve.sh"
+# Only run inside a cs session. No input yet at this point (it is read further
+# down), so resolution relies on the env or CLAUDE_PROJECT_DIR.
+cs_resolve_session "" || exit 0
 
 # The user is back: drop the statusline's finished-blink marker before any
 # other gate (slash commands and short prompts clear it too).

@@ -6,10 +6,10 @@ set -euo pipefail
 
 INPUT=$(cat)
 
+# shellcheck source=cs-resolve.sh
+. "$(dirname "$0")/cs-resolve.sh"
 # Only run in cs sessions
-if [ -z "${CLAUDE_SESSION_NAME:-}" ]; then
-    exit 0
-fi
+cs_resolve_session "$INPUT" || exit 0
 
 SESSION_DIR="${CLAUDE_SESSION_DIR:-}"
 META_DIR="${CLAUDE_SESSION_META_DIR:-$SESSION_DIR/.cs}"

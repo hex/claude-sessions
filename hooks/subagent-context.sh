@@ -7,10 +7,10 @@ set -euo pipefail
 # Read hook input from stdin
 cat > /dev/null
 
+# shellcheck source=cs-resolve.sh
+. "$(dirname "$0")/cs-resolve.sh"
 # Only run in cs sessions
-if [ -z "${CLAUDE_SESSION_NAME:-}" ]; then
-    exit 0
-fi
+cs_resolve_session "" || exit 0
 
 SESSION_DIR="${CLAUDE_SESSION_DIR:-}"
 

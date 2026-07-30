@@ -5,10 +5,10 @@
 # No set -e: this hook must never block a command from running
 set -uo pipefail
 
+# shellcheck source=cs-resolve.sh
+. "$(dirname "$0")/cs-resolve.sh"
 # Only run in cs sessions
-if [ -z "${CLAUDE_SESSION_NAME:-}" ]; then
-    exit 0
-fi
+cs_resolve_session "" || exit 0
 
 META_DIR="${CLAUDE_SESSION_META_DIR:-${CLAUDE_SESSION_DIR:-}/.cs}"
 if [ -z "$META_DIR" ] || [ ! -d "$META_DIR/local" ]; then

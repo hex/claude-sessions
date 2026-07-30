@@ -19,11 +19,11 @@ SESSION_ID=$(echo "$INPUT" | jq -r '.session_id')
 CWD=$(echo "$INPUT" | jq -r '.cwd')
 SOURCE=$(echo "$INPUT" | jq -r '.source // "startup"')
 
-# Check if we're in a cs session
-if [ -z "${CLAUDE_SESSION_NAME:-}" ]; then
-    # Not in a cs session, do nothing
-    exit 0
-fi
+# shellcheck source=cs-resolve.sh
+. "$(dirname "$0")/cs-resolve.sh"
+# Not in a cs session, do nothing. Resolves from the env under the CLI and
+# from the opened directory under front ends that cannot export one.
+cs_resolve_session "$INPUT" || exit 0
 
 SESSION_DIR="${CLAUDE_SESSION_DIR:-}"
 META_DIR="${CLAUDE_SESSION_META_DIR:-$SESSION_DIR/.cs}"

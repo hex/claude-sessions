@@ -56,6 +56,13 @@ CS_HOOKS=(
     scope-prompt.sh
 )
 
+# Files under hooks/ that the hooks source rather than files Claude Code
+# invokes. Deployed and removed alongside the hooks, never registered against
+# an event. KEEP THIS LIST IN SYNC WITH install.sh's CS_HOOK_LIBS.
+CS_HOOK_LIBS=(
+    cs-resolve.sh
+)
+
 # Slash commands cs ships; deployed to ~/.claude/commands/.
 # KEEP THIS LIST IN SYNC WITH install.sh's CS_COMMANDS.
 CS_COMMANDS=(

@@ -222,7 +222,7 @@ run_uninstall() {
 
     # Remove hooks from both deployment layouts (subdirectory and flat)
     local hook dir
-    for hook in "${CS_HOOKS[@]}"; do
+    for hook in "${CS_HOOKS[@]}" "${CS_HOOK_LIBS[@]}"; do
         for dir in "$hooks_dir" "$hooks_parent_dir"; do
             if [ -f "$dir/$hook" ]; then
                 rm "$dir/$hook"

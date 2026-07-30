@@ -14,8 +14,10 @@ if [ -n "$AGENT_ID" ]; then
     exit 0
 fi
 
+# shellcheck source=cs-resolve.sh
+. "$(dirname "$0")/cs-resolve.sh"
 # Only run in cs sessions
-if [ -z "${CLAUDE_SESSION_NAME:-}" ]; then
+if ! cs_resolve_session ""; then
     echo '{"decision": "approve"}'
     exit 0
 fi
