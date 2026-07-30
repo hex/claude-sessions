@@ -17,8 +17,19 @@ fi
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id')
 SOURCE=$(echo "$INPUT" | jq -r '.source // "user_exit"')
 
+# Test before sourcing rather than catching a failed source with ||: under
+# bash 3.2, cs's floor, a `.` of a missing file kills a non-interactive shell
+# outright and the || never runs. A partial install would then abort the hook
+# before its own decline, silently. When the library is absent the fallback
+# is the env-only check this guard replaced, so the hook behaves as it used to.
+_cs_lib="$(dirname "$0")/cs-resolve.sh"
 # shellcheck source=cs-resolve.sh
-. "$(dirname "$0")/cs-resolve.sh"
+[ -r "$_cs_lib" ] && . "$_cs_lib"
+if ! command -v cs_resolve_session >/dev/null 2>&1; then
+    cs_resolve_session() {
+        [ -n "${CLAUDE_SESSION_NAME:-}" ] && [ -n "${CLAUDE_SESSION_DIR:-}" ]
+    }
+fi
 # Not in a cs session, do nothing. Resolves from the env under the CLI and
 # from the opened directory under front ends that cannot export one.
 cs_resolve_session "$INPUT" || exit 0

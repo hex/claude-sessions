@@ -169,6 +169,44 @@ test_pwd_alone_does_not_resolve() {
     assert_eq "FAIL" "$got" "cwd alone is not a session signal" || return 1
 }
 
+# A hook must still decline, not die, when the resolver is missing: a partial
+# install or an upgrade from a cs version that shipped no library would
+# otherwise abort every hook under set -e, and the two that answer with an
+# approval payload would answer with nothing at all.
+test_hooks_decline_when_the_resolver_is_missing() {
+    local hooks_src="$SCRIPT_DIR/../hooks" fake="$TEST_TMPDIR/nolib"
+    mkdir -p "$fake"
+    # Run under cs's actual floor, not the shell running the suite. A `.` of a
+    # missing file kills a non-interactive bash 3.2 outright, where bash 5 lets
+    # `||` catch it, so this exact defect is invisible to a homebrew-bash run.
+    local sh=/bin/bash
+    [ -x "$sh" ] || sh=bash
+    local h rc out failures=0
+    for h in narrative-reminder prose-lint session-start autosave-commits; do
+        cp "$hooks_src/$h.sh" "$fake/"
+    done
+    for h in narrative-reminder prose-lint session-start autosave-commits; do
+        out=$(env -u CLAUDE_SESSION_NAME -u CLAUDE_SESSION_DIR -u CLAUDE_PROJECT_DIR \
+            "$sh" "$fake/$h.sh" <<< '{"tool_name":"Write","cwd":"/"}' 2>/dev/null)
+        rc=$?
+        if [ "$rc" -ne 0 ]; then
+            echo "  FAIL: $h.sh exited $rc without its resolver instead of declining"
+            failures=$((failures + 1))
+        fi
+        case "$h" in
+            narrative-reminder|prose-lint)
+                case "$out" in
+                    *approve*) : ;;
+                    *) echo "  FAIL: $h.sh must still emit its approve payload, got [$out]"
+                       failures=$((failures + 1)) ;;
+                esac
+                ;;
+        esac
+    done
+    [ "$failures" -eq 0 ] || return 1
+}
+
+run_test test_hooks_decline_when_the_resolver_is_missing
 run_test test_pwd_alone_does_not_resolve
 run_test test_env_contract_is_used_verbatim
 run_test test_env_contract_with_missing_dir_fails
