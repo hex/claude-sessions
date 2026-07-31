@@ -261,7 +261,14 @@ launch_claude_code() {
             # and reporting the repair target as a rival would be nonsense.
             if [ -f "$_proj/$claude_session_id.jsonl" ]; then
                 _newest=$(_discover_session_uuid_in "$_proj")
-                if [ -n "$_newest" ] && [ "$_newest" != "$claude_session_id" ]; then
+                # "Newer" is a claim about the clock, so check it rather than
+                # infer it from "discovery returned something else". Discovery
+                # skips teammates, so when the recorded slot is itself a
+                # teammate's — the state this gate exists to stop — what comes
+                # back is genuinely OLDER, and announcing it as newer would be
+                # a lie built on a correct skip.
+                if [ -n "$_newest" ] && [ "$_newest" != "$claude_session_id" ] \
+                    && [ "$_proj/$_newest.jsonl" -nt "$_proj/$claude_session_id.jsonl" ]; then
                     printf "${DIM}A newer conversation was opened here outside cs:${NC} %s\n" "$_newest"
                     printf "${DIM}Resuming the recorded one instead. To continue the newer:${NC} claude --resume %s\n" "$_newest"
                 fi

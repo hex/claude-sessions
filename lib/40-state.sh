@@ -87,15 +87,26 @@ _claude_project_dir() {
 # session itself. A teammate started with the session as its working directory
 # writes a top-level transcript into the same project dir as the lead, so the
 # filename cannot tell them apart — and it is routinely the newest, because the
-# teammate outlives the turn that spawned it. Its brief is the marker: Claude
-# Code frames a teammate's first turn as a teammate-message.
+# teammate outlives the turn that spawned it.
 #
-# Reads the file directly rather than `head -c N | grep -q`. An early-exiting
-# pipe consumer SIGPIPEs its producer, which under pipefail takes cs down at
-# 141 once the transcript passes the pipe buffer — and transcripts run to
-# megabytes.
+# What separates them is WHERE the teammate frame appears, not whether it does.
+# A teammate's brief IS its first user turn. A lead that merely receives
+# teammate reports carries the same frame mid-file, because Claude Code injects
+# an inbound message as "Another Claude session sent a message:
+# <teammate-message ...>" — so testing the whole file would classify every
+# team-using lead as a teammate, which is exactly the population this serves.
+#
+# Reads the file directly rather than `head -c N | grep -q`: an early-exiting
+# pipe consumer SIGPIPEs its producer, and transcripts run to megabytes. `-m1`
+# also stops at the first user turn instead of scanning a whole transcript to
+# prove a marker absent.
 _is_teammate_transcript() {  # transcript_file
-    grep -q 'teammate-message' "$1" 2>/dev/null
+    local first
+    first=$(grep -m1 '"type":"user"' "$1" 2>/dev/null) || return 1
+    case "$first" in
+        *teammate-message*) return 0 ;;
+    esac
+    return 1
 }
 
 # Teammates are skipped rather than merely deprioritised: naming one is wrong

@@ -505,6 +505,68 @@ test_resume_ignores_a_newer_teammate_transcript() {
 
 run_test test_resume_ignores_a_newer_teammate_transcript
 
+test_resume_reports_a_lead_that_received_teammate_reports() {
+    local recorded="abcd1234-5678-4abc-9def-fedcba987654"
+    local session_dir
+    session_dir=$(_seed_legacy_session "legacy-session" "$recorded")
+    _seed_claude_transcript "$session_dir" "$recorded"
+
+    # A lead that merely RECEIVES teammate reports carries the same frame
+    # mid-file — Claude Code injects an inbound message as "Another Claude
+    # session sent a message: <teammate-message ...>". Only a teammate's OWN
+    # brief is its first user turn. Matching the marker anywhere would
+    # classify every team-using lead as a teammate, which is precisely the
+    # population the filter exists to serve.
+    local lead="77777777-6666-4555-8444-333333333333"
+    _seed_claude_transcript "$session_dir" "$lead"
+    local proj
+    proj="$CS_TRANSCRIPTS_DIR/$(_encode_cwd_for_claude_test "$session_dir")"
+    {
+        printf '%s\n' '{"type":"user","message":{"content":"start the review"}}'
+        printf '%s\n' '{"type":"assistant","message":{"content":"working"}}'
+        printf '%s\n' '{"type":"user","message":{"content":"Another Claude session sent a message: <teammate-message teammate_id=\"reviewer\">done</teammate-message>"}}'
+    } > "$proj/$lead.jsonl"
+    touch -t 203001010000 "$proj/$lead.jsonl"
+
+    local output
+    output=$("$CS_BIN" legacy-session <<< "" 2>&1) || true
+
+    assert_output_contains "$output" "$lead" \
+        "a lead that received teammate reports is still the session's own conversation" || return 1
+}
+
+run_test test_resume_reports_a_lead_that_received_teammate_reports
+
+test_resume_stays_silent_when_the_discovered_conversation_is_older() {
+    # A slot already taken by a teammate (the state this release exists to
+    # stop happening) leaves the recorded transcript NEWER than any real
+    # conversation. Discovery correctly skips the teammate and returns an
+    # older one — so "newer" has to be checked against the clock rather than
+    # inferred from "discovery returned something different".
+    local recorded="99999999-8888-4777-8666-555555555555"
+    local session_dir
+    session_dir=$(_seed_legacy_session "legacy-session" "$recorded")
+    local proj
+    proj="$CS_TRANSCRIPTS_DIR/$(_encode_cwd_for_claude_test "$session_dir")"
+
+    local older="abcd1234-5678-4abc-9def-fedcba987654"
+    _seed_claude_transcript "$session_dir" "$older"
+    touch -t 200001010000 "$proj/$older.jsonl"
+
+    _seed_claude_transcript "$session_dir" "$recorded"
+    printf '%s\n' '{"type":"user","message":{"content":"<teammate-message teammate_id=\"team-lead\">go</teammate-message>"}}' \
+        > "$proj/$recorded.jsonl"
+    touch -t 203001010000 "$proj/$recorded.jsonl"
+
+    local output
+    output=$("$CS_BIN" legacy-session <<< "" 2>&1) || true
+
+    assert_output_not_contains "$output" "newer conversation" \
+        "an older conversation must never be announced as newer" || return 1
+}
+
+run_test test_resume_stays_silent_when_the_discovered_conversation_is_older
+
 run_test test_launch_exports_lead_pid_of_the_claude_process
 
 test_resume_launch_exports_lead_pid_as_the_parent() {
