@@ -83,13 +83,43 @@ _claude_project_dir() {
 # to it makes `--resume <uuid>` equivalent to `--continue` on first contact.
 # Takes the project dir (not cwd) so callers that already computed it via
 # _claude_project_dir can avoid a second symlink resolution.
+# True when a transcript belongs to an agent-team teammate rather than to the
+# session itself. A teammate started with the session as its working directory
+# writes a top-level transcript into the same project dir as the lead, so the
+# filename cannot tell them apart — and it is routinely the newest, because the
+# teammate outlives the turn that spawned it. Its brief is the marker: Claude
+# Code frames a teammate's first turn as a teammate-message.
+#
+# Reads the file directly rather than `head -c N | grep -q`. An early-exiting
+# pipe consumer SIGPIPEs its producer, which under pipefail takes cs down at
+# 141 once the transcript passes the pipe buffer — and transcripts run to
+# megabytes.
+_is_teammate_transcript() {  # transcript_file
+    grep -q 'teammate-message' "$1" 2>/dev/null
+}
+
+# Teammates are skipped rather than merely deprioritised: naming one is wrong
+# for every caller — as a rebind target it would bind the session to a
+# reviewer's conversation, and as a resume suggestion it would offer to
+# continue one.
 _discover_session_uuid_in() {
     local proj="$1"
     [ -d "$proj" ] || return 0
-    local newest
-    newest=$(ls -t "$proj"/*.jsonl 2>/dev/null | head -1 || true)
-    [ -n "$newest" ] || return 0
-    basename "$newest" .jsonl
+    # Collect first, then iterate a here-string. A `while read` fed by a pipe
+    # would SIGPIPE `ls` on the early return — the same trap the direct file
+    # read above avoids.
+    local listing
+    listing=$(ls -t "$proj"/*.jsonl 2>/dev/null) || true
+    [ -n "$listing" ] || return 0
+    local f
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        if ! _is_teammate_transcript "$f"; then
+            basename "$f" .jsonl
+            return 0
+        fi
+    done <<< "$listing"
+    return 0
 }
 
 # Append a rotated event to the tracked timeline: the durable link between
