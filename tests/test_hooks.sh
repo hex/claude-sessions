@@ -1451,4 +1451,70 @@ run_test test_session_start_warns_that_memory_is_shared
 run_test test_session_start_actor_honours_pinned_identity
 run_test test_session_start_actor_matches_cs_on_a_blank_pin
 
+# CS_SESSIONS_ROOT is read by session-end.sh but never exported into a session,
+# so `dirname "$SESSION_DIR"` always decides. That is right for a session under
+# the sessions root and wrong for an adopted one, whose real directory lives at
+# an unrelated project path: the index then lands in that project's parent.
+test_session_end_does_not_write_index_beside_an_adopted_session() {
+    local proj="$TEST_TMPDIR/code/my-project"
+    mkdir -p "$proj/.cs/local"
+    touch "$proj/.cs/local/session.log"
+    printf 'session_name: adopted-one\n' > "$proj/.cs/local/state"
+    printf -- '---\nstatus: active\ncreated: 2026-07-30\n---\n# Session: adopted-one\n' > "$proj/.cs/README.md"
+
+    unset CS_SESSIONS_ROOT
+    export CLAUDE_SESSION_NAME="adopted-one"
+    export CLAUDE_SESSION_DIR="$proj"
+    export CLAUDE_SESSION_META_DIR="$proj/.cs"
+
+    echo "{\"session_id\":\"11111111-2222-4333-8444-555555555555\",\"cwd\":\"$proj\",\"source\":\"user_exit\"}" \
+        | bash "$HOOKS_DIR/session-end.sh" >/dev/null 2>&1 || true
+
+    [ ! -f "$TEST_TMPDIR/code/index.md" ] \
+        || { echo "  FAIL: index.md written into the adopted project's parent"; return 1; }
+}
+
+run_test test_session_end_does_not_write_index_beside_an_adopted_session
+
+# The containment check compares SESSION_DIR against the sessions root. The
+# resolver reports physical paths but the CLI exports a logical SESSION_DIR
+# built from $HOME, so normalizing only one side stops the index being written
+# for any home reached through a symlink (/home -> /var/home, and every
+# /tmp-based test environment).
+test_session_end_writes_index_when_home_traverses_a_symlink() {
+    local fh="$TEST_TMPDIR/symhome" phys
+    mkdir -p "$fh/.claude-sessions/sess/.cs/local"
+    printf -- '---\nstatus: active\ncreated: 2026-07-30\n---\n# Session: sess\n' \
+        > "$fh/.claude-sessions/sess/.cs/README.md"
+    phys=$(cd "$fh" && pwd -P)
+
+    env -i HOME="$fh" PATH="$PATH" \
+        CLAUDE_SESSION_NAME=sess CLAUDE_SESSION_DIR="$fh/.claude-sessions/sess" \
+        /bin/bash "$HOOKS_DIR/session-end.sh" \
+        <<< "{\"session_id\":\"11111111-2222-4333-8444-555555555555\",\"cwd\":\"$fh\",\"source\":\"user_exit\"}" \
+        >/dev/null 2>&1 || true
+
+    [ -f "$phys/.claude-sessions/index.md" ] \
+        || { echo "  FAIL: index not written when \$HOME traverses a symlink"; return 1; }
+}
+
+run_test test_session_end_writes_index_when_home_traverses_a_symlink
+
+# The sessions-root default reads $HOME, which main never did, so under set -u an
+# unset HOME turns a step that should skip into an abort. cs-resolve.sh already
+# guards HOME; this must match it.
+test_session_end_survives_an_unset_home() {
+    local proj="$TEST_TMPDIR/nohome/sess"
+    mkdir -p "$proj/.cs/local"
+    touch "$proj/.cs/local/session.log"
+    env -i PATH="$PATH" CLAUDE_SESSION_NAME=sess CLAUDE_SESSION_DIR="$proj" \
+        /bin/bash "$HOOKS_DIR/session-end.sh" \
+        <<< "{\"session_id\":\"11111111-2222-4333-8444-555555555555\",\"cwd\":\"$proj\",\"source\":\"user_exit\"}" \
+        >/dev/null 2>&1
+    local rc=$?
+    [ "$rc" -eq 0 ] || { echo "  FAIL: session-end exited $rc with HOME unset"; return 1; }
+}
+
+run_test test_session_end_survives_an_unset_home
+
 report_results

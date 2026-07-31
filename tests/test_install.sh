@@ -176,13 +176,28 @@ test_strip_filters_in_sync() {
 
 test_manifest_arrays_match_repo_files() {
     local listed actual
-    listed=$(extract_array "$SCRIPT_DIR/../install.sh" CS_HOOKS | sort)
+    # hooks/ holds two kinds of file: hooks, which install.sh registers against
+    # an event, and libraries the hooks source, which must ship and be removed
+    # with them but must never be registered. Together they must account for
+    # every file, so a new one cannot be silently left uninstalled.
+    listed=$( { extract_array "$SCRIPT_DIR/../install.sh" CS_HOOKS
+                extract_array "$SCRIPT_DIR/../install.sh" CS_HOOK_LIBS; } | sort)
     actual=$(cd "$SCRIPT_DIR/../hooks" && ls *.sh | sort)
     if [ "$listed" != "$actual" ]; then
-        echo "  FAIL: CS_HOOKS does not match hooks/*.sh"
+        echo "  FAIL: CS_HOOKS + CS_HOOK_LIBS does not match hooks/*.sh"
         diff <(echo "$listed") <(echo "$actual") | head -10
         return 1
     fi
+
+    # A library must not be registered as a hook: it has no event and would be
+    # invoked with the wrong contract.
+    local lib
+    for lib in $(extract_array "$SCRIPT_DIR/../install.sh" CS_HOOK_LIBS); do
+        if extract_array "$SCRIPT_DIR/../install.sh" CS_HOOKS | grep -qx "$lib"; then
+            echo "  FAIL: $lib appears in both CS_HOOKS and CS_HOOK_LIBS"
+            return 1
+        fi
+    done
 
     listed=$(extract_array "$SCRIPT_DIR/../install.sh" CS_COMMANDS | sort)
     actual=$(cd "$SCRIPT_DIR/../commands" && ls *.md | sort)

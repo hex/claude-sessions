@@ -17,11 +17,34 @@ fi
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id')
 SOURCE=$(echo "$INPUT" | jq -r '.source // "user_exit"')
 
-# Check if we're in a cs session
-if [ -z "${CLAUDE_SESSION_NAME:-}" ]; then
-    # Not in a cs session, do nothing
-    exit 0
+# Test before sourcing rather than catching a failed source with ||: under
+# bash 3.2, cs's floor, a `.` of a missing file kills a non-interactive shell
+# outright and the || never runs. A partial install would then abort the hook
+# before its own decline, silently. When the library is absent the fallback
+# is the env-only check this guard replaced, so the hook behaves as it used to.
+_cs_lib="$(dirname "$0")/cs-resolve.sh"
+# shellcheck source=cs-resolve.sh
+# Parse-check before sourcing: a truncated or corrupt library is readable,
+# and sourcing it aborts the hook at the syntax error, before the fallback
+# below is even defined. One fork against several the hook already makes.
+# errexit is suspended across the source, not just around it: a library that
+# parses clean and fails when RUN (an inserted `=======` conflict marker is a
+# valid-looking command) fails INSIDE the sourced file, where set -e fires
+# before any outer || can catch it. Exit 2 out of a PreToolUse hook is
+# Claude Code's blocking code. Whatever the source defined before failing
+# still stands; the check below decides whether it is usable.
+case $- in *e*) _cs_had_e=1 ;; *) _cs_had_e=0 ;; esac
+set +e
+[ -r "$_cs_lib" ] && "${BASH:-/bin/bash}" -n "$_cs_lib" 2>/dev/null && . "$_cs_lib"
+if [ "$_cs_had_e" = 1 ]; then set -e; fi
+if ! command -v cs_resolve_session >/dev/null 2>&1; then
+    cs_resolve_session() {
+        [ -n "${CLAUDE_SESSION_NAME:-}" ] && [ -n "${CLAUDE_SESSION_DIR:-}" ]
+    }
 fi
+# Not in a cs session, do nothing. Resolves from the env under the CLI and
+# from the opened directory under front ends that cannot export one.
+cs_resolve_session "$INPUT" || exit 0
 
 SESSION_DIR="${CLAUDE_SESSION_DIR:-}"
 META_DIR="${CLAUDE_SESSION_META_DIR:-$SESSION_DIR/.cs}"
@@ -61,8 +84,29 @@ fi
 rm -f "$META_DIR/session.lock" 2>/dev/null || true
 
 # Regenerate sessions index.md at the sessions root
-SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$(dirname "$SESSION_DIR")}"
+# CS_SESSIONS_ROOT is not exported into a session, so this used to fall back to
+# the session's parent directory unconditionally. That is right for a session
+# living under the sessions root and wrong for an adopted one, whose directory
+# is an unrelated project path — the index landed in that project's parent.
+# Default to the sessions root itself, and only write an index where sessions
+# actually live.
+# Compare physical against physical, on BOTH sides. The resolver reports a
+# physical SESSION_DIR (cd + pwd -P) while the CLI exports a logical one built
+# from $HOME, so normalizing only the root stops the index being written for any
+# home reached through a symlink (/home -> /var/home, and every /tmp test env).
+# ${HOME:-} matches cs-resolve.sh: main never read HOME here, so under set -u
+# an unset one turned a step that should skip into an abort.
+_cs_root_default="${HOME:-/nonexistent}/.claude-sessions"
+SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$_cs_root_default}"
 if [ -d "$SESSIONS_ROOT" ]; then
+    SESSIONS_ROOT=$(cd "$SESSIONS_ROOT" 2>/dev/null && pwd -P) || SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$_cs_root_default}"
+fi
+SESSION_DIR_PHYS=$(cd "$SESSION_DIR" 2>/dev/null && pwd -P) || SESSION_DIR_PHYS="$SESSION_DIR"
+case "$SESSION_DIR_PHYS" in
+    "$SESSIONS_ROOT"/*) : ;;
+    *) [ -n "${CS_SESSIONS_ROOT:-}" ] || SESSIONS_ROOT="" ;;
+esac
+if [ -n "$SESSIONS_ROOT" ] && [ -d "$SESSIONS_ROOT" ]; then
     INDEX_FILE="$SESSIONS_ROOT/index.md"
     {
         echo "# Sessions"

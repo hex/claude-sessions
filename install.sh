@@ -94,6 +94,16 @@ CS_HOOKS=(
     scope-prompt.sh
 )
 
+# Files under hooks/ that the hooks SOURCE rather than files Claude Code
+# invokes. They ship and are removed alongside the hooks, but must never be
+# registered against an event. KEEP THIS LIST IN SYNC WITH bin/cs.
+CS_HOOK_LIBS=(
+    cs-resolve.sh
+)
+
+# Everything that lands in HOOKS_DIR, for the copy and cleanup loops.
+CS_HOOK_FILES=("${CS_HOOKS[@]}" "${CS_HOOK_LIBS[@]}")
+
 # Hooks retired in past versions but possibly still installed from older cs versions.
 # install.sh and bin/cs run_uninstall both clean these up. KEEP THIS LIST IN SYNC WITH bin/cs.
 # When retiring a hook in a release, add its filename here.
@@ -332,7 +342,7 @@ done
 
 # The subdirectory copy is canonical; remove parent-level copies left by
 # installs that deployed hooks flat into ~/.claude/hooks/.
-for hook in "${CS_HOOKS[@]}"; do
+for hook in "${CS_HOOK_FILES[@]}"; do
     if [ -f "$HOOKS_PARENT_DIR/$hook" ]; then
         rm "$HOOKS_PARENT_DIR/$hook"
         info "  Removed $HOOKS_PARENT_DIR/$hook"
@@ -341,17 +351,17 @@ done
 
 if [ "$INSTALL_METHOD" = "local" ]; then
     # Install from local clone
-    for hook in "${CS_HOOKS[@]}"; do
+    for hook in "${CS_HOOK_FILES[@]}"; do
         cp "$HOOKS_SOURCE/$hook" "$HOOKS_DIR/"
     done
 else
     # Download from GitHub
     if command -v curl >/dev/null 2>&1; then
-        for hook in "${CS_HOOKS[@]}"; do
+        for hook in "${CS_HOOK_FILES[@]}"; do
             curl -fsSL "$REPO_URL/hooks/$hook" -o "$HOOKS_DIR/$hook" || error "Failed to download $hook"
         done
     elif command -v wget >/dev/null 2>&1; then
-        for hook in "${CS_HOOKS[@]}"; do
+        for hook in "${CS_HOOK_FILES[@]}"; do
             wget -q "$REPO_URL/hooks/$hook" -O "$HOOKS_DIR/$hook" || error "Failed to download $hook"
         done
     fi
