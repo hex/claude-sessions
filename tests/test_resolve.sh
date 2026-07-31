@@ -284,6 +284,19 @@ run_test test_home_itself_is_not_a_session_root
 run_test test_no_session_anywhere_fails
 run_test test_name_comes_from_state_not_basename
 run_test test_name_falls_back_to_basename
+# The marker applies to the env path too, so the opt-out means "this directory
+# is not a cs session" rather than "keep one front end out".
+test_disabled_marker_opts_out_on_the_env_path() {
+    _make_session "$TEST_TMPDIR/optout-env" "optout-env"
+    touch "$TEST_TMPDIR/optout-env/.cs/local/disabled"
+    export CLAUDE_SESSION_NAME="optout-env"
+    export CLAUDE_SESSION_DIR="$TEST_TMPDIR/optout-env"
+    local got
+    got=$(_resolve '{}')
+    assert_eq "FAIL" "$got" "the disabled marker silences a cs-launched session too" || return 1
+}
+
 run_test test_disabled_marker_opts_out
+run_test test_disabled_marker_opts_out_on_the_env_path
 
 report_results

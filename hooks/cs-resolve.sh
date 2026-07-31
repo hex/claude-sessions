@@ -20,13 +20,17 @@
 cs_resolve_session() {  # [hook_input_json]
     local input="${1:-}" start="" dir="" name=""
 
-    # Env first. The CLI path resolves here and never reaches the walk, so its
-    # behaviour is unchanged by anything below.
+    # Env first: the CLI path resolves here and never reaches the walk below.
+    # The disabled marker is the one thing that does apply to it as well, and
+    # deliberately: an opt-out that silenced one front end but not the other
+    # would be a worse rule than "this directory is not a cs session".
     if [ -n "${CLAUDE_SESSION_NAME:-}" ] && [ -n "${CLAUDE_SESSION_DIR:-}" ]; then
         [ -d "$CLAUDE_SESSION_DIR" ] || return 1
         : "${CLAUDE_SESSION_META_DIR:=$CLAUDE_SESSION_DIR/.cs}"
         export CLAUDE_SESSION_META_DIR
         _cs_session_is_enabled "$CLAUDE_SESSION_DIR" || return 1
+        CS_RESOLVED_FROM=env
+        export CS_RESOLVED_FROM
         return 0
     fi
 
@@ -52,7 +56,10 @@ cs_resolve_session() {  # [hook_input_json]
     CLAUDE_SESSION_DIR="$dir"
     CLAUDE_SESSION_META_DIR="$dir/.cs"
     CLAUDE_SESSION_NAME="$name"
-    export CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR CLAUDE_SESSION_NAME
+    # Which path resolved matters downstream: only a cs launch owns the
+    # session lock, so a hook that got here by walking must not remove it.
+    CS_RESOLVED_FROM=walk
+    export CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR CLAUDE_SESSION_NAME CS_RESOLVED_FROM
     return 0
 }
 

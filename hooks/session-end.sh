@@ -80,8 +80,23 @@ if git -C "$SESSION_DIR" rev-parse --git-dir >/dev/null 2>&1; then
     fi
 fi
 
-# Clean up lock files
-rm -f "$META_DIR/session.lock" 2>/dev/null || true
+# Clean up the lock, but only one this launch owns. Only `cs` writes a lock, so
+# a hook that resolved by walking a directory belongs to another front end and
+# is not the owner: closing a desktop conversation on a directory a CLI session
+# is live in would otherwise strip that session's lock, letting `cs <name>` open
+# a duplicate with no collision menu and leaving prose-lint inert mid-session
+# (its cutoff file is gone). A stale lock is still cleared either way, so a
+# crashed session does not stay locked out. Ownership cannot be the $$ test
+# lib/15-lock.sh uses — a hook is a different process.
+if [ "${CS_RESOLVED_FROM:-env}" = "env" ]; then
+    rm -f "$META_DIR/session.lock" 2>/dev/null || true
+else
+    _cs_lock_pid=$(cat "$META_DIR/session.lock" 2>/dev/null | tr -d '[:space:]') || true
+    case "${_cs_lock_pid:-}" in
+        ''|*[!0-9]*) rm -f "$META_DIR/session.lock" 2>/dev/null || true ;;
+        *) kill -0 "$_cs_lock_pid" 2>/dev/null || rm -f "$META_DIR/session.lock" 2>/dev/null || true ;;
+    esac
+fi
 
 # Regenerate sessions index.md at the sessions root
 # CS_SESSIONS_ROOT is not exported into a session, so this used to fall back to

@@ -8,6 +8,14 @@ _CS_TEST_LIB_LOADED=1
 
 set -euo pipefail
 
+# Hooks resolve a session from the directory they are opened on, so an ambient
+# CLAUDE_PROJECT_DIR binds a hook under test to a REAL session: assertions that
+# it declines outside a session fail, and — worse — ones that assert silence
+# stay green while the hook writes into that live session. Cleared here rather
+# than in setup() because suites override setup() and this must hold for all of
+# them. CS_ACTOR is cleared for the same reason: it decides resolved identity.
+unset CLAUDE_PROJECT_DIR CS_ACTOR 2>/dev/null || true
+
 # --- State ---
 TESTS_RUN=0
 TESTS_PASSED=0

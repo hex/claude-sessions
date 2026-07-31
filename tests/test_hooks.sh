@@ -13,6 +13,11 @@ setup() {
     # CS_ACTOR is the top-precedence actor override, so an exported one on the
     # developer's machine would decide the identity these tests pin.
     unset CS_ACTOR
+    # Hooks now resolve a session from the directory, so an ambient
+    # CLAUDE_PROJECT_DIR would bind them to a REAL session: tests that assert
+    # "declines outside a session" fail, and worse, ones that assert silence
+    # stay green while the hook writes into that live session.
+    unset CLAUDE_PROJECT_DIR
     export CLAUDE_SESSION_NAME="test-session"
     export CLAUDE_SESSION_DIR="$TEST_TMPDIR/session"
     export CLAUDE_SESSION_META_DIR="$CLAUDE_SESSION_DIR/.cs"
@@ -1516,5 +1521,50 @@ test_session_end_survives_an_unset_home() {
 }
 
 run_test test_session_end_survives_an_unset_home
+
+# Before hooks resolved a session from the directory, a second front end never
+# reached SessionEnd for a session it did not launch. Now closing a desktop
+# conversation on a directory a CLI session is live in would remove that
+# session's lock, so `cs <name>` opens a duplicate with no collision menu and
+# prose-lint goes inert mid-session (its cutoff file is gone).
+test_session_end_spares_a_live_sessions_lock() {
+    local proj="$TEST_TMPDIR/lockheld"
+    mkdir -p "$proj/.cs/local"
+    touch "$proj/.cs/local/session.log"
+    # $$ is this test runner: a PID that is definitely alive.
+    printf '%s\n' "$$" > "$proj/.cs/session.lock"
+
+    # The real scenario: another front end resolves by WALKING the directory,
+    # so no session env is set. A cs launch (env path) still clears its own lock.
+    env -i PATH="$PATH" HOME="$TEST_TMPDIR" CLAUDE_PROJECT_DIR="$proj" \
+        /bin/bash "$HOOKS_DIR/session-end.sh" \
+        <<< "{\"session_id\":\"11111111-2222-4333-8444-555555555555\",\"cwd\":\"$proj\",\"source\":\"user_exit\"}" \
+        >/dev/null 2>&1 || true
+
+    [ -f "$proj/.cs/session.lock" ] \
+        || { echo "  FAIL: a live session's lock was removed by another front end"; return 1; }
+}
+
+# A lock left by a process that is gone is exactly what SessionEnd should clear.
+test_session_end_clears_a_stale_lock() {
+    local proj="$TEST_TMPDIR/lockstale"
+    mkdir -p "$proj/.cs/local"
+    touch "$proj/.cs/local/session.log"
+    # A PID that cannot be running: start a shell and let it exit.
+    local dead
+    dead=$( ( exec /bin/bash -c 'echo $$' ) )
+    printf '%s\n' "$dead" > "$proj/.cs/session.lock"
+
+    env -i PATH="$PATH" HOME="$TEST_TMPDIR" CLAUDE_PROJECT_DIR="$proj" \
+        /bin/bash "$HOOKS_DIR/session-end.sh" \
+        <<< "{\"session_id\":\"11111111-2222-4333-8444-555555555555\",\"cwd\":\"$proj\",\"source\":\"user_exit\"}" \
+        >/dev/null 2>&1 || true
+
+    [ ! -f "$proj/.cs/session.lock" ] \
+        || { echo "  FAIL: a stale lock was left behind"; return 1; }
+}
+
+run_test test_session_end_spares_a_live_sessions_lock
+run_test test_session_end_clears_a_stale_lock
 
 report_results
