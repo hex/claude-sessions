@@ -455,6 +455,56 @@ test_resume_reports_a_newer_conversation_than_the_recorded_one() {
 
 run_test test_resume_reports_a_newer_conversation_than_the_recorded_one
 
+test_resume_ignores_a_newer_teammate_transcript() {
+    local recorded="abcd1234-5678-4abc-9def-fedcba987654"
+    local session_dir
+    session_dir=$(_seed_legacy_session "legacy-session" "$recorded")
+    _seed_claude_transcript "$session_dir" "$recorded"
+
+    # An agent-team teammate started with the session as its working directory
+    # writes a TOP-LEVEL transcript into the same project dir as the lead —
+    # indistinguishable by filename, and routinely the newest, because the
+    # teammate outlives the turn that spawned it. It is never the session's own
+    # conversation, so offering to resume it is always wrong.
+    local teammate="99999999-8888-4777-8666-555555555555"
+    _seed_claude_transcript "$session_dir" "$teammate"
+    local proj
+    proj="$CS_TRANSCRIPTS_DIR/$(_encode_cwd_for_claude_test "$session_dir")"
+    printf '%s\n' '{"type":"user","message":{"content":"<teammate-message teammate_id=\"team-lead\">review the branch</teammate-message>"}}' \
+        > "$proj/$teammate.jsonl"
+    # Pad well past the 64KB pipe buffer. A real transcript runs to megabytes,
+    # and the detection reads it whole: an implementation that piped the file
+    # into an early-exiting consumer would SIGPIPE the producer and, under
+    # pipefail, take cs down at 141 — which a small fixture never reaches.
+    local pad
+    pad=$(printf '%0.sx' $(seq 1 1000))
+    local i=0
+    while [ "$i" -lt 100 ]; do
+        printf '{"type":"assistant","message":{"content":"%s"}}\n' "$pad" >> "$proj/$teammate.jsonl"
+        i=$((i + 1))
+    done
+    touch -t 203001010000 "$proj/$teammate.jsonl"
+
+    local size
+    size=$(wc -c < "$proj/$teammate.jsonl" | tr -d '[:space:]')
+    if [ "$size" -le 65536 ]; then
+        echo "  FAIL: precondition - fixture must exceed the 64KB pipe buffer (got $size)"
+        return 1
+    fi
+
+    local output rc=0
+    output=$("$CS_BIN" legacy-session <<< "" 2>&1) || rc=$?
+
+    if [ "$rc" = 141 ]; then
+        echo "  FAIL: cs died of SIGPIPE (141) reading a large transcript"
+        return 1
+    fi
+    assert_output_not_contains "$output" "$teammate" \
+        "a teammate's conversation must never be offered as the newer one" || return 1
+}
+
+run_test test_resume_ignores_a_newer_teammate_transcript
+
 run_test test_launch_exports_lead_pid_of_the_claude_process
 
 test_resume_launch_exports_lead_pid_as_the_parent() {
