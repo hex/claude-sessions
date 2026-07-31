@@ -246,6 +246,28 @@ launch_claude_code() {
     # For existing sessions, ask if user wants to continue previous conversation
     local continue_flag=""
     if [ "$is_new" = "false" ]; then
+        # cs records only the conversation it launched, so one started any other
+        # way on this folder — a `/desktop` handoff, a claude opened on the
+        # directory — leaves the recorded uuid naming an older conversation.
+        # That uuid still resolves, so `--resume` SUCCEEDS and the quick-failure
+        # fallback below never fires: the launch would continue a superseded
+        # prefix with nothing said. Name the newer one rather than switching to
+        # it, which would hand the session to whatever was last opened here.
+        if [ -n "$claude_session_id" ]; then
+            local _proj _newest
+            _proj=$(_claude_project_dir "$session_dir")
+            # Only when the recorded conversation is real. A recorded uuid with
+            # no transcript is the orphan case migrate_session already repairs,
+            # and reporting the repair target as a rival would be nonsense.
+            if [ -f "$_proj/$claude_session_id.jsonl" ]; then
+                _newest=$(_discover_session_uuid_in "$_proj")
+                if [ -n "$_newest" ] && [ "$_newest" != "$claude_session_id" ]; then
+                    printf "${DIM}A newer conversation was opened here outside cs:${NC} %s\n" "$_newest"
+                    printf "${DIM}Resuming the recorded one instead. To continue the newer:${NC} claude --resume %s\n" "$_newest"
+                fi
+            fi
+        fi
+
         # Deliberate rotation: an unconsumed handoff written by the rotate
         # skill adds a third answer. Lexicographically last basename wins
         # (the YYYY-MM-DD- prefix makes that the newest date).

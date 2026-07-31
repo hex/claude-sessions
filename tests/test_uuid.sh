@@ -399,6 +399,62 @@ STUB_EOF
         "CS_LEAD_PID must be the pid the launched claude runs under" || return 1
 }
 
+test_self_heals_a_slot_taken_by_a_subdirectory_claude() {
+    # A claude working in a SUBDIRECTORY of a session writes its transcript
+    # under that subdirectory's project dir, never the session's. A conversation
+    # like that could take the session's recorded slot, leaving a uuid that
+    # resolves for `claude` while naming no conversation of this session.
+    # Discovery only ever looks in the session's own project dir, so the value
+    # reads as an orphan there and heals to the session's newest real
+    # conversation — no separate repair path needed for the case.
+    local intruder="00000000-0000-4000-8000-0000000000ff"
+    local session_dir
+    session_dir=$(_seed_legacy_session "legacy-session" "$intruder")
+
+    # The intruder's transcript DOES exist — under the subdirectory's project
+    # dir. That is what makes this different from a plain missing-file orphan.
+    mkdir -p "$session_dir/sub-project"
+    _seed_claude_transcript "$session_dir/sub-project" "$intruder"
+    local real_uuid="abcd1234-5678-4abc-9def-fedcba987654"
+    _seed_claude_transcript "$session_dir" "$real_uuid"
+
+    "$CS_BIN" legacy-session <<< "" >/dev/null 2>&1 || true
+
+    assert_eq "$real_uuid" "$(_extract_session_uuid "$session_dir/.cs/local/state")" \
+        "a slot taken by a subdirectory's claude must heal to the session's own conversation" || return 1
+}
+
+run_test test_self_heals_a_slot_taken_by_a_subdirectory_claude
+
+test_resume_reports_a_newer_conversation_than_the_recorded_one() {
+    # The recorded conversation still resolves, so `claude --resume` SUCCEEDS
+    # and the sub-3-second failure fallback never fires. But a newer
+    # conversation exists in this session's own transcript dir — what a
+    # `/desktop` handoff or a claude opened on the folder leaves behind. Only
+    # the launched conversation may rebind the slot, so cs never learns of it;
+    # without this notice the launch silently continues a superseded prefix.
+    local recorded="abcd1234-5678-4abc-9def-fedcba987654"
+    local session_dir
+    session_dir=$(_seed_legacy_session "legacy-session" "$recorded")
+    _seed_claude_transcript "$session_dir" "$recorded"
+
+    local newer="11111111-2222-4333-8444-555555555555"
+    _seed_claude_transcript "$session_dir" "$newer"
+    # Pin the ordering rather than relying on write order: same-second mtimes
+    # would leave `ls -t` free to pick either, making the test flaky.
+    local proj
+    proj="$CS_TRANSCRIPTS_DIR/$(_encode_cwd_for_claude_test "$session_dir")"
+    touch -t 203001010000 "$proj/$newer.jsonl"
+
+    local output
+    output=$("$CS_BIN" legacy-session <<< "" 2>&1) || true
+
+    assert_output_contains "$output" "$newer" \
+        "launch must name the newer conversation it is not resuming" || return 1
+}
+
+run_test test_resume_reports_a_newer_conversation_than_the_recorded_one
+
 run_test test_launch_exports_lead_pid_of_the_claude_process
 
 test_resume_launch_exports_lead_pid_as_the_parent() {
