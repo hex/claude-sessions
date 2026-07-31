@@ -235,6 +235,33 @@ test_hooks_decline_when_the_resolver_is_corrupt() {
 
 run_test test_hooks_decline_when_the_resolver_is_missing
 run_test test_hooks_decline_when_the_resolver_is_corrupt
+
+# A parse-check catches truncation but not a library that parses clean and then
+# fails when run: an inserted conflict marker like ======= is a valid-looking
+# command. Sourcing it dies at execution, and as the last command of the guard's
+# && chain that aborts the hook. Exit 2 from a PreToolUse hook is Claude Code's
+# blocking code, so this must degrade to a decline.
+test_hooks_decline_when_the_resolver_fails_at_runtime() {
+    local fake="$TEST_TMPDIR/runtimebad" sh=/bin/bash
+    [ -x "$sh" ] || sh=bash
+    mkdir -p "$fake"
+    cp "$SCRIPT_DIR/../hooks/narrative-reminder.sh" "$fake/"
+    cp "$SCRIPT_DIR/../hooks/cs-resolve.sh" "$fake/"
+    printf '=======\n' >> "$fake/cs-resolve.sh"
+    "$sh" -n "$fake/cs-resolve.sh" 2>/dev/null \
+        || { echo "  FAIL: fixture must PARSE clean or it tests the wrong thing"; return 1; }
+    local out rc
+    out=$(env -u CLAUDE_SESSION_NAME -u CLAUDE_SESSION_DIR -u CLAUDE_PROJECT_DIR \
+        "$sh" "$fake/narrative-reminder.sh" <<< '{}' 2>/dev/null)
+    rc=$?
+    [ "$rc" -eq 0 ] || { echo "  FAIL: a runtime-failing library made the hook exit $rc"; return 1; }
+    case "$out" in
+        *approve*) : ;;
+        *) echo "  FAIL: approve payload suppressed, got [$out]"; return 1 ;;
+    esac
+}
+
+run_test test_hooks_decline_when_the_resolver_fails_at_runtime
 run_test test_pwd_alone_does_not_resolve
 run_test test_env_contract_is_used_verbatim
 run_test test_env_contract_with_missing_dir_fails

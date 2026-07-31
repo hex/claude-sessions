@@ -1500,4 +1500,21 @@ test_session_end_writes_index_when_home_traverses_a_symlink() {
 
 run_test test_session_end_writes_index_when_home_traverses_a_symlink
 
+# The sessions-root default reads $HOME, which main never did, so under set -u an
+# unset HOME turns a step that should skip into an abort. cs-resolve.sh already
+# guards HOME; this must match it.
+test_session_end_survives_an_unset_home() {
+    local proj="$TEST_TMPDIR/nohome/sess"
+    mkdir -p "$proj/.cs/local"
+    touch "$proj/.cs/local/session.log"
+    env -i PATH="$PATH" CLAUDE_SESSION_NAME=sess CLAUDE_SESSION_DIR="$proj" \
+        /bin/bash "$HOOKS_DIR/session-end.sh" \
+        <<< "{\"session_id\":\"11111111-2222-4333-8444-555555555555\",\"cwd\":\"$proj\",\"source\":\"user_exit\"}" \
+        >/dev/null 2>&1
+    local rc=$?
+    [ "$rc" -eq 0 ] || { echo "  FAIL: session-end exited $rc with HOME unset"; return 1; }
+}
+
+run_test test_session_end_survives_an_unset_home
+
 report_results
