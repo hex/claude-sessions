@@ -804,6 +804,12 @@ test_session_start_rebind_ignores_invalid_session_id() {
 }
 
 test_session_start_rebinds_for_a_claude_cs_spawned() {
+    # Needs a real `ps -o ppid=`. The Cygwin-derived ps that MSYS ships accepts
+    # only [-aefls] [-u UID] [-p PID] and errors on -o, which would fail this
+    # test for a reason that has nothing to do with the property. Nothing is
+    # lost there: cs hands Windows launches to WSL (lib/99-main.sh), so no lead
+    # process exists under MSYS and declining is the right answer anyway.
+    _skip_on_msys && return 0
     session_start_setup
 
     seed_recorded_uuid "aaaaaaaa-1111-2222-3333-444444444444"
@@ -849,6 +855,35 @@ test_session_start_rebind_declines_for_child_claude() {
         "a child claude must not take the recorded slot" || { session_start_teardown; return 1; }
     assert_file_not_contains "$CLAUDE_SESSION_META_DIR/local/state" "bbbbbbbb-5555-6666-7777-888888888888" \
         "the child's own UUID must never be recorded" || { session_start_teardown; return 1; }
+
+    session_start_teardown
+}
+
+test_session_start_rebind_declines_for_a_live_foreign_parent() {
+    # Needs a real `ps -o ppid=` — see the skip note above.
+    _skip_on_msys && return 0
+    session_start_setup
+
+    seed_recorded_uuid "aaaaaaaa-1111-2222-3333-444444444444"
+
+    # The teammate's actual shape: a LIVE claude whose parent is real but is not
+    # cs — tmux started it. The sibling decline test uses a dead pid, so it pins
+    # only the case where ps finds nothing; an implementation that asked whether
+    # a parent EXISTS rather than whether it MATCHES would satisfy that test and
+    # re-open this bug. Here ps succeeds and reports this shell, while
+    # CS_LEAD_PID names a process that is not it.
+    sleep 30 &
+    local live=$!
+
+    CLAUDE_PID="$live" CS_LEAD_PID=999999 \
+        bash -c 'echo "{\"session_id\":\"bbbbbbbb-5555-6666-7777-888888888888\",\"source\":\"startup\",\"cwd\":\"'"$CLAUDE_SESSION_DIR"'\",\"hook_event_name\":\"SessionStart\"}" | bash "'"$HOOKS_DIR"'/session-start.sh"' \
+        2>/dev/null > /dev/null
+
+    kill "$live" 2>/dev/null || true
+    wait "$live" 2>/dev/null || true
+
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/local/state" "claude_session_id: aaaaaaaa-1111-2222-3333-444444444444" \
+        "a live claude whose parent is not cs must not take the slot" || { session_start_teardown; return 1; }
 
     session_start_teardown
 }
@@ -1232,6 +1267,7 @@ run_test test_session_start_rebinds_uuid_on_startup
 run_test test_session_start_rebind_ignores_invalid_session_id
 run_test test_session_start_rebinds_for_a_claude_cs_spawned
 run_test test_session_start_rebind_declines_for_child_claude
+run_test test_session_start_rebind_declines_for_a_live_foreign_parent
 run_test test_session_start_rebind_declines_without_lead_pid
 run_test test_session_start_rebind_declines_when_neither_pid_is_set
 

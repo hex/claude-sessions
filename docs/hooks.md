@@ -34,12 +34,22 @@ session fires its hooks — agent-team teammates (full claude processes with the
 top-level `SessionStart`, not in-process subagents), headless `claude -p` children,
 desktop conversations, a bare `claude` started in a session folder. The session's
 recorded conversation (`claude_session_id`) is a single slot, so exactly one of them
-may write it: the one `cs` launched. `cs` exports `CS_LEAD_PID` with the pid it
-`exec`s into, Claude Code stamps every hook env with `CLAUDE_PID`, and the two match
-only for the launched conversation — a context-limit fork and an in-process `/clear`
-keep the process, while every other claude has a pid of its own. Environment cannot
-answer this: children inherit exports, so a teammate carries `CS_LEAD_PID` while
-owning a different pid.
+may write it: the one `cs` launched. `cs` exports `CS_LEAD_PID` with the pid it hands
+to claude and Claude Code stamps every hook env with `CLAUDE_PID`, which the hook
+matches two ways, because `cs` launches two ways. The fresh-spawn arms `exec`, so
+claude carries `cs`'s own pid; the resume arm runs claude as a child — it needs the
+exit status to fall through to a fresh rebind when there is nothing to resume — so
+there `cs` is claude's parent. A context-limit fork and an in-process `/clear` keep
+the process either way. Environment cannot answer this on its own: children inherit
+exports, so a teammate carries `CS_LEAD_PID` while owning a different pid.
+
+The parent arm is the looser of the two, and its limit is worth stating. After an
+`exec` launch `CS_LEAD_PID` is the lead claude's own pid, so a claude that is a
+*direct* child of the lead claude is admitted. Nothing in cs spawns one, and the
+route that would otherwise reach it — a `claude -p` run through the Bash tool —
+does not, because that command runs under an intermediate shell and the nested
+claude is a grandchild. A user hook or wrapper that `exec`-chains straight into
+`claude -p` inside a session would take the slot.
 
 ## session-start.sh (SessionStart)
 
