@@ -14,6 +14,10 @@ setup() {
     export CLAUDE_SESSION_DIR="$TEST_TMPDIR/session"
     export CLAUDE_SESSION_META_DIR="$CLAUDE_SESSION_DIR/.cs"
     export CS_TEST_SYNC=1  # Run hook git operations in foreground for testing
+    # Model a cs-launched lead: the ref rename rides inside the rebind, which
+    # the hook performs only for the claude cs exec'd into, matched by pid.
+    export CS_LEAD_PID=$$
+    export CLAUDE_PID=$$
     export CS_SESSIONS_ROOT="$TEST_TMPDIR/sessions"  # for create_test_session_with_git
 
     mkdir -p "$CLAUDE_SESSION_DIR/.cs/local"

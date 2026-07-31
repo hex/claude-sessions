@@ -368,6 +368,74 @@ test_env_var_exported_with_uuid() {
 
 run_test test_env_var_exported_with_uuid
 
+test_launch_exports_lead_pid_of_the_claude_process() {
+    # Hooks tell the launched conversation from any other claude resolving the
+    # same session by comparing CS_LEAD_PID against Claude Code's CLAUDE_PID.
+    # That only holds if the exported value is the pid claude actually runs
+    # under, which is what exec buys: the launch shell's image is replaced and
+    # the pid carries over. The stub reports its own $$ — ground truth for the
+    # launched process's pid, arrived at independently of the exported value.
+    local stub="$TEST_TMPDIR/claude-pid-stub"
+    cat > "$stub" << 'STUB_EOF'
+#!/usr/bin/env bash
+echo "CS_LEAD_PID_SEEN=${CS_LEAD_PID:-unset} LAUNCHED_PID=$$"
+STUB_EOF
+    chmod +x "$stub"
+    export CLAUDE_CODE_BIN="$stub"
+
+    local output
+    output=$("$CS_BIN" test-session <<< "" 2>&1) || true
+
+    local exported launched
+    exported=$(printf '%s' "$output" | sed -n 's/.*CS_LEAD_PID_SEEN=\([^ ]*\).*/\1/p')
+    launched=$(printf '%s' "$output" | sed -n 's/.*LAUNCHED_PID=\([0-9]*\).*/\1/p')
+
+    if [ -z "$launched" ]; then
+        echo "  FAIL: precondition - stub never ran (output: $output)"
+        return 1
+    fi
+
+    assert_eq "$launched" "$exported" \
+        "CS_LEAD_PID must be the pid the launched claude runs under" || return 1
+}
+
+run_test test_launch_exports_lead_pid_of_the_claude_process
+
+test_resume_launch_exports_lead_pid_as_the_parent() {
+    # The resume arm runs claude rather than exec'ing into it, so there the
+    # launched conversation is cs's child and CS_LEAD_PID is its parent, not
+    # its own pid. The hook accepts both shapes; this pins the one the exec
+    # test cannot see, on the commonest launch there is. The stub reports its
+    # own $PPID — ground truth for who started it, independent of the exported
+    # value.
+    local stub="$TEST_TMPDIR/claude-ppid-stub"
+    cat > "$stub" << 'STUB_EOF'
+#!/usr/bin/env bash
+echo "CS_LEAD_PID_SEEN=${CS_LEAD_PID:-unset} LAUNCHED_BY=$PPID"
+STUB_EOF
+    chmod +x "$stub"
+    export CLAUDE_CODE_BIN="$stub"
+
+    # First run creates the session; the second resumes (default 'Y').
+    "$CS_BIN" test-session <<< "" >/dev/null 2>&1 || true
+    local output
+    output=$("$CS_BIN" test-session <<< "" 2>&1) || true
+
+    local exported parent
+    exported=$(printf '%s' "$output" | sed -n 's/.*CS_LEAD_PID_SEEN=\([^ ]*\).*/\1/p' | tail -1)
+    parent=$(printf '%s' "$output" | sed -n 's/.*LAUNCHED_BY=\([0-9]*\).*/\1/p' | tail -1)
+
+    if [ -z "$parent" ]; then
+        echo "  FAIL: precondition - stub never ran on the resume path (output: $output)"
+        return 1
+    fi
+
+    assert_eq "$parent" "$exported" \
+        "CS_LEAD_PID must be the pid that started the resumed claude" || return 1
+}
+
+run_test test_resume_launch_exports_lead_pid_as_the_parent
+
 # ============================================================================
 # Cycle 5: doctor check verifies recorded UUID against $CLAUDE_CODE_SESSION_ID
 # ============================================================================

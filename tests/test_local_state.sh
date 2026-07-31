@@ -196,6 +196,10 @@ EOF
 # ============================================================================
 
 hook_setup() {
+    # Model a cs-launched lead: the hook rebinds only for the claude cs exec'd
+    # into, matched by pid.
+    export CS_LEAD_PID=$$
+    export CLAUDE_PID=$$
     export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/current-session"
     export CLAUDE_SESSION_META_DIR="$CLAUDE_SESSION_DIR/.cs"
     export CLAUDE_SESSION_NAME="current-session"

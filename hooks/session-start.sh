@@ -350,7 +350,36 @@ case "$SOURCE" in
 esac
 
 UUID_RE='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
-if [[ "$SESSION_ID" =~ $UUID_RE ]]; then
+# Only the launched conversation may rebind: the slot is one per checkout, and
+# every claude that resolves this session fires this hook. A teammate is a full
+# claude process with its own top-level SessionStart (the agent_id check above
+# catches in-process subagents, not tmux-backed ones), and a front end that
+# walked in from the directory is not a cs launch at all — either taking the
+# slot leaves `cs <name>` resuming a conversation nobody opened, and stamps the
+# timeline with a lineage that never happened.
+#
+# Two shapes count as the launch, because cs starts claude two ways. The exec
+# arms replace cs's own process, so claude carries cs's pid; the resume arm runs
+# claude as a child, since it needs the exit status to fall through to a fresh
+# rebind when there is nothing to resume, and there claude's parent is cs. A
+# teammate is neither: tmux starts it, so cs is not its process and not its
+# parent, and CS_LEAD_PID is absent from its environment entirely.
+#
+# Both variables must be non-empty, not merely equal: unset on both sides
+# compares equal, which would hand the slot to precisely the callers this
+# excludes.
+IS_LEAD=0
+if [ -n "${CS_LEAD_PID:-}" ] && [ -n "${CLAUDE_PID:-}" ]; then
+    if [ "$CLAUDE_PID" = "$CS_LEAD_PID" ]; then
+        IS_LEAD=1
+    else
+        _CS_LAUNCH_PARENT=$(ps -o ppid= -p "$CLAUDE_PID" 2>/dev/null | tr -d '[:space:]' || true)
+        if [ -n "$_CS_LAUNCH_PARENT" ] && [ "$_CS_LAUNCH_PARENT" = "$CS_LEAD_PID" ]; then
+            IS_LEAD=1
+        fi
+    fi
+fi
+if [ "$IS_LEAD" = 1 ] && [[ "$SESSION_ID" =~ $UUID_RE ]]; then
     RECORDED_UUID=$(awk '/^claude_session_id:/ { print $2; exit }' "$STATE_FILE" 2>/dev/null || true)
     if [ "$RECORDED_UUID" != "$SESSION_ID" ]; then
         local_state_set claude_session_id "$SESSION_ID"

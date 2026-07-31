@@ -29,12 +29,34 @@ Session identity is not the only thing that differs by path: only `cs` writes
 `.cs/session.lock`, so a hook that resolved by walking does not own it (see
 `session-end.sh` below).
 
+Resolving a session is also not the same as *being* it. Every claude that resolves a
+session fires its hooks — agent-team teammates (full claude processes with their own
+top-level `SessionStart`, not in-process subagents), headless `claude -p` children,
+desktop conversations, a bare `claude` started in a session folder. The session's
+recorded conversation (`claude_session_id`) is a single slot, so exactly one of them
+may write it: the one `cs` launched. `cs` exports `CS_LEAD_PID` with the pid it hands
+to claude and Claude Code stamps every hook env with `CLAUDE_PID`, which the hook
+matches two ways, because `cs` launches two ways. The fresh-spawn arms `exec`, so
+claude carries `cs`'s own pid; the resume arm runs claude as a child — it needs the
+exit status to fall through to a fresh rebind when there is nothing to resume — so
+there `cs` is claude's parent. A context-limit fork and an in-process `/clear` keep
+the process either way. Environment cannot answer this on its own: children inherit
+exports, so a teammate carries `CS_LEAD_PID` while owning a different pid.
+
+The parent arm is the looser of the two, and its limit is worth stating. After an
+`exec` launch `CS_LEAD_PID` is the lead claude's own pid, so a claude that is a
+*direct* child of the lead claude is admitted. Nothing in cs spawns one, and the
+route that would otherwise reach it — a `claude -p` run through the Bash tool —
+does not, because that command runs under an intermediate shell and the nested
+claude is a grandchild. A user hook or wrapper that `exec`-chains straight into
+`claude -p` inside a session would take the slot.
+
 ## session-start.sh (SessionStart)
 
 Runs when Claude Code starts a session:
 - Logs session start (including source: `startup`, `resume`, `clear`, `compact`) to `.cs/local/session.log` and appends a `started` event to `.cs/timeline.jsonl`
 - On all sources: clears the statusline's attention marker (`.cs/local/attention`) — a fresh session is attended by definition — and, inside iTerm2 with shell integration installed, cancels any dock bounce the previous conversation left running (`CS_NO_ITERM2=1` disables)
-- On all sources: rebinds `claude_session_id` in the machine-local `.cs/local/state` to the live conversation UUID from the hook input. Claude Code forks a new UUID when a conversation is continued past the context limit (the old transcript stays on disk), so the recorded binding can silently go stale and `cs` would resume the pre-fork conversation. Non-UUID session ids are ignored; each rebind is logged to `session.log`
+- On all sources, **for the launched conversation only** (`CLAUDE_PID` = `CS_LEAD_PID`, see above): rebinds `claude_session_id` in the machine-local `.cs/local/state` to the live conversation UUID from the hook input. Claude Code forks a new UUID when a conversation is continued past the context limit (the old transcript stays on disk), so the recorded binding can silently go stale and `cs` would resume the pre-fork conversation. Non-UUID session ids are ignored; each rebind is logged to `session.log`. Any other claude resolving the same session — teammate, `claude -p` child, desktop, walked-in — leaves the slot alone, so `cs <name>` always resumes the conversation that was opened and the `rotated` timeline lineage stays true
 - On `startup`/`resume` only: configures `transfer.hideRefs`, and recovers autosaved changes from a crash of **this conversation only** — it reads just the current conversation's own ref (`refs/worktree/cs/session/<conversation-uuid>`), so a live sibling session's in-flight ref is never misread as a crash. It also renames its ref across a context-fork UUID rebind (a clean continuation), claims any pre-upgrade shared ref once via a compare-and-swap delete, and garbage-collects other conversations' refs older than 14 days. The whole-tree restore (`checkout <shadow ref> -- .`) is offered only when the snapshot's recorded base HEAD still matches the current HEAD; if HEAD has moved since the snapshot (a commit or rebase) or the snapshot predates base recording, it instead warns and points at per-file inspection — a blanket restore over diverged history would overwrite committed work
 - On `resume` only: injects dynamic context (last activity, recent commits, objective, up to 5 most recently active sibling sessions with their objectives), and a per-actor digest of shared memory/narrative activity since this actor's `.cs/local/watermark` (grouped by git author), then advances the watermark and stamps the day's date into `last_resumed`
 - In a feature worktree (when `task_branch` is in machine-local state): injects a Feature Worktree contract instructing Claude to integrate only via `cs <base> --merge <feature>` and never merge the branch manually
