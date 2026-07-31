@@ -4,6 +4,20 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.7.29
+
+A regression fix for v2026.7.28, and the resume safety it exposed.
+
+### Fixes
+
+- **Only the conversation `cs` launched may rebind the session's recorded UUID.** Since v2026.7.28 made hooks resolve a session by walking up from the opened directory, every claude in the tree could take that single slot — including agent-team teammates, which are full claude processes with their own top-level SessionStart (the existing guard catches in-process subagents only). A teammate working in a session subdirectory took it, leaving `cs <name>` resuming a reviewer's conversation and `.cs/timeline.jsonl` recording a lineage that never happened. Identity is now the process: `cs` exports the pid it hands to claude and the hook matches it against Claude Code's `CLAUDE_PID`. Both launch shapes count — the fresh-spawn arms `exec`, so claude carries cs's pid, while the resume arm runs claude as a child and cs is its parent. Environment cannot answer this on its own: children inherit exports, so a teammate carries the value while owning a different pid.
+
+- **A conversation newer than the recorded one is reported instead of silently skipped.** Because only the launched conversation is recorded, one started another way on the folder — a `/desktop` handoff, a `claude` opened on the directory — leaves the recorded UUID naming an older conversation. That UUID still resolves, so `--resume` succeeded and the quick-failure fallback never fired: the launch continued a superseded prefix with nothing said. The launch now names the newer conversation and the command to reach it, without switching to it, and checks the clock rather than assuming.
+
+- **A teammate's conversation is never offered as the session's own.** A teammate started with the session as its working directory writes a top-level transcript into the same project dir as the lead, indistinguishable by filename and routinely the newest. Discovery now skips them for every caller, so neither the notice nor the session's recorded UUID can land on a reviewer's conversation. A lead that merely *received* teammate reports is not mistaken for one: the frame appears mid-file there, and only a teammate's own brief is its first user turn.
+
+**Full Changelog**: https://github.com/hex/claude-sessions/compare/v2026.7.28...v2026.7.29
+
 ## 2026.7.28
 
 cs hooks now work in front ends other than the `cs` launcher, Claude Code desktop among them.
