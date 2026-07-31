@@ -49,6 +49,10 @@ _rot_hook_session() {  # name
     local dir="$CS_SESSIONS_ROOT/$1"
     mkdir -p "$dir/.cs/local"
     touch "$dir/.cs/local/session.log"
+    # Model a cs-launched lead: rotation events come from the rebind, which the
+    # hook performs only for the claude cs exec'd into, matched by pid.
+    export CS_LEAD_PID=$$
+    export CLAUDE_PID=$$
     export CLAUDE_SESSION_NAME="$1"
     export CLAUDE_SESSION_DIR="$dir"
     export CLAUDE_SESSION_META_DIR="$dir/.cs"

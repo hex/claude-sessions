@@ -130,6 +130,15 @@ launch_claude_code() {
     if [ -n "$claude_session_id" ]; then
         export CS_CLAUDE_SESSION_ID="$claude_session_id"
     fi
+    # The pid this shell hands to claude. Every exec arm below replaces this
+    # process image, so the launched claude keeps this pid, and Claude Code
+    # stamps CLAUDE_PID with the pid of whichever claude fires a hook. Equality
+    # of the two is therefore the test for "this conversation is the one cs
+    # launched" — the session's single claude_session_id slot is its to rebind,
+    # and no other claude's. Identity has to be the process, not the
+    # environment: children inherit every exported variable, so a teammate or a
+    # headless `claude -p` carries this value while owning a different pid.
+    export CS_LEAD_PID=$$
 
     # Spawn seed: tasks staged by cs -spawn for this session. Consumed here,
     # after the already-running guard and before any exec arm, so a window

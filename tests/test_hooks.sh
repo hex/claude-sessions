@@ -333,6 +333,11 @@ session_start_setup() {
     # Isolate from an ambient CS_FRESH_REBIND (set when the suite runs from inside
     # a freshly-rebound cs session); the positive test re-supplies it inline.
     unset CS_FRESH_REBIND 2>/dev/null || true
+    # Model a cs-launched lead: the hook rebinds the recorded conversation only
+    # when the claude firing it is the process cs exec'd into. Tests that model
+    # a child claude or a walked-in front end override CLAUDE_PID inline.
+    export CS_LEAD_PID=$$
+    export CLAUDE_PID=$$
     export CS_SESSIONS_ROOT="$TEST_TMPDIR/sessions"
     mkdir -p "$CS_SESSIONS_ROOT"
 
@@ -798,6 +803,96 @@ test_session_start_rebind_ignores_invalid_session_id() {
     session_start_teardown
 }
 
+test_session_start_rebinds_for_a_claude_cs_spawned() {
+    session_start_setup
+
+    seed_recorded_uuid "aaaaaaaa-1111-2222-3333-444444444444"
+
+    # cs's resume arm runs claude as a child rather than exec'ing into it — it
+    # needs the exit status to fall through to a fresh rebind when there is no
+    # conversation to resume — so on the commonest launch of all the recorded
+    # conversation's pid is cs's CHILD, not cs itself. A real background job
+    # stands in for claude: its parent is this shell, the same relation that
+    # launch creates. Recognising only the exec'd shape would silence the
+    # rebind on every resume.
+    sleep 30 &
+    local launched=$!
+
+    CLAUDE_PID="$launched" \
+        bash -c 'echo "{\"session_id\":\"bbbbbbbb-5555-6666-7777-888888888888\",\"source\":\"resume\",\"cwd\":\"'"$CLAUDE_SESSION_DIR"'\",\"hook_event_name\":\"SessionStart\"}" | bash "'"$HOOKS_DIR"'/session-start.sh"' \
+        2>/dev/null > /dev/null
+
+    kill "$launched" 2>/dev/null || true
+    wait "$launched" 2>/dev/null || true
+
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/local/state" "claude_session_id: bbbbbbbb-5555-6666-7777-888888888888" \
+        "a claude cs spawned as its child must still rebind" || { session_start_teardown; return 1; }
+
+    session_start_teardown
+}
+
+test_session_start_rebind_declines_for_child_claude() {
+    session_start_setup
+
+    seed_recorded_uuid "aaaaaaaa-1111-2222-3333-444444444444"
+
+    # A child claude — an agent-team teammate, or a headless `claude -p` the
+    # lead spawned — runs its own SessionStart against the same checkout. It
+    # may carry the lead's exported CS_LEAD_PID, but Claude Code stamps each
+    # hook env with the pid of the claude that fired it, so CLAUDE_PID is the
+    # child's own. Only the launched conversation owns the single recorded slot.
+    CLAUDE_PID=999999 \
+        bash -c 'echo "{\"session_id\":\"bbbbbbbb-5555-6666-7777-888888888888\",\"source\":\"startup\",\"cwd\":\"'"$CLAUDE_SESSION_DIR"'\",\"hook_event_name\":\"SessionStart\"}" | bash "'"$HOOKS_DIR"'/session-start.sh"' \
+        2>/dev/null > /dev/null
+
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/local/state" "claude_session_id: aaaaaaaa-1111-2222-3333-444444444444" \
+        "a child claude must not take the recorded slot" || { session_start_teardown; return 1; }
+    assert_file_not_contains "$CLAUDE_SESSION_META_DIR/local/state" "bbbbbbbb-5555-6666-7777-888888888888" \
+        "the child's own UUID must never be recorded" || { session_start_teardown; return 1; }
+
+    session_start_teardown
+}
+
+test_session_start_rebind_declines_without_lead_pid() {
+    session_start_setup
+
+    seed_recorded_uuid "aaaaaaaa-1111-2222-3333-444444444444"
+
+    # A front end that resolved the session by walking the directory — desktop,
+    # or a bare `claude` started inside a session checkout. Nothing exported
+    # CS_LEAD_PID, so there is no launch to match and the slot is not this
+    # conversation's to claim. Asserted separately from the child case because
+    # the two fail the gate for different reasons, and an implementation that
+    # compares the two variables without requiring both to be set would let
+    # this one through on the empty string.
+    CLAUDE_PID=999999 CS_LEAD_PID= \
+        bash -c 'echo "{\"session_id\":\"bbbbbbbb-5555-6666-7777-888888888888\",\"source\":\"startup\",\"cwd\":\"'"$CLAUDE_SESSION_DIR"'\",\"hook_event_name\":\"SessionStart\"}" | bash "'"$HOOKS_DIR"'/session-start.sh"' \
+        2>/dev/null > /dev/null
+
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/local/state" "claude_session_id: aaaaaaaa-1111-2222-3333-444444444444" \
+        "a walked-in front end must not take the recorded slot" || { session_start_teardown; return 1; }
+
+    session_start_teardown
+}
+
+test_session_start_rebind_declines_when_neither_pid_is_set() {
+    session_start_setup
+
+    seed_recorded_uuid "aaaaaaaa-1111-2222-3333-444444444444"
+
+    # Both unset is the trap a bare `[ "$CLAUDE_PID" = "$CS_LEAD_PID" ]` falls
+    # into: empty equals empty, so every unknown caller would be treated as the
+    # lead. The gate must require a launch pid to exist, not merely agree.
+    CLAUDE_PID= CS_LEAD_PID= \
+        bash -c 'echo "{\"session_id\":\"bbbbbbbb-5555-6666-7777-888888888888\",\"source\":\"startup\",\"cwd\":\"'"$CLAUDE_SESSION_DIR"'\",\"hook_event_name\":\"SessionStart\"}" | bash "'"$HOOKS_DIR"'/session-start.sh"' \
+        2>/dev/null > /dev/null
+
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/local/state" "claude_session_id: aaaaaaaa-1111-2222-3333-444444444444" \
+        "an unidentifiable caller must not take the recorded slot" || { session_start_teardown; return 1; }
+
+    session_start_teardown
+}
+
 # ============================================================================
 # session-end.sh: index.md generation
 # ============================================================================
@@ -1135,6 +1230,10 @@ run_test test_session_start_clears_attention_marker
 run_test test_session_start_rebinds_uuid_to_live_session
 run_test test_session_start_rebinds_uuid_on_startup
 run_test test_session_start_rebind_ignores_invalid_session_id
+run_test test_session_start_rebinds_for_a_claude_cs_spawned
+run_test test_session_start_rebind_declines_for_child_claude
+run_test test_session_start_rebind_declines_without_lead_pid
+run_test test_session_start_rebind_declines_when_neither_pid_is_set
 
 # Session end: index.md generation
 run_test test_session_end_generates_index
