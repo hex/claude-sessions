@@ -4,6 +4,29 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.7.28
+
+cs hooks now work in front ends other than the `cs` launcher, Claude Code desktop among them.
+
+### Features
+
+- **A session is any directory containing `.cs/`.** Hooks used to identify their session purely from environment variables that only the `cs` wrapper can export, so under any other front end every hook silently did nothing. They now fall back to walking up from the opened directory for the `.cs/` that marks a session root. The environment is still tried first, so a `cs`-launched session behaves exactly as before and never reaches the walk. Measured against Claude Code desktop: hooks fire, project and user settings are both read, the filesystem is real and unsandboxed, and `autoMemoryDirectory` already pointed memory into the session — but `CLAUDE_ENV_FILE`, though offered and writable, propagates to nothing, so no hook can publish the contract to the rest of the session. Hence resolution from the directory rather than the environment.
+
+  This also ends a quieter gap: a session started outside `cs` at all — an IDE, a plugin, plain `claude` in a session folder — was cs-blind. It no longer is. The nearest `.cs/` wins, so a session cloned inside another belongs to itself; the walk stops at `$HOME` so a stray `~/.cs` cannot adopt everything beneath it; and there is no `$PWD` fallback, because a hook's working directory is wherever the front end left it rather than a statement about which session is open.
+
+- **`.cs/local/disabled` opts a directory out.** Present, the hooks decline as though it were not a session, whichever front end opened it.
+
+### Fixes
+
+- **A second front end no longer removes a live session's lock.** Because hooks now resolve from the directory, SessionEnd is reached for sessions this launch did not start; it removed `.cs/session.lock` unconditionally. Closing a desktop conversation on a directory a CLI session was live in stripped that session's lock, letting `cs <name>` open a duplicate with no collision menu and leaving prose-lint inert mid-session, since the cutoff file it tests for was gone. Only `cs` writes a lock, so only a `cs` launch clears one unconditionally; a walked-in hook clears it only when the recorded process is gone, so a crashed session is still never left locked out.
+- **The sessions index is written only where sessions live.** `CS_SESSIONS_ROOT` is never exported into a session, so SessionEnd fell back to the session's parent directory — right for a session under the sessions root, wrong for an adopted one, whose directory is an unrelated project path and whose parent then received a stray `index.md`. Both sides of the containment test are now compared physically, so a `$HOME` reached through a symlink still matches its own root.
+- **A missing, unreadable, corrupt, empty, or runtime-failing resolver library degrades to the old behaviour instead of killing the hook.** The library is parse-checked before sourcing and `errexit` is suspended across it, because a failure inside a sourced file fires before any outer `||` can catch it. An exit of 2 from a `PreToolUse` hook is Claude Code's blocking code, so a partial install had to degrade to "cs is inactive", not "tool calls are blocked".
+- **Hook tests no longer resolve a real session.** No suite cleared `CLAUDE_PROJECT_DIR`; with one ambient, hooks under test bound to a live session. Some assertions false-failed, and `tool-failure-logger`'s silence assertion passed while the hook appended to that session's log.
+
+### Docs
+
+- `README.md` documents working outside the launcher; `docs/hooks.md` gains a section on how a hook finds its session, plus the lock-ownership and index rules; `docs/session-layout.md` documents `.cs/local/disabled`.
+
 ## 2026.7.27
 
 A durable memory entry can no longer tell Claude it is talking to the wrong person.

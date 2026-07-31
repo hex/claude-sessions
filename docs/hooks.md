@@ -2,6 +2,33 @@
 
 The installer configures Claude Code hooks that enable session management features.
 
+## How a hook finds its session (`cs-resolve.sh`)
+
+Every hook opens by sourcing `cs-resolve.sh`, a library shipped alongside them and
+never registered against an event, and calling `cs_resolve_session`. It resolves in
+two ways and declines when neither applies, leaving each hook to take its own decline
+path (a silent exit, or the approval payload the blocking hooks owe Claude Code):
+
+1. **The environment**, when `CLAUDE_SESSION_NAME` and `CLAUDE_SESSION_DIR` are set.
+   `cs` exports them before `exec`, so a CLI session resolves here and never reaches
+   the walk. This path is what it always was.
+2. **The directory**, otherwise: walk up from `CLAUDE_PROJECT_DIR` (or the hook
+   input's `cwd`) looking for the `.cs/` that marks a session root. The nearest one
+   wins, so a session cloned inside another belongs to itself, and the walk stops at
+   `$HOME` so a stray `~/.cs` cannot adopt everything beneath it. There is no `$PWD`
+   fallback: a hook's working directory is wherever the front end left it, not a
+   statement about which session is open.
+
+This is what lets cs work in front ends that fire hooks but cannot export environment
+into a session — Claude Code desktop among them, where `CLAUDE_ENV_FILE` is offered
+and writable yet propagates to nothing. It also means a session started outside `cs`
+(an IDE, a plugin, `claude` typed in a session folder) is no longer cs-blind;
+`.cs/local/disabled` opts a directory out.
+
+Session identity is not the only thing that differs by path: only `cs` writes
+`.cs/session.lock`, so a hook that resolved by walking does not own it (see
+`session-end.sh` below).
+
 ## session-start.sh (SessionStart)
 
 Runs when Claude Code starts a session:
@@ -56,8 +83,8 @@ Runs when Claude pauses for user input:
 Runs when Claude Code session ends:
 - Logs session end time and the exit source reported by Claude Code (defaulting to `user_exit` when none is given) and appends an `ended` event to `.cs/timeline.jsonl`
 - Deletes only the ending conversation's own shadow ref (`refs/worktree/cs/session/<conversation-uuid>`); a concurrent sibling's ref is left untouched
-- Cleans up lock files
-- Regenerates the sessions index (`<sessions-root>/index.md`) — a table of every session's status, objective, and created date
+- Cleans up `.cs/session.lock`, but only one this launch owns. Only `cs` writes a lock, so a hook that resolved by walking the directory belongs to another front end: closing a desktop conversation on a directory a CLI session is live in would otherwise strip that session's lock, letting `cs <name>` open a duplicate with no collision menu and leaving prose-lint inert mid-session (the cutoff file it tests for is gone). A walked-in hook still clears a lock whose process is gone, so a crashed session is never left locked out
+- Regenerates the sessions index (`<sessions-root>/index.md`) — a table of every session's status, objective, and created date. Written only where sessions actually live: the session's own directory must sit under the sessions root, compared physically on both sides so a `$HOME` reached through a symlink still matches. An adopted session, whose directory is an unrelated project path, writes no index beside that project
 - Skipped entirely inside subagents (guarded on the hook input's `agent_id`)
 
 ## subagent-context.sh (SubagentStart)
