@@ -22,11 +22,6 @@ _cs_lib="$(dirname "$0")/cs-resolve.sh"
 # Parse-check before sourcing: a truncated or corrupt library is readable,
 # and sourcing it aborts the hook at the syntax error, before the fallback
 # below is even defined. One fork against several the hook already makes.
-# The trailing `|| true` matters as much as the parse-check: a library that
-# parses clean and fails when RUN (an inserted `=======` conflict marker is a
-# valid-looking command) would otherwise abort here as the last command of
-# the chain. Exit 2 out of a PreToolUse hook is Claude Code's blocking code.
-# Whatever the source managed to define still stands; the check below decides.
 # errexit is suspended across the source, not just around it: a library that
 # parses clean and fails when RUN (an inserted `=======` conflict marker is a
 # valid-looking command) fails INSIDE the sourced file, where set -e fires
