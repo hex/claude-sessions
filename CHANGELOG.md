@@ -4,6 +4,32 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.8.1
+
+Closing out a feature worktree used to mean remembering what each `base@feature` session was for and guessing whether it was safe to merge. The picker now answers that, and hands the merge itself to the ritual that can diagnose a failing gate.
+
+### Features
+
+- **Merge readiness screen** in the picker, on `m`. Replaces the panes with a base's feature worktrees and why each can or cannot merge: commits ahead, a dirty tree, untracked files, a live lock, already merged. The detail pane names what finishing will do, down to whether the merge fast-forwards or writes a merge commit, and which side holds a lock. Enter leaves the picker and runs `cs <base> -finish <feature>`; the picker never merges anything itself.
+- **`cs <base> -features [--porcelain]`** lists a base's feature worktrees with that same readiness. Readiness is computed by the shell functions the real merge gates call, so the screen cannot disagree with the refusal a merge would produce. `--porcelain` emits one tab-separated record per feature.
+- **`cs <base> -finish <feature>`** opens the base session with `/merge <feature>` armed. `--merge` remains the mechanical git step; `-finish` runs the ritual around it, so a failing gate gets diagnosed instead of just stopping.
+- **`/merge` gained a third context**: invoked in a base session with a feature name, it runs the preflight gates inside the worktree, merges from the base, and runs the post-merge gates there.
+
+### Fixes
+
+- A linked worktree's `.git` is a file holding a `gitdir:` pointer, not a directory. Two independent probes tested only for a directory, so every `base@feature` row showed no repo and no contributors: exactly the rows a merge screen is about.
+- The picker forks cs for its own subcommands and hardcoded a bare `cs`, which a cs installed outside PATH could never reach. cs now exports its own path.
+- The masthead painted its live count in the liveness teal even at zero live sessions.
+- The session-start sibling block named `cs -msg <session>` without its syntax, which announced a capability without supplying it and cost a `cs --help` call on every send. It now carries the full send form and the `--kind` values, and only when a sibling exists to send to.
+- Feature discovery and the `-finish` existence check anchored their match on one side, so `myproj@wip` verified against a registered `myproj@wip-2`.
+- The finish plan branched on a readiness flag that excludes the case `merge_worktree_session` treats as already merged, so a branch sitting at base HEAD was promised a fast-forward while cs removed the worktree instead. It now branches on the verb's own condition, keeps both gate passes in every plan, and puts removal in the merge step where cs actually does it.
+
+### Docs
+
+- README documents the merge screen, `-features`, and `-finish`.
+- `docs/hooks.md` records the send form in the session-start context block.
+- Design spec and implementation plan under `docs/superpowers/`.
+
 ## 2026.7.29
 
 A regression fix for v2026.7.28, and the resume safety it exposed.
