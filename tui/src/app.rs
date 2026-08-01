@@ -278,6 +278,32 @@ pub struct FeatureRow {
     pub state: String,
 }
 
+/// Parse `cs <base> -features --porcelain`: one tab-separated record per
+/// feature, ten fields. A record of any other width means the verb changed
+/// shape — drop it rather than render misaligned fields.
+pub fn parse_features(text: &str) -> Vec<FeatureRow> {
+    text.lines()
+        .filter_map(|line| {
+            let f: Vec<&str> = line.split('\t').collect();
+            if f.len() != 10 {
+                return None;
+            }
+            Some(FeatureRow {
+                task: f[0].to_string(),
+                branch: f[1].to_string(),
+                ahead: f[2].parse().unwrap_or(0),
+                merged: f[3] == "1",
+                ff: f[4] == "1",
+                wt_dirty: f[5] == "1",
+                untracked: f[6].parse().unwrap_or(0),
+                base_dirty: f[7] == "1",
+                lock: f[8].to_string(),
+                state: f[9].to_string(),
+            })
+        })
+        .collect()
+}
+
 /// Which panel receives keyboard input while in `Mode::Normal`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Focus {
@@ -1040,6 +1066,27 @@ impl App {
                 self.apply_filter_and_sort();
                 Action::None
             }
+            KeyCode::Char('m') => {
+                if let Some(session) = self.selected_session() {
+                    let name = session.name.clone();
+                    // A worktree row opens its base; a base row opens itself.
+                    let base = match name.split_once('@') {
+                        Some((b, _)) => b.to_string(),
+                        None => name,
+                    };
+                    self.merge_base = base;
+                    self.load_merge_features();
+                    if self.merge_features.is_empty() {
+                        self.set_status(
+                            format!("No feature worktrees of {}", self.merge_base),
+                            StatusLevel::Info,
+                        );
+                    } else {
+                        self.mode = Mode::Merge;
+                    }
+                }
+                Action::None
+            }
             _ => Action::None,
         }
     }
@@ -1244,7 +1291,34 @@ impl App {
         self.merge_features.get(self.merge_selected)
     }
 
-    fn load_merge_features(&mut self) {}
+    /// Fork cs once for the whole base. The per-feature git work happens inside
+    /// cs, which is also where the gate semantics live. A failure is a status
+    /// line, never an exit code: a nonzero TUI exit kills cs outright.
+    fn load_merge_features(&mut self) {
+        let base = self.merge_base.clone();
+        if base.is_empty() {
+            return;
+        }
+        let output = std::process::Command::new(cs_bin())
+            .args([&base, "-features", "--porcelain"])
+            .output();
+        match output {
+            Ok(out) if out.status.success() => {
+                let text = String::from_utf8_lossy(&out.stdout).to_string();
+                self.merge_features = parse_features(&text);
+                self.merge_selected = 0;
+            }
+            Ok(out) => {
+                let err = String::from_utf8_lossy(&out.stderr);
+                self.merge_features = Vec::new();
+                self.set_status(format!("Features failed: {}", err.trim()), StatusLevel::Error);
+            }
+            Err(e) => {
+                self.merge_features = Vec::new();
+                self.set_status(format!("Features failed: {}", e), StatusLevel::Error);
+            }
+        }
+    }
 
     fn handle_session_menu(&mut self, key: KeyEvent) -> Action {
         match key.code {
@@ -2141,6 +2215,29 @@ mod tests {
         }
     }
 
+    #[test]
+    fn parse_features_reads_a_porcelain_record() {
+        let text = "fix-auth\tcs/fix-auth\t7\t0\t1\t0\t0\t0\tnone\tready\n\
+                    flaky\tcs/flaky\t1\t0\t0\t0\t3\t0\tnone\tuntracked\n";
+        let rows = parse_features(text);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].task, "fix-auth");
+        assert_eq!(rows[0].ahead, 7);
+        assert!(rows[0].ff, "ff is field 5");
+        assert_eq!(rows[0].state, "ready");
+        assert_eq!(rows[1].untracked, 3, "untracked is field 7");
+        assert_eq!(rows[1].state, "untracked");
+    }
+
+    #[test]
+    fn parse_features_ignores_malformed_lines() {
+        // A short record means the verb changed shape; drop it rather than
+        // render a row built from misaligned fields.
+        let rows = parse_features("broken\tcs/broken\n\nfix-auth\tcs/fix-auth\t2\t0\t1\t0\t0\t0\tnone\tready\n");
+        assert_eq!(rows.len(), 1, "only the well-formed record survives");
+        assert_eq!(rows[0].task, "fix-auth");
+    }
+
     fn feature_row(task: &str, state: &str) -> FeatureRow {
         FeatureRow {
             task: task.into(),
@@ -2206,8 +2303,65 @@ mod tests {
         assert_eq!(app.mode, Mode::Merge, "an empty list stays put");
     }
 
+    /// Serializes every test that sets, removes, or asserts on the
+    /// process-global CS_BIN env var. Cargo runs tests on parallel threads, so
+    /// an unguarded set_var races every concurrent reader of cs_bin().
+    static CS_BIN_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// `sample_sessions()` has no `base@task` row. A dedicated fixture rather
+    /// than a fourth entry in the shared one, so no existing test that counts
+    /// or orders sessions changes behaviour.
+    fn sessions_with_a_worktree() -> Vec<Session> {
+        let mut v = sample_sessions();
+        let base = v[0].clone();
+        v.push(Session {
+            name: format!("{}@fix-auth", base.name),
+            ..base
+        });
+        v
+    }
+
+    #[test]
+    fn m_on_a_worktree_row_opens_its_base() {
+        let _env = CS_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // Point the probe at a path that cannot exist, so the fork fails the
+        // same way on every machine. Without this the test forks the real cs
+        // against the developer's real sessions root and its result depends on
+        // whether cs happens to be on PATH.
+        std::env::set_var("CS_BIN", "/nonexistent/cs");
+        let mut app = App::new(sessions_with_a_worktree());
+        app.apply_filter_and_sort();
+        let i = app
+            .filtered
+            .iter()
+            .position(|&i| app.sessions[i].name.contains('@'))
+            .expect("the fixture must contain a worktree row");
+        app.table_state.select(Some(i));
+        app.handle_key(KeyEvent::from(KeyCode::Char('m')));
+        std::env::remove_var("CS_BIN");
+        assert_eq!(app.merge_base, "alpha", "a worktree row opens its base");
+        assert!(
+            app.merge_features.is_empty(),
+            "a failed probe must leave the list empty, not stale"
+        );
+        assert_ne!(app.mode, Mode::Merge, "a failed probe must not open an empty screen");
+    }
+
+    #[test]
+    fn m_does_not_fire_while_the_notes_pane_has_focus() {
+        // handle_normal routes to the notes input first, so `m` must type a
+        // letter there rather than opening the merge screen.
+        let mut app = App::new(sessions_with_a_worktree());
+        app.focus = Focus::Notes;
+        app.notes_focus = NotesFocus::Input;
+        app.handle_key(KeyEvent::from(KeyCode::Char('m')));
+        assert!(app.merge_base.is_empty(), "m must not open the screen from the notes input");
+        assert_ne!(app.mode, Mode::Merge);
+    }
+
     #[test]
     fn cs_bin_prefers_the_exported_path_over_bare_cs() {
+        let _env = CS_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // cs exports its own path when it launches the picker. Without the
         // seam the TUI forks a bare "cs" that may not be on PATH at all.
         std::env::set_var("CS_BIN", "/opt/example/bin/cs");

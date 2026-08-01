@@ -37,6 +37,7 @@ impl Liveness {
     }
 }
 
+#[derive(Clone)]
 pub struct Session {
     pub name: String,
     pub is_adopted: bool,
