@@ -591,4 +591,27 @@ run_test test_worktree_create_dirty_base_consent_no
 run_test test_session_repo_pins_autocrlf_off
 run_test test_worktree_excludes_protocol_file
 
+test_features_lists_only_verified_worktrees() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    # A directory that looks like a worktree but was never registered with git.
+    mkdir -p "$CS_SESSIONS_ROOT/myproj@hand-made/.cs/local"
+    local output
+    output=$("$CS_BIN" "myproj" -features --porcelain 2>&1)
+    assert_output_contains "$output" "fix-auth" "a registered worktree is listed" || return 1
+    assert_output_not_contains "$output" "hand-made" "an unregistered lookalike must be excluded" || return 1
+}
+
+run_test test_features_lists_only_verified_worktrees
+
+test_features_is_empty_for_a_base_with_no_worktrees() {
+    create_test_session_with_git "myproj" > /dev/null
+    local output
+    output=$("$CS_BIN" "myproj" -features --porcelain 2>&1)
+    assert_eq "" "$output" "a base with no features prints nothing" || return 1
+}
+
+run_test test_features_is_empty_for_a_base_with_no_worktrees
+
 report_results

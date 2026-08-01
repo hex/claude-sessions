@@ -1242,6 +1242,37 @@ _tree_is_dirty() {
         || ! git -C "$1" diff --cached --quiet 2>/dev/null
 }
 
+# Print the task name of every verified feature worktree of a base, one per
+# line. Glob the sessions root then ask git to confirm each candidate — the
+# reverse direction would enumerate the main checkout, and for an adopted base
+# it would also enumerate the underlying project's own worktrees, which are not
+# cs sessions at all. Asking git for the path on both sides is what makes this
+# survive Git for Windows drive-letter paths, exactly as _doctor_check_worktrees
+# does.
+_worktree_features() {  # base_name
+    local base_name="$1"
+    local base_dir d name task d_real registered
+    base_dir=$(_resolve_session_dir "$base_name")
+    [ -d "$base_dir" ] || return 0
+    git -C "$base_dir" rev-parse --git-dir >/dev/null 2>&1 || return 0
+
+    registered=$(git -C "$base_dir" worktree list --porcelain 2>/dev/null || true)
+
+    for d in "$SESSIONS_ROOT/$base_name"@*; do
+        [ -d "$d" ] || continue
+        name=$(basename "$d")
+        task="${name#*@}"
+        [ -n "$task" ] || continue
+        d_real=$(git -C "$d" rev-parse --show-toplevel 2>/dev/null) \
+            || d_real=$(cd "$d" 2>/dev/null && pwd -P || echo "$d")
+        case "
+$registered" in
+            *"
+worktree $d_real"*) printf '%s\n' "$task" ;;
+        esac
+    done
+}
+
 # Resolve a symlinked directory to its real path, portably. BSD readlink gained
 # -f only in macOS 12.3; cd+pwd -P follows the link on every platform, and the
 # fallback keeps the original path rather than aborting under set -e.
