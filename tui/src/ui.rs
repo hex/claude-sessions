@@ -6,7 +6,7 @@ use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
-    Block, Borders, Cell, Clear, HighlightSpacing, Paragraph, Row, Table, Wrap,
+    Block, Borders, Cell, Clear, HighlightSpacing, Paragraph, Row, Table, TableState, Wrap,
 };
 use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
@@ -221,32 +221,36 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 
     render_masthead(app, frame, chunks[0]);
 
-    match choose_layout(chunks[1], app.show_preview) {
-        PaneLayout::SideBySide => {
-            app.request_preview();
-            let cols = Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)])
+    if app.mode == Mode::Merge {
+        render_merge(app, frame, chunks[1]);
+    } else {
+        match choose_layout(chunks[1], app.show_preview) {
+            PaneLayout::SideBySide => {
+                app.request_preview();
+                let cols = Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)])
+                    .split(chunks[1]);
+                render_table(app, frame, cols[0], true);
+                let right_rows =
+                    Layout::vertical([Constraint::Percentage(55), Constraint::Percentage(45)])
+                        .split(cols[1]);
+                render_preview_pane(app, frame, right_rows[0]);
+                render_notes_pane(app, frame, right_rows[1]);
+            }
+            PaneLayout::Stacked => {
+                app.request_preview();
+                let rows = Layout::vertical([
+                    Constraint::Percentage(25),
+                    Constraint::Percentage(45),
+                    Constraint::Percentage(30),
+                ])
                 .split(chunks[1]);
-            render_table(app, frame, cols[0], true);
-            let right_rows =
-                Layout::vertical([Constraint::Percentage(55), Constraint::Percentage(45)])
-                    .split(cols[1]);
-            render_preview_pane(app, frame, right_rows[0]);
-            render_notes_pane(app, frame, right_rows[1]);
-        }
-        PaneLayout::Stacked => {
-            app.request_preview();
-            let rows = Layout::vertical([
-                Constraint::Percentage(25),
-                Constraint::Percentage(45),
-                Constraint::Percentage(30),
-            ])
-            .split(chunks[1]);
-            render_table(app, frame, rows[0], true);
-            render_preview_pane(app, frame, rows[1]);
-            render_notes_pane(app, frame, rows[2]);
-        }
-        PaneLayout::TableOnly => {
-            render_table(app, frame, chunks[1], false);
+                render_table(app, frame, rows[0], true);
+                render_preview_pane(app, frame, rows[1]);
+                render_notes_pane(app, frame, rows[2]);
+            }
+            PaneLayout::TableOnly => {
+                render_table(app, frame, chunks[1], false);
+            }
         }
     }
 
@@ -294,7 +298,10 @@ fn render_masthead(app: &App, frame: &mut Frame, area: Rect) {
             format!("  {} sessions", app.sessions.len()),
             Style::default().fg(p.ink).add_modifier(Modifier::BOLD),
         ),
-        Span::styled(format!("  \u{b7}  {} live", live), Style::default().fg(p.teal)),
+        Span::styled(
+            format!("  \u{b7}  {} live", live),
+            Style::default().fg(if live > 0 { p.teal } else { p.mut_ }),
+        ),
     ];
     if archived > 0 {
         spans.push(Span::styled(
@@ -931,7 +938,7 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
             Mode::CommandOutput(_) => "Press any key to dismiss",
             Mode::Changelog => "Esc:close",
             Mode::Legend => "Esc:close",
-            Mode::Merge => "Esc:close",
+            Mode::Merge => "enter:finish  j/k:select  r:refresh  esc:back",
             Mode::Search => unreachable!(),
         }
     };
@@ -1809,6 +1816,115 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
     card_frame(frame.buffer_mut(), area, "to-do", side, p);
 }
 
+/// The merge screen. Replaces the two content panes rather than overlaying
+/// them: centered_rect is percentage-only with no max-width clamp, and an
+/// overlay's Clear'd interior shows the raw terminal background instead of
+/// the painted paper on a light theme. card_frame paints paper.
+fn render_merge(app: &mut App, frame: &mut Frame, area: Rect) {
+    let p = app.theme;
+    let panes = Layout::vertical([Constraint::Min(6), Constraint::Length(12)]).split(area);
+
+    // --- feature list ---
+    let list_area = panes[0];
+    let inner = Rect::new(
+        list_area.x + 2,
+        list_area.y + 2,
+        list_area.width.saturating_sub(4),
+        list_area.height.saturating_sub(3),
+    );
+
+    let header_style = Style::default().fg(p.mut_).add_modifier(Modifier::BOLD);
+    let header = Row::new(vec![
+        Cell::from("FEATURE").style(header_style),
+        Cell::from("AHEAD").style(header_style),
+        Cell::from("STATE").style(header_style),
+    ])
+    .bottom_margin(1);
+
+    let rows: Vec<Row> = app
+        .merge_features
+        .iter()
+        .map(|f| {
+            let (label, color) = match f.state.as_str() {
+                "ready" => (f.state.clone(), p.ink),
+                "merged" => (f.state.clone(), p.faint),
+                "untracked" => (format!("{} files untracked", f.untracked), p.amber),
+                "locked" => (format!("{} session is open", f.lock), p.amber),
+                "dirty" => ("uncommitted changes".to_string(), p.amber),
+                "base-dirty" => ("base has uncommitted changes".to_string(), p.amber),
+                other => (other.to_string(), p.amber),
+            };
+            Row::new(vec![
+                Cell::from(f.task.clone()).style(Style::default().fg(p.ink)),
+                Cell::from(f.ahead.to_string()).style(Style::default().fg(p.mut_)),
+                Cell::from(label).style(Style::default().fg(color)),
+            ])
+        })
+        .collect();
+
+    let mut table_state = TableState::default();
+    table_state.select(Some(app.merge_selected));
+    let table = Table::new(rows, [Constraint::Min(20), Constraint::Length(7), Constraint::Min(24)])
+        .header(header)
+        .row_highlight_style(Style::default().bg(p.wash));
+    frame.render_stateful_widget(table, inner, &mut table_state);
+
+    // A single hairline rule beneath the header, drawn into the header's
+    // blank bottom-margin row — the same quiet structure the session table
+    // uses instead of a table border or vertical dividers.
+    let rule_y = inner.y + 1;
+    let buf = frame.buffer_mut();
+    for x in inner.x..inner.x.saturating_add(inner.width) {
+        if let Some(cell) = buf.cell_mut(ratatui::layout::Position::new(x, rule_y)) {
+            cell.set_char('\u{2500}');
+            cell.set_fg(p.soft);
+        }
+    }
+
+    card_frame(frame.buffer_mut(), list_area, &format!("{} \u{b7} features", app.merge_base), p.strong, p);
+
+    // --- detail ---
+    let detail_area = panes[1];
+    let title = app
+        .selected_feature()
+        .map(|f| f.task.clone())
+        .unwrap_or_else(|| "no features".to_string());
+
+    if let Some(f) = app.selected_feature() {
+        // `git merge --no-edit` carries no --no-ff, so a feature whose base
+        // has not moved fast-forwards and leaves no merge commit.
+        let shape = if f.ff { "fast-forward" } else { "merge commit" };
+        let lines = vec![
+            Line::from(vec![
+                Span::styled("  branch    ", Style::default().fg(p.mut_)),
+                Span::styled(f.branch.clone(), Style::default().fg(p.ink)),
+            ]),
+            Line::from(vec![
+                Span::styled("  ahead     ", Style::default().fg(p.mut_)),
+                Span::styled(format!("{} commits", f.ahead), Style::default().fg(p.ink)),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled("  ON FINISH", Style::default().fg(p.mut_))),
+            Line::from(Span::styled("    1  gates in this worktree", Style::default().fg(p.ink))),
+            Line::from(Span::styled(
+                format!("    2  merge into {}  ({})", app.merge_base, shape),
+                Style::default().fg(p.ink),
+            )),
+            Line::from(Span::styled(format!("    3  gates in {}", app.merge_base), Style::default().fg(p.ink))),
+            Line::from(Span::styled("    4  remove worktree, delete branch", Style::default().fg(p.ink))),
+        ];
+        let body = Rect::new(
+            detail_area.x + 1,
+            detail_area.y + 2,
+            detail_area.width.saturating_sub(2),
+            detail_area.height.saturating_sub(3),
+        );
+        frame.render_widget(Paragraph::new(lines), body);
+    }
+
+    card_frame(frame.buffer_mut(), detail_area, &title, p.strong, p);
+}
+
 fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
     let popup_layout = Layout::vertical([
         Constraint::Fill(1),
@@ -1844,6 +1960,7 @@ mod tests {
     }
 
     use crate::app::App;
+    use crate::app::FeatureRow;
     use crate::session::{Liveness, Session};
     use crate::theme::Palette;
     use crate::app::Focus;
@@ -3922,5 +4039,120 @@ mod tests {
             rows.iter().any(|r| r.contains("state") && r.contains("archived")),
             "preview should label state archived"
         );
+    }
+
+    fn merge_app() -> App {
+        let mut app = App::new(one_session());
+        app.theme = Palette::light();
+        app.mode = Mode::Merge;
+        app.merge_base = "myproj".into();
+        app.merge_features = vec![
+            FeatureRow {
+                task: "fix-auth".into(),
+                branch: "cs/fix-auth".into(),
+                ahead: 7,
+                merged: false,
+                ff: true,
+                wt_dirty: false,
+                untracked: 0,
+                base_dirty: false,
+                lock: "none".into(),
+                state: "ready".into(),
+            },
+            FeatureRow {
+                task: "flaky".into(),
+                branch: "cs/flaky".into(),
+                ahead: 1,
+                merged: false,
+                ff: false,
+                wt_dirty: false,
+                untracked: 3,
+                base_dirty: false,
+                lock: "none".into(),
+                state: "untracked".into(),
+            },
+        ];
+        app.merge_selected = 0;
+        app
+    }
+
+    #[test]
+    fn merge_screen_lists_features_with_their_state() {
+        let mut app = merge_app();
+        let text = render_wide(&mut app);
+        assert!(text.contains("FEATURE"), "column header missing:\n{text}");
+        assert!(text.contains("fix-auth"), "feature missing:\n{text}");
+        assert!(text.contains("ready"), "state missing:\n{text}");
+        assert!(text.contains("untracked"), "blocker missing:\n{text}");
+        assert!(text.contains("cs/fix-auth"), "branch missing from the detail pane:\n{text}");
+    }
+
+    #[test]
+    fn merge_screen_names_fast_forward_versus_merge_commit() {
+        // cs runs `git merge --no-edit` with no --no-ff, so a feature whose
+        // base has not moved leaves no merge commit. One affordance must not
+        // hide two behaviours.
+        let mut app = merge_app();
+        let text = render_wide(&mut app);
+        assert!(text.contains("fast-forward"), "an ff merge must say so:\n{text}");
+
+        app.merge_selected = 1; // ff: false
+        let text = render_wide(&mut app);
+        assert!(text.contains("merge commit"), "a non-ff merge must say so:\n{text}");
+    }
+
+    #[test]
+    fn merge_screen_does_not_use_teal() {
+        // Teal is reserved exclusively for liveness across the whole product.
+        let mut app = merge_app();
+        let p = app.theme;
+        let backend = TestBackend::new(120, 30);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(&mut app, f)).unwrap();
+        let buf = term.backend().buffer();
+        for y in 0..30u16 {
+            for x in 0..120u16 {
+                let cell = buf.cell(ratatui::layout::Position::new(x, y)).unwrap();
+                assert_ne!(cell.fg, p.teal, "teal is reserved for liveness (cell {x},{y})");
+            }
+        }
+    }
+
+    #[test]
+    fn merge_screen_scrolls_a_list_longer_than_its_viewport() {
+        // A base can hold more features than fit. The changelog and legend
+        // panes clip rather than scroll; that is not acceptable here, so the
+        // list is a Table, the only scrollable widget in the crate.
+        let mut app = merge_app();
+        app.merge_features = (0..40)
+            .map(|i| FeatureRow {
+                task: format!("feature-{i:02}"),
+                branch: format!("cs/feature-{i:02}"),
+                ahead: 1,
+                merged: false,
+                ff: true,
+                wt_dirty: false,
+                untracked: 0,
+                base_dirty: false,
+                lock: "none".into(),
+                state: "ready".into(),
+            })
+            .collect();
+        app.merge_selected = 39;
+        let text = render_at(&mut app, 120, 30);
+        assert!(
+            text.contains("feature-39"),
+            "the selected row must be scrolled into view:\n{text}"
+        );
+    }
+
+    #[test]
+    fn merge_screen_footer_names_its_keys() {
+        let mut app = merge_app();
+        let text = render_wide(&mut app);
+        let footer = text.lines().last().unwrap();
+        for hint in ["enter", "r", "esc"] {
+            assert!(footer.contains(hint), "footer should hint {hint}: {footer:?}");
+        }
     }
 }
