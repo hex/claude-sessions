@@ -630,4 +630,71 @@ test_features_excludes_a_lookalike_whose_name_prefixes_a_real_one() {
 
 run_test test_features_excludes_a_lookalike_whose_name_prefixes_a_real_one
 
+# Field positions in a -features --porcelain record.
+_feat_field() {  # line field_number
+    printf '%s\n' "$1" | awk -F'\t' -v n="$2" '{print $n}'
+}
+
+test_features_untracked_is_not_reported_as_dirty() {
+    # _tree_is_dirty deliberately excludes untracked files: a worktree holding
+    # only untracked files is NOT dirty, but is still refused, by a different
+    # gate with a different message. A porcelain-non-empty test would conflate
+    # them and the screen would disagree with the gate.
+    create_test_session_with_git "myproj" > /dev/null
+    cs_launch "myproj@fix-auth"
+    echo "scratch" > "$CS_SESSIONS_ROOT/myproj@fix-auth/notes.txt"
+    local line
+    line=$("$CS_BIN" "myproj" -features --porcelain 2>/dev/null)
+    assert_eq "0" "$(_feat_field "$line" 6)" "untracked files must not set wt_dirty" || return 1
+    assert_eq "1" "$(_feat_field "$line" 7)" "the untracked file must be counted" || return 1
+    assert_eq "untracked" "$(_feat_field "$line" 10)" "state must name the untracked gate" || return 1
+}
+
+run_test test_features_untracked_is_not_reported_as_dirty
+
+test_features_fresh_worktree_is_not_already_merged() {
+    # A fresh worktree's branch sits AT base HEAD, where merge-base
+    # --is-ancestor is also true. Reporting that as already-merged is
+    # destructive: cs reads is-ancestor as "already merged; cleaning up" and
+    # removes the worktree and deletes the branch.
+    create_test_session_with_git "myproj" > /dev/null
+    cs_launch "myproj@fix-auth"
+    local line
+    line=$("$CS_BIN" "myproj" -features --porcelain 2>/dev/null)
+    assert_eq "0" "$(_feat_field "$line" 4)" "a branch AT base HEAD is not already merged" || return 1
+    assert_eq "ready" "$(_feat_field "$line" 10)" "a fresh clean worktree is ready" || return 1
+}
+
+run_test test_features_fresh_worktree_is_not_already_merged
+
+test_features_reports_a_branch_strictly_behind_as_merged() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "fix" > "$wt/auth.txt"
+    (cd "$wt" && git add -A && git commit -q -m "task work")
+    (cd "$base_dir" && git merge -q --no-ff --no-edit cs/fix-auth)
+    local line
+    line=$("$CS_BIN" "myproj" -features --porcelain 2>/dev/null)
+    assert_eq "1" "$(_feat_field "$line" 4)" "a tip strictly behind base HEAD is merged" || return 1
+    assert_eq "merged" "$(_feat_field "$line" 10)" "state must say merged" || return 1
+}
+
+run_test test_features_reports_a_branch_strictly_behind_as_merged
+
+test_features_counts_commits_ahead() {
+    create_test_session_with_git "myproj" > /dev/null
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo one > "$wt/a.txt"; (cd "$wt" && git add -A && git commit -q -m one)
+    echo two > "$wt/b.txt"; (cd "$wt" && git add -A && git commit -q -m two)
+    local line
+    line=$("$CS_BIN" "myproj" -features --porcelain 2>/dev/null)
+    assert_eq "2" "$(_feat_field "$line" 3)" "two commits ahead of base HEAD" || return 1
+    assert_eq "cs/fix-auth" "$(_feat_field "$line" 2)" "branch comes from the state pin" || return 1
+}
+
+run_test test_features_counts_commits_ahead
+
 report_results

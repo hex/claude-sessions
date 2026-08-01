@@ -91,6 +91,85 @@ worktree $d_real
     done
 }
 
+# Print one tab-separated readiness record for a base's feature worktree:
+#   task branch ahead merged ff wt_dirty untracked base_dirty lock state
+# Every fact is computed by the function the real gate calls, so the answer can
+# never disagree with the refusal the merge would produce.
+_feature_readiness() {  # base_name task
+    local base_name="$1" task="$2"
+    local base_dir wt_dir wt_name branch
+    base_dir=$(_resolve_session_dir "$base_name")
+    wt_name="$base_name@$task"
+    wt_dir="$SESSIONS_ROOT/$wt_name"
+    branch=$(_read_local_state "$wt_dir/.cs/local/state" task_branch)
+    [ -n "$branch" ] || branch="cs/$task"
+
+    local ahead=0 merged=0 ff=0 wt_dirty=0 untracked=0 base_dirty=0 lock="none"
+
+    ahead=$(git -C "$base_dir" rev-list --count "HEAD..$branch" 2>/dev/null || echo 0)
+
+    # "Already merged" needs the tip STRICTLY behind base HEAD. A fresh
+    # worktree's branch sits AT base HEAD, where is-ancestor is also true, and
+    # merge_worktree_session reads is-ancestor as "already merged; cleaning up"
+    # and then removes the worktree. Same guard as _doctor_check_worktrees.
+    if git -C "$base_dir" merge-base --is-ancestor "$branch" HEAD 2>/dev/null \
+        && [ "$(git -C "$base_dir" rev-parse "$branch" 2>/dev/null)" \
+             != "$(git -C "$base_dir" rev-parse HEAD 2>/dev/null)" ]; then
+        merged=1
+    fi
+
+    # A merge fast-forwards when base HEAD is already an ancestor of the
+    # branch: `git merge --no-edit` carries no --no-ff, so no merge commit is
+    # written and the screen must not promise one.
+    if git -C "$base_dir" merge-base --is-ancestor HEAD "$branch" 2>/dev/null; then
+        ff=1
+    fi
+
+    _tree_is_dirty "$wt_dir" && wt_dirty=1
+    _tree_is_dirty "$base_dir" && base_dirty=1
+
+    local others
+    others=$(git -C "$wt_dir" ls-files --others --exclude-standard 2>/dev/null || true)
+    if [ -n "$others" ]; then
+        untracked=$(printf '%s\n' "$others" | wc -l | tr -d '[:space:]')
+    fi
+
+    # Gate order: base lock, then worktree lock. A lock owned by this invoker
+    # is exempt, exactly as the merge gate treats it.
+    local lock_session lock_file pid
+    for lock_session in "$base_name" "$wt_name"; do
+        if [ "$lock_session" = "$base_name" ]; then
+            lock_file="$base_dir/.cs/session.lock"
+        else
+            lock_file="$wt_dir/.cs/session.lock"
+        fi
+        [ -f "$lock_file" ] || continue
+        pid=$(cat "$lock_file" 2>/dev/null || echo "")
+        [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || continue
+        session_lock_owned_by_invoker "$lock_session" "$pid" && continue
+        if [ "$lock_session" = "$base_name" ]; then lock="base"; else lock="worktree"; fi
+        break
+    done
+
+    # State is the first blocker merge_worktree_session would hit, in its order.
+    local state="ready"
+    if [ "$lock" != "none" ]; then
+        state="locked"
+    elif [ "$wt_dirty" = 1 ]; then
+        state="dirty"
+    elif [ "$untracked" != 0 ]; then
+        state="untracked"
+    elif [ "$base_dirty" = 1 ]; then
+        state="base-dirty"
+    elif [ "$merged" = 1 ]; then
+        state="merged"
+    fi
+
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$task" "$branch" "$ahead" "$merged" "$ff" \
+        "$wt_dirty" "$untracked" "$base_dirty" "$lock" "$state"
+}
+
 # Resolve a symlinked directory to its real path, portably. BSD readlink gained
 # -f only in macOS 12.3; cd+pwd -P follows the link on every platform, and the
 # fallback keeps the original path rather than aborting under set -e.
