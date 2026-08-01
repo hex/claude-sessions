@@ -524,7 +524,14 @@ if [ "$SOURCE" = "resume" ] && [ -d "$SESSION_DIR/.git" ]; then
             [ "$SIBLING_COUNT" -ge 5 ] && break
         done < <(ls -t "$SESSIONS_ROOT"/*/.cs/local/session.log "$SESSIONS_ROOT"/*/.cs/logs/session.log 2>/dev/null || true)
         if [ -n "$SIBLINGS" ]; then
-            DYNAMIC="${DYNAMIC}Other Sessions (awareness only — if a request belongs to one of these, say so rather than duplicating work here; to hand one a task or note, run cs -msg <session>):\n${SIBLINGS}"
+            # The send form is spelled out rather than named. Inbound mail is
+            # already pushed here on every prompt by scope-prompt.sh's digest;
+            # outbound has no such channel, and the syntax lives only in
+            # `cs --help`. Naming the verb alone announces a capability without
+            # supplying it, which costs a help call every time it is used. This
+            # block is already conditional on siblings existing, so it appears
+            # exactly when there is somewhere to send to.
+            DYNAMIC="${DYNAMIC}Other Sessions (awareness only — if a request belongs to one of these, say so rather than duplicating work here):\n${SIBLINGS}To hand one a task or note: cs -msg <session> \"<body>\"\nAdd --kind notify|task|text|result (default text; a task kind lands in that session's walk-away queue).\n"
         fi
     fi
 

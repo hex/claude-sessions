@@ -599,6 +599,34 @@ test_session_start_excludes_current_session() {
     session_start_teardown
 }
 
+test_session_start_sibling_line_carries_the_send_syntax() {
+    # Naming the verb without its syntax is worse than saying nothing: it tells
+    # the reader a capability exists and forces a `cs --help` call to use it.
+    # Inbound mail is already pushed on every prompt by scope-prompt.sh; this is
+    # the only place the outbound form is delivered where sending is possible.
+    session_start_setup
+
+    create_sibling_session "other-work" "Some other work"
+
+    local output context
+    output=$(echo '{"session_id":"test","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+
+    if ! echo "$context" | grep -q 'cs -msg <session> "<body>"'; then
+        echo "  FAIL: the sibling line must carry the full send form, not just the verb"
+        session_start_teardown
+        return 1
+    fi
+    if ! echo "$context" | grep -q 'notify|task|text|result'; then
+        echo "  FAIL: the sibling line must name the --kind values"
+        session_start_teardown
+        return 1
+    fi
+
+    session_start_teardown
+}
+
 test_session_start_narrative_is_per_actor() {
     session_start_setup
 
@@ -1256,6 +1284,7 @@ run_test test_resume_digest_reports_memory_activity
 run_test test_resume_digest_silent_without_watermark
 run_test test_session_start_includes_sibling_sessions
 run_test test_session_start_excludes_current_session
+run_test test_session_start_sibling_line_carries_the_send_syntax
 run_test test_session_start_shows_objectives
 run_test test_session_start_limits_sibling_count
 run_test test_session_start_updates_last_resumed
