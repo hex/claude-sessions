@@ -938,7 +938,7 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
             Mode::CommandOutput(_) => "Press any key to dismiss",
             Mode::Changelog => "Esc:close",
             Mode::Legend => "Esc:close",
-            Mode::Merge => "enter:finish  j/k:select  r:refresh  esc:back",
+            Mode::Merge => "Enter:finish  j/k:select  r:refresh  Esc:back",
             Mode::Search => unreachable!(),
         }
     };
@@ -3388,6 +3388,44 @@ mod tests {
     }
 
     #[test]
+    fn masthead_live_count_only_reads_teal_when_someone_is_live() {
+        // masthead_shows_brand_counts_and_sort (above) only checks that the
+        // word "live" is present — exactly the check that missed a real bug
+        // where the span painted the liveness teal even at live == 0. Pin
+        // the cell's actual fg in both directions instead.
+        let live_span_fg = |sessions: Vec<Session>| -> Color {
+            let mut app = App::new(sessions);
+            app.theme = Palette::dark();
+            let backend = TestBackend::new(100, 24);
+            let mut term = Terminal::new(backend).unwrap();
+            term.draw(|f| render(&mut app, f)).unwrap();
+            let buf = term.backend().buffer().clone();
+            let row: Vec<char> = (0..100u16)
+                .map(|x| buf.cell(ratatui::layout::Position::new(x, 0)).unwrap().symbol())
+                .collect::<String>()
+                .chars()
+                .collect();
+            let x = row
+                .windows(4)
+                .position(|w| w.iter().collect::<String>() == "live")
+                .expect("masthead should show the live count") as u16;
+            buf.cell(ratatui::layout::Position::new(x, 0)).unwrap().fg
+        };
+
+        let p = Palette::dark();
+        assert_eq!(
+            live_span_fg(one_session()),
+            p.mut_,
+            "zero live sessions must not borrow the liveness teal"
+        );
+        assert_eq!(
+            live_span_fg(locked_and_recent_sessions()),
+            p.teal,
+            "a live session should read teal"
+        );
+    }
+
+    #[test]
     fn masthead_count_uses_all_sessions_not_the_filtered_set() {
         // A narrowing search should not shrink the masthead's session count —
         // it reads app.sessions (the full roster), not app.filtered.
@@ -4103,17 +4141,27 @@ mod tests {
 
     #[test]
     fn merge_screen_does_not_use_teal() {
-        // Teal is reserved exclusively for liveness across the whole product.
+        // Teal is reserved exclusively for liveness across the whole product,
+        // but the merge screen deliberately keeps the masthead, which
+        // legitimately paints teal whenever a session actually is live. The
+        // invariant under test is narrower than "no teal on screen": it's
+        // that render_merge's own output never does. Scope the scan to the
+        // content rect render_merge is passed (chunks[1] in the top-level
+        // render) — everything below the masthead's 2 rows and above the
+        // footer's 1 row, with no action-bar row in Mode::Merge.
         let mut app = merge_app();
         let p = app.theme;
         let backend = TestBackend::new(120, 30);
         let mut term = Terminal::new(backend).unwrap();
         term.draw(|f| render(&mut app, f)).unwrap();
         let buf = term.backend().buffer();
-        for y in 0..30u16 {
+        for y in 2..29u16 {
             for x in 0..120u16 {
                 let cell = buf.cell(ratatui::layout::Position::new(x, y)).unwrap();
-                assert_ne!(cell.fg, p.teal, "teal is reserved for liveness (cell {x},{y})");
+                assert_ne!(
+                    cell.fg, p.teal,
+                    "the merge screen must not use teal (cell {x},{y})"
+                );
             }
         }
     }
@@ -4150,7 +4198,10 @@ mod tests {
     fn merge_screen_footer_names_its_keys() {
         let mut app = merge_app();
         let text = render_wide(&mut app);
-        let footer = text.lines().last().unwrap();
+        // Named keys (Enter, Esc) are capitalized to match every sibling
+        // arm's construction; lowercase the footer before comparing rather
+        // than asserting a specific case on the rendered text.
+        let footer = text.lines().last().unwrap().to_lowercase();
         for hint in ["enter", "r", "esc"] {
             assert!(footer.contains(hint), "footer should hint {hint}: {footer:?}");
         }
