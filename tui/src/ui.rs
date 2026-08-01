@@ -897,8 +897,12 @@ fn render_table(app: &mut App, frame: &mut Frame, area: Rect, preview_open: bool
 
 fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
     let p = app.theme;
-    // Status message takes priority in Normal mode
-    if app.mode == Mode::Normal {
+    // Status message takes priority in Normal and Merge mode. The merge
+    // screen's `r` re-probe (load_merge_features) can set this while already
+    // in Mode::Merge, unlike the `m` entry point which still runs in
+    // Mode::Normal — both must paint it, or a failed re-probe silently
+    // empties the list.
+    if app.mode == Mode::Normal || app.mode == Mode::Merge {
         if let Some(msg) = &app.status_message {
             let color = match msg.level {
                 StatusLevel::Success => p.green,
@@ -4205,5 +4209,21 @@ mod tests {
         for hint in ["enter", "r", "esc"] {
             assert!(footer.contains(hint), "footer should hint {hint}: {footer:?}");
         }
+    }
+
+    #[test]
+    fn merge_screen_shows_a_failed_probe_status() {
+        // The `r` re-probe (load_merge_features) sets app.status_message
+        // while already in Mode::Merge, unlike the `m` entry point which
+        // still runs in Mode::Normal. The footer must paint the status line
+        // in both modes, or a failed re-probe empties the list with no
+        // visible reason.
+        let mut app = merge_app();
+        app.set_status("Features failed: boom", StatusLevel::Error);
+        let text = render_wide(&mut app);
+        assert!(
+            text.contains("Features failed: boom"),
+            "a probe failure must surface on the merge screen's status line:\n{text}"
+        );
     }
 }
