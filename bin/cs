@@ -388,6 +388,7 @@ Commands:
   <name> --force      Override active session lock
   <base>@<feature>    Open a parallel feature worktree of session <base>
   <base> --merge <feature>  Merge a feature worktree back into <base> and remove it
+  <base> -features         List a base's feature worktrees and their merge readiness
   <name> -secrets <cmd>  Run secrets command on <name> without launching session
   -search <query>     Search across all sessions (--include-archived searches archived too)
   -checkpoint "<label>"  Save labelled state snapshot (run from inside a session)
@@ -1629,6 +1630,41 @@ fuse_session_records() {
     if [ -f "$src/memory/MEMORY.md" ]; then
         info "MEMORY.md index lines from the feature were not merged (base copy kept)"
     fi
+}
+
+# List a base session's feature worktrees with their merge readiness. Read
+# only: this is a query, not a gate, so it exits 0 even when nothing can merge.
+run_features() {  # base_name [--porcelain]
+    local base_name="$1"
+    shift
+    local porcelain=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --porcelain) porcelain=1; shift ;;
+            *) error "Usage: cs $base_name -features [--porcelain]" ;;
+        esac
+    done
+
+    local features task record
+    features=$(_worktree_features "$base_name")
+    [ -n "$features" ] || return 0
+
+    if [ -n "$porcelain" ]; then
+        while IFS= read -r task; do
+            [ -n "$task" ] || continue
+            _feature_readiness "$base_name" "$task"
+        done <<< "$features"
+        return 0
+    fi
+
+    printf '%-24s %-24s %6s  %s\n' "FEATURE" "BRANCH" "AHEAD" "STATE"
+    while IFS= read -r task; do
+        [ -n "$task" ] || continue
+        record=$(_feature_readiness "$base_name" "$task")
+        printf '%s\n' "$record" | awk -F'\t' \
+            '{ detail = ($10 == "untracked") ? sprintf("%s (%s files)", $10, $7) : $10;
+               printf "%-24s %-24s %6s  %s\n", $1, $2, $3, detail }'
+    done <<< "$features"
 }
 
 # Ensure auto memory directory exists and migrate from default location
@@ -6154,6 +6190,11 @@ main() {
                 run_tag "$@"
                 return 0
                 ;;
+            -features)
+                shift
+                run_features "$session_name" "$@"
+                return 0
+                ;;
             --merge)
                 shift
                 [ -n "${1:-}" ] || error "Usage: cs <base> --merge <feature>"
@@ -6170,7 +6211,7 @@ main() {
                 shift
                 ;;
             *)
-                error "Unknown session command: $1. Use -secrets, -queue, -conversations, -usage, -tag, --merge, or --force."
+                error "Unknown session command: $1. Use -secrets, -queue, -conversations, -usage, -tag, -features, -finish, --merge, or --force."
                 ;;
         esac
     done

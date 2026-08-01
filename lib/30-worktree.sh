@@ -447,4 +447,39 @@ fuse_session_records() {
     fi
 }
 
+# List a base session's feature worktrees with their merge readiness. Read
+# only: this is a query, not a gate, so it exits 0 even when nothing can merge.
+run_features() {  # base_name [--porcelain]
+    local base_name="$1"
+    shift
+    local porcelain=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --porcelain) porcelain=1; shift ;;
+            *) error "Usage: cs $base_name -features [--porcelain]" ;;
+        esac
+    done
+
+    local features task record
+    features=$(_worktree_features "$base_name")
+    [ -n "$features" ] || return 0
+
+    if [ -n "$porcelain" ]; then
+        while IFS= read -r task; do
+            [ -n "$task" ] || continue
+            _feature_readiness "$base_name" "$task"
+        done <<< "$features"
+        return 0
+    fi
+
+    printf '%-24s %-24s %6s  %s\n' "FEATURE" "BRANCH" "AHEAD" "STATE"
+    while IFS= read -r task; do
+        [ -n "$task" ] || continue
+        record=$(_feature_readiness "$base_name" "$task")
+        printf '%s\n' "$record" | awk -F'\t' \
+            '{ detail = ($10 == "untracked") ? sprintf("%s (%s files)", $10, $7) : $10;
+               printf "%-24s %-24s %6s  %s\n", $1, $2, $3, detail }'
+    done <<< "$features"
+}
+
 # Ensure auto memory directory exists and migrate from default location

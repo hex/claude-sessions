@@ -283,6 +283,11 @@ main() {
                 run_tag "$@"
                 return 0
                 ;;
+            -features)
+                shift
+                run_features "$session_name" "$@"
+                return 0
+                ;;
             --merge)
                 shift
                 [ -n "${1:-}" ] || error "Usage: cs <base> --merge <feature>"
@@ -299,7 +304,7 @@ main() {
                 shift
                 ;;
             *)
-                error "Unknown session command: $1. Use -secrets, -queue, -conversations, -usage, -tag, --merge, or --force."
+                error "Unknown session command: $1. Use -secrets, -queue, -conversations, -usage, -tag, -features, -finish, --merge, or --force."
                 ;;
         esac
     done

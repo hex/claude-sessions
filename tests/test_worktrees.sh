@@ -697,4 +697,16 @@ test_features_counts_commits_ahead() {
 
 run_test test_features_counts_commits_ahead
 
+test_features_human_table_names_the_state() {
+    create_test_session_with_git "myproj" > /dev/null
+    cs_launch "myproj@fix-auth"
+    local output
+    output=$("$CS_BIN" "myproj" -features 2>&1)
+    assert_output_contains "$output" "FEATURE" "the table carries a header" || return 1
+    assert_output_contains "$output" "fix-auth" "the feature is listed" || return 1
+    assert_output_contains "$output" "ready" "the state is named" || return 1
+}
+
+run_test test_features_human_table_names_the_state
+
 report_results
