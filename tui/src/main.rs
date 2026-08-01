@@ -63,6 +63,12 @@ fn main() {
             println!("{}", name);
             println!("--force");
         }
+        Ok(app::Action::OpenWith { session, args }) => {
+            println!("{}", session);
+            for a in args {
+                println!("{}", a);
+            }
+        }
         Ok(app::Action::Quit) | Ok(app::Action::None) => {}
         Err(e) => {
             eprintln!("Error: {}", e);
@@ -120,7 +126,7 @@ fn run_event_loop(app: &mut app::App, terminal: &mut Tui) -> io::Result<app::Act
                             app.note_input();
                             let action = app.handle_key(key);
                             match action {
-                                app::Action::Quit | app::Action::Open(_) | app::Action::ForceOpen(_) => return Ok(action),
+                                app::Action::Quit | app::Action::Open(_) | app::Action::ForceOpen(_) | app::Action::OpenWith { .. } => return Ok(action),
                                 app::Action::None => {}
                             }
                         }
@@ -129,7 +135,7 @@ fn run_event_loop(app: &mut app::App, terminal: &mut Tui) -> io::Result<app::Act
                         app.note_input();
                         let action = app.handle_mouse(mouse);
                         match action {
-                            app::Action::Quit | app::Action::Open(_) | app::Action::ForceOpen(_) => return Ok(action),
+                            app::Action::Quit | app::Action::Open(_) | app::Action::ForceOpen(_) | app::Action::OpenWith { .. } => return Ok(action),
                             app::Action::None => {}
                         }
                     }

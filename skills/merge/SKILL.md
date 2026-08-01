@@ -28,6 +28,18 @@ a quality gate or a review.
    The target is the branch it forked from — usually the repo's
    default branch (`git merge-base` confirms ancestry); ask the user
    when the target is ambiguous.
+3. **Base session closing out a named feature**: the workspace is the
+   base session and the invocation named a feature (`/merge fix-auth`),
+   which is what `cs <base> -finish <feature>` arms from the picker.
+   The target is `<base>@<feature>`; run the preflight gates inside
+   that worktree, then `cs <base> --merge <feature>` from here, then
+   the post-merge gates in this checkout. Do not change directory into
+   the feature session to merge — it cannot remove its own working
+   directory.
+
+When this skill is invoked with an argument, the argument is the
+feature name and context 3 applies. With no argument, detect the
+context from the workspace.
 
 ## Discover the gates
 

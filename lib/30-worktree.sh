@@ -58,6 +58,118 @@ _tree_is_dirty() {
         || ! git -C "$1" diff --cached --quiet 2>/dev/null
 }
 
+# Print the task name of every verified feature worktree of a base, one per
+# line. Glob the sessions root then ask git to confirm each candidate — the
+# reverse direction would enumerate the main checkout, and for an adopted base
+# it would also enumerate the underlying project's own worktrees, which are not
+# cs sessions at all. Asking git for the path on both sides is what makes this
+# survive Git for Windows drive-letter paths, exactly as _doctor_check_worktrees
+# does.
+_worktree_features() {  # base_name
+    local base_name="$1"
+    local base_dir d name task d_real registered
+    base_dir=$(_resolve_session_dir "$base_name")
+    [ -d "$base_dir" ] || return 0
+    git -C "$base_dir" rev-parse --git-dir >/dev/null 2>&1 || return 0
+
+    registered=$(git -C "$base_dir" worktree list --porcelain 2>/dev/null || true)
+
+    for d in "$SESSIONS_ROOT/$base_name"@*; do
+        [ -d "$d" ] || continue
+        name=$(basename "$d")
+        task="${name#*@}"
+        [ -n "$task" ] || continue
+        d_real=$(git -C "$d" rev-parse --show-toplevel 2>/dev/null) \
+            || d_real=$(cd "$d" 2>/dev/null && pwd -P || echo "$d")
+        case "
+$registered
+" in
+            *"
+worktree $d_real
+"*) printf '%s\n' "$task" ;;
+        esac
+    done
+}
+
+# Print one tab-separated readiness record for a base's feature worktree:
+#   task branch ahead merged ff wt_dirty untracked base_dirty lock state
+# Every fact is computed by the function the real gate calls, so the answer can
+# never disagree with the refusal the merge would produce.
+_feature_readiness() {  # base_name task
+    local base_name="$1" task="$2"
+    local base_dir wt_dir wt_name branch
+    base_dir=$(_resolve_session_dir "$base_name")
+    wt_name="$base_name@$task"
+    wt_dir="$SESSIONS_ROOT/$wt_name"
+    branch=$(_read_local_state "$wt_dir/.cs/local/state" task_branch)
+    [ -n "$branch" ] || branch="cs/$task"
+
+    local ahead=0 merged=0 ff=0 wt_dirty=0 untracked=0 base_dirty=0 lock="none"
+
+    ahead=$(git -C "$base_dir" rev-list --count "HEAD..$branch" 2>/dev/null || echo 0)
+
+    # "Already merged" needs the tip STRICTLY behind base HEAD. A fresh
+    # worktree's branch sits AT base HEAD, where is-ancestor is also true, and
+    # merge_worktree_session reads is-ancestor as "already merged; cleaning up"
+    # and then removes the worktree. Same guard as _doctor_check_worktrees.
+    if git -C "$base_dir" merge-base --is-ancestor "$branch" HEAD 2>/dev/null \
+        && [ "$(git -C "$base_dir" rev-parse "$branch" 2>/dev/null)" \
+             != "$(git -C "$base_dir" rev-parse HEAD 2>/dev/null)" ]; then
+        merged=1
+    fi
+
+    # A merge fast-forwards when base HEAD is already an ancestor of the
+    # branch: `git merge --no-edit` carries no --no-ff, so no merge commit is
+    # written and the screen must not promise one.
+    if git -C "$base_dir" merge-base --is-ancestor HEAD "$branch" 2>/dev/null; then
+        ff=1
+    fi
+
+    _tree_is_dirty "$wt_dir" && wt_dirty=1
+    _tree_is_dirty "$base_dir" && base_dirty=1
+
+    local others
+    others=$(git -C "$wt_dir" ls-files --others --exclude-standard 2>/dev/null || true)
+    if [ -n "$others" ]; then
+        untracked=$(printf '%s\n' "$others" | wc -l | tr -d '[:space:]')
+    fi
+
+    # Gate order: base lock, then worktree lock. A lock owned by this invoker
+    # is exempt, exactly as the merge gate treats it.
+    local lock_session lock_file pid
+    for lock_session in "$base_name" "$wt_name"; do
+        if [ "$lock_session" = "$base_name" ]; then
+            lock_file="$base_dir/.cs/session.lock"
+        else
+            lock_file="$wt_dir/.cs/session.lock"
+        fi
+        [ -f "$lock_file" ] || continue
+        pid=$(cat "$lock_file" 2>/dev/null || echo "")
+        [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || continue
+        session_lock_owned_by_invoker "$lock_session" "$pid" && continue
+        if [ "$lock_session" = "$base_name" ]; then lock="base"; else lock="worktree"; fi
+        break
+    done
+
+    # State is the first blocker merge_worktree_session would hit, in its order.
+    local state="ready"
+    if [ "$lock" != "none" ]; then
+        state="locked"
+    elif [ "$wt_dirty" = 1 ]; then
+        state="dirty"
+    elif [ "$untracked" != 0 ]; then
+        state="untracked"
+    elif [ "$base_dirty" = 1 ]; then
+        state="base-dirty"
+    elif [ "$merged" = 1 ]; then
+        state="merged"
+    fi
+
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$task" "$branch" "$ahead" "$merged" "$ff" \
+        "$wt_dirty" "$untracked" "$base_dirty" "$lock" "$state"
+}
+
 # Resolve a symlinked directory to its real path, portably. BSD readlink gained
 # -f only in macOS 12.3; cd+pwd -P follows the link on every platform, and the
 # fallback keeps the original path rather than aborting under set -e.
@@ -333,6 +445,41 @@ fuse_session_records() {
     if [ -f "$src/memory/MEMORY.md" ]; then
         info "MEMORY.md index lines from the feature were not merged (base copy kept)"
     fi
+}
+
+# List a base session's feature worktrees with their merge readiness. Read
+# only: this is a query, not a gate, so it exits 0 even when nothing can merge.
+run_features() {  # base_name [--porcelain]
+    local base_name="$1"
+    shift
+    local porcelain=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --porcelain) porcelain=1; shift ;;
+            *) error "Usage: cs $base_name -features [--porcelain]" ;;
+        esac
+    done
+
+    local features task record
+    features=$(_worktree_features "$base_name")
+    [ -n "$features" ] || return 0
+
+    if [ -n "$porcelain" ]; then
+        while IFS= read -r task; do
+            [ -n "$task" ] || continue
+            _feature_readiness "$base_name" "$task"
+        done <<< "$features"
+        return 0
+    fi
+
+    printf '%-24s %-24s %6s  %s\n' "FEATURE" "BRANCH" "AHEAD" "STATE"
+    while IFS= read -r task; do
+        [ -n "$task" ] || continue
+        record=$(_feature_readiness "$base_name" "$task")
+        printf '%s\n' "$record" | awk -F'\t' \
+            '{ detail = ($10 == "untracked") ? sprintf("%s (%s files)", $10, $7) : $10;
+               printf "%-24s %-24s %6s  %s\n", $1, $2, $3, detail }'
+    done <<< "$features"
 }
 
 # Ensure auto memory directory exists and migrate from default location

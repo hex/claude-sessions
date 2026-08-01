@@ -22,6 +22,8 @@ Commands:
   <name> --force      Override active session lock
   <base>@<feature>    Open a parallel feature worktree of session <base>
   <base> --merge <feature>  Merge a feature worktree back into <base> and remove it
+  <base> -features          List a base's feature worktrees and their merge readiness
+  <base> -finish <feature>  Open <base> and run the merge ritual for <feature>
   <name> -secrets <cmd>  Run secrets command on <name> without launching session
   -search <query>     Search across all sessions (--include-archived searches archived too)
   -checkpoint "<label>"  Save labelled state snapshot (run from inside a session)

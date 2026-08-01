@@ -37,6 +37,7 @@ impl Liveness {
     }
 }
 
+#[derive(Clone)]
 pub struct Session {
     pub name: String,
     pub is_adopted: bool,
@@ -421,7 +422,7 @@ fn read_session(path: &Path, secret_counts: &HashMap<String, u32>) -> Session {
         .map(|s| s.lines().filter(|l| !l.trim().is_empty()).count() as u32)
         .unwrap_or(0);
     let unread_mail = unread_mail_count(&meta_dir);
-    let has_git = path.join(".git").is_dir();
+    let has_git = is_git_checkout(path);
     let git_repo = if has_git {
         parse_git_remote(path)
     } else {
@@ -778,8 +779,15 @@ fn is_pid_alive(pid: u32) -> bool {
     }
 }
 
+/// True when a path is a git checkout. A linked worktree's `.git` is a file
+/// holding a `gitdir:` pointer, so both shapes count.
+fn is_git_checkout(dir: &Path) -> bool {
+    let g = dir.join(".git");
+    g.is_dir() || g.is_file()
+}
+
 fn load_contributors(session_dir: &Path) -> Vec<String> {
-    if !session_dir.join(".git").is_dir() {
+    if !is_git_checkout(session_dir) {
         return Vec::new();
     }
     let output = std::process::Command::new("git")
@@ -1529,5 +1537,22 @@ mod tests {
         assert!(counts.is_empty());
         #[cfg(target_os = "macos")]
         let _ = counts; // content depends on the login keychain; only assert no panic
+    }
+
+    #[test]
+    fn a_linked_worktree_is_recognised_as_a_git_checkout() {
+        // A linked worktree's .git is a FILE containing a gitdir: pointer, not
+        // a directory. Probing only for a directory makes every base@feature
+        // session read as having no repo at all.
+        let tmp = std::env::temp_dir().join(format!("cs-wt-probe-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(tmp.join(".git"), "gitdir: /elsewhere/.git/worktrees/probe\n").unwrap();
+
+        assert!(
+            is_git_checkout(&tmp),
+            "a .git file must count as a checkout, not only a .git directory"
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
     }
 }

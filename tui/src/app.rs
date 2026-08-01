@@ -9,6 +9,15 @@ use ratatui::widgets::TableState;
 use crate::session::{self, Session};
 use crate::theme::Palette;
 
+/// The cs binary to fork. cs exports its own path when it launches the picker,
+/// so a cs that is not on PATH still reaches itself.
+pub fn cs_bin() -> String {
+    match std::env::var("CS_BIN") {
+        Ok(v) if !v.is_empty() => v,
+        _ => "cs".to_string(),
+    }
+}
+
 /// Editable text buffer with cursor position tracking.
 /// Cursor is stored as a byte offset, always on a char boundary.
 pub struct TextInput {
@@ -249,6 +258,50 @@ pub enum Mode {
     CommandOutput(String),
     Changelog,
     Legend,
+    Merge,
+}
+
+/// One feature worktree's merge readiness, as reported by
+/// `cs <base> -features --porcelain`. Every field is computed by the shell
+/// function the real merge gate calls, so this never disagrees with the gate.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FeatureRow {
+    pub task: String,
+    pub branch: String,
+    pub ahead: u32,
+    pub merged: bool,
+    pub ff: bool,
+    pub wt_dirty: bool,
+    pub untracked: u32,
+    pub base_dirty: bool,
+    pub lock: String,
+    pub state: String,
+}
+
+/// Parse `cs <base> -features --porcelain`: one tab-separated record per
+/// feature, ten fields. A record of any other width means the verb changed
+/// shape — drop it rather than render misaligned fields.
+pub fn parse_features(text: &str) -> Vec<FeatureRow> {
+    text.lines()
+        .filter_map(|line| {
+            let f: Vec<&str> = line.split('\t').collect();
+            if f.len() != 10 {
+                return None;
+            }
+            Some(FeatureRow {
+                task: f[0].to_string(),
+                branch: f[1].to_string(),
+                ahead: f[2].parse().unwrap_or(0),
+                merged: f[3] == "1",
+                ff: f[4] == "1",
+                wt_dirty: f[5] == "1",
+                untracked: f[6].parse().unwrap_or(0),
+                base_dirty: f[7] == "1",
+                lock: f[8].to_string(),
+                state: f[9].to_string(),
+            })
+        })
+        .collect()
 }
 
 /// Which panel receives keyboard input while in `Mode::Normal`.
@@ -274,11 +327,15 @@ pub const MENU_ITEMS: &[(&str, &str)] = &[
     ("Secrets", "s"),
 ];
 
+#[derive(Debug)]
 pub enum Action {
     None,
     Quit,
     Open(String),
     ForceOpen(String),
+    /// Exit and hand cs a session plus argv words. `lib/99-main.sh` reads line
+    /// 1 as the session and word-splits the rest, so no word may hold a space.
+    OpenWith { session: String, args: Vec<String> },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -405,6 +462,12 @@ pub struct App {
     /// shimmer animates only while this is recent; after `IDLE_PAUSE_SECS` the
     /// event loop stops repainting and blocks until the next event.
     last_input: std::time::Instant,
+    /// The base session whose features the merge screen is showing.
+    pub merge_base: String,
+    /// Readiness rows for that base, refreshed on entry and on `r`.
+    pub merge_features: Vec<FeatureRow>,
+    /// Highlighted row in `merge_features`.
+    pub merge_selected: usize,
 }
 
 /// Start the thread that reads session previews off the render path.
@@ -487,6 +550,9 @@ impl App {
             notes_selected: 0,
             theme: Palette::dark(),
             last_input: std::time::Instant::now(),
+            merge_base: String::new(),
+            merge_features: Vec::new(),
+            merge_selected: 0,
         };
         // Apply the default sort (recency) so the initial view is ordered, not
         // just scan order. Also seeds section labels for the grouped view.
@@ -838,6 +904,7 @@ impl App {
             Mode::Secrets => self.handle_secrets(key),
             Mode::Changelog => self.handle_changelog(key),
             Mode::Legend => self.handle_legend(key),
+            Mode::Merge => self.handle_merge(key),
             Mode::CommandOutput(_) => {
                 if self.return_to_secrets {
                     self.return_to_secrets = false;
@@ -999,6 +1066,27 @@ impl App {
                 self.apply_filter_and_sort();
                 Action::None
             }
+            KeyCode::Char('m') => {
+                if let Some(session) = self.selected_session() {
+                    let name = session.name.clone();
+                    // A worktree row opens its base; a base row opens itself.
+                    let base = match name.split_once('@') {
+                        Some((b, _)) => b.to_string(),
+                        None => name,
+                    };
+                    self.merge_base = base;
+                    self.load_merge_features();
+                    if self.merge_features.is_empty() {
+                        self.set_status(
+                            format!("No feature worktrees of {}", self.merge_base),
+                            StatusLevel::Info,
+                        );
+                    } else {
+                        self.mode = Mode::Merge;
+                    }
+                }
+                Action::None
+            }
             _ => Action::None,
         }
     }
@@ -1158,6 +1246,78 @@ impl App {
             _ => {}
         }
         Action::None
+    }
+
+    fn handle_merge(&mut self, key: KeyEvent) -> Action {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.mode = Mode::Normal;
+                Action::None
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if !self.merge_features.is_empty()
+                    && self.merge_selected + 1 < self.merge_features.len()
+                {
+                    self.merge_selected += 1;
+                }
+                Action::None
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if self.merge_selected > 0 {
+                    self.merge_selected -= 1;
+                }
+                Action::None
+            }
+            KeyCode::Char('r') => {
+                self.load_merge_features();
+                Action::None
+            }
+            KeyCode::Enter => {
+                // Hand off unconditionally. The ritual can resolve blockers
+                // the screen can only report, and cs delivers the real refusal.
+                match self.selected_feature() {
+                    Some(f) => Action::OpenWith {
+                        session: self.merge_base.clone(),
+                        args: vec!["-finish".to_string(), f.task.clone()],
+                    },
+                    None => Action::None,
+                }
+            }
+            _ => Action::None,
+        }
+    }
+
+    pub fn selected_feature(&self) -> Option<&FeatureRow> {
+        self.merge_features.get(self.merge_selected)
+    }
+
+    /// Fork cs once for the whole base. The per-feature git work happens inside
+    /// cs, which is also where the gate semantics live. A failure is a status
+    /// line, never an exit code: a nonzero TUI exit kills cs outright.
+    fn load_merge_features(&mut self) {
+        let base = self.merge_base.clone();
+        if base.is_empty() {
+            return;
+        }
+        let output = std::process::Command::new(cs_bin())
+            .args([&base, "-features", "--porcelain"])
+            .output();
+        match output {
+            Ok(out) if out.status.success() => {
+                let text = String::from_utf8_lossy(&out.stdout).to_string();
+                self.merge_features = parse_features(&text);
+                self.merge_selected = 0;
+            }
+            Ok(out) => {
+                let err = String::from_utf8_lossy(&out.stderr);
+                self.merge_features = Vec::new();
+                self.set_status(format!("Features failed: {}", err.trim()), StatusLevel::Error);
+            }
+            Err(e) => {
+                self.merge_features = Vec::new();
+                self.set_status(format!("Features failed: {}", e), StatusLevel::Error);
+            }
+        }
     }
 
     fn handle_session_menu(&mut self, key: KeyEvent) -> Action {
@@ -1692,7 +1852,7 @@ impl App {
     fn run_secrets_command(&mut self) {
         if let Some(session) = self.selected_session() {
             let name = session.name.clone();
-            let output = std::process::Command::new("cs")
+            let output = std::process::Command::new(cs_bin())
                 .args([&name, "-secrets", "list"])
                 .output();
             match output {
@@ -1731,7 +1891,7 @@ impl App {
     fn run_secrets_subcommand(&mut self, subcommand: &str, key: &str) {
         if let Some(session) = self.selected_session() {
             let name = session.name.clone();
-            let output = std::process::Command::new("cs")
+            let output = std::process::Command::new(cs_bin())
                 .args([&name, "-secrets", subcommand, key])
                 .output();
             match output {
@@ -1752,7 +1912,7 @@ impl App {
     fn peek_secret(&mut self, key_name: &str) {
         if let Some(session) = self.selected_session() {
             let name = session.name.clone();
-            let output = std::process::Command::new("cs")
+            let output = std::process::Command::new(cs_bin())
                 .args([&name, "-secrets", "get", key_name])
                 .output();
             match output {
@@ -2035,6 +2195,181 @@ mod tests {
         let app = App::new(sample_sessions());
         assert_eq!(app.table_state.selected(), Some(0));
         assert_eq!(app.filtered.len(), 3);
+    }
+
+    #[test]
+    fn open_with_carries_a_session_and_its_argv_words() {
+        let a = Action::OpenWith {
+            session: "myproj".into(),
+            args: vec!["-finish".into(), "fix-auth".into()],
+        };
+        match a {
+            Action::OpenWith { session, args } => {
+                assert_eq!(session, "myproj");
+                assert_eq!(args, vec!["-finish".to_string(), "fix-auth".to_string()]);
+                for w in &args {
+                    assert!(!w.contains(' '), "argv words are word-split by the shell wrapper");
+                }
+            }
+            _ => panic!("expected OpenWith"),
+        }
+    }
+
+    #[test]
+    fn parse_features_reads_a_porcelain_record() {
+        let text = "fix-auth\tcs/fix-auth\t7\t0\t1\t0\t0\t0\tnone\tready\n\
+                    flaky\tcs/flaky\t1\t0\t0\t0\t3\t0\tnone\tuntracked\n";
+        let rows = parse_features(text);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].task, "fix-auth");
+        assert_eq!(rows[0].ahead, 7);
+        assert!(rows[0].ff, "ff is field 5");
+        assert_eq!(rows[0].state, "ready");
+        assert_eq!(rows[1].untracked, 3, "untracked is field 7");
+        assert_eq!(rows[1].state, "untracked");
+    }
+
+    #[test]
+    fn parse_features_ignores_malformed_lines() {
+        // A short record means the verb changed shape; drop it rather than
+        // render a row built from misaligned fields.
+        let rows = parse_features("broken\tcs/broken\n\nfix-auth\tcs/fix-auth\t2\t0\t1\t0\t0\t0\tnone\tready\n");
+        assert_eq!(rows.len(), 1, "only the well-formed record survives");
+        assert_eq!(rows[0].task, "fix-auth");
+    }
+
+    fn feature_row(task: &str, state: &str) -> FeatureRow {
+        FeatureRow {
+            task: task.into(),
+            branch: format!("cs/{task}"),
+            ahead: 3,
+            merged: false,
+            ff: true,
+            wt_dirty: false,
+            untracked: 0,
+            base_dirty: false,
+            lock: "none".into(),
+            state: state.into(),
+        }
+    }
+
+    #[test]
+    fn merge_mode_moves_selection_and_leaves_on_escape() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::Merge;
+        app.merge_base = "myproj".into();
+        app.merge_features = vec![feature_row("fix-auth", "ready"), feature_row("flaky", "dirty")];
+        app.merge_selected = 0;
+
+        app.handle_key(KeyEvent::from(KeyCode::Char('j')));
+        assert_eq!(app.merge_selected, 1, "j moves down the feature list");
+        app.handle_key(KeyEvent::from(KeyCode::Char('j')));
+        assert_eq!(app.merge_selected, 1, "selection clamps at the last row");
+        app.handle_key(KeyEvent::from(KeyCode::Char('k')));
+        assert_eq!(app.merge_selected, 0, "k moves up");
+
+        app.handle_key(KeyEvent::from(KeyCode::Esc));
+        assert_eq!(app.mode, Mode::Normal, "Esc returns to the picker");
+    }
+
+    #[test]
+    fn enter_hands_off_even_when_the_feature_is_blocked() {
+        // The screen is advisory; cs is the authority. The ritual can resolve
+        // most blockers — it offers to commit an uncommitted tree — where the
+        // screen could only refuse.
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::Merge;
+        app.merge_base = "myproj".into();
+        app.merge_features = vec![feature_row("flaky", "dirty")];
+        app.merge_selected = 0;
+
+        let action = app.handle_key(KeyEvent::from(KeyCode::Enter));
+        match action {
+            Action::OpenWith { session, args } => {
+                assert_eq!(session, "myproj");
+                assert_eq!(args, vec!["-finish".to_string(), "flaky".to_string()]);
+            }
+            other => panic!("a blocked feature must still hand off, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn enter_with_no_features_does_not_exit() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::Merge;
+        app.merge_base = "myproj".into();
+        app.merge_features = Vec::new();
+        assert!(matches!(app.handle_key(KeyEvent::from(KeyCode::Enter)), Action::None));
+        assert_eq!(app.mode, Mode::Merge, "an empty list stays put");
+    }
+
+    /// Serializes every test that sets, removes, or asserts on the
+    /// process-global CS_BIN env var. Cargo runs tests on parallel threads, so
+    /// an unguarded set_var races every concurrent reader of cs_bin().
+    static CS_BIN_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// `sample_sessions()` has no `base@task` row. A dedicated fixture rather
+    /// than a fourth entry in the shared one, so no existing test that counts
+    /// or orders sessions changes behaviour.
+    fn sessions_with_a_worktree() -> Vec<Session> {
+        let mut v = sample_sessions();
+        let base = v[0].clone();
+        v.push(Session {
+            name: format!("{}@fix-auth", base.name),
+            ..base
+        });
+        v
+    }
+
+    #[test]
+    fn m_on_a_worktree_row_opens_its_base() {
+        let _env = CS_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // Point the probe at a path that cannot exist, so the fork fails the
+        // same way on every machine. Without this the test forks the real cs
+        // against the developer's real sessions root and its result depends on
+        // whether cs happens to be on PATH.
+        std::env::set_var("CS_BIN", "/nonexistent/cs");
+        let mut app = App::new(sessions_with_a_worktree());
+        app.apply_filter_and_sort();
+        let i = app
+            .filtered
+            .iter()
+            .position(|&i| app.sessions[i].name.contains('@'))
+            .expect("the fixture must contain a worktree row");
+        app.table_state.select(Some(i));
+        app.handle_key(KeyEvent::from(KeyCode::Char('m')));
+        std::env::remove_var("CS_BIN");
+        assert_eq!(app.merge_base, "alpha", "a worktree row opens its base");
+        assert!(
+            app.merge_features.is_empty(),
+            "a failed probe must leave the list empty, not stale"
+        );
+        assert_ne!(app.mode, Mode::Merge, "a failed probe must not open an empty screen");
+    }
+
+    #[test]
+    fn m_does_not_fire_while_the_notes_pane_has_focus() {
+        // handle_normal routes to the notes input first, so `m` must type a
+        // letter there rather than opening the merge screen.
+        let mut app = App::new(sessions_with_a_worktree());
+        app.focus = Focus::Notes;
+        app.notes_focus = NotesFocus::Input;
+        app.handle_key(KeyEvent::from(KeyCode::Char('m')));
+        assert!(app.merge_base.is_empty(), "m must not open the screen from the notes input");
+        assert_ne!(app.mode, Mode::Merge);
+    }
+
+    #[test]
+    fn cs_bin_prefers_the_exported_path_over_bare_cs() {
+        let _env = CS_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // cs exports its own path when it launches the picker. Without the
+        // seam the TUI forks a bare "cs" that may not be on PATH at all.
+        std::env::set_var("CS_BIN", "/opt/example/bin/cs");
+        assert_eq!(cs_bin(), "/opt/example/bin/cs");
+        std::env::set_var("CS_BIN", "");
+        assert_eq!(cs_bin(), "cs", "an empty value must fall back, not fork nothing");
+        std::env::remove_var("CS_BIN");
+        assert_eq!(cs_bin(), "cs");
     }
 
     #[test]

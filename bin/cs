@@ -388,6 +388,8 @@ Commands:
   <name> --force      Override active session lock
   <base>@<feature>    Open a parallel feature worktree of session <base>
   <base> --merge <feature>  Merge a feature worktree back into <base> and remove it
+  <base> -features          List a base's feature worktrees and their merge readiness
+  <base> -finish <feature>  Open <base> and run the merge ritual for <feature>
   <name> -secrets <cmd>  Run secrets command on <name> without launching session
   -search <query>     Search across all sessions (--include-archived searches archived too)
   -checkpoint "<label>"  Save labelled state snapshot (run from inside a session)
@@ -1242,6 +1244,118 @@ _tree_is_dirty() {
         || ! git -C "$1" diff --cached --quiet 2>/dev/null
 }
 
+# Print the task name of every verified feature worktree of a base, one per
+# line. Glob the sessions root then ask git to confirm each candidate — the
+# reverse direction would enumerate the main checkout, and for an adopted base
+# it would also enumerate the underlying project's own worktrees, which are not
+# cs sessions at all. Asking git for the path on both sides is what makes this
+# survive Git for Windows drive-letter paths, exactly as _doctor_check_worktrees
+# does.
+_worktree_features() {  # base_name
+    local base_name="$1"
+    local base_dir d name task d_real registered
+    base_dir=$(_resolve_session_dir "$base_name")
+    [ -d "$base_dir" ] || return 0
+    git -C "$base_dir" rev-parse --git-dir >/dev/null 2>&1 || return 0
+
+    registered=$(git -C "$base_dir" worktree list --porcelain 2>/dev/null || true)
+
+    for d in "$SESSIONS_ROOT/$base_name"@*; do
+        [ -d "$d" ] || continue
+        name=$(basename "$d")
+        task="${name#*@}"
+        [ -n "$task" ] || continue
+        d_real=$(git -C "$d" rev-parse --show-toplevel 2>/dev/null) \
+            || d_real=$(cd "$d" 2>/dev/null && pwd -P || echo "$d")
+        case "
+$registered
+" in
+            *"
+worktree $d_real
+"*) printf '%s\n' "$task" ;;
+        esac
+    done
+}
+
+# Print one tab-separated readiness record for a base's feature worktree:
+#   task branch ahead merged ff wt_dirty untracked base_dirty lock state
+# Every fact is computed by the function the real gate calls, so the answer can
+# never disagree with the refusal the merge would produce.
+_feature_readiness() {  # base_name task
+    local base_name="$1" task="$2"
+    local base_dir wt_dir wt_name branch
+    base_dir=$(_resolve_session_dir "$base_name")
+    wt_name="$base_name@$task"
+    wt_dir="$SESSIONS_ROOT/$wt_name"
+    branch=$(_read_local_state "$wt_dir/.cs/local/state" task_branch)
+    [ -n "$branch" ] || branch="cs/$task"
+
+    local ahead=0 merged=0 ff=0 wt_dirty=0 untracked=0 base_dirty=0 lock="none"
+
+    ahead=$(git -C "$base_dir" rev-list --count "HEAD..$branch" 2>/dev/null || echo 0)
+
+    # "Already merged" needs the tip STRICTLY behind base HEAD. A fresh
+    # worktree's branch sits AT base HEAD, where is-ancestor is also true, and
+    # merge_worktree_session reads is-ancestor as "already merged; cleaning up"
+    # and then removes the worktree. Same guard as _doctor_check_worktrees.
+    if git -C "$base_dir" merge-base --is-ancestor "$branch" HEAD 2>/dev/null \
+        && [ "$(git -C "$base_dir" rev-parse "$branch" 2>/dev/null)" \
+             != "$(git -C "$base_dir" rev-parse HEAD 2>/dev/null)" ]; then
+        merged=1
+    fi
+
+    # A merge fast-forwards when base HEAD is already an ancestor of the
+    # branch: `git merge --no-edit` carries no --no-ff, so no merge commit is
+    # written and the screen must not promise one.
+    if git -C "$base_dir" merge-base --is-ancestor HEAD "$branch" 2>/dev/null; then
+        ff=1
+    fi
+
+    _tree_is_dirty "$wt_dir" && wt_dirty=1
+    _tree_is_dirty "$base_dir" && base_dirty=1
+
+    local others
+    others=$(git -C "$wt_dir" ls-files --others --exclude-standard 2>/dev/null || true)
+    if [ -n "$others" ]; then
+        untracked=$(printf '%s\n' "$others" | wc -l | tr -d '[:space:]')
+    fi
+
+    # Gate order: base lock, then worktree lock. A lock owned by this invoker
+    # is exempt, exactly as the merge gate treats it.
+    local lock_session lock_file pid
+    for lock_session in "$base_name" "$wt_name"; do
+        if [ "$lock_session" = "$base_name" ]; then
+            lock_file="$base_dir/.cs/session.lock"
+        else
+            lock_file="$wt_dir/.cs/session.lock"
+        fi
+        [ -f "$lock_file" ] || continue
+        pid=$(cat "$lock_file" 2>/dev/null || echo "")
+        [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || continue
+        session_lock_owned_by_invoker "$lock_session" "$pid" && continue
+        if [ "$lock_session" = "$base_name" ]; then lock="base"; else lock="worktree"; fi
+        break
+    done
+
+    # State is the first blocker merge_worktree_session would hit, in its order.
+    local state="ready"
+    if [ "$lock" != "none" ]; then
+        state="locked"
+    elif [ "$wt_dirty" = 1 ]; then
+        state="dirty"
+    elif [ "$untracked" != 0 ]; then
+        state="untracked"
+    elif [ "$base_dirty" = 1 ]; then
+        state="base-dirty"
+    elif [ "$merged" = 1 ]; then
+        state="merged"
+    fi
+
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$task" "$branch" "$ahead" "$merged" "$ff" \
+        "$wt_dirty" "$untracked" "$base_dirty" "$lock" "$state"
+}
+
 # Resolve a symlinked directory to its real path, portably. BSD readlink gained
 # -f only in macOS 12.3; cd+pwd -P follows the link on every platform, and the
 # fallback keeps the original path rather than aborting under set -e.
@@ -1517,6 +1631,41 @@ fuse_session_records() {
     if [ -f "$src/memory/MEMORY.md" ]; then
         info "MEMORY.md index lines from the feature were not merged (base copy kept)"
     fi
+}
+
+# List a base session's feature worktrees with their merge readiness. Read
+# only: this is a query, not a gate, so it exits 0 even when nothing can merge.
+run_features() {  # base_name [--porcelain]
+    local base_name="$1"
+    shift
+    local porcelain=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --porcelain) porcelain=1; shift ;;
+            *) error "Usage: cs $base_name -features [--porcelain]" ;;
+        esac
+    done
+
+    local features task record
+    features=$(_worktree_features "$base_name")
+    [ -n "$features" ] || return 0
+
+    if [ -n "$porcelain" ]; then
+        while IFS= read -r task; do
+            [ -n "$task" ] || continue
+            _feature_readiness "$base_name" "$task"
+        done <<< "$features"
+        return 0
+    fi
+
+    printf '%-24s %-24s %6s  %s\n' "FEATURE" "BRANCH" "AHEAD" "STATE"
+    while IFS= read -r task; do
+        [ -n "$task" ] || continue
+        record=$(_feature_readiness "$base_name" "$task")
+        printf '%s\n' "$record" | awk -F'\t' \
+            '{ detail = ($10 == "untracked") ? sprintf("%s (%s files)", $10, $7) : $10;
+               printf "%-24s %-24s %6s  %s\n", $1, $2, $3, detail }'
+    done <<< "$features"
 }
 
 # Ensure auto memory directory exists and migrate from default location
@@ -2015,6 +2164,7 @@ _exec_fresh_rebind() {
     local reason="${2:-declined-resume}"
     local handoff="${3:-}"
     local spawn_kick="${4:-}"
+    local merge_kick="${5:-}"
     local session_name
     session_name=$(basename "$session_dir")
     local old_uuid
@@ -2031,12 +2181,13 @@ _exec_fresh_rebind() {
     # waiting for the user. It stays a bare trigger on purpose: the SessionStart
     # hook (which the same r answer arms via the pending-handoff marker) is the
     # single owner of the how — next-step section, transcript-not-loaded, the
-    # narrative pointers — so the wording lives in one place. A spawn kick outranks
-    # the handoff, and both outrank the color re-apply; all three ride claude's
-    # single prompt slot, so the displaced color returns on the next open.
+    # narrative pointers — so the wording lives in one place. A merge kick
+    # outranks a spawn kick, which outranks the handoff, which outranks the
+    # color re-apply; all four ride claude's single prompt slot, so a displaced
+    # color returns on the next open.
     local handoff_arg=""
     [ -n "$handoff" ] && handoff_arg="Continue from the pending rotation handoff: read .cs/handoffs/$handoff first."
-    local launch_prompt="${spawn_kick:-${handoff_arg:-$color_arg}}"
+    local launch_prompt="${merge_kick:-${spawn_kick:-${handoff_arg:-$color_arg}}}"
     export CS_CLAUDE_SESSION_ID="$new_uuid"
     export CS_FRESH_REBIND=1
     # shellcheck disable=SC2086
@@ -4989,6 +5140,7 @@ launch_claude_code() {
     local session_dir="$2"
     local is_new="$3"
     local force="${4:-}"
+    local merge_feature="${5:-}"
 
     # Terminal theme (and its real background RGB when known) for the statusline
     # and hooks, detected while cs still owns the tty and reused by the session
@@ -5132,9 +5284,18 @@ launch_claude_code() {
             rm -f "$_seed"
         fi
     fi
+    # Arming the ritual is an explicit action the user took seconds ago, so it
+    # outranks a spawn seed staged earlier. The queue is already armed by this
+    # point, so nothing is lost — but the drain is the Stop hook, which fires
+    # at the first turn end, so do not promise it runs after the merge.
+    local merge_kick=""
+    [ -n "$merge_feature" ] && merge_kick="/merge $merge_feature"
+    if [ -n "$merge_kick" ] && [ -n "$spawn_kick" ]; then
+        warn "A walk-away queue is armed here; it will begin at the first turn end."
+    fi
     # The kick prompt takes claude's single positional-prompt slot, displacing
     # the /color re-apply for this one launch (color returns next open).
-    local launch_prompt="${spawn_kick:-$color_arg}"
+    local launch_prompt="${merge_kick:-${spawn_kick:-$color_arg}}"
 
     # Status indicator
     local status_icon status_text
@@ -5282,7 +5443,13 @@ launch_claude_code() {
                     mkdir -p "$session_dir/.cs/local"
                     printf '%s\n' "$(basename "$pending_handoff")" > "$session_dir/.cs/local/pending-handoff"
                     echo ""
-                    _exec_fresh_rebind "$session_dir" handoff "$(basename "$pending_handoff")" "$spawn_kick"
+                    # r is the user explicitly choosing the rotation handoff
+                    # over resuming; a merge armed moments earlier must not
+                    # silently override the choice they just made.
+                    if [ -n "$merge_kick" ]; then
+                        warn "Rotation handoff takes this launch; re-run: cs $session_name -finish $merge_feature"
+                    fi
+                    _exec_fresh_rebind "$session_dir" handoff "$(basename "$pending_handoff")" "$spawn_kick" ""
                 fi
                 # r without a pending handoff was never offered: treat as the
                 # default resume answer, disarm included.
@@ -5352,7 +5519,7 @@ launch_claude_code() {
             # the same failure).
             echo -e "${DIM}No previous conversation found. Starting fresh...${NC}"
             echo ""
-            _exec_fresh_rebind "$session_dir" resume-failed "" "$spawn_kick"
+            _exec_fresh_rebind "$session_dir" resume-failed "" "$spawn_kick" "$merge_kick"
         fi
         exit $rc
     else
@@ -5369,7 +5536,7 @@ launch_claude_code() {
             # shellcheck disable=SC2086
             exec $CLAUDE_CODE_BIN --name "$session_name" --session-id "$claude_session_id" ${launch_prompt:+"$launch_prompt"}
         elif [ "$is_new" = "false" ]; then
-            _exec_fresh_rebind "$session_dir" declined-resume "" "$spawn_kick"
+            _exec_fresh_rebind "$session_dir" declined-resume "" "$spawn_kick" "$merge_kick"
         else
             # shellcheck disable=SC2086
             exec $CLAUDE_CODE_BIN --name "$session_name" ${launch_prompt:+"$launch_prompt"}
@@ -5794,7 +5961,7 @@ main() {
                 # launch next.
                 _export_term_theme
                 local tui_output
-                tui_output=$(CS_VERSION="$VERSION" "$tui_bin") || exit $?
+                tui_output=$(CS_VERSION="$VERSION" CS_BIN="$0" "$tui_bin") || exit $?
                 if [ -n "$tui_output" ]; then
                     local selected="${tui_output%%$'\n'*}"
                     if [ "$tui_output" != "$selected" ]; then
@@ -5969,6 +6136,7 @@ main() {
 
     local session_name="$cmd"
     local force_flag=""
+    local merge_feature=""
 
     # Validate inputs
     local wt_base="" wt_task=""
@@ -6042,6 +6210,11 @@ main() {
                 run_tag "$@"
                 return 0
                 ;;
+            -features)
+                shift
+                run_features "$session_name" "$@"
+                return 0
+                ;;
             --merge)
                 shift
                 [ -n "${1:-}" ] || error "Usage: cs <base> --merge <feature>"
@@ -6053,12 +6226,21 @@ main() {
                 merge_worktree_session "$session_name" "$1"
                 return 0
                 ;;
+            -finish)
+                shift
+                [ -n "${1:-}" ] || error "Usage: cs <base> -finish <feature>"
+                # Validate the same way --merge does, so a feature name with
+                # path separators is rejected before any filesystem lookup.
+                cs_split_worktree_name "$session_name@$1" >/dev/null
+                merge_feature="$1"
+                shift
+                ;;
             --force)
                 force_flag="true"
                 shift
                 ;;
             *)
-                error "Unknown session command: $1. Use -secrets, -queue, -conversations, -usage, -tag, --merge, or --force."
+                error "Unknown session command: $1. Use -secrets, -queue, -conversations, -usage, -tag, -features, -finish, --merge, or --force."
                 ;;
         esac
     done
@@ -6122,16 +6304,32 @@ main() {
         migrate_session "$session_dir"
     fi
 
+    if [ -n "$merge_feature" ]; then
+        local _known
+        _known=$(_worktree_features "$session_name")
+        case "
+$_known
+" in
+            *"
+$merge_feature
+"*) ;;
+            *) error "No feature worktree '$merge_feature' of '$session_name'. List them with: cs $session_name -features" ;;
+        esac
+    fi
+
     # MSYS (Windows Git Bash) can manage sessions but cannot exec Claude Code
     # itself; the session is prepared above, then handed off to WSL to launch.
     if [ "$(cs_platform)" = "msys" ]; then
         info "Session ready at $session_dir."
         info "On Windows, launch it from WSL (Git Bash supports session management only)."
+        if [ -n "$merge_feature" ]; then
+            info "To finish '$merge_feature', run from WSL: cs $session_name -finish $merge_feature"
+        fi
         return 0
     fi
 
     # Launch Claude Code
-    launch_claude_code "$session_name" "$session_dir" "$is_new" "$force_flag"
+    launch_claude_code "$session_name" "$session_dir" "$is_new" "$force_flag" "$merge_feature"
 }
 
 main "$@"

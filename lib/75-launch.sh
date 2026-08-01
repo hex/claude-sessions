@@ -30,6 +30,7 @@ launch_claude_code() {
     local session_dir="$2"
     local is_new="$3"
     local force="${4:-}"
+    local merge_feature="${5:-}"
 
     # Terminal theme (and its real background RGB when known) for the statusline
     # and hooks, detected while cs still owns the tty and reused by the session
@@ -173,9 +174,18 @@ launch_claude_code() {
             rm -f "$_seed"
         fi
     fi
+    # Arming the ritual is an explicit action the user took seconds ago, so it
+    # outranks a spawn seed staged earlier. The queue is already armed by this
+    # point, so nothing is lost — but the drain is the Stop hook, which fires
+    # at the first turn end, so do not promise it runs after the merge.
+    local merge_kick=""
+    [ -n "$merge_feature" ] && merge_kick="/merge $merge_feature"
+    if [ -n "$merge_kick" ] && [ -n "$spawn_kick" ]; then
+        warn "A walk-away queue is armed here; it will begin at the first turn end."
+    fi
     # The kick prompt takes claude's single positional-prompt slot, displacing
     # the /color re-apply for this one launch (color returns next open).
-    local launch_prompt="${spawn_kick:-$color_arg}"
+    local launch_prompt="${merge_kick:-${spawn_kick:-$color_arg}}"
 
     # Status indicator
     local status_icon status_text
@@ -323,7 +333,13 @@ launch_claude_code() {
                     mkdir -p "$session_dir/.cs/local"
                     printf '%s\n' "$(basename "$pending_handoff")" > "$session_dir/.cs/local/pending-handoff"
                     echo ""
-                    _exec_fresh_rebind "$session_dir" handoff "$(basename "$pending_handoff")" "$spawn_kick"
+                    # r is the user explicitly choosing the rotation handoff
+                    # over resuming; a merge armed moments earlier must not
+                    # silently override the choice they just made.
+                    if [ -n "$merge_kick" ]; then
+                        warn "Rotation handoff takes this launch; re-run: cs $session_name -finish $merge_feature"
+                    fi
+                    _exec_fresh_rebind "$session_dir" handoff "$(basename "$pending_handoff")" "$spawn_kick" ""
                 fi
                 # r without a pending handoff was never offered: treat as the
                 # default resume answer, disarm included.
@@ -393,7 +409,7 @@ launch_claude_code() {
             # the same failure).
             echo -e "${DIM}No previous conversation found. Starting fresh...${NC}"
             echo ""
-            _exec_fresh_rebind "$session_dir" resume-failed "" "$spawn_kick"
+            _exec_fresh_rebind "$session_dir" resume-failed "" "$spawn_kick" "$merge_kick"
         fi
         exit $rc
     else
@@ -410,7 +426,7 @@ launch_claude_code() {
             # shellcheck disable=SC2086
             exec $CLAUDE_CODE_BIN --name "$session_name" --session-id "$claude_session_id" ${launch_prompt:+"$launch_prompt"}
         elif [ "$is_new" = "false" ]; then
-            _exec_fresh_rebind "$session_dir" declined-resume "" "$spawn_kick"
+            _exec_fresh_rebind "$session_dir" declined-resume "" "$spawn_kick" "$merge_kick"
         else
             # shellcheck disable=SC2086
             exec $CLAUDE_CODE_BIN --name "$session_name" ${launch_prompt:+"$launch_prompt"}

@@ -591,4 +591,282 @@ run_test test_worktree_create_dirty_base_consent_no
 run_test test_session_repo_pins_autocrlf_off
 run_test test_worktree_excludes_protocol_file
 
+test_features_lists_only_verified_worktrees() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    # A directory that looks like a worktree but was never registered with git.
+    mkdir -p "$CS_SESSIONS_ROOT/myproj@hand-made/.cs/local"
+    local output
+    output=$("$CS_BIN" "myproj" -features --porcelain 2>&1)
+    assert_output_contains "$output" "fix-auth" "a registered worktree is listed" || return 1
+    assert_output_not_contains "$output" "hand-made" "an unregistered lookalike must be excluded" || return 1
+}
+
+run_test test_features_lists_only_verified_worktrees
+
+test_features_is_empty_for_a_base_with_no_worktrees() {
+    create_test_session_with_git "myproj" > /dev/null
+    local output
+    output=$("$CS_BIN" "myproj" -features --porcelain 2>&1)
+    assert_eq "" "$output" "a base with no features prints nothing" || return 1
+}
+
+run_test test_features_is_empty_for_a_base_with_no_worktrees
+
+test_features_excludes_a_lookalike_whose_name_prefixes_a_real_one() {
+    # The verification compares whole lines. A one-sided anchor would verify
+    # "wip" against the registered "wip-2", which is precisely the unregistered
+    # directory this function exists to exclude. Prefix-colliding task names are
+    # ordinary, so this is a realistic collision, not a contrived one.
+    create_test_session_with_git "myproj" > /dev/null
+    cs_launch "myproj@wip-2"
+    mkdir -p "$CS_SESSIONS_ROOT/myproj@wip/.cs/local"
+    local output
+    output=$("$CS_BIN" "myproj" -features --porcelain 2>&1)
+    assert_output_contains "$output" "wip-2" "the registered worktree is listed" || return 1
+    assert_output_not_contains "$output" $'^wip\t' "an unregistered prefix must not verify" || return 1
+}
+
+run_test test_features_excludes_a_lookalike_whose_name_prefixes_a_real_one
+
+# Field positions in a -features --porcelain record.
+_feat_field() {  # line field_number
+    printf '%s\n' "$1" | awk -F'\t' -v n="$2" '{print $n}'
+}
+
+test_features_untracked_is_not_reported_as_dirty() {
+    # _tree_is_dirty deliberately excludes untracked files: a worktree holding
+    # only untracked files is NOT dirty, but is still refused, by a different
+    # gate with a different message. A porcelain-non-empty test would conflate
+    # them and the screen would disagree with the gate.
+    create_test_session_with_git "myproj" > /dev/null
+    cs_launch "myproj@fix-auth"
+    echo "scratch" > "$CS_SESSIONS_ROOT/myproj@fix-auth/notes.txt"
+    local line
+    line=$("$CS_BIN" "myproj" -features --porcelain 2>/dev/null)
+    assert_eq "0" "$(_feat_field "$line" 6)" "untracked files must not set wt_dirty" || return 1
+    assert_eq "1" "$(_feat_field "$line" 7)" "the untracked file must be counted" || return 1
+    assert_eq "untracked" "$(_feat_field "$line" 10)" "state must name the untracked gate" || return 1
+}
+
+run_test test_features_untracked_is_not_reported_as_dirty
+
+test_features_fresh_worktree_is_not_already_merged() {
+    # A fresh worktree's branch sits AT base HEAD, where merge-base
+    # --is-ancestor is also true. Reporting that as already-merged is
+    # destructive: cs reads is-ancestor as "already merged; cleaning up" and
+    # removes the worktree and deletes the branch.
+    create_test_session_with_git "myproj" > /dev/null
+    cs_launch "myproj@fix-auth"
+    local line
+    line=$("$CS_BIN" "myproj" -features --porcelain 2>/dev/null)
+    assert_eq "0" "$(_feat_field "$line" 4)" "a branch AT base HEAD is not already merged" || return 1
+    assert_eq "ready" "$(_feat_field "$line" 10)" "a fresh clean worktree is ready" || return 1
+}
+
+run_test test_features_fresh_worktree_is_not_already_merged
+
+test_features_reports_a_branch_strictly_behind_as_merged() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "fix" > "$wt/auth.txt"
+    (cd "$wt" && git add -A && git commit -q -m "task work")
+    (cd "$base_dir" && git merge -q --no-ff --no-edit cs/fix-auth)
+    local line
+    line=$("$CS_BIN" "myproj" -features --porcelain 2>/dev/null)
+    assert_eq "1" "$(_feat_field "$line" 4)" "a tip strictly behind base HEAD is merged" || return 1
+    assert_eq "merged" "$(_feat_field "$line" 10)" "state must say merged" || return 1
+}
+
+run_test test_features_reports_a_branch_strictly_behind_as_merged
+
+test_features_counts_commits_ahead() {
+    create_test_session_with_git "myproj" > /dev/null
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo one > "$wt/a.txt"; (cd "$wt" && git add -A && git commit -q -m one)
+    echo two > "$wt/b.txt"; (cd "$wt" && git add -A && git commit -q -m two)
+    local line
+    line=$("$CS_BIN" "myproj" -features --porcelain 2>/dev/null)
+    assert_eq "2" "$(_feat_field "$line" 3)" "two commits ahead of base HEAD" || return 1
+    assert_eq "cs/fix-auth" "$(_feat_field "$line" 2)" "branch comes from the state pin" || return 1
+}
+
+run_test test_features_counts_commits_ahead
+
+test_features_reports_a_live_worktree_lock_distinctly() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "$$" > "$wt/.cs/session.lock"   # this test process is alive
+    local line
+    line=$("$CS_BIN" "myproj" -features --porcelain 2>/dev/null)
+    rm -f "$wt/.cs/session.lock"
+    assert_eq "worktree" "$(_feat_field "$line" 9)" "a live lock on the feature worktree is lock=worktree" || return 1
+    assert_eq "locked" "$(_feat_field "$line" 10)" "a live worktree lock sets state=locked" || return 1
+}
+
+run_test test_features_reports_a_live_worktree_lock_distinctly
+
+test_features_reports_a_live_base_lock_distinctly() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    echo "$$" > "$base_dir/.cs/session.lock"   # this test process is alive
+    local line
+    line=$("$CS_BIN" "myproj" -features --porcelain 2>/dev/null)
+    rm -f "$base_dir/.cs/session.lock"
+    assert_eq "base" "$(_feat_field "$line" 9)" "a live lock on the base is lock=base" || return 1
+    assert_eq "locked" "$(_feat_field "$line" 10)" "a live base lock sets state=locked" || return 1
+}
+
+run_test test_features_reports_a_live_base_lock_distinctly
+
+test_features_ignores_a_dead_lock_pid() {
+    create_test_session_with_git "myproj" > /dev/null
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    local dead_pid
+    dead_pid=$(bash -c 'echo $$')
+    if kill -0 "$dead_pid" 2>/dev/null; then
+        echo "  SKIP: PID $dead_pid is unexpectedly alive"
+        return 0
+    fi
+    echo "$dead_pid" > "$wt/.cs/session.lock"
+    local line
+    line=$("$CS_BIN" "myproj" -features --porcelain 2>/dev/null)
+    assert_eq "none" "$(_feat_field "$line" 9)" "a dead pid must not be reported as a lock" || return 1
+    assert_eq "ready" "$(_feat_field "$line" 10)" "a dead pid must not set state=locked" || return 1
+}
+
+run_test test_features_ignores_a_dead_lock_pid
+
+test_features_human_table_names_the_state() {
+    create_test_session_with_git "myproj" > /dev/null
+    cs_launch "myproj@fix-auth"
+    local output
+    output=$("$CS_BIN" "myproj" -features 2>&1)
+    assert_output_contains "$output" "FEATURE" "the table carries a header" || return 1
+    assert_output_contains "$output" "fix-auth" "the feature is listed" || return 1
+    assert_output_contains "$output" "ready" "the state is named" || return 1
+}
+
+run_test test_features_human_table_names_the_state
+
+test_finish_arms_the_ritual_without_merging() {
+    # -finish opens the base with the ritual armed. It must not merge: the
+    # branch is still unmerged and the worktree still exists afterwards.
+    # The base session directory already exists (created by
+    # create_test_session_with_git below), so this launch is a resume, not a
+    # fresh session: it hits the "Continue previous conversation?" prompt, so
+    # stdin needs an answer rather than an immediate EOF (< /dev/null exits
+    # the launch at that prompt before the exec line is ever reached).
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "fix" > "$wt/auth.txt"
+    (cd "$wt" && git add -A && git commit -q -m "task work")
+    local output
+    output=$("$CS_BIN" "myproj" -finish "fix-auth" <<< "" 2>&1 || true)
+    assert_output_contains "$output" "/merge fix-auth" "the launch prompt must arm the ritual" || return 1
+    assert_dir "$wt" "the worktree must survive -finish" || return 1
+    assert_file_not_exists "$base_dir/auth.txt" "-finish must not merge" || return 1
+}
+
+run_test test_finish_arms_the_ritual_without_merging
+
+test_finish_survives_declining_the_resume() {
+    # Answering n takes _exec_fresh_rebind, which builds its OWN prompt chain.
+    # Missing it drops the merge intent silently on a routine answer.
+    create_test_session_with_git "myproj" > /dev/null
+    cs_launch "myproj@fix-auth"
+    printf 'claude_session_id: 00000000-0000-4000-8000-000000000000\n' \
+        > "$CS_SESSIONS_ROOT/myproj/.cs/local/state"
+    local output
+    output=$("$CS_BIN" "myproj" -finish "fix-auth" <<< "n" 2>&1 || true)
+    assert_output_contains "$output" "/merge fix-auth" "a declined resume must keep the merge kick" || return 1
+}
+
+run_test test_finish_survives_declining_the_resume
+
+test_finish_rejects_an_unknown_feature() {
+    create_test_session_with_git "myproj" > /dev/null
+    local output
+    output=$("$CS_BIN" "myproj" -finish "no-such-feature" < /dev/null 2>&1 || true)
+    assert_output_contains "$output" "no-such-feature" "the refusal must name the feature" || return 1
+}
+
+run_test test_finish_rejects_an_unknown_feature
+
+test_finish_rejects_a_prefix_lookalike() {
+    create_test_session_with_git "myproj" > /dev/null
+    cs_launch "myproj@wip-2"
+    local output
+    output=$("$CS_BIN" "myproj" -finish "wip" < /dev/null 2>&1 || true)
+    assert_output_contains "$output" "No feature worktree 'wip'" \
+        "a prefix of a real feature must be refused" || return 1
+}
+
+run_test test_finish_rejects_a_prefix_lookalike
+
+test_finish_rejects_a_traversal_feature_name() {
+    create_test_session_with_git "myproj" > /dev/null
+    local output
+    output=$("$CS_BIN" "myproj" -finish "../escape" < /dev/null 2>&1 || true)
+    assert_output_contains "$output" "feature name" "a path separator must be rejected" || return 1
+}
+
+run_test test_finish_rejects_a_traversal_feature_name
+
+test_finish_warns_when_it_displaces_a_spawn_kick() {
+    # Both ride claude's single prompt slot. The merge kick wins because the
+    # user took the action seconds ago — but the displacement must not be
+    # silent, and the warning must not promise the queue runs after the merge:
+    # the drain is the Stop hook, which fires at the first turn end.
+    create_test_session_with_git "myproj" > /dev/null
+    cs_launch "myproj@fix-auth"
+    mkdir -p "$CS_SESSIONS_ROOT/.spawn"
+    printf 'other-session\nfirst staged task\n' > "$CS_SESSIONS_ROOT/.spawn/myproj.seed"
+    local output
+    output=$("$CS_BIN" "myproj" -finish "fix-auth" < /dev/null 2>&1 || true)
+    assert_output_contains "$output" "/merge fix-auth" "the merge kick takes the slot" || return 1
+    assert_output_contains "$output" "walk-away queue is armed" "the displacement must be announced" || return 1
+    assert_output_not_contains "$output" "after the merge" "must not promise sequencing it cannot enforce" || return 1
+}
+
+run_test test_finish_warns_when_it_displaces_a_spawn_kick
+
+test_finish_yields_to_an_explicit_rotation_choice() {
+    # r is the user explicitly choosing the rotation handoff at the prompt;
+    # a merge armed moments earlier must not silently override that choice.
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    mkdir -p "$base_dir/.cs/handoffs"
+    cat > "$base_dir/.cs/handoffs/2026-07-16-test.md" << 'EOF'
+---
+parent: 00000000-0000-4000-8000-000000000000
+created: 2026-07-16T10:00:00Z
+purpose: test rotation
+status: unconsumed
+---
+
+## 7. Next Step
+Continue the test.
+EOF
+    local output
+    output=$("$CS_BIN" "myproj" -finish "fix-auth" <<< "r" 2>&1 || true)
+    assert_output_contains "$output" "Rotation handoff takes this launch; re-run: cs myproj -finish fix-auth" \
+        "the displaced merge must be announced" || return 1
+    assert_output_not_contains "$output" "/merge fix-auth" "the explicit r choice must not be overridden" || return 1
+    assert_output_contains "$output" ".cs/handoffs/2026-07-16-test.md" "the handoff prompt must run instead" || return 1
+}
+
+run_test test_finish_yields_to_an_explicit_rotation_choice
+
 report_results

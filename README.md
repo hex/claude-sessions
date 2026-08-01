@@ -98,6 +98,8 @@ cs <session-name>           # Create or resume a session
 cs <session-name> --force   # Override active session lock
 cs <base>@<feature>         # Create/resume a parallel feature worktree off <base>
 cs <base> --merge <feature> # Merge a feature worktree back into <base>
+cs <base> -features         # List a base's feature worktrees and their merge readiness
+cs <base> -finish <feature> # Open <base> and run the merge ritual for <feature>
 cs -adopt <name>            # Adopt current directory as a session
 cs -whoami                  # Show the current actor (for shared, multi-person sessions)
 cs -who                     # Show who contributed to shared memory/narrative (git history)
