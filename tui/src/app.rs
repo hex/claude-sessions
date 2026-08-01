@@ -288,6 +288,9 @@ pub enum Action {
     Quit,
     Open(String),
     ForceOpen(String),
+    /// Exit and hand cs a session plus argv words. `lib/99-main.sh` reads line
+    /// 1 as the session and word-splits the rest, so no word may hold a space.
+    OpenWith { session: String, args: Vec<String> },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2044,6 +2047,24 @@ mod tests {
         let app = App::new(sample_sessions());
         assert_eq!(app.table_state.selected(), Some(0));
         assert_eq!(app.filtered.len(), 3);
+    }
+
+    #[test]
+    fn open_with_carries_a_session_and_its_argv_words() {
+        let a = Action::OpenWith {
+            session: "myproj".into(),
+            args: vec!["-finish".into(), "fix-auth".into()],
+        };
+        match a {
+            Action::OpenWith { session, args } => {
+                assert_eq!(session, "myproj");
+                assert_eq!(args, vec!["-finish".to_string(), "fix-auth".to_string()]);
+                for w in &args {
+                    assert!(!w.contains(' '), "argv words are word-split by the shell wrapper");
+                }
+            }
+            _ => panic!("expected OpenWith"),
+        }
     }
 
     #[test]
