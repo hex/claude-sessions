@@ -1839,24 +1839,28 @@ fn render_merge(app: &mut App, frame: &mut Frame, area: Rect) {
     // Size the list to its content rather than giving it every remaining row:
     // one feature under Min(6) rendered a near-full-height empty card. The card
     // costs 5 rows of chrome — two borders, the headroom row, the column header
-    // and its hairline — so a row per feature on top of that. Floored so a short
-    // list still reads as a card, capped so a long one still leaves the detail
-    // pane whole; the Table scrolls once the cap bites.
-    const MERGE_DETAIL_HEIGHT: u16 = 14;
+    // and its hairline — so a row per feature on top of that.
+    //
+    // The detail pane takes everything the list does not, at both ends of the
+    // range. On a tall terminal that stops half the screen sitting unused below
+    // two fixed-height cards. On a short one it means the pane holding the plan
+    // never truncates: it cannot scroll and its last line is the destructive
+    // step, where the list does scroll, so squeezing the list costs nothing but
+    // a smaller viewport. Below a list of 6 rows no feature fits at all, and the
+    // card names the hidden count in its title rather than stealing rows the
+    // plan needs.
+    //
+    // The reserve is a floor on the detail pane, not its height: it is the
+    // detail's actual height only when the list wants every other row.
+    const MERGE_DETAIL_RESERVE: u16 = 14;
     const MERGE_LIST_CHROME: usize = 5;
     let want = app
         .merge_features
         .len()
         .saturating_add(MERGE_LIST_CHROME)
         .min(u16::MAX as usize) as u16;
-    // The list is sized to its features; the detail pane takes everything else,
-    // at both ends of the range. On a tall terminal that stops half the screen
-    // sitting unused below two fixed-height cards. On a short one it means the
-    // pane holding the plan never truncates: it cannot scroll and its last line
-    // is the destructive step, where the list does scroll, so squeezing the list
-    // costs nothing but a smaller viewport.
-    let room = area.height.saturating_sub(MERGE_DETAIL_HEIGHT);
-    let list_height = want.min(room).max(room.min(3));
+    let room = area.height.saturating_sub(MERGE_DETAIL_RESERVE);
+    let list_height = want.min(room);
     let detail_height = area.height.saturating_sub(list_height);
     let panes =
         Layout::vertical([Constraint::Length(list_height), Constraint::Length(detail_height)])
@@ -1910,16 +1914,32 @@ fn render_merge(app: &mut App, frame: &mut Frame, area: Rect) {
     // A single hairline rule beneath the header, drawn into the header's
     // blank bottom-margin row — the same quiet structure the session table
     // uses instead of a table border or vertical dividers.
-    let rule_y = inner.y + 1;
-    let buf = frame.buffer_mut();
-    for x in inner.x..inner.x.saturating_add(inner.width) {
-        if let Some(cell) = buf.cell_mut(ratatui::layout::Position::new(x, rule_y)) {
-            cell.set_char('\u{2500}');
-            cell.set_fg(p.soft);
+    // Guarded on the header's bottom-margin row actually lying inside the list
+    // interior. Unguarded, a short terminal shrinks the list until rule_y falls
+    // past the card and the rule paints across the detail pane's text instead —
+    // Paragraph writes only the cells it has characters for, so the rule's tail
+    // survives past the end of a line.
+    if inner.height >= 2 {
+        let rule_y = inner.y + 1;
+        let buf = frame.buffer_mut();
+        for x in inner.x..inner.x.saturating_add(inner.width) {
+            if let Some(cell) = buf.cell_mut(ratatui::layout::Position::new(x, rule_y)) {
+                cell.set_char('\u{2500}');
+                cell.set_fg(p.soft);
+            }
         }
     }
 
-    card_frame(frame.buffer_mut(), list_area, &format!("{} \u{b7} features", app.merge_base), p.strong, p);
+    // A list too short to show a single feature row would otherwise render an
+    // empty card while features are pending. Name the count in the title, which
+    // costs no rows and so does not compete with the plan for space.
+    let hidden = if inner.height < 3 { app.merge_features.len() } else { 0 };
+    let list_title = if hidden > 0 {
+        format!("{} \u{b7} features ({} hidden)", app.merge_base, hidden)
+    } else {
+        format!("{} \u{b7} features", app.merge_base)
+    };
+    card_frame(frame.buffer_mut(), list_area, &list_title, p.strong, p);
 
     // --- detail ---
     let detail_area = panes[1];
@@ -4251,6 +4271,38 @@ mod tests {
         assert!(
             !text.contains("base      clean"),
             "a locked base must not also read clean:\n{text}"
+        );
+    }
+
+    #[test]
+    fn merge_screen_hairline_stays_inside_the_list_card() {
+        // The rule is drawn at inner.y + 1. On a short terminal the list shrinks
+        // until that row falls past the card and the rule paints across the
+        // detail pane's text — Paragraph writes only the cells it has characters
+        // for, so the tail survives past the end of a line.
+        let mut app = merge_app();
+        for h in [8u16, 10, 13, 15, 16, 18, 19] {
+            let rows = rows_at(&mut app, 100, h);
+            for (y, row) in rows.iter().enumerate() {
+                // A rule row is legitimate only when it is nothing but the rule.
+                if row.contains('\u{2500}') && row.contains("cs/") {
+                    panic!("hairline bled onto detail text at terminal height {h}, row {y}: {row:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn merge_screen_names_features_it_cannot_show() {
+        // Below a 6-row list no feature row fits. An empty card while features
+        // are pending hides data; the title carries the count instead, which
+        // costs no rows and so does not compete with the plan.
+        let mut app = merge_app();
+        let rows = rows_at(&mut app, 100, 19);
+        let joined = rows.join("\n");
+        assert!(
+            joined.contains("hidden"),
+            "a list too short for any row must name the count:\n{joined}"
         );
     }
 
