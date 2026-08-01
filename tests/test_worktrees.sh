@@ -709,4 +709,77 @@ test_features_human_table_names_the_state() {
 
 run_test test_features_human_table_names_the_state
 
+test_finish_arms_the_ritual_without_merging() {
+    # -finish opens the base with the ritual armed. It must not merge: the
+    # branch is still unmerged and the worktree still exists afterwards.
+    # The base session directory already exists (created by
+    # create_test_session_with_git below), so this launch is a resume, not a
+    # fresh session: it hits the "Continue previous conversation?" prompt, so
+    # stdin needs an answer rather than an immediate EOF (< /dev/null exits
+    # the launch at that prompt before the exec line is ever reached).
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "fix" > "$wt/auth.txt"
+    (cd "$wt" && git add -A && git commit -q -m "task work")
+    local output
+    output=$("$CS_BIN" "myproj" -finish "fix-auth" <<< "" 2>&1 || true)
+    assert_output_contains "$output" "/merge fix-auth" "the launch prompt must arm the ritual" || return 1
+    assert_dir "$wt" "the worktree must survive -finish" || return 1
+    assert_file_not_exists "$base_dir/auth.txt" "-finish must not merge" || return 1
+}
+
+run_test test_finish_arms_the_ritual_without_merging
+
+test_finish_survives_declining_the_resume() {
+    # Answering n takes _exec_fresh_rebind, which builds its OWN prompt chain.
+    # Missing it drops the merge intent silently on a routine answer.
+    create_test_session_with_git "myproj" > /dev/null
+    cs_launch "myproj@fix-auth"
+    printf 'claude_session_id: 00000000-0000-4000-8000-000000000000\n' \
+        > "$CS_SESSIONS_ROOT/myproj/.cs/local/state"
+    local output
+    output=$("$CS_BIN" "myproj" -finish "fix-auth" <<< "n" 2>&1 || true)
+    assert_output_contains "$output" "/merge fix-auth" "a declined resume must keep the merge kick" || return 1
+}
+
+run_test test_finish_survives_declining_the_resume
+
+test_finish_rejects_an_unknown_feature() {
+    create_test_session_with_git "myproj" > /dev/null
+    local output
+    output=$("$CS_BIN" "myproj" -finish "no-such-feature" < /dev/null 2>&1 || true)
+    assert_output_contains "$output" "no-such-feature" "the refusal must name the feature" || return 1
+}
+
+run_test test_finish_rejects_an_unknown_feature
+
+test_finish_rejects_a_traversal_feature_name() {
+    create_test_session_with_git "myproj" > /dev/null
+    local output
+    output=$("$CS_BIN" "myproj" -finish "../escape" < /dev/null 2>&1 || true)
+    assert_output_contains "$output" "feature name" "a path separator must be rejected" || return 1
+}
+
+run_test test_finish_rejects_a_traversal_feature_name
+
+test_finish_warns_when_it_displaces_a_spawn_kick() {
+    # Both ride claude's single prompt slot. The merge kick wins because the
+    # user took the action seconds ago — but the displacement must not be
+    # silent, and the warning must not promise the queue runs after the merge:
+    # the drain is the Stop hook, which fires at the first turn end.
+    create_test_session_with_git "myproj" > /dev/null
+    cs_launch "myproj@fix-auth"
+    mkdir -p "$CS_SESSIONS_ROOT/.spawn"
+    printf 'other-session\nfirst staged task\n' > "$CS_SESSIONS_ROOT/.spawn/myproj.seed"
+    local output
+    output=$("$CS_BIN" "myproj" -finish "fix-auth" < /dev/null 2>&1 || true)
+    assert_output_contains "$output" "/merge fix-auth" "the merge kick takes the slot" || return 1
+    assert_output_contains "$output" "walk-away queue is armed" "the displacement must be announced" || return 1
+    assert_output_not_contains "$output" "after the merge" "must not promise sequencing it cannot enforce" || return 1
+}
+
+run_test test_finish_warns_when_it_displaces_a_spawn_kick
+
 report_results

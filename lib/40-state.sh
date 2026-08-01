@@ -160,6 +160,7 @@ _exec_fresh_rebind() {
     local reason="${2:-declined-resume}"
     local handoff="${3:-}"
     local spawn_kick="${4:-}"
+    local merge_kick="${5:-}"
     local session_name
     session_name=$(basename "$session_dir")
     local old_uuid
@@ -176,12 +177,13 @@ _exec_fresh_rebind() {
     # waiting for the user. It stays a bare trigger on purpose: the SessionStart
     # hook (which the same r answer arms via the pending-handoff marker) is the
     # single owner of the how — next-step section, transcript-not-loaded, the
-    # narrative pointers — so the wording lives in one place. A spawn kick outranks
-    # the handoff, and both outrank the color re-apply; all three ride claude's
-    # single prompt slot, so the displaced color returns on the next open.
+    # narrative pointers — so the wording lives in one place. A merge kick
+    # outranks a spawn kick, which outranks the handoff, which outranks the
+    # color re-apply; all four ride claude's single prompt slot, so a displaced
+    # color returns on the next open.
     local handoff_arg=""
     [ -n "$handoff" ] && handoff_arg="Continue from the pending rotation handoff: read .cs/handoffs/$handoff first."
-    local launch_prompt="${spawn_kick:-${handoff_arg:-$color_arg}}"
+    local launch_prompt="${merge_kick:-${spawn_kick:-${handoff_arg:-$color_arg}}}"
     export CS_CLAUDE_SESSION_ID="$new_uuid"
     export CS_FRESH_REBIND=1
     # shellcheck disable=SC2086

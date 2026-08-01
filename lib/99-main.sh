@@ -210,6 +210,7 @@ main() {
 
     local session_name="$cmd"
     local force_flag=""
+    local merge_feature=""
 
     # Validate inputs
     local wt_base="" wt_task=""
@@ -299,6 +300,15 @@ main() {
                 merge_worktree_session "$session_name" "$1"
                 return 0
                 ;;
+            -finish)
+                shift
+                [ -n "${1:-}" ] || error "Usage: cs <base> -finish <feature>"
+                # Validate the same way --merge does, so a feature name with
+                # path separators is rejected before any filesystem lookup.
+                cs_split_worktree_name "$session_name@$1" >/dev/null
+                merge_feature="$1"
+                shift
+                ;;
             --force)
                 force_flag="true"
                 shift
@@ -368,16 +378,30 @@ main() {
         migrate_session "$session_dir"
     fi
 
+    if [ -n "$merge_feature" ]; then
+        local _known
+        _known=$(_worktree_features "$session_name")
+        case "
+$_known" in
+            *"
+$merge_feature"*) ;;
+            *) error "No feature worktree '$merge_feature' of '$session_name'. List them with: cs $session_name -features" ;;
+        esac
+    fi
+
     # MSYS (Windows Git Bash) can manage sessions but cannot exec Claude Code
     # itself; the session is prepared above, then handed off to WSL to launch.
     if [ "$(cs_platform)" = "msys" ]; then
         info "Session ready at $session_dir."
         info "On Windows, launch it from WSL (Git Bash supports session management only)."
+        if [ -n "$merge_feature" ]; then
+            info "To finish '$merge_feature', run from WSL: cs $session_name -finish $merge_feature"
+        fi
         return 0
     fi
 
     # Launch Claude Code
-    launch_claude_code "$session_name" "$session_dir" "$is_new" "$force_flag"
+    launch_claude_code "$session_name" "$session_dir" "$is_new" "$force_flag" "$merge_feature"
 }
 
 main "$@"
