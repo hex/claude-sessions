@@ -185,7 +185,6 @@ fn cursor_wrap_spans(
         .collect()
 }
 
-/// 4-segment queue-depth meter: 0→empty, 1→1, 2-3→2, 4-5→3, 6+→4 filled.
 /// "1 file", "2 files". Counts reach the merge screen from git, so one is an
 /// ordinary value rather than an edge case.
 fn plural(n: u32, noun: &str) -> String {
@@ -196,6 +195,7 @@ fn plural(n: u32, noun: &str) -> String {
     }
 }
 
+/// 4-segment queue-depth meter: 0→empty, 1→1, 2-3→2, 4-5→3, 6+→4 filled.
 fn qbar(n: u32) -> String {
     let f = match n {
         0 => 0,
@@ -1849,8 +1849,13 @@ fn render_merge(app: &mut App, frame: &mut Frame, area: Rect) {
         .len()
         .saturating_add(MERGE_LIST_CHROME)
         .min(u16::MAX as usize) as u16;
+    // The detail pane wins when the terminal is short. It cannot scroll, and
+    // its last line is the destructive one; the list does scroll, so squeezing
+    // it costs nothing but a smaller viewport. A floor that outranked the pane
+    // dropped "remove worktree, delete branch" on a 21-row terminal with no
+    // indicator that anything was missing.
     let room = area.height.saturating_sub(MERGE_DETAIL_HEIGHT);
-    let list_height = want.clamp(6, room.max(6));
+    let list_height = want.min(room).max(room.min(3));
     let panes =
         Layout::vertical([Constraint::Length(list_height), Constraint::Length(MERGE_DETAIL_HEIGHT)])
             .split(area);
@@ -1947,7 +1952,11 @@ fn render_merge(app: &mut App, frame: &mut Frame, area: Rect) {
             Span::styled("  tree      ", Style::default().fg(p.mut_)),
             Span::styled(tree_label, Style::default().fg(tree_color)),
         ]));
-        let (base_label, base_color) = if f.base_dirty {
+        // A lock is the one blocker the ritual cannot resolve for you, and base
+        // and worktree locks want different remedies, so name the side.
+        let (base_label, base_color) = if f.lock == "base" {
+            ("base session open".to_string(), p.amber)
+        } else if f.base_dirty {
             ("uncommitted changes".to_string(), p.amber)
         } else {
             ("clean".to_string(), p.ink)
@@ -1956,34 +1965,48 @@ fn render_merge(app: &mut App, frame: &mut Frame, area: Rect) {
             Span::styled("  base      ", Style::default().fg(p.mut_)),
             Span::styled(base_label, Style::default().fg(base_color)),
         ]));
+        if f.lock == "worktree" {
+            lines.push(Line::from(vec![
+                Span::styled("  lock      ", Style::default().fg(p.mut_)),
+                Span::styled("feature session open", Style::default().fg(p.amber)),
+            ]));
+        }
 
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled("  ON FINISH", Style::default().fg(p.mut_))));
 
-        if f.merged {
-            // merge_worktree_session reads an already-merged branch as "already
-            // merged; cleaning up" and skips straight to removal. Promising a
-            // merge here would describe work that never happens.
-            lines.push(Line::from(Span::styled(
-                format!("    1  already merged into {} \u{b7} cleanup only", app.merge_base),
-                Style::default().fg(p.ink),
-            )));
-            lines.push(Line::from(Span::styled(
-                "    2  remove worktree, delete branch",
-                Style::default().fg(p.ink),
-            )));
+        // Enter arms /merge, which is the RITUAL: gates, merge, gates, cleanup.
+        // The ritual has no already-merged carve-out — only the `git merge`
+        // inside `cs --merge` is skipped — so both gate passes belong in every
+        // plan. And `cs --merge` merges, fuses records, removes the worktree and
+        // deletes the branch in one invocation, before the post-merge gate: a
+        // plan listing removal last implies a red gate leaves a worktree to go
+        // back to, and by then there is none.
+        //
+        // The predicate is `ahead == 0`, not `merged`. merge_worktree_session
+        // asks plain `is-ancestor branch HEAD`, true at EQUAL tips;
+        // _feature_readiness's `merged` adds a strictness guard so the STATE
+        // word does not call a fresh worktree merged. `rev-list --count
+        // HEAD..branch == 0` is exactly the verb's own condition.
+        let nothing_to_merge = f.ahead == 0;
+        let step2 = if nothing_to_merge {
+            let why = if f.merged { "already merged into" } else { "nothing to merge into" };
+            format!(
+                "    2  {} {} \u{b7} fuse records, remove worktree, delete branch",
+                why, app.merge_base
+            )
         } else {
             // `git merge --no-edit` carries no --no-ff, so a feature whose base
             // has not moved fast-forwards and leaves no merge commit.
             let shape = if f.ff { "fast-forward" } else { "merge commit" };
-            lines.push(Line::from(Span::styled("    1  gates in this worktree", Style::default().fg(p.ink))));
-            lines.push(Line::from(Span::styled(
-                format!("    2  merge into {}  ({})", app.merge_base, shape),
-                Style::default().fg(p.ink),
-            )));
-            lines.push(Line::from(Span::styled(format!("    3  gates in {}", app.merge_base), Style::default().fg(p.ink))));
-            lines.push(Line::from(Span::styled("    4  remove worktree, delete branch", Style::default().fg(p.ink))));
-        }
+            format!(
+                "    2  merge into {} ({}) \u{b7} fuse records, remove worktree, delete branch",
+                app.merge_base, shape
+            )
+        };
+        lines.push(Line::from(Span::styled("    1  gates in this worktree", Style::default().fg(p.ink))));
+        lines.push(Line::from(Span::styled(step2, Style::default().fg(p.ink))));
+        lines.push(Line::from(Span::styled(format!("    3  gates in {}", app.merge_base), Style::default().fg(p.ink))));
         let body = Rect::new(
             detail_area.x + 1,
             detail_area.y + 2,
@@ -4147,6 +4170,98 @@ mod tests {
         assert!(
             rows.iter().any(|r| r.contains("state") && r.contains("archived")),
             "preview should label state archived"
+        );
+    }
+
+    #[test]
+    fn merge_screen_does_not_promise_a_merge_for_a_branch_at_base_head() {
+        // merge_worktree_session asks plain `is-ancestor branch HEAD`, which is
+        // TRUE at equal tips. _feature_readiness's `merged` adds a strictness
+        // guard so the STATE word does not call a fresh worktree merged — so
+        // `merged` is the wrong predicate for the plan. `ahead == 0` is exactly
+        // the verb's condition.
+        let mut app = merge_app();
+        app.merge_features[0].merged = false;
+        app.merge_features[0].ahead = 0;
+        app.merge_features[0].ff = true;
+        app.merge_selected = 0;
+        let text = render_wide(&mut app);
+        assert!(
+            !text.contains("fast-forward") && !text.contains("merge commit"),
+            "nothing is merged at equal tips, so no merge may be promised:\n{text}"
+        );
+        assert!(
+            text.contains("nothing to merge"),
+            "the plan must say there is nothing to merge:\n{text}"
+        );
+    }
+
+    #[test]
+    fn merge_screen_keeps_the_gates_in_the_cleanup_plan() {
+        // Enter arms /merge, which is the ritual: gates, merge, gates, cleanup.
+        // The ritual has no already-merged carve-out — only the `git merge`
+        // inside `cs --merge` is skipped. A "cleanup only" plan hides two full
+        // gate runs.
+        let mut app = merge_app();
+        app.merge_features[0].merged = true;
+        app.merge_features[0].ahead = 0;
+        app.merge_selected = 0;
+        let text = render_wide(&mut app);
+        assert!(text.contains("already merged"), "wording must name the state:\n{text}");
+        assert!(
+            text.contains("gates in this worktree") && text.contains("gates in myproj"),
+            "both gate passes still run and must be listed:\n{text}"
+        );
+    }
+
+    #[test]
+    fn merge_screen_puts_removal_in_the_merge_step_not_after_the_gates() {
+        // `cs <base> --merge <task>` merges, fuses records, removes the worktree
+        // and deletes the branch in ONE invocation — before any post-merge gate.
+        // Listing removal after the gates implies a red gate leaves a worktree
+        // to return to; by then it is gone.
+        let mut app = merge_app();
+        let text = render_wide(&mut app);
+        let merge_line = text
+            .lines()
+            .find(|l| l.contains("merge into myproj"))
+            .expect("the merge step should render")
+            .to_string();
+        assert!(
+            merge_line.contains("remove worktree"),
+            "removal happens inside the merge step:\n{merge_line}"
+        );
+    }
+
+    #[test]
+    fn merge_screen_shows_which_side_holds_a_lock() {
+        // base and worktree locks have different remedies, and unlike a dirty
+        // tree the ritual cannot resolve either.
+        let mut app = merge_app();
+        app.merge_features[0].lock = "base".into();
+        app.merge_features[0].state = "locked".into();
+        app.merge_selected = 0;
+        let text = render_wide(&mut app);
+        assert!(
+            text.contains("base session open"),
+            "the detail pane must name the locked side:\n{text}"
+        );
+        assert!(
+            !text.contains("base      clean"),
+            "a locked base must not also read clean:\n{text}"
+        );
+    }
+
+    #[test]
+    fn merge_screen_keeps_the_whole_plan_on_a_short_terminal() {
+        // The list scrolls; the detail pane does not. When the terminal is
+        // short the list must yield, or the destructive last step vanishes
+        // with no indicator.
+        let mut app = merge_app();
+        let text = render_at(&mut app, 100, 21);
+        assert!(
+            text.contains("remove worktree"),
+            "the destructive step must survive a 21-row terminal:\n{text}"
         );
     }
 
