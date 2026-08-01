@@ -258,6 +258,24 @@ pub enum Mode {
     CommandOutput(String),
     Changelog,
     Legend,
+    Merge,
+}
+
+/// One feature worktree's merge readiness, as reported by
+/// `cs <base> -features --porcelain`. Every field is computed by the shell
+/// function the real merge gate calls, so this never disagrees with the gate.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FeatureRow {
+    pub task: String,
+    pub branch: String,
+    pub ahead: u32,
+    pub merged: bool,
+    pub ff: bool,
+    pub wt_dirty: bool,
+    pub untracked: u32,
+    pub base_dirty: bool,
+    pub lock: String,
+    pub state: String,
 }
 
 /// Which panel receives keyboard input while in `Mode::Normal`.
@@ -283,6 +301,7 @@ pub const MENU_ITEMS: &[(&str, &str)] = &[
     ("Secrets", "s"),
 ];
 
+#[derive(Debug)]
 pub enum Action {
     None,
     Quit,
@@ -417,6 +436,12 @@ pub struct App {
     /// shimmer animates only while this is recent; after `IDLE_PAUSE_SECS` the
     /// event loop stops repainting and blocks until the next event.
     last_input: std::time::Instant,
+    /// The base session whose features the merge screen is showing.
+    pub merge_base: String,
+    /// Readiness rows for that base, refreshed on entry and on `r`.
+    pub merge_features: Vec<FeatureRow>,
+    /// Highlighted row in `merge_features`.
+    pub merge_selected: usize,
 }
 
 /// Start the thread that reads session previews off the render path.
@@ -499,6 +524,9 @@ impl App {
             notes_selected: 0,
             theme: Palette::dark(),
             last_input: std::time::Instant::now(),
+            merge_base: String::new(),
+            merge_features: Vec::new(),
+            merge_selected: 0,
         };
         // Apply the default sort (recency) so the initial view is ordered, not
         // just scan order. Also seeds section labels for the grouped view.
@@ -850,6 +878,7 @@ impl App {
             Mode::Secrets => self.handle_secrets(key),
             Mode::Changelog => self.handle_changelog(key),
             Mode::Legend => self.handle_legend(key),
+            Mode::Merge => self.handle_merge(key),
             Mode::CommandOutput(_) => {
                 if self.return_to_secrets {
                     self.return_to_secrets = false;
@@ -1171,6 +1200,51 @@ impl App {
         }
         Action::None
     }
+
+    fn handle_merge(&mut self, key: KeyEvent) -> Action {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.mode = Mode::Normal;
+                Action::None
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if !self.merge_features.is_empty()
+                    && self.merge_selected + 1 < self.merge_features.len()
+                {
+                    self.merge_selected += 1;
+                }
+                Action::None
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if self.merge_selected > 0 {
+                    self.merge_selected -= 1;
+                }
+                Action::None
+            }
+            KeyCode::Char('r') => {
+                self.load_merge_features();
+                Action::None
+            }
+            KeyCode::Enter => {
+                // Hand off unconditionally. The ritual can resolve blockers
+                // the screen can only report, and cs delivers the real refusal.
+                match self.selected_feature() {
+                    Some(f) => Action::OpenWith {
+                        session: self.merge_base.clone(),
+                        args: vec!["-finish".to_string(), f.task.clone()],
+                    },
+                    None => Action::None,
+                }
+            }
+            _ => Action::None,
+        }
+    }
+
+    pub fn selected_feature(&self) -> Option<&FeatureRow> {
+        self.merge_features.get(self.merge_selected)
+    }
+
+    fn load_merge_features(&mut self) {}
 
     fn handle_session_menu(&mut self, key: KeyEvent) -> Action {
         match key.code {
@@ -2065,6 +2139,71 @@ mod tests {
             }
             _ => panic!("expected OpenWith"),
         }
+    }
+
+    fn feature_row(task: &str, state: &str) -> FeatureRow {
+        FeatureRow {
+            task: task.into(),
+            branch: format!("cs/{task}"),
+            ahead: 3,
+            merged: false,
+            ff: true,
+            wt_dirty: false,
+            untracked: 0,
+            base_dirty: false,
+            lock: "none".into(),
+            state: state.into(),
+        }
+    }
+
+    #[test]
+    fn merge_mode_moves_selection_and_leaves_on_escape() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::Merge;
+        app.merge_base = "myproj".into();
+        app.merge_features = vec![feature_row("fix-auth", "ready"), feature_row("flaky", "dirty")];
+        app.merge_selected = 0;
+
+        app.handle_key(KeyEvent::from(KeyCode::Char('j')));
+        assert_eq!(app.merge_selected, 1, "j moves down the feature list");
+        app.handle_key(KeyEvent::from(KeyCode::Char('j')));
+        assert_eq!(app.merge_selected, 1, "selection clamps at the last row");
+        app.handle_key(KeyEvent::from(KeyCode::Char('k')));
+        assert_eq!(app.merge_selected, 0, "k moves up");
+
+        app.handle_key(KeyEvent::from(KeyCode::Esc));
+        assert_eq!(app.mode, Mode::Normal, "Esc returns to the picker");
+    }
+
+    #[test]
+    fn enter_hands_off_even_when_the_feature_is_blocked() {
+        // The screen is advisory; cs is the authority. The ritual can resolve
+        // most blockers — it offers to commit an uncommitted tree — where the
+        // screen could only refuse.
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::Merge;
+        app.merge_base = "myproj".into();
+        app.merge_features = vec![feature_row("flaky", "dirty")];
+        app.merge_selected = 0;
+
+        let action = app.handle_key(KeyEvent::from(KeyCode::Enter));
+        match action {
+            Action::OpenWith { session, args } => {
+                assert_eq!(session, "myproj");
+                assert_eq!(args, vec!["-finish".to_string(), "flaky".to_string()]);
+            }
+            other => panic!("a blocked feature must still hand off, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn enter_with_no_features_does_not_exit() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::Merge;
+        app.merge_base = "myproj".into();
+        app.merge_features = Vec::new();
+        assert!(matches!(app.handle_key(KeyEvent::from(KeyCode::Enter)), Action::None));
+        assert_eq!(app.mode, Mode::Merge, "an empty list stays put");
     }
 
     #[test]

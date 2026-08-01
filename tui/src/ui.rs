@@ -931,6 +931,7 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
             Mode::CommandOutput(_) => "Press any key to dismiss",
             Mode::Changelog => "Esc:close",
             Mode::Legend => "Esc:close",
+            Mode::Merge => "Esc:close",
             Mode::Search => unreachable!(),
         }
     };
