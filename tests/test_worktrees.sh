@@ -697,6 +697,54 @@ test_features_counts_commits_ahead() {
 
 run_test test_features_counts_commits_ahead
 
+test_features_reports_a_live_worktree_lock_distinctly() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "$$" > "$wt/.cs/session.lock"   # this test process is alive
+    local line
+    line=$("$CS_BIN" "myproj" -features --porcelain 2>/dev/null)
+    rm -f "$wt/.cs/session.lock"
+    assert_eq "worktree" "$(_feat_field "$line" 9)" "a live lock on the feature worktree is lock=worktree" || return 1
+    assert_eq "locked" "$(_feat_field "$line" 10)" "a live worktree lock sets state=locked" || return 1
+}
+
+run_test test_features_reports_a_live_worktree_lock_distinctly
+
+test_features_reports_a_live_base_lock_distinctly() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    echo "$$" > "$base_dir/.cs/session.lock"   # this test process is alive
+    local line
+    line=$("$CS_BIN" "myproj" -features --porcelain 2>/dev/null)
+    rm -f "$base_dir/.cs/session.lock"
+    assert_eq "base" "$(_feat_field "$line" 9)" "a live lock on the base is lock=base" || return 1
+    assert_eq "locked" "$(_feat_field "$line" 10)" "a live base lock sets state=locked" || return 1
+}
+
+run_test test_features_reports_a_live_base_lock_distinctly
+
+test_features_ignores_a_dead_lock_pid() {
+    create_test_session_with_git "myproj" > /dev/null
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    local dead_pid
+    dead_pid=$(bash -c 'echo $$')
+    if kill -0 "$dead_pid" 2>/dev/null; then
+        echo "  SKIP: PID $dead_pid is unexpectedly alive"
+        return 0
+    fi
+    echo "$dead_pid" > "$wt/.cs/session.lock"
+    local line
+    line=$("$CS_BIN" "myproj" -features --porcelain 2>/dev/null)
+    assert_eq "none" "$(_feat_field "$line" 9)" "a dead pid must not be reported as a lock" || return 1
+    assert_eq "ready" "$(_feat_field "$line" 10)" "a dead pid must not set state=locked" || return 1
+}
+
+run_test test_features_ignores_a_dead_lock_pid
+
 test_features_human_table_names_the_state() {
     create_test_session_with_git "myproj" > /dev/null
     cs_launch "myproj@fix-auth"
