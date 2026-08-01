@@ -9,6 +9,15 @@ use ratatui::widgets::TableState;
 use crate::session::{self, Session};
 use crate::theme::Palette;
 
+/// The cs binary to fork. cs exports its own path when it launches the picker,
+/// so a cs that is not on PATH still reaches itself.
+pub fn cs_bin() -> String {
+    match std::env::var("CS_BIN") {
+        Ok(v) if !v.is_empty() => v,
+        _ => "cs".to_string(),
+    }
+}
+
 /// Editable text buffer with cursor position tracking.
 /// Cursor is stored as a byte offset, always on a char boundary.
 pub struct TextInput {
@@ -1692,7 +1701,7 @@ impl App {
     fn run_secrets_command(&mut self) {
         if let Some(session) = self.selected_session() {
             let name = session.name.clone();
-            let output = std::process::Command::new("cs")
+            let output = std::process::Command::new(cs_bin())
                 .args([&name, "-secrets", "list"])
                 .output();
             match output {
@@ -1731,7 +1740,7 @@ impl App {
     fn run_secrets_subcommand(&mut self, subcommand: &str, key: &str) {
         if let Some(session) = self.selected_session() {
             let name = session.name.clone();
-            let output = std::process::Command::new("cs")
+            let output = std::process::Command::new(cs_bin())
                 .args([&name, "-secrets", subcommand, key])
                 .output();
             match output {
@@ -1752,7 +1761,7 @@ impl App {
     fn peek_secret(&mut self, key_name: &str) {
         if let Some(session) = self.selected_session() {
             let name = session.name.clone();
-            let output = std::process::Command::new("cs")
+            let output = std::process::Command::new(cs_bin())
                 .args([&name, "-secrets", "get", key_name])
                 .output();
             match output {
@@ -2035,6 +2044,18 @@ mod tests {
         let app = App::new(sample_sessions());
         assert_eq!(app.table_state.selected(), Some(0));
         assert_eq!(app.filtered.len(), 3);
+    }
+
+    #[test]
+    fn cs_bin_prefers_the_exported_path_over_bare_cs() {
+        // cs exports its own path when it launches the picker. Without the
+        // seam the TUI forks a bare "cs" that may not be on PATH at all.
+        std::env::set_var("CS_BIN", "/opt/example/bin/cs");
+        assert_eq!(cs_bin(), "/opt/example/bin/cs");
+        std::env::set_var("CS_BIN", "");
+        assert_eq!(cs_bin(), "cs", "an empty value must fall back, not fork nothing");
+        std::env::remove_var("CS_BIN");
+        assert_eq!(cs_bin(), "cs");
     }
 
     #[test]

@@ -5794,7 +5794,7 @@ main() {
                 # launch next.
                 _export_term_theme
                 local tui_output
-                tui_output=$(CS_VERSION="$VERSION" "$tui_bin") || exit $?
+                tui_output=$(CS_VERSION="$VERSION" CS_BIN="$0" "$tui_bin") || exit $?
                 if [ -n "$tui_output" ]; then
                     local selected="${tui_output%%$'\n'*}"
                     if [ "$tui_output" != "$selected" ]; then

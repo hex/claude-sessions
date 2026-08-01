@@ -74,6 +74,13 @@ test_list_includes_a_legacy_session() {
     assert_output_contains "$out" "legacy" "cs -list should list a pre-.cs/ session" || return 1
 }
 
+test_tui_launch_exports_the_cs_binary_path() {
+    # The picker forks cs back for its own subcommands, so cs must hand it its
+    # own path. The launch itself needs a tty and a resolved cs-tui, neither of
+    # which a test has, so pin the exported assignment in the built binary.
+    assert_file_contains "$CS_BIN" 'CS_BIN="\$0"' "cs must export its own path to the picker" || return 1
+}
+
 echo ""
 echo "cs -list tests"
 echo "=============="
@@ -83,5 +90,6 @@ run_test test_list_renders_sessions
 run_test test_list_omits_non_session_directories
 run_test test_list_includes_a_legacy_session
 run_test test_list_runs_under_old_bash
+run_test test_tui_launch_exports_the_cs_binary_path
 
 report_results
