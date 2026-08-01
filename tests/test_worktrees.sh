@@ -614,4 +614,20 @@ test_features_is_empty_for_a_base_with_no_worktrees() {
 
 run_test test_features_is_empty_for_a_base_with_no_worktrees
 
+test_features_excludes_a_lookalike_whose_name_prefixes_a_real_one() {
+    # The verification compares whole lines. A one-sided anchor would verify
+    # "wip" against the registered "wip-2", which is precisely the unregistered
+    # directory this function exists to exclude. Prefix-colliding task names are
+    # ordinary, so this is a realistic collision, not a contrived one.
+    create_test_session_with_git "myproj" > /dev/null
+    cs_launch "myproj@wip-2"
+    mkdir -p "$CS_SESSIONS_ROOT/myproj@wip/.cs/local"
+    local output
+    output=$("$CS_BIN" "myproj" -features --porcelain 2>&1)
+    assert_output_contains "$output" "wip-2" "the registered worktree is listed" || return 1
+    assert_output_not_contains "$output" $'^wip\t' "an unregistered prefix must not verify" || return 1
+}
+
+run_test test_features_excludes_a_lookalike_whose_name_prefixes_a_real_one
+
 report_results

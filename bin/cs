@@ -1266,9 +1266,11 @@ _worktree_features() {  # base_name
         d_real=$(git -C "$d" rev-parse --show-toplevel 2>/dev/null) \
             || d_real=$(cd "$d" 2>/dev/null && pwd -P || echo "$d")
         case "
-$registered" in
+$registered
+" in
             *"
-worktree $d_real"*) printf '%s\n' "$task" ;;
+worktree $d_real
+"*) printf '%s\n' "$task" ;;
         esac
     done
 }
