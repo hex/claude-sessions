@@ -38,9 +38,16 @@ test_merge_skill_in_built_manifest() {
         || { echo "  FAIL: built bin/cs CS_SKILLS lacks merge (run ./build.sh)"; return 1; }
 }
 
+test_merge_skill_documents_the_base_session_context() {
+    local skill="$SCRIPT_DIR/../skills/merge/SKILL.md"
+    assert_file_contains "$skill" "base session" "the skill must handle being invoked in the base" || return 1
+    assert_file_contains "$skill" "cs <base> -finish" "the skill must name the verb that arms it" || return 1
+}
+
 run_test test_merge_skill_exists_with_frontmatter
 run_test test_merge_skill_registered_in_both_manifests
 run_test test_merge_skill_teaches_the_gated_ritual
 run_test test_merge_skill_in_built_manifest
+run_test test_merge_skill_documents_the_base_session_context
 
 report_results
