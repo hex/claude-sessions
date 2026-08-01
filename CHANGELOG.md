@@ -4,6 +4,16 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.8.2
+
+Layout fixes for the merge readiness screen shipped in v2026.8.1, found by looking at it on a real terminal and by reviewing that fix before tagging.
+
+### Fixes
+
+- **The merge screen fills its terminal.** Both panes were fixed heights, so a tall terminal left everything below the two cards unused. The list stays sized to its features and the detail pane takes the remainder. The same change covers the short end: the pane holding the finish plan cannot scroll and its last line is the destructive step, where the list does scroll, so the plan can no longer truncate.
+- **The header hairline stays inside the list card.** It was drawn one row below the card's interior top without checking that the row was still inside the card. On terminals between 8 and 19 rows the list shrinks past that point and the rule painted across the detail pane's text, leaving a line like `branch cs/light-theme` with a rule running off its right.
+- **A list too short to show any feature names the count.** Below a six-row list no feature row fits, so the card rendered empty while features were pending. The title now reads `<base> · features (N hidden)`, which costs no rows and so does not compete with the plan for space.
+
 ## 2026.8.1
 
 Closing out a feature worktree used to mean remembering what each `base@feature` session was for and guessing whether it was safe to merge. The picker now answers that, and hands the merge itself to the ritual that can diagnose a failing gate.
