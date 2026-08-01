@@ -869,4 +869,18 @@ EOF
 
 run_test test_finish_yields_to_an_explicit_rotation_choice
 
+test_features_table_says_one_file_not_one_files() {
+    # The count comes from git, so 1 is an ordinary value. The TUI and this
+    # table must word it identically or the same fact reads two ways.
+    create_test_session_with_git "myproj" > /dev/null
+    cs_launch "myproj@fix-auth"
+    echo "scratch" > "$CS_SESSIONS_ROOT/myproj@fix-auth/notes.txt"
+    local output
+    output=$("$CS_BIN" "myproj" -features 2>&1)
+    assert_output_not_contains "$output" "1 files" "singular count must not say files" || return 1
+    assert_output_contains "$output" "1 file untracked" "expected the singular form" || return 1
+}
+
+run_test test_features_table_says_one_file_not_one_files
+
 report_results

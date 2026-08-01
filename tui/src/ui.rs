@@ -186,6 +186,16 @@ fn cursor_wrap_spans(
 }
 
 /// 4-segment queue-depth meter: 0→empty, 1→1, 2-3→2, 4-5→3, 6+→4 filled.
+/// "1 file", "2 files". Counts reach the merge screen from git, so one is an
+/// ordinary value rather than an edge case.
+fn plural(n: u32, noun: &str) -> String {
+    if n == 1 {
+        format!("{n} {noun}")
+    } else {
+        format!("{n} {noun}s")
+    }
+}
+
 fn qbar(n: u32) -> String {
     let f = match n {
         0 => 0,
@@ -1826,7 +1836,24 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
 /// the painted paper on a light theme. card_frame paints paper.
 fn render_merge(app: &mut App, frame: &mut Frame, area: Rect) {
     let p = app.theme;
-    let panes = Layout::vertical([Constraint::Min(6), Constraint::Length(12)]).split(area);
+    // Size the list to its content rather than giving it every remaining row:
+    // one feature under Min(6) rendered a near-full-height empty card. The card
+    // costs 5 rows of chrome — two borders, the headroom row, the column header
+    // and its hairline — so a row per feature on top of that. Floored so a short
+    // list still reads as a card, capped so a long one still leaves the detail
+    // pane whole; the Table scrolls once the cap bites.
+    const MERGE_DETAIL_HEIGHT: u16 = 14;
+    const MERGE_LIST_CHROME: usize = 5;
+    let want = app
+        .merge_features
+        .len()
+        .saturating_add(MERGE_LIST_CHROME)
+        .min(u16::MAX as usize) as u16;
+    let room = area.height.saturating_sub(MERGE_DETAIL_HEIGHT);
+    let list_height = want.clamp(6, room.max(6));
+    let panes =
+        Layout::vertical([Constraint::Length(list_height), Constraint::Length(MERGE_DETAIL_HEIGHT)])
+            .split(area);
 
     // --- feature list ---
     let list_area = panes[0];
@@ -1852,7 +1879,7 @@ fn render_merge(app: &mut App, frame: &mut Frame, area: Rect) {
             let (label, color) = match f.state.as_str() {
                 "ready" => (f.state.clone(), p.ink),
                 "merged" => (f.state.clone(), p.faint),
-                "untracked" => (format!("{} files untracked", f.untracked), p.amber),
+                "untracked" => (format!("{} untracked", plural(f.untracked, "file")), p.amber),
                 "locked" => (format!("{} session is open", f.lock), p.amber),
                 "dirty" => ("uncommitted changes".to_string(), p.amber),
                 "base-dirty" => ("base has uncommitted changes".to_string(), p.amber),
@@ -1895,28 +1922,68 @@ fn render_merge(app: &mut App, frame: &mut Frame, area: Rect) {
         .unwrap_or_else(|| "no features".to_string());
 
     if let Some(f) = app.selected_feature() {
-        // `git merge --no-edit` carries no --no-ff, so a feature whose base
-        // has not moved fast-forwards and leaves no merge commit.
-        let shape = if f.ff { "fast-forward" } else { "merge commit" };
-        let lines = vec![
+        let mut lines = vec![
             Line::from(vec![
                 Span::styled("  branch    ", Style::default().fg(p.mut_)),
                 Span::styled(f.branch.clone(), Style::default().fg(p.ink)),
             ]),
             Line::from(vec![
                 Span::styled("  ahead     ", Style::default().fg(p.mut_)),
-                Span::styled(format!("{} commits", f.ahead), Style::default().fg(p.ink)),
+                Span::styled(plural(f.ahead, "commit"), Style::default().fg(p.ink)),
             ]),
-            Line::from(""),
-            Line::from(Span::styled("  ON FINISH", Style::default().fg(p.mut_))),
-            Line::from(Span::styled("    1  gates in this worktree", Style::default().fg(p.ink))),
-            Line::from(Span::styled(
+        ];
+
+        // The two facts that stop a merge but never reach the row: the row
+        // shows only the FIRST blocker in gate order, so a dirty base hides
+        // behind any worktree-side problem.
+        let (tree_label, tree_color) = if f.wt_dirty {
+            ("uncommitted changes".to_string(), p.amber)
+        } else if f.untracked > 0 {
+            (format!("{} untracked", plural(f.untracked, "file")), p.amber)
+        } else {
+            ("clean".to_string(), p.ink)
+        };
+        lines.push(Line::from(vec![
+            Span::styled("  tree      ", Style::default().fg(p.mut_)),
+            Span::styled(tree_label, Style::default().fg(tree_color)),
+        ]));
+        let (base_label, base_color) = if f.base_dirty {
+            ("uncommitted changes".to_string(), p.amber)
+        } else {
+            ("clean".to_string(), p.ink)
+        };
+        lines.push(Line::from(vec![
+            Span::styled("  base      ", Style::default().fg(p.mut_)),
+            Span::styled(base_label, Style::default().fg(base_color)),
+        ]));
+
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled("  ON FINISH", Style::default().fg(p.mut_))));
+
+        if f.merged {
+            // merge_worktree_session reads an already-merged branch as "already
+            // merged; cleaning up" and skips straight to removal. Promising a
+            // merge here would describe work that never happens.
+            lines.push(Line::from(Span::styled(
+                format!("    1  already merged into {} \u{b7} cleanup only", app.merge_base),
+                Style::default().fg(p.ink),
+            )));
+            lines.push(Line::from(Span::styled(
+                "    2  remove worktree, delete branch",
+                Style::default().fg(p.ink),
+            )));
+        } else {
+            // `git merge --no-edit` carries no --no-ff, so a feature whose base
+            // has not moved fast-forwards and leaves no merge commit.
+            let shape = if f.ff { "fast-forward" } else { "merge commit" };
+            lines.push(Line::from(Span::styled("    1  gates in this worktree", Style::default().fg(p.ink))));
+            lines.push(Line::from(Span::styled(
                 format!("    2  merge into {}  ({})", app.merge_base, shape),
                 Style::default().fg(p.ink),
-            )),
-            Line::from(Span::styled(format!("    3  gates in {}", app.merge_base), Style::default().fg(p.ink))),
-            Line::from(Span::styled("    4  remove worktree, delete branch", Style::default().fg(p.ink))),
-        ];
+            )));
+            lines.push(Line::from(Span::styled(format!("    3  gates in {}", app.merge_base), Style::default().fg(p.ink))));
+            lines.push(Line::from(Span::styled("    4  remove worktree, delete branch", Style::default().fg(p.ink))));
+        }
         let body = Rect::new(
             detail_area.x + 1,
             detail_area.y + 2,
@@ -4080,6 +4147,71 @@ mod tests {
         assert!(
             rows.iter().any(|r| r.contains("state") && r.contains("archived")),
             "preview should label state archived"
+        );
+    }
+
+    #[test]
+    fn merge_screen_does_not_promise_a_merge_for_an_already_merged_feature() {
+        // merge_worktree_session reads an already-merged branch as "already
+        // merged; cleaning up" and skips straight to removal. Promising a merge
+        // commit describes work that will never happen.
+        let mut app = merge_app();
+        app.merge_features[0].merged = true;
+        app.merge_features[0].ahead = 0;
+        app.merge_selected = 0;
+        let text = render_wide(&mut app);
+        assert!(
+            text.contains("already merged"),
+            "an already-merged feature must say so:\n{text}"
+        );
+        assert!(
+            !text.contains("merge commit") && !text.contains("fast-forward"),
+            "nothing is merged, so neither merge shape may be promised:\n{text}"
+        );
+    }
+
+    #[test]
+    fn merge_screen_surfaces_a_dirty_base() {
+        // base_dirty stops the merge but appeared nowhere on screen: the row
+        // shows only the FIRST blocker, so a dirty base hides behind any other.
+        let mut app = merge_app();
+        app.merge_features[0].base_dirty = true;
+        app.merge_selected = 0;
+        let text = render_wide(&mut app);
+        assert!(
+            text.contains("base") && text.contains("uncommitted"),
+            "a dirty base must be visible in the detail pane:\n{text}"
+        );
+    }
+
+    #[test]
+    fn merge_screen_says_one_file_not_one_files() {
+        let mut app = merge_app();
+        app.merge_features[0].state = "untracked".into();
+        app.merge_features[0].untracked = 1;
+        let text = render_wide(&mut app);
+        assert!(!text.contains("1 files"), "singular count must not say files:\n{text}");
+        assert!(text.contains("1 file untracked"), "expected the singular form:\n{text}");
+    }
+
+    #[test]
+    fn merge_screen_does_not_leave_the_list_card_swallowing_the_screen() {
+        // Min(6) gave the list every remaining row, so one feature rendered a
+        // near-full-height empty card. The list should size to its content.
+        let mut app = merge_app();
+        app.merge_features.truncate(1);
+        let rows = rows_at(&mut app, 120, 50);
+        let list_bottom = rows
+            .iter()
+            .rposition(|r| r.contains('\u{2570}'))
+            .expect("cards should render");
+        let detail_top = rows
+            .iter()
+            .position(|r| r.contains("ON FINISH"))
+            .expect("the detail pane should render");
+        assert!(
+            detail_top < 24,
+            "with one feature the detail pane should sit near the top, not below a huge empty card (detail at {detail_top}, last card edge {list_bottom})"
         );
     }
 

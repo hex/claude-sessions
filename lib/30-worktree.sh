@@ -477,7 +477,7 @@ run_features() {  # base_name [--porcelain]
         [ -n "$task" ] || continue
         record=$(_feature_readiness "$base_name" "$task")
         printf '%s\n' "$record" | awk -F'\t' \
-            '{ detail = ($10 == "untracked") ? sprintf("%s (%s files)", $10, $7) : $10;
+            '{ detail = ($10 == "untracked") ? sprintf("%s file%s untracked", $7, ($7 == 1) ? "" : "s") : $10;
                printf "%-24s %-24s %6s  %s\n", $1, $2, $3, detail }'
     done <<< "$features"
 }
