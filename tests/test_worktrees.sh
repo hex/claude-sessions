@@ -782,4 +782,32 @@ test_finish_warns_when_it_displaces_a_spawn_kick() {
 
 run_test test_finish_warns_when_it_displaces_a_spawn_kick
 
+test_finish_yields_to_an_explicit_rotation_choice() {
+    # r is the user explicitly choosing the rotation handoff at the prompt;
+    # a merge armed moments earlier must not silently override that choice.
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    mkdir -p "$base_dir/.cs/handoffs"
+    cat > "$base_dir/.cs/handoffs/2026-07-16-test.md" << 'EOF'
+---
+parent: 00000000-0000-4000-8000-000000000000
+created: 2026-07-16T10:00:00Z
+purpose: test rotation
+status: unconsumed
+---
+
+## 7. Next Step
+Continue the test.
+EOF
+    local output
+    output=$("$CS_BIN" "myproj" -finish "fix-auth" <<< "r" 2>&1 || true)
+    assert_output_contains "$output" "Rotation handoff takes this launch; re-run: cs myproj -finish fix-auth" \
+        "the displaced merge must be announced" || return 1
+    assert_output_not_contains "$output" "/merge fix-auth" "the explicit r choice must not be overridden" || return 1
+    assert_output_contains "$output" ".cs/handoffs/2026-07-16-test.md" "the handoff prompt must run instead" || return 1
+}
+
+run_test test_finish_yields_to_an_explicit_rotation_choice
+
 report_results
