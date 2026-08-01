@@ -1849,15 +1849,17 @@ fn render_merge(app: &mut App, frame: &mut Frame, area: Rect) {
         .len()
         .saturating_add(MERGE_LIST_CHROME)
         .min(u16::MAX as usize) as u16;
-    // The detail pane wins when the terminal is short. It cannot scroll, and
-    // its last line is the destructive one; the list does scroll, so squeezing
-    // it costs nothing but a smaller viewport. A floor that outranked the pane
-    // dropped "remove worktree, delete branch" on a 21-row terminal with no
-    // indicator that anything was missing.
+    // The list is sized to its features; the detail pane takes everything else,
+    // at both ends of the range. On a tall terminal that stops half the screen
+    // sitting unused below two fixed-height cards. On a short one it means the
+    // pane holding the plan never truncates: it cannot scroll and its last line
+    // is the destructive step, where the list does scroll, so squeezing the list
+    // costs nothing but a smaller viewport.
     let room = area.height.saturating_sub(MERGE_DETAIL_HEIGHT);
     let list_height = want.min(room).max(room.min(3));
+    let detail_height = area.height.saturating_sub(list_height);
     let panes =
-        Layout::vertical([Constraint::Length(list_height), Constraint::Length(MERGE_DETAIL_HEIGHT)])
+        Layout::vertical([Constraint::Length(list_height), Constraint::Length(detail_height)])
             .split(area);
 
     // --- feature list ---
@@ -4249,6 +4251,24 @@ mod tests {
         assert!(
             !text.contains("base      clean"),
             "a locked base must not also read clean:\n{text}"
+        );
+    }
+
+    #[test]
+    fn merge_screen_detail_pane_fills_a_tall_terminal() {
+        // Both panes were fixed Lengths, so half a tall terminal sat unused.
+        // The list stays sized to its features; the detail card takes the slack,
+        // because it is the pane that holds prose and cannot scroll.
+        let mut app = merge_app();
+        app.merge_features.truncate(1);
+        let rows = rows_at(&mut app, 120, 48);
+        let last_card_edge = rows
+            .iter()
+            .rposition(|r| r.contains('\u{2570}'))
+            .expect("the detail card should render its bottom border");
+        assert!(
+            last_card_edge >= 40,
+            "the detail card should reach the bottom of a 48-row frame, ended at {last_card_edge}"
         );
     }
 
