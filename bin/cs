@@ -6308,9 +6308,11 @@ main() {
         local _known
         _known=$(_worktree_features "$session_name")
         case "
-$_known" in
+$_known
+" in
             *"
-$merge_feature"*) ;;
+$merge_feature
+"*) ;;
             *) error "No feature worktree '$merge_feature' of '$session_name'. List them with: cs $session_name -features" ;;
         esac
     fi

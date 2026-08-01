@@ -755,6 +755,17 @@ test_finish_rejects_an_unknown_feature() {
 
 run_test test_finish_rejects_an_unknown_feature
 
+test_finish_rejects_a_prefix_lookalike() {
+    create_test_session_with_git "myproj" > /dev/null
+    cs_launch "myproj@wip-2"
+    local output
+    output=$("$CS_BIN" "myproj" -finish "wip" < /dev/null 2>&1 || true)
+    assert_output_contains "$output" "No feature worktree 'wip'" \
+        "a prefix of a real feature must be refused" || return 1
+}
+
+run_test test_finish_rejects_a_prefix_lookalike
+
 test_finish_rejects_a_traversal_feature_name() {
     create_test_session_with_git "myproj" > /dev/null
     local output
