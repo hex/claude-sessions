@@ -121,7 +121,51 @@ test_queue_add_via_session_scoped_arm() {
     [ "$found" = 1 ] || { echo "  session-scoped add did not land in the named session"; return 1; }
 }
 
+# A pre-directory queue is a single FILE at the queue path. Any queue verb
+# converts it first (mv aside, then one file per line, order preserved) so an
+# upgraded session neither errors on mkdir nor strands its queued tasks.
+test_queue_verbs_convert_a_legacy_queue_file() {
+    printf 'legacy one\nlegacy two\n' > "$(QFILE)"
+    "$CS_BIN" -queue add "third" >/dev/null 2>&1 || { echo "  add failed over a legacy file"; return 1; }
+    [ -d "$(QFILE)" ] || { echo "  legacy file not converted to a directory"; return 1; }
+    assert_eq "3" "$(QCOUNT)" "legacy lines and the new task all queued" || return 1
+    [ ! -f "$(QFILE).migrating" ] || { echo "  conversion leftover"; return 1; }
+    local out; out=$("$CS_BIN" -queue list 2>&1)
+    assert_output_contains "$out" "1. legacy one" "legacy order preserved first" || return 1
+    assert_output_contains "$out" "2. legacy two" "legacy order preserved second" || return 1
+    assert_output_contains "$out" "3. third" "new task after the legacy ones" || return 1
+}
+
+# Session open converts too, so the statusline, TUI and drain (which never
+# write) see the directory without waiting for a queue verb.
+test_session_open_converts_legacy_queue_file() {
+    create_test_session opensess >/dev/null
+    printf 'opened task\n' > "$CS_SESSIONS_ROOT/opensess/.cs/local/queue"
+    CLAUDE_CODE_BIN=echo "$CS_BIN" opensess < /dev/null > /dev/null 2>&1 || true
+    [ -d "$CS_SESSIONS_ROOT/opensess/.cs/local/queue" ] \
+        || { echo "  open did not convert the legacy queue"; return 1; }
+    grep -q "opened task" "$CS_SESSIONS_ROOT/opensess/.cs/local/queue"/* \
+        || { echo "  legacy task lost on open"; return 1; }
+}
+
+# The worktree open path bypasses migrate_session; queue conversion must run
+# there too, exactly as mail migration does.
+test_worktree_open_converts_legacy_queue_file() {
+    create_test_session_with_git wtqbase >/dev/null
+    CLAUDE_CODE_BIN=echo "$CS_BIN" "wtqbase@feat" < /dev/null > /dev/null 2>&1 || true
+    local wtlocal="$CS_SESSIONS_ROOT/wtqbase@feat/.cs/local"
+    [ -d "$CS_SESSIONS_ROOT/wtqbase@feat" ] || { echo "  worktree session not created"; return 1; }
+    mkdir -p "$wtlocal"
+    printf 'worktree task\n' > "$wtlocal/queue"
+    CLAUDE_CODE_BIN=echo "$CS_BIN" "wtqbase@feat" < /dev/null > /dev/null 2>&1 || true
+    [ -d "$wtlocal/queue" ] || { echo "  worktree open did not convert the legacy queue"; return 1; }
+    grep -q "worktree task" "$wtlocal/queue"/* || { echo "  legacy task lost on worktree open"; return 1; }
+}
+
 run_test test_queue_add_writes_one_file_per_task
+run_test test_queue_verbs_convert_a_legacy_queue_file
+run_test test_session_open_converts_legacy_queue_file
+run_test test_worktree_open_converts_legacy_queue_file
 run_test test_queue_list_numbers_pending
 run_test test_queue_rm_removes_by_index
 run_test test_queue_clear_empties_and_resets_state

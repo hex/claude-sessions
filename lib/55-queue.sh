@@ -8,6 +8,37 @@ _queue_set_state() {  # atomic single-word write; "" removes the file
     printf '%s\n' "$val" > "$qdir/queue.state.tmp" && mv "$qdir/queue.state.tmp" "$qdir/queue.state"
 }
 
+# Convert a pre-directory queue (a single line-per-task FILE at the queue
+# path) into per-task files, preserving order via zero-padded sequence names
+# that sort before any epoch-named task. mv-aside first, so a stale writer
+# holding the old inode never re-materializes converted lines; a leftover
+# .migrating from an interrupted conversion is picked up first. No-op when
+# the queue is already a directory or absent.
+_queue_convert_legacy() {  # qdir
+    local qdir="$1" legacy="$1/queue.migrating"
+    if [ -f "$qdir/queue" ]; then
+        # A leftover from an interrupted conversion holds real tasks; fold it
+        # in before renaming the fresh file over it.
+        if [ -f "$legacy" ]; then
+            cat "$qdir/queue" >> "$legacy" 2>/dev/null || return 0
+            rm -f "$qdir/queue"
+        else
+            mv "$qdir/queue" "$legacy" 2>/dev/null || return 0
+        fi
+    fi
+    [ -f "$legacy" ] || return 0
+    mkdir -p "$qdir/queue" "$qdir/queue.tmp"
+    local line seq=0 fname
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in *[![:space:]]*) : ;; *) continue ;; esac
+        seq=$((seq + 1))
+        fname="0000000000-legacy-$(printf '%04d' "$seq")"
+        printf '%s\n' "$line" > "$qdir/queue.tmp/$fname" \
+            && mv "$qdir/queue.tmp/$fname" "$qdir/queue/$fname"
+    done < "$legacy"
+    rm -f "$legacy"
+}
+
 # The queue is a directory of one file per task. A task is written whole to
 # the sibling queue.tmp/ staging dir and renamed into place, so the drain can
 # never read a torn entry — the queue executes what it reads, which makes a
@@ -17,6 +48,9 @@ _queue_add() {  # qdir, text
     local qdir="$1" text="$2"
     text="$(_trim "$text")"
     [ -n "$text" ] || { error "cs -queue add needs a non-empty task"; }
+    # Senders write into other sessions' queues (task-kind mail), so a
+    # recipient that has not reopened since the upgrade converts here.
+    _queue_convert_legacy "$qdir"
     mkdir -p "$qdir/queue" "$qdir/queue.tmp"
     # The zero-padded per-process sequence keeps several adds from one process
     # inside one second (a spawn seed's task list) in submission order; guard
@@ -106,6 +140,7 @@ run_queue() {
         error "cs -queue must be run inside a cs session, or as: cs <session> -queue ..."
     fi
     local qdir="$CLAUDE_SESSION_META_DIR/local"
+    _queue_convert_legacy "$qdir"
     local sub="${1:-list}"
     case "$sub" in
         add)   shift; _queue_add "$qdir" "$*";;

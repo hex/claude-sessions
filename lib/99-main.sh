@@ -354,10 +354,11 @@ main() {
             # No migrate_session here: worktree checkouts never predate the
             # worktree feature, and its CLAUDE.md rewrite must never touch a
             # project's own file (ignored-.cs repos track their real CLAUDE.md).
-            # Mail migration DOES run: a worktree can hold a legacy
-            # inbox.jsonl from the shipped mailbox, and it touches only
-            # .cs/local/mail — never project files.
+            # Mail and queue migration DO run: a worktree can hold a legacy
+            # inbox.jsonl or queue file from the shipped versions, and both
+            # conversions touch only .cs/local — never project files.
             migrate_mailbox "$session_dir"
+            _queue_convert_legacy "$session_dir/.cs/local"
         fi
     elif [ ! -d "$session_dir" ]; then
         is_new="true"

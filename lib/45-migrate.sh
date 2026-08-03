@@ -257,8 +257,10 @@ migrate_session() {
     # Phase 2: Ensure .cs/ subdirectories exist (handles partial migrations and edge cases)
     mkdir -p "$session_dir/.cs/local"
 
-    # Phase 2a: Convert a legacy line-per-message mail inbox to the maildir.
+    # Phase 2a: Convert a legacy line-per-message mail inbox to the maildir,
+    # and a legacy line-per-task queue file to the queue directory.
     migrate_mailbox "$session_dir"
+    _queue_convert_legacy "$session_dir/.cs/local"
 
     # Phase 2b: Relocate the session log to machine-local state. The audit trail
     # (bash commands, lifecycle events, autosave notes) is per-checkout, not
