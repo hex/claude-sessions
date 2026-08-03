@@ -400,7 +400,7 @@ Commands:
   -queue rm <n>       Remove pending task n
   -queue clear        Empty the queue and stop draining
   -queue log          Show the walk-away run journal (drains, breaker trips)
-  -msg <session> "<body>"  Send a message to another session (--kind notify|task|text|result)
+  -msg <session> "<body>"  Send a message to another session (--kind notify|task|text|result; '-' reads the body from stdin)
   -msg                Read this session's unread mail
   -msg log            Show this session's full mail history
   -spawn <name>       Open a session in the cs tmux session (--task "..." seeds and arms its queue)${wsl_only}
@@ -2424,6 +2424,75 @@ migrate_if_exists() {
     fi
 }
 
+# Convert a legacy line-per-message inbox (already renamed to
+# inbox.jsonl.migrating) into per-message maildir documents. Lines at or below
+# the old `seen` cursor were read and go to cur/; the rest go to new/. A line
+# that does not parse at all is quarantined in mail/corrupt.jsonl — it is
+# evidence of the append tearing the maildir removes, not garbage. Records may
+# lack a numeric ts (accepted and pinned by test) or a usable id, so neither
+# is assumed for the filename: a missing ts becomes this migration's epoch
+# second and a missing id a migration-local sequence, preserving order within
+# the legacy file. Deletes the converted file and the cursor when done.
+_convert_legacy_inbox() {  # maildir
+    local maildir="$1" legacy="$1/inbox.jsonl.migrating"
+    [ -f "$legacy" ] || return 0
+    mkdir -p "$maildir/tmp" "$maildir/new" "$maildir/cur"
+    local seen=""
+    if [ -f "$maildir/seen" ]; then
+        IFS= read -r seen < "$maildir/seen" || true
+    fi
+    case "$seen" in ''|*[!0-9]*) seen=0;; esac
+    local epoch lineno=0 seq=0 line meta ts id fname dest
+    epoch=$(date +%s)
+    # `|| [ -n "$line" ]` converts a final line the stale writer never
+    # terminated rather than dropping it.
+    while IFS= read -r line || [ -n "$line" ]; do
+        lineno=$((lineno + 1))
+        case "$line" in *[![:space:]]*) : ;; *) continue ;; esac
+        meta=$(printf '%s\n' "$line" | jq -r '
+            (try (if (.ts|type) == "number" then (.ts|floor|tostring) else "" end) catch "") + "\t" +
+            (try (if (.id|type) == "string" then .id else "" end) catch "")
+        ' 2>/dev/null) || meta=""
+        if [ -z "$meta" ]; then
+            printf '%s\n' "$line" >> "$maildir/corrupt.jsonl"
+            continue
+        fi
+        seq=$((seq + 1))
+        ts="${meta%%$'\t'*}"
+        id="${meta#*$'\t'}"
+        # Base-10 normalize before printf %d, which reads a leading zero as octal.
+        case "$ts" in ''|*[!0-9]*) ts="$epoch";; *) ts=$((10#$ts));; esac
+        case "$id" in ''|*[!A-Za-z0-9._-]*) id=$(printf 'legacy-%04d' "$seq");; esac
+        fname="$(printf '%010d' "$ts")-${id}.json"
+        if [ "$lineno" -le "$seen" ]; then dest="cur"; else dest="new"; fi
+        # Never clobber a message already delivered under the same name.
+        if [ -e "$maildir/$dest/$fname" ]; then
+            fname="$(printf '%010d' "$ts")-${id}-$(printf '%04d' "$seq").json"
+        fi
+        printf '%s\n' "$line" > "$maildir/tmp/$fname" \
+            && mv "$maildir/tmp/$fname" "$maildir/$dest/$fname"
+    done < "$legacy"
+    rm -f "$legacy" "$maildir/seen"
+}
+
+# One-time, idempotent mailbox migration, keyed ONLY on inbox.jsonl existing.
+# It must not also require new/ to be absent: delivery creates the recipient's
+# maildir on send, so a session receiving one new-format message before its
+# next open would otherwise read the gate false forever and strand its legacy
+# unread mail. Renaming before converting keeps a stale writer safe: one
+# holding an open descriptor keeps writing into the renamed inode and its
+# lines are still converted; one that reopens the path creates a fresh
+# inbox.jsonl, which the next open converts.
+migrate_mailbox() {  # session_dir
+    local maildir="$1/.cs/local/mail"
+    # A migration interrupted between rename and delete left real mail in
+    # inbox.jsonl.migrating; convert it before renaming a fresh inbox over it.
+    _convert_legacy_inbox "$maildir"
+    [ -f "$maildir/inbox.jsonl" ] || return 0
+    mv "$maildir/inbox.jsonl" "$maildir/inbox.jsonl.migrating" 2>/dev/null || return 0
+    _convert_legacy_inbox "$maildir"
+}
+
 # Check if session needs migration from flat layout to .cs/ directory
 needs_cs_migration() {
     local session_dir="$1"
@@ -2483,6 +2552,11 @@ migrate_session() {
 
     # Phase 2: Ensure .cs/ subdirectories exist (handles partial migrations and edge cases)
     mkdir -p "$session_dir/.cs/local"
+
+    # Phase 2a: Convert a legacy line-per-message mail inbox to the maildir,
+    # and a legacy line-per-task queue file to the queue directory.
+    migrate_mailbox "$session_dir"
+    _queue_convert_legacy "$session_dir/.cs/local"
 
     # Phase 2b: Relocate the session log to machine-local state. The audit trail
     # (bash commands, lifecycle events, autosave notes) is per-checkout, not
@@ -3027,9 +3101,10 @@ run_checkpoint() {
 
 # --- Task queue (cs -queue) ---------------------------------------------------
 # Machine-local queue of prompts drained by the Stop hook. Files live in
-# <session>/.cs/local/: queue (one prompt/line), queue.done, queue.state
-# (idle|armed|draining), queue.declined (epoch). Plain files so the standalone
-# Stop hook can read them without bin/cs's helpers.
+# <session>/.cs/local/: queue/ (one file per task, staged via queue.tmp/),
+# queue.done, queue.state (idle|armed|draining), queue.declined (epoch).
+# Plain files so the standalone Stop hook can read them without bin/cs's
+# helpers.
 
 # Every tmux call goes through this wrapper; tests point CS_TMUX_BIN at a fake.
 _tmux() {
@@ -3131,7 +3206,7 @@ run_spawn() {
                 local t
                 t="$(_trim "$1")"
                 [ -n "$t" ] || error "cs -spawn --task needs a non-empty task"
-                case "$t" in *"$nl"*) error "task bodies must be a single line (the queue file is line-oriented)";; esac
+                case "$t" in *"$nl"*) error "task bodies must be a single line (the queue's done log and listing are line-oriented)";; esac
                 tasks+=("$t");;
             -*) error "Unknown option: $1. Usage: cs -spawn <name> [--task \"...\"] ...";;
             *)
@@ -3162,7 +3237,10 @@ run_spawn() {
     fi
     _spawn_window "$name"
 }
-MAIL_BODY_MAX=4096
+# Bounds render cost, not corruption: delivery is per-message-atomic, so a
+# large body can tear nothing. Raised from 4096 only once BOTH shared-file
+# appends (mail inbox, walk-away queue) were gone.
+MAIL_BODY_MAX=65536
 
 # Strip C0 control characters (keeping tab and newline) and DEL from stdin,
 # so a message body cannot smuggle ANSI/OSC sequences into a terminal.
@@ -3170,31 +3248,12 @@ _mail_scrub() {
     LC_ALL=C tr -d '\000-\010\013-\037\177'
 }
 
-# Count complete (newline-terminated) lines. wc -l counts newline bytes, so a
-# torn final line still being written is excluded from cursor math.
-_mail_total() {  # file
-    if [ -f "$1" ]; then
-        wc -l < "$1" | tr -d '[:space:]'
-    else
-        echo 0
-    fi
-}
-
-_mail_cursor() {  # cursor_file
-    local v=""
-    if [ -f "$1" ]; then IFS= read -r v < "$1" || true; fi
-    case "$v" in ''|*[!0-9]*) v=0;; esac
-    echo "$v"
-}
-
-_mail_set_cursor() {  # cursor_file, value
-    printf '%s\n' "$2" > "$1.tmp" && mv "$1.tmp" "$1"
-}
-
-# Print inbox lines from..to inclusive. awk bounds both ends without the
-# early-exit SIGPIPE risk of head/sed on large files.
-_mail_slice() {  # file, from_line, to_line
-    awk -v a="$2" -v b="$3" 'NR>=a && NR<=b' "$1"
+# The mailbox is a maildir: a message is written whole to tmp/, then renamed
+# into new/ (unread) — the rename is same-filesystem, so a message is either
+# entirely present or entirely absent. 'cs -msg' moves what it prints into
+# cur/ (read). Unread is simply the count of new/*.json.
+_mail_ensure_maildir() {  # maildir
+    mkdir -p "$1/tmp" "$1/new" "$1/cur"
 }
 
 _mail_send() {  # target, [--kind|-k KIND] body
@@ -3216,6 +3275,12 @@ _mail_send() {  # target, [--kind|-k KIND] body
     fi
     case "$kind" in notify|task|text|result) : ;; *) error "Unknown kind: $kind (notify|task|text|result)";; esac
     body="$(_trim "$body")"
+    # A lone '-' body reads the real body from stdin: a multi-KB handoff does
+    # not belong in argv, and this is what makes the larger cap reachable.
+    if [ "$body" = "-" ]; then
+        body="$(cat)"
+        body="$(_trim "$body")"
+    fi
     [ -n "$body" ] || error "cs -msg needs a non-empty body"
     local bytes
     bytes=$(LC_ALL=C printf '%s' "$body" | wc -c | tr -d '[:space:]')
@@ -3228,21 +3293,34 @@ _mail_send() {  # target, [--kind|-k KIND] body
         local nl='
 '
         case "$body" in
-            *"$nl"*) error "task bodies must be a single line (the queue file is line-oriented)";;
+            *"$nl"*) error "task bodies must be a single line (the queue's done log and listing are line-oriented)";;
         esac
         # Queue first, attribution second: if the queue write fails nothing is
-        # sent; if the inbox write fails the work is still delivered.
+        # sent; if the mail write fails the work is still delivered.
         _queue_add "$target_dir/.cs/local" "$body"
     fi
+    # Deliver into the RECIPIENT's tmp/, then rename into its new/: both live
+    # in one tree, so the rename is atomic even for adopted (symlinked)
+    # sessions, where a sender-side tmp/ could sit on another volume and
+    # degrade the mv to copy-then-unlink.
     local maildir="$target_dir/.cs/local/mail"
-    mkdir -p "$maildir"
-    local now line
+    _mail_ensure_maildir "$maildir"
+    local now id line fname
     now="$(date +%s)"
-    line=$(jq -cn --arg id "${now}-$$-${RANDOM}" --argjson ts "$now" \
+    # The pid keeps two senders inside one second apart; a bare RANDOM suffix
+    # collides ~1 in 32768 per pair and mv clobbers silently.
+    id="${now}-$$-${RANDOM}"
+    line=$(jq -cn --arg id "$id" --argjson ts "$now" \
         --arg from "${CLAUDE_SESSION_NAME:-}" --arg actor "$(cs_actor_slug)" \
         --arg kind "$kind" --arg body "$body" \
         '{id:$id, ts:$ts, from:$from, actor:$actor, kind:$kind, body:$body}')
-    if ! printf '%s\n' "$line" >> "$maildir/inbox.jsonl"; then
+    # Zero-padded epoch keeps lexical order aligned with time order; NOT a
+    # monotonic clock (same-second order is by unpadded pid, and the wall
+    # clock can go backwards) — nothing may treat name order as arrival order.
+    fname="$(printf '%010d' "$now")-${id}.json"
+    if ! { printf '%s\n' "$line" > "$maildir/tmp/$fname" \
+            && mv "$maildir/tmp/$fname" "$maildir/new/$fname"; }; then
+        rm -f "$maildir/tmp/$fname"
         if [ "$kind" = "task" ]; then
             warn "task queued in $target, but recording the mail attribution failed"
             return 0
@@ -3252,9 +3330,11 @@ _mail_send() {  # target, [--kind|-k KIND] body
     info "sent to $target; surfaces at their next turn"
 }
 
-# Shared formatter: print inbox lines from..to as 'HH:MM  sender  [kind]  body'.
-_mail_print() {  # from_line, to_line, inbox
-    _mail_slice "$3" "$1" "$2" | jq -rR '
+# Shared formatter: print message documents as 'HH:MM  sender  [kind]  body'.
+# Each document is a single-line JSON object, so one line-oriented jq pass
+# renders them all (no early-exit consumers -> no SIGPIPE risk on big mail).
+_mail_print_files() {  # file...
+    cat "$@" | jq -rR '
         fromjson? // empty |
         (.ts | if type == "number" then strflocaltime("%H:%M") else "--:--" end) + "  " +
         (if .from == "" then .actor else .from end) + "  [" + .kind + "]  " +
@@ -3264,27 +3344,41 @@ _mail_print() {  # from_line, to_line, inbox
 
 _mail_read() {
     local maildir="$CLAUDE_SESSION_META_DIR/local/mail"
-    local inbox="$maildir/inbox.jsonl"
-    local total seen
-    total=$(_mail_total "$inbox")
-    seen=$(_mail_cursor "$maildir/seen")
-    if [ "$total" -le "$seen" ]; then
+    local f files=()
+    for f in "$maildir"/new/*.json; do
+        [ -e "$f" ] || continue
+        files+=("$f")
+    done
+    if [ "${#files[@]}" -eq 0 ]; then
         echo "No unread mail."
         return 0
     fi
-    _mail_print $((seen + 1)) "$total" "$inbox"
-    _mail_set_cursor "$maildir/seen" "$total"
+    _mail_print_files "${files[@]}"
+    # Exactly what was printed moves to cur/; a message landing between the
+    # glob and here stays unread for the next read.
+    mkdir -p "$maildir/cur"
+    for f in "${files[@]}"; do
+        mv "$f" "$maildir/cur/${f##*/}"
+    done
 }
 
 _mail_log() {
-    local inbox="$CLAUDE_SESSION_META_DIR/local/mail/inbox.jsonl"
-    local total
-    total=$(_mail_total "$inbox")
-    if [ "$total" -eq 0 ]; then
+    local maildir="$CLAUDE_SESSION_META_DIR/local/mail"
+    local f files=()
+    for f in "$maildir"/cur/*.json "$maildir"/new/*.json; do
+        [ -e "$f" ] || continue
+        files+=("$f")
+    done
+    if [ "${#files[@]}" -eq 0 ]; then
         echo "No mail."
         return 0
     fi
-    _mail_print 1 "$total" "$inbox"
+    # Interleave read and unread history by filename (the timestamp prefix).
+    local sorted=()
+    while IFS= read -r f; do
+        [ -n "$f" ] && sorted+=("$f")
+    done < <(printf '%s\n' "${files[@]}" | awk -F/ '{ print $NF "\t" $0 }' | sort | cut -f2-)
+    _mail_print_files "${sorted[@]}"
 }
 
 # Dispatcher. Bare = read own inbox; 'log' = full history; else = send.
@@ -3351,20 +3445,84 @@ _queue_set_state() {  # atomic single-word write; "" removes the file
     printf '%s\n' "$val" > "$qdir/queue.state.tmp" && mv "$qdir/queue.state.tmp" "$qdir/queue.state"
 }
 
+# Convert a pre-directory queue (a single line-per-task FILE at the queue
+# path) into per-task files, preserving order via zero-padded sequence names
+# that sort before any epoch-named task. mv-aside first, so a stale writer
+# holding the old inode never re-materializes converted lines; a leftover
+# .migrating from an interrupted conversion is picked up first. No-op when
+# the queue is already a directory or absent.
+_queue_convert_legacy() {  # qdir
+    local qdir="$1" legacy="$1/queue.migrating"
+    if [ -f "$qdir/queue" ]; then
+        # A leftover from an interrupted conversion holds real tasks; fold it
+        # in before renaming the fresh file over it.
+        if [ -f "$legacy" ]; then
+            cat "$qdir/queue" >> "$legacy" 2>/dev/null || return 0
+            rm -f "$qdir/queue"
+        else
+            mv "$qdir/queue" "$legacy" 2>/dev/null || return 0
+        fi
+    fi
+    [ -f "$legacy" ] || return 0
+    mkdir -p "$qdir/queue" "$qdir/queue.tmp"
+    local line seq=0 fname
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in *[![:space:]]*) : ;; *) continue ;; esac
+        seq=$((seq + 1))
+        fname="0000000000-legacy-$(printf '%04d' "$seq")"
+        printf '%s\n' "$line" > "$qdir/queue.tmp/$fname" \
+            && mv "$qdir/queue.tmp/$fname" "$qdir/queue/$fname"
+    done < "$legacy"
+    rm -f "$legacy"
+}
+
+# The queue is a directory of one file per task. A task is written whole to
+# the sibling queue.tmp/ staging dir and renamed into place, so the drain can
+# never read a torn entry — the queue executes what it reads, which makes a
+# spliced line worse than a lost one. Names are <zero-padded epoch>-<pid>-<n>;
+# lexical order approximates arrival order (same caveats as mail filenames).
 _queue_add() {  # qdir, text
     local qdir="$1" text="$2"
     text="$(_trim "$text")"
     [ -n "$text" ] || { error "cs -queue add needs a non-empty task"; }
-    mkdir -p "$qdir"
-    printf '%s\n' "$text" >> "$qdir/queue"
+    # Senders write into other sessions' queues (task-kind mail), so a
+    # recipient that has not reopened since the upgrade converts here.
+    _queue_convert_legacy "$qdir"
+    mkdir -p "$qdir/queue" "$qdir/queue.tmp"
+    # The zero-padded per-process sequence keeps several adds from one process
+    # inside one second (a spawn seed's task list) in submission order; guard
+    # against an inherited same-named env var poisoning the counter.
+    case "${_QUEUE_SEQ:-}" in ''|*[!0-9]*) _QUEUE_SEQ=0;; esac
+    _QUEUE_SEQ=$((10#$_QUEUE_SEQ + 1))
+    local fname
+    fname="$(printf '%010d' "$(date +%s)")-$$-$(printf '%04d' "$_QUEUE_SEQ")-${RANDOM}"
+    printf '%s\n' "$text" > "$qdir/queue.tmp/$fname" \
+        && mv "$qdir/queue.tmp/$fname" "$qdir/queue/$fname"
     rm -f "$qdir/queue.declined"   # queue changed: allow the gate to re-ask
 }
 
+# Count of queued task files ([ -f ] also guards bash 3.2's literal
+# unmatched glob and skips the odd subdirectory).
+_queue_len() {  # qdir
+    local f n=0
+    for f in "$1/queue"/*; do
+        [ -f "$f" ] || continue
+        n=$((n + 1))
+    done
+    echo "$n"
+}
+
 _queue_list() {  # qdir
-    local qdir="$1"
-    if [ -s "$qdir/queue" ]; then
+    local qdir="$1" f n=0 text
+    if [ "$(_queue_len "$qdir")" -gt 0 ]; then
         echo "Pending:"
-        awk 'NF{ printf "  %d. %s\n", ++n, $0 }' "$qdir/queue"
+        for f in "$qdir/queue"/*; do
+            [ -f "$f" ] || continue
+            text=$(cat "$f")
+            case "$text" in *[![:space:]]*) : ;; *) continue ;; esac
+            n=$((n + 1))
+            printf '  %d. %s\n' "$n" "${text//$'\n'/ }"
+        done
     else
         echo "Queue is empty."
     fi
@@ -3376,16 +3534,24 @@ _queue_list() {  # qdir
 
 _queue_rm() {  # qdir, index
     local qdir="$1" n="$2"
-    case "$n" in ''|*[!0-9]*) error "cs -queue rm needs a line number";; esac
-    [ -f "$qdir/queue" ] || { error "queue is empty"; }
-    awk -v target="$n" 'NF{ c++ } { if (c==target && NF) next; print }' "$qdir/queue" \
-        > "$qdir/queue.tmp" && mv "$qdir/queue.tmp" "$qdir/queue"
+    case "$n" in ''|*[!0-9]*) error "cs -queue rm needs a task number";; esac
+    [ "$(_queue_len "$qdir")" -gt 0 ] || { error "queue is empty"; }
+    local f i=0
+    for f in "$qdir/queue"/*; do
+        [ -f "$f" ] || continue
+        i=$((i + 1))
+        if [ "$i" -eq "$n" ]; then
+            rm -f "$f"
+            break
+        fi
+    done
     rm -f "$qdir/queue.declined"
 }
 
 _queue_clear() {  # qdir
     local qdir="$1"
-    rm -f "$qdir/queue" "$qdir/queue.state" "$qdir/queue.declined"
+    rm -rf "$qdir/queue" "$qdir/queue.tmp"
+    rm -f "$qdir/queue.state" "$qdir/queue.declined"
 }
 
 _queue_log() {  # qdir
@@ -3411,6 +3577,7 @@ run_queue() {
         error "cs -queue must be run inside a cs session, or as: cs <session> -queue ..."
     fi
     local qdir="$CLAUDE_SESSION_META_DIR/local"
+    _queue_convert_legacy "$qdir"
     local sub="${1:-list}"
     case "$sub" in
         add)   shift; _queue_add "$qdir" "$*";;
@@ -6301,6 +6468,11 @@ main() {
             # No migrate_session here: worktree checkouts never predate the
             # worktree feature, and its CLAUDE.md rewrite must never touch a
             # project's own file (ignored-.cs repos track their real CLAUDE.md).
+            # Mail and queue migration DO run: a worktree can hold a legacy
+            # inbox.jsonl or queue file from the shipped versions, and both
+            # conversions touch only .cs/local — never project files.
+            migrate_mailbox "$session_dir"
+            _queue_convert_legacy "$session_dir/.cs/local"
         fi
     elif [ ! -d "$session_dir" ]; then
         is_new="true"

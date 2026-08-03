@@ -516,48 +516,39 @@ _seg_session() {
     _add "${name}" "$bg" bold
 }
 
-# Count of queued tasks for the current session (.cs/local/queue), shown right
-# after the session name. Hidden when the queue is empty or absent.
+# Count of queued tasks for the current session (one file per task in
+# .cs/local/queue/), shown right after the session name. Hidden when the
+# queue is empty or absent. Only regular files count, so a subdirectory or
+# an unmatched glob (bash 3.2 has no nullglob) never inflates the badge.
 _seg_notes() {
     [ -n "${CLAUDE_SESSION_NAME:-}" ] || return 0
-    local qf="$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/local/queue"
-    [ -f "$qf" ] || return 0
-    # Count non-blank lines (awk NF equivalent) without an awk fork; this runs
-    # every render. A whitespace-only line is not a task. `|| [ -n "$line" ]`
-    # counts a torn final line lacking a trailing newline, matching awk's read.
-    local n=0 line
-    while IFS= read -r line || [ -n "$line" ]; do
-        case "$line" in
-            *[![:space:]]*) n=$((n + 1)) ;;
-        esac
-    done < "$qf"
+    local qdir="$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/local/queue"
+    [ -d "$qdir" ] || return 0
+    local n=0 f
+    for f in "$qdir"/*; do
+        [ -f "$f" ] || continue
+        n=$((n + 1))
+    done
     [ "$n" -gt 0 ] || return 0
     _add "${ICON_NOTES}${n}" "amber"
 }
 
 # Unread cross-session mail for the current session, shown after the notes
-# queue. Hidden when nothing is unread or the inbox is absent. Unread is the
-# count of newline-terminated inbox lines past the `seen` cursor that `cs -msg`
-# advances on read — the same basis as the shell's _mail_total (wc -l) and the
-# TUI. A torn final line (message mid-write, no trailing newline) is not
-# counted, so it can't show a phantom unread that never clears.
+# queue. Hidden when nothing is unread or the maildir is absent. Unread is the
+# count of mail/new/*.json documents (cs -msg moves what it prints to cur/) —
+# the same basis as the shell reader and the TUI. Only *.json files count: a
+# .DS_Store, a staging leftover or a subdirectory must not show a phantom
+# unread that never clears. The [ -f ] guard also covers bash 3.2's lack of
+# nullglob (an unmatched glob comes back literal).
 _seg_mail() {
     [ -n "${CLAUDE_SESSION_NAME:-}" ] || return 0
     local mdir="$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/local/mail"
-    local inbox="$mdir/inbox.jsonl"
-    [ -f "$inbox" ] || return 0
-    local total=0 line
-    while IFS= read -r line; do
-        total=$((total + 1))
-    done < "$inbox"
-    local seen=0
-    [ -r "$mdir/seen" ] && read -r seen < "$mdir/seen" 2>/dev/null
-    case "$seen" in
-        ''|*[!0-9]*) seen=0 ;;
-    esac
-    # Base-10 normalize the cursor so a zero-padded value (e.g. "08") is not
-    # read as octal by the arithmetic below.
-    local unread=$((total - 10#$seen))
+    [ -d "$mdir/new" ] || return 0
+    local unread=0 f
+    for f in "$mdir"/new/*.json; do
+        [ -f "$f" ] || continue
+        unread=$((unread + 1))
+    done
     [ "$unread" -gt 0 ] || return 0
     _add "${ICON_MAIL}${unread}" "amber"
 }

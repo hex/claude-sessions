@@ -8,20 +8,84 @@ _queue_set_state() {  # atomic single-word write; "" removes the file
     printf '%s\n' "$val" > "$qdir/queue.state.tmp" && mv "$qdir/queue.state.tmp" "$qdir/queue.state"
 }
 
+# Convert a pre-directory queue (a single line-per-task FILE at the queue
+# path) into per-task files, preserving order via zero-padded sequence names
+# that sort before any epoch-named task. mv-aside first, so a stale writer
+# holding the old inode never re-materializes converted lines; a leftover
+# .migrating from an interrupted conversion is picked up first. No-op when
+# the queue is already a directory or absent.
+_queue_convert_legacy() {  # qdir
+    local qdir="$1" legacy="$1/queue.migrating"
+    if [ -f "$qdir/queue" ]; then
+        # A leftover from an interrupted conversion holds real tasks; fold it
+        # in before renaming the fresh file over it.
+        if [ -f "$legacy" ]; then
+            cat "$qdir/queue" >> "$legacy" 2>/dev/null || return 0
+            rm -f "$qdir/queue"
+        else
+            mv "$qdir/queue" "$legacy" 2>/dev/null || return 0
+        fi
+    fi
+    [ -f "$legacy" ] || return 0
+    mkdir -p "$qdir/queue" "$qdir/queue.tmp"
+    local line seq=0 fname
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in *[![:space:]]*) : ;; *) continue ;; esac
+        seq=$((seq + 1))
+        fname="0000000000-legacy-$(printf '%04d' "$seq")"
+        printf '%s\n' "$line" > "$qdir/queue.tmp/$fname" \
+            && mv "$qdir/queue.tmp/$fname" "$qdir/queue/$fname"
+    done < "$legacy"
+    rm -f "$legacy"
+}
+
+# The queue is a directory of one file per task. A task is written whole to
+# the sibling queue.tmp/ staging dir and renamed into place, so the drain can
+# never read a torn entry — the queue executes what it reads, which makes a
+# spliced line worse than a lost one. Names are <zero-padded epoch>-<pid>-<n>;
+# lexical order approximates arrival order (same caveats as mail filenames).
 _queue_add() {  # qdir, text
     local qdir="$1" text="$2"
     text="$(_trim "$text")"
     [ -n "$text" ] || { error "cs -queue add needs a non-empty task"; }
-    mkdir -p "$qdir"
-    printf '%s\n' "$text" >> "$qdir/queue"
+    # Senders write into other sessions' queues (task-kind mail), so a
+    # recipient that has not reopened since the upgrade converts here.
+    _queue_convert_legacy "$qdir"
+    mkdir -p "$qdir/queue" "$qdir/queue.tmp"
+    # The zero-padded per-process sequence keeps several adds from one process
+    # inside one second (a spawn seed's task list) in submission order; guard
+    # against an inherited same-named env var poisoning the counter.
+    case "${_QUEUE_SEQ:-}" in ''|*[!0-9]*) _QUEUE_SEQ=0;; esac
+    _QUEUE_SEQ=$((10#$_QUEUE_SEQ + 1))
+    local fname
+    fname="$(printf '%010d' "$(date +%s)")-$$-$(printf '%04d' "$_QUEUE_SEQ")-${RANDOM}"
+    printf '%s\n' "$text" > "$qdir/queue.tmp/$fname" \
+        && mv "$qdir/queue.tmp/$fname" "$qdir/queue/$fname"
     rm -f "$qdir/queue.declined"   # queue changed: allow the gate to re-ask
 }
 
+# Count of queued task files ([ -f ] also guards bash 3.2's literal
+# unmatched glob and skips the odd subdirectory).
+_queue_len() {  # qdir
+    local f n=0
+    for f in "$1/queue"/*; do
+        [ -f "$f" ] || continue
+        n=$((n + 1))
+    done
+    echo "$n"
+}
+
 _queue_list() {  # qdir
-    local qdir="$1"
-    if [ -s "$qdir/queue" ]; then
+    local qdir="$1" f n=0 text
+    if [ "$(_queue_len "$qdir")" -gt 0 ]; then
         echo "Pending:"
-        awk 'NF{ printf "  %d. %s\n", ++n, $0 }' "$qdir/queue"
+        for f in "$qdir/queue"/*; do
+            [ -f "$f" ] || continue
+            text=$(cat "$f")
+            case "$text" in *[![:space:]]*) : ;; *) continue ;; esac
+            n=$((n + 1))
+            printf '  %d. %s\n' "$n" "${text//$'\n'/ }"
+        done
     else
         echo "Queue is empty."
     fi
@@ -33,16 +97,24 @@ _queue_list() {  # qdir
 
 _queue_rm() {  # qdir, index
     local qdir="$1" n="$2"
-    case "$n" in ''|*[!0-9]*) error "cs -queue rm needs a line number";; esac
-    [ -f "$qdir/queue" ] || { error "queue is empty"; }
-    awk -v target="$n" 'NF{ c++ } { if (c==target && NF) next; print }' "$qdir/queue" \
-        > "$qdir/queue.tmp" && mv "$qdir/queue.tmp" "$qdir/queue"
+    case "$n" in ''|*[!0-9]*) error "cs -queue rm needs a task number";; esac
+    [ "$(_queue_len "$qdir")" -gt 0 ] || { error "queue is empty"; }
+    local f i=0
+    for f in "$qdir/queue"/*; do
+        [ -f "$f" ] || continue
+        i=$((i + 1))
+        if [ "$i" -eq "$n" ]; then
+            rm -f "$f"
+            break
+        fi
+    done
     rm -f "$qdir/queue.declined"
 }
 
 _queue_clear() {  # qdir
     local qdir="$1"
-    rm -f "$qdir/queue" "$qdir/queue.state" "$qdir/queue.declined"
+    rm -rf "$qdir/queue" "$qdir/queue.tmp"
+    rm -f "$qdir/queue.state" "$qdir/queue.declined"
 }
 
 _queue_log() {  # qdir
@@ -68,6 +140,7 @@ run_queue() {
         error "cs -queue must be run inside a cs session, or as: cs <session> -queue ..."
     fi
     local qdir="$CLAUDE_SESSION_META_DIR/local"
+    _queue_convert_legacy "$qdir"
     local sub="${1:-list}"
     case "$sub" in
         add)   shift; _queue_add "$qdir" "$*";;

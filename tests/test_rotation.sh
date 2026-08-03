@@ -788,7 +788,8 @@ test_nudge_threshold_override() {
 
 test_nudge_yields_to_queue_drain() {
     _rot_hook_session "rot-nudge-queue"
-    printf 'task one\n' > "$CLAUDE_SESSION_META_DIR/local/queue"
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local/queue"
+    printf 'task one\n' > "$CLAUDE_SESSION_META_DIR/local/queue/0000000001-seed"
     printf 'armed\n' > "$CLAUDE_SESSION_META_DIR/local/queue.state"
     local out
     out=$(_stop_with_ctx 80 "$UUID_A") || return 1

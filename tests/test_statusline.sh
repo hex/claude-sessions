@@ -1377,7 +1377,11 @@ test_notes_segment_shows_queue_depth() {
     export NO_COLOR=1
     export CLAUDE_SESSION_NAME="notesess"
     make_cs_session "notesess" 0 cyan
-    printf 'task a\ntask b\ntask c\n' > "$CS_SESSIONS_ROOT/notesess/.cs/local/queue"
+    local qdir="$CS_SESSIONS_ROOT/notesess/.cs/local/queue"
+    mkdir -p "$qdir"
+    printf 'task a\n' > "$qdir/0000000001-a"
+    printf 'task b\n' > "$qdir/0000000002-b"
+    printf 'task c\n' > "$qdir/0000000003-c"
     local out
     out=$(run_sl "$FIXTURE_DOCS")
     assert_output_contains "$out" "▤ 3" "notes segment shows the queue depth" || return 1
@@ -1387,69 +1391,76 @@ test_notes_segment_absent_when_queue_empty() {
     export NO_COLOR=1
     export CLAUDE_SESSION_NAME="emptyq"
     make_cs_session "emptyq" 0 cyan
-    : > "$CS_SESSIONS_ROOT/emptyq/.cs/local/queue"
+    mkdir -p "$CS_SESSIONS_ROOT/emptyq/.cs/local/queue"
     local out
     out=$(run_sl "$FIXTURE_DOCS")
     assert_output_not_contains "$out" "▤" "notes segment hidden when queue empty" || return 1
 }
 
-# The queue count skips whitespace-only lines (a blank line is not a task). The
-# pure-bash line loop must preserve awk's NF semantics.
-test_notes_segment_skips_whitespace_only_lines() {
+# Only regular files count as tasks: a subdirectory must not inflate the badge.
+test_notes_segment_counts_only_files() {
     export NO_COLOR=1
     export CLAUDE_SESSION_NAME="wsq"
     make_cs_session "wsq" 0 cyan
-    printf 'task a\n   \ntask b\n' > "$CS_SESSIONS_ROOT/wsq/.cs/local/queue"
+    local qdir="$CS_SESSIONS_ROOT/wsq/.cs/local/queue"
+    mkdir -p "$qdir/subdir"
+    printf 'task a\n' > "$qdir/0000000001-a"
+    printf 'task b\n' > "$qdir/0000000002-b"
     local out
     out=$(run_sl "$FIXTURE_DOCS")
-    assert_output_contains "$out" "▤ 2" "whitespace-only queue lines are not counted" || return 1
+    assert_output_contains "$out" "▤ 2" "only task files are counted" || return 1
 }
 
-# Mail segment: unread cross-session mail after the notes queue. Unread =
-# newline-terminated inbox lines past the `seen` cursor (the cursor `cs -msg`
-# advances on read), matching the shell's _mail_total and the TUI.
+# Mail segment: unread cross-session mail after the notes queue. Unread is the
+# count of mail/new/*.json documents (cs -msg moves what it prints to cur/),
+# matching the shell reader and the TUI.
 # ============================================================================
 
 test_mail_segment_shows_unread_count() {
     export NO_COLOR=1
     export CLAUDE_SESSION_NAME="mailsess"
     make_cs_session "mailsess" 0 cyan
-    mkdir -p "$CS_SESSIONS_ROOT/mailsess/.cs/local/mail"
-    printf '{"a":1}\n{"a":2}\n{"a":3}\n{"a":4}\n' \
-        > "$CS_SESSIONS_ROOT/mailsess/.cs/local/mail/inbox.jsonl"
-    printf '1\n' > "$CS_SESSIONS_ROOT/mailsess/.cs/local/mail/seen"
+    local mdir="$CS_SESSIONS_ROOT/mailsess/.cs/local/mail"
+    mkdir -p "$mdir/new" "$mdir/cur"
+    printf '{"a":1}\n' > "$mdir/new/0000000001-a.json"
+    printf '{"a":2}\n' > "$mdir/new/0000000002-b.json"
+    printf '{"a":3}\n' > "$mdir/new/0000000003-c.json"
+    printf '{"a":4}\n' > "$mdir/cur/0000000000-read.json"
     local out
     out=$(run_sl "$FIXTURE_DOCS")
-    assert_output_contains "$out" "✉ 3" "mail segment shows unread count (total 4 minus seen 1)" || return 1
+    assert_output_contains "$out" "✉ 3" "mail segment counts new/*.json only (read mail in cur/ excluded)" || return 1
 }
 
 test_mail_segment_absent_when_all_read() {
     export NO_COLOR=1
     export CLAUDE_SESSION_NAME="readmail"
     make_cs_session "readmail" 0 cyan
-    mkdir -p "$CS_SESSIONS_ROOT/readmail/.cs/local/mail"
-    printf '{"a":1}\n{"a":2}\n' \
-        > "$CS_SESSIONS_ROOT/readmail/.cs/local/mail/inbox.jsonl"
-    printf '2\n' > "$CS_SESSIONS_ROOT/readmail/.cs/local/mail/seen"
+    local mdir="$CS_SESSIONS_ROOT/readmail/.cs/local/mail"
+    mkdir -p "$mdir/new" "$mdir/cur"
+    printf '{"a":1}\n' > "$mdir/cur/0000000001-a.json"
+    printf '{"a":2}\n' > "$mdir/cur/0000000002-b.json"
     local out
     out=$(run_sl "$FIXTURE_DOCS")
     assert_output_not_contains "$out" "✉" "mail segment hidden when all mail is read" || return 1
 }
 
-# A half-written final line (no trailing newline) must not inflate the count:
-# the `seen` cursor is set from _mail_total (wc -l), which excludes a torn line.
-# Counting it here would show a phantom unread that never clears.
-test_mail_segment_ignores_torn_final_line() {
+# Only *.json files are mail: a .DS_Store, a staging leftover or a subdirectory
+# in new/ must not inflate the badge — a phantom unread that cs -msg cannot
+# clear would never go out.
+test_mail_segment_ignores_non_json_entries() {
     export NO_COLOR=1
-    export CLAUDE_SESSION_NAME="tornmail"
-    make_cs_session "tornmail" 0 cyan
-    mkdir -p "$CS_SESSIONS_ROOT/tornmail/.cs/local/mail"
-    printf '{"a":1}\n{"a":2}\n{"a":3}\n{"a":4' \
-        > "$CS_SESSIONS_ROOT/tornmail/.cs/local/mail/inbox.jsonl"
-    printf '0\n' > "$CS_SESSIONS_ROOT/tornmail/.cs/local/mail/seen"
+    export CLAUDE_SESSION_NAME="straymail"
+    make_cs_session "straymail" 0 cyan
+    local mdir="$CS_SESSIONS_ROOT/straymail/.cs/local/mail"
+    mkdir -p "$mdir/new/subdir"
+    printf '{"a":1}\n' > "$mdir/new/0000000001-a.json"
+    printf '{"a":2}\n' > "$mdir/new/0000000002-b.json"
+    printf '{"a":3}\n' > "$mdir/new/0000000003-c.json"
+    printf 'stray\n' > "$mdir/new/.DS_Store"
+    printf '{"a":4' > "$mdir/new/0000000004-torn.json.partial"
     local out
     out=$(run_sl "$FIXTURE_DOCS")
-    assert_output_contains "$out" "✉ 3" "torn final line is not counted (3 complete lines, none seen)" || return 1
+    assert_output_contains "$out" "✉ 3" "non-.json entries are not counted as unread" || return 1
 }
 
 test_pane_segment_shows_tmux_pane_id() {
@@ -1567,10 +1578,10 @@ test_enable_warns_that_a_restart_is_required() {
 
 run_test test_notes_segment_shows_queue_depth
 run_test test_notes_segment_absent_when_queue_empty
-run_test test_notes_segment_skips_whitespace_only_lines
+run_test test_notes_segment_counts_only_files
 run_test test_mail_segment_shows_unread_count
 run_test test_mail_segment_absent_when_all_read
-run_test test_mail_segment_ignores_torn_final_line
+run_test test_mail_segment_ignores_non_json_entries
 run_test test_pane_segment_shows_tmux_pane_id
 run_test test_pane_segment_absent_outside_tmux
 run_test test_pane_segment_needs_both_tmux_vars

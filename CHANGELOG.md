@@ -4,6 +4,16 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## Unreleased
+
+### Fixes
+
+- **Concurrent mail and queue delivery could interleave into garbage — or into the drain.** Both `cs -msg` and the walk-away queue delivered by appending a line to a shared file, but bash's `printf` flushes large bodies in ~1KB chunks, so simultaneous senders (a spawn fan-out finishing together is the normal case) spliced each other's lines: measured, four concurrent senders left only 112 of 200 lines intact. Torn mail was silently discarded by the tolerant readers; a torn queue line was worse — the drain executes what it reads. Delivery is now atomic by construction: mail is a per-message maildir (`mail/tmp/` → rename into `mail/new/`; `cs -msg` moves what it prints to `mail/cur/`), and the queue is one file per task staged the same way, popped by moving the lexically first entry aside (atomic against a second drain). Unread mail is simply the count of `new/*.json` — the same basis in `cs -msg`, the prompt digest, the status line, and the TUI — and the old `seen` cursor arithmetic is gone. Legacy `mail/inbox.jsonl` mailboxes are converted on the session's next open (worktree opens included); lines that fail to parse are quarantined in `mail/corrupt.jsonl` as evidence of the tearing this removes.
+
+### Changed
+
+- **Mail bodies may now be 64KB, and `cs -msg <session> -` reads the body from stdin.** The 4096-byte cap guarded the corruption window above; with delivery atomic it only bounds render cost, so it rises to 65536. Over-cap bodies still error rather than truncate. The stdin form is what makes the larger cap practical — a multi-KB handoff does not belong in argv.
+
 ## 2026.8.4
 
 ### Fixes

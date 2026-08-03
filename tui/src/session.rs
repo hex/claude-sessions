@@ -287,18 +287,30 @@ pub fn queue_active(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// The highlighted session's queued tasks, one per non-blank line, in order.
+/// Task files in the session's queue directory (one file per task), in
+/// lexical filename order — the queue's arrival order.
+pub fn queue_task_files(name: &str) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = match fs::read_dir(queue_dir(name).join("queue")) {
+        Ok(rd) => rd
+            .flatten()
+            .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+            .map(|e| e.path())
+            .collect(),
+        Err(_) => return Vec::new(),
+    };
+    files.sort();
+    files
+}
+
+/// The highlighted session's queued tasks, one entry per task file, in order.
 /// Read fresh from disk so callers always see the latest queue.
 pub fn read_queue(name: &str) -> Vec<String> {
-    let path = queue_dir(name).join("queue");
-    fs::read_to_string(path)
-        .map(|text| {
-            text.lines()
-                .filter(|line| !line.trim().is_empty())
-                .map(|line| line.to_string())
-                .collect()
-        })
-        .unwrap_or_default()
+    queue_task_files(name)
+        .iter()
+        .filter_map(|p| fs::read_to_string(p).ok())
+        .map(|s| s.trim_end_matches('\n').to_string())
+        .filter(|s| !s.trim().is_empty())
+        .collect()
 }
 
 pub fn scan_sessions() -> Vec<Session> {
@@ -418,8 +430,12 @@ fn read_session(path: &Path, secret_counts: &HashMap<String, u32>) -> Session {
         None => Liveness::Dormant,
     };
     let secrets_count = secret_counts.get(&name).copied().unwrap_or(0);
-    let queue_depth = fs::read_to_string(meta_dir.join("local/queue"))
-        .map(|s| s.lines().filter(|l| !l.trim().is_empty()).count() as u32)
+    let queue_depth = fs::read_dir(meta_dir.join("local/queue"))
+        .map(|rd| {
+            rd.flatten()
+                .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+                .count() as u32
+        })
         .unwrap_or(0);
     let unread_mail = unread_mail_count(&meta_dir);
     let has_git = is_git_checkout(path);
@@ -727,20 +743,20 @@ fn remove_worktree_session(root: &Path, name: &str, path: &Path) -> std::io::Res
     fs::remove_dir_all(path)
 }
 
-/// Unread cross-session mail: inbox lines past the `seen` cursor (the cursor
-/// `cs -msg` advances on read). Counts newline-terminated lines like the shell's
-/// `_mail_total`, so a half-written final line is not counted.
+/// Unread cross-session mail: the documents in `mail/new/` (`cs -msg` moves
+/// what it prints into `cur/`), matching the shell reader and the statusline.
+/// Only `*.json` files count — a `.DS_Store`, a staging leftover or a
+/// subdirectory would otherwise badge a phantom unread that never clears.
 fn unread_mail_count(meta_dir: &Path) -> u32 {
-    // Count raw newline bytes, like the shell's `_mail_total` (wc -l): reading
-    // as UTF-8 would collapse the whole file to empty on an invalid-UTF-8 torn
-    // final line, silently hiding the complete messages before it.
-    let inbox = fs::read(meta_dir.join("local/mail/inbox.jsonl")).unwrap_or_default();
-    let total = inbox.iter().filter(|&&b| b == b'\n').count() as u32;
-    let seen = fs::read_to_string(meta_dir.join("local/mail/seen"))
-        .ok()
-        .and_then(|s| s.trim().parse::<u32>().ok())
-        .unwrap_or(0);
-    total.saturating_sub(seen)
+    fs::read_dir(meta_dir.join("local/mail/new"))
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter(|e| e.path().extension().is_some_and(|ext| ext == "json"))
+                .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+                .count() as u32
+        })
+        .unwrap_or(0)
 }
 
 fn read_lock_pid(meta_dir: &Path) -> Option<u32> {
@@ -904,43 +920,41 @@ mod tests {
     }
 
     #[test]
-    fn unread_mail_counts_lines_past_seen_cursor() {
+    fn unread_mail_counts_new_json_documents() {
         let dir = std::env::temp_dir().join(format!("cs-unread-{}", std::process::id()));
-        let mail = dir.join("local/mail");
-        fs::create_dir_all(&mail).unwrap();
-        // three complete messages plus a torn final line (no trailing newline)
-        fs::write(mail.join("inbox.jsonl"), "{\"a\":1}\n{\"a\":2}\n{\"a\":3}\n{\"a\":4").unwrap();
-        fs::write(mail.join("seen"), "1\n").unwrap();
-        // 3 complete lines minus the seen cursor (1) = 2; the torn 4th is excluded
+        let new = dir.join("local/mail/new");
+        let cur = dir.join("local/mail/cur");
+        fs::create_dir_all(&new).unwrap();
+        fs::create_dir_all(&cur).unwrap();
+        fs::write(new.join("0000000001-a.json"), "{\"a\":1}\n").unwrap();
+        fs::write(new.join("0000000002-b.json"), "{\"a\":2}\n").unwrap();
+        // read mail lives in cur/ and is not unread
+        fs::write(cur.join("0000000000-read.json"), "{\"a\":0}\n").unwrap();
         assert_eq!(unread_mail_count(&dir), 2);
-        // no seen cursor => 0 => all 3 complete lines are unread
-        fs::remove_file(mail.join("seen")).unwrap();
-        assert_eq!(unread_mail_count(&dir), 3);
         fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
-    fn unread_mail_counts_past_an_invalid_utf8_torn_tail() {
-        let dir = std::env::temp_dir().join(format!("cs-unread-torn-{}", std::process::id()));
-        let mail = dir.join("local/mail");
-        fs::create_dir_all(&mail).unwrap();
-        // Two complete messages, then a torn final line whose bytes are invalid
-        // UTF-8 (a 4-byte emoji cut mid-sequence by an interrupted append). The
-        // shell's wc -l counts the two complete lines; the TUI must match, not
-        // read the whole file as UTF-8 and collapse the count to zero.
-        let mut bytes = b"{\"a\":1}\n{\"a\":2}\n".to_vec();
-        bytes.extend_from_slice(&[0xF0, 0x9F]);
-        fs::write(mail.join("inbox.jsonl"), &bytes).unwrap();
+    fn unread_mail_ignores_non_json_entries() {
+        let dir = std::env::temp_dir().join(format!("cs-unread-stray-{}", std::process::id()));
+        let new = dir.join("local/mail/new");
+        fs::create_dir_all(new.join("subdir")).unwrap();
+        fs::write(new.join("0000000001-a.json"), "{\"a\":1}\n").unwrap();
+        // Strays a scan must not count: a Finder droplet, a staging leftover,
+        // and a subdirectory. A phantom unread here would badge forever,
+        // because cs -msg only clears new/*.json.
+        fs::write(new.join(".DS_Store"), "stray").unwrap();
+        fs::write(new.join("0000000002-b.json.partial"), "{\"a\":2").unwrap();
         assert_eq!(
             unread_mail_count(&dir),
-            2,
-            "complete lines stay counted despite an invalid-UTF-8 torn tail"
+            1,
+            "only new/*.json files count as unread"
         );
         fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
-    fn unread_mail_is_zero_without_inbox() {
+    fn unread_mail_is_zero_without_maildir() {
         let dir = std::env::temp_dir().join(format!("cs-unread-none-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         assert_eq!(unread_mail_count(&dir), 0);
@@ -1214,9 +1228,11 @@ mod tests {
         let tmp = std::env::temp_dir().join(format!("cs-qd-{}", std::process::id()));
         let root = tmp.as_path();
         setup_session(root, "beta");
-        let local = root.join("beta").join(".cs/local");
-        std::fs::create_dir_all(&local).unwrap();
-        std::fs::write(local.join("queue"), "t1\nt2\nt3\n").unwrap();
+        let qdir = root.join("beta").join(".cs/local/queue");
+        std::fs::create_dir_all(qdir.join("subdir")).unwrap();
+        std::fs::write(qdir.join("0000000001-a"), "t1\n").unwrap();
+        std::fs::write(qdir.join("0000000002-b"), "t2\n").unwrap();
+        std::fs::write(qdir.join("0000000003-c"), "t3\n").unwrap();
         let sessions = scan_sessions_in(root);
         let beta = sessions.iter().find(|s| s.name == "beta").unwrap();
         assert_eq!(beta.queue_depth, 3);

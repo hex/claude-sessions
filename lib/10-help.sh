@@ -34,7 +34,7 @@ Commands:
   -queue rm <n>       Remove pending task n
   -queue clear        Empty the queue and stop draining
   -queue log          Show the walk-away run journal (drains, breaker trips)
-  -msg <session> "<body>"  Send a message to another session (--kind notify|task|text|result)
+  -msg <session> "<body>"  Send a message to another session (--kind notify|task|text|result; '-' reads the body from stdin)
   -msg                Read this session's unread mail
   -msg log            Show this session's full mail history
   -spawn <name>       Open a session in the cs tmux session (--task "..." seeds and arms its queue)${wsl_only}

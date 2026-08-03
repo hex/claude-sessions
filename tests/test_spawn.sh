@@ -173,6 +173,26 @@ test_spawn_new_session_race_falls_through_to_new_window() {
 
 WQ() { printf '%s' "$CS_SESSIONS_ROOT/worker/.cs/local"; }
 
+# Count task files in the worker's queue directory.
+WQ_COUNT() {
+    local f n=0
+    for f in "$(WQ)/queue"/*; do
+        [ -f "$f" ] || continue
+        n=$((n + 1))
+    done
+    printf '%s' "$n"
+}
+
+# Content of the lexically first queued task (empty when none).
+WQ_FIRST() {
+    local f
+    for f in "$(WQ)/queue"/*; do
+        [ -f "$f" ] || continue
+        cat "$f"
+        return 0
+    done
+}
+
 # Launch recipe (same as tests/test_uuid.sh): CLAUDE_CODE_BIN=echo makes cs's
 # `exec $CLAUDE_CODE_BIN <args>` print claude's argv; <<< "" answers any read.
 _launch_worker() {
@@ -183,9 +203,9 @@ test_launch_consumes_seed_queues_arms_and_kicks() {
     mkdir -p "$CS_SESSIONS_ROOT/.spawn"
     printf 'boss\nfirst job\nsecond job\n' > "$CS_SESSIONS_ROOT/.spawn/worker.seed"
     local out; out=$(_launch_worker) || return 1
-    assert_file_contains "$(WQ)/queue" "first job" "task 1 queued" || return 1
-    assert_file_contains "$(WQ)/queue" "second job" "task 2 queued" || return 1
-    assert_eq "first job" "$(sed -n 1p "$(WQ)/queue")" "queue order kept" || return 1
+    grep -q "first job" "$(WQ)/queue"/* || { echo "  task 1 not queued"; return 1; }
+    grep -q "second job" "$(WQ)/queue"/* || { echo "  task 2 not queued"; return 1; }
+    assert_eq "first job" "$(WQ_FIRST)" "queue order kept" || return 1
     assert_file_contains "$(WQ)/queue.state" "armed" "queue armed" || return 1
     assert_file_contains "$(WQ)/spawned-by" "boss" "spawned-by recorded" || return 1
     [ ! -f "$CS_SESSIONS_ROOT/.spawn/worker.seed" ] || { echo "  seed not deleted"; return 1; }
@@ -198,7 +218,7 @@ test_launch_empty_spawner_gets_no_reply_wiring() {
     mkdir -p "$CS_SESSIONS_ROOT/.spawn"
     printf '\nonly job\n' > "$CS_SESSIONS_ROOT/.spawn/worker.seed"
     local out; out=$(_launch_worker) || return 1
-    assert_file_contains "$(WQ)/queue" "only job" "task queued" || return 1
+    grep -q "only job" "$(WQ)/queue"/* || { echo "  task not queued"; return 1; }
     [ ! -f "$(WQ)/spawned-by" ] || { echo "  spawned-by written for empty spawner"; return 1; }
     assert_output_contains "$out" "armed with 1 task(s)" "kick present" || return 1
     assert_output_not_contains "$out" "Spawned by" "no spawner attribution" || return 1
@@ -218,7 +238,7 @@ test_launch_sets_aside_stale_seed() {
     local out; out=$(_launch_worker) || return 1
     [ ! -f "$CS_SESSIONS_ROOT/.spawn/worker.seed" ] || { echo "  stale seed still active"; return 1; }
     assert_file_exists "$CS_SESSIONS_ROOT/.spawn/worker.seed.stale" "stale set aside" || return 1
-    [ ! -f "$(WQ)/queue" ] || { echo "  stale seed queued work"; return 1; }
+    assert_eq "0" "$(WQ_COUNT)" "stale seed queued no work" || return 1
     assert_output_not_contains "$out" "armed with" "no kick from stale seed" || return 1
 }
 
@@ -288,28 +308,51 @@ _worker_stop_turn() {
 _arm_worker_queue() {  # tasks...
     create_test_session worker >/dev/null 2>&1 || true
     create_test_session boss >/dev/null 2>&1 || true
-    local t
-    for t in "$@"; do printf '%s\n' "$t" >> "$CS_SESSIONS_ROOT/worker/.cs/local/queue"; done
+    local t i=0
+    mkdir -p "$CS_SESSIONS_ROOT/worker/.cs/local/queue"
+    for t in "$@"; do
+        i=$((i + 1))
+        printf '%s\n' "$t" > "$CS_SESSIONS_ROOT/worker/.cs/local/queue/$(printf '%010d' "$i")-seed"
+    done
     printf 'armed\n' > "$CS_SESSIONS_ROOT/worker/.cs/local/queue.state"
     printf 'boss\n' > "$CS_SESSIONS_ROOT/worker/.cs/local/spawned-by"
 }
-BOSS_INBOX() { printf '%s' "$CS_SESSIONS_ROOT/boss/.cs/local/mail/inbox.jsonl"; }
+# First unread message in boss's maildir, as a file path (empty when none).
+BOSS_MSG() {
+    local f
+    for f in "$CS_SESSIONS_ROOT/boss/.cs/local/mail/new"/*.json; do
+        [ -e "$f" ] || return 1
+        printf '%s' "$f"
+        return 0
+    done
+}
+
+# Count of unread messages in boss's maildir.
+BOSS_MSG_COUNT() {
+    local f n=0
+    for f in "$CS_SESSIONS_ROOT/boss/.cs/local/mail/new"/*.json; do
+        [ -e "$f" ] || continue
+        n=$((n + 1))
+    done
+    printf '%s' "$n"
+}
 
 test_drain_finished_notifies_spawner_once() {
     _arm_worker_queue "only task"
     _worker_stop_turn >/dev/null || return 1        # armed -> draining, task 1 injected
     _worker_stop_turn >/dev/null || return 1        # task done -> drain_finished
-    assert_file_exists "$(BOSS_INBOX)" "spawner inbox written" || return 1
-    assert_file_contains "$(BOSS_INBOX)" "queue drained: 1 task(s) done" "notify body" || return 1
-    assert_eq "notify" "$(head -1 "$(BOSS_INBOX)" | jq -r .kind)" "kind notify" || return 1
-    assert_eq "worker" "$(head -1 "$(BOSS_INBOX)" | jq -r .from)" "from worker" || return 1
+    local msg; msg=$(BOSS_MSG) || { echo "  spawner mail not delivered"; return 1; }
+    assert_file_contains "$msg" "queue drained: 1 task(s) done" "notify body" || return 1
+    assert_eq "notify" "$(jq -r .kind "$msg")" "kind notify" || return 1
+    assert_eq "worker" "$(jq -r .from "$msg")" "from worker" || return 1
     [ ! -f "$CS_SESSIONS_ROOT/worker/.cs/local/spawned-by" ] || { echo "  spawned-by not one-shot"; return 1; }
     # A later, unrelated drain must not re-notify.
-    printf 'later task\n' >> "$CS_SESSIONS_ROOT/worker/.cs/local/queue"
+    mkdir -p "$CS_SESSIONS_ROOT/worker/.cs/local/queue"
+    printf 'later task\n' > "$CS_SESSIONS_ROOT/worker/.cs/local/queue/0000000009-later"
     printf 'armed\n' > "$CS_SESSIONS_ROOT/worker/.cs/local/queue.state"
     _worker_stop_turn >/dev/null || return 1
     _worker_stop_turn >/dev/null || return 1
-    assert_eq "1" "$(wc -l < "$(BOSS_INBOX)" | tr -d '[:space:]')" "no second notify" || return 1
+    assert_eq "1" "$(BOSS_MSG_COUNT)" "no second notify" || return 1
 }
 
 test_breaker_trip_notifies_and_keeps_spawned_by() {
@@ -317,7 +360,8 @@ test_breaker_trip_notifies_and_keeps_spawned_by() {
     _worker_stop_turn >/dev/null || return 1        # draining, task a injected
     printf '9\n' > "$CS_SESSIONS_ROOT/worker/.cs/local/failures"
     _worker_stop_turn >/dev/null || return 1        # trips the failure breaker
-    assert_file_contains "$(BOSS_INBOX)" "breaker tripped" "trip notified" || return 1
+    local msg; msg=$(BOSS_MSG) || { echo "  trip mail not delivered"; return 1; }
+    assert_file_contains "$msg" "breaker tripped" "trip notified" || return 1
     assert_file_exists "$CS_SESSIONS_ROOT/worker/.cs/local/spawned-by" "spawned-by kept on trip" || return 1
 }
 
@@ -326,7 +370,7 @@ test_drain_without_spawned_by_sends_nothing() {
     rm -f "$CS_SESSIONS_ROOT/worker/.cs/local/spawned-by"
     _worker_stop_turn >/dev/null || return 1
     _worker_stop_turn >/dev/null || return 1
-    [ ! -f "$(BOSS_INBOX)" ] || { echo "  notify sent without spawned-by"; return 1; }
+    assert_eq "0" "$(BOSS_MSG_COUNT)" "notify sent without spawned-by" || return 1
 }
 
 run_test test_drain_finished_notifies_spawner_once

@@ -85,43 +85,46 @@ _build_digest() {  # meta_local_dir
 }
 
 # Build the persistent unread-mail digest: on every prompt, inline the bodies of
-# mail past the `seen` cursor (which only `cs -msg` advances on read), so the
-# session stays aware of new mail until it actually reads it — not surface-once.
-# Bounded to keep context cheap: at most 5 messages, sender and body truncated
-# inside jq (codepoint-safe, so a torn multibyte char can never reach the shell
-# and poison the additionalContext), plus an "N more" overflow line. A task-kind
-# message is surfaced as a count-only label, never its body: the body is already
-# an imperative in the recipient's queue, so inlining it would double-execute.
-# No cursor is written here — persistence is anchored on `seen` — so this stays a
-# read-only view of the inbox (a multi-user-safety win: no hook-vs-hook race on a
-# mail cursor). Best-effort throughout: never breaks the hook.
+# the messages sitting in mail/new/ (which only `cs -msg` empties, by moving what
+# it prints to cur/), so the session stays aware of new mail until it actually
+# reads it — not surface-once. Bounded to keep context cheap: at most the first 5
+# documents are opened, sender and body truncated inside jq (codepoint-safe, so a
+# torn multibyte char can never reach the shell and poison the
+# additionalContext), plus an "N more" overflow line. A task-kind message is
+# surfaced as a count-only label, never its body: the body is already an
+# imperative in the recipient's queue, so inlining it would double-execute.
+# Nothing is written here — persistence is anchored on new/ itself — so this
+# stays a read-only view of the mailbox (a multi-user-safety win: no
+# hook-vs-hook race on a mail cursor). Only new/*.json counts: an unfiltered
+# scan would pick up a .DS_Store or a subdirectory and nag about phantom mail
+# that cs -msg cannot clear. Best-effort throughout: never breaks the hook.
 _build_mail_digest() {  # meta_local_dir
-    local mdir="$1/mail" inbox total seen
+    local mdir="$1/mail" f total=0
     MAIL_DIGEST=""
-    inbox="$mdir/inbox.jsonl"
-    [ -s "$inbox" ] || return 0
-    total=$(wc -l < "$inbox" 2>/dev/null | tr -d '[:space:]') || return 0
-    case "$total" in ''|*[!0-9]*) return 0;; esac
-    seen=$(cat "$mdir/seen" 2>/dev/null | tr -d '[:space:]') || true
-    case "$seen" in ''|*[!0-9]*) seen=0;; esac
-    # 10# so a zero-padded cursor ("08") is not read as octal by the arithmetic.
-    [ "$total" -gt "$((10#$seen))" ] || return 0
-    # tostr coerces any non-string field (a forged/hand-appended line could carry
-    # a number or object) to a string so a single bad line can't error the whole
-    # jq program and suppress every valid message beside it. The $n==0 guard keeps
-    # an all-unparseable window from emitting a bare "Unread mail (0)" nag.
-    MAIL_DIGEST=$(awk -v a=$((10#$seen + 1)) -v b="$total" 'NR>=a && NR<=b' "$inbox" 2>/dev/null | jq -rRs '
+    [ -d "$mdir/new" ] || return 0
+    local files=()
+    for f in "$mdir"/new/*.json; do
+        [ -e "$f" ] || continue
+        files+=("$f")
+        total=$((total + 1))
+    done
+    [ "$total" -gt 0 ] || return 0
+    # tostr coerces any non-string field (a forged/hand-written document could
+    # carry a number or object) to a string so a single bad document can't error
+    # the whole jq program and suppress every valid message beside it. The
+    # length==0 guard keeps an all-unparseable window from emitting a bare
+    # digest header with no lines under it.
+    MAIL_DIGEST=$(cat "${files[@]:0:5}" 2>/dev/null | jq -rRs --argjson total "$total" '
         def tostr: if type == "string" then . else tostring end;
         [split("\n")[] | select(length > 0) | (fromjson? // empty)] as $m |
-        ($m | length) as $n |
-        if $n == 0 then "" else
-        ( [ $m[0:5][] |
+        if ($m | length) == 0 then "" else
+        ( [ $m[] |
               ((((if (.from // "") == "" then .actor else .from end) // "") | tostr)[0:40]) as $who |
               if .kind == "task" then "  queued task from \($who) (runs via cs -queue)"
               else "  mail from \($who): \"\((((.body // "") | tostr) | gsub("[\n\r]"; " "))[0:160])\"" end ]
-          + (if $n > 5 then ["  ... and \($n - 5) more (cs -msg to read)"] else [] end)
+          + (if $total > 5 then ["  ... and \($total - 5) more (cs -msg to read)"] else [] end)
         ) as $lines |
-        "Unread mail (\($n)) - still unread, run cs -msg to clear:\n" + ($lines | join("\n"))
+        "Unread mail (\($total)) - still unread, run cs -msg to clear:\n" + ($lines | join("\n"))
         end
     ' 2>/dev/null) || MAIL_DIGEST=""
     MAIL_DIGEST=$(printf '%s' "$MAIL_DIGEST" | LC_ALL=C tr -d '\000-\010\013-\037\177')

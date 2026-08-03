@@ -2739,7 +2739,10 @@ mod tests {
         let name = "solo-working";
         let local = tmp.join(name).join(".cs/local");
         std::fs::create_dir_all(&local).unwrap();
-        std::fs::write(local.join("queue"), "first queued task\nsecond queued task\n").unwrap();
+        let qdir = local.join("queue");
+        std::fs::create_dir_all(&qdir).unwrap();
+        std::fs::write(qdir.join("0000000001-a"), "first queued task\n").unwrap();
+        std::fs::write(qdir.join("0000000002-b"), "second queued task\n").unwrap();
         let _guard = test_root::scoped(tmp.clone());
 
         let mut sessions = one_session();
@@ -3191,7 +3194,9 @@ mod tests {
         let local = tmp.join(name).join(".cs/local");
         std::fs::create_dir_all(&local).unwrap();
         let long = "Refactor the preview worker so that the contributor git walk is bounded by a date window";
-        std::fs::write(local.join("queue"), format!("{}\n", long)).unwrap();
+        let qdir = local.join("queue");
+        std::fs::create_dir_all(&qdir).unwrap();
+        std::fs::write(qdir.join("0000000001-a"), format!("{}\n", long)).unwrap();
         let _guard = test_root::scoped(tmp.clone());
 
         let mut sessions = one_session();
@@ -3275,7 +3280,10 @@ mod tests {
         let name = "solo-italic";
         let local = tmp.join(name).join(".cs/local");
         std::fs::create_dir_all(&local).unwrap();
-        std::fs::write(local.join("queue"), "alpha task\nbeta task\n").unwrap();
+        let qdir = local.join("queue");
+        std::fs::create_dir_all(&qdir).unwrap();
+        std::fs::write(qdir.join("0000000001-a"), "alpha task\n").unwrap();
+        std::fs::write(qdir.join("0000000002-b"), "beta task\n").unwrap();
         let _guard = test_root::scoped(tmp.clone());
 
         let mut sessions = one_session();
@@ -3320,7 +3328,10 @@ mod tests {
         let name = "solo-pad";
         let local = tmp.join(name).join(".cs/local");
         std::fs::create_dir_all(&local).unwrap();
-        std::fs::write(local.join("queue"), "one\ntwo\n").unwrap();
+        let qdir = local.join("queue");
+        std::fs::create_dir_all(&qdir).unwrap();
+        std::fs::write(qdir.join("0000000001-a"), "one\n").unwrap();
+        std::fs::write(qdir.join("0000000002-b"), "two\n").unwrap();
         let _guard = test_root::scoped(tmp.clone());
 
         let mut sessions = one_session();

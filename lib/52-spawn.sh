@@ -101,7 +101,7 @@ run_spawn() {
                 local t
                 t="$(_trim "$1")"
                 [ -n "$t" ] || error "cs -spawn --task needs a non-empty task"
-                case "$t" in *"$nl"*) error "task bodies must be a single line (the queue file is line-oriented)";; esac
+                case "$t" in *"$nl"*) error "task bodies must be a single line (the queue's done log and listing are line-oriented)";; esac
                 tasks+=("$t");;
             -*) error "Unknown option: $1. Usage: cs -spawn <name> [--task \"...\"] ...";;
             *)

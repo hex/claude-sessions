@@ -63,7 +63,7 @@ user-owned `CLAUDE.md` is never touched.
 | `pending-handoff` | Basename of the `.cs/handoffs/` file to rotate into — armed by the `rotate` skill (for `/clear`) or by the `r` answer at the resume prompt. Consumed and cleared by the next SessionStart whose source is `startup` or `clear`; left armed on any other source; disarmed by any other resume-prompt answer. |
 | `rotate-nudged` | Conversation UUID last nudged to rotate by the narrative reminder — keeps the 80%-context nudge to once per conversation. |
 | `disabled` | Opts the directory out of cs's hooks entirely. Present, the hooks decline as if it were not a session, whichever front end opened it. Before hooks resolved a session from the directory, a `claude` started outside `cs` in a session folder was inert; this restores that on request instead of by accident. |
-| `queue` | The walk-away task queue (`cs -queue`). |
+| `queue/` | The walk-away task queue (`cs -queue`): one file per task, staged in `queue.tmp/` and renamed into place so the drain never reads a torn entry. The drain pops the lexically first file by moving it aside — atomic against a second drain. |
 | `queue.state` | Drain state machine for the queue: `idle`, `armed`, or `draining`. |
 | `queue.done` | Log of completed queued tasks, appended as each is drained. |
 | `queue.declined` | Cooldown stamp after declining the queue-drain prompt. |
@@ -75,8 +75,7 @@ user-owned `CLAUDE.md` is never touched.
 | `context-pct` | Latest context-window percentage, stamped by the status line; the narrative reminder reads it to suggest compaction, and cs-tui uses its mtime as the liveness heartbeat for conversations opened outside cs. |
 | `limits` | Latest 5-hour/weekly rate-limit readings, stamped by the status line; read by `cs -usage` window anchoring and the queue's rate-limit breaker. |
 | `failures` | Per-task tool-failure counter written by `tool-failure-logger.sh`; feeds the queue's failures circuit breaker, reset at each drain advance. |
-| `mail/inbox.jsonl` | Cross-session mailbox: one JSON message per line, appended by senders (`cs -msg`). |
-| `mail/seen` | Read cursor: inbox line count already printed by `cs -msg`. Also the anchor for the prompt hook's unread-mail digest, which inlines every line past this cursor on each prompt until `cs -msg` advances it — so awareness persists until the mail is actually read. (The former `mail/notified` surface-once cursor is retired; a leftover file on old sessions is inert.) |
+| `mail/` | Cross-session mailbox, one JSON document per message: senders (`cs -msg`) write to the recipient's `tmp/` and rename into `new/` (atomic — a message is either entirely present or absent); `cs -msg` prints `new/*.json` and moves them to `cur/`. Unread is simply the count of `new/*.json`, the same basis for the prompt hook's digest, the status line, and the TUI. Filenames are `<zero-padded epoch>-<id>.json` — not a monotonic clock; nothing may treat name order as arrival order. `corrupt.jsonl` holds any legacy inbox lines that failed to parse during migration. (A legacy `inbox.jsonl` plus its `seen` cursor is converted on the next session open.) |
 | `spawned-by` | Spawner session name for a `cs -spawn`ed worker; deleted after the drain-finished notify (one-shot). |
 
 ## Merge policy

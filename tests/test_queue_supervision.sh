@@ -49,8 +49,12 @@ _stop_turn() {
 }
 
 _arm_queue() {  # tasks...
-    local qdir="$CLAUDE_SESSION_META_DIR/local" t
-    for t in "$@"; do printf '%s\n' "$t" >> "$qdir/queue"; done
+    local qdir="$CLAUDE_SESSION_META_DIR/local" t i=0
+    mkdir -p "$qdir/queue"
+    for t in "$@"; do
+        i=$((i + 1))
+        printf '%s\n' "$t" > "$qdir/queue/$(printf '%010d' "$i")-seed"
+    done
     printf 'armed\n' > "$qdir/queue.state"
 }
 
@@ -94,7 +98,7 @@ test_failures_breaker_parks_the_drain() {
     assert_output_contains "$(_inbox)" '"event":"breaker_tripped"' "trip recorded" || return 1
     assert_output_contains "$(_inbox)" '"reason":"failures"' "trip reason recorded" || return 1
     # The remaining task is intact — nothing lost.
-    grep -q "never reached" "$CLAUDE_SESSION_META_DIR/local/queue" \
+    grep -q "never reached" "$CLAUDE_SESSION_META_DIR/local/queue"/* \
         || { echo "  FAIL: remaining task lost on trip"; return 1; }
 }
 
