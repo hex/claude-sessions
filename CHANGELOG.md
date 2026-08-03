@@ -4,6 +4,14 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.8.3
+
+### Fixes
+
+- **`/rotate` recorded the wrong parent on a second rotation.** The skill took the conversation UUID from `$CS_CLAUDE_SESSION_ID` and fell back to `.cs/local/state` only when that was unset. The two agree until the first `/clear` and diverge after it: cs exports the env var once per process and never refreshes it, while the SessionStart hook rebinds `claude_session_id` on every fresh conversation. A second rotation therefore wrote the grandparent as `parent:`, which also weakened the check that supersedes stale handoffs by matching `parent:` against the session log. The skill now reads the state file first and says why the env var is only a fallback.
+
+The env var's staleness is deliberate and unchanged: `session-start.sh` keys its ref-rename guard on `CS_CLAUDE_SESSION_ID` still naming the current process's predecessor, which is what stops one conversation stripping a live sibling's crash-recovery snapshot.
+
 ## 2026.8.2
 
 Layout fixes for the merge readiness screen shipped in v2026.8.1, found by looking at it on a real terminal and by reviewing that fix before tagging.
