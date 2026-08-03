@@ -76,8 +76,11 @@ threads spec's transcript ordering and wake marker both depend on that caveat.
 ### Queue: one file per task
 
 `_queue_add`'s append has the same defect and gets the same fix. The queue
-becomes a directory of one file per task, named `<ts>-<pid>-<random>`, staged in
-a sibling `queue.tmp/` and renamed into place. The drain pops by taking the
+becomes a directory of one file per task, named
+`<ts>-<pid>-<seq>-<random>` with a zero-padded per-process sequence, staged in a
+sibling `queue.tmp/` and renamed into place. The sequence is not decoration: a
+spawn seed enqueues several tasks inside one second from one process, and
+without it their submission order is lost to `RANDOM`. The drain pops by taking the
 lexically first entry and `mv`ing it aside before running it, which also makes
 the pop atomic against a second drain — something the current
 read-first-line-then-rewrite cannot promise. `queue.state` and `queue.declined`
@@ -98,11 +101,13 @@ to task files, so `queue.tmp/` is never a task.
 `cs -queue add`, the TUI Notes panel and the drain together while stranding
 queued work. Migration is keyed on "`queue` is a regular file" — not on the
 directory being absent, which the first write would destroy — and runs lazily
-from the queue accessors, needing no session-open hook. Order mirrors the mail
-migration: `mv queue queue.migrating`, convert each non-blank line to one task
-file preserving order, delete `queue.migrating`. A stale writer holding an open
-descriptor keeps writing into the renamed inode and its lines are still
-converted.
+from the queue accessors, and additionally at session open on both paths — the
+accessors alone leave a window where the status line, the TUI and the drain,
+which only read, report an empty queue on an upgraded session nobody has written
+to yet. Order mirrors the mail migration: `mv queue queue.migrating`, convert
+each non-blank line to one task file preserving order, delete
+`queue.migrating`. A stale writer holding an open descriptor keeps writing into
+the renamed inode and its lines are still converted.
 
 Both mail and the queue therefore stop appending to shared files, which is the
 whole point: locking was the alternative, and it serializes delivery, lets a
@@ -131,7 +136,11 @@ The digest is a redesign, not a retarget: its five-message bound, 160-character
 clamp and task-kind labeling operate on a line slice
 (`hooks/scope-prompt.sh:113-124`) and become a bounded, sorted scan of `new/`.
 Its contract — a message stays in the digest until `cs -msg` reads it — survives
-unchanged, because `new/` is exactly that set.
+unchanged, because `new/` is exactly that set. Its header count changes meaning:
+it counts files rather than successfully parsed records, so an unparseable
+document among the first five counts toward N while rendering nothing. That is
+the honest number now that `new/` is the unread set, and it keeps the digest
+agreeing with the status line and the TUI, which also count files.
 
 The torn-line defenses in all of them (and the test at `tui/src/session.rs:923`)
 become unnecessary rather than being weakened: an incomplete message never
