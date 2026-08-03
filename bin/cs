@@ -2424,6 +2424,75 @@ migrate_if_exists() {
     fi
 }
 
+# Convert a legacy line-per-message inbox (already renamed to
+# inbox.jsonl.migrating) into per-message maildir documents. Lines at or below
+# the old `seen` cursor were read and go to cur/; the rest go to new/. A line
+# that does not parse at all is quarantined in mail/corrupt.jsonl — it is
+# evidence of the append tearing the maildir removes, not garbage. Records may
+# lack a numeric ts (accepted and pinned by test) or a usable id, so neither
+# is assumed for the filename: a missing ts becomes this migration's epoch
+# second and a missing id a migration-local sequence, preserving order within
+# the legacy file. Deletes the converted file and the cursor when done.
+_convert_legacy_inbox() {  # maildir
+    local maildir="$1" legacy="$1/inbox.jsonl.migrating"
+    [ -f "$legacy" ] || return 0
+    mkdir -p "$maildir/tmp" "$maildir/new" "$maildir/cur"
+    local seen=""
+    if [ -f "$maildir/seen" ]; then
+        IFS= read -r seen < "$maildir/seen" || true
+    fi
+    case "$seen" in ''|*[!0-9]*) seen=0;; esac
+    local epoch lineno=0 seq=0 line meta ts id fname dest
+    epoch=$(date +%s)
+    # `|| [ -n "$line" ]` converts a final line the stale writer never
+    # terminated rather than dropping it.
+    while IFS= read -r line || [ -n "$line" ]; do
+        lineno=$((lineno + 1))
+        case "$line" in *[![:space:]]*) : ;; *) continue ;; esac
+        meta=$(printf '%s\n' "$line" | jq -r '
+            (try (if (.ts|type) == "number" then (.ts|floor|tostring) else "" end) catch "") + "\t" +
+            (try (if (.id|type) == "string" then .id else "" end) catch "")
+        ' 2>/dev/null) || meta=""
+        if [ -z "$meta" ]; then
+            printf '%s\n' "$line" >> "$maildir/corrupt.jsonl"
+            continue
+        fi
+        seq=$((seq + 1))
+        ts="${meta%%$'\t'*}"
+        id="${meta#*$'\t'}"
+        # Base-10 normalize before printf %d, which reads a leading zero as octal.
+        case "$ts" in ''|*[!0-9]*) ts="$epoch";; *) ts=$((10#$ts));; esac
+        case "$id" in ''|*[!A-Za-z0-9._-]*) id=$(printf 'legacy-%04d' "$seq");; esac
+        fname="$(printf '%010d' "$ts")-${id}.json"
+        if [ "$lineno" -le "$seen" ]; then dest="cur"; else dest="new"; fi
+        # Never clobber a message already delivered under the same name.
+        if [ -e "$maildir/$dest/$fname" ]; then
+            fname="$(printf '%010d' "$ts")-${id}-$(printf '%04d' "$seq").json"
+        fi
+        printf '%s\n' "$line" > "$maildir/tmp/$fname" \
+            && mv "$maildir/tmp/$fname" "$maildir/$dest/$fname"
+    done < "$legacy"
+    rm -f "$legacy" "$maildir/seen"
+}
+
+# One-time, idempotent mailbox migration, keyed ONLY on inbox.jsonl existing.
+# It must not also require new/ to be absent: delivery creates the recipient's
+# maildir on send, so a session receiving one new-format message before its
+# next open would otherwise read the gate false forever and strand its legacy
+# unread mail. Renaming before converting keeps a stale writer safe: one
+# holding an open descriptor keeps writing into the renamed inode and its
+# lines are still converted; one that reopens the path creates a fresh
+# inbox.jsonl, which the next open converts.
+migrate_mailbox() {  # session_dir
+    local maildir="$1/.cs/local/mail"
+    # A migration interrupted between rename and delete left real mail in
+    # inbox.jsonl.migrating; convert it before renaming a fresh inbox over it.
+    _convert_legacy_inbox "$maildir"
+    [ -f "$maildir/inbox.jsonl" ] || return 0
+    mv "$maildir/inbox.jsonl" "$maildir/inbox.jsonl.migrating" 2>/dev/null || return 0
+    _convert_legacy_inbox "$maildir"
+}
+
 # Check if session needs migration from flat layout to .cs/ directory
 needs_cs_migration() {
     local session_dir="$1"
@@ -2483,6 +2552,9 @@ migrate_session() {
 
     # Phase 2: Ensure .cs/ subdirectories exist (handles partial migrations and edge cases)
     mkdir -p "$session_dir/.cs/local"
+
+    # Phase 2a: Convert a legacy line-per-message mail inbox to the maildir.
+    migrate_mailbox "$session_dir"
 
     # Phase 2b: Relocate the session log to machine-local state. The audit trail
     # (bash commands, lifecycle events, autosave notes) is per-checkout, not
@@ -6311,6 +6383,10 @@ main() {
             # No migrate_session here: worktree checkouts never predate the
             # worktree feature, and its CLAUDE.md rewrite must never touch a
             # project's own file (ignored-.cs repos track their real CLAUDE.md).
+            # Mail migration DOES run: a worktree can hold a legacy
+            # inbox.jsonl from the shipped mailbox, and it touches only
+            # .cs/local/mail — never project files.
+            migrate_mailbox "$session_dir"
         fi
     elif [ ! -d "$session_dir" ]; then
         is_new="true"

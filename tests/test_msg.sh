@@ -414,4 +414,143 @@ run_test test_mail_nonstring_body_does_not_wipe_digest
 run_test test_session_start_does_not_deliver_mail
 run_test test_digest_ignores_non_json_entries
 
+# --- Legacy inbox migration (session open converts inbox.jsonl to the maildir) ---
+
+CUR_COUNT() {
+    local f n=0
+    for f in "$(MAILDIR)"/cur/*.json; do
+        [ -e "$f" ] || continue
+        n=$((n + 1))
+    done
+    printf '%s' "$n"
+}
+
+# Open the receiver session so migrate_session runs; the echo stub stands in
+# for claude, so cs exits after setup.
+_open_receiver() {
+    CLAUDE_CODE_BIN=echo "$CS_BIN" receiver < /dev/null > /dev/null 2>&1 || true
+}
+
+_seed_legacy_inbox() {  # jsonl lines...
+    mkdir -p "$(MAILDIR)"
+    local l
+    for l in "$@"; do
+        printf '%s\n' "$l"
+    done > "$(MAILDIR)/inbox.jsonl"
+}
+
+test_migration_converts_legacy_inbox_honoring_seen() {
+    _seed_legacy_inbox \
+        '{"id":"1700000000-11-1","ts":1700000000,"from":"sender","actor":"a","kind":"text","body":"read one"}' \
+        '{"id":"1700000001-11-2","ts":1700000001,"from":"sender","actor":"a","kind":"text","body":"unread two"}' \
+        '{"id":"1700000002-11-3","ts":1700000002,"from":"sender","actor":"a","kind":"text","body":"unread three"}'
+    printf '1\n' > "$(MAILDIR)/seen"
+    _open_receiver
+    assert_eq "2" "$(NEW_COUNT)" "lines past seen land in new/" || return 1
+    assert_eq "1" "$(CUR_COUNT)" "seen lines land in cur/" || return 1
+    [ ! -f "$(MAILDIR)/inbox.jsonl" ] || { echo "  inbox.jsonl survived migration"; return 1; }
+    [ ! -f "$(MAILDIR)/inbox.jsonl.migrating" ] || { echo "  migrating file left behind"; return 1; }
+    [ ! -f "$(MAILDIR)/seen" ] || { echo "  seen cursor left behind"; return 1; }
+    local out; out=$(_as_receiver -msg 2>&1) || return 1
+    assert_output_contains "$out" "unread two" "migrated unread readable" || return 1
+    assert_output_contains "$out" "unread three" "migrated unread readable" || return 1
+    assert_output_not_contains "$out" "read one" "seen mail not re-surfaced as unread" || return 1
+}
+
+run_test test_migration_converts_legacy_inbox_honoring_seen
+
+# The gate is keyed on inbox.jsonl ALONE: delivery creates the maildir on send,
+# so a session that received one new-format message before its next open still
+# has legacy mail to convert — requiring new/ to be absent would strand it.
+test_migration_merges_when_new_already_exists() {
+    _seed_legacy_inbox \
+        '{"id":"1700000000-11-1","ts":1700000000,"from":"sender","actor":"a","kind":"text","body":"legacy unread"}'
+    "$CS_BIN" -msg receiver "fresh format message" >/dev/null 2>&1 || return 1
+    assert_eq "1" "$(NEW_COUNT)" "new-format message already delivered" || return 1
+    _open_receiver
+    assert_eq "2" "$(NEW_COUNT)" "legacy unread merged beside the delivered message" || return 1
+    [ ! -f "$(MAILDIR)/inbox.jsonl" ] || { echo "  inbox.jsonl survived migration"; return 1; }
+    local out; out=$(_as_receiver -msg 2>&1) || return 1
+    assert_output_contains "$out" "legacy unread" "legacy mail readable" || return 1
+    assert_output_contains "$out" "fresh format message" "delivered mail readable" || return 1
+}
+
+# Only lines that do not parse at all are quarantined (evidence of the append
+# tearing this design removes); a ts:null record is valid legacy content and
+# must convert without producing a malformed filename.
+test_migration_quarantines_corrupt_and_converts_null_ts() {
+    _seed_legacy_inbox \
+        '{"id":"x","ts":1,"from":"sender","actor":"a","kind":"te{"id":"y","ts":2,"body":"spliced' \
+        '{"id":"n","ts":null,"from":"sender","actor":"a","kind":"text","body":"null ts body"}'
+    _open_receiver
+    assert_file_exists "$(MAILDIR)/corrupt.jsonl" "unparseable line quarantined" || return 1
+    assert_file_contains "$(MAILDIR)/corrupt.jsonl" "spliced" "quarantine holds the torn line" || return 1
+    assert_eq "1" "$(NEW_COUNT)" "the parseable record converted" || return 1
+    local f
+    for f in "$(MAILDIR)"/new/*.json; do
+        case "${f##*/}" in
+            [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-*.json) : ;;
+            *) echo "  malformed filename from null ts: ${f##*/}"; return 1 ;;
+        esac
+    done
+    local out; out=$(_as_receiver -msg 2>&1) || return 1
+    assert_output_contains "$out" "null ts body" "null-ts record readable after migration" || return 1
+    assert_output_contains "$out" "--:--" "null ts still renders as --:--" || return 1
+}
+
+# Spec test 7: a line a stale writer appended after the mv (it keeps the renamed
+# inode's descriptor) is still converted. Deterministic stand-in for the race: a
+# pre-existing inbox.jsonl.migrating (the state a crash or a mid-migration
+# append leaves) is converted first and never clobbered by the next rename.
+test_migration_converts_lines_landing_in_migrating_file() {
+    mkdir -p "$(MAILDIR)"
+    printf '{"id":"1700000000-11-1","ts":1700000000,"from":"sender","actor":"a","kind":"text","body":"late appended line"}\n' \
+        > "$(MAILDIR)/inbox.jsonl.migrating"
+    _seed_legacy_inbox \
+        '{"id":"1700000001-11-2","ts":1700000001,"from":"sender","actor":"a","kind":"text","body":"second wave"}'
+    _open_receiver
+    assert_eq "2" "$(NEW_COUNT)" "both the stranded and the fresh line converted" || return 1
+    [ ! -f "$(MAILDIR)/inbox.jsonl.migrating" ] || { echo "  migrating file left behind"; return 1; }
+    local out; out=$(_as_receiver -msg 2>&1) || return 1
+    assert_output_contains "$out" "late appended line" "stranded line delivered" || return 1
+    assert_output_contains "$out" "second wave" "fresh line delivered" || return 1
+}
+
+# A torn final line without a trailing newline is still read (the stale writer
+# died mid-append); parseable content converts, unparseable quarantines.
+test_migration_reads_unterminated_final_line() {
+    mkdir -p "$(MAILDIR)"
+    printf '{"id":"1700000000-11-1","ts":1700000000,"from":"sender","actor":"a","kind":"text","body":"terminated"}\n{"id":"1700000001-11-2","ts":1700000001,"from":"sender","actor":"a","kind":"text","body":"unterminated"}' \
+        > "$(MAILDIR)/inbox.jsonl"
+    _open_receiver
+    assert_eq "2" "$(NEW_COUNT)" "unterminated final line still converted" || return 1
+}
+
+# The worktree open path bypasses migrate_session entirely; a worktree checkout
+# can still hold a legacy inbox.jsonl from the shipped mailbox, so mail
+# migration must run there too.
+test_migration_runs_on_worktree_open() {
+    create_test_session_with_git "wtbase" >/dev/null
+    CLAUDE_CODE_BIN=echo "$CS_BIN" "wtbase@feat" < /dev/null > /dev/null 2>&1 || true
+    local wtmail="$CS_SESSIONS_ROOT/wtbase@feat/.cs/local/mail"
+    [ -d "$CS_SESSIONS_ROOT/wtbase@feat" ] || { echo "  worktree session not created"; return 1; }
+    mkdir -p "$wtmail"
+    printf '{"id":"1700000000-11-1","ts":1700000000,"from":"sender","actor":"a","kind":"text","body":"worktree legacy"}\n' \
+        > "$wtmail/inbox.jsonl"
+    CLAUDE_CODE_BIN=echo "$CS_BIN" "wtbase@feat" < /dev/null > /dev/null 2>&1 || true
+    [ ! -f "$wtmail/inbox.jsonl" ] || { echo "  worktree open did not migrate the inbox"; return 1; }
+    local f n=0
+    for f in "$wtmail"/new/*.json; do
+        [ -e "$f" ] || continue
+        n=$((n + 1))
+    done
+    assert_eq "1" "$n" "worktree legacy mail landed in new/" || return 1
+}
+
+run_test test_migration_merges_when_new_already_exists
+run_test test_migration_quarantines_corrupt_and_converts_null_ts
+run_test test_migration_converts_lines_landing_in_migrating_file
+run_test test_migration_reads_unterminated_final_line
+run_test test_migration_runs_on_worktree_open
+
 report_results
