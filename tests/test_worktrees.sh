@@ -108,6 +108,101 @@ test_worktree_create_ignored_mode_bootstraps_cs() {
         "bootstrap must not overwrite the project's CLAUDE.md" || return 1
 }
 
+test_ignored_mode_worktree_starts_with_nothing_untracked() {
+    # Ignored mode only means .cs is not TRACKED — it does not mean the project
+    # ignores it. A project that never gitignored .cs/ gets a worktree whose .cs
+    # skeleton cs itself just wrote, untracked, which the merge preflight then
+    # refuses. cs must not manufacture its own merge blocker.
+    local base_dir="$CS_SESSIONS_ROOT/proj"
+    mkdir -p "$base_dir/.cs"/{memory,local}
+    echo "# Project readme" > "$base_dir/README.md"
+    echo "# Project CLAUDE.md" > "$base_dir/CLAUDE.md"
+    # No .gitignore entry for .cs/ — this is the freya shape.
+    (cd "$base_dir" && git init -q && git config core.autocrlf false \
+        && git add README.md CLAUDE.md && git commit -q -m init)
+    cs_launch "proj@task1"
+    local wt="$CS_SESSIONS_ROOT/proj@task1"
+    assert_file_contains "$wt/.cs/local/state" "cs_mode: ignored" || return 1
+    local others
+    others=$(git -C "$wt" ls-files --others --exclude-standard 2>/dev/null || true)
+    assert_eq "" "$others" "a fresh ignored-mode worktree must have nothing untracked" || return 1
+}
+
+test_ignored_mode_worktree_merges_without_a_manual_exclude() {
+    # The end the user actually hits: create, commit work, merge.
+    local base_dir="$CS_SESSIONS_ROOT/proj"
+    mkdir -p "$base_dir/.cs"/{memory,local}
+    echo "# Project readme" > "$base_dir/README.md"
+    echo "# Project CLAUDE.md" > "$base_dir/CLAUDE.md"
+    (cd "$base_dir" && git init -q && git config core.autocrlf false \
+        && git add README.md CLAUDE.md && git commit -q -m init)
+    cs_launch "proj@task1"
+    local wt="$CS_SESSIONS_ROOT/proj@task1"
+    echo "feature" > "$wt/feature.txt"
+    (cd "$wt" && git add feature.txt && git commit -q -m "task work")
+    local output
+    output=$("$CS_BIN" "proj" --merge "task1" 2>&1 || true)
+    assert_output_not_contains "$output" "untracked files that removal would destroy" \
+        "cs must not refuse over the .cs skeleton it wrote itself" || return 1
+    assert_file_exists "$base_dir/feature.txt" "the feature merged into the base" || return 1
+}
+
+test_merge_tolerates_a_worktree_predating_the_cs_exclude() {
+    # A worktree created before cs excluded its own bookkeeping still has .cs/
+    # untracked, and upgrading cs must unblock it without the user editing
+    # info/exclude by hand. Model that by stripping the entry after creation.
+    local base_dir="$CS_SESSIONS_ROOT/proj"
+    mkdir -p "$base_dir/.cs"/{memory,local}
+    echo "# Project readme" > "$base_dir/README.md"
+    echo "# Project CLAUDE.md" > "$base_dir/CLAUDE.md"
+    (cd "$base_dir" && git init -q && git config core.autocrlf false \
+        && git add README.md CLAUDE.md && git commit -q -m init)
+    cs_launch "proj@task1"
+    local wt="$CS_SESSIONS_ROOT/proj@task1"
+
+    local exclude
+    exclude=$( (cd "$wt" && git rev-parse --git-path info/exclude) 2>/dev/null )
+    case "$exclude" in /*|[A-Za-z]:[\\/]*) : ;; *) exclude="$wt/$exclude" ;; esac
+    grep -v -e '^\.cs/$' -e '^\.claude/settings\.local\.json$' "$exclude" > "$exclude.tmp" 2>/dev/null || true
+    mv "$exclude.tmp" "$exclude"
+    # Fixture sanity: without the entry the skeleton really is untracked again,
+    # so this test exercises the preflight rather than the exclude.
+    local others
+    others=$(git -C "$wt" ls-files --others --exclude-standard 2>/dev/null || true)
+    case "$others" in
+        *.cs/*) : ;;
+        *) echo "  FAIL: fixture did not reproduce the untracked .cs skeleton"; return 1 ;;
+    esac
+
+    echo "feature" > "$wt/feature.txt"
+    (cd "$wt" && git add feature.txt && git commit -q -m "task work")
+    local output
+    output=$("$CS_BIN" "proj" --merge "task1" 2>&1 || true)
+    assert_output_not_contains "$output" "untracked files that removal would destroy" \
+        "an older worktree's .cs skeleton must not block the merge" || return 1
+    assert_file_exists "$base_dir/feature.txt" "the feature merged into the base" || return 1
+}
+
+test_merge_still_refuses_real_untracked_work() {
+    # The carve-out is scoped to cs's own bookkeeping. A file the user would
+    # lose must still stop the merge — that is what the gate is for.
+    local base_dir="$CS_SESSIONS_ROOT/proj"
+    mkdir -p "$base_dir/.cs"/{memory,local}
+    echo "# Project readme" > "$base_dir/README.md"
+    echo "# Project CLAUDE.md" > "$base_dir/CLAUDE.md"
+    (cd "$base_dir" && git init -q && git config core.autocrlf false \
+        && git add README.md CLAUDE.md && git commit -q -m init)
+    cs_launch "proj@task1"
+    local wt="$CS_SESSIONS_ROOT/proj@task1"
+    echo "unsaved" > "$wt/notes.txt"
+    local output
+    output=$("$CS_BIN" "proj" --merge "task1" 2>&1 || true)
+    assert_output_contains "$output" "untracked files that removal would destroy" \
+        "real untracked work must still refuse" || return 1
+    assert_output_contains "$output" "notes.txt" "the refusal names the file at risk" || return 1
+    assert_dir "$wt" "the worktree survives a refusal" || return 1
+}
+
 test_worktree_of_worktree_refused() {
     create_test_session_with_git "myproj" > /dev/null
     cs_launch "myproj@fix-auth"
@@ -372,6 +467,10 @@ run_test test_worktree_create_tracked_mode
 run_test test_worktree_create_refuses_dirty_base
 run_test test_worktree_create_reuses_existing_branch
 run_test test_worktree_create_ignored_mode_bootstraps_cs
+run_test test_ignored_mode_worktree_starts_with_nothing_untracked
+run_test test_ignored_mode_worktree_merges_without_a_manual_exclude
+run_test test_merge_tolerates_a_worktree_predating_the_cs_exclude
+run_test test_merge_still_refuses_real_untracked_work
 run_test test_worktree_of_worktree_refused
 run_test test_worktree_create_succeeds_with_untracked_base
 run_test test_worktree_reopen_preserves_project_claude_md

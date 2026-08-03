@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.8.3"
+VERSION="2026.8.4"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 
@@ -1472,6 +1472,17 @@ create_worktree_session() {
         if ! grep -qF 'CLAUDE.local.md' "$exclude" 2>/dev/null; then
             echo 'CLAUDE.local.md' >> "$exclude"
         fi
+        if ! grep -qF '.claude/settings.local.json' "$exclude" 2>/dev/null; then
+            echo '.claude/settings.local.json' >> "$exclude"
+        fi
+        # Ignored mode means .cs is not TRACKED — it does not mean the project
+        # ignores it. Where the project's .gitignore never named .cs/, the
+        # skeleton bootstrap_worktree_meta just wrote shows up as untracked in
+        # every git status the user runs here. Tracked mode must not get this
+        # entry: there .cs belongs to the checkout.
+        if [ "$mode" = "ignored" ] && ! grep -qF '.cs/' "$exclude" 2>/dev/null; then
+            echo '.cs/' >> "$exclude"
+        fi
     fi
 
     local state="$wt_dir/.cs/local/state"
@@ -1525,8 +1536,18 @@ merge_worktree_session() {
     if _tree_is_dirty "$wt_dir"; then
         error "Worktree has uncommitted changes; commit them in $wt_dir first (cs never commits for you)"
     fi
+    # cs writes its own bookkeeping into every worktree — the whole .cs tree in
+    # ignored mode, plus the settings and protocol files — and none of it is the
+    # user's to commit. Ignored-mode fusion carries .cs into the base before the
+    # removal below, and the removal already passes --force precisely because
+    # these are expected. Counting them as dirt refuses a merge over the files
+    # cs itself just created, in any project whose .gitignore does not happen to
+    # name them. Everything else still refuses: the point of the gate is work
+    # the user would lose.
     local wt_untracked
-    wt_untracked=$(git -C "$wt_dir" ls-files --others --exclude-standard 2>/dev/null || true)
+    wt_untracked=$(git -C "$wt_dir" ls-files --others --exclude-standard 2>/dev/null \
+        | grep -v -e '^\.cs/' -e '^\.claude/settings\.local\.json$' -e '^CLAUDE\.local\.md$' \
+        || true)
     if [ -n "$wt_untracked" ]; then
         error "Worktree has untracked files that removal would destroy; commit or remove them first:
 $wt_untracked"
