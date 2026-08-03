@@ -3234,7 +3234,10 @@ run_spawn() {
     fi
     _spawn_window "$name"
 }
-MAIL_BODY_MAX=4096
+# Bounds render cost, not corruption: delivery is per-message-atomic, so a
+# large body can tear nothing. Raised from 4096 only once BOTH shared-file
+# appends (mail inbox, walk-away queue) were gone.
+MAIL_BODY_MAX=65536
 
 # Strip C0 control characters (keeping tab and newline) and DEL from stdin,
 # so a message body cannot smuggle ANSI/OSC sequences into a terminal.
@@ -3269,6 +3272,12 @@ _mail_send() {  # target, [--kind|-k KIND] body
     fi
     case "$kind" in notify|task|text|result) : ;; *) error "Unknown kind: $kind (notify|task|text|result)";; esac
     body="$(_trim "$body")"
+    # A lone '-' body reads the real body from stdin: a multi-KB handoff does
+    # not belong in argv, and this is what makes the larger cap reachable.
+    if [ "$body" = "-" ]; then
+        body="$(cat)"
+        body="$(_trim "$body")"
+    fi
     [ -n "$body" ] || error "cs -msg needs a non-empty body"
     local bytes
     bytes=$(LC_ALL=C printf '%s' "$body" | wc -c | tr -d '[:space:]')

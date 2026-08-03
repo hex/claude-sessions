@@ -144,19 +144,40 @@ test_send_trailing_flag_errors_loudly() {
     assert_output_contains "$out" "needs a value" "trailing flag errors with a message" || return 1
 }
 
+# The cap (65536) bounds render cost, not corruption: delivery is atomic, so
+# an over-cap body errors rather than truncates, and an at-cap body sends.
 test_send_rejects_empty_and_oversize_body() {
     ! "$CS_BIN" -msg receiver "   " >/dev/null 2>&1 || return 1
-    local big; big=$(printf 'a%.0s' $(seq 1 4097))
+    local big; big=$(printf 'a%.0s' $(seq 1 65537))
     ! "$CS_BIN" -msg receiver "$big" >/dev/null 2>&1 || return 1
     assert_eq "0" "$(NEW_COUNT)" "no message delivered on failed send" || return 1
+}
+
+test_send_accepts_body_at_the_cap() {
+    local atcap; atcap=$(printf 'a%.0s' $(seq 1 65536))
+    "$CS_BIN" -msg receiver "$atcap" >/dev/null 2>&1 || { echo "  at-cap body rejected"; return 1; }
+    assert_eq "1" "$(NEW_COUNT)" "at-cap body delivered" || return 1
+    assert_eq "65536" "$(jq -r '.body | length' "$(FIRST_MSG)")" "body stored whole" || return 1
+}
+
+# `cs -msg <session> -` reads the body from stdin — the channel that makes the
+# larger cap reachable, since a multi-KB handoff does not belong in argv.
+test_send_reads_body_from_stdin() {
+    printf 'b%.0s' $(seq 1 60000) | "$CS_BIN" -msg receiver - >/dev/null 2>&1 \
+        || { echo "  stdin body send failed"; return 1; }
+    assert_eq "1" "$(NEW_COUNT)" "stdin body delivered" || return 1
+    assert_eq "60000" "$(jq -r '.body | length' "$(FIRST_MSG)")" "stdin body stored whole" || return 1
+    local out
+    out=$(printf 'over%.0s' $(seq 1 20000) | "$CS_BIN" -msg receiver - 2>&1) && return 1
+    assert_output_contains "$out" "exceeds" "over-cap stdin body errors, never truncates" || return 1
 }
 
 RQUEUE() { printf '%s' "$CS_SESSIONS_ROOT/receiver/.cs/local/queue"; }
 
 test_task_kind_lands_in_recipient_queue() {
     "$CS_BIN" -msg receiver -k task "review the tui diff" >/dev/null 2>&1 || return 1
-    assert_file_exists "$(RQUEUE)" "queue file created" || return 1
-    assert_file_contains "$(RQUEUE)" "review the tui diff" "task queued" || return 1
+    assert_dir "$(RQUEUE)" "queue directory created" || return 1
+    grep -q "review the tui diff" "$(RQUEUE)"/* || { echo "  task not queued"; return 1; }
     assert_file_contains "$(FIRST_MSG)" "review the tui diff" "attribution recorded" || return 1
     assert_eq "task" "$(jq -r .kind "$(FIRST_MSG)")" "kind is task" || return 1
 }
@@ -169,7 +190,10 @@ test_task_kind_clears_declined_flag() {
 
 test_task_kind_rejects_multiline_body() {
     ! "$CS_BIN" -msg receiver -k task "$(printf 'one\ntwo')" >/dev/null 2>&1 || return 1
-    [ ! -f "$(RQUEUE)" ] || { echo "  queue written despite rejection"; return 1; }
+    local f
+    for f in "$(RQUEUE)"/*; do
+        [ -f "$f" ] && { echo "  queue written despite rejection"; return 1; }
+    done
     assert_eq "0" "$(NEW_COUNT)" "no message delivered despite rejection" || return 1
 }
 
@@ -188,6 +212,8 @@ run_test test_send_rejects_self
 run_test test_send_rejects_bad_kind
 run_test test_send_trailing_flag_errors_loudly
 run_test test_send_rejects_empty_and_oversize_body
+run_test test_send_accepts_body_at_the_cap
+run_test test_send_reads_body_from_stdin
 run_test test_task_kind_lands_in_recipient_queue
 run_test test_task_kind_clears_declined_flag
 run_test test_task_kind_rejects_multiline_body
