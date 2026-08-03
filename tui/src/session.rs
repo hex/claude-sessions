@@ -287,18 +287,30 @@ pub fn queue_active(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// The highlighted session's queued tasks, one per non-blank line, in order.
+/// Task files in the session's queue directory (one file per task), in
+/// lexical filename order — the queue's arrival order.
+pub fn queue_task_files(name: &str) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = match fs::read_dir(queue_dir(name).join("queue")) {
+        Ok(rd) => rd
+            .flatten()
+            .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+            .map(|e| e.path())
+            .collect(),
+        Err(_) => return Vec::new(),
+    };
+    files.sort();
+    files
+}
+
+/// The highlighted session's queued tasks, one entry per task file, in order.
 /// Read fresh from disk so callers always see the latest queue.
 pub fn read_queue(name: &str) -> Vec<String> {
-    let path = queue_dir(name).join("queue");
-    fs::read_to_string(path)
-        .map(|text| {
-            text.lines()
-                .filter(|line| !line.trim().is_empty())
-                .map(|line| line.to_string())
-                .collect()
-        })
-        .unwrap_or_default()
+    queue_task_files(name)
+        .iter()
+        .filter_map(|p| fs::read_to_string(p).ok())
+        .map(|s| s.trim_end_matches('\n').to_string())
+        .filter(|s| !s.trim().is_empty())
+        .collect()
 }
 
 pub fn scan_sessions() -> Vec<Session> {
@@ -418,8 +430,12 @@ fn read_session(path: &Path, secret_counts: &HashMap<String, u32>) -> Session {
         None => Liveness::Dormant,
     };
     let secrets_count = secret_counts.get(&name).copied().unwrap_or(0);
-    let queue_depth = fs::read_to_string(meta_dir.join("local/queue"))
-        .map(|s| s.lines().filter(|l| !l.trim().is_empty()).count() as u32)
+    let queue_depth = fs::read_dir(meta_dir.join("local/queue"))
+        .map(|rd| {
+            rd.flatten()
+                .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+                .count() as u32
+        })
         .unwrap_or(0);
     let unread_mail = unread_mail_count(&meta_dir);
     let has_git = is_git_checkout(path);
@@ -1212,9 +1228,11 @@ mod tests {
         let tmp = std::env::temp_dir().join(format!("cs-qd-{}", std::process::id()));
         let root = tmp.as_path();
         setup_session(root, "beta");
-        let local = root.join("beta").join(".cs/local");
-        std::fs::create_dir_all(&local).unwrap();
-        std::fs::write(local.join("queue"), "t1\nt2\nt3\n").unwrap();
+        let qdir = root.join("beta").join(".cs/local/queue");
+        std::fs::create_dir_all(qdir.join("subdir")).unwrap();
+        std::fs::write(qdir.join("0000000001-a"), "t1\n").unwrap();
+        std::fs::write(qdir.join("0000000002-b"), "t2\n").unwrap();
+        std::fs::write(qdir.join("0000000003-c"), "t3\n").unwrap();
         let sessions = scan_sessions_in(root);
         let beta = sessions.iter().find(|s| s.name == "beta").unwrap();
         assert_eq!(beta.queue_depth, 3);

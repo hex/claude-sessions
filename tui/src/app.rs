@@ -1612,17 +1612,27 @@ impl App {
         self.apply_filter_and_sort();
     }
 
-    /// Append `text` as a new queued task and clear the input, leaving focus on
-    /// the input so several tasks can be queued in a row.
+    /// Queue `text` as a new task file and clear the input, leaving focus on
+    /// the input so several tasks can be queued in a row. The task is written
+    /// whole to the queue.tmp/ staging dir and renamed into the queue
+    /// directory, so the drain can never read a torn entry — mirroring the
+    /// CLI's `_queue_add` in bin/cs.
     fn append_notes_task(&mut self, name: &str, text: &str) {
         let dir = session::queue_dir(name);
-        if std::fs::create_dir_all(&dir).is_ok() {
-            use std::io::Write;
-            match std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(dir.join("queue"))
-                .and_then(|mut f| writeln!(f, "{}", text))
+        let qdir = dir.join("queue");
+        let staging = dir.join("queue.tmp");
+        if std::fs::create_dir_all(&qdir).is_ok() && std::fs::create_dir_all(&staging).is_ok() {
+            let (secs, nanos) = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| (d.as_secs(), d.subsec_nanos()))
+                .unwrap_or((0, 0));
+            // Zero-padded epoch keeps lexical order aligned with time order;
+            // the nanosecond suffix keeps several adds inside one second in
+            // submission order.
+            let fname = format!("{:010}-{}-{:09}", secs, std::process::id(), nanos);
+            let staged = staging.join(&fname);
+            match std::fs::write(&staged, format!("{}\n", text))
+                .and_then(|_| std::fs::rename(&staged, qdir.join(&fname)))
             {
                 Ok(()) => {
                     // Queue changed: let the Stop-hook gate re-ask even if it was
@@ -1643,7 +1653,7 @@ impl App {
     /// Replace the task at `idx` in place, preserving its position, then return
     /// to the list with the edited task still highlighted.
     fn replace_notes_task(&mut self, name: &str, idx: usize, text: &str) {
-        match rewrite_queue_line(name, idx, Some(text)) {
+        match rewrite_queue_task(name, idx, Some(text)) {
             Ok(()) => {
                 let _ = std::fs::remove_file(session::queue_dir(name).join("queue.declined"));
                 self.queue_input.clear();
@@ -1671,7 +1681,7 @@ impl App {
             Some(session) => session.name.clone(),
             None => return,
         };
-        match rewrite_queue_line(&name, idx, None) {
+        match rewrite_queue_task(&name, idx, None) {
             Ok(()) => {
                 let _ = std::fs::remove_file(session::queue_dir(&name).join("queue.declined"));
                 let len = session::read_queue(&name).len();
@@ -2036,42 +2046,30 @@ impl App {
     }
 }
 
-/// Rewrite a session's queue file, targeting the `target`-th non-blank line
-/// (0-based). `Some(text)` replaces that line's content; `None` drops it.
-/// Blank lines and every other task keep their position, mirroring the CLI's
-/// `_queue_rm` in bin/cs. Writes via a temp file then renames, as the CLI does.
-fn rewrite_queue_line(
+/// Rewrite the `target`-th queued task (0-based, lexical file order).
+/// `Some(text)` replaces the task's content in place — the filename is kept,
+/// so the task keeps its queue position; `None` removes the task file,
+/// mirroring the CLI's `_queue_rm` in bin/cs. Replacement stages in
+/// queue.tmp/ and renames, so the drain can never read a torn entry.
+fn rewrite_queue_task(
     name: &str,
     target: usize,
     replacement: Option<&str>,
 ) -> std::io::Result<()> {
-    let dir = session::queue_dir(name);
-    let path = dir.join("queue");
-    let content = std::fs::read_to_string(&path)?;
-
-    let mut out = String::new();
-    let mut idx = 0usize;
-    for line in content.lines() {
-        if line.trim().is_empty() {
-            out.push_str(line);
-            out.push('\n');
-            continue;
+    let files = session::queue_task_files(name);
+    let path = files.get(target).ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::NotFound, "no queued task at that position")
+    })?;
+    match replacement {
+        Some(text) => {
+            let staging = session::queue_dir(name).join("queue.tmp");
+            std::fs::create_dir_all(&staging)?;
+            let staged = staging.join(path.file_name().unwrap_or_default());
+            std::fs::write(&staged, format!("{}\n", text))?;
+            std::fs::rename(&staged, path)
         }
-        if idx == target {
-            if let Some(text) = replacement {
-                out.push_str(text);
-                out.push('\n');
-            }
-        } else {
-            out.push_str(line);
-            out.push('\n');
-        }
-        idx += 1;
+        None => std::fs::remove_file(path),
     }
-
-    let tmp = dir.join("queue.tmp");
-    std::fs::write(&tmp, out)?;
-    std::fs::rename(&tmp, &path)
 }
 
 /// Rename the Claude Code conversation history directory to match the session rename.
@@ -3942,8 +3940,8 @@ mod tests {
             app.handle_key(KeyEvent::from(KeyCode::Char(c)));
         }
         app.handle_key(KeyEvent::from(KeyCode::Enter));
-        let q = std::fs::read_to_string(tmp.join(name).join(".cs/local/queue")).unwrap();
-        assert!(q.contains("do X"));
+        let queued = session::read_queue(name);
+        assert!(queued.iter().any(|t| t.contains("do X")));
         assert_eq!(app.queue_input.text(), "", "Enter must clear the Notes input");
         std::fs::remove_dir_all(&tmp).ok();
     }
@@ -3982,13 +3980,11 @@ mod tests {
         let tmp = std::env::temp_dir().join(format!("cs-tui-{}-{}", slug, std::process::id()));
         let root = session::test_root::scoped(tmp.clone());
         let local = tmp.join(name).join(".cs/local");
-        std::fs::create_dir_all(&local).unwrap();
-        let mut body = String::new();
-        for t in tasks {
-            body.push_str(t);
-            body.push('\n');
+        let qdir = local.join("queue");
+        std::fs::create_dir_all(&qdir).unwrap();
+        for (i, t) in tasks.iter().enumerate() {
+            std::fs::write(qdir.join(format!("{:010}-seed", i + 1)), format!("{t}\n")).unwrap();
         }
-        std::fs::write(local.join("queue"), body).unwrap();
         (tmp, local, root)
     }
 
@@ -4016,9 +4012,8 @@ mod tests {
         app.handle_key(KeyEvent::from(KeyCode::Down)); // into list, highlight #1
         app.handle_key(KeyEvent::from(KeyCode::Down)); // highlight #2 ("two")
         app.handle_key(KeyEvent::from(KeyCode::Char('d')));
-        let q = std::fs::read_to_string(local.join("queue")).unwrap();
-        let lines: Vec<&str> = q.lines().filter(|l| !l.trim().is_empty()).collect();
-        assert_eq!(lines, vec!["one", "three"], "deletes exactly the #2 line, order preserved");
+        let lines = session::read_queue("alpha");
+        assert_eq!(lines, vec!["one", "three"], "deletes exactly task #2, order preserved");
         std::fs::remove_dir_all(&tmp).ok();
     }
 
@@ -4037,8 +4032,7 @@ mod tests {
             app.handle_key(KeyEvent::from(KeyCode::Char(c)));
         }
         app.handle_key(KeyEvent::from(KeyCode::Enter));
-        let q = std::fs::read_to_string(local.join("queue")).unwrap();
-        let lines: Vec<&str> = q.lines().filter(|l| !l.trim().is_empty()).collect();
+        let lines = session::read_queue("alpha");
         assert_eq!(lines, vec!["one", "two X", "three"], "replaces in place, position preserved");
         assert_eq!(app.notes_focus, NotesFocus::List, "back to list after save");
         std::fs::remove_dir_all(&tmp).ok();
@@ -4058,8 +4052,7 @@ mod tests {
         }
         app.handle_key(KeyEvent::from(KeyCode::Esc)); // cancel edit
         assert_eq!(app.notes_focus, NotesFocus::List, "edit cancelled, back to list");
-        let q = std::fs::read_to_string(local.join("queue")).unwrap();
-        let lines: Vec<&str> = q.lines().filter(|l| !l.trim().is_empty()).collect();
+        let lines = session::read_queue("alpha");
         assert_eq!(lines, vec!["one", "two", "three"], "queue unchanged after cancel");
         std::fs::remove_dir_all(&tmp).ok();
     }
@@ -4099,8 +4092,7 @@ mod tests {
         app.handle_mouse(mouse);
         assert_eq!(app.notes_focus, NotesFocus::List, "edit cancelled by mouse switch");
         // Original session's queue is untouched.
-        let q = std::fs::read_to_string(local.join("queue")).unwrap();
-        let lines: Vec<&str> = q.lines().filter(|l| !l.trim().is_empty()).collect();
+        let lines = session::read_queue("alpha");
         assert_eq!(lines, vec!["one", "two", "three"], "no write from a cancelled edit");
         std::fs::remove_dir_all(&tmp).ok();
     }
