@@ -1,171 +1,251 @@
-# Mailbox threads, body limits, and mail wake-up
+# Mailbox threads, atomic delivery, and mail wake-up
 
 Date: 2026-08-03
-Status: proposed
+Status: proposed (revision 2)
 
 ## Problem
 
-`cs -msg` delivers a message into another session's inbox and stops there. Three
-gaps follow from that.
+**The inbox loses messages.** `_mail_send` appends a JSON line with
+`printf '%s\n' >> inbox.jsonl` (`lib/53-mail.sh:84`). bash's `printf` flushes in
+roughly 1KB stdio chunks, so one append is many `write()` calls, and `O_APPEND`
+orders chunks rather than lines. Measured on stock bash 3.2, four concurrent
+senders writing 4096-byte bodies left **112 of 200 lines intact**; the rest
+interleaved into text that `fromjson? // empty` (`lib/53-mail.sh:97`,
+`hooks/scope-prompt.sh:115`) silently drops. Concurrent delivery is a designed-in
+flow: every spawned worker mails its spawner from its own Stop hook
+(`hooks/narrative-reminder.sh:102`), so a fan-out finishing together is the
+normal case, not an edge one. This is a live bug and everything below depends on
+fixing it first.
 
-**No conversation.** Every message is an island. An agent that receives "can you
-check X?" can send a message back, but nothing links the two, and neither side
-can re-read the exchange. After a rotation, an agent has no way to find out what
-it already said.
-
-**A cap nobody chose.** `MAIL_BODY_MAX=4096` (`lib/53-mail.sh:4`) rejects any
-body over 4096 bytes. It arrived with the original send path in `c214c4e` with no
-comment, no test, and no mention in the README or docs. It does not guard what it
-appears to guard: `hooks/scope-prompt.sh:121` already clamps each digest body to
-160 characters and the digest to five messages, `jq` escapes newlines so line
-orientation is length-independent, and `ARG_MAX` binds the argv long before 4096.
-What it does do is hard-fail a 5KB handoff, with no stdin path to send one.
+**No conversation.** Every message is an island. A recipient can send something
+back, but nothing links the two and neither side can re-read the exchange. After
+a rotation an agent has no way to find out what it already said.
 
 **Mail only lands when a human types.** The unread digest is built by
-`hooks/scope-prompt.sh`, a `UserPromptSubmit` hook. A session sitting idle learns
-about mail on Alex's next keystroke and not before, so an agent-to-agent exchange
-cannot advance without a human in the loop.
+`hooks/scope-prompt.sh`, a `UserPromptSubmit` hook, so a session learns about
+mail on Alex's next keystroke and not before. Agent-to-agent work cannot advance
+without a human in the loop.
 
 ## Constraints
 
-- `cs` and its tests run on macOS stock `/bin/bash` 3.2 and BSD userland. No
-  bash 4 features, no GNU-only `sed`/`awk`/`stat`.
+- macOS stock `/bin/bash` 3.2 and BSD userland. No bash 4 features, no GNU-only
+  `sed`/`awk`/`stat`/`timeout`.
 - `.cs/local/` is machine-local and never synced. A thread's two halves live in
-  two session directories and may live on two machines. Nothing here may assume
-  both halves are reachable.
-- Unread counts are computed by counting newline bytes past a cursor, in the
-  shell (`_mail_total`) and independently in the Rust TUI
-  (`tui/src/session.rs:733`). Both deliberately avoid parsing, so a torn final
-  line cannot collapse the count. That invariant stays.
+  two session directories, possibly on two machines. Nothing may assume both are
+  reachable.
+- `bin/cs` is a build artifact concatenated from `lib/*.sh` by `build.sh`, and
+  `tests/test_msg.sh` runs against `bin/cs`. Every lib edit needs a rebuild
+  before the tests mean anything.
+- Early-exiting pipe consumers (`grep -q`, `head`, `sed q`) kill `cs` at exit 141
+  under `pipefail` on large payloads. Existing mail paths avoid them
+  deliberately (`_mail_slice` is bounded `awk`); new paths must too.
 - `jq` is already a hard requirement for `cs -msg`.
 
 ## Design
 
-### The mailbox gains an outbox
+### One file per message
 
-`_mail_send` writes only to the recipient's `inbox.jsonl`; the sender keeps no
-record. A readable thread needs the sender's own half, so a send now also
-appends the message to the sender's `.cs/local/mail/sent.jsonl`.
+`.cs/local/mail/` becomes a maildir:
 
-A separate file, not a `dir: out` record inside `inbox.jsonl`. Interleaving
-outbound records into the inbox breaks the newline-counting unread math: every
-send would inflate the session's own unread badge. The obvious repair — advance
-the `seen` cursor by one on each send — is racy, because another session can
-append an inbound message between the two operations, and the cursor bump would
-then mark that inbound message as read. Silently swallowed mail is the worst
-failure this feature could introduce. A separate file has exactly one writer,
-which removes the race, leaves both unread implementations untouched, and costs
-only a timestamp-ordered merge at render time.
+```
+mail/
+  tmp/    messages being written
+  new/    received, unread
+  cur/    received, read
+  out/    sent by this session
+```
 
-`sent.jsonl` carries the same record shape as `inbox.jsonl` plus a `to` field.
-It has no cursor: a session has read everything it wrote.
+A send writes the complete JSON document to `tmp/`, `fsync`-free but complete,
+then `mv`s it into the target's `new/`. Rename within one filesystem is atomic,
+so a message is either entirely present or entirely absent. There is no append,
+therefore no interleaving, no torn tail, and no cap-dependent corruption window.
+This is the whole reason for the change: locking an append would serialize
+writers, but it would still leave a stale lock able to block delivery, and it
+would keep every reader parsing a file that a crash can leave half-written.
 
-### Thread identity
+Filenames are `<ts>-<thread>-<rand>.json` with `ts` a zero-padded 10-digit epoch
+second, so a plain lexical sort is chronological.
 
-Two new fields on every record:
+**Unread becomes a file count.** `new/` holds exactly the unread messages;
+`cs -msg` moves what it prints into `cur/`. The `seen` cursor and all the
+newline arithmetic built on it are deleted:
 
-- `thread` — a 6-hex-digit token, e.g. `a3f9c1`. A message that starts a
-  conversation generates one; a reply copies its parent's. Generated with
-  `printf '%06x' $(( ((RANDOM << 15) | RANDOM) & 0xFFFFFF ))`, which is bash 3.2
-  safe and gives 16.7M values. Uniqueness only has to hold within one mailbox
-  pair, so this is ample.
-- `to` — on `sent.jsonl` records only, the target session name. `inbox.jsonl`
-  already records `from`.
+| Site | Now | Becomes |
+|---|---|---|
+| `lib/53-mail.sh` `_mail_total`/`_mail_cursor`/`_mail_set_cursor` | `wc -l` past a cursor | count entries in `new/` |
+| `bin/cs-statusline:544` `_seg_mail` | `while read` line count minus cursor | count entries in `new/` |
+| `tui/src/session.rs:733` `unread_mail_count` | count `\n` bytes, minus cursor | `read_dir(new).count()` |
 
-Short and typeable is the whole point: an agent has to be able to put a thread id
-into a command line without copying a 25-character `1754230000-12345-9876`. The
-existing `id` field is unchanged and still uniquely identifies a single message.
+The torn-line defenses in all three (and the test at
+`tui/src/session.rs:923`) become unnecessary rather than being weakened — an
+incomplete message never appears in `new/` at all.
+
+### Threading
+
+Every message document:
+
+```json
+{ "id": "1754230000-4821-9173", "ts": 1754230000, "thread": "a3f9c1",
+  "in_reply_to": null, "from": "sessionA", "to": "sessionB",
+  "actor": "alice-example-com", "kind": "text", "body": "..." }
+```
+
+- `thread` — 6 hex digits, e.g. `a3f9c1`, generated at thread start with
+  `printf '%06x' $(( ((RANDOM << 15) | RANDOM) & 0xFFFFFF ))` (verified under
+  bash 3.2.57). Short because an agent has to retype it; 16.7M values is ample
+  for uniqueness within one mailbox pair. `id` is unchanged and still identifies
+  a single message.
+- `in_reply_to` — the `id` of the message being answered, or `null` for a thread
+  root. This, not the timestamp, orders the transcript. `ts` is whole seconds
+  (`date +%s`), and a question and its reply inside one second is the normal
+  cadence for agent-to-agent exchange, so any ts-based tie-break renders replies
+  above the questions they answer.
+- `to` — the target session, so `out/` records know where they went.
 
 ### Commands
 
 | Form | Behavior |
 |---|---|
-| `cs -msg <session> "body"` | Starts a thread. Prints the id: `sent to freya (thread a3f9c1)`. |
-| `cs -msg --reply <thread> "body"` | Replies. The target is derived from the thread's records, so no session name is needed. |
-| `cs -msg <session> --reply <thread> "body"` | Same, target stated explicitly; errors if it disagrees with the thread. |
-| `cs -msg thread <id>` | Prints the merged transcript, oldest first, direction marked. |
-| `cs -msg` | Unread, unchanged, each line now carrying its thread id. |
-| `cs -msg log` | Full inbox history, each line now carrying its thread id. |
+| `cs -msg <session> "body"` | Starts a thread. Prints `sent to freya (thread a3f9c1)`. |
+| `cs -msg <session> -` | Same, body read from stdin. |
+| `cs -msg --reply <thread> "body"` | Replies; target derived from the thread. |
+| `cs -msg <session> --reply <thread> "body"` | Replies with the target stated. |
+| `cs -msg thread <id>` | Prints the merged transcript, root first. |
+| `cs -msg` | Unread, unchanged, each line carrying its thread id. |
+| `cs -msg log` | Full history (`cur/` + `new/` + `out/`), thread ids shown. |
 
-`--reply` resolves the thread by scanning `inbox.jsonl` then `sent.jsonl` for a
-matching `thread`, and takes the target from the newest matching record: `from`
-if it came from the inbox, `to` if from sent. An unknown thread id is an error,
-not a new thread — a typo that silently opens a fresh conversation is worse than
-a refusal. Prefix matching is not supported; ids are already short.
+`run_mail` (`lib/53-mail.sh:130`) currently treats any first word that is not
+`""` or `log` as a target session, so it needs a real command table: `log`,
+`thread`, `--reply` and `-` become reserved first words, and only an unreserved
+word is a target. Without this, `cs -msg thread a3f9c1` fails with
+"No such session: thread".
 
-`cs -msg thread <id>` merges the two files filtered to that thread and sorts by
-`ts`, rendering `-> ` for sent and `<- ` for received. Records with equal `ts`
-keep file order, inbox before sent. Reading a thread does not advance the unread
-cursor; `cs -msg` remains the only reader that does.
+The session-scoped alias (`lib/99-main.sh:248`) forwards everything except bare
+and lone-`log` into the send path, where unrecognized words are appended to the
+body (`lib/53-mail.sh:45`) — so `cs freya -msg thread a3f9c1` would silently mail
+freya the text "thread a3f9c1". The existing lone-`log` guard
+(`lib/99-main.sh:257`) is the pattern; it extends to every reserved word.
 
-A `cs -msg threads` listing is deliberately out of scope. `cs -msg log` showing
-thread ids covers finding a thread, and a grouped listing can be added when
-something actually needs it.
+`--reply` scans `new/`, `cur/` then `out/` for the thread and takes the target
+from the newest match: `from` for a received message, `to` for a sent one. When
+that value is empty the reply errors and names the fix. Empty is reachable and
+tested: `from` is `${CLAUDE_SESSION_NAME:-}` (`lib/53-mail.sh:81`) and sending
+from outside a session is a supported flow (`tests/test_msg.sh:46`). Supplying
+the target explicitly is then accepted; an explicit target always wins, because
+the only case where it can "disagree" with the thread is the empty one. An
+unknown thread id errors rather than opening a new thread — a typo that silently
+starts a fresh conversation is worse than a refusal.
 
-### Body limits
+`cs -msg thread <id>` collects the thread's documents from all three
+directories, orders them by following `in_reply_to` from the root, and falls
+back to filename order for anything unreachable from the chain. Sent messages
+render `-> `, received `<- `. Reading a thread does not mark anything read;
+`cs -msg` remains the only reader that moves files into `cur/`.
 
-`MAIL_BODY_MAX` becomes 65536, with a comment saying what it protects (an inbox
-line that the TUI and the digest builder scan on every render) and a test pinning
-the number.
+`cs -msg threads` (a grouped listing) is deliberately out of scope — `log`
+showing thread ids covers finding one.
 
-The body may come from stdin: `cs -msg <session> -` and
-`cs -msg --reply <thread> -` read the body from standard input. This is what
-makes the larger cap usable, since argv is the wrong channel for a multi-KB
-handoff. Over-cap bodies still error rather than truncate; a silently clipped
-handoff is worse than a refused one.
+### Body size
 
-### Waking a session on new mail
+`MAIL_BODY_MAX` becomes 65536, carrying a comment saying what it now bounds:
+render cost in the digest builder and the TUI, not corruption. The current 4096
+is not undocumented — `tests/test_msg.sh:104` pins the rejection and
+`docs/superpowers/specs/2026-07-18-cross-session-mailbox-design.md:34` records
+it — so both move together with the new number.
 
-An unread-mail check folds into `hooks/narrative-reminder.sh`, the existing
-`Stop` hook, rather than becoming a new hook file — a new file costs five
-registration sites.
+`-` reads the body from stdin, which is what makes the larger cap reachable;
+argv is the wrong channel for a multi-KB handoff. Over-cap bodies still error
+rather than truncate: a silently clipped handoff is worse than a refused one.
 
-On `Stop`, if the inbox has unread mail, the hook blocks the stop with a reason
-naming the count and telling the session to run `cs -msg`. The session then reads
-its mail and acts on it without waiting for a keystroke.
+### Waking a session
 
-The loop guard is a `.cs/local/mail/woke` cursor holding the inbox total at which
-the hook last woke the session. The hook blocks only when the current total
-exceeds `woke`, and writes the new total immediately. A session that reads its
-mail and decides to do nothing therefore stops normally on the next turn; only
-genuinely new arrivals wake it again. `task`-kind mail never wakes a session,
-because it is already in the walk-away queue and the drain owns it.
+Two paths, because a `Stop` hook alone cannot do it. `Stop` fires when a turn
+ends, so a session parked at the prompt with no active turn emits no event and
+still waits for a keystroke.
 
-### Existing records
+**Mid-turn arrivals — `Stop`.** An unread check folds into
+`hooks/narrative-reminder.sh` (the existing `Stop` hook; a new hook file costs
+five registration sites). It sits above the queue section but returns
+immediately when the queue state is `armed` or `draining`. During a walk-away
+run the drain owns `Stop` (`hooks/narrative-reminder.sh:167-209`) and stealing a
+turn from it would shift its pop one turn late and mis-attribute any tool
+failure to the current task's circuit breaker
+(`hooks/tool-failure-logger.sh:59`). Mail therefore waits for the drain to
+finish, and that is stated behavior rather than an accident of ordering.
 
-Inboxes on disk today have no `thread` and no `to`. The read paths treat a
-missing `thread` as the record's own `id`, which renders every pre-threads
-message as a one-message thread. This is a real backward-compatibility
-allowance and needs explicit sign-off before implementation.
+The guard against re-waking is `mail/woke`, holding the `new/` count at the last
+wake. The hook blocks only when the count exceeds it, and writes the new count
+before blocking, so a session that reads its mail and does nothing stops
+normally next turn. Messages of kind `task` never trigger a wake — the walk-away
+queue already owns them (`lib/53-mail.sh:74`) — but they still advance `woke`,
+so a task-only arrival cannot leave a later text message unable to wake.
+
+**Idle sessions — sender-side tmux nudge.** After a successful send, if the
+target was spawned by `cs -spawn` and so has a known pane, the sender
+`tmux send-keys` a one-line prompt telling it to run `cs -msg`. Best-effort:
+failure never fails the send. It is restricted to cs-spawned sessions on
+purpose — those panes host an agent, whereas an arbitrary session's pane may
+have a half-typed human message in its input box that injected keys would
+corrupt.
+
+### Existing mailboxes
+
+`migrate_session` (`lib/45-migrate.sh:138`) gains a one-time step: when
+`mail/inbox.jsonl` exists and `mail/new` does not, each parseable line becomes a
+document in `cur/`, except lines past the old `seen` cursor which land in `new/`.
+Each gets `thread` set to its own `id` and `in_reply_to: null`, rendering as a
+one-message thread. Lines that do not parse are moved to `mail/corrupt.jsonl`
+rather than dropped — they are evidence of the tearing this design removes.
+`inbox.jsonl` and `seen` are deleted afterward, so no code path reads the old
+layout and there is no permanent compatibility branch. This is data migration,
+and it needs sign-off before implementation.
 
 ## Testing
 
-Extends `tests/test_msg.sh`, TDD, one failing test at a time:
+Extends `tests/test_msg.sh`, TDD, one failing test at a time. `build.sh` runs
+before each test run because the suite exercises `bin/cs`.
 
-1. A new send stamps a `thread` and echoes to `sent.jsonl`; the sender's own
-   unread count does not move.
-2. `--reply` derives the target from the thread and reuses its id.
-3. `--reply` to an unknown thread errors.
-4. `cs -msg thread <id>` renders both halves in timestamp order with direction.
-5. Reading a thread does not advance the `seen` cursor.
-6. A body over the cap errors; a body at the cap sends; stdin carries a body
+1. Concurrent senders: N background `cs -msg` calls at the cap size all arrive
+   intact and parseable. This is the regression test for the corruption above
+   and must fail against the current append implementation.
+2. A send stamps a `thread`, lands in the target's `new/`, and writes the
+   sender's `out/`; the sender's own unread count does not move.
+3. `cs -msg` moves what it printed from `new/` to `cur/`; a second run reports
+   nothing unread.
+4. `--reply` derives the target from the thread and reuses its id.
+5. `--reply` errors on an unknown thread, and on a thread whose derived target
+   is empty; the explicit-target form then succeeds.
+6. `cs -msg thread <id>` orders a question and its same-second reply by
+   `in_reply_to`, not by `ts`.
+7. `cs freya -msg thread abc` errors instead of mailing the words.
+8. A body over the cap errors; a body at the cap sends; stdin carries a body
    larger than a comfortable argv.
-7. The Stop hook wakes once per new arrival and not twice (`woke` cursor).
-8. A record with no `thread` field renders as its own thread.
+9. The Stop wake fires once per new arrival, not twice; does not fire for
+   `task`-kind; does not fire while the queue is armed or draining.
+10. Migration splits a legacy `inbox.jsonl` honoring the old `seen` cursor and
+    quarantines an unparseable line.
 
-Surfaces to update alongside: `README.md`, `docs/session-layout.md` (the new
-`sent.jsonl` and `woke` files), `completions/_cs` and `completions/cs.bash`
-(`--reply`, `thread`), `lib/10-help.sh`, and `CHANGELOG.md`.
+Rust-side: `tui/src/session.rs` unread tests are rewritten against `new/`.
+
+Surfaces to update: `README.md`, `docs/session-layout.md` (the maildir and
+`woke`), `docs/hooks.md` (the Stop wake), `completions/_cs` and
+`completions/cs.bash` (`--reply`, `thread`, `-`), `lib/10-help.sh`,
+`bin/cs-statusline`, `tui/`, and `CHANGELOG.md`.
 
 ## Rejected
 
-**Thread id = first message id.** Free, but 25 characters of digits and dashes is
-not something an agent should have to retype, and the value would then mean two
-things at once.
+**Locking the append.** Keeps every reader and the cursor untouched, but
+serializes delivery, lets a killed sender's stale lock block mail, and still
+leaves readers parsing a file a crash can tear.
 
-**Reply routing without a transcript.** Cheaper by one file, but an agent could
-reply into a conversation it cannot read, which is most of the value gone.
+**Threads on the existing append, corruption filed separately.** Fastest to a
+demo, but it builds a transcript feature on a substrate that drops messages.
 
-**Mid-turn wake on `PostToolUse`.** Most responsive, but it runs on every tool
-call and can interrupt an agent mid-thought. End-of-turn is where the session is
-already between units of work.
+**Thread id = the first message's `id`.** Free, but 20-odd characters of digits
+and dashes is not retypable, and the field would mean two things at once.
+
+**Ordering the transcript by `ts`.** Whole-second timestamps put a reply above
+its question in the common case.
+
+**`PostToolUse` polling for the wake.** Runs on every tool call, interrupts
+mid-thought, and still cannot reach a session that is idle at the prompt.
