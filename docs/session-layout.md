@@ -75,8 +75,7 @@ user-owned `CLAUDE.md` is never touched.
 | `context-pct` | Latest context-window percentage, stamped by the status line; the narrative reminder reads it to suggest compaction, and cs-tui uses its mtime as the liveness heartbeat for conversations opened outside cs. |
 | `limits` | Latest 5-hour/weekly rate-limit readings, stamped by the status line; read by `cs -usage` window anchoring and the queue's rate-limit breaker. |
 | `failures` | Per-task tool-failure counter written by `tool-failure-logger.sh`; feeds the queue's failures circuit breaker, reset at each drain advance. |
-| `mail/inbox.jsonl` | Cross-session mailbox: one JSON message per line, appended by senders (`cs -msg`). |
-| `mail/seen` | Read cursor: inbox line count already printed by `cs -msg`. Also the anchor for the prompt hook's unread-mail digest, which inlines every line past this cursor on each prompt until `cs -msg` advances it — so awareness persists until the mail is actually read. (The former `mail/notified` surface-once cursor is retired; a leftover file on old sessions is inert.) |
+| `mail/` | Cross-session mailbox, one JSON document per message: senders (`cs -msg`) write to the recipient's `tmp/` and rename into `new/` (atomic — a message is either entirely present or absent); `cs -msg` prints `new/*.json` and moves them to `cur/`. Unread is simply the count of `new/*.json`, the same basis for the prompt hook's digest, the status line, and the TUI. Filenames are `<zero-padded epoch>-<id>.json` — not a monotonic clock; nothing may treat name order as arrival order. `corrupt.jsonl` holds any legacy inbox lines that failed to parse during migration. (A legacy `inbox.jsonl` plus its `seen` cursor is converted on the next session open.) |
 | `spawned-by` | Spawner session name for a `cs -spawn`ed worker; deleted after the drain-finished notify (one-shot). |
 
 ## Merge policy
