@@ -1599,7 +1599,7 @@ impl App {
         Action::None
     }
 
-    /// Sync the affected session's in-memory `queue_depth` with the queue file,
+    /// Sync the affected session's in-memory `queue_depth` with the on-disk queue,
     /// then re-sort. `queue_depth` drives the To-Do column's count, sort, and
     /// visibility, and is otherwise only refreshed by a full `scan_sessions()`
     /// (which re-forks every git remote) — so a queue edit must patch it
@@ -3971,7 +3971,7 @@ mod tests {
 
     // --- Notes panel: delete + edit ---
 
-    /// Seed a session's queue file with the given tasks and return (tmp root, dir).
+    /// Seed a session's queue with the given tasks and return (tmp root, dir).
     fn seed_queue(
         slug: &str,
         name: &str,

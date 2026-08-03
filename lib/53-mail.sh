@@ -57,7 +57,7 @@ _mail_send() {  # target, [--kind|-k KIND] body
         local nl='
 '
         case "$body" in
-            *"$nl"*) error "task bodies must be a single line (the queue file is line-oriented)";;
+            *"$nl"*) error "task bodies must be a single line (the queue's done log and listing are line-oriented)";;
         esac
         # Queue first, attribution second: if the queue write fails nothing is
         # sent; if the mail write fails the work is still delivered.
