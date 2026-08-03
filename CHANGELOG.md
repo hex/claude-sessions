@@ -4,6 +4,16 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.8.4
+
+### Fixes
+
+- **`cs <base> --merge <feature>` refused over the files cs itself wrote.** In ignored mode cs bootstraps a `.cs/` skeleton into the worktree and writes `.claude/settings.local.json`, but only `CLAUDE.local.md` was excluded from git. Any project whose `.gitignore` never named `.cs/` therefore got a worktree full of untracked cs bookkeeping, and the merge preflight refused with a list the user could neither commit nor safely delete — the ignored-mode fusion needs those records, and they carry the feature session's timeline, narrative and memory.
+
+  The preflight now skips cs's own bookkeeping, which unblocks worktrees that already exist. The removal step already passed `--force` for exactly these files, and its comment already described the preflight as ignoring them; the two halves of the function now agree. New ignored-mode worktrees also exclude the skeleton at creation, so `git status` stays clean while you work in them.
+
+  Untracked work the user would actually lose still refuses, and the refusal still names the file.
+
 ## 2026.8.3
 
 ### Fixes
