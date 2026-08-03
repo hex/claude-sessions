@@ -4,21 +4,25 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
-## 2026.8.4
+## Unreleased
 
 ### Fixes
 
 - **Concurrent mail and queue delivery could interleave into garbage — or into the drain.** Both `cs -msg` and the walk-away queue delivered by appending a line to a shared file, but bash's `printf` flushes large bodies in ~1KB chunks, so simultaneous senders (a spawn fan-out finishing together is the normal case) spliced each other's lines: measured, four concurrent senders left only 112 of 200 lines intact. Torn mail was silently discarded by the tolerant readers; a torn queue line was worse — the drain executes what it reads. Delivery is now atomic by construction: mail is a per-message maildir (`mail/tmp/` → rename into `mail/new/`; `cs -msg` moves what it prints to `mail/cur/`), and the queue is one file per task staged the same way, popped by moving the lexically first entry aside (atomic against a second drain). Unread mail is simply the count of `new/*.json` — the same basis in `cs -msg`, the prompt digest, the status line, and the TUI — and the old `seen` cursor arithmetic is gone. Legacy `mail/inbox.jsonl` mailboxes are converted on the session's next open (worktree opens included); lines that fail to parse are quarantined in `mail/corrupt.jsonl` as evidence of the tearing this removes.
+
+### Changed
+
+- **Mail bodies may now be 64KB, and `cs -msg <session> -` reads the body from stdin.** The 4096-byte cap guarded the corruption window above; with delivery atomic it only bounds render cost, so it rises to 65536. Over-cap bodies still error rather than truncate. The stdin form is what makes the larger cap practical — a multi-KB handoff does not belong in argv.
+
+## 2026.8.4
+
+### Fixes
 
 - **`cs <base> --merge <feature>` refused over the files cs itself wrote.** In ignored mode cs bootstraps a `.cs/` skeleton into the worktree and writes `.claude/settings.local.json`, but only `CLAUDE.local.md` was excluded from git. Any project whose `.gitignore` never named `.cs/` therefore got a worktree full of untracked cs bookkeeping, and the merge preflight refused with a list the user could neither commit nor safely delete — the ignored-mode fusion needs those records, and they carry the feature session's timeline, narrative and memory.
 
   The preflight now skips cs's own bookkeeping, which unblocks worktrees that already exist. The removal step already passed `--force` for exactly these files, and its comment already described the preflight as ignoring them; the two halves of the function now agree. New ignored-mode worktrees also exclude the skeleton at creation, so `git status` stays clean while you work in them.
 
   Untracked work the user would actually lose still refuses, and the refusal still names the file.
-
-### Changed
-
-- **Mail bodies may now be 64KB, and `cs -msg <session> -` reads the body from stdin.** The 4096-byte cap guarded the corruption window above; with delivery atomic it only bounds render cost, so it rises to 65536. Over-cap bodies still error rather than truncate. The stdin form is what makes the larger cap practical — a multi-KB handoff does not belong in argv.
 
 ## 2026.8.3
 
