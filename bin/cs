@@ -3170,31 +3170,12 @@ _mail_scrub() {
     LC_ALL=C tr -d '\000-\010\013-\037\177'
 }
 
-# Count complete (newline-terminated) lines. wc -l counts newline bytes, so a
-# torn final line still being written is excluded from cursor math.
-_mail_total() {  # file
-    if [ -f "$1" ]; then
-        wc -l < "$1" | tr -d '[:space:]'
-    else
-        echo 0
-    fi
-}
-
-_mail_cursor() {  # cursor_file
-    local v=""
-    if [ -f "$1" ]; then IFS= read -r v < "$1" || true; fi
-    case "$v" in ''|*[!0-9]*) v=0;; esac
-    echo "$v"
-}
-
-_mail_set_cursor() {  # cursor_file, value
-    printf '%s\n' "$2" > "$1.tmp" && mv "$1.tmp" "$1"
-}
-
-# Print inbox lines from..to inclusive. awk bounds both ends without the
-# early-exit SIGPIPE risk of head/sed on large files.
-_mail_slice() {  # file, from_line, to_line
-    awk -v a="$2" -v b="$3" 'NR>=a && NR<=b' "$1"
+# The mailbox is a maildir: a message is written whole to tmp/, then renamed
+# into new/ (unread) — the rename is same-filesystem, so a message is either
+# entirely present or entirely absent. 'cs -msg' moves what it prints into
+# cur/ (read). Unread is simply the count of new/*.json.
+_mail_ensure_maildir() {  # maildir
+    mkdir -p "$1/tmp" "$1/new" "$1/cur"
 }
 
 _mail_send() {  # target, [--kind|-k KIND] body
@@ -3231,18 +3212,31 @@ _mail_send() {  # target, [--kind|-k KIND] body
             *"$nl"*) error "task bodies must be a single line (the queue file is line-oriented)";;
         esac
         # Queue first, attribution second: if the queue write fails nothing is
-        # sent; if the inbox write fails the work is still delivered.
+        # sent; if the mail write fails the work is still delivered.
         _queue_add "$target_dir/.cs/local" "$body"
     fi
+    # Deliver into the RECIPIENT's tmp/, then rename into its new/: both live
+    # in one tree, so the rename is atomic even for adopted (symlinked)
+    # sessions, where a sender-side tmp/ could sit on another volume and
+    # degrade the mv to copy-then-unlink.
     local maildir="$target_dir/.cs/local/mail"
-    mkdir -p "$maildir"
-    local now line
+    _mail_ensure_maildir "$maildir"
+    local now id line fname
     now="$(date +%s)"
-    line=$(jq -cn --arg id "${now}-$$-${RANDOM}" --argjson ts "$now" \
+    # The pid keeps two senders inside one second apart; a bare RANDOM suffix
+    # collides ~1 in 32768 per pair and mv clobbers silently.
+    id="${now}-$$-${RANDOM}"
+    line=$(jq -cn --arg id "$id" --argjson ts "$now" \
         --arg from "${CLAUDE_SESSION_NAME:-}" --arg actor "$(cs_actor_slug)" \
         --arg kind "$kind" --arg body "$body" \
         '{id:$id, ts:$ts, from:$from, actor:$actor, kind:$kind, body:$body}')
-    if ! printf '%s\n' "$line" >> "$maildir/inbox.jsonl"; then
+    # Zero-padded epoch keeps lexical order aligned with time order; NOT a
+    # monotonic clock (same-second order is by unpadded pid, and the wall
+    # clock can go backwards) — nothing may treat name order as arrival order.
+    fname="$(printf '%010d' "$now")-${id}.json"
+    if ! { printf '%s\n' "$line" > "$maildir/tmp/$fname" \
+            && mv "$maildir/tmp/$fname" "$maildir/new/$fname"; }; then
+        rm -f "$maildir/tmp/$fname"
         if [ "$kind" = "task" ]; then
             warn "task queued in $target, but recording the mail attribution failed"
             return 0
@@ -3252,9 +3246,11 @@ _mail_send() {  # target, [--kind|-k KIND] body
     info "sent to $target; surfaces at their next turn"
 }
 
-# Shared formatter: print inbox lines from..to as 'HH:MM  sender  [kind]  body'.
-_mail_print() {  # from_line, to_line, inbox
-    _mail_slice "$3" "$1" "$2" | jq -rR '
+# Shared formatter: print message documents as 'HH:MM  sender  [kind]  body'.
+# Each document is a single-line JSON object, so one line-oriented jq pass
+# renders them all (no early-exit consumers -> no SIGPIPE risk on big mail).
+_mail_print_files() {  # file...
+    cat "$@" | jq -rR '
         fromjson? // empty |
         (.ts | if type == "number" then strflocaltime("%H:%M") else "--:--" end) + "  " +
         (if .from == "" then .actor else .from end) + "  [" + .kind + "]  " +
@@ -3264,27 +3260,41 @@ _mail_print() {  # from_line, to_line, inbox
 
 _mail_read() {
     local maildir="$CLAUDE_SESSION_META_DIR/local/mail"
-    local inbox="$maildir/inbox.jsonl"
-    local total seen
-    total=$(_mail_total "$inbox")
-    seen=$(_mail_cursor "$maildir/seen")
-    if [ "$total" -le "$seen" ]; then
+    local f files=()
+    for f in "$maildir"/new/*.json; do
+        [ -e "$f" ] || continue
+        files+=("$f")
+    done
+    if [ "${#files[@]}" -eq 0 ]; then
         echo "No unread mail."
         return 0
     fi
-    _mail_print $((seen + 1)) "$total" "$inbox"
-    _mail_set_cursor "$maildir/seen" "$total"
+    _mail_print_files "${files[@]}"
+    # Exactly what was printed moves to cur/; a message landing between the
+    # glob and here stays unread for the next read.
+    mkdir -p "$maildir/cur"
+    for f in "${files[@]}"; do
+        mv "$f" "$maildir/cur/${f##*/}"
+    done
 }
 
 _mail_log() {
-    local inbox="$CLAUDE_SESSION_META_DIR/local/mail/inbox.jsonl"
-    local total
-    total=$(_mail_total "$inbox")
-    if [ "$total" -eq 0 ]; then
+    local maildir="$CLAUDE_SESSION_META_DIR/local/mail"
+    local f files=()
+    for f in "$maildir"/cur/*.json "$maildir"/new/*.json; do
+        [ -e "$f" ] || continue
+        files+=("$f")
+    done
+    if [ "${#files[@]}" -eq 0 ]; then
         echo "No mail."
         return 0
     fi
-    _mail_print 1 "$total" "$inbox"
+    # Interleave read and unread history by filename (the timestamp prefix).
+    local sorted=()
+    while IFS= read -r f; do
+        [ -n "$f" ] && sorted+=("$f")
+    done < <(printf '%s\n' "${files[@]}" | awk -F/ '{ print $NF "\t" $0 }' | sort | cut -f2-)
+    _mail_print_files "${sorted[@]}"
 }
 
 # Dispatcher. Bare = read own inbox; 'log' = full history; else = send.

@@ -293,23 +293,41 @@ _arm_worker_queue() {  # tasks...
     printf 'armed\n' > "$CS_SESSIONS_ROOT/worker/.cs/local/queue.state"
     printf 'boss\n' > "$CS_SESSIONS_ROOT/worker/.cs/local/spawned-by"
 }
-BOSS_INBOX() { printf '%s' "$CS_SESSIONS_ROOT/boss/.cs/local/mail/inbox.jsonl"; }
+# First unread message in boss's maildir, as a file path (empty when none).
+BOSS_MSG() {
+    local f
+    for f in "$CS_SESSIONS_ROOT/boss/.cs/local/mail/new"/*.json; do
+        [ -e "$f" ] || return 1
+        printf '%s' "$f"
+        return 0
+    done
+}
+
+# Count of unread messages in boss's maildir.
+BOSS_MSG_COUNT() {
+    local f n=0
+    for f in "$CS_SESSIONS_ROOT/boss/.cs/local/mail/new"/*.json; do
+        [ -e "$f" ] || continue
+        n=$((n + 1))
+    done
+    printf '%s' "$n"
+}
 
 test_drain_finished_notifies_spawner_once() {
     _arm_worker_queue "only task"
     _worker_stop_turn >/dev/null || return 1        # armed -> draining, task 1 injected
     _worker_stop_turn >/dev/null || return 1        # task done -> drain_finished
-    assert_file_exists "$(BOSS_INBOX)" "spawner inbox written" || return 1
-    assert_file_contains "$(BOSS_INBOX)" "queue drained: 1 task(s) done" "notify body" || return 1
-    assert_eq "notify" "$(head -1 "$(BOSS_INBOX)" | jq -r .kind)" "kind notify" || return 1
-    assert_eq "worker" "$(head -1 "$(BOSS_INBOX)" | jq -r .from)" "from worker" || return 1
+    local msg; msg=$(BOSS_MSG) || { echo "  spawner mail not delivered"; return 1; }
+    assert_file_contains "$msg" "queue drained: 1 task(s) done" "notify body" || return 1
+    assert_eq "notify" "$(jq -r .kind "$msg")" "kind notify" || return 1
+    assert_eq "worker" "$(jq -r .from "$msg")" "from worker" || return 1
     [ ! -f "$CS_SESSIONS_ROOT/worker/.cs/local/spawned-by" ] || { echo "  spawned-by not one-shot"; return 1; }
     # A later, unrelated drain must not re-notify.
     printf 'later task\n' >> "$CS_SESSIONS_ROOT/worker/.cs/local/queue"
     printf 'armed\n' > "$CS_SESSIONS_ROOT/worker/.cs/local/queue.state"
     _worker_stop_turn >/dev/null || return 1
     _worker_stop_turn >/dev/null || return 1
-    assert_eq "1" "$(wc -l < "$(BOSS_INBOX)" | tr -d '[:space:]')" "no second notify" || return 1
+    assert_eq "1" "$(BOSS_MSG_COUNT)" "no second notify" || return 1
 }
 
 test_breaker_trip_notifies_and_keeps_spawned_by() {
@@ -317,7 +335,8 @@ test_breaker_trip_notifies_and_keeps_spawned_by() {
     _worker_stop_turn >/dev/null || return 1        # draining, task a injected
     printf '9\n' > "$CS_SESSIONS_ROOT/worker/.cs/local/failures"
     _worker_stop_turn >/dev/null || return 1        # trips the failure breaker
-    assert_file_contains "$(BOSS_INBOX)" "breaker tripped" "trip notified" || return 1
+    local msg; msg=$(BOSS_MSG) || { echo "  trip mail not delivered"; return 1; }
+    assert_file_contains "$msg" "breaker tripped" "trip notified" || return 1
     assert_file_exists "$CS_SESSIONS_ROOT/worker/.cs/local/spawned-by" "spawned-by kept on trip" || return 1
 }
 
@@ -326,7 +345,7 @@ test_drain_without_spawned_by_sends_nothing() {
     rm -f "$CS_SESSIONS_ROOT/worker/.cs/local/spawned-by"
     _worker_stop_turn >/dev/null || return 1
     _worker_stop_turn >/dev/null || return 1
-    [ ! -f "$(BOSS_INBOX)" ] || { echo "  notify sent without spawned-by"; return 1; }
+    assert_eq "0" "$(BOSS_MSG_COUNT)" "notify sent without spawned-by" || return 1
 }
 
 run_test test_drain_finished_notifies_spawner_once
