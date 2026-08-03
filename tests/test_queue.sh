@@ -136,6 +136,39 @@ test_queue_verbs_convert_a_legacy_queue_file() {
     assert_output_contains "$out" "3. third" "new task after the legacy ones" || return 1
 }
 
+# Blank legacy lines are not tasks; a second conversion call is a no-op.
+test_legacy_conversion_skips_blanks_and_is_idempotent() {
+    printf 'real one\n   \n\nreal two\n' > "$(QFILE)"
+    local out; out=$("$CS_BIN" -queue list 2>&1)
+    assert_eq "2" "$(QCOUNT)" "blank lines skipped" || return 1
+    assert_output_contains "$out" "2. real two" "order preserved around blanks" || return 1
+    out=$("$CS_BIN" -queue list 2>&1)
+    assert_eq "2" "$(QCOUNT)" "second call converts nothing twice" || return 1
+}
+
+# A queue.migrating stranded by an interrupted conversion (or fed by a stale
+# writer holding the renamed inode) is folded in, never clobbered.
+test_legacy_conversion_folds_in_stranded_migrating_file() {
+    printf 'stranded task\n' > "$CLAUDE_SESSION_META_DIR/local/queue.migrating"
+    printf 'fresh task\n' > "$(QFILE)"
+    "$CS_BIN" -queue add "added task" >/dev/null 2>&1 || return 1
+    assert_eq "3" "$(QCOUNT)" "stranded, fresh and added tasks all present" || return 1
+    local out; out=$("$CS_BIN" -queue list 2>&1)
+    assert_output_contains "$out" "1. stranded task" "stranded line converted first" || return 1
+    assert_output_contains "$out" "2. fresh task" "fresh line after it" || return 1
+    [ ! -f "$CLAUDE_SESSION_META_DIR/local/queue.migrating" ] || { echo "  migrating leftover"; return 1; }
+}
+
+# The drain works on a session upgraded from the file layout once any queue
+# verb (or a session open) has converted it.
+test_drain_works_after_legacy_conversion() {
+    printf 'legacy drain task\n' > "$(QFILE)"
+    "$CS_BIN" -queue list >/dev/null 2>&1 || return 1
+    printf 'armed\n' > "$(QDIR)/queue.state"
+    local out; out=$(drain)
+    assert_output_contains "$out" "legacy drain task" "drain injects the converted task" || return 1
+}
+
 # Session open converts too, so the statusline, TUI and drain (which never
 # write) see the directory without waiting for a queue verb.
 test_session_open_converts_legacy_queue_file() {
@@ -164,6 +197,8 @@ test_worktree_open_converts_legacy_queue_file() {
 
 run_test test_queue_add_writes_one_file_per_task
 run_test test_queue_verbs_convert_a_legacy_queue_file
+run_test test_legacy_conversion_skips_blanks_and_is_idempotent
+run_test test_legacy_conversion_folds_in_stranded_migrating_file
 run_test test_session_open_converts_legacy_queue_file
 run_test test_worktree_open_converts_legacy_queue_file
 run_test test_queue_list_numbers_pending
@@ -310,6 +345,7 @@ test_drain_narrative_reminder_scopes_to_own() {
     assert_output_contains "$out" "teammate" "reminder must warn against editing a teammate's narrative" || return 1
 }
 
+run_test test_drain_works_after_legacy_conversion
 run_test test_drain_gates_when_idle_nonempty
 run_test test_drain_armed_injects_first_task_no_pop
 run_test test_drain_armed_mentions_queue_list
