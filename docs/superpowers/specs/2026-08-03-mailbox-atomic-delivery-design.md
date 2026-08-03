@@ -76,11 +76,33 @@ threads spec's transcript ordering and wake marker both depend on that caveat.
 ### Queue: one file per task
 
 `_queue_add`'s append has the same defect and gets the same fix. The queue
-becomes a directory of one file per task, named `<ts>-<pid>-<random>`, written
-to a sibling `tmp/` and renamed into place. The drain pops by taking the
+becomes a directory of one file per task, named `<ts>-<pid>-<random>`, staged in
+a sibling `queue.tmp/` and renamed into place. The drain pops by taking the
 lexically first entry and `mv`ing it aside before running it, which also makes
 the pop atomic against a second drain — something the current
-read-first-line-then-rewrite cannot promise.
+read-first-line-then-rewrite cannot promise. `queue.state` and `queue.declined`
+remain sibling files.
+
+**The queue has more writers than the mailbox, and they are not all shell.**
+`bin/cs-statusline` `_seg_notes` line-counts the queue (~line 523);
+`tui/src/session.rs` reads it in `read_queue` and `queue_depth` (lines 292, 421);
+and `tui/src/app.rs` does full CRUD, where `append_notes_task` is the same
+append defect and replace/delete address tasks by line index. All convert to the
+directory layout. Addressing becomes "the nth entry of the sorted listing", and
+that ordering rule is stated once and used by every reader, so the shell, the
+status bar and the TUI cannot disagree about which task is nth. Listings filter
+to task files, so `queue.tmp/` is never a task.
+
+**Legacy queue migration.** Every existing session has a regular file at
+`.cs/local/queue`, so `mkdir` there fails and an upgrade would break
+`cs -queue add`, the TUI Notes panel and the drain together while stranding
+queued work. Migration is keyed on "`queue` is a regular file" — not on the
+directory being absent, which the first write would destroy — and runs lazily
+from the queue accessors, needing no session-open hook. Order mirrors the mail
+migration: `mv queue queue.migrating`, convert each non-blank line to one task
+file preserving order, delete `queue.migrating`. A stale writer holding an open
+descriptor keeps writing into the renamed inode and its lines are still
+converted.
 
 Both mail and the queue therefore stop appending to shared files, which is the
 whole point: locking was the alternative, and it serializes delivery, lets a
@@ -176,7 +198,14 @@ time; `build.sh` runs before each run because the suite exercises `bin/cs`.
    inside a multi-millisecond process and real `cs` startup adds ~100ms of skew.
    It would pass against the broken implementation most runs and flake on CI.
    Any soak-style reproduction stays out of the default suite.
-2. The same, for `_queue_add` and the drain's pop.
+2. The same, for `_queue_add`; and the drain's pop is atomic against a second
+   drain.
+2b. A legacy queue file migrates with order preserved and blank lines skipped;
+   the migration is idempotent on a second call; a line appended to
+   `queue.migrating` after the rename is still converted; `cs -queue add`, the
+   drain and the TUI paths all work on a session upgraded from the file layout;
+   and the statusline notes count, `queue_depth` and `cs -queue list` agree on
+   the same directory.
 3. `cs -msg` moves what it printed from `new/` to `cur/`; a second run reports
    nothing unread.
 4. A non-`.json` file in `new/` is counted as unread by none of the four readers.
@@ -192,9 +221,10 @@ Rust-side: `tui/src/session.rs` unread tests are rewritten against `new/`,
 including the non-`.json` case.
 
 Surfaces: `README.md`, `docs/session-layout.md`, `docs/statusline.md` (documents
-the line-count basis), `hooks/scope-prompt.sh`, `bin/cs-statusline`, `tui/`,
-`tests/test_spawn.sh` and `tests/test_statusline.sh` (both assert against
-`inbox.jsonl`), and `CHANGELOG.md`.
+the line-count basis for both mail and notes), `hooks/scope-prompt.sh`,
+`bin/cs-statusline` (`_seg_mail` and `_seg_notes`), `tui/src/session.rs` and
+`tui/src/app.rs`, `tests/test_spawn.sh`, `tests/test_statusline.sh` and
+`tests/test_queue.sh`, and `CHANGELOG.md`.
 
 ## Rejected
 
