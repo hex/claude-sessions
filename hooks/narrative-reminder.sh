@@ -77,7 +77,30 @@ QDIR="$META_DIR/local"
 QUEUE="$QDIR/queue"
 QSTATE_FILE="$QDIR/queue.state"
 
-_qlen() {
+# The queue is a directory of one file per task (written via tmp+rename by
+# cs -queue add / task-kind mail), so the drain can never read a torn entry.
+_qlen() {  # queue dir
+    local f n=0
+    for f in "$1"/*; do
+        [ -f "$f" ] || continue
+        n=$((n + 1))
+    done
+    echo "$n"
+}
+
+# Lexically first task file (the glob is sorted); rc 1 when none.
+_qfirst() {  # queue dir
+    local f
+    for f in "$1"/*; do
+        [ -f "$f" ] || continue
+        printf '%s\n' "$f"
+        return 0
+    done
+    return 1
+}
+
+# Count of completed tasks in the line-per-task done log.
+_qdone_len() {  # done file
     if [ -f "$1" ]; then
         grep -c '[^[:space:]]' "$1" 2>/dev/null || true
     else
@@ -152,7 +175,9 @@ if [ "$QLEN" -gt 0 ]; then
     [ -n "$QSTATE" ] || QSTATE="idle"
 
     if [ "$QSTATE" = "armed" ]; then
-        TASK=$(awk 'NF{print; exit}' "$QUEUE")
+        TASK=""
+        _first=$(_qfirst "$QUEUE") || _first=""
+        [ -n "$_first" ] && TASK=$(cat "$_first" 2>/dev/null || true)
         printf 'draining\n' > "$QSTATE_FILE.tmp" && mv "$QSTATE_FILE.tmp" "$QSTATE_FILE"
         rm -f "$QDIR/failures"
         _inbox_append --arg ts "$(date +%s)" --arg q "$QLEN" \
@@ -165,16 +190,21 @@ First task: $TASK"
     fi
 
     if [ "$QSTATE" = "draining" ]; then
-        DONE_TASK=$(awk 'NF{print; exit}' "$QUEUE")
-        if awk 'popped==0 && NF { popped=1; next } { print }' "$QUEUE" \
-                > "$QUEUE.tmp" && mv "$QUEUE.tmp" "$QUEUE"; then
+        # Pop = mv the lexically first entry aside BEFORE reading it: a second
+        # drain racing this one loses the rename and disarms instead of
+        # double-running the task.
+        _first=$(_qfirst "$QUEUE") || _first=""
+        POPPED="$QDIR/queue.popping.$$"
+        if [ -n "$_first" ] && mv "$_first" "$POPPED" 2>/dev/null; then
+            DONE_TASK=$(cat "$POPPED" 2>/dev/null || true)
+            rm -f "$POPPED"
             printf '%s\n' "$DONE_TASK" >> "$QDIR/queue.done"
             _inbox_append --arg ts "$(date +%s)" --arg task "$DONE_TASK" \
                 '{ts: ($ts|tonumber), event: "task_done", task: $task}'
             NEWLEN=$(_qlen "$QUEUE")
             if [ "$NEWLEN" -le 0 ]; then
                 printf 'idle\n' > "$QSTATE_FILE.tmp" && mv "$QSTATE_FILE.tmp" "$QSTATE_FILE"
-                DONE_COUNT=$(_qlen "$QDIR/queue.done")
+                DONE_COUNT=$(_qdone_len "$QDIR/queue.done")
                 _inbox_append --arg ts "$(date +%s)" --arg d "$DONE_COUNT" \
                     '{ts: ($ts|tonumber), event: "drain_finished", done: ($d|tonumber)}'
                 # Spawned worker: tell the spawner its batch is done. One-shot
@@ -201,7 +231,9 @@ First task: $TASK"
                 exit 0
             fi
             rm -f "$QDIR/failures"
-            NEXT=$(awk 'NF{print; exit}' "$QUEUE")
+            NEXT=""
+            _first=$(_qfirst "$QUEUE") || _first=""
+            [ -n "$_first" ] && NEXT=$(cat "$_first" 2>/dev/null || true)
             REASON="cs task queue: next task ($NEWLEN remaining). Mark the previous native task completed and this one in-progress (create it if missing), then do it.
 
 Task: $NEXT"
