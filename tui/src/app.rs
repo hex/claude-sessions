@@ -4005,7 +4005,7 @@ mod tests {
 
     #[test]
     fn notes_list_d_removes_highlighted_task() {
-        let (tmp, local, _root) = seed_queue("notes-del", "alpha", &["one", "two", "three"]);
+        let (tmp, _local, _root) = seed_queue("notes-del", "alpha", &["one", "two", "three"]);
         let mut app = App::new(sample_sessions());
         app.table_state.select(Some(0));
         app.handle_key(KeyEvent::from(KeyCode::Tab));
@@ -4019,7 +4019,7 @@ mod tests {
 
     #[test]
     fn notes_list_e_loads_task_and_enter_replaces_in_place() {
-        let (tmp, local, _root) = seed_queue("notes-edit", "alpha", &["one", "two", "three"]);
+        let (tmp, _local, _root) = seed_queue("notes-edit", "alpha", &["one", "two", "three"]);
         let mut app = App::new(sample_sessions());
         app.table_state.select(Some(0));
         app.handle_key(KeyEvent::from(KeyCode::Tab));
@@ -4040,7 +4040,7 @@ mod tests {
 
     #[test]
     fn notes_list_e_then_esc_cancels_edit_unchanged() {
-        let (tmp, local, _root) = seed_queue("notes-edit-cancel", "alpha", &["one", "two", "three"]);
+        let (tmp, _local, _root) = seed_queue("notes-edit-cancel", "alpha", &["one", "two", "three"]);
         let mut app = App::new(sample_sessions());
         app.table_state.select(Some(0));
         app.handle_key(KeyEvent::from(KeyCode::Tab));
@@ -4076,7 +4076,7 @@ mod tests {
 
     #[test]
     fn mouse_scroll_during_edit_cancels_it() {
-        let (tmp, local, _root) = seed_queue("notes-edit-mouse", "alpha", &["one", "two", "three"]);
+        let (tmp, _local, _root) = seed_queue("notes-edit-mouse", "alpha", &["one", "two", "three"]);
         let mut app = App::new(sample_sessions());
         app.table_state.select(Some(0));
         app.handle_key(KeyEvent::from(KeyCode::Tab));
