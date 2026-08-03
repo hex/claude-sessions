@@ -153,9 +153,33 @@ test_rotate_skill_documents_the_clear_route() {
         "the stale no-state contract is gone" || return 1
 }
 
+test_rotate_skill_reads_parent_from_state_not_the_launch_env() {
+    # CS_CLAUDE_SESSION_ID is the LAUNCH uuid: exported once per cs process
+    # (lib/75-launch.sh) and never refreshed, on purpose — session-start.sh
+    # keys its ref-rename guard on it still naming this process's predecessor.
+    # .cs/local/state is what tracks the current conversation, rebound by the
+    # hook on every fresh conversation. The two agree only until the first
+    # /clear, so preferring the env var writes the GRANDPARENT as parent: on a
+    # second rotation, and step 4 supersedes by matching parent: against the
+    # session log.
+    local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
+    local state_line env_line
+    state_line=$(grep -n 'claude_session_id' "$skill" | head -1 | cut -d: -f1)
+    env_line=$(grep -n 'CS_CLAUDE_SESSION_ID' "$skill" | head -1 | cut -d: -f1)
+    [ -n "$state_line" ] || { echo "  FAIL: skill never names .cs/local/state's claude_session_id"; return 1; }
+    [ -n "$env_line" ] || { echo "  FAIL: skill never names CS_CLAUDE_SESSION_ID"; return 1; }
+    [ "$state_line" -lt "$env_line" ] || {
+        echo "  FAIL: skill offers CS_CLAUDE_SESSION_ID (line $env_line) before the state file (line $state_line); the launch uuid is stale after a /clear"
+        return 1
+    }
+    assert_file_contains "$skill" "launch" \
+        "the skill says why the env var is only a fallback" || return 1
+}
+
 run_test test_rotate_skill_exists_with_frontmatter
 run_test test_rotate_skill_registered_in_both_manifests
 run_test test_rotate_skill_documents_the_clear_route
+run_test test_rotate_skill_reads_parent_from_state_not_the_launch_env
 
 # ============================================================================
 # Cycle 3: three-way launch prompt

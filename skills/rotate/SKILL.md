@@ -19,8 +19,17 @@ should do. If the user did not give one, ask before writing anything.
 
 ## Process
 
-1. Determine the parent conversation UUID: `$CS_CLAUDE_SESSION_ID`, or if
-   unset, the `claude_session_id` line of `.cs/local/state`.
+1. Determine the parent conversation UUID: the `claude_session_id` line of
+   `.cs/local/state`, or if that is missing, `$CS_CLAUDE_SESSION_ID`.
+
+   Take the state file first. `CS_CLAUDE_SESSION_ID` is the *launch* UUID —
+   cs exports it once per process and never refreshes it, because the
+   SessionStart hook keys its ref-rename guard on that value still naming
+   this process's predecessor. The hook rebinds `claude_session_id` on every
+   fresh conversation, so the two agree only until the first `/clear`. After
+   that the env var names an ancestor, and `parent:` must be the conversation
+   that is writing this handoff — step 4 supersedes by matching it against
+   the session log.
 2. Pick a short kebab-case slug from the purpose (e.g. `continue-f5-plan`).
 3. Write `.cs/handoffs/YYYY-MM-DD-<slug>.md` (today's date; create the
    directory if missing) with EXACTLY this frontmatter, then the body:
