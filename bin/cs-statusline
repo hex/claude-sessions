@@ -536,28 +536,21 @@ _seg_notes() {
 }
 
 # Unread cross-session mail for the current session, shown after the notes
-# queue. Hidden when nothing is unread or the inbox is absent. Unread is the
-# count of newline-terminated inbox lines past the `seen` cursor that `cs -msg`
-# advances on read — the same basis as the shell's _mail_total (wc -l) and the
-# TUI. A torn final line (message mid-write, no trailing newline) is not
-# counted, so it can't show a phantom unread that never clears.
+# queue. Hidden when nothing is unread or the maildir is absent. Unread is the
+# count of mail/new/*.json documents (cs -msg moves what it prints to cur/) —
+# the same basis as the shell reader and the TUI. Only *.json files count: a
+# .DS_Store, a staging leftover or a subdirectory must not show a phantom
+# unread that never clears. The [ -f ] guard also covers bash 3.2's lack of
+# nullglob (an unmatched glob comes back literal).
 _seg_mail() {
     [ -n "${CLAUDE_SESSION_NAME:-}" ] || return 0
     local mdir="$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/local/mail"
-    local inbox="$mdir/inbox.jsonl"
-    [ -f "$inbox" ] || return 0
-    local total=0 line
-    while IFS= read -r line; do
-        total=$((total + 1))
-    done < "$inbox"
-    local seen=0
-    [ -r "$mdir/seen" ] && read -r seen < "$mdir/seen" 2>/dev/null
-    case "$seen" in
-        ''|*[!0-9]*) seen=0 ;;
-    esac
-    # Base-10 normalize the cursor so a zero-padded value (e.g. "08") is not
-    # read as octal by the arithmetic below.
-    local unread=$((total - 10#$seen))
+    [ -d "$mdir/new" ] || return 0
+    local unread=0 f
+    for f in "$mdir"/new/*.json; do
+        [ -f "$f" ] || continue
+        unread=$((unread + 1))
+    done
     [ "$unread" -gt 0 ] || return 0
     _add "${ICON_MAIL}${unread}" "amber"
 }
