@@ -537,15 +537,25 @@ else
     # skips them. The spec tests in tests/test_hooks.sh embed this same
     # filter shape via _install_merge_filter — keep them aligned.
     _merge_cs_hook() {
-        local event="$1" file="$2" timeout="$3" matcher="${4:-}" async="${5:-}"
+        local event="$1" file="$2" timeout="$3" matcher="${4:-}" async="${5:-}" rewake="${6:-}"
         local path="$HOOKS_DIR/$file" tilde="$HOOKS_TILDE_DIR/$file"
         local append
+        # asyncRewake makes a hook's exit 2 wake the model with its stderr,
+        # wrapped in a system-reminder under the rewakeMessage prefix. It
+        # implies async, so it does not also need the async flag. Without it the
+        # hook still runs and its output is discarded — the wake becomes a
+        # five-second toast nobody reads.
         append=$(jq -n --arg cmd "$tilde" --argjson timeout "$timeout" \
-            --arg matcher "$matcher" --arg async "$async" '
+            --arg matcher "$matcher" --arg async "$async" --arg rewake "$rewake" '
             (if $matcher != "" then {matcher: $matcher} else {} end)
             + {hooks: [
                 {type: "command", command: $cmd, timeout: $timeout}
                 + (if $async == "true" then {async: true} else {} end)
+                + (if $rewake == "true" then {
+                       asyncRewake: true,
+                       rewakeMessage: "Cross-session mail arrived:",
+                       rewakeSummary: "New cs mail"
+                   } else {} end)
               ]}
         ')
         SETTINGS=$(echo "$SETTINGS" | jq \
@@ -564,7 +574,14 @@ else
         ')
     }
 
-    # Registration table: event, file, timeout, [matcher], [async]
+    # Registration table: event, file, timeout, [matcher], [async], [rewake]
+    #
+    # FileChanged carries no matcher on purpose: for that event the matcher both
+    # seeds the watch path and supplies the dispatch query as the changed file's
+    # BASENAME, so a matcher naming the maildir would watch it and then never
+    # fire — and maildir filenames are unpredictable, so no basename matcher can
+    # be written either. The watch path arrives instead as watchPaths from
+    # session-start.sh, and the hook filters file_path to its own mailbox.
     _merge_cs_hook SessionStart       session-start.sh       30
     _merge_cs_hook PostToolUse        autosave-commits.sh    10 "Write|Edit" true
     _merge_cs_hook Stop               narrative-reminder.sh  10
@@ -575,6 +592,7 @@ else
     _merge_cs_hook PermissionRequest  session-auto-approve.sh 5 "Write|Edit"
     _merge_cs_hook PreToolUse         bash-logger.sh          5 "Bash"
     _merge_cs_hook UserPromptSubmit   scope-prompt.sh         3
+    _merge_cs_hook FileChanged        narrative-reminder.sh  10 "" "" true
 
     # Register cs-statusline as the Claude Code status line. A status line the
     # user already configured is never replaced silently: prompt when a

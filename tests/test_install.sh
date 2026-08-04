@@ -716,6 +716,26 @@ test_hook_registration_doc_matches_install() {
     done <<< "$regs"
 }
 
+test_filechanged_registration_carries_async_rewake() {
+    # The idle mail wake delivers by exiting 2. Without asyncRewake the hook
+    # still runs and its output is discarded — a five-second toast the model
+    # never sees — so the wake would look wired up and do nothing.
+    local inst="$SCRIPT_DIR/../install.sh" reg
+    reg=$(grep -E '^ +_merge_cs_hook FileChanged ' "$inst") \
+        || { echo "  FAIL: FileChanged is not registered"; return 1; }
+    assert_output_contains "$reg" "narrative-reminder.sh" \
+        "FileChanged routes to the hook that owns the mail wake" || return 1
+    # 6th positional is the rewake flag; a matcher here would break the event
+    # (its matcher is tested against the changed file's basename).
+    assert_output_contains "$reg" '"" "" true' \
+        "registered with no matcher and the rewake flag set" || return 1
+    grep -q 'asyncRewake: true' "$inst" \
+        || { echo "  FAIL: _merge_cs_hook cannot emit asyncRewake"; return 1; }
+    grep -q 'rewakeMessage' "$inst" \
+        || { echo "  FAIL: no rewakeMessage prefix; the payload would read as a Stop hook error"; return 1; }
+}
+
+run_test test_filechanged_registration_carries_async_rewake
 run_test test_uninstall_preserves_foreign_statusline
 run_test test_install_recovers_from_invalid_settings_json
 run_test test_hook_registration_doc_matches_install
