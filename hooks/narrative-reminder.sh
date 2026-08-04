@@ -274,6 +274,43 @@ Task: $NEXT"
 fi
 # (falls through to the narrative reminder below when not gating/draining)
 
+# --- Mail wake ----------------------------------------------------------------
+# Unread cross-session mail takes the turn end, so an agent-to-agent exchange
+# advances without waiting for a keystroke. Reached only when the queue is not
+# active: every armed/draining branch above exits, so an empty queue never gates
+# whatever queue.state records.
+# The re-wake guard is a snapshot of the filenames already discharged, not a
+# count and not a high-water mark: unread drops to zero whenever cs -msg moves
+# files to cur/, and filenames are not ordered by arrival (same-second order is
+# by unpadded pid). Set membership needs neither property.
+MAILDIR="$META_DIR/local/mail"
+MAIL_WOKE="$MAILDIR/woke"
+MAIL_UNREAD=0
+MAIL_FRESH=0
+MAIL_NAMES=""
+for _mw_f in "$MAILDIR"/new/*.json; do
+    [ -f "$_mw_f" ] || continue
+    MAIL_UNREAD=$((MAIL_UNREAD + 1))
+    _mw_name=${_mw_f##*/}
+    MAIL_NAMES="$MAIL_NAMES$_mw_name
+"
+    # Reads a file, never a pipe, so the -q early exit cannot raise SIGPIPE.
+    grep -qxF "$_mw_name" "$MAIL_WOKE" 2>/dev/null || MAIL_FRESH=1
+done
+if [ "$MAIL_FRESH" = 1 ]; then
+    REASON="Unread cross-session mail ($MAIL_UNREAD). Run cs -msg to read it."
+    jq -nc --arg r "$REASON" '{decision: "block", reason: $r}'
+    # Emit first, record second: a kill in between costs one duplicate wake,
+    # while the reverse costs a silent strand — and a strand is unrecoverable
+    # for an idle session, which submits no prompt and ends no turn. The tmp
+    # name carries the pid because the idle wake writes this same file
+    # concurrently; two writers sharing one tmp name splice each other and the
+    # rename then publishes the splice.
+    printf '%s' "$MAIL_NAMES" > "$MAIL_WOKE.tmp.$$" 2>/dev/null \
+        && mv "$MAIL_WOKE.tmp.$$" "$MAIL_WOKE" 2>/dev/null || true
+    exit 0
+fi
+
 # --- Rotation nudge -----------------------------------------------------------
 # One-time suggestion to rotate when context runs hot. Delivered as a block
 # (the only Stop-hook surface Claude sees); an armed or draining queue never

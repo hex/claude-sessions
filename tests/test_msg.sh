@@ -720,6 +720,39 @@ test_migration_runs_on_worktree_open() {
     assert_eq "1" "$n" "worktree legacy mail landed in new/" || return 1
 }
 
+# --- mail wake -------------------------------------------------------------
+# The wakes run as the RECIPIENT, so every wake helper re-points the session env
+# at receiver; the suite's own env names sender (it is the one sending).
+RCV_META() { printf '%s' "$CS_SESSIONS_ROOT/receiver/.cs"; }
+
+# Drive the Stop hook as the receiver.
+wake() {
+    (
+        export CLAUDE_SESSION_NAME=receiver
+        export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/receiver"
+        export CLAUDE_SESSION_META_DIR="$(RCV_META)"
+        echo "${1:-{\}}" | bash "$HOOKS_DIR/narrative-reminder.sh" 2>/dev/null
+    )
+}
+
+test_stop_wake_blocks_on_unread_mail() {
+    "$CS_BIN" -msg receiver "hello there" >/dev/null 2>&1 || return 1
+    local out; out=$(wake)
+    assert_output_contains "$out" '"block"' "unread mail blocks the stop" || return 1
+    assert_output_contains "$out" "cs -msg" "the wake names the reader command" || return 1
+}
+
+test_stop_wake_fires_once_per_arrival() {
+    "$CS_BIN" -msg receiver "first" >/dev/null 2>&1 || return 1
+    wake >/dev/null
+    local out; out=$(wake)
+    assert_output_not_contains "$out" "Unread cross-session mail" \
+        "the same unread message does not wake a second time" || return 1
+}
+
+run_test test_stop_wake_blocks_on_unread_mail
+run_test test_stop_wake_fires_once_per_arrival
+
 run_test test_migration_merges_when_new_already_exists
 run_test test_migration_retry_after_partial_conversion_delivers_no_duplicates
 run_test test_migration_keeps_the_legacy_file_when_a_record_cannot_be_written
