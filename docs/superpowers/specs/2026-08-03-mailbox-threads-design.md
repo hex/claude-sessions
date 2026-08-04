@@ -1,7 +1,7 @@
 # Mailbox threads and mail wake-up
 
 Date: 2026-08-03
-Status: proposed (revision 4)
+Status: proposed (revision 5)
 
 **Depends on `2026-08-03-mailbox-atomic-delivery-design.md`.** That change moves
 the mailbox to a maildir and fixes the shared-append corruption in both mail and
@@ -154,20 +154,76 @@ Writing the snapshot before emitting the block matches what the rotation nudge
 already does (`hooks/narrative-reminder.sh:256`): a kill between the two loses
 exactly one wake, which the prompt digest then recovers.
 
-**Idle sessions are not covered.** `Stop` fires when a turn ends, so a session
-parked at the prompt emits no event and still waits for a keystroke. The
-sender-side `tmux send-keys` nudge that would cover it is deliberately not
-specified: nothing records the target's pane — the window id captured at spawn is
-used only for an info message (`lib/52-spawn.sh:76`), the statusline's
-`TMUX_PANE` is never persisted (`bin/cs-statusline:569`), and the only durable
-fact is the worker-side `spawned-by` (`lib/75-launch.sh:168`), which points the
-wrong way and is deleted after the final drain
-(`hooks/narrative-reminder.sh:183`). Resolution would degrade to matching a
-window by name, which `lib/52-spawn.sh:50` itself warns is unreliable under tmux
-automatic-rename. And `send-keys` into a live Claude Code pane lands in the input
-box and submits **as user input**, indistinguishable from Alex typing, in a pane
-Alex may be attached to. Closing this gap needs a recorded window-id handshake
-written at spawn and invalidated on window death. Separate change.
+`Stop` covers the turn-end case only: it fires as a turn ends, so it reaches a
+session that has just finished work, not one already parked at the prompt.
+
+**Consecutive `Stop` blocks are capped.** Claude Code reads
+`CLAUDE_CODE_STOP_HOOK_BLOCK_CAP` (default 8) and, past it, overrides the hook
+and ends the turn. The wake blocks at most once per arrival, so the cap is not
+reachable by mail alone, but the drain and the rotation nudge share the budget.
+
+### Waking an idle session
+
+A session parked at the prompt emits neither `Stop` nor `UserPromptSubmit`, so
+no turn-boundary hook can reach it. Claude Code's `FileChanged` event does: it is
+served by a chokidar watcher living on the CLI's own event loop, independent of
+turn state, so an external `rename(2)` into a watched directory runs a hook while
+the session is idle. That is exactly how mail is delivered
+(`lib/53-mail.sh:102`), so the mailbox needs no new write to become observable.
+
+The wake is a second hook entry, `FileChanged`, watching the recipient's
+`mail/new/`:
+
+- **No `matcher`.** `matcher` does double duty — it seeds the watch path
+  (`isAbsolute(k) ? k : join(cwd, k)`, split on `|`) *and* supplies the dispatch
+  query, which for this event is `basename(file_path)`. A matcher naming the
+  maildir therefore watches it and then never fires, because no message's
+  basename equals the directory's path. Maildir filenames are unpredictable by
+  construction, so no basename matcher can be written either.
+- **`watchPaths` from `SessionStart` instead.** The `SessionStart` output schema
+  accepts `watchPaths` ("Absolute paths to watch for FileChanged hooks"), so the
+  absolute maildir path joins the object `hooks/session-start.sh:651` already
+  emits. The watcher early-returns on an empty initial path set, so supplying the
+  path at session start is what arms it at all.
+- **`asyncRewake: true`, and the hook exits 2.** These sit on the command object
+  beside `type` and `command`. Without them the hook still runs — and delivers
+  nothing: a successful `FileChanged` hook's output is discarded, and
+  `additionalContext` is not in that event's output schema. Only the exit-2 path
+  reaches the model, enqueued as `{mode: "task-notification", priority: "next"}`.
+- **The payload is the hook's stderr**, prefixed by `rewakeMessage` and wrapped in
+  a system-reminder; stdout is discarded. `rewakeSummary` is the one-line label
+  shown in the terminal.
+
+Measured end to end against Claude Code 2.1.221: a session idle at the composer
+for 20 s with zero prompts ever submitted ran the hook 1 s after the rename, then
+started and completed a turn on its own. Latency has a floor of the watcher's
+`awaitWriteFinish.stabilityThreshold` (500 ms).
+
+Arriving as a system-reminder rather than as page content is what makes the wake
+actionable: the same instruction delivered as data is treated as data, and
+correctly ignored.
+
+**What the wake says.** The hook receives `file_path` and `event`, so it names
+the count and tells the session to run `cs -msg` — the same reason string the
+`Stop` wake uses, and for the same reason it does not inline bodies. A `task`
+kind is silent here exactly as it is in the digest: the queue already owns it,
+and waking on it would race the drain.
+
+**Coalescing.** One arrival is one hook run, so five messages landing together
+would otherwise wake five times. The `mail/woke` snapshot governs both wakes: the
+hook exits 2 only when `new/` holds a file absent from the snapshot, then rewrites
+it. The snapshot's set-membership property is what makes it safe to share — it
+depends on neither a monotonic count nor filename order.
+
+**Degrading on older Claude Code.** A `FileChanged` entry in `settings.json` is
+inert on a version that does not know the event, and `watchPaths` in the
+`SessionStart` output is an unknown key that is ignored. So the wake is
+additive: where it is unavailable, mail behaves exactly as it does today. `cs
+-doctor` reports whether the running Claude Code serves the event.
+
+**Opt-in.** A wake spends tokens unprompted. That is the point for a `cs -spawn`
+worker and an intrusion for a session parked mid-thought, so the idle wake is
+enabled per session rather than globally.
 
 ## Testing
 
@@ -190,9 +246,20 @@ first because the suite exercises `bin/cs`.
    while a non-empty queue is armed or draining; **does** fire when the queue is
    empty and its recorded state is `armed`.
 
+8. The idle wake: the `FileChanged` hook exits 2 on a text arrival absent from
+   the snapshot and exits 0 on a `task` arrival; a second arrival already in the
+   snapshot does not re-exit 2; the reason names the count and `cs -msg`, never a
+   body. The end-to-end wake needs a live session, so it stays a documented
+   manual smoke (`docs/windows-manual-smoke.md` is the precedent): idle a session
+   at the composer, `cs -msg` it from a second shell, observe the turn start.
+9. `session-start.sh` emits an absolute `watchPaths` entry for the maildir, and
+   omits it when the mailbox cannot be resolved.
+
 Surfaces: `README.md`, `docs/session-layout.md` (`out/`, `woke`), `docs/hooks.md`
-(the Stop wake), `completions/_cs` and `completions/cs.bash` (`--reply`,
-`thread`), `lib/10-help.sh`, and `CHANGELOG.md`.
+(both wakes), `install.sh` (the `FileChanged` registration and its uninstall),
+`lib/60-doctor.sh` (whether the running Claude Code serves the event),
+`completions/_cs` and `completions/cs.bash` (`--reply`, `thread`),
+`lib/10-help.sh`, and `CHANGELOG.md`.
 
 ## Rejected
 
@@ -207,3 +274,40 @@ a reply above its question in the common case, and filenames are not a clock.
 
 **`PostToolUse` polling for the wake.** Runs on every tool call, interrupts
 mid-thought, and still cannot reach a session idle at the prompt.
+
+**Sender-side `tmux send-keys` for the idle wake.** Reaches an idle session, and
+was the only candidate before `FileChanged`. Rejected on two counts, either
+fatal. Nothing records the target's pane: the window id captured at spawn feeds
+an info message only (`lib/52-spawn.sh:76`), the statusline's `TMUX_PANE` is
+never persisted (`bin/cs-statusline:569`), and the durable `spawned-by`
+(`lib/75-launch.sh:168`) points the wrong way and is deleted after the final
+drain (`hooks/narrative-reminder.sh:183`) — leaving name-matching, which
+`lib/52-spawn.sh:50` warns is unreliable under automatic-rename. And the keys
+land in the input box and submit **as user input**, indistinguishable from Alex
+typing, in a pane Alex may be attached to. `FileChanged` needs no pane and
+fabricates nothing.
+
+**MCP Channels (`notifications/claude/channel`).** Does wake a fully idle
+session. Rejected for now on three counts: a cs-authored stdio server is not on
+the preview allowlist, so it needs
+`--dangerously-load-development-channels`, which opens a **blocking confirmation
+dialog at startup** and so breaks unattended `cs -spawn`; availability is behind
+a remote flag that defaults off, first-party auth only, plus an org toggle; and
+the payload arrives as page content, which the recipient correctly treats as
+data — a probe worded exactly as cs mail woke the session and was then declined
+as injection. Reconsider if cs ships a channel as an allowlisted plugin.
+
+**Peer-session delivery over a Unix socket.** The binary carries a session
+registry and a socket sender for exactly this, but the accessor that would
+publish a session's own socket path is a no-op stub and no live session
+registers one. Real code, inert build. Watch, do not build on.
+
+**Agent-team messaging.** The teammate inbox is polled once a second and
+auto-submits to an idle teammate, which is the behavior cs wants — but it
+addresses only teammates a lead spawned inside one session's lifetime, and cs
+sessions are independently launched, symmetric, and outlive any one
+conversation.
+
+**The `Notification` event (`idle_prompt`).** The one event that fires from pure
+idleness, and useless here: its output has no injection field, so it can ring a
+bell and nothing more.
