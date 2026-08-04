@@ -22,6 +22,19 @@ teardown() {
 }
 
 MAILDIR() { printf '%s' "$CS_SESSIONS_ROOT/receiver/.cs/local/mail"; }
+RCV_META() { printf '%s' "$CS_SESSIONS_ROOT/receiver/.cs"; }
+
+# Run cs as the receiver (to read its own mail, or reply from its side).
+# Defined here rather than beside the wake tests because run_test calls are
+# interleaved through this file: a helper must exist before the first one runs.
+rcv() {
+    (
+        export CLAUDE_SESSION_NAME=receiver
+        export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/receiver"
+        export CLAUDE_SESSION_META_DIR="$(RCV_META)"
+        "$CS_BIN" "$@"
+    )
+}
 
 # Count of unread (new/*.json) messages in receiver's maildir.
 NEW_COUNT() {
@@ -117,6 +130,51 @@ test_send_stamps_a_thread_and_keeps_a_sent_copy() {
         [ -f "$f" ] || continue; n=$((n + 1))
     done
     assert_eq "0" "$n" "a sent copy is not unread mail to its own sender" || return 1
+}
+
+SENDER_NEW() {
+    local f n=0
+    for f in "$CS_SESSIONS_ROOT/sender/.cs/local/mail/new"/*.json; do
+        [ -f "$f" ] || continue; n=$((n + 1)); printf '%s' "$f"
+    done
+    [ "$n" -gt 0 ] || return 1
+}
+
+test_reply_derives_its_target_from_the_thread() {
+    "$CS_BIN" -msg receiver "question?" >/dev/null 2>&1 || return 1
+    local msg; msg=$(FIRST_MSG) || return 1
+    local thread parent
+    thread=$(jq -r .thread "$msg"); parent=$(jq -r .id "$msg")
+
+    # The receiver answers naming only the thread — never the peer.
+    rcv -msg --reply "$thread" "answer!" >/dev/null 2>&1 || { echo "  reply failed"; return 1; }
+
+    local back; back=$(SENDER_NEW) || { echo "  the reply did not route back to the sender"; return 1; }
+    assert_eq "$thread" "$(jq -r .thread "$back")" "the reply reuses the thread id" || return 1
+    assert_eq "sender" "$(jq -r .to "$back")" "the target was derived, not stated" || return 1
+    assert_eq "$parent" "$(jq -r .in_reply_to "$back")" \
+        "in_reply_to points at the message answered, which is what orders the transcript" || return 1
+}
+
+test_reply_refuses_an_unknown_thread() {
+    local out rc=0
+    out=$(rcv -msg --reply ffffff "into the void" 2>&1) || rc=$?
+    [ "$rc" != "0" ] || { echo "  an unknown thread should error, never start a new one"; return 1; }
+    assert_output_contains "$out" "thread" "the error names the problem" || return 1
+}
+
+test_reply_refuses_a_target_that_contradicts_the_thread() {
+    "$CS_BIN" -msg receiver "question?" >/dev/null 2>&1 || return 1
+    local thread; thread=$(jq -r .thread "$(FIRST_MSG)")
+    create_test_session third >/dev/null 2>&1 || true
+    local out rc=0
+    out=$(rcv -msg third --reply "$thread" "misrouted" 2>&1) || rc=$?
+    [ "$rc" != "0" ] || { echo "  a contradicting target should error"; return 1; }
+    local f n=0
+    for f in "$CS_SESSIONS_ROOT/third/.cs/local/mail/new"/*.json; do
+        [ -f "$f" ] || continue; n=$((n + 1))
+    done
+    assert_eq "0" "$n" "a typo must not misroute the reply and poison later derivations" || return 1
 }
 
 test_record_has_no_ref_field() {
@@ -254,6 +312,9 @@ test_task_kind_rejects_multiline_body() {
 run_test test_send_delivers_one_whole_document_per_message
 run_test test_send_writes_full_record
 run_test test_send_stamps_a_thread_and_keeps_a_sent_copy
+run_test test_reply_derives_its_target_from_the_thread
+run_test test_reply_refuses_an_unknown_thread
+run_test test_reply_refuses_a_target_that_contradicts_the_thread
 run_test test_record_has_no_ref_field
 run_test test_send_from_outside_session_has_empty_from
 run_test test_send_session_scoped_alias
@@ -780,7 +841,7 @@ test_migration_runs_on_worktree_open() {
 # --- mail wake -------------------------------------------------------------
 # The wakes run as the RECIPIENT, so every wake helper re-points the session env
 # at receiver; the suite's own env names sender (it is the one sending).
-RCV_META() { printf '%s' "$CS_SESSIONS_ROOT/receiver/.cs"; }
+# RCV_META and rcv are defined near the top, alongside MAILDIR.
 
 # Drive the Stop hook as the receiver's LEAD conversation: cs's exec arm replaces
 # its own process, so claude carries cs's pid and the two agree.
@@ -899,16 +960,6 @@ test_stop_wake_silent_for_task_kind() {
         "fixture reaches the mail wake (the queue gate did not take the turn)" || return 1
     assert_output_not_contains "$out" "Unread cross-session mail" \
         "a task-kind message never wakes: the queue already owns it" || return 1
-}
-
-# Run cs as the receiver (e.g. to read its own mail).
-rcv() {
-    (
-        export CLAUDE_SESSION_NAME=receiver
-        export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/receiver"
-        export CLAUDE_SESSION_META_DIR="$(RCV_META)"
-        "$CS_BIN" "$@"
-    )
 }
 
 test_stop_wake_fires_again_for_a_later_message() {

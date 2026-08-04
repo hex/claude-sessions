@@ -3305,16 +3305,56 @@ _mail_keep_sent() {  # line, fname
     return 0
 }
 
-_mail_send() {  # target, [--kind|-k KIND] body
+# Derive the peer and the message being answered from a thread this session can
+# see. The newest match wins: 'from' when we received it, 'to' when we sent it.
+# Ordering is by filename, which is only a tie-break here — the peer is the same
+# at either end of a two-party thread.
+_mail_reply_peer() {  # maildir, thread -> "peer<TAB>parent id"; rc 1 if unknown
+    local maildir="$1" id="$2" f newest=""
+    while IFS= read -r f; do
+        [ -n "$f" ] && newest="$f"
+    done < <(_mail_thread_files "$maildir" "$id" 2>/dev/null \
+        | awk -F/ '{print $NF "\t" $0}' | sort | cut -f2-)
+    [ -n "$newest" ] || return 1
+    local peer
+    case "$newest" in
+        */out/*) peer=$(jq -r '.to // ""' "$newest" 2>/dev/null || true) ;;
+        *)       peer=$(jq -r '.from // ""' "$newest" 2>/dev/null || true) ;;
+    esac
+    printf '%s\t%s' "$peer" "$(jq -r '.id // ""' "$newest" 2>/dev/null || true)"
+}
+
+_mail_send() {  # target, [--kind|-k KIND] [--reply THREAD] body
     local target="$1"; shift
-    local kind="text" body=""
+    local kind="text" body="" reply_thread="" reply_parent=""
     while [ $# -gt 0 ]; do
         case "$1" in
-            --kind|-k) [ $# -ge 2 ] || error "--kind needs a value"; shift; kind="$1";;
-            *)         body="${body:+$body }$1";;
+            --kind|-k)   [ $# -ge 2 ] || error "--kind needs a value"; shift; kind="$1";;
+            --reply|-r)  [ $# -ge 2 ] || error "--reply needs a thread id"; shift; reply_thread="$1";;
+            *)           body="${body:+$body }$1";;
         esac
         shift
     done
+    if [ -n "$reply_thread" ]; then
+        [ -n "${CLAUDE_SESSION_META_DIR:-}" ] \
+            || error "cs -msg --reply resolves the thread from a session's mailbox; run it inside a session"
+        local pair derived
+        pair=$(_mail_reply_peer "$CLAUDE_SESSION_META_DIR/local/mail" "$reply_thread") \
+            || error "No such thread: $reply_thread (cs -msg log lists them)"
+        IFS=$'\t' read -r derived reply_parent <<< "$pair"
+        # An explicit target must EQUAL the derived peer. Accepting a different
+        # one silently misroutes the reply on a typo, records the wrong peer in
+        # out/, and poisons every later derivation in the thread.
+        if [ -n "$derived" ]; then
+            if [ -n "$target" ] && [ "$target" != "$derived" ]; then
+                error "thread $reply_thread is with $derived, not $target"
+            fi
+            target="$derived"
+        elif [ -z "$target" ]; then
+            # Reachable: 'from' is empty on mail sent from outside a session.
+            error "cannot tell who thread $reply_thread is with; name the target: cs -msg <session> --reply $reply_thread ..."
+        fi
+    fi
     command -v jq >/dev/null 2>&1 || error "jq is required for cs -msg"
     case "$target" in ''|.|..|*/*) error "cs -msg needs a plain session name as target";; esac
     local target_dir="$SESSIONS_ROOT/$target"
@@ -3370,14 +3410,20 @@ _mail_send() {  # target, [--kind|-k KIND] body
     # The pid keeps two senders inside one second apart; a bare RANDOM suffix
     # collides ~1 in 32768 per pair and mv clobbers silently.
     id="${now}-$$-${RANDOM}"
-    # Generated against the sender's own mailbox, which is where the roots this
-    # session started are recorded.
-    thread="$(_mail_new_thread "${CLAUDE_SESSION_META_DIR:-$target_dir/.cs}/local/mail")"
+    # A reply joins the thread it answers; a root gets a fresh id, generated
+    # against the sender's own mailbox where its earlier roots are recorded.
+    if [ -n "$reply_thread" ]; then
+        thread="$reply_thread"
+    else
+        thread="$(_mail_new_thread "${CLAUDE_SESSION_META_DIR:-$target_dir/.cs}/local/mail")"
+    fi
     if ! line=$(jq -cn --arg id "$id" --argjson ts "$now" \
-        --arg thread "$thread" --arg to "$target" \
+        --arg thread "$thread" --arg to "$target" --arg parent "$reply_parent" \
         --arg from "${CLAUDE_SESSION_NAME:-}" --arg actor "$(cs_actor_slug)" \
         --arg kind "$kind" --arg body "$body" \
-        '{id:$id, ts:$ts, thread:$thread, in_reply_to:null, to:$to, from:$from, actor:$actor, kind:$kind, body:$body}'); then
+        '{id:$id, ts:$ts, thread:$thread,
+          in_reply_to:(if $parent == "" then null else $parent end),
+          to:$to, from:$from, actor:$actor, kind:$kind, body:$body}'); then
         if [ "$kind" = "task" ]; then
             warn "task queued in $target, but composing the mail attribution failed"
             return 0
@@ -3494,6 +3540,10 @@ run_mail() {
             shift
             [ -n "${CLAUDE_SESSION_META_DIR:-}" ] || error "cs -msg thread reads the current session's mail; run it inside a session"
             _mail_thread "${1:-}";;
+        --reply|-r)
+            # No target stated: it comes from the thread. The flag stays in the
+            # stream so one parser handles both this and the explicit form.
+            _mail_send "" "$@";;
         *)
             shift; _mail_send "$first" "$@";;
     esac
