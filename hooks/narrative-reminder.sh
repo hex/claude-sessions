@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# ABOUTME: Stop hook that reminds Claude to update the session narrative periodically
-# ABOUTME: Cooldown-gated (at most once per 5 minutes); tracks the newest .cs/memory/narrative.*.md
+# ABOUTME: Stop hook for the narrative reminder, walk-away queue drain, rotation
+# ABOUTME: nudge and mail wake; also serves FileChanged for the idle mail wake
 
 set -euo pipefail
 
 # Read hook input (may be empty for legacy Stop events)
 INPUT=$(cat 2>/dev/null || echo '{}')
+
+# This script serves two events. Stop carries no name on legacy input, so an
+# absent value means Stop.
+HOOK_EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // "Stop"' 2>/dev/null || echo Stop)
 
 # Skip inside subagents (Stop auto-converts to SubagentStop, but guard anyway)
 AGENT_ID=$(echo "$INPUT" | jq -r '.agent_id // empty' 2>/dev/null || true)
@@ -52,6 +56,167 @@ if [ -z "$SESSION_DIR" ] || [ ! -d "$SESSION_DIR" ]; then
     exit 0
 fi
 
+# --- Mail wake, shared by both events -----------------------------------------
+# Unread cross-session mail takes a turn, so an agent-to-agent exchange advances
+# without waiting for a keystroke. Stop reaches a session that has just finished
+# work; FileChanged reaches one already parked at the prompt, because its
+# watcher lives on Claude Code's own event loop and fires independently of turn
+# state. Both share this scan, the snapshot, the gate rule and the ceiling —
+# they differ only in how they deliver.
+MAILDIR="$META_DIR/local/mail"
+MAIL_WOKE="$MAILDIR/woke"
+MAIL_UNREAD=0
+MAIL_FRESH=0
+MAIL_DISCHARGED=0
+MAIL_NAMES=""
+
+_num_or() {  # value, default -> prints value if a plain integer, else default
+    case "${1:-}" in ''|*[!0-9]*) echo "$2";; *) echo "$1";; esac
+}
+
+# The queue is a directory of one file per task (written via tmp+rename by
+# cs -queue add / task-kind mail), so the drain can never read a torn entry.
+_qlen() {  # queue dir
+    local f n=0
+    for f in "$1"/*; do
+        [ -f "$f" ] || continue
+        n=$((n + 1))
+    done
+    echo "$n"
+}
+
+# Only the launched conversation wakes, by the same two shapes session-start.sh
+# calls the lead: claude carrying cs's pid from the exec arm, or claude as cs's
+# child from the resume arm. A tmux-backed teammate is a full claude with its
+# own top-level Stop — the agent_id guard above catches in-process subagents,
+# not tmux ones — and cs is neither its process nor its parent, so CS_LEAD_PID
+# is absent from its environment. Ungated, one arrival wakes the lead and every
+# idle teammate, each racing to cs -msg where the first mv wins, so a teammate
+# can consume mail the lead then never sees. A session opened straight from a
+# front end is not a cs launch either and likewise does not wake; it is attended
+# by definition, and the prompt digest carries its mail.
+_mail_is_lead() {
+    [ -n "${CS_LEAD_PID:-}" ] && [ -n "${CLAUDE_PID:-}" ] || return 1
+    [ "$CLAUDE_PID" = "$CS_LEAD_PID" ] && return 0
+    local parent
+    parent=$(ps -o ppid= -p "$CLAUDE_PID" 2>/dev/null | tr -d '[:space:]' || true)
+    [ -n "$parent" ] && [ "$parent" = "$CS_LEAD_PID" ]
+}
+
+# Populate the MAIL_* globals. The re-wake guard is a snapshot of the filenames
+# already discharged, not a count and not a high-water mark: unread drops to
+# zero whenever cs -msg moves files to cur/, and filenames are not ordered by
+# arrival (same-second order is by unpadded pid). Set membership needs neither
+# property.
+_mail_scan() {
+    local f name kind
+    for f in "$MAILDIR"/new/*.json; do
+        [ -f "$f" ] || continue
+        MAIL_UNREAD=$((MAIL_UNREAD + 1))
+        name=${f##*/}
+        MAIL_NAMES="$MAIL_NAMES$name
+"
+        # Reads a file, never a pipe, so the -q early exit cannot raise SIGPIPE;
+        # and a missing snapshot yields 1, not grep's error status 2.
+        if ! grep -qxF "$name" "$MAIL_WOKE" 2>/dev/null; then
+            # A task is already an imperative in the queue, so waking on it
+            # would race the drain — but it is discharged all the same, and
+            # recording it is what stops every later turn from re-reading it. An
+            # unreadable or forged document reads as text: over-waking is the
+            # safe direction.
+            kind=$(jq -r '.kind // "text"' "$f" 2>/dev/null || echo text)
+            if [ "$kind" = "task" ]; then
+                MAIL_DISCHARGED=1
+            else
+                MAIL_FRESH=1
+            fi
+        fi
+    done
+}
+
+# Record the snapshot as the whole of new/, which is sound only when everything
+# in it has been discharged — every caller checks that before calling. The tmp
+# name carries the pid because both wakes write this file and the idle one
+# overlaps itself: two writers sharing one tmp name splice each other, and the
+# rename then publishes the splice.
+_mail_record() {
+    printf '%s' "$MAIL_NAMES" > "$MAIL_WOKE.tmp.$$" 2>/dev/null \
+        && mv "$MAIL_WOKE.tmp.$$" "$MAIL_WOKE" 2>/dev/null || true
+}
+
+# Apply the two silencers. A silenced run discharges nothing, so it records
+# nothing: recording would mark the arrival considered for every reader of the
+# snapshot, not just the wake that was silenced, and the message would then wait
+# for a keystroke — the gap this whole change exists to close.
+#
+# Nothing else bounds a volley: the drain's breakers gate drains, and Claude
+# Code's consecutive-Stop-block cap does not count a turn a wake itself started.
+# Past the ceiling the digest carries the backlog until a prompt clears the
+# counter (scope-prompt.sh).
+_mail_apply_silencers() {
+    [ -z "${CS_NO_MAIL_WAKE:-}" ] || { MAIL_FRESH=0; return 0; }
+    local max seen
+    max=$(_num_or "${CS_MAIL_WAKE_MAX:-}" 5)
+    seen=$(_num_or "$(cat "$MAILDIR/wakes" 2>/dev/null | tr -d '[:space:]')" 0)
+    if [ "$MAIL_FRESH" = 1 ] && [ "$seen" -ge "$max" ]; then
+        MAIL_FRESH=0
+    fi
+    MAIL_WAKES="$seen"
+}
+
+_mail_count_wake() {
+    printf '%s\n' "$((${MAIL_WAKES:-0} + 1))" > "$MAILDIR/wakes.tmp.$$" 2>/dev/null \
+        && mv "$MAILDIR/wakes.tmp.$$" "$MAILDIR/wakes" 2>/dev/null || true
+}
+
+MAIL_REASON_TAIL="Run cs -msg to read it. Reply only if the message needs an answer; never reply merely to acknowledge."
+
+# --- FileChanged: the idle wake -----------------------------------------------
+# Delivered by writing the reason to stderr and exiting 2 (asyncRewake), which
+# Claude Code wraps in a system-reminder and enqueues — so it reaches a session
+# with nobody at the keyboard, as data the model trusts rather than as fabricated
+# input. This branch sits above the attention flag and the iTerm2 bounce on
+# purpose: a watched file changing is not a finished turn, and cs -msg moving
+# mail to cur/ fires one event per message.
+#
+# Every command below is guarded, because under errexit an incidental failure
+# exiting 2 — grep and jq both use 2 for errors — would deliver a phantom wake
+# carrying whatever noise reached stderr. Exit 2 must be reachable only on
+# purpose.
+if [ "$HOOK_EVENT" = "FileChanged" ]; then
+    _fc_path=$(echo "$INPUT" | jq -r '.file_path // empty' 2>/dev/null || true)
+    _fc_event=$(echo "$INPUT" | jq -r '.event // empty' 2>/dev/null || true)
+    # A matcher-less entry is match-all over the union of every watch path in
+    # the session, other plugins' included, so the hook filters its own.
+    case "$_fc_path" in
+        "$MAILDIR"/new/*.json) : ;;
+        *) exit 0 ;;
+    esac
+    [ "$_fc_event" != "unlink" ] || exit 0
+    _mail_is_lead || exit 0
+    # The Stop path gets the queue rule free from its position below the drain,
+    # which exits in every armed or draining branch. This one has to ask: a
+    # rewake at priority "next" lands between drain turns, shifting the pop one
+    # turn late and mis-attributing a tool failure to the current task's
+    # breaker. An empty queue is never gating, whatever queue.state records.
+    if [ "$(_qlen "$META_DIR/local/queue")" -gt 0 ]; then
+        _fc_qstate=$(cat "$META_DIR/local/queue.state" 2>/dev/null | tr -d '[:space:]' || true)
+        case "$_fc_qstate" in armed|draining) exit 0 ;; esac
+    fi
+    _mail_scan
+    if [ "$MAIL_FRESH" = 0 ] && [ "$MAIL_DISCHARGED" = 1 ]; then
+        _mail_record
+    fi
+    _mail_apply_silencers
+    [ "$MAIL_FRESH" = 1 ] || exit 0
+    # Delivery IS the exit here, so it has to come last and the record precedes
+    # it — the reverse of the Stop path's order. The window is microseconds.
+    _mail_count_wake
+    _mail_record
+    printf '%s\n' "Unread cross-session mail ($MAIL_UNREAD). $MAIL_REASON_TAIL" >&2
+    exit 2
+fi
+
 # Claude just finished a turn: raise the machine-local attention flag the
 # statusline blinks until the user next interacts. Cleared by scope-prompt.sh
 # on the next prompt and by session-start.sh at launch. Lives in .cs/local/
@@ -77,16 +242,8 @@ QDIR="$META_DIR/local"
 QUEUE="$QDIR/queue"
 QSTATE_FILE="$QDIR/queue.state"
 
-# The queue is a directory of one file per task (written via tmp+rename by
-# cs -queue add / task-kind mail), so the drain can never read a torn entry.
-_qlen() {  # queue dir
-    local f n=0
-    for f in "$1"/*; do
-        [ -f "$f" ] || continue
-        n=$((n + 1))
-    done
-    echo "$n"
-}
+# _qlen is defined above, hoisted so the FileChanged branch can ask the same
+# question before the drain's own section is reached.
 
 # Lexically first task file (the glob is sorted); rc 1 when none.
 _qfirst() {  # queue dir
@@ -126,9 +283,7 @@ _notify_spawner() {  # message
     fi
 }
 
-_num_or() {  # value, default -> prints value if a plain integer, else default
-    case "${1:-}" in ''|*[!0-9]*) echo "$2";; *) echo "$1";; esac
-}
+# _num_or is defined above, hoisted alongside _qlen.
 
 # Evaluate the circuit breakers. Prints "reason reading limit" and returns 0
 # when one trips; returns 1 otherwise. Order: failures, context, five_hour.
@@ -274,106 +429,31 @@ Task: $NEXT"
 fi
 # (falls through to the narrative reminder below when not gating/draining)
 
-# --- Mail wake ----------------------------------------------------------------
-# Unread cross-session mail takes the turn end, so an agent-to-agent exchange
-# advances without waiting for a keystroke. Reached only when the queue is not
-# active: every armed/draining branch above exits, so an empty queue never gates
-# whatever queue.state records.
-# The re-wake guard is a snapshot of the filenames already discharged, not a
-# count and not a high-water mark: unread drops to zero whenever cs -msg moves
-# files to cur/, and filenames are not ordered by arrival (same-second order is
-# by unpadded pid). Set membership needs neither property.
-MAILDIR="$META_DIR/local/mail"
-MAIL_WOKE="$MAILDIR/woke"
-MAIL_UNREAD=0
-MAIL_FRESH=0
-MAIL_DISCHARGED=0
-MAIL_NAMES=""
-# Only the launched conversation wakes, by the same two shapes session-start.sh
-# calls the lead. A tmux-backed teammate is a full claude with its own top-level
-# Stop — the agent_id guard above catches in-process subagents, not tmux ones —
-# and cs is neither its process nor its parent, so CS_LEAD_PID is absent from
-# its environment. Ungated, one arrival wakes the lead and every idle teammate,
-# each racing to cs -msg where the first mv wins, so a teammate can consume mail
-# the lead then never sees. A session opened straight from a front end is not a
-# cs launch either and likewise does not wake; it is attended by definition, and
-# the prompt digest carries its mail.
-MAIL_IS_LEAD=0
-if [ -n "${CS_LEAD_PID:-}" ] && [ -n "${CLAUDE_PID:-}" ]; then
-    if [ "$CLAUDE_PID" = "$CS_LEAD_PID" ]; then
-        MAIL_IS_LEAD=1
-    else
-        _mw_parent=$(ps -o ppid= -p "$CLAUDE_PID" 2>/dev/null | tr -d '[:space:]' || true)
-        if [ -n "$_mw_parent" ] && [ "$_mw_parent" = "$CS_LEAD_PID" ]; then
-            MAIL_IS_LEAD=1
-        fi
-    fi
-fi
-# A non-lead leaves both flags at 0, so it neither wakes nor records: the lead's
-# wake for the same arrival has to survive the teammate's turn ending first.
-if [ "$MAIL_IS_LEAD" = 1 ]; then
-    for _mw_f in "$MAILDIR"/new/*.json; do
-        [ -f "$_mw_f" ] || continue
-        MAIL_UNREAD=$((MAIL_UNREAD + 1))
-        _mw_name=${_mw_f##*/}
-        MAIL_NAMES="$MAIL_NAMES$_mw_name
-"
-        # Reads a file, never a pipe, so the -q early exit cannot raise SIGPIPE.
-        if ! grep -qxF "$_mw_name" "$MAIL_WOKE" 2>/dev/null; then
-            # A task is already an imperative in the queue, so waking on it
-            # would race the drain — but it is discharged all the same, and
-            # recording it is what stops every later turn from re-reading it. An
-            # unreadable or forged document reads as text: over-waking is the
-            # safe direction.
-            _mw_kind=$(jq -r '.kind // "text"' "$_mw_f" 2>/dev/null || echo text)
-            if [ "$_mw_kind" = "task" ]; then
-                MAIL_DISCHARGED=1
-            else
-                MAIL_FRESH=1
-            fi
-        fi
-    done
+# --- Mail wake (Stop) ---------------------------------------------------------
+# The turn-end half. Reached only when the queue is not active: every armed or
+# draining branch above exits, so an empty queue never gates here whatever
+# queue.state records — the rule the FileChanged branch has to ask for outright.
+# A non-lead leaves the flags clear, so it neither wakes nor records: the lead's
+# wake for the same arrival has to survive a teammate ending its turn first.
+if _mail_is_lead; then
+    _mail_scan
     if [ "$MAIL_FRESH" = 0 ] && [ "$MAIL_DISCHARGED" = 1 ]; then
-        printf '%s' "$MAIL_NAMES" > "$MAIL_WOKE.tmp.$$" 2>/dev/null \
-            && mv "$MAIL_WOKE.tmp.$$" "$MAIL_WOKE" 2>/dev/null || true
+        _mail_record
     fi
 fi
-# A silenced run discharges nothing, so it records nothing. Recording here would
-# mark the arrival considered for a wake that never announced it, and the
-# operator silencing the wake did not ask for the message to be swallowed — the
-# Stop wake is not the only reader of this snapshot.
-#
-# Silencing deliberately comes AFTER the discharge write, not before: the
-# snapshot is written as the whole of new/, which is only sound when everything
-# in new/ has been discharged. A silenced text message alongside a fresh task
-# has not been, so the live MAIL_FRESH must still suppress that write. Moving
-# this block up would record the silenced message and strand it.
-if [ -n "${CS_NO_MAIL_WAKE:-}" ]; then
-    MAIL_FRESH=0
-fi
-# Nothing else bounds a volley: the drain's breakers gate drains, and Claude
-# Code's consecutive-Stop-block cap does not count a turn a wake started. Two
-# sessions told to correspond could trade replies indefinitely, each leg an
-# unattended turn. Past the ceiling the digest carries the backlog until a human
-# prompt clears the counter (scope-prompt.sh).
-MAIL_WAKE_MAX=$(_num_or "${CS_MAIL_WAKE_MAX:-}" 5)
-MAIL_WAKES=$(_num_or "$(cat "$MAILDIR/wakes" 2>/dev/null | tr -d '[:space:]')" 0)
-if [ "$MAIL_FRESH" = 1 ] && [ "$MAIL_WAKES" -ge "$MAIL_WAKE_MAX" ]; then
-    MAIL_FRESH=0
-fi
+# The silencers apply after the discharge write above, not before: the snapshot
+# is recorded as the whole of new/, which is sound only when everything in it
+# has been discharged. A silenced text message sitting beside a fresh task has
+# not been, so the live MAIL_FRESH must still suppress that write.
+_mail_apply_silencers
 if [ "$MAIL_FRESH" = 1 ]; then
-    REASON="Unread cross-session mail ($MAIL_UNREAD). Run cs -msg to read it. Reply only if the message needs an answer; never reply merely to acknowledge."
-    jq -nc --arg r "$REASON" '{decision: "block", reason: $r}'
-    printf '%s\n' "$((MAIL_WAKES + 1))" > "$MAILDIR/wakes.tmp.$$" 2>/dev/null \
-        && mv "$MAILDIR/wakes.tmp.$$" "$MAILDIR/wakes" 2>/dev/null || true
+    jq -nc --arg r "Unread cross-session mail ($MAIL_UNREAD). $MAIL_REASON_TAIL" \
+        '{decision: "block", reason: $r}'
     # Emit first, record second: a kill in between costs one duplicate wake,
-    # while the reverse costs a silent strand — and a strand is unrecoverable
-    # for an idle session, which submits no prompt and ends no turn. The tmp
-    # name carries the pid because the idle wake writes this same file
-    # concurrently; two writers sharing one tmp name splice each other and the
-    # rename then publishes the splice.
-    printf '%s' "$MAIL_NAMES" > "$MAIL_WOKE.tmp.$$" 2>/dev/null \
-        && mv "$MAIL_WOKE.tmp.$$" "$MAIL_WOKE" 2>/dev/null || true
+    # while the reverse costs a silent strand — unrecoverable for an idle
+    # session, which submits no prompt and ends no turn.
+    _mail_count_wake
+    _mail_record
     exit 0
 fi
 

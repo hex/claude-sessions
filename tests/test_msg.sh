@@ -762,6 +762,56 @@ test_stop_wake_only_the_lead_wakes() {
         "the lead still wakes for the same message" || return 1
 }
 
+# Drive the FileChanged event as the receiver's lead. Streams pass through
+# untouched: the payload rides on stderr and delivery is the exit code.
+filechanged() {  # file_path, [event]
+    (
+        export CLAUDE_SESSION_NAME=receiver
+        export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/receiver"
+        export CLAUDE_SESSION_META_DIR="$(RCV_META)"
+        export CS_LEAD_PID=$$ CLAUDE_PID=$$
+        jq -nc --arg p "$1" --arg e "${2:-add}" \
+            '{hook_event_name: "FileChanged", file_path: $p, event: $e}' \
+            | bash "$HOOKS_DIR/narrative-reminder.sh"
+    )
+}
+
+test_idle_wake_exits_2_with_the_reason_on_stderr() {
+    "$CS_BIN" -msg receiver "wake up" >/dev/null 2>&1 || return 1
+    local msg; msg=$(FIRST_MSG) || return 1
+    local err rc=0
+    err=$(filechanged "$msg" add 2>&1 >/dev/null) || rc=$?
+    assert_eq "2" "$rc" "asyncRewake delivers by exiting 2" || return 1
+    assert_output_contains "$err" "Unread cross-session mail" \
+        "the reason rides on stderr, which outranks stdout in the composed payload" || return 1
+}
+
+test_idle_wake_ignores_files_outside_the_maildir() {
+    "$CS_BIN" -msg receiver "wake up" >/dev/null 2>&1 || return 1
+    local rc=0
+    filechanged "$(RCV_META)/local/queue/some-task" add >/dev/null 2>&1 || rc=$?
+    assert_eq "0" "$rc" \
+        "a match-all entry sees every watch path in the session; only our own maildir counts" || return 1
+}
+
+test_idle_wake_ignores_unlink() {
+    "$CS_BIN" -msg receiver "wake up" >/dev/null 2>&1 || return 1
+    local msg; msg=$(FIRST_MSG) || return 1
+    local rc=0
+    filechanged "$msg" unlink >/dev/null 2>&1 || rc=$?
+    assert_eq "0" "$rc" \
+        "cs -msg moving files to cur/ fires one unlink per message and must not wake" || return 1
+}
+
+test_idle_wake_does_not_touch_the_attention_flag() {
+    "$CS_BIN" -msg receiver "wake up" >/dev/null 2>&1 || return 1
+    rm -f "$(RCV_META)/local/attention"
+    local msg; msg=$(FIRST_MSG) || return 1
+    filechanged "$msg" add >/dev/null 2>&1 || true
+    assert_file_not_exists "$(RCV_META)/local/attention" \
+        "a watched-file event is not a finished turn: the statusline must not blink for it" || return 1
+}
+
 test_stop_wake_blocks_on_unread_mail() {
     "$CS_BIN" -msg receiver "hello there" >/dev/null 2>&1 || return 1
     local out; out=$(wake)
@@ -883,6 +933,10 @@ test_stop_wake_stops_at_the_ceiling() {
 
 run_test test_stop_wake_only_the_lead_wakes
 run_test test_stop_wake_stops_at_the_ceiling
+run_test test_idle_wake_exits_2_with_the_reason_on_stderr
+run_test test_idle_wake_ignores_files_outside_the_maildir
+run_test test_idle_wake_ignores_unlink
+run_test test_idle_wake_does_not_touch_the_attention_flag
 run_test test_stop_wake_disabled_records_nothing
 run_test test_stop_wake_disabled_does_not_strand_text_beside_a_task
 run_test test_stop_wake_blocks_on_unread_mail
