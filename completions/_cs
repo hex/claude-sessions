@@ -151,6 +151,14 @@ _cs() {
     # is a session name (the mail target, or the session to open in tmux). Only
     # the first positional; later -msg args are free-text body.
     if [[ $CURRENT -eq 3 && ( "${words[2]}" == "-msg" || "${words[2]}" == "-spawn" ) ]]; then
+        # Reserved first words name a command rather than a target session.
+        if [[ "${words[2]}" == "-msg" ]]; then
+            _describe -t commands 'mail command' '(
+                log:"Full mail history"
+                thread:"Show one thread as a conversation"
+                --reply:"Reply into a thread"
+            )'
+        fi
         _cs_sessions
         return
     fi

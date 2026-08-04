@@ -37,9 +37,12 @@ fi
 cs_resolve_session "" || exit 0
 
 # The user is back: drop the statusline's finished-blink marker before any
-# other gate (slash commands and short prompts clear it too).
+# other gate (slash commands and short prompts clear it too), and clear the mail
+# wake's budget. The ceiling exists to stop two unattended sessions volleying at
+# each other; a human typing is the proof that nobody is stuck in one.
 [ -n "${CLAUDE_SESSION_META_DIR:-}" ] \
-    && rm -f "$CLAUDE_SESSION_META_DIR/local/attention" 2>/dev/null
+    && rm -f "$CLAUDE_SESSION_META_DIR/local/attention" \
+             "$CLAUDE_SESSION_META_DIR/local/mail/wakes" 2>/dev/null
 
 # iTerm2: the bounce raised at turn end stops the moment the user prompts.
 # Mirrors the guard in narrative-reminder.sh (hooks are standalone).

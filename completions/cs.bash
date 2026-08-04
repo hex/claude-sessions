@@ -136,6 +136,11 @@ _cs_completions() {
     # the first positional; later -msg args are free-text body.
     if [[ $cword -eq 2 && ( "${words[1]}" == "-msg" || "${words[1]}" == "-spawn" ) ]]; then
         COMPREPLY=()
+        # Reserved first words name a command rather than a target session, so
+        # they complete alongside the session names.
+        if [[ "${words[1]}" == "-msg" ]]; then
+            COMPREPLY=( $(compgen -W "log thread --reply" -- "$cur") )
+        fi
         _cs_add_session_matches "$cur"
         return
     fi

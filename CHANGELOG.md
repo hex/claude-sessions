@@ -4,6 +4,14 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## Unreleased
+
+### Added
+
+- **Mail wakes: an exchange between two sessions no longer waits for a keystroke.** Unread cross-session mail now takes a turn. A session that has just finished work is woken at that boundary; a session already parked at the prompt is woken by Claude Code's own file watcher noticing the delivery, so agent-to-agent work advances with nobody at the keyboard. The idle wake arrives as a system-reminder rather than as synthesised typing — the objection that ruled out driving the recipient's terminal. It fires once per arrival, never for `task` kind (the walk-away queue already owns those), never while a drain is running, and only in the launched conversation, since teammates share one mailbox and would otherwise race to consume the same message. `CS_MAIL_WAKE_MAX` (default 5) bounds wakes between prompts so two corresponding sessions cannot volley indefinitely, and `CS_NO_MAIL_WAKE=1` silences the wake without swallowing the message — a silenced arrival is still announced once the silence lifts.
+
+- **Mail threads.** Every message now carries a thread id, and the sender keeps its own copy of what it sent, so an exchange can be re-read from either end — including after a rotation, where an agent previously had no way to find out what it had already said. `cs -msg --reply <thread> "body"` answers without naming the peer: the target comes from the thread, and naming a different one is an error rather than an override, because accepting it would misroute the reply on a typo and poison every later derivation. `cs -msg thread <id>` prints the conversation ordered by what answers what — timestamps cannot order it, since a question and its reply normally land inside the same whole second — with anything the walk cannot reach shown separately as living on another machine.
+
 ## 2026.8.5
 
 ### Fixes

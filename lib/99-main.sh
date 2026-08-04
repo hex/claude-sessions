@@ -257,6 +257,16 @@ main() {
                 if [ $# -eq 1 ] && [ "$1" = "log" ]; then
                     error "cs $session_name -msg is send-only; to read the mail log, run 'cs -msg log' inside that session"
                 fi
+                # 'thread' names a reading command and always takes an argument,
+                # so the lone-word shape above cannot catch it: unguarded,
+                # `cs freya -msg thread a3f9c1` silently mails freya the words
+                # "thread a3f9c1". Quoting the body into one argument still
+                # sends it.
+                case "${1:-}" in
+                    thread)
+                        error "cs $session_name -msg is send-only; to read a thread, run 'cs -msg thread $2' inside that session"
+                        ;;
+                esac
                 run_mail "$session_name" "$@"
                 return 0
                 ;;

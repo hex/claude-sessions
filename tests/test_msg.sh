@@ -22,6 +22,19 @@ teardown() {
 }
 
 MAILDIR() { printf '%s' "$CS_SESSIONS_ROOT/receiver/.cs/local/mail"; }
+RCV_META() { printf '%s' "$CS_SESSIONS_ROOT/receiver/.cs"; }
+
+# Run cs as the receiver (to read its own mail, or reply from its side).
+# Defined here rather than beside the wake tests because run_test calls are
+# interleaved through this file: a helper must exist before the first one runs.
+rcv() {
+    (
+        export CLAUDE_SESSION_NAME=receiver
+        export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/receiver"
+        export CLAUDE_SESSION_META_DIR="$(RCV_META)"
+        "$CS_BIN" "$@"
+    )
+}
 
 # Count of unread (new/*.json) messages in receiver's maildir.
 NEW_COUNT() {
@@ -82,6 +95,139 @@ test_send_writes_full_record() {
     [ -n "$actor" ] || { echo "  actor empty"; return 1; }
 }
 
+OUTDIR() { printf '%s' "$CS_SESSIONS_ROOT/sender/.cs/local/mail/out"; }
+
+# Sole sent copy, as a path; rc 1 when none.
+FIRST_SENT() {
+    local f
+    for f in "$(OUTDIR)"/*.json; do
+        [ -e "$f" ] || return 1
+        printf '%s' "$f"
+        return 0
+    done
+    return 1
+}
+
+test_send_stamps_a_thread_and_keeps_a_sent_copy() {
+    "$CS_BIN" -msg receiver "hello there" >/dev/null 2>&1 || return 1
+    local msg; msg=$(FIRST_MSG) || { echo "  nothing delivered"; return 1; }
+    local thread; thread=$(jq -r '.thread // ""' "$msg")
+    case "$thread" in
+        [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) : ;;
+        *) echo "  thread is not 6 hex digits: '$thread'"; return 1 ;;
+    esac
+    assert_eq "receiver" "$(jq -r '.to // ""' "$msg")" \
+        "the record names where it went, so an out/ copy can route a reply" || return 1
+    assert_eq "null" "$(jq -r '.in_reply_to' "$msg")" "a thread root has no parent" || return 1
+
+    local sent; sent=$(FIRST_SENT) || { echo "  sender kept no out/ copy"; return 1; }
+    assert_eq "$thread" "$(jq -r '.thread // ""' "$sent")" \
+        "the sent copy shares the thread id" || return 1
+    assert_eq "hello there" "$(jq -r '.body // ""' "$sent")" "the sent copy carries the body" || return 1
+
+    local f n=0
+    for f in "$CS_SESSIONS_ROOT/sender/.cs/local/mail/new"/*.json; do
+        [ -f "$f" ] || continue; n=$((n + 1))
+    done
+    assert_eq "0" "$n" "a sent copy is not unread mail to its own sender" || return 1
+}
+
+SENDER_NEW() {
+    local f n=0
+    for f in "$CS_SESSIONS_ROOT/sender/.cs/local/mail/new"/*.json; do
+        [ -f "$f" ] || continue; n=$((n + 1)); printf '%s' "$f"
+    done
+    [ "$n" -gt 0 ] || return 1
+}
+
+test_reply_derives_its_target_from_the_thread() {
+    "$CS_BIN" -msg receiver "question?" >/dev/null 2>&1 || return 1
+    local msg; msg=$(FIRST_MSG) || return 1
+    local thread parent
+    thread=$(jq -r .thread "$msg"); parent=$(jq -r .id "$msg")
+
+    # The receiver answers naming only the thread — never the peer.
+    rcv -msg --reply "$thread" "answer!" >/dev/null 2>&1 || { echo "  reply failed"; return 1; }
+
+    local back; back=$(SENDER_NEW) || { echo "  the reply did not route back to the sender"; return 1; }
+    assert_eq "$thread" "$(jq -r .thread "$back")" "the reply reuses the thread id" || return 1
+    assert_eq "sender" "$(jq -r .to "$back")" "the target was derived, not stated" || return 1
+    assert_eq "$parent" "$(jq -r .in_reply_to "$back")" \
+        "in_reply_to points at the message answered, which is what orders the transcript" || return 1
+}
+
+test_reply_refuses_an_unknown_thread() {
+    local out rc=0
+    out=$(rcv -msg --reply ffffff "into the void" 2>&1) || rc=$?
+    [ "$rc" != "0" ] || { echo "  an unknown thread should error, never start a new one"; return 1; }
+    assert_output_contains "$out" "thread" "the error names the problem" || return 1
+}
+
+test_reply_refuses_a_target_that_contradicts_the_thread() {
+    "$CS_BIN" -msg receiver "question?" >/dev/null 2>&1 || return 1
+    local thread; thread=$(jq -r .thread "$(FIRST_MSG)")
+    create_test_session third >/dev/null 2>&1 || true
+    local out rc=0
+    out=$(rcv -msg third --reply "$thread" "misrouted" 2>&1) || rc=$?
+    [ "$rc" != "0" ] || { echo "  a contradicting target should error"; return 1; }
+    local f n=0
+    for f in "$CS_SESSIONS_ROOT/third/.cs/local/mail/new"/*.json; do
+        [ -f "$f" ] || continue; n=$((n + 1))
+    done
+    assert_eq "0" "$n" "a typo must not misroute the reply and poison later derivations" || return 1
+}
+
+test_reply_refuses_an_ambiguous_thread() {
+    # Six hex digits is short enough to retype and short enough to repeat: a
+    # mailbox accumulates roots without bound. If a collision ever lands,
+    # guessing a peer would misroute into a stranger's conversation.
+    local mine="$CLAUDE_SESSION_META_DIR/local/mail"
+    mkdir -p "$mine/cur" "$mine/out"
+    printf '%s\n' '{"id":"1","ts":1700000000,"thread":"abc123","in_reply_to":null,"to":"sender","from":"receiver","actor":"a","kind":"text","body":"one"}' \
+        > "$mine/cur/0000000001-1.json"
+    printf '%s\n' '{"id":"2","ts":1700000001,"thread":"abc123","in_reply_to":null,"to":"third","from":"","actor":"a","kind":"text","body":"two"}' \
+        > "$mine/out/0000000002-2.json"
+    local out rc=0
+    out=$("$CS_BIN" -msg --reply abc123 "which conversation is this?" 2>&1) || rc=$?
+    [ "$rc" != "0" ] || { echo "  an ambiguous thread id should refuse, not guess"; return 1; }
+    assert_output_contains "$out" "abc123" "the error names the ambiguous id" || return 1
+}
+
+test_thread_transcript_orders_a_reply_after_its_question() {
+    "$CS_BIN" -msg receiver "question?" >/dev/null 2>&1 || return 1
+    local thread; thread=$(jq -r .thread "$(FIRST_MSG)")
+    rcv -msg --reply "$thread" "answer!" >/dev/null 2>&1 || return 1
+    # Read it from the SENDER's side on purpose: its question sits in out/ and
+    # the answer in new/, so scanning new/ then cur/ then out/ renders the reply
+    # above the question. Only the in_reply_to chain gets this right.
+    local out; out=$("$CS_BIN" -msg thread "$thread" 2>&1) \
+        || { echo "  transcript failed: $out"; return 1; }
+    local q a
+    q=$(printf '%s\n' "$out" | grep -n 'question?' | head -1 | cut -d: -f1)
+    a=$(printf '%s\n' "$out" | grep -n 'answer!'   | head -1 | cut -d: -f1)
+    [ -n "$q" ] && [ -n "$a" ] || { echo "  transcript is missing a message:"; printf '%s\n' "$out"; return 1; }
+    # Both land in the same whole second, so only in_reply_to can order them —
+    # a ts tie-break renders the reply above the question it answers.
+    [ "$q" -lt "$a" ] || { echo "  the reply rendered above its question"; printf '%s\n' "$out"; return 1; }
+}
+
+test_thread_transcript_marks_direction() {
+    "$CS_BIN" -msg receiver "question?" >/dev/null 2>&1 || return 1
+    local thread; thread=$(jq -r .thread "$(FIRST_MSG)")
+    rcv -msg --reply "$thread" "answer!" >/dev/null 2>&1 || return 1
+    local out; out=$(rcv -msg thread "$thread" 2>&1) || return 1
+    assert_output_contains "$out" "<-" "a received message reads as inbound" || return 1
+    assert_output_contains "$out" "->" "a sent message reads as outbound" || return 1
+}
+
+test_unread_lines_carry_the_thread_id() {
+    "$CS_BIN" -msg receiver "hello there" >/dev/null 2>&1 || return 1
+    local thread; thread=$(jq -r .thread "$(FIRST_MSG)")
+    local out; out=$(rcv -msg 2>&1)
+    assert_output_contains "$out" "$thread" \
+        "an agent cannot reply to a thread whose id it is never shown" || return 1
+}
+
 test_record_has_no_ref_field() {
     "$CS_BIN" -msg receiver "hi" >/dev/null 2>&1 || return 1
     assert_eq "false" "$(jq 'has("ref")' "$(FIRST_MSG)")" \
@@ -96,6 +242,23 @@ test_send_from_outside_session_has_empty_from() {
 test_send_session_scoped_alias() {
     "$CS_BIN" receiver -msg "via alias" >/dev/null 2>&1 || return 1
     assert_file_contains "$(FIRST_MSG)" "via alias" "session-scoped arm sends" || return 1
+}
+
+test_msg_thread_is_reserved_not_a_target() {
+    local out rc=0
+    out=$("$CS_BIN" -msg thread abc123 2>&1) || rc=$?
+    [ "$rc" != "0" ] || { echo "  an unknown thread id should error"; return 1; }
+    assert_output_not_contains "$out" "No such session" \
+        "'thread' is a reserved first word, not a session to mail" || return 1
+    assert_eq "0" "$(NEW_COUNT)" "nothing was sent" || return 1
+}
+
+test_alias_thread_errors_instead_of_mailing_the_words() {
+    local out rc=0
+    out=$("$CS_BIN" receiver -msg thread abc123 2>&1) || rc=$?
+    [ "$rc" != "0" ] || { echo "  the alias should refuse a reserved word"; return 1; }
+    assert_eq "0" "$(NEW_COUNT)" \
+        "'thread abc123' must not be mailed to receiver as a message body" || return 1
 }
 
 test_alias_lone_log_errors_instead_of_sending() {
@@ -199,9 +362,19 @@ test_task_kind_rejects_multiline_body() {
 
 run_test test_send_delivers_one_whole_document_per_message
 run_test test_send_writes_full_record
+run_test test_send_stamps_a_thread_and_keeps_a_sent_copy
+run_test test_reply_derives_its_target_from_the_thread
+run_test test_reply_refuses_an_unknown_thread
+run_test test_reply_refuses_a_target_that_contradicts_the_thread
+run_test test_reply_refuses_an_ambiguous_thread
+run_test test_thread_transcript_orders_a_reply_after_its_question
+run_test test_thread_transcript_marks_direction
+run_test test_unread_lines_carry_the_thread_id
 run_test test_record_has_no_ref_field
 run_test test_send_from_outside_session_has_empty_from
 run_test test_send_session_scoped_alias
+run_test test_msg_thread_is_reserved_not_a_target
+run_test test_alias_thread_errors_instead_of_mailing_the_words
 run_test test_alias_lone_log_errors_instead_of_sending
 run_test test_alias_empty_body_errors_with_read_hint
 run_test test_send_joins_unquoted_multiword_body
@@ -719,6 +892,222 @@ test_migration_runs_on_worktree_open() {
     done
     assert_eq "1" "$n" "worktree legacy mail landed in new/" || return 1
 }
+
+# --- mail wake -------------------------------------------------------------
+# The wakes run as the RECIPIENT, so every wake helper re-points the session env
+# at receiver; the suite's own env names sender (it is the one sending).
+# RCV_META and rcv are defined near the top, alongside MAILDIR.
+
+# Drive the Stop hook as the receiver's LEAD conversation: cs's exec arm replaces
+# its own process, so claude carries cs's pid and the two agree.
+wake() {
+    (
+        export CLAUDE_SESSION_NAME=receiver
+        export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/receiver"
+        export CLAUDE_SESSION_META_DIR="$(RCV_META)"
+        export CS_LEAD_PID=$$ CLAUDE_PID=$$
+        echo "${1:-{\}}" | bash "$HOOKS_DIR/narrative-reminder.sh" 2>/dev/null
+    )
+}
+
+# A tmux-backed teammate is a full claude with its own top-level Stop, but tmux
+# started it, so cs is neither its process nor its parent and CS_LEAD_PID is
+# absent from its environment entirely.
+wake_as_teammate() {
+    (
+        export CLAUDE_SESSION_NAME=receiver
+        export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/receiver"
+        export CLAUDE_SESSION_META_DIR="$(RCV_META)"
+        unset CS_LEAD_PID CLAUDE_PID
+        echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh" 2>/dev/null
+    )
+}
+
+test_stop_wake_only_the_lead_wakes() {
+    "$CS_BIN" -msg receiver "hello there" >/dev/null 2>&1 || return 1
+    local out; out=$(wake_as_teammate)
+    assert_output_not_contains "$out" "Unread cross-session mail" \
+        "a teammate does not take the wake" || return 1
+    assert_file_not_exists "$(RCV_META)/local/mail/woke" \
+        "and records nothing, so the lead's wake survives" || return 1
+    out=$(wake)
+    assert_output_contains "$out" "Unread cross-session mail" \
+        "the lead still wakes for the same message" || return 1
+}
+
+# Drive the FileChanged event as the receiver's lead. Streams pass through
+# untouched: the payload rides on stderr and delivery is the exit code.
+filechanged() {  # file_path, [event]
+    (
+        export CLAUDE_SESSION_NAME=receiver
+        export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/receiver"
+        export CLAUDE_SESSION_META_DIR="$(RCV_META)"
+        export CS_LEAD_PID=$$ CLAUDE_PID=$$
+        jq -nc --arg p "$1" --arg e "${2:-add}" \
+            '{hook_event_name: "FileChanged", file_path: $p, event: $e}' \
+            | bash "$HOOKS_DIR/narrative-reminder.sh"
+    )
+}
+
+test_idle_wake_exits_2_with_the_reason_on_stderr() {
+    "$CS_BIN" -msg receiver "wake up" >/dev/null 2>&1 || return 1
+    local msg; msg=$(FIRST_MSG) || return 1
+    local err rc=0
+    err=$(filechanged "$msg" add 2>&1 >/dev/null) || rc=$?
+    assert_eq "2" "$rc" "asyncRewake delivers by exiting 2" || return 1
+    assert_output_contains "$err" "Unread cross-session mail" \
+        "the reason rides on stderr, which outranks stdout in the composed payload" || return 1
+}
+
+test_idle_wake_ignores_files_outside_the_maildir() {
+    "$CS_BIN" -msg receiver "wake up" >/dev/null 2>&1 || return 1
+    local rc=0
+    filechanged "$(RCV_META)/local/queue/some-task" add >/dev/null 2>&1 || rc=$?
+    assert_eq "0" "$rc" \
+        "a match-all entry sees every watch path in the session; only our own maildir counts" || return 1
+}
+
+test_idle_wake_ignores_unlink() {
+    "$CS_BIN" -msg receiver "wake up" >/dev/null 2>&1 || return 1
+    local msg; msg=$(FIRST_MSG) || return 1
+    local rc=0
+    filechanged "$msg" unlink >/dev/null 2>&1 || rc=$?
+    assert_eq "0" "$rc" \
+        "cs -msg moving files to cur/ fires one unlink per message and must not wake" || return 1
+}
+
+test_idle_wake_does_not_touch_the_attention_flag() {
+    "$CS_BIN" -msg receiver "wake up" >/dev/null 2>&1 || return 1
+    rm -f "$(RCV_META)/local/attention"
+    local msg; msg=$(FIRST_MSG) || return 1
+    filechanged "$msg" add >/dev/null 2>&1 || true
+    assert_file_not_exists "$(RCV_META)/local/attention" \
+        "a watched-file event is not a finished turn: the statusline must not blink for it" || return 1
+}
+
+test_stop_wake_blocks_on_unread_mail() {
+    "$CS_BIN" -msg receiver "hello there" >/dev/null 2>&1 || return 1
+    local out; out=$(wake)
+    assert_output_contains "$out" '"block"' "unread mail blocks the stop" || return 1
+    assert_output_contains "$out" "cs -msg" "the wake names the reader command" || return 1
+}
+
+test_stop_wake_fires_once_per_arrival() {
+    "$CS_BIN" -msg receiver "first" >/dev/null 2>&1 || return 1
+    wake >/dev/null
+    local out; out=$(wake)
+    assert_output_not_contains "$out" "Unread cross-session mail" \
+        "the same unread message does not wake a second time" || return 1
+}
+
+# A task-kind send also queue-adds, and the queue gate exits before the mail
+# wake is ever reached — so the fixture must empty the queue, or the assertion
+# passes without the branch under test running at all.
+drain_receiver_queue() {
+    rm -f "$(RCV_META)/local/queue"/* 2>/dev/null || true
+}
+
+test_stop_wake_silent_for_task_kind() {
+    "$CS_BIN" -msg receiver -k task "do the thing" >/dev/null 2>&1 || return 1
+    drain_receiver_queue
+    local out; out=$(wake)
+    assert_output_not_contains "$out" "cs task queue" \
+        "fixture reaches the mail wake (the queue gate did not take the turn)" || return 1
+    assert_output_not_contains "$out" "Unread cross-session mail" \
+        "a task-kind message never wakes: the queue already owns it" || return 1
+}
+
+test_stop_wake_fires_again_for_a_later_message() {
+    "$CS_BIN" -msg receiver "first" >/dev/null 2>&1 || return 1
+    wake >/dev/null
+    rcv -msg >/dev/null 2>&1 || return 1
+    "$CS_BIN" -msg receiver "second" >/dev/null 2>&1 || return 1
+    local out; out=$(wake)
+    assert_output_contains "$out" "Unread cross-session mail" \
+        "a message arriving after a read wakes again" || return 1
+}
+
+test_stop_wake_not_blocked_by_a_lingering_task() {
+    "$CS_BIN" -msg receiver -k task "queued work" >/dev/null 2>&1 || return 1
+    drain_receiver_queue
+    wake >/dev/null
+    "$CS_BIN" -msg receiver "a real question" >/dev/null 2>&1 || return 1
+    local out; out=$(wake)
+    assert_output_contains "$out" "Unread cross-session mail" \
+        "an unread task sitting in new/ does not suppress a later text message" || return 1
+}
+
+test_stop_wake_records_a_task_as_discharged() {
+    "$CS_BIN" -msg receiver -k task "queued work" >/dev/null 2>&1 || return 1
+    drain_receiver_queue
+    wake >/dev/null
+    local woke="$(RCV_META)/local/mail/woke"
+    assert_file_exists "$woke" "a task-only arrival still writes the snapshot" || return 1
+    local n; n=$(grep -c '[^[:space:]]' "$woke" 2>/dev/null || echo 0)
+    assert_eq "1" "$n" "the task filename is recorded as discharged" || return 1
+}
+
+test_stop_wake_disabled_records_nothing() {
+    "$CS_BIN" -msg receiver "hello there" >/dev/null 2>&1 || return 1
+    local out; out=$(CS_NO_MAIL_WAKE=1 wake)
+    assert_output_not_contains "$out" "Unread cross-session mail" \
+        "CS_NO_MAIL_WAKE silences the wake" || return 1
+    assert_file_not_exists "$(RCV_META)/local/mail/woke" \
+        "a silenced run discharges nothing, so it records nothing" || return 1
+    out=$(wake)
+    assert_output_contains "$out" "Unread cross-session mail" \
+        "the same message still wakes once the silence is lifted" || return 1
+}
+
+test_stop_wake_disabled_does_not_strand_text_beside_a_task() {
+    "$CS_BIN" -msg receiver -k task "queued work" >/dev/null 2>&1 || return 1
+    drain_receiver_queue
+    "$CS_BIN" -msg receiver "a real question" >/dev/null 2>&1 || return 1
+    CS_NO_MAIL_WAKE=1 wake >/dev/null
+    local out; out=$(wake)
+    assert_output_contains "$out" "Unread cross-session mail" \
+        "the task's discharge write must not swallow a silenced text message beside it" || return 1
+}
+
+# Drive the UserPromptSubmit hook as the receiver (a human keystroke).
+prompt_as_receiver() {
+    (
+        export CLAUDE_SESSION_NAME=receiver
+        export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/receiver"
+        export CLAUDE_SESSION_META_DIR="$(RCV_META)"
+        echo '{"prompt":"hi"}' | bash "$HOOKS_DIR/scope-prompt.sh" >/dev/null 2>&1 || true
+    )
+}
+
+test_stop_wake_stops_at_the_ceiling() {
+    "$CS_BIN" -msg receiver "one" >/dev/null 2>&1 || return 1
+    CS_MAIL_WAKE_MAX=2 wake >/dev/null
+    "$CS_BIN" -msg receiver "two" >/dev/null 2>&1 || return 1
+    CS_MAIL_WAKE_MAX=2 wake >/dev/null
+    "$CS_BIN" -msg receiver "three" >/dev/null 2>&1 || return 1
+    local out; out=$(CS_MAIL_WAKE_MAX=2 wake)
+    assert_output_not_contains "$out" "Unread cross-session mail" \
+        "the ceiling stops an unbounded volley" || return 1
+    prompt_as_receiver
+    out=$(CS_MAIL_WAKE_MAX=2 wake)
+    assert_output_contains "$out" "Unread cross-session mail" \
+        "a human prompt resets the ceiling" || return 1
+}
+
+run_test test_stop_wake_only_the_lead_wakes
+run_test test_stop_wake_stops_at_the_ceiling
+run_test test_idle_wake_exits_2_with_the_reason_on_stderr
+run_test test_idle_wake_ignores_files_outside_the_maildir
+run_test test_idle_wake_ignores_unlink
+run_test test_idle_wake_does_not_touch_the_attention_flag
+run_test test_stop_wake_disabled_records_nothing
+run_test test_stop_wake_disabled_does_not_strand_text_beside_a_task
+run_test test_stop_wake_blocks_on_unread_mail
+run_test test_stop_wake_fires_once_per_arrival
+run_test test_stop_wake_silent_for_task_kind
+run_test test_stop_wake_records_a_task_as_discharged
+run_test test_stop_wake_fires_again_for_a_later_message
+run_test test_stop_wake_not_blocked_by_a_lingering_task
 
 run_test test_migration_merges_when_new_already_exists
 run_test test_migration_retry_after_partial_conversion_delivers_no_duplicates

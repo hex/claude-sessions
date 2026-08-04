@@ -647,13 +647,34 @@ fi
 # so session-start no longer emits a mail digest — doing both would double-inject
 # the same unread bodies on every startup and resume.
 
+# Arm the idle mail wake: hand Claude Code the maildir to watch, so mail
+# arriving while this session sits at the prompt still reaches it.
+#
+# The directory must exist before the path is emitted. Claude Code passes
+# watchPaths to its file watcher with no existence check, and a watch armed on a
+# path missing two levels — both mail/ and new/ — never fires again for the
+# process's lifetime, even once the directories appear and a message is renamed
+# in. The maildir is created lazily on first send or read, so a session that has
+# never exchanged mail is exactly that case: every fresh spawn worker, which is
+# the population the wake exists for.
+#
+# Only the lead arms it. Every claude resolving this session runs this hook,
+# teammates included, and N watchers on one maildir means one arrival wakes N
+# processes that then race to read it, where the first mv wins.
+MAIL_WATCH=""
+if [ "$IS_LEAD" = 1 ] \
+    && mkdir -p "$META_DIR/local/mail/tmp" "$META_DIR/local/mail/new" \
+                "$META_DIR/local/mail/cur" 2>/dev/null; then
+    MAIL_WATCH="$META_DIR/local/mail/new"
+fi
+
 # Return additional context as JSON
-jq -n --arg context "$CONTEXT" '{
-    hookSpecificOutput: {
+jq -n --arg context "$CONTEXT" --arg watch "$MAIL_WATCH" '{
+    hookSpecificOutput: ({
         hookEventName: "SessionStart",
         additionalContext: $context,
         statusMessage: "Loading session..."
-    }
+    } + (if $watch == "" then {} else {watchPaths: [$watch]} end))
 }'
 
 exit 0
