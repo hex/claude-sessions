@@ -750,8 +750,58 @@ test_stop_wake_fires_once_per_arrival() {
         "the same unread message does not wake a second time" || return 1
 }
 
+# A task-kind send also queue-adds, and the queue gate exits before the mail
+# wake is ever reached — so the fixture must empty the queue, or the assertion
+# passes without the branch under test running at all.
+drain_receiver_queue() {
+    rm -f "$(RCV_META)/local/queue"/* 2>/dev/null || true
+}
+
+test_stop_wake_silent_for_task_kind() {
+    "$CS_BIN" -msg receiver -k task "do the thing" >/dev/null 2>&1 || return 1
+    drain_receiver_queue
+    local out; out=$(wake)
+    assert_output_not_contains "$out" "cs task queue" \
+        "fixture reaches the mail wake (the queue gate did not take the turn)" || return 1
+    assert_output_not_contains "$out" "Unread cross-session mail" \
+        "a task-kind message never wakes: the queue already owns it" || return 1
+}
+
+# Run cs as the receiver (e.g. to read its own mail).
+rcv() {
+    (
+        export CLAUDE_SESSION_NAME=receiver
+        export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/receiver"
+        export CLAUDE_SESSION_META_DIR="$(RCV_META)"
+        "$CS_BIN" "$@"
+    )
+}
+
+test_stop_wake_fires_again_for_a_later_message() {
+    "$CS_BIN" -msg receiver "first" >/dev/null 2>&1 || return 1
+    wake >/dev/null
+    rcv -msg >/dev/null 2>&1 || return 1
+    "$CS_BIN" -msg receiver "second" >/dev/null 2>&1 || return 1
+    local out; out=$(wake)
+    assert_output_contains "$out" "Unread cross-session mail" \
+        "a message arriving after a read wakes again" || return 1
+}
+
+test_stop_wake_not_blocked_by_a_lingering_task() {
+    "$CS_BIN" -msg receiver -k task "queued work" >/dev/null 2>&1 || return 1
+    drain_receiver_queue
+    wake >/dev/null
+    "$CS_BIN" -msg receiver "a real question" >/dev/null 2>&1 || return 1
+    local out; out=$(wake)
+    assert_output_contains "$out" "Unread cross-session mail" \
+        "an unread task sitting in new/ does not suppress a later text message" || return 1
+}
+
 run_test test_stop_wake_blocks_on_unread_mail
 run_test test_stop_wake_fires_once_per_arrival
+run_test test_stop_wake_silent_for_task_kind
+run_test test_stop_wake_fires_again_for_a_later_message
+run_test test_stop_wake_not_blocked_by_a_lingering_task
 
 run_test test_migration_merges_when_new_already_exists
 run_test test_migration_retry_after_partial_conversion_delivers_no_duplicates

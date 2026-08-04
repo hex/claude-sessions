@@ -287,6 +287,7 @@ MAILDIR="$META_DIR/local/mail"
 MAIL_WOKE="$MAILDIR/woke"
 MAIL_UNREAD=0
 MAIL_FRESH=0
+MAIL_DISCHARGED=0
 MAIL_NAMES=""
 for _mw_f in "$MAILDIR"/new/*.json; do
     [ -f "$_mw_f" ] || continue
@@ -295,8 +296,23 @@ for _mw_f in "$MAILDIR"/new/*.json; do
     MAIL_NAMES="$MAIL_NAMES$_mw_name
 "
     # Reads a file, never a pipe, so the -q early exit cannot raise SIGPIPE.
-    grep -qxF "$_mw_name" "$MAIL_WOKE" 2>/dev/null || MAIL_FRESH=1
+    if ! grep -qxF "$_mw_name" "$MAIL_WOKE" 2>/dev/null; then
+        # A task is already an imperative in the queue, so waking on it would
+        # race the drain — but it is discharged all the same, and recording it
+        # is what stops every later turn from re-reading it. An unreadable or
+        # forged document reads as text: over-waking is the safe direction.
+        _mw_kind=$(jq -r '.kind // "text"' "$_mw_f" 2>/dev/null || echo text)
+        if [ "$_mw_kind" = "task" ]; then
+            MAIL_DISCHARGED=1
+        else
+            MAIL_FRESH=1
+        fi
+    fi
 done
+if [ "$MAIL_FRESH" = 0 ] && [ "$MAIL_DISCHARGED" = 1 ]; then
+    printf '%s' "$MAIL_NAMES" > "$MAIL_WOKE.tmp.$$" 2>/dev/null \
+        && mv "$MAIL_WOKE.tmp.$$" "$MAIL_WOKE" 2>/dev/null || true
+fi
 if [ "$MAIL_FRESH" = 1 ]; then
     REASON="Unread cross-session mail ($MAIL_UNREAD). Run cs -msg to read it."
     jq -nc --arg r "$REASON" '{decision: "block", reason: $r}'
