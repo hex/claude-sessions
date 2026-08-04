@@ -856,7 +856,33 @@ test_stop_wake_disabled_does_not_strand_text_beside_a_task() {
         "the task's discharge write must not swallow a silenced text message beside it" || return 1
 }
 
+# Drive the UserPromptSubmit hook as the receiver (a human keystroke).
+prompt_as_receiver() {
+    (
+        export CLAUDE_SESSION_NAME=receiver
+        export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/receiver"
+        export CLAUDE_SESSION_META_DIR="$(RCV_META)"
+        echo '{"prompt":"hi"}' | bash "$HOOKS_DIR/scope-prompt.sh" >/dev/null 2>&1 || true
+    )
+}
+
+test_stop_wake_stops_at_the_ceiling() {
+    "$CS_BIN" -msg receiver "one" >/dev/null 2>&1 || return 1
+    CS_MAIL_WAKE_MAX=2 wake >/dev/null
+    "$CS_BIN" -msg receiver "two" >/dev/null 2>&1 || return 1
+    CS_MAIL_WAKE_MAX=2 wake >/dev/null
+    "$CS_BIN" -msg receiver "three" >/dev/null 2>&1 || return 1
+    local out; out=$(CS_MAIL_WAKE_MAX=2 wake)
+    assert_output_not_contains "$out" "Unread cross-session mail" \
+        "the ceiling stops an unbounded volley" || return 1
+    prompt_as_receiver
+    out=$(CS_MAIL_WAKE_MAX=2 wake)
+    assert_output_contains "$out" "Unread cross-session mail" \
+        "a human prompt resets the ceiling" || return 1
+}
+
 run_test test_stop_wake_only_the_lead_wakes
+run_test test_stop_wake_stops_at_the_ceiling
 run_test test_stop_wake_disabled_records_nothing
 run_test test_stop_wake_disabled_does_not_strand_text_beside_a_task
 run_test test_stop_wake_blocks_on_unread_mail

@@ -351,9 +351,21 @@ fi
 if [ -n "${CS_NO_MAIL_WAKE:-}" ]; then
     MAIL_FRESH=0
 fi
+# Nothing else bounds a volley: the drain's breakers gate drains, and Claude
+# Code's consecutive-Stop-block cap does not count a turn a wake started. Two
+# sessions told to correspond could trade replies indefinitely, each leg an
+# unattended turn. Past the ceiling the digest carries the backlog until a human
+# prompt clears the counter (scope-prompt.sh).
+MAIL_WAKE_MAX=$(_num_or "${CS_MAIL_WAKE_MAX:-}" 5)
+MAIL_WAKES=$(_num_or "$(cat "$MAILDIR/wakes" 2>/dev/null | tr -d '[:space:]')" 0)
+if [ "$MAIL_FRESH" = 1 ] && [ "$MAIL_WAKES" -ge "$MAIL_WAKE_MAX" ]; then
+    MAIL_FRESH=0
+fi
 if [ "$MAIL_FRESH" = 1 ]; then
-    REASON="Unread cross-session mail ($MAIL_UNREAD). Run cs -msg to read it."
+    REASON="Unread cross-session mail ($MAIL_UNREAD). Run cs -msg to read it. Reply only if the message needs an answer; never reply merely to acknowledge."
     jq -nc --arg r "$REASON" '{decision: "block", reason: $r}'
+    printf '%s\n' "$((MAIL_WAKES + 1))" > "$MAILDIR/wakes.tmp.$$" 2>/dev/null \
+        && mv "$MAILDIR/wakes.tmp.$$" "$MAILDIR/wakes" 2>/dev/null || true
     # Emit first, record second: a kill in between costs one duplicate wake,
     # while the reverse costs a silent strand — and a strand is unrecoverable
     # for an idle session, which submits no prompt and ends no turn. The tmp
