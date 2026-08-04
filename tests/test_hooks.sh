@@ -1616,6 +1616,42 @@ test_session_start_actor_matches_cs_on_a_blank_pin() {
 }
 
 run_test test_session_start_names_the_current_actor
+test_session_start_arms_the_mail_watcher() {
+    session_start_setup
+    # A session that has never exchanged mail has no maildir, and the watcher is
+    # handed its path with no existence check: armed on a path missing two
+    # levels it never fires again for the process's lifetime. So the fixture
+    # must start without one, which is the state of every fresh spawn worker.
+    [ ! -d "$CLAUDE_SESSION_META_DIR/local/mail" ] \
+        || { echo "  fixture already had a maildir; the test would prove nothing"; session_start_teardown; return 1; }
+
+    local output rc=0
+    output=$(echo '{"session_id":"s","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+
+    assert_dir "$CLAUDE_SESSION_META_DIR/local/mail/new" \
+        "session start creates the maildir before asking for it to be watched" || rc=1
+    local wp
+    wp=$(echo "$output" | jq -r '.hookSpecificOutput.watchPaths[0] // ""')
+    assert_eq "$CLAUDE_SESSION_META_DIR/local/mail/new" "$wp" \
+        "watchPaths names the absolute maildir" || rc=1
+    session_start_teardown
+    return $rc
+}
+
+test_session_start_does_not_arm_the_watcher_for_a_teammate() {
+    session_start_setup
+    local output
+    output=$(echo '{"session_id":"s","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | env -u CS_LEAD_PID -u CLAUDE_PID bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    local wp; wp=$(echo "$output" | jq -r '.hookSpecificOutput.watchPaths // "none"')
+    session_start_teardown
+    assert_eq "none" "$wp" \
+        "a teammate arms no watcher: one arrival must not wake every claude on the session" || return 1
+}
+
+run_test test_session_start_arms_the_mail_watcher
+run_test test_session_start_does_not_arm_the_watcher_for_a_teammate
 run_test test_session_start_warns_that_memory_is_shared
 run_test test_session_start_actor_honours_pinned_identity
 run_test test_session_start_actor_matches_cs_on_a_blank_pin
