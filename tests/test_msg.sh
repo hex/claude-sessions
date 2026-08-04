@@ -725,14 +725,41 @@ test_migration_runs_on_worktree_open() {
 # at receiver; the suite's own env names sender (it is the one sending).
 RCV_META() { printf '%s' "$CS_SESSIONS_ROOT/receiver/.cs"; }
 
-# Drive the Stop hook as the receiver.
+# Drive the Stop hook as the receiver's LEAD conversation: cs's exec arm replaces
+# its own process, so claude carries cs's pid and the two agree.
 wake() {
     (
         export CLAUDE_SESSION_NAME=receiver
         export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/receiver"
         export CLAUDE_SESSION_META_DIR="$(RCV_META)"
+        export CS_LEAD_PID=$$ CLAUDE_PID=$$
         echo "${1:-{\}}" | bash "$HOOKS_DIR/narrative-reminder.sh" 2>/dev/null
     )
+}
+
+# A tmux-backed teammate is a full claude with its own top-level Stop, but tmux
+# started it, so cs is neither its process nor its parent and CS_LEAD_PID is
+# absent from its environment entirely.
+wake_as_teammate() {
+    (
+        export CLAUDE_SESSION_NAME=receiver
+        export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/receiver"
+        export CLAUDE_SESSION_META_DIR="$(RCV_META)"
+        unset CS_LEAD_PID CLAUDE_PID
+        echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh" 2>/dev/null
+    )
+}
+
+test_stop_wake_only_the_lead_wakes() {
+    "$CS_BIN" -msg receiver "hello there" >/dev/null 2>&1 || return 1
+    local out; out=$(wake_as_teammate)
+    assert_output_not_contains "$out" "Unread cross-session mail" \
+        "a teammate does not take the wake" || return 1
+    assert_file_not_exists "$(RCV_META)/local/mail/woke" \
+        "and records nothing, so the lead's wake survives" || return 1
+    out=$(wake)
+    assert_output_contains "$out" "Unread cross-session mail" \
+        "the lead still wakes for the same message" || return 1
 }
 
 test_stop_wake_blocks_on_unread_mail() {
@@ -829,6 +856,7 @@ test_stop_wake_disabled_does_not_strand_text_beside_a_task() {
         "the task's discharge write must not swallow a silenced text message beside it" || return 1
 }
 
+run_test test_stop_wake_only_the_lead_wakes
 run_test test_stop_wake_disabled_records_nothing
 run_test test_stop_wake_disabled_does_not_strand_text_beside_a_task
 run_test test_stop_wake_blocks_on_unread_mail

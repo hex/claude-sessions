@@ -289,29 +289,54 @@ MAIL_UNREAD=0
 MAIL_FRESH=0
 MAIL_DISCHARGED=0
 MAIL_NAMES=""
-for _mw_f in "$MAILDIR"/new/*.json; do
-    [ -f "$_mw_f" ] || continue
-    MAIL_UNREAD=$((MAIL_UNREAD + 1))
-    _mw_name=${_mw_f##*/}
-    MAIL_NAMES="$MAIL_NAMES$_mw_name
-"
-    # Reads a file, never a pipe, so the -q early exit cannot raise SIGPIPE.
-    if ! grep -qxF "$_mw_name" "$MAIL_WOKE" 2>/dev/null; then
-        # A task is already an imperative in the queue, so waking on it would
-        # race the drain — but it is discharged all the same, and recording it
-        # is what stops every later turn from re-reading it. An unreadable or
-        # forged document reads as text: over-waking is the safe direction.
-        _mw_kind=$(jq -r '.kind // "text"' "$_mw_f" 2>/dev/null || echo text)
-        if [ "$_mw_kind" = "task" ]; then
-            MAIL_DISCHARGED=1
-        else
-            MAIL_FRESH=1
+# Only the launched conversation wakes, by the same two shapes session-start.sh
+# calls the lead. A tmux-backed teammate is a full claude with its own top-level
+# Stop — the agent_id guard above catches in-process subagents, not tmux ones —
+# and cs is neither its process nor its parent, so CS_LEAD_PID is absent from
+# its environment. Ungated, one arrival wakes the lead and every idle teammate,
+# each racing to cs -msg where the first mv wins, so a teammate can consume mail
+# the lead then never sees. A session opened straight from a front end is not a
+# cs launch either and likewise does not wake; it is attended by definition, and
+# the prompt digest carries its mail.
+MAIL_IS_LEAD=0
+if [ -n "${CS_LEAD_PID:-}" ] && [ -n "${CLAUDE_PID:-}" ]; then
+    if [ "$CLAUDE_PID" = "$CS_LEAD_PID" ]; then
+        MAIL_IS_LEAD=1
+    else
+        _mw_parent=$(ps -o ppid= -p "$CLAUDE_PID" 2>/dev/null | tr -d '[:space:]' || true)
+        if [ -n "$_mw_parent" ] && [ "$_mw_parent" = "$CS_LEAD_PID" ]; then
+            MAIL_IS_LEAD=1
         fi
     fi
-done
-if [ "$MAIL_FRESH" = 0 ] && [ "$MAIL_DISCHARGED" = 1 ]; then
-    printf '%s' "$MAIL_NAMES" > "$MAIL_WOKE.tmp.$$" 2>/dev/null \
-        && mv "$MAIL_WOKE.tmp.$$" "$MAIL_WOKE" 2>/dev/null || true
+fi
+# A non-lead leaves both flags at 0, so it neither wakes nor records: the lead's
+# wake for the same arrival has to survive the teammate's turn ending first.
+if [ "$MAIL_IS_LEAD" = 1 ]; then
+    for _mw_f in "$MAILDIR"/new/*.json; do
+        [ -f "$_mw_f" ] || continue
+        MAIL_UNREAD=$((MAIL_UNREAD + 1))
+        _mw_name=${_mw_f##*/}
+        MAIL_NAMES="$MAIL_NAMES$_mw_name
+"
+        # Reads a file, never a pipe, so the -q early exit cannot raise SIGPIPE.
+        if ! grep -qxF "$_mw_name" "$MAIL_WOKE" 2>/dev/null; then
+            # A task is already an imperative in the queue, so waking on it
+            # would race the drain — but it is discharged all the same, and
+            # recording it is what stops every later turn from re-reading it. An
+            # unreadable or forged document reads as text: over-waking is the
+            # safe direction.
+            _mw_kind=$(jq -r '.kind // "text"' "$_mw_f" 2>/dev/null || echo text)
+            if [ "$_mw_kind" = "task" ]; then
+                MAIL_DISCHARGED=1
+            else
+                MAIL_FRESH=1
+            fi
+        fi
+    done
+    if [ "$MAIL_FRESH" = 0 ] && [ "$MAIL_DISCHARGED" = 1 ]; then
+        printf '%s' "$MAIL_NAMES" > "$MAIL_WOKE.tmp.$$" 2>/dev/null \
+            && mv "$MAIL_WOKE.tmp.$$" "$MAIL_WOKE" 2>/dev/null || true
+    fi
 fi
 # A silenced run discharges nothing, so it records nothing. Recording here would
 # mark the arrival considered for a wake that never announced it, and the
