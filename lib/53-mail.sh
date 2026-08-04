@@ -195,13 +195,49 @@ _mail_log() {
     _mail_print_files "${sorted[@]}"
 }
 
-# Dispatcher. Bare = read own inbox; 'log' = full history; else = send.
+# Collect a thread's documents from everywhere this session holds them: what it
+# received (unread and read) and what it sent. Half a thread normally lives in
+# the other session's mailbox, which the machine-local design makes ordinary.
+_mail_thread_files() {  # maildir, thread id -> prints paths, rc 1 when none
+    local maildir="$1" id="$2" f found=1
+    for f in "$maildir"/new/*.json "$maildir"/cur/*.json "$maildir"/out/*.json; do
+        [ -f "$f" ] || continue
+        if [ "$(jq -r '.thread // ""' "$f" 2>/dev/null || true)" = "$id" ]; then
+            printf '%s\n' "$f"
+            found=0
+        fi
+    done
+    return $found
+}
+
+_mail_thread() {  # thread id
+    local id="${1:-}"
+    [ -n "$id" ] || error "cs -msg thread needs a thread id (cs -msg log lists them)"
+    local maildir="$CLAUDE_SESSION_META_DIR/local/mail"
+    local files=() f
+    while IFS= read -r f; do
+        [ -n "$f" ] && files+=("$f")
+    done < <(_mail_thread_files "$maildir" "$id" || true)
+    # An unknown id is an error rather than an empty transcript: a typo that
+    # silently shows nothing reads as "the exchange is gone".
+    [ "${#files[@]}" -gt 0 ] || error "No such thread: $id"
+    _mail_print_files "${files[@]}"
+}
+
+# Dispatcher. Reserved first words name a command, not a target session —
+# without this table `cs -msg thread a3f9c1` fails with "No such session:
+# thread". A body that genuinely starts with a reserved word is still sendable
+# by quoting it into a single argument.
 run_mail() {
     local first="${1:-}"
     case "$first" in
         ""|log)
             [ -n "${CLAUDE_SESSION_META_DIR:-}" ] || error "cs -msg reads the current session's mail; run it inside a session"
             if [ "$first" = "log" ]; then _mail_log; else _mail_read; fi;;
+        thread)
+            shift
+            [ -n "${CLAUDE_SESSION_META_DIR:-}" ] || error "cs -msg thread reads the current session's mail; run it inside a session"
+            _mail_thread "${1:-}";;
         *)
             shift; _mail_send "$first" "$@";;
     esac

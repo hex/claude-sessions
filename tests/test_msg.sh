@@ -135,6 +135,23 @@ test_send_session_scoped_alias() {
     assert_file_contains "$(FIRST_MSG)" "via alias" "session-scoped arm sends" || return 1
 }
 
+test_msg_thread_is_reserved_not_a_target() {
+    local out rc=0
+    out=$("$CS_BIN" -msg thread abc123 2>&1) || rc=$?
+    [ "$rc" != "0" ] || { echo "  an unknown thread id should error"; return 1; }
+    assert_output_not_contains "$out" "No such session" \
+        "'thread' is a reserved first word, not a session to mail" || return 1
+    assert_eq "0" "$(NEW_COUNT)" "nothing was sent" || return 1
+}
+
+test_alias_thread_errors_instead_of_mailing_the_words() {
+    local out rc=0
+    out=$("$CS_BIN" receiver -msg thread abc123 2>&1) || rc=$?
+    [ "$rc" != "0" ] || { echo "  the alias should refuse a reserved word"; return 1; }
+    assert_eq "0" "$(NEW_COUNT)" \
+        "'thread abc123' must not be mailed to receiver as a message body" || return 1
+}
+
 test_alias_lone_log_errors_instead_of_sending() {
     local out; out=$("$CS_BIN" receiver -msg log 2>&1) && return 1
     assert_output_contains "$out" "cs -msg log" "hint points at the in-session read form" || return 1
@@ -240,6 +257,8 @@ run_test test_send_stamps_a_thread_and_keeps_a_sent_copy
 run_test test_record_has_no_ref_field
 run_test test_send_from_outside_session_has_empty_from
 run_test test_send_session_scoped_alias
+run_test test_msg_thread_is_reserved_not_a_target
+run_test test_alias_thread_errors_instead_of_mailing_the_words
 run_test test_alias_lone_log_errors_instead_of_sending
 run_test test_alias_empty_body_errors_with_read_hint
 run_test test_send_joins_unquoted_multiword_body
