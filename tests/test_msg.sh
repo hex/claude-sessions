@@ -82,6 +82,43 @@ test_send_writes_full_record() {
     [ -n "$actor" ] || { echo "  actor empty"; return 1; }
 }
 
+OUTDIR() { printf '%s' "$CS_SESSIONS_ROOT/sender/.cs/local/mail/out"; }
+
+# Sole sent copy, as a path; rc 1 when none.
+FIRST_SENT() {
+    local f
+    for f in "$(OUTDIR)"/*.json; do
+        [ -e "$f" ] || return 1
+        printf '%s' "$f"
+        return 0
+    done
+    return 1
+}
+
+test_send_stamps_a_thread_and_keeps_a_sent_copy() {
+    "$CS_BIN" -msg receiver "hello there" >/dev/null 2>&1 || return 1
+    local msg; msg=$(FIRST_MSG) || { echo "  nothing delivered"; return 1; }
+    local thread; thread=$(jq -r '.thread // ""' "$msg")
+    case "$thread" in
+        [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) : ;;
+        *) echo "  thread is not 6 hex digits: '$thread'"; return 1 ;;
+    esac
+    assert_eq "receiver" "$(jq -r '.to // ""' "$msg")" \
+        "the record names where it went, so an out/ copy can route a reply" || return 1
+    assert_eq "null" "$(jq -r '.in_reply_to' "$msg")" "a thread root has no parent" || return 1
+
+    local sent; sent=$(FIRST_SENT) || { echo "  sender kept no out/ copy"; return 1; }
+    assert_eq "$thread" "$(jq -r '.thread // ""' "$sent")" \
+        "the sent copy shares the thread id" || return 1
+    assert_eq "hello there" "$(jq -r '.body // ""' "$sent")" "the sent copy carries the body" || return 1
+
+    local f n=0
+    for f in "$CS_SESSIONS_ROOT/sender/.cs/local/mail/new"/*.json; do
+        [ -f "$f" ] || continue; n=$((n + 1))
+    done
+    assert_eq "0" "$n" "a sent copy is not unread mail to its own sender" || return 1
+}
+
 test_record_has_no_ref_field() {
     "$CS_BIN" -msg receiver "hi" >/dev/null 2>&1 || return 1
     assert_eq "false" "$(jq 'has("ref")' "$(FIRST_MSG)")" \
@@ -199,6 +236,7 @@ test_task_kind_rejects_multiline_body() {
 
 run_test test_send_delivers_one_whole_document_per_message
 run_test test_send_writes_full_record
+run_test test_send_stamps_a_thread_and_keeps_a_sent_copy
 run_test test_record_has_no_ref_field
 run_test test_send_from_outside_session_has_empty_from
 run_test test_send_session_scoped_alias

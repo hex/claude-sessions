@@ -3273,7 +3273,36 @@ _mail_scrub() {
 # entirely present or entirely absent. 'cs -msg' moves what it prints into
 # cur/ (read). Unread is simply the count of new/*.json.
 _mail_ensure_maildir() {  # maildir
-    mkdir -p "$1/tmp" "$1/new" "$1/cur"
+    mkdir -p "$1/tmp" "$1/new" "$1/cur" "$1/out"
+}
+
+# Thread ids are 6 hex digits because an agent has to retype them. RANDOM is 15
+# bits, so two draws cover the 24. Collisions matter — a repeat would merge two
+# unrelated transcripts and misroute replies — so generation avoids the roots
+# already in this mailbox rather than trusting 24 bits on their own.
+_mail_new_thread() {  # maildir
+    local n try id
+    for try in 1 2 3 4 5 6 7 8; do
+        id=$(printf '%06x' $(( ((RANDOM << 15) | RANDOM) & 0xFFFFFF )))
+        n=$(grep -l "\"thread\":\"$id\"" "$1"/out/*.json "$1"/new/*.json "$1"/cur/*.json 2>/dev/null | wc -l | tr -d '[:space:]')
+        [ "${n:-0}" = "0" ] && { printf '%s' "$id"; return 0; }
+    done
+    printf '%s' "$id"
+}
+
+# The sender keeps its own copy of everything it sends, so either end can
+# re-read the exchange — without it a rotated agent cannot find out what it
+# already said. Best-effort by design: the message is already delivered, and a
+# failure to file the copy must never report the send as failed.
+_mail_keep_sent() {  # line, fname
+    [ -n "${CLAUDE_SESSION_META_DIR:-}" ] || return 0
+    local mine="$CLAUDE_SESSION_META_DIR/local/mail"
+    _mail_ensure_maildir "$mine" 2>/dev/null || return 0
+    if ! { printf '%s\n' "$1" > "$mine/tmp/$2" 2>/dev/null \
+            && mv "$mine/tmp/$2" "$mine/out/$2" 2>/dev/null; }; then
+        rm -f "$mine/tmp/$2" 2>/dev/null || true
+    fi
+    return 0
 }
 
 _mail_send() {  # target, [--kind|-k KIND] body
@@ -3336,15 +3365,19 @@ _mail_send() {  # target, [--kind|-k KIND] body
         fi
         error "Failed to open ${target}'s mailbox"
     fi
-    local now id line fname
+    local now id line fname thread
     now="$(date +%s)"
     # The pid keeps two senders inside one second apart; a bare RANDOM suffix
     # collides ~1 in 32768 per pair and mv clobbers silently.
     id="${now}-$$-${RANDOM}"
+    # Generated against the sender's own mailbox, which is where the roots this
+    # session started are recorded.
+    thread="$(_mail_new_thread "${CLAUDE_SESSION_META_DIR:-$target_dir/.cs}/local/mail")"
     if ! line=$(jq -cn --arg id "$id" --argjson ts "$now" \
+        --arg thread "$thread" --arg to "$target" \
         --arg from "${CLAUDE_SESSION_NAME:-}" --arg actor "$(cs_actor_slug)" \
         --arg kind "$kind" --arg body "$body" \
-        '{id:$id, ts:$ts, from:$from, actor:$actor, kind:$kind, body:$body}'); then
+        '{id:$id, ts:$ts, thread:$thread, in_reply_to:null, to:$to, from:$from, actor:$actor, kind:$kind, body:$body}'); then
         if [ "$kind" = "task" ]; then
             warn "task queued in $target, but composing the mail attribution failed"
             return 0
@@ -3364,7 +3397,8 @@ _mail_send() {  # target, [--kind|-k KIND] body
         fi
         error "Failed to write to ${target}'s mailbox"
     fi
-    info "sent to $target; surfaces at their next turn"
+    _mail_keep_sent "$line" "$fname"
+    info "sent to $target (thread $thread); surfaces at their next turn"
 }
 
 # Shared formatter: print message documents as 'HH:MM  sender  [kind]  body'.
