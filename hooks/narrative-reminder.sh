@@ -313,6 +313,19 @@ if [ "$MAIL_FRESH" = 0 ] && [ "$MAIL_DISCHARGED" = 1 ]; then
     printf '%s' "$MAIL_NAMES" > "$MAIL_WOKE.tmp.$$" 2>/dev/null \
         && mv "$MAIL_WOKE.tmp.$$" "$MAIL_WOKE" 2>/dev/null || true
 fi
+# A silenced run discharges nothing, so it records nothing. Recording here would
+# mark the arrival considered for a wake that never announced it, and the
+# operator silencing the wake did not ask for the message to be swallowed — the
+# Stop wake is not the only reader of this snapshot.
+#
+# Silencing deliberately comes AFTER the discharge write, not before: the
+# snapshot is written as the whole of new/, which is only sound when everything
+# in new/ has been discharged. A silenced text message alongside a fresh task
+# has not been, so the live MAIL_FRESH must still suppress that write. Moving
+# this block up would record the silenced message and strand it.
+if [ -n "${CS_NO_MAIL_WAKE:-}" ]; then
+    MAIL_FRESH=0
+fi
 if [ "$MAIL_FRESH" = 1 ]; then
     REASON="Unread cross-session mail ($MAIL_UNREAD). Run cs -msg to read it."
     jq -nc --arg r "$REASON" '{decision: "block", reason: $r}'

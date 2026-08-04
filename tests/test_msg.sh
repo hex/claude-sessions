@@ -807,6 +807,30 @@ test_stop_wake_records_a_task_as_discharged() {
     assert_eq "1" "$n" "the task filename is recorded as discharged" || return 1
 }
 
+test_stop_wake_disabled_records_nothing() {
+    "$CS_BIN" -msg receiver "hello there" >/dev/null 2>&1 || return 1
+    local out; out=$(CS_NO_MAIL_WAKE=1 wake)
+    assert_output_not_contains "$out" "Unread cross-session mail" \
+        "CS_NO_MAIL_WAKE silences the wake" || return 1
+    assert_file_not_exists "$(RCV_META)/local/mail/woke" \
+        "a silenced run discharges nothing, so it records nothing" || return 1
+    out=$(wake)
+    assert_output_contains "$out" "Unread cross-session mail" \
+        "the same message still wakes once the silence is lifted" || return 1
+}
+
+test_stop_wake_disabled_does_not_strand_text_beside_a_task() {
+    "$CS_BIN" -msg receiver -k task "queued work" >/dev/null 2>&1 || return 1
+    drain_receiver_queue
+    "$CS_BIN" -msg receiver "a real question" >/dev/null 2>&1 || return 1
+    CS_NO_MAIL_WAKE=1 wake >/dev/null
+    local out; out=$(wake)
+    assert_output_contains "$out" "Unread cross-session mail" \
+        "the task's discharge write must not swallow a silenced text message beside it" || return 1
+}
+
+run_test test_stop_wake_disabled_records_nothing
+run_test test_stop_wake_disabled_does_not_strand_text_beside_a_task
 run_test test_stop_wake_blocks_on_unread_mail
 run_test test_stop_wake_fires_once_per_arrival
 run_test test_stop_wake_silent_for_task_kind
