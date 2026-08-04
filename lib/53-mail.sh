@@ -194,12 +194,20 @@ _mail_send() {  # target, [--kind|-k KIND] [--reply THREAD] body
 # Shared formatter: print message documents as 'HH:MM  sender  [kind]  body'.
 # Each document is a single-line JSON object, so one line-oriented jq pass
 # renders them all (no early-exit consumers -> no SIGPIPE risk on big mail).
+# Direction comes from the record, not the path, so one line-oriented jq pass
+# still renders every document (no early-exit consumer -> no SIGPIPE on big
+# mail). The thread id is shown because an agent cannot reply into a thread
+# whose id it was never told.
 _mail_print_files() {  # file...
-    cat "$@" | jq -rR '
+    cat "$@" | jq -rR --arg me "${CLAUDE_SESSION_NAME:-}" '
         fromjson? // empty |
+        (if $me != "" and (.from // "") == $me then "->" else "<-" end) as $dir |
+        (if $dir == "->" then (.to // "?")
+         elif (.from // "") == "" then (.actor // "?")
+         else .from end) as $peer |
         (.ts | if type == "number" then strflocaltime("%H:%M") else "--:--" end) + "  " +
-        (if .from == "" then .actor else .from end) + "  [" + .kind + "]  " +
-        (.body | gsub("[\n\r]"; " "))
+        $dir + " " + $peer + "  [" + (.kind // "text") + "]  (" + (.thread // "------") + ")  " +
+        ((.body // "") | gsub("[\n\r]"; " "))
     ' | _mail_scrub
 }
 
@@ -256,18 +264,66 @@ _mail_thread_files() {  # maildir, thread id -> prints paths, rc 1 when none
     return $found
 }
 
+# Emit one document and everything that answers it, depth first. Reads the
+# arrays _mail_thread declares (bash scopes dynamically), so it is only ever
+# called from there.
+_mail_emit_subtree() {  # index
+    local idx="$1" j
+    [ "${used[$idx]}" = "0" ] || return 0
+    used[$idx]=1
+    order+=("${files[$idx]}")
+    for ((j = 0; j < n; j++)); do
+        if [ "${used[$j]}" = "0" ] && [ -n "${ids[$idx]}" ] \
+            && [ "${parents[$j]}" = "${ids[$idx]}" ]; then
+            _mail_emit_subtree "$j"
+        fi
+    done
+}
+
 _mail_thread() {  # thread id
     local id="${1:-}"
     [ -n "$id" ] || error "cs -msg thread needs a thread id (cs -msg log lists them)"
     local maildir="$CLAUDE_SESSION_META_DIR/local/mail"
     local files=() f
+    # Filename order first, so siblings answering one parent come out in it.
     while IFS= read -r f; do
         [ -n "$f" ] && files+=("$f")
-    done < <(_mail_thread_files "$maildir" "$id" || true)
+    done < <(_mail_thread_files "$maildir" "$id" 2>/dev/null \
+        | awk -F/ '{print $NF "\t" $0}' | sort | cut -f2- || true)
     # An unknown id is an error rather than an empty transcript: a typo that
     # silently shows nothing reads as "the exchange is gone".
     [ "${#files[@]}" -gt 0 ] || error "No such thread: $id"
-    _mail_print_files "${files[@]}"
+
+    # Order by the in_reply_to chain, not by time: ts is whole seconds and a
+    # question with its reply inside one second is the normal cadence between
+    # agents, so any ts tie-break renders replies above what they answer.
+    # Filenames cannot substitute either — same-second order is by unpadded pid.
+    local n=${#files[@]} i
+    local ids=() parents=() used=() order=() orphans=()
+    for ((i = 0; i < n; i++)); do
+        ids[$i]=$(jq -r '.id // ""' "${files[$i]}" 2>/dev/null || true)
+        parents[$i]=$(jq -r '.in_reply_to // ""' "${files[$i]}" 2>/dev/null || true)
+        used[$i]=0
+    done
+
+    # Start at the root. Having none is ordinary, not broken: the root lives in
+    # the other session's mailbox whenever they started the thread.
+    local root=-1
+    for ((i = 0; i < n; i++)); do
+        case "${parents[$i]}" in ''|null) root=$i; break ;; esac
+    done
+    [ "$root" -ge 0 ] || root=0
+    _mail_emit_subtree "$root"
+
+    for ((i = 0; i < n; i++)); do
+        [ "${used[$i]}" = "0" ] && orphans+=("${files[$i]}")
+    done
+
+    _mail_print_files "${order[@]}"
+    if [ "${#orphans[@]}" -gt 0 ]; then
+        echo "  --- the rest of this thread is not on this machine ---"
+        _mail_print_files "${orphans[@]}"
+    fi
 }
 
 # Dispatcher. Reserved first words name a command, not a target session —

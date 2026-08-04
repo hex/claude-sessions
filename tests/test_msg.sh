@@ -177,6 +177,41 @@ test_reply_refuses_a_target_that_contradicts_the_thread() {
     assert_eq "0" "$n" "a typo must not misroute the reply and poison later derivations" || return 1
 }
 
+test_thread_transcript_orders_a_reply_after_its_question() {
+    "$CS_BIN" -msg receiver "question?" >/dev/null 2>&1 || return 1
+    local thread; thread=$(jq -r .thread "$(FIRST_MSG)")
+    rcv -msg --reply "$thread" "answer!" >/dev/null 2>&1 || return 1
+    # Read it from the SENDER's side on purpose: its question sits in out/ and
+    # the answer in new/, so scanning new/ then cur/ then out/ renders the reply
+    # above the question. Only the in_reply_to chain gets this right.
+    local out; out=$("$CS_BIN" -msg thread "$thread" 2>&1) \
+        || { echo "  transcript failed: $out"; return 1; }
+    local q a
+    q=$(printf '%s\n' "$out" | grep -n 'question?' | head -1 | cut -d: -f1)
+    a=$(printf '%s\n' "$out" | grep -n 'answer!'   | head -1 | cut -d: -f1)
+    [ -n "$q" ] && [ -n "$a" ] || { echo "  transcript is missing a message:"; printf '%s\n' "$out"; return 1; }
+    # Both land in the same whole second, so only in_reply_to can order them —
+    # a ts tie-break renders the reply above the question it answers.
+    [ "$q" -lt "$a" ] || { echo "  the reply rendered above its question"; printf '%s\n' "$out"; return 1; }
+}
+
+test_thread_transcript_marks_direction() {
+    "$CS_BIN" -msg receiver "question?" >/dev/null 2>&1 || return 1
+    local thread; thread=$(jq -r .thread "$(FIRST_MSG)")
+    rcv -msg --reply "$thread" "answer!" >/dev/null 2>&1 || return 1
+    local out; out=$(rcv -msg thread "$thread" 2>&1) || return 1
+    assert_output_contains "$out" "<-" "a received message reads as inbound" || return 1
+    assert_output_contains "$out" "->" "a sent message reads as outbound" || return 1
+}
+
+test_unread_lines_carry_the_thread_id() {
+    "$CS_BIN" -msg receiver "hello there" >/dev/null 2>&1 || return 1
+    local thread; thread=$(jq -r .thread "$(FIRST_MSG)")
+    local out; out=$(rcv -msg 2>&1)
+    assert_output_contains "$out" "$thread" \
+        "an agent cannot reply to a thread whose id it is never shown" || return 1
+}
+
 test_record_has_no_ref_field() {
     "$CS_BIN" -msg receiver "hi" >/dev/null 2>&1 || return 1
     assert_eq "false" "$(jq 'has("ref")' "$(FIRST_MSG)")" \
@@ -315,6 +350,9 @@ run_test test_send_stamps_a_thread_and_keeps_a_sent_copy
 run_test test_reply_derives_its_target_from_the_thread
 run_test test_reply_refuses_an_unknown_thread
 run_test test_reply_refuses_a_target_that_contradicts_the_thread
+run_test test_thread_transcript_orders_a_reply_after_its_question
+run_test test_thread_transcript_marks_direction
+run_test test_unread_lines_carry_the_thread_id
 run_test test_record_has_no_ref_field
 run_test test_send_from_outside_session_has_empty_from
 run_test test_send_session_scoped_alias
