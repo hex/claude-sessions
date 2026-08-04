@@ -797,9 +797,20 @@ test_stop_wake_not_blocked_by_a_lingering_task() {
         "an unread task sitting in new/ does not suppress a later text message" || return 1
 }
 
+test_stop_wake_records_a_task_as_discharged() {
+    "$CS_BIN" -msg receiver -k task "queued work" >/dev/null 2>&1 || return 1
+    drain_receiver_queue
+    wake >/dev/null
+    local woke="$(RCV_META)/local/mail/woke"
+    assert_file_exists "$woke" "a task-only arrival still writes the snapshot" || return 1
+    local n; n=$(grep -c '[^[:space:]]' "$woke" 2>/dev/null || echo 0)
+    assert_eq "1" "$n" "the task filename is recorded as discharged" || return 1
+}
+
 run_test test_stop_wake_blocks_on_unread_mail
 run_test test_stop_wake_fires_once_per_arrival
 run_test test_stop_wake_silent_for_task_kind
+run_test test_stop_wake_records_a_task_as_discharged
 run_test test_stop_wake_fires_again_for_a_later_message
 run_test test_stop_wake_not_blocked_by_a_lingering_task
 
