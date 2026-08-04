@@ -177,6 +177,22 @@ test_reply_refuses_a_target_that_contradicts_the_thread() {
     assert_eq "0" "$n" "a typo must not misroute the reply and poison later derivations" || return 1
 }
 
+test_reply_refuses_an_ambiguous_thread() {
+    # Six hex digits is short enough to retype and short enough to repeat: a
+    # mailbox accumulates roots without bound. If a collision ever lands,
+    # guessing a peer would misroute into a stranger's conversation.
+    local mine="$CLAUDE_SESSION_META_DIR/local/mail"
+    mkdir -p "$mine/cur" "$mine/out"
+    printf '%s\n' '{"id":"1","ts":1700000000,"thread":"abc123","in_reply_to":null,"to":"sender","from":"receiver","actor":"a","kind":"text","body":"one"}' \
+        > "$mine/cur/0000000001-1.json"
+    printf '%s\n' '{"id":"2","ts":1700000001,"thread":"abc123","in_reply_to":null,"to":"third","from":"","actor":"a","kind":"text","body":"two"}' \
+        > "$mine/out/0000000002-2.json"
+    local out rc=0
+    out=$("$CS_BIN" -msg --reply abc123 "which conversation is this?" 2>&1) || rc=$?
+    [ "$rc" != "0" ] || { echo "  an ambiguous thread id should refuse, not guess"; return 1; }
+    assert_output_contains "$out" "abc123" "the error names the ambiguous id" || return 1
+}
+
 test_thread_transcript_orders_a_reply_after_its_question() {
     "$CS_BIN" -msg receiver "question?" >/dev/null 2>&1 || return 1
     local thread; thread=$(jq -r .thread "$(FIRST_MSG)")
@@ -350,6 +366,7 @@ run_test test_send_stamps_a_thread_and_keeps_a_sent_copy
 run_test test_reply_derives_its_target_from_the_thread
 run_test test_reply_refuses_an_unknown_thread
 run_test test_reply_refuses_a_target_that_contradicts_the_thread
+run_test test_reply_refuses_an_ambiguous_thread
 run_test test_thread_transcript_orders_a_reply_after_its_question
 run_test test_thread_transcript_marks_direction
 run_test test_unread_lines_carry_the_thread_id

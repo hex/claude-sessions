@@ -3311,14 +3311,29 @@ _mail_keep_sent() {  # line, fname
 # see. The newest match wins: 'from' when we received it, 'to' when we sent it.
 # Ordering is by filename, which is only a tie-break here — the peer is the same
 # at either end of a two-party thread.
-_mail_reply_peer() {  # maildir, thread -> "peer<TAB>parent id"; rc 1 if unknown
-    local maildir="$1" id="$2" f newest=""
+_mail_reply_peer() {  # maildir, thread -> "peer<TAB>parent id"; rc 1 unknown, 2 ambiguous
+    local maildir="$1" id="$2" f newest="" seen="" peer
     while IFS= read -r f; do
-        [ -n "$f" ] && newest="$f"
+        [ -n "$f" ] || continue
+        newest="$f"
+        case "$f" in
+            */out/*) peer=$(jq -r '.to // ""' "$f" 2>/dev/null || true) ;;
+            *)       peer=$(jq -r '.from // ""' "$f" 2>/dev/null || true) ;;
+        esac
+        # Six hex digits repeat eventually — a mailbox accumulates roots without
+        # bound — and a repeat would merge two unrelated transcripts. Refusing
+        # beats guessing: a misrouted reply lands in a stranger's conversation.
+        case "$peer" in
+            '') : ;;
+            *) case "$seen" in
+                   '') seen="$peer" ;;
+                   "$peer") : ;;
+                   *) return 2 ;;
+               esac ;;
+        esac
     done < <(_mail_thread_files "$maildir" "$id" 2>/dev/null \
         | awk -F/ '{print $NF "\t" $0}' | sort | cut -f2-)
     [ -n "$newest" ] || return 1
-    local peer
     case "$newest" in
         */out/*) peer=$(jq -r '.to // ""' "$newest" 2>/dev/null || true) ;;
         *)       peer=$(jq -r '.from // ""' "$newest" 2>/dev/null || true) ;;
@@ -3340,9 +3355,13 @@ _mail_send() {  # target, [--kind|-k KIND] [--reply THREAD] body
     if [ -n "$reply_thread" ]; then
         [ -n "${CLAUDE_SESSION_META_DIR:-}" ] \
             || error "cs -msg --reply resolves the thread from a session's mailbox; run it inside a session"
-        local pair derived
-        pair=$(_mail_reply_peer "$CLAUDE_SESSION_META_DIR/local/mail" "$reply_thread") \
-            || error "No such thread: $reply_thread (cs -msg log lists them)"
+        local pair derived rc=0
+        pair=$(_mail_reply_peer "$CLAUDE_SESSION_META_DIR/local/mail" "$reply_thread") || rc=$?
+        case "$rc" in
+            0) : ;;
+            2) error "thread $reply_thread names more than one correspondent; it is not a single conversation" ;;
+            *) error "No such thread: $reply_thread (cs -msg log lists them)" ;;
+        esac
         IFS=$'\t' read -r derived reply_parent <<< "$pair"
         # An explicit target must EQUAL the derived peer. Accepting a different
         # one silently misroutes the reply on a typo, records the wrong peer in
