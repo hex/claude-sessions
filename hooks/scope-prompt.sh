@@ -104,25 +104,37 @@ _build_mail_digest() {  # meta_local_dir
     [ -d "$mdir/new" ] || return 0
     local files=()
     for f in "$mdir"/new/*.json; do
-        [ -e "$f" ] || continue
+        [ -f "$f" ] || continue
         files+=("$f")
         total=$((total + 1))
     done
     [ "$total" -gt 0 ] || return 0
     # tostr coerces any non-string field (a forged/hand-written document could
     # carry a number or object) to a string so a single bad document can't error
-    # the whole jq program and suppress every valid message beside it. The
-    # length==0 guard keeps an all-unparseable window from emitting a bare
-    # digest header with no lines under it.
+    # the whole jq program and suppress every valid message beside it.
     MAIL_DIGEST=$(cat "${files[@]:0:5}" 2>/dev/null | jq -rRs --argjson total "$total" '
         def tostr: if type == "string" then . else tostring end;
-        [split("\n")[] | select(length > 0) | (fromjson? // empty)] as $m |
-        if ($m | length) == 0 then "" else
+        # Bound the RENDERED MESSAGES, not the files opened: one document is
+        # normally one message, but a hand-written file can hold many lines,
+        # and rendering all of them would inject unbounded context every
+        # prompt (this digest is prepended after the scope cap, so nothing
+        # downstream would trim it).
+        [split("\n")[] | select(length > 0) | (fromjson? // empty)][0:5] as $m |
+        # The header shows even when nothing in the window parsed: staying
+        # silent while the badge counts N unread is the one outcome this
+        # persistent digest exists to prevent.
+        if ($m | length) == 0 then
+          "Unread mail (\($total)) - nothing legible in the first documents; run cs -msg to read and clear."
+        else
         ( [ $m[] |
               ((((if (.from // "") == "" then .actor else .from end) // "") | tostr)[0:40]) as $who |
               if .kind == "task" then "  queued task from \($who) (runs via cs -queue)"
               else "  mail from \($who): \"\((((.body // "") | tostr) | gsub("[\n\r]"; " "))[0:160])\"" end ]
-          + (if $total > 5 then ["  ... and \($total - 5) more (cs -msg to read)"] else [] end)
+          # Count the overflow against what was actually RENDERED, not against
+          # the file total: the two differ whenever the opened files hold more
+          # or fewer messages than one apiece, and an overflow line derived
+          # from files would then contradict the bodies above it.
+          + (if $total > ($m | length) then ["  ... and \($total - ($m | length)) more (cs -msg to read)"] else [] end)
         ) as $lines |
         "Unread mail (\($total)) - still unread, run cs -msg to clear:\n" + ($lines | join("\n"))
         end

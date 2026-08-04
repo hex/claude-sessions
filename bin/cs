@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.8.4"
+VERSION="2026.8.5"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 
@@ -2430,20 +2430,22 @@ migrate_if_exists() {
 # that does not parse at all is quarantined in mail/corrupt.jsonl — it is
 # evidence of the append tearing the maildir removes, not garbage. Records may
 # lack a numeric ts (accepted and pinned by test) or a usable id, so neither
-# is assumed for the filename: a missing ts becomes this migration's epoch
-# second and a missing id a migration-local sequence, preserving order within
-# the legacy file. Deletes the converted file and the cursor when done.
+# is assumed for the filename: a missing ts sorts to the front and a missing id
+# becomes a migration-local sequence, preserving order within the legacy file.
+# Every name derives only from the legacy content, so converting the same file
+# twice produces the same names and the second run delivers nothing new — which
+# is what makes an interrupted conversion safe to retry. Deletes the converted
+# file and the cursor when done.
 _convert_legacy_inbox() {  # maildir
     local maildir="$1" legacy="$1/inbox.jsonl.migrating"
     [ -f "$legacy" ] || return 0
-    mkdir -p "$maildir/tmp" "$maildir/new" "$maildir/cur"
+    _mail_ensure_maildir "$maildir"
     local seen=""
     if [ -f "$maildir/seen" ]; then
         IFS= read -r seen < "$maildir/seen" || true
     fi
     case "$seen" in ''|*[!0-9]*) seen=0;; esac
-    local epoch lineno=0 seq=0 line meta ts id fname dest
-    epoch=$(date +%s)
+    local lineno=0 seq=0 line meta ts id fname dest failed=0
     # `|| [ -n "$line" ]` converts a final line the stale writer never
     # terminated rather than dropping it.
     while IFS= read -r line || [ -n "$line" ]; do
@@ -2461,18 +2463,36 @@ _convert_legacy_inbox() {  # maildir
         ts="${meta%%$'\t'*}"
         id="${meta#*$'\t'}"
         # Base-10 normalize before printf %d, which reads a leading zero as octal.
-        case "$ts" in ''|*[!0-9]*) ts="$epoch";; *) ts=$((10#$ts));; esac
+        # A record with no usable ts sorts to the front rather than taking the
+        # migration's own clock: "now" differs on every run, which would give
+        # the same record a new name each time and defeat the rerun guard below.
+        case "$ts" in ''|*[!0-9]*) ts=0;; *) ts=$((10#$ts));; esac
         case "$id" in ''|*[!A-Za-z0-9._-]*) id=$(printf 'legacy-%04d' "$seq");; esac
-        fname="$(printf '%010d' "$ts")-${id}.json"
+        # The line's own position is part of the name, so the name depends only
+        # on the legacy file's content -- the same record converts to the same
+        # filename on every run.
+        fname="$(printf '%010d' "$ts")-${id}-$(printf '%04d' "$seq").json"
         if [ "$lineno" -le "$seen" ]; then dest="cur"; else dest="new"; fi
-        # Never clobber a message already delivered under the same name.
-        if [ -e "$maildir/$dest/$fname" ]; then
-            fname="$(printf '%010d' "$ts")-${id}-$(printf '%04d' "$seq").json"
+        # A conversion interrupted partway leaves records already delivered.
+        # Skip those, in EITHER box: re-delivering one the recipient has since
+        # read would resurrect it as unread, and delivering it twice would show
+        # the same message twice.
+        if [ -e "$maildir/new/$fname" ] || [ -e "$maildir/cur/$fname" ]; then
+            continue
         fi
-        printf '%s\n' "$line" > "$maildir/tmp/$fname" \
-            && mv "$maildir/tmp/$fname" "$maildir/$dest/$fname"
+        if ! { printf '%s\n' "$line" > "$maildir/tmp/$fname" \
+                && mv "$maildir/tmp/$fname" "$maildir/$dest/$fname"; }; then
+            rm -f "$maildir/tmp/$fname"
+            failed=1
+        fi
     done < "$legacy"
-    rm -f "$legacy" "$maildir/seen"
+    # Only drop the legacy file once every record reached a box. A failed write
+    # is the non-final command of an && list, so errexit does not fire and the
+    # loop runs on; unlinking here regardless would destroy the one copy of the
+    # mail that never landed. Retrying is safe because the names above are a
+    # pure function of the legacy content.
+    [ "$failed" -eq 0 ] && rm -f "$legacy" "$maildir/seen"
+    return 0
 }
 
 # One-time, idempotent mailbox migration, keyed ONLY on inbox.jsonl existing.
@@ -3304,16 +3324,33 @@ _mail_send() {  # target, [--kind|-k KIND] body
     # sessions, where a sender-side tmp/ could sit on another volume and
     # degrade the mv to copy-then-unlink.
     local maildir="$target_dir/.cs/local/mail"
-    _mail_ensure_maildir "$maildir"
+    # Everything after _queue_add must fail gracefully for a task-kind send:
+    # the work is already queued, so aborting here makes the sender believe the
+    # send failed, and a retry queues the task a second time. The maildir
+    # creation and the record-composing jq are as able to fail as the write
+    # below (an unwritable mailbox, a mail/ path that is a regular file).
+    if ! _mail_ensure_maildir "$maildir" 2>/dev/null; then
+        if [ "$kind" = "task" ]; then
+            warn "task queued in $target, but its mailbox could not be opened for attribution"
+            return 0
+        fi
+        error "Failed to open ${target}'s mailbox"
+    fi
     local now id line fname
     now="$(date +%s)"
     # The pid keeps two senders inside one second apart; a bare RANDOM suffix
     # collides ~1 in 32768 per pair and mv clobbers silently.
     id="${now}-$$-${RANDOM}"
-    line=$(jq -cn --arg id "$id" --argjson ts "$now" \
+    if ! line=$(jq -cn --arg id "$id" --argjson ts "$now" \
         --arg from "${CLAUDE_SESSION_NAME:-}" --arg actor "$(cs_actor_slug)" \
         --arg kind "$kind" --arg body "$body" \
-        '{id:$id, ts:$ts, from:$from, actor:$actor, kind:$kind, body:$body}')
+        '{id:$id, ts:$ts, from:$from, actor:$actor, kind:$kind, body:$body}'); then
+        if [ "$kind" = "task" ]; then
+            warn "task queued in $target, but composing the mail attribution failed"
+            return 0
+        fi
+        error "Failed to compose the message for $target"
+    fi
     # Zero-padded epoch keeps lexical order aligned with time order; NOT a
     # monotonic clock (same-second order is by unpadded pid, and the wall
     # clock can go backwards) — nothing may treat name order as arrival order.
@@ -3346,7 +3383,7 @@ _mail_read() {
     local maildir="$CLAUDE_SESSION_META_DIR/local/mail"
     local f files=()
     for f in "$maildir"/new/*.json; do
-        [ -e "$f" ] || continue
+        [ -f "$f" ] || continue
         files+=("$f")
     done
     if [ "${#files[@]}" -eq 0 ]; then
@@ -3355,18 +3392,17 @@ _mail_read() {
     fi
     _mail_print_files "${files[@]}"
     # Exactly what was printed moves to cur/; a message landing between the
-    # glob and here stays unread for the next read.
-    mkdir -p "$maildir/cur"
-    for f in "${files[@]}"; do
-        mv "$f" "$maildir/cur/${f##*/}"
-    done
+    # glob and here stays unread for the next read. One mv for the batch:
+    # filenames carry the sender's pid, so a basename cannot collide in cur/.
+    _mail_ensure_maildir "$maildir"
+    mv "${files[@]}" "$maildir/cur/"
 }
 
 _mail_log() {
     local maildir="$CLAUDE_SESSION_META_DIR/local/mail"
     local f files=()
     for f in "$maildir"/cur/*.json "$maildir"/new/*.json; do
-        [ -e "$f" ] || continue
+        [ -f "$f" ] || continue
         files+=("$f")
     done
     if [ "${#files[@]}" -eq 0 ]; then
@@ -3457,6 +3493,12 @@ _queue_convert_legacy() {  # qdir
         # A leftover from an interrupted conversion holds real tasks; fold it
         # in before renaming the fresh file over it.
         if [ -f "$legacy" ]; then
+            # Terminate the leftover first: an interrupted conversion can strand
+            # a file whose last line has no newline, and appending straight onto
+            # it would splice two tasks into one. The converter skips the blank
+            # line this adds when the leftover was already terminated, and the
+            # queue executes what it reads, so a splice is worse than anything.
+            printf '\n' >> "$legacy" 2>/dev/null || return 0
             cat "$qdir/queue" >> "$legacy" 2>/dev/null || return 0
             rm -f "$qdir/queue"
         else
@@ -3464,16 +3506,39 @@ _queue_convert_legacy() {  # qdir
         fi
     fi
     [ -f "$legacy" ] || return 0
+    # The pre-directory layout used queue.tmp as an awk TEMP FILE, so a killed
+    # old-cs rm or drain pop leaves a regular file exactly where the staging
+    # directory now goes. mkdir -p fails over it, which under errexit aborts
+    # every entry point that converts — including session open, leaving the
+    # session unopenable. Clear a non-directory at either path first.
+    [ -d "$qdir/queue" ]     || rm -f "$qdir/queue"
+    [ -d "$qdir/queue.tmp" ] || rm -f "$qdir/queue.tmp"
     mkdir -p "$qdir/queue" "$qdir/queue.tmp"
-    local line seq=0 fname
+    local line seq=0 fname failed=0
     while IFS= read -r line || [ -n "$line" ]; do
         case "$line" in *[![:space:]]*) : ;; *) continue ;; esac
         seq=$((seq + 1))
         fname="0000000000-legacy-$(printf '%04d' "$seq")"
-        printf '%s\n' "$line" > "$qdir/queue.tmp/$fname" \
-            && mv "$qdir/queue.tmp/$fname" "$qdir/queue/$fname"
+        # Keeping the legacy file for retry (below) means a task that DID land
+        # and was then popped and run by the drain would be re-created here and
+        # executed a second time. Names are deterministic, so a task still
+        # queued is recognisable by its name; one already executed is only
+        # recognisable in the done log. The queue runs what it reads, so
+        # re-execution is the worse failure and both are checked.
+        if [ -e "$qdir/queue/$fname" ] ||
+           { [ -f "$qdir/queue.done" ] && grep -Fxq -- "$line" "$qdir/queue.done"; }; then
+            continue
+        fi
+        if ! { printf '%s\n' "$line" > "$qdir/queue.tmp/$fname" \
+                && mv "$qdir/queue.tmp/$fname" "$qdir/queue/$fname"; }; then
+            failed=1
+        fi
     done < "$legacy"
-    rm -f "$legacy"
+    # Only drop the legacy file once every task reached the queue. Unlinking it
+    # after a partial conversion destroys the tasks that never landed, and this
+    # is the one copy of them.
+    [ "$failed" -eq 0 ] && rm -f "$legacy"
+    return 0
 }
 
 # The queue is a directory of one file per task. A task is written whole to
@@ -3491,7 +3556,9 @@ _queue_add() {  # qdir, text
     mkdir -p "$qdir/queue" "$qdir/queue.tmp"
     # The zero-padded per-process sequence keeps several adds from one process
     # inside one second (a spawn seed's task list) in submission order; guard
-    # against an inherited same-named env var poisoning the counter.
+    # against an inherited same-named env var poisoning the counter. The random
+    # suffix covers what the sequence cannot: two cs processes that recycled the
+    # same pid within one second, where both counters start at 1.
     case "${_QUEUE_SEQ:-}" in ''|*[!0-9]*) _QUEUE_SEQ=0;; esac
     _QUEUE_SEQ=$((10#$_QUEUE_SEQ + 1))
     local fname
@@ -3512,20 +3579,20 @@ _queue_len() {  # qdir
     echo "$n"
 }
 
+# One enumeration, and every regular file is a task — the same rule _queue_len
+# counts and _queue_rm indexes, so the number shown here is the number that
+# deletes. Filtering blank files here (they cannot occur: both writers trim and
+# reject empties) would renumber the list out of step with rm.
 _queue_list() {  # qdir
     local qdir="$1" f n=0 text
-    if [ "$(_queue_len "$qdir")" -gt 0 ]; then
-        echo "Pending:"
-        for f in "$qdir/queue"/*; do
-            [ -f "$f" ] || continue
-            text=$(cat "$f")
-            case "$text" in *[![:space:]]*) : ;; *) continue ;; esac
-            n=$((n + 1))
-            printf '  %d. %s\n' "$n" "${text//$'\n'/ }"
-        done
-    else
-        echo "Queue is empty."
-    fi
+    for f in "$qdir/queue"/*; do
+        [ -f "$f" ] || continue
+        n=$((n + 1))
+        [ "$n" -eq 1 ] && echo "Pending:"
+        text=$(<"$f")
+        printf '  %d. %s\n' "$n" "${text//$'\n'/ }"
+    done
+    [ "$n" -gt 0 ] || echo "Queue is empty."
     if [ -s "$qdir/queue.done" ]; then
         echo "Done:"
         awk 'NF{ printf "  - %s\n", $0 }' "$qdir/queue.done"
@@ -5456,7 +5523,11 @@ launch_claude_code() {
             local _spawner="" _line _n=0 _first=1
             while IFS= read -r _line || [ -n "$_line" ]; do
                 if [ "$_first" = 1 ]; then _spawner="$_line"; _first=0; continue; fi
-                [ -n "$_line" ] || continue
+                # Skip whitespace-only lines, not merely empty ones: _queue_add
+                # trims and then errors on an empty body, which under errexit
+                # would abort the whole session launch over a stray space in a
+                # hand-edited seed.
+                case "$_line" in *[![:space:]]*) : ;; *) continue ;; esac
                 _queue_add "$session_dir/.cs/local" "$_line"
                 _n=$((_n + 1))
             done < "$_seed"

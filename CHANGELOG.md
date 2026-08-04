@@ -4,15 +4,33 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
-## Unreleased
+## 2026.8.5
 
 ### Fixes
 
-- **Concurrent mail and queue delivery could interleave into garbage — or into the drain.** Both `cs -msg` and the walk-away queue delivered by appending a line to a shared file, but bash's `printf` flushes large bodies in ~1KB chunks, so simultaneous senders (a spawn fan-out finishing together is the normal case) spliced each other's lines: measured, four concurrent senders left only 112 of 200 lines intact. Torn mail was silently discarded by the tolerant readers; a torn queue line was worse — the drain executes what it reads. Delivery is now atomic by construction: mail is a per-message maildir (`mail/tmp/` → rename into `mail/new/`; `cs -msg` moves what it prints to `mail/cur/`), and the queue is one file per task staged the same way, popped by moving the lexically first entry aside (atomic against a second drain). Unread mail is simply the count of `new/*.json` — the same basis in `cs -msg`, the prompt digest, the status line, and the TUI — and the old `seen` cursor arithmetic is gone. Legacy `mail/inbox.jsonl` mailboxes are converted on the session's next open (worktree opens included); lines that fail to parse are quarantined in `mail/corrupt.jsonl` as evidence of the tearing this removes.
+- **Concurrent mail and queue delivery could interleave into garbage — or into the drain.** Both `cs -msg` and the walk-away queue delivered by appending a line to a shared file, but bash's `printf` flushes large bodies in ~1KB chunks, so simultaneous senders (a spawn fan-out finishing together is the normal case) spliced each other's lines: measured, four concurrent senders left only 112 of 200 lines intact. Torn mail was silently discarded by the tolerant readers; a torn queue line was worse — the drain executes what it reads. Delivery is now atomic by construction: mail is a per-message maildir (`mail/tmp/` → rename into `mail/new/`; `cs -msg` moves what it prints to `mail/cur/`), and the queue is one file per task staged the same way, popped by moving the lexically first entry aside (atomic against a second drain). Unread mail is simply the count of `new/*.json` — the same basis in `cs -msg`, the prompt digest, the status line, and the TUI — and the old `seen` cursor arithmetic is gone.
+
+- **Upgrading could destroy queued tasks and leave the session unopenable.** The pre-directory layout used `.cs/local/queue.tmp` as a temp *file*, so a killed `cs -queue rm` or drain pop left a regular file exactly where the new staging *directory* goes. `mkdir -p` failed over it, aborting every entry point that converts — including session open — and the converter then deleted the legacy file anyway, taking the tasks with it. A non-directory at that path is now cleared, and neither converter drops its legacy file until every record has actually landed.
+
+- **An interrupted mailbox migration duplicated mail on the next open.** Converted filenames depended on the migration's own clock, so a retry no longer recognised what it had already delivered and wrote a second copy beside it; a message read in between came back as unread. Names now derive only from the legacy content, and a record already present in `new/` or `cur/` is skipped.
+
+- **A stranded conversion file could splice two queued tasks into one.** An interrupted run can leave a file whose last line has no newline; folding a fresh queue onto it concatenated the two, and the drain executes what it reads. Requeuing after such a failure also no longer re-runs a task the drain already completed.
+
+- **The TUI could edit or delete a different task than the one shown.** The Notes panel skipped entries it could not decode while the editor and delete key addressed tasks by position in the unfiltered list, so a stray file sorting first shifted every index: `d` on the first row removed the stray and left the real task, and editing overwrote the stray instead. Both paths now read the same list.
+
+- **The unread-mail digest could go silent, or grow without bound.** A window of documents that failed to parse suppressed the digest entirely while the status line still counted them, so a session was never told it had mail. The five-message bound also counted files rather than messages, letting a single crafted document inline unbounded text into every prompt. The header now always reports, the bound applies to rendered messages, and the overflow count matches what was shown.
+
+- **A failed `task`-kind send could queue the same task twice.** Mail carrying a task queues the work first and records attribution second. If that second step failed, the sender saw an outright failure and retried, queuing the work again. Those paths now warn and keep the delivered task.
+
+- **A blank line in a spawn seed aborted the session launch.** A whitespace-only task line reached the queue's empty-body check and failed the whole launch; it is now skipped.
 
 ### Changed
 
 - **Mail bodies may now be 64KB, and `cs -msg <session> -` reads the body from stdin.** The 4096-byte cap guarded the corruption window above; with delivery atomic it only bounds render cost, so it rises to 65536. Over-cap bodies still error rather than truncate. The stdin form is what makes the larger cap practical — a multi-KB handoff does not belong in argv.
+
+### Docs
+
+- `docs/hooks.md` described the mail digest in terms of the `inbox.jsonl` file and its `seen` cursor, neither of which exists any more.
 
 ## 2026.8.4
 

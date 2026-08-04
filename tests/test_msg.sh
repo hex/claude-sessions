@@ -27,7 +27,7 @@ MAILDIR() { printf '%s' "$CS_SESSIONS_ROOT/receiver/.cs/local/mail"; }
 NEW_COUNT() {
     local f n=0
     for f in "$(MAILDIR)"/new/*.json; do
-        [ -e "$f" ] || continue
+        [ -f "$f" ] || continue
         n=$((n + 1))
     done
     printf '%s' "$n"
@@ -272,19 +272,27 @@ test_read_strips_control_characters() {
     assert_output_contains "$out" "evil" "body otherwise shown" || return 1
 }
 
-# Spec test 4 (reader): only new/*.json is mail. A .DS_Store, a stray tmp
-# leftover or a subdirectory in new/ must neither render nor count as unread.
+# Spec test 4 (reader): only regular new/*.json files are mail. A .DS_Store, a
+# stray tmp leftover, a plain subdirectory, and — the case that matters — a
+# DIRECTORY whose name ends in .json must neither render nor count as unread.
+# That last one is what separates the readers: a glob-and-`-e` reader accepts
+# it while the status line and the TUI (`-f` / is_file) do not, so a fixture
+# without it lets the four definitions drift while every suite stays green.
 test_read_skips_non_json_entries() {
     "$CS_BIN" -msg receiver "real message" >/dev/null 2>&1 || return 1
     printf 'stray bytes\n' > "$(MAILDIR)/new/.DS_Store"
     printf '{"id":"x","ts":1,"from":"sender","actor":"a","kind":"text","body":"halfway"}' \
         > "$(MAILDIR)/new/0000000001-half.json.partial"
     mkdir -p "$(MAILDIR)/new/subdir"
+    mkdir -p "$(MAILDIR)/new/0000000002-stray.json"
+    assert_eq "1" "$(NEW_COUNT)" "only the real message counts as unread" || return 1
     local out; out=$(_as_receiver -msg 2>&1) || return 1
     assert_output_contains "$out" "real message" "real message shown" || return 1
     assert_output_not_contains "$out" "halfway" "non-.json entry hidden" || return 1
     out=$(_as_receiver -msg 2>&1) || return 1
     assert_output_contains "$out" "No unread mail" "strays never count as unread" || return 1
+    assert_eq "0" "$(NEW_COUNT)" "reading leaves no phantom unread behind" || return 1
+    [ -d "$(MAILDIR)/new/0000000002-stray.json" ] || { echo "  stray dir was moved to cur/"; return 1; }
 }
 
 test_read_renders_null_ts_and_flattens_multiline_body() {
@@ -359,10 +367,17 @@ test_task_kind_counted_not_inlined() {
 }
 
 # Bounded: at most 5 bodies inline, with an "N more" overflow line and the total.
+# Seeded as files rather than via seven `cs -msg` runs: document names carry the
+# sending process's pid unpadded, so same-second sends from different pids sort
+# by pid STRING (999 after 1000) and "which five come first" would flake at
+# every digit-length boundary. _mail_send's own comment says name order is not
+# arrival order, so a test must not depend on it.
 test_mail_bounded_at_five() {
+    mkdir -p "$(MAILDIR)/new"
     local i=1
     while [ "$i" -le 7 ]; do
-        "$CS_BIN" -msg receiver "message number $i here" >/dev/null 2>&1
+        printf '{"id":"m%s","ts":1700000000,"from":"sender","actor":"a","kind":"text","body":"message number %s here"}\n' \
+            "$i" "$i" > "$(MAILDIR)/new/000000000$i-m$i.json"
         i=$((i + 1))
     done
     local out; out=$(_prompt_as_receiver "hello") || return 1
@@ -370,6 +385,43 @@ test_mail_bounded_at_five() {
     assert_output_not_contains "$out" "message number 6 here" "sixth body capped" || return 1
     assert_output_contains "$out" "2 more" "overflow counted" || return 1
     assert_output_contains "$out" "Unread mail (7)" "total unread count shown" || return 1
+}
+
+# The bound is on MESSAGES, not on files opened. One document holding many JSON
+# lines must still render at most five, because the digest is prepended after
+# the scope cap and nothing downstream would trim it — an unbounded document
+# would inject unbounded context on every prompt. The seven-file fixture above
+# cannot reach this: the file window alone satisfies it.
+test_mail_digest_bounds_messages_not_files() {
+    mkdir -p "$(MAILDIR)/new"
+    local i=1
+    while [ "$i" -le 10 ]; do
+        printf '{"id":"b%s","ts":1700000000,"from":"sender","actor":"a","kind":"text","body":"crafted line %s"}\n' \
+            "$i" "$i"
+        i=$((i + 1))
+    done > "$(MAILDIR)/new/0000000001-many.json"
+    local out; out=$(_prompt_as_receiver "hello") || return 1
+    # The hook emits the digest inside a JSON string, so its newlines are
+    # escaped and the whole digest is one output line: count occurrences, not
+    # matching lines.
+    assert_eq "5" "$(printf '%s' "$out" | grep -o 'crafted line' | wc -l | tr -d ' ')" \
+        "at most five bodies rendered" || return 1
+    assert_output_not_contains "$out" "crafted line 6" "the sixth message is not inlined" || return 1
+}
+
+# A window whose documents cannot be parsed must still report. Going silent
+# while the badge counts N unread is the one outcome a persistent digest exists
+# to prevent: the session would never learn it has mail.
+test_mail_digest_reports_when_nothing_parses() {
+    mkdir -p "$(MAILDIR)/new"
+    local i=1
+    while [ "$i" -le 6 ]; do
+        printf 'not json at all\n' > "$(MAILDIR)/new/000000000$i-bad.json"
+        i=$((i + 1))
+    done
+    local out; out=$(_prompt_as_receiver "hello") || return 1
+    assert_output_contains "$out" "Unread mail (6)" "the count is still surfaced" || return 1
+    assert_output_contains "$out" "cs -msg" "and the way to clear it" || return 1
 }
 
 # Long bodies are truncated (codepoint-safe, inside jq) so context stays bounded.
@@ -417,13 +469,18 @@ test_session_start_does_not_deliver_mail() {
     assert_output_not_contains "$out" "Unread mail" "no mail digest header from session-start" || return 1
 }
 
-# Spec test 4 (digest reader): a non-.json entry in new/ (a staging leftover, a
-# .DS_Store) is neither inlined nor counted — no phantom unread the digest nags
-# about but cs -msg cannot clear.
+# Spec test 4 (digest reader): a non-regular or non-.json entry in new/ is
+# neither inlined nor counted — no phantom unread the digest nags about but
+# cs -msg cannot clear. The DIRECTORY named *.json is the load-bearing case:
+# the glob excludes every other stray on its own, so only this one reaches the
+# `-f` guard. It is also the worst failure — `cat` on a directory fails, and
+# under pipefail that wipes the WHOLE digest, so real unread mail would stop
+# surfacing entirely rather than merely miscounting.
 test_digest_ignores_non_json_entries() {
     "$CS_BIN" -msg receiver "solid body" >/dev/null 2>&1
     printf '{"id":"t","ts":1,"from":"sender","actor":"a","kind":"text","body":"straybody"}\n' \
         > "$(MAILDIR)/new/0000000001-t.json.partial"
+    mkdir -p "$(MAILDIR)/new/0000000002-dir.json"
     local out; out=$(_prompt_as_receiver "hello") || return 1
     assert_output_contains "$out" "solid body" "real message shown" || return 1
     assert_output_not_contains "$out" "straybody" "non-.json entry excluded" || return 1
@@ -434,6 +491,8 @@ run_test test_mail_persists_inline_until_read
 run_test test_mail_read_clears_digest
 run_test test_task_kind_counted_not_inlined
 run_test test_mail_bounded_at_five
+run_test test_mail_digest_bounds_messages_not_files
+run_test test_mail_digest_reports_when_nothing_parses
 run_test test_mail_body_truncated
 run_test test_forged_long_sender_truncated
 run_test test_mail_nonstring_body_does_not_wipe_digest
@@ -485,6 +544,33 @@ test_migration_converts_legacy_inbox_honoring_seen() {
 
 run_test test_migration_converts_legacy_inbox_honoring_seen
 
+# A conversion killed partway leaves inbox.jsonl.migrating holding lines it has
+# ALREADY delivered. Retrying must deliver nothing new. The fixture has to seed
+# the delivered files too — a leftover next to an empty new/ never reaches the
+# already-converted branch, which is how the duplication below survived a green
+# suite. Also covers the nastier variant: a message the recipient read between
+# the two runs must not be resurrected as unread.
+test_migration_retry_after_interruption_delivers_nothing_twice() {
+    local l1 l2
+    l1='{"id":"1700000000-11-1","ts":1700000000,"from":"sender","actor":"a","kind":"text","body":"first"}'
+    l2='{"id":"1700000001-11-2","ts":1700000001,"from":"sender","actor":"a","kind":"text","body":"second"}'
+    mkdir -p "$(MAILDIR)"
+    printf '%s\n%s\n' "$l1" "$l2" > "$(MAILDIR)/inbox.jsonl"
+    _open_receiver
+    assert_eq "2" "$(NEW_COUNT)" "first conversion delivers both" || return 1
+    # The recipient reads one of them, so it now lives in cur/.
+    _as_receiver -msg >/dev/null 2>&1 || return 1
+    assert_eq "0" "$(NEW_COUNT)" "reading empties new/" || return 1
+    # Now model the interruption: the same legacy content is stranded again.
+    printf '%s\n%s\n' "$l1" "$l2" > "$(MAILDIR)/inbox.jsonl.migrating"
+    _open_receiver
+    assert_eq "0" "$(NEW_COUNT)" "retry re-delivers nothing, not even as unread" || return 1
+    assert_eq "2" "$(CUR_COUNT)" "and creates no duplicate copies" || return 1
+    [ ! -f "$(MAILDIR)/inbox.jsonl.migrating" ] || { echo "  migrating file left behind"; return 1; }
+}
+
+run_test test_migration_retry_after_interruption_delivers_nothing_twice
+
 # The gate is keyed on inbox.jsonl ALONE: delivery creates the maildir on send,
 # so a session that received one new-format message before its next open still
 # has legacy mail to convert — requiring new/ to be absent would strand it.
@@ -499,6 +585,67 @@ test_migration_merges_when_new_already_exists() {
     local out; out=$(_as_receiver -msg 2>&1) || return 1
     assert_output_contains "$out" "legacy unread" "legacy mail readable" || return 1
     assert_output_contains "$out" "fresh format message" "delivered mail readable" || return 1
+}
+
+# A conversion killed mid-loop leaves the legacy file intact AND some records
+# already delivered. The retry must deliver only what is missing. Filenames
+# therefore derive solely from the legacy content, so the same record converts
+# to the same name every run and the retry recognises it. Before that, the
+# retry saw the name taken, wrote a -NNNN variant beside it, and the recipient
+# read the same message twice.
+test_migration_retry_after_partial_conversion_delivers_no_duplicates() {
+    _seed_legacy_inbox \
+        '{"id":"a1","ts":1700000000,"from":"sender","actor":"a","kind":"text","body":"first legacy"}' \
+        '{"id":"a2","ts":1700000001,"from":"sender","actor":"a","kind":"text","body":"second legacy"}'
+    _open_receiver
+    assert_eq "2" "$(NEW_COUNT)" "both records converted on the first run" || return 1
+    # Model the crash: the legacy file is back (a stale writer recreated it, or
+    # the run died before the unlink) while its records are already delivered.
+    _seed_legacy_inbox \
+        '{"id":"a1","ts":1700000000,"from":"sender","actor":"a","kind":"text","body":"first legacy"}' \
+        '{"id":"a2","ts":1700000001,"from":"sender","actor":"a","kind":"text","body":"second legacy"}'
+    _open_receiver
+    assert_eq "2" "$(NEW_COUNT)" "the retry delivers nothing already present" || return 1
+    local out; out=$(_as_receiver -msg 2>&1) || return 1
+    assert_eq "1" "$(printf '%s\n' "$out" | grep -c 'first legacy')" "message shown once, not twice" || return 1
+}
+
+# A write that fails mid-conversion must not cost the mail. The delivery is
+# `printf > tmp && mv`, and a failed printf is the NON-FINAL command of an &&
+# list, so errexit never fires and the loop runs to the end looking successful
+# — at which point unlinking the legacy file would destroy every record that
+# never landed. An unwritable tmp/ is the reproducible stand-in for ENOSPC.
+test_migration_keeps_the_legacy_file_when_a_record_cannot_be_written() {
+    _seed_legacy_inbox \
+        '{"id":"w1","ts":1700000000,"from":"sender","actor":"a","kind":"text","body":"must survive"}'
+    mkdir -p "$(MAILDIR)/tmp"
+    chmod 500 "$(MAILDIR)/tmp"
+    _open_receiver
+    chmod 700 "$(MAILDIR)/tmp"
+    assert_eq "0" "$(NEW_COUNT)" "nothing was delivered" || return 1
+    local legacy_present=0
+    [ -f "$(MAILDIR)/inbox.jsonl" ] && legacy_present=1
+    [ -f "$(MAILDIR)/inbox.jsonl.migrating" ] && legacy_present=1
+    assert_eq "1" "$legacy_present" "the undelivered mail is still on disk to retry" || return 1
+    # And the retry, once writes work again, delivers it.
+    _open_receiver
+    assert_eq "1" "$(NEW_COUNT)" "the retry delivers the record" || return 1
+    local out; out=$(_as_receiver -msg 2>&1) || return 1
+    assert_output_contains "$out" "must survive" "the message survived the failed run" || return 1
+}
+
+# A record the recipient already READ must not come back as unread: the retry
+# checks both boxes, not just the one it would deliver into.
+test_migration_retry_does_not_resurrect_read_mail() {
+    _seed_legacy_inbox \
+        '{"id":"r1","ts":1700000000,"from":"sender","actor":"a","kind":"text","body":"already read body"}'
+    _open_receiver
+    _as_receiver -msg >/dev/null 2>&1 || return 1
+    assert_eq "0" "$(NEW_COUNT)" "reading moved it out of new/" || return 1
+    _seed_legacy_inbox \
+        '{"id":"r1","ts":1700000000,"from":"sender","actor":"a","kind":"text","body":"already read body"}'
+    _open_receiver
+    assert_eq "0" "$(NEW_COUNT)" "the retry does not resurrect it as unread" || return 1
 }
 
 # Only lines that do not parse at all are quarantined (evidence of the append
@@ -574,6 +721,9 @@ test_migration_runs_on_worktree_open() {
 }
 
 run_test test_migration_merges_when_new_already_exists
+run_test test_migration_retry_after_partial_conversion_delivers_no_duplicates
+run_test test_migration_keeps_the_legacy_file_when_a_record_cannot_be_written
+run_test test_migration_retry_does_not_resurrect_read_mail
 run_test test_migration_quarantines_corrupt_and_converts_null_ts
 run_test test_migration_converts_lines_landing_in_migrating_file
 run_test test_migration_reads_unterminated_final_line

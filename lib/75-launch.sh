@@ -158,7 +158,11 @@ launch_claude_code() {
             local _spawner="" _line _n=0 _first=1
             while IFS= read -r _line || [ -n "$_line" ]; do
                 if [ "$_first" = 1 ]; then _spawner="$_line"; _first=0; continue; fi
-                [ -n "$_line" ] || continue
+                # Skip whitespace-only lines, not merely empty ones: _queue_add
+                # trims and then errors on an empty body, which under errexit
+                # would abort the whole session launch over a stray space in a
+                # hand-edited seed.
+                case "$_line" in *[![:space:]]*) : ;; *) continue ;; esac
                 _queue_add "$session_dir/.cs/local" "$_line"
                 _n=$((_n + 1))
             done < "$_seed"

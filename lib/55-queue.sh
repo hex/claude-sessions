@@ -20,6 +20,12 @@ _queue_convert_legacy() {  # qdir
         # A leftover from an interrupted conversion holds real tasks; fold it
         # in before renaming the fresh file over it.
         if [ -f "$legacy" ]; then
+            # Terminate the leftover first: an interrupted conversion can strand
+            # a file whose last line has no newline, and appending straight onto
+            # it would splice two tasks into one. The converter skips the blank
+            # line this adds when the leftover was already terminated, and the
+            # queue executes what it reads, so a splice is worse than anything.
+            printf '\n' >> "$legacy" 2>/dev/null || return 0
             cat "$qdir/queue" >> "$legacy" 2>/dev/null || return 0
             rm -f "$qdir/queue"
         else
@@ -27,16 +33,39 @@ _queue_convert_legacy() {  # qdir
         fi
     fi
     [ -f "$legacy" ] || return 0
+    # The pre-directory layout used queue.tmp as an awk TEMP FILE, so a killed
+    # old-cs rm or drain pop leaves a regular file exactly where the staging
+    # directory now goes. mkdir -p fails over it, which under errexit aborts
+    # every entry point that converts — including session open, leaving the
+    # session unopenable. Clear a non-directory at either path first.
+    [ -d "$qdir/queue" ]     || rm -f "$qdir/queue"
+    [ -d "$qdir/queue.tmp" ] || rm -f "$qdir/queue.tmp"
     mkdir -p "$qdir/queue" "$qdir/queue.tmp"
-    local line seq=0 fname
+    local line seq=0 fname failed=0
     while IFS= read -r line || [ -n "$line" ]; do
         case "$line" in *[![:space:]]*) : ;; *) continue ;; esac
         seq=$((seq + 1))
         fname="0000000000-legacy-$(printf '%04d' "$seq")"
-        printf '%s\n' "$line" > "$qdir/queue.tmp/$fname" \
-            && mv "$qdir/queue.tmp/$fname" "$qdir/queue/$fname"
+        # Keeping the legacy file for retry (below) means a task that DID land
+        # and was then popped and run by the drain would be re-created here and
+        # executed a second time. Names are deterministic, so a task still
+        # queued is recognisable by its name; one already executed is only
+        # recognisable in the done log. The queue runs what it reads, so
+        # re-execution is the worse failure and both are checked.
+        if [ -e "$qdir/queue/$fname" ] ||
+           { [ -f "$qdir/queue.done" ] && grep -Fxq -- "$line" "$qdir/queue.done"; }; then
+            continue
+        fi
+        if ! { printf '%s\n' "$line" > "$qdir/queue.tmp/$fname" \
+                && mv "$qdir/queue.tmp/$fname" "$qdir/queue/$fname"; }; then
+            failed=1
+        fi
     done < "$legacy"
-    rm -f "$legacy"
+    # Only drop the legacy file once every task reached the queue. Unlinking it
+    # after a partial conversion destroys the tasks that never landed, and this
+    # is the one copy of them.
+    [ "$failed" -eq 0 ] && rm -f "$legacy"
+    return 0
 }
 
 # The queue is a directory of one file per task. A task is written whole to
@@ -54,7 +83,9 @@ _queue_add() {  # qdir, text
     mkdir -p "$qdir/queue" "$qdir/queue.tmp"
     # The zero-padded per-process sequence keeps several adds from one process
     # inside one second (a spawn seed's task list) in submission order; guard
-    # against an inherited same-named env var poisoning the counter.
+    # against an inherited same-named env var poisoning the counter. The random
+    # suffix covers what the sequence cannot: two cs processes that recycled the
+    # same pid within one second, where both counters start at 1.
     case "${_QUEUE_SEQ:-}" in ''|*[!0-9]*) _QUEUE_SEQ=0;; esac
     _QUEUE_SEQ=$((10#$_QUEUE_SEQ + 1))
     local fname
@@ -75,20 +106,20 @@ _queue_len() {  # qdir
     echo "$n"
 }
 
+# One enumeration, and every regular file is a task — the same rule _queue_len
+# counts and _queue_rm indexes, so the number shown here is the number that
+# deletes. Filtering blank files here (they cannot occur: both writers trim and
+# reject empties) would renumber the list out of step with rm.
 _queue_list() {  # qdir
     local qdir="$1" f n=0 text
-    if [ "$(_queue_len "$qdir")" -gt 0 ]; then
-        echo "Pending:"
-        for f in "$qdir/queue"/*; do
-            [ -f "$f" ] || continue
-            text=$(cat "$f")
-            case "$text" in *[![:space:]]*) : ;; *) continue ;; esac
-            n=$((n + 1))
-            printf '  %d. %s\n' "$n" "${text//$'\n'/ }"
-        done
-    else
-        echo "Queue is empty."
-    fi
+    for f in "$qdir/queue"/*; do
+        [ -f "$f" ] || continue
+        n=$((n + 1))
+        [ "$n" -eq 1 ] && echo "Pending:"
+        text=$(<"$f")
+        printf '  %d. %s\n' "$n" "${text//$'\n'/ }"
+    done
+    [ "$n" -gt 0 ] || echo "Queue is empty."
     if [ -s "$qdir/queue.done" ]; then
         echo "Done:"
         awk 'NF{ printf "  - %s\n", $0 }' "$qdir/queue.done"

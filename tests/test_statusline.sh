@@ -1444,15 +1444,18 @@ test_mail_segment_absent_when_all_read() {
     assert_output_not_contains "$out" "✉" "mail segment hidden when all mail is read" || return 1
 }
 
-# Only *.json files are mail: a .DS_Store, a staging leftover or a subdirectory
-# in new/ must not inflate the badge — a phantom unread that cs -msg cannot
-# clear would never go out.
+# Only regular *.json files are mail: a .DS_Store, a staging leftover or a
+# subdirectory in new/ must not inflate the badge — a phantom unread that
+# cs -msg cannot clear would never go out. The DIRECTORY named *.json is the
+# case that matters: every other stray is excluded by the glob itself, so only
+# this one reaches the `-f` guard and separates this reader from `cs -msg`.
 test_mail_segment_ignores_non_json_entries() {
     export NO_COLOR=1
     export CLAUDE_SESSION_NAME="straymail"
     make_cs_session "straymail" 0 cyan
     local mdir="$CS_SESSIONS_ROOT/straymail/.cs/local/mail"
     mkdir -p "$mdir/new/subdir"
+    mkdir -p "$mdir/new/0000000005-dir.json"
     printf '{"a":1}\n' > "$mdir/new/0000000001-a.json"
     printf '{"a":2}\n' > "$mdir/new/0000000002-b.json"
     printf '{"a":3}\n' > "$mdir/new/0000000003-c.json"

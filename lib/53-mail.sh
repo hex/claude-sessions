@@ -68,16 +68,33 @@ _mail_send() {  # target, [--kind|-k KIND] body
     # sessions, where a sender-side tmp/ could sit on another volume and
     # degrade the mv to copy-then-unlink.
     local maildir="$target_dir/.cs/local/mail"
-    _mail_ensure_maildir "$maildir"
+    # Everything after _queue_add must fail gracefully for a task-kind send:
+    # the work is already queued, so aborting here makes the sender believe the
+    # send failed, and a retry queues the task a second time. The maildir
+    # creation and the record-composing jq are as able to fail as the write
+    # below (an unwritable mailbox, a mail/ path that is a regular file).
+    if ! _mail_ensure_maildir "$maildir" 2>/dev/null; then
+        if [ "$kind" = "task" ]; then
+            warn "task queued in $target, but its mailbox could not be opened for attribution"
+            return 0
+        fi
+        error "Failed to open ${target}'s mailbox"
+    fi
     local now id line fname
     now="$(date +%s)"
     # The pid keeps two senders inside one second apart; a bare RANDOM suffix
     # collides ~1 in 32768 per pair and mv clobbers silently.
     id="${now}-$$-${RANDOM}"
-    line=$(jq -cn --arg id "$id" --argjson ts "$now" \
+    if ! line=$(jq -cn --arg id "$id" --argjson ts "$now" \
         --arg from "${CLAUDE_SESSION_NAME:-}" --arg actor "$(cs_actor_slug)" \
         --arg kind "$kind" --arg body "$body" \
-        '{id:$id, ts:$ts, from:$from, actor:$actor, kind:$kind, body:$body}')
+        '{id:$id, ts:$ts, from:$from, actor:$actor, kind:$kind, body:$body}'); then
+        if [ "$kind" = "task" ]; then
+            warn "task queued in $target, but composing the mail attribution failed"
+            return 0
+        fi
+        error "Failed to compose the message for $target"
+    fi
     # Zero-padded epoch keeps lexical order aligned with time order; NOT a
     # monotonic clock (same-second order is by unpadded pid, and the wall
     # clock can go backwards) — nothing may treat name order as arrival order.
@@ -110,7 +127,7 @@ _mail_read() {
     local maildir="$CLAUDE_SESSION_META_DIR/local/mail"
     local f files=()
     for f in "$maildir"/new/*.json; do
-        [ -e "$f" ] || continue
+        [ -f "$f" ] || continue
         files+=("$f")
     done
     if [ "${#files[@]}" -eq 0 ]; then
@@ -119,18 +136,17 @@ _mail_read() {
     fi
     _mail_print_files "${files[@]}"
     # Exactly what was printed moves to cur/; a message landing between the
-    # glob and here stays unread for the next read.
-    mkdir -p "$maildir/cur"
-    for f in "${files[@]}"; do
-        mv "$f" "$maildir/cur/${f##*/}"
-    done
+    # glob and here stays unread for the next read. One mv for the batch:
+    # filenames carry the sender's pid, so a basename cannot collide in cur/.
+    _mail_ensure_maildir "$maildir"
+    mv "${files[@]}" "$maildir/cur/"
 }
 
 _mail_log() {
     local maildir="$CLAUDE_SESSION_META_DIR/local/mail"
     local f files=()
     for f in "$maildir"/cur/*.json "$maildir"/new/*.json; do
-        [ -e "$f" ] || continue
+        [ -f "$f" ] || continue
         files+=("$f")
     done
     if [ "${#files[@]}" -eq 0 ]; then

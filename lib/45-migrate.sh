@@ -134,20 +134,22 @@ migrate_if_exists() {
 # that does not parse at all is quarantined in mail/corrupt.jsonl — it is
 # evidence of the append tearing the maildir removes, not garbage. Records may
 # lack a numeric ts (accepted and pinned by test) or a usable id, so neither
-# is assumed for the filename: a missing ts becomes this migration's epoch
-# second and a missing id a migration-local sequence, preserving order within
-# the legacy file. Deletes the converted file and the cursor when done.
+# is assumed for the filename: a missing ts sorts to the front and a missing id
+# becomes a migration-local sequence, preserving order within the legacy file.
+# Every name derives only from the legacy content, so converting the same file
+# twice produces the same names and the second run delivers nothing new — which
+# is what makes an interrupted conversion safe to retry. Deletes the converted
+# file and the cursor when done.
 _convert_legacy_inbox() {  # maildir
     local maildir="$1" legacy="$1/inbox.jsonl.migrating"
     [ -f "$legacy" ] || return 0
-    mkdir -p "$maildir/tmp" "$maildir/new" "$maildir/cur"
+    _mail_ensure_maildir "$maildir"
     local seen=""
     if [ -f "$maildir/seen" ]; then
         IFS= read -r seen < "$maildir/seen" || true
     fi
     case "$seen" in ''|*[!0-9]*) seen=0;; esac
-    local epoch lineno=0 seq=0 line meta ts id fname dest
-    epoch=$(date +%s)
+    local lineno=0 seq=0 line meta ts id fname dest failed=0
     # `|| [ -n "$line" ]` converts a final line the stale writer never
     # terminated rather than dropping it.
     while IFS= read -r line || [ -n "$line" ]; do
@@ -165,18 +167,36 @@ _convert_legacy_inbox() {  # maildir
         ts="${meta%%$'\t'*}"
         id="${meta#*$'\t'}"
         # Base-10 normalize before printf %d, which reads a leading zero as octal.
-        case "$ts" in ''|*[!0-9]*) ts="$epoch";; *) ts=$((10#$ts));; esac
+        # A record with no usable ts sorts to the front rather than taking the
+        # migration's own clock: "now" differs on every run, which would give
+        # the same record a new name each time and defeat the rerun guard below.
+        case "$ts" in ''|*[!0-9]*) ts=0;; *) ts=$((10#$ts));; esac
         case "$id" in ''|*[!A-Za-z0-9._-]*) id=$(printf 'legacy-%04d' "$seq");; esac
-        fname="$(printf '%010d' "$ts")-${id}.json"
+        # The line's own position is part of the name, so the name depends only
+        # on the legacy file's content -- the same record converts to the same
+        # filename on every run.
+        fname="$(printf '%010d' "$ts")-${id}-$(printf '%04d' "$seq").json"
         if [ "$lineno" -le "$seen" ]; then dest="cur"; else dest="new"; fi
-        # Never clobber a message already delivered under the same name.
-        if [ -e "$maildir/$dest/$fname" ]; then
-            fname="$(printf '%010d' "$ts")-${id}-$(printf '%04d' "$seq").json"
+        # A conversion interrupted partway leaves records already delivered.
+        # Skip those, in EITHER box: re-delivering one the recipient has since
+        # read would resurrect it as unread, and delivering it twice would show
+        # the same message twice.
+        if [ -e "$maildir/new/$fname" ] || [ -e "$maildir/cur/$fname" ]; then
+            continue
         fi
-        printf '%s\n' "$line" > "$maildir/tmp/$fname" \
-            && mv "$maildir/tmp/$fname" "$maildir/$dest/$fname"
+        if ! { printf '%s\n' "$line" > "$maildir/tmp/$fname" \
+                && mv "$maildir/tmp/$fname" "$maildir/$dest/$fname"; }; then
+            rm -f "$maildir/tmp/$fname"
+            failed=1
+        fi
     done < "$legacy"
-    rm -f "$legacy" "$maildir/seen"
+    # Only drop the legacy file once every record reached a box. A failed write
+    # is the non-final command of an && list, so errexit does not fire and the
+    # loop runs on; unlinking here regardless would destroy the one copy of the
+    # mail that never landed. Retrying is safe because the names above are a
+    # pure function of the legacy content.
+    [ "$failed" -eq 0 ] && rm -f "$legacy" "$maildir/seen"
+    return 0
 }
 
 # One-time, idempotent mailbox migration, keyed ONLY on inbox.jsonl existing.

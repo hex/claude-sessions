@@ -642,7 +642,8 @@ if [ -n "$DIGEST" ]; then
 --- $DIGEST"
 fi
 
-# Mail is surfaced by scope-prompt.sh on every prompt (persistent, seen-keyed),
+# Mail is surfaced by scope-prompt.sh on every prompt (persistent, anchored on
+# the maildir's new/),
 # so session-start no longer emits a mail digest — doing both would double-inject
 # the same unread bodies on every startup and resume.
 

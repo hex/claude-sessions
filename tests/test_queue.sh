@@ -64,9 +64,16 @@ test_queue_list_numbers_pending() {
     assert_output_contains "$out" "alpha" "list shows the task" || return 1
 }
 
+# Deletes the task at the position `list` showed. The two tasks are seeded as
+# files rather than through two `cs -queue add` runs on purpose: task names
+# carry the adding process's pid unpadded, so two same-second adds from
+# different pids sort by pid STRING (999 after 1000) and the arrival order this
+# asserts would flake at every digit-length boundary.
 test_queue_rm_removes_by_index() {
-    "$CS_BIN" -queue add "keep" >/dev/null 2>&1
-    "$CS_BIN" -queue add "drop" >/dev/null 2>&1
+    local q="$CLAUDE_SESSION_META_DIR/local/queue"
+    mkdir -p "$q"
+    printf 'keep\n' > "$q/0000000001-00001-0001-1"
+    printf 'drop\n' > "$q/0000000002-00001-0002-2"
     "$CS_BIN" -queue rm 2 >/dev/null 2>&1
     assert_eq "1" "$(QCOUNT)" "one task remains" || return 1
     local out; out=$("$CS_BIN" -queue list 2>&1)
@@ -159,6 +166,73 @@ test_legacy_conversion_folds_in_stranded_migrating_file() {
     [ ! -f "$CLAUDE_SESSION_META_DIR/local/queue.migrating" ] || { echo "  migrating leftover"; return 1; }
 }
 
+# The stranded file's last line can be UNTERMINATED — that is the tear an
+# interrupted conversion actually leaves, and the converter's `|| [ -n "$line" ]`
+# exists for it. Appending the fresh queue straight onto such a file splices two
+# tasks into one line, and the drain executes what it reads, so a splice is
+# worse than a loss. The terminated fixture above cannot reach this.
+test_legacy_conversion_does_not_splice_an_unterminated_stranded_line() {
+    printf 'stranded task with no newline' > "$CLAUDE_SESSION_META_DIR/local/queue.migrating"
+    printf 'fresh task\n' > "$(QFILE)"
+    local out; out=$("$CS_BIN" -queue list 2>&1)
+    assert_eq "2" "$(QCOUNT)" "stranded and fresh stay two tasks" || return 1
+    assert_output_contains "$out" "1. stranded task with no newline" "stranded line intact" || return 1
+    assert_output_contains "$out" "2. fresh task" "fresh line is its own task" || return 1
+    assert_output_not_contains "$out" "newlinefresh" "the two lines are not spliced" || return 1
+}
+
+# The pre-directory layout used queue.tmp as an awk TEMP FILE, so a killed old
+# `-queue rm` or drain pop leaves a regular file where the staging directory
+# now belongs. mkdir -p fails over it and errexit aborts every converting entry
+# point, session open included — and the old code then unlinked the legacy file
+# anyway, destroying the tasks it had failed to write. Upgrade path only: no
+# current code can create this state, so only a fixture that plants it reaches
+# the branch.
+test_legacy_conversion_survives_a_stale_queue_tmp_file() {
+    printf 'task one\ntask two\n' > "$(QFILE)"
+    printf 'stale awk temp\n' > "$CLAUDE_SESSION_META_DIR/local/queue.tmp"
+    local out; out=$("$CS_BIN" -queue list 2>&1) || { echo "  queue verb aborted: $out"; return 1; }
+    assert_eq "2" "$(QCOUNT)" "both legacy tasks survived the stale temp file" || return 1
+    assert_output_contains "$out" "1. task one" "first task converted" || return 1
+    assert_output_contains "$out" "2. task two" "second task converted" || return 1
+    [ -d "$CLAUDE_SESSION_META_DIR/local/queue.tmp" ] || { echo "  staging dir not created"; return 1; }
+}
+
+# A failed task write must not cost the task. The write is `printf > staging &&
+# mv`, and a failed printf is the NON-FINAL command of an && list, so errexit
+# never fires: the loop finishes looking successful and unlinking the legacy
+# file would destroy whatever never landed.
+test_legacy_conversion_keeps_the_legacy_file_when_a_task_cannot_be_written() {
+    printf 'must survive\n' > "$(QFILE)"
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local/queue.tmp"
+    chmod 500 "$CLAUDE_SESSION_META_DIR/local/queue.tmp"
+    "$CS_BIN" -queue list >/dev/null 2>&1 || true
+    chmod 700 "$CLAUDE_SESSION_META_DIR/local/queue.tmp"
+    assert_eq "0" "$(QCOUNT)" "nothing landed" || return 1
+    [ -f "$CLAUDE_SESSION_META_DIR/local/queue.migrating" ] || { echo "  legacy tasks destroyed"; return 1; }
+    local out; out=$("$CS_BIN" -queue list 2>&1)
+    assert_eq "1" "$(QCOUNT)" "the retry converts it once writes work" || return 1
+    assert_output_contains "$out" "must survive" "the task survived the failed run" || return 1
+}
+
+# Keeping the legacy file for retry must not resurrect a task the drain already
+# RAN. A task still queued is recognisable by its deterministic name; one
+# already executed exists only in the done log, so both are consulted.
+test_legacy_conversion_does_not_requeue_an_executed_task() {
+    printf 'ran already\nstill pending\n' > "$(QFILE)"
+    "$CS_BIN" -queue list >/dev/null 2>&1
+    assert_eq "2" "$(QCOUNT)" "both converted" || return 1
+    # Model the drain having popped and run the first task.
+    rm -f "$CLAUDE_SESSION_META_DIR/local/queue/0000000000-legacy-0001"
+    printf 'ran already\n' > "$CLAUDE_SESSION_META_DIR/local/queue.done"
+    # Model the retry: a stale writer recreates the legacy file.
+    printf 'ran already\nstill pending\n' > "$(QFILE)"
+    local out; out=$("$CS_BIN" -queue list 2>&1)
+    assert_eq "1" "$(QCOUNT)" "the executed task is not re-queued" || return 1
+    assert_output_not_contains "$out" "1. ran already" "executed task stays out of the queue" || return 1
+    assert_output_contains "$out" "still pending" "the pending task is untouched" || return 1
+}
+
 # The drain works on a session upgraded from the file layout once any queue
 # verb (or a session open) has converted it.
 test_drain_works_after_legacy_conversion() {
@@ -199,6 +273,10 @@ run_test test_queue_add_writes_one_file_per_task
 run_test test_queue_verbs_convert_a_legacy_queue_file
 run_test test_legacy_conversion_skips_blanks_and_is_idempotent
 run_test test_legacy_conversion_folds_in_stranded_migrating_file
+run_test test_legacy_conversion_does_not_splice_an_unterminated_stranded_line
+run_test test_legacy_conversion_survives_a_stale_queue_tmp_file
+run_test test_legacy_conversion_keeps_the_legacy_file_when_a_task_cannot_be_written
+run_test test_legacy_conversion_does_not_requeue_an_executed_task
 run_test test_session_open_converts_legacy_queue_file
 run_test test_worktree_open_converts_legacy_queue_file
 run_test test_queue_list_numbers_pending
@@ -269,6 +347,21 @@ test_drain_draining_pops_and_injects_next() {
         [ -e "$f" ] && { echo "  pop staging leftover: $f"; return 1; }
     done
     return 0
+}
+
+# The fail-safe: if the pop's rename fails, the drain disarms rather than
+# re-injecting the task it could not claim. A read-only queue directory makes
+# the mv fail without removing the task, which is the only way to reach this
+# branch — a second drain winning the race is not reproducible on demand.
+test_drain_disarms_when_the_pop_fails() {
+    qseed "task one" "task two"
+    printf 'draining\n' > "$(QDIR)/queue.state"
+    chmod 500 "$(QDIR)/queue"
+    local out; out=$(drain)
+    chmod 700 "$(QDIR)/queue"
+    assert_eq "idle" "$(cat "$(QDIR)/queue.state" | tr -d '[:space:]')" "failed pop disarms the drain" || return 1
+    assert_eq "2" "$(qlen)" "no task is lost when the pop fails" || return 1
+    assert_output_not_contains "$out" "task two" "no task injected after a failed pop" || return 1
 }
 
 test_drain_empties_and_returns_idle() {
@@ -350,6 +443,7 @@ run_test test_drain_gates_when_idle_nonempty
 run_test test_drain_armed_injects_first_task_no_pop
 run_test test_drain_armed_mentions_queue_list
 run_test test_drain_draining_pops_and_injects_next
+run_test test_drain_disarms_when_the_pop_fails
 run_test test_drain_empties_and_returns_idle
 run_test test_drain_declined_within_cooldown_falls_through
 run_test test_drain_ignores_subagents

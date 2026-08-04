@@ -50,7 +50,7 @@ pub struct Session {
     pub liveness: Liveness,
     pub secrets_count: u32,
     pub queue_depth: u32,
-    /// Unread cross-session mail: inbox lines past the `seen` cursor.
+    /// Unread cross-session mail: documents sitting in the maildir's `new/`.
     pub unread_mail: u32,
     pub git_repo: Option<String>,
     pub tags: Vec<String>,
@@ -287,10 +287,12 @@ pub fn queue_active(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Task files in the session's queue directory (one file per task), in
-/// lexical filename order — the queue's arrival order.
-pub fn queue_task_files(name: &str) -> Vec<PathBuf> {
-    let mut files: Vec<PathBuf> = match fs::read_dir(queue_dir(name).join("queue")) {
+/// Task files in a queue directory (one file per task), in lexical filename
+/// order — the queue's arrival order. Takes the directory rather than a
+/// session name so a scan rooted anywhere but `sessions_root()` shares this
+/// one definition of what counts as a queued task.
+pub fn queue_task_files_in(queue: &Path) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = match fs::read_dir(queue) {
         Ok(rd) => rd
             .flatten()
             .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
@@ -302,15 +304,35 @@ pub fn queue_task_files(name: &str) -> Vec<PathBuf> {
     files
 }
 
+/// Task files in the named session's queue directory.
+pub fn queue_task_files(name: &str) -> Vec<PathBuf> {
+    queue_task_files_in(&queue_dir(name).join("queue"))
+}
+
 /// The highlighted session's queued tasks, one entry per task file, in order.
 /// Read fresh from disk so callers always see the latest queue.
-pub fn read_queue(name: &str) -> Vec<String> {
-    queue_task_files(name)
+///
+/// Exactly one entry per task file, and never fewer: the editor and the delete
+/// key address a task by its position in this list, so dropping an entry here
+/// would shift every later index and mutate a different file than the one the
+/// user is looking at. A file that is not valid UTF-8 is read lossily rather
+/// than skipped for the same reason (`read_to_string` would fail the whole
+/// read), and an empty file stays an empty row. This matches the shell's
+/// `_queue_list`, which likewise numbers every regular file in the directory.
+pub fn read_queue_in(queue: &Path) -> Vec<String> {
+    queue_task_files_in(queue)
         .iter()
-        .filter_map(|p| fs::read_to_string(p).ok())
-        .map(|s| s.trim_end_matches('\n').to_string())
-        .filter(|s| !s.trim().is_empty())
+        .map(|p| {
+            let bytes = fs::read(p).unwrap_or_default();
+            String::from_utf8_lossy(&bytes)
+                .trim_end_matches('\n')
+                .to_string()
+        })
         .collect()
+}
+
+pub fn read_queue(name: &str) -> Vec<String> {
+    read_queue_in(&queue_dir(name).join("queue"))
 }
 
 pub fn scan_sessions() -> Vec<Session> {
@@ -430,13 +452,7 @@ fn read_session(path: &Path, secret_counts: &HashMap<String, u32>) -> Session {
         None => Liveness::Dormant,
     };
     let secrets_count = secret_counts.get(&name).copied().unwrap_or(0);
-    let queue_depth = fs::read_dir(meta_dir.join("local/queue"))
-        .map(|rd| {
-            rd.flatten()
-                .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
-                .count() as u32
-        })
-        .unwrap_or(0);
+    let queue_depth = queue_task_files_in(&meta_dir.join("local/queue")).len() as u32;
     let unread_mail = unread_mail_count(&meta_dir);
     let has_git = is_git_checkout(path);
     let git_repo = if has_git {
@@ -1237,6 +1253,42 @@ mod tests {
         let beta = sessions.iter().find(|s| s.name == "beta").unwrap();
         assert_eq!(beta.queue_depth, 3);
         std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    // The editor and the delete key address a task by its position in
+    // read_queue, then mutate queue_task_files at that index. If read_queue
+    // drops an entry the two lists shift apart and the TUI edits a file the
+    // user cannot see: a non-UTF-8 .DS_Store sorts before every task name, so
+    // "delete task 1" would have removed .DS_Store and left the real task.
+    // Every other fixture seeds clean UTF-8 files, which is why the divergence
+    // stayed invisible.
+    #[test]
+    fn read_queue_keeps_one_entry_per_task_file() {
+        let tmp = std::env::temp_dir().join(format!("cs-rq-{}", std::process::id()));
+        let root = tmp.as_path();
+        fs::create_dir_all(root).unwrap();
+        let qdir = root.join("queue");
+        fs::create_dir_all(&qdir).unwrap();
+        // Sorts first, is not valid UTF-8, and is not a task the user sees.
+        fs::write(qdir.join(".DS_Store"), [0x00, 0xF0, 0x9F, 0xFF]).unwrap();
+        fs::write(qdir.join("0000000001-a"), "real task\n").unwrap();
+        fs::write(qdir.join("0000000002-b"), "   \n").unwrap();
+
+        let files = queue_task_files_in(&qdir);
+        let rows = read_queue_in(&qdir);
+        assert_eq!(
+            files.len(),
+            rows.len(),
+            "display list and mutation list must have equal length"
+        );
+        assert_eq!(rows.len(), 3, "no entry is dropped");
+        assert_eq!(
+            files[1].file_name().unwrap(),
+            "0000000001-a",
+            "the real task keeps index 1 in both lists"
+        );
+        assert_eq!(rows[1], "real task");
+        fs::remove_dir_all(&tmp).ok();
     }
 
     #[test]
