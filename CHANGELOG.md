@@ -4,13 +4,21 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
-## Unreleased
+## 2026.8.6
 
 ### Added
 
 - **Mail wakes: an exchange between two sessions no longer waits for a keystroke.** Unread cross-session mail now takes a turn. A session that has just finished work is woken at that boundary; a session already parked at the prompt is woken by Claude Code's own file watcher noticing the delivery, so agent-to-agent work advances with nobody at the keyboard. The idle wake arrives as a system-reminder rather than as synthesised typing — the objection that ruled out driving the recipient's terminal. It fires once per arrival, never for `task` kind (the walk-away queue already owns those), never while a drain is running, and only in the launched conversation, since teammates share one mailbox and would otherwise race to consume the same message. `CS_MAIL_WAKE_MAX` (default 5) bounds wakes between prompts so two corresponding sessions cannot volley indefinitely, and `CS_NO_MAIL_WAKE=1` silences the wake without swallowing the message — a silenced arrival is still announced once the silence lifts.
 
 - **Mail threads.** Every message now carries a thread id, and the sender keeps its own copy of what it sent, so an exchange can be re-read from either end — including after a rotation, where an agent previously had no way to find out what it had already said. `cs -msg --reply <thread> "body"` answers without naming the peer: the target comes from the thread, and naming a different one is an error rather than an override, because accepting it would misroute the reply on a typo and poison every later derivation. `cs -msg thread <id>` prints the conversation ordered by what answers what — timestamps cannot order it, since a question and its reply normally land inside the same whole second — with anything the walk cannot reach shown separately as living on another machine.
+
+### Performance
+
+- **The mail wake no longer forks a grep per unread message on every turn end.** The snapshot of already-announced messages is read once and matched in-shell; with 30 unread that is 272.8ms down to 167.8ms per turn end. It also mattered more than the average suggests, because the wake ceiling deliberately leaves mail sitting in `new/` while turns keep ending, and each idle-wake arrival re-scanned the whole directory — so a burst of N deliveries cost N(N+1)/2 forks. A watched-file event the hook does not own — including the one fired per message as `cs -msg` moves mail to `cur/` — is now rejected on the path's shape before the session is resolved at all.
+
+### Fixes
+
+- **A single unreadable message could hide every thread in the mailbox.** `jq` treats a JSON parse error as fatal to the whole invocation and never opens the files after it, so reading the thread index in one pass meant one torn document silently dropped every later one across `new/`, `cur/` and `out/`. The visible effects were worse than a missing line: a reply stamped the wrong parent, and the guard that refuses to answer a thread naming two correspondents could be defeated into delivering to the wrong session. Thread reads fall back to reading documents individually, as every other reader in the mailbox already did.
 
 ## 2026.8.5
 
