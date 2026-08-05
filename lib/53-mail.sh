@@ -25,11 +25,16 @@ _mail_ensure_maildir() {  # maildir
 # unrelated transcripts and misroute replies — so generation avoids the roots
 # already in this mailbox rather than trusting 24 bits on their own.
 _mail_new_thread() {  # maildir
-    local n try id
+    local try id
     for try in 1 2 3 4 5 6 7 8; do
         id=$(printf '%06x' $(( ((RANDOM << 15) | RANDOM) & 0xFFFFFF )))
-        n=$(grep -l "\"thread\":\"$id\"" "$1"/out/*.json "$1"/new/*.json "$1"/cur/*.json 2>/dev/null | wc -l | tr -d '[:space:]')
-        [ "${n:-0}" = "0" ] && { printf '%s' "$id"; return 0; }
+        # -q stops at the first match and reads files, never a pipe, so it
+        # cannot raise SIGPIPE under pipefail.
+        if ! grep -q "\"thread\":\"$id\"" \
+            "$1"/out/*.json "$1"/new/*.json "$1"/cur/*.json 2>/dev/null; then
+            printf '%s' "$id"
+            return 0
+        fi
     done
     printf '%s' "$id"
 }
@@ -54,14 +59,16 @@ _mail_keep_sent() {  # line, fname
 # Ordering is by filename, which is only a tie-break here — the peer is the same
 # at either end of a two-party thread.
 _mail_reply_peer() {  # maildir, thread -> "peer<TAB>parent id"; rc 1 unknown, 2 ambiguous
-    local maildir="$1" id="$2" f newest="" seen="" peer
+    local maildir="$1" id="$2" f found=1 seen="" peer="" parent="" to="" from=""
+    # One jq per document covering both ends and the id; the loop runs in this
+    # shell, so the last iteration's values are the newest message's.
     while IFS= read -r f; do
         [ -n "$f" ] || continue
-        newest="$f"
-        case "$f" in
-            */out/*) peer=$(jq -r '.to // ""' "$f" 2>/dev/null || true) ;;
-            *)       peer=$(jq -r '.from // ""' "$f" 2>/dev/null || true) ;;
-        esac
+        found=0
+        IFS=$'\037' read -r to from parent <<EOF
+$(jq -r '[(.to // ""), (.from // ""), (.id // "")] | join("\u001f")' "$f" 2>/dev/null || true)
+EOF
+        case "$f" in */out/*) peer="$to" ;; *) peer="$from" ;; esac
         # Six hex digits repeat eventually — a mailbox accumulates roots without
         # bound — and a repeat would merge two unrelated transcripts. Refusing
         # beats guessing: a misrouted reply lands in a stranger's conversation.
@@ -73,14 +80,9 @@ _mail_reply_peer() {  # maildir, thread -> "peer<TAB>parent id"; rc 1 unknown, 2
                    *) return 2 ;;
                esac ;;
         esac
-    done < <(_mail_thread_files "$maildir" "$id" 2>/dev/null \
-        | awk -F/ '{print $NF "\t" $0}' | sort | cut -f2-)
-    [ -n "$newest" ] || return 1
-    case "$newest" in
-        */out/*) peer=$(jq -r '.to // ""' "$newest" 2>/dev/null || true) ;;
-        *)       peer=$(jq -r '.from // ""' "$newest" 2>/dev/null || true) ;;
-    esac
-    printf '%s\t%s' "$peer" "$(jq -r '.id // ""' "$newest" 2>/dev/null || true)"
+    done < <(_mail_thread_files "$maildir" "$id" 2>/dev/null)
+    [ "$found" = 0 ] || return 1
+    printf '%s\t%s' "$peer" "$parent"
 }
 
 _mail_send() {  # target, [--kind|-k KIND] [--reply THREAD] body
@@ -210,13 +212,12 @@ _mail_send() {  # target, [--kind|-k KIND] [--reply THREAD] body
     info "sent to $target (thread $thread); surfaces at their next turn"
 }
 
-# Shared formatter: print message documents as 'HH:MM  sender  [kind]  body'.
-# Each document is a single-line JSON object, so one line-oriented jq pass
-# renders them all (no early-exit consumers -> no SIGPIPE risk on big mail).
-# Direction comes from the record, not the path, so one line-oriented jq pass
-# still renders every document (no early-exit consumer -> no SIGPIPE on big
-# mail). The thread id is shown because an agent cannot reply into a thread
-# whose id it was never told.
+# Shared formatter: 'HH:MM  -> peer  [kind]  (thread)  body', with <- for a
+# message this session received. Direction is taken from the record rather than
+# the file's directory, which keeps this a single line-oriented jq pass over
+# every document — and with no early-exit consumer, no SIGPIPE risk on big mail.
+# The thread id is rendered because an agent cannot reply into a thread whose id
+# it was never shown.
 _mail_print_files() {  # file...
     cat "$@" | jq -rR --arg me "${CLAUDE_SESSION_NAME:-}" '
         fromjson? // empty |
@@ -271,16 +272,25 @@ _mail_log() {
 # Collect a thread's documents from everywhere this session holds them: what it
 # received (unread and read) and what it sent. Half a thread normally lives in
 # the other session's mailbox, which the machine-local design makes ordinary.
+# Prints paths in basename order — every caller wants that order, so sorting
+# here keeps the mailbox's one ordering rule in one place. One jq pass over the
+# whole mailbox rather than a fork per message: nothing prunes a maildir, so a
+# per-file fork grows without bound and is paid on every reply as well as every
+# thread read.
 _mail_thread_files() {  # maildir, thread id -> prints paths, rc 1 when none
-    local maildir="$1" id="$2" f found=1
-    for f in "$maildir"/new/*.json "$maildir"/cur/*.json "$maildir"/out/*.json; do
-        [ -f "$f" ] || continue
-        if [ "$(jq -r '.thread // ""' "$f" 2>/dev/null || true)" = "$id" ]; then
-            printf '%s\n' "$f"
-            found=0
-        fi
+    local f all=() out
+    # An unmatched glob arrives as its own literal text, and jq given one
+    # nonexistent path fails the whole invocation — including the files that do
+    # exist. Collect what is really there first.
+    for f in "$1"/new/*.json "$1"/cur/*.json "$1"/out/*.json; do
+        [ -f "$f" ] && all+=("$f")
     done
-    return $found
+    [ "${#all[@]}" -gt 0 ] || return 1
+    out=$(jq -r --arg id "$2" 'select((.thread // "") == $id) | input_filename' \
+        "${all[@]}" 2>/dev/null \
+        | awk -F/ '{print $NF "\t" $0}' | sort | cut -f2-) || true
+    [ -n "$out" ] || return 1
+    printf '%s\n' "$out"
 }
 
 # Emit one document and everything that answers it, depth first. Reads the
@@ -304,11 +314,10 @@ _mail_thread() {  # thread id
     [ -n "$id" ] || error "cs -msg thread needs a thread id (cs -msg log lists them)"
     local maildir="$CLAUDE_SESSION_META_DIR/local/mail"
     local files=() f
-    # Filename order first, so siblings answering one parent come out in it.
+    # Already in filename order, so siblings answering one parent stay in it.
     while IFS= read -r f; do
         [ -n "$f" ] && files+=("$f")
-    done < <(_mail_thread_files "$maildir" "$id" 2>/dev/null \
-        | awk -F/ '{print $NF "\t" $0}' | sort | cut -f2- || true)
+    done < <(_mail_thread_files "$maildir" "$id" 2>/dev/null || true)
     # An unknown id is an error rather than an empty transcript: a typo that
     # silently shows nothing reads as "the exchange is gone".
     [ "${#files[@]}" -gt 0 ] || error "No such thread: $id"
@@ -320,8 +329,10 @@ _mail_thread() {  # thread id
     local n=${#files[@]} i
     local ids=() parents=() used=() order=() orphans=()
     for ((i = 0; i < n; i++)); do
-        ids[$i]=$(jq -r '.id // ""' "${files[$i]}" 2>/dev/null || true)
-        parents[$i]=$(jq -r '.in_reply_to // ""' "${files[$i]}" 2>/dev/null || true)
+        # One jq per document for both fields, not one each.
+        IFS=$'\037' read -r ids[$i] parents[$i] <<EOF
+$(jq -r '[(.id // ""), (.in_reply_to // "")] | join("\u001f")' "${files[$i]}" 2>/dev/null || true)
+EOF
         used[$i]=0
     done
 

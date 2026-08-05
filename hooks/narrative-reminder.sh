@@ -7,12 +7,34 @@ set -euo pipefail
 # Read hook input (may be empty for legacy Stop events)
 INPUT=$(cat 2>/dev/null || echo '{}')
 
-# This script serves two events. Stop carries no name on legacy input, so an
+# One pass for every field any path needs. This script serves two events, and
+# the FileChanged one fires per watched file, so a fork per field is paid on
+# every file change in the session. Stop carries no name on legacy input, so an
 # absent value means Stop.
-HOOK_EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // "Stop"' 2>/dev/null || echo Stop)
+# Unit separator, not tab: tab is IFS whitespace, so bash collapses runs of it
+# and an absent field (agent_id is empty on every top-level event) would shift
+# every later field one place left.
+HOOK_EVENT=Stop; AGENT_ID=""; FC_PATH=""; FC_EVENT=""
+IFS=$'\037' read -r HOOK_EVENT AGENT_ID FC_PATH FC_EVENT <<EOF
+$(printf '%s' "$INPUT" | jq -r '[.hook_event_name // "Stop", .agent_id // "",
+    .file_path // "", .event // ""] | join("\u001f")' 2>/dev/null || printf 'Stop')
+EOF
+[ -n "$HOOK_EVENT" ] || HOOK_EVENT=Stop
+
+# Triage a watched-file event before anything else runs. A matcher-less
+# FileChanged entry is match-all over every watch path in the session — other
+# plugins' included — and reading mail fires one unlink per message moved to
+# cur/, so the common case here is an event this hook does not own. The shape
+# test needs no session resolution, which is what lets it sit above the library
+# source; the precise per-session path check still happens below.
+if [ "$HOOK_EVENT" = "FileChanged" ]; then
+    case "$FC_PATH" in
+        */.cs/local/mail/new/*.json) [ "$FC_EVENT" != "unlink" ] || exit 0 ;;
+        *) exit 0 ;;
+    esac
+fi
 
 # Skip inside subagents (Stop auto-converts to SubagentStop, but guard anyway)
-AGENT_ID=$(echo "$INPUT" | jq -r '.agent_id // empty' 2>/dev/null || true)
 if [ -n "$AGENT_ID" ]; then
     echo '{"decision": "approve"}'
     exit 0
@@ -69,6 +91,11 @@ MAIL_UNREAD=0
 MAIL_FRESH=0
 MAIL_DISCHARGED=0
 MAIL_NAMES=""
+# Initialised here rather than inside the silencers: an unset counter would be
+# seeded by any same-named variable inherited from the environment.
+MAIL_WAKES=0
+NL='
+'
 
 _num_or() {  # value, default -> prints value if a plain integer, else default
     case "${1:-}" in ''|*[!0-9]*) echo "$2";; *) echo "$1";; esac
@@ -109,27 +136,32 @@ _mail_is_lead() {
 # arrival (same-second order is by unpadded pid). Set membership needs neither
 # property.
 _mail_scan() {
-    local f name kind
+    local f name kind woke=""
+    # Read the snapshot ONCE and match in-shell. A fork per unread message is
+    # paid on every turn end for as long as the mail stays unread, and the idle
+    # wake re-scans all of new/ per arrival — so a burst of N deliveries would
+    # cost N(N+1)/2 forks. The ceiling makes that state ordinary rather than
+    # rare: past it mail piles up in new/ while turns keep ending.
+    [ ! -f "$MAIL_WOKE" ] || woke=$(<"$MAIL_WOKE")
     for f in "$MAILDIR"/new/*.json; do
         [ -f "$f" ] || continue
         MAIL_UNREAD=$((MAIL_UNREAD + 1))
         name=${f##*/}
         MAIL_NAMES="$MAIL_NAMES$name
 "
-        # Reads a file, never a pipe, so the -q early exit cannot raise SIGPIPE;
-        # and a missing snapshot yields 1, not grep's error status 2.
-        if ! grep -qxF "$name" "$MAIL_WOKE" 2>/dev/null; then
-            # A task is already an imperative in the queue, so waking on it
-            # would race the drain — but it is discharged all the same, and
-            # recording it is what stops every later turn from re-reading it. An
-            # unreadable or forged document reads as text: over-waking is the
-            # safe direction.
-            kind=$(jq -r '.kind // "text"' "$f" 2>/dev/null || echo text)
-            if [ "$kind" = "task" ]; then
-                MAIL_DISCHARGED=1
-            else
-                MAIL_FRESH=1
-            fi
+        # Newlines on both sides so one name cannot match inside another.
+        case "$NL$woke$NL" in
+            *"$NL$name$NL"*) continue ;;
+        esac
+        # A task is already an imperative in the queue, so waking on it would
+        # race the drain — but it is discharged all the same, and recording it
+        # is what stops every later turn from re-reading it. An unreadable or
+        # forged document reads as text: over-waking is the safe direction.
+        kind=$(jq -r '.kind // "text"' "$f" 2>/dev/null || echo text)
+        if [ "$kind" = "task" ]; then
+            MAIL_DISCHARGED=1
+        else
+            MAIL_FRESH=1
         fi
     done
 }
@@ -154,18 +186,23 @@ _mail_record() {
 # Past the ceiling the digest carries the backlog until a prompt clears the
 # counter (scope-prompt.sh).
 _mail_apply_silencers() {
+    # Nothing below is observable when there is nothing to silence, and this is
+    # the majority of turn ends. MAIL_WAKES is only ever read by the counter,
+    # which runs only when a wake is about to be delivered.
+    [ "$MAIL_FRESH" = 1 ] || return 0
     [ -z "${CS_NO_MAIL_WAKE:-}" ] || { MAIL_FRESH=0; return 0; }
-    local max seen
+    local max seen=""
     max=$(_num_or "${CS_MAIL_WAKE_MAX:-}" 5)
-    seen=$(_num_or "$(cat "$MAILDIR/wakes" 2>/dev/null | tr -d '[:space:]')" 0)
-    if [ "$MAIL_FRESH" = 1 ] && [ "$seen" -ge "$max" ]; then
+    [ ! -f "$MAILDIR/wakes" ] || seen=$(<"$MAILDIR/wakes")
+    seen=$(_num_or "${seen//[[:space:]]/}" 0)
+    if [ "$seen" -ge "$max" ]; then
         MAIL_FRESH=0
     fi
     MAIL_WAKES="$seen"
 }
 
 _mail_count_wake() {
-    printf '%s\n' "$((${MAIL_WAKES:-0} + 1))" > "$MAILDIR/wakes.tmp.$$" 2>/dev/null \
+    printf '%s\n' "$((MAIL_WAKES + 1))" > "$MAILDIR/wakes.tmp.$$" 2>/dev/null \
         && mv "$MAILDIR/wakes.tmp.$$" "$MAILDIR/wakes" 2>/dev/null || true
 }
 
@@ -184,15 +221,13 @@ MAIL_REASON_TAIL="Run cs -msg to read it. Reply only if the message needs an ans
 # carrying whatever noise reached stderr. Exit 2 must be reachable only on
 # purpose.
 if [ "$HOOK_EVENT" = "FileChanged" ]; then
-    _fc_path=$(echo "$INPUT" | jq -r '.file_path // empty' 2>/dev/null || true)
-    _fc_event=$(echo "$INPUT" | jq -r '.event // empty' 2>/dev/null || true)
-    # A matcher-less entry is match-all over the union of every watch path in
-    # the session, other plugins' included, so the hook filters its own.
-    case "$_fc_path" in
+    # Shape and unlink were triaged above, before the library source; this is
+    # the precise check that the file belongs to THIS session's mailbox rather
+    # than to another session that happens to share the layout.
+    case "$FC_PATH" in
         "$MAILDIR"/new/*.json) : ;;
         *) exit 0 ;;
     esac
-    [ "$_fc_event" != "unlink" ] || exit 0
     _mail_is_lead || exit 0
     # The Stop path gets the queue rule free from its position below the drain,
     # which exits in every armed or draining branch. This one has to ask: a
@@ -242,9 +277,6 @@ QDIR="$META_DIR/local"
 QUEUE="$QDIR/queue"
 QSTATE_FILE="$QDIR/queue.state"
 
-# _qlen is defined above, hoisted so the FileChanged branch can ask the same
-# question before the drain's own section is reached.
-
 # Lexically first task file (the glob is sorted); rc 1 when none.
 _qfirst() {  # queue dir
     local f
@@ -282,8 +314,6 @@ _notify_spawner() {  # message
         cs -msg "$spawner" -k notify "$1" >/dev/null 2>&1 || true
     fi
 }
-
-# _num_or is defined above, hoisted alongside _qlen.
 
 # Evaluate the circuit breakers. Prints "reason reading limit" and returns 0
 # when one trips; returns 1 otherwise. Order: failures, context, five_hour.
