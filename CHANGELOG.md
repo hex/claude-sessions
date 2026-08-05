@@ -14,6 +14,8 @@ All notable changes to cs are documented here. Release notes are also available 
 
 ### Fixes
 
+- **A `settings.local.json` cs cannot parse is left alone instead of emptied.** Merging cs's memory settings redirected `jq`'s output straight onto the file, and the shell truncates a redirect target before the command runs — so a single trailing comma in a hand-edited `.claude/settings.local.json` cost the user every setting in it. The damage did not stop there: the merge runs under `set -euo pipefail`, so the failure aborted the launch, and every later attempt fed `jq` an empty file, which succeeds and writes nothing, leaving it empty for good. Migration could not repair it either, since its retry is gated on the file being *absent*. The merge now writes through a temp file and keeps the original when `jq` cannot read it — the same outcome as when `jq` is not installed at all — and says so on stderr.
+
 - **`cs -doctor` no longer reports a hook library as an unregistered hook.** The registration check listed every `*.sh` in the hooks deploy directory and required each to be named in `settings.json`. Files in `CS_HOOK_LIBS` are sourced by the hooks rather than invoked by Claude Code, so they are deployed alongside them and correctly never registered — which meant a healthy install carried a standing `[FAIL] Hooks: missing in settings.json: cs-resolve.sh`. Libraries are now skipped; a genuine hook left in the deploy directory without a registration is still reported.
 
 ## 2026.8.6

@@ -1703,8 +1703,21 @@ setup_auto_memory() {
     if [ -f "$settings_file" ] && command -v jq >/dev/null 2>&1; then
         local current
         current=$(cat "$settings_file")
-        echo "$current" | jq --arg m "$memory_path" \
-            '.autoMemoryDirectory = $m | .plansDirectory = ".cs/plans"' > "$settings_file"
+        # Write through a temp file: redirecting jq's output onto the settings
+        # file truncates it before jq parses, so one syntax error in a
+        # hand-edited file would cost the user every setting it holds. A file
+        # jq cannot read is left alone, like the no-jq case below.
+        if echo "$current" | jq --arg m "$memory_path" \
+            '.autoMemoryDirectory = $m | .plansDirectory = ".cs/plans"' \
+            > "$settings_file.tmp" 2>/dev/null; then
+            mv "$settings_file.tmp" "$settings_file"
+        else
+            rm -f "$settings_file.tmp"
+            # stderr, not stdout: create_worktree_session returns its directory
+            # by echoing it, and lib/99-main.sh captures that in a command
+            # substitution, so anything on stdout here lands inside the path.
+            warn "Could not parse $settings_file — left unchanged; cs memory settings not applied" >&2
+        fi
     elif [ -f "$settings_file" ]; then
         # No jq, file exists — leave it alone rather than risk clobbering
         :
