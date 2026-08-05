@@ -4,7 +4,7 @@ model: claude-sonnet-5
 
 Generate an intelligent summary of this cs session by synthesizing all documentation files.
 
-You are working in a cs session. Your task is to create a comprehensive summary of the entire session by reading and synthesizing all documentation files.
+You are working in a cs session. Your task is to summarize the entire session by reading and synthesizing all documentation files.
 
 ## Steps
 
@@ -77,4 +77,5 @@ You are working in a cs session. Your task is to create a comprehensive summary 
 - Read ALL documentation files completely before writing the summary
 - If files are empty or minimal, note what was not documented
 - The summary should be understandable by someone who wasn't present in the session
+- Match each section's length to what the session actually produced. A section with little to report gets a line, not a paragraph — the structure is a checklist of what to cover, not a quota to fill.
 - If the session is still in progress, note that in the summary

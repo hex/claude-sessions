@@ -6,6 +6,10 @@ All notable changes to cs are documented here. Release notes are also available 
 
 ## Unreleased
 
+### Changed
+
+- **`/summary` sizes each section to the session rather than filling the template.** The eight-section structure reads as a form to complete, so a session with nothing to say about a heading still got a paragraph under it — across 36 sessions the generated summaries clustered at 1,455-1,785 words almost regardless of what the session contained. The instruction to write a "comprehensive" summary is dropped, and a section with little to report is now expected to get a line rather than a paragraph.
+
 ### Fixes
 
 - **`cs -doctor` no longer reports a hook library as an unregistered hook.** The registration check listed every `*.sh` in the hooks deploy directory and required each to be named in `settings.json`. Files in `CS_HOOK_LIBS` are sourced by the hooks rather than invoked by Claude Code, so they are deployed alongside them and correctly never registered — which meant a healthy install carried a standing `[FAIL] Hooks: missing in settings.json: cs-resolve.sh`. Libraries are now skipped; a genuine hook left in the deploy directory without a registration is still reported.
