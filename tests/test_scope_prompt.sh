@@ -499,6 +499,32 @@ echo "cs scope-prompt tests"
 echo "====================="
 echo ""
 
+# A prompt big enough to outlive the match was classified NEGATIVE. The
+# classifier ran `printf | rg -q`; rg -q exits at the first match, the writer
+# takes SIGPIPE, and `set -o pipefail` promotes that 141 to the pipeline's
+# status — which the leading `!` then reads as "no match". Scope grounding was
+# therefore skipped on exactly the pasted-log prompts that most need it.
+#
+# The fixture must exceed the 64KB pipe buffer AND be multi-line: a single long
+# line is consumed whole before rg can exit, and the bug does not appear.
+test_large_multiline_prompt_still_classifies_positive() {
+    local filler
+    filler=$(awk 'BEGIN { for (i = 0; i < 3000; i++) print "log line with nothing interesting in it at all" }')
+    local prompt="implement the retry wrapper
+$filler"
+    if [ "${#prompt}" -le 65536 ]; then
+        echo "  FAIL: fixture must exceed the pipe buffer to reach the bug"
+        return 1
+    fi
+
+    local out ac
+    out=$(run_hook "$prompt")
+    ac=$(additional_context "$out")
+    printf '%s' "$ac" | grep -q "Scope (auto-grounded)" \
+        || { echo "  FAIL: a large multi-line prompt was classified negative"; return 1; }
+}
+
+run_test test_large_multiline_prompt_still_classifies_positive
 run_test test_prompt_clears_attention_marker
 run_test test_classifier_fires_emit_scope_block
 run_test test_classifier_silent_passthrough
