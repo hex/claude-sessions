@@ -225,13 +225,18 @@ EXT_RE='\.(ts|tsx|js|jsx|py|sh|bash|md|json|yaml|yml|toml|rs|go|swift|java|c|cpp
 if command -v rg >/dev/null 2>&1; then
     _scan() { rg "$@"; }
     # Verbs match case-insensitively via (?i:); extensions stay case-sensitive.
-    if ! printf '%s' "$PROMPT" | rg -q "(?i:$VERB_RE)|$EXT_RE" 2>/dev/null; then
+    # Herestring, not a pipe: -q exits at the first match, which leaves the
+    # writer holding a closed fd, and `set -o pipefail` promotes that SIGPIPE
+    # (141) to the pipeline's status — read by the leading `!` as "no match".
+    # A prompt bigger than the 64KB pipe buffer outlives the match, so pasted
+    # logs classified negative and got no grounding at all.
+    if ! rg -q "(?i:$VERB_RE)|$EXT_RE" <<< "$PROMPT" 2>/dev/null; then
         _digest_exit   # negative classification: silent pass-through
     fi
 else
     _scan() { grep -E "$@"; }
-    if ! { printf '%s' "$PROMPT" | grep -qiE "$VERB_RE" 2>/dev/null \
-        || printf '%s' "$PROMPT" | grep -qE "$EXT_RE" 2>/dev/null; }; then
+    if ! { grep -qiE "$VERB_RE" <<< "$PROMPT" 2>/dev/null \
+        || grep -qE "$EXT_RE" <<< "$PROMPT" 2>/dev/null; }; then
         _digest_exit   # negative classification: silent pass-through
     fi
 fi

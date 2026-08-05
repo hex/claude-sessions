@@ -14,6 +14,8 @@ All notable changes to cs are documented here. Release notes are also available 
 
 ### Fixes
 
+- **A long pasted prompt gets scope grounding again.** The classifier that decides whether a prompt is code work piped the prompt into a matcher that exits at the first hit. Past the 64KB pipe buffer the write outlives the match, the writer takes `SIGPIPE`, and `pipefail` promotes that to the pipeline's status — which the classifier read as "no match". So a prompt with a pasted log in it was classified as chitchat and got no grounding at all, which is the case that most wants it. The prompt is no longer piped.
+
 - **`cs -msg` and `cs -archive` refuse a session name that points out of the sessions root.** Both build a path by joining the name onto the sessions root, and both had grown their own guard rather than sharing one: the mail guard admitted a backslash, which MSYS resolves as a separator, and the archive verbs checked only that the name was non-empty — so `../name` wrote and removed the archived marker outside the root entirely. They now share one check. It is deliberately looser than the validator used for names cs *creates*: worktree sessions are named `base@task`, and that validator admits no `@`, so borrowing it here would have refused every worktree session.
 
 - **`cs -queue rm` reports a task number that is not there instead of exiting quietly.** An index past the end matched nothing, exited 0, and still cleared the deferral marker — re-arming the gate, so a later drain ran the task the user believed they had removed.
