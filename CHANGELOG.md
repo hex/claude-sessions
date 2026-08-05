@@ -8,6 +8,8 @@ All notable changes to cs are documented here. Release notes are also available 
 
 ### Changed
 
+- **`/wrap`, `/sweep`, and `/summary` run on Opus 5.** Distilling a session's documentation into what is worth keeping is judgment work, and the summary is the artifact the session is remembered by. The trade-off is cost: these three passes previously ran on a cheaper model precisely so that wrapping up never spent the heavyweight one.
+
 - **`/summary` sizes each section to the session rather than filling the template.** The eight-section structure reads as a form to complete, so a session with nothing to say about a heading still got a paragraph under it — across 36 sessions the generated summaries clustered at 1,455-1,785 words almost regardless of what the session contained. The instruction to write a "comprehensive" summary is dropped, and a section with little to report is now expected to get a line rather than a paragraph.
 
 ### Fixes

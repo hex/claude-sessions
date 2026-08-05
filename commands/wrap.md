@@ -1,5 +1,5 @@
 ---
-model: claude-sonnet-5
+model: claude-opus-5
 ---
 
 Wrap up this session: distill durable memory entries, then write a comprehensive summary. Run the two passes back-to-back, then a shared prose-quality gate.

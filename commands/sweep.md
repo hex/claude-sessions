@@ -1,5 +1,5 @@
 ---
-model: claude-sonnet-5
+model: claude-opus-5
 ---
 
 Distill the current session into durable auto-memory entries with a strict bar.
