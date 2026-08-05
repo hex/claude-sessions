@@ -454,8 +454,10 @@ if [ -z "${CS_NO_ITERM2:-}" ] && [ "${TERM_PROGRAM:-}" = "iTerm.app" ]; then
     { [ -x "$_it2" ] && "$_it2" stop > "${CS_IT2_TTY:-/dev/tty}"; } 2>/dev/null || true
 fi
 
-# Dynamic context: add session state info on resume
-if [ "$SOURCE" = "resume" ] && [ -d "$SESSION_DIR/.git" ]; then
+# Dynamic context: add session state info on resume. The repo test is
+# rev-parse, not `-d .git`: in a feature worktree .git is a FILE, and a
+# directory test there skipped this whole block on every resume.
+if [ "$SOURCE" = "resume" ] && git -C "$SESSION_DIR" rev-parse --git-dir >/dev/null 2>&1; then
     DYNAMIC=""
 
     # Time since last session activity
