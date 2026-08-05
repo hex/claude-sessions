@@ -81,6 +81,32 @@ test_queue_rm_removes_by_index() {
     assert_output_not_contains "$out" "drop" "removed task is gone" || return 1
 }
 
+# An index past the end removed nothing and said nothing, but still cleared
+# queue.declined — so the gate re-armed and a later drain ran the very task the
+# user believed they had deleted.
+test_queue_rm_rejects_an_index_past_the_end() {
+    local q="$CLAUDE_SESSION_META_DIR/local/queue"
+    mkdir -p "$q"
+    printf 'keep\n' > "$q/0000000001-00001-0001-1"
+    printf 'also keep\n' > "$q/0000000002-00001-0002-2"
+    printf 'declined\n' > "$CLAUDE_SESSION_META_DIR/local/queue.declined"
+
+    local out status
+    out=$("$CS_BIN" -queue rm 7 2>&1)
+    status=$?
+
+    if [ "$status" -eq 0 ]; then
+        echo "  FAIL: removing a task that is not there must exit non-zero"
+        return 1
+    fi
+    assert_output_contains "$out" "1-2" "the error should name the valid range" || return 1
+    assert_eq "2" "$(QCOUNT)" "both tasks remain" || return 1
+    if [ ! -f "$CLAUDE_SESSION_META_DIR/local/queue.declined" ]; then
+        echo "  FAIL: a refused removal must not re-arm the gate"
+        return 1
+    fi
+}
+
 test_queue_clear_empties_and_resets_state() {
     "$CS_BIN" -queue add "x" >/dev/null 2>&1
     printf 'armed\n' > "$CLAUDE_SESSION_META_DIR/local/queue.state"
@@ -281,6 +307,7 @@ run_test test_session_open_converts_legacy_queue_file
 run_test test_worktree_open_converts_legacy_queue_file
 run_test test_queue_list_numbers_pending
 run_test test_queue_rm_removes_by_index
+run_test test_queue_rm_rejects_an_index_past_the_end
 run_test test_queue_clear_empties_and_resets_state
 run_test test_queue_start_sets_armed
 run_test test_queue_defer_writes_declined_epoch

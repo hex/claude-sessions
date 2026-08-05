@@ -3840,9 +3840,16 @@ _queue_list() {  # qdir
 }
 
 _queue_rm() {  # qdir, index
-    local qdir="$1" n="$2"
+    local qdir="$1" n="$2" len
     case "$n" in ''|*[!0-9]*) error "cs -queue rm needs a task number";; esac
-    [ "$(_queue_len "$qdir")" -gt 0 ] || { error "queue is empty"; }
+    len=$(_queue_len "$qdir")
+    [ "$len" -gt 0 ] || { error "queue is empty"; }
+    # Refuse before touching anything: an index past the end used to fall
+    # through the loop silently and still clear queue.declined below, re-arming
+    # the gate so a later drain ran the task the user believed they had removed.
+    if [ "$n" -lt 1 ] || [ "$n" -gt "$len" ]; then
+        error "no task $n in the queue (1-$len)"
+    fi
     local f i=0
     for f in "$qdir/queue"/*; do
         [ -f "$f" ] || continue
