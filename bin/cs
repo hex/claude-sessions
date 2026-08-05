@@ -2716,7 +2716,10 @@ migrate_session() {
         fi
         local existing_content
         existing_content=$(cat "$readme")
-        {
+        # Temp+mv, like every neighbouring write: redirecting onto the README
+        # truncates the user's file before the block writes a byte, so a write
+        # that does not complete leaves nothing behind.
+        if {
             echo "---"
             echo "status: active"
             echo "created: $created_date"
@@ -2724,8 +2727,11 @@ migrate_session() {
             echo "aliases: [\"$session_name\"]"
             echo "---"
             echo "$existing_content"
-        } > "$readme"
-        warn "Added frontmatter to .cs/README.md"
+        } > "$readme.tmp" 2>/dev/null && mv "$readme.tmp" "$readme"; then
+            warn "Added frontmatter to .cs/README.md"
+        else
+            rm -f "$readme.tmp" 2>/dev/null || true
+        fi
     fi
 
     # Phase 12: Move machine-local fields out of README frontmatter into
@@ -2737,7 +2743,17 @@ migrate_session() {
     # with divergent values, which made merge conflicts inevitable whenever
     # a session was shared through git.
     local _state="$session_dir/.cs/local/state"
-    if [ -f "$readme" ] && grep -qE '^(claude_session_id|claude_session_color|last_resumed|updated):' "$readme"; then
+    # Bounded to the frontmatter block, opened by the `---` on line 1 that
+    # Phase 6 guarantees. All four keys are ordinary English, and the README
+    # carries hand-written prose sections, so a body line beginning "updated:"
+    # is the user's own content — matching it anywhere in the file deleted it.
+    local _fm_field_re='^(claude_session_id|claude_session_color|last_resumed|updated):'
+    if [ -f "$readme" ] && awk -v re="$_fm_field_re" '
+            NR == 1 && /^---$/ { fm = 1; next }
+            fm && /^---$/      { exit }
+            fm && $0 ~ re      { found = 1; exit }
+            END                { exit !found }
+        ' "$readme"; then
         local _legacy_uuid _legacy_color
         _legacy_uuid=$(awk '/^claude_session_id:/ { sub(/^claude_session_id:[[:space:]]*/, ""); gsub(/"/, ""); print; exit }' "$readme")
         _legacy_color=$(awk '/^claude_session_color:/ { sub(/^claude_session_color:[[:space:]]*/, ""); gsub(/"/, ""); print; exit }' "$readme")
@@ -2748,8 +2764,12 @@ migrate_session() {
             _set_local_state "$_state" claude_session_color "$_legacy_color"
         fi
         local _tmp="$readme.tmp"
-        awk '/^(claude_session_id|claude_session_color|last_resumed|updated):/ { next } { print }' \
-            "$readme" > "$_tmp" && mv "$_tmp" "$readme"
+        awk -v re="$_fm_field_re" '
+            NR == 1 && /^---$/ { fm = 1; print; next }
+            fm && /^---$/      { fm = 0; print; next }
+            fm && $0 ~ re      { next }
+            { print }
+        ' "$readme" > "$_tmp" && mv "$_tmp" "$readme"
         warn "Moved machine-local fields from .cs/README.md to .cs/local/state"
     fi
 
