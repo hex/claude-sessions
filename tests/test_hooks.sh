@@ -409,6 +409,45 @@ EOF
 }
 
 
+# The resume-only Session State block is gated on the session being a git repo.
+# This is the baseline: an ordinary session, where .git is a directory.
+test_session_start_emits_session_state_on_resume() {
+    session_start_setup
+
+    local output context
+    output=$(echo '{"session_id":"s","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+    assert_output_contains "$context" "Session State" \
+        "an ordinary session gets the resume state block" || return 1
+}
+
+# In a feature worktree .git is a FILE, not a directory, so a `-d` test on it is
+# false and the whole block was skipped — for every worktree session, on every
+# resume. The rest of the codebase probes with `git rev-parse --git-dir`, which
+# is true for both shapes.
+test_session_start_emits_session_state_in_a_worktree() {
+    session_start_setup
+    local base="$CLAUDE_SESSION_DIR"
+    local wt="$CS_SESSIONS_ROOT/current-session@feat"
+    git -C "$base" worktree add -q -b cs/feat "$wt" >/dev/null 2>&1 || {
+        echo "  FAIL: could not create the worktree fixture"
+        return 1
+    }
+    [ -f "$wt/.git" ] || { echo "  FAIL: fixture .git is not a file — the bug is unreachable"; return 1; }
+    mkdir -p "$wt/.cs"/{local,memory}
+    cp "$CLAUDE_SESSION_META_DIR/README.md" "$wt/.cs/README.md"
+    export CLAUDE_SESSION_DIR="$wt"
+    export CLAUDE_SESSION_META_DIR="$wt/.cs"
+
+    local output context
+    output=$(echo '{"session_id":"s","source":"resume","cwd":"'"$wt"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+    assert_output_contains "$context" "Session State" \
+        "a worktree session must get the resume state block too" || return 1
+}
+
 test_session_start_announces_worktree_task() {
     session_start_setup
     mkdir -p "$CLAUDE_SESSION_META_DIR/local"
@@ -1292,6 +1331,8 @@ run_test test_failure_skips_outside_session
 run_test test_failure_handles_missing_error
 
 # Session start: cross-session context
+run_test test_session_start_emits_session_state_on_resume
+run_test test_session_start_emits_session_state_in_a_worktree
 run_test test_session_start_announces_worktree_task
 run_test test_session_start_worktree_block_needs_at_shaped_name
 run_test test_session_start_no_worktree_block_for_plain_sessions

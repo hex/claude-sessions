@@ -14,6 +14,8 @@ All notable changes to cs are documented here. Release notes are also available 
 
 ### Fixes
 
+- **A feature worktree gets its resume briefing.** The block that reports last activity, recent commits, the objective and what teammates changed is added when a session is resumed inside a git repo — but the repo test was for a `.git` *directory*, and in a worktree `.git` is a file. Every worktree session therefore resumed with none of it, on every resume. The test now matches the probe used everywhere else in cs, which is true for both shapes.
+
 - **Migration no longer deletes a line of the session README because it looks like a field.** Four machine-local keys are moved out of the README's frontmatter and into per-machine state, but the match ran over the whole file. `claude_session_id`, `claude_session_color`, `last_resumed` and `updated` are ordinary English, and the README carries hand-written prose sections — so a line in the Outcome section beginning `updated:` was silently removed, under a message announcing that machine-local fields had been moved. The match is now bounded to the frontmatter block.
 
 - **A session README with no frontmatter is reframed through a temp file.** The rewrite redirected onto the README, which truncates it before a byte is written back, so a write that did not complete left the user's file empty. Every neighbouring write in that code already used a temp file; this one now does too, and a failed write leaves the original untouched.
