@@ -176,6 +176,27 @@ test_auto_approve_rejects_traversal() {
     fi
 }
 
+# A symlink AT the write target resolves inside .cs/ by its parent, so only an
+# lstat of the final component catches it. Session directories are git-shared by
+# design, so a pulled symlink would otherwise turn every auto-approved metadata
+# write into a write outside the session.
+test_auto_approve_rejects_leaf_symlink() {
+    local outside="$TEST_TMPDIR/outside-the-session.conf"
+    echo "original" > "$outside"
+    ln -s "$outside" "$CLAUDE_SESSION_META_DIR/notes.md"
+
+    local input
+    input=$(jq -n --arg path "$CLAUDE_SESSION_META_DIR/notes.md" \
+        '{tool_name: "Write", tool_input: {file_path: $path}}')
+
+    local output
+    output=$(echo "$input" | bash "$HOOKS_DIR/session-auto-approve.sh")
+    if [[ -n "$output" ]]; then
+        echo "  FAIL: a symlinked target must fall through to the prompt, got: $output"
+        return 1
+    fi
+}
+
 test_auto_approve_skips_outside_session() {
     unset CLAUDE_SESSION_NAME
     local input='{"tool_name":"Write","tool_input":{"file_path":"/tmp/anything.md"}}'
@@ -1252,6 +1273,7 @@ run_test test_auto_approve_allows_cs_edit
 run_test test_auto_approve_ignores_non_cs_path
 run_test test_auto_approve_ignores_non_write_tools
 run_test test_auto_approve_rejects_traversal
+run_test test_auto_approve_rejects_leaf_symlink
 run_test test_auto_approve_skips_outside_session
 
 # Subagent context

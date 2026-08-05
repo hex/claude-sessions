@@ -55,6 +55,15 @@ case "$FILE_PATH" in
     ..|../*|*/../*|*/..) exit 0 ;;
 esac
 
+# A symlink at the target itself resolves inside .cs/ by its parent, so the
+# canonicalization below cannot see it; only an lstat of the final component
+# can. Session directories are git-shared by design, so a pulled symlink would
+# otherwise redirect every auto-approved metadata write out of the session.
+# cs never creates symlinks inside .cs/, so nothing legitimate lands here.
+if [ -L "$FILE_PATH" ]; then
+    exit 0
+fi
+
 # Canonicalize the write target's parent directory so that no symlink or
 # spelling can smuggle the path outside .cs/. A parent that doesn't resolve
 # (e.g. a not-yet-created nested dir) falls through to the normal prompt.
