@@ -311,6 +311,58 @@ test_doctor_audit_handles_missing_settings() {
     assert_output_contains "$output" "Audit" "audit check should still run when settings.json is missing" || return 1
 }
 
+# --- Hook libraries are not registrations ---
+# Files in CS_HOOK_LIBS are sourced by the hooks, never invoked by Claude Code,
+# so they are deployed alongside them but never named in settings.json. The
+# registration check globs *.sh in the deploy dir, so without an exclusion it
+# reports every library as a missing registration — a standing [FAIL] on a
+# correct install. Both env vars matter: the deploy dir comes from CS_HOOKS_DIR
+# and settings.json from CS_CLAUDE_DIR, so a fixture setting only one silently
+# reads the developer's real install.
+
+test_doctor_hook_library_is_not_a_missing_registration() {
+    local fake_claude="$TEST_TMPDIR/claude-libs" fake_hooks="$TEST_TMPDIR/hooks-libs"
+    mkdir -p "$fake_claude" "$fake_hooks"
+    : > "$fake_hooks/session-start.sh"
+    : > "$fake_hooks/cs-resolve.sh"
+    chmod +x "$fake_hooks/session-start.sh" "$fake_hooks/cs-resolve.sh"
+    cat > "$fake_claude/settings.json" << EOF
+{
+  "hooks": {
+    "SessionStart": [
+      {"hooks": [{"type": "command", "command": "$fake_hooks/session-start.sh"}]}
+    ]
+  }
+}
+EOF
+    local output
+    output=$(CS_CLAUDE_DIR="$fake_claude" CS_HOOKS_DIR="$fake_hooks" "$CS_BIN" -doctor 2>&1) || true
+    # Scoped to the registration line: the drift check legitimately names the
+    # library (the fixture's stub differs from the shipped source), so a bare
+    # "never mentioned" assertion would fail on correct behavior.
+    assert_output_not_contains "$output" "missing in settings.json" \
+        "a hook library must not be reported as an unregistered hook" || return 1
+    assert_output_contains "$output" "Hooks: all registered" \
+        "the registration check should pass when only libraries are unregistered" || return 1
+}
+
+# The exclusion must not gut the check: a genuine hook left in the deploy dir
+# without a registration is still an orphan worth reporting.
+test_doctor_still_fails_on_unregistered_hook() {
+    local fake_claude="$TEST_TMPDIR/claude-orph2" fake_hooks="$TEST_TMPDIR/hooks-orph2"
+    mkdir -p "$fake_claude" "$fake_hooks"
+    : > "$fake_hooks/cs-resolve.sh"
+    : > "$fake_hooks/scope-prompt.sh"
+    chmod +x "$fake_hooks/cs-resolve.sh" "$fake_hooks/scope-prompt.sh"
+    printf '{"hooks": {}}\n' > "$fake_claude/settings.json"
+    local output
+    output=$(CS_CLAUDE_DIR="$fake_claude" CS_HOOKS_DIR="$fake_hooks" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "missing in settings.json: scope-prompt.sh" \
+        "an unregistered real hook is still reported" || return 1
+    assert_output_not_contains "$output" "missing in settings.json.*cs-resolve.sh" \
+        "the library is not named alongside it" || return 1
+}
+
 # --- Settings.json hook-resolve scan ---
 # Catches the inverse direction of _doctor_check_hooks_registered: hooks registered
 # in settings.json that point at files which do not exist on disk. This is the
@@ -669,6 +721,8 @@ run_test test_doctor_runs_without_session
 run_test test_doctor_runs_audit_check
 run_test test_doctor_audit_counts_settings_contents
 run_test test_doctor_audit_handles_missing_settings
+run_test test_doctor_hook_library_is_not_a_missing_registration
+run_test test_doctor_still_fails_on_unregistered_hook
 run_test test_doctor_runs_settings_hooks_resolve_check
 run_test test_doctor_warns_on_settings_hook_missing_file
 run_test test_doctor_passes_when_all_settings_hooks_resolve
