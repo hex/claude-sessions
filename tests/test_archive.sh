@@ -27,6 +27,45 @@ _archive_session() {  # name, tags_line ("" = default empty tags)
     } > "$dir/.cs/README.md"
 }
 
+# "$SESSIONS_ROOT/$name" is the whole path construction, so a name carrying a
+# path separator writes the marker wherever it points. -rm guards this; the
+# archive verbs did not, and the marker is created AND removed by these paths.
+test_archive_refuses_a_traversing_name() {
+    local outside="$CS_SESSIONS_ROOT/../outside-session"
+    mkdir -p "$outside/.cs"
+
+    local out status
+    out=$("$CS_BIN" -archive "../outside-session" 2>&1)
+    status=$?
+
+    if [ "$status" -eq 0 ]; then
+        echo "  FAIL: a traversing name must be refused"
+        rm -rf "$outside"
+        return 1
+    fi
+    if [ -f "$outside/.cs/archived" ]; then
+        echo "  FAIL: wrote a marker outside the sessions root"
+        rm -rf "$outside"
+        return 1
+    fi
+    rm -rf "$outside"
+}
+
+# The worktree form must still work: it is a real session name, and the
+# canonical validate_session_name rejects @, so a guard borrowed wholesale from
+# there would refuse every worktree session.
+test_archive_accepts_a_worktree_name() {
+    _archive_session "wtbase@feat"
+    "$CS_BIN" -archive "wtbase@feat" >/dev/null 2>&1 || {
+        echo "  FAIL: a worktree session name must still archive"
+        return 1
+    }
+    [ -f "$CS_SESSIONS_ROOT/wtbase@feat/.cs/archived" ] || {
+        echo "  FAIL: no marker written for the worktree session"
+        return 1
+    }
+}
+
 test_archive_subcommand_exists() {
     local output
     output=$("$CS_BIN" -archive 2>&1) || true
@@ -280,5 +319,7 @@ run_test test_archive_rejects_empty_name_before_acting
 run_test test_archive_multiple_names
 run_test test_unarchive_multiple_names
 run_test test_list_tag_trailer_counts_only_tagged_archived
+run_test test_archive_refuses_a_traversing_name
+run_test test_archive_accepts_a_worktree_name
 run_test test_search_flag_before_query
 report_results

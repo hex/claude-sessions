@@ -127,7 +127,7 @@ _mail_send() {  # target, [--kind|-k KIND] [--reply THREAD] body
         fi
     fi
     command -v jq >/dev/null 2>&1 || error "jq is required for cs -msg"
-    case "$target" in ''|.|..|*/*) error "cs -msg needs a plain session name as target";; esac
+    validate_session_ref "$target"
     local target_dir="$SESSIONS_ROOT/$target"
     is_session_dir "$target_dir" || error "No such session: $target"
     if [ "$target" = "${CLAUDE_SESSION_NAME:-}" ]; then
