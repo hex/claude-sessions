@@ -310,6 +310,24 @@ test_send_rejects_slash_in_target() {
     ! "$CS_BIN" -msg "a/b" "x" >/dev/null 2>&1 || return 1
 }
 
+test_send_rejects_backslash_in_target() {
+    # A directory that would otherwise resolve, so only the name guard can
+    # refuse it. MSYS reads a backslash as a separator, which is how
+    # "..\\..\\repo" walks out of the sessions root there; nothing cs creates
+    # can contain one, since validate_session_name admits no backslash.
+    mkdir -p "$CS_SESSIONS_ROOT/a\\b/.cs/local"
+    [ -d "$CS_SESSIONS_ROOT/a\\b/.cs" ] || { echo "  fixture did not create the directory"; return 1; }
+    ! "$CS_BIN" -msg 'a\b' "x" >/dev/null 2>&1 || return 1
+}
+
+# The worktree form is a real session name and must keep working: the canonical
+# validate_session_name rejects @, so a guard borrowed wholesale from there
+# would refuse mail to every worktree session.
+test_send_accepts_a_worktree_target() {
+    mkdir -p "$CS_SESSIONS_ROOT/wtbase@feat/.cs/local"
+    "$CS_BIN" -msg "wtbase@feat" "hello" >/dev/null 2>&1 || return 1
+}
+
 test_send_rejects_dot_and_dotdot_targets() {
     touch "$TEST_TMPDIR/CLAUDE.md"   # makes ".." session-shaped; only the name guard may reject it
     ! "$CS_BIN" -msg .. "escape" >/dev/null 2>&1 || return 1
@@ -406,6 +424,8 @@ run_test test_alias_empty_body_errors_with_read_hint
 run_test test_send_joins_unquoted_multiword_body
 run_test test_send_rejects_unknown_target
 run_test test_send_rejects_slash_in_target
+run_test test_send_rejects_backslash_in_target
+run_test test_send_accepts_a_worktree_target
 run_test test_send_rejects_dot_and_dotdot_targets
 run_test test_send_rejects_self
 run_test test_send_rejects_bad_kind

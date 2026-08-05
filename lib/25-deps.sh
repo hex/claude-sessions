@@ -31,6 +31,20 @@ validate_session_name() {
     fi
 }
 
+# Validate a name used to REFER to an existing session, where the only concern
+# is that "$SESSIONS_ROOT/$name" stays inside SESSIONS_ROOT. Deliberately looser
+# than validate_session_name, which is the whitelist for names cs CREATES:
+# worktree sessions are named <base>@<task> and that function admits no @, so
+# borrowing it here would refuse every worktree session. Backslash counts as a
+# separator because MSYS resolves it as one; nothing cs creates contains either.
+validate_session_ref() {  # name
+    case "${1:-}" in
+        '') error "Session name cannot be empty" ;;
+        .|..) error "Session name cannot be '.' or '..'" ;;
+        */*|*\\*) error "Session name cannot contain a path separator: $1" ;;
+    esac
+}
+
 # Split a worktree session name <base>@<task> into CS_WT_BASE / CS_WT_TASK.
 # Returns 1 for plain names (no @). Errors out when either half is invalid.
 # @ is safe as a separator: validate_session_name has never admitted it, so

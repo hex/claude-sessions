@@ -6,7 +6,7 @@
 # session. Called directly, never in command substitution — error must exit
 # the caller, not a subshell.
 _archive_resolve() {  # name
-    [ -n "${1:-}" ] || error "Empty session name"
+    validate_session_ref "${1:-}"
     ARCHIVE_DIR="$SESSIONS_ROOT/$1"
     if [ ! -d "$ARCHIVE_DIR" ] && [ ! -L "$ARCHIVE_DIR" ]; then
         error "No such session: $1"
