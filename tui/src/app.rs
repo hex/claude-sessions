@@ -976,7 +976,9 @@ impl App {
                 Action::None
             }
             KeyCode::Char('d') => {
-                if self.selected_session().is_some() {
+                if let Some(refusal) = self.locked_selection_refusal() {
+                    self.set_status(refusal, StatusLevel::Error);
+                } else if self.selected_session().is_some() {
                     self.mode = Mode::ConfirmDelete;
                     self.delete_countdown_start = Some(std::time::Instant::now());
                 }
@@ -1752,14 +1754,33 @@ impl App {
         self.apply_filter_and_sort();
     }
 
+    /// Why the selected session may not be deleted, when it may not be.
+    ///
+    /// `cs -rm` refuses a lock-held session without `--force`, and the TUI
+    /// reaches the same removal. Lock, not heartbeat: the shell's
+    /// `session_is_live` reads the lock pid and `kill(0)`s it.
+    fn locked_selection_refusal(&self) -> Option<String> {
+        let session = self.selected_session()?;
+        let pid = session.liveness.lock_pid()?;
+        Some(format!(
+            "{} is live (pid {}) — close it first",
+            session.name, pid
+        ))
+    }
+
     fn execute_delete(&mut self) {
-        if let Some(session) = self.selected_session() {
+        if let Some(refusal) = self.locked_selection_refusal() {
+            self.set_status(refusal, StatusLevel::Error);
+            self.mode = Mode::Normal;
+            self.delete_countdown_start = None;
+            return;
+        }
+        if let Some(name) = self.selected_session().map(|s| s.name.clone()) {
             let root = self.sessions_root.clone();
-            let path = root.join(&session.name);
-            let result = session::remove_session_path(&root, &session.name, &path);
-            match result {
+            let path = root.join(&name);
+            match session::remove_session_path(&root, &name, &path) {
                 Ok(()) => {
-                    self.set_status(format!("Deleted: {}", session.name), StatusLevel::Success);
+                    self.set_status(format!("Deleted: {}", name), StatusLevel::Success);
                     self.sessions = session::scan_sessions();
                     self.apply_filter_and_sort();
                 }
@@ -1776,8 +1797,22 @@ impl App {
         let root = self.sessions_root.clone();
         let mut deleted = 0;
         let mut errors = 0;
+        let mut live: Vec<String> = Vec::new();
         let names: Vec<String> = self.marked_sessions.iter().cloned().collect();
         for name in &names {
+            // Resolved per name rather than from the selection: a batch mixes
+            // states, and a row can take the lock between marking and confirming.
+            let lock_pid = self
+                .sessions
+                .iter()
+                .find(|s| &s.name == name)
+                .and_then(|s| s.liveness.lock_pid());
+            if let Some(pid) = lock_pid {
+                live.push(format!("{} (pid {})", name, pid));
+                errors += 1;
+                self.flash_row(name.clone(), FlashKind::Error);
+                continue;
+            }
             let path = root.join(name);
             let result = session::remove_session_path(&root, name, &path);
             match result {
@@ -1796,9 +1831,14 @@ impl App {
         self.apply_filter_and_sort();
         if errors == 0 {
             self.set_status(format!("Deleted {} sessions", deleted), StatusLevel::Success);
-        } else {
+        } else if live.is_empty() {
             self.set_status(
                 format!("Deleted {}, {} failed", deleted, errors),
+                StatusLevel::Error,
+            );
+        } else {
+            self.set_status(
+                format!("Deleted {}, {} failed — live: {}", deleted, errors, live.join(", ")),
                 StatusLevel::Error,
             );
         }
@@ -3401,6 +3441,85 @@ mod tests {
         // execute_delete runs and returns to Normal
         // (actual filesystem delete fails in tests, but mode change confirms acceptance)
         assert_eq!(app.mode, Mode::Normal);
+    }
+
+    /// Select the row whose session has `name`, whatever the current sort.
+    fn select_named(app: &mut App, name: &str) {
+        let idx = app
+            .filtered
+            .iter()
+            .position(|&i| app.sessions[i].name == name)
+            .expect("session should be in the filtered set");
+        app.table_state.select(Some(idx));
+    }
+
+    /// `cs -rm` refuses a lock-held session without --force (lib/15-lock.sh's
+    /// session_is_live is lock-based, so Locked and not merely Heartbeat is the
+    /// matching predicate). The TUI reaches the same filesystem removal and must
+    /// refuse it too. Asserting on the pid in the status is what separates a
+    /// refusal from a delete that merely failed for some other reason.
+    #[test]
+    fn delete_refuses_a_locked_session() {
+        let mut app = App::new(sample_sessions());
+        select_named(&mut app, "gamma");
+
+        // Called directly rather than through `d`+`y`: this is the guard that
+        // has to hold even when the row takes the lock after the confirmation
+        // was opened, so the key path must not be what proves it.
+        app.execute_delete();
+
+        assert_eq!(app.mode, Mode::Normal);
+        let status = app
+            .status_message
+            .as_ref()
+            .expect("refusing should explain itself");
+        assert!(
+            status.text.contains("12345"),
+            "status should name the locking pid, got: {}",
+            status.text
+        );
+        assert!(
+            !status.text.contains("Deleted"),
+            "a refusal must not report a deletion, got: {}",
+            status.text
+        );
+    }
+
+    /// The confirmation itself does not open on a locked row, so the user is
+    /// never shown a countdown that will refuse.
+    #[test]
+    fn confirm_delete_does_not_open_on_a_locked_session() {
+        let mut app = App::new(sample_sessions());
+        select_named(&mut app, "gamma");
+
+        app.handle_key(KeyEvent::from(KeyCode::Char('d')));
+
+        assert_eq!(app.mode, Mode::Normal);
+        assert!(app.delete_countdown_start.is_none());
+        assert!(app
+            .status_message
+            .as_ref()
+            .is_some_and(|s| s.text.contains("12345")));
+    }
+
+    /// A batch mixes states: the dormant rows go, the locked one stays and is
+    /// counted against the run rather than silently skipped.
+    #[test]
+    fn batch_delete_skips_a_locked_session() {
+        let mut app = App::new(sample_sessions());
+        app.marked_sessions.insert("gamma".to_string());
+
+        app.execute_batch_delete();
+
+        let status = app
+            .status_message
+            .as_ref()
+            .expect("a batch that skipped something should say so");
+        assert!(
+            status.text.contains("12345"),
+            "status should name the locking pid, got: {}",
+            status.text
+        );
     }
 
     #[test]
