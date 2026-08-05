@@ -36,6 +36,39 @@ test_new_session_creates_settings_local() {
         "autoMemoryDirectory should point to .cs/memory" || return 1
 }
 
+# A hand-edited settings.local.json that jq cannot parse must survive the merge.
+# Redirecting jq's output straight onto the file truncates it before jq reads it,
+# so a single trailing comma costs the user every setting in the file — and the
+# damage is permanent, since jq on empty input succeeds and writes nothing.
+test_unparseable_settings_local_survives_merge() {
+    "$CS_BIN" test-session <<< "" 2>&1 || true
+
+    local settings="$CS_SESSIONS_ROOT/test-session/.claude/settings.local.json"
+    printf '%s' '{ "permissions": { "allow": ["Bash(ls:*)"] }, }' > "$settings"
+    local before
+    before=$(cat "$settings")
+    # Phase 4 only re-runs the merge when memory, plans or settings is missing.
+    # A session predating plansDirectory is the state that reaches it with a
+    # settings file already on disk.
+    rm -rf "$CS_SESSIONS_ROOT/test-session/.cs/plans"
+
+    # stdout only: create_worktree_session returns its directory by echoing it
+    # and lib/99-main.sh captures that, so a complaint on stdout would land
+    # inside a worktree session's path.
+    local out
+    out=$("$CS_BIN" test-session <<< "" 2>/dev/null) || true
+
+    local after
+    after=$(cat "$settings")
+    assert_eq "$before" "$after" "unparseable settings.local.json must be left intact" || return 1
+    if [ -e "$settings.tmp" ]; then
+        echo "  FAIL: left $settings.tmp behind"
+        return 1
+    fi
+    assert_output_not_contains "$out" "Could not parse" \
+        "the complaint belongs on stderr, where a command substitution cannot capture it" || return 1
+}
+
 test_settings_local_is_gitignored() {
     "$CS_BIN" test-session <<< "" 2>&1 || true
 
@@ -361,6 +394,7 @@ echo ""
 
 run_test test_new_session_creates_memory_dir
 run_test test_new_session_creates_settings_local
+run_test test_unparseable_settings_local_survives_merge
 run_test test_settings_local_is_gitignored
 run_test test_adopt_creates_memory_dir
 run_test test_adopt_adds_settings_to_gitignore
