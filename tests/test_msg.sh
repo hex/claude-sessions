@@ -177,6 +177,30 @@ test_reply_refuses_a_target_that_contradicts_the_thread() {
     assert_eq "0" "$n" "a typo must not misroute the reply and poison later derivations" || return 1
 }
 
+test_thread_survives_an_unparseable_document() {
+    # jq treats a JSON parse error as fatal to the whole invocation and never
+    # opens the files after it, so a single torn document must not be able to
+    # hide every later one. This suite already blesses a corrupt document in
+    # new/ as an input reading must survive.
+    "$CS_BIN" -msg receiver "first" >/dev/null 2>&1 || return 1
+    local thread; thread=$(jq -r .thread "$(FIRST_MSG)")
+    printf '%s' '{"id":"x","thread":' > "$(MAILDIR)/new/0000000000-torn.json"
+    "$CS_BIN" -msg receiver "second" >/dev/null 2>&1 || return 1
+    local out; out=$(rcv -msg thread "$thread" 2>&1) \
+        || { echo "  a torn document made the whole thread unreadable"; return 1; }
+    assert_output_contains "$out" "first" "the readable messages still render" || return 1
+}
+
+test_log_shows_what_this_session_sent() {
+    "$CS_BIN" -msg receiver "a question I asked" >/dev/null 2>&1 || return 1
+    local thread; thread=$(jq -r .thread "$(FIRST_MSG)")
+    local out; out=$("$CS_BIN" -msg log 2>&1)
+    assert_output_contains "$out" "a question I asked" \
+        "history without sent mail cannot show what this session said" || return 1
+    assert_output_contains "$out" "$thread" \
+        "and cannot surface the thread id of a conversation it started" || return 1
+}
+
 test_reply_refuses_an_ambiguous_thread() {
     # Six hex digits is short enough to retype and short enough to repeat: a
     # mailbox accumulates roots without bound. If a collision ever lands,
@@ -366,6 +390,8 @@ run_test test_send_stamps_a_thread_and_keeps_a_sent_copy
 run_test test_reply_derives_its_target_from_the_thread
 run_test test_reply_refuses_an_unknown_thread
 run_test test_reply_refuses_a_target_that_contradicts_the_thread
+run_test test_thread_survives_an_unparseable_document
+run_test test_log_shows_what_this_session_sent
 run_test test_reply_refuses_an_ambiguous_thread
 run_test test_thread_transcript_orders_a_reply_after_its_question
 run_test test_thread_transcript_marks_direction

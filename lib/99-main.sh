@@ -264,7 +264,7 @@ main() {
                 # sends it.
                 case "${1:-}" in
                     thread)
-                        error "cs $session_name -msg is send-only; to read a thread, run 'cs -msg thread $2' inside that session"
+                        error "cs $session_name -msg is send-only; to read a thread, run 'cs -msg thread ${2:-<id>}' inside that session"
                         ;;
                 esac
                 run_mail "$session_name" "$@"

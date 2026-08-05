@@ -68,7 +68,10 @@ _mail_reply_peer() {  # maildir, thread -> "peer<TAB>parent id"; rc 1 unknown, 2
         IFS=$'\037' read -r to from parent <<EOF
 $(jq -r '[(.to // ""), (.from // ""), (.id // "")] | join("\u001f")' "$f" 2>/dev/null || true)
 EOF
-        case "$f" in */out/*) peer="$to" ;; *) peer="$from" ;; esac
+        case "$f" in
+            "$maildir"/out/*) peer="$to" ;;
+            *)                peer="$from" ;;
+        esac
         # Six hex digits repeat eventually — a mailbox accumulates roots without
         # bound — and a repeat would merge two unrelated transcripts. Refusing
         # beats guessing: a misrouted reply lands in a stranger's conversation.
@@ -82,7 +85,10 @@ EOF
         esac
     done < <(_mail_thread_files "$maildir" "$id" 2>/dev/null)
     [ "$found" = 0 ] || return 1
-    printf '%s\t%s' "$peer" "$parent"
+    # Unit separator, not tab: tab is IFS whitespace, so bash collapses runs of
+    # it and an empty peer would shift the parent id into the caller's first
+    # field — silently turning "cannot tell who" into a confident wrong answer.
+    printf '%s\037%s' "$peer" "$parent"
 }
 
 _mail_send() {  # target, [--kind|-k KIND] [--reply THREAD] body
@@ -106,7 +112,7 @@ _mail_send() {  # target, [--kind|-k KIND] [--reply THREAD] body
             2) error "thread $reply_thread names more than one correspondent; it is not a single conversation" ;;
             *) error "No such thread: $reply_thread (cs -msg log lists them)" ;;
         esac
-        IFS=$'\t' read -r derived reply_parent <<< "$pair"
+        IFS=$'\037' read -r derived reply_parent <<< "$pair"
         # An explicit target must EQUAL the derived peer. Accepting a different
         # one silently misroutes the reply on a typo, records the wrong peer in
         # out/, and poisons every later derivation in the thread.
@@ -253,7 +259,9 @@ _mail_read() {
 _mail_log() {
     local maildir="$CLAUDE_SESSION_META_DIR/local/mail"
     local f files=()
-    for f in "$maildir"/cur/*.json "$maildir"/new/*.json; do
+    # Sent copies belong in the history too: without out/, a session cannot see
+    # what it said, and cannot find the thread id of any conversation it started.
+    for f in "$maildir"/cur/*.json "$maildir"/new/*.json "$maildir"/out/*.json; do
         [ -f "$f" ] || continue
         files+=("$f")
     done
@@ -261,7 +269,7 @@ _mail_log() {
         echo "No mail."
         return 0
     fi
-    # Interleave read and unread history by filename (the timestamp prefix).
+    # Interleave sent, read and unread by filename (the timestamp prefix).
     local sorted=()
     while IFS= read -r f; do
         [ -n "$f" ] && sorted+=("$f")
@@ -286,11 +294,22 @@ _mail_thread_files() {  # maildir, thread id -> prints paths, rc 1 when none
         [ -f "$f" ] && all+=("$f")
     done
     [ "${#all[@]}" -gt 0 ] || return 1
-    out=$(jq -r --arg id "$2" 'select((.thread // "") == $id) | input_filename' \
-        "${all[@]}" 2>/dev/null \
-        | awk -F/ '{print $NF "\t" $0}' | sort | cut -f2-) || true
+    # One pass for the common case, but jq treats a JSON *parse* error as fatal
+    # to the whole invocation and never opens the files after it — so a single
+    # torn or forged document would hide every later one, across all three
+    # boxes. Every other reader here tolerates a bad document; this one falls
+    # back to reading them individually so it does too.
+    if ! out=$(jq -r --arg id "$2" 'select((.thread // "") == $id) | input_filename' \
+        "${all[@]}" 2>/dev/null); then
+        out=""
+        for f in "${all[@]}"; do
+            [ "$(jq -r '.thread // ""' "$f" 2>/dev/null || true)" = "$2" ] || continue
+            out="$out$f
+"
+        done
+    fi
     [ -n "$out" ] || return 1
-    printf '%s\n' "$out"
+    printf '%s\n' "$out" | awk -F/ 'NF {print $NF "\t" $0}' | sort | cut -f2-
 }
 
 # Emit one document and everything that answers it, depth first. Reads the
@@ -330,7 +349,7 @@ _mail_thread() {  # thread id
     local ids=() parents=() used=() order=() orphans=()
     for ((i = 0; i < n; i++)); do
         # One jq per document for both fields, not one each.
-        IFS=$'\037' read -r ids[$i] parents[$i] <<EOF
+        IFS=$'\037' read -r "ids[$i]" "parents[$i]" <<EOF
 $(jq -r '[(.id // ""), (.in_reply_to // "")] | join("\u001f")' "${files[$i]}" 2>/dev/null || true)
 EOF
         used[$i]=0

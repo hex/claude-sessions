@@ -142,7 +142,9 @@ _mail_scan() {
     # wake re-scans all of new/ per arrival — so a burst of N deliveries would
     # cost N(N+1)/2 forks. The ceiling makes that state ordinary rather than
     # rare: past it mail piles up in new/ while turns keep ending.
-    [ ! -f "$MAIL_WOKE" ] || woke=$(<"$MAIL_WOKE")
+    # || true: an unreadable snapshot must degrade to "nothing discharged"
+    # (which over-wakes) rather than abort the hook under errexit.
+    [ ! -f "$MAIL_WOKE" ] || woke=$(<"$MAIL_WOKE") || woke=""
     for f in "$MAILDIR"/new/*.json; do
         [ -f "$f" ] || continue
         MAIL_UNREAD=$((MAIL_UNREAD + 1))
@@ -193,7 +195,7 @@ _mail_apply_silencers() {
     [ -z "${CS_NO_MAIL_WAKE:-}" ] || { MAIL_FRESH=0; return 0; }
     local max seen=""
     max=$(_num_or "${CS_MAIL_WAKE_MAX:-}" 5)
-    [ ! -f "$MAILDIR/wakes" ] || seen=$(<"$MAILDIR/wakes")
+    [ ! -f "$MAILDIR/wakes" ] || seen=$(<"$MAILDIR/wakes") || seen=""
     seen=$(_num_or "${seen//[[:space:]]/}" 0)
     if [ "$seen" -ge "$max" ]; then
         MAIL_FRESH=0
@@ -244,11 +246,13 @@ if [ "$HOOK_EVENT" = "FileChanged" ]; then
     fi
     _mail_apply_silencers
     [ "$MAIL_FRESH" = 1 ] || exit 0
-    # Delivery IS the exit here, so it has to come last and the record precedes
-    # it — the reverse of the Stop path's order. The window is microseconds.
+    # Compose before recording, as on the Stop path: a kill between the two
+    # costs a duplicate wake, while recording first costs a silent strand — and
+    # a strand is unrecoverable for an idle session, which submits no prompt and
+    # ends no turn. Only the exit itself has to come last.
+    printf '%s\n' "Unread cross-session mail ($MAIL_UNREAD). $MAIL_REASON_TAIL" >&2
     _mail_count_wake
     _mail_record
-    printf '%s\n' "Unread cross-session mail ($MAIL_UNREAD). $MAIL_REASON_TAIL" >&2
     exit 2
 fi
 
