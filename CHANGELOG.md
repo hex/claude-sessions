@@ -4,6 +4,12 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## Unreleased
+
+### Fixes
+
+- **`cs -doctor` no longer reports a hook library as an unregistered hook.** The registration check listed every `*.sh` in the hooks deploy directory and required each to be named in `settings.json`. Files in `CS_HOOK_LIBS` are sourced by the hooks rather than invoked by Claude Code, so they are deployed alongside them and correctly never registered — which meant a healthy install carried a standing `[FAIL] Hooks: missing in settings.json: cs-resolve.sh`. Libraries are now skipped; a genuine hook left in the deploy directory without a registration is still reported.
+
 ## 2026.8.6
 
 ### Added

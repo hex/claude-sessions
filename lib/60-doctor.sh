@@ -35,9 +35,18 @@ _doctor_check_hooks_registered() {
     names=$(cd "$hooks_dir" && ls *.sh 2>/dev/null || true)
     [ -z "$names" ] && { _doctor_warn "Hooks: no .sh files in $hooks_dir"; return; }
     settings_contents=$(cat "$settings")
-    local name
+    local name lib is_lib
     while IFS= read -r name; do
         [ -z "$name" ] && continue
+        # Hook libraries are sourced by the hooks, never invoked by Claude Code,
+        # so they ship into the deploy dir without ever being named in
+        # settings.json. Absent this skip, the glob below reports every one of
+        # them as a missing registration on a correct install.
+        is_lib=0
+        for lib in "${CS_HOOK_LIBS[@]}"; do
+            [ "$name" = "$lib" ] && { is_lib=1; break; }
+        done
+        [ "$is_lib" = 1 ] && continue
         case "$settings_contents" in
             *"/$name"*) ;;
             *) missing+=("$name") ;;
