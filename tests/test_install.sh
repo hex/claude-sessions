@@ -621,6 +621,84 @@ test_release_windows_tui_artifact_matches_what_install_fetches() {
         || { echo "  FAIL: no ${expected}.minisig requested"; return 1; }
 }
 
+# Run install.sh's WEB path with the cs-tui download stubbed, so the checksum
+# gate can be driven into each of its "cannot verify" states. Echoes the bin dir.
+# CS_TEST_SHA_FETCH=fail   -> the .sha256 sibling 404s
+# CS_TEST_SHA_TOOL=fail    -> the digest tool exists but errors, so no digest
+_install_tui_with_broken_verification() {  # tag
+    local sandbox="$TEST_TMPDIR/tui-verify-$1"
+    local bindir="$sandbox/stub"
+    mkdir -p "$bindir" "$sandbox/home"
+    cp "$INSTALL_SH" "$sandbox/install.sh"
+
+    cat > "$bindir/curl" <<STUB
+#!/usr/bin/env bash
+out=""; url=""; prev=""
+for a in "\$@"; do
+    case "\$prev" in -o) out="\$a" ;; esac
+    case "\$a" in https://*) url="\$a" ;; esac
+    prev="\$a"
+done
+case "\$url" in
+    *.sha256) [ "\${CS_TEST_SHA_FETCH:-ok}" = "fail" ] && exit 22 ;;
+    *.minisig) exit 22 ;;
+esac
+if [ -n "\$out" ]; then
+    case "\$out" in
+        */cs) printf 'VERSION="9999.9.9"\n' > "\$out" ;;
+        *.sha256) printf 'deadbeef  x\n' > "\$out" ;;
+        *)    printf 'stub-binary\n' > "\$out" ;;
+    esac
+fi
+exit 0
+STUB
+
+    # Shadow both digest tools; whichever install.sh picks, it fails the same way.
+    local t
+    for t in sha256sum shasum; do
+        cat > "$bindir/$t" <<STUB
+#!/usr/bin/env bash
+[ "\${CS_TEST_SHA_TOOL:-ok}" = "fail" ] && exit 1
+printf '%s  %s\n' deadbeef "\$1"
+STUB
+        chmod +x "$bindir/$t"
+    done
+    chmod +x "$bindir/curl"
+
+    PATH="$bindir:$PATH" HOME="$sandbox/home" bash "$sandbox/install.sh" >/dev/null 2>&1
+    printf '%s' "$sandbox/home/.local/bin"
+}
+
+# A gate that cannot verify must not pass. lib/20-update.sh's verify_checksum
+# says so in as many words ("Fail closed: a verification gate that can't verify
+# must not pass"); install.sh reimplemented the same check inline and skipped
+# the whole block when the .sha256 could not be fetched, keeping the binary.
+test_tui_removed_when_checksum_cannot_be_fetched() {
+    local bin
+    bin=$(CS_TEST_SHA_FETCH=fail _install_tui_with_broken_verification fetch)
+    local f
+    for f in "$bin"/cs-tui "$bin"/cs-tui.exe; do
+        if [ -f "$f" ]; then
+            echo "  FAIL: kept an unverified $f when the checksum could not be fetched"
+            return 1
+        fi
+    done
+}
+
+# Same gate, other way to be unable to verify: the digest tool is there but
+# produces nothing, which left the comparison unreached and the binary in place.
+test_tui_removed_when_digest_cannot_be_computed() {
+    local bin
+    bin=$(CS_TEST_SHA_TOOL=fail _install_tui_with_broken_verification tool)
+    local f
+    for f in "$bin"/cs-tui "$bin"/cs-tui.exe; do
+        if [ -f "$f" ]; then
+            echo "  FAIL: kept an unverified $f when no digest could be computed"
+            return 1
+        fi
+    done
+}
+
 test_uninstall_removes_windows_cs_tui_exe() {
     local fake_home="$TEST_TMPDIR/uninstall-tui-exe"
     mkdir -p "$fake_home/.local/bin" "$fake_home/.claude"
@@ -698,6 +776,8 @@ run_test test_install_preserves_foreign_statusline
 run_test test_uninstall_removes_statusline
 run_test test_install_removes_stale_opposite_platform_tui
 run_test test_release_windows_tui_artifact_matches_what_install_fetches
+run_test test_tui_removed_when_checksum_cannot_be_fetched
+run_test test_tui_removed_when_digest_cannot_be_computed
 run_test test_uninstall_removes_windows_cs_tui_exe
 run_test test_uninstall_removes_subagent_statusline
 test_hook_registration_doc_matches_install() {

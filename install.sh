@@ -276,21 +276,41 @@ elif [ "$INSTALL_METHOD" = "web" ]; then
         installed "cs-tui" "$_tui_dst"
         chmod +x "$_tui_dst"
 
-        # Verify cs-tui checksum (hard gate)
+        # Verify cs-tui checksum (hard gate). The rule is the one stated in
+        # lib/20-update.sh's verify_checksum: a gate that cannot verify must not
+        # pass. An unfetchable .sha256 and a digest that cannot be computed both
+        # leave the binary unverified, so both remove it.
         _checksum_url="${RELEASES_URL}/v${_cs_version}/${_tui_base}.sha256"
+        _verified=0
+        _mismatch=0
         if curl -fsSL "$_checksum_url" -o "$_tui_dst.sha256" 2>/dev/null; then
             _expected=$(awk '{print $1}' "$_tui_dst.sha256")
             _actual=""
+            # `|| _actual=""`: the script runs under `set -euo pipefail`, so a
+            # digest tool that exits non-zero would otherwise abort the whole
+            # install here — leaving both the unverified binary and its .sha256
+            # behind — rather than falling through to the removal below.
             if command -v sha256sum >/dev/null 2>&1; then
-                _actual=$(sha256sum "$_tui_dst" | awk '{print $1}')
+                _actual=$(sha256sum "$_tui_dst" 2>/dev/null | awk '{print $1}') || _actual=""
             elif command -v shasum >/dev/null 2>&1; then
-                _actual=$(shasum -a 256 "$_tui_dst" | awk '{print $1}')
+                _actual=$(shasum -a 256 "$_tui_dst" 2>/dev/null | awk '{print $1}') || _actual=""
             fi
-            if [ -n "$_actual" ] && [ "$_expected" != "$_actual" ]; then
-                rm -f "$_tui_dst" "$_tui_dst.sha256"
-                warn "cs-tui checksum verification failed -- removed"
+            if [ -n "$_expected" ] && [ -n "$_actual" ]; then
+                if [ "$_expected" = "$_actual" ]; then
+                    _verified=1
+                else
+                    _mismatch=1
+                fi
             fi
             rm -f "$_tui_dst.sha256"
+        fi
+        if [ "$_verified" != 1 ]; then
+            rm -f "$_tui_dst"
+            if [ "$_mismatch" = 1 ]; then
+                warn "cs-tui checksum verification failed -- removed"
+            else
+                warn "cs-tui could not be verified (no checksum or no digest tool) -- removed"
+            fi
         fi
 
         # Verify cs-tui signature (best-effort: minisign may not be installed)

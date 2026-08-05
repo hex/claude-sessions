@@ -263,6 +263,38 @@ run_test test_cs_term_theme_override_wins
 run_test test_export_term_theme_exports_theme_and_auto_marker
 run_test test_export_term_theme_user_pin_passes_through
 run_test test_tmux_truecolor_exported_at_launch
+# The tab color is derived from a digest of the session name, and the point is
+# determinism: the same name always gets the same color. Without any digest tool
+# the digest is empty, every name collapses onto one color, and the missing
+# command complains on stderr at every tab change. coreutils-only Linux and WSL
+# ship sha256sum but no shasum, so this is a real host, not a hypothetical.
+test_color_from_name_survives_a_missing_shasum() {
+    local stub="$TEST_TMPDIR/nodigest"
+    mkdir -p "$stub"
+    local b
+    for b in cut cksum; do ln -sf "$(command -v "$b")" "$stub/$b"; done
+
+    local errfile="$TEST_TMPDIR/nodigest.err" a c
+    a=$(PATH="$stub" "${BASH:-/bin/bash}" -c \
+        "source '$SCRIPT_DIR/../lib/05-term.sh' 2>/dev/null; _color_from_name alpha" 2>"$errfile")
+    c=$(PATH="$stub" "${BASH:-/bin/bash}" -c \
+        "source '$SCRIPT_DIR/../lib/05-term.sh' 2>/dev/null; _color_from_name gamma" 2>>"$errfile")
+
+    case "$a" in
+        [0-9]*,[0-9]*,[0-9]*) : ;;
+        *) echo "  FAIL: expected an r,g,b triple, got: [$a]"; return 1 ;;
+    esac
+    if [ "$a" = "$c" ]; then
+        echo "  FAIL: every name collapsed onto $a — the mapping is no longer deterministic by name"
+        return 1
+    fi
+    if [ -s "$errfile" ]; then
+        echo "  FAIL: wrote to stderr: $(cat "$errfile")"
+        return 1
+    fi
+}
+
+run_test test_color_from_name_survives_a_missing_shasum
 run_test test_tmux_truecolor_respects_user_value
 run_test test_cs_term_bg_rgb_absent_when_theme_unknown
 run_test test_cs_term_bg_rgb_respects_user_value
