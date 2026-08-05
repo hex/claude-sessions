@@ -117,6 +117,72 @@ test_resume_leaves_readme_untouched() {
 # strips them from the README
 # ============================================================================
 
+# The strip is bounded to the frontmatter block. These four keys are ordinary
+# English in prose, and .cs/README.md has an Outcome section written by hand, so
+# a body line beginning "updated:" is user-owned content — not a stale
+# machine-local field. Matching it over the whole file deleted it silently while
+# reporting that machine-local fields had been moved.
+test_migration_leaves_a_body_line_that_looks_like_a_field() {
+    local session_dir="$CS_SESSIONS_ROOT/body-line"
+    mkdir -p "$session_dir/.cs"/{local,memory}
+    cat > "$session_dir/.cs/README.md" << 'EOF'
+---
+status: active
+created: 2026-01-01
+claude_session_id: abcd1234-5678-4abc-9def-fedcba987654
+tags: []
+aliases: ["body-line"]
+---
+# Session: body-line
+
+## Outcome
+
+updated: the parser rewrite landed, docs still pending
+last_resumed: never went back to the follow-up
+EOF
+    echo "# Session narrative" > "$session_dir/.cs/memory/narrative.md"
+    echo "# Session" > "$session_dir/CLAUDE.md"
+    (cd "$session_dir" && git init -q && git add -A && git commit -q -m "init")
+
+    "$CS_BIN" body-line <<< "" >/dev/null 2>&1 || true
+
+    local readme="$session_dir/.cs/README.md"
+    assert_file_contains "$readme" "^updated: the parser rewrite landed"         "a body line the user wrote must survive migration" || return 1
+    assert_file_contains "$readme" "^last_resumed: never went back"         "and so must the second one" || return 1
+    # The frontmatter field is still moved out.
+    assert_eq "abcd1234-5678-4abc-9def-fedcba987654"         "$(_extract_state_value "$session_dir/.cs/local/state" claude_session_id)"         "the frontmatter field is still carried into local state" || return 1
+    if grep -qE '^claude_session_id:' "$readme"; then
+        echo "  FAIL: frontmatter field left in the README"
+        return 1
+    fi
+}
+
+# Phase 6 reframes a README that has no frontmatter. Writing it in place means
+# the redirect truncates the user's file before anything is written back; a
+# write that does not complete leaves it empty. Through a temp file, a failed
+# write leaves the original untouched — which is what this asserts, by making
+# the temp path unwritable (a directory) so the write cannot succeed.
+test_migration_readme_survives_a_failed_frontmatter_write() {
+    local session_dir="$CS_SESSIONS_ROOT/no-frontmatter"
+    mkdir -p "$session_dir/.cs"/{local,memory}
+    local readme="$session_dir/.cs/README.md"
+    printf '# Session: no-frontmatter\n\n## Objective\n\nkeep me\n' > "$readme"
+    echo "# Session narrative" > "$session_dir/.cs/memory/narrative.md"
+    echo "# Session" > "$session_dir/CLAUDE.md"
+    (cd "$session_dir" && git init -q && git add -A && git commit -q -m "init")
+    mkdir -p "$readme.tmp"   # the write cannot land here
+
+    "$CS_BIN" no-frontmatter <<< "" >/dev/null 2>&1 || true
+
+    assert_file_contains "$readme" "^## Objective" "the user's README must survive" || return 1
+    assert_file_contains "$readme" "^keep me" "including its body" || return 1
+    if [ "$(head -1 "$readme")" = "---" ]; then
+        echo "  FAIL: rewrote the README in place despite the write failing"
+        return 1
+    fi
+    rmdir "$readme.tmp" 2>/dev/null || true
+}
+
 test_migration_moves_fields_from_readme_to_local_state() {
     local session_dir="$CS_SESSIONS_ROOT/legacy-frontmatter"
     mkdir -p "$session_dir/.cs"/{local,memory}
@@ -339,6 +405,8 @@ test_divergent_appends_merge_clean() {
 
 run_test test_new_session_records_state_in_local_not_readme
 run_test test_resume_leaves_readme_untouched
+run_test test_migration_leaves_a_body_line_that_looks_like_a_field
+run_test test_migration_readme_survives_a_failed_frontmatter_write
 run_test test_migration_moves_fields_from_readme_to_local_state
 run_test test_migration_moves_session_log_to_local
 run_test test_session_start_rebinds_uuid_in_local_state
