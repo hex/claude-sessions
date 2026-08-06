@@ -5,6 +5,31 @@ _doctor_ok()   { printf "  ${GREEN}[ OK ]${NC} %s\n" "$1"; }
 _doctor_warn() { printf "  ${YELLOW}[WARN]${NC} %s\n" "$1"; DOCTOR_WARN=$((DOCTOR_WARN+1)); }
 _doctor_fail() { printf "  ${RED}[FAIL]${NC} %s\n" "$1"; DOCTOR_FAIL=$((DOCTOR_FAIL+1)); }
 
+# True when the settings file parses as JSON. Every settings check below reads
+# it through jq with stderr discarded, where a parse failure is indistinguishable
+# from an empty result — which is how a single syntax error produced a screen of
+# OKs: no hooks missing, no hook paths broken, "0 hooks, 0 MCPs", statusline
+# "not registered (optional)". Consumers ask this first and say "unreadable"
+# instead of "none".
+_doctor_settings_parse_ok() {  # settings
+    jq -e . "$1" >/dev/null 2>&1
+}
+
+_doctor_check_settings_valid() {
+    local settings="${CS_CLAUDE_DIR:-$HOME/.claude}/settings.json"
+    # A missing file is the hooks check's story to tell, with its own advice.
+    [ -f "$settings" ] || return 0
+    if ! command -v jq >/dev/null 2>&1; then
+        _doctor_warn "Settings: jq not installed; $settings could not be validated"
+        return 0
+    fi
+    if _doctor_settings_parse_ok "$settings"; then
+        _doctor_ok "Settings: $settings is valid JSON"
+    else
+        _doctor_fail "Settings: $settings is not valid JSON — fix it first; every check below that reads it is unreliable"
+    fi
+}
+
 _doctor_check_keychain() {
     local script
     if ! script=$(find_secrets_script); then
@@ -31,10 +56,23 @@ _doctor_check_hooks_registered() {
         _doctor_warn "Hooks: directory $hooks_dir not found"
         return
     fi
-    local names settings_contents missing=()
+    local names registered missing=()
     names=$(cd "$hooks_dir" && ls *.sh 2>/dev/null || true)
     [ -z "$names" ] && { _doctor_warn "Hooks: no .sh files in $hooks_dir"; return; }
-    settings_contents=$(cat "$settings")
+    if ! command -v jq >/dev/null 2>&1; then
+        _doctor_warn "Hooks: jq not installed; registration in $settings could not be checked"
+        return
+    fi
+    if ! _doctor_settings_parse_ok "$settings"; then
+        _doctor_fail "Hooks: cannot read $settings (invalid JSON); registration unknown"
+        return
+    fi
+    # The registered set is the hook COMMANDS, not the whole file. Matching the
+    # file as text passed a broken install whenever a hook path lingered in an
+    # unrelated permission rule or env value: the hook never fires, and doctor
+    # called the install healthy. Native jq.exe on Windows emits CRLF.
+    registered=$(jq -r '.hooks // {} | to_entries[].value[].hooks[]?.command // empty' "$settings" 2>/dev/null || true)
+    registered=${registered//$'\r'/}
     local name lib is_lib
     while IFS= read -r name; do
         [ -z "$name" ] && continue
@@ -47,7 +85,7 @@ _doctor_check_hooks_registered() {
             [ "$name" = "$lib" ] && { is_lib=1; break; }
         done
         [ "$is_lib" = 1 ] && continue
-        case "$settings_contents" in
+        case "$registered" in
             *"/$name"*) ;;
             *) missing+=("$name") ;;
         esac
@@ -241,6 +279,10 @@ _doctor_check_settings_hooks_resolve() {
     if [ ! -f "$settings" ]; then
         return
     fi
+    if ! _doctor_settings_parse_ok "$settings"; then
+        _doctor_fail "Hook paths: cannot read $settings (invalid JSON)"
+        return
+    fi
     local commands
     commands=$(jq -r '.hooks // {} | to_entries[].value[].hooks[]?.command // empty' "$settings" 2>/dev/null)
     # Native jq.exe on Windows emits CRLF; strip the trailing \r so hook paths
@@ -330,6 +372,17 @@ _doctor_check_shadow_ref() {
     [ -n "$ref" ] && shadow_sha=$(git -C "$dir" show-ref --verify "$ref" 2>/dev/null | awk '{print $1}' || true)
     local has_changes=0
     git -C "$dir" diff --quiet HEAD 2>/dev/null || has_changes=1
+    # The autosave hook snapshots with `git add -A`, which stages untracked
+    # files, so a session whose entire body of work is untracked still needs a
+    # shadow ref. Testing tracked changes alone reported "no uncommitted work to
+    # snapshot" on exactly the broken-autosave state this check exists to catch.
+    # Captured whole rather than piped: an early-exiting consumer would SIGPIPE
+    # the writer, and pipefail promotes that to the assignment's status.
+    if [ "$has_changes" = 0 ]; then
+        local untracked
+        untracked=$(git -C "$dir" ls-files --others --exclude-standard 2>/dev/null || true)
+        [ -n "$untracked" ] && has_changes=1
+    fi
     if [ -z "$ref" ]; then
         _doctor_ok "Shadow ref: no conversation id in environment to check"
     elif [ "$has_changes" = "1" ] && [ -z "$shadow_sha" ]; then
@@ -350,6 +403,10 @@ _doctor_check_claude_audit() {
     local settings="$claude_dir/settings.json"
     if [ ! -f "$settings" ]; then
         _doctor_warn "Audit: $settings not found"
+        return
+    fi
+    if ! _doctor_settings_parse_ok "$settings"; then
+        _doctor_fail "Audit: cannot read $settings (invalid JSON)"
         return
     fi
     # .hooks is event -> [{matcher, hooks: [{type, command, ...}]}]; flatten 3 levels for command count.
@@ -480,6 +537,7 @@ run_doctor() {
     echo "cs doctor - running health checks"
     echo ""
 
+    _doctor_check_settings_valid
     _doctor_check_keychain
     _doctor_check_hooks_registered
     _doctor_check_hook_files_executable
