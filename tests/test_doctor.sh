@@ -88,16 +88,45 @@ test_doctor_exits_nonzero_on_failure() {
 }
 
 # Helper: build a directory that looks like a cs source checkout
-make_fake_checkout() {
-    local dir="$1"
+make_fake_checkout() {  # dir, [deploy_dir], [version]
+    local dir="$1" deployed="${2:-}" version="${3:-9999.9.9}"
     mkdir -p "$dir/hooks" "$dir/bin"
     : > "$dir/install.sh"
-    : > "$dir/bin/cs"
+    printf 'VERSION="%s"\n' "$version" > "$dir/bin/cs"
+    # The drift scan compares only against the checkout that produced the
+    # install, which it recognises by the stamp install.sh writes into the
+    # deploy directory. Without a matching stamp it declines to compare.
+    if [ -n "$deployed" ]; then
+        mkdir -p "$deployed"
+        printf '%s\n' "$version" > "$deployed/.version"
+    fi
+}
+
+# Three filenames are not proof of a cs checkout, let alone THE one that was
+# installed: any directory holding hooks/, install.sh and bin/cs passes, and a
+# scratch copy of the repo is a common thing to be standing in. Comparing a
+# stranger's hooks against the deployed ones reports drift naming files the
+# user never touched, and advises `./install.sh`, which from there installs
+# something else entirely.
+test_doctor_drift_ignores_a_checkout_that_did_not_produce_the_install() {
+    local checkout="$TEST_TMPDIR/otherco" deployed="$TEST_TMPDIR/otherdep"
+    make_fake_checkout "$checkout" "$deployed" "1111.1.1"
+    printf '9999.9.9\n' > "$deployed/.version"   # deployed from a different tree
+    echo 'echo source-version'   > "$checkout/hooks/session-start.sh"
+    echo 'echo deployed-version' > "$deployed/session-start.sh"
+    chmod +x "$deployed/session-start.sh"
+
+    local output
+    output=$(cd "$checkout" && CS_HOOKS_DIR="$deployed" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_not_contains "$output" "differs from source" \
+        "an unrelated checkout must not be reported as the drifting source" || return 1
+    assert_output_not_contains "$output" "not deployed" \
+        "nor its hooks reported as undeployed" || return 1
 }
 
 test_doctor_warns_on_hook_drift() {
     local checkout="$TEST_TMPDIR/checkout" deployed="$TEST_TMPDIR/deployed"
-    make_fake_checkout "$checkout"
+    make_fake_checkout "$checkout" "$deployed"
     mkdir -p "$deployed"
     echo 'echo source-version' > "$checkout/hooks/session-start.sh"
     echo 'echo deployed-version' > "$deployed/session-start.sh"
@@ -111,7 +140,7 @@ test_doctor_warns_on_hook_drift() {
 
 test_doctor_warns_on_undeployed_hook() {
     local checkout="$TEST_TMPDIR/checkout" deployed="$TEST_TMPDIR/deployed"
-    make_fake_checkout "$checkout"
+    make_fake_checkout "$checkout" "$deployed"
     mkdir -p "$deployed"
     echo 'echo only-in-source' > "$checkout/hooks/brand-new.sh"
 
@@ -123,7 +152,7 @@ test_doctor_warns_on_undeployed_hook() {
 
 test_doctor_drift_silent_when_in_sync() {
     local checkout="$TEST_TMPDIR/checkout" deployed="$TEST_TMPDIR/deployed"
-    make_fake_checkout "$checkout"
+    make_fake_checkout "$checkout" "$deployed"
     mkdir -p "$deployed"
     echo 'echo same' > "$checkout/hooks/session-start.sh"
     cp "$checkout/hooks/session-start.sh" "$deployed/session-start.sh"
@@ -154,7 +183,7 @@ test_doctor_drift_skipped_outside_checkout() {
 
 test_doctor_warns_on_command_drift() {
     local checkout="$TEST_TMPDIR/checkout" deployed_cmds="$TEST_TMPDIR/commands"
-    make_fake_checkout "$checkout"
+    make_fake_checkout "$checkout" "$TEST_TMPDIR/deployed-hooks"
     mkdir -p "$checkout/commands" "$deployed_cmds" "$TEST_TMPDIR/deployed-hooks"
     echo 'source version' > "$checkout/commands/summary.md"
     echo 'deployed version' > "$deployed_cmds/summary.md"
@@ -168,7 +197,7 @@ test_doctor_warns_on_command_drift() {
 
 test_doctor_warns_on_skill_script_drift() {
     local checkout="$TEST_TMPDIR/checkout" deployed_skills="$TEST_TMPDIR/skills"
-    make_fake_checkout "$checkout"
+    make_fake_checkout "$checkout" "$TEST_TMPDIR/deployed-hooks"
     mkdir -p "$checkout/skills/voice/scripts" "$deployed_skills/voice/scripts" \
         "$TEST_TMPDIR/deployed-hooks"
     echo 'source version' > "$checkout/skills/voice/scripts/build-corpus.sh"
@@ -185,7 +214,7 @@ test_doctor_warns_on_skill_script_drift() {
 
 test_doctor_warns_on_skill_drift() {
     local checkout="$TEST_TMPDIR/checkout" deployed_skills="$TEST_TMPDIR/skills"
-    make_fake_checkout "$checkout"
+    make_fake_checkout "$checkout" "$TEST_TMPDIR/deployed-hooks"
     mkdir -p "$checkout/skills/store-secret" "$deployed_skills/store-secret" "$TEST_TMPDIR/deployed-hooks"
     echo 'source version' > "$checkout/skills/store-secret/SKILL.md"
     echo 'deployed version' > "$deployed_skills/store-secret/SKILL.md"
@@ -708,6 +737,7 @@ run_test test_doctor_runs_default_checks_from_session
 run_test test_doctor_reports_pass_for_healthy_session
 run_test test_doctor_fails_when_hook_not_executable
 run_test test_doctor_exits_nonzero_on_failure
+run_test test_doctor_drift_ignores_a_checkout_that_did_not_produce_the_install
 run_test test_doctor_warns_on_hook_drift
 run_test test_doctor_warns_on_undeployed_hook
 run_test test_doctor_drift_silent_when_in_sync

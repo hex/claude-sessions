@@ -4864,6 +4864,18 @@ _doctor_check_hook_drift() {
     local skills_dir="${CS_SKILLS_DIR:-$HOME/.claude/skills}"
     [ -d "hooks" ] && [ -f "install.sh" ] && [ -f "bin/cs" ] || return 0
 
+    # Those three names are not proof this checkout produced the install. Any
+    # directory holding them passes, and a scratch copy of the repo is an
+    # ordinary thing to be standing in — comparing its hooks against the
+    # deployed ones reports drift naming files nobody edited, and advises
+    # `./install.sh`, which from there installs something else. install.sh
+    # stamps the deploy directory with the version it shipped, so compare
+    # against that and stay silent when it is a different tree.
+    local src_version deployed_version
+    src_version=$(sed -n 's/^VERSION="\([^"]*\)".*/\1/p' bin/cs 2>/dev/null | head -1)
+    deployed_version=$(head -1 "$hooks_dir/.version" 2>/dev/null | tr -d '[:space:]')
+    [ -n "$src_version" ] && [ "$src_version" = "$deployed_version" ] || return 0
+
     local clean=1
 
     # area label, deploy root, source paths — reported per artifact kind.
