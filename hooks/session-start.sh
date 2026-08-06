@@ -284,7 +284,7 @@ Current actor: $ACTOR_SLUG ($ACTOR_RAW). Your narrative is .cs/memory/narrative.
 
 Key files to maintain:
 - .cs/README.md: Update objective and outcome
-- .cs/memory/narrative.<actor>.md: append findings as you go (run 'cs -whoami' for your actor; read all narrative.*.md on resume)
+- .cs/memory/narrative.$ACTOR_SLUG.md: append findings as you go; read all narrative.*.md on resume
 
 Secrets: never write credentials to files — pipe the value to 'cs -secrets set <name>' on stdin (argv/heredocs are logged verbatim); retrieve with 'cs -secrets get <name>'. See CLAUDE.local.md, Secure Secrets Handling.
 

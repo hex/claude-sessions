@@ -697,8 +697,19 @@ test_session_start_narrative_is_per_actor() {
 
     assert_output_not_contains "$context" "narrative.md: Document" \
         "session-start must not steer findings to the shared narrative.md" || { session_start_teardown; return 1; }
-    assert_output_contains "$context" "narrative.<actor>.md" \
-        "session-start must name the per-actor narrative" || { session_start_teardown; return 1; }
+    # The block resolves the actor, so the key-files line can name the real file
+    # instead of a placeholder the agent would have to resolve for itself. Read
+    # the slug back out of the context and require the two lines to agree —
+    # a drifting pair is what would send findings to a file nobody reads.
+    local actor
+    actor=$(printf '%s\n' "$context" | sed -n 's/^Current actor: \([^ ]*\) .*/\1/p' | head -1)
+    [ -n "$actor" ] || {
+        echo "  FAIL: the injected context never states the resolved actor"
+        session_start_teardown; return 1
+    }
+    assert_output_contains "$context" "narrative.$actor.md: append findings" \
+        "the key-files line must name the same resolved narrative the actor line does" \
+        || { session_start_teardown; return 1; }
 
     session_start_teardown
 }
