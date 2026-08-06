@@ -104,8 +104,9 @@ Sessions are stored in: $SESSIONS_ROOT
 EOF
 }
 
+# Message through %s, like error()/info(): escapes in interpolated text are data.
 warn() {
-    echo -e "${YELLOW}$1${NC}"
+    printf "${YELLOW}%s${NC}\n" "$1"
 }
 
 # Offer a way forward when the session is already open elsewhere: open one of

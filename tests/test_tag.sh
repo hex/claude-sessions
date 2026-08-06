@@ -268,7 +268,65 @@ run_test test_tag_add_outside_session_errors
 run_test test_tag_site_b_targets_named_session
 run_test test_tag_list_bare_counts_across_sessions
 run_test test_tag_list_bare_in_session_shows_all_sessions
+test_tag_add_fails_loudly_when_the_write_anchors_on_nothing() {
+    # An unterminated frontmatter block with no `status:` line leaves the insert
+    # branch's two anchors both absent, so every record fell through to the
+    # catch-all print: awk exited 0, the tmp+mv rewrote the file identically, and
+    # the add reported success having written nothing.
+    local dir="$CS_SESSIONS_ROOT/unterminated"
+    mkdir -p "$dir/.cs/local"
+    printf -- '---\ncreated: 2026-07-15\naliases: ["unterminated"]\n\n## Objective\ntest\n' \
+        > "$dir/.cs/README.md"
+    local before output
+    before=$(cat "$dir/.cs/README.md")
+    _in_session "unterminated"
+    if output=$("$CS_BIN" -tag add api 2>&1); then
+        echo "  FAIL: a write that anchored on nothing must not report success"
+        return 1
+    fi
+    assert_output_contains "$output" "frontmatter" "the error names what is wrong" || return 1
+    assert_eq "$before" "$(cat "$dir/.cs/README.md")" "the file is left untouched" || return 1
+    assert_file_not_contains "$dir/.cs/README.md" "^tags:" "no tags line written" || return 1
+}
+
+test_tag_add_still_anchors_on_status_without_a_closing_fence() {
+    # Regression guard for the fix above. This file is ALSO unterminated, but it
+    # has a `status:` line, so the insert branch anchors there and writes
+    # correctly today. Refusing it would strand any tag already in such a file:
+    # `cs -tag list` would keep showing it while add and rm both refused.
+    local dir="$CS_SESSIONS_ROOT/statusnofence"
+    mkdir -p "$dir/.cs/local"
+    printf -- '---\nstatus: active\ncreated: 2026-07-15\n\n## Objective\ntest\n' \
+        > "$dir/.cs/README.md"
+    _in_session "statusnofence"
+    "$CS_BIN" -tag add api >/dev/null 2>&1 \
+        || { echo "  FAIL: a status-anchored insert must keep working"; return 1; }
+    assert_file_contains "$dir/.cs/README.md" "^tags: \[api\]$" \
+        "the tag lands in the frontmatter" || return 1
+    "$CS_BIN" -tag rm api >/dev/null 2>&1 \
+        || { echo "  FAIL: what add wrote, rm must be able to remove"; return 1; }
+    assert_file_contains "$dir/.cs/README.md" "^tags: \[\]$" "rm empties the list" || return 1
+}
+
+test_tag_rm_does_not_rewrite_a_prose_line_that_looks_like_tags() {
+    # Without a closing fence the replace branch's `fm == 1` test stayed true
+    # through the whole file, so a prose line reading `tags: [...]` forty lines
+    # down was treated as frontmatter and rewritten in place.
+    local dir="$CS_SESSIONS_ROOT/prosetags"
+    mkdir -p "$dir/.cs/local"
+    printf -- '---\nstatus: active\ncreated: 2026-07-15\n\n## Objective\ntags: [ghost, phantom]\nmore prose\n' \
+        > "$dir/.cs/README.md"
+    _in_session "prosetags"
+    "$CS_BIN" -tag rm ghost >/dev/null 2>&1 || true
+    assert_file_contains "$dir/.cs/README.md" "^tags: \[ghost, phantom\]$" \
+        "the prose line survives untouched" || return 1
+    assert_file_contains "$dir/.cs/README.md" "^more prose$" "and so does what follows it" || return 1
+}
+
 run_test test_list_filters_by_tag
 run_test test_list_tag_filter_is_case_insensitive
 run_test test_list_tag_filter_matches_dots_literally
+run_test test_tag_add_fails_loudly_when_the_write_anchors_on_nothing
+run_test test_tag_add_still_anchors_on_status_without_a_closing_fence
+run_test test_tag_rm_does_not_rewrite_a_prose_line_that_looks_like_tags
 report_results

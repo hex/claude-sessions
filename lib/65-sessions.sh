@@ -14,6 +14,19 @@ search_sessions() {
         error "Usage: cs -search <query> [--include-archived]"
     fi
 
+    # grep exits 2 when the pattern will not compile and 1 on a clean no-match.
+    # The per-file calls below map every non-zero status to `continue`, so an
+    # uncompilable pattern made every file miss and the run finished by printing
+    # "No results" — a false negative presented as an authoritative answer. The
+    # pattern is invariant across files, so probe it once, with the same grep and
+    # the same flags the loops use. Probed before the SESSIONS_ROOT check so a
+    # typo is not reported as an empty machine.
+    local probe_status=0
+    grep -in -- "$query" /dev/null >/dev/null 2>&1 || probe_status=$?
+    if [ "$probe_status" -gt 1 ]; then
+        error "Invalid search pattern '$query': grep cannot compile it"
+    fi
+
     if [ ! -d "$SESSIONS_ROOT" ]; then
         info "No sessions found"
         return 0
@@ -42,7 +55,10 @@ search_sessions() {
             local matches
             matches=$(grep -in -- "$query" "$filepath" 2>/dev/null) || continue
             while IFS= read -r line; do
-                echo -e "${GOLD}${session_name}${NC}: ${DIM}${relpath}${NC}: ${line}"
+                # %s for the matched line: `echo -e` ate escapes in file content,
+                # so a line containing \c truncated the result there and dropped
+                # everything after it.
+                printf "${GOLD}%s${NC}: ${DIM}%s${NC}: %s\n" "$session_name" "$relpath" "$line"
                 found=$((found + 1))
             done <<< "$matches"
         done
@@ -54,7 +70,10 @@ search_sessions() {
             local matches
             matches=$(grep -in -- "$query" "$filepath" 2>/dev/null) || continue
             while IFS= read -r line; do
-                echo -e "${GOLD}${session_name}${NC}: ${DIM}${relpath}${NC}: ${line}"
+                # %s for the matched line: `echo -e` ate escapes in file content,
+                # so a line containing \c truncated the result there and dropped
+                # everything after it.
+                printf "${GOLD}%s${NC}: ${DIM}%s${NC}: %s\n" "$session_name" "$relpath" "$line"
                 found=$((found + 1))
             done <<< "$matches"
         done
