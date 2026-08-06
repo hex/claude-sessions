@@ -1841,4 +1841,88 @@ test_session_end_clears_a_stale_lock() {
 run_test test_session_end_spares_a_live_sessions_lock
 run_test test_session_end_clears_a_stale_lock
 
+
+# --- A torn JSONL tail must not take the next record down with it ---
+# A process killed mid-append leaves a last line with no newline. The next `>>`
+# then splices two records onto one line, and cs's tolerant per-line reader drops
+# the spliced line whole — losing the torn record AND the intact one after it.
+
+test_session_end_does_not_splice_onto_a_torn_timeline() {
+    session_start_setup
+    printf '{"ts":"2026-01-01T00:00:00Z","event":"started","session_id":"1111"}\n' \
+        > "$CLAUDE_SESSION_META_DIR/timeline.jsonl"
+    printf '{"ts":"2026-01-02T00:00:00Z","event":"checkpoint","label":"torn"}' \
+        >> "$CLAUDE_SESSION_META_DIR/timeline.jsonl"
+    jsonl_tail_is_torn "$CLAUDE_SESSION_META_DIR/timeline.jsonl" \
+        || { echo "  FAIL: fixture is terminated; the splice cannot happen"; session_start_teardown; return 1; }
+
+    echo '{"session_id":"3333","source":"user_exit"}' \
+        | bash "$HOOKS_DIR/session-end.sh" >/dev/null 2>&1 || true
+
+    local events
+    events=$(jsonl_events "$CLAUDE_SESSION_META_DIR/timeline.jsonl")
+    assert_output_contains "$events" "checkpoint" "the torn record survives" \
+        || { session_start_teardown; return 1; }
+    assert_output_contains "$events" "ended" "and so does the record appended after it" \
+        || { session_start_teardown; return 1; }
+    session_start_teardown
+}
+
+test_session_start_does_not_splice_onto_a_torn_timeline() {
+    session_start_setup
+    printf '{"ts":"2026-01-02T00:00:00Z","event":"checkpoint","label":"torn"}' \
+        > "$CLAUDE_SESSION_META_DIR/timeline.jsonl"
+    jsonl_tail_is_torn "$CLAUDE_SESSION_META_DIR/timeline.jsonl" \
+        || { echo "  FAIL: fixture is terminated; the splice cannot happen"; session_start_teardown; return 1; }
+
+    echo '{"session_id":"test","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>&1 || true
+
+    local events
+    events=$(jsonl_events "$CLAUDE_SESSION_META_DIR/timeline.jsonl")
+    assert_output_contains "$events" "checkpoint" "the torn record survives" \
+        || { session_start_teardown; return 1; }
+    assert_output_contains "$events" "started" "and so does the record appended after it" \
+        || { session_start_teardown; return 1; }
+    session_start_teardown
+}
+
+test_torn_partial_record_costs_only_itself() {
+    # The realistic crash leaves a PARTIAL record, not a whole one missing its
+    # newline. That record is unrecoverable by design — it was never complete —
+    # but the guard still bounds the damage to one record instead of two.
+    session_start_setup
+    printf '{"ts":"2026-01-01T00:00:00Z","event":"sta' \
+        > "$CLAUDE_SESSION_META_DIR/timeline.jsonl"
+    jsonl_tail_is_torn "$CLAUDE_SESSION_META_DIR/timeline.jsonl" \
+        || { echo "  FAIL: fixture is terminated"; session_start_teardown; return 1; }
+
+    echo '{"session_id":"3333","source":"user_exit"}' \
+        | bash "$HOOKS_DIR/session-end.sh" >/dev/null 2>&1 || true
+
+    local events
+    events=$(jsonl_events "$CLAUDE_SESSION_META_DIR/timeline.jsonl")
+    assert_output_contains "$events" "ended" "the new record parses on its own line" \
+        || { session_start_teardown; return 1; }
+    session_start_teardown
+}
+
+test_hook_terminator_survives_a_missing_resolver_library() {
+    # An install whose hooks were not redeployed pairs a NEW bin/cs with OLD
+    # hooks. Each hook therefore defines its own fallback beside the existing
+    # cs_resolve_session one, so the two hottest writers cannot go back to
+    # splicing silently when the shared library is absent.
+    assert_file_contains "$HOOKS_DIR/session-start.sh" "command -v _cs_terminate_jsonl" \
+        "session-start defines a fallback terminator" || return 1
+    assert_file_contains "$HOOKS_DIR/session-end.sh" "command -v _cs_terminate_jsonl" \
+        "session-end defines a fallback terminator" || return 1
+    assert_file_contains "$HOOKS_DIR/cs-resolve.sh" "_cs_terminate_jsonl" \
+        "the shared library carries the canonical definition" || return 1
+}
+
+run_test test_session_end_does_not_splice_onto_a_torn_timeline
+run_test test_session_start_does_not_splice_onto_a_torn_timeline
+run_test test_torn_partial_record_costs_only_itself
+run_test test_hook_terminator_survives_a_missing_resolver_library
+
 report_results

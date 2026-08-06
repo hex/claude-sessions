@@ -338,3 +338,19 @@ GITIGNORE
     (cd "$session_dir" && git init -q && git add -A && git commit -q -m "init")
     echo "$session_dir"
 }
+
+# Parse a JSONL file the way cs reads it — one record per line, malformed lines
+# dropped (lib/54-conversations.sh's `fromjson? // empty`) — and print each
+# surviving record's .event, comma-joined. A line holding two records spliced
+# together yields NEITHER, which is what makes this the right lens for a torn
+# tail: it shows the loss the reader actually suffers, not the bytes on disk.
+jsonl_events() {  # file
+    jq -rRs '[split("\n")[] | select(length > 0) | (fromjson? // empty) | .event] | join(",")' \
+        "$1" 2>/dev/null
+}
+
+# True when a file's last byte is not a newline. Command substitution strips
+# trailing newlines, so a terminated file yields the empty string here.
+jsonl_tail_is_torn() {  # file
+    [ -s "$1" ] && [ -n "$(tail -c 1 "$1" 2>/dev/null)" ]
+}

@@ -841,7 +841,10 @@ EOF
     out=$("$CS_BIN" -conversations 2>&1) || return 1
     assert_output_contains "$out" "11111111  started (startup, resumed 1x)" "first conversation folds resumes" || return 1
     assert_output_contains "$out" "11111111 > 22222222  rotated (handoff: 2026-07-16-test.md)" "rotation arrow with handoff" || return 1
-    assert_output_contains "$out" "[current]" "live conversation marked" || return 1
+    # Escaped: assert_output_contains greps a BRE, where [current] is a character
+    # class matching any one of c/u/r/e/n/t — which every line of this output
+    # already contains, so the unescaped form passed with the marker removed.
+    assert_output_contains "$out" '\[current\]' "live conversation marked" || return 1
     if printf '%s' "$out" | grep -q "checkpoint"; then
         echo "  FAIL: non-conversation events must not render"
         return 1

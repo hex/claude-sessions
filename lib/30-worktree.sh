@@ -409,6 +409,7 @@ $wt_untracked"
     git -C "$base_dir" branch -d "$branch" >/dev/null 2>&1 \
         || warn "Branch $branch was not deleted (not fully merged?)"
 
+    _terminate_jsonl "$base_dir/.cs/timeline.jsonl"
     jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
            --arg event "worktree-merged" \
            --arg task "$task" \
@@ -426,13 +427,9 @@ $wt_untracked"
 _append_jsonl() {  # src dst
     local src="$1" dst="$2"
     [ -f "$src" ] || return 0
-    if [ -s "$dst" ] && [ -n "$(tail -c 1 "$dst" 2>/dev/null)" ]; then
-        printf '\n' >> "$dst"
-    fi
+    _terminate_jsonl "$dst"
     cat "$src" >> "$dst"
-    if [ -n "$(tail -c 1 "$dst" 2>/dev/null)" ]; then
-        printf '\n' >> "$dst"
-    fi
+    _terminate_jsonl "$dst"
 }
 
 # Fuse session records from a worktree .cs into the base .cs (ignored mode:

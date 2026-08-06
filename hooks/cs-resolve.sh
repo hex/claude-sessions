@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: Resolves the cs session for a hook, from the env or from the cwd
-# ABOUTME: Sourced by every hook; not registered as a hook itself
+# ABOUTME: Sourced by every hook; also carries JSONL tail repair. Not a hook itself
 
 # Claude Code front ends differ in what they can hand a hook. The CLI is
 # launched by `cs`, which exports the session contract before exec, so a hook
@@ -104,4 +104,16 @@ _cs_session_name() {  # session_dir
     fi
     [ -n "$n" ] || n=$(basename "$1")
     printf '%s\n' "$n"
+}
+
+# Terminate a JSONL file whose last line lost its newline to an interrupted
+# write, so the next `>>` starts a fresh line instead of splicing two records
+# onto one. The tolerant per-line reader (`fromjson? // empty` in
+# run_conversations) drops a spliced line whole, losing the torn record AND the
+# intact one appended after it. Shape shared with bin/cs's _terminate_jsonl —
+# hooks cannot source bin/cs.
+_cs_terminate_jsonl() {  # file
+    [ -s "$1" ] || return 0
+    [ -n "$(tail -c 1 "$1" 2>/dev/null)" ] || return 0
+    printf '\n' >> "$1" 2>/dev/null || true
 }

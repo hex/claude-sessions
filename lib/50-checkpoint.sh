@@ -73,6 +73,7 @@ save_checkpoint() {
     local timeline_file="$meta_dir/timeline.jsonl"
     local timeline_branch
     timeline_branch=$(git -C "$session_dir" branch --show-current 2>/dev/null || echo "")
+    _terminate_jsonl "$timeline_file"
     jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
            --arg event "checkpoint" \
            --arg label "$label" \
