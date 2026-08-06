@@ -1366,8 +1366,12 @@ impl App {
                 }
             }
             1 => {
-                // Delete
-                if self.selected_session().is_some() {
+                // Delete. Same liveness guard as the `d` key: the removal
+                // refuses a lock-held session anyway, so opening the countdown
+                // here only promises a deletion that will not happen.
+                if let Some(refusal) = self.locked_selection_refusal() {
+                    self.set_status(refusal, StatusLevel::Error);
+                } else if self.selected_session().is_some() {
                     self.mode = Mode::ConfirmDelete;
                     self.delete_countdown_start = Some(std::time::Instant::now());
                 }
@@ -3053,6 +3057,44 @@ mod tests {
         let action = app.handle_key(KeyEvent::from(KeyCode::Enter));
         assert!(matches!(action, Action::None));
         assert_eq!(app.mode, Mode::ConfirmForceOpen);
+    }
+
+    /// The menu's Delete must refuse a lock-held session where the `d` key does.
+    /// The removal refuses it either way, so opening the countdown here only
+    /// promises a deletion that is already going to fail.
+    #[test]
+    fn menu_delete_on_locked_session_refuses_instead_of_counting_down() {
+        let mut app = App::new(sample_sessions());
+        // gamma (index 2) is locked.
+        app.table_state.select(Some(2));
+        app.mode = Mode::SessionMenu;
+        app.menu_selected = 1;
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        assert_ne!(
+            app.mode,
+            Mode::ConfirmDelete,
+            "a locked row must not open the delete countdown"
+        );
+        assert!(
+            app.delete_countdown_start.is_none(),
+            "and must not start its timer"
+        );
+        assert!(
+            app.status_message.is_some(),
+            "the refusal has to be visible, not silent"
+        );
+    }
+
+    #[test]
+    fn menu_delete_on_unlocked_session_opens_the_countdown() {
+        let mut app = App::new(sample_sessions());
+        // alpha (index 0) is not locked — the guard must not refuse everything.
+        app.table_state.select(Some(0));
+        app.mode = Mode::SessionMenu;
+        app.menu_selected = 1;
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        assert_eq!(app.mode, Mode::ConfirmDelete);
+        assert!(app.delete_countdown_start.is_some());
     }
 
     #[test]

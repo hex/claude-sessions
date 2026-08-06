@@ -1585,6 +1585,14 @@ create_worktree_session() {
 
     setup_auto_memory "$wt_dir"
 
+    # A feature worktree is a full cs session holding the same narrative, plans
+    # and machine-local state as its base, so it gets the same privacy. cs
+    # created this directory, so unlike an adopted session the ROOT is cs's to
+    # set too. Kept here rather than left to migrate_session, which the worktree
+    # open path deliberately never calls.
+    _harden_session_meta "$wt_dir"
+    chmod 700 "$wt_dir" 2>/dev/null || true
+
     echo "$wt_dir"
 }
 
@@ -2440,6 +2448,27 @@ cs_assert_local_untracked() {
     fi
 }
 
+# True when cs created this session directory, and so owns its mode. Two ways to
+# fail: the directory sits outside the sessions root, or a symlink IN the root
+# resolves to it — an adopted session, whose target is the user's own project
+# and stays whatever mode they chose, even when they keep it inside the root.
+#
+# Both sides are resolved before comparing. A plain prefix test on the unresolved
+# root silently never matched wherever the root itself sits behind a link (macOS
+# /var -> /private/var is the everyday case), so the backfill quietly did nothing
+# on exactly the machines it was written on.
+_session_root_is_cs_owned() {  # session_dir
+    local dir root e
+    dir=$(cd "$1" 2>/dev/null && pwd -P) || return 1
+    root=$(cd "${SESSIONS_ROOT:-}" 2>/dev/null && pwd -P) || return 1
+    case "$dir" in "$root"/*) ;; *) return 1 ;; esac
+    for e in "${SESSIONS_ROOT:-}"/*; do
+        [ -L "$e" ] || continue
+        [ "$(cd "$e" 2>/dev/null && pwd -P)" = "$dir" ] && return 1
+    done
+    return 0
+}
+
 # Bring a session's own data directory to owner-only. cs writes narratives,
 # plans, logs, the timeline and machine-local state here, and a session can hold
 # anything its user worked on — but bare mkdir takes the caller's umask, so on
@@ -2669,9 +2698,9 @@ migrate_session() {
     # PARENT rather than the name: by the time migrate runs, the path has been
     # resolved through the symlink, so the adopted session no longer looks like
     # a link and its basename is the project's, not the session's.
-    case "$session_dir" in
-        "${SESSIONS_ROOT:-}"/*) chmod 700 "$session_dir" 2>/dev/null || true ;;
-    esac
+    if _session_root_is_cs_owned "$session_dir"; then
+        chmod 700 "$session_dir" 2>/dev/null || true
+    fi
 
     # Per-actor local state must never be committed; refuse if it has been.
     cs_assert_local_untracked "$session_dir"
@@ -2853,8 +2882,11 @@ migrate_session() {
     # with divergent values, which made merge conflicts inevitable whenever
     # a session was shared through git.
     local _state="$session_dir/.cs/local/state"
-    # Bounded to the frontmatter block, opened by the `---` on line 1 that
-    # Phase 6 guarantees. All four keys are ordinary English, and the README
+    # Bounded to the frontmatter block: opened by the `---` on line 1 that Phase 6
+    # guarantees, and CLOSED by a second one, which it does not. Without a
+    # terminator there is no way to tell frontmatter from prose — fm would stay
+    # set to EOF and the strip below would delete a body line — so an unclosed
+    # block is left entirely alone. All four keys are ordinary English, and the README
     # carries hand-written prose sections, so a body line beginning "updated:"
     # is the user's own content — matching it anywhere in the file deleted it.
     local _fm_field_re='^(claude_session_id|claude_session_color|last_resumed|updated):'
@@ -2865,9 +2897,9 @@ migrate_session() {
     if [ -f "$readme" ] && awk -v re="$_fm_field_re" '
             { line = $0; sub(/\r$/, "", line) }
             NR == 1 && line == "---" { fm = 1; next }
-            fm && line == "---"      { exit }
-            fm && line ~ re          { found = 1; exit }
-            END                      { exit !found }
+            fm && line == "---"      { closed = 1; exit }
+            fm && line ~ re          { found = 1 }
+            END                      { exit (found && closed) ? 0 : 1 }
         ' "$readme"; then
         local _legacy_uuid _legacy_color
         _legacy_uuid=$(awk '/^claude_session_id:/ { sub(/^claude_session_id:[[:space:]]*/, ""); gsub(/["\r]/, ""); print; exit }' "$readme")
@@ -4489,9 +4521,18 @@ _tags_write() {
             END { exit done ? 0 : 1 }
         ' "$readme" > "$tmp" || status=$?
     else
+        # The `eat` run below consumes tags lines sitting immediately after
+        # status:. cs always inserts there, so those are its own from earlier
+        # mutations and would otherwise pile up one per edit, unbounded and
+        # unseen (readers stop at the first). Scoped to that contiguous run
+        # rather than to every /^tags:/ line: on an unterminated block there is
+        # no frontmatter boundary, and a line further down that reads
+        # "tags: [...]" belongs to the user.
         awk -v repl="$newline" '
             NR == 1 && $0 == "---" { fm = 1; print; next }
-            fm == 1 && /^status:/ && !done { print; print repl; done = 1; next }
+            fm == 1 && /^status:/ && !done { print; print repl; done = 1; eat = 1; next }
+            eat && /^tags:[[:space:]]*\[/ { next }
+            eat { eat = 0 }
             fm == 1 && $0 == "---" && !done { print repl; done = 1; fm = 2; print; next }
             fm == 1 && $0 == "---" { fm = 2; print; next }
             { print }
@@ -7124,6 +7165,11 @@ main() {
             confirm_clean_worktree_base "$base_dir" "$wt_base"
             session_dir=$(create_worktree_session "$base_dir" "$wt_base" "$wt_task")
         else
+            # The backfill a base session gets from migrate_session, which the
+            # worktree path below deliberately skips: an older worktree, or one
+            # from a clone, still arrives at the umask's mode.
+            _harden_session_meta "$session_dir"
+            chmod 700 "$session_dir" 2>/dev/null || true
             local pinned head_branch
             pinned=$(_read_local_state "$session_dir/.cs/local/state" task_branch)
             head_branch=$(git -C "$session_dir" branch --show-current 2>/dev/null || echo "")

@@ -81,9 +81,18 @@ _tags_write() {
             END { exit done ? 0 : 1 }
         ' "$readme" > "$tmp" || status=$?
     else
+        # The `eat` run below consumes tags lines sitting immediately after
+        # status:. cs always inserts there, so those are its own from earlier
+        # mutations and would otherwise pile up one per edit, unbounded and
+        # unseen (readers stop at the first). Scoped to that contiguous run
+        # rather than to every /^tags:/ line: on an unterminated block there is
+        # no frontmatter boundary, and a line further down that reads
+        # "tags: [...]" belongs to the user.
         awk -v repl="$newline" '
             NR == 1 && $0 == "---" { fm = 1; print; next }
-            fm == 1 && /^status:/ && !done { print; print repl; done = 1; next }
+            fm == 1 && /^status:/ && !done { print; print repl; done = 1; eat = 1; next }
+            eat && /^tags:[[:space:]]*\[/ { next }
+            eat { eat = 0 }
             fm == 1 && $0 == "---" && !done { print repl; done = 1; fm = 2; print; next }
             fm == 1 && $0 == "---" { fm = 2; print; next }
             { print }

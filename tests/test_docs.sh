@@ -38,9 +38,19 @@ test_configuration_documents_every_env_var_the_readme_names() {
 test_every_backend_the_code_accepts_is_documented() {
     local backends f b
     # The validated set, from the one place that rejects anything else.
-    backends=$(sed -n 's/.*keychain|wcm|encrypted.*/keychain wcm encrypted/p' \
-        "$REPO/bin/cs-secrets" | head -1)
-    [ -n "$backends" ] || backends="keychain wcm encrypted"
+    # Read the alternation the validator rejects everything else against, and
+    # split it. No hardcoded fallback: with one, a fourth backend added to the
+    # code and omitted from the docs shipped green, which is the entire drift
+    # class this test exists for. An extraction that finds nothing is a broken
+    # test, not a passing one.
+    backends=$(grep -oE '^[[:space:]]*keychain\|[a-z|]+\)' "$REPO/bin/cs-secrets" \
+        | head -1 | tr -d ' )' | tr '|' ' ')
+    [ -n "$backends" ] \
+        || { echo "  FAIL: could not read the backend set from bin/cs-secrets"; return 1; }
+    case "$backends" in
+        *keychain*) ;;
+        *) echo "  FAIL: extraction produced '$backends', which is not the backend set"; return 1 ;;
+    esac
     for f in "$REPO/docs/secrets.md" "$REPO/docs/configuration.md" "$REPO/bin/cs-secrets"; do
         for b in $backends; do
             grep -qF "$b" "$f" \

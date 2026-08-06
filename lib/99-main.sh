@@ -365,6 +365,11 @@ main() {
             confirm_clean_worktree_base "$base_dir" "$wt_base"
             session_dir=$(create_worktree_session "$base_dir" "$wt_base" "$wt_task")
         else
+            # The backfill a base session gets from migrate_session, which the
+            # worktree path below deliberately skips: an older worktree, or one
+            # from a clone, still arrives at the umask's mode.
+            _harden_session_meta "$session_dir"
+            chmod 700 "$session_dir" 2>/dev/null || true
             local pinned head_branch
             pinned=$(_read_local_state "$session_dir/.cs/local/state" task_branch)
             head_branch=$(git -C "$session_dir" branch --show-current 2>/dev/null || echo "")
