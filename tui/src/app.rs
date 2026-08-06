@@ -1623,31 +1623,43 @@ impl App {
         let dir = session::queue_dir(name);
         let qdir = dir.join("queue");
         let staging = dir.join("queue.tmp");
-        if std::fs::create_dir_all(&qdir).is_ok() && std::fs::create_dir_all(&staging).is_ok() {
-            let (secs, nanos) = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| (d.as_secs(), d.subsec_nanos()))
-                .unwrap_or((0, 0));
-            // Zero-padded epoch keeps lexical order aligned with time order;
-            // the nanosecond suffix keeps several adds inside one second in
-            // submission order.
-            let fname = format!("{:010}-{}-{:09}", secs, std::process::id(), nanos);
-            let staged = staging.join(&fname);
-            match std::fs::write(&staged, format!("{}\n", text))
-                .and_then(|_| std::fs::rename(&staged, qdir.join(&fname)))
-            {
-                Ok(()) => {
-                    // Queue changed: let the Stop-hook gate re-ask even if it was
-                    // recently declined. Mirrors the CLI's `rm -f queue.declined`
-                    // in bin/cs `_queue_add`.
-                    let _ = std::fs::remove_file(dir.join("queue.declined"));
-                    self.queue_input.clear();
-                    self.refresh_queue_depth(name);
-                    self.set_status(format!("Queued task for {}", name), StatusLevel::Success);
-                }
-                Err(e) => {
-                    self.set_status(format!("Queue write failed: {}", e), StatusLevel::Error);
-                }
+        // A pre-directory queue leaves a regular FILE at one of these paths, and
+        // create_dir_all cannot convert it. cs converts on open; the TUI does not
+        // duplicate that migration, but it must not swallow the task either —
+        // read_queue's read_dir fails on the same shape, so such a session also
+        // renders as empty, and a silent drop here is invisible from both ends.
+        if let Err(e) =
+            std::fs::create_dir_all(&qdir).and_then(|_| std::fs::create_dir_all(&staging))
+        {
+            self.set_status(
+                format!("Queue write failed: {} — open {} with cs once", e, name),
+                StatusLevel::Error,
+            );
+            return;
+        }
+        let (secs, nanos) = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| (d.as_secs(), d.subsec_nanos()))
+            .unwrap_or((0, 0));
+        // Zero-padded epoch keeps lexical order aligned with time order;
+        // the nanosecond suffix keeps several adds inside one second in
+        // submission order.
+        let fname = format!("{:010}-{}-{:09}", secs, std::process::id(), nanos);
+        let staged = staging.join(&fname);
+        match std::fs::write(&staged, format!("{}\n", text))
+            .and_then(|_| std::fs::rename(&staged, qdir.join(&fname)))
+        {
+            Ok(()) => {
+                // Queue changed: let the Stop-hook gate re-ask even if it was
+                // recently declined. Mirrors the CLI's `rm -f queue.declined`
+                // in bin/cs `_queue_add`.
+                let _ = std::fs::remove_file(dir.join("queue.declined"));
+                self.queue_input.clear();
+                self.refresh_queue_depth(name);
+                self.set_status(format!("Queued task for {}", name), StatusLevel::Success);
+            }
+            Err(e) => {
+                self.set_status(format!("Queue write failed: {}", e), StatusLevel::Error);
             }
         }
     }
@@ -4396,6 +4408,45 @@ mod tests {
         assert!(
             app.has_todos(),
             "queuing the first task makes the To-Do column appear"
+        );
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn append_notes_task_reports_a_legacy_queue_rather_than_dropping_the_task() {
+        // Pre-directory layout: `queue` is one FILE holding a task per line, so
+        // create_dir_all over it fails. cs converts on open; the TUI cannot, and
+        // the read side already shows this session as empty, so a silent drop
+        // here is invisible from both ends.
+        let tmp = std::env::temp_dir().join(format!("cs-tui-legacy-q-{}", std::process::id()));
+        let _root = session::test_root::scoped(tmp.clone());
+        let local = tmp.join("alpha").join(".cs/local");
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::write(local.join("queue"), "already queued\n").unwrap();
+        assert!(
+            local.join("queue").is_file(),
+            "fixture must be the legacy single-file queue, or the bug is unreachable"
+        );
+
+        let mut app = App::new(sample_sessions());
+        app.table_state.select(Some(0));
+        app.queue_input.set("new task");
+        app.append_notes_task("alpha", "new task");
+
+        let msg = app
+            .status_message
+            .as_ref()
+            .expect("a queue add that wrote nothing must say so");
+        assert_eq!(msg.level, StatusLevel::Error);
+        assert!(
+            msg.text.contains("cs"),
+            "the message must point at the fix (open the session with cs once), got: {}",
+            msg.text
+        );
+        assert_eq!(
+            app.queue_input.text(),
+            "new task",
+            "a failed add keeps the text so it is not lost"
         );
         std::fs::remove_dir_all(&tmp).ok();
     }
