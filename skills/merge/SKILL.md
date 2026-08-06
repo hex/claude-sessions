@@ -1,6 +1,7 @@
 ---
 name: merge
 description: Close out a feature branch or cs task worktree - run the repo's gates, merge --no-ff, re-run gates on the merged result, clean up. Invoke when the user asks to merge a branch or worktree, or to close out a finished feature.
+disable-model-invocation: true
 ---
 
 Merging is a ritual, not a git command: gates before, merge, gates after,

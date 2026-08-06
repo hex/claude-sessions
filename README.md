@@ -252,7 +252,9 @@ branch by hand.
 
 The `merge` skill (`/merge` in a conversation) wraps this — and ordinary
 feature branches — in the full gated ritual: tests before, `--no-ff` merge,
-tests again on the merged result, cleanup only when green.
+tests again on the merged result, cleanup only when green. It is user-invoked
+only (`disable-model-invocation: true`): merging and deleting a branch is
+never something Claude should start on its own initiative.
 
 Each worktree is a full cs session (own conversation, color, crash
 recovery) that shares the base session's task list and secrets. Session
@@ -322,6 +324,11 @@ commits it to `.cs/handoffs/YYYY-MM-DD-<slug>.md`, and arms it by naming it in
 `.cs/local/pending-handoff`. Any earlier handoff of its own that is still
 pending is flipped to `superseded`. The conversation keeps running; nothing
 has ended yet.
+
+Because the handoff is committed and becomes the next conversation's opening
+prompt, the skill redacts credentials and personal data out of it (name the
+secret's purpose and its `cs -secrets get` key instead), and references
+committed work by path rather than re-summarising it.
 
 Then rotate with **`/clear`**. The fresh conversation reads the handoff and
 continues from its next-step section — the old transcript is not loaded. It

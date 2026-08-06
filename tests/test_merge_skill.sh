@@ -14,6 +14,14 @@ test_merge_skill_exists_with_frontmatter() {
     assert_file_contains "$SKILL" "description:" "frontmatter has a description" || return 1
 }
 
+test_merge_skill_is_user_invoked_only() {
+    # The skill runs the repo's gates, merges --no-ff and deletes the branch.
+    # The description's "Invoke when the user asks" is a soft guard the model
+    # can read past; the frontmatter flag is the hard one.
+    assert_file_contains "$SKILL" "disable-model-invocation: true" \
+        "merging must never start on the model's own initiative" || return 1
+}
+
 test_merge_skill_registered_in_both_manifests() {
     grep -A 6 '^CS_SKILLS=(' "$SCRIPT_DIR/../lib/00-header.sh" | grep -q 'merge' \
         || { echo "  FAIL: merge missing from lib/00-header.sh CS_SKILLS"; return 1; }
@@ -45,6 +53,7 @@ test_merge_skill_documents_the_base_session_context() {
 }
 
 run_test test_merge_skill_exists_with_frontmatter
+run_test test_merge_skill_is_user_invoked_only
 run_test test_merge_skill_registered_in_both_manifests
 run_test test_merge_skill_teaches_the_gated_ritual
 run_test test_merge_skill_in_built_manifest
