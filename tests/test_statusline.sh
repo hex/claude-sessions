@@ -454,10 +454,27 @@ test_detect_theme_konsole_three_part() {
     assert_output_contains "$out" "light" "three-part COLORFGBG should classify by its last field" || return 1
 }
 
+# No tty to answer OSC 11, no COLORFGBG, and a platform with no appearance
+# setting to read: with every signal absent the classification is unknown.
+# OSTYPE is pinned non-darwin because on macOS the OS appearance IS a signal.
 test_detect_theme_unknown_without_signals() {
     local out
-    out=$(env -u COLORFGBG -u TMUX "$CS_BIN" -detect-theme 2>&1 < /dev/null)
-    assert_output_contains "$out" "unknown" "no COLORFGBG and no tty should classify as unknown" || return 1
+    out=$(env -u COLORFGBG -u TMUX OSTYPE="linux-gnu" "$CS_BIN" -detect-theme 2>&1 < /dev/null)
+    assert_output_contains "$out" "unknown" \
+        "no tty, no COLORFGBG and no OS appearance should classify as unknown" || return 1
+}
+
+# Outside tmux on macOS the OS appearance is the last resort, exactly as it is
+# under tmux: a terminal answering no OSC 11 query and exporting no COLORFGBG
+# (Terminal.app) must not be left unknown, because unknown leaves cs on its dark
+# default and dark on a light terminal is the wrong-way failure.
+test_detect_theme_no_tmux_uses_os_appearance() {
+    _make_appearance_fakes light
+    local out
+    out=$(env -u COLORFGBG -u TMUX OSTYPE="darwin24.0" PATH="$TEST_TMPDIR/fakebin:$PATH" \
+        "$CS_BIN" -detect-theme 2>&1 < /dev/null)
+    assert_output_contains "$out" "light" \
+        "no tty and no COLORFGBG must fall back to the OS appearance, not to unknown" || return 1
 }
 
 # Under tmux, OSC 11 is answered by tmux itself (default-black) and COLORFGBG
@@ -1318,6 +1335,7 @@ run_test test_detect_theme_colorfgbg_dark
 run_test test_detect_theme_colorfgbg_light
 run_test test_detect_theme_konsole_three_part
 run_test test_detect_theme_unknown_without_signals
+run_test test_detect_theme_no_tmux_uses_os_appearance
 run_test test_detect_theme_tmux_appearance_dark
 run_test test_detect_theme_tmux_appearance_light
 run_test test_detect_theme_tmux_non_darwin_unknown

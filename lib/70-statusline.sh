@@ -193,6 +193,13 @@ detect_term_theme_and_bg() {
         if [ "$out" = "unknown" ] && [ -n "${COLORFGBG:-}" ]; then
             out=$(_theme_from_colorfgbg "$COLORFGBG")
         fi
+        # A terminal that answers no OSC 11 query and exports no COLORFGBG
+        # (Terminal.app) would otherwise stay unknown, and unknown leaves cs on
+        # its dark default — the wrong way round on a light terminal. This is
+        # the same last rung the tmux path already has, so the order matches
+        # what tui/src/theme.rs documents. Off macOS the probe reports unknown
+        # and the classification is unchanged.
+        [ "$out" = "unknown" ] && out=$(_theme_from_os_appearance)
     fi
     echo "$out"
 }

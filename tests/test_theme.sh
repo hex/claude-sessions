@@ -257,7 +257,39 @@ run_test test_detect_term_theme_and_bg_carries_rgb
 run_test test_detect_under_tmux_uses_plain_query_when_passthrough_is_dead
 run_test test_detect_under_tmux_rejects_black_self_default_and_uses_passthrough
 run_test test_detect_under_tmux_black_everywhere_falls_back_to_os_appearance
+# Outside tmux, a terminal that answers no OSC 11 query and exports no COLORFGBG
+# (Terminal.app) must still be classified by OS appearance. Left unknown, cs
+# exports no CS_TERM_THEME and both consumers fall through to their dark default
+# — dark on a light terminal is the wrong-way failure.
+test_detect_no_tmux_falls_back_to_os_appearance() {
+    ( _load_cs_functions
+      _theme_from_osc11() { echo "unknown"; }
+      _theme_from_os_appearance() { echo "light"; }
+      unset TMUX COLORFGBG
+      local out
+      out=$(detect_term_theme_and_bg)
+      assert_eq "light" "$out" \
+        "with no OSC 11 reply and no COLORFGBG, OS appearance must classify the theme" || return 1 )
+}
+
+# COLORFGBG is the terminal's own statement about its background; OS appearance
+# is a guess from the desktop setting. Outside tmux the explicit signal wins, so
+# the fallback goes last rather than ahead of COLORFGBG.
+test_detect_no_tmux_prefers_colorfgbg_over_os_appearance() {
+    ( _load_cs_functions
+      _theme_from_osc11() { echo "unknown"; }
+      _theme_from_os_appearance() { echo "light"; }
+      unset TMUX
+      export COLORFGBG="15;0"
+      local out
+      out=$(detect_term_theme_and_bg)
+      assert_eq "dark" "$out" \
+        "an explicit COLORFGBG must be consulted before the OS-appearance guess" || return 1 )
+}
+
 run_test test_detect_theme_graceful_under_tmux
+run_test test_detect_no_tmux_falls_back_to_os_appearance
+run_test test_detect_no_tmux_prefers_colorfgbg_over_os_appearance
 run_test test_detect_theme_graceful_no_tmux
 run_test test_cs_term_theme_override_wins
 run_test test_export_term_theme_exports_theme_and_auto_marker

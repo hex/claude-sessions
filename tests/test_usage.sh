@@ -199,9 +199,38 @@ EOF
     }
 }
 
+# Only the week window is still anchored: the 5h reset passed two hours ago while
+# the week reset is a day out — the shape of any stamp between 5h and 7d old. The
+# 5h percentage describes a window that has already rolled over, so the header
+# must report it unknown rather than pass a dead number off as current usage.
+# The table beneath is computed on the rolling window either way, so printing the
+# stale figure also made the two disagree.
+test_usage_header_marks_expired_five_hour_pct_unknown() {
+    local sdir="$CS_SESSIONS_ROOT/weeksess"
+    mkdir -p "$sdir/.cs/local"
+    local now
+    now=$(date +%s)
+    cat > "$sdir/.cs/local/limits" << EOF
+five_hour_used_pct: 88
+five_hour_resets_at: $((now - 7200))
+seven_day_used_pct: 41
+seven_day_resets_at: $((now + 86400))
+stamped_at: $((now - 86400))
+EOF
+    local output
+    output=$("$CS_BIN" -usage 2>&1) || true
+    assert_output_contains "$output" "week 41%" "the still-anchored week pct is reported" || return 1
+    assert_output_not_contains "$output" "stale rate-limit stamp" \
+        "a live week anchor is not the stale-stamp case" || return 1
+    assert_output_not_contains "$output" "5h 88%" \
+        "an expired 5h window must not report its stale pct as current" || return 1
+    assert_output_contains "$output" "5h ?" "an expired 5h window reports unknown" || return 1
+}
+
 run_test test_usage_header_anchored_by_limits_file
 run_test test_usage_window_start_is_resets_minus_span
 run_test test_usage_expired_anchor_falls_back_to_rolling
+run_test test_usage_header_marks_expired_five_hour_pct_unknown
 
 # Two sessions: bigger 5h usage sorts first; each row shows only its own tokens.
 test_usage_attribution_and_sort() {
