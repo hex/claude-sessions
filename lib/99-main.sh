@@ -60,6 +60,12 @@ main() {
 
     local cmd="$1"
 
+    # `cs <verb> --help` before the arms: each one resolves a session or parses
+    # its own arguments first, so the flag would arrive as data.
+    case "$cmd" in
+        -*) if _is_help_flag "${2:-}"; then show_verb_help "$cmd"; return $?; fi ;;
+    esac
+
     # Handle subcommands (with - prefix)
     case "$cmd" in
         -h|-help|--help)
@@ -223,6 +229,10 @@ main() {
 
     # Parse session subcommands with a while loop to support flag combinations
     shift  # Remove session name / cmd
+    # `cs <name> <verb> --help` — same reasoning as the global form above.
+    case "${1:-}" in
+        -*) if _is_help_flag "${2:-}"; then show_verb_help "$1"; return $?; fi ;;
+    esac
     while [ $# -gt 0 ]; do
         case "$1" in
             -secrets)

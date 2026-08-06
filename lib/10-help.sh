@@ -105,6 +105,34 @@ EOF
 }
 
 # Message through %s, like error()/info(): escapes in interpolated text are data.
+# Print the full help's own lines for one verb, and nothing else. Derived rather
+# than a second copy: adding a flag to a verb updates `cs -help` and
+# `cs <verb> --help` in the same edit, so the two can never disagree. Exits
+# non-zero only if the verb has no documented line, which is a help-text bug
+# rather than a user error.
+show_verb_help() {  # verb
+    local verb="$1" lines
+    # Match the verb as a whole token ANYWHERE on the line, splitting on commas
+    # too: the help lists aliases together ("-doctor, -diag") and prefixes the
+    # session forms ("<base> -features"), so a first-field test finds neither.
+    lines=$(show_help 2>/dev/null \
+        | awk -v v="$verb" '{ orig = $0; n = split($0, f, /[[:space:],]+/);
+              for (i = 1; i <= n; i++) if (f[i] == v) { print orig; break } }') || true
+    if [ -z "$lines" ]; then
+        printf 'No help recorded for %s. Run: cs -help\n' "$verb" >&2
+        return 1
+    fi
+    printf 'Usage:\n%s\n' "$lines"
+}
+
+# True when the next argument is a help flag. `<verb> --help` has to be answered
+# BEFORE the verb resolves a session or parses arguments, or the flag arrives
+# somewhere that reads it as data — `cs -msg --help` reported "No such session:
+# --help", which sends the reader looking for a session rather than for docs.
+_is_help_flag() {  # arg
+    case "${1:-}" in -h|-help|--help) return 0 ;; *) return 1 ;; esac
+}
+
 warn() {
     printf "${YELLOW}%s${NC}\n" "$1"
 }
