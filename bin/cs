@@ -1944,32 +1944,24 @@ When a conversation's context grows heavy or a work phase completes, invoke the 
 
 ## Secure Secrets Handling
 
-Store sensitive data (API keys, tokens, passwords) securely (macOS Keychain or
-encrypted file) instead of writing it into project files. The `store-secret`
-skill and `cs -secrets set` read the value from stdin so it never lands in a
-file or the command log.
+Secrets live in the cs session store, never in a project file. `cs -secrets set`
+and the `store-secret` skill read the value on **stdin** via a file redirect —
+never `echo`/`printf` a secret into a pipe or a Bash heredoc: the bash-logger
+records the whole Bash command, plaintext and all, in `.cs/local/session.log`.
 
-**Retrieving secrets:**
-```bash
-cs -secrets backend                # Check which storage backend is active
-cs -secrets list                   # List secrets for current session
-cs -secrets get API_KEY            # Get a specific secret value
-cs -secrets export                 # Export as CS_SECRET_<NAME> environment variables
-```
-Never print or echo a retrieved secret, and don't paste `cs -secrets export` output into a file — consume the value inline, e.g. `some-command --token "$(cs -secrets get API_KEY)"`, so the plaintext stays out of the tool result and the session transcript.
+Consume a secret inline — `some-command --token "$(cs -secrets get API_KEY)"` —
+so it stays out of the tool result and the transcript. A retrieved value is read
+by a command, never printed, echoed, piped, or written to a file (that includes
+`cs -secrets export` output). `cs -secrets --help` lists the rest of the verbs.
 
-**If you detect sensitive data** in the workspace (embedded credentials, a
-committed token, etc.), invoke the `store-secret` skill and replace the literal
-with a reference appropriate to the file — an env-var placeholder like
-`${API_KEY}` in configs, or `$(cs -secrets get API_KEY)` in shell scripts —
-noting that the value now lives in `cs -secrets`. The skill writes the value to
-a scratch file with the Write tool (which the bash-logger does not capture),
-feeds it in via a stdin redirect so the plaintext never reaches argv or the
-command log (`cs -secrets set <name> < scratch-file`), and deletes the scratch
-file afterward. If the skill is unavailable and you do this by hand, you MUST
-delete the scratch file immediately after, and never `echo`/`printf` a secret
-into a pipe — the bash-logger records the whole Bash command (secret and all)
-in `.cs/local/session.log`.
+**When you find a credential already in the workspace**, invoke the
+`store-secret` skill — it carries the full procedure. Replace the literal with
+the reference the file wants — `${API_KEY}` in a config, `$(cs -secrets get
+API_KEY)` in a shell script. Doing it by hand instead, the safe path is exactly
+this: write the value with the **Write** tool to a file OUTSIDE the session
+directory (any Write inside it is snapshotted into the autosave ref and survives
+`rm`), run `cs -secrets set NAME < that-file`, then delete the scratch file
+immediately.
 
 EOF
     _emit_memory_note_block

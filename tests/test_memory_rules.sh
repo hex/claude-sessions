@@ -450,4 +450,30 @@ test_always_loaded_surfaces_do_not_re_derive_the_resolved_actor() {
 }
 
 run_test test_always_loaded_surfaces_do_not_re_derive_the_resolved_actor
+
+# The section names a path on which the store-secret skill is, by definition,
+# not loaded: "doing it by hand". Every rule whose only copy lives in the skill
+# has zero force there, so the two that convert directly into an unrecoverable
+# leak must stay inline. Neither is covered by the pins above, so both could be
+# compressed away as "duplication" without a single test going red.
+test_secrets_section_keeps_the_rules_the_skill_less_path_needs() {
+    "$CS_BIN" test-session <<< "" >/dev/null 2>&1 || true
+    local claude_md="$CS_SESSIONS_ROOT/test-session/CLAUDE.local.md"
+
+    assert_file_exists "$claude_md" "session CLAUDE.local.md should exist" || return 1
+    # bash-logger records the whole Bash command, so stdin alone is not safety:
+    # a pipe or a heredoc puts the plaintext in .cs/local/session.log verbatim.
+    assert_file_contains "$claude_md" "into a pipe or a Bash heredoc" \
+        "the section must forbid the two stdin forms the command log captures" || return 1
+    assert_file_contains "$claude_md" "bash-logger" \
+        "the prohibition must carry its reason" || return 1
+    # A Write inside the session directory is snapshotted into the autosave ref
+    # and survives the later rm, so location is the mechanism, not cleanup.
+    assert_file_contains "$claude_md" "OUTSIDE the session" \
+        "the scratch file's location rule must be stated, not left to the skill" || return 1
+    assert_file_contains "$claude_md" "autosave ref" \
+        "the location rule must carry its reason" || return 1
+}
+
+run_test test_secrets_section_keeps_the_rules_the_skill_less_path_needs
 report_results
