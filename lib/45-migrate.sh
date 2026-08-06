@@ -384,7 +384,13 @@ migrate_session() {
 
     # Phase 6: Add YAML frontmatter to README.md if missing
     local readme="$session_dir/.cs/README.md"
-    if [ -f "$readme" ] && ! head -1 "$readme" | grep -q '^---$'; then
+    # A trailing CR is stripped before the test: a repo cloned on Git for Windows
+    # with default autocrlf has "---\r" on line 1, which '^---$' does not match —
+    # so this phase read the file as having NO frontmatter and PREPENDED a second
+    # block, leaving the original orphaned in the body. Two frontmatter blocks
+    # break every reader of it (tags, status, aliases) and strand the
+    # machine-local fields outside the bounded block Phase 12 scans.
+    if [ -f "$readme" ] && ! head -1 "$readme" | tr -d '\r' | grep -q '^---$'; then
         local session_name
         session_name=$(basename "$session_dir")
         # Derive created date from the "Started:" line, then from the git
@@ -438,15 +444,20 @@ migrate_session() {
     # carries hand-written prose sections, so a body line beginning "updated:"
     # is the user's own content — matching it anywhere in the file deleted it.
     local _fm_field_re='^(claude_session_id|claude_session_color|last_resumed|updated):'
+    # Matching is done on a CR-stripped COPY of each line, and the file is written
+    # back untouched: a repo cloned on Git for Windows with default autocrlf
+    # arrives as CRLF, where /^---$/ never matches "---\r", fm is never set, and
+    # the whole strip silently no-ops.
     if [ -f "$readme" ] && awk -v re="$_fm_field_re" '
-            NR == 1 && /^---$/ { fm = 1; next }
-            fm && /^---$/      { exit }
-            fm && $0 ~ re      { found = 1; exit }
-            END                { exit !found }
+            { line = $0; sub(/\r$/, "", line) }
+            NR == 1 && line == "---" { fm = 1; next }
+            fm && line == "---"      { exit }
+            fm && line ~ re          { found = 1; exit }
+            END                      { exit !found }
         ' "$readme"; then
         local _legacy_uuid _legacy_color
-        _legacy_uuid=$(awk '/^claude_session_id:/ { sub(/^claude_session_id:[[:space:]]*/, ""); gsub(/"/, ""); print; exit }' "$readme")
-        _legacy_color=$(awk '/^claude_session_color:/ { sub(/^claude_session_color:[[:space:]]*/, ""); gsub(/"/, ""); print; exit }' "$readme")
+        _legacy_uuid=$(awk '/^claude_session_id:/ { sub(/^claude_session_id:[[:space:]]*/, ""); gsub(/["\r]/, ""); print; exit }' "$readme")
+        _legacy_color=$(awk '/^claude_session_color:/ { sub(/^claude_session_color:[[:space:]]*/, ""); gsub(/["\r]/, ""); print; exit }' "$readme")
         if [ -n "$_legacy_uuid" ] && [ -z "$(_read_local_state "$_state" claude_session_id)" ]; then
             _set_local_state "$_state" claude_session_id "$_legacy_uuid"
         fi
@@ -455,9 +466,10 @@ migrate_session() {
         fi
         local _tmp="$readme.tmp"
         awk -v re="$_fm_field_re" '
-            NR == 1 && /^---$/ { fm = 1; print; next }
-            fm && /^---$/      { fm = 0; print; next }
-            fm && $0 ~ re      { next }
+            { line = $0; sub(/\r$/, "", line) }
+            NR == 1 && line == "---" { fm = 1; print; next }
+            fm && line == "---"      { fm = 0; print; next }
+            fm && line ~ re          { next }
             { print }
         ' "$readme" > "$_tmp" && mv "$_tmp" "$readme"
         warn "Moved machine-local fields from .cs/README.md to .cs/local/state"

@@ -476,4 +476,18 @@ test_secrets_section_keeps_the_rules_the_skill_less_path_needs() {
 }
 
 run_test test_secrets_section_keeps_the_rules_the_skill_less_path_needs
+# Subagents get their own always-loaded rules, and bash-logger records their Bash
+# commands too — so the pipe form leaks a secret there exactly as it does in the
+# lead. This surface was the one the secrets pass missed.
+test_subagent_secrets_rule_names_the_redirect_form() {
+    local hook="$SCRIPT_DIR/../hooks/subagent-context.sh"
+    assert_file_contains "$hook" "FILE REDIRECT" \
+        "the subagent rule must name the form that keeps the value out of the log" || return 1
+    assert_file_contains "$hook" "bash-logger" \
+        "and carry its reason" || return 1
+    assert_file_not_contains "$hook" "value on stdin) and reference" \
+        "the bare stdin wording implied any stdin form was safe" || return 1
+}
+
+run_test test_subagent_secrets_rule_names_the_redirect_form
 report_results

@@ -11,6 +11,11 @@ _doctor_fail() { printf "  ${RED}[FAIL]${NC} %s\n" "$1"; DOCTOR_FAIL=$((DOCTOR_F
 # OKs: no hooks missing, no hook paths broken, "0 hooks, 0 MCPs", statusline
 # "not registered (optional)". Consumers ask this first and say "unreadable"
 # instead of "none".
+# CALLERS MUST CHECK `command -v jq` FIRST. With no jq this returns false via
+# exit 127, which is indistinguishable from a parse failure — so an unguarded
+# caller states, falsely and with confidence, that a perfectly good settings
+# file is malformed. That is the lying-diagnostic class this whole family of
+# gates exists to remove.
 _doctor_settings_parse_ok() {  # settings
     jq -e . "$1" >/dev/null 2>&1
 }
@@ -279,6 +284,10 @@ _doctor_check_settings_hooks_resolve() {
     if [ ! -f "$settings" ]; then
         return
     fi
+    if ! command -v jq >/dev/null 2>&1; then
+        _doctor_warn "Hook paths: jq not installed; $settings could not be read"
+        return
+    fi
     if ! _doctor_settings_parse_ok "$settings"; then
         _doctor_fail "Hook paths: cannot read $settings (invalid JSON)"
         return
@@ -403,6 +412,10 @@ _doctor_check_claude_audit() {
     local settings="$claude_dir/settings.json"
     if [ ! -f "$settings" ]; then
         _doctor_warn "Audit: $settings not found"
+        return
+    fi
+    if ! command -v jq >/dev/null 2>&1; then
+        _doctor_warn "Audit: jq not installed; $settings could not be read"
         return
     fi
     if ! _doctor_settings_parse_ok "$settings"; then

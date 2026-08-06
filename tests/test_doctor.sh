@@ -831,4 +831,45 @@ test_doctor_warns_when_only_untracked_work_has_no_shadow_ref() {
 run_test test_doctor_fails_on_unparseable_settings
 run_test test_doctor_does_not_accept_a_hook_named_only_in_a_permission_rule
 run_test test_doctor_warns_when_only_untracked_work_has_no_shadow_ref
+# Build a PATH resolving everything doctor needs EXCEPT jq. bash included: this
+# PATH is what starts the binary, and omitting it fails at exec and reads like a
+# doctor bug.
+_jq_free_path() {
+    local d="$TEST_TMPDIR/nojq" t src
+    mkdir -p "$d"
+    for t in bash sh git grep sed awk cut tr head tail wc sort uniq basename dirname \
+             date mkdir rm cat ls find stat printf id kill; do
+        src=$(command -v "$t" 2>/dev/null) || continue
+        ln -sf "$src" "$d/$t" 2>/dev/null || true
+    done
+    printf '%s' "$d"
+}
+
+test_doctor_does_not_call_a_valid_settings_file_invalid_without_jq() {
+    # Every settings check reads the file through jq, so on a machine with no jq
+    # its exit 127 is indistinguishable from a parse failure — and doctor then
+    # states, falsely and confidently, that the file is not valid JSON. That is
+    # the same lying-diagnostic class these gates exist to remove.
+    local fake_claude="$TEST_TMPDIR/claude-nojq"
+    mkdir -p "$fake_claude"
+    printf '{"hooks": {}}\n' > "$fake_claude/settings.json"
+    jq -e . "$fake_claude/settings.json" >/dev/null 2>&1 \
+        || { echo "  FAIL: fixture is not valid JSON; the test would pass for the wrong reason"; return 1; }
+
+    local p; p=$(_jq_free_path)
+    if PATH="$p" command -v jq >/dev/null 2>&1; then
+        echo "  FAIL: jq is still resolvable on that PATH"; return 1
+    fi
+    local output
+    output=$(PATH="$p" CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_not_contains "$output" "not valid JSON" \
+        "a file doctor cannot READ must not be reported as malformed" || return 1
+    assert_output_not_contains "$output" "invalid JSON" \
+        "and no downstream check may claim it either" || return 1
+    assert_output_contains "$output" "jq" \
+        "doctor should say jq is missing rather than blame the file" || return 1
+}
+
+run_test test_doctor_does_not_call_a_valid_settings_file_invalid_without_jq
+
 report_results

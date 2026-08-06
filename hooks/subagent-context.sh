@@ -47,7 +47,7 @@ You are a subagent in a managed Claude Code session: $CLAUDE_SESSION_NAME
 Session directory: $SESSION_DIR
 
 Key rules:
-- NEVER write raw API keys, tokens, or passwords to files — store them in the session secret store ('cs -secrets set <name>', value on stdin) and reference them by name
+- NEVER write raw API keys, tokens, or passwords to project files — store them in the session secret store and reference them by name. Feed the value to 'cs -secrets set <name>' on stdin via a FILE REDIRECT: argv, pipes and heredocs are all recorded verbatim by the bash-logger, so stdin alone is not safety
 - Your final message is your deliverable — the parent reads it directly. Return findings there; do not write them to the session narrative (that notebook is per-actor, kept by the lead) unless you were asked to.
 EOF
 )
