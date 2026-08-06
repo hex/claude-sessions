@@ -176,17 +176,16 @@ At the start of every conversation in this session, read the following files to 
 2. **.cs/README.md** - Session objective, environment, and outcome
 3. **.cs/memory/narrative.*.md** - Per-actor lab notebooks (yours + teammates'): findings, in-progress state, observations
 
-Note: narratives are per-actor (narrative.<actor>.md) so co-developers never
-conflict. Append only to your own (run `cs -whoami` for your actor); read all
-narrative.*.md on resume to restore your working narrative and see teammates'
-in-progress findings.
+Narratives are per-actor (narrative.<actor>.md) so co-developers never conflict.
+Append only to your own; read all narrative.*.md on resume to restore your
+working narrative and see teammates' in-progress findings.
 
 ## Documentation Discipline
 
 Update the markdown documentation files throughout the session:
 
 1. **Once the objective is clear** (from the first substantive request): fill in the .cs/README.md objective and environment — don't block the user's first answer on this; on resume, update the existing text rather than overwriting it
-2. **As you work:** Update your narrative (.cs/memory/narrative.<actor>.md — run `cs -whoami` for your actor) with findings
+2. **As you work:** Update your narrative (.cs/memory/narrative.<actor>.md) with findings
 3. **End of session:** Complete the .cs/README.md outcome section
 
 Treat these files as a lab notebook - document as you go, not just at the end.

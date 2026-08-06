@@ -421,4 +421,33 @@ test_memory_note_discloses_shared_store() {
 }
 
 run_test test_memory_note_discloses_shared_store
+
+# SessionStart resolves the actor and injects "Current actor: <slug>. Your
+# narrative is .cs/memory/narrative.<slug>.md" into every conversation, and
+# subagent-context.sh tells subagents to keep no narrative at all. Every
+# surviving `cs -whoami` on an always-loaded surface therefore spends tokens on
+# every turn to look up an answer already sitting in context, in both the
+# protocol file and the injected block that names the actor four lines earlier.
+# The command stays a documented verb, and the two on-demand surfaces that need
+# it — commands/sweep.md and the narrative reminder — keep theirs.
+test_always_loaded_surfaces_do_not_re_derive_the_resolved_actor() {
+    "$CS_BIN" test-session <<< "" >/dev/null 2>&1 || true
+    local claude_md="$CS_SESSIONS_ROOT/test-session/CLAUDE.local.md"
+    local hook="$SCRIPT_DIR/../hooks/session-start.sh"
+
+    assert_file_exists "$claude_md" "session CLAUDE.local.md should exist" || return 1
+    assert_file_not_contains "$claude_md" "cs -whoami" \
+        "the protocol must not re-derive an actor the session context already names" || return 1
+    # Both absences are only safe while the hook still resolves and states it.
+    assert_file_contains "$hook" "Current actor: " \
+        "SessionStart must still name the resolved actor" || return 1
+    assert_file_contains "$hook" 'narrative\.\$ACTOR_SLUG\.md' \
+        "SessionStart must still name the agent's own narrative path" || return 1
+    assert_file_not_contains "$hook" "run 'cs -whoami' for your actor" \
+        "the injected block must not re-derive the actor it just named" || return 1
+    assert_file_contains "$claude_md" 'narrative\.<actor>\.md' \
+        "the protocol still names the per-actor path" || return 1
+}
+
+run_test test_always_loaded_surfaces_do_not_re_derive_the_resolved_actor
 report_results
