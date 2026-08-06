@@ -253,7 +253,10 @@ test_migrate_moves_machine_local_fields_out_of_a_crlf_readme() {
     printf -- '---\r\nstatus: active\r\nclaude_session_id: 11111111-2222-3333-4444-555555555555\r\nclaude_session_color: cyan\r\naliases: ["crlfproj"]\r\n---\r\n\r\n# Session: crlfproj\r\n\r\n## Outcome\r\n\r\nupdated: the docs by hand\r\n' \
         > "$dir/.cs/README.md"
     # Fixture sanity: the file really is CRLF, or this tests the LF path again.
-    LC_ALL=C grep -q "$(printf '\r')" "$dir/.cs/README.md" \
+    # Counted rather than matched: a CR carried through a shell variable is the
+    # one value Git Bash is most likely to mangle, and this test exists for Git
+    # Bash — a guard that cannot survive the platform it guards proves nothing.
+    [ "$(LC_ALL=C tr -cd '\r' < "$dir/.cs/README.md" | wc -c | tr -d '[:space:]')" -gt 0 ] \
         || { echo "  FAIL: fixture is not CRLF"; return 1; }
 
     "$CS_BIN" "crlfproj" < /dev/null > /dev/null 2>&1 || true
