@@ -61,8 +61,11 @@ main() {
     local cmd="$1"
 
     # `cs <verb> --help` before the arms: each one resolves a session or parses
-    # its own arguments first, so the flag would arrive as data.
+    # its own arguments first, so the flag would arrive as data. -secrets is
+    # exempt because it forwards to cs-secrets, which holds the reference for
+    # its own verbs; a derived usage line would answer in that reference's place.
     case "$cmd" in
+        -secrets) ;;
         -*) if _is_help_flag "${2:-}"; then show_verb_help "$cmd"; return $?; fi ;;
     esac
 
@@ -229,8 +232,10 @@ main() {
 
     # Parse session subcommands with a while loop to support flag combinations
     shift  # Remove session name / cmd
-    # `cs <name> <verb> --help` — same reasoning as the global form above.
+    # `cs <name> <verb> --help` — same reasoning as the global form above,
+    # including the -secrets exemption.
     case "${1:-}" in
+        -secrets) ;;
         -*) if _is_help_flag "${2:-}"; then show_verb_help "$1"; return $?; fi ;;
     esac
     while [ $# -gt 0 ]; do

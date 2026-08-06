@@ -9,7 +9,8 @@ never registered against an event, and calling `cs_resolve_session`. The library
 also carries `_cs_terminate_jsonl`, which repairs a JSONL tail left unterminated by
 an interrupted write so the next append cannot splice two records onto one line —
 hooks cannot source `bin/cs`, so the shape is shared rather than the code. Each hook
-that appends to the timeline defines its own fallback copy beside the
+that appends to a JSONL journal — the shared `timeline.jsonl` or the machine-local
+`notifications.jsonl` queue inbox — defines its own fallback copy beside the
 `cs_resolve_session` one, so an install whose hooks were not redeployed alongside a
 newer `bin/cs` still repairs rather than silently splicing.
 

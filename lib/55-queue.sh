@@ -193,6 +193,7 @@ run_queue() {
         start) _queue_set_state "$qdir" armed;;
         defer) mkdir -p "$qdir"; printf '%s\n' "$(date +%s)" > "$qdir/queue.declined.tmp" \
                    && mv "$qdir/queue.declined.tmp" "$qdir/queue.declined"
+               _terminate_jsonl "$qdir/notifications.jsonl"
                jq -nc --arg ts "$(date +%s)" '{ts: ($ts|tonumber), event: "gate_declined"}' \
                    >> "$qdir/notifications.jsonl" 2>/dev/null || true;;
         log)   _queue_log "$qdir";;

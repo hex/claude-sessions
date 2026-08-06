@@ -641,7 +641,7 @@ for a in "\$@"; do
 done
 case "\$url" in
     *.sha256) [ "\${CS_TEST_SHA_FETCH:-ok}" = "fail" ] && exit 22 ;;
-    *.minisig) exit 22 ;;
+    *.minisig) [ "\${CS_TEST_SIG_FETCH:-fail}" = "fail" ] && exit 22 ;;
 esac
 if [ -n "\$out" ]; then
     case "\$out" in
@@ -665,7 +665,22 @@ STUB
     done
     chmod +x "$bindir/curl"
 
-    PATH="$bindir:$PATH" HOME="$sandbox/home" bash "$sandbox/install.sh" >/dev/null 2>&1
+    # Reproduces the one minisign behaviour under test: a -m target that is not
+    # there fails, as real minisign does ("No such file or directory", exit 2).
+    cat > "$bindir/minisign" <<'STUB'
+#!/usr/bin/env bash
+m=""; prev=""
+for a in "$@"; do
+    case "$prev" in -m) m="$a" ;; esac
+    prev="$a"
+done
+[ -f "$m" ] || exit 2
+exit 0
+STUB
+    chmod +x "$bindir/minisign"
+
+    PATH="$bindir:$PATH" HOME="$sandbox/home" bash "$sandbox/install.sh" \
+        > "$sandbox/install.out" 2>&1
     printf '%s' "$sandbox/home/.local/bin"
 }
 
@@ -697,6 +712,22 @@ test_tui_removed_when_digest_cannot_be_computed() {
             return 1
         fi
     done
+}
+
+# The checksum gate removes a binary it could not verify; the signature block
+# below it then ran minisign against that removed path. minisign fails on a file
+# that is not there, so the install blamed the release signature for a removal
+# the checksum gate had already reported and explained. Both diagnostics claimed
+# a different cause, and only one of them happened.
+test_tui_signature_not_blamed_for_a_checksum_gate_removal() {
+    CS_TEST_SHA_TOOL=fail CS_TEST_SIG_FETCH=ok \
+        _install_tui_with_broken_verification sigblame >/dev/null
+    local out
+    out=$(cat "$TEST_TMPDIR/tui-verify-sigblame/install.out")
+    assert_output_contains "$out" "could not be verified" \
+        "the checksum gate must still say why it removed the binary" || return 1
+    assert_output_not_contains "$out" "signature verification failed" \
+        "must not report a signature failure for a binary already removed" || return 1
 }
 
 test_uninstall_removes_windows_cs_tui_exe() {
@@ -843,6 +874,7 @@ run_test test_install_removes_stale_opposite_platform_tui
 run_test test_release_windows_tui_artifact_matches_what_install_fetches
 run_test test_tui_removed_when_checksum_cannot_be_fetched
 run_test test_tui_removed_when_digest_cannot_be_computed
+run_test test_tui_signature_not_blamed_for_a_checksum_gate_removal
 run_test test_uninstall_removes_windows_cs_tui_exe
 run_test test_uninstall_removes_subagent_statusline
 test_hook_registration_doc_matches_install() {

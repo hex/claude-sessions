@@ -322,7 +322,11 @@ elif [ "$INSTALL_METHOD" = "web" ]; then
             elif [ -x "$HOME/.local/bin/minisign" ]; then
                 _ms_bin="$HOME/.local/bin/minisign"
             fi
-            if [ -n "$_ms_bin" ]; then
+            # Nothing to verify once the checksum gate above removed the binary:
+            # minisign fails on a path that is not there, which would report a
+            # signature failure for a removal the gate has already explained,
+            # and send the reader after release-key tampering that never was.
+            if [ -n "$_ms_bin" ] && [ -f "$_tui_dst" ]; then
                 if ! "$_ms_bin" -Vm "$_tui_dst" -P "$CS_SIGN_PUBKEY" -x "$_tui_dst.minisig" >/dev/null 2>&1; then
                     rm -f "$_tui_dst" "$_tui_dst.minisig"
                     warn "cs-tui signature verification failed -- removed"

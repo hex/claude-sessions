@@ -65,6 +65,13 @@ if ! command -v cs_resolve_session >/dev/null 2>&1; then
         [ -n "${CLAUDE_SESSION_NAME:-}" ] && [ -n "${CLAUDE_SESSION_DIR:-}" ]
     }
 fi
+if ! command -v _cs_terminate_jsonl >/dev/null 2>&1; then
+    _cs_terminate_jsonl() {
+        [ -s "$1" ] || return 0
+        [ -n "$(tail -c 1 "$1" 2>/dev/null)" ] || return 0
+        printf '\n' >> "$1" 2>/dev/null || true
+    }
+fi
 # Only run in cs sessions
 if ! cs_resolve_session ""; then
     echo '{"decision": "approve"}'
@@ -302,8 +309,12 @@ _qdone_len() {  # done file
 }
 
 # Append one event to the notification inbox. Task text is arbitrary -> jq.
-# Best-effort: inbox failure must never break the drain.
+# Repair an unterminated tail first: a drain killed mid-append leaves the last
+# line without its newline, and appending onto it joins two records into one
+# line that the readers' `fromjson? // empty` drops whole — costing the torn
+# record and this one. Best-effort: inbox failure must never break the drain.
 _inbox_append() {  # jq --arg/--argjson pairs..., then the jq object program
+    _cs_terminate_jsonl "$QDIR/notifications.jsonl" 2>/dev/null || true
     jq -nc "$@" >> "$QDIR/notifications.jsonl" 2>/dev/null || true
 }
 

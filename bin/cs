@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.8.6"
+VERSION="2026.8.7"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 
@@ -4100,6 +4100,7 @@ run_queue() {
         start) _queue_set_state "$qdir" armed;;
         defer) mkdir -p "$qdir"; printf '%s\n' "$(date +%s)" > "$qdir/queue.declined.tmp" \
                    && mv "$qdir/queue.declined.tmp" "$qdir/queue.declined"
+               _terminate_jsonl "$qdir/notifications.jsonl"
                jq -nc --arg ts "$(date +%s)" '{ts: ($ts|tonumber), event: "gate_declined"}' \
                    >> "$qdir/notifications.jsonl" 2>/dev/null || true;;
         log)   _queue_log "$qdir";;
@@ -6861,8 +6862,11 @@ main() {
     local cmd="$1"
 
     # `cs <verb> --help` before the arms: each one resolves a session or parses
-    # its own arguments first, so the flag would arrive as data.
+    # its own arguments first, so the flag would arrive as data. -secrets is
+    # exempt because it forwards to cs-secrets, which holds the reference for
+    # its own verbs; a derived usage line would answer in that reference's place.
     case "$cmd" in
+        -secrets) ;;
         -*) if _is_help_flag "${2:-}"; then show_verb_help "$cmd"; return $?; fi ;;
     esac
 
@@ -7029,8 +7033,10 @@ main() {
 
     # Parse session subcommands with a while loop to support flag combinations
     shift  # Remove session name / cmd
-    # `cs <name> <verb> --help` — same reasoning as the global form above.
+    # `cs <name> <verb> --help` — same reasoning as the global form above,
+    # including the -secrets exemption.
     case "${1:-}" in
+        -secrets) ;;
         -*) if _is_help_flag "${2:-}"; then show_verb_help "$1"; return $?; fi ;;
     esac
     while [ $# -gt 0 ]; do

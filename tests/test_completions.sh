@@ -586,4 +586,21 @@ test_every_verb_answers_help() {
 
 run_test test_every_verb_answers_help
 
+# -secrets is a delegation, not a verb cs answers itself: bin/cs-secrets holds
+# the reference, and the interception runs ahead of the arm that forwards to it.
+# test_every_verb_answers_help cannot catch this — it asks only for exit 0,
+# non-empty output naming the verb, which the interception satisfies for every
+# verb by construction. `migrate-backend` appears in the secrets reference and
+# nowhere in cs's own help, so it distinguishes the two answers.
+test_secrets_help_reaches_the_secrets_reference() {
+    local flag out
+    for flag in --help -h; do
+        out=$("$CS_FILE" -secrets "$flag" 2>&1) || return 1
+        assert_output_contains "$out" "migrate-backend" \
+            "cs -secrets $flag must reach the cs-secrets reference" || return 1
+    done
+}
+
+run_test test_secrets_help_reaches_the_secrets_reference
+
 report_results

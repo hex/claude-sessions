@@ -180,6 +180,53 @@ test_defer_records_gate_declined() {
         || { echo "  FAIL: existing declined stamp must still be written"; return 1; }
 }
 
+# Lay down an inbox whose last line lost its newline to an interrupted write,
+# and prove the fixture is genuinely torn before anything appends to it.
+_torn_inbox() {
+    local inbox="$CLAUDE_SESSION_META_DIR/local/notifications.jsonl"
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    # The surviving record uses an event neither writer under test emits here,
+    # so a passing assertion cannot be satisfied by the fixture alone.
+    printf '{"ts":1,"event":"breaker_tripped","reason":"seed"}\n' >  "$inbox"
+    printf '{"ts":2,"event":"task_done","task":"alpha"}'          >> "$inbox"
+    [ -n "$(tail -c 1 "$inbox")" ] \
+        || { echo "  FAIL: fixture is not torn, so the test cannot reach the splice"; return 1; }
+}
+
+# A killed writer leaves the last line unterminated, so the next bare `>>`
+# lands on it and the tolerant `fromjson? // empty` reader drops the joined
+# line whole — losing the torn record AND the intact one written after it.
+# timeline.jsonl's writers were taught to repair the tail first; these two
+# append to notifications.jsonl and were not.
+# Read the inbox the way _queue_log and the digest do: raw lines through
+# `fromjson? // empty`, which drops a line holding two spliced records. A plain
+# `jq .` would hide the defect — jq parses concatenated objects as a stream and
+# reports both events from the very line the real readers throw away.
+_inbox_events() { _inbox | jq -rR 'fromjson? // empty | .event' 2>/dev/null; }
+
+test_defer_does_not_splice_onto_a_torn_inbox() {
+    _qs_session "tornd"
+    _torn_inbox || return 1
+    "$CS_BIN" -queue defer >/dev/null 2>&1 || { echo "  FAIL: defer exited non-zero"; return 1; }
+    local seen; seen=$(_inbox_events)
+    assert_output_contains "$seen" "gate_declined" \
+        "the record defer just wrote must survive the torn tail" || return 1
+    assert_output_contains "$seen" "breaker_tripped" \
+        "the intact record before the torn one must still parse" || return 1
+}
+
+test_drain_does_not_splice_onto_a_torn_inbox() {
+    _qs_session "torna"
+    _arm_queue "task one"
+    _torn_inbox || return 1
+    _stop_turn >/dev/null || return 1
+    local seen; seen=$(_inbox_events)
+    assert_output_contains "$seen" "drain_started" \
+        "the drain's own event must survive the torn tail" || return 1
+    assert_output_contains "$seen" "breaker_tripped" \
+        "the intact record before the torn one must still parse" || return 1
+}
+
 test_queue_log_prints_events_oldest_first() {
     _qs_session "ql"
     _arm_queue "only task"
@@ -317,6 +364,8 @@ run_test test_context_breaker_parks_and_missing_ctx_never_trips
 run_test test_five_hour_breaker_fresh_trips_stale_skips
 run_test test_threshold_env_overrides
 run_test test_defer_records_gate_declined
+run_test test_defer_does_not_splice_onto_a_torn_inbox
+run_test test_drain_does_not_splice_onto_a_torn_inbox
 run_test test_queue_log_prints_events_oldest_first
 run_test test_queue_log_empty_message
 run_test test_digest_surfaces_once_at_prompt
