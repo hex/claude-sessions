@@ -1277,6 +1277,20 @@ _tree_is_dirty() {
         || ! git -C "$1" diff --cached --quiet 2>/dev/null
 }
 
+# Untracked files in a worktree that removal would actually destroy, one per
+# line. cs writes its own bookkeeping into every worktree — the whole .cs tree
+# in ignored mode, plus the settings and protocol files — and none of it is the
+# user's to commit: ignored-mode fusion carries .cs into the base before the
+# removal, and the removal passes --force precisely because these are expected.
+# The merge gate and the readiness screen MUST read from this one definition;
+# when they disagreed, a worktree predating the cs exclude reported blocked on a
+# merge that would have gone straight through.
+_worktree_untracked_at_risk() {  # wt_dir
+    git -C "$1" ls-files --others --exclude-standard 2>/dev/null \
+        | grep -v -e '^\.cs/' -e '^\.claude/settings\.local\.json$' -e '^CLAUDE\.local\.md$' \
+        || true
+}
+
 # Print the task name of every verified feature worktree of a base, one per
 # line. Glob the sessions root then ask git to confirm each candidate — the
 # reverse direction would enumerate the main checkout, and for an adopted base
@@ -1348,7 +1362,7 @@ _feature_readiness() {  # base_name task
     _tree_is_dirty "$base_dir" && base_dirty=1
 
     local others
-    others=$(git -C "$wt_dir" ls-files --others --exclude-standard 2>/dev/null || true)
+    others=$(_worktree_untracked_at_risk "$wt_dir")
     if [ -n "$others" ]; then
         untracked=$(printf '%s\n' "$others" | wc -l | tr -d '[:space:]')
     fi
@@ -1569,18 +1583,10 @@ merge_worktree_session() {
     if _tree_is_dirty "$wt_dir"; then
         error "Worktree has uncommitted changes; commit them in $wt_dir first (cs never commits for you)"
     fi
-    # cs writes its own bookkeeping into every worktree — the whole .cs tree in
-    # ignored mode, plus the settings and protocol files — and none of it is the
-    # user's to commit. Ignored-mode fusion carries .cs into the base before the
-    # removal below, and the removal already passes --force precisely because
-    # these are expected. Counting them as dirt refuses a merge over the files
-    # cs itself just created, in any project whose .gitignore does not happen to
-    # name them. Everything else still refuses: the point of the gate is work
+    # Everything the filter keeps still refuses: the point of the gate is work
     # the user would lose.
     local wt_untracked
-    wt_untracked=$(git -C "$wt_dir" ls-files --others --exclude-standard 2>/dev/null \
-        | grep -v -e '^\.cs/' -e '^\.claude/settings\.local\.json$' -e '^CLAUDE\.local\.md$' \
-        || true)
+    wt_untracked=$(_worktree_untracked_at_risk "$wt_dir")
     if [ -n "$wt_untracked" ]; then
         error "Worktree has untracked files that removal would destroy; commit or remove them first:
 $wt_untracked"
@@ -1630,6 +1636,24 @@ $wt_untracked"
     info "Merged $branch and removed worktree $base_name@$task"
 }
 
+# Append one JSONL file onto another, keeping every record on its own line. A
+# process killed mid-write leaves a last line with no newline; a bare `cat >>`
+# then splices two records into one, and the tolerant per-line reader
+# (`fromjson? // empty` in run_conversations) drops BOTH the splice and the
+# record that followed it. Terminating on either side costs one byte and keeps
+# the loss at zero.
+_append_jsonl() {  # src dst
+    local src="$1" dst="$2"
+    [ -f "$src" ] || return 0
+    if [ -s "$dst" ] && [ -n "$(tail -c 1 "$dst" 2>/dev/null)" ]; then
+        printf '\n' >> "$dst"
+    fi
+    cat "$src" >> "$dst"
+    if [ -n "$(tail -c 1 "$dst" 2>/dev/null)" ]; then
+        printf '\n' >> "$dst"
+    fi
+}
+
 # Fuse session records from a worktree .cs into the base .cs (ignored mode:
 # the repo does not track .cs/, so git merge cannot carry these). Applies the
 # same semantics the merge drivers give tracked repos: union append for
@@ -1639,7 +1663,7 @@ fuse_session_records() {
     local src="$1" dst="$2"
     local f base
 
-    [ -f "$src/timeline.jsonl" ] && cat "$src/timeline.jsonl" >> "$dst/timeline.jsonl"
+    _append_jsonl "$src/timeline.jsonl" "$dst/timeline.jsonl"
     # Worktrees never run migrate_session, so a task branch created before the
     # log moved to .cs/local/ still keeps its audit trail at .cs/logs/; fuse
     # whichever the worktree has into the base's machine-local log.

@@ -540,6 +540,46 @@ test_merge_ignored_mode_fuses_records() {
 
 run_test test_merge_ignored_mode_fuses_records
 
+test_merge_fuse_survives_a_torn_timeline_tail() {
+    # A crash mid-append leaves a last line with no newline. Appending onto it
+    # splices two records into one, and the reader's tolerant `fromjson? //
+    # empty` then drops BOTH — the splice and the record that followed it.
+    local base_dir="$CS_SESSIONS_ROOT/proj"
+    mkdir -p "$base_dir/.cs"/{memory,local}
+    echo "# P" > "$base_dir/README.md"
+    printf '.cs/\n.claude/settings.local.json\n' > "$base_dir/.gitignore"
+    (cd "$base_dir" && git init -q && git config core.autocrlf false \
+        && git add -A && git commit -q -m init)
+    # Torn tail: the last record has no terminating newline.
+    printf '{"event":"base-last"}' > "$base_dir/.cs/timeline.jsonl"
+    cs_launch "proj@t1"
+    local wt="$CS_SESSIONS_ROOT/proj@t1"
+    echo "done" > "$wt/result.txt"
+    (cd "$wt" && git add result.txt && git commit -q -m "task")
+    printf '{"event":"from-task"}\n' > "$wt/.cs/timeline.jsonl"
+    # Fixture sanity: the base tail really is unterminated, or the splice the
+    # test is about cannot happen.
+    assert_eq "}" "$(tail -c 1 "$base_dir/.cs/timeline.jsonl")" \
+        "fixture must leave the base timeline unterminated" || return 1
+
+    local output merge_status
+    output=$("$CS_BIN" "proj" --merge "t1" 2>&1)
+    merge_status=$?
+    assert_eq "0" "$merge_status" "merge exits 0" \
+        || { echo "  merge output: $output"; return 1; }
+
+    # Parse the way cs reads it: one record per line, malformed lines dropped.
+    local events
+    events=$(jq -rRs '[split("\n")[] | select(length > 0) | (fromjson? // empty) | .event] | join(",")' \
+        "$base_dir/.cs/timeline.jsonl" 2>/dev/null)
+    assert_output_contains "$events" "base-last" \
+        "the torn base record must survive the fuse" || return 1
+    assert_output_contains "$events" "from-task" \
+        "the fused record must survive the fuse" || return 1
+}
+
+run_test test_merge_fuse_survives_a_torn_timeline_tail
+
 test_rm_worktree_unregisters_and_prompts_branch() {
     local base_dir
     base_dir=$(create_test_session_with_git "myproj")
@@ -750,6 +790,63 @@ test_features_untracked_is_not_reported_as_dirty() {
 }
 
 run_test test_features_untracked_is_not_reported_as_dirty
+
+test_features_does_not_count_the_bookkeeping_the_merge_gate_skips() {
+    # A worktree created before cs excluded its own bookkeeping still has .cs/
+    # untracked. The merge gate filters exactly that set and would succeed, so
+    # readiness reporting "blocked" sends the user hunting for work to commit
+    # that is not theirs and does not exist.
+    local base_dir="$CS_SESSIONS_ROOT/proj"
+    mkdir -p "$base_dir/.cs"/{memory,local}
+    echo "# Project readme" > "$base_dir/README.md"
+    (cd "$base_dir" && git init -q && git config core.autocrlf false \
+        && git add README.md && git commit -q -m init)
+    cs_launch "proj@task1"
+    local wt="$CS_SESSIONS_ROOT/proj@task1"
+
+    local exclude
+    exclude=$( (cd "$wt" && git rev-parse --git-path info/exclude) 2>/dev/null )
+    case "$exclude" in /*|[A-Za-z]:[\\/]*) : ;; *) exclude="$wt/$exclude" ;; esac
+    grep -v -e '^\.cs/$' -e '^\.claude/settings\.local\.json$' "$exclude" > "$exclude.tmp" 2>/dev/null || true
+    mv "$exclude.tmp" "$exclude"
+    # Fixture sanity: without the entry the skeleton really is untracked again,
+    # so the readiness path is reached with something to filter.
+    local others
+    others=$(git -C "$wt" ls-files --others --exclude-standard 2>/dev/null || true)
+    case "$others" in
+        *.cs/*) : ;;
+        *) echo "  FAIL: fixture did not reproduce the untracked .cs skeleton"; return 1 ;;
+    esac
+
+    local line
+    line=$("$CS_BIN" "proj" -features --porcelain 2>/dev/null)
+    assert_eq "0" "$(_feat_field "$line" 7)" \
+        "cs's own bookkeeping is not untracked work" || return 1
+    assert_eq "ready" "$(_feat_field "$line" 10)" \
+        "readiness must agree with the gate that would let this merge through" || return 1
+}
+
+run_test test_features_does_not_count_the_bookkeeping_the_merge_gate_skips
+
+test_features_still_counts_real_untracked_work_in_an_old_worktree() {
+    # The filter is scoped to cs's bookkeeping. A file the user would lose must
+    # still show up in the count and in the state, or readiness becomes a lie in
+    # the other direction.
+    local base_dir="$CS_SESSIONS_ROOT/proj"
+    mkdir -p "$base_dir/.cs"/{memory,local}
+    echo "# Project readme" > "$base_dir/README.md"
+    (cd "$base_dir" && git init -q && git config core.autocrlf false \
+        && git add README.md && git commit -q -m init)
+    cs_launch "proj@task1"
+    local wt="$CS_SESSIONS_ROOT/proj@task1"
+    echo "unsaved" > "$wt/notes.txt"
+    local line
+    line=$("$CS_BIN" "proj" -features --porcelain 2>/dev/null)
+    assert_eq "1" "$(_feat_field "$line" 7)" "the user's file is still counted" || return 1
+    assert_eq "untracked" "$(_feat_field "$line" 10)" "state must name the untracked gate" || return 1
+}
+
+run_test test_features_still_counts_real_untracked_work_in_an_old_worktree
 
 test_features_fresh_worktree_is_not_already_merged() {
     # A fresh worktree's branch sits AT base HEAD, where merge-base
