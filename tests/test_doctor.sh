@@ -747,4 +747,88 @@ run_test test_doctor_warns_on_dangling_spawned_by
 run_test test_doctor_spawned_by_ok_when_spawner_exists
 run_test test_doctor_warns_on_unmarked_cs_tmux_session
 run_test test_doctor_no_warning_when_cs_tmux_session_managed
+
+# --- Checks that must not report green on the state they exist to catch ---
+# Every fixture below is in the BROKEN state. A green-path test proves nothing
+# here: the defect in each case was that the check passed under corruption.
+
+test_doctor_fails_on_unparseable_settings() {
+    # Every settings check reads the file with jq and swallows the error, so a
+    # syntax error produced a screen of OKs — no hooks missing, no hook paths
+    # broken, "0 hooks, 0 MCPs", statusline "not registered (optional)". A
+    # diagnostic that reports healthy on a file it cannot read is worse than
+    # no diagnostic.
+    local fake_claude="$TEST_TMPDIR/claude-badjson"
+    mkdir -p "$fake_claude"
+    printf '{"hooks": {"SessionStart": [ }\n' > "$fake_claude/settings.json"
+    # Fixture sanity: the file really is unparseable, or nothing is being tested.
+    if jq -e . "$fake_claude/settings.json" >/dev/null 2>&1; then
+        echo "  FAIL: fixture settings.json parses; the defect is unreachable"
+        return 1
+    fi
+    local output
+    output=$(CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "not valid JSON" \
+        "doctor must name the parse failure" || return 1
+    assert_output_contains "$output" "FAIL" \
+        "an unreadable settings file is a failure, not a warning" || return 1
+    assert_output_not_contains "$output" "0 hooks, 0 MCPs" \
+        "counts from a failed parse must not be reported as an audit result" || return 1
+}
+
+test_doctor_does_not_accept_a_hook_named_only_in_a_permission_rule() {
+    # The registration check substring-matched the WHOLE settings file, so a
+    # hook path lingering anywhere — a permissions rule, a comment-like string,
+    # an env value — read as "registered". The hook never fires, and doctor
+    # said the install was fine.
+    local fake_claude="$TEST_TMPDIR/claude-permonly" fake_hooks="$TEST_TMPDIR/hooks-permonly"
+    mkdir -p "$fake_claude" "$fake_hooks"
+    : > "$fake_hooks/session-start.sh"
+    chmod +x "$fake_hooks/session-start.sh"
+    # session-start.sh appears in the file, but only inside a permission rule —
+    # the hooks section registers something else entirely.
+    cat > "$fake_claude/settings.json" << EOF
+{
+  "hooks": {
+    "PreToolUse": [
+      {"hooks": [{"type": "command", "command": "$fake_hooks/other.sh"}]}
+    ]
+  },
+  "permissions": {"allow": ["Bash($fake_hooks/session-start.sh)"]}
+}
+EOF
+    local output
+    output=$(CS_CLAUDE_DIR="$fake_claude" CS_HOOKS_DIR="$fake_hooks" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "missing in settings.json" \
+        "a hook absent from the hooks section is not registered" || return 1
+    assert_output_contains "$output" "session-start.sh" \
+        "the failure must name the unregistered hook" || return 1
+}
+
+test_doctor_warns_when_only_untracked_work_has_no_shadow_ref() {
+    # The autosave hook snapshots with `git add -A`, which stages untracked
+    # files. The check tested `git diff --quiet HEAD` — tracked changes only —
+    # so a session whose entire body of work is untracked reported "no
+    # uncommitted work to snapshot" on exactly the broken-autosave state.
+    local dir="$CLAUDE_SESSION_DIR"
+    echo "unsaved work" > "$dir/scratch-note.txt"
+    # Fixture sanity: tracked-clean, untracked-dirty, and no shadow ref — the
+    # precise state that produced the false OK.
+    git -C "$dir" diff --quiet HEAD 2>/dev/null \
+        || { echo "  FAIL: fixture has tracked changes; it would pass for the wrong reason"; return 1; }
+    local others
+    others=$(git -C "$dir" ls-files --others --exclude-standard 2>/dev/null || true)
+    [ -n "$others" ] || { echo "  FAIL: fixture produced no untracked files"; return 1; }
+
+    local output
+    output=$(CS_CLAUDE_SESSION_ID="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "autosave may be broken" \
+        "untracked work with no shadow ref must warn" || return 1
+    assert_output_not_contains "$output" "no uncommitted work to snapshot" \
+        "untracked work is work" || return 1
+}
+
+run_test test_doctor_fails_on_unparseable_settings
+run_test test_doctor_does_not_accept_a_hook_named_only_in_a_permission_rule
+run_test test_doctor_warns_when_only_untracked_work_has_no_shadow_ref
 report_results
