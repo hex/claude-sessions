@@ -757,6 +757,71 @@ EOF
 # ============================================================================
 echo "Running test_install.sh"
 echo ""
+
+# --- Uninstall must remove everything install created ---
+
+# install.sh reads the user's fpath line to choose between ~/.zsh/completions and
+# the singular ~/.zsh/completion (install.sh:62-69). Uninstall hardcoded the
+# plural, so _cs survived for exactly the users that detection exists to serve.
+test_uninstall_removes_zsh_completion_from_detected_dir() {
+    local fake_home="$TEST_TMPDIR/uninstall-zsh-singular"
+    mkdir -p "$fake_home"
+    printf 'fpath=(~/.zsh/completion $fpath)\n' > "$fake_home/.zshrc"
+
+    HOME="$fake_home" bash "$INSTALL_SH" > /dev/null 2>&1 \
+        || { echo "  FAIL: install.sh exited non-zero"; return 1; }
+    assert_file_exists "$fake_home/.zsh/completion/_cs" \
+        "install must place _cs in the fpath-detected dir, or this test proves nothing" || return 1
+
+    printf 'y\n' | HOME="$fake_home" "$CS_BIN" -uninstall > /dev/null 2>&1 \
+        || { echo "  FAIL: cs -uninstall exited non-zero"; return 1; }
+    assert_not_exists "$fake_home/.local/bin/cs" \
+        "uninstall body must have run (confirmation accepted)" || return 1
+    assert_not_exists "$fake_home/.zsh/completion/_cs" \
+        "zsh completion in the fpath-detected dir must be removed" || return 1
+}
+
+test_uninstall_removes_zsh_completion_from_default_dir() {
+    local fake_home="$TEST_TMPDIR/uninstall-zsh-plural"
+    mkdir -p "$fake_home"
+    printf 'fpath=(~/.zsh/completions $fpath)\n' > "$fake_home/.zshrc"
+
+    HOME="$fake_home" bash "$INSTALL_SH" > /dev/null 2>&1 \
+        || { echo "  FAIL: install.sh exited non-zero"; return 1; }
+    assert_file_exists "$fake_home/.zsh/completions/_cs" \
+        "install must place _cs in the default dir, or this test proves nothing" || return 1
+
+    printf 'y\n' | HOME="$fake_home" "$CS_BIN" -uninstall > /dev/null 2>&1 \
+        || { echo "  FAIL: cs -uninstall exited non-zero"; return 1; }
+    assert_not_exists "$fake_home/.zsh/completions/_cs" \
+        "zsh completion in the default dir must be removed" || return 1
+}
+
+test_uninstall_removes_update_cache() {
+    local fake_home="$TEST_TMPDIR/uninstall-cache"
+    mkdir -p "$fake_home"
+
+    HOME="$fake_home" bash "$INSTALL_SH" > /dev/null 2>&1 \
+        || { echo "  FAIL: install.sh exited non-zero"; return 1; }
+    # check_update_notify writes these on launch; the installer never creates
+    # them, so the fixture seeds them the way a real run would.
+    mkdir -p "$fake_home/.cache/cs"
+    printf '%s 2026.99.3\n' "$(date +%s)" > "$fake_home/.cache/cs/update-check"
+    printf '2026.99.3\tone summary\n' > "$fake_home/.cache/cs/update-notes-2026.99.3"
+
+    printf 'y\n' | HOME="$fake_home" "$CS_BIN" -uninstall > /dev/null 2>&1 \
+        || { echo "  FAIL: cs -uninstall exited non-zero"; return 1; }
+    assert_not_exists "$fake_home/.local/bin/cs" \
+        "uninstall body must have run (confirmation accepted)" || return 1
+    assert_not_exists "$fake_home/.cache/cs/update-check" \
+        "update-check stamp must not survive uninstall" || return 1
+    assert_not_exists "$fake_home/.cache/cs/update-notes-2026.99.3" \
+        "notes cache must not survive uninstall" || return 1
+    assert_not_exists "$fake_home/.cache/cs" \
+        "the update cache directory itself must go" || return 1
+}
+
+
 run_test test_install_completes_when_zshrc_has_no_fpath
 run_test test_install_respects_custom_fpath_dir
 run_test test_manifest_arrays_in_sync
@@ -817,6 +882,9 @@ test_filechanged_registration_carries_async_rewake() {
 
 run_test test_filechanged_registration_carries_async_rewake
 run_test test_uninstall_preserves_foreign_statusline
+run_test test_uninstall_removes_zsh_completion_from_detected_dir
+run_test test_uninstall_removes_zsh_completion_from_default_dir
+run_test test_uninstall_removes_update_cache
 run_test test_install_recovers_from_invalid_settings_json
 run_test test_hook_registration_doc_matches_install
 report_results
