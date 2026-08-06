@@ -48,6 +48,20 @@ should do. If the user did not give one, ask before writing anything.
    Concepts; 3. Files and Code Sections (with the snippets that matter);
    4. Problem Solving; 5. Pending Tasks; 6. Current Work; 7. Next Step.
    Write for a successor with zero conversation memory.
+
+   Two rules govern the body, both following from where it goes — step 5
+   commits it, and the next conversation reads it as its opening prompt:
+
+   - **Redact.** API keys, tokens, passwords and personally identifying
+     information that surfaced in the conversation stay out of the file.
+     `.cs/handoffs/` is tracked, so writing one here publishes it, and cs's
+     own protocol is that credentials live in `cs -secrets`, never in a
+     file. Name the secret's purpose instead: "the deploy token, in
+     `cs -secrets get DEPLOY_TOKEN`".
+   - **Reference, do not restate.** Work already captured in a commit,
+     spec, plan or diff gets a path and a one-line pointer. Re-summarising
+     it spends the successor's opening context on what it can read for
+     itself, and a summary drifts from the file while the path does not.
 4. Retire this machine's leftovers: for every OTHER file in `.cs/handoffs/`
    whose frontmatter still says `status: unconsumed`, flip that one
    frontmatter line to `status: superseded` — but only when its `parent:`

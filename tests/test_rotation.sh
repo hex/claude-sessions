@@ -153,6 +153,22 @@ test_rotate_skill_documents_the_clear_route() {
         "the stale no-state contract is gone" || return 1
 }
 
+test_rotate_skill_governs_what_goes_into_the_handoff() {
+    # The handoff is written by a model summarising a conversation, committed
+    # by step 5 into a store the session .gitignore does not cover, and read
+    # back as the next conversation's prompt. Published and re-read: both
+    # halves are why the body needs rules.
+    local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
+    assert_file_contains "$skill" "Redact" \
+        "the skill must tell the writer to redact secrets" || return 1
+    assert_file_contains "$skill" "tokens" \
+        "the redaction rule must name what to look for" || return 1
+    assert_file_contains "$skill" "personally identifying" \
+        "redaction covers personal data, not just credentials" || return 1
+    assert_file_contains "$skill" "Reference, do not restate" \
+        "the skill must stop the handoff re-summarising committed work" || return 1
+}
+
 test_rotate_skill_reads_parent_from_state_not_the_launch_env() {
     # CS_CLAUDE_SESSION_ID is the LAUNCH uuid: exported once per cs process
     # (lib/75-launch.sh) and never refreshed, on purpose — session-start.sh
@@ -179,6 +195,7 @@ test_rotate_skill_reads_parent_from_state_not_the_launch_env() {
 run_test test_rotate_skill_exists_with_frontmatter
 run_test test_rotate_skill_registered_in_both_manifests
 run_test test_rotate_skill_documents_the_clear_route
+run_test test_rotate_skill_governs_what_goes_into_the_handoff
 run_test test_rotate_skill_reads_parent_from_state_not_the_launch_env
 
 # ============================================================================
