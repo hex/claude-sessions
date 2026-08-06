@@ -13,7 +13,7 @@ export CS_SESSIONS_ROOT="/path/to/sessions"
 # Legacy password for secrets sync (age encryption preferred - see secrets.md)
 export CS_SECRETS_PASSWORD="your-secure-password"
 
-# Override secrets backend (keychain or encrypted)
+# Override secrets backend (keychain, wcm, or encrypted)
 export CS_SECRETS_BACKEND="keychain"
 
 # Override Claude Code binary (default: claude)
@@ -63,11 +63,20 @@ export CS_QUEUE_MAX_FAILURES="5"
 export CS_QUEUE_MAX_CTX="85"
 export CS_QUEUE_MAX_5H="85"
 
+# Mail wakes: how many a turn boundary may fire between user prompts,
+# and the switch that silences them entirely (see hooks.md)
+export CS_MAIL_WAKE_MAX="5"   # this is the default
+export CS_NO_MAIL_WAKE="1"
+
 # Disable the iTerm2 integrations (tab color, attention dock bounce)
 export CS_NO_ITERM2="1"
 
 # Override the tmux binary cs -spawn uses (default: tmux on PATH)
 export CS_TMUX_BIN="/opt/homebrew/bin/tmux"
+
+# Force the detected platform instead of probing for it; any other
+# value is rejected
+export CS_PLATFORM_OVERRIDE="linux"   # macos, wsl, msys, or linux
 ```
 
 ## Environment variables cs sets for you
