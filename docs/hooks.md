@@ -218,4 +218,4 @@ The hooks are configured in `~/.claude/settings.json`:
 }
 ```
 
-Hooks only activate when running inside a `cs` session (detected via `CLAUDE_SESSION_NAME` environment variable). Outside of `cs` sessions, they pass through without effect.
+Hooks activate wherever `cs_resolve_session` finds a session: from the exported `CLAUDE_SESSION_NAME`/`CLAUDE_SESSION_DIR` when `cs` launched the conversation, and otherwise by walking up from the directory the front end opened (see "How a hook finds its session" above). Outside a session root, and in a session carrying `.cs/local/disabled`, they pass through without effect.
