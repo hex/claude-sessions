@@ -169,7 +169,7 @@ _queue_log() {  # qdir
          elif .reason then ": " + .reason + " (" + (.reading|tostring) + " >= " + (.limit|tostring) + "), " + (.remaining|tostring) + " remaining"
          elif .done then ": " + (.done|tostring) + " done"
          else "" end)
-    ' "$inbox"
+    ' "$inbox" | _scrub_controls
 }
 
 # Dispatcher. Runs inside a session (env) or via the session-scoped arm.
@@ -182,7 +182,12 @@ run_queue() {
     local sub="${1:-list}"
     case "$sub" in
         add)   shift; _queue_add "$qdir" "$*";;
-        list|ls) _queue_list "$qdir";;
+        # Scrubbed once here rather than inside _queue_list's two branches:
+        # one construct that cannot be half-removed, and one tr fork instead
+        # of one per queued task (forks are expensive under MSYS).
+        # _queue_list is a pure reader — it emits no palette variables and
+        # never calls error() — so the pipeline eats nothing cs owns.
+        list|ls) _queue_list "$qdir" | _scrub_controls;;
         rm)    shift; _queue_rm "$qdir" "${1:-}";;
         clear) _queue_clear "$qdir";;
         start) _queue_set_state "$qdir" armed;;

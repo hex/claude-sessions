@@ -197,6 +197,16 @@ _trim() {  # text
     printf '%s' "$s"
 }
 
+# Strip C0 control characters (keeping tab and newline) and DEL from stdin, so
+# text another session wrote cannot smuggle an escape sequence into this
+# session's terminal. cs is multi-session by design — presence, queued tasks and
+# mail all cross a session boundary — and the reader does not trust the writer.
+# C0 and DEL only: 8-bit C1 (0x80-0x9F, where 0x9B is CSI) is deliberately out
+# of scope, because a UTF-8 terminal does not decode raw C1 bytes as controls.
+_scrub_controls() {
+    LC_ALL=C tr -d '\000-\010\013-\037\177'
+}
+
 # Detect the outer terminal, even when running inside tmux.
 # tmux overrides TERM_PROGRAM, so we check LC_TERMINAL and ITERM_SESSION_ID as fallbacks.
 _detect_terminal() {
@@ -3349,12 +3359,6 @@ run_spawn() {
 # appends (mail inbox, walk-away queue) were gone.
 MAIL_BODY_MAX=65536
 
-# Strip C0 control characters (keeping tab and newline) and DEL from stdin,
-# so a message body cannot smuggle ANSI/OSC sequences into a terminal.
-_mail_scrub() {
-    LC_ALL=C tr -d '\000-\010\013-\037\177'
-}
-
 # The mailbox is a maildir: a message is written whole to tmp/, then renamed
 # into new/ (unread) — the rename is same-filesystem, so a message is either
 # entirely present or entirely absent. 'cs -msg' moves what it prints into
@@ -3577,7 +3581,7 @@ _mail_print_files() {  # file...
         (.ts | if type == "number" then strflocaltime("%H:%M") else "--:--" end) + "  " +
         $dir + " " + $peer + "  [" + (.kind // "text") + "]  (" + (.thread // "------") + ")  " +
         ((.body // "") | gsub("[\n\r]"; " "))
-    ' | _mail_scrub
+    ' | _scrub_controls
 }
 
 _mail_read() {
@@ -3954,7 +3958,7 @@ _queue_log() {  # qdir
          elif .reason then ": " + .reason + " (" + (.reading|tostring) + " >= " + (.limit|tostring) + "), " + (.remaining|tostring) + " remaining"
          elif .done then ": " + (.done|tostring) + " done"
          else "" end)
-    ' "$inbox"
+    ' "$inbox" | _scrub_controls
 }
 
 # Dispatcher. Runs inside a session (env) or via the session-scoped arm.
@@ -3967,7 +3971,12 @@ run_queue() {
     local sub="${1:-list}"
     case "$sub" in
         add)   shift; _queue_add "$qdir" "$*";;
-        list|ls) _queue_list "$qdir";;
+        # Scrubbed once here rather than inside _queue_list's two branches:
+        # one construct that cannot be half-removed, and one tr fork instead
+        # of one per queued task (forks are expensive under MSYS).
+        # _queue_list is a pure reader — it emits no palette variables and
+        # never calls error() — so the pipeline eats nothing cs owns.
+        list|ls) _queue_list "$qdir" | _scrub_controls;;
         rm)    shift; _queue_rm "$qdir" "${1:-}";;
         clear) _queue_clear "$qdir";;
         start) _queue_set_state "$qdir" armed;;
@@ -4029,7 +4038,11 @@ session_status() {  # session_dir
     local session_dir="$1" status
     status="$(_read_presence "$session_dir/.cs")"
     [ -n "$status" ] || status="$(_session_objective "$session_dir")"
-    printf '%s' "$status"
+    # The single funnel for both render sites (run_status and cmd_live) and
+    # for the _session_objective fallback, which under `cs -live` is another
+    # session's README. Scrubbed on read, not on write: the write path only
+    # guards this session's own text, and the threat is a file it never wrote.
+    printf '%s' "$status" | _scrub_controls
 }
 
 # Dispatcher for 'cs -status'. In-session only (ambient env), like run_queue.

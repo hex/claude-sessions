@@ -6,12 +6,6 @@
 # appends (mail inbox, walk-away queue) were gone.
 MAIL_BODY_MAX=65536
 
-# Strip C0 control characters (keeping tab and newline) and DEL from stdin,
-# so a message body cannot smuggle ANSI/OSC sequences into a terminal.
-_mail_scrub() {
-    LC_ALL=C tr -d '\000-\010\013-\037\177'
-}
-
 # The mailbox is a maildir: a message is written whole to tmp/, then renamed
 # into new/ (unread) — the rename is same-filesystem, so a message is either
 # entirely present or entirely absent. 'cs -msg' moves what it prints into
@@ -234,7 +228,7 @@ _mail_print_files() {  # file...
         (.ts | if type == "number" then strflocaltime("%H:%M") else "--:--" end) + "  " +
         $dir + " " + $peer + "  [" + (.kind // "text") + "]  (" + (.thread // "------") + ")  " +
         ((.body // "") | gsub("[\n\r]"; " "))
-    ' | _mail_scrub
+    ' | _scrub_controls
 }
 
 _mail_read() {
