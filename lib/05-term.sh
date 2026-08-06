@@ -57,13 +57,18 @@ fi
 ICON_LOGO='✳'          # U+2733 eight-spoked asterisk (Claude mark); font-independent
 
 # Utility functions
+# The message travels through %s, never through the format string. `echo -e`
+# consumed escapes in whatever was interpolated: a message carrying \c (common
+# in an uncompilable regex the user just typed) truncated itself and swallowed
+# its own newline, and \t became a literal tab. The colour variables stay in the
+# format, which is where their \033 sequences are meant to be read.
 error() {
-    echo -e "${RED}Error: $1${NC}" >&2
+    printf "${RED}Error: %s${NC}\n" "$1" >&2
     exit 1
 }
 
 info() {
-    echo -e "${GREEN}$1${NC}"
+    printf "${GREEN}%s${NC}\n" "$1"
 }
 
 # Strip leading and trailing whitespace from a string; prints the result.

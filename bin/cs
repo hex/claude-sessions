@@ -175,13 +175,18 @@ fi
 ICON_LOGO='✳'          # U+2733 eight-spoked asterisk (Claude mark); font-independent
 
 # Utility functions
+# The message travels through %s, never through the format string. `echo -e`
+# consumed escapes in whatever was interpolated: a message carrying \c (common
+# in an uncompilable regex the user just typed) truncated itself and swallowed
+# its own newline, and \t became a literal tab. The colour variables stay in the
+# format, which is where their \033 sequences are meant to be read.
 error() {
-    echo -e "${RED}Error: $1${NC}" >&2
+    printf "${RED}Error: %s${NC}\n" "$1" >&2
     exit 1
 }
 
 info() {
-    echo -e "${GREEN}$1${NC}"
+    printf "${GREEN}%s${NC}\n" "$1"
 }
 
 # Strip leading and trailing whitespace from a string; prints the result.
@@ -487,8 +492,9 @@ Sessions are stored in: $SESSIONS_ROOT
 EOF
 }
 
+# Message through %s, like error()/info(): escapes in interpolated text are data.
 warn() {
-    echo -e "${YELLOW}$1${NC}"
+    printf "${YELLOW}%s${NC}\n" "$1"
 }
 
 # Offer a way forward when the session is already open elsewhere: open one of
@@ -4354,13 +4360,21 @@ _tags_write() {
     done
     local newline="tags: [$formatted]"
     local tmp="$readme.tmp"
+    # Both branches end on `exit done ? 0 : 1`: awk otherwise exits 0 whether or
+    # not it anchored anywhere, so a frontmatter block offering neither anchor
+    # sent every record through the catch-all print, the tmp+mv rewrote the file
+    # byte-identically, and the caller reported success having written nothing.
+    # Verifying the write landed is the whole point — a status quo the tool
+    # cannot distinguish from a successful edit is not a successful edit.
+    local status=0
     if _tags_read_line_exists "$readme"; then
         awk -v repl="$newline" '
             NR == 1 && $0 == "---" { fm = 1; print; next }
             fm == 1 && $0 == "---" { fm = 2; print; next }
             fm == 1 && /^tags:[[:space:]]*\[/ && !done { print repl; done = 1; next }
             { print }
-        ' "$readme" > "$tmp" && mv "$tmp" "$readme"
+            END { exit done ? 0 : 1 }
+        ' "$readme" > "$tmp" || status=$?
     else
         awk -v repl="$newline" '
             NR == 1 && $0 == "---" { fm = 1; print; next }
@@ -4368,8 +4382,14 @@ _tags_write() {
             fm == 1 && $0 == "---" && !done { print repl; done = 1; fm = 2; print; next }
             fm == 1 && $0 == "---" { fm = 2; print; next }
             { print }
-        ' "$readme" > "$tmp" && mv "$tmp" "$readme"
+            END { exit done ? 0 : 1 }
+        ' "$readme" > "$tmp" || status=$?
     fi
+    if [ "$status" -ne 0 ]; then
+        rm -f "$tmp"
+        return 1
+    fi
+    mv "$tmp" "$readme"
 }
 
 # True when an inline tags line exists in the frontmatter. The "found" branch
@@ -4381,10 +4401,10 @@ _tags_write() {
 _tags_read_line_exists() {
     local readme="$1"
     awk '
-        NR == 1 && $0 != "---" { exit 1 }
-        NR > 1 && $0 == "---" { exit 1 }
-        /^tags:[[:space:]]*\[/ { found = 1; exit }
-        END { exit found ? 0 : 1 }
+        NR == 1 && $0 != "---" { bad = 1; exit }
+        NR > 1 && $0 == "---" { terminated = 1; exit }
+        /^tags:[[:space:]]*\[/ { found = 1 }
+        END { exit (!bad && terminated && found) ? 0 : 1 }
     ' "$readme" 2>/dev/null
 }
 
@@ -4442,7 +4462,8 @@ $lower
             result=$(printf '%s\n' "$result" | awk -v t="$lower" '$0 != t')
         done
     fi
-    _tags_write "$readme" "$(printf '%s\n' "$result" | tr '\n' ' ')"
+    _tags_write "$readme" "$(printf '%s\n' "$result" | tr '\n' ' ')" \
+        || error "Cannot edit $readme: its YAML frontmatter offers nowhere to write the tags line (no 'status:' line and no closing '---' fence); the file is unchanged"
 }
 
 _tag_list_session() {
@@ -5138,6 +5159,19 @@ search_sessions() {
         error "Usage: cs -search <query> [--include-archived]"
     fi
 
+    # grep exits 2 when the pattern will not compile and 1 on a clean no-match.
+    # The per-file calls below map every non-zero status to `continue`, so an
+    # uncompilable pattern made every file miss and the run finished by printing
+    # "No results" — a false negative presented as an authoritative answer. The
+    # pattern is invariant across files, so probe it once, with the same grep and
+    # the same flags the loops use. Probed before the SESSIONS_ROOT check so a
+    # typo is not reported as an empty machine.
+    local probe_status=0
+    grep -in -- "$query" /dev/null >/dev/null 2>&1 || probe_status=$?
+    if [ "$probe_status" -gt 1 ]; then
+        error "Invalid search pattern '$query': grep cannot compile it"
+    fi
+
     if [ ! -d "$SESSIONS_ROOT" ]; then
         info "No sessions found"
         return 0
@@ -5166,7 +5200,10 @@ search_sessions() {
             local matches
             matches=$(grep -in -- "$query" "$filepath" 2>/dev/null) || continue
             while IFS= read -r line; do
-                echo -e "${GOLD}${session_name}${NC}: ${DIM}${relpath}${NC}: ${line}"
+                # %s for the matched line: `echo -e` ate escapes in file content,
+                # so a line containing \c truncated the result there and dropped
+                # everything after it.
+                printf "${GOLD}%s${NC}: ${DIM}%s${NC}: %s\n" "$session_name" "$relpath" "$line"
                 found=$((found + 1))
             done <<< "$matches"
         done
@@ -5178,7 +5215,10 @@ search_sessions() {
             local matches
             matches=$(grep -in -- "$query" "$filepath" 2>/dev/null) || continue
             while IFS= read -r line; do
-                echo -e "${GOLD}${session_name}${NC}: ${DIM}${relpath}${NC}: ${line}"
+                # %s for the matched line: `echo -e` ate escapes in file content,
+                # so a line containing \c truncated the result there and dropped
+                # everything after it.
+                printf "${GOLD}%s${NC}: ${DIM}%s${NC}: %s\n" "$session_name" "$relpath" "$line"
                 found=$((found + 1))
             done <<< "$matches"
         done

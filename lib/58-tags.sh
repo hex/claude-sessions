@@ -65,13 +65,21 @@ _tags_write() {
     done
     local newline="tags: [$formatted]"
     local tmp="$readme.tmp"
+    # Both branches end on `exit done ? 0 : 1`: awk otherwise exits 0 whether or
+    # not it anchored anywhere, so a frontmatter block offering neither anchor
+    # sent every record through the catch-all print, the tmp+mv rewrote the file
+    # byte-identically, and the caller reported success having written nothing.
+    # Verifying the write landed is the whole point — a status quo the tool
+    # cannot distinguish from a successful edit is not a successful edit.
+    local status=0
     if _tags_read_line_exists "$readme"; then
         awk -v repl="$newline" '
             NR == 1 && $0 == "---" { fm = 1; print; next }
             fm == 1 && $0 == "---" { fm = 2; print; next }
             fm == 1 && /^tags:[[:space:]]*\[/ && !done { print repl; done = 1; next }
             { print }
-        ' "$readme" > "$tmp" && mv "$tmp" "$readme"
+            END { exit done ? 0 : 1 }
+        ' "$readme" > "$tmp" || status=$?
     else
         awk -v repl="$newline" '
             NR == 1 && $0 == "---" { fm = 1; print; next }
@@ -79,8 +87,14 @@ _tags_write() {
             fm == 1 && $0 == "---" && !done { print repl; done = 1; fm = 2; print; next }
             fm == 1 && $0 == "---" { fm = 2; print; next }
             { print }
-        ' "$readme" > "$tmp" && mv "$tmp" "$readme"
+            END { exit done ? 0 : 1 }
+        ' "$readme" > "$tmp" || status=$?
     fi
+    if [ "$status" -ne 0 ]; then
+        rm -f "$tmp"
+        return 1
+    fi
+    mv "$tmp" "$readme"
 }
 
 # True when an inline tags line exists in the frontmatter. The "found" branch
@@ -92,10 +106,10 @@ _tags_write() {
 _tags_read_line_exists() {
     local readme="$1"
     awk '
-        NR == 1 && $0 != "---" { exit 1 }
-        NR > 1 && $0 == "---" { exit 1 }
-        /^tags:[[:space:]]*\[/ { found = 1; exit }
-        END { exit found ? 0 : 1 }
+        NR == 1 && $0 != "---" { bad = 1; exit }
+        NR > 1 && $0 == "---" { terminated = 1; exit }
+        /^tags:[[:space:]]*\[/ { found = 1 }
+        END { exit (!bad && terminated && found) ? 0 : 1 }
     ' "$readme" 2>/dev/null
 }
 
@@ -153,7 +167,8 @@ $lower
             result=$(printf '%s\n' "$result" | awk -v t="$lower" '$0 != t')
         done
     fi
-    _tags_write "$readme" "$(printf '%s\n' "$result" | tr '\n' ' ')"
+    _tags_write "$readme" "$(printf '%s\n' "$result" | tr '\n' ' ')" \
+        || error "Cannot edit $readme: its YAML frontmatter offers nowhere to write the tags line (no 'status:' line and no closing '---' fence); the file is unchanged"
 }
 
 _tag_list_session() {

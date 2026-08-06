@@ -130,9 +130,58 @@ test_search_dash_prefixed_query() {
 run_test test_search_finds_in_readme
 run_test test_search_across_multiple_sessions
 run_test test_search_case_insensitive
+test_search_errors_on_uncompilable_pattern() {
+    # grep exits 2 when the pattern will not compile and 1 on a clean no-match.
+    # `|| continue` folded both into the same bucket, so a typo'd bracket made
+    # every file miss and the run answered "No results" — a false negative
+    # dressed as an authoritative answer.
+    create_test_session "alpha" >/dev/null
+    printf 'the abc marker\n' > "$CS_SESSIONS_ROOT/alpha/.cs/memory/narrative.md"
+    # Reachability control: a VALID pattern over the same fixture must match, or
+    # the failing half below would pass for the wrong reason.
+    local sane
+    sane=$("$CS_BIN" -search "abc marker" 2>&1) \
+        || { echo "  FAIL: control search exited non-zero: $sane"; return 1; }
+    assert_output_contains "$sane" "abc marker" "control: the fixture is searchable" || return 1
+
+    local output rc=0
+    output=$("$CS_BIN" -search 'a[' 2>&1) || rc=$?
+    [ "$rc" -ne 0 ] || { echo "  FAIL: an uncompilable pattern must not exit 0"; return 1; }
+    assert_output_not_contains "$output" "No results" \
+        "a pattern that never compiled is not an answer about matches" || return 1
+    assert_output_contains "$output" "a\[" "the error echoes the offending pattern" || return 1
+}
+
+test_search_error_does_not_mangle_a_backslash_pattern() {
+    # error() rendered its message with `echo -e`, which consumes escapes in the
+    # interpolated value: \c truncates the message (and its newline) outright and
+    # \t becomes a literal tab. Backslashes are common in uncompilable BREs, so
+    # the diagnostic broke on exactly the inputs it exists to report.
+    create_test_session "alpha" >/dev/null
+    local output rc=0
+    output=$("$CS_BIN" -search 'a\c[' 2>&1) || rc=$?
+    [ "$rc" -ne 0 ] || { echo "  FAIL: an uncompilable pattern must not exit 0"; return 1; }
+    assert_output_contains "$output" 'a\\c\[' "the pattern survives verbatim into the message" || return 1
+}
+
+test_search_output_does_not_mangle_a_matched_line() {
+    # The match render used `echo -e` too, so a file whose content carries \c
+    # truncated the result line — and everything after it on that line.
+    create_test_session "alpha" >/dev/null
+    printf 'literal backslash c here: a\\c and trailing text\n' \
+        > "$CS_SESSIONS_ROOT/alpha/.cs/memory/narrative.md"
+    local output
+    output=$("$CS_BIN" -search "literal backslash" 2>&1) || return 1
+    assert_output_contains "$output" "trailing text" \
+        "content after a backslash escape must survive the render" || return 1
+}
+
 run_test test_search_no_results
 run_test test_search_no_query
 run_test test_search_follows_symlinks
 run_test test_search_dash_prefixed_query
+run_test test_search_errors_on_uncompilable_pattern
+run_test test_search_error_does_not_mangle_a_backslash_pattern
+run_test test_search_output_does_not_mangle_a_matched_line
 
 report_results
