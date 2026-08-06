@@ -537,7 +537,7 @@ if [ "$SOURCE" = "resume" ] && git -C "$SESSION_DIR" rev-parse --git-dir >/dev/n
             sibling_obj=$(sed -n '/^## Objective/,/^## /{/^## Objective/d;/^## /d;/^$/d;p;}' "$sibling_dir/.cs/README.md" 2>/dev/null | head -1 || true)
             [ -z "$sibling_obj" ] && continue
             [[ "$sibling_obj" == "["*"]" ]] && continue
-            SIBLINGS="${SIBLINGS}  ${sibling_name}: ${sibling_obj}\n"
+            SIBLINGS="${SIBLINGS}  ${sibling_name}: ${sibling_obj}${_NL}"
             SIBLING_COUNT=$((SIBLING_COUNT + 1))
             [ "$SIBLING_COUNT" -ge 5 ] && break
         done < <(ls -t "$SESSIONS_ROOT"/*/.cs/local/session.log "$SESSIONS_ROOT"/*/.cs/logs/session.log 2>/dev/null || true)
