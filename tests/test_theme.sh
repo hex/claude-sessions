@@ -303,8 +303,15 @@ run_test test_tmux_truecolor_exported_at_launch
 test_color_from_name_survives_a_missing_shasum() {
     local stub="$TEST_TMPDIR/nodigest"
     mkdir -p "$stub"
-    local b
-    for b in cut cksum; do ln -sf "$(command -v "$b")" "$stub/$b"; done
+    _stub_tools "$stub" cut cksum || return 1
+    # The fallback under test IS cksum, so verify it actually runs through the
+    # stub PATH before drawing conclusions from a colour. A host without a
+    # usable cksum produces the exact symptom this test reports as a defect —
+    # every name on one colour — for a reason that is not the code's fault.
+    if ! PATH="$stub" "${BASH:-/bin/bash}" -c 'printf x | cksum' >/dev/null 2>&1; then
+        echo "    SKIP (no usable cksum here: the cksum fallback cannot be exercised)"
+        return 0
+    fi
 
     local errfile="$TEST_TMPDIR/nodigest.err" a c
     a=$(PATH="$stub" "${BASH:-/bin/bash}" -c \

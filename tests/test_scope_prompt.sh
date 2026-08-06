@@ -534,10 +534,8 @@ _rg_free_path() {
     # bash included deliberately: the PATH below is what resolves the hook's
     # own interpreter and every command it shells out to, so omitting it fails
     # the hook at exec time and looks like a classifier bug.
-    for t in bash sh jq git grep sed awk cut tr head tail wc sort uniq basename dirname date mkdir rm cat printf ls find od stat; do
-        src=$(command -v "$t" 2>/dev/null) || continue
-        ln -sf "$src" "$d/$t" 2>/dev/null || true
-    done
+    _stub_tools "$d" bash sh jq git grep sed awk cut tr head tail wc sort uniq basename \
+                dirname date mkdir rm cat printf ls find od stat || return 1
     command -v jq >/dev/null 2>&1 || return 1
     printf '%s' "$d"
 }

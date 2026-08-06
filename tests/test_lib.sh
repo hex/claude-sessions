@@ -69,6 +69,43 @@ _skip_on_msys() {
     return 1
 }
 
+# Link one tool into a stub PATH directory, for tests that build a PATH missing
+# exactly one command. Under Git Bash `command -v cksum` answers /usr/bin/cksum
+# while the file on disk is cksum.exe, so linking the reported path produces a
+# dangling entry: the stub PATH then loses every tool rather than the one under
+# suppression, and the test fails somewhere unrelated to what it is checking.
+# Both spellings are provided because Windows resolves the .exe name.
+# Returns non-zero when the tool cannot be staged, so callers can say so.
+_stub_tool() {  # dir, tool
+    local dir="$1" tool="$2" src
+    src=$(command -v "$tool" 2>/dev/null) || return 1
+    # A builtin or function answers with its own name, not a path. It travels
+    # with the shell, so there is nothing to stage and nothing missing.
+    case "$src" in /*) ;; *) return 0 ;; esac
+    [ -e "$src" ] || src="${src}.exe"
+    [ -e "$src" ] || return 1
+    ln -sf "$src" "$dir/$tool" 2>/dev/null || cp -p "$src" "$dir/$tool" 2>/dev/null || return 1
+    case "$src" in
+        *.exe) ln -sf "$src" "$dir/$tool.exe" 2>/dev/null \
+                   || cp -p "$src" "$dir/$tool.exe" 2>/dev/null || true ;;
+    esac
+    return 0
+}
+
+# Stage a whole whitelist into a stub PATH dir. Tools genuinely absent from the
+# host are skipped; a tool present but unstageable is a harness failure, since a
+# silently missing one turns "X is absent" into "everything is absent".
+_stub_tools() {  # dir, tools...
+    local dir="$1"; shift
+    local t missing=""
+    for t in "$@"; do
+        command -v "$t" >/dev/null 2>&1 || continue
+        _stub_tool "$dir" "$t" || missing="$missing $t"
+    done
+    [ -z "$missing" ] || { echo "  FAIL: could not stage into the stub PATH:$missing"; return 1; }
+    return 0
+}
+
 # Install a jq shim (on $TEST_TMPDIR/crlfbin, echoed for prepending to PATH)
 # that wraps the real jq and re-emits every output line with CRLF, reproducing
 # native jq.exe under Git Bash — where stdout runs in text mode and `read`

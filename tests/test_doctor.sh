@@ -835,13 +835,10 @@ run_test test_doctor_warns_when_only_untracked_work_has_no_shadow_ref
 # PATH is what starts the binary, and omitting it fails at exec and reads like a
 # doctor bug.
 _jq_free_path() {
-    local d="$TEST_TMPDIR/nojq" t src
+    local d="$TEST_TMPDIR/nojq"
     mkdir -p "$d"
-    for t in bash sh git grep sed awk cut tr head tail wc sort uniq basename dirname \
-             date mkdir rm cat ls find stat printf id kill; do
-        src=$(command -v "$t" 2>/dev/null) || continue
-        ln -sf "$src" "$d/$t" 2>/dev/null || true
-    done
+    _stub_tools "$d" bash sh git grep sed awk cut tr head tail wc sort uniq basename \
+                dirname date mkdir rm cat ls find stat printf id kill || return 1
     printf '%s' "$d"
 }
 
@@ -857,6 +854,12 @@ test_doctor_does_not_call_a_valid_settings_file_invalid_without_jq() {
         || { echo "  FAIL: fixture is not valid JSON; the test would pass for the wrong reason"; return 1; }
 
     local p; p=$(_jq_free_path)
+    # Drop the hashed location of the jq just run above. Under bash 3.2 — the
+    # floor, and what macos-latest runs — `command -v` answers from the hash
+    # table and a one-command PATH assignment does not invalidate it, so the
+    # guard below would report a jq the scrubbed PATH cannot actually reach.
+    # doctor itself is unaffected: it runs in a fresh process with no hash.
+    hash -r 2>/dev/null || true
     if PATH="$p" command -v jq >/dev/null 2>&1; then
         echo "  FAIL: jq is still resolvable on that PATH"; return 1
     fi
