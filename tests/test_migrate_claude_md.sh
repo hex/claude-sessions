@@ -242,4 +242,40 @@ run_test test_old_template_head_moves_wholesale
 run_test test_worktree_from_unmigrated_base_can_merge
 run_test test_worktree_ignored_mode_excludes_local_md_via_clone_exclude
 
+# A session repo cloned on Git for Windows with default autocrlf arrives with
+# CRLF line endings. The frontmatter-bounded field strip opens on /^---$/, which
+# does not match "---\r", so fm is never set, the gate reports nothing found, and
+# the machine-local fields survive migration — a regression against the looser
+# match this replaced.
+test_migrate_moves_machine_local_fields_out_of_a_crlf_readme() {
+    local dir
+    dir=$(create_test_session "crlfproj")
+    printf -- '---\r\nstatus: active\r\nclaude_session_id: 11111111-2222-3333-4444-555555555555\r\nclaude_session_color: cyan\r\naliases: ["crlfproj"]\r\n---\r\n\r\n# Session: crlfproj\r\n\r\n## Outcome\r\n\r\nupdated: the docs by hand\r\n' \
+        > "$dir/.cs/README.md"
+    # Fixture sanity: the file really is CRLF, or this tests the LF path again.
+    LC_ALL=C grep -q "$(printf '\r')" "$dir/.cs/README.md" \
+        || { echo "  FAIL: fixture is not CRLF"; return 1; }
+
+    "$CS_BIN" "crlfproj" < /dev/null > /dev/null 2>&1 || true
+
+    assert_file_not_contains "$dir/.cs/README.md" '^claude_session_id:' \
+        "the machine-local uuid must be moved out of the frontmatter" || return 1
+    assert_file_not_contains "$dir/.cs/README.md" '^claude_session_color:' \
+        "and so must the colour" || return 1
+    assert_file_contains "$dir/.cs/local/state" "11111111-2222-3333-4444-555555555555" \
+        "the uuid must land in machine-local state, not be discarded" || return 1
+    # The body line beginning "updated:" is the user's prose and must survive —
+    # the whole reason the strip is bounded to the frontmatter.
+    assert_file_contains "$dir/.cs/README.md" "updated: the docs by hand" \
+        "a body line that looks like a field is user content" || return 1
+    # The corruption this really guards: unrecognised frontmatter made Phase 6
+    # PREPEND a second block, orphaning the first in the body where every
+    # frontmatter reader stops before it.
+    local fences
+    fences=$(grep -c '^---' "$dir/.cs/README.md" | tr -d '[:space:]')
+    assert_eq "2" "$fences" "exactly one frontmatter block, opened and closed" || return 1
+}
+
+run_test test_migrate_moves_machine_local_fields_out_of_a_crlf_readme
+
 report_results
