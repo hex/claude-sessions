@@ -42,6 +42,13 @@ if ! command -v cs_resolve_session >/dev/null 2>&1; then
         [ -n "${CLAUDE_SESSION_NAME:-}" ] && [ -n "${CLAUDE_SESSION_DIR:-}" ]
     }
 fi
+if ! command -v _cs_terminate_jsonl >/dev/null 2>&1; then
+    _cs_terminate_jsonl() {
+        [ -s "$1" ] || return 0
+        [ -n "$(tail -c 1 "$1" 2>/dev/null)" ] || return 0
+        printf '\n' >> "$1" 2>/dev/null || true
+    }
+fi
 # Not in a cs session, do nothing. Resolves from the env under the CLI and
 # from the opened directory under front ends that cannot export one.
 cs_resolve_session "$INPUT" || exit 0
@@ -63,6 +70,7 @@ echo "$(date '+%Y-%m-%d %H:%M:%S') - Session ended (source: $SOURCE, ID: $SESSIO
 # Append structured event to timeline.jsonl
 TIMELINE_FILE="$META_DIR/timeline.jsonl"
 TIMELINE_BRANCH=$(git -C "$SESSION_DIR" branch --show-current 2>/dev/null || echo "")
+_cs_terminate_jsonl "$TIMELINE_FILE" 2>/dev/null || true
 jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
        --arg event "ended" \
        --arg source "$SOURCE" \

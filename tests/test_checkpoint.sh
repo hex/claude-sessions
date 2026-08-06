@@ -223,4 +223,24 @@ run_test test_checkpoint_list_shows_all
 run_test test_checkpoint_show_prints_content
 run_test test_help_shows_checkpoint
 
+
+test_checkpoint_does_not_splice_onto_a_torn_timeline() {
+    # The lib-side counterpart of the hook guard: a checkpoint appended after an
+    # interrupted write must not fuse onto the torn line and take it down too.
+    local timeline="$CS_SESSIONS_ROOT/test-session/.cs/timeline.jsonl"
+    printf '{"ts":"2026-01-01T00:00:00Z","event":"started","session_id":"1111"}\n' > "$timeline"
+    printf '{"ts":"2026-01-02T00:00:00Z","event":"rotated","reason":"torn"}' >> "$timeline"
+    jsonl_tail_is_torn "$timeline" \
+        || { echo "  FAIL: fixture is terminated; the splice cannot happen"; return 1; }
+
+    "$CS_BIN" -checkpoint "green milestone" >/dev/null 2>&1 || return 1
+
+    local events
+    events=$(jsonl_events "$timeline")
+    assert_output_contains "$events" "rotated" "the torn record survives" || return 1
+    assert_output_contains "$events" "checkpoint" "and so does the record appended after it" || return 1
+}
+
+run_test test_checkpoint_does_not_splice_onto_a_torn_timeline
+
 report_results

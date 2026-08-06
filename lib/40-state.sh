@@ -133,12 +133,28 @@ _discover_session_uuid_in() {
     return 0
 }
 
+# Terminate a JSONL file whose last line lost its newline to an interrupted
+# write, so the next `>>` starts a fresh line instead of splicing two records
+# onto one. The tolerant per-line reader (`fromjson? // empty` in
+# run_conversations) drops a spliced line whole, which loses the torn record AND
+# the intact one appended after it. The torn record itself is unrecoverable —
+# it was never complete — but the next one no longer dies with it. A no-op on a
+# file that is empty or already terminated, and best-effort on write like every
+# other timeline append: a launch must not die because a journal could not be
+# repaired.
+_terminate_jsonl() {  # file
+    [ -s "$1" ] || return 0
+    [ -n "$(tail -c 1 "$1" 2>/dev/null)" ] || return 0
+    printf '\n' >> "$1" 2>/dev/null || true
+}
+
 # Append a rotated event to the tracked timeline: the durable link between
 # the conversation being left and the one about to start. Shape shared with
 # hooks/session-start.sh's rebind emitter (hooks cannot source bin/cs).
 # Best-effort — a timeline failure must never break a launch.
 _timeline_rotated() {  # session_dir, from, to, reason, [handoff]
     local session_dir="$1" from="$2" to="$3" reason="$4" handoff="${5:-}"
+    _terminate_jsonl "$session_dir/.cs/timeline.jsonl"
     jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
            --arg from "$from" \
            --arg to "$to" \
