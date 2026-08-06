@@ -1739,12 +1739,16 @@ impl App {
             }
             KeyCode::Char('d') => {
                 if let Some(key_name) = self.secrets_names.get(self.secrets_selected).cloned() {
-                    self.run_secrets_subcommand("delete", &key_name);
-                    self.secrets_names.remove(self.secrets_selected);
-                    if self.secrets_selected >= self.secrets_names.len()
-                        && !self.secrets_names.is_empty()
-                    {
-                        self.secrets_selected = self.secrets_names.len() - 1;
+                    // Only mirror a deletion the helper actually made: a denied
+                    // keychain prompt exits non-zero, and dropping the row
+                    // anyway claims a deletion that did not happen.
+                    if self.run_secrets_subcommand("delete", &key_name) {
+                        self.secrets_names.remove(self.secrets_selected);
+                        if self.secrets_selected >= self.secrets_names.len()
+                            && !self.secrets_names.is_empty()
+                        {
+                            self.secrets_selected = self.secrets_names.len() - 1;
+                        }
                     }
                 }
             }
@@ -1950,7 +1954,11 @@ impl App {
             .collect()
     }
 
-    fn run_secrets_subcommand(&mut self, subcommand: &str, key: &str) {
+    /// Run `cs <session> -secrets <subcommand> <key>` and show what it printed.
+    /// Returns whether the helper ran AND exited zero, so a caller mirroring the
+    /// store in memory mirrors only the changes the helper actually made.
+    fn run_secrets_subcommand(&mut self, subcommand: &str, key: &str) -> bool {
+        let mut succeeded = false;
         if let Some(session) = self.selected_session() {
             let name = session.name.clone();
             let output = std::process::Command::new(cs_bin())
@@ -1958,6 +1966,7 @@ impl App {
                 .output();
             match output {
                 Ok(out) => {
+                    succeeded = out.status.success();
                     let text = String::from_utf8_lossy(&out.stdout).to_string()
                         + &String::from_utf8_lossy(&out.stderr).to_string();
                     self.return_to_secrets = true;
@@ -1969,6 +1978,7 @@ impl App {
                 }
             }
         }
+        succeeded
     }
 
     fn peek_secret(&mut self, key_name: &str) {
@@ -3734,6 +3744,63 @@ mod tests {
         app.handle_key(KeyEvent::from(KeyCode::Esc));
         assert_eq!(app.mode, Mode::Normal);
         assert!(app.revealed_secret.is_none());
+    }
+
+    /// A delete the helper never performed must leave the list alone: dropping
+    /// the row claims a deletion that did not happen while the key is still in
+    /// the store. An unspawnable helper stands in for every refusal — a denied
+    /// keychain prompt exits non-zero the same way — and fails identically on
+    /// every platform.
+    #[test]
+    fn secrets_delete_keeps_the_key_when_the_helper_fails() {
+        let _env = CS_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("CS_BIN", "/nonexistent/cs");
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::Secrets;
+        app.secrets_names = vec!["API_KEY".into(), "DB_PASSWORD".into()];
+        app.secrets_selected = 0;
+        app.handle_key(KeyEvent::from(KeyCode::Char('d')));
+        std::env::remove_var("CS_BIN");
+        assert_eq!(
+            app.mode,
+            Mode::Normal,
+            "the failed spawn must have been reached and reported"
+        );
+        assert_eq!(
+            app.secrets_names,
+            vec!["API_KEY", "DB_PASSWORD"],
+            "a delete that did not happen must not remove the key from the list"
+        );
+    }
+
+    /// The refusal that motivates this: the helper runs and exits non-zero, as a
+    /// denied keychain prompt does. Unix-only because it needs a program that
+    /// fails for any argv.
+    #[cfg(unix)]
+    #[test]
+    fn secrets_delete_keeps_the_key_when_the_helper_exits_nonzero() {
+        let _env = CS_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let failing = ["/usr/bin/false", "/bin/false"]
+            .into_iter()
+            .find(|p| std::path::Path::new(p).exists())
+            .expect("a POSIX host has false(1)");
+        std::env::set_var("CS_BIN", failing);
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::Secrets;
+        app.secrets_names = vec!["API_KEY".into(), "DB_PASSWORD".into()];
+        app.secrets_selected = 0;
+        app.handle_key(KeyEvent::from(KeyCode::Char('d')));
+        std::env::remove_var("CS_BIN");
+        assert_eq!(
+            app.mode,
+            Mode::CommandOutput(String::new()),
+            "the helper must have run and its (empty) output shown"
+        );
+        assert_eq!(
+            app.secrets_names,
+            vec!["API_KEY", "DB_PASSWORD"],
+            "a refused delete must not remove the key from the list"
+        );
     }
 
     #[test]

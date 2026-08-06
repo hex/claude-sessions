@@ -187,9 +187,23 @@ run_usage() {
     local header="Rate limits: unknown (statusline not running); windows are rolling"
     if [ "$U_STAMP" -gt 0 ]; then
         if [ -n "$U_5H_ANCHORED" ] || [ -n "$U_WK_ANCHORED" ]; then
-            header="Rate limits: 5h ${U_5H_PCT:-?}%"
-            [ -n "$U_5H_ANCHORED" ] && header="$header (resets $(_usage_epoch_to_hhmm "$U_5H_RESET"))"
-            header="$header · week ${U_WK_PCT:-?}%"
+            # A percentage is current only while its own window is still the one
+            # the stamp measured. Once that window's reset has passed the usage
+            # it reported has already rolled over, so the figure is dead and the
+            # window reads unknown rather than printing as though it were live.
+            # Reading each window's own anchor flag, not the OR of both, is what
+            # keeps the header agreeing with the table beneath it — which is
+            # computed on the rolling window either way.
+            if [ -n "$U_5H_ANCHORED" ]; then
+                header="Rate limits: 5h ${U_5H_PCT:-?}% (resets $(_usage_epoch_to_hhmm "$U_5H_RESET"))"
+            else
+                header="Rate limits: 5h ? (window reset since last stamp)"
+            fi
+            if [ -n "$U_WK_ANCHORED" ]; then
+                header="$header · week ${U_WK_PCT:-?}%"
+            else
+                header="$header · week ? (window reset since last stamp)"
+            fi
         else
             header="Rate limits: unknown (stale rate-limit stamp); windows are rolling"
         fi
