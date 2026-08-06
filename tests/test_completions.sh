@@ -556,4 +556,34 @@ run_test test_session_extraction_is_sane
 run_test test_every_session_subcommand_is_completed
 run_test test_unknown_session_command_error_lists_every_verb
 
+# Every verb must answer --help, derived from the dispatch rather than a list
+# here. `cs -msg --help` used to report "No such session: --help" because the
+# flag reached the mail parser as a target, which sends an agent looking for a
+# session instead of for documentation.
+test_every_verb_answers_help() {
+    local verb rc out broken=""
+    while IFS= read -r verb; do
+        [ -n "$verb" ] || continue
+        rc=0
+        out=$("$CS_FILE" "$verb" --help 2>&1) || rc=$?
+        if [ "$rc" != "0" ] || [ -z "$out" ]; then
+            broken="$broken $verb(exit=$rc)"
+            continue
+        fi
+        # The answer must be about that verb, not the whole manual and not an
+        # error that merely happens to exit 0.
+        case "$out" in
+            *"$verb"*) ;;
+            *) broken="$broken $verb(off-topic)" ;;
+        esac
+        case "$out" in
+            Error:*) broken="$broken $verb(error-framed)" ;;
+        esac
+    done <<< "$(dispatch_commands; session_subcommands)"
+    [ -z "$broken" ] \
+        || { echo "  FAIL: these verbs do not answer --help cleanly:$broken"; return 1; }
+}
+
+run_test test_every_verb_answers_help
+
 report_results
