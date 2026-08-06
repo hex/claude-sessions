@@ -1925,4 +1925,86 @@ run_test test_session_start_does_not_splice_onto_a_torn_timeline
 run_test test_torn_partial_record_costs_only_itself
 run_test test_hook_terminator_survives_a_missing_resolver_library
 
+
+# --- Session State must not manufacture escape sequences out of plain text ---
+
+test_session_state_does_not_interpret_backslash_escapes_in_content() {
+    # The block was emitted through `printf '%b'`, which INTERPRETS backslash
+    # escapes — so a README objective containing the five literal characters
+    # backslash-0-3-3 was converted by cs itself into a real ESC byte. The text
+    # was inert on disk; cs made it dangerous. That is worse than the raw-byte
+    # case, where a writer has to smuggle a control character in.
+    session_start_setup
+    printf '# test-session\n\n## Objective\n\nship \\033[31mred\\033[0m thing\n' \
+        > "$CLAUDE_SESSION_META_DIR/README.md"
+    # Fixture sanity: the file holds NO control byte, only printable characters.
+    local on_disk
+    on_disk=$(LC_ALL=C tr -dc "$(printf '\033\007')" < "$CLAUDE_SESSION_META_DIR/README.md" | wc -c | tr -d '[:space:]')
+    [ "$on_disk" = "0" ] || {
+        echo "  FAIL: fixture already contains a control byte; the test would pass for the wrong reason"
+        session_start_teardown; return 1
+    }
+
+    local output context esc
+    output=$(echo '{"session_id":"test","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+    assert_output_contains "$context" "Session State" \
+        "the block must be reached, or nothing is being tested" || { session_start_teardown; return 1; }
+    esc=$(printf '%s' "$context" | LC_ALL=C tr -dc "$(printf '\033\007')" | wc -c | tr -d '[:space:]')
+    assert_eq "0" "$esc" \
+        "cs must not convert literal backslash-033 in content into a real escape byte" \
+        || { session_start_teardown; return 1; }
+    session_start_teardown
+}
+
+test_session_state_scrubs_a_real_control_byte_in_content() {
+    # The other half: a README that really does carry a raw ESC — written by
+    # another session, or pasted — must not reach the terminal with it.
+    session_start_setup
+    printf '# test-session\n\n## Objective\n\nship \033[31mred\033[0m thing\n' \
+        > "$CLAUDE_SESSION_META_DIR/README.md"
+    local on_disk
+    on_disk=$(LC_ALL=C tr -dc "$(printf '\033')" < "$CLAUDE_SESSION_META_DIR/README.md" | wc -c | tr -d '[:space:]')
+    [ "$on_disk" != "0" ] || {
+        echo "  FAIL: fixture carries no raw ESC; the scrub is not being exercised"
+        session_start_teardown; return 1
+    }
+
+    local output context esc
+    output=$(echo '{"session_id":"test","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+    assert_output_contains "$context" "Session State" \
+        "the block must be reached" || { session_start_teardown; return 1; }
+    esc=$(printf '%s' "$context" | LC_ALL=C tr -dc "$(printf '\033')" | wc -c | tr -d '[:space:]')
+    assert_eq "0" "$esc" "a raw control byte in content must be scrubbed" \
+        || { session_start_teardown; return 1; }
+    session_start_teardown
+}
+
+test_session_state_still_renders_its_own_line_breaks() {
+    # The fix removes %b, so cs's OWN newlines must survive the change — the
+    # block is multi-line and a regression would fuse it into one line.
+    session_start_setup
+    local output context lines
+    output=$(echo '{"session_id":"test","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+    assert_output_contains "$context" "Session State" "the block renders" \
+        || { session_start_teardown; return 1; }
+    assert_output_not_contains "$context" 'Objective:.*\\n' \
+        "a literal backslash-n must never survive into the rendered block" \
+        || { session_start_teardown; return 1; }
+    lines=$(printf '%s' "$context" | sed -n '/--- Session State ---/,$p' | grep -c .)
+    [ "${lines:-0}" -ge 2 ] \
+        || { echo "  FAIL: Session State collapsed to $lines line(s); cs's own newlines were lost"
+             session_start_teardown; return 1; }
+    session_start_teardown
+}
+
+run_test test_session_state_does_not_interpret_backslash_escapes_in_content
+run_test test_session_state_scrubs_a_real_control_byte_in_content
+run_test test_session_state_still_renders_its_own_line_breaks
+
 report_results

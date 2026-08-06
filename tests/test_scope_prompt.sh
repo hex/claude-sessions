@@ -524,7 +524,71 @@ $filler"
         || { echo "  FAIL: a large multi-line prompt was classified negative"; return 1; }
 }
 
+# Build a PATH that resolves everything the hook needs EXCEPT rg, by symlinking
+# each required tool into a private dir. The hook's own dependencies decide the
+# list: dropping one makes the fallback arm fail for the wrong reason and the
+# test would report a classifier bug that is really a missing shim.
+_rg_free_path() {
+    local d="$TEST_TMPDIR/norg" t src
+    mkdir -p "$d"
+    # bash included deliberately: the PATH below is what resolves the hook's
+    # own interpreter and every command it shells out to, so omitting it fails
+    # the hook at exec time and looks like a classifier bug.
+    for t in bash sh jq git grep sed awk cut tr head tail wc sort uniq basename dirname date mkdir rm cat printf ls find od stat; do
+        src=$(command -v "$t" 2>/dev/null) || continue
+        ln -sf "$src" "$d/$t" 2>/dev/null || true
+    done
+    command -v jq >/dev/null 2>&1 || return 1
+    printf '%s' "$d"
+}
+
+# Run the hook with an explicit PATH, mirroring run_hook's payload shaping.
+_run_hook_on_path() {  # path, prompt
+    local _in
+    _in=$(printf '%s' "$2" | jq -Rs '{prompt: ., hook_event_name: "UserPromptSubmit"}')
+    # Absolute interpreter: the restricted PATH is for what the HOOK resolves,
+    # not for finding bash to start it.
+    PATH="$1" "${BASH:-/bin/bash}" "$HOOK" <<< "$_in"
+}
+
+# The classifier has two arms and the HOST decides which runs, so on any box with
+# ripgrep installed nothing here had ever executed the grep fallback.
+test_classifier_falls_back_to_grep_without_ripgrep() {
+    seed_repo "src/api.ts" "src/unrelated.ts"
+    local p
+    p=$(_rg_free_path) || { echo "  FAIL: could not build an rg-free PATH"; return 1; }
+    if PATH="$p" command -v rg >/dev/null 2>&1; then
+        echo "  FAIL: rg is still resolvable on that PATH; the fallback arm is not reached"
+        return 1
+    fi
+    local out ac
+    out=$(_run_hook_on_path "$p" "implement a retry wrapper around the fetch call in src/api.ts") \
+        || { echo "  FAIL: the hook failed on a box without ripgrep"; return 1; }
+    ac=$(additional_context "$out")
+    assert_output_contains "$ac" "Scope (auto-grounded)" \
+        "without ripgrep the classifier must still fire, not read every prompt as chitchat" || return 1
+    assert_output_contains "$ac" "src/api.ts" \
+        "and the grounded scan must still run, through the grep _scan" || return 1
+}
+
+# The other direction, and the reason the test above is a proof rather than half
+# of one: a fallback classifier that fires on EVERYTHING also passes a
+# positive-only test, and injecting scope into chitchat is the worse failure.
+test_grep_fallback_still_classifies_chitchat_negative() {
+    seed_repo "src/api.ts"
+    local p
+    p=$(_rg_free_path) || { echo "  FAIL: could not build an rg-free PATH"; return 1; }
+    local out
+    out=$(_run_hook_on_path "$p" "good morning! how is it going today?") \
+        || { echo "  FAIL: the hook failed on a negative prompt"; return 1; }
+    local ac
+    ac=$(additional_context "$out")
+    [ -z "$ac" ] || { echo "  FAIL: the fallback must still classify chitchat negative, got: $ac"; return 1; }
+}
+
 run_test test_large_multiline_prompt_still_classifies_positive
+run_test test_classifier_falls_back_to_grep_without_ripgrep
+run_test test_grep_fallback_still_classifies_chitchat_negative
 run_test test_prompt_clears_attention_marker
 run_test test_classifier_fires_emit_scope_block
 run_test test_classifier_silent_passthrough
