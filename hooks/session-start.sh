@@ -468,12 +468,18 @@ fi
 # rev-parse, not `-d .git`: in a feature worktree .git is a FILE, and a
 # directory test there skipped this whole block on every resume.
 if [ "$SOURCE" = "resume" ] && git -C "$SESSION_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+    # Real newline, not the two characters backslash-n. The block used to be
+    # emitted through `printf '%b'`, which interprets escapes in whatever was
+    # interpolated — so a README objective containing the literal characters
+    # backslash-0-3-3 was turned into a real ESC byte by cs itself. Building the
+    # text with actual newlines lets it render with %s, where content is content.
+    _NL=$'\n'
     DYNAMIC=""
 
     # Time since last session activity
     LAST_LOG_TIME=$(tail -1 "$META_DIR/local/session.log" 2>/dev/null | grep -oE '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}' | head -1 || true)
     if [ -n "$LAST_LOG_TIME" ]; then
-        DYNAMIC="${DYNAMIC}Last activity: ${LAST_LOG_TIME}\n"
+        DYNAMIC="${DYNAMIC}Last activity: ${LAST_LOG_TIME}${_NL}"
     fi
 
     # Recent commits since last session
@@ -484,7 +490,7 @@ if [ "$SOURCE" = "resume" ] && git -C "$SESSION_DIR" rev-parse --git-dir >/dev/n
         if [ -n "$RECENT_FILES" ]; then
             DYNAMIC="${DYNAMIC} (${RECENT_FILES})"
         fi
-        DYNAMIC="${DYNAMIC}\n"
+        DYNAMIC="${DYNAMIC}${_NL}"
     fi
 
     # Per-actor digest: shared memory/narrative activity since this actor last looked.
@@ -500,7 +506,7 @@ if [ "$SOURCE" = "resume" ] && git -C "$SESSION_DIR" rev-parse --git-dir >/dev/n
             | sed 's/^[[:space:]]*\([0-9][0-9]*\)[[:space:]]*\(.*\)$/\2 (\1)/' \
             | paste -sd', ' - 2>/dev/null || true)
         if [ -n "$DIGEST" ]; then
-            DYNAMIC="${DYNAMIC}Since your last session, teammates committed to shared memory/narrative (author: commits): ${DIGEST}. Skim their narrative.*.md before working in overlapping areas.\n"
+            DYNAMIC="${DYNAMIC}Since your last session, teammates committed to shared memory/narrative (author: commits): ${DIGEST}. Skim their narrative.*.md before working in overlapping areas.${_NL}"
         fi
     fi
     # Advance the watermark to current HEAD (also seeds it on first resume).
@@ -509,7 +515,7 @@ if [ "$SOURCE" = "resume" ] && git -C "$SESSION_DIR" rev-parse --git-dir >/dev/n
     # Objective from README.md
     OBJECTIVE=$(sed -n '/^## Objective/,/^## /{/^## Objective/d;/^## /d;/^$/d;p;}' "$META_DIR/README.md" 2>/dev/null | head -1 | sed 's/^\[.*\]$//' || true)
     if [ -n "$OBJECTIVE" ] && [ "$OBJECTIVE" != "[Describe what you're trying to accomplish in this session]" ]; then
-        DYNAMIC="${DYNAMIC}Objective: ${OBJECTIVE}\n"
+        DYNAMIC="${DYNAMIC}Objective: ${OBJECTIVE}${_NL}"
     fi
 
     # Cross-session awareness: show most recently active sibling sessions
@@ -543,15 +549,19 @@ if [ "$SOURCE" = "resume" ] && git -C "$SESSION_DIR" rev-parse --git-dir >/dev/n
             # supplying it, which costs a help call every time it is used. This
             # block is already conditional on siblings existing, so it appears
             # exactly when there is somewhere to send to.
-            DYNAMIC="${DYNAMIC}Other Sessions (awareness only — if a request belongs to one of these, say so rather than duplicating work here):\n${SIBLINGS}To hand one a task or note: cs -msg <session> \"<body>\"\nAdd --kind notify|task|text|result (default text; a task kind lands in that session's walk-away queue).\n"
+            DYNAMIC="${DYNAMIC}Other Sessions (awareness only — if a request belongs to one of these, say so rather than duplicating work here):${_NL}${SIBLINGS}To hand one a task or note: cs -msg <session> \"<body>\"${_NL}Add --kind notify|task|text|result (default text; a task kind lands in that session's walk-away queue).${_NL}"
         fi
     fi
 
     if [ -n "$DYNAMIC" ]; then
+        # %s, not %b: escapes in interpolated content are data. Scrubbed once
+        # here because DYNAMIC carries text cs did not write — a sibling
+        # session's README objective, git author names, commit subjects — and
+        # the range keeps tab and newline, so the block's own breaks survive.
         CONTEXT="${CONTEXT}
 
 --- Session State ---
-$(printf '%b' "$DYNAMIC")"
+$(printf '%s' "$DYNAMIC" | LC_ALL=C tr -d '\000-\010\013-\037\177')"
     fi
 fi
 
@@ -640,6 +650,13 @@ fi
 
 # Append crash recovery info if present
 if [ -n "${CRASH_CONTEXT:-}" ]; then
+    # %b here is safe and deliberate, unlike the Session State block above: this
+    # skeleton is built with \n escapes throughout, and every value interpolated
+    # into it is either a count, a validated session name, or git output — and
+    # git quotes a backslash in a path as \\ (core.quotePath), which %b renders
+    # back to one literal backslash rather than an escape. Measured, not assumed:
+    # a file named a\033[31mred.txt reaches this block as "a\\033[31mred.txt".
+    # Do not add a scrub here without first demonstrating a reachable input.
     CONTEXT="${CONTEXT}
 
 --- $(printf '%b' "$CRASH_CONTEXT")"

@@ -222,6 +222,8 @@ _cs() {
             '-conversations:Show the session'\''s conversation chain'
             '-usage:Show per-conversation token usage for this session'
             '-tag:Manage session tags'
+            '-features:List this base session'\''s feature worktrees'
+            '-finish:Arm the merge ritual for a finished feature worktree'
             '--force:Override active session lock'
             '--merge:Merge a task worktree back and remove it'
         )

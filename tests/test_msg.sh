@@ -410,7 +410,107 @@ run_test test_reply_refuses_an_unknown_thread
 run_test test_reply_refuses_a_target_that_contradicts_the_thread
 run_test test_thread_survives_an_unparseable_document
 run_test test_log_shows_what_this_session_sent
+# The direction test decides whether a document is one this session SENT (peer =
+# .to) or RECEIVED (peer = .from). "out" is a legal session name, so an
+# unanchored */out/* pattern reads every document in THAT session's mailbox —
+# new/ included — as sent, and derives the replier itself as the peer.
+test_reply_direction_is_anchored_on_the_maildir() {
+    create_test_session out >/dev/null || return 1
+    "$CS_BIN" -msg out "question?" >/dev/null 2>&1 || return 1
+    local msg="" f
+    for f in "$CS_SESSIONS_ROOT/out/.cs/local/mail/new"/*.json; do
+        [ -f "$f" ] && { msg="$f"; break; }
+    done
+    [ -n "$msg" ] || { echo "  FAIL: nothing was delivered to the session named out"; return 1; }
+    # Reachability: the path must actually contain an "out" component, or the
+    # unanchored pattern is never reached and this proves nothing.
+    case "$msg" in
+        */out/*) : ;;
+        *) echo "  FAIL: fixture path has no 'out' component: $msg"; return 1 ;;
+    esac
+    assert_eq "sender" "$(jq -r .from "$msg")" \
+        "the fixture document is RECEIVED mail, so its peer is .from" || return 1
+    assert_eq "out" "$(jq -r .to "$msg")" \
+        "and .to names the replier itself, which is what an unanchored test picks up" || return 1
+
+    local thread rc=0 out
+    thread=$(jq -r .thread "$msg")
+    out=$(
+        export CLAUDE_SESSION_NAME=out
+        export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/out"
+        export CLAUDE_SESSION_META_DIR="$CS_SESSIONS_ROOT/out/.cs"
+        "$CS_BIN" -msg --reply "$thread" "answer!" 2>&1
+    ) || rc=$?
+    [ "$rc" = "0" ] || { echo "  FAIL: a session named out could not answer its own mail: $out"; return 1; }
+    local back="" n=0
+    for f in "$CS_SESSIONS_ROOT/sender/.cs/local/mail/new"/*.json; do
+        [ -f "$f" ] || continue; n=$((n + 1)); back="$f"
+    done
+    assert_eq "1" "$n" "the reply routes to the correspondent, not back to the replier" || return 1
+    assert_eq "sender" "$(jq -r .to "$back")" "the peer was read from .from" || return 1
+}
+
+# The other arm of the same case statement: a document this session SENT lives in
+# out/, and its peer is .to. Deleting the case and always using .from keeps the
+# test above green, so the sent direction needs its own pin.
+test_reply_reads_the_peer_from_to_on_a_sent_message() {
+    "$CS_BIN" -msg receiver "opening question?" >/dev/null 2>&1 || return 1
+    local sent="" f
+    for f in "$CS_SESSIONS_ROOT/sender/.cs/local/mail/out"/*.json; do
+        [ -f "$f" ] && { sent="$f"; break; }
+    done
+    [ -n "$sent" ] || { echo "  FAIL: the sender kept no copy in out/"; return 1; }
+    assert_eq "receiver" "$(jq -r .to "$sent")" "the sent copy names its recipient" || return 1
+    assert_eq "sender" "$(jq -r .from "$sent")" \
+        "and names this session as author, which is what the wrong arm would return" || return 1
+
+    # Replying from the SENDER, whose only view of the thread is that sent copy.
+    local thread rc=0 out
+    thread=$(jq -r .thread "$sent")
+    out=$("$CS_BIN" -msg --reply "$thread" "following up" 2>&1) || rc=$?
+    [ "$rc" = "0" ] || { echo "  FAIL: could not follow up on a thread we started: $out"; return 1; }
+    local n=0
+    for f in "$(MAILDIR)"/new/*.json; do [ -f "$f" ] || continue; n=$((n + 1)); done
+    assert_eq "2" "$n" \
+        "the follow-up went to the recipient; reading .from would have addressed ourselves" || return 1
+}
+
+# 'from' is empty on mail sent from outside a session, so the peer cannot be
+# derived and the caller must name the target. The peer and the parent id cross
+# that boundary as one string: a TAB separator is IFS whitespace, so bash
+# collapses the empty leading field and the parent id arrives AS the peer,
+# turning "cannot tell who" into a confident wrong answer.
+test_reply_to_an_anonymous_thread_needs_a_target_and_keeps_the_parent() {
+    env -u CLAUDE_SESSION_NAME -u CLAUDE_SESSION_META_DIR -u CLAUDE_SESSION_DIR \
+        "$CS_BIN" -msg receiver "note from outside" >/dev/null 2>&1 || return 1
+    local msg; msg=$(FIRST_MSG) || { echo "  FAIL: nothing delivered"; return 1; }
+    assert_eq "" "$(jq -r .from "$msg")" \
+        "the fixture's peer really is underivable, so the empty-peer branch is reached" || return 1
+    local thread parent
+    thread=$(jq -r .thread "$msg"); parent=$(jq -r .id "$msg")
+
+    local out rc=0
+    out=$(rcv -msg --reply "$thread" "who is this?" 2>&1) || rc=$?
+    [ "$rc" != "0" ] || { echo "  FAIL: an underivable peer must refuse, not guess"; return 1; }
+    assert_output_contains "$out" "cannot tell who thread $thread is with" \
+        "the parent id must not be handed back as the peer" || return 1
+
+    rcv -msg sender --reply "$thread" "answering" >/dev/null 2>&1 \
+        || { echo "  FAIL: naming the target must let the reply through"; return 1; }
+    local back="" f
+    for f in "$CS_SESSIONS_ROOT/sender/.cs/local/mail/new"/*.json; do
+        [ -f "$f" ] && { back="$f"; break; }
+    done
+    [ -n "$back" ] || { echo "  FAIL: the reply was not delivered"; return 1; }
+    assert_eq "sender" "$(jq -r .to "$back")" "the named target is honoured" || return 1
+    assert_eq "$parent" "$(jq -r .in_reply_to "$back")" \
+        "the parent id crossed the peer handoff intact" || return 1
+}
+
 run_test test_reply_refuses_an_ambiguous_thread
+run_test test_reply_direction_is_anchored_on_the_maildir
+run_test test_reply_reads_the_peer_from_to_on_a_sent_message
+run_test test_reply_to_an_anonymous_thread_needs_a_target_and_keeps_the_parent
 run_test test_thread_transcript_orders_a_reply_after_its_question
 run_test test_thread_transcript_marks_direction
 run_test test_unread_lines_carry_the_thread_id

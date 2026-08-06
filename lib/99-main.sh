@@ -324,7 +324,7 @@ main() {
                 shift
                 ;;
             *)
-                error "Unknown session command: $1. Use -secrets, -queue, -conversations, -usage, -tag, -features, -finish, --merge, or --force."
+                error "Unknown session command: $1. Use -secrets, -queue, -msg, -conversations, -usage, -tag, -features, -finish, --merge, or --force."
                 ;;
         esac
     done

@@ -9,6 +9,11 @@ CS_FILE="$SCRIPT_DIR/../bin/cs"
 SECRETS_FILE="$SCRIPT_DIR/../bin/cs-secrets"
 ZSH_COMP="$SCRIPT_DIR/../completions/_cs"
 BASH_COMP="$SCRIPT_DIR/../completions/cs.bash"
+# The session dispatch is read from its lib fragment, not the built bin/cs: the
+# build concatenates every fragment, so -msg/-queue/-tag's own argument parsers
+# contribute their flags to any `while [ $# -gt 0 ]` range taken over bin/cs.
+# CI already pins bin/cs as an exact build of lib/, so the two cannot diverge.
+MAIN_LIB="$SCRIPT_DIR/../lib/99-main.sh"
 
 # Extract single-dash top-level command tokens from the main dispatch case
 # (the 8-space-indented arms only, so nested case arms like -update's are excluded).
@@ -485,5 +490,70 @@ run_test test_bash_rm_completes_beyond_first_name
 run_test test_bash_archive_completes_beyond_first_name
 run_test test_zsh_msg_completes_target_session
 run_test test_zsh_rm_completes_beyond_first_name
+
+# Extract the SESSION subcommand arms — the second dispatch site, `cs <name>
+# -verb`, which is a different vocabulary from the top-level one above. The arms
+# sit at 12-space indent inside run_session's while/case; the awk range ends on
+# the 8-space `esac`, so the nested `esac` inside the -msg arm does not close it
+# early.
+#
+# The character class KEEPS `|` so an aliased arm like `-foo|-f)` matches and the
+# `tr` below splits it into two names. Dropping `|` from the class does not merely
+# lose the alias — the whole line stops matching, the arm vanishes from the set,
+# and this drift net goes silently green on a verb nobody completed.
+session_subcommands() {
+    awk '/^    while \[ \$# -gt 0 \]; do/,/^        esac/' "$MAIN_LIB" \
+        | grep -v '# hidden' \
+        | grep -oE '^ {12}--?[a-zA-Z][a-zA-Z|-]*\)' \
+        | tr -d ' )' \
+        | tr '|' '\n' \
+        | grep -E '^-' \
+        | sort -u
+}
+
+test_session_extraction_is_sane() {
+    local cmds
+    cmds=$(session_subcommands)
+    assert_output_contains "$cmds" "-secrets" "extraction should find -secrets" || return 1
+    assert_output_contains "$cmds" "--merge" "extraction should find --merge" || return 1
+    local n
+    n=$(printf '%s\n' "$cmds" | grep -c . | tr -d '[:space:]')
+    [ "${n:-0}" -ge 8 ] \
+        || { echo "  FAIL: only $n session arms extracted; the range or regex is broken"; return 1; }
+}
+
+# Derived, not a hand-written list: a verb added to the dispatch and forgotten in
+# a completion fails here without anyone remembering to update a pin. This is the
+# surface that has drifted before.
+test_every_session_subcommand_is_completed() {
+    local verb missing_bash="" missing_zsh=""
+    while IFS= read -r verb; do
+        [ -n "$verb" ] || continue
+        grep -qF -- "$verb" "$BASH_COMP" || missing_bash="$missing_bash $verb"
+        grep -qF -- "$verb" "$ZSH_COMP"  || missing_zsh="$missing_zsh $verb"
+    done <<< "$(session_subcommands)"
+    [ -z "$missing_bash" ] \
+        || { echo "  FAIL: completions/cs.bash is missing:$missing_bash"; return 1; }
+    [ -z "$missing_zsh" ] \
+        || { echo "  FAIL: completions/_cs is missing:$missing_zsh"; return 1; }
+}
+
+# The catch-all arm tells the user what they could have typed, so it is a third
+# copy of the same vocabulary and drifts the same way.
+test_unknown_session_command_error_lists_every_verb() {
+    local err verb missing=""
+    err=$(grep -F 'Unknown session command' "$MAIN_LIB" | head -1)
+    [ -n "$err" ] || { echo "  FAIL: could not find the unknown-session-command error"; return 1; }
+    while IFS= read -r verb; do
+        [ -n "$verb" ] || continue
+        case "$err" in *"$verb"*) ;; *) missing="$missing $verb" ;; esac
+    done <<< "$(session_subcommands)"
+    [ -z "$missing" ] \
+        || { echo "  FAIL: the unknown-session-command error omits:$missing"; return 1; }
+}
+
+run_test test_session_extraction_is_sane
+run_test test_every_session_subcommand_is_completed
+run_test test_unknown_session_command_error_lists_every_verb
 
 report_results
