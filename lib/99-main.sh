@@ -373,6 +373,10 @@ main() {
     elif [ ! -d "$session_dir" ]; then
         is_new="true"
         create_session_structure "$session_dir"
+        # cs created this directory, so its mode is cs's to set. The adopt path
+        # deliberately does not do this: there the root is the user's own
+        # project, and only the .cs tree inside it belongs to cs.
+        chmod 700 "$session_dir" 2>/dev/null || true
 
         # Initialize local git repo by default
         (

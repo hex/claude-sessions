@@ -5,6 +5,14 @@ Every cs session is a directory under `~/.claude-sessions/` (override with
 project files there. All session *metadata* lives in a single `.cs/`
 subdirectory, and the whole session directory is its own local git repo.
 
+`.cs/` is kept at mode `0700` — set when the session is created and re-applied on
+every open, which covers sessions predating the rule and fresh clones (git records
+no directory modes, so a clone recreates `.cs/` under the local umask). Reaching a
+file inside needs execute on the directory, so one private `.cs/` covers everything
+under it. A session root cs created is `0700` too; an **adopted** session's root is
+not, because that directory is the user's own project and its mode is theirs to
+choose.
+
 `.spawn/` at the sessions root stages `<name>.seed` files written by
 `cs -spawn --task`: line 1 is the spawner, remaining lines are tasks. The
 launch consumes fresh seeds (queued, armed, kick prompt); seeds older than an

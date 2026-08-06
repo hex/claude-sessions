@@ -2412,6 +2412,23 @@ cs_assert_local_untracked() {
     fi
 }
 
+# Bring a session's own data directory to owner-only. cs writes narratives,
+# plans, logs, the timeline and machine-local state here, and a session can hold
+# anything its user worked on — but bare mkdir takes the caller's umask, so on
+# any sessions root that is not itself private the whole lot is world-readable.
+# Only .cs is set: reaching a file inside needs execute on the directory, so a
+# private .cs covers everything under it whatever the files' own modes are.
+#
+# Scoped to .cs on purpose. adopt calls create_session_structure with the USER'S
+# project directory, whose mode is theirs to choose — a shared checkout or a
+# served directory may be world-readable deliberately — so the session root is
+# hardened only where cs created it.
+_harden_session_meta() {  # session_dir
+    [ -d "$1/.cs" ] || return 0
+    chmod 700 "$1/.cs" 2>/dev/null || true
+    return 0
+}
+
 # Create session directory structure
 create_session_structure() {
     local session_dir="$1"
@@ -2420,6 +2437,7 @@ create_session_structure() {
     claude_session_color=$(_alloc_random_color)
 
     mkdir -p "$session_dir/.cs/local"
+    _harden_session_meta "$session_dir"
 
     # Machine-local values go to .cs/local/state, never the git-synced README.
     _set_local_state "$session_dir/.cs/local/state" claude_session_id "$claude_session_id"
@@ -2612,6 +2630,20 @@ needs_cs_migration() {
 # Migrate existing session to latest format
 migrate_session() {
     local session_dir="$1"
+
+    # Sessions created before cs set a mode are still world-readable on disk,
+    # and git does not record directory modes, so a fresh clone recreates .cs
+    # under the cloner's umask however it was set on the other machine.
+    _harden_session_meta "$session_dir"
+    # The root only when cs owns it. An adopted session's real directory is the
+    # user's project, living wherever they keep it — re-permissioning that on
+    # every launch would change their directory behind their back. Testing the
+    # PARENT rather than the name: by the time migrate runs, the path has been
+    # resolved through the symlink, so the adopted session no longer looks like
+    # a link and its basename is the project's, not the session's.
+    case "$session_dir" in
+        "${SESSIONS_ROOT:-}"/*) chmod 700 "$session_dir" 2>/dev/null || true ;;
+    esac
 
     # Per-actor local state must never be committed; refuse if it has been.
     cs_assert_local_untracked "$session_dir"
@@ -7047,6 +7079,10 @@ main() {
     elif [ ! -d "$session_dir" ]; then
         is_new="true"
         create_session_structure "$session_dir"
+        # cs created this directory, so its mode is cs's to set. The adopt path
+        # deliberately does not do this: there the root is the user's own
+        # project, and only the .cs tree inside it belongs to cs.
+        chmod 700 "$session_dir" 2>/dev/null || true
 
         # Initialize local git repo by default
         (
