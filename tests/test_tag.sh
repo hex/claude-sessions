@@ -326,7 +326,29 @@ test_tag_rm_does_not_rewrite_a_prose_line_that_looks_like_tags() {
 run_test test_list_filters_by_tag
 run_test test_list_tag_filter_is_case_insensitive
 run_test test_list_tag_filter_matches_dots_literally
+test_tag_mutations_leave_exactly_one_tags_line() {
+    # On a status-anchored unfenced README the insert branch anchors after
+    # `status:` and never consumed the line it had written last time, so every
+    # mutation left another behind. Invisible — readers stop at the first line,
+    # which is the newest — and unbounded.
+    local dir="$CS_SESSIONS_ROOT/accumulate"
+    mkdir -p "$dir/.cs/local"
+    printf -- '---\nstatus: active\ncreated: 2026-07-15\n\n## Objective\ntest\n' \
+        > "$dir/.cs/README.md"
+    _in_session "accumulate"
+    "$CS_BIN" -tag add api >/dev/null 2>&1 || return 1
+    "$CS_BIN" -tag add web >/dev/null 2>&1 || return 1
+    "$CS_BIN" -tag rm api >/dev/null 2>&1 || return 1
+
+    local n
+    n=$(grep -c '^tags:' "$dir/.cs/README.md" | tr -d '[:space:]')
+    assert_eq "1" "$n" "three mutations must leave one tags line, not three" || return 1
+    assert_file_contains "$dir/.cs/README.md" "^tags: \[web\]$" \
+        "and it must hold the current set" || return 1
+}
+
 run_test test_tag_add_fails_loudly_when_the_write_anchors_on_nothing
+run_test test_tag_mutations_leave_exactly_one_tags_line
 run_test test_tag_add_still_anchors_on_status_without_a_closing_fence
 run_test test_tag_rm_does_not_rewrite_a_prose_line_that_looks_like_tags
 report_results

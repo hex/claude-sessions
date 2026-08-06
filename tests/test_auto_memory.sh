@@ -67,6 +67,15 @@ test_unparseable_settings_local_survives_merge() {
     fi
     assert_output_not_contains "$out" "Could not parse" \
         "the complaint belongs on stderr, where a command substitution cannot capture it" || return 1
+    # The absence above is only half the contract: with the warn deleted
+    # entirely it still holds, and the user is then left with a settings file cs
+    # silently declined to touch. Pin that it is actually SAID, on stderr.
+    rm -rf "$CS_SESSIONS_ROOT/test-session/.cs/plans"
+    printf '%s' '{ "permissions": { "allow": ["Bash(ls:*)"] }, }' > "$settings"
+    local err
+    err=$("$CS_BIN" test-session <<< "" 2>&1 >/dev/null) || true
+    assert_output_contains "$err" "Could not parse" \
+        "cs must say it left the file alone, not decline in silence" || return 1
 }
 
 test_settings_local_is_gitignored() {

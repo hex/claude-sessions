@@ -26,6 +26,27 @@ cs_assert_local_untracked() {
     fi
 }
 
+# True when cs created this session directory, and so owns its mode. Two ways to
+# fail: the directory sits outside the sessions root, or a symlink IN the root
+# resolves to it — an adopted session, whose target is the user's own project
+# and stays whatever mode they chose, even when they keep it inside the root.
+#
+# Both sides are resolved before comparing. A plain prefix test on the unresolved
+# root silently never matched wherever the root itself sits behind a link (macOS
+# /var -> /private/var is the everyday case), so the backfill quietly did nothing
+# on exactly the machines it was written on.
+_session_root_is_cs_owned() {  # session_dir
+    local dir root e
+    dir=$(cd "$1" 2>/dev/null && pwd -P) || return 1
+    root=$(cd "${SESSIONS_ROOT:-}" 2>/dev/null && pwd -P) || return 1
+    case "$dir" in "$root"/*) ;; *) return 1 ;; esac
+    for e in "${SESSIONS_ROOT:-}"/*; do
+        [ -L "$e" ] || continue
+        [ "$(cd "$e" 2>/dev/null && pwd -P)" = "$dir" ] && return 1
+    done
+    return 0
+}
+
 # Bring a session's own data directory to owner-only. cs writes narratives,
 # plans, logs, the timeline and machine-local state here, and a session can hold
 # anything its user worked on — but bare mkdir takes the caller's umask, so on
@@ -255,9 +276,9 @@ migrate_session() {
     # PARENT rather than the name: by the time migrate runs, the path has been
     # resolved through the symlink, so the adopted session no longer looks like
     # a link and its basename is the project's, not the session's.
-    case "$session_dir" in
-        "${SESSIONS_ROOT:-}"/*) chmod 700 "$session_dir" 2>/dev/null || true ;;
-    esac
+    if _session_root_is_cs_owned "$session_dir"; then
+        chmod 700 "$session_dir" 2>/dev/null || true
+    fi
 
     # Per-actor local state must never be committed; refuse if it has been.
     cs_assert_local_untracked "$session_dir"
@@ -439,8 +460,11 @@ migrate_session() {
     # with divergent values, which made merge conflicts inevitable whenever
     # a session was shared through git.
     local _state="$session_dir/.cs/local/state"
-    # Bounded to the frontmatter block, opened by the `---` on line 1 that
-    # Phase 6 guarantees. All four keys are ordinary English, and the README
+    # Bounded to the frontmatter block: opened by the `---` on line 1 that Phase 6
+    # guarantees, and CLOSED by a second one, which it does not. Without a
+    # terminator there is no way to tell frontmatter from prose — fm would stay
+    # set to EOF and the strip below would delete a body line — so an unclosed
+    # block is left entirely alone. All four keys are ordinary English, and the README
     # carries hand-written prose sections, so a body line beginning "updated:"
     # is the user's own content — matching it anywhere in the file deleted it.
     local _fm_field_re='^(claude_session_id|claude_session_color|last_resumed|updated):'
@@ -451,9 +475,9 @@ migrate_session() {
     if [ -f "$readme" ] && awk -v re="$_fm_field_re" '
             { line = $0; sub(/\r$/, "", line) }
             NR == 1 && line == "---" { fm = 1; next }
-            fm && line == "---"      { exit }
-            fm && line ~ re          { found = 1; exit }
-            END                      { exit !found }
+            fm && line == "---"      { closed = 1; exit }
+            fm && line ~ re          { found = 1 }
+            END                      { exit (found && closed) ? 0 : 1 }
         ' "$readme"; then
         local _legacy_uuid _legacy_color
         _legacy_uuid=$(awk '/^claude_session_id:/ { sub(/^claude_session_id:[[:space:]]*/, ""); gsub(/["\r]/, ""); print; exit }' "$readme")

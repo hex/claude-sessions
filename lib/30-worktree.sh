@@ -322,6 +322,14 @@ create_worktree_session() {
 
     setup_auto_memory "$wt_dir"
 
+    # A feature worktree is a full cs session holding the same narrative, plans
+    # and machine-local state as its base, so it gets the same privacy. cs
+    # created this directory, so unlike an adopted session the ROOT is cs's to
+    # set too. Kept here rather than left to migrate_session, which the worktree
+    # open path deliberately never calls.
+    _harden_session_meta "$wt_dir"
+    chmod 700 "$wt_dir" 2>/dev/null || true
+
     echo "$wt_dir"
 }
 

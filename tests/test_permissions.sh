@@ -123,7 +123,63 @@ test_open_does_not_tighten_an_adopted_project_root() {
         "the data directory is still brought private" || return 1
 }
 
+test_worktree_session_data_is_private_too() {
+    # A feature worktree is a full cs session holding the same narrative, plans
+    # and machine-local state as its base. cs creates the directory itself, so
+    # the adopt boundary does not apply and the root is cs's to set — but the
+    # worktree open path bypasses migrate_session, so neither hardening site
+    # reached it and the data sat at 0755 beside a base locked at 0700.
+    _skip_on_msys && return 0
+    local base="$CS_SESSIONS_ROOT/wtbase"
+    mkdir -p "$base"
+    echo "# P" > "$base/README.md"
+    ( cd "$base" && git init -q && git config core.autocrlf false \
+        && git config user.email a@example.com && git config user.name Tester \
+        && git add -A && git commit -q -m init )
+
+    ( umask 022; "$CS_BIN" wtbase <<< "" >/dev/null 2>&1 ) || true
+    ( umask 022; "$CS_BIN" "wtbase@feat" <<< "" >/dev/null 2>&1 ) || true
+    local wt="$CS_SESSIONS_ROOT/wtbase@feat"
+    assert_dir "$wt" "the worktree session was created" || return 1
+    assert_dir "$wt/.cs" "and has its own data directory" || return 1
+
+    assert_eq "700" "$(_mode "$wt/.cs")" \
+        "a worktree's session data is as private as its base's" || return 1
+    assert_eq "700" "$(_mode "$wt")" "and so is its root, which cs created" || return 1
+
+    # Reopening must keep it there, the same backfill the base session gets.
+    chmod 755 "$wt" "$wt/.cs"
+    ( umask 022; "$CS_BIN" "wtbase@feat" <<< "" >/dev/null 2>&1 ) || true
+    assert_eq "700" "$(_mode "$wt/.cs")" "reopening tightens it again" || return 1
+    assert_eq "700" "$(_mode "$wt")" "root too" || return 1
+}
+
+test_open_does_not_tighten_an_adopted_project_kept_inside_the_sessions_root() {
+    # The ownership test is "does this live under SESSIONS_ROOT", which is true
+    # for an adopted project the user happens to keep there — and cs then
+    # re-permissions their directory on every launch, the exact act the rule
+    # forbids. An adopted session is reached through a SYMLINK at the root; the
+    # target is theirs wherever it sits.
+    _skip_on_msys && return 0
+    local proj="$CS_SESSIONS_ROOT/inside-project"
+    mkdir -p "$proj"
+    chmod 755 "$proj"
+    echo "# project" > "$proj/README.md"
+    ( cd "$proj" && git init -q && git config user.email a@example.com \
+        && git config user.name Tester && git add -A && git commit -q -m init )
+    ( umask 022; cd "$proj" && "$CS_BIN" -adopt inside <<< "" >/dev/null 2>&1 ) || true
+    assert_exists "$CS_SESSIONS_ROOT/inside" "adopt created the session link" || return 1
+    chmod 755 "$proj"
+
+    ( umask 022; "$CS_BIN" inside <<< "" >/dev/null 2>&1 ) || true
+    assert_eq "755" "$(_mode "$proj")" \
+        "an adopted project is the user's, wherever they keep it" || return 1
+    assert_eq "700" "$(_mode "$proj/.cs")" "its cs data is still private" || return 1
+}
+
 run_test test_create_keeps_session_data_private_under_a_lax_umask
+run_test test_open_does_not_tighten_an_adopted_project_kept_inside_the_sessions_root
+run_test test_worktree_session_data_is_private_too
 run_test test_adopt_does_not_re_permission_the_user_project
 run_test test_open_tightens_an_existing_world_readable_session
 run_test test_open_does_not_tighten_an_adopted_project_root

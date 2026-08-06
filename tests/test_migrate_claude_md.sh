@@ -276,6 +276,22 @@ test_migrate_moves_machine_local_fields_out_of_a_crlf_readme() {
     assert_eq "2" "$fences" "exactly one frontmatter block, opened and closed" || return 1
 }
 
+test_migrate_does_not_strip_a_body_line_when_the_fence_is_unclosed() {
+    # Line 1 is `---` so Phase 6 leaves the file alone, but nothing closes the
+    # block — so the "bounded to the frontmatter" scan runs to EOF and deletes a
+    # body line that merely begins with one of the four key names. Without a
+    # closing fence there is no way to tell frontmatter from prose, and
+    # rewriting prose is the worse failure.
+    local dir
+    dir=$(create_test_session "unfenced")
+    printf -- '---\nstatus: active\nclaude_session_id: 99999999-8888-7777-6666-555555555555\n\n## Outcome\n\nupdated: the deploy notes\n' \
+        > "$dir/.cs/README.md"
+    "$CS_BIN" "unfenced" < /dev/null > /dev/null 2>&1 || true
+    assert_file_contains "$dir/.cs/README.md" "updated: the deploy notes" \
+        "a body line must survive when the block was never closed" || return 1
+}
+
 run_test test_migrate_moves_machine_local_fields_out_of_a_crlf_readme
+run_test test_migrate_does_not_strip_a_body_line_when_the_fence_is_unclosed
 
 report_results
