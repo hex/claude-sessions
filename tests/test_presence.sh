@@ -111,8 +111,39 @@ run_test test_status_get_none_when_empty
 run_test test_status_clear_removes_file
 run_test test_status_empty_string_is_usage_error
 run_test test_status_requires_session
+# Count raw ESC BYTES, never the text of an escape sequence: a prior check of
+# this exact defect was wrong because it grepped for the word rather than the
+# byte, and the scrub removes the byte while leaving the printable remainder.
+_esc_bytes() { printf '%s' "$1" | LC_ALL=C tr -dc "$(printf '\033\007')" | wc -c | tr -d '[:space:]'; }
+
+test_status_render_strips_control_bytes_from_the_presence_file() {
+    # cs is multi-session: another session writes here via `cs -msg`, so the
+    # reader does not trust the writer.
+    printf 'busy \033[31mRED\033[0m and \007bell' > "$(PFILE)"
+    local out
+    out=$("$CS_BIN" -status 2>&1) || return 1
+    assert_output_contains "$out" "busy" "the printable text survives" || return 1
+    assert_output_contains "$out" "bell" "and so does text after the control byte" || return 1
+    assert_eq "0" "$(_esc_bytes "$out")" "no raw ESC or BEL reaches the terminal" || return 1
+}
+
+test_status_render_strips_control_bytes_from_the_objective_fallback() {
+    # With no presence file, session_status falls back to the README objective —
+    # which under `cs -live` is ANOTHER session's file, the most genuinely
+    # cross-session surface here. Omitting the presence file is what reaches it.
+    rm -f "$(PFILE)"
+    seed_readme "$(printf 'ship \033[31mred\033[0m thing')"
+    local out
+    out=$("$CS_BIN" -status 2>&1) || return 1
+    assert_output_contains "$out" "ship" "the fallback path is reached and renders" || return 1
+    assert_output_contains "$out" "thing" "text after the control byte survives" || return 1
+    assert_eq "0" "$(_esc_bytes "$out")" "no raw ESC reaches the terminal" || return 1
+}
+
 run_test test_status_set_leaves_no_temp
 run_test test_status_clear_reverts_to_objective
 run_test test_status_get_filters_readme_placeholder
+run_test test_status_render_strips_control_bytes_from_the_presence_file
+run_test test_status_render_strips_control_bytes_from_the_objective_fallback
 
 report_results

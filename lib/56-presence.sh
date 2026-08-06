@@ -50,7 +50,11 @@ session_status() {  # session_dir
     local session_dir="$1" status
     status="$(_read_presence "$session_dir/.cs")"
     [ -n "$status" ] || status="$(_session_objective "$session_dir")"
-    printf '%s' "$status"
+    # The single funnel for both render sites (run_status and cmd_live) and
+    # for the _session_objective fallback, which under `cs -live` is another
+    # session's README. Scrubbed on read, not on write: the write path only
+    # guards this session's own text, and the threat is a file it never wrote.
+    printf '%s' "$status" | _scrub_controls
 }
 
 # Dispatcher for 'cs -status'. In-session only (ambient env), like run_queue.

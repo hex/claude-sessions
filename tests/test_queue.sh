@@ -489,4 +489,47 @@ test_statusline_stamps_context_pct() {
 
 run_test test_statusline_stamps_context_pct
 
+# --- Queued text crosses a session boundary and is not trusted ---
+# `cs -msg <target> -k task "<body>"` writes a task file straight into ANOTHER
+# session's queue, so the bytes rendered below were authored elsewhere. Count raw
+# ESC BYTES, never the text of an escape sequence: a prior check of this defect
+# grepped for the word and passed while the byte was still reaching the terminal.
+_esc_bytes() { printf '%s' "$1" | LC_ALL=C tr -dc "$(printf '\033')" | wc -c | tr -d '[:space:]'; }
+
+test_queue_list_strips_control_bytes_from_a_pending_task() {
+    "$CS_BIN" -queue add "$(printf 'run \033[31mred\033[0m job')" >/dev/null 2>&1 || return 1
+    local out
+    out=$("$CS_BIN" -queue list 2>&1) || return 1
+    assert_output_contains "$out" "Pending:" "the pending branch is reached" || return 1
+    assert_output_contains "$out" "job" "text after the control byte survives" || return 1
+    assert_eq "0" "$(_esc_bytes "$out")" "no raw ESC reaches the terminal" || return 1
+}
+
+test_queue_list_strips_control_bytes_from_the_done_log() {
+    # queue.done is appended by the drain with the popped cross-session task
+    # text. Writing the file directly is what reaches the Done: branch — the
+    # only guard is `[ -s "$qdir/queue.done" ]`, which a non-empty write meets.
+    printf 'finished \033[31mred\033[0m task\n' > "$CLAUDE_SESSION_META_DIR/local/queue.done"
+    local out
+    out=$("$CS_BIN" -queue list 2>&1) || return 1
+    assert_output_contains "$out" "Done:" "the done branch is reached" || return 1
+    assert_output_contains "$out" "task" "text after the control byte survives" || return 1
+    assert_eq "0" "$(_esc_bytes "$out")" "no raw ESC reaches the terminal" || return 1
+}
+
+test_queue_log_strips_control_bytes() {
+    # jq -r DECODES the  the drain stored, so the raw byte reappears here
+    # even though the journal on disk holds none.
+    printf '{"ts":1750000000,"event":"task_done","task":"run \\u001b[31mred\\u001b[0m"}\n' \
+        > "$CLAUDE_SESSION_META_DIR/local/notifications.jsonl"
+    local out
+    out=$("$CS_BIN" -queue log 2>&1) || return 1
+    assert_output_contains "$out" "task_done" "the log branch is reached" || return 1
+    assert_eq "0" "$(_esc_bytes "$out")" "no raw ESC reaches the terminal" || return 1
+}
+
+run_test test_queue_list_strips_control_bytes_from_a_pending_task
+run_test test_queue_list_strips_control_bytes_from_the_done_log
+run_test test_queue_log_strips_control_bytes
+
 report_results
