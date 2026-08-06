@@ -181,6 +181,10 @@ test_auto_approve_rejects_traversal() {
 # design, so a pulled symlink would otherwise turn every auto-approved metadata
 # write into a write outside the session.
 test_auto_approve_rejects_leaf_symlink() {
+    # Git Bash's `ln -s` produces a regular-file COPY, so the hook's -L guard
+    # cannot fire and its approval is correct there (same reason as
+    # tests/test_adopt.sh's symlink cases).
+    _skip_on_msys && return 0
     local outside="$TEST_TMPDIR/outside-the-session.conf"
     echo "original" > "$outside"
     ln -s "$outside" "$CLAUDE_SESSION_META_DIR/notes.md"
