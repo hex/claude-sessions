@@ -563,8 +563,21 @@ test_classifier_falls_back_to_grep_without_ripgrep() {
     out=$(_run_hook_on_path "$p" "implement a retry wrapper around the fetch call in src/api.ts") \
         || { echo "  FAIL: the hook failed on a box without ripgrep"; return 1; }
     ac=$(additional_context "$out")
-    assert_output_contains "$ac" "Scope (auto-grounded)" \
-        "without ripgrep the classifier must still fire, not read every prompt as chitchat" || return 1
+    if ! echo "$ac" | grep -q "Scope (auto-grounded)"; then
+        echo "  FAIL: without ripgrep the classifier must still fire, not read every prompt as chitchat"
+        # This arm only runs where ripgrep is absent, which off Git Bash means a
+        # stubbed PATH. When it fails there and nowhere else, the useful question
+        # is what the stub could actually reach, so say it rather than making the
+        # next person add printfs and push again.
+        echo "    stub PATH: $p"
+        echo "    staged   : $(ls "$p" 2>/dev/null | tr '\n' ' ')"
+        echo "    grep     : $(PATH="$p" command -v grep 2>/dev/null || echo NONE)"
+        echo "    grep -E  : $(PATH="$p" sh -c 'echo aXb | grep -qE "a.b" && echo ok || echo FAILED' 2>&1)"
+        echo "    grep -qiE: $(PATH="$p" sh -c 'echo Implement | grep -qiE "implement" && echo ok || echo FAILED' 2>&1)"
+        echo "    herestring: $(PATH="$p" bash -c 'grep -qiE implement <<< Implement && echo ok || echo FAILED' 2>&1)"
+        echo "    hook said : $(echo "$ac" | head -3 | tr '\n' '|')"
+        return 1
+    fi
     assert_output_contains "$ac" "src/api.ts" \
         "and the grounded scan must still run, through the grep _scan" || return 1
 }

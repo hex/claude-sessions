@@ -4871,9 +4871,16 @@ _doctor_check_hook_drift() {
     # `./install.sh`, which from there installs something else. install.sh
     # stamps the deploy directory with the version it shipped, so compare
     # against that and stay silent when it is a different tree.
-    local src_version deployed_version
-    src_version=$(sed -n 's/^VERSION="\([^"]*\)".*/\1/p' bin/cs 2>/dev/null | head -1)
-    deployed_version=$(head -1 "$hooks_dir/.version" 2>/dev/null | tr -d '[:space:]')
+    # Both reads are guarded on the file existing rather than leaning on 2>/dev/null:
+    # a missing file makes the first stage of the pipe exit non-zero, pipefail
+    # promotes that to the assignment, and errexit ends the whole run here — so
+    # every check after this one would silently never print. A machine with
+    # nothing installed has no stamp, which is the ordinary case, not an error.
+    local src_version="" deployed_version=""
+    [ -f "bin/cs" ] &&
+        src_version=$(sed -n 's/^VERSION="\([^"]*\)".*/\1/p' bin/cs 2>/dev/null | head -1)
+    [ -f "$hooks_dir/.version" ] &&
+        deployed_version=$(tr -d '[:space:]' < "$hooks_dir/.version" 2>/dev/null)
     [ -n "$src_version" ] && [ "$src_version" = "$deployed_version" ] || return 0
 
     local clean=1

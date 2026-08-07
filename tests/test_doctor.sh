@@ -124,6 +124,24 @@ test_doctor_drift_ignores_a_checkout_that_did_not_produce_the_install() {
         "nor its hooks reported as undeployed" || return 1
 }
 
+# A machine with nothing installed has no version stamp. Reading a missing one
+# through a pipe fails, pipefail promotes it, and errexit takes the whole run
+# down mid-check, so every check after this one silently never prints. The
+# symptom is not a wrong drift verdict, it is unrelated checks going missing.
+test_doctor_completes_when_the_deploy_stamp_is_absent() {
+    local checkout="$TEST_TMPDIR/nostamp" deployed="$TEST_TMPDIR/nostampdep"
+    make_fake_checkout "$checkout" "$deployed"
+    rm -f "$deployed/.version"
+    echo 'echo hook' > "$checkout/hooks/session-start.sh"
+
+    local output
+    output=$(cd "$checkout" && CS_HOOKS_DIR="$deployed" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Session UUID" \
+        "checks after the drift scan must still run without a version stamp" || return 1
+    assert_output_contains "$output" "Auto-memory" \
+        "and the rest of the run must not be cut short" || return 1
+}
+
 test_doctor_warns_on_hook_drift() {
     local checkout="$TEST_TMPDIR/checkout" deployed="$TEST_TMPDIR/deployed"
     make_fake_checkout "$checkout" "$deployed"
@@ -737,6 +755,7 @@ run_test test_doctor_runs_default_checks_from_session
 run_test test_doctor_reports_pass_for_healthy_session
 run_test test_doctor_fails_when_hook_not_executable
 run_test test_doctor_exits_nonzero_on_failure
+run_test test_doctor_completes_when_the_deploy_stamp_is_absent
 run_test test_doctor_drift_ignores_a_checkout_that_did_not_produce_the_install
 run_test test_doctor_warns_on_hook_drift
 run_test test_doctor_warns_on_undeployed_hook
