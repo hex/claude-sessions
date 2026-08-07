@@ -4,6 +4,23 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.8.9
+
+Three defects that only fired on Git Bash, found by fixing the Windows CI lane.
+It is green for the first time since 2026-08-03, so these were shipping unseen.
+
+### Fixes
+
+- **Replying to a thread you started worked everywhere except Windows.** The thread reader asks `jq` for `input_filename`, and `jq` echoes each path exactly as it received it. MSYS rewrites a leading-slash argument into `C:/...` before a native `jq.exe` sees it, so the returned paths stopped matching the `out/` pattern the reply keys direction on. Every copy this session had sent then read as received, the correspondent resolved to the message's author, which is you, and the send was refused as mail to the current session. The paths handed back are now the caller's own, and a spelling that cannot be correlated falls back to reading the documents one at a time rather than returning an empty thread.
+
+- **Mail arriving at an idle Windows session never woke it.** The `FileChanged` arm compared the reported path against this session's maildir as strings. The watcher reports the platform's own spelling, which need not be the one the maildir path was built from: `C:/Users/...` beside an MSYS `/tmp/...`, or `/private/var` beside `/var`. A real arrival in the session's own `new/` was dropped for being described differently. It now asks whether the document is in this session's `new/` rather than whether two strings agree, which keeps the precision the check exists for.
+
+- **`cs -msg <target> -` could not send a large body on Windows.** The body was read from stdin and then handed to `jq` as an `--arg`, putting it straight back onto a command line, which Windows caps at about 32K. A body approaching the documented 65536-byte maximum failed to compose, so the stdin channel, which exists precisely so a multi-KB handoff need not travel through argv, did not deliver what it was for. The body now rides on `jq`'s stdin and nothing size-dependent reaches a command line.
+
+### Tests
+
+- The Git Bash lane is green again. Two of the suites were failing on fixtures the platform cannot produce rather than on the code: `chmod 500` does not deny the owner writes on Windows, so three tests modelling a failed write were silently modelling a successful one, and a stub PATH cannot be built there at all because MSYS binaries link against `msys-2.0.dll`, which Windows resolves beside the executable, so a relocated copy will not start. Both now probe the condition they need and skip, naming the reason, where it cannot be established. A `watchPaths` assertion that compared path spellings now writes a file through the maildir and looks for it through the emitted path, so it pins which directory the watch lands on.
+
 ## 2026.8.8
 
 A follow-up to 2026.8.7, fixing what that release's own gate could not see. Its
