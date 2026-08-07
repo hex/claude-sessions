@@ -69,6 +69,18 @@ _skip_on_msys() {
     return 1
 }
 
+# The host itself, ignoring CS_PLATFORM_OVERRIDE. _is_msys answers what the code
+# under test should believe, which a suite may pin (SUITE_PIN_NONMSYS) so a
+# platform-gated path runs on Windows CI. Anything that touches the real
+# filesystem must ask this instead: a suite pretending to be Linux is still
+# writing to an NTFS volume where an executable needs its .exe name.
+_is_real_msys() {
+    case "$(uname -s 2>/dev/null)" in
+        MINGW*|MSYS*|CYGWIN*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 # Stage one tool into a stub PATH directory, for tests that build a PATH missing
 # exactly one command. Two Git Bash behaviours conspire here: `command -v grep`
 # answers /usr/bin/grep though the file is grep.exe (MSYS hides the suffix from
@@ -86,11 +98,21 @@ _stub_tool() {  # dir, tool
     case "$src" in /*) ;; *) return 0 ;; esac
     [ -e "$src" ] || src="${src}.exe"
     [ -e "$src" ] || return 1
-    ln -sf "$src" "$dir/$tool" 2>/dev/null || cp -p "$src" "$dir/$tool" 2>/dev/null || return 1
-    if _is_msys || [ "${src%.exe}" != "$src" ]; then
-        ln -sf "$src" "$dir/$tool.exe" 2>/dev/null \
-            || cp -p "$src" "$dir/$tool.exe" 2>/dev/null || true
+    if _is_real_msys; then
+        # Copy outright rather than trying `ln -s` first. It SUCCEEDS there
+        # while writing a placeholder Windows will not execute, so the `||`
+        # fallback never runs and the stub fills with files that resolve on the
+        # PATH and then fail to launch. Both names, since the loader wants .exe
+        # and the callers spell the tool without it.
+        cp -p "$src" "$dir/$tool" 2>/dev/null || return 1
+        cp -p "$src" "$dir/$tool.exe" 2>/dev/null || return 1
+        return 0
     fi
+    ln -sf "$src" "$dir/$tool" 2>/dev/null || cp -p "$src" "$dir/$tool" 2>/dev/null || return 1
+    case "$src" in
+        *.exe) ln -sf "$src" "$dir/$tool.exe" 2>/dev/null \
+                   || cp -p "$src" "$dir/$tool.exe" 2>/dev/null || true ;;
+    esac
     return 0
 }
 
