@@ -69,12 +69,14 @@ _skip_on_msys() {
     return 1
 }
 
-# Link one tool into a stub PATH directory, for tests that build a PATH missing
-# exactly one command. Under Git Bash `command -v cksum` answers /usr/bin/cksum
-# while the file on disk is cksum.exe, so linking the reported path produces a
-# dangling entry: the stub PATH then loses every tool rather than the one under
-# suppression, and the test fails somewhere unrelated to what it is checking.
-# Both spellings are provided because Windows resolves the .exe name.
+# Stage one tool into a stub PATH directory, for tests that build a PATH missing
+# exactly one command. Two Git Bash behaviours conspire here: `command -v grep`
+# answers /usr/bin/grep though the file is grep.exe (MSYS hides the suffix from
+# `command -v` and from `[ -e ]` alike), and `ln -s` copies rather than links.
+# A copy of an .exe under a name Windows does not recognise as executable will
+# not launch, so the stub PATH loses every tool instead of the one under
+# suppression, and the test then fails somewhere unrelated to its subject.
+# On Windows both spellings are written; elsewhere the reported path is enough.
 # Returns non-zero when the tool cannot be staged, so callers can say so.
 _stub_tool() {  # dir, tool
     local dir="$1" tool="$2" src
@@ -85,23 +87,41 @@ _stub_tool() {  # dir, tool
     [ -e "$src" ] || src="${src}.exe"
     [ -e "$src" ] || return 1
     ln -sf "$src" "$dir/$tool" 2>/dev/null || cp -p "$src" "$dir/$tool" 2>/dev/null || return 1
-    case "$src" in
-        *.exe) ln -sf "$src" "$dir/$tool.exe" 2>/dev/null \
-                   || cp -p "$src" "$dir/$tool.exe" 2>/dev/null || true ;;
-    esac
+    if _is_msys || [ "${src%.exe}" != "$src" ]; then
+        ln -sf "$src" "$dir/$tool.exe" 2>/dev/null \
+            || cp -p "$src" "$dir/$tool.exe" 2>/dev/null || true
+    fi
     return 0
 }
 
 # Stage a whole whitelist into a stub PATH dir. Tools genuinely absent from the
 # host are skipped; a tool present but unstageable is a harness failure, since a
 # silently missing one turns "X is absent" into "everything is absent".
+# Staging is then proved by RUNNING one of them: on Windows a staged file can
+# resolve on the PATH and still refuse to launch, which reads downstream as a
+# defect in whatever the test was actually checking.
 _stub_tools() {  # dir, tools...
     local dir="$1"; shift
-    local t missing=""
+    local t missing="" probe=""
     for t in "$@"; do
         command -v "$t" >/dev/null 2>&1 || continue
-        _stub_tool "$dir" "$t" || missing="$missing $t"
+        if _stub_tool "$dir" "$t"; then
+            case "$t" in cat|echo|true) ;; *) [ -n "$probe" ] || probe="$t" ;; esac
+        else
+            missing="$missing $t"
+        fi
     done
+    if [ -n "$probe" ]; then
+        local rc=0
+        PATH="$dir" "$probe" --version >/dev/null 2>&1 || rc=$?
+        # Only 126 (found, not executable) and 127 (not found) mean it failed to
+        # launch. Every other status says it ran, including the usage error a
+        # BSD tool gives for --version, so the probe stays tool-agnostic.
+        if [ "$rc" = "126" ] || [ "$rc" = "127" ]; then
+            echo "  FAIL: staged '$probe' into the stub PATH but it will not run there (exit $rc)"
+            return 1
+        fi
+    fi
     [ -z "$missing" ] || { echo "  FAIL: could not stage into the stub PATH:$missing"; return 1; }
     return 0
 }
