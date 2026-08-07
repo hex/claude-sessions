@@ -450,6 +450,40 @@ test_reply_direction_is_anchored_on_the_maildir() {
     assert_eq "sender" "$(jq -r .to "$back")" "the peer was read from .from" || return 1
 }
 
+# _mail_thread_files' fast path asks jq for input_filename, and jq echoes each
+# path exactly as IT received it. Under MSYS a leading-slash argument is
+# rewritten to C:/... before a native jq.exe sees it, so the emitted paths stop
+# matching the "$maildir"/out/* pattern its caller keys direction on: every sent
+# copy reads as received, the peer resolves to .from, and a session replying to
+# a thread it started addresses itself. The paths must be the caller's own.
+test_thread_files_emit_paths_anchored_on_the_maildir_given() {
+    "$CS_BIN" -msg receiver "anchor probe" >/dev/null 2>&1 || return 1
+    local maildir="$CS_SESSIONS_ROOT/sender/.cs/local/mail" sent="" f
+    for f in "$maildir"/out/*.json; do [ -f "$f" ] && { sent="$f"; break; }; done
+    [ -n "$sent" ] || { echo "  FAIL: no sent copy to probe"; return 1; }
+    local thread; thread=$(jq -r .thread "$sent")
+
+    local out n=0
+    out=$(
+        eval "$(sed 's/^main "\$@"$/:/' "$CS_BIN")" 2>/dev/null
+        _mail_thread_files "$maildir" "$thread"
+    ) || { echo "  FAIL: _mail_thread_files found nothing for thread $thread"; return 1; }
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        n=$((n + 1))
+        case "$f" in
+            "$maildir"/*) : ;;
+            *) echo "  FAIL: emitted path is not anchored on the maildir it was given"
+               echo "    maildir: $maildir"
+               echo "    emitted: $f"
+               return 1 ;;
+        esac
+    done <<EOF
+$out
+EOF
+    [ "$n" -gt 0 ] || { echo "  FAIL: nothing emitted for a thread that exists"; return 1; }
+}
+
 # The other arm of the same case statement: a document this session SENT lives in
 # out/, and its peer is .to. Deleting the case and always using .from keeps the
 # test above green, so the sent direction needs its own pin.
@@ -509,6 +543,7 @@ test_reply_to_an_anonymous_thread_needs_a_target_and_keeps_the_parent() {
 
 run_test test_reply_refuses_an_ambiguous_thread
 run_test test_reply_direction_is_anchored_on_the_maildir
+run_test test_thread_files_emit_paths_anchored_on_the_maildir_given
 run_test test_reply_reads_the_peer_from_to_on_a_sent_message
 run_test test_reply_to_an_anonymous_thread_needs_a_target_and_keeps_the_parent
 run_test test_thread_transcript_orders_a_reply_after_its_question
@@ -938,9 +973,9 @@ test_migration_keeps_the_legacy_file_when_a_record_cannot_be_written() {
     _seed_legacy_inbox \
         '{"id":"w1","ts":1700000000,"from":"sender","actor":"a","kind":"text","body":"must survive"}'
     mkdir -p "$(MAILDIR)/tmp"
-    chmod 500 "$(MAILDIR)/tmp"
+    _deny_writes "$(MAILDIR)/tmp" || return 0
     _open_receiver
-    chmod 700 "$(MAILDIR)/tmp"
+    _allow_writes "$(MAILDIR)/tmp"
     assert_eq "0" "$(NEW_COUNT)" "nothing was delivered" || return 1
     local legacy_present=0
     [ -f "$(MAILDIR)/inbox.jsonl" ] && legacy_present=1
@@ -1105,6 +1140,23 @@ test_idle_wake_exits_2_with_the_reason_on_stderr() {
         "the reason rides on stderr, which outranks stdout in the composed payload" || return 1
 }
 
+# The watcher reports file_path in the platform's own spelling, which need not
+# be the one $MAILDIR was built from: on Windows it is C:/Users/... beside an
+# MSYS /tmp/..., and here /private/var beside /var. Matching the strings makes
+# the wake depend on which spelling the reporter happened to use, so a real
+# arrival in this session's own new/ is dropped and idle mail never wakes it.
+test_idle_wake_accepts_another_spelling_of_the_same_path() {
+    "$CS_BIN" -msg receiver "wake up" >/dev/null 2>&1 || return 1
+    local msg; msg=$(FIRST_MSG) || return 1
+    local other; other=$(cd "$(dirname "$msg")" && pwd -P)/$(basename "$msg")
+    [ "$other" != "$msg" ] || { echo "    SKIP (no second spelling of the maildir on this host)"; return 0; }
+    [ -f "$other" ] || { echo "  FAIL: the second spelling does not name the same file"; return 1; }
+    local rc=0
+    filechanged "$other" add >/dev/null 2>&1 || rc=$?
+    assert_eq "2" "$rc" \
+        "a wake must follow the file, not the spelling of the path reporting it" || return 1
+}
+
 test_idle_wake_ignores_files_outside_the_maildir() {
     "$CS_BIN" -msg receiver "wake up" >/dev/null 2>&1 || return 1
     local rc=0
@@ -1243,6 +1295,7 @@ test_stop_wake_stops_at_the_ceiling() {
 run_test test_stop_wake_only_the_lead_wakes
 run_test test_stop_wake_stops_at_the_ceiling
 run_test test_idle_wake_exits_2_with_the_reason_on_stderr
+run_test test_idle_wake_accepts_another_spelling_of_the_same_path
 run_test test_idle_wake_ignores_files_outside_the_maildir
 run_test test_idle_wake_ignores_unlink
 run_test test_idle_wake_does_not_touch_the_attention_flag

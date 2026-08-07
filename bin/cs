@@ -3772,6 +3772,25 @@ _mail_thread_files() {  # maildir, thread id -> prints paths, rc 1 when none
             out="$out$f
 "
         done
+    else
+        # input_filename echoes each path as jq received it, and MSYS rewrites a
+        # leading-slash argument to C:/... before a native jq.exe sees it. The
+        # caller keys reply direction on "$maildir"/out/*, so a Windows spelling
+        # classifies every sent copy as received and a reply to a thread this
+        # session started is addressed back to itself. Re-key on the basename,
+        # which the rewrite leaves alone, and emit the caller's own path.
+        local remapped="" name
+        while IFS= read -r name; do
+            [ -n "$name" ] || continue
+            name="${name##*/}"
+            for f in "${all[@]}"; do
+                [ "${f##*/}" = "$name" ] && { remapped="$remapped$f
+"; break; }
+            done
+        done <<EOF
+$out
+EOF
+        out="$remapped"
     fi
     [ -n "$out" ] || return 1
     printf '%s\n' "$out" | awk -F/ 'NF {print $NF "\t" $0}' | sort | cut -f2-

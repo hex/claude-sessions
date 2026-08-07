@@ -1711,8 +1711,22 @@ test_session_start_arms_the_mail_watcher() {
         "session start creates the maildir before asking for it to be watched" || rc=1
     local wp
     wp=$(echo "$output" | jq -r '.hookSpecificOutput.watchPaths[0] // ""')
-    assert_eq "$CLAUDE_SESSION_META_DIR/local/mail/new" "$wp" \
-        "watchPaths names the absolute maildir" || rc=1
+    # Assert which directory the watch lands on, not how it is spelled. Under
+    # Git Bash the path reaches jq through MSYS argv translation and comes back
+    # as C:/Users/.../AppData/Local/Temp/..., the same directory /tmp names
+    # there. A string compare fails on the spelling while the watch is armed on
+    # exactly the right place, so prove identity with a file instead.
+    if [ -z "$wp" ]; then
+        echo "  FAIL: watchPaths is empty; the maildir was never armed"; rc=1
+    else
+        local token="watch-probe-$$"
+        : > "$CLAUDE_SESSION_META_DIR/local/mail/new/$token"
+        [ -f "$wp/$token" ] \
+            || { echo "  FAIL: watchPaths does not name the maildir session start created"
+                 echo "    watchPaths: $wp"
+                 echo "    maildir   : $CLAUDE_SESSION_META_DIR/local/mail/new"; rc=1; }
+        rm -f "$CLAUDE_SESSION_META_DIR/local/mail/new/$token"
+    fi
     session_start_teardown
     return $rc
 }

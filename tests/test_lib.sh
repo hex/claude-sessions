@@ -69,6 +69,29 @@ _skip_on_msys() {
     return 1
 }
 
+# Make a directory reject new files, and prove it did. Windows emulates the
+# POSIX mode bits without enforcing them against the owner, so `chmod 500`
+# leaves the directory writable there and a test modelling a FAILED write
+# silently models a successful one -- it then reports the code as broken for
+# not handling a failure that never happened. Returns 2 when the denial cannot
+# be established, so callers skip rather than assert against a fixture that
+# never reached the branch. Pair with _allow_writes.
+_deny_writes() {  # dir
+    local dir="$1"
+    chmod 500 "$dir" 2>/dev/null || return 2
+    if : > "$dir/.write-probe" 2>/dev/null; then
+        rm -f "$dir/.write-probe" 2>/dev/null || true
+        chmod 700 "$dir" 2>/dev/null || true
+        echo "    SKIP (this filesystem does not deny the owner writes to a read-only directory)"
+        return 2
+    fi
+    return 0
+}
+
+_allow_writes() {  # dir
+    chmod 700 "$1" 2>/dev/null || true
+}
+
 # The host itself, ignoring CS_PLATFORM_OVERRIDE. _is_msys answers what the code
 # under test should believe, which a suite may pin (SUITE_PIN_NONMSYS) so a
 # platform-gated path runs on Windows CI. Anything that touches the real

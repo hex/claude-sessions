@@ -231,9 +231,9 @@ test_legacy_conversion_survives_a_stale_queue_tmp_file() {
 test_legacy_conversion_keeps_the_legacy_file_when_a_task_cannot_be_written() {
     printf 'must survive\n' > "$(QFILE)"
     mkdir -p "$CLAUDE_SESSION_META_DIR/local/queue.tmp"
-    chmod 500 "$CLAUDE_SESSION_META_DIR/local/queue.tmp"
+    _deny_writes "$CLAUDE_SESSION_META_DIR/local/queue.tmp" || return 0
     "$CS_BIN" -queue list >/dev/null 2>&1 || true
-    chmod 700 "$CLAUDE_SESSION_META_DIR/local/queue.tmp"
+    _allow_writes "$CLAUDE_SESSION_META_DIR/local/queue.tmp"
     assert_eq "0" "$(QCOUNT)" "nothing landed" || return 1
     [ -f "$CLAUDE_SESSION_META_DIR/local/queue.migrating" ] || { echo "  legacy tasks destroyed"; return 1; }
     local out; out=$("$CS_BIN" -queue list 2>&1)
@@ -383,9 +383,9 @@ test_drain_draining_pops_and_injects_next() {
 test_drain_disarms_when_the_pop_fails() {
     qseed "task one" "task two"
     printf 'draining\n' > "$(QDIR)/queue.state"
-    chmod 500 "$(QDIR)/queue"
+    _deny_writes "$(QDIR)/queue" || return 0
     local out; out=$(drain)
-    chmod 700 "$(QDIR)/queue"
+    _allow_writes "$(QDIR)/queue"
     assert_eq "idle" "$(cat "$(QDIR)/queue.state" | tr -d '[:space:]')" "failed pop disarms the drain" || return 1
     assert_eq "2" "$(qlen)" "no task is lost when the pop fails" || return 1
     assert_output_not_contains "$out" "task two" "no task injected after a failed pop" || return 1

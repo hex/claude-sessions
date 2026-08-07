@@ -233,10 +233,18 @@ if [ "$HOOK_EVENT" = "FileChanged" ]; then
     # Shape and unlink were triaged above, before the library source; this is
     # the precise check that the file belongs to THIS session's mailbox rather
     # than to another session that happens to share the layout.
+    # The watcher reports the path in the platform's own spelling, which need
+    # not be the one MAILDIR was built from: C:/Users/... beside an MSYS
+    # /tmp/..., or /private/var beside /var. Ask whether the document is in
+    # THIS session's new/ rather than whether the two strings agree, so a real
+    # arrival is not dropped for being described differently. Still precise:
+    # the name must be a .json under a new/, and it must be one of ours.
+    _fc_name=""
     case "$FC_PATH" in
-        "$MAILDIR"/new/*.json) : ;;
+        */new/*.json) _fc_name="${FC_PATH##*/}" ;;
         *) exit 0 ;;
     esac
+    [ -n "$_fc_name" ] && [ -f "$MAILDIR/new/$_fc_name" ] || exit 0
     _mail_is_lead || exit 0
     # The Stop path gets the queue rule free from its position below the drain,
     # which exits in every armed or draining branch. This one has to ask: a
