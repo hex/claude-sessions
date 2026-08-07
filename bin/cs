@@ -3779,18 +3779,36 @@ _mail_thread_files() {  # maildir, thread id -> prints paths, rc 1 when none
         # classifies every sent copy as received and a reply to a thread this
         # session started is addressed back to itself. Re-key on the basename,
         # which the rewrite leaves alone, and emit the caller's own path.
-        local remapped="" name
+        local remapped="" name hit
         while IFS= read -r name; do
             [ -n "$name" ] || continue
-            name="${name##*/}"
+            # Either separator: the rewrite can hand back C:\Users\... too, and
+            # stripping only to the last "/" would leave the whole path as the
+            # "basename" and match nothing.
+            name="${name##*/}"; name="${name##*\\}"
+            hit=""
             for f in "${all[@]}"; do
-                [ "${f##*/}" = "$name" ] && { remapped="$remapped$f
-"; break; }
+                [ "${f##*/}" = "$name" ] && { hit="$f"; break; }
             done
+            # A name that resolves to nothing must not silently shrink the
+            # thread: fall back to reading the documents one at a time, which
+            # needs no correlation at all.
+            [ -n "$hit" ] || { remapped=""; break; }
+            remapped="$remapped$hit
+"
         done <<EOF
 $out
 EOF
-        out="$remapped"
+        if [ -n "$remapped" ]; then
+            out="$remapped"
+        else
+            out=""
+            for f in "${all[@]}"; do
+                [ "$(jq -r '.thread // ""' "$f" 2>/dev/null || true)" = "$2" ] || continue
+                out="$out$f
+"
+            done
+        fi
     fi
     [ -n "$out" ] || return 1
     printf '%s\n' "$out" | awk -F/ 'NF {print $NF "\t" $0}' | sort | cut -f2-
