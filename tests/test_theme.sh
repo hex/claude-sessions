@@ -303,7 +303,7 @@ run_test test_tmux_truecolor_exported_at_launch
 test_color_from_name_survives_a_missing_shasum() {
     local stub="$TEST_TMPDIR/nodigest"
     mkdir -p "$stub"
-    _stub_tools "$stub" cut cksum || return 1
+    _stub_tools "$stub" cut cksum; case $? in 2) return 0 ;; 0) ;; *) return 1 ;; esac
     # The fallback under test IS cksum, so verify it actually runs through the
     # stub PATH before drawing conclusions from a colour. A host without a
     # usable cksum produces the exact symptom this test reports as a defect —

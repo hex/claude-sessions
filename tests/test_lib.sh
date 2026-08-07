@@ -139,9 +139,16 @@ _stub_tools() {  # dir, tools...
         # Only 126 (found, not executable) and 127 (not found) mean it failed to
         # launch. Every other status says it ran, including the usage error a
         # BSD tool gives for --version, so the probe stays tool-agnostic.
+        #
+        # Git Bash cannot host this harness at all: its coreutils link against
+        # msys-2.0.dll, which Windows resolves beside the executable, so a
+        # relocated copy will not start. Removing the PATH entries that hold the
+        # suppressed tool is no better there, because rg, jq and grep share
+        # /usr/bin. Return 2 for "cannot build one here" so callers skip rather
+        # than report a defect in whatever they were checking.
         if [ "$rc" = "126" ] || [ "$rc" = "127" ]; then
-            echo "  FAIL: staged '$probe' into the stub PATH but it will not run there (exit $rc)"
-            return 1
+            echo "    SKIP (a stub PATH is not constructible here: staged '$probe' will not run, exit $rc)"
+            return 2
         fi
     fi
     [ -z "$missing" ] || { echo "  FAIL: could not stage into the stub PATH:$missing"; return 1; }

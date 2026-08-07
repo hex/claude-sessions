@@ -887,7 +887,7 @@ _jq_free_path() {
     local d="$TEST_TMPDIR/nojq"
     mkdir -p "$d"
     _stub_tools "$d" bash sh git grep sed awk cut tr head tail wc sort uniq basename \
-                dirname date mkdir rm cat ls find stat printf id kill || return 1
+                dirname date mkdir rm cat ls find stat printf id kill || return $?
     printf '%s' "$d"
 }
 
@@ -902,7 +902,10 @@ test_doctor_does_not_call_a_valid_settings_file_invalid_without_jq() {
     jq -e . "$fake_claude/settings.json" >/dev/null 2>&1 \
         || { echo "  FAIL: fixture is not valid JSON; the test would pass for the wrong reason"; return 1; }
 
-    local p; p=$(_jq_free_path)
+    local p rc=0; p=$(_jq_free_path) || rc=$?
+    # 2 means the stub PATH is not constructible on this host.
+    [ "$rc" = "2" ] && return 0
+    [ "$rc" = "0" ] || { echo "  FAIL: could not build a jq-free PATH"; return 1; }
     # Drop the hashed location of the jq just run above. Under bash 3.2 — the
     # floor, and what macos-latest runs — `command -v` answers from the hash
     # table and a one-command PATH assignment does not invalidate it, so the
