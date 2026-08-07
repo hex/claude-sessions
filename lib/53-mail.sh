@@ -182,13 +182,18 @@ _mail_send() {  # target, [--kind|-k KIND] [--reply THREAD] body
     else
         thread="$(_mail_new_thread "${CLAUDE_SESSION_META_DIR:-$target_dir/.cs}/local/mail")"
     fi
-    if ! line=$(jq -cn --arg id "$id" --argjson ts "$now" \
+    # The body rides on stdin, never as an --arg. Windows caps a command line at
+    # about 32K, so a body approaching MAIL_BODY_MAX fails to compose there --
+    # and `cs -msg <target> -` exists precisely so a multi-KB handoff need not
+    # go through argv, which putting it back into jq's argv undid. -Rs makes the
+    # whole of stdin one string, byte for byte, and printf adds nothing to it.
+    if ! line=$(printf '%s' "$body" | jq -cRs --arg id "$id" --argjson ts "$now" \
         --arg thread "$thread" --arg to "$target" --arg parent "$reply_parent" \
         --arg from "${CLAUDE_SESSION_NAME:-}" --arg actor "$(cs_actor_slug)" \
-        --arg kind "$kind" --arg body "$body" \
+        --arg kind "$kind" \
         '{id:$id, ts:$ts, thread:$thread,
           in_reply_to:(if $parent == "" then null else $parent end),
-          to:$to, from:$from, actor:$actor, kind:$kind, body:$body}'); then
+          to:$to, from:$from, actor:$actor, kind:$kind, body:.}'); then
         if [ "$kind" = "task" ]; then
             warn "task queued in $target, but composing the mail attribution failed"
             return 0

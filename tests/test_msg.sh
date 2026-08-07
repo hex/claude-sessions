@@ -358,9 +358,14 @@ test_send_rejects_empty_and_oversize_body() {
     assert_eq "0" "$(NEW_COUNT)" "no message delivered on failed send" || return 1
 }
 
+# Sent through stdin, which is the channel documented for a body this size and
+# the only one that can carry it everywhere: Windows caps a command line at
+# about 32K, so a cap-sized argv value cannot reach cs there at all. The cap
+# belongs to the body, not to the way it arrived, so pin it on the channel that
+# exists to carry a large one.
 test_send_accepts_body_at_the_cap() {
-    local atcap; atcap=$(printf 'a%.0s' $(seq 1 65536))
-    "$CS_BIN" -msg receiver "$atcap" >/dev/null 2>&1 || { echo "  at-cap body rejected"; return 1; }
+    printf 'a%.0s' $(seq 1 65536) | "$CS_BIN" -msg receiver - >/dev/null 2>&1 \
+        || { echo "  at-cap body rejected"; return 1; }
     assert_eq "1" "$(NEW_COUNT)" "at-cap body delivered" || return 1
     assert_eq "65536" "$(jq -r '.body | length' "$(FIRST_MSG)")" "body stored whole" || return 1
 }
