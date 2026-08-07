@@ -4,6 +4,24 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.8.8
+
+A follow-up to 2026.8.7, fixing what that release's own gate could not see. Its
+test gate runs the suite locally and never reads CI, and the local shell here is
+bash 5 while the floor and `macos-latest` are 3.2, so four suites went red on
+required lanes that no local run exercised.
+
+### Fixes
+
+- **Four suites 2026.8.7 turned red on lanes its gate never ran.** Under bash 3.2, `command -v` answers from the command hash table and a one-command `PATH=` assignment does not invalidate it, so the doctor test that validates its fixture by *running* `jq` then found that same jq on a PATH scrubbed of it, and refused to run rather than pass vacuously. `cs -doctor` itself was never affected: it runs in a fresh process with no hash. Separately, three suites built a "tool X is absent" PATH by symlinking a whitelist to whatever `command -v` reported, which under Git Bash is `/usr/bin/foo` while the file is `foo.exe`, so every link dangled and the stub lost every tool rather than the one under suppression, surfacing as a failure somewhere unrelated to what the test checked. One shared helper now handles the `.exe` spelling, skips builtins, and fails loudly naming anything it could not stage, so a broken stub can no longer read as a defect in the code. The theme test additionally confirms `cksum` runs through the stub before judging a colour, since a host without one produces that test's exact symptom for a reason that is not the code's fault. The CRLF migration test no longer carries a carriage return through a shell variable, which is the one value Git Bash mangles, in a test that exists for Git Bash.
+
+- **`cs -doctor` stops reporting drift against a checkout that never produced the install.** The deploy-drift check decides it is in a cs checkout from three relative names (`hooks/`, `install.sh`, `bin/cs`), then compares that directory's hooks with the deployed ones. Any directory holding those three passes, and a scratch copy of the repo is an ordinary thing to be standing in: running `cs -doctor` from one reported five hooks as drifted while the deployed copies were byte-identical to the real source, and advised `./install.sh`, which from there installs something else entirely. Running it again changed nothing, because nothing was wrong. `install.sh` already stamps the deploy directory with the version it shipped, so the check now reads that stamp and stays silent unless the checkout's own version matches. It compares the install against the tree that produced it, or not at all. The fixture had encoded the same looseness, writing an empty `bin/cs` so the existing drift tests passed on a checkout that could not have installed anything.
+
+### Known issues
+
+- `v2026.8.7` was published during a critical GitHub Actions incident and carries no release assets: the signing job never got a runner. Use this release instead.
+- Three suites (`test_hooks.sh`, `test_msg.sh`, `test_queue.sh`) have been failing on Git Bash since 2026-08-04 and are not addressed here.
+
 ## 2026.8.7
 
 A correctness release, almost all of it fixes, found by reviewing the shipped
