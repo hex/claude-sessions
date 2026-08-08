@@ -405,7 +405,7 @@ migrate_session() {
 
     # Phase 6: Add YAML frontmatter to README.md if missing
     local readme="$session_dir/.cs/README.md"
-    # A trailing CR is stripped before the test: a repo cloned on Git for Windows
+    # A trailing CR is stripped before the test: a repo cloned with autocrlf
     # with default autocrlf has "---\r" on line 1, which '^---$' does not match —
     # so this phase read the file as having NO frontmatter and PREPENDED a second
     # block, leaving the original orphaned in the body. Two frontmatter blocks
@@ -469,7 +469,7 @@ migrate_session() {
     # is the user's own content — matching it anywhere in the file deleted it.
     local _fm_field_re='^(claude_session_id|claude_session_color|last_resumed|updated):'
     # Matching is done on a CR-stripped COPY of each line, and the file is written
-    # back untouched: a repo cloned on Git for Windows with default autocrlf
+    # back untouched: a repo cloned with autocrlf enabled
     # arrives as CRLF, where /^---$/ never matches "---\r", fm is never set, and
     # the whole strip silently no-ops.
     if [ -f "$readme" ] && awk -v re="$_fm_field_re" '

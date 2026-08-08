@@ -77,8 +77,8 @@ _worktree_untracked_at_risk() {  # wt_dir
 # reverse direction would enumerate the main checkout, and for an adopted base
 # it would also enumerate the underlying project's own worktrees, which are not
 # cs sessions at all. Asking git for the path on both sides is what makes this
-# survive Git for Windows drive-letter paths, exactly as _doctor_check_worktrees
-# does.
+# survive a directory whose two spellings differ, exactly as
+# _doctor_check_worktrees does.
 _worktree_features() {  # base_name
     local base_name="$1"
     local base_dir d name task d_real registered
@@ -284,15 +284,13 @@ create_worktree_session() {
     # through the common git dir).
     local exclude
     exclude=$( (cd "$wt_dir" && git rev-parse --git-path info/exclude) 2>/dev/null || echo "" )
-    # A worktree's git-path resolves to the common git dir, which git reports as
-    # an absolute path — drive-letter form (C:/... or C:\...) under Git Bash.
-    # Matching only /* would read that as relative and prepend $wt_dir, writing
-    # the exclude entry to a nonsense path and leaving the protocol file
+    # A worktree's git-path resolves to the common git dir, which git reports
+    # as an absolute path. Reading that as relative would prepend $wt_dir,
+    # writing the exclude entry to a nonsense path and leaving the protocol file
     # untracked, which then blocks `cs <base> --merge`.
     case "$exclude" in
         "") : ;;
         /*) : ;;
-        [A-Za-z]:[\\/]*) : ;;
         *) exclude="$wt_dir/$exclude" ;;
     esac
     if [ -n "$exclude" ]; then

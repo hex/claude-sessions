@@ -76,8 +76,8 @@ run_hook() {
     # the hook exits 0 before draining stdin, so a pipe would leave jq writing into a
     # closed fd (SIGPIPE) and `set -o pipefail` would surface that as a non-zero exit.
     # Build the payload with the prompt on jq's STDIN, never as an argv value:
-    # MSYS rewrites a leading-slash argument to a Windows path before a native
-    # jq.exe sees it, so "/color red" would arrive as "C:/Program Files/Git/...".
+    # A leading-slash argument can be rewritten before jq sees it, so
+    # "/color red" would arrive as some other absolute path.
     local _in
     _in=$(printf '%s' "$1" | jq -Rs '{prompt: ., hook_event_name: "UserPromptSubmit"}')
     bash "$HOOK" <<< "$_in"
@@ -378,7 +378,7 @@ test_working_tree_truncation_cue() {
 # ============================================================================
 
 test_token_cap_under_8000_bytes() {
-    # The over-cap fixture needs a ~400-char path, past the Windows MAX_PATH limit.
+    # The over-cap fixture needs a ~400-char path.
     # Force a pre-truncation block well over 8000 bytes: 35 long paths sharing a real "loader"
     # component. The long segments are separate nested dirs so each stays under the 255-char
     # filename limit while the full path is long enough that 30 of them exceed 8000 bytes.
@@ -404,7 +404,7 @@ test_token_cap_under_8000_bytes() {
 }
 
 test_token_cap_marks_truncation() {
-    # The over-cap fixture needs a ~400-char path, past the Windows MAX_PATH limit.
+    # The over-cap fixture needs a ~400-char path.
     # finding: head -c 8000 can sever a path/commit mid-token with no marker, so a truncated tail
     # reads as a real (but nonexistent) path. When the block overflows the cap it must end with an
     # explicit truncation marker on its own final line. Same over-cap setup as the byte-cap test.
@@ -568,7 +568,7 @@ test_classifier_falls_back_to_grep_without_ripgrep() {
     ac=$(additional_context "$out")
     if ! echo "$ac" | grep -q "Scope (auto-grounded)"; then
         echo "  FAIL: without ripgrep the classifier must still fire, not read every prompt as chitchat"
-        # This arm only runs where ripgrep is absent, which off Git Bash means a
+        # This arm only runs where ripgrep is absent, which means a
         # stubbed PATH. When it fails there and nowhere else, the useful question
         # is what the stub could actually reach, so say it rather than making the
         # next person add printfs and push again.

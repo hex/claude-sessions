@@ -31,7 +31,7 @@ _tags_read() {
 # the exact string "---"), and an empty file (read sets nothing, so line1 stays
 # empty) all fail this check — each would otherwise make _tags_write's insert
 # branch silently pass the file through unchanged. Compared in the shell rather
-# than awk: awk builds on Windows read in text mode and strip the \r, which
+# than awk: some awk builds read in text mode and strip the \r, which
 # would let a CRLF fence pass as exact. read's non-zero exit at EOF is ignored
 # on purpose, so a fence with no trailing newline still counts.
 _tags_has_frontmatter() {

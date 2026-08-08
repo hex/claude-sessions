@@ -41,7 +41,7 @@ ORIGINAL_HOME="$HOME"
 # files (hostname-derived, matches age_get_machine_id in bin/cs-secrets).
 _machine_id() {
     local user host
-    user="${USER:-${USERNAME:-}}"
+    user="${USER:-}"
     [ -n "$user" ] || user=$(id -un 2>/dev/null) || user=""
     host=$(hostname -s 2>/dev/null || hostname 2>/dev/null) || host=""
     host=${host//$'\r'/}
@@ -51,7 +51,7 @@ _machine_id() {
 # The PATH to run cs-secrets under when a test needs the password (.enc) export
 # path. age is disabled through the CS_AGE_BIN seam that setup exports, so the
 # PATH itself needs no surgery: a whitelist-rebuilt PATH could not start the
-# interpreter under Git Bash at all, which surfaced as a bare exit 127.
+# interpreter at all on some hosts, which surfaced as a bare exit 127.
 _ageless_path() {
     printf '%s' "$PATH"
 }
@@ -91,8 +91,8 @@ _report_import() {
 # Build a sandbox bin dir holding a fake `security` (never touches the real
 # macOS Keychain). Callers PREPEND it to PATH so the fake shadows the real tool
 # while the rest of the system stays reachable -- a rebuilt PATH holding only
-# copies of the tools cannot start `#!/usr/bin/env bash` under Git Bash, where
-# `ln -s` copies rather than links, and surfaces as a bare exit 127.
+# copies of the tools cannot always start `#!/usr/bin/env bash`, which surfaces
+# as a bare exit 127.
 # FAKE_SECURITY_MODE selects the behaviour: "fail" makes `dump-keychain` exit
 # nonzero (a real enumeration failure); "readfail" enumerates one credential but
 # makes the per-item `find-generic-password` read fail; anything else is a
@@ -731,14 +731,15 @@ test_export_file_writes_per_machine_enc() {
     assert_file_not_exists "$meta/secrets.enc" "export-file must NOT write the shared/unsuffixed name" || return 1
 }
 
-# Git Bash leaves USER unset (it exports USERNAME instead). Under `set -u` a bare
-# ${USER} aborts the machine-id derivation, so the per-machine sync file collapses
-# to the empty-id name "secrets..enc" and every machine then writes the same file.
+# A context that leaves USER unset (cron, a systemd unit) must still derive a
+# machine id: under `set -u` a bare ${USER} aborts the derivation, the sync file
+# collapses to the empty-id name "secrets..enc", and every machine then writes
+# the same file.
 test_export_file_machine_id_survives_unset_user() {
     local meta="$CS_SESSIONS_ROOT/test-session/.cs"
     "$CS_SECRETS_BIN" set api_key "sk_123" >/dev/null 2>&1
     local _exp_out
-    _exp_out=$( unset USER; export USERNAME="winuser"
+    _exp_out=$( unset USER
                 PATH="$(_ageless_path)" "$CS_SECRETS_BIN" export-file 2>&1 ) || true
     assert_file_not_exists "$meta/secrets..enc" \
         "an unset USER must not collapse the machine id to empty" || return 1
@@ -809,14 +810,6 @@ test_import_file_merges_all_machines_and_legacy() {
 # successful import: `import-file` calls backend_store under `|| error`, which
 # suppresses errexit for the whole call, so a store that ignores its write's
 # return value would report "Imported N secret(s)" having stored nothing.
-# jq.exe emits CRLF and MSYS bash strips only the TRAILING \r\n, so every key
-# but the last arrives with a trailing CR. Importing three secrets must land all
-# three under their real names -- not two CR-suffixed ghosts plus a healthy
-# final key, which is what makes this corruption read as "mostly working".
-# A multi-line secret (a PEM key, a JSON blob) must round-trip byte-exactly.
-# Values are read back through jq, and jq.exe emits CRLF, so every interior
-# newline would otherwise gain a CR -- and unlike a key, a value cannot simply
-# be stripped, since a secret may legitimately contain one.
 # A secret NAME becomes a shell variable name in the eval'd `export` output.
 # An unvalidated name breaks out of the assignment and executes -- and sync
 # files are designed to be committed and shared, so the name is attacker-
@@ -1019,10 +1012,10 @@ test_import_file_stores_when_secret_genuinely_absent() {
     assert_file_exists "$addlog" "a genuinely-absent secret must be stored" || return 1
 }
 
-# Git Bash leaves USER unset (it exports USERNAME), so a bare "$USER" in the
-# keychain functions aborts the command substitution under `set -u` before
-# `security` ever runs. The merge-import probe then reads that as a backend READ
-# FAILURE rather than not-found and refuses to import.
+# With USER unset, a bare "$USER" in the keychain functions aborts the command
+# substitution under `set -u` before `security` ever runs. The merge-import probe
+# then reads that as a backend READ FAILURE rather than not-found and refuses to
+# import.
 test_import_file_stores_when_secret_absent_and_user_unset() {
     local bindir; bindir=$(_make_fake_security)
     local addlog="$TEST_TMPDIR/kc-addlog"
@@ -1030,7 +1023,7 @@ test_import_file_stores_when_secret_absent_and_user_unset() {
     _seed_enc_sync_file "$meta/secrets.machine-a.enc" '{"K1":"synced_value"}' || return 1
 
     local out rc=0
-    out=$(PATH="$bindir:$PATH" env -u USER USERNAME=winuser \
+    out=$(PATH="$bindir:$PATH" env -u USER \
         CS_SECRETS_BACKEND=keychain FAKE_SECURITY_MODE=empty \
         FAKE_SECURITY_ADDLOG="$addlog" CS_SECRETS_PASSWORD="$CS_SECRETS_PASSWORD" \
         "$CS_SECRETS_BIN" import-file 2>&1) || rc=$?
@@ -1107,51 +1100,6 @@ SEDFAKE
         "the abort must show sed actually ran and failed, not that cs-secrets never started" || return 1
     assert_output_not_contains "$out" "No secrets stored" "an extraction failure must not read as an empty store" || return 1
 }
-
-# ============================================================================
-# WCM backend (Windows Credential Manager, simulated via fake powershell.exe)
-# ============================================================================
-
-
-# The security property: the secret and the session:name metadata must NEVER
-# reach the powershell.exe argv — they travel via stdin (base64) and env only.
-
-
-
-
-
-
-
-
-# The WCM helper reports distinct exit codes: 2 = oversize blob, 3 = missing
-# credential. Those must propagate to the process exit so callers can react.
-
-
-# A real enumeration/helper failure must NOT masquerade as an empty store.
-
-
-# Enumeration succeeds but a per-item delete fails: purge must still be loud.
-
-# A plain successful WCM export must namespace the variable and exit clean.
-# Every other wcm export test drives a FAILURE mode, so the happy path -- and
-# with it the seen_vars declaration the collision guard relies on -- went
-# uncovered; under `set -u` a missing declaration crashes on the first secret.
-# The live poison-and-refuse check on the WCM backend specifically: seed hostile
-# credential NAMES directly into the fake store (bypassing set's validation, as
-# a store written before this release would be), then prove export refuses them
-# rather than emitting a metacharacter or bare-variable assignment. wcm is the
-# backend only on native Windows, and the seen_vars crash already showed this
-# surface can diverge from the other two, so it gets its own live attack.
-# The outer `backend_store ... || error` guard in the import loop is redundant
-# for keychain/encrypted (they exit internally) but LOAD-BEARING for wcm, whose
-# store RETURNS a nonzero code rather than exiting. Without a test on the wcm
-# path, a "this guard is redundant" cleanup would let a failed wcm store be
-# counted as imported. Pin it: a wcm store failure during import must abort.
-
-
-
-
-# The genuinely-empty store must still succeed quietly.
 
 # An unknown/unimplemented backend must fail loudly, never silently no-op.
 test_unknown_backend_guard() {

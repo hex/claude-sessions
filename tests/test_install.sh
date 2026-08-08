@@ -514,45 +514,25 @@ EOF
 }
 
 # A cross-platform reinstall must not leave cs-tui and cs-tui.exe side by side.
-# On this (non-Windows) platform, install must remove a stale cs-tui.exe so PATH
+# Install must remove a stale cs-tui.exe left by a pre-2026.8.8 install so PATH
 # / sibling resolution cannot pick the wrong-platform binary.
 test_install_removes_stale_opposite_platform_tui() {
     local fake_home="$TEST_TMPDIR/install-tui-clean"
     mkdir -p "$fake_home/.local/bin"
-    echo '#!/bin/sh' > "$fake_home/.local/bin/cs-tui.exe"   # stale Windows binary
+    echo '#!/bin/sh' > "$fake_home/.local/bin/cs-tui.exe"   # leftover from an older install
     chmod +x "$fake_home/.local/bin/cs-tui.exe"
     HOME="$fake_home" bash "$INSTALL_SH" > /dev/null 2>&1 || {
         echo "  FAIL: install.sh exited non-zero"
         return 1
     }
     if [ -f "$fake_home/.local/bin/cs-tui.exe" ]; then
-        echo "  FAIL: stale cs-tui.exe not removed on a non-Windows install"
+        echo "  FAIL: stale cs-tui.exe not removed"
         return 1
     fi
     # NB: we do not assert cs-tui was installed — bin/cs-tui is a build artifact,
     # not git-tracked, so it is absent from a fresh CI checkout. The behavior
     # under test is that the opposite-platform binary is removed regardless.
 }
-
-# On native Windows the TUI installs as cs-tui.exe; uninstall must remove that
-# filename too, not only the Unix-named cs-tui.
-# The name the release workflow PUBLISHES for native Windows and the name
-# install.sh FETCHES there are set in two different files and only ever meet
-# during a real release -- which has never run the Windows matrix entry. Derive
-# each from its own source and pin them together.
-_release_windows_tui_artifact() {
-    local yml="$SCRIPT_DIR/../.github/workflows/release.yml"
-    local platform ext
-    platform=$(grep -o 'platform: windows-[a-z0-9]*' "$yml" | head -1 | sed 's/platform: //')
-    ext=$(grep -A3 'platform: windows-' "$yml" | grep -o 'ext: "[^"]*"' | head -1 | sed -e 's/ext: "//' -e 's/"$//')
-    [ -n "$platform" ] || return 1
-    printf 'cs-tui-%s%s' "$platform" "$ext"
-}
-
-# Run install.sh's WEB path as if on Git Bash, recording every URL it requests.
-# Copied to a bin/-less dir so install.sh selects INSTALL_METHOD=web; uname and
-# curl are stubbed so the run needs no network and no Windows host.
-
 
 # Run install.sh's WEB path with the cs-tui download stubbed, so the checksum
 # gate can be driven into each of its "cannot verify" states. Echoes the bin dir.
@@ -663,7 +643,7 @@ test_tui_signature_not_blamed_for_a_checksum_gate_removal() {
         "must not report a signature failure for a binary already removed" || return 1
 }
 
-test_uninstall_removes_windows_cs_tui_exe() {
+test_uninstall_removes_leftover_cs_tui_exe() {
     local fake_home="$TEST_TMPDIR/uninstall-tui-exe"
     mkdir -p "$fake_home/.local/bin" "$fake_home/.claude"
     echo '#!/bin/sh' > "$fake_home/.local/bin/cs-tui.exe"
@@ -672,7 +652,7 @@ test_uninstall_removes_windows_cs_tui_exe() {
         return 1
     }
     if [ -f "$fake_home/.local/bin/cs-tui.exe" ]; then
-        echo "  FAIL: cs-tui.exe (Windows TUI) survived uninstall"
+        echo "  FAIL: a leftover cs-tui.exe survived uninstall"
         return 1
     fi
 }
@@ -807,7 +787,7 @@ run_test test_install_removes_stale_opposite_platform_tui
 run_test test_tui_removed_when_checksum_cannot_be_fetched
 run_test test_tui_removed_when_digest_cannot_be_computed
 run_test test_tui_signature_not_blamed_for_a_checksum_gate_removal
-run_test test_uninstall_removes_windows_cs_tui_exe
+run_test test_uninstall_removes_leftover_cs_tui_exe
 run_test test_uninstall_removes_subagent_statusline
 test_hook_registration_doc_matches_install() {
     # docs/hooks.md restates install.sh's _merge_cs_hook registrations as a

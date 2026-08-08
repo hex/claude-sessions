@@ -82,7 +82,7 @@ _stub_tool() {  # dir, tool
 # Stage a whole whitelist into a stub PATH dir. Tools genuinely absent from the
 # host are skipped; a tool present but unstageable is a harness failure, since a
 # silently missing one turns "X is absent" into "everything is absent".
-# Staging is then proved by RUNNING one of them: on Windows a staged file can
+# Staging is then proved by RUNNING one of them: a staged file can
 # resolve on the PATH and still refuse to launch, which reads downstream as a
 # defect in whatever the test was actually checking.
 _stub_tools() {  # dir, tools...
@@ -103,8 +103,8 @@ _stub_tools() {  # dir, tools...
         # launch. Every other status says it ran, including the usage error a
         # BSD tool gives for --version, so the probe stays tool-agnostic.
         #
-        # Git Bash cannot host this harness at all: its coreutils link against
-        # msys-2.0.dll, which Windows resolves beside the executable, so a
+        # Some hosts cannot run this harness: a tool that resolves its own
+        # libraries beside the executable means a
         # relocated copy will not start. Removing the PATH entries that hold the
         # suppressed tool is no better there, because rg, jq and grep share
         # /usr/bin. Return 2 for "cannot build one here" so callers skip rather
@@ -118,30 +118,6 @@ _stub_tools() {  # dir, tools...
     return 0
 }
 
-# Install a jq shim (on $TEST_TMPDIR/crlfbin, echoed for prepending to PATH)
-# that wraps the real jq and re-emits every output line with CRLF, reproducing
-# native jq.exe under Git Bash — where stdout runs in text mode and `read`
-# leaves a trailing \r on each extracted field. Lets the CR-handling paths be
-# exercised on any platform. Returns non-zero (skip) when jq is unavailable.
-_install_crlf_jq() {
-    local real_jq shimdir
-    real_jq="$(command -v jq)" || return 1
-    shimdir="$TEST_TMPDIR/crlfbin"
-    mkdir -p "$shimdir"
-    cat > "$shimdir/jq" <<STUB
-#!/usr/bin/env bash
-"$real_jq" "\$@" | while IFS= read -r _l; do printf '%s\r\n' "\$_l"; done
-STUB
-    chmod +x "$shimdir/jq"
-    printf '%s' "$shimdir"
-}
-
-# Install a jq shim reproducing what a COMMAND SUBSTITUTION sees on Git Bash:
-# jq.exe emits CRLF, but MSYS bash strips the trailing \r\n along with the
-# trailing newline, so every line EXCEPT the last arrives carrying a \r. That
-# asymmetry is what makes a multi-key loop corrupt every key but the final one
-# while the final one looks perfectly healthy. Echoes the dir to prepend to
-# PATH; returns non-zero (skip) when jq is unavailable.
 
 # --- Setup / Teardown ---
 

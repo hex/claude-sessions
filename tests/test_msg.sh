@@ -312,7 +312,7 @@ test_send_rejects_slash_in_target() {
 
 test_send_rejects_backslash_in_target() {
     # A directory that would otherwise resolve, so only the name guard can
-    # refuse it. MSYS reads a backslash as a separator, which is how
+    # refuse it. A backslash is a separator in some spellings, which is how
     # "..\\..\\repo" walks out of the sessions root there; nothing cs creates
     # can contain one, since validate_session_name admits no backslash.
     mkdir -p "$CS_SESSIONS_ROOT/a\\b/.cs/local"
@@ -359,7 +359,7 @@ test_send_rejects_empty_and_oversize_body() {
 }
 
 # Sent through stdin, which is the channel documented for a body this size and
-# the only one that can carry it everywhere: Windows caps a command line at
+# the only one that can carry it everywhere: a command line is capped at
 # about 32K, so a cap-sized argv value cannot reach cs there at all. The cap
 # belongs to the body, not to the way it arrived, so pin it on the channel that
 # exists to carry a large one.
@@ -1146,8 +1146,8 @@ test_idle_wake_exits_2_with_the_reason_on_stderr() {
 }
 
 # The watcher reports file_path in the platform's own spelling, which need not
-# be the one $MAILDIR was built from: on Windows it is C:/Users/... beside an
-# MSYS /tmp/..., and here /private/var beside /var. Matching the strings makes
+# be the one $MAILDIR was built from — /private/var beside /var, say.
+# Matching the strings makes
 # the wake depend on which spelling the reporter happened to use, so a real
 # arrival in this session's own new/ is dropped and idle mail never wakes it.
 test_idle_wake_accepts_another_spelling_of_the_same_path() {

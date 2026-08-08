@@ -5,8 +5,6 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/test_lib.sh"
 
-# Launch-gated suite: on a real MSYS runner the Claude launch short-circuits
-# (Tier 2 = session management only), so pin a supported platform there. See
 
 # Bound a command with a wall-clock limit when a timeout tool is available;
 # otherwise run it directly. macOS stock ships no `timeout` (GNU coreutils

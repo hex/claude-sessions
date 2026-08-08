@@ -6,8 +6,6 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=tests/test_lib.sh
 source "$SCRIPT_DIR/test_lib.sh"
 
-# Launch-gated suite: on a real MSYS runner the Claude launch short-circuits
-# (Tier 2 = session management only), so pin a supported platform there. See
 
 HOOKS_DIR="$SCRIPT_DIR/../hooks"
 
@@ -699,15 +697,14 @@ run_test test_clear_rotation_records_handoff_reason
 run_test test_fork_with_armed_marker_records_rebind
 run_test test_fresh_notice_absent_on_compact
 run_test test_fresh_notice_present_on_clear_without_rebind_env
-# The msys runtime resolves backslashes as separators, and the required
-# test-windows-msys lane runs this suite there. Trivial on POSIX; the point is
+# A backslash is a separator in some spellings. Trivial on POSIX; the point is
 # the lane where the escape would otherwise work.
 test_marker_with_a_backslash_path_is_rejected() {
     _rot_hook_session "rot-traverse-bs"
     mkdir -p "$CLAUDE_SESSION_DIR/.cs/handoffs"
     # Seed a file the marker would resolve to. On POSIX the backslashes are an
     # ordinary filename, which is what makes this assertion able to fail here;
-    # on msys the same name resolves out of the store, which is the real target.
+    # elsewhere the same name resolves out of the store, which is the real target.
     printf -- '---\nstatus: unconsumed\n---\n' \
         > "$CLAUDE_SESSION_DIR/.cs/handoffs/..\\..\\outside.md" 2>/dev/null || true
     printf '..\\..\\outside.md\n' > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"

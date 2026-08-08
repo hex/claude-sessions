@@ -1327,8 +1327,8 @@ _worktree_untracked_at_risk() {  # wt_dir
 # reverse direction would enumerate the main checkout, and for an adopted base
 # it would also enumerate the underlying project's own worktrees, which are not
 # cs sessions at all. Asking git for the path on both sides is what makes this
-# survive Git for Windows drive-letter paths, exactly as _doctor_check_worktrees
-# does.
+# survive a directory whose two spellings differ, exactly as
+# _doctor_check_worktrees does.
 _worktree_features() {  # base_name
     local base_name="$1"
     local base_dir d name task d_real registered
@@ -1534,15 +1534,13 @@ create_worktree_session() {
     # through the common git dir).
     local exclude
     exclude=$( (cd "$wt_dir" && git rev-parse --git-path info/exclude) 2>/dev/null || echo "" )
-    # A worktree's git-path resolves to the common git dir, which git reports as
-    # an absolute path — drive-letter form (C:/... or C:\...) under Git Bash.
-    # Matching only /* would read that as relative and prepend $wt_dir, writing
-    # the exclude entry to a nonsense path and leaving the protocol file
+    # A worktree's git-path resolves to the common git dir, which git reports
+    # as an absolute path. Reading that as relative would prepend $wt_dir,
+    # writing the exclude entry to a nonsense path and leaving the protocol file
     # untracked, which then blocks `cs <base> --merge`.
     case "$exclude" in
         "") : ;;
         /*) : ;;
-        [A-Za-z]:[\\/]*) : ;;
         *) exclude="$wt_dir/$exclude" ;;
     esac
     if [ -n "$exclude" ]; then
@@ -2814,7 +2812,7 @@ migrate_session() {
 
     # Phase 6: Add YAML frontmatter to README.md if missing
     local readme="$session_dir/.cs/README.md"
-    # A trailing CR is stripped before the test: a repo cloned on Git for Windows
+    # A trailing CR is stripped before the test: a repo cloned with autocrlf
     # with default autocrlf has "---\r" on line 1, which '^---$' does not match —
     # so this phase read the file as having NO frontmatter and PREPENDED a second
     # block, leaving the original orphaned in the body. Two frontmatter blocks
@@ -2878,7 +2876,7 @@ migrate_session() {
     # is the user's own content — matching it anywhere in the file deleted it.
     local _fm_field_re='^(claude_session_id|claude_session_color|last_resumed|updated):'
     # Matching is done on a CR-stripped COPY of each line, and the file is written
-    # back untouched: a repo cloned on Git for Windows with default autocrlf
+    # back untouched: a repo cloned with autocrlf enabled
     # arrives as CRLF, where /^---$/ never matches "---\r", fm is never set, and
     # the whole strip silently no-ops.
     if [ -f "$readme" ] && awk -v re="$_fm_field_re" '
@@ -4531,7 +4529,7 @@ _tags_read() {
 # the exact string "---"), and an empty file (read sets nothing, so line1 stays
 # empty) all fail this check — each would otherwise make _tags_write's insert
 # branch silently pass the file through unchanged. Compared in the shell rather
-# than awk: awk builds on Windows read in text mode and strip the \r, which
+# than awk: some awk builds read in text mode and strip the \r, which
 # would let a CRLF fence pass as exact. read's non-zero exit at EOF is ignored
 # on purpose, so a fence with no trailing newline still counts.
 _tags_has_frontmatter() {
@@ -4864,9 +4862,8 @@ _doctor_check_hooks_registered() {
     # The registered set is the hook COMMANDS, not the whole file. Matching the
     # file as text passed a broken install whenever a hook path lingered in an
     # unrelated permission rule or env value: the hook never fires, and doctor
-    # called the install healthy. Native jq.exe on Windows emits CRLF.
+    # called the install healthy.
     registered=$(jq -r '.hooks // {} | to_entries[].value[].hooks[]?.command // empty' "$settings" 2>/dev/null || true)
-    registered=${registered//$'\r'/}
     local name lib is_lib
     while IFS= read -r name; do
         [ -z "$name" ] && continue
@@ -5102,9 +5099,6 @@ _doctor_check_settings_hooks_resolve() {
     fi
     local commands
     commands=$(jq -r '.hooks // {} | to_entries[].value[].hooks[]?.command // empty' "$settings" 2>/dev/null)
-    # Native jq.exe on Windows emits CRLF; strip the trailing \r so hook paths
-    # aren't tested as "/path\r" (which never exists) and mis-reported missing.
-    commands=${commands//$'\r'/}
     if [ -z "$commands" ]; then
         _doctor_ok "Hook paths: no hooks registered in settings.json"
         return
@@ -5146,8 +5140,8 @@ _doctor_check_worktrees() {
             continue
         fi
         # Ask git for the path so both sides of the comparison come from the
-        # same binary: Git for Windows prints drive-letter (C:/...) paths that
-        # an MSYS `pwd -P` (/c/...) can never match.
+        # same binary; a shell's own spelling of the directory need not match
+        # git's.
         d_real=$(git -C "$d" rev-parse --show-toplevel 2>/dev/null) \
             || d_real=$(cd "$d" 2>/dev/null && pwd -P || echo "$d")
         if ! git -C "$base_dir" worktree list --porcelain 2>/dev/null \

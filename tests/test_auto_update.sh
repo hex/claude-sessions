@@ -5,8 +5,6 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/test_lib.sh"
 
-# Launch-gated suite: on a real MSYS runner the Claude launch short-circuits
-# (Tier 2 = session management only), so pin a supported platform there. See
 
 # ============================================================================
 # Help text tests
