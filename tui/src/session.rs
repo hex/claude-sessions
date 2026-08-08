@@ -48,6 +48,9 @@ pub struct Session {
     /// conversation opened outside cs touches context-pct while active), or
     /// dormant.
     pub liveness: Liveness,
+    /// What Claude Code says the session is doing right now ("busy", "waiting"),
+    /// absent when it publishes no record for this name.
+    pub agent_status: Option<String>,
     pub secrets_count: u32,
     pub queue_depth: u32,
     /// Unread cross-session mail: documents sitting in the maildir's `new/`.
@@ -227,6 +230,104 @@ fn narrative_headings(memory_dir: &Path) -> Vec<String> {
         .collect()
 }
 
+/// One record from the set Claude Code publishes while a session runs, holding
+/// only the fields cs reads back.
+pub struct AgentRecord {
+    pub name: String,
+    pub status: String,
+    pub pid: u32,
+    pub proc_start: String,
+}
+
+/// Read a top-level string value out of a flat JSON object. The documents this
+/// serves are machine-written, one object per file, and none of these keys
+/// nests or carries an escape, so scanning beats taking a parser dependency.
+/// A value that did carry one yields nothing, and the session shows no state.
+fn json_string_field(text: &str, key: &str) -> Option<String> {
+    let rest = text.split(&format!("\"{key}\":")).nth(1)?;
+    let rest = rest.trim_start().strip_prefix('"')?;
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
+}
+
+fn json_u32_field(text: &str, key: &str) -> Option<u32> {
+    let rest = text.split(&format!("\"{key}\":")).nth(1)?;
+    let rest = rest.trim_start();
+    let end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+    rest[..end].parse().ok()
+}
+
+pub fn parse_agent_record(text: &str) -> Option<AgentRecord> {
+    Some(AgentRecord {
+        name: json_string_field(text, "name")?,
+        status: json_string_field(text, "status")?,
+        pid: json_u32_field(text, "pid")?,
+        proc_start: json_string_field(text, "procStart")?,
+    })
+}
+
+/// Where Claude Code publishes its session records.
+fn claude_sessions_dir() -> PathBuf {
+    let base = std::env::var_os("CS_CLAUDE_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(home_dir().expect("HOME or USERPROFILE not set")).join(".claude"));
+    base.join("sessions")
+}
+
+/// Map each session name to the state Claude Code advertises for it.
+///
+/// A record is unlinked on a clean exit but survives a crash, so a name only
+/// earns its state once the recorded pid is still alive AND still reports the
+/// process start time in the record — otherwise a pid the kernel has handed to
+/// something else would keep a dead session looking busy. One `ps` answers for
+/// every candidate; it prints the start time in the caller's zone while the
+/// record holds UTC, so the comparison is made in UTC.
+pub fn agent_statuses_in(dir: &Path) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return out,
+    };
+    let records: Vec<AgentRecord> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map(|x| x == "json").unwrap_or(false))
+        .filter_map(|e| fs::read_to_string(e.path()).ok())
+        .filter_map(|text| parse_agent_record(&text))
+        .collect();
+    if records.is_empty() {
+        return out;
+    }
+
+    let pids: Vec<String> = records.iter().map(|r| r.pid.to_string()).collect();
+    let output = match std::process::Command::new("ps")
+        .env("TZ", "UTC")
+        .args(["-o", "pid=,lstart=", "-p", &pids.join(",")])
+        .output()
+    {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).into_owned(),
+        Err(_) => return out,
+    };
+
+    let mut started: HashMap<u32, String> = HashMap::new();
+    for line in output.lines() {
+        let line = line.trim();
+        let (pid, rest) = match line.split_once(char::is_whitespace) {
+            Some(parts) => parts,
+            None => continue,
+        };
+        if let Ok(pid) = pid.parse::<u32>() {
+            started.insert(pid, rest.trim().to_string());
+        }
+    }
+
+    for r in records {
+        if started.get(&r.pid).map(|s| *s == r.proc_start).unwrap_or(false) {
+            out.insert(r.name, r.status);
+        }
+    }
+    out
+}
+
 pub fn sessions_root() -> PathBuf {
     #[cfg(test)]
     if let Some(root) = test_root::current() {
@@ -398,6 +499,13 @@ fn scan_sessions_in(root: &Path) -> Vec<Session> {
         })
     };
 
+    // One read of the published records covers the whole scan; a per-session
+    // lookup would rescan the directory and re-fork ps for every row.
+    let agent_statuses = agent_statuses_in(&claude_sessions_dir());
+    for s in &mut sessions {
+        s.agent_status = agent_statuses.get(&s.name).cloned();
+    }
+
     sessions.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     sessions
 }
@@ -472,6 +580,7 @@ fn read_session(path: &Path, secret_counts: &HashMap<String, u32>) -> Session {
         modified,
         modified_ts,
         liveness,
+        agent_status: None,
         secrets_count,
         queue_depth,
         unread_mail,
@@ -933,6 +1042,45 @@ mod tests {
         )
         .unwrap();
         dir
+    }
+
+    /// A verbatim Claude Code session record, taken off disk with the paths and
+    /// identifiers replaced. Pinning the real document shape here is the point:
+    /// a fixture the parser itself generated could not catch a field cs reads
+    /// under the wrong name or in the wrong format.
+    const REGISTRY_DOCUMENT: &str = r#"{"pid":70260,"sessionId":"072f4811-2a21-4008-b55f-05d5f193727d","cwd":"/home/example/.claude-sessions/demo","startedAt":1786173098860,"procStart":"Sat Aug  8 07:11:34 2026","version":"2.1.226","peerProtocol":1,"kind":"interactive","entrypoint":"cli","tmux":"main:@2.%12","messagingSocketPath":"/tmp/cc-socks/70260.sock","name":"demo","updatedAt":1786173631759,"status":"busy","statusUpdatedAt":1786173631759}"#;
+
+    #[test]
+    fn agent_record_parses_a_real_session_document() {
+        let r = parse_agent_record(REGISTRY_DOCUMENT).expect("record parses");
+        assert_eq!(r.name, "demo");
+        assert_eq!(r.status, "busy");
+        assert_eq!(r.pid, 70260);
+        assert_eq!(r.proc_start, "Sat Aug  8 07:11:34 2026");
+    }
+
+    /// Manual smoke check: read the records Claude Code has actually published
+    /// on this machine. A fixture cannot stand in for it, because the fixture
+    /// and the reader would agree on a start-time format that Claude Code does
+    /// not use. Ignored by default so no CI run depends on a live session.
+    /// Run with: cargo test -- --ignored live_registry
+    #[test]
+    #[ignore]
+    fn agent_statuses_read_the_live_registry() {
+        let dir = claude_sessions_dir();
+        let published = fs::read_dir(&dir).map(|e| e.count()).unwrap_or(0);
+        let statuses = agent_statuses_in(&dir);
+        eprintln!("{} document(s) in {:?} -> {:?}", published, dir, statuses);
+        assert!(
+            published == 0 || !statuses.is_empty(),
+            "records exist but none survived the liveness cross-check"
+        );
+    }
+
+    #[test]
+    fn agent_record_rejects_a_document_missing_the_fields_cs_reads() {
+        assert!(parse_agent_record("{\"pid\":1,\"name\":\"demo\"}").is_none());
+        assert!(parse_agent_record("not json").is_none());
     }
 
     #[test]

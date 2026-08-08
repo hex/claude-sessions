@@ -9,6 +9,7 @@ CS_BIN="$SCRIPT_DIR/../bin/cs"
 setup() {
     TEST_TMPDIR="$(mktemp -d)"
     export CS_SESSIONS_ROOT="$TEST_TMPDIR/sessions"
+    export CS_CLAUDE_DIR="$TEST_TMPDIR/claude"
     export CLAUDE_CODE_BIN="echo"
     mkdir -p "$CS_SESSIONS_ROOT"
     unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR CS_ACTOR 2>/dev/null || true
@@ -38,6 +39,28 @@ make_live_session() { # name
     p=$!
     printf '%s\n' "$p" > "$sdir/.cs/session.lock"
 }
+# Write the Claude Code session record for an already-created session, keyed to
+# the pid in that session's lock. The schema and the UTC process-start format
+# were both read off live records Claude Code had written; a caller in any other
+# zone that formats the time locally will not match what cs reads back. Pass a
+# third argument to override the start time and stand in for a recycled pid.
+make_registry_record() {  # name, status, [procStart]
+    local sdir="$CS_SESSIONS_ROOT/$1" pid start
+    pid="$(cat "$sdir/.cs/session.lock")"
+    if [ $# -ge 3 ]; then
+        start="$3"
+    else
+        start="$(TZ=UTC ps -o lstart= -p "$pid" 2>/dev/null \
+            | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    fi
+    mkdir -p "$CS_CLAUDE_DIR/sessions"
+    cat > "$CS_CLAUDE_DIR/sessions/$pid.json" <<EOF
+{"pid": $pid, "name": "$1", "status": "$2", "procStart": "$start",
+ "cwd": "$sdir", "peerProtocol": 1, "kind": "interactive",
+ "messagingSocketPath": "/tmp/cc-socks/$pid.sock"}
+EOF
+}
+
 # Create a session whose lock holds a dead pid (started, then killed+reaped).
 make_dead_session() { # name
     local sdir="$CS_SESSIONS_ROOT/$1" p
@@ -168,10 +191,29 @@ test_live_empty_root_message_and_exit0() {
     assert_eq "0" "$rc" "empty root exits 0" || return 1
 }
 
+test_live_shows_agent_status_from_registry() {
+    command -v jq >/dev/null 2>&1 || return 0
+    make_live_session working
+    make_registry_record working waiting
+    local out; out="$("$CS_BIN" -live 2>&1)"
+    assert_output_contains "$out" "working.*waiting" "agent status read from the session registry" || return 1
+}
+
+test_live_ignores_record_whose_start_time_differs() {
+    command -v jq >/dev/null 2>&1 || return 0
+    make_live_session recycled
+    make_registry_record recycled waiting "Mon Jan  1 00:00:00 2001"
+    local out; out="$("$CS_BIN" -live 2>&1)"
+    assert_output_not_contains "$out" "recycled.*waiting" \
+        "record left by an exited session whose pid was reused is ignored" || return 1
+}
+
 run_test test_live_includes_heartbeat_session
 run_test test_live_excludes_cold_heartbeat_session
 run_test test_live_includes_live_excludes_dead
 run_test test_live_shows_presence_status
+run_test test_live_shows_agent_status_from_registry
+run_test test_live_ignores_record_whose_start_time_differs
 run_test test_live_falls_back_to_readme_objective
 run_test test_live_filters_readme_placeholder
 run_test test_live_marks_current_session

@@ -57,6 +57,46 @@ session_status() {  # session_dir
     printf '%s' "$status" | _scrub_controls
 }
 
+# Print the agent state Claude Code advertises for a session ('busy', 'waiting',
+# 'idle'), empty when it advertises none. Claude Code writes one document per
+# session at <claude dir>/sessions/<pid>.json and unlinks it on a clean exit; a
+# crash orphans it, so the pid must still be alive AND report the process start
+# time recorded in the document. Without that second test a pid the kernel has
+# since handed to an unrelated process would read as the session still running.
+# Arg: session name.
+agent_status() {  # name
+    local dir="${CS_CLAUDE_DIR:-$HOME/.claude}/sessions" record pid recorded started
+    [ -d "$dir" ] || return 0
+    command -v jq >/dev/null 2>&1 || return 0
+
+    # One jq across every document; a name matches at most one live session, and
+    # trimming to the first line in the shell keeps a pipe consumer that exits
+    # early (head, awk/exit) out of the pipeline, which under pipefail turns a
+    # large payload into a SIGPIPE failure for the whole function.
+    record="$(jq -r --arg n "$1" \
+        'select(.name == $n)
+         | [(.pid | tostring), (.procStart // ""), (.status // "")] | @tsv' \
+        "$dir"/*.json 2>/dev/null || true)"
+    record="${record%%$'\n'*}"
+    [ -n "$record" ] || return 0
+
+    local state
+    IFS="$(printf '\t')" read -r pid recorded state <<< "$record"
+    case "$pid" in ''|*[!0-9]*) return 0 ;; esac
+    kill -0 "$pid" 2>/dev/null || return 0
+    if [ -n "$recorded" ]; then
+        # Claude Code records the start time in UTC while ps formats it in the
+        # caller's zone and pads the field, so both have to be normalised or
+        # every record outside UTC is read as a pid the kernel has recycled.
+        started="$(TZ=UTC "${CS_PS_BIN:-ps}" -o lstart= -p "$pid" 2>/dev/null \
+            | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+        [ "$started" = "$recorded" ] || return 0
+    fi
+
+    # Scrubbed like session_status: another process wrote this document.
+    printf '%s' "$state" | _scrub_controls
+}
+
 # Dispatcher for 'cs -status'. In-session only (ambient env), like run_queue.
 run_status() {
     if [ -z "${CLAUDE_SESSION_META_DIR:-}" ]; then
