@@ -184,7 +184,7 @@ run_queue() {
         add)   shift; _queue_add "$qdir" "$*";;
         # Scrubbed once here rather than inside _queue_list's two branches:
         # one construct that cannot be half-removed, and one tr fork instead
-        # of one per queued task (forks are expensive under MSYS).
+        # of one per queued task.
         # _queue_list is a pure reader — it emits no palette variables and
         # never calls error() — so the pipeline eats nothing cs owns.
         list|ls) _queue_list "$qdir" | _scrub_controls;;

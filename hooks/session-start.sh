@@ -340,8 +340,8 @@ case "$SOURCE" in
             # The marker names a basename. Anything with a separator would
             # resolve outside the handoff store, and the file it landed on
             # would be rewritten and then named to Claude as the handoff.
-            # Backslash counts: the msys runtime resolves it as a separator,
-            # and the required test-windows-msys lane runs this suite there.
+            # Backslash counts too: nothing cs writes here contains one, so
+            # rejecting it costs nothing and closes a spelling of the same idea.
             case "$HANDOFF_BASENAME" in
                 */*|*\\*) HANDOFF_BASENAME="" ;;
             esac

@@ -225,7 +225,8 @@ run_uninstall() {
         info "Removed cs-subagent-statusline registration from settings.json"
     fi
 
-    # cs-tui on macOS/Linux, cs-tui.exe on native Windows (Git Bash/MSYS2).
+    # The .exe name is only ever a leftover from an install that predates
+    # dropping Windows; remove it too so an upgrade leaves nothing behind.
     for _tui in cs-tui cs-tui.exe; do
         if [ -f "$install_dir/$_tui" ]; then
             rm "$install_dir/$_tui"

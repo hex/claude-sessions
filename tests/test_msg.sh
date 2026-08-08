@@ -456,11 +456,10 @@ test_reply_direction_is_anchored_on_the_maildir() {
 }
 
 # _mail_thread_files' fast path asks jq for input_filename, and jq echoes each
-# path exactly as IT received it. Under MSYS a leading-slash argument is
-# rewritten to C:/... before a native jq.exe sees it, so the emitted paths stop
-# matching the "$maildir"/out/* pattern its caller keys direction on: every sent
-# copy reads as received, the peer resolves to .from, and a session replying to
-# a thread it started addresses itself. The paths must be the caller's own.
+# path exactly as IT received it. The caller keys reply direction on the
+# "$maildir"/out/* pattern, so a path spelled any other way makes every sent
+# copy read as received and a session replying to a thread it started addresses
+# itself. The paths must be the caller's own.
 test_thread_files_emit_paths_anchored_on_the_maildir_given() {
     "$CS_BIN" -msg receiver "anchor probe" >/dev/null 2>&1 || return 1
     local maildir="$CS_SESSIONS_ROOT/sender/.cs/local/mail" sent="" f
@@ -489,27 +488,6 @@ EOF
     [ "$n" -gt 0 ] || { echo "  FAIL: nothing emitted for a thread that exists"; return 1; }
 }
 
-# The correlation back to the caller's own paths must not shrink the thread when
-# it cannot resolve a name. jq can report C:\Users\...\x.json there, and keying
-# on the last "/" alone leaves the whole path as the basename, matches nothing,
-# and returns an EMPTY list -- read by every caller as "no such thread", so a
-# transcript loses its messages and an ambiguous thread stops looking ambiguous.
-# Shimmed with a jq that answers in backslashes, which is the shape MSYS gives.
-test_thread_files_survive_a_backslash_spelling_from_jq() {
-    local probe="$TEST_TMPDIR/backslash-probe.sh"
-    cat > "$probe" <<'PROBE'
-eval "$(sed 's/^main "\$@"$/:/' "$1")" 2>/dev/null
-d="$2"; mkdir -p "$d/new" "$d/out" "$d/cur"
-printf '{"thread":"abc123","id":"m1","to":"r","from":"s"}\n' > "$d/new/0000000100-a.json"
-printf '{"thread":"abc123","id":"m2","to":"s","from":"r"}\n' > "$d/out/0000000200-b.json"
-jq() { command jq "$@" | sed 's|/|\\|g'; }
-_mail_thread_files "$d" abc123 | grep -c .
-PROBE
-    local n
-    n=$(bash "$probe" "$CS_BIN" "$TEST_TMPDIR/bsmail" 2>/dev/null | tail -1)
-    assert_eq "2" "$n" \
-        "a path spelling it cannot correlate must fall back, not return an empty thread" || return 1
-}
 
 # The other arm of the same case statement: a document this session SENT lives in
 # out/, and its peer is .to. Deleting the case and always using .from keeps the
@@ -571,7 +549,6 @@ test_reply_to_an_anonymous_thread_needs_a_target_and_keeps_the_parent() {
 run_test test_reply_refuses_an_ambiguous_thread
 run_test test_reply_direction_is_anchored_on_the_maildir
 run_test test_thread_files_emit_paths_anchored_on_the_maildir_given
-run_test test_thread_files_survive_a_backslash_spelling_from_jq
 run_test test_reply_reads_the_peer_from_to_on_a_sent_message
 run_test test_reply_to_an_anonymous_thread_needs_a_target_and_keeps_the_parent
 run_test test_thread_transcript_orders_a_reply_after_its_question
