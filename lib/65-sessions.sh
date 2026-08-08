@@ -376,7 +376,8 @@ cmd_live() {
     now="$(date +%s)"
     current="${CLAUDE_SESSION_NAME:-}"
 
-    local dir name meta actor up agent status
+    local dir name meta actor up agent status states
+    states="$(agent_states)"
     while IFS= read -r -d '' dir; do
         is_session_dir "$dir" || continue
         meta="$dir/.cs"
@@ -384,7 +385,7 @@ cmd_live() {
         name="$(basename "$dir")"
         actor="$(session_actor_slug "$dir")"
         up="$(_humanize_secs "$(session_uptime_secs "$meta" "$now")")"
-        agent="$(agent_status "$name")"
+        agent="$(agent_state_of "$states" "$name")"
         if [ "$name" = "$current" ]; then
             status="(this session)"
         else

@@ -57,44 +57,75 @@ session_status() {  # session_dir
     printf '%s' "$status" | _scrub_controls
 }
 
-# Print the agent state Claude Code advertises for a session ('busy', 'waiting',
-# 'idle'), empty when it advertises none. Claude Code writes one document per
+# Print one "<name><tab><state>" line per session Claude Code advertises as
+# running ('busy', 'waiting', 'idle'). Claude Code writes one document per
 # session at <claude dir>/sessions/<pid>.json and unlinks it on a clean exit; a
-# crash orphans it, so the pid must still be alive AND report the process start
-# time recorded in the document. Without that second test a pid the kernel has
-# since handed to an unrelated process would read as the session still running.
-# Arg: session name.
-agent_status() {  # name
-    local dir="${CS_CLAUDE_DIR:-$HOME/.claude}/sessions" record pid recorded started
+# crash orphans it, so a record counts only while its pid is still alive AND
+# still reports the process start time the record holds. Without that second
+# test a pid the kernel has since handed to an unrelated process would read as
+# the session still running.
+#
+# The whole set is read in one pass — one jq, one ps, one awk — so the fork
+# count stays flat however many sessions are live. Callers render every live
+# session, and asking per session cost two forks each.
+agent_states() {
+    local dir="${CS_CLAUDE_DIR:-$HOME/.claude}/sessions" records pidlist="" started pid rest
     [ -d "$dir" ] || return 0
     command -v jq >/dev/null 2>&1 || return 0
 
-    # One jq across every document; a name matches at most one live session, and
-    # trimming to the first line in the shell keeps a pipe consumer that exits
-    # early (head, awk/exit) out of the pipeline, which under pipefail turns a
-    # large payload into a SIGPIPE failure for the whole function.
-    record="$(jq -r --arg n "$1" \
-        'select(.name == $n)
-         | [(.pid | tostring), (.procStart // ""), (.status // "")] | @tsv' \
-        "$dir"/*.json 2>/dev/null || true)"
-    record="${record%%$'\n'*}"
-    [ -n "$record" ] || return 0
+    records="$(jq -r '
+        select((.name // "") != "" and (.status // "") != "" and .pid != null)
+        | [(.pid | tostring), (.procStart // ""), .name, .status] | @tsv
+    ' "$dir"/*.json 2>/dev/null || true)"
+    [ -n "$records" ] || return 0
 
-    local state
-    IFS="$(printf '\t')" read -r pid recorded state <<< "$record"
-    case "$pid" in ''|*[!0-9]*) return 0 ;; esac
-    kill -0 "$pid" 2>/dev/null || return 0
-    if [ -n "$recorded" ]; then
-        # Claude Code records the start time in UTC while ps formats it in the
-        # caller's zone and pads the field, so both have to be normalised or
-        # every record outside UTC is read as a pid the kernel has recycled.
-        started="$(TZ=UTC "${CS_PS_BIN:-ps}" -o lstart= -p "$pid" 2>/dev/null \
-            | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-        [ "$started" = "$recorded" ] || return 0
-    fi
+    # Collecting the pids in the shell rather than forking cut keeps this to the
+    # three forks the comment above promises.
+    while IFS="$(printf '\t')" read -r pid rest; do
+        case "$pid" in ''|*[!0-9]*) continue ;; esac
+        pidlist="${pidlist:+$pidlist,}$pid"
+    done <<< "$records"
+    [ -n "$pidlist" ] || return 0
 
-    # Scrubbed like session_status: another process wrote this document.
-    printf '%s' "$state" | _scrub_controls
+    # ps prints the start time in the caller's zone and pads the field while the
+    # record holds UTC, so the join compares trimmed strings in UTC. Without
+    # that, every record outside UTC reads as a pid the kernel has recycled.
+    started="$(TZ=UTC "${CS_PS_BIN:-ps}" -o pid=,lstart= -p "$pidlist" 2>/dev/null || true)"
+
+    # Scrubbed like session_status: another process wrote these documents. tr
+    # keeps tab and newline, which are this table's own structure.
+    # ps output reaches awk through the environment, not -v: an assignment made
+    # with -v is processed for escapes and cannot carry the embedded newlines
+    # that separate one process from the next.
+    CS_PS_RUNNING="$started" awk -F'\t' '
+        BEGIN {
+            n = split(ENVIRON["CS_PS_RUNNING"], lines, "\n")
+            for (i = 1; i <= n; i++) {
+                line = lines[i]
+                sub(/^[[:space:]]+/, "", line)
+                sub(/[[:space:]]+$/, "", line)
+                if (line !~ /^[0-9]+[[:space:]]/) continue
+                p = line;     sub(/[[:space:]].*$/, "", p)
+                start = line; sub(/^[0-9]+[[:space:]]+/, "", start)
+                alive[p] = start
+            }
+        }
+        ($1 in alive) && ($2 == "" || alive[$1] == $2) { print $3 "\t" $4 }
+    ' <<< "$records" | _scrub_controls
+}
+
+# Print the state from an agent_states table for one session, empty when the
+# table holds none. Pure shell: the table is read once by the caller and looked
+# up per row without another process.
+agent_state_of() {  # table, name
+    local name rest
+    [ -n "$1" ] || return 0
+    while IFS="$(printf '\t')" read -r name rest; do
+        if [ "$name" = "$2" ]; then
+            printf '%s' "$rest"
+            return 0
+        fi
+    done <<< "$1"
 }
 
 # Dispatcher for 'cs -status'. In-session only (ambient env), like run_queue.

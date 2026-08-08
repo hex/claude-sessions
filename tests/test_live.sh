@@ -199,6 +199,19 @@ test_live_shows_agent_status_from_registry() {
     assert_output_contains "$out" "working.*waiting" "agent status read from the session registry" || return 1
 }
 
+test_live_gives_each_session_its_own_agent_status() {
+    command -v jq >/dev/null 2>&1 || return 0
+    make_live_session one-busy
+    make_registry_record one-busy busy
+    make_live_session two-waiting
+    make_registry_record two-waiting waiting
+    local out; out="$("$CS_BIN" -live 2>&1)"
+    assert_output_contains "$out" "one-busy.*busy" "first session carries its own state" || return 1
+    assert_output_contains "$out" "two-waiting.*waiting" "second session carries its own state" || return 1
+    assert_output_not_contains "$out" "one-busy.*waiting" \
+        "reading every record at once must not smear one session's state onto another" || return 1
+}
+
 test_live_ignores_record_whose_start_time_differs() {
     command -v jq >/dev/null 2>&1 || return 0
     make_live_session recycled
@@ -213,6 +226,7 @@ run_test test_live_excludes_cold_heartbeat_session
 run_test test_live_includes_live_excludes_dead
 run_test test_live_shows_presence_status
 run_test test_live_shows_agent_status_from_registry
+run_test test_live_gives_each_session_its_own_agent_status
 run_test test_live_ignores_record_whose_start_time_differs
 run_test test_live_falls_back_to_readme_objective
 run_test test_live_filters_readme_placeholder
