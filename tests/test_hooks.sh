@@ -181,10 +181,9 @@ test_auto_approve_rejects_traversal() {
 # design, so a pulled symlink would otherwise turn every auto-approved metadata
 # write into a write outside the session.
 test_auto_approve_rejects_leaf_symlink() {
-    # Git Bash's `ln -s` produces a regular-file COPY, so the hook's -L guard
+    # A filesystem where `ln -s` produces a regular-file COPY makes the -L guard
     # cannot fire and its approval is correct there (same reason as
     # tests/test_adopt.sh's symlink cases).
-    _skip_on_msys && return 0
     local outside="$TEST_TMPDIR/outside-the-session.conf"
     echo "original" > "$outside"
     ln -s "$outside" "$CLAUDE_SESSION_META_DIR/notes.md"
@@ -907,12 +906,10 @@ test_session_start_rebind_ignores_invalid_session_id() {
 }
 
 test_session_start_rebinds_for_a_claude_cs_spawned() {
-    # Needs a real `ps -o ppid=`. The Cygwin-derived ps that MSYS ships accepts
+    # Needs a real `ps -o ppid=`. A ps that accepts
     # only [-aefls] [-u UID] [-p PID] and errors on -o, which would fail this
     # test for a reason that has nothing to do with the property. Nothing is
-    # lost there: cs hands Windows launches to WSL (lib/99-main.sh), so no lead
-    # process exists under MSYS and declining is the right answer anyway.
-    _skip_on_msys && return 0
+    # declining is the right answer when no lead process can be identified.
     session_start_setup
 
     seed_recorded_uuid "aaaaaaaa-1111-2222-3333-444444444444"
@@ -964,7 +961,6 @@ test_session_start_rebind_declines_for_child_claude() {
 
 test_session_start_rebind_declines_for_a_live_foreign_parent() {
     # Needs a real `ps -o ppid=` — see the skip note above.
-    _skip_on_msys && return 0
     session_start_setup
 
     seed_recorded_uuid "aaaaaaaa-1111-2222-3333-444444444444"
@@ -1712,8 +1708,8 @@ test_session_start_arms_the_mail_watcher() {
     local wp
     wp=$(echo "$output" | jq -r '.hookSpecificOutput.watchPaths[0] // ""')
     # Assert which directory the watch lands on, not how it is spelled. Under
-    # Git Bash the path reaches jq through MSYS argv translation and comes back
-    # as C:/Users/.../AppData/Local/Temp/..., the same directory /tmp names
+    # a path can reach jq through argv translation and come back spelled as a
+    # different absolute form for the same directory
     # there. A string compare fails on the spelling while the watch is armed on
     # exactly the right place, so prove identity with a file instead.
     if [ -z "$wp" ]; then

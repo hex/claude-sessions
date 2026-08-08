@@ -86,12 +86,9 @@ The installer:
 
 ### Windows
 
-cs runs on Windows two ways:
+Install inside a WSL2 distro exactly as on Linux (the command above). cs targets macOS and Linux; native Windows and Git Bash are not supported.
 
-- **WSL2 (recommended — full support).** Install inside a WSL2 distro exactly as on Linux (the command above). Everything works: session launch, the tmux spawner, secrets (encrypted-file backend), and the TUI.
-- **Git Bash / MSYS2 (Tier 2 — session management only).** cs runs for session bookkeeping, secrets, and the TUI, but **cannot launch Claude Code or use the tmux spawner** — those require a POSIX shell + tmux and print a "use WSL" message on native Windows. The installer fetches `cs-tui.exe`; secrets use the **Windows Credential Manager** backend (see [docs/secrets.md](docs/secrets.md)) when `powershell.exe` is available, else the encrypted-file backend.
-
-The platform is detected automatically; override with `CS_PLATFORM_OVERRIDE=macos|wsl|msys|linux` for testing.
+The platform is detected automatically; override with `CS_PLATFORM_OVERRIDE=macos|wsl|linux` for testing.
 
 ## Usage
 
@@ -488,7 +485,7 @@ WHERE file.name = "README" AND status = "active"
 - Bash 3.2+ (macOS system bash supported)
 - `jq` for hook configuration
 - `git` for local session history and crash recovery
-- Windows: WSL2 for full support, or Git Bash/MSYS2 for session management only (see [Installation → Windows](#windows))
+- Windows: WSL2 (see [Installation → Windows](#windows)); native Windows and Git Bash are not supported
 
 ## Uninstalling
 

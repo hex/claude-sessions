@@ -234,8 +234,8 @@ if [ "$HOOK_EVENT" = "FileChanged" ]; then
     # the precise check that the file belongs to THIS session's mailbox rather
     # than to another session that happens to share the layout.
     # The watcher reports the path in the platform's own spelling, which need
-    # not be the one MAILDIR was built from: C:/Users/... beside an MSYS
-    # /tmp/..., or /private/var beside /var. Ask whether the document is in
+    # not be the one MAILDIR was built from — /private/var beside /var, say.
+    # Ask whether the document is in
     # THIS session's new/ rather than whether the two strings agree, so a real
     # arrival is not dropped for being described differently. Still precise:
     # the name must be a .json under a new/, and it must be one of ours.

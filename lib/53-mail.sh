@@ -182,11 +182,10 @@ _mail_send() {  # target, [--kind|-k KIND] [--reply THREAD] body
     else
         thread="$(_mail_new_thread "${CLAUDE_SESSION_META_DIR:-$target_dir/.cs}/local/mail")"
     fi
-    # The body rides on stdin, never as an --arg. Windows caps a command line at
-    # about 32K, so a body approaching MAIL_BODY_MAX fails to compose there --
-    # and `cs -msg <target> -` exists precisely so a multi-KB handoff need not
-    # go through argv, which putting it back into jq's argv undid. -Rs makes the
-    # whole of stdin one string, byte for byte, and printf adds nothing to it.
+    # The body rides on stdin, never as an --arg: `cs -msg <target> -` exists
+    # precisely so a multi-KB handoff need not go through argv, and putting it
+    # back into jq's argv undid that. -Rs makes the whole of stdin one string,
+    # byte for byte, and printf adds nothing to it.
     if ! line=$(printf '%s' "$body" | jq -cRs --arg id "$id" --argjson ts "$now" \
         --arg thread "$thread" --arg to "$target" --arg parent "$reply_parent" \
         --arg from "${CLAUDE_SESSION_NAME:-}" --arg actor "$(cs_actor_slug)" \
@@ -306,43 +305,6 @@ _mail_thread_files() {  # maildir, thread id -> prints paths, rc 1 when none
             out="$out$f
 "
         done
-    else
-        # input_filename echoes each path as jq received it, and MSYS rewrites a
-        # leading-slash argument to C:/... before a native jq.exe sees it. The
-        # caller keys reply direction on "$maildir"/out/*, so a Windows spelling
-        # classifies every sent copy as received and a reply to a thread this
-        # session started is addressed back to itself. Re-key on the basename,
-        # which the rewrite leaves alone, and emit the caller's own path.
-        local remapped="" name hit
-        while IFS= read -r name; do
-            [ -n "$name" ] || continue
-            # Either separator: the rewrite can hand back C:\Users\... too, and
-            # stripping only to the last "/" would leave the whole path as the
-            # "basename" and match nothing.
-            name="${name##*/}"; name="${name##*\\}"
-            hit=""
-            for f in "${all[@]}"; do
-                [ "${f##*/}" = "$name" ] && { hit="$f"; break; }
-            done
-            # A name that resolves to nothing must not silently shrink the
-            # thread: fall back to reading the documents one at a time, which
-            # needs no correlation at all.
-            [ -n "$hit" ] || { remapped=""; break; }
-            remapped="$remapped$hit
-"
-        done <<EOF
-$out
-EOF
-        if [ -n "$remapped" ]; then
-            out="$remapped"
-        else
-            out=""
-            for f in "${all[@]}"; do
-                [ "$(jq -r '.thread // ""' "$f" 2>/dev/null || true)" = "$2" ] || continue
-                out="$out$f
-"
-            done
-        fi
     fi
     [ -n "$out" ] || return 1
     printf '%s\n' "$out" | awk -F/ 'NF {print $NF "\t" $0}' | sort | cut -f2-

@@ -1,4 +1,4 @@
-# ABOUTME: Builds cs-tui for macOS (arm64, amd64), Linux (amd64) and Windows (amd64) on version tags
+# ABOUTME: Builds cs-tui for macOS (arm64, amd64) and Linux (amd64) on version tags
 # ABOUTME: Creates a GitHub Release with signed, checksummed binaries for each platform
 
 name: Release
@@ -28,10 +28,6 @@ jobs:
             runner: ubuntu-latest
             target: x86_64-unknown-linux-musl
             ext: ""
-          - platform: windows-amd64
-            runner: windows-latest
-            target: x86_64-pc-windows-msvc
-            ext: ".exe"
 
     runs-on: ${{ matrix.runner }}
 
@@ -45,12 +41,6 @@ jobs:
       - name: Install musl-tools (Linux only)
         if: contains(matrix.platform, 'linux')
         run: sudo apt-get update && sudo apt-get install -y musl-tools
-
-      # Gate the Windows artifact on the TUI behaving on Windows (Task 13):
-      # a broken kill/security path fails here and no cs-tui.exe is published.
-      - name: Test cs-tui (Windows gate)
-        if: contains(matrix.platform, 'windows')
-        run: cargo test --manifest-path tui/Cargo.toml --target ${{ matrix.target }}
 
       - name: Build cs-tui
         run: cargo build --release --manifest-path tui/Cargo.toml --target ${{ matrix.target }}

@@ -188,8 +188,8 @@ test_worktree_from_unmigrated_base_can_merge() {
     if [ -d "$wt" ]; then
         local exclude
         exclude=$( (cd "$wt" && git rev-parse --git-path info/exclude) 2>/dev/null || echo "" )
-        # git reports an absolute path for a worktree (drive-letter form under
-        # Git Bash) and a relative one for a plain repo. Resolve by existence
+        # git reports an absolute path for a worktree and a relative one for a
+        # plain repo. Resolve by existence
         # rather than re-deriving cs's own classification here — duplicating it
         # let a bug in both cancel out and the assertion pass regardless.
         [ -f "$exclude" ] || exclude="$wt/$exclude"
@@ -211,8 +211,8 @@ test_worktree_ignored_mode_excludes_local_md_via_clone_exclude() {
     if [ -d "$wt" ]; then
         local exclude
         exclude=$( (cd "$wt" && git rev-parse --git-path info/exclude) 2>/dev/null || echo "")
-        # git reports an absolute path for a worktree (drive-letter form under
-        # Git Bash) and a relative one for a plain repo. Resolve by existence
+        # git reports an absolute path for a worktree and a relative one for a
+        # plain repo. Resolve by existence
         # rather than re-deriving cs's own classification here — duplicating it
         # let a bug in both cancel out and the assertion pass regardless.
         [ -f "$exclude" ] || exclude="$wt/$exclude"
@@ -242,7 +242,7 @@ run_test test_old_template_head_moves_wholesale
 run_test test_worktree_from_unmigrated_base_can_merge
 run_test test_worktree_ignored_mode_excludes_local_md_via_clone_exclude
 
-# A session repo cloned on Git for Windows with default autocrlf arrives with
+# A session repo cloned with autocrlf enabled arrives with
 # CRLF line endings. The frontmatter-bounded field strip opens on /^---$/, which
 # does not match "---\r", so fm is never set, the gate reports nothing found, and
 # the machine-local fields survive migration — a regression against the looser
@@ -254,7 +254,7 @@ test_migrate_moves_machine_local_fields_out_of_a_crlf_readme() {
         > "$dir/.cs/README.md"
     # Fixture sanity: the file really is CRLF, or this tests the LF path again.
     # Counted rather than matched: a CR carried through a shell variable is the
-    # one value Git Bash is most likely to mangle, and this test exists for Git
+    # the value autocrlf is most likely to mangle, and this test exists for that
     # Bash — a guard that cannot survive the platform it guards proves nothing.
     [ "$(LC_ALL=C tr -cd '\r' < "$dir/.cs/README.md" | wc -c | tr -d '[:space:]')" -gt 0 ] \
         || { echo "  FAIL: fixture is not CRLF"; return 1; }

@@ -36,7 +36,7 @@ validate_session_name() {
 # than validate_session_name, which is the whitelist for names cs CREATES:
 # worktree sessions are named <base>@<task> and that function admits no @, so
 # borrowing it here would refuse every worktree session. Backslash counts as a
-# separator because MSYS resolves it as one; nothing cs creates contains either.
+# separator too; nothing cs creates contains either.
 validate_session_ref() {  # name
     case "${1:-}" in
         '') error "Session name cannot be empty" ;;

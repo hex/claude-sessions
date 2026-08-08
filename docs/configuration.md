@@ -13,7 +13,7 @@ export CS_SESSIONS_ROOT="/path/to/sessions"
 # Legacy password for secrets sync (age encryption preferred - see secrets.md)
 export CS_SECRETS_PASSWORD="your-secure-password"
 
-# Override secrets backend (keychain, wcm, or encrypted)
+# Override secrets backend (keychain or encrypted)
 export CS_SECRETS_BACKEND="keychain"
 
 # Override Claude Code binary (default: claude)
@@ -76,7 +76,7 @@ export CS_TMUX_BIN="/opt/homebrew/bin/tmux"
 
 # Force the detected platform instead of probing for it; any other
 # value is rejected
-export CS_PLATFORM_OVERRIDE="linux"   # macos, wsl, msys, or linux
+export CS_PLATFORM_OVERRIDE="linux"   # macos, wsl, or linux
 ```
 
 ## Environment variables cs sets for you

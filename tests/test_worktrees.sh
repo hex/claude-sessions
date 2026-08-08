@@ -5,10 +5,6 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/test_lib.sh"
 
-# Launch-gated suite: on a real MSYS runner the Claude launch short-circuits
-# (Tier 2 = session management only), so pin a supported platform there. See
-# _apply_suite_platform_pin in test_lib.sh (no-op on macOS/Linux lanes).
-SUITE_PIN_NONMSYS=1
 
 # --- Name parsing (via cs CLI behavior) ---
 
@@ -97,7 +93,7 @@ test_worktree_create_ignored_mode_bootstraps_cs() {
     echo "# Project readme" > "$base_dir/README.md"
     echo "# Project CLAUDE.md" > "$base_dir/CLAUDE.md"
     printf '.cs/\n' > "$base_dir/.gitignore"
-    # autocrlf is on by default in Git for Windows and would rewrite the fixture's
+    # A global autocrlf would rewrite the fixture's
     # line endings, so the record fusion compares LF content against CRLF checkouts.
     (cd "$base_dir" && git init -q && git config core.autocrlf false && git add -A && git commit -q -m init)
     cs_launch "proj@task1"
@@ -228,7 +224,7 @@ test_worktree_reopen_preserves_project_claude_md() {
     mkdir -p "$base_dir/.cs"/{memory,local}
     echo "# Project CLAUDE.md" > "$base_dir/CLAUDE.md"
     printf '.cs/\n' > "$base_dir/.gitignore"
-    # autocrlf is on by default in Git for Windows and would rewrite the fixture's
+    # A global autocrlf would rewrite the fixture's
     # line endings, so the record fusion compares LF content against CRLF checkouts.
     (cd "$base_dir" && git init -q && git config core.autocrlf false && git add -A && git commit -q -m init)
     cs_launch "proj@task1"
@@ -427,7 +423,7 @@ test_merge_rejects_traversal_task_name() {
     assert_output_contains "$output" "alphanumeric" "rejects a traversal task name with the charset error" || return 1
 }
 
-# Git for Windows enables core.autocrlf by default. A CRLF-rewritten .gitignore
+# With core.autocrlf enabled, a CRLF-rewritten .gitignore
 # carries a trailing \r on every pattern and matches nothing, so files cs means
 # to ignore surface as untracked — which then blocks `cs --merge`.
 test_session_repo_pins_autocrlf_off() {
@@ -443,8 +439,8 @@ test_session_repo_pins_autocrlf_off() {
 }
 
 # cs records the protocol file in the worktree's info/exclude, at whatever path
-# git reports for it. A worktree's git-path is absolute, and in drive-letter form
-# under Git Bash; mis-reading that as relative sends the entry to a nonsense path,
+# git reports for it. A worktree's git-path is absolute; mis-reading that as
+# relative sends the entry to a nonsense path,
 # leaves CLAUDE.local.md untracked, and blocks `cs <base> --merge`.
 test_worktree_excludes_protocol_file() {
     local base_dir="$CS_SESSIONS_ROOT/proj"
@@ -495,7 +491,7 @@ test_merge_ignored_mode_fuses_records() {
         > "$base_dir/.cs/memory/narrative.plain.md"
     echo "# P" > "$base_dir/README.md"
     printf '.cs/\n.claude/settings.local.json\n' > "$base_dir/.gitignore"
-    # autocrlf is on by default in Git for Windows and would rewrite the fixture's
+    # A global autocrlf would rewrite the fixture's
     # line endings, so the record fusion compares LF content against CRLF checkouts.
     (cd "$base_dir" && git init -q && git config core.autocrlf false && git add -A && git commit -q -m init)
     cs_launch "proj@t1"
@@ -630,44 +626,6 @@ test_doctor_fresh_worktree_not_flagged_merged() {
 
 run_test test_doctor_fresh_worktree_not_flagged_merged
 
-# Git for Windows prints drive-letter paths (C:/...) everywhere, while MSYS
-# `pwd -P` yields /c/... form -- so a doctor check that compares one against the
-# other can never match. A git shim that rewrites both path outputs to
-# drive-letter form reproduces that divergence on any platform.
-_make_drive_letter_git() {
-    local bindir="$TEST_TMPDIR/dl-git"
-    local real_git; real_git=$(command -v git)
-    mkdir -p "$bindir"
-    cat > "$bindir/git" <<GITFAKE
-#!/usr/bin/env bash
-set -o pipefail
-case " \$* " in
-    *" worktree list --porcelain "*|*" rev-parse --show-toplevel "*)
-        "$real_git" "\$@" | sed -e 's|^worktree /|worktree C:/|' -e 's|^/|C:/|'
-        exit
-        ;;
-esac
-exec "$real_git" "\$@"
-GITFAKE
-    chmod +x "$bindir/git"
-    echo "$bindir"
-}
-
-test_doctor_classifies_worktrees_when_git_prints_drive_letter_paths() {
-    local base_dir
-    base_dir=$(create_test_session_with_git "myproj")
-    cs_launch "myproj@fresh-task"
-    local bindir; bindir=$(_make_drive_letter_git)
-    local output
-    output=$(cd "$base_dir" && PATH="$bindir:$PATH" CLAUDE_SESSION_DIR="$base_dir" \
-        CLAUDE_SESSION_META_DIR="$base_dir/.cs" "$CS_BIN" -doctor 2>&1 || true)
-    assert_output_not_contains "$output" "not a registered worktree" \
-        "a live worktree must not read as unregistered on git's path form" || return 1
-    assert_output_contains "$output" "Worktrees: myproj@fresh-task on cs/fresh-task" \
-        "a registered worktree still classifies when git prints drive-letter paths" || return 1
-}
-
-run_test test_doctor_classifies_worktrees_when_git_prints_drive_letter_paths
 
 test_merge_refuses_untracked_worktree() {
     local base_dir

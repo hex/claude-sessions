@@ -109,16 +109,6 @@ test_happy_path_docs_fixture_plain() {
         "docs fixture should render identity first, then gauges (no badge in plain mode)"
 }
 
-# Under a CRLF-emitting jq (Windows), the extracted fields must be sanitized so
-# the pill renders as one clean line — not split at every field by a stray \r.
-test_crlf_jq_output_is_sanitized_plain() {
-    export NO_COLOR=1
-    local shimdir out
-    shimdir=$(_install_crlf_jq) || return 0   # no jq locally: nothing to simulate
-    out=$( export PATH="$shimdir:$PATH"; run_sl "$FIXTURE_DOCS" )
-    assert_eq "my-session > ✦ Opus high > ◔ ctx 8% > ◷ 5h 23% > ◑ wk 41%" "$out" \
-        "CRLF jq output (Windows) must be sanitized to a single clean pill line"
-}
 
 # ============================================================================
 # All default segments render in order with git present (plain)
@@ -1308,7 +1298,6 @@ test_gauge_falls_back_to_grey_without_bg() {
 echo "Running test_statusline.sh"
 echo ""
 run_test test_happy_path_docs_fixture_plain
-run_test test_crlf_jq_output_is_sanitized_plain
 run_test test_all_segments_ordering_plain
 run_test test_limits_neutral_when_healthy
 run_test test_two_accents_default

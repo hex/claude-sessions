@@ -30,7 +30,6 @@ teardown() {
 }
 
 test_create_keeps_session_data_private_under_a_lax_umask() {
-    _skip_on_msys && return 0
     ( umask 022; "$CS_BIN" alpha <<< "" >/dev/null 2>&1 ) || true
     local sdir="$CS_SESSIONS_ROOT/alpha"
     assert_dir "$sdir" "the session was created" || return 1
@@ -50,7 +49,6 @@ test_create_keeps_session_data_private_under_a_lax_umask() {
 }
 
 test_adopt_does_not_re_permission_the_user_project() {
-    _skip_on_msys && return 0
     # adopt calls create_session_structure with the user's OWN directory. Their
     # project may be deliberately group- or world-readable — a shared checkout, a
     # served directory — and cs has no business changing that. Only the .cs/
@@ -73,7 +71,6 @@ test_adopt_does_not_re_permission_the_user_project() {
 }
 
 test_open_tightens_an_existing_world_readable_session() {
-    _skip_on_msys && return 0
     # Sessions created before cs set a mode are still 0755 on disk. Opening one
     # must bring it up to the current contract rather than leaving the older
     # sessions — the ones with the most history in them — permanently exposed.
@@ -102,7 +99,6 @@ EOF
 }
 
 test_open_does_not_tighten_an_adopted_project_root() {
-    _skip_on_msys && return 0
     # The backfill has the same boundary as create: an adopted session's root is
     # the user's project, reached through a symlink. Tightening it on open would
     # re-permission their directory behind their back, on every launch.
@@ -129,7 +125,6 @@ test_worktree_session_data_is_private_too() {
     # the adopt boundary does not apply and the root is cs's to set — but the
     # worktree open path bypasses migrate_session, so neither hardening site
     # reached it and the data sat at 0755 beside a base locked at 0700.
-    _skip_on_msys && return 0
     local base="$CS_SESSIONS_ROOT/wtbase"
     mkdir -p "$base"
     echo "# P" > "$base/README.md"
@@ -160,7 +155,6 @@ test_open_does_not_tighten_an_adopted_project_kept_inside_the_sessions_root() {
     # re-permissions their directory on every launch, the exact act the rule
     # forbids. An adopted session is reached through a SYMLINK at the root; the
     # target is theirs wherever it sits.
-    _skip_on_msys && return 0
     local proj="$CS_SESSIONS_ROOT/inside-project"
     mkdir -p "$proj"
     chmod 755 "$proj"

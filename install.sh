@@ -246,28 +246,17 @@ fi
 
 chmod +x "$INSTALL_DIR/cs-subagent-statusline"
 
-# Install cs-tui (interactive session manager). The TUI is bin/cs-tui on
-# macOS/Linux and bin/cs-tui.exe on native Windows (Git Bash/MSYS2); pick the
-# source/dest name by platform so a local Windows clone installs its .exe.
-_tui_local_ext=""
-case "$(uname -s | tr '[:upper:]' '[:lower:]')" in
-    mingw*|msys*|cygwin*) _tui_local_ext=".exe" ;;
-esac
-if [ "$INSTALL_METHOD" = "local" ] && [ -f "$SCRIPT_DIR/bin/cs-tui${_tui_local_ext}" ]; then
-    installed "cs-tui" "$INSTALL_DIR/cs-tui${_tui_local_ext}"
-    cp "$SCRIPT_DIR/bin/cs-tui${_tui_local_ext}" "$INSTALL_DIR/cs-tui${_tui_local_ext}"
-    chmod +x "$INSTALL_DIR/cs-tui${_tui_local_ext}"
+# Install cs-tui (interactive session manager).
+if [ "$INSTALL_METHOD" = "local" ] && [ -f "$SCRIPT_DIR/bin/cs-tui" ]; then
+    installed "cs-tui" "$INSTALL_DIR/cs-tui"
+    cp "$SCRIPT_DIR/bin/cs-tui" "$INSTALL_DIR/cs-tui"
+    chmod +x "$INSTALL_DIR/cs-tui"
 elif [ "$INSTALL_METHOD" = "web" ]; then
     _cs_version=$(grep -m1 "^VERSION=" "$INSTALL_DIR/cs" 2>/dev/null | cut -d'"' -f2 || echo "")
     _os=$(uname -s | tr '[:upper:]' '[:lower:]')
     _arch=$(uname -m)
     [ "$_arch" = "x86_64" ] && _arch="amd64"
-    # Native Windows (Git Bash / MSYS2): uname reports mingw*/msys*. The release
-    # artifact is a .exe, installed as cs-tui.exe so MSYS resolves `cs-tui`.
     _tui_ext=""
-    case "$_os" in
-        mingw*|msys*|cygwin*) _os="windows"; _tui_ext=".exe" ;;
-    esac
     _tui_base="cs-tui-${_os}-${_arch}${_tui_ext}"
     _tui_dst="$INSTALL_DIR/cs-tui${_tui_ext}"
     _tui_url="${RELEASES_URL}/v${_cs_version}/${_tui_base}"
@@ -343,10 +332,7 @@ fi
 # never leave cs-tui and cs-tui.exe side by side — which would let PATH lookup
 # or the sibling probe select the wrong one and fail to launch. Keep only the
 # name this platform installs.
-case "$(uname -s | tr '[:upper:]' '[:lower:]')" in
-    mingw*|msys*|cygwin*) rm -f "$INSTALL_DIR/cs-tui" ;;
-    *) rm -f "$INSTALL_DIR/cs-tui.exe" ;;
-esac
+rm -f "$INSTALL_DIR/cs-tui.exe"
 
 # Install hooks
 installed "${#CS_HOOKS[@]} hooks" "$HOOKS_DIR/"
@@ -678,16 +664,8 @@ if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
     echo ""
     warn "   WARNING: $INSTALL_DIR is not in your PATH"
     echo ""
-    case "$OSTYPE" in
-        msys*|cygwin*|mingw*)
-            warn "   For Git Bash on Windows, add to ~/.bashrc:"
-            warn "     export PATH=\"\$HOME/.local/bin:\$PATH\""
-            ;;
-        *)
-            warn "   Add this line to your ~/.bashrc, ~/.zshrc, or equivalent:"
-            warn "     export PATH=\"\$HOME/.local/bin:\$PATH\""
-            ;;
-    esac
+    warn "   Add this line to your ~/.bashrc, ~/.zshrc, or equivalent:"
+    warn "     export PATH=\"\$HOME/.local/bin:\$PATH\""
     echo ""
 fi
 

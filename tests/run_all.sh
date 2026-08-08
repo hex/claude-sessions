@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Optional sharding for CI parallelism: CS_TEST_SHARD="N/M" runs shard N of M
 # (round-robin over the suite list, so slow suites spread across shards). Unset
-# runs every suite — the default for local runs and the non-Windows lanes. The
+# runs every suite — the default for local runs and the CI lanes. The
 # round-robin index counts only real suites (test_lib.sh is skipped first), so
 # every shard on an identical runner image computes the same assignment and the
 # shards together cover each suite exactly once.

@@ -103,12 +103,9 @@ pub fn update_notice_in(cache_dir: &Path, installed: &str) -> Option<UpdateNotic
     Some(UpdateNotice { version: latest, notes })
 }
 
-/// The user's home directory, portable across Unix (HOME) and native Windows,
-/// which sets USERPROFILE rather than HOME. None if neither is set.
+/// The user's home directory. None when HOME is unset.
 pub(crate) fn home_dir() -> Option<String> {
-    std::env::var("HOME")
-        .ok()
-        .or_else(|| std::env::var("USERPROFILE").ok())
+    std::env::var("HOME").ok()
 }
 
 /// The pending-update notice for this process: cs exports CS_VERSION at
@@ -270,7 +267,7 @@ pub fn parse_agent_record(text: &str) -> Option<AgentRecord> {
 fn claude_sessions_dir() -> PathBuf {
     let base = std::env::var_os("CS_CLAUDE_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(home_dir().expect("HOME or USERPROFILE not set")).join(".claude"));
+        .unwrap_or_else(|| PathBuf::from(home_dir().expect("HOME not set")).join(".claude"));
     base.join("sessions")
 }
 
@@ -336,7 +333,7 @@ pub fn sessions_root() -> PathBuf {
     std::env::var("CS_SESSIONS_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
-            let home = home_dir().expect("HOME or USERPROFILE not set");
+            let home = home_dir().expect("HOME not set");
             PathBuf::from(home).join(".claude-sessions")
         })
 }
@@ -891,12 +888,9 @@ fn read_lock_pid(meta_dir: &Path) -> Option<u32> {
     if is_pid_alive(pid) { Some(pid) } else { None }
 }
 
-/// True when a process with `pid` is alive on this machine.
-///
-/// Unix uses `kill -0`; native Windows has no `kill`, so it probes `tasklist`.
+/// True when a process with `pid` is alive on this machine, via `kill -0`.
 /// A missing tool or a spawn error is treated as "not alive" (the caller then
 /// falls back to the statusline heartbeat), never a crash.
-#[cfg(unix)]
 fn is_pid_alive(pid: u32) -> bool {
     std::process::Command::new("kill")
         .args(["-0", &pid.to_string()])
@@ -904,20 +898,6 @@ fn is_pid_alive(pid: u32) -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
-}
-
-/// Windows liveness via `tasklist`: a live PID appears (quoted) in the CSV
-/// output; a dead one yields "INFO: No tasks..." and the PID is absent.
-#[cfg(windows)]
-fn is_pid_alive(pid: u32) -> bool {
-    let out = std::process::Command::new("tasklist")
-        .args(["/NH", "/FO", "CSV", "/FI", &format!("PID eq {pid}")])
-        .stderr(std::process::Stdio::null())
-        .output();
-    match out {
-        Ok(o) => String::from_utf8_lossy(&o.stdout).contains(&format!("\"{pid}\"")),
-        Err(_) => false,
-    }
 }
 
 /// True when a path is a git checkout. A linked worktree's `.git` is a file
@@ -991,11 +971,10 @@ fn extract_user_repo(url: &str) -> Option<String> {
 
 /// Count cs secrets per session by scanning the macOS login keychain.
 ///
-/// Only macOS ships the `security` tool and a keychain; on Linux and Windows
-/// the TUI's keychain panel is empty by design (secrets there live in the
-/// encrypted-file or Windows Credential Manager backend, which this view does
-/// not enumerate). Gated to macOS so non-macOS builds don't spawn a missing
-/// binary on every refresh.
+/// Only macOS ships the `security` tool and a keychain; on Linux the TUI's
+/// keychain panel is empty by design (secrets there live in the encrypted-file
+/// backend, which this view does not enumerate). Gated to macOS so non-macOS
+/// builds don't spawn a missing binary on every refresh.
 #[cfg(target_os = "macos")]
 fn count_secrets_from_keychain() -> HashMap<String, u32> {
     let mut counts = HashMap::new();
@@ -1736,8 +1715,7 @@ mod tests {
     }
 
     // The current process is always alive; a max-u32 PID is never a real one.
-    // Covers the platform-selected is_pid_alive (kill on unix, tasklist on
-    // Windows) without a fixture process.
+    // Covers is_pid_alive without a fixture process.
     #[test]
     fn is_pid_alive_reports_self_alive_and_bogus_dead() {
         assert!(is_pid_alive(std::process::id()));

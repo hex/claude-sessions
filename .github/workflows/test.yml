@@ -47,7 +47,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        os: [macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -57,32 +57,3 @@ jobs:
       - name: Run TUI tests
         run: cargo test --manifest-path tui/Cargo.toml
 
-  # Git Bash / MSYS2 lane: session management and secrets run here, but launch
-  # and the tmux spawner do not (Tier 2), so those tests skip via _skip_on_msys.
-  # Required — see docs/windows-manual-smoke.md for what stays manual and how to
-  # triage a failure that only this lane sees.
-  test-windows-msys:
-    runs-on: windows-latest
-    # Git Bash on Windows has no native fork(), so each process spawn is
-    # emulated at ~10-50x the cost of Linux/macOS. The suite is spawn-heavy, so
-    # this lane dominates wall-clock. Shard it across parallel runners; each
-    # shard runs a round-robin slice of the suites (see tests/run_all.sh).
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4]
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Configure git identity
-        run: |
-          git config --global user.email "ci@claude-sessions.test"
-          git config --global user.name "cs CI"
-
-      - name: Run bash test suites (shard ${{ matrix.shard }}/4)
-        run: bash tests/run_all.sh
-        env:
-          CS_TEST_SHARD: ${{ matrix.shard }}/4

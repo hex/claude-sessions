@@ -75,9 +75,8 @@ _doctor_check_hooks_registered() {
     # The registered set is the hook COMMANDS, not the whole file. Matching the
     # file as text passed a broken install whenever a hook path lingered in an
     # unrelated permission rule or env value: the hook never fires, and doctor
-    # called the install healthy. Native jq.exe on Windows emits CRLF.
+    # called the install healthy.
     registered=$(jq -r '.hooks // {} | to_entries[].value[].hooks[]?.command // empty' "$settings" 2>/dev/null || true)
-    registered=${registered//$'\r'/}
     local name lib is_lib
     while IFS= read -r name; do
         [ -z "$name" ] && continue
@@ -313,9 +312,6 @@ _doctor_check_settings_hooks_resolve() {
     fi
     local commands
     commands=$(jq -r '.hooks // {} | to_entries[].value[].hooks[]?.command // empty' "$settings" 2>/dev/null)
-    # Native jq.exe on Windows emits CRLF; strip the trailing \r so hook paths
-    # aren't tested as "/path\r" (which never exists) and mis-reported missing.
-    commands=${commands//$'\r'/}
     if [ -z "$commands" ]; then
         _doctor_ok "Hook paths: no hooks registered in settings.json"
         return
@@ -357,8 +353,8 @@ _doctor_check_worktrees() {
             continue
         fi
         # Ask git for the path so both sides of the comparison come from the
-        # same binary: Git for Windows prints drive-letter (C:/...) paths that
-        # an MSYS `pwd -P` (/c/...) can never match.
+        # same binary; a shell's own spelling of the directory need not match
+        # git's.
         d_real=$(git -C "$d" rev-parse --show-toplevel 2>/dev/null) \
             || d_real=$(cd "$d" 2>/dev/null && pwd -P || echo "$d")
         if ! git -C "$base_dir" worktree list --porcelain 2>/dev/null \

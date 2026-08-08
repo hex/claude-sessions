@@ -250,7 +250,7 @@ test_control_chars_in_description_are_sanitized() {
     assert_output_contains "$c" "line1 line2 end" "control characters collapse to spaces" || return 1
 }
 
-# @tsv also escapes a backslash by doubling it. Undo that, or a Windows path in
+# @tsv also escapes a backslash by doubling it. Undo that, or a backslash in
 # a description renders with two separators.
 test_backslash_in_description_is_not_doubled() {
     export NO_COLOR=1
