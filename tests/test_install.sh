@@ -552,74 +552,7 @@ _release_windows_tui_artifact() {
 # Run install.sh's WEB path as if on Git Bash, recording every URL it requests.
 # Copied to a bin/-less dir so install.sh selects INSTALL_METHOD=web; uname and
 # curl are stubbed so the run needs no network and no Windows host.
-_install_urls_on_msys() {
-    local sandbox="$TEST_TMPDIR/msys-install"
-    local bindir="$sandbox/stub" log="$sandbox/urls.txt"
-    mkdir -p "$bindir" "$sandbox/home"
-    cp "$INSTALL_SH" "$sandbox/install.sh"
 
-    cat > "$bindir/uname" <<'STUB'
-#!/usr/bin/env bash
-case "${1:-}" in
-    -s) echo "MINGW64_NT-10.0-22631" ;;
-    -m) echo "x86_64" ;;
-    *)  echo "MINGW64_NT-10.0-22631" ;;
-esac
-STUB
-
-    cat > "$bindir/curl" <<STUB
-#!/usr/bin/env bash
-# Record every requested URL, then satisfy the request with a stub payload so
-# install.sh proceeds far enough to reach the TUI fetch.
-out=""; url=""; prev=""
-for a in "\$@"; do
-    case "\$prev" in -o) out="\$a" ;; esac
-    case "\$a" in https://*) url="\$a" ;; esac
-    prev="\$a"
-done
-[ -n "\$url" ] && printf '%s\n' "\$url" >> "$log"
-if [ -n "\$out" ]; then
-    case "\$out" in
-        */cs) printf 'VERSION="9999.9.9"\n' > "\$out" ;;
-        *)    printf 'stub\n' > "\$out" ;;
-    esac
-fi
-exit 0
-STUB
-    chmod +x "$bindir/uname" "$bindir/curl"
-
-    PATH="$bindir:$PATH" HOME="$sandbox/home" bash "$sandbox/install.sh" >/dev/null 2>&1
-    cat "$log" 2>/dev/null
-}
-
-test_release_windows_tui_artifact_matches_what_install_fetches() {
-    local expected; expected=$(_release_windows_tui_artifact) || {
-        echo "  FAIL: release.yml has no windows platform matrix entry"
-        return 1
-    }
-
-    local urls; urls=$(_install_urls_on_msys)
-    local fetched
-    fetched=$(printf '%s\n' "$urls" | grep -o 'cs-tui-[a-z0-9-]*\(\.exe\)\{0,1\}$' | head -1)
-
-    if [ -z "$fetched" ]; then
-        echo "  FAIL: install.sh requested no cs-tui artifact on a Git Bash host"
-        printf '%s\n' "$urls" | sed 's/^/    /'
-        return 1
-    fi
-    assert_eq "$expected" "$fetched" \
-        "install.sh must fetch the artifact name release.yml publishes" || {
-        printf '%s\n' "$urls" | sed 's/^/    /'
-        return 1
-    }
-
-    # The signature and checksum siblings must be fetched under the SAME base,
-    # or verification silently no-ops and an unverified binary is kept.
-    printf '%s\n' "$urls" | grep -q "${expected}\.sha256\$" \
-        || { echo "  FAIL: no ${expected}.sha256 requested"; return 1; }
-    printf '%s\n' "$urls" | grep -q "${expected}\.minisig\$" \
-        || { echo "  FAIL: no ${expected}.minisig requested"; return 1; }
-}
 
 # Run install.sh's WEB path with the cs-tui download stubbed, so the checksum
 # gate can be driven into each of its "cannot verify" states. Echoes the bin dir.
@@ -871,7 +804,6 @@ run_test test_statusline_disable_strips_only_ours
 run_test test_install_preserves_foreign_statusline
 run_test test_uninstall_removes_statusline
 run_test test_install_removes_stale_opposite_platform_tui
-run_test test_release_windows_tui_artifact_matches_what_install_fetches
 run_test test_tui_removed_when_checksum_cannot_be_fetched
 run_test test_tui_removed_when_digest_cannot_be_computed
 run_test test_tui_signature_not_blamed_for_a_checksum_gate_removal

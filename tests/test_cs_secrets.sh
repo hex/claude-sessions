@@ -384,23 +384,6 @@ test_export_produces_eval_format() {
 # corrupt every value but the last. Multi-line values are load-bearing: a
 # single-line value cannot carry an interior CR, so it could not catch a broken
 # json_value at all.
-test_export_values_survive_crlf_jq() {
-    _skip_on_msys && return 0
-    local va vb
-    va=$(printf -- 'A1\nA2\nA3')
-    vb=$(printf -- 'B1\nB2')
-    printf '%s' "$va" | "$CS_SECRETS_BIN" set a_key >/dev/null 2>&1
-    printf '%s' "$vb" | "$CS_SECRETS_BIN" set b_key >/dev/null 2>&1
-
-    local shim; shim=$(_install_msys_jq) || return 0
-    local output; output=$(PATH="$shim:$PATH" "$CS_SECRETS_BIN" export 2>&1)
-    eval "$output" 2>/dev/null
-    assert_eq "$va" "${CS_SECRET_A_KEY:-}" "the first exported value must survive byte-exact" || {
-        printf '%s' "$output" | cat -v | sed 's/^/    /'
-        return 1
-    }
-    assert_eq "$vb" "${CS_SECRET_B_KEY:-}" "the last exported value must survive byte-exact too" || return 1
-}
 
 test_export_is_eval_safe() {
     "$CS_SECRETS_BIN" set test_key "value with spaces" 2>&1
@@ -431,7 +414,6 @@ test_encrypted_file_not_plaintext() {
 }
 
 test_encrypted_file_permissions() {
-    _skip_on_msys && return 0  # Windows FS doesn't enforce Unix 600 mode bits
     "$CS_SECRETS_BIN" set api_key "abc" 2>&1
     local enc_file="$HOME/.cs-secrets/test-session.enc"
     local perms
@@ -440,7 +422,6 @@ test_encrypted_file_permissions() {
 }
 
 test_secrets_dir_permissions() {
-    _skip_on_msys && return 0  # Windows FS doesn't enforce Unix 700 mode bits
     "$CS_SECRETS_BIN" set api_key "abc" 2>&1
     local perms
     perms=$(_file_mode "$HOME/.cs-secrets")
@@ -514,12 +495,8 @@ test_encrypted_write_success_updates_and_leaves_no_temp() {
     assert_eq "v2" "$("$CS_SECRETS_BIN" get K1 2>&1)" "update must persist" || return 1
     assert_eq "w1" "$("$CS_SECRETS_BIN" get K2 2>&1)" "second secret must be stored" || return 1
 
-    # Windows FS doesn't enforce Unix mode bits; the update/no-temp logic below
-    # is still valid there, so guard only the mode assertion.
-    if ! _is_msys; then
-        local perms; perms=$(_file_mode "$HOME/.cs-secrets/test-session.enc")
-        assert_eq "600" "$perms" "committed store must keep mode 600" || return 1
-    fi
+    local perms; perms=$(_file_mode "$HOME/.cs-secrets/test-session.enc")
+    assert_eq "600" "$perms" "committed store must keep mode 600" || return 1
 
     local tmpcount
     tmpcount=$(find "$HOME/.cs-secrets" -maxdepth 1 -name '.??????' -type f 2>/dev/null | wc -l | tr -d ' ')
@@ -966,55 +943,10 @@ test_export_refuses_a_hostile_name_already_in_the_store() {
     assert_output_contains "$out" "a;touch" "the refusal must name the offending key" || return 1
 }
 
-test_multiline_secret_round_trips_under_crlf_jq() {
-    _skip_on_msys && return 0
-    local pem
-    pem=$(printf -- '-----BEGIN KEY-----\nabc\ndef\n-----END KEY-----')
-    printf '%s' "$pem" | "$CS_SECRETS_BIN" set pem >/dev/null 2>&1
-
-    local shim; shim=$(_install_msys_jq) || return 0
-    local got; got=$(PATH="$shim:$PATH" "$CS_SECRETS_BIN" get pem 2>&1)
-
-    assert_eq "$pem" "$got" "a multi-line secret must survive a jq.exe read" || {
-        echo "    got bytes:"; printf '%s' "$got" | od -c | sed 's/^/      /'
-        return 1
-    }
-}
 
 # The same value path feeds the eval'd export, where a CR lands inside the
 # quoted value rather than at the line end.
-test_multiline_secret_exports_under_crlf_jq() {
-    _skip_on_msys && return 0
-    local pem
-    pem=$(printf -- '-----BEGIN KEY-----\nabc\n-----END KEY-----')
-    printf '%s' "$pem" | "$CS_SECRETS_BIN" set pem >/dev/null 2>&1
 
-    local shim; shim=$(_install_msys_jq) || return 0
-    local output; output=$(PATH="$shim:$PATH" "$CS_SECRETS_BIN" export 2>&1)
-    eval "$output" 2>/dev/null
-    assert_eq "$pem" "${CS_SECRET_PEM:-}" "an exported multi-line secret must eval byte-exact" || {
-        printf '%s' "${CS_SECRET_PEM:-}" | od -c | sed 's/^/      /'
-        return 1
-    }
-}
-
-test_import_file_keys_survive_crlf_jq() {
-    _skip_on_msys && return 0
-    local meta="$CS_SESSIONS_ROOT/test-session/.cs"
-    _seed_enc_sync_file "$meta/secrets.machine-a.enc" \
-        '{"k_alpha":"va","k_beta":"vb","k_gamma":"vg"}' || return 1
-
-    local shim; shim=$(_install_msys_jq) || return 0
-    local out rc=0
-    out=$(PATH="$shim:$(_ageless_path)" "$CS_SECRETS_BIN" import-file 2>&1) || rc=$?
-
-    local pair
-    for pair in k_alpha:va k_beta:vb k_gamma:vg; do
-        assert_eq "${pair#*:}" "$("$CS_SECRETS_BIN" get "${pair%%:*}" 2>&1)" \
-            "${pair%%:*} must import under its real name" \
-            || { _report_import "$rc" "$out" "$meta"; return 1; }
-    done
-}
 
 test_import_file_aborts_when_the_store_write_fails() {
     local meta="$CS_SESSIONS_ROOT/test-session/.cs"
@@ -1815,7 +1747,6 @@ run_test test_purge_empty_session
 
 # Export
 run_test test_export_produces_eval_format
-run_test test_export_values_survive_crlf_jq
 run_test test_export_is_eval_safe
 
 # Encrypted file internals
@@ -1860,9 +1791,6 @@ run_test test_export_namespaces_every_variable
 run_test test_export_namespace_neutralises_dangerous_names
 run_test test_import_file_refuses_a_hostile_key_name
 run_test test_export_refuses_a_hostile_name_already_in_the_store
-run_test test_multiline_secret_round_trips_under_crlf_jq
-run_test test_multiline_secret_exports_under_crlf_jq
-run_test test_import_file_keys_survive_crlf_jq
 run_test test_import_file_aborts_when_the_store_write_fails
 run_test test_import_file_skips_undecryptable_files
 run_test test_import_file_aborts_on_backend_read_failure_no_overwrite

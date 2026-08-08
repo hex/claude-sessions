@@ -42,40 +42,13 @@ _file_mode() {
     fi
 }
 
-# Skip the calling test on native Windows (Git Bash / MSYS2), where tmux and
-# the Claude launch are unavailable (Tier 2 is session management only). Usage,
-# at the top of a test that drives launch/tmux/spawn:
-#     _skip_on_msys && return 0
-# Honors CS_PLATFORM_OVERRIDE so the skip path is exercisable off Windows.
-# Quiet predicate: true on native Windows / MSYS. Honors CS_PLATFORM_OVERRIDE so
-# it is exercisable off Windows. Use this to guard a single MSYS-invalid
-# assertion inside an otherwise-valid test; use _skip_on_msys to skip a whole one.
-_is_msys() {
-    local p="${CS_PLATFORM_OVERRIDE:-}"
-    if [ -z "$p" ]; then
-        case "$(uname -s 2>/dev/null)" in
-            MINGW*|MSYS*|CYGWIN*) p=msys ;;
-            *) p=other ;;
-        esac
-    fi
-    [ "$p" = "msys" ]
-}
-
-_skip_on_msys() {
-    if _is_msys; then
-        echo "    SKIP (native Windows / MSYS: launch/tmux unavailable)"
-        return 0
-    fi
-    return 1
-}
-
-# Make a directory reject new files, and prove it did. Windows emulates the
-# POSIX mode bits without enforcing them against the owner, so `chmod 500`
-# leaves the directory writable there and a test modelling a FAILED write
-# silently models a successful one -- it then reports the code as broken for
-# not handling a failure that never happened. Returns 2 when the denial cannot
-# be established, so callers skip rather than assert against a fixture that
-# never reached the branch. Pair with _allow_writes.
+# Make a directory reject new files, and prove it did. A filesystem that does
+# not enforce the POSIX mode bits against the owner leaves the directory
+# writable after `chmod 500`, and a test modelling a FAILED write silently
+# models a successful one -- it then reports the code as broken for not
+# handling a failure that never happened. Returns 2 when the denial cannot be
+# established, so callers skip rather than assert against a fixture that never
+# reached the branch. Pair with _allow_writes.
 _deny_writes() {  # dir
     local dir="$1"
     chmod 500 "$dir" 2>/dev/null || return 2
@@ -92,50 +65,17 @@ _allow_writes() {  # dir
     chmod 700 "$1" 2>/dev/null || true
 }
 
-# The host itself, ignoring CS_PLATFORM_OVERRIDE. _is_msys answers what the code
-# under test should believe, which a suite may pin (SUITE_PIN_NONMSYS) so a
-# platform-gated path runs on Windows CI. Anything that touches the real
-# filesystem must ask this instead: a suite pretending to be Linux is still
-# writing to an NTFS volume where an executable needs its .exe name.
-_is_real_msys() {
-    case "$(uname -s 2>/dev/null)" in
-        MINGW*|MSYS*|CYGWIN*) return 0 ;;
-        *) return 1 ;;
-    esac
-}
-
 # Stage one tool into a stub PATH directory, for tests that build a PATH missing
-# exactly one command. Two Git Bash behaviours conspire here: `command -v grep`
-# answers /usr/bin/grep though the file is grep.exe (MSYS hides the suffix from
-# `command -v` and from `[ -e ]` alike), and `ln -s` copies rather than links.
-# A copy of an .exe under a name Windows does not recognise as executable will
-# not launch, so the stub PATH loses every tool instead of the one under
-# suppression, and the test then fails somewhere unrelated to its subject.
-# On Windows both spellings are written; elsewhere the reported path is enough.
-# Returns non-zero when the tool cannot be staged, so callers can say so.
+# exactly one command. Returns non-zero when the tool cannot be staged, so
+# callers can say so.
 _stub_tool() {  # dir, tool
     local dir="$1" tool="$2" src
     src=$(command -v "$tool" 2>/dev/null) || return 1
     # A builtin or function answers with its own name, not a path. It travels
     # with the shell, so there is nothing to stage and nothing missing.
     case "$src" in /*) ;; *) return 0 ;; esac
-    [ -e "$src" ] || src="${src}.exe"
     [ -e "$src" ] || return 1
-    if _is_real_msys; then
-        # Copy outright rather than trying `ln -s` first. It SUCCEEDS there
-        # while writing a placeholder Windows will not execute, so the `||`
-        # fallback never runs and the stub fills with files that resolve on the
-        # PATH and then fail to launch. Both names, since the loader wants .exe
-        # and the callers spell the tool without it.
-        cp -p "$src" "$dir/$tool" 2>/dev/null || return 1
-        cp -p "$src" "$dir/$tool.exe" 2>/dev/null || return 1
-        return 0
-    fi
     ln -sf "$src" "$dir/$tool" 2>/dev/null || cp -p "$src" "$dir/$tool" 2>/dev/null || return 1
-    case "$src" in
-        *.exe) ln -sf "$src" "$dir/$tool.exe" 2>/dev/null \
-                   || cp -p "$src" "$dir/$tool.exe" 2>/dev/null || true ;;
-    esac
     return 0
 }
 
@@ -202,18 +142,6 @@ STUB
 # asymmetry is what makes a multi-key loop corrupt every key but the final one
 # while the final one looks perfectly healthy. Echoes the dir to prepend to
 # PATH; returns non-zero (skip) when jq is unavailable.
-_install_msys_jq() {
-    local real_jq shimdir
-    real_jq="$(command -v jq)" || return 1
-    shimdir="$TEST_TMPDIR/msysjqbin"
-    mkdir -p "$shimdir"
-    cat > "$shimdir/jq" <<STUB
-#!/usr/bin/env bash
-"$real_jq" "\$@" | awk 'NR>1 { printf "\r\n" } { printf "%s", \$0 } END { if (NR) printf "\n" }'
-STUB
-    chmod +x "$shimdir/jq"
-    printf '%s' "$shimdir"
-}
 
 # --- Setup / Teardown ---
 
@@ -244,21 +172,6 @@ teardown() {
     unset CS_SESSIONS_ROOT CLAUDE_CODE_BIN CS_TRANSCRIPTS_DIR CS_NO_UPDATE_CHECK CS_NO_ITERM2
 }
 
-# Suites that drive the Claude launch path set SUITE_PIN_NONMSYS=1 at the top of
-# the file. On a real MSYS runner the launch short-circuits (Tier 2 is session
-# management only), so those tests would never reach the behavior they assert.
-# Pin a supported non-msys platform there so the launch path runs on Windows CI.
-# Fires ONLY when the real platform is msys and no explicit override is set, so
-# the macOS and Linux lanes keep exercising their own platform. linux (not macos)
-# is used: it reaches the launch path without any macOS-only tool calls.
-_apply_suite_platform_pin() {
-    [ "${SUITE_PIN_NONMSYS:-}" = "1" ] || return 0
-    [ -z "${CS_PLATFORM_OVERRIDE:-}" ] || return 0
-    case "$(uname -s 2>/dev/null)" in
-        MINGW*|MSYS*|CYGWIN*) export CS_PLATFORM_OVERRIDE=linux ;;
-    esac
-}
-
 # --- Test Runner ---
 
 run_test() {
@@ -266,7 +179,6 @@ run_test() {
     TESTS_RUN=$((TESTS_RUN + 1))
     echo "  $test_name..."
     setup
-    _apply_suite_platform_pin
     if "$test_name" 2>&1; then
         TESTS_PASSED=$((TESTS_PASSED + 1))
         echo "    OK"

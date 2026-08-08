@@ -9,14 +9,9 @@ The `cs -secrets` command auto-detects the best available backend for the platfo
 | Backend | Platform | Storage Location | Cross-Machine Sync |
 |---------|----------|------------------|-------------------|
 | macOS Keychain | macOS | Login keychain | Via export-file |
-| Windows Credential Manager (`wcm`) | Native Windows / Git Bash (when `powershell.exe` is available) | Windows Credential Manager | Via export-file |
-| Encrypted file | Linux, WSL, and the fallback everywhere else | `~/.cs-secrets/<session>.enc` | Manual / age |
+| Encrypted file | Linux, WSL, and the fallback wherever no keychain is available | `~/.cs-secrets/<session>.enc` | Manual / age |
 
-Override the choice with `CS_SECRETS_BACKEND=keychain|wcm|encrypted`.
-
-**Windows Credential Manager (`wcm`) Backend:**
-
-On Windows, secrets are stored in the OS Credential Manager via a PowerShell helper (P/Invoke of `CredWrite`/`CredRead`/`CredDelete`/`CredEnumerate`). Secret values travel on stdin/stdout (never argv), so they stay out of the command line and logs. Requires `powershell.exe` on `PATH` (present on native Windows and Git Bash/MSYS2).
+Override the choice with `CS_SECRETS_BACKEND=keychain|encrypted`.
 
 **Encrypted File Backend:**
 
@@ -236,5 +231,5 @@ cs -secrets age remove <name>
 
 - `CLAUDE_SESSION_NAME` - Current session (set automatically by `cs`)
 - `CS_SECRETS_SESSION` - Overrides the session namespace; worktree feature sessions export it so their secrets land in the base session's store, and `cs <name> -secrets` sets it so an explicit target outranks ambient env
-- `CS_SECRETS_BACKEND` - Force a specific backend (`keychain`, `wcm`, or `encrypted`)
+- `CS_SECRETS_BACKEND` - Force a specific backend (`keychain` or `encrypted`)
 - `CS_SECRETS_PASSWORD` - Master password for legacy sync (only needed if not using age)

@@ -184,7 +184,6 @@ test_auto_approve_rejects_leaf_symlink() {
     # Git Bash's `ln -s` produces a regular-file COPY, so the hook's -L guard
     # cannot fire and its approval is correct there (same reason as
     # tests/test_adopt.sh's symlink cases).
-    _skip_on_msys && return 0
     local outside="$TEST_TMPDIR/outside-the-session.conf"
     echo "original" > "$outside"
     ln -s "$outside" "$CLAUDE_SESSION_META_DIR/notes.md"
@@ -912,7 +911,6 @@ test_session_start_rebinds_for_a_claude_cs_spawned() {
     # test for a reason that has nothing to do with the property. Nothing is
     # lost there: cs hands Windows launches to WSL (lib/99-main.sh), so no lead
     # process exists under MSYS and declining is the right answer anyway.
-    _skip_on_msys && return 0
     session_start_setup
 
     seed_recorded_uuid "aaaaaaaa-1111-2222-3333-444444444444"
@@ -964,7 +962,6 @@ test_session_start_rebind_declines_for_child_claude() {
 
 test_session_start_rebind_declines_for_a_live_foreign_parent() {
     # Needs a real `ps -o ppid=` — see the skip note above.
-    _skip_on_msys && return 0
     session_start_setup
 
     seed_recorded_uuid "aaaaaaaa-1111-2222-3333-444444444444"
