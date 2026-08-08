@@ -11,16 +11,20 @@ source "$SCRIPT_DIR/../lib/02-platform.sh"
 # ============================================================================
 
 test_platform_override_is_honored_and_validated() {
-    ( export CS_PLATFORM_OVERRIDE=msys; [ "$(cs_platform)" = "msys" ] ) || return 1
-    ( export CS_PLATFORM_OVERRIDE=wsl;  [ "$(cs_platform)" = "wsl" ]  ) || return 1
+    ( export CS_PLATFORM_OVERRIDE=macos; [ "$(cs_platform)" = "macos" ] ) || return 1
+    ( export CS_PLATFORM_OVERRIDE=wsl;   [ "$(cs_platform)" = "wsl" ]   ) || return 1
+    # msys was a platform cs supported and no longer is: it must now be refused
+    # like any other unknown value, not silently accepted.
+    local msys_out; msys_out=$( CS_PLATFORM_OVERRIDE=msys cs_platform 2>/dev/null ); local msys_rc=$?
+    [ "$msys_rc" -ne 0 ] || return 1
+    [ -z "$msys_out" ] || return 1
     # invalid override -> nonzero, error to stderr, nothing on stdout
     local out; out=$( CS_PLATFORM_OVERRIDE=bogus cs_platform 2>/dev/null ); local rc=$?
     [ "$rc" -ne 0 ] || return 1
     [ -z "$out" ] || return 1
 }
-test_platform_detects_macos_and_msys_from_uname() {
+test_platform_detects_macos_from_uname() {
     ( _CS_PLATFORM=""; uname() { echo Darwin; }; [ "$(cs_platform)" = "macos" ] ) || return 1
-    ( _CS_PLATFORM=""; uname() { echo MINGW64_NT-10.0; }; [ "$(cs_platform)" = "msys" ] ) || return 1
 }
 test_platform_detects_wsl_and_linux_from_uname() {
     # WSL via the WSL_DISTRO_NAME env var
@@ -66,7 +70,7 @@ echo "========================"
 echo ""
 
 run_test test_platform_override_is_honored_and_validated
-run_test test_platform_detects_macos_and_msys_from_uname
+run_test test_platform_detects_macos_from_uname
 run_test test_platform_detects_wsl_and_linux_from_uname
 run_test test_statusline_theme_degrades_off_macos
 run_test test_cs_platform_copies_match_lib

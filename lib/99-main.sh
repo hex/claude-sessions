@@ -9,25 +9,10 @@ main() {
             if [ -z "$tui_bin" ]; then
                 # Not on PATH (cs may be run by explicit path with its own dir
                 # off PATH, which the installer permits): probe the sibling next
-                # to this script. Try the platform's OWN name first so a stale
-                # other-platform binary left by a cross-platform reinstall can't
-                # shadow it — cs-tui.exe on native Windows, cs-tui elsewhere.
-                # MSYS's .exe-suffix resolution only helps `command -v`, not this
-                # literal sibling -x test.
-                local _self_dir _cand
+                # to this script.
+                local _self_dir
                 _self_dir="$(dirname "$0")"
-                # Literal per-platform candidate lists (not a split variable, so
-                # the order holds regardless of IFS).
-                case "$(uname -s 2>/dev/null)" in
-                    MINGW*|MSYS*|CYGWIN*)
-                        for _cand in cs-tui.exe cs-tui; do
-                            if [ -x "$_self_dir/$_cand" ]; then tui_bin="$_self_dir/$_cand"; break; fi
-                        done ;;
-                    *)
-                        for _cand in cs-tui cs-tui.exe; do
-                            if [ -x "$_self_dir/$_cand" ]; then tui_bin="$_self_dir/$_cand"; break; fi
-                        done ;;
-                esac
+                if [ -x "$_self_dir/cs-tui" ]; then tui_bin="$_self_dir/cs-tui"; fi
             fi
             if [ -n "$tui_bin" ] && [ -x "$tui_bin" ]; then
                 # Detect the terminal theme while cs still owns the tty so the
@@ -403,10 +388,10 @@ main() {
             cd "$session_dir" || exit 0
             create_session_gitignore "$session_dir"
             git init -q 2>/dev/null || true
-            # cs writes its bookkeeping files with LF. Git for Windows enables
-            # core.autocrlf by default, which rewrites the checked-out .gitignore
-            # to CRLF — every pattern then carries a trailing \r and matches
-            # nothing, so files meant to be ignored surface as untracked.
+            # cs writes its bookkeeping files with LF. A global core.autocrlf
+            # rewrites the checked-out .gitignore to CRLF — every pattern then
+            # carries a trailing \r and matches nothing, so files meant to be
+            # ignored surface as untracked.
             git config core.autocrlf false 2>/dev/null || true
             git branch -M main 2>/dev/null || true
             setup_merge_attributes "$session_dir"
@@ -428,17 +413,6 @@ $merge_feature
 "*) ;;
             *) error "No feature worktree '$merge_feature' of '$session_name'. List them with: cs $session_name -features" ;;
         esac
-    fi
-
-    # MSYS (Windows Git Bash) can manage sessions but cannot exec Claude Code
-    # itself; the session is prepared above, then handed off to WSL to launch.
-    if [ "$(cs_platform)" = "msys" ]; then
-        info "Session ready at $session_dir."
-        info "On Windows, launch it from WSL (Git Bash supports session management only)."
-        if [ -n "$merge_feature" ]; then
-            info "To finish '$merge_feature', run from WSL: cs $session_name -finish $merge_feature"
-        fi
-        return 0
     fi
 
     # Launch Claude Code
