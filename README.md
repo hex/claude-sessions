@@ -32,6 +32,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 - **Documentation templates** - Pre-configured markdown files for the session narrative and outcome
 - **Automatic git version control** - Every session gets a local git repo; in-session edits are autosaved to a shadow ref for crash recovery
 - **Session locking** - PID-based lock prevents the same session from being opened in two terminals simultaneously; use `--force` to override. cs also treats a session as live when its statusline heartbeat is fresh — in the TUI (`■ live · unlocked`), `cs -live`, and the `cs -usage` marker — so a conversation opened outside cs still registers as live. The destructive guards (`cs -rm`/`-archive`/`-spawn`) stay on the strict PID lock, so a session whose process is gone is still removable without `--force`
+- **Agent state** - `cs -live` and the TUI's `state` row show what Claude Code says each session is doing right now — `busy`, `waiting`, `idle` — read from the per-session records Claude Code publishes under `~/.claude/sessions/`. A record outlives a crash, so cs believes one only while its pid is alive and still reports the process start time the record holds; otherwise a recycled pid would keep a dead session looking busy. Hosts that publish no records (Claude Code before 2.1.224, or without `jq` for the shell reader) simply show no state
 - **Deterministic Claude-session resume** - Each session pre-allocates a conversation UUID in the gitignored `.cs/local/state`, so `cs <name>` resumes the *exact* conversation via `claude --resume <uuid>`, not the most-recent one `--continue` might pick from a sibling. A `ps`-based guard refuses to launch a second claude for the same conversation (`--force` overrides), and every launch passes `--name` plus a per-session `/color` so parallel sessions stay visually distinct.
 - **Per-session memory path redirect** - cs points Claude Code's built-in auto-memory writer at `<session>/.cs/memory/` (via `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE`) so durable facts land in the session instead of the global project store. The harness owns how memory files are written (naming, frontmatter, `MEMORY.md` index); cs owns only the storage path.
 - **Cross-session search** - `cs -search <query>` greps across all sessions' narrative, memory, and README
@@ -123,7 +124,7 @@ cs -lint <file>...          # Flag AI-slop prose tells (em-dashes, banned phrase
 cs -statusline enable|disable  # Enable or remove the cs status line + agent-panel rows
 cs -detect-theme            # Show the detected terminal light/dark theme
 cs -list, -ls               # List all sessions
-cs -live                    # List sessions running right now on this machine
+cs -live                    # List sessions running right now on this machine, with what each is doing
 cs -status "<text>"         # Set this session's status (also: cs -status, cs -status --clear)
 cs -remove, -rm <name>...   # Remove sessions (each asks its own confirm; --force if live)
 cs -update [--check|--force]   # Update to latest (--check: check only; --force: reinstall)
@@ -380,7 +381,7 @@ breathing via the statusline heartbeat, so conversations opened outside cs
 appear too — and let each one say what it's working on:
 
 ```bash
-cs -live                       # list live sessions: name, actor, uptime, status
+cs -live                       # list live sessions: name, actor, uptime, agent state, status
 cs -status "refactoring auth"  # set this session's status
 cs -status                     # show this session's status (falls back to the README objective)
 cs -status --clear             # clear it (revert to the objective)

@@ -376,7 +376,8 @@ cmd_live() {
     now="$(date +%s)"
     current="${CLAUDE_SESSION_NAME:-}"
 
-    local dir name meta actor up status
+    local dir name meta actor up agent status states
+    states="$(agent_states)"
     while IFS= read -r -d '' dir; do
         is_session_dir "$dir" || continue
         meta="$dir/.cs"
@@ -384,14 +385,17 @@ cmd_live() {
         name="$(basename "$dir")"
         actor="$(session_actor_slug "$dir")"
         up="$(_humanize_secs "$(session_uptime_secs "$meta" "$now")")"
+        agent="$(agent_state_of "$states" "$name")"
         if [ "$name" = "$current" ]; then
             status="(this session)"
         else
             others=$(( others + 1 ))
             status="$(session_status "$dir")"
         fi
-        printf "${GREEN}●${NC} ${GOLD}%-18s${NC} ${COMMENT}%-10s %-5s${NC} %s\n" \
-            "$name" "$actor" "$up" "$status"
+        # The agent column stays padded when Claude Code advertises nothing, so
+        # the objective still lines up on a host that keeps no session records.
+        printf "${GREEN}●${NC} ${GOLD}%-18s${NC} ${COMMENT}%-10s %-5s %-7s${NC} %s\n" \
+            "$name" "$actor" "$up" "$agent" "$status"
     done < <(find "$SESSIONS_ROOT" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) -print0 | sort -z)
 
     if [ "$others" -eq 0 ]; then

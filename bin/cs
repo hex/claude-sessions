@@ -4206,6 +4206,77 @@ session_status() {  # session_dir
     printf '%s' "$status" | _scrub_controls
 }
 
+# Print one "<name><tab><state>" line per session Claude Code advertises as
+# running ('busy', 'waiting', 'idle'). Claude Code writes one document per
+# session at <claude dir>/sessions/<pid>.json and unlinks it on a clean exit; a
+# crash orphans it, so a record counts only while its pid is still alive AND
+# still reports the process start time the record holds. Without that second
+# test a pid the kernel has since handed to an unrelated process would read as
+# the session still running.
+#
+# The whole set is read in one pass — one jq, one ps, one awk — so the fork
+# count stays flat however many sessions are live. Callers render every live
+# session, and asking per session cost two forks each.
+agent_states() {
+    local dir="${CS_CLAUDE_DIR:-$HOME/.claude}/sessions" records pidlist="" started pid rest
+    [ -d "$dir" ] || return 0
+    command -v jq >/dev/null 2>&1 || return 0
+
+    records="$(jq -r '
+        select((.name // "") != "" and (.status // "") != "" and .pid != null)
+        | [(.pid | tostring), (.procStart // ""), .name, .status] | @tsv
+    ' "$dir"/*.json 2>/dev/null || true)"
+    [ -n "$records" ] || return 0
+
+    # Collecting the pids in the shell rather than forking cut keeps this to the
+    # three forks the comment above promises.
+    while IFS="$(printf '\t')" read -r pid rest; do
+        case "$pid" in ''|*[!0-9]*) continue ;; esac
+        pidlist="${pidlist:+$pidlist,}$pid"
+    done <<< "$records"
+    [ -n "$pidlist" ] || return 0
+
+    # ps prints the start time in the caller's zone and pads the field while the
+    # record holds UTC, so the join compares trimmed strings in UTC. Without
+    # that, every record outside UTC reads as a pid the kernel has recycled.
+    started="$(TZ=UTC "${CS_PS_BIN:-ps}" -o pid=,lstart= -p "$pidlist" 2>/dev/null || true)"
+
+    # Scrubbed like session_status: another process wrote these documents. tr
+    # keeps tab and newline, which are this table's own structure.
+    # ps output reaches awk through the environment, not -v: an assignment made
+    # with -v is processed for escapes and cannot carry the embedded newlines
+    # that separate one process from the next.
+    CS_PS_RUNNING="$started" awk -F'\t' '
+        BEGIN {
+            n = split(ENVIRON["CS_PS_RUNNING"], lines, "\n")
+            for (i = 1; i <= n; i++) {
+                line = lines[i]
+                sub(/^[[:space:]]+/, "", line)
+                sub(/[[:space:]]+$/, "", line)
+                if (line !~ /^[0-9]+[[:space:]]/) continue
+                p = line;     sub(/[[:space:]].*$/, "", p)
+                start = line; sub(/^[0-9]+[[:space:]]+/, "", start)
+                alive[p] = start
+            }
+        }
+        ($1 in alive) && ($2 == "" || alive[$1] == $2) { print $3 "\t" $4 }
+    ' <<< "$records" | _scrub_controls
+}
+
+# Print the state from an agent_states table for one session, empty when the
+# table holds none. Pure shell: the table is read once by the caller and looked
+# up per row without another process.
+agent_state_of() {  # table, name
+    local name rest
+    [ -n "$1" ] || return 0
+    while IFS="$(printf '\t')" read -r name rest; do
+        if [ "$name" = "$2" ]; then
+            printf '%s' "$rest"
+            return 0
+        fi
+    done <<< "$1"
+}
+
 # Dispatcher for 'cs -status'. In-session only (ambient env), like run_queue.
 run_status() {
     if [ -z "${CLAUDE_SESSION_META_DIR:-}" ]; then
@@ -5750,7 +5821,8 @@ cmd_live() {
     now="$(date +%s)"
     current="${CLAUDE_SESSION_NAME:-}"
 
-    local dir name meta actor up status
+    local dir name meta actor up agent status states
+    states="$(agent_states)"
     while IFS= read -r -d '' dir; do
         is_session_dir "$dir" || continue
         meta="$dir/.cs"
@@ -5758,14 +5830,17 @@ cmd_live() {
         name="$(basename "$dir")"
         actor="$(session_actor_slug "$dir")"
         up="$(_humanize_secs "$(session_uptime_secs "$meta" "$now")")"
+        agent="$(agent_state_of "$states" "$name")"
         if [ "$name" = "$current" ]; then
             status="(this session)"
         else
             others=$(( others + 1 ))
             status="$(session_status "$dir")"
         fi
-        printf "${GREEN}●${NC} ${GOLD}%-18s${NC} ${COMMENT}%-10s %-5s${NC} %s\n" \
-            "$name" "$actor" "$up" "$status"
+        # The agent column stays padded when Claude Code advertises nothing, so
+        # the objective still lines up on a host that keeps no session records.
+        printf "${GREEN}●${NC} ${GOLD}%-18s${NC} ${COMMENT}%-10s %-5s %-7s${NC} %s\n" \
+            "$name" "$actor" "$up" "$agent" "$status"
     done < <(find "$SESSIONS_ROOT" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) -print0 | sort -z)
 
     if [ "$others" -eq 0 ]; then

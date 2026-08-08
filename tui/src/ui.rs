@@ -1516,15 +1516,22 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
     // Labeled meta rows: label FAINT at the pane's left edge, value at a fixed
     // column so the block reads as a table even without rules between rows.
     // (value, colour, optional leading dot in its own colour)
+    // What Claude Code says the session is doing, appended to the live states
+    // only: on a dormant session any surviving record is stale by definition.
+    let agent = session
+        .agent_status
+        .as_deref()
+        .map(|s| format!(" \u{b7} {s}"))
+        .unwrap_or_default();
     let (state_value, state_color, state_dot) = if let Some(pid) = session.liveness.lock_pid() {
         (
-            format!("\u{25a0} live \u{b7} locked {}", pid),
+            format!("\u{25a0} live \u{b7} locked {}{}", pid, agent),
             p.teal,
             None,
         )
     } else if session.liveness.is_live() {
         // Breathing without a lock: opened outside cs, no PID to show.
-        ("\u{25a0} live \u{b7} unlocked".to_string(), p.teal, None)
+        (format!("\u{25a0} live \u{b7} unlocked{}", agent), p.teal, None)
     } else if session.archived {
         ("archived".to_string(), p.faint, None)
     } else {
@@ -2093,6 +2100,7 @@ mod tests {
             modified: Some("2026-02-20 14:00".into()),
             modified_ts: None,
             liveness: Liveness::Dormant,
+            agent_status: None,
             secrets_count: 0,
             queue_depth: 0,
             unread_mail: 0,
@@ -2114,6 +2122,7 @@ mod tests {
                 modified: Some("2026-02-20 14:00".into()),
                 modified_ts: Some(std::time::SystemTime::now()),
                 liveness: Liveness::Locked(123),
+                agent_status: None,
                 secrets_count: 0,
                 queue_depth: 0,
                 unread_mail: 0,
@@ -2128,6 +2137,7 @@ mod tests {
                 modified: Some("2026-02-20 14:00".into()),
                 modified_ts: Some(std::time::SystemTime::now()),
                 liveness: Liveness::Dormant,
+                agent_status: None,
                 secrets_count: 0,
                 queue_depth: 0,
                 unread_mail: 0,
@@ -3565,6 +3575,7 @@ mod tests {
                 modified: Some("2026-02-20 14:00".into()),
                 modified_ts: None,
                 liveness: Liveness::Dormant,
+                agent_status: None,
                 secrets_count: 0,
                 queue_depth: 0,
                 unread_mail: 0,
@@ -4007,6 +4018,31 @@ mod tests {
     }
 
     #[test]
+    fn preview_state_row_carries_the_advertised_agent_status() {
+        let mut app = preview_test_app();
+        app.sessions[0].liveness = Liveness::Locked(4242);
+        app.sessions[0].agent_status = Some("waiting".into());
+        let text = render_wide(&mut app);
+        assert!(
+            text.contains("locked 4242 \u{b7} waiting"),
+            "state row must carry the advertised status beside the pid:\n{text}"
+        );
+    }
+
+    #[test]
+    fn preview_state_row_omits_agent_status_when_none_is_advertised() {
+        let mut app = preview_test_app();
+        app.sessions[0].liveness = Liveness::Locked(4242);
+        app.sessions[0].agent_status = None;
+        let text = render_wide(&mut app);
+        assert!(text.contains("locked 4242"), "state row missing:\n{text}");
+        assert!(
+            !text.contains("locked 4242 \u{b7}"),
+            "no separator may trail the pid when nothing is advertised:\n{text}"
+        );
+    }
+
+    #[test]
     fn preview_shows_tags_row_when_tagged() {
         let mut app = preview_test_app_with_tags(vec!["api".into(), "infra".into()]);
         let text = render_wide(&mut app);
@@ -4091,6 +4127,7 @@ mod tests {
             modified: Some("2026-02-20 14:00".into()),
             modified_ts: Some(std::time::SystemTime::now()),
             liveness: Liveness::Dormant,
+            agent_status: None,
             secrets_count: 0,
             queue_depth: 0,
             unread_mail: 0,
