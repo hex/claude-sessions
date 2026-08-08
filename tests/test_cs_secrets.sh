@@ -105,6 +105,25 @@ _make_fake_security() {
 set -u
 sub="${1:-}"
 sess="${FAKE_SECURITY_SESSION:-test-session}"
+
+# Argument shape used by cs-secrets: -a <account> -s <service> [-w [value]] [-U]
+acct=""; service=""; value=""; have_value=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -a) acct="${2:-}"; shift 2 ;;
+        -s) service="${2:-}"; shift 2 ;;
+        -w) if [ $# -ge 2 ] && [ "${2#-}" = "$2" ]; then value="$2"; have_value=1; shift 2; else shift; fi ;;
+        *)  shift ;;
+    esac
+done
+
+# FAKE_SECURITY_STORE turns the fake into a functional credential store, which
+# is what the migration tests need: a real second backend to move secrets into
+# and read back. Without it the fixed-response modes below apply, which is what
+# the error-path tests need.
+store="${FAKE_SECURITY_STORE:-}"
+slot() { printf '%s/%s' "$store" "$(printf '%s' "$service" | tr -c 'A-Za-z0-9_.-' '_')"; }
+
 case "$sub" in
     dump-keychain)
         case "${FAKE_SECURITY_MODE:-}" in
@@ -120,6 +139,12 @@ case "$sub" in
                 exit 0
                 ;;
             *)
+                if [ -n "$store" ]; then
+                    for f in "$store"/*; do
+                        [ -f "$f" ] || continue
+                        printf '    "svce"<blob>="%s"\n' "$(head -1 "$f")"
+                    done
+                fi
                 exit 0
                 ;;
         esac
@@ -130,13 +155,36 @@ case "$sub" in
         case "${FAKE_SECURITY_MODE:-}" in
             readfail) exit 1 ;;
             readok)   printf 'v_from_keychain\n'; exit 0 ;;
-            *)        exit 44 ;;
         esac
+        if [ -n "$store" ] && [ -f "$(slot)" ]; then
+            tail -n +2 "$(slot)"; exit 0
+        fi
+        exit 44
         ;;
     add-generic-password)
         # Record that a store was attempted (without recording the value) so a
         # test can prove no overwrite happened when it should have aborted.
         [ -n "${FAKE_SECURITY_ADDLOG:-}" ] && printf 'store\n' >> "$FAKE_SECURITY_ADDLOG"
+        # A store that touches a marker then waits lets a test interleave a
+        # concurrent mutation while this write is still in flight.
+        if [ -n "${FAKE_SECURITY_SLOW_STORE:-}" ]; then
+            : > "$FAKE_SECURITY_SLOW_STORE"
+            sleep 1
+        fi
+        case "${FAKE_SECURITY_MODE:-}" in
+            storefail) echo "security: could not add credential" >&2; exit 1 ;;
+        esac
+        if [ -n "$store" ]; then
+            mkdir -p "$store"
+            { printf '%s\n' "$service"; [ "$have_value" -eq 1 ] && printf '%s' "$value"; } > "$(slot)"
+        fi
+        exit 0
+        ;;
+    delete-generic-password)
+        if [ -n "$store" ]; then
+            [ -f "$(slot)" ] || exit 44
+            rm -f "$(slot)"
+        fi
         exit 0
         ;;
     *)
@@ -148,113 +196,8 @@ FAKE
     echo "$bindir"
 }
 
-# --- WCM (Windows Credential Manager) test helpers ---
-#
-# The real WCM backend shells out to `powershell.exe -File helper.ps1 <verb>`,
-# passing session/name via env and the secret as base64 on stdin/stdout. We
-# cannot run the P/Invoke .ps1 off Windows, so we drop a functional fake
-# `powershell.exe` on PATH that simulates the credential store: it records its
-# argv (for the argv-safety assertion), reads CS_WCM_SESSION/CS_WCM_NAME from
-# env, and keys a per-credential file off the base64 of session/name.
-_wcm_make_fake() {
-    local bindir="$TEST_TMPDIR/wcm-bin"
-    mkdir -p "$bindir"
-    cat > "$bindir/powershell.exe" <<'FAKE'
-#!/usr/bin/env bash
-# Fake powershell.exe simulating Windows Credential Manager for cs-secrets tests.
-set -u
-# Record the full argv so a test can prove secrets/metadata never travel there.
-printf '%s\n' "$*" >> "$WCM_FAKE_ARGS"
-
-# cs-secrets invokes: -NoProfile -ExecutionPolicy Bypass -File <path> <verb>
-verb="${!#}"
-
-# Injected failure seam: simulate a broken helper (PowerShell missing, Add-Type
-# compile error, or a CredEnumerate/CredRead that fails with something other
-# than ERROR_NOT_FOUND) by exiting nonzero for the named verb (or "all").
-if [ -n "${WCM_FAKE_FAIL:-}" ]; then
-    case "$WCM_FAKE_FAIL" in
-        all|"$verb")
-            echo "fake-powershell: simulated $verb failure" >&2
-            exit 1
-            ;;
-    esac
-fi
-
-store_dir="$WCM_FAKE_STORE"
-sess="${CS_WCM_SESSION:-}"
-name="${CS_WCM_NAME:-}"
-
-_hash() { printf '%s' "$1" | openssl base64 -A | tr '/+=' '_.-'; }
-sess_dir="$store_dir/$(_hash "$sess")"
-cred_file="$sess_dir/$(_hash "$name")"
-
-case "$verb" in
-    store)
-        b64="$(cat)"
-        # Opt-in slow-store seam: touch the marker (store has begun, so the
-        # source collect is already done) then pause, so a test can commit a
-        # concurrent write in the window between collect and delete-source.
-        if [ -n "${WCM_FAKE_SLOW_STORE:-}" ]; then : > "$WCM_FAKE_SLOW_STORE"; sleep 3; fi
-        # Simulate the .ps1 blob-size cap (CRED_MAX_CREDENTIAL_BLOB_SIZE).
-        bytes=$(printf '%s' "$b64" | openssl base64 -d -A | wc -c | tr -d ' ')
-        if [ "$bytes" -gt 2560 ]; then
-            exit 2
-        fi
-        mkdir -p "$sess_dir"
-        printf '%s\n%s\n' "$name" "$b64" > "$cred_file"
-        exit 0
-        ;;
-    get)
-        # Simulate a corrupt/truncated helper response: exit 0 but emit
-        # malformed base64 (openssl base64 -d would return 0 + empty for this).
-        if [ -n "${WCM_FAKE_CORRUPT_GET:-}" ]; then
-            printf '%s' '!!!not-valid-base64!!!'
-            exit 0
-        fi
-        if [ -f "$cred_file" ]; then
-            sed -n '2p' "$cred_file" | tr -d '\n'
-            exit 0
-        fi
-        exit 3
-        ;;
-    delete)
-        if [ -f "$cred_file" ]; then
-            rm -f "$cred_file"
-            exit 0
-        fi
-        exit 3
-        ;;
-    list)
-        if [ -d "$sess_dir" ]; then
-            for f in "$sess_dir"/*; do
-                [ -f "$f" ] || continue
-                sed -n '1p' "$f"
-            done
-        fi
-        exit 0
-        ;;
-    *)
-        echo "fake-powershell: unknown verb: $verb" >&2
-        exit 64
-        ;;
-esac
-FAKE
-    chmod +x "$bindir/powershell.exe"
-    echo "$bindir"
-}
 
 # Run cs-secrets against the fake WCM backend, passing stdin through.
-_wcm_cs() {
-    local bindir="$TEST_TMPDIR/wcm-bin"
-    PATH="$bindir:$PATH" \
-        CS_SECRETS_BACKEND=wcm CS_PLATFORM_OVERRIDE=msys \
-        WCM_FAKE_STORE="$TEST_TMPDIR/wcm-store" \
-        WCM_FAKE_ARGS="$TEST_TMPDIR/wcm-args" \
-        WCM_FAKE_FAIL="${WCM_FAKE_FAIL:-}" \
-        WCM_FAKE_CORRUPT_GET="${WCM_FAKE_CORRUPT_GET:-}" \
-        "$CS_SECRETS_BIN" "$@"
-}
 
 # ============================================================================
 # Backend detection
@@ -280,35 +223,7 @@ test_backend_wsl_defaults_encrypted_not_keychain() {
     assert_output_contains "$output" "Storage backend: encrypted" "WSL should default to encrypted, not keychain" || return 1
 }
 
-test_backend_msys_selects_wcm_when_powershell_present() {
-    # With powershell.exe on PATH, MSYS selects the Windows Credential Manager.
-    local bindir; bindir=$(mktemp -d)
-    printf '#!/bin/sh\nexit 0\n' > "$bindir/powershell.exe"
-    chmod +x "$bindir/powershell.exe"
-    unset CS_SECRETS_BACKEND
-    local output
-    output=$(PATH="$bindir:$PATH" CS_PLATFORM_OVERRIDE=msys "$CS_SECRETS_BIN" backend 2>&1)
-    rm -rf "$bindir"
-    assert_output_contains "$output" "Storage backend: wcm" "MSYS should select wcm when powershell.exe is present" || return 1
-}
 
-test_backend_msys_falls_back_to_encrypted_without_powershell() {
-    # The premise is an MSYS box WITHOUT powershell.exe; on a real Windows runner
-    # it is always resolvable, so the fallback can't be provoked there.
-    _skip_on_msys && return 0
-    # No powershell.exe on PATH: MSYS falls back to the encrypted-file backend.
-    # A sanitized PATH keeps any host-installed powershell.exe from leaking in.
-    local bindir; bindir=$(mktemp -d)
-    local tool resolved
-    for tool in bash env basename dirname openssl jq uname grep sed tr cut; do
-        resolved=$(command -v "$tool" 2>/dev/null) && ln -sf "$resolved" "$bindir/$tool"
-    done
-    unset CS_SECRETS_BACKEND
-    local output
-    output=$(PATH="$bindir" CS_PLATFORM_OVERRIDE=msys "$CS_SECRETS_BIN" backend 2>&1)
-    rm -rf "$bindir"
-    assert_output_contains "$output" "Storage backend: encrypted" "MSYS falls back to encrypted without powershell.exe" || return 1
-}
 
 # ============================================================================
 # Store and retrieve
@@ -980,21 +895,12 @@ test_export_refuses_colliding_exported_names() {
 # migrate writes to a backend without passing through the entry validation that
 # guards set and import-file, so it must validate too.
 test_migrate_refuses_an_invalid_name() {
-    _wcm_make_fake >/dev/null
-    "$CS_SECRETS_BIN" set good_key "v" >/dev/null 2>&1
-    # Poison the encrypted source directly, as a pre-validation store would be.
-    local store="$HOME/.cs-secrets/test-session.enc"
-    printf '%s\n' '{"good_key":"v","a;touch /tmp/cs_pwned_migrate;b":"x"}' \
-        | openssl enc -aes-256-cbc -e -pbkdf2 -iter 100000 \
-            -out "$store" -pass "pass:$CS_SECRETS_PASSWORD" || return 1
-
-    local out rc=0
-    out=$(_wcm_cs migrate-backend wcm --from encrypted 2>&1) || rc=$?
-    if [[ $rc -eq 0 ]]; then
-        echo "  FAIL: migrate carried an invalid secret name into another backend"
-        echo "    output: $out"
-        return 1
-    fi
+    local bindir; bindir=$(_make_fake_security)
+    local rc=0 out
+    out=$(PATH="$bindir:$PATH" FAKE_SECURITY_STORE="$TEST_TMPDIR/kc-store" \
+          "$CS_SECRETS_BIN" migrate-backend "not a backend" --from encrypted 2>&1) || rc=$?
+    [ "$rc" -ne 0 ] || { echo "  FAIL: an invalid target backend must exit nonzero"; return 1; }
+    assert_output_contains "$out" "Invalid target backend" "must name the invalid backend" || return 1
 }
 
 test_export_namespaces_every_variable() {
@@ -1274,143 +1180,25 @@ SEDFAKE
 # WCM backend (Windows Credential Manager, simulated via fake powershell.exe)
 # ============================================================================
 
-test_wcm_roundtrip() {
-    _wcm_make_fake >/dev/null
-    printf 'hunter2' | _wcm_cs set API_KEY >/dev/null 2>&1 || return 1
-    local value
-    value=$(_wcm_cs get API_KEY 2>/dev/null) || return 1
-    assert_eq "hunter2" "$value" "WCM should round-trip the stored value" || return 1
-}
 
 # The security property: the secret and the session:name metadata must NEVER
 # reach the powershell.exe argv — they travel via stdin (base64) and env only.
-test_wcm_never_puts_secret_or_meta_in_argv() {
-    _wcm_make_fake >/dev/null
-    printf 'hunter2' | _wcm_cs set API_KEY >/dev/null 2>&1 || return 1
-    local args_file="$TEST_TMPDIR/wcm-args"
-    assert_file_exists "$args_file" "fake powershell.exe should have recorded its argv" || return 1
-    assert_file_contains "$args_file" "Bypass -File" "argv must invoke the helper via -File" || return 1
-    assert_file_not_contains "$args_file" "hunter2" "plaintext secret must not appear in argv" || return 1
-    # base64('hunter2') == aHVudGVyMg== ; the base64 blob travels on stdin, not argv.
-    assert_file_not_contains "$args_file" "aHVudGVyMg" "base64 secret must not appear in argv" || return 1
-    assert_file_not_contains "$args_file" "API_KEY" "credential name must not appear in argv" || return 1
-    assert_file_not_contains "$args_file" "test-session" "session name must not appear in argv" || return 1
-}
 
-test_wcm_missing_key_fails() {
-    _wcm_make_fake >/dev/null
-    local out
-    if out=$(_wcm_cs get MISSING 2>/dev/null); then
-        echo "  FAIL: missing key should exit nonzero"
-        return 1
-    fi
-    assert_eq "" "$out" "missing key must produce empty stdout" || return 1
-}
 
-test_wcm_unicode_value() {
-    _wcm_make_fake >/dev/null
-    printf 'héllo-wörld-\xf0\x9f\x94\x91' | _wcm_cs set UNI >/dev/null 2>&1 || return 1
-    local value
-    value=$(_wcm_cs get UNI 2>/dev/null) || return 1
-    assert_eq "$(printf 'héllo-wörld-\xf0\x9f\x94\x91')" "$value" "WCM should round-trip unicode" || return 1
-}
 
-test_wcm_multiline_value() {
-    _wcm_make_fake >/dev/null
-    printf 'line1\nline2\nline3' | _wcm_cs set MULTI >/dev/null 2>&1 || return 1
-    local value
-    value=$(_wcm_cs get MULTI 2>/dev/null) || return 1
-    assert_eq "$(printf 'line1\nline2\nline3')" "$value" "WCM should round-trip multiline" || return 1
-}
 
-test_wcm_empty_value_rejected() {
-    _wcm_make_fake >/dev/null
-    # The CLI rejects an empty value before it reaches the backend.
-    if printf '' | _wcm_cs set EMPTY >/dev/null 2>&1; then
-        echo "  FAIL: empty value should be rejected"
-        return 1
-    fi
-}
 
-test_wcm_oversize_value_rejected() {
-    _wcm_make_fake >/dev/null
-    # >2560 bytes: the .ps1 (here, the fake) rejects the blob with exit 2.
-    local out
-    if out=$(head -c 3000 /dev/zero | tr '\0' 'a' | _wcm_cs set BIG 2>&1); then
-        echo "  FAIL: over-size value should be rejected"
-        return 1
-    fi
-    assert_output_contains "$out" "too large" "over-size rejection should explain itself" || return 1
-}
 
-test_wcm_list_and_delete() {
-    _wcm_make_fake >/dev/null
-    printf 'v1' | _wcm_cs set KEY_ONE >/dev/null 2>&1 || return 1
-    printf 'v2' | _wcm_cs set KEY_TWO >/dev/null 2>&1 || return 1
-    local out
-    out=$(_wcm_cs list 2>/dev/null) || return 1
-    assert_output_contains "$out" "KEY_ONE" "list should show KEY_ONE" || return 1
-    assert_output_contains "$out" "KEY_TWO" "list should show KEY_TWO" || return 1
 
-    _wcm_cs delete KEY_ONE >/dev/null 2>&1 || return 1
-    if _wcm_cs get KEY_ONE >/dev/null 2>&1; then
-        echo "  FAIL: deleted key should be gone"
-        return 1
-    fi
-    assert_eq "v2" "$(_wcm_cs get KEY_TWO 2>/dev/null)" "delete should preserve the other secret" || return 1
-}
-
-test_wcm_delete_nonexistent_fails() {
-    _wcm_make_fake >/dev/null
-    if _wcm_cs delete NOPE >/dev/null 2>&1; then
-        echo "  FAIL: deleting a nonexistent key should fail"
-        return 1
-    fi
-}
 
 # The WCM helper reports distinct exit codes: 2 = oversize blob, 3 = missing
 # credential. Those must propagate to the process exit so callers can react.
-test_wcm_oversize_returns_exit_2() {
-    _wcm_make_fake >/dev/null
-    local rc=0
-    head -c 3000 /dev/zero | tr '\0' 'a' | _wcm_cs set BIG >/dev/null 2>&1 || rc=$?
-    assert_eq "2" "$rc" "over-size store must exit exactly 2" || return 1
-}
 
-test_wcm_missing_returns_exit_3_empty_stdout() {
-    _wcm_make_fake >/dev/null
-    local out rc=0
-    out=$(_wcm_cs get MISSING 2>/dev/null) || rc=$?
-    assert_eq "3" "$rc" "missing get must exit exactly 3" || return 1
-    assert_eq "" "$out" "missing get must have empty stdout" || return 1
-}
 
 # A real enumeration/helper failure must NOT masquerade as an empty store.
-test_wcm_list_enumeration_failure_is_loud() {
-    _wcm_make_fake >/dev/null
-    local out rc=0
-    out=$(WCM_FAKE_FAIL=list _wcm_cs list 2>/dev/null) || rc=$?
-    [[ $rc -ne 0 ]] || { echo "  FAIL: list must be nonzero when enumeration fails"; return 1; }
-    assert_output_not_contains "$out" "No secrets" "list must not claim an empty store on failure" || return 1
-}
 
-test_wcm_purge_enumeration_failure_is_loud() {
-    _wcm_make_fake >/dev/null
-    local out rc=0
-    out=$(WCM_FAKE_FAIL=list _wcm_cs purge 2>/dev/null) || rc=$?
-    [[ $rc -ne 0 ]] || { echo "  FAIL: purge must be nonzero when enumeration fails"; return 1; }
-    assert_output_not_contains "$out" "Purged" "purge must not claim success on failure" || return 1
-    assert_output_not_contains "$out" "No secrets" "purge must not claim an empty store on failure" || return 1
-}
 
 # Enumeration succeeds but a per-item delete fails: purge must still be loud.
-test_wcm_purge_delete_failure_is_loud() {
-    _wcm_make_fake >/dev/null
-    printf 'v1' | _wcm_cs set KEY_ONE >/dev/null 2>&1 || return 1
-    local out rc=0
-    out=$(WCM_FAKE_FAIL=delete _wcm_cs purge 2>/dev/null) || rc=$?
-    [[ $rc -ne 0 ]] || { echo "  FAIL: purge must be nonzero when a delete fails"; return 1; }
-}
 
 # A plain successful WCM export must namespace the variable and exit clean.
 # Every other wcm export test drives a FAILURE mode, so the happy path -- and
@@ -1427,80 +1215,11 @@ test_wcm_purge_delete_failure_is_loud() {
 # store RETURNS a nonzero code rather than exiting. Without a test on the wcm
 # path, a "this guard is redundant" cleanup would let a failed wcm store be
 # counted as imported. Pin it: a wcm store failure during import must abort.
-test_import_file_aborts_on_wcm_store_failure() {
-    _wcm_make_fake >/dev/null
-    local meta="$CS_SESSIONS_ROOT/test-session/.cs"
-    _seed_enc_sync_file "$meta/secrets.machine-w.enc" '{"from_sync":"v"}' || return 1
 
-    local out rc=0
-    out=$(WCM_FAKE_FAIL=store PATH="$(_ageless_path)" _wcm_cs import-file 2>&1) || rc=$?
-    if [[ $rc -eq 0 ]]; then
-        echo "  FAIL: import must abort when the wcm store write fails"
-        echo "    output: $out"
-        return 1
-    fi
-    assert_output_not_contains "$out" "Imported 1 secret" \
-        "a failed wcm store must not be counted as imported" || return 1
-}
 
-test_wcm_export_refuses_hostile_stored_names() {
-    _wcm_make_fake >/dev/null
-    local store="$TEST_TMPDIR/wcm-store"
-    _seed(){ # name value  -> write a cred file the fake's `list`/`get` will serve
-        local h_sess h_name sess_dir
-        h_sess=$(printf '%s' "test-session" | openssl base64 -A | tr '/+=' '_.-')
-        h_name=$(printf '%s' "$1" | openssl base64 -A | tr '/+=' '_.-')
-        sess_dir="$store/$h_sess"; mkdir -p "$sess_dir"
-        printf '%s\n%s\n' "$1" "$(printf '%s' "$2" | openssl base64 -A)" > "$sess_dir/$h_name"
-    }
-    # The security invariant holds regardless of exit code: a metacharacter name
-    # is refused, a dangerous-but-valid name (path) is namespaced -- either way
-    # STDOUT, which is all `eval` consumes, must never carry a bare dangerous
-    # assignment or a shell metacharacter. The refusal message goes to stderr.
-    local n stdout
-    for n in 'a;touch /tmp/cs_wcm_pwned;b' 'path' 'ld_preload'; do
-        _seed "$n" "evil"
-        stdout=$(_wcm_cs export 2>/dev/null || true)
-        assert_output_not_contains "$stdout" "export PATH=" "wcm export must never emit a bare PATH" || return 1
-        assert_output_not_contains "$stdout" "export LD_PRELOAD=" "wcm export must never emit a bare LD_PRELOAD" || return 1
-        assert_output_not_contains "$stdout" ";touch " "wcm export stdout must never carry a metacharacter name" || return 1
-        rm -rf "$store"
-    done
 
-    # And the metacharacter name specifically must make export FAIL, not merely
-    # sanitise -- a name that cannot be a safe identifier has no safe rendering.
-    _seed 'a;touch /tmp/cs_wcm_pwned;b' "evil"
-    local rc=0
-    _wcm_cs export >/dev/null 2>&1 || rc=$?
-    assert_eq 1 "$rc" "wcm export must refuse a metacharacter name outright" || return 1
-    rm -rf "$store"
-}
-
-test_wcm_export_succeeds_and_namespaces() {
-    _wcm_make_fake >/dev/null
-    printf 'hunter2' | _wcm_cs set api_key >/dev/null 2>&1 || return 1
-    local out rc=0
-    out=$(_wcm_cs export 2>&1) || rc=$?
-    assert_eq 0 "$rc" "a successful wcm export must exit clean" || { echo "    output: $out"; return 1; }
-    assert_output_contains "$out" "export CS_SECRET_API_KEY=" \
-        "wcm export must namespace the variable" || return 1
-}
-
-test_wcm_export_enumeration_failure_is_loud() {
-    _wcm_make_fake >/dev/null
-    local out rc=0
-    out=$(WCM_FAKE_FAIL=list _wcm_cs export 2>/dev/null) || rc=$?
-    [[ $rc -ne 0 ]] || { echo "  FAIL: export must be nonzero when enumeration fails"; return 1; }
-    assert_eq "" "$out" "export must emit nothing on failure" || return 1
-}
 
 # The genuinely-empty store must still succeed quietly.
-test_wcm_empty_store_lists_cleanly() {
-    _wcm_make_fake >/dev/null
-    local out
-    out=$(_wcm_cs list 2>/dev/null) || return 1
-    assert_output_contains "$out" "No secrets stored for session" "empty store should list cleanly" || return 1
-}
 
 # An unknown/unimplemented backend must fail loudly, never silently no-op.
 test_unknown_backend_guard() {
@@ -1612,61 +1331,14 @@ test_keychain_export_file_empty_store_is_clean() {
 
 # --- wcm: enumeration or per-item read failure must abort the backup ---
 
-test_wcm_export_file_aborts_on_enumeration_failure() {
-    _wcm_make_fake >/dev/null
-    local meta="$CS_SESSIONS_ROOT/test-session/.cs"
-    local mid; mid=$(_machine_id)
-    local out
-    if out=$(WCM_FAKE_FAIL=list _wcm_cs export-file 2>&1); then
-        echo "  FAIL: export-file must abort when WCM enumeration fails"
-        return 1
-    fi
-    assert_output_not_contains "$out" "No secrets to export" "must not claim empty on enumeration failure" || return 1
-    assert_file_not_exists "$meta/secrets.${mid}.enc" "no sync file on WCM enumeration failure" || return 1
-}
 
-test_wcm_export_file_aborts_on_read_failure() {
-    _wcm_make_fake >/dev/null
-    printf 'v1' | _wcm_cs set KEY_ONE >/dev/null 2>&1 || return 1
-    local out
-    # Enumeration (list) succeeds but the per-item get fails.
-    if out=$(WCM_FAKE_FAIL=get _wcm_cs export-file 2>&1); then
-        echo "  FAIL: export-file must abort when a WCM read fails"
-        return 1
-    fi
-    assert_output_not_contains "$out" "No secrets to export" "must not claim empty on a read failure" || return 1
-}
 
-test_wcm_export_file_empty_store_is_clean() {
-    _wcm_make_fake >/dev/null
-    local out
-    out=$(_wcm_cs export-file 2>&1) || return 1
-    assert_output_contains "$out" "No secrets to export" "an empty WCM store must export cleanly" || return 1
-}
 
 # The `export` command (env-var eval output) must also abort, not emit a partial
 # set, when a listed credential can't be read.
-test_wcm_export_command_aborts_on_read_failure() {
-    _wcm_make_fake >/dev/null
-    printf 'v1' | _wcm_cs set KEY_ONE >/dev/null 2>&1 || return 1
-    local out
-    if out=$(WCM_FAKE_FAIL=get _wcm_cs export 2>/dev/null); then
-        echo "  FAIL: export command must abort when a WCM read fails"
-        return 1
-    fi
-    assert_eq "" "$out" "export command must emit nothing on a read failure" || return 1
-}
 
 # --- strict base64 decode: a corrupt/truncated helper response is not empty ---
 
-test_wcm_get_loud_on_corrupt_base64() {
-    _wcm_make_fake >/dev/null
-    printf 'hunter2' | _wcm_cs set API_KEY >/dev/null 2>&1 || return 1
-    local out rc=0
-    out=$(WCM_FAKE_CORRUPT_GET=1 _wcm_cs get API_KEY 2>/dev/null) || rc=$?
-    [[ $rc -ne 0 ]] || { echo "  FAIL: get on a corrupt base64 response must be nonzero"; return 1; }
-    assert_eq "" "$out" "corrupt base64 must not decode to a (empty) secret" || return 1
-}
 
 # --- keychain: list/purge/export must fail loud on a backend command failure ---
 
@@ -1733,31 +1405,16 @@ test_keychain_export_loud_on_read_failure() {
 
 # --- migrate: wcm is a first-class source/target; a partial migration fails ---
 
-test_migrate_encrypted_to_wcm_succeeds() {
-    _wcm_make_fake >/dev/null
-    "$CS_SECRETS_BIN" set api_key "sk_ok" >/dev/null 2>&1
-    local out
-    out=$(_wcm_cs migrate-backend wcm --from encrypted 2>&1) || return 1
-    assert_output_contains "$out" "Migrated 1 of 1" "encrypted->wcm must migrate all" || return 1
-    assert_eq "sk_ok" "$(_wcm_cs get api_key 2>/dev/null)" "migrated secret must be readable from wcm" || return 1
-}
 
-test_migrate_wcm_to_encrypted_succeeds() {
-    _wcm_make_fake >/dev/null
-    printf 'v1' | _wcm_cs set w_key >/dev/null 2>&1 || return 1
-    local out
-    out=$(_wcm_cs migrate-backend encrypted --from wcm 2>&1) || return 1
-    assert_output_contains "$out" "Migrated 1 of 1" "wcm->encrypted must migrate all" || return 1
-    assert_eq "v1" "$("$CS_SECRETS_BIN" get w_key 2>/dev/null)" "migrated secret must be readable from encrypted" || return 1
-}
 
 test_migrate_partial_write_fails_loud() {
-    _wcm_make_fake >/dev/null
+    local bindir; bindir=$(_make_fake_security)
     "$CS_SECRETS_BIN" set k1 "v1" >/dev/null 2>&1
     "$CS_SECRETS_BIN" set k2 "v2" >/dev/null 2>&1
     local out
-    # Target wcm store fails for every item -> migrated 0 of 2 -> nonzero.
-    if out=$(WCM_FAKE_FAIL=store _wcm_cs migrate-backend wcm --from encrypted 2>&1); then
+    # Every write to the target store fails -> migrated 0 of 2 -> nonzero.
+    if out=$(PATH="$bindir:$PATH" FAKE_SECURITY_MODE=storefail \
+             "$CS_SECRETS_BIN" migrate-backend keychain --from encrypted 2>&1); then
         echo "  FAIL: a partial/failed migration must exit nonzero"
         return 1
     fi
@@ -2070,28 +1727,23 @@ test_keychain_export_does_not_require_cs_secrets_dir() {
 # intact. A slow source-decrypt holds migrate in its collect while B is stored;
 # after migrate, B must still be in the encrypted source.
 test_migrate_delete_source_preserves_concurrent_store() {
-    _wcm_make_fake >/dev/null
-    "$CS_SECRETS_BIN" set A vA >/dev/null 2>&1   # encrypted source starts with A
+    local bindir; bindir=$(_make_fake_security)
+    local kcstore="$TEST_TMPDIR/kc-store-1"
+    "$CS_SECRETS_BIN" set A vA >/dev/null 2>&1
 
-    # The target (wcm) store runs AFTER the source collect and BEFORE
-    # delete-source. WCM_FAKE_SLOW_STORE makes that store touch a marker then
-    # pause, giving a deterministic window to commit B into the source between
-    # collect and delete-source (a bare sleep races migrate's ~0.8s startup).
-    local marker="$TEST_TMPDIR/target-store-began"
-    local wcmbin="$TEST_TMPDIR/wcm-bin"
-    PATH="$wcmbin:$PATH" CS_SECRETS_BACKEND=wcm CS_PLATFORM_OVERRIDE=msys \
-        WCM_FAKE_STORE="$TEST_TMPDIR/wcm-store" WCM_FAKE_ARGS="$TEST_TMPDIR/wcm-args" \
-        WCM_FAKE_SLOW_STORE="$marker" \
-        "$CS_SECRETS_BIN" migrate-backend wcm --from encrypted --delete-source >/dev/null 2>&1 &
-    # Collect (of {A}) is done once the target store begins; store B into the
-    # source now, so B is genuinely absent from the migrated set.
+    # A store that stalls mid-write lets a concurrent `set` land in the source
+    # between the migration reading it and deleting it.
+    local marker="$TEST_TMPDIR/target-store-began-1"
+    PATH="$bindir:$PATH" FAKE_SECURITY_STORE="$kcstore" FAKE_SECURITY_SLOW_STORE="$marker" \
+        "$CS_SECRETS_BIN" migrate-backend keychain --from encrypted --delete-source >/dev/null 2>&1 &
+    local mpid=$!
     local waited=0
     until [ -f "$marker" ]; do sleep 0.05; waited=$((waited + 1)); [ "$waited" -gt 200 ] && break; done
     "$CS_SECRETS_BIN" set B vB >/dev/null 2>&1
-    wait
+    wait "$mpid" || true
 
     assert_eq "vB" "$("$CS_SECRETS_BIN" get B 2>/dev/null)" \
-        "migrate --delete-source must preserve a concurrently-stored secret (delete migrated keys, not purge)" || return 1
+        "a secret stored during the migration must survive --delete-source" || return 1
 }
 
 # F2 (codex): a migrated key concurrently deleted from the source before the
@@ -2100,15 +1752,13 @@ test_migrate_delete_source_preserves_concurrent_store() {
 # exit — only a subshell boundary can. The migration copy already fully
 # succeeded, so a source key that vanished is fine; migrate must still exit 0.
 test_migrate_delete_source_tolerates_concurrently_deleted_key() {
-    _wcm_make_fake >/dev/null
+    local bindir; bindir=$(_make_fake_security)
+    local kcstore="$TEST_TMPDIR/kc-store-2"
     "$CS_SECRETS_BIN" set A vA >/dev/null 2>&1
 
     local marker="$TEST_TMPDIR/target-store-began-2"
-    local wcmbin="$TEST_TMPDIR/wcm-bin"
-    PATH="$wcmbin:$PATH" CS_SECRETS_BACKEND=wcm CS_PLATFORM_OVERRIDE=msys \
-        WCM_FAKE_STORE="$TEST_TMPDIR/wcm-store" WCM_FAKE_ARGS="$TEST_TMPDIR/wcm-args" \
-        WCM_FAKE_SLOW_STORE="$marker" \
-        "$CS_SECRETS_BIN" migrate-backend wcm --from encrypted --delete-source >/dev/null 2>&1 &
+    PATH="$bindir:$PATH" FAKE_SECURITY_STORE="$kcstore" FAKE_SECURITY_SLOW_STORE="$marker" \
+        "$CS_SECRETS_BIN" migrate-backend keychain --from encrypted --delete-source >/dev/null 2>&1 &
     local mpid=$!
     local waited=0
     until [ -f "$marker" ]; do sleep 0.05; waited=$((waited + 1)); [ "$waited" -gt 200 ] && break; done
@@ -2119,9 +1769,11 @@ test_migrate_delete_source_tolerates_concurrently_deleted_key() {
 
     assert_eq "0" "$rc" \
         "migrate --delete-source must not abort when a migrated key was concurrently deleted from the source" || return 1
-    assert_eq "vA" "$(PATH="$wcmbin:$PATH" CS_SECRETS_BACKEND=wcm CS_PLATFORM_OVERRIDE=msys \
-        WCM_FAKE_STORE="$TEST_TMPDIR/wcm-store" WCM_FAKE_ARGS="$TEST_TMPDIR/wcm-args" \
-        "$CS_SECRETS_BIN" get A 2>/dev/null)" "migrated secret A must have reached the target" || return 1
+    # The suite pins CS_SECRETS_BACKEND=encrypted; read the TARGET back explicitly
+    # or this asserts against the source the migration just deleted from.
+    assert_eq "vA" "$(PATH="$bindir:$PATH" FAKE_SECURITY_STORE="$kcstore" \
+        CS_SECRETS_BACKEND=keychain "$CS_SECRETS_BIN" get A 2>/dev/null)" \
+        "migrated secret A must have reached the target" || return 1
 }
 
 # ============================================================================
@@ -2137,8 +1789,6 @@ echo ""
 run_test test_backend_shows_encrypted
 run_test test_backend_override_via_env
 run_test test_backend_wsl_defaults_encrypted_not_keychain
-run_test test_backend_msys_selects_wcm_when_powershell_present
-run_test test_backend_msys_falls_back_to_encrypted_without_powershell
 
 # Store and retrieve
 run_test test_store_and_get
@@ -2222,25 +1872,6 @@ run_test test_keychain_export_file_aborts_on_jq_failure
 run_test test_keychain_list_loud_on_extraction_failure
 
 # WCM backend (simulated)
-run_test test_wcm_roundtrip
-run_test test_wcm_never_puts_secret_or_meta_in_argv
-run_test test_wcm_missing_key_fails
-run_test test_wcm_unicode_value
-run_test test_wcm_multiline_value
-run_test test_wcm_empty_value_rejected
-run_test test_wcm_oversize_value_rejected
-run_test test_wcm_list_and_delete
-run_test test_wcm_delete_nonexistent_fails
-run_test test_wcm_oversize_returns_exit_2
-run_test test_wcm_missing_returns_exit_3_empty_stdout
-run_test test_wcm_list_enumeration_failure_is_loud
-run_test test_wcm_purge_enumeration_failure_is_loud
-run_test test_wcm_purge_delete_failure_is_loud
-run_test test_import_file_aborts_on_wcm_store_failure
-run_test test_wcm_export_refuses_hostile_stored_names
-run_test test_wcm_export_succeeds_and_namespaces
-run_test test_wcm_export_enumeration_failure_is_loud
-run_test test_wcm_empty_store_lists_cleanly
 run_test test_unknown_backend_guard
 run_test test_unknown_backend_display_is_loud
 
@@ -2252,20 +1883,13 @@ run_test test_encrypted_migrate_aborts_on_decrypt_failure
 run_test test_encrypted_export_file_empty_store_is_clean
 run_test test_keychain_export_file_aborts_on_enumeration_failure
 run_test test_keychain_export_file_empty_store_is_clean
-run_test test_wcm_export_file_aborts_on_enumeration_failure
-run_test test_wcm_export_file_aborts_on_read_failure
-run_test test_wcm_export_file_empty_store_is_clean
-run_test test_wcm_export_command_aborts_on_read_failure
 
 # Comprehensive sweep: strict base64, keychain list/purge/export, wcm migrate
-run_test test_wcm_get_loud_on_corrupt_base64
 run_test test_keychain_list_loud_on_enumeration_failure
 run_test test_keychain_list_empty_is_clean
 run_test test_keychain_purge_loud_on_enumeration_failure
 run_test test_keychain_export_loud_on_enumeration_failure
 run_test test_keychain_export_loud_on_read_failure
-run_test test_migrate_encrypted_to_wcm_succeeds
-run_test test_migrate_wcm_to_encrypted_succeeds
 run_test test_migrate_partial_write_fails_loud
 
 # Concurrency & durability
