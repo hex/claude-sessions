@@ -900,6 +900,15 @@ fn read_lock_pid(meta_dir: &Path) -> Option<u32> {
 /// A missing tool or a spawn error is treated as "not alive" (the caller then
 /// falls back to the statusline heartbeat), never a crash.
 fn is_pid_alive(pid: u32) -> bool {
+    // A pid_t is a SIGNED 32-bit int, so anything past i32::MAX is not a process
+    // id at all and each platform mishandles it differently: macOS `kill` refuses
+    // it ("illegal process id"), while on Linux it wraps — 4294967295 lands on
+    // -1, which means "every process the caller may signal" and SUCCEEDS, so an
+    // absurd id in a lock file or a session record would read as alive. Rule the
+    // range out here rather than depending on how `kill` parses it.
+    if pid == 0 || pid > i32::MAX as u32 {
+        return false;
+    }
     std::process::Command::new("kill")
         .args(["-0", &pid.to_string()])
         .stderr(std::process::Stdio::null())
@@ -1727,7 +1736,14 @@ mod tests {
     #[test]
     fn is_pid_alive_reports_self_alive_and_bogus_dead() {
         assert!(is_pid_alive(std::process::id()));
+        // Past i32::MAX is not a process id. Each platform mishandles it its own
+        // way — macOS `kill` refuses it, Linux wraps u32::MAX onto -1 and reports
+        // success, meaning "every process the caller may signal" — so pin the
+        // whole out-of-range band here rather than the one value that happened
+        // to fail on the platform this was written on.
         assert!(!is_pid_alive(u32::MAX));
+        assert!(!is_pid_alive(i32::MAX as u32 + 1));
+        assert!(!is_pid_alive(0));
     }
 
     // On non-macOS there is no keychain to scan, so the count is always empty.
