@@ -256,9 +256,8 @@ elif [ "$INSTALL_METHOD" = "web" ]; then
     _os=$(uname -s | tr '[:upper:]' '[:lower:]')
     _arch=$(uname -m)
     [ "$_arch" = "x86_64" ] && _arch="amd64"
-    _tui_ext=""
-    _tui_base="cs-tui-${_os}-${_arch}${_tui_ext}"
-    _tui_dst="$INSTALL_DIR/cs-tui${_tui_ext}"
+    _tui_base="cs-tui-${_os}-${_arch}"
+    _tui_dst="$INSTALL_DIR/cs-tui"
     _tui_url="${RELEASES_URL}/v${_cs_version}/${_tui_base}"
     if [ -n "$_cs_version" ] && curl -fsSL --head "$_tui_url" >/dev/null 2>&1 \
         && curl -fsSL "$_tui_url" -o "$_tui_dst"; then

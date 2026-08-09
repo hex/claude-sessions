@@ -212,6 +212,35 @@ test_live_gives_each_session_its_own_agent_status() {
         "reading every record at once must not smear one session's state onto another" || return 1
 }
 
+test_live_survives_a_record_whose_pid_is_out_of_range() {
+    command -v jq >/dev/null 2>&1 || return 0
+    make_live_session healthy
+    make_registry_record healthy busy
+    # A stale record naming a pid past the kernel's maximum: `ps -p` fails the
+    # WHOLE list rather than skipping that one, so batching the lookup would
+    # blank every other session's state over a single orphaned document.
+    mkdir -p "$CS_CLAUDE_DIR/sessions"
+    printf '{"pid": 999999, "name": "ghost", "status": "busy", "procStart": "Mon Jan  1 00:00:00 2001"}\n' \
+        > "$CS_CLAUDE_DIR/sessions/999999.json"
+    local out; out="$("$CS_BIN" -live 2>&1)"
+    assert_output_contains "$out" "healthy.*busy" \
+        "one unusable record must not cost every other session its state" || return 1
+}
+
+test_live_ignores_record_with_no_start_time() {
+    command -v jq >/dev/null 2>&1 || return 0
+    make_live_session unverifiable
+    # A record carrying no start time cannot be told apart from one left by a
+    # session whose pid has been reused, so it earns no state. The TUI reader
+    # refuses it too; a wildcard here made the same record read one way in
+    # cs -live and another in the TUI.
+    make_registry_record unverifiable waiting ""
+    local out; out="$("$CS_BIN" -live 2>&1)"
+    assert_output_contains "$out" "unverifiable" "the session is still listed" || return 1
+    assert_output_not_contains "$out" "unverifiable.*waiting" \
+        "a record with no start time must not be trusted" || return 1
+}
+
 test_live_ignores_record_whose_start_time_differs() {
     command -v jq >/dev/null 2>&1 || return 0
     make_live_session recycled
@@ -228,6 +257,8 @@ run_test test_live_shows_presence_status
 run_test test_live_shows_agent_status_from_registry
 run_test test_live_gives_each_session_its_own_agent_status
 run_test test_live_ignores_record_whose_start_time_differs
+run_test test_live_ignores_record_with_no_start_time
+run_test test_live_survives_a_record_whose_pid_is_out_of_range
 run_test test_live_falls_back_to_readme_objective
 run_test test_live_filters_readme_placeholder
 run_test test_live_marks_current_session

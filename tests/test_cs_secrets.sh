@@ -196,9 +196,6 @@ FAKE
     echo "$bindir"
 }
 
-
-# Run cs-secrets against the fake WCM backend, passing stdin through.
-
 # ============================================================================
 # Backend detection
 # ============================================================================
@@ -222,8 +219,6 @@ test_backend_wsl_defaults_encrypted_not_keychain() {
     output=$(CS_PLATFORM_OVERRIDE=wsl "$CS_SECRETS_BIN" backend 2>&1)
     assert_output_contains "$output" "Storage backend: encrypted" "WSL should default to encrypted, not keychain" || return 1
 }
-
-
 
 # ============================================================================
 # Store and retrieve
@@ -899,8 +894,6 @@ test_export_namespace_neutralises_dangerous_names() {
     done
 }
 
-
-
 test_import_file_refuses_a_hostile_key_name() {
     local meta="$CS_SESSIONS_ROOT/test-session/.cs"
     _seed_enc_sync_file "$meta/secrets.machine-x.enc" \
@@ -1209,17 +1202,6 @@ test_keychain_export_file_empty_store_is_clean() {
     assert_output_contains "$out" "No secrets to export" "an empty keychain must export cleanly" || return 1
 }
 
-# --- wcm: enumeration or per-item read failure must abort the backup ---
-
-
-
-
-# The `export` command (env-var eval output) must also abort, not emit a partial
-# set, when a listed credential can't be read.
-
-# --- strict base64 decode: a corrupt/truncated helper response is not empty ---
-
-
 # --- keychain: list/purge/export must fail loud on a backend command failure ---
 
 test_keychain_list_loud_on_enumeration_failure() {
@@ -1283,9 +1265,7 @@ test_keychain_export_loud_on_read_failure() {
         "the abort must name the read failure, not just exit nonzero" || return 1
 }
 
-# --- migrate: wcm is a first-class source/target; a partial migration fails ---
-
-
+# --- migrate: a partial migration fails loud ---
 
 test_migrate_partial_write_fails_loud() {
     local bindir; bindir=$(_make_fake_security)
@@ -1580,7 +1560,7 @@ SHIM
 }
 
 # codex F1 review: the export mutex must not couple non-encrypted backends to the
-# encrypted backend's ~/.cs-secrets. A keychain/WCM store is atomic per credential
+# encrypted backend's ~/.cs-secrets. A keychain store is atomic per credential
 # and never needed the lock; requiring a writable ~/.cs-secrets to export from
 # those backends is a regression. Block the path with a plain file where the dir
 # would go and confirm a keychain export still works (only the encrypted backend
@@ -1747,7 +1727,7 @@ run_test test_import_file_stores_when_secret_absent_and_user_unset
 run_test test_keychain_export_file_aborts_on_jq_failure
 run_test test_keychain_list_loud_on_extraction_failure
 
-# WCM backend (simulated)
+# Unknown backend guard
 run_test test_unknown_backend_guard
 run_test test_unknown_backend_display_is_loud
 
@@ -1760,7 +1740,7 @@ run_test test_encrypted_export_file_empty_store_is_clean
 run_test test_keychain_export_file_aborts_on_enumeration_failure
 run_test test_keychain_export_file_empty_store_is_clean
 
-# Comprehensive sweep: strict base64, keychain list/purge/export, wcm migrate
+# Comprehensive sweep: keychain list/purge/export, migrate
 run_test test_keychain_list_loud_on_enumeration_failure
 run_test test_keychain_list_empty_is_clean
 run_test test_keychain_purge_loud_on_enumeration_failure

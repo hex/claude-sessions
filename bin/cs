@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.8.9"
+VERSION="2026.8.10"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 
@@ -4165,6 +4165,10 @@ agent_states() {
     local dir="${CS_CLAUDE_DIR:-$HOME/.claude}/sessions" records pidlist="" started pid rest
     [ -d "$dir" ] || return 0
     command -v jq >/dev/null 2>&1 || return 0
+    # An unmatched glob would hand jq the literal pattern, which it opens, fails
+    # on, and discards -- a whole jq startup on the common quiet host.
+    set -- "$dir"/*.json
+    [ -e "$1" ] || return 0
 
     records="$(jq -r '
         select((.name // "") != "" and (.status // "") != "" and .pid != null)
@@ -4173,9 +4177,14 @@ agent_states() {
     [ -n "$records" ] || return 0
 
     # Collecting the pids in the shell rather than forking cut keeps this to the
-    # three forks the comment above promises.
-    while IFS="$(printf '\t')" read -r pid rest; do
+    # three forks the comment above promises. kill -0 is a builtin, so screening
+    # out pids that are gone costs nothing and is not an optimisation: one pid
+    # past the kernel's maximum makes `ps -p` fail the WHOLE invocation ("process
+    # id too large"), which would blank the state of every other session over one
+    # stale record — exactly the case the start-time check exists to tolerate.
+    while IFS=$'\t' read -r pid rest; do
         case "$pid" in ''|*[!0-9]*) continue ;; esac
+        kill -0 "$pid" 2>/dev/null || continue
         pidlist="${pidlist:+$pidlist,}$pid"
     done <<< "$records"
     [ -n "$pidlist" ] || return 0
@@ -4183,6 +4192,8 @@ agent_states() {
     # ps prints the start time in the caller's zone and pads the field while the
     # record holds UTC, so the join compares trimmed strings in UTC. Without
     # that, every record outside UTC reads as a pid the kernel has recycled.
+    # A record carrying no start time is refused rather than trusted: it cannot
+    # be told apart from a recycled pid, and the TUI reader refuses it too.
     started="$(TZ=UTC "${CS_PS_BIN:-ps}" -o pid=,lstart= -p "$pidlist" 2>/dev/null || true)"
 
     # Scrubbed like session_status: another process wrote these documents. tr
@@ -4203,7 +4214,7 @@ agent_states() {
                 alive[p] = start
             }
         }
-        ($1 in alive) && ($2 == "" || alive[$1] == $2) { print $3 "\t" $4 }
+        ($1 in alive) && alive[$1] == $2 { print $3 "\t" $4 }
     ' <<< "$records" | _scrub_controls
 }
 
@@ -4213,7 +4224,7 @@ agent_states() {
 agent_state_of() {  # table, name
     local name rest
     [ -n "$1" ] || return 0
-    while IFS="$(printf '\t')" read -r name rest; do
+    while IFS=$'\t' read -r name rest; do
         if [ "$name" = "$2" ]; then
             printf '%s' "$rest"
             return 0

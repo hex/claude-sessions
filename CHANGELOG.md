@@ -4,6 +4,39 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.8.10
+
+cs drops Windows and Git Bash, and learns to say what each session is actually doing.
+
+The previous release spent itself fixing three defects that only fired on Git Bash. This one removes the platform those defects lived on: 2025 lines of it, along with the workarounds, the permanently-red CI lane, and the release target still publishing a binary for it.
+
+### Added
+
+- **`cs -live` and the TUI say what each session is doing.** Claude Code publishes a record per running session under `~/.claude/sessions/`, and it carries the live agent state. `cs -live` gains a column reading `busy`, `waiting` or `idle`, and the TUI's `state` row appends it beside the pid (`■ live · locked 4242 · waiting`). Until now cs could tell you a session was alive but nothing about what it was doing, so three live sessions rendered as three identical rows and the objective text was the only way to tell them apart.
+
+  A record outlives a crash, so neither reader trusts one on sight: the pid must still be alive *and* still report the process start time the record holds, or a pid the kernel has handed to something else would keep a dead session looking busy. A host that publishes no records, or a shell without `jq`, simply shows no state.
+
+### Removed
+
+- **Windows and Git Bash are no longer targets.** Windows was a second-class tier: session bookkeeping and secrets ran under Git Bash, but the Claude launch and the tmux spawner did not, so what shipped there was a session directory and a message telling you to use WSL. Holding that tier cost a CI lane, per-test skip guards, and a set of workarounds for behaviours only MSYS exhibits. Windows is now reached through WSL2, like any other Linux.
+
+  Gone with it: the Windows Credential Manager secrets backend and its embedded PowerShell CredMan helper, the `test-windows-msys` lane that had been red since 2026-08-04 and shipped red through three releases, the release target still building and publishing a `cs-tui.exe`, 23 per-test skip guards and 9 suite pins, the TUI's `tasklist` liveness probe, and the mail path-remap that existed only because MSYS rewrote `/foo` into `C:/foo`. `CS_SECRETS_BACKEND` now accepts `keychain` and `encrypted`; `CS_PLATFORM_OVERRIDE` accepts `macos`, `wsl` and `linux`, and refuses `msys` rather than quietly honouring it.
+
+  bash 3.2 remains the floor — macOS still ships it — so this drops a platform, not the shell constraint.
+
+### Fixed
+
+- **A failed migration to the Keychain ended with no diagnostic at all.** `keychain_store` exited where the other backends returned, so the migration loop's per-key failure counting was unreachable, and because that loop suppresses the function's stderr the run simply stopped. It now returns, which is what all four call sites already assumed. This surfaced only because removing the Credential Manager backend left three tests — asserting properties that were never Windows-specific — passing while testing nothing.
+
+### Performance
+
+- **Reading every session's state costs a flat two forks.** The state lookup ran a `jq` and a `ps` per live session; it now reads the whole set in one pass. Measured over eight live sessions: one `jq` and one `ps`, down from sixteen, and flat from there however many sessions are running.
+
+### Tests & CI
+
+- The Rust CI matrix ran macOS and Windows, so the TUI had never been built for Linux — a supported target. It now runs macOS and Ubuntu.
+- 53 suites, 1270 assertions, plus 315 TUI tests.
+
 ## 2026.8.9
 
 Three defects that only fired on Git Bash, found by fixing the Windows CI lane.

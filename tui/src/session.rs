@@ -296,13 +296,21 @@ pub fn agent_statuses_in(dir: &Path) -> HashMap<String, String> {
     }
 
     let pids: Vec<String> = records.iter().map(|r| r.pid.to_string()).collect();
-    let output = match std::process::Command::new("ps")
-        .env("TZ", "UTC")
-        .args(["-o", "pid=,lstart=", "-p", &pids.join(",")])
-        .output()
-    {
-        Ok(o) => String::from_utf8_lossy(&o.stdout).into_owned(),
-        Err(_) => return out,
+    // One ps answers for every candidate, but `ps -p` fails the WHOLE invocation
+    // when any id in the list is past the kernel's maximum ("process id too
+    // large"), which would blank every session's state over one stale record.
+    // Fall back to asking per pid so a single bad id costs only itself.
+    let ask = |list: String| -> Option<String> {
+        let o = std::process::Command::new("ps")
+            .env("TZ", "UTC")
+            .args(["-o", "pid=,lstart=", "-p", &list])
+            .output()
+            .ok()?;
+        o.status.success().then(|| String::from_utf8_lossy(&o.stdout).into_owned())
+    };
+    let output = match ask(pids.join(",")) {
+        Some(o) => o,
+        None => pids.iter().filter_map(|p| ask(p.clone())).collect::<Vec<_>>().join("\n"),
     };
 
     let mut started: HashMap<u32, String> = HashMap::new();
