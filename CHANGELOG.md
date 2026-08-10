@@ -4,6 +4,41 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.8.11
+
+Four items filed as cleanup, which turned out to be hiding five defects.
+
+Nothing here was reported by a user. Three of the five were found by writing a test for code that had none, and the other two by an independent review of that new code — including one where the test gate itself would report every suite passing having run none of them.
+
+### Fixed
+
+- **A rejected `CS_PLATFORM_OVERRIDE` was announced and then ignored.** `detect_backend` read the platform as a `case "$(cs_platform)"` word, and a command substitution in that position discards the exit status. The value was refused on stderr, matched no branch, and fell through to the encrypted file — so on macOS a typo in that variable quietly moved secrets off the keychain and into a different store, while `docs/configuration.md` promised the value was rejected. It now is.
+
+  The previous tests could not have caught it. They called `cs_platform` directly and asserted it returns non-zero; nothing asserted that a caller acts on that. Rewritten to drive the function through `cs -secrets`, the only thing that calls it, they fail without the fix.
+
+- **One malformed session record cost every record after it.** The agent-state reader hands the whole `~/.claude/sessions/` set to a single `jq`, and `jq` abandons the run at the first parse error. A document left half-written by a session that crashed therefore took down every record sorting after it: healthy sessions silently lost their state in `cs -live` because an unrelated session died badly. The one-`jq` path still costs one `jq`; on failure each file is asked separately, so a corrupt document costs only itself.
+
+- **An out-of-range pid read as a live process.** `pid_t` is a signed 32-bit integer, so a value past its maximum is not a process id at all — macOS refuses it, while Linux wraps `4294967295` onto `-1`, which means "every process the caller may signal" and succeeds. Pid `0` meant the caller's own process group on both. A lock file or session record holding either value made a dormant session read as running. Ruled out before `kill` is asked, so the answer no longer depends on how a platform parses its argument.
+
+### Changed
+
+- **The test gate runs suites concurrently.** A full local run took 502 seconds because 53 suites ran one after another; four at a time is 193 seconds on the same machine, both green over every suite. Nothing had been stopping them: the harness has always given each test its own temporary directory and scoped `CS_SESSIONS_ROOT`, `HOME`, `CS_CLAUDE_DIR` and the rest inside it, so suites cannot collide. The capability existed for a CI lane that was deleted with Windows support and simply lost its only consumer.
+
+  The concurrency is invisible in the output — each suite's log is replayed in the order a serial run would have printed it — and `CS_TEST_JOBS=1` restores the serial path, which streams output live for debugging a single suite. The default caps at four rather than at the core count, because wall time is bounded by the slowest single suite; more shards past that point only oversubscribe a shared runner.
+
+### Internal
+
+- **`cs_platform` had three definitions and one caller.** Every other caller was an `= "msys"` comparison and went with Windows support. The copies in `cs` and `cs-statusline` were never invoked — `cs-statusline` branches on `$OSTYPE` and never used its own — so both are gone along with the drift test that existed only because copies existed. `CS_PLATFORM_OVERRIDE` is unchanged and still accepts `macos`, `wsl` and `linux`; the docs now say what it actually steers, which is secrets-backend selection.
+
+- **The CR handling in `cs -secrets` states a reason that outlives Windows.** Its comments justified the base64 detour and the CR strips by a `jq` that opens stdout in text mode, which was a `jq.exe` behaviour; the previous release deleted the equivalent strips elsewhere as Windows-only. Each site now carries the reason that survives — a secret value may contain a CR deliberately, and the raw path cannot tell that from one added in transit — and the hostname strip feeding the password derivation is marked not refactorable, because changing which bytes reach the digest orphans every store already encrypted on that machine.
+
+### Tests & CI
+
+- **The gate reported success when it had run nothing.** `mktemp -d` was unchecked, and an empty log directory makes every suite's output redirection fail — bash abandons a command whose redirection fails, so no suite ran, the missing logs were swallowed and the absent failure markers read as success. Found by review before it shipped, reproduced with a stubbed `mktemp`: three suites that all fail, reported green, zero executed.
+- **The gate's own suite failed under the feature it tests**, inheriting `CS_TEST_SHARD` and handing it to the runner it spawns, so a sharded lane sharded its fixtures.
+- **The two registry readers are held to one document.** The shell and Rust readers implement the same contract in two languages and had drifted three times. They now share `tests/fixtures/claude-session-record.json` — templated by the shell suite, `include_str!`d by the Rust one — verified load-bearing by renaming a field in it and watching both suites go red.
+- `run_all.sh` had no tests of its own; it has nine now. 54 suites, 1283 assertions, plus 315 TUI tests.
+
 ## 2026.8.10
 
 cs drops Windows and Git Bash, and learns to say what each session is actually doing.
