@@ -1044,7 +1044,14 @@ mod tests {
     /// identifiers replaced. Pinning the real document shape here is the point:
     /// a fixture the parser itself generated could not catch a field cs reads
     /// under the wrong name or in the wrong format.
-    const REGISTRY_DOCUMENT: &str = r#"{"pid":70260,"sessionId":"072f4811-2a21-4008-b55f-05d5f193727d","cwd":"/home/example/.claude-sessions/demo","startedAt":1786173098860,"procStart":"Sat Aug  8 07:11:34 2026","version":"2.1.226","peerProtocol":1,"kind":"interactive","entrypoint":"cli","tmux":"main:@2.%12","messagingSocketPath":"/tmp/cc-socks/70260.sock","name":"demo","updatedAt":1786173631759,"status":"busy","statusUpdatedAt":1786173631759}"#;
+    ///
+    /// Shared with tests/test_live.sh, which templates the same bytes for the
+    /// bash reader. The two readers implement one contract in two languages and
+    /// have drifted apart twice; a single document is what keeps them agreeing
+    /// on field names, value types, and above all the procStart string format,
+    /// which is the text both of them compare against `ps`.
+    const REGISTRY_DOCUMENT: &str =
+        include_str!("../../tests/fixtures/claude-session-record.json");
 
     #[test]
     fn agent_record_parses_a_real_session_document() {
