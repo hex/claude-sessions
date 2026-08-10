@@ -274,6 +274,80 @@ test_live_survives_a_malformed_record_sorting_first() {
         "a malformed record must not cost a healthy session its state" || return 1
 }
 
+# ---- the contract shared with parse_agent_record in tui/src/session.rs ----
+#
+# Two readers answer the same question in two languages and have drifted three
+# times. Each case here is pinned on BOTH sides; changing one means changing the
+# other. Asserted against agent_states rather than through cs -live, because the
+# render collapses distinctions the contract turns on.
+states_for() {  # session-name, name-value, status-value
+    local sdir="$CS_SESSIONS_ROOT/$1" pid start
+    pid="$(cat "$sdir/.cs/session.lock")"
+    start="$(TZ=UTC ps -o lstart= -p "$pid" 2>/dev/null \
+        | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    mkdir -p "$CS_CLAUDE_DIR/sessions"
+    printf '{"pid":%s,"name":"%s","status":"%s","procStart":"%s"}\n' \
+        "$pid" "$2" "$3" "$start" > "$CS_CLAUDE_DIR/sessions/$pid.json"
+    ( source "$SCRIPT_DIR/../lib/05-term.sh"
+      source "$SCRIPT_DIR/../lib/56-presence.sh"
+      agent_states )
+}
+
+test_agent_states_refuses_an_empty_name() {
+    command -v jq >/dev/null 2>&1 || return 0
+    make_live_session s1
+    assert_eq "" "$(states_for s1 "" busy)" \
+        "an empty name earns no state: it can match no session" || return 1
+}
+
+test_agent_states_refuses_an_empty_status() {
+    command -v jq >/dev/null 2>&1 || return 0
+    make_live_session s2
+    assert_eq "" "$(states_for s2 demo "")" \
+        "an empty status says nothing a missing one does not" || return 1
+}
+
+test_agent_states_refuses_a_pid_that_is_not_a_number() {
+    command -v jq >/dev/null 2>&1 || return 0
+    make_live_session s3
+    local sdir="$CS_SESSIONS_ROOT/s3" pid start out
+    pid="$(cat "$sdir/.cs/session.lock")"
+    start="$(TZ=UTC ps -o lstart= -p "$pid" 2>/dev/null \
+        | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    mkdir -p "$CS_CLAUDE_DIR/sessions"
+    # A quoted pid is a malformed record, not a session. The TUI's parser reads
+    # the digits only when they are unquoted and refuses this outright, so
+    # accepting it here would show a state in cs -live that the TUI never shows.
+    printf '{"pid":"%s","name":"demo","status":"busy","procStart":"%s"}\n' \
+        "$pid" "$start" > "$CS_CLAUDE_DIR/sessions/$pid.json"
+    out="$( source "$SCRIPT_DIR/../lib/05-term.sh"
+            source "$SCRIPT_DIR/../lib/56-presence.sh"
+            agent_states )"
+    assert_eq "" "$out" "a quoted pid must earn no state" || return 1
+}
+
+test_agent_states_refuses_a_raw_control_byte() {
+    command -v jq >/dev/null 2>&1 || return 0
+    make_live_session s4
+    # A raw control byte is not legal JSON. jq refuses the whole document, so
+    # the session shows no state at all rather than a cleaned one.
+    local raw
+    raw="bu$(printf '\001')sy"
+    assert_eq "" "$(states_for s4 demo "$raw")" \
+        "an illegal raw control byte must earn no state" || return 1
+}
+
+test_agent_states_strips_an_escaped_control_character() {
+    command -v jq >/dev/null 2>&1 || return 0
+    make_live_session s5
+    # Six characters -- backslash u 0 0 0 1 -- which is legal JSON. jq decodes
+    # it to a byte and _scrub_controls removes that byte, so the rendered text
+    # is the value without it.
+    local esc="bu\\u0001sy"
+    assert_eq "demo	busy" "$(states_for s5 demo "$esc")" \
+        "an escaped control character is decoded and scrubbed, not rendered" || return 1
+}
+
 test_agent_states_emits_one_row_when_a_later_record_is_malformed() {
     command -v jq >/dev/null 2>&1 || return 0
     make_live_session healthy
@@ -341,6 +415,11 @@ run_test test_live_ignores_record_whose_start_time_differs
 run_test test_live_ignores_record_with_no_start_time
 run_test test_live_survives_a_record_whose_pid_is_out_of_range
 run_test test_live_survives_a_malformed_record_sorting_first
+run_test test_agent_states_refuses_an_empty_name
+run_test test_agent_states_refuses_an_empty_status
+run_test test_agent_states_refuses_a_pid_that_is_not_a_number
+run_test test_agent_states_refuses_a_raw_control_byte
+run_test test_agent_states_strips_an_escaped_control_character
 run_test test_agent_states_emits_one_row_when_a_later_record_is_malformed
 run_test test_live_falls_back_to_readme_objective
 run_test test_live_filters_readme_placeholder

@@ -4147,8 +4147,15 @@ agent_states() {
     set -- "$dir"/*.json
     [ -e "$1" ] || return 0
 
+    # The contract this shares with parse_agent_record in tui/src/session.rs,
+    # which answers the same question for the TUI. The two have drifted three
+    # times, so the rules are stated once and pinned on both sides: a record
+    # earns a state only with a non-empty name, a non-empty status and a pid
+    # that is a NUMBER. `.pid != null` also admitted a quoted pid, which the TUI
+    # refuses outright -- one session then carried a state in cs -live that the
+    # TUI never showed for it.
     prog='
-        select((.name // "") != "" and (.status // "") != "" and .pid != null)
+        select((.name // "") != "" and (.status // "") != "" and (.pid | type) == "number")
         | [(.pid | tostring), (.procStart // ""), .name, .status] | @tsv
     '
     # One jq for the whole set while every document parses. jq abandons the run

@@ -240,11 +240,51 @@ pub struct AgentRecord {
 /// serves are machine-written, one object per file, and none of these keys
 /// nests or carries an escape, so scanning beats taking a parser dependency.
 /// A value that did carry one yields nothing, and the session shows no state.
+/// True when the document holds a byte JSON forbids: a control character below
+/// 0x20 that is not one of the three legal whitespace bytes. Such a document is
+/// not JSON, `jq` refuses it outright, and the shell reader therefore shows no
+/// state for that session — so scanning for fields must refuse it too rather
+/// than reading a record its counterpart threw away.
+fn has_illegal_raw_control(text: &str) -> bool {
+    text.bytes()
+        .any(|b| b < 0x20 && b != b'\t' && b != b'\n' && b != b'\r')
+}
+
+/// Drop what the shell reader's `tr -d` drops, in both forms a record can carry
+/// it. A control character escaped as `\u00XX` is legal JSON: `jq` decodes it to
+/// a byte and the shell strips that byte, so the text must lose the escape here
+/// to arrive at the same answer. A raw DEL is legal JSON too and is stripped the
+/// same way. Everything else is left exactly as written.
+fn scrub_controls(value: &str) -> String {
+    let v: Vec<char> = value.chars().collect();
+    let mut out = String::with_capacity(value.len());
+    let mut i = 0;
+    while i < v.len() {
+        if v[i] == '\\' && i + 5 < v.len() && (v[i + 1] == 'u' || v[i + 1] == 'U') {
+            let hex: String = v[i + 2..i + 6].iter().collect();
+            if let Ok(cp) = u32::from_str_radix(&hex, 16) {
+                if cp < 0x20 || cp == 0x7f {
+                    i += 6;
+                    continue;
+                }
+            }
+        }
+        let cp = v[i] as u32;
+        if cp < 0x20 || cp == 0x7f {
+            i += 1;
+            continue;
+        }
+        out.push(v[i]);
+        i += 1;
+    }
+    out
+}
+
 fn json_string_field(text: &str, key: &str) -> Option<String> {
     let rest = text.split(&format!("\"{key}\":")).nth(1)?;
     let rest = rest.trim_start().strip_prefix('"')?;
     let end = rest.find('"')?;
-    Some(rest[..end].to_string())
+    Some(scrub_controls(&rest[..end]))
 }
 
 fn json_u32_field(text: &str, key: &str) -> Option<u32> {
@@ -254,10 +294,25 @@ fn json_u32_field(text: &str, key: &str) -> Option<u32> {
     rest[..end].parse().ok()
 }
 
+/// The contract this shares with `agent_states` in lib/56-presence.sh, which
+/// answers the same question for `cs -live`. The two have drifted three times,
+/// so the rules are stated once here and pinned on both sides: a record earns a
+/// state only with a non-empty name, a non-empty status, a numeric pid and a
+/// start time, out of a document that is legal JSON.
 pub fn parse_agent_record(text: &str) -> Option<AgentRecord> {
+    if has_illegal_raw_control(text) {
+        return None;
+    }
+    let name = json_string_field(text, "name")?;
+    let status = json_string_field(text, "status")?;
+    // Empty is refused rather than rendered: a nameless record can match no
+    // session, and a blank status says nothing a missing one does not.
+    if name.is_empty() || status.is_empty() {
+        return None;
+    }
     Some(AgentRecord {
-        name: json_string_field(text, "name")?,
-        status: json_string_field(text, "status")?,
+        name,
+        status,
         pid: json_u32_field(text, "pid")?,
         proc_start: json_string_field(text, "procStart")?,
     })
@@ -1060,6 +1115,153 @@ mod tests {
         assert_eq!(r.status, "busy");
         assert_eq!(r.pid, 70260);
         assert_eq!(r.proc_start, "Sat Aug  8 07:11:34 2026");
+    }
+
+    /// This process is alive by definition and `ps` will confirm its start
+    /// time, so a record naming it is the only hermetic way to exercise the
+    /// liveness half of the contract without spawning anything.
+    fn own_proc_start() -> String {
+        let o = std::process::Command::new("ps")
+            .env("TZ", "UTC")
+            .args(["-o", "lstart=", "-p", &std::process::id().to_string()])
+            .output()
+            .expect("ps runs");
+        String::from_utf8_lossy(&o.stdout).trim().to_string()
+    }
+
+    /// A registry directory holding exactly one record, so each contract case
+    /// varies one field and nothing else. The label keeps concurrent tests in
+    /// separate directories.
+    fn registry_with(label: &str, body: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("cs-registry-{}-{}", label, std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(format!("{}.json", std::process::id())), body).unwrap();
+        dir
+    }
+
+    fn record(name: &str, status: &str) -> String {
+        format!(
+            r#"{{"pid":{},"name":"{}","status":"{}","procStart":"{}"}}"#,
+            std::process::id(),
+            name,
+            status,
+            own_proc_start()
+        )
+    }
+
+    // ---- the contract shared with agent_states in lib/56-presence.sh ----
+    //
+    // These two readers answer the same question in two languages and have
+    // drifted three times. Each case below is pinned on BOTH sides; when one
+    // changes, the other has to change with it.
+
+    #[test]
+    fn agent_statuses_reads_a_live_record() {
+        let dir = registry_with("live", &record("demo", "busy"));
+        assert_eq!(
+            agent_statuses_in(&dir).get("demo").map(String::as_str),
+            Some("busy")
+        );
+    }
+
+    #[test]
+    fn agent_statuses_refuses_an_empty_name() {
+        let dir = registry_with("emptyname", &record("", "busy"));
+        assert!(
+            agent_statuses_in(&dir).is_empty(),
+            "an empty name earns no state: it can match no session, and admitting \
+             it puts an empty key in the map"
+        );
+    }
+
+    #[test]
+    fn agent_statuses_refuses_an_empty_status() {
+        let dir = registry_with("emptystatus", &record("demo", ""));
+        assert!(
+            agent_statuses_in(&dir).is_empty(),
+            "an empty status carries no information and must not be rendered"
+        );
+    }
+
+    #[test]
+    fn agent_statuses_refuses_a_pid_that_is_not_a_number() {
+        let body = format!(
+            r#"{{"pid":"{}","name":"demo","status":"busy","procStart":"{}"}}"#,
+            std::process::id(),
+            own_proc_start()
+        );
+        let dir = registry_with("strpid", &body);
+        assert!(
+            agent_statuses_in(&dir).is_empty(),
+            "a quoted pid is a malformed record, not a session"
+        );
+    }
+
+    #[test]
+    fn agent_statuses_refuses_a_record_with_no_start_time() {
+        let body = format!(
+            r#"{{"pid":{},"name":"demo","status":"busy"}}"#,
+            std::process::id()
+        );
+        let dir = registry_with("nostart", &body);
+        assert!(
+            agent_statuses_in(&dir).is_empty(),
+            "with no start time a record cannot be told from one a recycled pid left behind"
+        );
+    }
+
+    #[test]
+    fn agent_statuses_refuses_a_start_time_that_does_not_match() {
+        let body = format!(
+            r#"{{"pid":{},"name":"demo","status":"busy","procStart":"Mon Jan  1 00:00:00 2001"}}"#,
+            std::process::id()
+        );
+        let dir = registry_with("badstart", &body);
+        assert!(agent_statuses_in(&dir).is_empty(), "the pid was recycled");
+    }
+
+    #[test]
+    fn agent_statuses_refuses_a_raw_control_byte() {
+        let body = format!(
+            "{{\"pid\":{},\"name\":\"demo\",\"status\":\"bu\u{1}sy\",\"procStart\":\"{}\"}}",
+            std::process::id(),
+            own_proc_start()
+        );
+        let dir = registry_with("rawctrl", &body);
+        assert!(
+            agent_statuses_in(&dir).is_empty(),
+            "a raw control byte is not legal JSON, so the shell reader's jq rejects \
+             the whole document; scanning for fields must not accept what jq refuses"
+        );
+    }
+
+    #[test]
+    fn agent_statuses_strips_an_escaped_control_character() {
+        // Six characters -- backslash u 0 0 0 1 -- which is what valid JSON
+        // carrying a control character looks like on disk. Assembled here so
+        // nothing can quietly collapse it into a raw byte.
+        let esc = format!("{}u0001", '\\');
+        let body = format!(
+            r#"{{"pid":{},"name":"demo","status":"bu{}sy","procStart":"{}"}}"#,
+            std::process::id(),
+            esc,
+            own_proc_start()
+        );
+        let dir = registry_with("escctrl", &body);
+        assert_eq!(
+            agent_statuses_in(&dir).get("demo").map(String::as_str),
+            Some("busy"),
+            "an escaped control character is legal JSON; the shell reader decodes it \
+             and scrubs the byte, so this reader must arrive at the same text"
+        );
+    }
+
+    #[test]
+    fn agent_statuses_is_empty_for_a_directory_that_does_not_exist() {
+        let dir = std::env::temp_dir().join(format!("cs-registry-absent-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        assert!(agent_statuses_in(&dir).is_empty());
     }
 
     /// Manual smoke check: read the records Claude Code has actually published
