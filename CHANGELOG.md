@@ -4,6 +4,26 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.8.12
+
+Two readers answer "what is this session doing" — one in shell for `cs -live`, one in Rust for the TUI. They agreed on healthy records and disagreed on four kinds of damaged one, in both directions.
+
+### Fixed
+
+- **A session could show a state in `cs -live` that the TUI never showed for it.** A record whose pid is written as a JSON string — `"pid":"4242"` rather than `"pid":4242` — was accepted by the shell reader, because `.pid != null` is true for a string and the digits then passed the shell's own numeric guard. The Rust reader refused it outright. The shell now requires the pid to be a number, so the two surfaces cannot disagree about whether a record names a session.
+
+- **A malformed record could write a control byte to your terminal.** The TUI's reader scans for fields rather than parsing JSON, so a raw control character — the range that includes `ESC` — was copied out of the file and rendered. Such a document is not legal JSON, which is why the shell reader's `jq` had always refused it; the Rust reader now refuses it too. This needs a file Claude Code did not write, but the file lives in a directory cs does not own, so the reader no longer trusts its bytes.
+
+  The escaped form of the same thing was wrong the other way. A backslash-u-0001 escape is perfectly legal JSON: the shell decodes it and strips the byte, while the TUI printed the six literal characters. Both now arrive at the same text.
+
+- **An empty name or status earned a state in the TUI.** A record naming no session was admitted with an empty key, and a blank status rendered as blank. Both are refused now, as the shell reader always did.
+
+### Tests
+
+- The two readers had drifted three times and the Rust side had no hermetic test at all — its only directory-level test is skipped by default, so nothing exercised it in CI. It has nine now, built around a record naming the test process itself: alive by definition, and `ps` confirms its start time, so the liveness half of the contract runs without spawning anything. Five matching cases on the shell side assert the reader directly rather than through the rendered line, because the render collapses distinctions the contract turns on.
+- The release runbook now waits for CI on the content being released before the tag is cut. 2026.8.10 and 2026.8.11 were both tagged on commits whose CI then went red, and both were repaired by the very next commit — so the branch recovered while the tags kept pointing at red. Both failures were Linux-only and neither could reproduce on a macOS dev box.
+- 55 suites, 1292 assertions, plus 324 TUI tests.
+
 ## 2026.8.11
 
 Four items filed as cleanup, which turned out to be hiding five defects.

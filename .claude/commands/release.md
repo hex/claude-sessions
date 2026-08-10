@@ -37,6 +37,35 @@ via **AskUserQuestion** before proceeding — bumping, committing, and tagging f
 feature branch or a stale `main` puts the tag on the wrong commit (and Step 8's bare
 `git push` may fail). Only continue once you are on `main` and up to date with origin.
 
+### 0b. Preflight: The Release Content Must Be Green on CI First
+
+Step 5 runs the suite **locally**, which is one platform. Every job in
+`.github/workflows/test.yml` must have judged the content being released
+**before** the tag is cut, or the tag lands on a commit CI has never seen.
+
+Push anything unpushed, then wait for the Test workflow on `HEAD` and read every
+job:
+
+```bash
+git push                       # the release content, not the release commit
+gh run list --workflow=test.yml --branch main --limit 1 \
+  --json status,conclusion,headSha --jq '.[0]'
+# once completed, read the per-job results — an overall "success" is not enough
+gh run list --workflow=test.yml --branch main --limit 1 --json databaseId --jq '.[0].databaseId' \
+  | xargs -I{} gh run view {} --json jobs --jq '.jobs[] | "\(.conclusion)\t\(.name)"'
+```
+
+Confirm the run's `headSha` is the commit you are about to release from — a
+green run on an older commit proves nothing about this one. If any job failed,
+STOP: fix it and re-verify before bumping.
+
+**Why this step exists.** 2026.8.10 and 2026.8.11 were both tagged on commits
+whose CI then went red, and both were repaired by the very next commit — so
+`main` recovered while the *tags* kept pointing at red. Both failures were
+Linux-only (a signed-`pid_t` split in `kill`, then a SIGPIPE race that only lost
+on a 2-core runner), and neither could reproduce on a macOS dev box. Local green
+is one platform's opinion.
+
 ### 1. Bump Version Number
 
 Read `lib/00-header.sh` and find the VERSION line (near the top). Calculate the new version:
