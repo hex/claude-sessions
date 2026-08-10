@@ -261,18 +261,24 @@ assert_file_not_contains() {
     fi
 }
 
+# Fed by here-string rather than by a pipe, and deliberately so: `grep -q` exits
+# at the first match, so `echo "$output" | grep -q` leaves echo writing into a
+# closed pipe. echo dies of SIGPIPE (141), `pipefail` promotes that to the
+# pipeline's status, and a pattern that MATCHED is reported as a failure -- the
+# earlier the match and the larger the output, the likelier it is. A here-string
+# is a file, not a pipe, so there is no reader to close.
 assert_output_contains() {
     local output="$1"; local pattern="$2"; local msg="${3:-output should contain '$pattern'}"
-    if ! echo "$output" | grep -q -- "$pattern"; then
+    if ! grep -q -- "$pattern" <<< "$output"; then
         echo "  FAIL: $msg"
-        echo "    output: $(echo "$output" | head -5)"
+        echo "    output: $(head -5 <<< "$output")"
         return 1
     fi
 }
 
 assert_output_not_contains() {
     local output="$1"; local pattern="$2"; local msg="${3:-output should not contain '$pattern'}"
-    if echo "$output" | grep -q -- "$pattern"; then
+    if grep -q -- "$pattern" <<< "$output"; then
         echo "  FAIL: $msg"
         return 1
     fi
