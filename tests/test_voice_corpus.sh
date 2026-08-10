@@ -31,12 +31,16 @@ run_build() { "$VOICE_SCRIPT" 2>&1; }
 # none is a live secret, and none should be replaced with one.
 cred_fixtures() {
     local gh='ghp' aws='AK' slack='xoxb' stripe='sk' jwt='eyJ'
+    local gl='glpat' npm='npm' goog='AIza'
     printf '%s\n' \
         "${gh}_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789" \
         "${aws}IAIOSFODNN7EXAMPLE" \
         "${slack}-2401-5738-abcdefghijklmnop" \
         "${stripe}_live_4eC39HqLyjWDarjtT1zdp7dc" \
-        "${jwt}hbGciOiJIUzI1NiJ9.${jwt}zdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27u"
+        "${jwt}hbGciOiJIUzI1NiJ9.${jwt}zdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27u" \
+        "${gl}-AbCdEfGhIjKlMnOpQrSt" \
+        "${npm}_AbCdEfGhIjKlMnOpQrStUvWx" \
+        "${goog}SyAbCdEfGhIjKlMnOpQrStUvWxYz01234567"
 }
 
 # A token embedded in a URL or after "Bearer ", carrying no keyword=value shape.
@@ -328,7 +332,7 @@ test_url_userinfo_and_bearer_redacted() {
     # below would read 1 no matter how many lines were redacted.
     wrap() { printf 'opening line for case %s here\n%s\nclosing line for case %s' "$2" "$1" "$2"; }
     add_msg "$f" "$(wrap "connect with postgres://admin:hunter2secret@db.internal:5432/appdb" one)" "2026-07-01T10:00:00Z"
-    add_msg "$f" "$(wrap "run git clone https://alex:${tok}@github.com/x/y first" two)" "2026-07-01T10:00:01Z"
+    add_msg "$f" "$(wrap "run git clone https://builder:${tok}@example.com/x/y first" two)" "2026-07-01T10:00:01Z"
     add_msg "$f" "$(wrap "call it with Authorization: Bearer ${tok} then retry" three)" "2026-07-01T10:00:02Z"
     run_build > /dev/null || { echo "  FAIL: build exited non-zero"; return 1; }
     local n_redacted; n_redacted=$(grep -c '\[redacted line\]' "$(corpus_path)" || true)
@@ -373,15 +377,54 @@ test_hyphenated_prose_survives_redaction() {
     done
 }
 
+# The bearer rule matches a keyword plus a 12+ character run. Ordinary English
+# words clear that length easily, and a rule that eats "bearer authentication"
+# deletes the sentences an engineer actually writes about auth.
+test_bearer_followed_by_a_plain_word_survives() {
+    local f; f="$(proj_file projA)"
+    add_msg "$f" "we use bearer authentication for the internal api here" "2026-07-01T10:00:00Z"
+    add_msg "$f" "the bearer authorization header is missing on that call" "2026-07-01T10:00:01Z"
+    add_msg "$f" "that is the bearer responsibility of the calling service" "2026-07-01T10:00:02Z"
+    run_build > /dev/null || { echo "  FAIL: build exited non-zero"; return 1; }
+    local phrase
+    for phrase in "bearer authentication" "bearer authorization" "bearer responsibility"; do
+        assert_file_contains "$(corpus_path)" "$phrase" \
+            "ordinary prose ($phrase) must not be redacted" || return 1
+    done
+}
+
+# Requiring a lowercase letter in the opaque-run rule excludes an all-caps
+# token, and there is no benign 40+ run of capitals and digits.
+test_uppercase_opaque_run_redacted() {
+    local f tok; f="$(proj_file projA)"
+    tok="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGH"
+    add_msg "$f" "$(printf 'opening line here\nthe value is %s ok\nclosing line here' "$tok")"
+    run_build > /dev/null || { echo "  FAIL: build exited non-zero"; return 1; }
+    if grep -qF "$tok" "$(corpus_path)"; then
+        echo "  FAIL: an all-caps opaque run leaked into corpus"; return 1
+    fi
+    assert_file_contains "$(corpus_path)" "\[redacted line\]" \
+        "the opaque run should be redacted, not the message dropped" || return 1
+}
+
 test_shas_and_paths_survive_redaction() {
     local f; f="$(proj_file projA)"
     add_msg "$f" "revert 3f2a9c1b8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a since it broke the build" "2026-07-01T10:00:00Z"
     add_msg "$f" "look in /System/Library/Frameworks/CoreFoundation/Headers for the header" "2026-07-01T10:00:01Z"
+    # A path carrying a DIGIT is the case the mixed-case-and-digits condition
+    # was blind to, and a digit-free fixture is exactly the shape where the
+    # code's own assumption holds. Unity build paths are the common instance.
+    add_msg "$f" "the gradle error points at Library/Bee/Android/Prj/IL2CPP/Gradle/unityLibrary here" "2026-07-01T10:00:02Z"
+    add_msg "$f" "unpack it into vendor/Modules/Runtime/Core/Private/Serialization/Archive2Reader now" "2026-07-01T10:00:03Z"
     run_build > /dev/null || { echo "  FAIL: build exited non-zero"; return 1; }
     assert_file_contains "$(corpus_path)" "since it broke the build" \
         "a git SHA must not trigger redaction" || return 1
     assert_file_contains "$(corpus_path)" "for the header" \
         "a long file path must not trigger redaction" || return 1
+    assert_file_contains "$(corpus_path)" "IL2CPP" \
+        "a long path containing a digit must not trigger redaction" || return 1
+    assert_file_contains "$(corpus_path)" "Archive2Reader" \
+        "a deep source path containing a digit must not trigger redaction" || return 1
 }
 
 run_test test_typed_string_message_lands_in_corpus
@@ -406,6 +449,8 @@ run_test test_token_families_redacted
 run_test test_url_userinfo_and_bearer_redacted
 run_test test_anthropic_key_shape_redacted
 run_test test_hyphenated_prose_survives_redaction
+run_test test_bearer_followed_by_a_plain_word_survives
+run_test test_uppercase_opaque_run_redacted
 run_test test_shas_and_paths_survive_redaction
 
 report_results

@@ -44,7 +44,12 @@ while IFS= read -r f; do
         # credential-shaped out of it.
         def looks_secret:
               test("(api[_-]?key|token|secret|password|passwd|bearer)[[:space:]]*[=:][[:space:]]*[^[:space:]]+"; "i")
-           or test("bearer[[:space:]]+[A-Za-z0-9._~+/=-]{12,}"; "i")
+           # The bearer value must look like a token, not a word. A plain 12+
+           # character run matches ordinary English (bearer authentication,
+           # bearer authorization, bearer responsibility), so require at least
+           # one non-letter in the captured value.
+           or ([match("bearer[[:space:]]+([A-Za-z0-9._~+/=-]{12,})"; "gi").captures[0].string]
+               | any(test("[^A-Za-z]")))
            or test("\\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{16,}")
            or test("\\bglpat-[A-Za-z0-9_-]{16,}")
            or test("\\bxox[baprs]-[A-Za-z0-9-]{10,}")
@@ -59,13 +64,23 @@ while IFS= read -r f; do
            or test("\\bAIza[A-Za-z0-9_-]{20,}")
            or test("\\beyJ[A-Za-z0-9_-]{8,}\\.eyJ[A-Za-z0-9_-]{8,}")
            or test("[a-z][a-z0-9+.-]*://[^/[:space:]]+:[^@[:space:]]+@")
-           # A long opaque run, but only when it mixes case AND digits the way
-           # encoded secrets do. Requiring all three is what keeps a 40-hex git
-           # SHA (no uppercase) and a long absolute path (no digits) out: both
-           # are ordinary engineering prose and carry the voice this corpus
-           # exists to capture.
+           # A long opaque run, but only when it looks encoded rather than
+           # typed. Three conditions, each excluding a real shape that is not a
+           # secret. Rejecting pure lowercase hex keeps a 40-char git SHA out.
+           # Counting slashes keeps deep paths out: `/` sits in the class above,
+           # so a build path stays one unbroken run, and any digit in it (IL2CPP
+           # in a Unity tree, a versioned directory) would otherwise qualify; an
+           # encoded blob carries at most an incidental slash while a path is
+           # mostly slashes. Requiring a digit and a letter keeps prose runs out.
+           # Case is deliberately NOT required in both directions: an all-caps
+           # token of 40+ characters is a credential, and there is no benign
+           # engineering shape of that form.
+           # NOTE: no apostrophes in this block. The whole jq program is a
+           # single-quoted bash string, so one would terminate it.
            or ([match("[A-Za-z0-9+/=]{40,}"; "g").string]
-               | any(test("[a-z]") and test("[A-Z]") and test("[0-9]")));
+               | any(test("[0-9]") and test("[A-Za-z]")
+                     and ((test("^[0-9a-f]+$")) | not)
+                     and (([match("/"; "g")] | length) <= 1)));
         fromjson? | select(type == "object")
         | select(.type == "user")
         | select((.isMeta // false) | not)
