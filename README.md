@@ -88,7 +88,7 @@ The installer:
 
 Install inside a WSL2 distro exactly as on Linux (the command above). cs targets macOS and Linux; native Windows and Git Bash are not supported.
 
-The platform is detected automatically; override with `CS_PLATFORM_OVERRIDE=macos|wsl|linux` for testing.
+The platform is detected automatically. It decides one thing — whether secrets go to the macOS keychain or to an encrypted file — and `CS_PLATFORM_OVERRIDE=macos|wsl|linux` forces that choice for testing. Any other value is refused rather than treated as "not macOS".
 
 ## Usage
 

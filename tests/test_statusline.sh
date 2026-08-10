@@ -1779,8 +1779,13 @@ test_sl_theme_non_macos_defaults_light() {
     ( _load_sl_functions
       unset CS_TERM_THEME CS_TERM_THEME_AUTO 2>/dev/null || true
       OSTYPE="linux-gnu"
+      # The appearance probe is macOS-only and costs a fork; off macOS the
+      # theme must resolve without reaching for it at all, not merely land on
+      # the same answer after asking.
+      _defaults_called=0; defaults() { _defaults_called=1; return 0; }
       _sl_detect_theme
-      assert_eq "light" "$SL_THEME" "non-macOS with no launch theme defaults light" || return 1 )
+      assert_eq "light" "$SL_THEME" "non-macOS with no launch theme defaults light" || return 1
+      assert_eq "0" "$_defaults_called" "non-macOS must not run the appearance probe" || return 1 )
 }
 
 # _sl_invalidate_stale_bg blanks CS_TERM_BG_RGB once the live theme (SL_THEME)
