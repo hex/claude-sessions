@@ -4,6 +4,40 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.8.13
+
+Two changes to what the tool reads and writes on your behalf: a linter comes out, and the voice corpus stops learning from text you never typed.
+
+### Removed
+
+- **`cs -lint` and the `prose-lint` Stop hook are gone.** The linter matched em-dashes and a banned-phrase list in prose written during a session, and the hook blocked turn-end until they were cleared. Neither survives. The `prose-hygiene` skill still carries the full taxonomy, and `/summary` still applies it with a subagent judge, which reads meaning rather than matching patterns; a regex only ever enforced the lexical fraction of it.
+
+  Upgrading deletes the deployed hook and strips its `settings.json` registration, so nothing is left calling a verb that no longer exists. `cs -lint` now reports an unknown command.
+
+  `/wrap` got faster as a direct result. Its prose gate spawned a judge subagent and re-ran it on a revise verdict, which was most of what a wrap cost; it now stops once the summary is written.
+
+### Fixed
+
+- **The `/voice` corpus was learning from text you never typed.** The builder decided authorship from the record type alone and never read `promptSource`, the field Claude Code stamps on every user turn. Anything the SDK or the system put through the user channel was distilled as your writing voice. On the machine this was found on, 1,717 `sdk` and 779 `system` records were passing that gate against 2,398 genuinely typed ones, and rebuilding the corpus now drops 2,504 records and shrinks it by a third. Records with no `promptSource` are still kept, so older transcripts are unaffected.
+
+- **The corpus redactor kept real credentials and destroyed real prose.** Its catch-all matched any run of 40 or more characters from a class that included `/`, so a git SHA and a long absolute path were replaced with `[redacted line]`, while the rules missed most real tokens: a separator inside a token breaks the run, and the keyword rule wanted a colon or equals sign immediately after the keyword. GitHub PATs, AWS key ids, Slack tokens, JWTs, Stripe and Anthropic keys, `DATABASE_URL=postgres://user:pass@host` and `Authorization: Bearer <token>` all survived into a plaintext file the skill reads on every rebuild.
+
+  The rules are now anchored on the issuers that actually appear, plus a pattern for credentials embedded in a URL and one for `Bearer` followed by a space. Anthropic keys needed their own rule: an `api03-` segment breaks any pattern wanting unbroken alphanumerics, and matching a bare `sk-` would have eaten every `task-`, `risk-` and `disk-` in your prose.
+
+- **The first cut of that fix was still wrong, and the release gate caught it.** Measured against the real transcript set rather than fixtures: 2,384 files, exactly two redactions, both false positives, zero credentials caught. A deep path stays one unbroken run because `/` is in the class, so any digit in it (`IL2CPP` in a Unity tree) satisfied the new mixed-case-and-digits test; and the `Bearer` rule matched the keyword plus any twelve-character word, so `bearer authentication` was replaced too. The catch-all now counts slashes, since an encoded blob carries at most an incidental one while a path is mostly slashes, and rejects pure lowercase hex to keep git SHAs out. The bearer rule now requires the value to contain a non-letter.
+
+  A deny-list cannot enumerate every secret, so this stays best-effort by design. The skill is now also told never to copy anything credential-shaped into the profile, not only into a draft: the profile persists and is reloaded every time you use it.
+
+### Known follow-up
+
+- A message whose entire content is one redacted line becomes fifteen characters, falls under the short-ack threshold, and is then excluded from the appendix, so it lands in no drop bucket and the stats header can report zero dropped while content was lost. Not fixed here.
+
+### Tests
+
+- `tests/test_no_lint.sh` guards the removal, including the membership that makes an upgrade clean up after itself rather than leaving a registered hook calling a deleted verb.
+- The voice corpus suite grew from 16 tests to 25, pinning false-positive cases beside the leak cases. The path fixture now carries a digit: the previous one was the single shape where the code's own assumption held, so it could never have failed, which is how the redactor shipped inverted twice.
+- 54 suites and 324 TUI tests, green on both platforms.
+
 ## 2026.8.12
 
 Two readers answer "what is this session doing" — one in shell for `cs -live`, one in Rust for the TUI. They agreed on healthy records and disagreed on four kinds of damaged one, in both directions.
