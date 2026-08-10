@@ -34,9 +34,18 @@ bash tests/run_all.sh
 # Run a single test file
 bash tests/test_hooks.sh
 
+# Run the suites one at a time, streaming each one's output live
+CS_TEST_JOBS=1 bash tests/run_all.sh
+
 # Run the Rust TUI tests
 cargo test --manifest-path tui/Cargo.toml
 ```
+
+`run_all.sh` runs several suites at once by default and replays their output in
+the order a serial run would have printed it, so the concurrency is invisible
+unless something fails. `CS_TEST_JOBS=1` runs them one at a time and streams
+each suite's output as it happens, which is what you want when bisecting a
+failure inside a single suite.
 
 Every bash suite under `tests/` plus the Rust TUI tests must
 pass before submitting changes; CI (`.github/workflows/test.yml`) runs them on

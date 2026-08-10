@@ -44,6 +44,8 @@ make_live_session() { # name
 # were both read off live records Claude Code had written; a caller in any other
 # zone that formats the time locally will not match what cs reads back. Pass a
 # third argument to override the start time and stand in for a recycled pid.
+REGISTRY_FIXTURE="$SCRIPT_DIR/fixtures/claude-session-record.json"
+
 make_registry_record() {  # name, status, [procStart]
     local sdir="$CS_SESSIONS_ROOT/$1" pid start
     pid="$(cat "$sdir/.cs/session.lock")"
@@ -54,11 +56,22 @@ make_registry_record() {  # name, status, [procStart]
             | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
     fi
     mkdir -p "$CS_CLAUDE_DIR/sessions"
-    cat > "$CS_CLAUDE_DIR/sessions/$pid.json" <<EOF
-{"pid": $pid, "name": "$1", "status": "$2", "procStart": "$start",
- "cwd": "$sdir", "peerProtocol": 1, "kind": "interactive",
- "messagingSocketPath": "/tmp/cc-socks/$pid.sock"}
-EOF
+    # Templated from the fixture the TUI's parser test include_str!s, so both
+    # readers are held to one document rather than to two hand-written
+    # approximations that drift. sed rather than jq on purpose: jq would
+    # round-trip the record through a parser and re-emit its own formatting,
+    # and then this suite would stop exercising the fixture's actual bytes.
+    # Substitutions are key-anchored so the pid inside the socket path cannot be
+    # rewritten by accident. sed interpolates the replacement, so a name or
+    # status containing & \ or | would corrupt the output; every caller passes a
+    # plain identifier. A control-character case would need printf and a \u
+    # escape instead of a raw byte here.
+    sed -e 's|"pid":70260|"pid":'"$pid"'|' \
+        -e 's|/tmp/cc-socks/70260\.sock|/tmp/cc-socks/'"$pid"'.sock|' \
+        -e 's|"name":"demo"|"name":"'"$1"'"|' \
+        -e 's|"status":"busy"|"status":"'"$2"'"|' \
+        -e 's|"procStart":"Sat Aug  8 07:11:34 2026"|"procStart":"'"$start"'"|' \
+        "$REGISTRY_FIXTURE" > "$CS_CLAUDE_DIR/sessions/$pid.json"
 }
 
 # Create a session whose lock holds a dead pid (started, then killed+reaped).
@@ -191,6 +204,23 @@ test_live_empty_root_message_and_exit0() {
     assert_eq "0" "$rc" "empty root exits 0" || return 1
 }
 
+# The fixture is shared with the TUI's parser test, which include_str!s it, so
+# an edit here reaches both readers. Each field make_registry_record rewrites
+# must appear exactly once, or the substitution silently stops applying and
+# every test built on it starts asserting against the fixture's own defaults --
+# green, and testing nothing.
+test_registry_fixture_sentinels_are_unique() {
+    command -v jq >/dev/null 2>&1 || return 0
+    jq -e . "$REGISTRY_FIXTURE" >/dev/null 2>&1 \
+        || { echo "fixture is not valid JSON"; return 1; }
+    local pat seen
+    for pat in '"pid":70260' '"name":"demo"' '"status":"busy"' \
+               '"procStart":"Sat Aug  8 07:11:34 2026"' '/tmp/cc-socks/70260.sock'; do
+        seen="$(grep -o -F "$pat" "$REGISTRY_FIXTURE" | grep -c .)"
+        assert_eq "1" "$seen" "fixture sentinel $pat must occur exactly once" || return 1
+    done
+}
+
 test_live_shows_agent_status_from_registry() {
     command -v jq >/dev/null 2>&1 || return 0
     make_live_session working
@@ -227,6 +257,56 @@ test_live_survives_a_record_whose_pid_is_out_of_range() {
         "one unusable record must not cost every other session its state" || return 1
 }
 
+test_live_survives_a_malformed_record_sorting_first() {
+    command -v jq >/dev/null 2>&1 || return 0
+    make_live_session healthy
+    make_registry_record healthy busy
+    # One corrupt document must cost only itself. The whole glob goes to a single
+    # jq, and jq abandons the run at a parse error, so a malformed file sorting
+    # BEFORE a good one took every record after it down as well -- a healthy
+    # session silently losing its state because an unrelated one crashed
+    # mid-write. Named "1.json" so it sorts ahead of any real pid.
+    mkdir -p "$CS_CLAUDE_DIR/sessions"
+    printf '{"pid": 1, "name": "broken", "status": NOT-VALID-JSON\n' \
+        > "$CS_CLAUDE_DIR/sessions/1.json"
+    local out; out="$("$CS_BIN" -live 2>&1)"
+    assert_output_contains "$out" "healthy.*busy" \
+        "a malformed record must not cost a healthy session its state" || return 1
+}
+
+test_agent_states_emits_one_row_when_a_later_record_is_malformed() {
+    command -v jq >/dev/null 2>&1 || return 0
+    make_live_session healthy
+    make_registry_record healthy busy
+    # The mirror of the case above, and the one that catches the WRONG repair.
+    # jq emits the good record BEFORE hitting the parse error, so a fallback that
+    # keeps that partial output and appends its per-file retry lists the session
+    # twice.
+    #
+    # Asserted against agent_states directly, not through cs -live: cmd_live
+    # prints one line per session DIRECTORY and resolves state with
+    # agent_state_of, which returns the first matching row. A duplicated row is
+    # therefore invisible at the CLI, and a test that counted output lines would
+    # pass against the appending implementation while claiming to reject it.
+    mkdir -p "$CS_CLAUDE_DIR/sessions"
+    printf '{"pid": 2, "name": "broken", "status": NOT-VALID-JSON\n' \
+        > "$CS_CLAUDE_DIR/sessions/999999999.json"
+    local rows state
+    rows="$( source "$SCRIPT_DIR/../lib/05-term.sh"
+             source "$SCRIPT_DIR/../lib/56-presence.sh"
+             agent_states | grep -c '^healthy' || true )"
+    assert_eq "1" "$rows" "agent_states must emit exactly one row for a session" || return 1
+    # The row COUNT alone cannot see the failure, because a command substitution
+    # strips the trailing newline: the retry's first record would be glued onto
+    # the partial output's last one, producing a single CORRUPTED row rather
+    # than two clean ones, whose status field reads "busy<pid>...". Assert the
+    # value, which is what the render surfaces.
+    state="$( source "$SCRIPT_DIR/../lib/05-term.sh"
+              source "$SCRIPT_DIR/../lib/56-presence.sh"
+              agent_state_of "$(agent_states)" healthy )"
+    assert_eq "busy" "$state" "the state must survive intact, not absorb the next record" || return 1
+}
+
 test_live_ignores_record_with_no_start_time() {
     command -v jq >/dev/null 2>&1 || return 0
     make_live_session unverifiable
@@ -254,11 +334,14 @@ run_test test_live_includes_heartbeat_session
 run_test test_live_excludes_cold_heartbeat_session
 run_test test_live_includes_live_excludes_dead
 run_test test_live_shows_presence_status
+run_test test_registry_fixture_sentinels_are_unique
 run_test test_live_shows_agent_status_from_registry
 run_test test_live_gives_each_session_its_own_agent_status
 run_test test_live_ignores_record_whose_start_time_differs
 run_test test_live_ignores_record_with_no_start_time
 run_test test_live_survives_a_record_whose_pid_is_out_of_range
+run_test test_live_survives_a_malformed_record_sorting_first
+run_test test_agent_states_emits_one_row_when_a_later_record_is_malformed
 run_test test_live_falls_back_to_readme_objective
 run_test test_live_filters_readme_placeholder
 run_test test_live_marks_current_session

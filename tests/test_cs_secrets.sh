@@ -373,12 +373,33 @@ test_export_produces_eval_format() {
     assert_output_contains "$output" "export CS_SECRET_DB_PASS=" "Should export db_pass" || return 1
 }
 
-# Multiple multi-line secrets must ALL export byte-exact -- not just the last.
-# The single-secret round-trip tests cover value CR-protection; this one covers
-# the export path carrying MORE THAN ONE secret, where a per-line CR bug would
-# corrupt every value but the last. Multi-line values are load-bearing: a
-# single-line value cannot carry an interior CR, so it could not catch a broken
-# json_value at all.
+# Multiple multi-line secrets must ALL survive byte-exact -- not just the last.
+# Multi-line values are load-bearing here: a single-line value cannot carry an
+# interior newline, so it could not tell a working json_value from one that
+# mangles the value path. More than one secret is load-bearing too, because a
+# per-line defect corrupts every value but the final one, which is precisely
+# the shape that reads as healthy when only one secret is checked.
+test_multi_line_secrets_survive_get_and_export() {
+    local pem_a pem_b
+    pem_a=$'-----BEGIN A-----\nalpha-one\nalpha-two\n-----END A-----'
+    pem_b=$'-----BEGIN B-----\nbeta-one\nbeta-two\n-----END B-----'
+
+    printf '%s' "$pem_a" | "$CS_SECRETS_BIN" set key_a >/dev/null 2>&1 || return 1
+    printf '%s' "$pem_b" | "$CS_SECRETS_BIN" set key_b >/dev/null 2>&1 || return 1
+
+    local got_a got_b
+    got_a=$("$CS_SECRETS_BIN" get key_a 2>/dev/null) || return 1
+    got_b=$("$CS_SECRETS_BIN" get key_b 2>/dev/null) || return 1
+    assert_eq "$pem_a" "$got_a" "get must return the first multi-line secret unchanged" || return 1
+    assert_eq "$pem_b" "$got_b" "get must return the second multi-line secret unchanged" || return 1
+
+    local out
+    out=$("$CS_SECRETS_BIN" export 2>/dev/null) || return 1
+    ( eval "$out"
+      assert_eq "$pem_a" "${CS_SECRET_KEY_A:-}" "export must carry the first secret unchanged" || exit 1
+      assert_eq "$pem_b" "${CS_SECRET_KEY_B:-}" "export must carry the second secret unchanged" || exit 1
+    ) || return 1
+}
 
 test_export_is_eval_safe() {
     "$CS_SECRETS_BIN" set test_key "value with spaces" 2>&1
@@ -928,10 +949,6 @@ test_export_refuses_a_hostile_name_already_in_the_store() {
     assert_output_not_contains "$out" ";TOUCH " "must not emit the injectable line" || return 1
     assert_output_contains "$out" "a;touch" "the refusal must name the offending key" || return 1
 }
-
-
-# The same value path feeds the eval'd export, where a CR lands inside the
-# quoted value rather than at the line end.
 
 
 test_import_file_aborts_when_the_store_write_fails() {
@@ -1675,6 +1692,7 @@ run_test test_purge_empty_session
 
 # Export
 run_test test_export_produces_eval_format
+run_test test_multi_line_secrets_survive_get_and_export
 run_test test_export_is_eval_safe
 
 # Encrypted file internals

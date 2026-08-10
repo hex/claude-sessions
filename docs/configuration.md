@@ -75,7 +75,8 @@ export CS_NO_ITERM2="1"
 export CS_TMUX_BIN="/opt/homebrew/bin/tmux"
 
 # Force the detected platform instead of probing for it; any other
-# value is rejected
+# value is rejected. Read by cs -secrets only, to choose between the
+# macOS keychain and the encrypted file
 export CS_PLATFORM_OVERRIDE="linux"   # macos, wsl, or linux
 ```
 

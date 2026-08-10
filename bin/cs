@@ -95,29 +95,6 @@ HOOKS_DEPLOY_DIR="${CS_HOOKS_DIR:-$HOME/.claude/hooks/cs}"
 # directory names under ~/.claude/projects/ (each `/` and `.` becomes `-`).
 # Used by setup_auto_memory and _doctor_check_token_cost to locate the
 # transcript directory for a given workspace.
-# Returns one of: macos | wsl | linux   (cached after first detect)
-cs_platform() {
-    # Test/override seam: FIRST branch, validated, cache-bypassing.
-    if [ -n "${CS_PLATFORM_OVERRIDE:-}" ]; then
-        case "$CS_PLATFORM_OVERRIDE" in
-            macos|wsl|linux) printf '%s' "$CS_PLATFORM_OVERRIDE"; return 0 ;;
-            *) printf 'cs: invalid CS_PLATFORM_OVERRIDE: %s\n' "$CS_PLATFORM_OVERRIDE" >&2; return 1 ;;
-        esac
-    fi
-    [ -n "${_CS_PLATFORM:-}" ] && { printf '%s' "$_CS_PLATFORM"; return 0; }
-    local p
-    case "$(uname -s 2>/dev/null)" in
-        Darwin) p=macos ;;
-        Linux)
-            if [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null; then
-                p=wsl
-            else
-                p=linux
-            fi ;;
-        *) p=linux ;;
-    esac
-    _CS_PLATFORM="$p"; printf '%s' "$p"
-}
 _claude_encode_path() {
     local p="$1"
     p="${p//\//-}"
@@ -4162,7 +4139,7 @@ session_status() {  # session_dir
 # count stays flat however many sessions are live. Callers render every live
 # session, and asking per session cost two forks each.
 agent_states() {
-    local dir="${CS_CLAUDE_DIR:-$HOME/.claude}/sessions" records pidlist="" started pid rest
+    local dir="${CS_CLAUDE_DIR:-$HOME/.claude}/sessions" records pidlist="" started pid rest prog f
     [ -d "$dir" ] || return 0
     command -v jq >/dev/null 2>&1 || return 0
     # An unmatched glob would hand jq the literal pattern, which it opens, fails
@@ -4170,10 +4147,22 @@ agent_states() {
     set -- "$dir"/*.json
     [ -e "$1" ] || return 0
 
-    records="$(jq -r '
+    prog='
         select((.name // "") != "" and (.status // "") != "" and .pid != null)
         | [(.pid | tostring), (.procStart // ""), .name, .status] | @tsv
-    ' "$dir"/*.json 2>/dev/null || true)"
+    '
+    # One jq for the whole set while every document parses. jq abandons the run
+    # at the first parse error, so a single file a session crashed mid-write
+    # would otherwise take every record sorting after it -- healthy sessions
+    # losing their state because an unrelated one died badly. The partial output
+    # is discarded rather than appended to, or a record read before the error
+    # would arrive twice.
+    if ! records="$(jq -r "$prog" "$dir"/*.json 2>/dev/null)"; then
+        records=""
+        for f in "$dir"/*.json; do
+            records="$records$(jq -r "$prog" "$f" 2>/dev/null)"$'\n'
+        done
+    fi
     [ -n "$records" ] || return 0
 
     # Collecting the pids in the shell rather than forking cut keeps this to the
