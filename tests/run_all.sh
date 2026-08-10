@@ -79,7 +79,12 @@ if [ "$jobs_n" -gt 1 ] && [ "$total" -gt 1 ]; then
     # replays them in the same order a serial run would print them -- the
     # concurrency is invisible in the output. Failures are recorded as marker
     # files because a background subshell cannot append to the parent's array.
-    logdir="$(mktemp -d)"
+    # Checked, because an empty logdir is silently catastrophic rather than
+    # noisy: every suite is launched with its output redirected into this
+    # directory, bash abandons a command whose redirection fails, and the
+    # missing log then reads as a suite that produced no output and did not
+    # fail. The gate would report every suite passing having run none of them.
+    logdir="$(mktemp -d)" || { echo "cannot create a scratch directory for the test logs" >&2; exit 2; }
     trap 'rm -rf "$logdir"' EXIT
     j=0
     while [ "$j" -lt "$jobs_n" ]; do

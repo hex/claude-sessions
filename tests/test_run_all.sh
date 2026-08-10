@@ -7,6 +7,14 @@ source "$SCRIPT_DIR/test_lib.sh"
 
 RUN_ALL="$SCRIPT_DIR/run_all.sh"
 
+# These tests spawn run_all.sh, which reads both of these from the environment,
+# and the outer gate launches suites with a plain `bash` that passes its own
+# environment straight through. Left ambient, a sharded CI lane would make this
+# suite shard its own FIXTURES -- so the one suite that tests sharding is the
+# one that fails, on healthy code, exactly when the feature is in use. Each test
+# sets what it needs explicitly.
+unset CS_TEST_SHARD CS_TEST_JOBS 2>/dev/null || true
+
 # Build a directory of fake suites for run_all.sh to drive. Each records the
 # fact that it ran by creating a file named after itself, so coverage is counted
 # from the filesystem rather than from parsing the runner's own output. Suites
@@ -105,6 +113,26 @@ test_run_all_shards_partition_the_suite_list() {
     [ "$(ran_count)" -eq 7 ] || { echo "3 shards covered $(ran_count)/7 suites"; return 1; }
 }
 
+# A gate that cannot create its scratch dir must fail, not pass. Every suite is
+# launched with its output redirected into that dir, so an empty path makes the
+# redirection fail, which makes bash abandon the command -- the suite never runs
+# at all. Reporting "all N suites passed" there is the worst possible answer: a
+# release gate goes green having executed nothing.
+test_run_all_fails_loudly_when_the_log_dir_cannot_be_made() {
+    make_suite_dir 3
+    local stub="$TEST_TMPDIR/stub"
+    mkdir -p "$stub"
+    printf '#!/bin/sh\nexit 1\n' > "$stub/mktemp"
+    chmod +x "$stub/mktemp"
+    local out rc=0
+    out=$(PATH="$stub:$PATH" CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" 2>&1) || rc=$?
+    [ "$rc" -ne 0 ] || { echo "exited 0 with no usable log dir"; printf '%s\n' "$out"; return 1; }
+    if printf '%s' "$out" | grep -q 'suites passed'; then
+        echo "claimed suites passed while running none"; printf '%s\n' "$out"; return 1
+    fi
+    [ "$(ran_count)" -eq 0 ] || { echo "expected no suite to have run"; return 1; }
+}
+
 test_run_all_rejects_a_malformed_shard() {
     make_suite_dir 2
     local rc=0
@@ -140,6 +168,7 @@ run_test test_run_all_serial_mode_runs_every_suite
 run_test test_run_all_reports_the_failing_suite_by_name
 run_test test_run_all_keeps_each_suites_own_output
 run_test test_run_all_shards_partition_the_suite_list
+run_test test_run_all_fails_loudly_when_the_log_dir_cannot_be_made
 run_test test_run_all_rejects_a_malformed_shard
 run_test test_run_all_rejects_a_malformed_job_count
 

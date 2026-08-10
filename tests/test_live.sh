@@ -274,23 +274,37 @@ test_live_survives_a_malformed_record_sorting_first() {
         "a malformed record must not cost a healthy session its state" || return 1
 }
 
-test_live_lists_a_session_once_when_a_later_record_is_malformed() {
+test_agent_states_emits_one_row_when_a_later_record_is_malformed() {
     command -v jq >/dev/null 2>&1 || return 0
     make_live_session healthy
     make_registry_record healthy busy
-    # The mirror of the case above, and the one that catches the wrong repair:
-    # jq emits the good record BEFORE hitting the parse error, so a fallback
-    # that appends its per-file retry to that partial output would list the
-    # healthy session twice. Named to sort after any real pid.
+    # The mirror of the case above, and the one that catches the WRONG repair.
+    # jq emits the good record BEFORE hitting the parse error, so a fallback that
+    # keeps that partial output and appends its per-file retry lists the session
+    # twice.
+    #
+    # Asserted against agent_states directly, not through cs -live: cmd_live
+    # prints one line per session DIRECTORY and resolves state with
+    # agent_state_of, which returns the first matching row. A duplicated row is
+    # therefore invisible at the CLI, and a test that counted output lines would
+    # pass against the appending implementation while claiming to reject it.
     mkdir -p "$CS_CLAUDE_DIR/sessions"
     printf '{"pid": 2, "name": "broken", "status": NOT-VALID-JSON\n' \
         > "$CS_CLAUDE_DIR/sessions/999999999.json"
-    local out seen
-    out="$("$CS_BIN" -live 2>&1)"
-    assert_output_contains "$out" "healthy.*busy" \
-        "a later malformed record must not cost the healthy session its state" || return 1
-    seen="$(printf '%s\n' "$out" | grep -c 'healthy')"
-    assert_eq "1" "$seen" "the session must be listed exactly once" || return 1
+    local rows state
+    rows="$( source "$SCRIPT_DIR/../lib/05-term.sh"
+             source "$SCRIPT_DIR/../lib/56-presence.sh"
+             agent_states | grep -c '^healthy' || true )"
+    assert_eq "1" "$rows" "agent_states must emit exactly one row for a session" || return 1
+    # The row COUNT alone cannot see the failure, because a command substitution
+    # strips the trailing newline: the retry's first record would be glued onto
+    # the partial output's last one, producing a single CORRUPTED row rather
+    # than two clean ones, whose status field reads "busy<pid>...". Assert the
+    # value, which is what the render surfaces.
+    state="$( source "$SCRIPT_DIR/../lib/05-term.sh"
+              source "$SCRIPT_DIR/../lib/56-presence.sh"
+              agent_state_of "$(agent_states)" healthy )"
+    assert_eq "busy" "$state" "the state must survive intact, not absorb the next record" || return 1
 }
 
 test_live_ignores_record_with_no_start_time() {
@@ -327,7 +341,7 @@ run_test test_live_ignores_record_whose_start_time_differs
 run_test test_live_ignores_record_with_no_start_time
 run_test test_live_survives_a_record_whose_pid_is_out_of_range
 run_test test_live_survives_a_malformed_record_sorting_first
-run_test test_live_lists_a_session_once_when_a_later_record_is_malformed
+run_test test_agent_states_emits_one_row_when_a_later_record_is_malformed
 run_test test_live_falls_back_to_readme_objective
 run_test test_live_filters_readme_placeholder
 run_test test_live_marks_current_session
