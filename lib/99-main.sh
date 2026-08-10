@@ -192,11 +192,6 @@ main() {
             run_statusline_cmd "$@"
             return $?
             ;;
-        -lint)
-            shift
-            run_lint "$@"
-            return $?
-            ;;
         -*)
             error "Unknown command: $cmd. Run 'cs -help' for usage."
             ;;

@@ -110,20 +110,12 @@ On `Stop`, also:
 - Cooldown-gated via `.cs/.narrative-reminder-cooldown` (at most once per 5 minutes); no size budget — narratives are native memory topic files that lazy-load
 - Approves silently inside subagents and outside cs sessions, and when the narrative was modified within the cooldown window
 
-## prose-lint.sh (Stop)
-
-Runs when Claude pauses for user input:
-- Lints prose written this session via `cs -lint` and blocks turn-end (`decision: block`) when AI-slop tells are found, feeding the file:line violations back so Claude fixes them before stopping
-- Scope is `.cs/summary.md` and `.cs/memory/*.md` (surfaces with no cross-session in-file backlog); the append-heavy narrative notebooks (`narrative.md` and the per-actor `narrative.<actor>.md`) and the `MEMORY.md` index are excluded
-- Only files modified at/after `session.lock` mtime are checked, so a resumed session never re-flags prose written in earlier sessions
-- After 3 consecutive unresolved blocks, allows the stop with a `session.log` warning rather than trapping the session
-
 ## session-end.sh (SessionEnd)
 
 Runs when Claude Code session ends:
 - Logs session end time and the exit source reported by Claude Code (defaulting to `user_exit` when none is given) and appends an `ended` event to `.cs/timeline.jsonl`
 - Deletes only the ending conversation's own shadow ref (`refs/worktree/cs/session/<conversation-uuid>`); a concurrent sibling's ref is left untouched
-- Cleans up `.cs/session.lock`, but only one this launch owns. Only `cs` writes a lock, so a hook that resolved by walking the directory belongs to another front end: closing a desktop conversation on a directory a CLI session is live in would otherwise strip that session's lock, letting `cs <name>` open a duplicate with no collision menu and leaving prose-lint inert mid-session (the cutoff file it tests for is gone). A walked-in hook still clears a lock whose process is gone, so a crashed session is never left locked out
+- Cleans up `.cs/session.lock`, but only one this launch owns. Only `cs` writes a lock, so a hook that resolved by walking the directory belongs to another front end: closing a desktop conversation on a directory a CLI session is live in would otherwise strip that session's lock, letting `cs <name>` open a duplicate with no collision menu. A walked-in hook still clears a lock whose process is gone, so a crashed session is never left locked out
 - Regenerates the sessions index (`<sessions-root>/index.md`) — a table of every session's status, objective, and created date. Written only where sessions actually live: the session's own directory must sit under the sessions root, compared physically on both sides so a `$HOME` reached through a symlink still matches. An adopted session, whose directory is an unrelated project path, writes no index beside that project
 - Skipped entirely inside subagents (guarded on the hook input's `agent_id`)
 
@@ -194,8 +186,7 @@ The hooks are configured in `~/.claude/settings.json`:
       { "matcher": "Write|Edit", "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/autosave-commits.sh", "timeout": 10, "async": true }] }
     ],
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/narrative-reminder.sh", "timeout": 10 }] },
-      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/prose-lint.sh", "timeout": 15 }] }
+      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/narrative-reminder.sh", "timeout": 10 }] }
     ],
     "FileChanged": [
       { "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/narrative-reminder.sh", "timeout": 10, "asyncRewake": true, "rewakeMessage": "Cross-session mail arrived:", "rewakeSummary": "New cs mail" }] }

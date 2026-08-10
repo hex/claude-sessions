@@ -92,8 +92,7 @@ fi
 # a hook that resolved by walking a directory belongs to another front end and
 # is not the owner: closing a desktop conversation on a directory a CLI session
 # is live in would otherwise strip that session's lock, letting `cs <name>` open
-# a duplicate with no collision menu and leaving prose-lint inert mid-session
-# (its cutoff file is gone). A stale lock is still cleared either way, so a
+# a duplicate with no collision menu. A stale lock is still cleared either way, so a
 # crashed session does not stay locked out. Ownership cannot be the $$ test
 # lib/15-lock.sh uses — a hook is a different process.
 if [ "${CS_RESOLVED_FROM:-env}" = "env" ]; then

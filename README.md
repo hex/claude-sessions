@@ -36,7 +36,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 - **Deterministic Claude-session resume** - Each session pre-allocates a conversation UUID in the gitignored `.cs/local/state`, so `cs <name>` resumes the *exact* conversation via `claude --resume <uuid>`, not the most-recent one `--continue` might pick from a sibling. A `ps`-based guard refuses to launch a second claude for the same conversation (`--force` overrides), and every launch passes `--name` plus a per-session `/color` so parallel sessions stay visually distinct.
 - **Per-session memory path redirect** - cs points Claude Code's built-in auto-memory writer at `<session>/.cs/memory/` (via `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE`) so durable facts land in the session instead of the global project store. The harness owns how memory files are written (naming, frontmatter, `MEMORY.md` index); cs owns only the storage path.
 - **Cross-session search** - `cs -search <query>` greps across all sessions' narrative, memory, and README
-- **Prose hygiene enforcement** - `cs -lint <file>` flags AI-slop tells (em-dashes, a curated banned-phrase list) outside code fences; the `prose-lint` Stop hook blocks turn-end when prose written this session carries them. `/summary` and `/wrap` add a subagent judge that applies the full `prose-hygiene` taxonomy a regex can't catch. See [docs/hooks.md](docs/hooks.md)
+- **Prose hygiene** - the `prose-hygiene` skill carries the full AI-slop taxonomy (phrases, structures, voice rules) that no regex can catch; `/summary` applies it with a subagent judge that scores `.cs/summary.md` and returns concrete rewrites. See [skills/prose-hygiene/SKILL.md](skills/prose-hygiene/SKILL.md)
 - **Auto-grounded scope** - On each code-work prompt, the `scope-prompt` hook injects a bounded context block — matching tracked files, recent commits, and a working-tree diff — grounding Claude in the current codebase before it acts. Capped at 8000 bytes; opt out per-session with `CS_SCOPE_DISABLE=1`. See [docs/hooks.md](docs/hooks.md)
 - **Status line** - `cs-statusline` renders Claude Code's status bar as one line of squared pills: a Claude logo badge (pulsing until your next prompt), the session name in its `/color`, a queued-task count, an unread cross-session mail count, git branch with ahead/behind and dirty counts, model + effort, context %, and 5-hour/weekly rate limits (each gaining a reset countdown as it fills) — all from the status-line JSON plus one bounded git call, with no transcript parsing, network, or writes. Session cost is available as an opt-in segment. Enable or remove it any time with `cs -statusline enable|disable`; choose and order segments with `CS_STATUSLINE_SEGMENTS`. cs auto-detects the terminal's light/dark theme (override with `CS_TERM_THEME`; `cs -detect-theme` shows the result). A companion `cs-subagent-statusline` styles the agent-panel rows so each running subagent shows the model driving it, its own context %, and elapsed time; `cs -statusline enable` registers both (Claude Code reads the registration at startup, so restart it to see them). See [docs/statusline.md](docs/statusline.md)
 
@@ -117,7 +117,6 @@ cs -list --tag <tag>        # List only sessions carrying a tag
 cs -archive <name>...       # Archive sessions (hidden from listings; --force if live)
 cs -unarchive <name>...     # Restore archived sessions
 cs -list --archived         # List only archived sessions
-cs -lint <file>...          # Flag AI-slop prose tells (em-dashes, banned phrases); 0 clean 1 issues 2 error
 cs -statusline enable|disable  # Enable or remove the cs status line + agent-panel rows
 cs -detect-theme            # Show the detected terminal light/dark theme
 cs -list, -ls               # List all sessions
@@ -495,7 +494,7 @@ cs -uninstall
 
 ## See also
 
-- [iTerm2-dimmer](https://github.com/hex/iTerm2-dimmer) -- dims noisy hook output (TASKMASTER, prose-lint) in iTerm2 so it doesn't clutter the screen
+- [iTerm2-dimmer](https://github.com/hex/iTerm2-dimmer) -- dims noisy hook output (TASKMASTER) in iTerm2 so it doesn't clutter the screen
 
 ## License
 

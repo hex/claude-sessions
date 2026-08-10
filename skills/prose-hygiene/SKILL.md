@@ -24,10 +24,11 @@ enumerations keep their true count (the three-item rule targets rhetorical triad
 a real list of three files); conditional openers are fine in procedural text (the
 starter ban targets rhetorical questions, not "When X, do Y").
 
-**Scope:** cs applies this to `/summary` and `/wrap` output (`.cs/summary.md` and the
-memory entries; the narrative notebooks are exempt). A regex catches only the lexical
-items — the structural and voice rules need a model judging meaning — so `cs -lint`
-and the prose-lint Stop hook enforce just the lexical subset.
+**Scope:** cs applies this to `/summary` output (`.cs/summary.md` and the memory
+entries; the narrative notebooks are exempt). Every rule below needs a model judging
+meaning, so the `/summary` critic subagent is the only thing that enforces them.
+`/wrap` skips that critic for speed, which makes these rules something to follow
+while drafting rather than a pass to run afterward.
 
 ## Core principles
 

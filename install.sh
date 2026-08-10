@@ -85,7 +85,6 @@ CS_HOOKS=(
     session-start.sh
     autosave-commits.sh
     narrative-reminder.sh
-    prose-lint.sh
     session-end.sh
     subagent-context.sh
     tool-failure-logger.sh
@@ -120,6 +119,7 @@ RETIRED_HOOKS=(
     files-context.sh          # retired: PreToolUse:Read context injector that surfaced files.md token estimates
     changes-tracker.sh        # retired: PostToolUse change log re-narrating git history into .cs/changes.md; git log/diff/status is authoritative
     artifact-tracker.sh       # retired: PreToolUse:Write redirect was inert (updatedInput path rewrite is not honored by the harness); tracking removed entirely
+    prose-lint.sh             # retired with the `cs -lint` verb it called; MUST stay listed, because a deployed copy calling the removed verb reads error()'s exit 1 as "violations found" and blocks every turn-end
 )
 
 # Slash commands cs ships; deployed to COMMANDS_DIR.
@@ -594,7 +594,6 @@ else
     _merge_cs_hook SessionStart       session-start.sh       30
     _merge_cs_hook PostToolUse        autosave-commits.sh    10 "Write|Edit" true
     _merge_cs_hook Stop               narrative-reminder.sh  10
-    _merge_cs_hook Stop               prose-lint.sh          15
     _merge_cs_hook SessionEnd         session-end.sh         30
     _merge_cs_hook SubagentStart      subagent-context.sh    10
     _merge_cs_hook PostToolUseFailure tool-failure-logger.sh 10 "" true

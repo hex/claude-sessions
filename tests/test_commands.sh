@@ -196,13 +196,6 @@ test_summary_prose_loop_is_bounded() {
         "summary.md must cap the critic loop so it terminates" || return 1
 }
 
-test_summary_relints_after_applying_rewrites() {
-    # Rewrites applied after the lexical lint would otherwise land unlinted and trip
-    # the prose-lint Stop hook at turn-end; the step must re-lint after applying.
-    assert_file_contains "$COMMANDS_DIR/summary.md" "edits introduced before moving to step 6" \
-        "summary.md must re-run cs -lint after applying the critic's rewrites" || return 1
-}
-
 test_wrap_report_is_not_two_line() {
     # 'two-line report' contradicts item 1's 'one path per line' once Pass 1 wrote
     # more than one file; the report must be sectioned, not line-capped.
@@ -404,7 +397,6 @@ run_test test_prose_hygiene_records_upstream_sync
 run_test test_summary_replaces_existing_file
 run_test test_summary_bounds_git_log_to_session
 run_test test_summary_prose_loop_is_bounded
-run_test test_summary_relints_after_applying_rewrites
 run_test test_wrap_report_is_not_two_line
 run_test test_checkpoint_routes_reserved_subcommands
 run_test test_checkpoint_quotes_label_and_stops_on_failure

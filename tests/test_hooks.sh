@@ -1813,8 +1813,7 @@ run_test test_session_end_survives_an_unset_home
 # Before hooks resolved a session from the directory, a second front end never
 # reached SessionEnd for a session it did not launch. Now closing a desktop
 # conversation on a directory a CLI session is live in would remove that
-# session's lock, so `cs <name>` opens a duplicate with no collision menu and
-# prose-lint goes inert mid-session (its cutoff file is gone).
+# session's lock, so `cs <name>` opens a duplicate with no collision menu.
 test_session_end_spares_a_live_sessions_lock() {
     local proj="$TEST_TMPDIR/lockheld"
     mkdir -p "$proj/.cs/local"

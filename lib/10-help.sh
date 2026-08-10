@@ -34,7 +34,6 @@ Commands:
   -spawn <name>       Open a session in the cs tmux session (--task "..." seeds and arms its queue)
   -conversations      Show the session's conversation chain (rotations, lineage)
   -doctor, -diag      Run health checks (Keychain, hooks, memory, audit, tokens)
-  -lint <file>...     Flag AI-slop prose tells (em-dashes, banned phrases); 0=clean 1=issues 2=error
   -statusline <cmd>   enable|disable the cs status line in Claude Code settings
   -detect-theme       Show the detected terminal theme (light|dark)
   -list, -ls          List sessions (--tag <tag> filters; --archived shows only archived)

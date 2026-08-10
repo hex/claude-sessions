@@ -110,7 +110,6 @@ _cs() {
         '-unarchive:Restore an archived session'
         '-status:Set or show this session'\''s advertised status'
         '-search:Search across all sessions'
-        '-lint:Flag AI-slop prose tells in files'
         '-statusline:Manage the cs status line (enable|disable)'
         '-detect-theme:Detect terminal background theme'
         '-doctor:Run health checks'

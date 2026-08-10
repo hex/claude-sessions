@@ -182,10 +182,10 @@ test_hooks_decline_when_the_resolver_is_missing() {
     local sh=/bin/bash
     [ -x "$sh" ] || sh=bash
     local h rc out failures=0
-    for h in narrative-reminder prose-lint session-start autosave-commits; do
+    for h in narrative-reminder session-start autosave-commits; do
         cp "$hooks_src/$h.sh" "$fake/"
     done
-    for h in narrative-reminder prose-lint session-start autosave-commits; do
+    for h in narrative-reminder session-start autosave-commits; do
         out=$(env -u CLAUDE_SESSION_NAME -u CLAUDE_SESSION_DIR -u CLAUDE_PROJECT_DIR \
             "$sh" "$fake/$h.sh" <<< '{"tool_name":"Write","cwd":"/"}' 2>/dev/null)
         rc=$?
@@ -194,7 +194,7 @@ test_hooks_decline_when_the_resolver_is_missing() {
             failures=$((failures + 1))
         fi
         case "$h" in
-            narrative-reminder|prose-lint)
+            narrative-reminder)
                 case "$out" in
                     *approve*) : ;;
                     *) echo "  FAIL: $h.sh must still emit its approve payload, got [$out]"
