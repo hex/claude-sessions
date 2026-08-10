@@ -23,6 +23,25 @@ proj_file() { echo "$CS_TRANSCRIPTS_DIR/$1/session-1.jsonl"; }
 
 run_build() { "$VOICE_SCRIPT" 2>&1; }
 
+# A redaction test needs credential-shaped input, but this repo pushes to a
+# remote with secret-scanning push protection, which rejects a literal token
+# pattern even inside a fixture. Each value is therefore assembled from its
+# prefix at runtime, so no complete pattern is ever stored in this file.
+# Every one is synthetic or a vendor's own published documentation sample;
+# none is a live secret, and none should be replaced with one.
+cred_fixtures() {
+    local gh='ghp' aws='AK' slack='xoxb' stripe='sk' jwt='eyJ'
+    printf '%s\n' \
+        "${gh}_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789" \
+        "${aws}IAIOSFODNN7EXAMPLE" \
+        "${slack}-2401-5738-abcdefghijklmnop" \
+        "${stripe}_live_4eC39HqLyjWDarjtT1zdp7dc" \
+        "${jwt}hbGciOiJIUzI1NiJ9.${jwt}zdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27u"
+}
+
+# A token embedded in a URL or after "Bearer ", carrying no keyword=value shape.
+url_cred_fixture() { printf 'ghp%s' '_AbCdEfGhIjKlMnOpQrSt'; }
+
 test_typed_string_message_lands_in_corpus() {
     add_msg "$(proj_file projA)" "here is a genuinely typed message about the build system"
     run_build > /dev/null || { echo "  FAIL: build exited non-zero"; return 1; }
@@ -231,6 +250,140 @@ test_corrupt_line_skipped_not_fatal() {
         "a file with one bad line is not counted unreadable" || return 1
 }
 
+# Claude Code stamps every user record with promptSource. Only some values mean
+# a human typed it; sdk and system records are machine-authored and were being
+# distilled as the user's writing voice.
+test_machine_prompt_sources_dropped() {
+    add_msg "$(proj_file projA)" "sdk payload that is not the user writing anything" \
+        "2026-07-01T10:00:00Z" '{"promptSource": "sdk"}'
+    add_msg "$(proj_file projA)" "system payload that is not the user writing either" \
+        "2026-07-01T10:00:01Z" '{"promptSource": "system"}'
+    add_msg "$(proj_file projA)" "one real message so the build has something to keep"
+    run_build > /dev/null || { echo "  FAIL: build exited non-zero"; return 1; }
+    if grep -q "payload that is not the user writing" "$(corpus_path)"; then
+        echo "  FAIL: machine-authored record reached the corpus"; return 1
+    fi
+    assert_file_contains "$(corpus_path)" "2 machine-authored" \
+        "stats should count the machine-authored drops" || return 1
+}
+
+# typed/queued/suggestion_accepted are all the human; an absent field predates
+# the stamp and must default to keeping the message, never to dropping it.
+test_human_prompt_sources_kept() {
+    add_msg "$(proj_file projA)" "typed message about the retry semantics here" \
+        "2026-07-01T10:00:00Z" '{"promptSource": "typed"}'
+    add_msg "$(proj_file projA)" "queued message about the retry semantics here" \
+        "2026-07-01T10:00:01Z" '{"promptSource": "queued"}'
+    add_msg "$(proj_file projA)" "accepted suggestion about retry semantics here" \
+        "2026-07-01T10:00:02Z" '{"promptSource": "suggestion_accepted"}'
+    add_msg "$(proj_file projA)" "message with no promptSource field at all here" \
+        "2026-07-01T10:00:03Z"
+    run_build > /dev/null || { echo "  FAIL: build exited non-zero"; return 1; }
+    local phrase
+    for phrase in "typed message about the retry" "queued message about the retry" \
+                  "accepted suggestion about retry" "no promptSource field at all"; do
+        assert_file_contains "$(corpus_path)" "$phrase" \
+            "human-authored record ($phrase) must be kept" || return 1
+    done
+}
+
+# The deny-list matched `sk-` with a hyphen and a 40+ run of [A-Za-z0-9+/=],
+# which let every one of these through. Each entry is a real token family.
+#
+# Fixtures come from cred_fixtures, which assembles each shape at runtime; see
+# the note there for why no literal pattern is stored in this file.
+test_token_families_redacted() {
+    local f; f="$(proj_file projA)"
+    local secrets; secrets=$(cred_fixtures)
+    local i=0 secret msg
+    # Each fixture is wrapped in ordinary prose so the block survives and the
+    # redaction marker is observable. A message that is ONLY a credential line
+    # collapses to "[redacted line]", falls under SHORT_CHARS, and is then
+    # excluded from the appendix — safe, but it would make this test vacuous.
+    while IFS= read -r secret; do
+        msg="$(printf 'ordinary opening line number %s here\n%s\nordinary closing line here' "$i" "$secret")"
+        add_msg "$f" "$msg" "2026-07-01T10:00:0${i}Z"
+        i=$((i + 1))
+    done <<< "$secrets"
+    run_build > /dev/null || { echo "  FAIL: build exited non-zero"; return 1; }
+    # Absence alone would also hold if the message were dropped wholesale, so
+    # assert the redaction marker is what replaced each one.
+    local n_redacted; n_redacted=$(grep -c '\[redacted line\]' "$(corpus_path)" || true)
+    assert_eq "$i" "$n_redacted" "every credential line should be redacted, not dropped" || return 1
+    assert_file_contains "$(corpus_path)" "ordinary closing line here" \
+        "prose around a redacted line must survive" || return 1
+    while IFS= read -r secret; do
+        if grep -qF "$secret" "$(corpus_path)"; then
+            echo "  FAIL: credential shape leaked into corpus: $secret"; return 1
+        fi
+    done <<< "$secrets"
+}
+
+# A credential inside a URL, or after `Bearer ` with a space, carries no
+# keyword=value shape at all.
+test_url_userinfo_and_bearer_redacted() {
+    local f tok wrap; f="$(proj_file projA)"; tok="$(url_cred_fixture)"
+    # The wrapper text must differ per message: once the middle line is
+    # replaced, identical blocks collapse at the dedupe step and the count
+    # below would read 1 no matter how many lines were redacted.
+    wrap() { printf 'opening line for case %s here\n%s\nclosing line for case %s' "$2" "$1" "$2"; }
+    add_msg "$f" "$(wrap "connect with postgres://admin:hunter2secret@db.internal:5432/appdb" one)" "2026-07-01T10:00:00Z"
+    add_msg "$f" "$(wrap "run git clone https://alex:${tok}@github.com/x/y first" two)" "2026-07-01T10:00:01Z"
+    add_msg "$f" "$(wrap "call it with Authorization: Bearer ${tok} then retry" three)" "2026-07-01T10:00:02Z"
+    run_build > /dev/null || { echo "  FAIL: build exited non-zero"; return 1; }
+    local n_redacted; n_redacted=$(grep -c '\[redacted line\]' "$(corpus_path)" || true)
+    assert_eq "3" "$n_redacted" "all three URL/Bearer lines should be redacted, not dropped" || return 1
+    local secret
+    for secret in "hunter2secret" "$tok"; do
+        if grep -qF "$secret" "$(corpus_path)"; then
+            echo "  FAIL: credential leaked into corpus: $secret"; return 1
+        fi
+    done
+}
+
+# The other direction, and the one that matters just as much: the 40+ run rule
+# includes `/`, so git SHAs and long paths were being destroyed. Those lines
+# carry the voice this corpus exists to capture.
+# Claude Code's own key shape. Its `api03-` segment breaks any rule that wants
+# a run of unbroken alphanumerics, so it needs an issuer-anchored pattern.
+test_anthropic_key_shape_redacted() {
+    local f key; f="$(proj_file projA)"
+    key="$(printf 'sk-%s' 'ant-api03-PtYgjmUhBel31iEl2hpChYgCfrL1spNxnyVmihA')"
+    add_msg "$f" "$(printf 'opening line of the message\nthe key is %s here\nclosing line' "$key")"
+    run_build > /dev/null || { echo "  FAIL: build exited non-zero"; return 1; }
+    if grep -qF "$key" "$(corpus_path)"; then
+        echo "  FAIL: Anthropic key shape leaked into corpus"; return 1
+    fi
+    assert_file_contains "$(corpus_path)" "\[redacted line\]" \
+        "the key line should be redacted, not the message dropped" || return 1
+}
+
+# The other half of the issuer anchor: a bare `sk-` rule would fire on ordinary
+# hyphenated prose, and this repo's vocabulary is full of it.
+test_hyphenated_prose_survives_redaction() {
+    local f; f="$(proj_file projA)"
+    add_msg "$f" "feat/task-scheduler-rewrite landed on the branch today" "2026-07-01T10:00:00Z"
+    add_msg "$f" "risk-assessment_document-v2 is ready for your review now" "2026-07-01T10:00:01Z"
+    add_msg "$f" "the disk-usage_report shows nothing unusual this week" "2026-07-01T10:00:02Z"
+    run_build > /dev/null || { echo "  FAIL: build exited non-zero"; return 1; }
+    local phrase
+    for phrase in "task-scheduler-rewrite" "risk-assessment_document" "disk-usage_report"; do
+        assert_file_contains "$(corpus_path)" "$phrase" \
+            "ordinary hyphenated prose ($phrase) must not be redacted" || return 1
+    done
+}
+
+test_shas_and_paths_survive_redaction() {
+    local f; f="$(proj_file projA)"
+    add_msg "$f" "revert 3f2a9c1b8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a since it broke the build" "2026-07-01T10:00:00Z"
+    add_msg "$f" "look in /System/Library/Frameworks/CoreFoundation/Headers for the header" "2026-07-01T10:00:01Z"
+    run_build > /dev/null || { echo "  FAIL: build exited non-zero"; return 1; }
+    assert_file_contains "$(corpus_path)" "since it broke the build" \
+        "a git SHA must not trigger redaction" || return 1
+    assert_file_contains "$(corpus_path)" "for the header" \
+        "a long file path must not trigger redaction" || return 1
+}
+
 run_test test_typed_string_message_lands_in_corpus
 run_test test_array_text_parts_join
 run_test test_tool_result_only_entry_dropped
@@ -247,5 +400,12 @@ run_test test_empty_transcripts_root_errors
 run_test test_large_transcript_builds_cleanly
 run_test test_voice_dir_permissions
 run_test test_corrupt_line_skipped_not_fatal
+run_test test_machine_prompt_sources_dropped
+run_test test_human_prompt_sources_kept
+run_test test_token_families_redacted
+run_test test_url_userinfo_and_bearer_redacted
+run_test test_anthropic_key_shape_redacted
+run_test test_hyphenated_prose_survives_redaction
+run_test test_shas_and_paths_survive_redaction
 
 report_results

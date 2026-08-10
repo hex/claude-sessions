@@ -66,7 +66,9 @@ edits are authoritative on the next draft.
   behalf. A draft may carry placeholders like [date] for facts you lack.
 - Typos in the corpus are a described trait; drafts are spelled correctly.
 - Never reproduce `[redacted line]` markers or anything credential-shaped
-  from the corpus into a draft.
+  from the corpus into the profile or a draft. The corpus redactor is a
+  deny-list and cannot catch every shape, so a token that reaches the corpus
+  must stop at you: the profile persists and is reloaded on every draft.
 - Every draft gets an anti-slop pass before delivery: no em dashes, no
   throat-clearing openers, no "not X, it's Y" contrasts, no quotable
   closers that restate the message, no filler adverbs, no three same-length
