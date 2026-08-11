@@ -1,5 +1,5 @@
 ---
-name: voice
+name: write-as-me
 description: Draft messages, replies, PR/issue/commit text, or longer prose in the user's own writing voice, learned from their Claude Code transcripts. Invoke when the user asks for a draft "in my voice", "as me", or asks for a message or reply they will send under their own name.
 ---
 
@@ -10,7 +10,7 @@ from a distilled profile document, never from improvisation.
 
 - Profile: `${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}/.voice/profile.md`
 - Corpus: `${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}/.voice/corpus.md`
-- Builder: `~/.claude/skills/voice/scripts/build-corpus.sh`
+- Builder: `~/.claude/skills/write-as-me/scripts/build-corpus.sh`
 
 ## Flow
 

@@ -266,9 +266,11 @@ run_uninstall() {
         fi
     done
 
-    # Remove skills
+    # Remove skills, current and retired. A machine that never ran an install
+    # carrying the rename still has the old directory, so uninstall must clear
+    # both lists or it leaves cs files behind.
     local skill
-    for skill in "${CS_SKILLS[@]}"; do
+    for skill in "${CS_SKILLS[@]}" "${RETIRED_SKILLS[@]}"; do
         if [ -d "$skills_dir/$skill" ]; then
             rm -rf "$skills_dir/$skill"
             info "Removed $skills_dir/$skill/"

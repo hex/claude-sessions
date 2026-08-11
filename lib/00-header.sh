@@ -79,13 +79,23 @@ CS_SKILLS=(
     prose-hygiene
     rotate
     merge
-    voice
+    write-as-me
+)
+
+# Skills retired or renamed in past versions but possibly still installed from
+# older cs versions. install.sh and run_uninstall both delete these directories.
+# KEEP THIS LIST IN SYNC WITH install.sh's RETIRED_SKILLS.
+# When retiring or renaming a skill in a release, add its OLD name here: a skill
+# directory left behind keeps answering its slash command forever, and nothing
+# else ever removes it.
+RETIRED_SKILLS=(
+    voice   # renamed to write-as-me; Claude Code 2.1.227 ships a built-in /voice (Toggle voice mode)
 )
 
 # Support files skills ship beyond SKILL.md, as skills/<skill>/<path> entries.
 # KEEP THIS LIST IN SYNC WITH install.sh's CS_SKILL_FILES.
 CS_SKILL_FILES=(
-    voice/scripts/build-corpus.sh
+    write-as-me/scripts/build-corpus.sh
 )
 
 # Deployed-hooks directory; CS_HOOKS_DIR overrides it for tests.

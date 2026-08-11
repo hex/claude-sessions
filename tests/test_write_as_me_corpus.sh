@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# ABOUTME: Tests for the /voice corpus extractor (skills/voice/scripts/build-corpus.sh)
+# ABOUTME: Tests for the /write-as-me corpus extractor (skills/write-as-me/scripts/build-corpus.sh)
 # ABOUTME: Covers typed-message filtering, redaction, dedupe, caps, and error paths
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/test_lib.sh"
 
-VOICE_SCRIPT="$SCRIPT_DIR/../skills/voice/scripts/build-corpus.sh"
+VOICE_SCRIPT="$SCRIPT_DIR/../skills/write-as-me/scripts/build-corpus.sh"
 
 # Corpus lands here; setup() exports CS_SESSIONS_ROOT and CS_TRANSCRIPTS_DIR.
 corpus_path() { echo "$CS_SESSIONS_ROOT/.voice/corpus.md"; }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ABOUTME: Builds the /voice skill's writing corpus from Claude Code transcripts
+# ABOUTME: Builds the /write-as-me skill's writing corpus from Claude Code transcripts
 # ABOUTME: Keeps the user's typed messages, drops harness noise, redacts credential shapes
 set -euo pipefail
 
@@ -10,11 +10,11 @@ SHORT_CHARS=20
 PASTE_CHARS=2000
 
 command -v jq >/dev/null 2>&1 || {
-    echo "voice: jq is required (brew install jq / apt-get install jq)" >&2
+    echo "write-as-me: jq is required (brew install jq / apt-get install jq)" >&2
     exit 1
 }
 if [ ! -d "$TRANSCRIPTS_ROOT" ]; then
-    echo "voice: no transcript directory at $TRANSCRIPTS_ROOT — nothing to learn from" >&2
+    echo "write-as-me: no transcript directory at $TRANSCRIPTS_ROOT — nothing to learn from" >&2
     exit 1
 fi
 
@@ -118,7 +118,7 @@ done < "$workdir/files"
 
 kept=$(jq -s '[.[] | select(.drop == null)] | length' "$workdir/all.jsonl")
 if [ "$kept" -eq 0 ]; then
-    echo "voice: no typed messages found under $TRANSCRIPTS_ROOT — nothing to learn from" >&2
+    echo "write-as-me: no typed messages found under $TRANSCRIPTS_ROOT — nothing to learn from" >&2
     exit 1
 fi
 
@@ -161,4 +161,4 @@ jq -r -s \
 mkdir -p "$VOICE_DIR"
 chmod 700 "$VOICE_DIR"
 mv "$workdir/corpus.md" "$VOICE_DIR/corpus.md"
-echo "voice: corpus built at $VOICE_DIR/corpus.md ($kept typed messages considered)"
+echo "write-as-me: corpus built at $VOICE_DIR/corpus.md ($kept typed messages considered)"
