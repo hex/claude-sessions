@@ -59,11 +59,13 @@ SESSION_DIR="${CLAUDE_SESSION_DIR:-}"
 META_DIR="${CLAUDE_SESSION_META_DIR:-$SESSION_DIR/.cs}"
 
 # Build the surface-once digest from unseen inbox lines. Sets DIGEST (may be
-# empty) and, when there were unseen lines, advances the cursor — surfacing is
-# at-most-once even when the digest itself is empty (decline-only content).
+# empty) and DIGEST_PENDING, the cursor value that _commit_digest spends once
+# the digest has actually been printed — surfacing is at-most-once even when
+# the digest itself is empty (decline-only content).
 _build_digest() {  # meta_local_dir
     local qdir="$1" inbox seen total
     DIGEST=""
+    DIGEST_PENDING=""
     inbox="$qdir/notifications.jsonl"
     [ -s "$inbox" ] || return 0
     total=$(wc -l < "$inbox" 2>/dev/null | tr -d '[:space:]') || return 0
@@ -82,8 +84,19 @@ _build_digest() {  # meta_local_dir
             (if $fin > 0 then "; drain finished" else "" end) +
             ". Run cs -queue log for detail."
         end' 2>/dev/null) || DIGEST=""
-    printf '%s\n' "$total" > "$qdir/notifications.seen.tmp" 2>/dev/null \
-        && mv "$qdir/notifications.seen.tmp" "$qdir/notifications.seen" 2>/dev/null || true
+    DIGEST_PENDING="$total"
+}
+
+# Spend the digest's surface-once budget, and only after it has been written to
+# stdout. This hook runs under a wall-clock timeout and is killed where it
+# stands when it overruns; a cursor advanced up front retires notifications
+# nobody ever saw, and there is no second chance at them. Advancing afterwards
+# can at worst repeat a digest, which is the harmless direction to fail in.
+_commit_digest() {  # meta_local_dir
+    [ -n "${DIGEST_PENDING:-}" ] || return 0
+    printf '%s\n' "$DIGEST_PENDING" > "$1/notifications.seen.tmp" 2>/dev/null \
+        && mv "$1/notifications.seen.tmp" "$1/notifications.seen" 2>/dev/null || true
+    DIGEST_PENDING=""
 }
 
 # True when a handoff file's YAML frontmatter (line 1 "---" through the next
@@ -664,6 +677,7 @@ fi
 
 # Queue inbox digest (surface-once; same recipe as scope-prompt.sh).
 DIGEST=""
+DIGEST_PENDING=""
 _build_digest "$META_DIR/local"
 if [ -n "$DIGEST" ]; then
     CONTEXT="${CONTEXT}
@@ -705,5 +719,7 @@ jq -n --arg context "$CONTEXT" --arg watch "$MAIL_WATCH" '{
         statusMessage: "Loading session..."
     } + (if $watch == "" then {} else {watchPaths: [$watch]} end))
 }'
+
+_commit_digest "$META_DIR/local"
 
 exit 0

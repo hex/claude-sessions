@@ -4,6 +4,16 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## Unreleased
+
+### Fixes
+
+- **A prompt hook killed at its timeout no longer swallows the queue digest.** `_build_digest` advanced the `.cs/local/notifications.seen` cursor before either injection hook did any of its expensive work, while the digest itself reached stdout last of all. `scope-prompt.sh` runs under a 3-second wall clock and Claude Code kills it where it stands when it overruns, so a killed run had already spent the surface-once budget for notifications it never printed — and nothing ever surfaces them again. The two halves are now split: `_build_digest` records the pending cursor in `DIGEST_PENDING`, and `_commit_digest` spends it at each hook's emission point, after the write. Failing that way round can at worst repeat a digest. Both hooks carry verbatim-identical copies of both functions under the standalone-hook law, and the sync test now covers both — a hook that built with one copy and retired with a stale other would lose exactly what the split prevents.
+
+### Added
+
+- **`scope-prompt.sh` traces its own stages.** Every run appends `pid`, milliseconds and stage name to `.cs/local/scope-prompt.trace` as each stage finishes, so a run that overruns the hook's timeout leaves a trail naming whatever it hung on. That trail is the only evidence such a run ever produces: it never reaches an exit where it could write a summary, which is why the trace writes as it goes rather than at the end. The clock comes from shell builtins alone (`$EPOCHREALTIME`, or `$SECONDS` on bash 3.2), so tracing adds no forks to a hook already under suspicion for running slow — measured at or below the noise floor on a 157k-file repository. Machine-local, since which machine was slow is half the finding; one run in 64 trims the file to its last 2000 lines. Opt out per-session with `CS_SCOPE_TRACE_DISABLE=1`.
+
 ## 2026.8.14
 
 A name collision with Claude Code, the mechanism that makes fixing one safe, and two changes to how cs asks before acting.

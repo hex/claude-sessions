@@ -491,6 +491,73 @@ test_firing_prompt_exits_zero() {
 }
 
 # ============================================================================
+# Stage trace
+# ============================================================================
+
+_trace_file() { printf '%s\n' "$CLAUDE_SESSION_META_DIR/local/scope-prompt.trace"; }
+_trace_stages() { awk '{print $3}' "$(_trace_file)" 2>/dev/null; }
+
+test_stage_trace_records_the_run_in_order() {
+    seed_repo "src/api.ts"
+    run_hook "implement a retry wrapper around the fetch call in src/api.ts" >/dev/null 2>&1
+    local stages; stages=$(_trace_stages)
+    assert_output_contains "$stages" "start" "trace opens with a start mark" || return 1
+    assert_output_contains "$stages" "classify" "trace marks the classifier" || return 1
+    assert_output_contains "$stages" "scan" "trace marks the grounded scan" || return 1
+    assert_output_contains "$stages" "emit" "a completed run reaches emit" || return 1
+    # Order is the whole point: a trail is only diagnostic if it reads forwards.
+    printf '%s\n' "$stages" \
+        | awk '/^start$/{s=NR} /^classify$/{c=NR} /^emit$/{e=NR} END{exit !(s && c && e && s < c && c < e)}' \
+        || { echo "  FAIL: stages must appear in execution order"; return 1; }
+    # Every mark carries an integer of milliseconds, and they only move forward:
+    # a negative or non-numeric column means the fork-free clock read wrong, and
+    # a trail nobody can subtract is not a diagnosis.
+    # The start mark carries absolute epoch ms, so it is excluded from the
+    # forward-only check that applies to the elapsed marks after it.
+    awk '$2 !~ /^[0-9]+$/ { bad = 1 }
+         $3 != "start" { if (seen && $2 + 0 < prev) bad = 1; prev = $2 + 0; seen = 1 }
+         END { exit bad }' "$(_trace_file)" \
+        || { echo "  FAIL: elapsed column must be non-decreasing integer milliseconds"; return 1; }
+}
+
+test_stage_trace_stops_where_a_killed_run_stopped() {
+    seed_repo "src/api.ts"
+    # A git that blocks parks the hook in the grounded scan, exactly where the
+    # 3s UserPromptSubmit cap parks it in production. The trail it leaves is the
+    # only evidence such a run ever produces, so it has to name the last stage
+    # reached and must not claim the run finished.
+    local stub="$TEST_TMPDIR/stub" marker="$TEST_TMPDIR/stub-reached"
+    mkdir -p "$stub"
+    cat > "$stub/git" <<'STUB'
+#!/bin/sh
+printf 'reached\n' > "$STUB_MARKER"
+sleep 5
+STUB
+    chmod +x "$stub/git"
+    rm -f "$marker"
+
+    printf '{"prompt": "implement a retry wrapper in src/api.ts"}' \
+        | STUB_MARKER="$marker" PATH="$stub:$PATH" bash "$HOOK" >/dev/null 2>&1 &
+    local pid=$! i=0
+    while [ ! -f "$marker" ] && [ "$i" -lt 100 ]; do i=$((i + 1)); sleep 0.05; done
+    kill -9 "$pid" 2>/dev/null
+    wait "$pid" 2>/dev/null
+    pkill -f "$stub/git" 2>/dev/null
+    [ -f "$marker" ] || { echo "  FAIL: hook never reached the grounded scan"; return 1; }
+
+    local stages; stages=$(_trace_stages)
+    assert_output_contains "$stages" "classify" "the killed run's trail survives" || return 1
+    assert_output_not_contains "$stages" "emit" "a killed run must not read as finished" || return 1
+}
+
+test_stage_trace_opt_out() {
+    seed_repo "src/api.ts"
+    CS_SCOPE_TRACE_DISABLE=1 run_hook "implement a retry wrapper in src/api.ts" >/dev/null 2>&1
+    [ ! -f "$(_trace_file)" ] \
+        || { echo "  FAIL: CS_SCOPE_TRACE_DISABLE=1 must write no trace"; return 1; }
+}
+
+# ============================================================================
 
 echo ""
 echo "cs scope-prompt tests"
@@ -634,5 +701,8 @@ run_test test_graceful_malformed_input
 run_test test_empty_tree_tombstone_marker
 run_test test_injection_prompt_is_data_not_code
 run_test test_firing_prompt_exits_zero
+run_test test_stage_trace_records_the_run_in_order
+run_test test_stage_trace_stops_where_a_killed_run_stopped
+run_test test_stage_trace_opt_out
 
 report_results
