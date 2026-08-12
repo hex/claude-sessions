@@ -612,6 +612,12 @@ else
     # fire — and maildir filenames are unpredictable, so no basename matcher can
     # be written either. The watch path arrives instead as watchPaths from
     # session-start.sh, and the hook filters file_path to its own mailbox.
+    #
+    # CwdChanged is registered for one reason: a cwd change REPLACES the
+    # session's dynamic watch list with what its CwdChanged hooks return, so
+    # answering nothing loses the maildir watch for the rest of the session.
+    # Registering FileChanged is itself what opens that path, so the mailbox has
+    # to answer the event its own registration enables.
     _merge_cs_hook SessionStart       session-start.sh       30
     _merge_cs_hook PostToolUse        autosave-commits.sh    10 "Write|Edit" true
     _merge_cs_hook Stop               narrative-reminder.sh  10
@@ -622,6 +628,7 @@ else
     _merge_cs_hook PreToolUse         bash-logger.sh          5 "Bash"
     _merge_cs_hook UserPromptSubmit   scope-prompt.sh         3
     _merge_cs_hook FileChanged        narrative-reminder.sh  10 "" "" true
+    _merge_cs_hook CwdChanged         narrative-reminder.sh   5
 
     # Register cs-statusline as the Claude Code status line. A status line the
     # user already configured is never replaced silently: prompt when a

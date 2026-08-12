@@ -217,6 +217,31 @@ _mail_count_wake() {
 
 MAIL_REASON_TAIL="Run cs -msg to read it. Reply only if the message needs an answer; never reply merely to acknowledge."
 
+# --- CwdChanged: re-arm the maildir watch -------------------------------------
+# A cwd change REPLACES the session's dynamic watch list with whatever the
+# CwdChanged hooks collectively return — not merges — so a session that answers
+# nothing loses the maildir watch for the rest of its life. Nothing later can
+# restore it: watchPaths rides on only three events, and of those SessionStart
+# has already happened and FileChanged cannot fire once the watch it depends on
+# is gone. Worse, the wipe only runs at all because this session registers a
+# FileChanged hook, so the mailbox arms the event that disarms it.
+#
+# Answering with the maildir turns that event into the repair. The directory
+# must exist before the path is handed over: a watch given a path missing two
+# levels never fires again for that process's lifetime.
+#
+# This branch exits before the drain below on purpose. An unhandled event falls
+# through into the walk-away run and pops a queued task, so a directory change
+# would silently consume work.
+if [ "$HOOK_EVENT" = "CwdChanged" ]; then
+    _mail_is_lead || exit 0
+    mkdir -p "$MAILDIR/new" 2>/dev/null || exit 0
+    jq -nc --arg p "$MAILDIR/new" \
+        '{hookSpecificOutput: {hookEventName: "CwdChanged", watchPaths: [$p]}}' \
+        2>/dev/null || true
+    exit 0
+fi
+
 # --- FileChanged: the idle wake -----------------------------------------------
 # Delivered by writing the reason to stderr and exiting 2 (asyncRewake), which
 # Claude Code wraps in a system-reminder and enqueues — so it reaches a session
