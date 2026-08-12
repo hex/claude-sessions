@@ -50,6 +50,11 @@ export CS_SCOPE_TRACE_DISABLE="1"
 # Opt a session out of first-prompt Objective capture (see hooks.md)
 export CS_OBJECTIVE_CAPTURE_DISABLE="1"
 
+# Opt a session out of the clarify guideline (see hooks.md).
+# Separate from CS_SCOPE_DISABLE on purpose: silencing grounding should not
+# silence the questions. Skip a single turn instead with a leading ~ .
+export CS_CLARIFY_DISABLE="1"
+
 # Statusline context gauge escalation thresholds (see statusline.md)
 export CS_STATUSLINE_CTX_WARN="50"
 export CS_STATUSLINE_CTX_CRIT="80"
