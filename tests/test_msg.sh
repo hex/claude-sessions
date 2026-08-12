@@ -1282,6 +1282,41 @@ prompt_as_receiver() {
     )
 }
 
+# Drive the UserPromptSubmit hook the way a WAKE does. A wake reaches the model
+# as a turn of its own, and that turn runs this hook with no prompt in it — the
+# shape every wake-turn trace in the wild has: input, digest, objective, exit,
+# never reaching the classifier.
+wake_turn_as_receiver() {
+    (
+        export CLAUDE_SESSION_NAME=receiver
+        export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/receiver"
+        export CLAUDE_SESSION_META_DIR="$(RCV_META)"
+        echo '{"prompt":""}' | bash "$HOOKS_DIR/scope-prompt.sh" >/dev/null 2>&1 || true
+    )
+}
+
+test_wake_turn_does_not_reset_the_ceiling() {
+    # The ceiling counts "wakes since the last USER prompt" (session-layout.md).
+    # A wake arrives as its own turn, so if that turn clears the budget the count
+    # can never exceed one and the ceiling can never stop anything — which is the
+    # runaway it exists to stop, between two sessions with nobody at either end.
+    "$CS_BIN" -msg receiver "one" >/dev/null 2>&1 || return 1
+    CS_MAIL_WAKE_MAX=2 wake >/dev/null
+    wake_turn_as_receiver
+    "$CS_BIN" -msg receiver "two" >/dev/null 2>&1 || return 1
+    CS_MAIL_WAKE_MAX=2 wake >/dev/null
+    wake_turn_as_receiver
+    "$CS_BIN" -msg receiver "three" >/dev/null 2>&1 || return 1
+    local out; out=$(CS_MAIL_WAKE_MAX=2 wake)
+    assert_output_not_contains "$out" "Unread cross-session mail" \
+        "wake turns must not spend the budget the ceiling counts" || return 1
+    # And the documented reset still works: a real keystroke clears it.
+    prompt_as_receiver
+    out=$(CS_MAIL_WAKE_MAX=2 wake)
+    assert_output_contains "$out" "Unread cross-session mail" \
+        "a human prompt still resets the ceiling" || return 1
+}
+
 test_stop_wake_stops_at_the_ceiling() {
     "$CS_BIN" -msg receiver "one" >/dev/null 2>&1 || return 1
     CS_MAIL_WAKE_MAX=2 wake >/dev/null
@@ -1298,6 +1333,7 @@ test_stop_wake_stops_at_the_ceiling() {
 }
 
 run_test test_stop_wake_only_the_lead_wakes
+run_test test_wake_turn_does_not_reset_the_ceiling
 run_test test_stop_wake_stops_at_the_ceiling
 run_test test_idle_wake_exits_2_with_the_reason_on_stderr
 run_test test_idle_wake_accepts_another_spelling_of_the_same_path

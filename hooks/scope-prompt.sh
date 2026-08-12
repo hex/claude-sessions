@@ -99,12 +99,9 @@ _trace() {  # stage
 _trace_open "${CLAUDE_SESSION_META_DIR:-}/local"
 
 # The user is back: drop the statusline's finished-blink marker before any
-# other gate (slash commands and short prompts clear it too), and clear the mail
-# wake's budget. The ceiling exists to stop two unattended sessions volleying at
-# each other; a human typing is the proof that nobody is stuck in one.
+# other gate (slash commands and short prompts clear it too).
 [ -n "${CLAUDE_SESSION_META_DIR:-}" ] \
-    && rm -f "$CLAUDE_SESSION_META_DIR/local/attention" \
-             "$CLAUDE_SESSION_META_DIR/local/mail/wakes" 2>/dev/null
+    && rm -f "$CLAUDE_SESSION_META_DIR/local/attention" 2>/dev/null
 
 # iTerm2: the bounce raised at turn end stops the moment the user prompts.
 # Mirrors the guard in narrative-reminder.sh (hooks are standalone).
@@ -119,6 +116,16 @@ fi
 INPUT=$(cat 2>/dev/null) || exit 0
 PROMPT=$(printf '%s' "$INPUT" | jq -r '.prompt // empty' 2>/dev/null) || exit 0
 _trace input
+
+# Clear the mail wake's budget, but only for a prompt somebody typed. The
+# ceiling exists to stop two unattended sessions volleying at each other, and a
+# human typing is the proof that nobody is stuck in one — which is why it counts
+# wakes since the last USER prompt. A wake reaches the model as a turn of its
+# own, carrying no prompt, so treating that turn as proof would let every wake
+# reset the budget it just spent, and the ceiling would cap nothing.
+if [ -n "$PROMPT" ] && [ -n "${CLAUDE_SESSION_META_DIR:-}" ]; then
+    rm -f "$CLAUDE_SESSION_META_DIR/local/mail/wakes" 2>/dev/null || true
+fi
 
 # --- Queue inbox digest (surface-once) ---
 
