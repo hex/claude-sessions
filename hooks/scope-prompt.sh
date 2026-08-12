@@ -79,9 +79,15 @@ _trace_open() {  # meta_local_dir
         tail -n 2000 "$_TRACE" > "$_TRACE.tmp" 2>/dev/null \
             && mv "$_TRACE.tmp" "$_TRACE" 2>/dev/null || true
     fi
-    # The start mark carries absolute epoch milliseconds; every later mark is
-    # relative to it, so one run reads as elapsed time and the file as a history.
-    printf '%s %s start\n' "$$" "$_TRACE_T0" >> "$_TRACE" 2>/dev/null || true
+    # The start mark carries the origin every later mark is relative to, so one
+    # run reads as elapsed time and the file as a history. It also names the
+    # directory the run stood in: the scan's cost depends on what git is asked
+    # to walk, and a kill from deep inside a tree and one at its root are not
+    # the same event. The directory is the rest of the line, never a field —
+    # paths hold spaces. A newline in one would split the mark in two, so it
+    # collapses to a space (a shell substitution: still no fork).
+    printf '%s %s start %s\n' "$$" "$_TRACE_T0" "${PWD//$'\n'/ }" \
+        >> "$_TRACE" 2>/dev/null || true
 }
 
 _trace() {  # stage

@@ -550,6 +550,21 @@ STUB
     assert_output_not_contains "$stages" "emit" "a killed run must not read as finished" || return 1
 }
 
+test_stage_trace_records_the_invoking_directory() {
+    seed_repo "src/api.ts"
+    # Kills recorded so far came overwhelmingly from repo roots, but one came
+    # from a directory several levels down. Whether that matters is exactly what
+    # the trace cannot answer unless it says where each run stood.
+    local deep="$CLAUDE_SESSION_DIR/Assets/Scripts/World"
+    mkdir -p "$deep"
+    ( cd "$deep" && run_hook "implement a retry wrapper in src/api.ts" ) >/dev/null 2>&1
+    # The directory is the rest of the line, not one field: a path may hold
+    # spaces, and truncating at the first would name a directory nobody visited.
+    local where
+    where=$(awk '$3 == "start" { sub(/^[^ ]+ [^ ]+ start /, ""); print; exit }' "$(_trace_file)")
+    assert_eq "$deep" "$where" "the start mark names the directory the hook ran in" || return 1
+}
+
 test_stage_trace_opt_out() {
     seed_repo "src/api.ts"
     CS_SCOPE_TRACE_DISABLE=1 run_hook "implement a retry wrapper in src/api.ts" >/dev/null 2>&1
@@ -703,6 +718,7 @@ run_test test_injection_prompt_is_data_not_code
 run_test test_firing_prompt_exits_zero
 run_test test_stage_trace_records_the_run_in_order
 run_test test_stage_trace_stops_where_a_killed_run_stopped
+run_test test_stage_trace_records_the_invoking_directory
 run_test test_stage_trace_opt_out
 
 report_results

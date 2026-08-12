@@ -169,10 +169,10 @@ Known multi-machine limitation: if a session is cloned to a second machine while
 - NO caching by design: a grounding hook must reflect the current tree; a prompt-only cache key would silently serve stale ground after commits/edits.
 - Never blocks the prompt path — every error path exits 0.
 
-**Stage trace.** Every run appends one line per stage to `.cs/local/scope-prompt.trace` as that stage finishes — `pid`, milliseconds, stage name, with each mark after `start` carrying the elapsed time since it. The `start` value itself is epoch milliseconds wherever the shell offers `$EPOCHREALTIME`, and shell-relative on the bash 3.2 fallback, so treat it as an origin to subtract from rather than a wall clock:
+**Stage trace.** Every run appends one line per stage to `.cs/local/scope-prompt.trace` as that stage finishes — `pid`, milliseconds, stage name, with each mark after `start` carrying the elapsed time since it. The `start` value itself is epoch milliseconds wherever the shell offers `$EPOCHREALTIME`, and shell-relative on the bash 3.2 fallback, so treat it as an origin to subtract from rather than a wall clock. The `start` mark also names the directory the run stood in — the rest of the line, never a field, since paths hold spaces:
 
 ```
-21204 1786532215708 start
+21204 1786532215708 start /Users/you/projects/big-repo
 21204 21 input
 21204 53 digest
 21204 68 classify
