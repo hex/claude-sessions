@@ -36,6 +36,62 @@ fi
 # down), so resolution relies on the env or CLAUDE_PROJECT_DIR.
 cs_resolve_session "" || exit 0
 
+# --- Stage trace ---
+
+# One line per stage, appended as that stage finishes, so a run killed at the
+# UserPromptSubmit wall clock still leaves the trail naming whatever it hung on.
+# A summary written at exit would say nothing about exactly the runs worth
+# diagnosing, since those never reach the exit. Machine-local: which machine was
+# slow is half the finding, and a shared file would average four of them
+# together. Columns are pid, milliseconds, stage.
+_TRACE=""
+_TRACE_T0=0
+_MS=0
+
+# The clock, through builtins only ($EPOCHREALTIME where the shell has it,
+# $SECONDS on bash 3.2). A trace that forked twice per stage would be measuring
+# its own overhead in a hook under suspicion for being slow. Sets _MS rather
+# than printing, because capturing a print costs the subshell this avoids.
+_now_ms() {
+    local t="${EPOCHREALTIME:-}" s f
+    case "$t" in
+        *[.,]*)
+            s="${t%%[.,]*}"
+            f="${t#*[.,]}"
+            # 10# forces base 10: a fractional part like 004512 is not octal.
+            _MS=$(( 10#$s * 1000 + 10#${f:0:3} ))
+            ;;
+        *) _MS=$(( SECONDS * 1000 )) ;;
+    esac
+}
+
+_trace_open() {  # meta_local_dir
+    [ "${CS_SCOPE_TRACE_DISABLE:-}" = "1" ] && return 0
+    [ -n "$1" ] || return 0
+    [ -d "$1" ] || mkdir -p "$1" 2>/dev/null || return 0
+    _TRACE="$1/scope-prompt.trace"
+    _now_ms
+    _TRACE_T0=$_MS
+    # Bound the file without buying a size check on every prompt: one run in 64
+    # trims it, often enough that it cannot run away and rare enough that the
+    # fork stays out of the common path.
+    if [ $(( $$ % 64 )) -eq 0 ] && [ -f "$_TRACE" ]; then
+        tail -n 2000 "$_TRACE" > "$_TRACE.tmp" 2>/dev/null \
+            && mv "$_TRACE.tmp" "$_TRACE" 2>/dev/null || true
+    fi
+    # The start mark carries absolute epoch milliseconds; every later mark is
+    # relative to it, so one run reads as elapsed time and the file as a history.
+    printf '%s %s start\n' "$$" "$_TRACE_T0" >> "$_TRACE" 2>/dev/null || true
+}
+
+_trace() {  # stage
+    [ -n "$_TRACE" ] || return 0
+    _now_ms
+    printf '%s %s %s\n' "$$" "$(( _MS - _TRACE_T0 ))" "$1" >> "$_TRACE" 2>/dev/null || true
+}
+
+_trace_open "${CLAUDE_SESSION_META_DIR:-}/local"
+
 # The user is back: drop the statusline's finished-blink marker before any
 # other gate (slash commands and short prompts clear it too), and clear the mail
 # wake's budget. The ceiling exists to stop two unattended sessions volleying at
@@ -56,6 +112,7 @@ fi
 # expanded into a shell context.
 INPUT=$(cat 2>/dev/null) || exit 0
 PROMPT=$(printf '%s' "$INPUT" | jq -r '.prompt // empty' 2>/dev/null) || exit 0
+_trace input
 
 # --- Queue inbox digest (surface-once) ---
 
@@ -169,6 +226,7 @@ if [ -n "$MAIL_DIGEST" ]; then
     DIGEST="${DIGEST:+$DIGEST
 }$MAIL_DIGEST"
 fi
+_trace digest
 
 # Every pass-through exit below this point must still deliver a pending
 # digest; a digest-only prompt turn emits just the digest as context.
@@ -178,6 +236,7 @@ _digest_exit() {
             '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: $c}}'
     fi
     _commit_digest "${CLAUDE_SESSION_META_DIR:-}/local"
+    _trace exit
     exit 0
 }
 
@@ -217,6 +276,7 @@ if [ "${CS_OBJECTIVE_CAPTURE_DISABLE:-}" != "1" ] \
         fi
     fi
 fi
+_trace objective
 
 # --- Scope grounding (code-work prompts only) ---
 
@@ -255,6 +315,7 @@ else
         _digest_exit   # negative classification: silent pass-through
     fi
 fi
+_trace classify
 
 # No cache: a grounding hook must reflect the CURRENT tree. A prompt-only cache key served
 # stale ground after commits/edits, and a repo-state-aware key would almost never hit in an
@@ -288,6 +349,7 @@ WORD_PARTS=$(printf '%s' "$TOKENS" | _scan -v '[/.]' 2>/dev/null \
     | tr '_-' '  ' | tr '[:upper:]' '[:lower:]' | tr ' ' '\n' \
     | _scan -v '^.{0,1}$' 2>/dev/null | _scan '[a-z]' 2>/dev/null \
     | _scan -vi "$STOP_RE" 2>/dev/null | sort -u || true)
+_trace tokens
 
 # Build/vendor/meta dirs that must never be injected. The \.cs/ entry is load-bearing:
 # without it /scope would surface the session's own metadata (memory, narrative, ...).
@@ -332,6 +394,7 @@ if [ -n "$PATH_TOKENS" ] || [ -n "$WORD_PARTS" ]; then
                 for (i = 1; i <= m; i++) if (parts[i] in WT) { print; if (++matched >= 30) exit; next }
             }')
 fi
+_trace scan
 
 # --- Build the scope block ---
 
@@ -351,6 +414,7 @@ $RELEVANT_FILES"
     REL_PATHS=()
     while IFS= read -r _f; do [ -n "$_f" ] && REL_PATHS+=("$_f"); done <<< "$RELEVANT_FILES"
     [ "${#REL_PATHS[@]}" -gt 0 ] && RECENT_COMMITS=$(git -C "$SESSION_DIR" log --oneline -5 --no-merges -- "${REL_PATHS[@]}" 2>/dev/null)
+    _trace gitlog
     [ -n "$RECENT_COMMITS" ] && BLOCK="$BLOCK
 
 ### Recent commits
@@ -360,6 +424,7 @@ $RECENT_COMMITS"
     # read a file absent from the list as unmodified. Flag the truncation in the header so an
     # absent file reads as "maybe cut", not "clean".
     _full_diff=$(git -C "$SESSION_DIR" diff --stat HEAD 2>/dev/null)
+    _trace gitdiff
     if [ -n "$_full_diff" ]; then
         LATEST_DIFF=$(printf '%s\n' "$_full_diff" | tail -10)
         _wt_header="### Working tree"
@@ -395,4 +460,5 @@ fi
 jq -n --arg c "$BLOCK" \
     '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: $c}}'
 _commit_digest "${CLAUDE_SESSION_META_DIR:-}/local"
+_trace emit
 exit 0

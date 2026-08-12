@@ -44,6 +44,9 @@ export CS_STATUSLINE_DISABLE="1"
 # Opt a session out of the scope-prompt auto-grounding hook
 export CS_SCOPE_DISABLE="1"
 
+# Opt a session out of the scope-prompt stage trace (see hooks.md)
+export CS_SCOPE_TRACE_DISABLE="1"
+
 # Opt a session out of first-prompt Objective capture (see hooks.md)
 export CS_OBJECTIVE_CAPTURE_DISABLE="1"
 
