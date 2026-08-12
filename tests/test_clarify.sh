@@ -96,8 +96,82 @@ test_short_prompt_is_not_filtered() {
         "a six-character prompt still carries the guideline"
 }
 
+test_tilde_prefix_opts_out() {
+    seed_repo "src/api.ts"
+    local ctx
+    ctx=$(run_hook "~implement a retry wrapper in src/api.ts" | emitted_context)
+    assert_output_not_contains "$ctx" "Before acting on this request" \
+        "a leading tilde suppresses the guideline" || return 1
+    # The opt-out is for the questions, not for grounding.
+    assert_output_contains "$ctx" "Scope (auto-grounded)" \
+        "scope grounding still runs on an opted-out turn"
+}
+
+test_leading_whitespace_before_tilde_still_opts_out() {
+    seed_repo "src/api.ts"
+    local ctx
+    ctx=$(run_hook "  ~implement a retry wrapper in src/api.ts" | emitted_context)
+    assert_output_not_contains "$ctx" "Before acting on this request" \
+        "leading whitespace does not defeat the tilde opt-out"
+}
+
+test_slash_command_skipped() {
+    seed_repo "src/api.ts"
+    local ctx
+    ctx=$(run_hook "/color red" | emitted_context)
+    assert_output_not_contains "$ctx" "Before acting on this request" \
+        "slash commands carry their own instructions"
+}
+
+test_bang_passthrough_skipped() {
+    seed_repo "src/api.ts"
+    local ctx
+    ctx=$(run_hook "!printenv CS_TERM_THEME" | emitted_context)
+    assert_output_not_contains "$ctx" "Before acting on this request" \
+        "shell passthrough is not a request to clarify"
+}
+
+test_empty_prompt_skipped() {
+    seed_repo "src/api.ts"
+    # An empty prompt is a mail wake, not vague input. Injecting here would put
+    # the guideline on every unattended wake turn.
+    local ctx
+    ctx=$(run_hook "" | emitted_context)
+    assert_output_not_contains "$ctx" "Before acting on this request" \
+        "a wake turn carries no prompt and gets no guideline"
+}
+
+test_opt_out_via_disable_env() {
+    seed_repo "src/api.ts"
+    local ctx
+    ctx=$(CS_CLARIFY_DISABLE=1 run_hook "implement a retry wrapper in src/api.ts" | emitted_context)
+    assert_output_not_contains "$ctx" "Before acting on this request" \
+        "CS_CLARIFY_DISABLE suppresses the guideline" || return 1
+    assert_output_contains "$ctx" "Scope (auto-grounded)" \
+        "and leaves scope grounding alone"
+}
+
+test_scope_disable_does_not_suppress_clarify() {
+    seed_repo "src/api.ts"
+    # The two switches are independent by design: silencing grounding must not
+    # silence the questions.
+    local ctx
+    ctx=$(CS_SCOPE_DISABLE=1 run_hook "implement a retry wrapper in src/api.ts" | emitted_context)
+    assert_output_contains "$ctx" "Before acting on this request" \
+        "CS_SCOPE_DISABLE leaves the clarify guideline in place" || return 1
+    assert_output_not_contains "$ctx" "Scope (auto-grounded)" \
+        "while still suppressing scope grounding"
+}
+
 run_test test_guideline_injected_on_scope_firing_prompt
 run_test test_guideline_injected_on_vague_prompt
 run_test test_short_prompt_is_not_filtered
+run_test test_tilde_prefix_opts_out
+run_test test_leading_whitespace_before_tilde_still_opts_out
+run_test test_slash_command_skipped
+run_test test_bang_passthrough_skipped
+run_test test_empty_prompt_skipped
+run_test test_opt_out_via_disable_env
+run_test test_scope_disable_does_not_suppress_clarify
 
 report_results
