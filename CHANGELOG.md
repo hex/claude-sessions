@@ -6,7 +6,17 @@ All notable changes to cs are documented here. Release notes are also available 
 
 ## Unreleased
 
+Idle mail arrives again. Two mechanisms meant to bound runaway behaviour turn out never to have worked, and a hook now says what it hung on.
+
 ### Fixes
+
+- **A directory change no longer kills the idle mail wake.** Claude Code hands its file watcher a list of paths, and a cwd change **replaces** that list with whatever the session's `CwdChanged` hooks return rather than merging into it. cs answered nothing, so every `cd` wiped the maildir watch and mail stopped waking an idle session for the rest of its life — nothing later could restore it, since `watchPaths` rides on only three events, `SessionStart` has already happened, and `FileChanged` cannot fire once the watch it depends on is gone. Worse, the wipe only ran at all because cs registers a `FileChanged` hook: the guard reaching that path is satisfied by any `FileChanged` or `CwdChanged` registration, so the mailbox armed the event that disarmed it.
+
+  `narrative-reminder.sh` now answers `CwdChanged` with the maildir, turning the event that wiped the watch into the one that restores it. The branch exits before the walk-away drain deliberately — an unhandled event falls through into it and pops a queued task, so without that exit a directory change would silently consume work.
+
+  Measured on a session with a live wake: six deliveries in 46 minutes, the last 80 seconds before a `cd`, then silence through a two-minute probe. After the fix, the same session and the same `cd` deliver in 1.8 seconds against a 1.4-second control.
+
+- **The mail wake ceiling counts wakes again, rather than turns.** `CS_MAIL_WAKE_MAX` caps "wakes since the last user prompt", but the budget was cleared on every `UserPromptSubmit` — and a wake reaches the model as a turn of its own, so each wake spent the budget and immediately reset it. The counter could never exceed one and the ceiling has never been able to stop anything, which is the volley between two unattended sessions it exists to prevent. The attention marker still drops on any prompt; the budget now clears only for a prompt somebody typed. A wake turn is distinguishable because it carries no prompt.
 
 - **A prompt hook killed at its timeout no longer swallows the queue digest.** `_build_digest` advanced the `.cs/local/notifications.seen` cursor before either injection hook did any of its expensive work, while the digest itself reached stdout last of all. `scope-prompt.sh` runs under a 3-second wall clock and Claude Code kills it where it stands when it overruns, so a killed run had already spent the surface-once budget for notifications it never printed — and nothing ever surfaces them again. The two halves are now split: `_build_digest` records the pending cursor in `DIGEST_PENDING`, and `_commit_digest` spends it at each hook's emission point, after the write. Failing that way round can at worst repeat a digest. Both hooks carry verbatim-identical copies of both functions under the standalone-hook law, and the sync test now covers both — a hook that built with one copy and retired with a stale other would lose exactly what the split prevents.
 
