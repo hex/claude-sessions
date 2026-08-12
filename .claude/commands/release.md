@@ -172,6 +172,28 @@ ship as follow-ups noted in the release notes or the narrative. For an
 unusually large or risky range, suggest the user run `/code-review ultra` —
 it is user-triggered and billed; never attempt to launch it yourself.
 
+**Rule-shaped changes need a measurement, not a reading.** If the range touches
+anything whose correctness is a claim about a population — a redaction or
+validation rule, a regex, a filter, a matcher, a classifier — one reviewer MUST
+run it against the real population and report two numbers: how often it fires,
+and how often that firing is correct. Reading the diff is not enough and neither
+is a green suite.
+
+The author cannot supply that measurement, because the failure is not a wrong
+answer, it is a fixture chosen where the author's own assumption holds. Test
+both directions explicitly: what the rule wrongly lets through, and what it
+wrongly destroys. A rule that fires twice on real input and is wrong both times
+is data loss, not a filter, and a suite can be entirely green while that is true.
+
+This is the step's own history, not a hypothetical. The corpus redactor merged
+in `fa8856b` and was tagged 80 minutes later in `v2026.7.14`, one day before
+this gate existed. It then survived 29 releases unseen, because every review
+after it was scoped to the range that release touched. It was caught only when
+`dcf8eec` re-touched the code and a reviewer measured it over 2384 real
+transcripts: two firings, both false positives, zero credentials caught. Scope a
+review to a diff and it sees a defect once; measure a rule against its
+population and the defect has nowhere to sit.
+
 ### 5. Run Tests
 
 Run the full test suite to verify nothing is broken before releasing:

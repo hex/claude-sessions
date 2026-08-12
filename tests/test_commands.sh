@@ -441,4 +441,22 @@ test_sweep_requires_identity_facts_to_be_keyed() {
 }
 
 run_test test_sweep_requires_identity_facts_to_be_keyed
+
+# The empirical remit. A reviewer reading a diff sees a rule once; a reviewer
+# measuring it against the real population leaves the defect nowhere to sit.
+# The corpus redactor survived 29 releases because every review after it was
+# scoped to the range that release touched.
+test_release_gate_mandates_an_empirical_pass() {
+    assert_file_contains "$RELEASE_MD" "run it against the real population" \
+        "Step 4b must require measuring a rule against real data, not reading the diff" || return 1
+    assert_file_contains "$RELEASE_MD" "how often it fires" \
+        "Step 4b must require reporting the firing rate" || return 1
+    assert_file_contains "$RELEASE_MD" "author cannot supply that measurement" \
+        "Step 4b must exclude the author from supplying their own measurement" || return 1
+    assert_file_contains "$RELEASE_MD" "wrongly destroys" \
+        "Step 4b must require testing both directions, not only what leaks" || return 1
+}
+
+run_test test_release_gate_mandates_an_empirical_pass
+
 report_results
