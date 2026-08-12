@@ -98,6 +98,7 @@ MAIL_UNREAD=0
 MAIL_FRESH=0
 MAIL_DISCHARGED=0
 MAIL_NAMES=""
+MAIL_FROM=""
 # Initialised here rather than inside the silencers: an unset counter would be
 # seeded by any same-named variable inherited from the environment.
 MAIL_WAKES=0
@@ -143,7 +144,7 @@ _mail_is_lead() {
 # arrival (same-second order is by unpadded pid). Set membership needs neither
 # property.
 _mail_scan() {
-    local f name kind woke=""
+    local f name kind from woke=""
     # Read the snapshot ONCE and match in-shell. A fork per unread message is
     # paid on every turn end for as long as the mail stays unread, and the idle
     # wake re-scans all of new/ per arrival — so a burst of N deliveries would
@@ -166,13 +167,41 @@ _mail_scan() {
         # race the drain — but it is discharged all the same, and recording it
         # is what stops every later turn from re-reading it. An unreadable or
         # forged document reads as text: over-waking is the safe direction.
-        kind=$(jq -r '.kind // "text"' "$f" 2>/dev/null || echo text)
+        # One jq per document, reading both fields it needs. The sender rides
+        # along free: a count says work arrived but not whose, and the recipient
+        # would otherwise spend a turn on `cs -msg` just to learn whether it can
+        # wait. Truncated and stripped of separators inside jq so a forged or
+        # hand-written document cannot smuggle a newline or a comma into the
+        # rendered line, and coerced to a string so a numeric field cannot error
+        # the whole read and take .kind down with it.
+        IFS=$'\037' read -r kind from <<EOF
+$(jq -r '[(.kind // "text"),
+          ((.from // .actor // "") | if type == "string" then . else tostring end
+             | gsub("[\n\r,]"; " "))[0:40]] | join("")' "$f" 2>/dev/null || printf 'text')
+EOF
+        [ -n "$kind" ] || kind=text
+        # Distinct senders only: two messages from one session is one name, and
+        # repeating it answers nothing the count has not already said.
+        case "$from" in
+            "") ;;
+            *) case "$NL$MAIL_FROM$NL" in
+                   *"$NL$from$NL"*) ;;
+                   *) MAIL_FROM="${MAIL_FROM:+$MAIL_FROM$NL}$from" ;;
+               esac ;;
+        esac
         if [ "$kind" = "task" ]; then
             MAIL_DISCHARGED=1
         else
             MAIL_FRESH=1
         fi
     done
+}
+
+# Render the distinct senders as a clause, or nothing when no document named
+# one. Kept separate from the scan so both wakes compose the same line.
+_mail_from_clause() {
+    [ -n "${MAIL_FROM:-}" ] || { printf ''; return 0; }
+    printf ' from %s' "$(printf '%s' "$MAIL_FROM" | tr '\n' ',' | sed 's/,$//; s/,/, /g')"
 }
 
 # Record the snapshot as the whole of new/, which is sound only when everything
@@ -290,7 +319,7 @@ if [ "$HOOK_EVENT" = "FileChanged" ]; then
     # costs a duplicate wake, while recording first costs a silent strand — and
     # a strand is unrecoverable for an idle session, which submits no prompt and
     # ends no turn. Only the exit itself has to come last.
-    printf '%s\n' "Unread cross-session mail ($MAIL_UNREAD). $MAIL_REASON_TAIL" >&2
+    printf '%s\n' "Unread cross-session mail ($MAIL_UNREAD)$(_mail_from_clause). $MAIL_REASON_TAIL" >&2
     _mail_count_wake
     _mail_record
     exit 2
@@ -525,7 +554,7 @@ fi
 # not been, so the live MAIL_FRESH must still suppress that write.
 _mail_apply_silencers
 if [ "$MAIL_FRESH" = 1 ]; then
-    jq -nc --arg r "Unread cross-session mail ($MAIL_UNREAD). $MAIL_REASON_TAIL" \
+    jq -nc --arg r "Unread cross-session mail ($MAIL_UNREAD)$(_mail_from_clause). $MAIL_REASON_TAIL" \
         '{decision: "block", reason: $r}'
     # Emit first, record second: a kill in between costs one duplicate wake,
     # while the reverse costs a silent strand — unrecoverable for an idle

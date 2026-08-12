@@ -1186,6 +1186,29 @@ test_cwd_change_never_reaches_the_drain() {
         || { echo "  FAIL: a cwd change consumed a queued task"; return 1; }
 }
 
+test_wake_names_who_the_mail_is_from() {
+    # A count alone says work arrived but not whose, and the recipient has to
+    # spend a turn on `cs -msg` to find out whether it can wait. The sender is
+    # the one field that makes that judgement possible without reading.
+    "$CS_BIN" -msg receiver "wake up" >/dev/null 2>&1 || return 1
+    local msg; msg=$(FIRST_MSG) || return 1
+    local err rc=0
+    err=$(filechanged "$msg" add 2>&1 >/dev/null) || rc=$?
+    assert_eq "2" "$rc" "still delivers by exiting 2" || return 1
+    assert_output_contains "$err" "from sender" "the wake names the sender" || return 1
+}
+
+test_wake_names_every_distinct_sender_once() {
+    # Two messages from one session is one name, not two — the line answers
+    # "who is waiting on me", and repeating a name answers nothing.
+    "$CS_BIN" -msg receiver "one" >/dev/null 2>&1 || return 1
+    "$CS_BIN" -msg receiver "two" >/dev/null 2>&1 || return 1
+    local msg; msg=$(FIRST_MSG) || return 1
+    local err; err=$(filechanged "$msg" add 2>&1 >/dev/null) || true
+    local hits; hits=$(printf '%s' "$err" | grep -o 'sender' | wc -l | tr -d ' ')
+    assert_eq "1" "$hits" "one sender named once, however many messages" || return 1
+}
+
 test_idle_wake_exits_2_with_the_reason_on_stderr() {
     "$CS_BIN" -msg receiver "wake up" >/dev/null 2>&1 || return 1
     local msg; msg=$(FIRST_MSG) || return 1
@@ -1389,6 +1412,8 @@ run_test test_stop_wake_stops_at_the_ceiling
 run_test test_cwd_change_rearms_the_maildir_watch
 run_test test_cwd_change_creates_the_maildir_before_arming
 run_test test_cwd_change_never_reaches_the_drain
+run_test test_wake_names_who_the_mail_is_from
+run_test test_wake_names_every_distinct_sender_once
 run_test test_idle_wake_exits_2_with_the_reason_on_stderr
 run_test test_idle_wake_accepts_another_spelling_of_the_same_path
 run_test test_idle_wake_ignores_files_outside_the_maildir
