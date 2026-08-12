@@ -662,6 +662,37 @@ test_session_start_excludes_current_session() {
     session_start_teardown
 }
 
+# Two other places in this hook family mandate AskUserQuestion for a decision the
+# user owns: crash recovery, and the wrap-up cue in the CLAUDE.local.md block.
+# Routing a request to the session that owns it is the same kind of decision and
+# was the one left as passive prose.
+test_session_start_sibling_block_mandates_asking() {
+    session_start_setup
+
+    create_sibling_session "other-work" "Some other work"
+
+    local output context
+    output=$(echo '{"session_id":"test","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+
+    if ! echo "$context" | grep -q "AskUserQuestion"; then
+        echo "  FAIL: sibling block must name AskUserQuestion, not just 'say so'"
+        session_start_teardown
+        return 1
+    fi
+    # Picky, not trigger-happy: the wrap-up cue text warns that false positives
+    # erode the signal, and a routing prompt that fires on vocabulary overlap
+    # becomes the next ignored block.
+    if ! echo "$context" | grep -qi "substantially"; then
+        echo "  FAIL: sibling block must set a high bar, not fire on any overlap"
+        session_start_teardown
+        return 1
+    fi
+
+    session_start_teardown
+}
+
 test_session_start_sibling_line_carries_the_send_syntax() {
     # Naming the verb without its syntax is worse than saying nothing: it tells
     # the reader a capability exists and forces a `cs --help` call to use it.
@@ -1358,6 +1389,7 @@ run_test test_resume_digest_reports_memory_activity
 run_test test_resume_digest_silent_without_watermark
 run_test test_session_start_includes_sibling_sessions
 run_test test_session_start_excludes_current_session
+run_test test_session_start_sibling_block_mandates_asking
 run_test test_session_start_sibling_line_carries_the_send_syntax
 run_test test_session_start_shows_objectives
 run_test test_session_start_limits_sibling_count
