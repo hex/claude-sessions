@@ -1135,6 +1135,57 @@ filechanged() {  # file_path, [event]
     )
 }
 
+# Drive the CwdChanged event as the receiver's lead.
+cwdchanged() {  # old_cwd, new_cwd
+    (
+        export CLAUDE_SESSION_NAME=receiver
+        export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/receiver"
+        export CLAUDE_SESSION_META_DIR="$(RCV_META)"
+        export CS_LEAD_PID=$$ CLAUDE_PID=$$
+        jq -nc --arg o "${1:-/tmp}" --arg n "${2:-/}" \
+            '{hook_event_name: "CwdChanged", old_cwd: $o, new_cwd: $n}' \
+            | bash "$HOOKS_DIR/narrative-reminder.sh"
+    )
+}
+
+test_cwd_change_rearms_the_maildir_watch() {
+    # A cwd change REPLACES the session's dynamic watch list with whatever the
+    # CwdChanged hooks return, so a session that answers nothing loses the
+    # maildir watch and never wakes again until the next SessionStart. Answering
+    # with the maildir turns the event that wiped the watch into the one that
+    # restores it.
+    local out; out=$(cwdchanged "/tmp" "/")
+    local watch; watch=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.watchPaths[0] // empty' 2>/dev/null)
+    assert_eq "$(RCV_META)/local/mail/new" "$watch" "the cwd change re-arms the maildir watch" || return 1
+    assert_eq "CwdChanged" \
+        "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.hookEventName // empty' 2>/dev/null)" \
+        "and names the event it is answering" || return 1
+}
+
+test_cwd_change_creates_the_maildir_before_arming() {
+    # A watch given a path missing two levels never fires again for that
+    # process's lifetime, so arming on a maildir that does not exist yet is
+    # worse than not arming at all.
+    rm -rf "$(RCV_META)/local/mail"
+    cwdchanged "/tmp" "/" >/dev/null
+    [ -d "$(RCV_META)/local/mail/new" ] \
+        || { echo "  FAIL: the maildir must exist before the watch is armed"; return 1; }
+}
+
+test_cwd_change_never_reaches_the_drain() {
+    # The drain pops a task off the queue. An event that fell through to it
+    # would consume queued work on every directory change, silently.
+    local qdir; qdir="$(RCV_META)/local/queue"
+    mkdir -p "$qdir"
+    printf 'only task\n' > "$qdir/0000000001-seed"
+    printf 'armed\n' > "$(RCV_META)/local/queue.state"
+    local out; out=$(cwdchanged "/tmp" "/")
+    assert_output_not_contains "$out" "walk-away" "a cwd change must not start a drain" || return 1
+    assert_output_not_contains "$out" "decision" "and must not block the turn" || return 1
+    [ -f "$qdir/0000000001-seed" ] \
+        || { echo "  FAIL: a cwd change consumed a queued task"; return 1; }
+}
+
 test_idle_wake_exits_2_with_the_reason_on_stderr() {
     "$CS_BIN" -msg receiver "wake up" >/dev/null 2>&1 || return 1
     local msg; msg=$(FIRST_MSG) || return 1
@@ -1335,6 +1386,9 @@ test_stop_wake_stops_at_the_ceiling() {
 run_test test_stop_wake_only_the_lead_wakes
 run_test test_wake_turn_does_not_reset_the_ceiling
 run_test test_stop_wake_stops_at_the_ceiling
+run_test test_cwd_change_rearms_the_maildir_watch
+run_test test_cwd_change_creates_the_maildir_before_arming
+run_test test_cwd_change_never_reaches_the_drain
 run_test test_idle_wake_exits_2_with_the_reason_on_stderr
 run_test test_idle_wake_accepts_another_spelling_of_the_same_path
 run_test test_idle_wake_ignores_files_outside_the_maildir

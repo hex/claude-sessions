@@ -206,6 +206,9 @@ The hooks are configured in `~/.claude/settings.json`:
     "FileChanged": [
       { "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/narrative-reminder.sh", "timeout": 10, "asyncRewake": true, "rewakeMessage": "Cross-session mail arrived:", "rewakeSummary": "New cs mail" }] }
     ],
+    "CwdChanged": [
+      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/narrative-reminder.sh", "timeout": 5 }] }
+    ],
     "SessionEnd": [
       { "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/session-end.sh", "timeout": 30 }] }
     ],
