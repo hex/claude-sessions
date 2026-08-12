@@ -163,6 +163,37 @@ test_scope_disable_does_not_suppress_clarify() {
         "while still suppressing scope grounding"
 }
 
+test_emits_exactly_one_object_with_all_parts() {
+    seed_repo "src/api.ts"
+    # Seed a pending queue digest so all three components are live at once.
+    printf '%s\n' '{"event":"task_done"}' \
+        > "$CLAUDE_SESSION_META_DIR/local/notifications.jsonl"
+
+    local raw
+    raw=$(run_hook "implement a retry wrapper in src/api.ts")
+
+    # One object, not a stream: jq -s wraps the whole input in an array.
+    local count
+    count=$(printf '%s' "$raw" | jq -s 'length' 2>/dev/null)
+    assert_eq "1" "$count" "the hook emits exactly one JSON object" || return 1
+
+    local ctx
+    ctx=$(printf '%s' "$raw" | emitted_context)
+    assert_output_contains "$ctx" "cs queue while you were away" \
+        "the digest is present" || return 1
+    assert_output_contains "$ctx" "Before acting on this request" \
+        "the guideline is present" || return 1
+    assert_output_contains "$ctx" "Scope (auto-grounded)" \
+        "the scope block is present" || return 1
+
+    # Order: digest, then the guideline, then scope. Scope goes last because a
+    # truncated scope block must end with its truncation marker.
+    printf '%s\n' "$ctx" \
+        | awk '/^cs queue while you were away/{d=NR} /^## Clarify/{c=NR} /^## Scope/{s=NR}
+               END{exit !(d && c && s && d < c && c < s)}' \
+        || { echo "  FAIL: components out of order (want digest, clarify, scope)"; return 1; }
+}
+
 run_test test_guideline_injected_on_scope_firing_prompt
 run_test test_guideline_injected_on_vague_prompt
 run_test test_short_prompt_is_not_filtered
@@ -173,5 +204,6 @@ run_test test_bang_passthrough_skipped
 run_test test_empty_prompt_skipped
 run_test test_opt_out_via_disable_env
 run_test test_scope_disable_does_not_suppress_clarify
+run_test test_emits_exactly_one_object_with_all_parts
 
 report_results
