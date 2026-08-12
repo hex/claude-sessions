@@ -4,6 +4,29 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.8.14
+
+A name collision with Claude Code, the mechanism that makes fixing one safe, and two changes to how cs asks before acting.
+
+### Changed
+
+- **The `/voice` skill is now `/write-as-me`.** Claude Code 2.1.227 ships its own `/voice`, a local command that toggles voice mode. Two commands answering the same name is one too many, so the drafting skill takes a name of its own. Everything else about it is unchanged, including the profile and corpus at `~/.claude-sessions/.voice/`, which keep their location so an existing profile survives the rename.
+
+  Upgrading deletes the old skill directory. That matters more than it sounds: a skill left on disk keeps answering its slash command forever, and nothing ever removed one. `RETIRED_SKILLS` now does for skills what `RETIRED_HOOKS` already did for hooks, consumed by both install and uninstall so a rename cleans up after itself and no cs files survive an uninstall.
+
+- **The sibling-session block asks instead of suggesting.** When a request substantially matches another session's stated goal rather than merely sharing its vocabulary, cs now asks whether to hand it over before the work starts, and offers both paths. Two other places in the same hook family already handed a decision the user owns to a question — crash recovery, and the wrap-up cue — and this was the one left as advice with no obligation. The bar sits high on purpose: a routing prompt that fires on every overlap becomes a block nobody reads.
+
+### Release process
+
+- **The release gate now measures a rule rather than reading it.** Any release range touching something whose correctness is a claim about a population — a redaction rule, a regex, a filter, a matcher, a classifier — requires one reviewer to run it against the real population and report how often it fires and how often that firing is correct, in both directions.
+
+  This is the step's own history rather than a hypothetical. The corpus redactor merged and was tagged 80 minutes later, one day before the gate existed, then survived 29 releases because every review after it was scoped to the range that release touched. It was caught only when a reviewer measured it over 2384 real transcripts: two firings, both false positives, zero credentials caught. Scope a review to a diff and it sees a rule once; measure a rule against its population and the defect has nowhere to sit.
+
+### Tests
+
+- `tests/test_retired_skills.sh` guards the cleanup path: the array present and identical in both manifest copies, a retired skill no longer shipping, and install and uninstall each deleting the old directory while leaving a skill cs does not own untouched.
+- 55 suites and 324 TUI tests, green on both platforms.
+
 ## 2026.8.13
 
 Two changes to what the tool reads and writes on your behalf: a linter comes out, and the voice corpus stops learning from text you never typed.
