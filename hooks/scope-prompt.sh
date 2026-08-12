@@ -60,11 +60,13 @@ PROMPT=$(printf '%s' "$INPUT" | jq -r '.prompt // empty' 2>/dev/null) || exit 0
 # --- Queue inbox digest (surface-once) ---
 
 # Build the surface-once digest from unseen inbox lines. Sets DIGEST (may be
-# empty) and, when there were unseen lines, advances the cursor — surfacing is
-# at-most-once even when the digest itself is empty (decline-only content).
+# empty) and DIGEST_PENDING, the cursor value that _commit_digest spends once
+# the digest has actually been printed — surfacing is at-most-once even when
+# the digest itself is empty (decline-only content).
 _build_digest() {  # meta_local_dir
     local qdir="$1" inbox seen total
     DIGEST=""
+    DIGEST_PENDING=""
     inbox="$qdir/notifications.jsonl"
     [ -s "$inbox" ] || return 0
     total=$(wc -l < "$inbox" 2>/dev/null | tr -d '[:space:]') || return 0
@@ -83,8 +85,19 @@ _build_digest() {  # meta_local_dir
             (if $fin > 0 then "; drain finished" else "" end) +
             ". Run cs -queue log for detail."
         end' 2>/dev/null) || DIGEST=""
-    printf '%s\n' "$total" > "$qdir/notifications.seen.tmp" 2>/dev/null \
-        && mv "$qdir/notifications.seen.tmp" "$qdir/notifications.seen" 2>/dev/null || true
+    DIGEST_PENDING="$total"
+}
+
+# Spend the digest's surface-once budget, and only after it has been written to
+# stdout. This hook runs under a wall-clock timeout and is killed where it
+# stands when it overruns; a cursor advanced up front retires notifications
+# nobody ever saw, and there is no second chance at them. Advancing afterwards
+# can at worst repeat a digest, which is the harmless direction to fail in.
+_commit_digest() {  # meta_local_dir
+    [ -n "${DIGEST_PENDING:-}" ] || return 0
+    printf '%s\n' "$DIGEST_PENDING" > "$1/notifications.seen.tmp" 2>/dev/null \
+        && mv "$1/notifications.seen.tmp" "$1/notifications.seen" 2>/dev/null || true
+    DIGEST_PENDING=""
 }
 
 # Build the persistent unread-mail digest: on every prompt, inline the bodies of
@@ -146,6 +159,7 @@ _build_mail_digest() {  # meta_local_dir
 }
 
 DIGEST=""
+DIGEST_PENDING=""
 MAIL_DIGEST=""
 if [ -n "${CLAUDE_SESSION_META_DIR:-}" ]; then
     _build_digest "$CLAUDE_SESSION_META_DIR/local"
@@ -163,6 +177,7 @@ _digest_exit() {
         jq -n --arg c "$DIGEST" \
             '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: $c}}'
     fi
+    _commit_digest "${CLAUDE_SESSION_META_DIR:-}/local"
     exit 0
 }
 
@@ -379,4 +394,5 @@ fi
 
 jq -n --arg c "$BLOCK" \
     '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: $c}}'
+_commit_digest "${CLAUDE_SESSION_META_DIR:-}/local"
 exit 0

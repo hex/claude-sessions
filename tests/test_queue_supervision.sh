@@ -306,6 +306,46 @@ test_digest_on_code_prompt_splices_with_scope_block() {
     assert_output_contains "$out" "Scope (auto-grounded)" "scope block still present (spliced, not replaced)" || return 1
 }
 
+test_killed_prompt_hook_does_not_swallow_the_digest() {
+    _qs_session "dgk"
+    (cd "$CLAUDE_SESSION_DIR" && git init -q && echo x > login.ts \
+        && git add login.ts && git commit -qm init) 2>/dev/null
+    _arm_queue "only task"
+    _stop_turn >/dev/null || return 1
+    _stop_turn >/dev/null || return 1
+
+    # Stall the hook PAST the point where the digest is built. git is the first
+    # command the grounded scan runs, and only a positively-classified prompt
+    # gets that far, so a git that blocks parks the hook exactly where the 3s
+    # UserPromptSubmit timeout parks it in production.
+    local stub="$CLAUDE_SESSION_DIR/stub" marker="$CLAUDE_SESSION_META_DIR/local/stub-reached"
+    mkdir -p "$stub"
+    cat > "$stub/git" <<'STUB'
+#!/bin/sh
+printf 'reached\n' > "$STUB_MARKER"
+sleep 5
+STUB
+    chmod +x "$stub/git"
+    rm -f "$marker"
+
+    printf '{"prompt": "fix the login bug"}' \
+        | STUB_MARKER="$marker" PATH="$stub:$PATH" bash "$HOOKS_DIR/scope-prompt.sh" \
+        >/dev/null 2>&1 &
+    local pid=$! i=0
+    while [ ! -f "$marker" ] && [ "$i" -lt 100 ]; do i=$((i + 1)); sleep 0.05; done
+    kill -9 "$pid" 2>/dev/null
+    wait "$pid" 2>/dev/null
+    pkill -f "$stub/git" 2>/dev/null
+    [ -f "$marker" ] || { echo "  FAIL: hook never reached the grounded scan"; return 1; }
+
+    # The notifications that run never printed must still be pending.
+    local out
+    out=$(_prompt_turn "hello") || return 1
+    assert_output_contains "$out" "while you were away" \
+        "a killed run must leave the digest for the next prompt" || return 1
+    assert_output_contains "$out" "1 task(s) done" "and leave it intact" || return 1
+}
+
 test_digest_at_session_start() {
     _qs_session "dgr"
     _arm_queue "only task"
@@ -372,21 +412,27 @@ run_test test_digest_surfaces_once_at_prompt
 run_test test_digest_includes_breaker_reason
 run_test test_declined_only_inbox_stays_silent_but_cursor_advances
 run_test test_digest_on_code_prompt_splices_with_scope_block
+run_test test_killed_prompt_hook_does_not_swallow_the_digest
 run_test test_digest_at_session_start
 run_test test_partial_limits_skips_silently_without_stderr
 test_build_digest_fn_in_sync_across_hooks() {
-    # _build_digest is duplicated verbatim between the two injection hooks by
-    # the standalone-hook law; this diff is the machine check that the copies
-    # have not drifted (the sanctioned-copy pattern used for manifest arrays).
-    local a b
-    a=$(awk '/^_build_digest\(\)/,/^\}/' "$HOOKS_DIR/scope-prompt.sh")
-    b=$(awk '/^_build_digest\(\)/,/^\}/' "$HOOKS_DIR/session-start.sh")
-    [ -n "$a" ] || { echo "  FAIL: _build_digest not found in scope-prompt.sh"; return 1; }
-    [ -n "$b" ] || { echo "  FAIL: _build_digest not found in session-start.sh"; return 1; }
-    if [ "$a" != "$b" ]; then
-        echo "  FAIL: _build_digest bodies differ between the two hooks"
-        return 1
-    fi
+    # _build_digest and _commit_digest are duplicated verbatim between the two
+    # injection hooks by the standalone-hook law; this diff is the machine check
+    # that the copies have not drifted (the sanctioned-copy pattern used for
+    # manifest arrays). They are one mechanism split in two — a hook that built
+    # the digest with one copy and retired the cursor with a stale other would
+    # lose notifications exactly the way the split exists to prevent.
+    local fn a b
+    for fn in _build_digest _commit_digest; do
+        a=$(awk "/^$fn\\(\\)/,/^\\}/" "$HOOKS_DIR/scope-prompt.sh")
+        b=$(awk "/^$fn\\(\\)/,/^\\}/" "$HOOKS_DIR/session-start.sh")
+        [ -n "$a" ] || { echo "  FAIL: $fn not found in scope-prompt.sh"; return 1; }
+        [ -n "$b" ] || { echo "  FAIL: $fn not found in session-start.sh"; return 1; }
+        if [ "$a" != "$b" ]; then
+            echo "  FAIL: $fn bodies differ between the two hooks"
+            return 1
+        fi
+    done
 }
 
 run_test test_ctx_threshold_env_override
