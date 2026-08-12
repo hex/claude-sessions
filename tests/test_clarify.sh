@@ -73,6 +73,31 @@ test_guideline_injected_on_scope_firing_prompt() {
         "the scope block is still emitted alongside it"
 }
 
+test_guideline_injected_on_vague_prompt() {
+    seed_repo "src/api.ts"
+    # "make" is deliberately absent from the hook's work-verb regex, so this
+    # prompt exits through the digest path and never reaches the scope emit.
+    # It is also the canonical vague prompt this feature exists for.
+    local ctx
+    ctx=$(run_hook "make it better" | emitted_context)
+    assert_output_contains "$ctx" "Before acting on this request" \
+        "a vague prompt still carries the guideline" || return 1
+    assert_output_not_contains "$ctx" "Scope (auto-grounded)" \
+        "and does not drag in the scope block"
+}
+
+test_short_prompt_is_not_filtered() {
+    seed_repo "src/api.ts"
+    # Objective capture skips prompts under 8 chars; clarify must not, or it
+    # misses exactly the prompts it exists for.
+    local ctx
+    ctx=$(run_hook "fix it" | emitted_context)
+    assert_output_contains "$ctx" "Before acting on this request" \
+        "a six-character prompt still carries the guideline"
+}
+
 run_test test_guideline_injected_on_scope_firing_prompt
+run_test test_guideline_injected_on_vague_prompt
+run_test test_short_prompt_is_not_filtered
 
 report_results

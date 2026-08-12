@@ -271,11 +271,29 @@ _trace digest
 
 # Every pass-through exit below this point must still deliver a pending
 # digest; a digest-only prompt turn emits just the digest as context.
+# Emit the run's single additionalContext object from the non-empty parts,
+# separated by blank lines. UserPromptSubmit consumes exactly one object, so every
+# exit path funnels through here rather than emitting its own. Emits nothing when
+# every part is empty.
+_emit_context() {  # part...
+    local out="" part
+    for part in "$@"; do
+        [ -n "$part" ] || continue
+        if [ -n "$out" ]; then
+            out="$out
+
+$part"
+        else
+            out="$part"
+        fi
+    done
+    [ -n "$out" ] || return 0
+    jq -n --arg c "$out" \
+        '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: $c}}'
+}
+
 _digest_exit() {
-    if [ -n "$DIGEST" ]; then
-        jq -n --arg c "$DIGEST" \
-            '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: $c}}'
-    fi
+    _emit_context "$DIGEST" "$CLARIFY"
     _commit_digest "${CLAUDE_SESSION_META_DIR:-}/local"
     _trace exit
     exit 0
@@ -503,24 +521,11 @@ if [ "$(printf '%s' "$BLOCK" | wc -c | tr -d ' ')" -gt "$CAP" ]; then
 [scope block truncated]"
 fi
 
-# Above the scope block, not below it. A truncated scope block must END with its
-# truncation marker so nothing severed can read as a complete path, and anything
-# appended after the marker breaks that. Order is news, then instruction, then
-# the orientation the instruction operates on.
-if [ -n "$CLARIFY" ]; then
-    BLOCK="$CLARIFY
-
-$BLOCK"
-fi
-
-if [ -n "$DIGEST" ]; then
-    BLOCK="$DIGEST
-
-$BLOCK"
-fi
-
-jq -n --arg c "$BLOCK" \
-    '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: $c}}'
+# News, then instruction, then the orientation the instruction operates on. The
+# scope block goes LAST because a truncated one must end with its truncation
+# marker — nothing severed may read as a complete path, and anything appended
+# after the marker breaks that.
+_emit_context "$DIGEST" "$CLARIFY" "$BLOCK"
 _commit_digest "${CLAUDE_SESSION_META_DIR:-}/local"
 _trace emit
 exit 0
