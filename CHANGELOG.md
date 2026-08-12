@@ -12,7 +12,15 @@ All notable changes to cs are documented here. Release notes are also available 
 
   Ungated on purpose. The hook's work-verb classifier exists to guard expensive git work, which is what earns its false-positive risk; a clarify gate would guard a few hundred bytes of text, so it would buy nothing and pay for itself in misclassification. It would also miss its own audience: `make` is absent from that regex, so `make it better` — the canonical vague prompt — never reaches the grounding path at all.
 
-  Consequence worth knowing: the hook no longer stays silent on a chitchat prompt. Four assertions moved from "emitted nothing" to "emitted no scope block", which is the property they were always protecting.
+  Consequence worth knowing: the hook no longer stays silent on a chitchat prompt.
+
+- **Prompt rewriting: type a rough prompt, press `ctrl+g`, get a precise one.** The composer is replaced in place with a rewritten engineering request that you review, edit and send yourself — nothing is submitted on your behalf. Opt out with `CS_REWRITE_DISABLE=1`, which also leaves your `$EDITOR` untouched; swap the rewriter with `CS_REWRITE_CMD` (stdin to stdout).
+
+  This looked impossible. No hook output field can replace prompt text, a blocking hook kills the turn before the model is called, and `additionalContext` only ever appends. The route is Claude Code's own `chat:externalEditor`: it writes the composer buffer to a temp file, runs `$EDITOR` on it, and replaces the composer with whatever comes back. cs points `$EDITOR` at a shim, so a supported round-trip does the substitution.
+
+  The shim hands every non-composer file to your real editor, so `/memory` still works, and it passes the buffer through untouched when it is empty, starts with `/`, `!` or `#`, or carries a paste or image placeholder — the buffer holds placeholders, not the pasted bodies, so rewriting one would destroy the attachment. Every failure path leaves your text exactly as typed.
+
+  The rewriter runs hermetically: its own config directory, a neutral working directory, and the session's context variables stripped. Without that, a nested `claude` inherits the project's `CLAUDE.md` and cs's own memory, and a request to add a flag came back demanding TDD, bash 3.2 compatibility and a README update that nobody asked for. Four assertions moved from "emitted nothing" to "emitted no scope block", which is the property they were always protecting.
 
 ## 2026.8.15
 

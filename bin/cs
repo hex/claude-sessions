@@ -56,11 +56,15 @@ CS_HOOKS=(
     scope-prompt.sh
 )
 
-# Files under hooks/ that the hooks source rather than files Claude Code
-# invokes. Deployed and removed alongside the hooks, never registered against
-# an event. KEEP THIS LIST IN SYNC WITH install.sh's CS_HOOK_LIBS.
+# Files under hooks/ that the hooks source, or that cs points other tools at,
+# rather than files Claude Code invokes as hooks. Deployed and removed alongside
+# the hooks, never registered against an event. The prompt-rewriter pair is
+# reached through $EDITOR, not through any hook event.
+# KEEP THIS LIST IN SYNC WITH install.sh's CS_HOOK_LIBS.
 CS_HOOK_LIBS=(
     cs-resolve.sh
+    prompt-rewriter.sh
+    prompt-rewriter-model.sh
 )
 
 # Slash commands cs ships; deployed to ~/.claude/commands/.
@@ -6034,6 +6038,15 @@ launch_claude_code() {
     export CLAUDE_SESSION_NAME="$session_name"
     export CLAUDE_SESSION_DIR="$session_dir"
     export CLAUDE_SESSION_META_DIR="$session_dir/.cs"
+    # Prompt rewriting rides Claude Code's external-editor round-trip: ctrl+g
+    # writes the composer buffer to a temp file, runs $EDITOR on it, and replaces
+    # the composer with whatever comes back. Capture the real editor first so the
+    # shim can hand it every file that is NOT a composer buffer.
+    if [ "${CS_REWRITE_DISABLE:-}" != "1" ] && [ -x "$HOOKS_DEPLOY_DIR/prompt-rewriter.sh" ]; then
+        export CS_REAL_EDITOR="${CS_REAL_EDITOR:-${VISUAL:-${EDITOR:-vi}}}"
+        export EDITOR="$HOOKS_DEPLOY_DIR/prompt-rewriter.sh"
+        export VISUAL="$EDITOR"
+    fi
     # Worktree sessions coordinate through the base session's task list and
     # keychain namespace; cs_base is only set in worktree local state.
     local cs_base

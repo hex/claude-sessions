@@ -161,6 +161,18 @@ Runs before each user prompt is sent to Claude. First it clears the statusline's
 
 The guideline is spliced above the `## Scope (auto-grounded)` block, never below it. A truncated scope block has to end with its truncation marker so nothing severed can read as a complete path, and its bytes come out of the same 8000-byte budget — the scan output is the elastic part and absorbs the cost, because emitting half an instruction is worse than a shorter file list.
 
+## prompt-rewriter.sh (not a hook — an `$EDITOR` shim)
+
+Ships in `hooks/` and deploys alongside the hooks, but Claude Code never invokes it as one and it is never registered against an event. It is reached through `$EDITOR`.
+
+Claude Code binds `chat:externalEditor` to `ctrl+g` (also `ctrl+e` and `ctrl+x ctrl+e`). Pressing it writes the composer buffer to `<tmpdir>/claude-prompt-<uuid>.md`, runs `$EDITOR` on that file, reads it back, and replaces the composer with the result when it differs. cs points `EDITOR`/`VISUAL` at `prompt-rewriter.sh` when it launches a session, so the round-trip becomes a rewrite: type a rough prompt, press `ctrl+g`, and the composer holds a precise engineering request you can review, edit and send. Nothing is sent on your behalf.
+
+The shim hands every file that is **not** named `claude-prompt-*.md` to your real editor (captured as `CS_REAL_EDITOR` before cs overrides `EDITOR`), so `/memory` and opening a transcript still work normally. It passes the buffer through untouched when it is empty, starts with `/`, `!` or `#`, or carries a `[Pasted text …]` or `[Image …]` placeholder — the buffer holds those placeholders rather than the pasted bodies, so rewriting one would destroy the attachment. Every failure path leaves the buffer exactly as typed: a rewriter that errors, times out, or returns empty loses nothing.
+
+The default rewriter, `prompt-rewriter-model.sh`, calls a fast model with the prompt as untrusted data. It runs hermetically — its own config directory, a neutral working directory, and the session's context variables stripped from its environment — because a nested `claude` otherwise inherits the project's `CLAUDE.md` and cs's own memory, and those leak into the rewrite: a request to add a flag came back demanding TDD, bash 3.2 compatibility and a README update that the user never asked for. Override the whole thing with `CS_REWRITE_CMD` (stdin to stdout, non-zero to decline). Opt out per-session: `export CS_REWRITE_DISABLE=1`, which also leaves your `$EDITOR` untouched.
+
+One cost worth knowing: Claude Code runs the editor with `spawnSync` and `stdio:"inherit"`, so the interface is frozen while the rewrite runs — roughly ten to twenty seconds on the default model.
+
 Known multi-machine limitation: if a session is cloned to a second machine while the Objective is still the placeholder and both machines then submit their first prompt before syncing, each captures its own objective and the merge conflicts. This is left as a real conflict on purpose — two people declared different objectives for the same session, and a human should reconcile them.
 
 **Scope grounding.** Grounds code-work prompts in the current codebase by injecting a bounded "Scope (auto-grounded)" block as `additionalContext`:

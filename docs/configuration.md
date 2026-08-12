@@ -55,6 +55,19 @@ export CS_OBJECTIVE_CAPTURE_DISABLE="1"
 # silence the questions. Skip a single turn instead with a leading ~ .
 export CS_CLARIFY_DISABLE="1"
 
+# Opt a session out of prompt rewriting (ctrl+g in the composer; see hooks.md).
+# Separate from CS_CLARIFY_DISABLE: the questions and the rewriter are
+# independent. When set, cs leaves your $EDITOR alone entirely.
+export CS_REWRITE_DISABLE="1"
+
+# The model that rewrites prompts, and how long to wait for it.
+export CS_REWRITE_MODEL="claude-haiku-4-5-20251001"   # this is the default
+export CS_REWRITE_TIMEOUT="25"                        # seconds; needs timeout(1)
+
+# Replace the rewriter itself. Reads the rough prompt on stdin, writes the
+# rewrite to stdout, non-zero to leave the prompt untouched.
+export CS_REWRITE_CMD="/path/to/my-rewriter"
+
 # Statusline context gauge escalation thresholds (see statusline.md)
 export CS_STATUSLINE_CTX_WARN="50"
 export CS_STATUSLINE_CTX_CRIT="80"
