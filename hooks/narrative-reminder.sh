@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: Stop hook for the narrative reminder, walk-away queue drain, rotation
-# ABOUTME: nudge and mail wake; also serves FileChanged for the idle mail wake
+# ABOUTME: nudge and mail wake; FileChanged wakes when idle, CwdChanged re-arms
 
 set -euo pipefail
 
@@ -176,7 +176,7 @@ _mail_scan() {
         # the whole read and take .kind down with it.
         IFS=$'\037' read -r kind from <<EOF
 $(jq -r '[(.kind // "text"),
-          ((.from // .actor // "") | if type == "string" then . else tostring end
+          (((if (.from // "") == "" then .actor else .from end) // "") | if type == "string" then . else tostring end
              | gsub("[\n\r,]"; " "))[0:40]] | join("")' "$f" 2>/dev/null || printf 'text')
 EOF
         [ -n "$kind" ] || kind=text
@@ -199,9 +199,17 @@ EOF
 
 # Render the distinct senders as a clause, or nothing when no document named
 # one. Kept separate from the scan so both wakes compose the same line.
+#
+# "new from", not "from": the count beside this clause covers every unread
+# document, while these names come only from the ones the wake is announcing —
+# the discharge skip in _mail_scan runs ahead of the read that would learn a
+# sender. Naming the narrower set is the deliberate half of that trade. Naming
+# every unread sender instead would cost one jq per unread document on every
+# turn end, which is the expense _mail_scan is built to avoid, and which the
+# wake ceiling makes an ordinary state rather than a rare one.
 _mail_from_clause() {
     [ -n "${MAIL_FROM:-}" ] || { printf ''; return 0; }
-    printf ' from %s' "$(printf '%s' "$MAIL_FROM" | tr '\n' ',' | sed 's/,$//; s/,/, /g')"
+    printf ', new from %s' "$(printf '%s' "$MAIL_FROM" | tr '\n' ',' | sed 's/,$//; s/,/, /g')"
 }
 
 # Record the snapshot as the whole of new/, which is sound only when everything

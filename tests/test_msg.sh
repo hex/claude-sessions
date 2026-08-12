@@ -1209,6 +1209,39 @@ test_wake_names_every_distinct_sender_once() {
     assert_eq "1" "$hits" "one sender named once, however many messages" || return 1
 }
 
+test_wake_clause_names_only_the_newly_arrived_sender() {
+    # The count covers every unread document, but the sender clause is built
+    # only from the ones not yet announced — the woke skip runs before the read
+    # that would learn a sender. The two therefore describe different sets, and
+    # the line has to say which one it names: otherwise a wake reads as "both of
+    # these are from alice" while bob is still waiting in new/ too.
+    mkdir -p "$(MAILDIR)/new" || return 1
+    printf '%s\n' '{"id":"b","ts":1700000000,"from":"bob","kind":"text","body":"first"}' \
+        > "$(MAILDIR)/new/1700000000-bob.json"
+    filechanged "$(MAILDIR)/new/1700000000-bob.json" add >/dev/null 2>&1 || true
+    printf '%s\n' '{"id":"a","ts":1700000001,"from":"alice","kind":"text","body":"second"}' \
+        > "$(MAILDIR)/new/1700000001-alice.json"
+    local err; err=$(filechanged "$(MAILDIR)/new/1700000001-alice.json" add 2>&1 >/dev/null) || true
+    assert_output_contains "$err" "(2)" "the count covers every unread message" || return 1
+    assert_output_contains "$err" "new from alice" \
+        "and the clause says it names only what just arrived" || return 1
+}
+
+test_wake_falls_back_to_the_actor_when_from_is_empty() {
+    # cs -msg sends --arg from "${CLAUDE_SESSION_NAME:-}", so every send from a
+    # plain terminal carries from:"" beside a valid actor. jq's // fires on null
+    # and false but never on "", so the wake has to test for emptiness the way
+    # the prompt digest already does — otherwise the sender clause silently
+    # disappears for the most common human-initiated send, and the two views of
+    # one mailbox disagree about the same document.
+    mkdir -p "$(MAILDIR)/new" || return 1
+    local m; m="$(MAILDIR)/new/1700000000-noname.json"
+    printf '%s\n' '{"id":"noname","ts":1700000000,"from":"","actor":"alice","kind":"text","body":"hi"}' > "$m"
+    local err; err=$(filechanged "$m" add 2>&1 >/dev/null) || true
+    assert_output_contains "$err" "from alice" \
+        "an empty from falls back to the actor, as the digest already does" || return 1
+}
+
 test_idle_wake_exits_2_with_the_reason_on_stderr() {
     "$CS_BIN" -msg receiver "wake up" >/dev/null 2>&1 || return 1
     local msg; msg=$(FIRST_MSG) || return 1
@@ -1414,6 +1447,8 @@ run_test test_cwd_change_creates_the_maildir_before_arming
 run_test test_cwd_change_never_reaches_the_drain
 run_test test_wake_names_who_the_mail_is_from
 run_test test_wake_names_every_distinct_sender_once
+run_test test_wake_clause_names_only_the_newly_arrived_sender
+run_test test_wake_falls_back_to_the_actor_when_from_is_empty
 run_test test_idle_wake_exits_2_with_the_reason_on_stderr
 run_test test_idle_wake_accepts_another_spelling_of_the_same_path
 run_test test_idle_wake_ignores_files_outside_the_maildir

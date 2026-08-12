@@ -4,7 +4,7 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
-## Unreleased
+## 2026.8.15
 
 Idle mail arrives again. Two mechanisms meant to bound runaway behaviour turn out never to have worked, and a hook now says what it hung on.
 
@@ -23,6 +23,16 @@ Idle mail arrives again. Two mechanisms meant to bound runaway behaviour turn ou
 ### Added
 
 - **`scope-prompt.sh` traces its own stages.** Every run appends `pid`, milliseconds and stage name to `.cs/local/scope-prompt.trace` as each stage finishes, so a run that overruns the hook's timeout leaves a trail naming whatever it hung on. That trail is the only evidence such a run ever produces: it never reaches an exit where it could write a summary, which is why the trace writes as it goes rather than at the end. The clock comes from shell builtins alone (`$EPOCHREALTIME`, or `$SECONDS` on bash 3.2), so tracing adds no forks to a hook already under suspicion for running slow — measured at or below the noise floor on a 157k-file repository. The `start` mark also names the directory the run stood in: the scan's cost depends on how much of the tree git has to walk, and a kill from deep inside one and a kill at its root are not the same event. Machine-local, since which machine was slow is half the finding; one run in 64 trims the file to its last 2000 lines. Opt out per-session with `CS_SCOPE_TRACE_DISABLE=1`.
+
+- **The mail wake names who the mail is from.** The reason now reads `Unread cross-session mail (2), new from alice` rather than a bare count, so a session woken with nobody at the keyboard knows its correspondent before it opens the mailbox — the difference between a wake worth spending a turn on and one worth deferring. Each sender comes out of the same `jq` call that already read the document's kind, so naming costs no extra pass over the maildir, and repeat senders collapse to one name: two messages from one session is one correspondent.
+
+  The clause says **new from** because the count and the names describe different sets. The count covers every unread document; the names come only from the ones this wake is announcing, because the discharge skip runs ahead of the read that would learn a sender. Naming every unread sender instead would cost one `jq` per unread document on every turn end — the expense the scan is built to avoid, and one the wake ceiling turns from rare into ordinary, since past it mail piles up in `new/` while turns keep ending. A sender is read as the document's `from`, falling back to its `actor` when `from` is empty: `cs -msg` records `from` as the sending session's name, which is empty for any send from a plain terminal, so without that fallback the clause would vanish for the most common human-initiated send.
+
+### Docs
+
+- The hook reference describes `narrative-reminder.sh` as the three-event hook it became. `CwdChanged` had reached the settings.json block but not the heading, not the "registered for two events" sentence, and not the paragraph explaining the watch's lifetime — which is where the root cause belongs. The registration test stayed green throughout, because it compares `install.sh` against the config block alone.
+- The stage-trace example lists every stage a run emits. It showed eight; `objective` and `tokens` are unconditional in the code, so a reader matching a real trace against the doc would have found two lines that were not supposed to exist.
+- The mailbox layout's `woke` entry reads as a sentence again. The README's mail-wake bullet says the wake names who the new mail is from, and its scope-grounding bullet now documents the stage trace and `CS_SCOPE_TRACE_DISABLE` beside the opt-out it already carried — a per-prompt file written on every run belongs where a reader looks for what the hook does.
 
 ## 2026.8.14
 
