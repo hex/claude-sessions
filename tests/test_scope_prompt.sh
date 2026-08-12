@@ -136,7 +136,12 @@ test_classifier_silent_passthrough() {
         out=$(run_hook "$p" 2>/dev/null) && rc=0 || rc=$?
         # Anti-vacuous-pass: a MISSING hook also yields empty output, so REQUIRE exit 0.
         if [ "$rc" -ne 0 ]; then echo "  FAIL: hook must exit 0 (got $rc) on silent prompt [$cat]: $p"; fails=1; continue; fi
-        if [ -n "$out" ]; then echo "  FAIL: expected silent pass-through, got output for [$cat]: $p"; fails=1; fi
+        # The property is that the CLASSIFIER stayed silent, not that the hook
+        # emitted nothing: the clarify guideline rides every non-empty prompt, so
+        # "no output at all" would now assert the absence of an unrelated feature.
+        if printf '%s' "$out" | grep -q "Scope (auto-grounded)"; then
+            echo "  FAIL: classifier fired on a silent prompt [$cat]: $p"; fails=1
+        fi
     done < <(printf '%s\n' "$FIXTURES" | jq -c 'select(.classifier_fires == false)')
     return $fails
 }
@@ -451,7 +456,13 @@ test_opt_out_via_disable_env() {
     local out rc
     out=$(run_hook "implement a retry wrapper in src/api.ts" 2>/dev/null) && rc=0 || rc=$?
     [ "$rc" -eq 0 ] || { echo "  FAIL: hook must exit 0 when disabled (got $rc)"; return 1; }
-    [ -z "$out" ] || { echo "  FAIL: CS_SCOPE_DISABLE=1 must suppress the scope block"; return 1; }
+    # The scope block specifically. CS_SCOPE_DISABLE governs grounding, not the
+    # clarify guideline, which has its own CS_CLARIFY_DISABLE — see
+    # test_scope_disable_does_not_suppress_clarify in tests/test_clarify.sh.
+    case "$out" in
+        *"Scope (auto-grounded)"*)
+            echo "  FAIL: CS_SCOPE_DISABLE=1 must suppress the scope block"; return 1 ;;
+    esac
 }
 
 test_graceful_malformed_input() {
@@ -684,7 +695,13 @@ test_grep_fallback_still_classifies_chitchat_negative() {
         || { echo "  FAIL: the hook failed on a negative prompt"; return 1; }
     local ac
     ac=$(additional_context "$out")
-    [ -z "$ac" ] || { echo "  FAIL: the fallback must still classify chitchat negative, got: $ac"; return 1; }
+    # Scope specifically, not emptiness: the clarify guideline rides every
+    # non-empty prompt, and injecting SCOPE into chitchat is the failure this
+    # test names.
+    case "$ac" in
+        *"Scope (auto-grounded)"*)
+            echo "  FAIL: the fallback must still classify chitchat negative, got: $ac"; return 1 ;;
+    esac
 }
 
 run_test test_large_multiline_prompt_still_classifies_positive

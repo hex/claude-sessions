@@ -4,6 +4,16 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## Unreleased
+
+### Added
+
+- **The prompt hook now asks before it guesses.** A short clarify guideline rides every non-empty prompt, telling Claude to question a request it genuinely cannot pin down rather than pick an interpretation and act on it. Skip one turn with a leading `~`; silence it for a session with `CS_CLARIFY_DISABLE=1`, which is deliberately separate from `CS_SCOPE_DISABLE` because silencing grounding should not silence the questions.
+
+  Ungated on purpose. The hook's work-verb classifier exists to guard expensive git work, which is what earns its false-positive risk; a clarify gate would guard a few hundred bytes of text, so it would buy nothing and pay for itself in misclassification. It would also miss its own audience: `make` is absent from that regex, so `make it better` — the canonical vague prompt — never reaches the grounding path at all.
+
+  Consequence worth knowing: the hook no longer stays silent on a chitchat prompt. Four assertions moved from "emitted nothing" to "emitted no scope block", which is the property they were always protecting.
+
 ## 2026.8.15
 
 Idle mail arrives again. Two mechanisms meant to bound runaway behaviour turn out never to have worked, and a hook now says what it hung on.
