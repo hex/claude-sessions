@@ -127,6 +127,34 @@ if [ -n "$PROMPT" ] && [ -n "${CLAUDE_SESSION_META_DIR:-}" ]; then
     rm -f "$CLAUDE_SESSION_META_DIR/local/mail/wakes" 2>/dev/null || true
 fi
 
+# --- Clarify guideline (every prompt; the model judges ambiguity, not a regex) ---
+
+# Injected on every prompt rather than gated by a classifier. The work-verb
+# classifier below guards EXPENSIVE git work, which is what earns its
+# false-positive risk; this guards a few hundred bytes of text, so a gate would
+# buy nothing and pay for itself in misclassification. Vagueness is a semantic
+# judgement and the model is the only component here that can make it — which is
+# also why this sits above the classifier: a vague prompt carries no work verb.
+#
+# Single-quoted, so the body must stay free of apostrophes; a heredoc would cost
+# a fork on a path that runs for every prompt.
+CLARIFY_TEXT='## Clarify
+
+Before acting on this request, judge whether it is actionable as written. If you genuinely cannot determine the intended outcome, target, or scope — or it could mean materially different things ("it", "that thing", "make it better") — do not guess. Ask first: one AskUserQuestion call with 1-3 targeted questions, offering your best-guess interpretation as the first option, marked (Recommended). If intent is clear from the prompt plus conversation and repo context, proceed without asking — do not ask confirmation questions about requests you already understand, and never ask more than once per request. A prompt beginning with `~` is an explicit opt-out of this check: treat the `~` as noise and proceed without asking.'
+
+CLARIFY=""
+if [ "${CS_CLARIFY_DISABLE:-}" != "1" ] && [ -n "$PROMPT" ]; then
+    # Fork-free leading-whitespace strip, so " ~foo" still reads as opted out.
+    _clarify_lead=${PROMPT#"${PROMPT%%[![:space:]]*}"}
+    # Slash commands and shell passthrough carry their own instructions, which a
+    # competing "ask questions first" would fight. `~` is the per-turn opt-out.
+    case "$_clarify_lead" in
+        /*|!*|'~'*) ;;
+        *) CLARIFY="$CLARIFY_TEXT" ;;
+    esac
+fi
+_trace clarify
+
 # --- Queue inbox digest (surface-once) ---
 
 # Build the surface-once digest from unseen inbox lines. Sets DIGEST (may be
@@ -458,10 +486,31 @@ fi
 # overflows, cut back to the last whole line (so no path/commit is severed mid-token) and append
 # an explicit marker — a truncated tail must never read as a real, complete list. Reserve headroom
 # for the marker so the result still fits the 8000-byte cap.
-if [ "$(printf '%s' "$BLOCK" | wc -c | tr -d ' ')" -gt 8000 ]; then
-    BLOCK=$(printf '%s' "$BLOCK" | head -c 7900)
+#
+# The cap is a contract on what the hook EMITS, and the clarify guideline rides in
+# the same emission, so its bytes come out of the same budget. The scan output is
+# the elastic part and absorbs the cost; truncating the guideline instead would
+# emit half an instruction, which is worse than a shorter file list. Measured with
+# wc -c, not ${#CLARIFY}, because the guideline carries multi-byte em dashes and
+# the cap is counted in bytes.
+CAP=8000
+if [ -n "$CLARIFY" ]; then
+    CAP=$(( CAP - $(printf '%s' "$CLARIFY" | wc -c | tr -d ' ') - 2 ))
+fi
+if [ "$(printf '%s' "$BLOCK" | wc -c | tr -d ' ')" -gt "$CAP" ]; then
+    BLOCK=$(printf '%s' "$BLOCK" | head -c "$(( CAP - 100 ))")
     BLOCK="${BLOCK%$'\n'*}
 [scope block truncated]"
+fi
+
+# Above the scope block, not below it. A truncated scope block must END with its
+# truncation marker so nothing severed can read as a complete path, and anything
+# appended after the marker breaks that. Order is news, then instruction, then
+# the orientation the instruction operates on.
+if [ -n "$CLARIFY" ]; then
+    BLOCK="$CLARIFY
+
+$BLOCK"
 fi
 
 if [ -n "$DIGEST" ]; then
