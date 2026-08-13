@@ -46,6 +46,18 @@ make_suite_dir() {  # count, [failing_name]
 
 ran_count() { ls -1 "$RAN_DIR" 2>/dev/null | grep -c . ; }
 
+# Put a fake core count in front of run_all's detection. It reads `sysctl -n
+# hw.ncpu` first and falls back to `nproc`, so both are shimmed: the Linux lane
+# never reaches sysctl and the macOS lane never reaches nproc.
+fake_cores() {  # count
+    local n="$1" d="$TEST_TMPDIR/fakebin"
+    mkdir -p "$d"
+    printf '#!/usr/bin/env bash\nprintf %s\n' "$n" > "$d/sysctl"
+    printf '#!/usr/bin/env bash\nprintf %s\n' "$n" > "$d/nproc"
+    chmod +x "$d/sysctl" "$d/nproc"
+    printf '%s' "$d"
+}
+
 # ============================================================================
 # Tests
 # ============================================================================
@@ -153,6 +165,31 @@ test_run_all_rejects_a_malformed_job_count() {
     [ "$rc" -eq 2 ] || { echo "expected exit 2 for CS_TEST_JOBS=nope, got $rc"; return 1; }
 }
 
+# The auto-detected job count has to track the machine. Measured against the
+# real suite list, a 14-core box finishes in 2.2 minutes at ten lanes against
+# 5.0 at four, because the total suite time far exceeds the slowest single
+# suite and lanes sit idle. Asserted as a range, not as the ceiling's value: a
+# test that restates the constant passes no matter what the constant is.
+test_run_all_scales_jobs_with_the_core_count() {
+    make_suite_dir 2
+    local out
+    out=$(PATH="$(fake_cores 16):$PATH" CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" 2>&1)
+    local n
+    n=$(printf '%s' "$out" | sed -n 's/.*at \([0-9][0-9]*\) jobs.*/\1/p' | head -1)
+    [ -n "$n" ] || { echo "runner did not announce its job count"; printf '%s\n' "$out"; return 1; }
+    [ "$n" -gt 4 ] || { echo "16 cores must buy more than 4 lanes, got $n"; return 1; }
+}
+
+# The ceiling must not become a floor: a small CI runner keeps its own core
+# count rather than being oversubscribed up to the cap.
+test_run_all_does_not_oversubscribe_a_small_runner() {
+    make_suite_dir 2
+    local out n
+    out=$(PATH="$(fake_cores 2):$PATH" CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" 2>&1)
+    n=$(printf '%s' "$out" | sed -n 's/.*at \([0-9][0-9]*\) jobs.*/\1/p' | head -1)
+    [ "$n" -eq 2 ] || { echo "a 2-core runner must use 2 lanes, got $n"; printf '%s\n' "$out"; return 1; }
+}
+
 # ============================================================================
 # Runner
 # ============================================================================
@@ -171,5 +208,7 @@ run_test test_run_all_shards_partition_the_suite_list
 run_test test_run_all_fails_loudly_when_the_log_dir_cannot_be_made
 run_test test_run_all_rejects_a_malformed_shard
 run_test test_run_all_rejects_a_malformed_job_count
+run_test test_run_all_scales_jobs_with_the_core_count
+run_test test_run_all_does_not_oversubscribe_a_small_runner
 
 report_results

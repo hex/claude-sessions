@@ -31,16 +31,22 @@ fi
 # How many suites run at once. Suites are independent -- test_lib.sh gives every
 # test its own mktemp -d and scopes CS_SESSIONS_ROOT, CS_TRANSCRIPTS_DIR, HOME,
 # CS_CLAUDE_DIR and CS_TMUX_BIN inside it -- so concurrent suites cannot collide.
-# The default caps well below the core count on purpose: wall time is bounded by
-# the slowest single suite, so shards past that point buy nothing and only
-# oversubscribe a shared CI runner. CS_TEST_JOBS=1 restores a serial run, which
-# streams each suite's output live rather than buffering it.
+# The default tracks the core count up to a ceiling. Wall time is the greater of
+# the slowest single suite and the total divided by the lanes, so lanes keep
+# paying off until those two meet: measured over the real suite list, the total
+# is an order of magnitude larger than the slowest suite, and a 14-core box
+# finishes in 2.2 minutes at ten lanes against 5.0 at four. The ceiling is where
+# the two terms converge; past it the lanes idle, and because assignment is
+# round-robin rather than greedy, more lanes start losing to imbalance. Small CI
+# runners keep their own core count and are never oversubscribed up to it.
+# CS_TEST_JOBS=1 restores a serial run, which streams each suite's output live
+# rather than buffering it.
 detect_jobs() {
     local n
     n="$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 1)"
     case "$n" in ''|*[!0-9]*) n=1 ;; esac
     [ "$n" -ge 1 ] || n=1
-    [ "$n" -le 4 ] || n=4
+    [ "$n" -le 10 ] || n=10
     printf '%s' "$n"
 }
 if [ -n "${CS_TEST_JOBS:-}" ]; then
@@ -73,6 +79,10 @@ if [ "$total" -eq 0 ]; then
     echo "no suites matched $SUITE_DIR/test_*.sh" >&2
     exit 2
 fi
+
+# Say what the run is about to do. A gate that takes minutes should account for
+# them, and the lane count is the one number that explains the wall time.
+echo "running $total suites at $jobs_n jobs" >&2
 
 if [ "$jobs_n" -gt 1 ] && [ "$total" -gt 1 ]; then
     # Each suite writes to its own log keyed by position, so the report below
