@@ -40,7 +40,7 @@ composer_file() {  # content
 # path. Only a pty makes [ -t 2 ] true; without one every rendering assertion
 # below would pass against a shim that draws nothing.
 render_in_mode() {  # mode, [prompt], [stub_seconds]
-    local mode="$1" text="${2:-make the login thing better}" secs="${3:-1.8}"
+    local mode="$1" text="${2:-make the login thing better}" secs="${3:-0.9}"
     local slow="$TEST_TMPDIR/slow-rewrite.sh"
     printf '#!/bin/bash\nsleep %s\nprintf "PRECISE"\n' "$secs" > "$slow"
     chmod +x "$slow"
@@ -424,7 +424,7 @@ test_the_header_names_the_resolved_engine_and_model() {
     unset CS_REWRITE_CMD
     local bin="$TEST_TMPDIR/bin"
     mkdir -p "$bin"
-    printf '#!/bin/bash\nsleep 1.8\nprintf "REWRITTEN"\n' > "$bin/agy"
+    printf '#!/bin/bash\nsleep 0.9\nprintf "REWRITTEN"\n' > "$bin/agy"
     chmod +x "$bin/agy"
     local f out
     f=$(composer_file "make the login thing better")
@@ -455,18 +455,15 @@ test_claude_api_routes_to_the_vendor_rewriter() {
 # A rewrite shorter than the draw threshold must leave the terminal alone. On
 # gemini-api the whole call is ~0.9s, so a screen that paints at 0.3s appears
 # and vanishes before it can be read — a flash is worse than nothing.
-test_a_fast_rewrite_draws_nothing() {
+test_a_fast_rewrite_still_paints() {
     local out
+    # 0.4s: far under the old 1.2s threshold, and now under any threshold at all
+    # since the screen paints immediately. A rewrite this quick must still
+    # acknowledge the keypress — silence until the buffer changes leaves the
+    # user unable to tell ctrl+g registered.
     out=$(render_in_mode screen '' 0.4)
-    # Not "the file is empty": script(1) writes its own bytes to the capture no
-    # matter what the child does. Assert the absence of OUR markers instead.
-    assert_file_not_contains "$out" 'ewriting' "a sub-threshold rewrite must not paint" || return 1
-    assert_file_not_contains "$out" '▏' "no margin rule below the threshold" || return 1
-    # Guard the guard: the two assertions above also pass against a shim that
-    # never paints at all, so prove the same helper DOES paint when the rewrite
-    # outlives the threshold.
-    out=$(render_in_mode screen)
-    assert_file_contains "$out" '▏' "the same path paints above the threshold"
+    assert_file_contains "$out" '▏' "a sub-second rewrite still paints" || return 1
+    assert_file_contains "$out" 'make the login thing better' "and shows the prompt"
 }
 
 # The prompt is the subject of this screen, held in a margin rule the way a
@@ -493,13 +490,33 @@ test_screen_mode_has_no_spinner() {
     assert_file_not_contains "$out" '⠹' "no braille spinner in screen mode"
 }
 
+# This shim is driven by a keypress and draws onto a screen that is torn down,
+# so when it does nothing there is no evidence of WHICH passthrough it took —
+# "not a composer file", "disabled", "slash command" and "rewriter declined" all
+# leave the buffer identical. The trace is the only way to tell them apart.
+test_the_trace_records_which_path_was_taken() {
+    local dir="$TEST_TMPDIR/meta"
+    mkdir -p "$dir"
+    local f
+    f=$(composer_file "/release")
+    CLAUDE_SESSION_META_DIR="$dir" "$SHIM" "$f"
+    assert_file_contains "$dir/local/rewrite.trace" 'exit passthrough-prefix' \
+        "a slash command records why it passed through" || return 1
+
+    f=$(composer_file "make the login thing better")
+    CLAUDE_SESSION_META_DIR="$dir" "$SHIM" "$f"
+    assert_file_contains "$dir/local/rewrite.trace" 'exit rewritten' \
+        "a completed rewrite records that it landed"
+}
+
 run_test test_every_progress_mode_paints_something
 run_test test_unknown_progress_mode_falls_back_to_a_display
 run_test test_screen_mode_caps_a_long_prompt_and_marks_it
 run_test test_line_and_static_modes_do_not_echo_the_prompt
 run_test test_animated_modes_withhold_the_elapsed_under_five_seconds
 run_test test_animated_modes_show_the_elapsed_past_five_seconds
-run_test test_a_fast_rewrite_draws_nothing
+run_test test_a_fast_rewrite_still_paints
+run_test test_the_trace_records_which_path_was_taken
 run_test test_screen_mode_frames_the_prompt_in_a_margin
 run_test test_screen_mode_counts_down_not_up
 run_test test_screen_mode_has_no_spinner
