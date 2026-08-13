@@ -7,7 +7,22 @@
 set -uo pipefail
 
 target="${1:-}"
-[ -n "$target" ] || exit 0
+
+# Every exit path leaves a line in a machine-local trace. This shim is invoked
+# by a keypress and draws onto a screen that is torn down, so when it does
+# nothing there is otherwise no evidence at all of WHICH of its several
+# passthrough paths it took — the buffer looks identical for "not a composer
+# file", "disabled", "slash command" and "rewriter declined".
+_trace() {  # stage
+    local dir="${CLAUDE_SESSION_META_DIR:-}"
+    [ -n "$dir" ] && [ -d "$dir" ] || return 0
+    mkdir -p "$dir/local" 2>/dev/null || return 0
+    printf '%s %s %s\n' "$$" "$(date '+%Y-%m-%dT%H:%M:%S')" "$1" \
+        >> "$dir/local/rewrite.trace" 2>/dev/null || true
+}
+
+_trace "start ${CS_REWRITE_PROVIDER:-claude} $(basename "${target:-<none>}")"
+[ -n "$target" ] || { _trace 'exit no-target'; exit 0; }
 
 # Claude Code writes the composer buffer to <tmpdir>/claude-prompt-<uuid>.md,
 # spawns $EDITOR on it, and replaces the composer with whatever it reads back.
@@ -17,13 +32,14 @@ case "$(basename "$target")" in
     claude-prompt-*.md) ;;
     *)
         # shellcheck disable=SC2086  # deliberate: an editor may carry flags ("code -w")
+        _trace 'exit real-editor'
         exec ${CS_REAL_EDITOR:-vi} "$target"
         ;;
 esac
 
 # Separate from CS_CLARIFY_DISABLE on purpose: silencing the clarifying
 # questions should not also silence the rewriter, and vice versa.
-[ "${CS_REWRITE_DISABLE:-}" = "1" ] && exit 0
+[ "${CS_REWRITE_DISABLE:-}" = "1" ] && { _trace 'exit disabled'; exit 0; }
 
 prompt=$(cat "$target" 2>/dev/null) || exit 0
 
@@ -34,14 +50,14 @@ lead=${prompt#"${prompt%%[![:space:]]*}"}
 case "$lead" in
     # Nothing to rewrite, and a slash command, shell passthrough or memory entry
     # is already precise — rewriting one would corrupt it into prose.
-    ''|/*|'!'*|'#'*) exit 0 ;;
+    ''|/*|'!'*|'#'*) _trace 'exit passthrough-prefix'; exit 0 ;;
 esac
 
 # The composer buffer holds PLACEHOLDERS for pasted text and images, not their
 # bodies. Rewriting the placeholder away silently destroys the attachment, so a
 # buffer carrying one is passed through untouched.
 case "$prompt" in
-    *'[Pasted text'*|*'[Image'*) exit 0 ;;
+    *'[Pasted text'*|*'[Image'*) _trace 'exit passthrough-placeholder'; exit 0 ;;
 esac
 
 # Claude Code spawns this shim with stdio inherited onto a BLANK alternate
@@ -212,10 +228,19 @@ _center_indent() {  # width
 # frame count, so sleep drift never shows up as a wrong clock.
 _render_until_done() {  # pid
     local pid="$1" i=0 budget='' indent shown='' text
-    # A fast rewriter must never flash a loader. gemini-api answers in about
-    # 0.9s, so a threshold under a second paints a screen that is gone before it
-    # can be read — which costs attention and returns nothing.
-    sleep 1.2
+    # Paint on every arm, including the ~1s API ones. A threshold high enough to
+    # skip them entirely means ctrl+g acknowledges nothing at all until the
+    # buffer silently changes, and the user cannot tell their keypress
+    # registered — worse than the brief showing it was meant to avoid. The flash
+    # No delay before painting. The rewriter is already forked and running, so
+    # drawing costs the user no wall time at all — and any wait here only means
+    # LESS screen, never a faster rewrite. The screen appears the instant the
+    # key is pressed, which is the acknowledgement ctrl+g owes the user.
+    #
+    # The one case this gives up is a rewriter that fails almost immediately —
+    # a missing binary, a rejected key at ~350ms — which now paints briefly
+    # before it declines. That is a fair trade for every successful rewrite
+    # acknowledging itself at once.
     kill -0 "$pid" 2>/dev/null || return 0
     [ -t 2 ] || return 0
     if command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; then
@@ -367,16 +392,18 @@ set -m
 _rw=$!
 set +m
 
+_trace 'rewriter-forked'
 _render_until_done "$_rw"
-wait "$_rw" || { rm -f "$out" 2>/dev/null; exit 0; }
+wait "$_rw" || { _trace 'exit rewriter-failed'; rm -f "$out" 2>/dev/null; exit 0; }
 rewritten=$(cat "$out" 2>/dev/null) || { rm -f "$out" 2>/dev/null; exit 0; }
 rm -f "$out" 2>/dev/null
 
 # An empty or whitespace-only rewrite means the rewriter failed in a way that
 # did not set a status. Writing it would silently erase what the user typed.
-[ -n "${rewritten//[[:space:]]/}" ] || exit 0
+[ -n "${rewritten//[[:space:]]/}" ] || { _trace 'exit empty-rewrite'; exit 0; }
 
 # tmp+rename so a crash mid-write cannot leave a truncated buffer.
 printf '%s' "$rewritten" > "$target.cs-tmp" 2>/dev/null || exit 0
 mv "$target.cs-tmp" "$target" 2>/dev/null || rm -f "$target.cs-tmp" 2>/dev/null
+_trace 'exit rewritten'
 exit 0
