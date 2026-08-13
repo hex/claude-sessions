@@ -15,22 +15,33 @@ _resolve() {
         gemini)
             if command -v agy >/dev/null 2>&1; then
                 printf 'agy %s' "${CS_REWRITE_MODEL:-}"
-            elif [ -n "${GEMINI_API_KEY:-}" ]; then
-                printf 'api %s' "${CS_REWRITE_MODEL:-gemini-flash-lite-latest}"
-            else
-                return 1
+                return 0
             fi ;;
         openai)
             if command -v codex >/dev/null 2>&1; then
                 printf 'codex %s' "${CS_REWRITE_MODEL:-}"
-            elif [ -n "${OPENAI_API_KEY:-}" ]; then
-                printf 'api %s' "${CS_REWRITE_MODEL:-gpt-4.1-mini}"
-            else
-                return 1
+                return 0
             fi ;;
+    esac
+    # Everything else is an API arm, including the bare provider names once
+    # their CLI turned out to be absent. The `-api` suffix is what lets a user
+    # reach it PAST an installed CLI: agy carries no lite models and the lite
+    # tier is the fastest thing there is, so "the API, even though a CLI is
+    # here" has to be sayable.
+    case "$_vendor" in
+        gemini) [ -n "${GEMINI_API_KEY:-}" ] && printf 'api %s' "${CS_REWRITE_MODEL:-gemini-flash-lite-latest}" ;;
+        openai) [ -n "${OPENAI_API_KEY:-}" ] && printf 'api %s' "${CS_REWRITE_MODEL:-gpt-4.1-mini}" ;;
+        claude) [ -n "${ANTHROPIC_API_KEY:-}" ] && printf 'api %s' "${CS_REWRITE_MODEL:-claude-haiku-4-5-20251001}" ;;
         *) return 1 ;;
     esac
 }
+
+case "${CS_REWRITE_PROVIDER:-}" in
+    gemini|gemini-api) _vendor=gemini ;;
+    openai|openai-api) _vendor=openai ;;
+    claude-api)        _vendor=claude ;;
+    *)                 _vendor='' ;;
+esac
 
 _resolved=$(_resolve) || _resolved=''
 _engine=${_resolved%% *}
@@ -133,9 +144,14 @@ _make_temps() {
 # The key travels in the mode-600 config file and the payload in a file of its
 # own, so neither reaches argv, where `ps` shows it to every user on the box. A
 # key passed in a URL query string would also land in logs at the far end.
-_curl_json() {  # url, auth-header, payload
+_curl_json() {  # url, auth-header, payload, [extra headers...]
     local url="$1" header="$2" payload="$3" rc=0
+    shift 3
     printf 'header = "%s"\n' "$header" > "$_cfg_file" || return 1
+    local extra
+    for extra in "$@"; do
+        printf 'header = "%s"\n' "$extra" >> "$_cfg_file" || return 1
+    done
     printf '%s' "$payload" > "$_body_file" || return 1
     curl -s --max-time "$_limit" --config "$_cfg_file" \
         -H 'Content-Type: application/json' --data-binary @"$_body_file" "$url" || rc=$?
@@ -189,6 +205,27 @@ _api_openai() {
     printf '%s' "$response" | jq -r '.choices[0].message.content // empty'
 }
 
+# The Messages API, not the agent. `claude -p` ships Claude Code's system prompt
+# and tool schemas on every call — 35k tokens measured for a 10-token prompt —
+# which is the whole reason the default rewriter takes ~13s where a completion
+# endpoint takes ~1s. This arm needs a real ANTHROPIC_API_KEY; the default
+# rewriter deliberately uses the user's claude.ai login instead, so the two are
+# complements rather than a replacement.
+_api_claude() {
+    local payload response
+    payload=$(jq -n --arg p "$prompt" --arg s "$_system" --arg m "$_model" \
+        '{model:$m, max_tokens:2048, system:$s,
+          messages:[{role:"user",content:$p}]}') || return 1
+    response=$(_curl_json "https://api.anthropic.com/v1/messages" \
+        "x-api-key: ${ANTHROPIC_API_KEY}" "$payload" \
+        "anthropic-version: 2023-06-01") || return 1
+    case $(printf '%s' "$response" | jq -r '.stop_reason // empty') in
+        ''|end_turn|stop_sequence) ;;
+        *) return 1 ;;
+    esac
+    printf '%s' "$response" | jq -r '[.content[]? | select(.type=="text") | .text] | first // empty'
+}
+
 _rc=0
 out=''
 case "$_engine" in
@@ -218,9 +255,10 @@ $prompt") || _rc=$?
         ;;
     api)
         _make_temps || exit 1
-        case "$CS_REWRITE_PROVIDER" in
+        case "$_vendor" in
             gemini) out=$(_api_gemini) || _rc=$? ;;
             openai) out=$(_api_openai) || _rc=$? ;;
+            claude) out=$(_api_claude) || _rc=$? ;;
         esac
         ;;
     *)

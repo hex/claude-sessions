@@ -325,6 +325,44 @@ test_an_unset_model_defers_to_the_cli_configuration() {
         "no model flag is passed when the user set none"
 }
 
+# agy carries no lite models — its catalogue is eleven entries and rejects every
+# lite id — and the lite tier is the fastest thing measured anywhere. So a user
+# who wants it needs a way to say "the API, even though a CLI is installed".
+# The bare provider names keep preferring the CLI, so nobody who has not asked
+# for this sees a change.
+test_the_api_suffix_forces_the_api_arm_past_a_present_cli() {
+    fake_bin agy 'printf "CLI SHOULD NOT RUN"'
+    fake_bin curl 'printf "%s" "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"VIA API\"}]}}]}"'
+    local out rc=0
+    out=$(CS_REWRITE_PROVIDER=gemini-api GEMINI_API_KEY=not-a-real-key run_rewrite) || rc=$?
+    [ "$rc" -eq 0 ] || { echo "expected the API arm to answer, got $rc"; return 1; }
+    [ "$out" = "VIA API" ] || { echo "expected the API rewrite, got: $out"; return 1; }
+    assert_file_not_contains "$ARGV_DUMP" 'agy' "the CLI must not run when the API arm is named"
+}
+
+# Anthropic gets an API arm too. The default rewriter drives the whole Claude
+# Code agent, which ships tens of thousands of tokens of tool schemas per call
+# and measures ~13s against ~1s for a completion endpoint. Same vendor, same
+# model, different transport.
+test_claude_api_calls_the_messages_endpoint() {
+    fake_bin curl 'printf "%s" "{\"content\":[{\"type\":\"text\",\"text\":\"VIA MESSAGES\"}],\"stop_reason\":\"end_turn\"}"'
+    local out rc=0
+    out=$(CS_REWRITE_PROVIDER=claude-api ANTHROPIC_API_KEY=not-a-real-key run_rewrite) || rc=$?
+    [ "$rc" -eq 0 ] || { echo "expected the messages arm to answer, got $rc"; return 1; }
+    [ "$out" = "VIA MESSAGES" ] || { echo "expected the extracted text, got: $out"; return 1; }
+    assert_file_contains "$ARGV_DUMP" 'api\.anthropic\.com/v1/messages' \
+        "claude-api posts to the Messages endpoint"
+}
+
+# The label still names the engine and the model, so an API arm reached through
+# the suffix is visibly an API arm.
+test_the_api_suffix_labels_itself_as_the_api() {
+    fake_bin agy 'printf "unused"'
+    local out
+    out=$(CS_REWRITE_PROVIDER=gemini-api GEMINI_API_KEY=k "$VENDOR" --label < /dev/null)
+    [ "$out" = "api · gemini-flash-lite-latest" ] || { echo "expected 'api · gemini-flash-lite-latest', got '$out'"; return 1; }
+}
+
 echo ""
 echo "Prompt rewriter vendor tests"
 echo "============================"
@@ -347,5 +385,8 @@ run_test test_label_names_the_api_arm_and_its_default_model
 run_test test_label_omits_the_model_when_the_cli_chooses_it
 run_test test_the_model_knob_reaches_the_vendor_clis
 run_test test_an_unset_model_defers_to_the_cli_configuration
+run_test test_the_api_suffix_forces_the_api_arm_past_a_present_cli
+run_test test_claude_api_calls_the_messages_endpoint
+run_test test_the_api_suffix_labels_itself_as_the_api
 
 report_results

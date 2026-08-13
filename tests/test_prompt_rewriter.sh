@@ -443,6 +443,22 @@ test_the_header_names_the_resolved_engine_and_model() {
     assert_file_contains "$out" 'gemini-3.6-flash' "the header names the model"
 }
 
+# claude-api is the one provider name that routes AWAY from the default
+# rewriter for the same vendor: bare `claude` is the shipped agent path, and the
+# suffix picks the Messages endpoint instead.
+test_claude_api_routes_to_the_vendor_rewriter() {
+    unset CS_REWRITE_CMD
+    local bin="$TEST_TMPDIR/bin"
+    mkdir -p "$bin"
+    printf '#!/bin/bash\nprintf "%%s" "{\\"content\\":[{\\"type\\":\\"text\\",\\"text\\":\\"VIA MESSAGES\\"}],\\"stop_reason\\":\\"end_turn\\"}"\n' > "$bin/curl"
+    chmod +x "$bin/curl"
+    local f
+    f=$(composer_file "make the login thing better")
+    PATH="$bin:$PATH" XDG_CACHE_HOME="$TEST_TMPDIR/cache" \
+        CS_REWRITE_PROVIDER=claude-api ANTHROPIC_API_KEY=not-a-real-key "$SHIM" "$f"
+    assert_file_contains "$f" 'VIA MESSAGES' "claude-api routes to the vendor rewriter"
+}
+
 run_test test_every_progress_mode_paints_something
 run_test test_unknown_progress_mode_falls_back_to_a_display
 run_test test_screen_mode_caps_a_long_prompt_and_marks_it
@@ -474,5 +490,6 @@ run_test test_shim_never_leaves_a_temp_file_behind
 run_test test_the_provider_knob_selects_the_vendor_rewriter
 run_test test_an_explicit_rewrite_cmd_outranks_the_provider_knob
 run_test test_an_unknown_provider_falls_back_to_the_default_rewriter
+run_test test_claude_api_routes_to_the_vendor_rewriter
 
 report_results
