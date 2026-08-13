@@ -38,6 +38,9 @@ for _v in ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_SECURESTORAGE_CONFIG_DIR
         printf '%s=absent\n' "$_v" >> "$CS_TEST_ENV_DUMP"
     fi
 done
+# The securestorage value is a config directory path, never a credential, and
+# the mirroring assertion needs it rather than a present/absent flag.
+printf 'SECURESTORAGE_VALUE=%s\n' "${CLAUDE_SECURESTORAGE_CONFIG_DIR-<unset>}" >> "$CS_TEST_ENV_DUMP"
 printf 'REWRITTEN'
 FAKEEOF
     chmod +x "$FAKE_BIN/claude"
@@ -70,10 +73,42 @@ test_the_api_key_is_not_handed_to_the_nested_call() {
         "the API key must not reach the nested call"
 }
 
-test_the_auth_token_is_not_handed_to_the_nested_call() {
+# ANTHROPIC_AUTH_TOKEN is deliberately NOT scrubbed, and the asymmetry is the
+# whole reason. An ambient API key wins unconditionally in print mode
+# (`if(pfr()&&t)return{key:t,source:"ANTHROPIC_API_KEY"}`) while interactive
+# mode requires it to be in `customApiKeyResponses.approved` — so a dead key
+# kills every nested rewrite while the parent session stays healthy, silently.
+# The auth token has no such asymmetry: it is checked identically in both
+# modes, so a dead one breaks the parent's own messages and the user already
+# knows. Scrubbing it would also strand proxy users, whose ANTHROPIC_BASE_URL
+# and ANTHROPIC_CUSTOM_HEADERS stay in place — the rewrite would send a
+# keychain OAuth bearer at their gateway. Scrub exactly the credentials whose
+# precedence differs between parent and child.
+test_the_auth_token_is_left_alone() {
     ANTHROPIC_AUTH_TOKEN="not-a-real-token" run_rewrite >/dev/null
-    assert_file_contains "$ENV_DUMP" '^ANTHROPIC_AUTH_TOKEN=absent' \
-        "the auth token must not reach the nested call either"
+    assert_file_contains "$ENV_DUMP" '^ANTHROPIC_AUTH_TOKEN=present' \
+        "the auth token is not ours to strip"
+}
+
+# A parent running its own CLAUDE_CONFIG_DIR keeps its login under
+# `Claude Code-credentials-<sha256(thatDir)[0:8]>`. Hardcoding the empty string
+# would point the child at the unsuffixed default item, which that user never
+# wrote — not logged in, or worse, a stale different login. Mirror whatever the
+# parent resolved.
+test_the_securestorage_dir_mirrors_the_parent() {
+    local sentinel="$TEST_TMPDIR/parent-config"
+    mkdir -p "$sentinel"
+    CLAUDE_CONFIG_DIR="$sentinel" run_rewrite >/dev/null
+    assert_file_contains "$ENV_DUMP" "^SECURESTORAGE_VALUE=$sentinel\$" \
+        "the child mirrors the parent's config dir, not the hermetic one"
+}
+
+# With no parent CLAUDE_CONFIG_DIR the mirror resolves to empty, which is the
+# value that makes the keychain lookup drop its suffix.
+test_the_securestorage_dir_is_empty_by_default() {
+    run_rewrite >/dev/null
+    assert_file_contains "$ENV_DUMP" '^SECURESTORAGE_VALUE=$' \
+        "no parent config dir means the default, unsuffixed keychain item"
 }
 
 # Setting CLAUDE_CONFIG_DIR renames the keychain service Claude Code looks up:
@@ -156,7 +191,9 @@ echo "==========================="
 echo ""
 
 run_test test_the_api_key_is_not_handed_to_the_nested_call
-run_test test_the_auth_token_is_not_handed_to_the_nested_call
+run_test test_the_auth_token_is_left_alone
+run_test test_the_securestorage_dir_mirrors_the_parent
+run_test test_the_securestorage_dir_is_empty_by_default
 run_test test_the_nested_call_reads_the_real_login
 run_test test_the_config_dir_stays_hermetic
 run_test test_the_session_context_is_scrubbed

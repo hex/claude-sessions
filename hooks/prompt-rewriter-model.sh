@@ -70,20 +70,32 @@ fi
 # which pulled cs's own memory into the rewrite, so a request to add a flag came
 # back demanding TDD and bash 3.2 compatibility.
 #
-# The auth vars go too, and this is the load-bearing part. Claude Code prefers
-# an ambient ANTHROPIC_API_KEY over the user's claude.ai login, so a key that is
-# stale, rotated or simply wrong takes every rewrite down with it — and not
-# quickly: a rejected key sends the call into retries, so it burns the whole
-# timeout and fails silently rather than erroring. Dropping the key leaves the
-# login, and CLAUDE_SECURESTORAGE_CONFIG_DIR set to empty makes the keychain
-# lookup drop the config-dir suffix described above, so the hermetic call reads
-# the credentials the user already has.
+# Where the parent resolves its credentials, captured BEFORE the call overrides
+# CLAUDE_CONFIG_DIR. It cannot be read inside the prefix list below: bash
+# processes those assignments left to right, so a later one reading
+# CLAUDE_CONFIG_DIR would see the hermetic value and hash that instead. Empty
+# when the parent has no config dir of its own, which is the value that makes
+# the keychain lookup drop its suffix; a parent running its own config dir keeps
+# its login under that dir's hash, and the child has to ask for the same item.
+_securestore="${CLAUDE_SECURESTORAGE_CONFIG_DIR-${CLAUDE_CONFIG_DIR-}}"
+
+# ANTHROPIC_API_KEY goes, and only it. Claude Code resolves an ambient key
+# differently either side of `-p`: print mode takes it unconditionally, while
+# interactive mode requires it to appear in `customApiKeyResponses.approved`.
+# So a stale key leaves the user's own session healthy and kills every nested
+# rewrite — and not quickly, because a rejected key retries until the timeout
+# and returns nothing. That asymmetry is the whole justification, which is why
+# it does not extend to ANTHROPIC_AUTH_TOKEN: that one is checked identically in
+# both modes, so a dead one breaks the parent too and the user already knows.
+# Stripping it would strand proxy users as well, whose ANTHROPIC_BASE_URL and
+# ANTHROPIC_CUSTOM_HEADERS remain — the rewrite would present a keychain OAuth
+# bearer at their gateway.
 out=$(cd "$cfg" 2>/dev/null && printf '%s' "$prompt" | CLAUDE_CONFIG_DIR="$cfg" \
-    CLAUDE_SECURESTORAGE_CONFIG_DIR="" \
+    CLAUDE_SECURESTORAGE_CONFIG_DIR="$_securestore" \
     env -u CLAUDE_COWORK_MEMORY_PATH_OVERRIDE -u CLAUDE_CODE_AUTO_MEMORY_PATH \
         -u CLAUDE_SESSION_DIR -u CLAUDE_SESSION_META_DIR -u CLAUDE_SESSION_NAME \
         -u CLAUDE_CODE_TASK_LIST_ID -u CLAUDE_PROJECT_DIR \
-        -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
+        -u ANTHROPIC_API_KEY \
     "$@" claude -p \
     --model "${CS_REWRITE_MODEL:-claude-haiku-4-5-20251001}" \
     --system-prompt "$_system" 2>/dev/null) || exit 1
