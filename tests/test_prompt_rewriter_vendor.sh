@@ -217,33 +217,38 @@ printf "ok"'
 # so the temp files cannot be redirected into the test's own tree. The assertion
 # diffs the real temp directory instead and inspects only what this run added.
 test_a_killed_rewrite_leaves_no_credential_on_disk() {
+    # Unique per run: the temp directory is shared machine-wide, so a concurrent
+    # run of this same suite would otherwise leave a file carrying the identical
+    # key and this run would read it as its own leak.
     local fake_key
-    fake_key="AIza""SyNotARealGeminiKey"
+    fake_key="AIza""SyNotAReal$$"
     fake_bin curl 'sleep 30'
     local tmproot before after leaked
     tmproot=$(dirname "$(mktemp -u)")
     before="$TEST_TMPDIR/before"
     ls -A "$tmproot" > "$before" 2>/dev/null
 
+    # Job control for the fork alone, so the rewriter and its curl land in one
+    # process group this test can address as a unit — exactly what the shim does
+    # with `set -m` before forking. A `pkill -f` pattern would reach any other
+    # process on the machine matching it, including a concurrent run of this very
+    # suite, and the two would kill each other's processes.
+    set -m
     ( printf 'fix the login thing' | CS_REWRITE_PROVIDER=gemini \
         GEMINI_API_KEY="$fake_key" "$VENDOR" >/dev/null 2>&1 ) &
     local pid=$! waited=0
-    while [ "$waited" -lt 50 ] && [ -z "$(pgrep -f 'sleep 30' 2>/dev/null)" ]; do
+    set +m
+    while [ "$waited" -lt 50 ] && [ -z "$(pgrep -g "$pid" -f 'sleep 30' 2>/dev/null)" ]; do
         sleep 0.1
         waited=$((waited + 1))
     done
-    [ -n "$(pgrep -f 'sleep 30' 2>/dev/null)" ] || { echo "the API arm never reached curl"; return 1; }
+    [ -n "$(pgrep -g "$pid" -f 'sleep 30' 2>/dev/null)" ] || { echo "the API arm never reached curl"; return 1; }
 
-    # The rewriter itself is signalled, which is what the shim's cancel handler
-    # does. Killing its curl instead would let _curl_json run on into its own
-    # cleanup and the test would pass against a script that never cleans up.
-    # The whole group, exactly as the shim's handler does: bash defers a trap
-    # until the foreground child returns, so signalling the script alone would
-    # leave it blocked in curl and the cleanup unreached for reasons production
-    # never sees.
-    pkill -TERM -f 'prompt-rewriter-vendor.sh' 2>/dev/null
-    pkill -TERM -f 'sleep 30' 2>/dev/null
-    kill -TERM "$pid" 2>/dev/null
+    # The whole group, exactly as the shim's cancel handler does. Signalling the
+    # script alone would leave it blocked in curl with the cleanup unreached,
+    # since bash defers a trap until the foreground child returns — a state
+    # production never produces.
+    kill -TERM "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null
     wait "$pid" 2>/dev/null
 
     # Only files this run created are inspected; the shared temp directory holds
