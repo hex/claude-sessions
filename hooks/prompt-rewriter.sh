@@ -50,10 +50,25 @@ esac
 # reaches the scrollback. All of it is gated on a tty, so a piped run draws
 # nothing at all.
 _spin=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+# The cs palette, mirroring lib/05-term.sh. A deployed hook cannot source that
+# file, so the values are inlined here and keyed on CS_TERM_THEME, which cs
+# exports after detecting the terminal background. Light is not dark dimmed: on
+# cream the muted tones wash out, so light gets darker ink instead.
 if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then
-    _b=$'\033[1m'; _d=$'\033[2m'; _r=$'\033[0m'
+    _b=$'\033[1m'; _r=$'\033[0m'
+    if [ "${CS_TERM_THEME:-dark}" = "light" ]; then
+        _accent=$'\033[38;2;166;86;60m'   # terracotta
+        _ink=$'\033[38;2;48;42;36m'       # primary text
+        _mute=$'\033[38;2;128;116;106m'   # taupe
+        _d=$'\033[38;2;120;108;98m'
+    else
+        _accent=$'\033[38;2;230;74;25m'
+        _ink=$'\033[38;2;245;230;211m'
+        _mute=$'\033[38;2;161;136;127m'
+        _d=$'\033[2m'
+    fi
 else
-    _b=''; _d=''; _r=''
+    _b=''; _d=''; _r=''; _accent=''; _ink=''; _mute=''
 fi
 
 # Terminal geometry, with a plausible fallback rather than a failure: this is
@@ -84,17 +99,21 @@ _paint_screen() {
     label=$(_model_label)
     pad=$(( cols - 4 - ${#title} - ${#label} ))
     [ "$pad" -ge 1 ] || pad=1
-    printf '\n  %s%s%s%*s%s%s%s\n  %s' \
-        "$_b" "$title" "$_r" "$pad" '' "$_d" "$label" "$_r" "$_d" >&2
+    # `cs` carries the brand accent, the rest is ordinary ink, the model is
+    # chrome. Same division the status line and the banners use.
+    printf '\n  %s%scs%s %s·%s %s%s%s%*s%s%s%s\n  %s' \
+        "$_b" "$_accent" "$_r" "$_d" "$_r" "$_ink" "${title#cs · }" "$_r" \
+        "$pad" '' "$_mute" "$label" "$_r" "$_d" >&2
     awk -v n=$(( cols - 4 )) 'BEGIN{while (n-- > 0) printf "─"}' >&2
     printf '%s\n\n' "$_r" >&2
     # awk rather than `head -8`, which exits early and SIGPIPEs fold — under
     # `pipefail` that turns a long prompt into a 141 status. awk drains the
     # whole stream, and says so when it clipped rather than showing a fragment
     # that reads like the whole prompt.
+    printf '%s' "$_ink" >&2
     printf '%s' "$prompt" | fold -s -w $(( cols - 4 )) \
         | awk 'NR<=8 {print "  " $0} END {if (NR>8) print "  … prompt clipped"}' >&2
-    printf '\n' >&2
+    printf '%s\n' "$_r" >&2
 }
 
 # Drops the cursor to the vertical middle for the modes that show one line on
@@ -190,8 +209,19 @@ _render_until_done() {  # pid
             _paint_screen
             SECONDS=0
             while kill -0 "$pid" 2>/dev/null; do
-                printf '\r  %s  working…   %ss%s\033[K' \
-                    "${_spin[$(( i % 10 ))]}" "$SECONDS" "$budget" >&2
+                # `Working…` is Claude Code's own label, and it withholds the
+                # elapsed under five seconds. The header already names what is
+                # being rewritten, so the status line does not repeat it.
+                if [ "$SECONDS" -ge 5 ]; then
+                    text="Working… (${SECONDS}s)"
+                else
+                    text='Working…'
+                fi
+                # The spinner is the only live thing on screen, so it takes the
+                # accent; the words stay chrome.
+                printf '\r  %s%s%s  %s%s%s\033[K' \
+                    "$_accent" "${_spin[$(( i % 10 ))]}" "$_r" \
+                    "$_mute" "$text" "$_r" >&2
                 i=$(( i + 1 ))
                 sleep 0.1
             done

@@ -224,16 +224,28 @@ test_line_and_static_modes_do_not_echo_the_prompt() {
 # The native mode follows that. Under five seconds it must show the label with
 # no clock at all — a counter ticking 1s, 2s on a rewrite that always takes
 # about ten is noise Claude Code deliberately leaves out.
-test_native_mode_withholds_the_elapsed_under_five_seconds() {
-    local out; out=$(render_in_mode native '' 1)
-    assert_file_contains "$out" 'Rewriting your prompt…' "the label is shown" || return 1
-    assert_file_not_contains "$out" '([0-9]*s)' "no elapsed before five seconds"
+test_animated_modes_withhold_the_elapsed_under_five_seconds() {
+    local mode out
+    for mode in native screen; do
+        out=$(render_in_mode "$mode" '' 1)
+        assert_file_not_contains "$out" '([0-9]*s)' \
+            "mode '$mode' shows no elapsed before five seconds" || return 1
+    done
 }
 
-test_native_mode_shows_the_elapsed_past_five_seconds() {
-    local out; out=$(render_in_mode native '' 6)
-    assert_file_contains "$out" 'Rewriting your prompt… (5s)' \
-        "the elapsed appears once it is worth reading"
+test_animated_modes_show_the_elapsed_past_five_seconds() {
+    local mode out
+    for mode in native screen; do
+        out=$(render_in_mode "$mode" '' 6)
+        assert_file_contains "$out" '(5s)' \
+            "mode '$mode' shows the elapsed once it is worth reading" || return 1
+    done
+}
+
+# The status line carries Claude Code's own label rather than an invention.
+test_screen_mode_uses_the_house_label() {
+    local out; out=$(render_in_mode screen '' 1)
+    assert_file_contains "$out" 'Working…' "the house label, capitalised as Claude Code writes it"
 }
 
 # A blinking cursor parked at the end of the line reads as unfinished output.
@@ -369,8 +381,9 @@ run_test test_every_progress_mode_paints_something
 run_test test_unknown_progress_mode_falls_back_to_a_display
 run_test test_screen_mode_caps_a_long_prompt_and_marks_it
 run_test test_line_and_static_modes_do_not_echo_the_prompt
-run_test test_native_mode_withholds_the_elapsed_under_five_seconds
-run_test test_native_mode_shows_the_elapsed_past_five_seconds
+run_test test_animated_modes_withhold_the_elapsed_under_five_seconds
+run_test test_animated_modes_show_the_elapsed_past_five_seconds
+run_test test_screen_mode_uses_the_house_label
 run_test test_progress_hides_the_cursor_and_restores_it
 run_test test_no_progress_mode_advertises_ctrl_c
 run_test test_cancel_reaps_the_whole_rewriter_tree
