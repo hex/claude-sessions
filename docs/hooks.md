@@ -171,7 +171,11 @@ The shim hands every file that is **not** named `claude-prompt-*.md` to your rea
 
 The default rewriter, `prompt-rewriter-model.sh`, calls a fast model with the prompt as untrusted data. It runs hermetically — its own config directory, a neutral working directory, and the session's context variables stripped from its environment — because a nested `claude` otherwise inherits the project's `CLAUDE.md` and cs's own memory, and those leak into the rewrite: a request to add a flag came back demanding TDD, bash 3.2 compatibility and a README update that the user never asked for. Override the whole thing with `CS_REWRITE_CMD` (stdin to stdout, non-zero to decline). Opt out per-session: `export CS_REWRITE_DISABLE=1`, which also leaves your `$EDITOR` untouched.
 
-One cost worth knowing: Claude Code runs the editor with `spawnSync` and `stdio:"inherit"`, so the interface is frozen while the rewrite runs — roughly ten to twenty seconds on the default model.
+Claude Code runs the editor with `spawnSync` and `stdio:"inherit"`. The shim's basename matches none of its known GUI editors, so it takes the `enterAlternateScreen()` branch and blanks the interface for the length of the rewrite, roughly ten to twenty seconds on the default model. The shim owns that screen and fills it: the prompt being rewritten (folded, capped at eight lines with a `… prompt clipped` marker), the model, a spinner, and elapsed time against the timeout budget. Tearing down the alternate screen discards it, so nothing reaches the scrollback.
+
+`ctrl+c` during a rewrite keeps what you typed. The shim catches the signal, kills the rewriter and its children, and exits 0, so the composer comes back byte-identical and Claude Code reports no editor error. Handle it and bash swallows it instead, deferring the signal until the child returns — the rewrite then finishes and lands anyway.
+
+Every drawing path checks `[ -t 2 ]` first, so a piped or scripted run emits nothing.
 
 Known multi-machine limitation: if a session is cloned to a second machine while the Objective is still the placeholder and both machines then submit their first prompt before syncing, each captures its own objective and the merge conflicts. This is left as a real conflict on purpose — two people declared different objectives for the same session, and a human should reconcile them.
 

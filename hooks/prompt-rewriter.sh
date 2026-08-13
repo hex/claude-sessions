@@ -44,10 +44,96 @@ case "$prompt" in
     *'[Pasted text'*|*'[Image'*) exit 0 ;;
 esac
 
+# Claude Code spawns this shim with stdio inherited onto a BLANK alternate
+# screen and blocks until it exits, so the terminal belongs to us for the whole
+# rewrite and everything drawn here is torn down with that screen — nothing
+# reaches the scrollback. All of it is gated on a tty, so a piped run draws
+# nothing at all.
+_spin=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then
+    _b=$'\033[1m'; _d=$'\033[2m'; _r=$'\033[0m'
+else
+    _b=''; _d=''; _r=''
+fi
+
+# claude-haiku-4-5-20251001 -> haiku 4.5
+_model_label() {
+    printf '%s' "${CS_REWRITE_MODEL:-claude-haiku-4-5-20251001}" \
+        | sed -e 's/^claude-//' -e 's/-[0-9]\{8\}$//' \
+              -e 's/\([0-9]\)-\([0-9]\)/\1.\2/g' -e 's/-/ /g'
+}
+
+# The static part of the screen: drawn once, so the poll loop only ever
+# repaints its own last line.
+_paint_screen() {
+    local cols title label pad
+    cols=$(tput cols 2>/dev/null) || cols=80
+    [ "$cols" -ge 40 ] 2>/dev/null || cols=80
+    title='cs · rewriting your prompt'
+    label=$(_model_label)
+    pad=$(( cols - 4 - ${#title} - ${#label} ))
+    [ "$pad" -ge 1 ] || pad=1
+    printf '\n  %s%s%s%*s%s%s%s\n  %s' \
+        "$_b" "$title" "$_r" "$pad" '' "$_d" "$label" "$_r" "$_d" >&2
+    awk -v n=$(( cols - 4 )) 'BEGIN{while (n-- > 0) printf "─"}' >&2
+    printf '%s\n\n' "$_r" >&2
+    # awk rather than `head -8`, which exits early and SIGPIPEs fold — under
+    # `pipefail` that turns a long prompt into a 141 status. awk drains the
+    # whole stream, and says so when it clipped rather than showing a fragment
+    # that reads like the whole prompt.
+    printf '%s' "$prompt" | fold -s -w $(( cols - 4 )) \
+        | awk 'NR<=8 {print "  " $0} END {if (NR>8) print "  … prompt clipped"}' >&2
+    printf '\n' >&2
+}
+
+# Spins until the rewriter exits. Elapsed comes from SECONDS rather than a
+# frame count, so sleep drift never shows up as a wrong clock.
+_render_until_done() {  # pid
+    local pid="$1" i=0 budget=''
+    # A fast CS_REWRITE_CMD should never flash a loader on screen.
+    sleep 0.3
+    kill -0 "$pid" 2>/dev/null || return 0
+    [ -t 2 ] || return 0
+    if command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; then
+        budget=" / ${CS_REWRITE_TIMEOUT:-25}s"
+    fi
+    _paint_screen
+    SECONDS=0
+    while kill -0 "$pid" 2>/dev/null; do
+        printf '\r  %s  working…   %ss%s        %s^C keeps your original%s\033[K' \
+            "${_spin[$(( i % 10 ))]}" "$SECONDS" "$budget" "$_d" "$_r" >&2
+        i=$(( i + 1 ))
+        sleep 0.1
+    done
+    printf '\r\033[K' >&2
+}
+
 # The rewriter reads the prompt on stdin and writes the rewrite to stdout.
 # Overridable so the tests can exercise the plumbing without a model, and so a
-# user can supply their own.
-rewritten=$(printf '%s' "$prompt" | ${CS_REWRITE_CMD:-"$(dirname "$0")/prompt-rewriter-model.sh"} 2>/dev/null) || exit 0
+# user can supply their own. It runs in the background rather than in a command
+# substitution because a blocking substitution leaves nothing able to draw.
+out="$target.cs-out"
+( printf '%s' "$prompt" | ${CS_REWRITE_CMD:-"$(dirname "$0")/prompt-rewriter-model.sh"} > "$out" 2>/dev/null ) &
+_rw=$!
+
+# ctrl+c means "keep what I typed". Without this the signal is swallowed: bash
+# defers it until the child returns, so the rewrite runs to completion and
+# lands anyway. pkill -P first, because killing the subshell alone orphans the
+# model call it is waiting on.
+# shellcheck disable=SC2329  # invoked by the trap below, not by name
+_keep_original() {
+    pkill -P "$_rw" 2>/dev/null
+    kill "$_rw" 2>/dev/null
+    rm -f "$out" "$target.cs-tmp" 2>/dev/null
+    [ -t 2 ] && printf '\r\033[K' >&2
+    exit 0
+}
+trap _keep_original INT TERM
+
+_render_until_done "$_rw"
+wait "$_rw" || { rm -f "$out" 2>/dev/null; exit 0; }
+rewritten=$(cat "$out" 2>/dev/null) || { rm -f "$out" 2>/dev/null; exit 0; }
+rm -f "$out" 2>/dev/null
 
 # An empty or whitespace-only rewrite means the rewriter failed in a way that
 # did not set a status. Writing it would silently erase what the user typed.

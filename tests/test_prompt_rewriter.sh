@@ -151,6 +151,95 @@ test_shim_never_leaves_a_temp_file_behind() {
     assert_not_exists "$f.cs-tmp" "the tmp+rename leaves no residue"
 }
 
+# Claude Code hands the shim a BLANK alternate screen and waits, so the shim
+# owns the terminal for the whole rewrite. Only a real pty makes [ -t 2 ] true;
+# without one this test would pass against a shim that renders nothing at all.
+test_progress_renders_under_a_pty() {
+    local slow="$TEST_TMPDIR/slow-rewrite.sh"
+    cat > "$slow" <<'SLOWEOF'
+#!/bin/bash
+sleep 0.6
+printf 'PRECISE: %s' "$(cat)"
+SLOWEOF
+    chmod +x "$slow"
+    local f; f=$(composer_file "make the login thing better")
+    local out="$TEST_TMPDIR/pty-out"
+    # script(1) tcgetattr's its OWN stdin and dies on a socket, which is what a
+    # CI runner or an agent harness often hands it; /dev/null still gets the
+    # child a pty.
+    CS_REWRITE_CMD="$slow" script -q /dev/null "$SHIM" "$f" < /dev/null > "$out" 2>&1
+    assert_file_contains "$out" "rewriting your prompt" \
+        "the loader painted while the rewrite ran" || return 1
+    assert_eq "PRECISE: make the login thing better" "$(cat "$f")" \
+        "and the rewrite still landed in the buffer"
+}
+
+# A pasted essay must not scroll the header off the screen, and the user has to
+# be told their prompt was clipped rather than silently shown a fragment.
+test_progress_caps_a_long_prompt_and_marks_it() {
+    local slow="$TEST_TMPDIR/slow-rewrite.sh"
+    printf '#!/bin/bash\nsleep 0.6\nprintf "PRECISE"\n' > "$slow"
+    chmod +x "$slow"
+    local long i=''
+    for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+        long="$long line $i of a very long prompt that keeps going and going;"
+    done
+    local f; f=$(composer_file "$long")
+    local out="$TEST_TMPDIR/pty-out"
+    CS_REWRITE_CMD="$slow" script -q /dev/null "$SHIM" "$f" < /dev/null > "$out" 2>&1
+    # A bare '…' would match the 'working…' in the spinner line and pass
+    # against a shim that never clips anything, so pin the whole marker.
+    assert_file_contains "$out" '… prompt clipped' "the clip is marked, not silent" || return 1
+    # 8 prompt lines + the ellipsis, never the whole essay.
+    local shown
+    shown=$(tr '\r' '\n' < "$out" | grep -c 'of a very long prompt')
+    [ "$shown" -le 8 ] || { echo "    expected <=8 prompt lines, got $shown"; return 1; }
+}
+
+# ctrl+c during a rewrite must read as "keep what I typed", not as a crash:
+# Claude Code renders any non-zero status as "<editor> quit unexpectedly".
+test_sigint_keeps_the_original_and_exits_clean() {
+    local slow="$TEST_TMPDIR/slow-rewrite.sh"
+    printf '#!/bin/bash\nsleep 5\nprintf "PRECISE: rewritten"\n' > "$slow"
+    chmod +x "$slow"
+    local f; f=$(composer_file "make the login thing better")
+    # `set -m` is load-bearing, not decoration. Without job control bash starts
+    # an async child with SIGINT set to SIG_IGN, and a trap cannot un-ignore a
+    # signal inherited as ignored — so the shim's handler would be unreachable
+    # and this test would fail forever against correct code. Claude Code runs
+    # the shim in the FOREGROUND, where INT is deliverable; job control
+    # reproduces that.
+    set -m
+    CS_REWRITE_CMD="$slow" "$SHIM" "$f" >/dev/null 2>&1 &
+    local shim=$!
+    set +m
+    sleep 0.8
+    kill -INT "$shim" 2>/dev/null
+    local st=0; wait "$shim" || st=$?
+    assert_eq "0" "$st" "exits 0, so Claude Code reports no editor error" || return 1
+    assert_eq "make the login thing better" "$(cat "$f")" \
+        "the buffer comes back exactly as typed" || return 1
+    assert_not_exists "$f.cs-out" "the rewriter's output file is cleaned up on cancel"
+}
+
+# Meaningful only as the other half of test_progress_renders_under_a_pty: this
+# one asserts absence and would pass against a shim that never draws at all.
+# The pair is what pins the behaviour — draws on a tty, silent off one.
+test_progress_is_silent_without_a_tty() {
+    local slow="$TEST_TMPDIR/slow-rewrite.sh"
+    printf '#!/bin/bash\nsleep 0.6\nprintf "PRECISE"\n' > "$slow"
+    chmod +x "$slow"
+    local f; f=$(composer_file "make the login thing better")
+    local err="$TEST_TMPDIR/err"
+    CS_REWRITE_CMD="$slow" "$SHIM" "$f" >/dev/null 2>"$err"
+    assert_eq "" "$(cat "$err")" "a piped run draws nothing" || return 1
+    assert_eq "PRECISE" "$(cat "$f")" "and the rewrite still lands"
+}
+
+run_test test_progress_renders_under_a_pty
+run_test test_progress_is_silent_without_a_tty
+run_test test_progress_caps_a_long_prompt_and_marks_it
+run_test test_sigint_keeps_the_original_and_exits_clean
 run_test test_rewrites_the_composer_file_in_place
 run_test test_non_composer_file_goes_to_the_real_editor
 run_test test_slash_command_passes_through
