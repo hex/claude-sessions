@@ -97,9 +97,11 @@ _curl_json() {  # url, auth-header, payload
 }
 
 # Gemini names the model in the path rather than the body. The default is
-# deliberately flash-lite class: gemini-2.5-flash spends its whole output budget
-# thinking and returns a rewrite truncated at MAX_TOKENS, which is non-empty and
-# so passes every gate below while being unusable.
+# deliberately flash-lite class. A thinking model can spend most of its output
+# budget on reasoning and return a rewrite truncated at MAX_TOKENS — observed at
+# 1963 reasoning tokens against this 2048 cap — which is non-empty, so it passes
+# every gate below while being unusable. It does not happen on every call, which
+# is worse than if it did.
 _api_gemini() {
     local payload response
     payload=$(jq -n --arg p "$prompt" --arg s "$_system" \

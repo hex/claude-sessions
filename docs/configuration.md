@@ -77,8 +77,9 @@ export CS_REWRITE_PROVIDER="claude"          # claude | openai | gemini
 # tool's configuration, so setting this while `codex` or `agy` is on PATH has no
 # effect. Defaults per provider: claude-haiku-4-5-20251001, gpt-4.1-mini,
 # gemini-flash-lite-latest. Reasoning models are a poor fit whatever the
-# provider: they spend the output budget thinking and return a rewrite truncated
-# mid-sentence, which cs declines, so a rewrite simply never appears.
+# provider: they can spend most of the output budget on reasoning and return a
+# rewrite truncated mid-sentence, which cs declines — so ctrl+g intermittently
+# does nothing at all.
 export CS_REWRITE_MODEL="claude-haiku-4-5-20251001"   # this is the default
 export CS_REWRITE_TIMEOUT="25"                        # seconds; needs timeout(1)
 
