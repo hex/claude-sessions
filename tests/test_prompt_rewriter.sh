@@ -196,9 +196,20 @@ test_progress_caps_a_long_prompt_and_marks_it() {
     [ "$shown" -le 8 ] || { echo "    expected <=8 prompt lines, got $shown"; return 1; }
 }
 
-# ctrl+c during a rewrite must read as "keep what I typed", not as a crash:
-# Claude Code renders any non-zero status as "<editor> quit unexpectedly".
-test_sigint_keeps_the_original_and_exits_clean() {
+# Cancelling a rewrite must read as "keep what I typed", not as a crash: Claude
+# Code renders any non-zero status as "<editor> quit unexpectedly".
+#
+# Signalled with TERM, and the shim handles INT and TERM with one handler, so
+# this covers the handler, the restored buffer, the exit status and the reaped
+# tree. It does NOT cover ctrl+c itself, and cannot: run_all.sh launches each
+# suite inside a background subshell with no job control, which leaves SIGINT
+# set to SIG_IGN for the suite and everything it spawns, and bash cannot trap a
+# signal it inherited as ignored. `set -m` does not undo it either — it hands
+# out a new process group, not a new disposition. A suite that sent INT would
+# pass when run by hand in the foreground and fail inside the gate, against
+# identical code. Delivery of the keystroke is an interactive property and is
+# verified by hand.
+test_cancel_keeps_the_original_and_exits_clean() {
     # The stub outlives the test by a wide margin on purpose. A short one makes
     # the test race it: if load stretches readiness-polling and signal delivery
     # past the stub's own life, the rewrite completes and the buffer changes,
@@ -208,16 +219,8 @@ test_sigint_keeps_the_original_and_exits_clean() {
     printf '#!/bin/bash\nsleep 120\nprintf "PRECISE: rewritten"\n' > "$slow"
     chmod +x "$slow"
     local f; f=$(composer_file "make the login thing better")
-    # `set -m` is load-bearing, not decoration. Without job control bash starts
-    # an async child with SIGINT set to SIG_IGN, and a trap cannot un-ignore a
-    # signal inherited as ignored — so the shim's handler would be unreachable
-    # and this test would fail forever against correct code. Claude Code runs
-    # the shim in the FOREGROUND, where INT is deliverable; job control
-    # reproduces that.
-    set -m
     CS_REWRITE_CMD="$slow" "$SHIM" "$f" >/dev/null 2>&1 &
     local shim=$!
-    set +m
     # Wait for the shim to fork the rewriter rather than guessing at a delay.
     # The trap is armed before that fork, so a visible child proves the handler
     # is installed. A fixed sleep raced it whenever the gate's other lanes made
@@ -228,7 +231,7 @@ test_sigint_keeps_the_original_and_exits_clean() {
         waited=$((waited + 1))
     done
     [ "$waited" -lt 50 ] || { echo "shim never forked a rewriter"; kill "$shim" 2>/dev/null; return 1; }
-    kill -INT "$shim" 2>/dev/null
+    kill -TERM "$shim" 2>/dev/null
     local st=0; wait "$shim" || st=$?
     assert_eq "0" "$st" "exits 0, so Claude Code reports no editor error" || return 1
     assert_eq "make the login thing better" "$(cat "$f")" \
@@ -254,7 +257,7 @@ test_progress_is_silent_without_a_tty() {
 # forked. The real rewriter is a script that spawns `claude -p` and waits, so a
 # kill that stops at the script leaves a live API call behind, unattached to
 # anything and still being paid for.
-test_sigint_reaps_the_whole_rewriter_tree() {
+test_cancel_reaps_the_whole_rewriter_tree() {
     local pidfile="$TEST_TMPDIR/grandchild.pid"
     local slow="$TEST_TMPDIR/slow-rewrite.sh"
     cat > "$slow" <<SLOWEOF
@@ -265,10 +268,8 @@ wait
 SLOWEOF
     chmod +x "$slow"
     local f; f=$(composer_file "make the login thing better")
-    set -m
     CS_REWRITE_CMD="$slow" "$SHIM" "$f" >/dev/null 2>&1 &
     local shim=$!
-    set +m
     local waited=0
     while [ "$waited" -lt 50 ] && [ ! -s "$pidfile" ]; do
         sleep 0.1
@@ -276,7 +277,7 @@ SLOWEOF
     done
     [ -s "$pidfile" ] || { echo "rewriter never recorded its child"; kill "$shim" 2>/dev/null; return 1; }
     local grandchild; grandchild=$(cat "$pidfile")
-    kill -INT "$shim" 2>/dev/null
+    kill -TERM "$shim" 2>/dev/null
     wait "$shim" 2>/dev/null
     # Give the group kill a moment to land before declaring a leak.
     local settle=0
@@ -292,10 +293,10 @@ SLOWEOF
 }
 
 run_test test_progress_renders_under_a_pty
-run_test test_sigint_reaps_the_whole_rewriter_tree
+run_test test_cancel_reaps_the_whole_rewriter_tree
 run_test test_progress_is_silent_without_a_tty
 run_test test_progress_caps_a_long_prompt_and_marks_it
-run_test test_sigint_keeps_the_original_and_exits_clean
+run_test test_cancel_keeps_the_original_and_exits_clean
 run_test test_rewrites_the_composer_file_in_place
 run_test test_non_composer_file_goes_to_the_real_editor
 run_test test_slash_command_passes_through
