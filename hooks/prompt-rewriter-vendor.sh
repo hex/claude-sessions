@@ -60,13 +60,57 @@ _failed() {  # status, output
     return 1
 }
 
+# The key travels in a mode-600 config file and the payload in a file of its
+# own, so neither reaches argv, where `ps` shows it to every user on the box. A
+# key passed in a URL query string would also land in logs at the far end.
+_curl_json() {  # url, auth-header, payload
+    local url="$1" header="$2" payload="$3" cfg body rc=0
+    cfg=$(mktemp) || return 1
+    chmod 600 "$cfg" 2>/dev/null || { rm -f "$cfg"; return 1; }
+    printf 'header = "%s"\n' "$header" > "$cfg" || { rm -f "$cfg"; return 1; }
+    body=$(mktemp) || { rm -f "$cfg"; return 1; }
+    printf '%s' "$payload" > "$body" || { rm -f "$cfg" "$body"; return 1; }
+    curl -s --max-time "$_limit" --config "$cfg" \
+        -H 'Content-Type: application/json' --data-binary @"$body" "$url" || rc=$?
+    rm -f "$cfg" "$body"
+    return "$rc"
+}
+
+# Gemini names the model in the path rather than the body. The default is
+# deliberately flash-lite class: gemini-2.5-flash spends its whole output budget
+# thinking and returns a rewrite truncated at MAX_TOKENS, which is non-empty and
+# so passes every gate below while being unusable.
+_api_gemini() {
+    local payload response
+    payload=$(jq -n --arg p "$prompt" --arg s "$_system" \
+        '{system_instruction:{parts:[{text:$s}]},
+          contents:[{parts:[{text:$p}]}],
+          generationConfig:{temperature:0.2,maxOutputTokens:2048}}') || return 1
+    response=$(_curl_json \
+        "https://generativelanguage.googleapis.com/v1beta/models/${CS_REWRITE_MODEL:-gemini-flash-lite-latest}:generateContent" \
+        "x-goog-api-key: ${GEMINI_API_KEY}" "$payload") || return 1
+    # A truncated answer is worse than none: it reads as a complete rewrite and
+    # silently drops whatever the user typed past the cut.
+    case $(printf '%s' "$response" | jq -r '.candidates[0].finishReason // empty') in
+        ''|STOP) ;;
+        *) return 1 ;;
+    esac
+    printf '%s' "$response" | jq -r '.candidates[0].content.parts[0].text // empty'
+}
+
 _rc=0
+out=''
 case "${CS_REWRITE_PROVIDER:-}" in
     gemini)
-        command -v agy >/dev/null 2>&1 || exit 1
-        out=$(_run_cli agy --sandbox -p "$_system
+        if command -v agy >/dev/null 2>&1; then
+            out=$(_run_cli agy --sandbox -p "$_system
 
 $prompt") || _rc=$?
+        elif [ -n "${GEMINI_API_KEY:-}" ]; then
+            out=$(_api_gemini) || _rc=$?
+        else
+            exit 1
+        fi
         ;;
     *)
         exit 1

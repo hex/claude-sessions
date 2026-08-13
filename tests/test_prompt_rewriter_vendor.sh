@@ -22,7 +22,15 @@ setup() {
     ARGV_DUMP="$TEST_TMPDIR/argv"
     mkdir -p "$FAKE_BIN"
     export CS_TEST_ARGV_DUMP="$ARGV_DUMP"
-    PATH="$FAKE_BIN:$PATH"
+    # PATH is replaced, not prepended. Prepending leaves the developer's own agy
+    # and codex resolvable, so every "the CLI is absent" test would quietly run
+    # the real binary — a live, billed, ten-second call that still reports the
+    # API arm untested. /usr/bin and /bin hold none of the vendor CLIs on any
+    # machine; jq is a cs dependency and lives outside them, so it is linked in
+    # by hand rather than assumed.
+    local _jq
+    _jq=$(command -v jq 2>/dev/null) && ln -sf "$_jq" "$FAKE_BIN/jq"
+    PATH="$FAKE_BIN:/usr/bin:/bin"
     export PATH
 }
 
@@ -63,11 +71,25 @@ exit 0'
     [ -z "$out" ] || { echo "error text was returned as a rewrite: $out"; return 1; }
 }
 
+# The council drops a vendor's API provider outright when its CLI is on PATH,
+# because the CLI carries subscription auth and spends no API credit. Same
+# policy here — but the API arm has to stay reachable, since a user with a key
+# and no CLI is the ordinary case for anyone who has not installed agy.
+test_gemini_falls_back_to_the_api_when_the_cli_is_absent() {
+    fake_bin curl 'printf "%s" "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"REWRITTEN BY API\"}]}}]}"'
+    local out rc=0
+    out=$(CS_REWRITE_PROVIDER=gemini GEMINI_API_KEY=not-a-real-key run_rewrite) || rc=$?
+    [ "$rc" -eq 0 ] || { echo "expected success from the API arm, got $rc"; return 1; }
+    assert_file_contains "$ARGV_DUMP" 'curl' "the API arm ran curl" || return 1
+    [ "$out" = "REWRITTEN BY API" ] || { echo "expected the extracted text, got: $out"; return 1; }
+}
+
 echo ""
 echo "Prompt rewriter vendor tests"
 echo "============================"
 echo ""
 
 run_test test_a_zero_exit_error_from_the_cli_is_not_returned_as_a_rewrite
+run_test test_gemini_falls_back_to_the_api_when_the_cli_is_absent
 
 report_results
