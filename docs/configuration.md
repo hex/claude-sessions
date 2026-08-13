@@ -4,11 +4,28 @@ cs reads its configuration from environment variables. None are required — cs
 runs with sensible defaults out of the box — but you can set any of these in
 `~/.bashrc` or `~/.zshrc` to override behavior.
 
+This lists every variable a user would set, plus the ones cs exports for hooks
+and helper binaries. It deliberately excludes test seams and internal state —
+values cs computes and passes to itself, which change without notice and are
+documented in the code that reads them.
+
 ## Environment variables you set
 
 ```bash
 # Sessions directory (default: ~/.claude-sessions)
 export CS_SESSIONS_ROOT="/path/to/sessions"
+
+# The actor name that shared memory and narratives are attributed to. Highest
+# precedence in the chain $CS_ACTOR > .cs/local/identity > git user.email >
+# git user.name, so it is how you override attribution on a machine whose git
+# identity is not the one you want recorded.
+export CS_ACTOR="alice"
+
+# Skip the update check entirely. cs otherwise asks GitHub for the latest
+# release at most hourly and caches the answer under ~/.cache/cs; this stops
+# both the request and the write, for an air-gapped machine or simply to keep
+# cs off the network.
+export CS_NO_UPDATE_CHECK="1"
 
 # Legacy password for secrets sync (age encryption preferred - see secrets.md)
 export CS_SECRETS_PASSWORD="your-secure-password"
@@ -100,8 +117,9 @@ export CS_REWRITE_PROVIDER="claude"          # claude | openai | gemini
 export CS_REWRITE_MODEL="gemini-3.6-flash-low"        # agy's id, for the gemini CLI arm
 export CS_REWRITE_TIMEOUT="25"                        # seconds; needs timeout(1)
 
-# What fills the blank screen while the rewrite runs. `screen` shows a header,
-# the model, and your prompt above the spinner. `native` is one anchored line
+# What fills the blank screen while the rewrite runs. `screen` holds your prompt
+# in a margin rule that breathes while the rewrite runs, with the engine, the
+# model and the time remaining beneath it. `native` is one anchored line
 # in Claude Code's own idiom, with the elapsed appearing only after five
 # seconds. `line` is one centred line with a spinner and a clock. `static`
 # prints once and never animates, so a wedged rewrite looks the same as a
@@ -152,6 +170,9 @@ These are exported automatically when you start a session, so the Claude Code
 process and its hooks can find the session:
 
 - `CLAUDE_SESSION_NAME` - The session name (e.g., `myproject`)
+- `CS_CLAUDE_SESSION_ID` - The conversation UUID cs launched or resumed, exported so hooks can tell the launched conversation from any other claude that resolves the same session
+- `CS_REAL_EDITOR` - Your own `$EDITOR`, captured before cs repoints `EDITOR`/`VISUAL` at the prompt-rewriter shim. The shim hands every file that is not a composer buffer back to it, so `/memory` and commit messages still open your editor. Set it yourself to pin which editor that is
+- `CS_SECRETS_SESSION` - For a worktree session, the base session its secrets key to, so a feature worktree reads the same store as its parent (see [secrets.md](secrets.md))
 - `CLAUDE_SESSION_DIR` - Full path to the session directory (workspace root)
 - `CLAUDE_SESSION_META_DIR` - Path to the `.cs/` metadata directory
 - `CLAUDE_CODE_TASK_LIST_ID` - Set to the session name for task list persistence

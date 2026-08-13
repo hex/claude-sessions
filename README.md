@@ -27,44 +27,70 @@ No git repo required. No project structure needed. Just a name for what you're w
 
 ## Features
 
+### Session workspaces
+
 - **Isolated session workspaces** - Each session has its own directory with structured documentation
-- **Secure secrets handling** - Store sensitive data in the OS keychain (value read from stdin, never written to a file); exportable as [age](https://github.com/FiloSottile/age)-encrypted files for backup
 - **Documentation templates** - Pre-configured markdown files for the session narrative and outcome
 - **Automatic git version control** - Every session gets a local git repo; in-session edits are autosaved to a shadow ref for crash recovery
 - **Session locking** - PID-based lock prevents the same session from being opened in two terminals simultaneously; use `--force` to override. cs also treats a session as live when its statusline heartbeat is fresh — in the TUI (`■ live · unlocked`), `cs -live`, and the `cs -usage` marker — so a conversation opened outside cs still registers as live. The destructive guards (`cs -rm`/`-archive`/`-spawn`) stay on the strict PID lock, so a session whose process is gone is still removable without `--force`
-- **Agent state** - `cs -live` and the TUI's `state` row show what Claude Code says each session is doing right now — `busy`, `waiting`, `idle` — read from the per-session records Claude Code publishes under `~/.claude/sessions/`. A record outlives a crash, so cs believes one only while its pid is alive and still reports the process start time the record holds; otherwise a recycled pid would keep a dead session looking busy. Hosts that publish no records (Claude Code before 2.1.224, or without `jq` for the shell reader) simply show no state
 - **Deterministic Claude-session resume** - Each session pre-allocates a conversation UUID in the gitignored `.cs/local/state`, so `cs <name>` resumes the *exact* conversation via `claude --resume <uuid>`, not the most-recent one `--continue` might pick from a sibling. A `ps`-based guard refuses to launch a second claude for the same conversation (`--force` overrides), and every launch passes `--name` plus a per-session `/color` so parallel sessions stay visually distinct.
 - **Per-session memory path redirect** - cs points Claude Code's built-in auto-memory writer at `<session>/.cs/memory/` (via `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE`) so durable facts land in the session instead of the global project store. The harness owns how memory files are written (naming, frontmatter, `MEMORY.md` index); cs owns only the storage path.
-- **Cross-session search** - `cs -search <query>` greps across all sessions' narrative, memory, and README
+- **Conversation rotation** - a heavy conversation can hand off to a fresh one without losing context: the `rotate` skill (self-invoked, or nudged once per conversation past 80% context) writes a lineage-stamped handoff to `.cs/handoffs/` and arms it, then `/clear` continues from it without leaving Claude Code. Exiting and answering `r` at the next `cs <name>` launch does the same; `d` discards the handoff. `cs -conversations` shows the resulting chain.
+- **Works outside the `cs` launcher** - a session is any directory containing `.cs/`, so the hooks find it whether `cs <name>` started the conversation or you opened the folder some other way — Claude Code desktop, an IDE, or plain `claude` in a session directory. `cs` still owns creating sessions and the launch experience (resume prompt, rotation menu, statusline, tmux spawner); what carries over is the documentation, narrative, timeline, autosave, and scope grounding. The session's recorded conversation stays with the `cs` launch, so a conversation opened another way — or a teammate claude working in the same folder — contributes to the session without becoming the one `cs <name>` resumes. When one of those is newer than the recorded conversation, the next launch says so and names it, rather than resuming the older one in silence:
+
+  ```
+  A newer conversation was opened here outside cs: 11111111-2222-4333-8444-555555555555
+  Resuming the recorded one instead. To continue the newer: claude --resume 11111111-2222-4333-8444-555555555555
+  ```
+
+  Drop `.cs/local/disabled` into a session to opt it out.
+
+### Prompt and writing aids
+
 - **Prose hygiene** - the `prose-hygiene` skill carries the full AI-slop taxonomy (phrases, structures, voice rules) that no regex can catch; `/summary` applies it with a subagent judge that scores `.cs/summary.md` and returns concrete rewrites. See [skills/prose-hygiene/SKILL.md](skills/prose-hygiene/SKILL.md)
 - **Auto-grounded scope** - On each code-work prompt, the `scope-prompt` hook injects a bounded context block — matching tracked files, recent commits, and a working-tree diff — grounding Claude in the current codebase before it acts. Capped at 8000 bytes; opt out per-session with `CS_SCOPE_DISABLE=1`. Each run also appends a stage trace to the machine-local `.cs/local/scope-prompt.trace`, so a run the hook's timeout kills leaves a trail naming the stage it hung on; opt out with `CS_SCOPE_TRACE_DISABLE=1`. The same hook asks Claude to question an ambiguous request rather than guess at it; skip one turn with a leading `~`, or the session with `CS_CLARIFY_DISABLE=1`. See [docs/hooks.md](docs/hooks.md)
-- **Prompt rewriting** - Type a rough prompt, press `ctrl+g`, and the composer holds a precise engineering request you can review, edit and send. cs points `$EDITOR` at a rewrite shim, so Claude Code's own external-editor round-trip does the substitution; nothing is sent on your behalf, and every failure leaves your text exactly as typed. Claude Code blanks the interface for the round-trip, so the shim fills that screen: your prompt, the model, a spinner and elapsed time against the timeout. `CS_REWRITE_PROGRESS` picks the style — `screen`, a `native` line in Claude Code's own idiom, a bare centred `line`, or a `static` one-liner. Nothing interrupts a rewrite from the keyboard — the terminal sends `ctrl+c` to Claude Code too, ending the session — so the timeout is the bound and the screen shows it. `CS_REWRITE_PROVIDER=openai` or `=gemini` rewrites with that vendor instead: each prefers its CLI when the binary is on PATH (`codex`, `agy`, on your subscription) and falls back to the vendor's API key when it is not. Opt out with `CS_REWRITE_DISABLE=1`. See [docs/hooks.md](docs/hooks.md)
-- **Status line** - `cs-statusline` renders Claude Code's status bar as one line of squared pills: a Claude logo badge (pulsing until your next prompt), the session name in its `/color`, a queued-task count, an unread cross-session mail count, git branch with ahead/behind and dirty counts, model + effort, context %, and 5-hour/weekly rate limits (each gaining a reset countdown as it fills) — all from the status-line JSON plus one bounded git call, with no transcript parsing, network, or writes. Session cost is available as an opt-in segment. Enable or remove it any time with `cs -statusline enable|disable`; choose and order segments with `CS_STATUSLINE_SEGMENTS`. cs auto-detects the terminal's light/dark theme (override with `CS_TERM_THEME`; `cs -detect-theme` shows the result). A companion `cs-subagent-statusline` styles the agent-panel rows so each running subagent shows the model driving it, its own context %, and elapsed time; `cs -statusline enable` registers both (Claude Code reads the registration at startup, so restart it to see them). See [docs/statusline.md](docs/statusline.md)
+- **Prompt rewriting** - Type a rough prompt, press `ctrl+g`, and the composer holds a precise engineering request you can review, edit and send. cs points `$EDITOR` at a rewrite shim, so Claude Code's own external-editor round-trip does the substitution; nothing is sent on your behalf, and every failure leaves your text exactly as typed. Claude Code blanks the interface for the round-trip, so the shim fills that screen: your prompt held in a margin rule that breathes while the rewrite runs, the engine and model answering it, and the time left against the timeout — shown only where something actually enforces one. `CS_REWRITE_PROGRESS` picks the style — `screen`, a `native` line in Claude Code's own idiom, a bare centred `line`, or a `static` one-liner. Nothing interrupts a rewrite from the keyboard — the terminal sends `ctrl+c` to Claude Code too, ending the session — so the timeout is the only bound. `CS_REWRITE_PROVIDER=openai` or `=gemini` rewrites with that vendor instead: each prefers its CLI when the binary is on PATH (`codex`, `agy`, on your subscription) and falls back to the vendor's API when it is not. Append `-api` (`gemini-api`, `openai-api`) to reach the API past an installed CLI, which is roughly eight times faster and the only way to Gemini's lite tier; `claude-api` calls Anthropic's Messages endpoint rather than driving Claude Code. `CS_REWRITE_MODEL` sets the model on every arm. Opt out with `CS_REWRITE_DISABLE=1`. See [docs/hooks.md](docs/hooks.md)
+- **Voice drafting** - `/write-as-me` drafts messages, replies, PR text, or docs in your own writing voice. On first use it distills your typed messages from Claude Code transcripts into an editable profile at `~/.claude-sessions/.voice/profile.md`; drafting loads the profile and writes as you.
 
-  ![cs-statusline: session and model accents, amber rate-limit warnings, standard-Unicode segment icons](assets/screenshot2.png)
+### Managing many sessions
+
+- **Agent state** - `cs -live` and the TUI's `state` row show what Claude Code says each session is doing right now — `busy`, `waiting`, `idle` — read from the per-session records Claude Code publishes under `~/.claude/sessions/`. A record outlives a crash, so cs believes one only while its pid is alive and still reports the process start time the record holds; otherwise a recycled pid would keep a dead session looking busy. Hosts that publish no records (Claude Code before 2.1.224, or without `jq` for the shell reader) simply show no state
+- **Cross-session search** - `cs -search <query>` greps across all sessions' narrative, memory, and README
 - **Health checks** - `cs -doctor` reports status of Keychain backend, hook registration, shadow-ref freshness, auto-memory writability, status line registration, Claude Code settings audit (hooks/MCPs/permissions/env vars counts), and cumulative token usage for the current project
 - **Usage attribution** - `cs -usage` shows which sessions are consuming the 5-hour and weekly rate-limit windows: per-session input/output token sums (deduplicated by API request, cache-read excluded), anchored at the true reset boundaries when the cs status line is active. `cs -usage <name>` breaks one session down per conversation with a lifetime column.
 - **Session tags** - `cs -tag add api` tags the current session in its README frontmatter (`tags: [api]` — the same field Obsidian indexes); `cs -list --tag api` filters the listing, and the picker filters live with `#api` in the search query (combining with fuzzy name search). Tags show in the preview card.
 - **Session archive** - `cs -archive <name>` drops a tracked `.cs/archived` marker that hides a finished session from the picker, `cs -list`, and `cs -search` (the marker syncs with the session, so archiving on one machine archives everywhere). `cs -list --archived` lists only archived sessions, `cs -search <q> --include-archived` searches them, and the picker toggles visibility with `A` (archived rows render dimmed). Opening an archived session unarchives it.
+
+### Unattended and multi-agent work
+
 - **Walk-away supervision** - a draining queue is watched by circuit breakers: too many tool failures in one task (default 5, `CS_QUEUE_MAX_FAILURES`), context past 85% (`CS_QUEUE_MAX_CTX`), or the 5-hour rate-limit window past 85% (`CS_QUEUE_MAX_5H`) parks the queue with a debrief instead of feeding the next task — nothing is lost, `cs -queue start` re-arms. Everything that happened while you were away (tasks done, breaker trips) lands in a per-machine journal: a one-line digest surfaces once on your return, and `cs -queue log` shows the full history.
 - **Cross-session mail** - `cs -msg <session> "note"` drops a message in another session's machine-local mailbox (`--kind notify|task|text|result`; `task` also lands in its walk-away queue). Delivery is atomic — each message is its own file, written whole and renamed into place, so concurrent senders can never interleave. Bodies may be up to 64KB, and a lone `-` body reads from stdin (`cs -msg <session> -`). The recipient sees the unread bodies inlined into its context on every prompt until it reads them with `cs -msg` (bounded to 5, truncated; `task` kind shows a count-only label since it is already queued). Same-machine only; attribution is unauthenticated by design.
 - **Threads** - every message carries a thread id, and the sender keeps its own copy, so an exchange can be re-read from either end — including after a rotation, when an agent otherwise has no way to find out what it already said. `cs -msg --reply <thread> "body"` answers without naming the peer (it comes from the thread; naming a different one is an error, not an override), and `cs -msg thread <id>` prints the conversation ordered by what answers what — not by time, since a question and its reply usually land in the same whole second.
 - **Mail wakes** - unread mail takes a turn instead of waiting for a keystroke, so agent-to-agent work advances unattended. A session that just finished a turn is woken at that boundary; a session already parked at the prompt is woken by Claude Code's file watcher noticing the delivery, which arrives as a system-reminder rather than as synthesised typing. Either way the wake names who the new mail is from, so the woken session knows its correspondent before it opens the mailbox. Fires once per arrival, never for `task` kind (the queue owns those), never while a walk-away drain is running, and only in the launched conversation — not in teammates sharing the mailbox. Bounded by `CS_MAIL_WAKE_MAX` (default 5) wakes between prompts so two sessions cannot volley forever; `CS_NO_MAIL_WAKE=1` silences it without swallowing the message.
 - **tmux spawner** - `cs -spawn <name>` opens a session in a cs-owned tmux session (`tmux attach -t cs`); `--task "..."` seeds and arms its walk-away queue so it starts working unattended, and the spawner hears back over cross-session mail when the queue drains. Same-machine only.
-- **Conversation rotation** - a heavy conversation can hand off to a fresh one without losing context: the `rotate` skill (self-invoked, or nudged once per conversation past 80% context) writes a lineage-stamped handoff to `.cs/handoffs/` and arms it, then `/clear` continues from it without leaving Claude Code. Exiting and answering `r` at the next `cs <name>` launch does the same; `d` discards the handoff. `cs -conversations` shows the resulting chain.
-- **Works outside the `cs` launcher** - a session is any directory containing `.cs/`, so the hooks find it whether `cs <name>` started the conversation or you opened the folder some other way — Claude Code desktop, an IDE, or plain `claude` in a session directory. `cs` still owns creating sessions and the launch experience (resume prompt, rotation menu, statusline, tmux spawner); what carries over is the documentation, narrative, timeline, autosave, and scope grounding. The session's recorded conversation stays with the `cs` launch, so a conversation opened another way — or a teammate claude working in the same folder — contributes to the session without becoming the one `cs <name>` resumes. When one of those is newer than the recorded conversation, the next launch says so and names it, rather than resuming the older one in silence:
 
-```
-A newer conversation was opened here outside cs: 11111111-2222-4333-8444-555555555555
-Resuming the recorded one instead. To continue the newer: claude --resume 11111111-2222-4333-8444-555555555555
-```
+### Terminal experience
 
-Drop `.cs/local/disabled` into a session to opt it out.
-- **Voice drafting** - `/write-as-me` drafts messages, replies, PR text, or docs in your own writing voice. On first use it distills your typed messages from Claude Code transcripts into an editable profile at `~/.claude-sessions/.voice/profile.md`; drafting loads the profile and writes as you.
+- **Status line** - `cs-statusline` renders Claude Code's status bar as one line of squared pills: a Claude logo badge (pulsing until your next prompt), the session name in its `/color`, a queued-task count, an unread cross-session mail count, git branch with ahead/behind and dirty counts, model + effort, context %, and 5-hour/weekly rate limits (each gaining a reset countdown as it fills) — all from the status-line JSON plus one bounded git call, with no transcript parsing, network, or writes. Session cost is available as an opt-in segment. Enable or remove it any time with `cs -statusline enable|disable`; choose and order segments with `CS_STATUSLINE_SEGMENTS`. cs auto-detects the terminal's light/dark theme (override with `CS_TERM_THEME`; `cs -detect-theme` shows the result). A companion `cs-subagent-statusline` styles the agent-panel rows so each running subagent shows the model driving it, its own context %, and elapsed time; `cs -statusline enable` registers both (Claude Code reads the registration at startup, so restart it to see them). See [docs/statusline.md](docs/statusline.md)
+
+  ![cs-statusline: session and model accents, amber rate-limit warnings, standard-Unicode segment icons](assets/screenshot2.png)
 - **iTerm2 awareness** - inside iTerm2 the session color tints the tab (native escapes, reset on exit), and with iTerm2 shell integration installed a finished turn bounces the dock until your next prompt. `CS_NO_ITERM2=1` disables; `cs -doctor` reports the integration surface.
+
+### Security and trust
+
+- **Secure secrets handling** - Store sensitive data in the OS keychain (value read from stdin, never written to a file); exportable as [age](https://github.com/FiloSottile/age)-encrypted files for backup
 - **Bash command audit trail** - Every Bash command Claude runs is logged to `.cs/local/session.log` (machine-local, never git-synced) with timestamps
 - **Update notifications** - Checks for updates and notifies when new versions are available. When an update is pending, cs shows the release notes for every version above the installed one: a compact summary card in the launch banner, and the full notes under `cs -update --check`.
 - **Verified updates** - Updates are downloaded from GitHub Releases and verified with SHA-256 checksums; additionally verified with [minisign](https://jedisct1.github.io/minisign/) signatures when available
+
+
+## Requirements
+
+- [Claude Code](https://github.com/anthropics/claude-code)
+- Bash 3.2+ (macOS system bash supported)
+- `jq` for hook configuration
+- `git` for local session history and crash recovery
+- Windows: WSL2 (see [Installation → Windows](#windows)); native Windows and Git Bash are not supported
 
 ## Installation
 
@@ -90,6 +116,14 @@ The installer:
 Install inside a WSL2 distro exactly as on Linux (the command above). cs targets macOS and Linux; native Windows and Git Bash are not supported.
 
 The platform is detected automatically. It decides one thing — whether secrets go to the macOS keychain or to an encrypted file — and `CS_PLATFORM_OVERRIDE=macos|wsl|linux` forces that choice for testing. Any other value is refused rather than treated as "not macOS".
+
+## Concepts
+
+- **Sessions** — Isolated workspaces, each with their own git repo and documentation. `cs debug-api` creates one; running it again resumes it.
+- **Narrative** (`.cs/memory/narrative.<actor>.md`) — A per-actor lab notebook for findings, observations, and ideas during a session. Each co-developer writes their own file (so shared sessions never conflict) and everyone reads all of them on resume. Stored as native Claude Code memory files; see [docs/session-layout.md](docs/session-layout.md) for how that works.
+- **Checkpoints** (`.cs/checkpoints/`) — Labelled narrative snapshots you can save mid-session with `/checkpoint`, capturing the narrative, changes, and the current git HEAD.
+- **Timeline** (`.cs/timeline.jsonl`) — A structured event log recording session starts, ends, and checkpoints as newline-delimited JSON.
+- **Auto-memory** (`.cs/memory/`) — Claude Code's persistent operational notes, redirected into the session and cleaned up with `cs -rm`.
 
 ## Usage
 
@@ -189,14 +223,6 @@ This converts the current directory into a cs session in place:
 - Writes the session protocol to `CLAUDE.local.md` (machine-local, gitignored, regenerated per machine); a project's existing `CLAUDE.md` is never touched
 - Initializes a git repo if one doesn't exist (preserves existing repos)
 - Since the working directory doesn't change, `claude --continue` picks up previous conversations
-
-## Concepts
-
-- **Sessions** — Isolated workspaces, each with their own git repo and documentation. `cs debug-api` creates one; running it again resumes it.
-- **Narrative** (`.cs/memory/narrative.<actor>.md`) — A per-actor lab notebook for findings, observations, and ideas during a session. Each co-developer writes their own file (so shared sessions never conflict) and everyone reads all of them on resume. Stored as native Claude Code memory files; see [docs/session-layout.md](docs/session-layout.md) for how that works.
-- **Checkpoints** (`.cs/checkpoints/`) — Labelled narrative snapshots you can save mid-session with `/checkpoint`, capturing the narrative, changes, and the current git HEAD.
-- **Timeline** (`.cs/timeline.jsonl`) — A structured event log recording session starts, ends, and checkpoints as newline-delimited JSON.
-- **Auto-memory** (`.cs/memory/`) — Claude Code's persistent operational notes, redirected into the session and cleaned up with `cs -rm`.
 
 ## Session Structure
 
@@ -478,14 +504,6 @@ WHERE file.name = "README" AND status = "active"
 ````
 
 **Graph view tip:** In Obsidian's graph settings, add `.cs/local` to the folder exclusion filter to reduce clutter.
-
-## Requirements
-
-- [Claude Code](https://github.com/anthropics/claude-code)
-- Bash 3.2+ (macOS system bash supported)
-- `jq` for hook configuration
-- `git` for local session history and crash recovery
-- Windows: WSL2 (see [Installation → Windows](#windows)); native Windows and Git Bash are not supported
 
 ## Uninstalling
 
