@@ -78,6 +78,8 @@ user-owned `CLAUDE.md` is never touched.
 | `notifications.jsonl` | Per-machine queue inbox — drain lifecycle events (`drain_started`, `task_done`, `breaker_tripped`, `drain_finished`) read by `cs -queue log` and the surface-once digest. |
 | `notifications.seen` | Cursor for that digest, so unseen inbox entries surface at most once. |
 | `ctx-warned` | Conversation UUID already given the one-time 60% context warning (the tier below the rotation nudge). |
+| `scope-prompt.trace` | One line per stage of each `scope-prompt` run, appended as that stage finishes — so a run its timeout killed still names the stage it hung on. Opt out with `CS_SCOPE_TRACE_DISABLE=1`. |
+| `rewrite.trace` | One line per `ctrl+g` invocation and the path it took. The rewriter shim draws onto a screen that is torn down and leaves the buffer unchanged on every one of its several do-nothing paths, so without this a rewrite that declined is indistinguishable from one that was never asked for. |
 | `watermark` | Per-actor high-water mark for the "shared memory/narrative activity since you were last here" digest injected on resume. |
 | `context-pct` | Latest context-window percentage, stamped by the status line; the narrative reminder reads it to suggest compaction, and cs-tui uses its mtime as the liveness heartbeat for conversations opened outside cs. |
 | `limits` | Latest 5-hour/weekly rate-limit readings, stamped by the status line; read by `cs -usage` window anchoring and the queue's rate-limit breaker. |

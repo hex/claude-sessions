@@ -99,6 +99,11 @@ _limit="${CS_REWRITE_TIMEOUT:-25}"
 # stdin is closed rather than inherited. Claude Code hands this shim the real
 # tty, and an agentic CLI that decides it is interactive would paint its own UI
 # over the progress screen the shim is drawing.
+# Array expansions here use the `${a[@]+"${a[@]}"}` form throughout. bash 3.2
+# treats a plain `"${a[@]}"` on an EMPTY array as an unbound variable under
+# `set -u` and aborts the script; these arrays are never empty today, but the
+# guarded form costs nothing and the unguarded one already shipped one silent
+# failure on every machine without timeout(1).
 _run_cli() {  # binary, args...
     local bin="$1"; shift
     ( cd "$_cfg" 2>/dev/null || exit 1
@@ -235,7 +240,7 @@ case "$_engine" in
         # since the prompt is untrusted text and agy has no allowed-tools flag.
         _args=(--sandbox)
         [ -n "$_model" ] && _args+=(--model "$_model")
-        out=$(_run_cli agy "${_args[@]}" -p "$_system
+        out=$(_run_cli agy ${_args[@]+"${_args[@]}"} -p "$_system
 
 $prompt") || _rc=$?
         ;;
@@ -249,7 +254,7 @@ $prompt") || _rc=$?
         # may well have opened up.
         _args=(exec --skip-git-repo-check -s read-only)
         [ -n "$_model" ] && _args+=(-m "$_model")
-        out=$(_run_cli codex "${_args[@]}" "$_system
+        out=$(_run_cli codex ${_args[@]+"${_args[@]}"} "$_system
 
 $prompt") || _rc=$?
         ;;

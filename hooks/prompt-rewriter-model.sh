@@ -51,6 +51,12 @@ SYS
 # A hung rewrite freezes the whole TUI, because Claude Code spawns the editor
 # with spawnSync and stdio:"inherit". Bound it where a timeout exists — stock
 # macOS ships neither `timeout` nor `gtimeout`, so this is best-effort.
+#
+# Every expansion of this array MUST be the `${a[@]+"${a[@]}"}` form. bash 3.2,
+# the floor here and the macOS system shell, treats a plain `"${a[@]}"` on an
+# EMPTY array as an unbound variable under `set -u` and aborts — so on exactly
+# the machines with no timeout(1), the ones this fallback exists for, the
+# rewrite would die before reaching the model.
 _limit="${CS_REWRITE_TIMEOUT:-25}"
 _tmo=()
 if command -v timeout >/dev/null 2>&1; then
@@ -98,7 +104,7 @@ _attempt() {  # 1 = drop the ambient key, 0 = keep it
                 -u CLAUDE_SESSION_DIR -u CLAUDE_SESSION_META_DIR -u CLAUDE_SESSION_NAME \
                 -u CLAUDE_CODE_TASK_LIST_ID -u CLAUDE_PROJECT_DIR \
                 -u ANTHROPIC_API_KEY \
-            "${_tmo[@]}" claude -p \
+            ${_tmo[@]+"${_tmo[@]}"} claude -p \
             --model "${CS_REWRITE_MODEL:-claude-haiku-4-5-20251001}" \
             --system-prompt "$_system" 2>/dev/null
     else
@@ -107,7 +113,7 @@ _attempt() {  # 1 = drop the ambient key, 0 = keep it
             env -u CLAUDE_COWORK_MEMORY_PATH_OVERRIDE -u CLAUDE_CODE_AUTO_MEMORY_PATH \
                 -u CLAUDE_SESSION_DIR -u CLAUDE_SESSION_META_DIR -u CLAUDE_SESSION_NAME \
                 -u CLAUDE_CODE_TASK_LIST_ID -u CLAUDE_PROJECT_DIR \
-            "${_tmo[@]}" claude -p \
+            ${_tmo[@]+"${_tmo[@]}"} claude -p \
             --model "${CS_REWRITE_MODEL:-claude-haiku-4-5-20251001}" \
             --system-prompt "$_system" 2>/dev/null
     fi

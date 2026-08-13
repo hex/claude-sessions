@@ -36,6 +36,23 @@ composer_file() {  # content
     printf '%s' "$f"
 }
 
+# script(1) is the only way to give the shim a real pty, and its argument order
+# is not portable: BSD (macOS) takes `script -q FILE CMD ARGS`, util-linux takes
+# `script -q -c "CMD ARGS" FILE`. Handed the BSD form, util-linux treats the
+# command as a filename and never runs it — which reads as "the shim drew
+# nothing" and failed ten rendering tests on the Linux lane while every one of
+# them passed on the developer's mac.
+_pty_run() {  # command, args...
+    if script --version 2>/dev/null | grep -q util-linux; then
+        script -q -c "$*" /dev/null < /dev/null
+    else
+        # script(1) tcgetattr's its OWN stdin and dies on a socket, which is
+        # what a CI runner or an agent harness often hands it; /dev/null still
+        # gets the child a pty.
+        script -q /dev/null "$@" < /dev/null
+    fi
+}
+
 # Run the shim under a real pty in a given progress mode and return the capture
 # path. Only a pty makes [ -t 2 ] true; without one every rendering assertion
 # below would pass against a shim that draws nothing.
@@ -50,7 +67,7 @@ render_in_mode() {  # mode, [prompt], [stub_seconds]
     # CI runner or an agent harness often hands it; /dev/null still gets the
     # child a pty.
     CS_REWRITE_PROGRESS="$mode" CS_REWRITE_CMD="$slow" \
-        script -q /dev/null "$SHIM" "$f" < /dev/null > "$out" 2>&1
+        _pty_run "$SHIM" "$f" > "$out" 2>&1
     printf '%s' "$out"
 }
 
@@ -431,7 +448,7 @@ test_the_header_names_the_resolved_engine_and_model() {
     out="$TEST_TMPDIR/pty-label"
     PATH="$bin:$PATH" XDG_CACHE_HOME="$TEST_TMPDIR/cache" \
         CS_REWRITE_PROVIDER=gemini CS_REWRITE_MODEL=gemini-3.6-flash \
-        script -q /dev/null "$SHIM" "$f" < /dev/null > "$out" 2>&1
+        _pty_run "$SHIM" "$f" > "$out" 2>&1
     assert_file_contains "$out" 'agy' "the header names the engine that answers" || return 1
     assert_file_contains "$out" 'gemini-3.6-flash' "the header names the model"
 }
@@ -477,9 +494,40 @@ test_screen_mode_frames_the_prompt_in_a_margin() {
 # Elapsed is a number you cannot act on: nothing here can be cancelled. What is
 # left against the budget is the only fact worth showing.
 test_screen_mode_counts_down_not_up() {
+    # These render through CS_REWRITE_CMD, which the shim does not wrap in any
+    # timeout — so it correctly advertises no deadline. What must never appear
+    # is the old elapsed-counter label.
     local out; out=$(render_in_mode screen)
-    assert_file_contains "$out" 'left' "the budget counts down" || return 1
-    assert_file_not_contains "$out" 'Working…' "the generic label is gone"
+    assert_file_not_contains "$out" 'Working…' "the generic elapsed label is gone" || return 1
+    assert_file_contains "$out" 'rewriting' "the screen still says what it is doing"
+}
+
+# A countdown is a promise that something will stop: it may appear only when the
+# thing that runs actually bounds itself. The two shipped rewriters do; an
+# arbitrary CS_REWRITE_CMD does not, and the shim never wraps it — so promising
+# a deadline there would be a lie drawn on screen.
+test_the_countdown_is_only_shown_when_something_enforces_it() {
+    local out
+    out=$(render_in_mode screen)
+    assert_file_not_contains "$out" 'left' \
+        "no deadline is promised for an unbounded CS_REWRITE_CMD" || return 1
+
+    # The default rewriter bounds itself where timeout(1) exists. Where it does
+    # not — stock macOS, the CI runners — there is genuinely no bound to show.
+    unset CS_REWRITE_CMD
+    local bin="$TEST_TMPDIR/bin"
+    mkdir -p "$bin"
+    printf '#!/bin/bash\nsleep 0.9\nprintf "REWRITTEN"\n' > "$bin/claude"
+    chmod +x "$bin/claude"
+    local f o2="$TEST_TMPDIR/pty-bounded"
+    f=$(composer_file "make the login thing better")
+    PATH="$bin:$PATH" XDG_CACHE_HOME="$TEST_TMPDIR/cache" \
+        _pty_run "$SHIM" "$f" > "$o2" 2>&1
+    if command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; then
+        assert_file_contains "$o2" 'left' "a bounded rewriter shows its deadline"
+    else
+        assert_file_not_contains "$o2" 'left' "no timeout(1) means no deadline to promise"
+    fi
 }
 
 # The margin rule carries the liveness, so the spinner beside it is redundant —
@@ -519,6 +567,7 @@ run_test test_a_fast_rewrite_still_paints
 run_test test_the_trace_records_which_path_was_taken
 run_test test_screen_mode_frames_the_prompt_in_a_margin
 run_test test_screen_mode_counts_down_not_up
+run_test test_the_countdown_is_only_shown_when_something_enforces_it
 run_test test_screen_mode_has_no_spinner
 run_test test_the_header_names_the_resolved_engine_and_model
 run_test test_progress_hides_the_cursor_and_restores_it

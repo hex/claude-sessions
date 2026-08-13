@@ -17,8 +17,15 @@ _trace() {  # stage
     local dir="${CLAUDE_SESSION_META_DIR:-}"
     [ -n "$dir" ] && [ -d "$dir" ] || return 0
     mkdir -p "$dir/local" 2>/dev/null || return 0
-    printf '%s %s %s\n' "$$" "$(date '+%Y-%m-%dT%H:%M:%S')" "$1" \
-        >> "$dir/local/rewrite.trace" 2>/dev/null || true
+    local f="$dir/local/rewrite.trace"
+    # Bound the file the way scope-prompt.sh bounds its own: one run in 64 trims
+    # it, often enough that it cannot run away and rare enough that the fork
+    # stays off the keypress path. Without this the trace grows for the life of
+    # the session directory.
+    if [ $(( $$ % 64 )) -eq 0 ] && [ -f "$f" ]; then
+        tail -n 2000 "$f" > "$f.tmp" 2>/dev/null && mv "$f.tmp" "$f" 2>/dev/null || true
+    fi
+    printf '%s %s %s\n' "$$" "$(date '+%Y-%m-%dT%H:%M:%S')" "$1" >> "$f" 2>/dev/null || true
 }
 
 _trace "start ${CS_REWRITE_PROVIDER:-claude} $(basename "${target:-<none>}")"
@@ -71,7 +78,7 @@ _spin=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
 # exports after detecting the terminal background. Light is not dark dimmed: on
 # cream the muted tones wash out, so light gets darker ink instead.
 if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then
-    _b=$'\033[1m'; _r=$'\033[0m'
+    _r=$'\033[0m'
     # The raw triples ride alongside the escapes: the margin rule breathes by
     # interpolating between muted and accent, and a two-colour blink would read
     # as an alert rather than a breath.
@@ -91,10 +98,8 @@ if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then
     _esc_rgb() { printf '\033[38;2;%s;%s;%sm' "$1" "$2" "$3"; }
     # shellcheck disable=SC2086  # deliberate: each triple is three fields
     _accent=$(_esc_rgb $_accent_rgb)
-    # shellcheck disable=SC2086
-    _mute=$(_esc_rgb $_mute_rgb)
 else
-    _b=''; _d=''; _r=''; _accent=''; _ink=''; _mute=''
+    _d=''; _r=''; _accent=''; _ink=''
     _accent_rgb=''; _mute_rgb=''
 fi
 
@@ -110,25 +115,15 @@ _geometry() {  # lines|cols -> a count
     printf '%s' "$n"
 }
 
-# claude-haiku-4-5-20251001 -> haiku 4.5
+# The label and the countdown are resolved ONCE, from the command actually
+# chosen, and cached — see the dispatch below. _paint_frame reads the cache.
 #
-# A vendor provider names the engine that answers and the model it runs, and
-# both come from the vendor rewriter's own `--label`. Repeating the CLI-or-API
-# test here would be a second copy of it, free to drift into a header that says
-# `api` while `agy` is answering. The provider name is the fallback, so a label
-# that cannot be resolved costs the user a detail rather than the whole header.
-_model_label() {
-    local vendor
-    case "${CS_REWRITE_PROVIDER:-}" in
-        openai|gemini|openai-api|gemini-api|claude-api)
-            vendor=$("$(dirname "$0")/prompt-rewriter-vendor.sh" --label </dev/null 2>/dev/null)
-            printf '%s' "${vendor:-$CS_REWRITE_PROVIDER}"
-            return ;;
-    esac
-    printf '%s' "${CS_REWRITE_MODEL:-claude-haiku-4-5-20251001}" \
-        | sed -e 's/^claude-//' -e 's/-[0-9]\{8\}$//' \
-              -e 's/\([0-9]\)-\([0-9]\)/\1.\2/g' -e 's/-/ /g'
-}
+# Both used to re-read CS_REWRITE_PROVIDER per frame, which was wrong twice
+# over: it named the vendor engine even when CS_REWRITE_CMD had replaced it
+# (the header said `codex` while a user script produced the buffer), and it
+# spawned the vendor script's --label ten times a second to reprint a string
+# that cannot change.
+_model_label() { printf '%s' "$_label"; }
 
 # The margin rule that holds the prompt, breathing between muted and accent.
 # Two endpoints interpolated over a slow triangle wave: a hard blink between
@@ -165,8 +160,11 @@ _repeat() {  # char, count
 # `\033[K` per line means no clear-screen and so no flicker. We own the
 # alternate screen, so home is ours to take.
 _paint_frame() {  # step, remaining-seconds
-    local step="$1" left="$2" cols line indent label bar_w filled
-    cols=$(_geometry cols)
+    # $_cols, not a per-frame `tput`: the prompt block is folded once to a fixed
+    # width before the loop, so re-reading the width here could only produce a
+    # bar and an indent that disagree with an already-folded block — while
+    # costing two forks and a tput exec ten times a second.
+    local step="$1" left="$2" cols=$_cols line indent label bar_w filled
     local rule; rule="$(_margin_color "$step")▏$_r"
 
     printf '\033[H' >&2
@@ -243,18 +241,9 @@ _render_until_done() {  # pid
     # acknowledging itself at once.
     kill -0 "$pid" 2>/dev/null || return 0
     [ -t 2 ] || return 0
-    if command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; then
-        budget=" / ${CS_REWRITE_TIMEOUT:-25}s"
-    fi
-    # A countdown may only be shown when something actually enforces it. The
-    # vendor rewriter bounds itself with perl's alarm, which is always there;
-    # the default rewriter needs timeout(1), which stock macOS does not ship.
+    [ -n "$_bounded" ] && budget=" / ${CS_REWRITE_TIMEOUT:-25}s"
     _budget=''
-    case "${CS_REWRITE_PROVIDER:-}" in
-        openai|gemini|openai-api|gemini-api|claude-api)
-            command -v perl >/dev/null 2>&1 && _budget="${CS_REWRITE_TIMEOUT:-25}" ;;
-        *) [ -n "$budget" ] && _budget="${CS_REWRITE_TIMEOUT:-25}" ;;
-    esac
+    [ -n "$_bounded" ] && _budget="${CS_REWRITE_TIMEOUT:-25}"
 
     # Hidden for the whole display, restored below and in the trap. A cursor
     # parked at the end of the line reads as unfinished output.
@@ -321,7 +310,8 @@ _render_until_done() {  # pid
             # fold and awk ten times a second would be work for nothing. awk
             # rather than `head -8`, which exits early and SIGPIPEs fold — under
             # `pipefail` that turns a long prompt into a 141 status.
-            _prompt_block=$(printf '%s' "$prompt" | fold -s -w $(( $(_geometry cols) - 7 )) \
+            _cols=$(_geometry cols)
+            _prompt_block=$(printf '%s' "$prompt" | fold -s -w $(( _cols - 7 )) \
                 | awk 'NR<=8 {print} END {if (NR>8) print "… prompt clipped"}')
             SECONDS=0
             while kill -0 "$pid" 2>/dev/null; do
@@ -352,6 +342,7 @@ out="$target.cs-out"
 # run, and the provider knob must not second-guess it. An unrecognised provider
 # lands on the default rather than failing: a typo in a shell profile should cost
 # the user their choice of model, never their prompt.
+#
 # The `-api` names reach a vendor's API past an installed CLI. Bare `claude` is
 # absent on purpose: it IS the default rewriter, and only `claude-api` routes
 # elsewhere.
@@ -360,6 +351,32 @@ case "${CS_REWRITE_PROVIDER:-}" in
         _rewriter="$(dirname "$0")/prompt-rewriter-vendor.sh" ;;
     *)  _rewriter="$(dirname "$0")/prompt-rewriter-model.sh" ;;
 esac
+
+# What the screen may claim, decided here because here is where the command is
+# known. A countdown is shown only when the thing that runs bounds itself: the
+# two shipped rewriters do, an arbitrary CS_REWRITE_CMD does not and the shim
+# never wraps it, so promising it a deadline would be a lie on screen.
+_label=''
+_bounded=''
+if [ -n "${CS_REWRITE_CMD:-}" ]; then
+    # Named by what it is, not by a provider it may have nothing to do with.
+    _label=$(basename "${CS_REWRITE_CMD%% *}")
+else
+    case "${CS_REWRITE_PROVIDER:-}" in
+        openai|gemini|openai-api|gemini-api|claude-api)
+            _label=$("$_rewriter" --label </dev/null 2>/dev/null)
+            _label="${_label:-$CS_REWRITE_PROVIDER}"
+            # The vendor rewriter bounds itself with perl's alarm.
+            command -v perl >/dev/null 2>&1 && _bounded=1 ;;
+        *)
+            # claude-haiku-4-5-20251001 -> haiku 4.5
+            _label=$(printf '%s' "${CS_REWRITE_MODEL:-claude-haiku-4-5-20251001}" \
+                | sed -e 's/^claude-//' -e 's/-[0-9]\{8\}$//' \
+                      -e 's/\([0-9]\)-\([0-9]\)/\1.\2/g' -e 's/-/ /g')
+            # The default rewriter needs timeout(1), absent on stock macOS.
+            { command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; } && _bounded=1 ;;
+    esac
+fi
 
 # This reaps; it does not cancel. ctrl+c cannot reach the shim alone — the
 # terminal sends it to the whole foreground process group, Claude Code with it,

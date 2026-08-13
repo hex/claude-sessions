@@ -120,7 +120,7 @@ extract_array() {
 
 test_manifest_arrays_in_sync() {
     local arr a b
-    for arr in CS_HOOKS RETIRED_HOOKS CS_COMMANDS CS_SKILLS RETIRED_SKILLS CS_SKILL_FILES; do
+    for arr in CS_HOOKS CS_HOOK_LIBS RETIRED_HOOKS CS_COMMANDS CS_SKILLS RETIRED_SKILLS CS_SKILL_FILES; do
         a=$(extract_array "$SCRIPT_DIR/../install.sh" "$arr" | sort)
         b=$(extract_array "$CS_BIN" "$arr" | sort)
         if [ -z "$a" ]; then

@@ -191,6 +191,8 @@ You cannot interrupt a rewrite from the keyboard, and the screen does not preten
 
 The shim still handles `INT` and `TERM`, for the case where it receives one anyway. The handler exists to reap, not to cancel: it signals the rewriter's whole process group, restores nothing because it has written nothing, and exits 0. Without it, a shim dying alongside its session would orphan the `claude -p` it started — detached, invisible, and still billed until it finished. That matters most in exactly the situation nothing can prevent.
 
+Every invocation appends one line to `.cs/local/rewrite.trace` naming the path it took — `exit passthrough-prefix`, `exit real-editor`, `rewriter-forked`, `exit rewritten`, and so on. This shim is driven by a keypress and draws onto a screen that is torn down, and each of its do-nothing paths leaves the buffer byte-identical, so without the trace a rewrite that declined, one that was disabled, and one that was never a composer buffer at all are indistinguishable after the fact. The trace is machine-local and written only when `CLAUDE_SESSION_META_DIR` resolves to a real session.
+
 Every drawing path checks `[ -t 2 ]` first, so a piped or scripted run emits nothing.
 
 Known multi-machine limitation: if a session is cloned to a second machine while the Objective is still the placeholder and both machines then submit their first prompt before syncing, each captures its own objective and the merge conflicts. This is left as a real conflict on purpose — two people declared different objectives for the same session, and a human should reconcile them.

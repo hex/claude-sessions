@@ -4,7 +4,7 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
-## Unreleased
+## 2026.8.16
 
 ### Added
 
@@ -47,6 +47,18 @@ All notable changes to cs are documented here. Release notes are also available 
   A cancelled rewrite used to leave the API key on disk. The temp file holding it was removed only on the way out of the normal path, and the shim's cancel handler signals the rewriter's whole process group as a matter of routine — so every cancellation left a readable credential in the system temp directory. Cleanup now runs from a trap, and the files are created in the main shell because a command substitution's assignments never reach one.
 
   The vendor CLI runs from the same neutral directory the default uses, because `codex` reads `AGENTS.md` from its working directory and `agy` takes that directory as its workspace. Its stdin is closed, since Claude Code hands the shim the real tty and an agentic CLI that decides it is interactive would paint over the progress screen. On the API arms the key travels in a mode-600 `curl --config` file and the prompt in a payload file, so neither reaches `argv`; both assertions are mutation-verified.
+
+### Fixes
+
+- **`ctrl+g` did nothing at all on a machine without `timeout(1)`, which is stock macOS.** bash 3.2 — the floor here, and the macOS system shell — treats `"${a[@]}"` on an EMPTY array as an unbound variable under `set -u` and aborts. The timeout prefix array is empty exactly when no `timeout(1)` exists, so the default rewriter died before reaching the model for precisely the users the best-effort bound was written for. Every expansion now uses the guarded `${a[@]+"${a[@]}"}` form.
+
+  This shipped green from a developer machine because Homebrew's coreutils puts `timeout` on PATH. The release gate's CI step is what caught it, on both bash lanes.
+
+- **The progress header could name an engine that never ran.** With `CS_REWRITE_CMD` set it showed the vendor's engine and a counting-down deadline, while a user script produced the buffer and nothing bounded it. The label and the countdown are now resolved once from the command actually dispatched: an arbitrary `CS_REWRITE_CMD` is named by its own basename and gets a plain elapsed clock, because the shim does not wrap it in any timeout and a deadline nothing enforces is a lie drawn on screen.
+
+- **The manifest sync test did not police `CS_HOOK_LIBS`** — the one array this release adds to. Deleting a rewriter from `bin/cs`'s copy left all 30 tests green; that drift gives every install a standing `cs -doctor` failure and leaves the file behind on uninstall.
+
+- **The rewrite screen spawned a subprocess ten times a second** to reprint a label that cannot change — roughly 250 process launches over a long rewrite, inside the window where the interface is frozen. The label, the terminal width and the timeout decision are resolved once; measured 6.7 to 9.4 frames per second on the vendor path.
 
 ## 2026.8.15
 

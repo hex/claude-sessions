@@ -243,6 +243,22 @@ test_the_prompt_is_passed_on_stdin_not_argv() {
     assert_file_not_contains "$ENV_DUMP" 'pwned' "no prompt text reaches the child environment"
 }
 
+# Stock macOS ships neither timeout(1) nor gtimeout, which is the case the
+# best-effort bound exists for — and the case where the whole rewrite used to
+# die before reaching the model. bash 3.2 treats a plain `"${a[@]}"` on an EMPTY
+# array as an unbound variable under `set -u`, so the empty _tmo aborted the
+# script. Every other test here passes on a developer box because Homebrew's
+# coreutils puts timeout on PATH; only hiding it reproduces the user's machine.
+test_the_rewrite_works_without_timeout_on_path() {
+    local shim="$FAKE_BIN/timeout"
+    # A PATH holding the fake claude and the system utilities, but no timeout
+    # and no gtimeout, whatever the developer has installed.
+    local out
+    out=$(printf 'fix the login thing' | PATH="$FAKE_BIN:/usr/bin:/bin" "$MODEL" 2>/dev/null)
+    [ "$out" = "REWRITTEN" ] || { echo "expected the rewrite, got: '$out'"; return 1; }
+    assert_exists "$ENV_DUMP" "the nested claude ran without timeout(1)"
+}
+
 echo ""
 echo "Prompt rewriter model tests"
 echo "==========================="
@@ -261,5 +277,6 @@ run_test test_a_slow_failure_is_not_retried
 run_test test_an_api_error_is_not_returned_as_a_rewrite
 run_test test_an_execution_error_is_not_returned_as_a_rewrite
 run_test test_the_prompt_is_passed_on_stdin_not_argv
+run_test test_the_rewrite_works_without_timeout_on_path
 
 report_results
