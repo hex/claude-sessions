@@ -22,6 +22,14 @@ All notable changes to cs are documented here. Release notes are also available 
 
   The rewriter runs hermetically: its own config directory, a neutral working directory, and the session's context variables stripped. Without that, a nested `claude` inherits the project's `CLAUDE.md` and cs's own memory, and a request to add a flag came back demanding TDD, bash 3.2 compatibility and a README update that nobody asked for. Four assertions moved from "emitted nothing" to "emitted no scope block", which is the property they were always protecting.
 
+- **`-api` provider names reach a vendor's API past its installed CLI.** `CS_REWRITE_PROVIDER=gemini-api` or `openai-api` skips the CLI preference, and `claude-api` posts to Anthropic's Messages endpoint instead of driving the Claude Code agent. Each needs that vendor's key and declines without one, leaving the prompt as typed.
+
+  The reason is Gemini's lite tier. agy's catalogue is eleven models and carries no lite variant — `gemini-3.5-flash-lite` and every spelling of it are rejected as unrecognised — while lite is the fastest option measured anywhere. Without a way to say "the API, even though a CLI is installed", that tier was unreachable for anyone who had agy.
+
+  Measured on one machine with agy and codex both present: `gemini` 7281ms against `gemini-api` 939ms, `openai` 12826ms against `openai-api` 1963ms. The bare names keep preferring the CLI, so nothing changes for anyone who has not asked for this.
+
+  `claude-api` exists because the default rewriter drives the whole agent: `claude -p` ships Claude Code's system prompt and tool schemas on every call, measured at 35,255 tokens for a ten-token prompt, of which 99% of the internal time is the API round trip. That is the ~13s, not the model. There is deliberately no suffix-free API form for Claude — the bare name *is* the default rewriter, and it authenticates through your claude.ai login rather than a key.
+
 - **The rewrite header names the engine and the model, and one knob sets that model everywhere.** `ctrl+g` now shows `agy · gemini-3.6-flash-low` or `api · gemini-flash-lite-latest` rather than a bare provider name, so which of the two arms is answering is never a guess. A vendor CLI that resolves its own model still shows a bare `codex`: cs cannot read that tool's configuration, and a guessed model in the header is worse than none.
 
   Both halves come from the vendor rewriter's own `--label`, called by the shim before it paints. Repeating the CLI-or-API test inside the shim would have been a second copy of it, free to drift into a header that said `api` while `agy` answered. `--label` is answered before the prompt is read from stdin, since the shim calls it without writing anything.

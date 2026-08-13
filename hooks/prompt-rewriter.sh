@@ -93,7 +93,7 @@ _geometry() {  # lines|cols -> a count
 _model_label() {
     local vendor
     case "${CS_REWRITE_PROVIDER:-}" in
-        openai|gemini)
+        openai|gemini|openai-api|gemini-api|claude-api)
             vendor=$("$(dirname "$0")/prompt-rewriter-vendor.sh" --label </dev/null 2>/dev/null)
             printf '%s' "${vendor:-$CS_REWRITE_PROVIDER}"
             return ;;
@@ -255,9 +255,13 @@ out="$target.cs-out"
 # run, and the provider knob must not second-guess it. An unrecognised provider
 # lands on the default rather than failing: a typo in a shell profile should cost
 # the user their choice of model, never their prompt.
+# The `-api` names reach a vendor's API past an installed CLI. Bare `claude` is
+# absent on purpose: it IS the default rewriter, and only `claude-api` routes
+# elsewhere.
 case "${CS_REWRITE_PROVIDER:-}" in
-    openai|gemini) _rewriter="$(dirname "$0")/prompt-rewriter-vendor.sh" ;;
-    *)             _rewriter="$(dirname "$0")/prompt-rewriter-model.sh" ;;
+    openai|gemini|openai-api|gemini-api|claude-api)
+        _rewriter="$(dirname "$0")/prompt-rewriter-vendor.sh" ;;
+    *)  _rewriter="$(dirname "$0")/prompt-rewriter-model.sh" ;;
 esac
 
 # This reaps; it does not cancel. ctrl+c cannot reach the shim alone — the
