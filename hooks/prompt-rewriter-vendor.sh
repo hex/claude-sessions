@@ -4,6 +4,52 @@
 
 set -uo pipefail
 
+# Which engine will answer, and on which model, decided once. The shim paints
+# its header before the rewrite starts and asks this script rather than
+# repeating the test, so the header can never name an engine other than the one
+# that runs. Prints "<engine> <model>", with the model omitted when a vendor CLI
+# resolves its own from its own configuration — cs cannot read that, and a
+# guessed model in the header is worse than none.
+_resolve() {
+    case "${CS_REWRITE_PROVIDER:-}" in
+        gemini)
+            if command -v agy >/dev/null 2>&1; then
+                printf 'agy %s' "${CS_REWRITE_MODEL:-}"
+            elif [ -n "${GEMINI_API_KEY:-}" ]; then
+                printf 'api %s' "${CS_REWRITE_MODEL:-gemini-flash-lite-latest}"
+            else
+                return 1
+            fi ;;
+        openai)
+            if command -v codex >/dev/null 2>&1; then
+                printf 'codex %s' "${CS_REWRITE_MODEL:-}"
+            elif [ -n "${OPENAI_API_KEY:-}" ]; then
+                printf 'api %s' "${CS_REWRITE_MODEL:-gpt-4.1-mini}"
+            else
+                return 1
+            fi ;;
+        *) return 1 ;;
+    esac
+}
+
+_resolved=$(_resolve) || _resolved=''
+_engine=${_resolved%% *}
+_model=${_resolved#* }
+[ "$_model" = "$_engine" ] && _model=''
+
+# Answered before the prompt is read. The shim calls this without writing
+# anything, so reading stdin first would hang the whole interface on a pipe
+# nobody fills.
+if [ "${1:-}" = --label ]; then
+    [ -n "$_engine" ] || exit 1
+    if [ -n "$_model" ]; then
+        printf '%s \302\267 %s' "$_engine" "$_model"
+    else
+        printf '%s' "$_engine"
+    fi
+    exit 0
+fi
+
 prompt=$(cat 2>/dev/null) || exit 1
 [ -n "${prompt//[[:space:]]/}" ] || exit 1
 
@@ -109,7 +155,7 @@ _api_gemini() {
           contents:[{parts:[{text:$p}]}],
           generationConfig:{temperature:0.2,maxOutputTokens:2048}}') || return 1
     response=$(_curl_json \
-        "https://generativelanguage.googleapis.com/v1beta/models/${CS_REWRITE_MODEL:-gemini-flash-lite-latest}:generateContent" \
+        "https://generativelanguage.googleapis.com/v1beta/models/${_model}:generateContent" \
         "x-goog-api-key: ${GEMINI_API_KEY}" "$payload") || return 1
     # A truncated answer is worse than none: it reads as a complete rewrite and
     # silently drops whatever the user typed past the cut.
@@ -129,7 +175,7 @@ _api_gemini() {
 _api_openai() {
     local payload response
     payload=$(jq -n --arg p "$prompt" --arg s "$_system" \
-        --arg m "${CS_REWRITE_MODEL:-gpt-4.1-mini}" \
+        --arg m "$_model" \
         '{model:$m,
           messages:[{role:"system",content:$s},{role:"user",content:$p}],
           temperature:0.2,
@@ -145,37 +191,37 @@ _api_openai() {
 
 _rc=0
 out=''
-case "${CS_REWRITE_PROVIDER:-}" in
-    gemini)
-        if command -v agy >/dev/null 2>&1; then
-            out=$(_run_cli agy --sandbox -p "$_system
+case "$_engine" in
+    agy)
+        # Flags must precede the prompt: agy uses Go's flag package, which stops
+        # parsing at the first positional. --sandbox restricts terminal access,
+        # since the prompt is untrusted text and agy has no allowed-tools flag.
+        _args=(--sandbox)
+        [ -n "$_model" ] && _args+=(--model "$_model")
+        out=$(_run_cli agy "${_args[@]}" -p "$_system
 
 $prompt") || _rc=$?
-        elif [ -n "${GEMINI_API_KEY:-}" ]; then
-            _make_temps || exit 1
-            out=$(_api_gemini) || _rc=$?
-        else
-            exit 1
-        fi
         ;;
-    openai)
-        if command -v codex >/dev/null 2>&1; then
-            # --skip-git-repo-check: the hermetic run directory is not a repo,
-            # and codex refuses to start outside one — a guard for interactive
-            # sessions, pure friction for a caller that only reads stdout.
-            # -s read-only: the prompt is untrusted text, and the sandbox is the
-            # only thing between an instruction embedded in it and codex's file
-            # tools. Pinned rather than inherited from ~/.codex/config.toml,
-            # which a user may well have opened up.
-            out=$(_run_cli codex exec --skip-git-repo-check -s read-only "$_system
+    codex)
+        # --skip-git-repo-check: the hermetic run directory is not a repo, and
+        # codex refuses to start outside one — a guard for interactive sessions,
+        # pure friction for a caller that only reads stdout.
+        # -s read-only: the prompt is untrusted text, and the sandbox is the only
+        # thing between an instruction embedded in it and codex's file tools.
+        # Pinned rather than inherited from ~/.codex/config.toml, which a user
+        # may well have opened up.
+        _args=(exec --skip-git-repo-check -s read-only)
+        [ -n "$_model" ] && _args+=(-m "$_model")
+        out=$(_run_cli codex "${_args[@]}" "$_system
 
 $prompt") || _rc=$?
-        elif [ -n "${OPENAI_API_KEY:-}" ]; then
-            _make_temps || exit 1
-            out=$(_api_openai) || _rc=$?
-        else
-            exit 1
-        fi
+        ;;
+    api)
+        _make_temps || exit 1
+        case "$CS_REWRITE_PROVIDER" in
+            gemini) out=$(_api_gemini) || _rc=$? ;;
+            openai) out=$(_api_openai) || _rc=$? ;;
+        esac
         ;;
     *)
         exit 1

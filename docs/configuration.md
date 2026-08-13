@@ -72,15 +72,24 @@ export CS_REWRITE_DISABLE="1"
 # makes for you: no key, no per-token charge.
 export CS_REWRITE_PROVIDER="claude"          # claude | openai | gemini
 
-# The model that rewrites prompts, and how long to wait for it. The model
-# applies to the API arms only — a vendor CLI resolves its own model from that
-# tool's configuration, so setting this while `codex` or `agy` is on PATH has no
-# effect. Defaults per provider: claude-haiku-4-5-20251001, gpt-4.1-mini,
-# gemini-flash-lite-latest. Reasoning models are a poor fit whatever the
-# provider: they can spend most of the output budget on reasoning and return a
-# rewrite truncated mid-sentence, which cs declines — so ctrl+g intermittently
-# does nothing at all.
-export CS_REWRITE_MODEL="claude-haiku-4-5-20251001"   # this is the default
+# The model that rewrites prompts, and how long to wait for it. It reaches every
+# arm: the API request, `agy --model`, `codex -m`. Left unset, each vendor CLI
+# uses the model configured in that tool, which is your setting and not cs's to
+# override.
+#
+# The id belongs to whichever engine answers, and the namespaces differ. Ask the
+# engine: `agy models` lists agy's, and its ids embed the reasoning effort
+# (`gemini-3.6-flash-low`), so the bare family name `gemini-3.6-flash` is
+# rejected. The API arms take the vendor's own API ids. An id the engine does not
+# accept declines the rewrite and leaves your prompt as typed — cs never
+# translates between the two namespaces.
+#
+# Defaults, used only where cs picks: claude-haiku-4-5-20251001 and, on the API
+# arms, gpt-4.1-mini and gemini-flash-lite-latest. Reasoning models are a poor
+# fit whatever the provider: they can spend most of the output budget on
+# reasoning and return a rewrite truncated mid-sentence, which cs declines — so
+# ctrl+g intermittently does nothing at all.
+export CS_REWRITE_MODEL="gemini-3.6-flash-low"        # agy's id, for the gemini CLI arm
 export CS_REWRITE_TIMEOUT="25"                        # seconds; needs timeout(1)
 
 # What fills the blank screen while the rewrite runs. `screen` shows a header,
