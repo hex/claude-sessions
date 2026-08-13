@@ -143,6 +143,71 @@ test_the_prompt_never_reaches_argv_on_the_api_arm() {
     assert_file_not_contains "$ARGV_DUMP" 'pwned' "no prompt text reaches argv"
 }
 
+# No CLI and no key is not an error to report, it is a decline. The shim keeps
+# the typed prompt on any non-zero status, so the user sees their own words
+# rather than a diagnostic they did not ask for.
+test_a_provider_with_neither_a_cli_nor_a_key_declines() {
+    local out rc=0
+    out=$(CS_REWRITE_PROVIDER=gemini run_rewrite) || rc=$?
+    [ "$rc" -ne 0 ] || { echo "expected a decline with no CLI and no key, got $rc"; return 1; }
+    [ -z "$out" ] || { echo "expected no output, got: $out"; return 1; }
+    rc=0
+    out=$(CS_REWRITE_PROVIDER=openai run_rewrite) || rc=$?
+    [ "$rc" -ne 0 ] || { echo "expected a decline for openai too, got $rc"; return 1; }
+}
+
+# A typo in a shell profile must not silently pick a provider. Unset lands here
+# too: this script is only ever reached when the shim resolved a vendor, so an
+# empty value means the resolution went wrong rather than "use the default".
+test_an_unknown_provider_declines() {
+    fake_bin agy 'printf "SHOULD NOT RUN"'
+    fake_bin codex 'printf "SHOULD NOT RUN"'
+    local out rc=0
+    out=$(CS_REWRITE_PROVIDER=gemeni run_rewrite) || rc=$?
+    [ "$rc" -ne 0 ] || { echo "expected a decline for an unknown provider, got $rc"; return 1; }
+    assert_not_exists "$ARGV_DUMP" "no vendor may run for a name we do not know" || return 1
+    rc=0
+    out=$(run_rewrite) || rc=$?
+    [ "$rc" -ne 0 ] || { echo "expected a decline for an unset provider, got $rc"; return 1; }
+}
+
+# Measured, not hypothetical: generativelanguage.googleapis.com answered three
+# consecutive requests with HTTP 404 and a zero-byte body, then served the
+# identical request normally a minute later.
+test_an_empty_api_response_declines() {
+    fake_bin curl 'exit 0'
+    local out rc=0
+    out=$(CS_REWRITE_PROVIDER=gemini GEMINI_API_KEY=not-a-real-key run_rewrite) || rc=$?
+    assert_exists "$ARGV_DUMP" "curl ran, so the decline came from the gate" || return 1
+    [ "$rc" -ne 0 ] || { echo "expected a decline for an empty body, got $rc"; return 1; }
+    [ -z "$out" ] || { echo "expected no output, got: $out"; return 1; }
+}
+
+# A truncated rewrite is worse than none: it is non-empty, so it passes every
+# emptiness check, and it silently drops whatever the user typed past the cut.
+# gemini-2.5-flash produces exactly this, spending 1963 tokens on reasoning
+# against a 2048 cap and stopping mid-sentence.
+test_a_truncated_api_answer_declines() {
+    fake_bin curl 'printf "%s" "{\"candidates\":[{\"finishReason\":\"MAX_TOKENS\",\"content\":{\"parts\":[{\"text\":\"Fix the statusline by\"}]}}]}"'
+    local out rc=0
+    out=$(CS_REWRITE_PROVIDER=gemini GEMINI_API_KEY=not-a-real-key run_rewrite) || rc=$?
+    [ "$rc" -ne 0 ] || { echo "expected a decline for a truncated answer, got $rc"; return 1; }
+    [ -z "$out" ] || { echo "a truncated rewrite was returned: $out"; return 1; }
+}
+
+# codex reads AGENTS.md from its working directory and agy takes that directory
+# as its workspace, so a rewrite launched from the user's checkout inherits that
+# project's instructions — the leak prompt-rewriter-model.sh closed for claude -p
+# by running from a directory that holds nothing.
+test_the_cli_runs_outside_the_project() {
+    fake_bin agy 'printf "%s\n" "PWD=$PWD" >> "$CS_TEST_ARGV_DUMP"
+printf "ok"'
+    CS_REWRITE_PROVIDER=gemini run_rewrite >/dev/null
+    assert_file_contains "$ARGV_DUMP" "PWD=$TEST_TMPDIR/cache/cs/rewrite-config" \
+        "the CLI runs from the hermetic directory, not the caller's" || return 1
+    assert_file_not_contains "$ARGV_DUMP" "PWD=$PWD" "never the project directory"
+}
+
 echo ""
 echo "Prompt rewriter vendor tests"
 echo "============================"
@@ -154,5 +219,10 @@ run_test test_openai_prefers_the_codex_cli
 run_test test_openai_falls_back_to_the_api_when_the_cli_is_absent
 run_test test_the_api_key_never_reaches_argv
 run_test test_the_prompt_never_reaches_argv_on_the_api_arm
+run_test test_a_provider_with_neither_a_cli_nor_a_key_declines
+run_test test_an_unknown_provider_declines
+run_test test_an_empty_api_response_declines
+run_test test_a_truncated_api_answer_declines
+run_test test_the_cli_runs_outside_the_project
 
 report_results

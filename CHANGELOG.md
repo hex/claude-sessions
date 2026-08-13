@@ -22,6 +22,14 @@ All notable changes to cs are documented here. Release notes are also available 
 
   The rewriter runs hermetically: its own config directory, a neutral working directory, and the session's context variables stripped. Without that, a nested `claude` inherits the project's `CLAUDE.md` and cs's own memory, and a request to add a flag came back demanding TDD, bash 3.2 compatibility and a README update that nobody asked for. Four assertions moved from "emitted nothing" to "emitted no scope block", which is the property they were always protecting.
 
+- **Rewrite with OpenAI or Gemini instead of Claude.** `CS_REWRITE_PROVIDER=openai` or `=gemini` routes `ctrl+g` to that vendor. Each prefers the vendor's CLI when its binary is on PATH — `codex` and `agy` — and falls back to the vendor's API, reading `OPENAI_API_KEY` or `GEMINI_API_KEY`, when it is not. This mirrors the claude-council's `prefer_cli_over_api` policy and for the same reason: the CLI carries your subscription and spends no API credit. `CS_REWRITE_CMD` still outranks the knob, being the older and wider contract.
+
+  The trade is measured, not assumed: the CLI arms take about ten seconds against about one for the API arms, and the interface is frozen for the whole run. The council can prefer CLIs freely because it is asynchronous on a twenty-minute budget; here that policy costs ten times as much in the one currency this feature spends.
+
+  Three failure modes are not the ones the "non-zero to decline" contract anticipates, so the gate judges the output rather than the status alone. `agy` prints `CLI error: …` on stdout and still exits 0 — that string would otherwise have become your next message. A reasoning model returns a rewrite truncated at the token cap, which is non-empty and so passes an emptiness check while being unusable: `gemini-2.5-flash` spends 1963 tokens thinking against a 2048 cap and stops mid-sentence, so a `finishReason` other than `STOP` now declines. And Gemini's endpoint has answered with a bare HTTP 404 and a zero-byte body, transiently, so an empty response declines too.
+
+  The vendor CLI runs from the same neutral directory the default uses, because `codex` reads `AGENTS.md` from its working directory and `agy` takes that directory as its workspace. Its stdin is closed, since Claude Code hands the shim the real tty and an agentic CLI that decides it is interactive would paint over the progress screen. On the API arms the key travels in a mode-600 `curl --config` file and the prompt in a payload file, so neither reaches `argv`; both assertions are mutation-verified.
+
 ## 2026.8.15
 
 Idle mail arrives again. Two mechanisms meant to bound runaway behaviour turn out never to have worked, and a hook now says what it hung on.
