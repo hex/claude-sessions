@@ -117,7 +117,7 @@ _center_indent() {  # width
 # Spins until the rewriter exits. Elapsed comes from SECONDS rather than a
 # frame count, so sleep drift never shows up as a wrong clock.
 _render_until_done() {  # pid
-    local pid="$1" i=0 budget='' indent
+    local pid="$1" i=0 budget='' indent shown='' text
     # A fast CS_REWRITE_CMD should never flash a loader on screen.
     sleep 0.3
     kill -0 "$pid" 2>/dev/null || return 0
@@ -147,6 +147,30 @@ _render_until_done() {  # pid
             printf '%*s%sRewriting your prompt…  up to %ss%s\n' \
                 "$indent" '' "$_d" "${CS_REWRITE_TIMEOUT:-25}" "$_r" >&2
             while kill -0 "$pid" 2>/dev/null; do sleep 0.2; done
+            ;;
+        native)
+            # Claude Code's own idiom: a sentence-case gerund, and the elapsed
+            # only once it has run long enough to be worth reading
+            # (`m = f >= 5 ? ${d} (${f}s) : d`). A counter ticking 1s, 2s on a
+            # rewrite that always takes about ten is noise it leaves out.
+            # Anchored where the composer was rather than centred: one short
+            # line in the middle of an empty screen advertises the emptiness.
+            printf '\n' >&2
+            SECONDS=0
+            while kill -0 "$pid" 2>/dev/null; do
+                if [ "$SECONDS" -ge 5 ]; then
+                    text="Rewriting your prompt… (${SECONDS}s)"
+                else
+                    text='Rewriting your prompt…'
+                fi
+                # Repaint only on change, as Claude Code does; without a
+                # spinner there is nothing to animate between ticks.
+                if [ "$text" != "$shown" ]; then
+                    printf '\r  %s%s%s\033[K' "$_d" "$text" "$_r" >&2
+                    shown="$text"
+                fi
+                sleep 0.25
+            done
             ;;
         line)
             _center_vertically

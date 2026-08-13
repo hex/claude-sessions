@@ -39,10 +39,10 @@ composer_file() {  # content
 # Run the shim under a real pty in a given progress mode and return the capture
 # path. Only a pty makes [ -t 2 ] true; without one every rendering assertion
 # below would pass against a shim that draws nothing.
-render_in_mode() {  # mode, [prompt]
-    local mode="$1" text="${2:-make the login thing better}"
+render_in_mode() {  # mode, [prompt], [stub_seconds]
+    local mode="$1" text="${2:-make the login thing better}" secs="${3:-0.6}"
     local slow="$TEST_TMPDIR/slow-rewrite.sh"
-    printf '#!/bin/bash\nsleep 0.6\nprintf "PRECISE"\n' > "$slow"
+    printf '#!/bin/bash\nsleep %s\nprintf "PRECISE"\n' "$secs" > "$slow"
     chmod +x "$slow"
     local f; f=$(composer_file "$text")
     local out="$TEST_TMPDIR/pty-$mode"
@@ -173,7 +173,7 @@ test_shim_never_leaves_a_temp_file_behind() {
 # of the feature, and the one property all three share.
 test_every_progress_mode_paints_something() {
     local mode out
-    for mode in screen line static; do
+    for mode in screen line static native; do
         out=$(render_in_mode "$mode")
         assert_file_contains "$out" 'ewriting your prompt' \
             "mode '$mode' painted the screen" || return 1
@@ -208,11 +208,32 @@ test_screen_mode_caps_a_long_prompt_and_marks_it() {
 # secret or a long essay never reaches the screen at all.
 test_line_and_static_modes_do_not_echo_the_prompt() {
     local mode out
-    for mode in line static; do
+    for mode in line static native; do
         out=$(render_in_mode "$mode" "correct-horse-battery-staple")
         assert_file_not_contains "$out" 'correct-horse-battery-staple' \
             "mode '$mode' keeps the prompt off screen" || return 1
     done
+}
+
+# Claude Code writes its own progress as a sentence-case gerund with the elapsed
+# in parentheses, and suppresses the elapsed until it has been running long
+# enough to be worth reading:
+#
+#     m = f >= 5 ? `${d} (${f}s)` : d
+#
+# The native mode follows that. Under five seconds it must show the label with
+# no clock at all — a counter ticking 1s, 2s on a rewrite that always takes
+# about ten is noise Claude Code deliberately leaves out.
+test_native_mode_withholds_the_elapsed_under_five_seconds() {
+    local out; out=$(render_in_mode native '' 1)
+    assert_file_contains "$out" 'Rewriting your prompt…' "the label is shown" || return 1
+    assert_file_not_contains "$out" '([0-9]*s)' "no elapsed before five seconds"
+}
+
+test_native_mode_shows_the_elapsed_past_five_seconds() {
+    local out; out=$(render_in_mode native '' 6)
+    assert_file_contains "$out" 'Rewriting your prompt… (5s)' \
+        "the elapsed appears once it is worth reading"
 }
 
 # A blinking cursor parked at the end of the line reads as unfinished output.
@@ -221,7 +242,7 @@ test_line_and_static_modes_do_not_echo_the_prompt() {
 # cosmetic problem it solves. Both halves are asserted together for that reason.
 test_progress_hides_the_cursor_and_restores_it() {
     local mode out hide show
-    for mode in screen line static; do
+    for mode in screen line static native; do
         out=$(render_in_mode "$mode")
         assert_file_contains "$out" $'\033\[?25l' "mode '$mode' hides the cursor" || return 1
         # Order matters, not just presence: restoring before hiding would
@@ -239,7 +260,7 @@ test_progress_hides_the_cursor_and_restores_it() {
 # your prompt costs the user their session.
 test_no_progress_mode_advertises_ctrl_c() {
     local mode out
-    for mode in screen line static; do
+    for mode in screen line static native; do
         out=$(render_in_mode "$mode")
         # Guard the guard: if nothing painted, absence of the hint proves nothing.
         assert_file_contains "$out" 'ewriting your prompt' "mode '$mode' painted" || return 1
@@ -348,6 +369,8 @@ run_test test_every_progress_mode_paints_something
 run_test test_unknown_progress_mode_falls_back_to_a_display
 run_test test_screen_mode_caps_a_long_prompt_and_marks_it
 run_test test_line_and_static_modes_do_not_echo_the_prompt
+run_test test_native_mode_withholds_the_elapsed_under_five_seconds
+run_test test_native_mode_shows_the_elapsed_past_five_seconds
 run_test test_progress_hides_the_cursor_and_restores_it
 run_test test_no_progress_mode_advertises_ctrl_c
 run_test test_cancel_reaps_the_whole_rewriter_tree

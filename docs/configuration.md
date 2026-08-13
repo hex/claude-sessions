@@ -68,7 +68,7 @@ export CS_REWRITE_TIMEOUT="25"                        # seconds; needs timeout(1
 # the model, and your prompt above the spinner; `line` is one centred line;
 # `static` prints once and never animates, so a wedged rewrite looks the same
 # as a working one. An unrecognised value falls back to `screen`.
-export CS_REWRITE_PROGRESS="screen"                   # screen | line | static
+export CS_REWRITE_PROGRESS="screen"          # screen | native | line | static
 
 # Replace the rewriter itself. Reads the rough prompt on stdin, writes the
 # rewrite to stdout, non-zero to leave the prompt untouched.
