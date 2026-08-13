@@ -180,7 +180,7 @@ test_progress_caps_a_long_prompt_and_marks_it() {
     local slow="$TEST_TMPDIR/slow-rewrite.sh"
     printf '#!/bin/bash\nsleep 0.6\nprintf "PRECISE"\n' > "$slow"
     chmod +x "$slow"
-    local long i=''
+    local long='' i=''
     for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
         long="$long line $i of a very long prompt that keeps going and going;"
     done
