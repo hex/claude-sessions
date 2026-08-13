@@ -150,6 +150,64 @@ test_the_session_context_is_scrubbed() {
     done
 }
 
+# A user whose only credential is a Console API key has no login for the scrub
+# to fall back to, so the first attempt fails in about a second. Rather than
+# leave the feature dead for them, retry once with the key in place.
+test_a_key_only_user_gets_a_retry_with_the_key() {
+    cat > "$FAKE_BIN/claude" <<'FAKEEOF'
+#!/usr/bin/env bash
+# Stands in for a machine with no claude.ai login: works only with the key.
+if printenv ANTHROPIC_API_KEY >/dev/null 2>&1; then
+    printf 'REWRITTEN VIA KEY'
+else
+    printf 'Not logged in · Please run /login'
+    exit 1
+fi
+FAKEEOF
+    chmod +x "$FAKE_BIN/claude"
+    local out fake_key
+    fake_key="sk-""ant-""still-not-real"
+    out=$(ANTHROPIC_API_KEY="$fake_key" run_rewrite)
+    assert_eq "REWRITTEN VIA KEY" "$out" "the retry runs with the key present"
+}
+
+# With no key there is nothing to retry with, so the failure must stay a single
+# attempt rather than looping or re-running the same doomed call.
+test_no_key_means_no_retry() {
+    local counter="$TEST_TMPDIR/attempts"
+    : > "$counter"
+    cat > "$FAKE_BIN/claude" <<FAKEEOF
+#!/usr/bin/env bash
+echo x >> "$counter"
+printf 'Not logged in'
+exit 1
+FAKEEOF
+    chmod +x "$FAKE_BIN/claude"
+    run_rewrite >/dev/null 2>&1
+    local n; n=$(grep -c . "$counter" 2>/dev/null || echo 0)
+    [ "$n" -eq 1 ] || { echo "expected 1 attempt with no key, got $n"; return 1; }
+}
+
+# The retry is for a fast failure only. A first attempt that hung has already
+# spent the timeout, and running a second would double the freeze the whole
+# feature exists to bound.
+test_a_slow_failure_is_not_retried() {
+    local counter="$TEST_TMPDIR/attempts"
+    : > "$counter"
+    cat > "$FAKE_BIN/claude" <<FAKEEOF
+#!/usr/bin/env bash
+echo x >> "$counter"
+sleep 6
+printf 'Execution error'
+exit 1
+FAKEEOF
+    chmod +x "$FAKE_BIN/claude"
+    local fake_key; fake_key="sk-""ant-""still-not-real"
+    ANTHROPIC_API_KEY="$fake_key" run_rewrite >/dev/null 2>&1
+    local n; n=$(grep -c . "$counter" 2>/dev/null || echo 0)
+    [ "$n" -eq 1 ] || { echo "a slow failure must not be retried, got $n attempts"; return 1; }
+}
+
 # An API error arrives on stdout with a zero status, so a status check alone
 # would hand the error text back as the user's prompt.
 test_an_api_error_is_not_returned_as_a_rewrite() {
@@ -197,6 +255,9 @@ run_test test_the_securestorage_dir_is_empty_by_default
 run_test test_the_nested_call_reads_the_real_login
 run_test test_the_config_dir_stays_hermetic
 run_test test_the_session_context_is_scrubbed
+run_test test_a_key_only_user_gets_a_retry_with_the_key
+run_test test_no_key_means_no_retry
+run_test test_a_slow_failure_is_not_retried
 run_test test_an_api_error_is_not_returned_as_a_rewrite
 run_test test_an_execution_error_is_not_returned_as_a_rewrite
 run_test test_the_prompt_is_passed_on_stdin_not_argv

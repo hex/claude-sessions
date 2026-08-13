@@ -52,12 +52,11 @@ SYS
 # with spawnSync and stdio:"inherit". Bound it where a timeout exists — stock
 # macOS ships neither `timeout` nor `gtimeout`, so this is best-effort.
 _limit="${CS_REWRITE_TIMEOUT:-25}"
+_tmo=()
 if command -v timeout >/dev/null 2>&1; then
-    set -- timeout "$_limit"
+    _tmo=(timeout "$_limit")
 elif command -v gtimeout >/dev/null 2>&1; then
-    set -- gtimeout "$_limit"
-else
-    set --
+    _tmo=(gtimeout "$_limit")
 fi
 
 # Run from the hermetic dir, not the user's project. `claude -p` reads the CWD's
@@ -90,21 +89,54 @@ _securestore="${CLAUDE_SECURESTORAGE_CONFIG_DIR-${CLAUDE_CONFIG_DIR-}}"
 # Stripping it would strand proxy users as well, whose ANTHROPIC_BASE_URL and
 # ANTHROPIC_CUSTOM_HEADERS remain — the rewrite would present a keychain OAuth
 # bearer at their gateway.
-out=$(cd "$cfg" 2>/dev/null && printf '%s' "$prompt" | CLAUDE_CONFIG_DIR="$cfg" \
-    CLAUDE_SECURESTORAGE_CONFIG_DIR="$_securestore" \
-    env -u CLAUDE_COWORK_MEMORY_PATH_OVERRIDE -u CLAUDE_CODE_AUTO_MEMORY_PATH \
-        -u CLAUDE_SESSION_DIR -u CLAUDE_SESSION_META_DIR -u CLAUDE_SESSION_NAME \
-        -u CLAUDE_CODE_TASK_LIST_ID -u CLAUDE_PROJECT_DIR \
-        -u ANTHROPIC_API_KEY \
-    "$@" claude -p \
-    --model "${CS_REWRITE_MODEL:-claude-haiku-4-5-20251001}" \
-    --system-prompt "$_system" 2>/dev/null) || exit 1
+_attempt() {  # 1 = drop the ambient key, 0 = keep it
+    local scrub="$1"
+    if [ "$scrub" = 1 ]; then
+        cd "$cfg" 2>/dev/null && printf '%s' "$prompt" | CLAUDE_CONFIG_DIR="$cfg" \
+            CLAUDE_SECURESTORAGE_CONFIG_DIR="$_securestore" \
+            env -u CLAUDE_COWORK_MEMORY_PATH_OVERRIDE -u CLAUDE_CODE_AUTO_MEMORY_PATH \
+                -u CLAUDE_SESSION_DIR -u CLAUDE_SESSION_META_DIR -u CLAUDE_SESSION_NAME \
+                -u CLAUDE_CODE_TASK_LIST_ID -u CLAUDE_PROJECT_DIR \
+                -u ANTHROPIC_API_KEY \
+            "${_tmo[@]}" claude -p \
+            --model "${CS_REWRITE_MODEL:-claude-haiku-4-5-20251001}" \
+            --system-prompt "$_system" 2>/dev/null
+    else
+        cd "$cfg" 2>/dev/null && printf '%s' "$prompt" | CLAUDE_CONFIG_DIR="$cfg" \
+            CLAUDE_SECURESTORAGE_CONFIG_DIR="$_securestore" \
+            env -u CLAUDE_COWORK_MEMORY_PATH_OVERRIDE -u CLAUDE_CODE_AUTO_MEMORY_PATH \
+                -u CLAUDE_SESSION_DIR -u CLAUDE_SESSION_META_DIR -u CLAUDE_SESSION_NAME \
+                -u CLAUDE_CODE_TASK_LIST_ID -u CLAUDE_PROJECT_DIR \
+            "${_tmo[@]}" claude -p \
+            --model "${CS_REWRITE_MODEL:-claude-haiku-4-5-20251001}" \
+            --system-prompt "$_system" 2>/dev/null
+    fi
+}
 
-# An API error is delivered on stdout with a zero status, so a status check
-# alone would hand the error text back as the user's prompt.
-case "$out" in
-    'API Error:'*|'Execution error'*) exit 1 ;;
-esac
+# An error arrives on stdout with a zero status, so a status check alone would
+# hand the error text back as the user's prompt.
+_failed() {  # status, output
+    [ "$1" -ne 0 ] && return 0
+    case "$2" in 'API Error:'*|'Execution error'*|'Not logged in'*) return 0 ;; esac
+    [ -n "${2//[[:space:]]/}" ] || return 0
+    return 1
+}
 
-[ -n "${out//[[:space:]]/}" ] || exit 1
+_rc=0
+_began=$SECONDS
+out=$(_attempt 1) || _rc=$?
+_took=$(( SECONDS - _began ))
+
+# A user whose only credential is a Console API key has no login to fall back
+# on, so the scrubbed attempt fails in about a second. Give the key one go
+# rather than leaving the feature dead for them. Only after a FAST failure: an
+# attempt that already spent the timeout has nothing left to spend, and a second
+# would double the freeze this timeout exists to bound.
+if _failed "$_rc" "$out" && [ -n "${ANTHROPIC_API_KEY:-}" ] && [ "$_took" -lt 5 ]; then
+    _rc=0
+    out=$(_attempt 0) || _rc=$?
+fi
+
+_failed "$_rc" "$out" && exit 1
+
 printf '%s' "$out"
