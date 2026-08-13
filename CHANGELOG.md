@@ -28,6 +28,8 @@ All notable changes to cs are documented here. Release notes are also available 
 
   Three failure modes are not the ones the "non-zero to decline" contract anticipates, so the gate judges the output rather than the status alone. `agy` prints `CLI error: …` on stdout and still exits 0 — that string would otherwise have become your next message. A reasoning model returns a rewrite truncated at the token cap, which is non-empty and so passes an emptiness check while being unusable: `gemini-2.5-flash` spends 1963 tokens thinking against a 2048 cap and stops mid-sentence, so a `finishReason` other than `STOP` now declines. And Gemini's endpoint has answered with a bare HTTP 404 and a zero-byte body, transiently, so an empty response declines too.
 
+  A cancelled rewrite used to leave the API key on disk. The temp file holding it was removed only on the way out of the normal path, and the shim's cancel handler signals the rewriter's whole process group as a matter of routine — so every cancellation left a readable credential in the system temp directory. Cleanup now runs from a trap, and the files are created in the main shell because a command substitution's assignments never reach one.
+
   The vendor CLI runs from the same neutral directory the default uses, because `codex` reads `AGENTS.md` from its working directory and `agy` takes that directory as its workspace. Its stdin is closed, since Claude Code hands the shim the real tty and an agentic CLI that decides it is interactive would paint over the progress screen. On the API arms the key travels in a mode-600 `curl --config` file and the prompt in a payload file, so neither reaches `argv`; both assertions are mutation-verified.
 
 ## 2026.8.15

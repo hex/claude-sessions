@@ -60,19 +60,39 @@ _failed() {  # status, output
     return 1
 }
 
-# The key travels in a mode-600 config file and the payload in a file of its
+# One of these holds the API key, so neither may outlive the process. The shim's
+# cancel handler signals this script's whole process group as a matter of
+# routine, so cleanup on the normal path alone would leave the key on disk every
+# time a rewrite is cancelled.
+#
+# They are created here, in the main shell, rather than inside _curl_json: that
+# runs in a command substitution, and a subshell's assignments never reach the
+# trap that has to remove them.
+_cfg_file=''
+_body_file=''
+_cleanup() {
+    [ -n "$_cfg_file" ] && rm -f "$_cfg_file"
+    [ -n "$_body_file" ] && rm -f "$_body_file"
+    return 0
+}
+trap '_cleanup; exit 1' INT TERM
+trap _cleanup EXIT
+
+_make_temps() {
+    _cfg_file=$(mktemp) || return 1
+    chmod 600 "$_cfg_file" 2>/dev/null || return 1
+    _body_file=$(mktemp) || return 1
+}
+
+# The key travels in the mode-600 config file and the payload in a file of its
 # own, so neither reaches argv, where `ps` shows it to every user on the box. A
 # key passed in a URL query string would also land in logs at the far end.
 _curl_json() {  # url, auth-header, payload
-    local url="$1" header="$2" payload="$3" cfg body rc=0
-    cfg=$(mktemp) || return 1
-    chmod 600 "$cfg" 2>/dev/null || { rm -f "$cfg"; return 1; }
-    printf 'header = "%s"\n' "$header" > "$cfg" || { rm -f "$cfg"; return 1; }
-    body=$(mktemp) || { rm -f "$cfg"; return 1; }
-    printf '%s' "$payload" > "$body" || { rm -f "$cfg" "$body"; return 1; }
-    curl -s --max-time "$_limit" --config "$cfg" \
-        -H 'Content-Type: application/json' --data-binary @"$body" "$url" || rc=$?
-    rm -f "$cfg" "$body"
+    local url="$1" header="$2" payload="$3" rc=0
+    printf 'header = "%s"\n' "$header" > "$_cfg_file" || return 1
+    printf '%s' "$payload" > "$_body_file" || return 1
+    curl -s --max-time "$_limit" --config "$_cfg_file" \
+        -H 'Content-Type: application/json' --data-binary @"$_body_file" "$url" || rc=$?
     return "$rc"
 }
 
@@ -130,6 +150,7 @@ case "${CS_REWRITE_PROVIDER:-}" in
 
 $prompt") || _rc=$?
         elif [ -n "${GEMINI_API_KEY:-}" ]; then
+            _make_temps || exit 1
             out=$(_api_gemini) || _rc=$?
         else
             exit 1
@@ -148,6 +169,7 @@ $prompt") || _rc=$?
 
 $prompt") || _rc=$?
         elif [ -n "${OPENAI_API_KEY:-}" ]; then
+            _make_temps || exit 1
             out=$(_api_openai) || _rc=$?
         else
             exit 1

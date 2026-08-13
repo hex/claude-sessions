@@ -208,6 +208,60 @@ printf "ok"'
     assert_file_not_contains "$ARGV_DUMP" "PWD=$PWD" "never the project directory"
 }
 
+# The shim's cancel handler signals the rewriter's whole process group, so this
+# script is killed mid-call as a matter of routine, not as an edge case. Cleaning
+# up only on the way out of the normal path leaves the mode-600 config file
+# behind — and that file holds the API key.
+#
+# BSD mktemp ignores TMPDIR (it resolves the per-user directory through confstr),
+# so the temp files cannot be redirected into the test's own tree. The assertion
+# diffs the real temp directory instead and inspects only what this run added.
+test_a_killed_rewrite_leaves_no_credential_on_disk() {
+    local fake_key
+    fake_key="AIza""SyNotARealGeminiKey"
+    fake_bin curl 'sleep 30'
+    local tmproot before after leaked
+    tmproot=$(dirname "$(mktemp -u)")
+    before="$TEST_TMPDIR/before"
+    ls -A "$tmproot" > "$before" 2>/dev/null
+
+    ( printf 'fix the login thing' | CS_REWRITE_PROVIDER=gemini \
+        GEMINI_API_KEY="$fake_key" "$VENDOR" >/dev/null 2>&1 ) &
+    local pid=$! waited=0
+    while [ "$waited" -lt 50 ] && [ -z "$(pgrep -f 'sleep 30' 2>/dev/null)" ]; do
+        sleep 0.1
+        waited=$((waited + 1))
+    done
+    [ -n "$(pgrep -f 'sleep 30' 2>/dev/null)" ] || { echo "the API arm never reached curl"; return 1; }
+
+    # The rewriter itself is signalled, which is what the shim's cancel handler
+    # does. Killing its curl instead would let _curl_json run on into its own
+    # cleanup and the test would pass against a script that never cleans up.
+    # The whole group, exactly as the shim's handler does: bash defers a trap
+    # until the foreground child returns, so signalling the script alone would
+    # leave it blocked in curl and the cleanup unreached for reasons production
+    # never sees.
+    pkill -TERM -f 'prompt-rewriter-vendor.sh' 2>/dev/null
+    pkill -TERM -f 'sleep 30' 2>/dev/null
+    kill -TERM "$pid" 2>/dev/null
+    wait "$pid" 2>/dev/null
+
+    # Only files this run created are inspected; the shared temp directory holds
+    # other processes' files and none of them are ours to read.
+    after="$TEST_TMPDIR/after"
+    ls -A "$tmproot" > "$after" 2>/dev/null
+    leaked=0
+    while IFS= read -r f; do
+        [ -f "$tmproot/$f" ] || continue
+        if grep -ql "$fake_key" "$tmproot/$f" 2>/dev/null; then
+            echo "a killed rewrite left the API key in $tmproot/$f"
+            rm -f "$tmproot/$f"
+            leaked=1
+        fi
+    done < <(comm -13 "$before" "$after" 2>/dev/null)
+    [ "$leaked" -eq 0 ]
+}
+
 echo ""
 echo "Prompt rewriter vendor tests"
 echo "============================"
@@ -224,5 +278,6 @@ run_test test_an_unknown_provider_declines
 run_test test_an_empty_api_response_declines
 run_test test_a_truncated_api_answer_declines
 run_test test_the_cli_runs_outside_the_project
+run_test test_a_killed_rewrite_leaves_no_credential_on_disk
 
 report_results
