@@ -97,6 +97,9 @@ _render_until_done() {  # pid
     if command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; then
         budget=" / ${CS_REWRITE_TIMEOUT:-25}s"
     fi
+    # Hidden for the spin, restored below and in the trap. A cursor parked
+    # at the end of the status line reads as unfinished output.
+    printf '\033[?25l' >&2
     _paint_screen
     SECONDS=0
     # No interrupt is offered. The terminal delivers SIGINT to the whole
@@ -109,7 +112,7 @@ _render_until_done() {  # pid
         i=$(( i + 1 ))
         sleep 0.1
     done
-    printf '\r\033[K' >&2
+    printf '\r\033[K\033[?25h' >&2
 }
 
 # The rewriter reads the prompt on stdin and writes the rewrite to stdout.
@@ -118,14 +121,15 @@ _render_until_done() {  # pid
 # substitution because a blocking substitution leaves nothing able to draw.
 out="$target.cs-out"
 
-# ctrl+c means "keep what I typed". Without this the signal is swallowed: bash
-# defers it until the child returns, so the rewrite runs to completion and
-# lands anyway. pkill -P first, because killing the subshell alone orphans the
-# model call it is waiting on.
+# This reaps; it does not cancel. ctrl+c cannot reach the shim alone — the
+# terminal sends it to the whole foreground process group, Claude Code with it,
+# so the session ends either way. What the handler prevents is the wreckage: a
+# shim dying alongside its session would leave the model call it started running
+# detached and billed. Signalling the group takes the call down with it.
 #
-# Armed BEFORE the rewriter is forked, and tolerant of an empty _rw, so that a
-# signal landing in the gap between fork and trap is caught rather than killing
-# the shim outright. On a loaded machine that gap is wide enough to hit.
+# Armed BEFORE the rewriter is forked, and tolerant of an empty _rw, so a signal
+# landing in the gap between fork and trap is handled rather than killing the
+# shim outright. On a loaded machine that gap is wide enough to hit.
 _rw=''
 # shellcheck disable=SC2329  # invoked by the trap below, not by name
 _keep_original() {
@@ -136,7 +140,7 @@ _keep_original() {
         kill -TERM "-$_rw" 2>/dev/null || kill -TERM "$_rw" 2>/dev/null
     fi
     rm -f "$out" "$target.cs-tmp" 2>/dev/null
-    [ -t 2 ] && printf '\r\033[K' >&2
+    [ -t 2 ] && printf '\r\033[K\033[?25h' >&2
     exit 0
 }
 trap _keep_original INT TERM

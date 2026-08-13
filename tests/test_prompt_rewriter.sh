@@ -309,7 +309,31 @@ test_progress_does_not_advertise_ctrl_c() {
     assert_file_not_contains "$out" 'ctrl+c' "nor spell it out"
 }
 
+# A blinking cursor parked at the end of the spinner line reads as unfinished
+# output. Hiding it is only safe if it always comes back: a shim that exits with
+# the cursor still hidden leaves the terminal that way, which is far worse than
+# the cosmetic problem it solves. Both halves are asserted together for that
+# reason.
+test_progress_hides_the_cursor_and_restores_it() {
+    local slow="$TEST_TMPDIR/slow-rewrite.sh"
+    printf '#!/bin/bash\nsleep 0.6\nprintf "PRECISE"\n' > "$slow"
+    chmod +x "$slow"
+    local f; f=$(composer_file "make the login thing better")
+    local out="$TEST_TMPDIR/pty-out"
+    CS_REWRITE_CMD="$slow" script -q /dev/null "$SHIM" "$f" < /dev/null > "$out" 2>&1
+    assert_file_contains "$out" $'\033\[?25l' "the loader hides the cursor" || return 1
+    assert_file_contains "$out" $'\033\[?25h' "and shows it again" || return 1
+    # Order matters, not just presence: restoring before hiding would satisfy
+    # both assertions above and still leave the cursor hidden.
+    local hide show
+    hide=$(printf '%s' "$(command cat "$out")" | grep -abo $'\033\[?25l' | head -1 | cut -d: -f1)
+    show=$(printf '%s' "$(command cat "$out")" | grep -abo $'\033\[?25h' | tail -1 | cut -d: -f1)
+    [ -n "$hide" ] && [ -n "$show" ] && [ "$show" -gt "$hide" ] \
+        || { echo "restore at $show does not follow hide at $hide"; return 1; }
+}
+
 run_test test_progress_renders_under_a_pty
+run_test test_progress_hides_the_cursor_and_restores_it
 run_test test_progress_does_not_advertise_ctrl_c
 run_test test_cancel_reaps_the_whole_rewriter_tree
 run_test test_progress_is_silent_without_a_tty
