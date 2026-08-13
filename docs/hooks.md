@@ -173,7 +173,9 @@ The default rewriter, `prompt-rewriter-model.sh`, calls a fast model with the pr
 
 Claude Code runs the editor with `spawnSync` and `stdio:"inherit"`. The shim's basename matches none of its known GUI editors, so it takes the `enterAlternateScreen()` branch and blanks the interface for the length of the rewrite, roughly ten to twenty seconds on the default model. The shim owns that screen and fills it: the prompt being rewritten (folded, capped at eight lines with a `… prompt clipped` marker), the model, a spinner, and elapsed time against the timeout budget. Tearing down the alternate screen discards it, so nothing reaches the scrollback.
 
-`ctrl+c` during a rewrite keeps what you typed. The shim catches the signal, kills the rewriter and its children, and exits 0, so the composer comes back byte-identical and Claude Code reports no editor error. Handle it and bash swallows it instead, deferring the signal until the child returns — the rewrite then finishes and lands anyway.
+You cannot interrupt a rewrite from the keyboard, and the screen does not pretend otherwise. The terminal delivers `ctrl+c` to the whole foreground process group, which contains Claude Code itself, so the keystroke ends the session rather than the rewrite. No handler in a spawned shim can intercept a signal the tty sends to its parent as well. `CS_REWRITE_TIMEOUT` is the only bound, which is why the screen shows elapsed time against it.
+
+The shim still handles `INT` and `TERM`, for the case where it receives one anyway. The handler exists to reap, not to cancel: it signals the rewriter's whole process group, restores nothing because it has written nothing, and exits 0. Without it, a shim dying alongside its session would orphan the `claude -p` it started — detached, invisible, and still billed until it finished. That matters most in exactly the situation nothing can prevent.
 
 Every drawing path checks `[ -t 2 ]` first, so a piped or scripted run emits nothing.
 

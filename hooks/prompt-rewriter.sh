@@ -99,9 +99,13 @@ _render_until_done() {  # pid
     fi
     _paint_screen
     SECONDS=0
+    # No interrupt is offered. The terminal delivers SIGINT to the whole
+    # foreground process group, Claude Code included, so ctrl+c here ends the
+    # session rather than the rewrite — nothing a spawned shim does can change
+    # that. The timeout is the only bound, which is why it is on screen.
     while kill -0 "$pid" 2>/dev/null; do
-        printf '\r  %s  working…   %ss%s        %s^C keeps your original%s\033[K' \
-            "${_spin[$(( i % 10 ))]}" "$SECONDS" "$budget" "$_d" "$_r" >&2
+        printf '\r  %s  working…   %ss%s\033[K' \
+            "${_spin[$(( i % 10 ))]}" "$SECONDS" "$budget" >&2
         i=$(( i + 1 ))
         sleep 0.1
     done

@@ -292,7 +292,25 @@ SLOWEOF
     fi
 }
 
+# The loader must not offer ctrl+c. The terminal delivers SIGINT to the whole
+# foreground process group, which contains Claude Code, so the keystroke ends
+# the session — no handler in a spawned shim can intercept that. Advertising it
+# as a way to keep your prompt costs the user their session.
+test_progress_does_not_advertise_ctrl_c() {
+    local slow="$TEST_TMPDIR/slow-rewrite.sh"
+    printf '#!/bin/bash\nsleep 0.6\nprintf "PRECISE"\n' > "$slow"
+    chmod +x "$slow"
+    local f; f=$(composer_file "make the login thing better")
+    local out="$TEST_TMPDIR/pty-out"
+    CS_REWRITE_CMD="$slow" script -q /dev/null "$SHIM" "$f" < /dev/null > "$out" 2>&1
+    # Guard the guard: if nothing painted, absence of the hint proves nothing.
+    assert_file_contains "$out" "rewriting your prompt" "the loader painted" || return 1
+    assert_file_not_contains "$out" '\^C' "the screen must not offer ctrl+c" || return 1
+    assert_file_not_contains "$out" 'ctrl+c' "nor spell it out"
+}
+
 run_test test_progress_renders_under_a_pty
+run_test test_progress_does_not_advertise_ctrl_c
 run_test test_cancel_reaps_the_whole_rewriter_tree
 run_test test_progress_is_silent_without_a_tty
 run_test test_progress_caps_a_long_prompt_and_marks_it
