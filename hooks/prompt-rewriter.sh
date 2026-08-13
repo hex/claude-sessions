@@ -113,22 +113,30 @@ _render_until_done() {  # pid
 # user can supply their own. It runs in the background rather than in a command
 # substitution because a blocking substitution leaves nothing able to draw.
 out="$target.cs-out"
-( printf '%s' "$prompt" | ${CS_REWRITE_CMD:-"$(dirname "$0")/prompt-rewriter-model.sh"} > "$out" 2>/dev/null ) &
-_rw=$!
 
 # ctrl+c means "keep what I typed". Without this the signal is swallowed: bash
 # defers it until the child returns, so the rewrite runs to completion and
 # lands anyway. pkill -P first, because killing the subshell alone orphans the
 # model call it is waiting on.
+#
+# Armed BEFORE the rewriter is forked, and tolerant of an empty _rw, so that a
+# signal landing in the gap between fork and trap is caught rather than killing
+# the shim outright. On a loaded machine that gap is wide enough to hit.
+_rw=''
 # shellcheck disable=SC2329  # invoked by the trap below, not by name
 _keep_original() {
-    pkill -P "$_rw" 2>/dev/null
-    kill "$_rw" 2>/dev/null
+    if [ -n "$_rw" ]; then
+        pkill -P "$_rw" 2>/dev/null
+        kill "$_rw" 2>/dev/null
+    fi
     rm -f "$out" "$target.cs-tmp" 2>/dev/null
     [ -t 2 ] && printf '\r\033[K' >&2
     exit 0
 }
 trap _keep_original INT TERM
+
+( printf '%s' "$prompt" | ${CS_REWRITE_CMD:-"$(dirname "$0")/prompt-rewriter-model.sh"} > "$out" 2>/dev/null ) &
+_rw=$!
 
 _render_until_done "$_rw"
 wait "$_rw" || { rm -f "$out" 2>/dev/null; exit 0; }

@@ -213,7 +213,16 @@ test_sigint_keeps_the_original_and_exits_clean() {
     CS_REWRITE_CMD="$slow" "$SHIM" "$f" >/dev/null 2>&1 &
     local shim=$!
     set +m
-    sleep 0.8
+    # Wait for the shim to fork the rewriter rather than guessing at a delay.
+    # The trap is armed before that fork, so a visible child proves the handler
+    # is installed. A fixed sleep raced it whenever the gate's other lanes made
+    # forking slow, and the lost signal let the rewrite land.
+    local waited=0
+    while [ "$waited" -lt 50 ] && ! pgrep -P "$shim" >/dev/null 2>&1; do
+        sleep 0.1
+        waited=$((waited + 1))
+    done
+    [ "$waited" -lt 50 ] || { echo "shim never forked a rewriter"; kill "$shim" 2>/dev/null; return 1; }
     kill -INT "$shim" 2>/dev/null
     local st=0; wait "$shim" || st=$?
     assert_eq "0" "$st" "exits 0, so Claude Code reports no editor error" || return 1
