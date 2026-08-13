@@ -152,7 +152,10 @@ export CS_QUEUE_MAX_5H="85"
 export CS_MAIL_WAKE_MAX="5"   # this is the default
 export CS_NO_MAIL_WAKE="1"
 
-# Disable the iTerm2 integrations (tab color, attention dock bounce)
+# Disable the iTerm2 attention bounce (the dock bounce a finished turn starts,
+# and the attention marker the status line reads). The tab tint is NOT gated by
+# this: set_tab_title emits the iTerm2 escapes unconditionally at launch, and
+# the colour resets when the session exits.
 export CS_NO_ITERM2="1"
 
 # Override the tmux binary cs -spawn uses (default: tmux on PATH)

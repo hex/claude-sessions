@@ -71,10 +71,10 @@ No git repo required. No project structure needed. Just a name for what you're w
 
 ### Terminal experience
 
-- **Status line** - `cs-statusline` renders Claude Code's status bar as one line of squared pills: a Claude logo badge (pulsing until your next prompt), the session name in its `/color`, a queued-task count, an unread cross-session mail count, git branch with ahead/behind and dirty counts, model + effort, context %, and 5-hour/weekly rate limits (each gaining a reset countdown as it fills) — all from the status-line JSON plus one bounded git call, with no transcript parsing, network, or writes. Session cost is available as an opt-in segment. Enable or remove it any time with `cs -statusline enable|disable`; choose and order segments with `CS_STATUSLINE_SEGMENTS`. cs auto-detects the terminal's light/dark theme (override with `CS_TERM_THEME`; `cs -detect-theme` shows the result). A companion `cs-subagent-statusline` styles the agent-panel rows so each running subagent shows the model driving it, its own context %, and elapsed time; `cs -statusline enable` registers both (Claude Code reads the registration at startup, so restart it to see them). See [docs/statusline.md](docs/statusline.md)
+- **Status line** - `cs-statusline` renders Claude Code's status bar as one line of squared pills: a Claude logo badge (pulsing until your next prompt), the session name in its `/color`, a queued-task count, an unread cross-session mail count, git branch with ahead/behind and dirty counts, model + effort, context %, and 5-hour/weekly rate limits (each gaining a reset countdown as it fills) — all from the status-line JSON plus one bounded git call, with no transcript parsing and no network. It writes two machine-local files as it renders — `.cs/local/context-pct` and `.cs/local/limits` — which is what makes the liveness heartbeat and `cs -usage`'s reset anchoring work. Session cost is available as an opt-in segment. Enable or remove it any time with `cs -statusline enable|disable`; choose and order segments with `CS_STATUSLINE_SEGMENTS`. cs auto-detects the terminal's light/dark theme (override with `CS_TERM_THEME`; `cs -detect-theme` shows the result). A companion `cs-subagent-statusline` styles the agent-panel rows so each running subagent shows the model driving it, its own context %, and elapsed time; `cs -statusline enable` registers both (Claude Code reads the registration at startup, so restart it to see them). See [docs/statusline.md](docs/statusline.md)
 
   ![cs-statusline: session and model accents, amber rate-limit warnings, standard-Unicode segment icons](assets/screenshot2.png)
-- **iTerm2 awareness** - inside iTerm2 the session color tints the tab (native escapes, reset on exit), and with iTerm2 shell integration installed a finished turn bounces the dock until your next prompt. `CS_NO_ITERM2=1` disables; `cs -doctor` reports the integration surface.
+- **iTerm2 awareness** - inside iTerm2 the session color tints the tab (native escapes, reset on exit), and with iTerm2 shell integration installed a finished turn bounces the dock until your next prompt. `CS_NO_ITERM2=1` disables the bounce; `cs -doctor` reports the integration surface.
 
 ### Security and trust
 
@@ -107,7 +107,7 @@ Or clone and run `./install.sh`.
 The installer:
 - Adds `cs`, `cs-secrets`, `cs-statusline`, `cs-subagent-statusline`, and `cs-tui` to `~/.local/bin/`
 - Installs the cs [hooks](docs/hooks.md) to `~/.claude/hooks/cs/` for session tracking (including the `scope-prompt` auto-grounding hook on UserPromptSubmit)
-- Adds `/summary`, `/checkpoint`, `/sweep`, and `/wrap` commands, and the `store-secret`, `prose-hygiene`, `rotate`, `merge`, and `voice` skills to `~/.claude/`
+- Adds `/summary`, `/checkpoint`, `/sweep`, and `/wrap` commands, and the `store-secret`, `prose-hygiene`, `rotate`, `merge`, and `write-as-me` skills to `~/.claude/`
 - Installs shell completions for bash and zsh
 - Configures hook entries in `~/.claude/settings.json`
 
@@ -144,6 +144,7 @@ cs -queue add "<task>"      # Walk-away task queue (also: list, rm <n>, clear, l
 cs -msg <session> "note"    # Send mail to another session (--kind notify|task|text|result; '-' body reads stdin); bare cs -msg reads
 cs -msg --reply <thread> "note"  # Reply into a thread; the target comes from the thread
 cs -msg thread <id>         # Show one thread as a conversation, oldest first
+cs -msg log                 # This session's full mail history, sent and received
 cs -spawn <name> [--task ..]  # Open a session in a cs-owned tmux window; --task arms its walk-away queue
 cs -doctor, -diag           # Run health checks (Keychain, hooks, memory, audit, tokens)
 cs -usage [--all] [<name>]  # Per-session token usage over the 5h/weekly rate-limit windows
