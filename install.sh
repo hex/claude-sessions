@@ -93,11 +93,15 @@ CS_HOOKS=(
     scope-prompt.sh
 )
 
-# Files under hooks/ that the hooks SOURCE rather than files Claude Code
-# invokes. They ship and are removed alongside the hooks, but must never be
-# registered against an event. KEEP THIS LIST IN SYNC WITH bin/cs.
+# Files under hooks/ that the hooks SOURCE, or that cs points other tools at,
+# rather than files Claude Code invokes as hooks. They ship and are removed
+# alongside the hooks, but must never be registered against an event. The
+# prompt-rewriter pair is reached through $EDITOR, not through any hook event.
+# KEEP THIS LIST IN SYNC WITH bin/cs.
 CS_HOOK_LIBS=(
     cs-resolve.sh
+    prompt-rewriter.sh
+    prompt-rewriter-model.sh
 )
 
 # Everything that lands in HOOKS_DIR, for the copy and cleanup loops.
