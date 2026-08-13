@@ -56,19 +56,30 @@ _spin=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
 # cream the muted tones wash out, so light gets darker ink instead.
 if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then
     _b=$'\033[1m'; _r=$'\033[0m'
+    # The raw triples ride alongside the escapes: the margin rule breathes by
+    # interpolating between muted and accent, and a two-colour blink would read
+    # as an alert rather than a breath.
     if [ "${CS_TERM_THEME:-dark}" = "light" ]; then
-        _accent=$'\033[38;2;166;86;60m'   # terracotta
+        _accent_rgb='166 86 60'          # terracotta
         _ink=$'\033[38;2;48;42;36m'       # primary text
-        _mute=$'\033[38;2;128;116;106m'   # taupe
+        _mute_rgb='128 116 106'          # taupe
         _d=$'\033[38;2;120;108;98m'
     else
-        _accent=$'\033[38;2;230;74;25m'
+        _accent_rgb='230 74 25'
         _ink=$'\033[38;2;245;230;211m'
-        _mute=$'\033[38;2;161;136;127m'
+        _mute_rgb='161 136 127'
         _d=$'\033[2m'
     fi
+    # A function, so splitting the triple happens in ITS positionals. `set --`
+    # here would overwrite the script's own, and $1 is the composer file.
+    _esc_rgb() { printf '\033[38;2;%s;%s;%sm' "$1" "$2" "$3"; }
+    # shellcheck disable=SC2086  # deliberate: each triple is three fields
+    _accent=$(_esc_rgb $_accent_rgb)
+    # shellcheck disable=SC2086
+    _mute=$(_esc_rgb $_mute_rgb)
 else
     _b=''; _d=''; _r=''; _accent=''; _ink=''; _mute=''
+    _accent_rgb=''; _mute_rgb=''
 fi
 
 # Terminal geometry, with a plausible fallback rather than a failure: this is
@@ -103,30 +114,81 @@ _model_label() {
               -e 's/\([0-9]\)-\([0-9]\)/\1.\2/g' -e 's/-/ /g'
 }
 
-# The header, rule and echoed prompt of the screen mode. Drawn once, so the
-# poll loop only ever repaints its own last line.
-_paint_screen() {
-    local cols title label pad
+# The margin rule that holds the prompt, breathing between muted and accent.
+# Two endpoints interpolated over a slow triangle wave: a hard blink between
+# them would read as an alert, and this screen is a held breath, not a warning.
+# Falls back to the plain accent where truecolor is off, so NO_COLOR and a dumb
+# terminal still get a rule rather than nothing.
+_margin_color() {  # step
+    local t r g b
+    [ -n "$_accent_rgb" ] || { printf '%s' "$_accent"; return; }
+    # 0..23 up, 24..47 down — about 4.8s a cycle at the 100ms tick, which is
+    # roughly a resting breath and slow enough not to pull the eye.
+    t=$(( $1 % 48 ))
+    [ "$t" -ge 24 ] && t=$(( 48 - t ))
+    # shellcheck disable=SC2086  # deliberate: each triple is three fields
+    set -- $_mute_rgb
+    local m1=$1 m2=$2 m3=$3
+    # shellcheck disable=SC2086
+    set -- $_accent_rgb
+    r=$(( m1 + ($1 - m1) * t / 24 ))
+    g=$(( m2 + ($2 - m2) * t / 24 ))
+    b=$(( m3 + ($3 - m3) * t / 24 ))
+    printf '\033[38;2;%s;%s;%sm' "$r" "$g" "$b"
+}
+
+# Repeats a character. awk rather than a bash loop: printf'ing per cell at ten
+# frames a second is visible work for no reason.
+_repeat() {  # char, count
+    [ "$2" -gt 0 ] || return 0
+    awk -v c="$1" -v n="$2" 'BEGIN{while (n-- > 0) printf "%s", c}'
+}
+
+# The whole screen, redrawn from cursor-home each tick. A full repaint rather
+# than a patched last line because the margin runs the height of the block, and
+# `\033[K` per line means no clear-screen and so no flicker. We own the
+# alternate screen, so home is ours to take.
+_paint_frame() {  # step, remaining-seconds
+    local step="$1" left="$2" cols line indent label bar_w filled
     cols=$(_geometry cols)
-    title='cs · rewriting your prompt'
+    local rule; rule="$(_margin_color "$step")▏$_r"
+
+    printf '\033[H' >&2
+    printf '\033[K\n' >&2
+    # The prompt is the subject of this screen, so it leads — folded to the
+    # margin, capped at eight lines, and told when it was cut rather than shown
+    # a fragment that reads like the whole thing.
+    # `%s\n`, not `%s`: command substitution strips the trailing newline, and a
+    # `read` loop discards a final unterminated line — which for a one-line
+    # prompt is the whole prompt.
+    printf '%s\n' "$_prompt_block" | while IFS= read -r line; do
+        printf '  %s  %s%s%s\033[K\n' "$rule" "$_ink" "$line" "$_r" >&2
+    done
+    printf '  %s\033[K\n' "$rule" >&2
+
+    # Chrome: what is happening, and which engine has the words. Both muted —
+    # neither is the subject.
     label=$(_model_label)
-    pad=$(( cols - 4 - ${#title} - ${#label} ))
-    [ "$pad" -ge 1 ] || pad=1
-    # `cs` carries the brand accent, the rest is ordinary ink, the model is
-    # chrome. Same division the status line and the banners use.
-    printf '\n  %s%scs%s %s·%s %s%s%s%*s%s%s%s\n  %s' \
-        "$_b" "$_accent" "$_r" "$_d" "$_r" "$_ink" "${title#cs · }" "$_r" \
-        "$pad" '' "$_mute" "$label" "$_r" "$_d" >&2
-    awk -v n=$(( cols - 4 )) 'BEGIN{while (n-- > 0) printf "─"}' >&2
-    printf '%s\n\n' "$_r" >&2
-    # awk rather than `head -8`, which exits early and SIGPIPEs fold — under
-    # `pipefail` that turns a long prompt into a 141 status. awk drains the
-    # whole stream, and says so when it clipped rather than showing a fragment
-    # that reads like the whole prompt.
-    printf '%s' "$_ink" >&2
-    printf '%s' "$prompt" | fold -s -w $(( cols - 4 )) \
-        | awk 'NR<=8 {print "  " $0} END {if (NR>8) print "  … prompt clipped"}' >&2
-    printf '%s\n' "$_r" >&2
+    indent=$(( cols - 4 - 9 - ${#label} ))
+    [ "$indent" -ge 1 ] || indent=1
+    printf '  %s  %srewriting%*s%s%s\033[K\n' "$rule" "$_d" "$indent" '' "$label" "$_r" >&2
+
+    # Remaining, not elapsed. Nothing here can be cancelled, so the elapsed
+    # count is a number the reader cannot act on; what is left against the
+    # budget is the one fact that answers "should I wait".
+    if [ -n "$_budget" ]; then
+        bar_w=$(( cols - 4 - 12 ))
+        [ "$bar_w" -ge 8 ] || bar_w=8
+        filled=$(( bar_w * left / _budget ))
+        [ "$filled" -ge 0 ] || filled=0
+        [ "$filled" -le "$bar_w" ] || filled=$bar_w
+        printf '  %s  %s%s%s%s%s  %ss left%s\033[K\n' "$rule" \
+            "$_accent" "$(_repeat '━' "$filled")" "$_d" \
+            "$(_repeat '━' $(( bar_w - filled )))" "$_r" "$left" "$_r" >&2
+    else
+        printf '  %s  %s%ss%s\033[K\n' "$rule" "$_d" "$SECONDS" "$_r" >&2
+    fi
+    printf '\033[K' >&2
 }
 
 # Drops the cursor to the vertical middle for the modes that show one line on
@@ -150,13 +212,24 @@ _center_indent() {  # width
 # frame count, so sleep drift never shows up as a wrong clock.
 _render_until_done() {  # pid
     local pid="$1" i=0 budget='' indent shown='' text
-    # A fast CS_REWRITE_CMD should never flash a loader on screen.
-    sleep 0.3
+    # A fast rewriter must never flash a loader. gemini-api answers in about
+    # 0.9s, so a threshold under a second paints a screen that is gone before it
+    # can be read — which costs attention and returns nothing.
+    sleep 1.2
     kill -0 "$pid" 2>/dev/null || return 0
     [ -t 2 ] || return 0
     if command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; then
         budget=" / ${CS_REWRITE_TIMEOUT:-25}s"
     fi
+    # A countdown may only be shown when something actually enforces it. The
+    # vendor rewriter bounds itself with perl's alarm, which is always there;
+    # the default rewriter needs timeout(1), which stock macOS does not ship.
+    _budget=''
+    case "${CS_REWRITE_PROVIDER:-}" in
+        openai|gemini|openai-api|gemini-api|claude-api)
+            command -v perl >/dev/null 2>&1 && _budget="${CS_REWRITE_TIMEOUT:-25}" ;;
+        *) [ -n "$budget" ] && _budget="${CS_REWRITE_TIMEOUT:-25}" ;;
+    esac
 
     # Hidden for the whole display, restored below and in the trap. A cursor
     # parked at the end of the line reads as unfinished output.
@@ -219,22 +292,21 @@ _render_until_done() {  # pid
             done
             ;;
         *)
-            _paint_screen
+            # Folded once, not per frame: the text does not change and re-running
+            # fold and awk ten times a second would be work for nothing. awk
+            # rather than `head -8`, which exits early and SIGPIPEs fold — under
+            # `pipefail` that turns a long prompt into a 141 status.
+            _prompt_block=$(printf '%s' "$prompt" | fold -s -w $(( $(_geometry cols) - 7 )) \
+                | awk 'NR<=8 {print} END {if (NR>8) print "… prompt clipped"}')
             SECONDS=0
             while kill -0 "$pid" 2>/dev/null; do
-                # `Working…` is Claude Code's own label, and it withholds the
-                # elapsed under five seconds. The header already names what is
-                # being rewritten, so the status line does not repeat it.
-                if [ "$SECONDS" -ge 5 ]; then
-                    text="Working… (${SECONDS}s)"
+                if [ -n "$_budget" ]; then
+                    text=$(( _budget - SECONDS ))
+                    [ "$text" -ge 0 ] || text=0
                 else
-                    text='Working…'
+                    text=$SECONDS
                 fi
-                # The spinner is the only live thing on screen, so it takes the
-                # accent; the words stay chrome.
-                printf '\r  %s%s%s  %s%s%s\033[K' \
-                    "$_accent" "${_spin[$(( i % 10 ))]}" "$_r" \
-                    "$_mute" "$text" "$_r" >&2
+                _paint_frame "$i" "$text"
                 i=$(( i + 1 ))
                 sleep 0.1
             done

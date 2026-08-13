@@ -40,7 +40,7 @@ composer_file() {  # content
 # path. Only a pty makes [ -t 2 ] true; without one every rendering assertion
 # below would pass against a shim that draws nothing.
 render_in_mode() {  # mode, [prompt], [stub_seconds]
-    local mode="$1" text="${2:-make the login thing better}" secs="${3:-0.6}"
+    local mode="$1" text="${2:-make the login thing better}" secs="${3:-1.8}"
     local slow="$TEST_TMPDIR/slow-rewrite.sh"
     printf '#!/bin/bash\nsleep %s\nprintf "PRECISE"\n' "$secs" > "$slow"
     chmod +x "$slow"
@@ -175,7 +175,7 @@ test_every_progress_mode_paints_something() {
     local mode out
     for mode in screen line static native; do
         out=$(render_in_mode "$mode")
-        assert_file_contains "$out" 'ewriting your prompt' \
+        assert_file_contains "$out" 'ewriting' \
             "mode '$mode' painted the screen" || return 1
     done
 }
@@ -184,7 +184,7 @@ test_every_progress_mode_paints_something() {
 # exists to remove.
 test_unknown_progress_mode_falls_back_to_a_display() {
     local out; out=$(render_in_mode 'nonsense-value')
-    assert_file_contains "$out" 'ewriting your prompt' "an unknown mode still paints"
+    assert_file_contains "$out" 'ewriting' "an unknown mode still paints"
 }
 
 # Only the screen mode echoes the prompt, so only it can clip one. A pasted
@@ -200,7 +200,7 @@ test_screen_mode_caps_a_long_prompt_and_marks_it() {
     # against a shim that never clips anything, so pin the whole marker.
     assert_file_contains "$out" '… prompt clipped' "the clip is marked, not silent" || return 1
     local shown
-    shown=$(tr '\r' '\n' < "$out" | grep -c 'of a very long prompt')
+    shown=$(perl -0777 -ne 's/.*\e\[H//s; print' < "$out" | tr '\r' '\n' | grep -c 'of a very long prompt')
     [ "$shown" -le 8 ] || { echo "    expected <=8 prompt lines, got $shown"; return 1; }
 }
 
@@ -235,22 +235,15 @@ test_animated_modes_withhold_the_elapsed_under_five_seconds() {
 
 test_animated_modes_show_the_elapsed_past_five_seconds() {
     local mode out
-    for mode in native screen; do
+    # screen is excluded deliberately: it shows time REMAINING against the
+    # budget, so it has no elapsed to withhold. See test_screen_mode_counts_down.
+    for mode in native; do
         out=$(render_in_mode "$mode" '' 6)
         assert_file_contains "$out" '(5s)' \
             "mode '$mode' shows the elapsed once it is worth reading" || return 1
     done
 }
 
-# The status line carries Claude Code's own label rather than an invention.
-test_screen_mode_uses_the_house_label() {
-    local out; out=$(render_in_mode screen '' 1)
-    assert_file_contains "$out" 'Working…' "the house label, capitalised as Claude Code writes it"
-}
-
-# A blinking cursor parked at the end of the line reads as unfinished output.
-# Hiding it is only safe if it always comes back: a shim that exits with the
-# cursor still hidden leaves the terminal that way, which is far worse than the
 # cosmetic problem it solves. Both halves are asserted together for that reason.
 test_progress_hides_the_cursor_and_restores_it() {
     local mode out hide show
@@ -275,7 +268,7 @@ test_no_progress_mode_advertises_ctrl_c() {
     for mode in screen line static native; do
         out=$(render_in_mode "$mode")
         # Guard the guard: if nothing painted, absence of the hint proves nothing.
-        assert_file_contains "$out" 'ewriting your prompt' "mode '$mode' painted" || return 1
+        assert_file_contains "$out" 'ewriting' "mode '$mode' painted" || return 1
         assert_file_not_contains "$out" '\^C' "mode '$mode' must not offer ctrl+c" || return 1
         assert_file_not_contains "$out" 'ctrl+c' "mode '$mode' must not spell it out" || return 1
     done
@@ -431,7 +424,7 @@ test_the_header_names_the_resolved_engine_and_model() {
     unset CS_REWRITE_CMD
     local bin="$TEST_TMPDIR/bin"
     mkdir -p "$bin"
-    printf '#!/bin/bash\nsleep 0.6\nprintf "REWRITTEN"\n' > "$bin/agy"
+    printf '#!/bin/bash\nsleep 1.8\nprintf "REWRITTEN"\n' > "$bin/agy"
     chmod +x "$bin/agy"
     local f out
     f=$(composer_file "make the login thing better")
@@ -459,13 +452,57 @@ test_claude_api_routes_to_the_vendor_rewriter() {
     assert_file_contains "$f" 'VIA MESSAGES' "claude-api routes to the vendor rewriter"
 }
 
+# A rewrite shorter than the draw threshold must leave the terminal alone. On
+# gemini-api the whole call is ~0.9s, so a screen that paints at 0.3s appears
+# and vanishes before it can be read — a flash is worse than nothing.
+test_a_fast_rewrite_draws_nothing() {
+    local out
+    out=$(render_in_mode screen '' 0.4)
+    # Not "the file is empty": script(1) writes its own bytes to the capture no
+    # matter what the child does. Assert the absence of OUR markers instead.
+    assert_file_not_contains "$out" 'ewriting' "a sub-threshold rewrite must not paint" || return 1
+    assert_file_not_contains "$out" '▏' "no margin rule below the threshold" || return 1
+    # Guard the guard: the two assertions above also pass against a shim that
+    # never paints at all, so prove the same helper DOES paint when the rewrite
+    # outlives the threshold.
+    out=$(render_in_mode screen)
+    assert_file_contains "$out" '▏' "the same path paints above the threshold"
+}
+
+# The prompt is the subject of this screen, held in a margin rule the way a
+# quoted passage is marked up — not body text under a header.
+test_screen_mode_frames_the_prompt_in_a_margin() {
+    local out; out=$(render_in_mode screen)
+    assert_file_contains "$out" '▏' "the prompt sits in a margin rule" || return 1
+    assert_file_contains "$out" 'make the login thing better' "the prompt is on screen"
+}
+
+# Elapsed is a number you cannot act on: nothing here can be cancelled. What is
+# left against the budget is the only fact worth showing.
+test_screen_mode_counts_down_not_up() {
+    local out; out=$(render_in_mode screen)
+    assert_file_contains "$out" 'left' "the budget counts down" || return 1
+    assert_file_not_contains "$out" 'Working…' "the generic label is gone"
+}
+
+# The margin rule carries the liveness, so the spinner beside it is redundant —
+# two things animating for one fact.
+test_screen_mode_has_no_spinner() {
+    local out; out=$(render_in_mode screen)
+    assert_file_not_contains "$out" '⠙' "no braille spinner in screen mode" || return 1
+    assert_file_not_contains "$out" '⠹' "no braille spinner in screen mode"
+}
+
 run_test test_every_progress_mode_paints_something
 run_test test_unknown_progress_mode_falls_back_to_a_display
 run_test test_screen_mode_caps_a_long_prompt_and_marks_it
 run_test test_line_and_static_modes_do_not_echo_the_prompt
 run_test test_animated_modes_withhold_the_elapsed_under_five_seconds
 run_test test_animated_modes_show_the_elapsed_past_five_seconds
-run_test test_screen_mode_uses_the_house_label
+run_test test_a_fast_rewrite_draws_nothing
+run_test test_screen_mode_frames_the_prompt_in_a_margin
+run_test test_screen_mode_counts_down_not_up
+run_test test_screen_mode_has_no_spinner
 run_test test_the_header_names_the_resolved_engine_and_model
 run_test test_progress_hides_the_cursor_and_restores_it
 run_test test_no_progress_mode_advertises_ctrl_c
