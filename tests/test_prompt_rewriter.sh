@@ -36,6 +36,24 @@ composer_file() {  # content
     printf '%s' "$f"
 }
 
+# Run the shim under a real pty in a given progress mode and return the capture
+# path. Only a pty makes [ -t 2 ] true; without one every rendering assertion
+# below would pass against a shim that draws nothing.
+render_in_mode() {  # mode, [prompt]
+    local mode="$1" text="${2:-make the login thing better}"
+    local slow="$TEST_TMPDIR/slow-rewrite.sh"
+    printf '#!/bin/bash\nsleep 0.6\nprintf "PRECISE"\n' > "$slow"
+    chmod +x "$slow"
+    local f; f=$(composer_file "$text")
+    local out="$TEST_TMPDIR/pty-$mode"
+    # script(1) tcgetattr's its OWN stdin and dies on a socket, which is what a
+    # CI runner or an agent harness often hands it; /dev/null still gets the
+    # child a pty.
+    CS_REWRITE_PROGRESS="$mode" CS_REWRITE_CMD="$slow" \
+        script -q /dev/null "$SHIM" "$f" < /dev/null > "$out" 2>&1
+    printf '%s' "$out"
+}
+
 test_rewrites_the_composer_file_in_place() {
     local f; f=$(composer_file "make the login thing better")
     "$SHIM" "$f" >/dev/null 2>&1
@@ -151,49 +169,83 @@ test_shim_never_leaves_a_temp_file_behind() {
     assert_not_exists "$f.cs-tmp" "the tmp+rename leaves no residue"
 }
 
-# Claude Code hands the shim a BLANK alternate screen and waits, so the shim
-# owns the terminal for the whole rewrite. Only a real pty makes [ -t 2 ] true;
-# without one this test would pass against a shim that renders nothing at all.
-test_progress_renders_under_a_pty() {
-    local slow="$TEST_TMPDIR/slow-rewrite.sh"
-    cat > "$slow" <<'SLOWEOF'
-#!/bin/bash
-sleep 0.6
-printf 'PRECISE: %s' "$(cat)"
-SLOWEOF
-    chmod +x "$slow"
-    local f; f=$(composer_file "make the login thing better")
-    local out="$TEST_TMPDIR/pty-out"
-    # script(1) tcgetattr's its OWN stdin and dies on a socket, which is what a
-    # CI runner or an agent harness often hands it; /dev/null still gets the
-    # child a pty.
-    CS_REWRITE_CMD="$slow" script -q /dev/null "$SHIM" "$f" < /dev/null > "$out" 2>&1
-    assert_file_contains "$out" "rewriting your prompt" \
-        "the loader painted while the rewrite ran" || return 1
-    assert_eq "PRECISE: make the login thing better" "$(cat "$f")" \
-        "and the rewrite still landed in the buffer"
+# Every mode must put something on that blank screen — that is the entire point
+# of the feature, and the one property all three share.
+test_every_progress_mode_paints_something() {
+    local mode out
+    for mode in screen line static; do
+        out=$(render_in_mode "$mode")
+        assert_file_contains "$out" 'ewriting your prompt' \
+            "mode '$mode' painted the screen" || return 1
+    done
 }
 
-# A pasted essay must not scroll the header off the screen, and the user has to
-# be told their prompt was clipped rather than silently shown a fragment.
-test_progress_caps_a_long_prompt_and_marks_it() {
-    local slow="$TEST_TMPDIR/slow-rewrite.sh"
-    printf '#!/bin/bash\nsleep 0.6\nprintf "PRECISE"\n' > "$slow"
-    chmod +x "$slow"
+# An unrecognised value must not silently restore the blank screen the feature
+# exists to remove.
+test_unknown_progress_mode_falls_back_to_a_display() {
+    local out; out=$(render_in_mode 'nonsense-value')
+    assert_file_contains "$out" 'ewriting your prompt' "an unknown mode still paints"
+}
+
+# Only the screen mode echoes the prompt, so only it can clip one. A pasted
+# essay must not scroll the header away, and the user has to be told it was
+# clipped rather than shown a fragment that reads like the whole thing.
+test_screen_mode_caps_a_long_prompt_and_marks_it() {
     local long='' i=''
     for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
         long="$long line $i of a very long prompt that keeps going and going;"
     done
-    local f; f=$(composer_file "$long")
-    local out="$TEST_TMPDIR/pty-out"
-    CS_REWRITE_CMD="$slow" script -q /dev/null "$SHIM" "$f" < /dev/null > "$out" 2>&1
+    local out; out=$(render_in_mode screen "$long")
     # A bare '…' would match the 'working…' in the spinner line and pass
     # against a shim that never clips anything, so pin the whole marker.
     assert_file_contains "$out" '… prompt clipped' "the clip is marked, not silent" || return 1
-    # 8 prompt lines + the ellipsis, never the whole essay.
     local shown
     shown=$(tr '\r' '\n' < "$out" | grep -c 'of a very long prompt')
     [ "$shown" -le 8 ] || { echo "    expected <=8 prompt lines, got $shown"; return 1; }
+}
+
+# The line and static modes are deliberately bare: no prompt echo, so a pasted
+# secret or a long essay never reaches the screen at all.
+test_line_and_static_modes_do_not_echo_the_prompt() {
+    local mode out
+    for mode in line static; do
+        out=$(render_in_mode "$mode" "correct-horse-battery-staple")
+        assert_file_not_contains "$out" 'correct-horse-battery-staple' \
+            "mode '$mode' keeps the prompt off screen" || return 1
+    done
+}
+
+# A blinking cursor parked at the end of the line reads as unfinished output.
+# Hiding it is only safe if it always comes back: a shim that exits with the
+# cursor still hidden leaves the terminal that way, which is far worse than the
+# cosmetic problem it solves. Both halves are asserted together for that reason.
+test_progress_hides_the_cursor_and_restores_it() {
+    local mode out hide show
+    for mode in screen line static; do
+        out=$(render_in_mode "$mode")
+        assert_file_contains "$out" $'\033\[?25l' "mode '$mode' hides the cursor" || return 1
+        # Order matters, not just presence: restoring before hiding would
+        # satisfy a presence check and still leave the cursor hidden.
+        hide=$(grep -abo $'\033\[?25l' "$out" | head -1 | cut -d: -f1)
+        show=$(grep -abo $'\033\[?25h' "$out" | tail -1 | cut -d: -f1)
+        [ -n "$hide" ] && [ -n "$show" ] && [ "$show" -gt "$hide" ] \
+            || { echo "mode '$mode': restore at '$show' does not follow hide at '$hide'"; return 1; }
+    done
+}
+
+# No mode may offer ctrl+c. The terminal delivers SIGINT to the whole foreground
+# process group, which contains Claude Code, so the keystroke ends the session —
+# no handler in a spawned shim can intercept it. Advertising it as a way to keep
+# your prompt costs the user their session.
+test_no_progress_mode_advertises_ctrl_c() {
+    local mode out
+    for mode in screen line static; do
+        out=$(render_in_mode "$mode")
+        # Guard the guard: if nothing painted, absence of the hint proves nothing.
+        assert_file_contains "$out" 'ewriting your prompt' "mode '$mode' painted" || return 1
+        assert_file_not_contains "$out" '\^C' "mode '$mode' must not offer ctrl+c" || return 1
+        assert_file_not_contains "$out" 'ctrl+c' "mode '$mode' must not spell it out" || return 1
+    done
 }
 
 # Cancelling a rewrite must read as "keep what I typed", not as a crash: Claude
@@ -292,52 +344,14 @@ SLOWEOF
     fi
 }
 
-# The loader must not offer ctrl+c. The terminal delivers SIGINT to the whole
-# foreground process group, which contains Claude Code, so the keystroke ends
-# the session — no handler in a spawned shim can intercept that. Advertising it
-# as a way to keep your prompt costs the user their session.
-test_progress_does_not_advertise_ctrl_c() {
-    local slow="$TEST_TMPDIR/slow-rewrite.sh"
-    printf '#!/bin/bash\nsleep 0.6\nprintf "PRECISE"\n' > "$slow"
-    chmod +x "$slow"
-    local f; f=$(composer_file "make the login thing better")
-    local out="$TEST_TMPDIR/pty-out"
-    CS_REWRITE_CMD="$slow" script -q /dev/null "$SHIM" "$f" < /dev/null > "$out" 2>&1
-    # Guard the guard: if nothing painted, absence of the hint proves nothing.
-    assert_file_contains "$out" "rewriting your prompt" "the loader painted" || return 1
-    assert_file_not_contains "$out" '\^C' "the screen must not offer ctrl+c" || return 1
-    assert_file_not_contains "$out" 'ctrl+c' "nor spell it out"
-}
-
-# A blinking cursor parked at the end of the spinner line reads as unfinished
-# output. Hiding it is only safe if it always comes back: a shim that exits with
-# the cursor still hidden leaves the terminal that way, which is far worse than
-# the cosmetic problem it solves. Both halves are asserted together for that
-# reason.
-test_progress_hides_the_cursor_and_restores_it() {
-    local slow="$TEST_TMPDIR/slow-rewrite.sh"
-    printf '#!/bin/bash\nsleep 0.6\nprintf "PRECISE"\n' > "$slow"
-    chmod +x "$slow"
-    local f; f=$(composer_file "make the login thing better")
-    local out="$TEST_TMPDIR/pty-out"
-    CS_REWRITE_CMD="$slow" script -q /dev/null "$SHIM" "$f" < /dev/null > "$out" 2>&1
-    assert_file_contains "$out" $'\033\[?25l' "the loader hides the cursor" || return 1
-    assert_file_contains "$out" $'\033\[?25h' "and shows it again" || return 1
-    # Order matters, not just presence: restoring before hiding would satisfy
-    # both assertions above and still leave the cursor hidden.
-    local hide show
-    hide=$(printf '%s' "$(command cat "$out")" | grep -abo $'\033\[?25l' | head -1 | cut -d: -f1)
-    show=$(printf '%s' "$(command cat "$out")" | grep -abo $'\033\[?25h' | tail -1 | cut -d: -f1)
-    [ -n "$hide" ] && [ -n "$show" ] && [ "$show" -gt "$hide" ] \
-        || { echo "restore at $show does not follow hide at $hide"; return 1; }
-}
-
-run_test test_progress_renders_under_a_pty
+run_test test_every_progress_mode_paints_something
+run_test test_unknown_progress_mode_falls_back_to_a_display
+run_test test_screen_mode_caps_a_long_prompt_and_marks_it
+run_test test_line_and_static_modes_do_not_echo_the_prompt
 run_test test_progress_hides_the_cursor_and_restores_it
-run_test test_progress_does_not_advertise_ctrl_c
+run_test test_no_progress_mode_advertises_ctrl_c
 run_test test_cancel_reaps_the_whole_rewriter_tree
 run_test test_progress_is_silent_without_a_tty
-run_test test_progress_caps_a_long_prompt_and_marks_it
 run_test test_cancel_keeps_the_original_and_exits_clean
 run_test test_rewrites_the_composer_file_in_place
 run_test test_non_composer_file_goes_to_the_real_editor

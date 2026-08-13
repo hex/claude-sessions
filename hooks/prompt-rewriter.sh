@@ -56,6 +56,18 @@ else
     _b=''; _d=''; _r=''
 fi
 
+# Terminal geometry, with a plausible fallback rather than a failure: this is
+# decoration, and no arithmetic here may cost the user their prompt.
+_geometry() {  # lines|cols -> a count
+    local n
+    n=$(tput "$1" 2>/dev/null) || n=0
+    case "$n" in ''|*[!0-9]*) n=0 ;; esac
+    if [ "$n" -lt 10 ]; then
+        [ "$1" = lines ] && n=24 || n=80
+    fi
+    printf '%s' "$n"
+}
+
 # claude-haiku-4-5-20251001 -> haiku 4.5
 _model_label() {
     printf '%s' "${CS_REWRITE_MODEL:-claude-haiku-4-5-20251001}" \
@@ -63,12 +75,11 @@ _model_label() {
               -e 's/\([0-9]\)-\([0-9]\)/\1.\2/g' -e 's/-/ /g'
 }
 
-# The static part of the screen: drawn once, so the poll loop only ever
-# repaints its own last line.
+# The header, rule and echoed prompt of the screen mode. Drawn once, so the
+# poll loop only ever repaints its own last line.
 _paint_screen() {
     local cols title label pad
-    cols=$(tput cols 2>/dev/null) || cols=80
-    [ "$cols" -ge 40 ] 2>/dev/null || cols=80
+    cols=$(_geometry cols)
     title='cs · rewriting your prompt'
     label=$(_model_label)
     pad=$(( cols - 4 - ${#title} - ${#label} ))
@@ -86,10 +97,27 @@ _paint_screen() {
     printf '\n' >&2
 }
 
+# Drops the cursor to the vertical middle for the modes that show one line on
+# an otherwise empty screen.
+_center_vertically() {
+    local blanks
+    blanks=$(( $(_geometry lines) / 2 - 1 ))
+    [ "$blanks" -ge 0 ] || blanks=0
+    awk -v n="$blanks" 'BEGIN{while (n-- > 0) printf "\n"}' >&2
+}
+
+# Horizontal offset that puts a line of roughly `width` in the middle.
+_center_indent() {  # width
+    local indent
+    indent=$(( ($(_geometry cols) - $1) / 2 ))
+    [ "$indent" -ge 0 ] || indent=0
+    printf '%s' "$indent"
+}
+
 # Spins until the rewriter exits. Elapsed comes from SECONDS rather than a
 # frame count, so sleep drift never shows up as a wrong clock.
 _render_until_done() {  # pid
-    local pid="$1" i=0 budget=''
+    local pid="$1" i=0 budget='' indent
     # A fast CS_REWRITE_CMD should never flash a loader on screen.
     sleep 0.3
     kill -0 "$pid" 2>/dev/null || return 0
@@ -97,21 +125,55 @@ _render_until_done() {  # pid
     if command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; then
         budget=" / ${CS_REWRITE_TIMEOUT:-25}s"
     fi
-    # Hidden for the spin, restored below and in the trap. A cursor parked
-    # at the end of the status line reads as unfinished output.
+
+    # Hidden for the whole display, restored below and in the trap. A cursor
+    # parked at the end of the line reads as unfinished output.
     printf '\033[?25l' >&2
-    _paint_screen
-    SECONDS=0
-    # No interrupt is offered. The terminal delivers SIGINT to the whole
-    # foreground process group, Claude Code included, so ctrl+c here ends the
-    # session rather than the rewrite — nothing a spawned shim does can change
-    # that. The timeout is the only bound, which is why it is on screen.
-    while kill -0 "$pid" 2>/dev/null; do
-        printf '\r  %s  working…   %ss%s\033[K' \
-            "${_spin[$(( i % 10 ))]}" "$SECONDS" "$budget" >&2
-        i=$(( i + 1 ))
-        sleep 0.1
-    done
+
+    # No interrupt is offered in any mode. The terminal delivers SIGINT to the
+    # whole foreground process group, Claude Code included, so ctrl+c here ends
+    # the session rather than the rewrite — nothing a spawned shim does can
+    # change that. The timeout is the only bound, which is why it is on screen.
+    # An unrecognised value lands on the default arm rather than drawing
+    # nothing: a typo in a shell profile must not silently restore the blank
+    # screen this exists to remove.
+    case "${CS_REWRITE_PROGRESS:-screen}" in
+        static)
+            # No animation and no repaint: one line, then wait. Nothing on
+            # screen distinguishes a working rewrite from a wedged one, which
+            # is the whole cost of the mode.
+            _center_vertically
+            indent=$(_center_indent 40)
+            printf '%*s%sRewriting your prompt…  up to %ss%s\n' \
+                "$indent" '' "$_d" "${CS_REWRITE_TIMEOUT:-25}" "$_r" >&2
+            while kill -0 "$pid" 2>/dev/null; do sleep 0.2; done
+            ;;
+        line)
+            _center_vertically
+            # 34 is the settled width at two-digit seconds. A column out on a
+            # short count is invisible; recomputing per frame would make the
+            # line jitter as the seconds roll over.
+            indent=$(_center_indent 34)
+            SECONDS=0
+            while kill -0 "$pid" 2>/dev/null; do
+                printf '\r%*s%s%s  Rewriting your prompt…  %ss%s%s\033[K' \
+                    "$indent" '' "$_d" "${_spin[$(( i % 10 ))]}" "$SECONDS" "$budget" "$_r" >&2
+                i=$(( i + 1 ))
+                sleep 0.1
+            done
+            ;;
+        *)
+            _paint_screen
+            SECONDS=0
+            while kill -0 "$pid" 2>/dev/null; do
+                printf '\r  %s  working…   %ss%s\033[K' \
+                    "${_spin[$(( i % 10 ))]}" "$SECONDS" "$budget" >&2
+                i=$(( i + 1 ))
+                sleep 0.1
+            done
+            ;;
+    esac
+
     printf '\r\033[K\033[?25h' >&2
 }
 

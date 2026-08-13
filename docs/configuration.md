@@ -64,6 +64,12 @@ export CS_REWRITE_DISABLE="1"
 export CS_REWRITE_MODEL="claude-haiku-4-5-20251001"   # this is the default
 export CS_REWRITE_TIMEOUT="25"                        # seconds; needs timeout(1)
 
+# What fills the blank screen while the rewrite runs. `screen` shows a header,
+# the model, and your prompt above the spinner; `line` is one centred line;
+# `static` prints once and never animates, so a wedged rewrite looks the same
+# as a working one. An unrecognised value falls back to `screen`.
+export CS_REWRITE_PROGRESS="screen"                   # screen | line | static
+
 # Replace the rewriter itself. Reads the rough prompt on stdin, writes the
 # rewrite to stdout, non-zero to leave the prompt untouched.
 export CS_REWRITE_CMD="/path/to/my-rewriter"
