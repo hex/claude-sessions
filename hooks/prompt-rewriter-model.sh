@@ -13,8 +13,17 @@ command -v claude >/dev/null 2>&1 || exit 1
 # plugins, agents and hooks — so the rewrite cannot recurse into cs's own hooks,
 # and cannot be broken by an unrelated agent definition (an inherited agent
 # pinning a data-retention-gated model makes the API reject the whole request
-# with `tools.N.model`, which --safe-mode does NOT prevent). Credentials come
-# from the environment and keychain, not from here, so auth still works.
+# with `tools.N.model`, which --safe-mode does NOT prevent).
+#
+# It does NOT come with credentials. Claude Code derives the keychain service
+# name from the config directory:
+#
+#     o = r ? "" : `-${sha256(configDir).digest("hex").substring(0,8)}`
+#     service = `Claude Code…-credentials${o}`
+#
+# so setting CLAUDE_CONFIG_DIR alone points the lookup at an item that was
+# never created, and the call reports "Not logged in". See the auth block
+# below for how the login is restored.
 cfg="${XDG_CACHE_HOME:-$HOME/.cache}/cs/rewrite-config"
 if [ ! -f "$cfg/settings.json" ]; then
     mkdir -p "$cfg" 2>/dev/null || exit 1
@@ -43,12 +52,11 @@ SYS
 # with spawnSync and stdio:"inherit". Bound it where a timeout exists — stock
 # macOS ships neither `timeout` nor `gtimeout`, so this is best-effort.
 _limit="${CS_REWRITE_TIMEOUT:-25}"
+_tmo=()
 if command -v timeout >/dev/null 2>&1; then
-    set -- timeout "$_limit"
+    _tmo=(timeout "$_limit")
 elif command -v gtimeout >/dev/null 2>&1; then
-    set -- gtimeout "$_limit"
-else
-    set --
+    _tmo=(gtimeout "$_limit")
 fi
 
 # Run from the hermetic dir, not the user's project. `claude -p` reads the CWD's
@@ -59,21 +67,76 @@ fi
 # Scrub the session context out of the child's environment. cs exports the
 # memory-path override and the session dirs, and a nested claude inherits them —
 # which pulled cs's own memory into the rewrite, so a request to add a flag came
-# back demanding TDD and bash 3.2 compatibility. Auth vars are deliberately left
-# alone; they are what makes the call work at all.
-out=$(cd "$cfg" 2>/dev/null && printf '%s' "$prompt" | CLAUDE_CONFIG_DIR="$cfg" \
-    env -u CLAUDE_COWORK_MEMORY_PATH_OVERRIDE -u CLAUDE_CODE_AUTO_MEMORY_PATH \
-        -u CLAUDE_SESSION_DIR -u CLAUDE_SESSION_META_DIR -u CLAUDE_SESSION_NAME \
-        -u CLAUDE_CODE_TASK_LIST_ID -u CLAUDE_PROJECT_DIR \
-    "$@" claude -p \
-    --model "${CS_REWRITE_MODEL:-claude-haiku-4-5-20251001}" \
-    --system-prompt "$_system" 2>/dev/null) || exit 1
+# back demanding TDD and bash 3.2 compatibility.
+#
+# Where the parent resolves its credentials, captured BEFORE the call overrides
+# CLAUDE_CONFIG_DIR. It cannot be read inside the prefix list below: bash
+# processes those assignments left to right, so a later one reading
+# CLAUDE_CONFIG_DIR would see the hermetic value and hash that instead. Empty
+# when the parent has no config dir of its own, which is the value that makes
+# the keychain lookup drop its suffix; a parent running its own config dir keeps
+# its login under that dir's hash, and the child has to ask for the same item.
+_securestore="${CLAUDE_SECURESTORAGE_CONFIG_DIR-${CLAUDE_CONFIG_DIR-}}"
 
-# An API error is delivered on stdout with a zero status, so a status check
-# alone would hand the error text back as the user's prompt.
-case "$out" in
-    'API Error:'*|'Execution error'*) exit 1 ;;
-esac
+# ANTHROPIC_API_KEY goes, and only it. Claude Code resolves an ambient key
+# differently either side of `-p`: print mode takes it unconditionally, while
+# interactive mode requires it to appear in `customApiKeyResponses.approved`.
+# So a stale key leaves the user's own session healthy and kills every nested
+# rewrite — and not quickly, because a rejected key retries until the timeout
+# and returns nothing. That asymmetry is the whole justification, which is why
+# it does not extend to ANTHROPIC_AUTH_TOKEN: that one is checked identically in
+# both modes, so a dead one breaks the parent too and the user already knows.
+# Stripping it would strand proxy users as well, whose ANTHROPIC_BASE_URL and
+# ANTHROPIC_CUSTOM_HEADERS remain — the rewrite would present a keychain OAuth
+# bearer at their gateway.
+_attempt() {  # 1 = drop the ambient key, 0 = keep it
+    local scrub="$1"
+    if [ "$scrub" = 1 ]; then
+        cd "$cfg" 2>/dev/null && printf '%s' "$prompt" | CLAUDE_CONFIG_DIR="$cfg" \
+            CLAUDE_SECURESTORAGE_CONFIG_DIR="$_securestore" \
+            env -u CLAUDE_COWORK_MEMORY_PATH_OVERRIDE -u CLAUDE_CODE_AUTO_MEMORY_PATH \
+                -u CLAUDE_SESSION_DIR -u CLAUDE_SESSION_META_DIR -u CLAUDE_SESSION_NAME \
+                -u CLAUDE_CODE_TASK_LIST_ID -u CLAUDE_PROJECT_DIR \
+                -u ANTHROPIC_API_KEY \
+            "${_tmo[@]}" claude -p \
+            --model "${CS_REWRITE_MODEL:-claude-haiku-4-5-20251001}" \
+            --system-prompt "$_system" 2>/dev/null
+    else
+        cd "$cfg" 2>/dev/null && printf '%s' "$prompt" | CLAUDE_CONFIG_DIR="$cfg" \
+            CLAUDE_SECURESTORAGE_CONFIG_DIR="$_securestore" \
+            env -u CLAUDE_COWORK_MEMORY_PATH_OVERRIDE -u CLAUDE_CODE_AUTO_MEMORY_PATH \
+                -u CLAUDE_SESSION_DIR -u CLAUDE_SESSION_META_DIR -u CLAUDE_SESSION_NAME \
+                -u CLAUDE_CODE_TASK_LIST_ID -u CLAUDE_PROJECT_DIR \
+            "${_tmo[@]}" claude -p \
+            --model "${CS_REWRITE_MODEL:-claude-haiku-4-5-20251001}" \
+            --system-prompt "$_system" 2>/dev/null
+    fi
+}
 
-[ -n "${out//[[:space:]]/}" ] || exit 1
+# An error arrives on stdout with a zero status, so a status check alone would
+# hand the error text back as the user's prompt.
+_failed() {  # status, output
+    [ "$1" -ne 0 ] && return 0
+    case "$2" in 'API Error:'*|'Execution error'*|'Not logged in'*) return 0 ;; esac
+    [ -n "${2//[[:space:]]/}" ] || return 0
+    return 1
+}
+
+_rc=0
+_began=$SECONDS
+out=$(_attempt 1) || _rc=$?
+_took=$(( SECONDS - _began ))
+
+# A user whose only credential is a Console API key has no login to fall back
+# on, so the scrubbed attempt fails in about a second. Give the key one go
+# rather than leaving the feature dead for them. Only after a FAST failure: an
+# attempt that already spent the timeout has nothing left to spend, and a second
+# would double the freeze this timeout exists to bound.
+if _failed "$_rc" "$out" && [ -n "${ANTHROPIC_API_KEY:-}" ] && [ "$_took" -lt 5 ]; then
+    _rc=0
+    out=$(_attempt 0) || _rc=$?
+fi
+
+_failed "$_rc" "$out" && exit 1
+
 printf '%s' "$out"

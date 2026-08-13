@@ -43,9 +43,37 @@ cargo test --manifest-path tui/Cargo.toml
 
 `run_all.sh` runs several suites at once by default and replays their output in
 the order a serial run would have printed it, so the concurrency is invisible
-unless something fails. `CS_TEST_JOBS=1` runs them one at a time and streams
-each suite's output as it happens, which is what you want when bisecting a
-failure inside a single suite.
+unless something fails. It announces its plan first (`running 57 suites at 10
+jobs`); the lane count is what explains the wall time. `CS_TEST_JOBS=1` runs
+them one at a time and streams each suite's output as it happens, which is what
+you want when bisecting a failure inside a single suite.
+
+### Which tests to run, and when
+
+The full gate takes minutes. Most of the time you do not want it.
+
+| Situation | Run |
+|---|---|
+| Red/green loop on one file | that file's suite alone, roughly a second or two |
+| About to commit | the affected suite, plus anything sharing a library you touched |
+| About to merge, or cutting a release | `bash tests/run_all.sh` |
+
+Order the gates so the cheap ones run first. A full sweep before a quick manual
+check that could send you back to the code is a sweep you pay for twice.
+
+### Run a single suite under both bash versions
+
+```bash
+/bin/bash tests/test_foo.sh   # 3.2 on macOS: the floor, and what CI pins
+bash tests/test_foo.sh        # 5.x if Homebrew is on PATH: what run_all spawns
+```
+
+`run_all.sh` launches suites with a bare `bash`, so on a dev box with Homebrew
+the gate runs them under 5.x while a hand-run `/bin/bash tests/...`
+uses 3.2. The two disagree — `local x` leaves `x` unset under 4.4 and later,
+where `set -u` then aborts the suite, and 3.2 accepts it — so a suite can pass
+alone and abort under the gate, or the reverse. Checking both takes seconds and
+catches the whole class.
 
 Every bash suite under `tests/` plus the Rust TUI tests must
 pass before submitting changes; CI (`.github/workflows/test.yml`) runs them on
