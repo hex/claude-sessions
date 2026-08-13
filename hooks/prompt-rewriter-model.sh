@@ -13,8 +13,17 @@ command -v claude >/dev/null 2>&1 || exit 1
 # plugins, agents and hooks — so the rewrite cannot recurse into cs's own hooks,
 # and cannot be broken by an unrelated agent definition (an inherited agent
 # pinning a data-retention-gated model makes the API reject the whole request
-# with `tools.N.model`, which --safe-mode does NOT prevent). Credentials come
-# from the environment and keychain, not from here, so auth still works.
+# with `tools.N.model`, which --safe-mode does NOT prevent).
+#
+# It does NOT come with credentials. Claude Code derives the keychain service
+# name from the config directory:
+#
+#     o = r ? "" : `-${sha256(configDir).digest("hex").substring(0,8)}`
+#     service = `Claude Code…-credentials${o}`
+#
+# so setting CLAUDE_CONFIG_DIR alone points the lookup at an item that was
+# never created, and the call reports "Not logged in". See the auth block
+# below for how the login is restored.
 cfg="${XDG_CACHE_HOME:-$HOME/.cache}/cs/rewrite-config"
 if [ ! -f "$cfg/settings.json" ]; then
     mkdir -p "$cfg" 2>/dev/null || exit 1
@@ -59,12 +68,22 @@ fi
 # Scrub the session context out of the child's environment. cs exports the
 # memory-path override and the session dirs, and a nested claude inherits them —
 # which pulled cs's own memory into the rewrite, so a request to add a flag came
-# back demanding TDD and bash 3.2 compatibility. Auth vars are deliberately left
-# alone; they are what makes the call work at all.
+# back demanding TDD and bash 3.2 compatibility.
+#
+# The auth vars go too, and this is the load-bearing part. Claude Code prefers
+# an ambient ANTHROPIC_API_KEY over the user's claude.ai login, so a key that is
+# stale, rotated or simply wrong takes every rewrite down with it — and not
+# quickly: a rejected key sends the call into retries, so it burns the whole
+# timeout and fails silently rather than erroring. Dropping the key leaves the
+# login, and CLAUDE_SECURESTORAGE_CONFIG_DIR set to empty makes the keychain
+# lookup drop the config-dir suffix described above, so the hermetic call reads
+# the credentials the user already has.
 out=$(cd "$cfg" 2>/dev/null && printf '%s' "$prompt" | CLAUDE_CONFIG_DIR="$cfg" \
+    CLAUDE_SECURESTORAGE_CONFIG_DIR="" \
     env -u CLAUDE_COWORK_MEMORY_PATH_OVERRIDE -u CLAUDE_CODE_AUTO_MEMORY_PATH \
         -u CLAUDE_SESSION_DIR -u CLAUDE_SESSION_META_DIR -u CLAUDE_SESSION_NAME \
         -u CLAUDE_CODE_TASK_LIST_ID -u CLAUDE_PROJECT_DIR \
+        -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
     "$@" claude -p \
     --model "${CS_REWRITE_MODEL:-claude-haiku-4-5-20251001}" \
     --system-prompt "$_system" 2>/dev/null) || exit 1
