@@ -60,7 +60,26 @@ export CS_CLARIFY_DISABLE="1"
 # independent. When set, cs leaves your $EDITOR alone entirely.
 export CS_REWRITE_DISABLE="1"
 
-# The model that rewrites prompts, and how long to wait for it.
+# Who rewrites prompts. The default is Claude, through the `claude` CLI and your
+# existing login. `openai` and `gemini` prefer that vendor's CLI when its binary
+# is on PATH — `codex` and `agy` respectively, both using your subscription — and
+# fall back to the vendor's API when it is not, reading OPENAI_API_KEY or
+# GEMINI_API_KEY from the environment. With neither a CLI nor a key, the rewrite
+# declines and your prompt stays as typed.
+#
+# The CLI arms cost about ten seconds against about one for the API arms, and
+# the interface is frozen for that whole time. That is the trade the default
+# makes for you: no key, no per-token charge.
+export CS_REWRITE_PROVIDER="claude"          # claude | openai | gemini
+
+# The model that rewrites prompts, and how long to wait for it. The model
+# applies to the API arms only — a vendor CLI resolves its own model from that
+# tool's configuration, so setting this while `codex` or `agy` is on PATH has no
+# effect. Defaults per provider: claude-haiku-4-5-20251001, gpt-4.1-mini,
+# gemini-flash-lite-latest. Reasoning models are a poor fit whatever the
+# provider: they can spend most of the output budget on reasoning and return a
+# rewrite truncated mid-sentence, which cs declines — so ctrl+g intermittently
+# does nothing at all.
 export CS_REWRITE_MODEL="claude-haiku-4-5-20251001"   # this is the default
 export CS_REWRITE_TIMEOUT="25"                        # seconds; needs timeout(1)
 

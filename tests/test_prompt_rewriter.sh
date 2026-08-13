@@ -377,6 +377,51 @@ SLOWEOF
     fi
 }
 
+# The provider knob picks which shipped rewriter runs. A fake agy on PATH stands
+# in for the vendor CLI so the assertion is about the shim's routing and never
+# makes a live call.
+test_the_provider_knob_selects_the_vendor_rewriter() {
+    unset CS_REWRITE_CMD
+    local bin="$TEST_TMPDIR/bin"
+    mkdir -p "$bin"
+    printf '#!/bin/bash\nprintf "VENDOR PATH TAKEN"\n' > "$bin/agy"
+    chmod +x "$bin/agy"
+    local f
+    f=$(composer_file "make the login thing better")
+    PATH="$bin:$PATH" XDG_CACHE_HOME="$TEST_TMPDIR/cache" CS_REWRITE_PROVIDER=gemini \
+        "$SHIM" "$f"
+    assert_file_contains "$f" 'VENDOR PATH TAKEN' \
+        "CS_REWRITE_PROVIDER routes to the vendor rewriter"
+}
+
+# CS_REWRITE_CMD is the older, wider contract: any executable reading the prompt
+# on stdin. A user who set it has said exactly what they want run, so the
+# provider knob must not quietly override it.
+test_an_explicit_rewrite_cmd_outranks_the_provider_knob() {
+    local f
+    f=$(composer_file "make the login thing better")
+    CS_REWRITE_PROVIDER=gemini "$SHIM" "$f"
+    assert_file_contains "$f" '^PRECISE: ' "CS_REWRITE_CMD wins over the provider knob"
+}
+
+# A typo in a shell profile should cost the user their choice of model, never
+# their prompt, so an unrecognised provider falls back to the default rewriter
+# rather than declining. A fake claude on PATH proves which one ran without a
+# live call.
+test_an_unknown_provider_falls_back_to_the_default_rewriter() {
+    unset CS_REWRITE_CMD
+    local bin="$TEST_TMPDIR/bin"
+    mkdir -p "$bin"
+    printf '#!/bin/bash\nprintf "DEFAULT PATH TAKEN"\n' > "$bin/claude"
+    chmod +x "$bin/claude"
+    local f
+    f=$(composer_file "make the login thing better")
+    PATH="$bin:$PATH" XDG_CACHE_HOME="$TEST_TMPDIR/cache" CS_REWRITE_PROVIDER=gemeni \
+        "$SHIM" "$f"
+    assert_file_contains "$f" 'DEFAULT PATH TAKEN' \
+        "an unrecognised provider must not cost the user their prompt"
+}
+
 run_test test_every_progress_mode_paints_something
 run_test test_unknown_progress_mode_falls_back_to_a_display
 run_test test_screen_mode_caps_a_long_prompt_and_marks_it
@@ -404,5 +449,8 @@ run_test test_opt_out_via_disable_env
 run_test test_clarify_disable_does_not_suppress_the_rewriter
 run_test test_prompt_text_is_data_not_code
 run_test test_shim_never_leaves_a_temp_file_behind
+run_test test_the_provider_knob_selects_the_vendor_rewriter
+run_test test_an_explicit_rewrite_cmd_outranks_the_provider_knob
+run_test test_an_unknown_provider_falls_back_to_the_default_rewriter
 
 report_results

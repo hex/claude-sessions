@@ -58,13 +58,14 @@ CS_HOOKS=(
 
 # Files under hooks/ that the hooks source, or that cs points other tools at,
 # rather than files Claude Code invokes as hooks. Deployed and removed alongside
-# the hooks, never registered against an event. The prompt-rewriter pair is
+# the hooks, never registered against an event. The prompt-rewriter scripts are
 # reached through $EDITOR, not through any hook event.
 # KEEP THIS LIST IN SYNC WITH install.sh's CS_HOOK_LIBS.
 CS_HOOK_LIBS=(
     cs-resolve.sh
     prompt-rewriter.sh
     prompt-rewriter-model.sh
+    prompt-rewriter-vendor.sh
 )
 
 # Slash commands cs ships; deployed to ~/.claude/commands/.

@@ -84,7 +84,15 @@ _geometry() {  # lines|cols -> a count
 }
 
 # claude-haiku-4-5-20251001 -> haiku 4.5
+#
+# A vendor provider is named rather than modelled. Which engine actually answers
+# there is resolved inside the vendor rewriter — the CLI when its binary is on
+# PATH, the API otherwise — and this label is painted before that resolution
+# happens, so naming a model here would be a guess as often as a fact.
 _model_label() {
+    case "${CS_REWRITE_PROVIDER:-}" in
+        openai|gemini) printf '%s' "$CS_REWRITE_PROVIDER"; return ;;
+    esac
     printf '%s' "${CS_REWRITE_MODEL:-claude-haiku-4-5-20251001}" \
         | sed -e 's/^claude-//' -e 's/-[0-9]\{8\}$//' \
               -e 's/\([0-9]\)-\([0-9]\)/\1.\2/g' -e 's/-/ /g'
@@ -237,6 +245,16 @@ _render_until_done() {  # pid
 # substitution because a blocking substitution leaves nothing able to draw.
 out="$target.cs-out"
 
+# Which shipped rewriter runs. CS_REWRITE_CMD is the older and wider contract —
+# any executable at all — so a user who set it has already said what they want
+# run, and the provider knob must not second-guess it. An unrecognised provider
+# lands on the default rather than failing: a typo in a shell profile should cost
+# the user their choice of model, never their prompt.
+case "${CS_REWRITE_PROVIDER:-}" in
+    openai|gemini) _rewriter="$(dirname "$0")/prompt-rewriter-vendor.sh" ;;
+    *)             _rewriter="$(dirname "$0")/prompt-rewriter-model.sh" ;;
+esac
+
 # This reaps; it does not cancel. ctrl+c cannot reach the shim alone — the
 # terminal sends it to the whole foreground process group, Claude Code with it,
 # so the session ends either way. What the handler prevents is the wreckage: a
@@ -264,7 +282,7 @@ trap _keep_original INT TERM
 # Job control for the fork alone, so the rewriter and everything it starts land
 # in one process group that the trap above can address as a unit.
 set -m
-( printf '%s' "$prompt" | ${CS_REWRITE_CMD:-"$(dirname "$0")/prompt-rewriter-model.sh"} > "$out" 2>/dev/null ) &
+( printf '%s' "$prompt" | ${CS_REWRITE_CMD:-"$_rewriter"} > "$out" 2>/dev/null ) &
 _rw=$!
 set +m
 
