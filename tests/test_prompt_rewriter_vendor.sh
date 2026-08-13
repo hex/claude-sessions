@@ -267,6 +267,64 @@ test_a_killed_rewrite_leaves_no_credential_on_disk() {
     [ "$leaked" -eq 0 ]
 }
 
+# The shim paints its header before the rewrite starts, so it has to know which
+# engine will answer before the vendor script resolves that. Asking the vendor
+# script itself keeps one resolution rather than two that can drift.
+#
+# --label must be answered before the prompt is read from stdin. The shim calls
+# it without writing anything, so a script that reads first would hang the whole
+# interface waiting on a pipe nobody fills.
+test_label_names_the_engine_and_the_model() {
+    fake_bin agy 'printf "unused"'
+    local out
+    out=$(CS_REWRITE_PROVIDER=gemini CS_REWRITE_MODEL=gemini-3.6-flash "$VENDOR" --label < /dev/null)
+    [ "$out" = "agy · gemini-3.6-flash" ] || { echo "expected 'agy · gemini-3.6-flash', got '$out'"; return 1; }
+}
+
+# With no CLI on PATH the API arm answers, and its model is cs's own default, so
+# the label can always name it.
+test_label_names_the_api_arm_and_its_default_model() {
+    local out
+    out=$(CS_REWRITE_PROVIDER=gemini GEMINI_API_KEY=not-a-real-key "$VENDOR" --label < /dev/null)
+    [ "$out" = "api · gemini-flash-lite-latest" ] || { echo "expected 'api · gemini-flash-lite-latest', got '$out'"; return 1; }
+}
+
+# A vendor CLI with no model pinned resolves its own from its own config, which
+# cs cannot read. Naming a model there would be a guess, so the label stops at
+# the engine rather than inventing one.
+test_label_omits_the_model_when_the_cli_chooses_it() {
+    fake_bin codex 'printf "unused"'
+    local out
+    out=$(CS_REWRITE_PROVIDER=openai "$VENDOR" --label < /dev/null)
+    [ "$out" = "codex" ] || { echo "expected bare 'codex', got '$out'"; return 1; }
+}
+
+# One knob for every arm. The council keeps a variable per provider and defers
+# to each tool's own configuration; cs has a single CS_REWRITE_MODEL, so the
+# answer to "how do I set the model" must not depend on which arm happens to
+# win on this machine.
+test_the_model_knob_reaches_the_vendor_clis() {
+    fake_bin agy 'printf "ok"'
+    CS_REWRITE_PROVIDER=gemini CS_REWRITE_MODEL=gemini-3.6-flash run_rewrite >/dev/null
+    assert_file_contains "$ARGV_DUMP" 'model gemini-3.6-flash' \
+        "agy takes the model as --model" || return 1
+
+    : > "$ARGV_DUMP"
+    fake_bin codex 'printf "ok"'
+    CS_REWRITE_PROVIDER=openai CS_REWRITE_MODEL=gpt-5-codex run_rewrite >/dev/null
+    assert_file_contains "$ARGV_DUMP" '\-m gpt-5-codex' "codex takes the model as -m"
+}
+
+# Unset means "whatever you configured in that tool", not a model cs picked. A
+# pinned default would silently override the model chosen in Antigravity or
+# ~/.codex/config.toml, which is the user's setting and not ours to take.
+test_an_unset_model_defers_to_the_cli_configuration() {
+    fake_bin agy 'printf "ok"'
+    CS_REWRITE_PROVIDER=gemini run_rewrite >/dev/null
+    assert_file_not_contains "$ARGV_DUMP" 'model' \
+        "no model flag is passed when the user set none"
+}
+
 echo ""
 echo "Prompt rewriter vendor tests"
 echo "============================"
@@ -284,5 +342,10 @@ run_test test_an_empty_api_response_declines
 run_test test_a_truncated_api_answer_declines
 run_test test_the_cli_runs_outside_the_project
 run_test test_a_killed_rewrite_leaves_no_credential_on_disk
+run_test test_label_names_the_engine_and_the_model
+run_test test_label_names_the_api_arm_and_its_default_model
+run_test test_label_omits_the_model_when_the_cli_chooses_it
+run_test test_the_model_knob_reaches_the_vendor_clis
+run_test test_an_unset_model_defers_to_the_cli_configuration
 
 report_results

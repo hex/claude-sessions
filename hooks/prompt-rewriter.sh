@@ -85,13 +85,18 @@ _geometry() {  # lines|cols -> a count
 
 # claude-haiku-4-5-20251001 -> haiku 4.5
 #
-# A vendor provider is named rather than modelled. Which engine actually answers
-# there is resolved inside the vendor rewriter — the CLI when its binary is on
-# PATH, the API otherwise — and this label is painted before that resolution
-# happens, so naming a model here would be a guess as often as a fact.
+# A vendor provider names the engine that answers and the model it runs, and
+# both come from the vendor rewriter's own `--label`. Repeating the CLI-or-API
+# test here would be a second copy of it, free to drift into a header that says
+# `api` while `agy` is answering. The provider name is the fallback, so a label
+# that cannot be resolved costs the user a detail rather than the whole header.
 _model_label() {
+    local vendor
     case "${CS_REWRITE_PROVIDER:-}" in
-        openai|gemini) printf '%s' "$CS_REWRITE_PROVIDER"; return ;;
+        openai|gemini)
+            vendor=$("$(dirname "$0")/prompt-rewriter-vendor.sh" --label </dev/null 2>/dev/null)
+            printf '%s' "${vendor:-$CS_REWRITE_PROVIDER}"
+            return ;;
     esac
     printf '%s' "${CS_REWRITE_MODEL:-claude-haiku-4-5-20251001}" \
         | sed -e 's/^claude-//' -e 's/-[0-9]\{8\}$//' \

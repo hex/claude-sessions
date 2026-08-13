@@ -22,6 +22,14 @@ All notable changes to cs are documented here. Release notes are also available 
 
   The rewriter runs hermetically: its own config directory, a neutral working directory, and the session's context variables stripped. Without that, a nested `claude` inherits the project's `CLAUDE.md` and cs's own memory, and a request to add a flag came back demanding TDD, bash 3.2 compatibility and a README update that nobody asked for. Four assertions moved from "emitted nothing" to "emitted no scope block", which is the property they were always protecting.
 
+- **The rewrite header names the engine and the model, and one knob sets that model everywhere.** `ctrl+g` now shows `agy · gemini-3.6-flash-low` or `api · gemini-flash-lite-latest` rather than a bare provider name, so which of the two arms is answering is never a guess. A vendor CLI that resolves its own model still shows a bare `codex`: cs cannot read that tool's configuration, and a guessed model in the header is worse than none.
+
+  Both halves come from the vendor rewriter's own `--label`, called by the shim before it paints. Repeating the CLI-or-API test inside the shim would have been a second copy of it, free to drift into a header that said `api` while `agy` answered. `--label` is answered before the prompt is read from stdin, since the shim calls it without writing anything.
+
+  `CS_REWRITE_MODEL` now reaches every arm — the API request, `agy --model`, `codex -m` — where it previously reached the API arms only. On a machine with `agy` or `codex` installed the CLI always wins, so the variable was silently inert exactly where most people would set it. Left unset it is still omitted entirely, so each CLI keeps the model configured in that tool.
+
+  The id belongs to whichever engine answers, and cs does not translate between the namespaces. `agy models` lists agy's, and they embed the reasoning effort — `gemini-3.6-flash-low` works where the bare family name `gemini-3.6-flash` is rejected with `requires --effort`. The API arms take the vendor's own API ids.
+
 - **Rewrite with OpenAI or Gemini instead of Claude.** `CS_REWRITE_PROVIDER=openai` or `=gemini` routes `ctrl+g` to that vendor. Each prefers the vendor's CLI when its binary is on PATH — `codex` and `agy` — and falls back to the vendor's API, reading `OPENAI_API_KEY` or `GEMINI_API_KEY`, when it is not. This mirrors the claude-council's `prefer_cli_over_api` policy and for the same reason: the CLI carries your subscription and spends no API credit. `CS_REWRITE_CMD` still outranks the knob, being the older and wider contract.
 
   The trade is measured, not assumed: the CLI arms take about ten seconds against about one for the API arms, and the interface is frozen for the whole run. The council can prefer CLIs freely because it is asynchronous on a twenty-minute budget; here that policy costs ten times as much in the one currency this feature spends.

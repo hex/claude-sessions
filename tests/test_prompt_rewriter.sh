@@ -422,6 +422,27 @@ test_an_unknown_provider_falls_back_to_the_default_rewriter() {
         "an unrecognised provider must not cost the user their prompt"
 }
 
+# The header names the engine and the model, and both come from the vendor
+# rewriter's own resolution rather than a second copy of it here — a header that
+# said `api` while `agy` answered would be worse than no header at all. A pty is
+# required: without one the shim draws nothing and this would pass against a
+# header that was never painted.
+test_the_header_names_the_resolved_engine_and_model() {
+    unset CS_REWRITE_CMD
+    local bin="$TEST_TMPDIR/bin"
+    mkdir -p "$bin"
+    printf '#!/bin/bash\nsleep 0.6\nprintf "REWRITTEN"\n' > "$bin/agy"
+    chmod +x "$bin/agy"
+    local f out
+    f=$(composer_file "make the login thing better")
+    out="$TEST_TMPDIR/pty-label"
+    PATH="$bin:$PATH" XDG_CACHE_HOME="$TEST_TMPDIR/cache" \
+        CS_REWRITE_PROVIDER=gemini CS_REWRITE_MODEL=gemini-3.6-flash \
+        script -q /dev/null "$SHIM" "$f" < /dev/null > "$out" 2>&1
+    assert_file_contains "$out" 'agy' "the header names the engine that answers" || return 1
+    assert_file_contains "$out" 'gemini-3.6-flash' "the header names the model"
+}
+
 run_test test_every_progress_mode_paints_something
 run_test test_unknown_progress_mode_falls_back_to_a_display
 run_test test_screen_mode_caps_a_long_prompt_and_marks_it
@@ -429,6 +450,7 @@ run_test test_line_and_static_modes_do_not_echo_the_prompt
 run_test test_animated_modes_withhold_the_elapsed_under_five_seconds
 run_test test_animated_modes_show_the_elapsed_past_five_seconds
 run_test test_screen_mode_uses_the_house_label
+run_test test_the_header_names_the_resolved_engine_and_model
 run_test test_progress_hides_the_cursor_and_restores_it
 run_test test_no_progress_mode_advertises_ctrl_c
 run_test test_cancel_reaps_the_whole_rewriter_tree
