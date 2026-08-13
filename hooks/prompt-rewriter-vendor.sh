@@ -98,6 +98,29 @@ _api_gemini() {
     printf '%s' "$response" | jq -r '.candidates[0].content.parts[0].text // empty'
 }
 
+# /v1/chat/completions only, and the default model follows the same rule as
+# Gemini's: fast and non-reasoning. The council needs a second endpoint because
+# its users pick reasoning models; here they are the wrong tool outright, since
+# a rewrite blocks the interface for its whole run. An o3/o4 model set through
+# CS_REWRITE_MODEL gets a 400 from this endpoint, which declines and leaves the
+# typed prompt untouched.
+_api_openai() {
+    local payload response
+    payload=$(jq -n --arg p "$prompt" --arg s "$_system" \
+        --arg m "${CS_REWRITE_MODEL:-gpt-4.1-mini}" \
+        '{model:$m,
+          messages:[{role:"system",content:$s},{role:"user",content:$p}],
+          temperature:0.2,
+          max_completion_tokens:2048}') || return 1
+    response=$(_curl_json "https://api.openai.com/v1/chat/completions" \
+        "Authorization: Bearer ${OPENAI_API_KEY}" "$payload") || return 1
+    case $(printf '%s' "$response" | jq -r '.choices[0].finish_reason // empty') in
+        ''|stop) ;;
+        *) return 1 ;;
+    esac
+    printf '%s' "$response" | jq -r '.choices[0].message.content // empty'
+}
+
 _rc=0
 out=''
 case "${CS_REWRITE_PROVIDER:-}" in
@@ -108,6 +131,24 @@ case "${CS_REWRITE_PROVIDER:-}" in
 $prompt") || _rc=$?
         elif [ -n "${GEMINI_API_KEY:-}" ]; then
             out=$(_api_gemini) || _rc=$?
+        else
+            exit 1
+        fi
+        ;;
+    openai)
+        if command -v codex >/dev/null 2>&1; then
+            # --skip-git-repo-check: the hermetic run directory is not a repo,
+            # and codex refuses to start outside one — a guard for interactive
+            # sessions, pure friction for a caller that only reads stdout.
+            # -s read-only: the prompt is untrusted text, and the sandbox is the
+            # only thing between an instruction embedded in it and codex's file
+            # tools. Pinned rather than inherited from ~/.codex/config.toml,
+            # which a user may well have opened up.
+            out=$(_run_cli codex exec --skip-git-repo-check -s read-only "$_system
+
+$prompt") || _rc=$?
+        elif [ -n "${OPENAI_API_KEY:-}" ]; then
+            out=$(_api_openai) || _rc=$?
         else
             exit 1
         fi

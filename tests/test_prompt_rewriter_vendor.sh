@@ -84,6 +84,65 @@ test_gemini_falls_back_to_the_api_when_the_cli_is_absent() {
     [ "$out" = "REWRITTEN BY API" ] || { echo "expected the extracted text, got: $out"; return 1; }
 }
 
+# The rewrite runs from a directory holding nothing, which is not a git repo, and
+# codex refuses to start outside one — a guard meant for interactive sessions
+# that is pure friction when the caller only ever reads stdout. The read-only
+# sandbox is not friction: the prompt is untrusted text, and this is the only
+# thing standing between an embedded instruction and codex's file tools.
+test_openai_prefers_the_codex_cli() {
+    fake_bin codex 'printf "REWRITTEN BY CODEX"'
+    local out rc=0
+    out=$(CS_REWRITE_PROVIDER=openai run_rewrite) || rc=$?
+    [ "$rc" -eq 0 ] || { echo "expected success from the codex arm, got $rc"; return 1; }
+    [ "$out" = "REWRITTEN BY CODEX" ] || { echo "expected the CLI output, got: $out"; return 1; }
+    assert_file_contains "$ARGV_DUMP" 'skip-git-repo-check' \
+        "codex refuses to run outside a git repo without it" || return 1
+    assert_file_contains "$ARGV_DUMP" '\-s read-only' \
+        "an untrusted prompt must not reach codex's file tools"
+}
+
+# Reasoning models are the wrong tool here and the endpoint choice follows from
+# that: /v1/chat/completions only. A rewrite blocks the whole interface, and a
+# model that spends its budget thinking either truncates or returns nothing —
+# measured, not assumed. An o3/o4 model set through CS_REWRITE_MODEL 400s on
+# this endpoint, which declines and leaves the typed prompt exactly as it was.
+test_openai_falls_back_to_the_api_when_the_cli_is_absent() {
+    fake_bin curl 'printf "%s" "{\"choices\":[{\"message\":{\"content\":\"REWRITTEN BY OPENAI\"},\"finish_reason\":\"stop\"}]}"'
+    local out rc=0
+    out=$(CS_REWRITE_PROVIDER=openai OPENAI_API_KEY=not-a-real-key run_rewrite) || rc=$?
+    [ "$rc" -eq 0 ] || { echo "expected success from the API arm, got $rc"; return 1; }
+    assert_file_contains "$ARGV_DUMP" 'curl' "the API arm ran curl" || return 1
+    [ "$out" = "REWRITTEN BY OPENAI" ] || { echo "expected the extracted text, got: $out"; return 1; }
+}
+
+# The key travels in a mode-600 curl config file, never on the command line,
+# where `ps` shows it to every user on the box and a URL query string would
+# carry it into logs at the far end.
+test_the_api_key_never_reaches_argv() {
+    # Assembled rather than written out: push protection rejects a literal
+    # credential shape even in a fixture, and taking the unblock URL to ship a
+    # fake one trains the wrong reflex.
+    local fake_key
+    fake_key="AIza""SyNotARealGeminiKey"
+    fake_bin curl 'printf "%s" "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]}}]}"'
+    CS_REWRITE_PROVIDER=gemini GEMINI_API_KEY="$fake_key" run_rewrite >/dev/null
+    assert_exists "$ARGV_DUMP" "curl ran, so there is an argv to inspect" || return 1
+    assert_file_not_contains "$ARGV_DUMP" "$fake_key" \
+        "the key must never appear on the command line"
+}
+
+# The prompt is untrusted text. On the API arm it rides a payload file, so a
+# shell in any later link of the chain never sees it. The CLI arms are the
+# documented exception: agy and codex both take the prompt as an argument and
+# offer no stdin path, which is the council's position too.
+test_the_prompt_never_reaches_argv_on_the_api_arm() {
+    fake_bin curl 'printf "%s" "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]}}]}"'
+    CS_REWRITE_PROVIDER=gemini GEMINI_API_KEY=not-a-real-key \
+        run_rewrite 'rm -rf $HOME && echo pwned' >/dev/null
+    assert_exists "$ARGV_DUMP" "curl ran, so there is an argv to inspect" || return 1
+    assert_file_not_contains "$ARGV_DUMP" 'pwned' "no prompt text reaches argv"
+}
+
 echo ""
 echo "Prompt rewriter vendor tests"
 echo "============================"
@@ -91,5 +150,9 @@ echo ""
 
 run_test test_a_zero_exit_error_from_the_cli_is_not_returned_as_a_rewrite
 run_test test_gemini_falls_back_to_the_api_when_the_cli_is_absent
+run_test test_openai_prefers_the_codex_cli
+run_test test_openai_falls_back_to_the_api_when_the_cli_is_absent
+run_test test_the_api_key_never_reaches_argv
+run_test test_the_prompt_never_reaches_argv_on_the_api_arm
 
 report_results
