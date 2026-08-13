@@ -199,8 +199,13 @@ test_progress_caps_a_long_prompt_and_marks_it() {
 # ctrl+c during a rewrite must read as "keep what I typed", not as a crash:
 # Claude Code renders any non-zero status as "<editor> quit unexpectedly".
 test_sigint_keeps_the_original_and_exits_clean() {
+    # The stub outlives the test by a wide margin on purpose. A short one makes
+    # the test race it: if load stretches readiness-polling and signal delivery
+    # past the stub's own life, the rewrite completes and the buffer changes,
+    # which reads as a broken trap rather than as a slow machine. The cancel
+    # path kills this process, so the long sleep costs nothing when it works.
     local slow="$TEST_TMPDIR/slow-rewrite.sh"
-    printf '#!/bin/bash\nsleep 5\nprintf "PRECISE: rewritten"\n' > "$slow"
+    printf '#!/bin/bash\nsleep 120\nprintf "PRECISE: rewritten"\n' > "$slow"
     chmod +x "$slow"
     local f; f=$(composer_file "make the login thing better")
     # `set -m` is load-bearing, not decoration. Without job control bash starts
@@ -245,7 +250,49 @@ test_progress_is_silent_without_a_tty() {
     assert_eq "PRECISE" "$(cat "$f")" "and the rewrite still lands"
 }
 
+# Cancelling must reap the whole rewriter tree, not just the process the shim
+# forked. The real rewriter is a script that spawns `claude -p` and waits, so a
+# kill that stops at the script leaves a live API call behind, unattached to
+# anything and still being paid for.
+test_sigint_reaps_the_whole_rewriter_tree() {
+    local pidfile="$TEST_TMPDIR/grandchild.pid"
+    local slow="$TEST_TMPDIR/slow-rewrite.sh"
+    cat > "$slow" <<SLOWEOF
+#!/bin/bash
+sleep 120 &
+printf '%s' "\$!" > "$pidfile"
+wait
+SLOWEOF
+    chmod +x "$slow"
+    local f; f=$(composer_file "make the login thing better")
+    set -m
+    CS_REWRITE_CMD="$slow" "$SHIM" "$f" >/dev/null 2>&1 &
+    local shim=$!
+    set +m
+    local waited=0
+    while [ "$waited" -lt 50 ] && [ ! -s "$pidfile" ]; do
+        sleep 0.1
+        waited=$((waited + 1))
+    done
+    [ -s "$pidfile" ] || { echo "rewriter never recorded its child"; kill "$shim" 2>/dev/null; return 1; }
+    local grandchild; grandchild=$(cat "$pidfile")
+    kill -INT "$shim" 2>/dev/null
+    wait "$shim" 2>/dev/null
+    # Give the group kill a moment to land before declaring a leak.
+    local settle=0
+    while [ "$settle" -lt 20 ] && kill -0 "$grandchild" 2>/dev/null; do
+        sleep 0.1
+        settle=$((settle + 1))
+    done
+    if kill -0 "$grandchild" 2>/dev/null; then
+        kill -9 "$grandchild" 2>/dev/null
+        echo "the rewriter's own child outlived the cancel"
+        return 1
+    fi
+}
+
 run_test test_progress_renders_under_a_pty
+run_test test_sigint_reaps_the_whole_rewriter_tree
 run_test test_progress_is_silent_without_a_tty
 run_test test_progress_caps_a_long_prompt_and_marks_it
 run_test test_sigint_keeps_the_original_and_exits_clean

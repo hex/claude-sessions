@@ -126,8 +126,10 @@ _rw=''
 # shellcheck disable=SC2329  # invoked by the trap below, not by name
 _keep_original() {
     if [ -n "$_rw" ]; then
-        pkill -P "$_rw" 2>/dev/null
-        kill "$_rw" 2>/dev/null
+        # The whole group, not just the forked process. The rewriter is a
+        # script that starts the model call and waits on it, so killing only
+        # what we forked leaves that call running, detached and still billed.
+        kill -TERM "-$_rw" 2>/dev/null || kill -TERM "$_rw" 2>/dev/null
     fi
     rm -f "$out" "$target.cs-tmp" 2>/dev/null
     [ -t 2 ] && printf '\r\033[K' >&2
@@ -135,8 +137,12 @@ _keep_original() {
 }
 trap _keep_original INT TERM
 
+# Job control for the fork alone, so the rewriter and everything it starts land
+# in one process group that the trap above can address as a unit.
+set -m
 ( printf '%s' "$prompt" | ${CS_REWRITE_CMD:-"$(dirname "$0")/prompt-rewriter-model.sh"} > "$out" 2>/dev/null ) &
 _rw=$!
+set +m
 
 _render_until_done "$_rw"
 wait "$_rw" || { rm -f "$out" 2>/dev/null; exit 0; }
