@@ -2141,7 +2141,8 @@ _alloc_random_color() {
 }
 
 # Machine-local session state lives in .cs/local/state as 'key: value' lines
-# (claude_session_id, claude_session_color, last_resumed). It is gitignored
+# (claude_session_id, claude_session_color, last_resumed, and session_name for
+# adopted sessions, whose name lives in a symlink no hook can see). It is gitignored
 # (see create_session_gitignore) because these values legitimately differ per
 # machine — recording them in the git-synced README caused merge conflicts
 # whenever two machines resumed the same session.
@@ -6124,6 +6125,15 @@ launch_claude_code() {
     export CLAUDE_SESSION_NAME="$session_name"
     export CLAUDE_SESSION_DIR="$session_dir"
     export CLAUDE_SESSION_META_DIR="$session_dir/.cs"
+    # An adopted session's name lives only in the symlink pointing here, which a
+    # hook walking up from the directory never sees. Record it on open, so
+    # sessions adopted before cs wrote the key get it too. Only for those: an
+    # ordinary session IS its directory, and a recorded name there would go
+    # stale the moment the directory was renamed — outranking a basename that
+    # is still right.
+    if [ -L "$SESSIONS_ROOT/$session_name" ]; then
+        _set_local_state "$session_dir/.cs/local/state" session_name "$session_name"
+    fi
     # Prompt rewriting rides Claude Code's external-editor round-trip: ctrl+g
     # writes the composer buffer to a temp file, runs $EDITOR on it, and replaces
     # the composer with whatever comes back. Capture the real editor first so the
@@ -6577,6 +6587,12 @@ adopt_session() {
     # create_session_structure writes CLAUDE.local.md, never CLAUDE.md — a
     # project's own CLAUDE.md is left untouched.
     create_session_structure "$target_dir"
+
+    # An adopted session's name is the link's, not the directory's, and the link
+    # is the only place it lives — so a hook that resolves this project by
+    # walking up from it has nothing to read. Record it where that walk looks
+    # (hooks/cs-resolve.sh's _cs_session_name).
+    _set_local_state "$target_dir/.cs/local/state" session_name "$session_name"
 
     # Create symlink from sessions root
     mkdir -p "$SESSIONS_ROOT"

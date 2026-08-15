@@ -136,6 +136,68 @@ test_name_comes_from_state_not_basename() {
         "session_name in local state outranks the directory basename" || return 1
 }
 
+# The two tests above hand-write the state file. Neither says whether cs ever
+# writes it — and while it did not, the name lookup could only ever return the
+# basename, which is wrong for exactly the session shape it exists to serve.
+# This one runs the real `cs -adopt` and asks the resolver what it sees.
+test_adopt_records_the_name_the_resolver_reads() {
+    local proj="$TEST_TMPDIR/code/some-repo"
+    mkdir -p "$proj"
+    (
+        cd "$proj" \
+            && CS_SESSIONS_ROOT="$TEST_TMPDIR/sessions" "$CS_BIN" -adopt chosen-name
+    ) >/dev/null 2>&1 || { echo "  FAIL: cs -adopt did not complete"; return 1; }
+
+    export CLAUDE_PROJECT_DIR="$proj"
+    local got
+    got=$(_resolve '{}')
+    assert_eq "chosen-name|$(_phys "$proj")|$(_phys "$proj")/.cs" "$got" \
+        "an adopted project resolves to its cs name, not its directory name" || return 1
+}
+
+# Every session adopted before cs recorded the name carries no key at all, and
+# adopt never runs again for them. Opening one through cs is the moment cs knows
+# both the name and the directory, so that is where the backfill belongs.
+test_opening_an_adopted_session_backfills_the_name() {
+    local root="$TEST_TMPDIR/sessions"
+    local proj="$TEST_TMPDIR/code/some-repo"
+    mkdir -p "$proj/.cs/local" "$root"
+    printf -- '---\nstatus: active\n---\n# Session: legacy-adopted\n' > "$proj/.cs/README.md"
+    ln -s "$proj" "$root/legacy-adopted"
+
+    # The launch asks "Continue previous conversation?". An attached stdin hangs
+    # the suite; /dev/null reads as EOF and cs cancels with 130. A blank line is
+    # the answer that takes the default and completes the open.
+    CS_SESSIONS_ROOT="$root" CLAUDE_CODE_BIN="echo" CS_NO_UPDATE_CHECK=1 \
+        CS_TERM_THEME=dark "$CS_BIN" legacy-adopted >/dev/null 2>&1 <<< "" \
+        || { echo "  FAIL: opening the adopted session did not complete"; return 1; }
+
+    export CLAUDE_PROJECT_DIR="$proj"
+    local got
+    got=$(_resolve '{}')
+    assert_eq "legacy-adopted|$(_phys "$proj")|$(_phys "$proj")/.cs" "$got" \
+        "opening an adopted session should teach the resolver its name" || return 1
+}
+
+# The other side of that decision. An ordinary session IS its directory, so it
+# records no name and the basename stays authoritative — which is what keeps a
+# renamed session resolving to what cs now calls it, rather than to a recorded
+# name that nothing updates until the next launch.
+test_a_renamed_ordinary_session_resolves_to_its_new_name() {
+    local root="$TEST_TMPDIR/sessions"
+    mkdir -p "$root"
+    CS_SESSIONS_ROOT="$root" CLAUDE_CODE_BIN="echo" CS_NO_UPDATE_CHECK=1 \
+        CS_TERM_THEME=dark "$CS_BIN" oldname >/dev/null 2>&1 <<< "" \
+        || { echo "  FAIL: creating the session did not complete"; return 1; }
+    mv "$root/oldname" "$root/newname"
+
+    export CLAUDE_PROJECT_DIR="$root/newname"
+    local got
+    got=$(_resolve '{}')
+    assert_eq "newname|$(_phys "$root/newname")|$(_phys "$root/newname")/.cs" "$got" \
+        "a renamed ordinary session resolves to the name cs now knows it by" || return 1
+}
+
 test_name_falls_back_to_basename() {
     _make_session "$TEST_TMPDIR/unnamed"
     export CLAUDE_PROJECT_DIR="$TEST_TMPDIR/unnamed"
@@ -283,6 +345,9 @@ test_home_itself_is_not_a_session_root() {
 run_test test_home_itself_is_not_a_session_root
 run_test test_no_session_anywhere_fails
 run_test test_name_comes_from_state_not_basename
+run_test test_adopt_records_the_name_the_resolver_reads
+run_test test_opening_an_adopted_session_backfills_the_name
+run_test test_a_renamed_ordinary_session_resolves_to_its_new_name
 run_test test_name_falls_back_to_basename
 # The marker applies to the env path too, so the opt-out means "this directory
 # is not a cs session" rather than "keep one front end out".

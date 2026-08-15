@@ -27,7 +27,8 @@ _alloc_random_color() {
 }
 
 # Machine-local session state lives in .cs/local/state as 'key: value' lines
-# (claude_session_id, claude_session_color, last_resumed). It is gitignored
+# (claude_session_id, claude_session_color, last_resumed, and session_name for
+# adopted sessions, whose name lives in a symlink no hook can see). It is gitignored
 # (see create_session_gitignore) because these values legitimately differ per
 # machine — recording them in the git-synced README caused merge conflicts
 # whenever two machines resumed the same session.

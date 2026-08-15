@@ -94,9 +94,14 @@ _cs_session_is_enabled() {  # session_dir
 }
 
 # The name a session is known by is not always its basename: `cs -adopt` links
-# a chosen name at an unrelated project path. The launch and adopt paths record
-# it in machine-local state, which is also where a clone on another machine can
-# carry a different name for the same tree.
+# a chosen name at an unrelated project path, and the link is invisible from the
+# directory this walk arrives at. Adoption records the name in machine-local
+# state, and opening an adopted session through cs rewrites it there, so a
+# session adopted before cs wrote the key picks it up on its next open.
+#
+# Ordinary sessions record nothing: such a session IS its directory, so the
+# basename is the answer, and a recorded name would outrank it while stale the
+# moment the directory was renamed.
 _cs_session_name() {  # session_dir
     local n=""
     if [ -f "$1/.cs/local/state" ]; then

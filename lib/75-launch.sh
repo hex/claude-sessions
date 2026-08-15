@@ -110,6 +110,15 @@ launch_claude_code() {
     export CLAUDE_SESSION_NAME="$session_name"
     export CLAUDE_SESSION_DIR="$session_dir"
     export CLAUDE_SESSION_META_DIR="$session_dir/.cs"
+    # An adopted session's name lives only in the symlink pointing here, which a
+    # hook walking up from the directory never sees. Record it on open, so
+    # sessions adopted before cs wrote the key get it too. Only for those: an
+    # ordinary session IS its directory, and a recorded name there would go
+    # stale the moment the directory was renamed — outranking a basename that
+    # is still right.
+    if [ -L "$SESSIONS_ROOT/$session_name" ]; then
+        _set_local_state "$session_dir/.cs/local/state" session_name "$session_name"
+    fi
     # Prompt rewriting rides Claude Code's external-editor round-trip: ctrl+g
     # writes the composer buffer to a temp file, runs $EDITOR on it, and replaces
     # the composer with whatever comes back. Capture the real editor first so the

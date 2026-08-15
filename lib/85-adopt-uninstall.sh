@@ -92,6 +92,12 @@ adopt_session() {
     # project's own CLAUDE.md is left untouched.
     create_session_structure "$target_dir"
 
+    # An adopted session's name is the link's, not the directory's, and the link
+    # is the only place it lives — so a hook that resolves this project by
+    # walking up from it has nothing to read. Record it where that walk looks
+    # (hooks/cs-resolve.sh's _cs_session_name).
+    _set_local_state "$target_dir/.cs/local/state" session_name "$session_name"
+
     # Create symlink from sessions root
     mkdir -p "$SESSIONS_ROOT"
     ln -s "$target_dir" "$session_link"
