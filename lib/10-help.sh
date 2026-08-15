@@ -5,7 +5,9 @@ show_help() {
     cat << EOF
 cs $VERSION - Claude Code session manager
 
-Usage: cs <session-name>              Create or resume a session
+Usage: cs                             Open the session you are standing in,
+                                      or the session manager if you are not in one
+       cs <session-name>              Create or resume a session
        cs <session-name> -secrets <cmd>  Run secrets command on session
        cs -<command>                  Run a global subcommand
 
@@ -36,6 +38,7 @@ Commands:
   -doctor, -diag      Run health checks (Keychain, hooks, memory, audit, tokens)
   -statusline <cmd>   enable|disable the cs status line in Claude Code settings
   -detect-theme       Show the detected terminal theme (light|dark)
+  -tui                Open the interactive session manager (bare 'cs' does too, outside a session)
   -list, -ls          List sessions (--tag <tag> filters; --archived shows only archived)
   -adopt <name>       Adopt current directory as a cs session
   -whoami             Show the current actor (for shared, multi-person sessions)

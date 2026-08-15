@@ -4,35 +4,22 @@
 main() {
     if [ $# -eq 0 ]; then
         if [ -t 1 ]; then
-            local tui_bin
-            tui_bin="$(command -v cs-tui 2>/dev/null || true)"
-            if [ -z "$tui_bin" ]; then
-                # Not on PATH (cs may be run by explicit path with its own dir
-                # off PATH, which the installer permits): probe the sibling next
-                # to this script.
-                local _self_dir
-                _self_dir="$(dirname "$0")"
-                if [ -x "$_self_dir/cs-tui" ]; then tui_bin="$_self_dir/cs-tui"; fi
+            # Standing in a session, open it: the picker exists to choose one,
+            # and here the choice is the directory you are in. Re-entered as
+            # `cs <name>` so the lock, migration and launch are the same ones
+            # the explicit form gets. Skipped inside a launched session, whose
+            # shells inherit the name — there the answer would be to open a
+            # second copy of the session you are already in.
+            local here=""
+            here=$(_bare_cs_target || true)
+            if [ -n "$here" ]; then
+                exec "$0" "$here"
             fi
-            if [ -n "$tui_bin" ] && [ -x "$tui_bin" ]; then
-                # Detect the terminal theme while cs still owns the tty so the
-                # picker gets a light/dark palette; reused by the session we
-                # launch next.
-                _export_term_theme
-                local tui_output
-                tui_output=$(CS_VERSION="$VERSION" CS_BIN="$0" "$tui_bin") || exit $?
-                if [ -n "$tui_output" ]; then
-                    local selected="${tui_output%%$'\n'*}"
-                    if [ "$tui_output" != "$selected" ]; then
-                        local tui_flags="${tui_output#*$'\n'}"
-                        exec "$0" "$selected" $tui_flags
-                    else
-                        exec "$0" "$selected"
-                    fi
-                fi
-                exit 0
-            fi
-            show_help
+            # `||`, not two statements: run_tui returns non-zero only when no
+            # picker is installed, and under `set -e` a bare failing call would
+            # end cs there — printing nothing at all on the machines that need
+            # the help most.
+            run_tui || show_help
         else
             echo "cs <name>        Create or resume a session"
             echo "cs -list         List all sessions"
@@ -64,9 +51,19 @@ main() {
             echo "cs $VERSION"
             return 0
             ;;
+        -tui)
+            run_tui || error "The session manager (cs-tui) is not installed. Reinstall cs, or run 'cs -list'."
+            return 0
+            ;;
         -list|-ls)
             if command -v cs-tui >/dev/null 2>&1; then
-                info "Hint: run bare 'cs' for the interactive session manager"
+                # Bare cs opens the session you are standing in, so name the
+                # command that reaches the manager from where the reader is.
+                if [ -n "$(_bare_cs_target || true)" ]; then
+                    info "Hint: run 'cs -tui' for the interactive session manager"
+                else
+                    info "Hint: run bare 'cs' for the interactive session manager"
+                fi
             fi
             shift
             list_sessions "$@"

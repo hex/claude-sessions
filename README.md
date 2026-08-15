@@ -128,7 +128,8 @@ The platform is detected automatically. It decides one thing — whether secrets
 ## Usage
 
 ```bash
-cs                          # Interactive session manager (TUI)
+cs                          # Open the session you are standing in, else the session manager (TUI)
+cs -tui                     # Interactive session manager, from anywhere
 cs <session-name>           # Create or resume a session
 cs <session-name> --force   # Override active session lock
 cs <base>@<feature>         # Create/resume a parallel feature worktree off <base>
@@ -167,7 +168,11 @@ cs -version, -v             # Show version
 
 ### Interactive Session Manager
 
-Running `cs` with no arguments launches an interactive TUI for browsing and managing sessions:
+Running `cs` with no arguments launches an interactive TUI for browsing and managing sessions. Standing in a session's own directory, bare `cs` opens that session instead — the picker is for choosing one, and there the choice is already made. `cs -tui` always reaches the picker.
+
+The current directory decides, not any history: cs opens a session when that directory *is* one it knows by name (a session root, a `<base>@<feature>` worktree, or a project adopted with `cs -adopt`). A subdirectory of a session, any unrelated directory, and a shell inside a launched session all get the picker — inside a session, opening a second copy is never the intent.
+
+- **Navigate** with `j`/`k` or arrow keys; `g`/`G` for first/last; mouse scroll and click supported
 
 - **Navigate** with `j`/`k` or arrow keys; `g`/`G` for first/last; mouse scroll and click supported
 - **Sort** by column with `1`-`6` (toggles ascending/descending); opens sorted by recency — most-recently-modified first

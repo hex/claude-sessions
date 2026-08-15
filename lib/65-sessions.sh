@@ -92,6 +92,43 @@ is_session_dir() {
     [ -d "$1/.cs" ] || [ -f "$1/CLAUDE.md" ]
 }
 
+# The name cs knows a directory by, or non-zero when the directory is not a
+# session cs can open. Backs bare `cs` opening the session you are standing in.
+#
+# Detects on .cs/ alone, where is_session_dir also accepts a root CLAUDE.md:
+# listing a stray directory is a cosmetic error, launching one is not.
+_session_name_for_dir() {  # dir
+    local dir root rest
+    [ -d "$1/.cs" ] || return 1
+    dir=$(cd "$1" 2>/dev/null && pwd -P) || return 1
+    root=$(cd "${SESSIONS_ROOT:-}" 2>/dev/null && pwd -P) || return 1
+
+    # Both sides resolved before comparing: a sessions root reached through a
+    # symlinked parent (macOS /var -> /private/var) never prefix-matches a
+    # resolved directory otherwise. Same lesson as _session_root_is_cs_owned.
+    case "$dir" in
+        "$root"/*)
+            rest="${dir#"$root"/}"
+            case "$rest" in
+                */*) return 1 ;;  # inside a session, not the session itself
+                *) printf '%s\n' "$rest"; return 0 ;;
+            esac
+            ;;
+    esac
+
+    # An adopted session lives at the user's own project path and is linked into
+    # the root under its cs name — which is the name the lock, the secrets
+    # namespace and Claude Code's --name all key on, so it is the answer here.
+    local link
+    for link in "${SESSIONS_ROOT:-}"/*; do
+        [ -L "$link" ] || continue
+        [ "$(cd "$link" 2>/dev/null && pwd -P)" = "$dir" ] || continue
+        printf '%s\n' "${link##*/}"
+        return 0
+    done
+    return 1
+}
+
 # Print every session name, one per line, as completion candidates. Symlinks
 # count: `cs -adopt` links repos that live elsewhere on disk into SESSIONS_ROOT,
 # and the marker tests resolve through the link. Kept free of git and keychain
@@ -113,6 +150,51 @@ cmd_complete() {
         sessions) complete_sessions ;;
         *) error "Unknown completion subject: ${1:-<none>}" ;;
     esac
+}
+
+# The session bare `cs` opens from where it was run, or nothing when it would
+# show the picker instead. Answers for the dispatch and for the `cs -list` hint
+# alike, so the hint can never name a command that does something else.
+#
+# Nothing inside a launched session, whose shells inherit its name: there the
+# request would be to open a second copy of the session you are already in.
+_bare_cs_target() {
+    [ -z "${CLAUDE_SESSION_NAME:-}" ] || return 1
+    _session_name_for_dir "$PWD"
+}
+
+# The interactive session manager. The picker prints its choice on stdout — the
+# session name, optionally followed by flags — and cs re-enters itself with it,
+# so every launch takes the same path an explicit `cs <name>` does. Returns
+# non-zero when no picker binary is installed, leaving the caller to say so.
+run_tui() {
+    local tui_bin
+    tui_bin="$(command -v cs-tui 2>/dev/null || true)"
+    if [ -z "$tui_bin" ]; then
+        # Not on PATH (cs may be run by explicit path with its own dir off
+        # PATH, which the installer permits): probe the sibling next to this
+        # script.
+        local _self_dir
+        _self_dir="$(dirname "$0")"
+        if [ -x "$_self_dir/cs-tui" ]; then tui_bin="$_self_dir/cs-tui"; fi
+    fi
+    [ -n "$tui_bin" ] && [ -x "$tui_bin" ] || return 1
+
+    # Detect the terminal theme while cs still owns the tty so the picker gets
+    # a light/dark palette; reused by the session we launch next.
+    _export_term_theme
+    local tui_output
+    tui_output=$(CS_VERSION="$VERSION" CS_BIN="$0" "$tui_bin") || exit $?
+    if [ -n "$tui_output" ]; then
+        local selected="${tui_output%%$'\n'*}"
+        if [ "$tui_output" != "$selected" ]; then
+            local tui_flags="${tui_output#*$'\n'}"
+            exec "$0" "$selected" $tui_flags
+        else
+            exec "$0" "$selected"
+        fi
+    fi
+    exit 0
 }
 
 # List all sessions

@@ -36,23 +36,6 @@ composer_file() {  # content
     printf '%s' "$f"
 }
 
-# script(1) is the only way to give the shim a real pty, and its argument order
-# is not portable: BSD (macOS) takes `script -q FILE CMD ARGS`, util-linux takes
-# `script -q -c "CMD ARGS" FILE`. Handed the BSD form, util-linux treats the
-# command as a filename and never runs it — which reads as "the shim drew
-# nothing" and failed ten rendering tests on the Linux lane while every one of
-# them passed on the developer's mac.
-_pty_run() {  # command, args...
-    if script --version 2>/dev/null | grep -q util-linux; then
-        script -q -c "$*" /dev/null < /dev/null
-    else
-        # script(1) tcgetattr's its OWN stdin and dies on a socket, which is
-        # what a CI runner or an agent harness often hands it; /dev/null still
-        # gets the child a pty.
-        script -q /dev/null "$@" < /dev/null
-    fi
-}
-
 # Run the shim under a real pty in a given progress mode and return the capture
 # path. Only a pty makes [ -t 2 ] true; without one every rendering assertion
 # below would pass against a shim that draws nothing.
