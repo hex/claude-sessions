@@ -130,6 +130,7 @@ The platform is detected automatically. It decides one thing — whether secrets
 ```bash
 cs                          # Open the session you are standing in, else the session manager (TUI)
 cs -tui                     # Interactive session manager, from anywhere
+cs -- <session-name>        # '--' ends the options, for launchers that insert one
 cs <session-name>           # Create or resume a session
 cs <session-name> --force   # Override active session lock
 cs <base>@<feature>         # Create/resume a parallel feature worktree off <base>

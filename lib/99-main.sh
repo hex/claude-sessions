@@ -2,6 +2,13 @@
 # ABOUTME: Assembled last so 'main "$@"' runs after every definition.
 
 main() {
+    # A launcher that composes `<binary> -- <operands>` hands cs the POSIX
+    # end-of-options separator, which the unknown-verb arm read as a command
+    # nobody could have typed. Drop one, and read the rest exactly as before.
+    if [ "${1:-}" = "--" ]; then
+        shift
+    fi
+
     if [ $# -eq 0 ]; then
         if [ -t 1 ]; then
             # Standing in a session, open it: the picker exists to choose one,
@@ -209,6 +216,12 @@ main() {
 
     # Parse session subcommands with a while loop to support flag combinations
     shift  # Remove session name / cmd
+    # The separator can arrive here too, between the session and its flags.
+    # Only in this position: further in, `--` is a word in a verb's own
+    # arguments — a mail body may legitimately contain one.
+    if [ "${1:-}" = "--" ]; then
+        shift
+    fi
     # `cs <name> <verb> --help` — same reasoning as the global form above,
     # including the -secrets exemption.
     case "${1:-}" in
