@@ -35,15 +35,25 @@ cs_resolve_session() {  # [hook_input_json]
         return 0
     fi
 
-    # A terminal CLI enters a session through `cs`, which exports the contract
-    # above, so one arriving here was started another way and is not in a
-    # session -- the .cs/ it may be standing in belongs to a session, not to
-    # this conversation. Claude Code names its own front end here, and the test
-    # is affirmative on purpose: only "cli" declines, so an unset or unfamiliar
-    # entrypoint keeps the walk a front end that can publish nothing depends on.
-    if [ "${CLAUDE_CODE_ENTRYPOINT:-}" = "cli" ]; then
-        return 1
-    fi
+    # A terminal claude enters a session through `cs`, which exports the
+    # contract above, so one arriving here was started another way and is not in
+    # a session -- the .cs/ it may be standing in belongs to a session, not to
+    # this conversation. Claude Code names its own front end here: an
+    # interactive terminal is "cli" and `claude -p` is "sdk-cli". The test is
+    # affirmative on purpose, listing the terminal rather than excluding it, so
+    # an unset or unfamiliar entrypoint keeps the walk that a front end able to
+    # publish nothing depends on.
+    #
+    # An agent-team teammate is the exception that stops this being a test on
+    # the entrypoint alone: Claude Code respawns it in a tmux pane, which
+    # inherits neither the contract nor an entrypoint from the lead, so it
+    # derives plain "cli" and reads identically to a bare claude. It is in the
+    # session -- it was spawned to work there -- so the launch flag decides.
+    case "${CLAUDE_CODE_ENTRYPOINT:-}" in
+        cli|sdk-cli)
+            _cs_is_teammate || return 1
+            ;;
+    esac
 
     # Prefer CLAUDE_PROJECT_DIR: it names the folder the session was opened on
     # and stays constant, where a hook input's cwd can follow the conversation.
@@ -93,6 +103,24 @@ _cs_find_session_root() {  # start_dir
         fi
         d=$(dirname "$d")
     done
+    return 1
+}
+
+# Claude Code launches an agent-team teammate with --agent-id (with
+# --agent-name and --team-name, which it rejects unless all three are given).
+# CLAUDE_PID names the claude a hook is firing for, and a process that cannot
+# be read cannot be shown to be a teammate: in a terminal that means the
+# session was not entered through cs, which is the case for declining.
+_cs_is_teammate() {
+    local args=""
+    [ -n "${CLAUDE_PID:-}" ] || return 1
+    args=$(ps -o args= -p "$CLAUDE_PID" 2>/dev/null) || return 1
+    [ -n "$args" ] || return 1
+    # Padded on both sides so the match is the whole flag: --agent-idle-foo
+    # shares a prefix with it and is not it.
+    case " $args " in
+        *" --agent-id "*|*" --agent-id="*) return 0 ;;
+    esac
     return 1
 }
 
