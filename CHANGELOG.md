@@ -4,6 +4,32 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.8.17
+
+### Features
+
+- **Bare `cs` in a session's own directory opens that session.** The picker exists to choose a session; standing in one, the directory has already chosen. A subdirectory, an unrelated directory, and a shell inside an already-launched session all still get the picker — inside a session, opening a second copy is never the intent.
+
+### Fixes
+
+- **A `claude` you start yourself no longer joins the session you are standing in.** Hooks find a session either from the contract `cs` exports before `exec`, or — for front ends that can publish no environment into a session — by walking up from the opened directory for its `.cs/`. A bare `claude` typed in a session folder was indistinguishable from those: same missing contract, same `.cs/` on disk. So cs hooks activated, and `CLAUDE_SESSION_NAME`/`DIR`/`META_DIR` were published into a conversation cs never launched.
+
+  A terminal is where that inference is wrong, because a session is entered there by running `cs`. The walk now declines for terminal front ends — `cli`, and `sdk-cli` for `claude -p` — while Claude Code desktop, IDEs, plugins and any entrypoint cs does not recognise keep theirs.
+
+  Agent-team teammates are the exception that keeps this from being a test on the front end alone. Claude Code respawns a teammate in a tmux pane, which inherits the tmux *server's* environment rather than the lead's, so it derives plain `cli` and reads exactly like a bare `claude` — but it is in the session, having been spawned to work there. The launch decides: cs reads the argv of the claude the hook is firing for and recognises a teammate by the `--agent-id`, `--agent-name` and `--team-name` trio Claude Code always passes together. A teammate keeps the session in its own environment, so `cs -secrets`, `cs -msg`, `cs -queue` and its status line work as before, while still being marked as not the launch — its exit never strips the lead's session lock.
+
+- **`cs` accepts the `--` end-of-options separator.** A launcher composing `<binary> -- <operands>` handed cs a bare `--`, which the unknown-verb arm rejected as a command nobody could have typed, and cs exited 1.
+
+- **An adopted project resolves by the name it was adopted under.** `hooks/cs-resolve.sh` read `session_name:` from machine-local state, but nothing wrote it, so the lookup always fell through to the directory basename — wrong for exactly the session shape it exists to serve. `cs -adopt` now records it, and opening an adopted session backfills it for sessions adopted before this.
+
+- **A session name can no longer start with a hyphen.** Bare `cs` in a session directory re-enters as `cs <name>`, where a leading hyphen reads as a verb: a session named `-uninstall` reached that verb instead of opening, and `-rm` reached `remove_session`. Such names are refused at creation.
+
+### Docs
+
+- README regrouped, with the configuration gaps closed.
+- Five documentation claims a four-angle audit confirmed false are corrected.
+- `docs/hooks.md` documents how a hook finds its session — which front ends the walk serves, which it declines, and where teammates fit.
+
 ## 2026.8.16
 
 ### Added
