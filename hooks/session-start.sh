@@ -259,8 +259,12 @@ fi
 
 fi # end startup/resume guard
 
-# Export environment variables for the session via CLAUDE_ENV_FILE
-if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+# Export environment variables for the session via CLAUDE_ENV_FILE. Only for a
+# session cs launched: a front end that reached this session by walking the
+# directory it opened is not the one holding the lock or the recorded
+# conversation, and publishing the contract would make every hook it fires
+# afterwards indistinguishable from the launch that owns them.
+if [ -n "${CLAUDE_ENV_FILE:-}" ] && [ "${CS_RESOLVED_FROM:-env}" = "env" ]; then
     cat >> "$CLAUDE_ENV_FILE" << EOF
 export CLAUDE_SESSION_NAME="$CLAUDE_SESSION_NAME"
 export CLAUDE_SESSION_DIR="$SESSION_DIR"

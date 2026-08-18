@@ -28,11 +28,29 @@ path (a silent exit, or the approval payload the blocking hooks owe Claude Code)
    fallback: a hook's working directory is wherever the front end left it, not a
    statement about which session is open.
 
-This is what lets cs work in front ends that fire hooks but cannot export environment
-into a session — Claude Code desktop among them, where `CLAUDE_ENV_FILE` is offered
-and writable yet propagates to nothing. It also means a session started outside `cs`
-(an IDE, a plugin, `claude` typed in a session folder) is no longer cs-blind;
-`.cs/local/disabled` opts a directory out.
+The walk is what lets cs work in front ends that fire hooks but cannot export
+environment into a session — Claude Code desktop among them, where `CLAUDE_ENV_FILE`
+is offered and writable yet propagates to nothing. An IDE or a plugin reaches its
+session the same way.
+
+A terminal is the exception: there a session is entered by running `cs`, which has
+already exported the contract, so a CLI conversation arriving at the walk was started
+some other way. `claude` typed inside a session folder is therefore cs-blind — the
+`.cs/` it is standing in belongs to a session, not to that conversation. Claude Code
+names its own front end in `CLAUDE_CODE_ENTRYPOINT`: an interactive terminal is `cli`
+and `claude -p` is `sdk-cli`. The test lists the terminal rather than excluding it, so
+an unset or unfamiliar entrypoint still walks rather than losing its session to a value
+cs has never heard of.
+
+An agent-team teammate is why that cannot be a test on the entrypoint alone. Claude Code
+respawns a teammate in a tmux pane, and a pane inherits the tmux server's environment
+rather than the lead's — neither the contract nor an entrypoint reaches it, so it derives
+plain `cli` and reads exactly like a bare `claude`. It is in the session, having been
+spawned to work there, so the launch flag decides: `cs_resolve_session` reads the argv of
+the claude named by `CLAUDE_PID` and lets the walk proceed for `--agent-id`. A process
+whose argv cannot be read is not a teammate, so it declines.
+
+`.cs/local/disabled` opts a directory out of every path, including cs's own.
 
 Session identity is not the only thing that differs by path: only `cs` writes
 `.cs/session.lock`, so a hook that resolved by walking does not own it (see
@@ -269,4 +287,4 @@ The hooks are configured in `~/.claude/settings.json`:
 }
 ```
 
-Hooks activate wherever `cs_resolve_session` finds a session: from the exported `CLAUDE_SESSION_NAME`/`CLAUDE_SESSION_DIR` when `cs` launched the conversation, and otherwise by walking up from the directory the front end opened (see "How a hook finds its session" above). Outside a session root, and in a session carrying `.cs/local/disabled`, they pass through without effect.
+Hooks activate wherever `cs_resolve_session` finds a session: from the exported `CLAUDE_SESSION_NAME`/`CLAUDE_SESSION_DIR` when `cs` launched the conversation, and otherwise by walking up from the directory the front end opened — except in a terminal, where only a `cs` launch resolves (see "How a hook finds its session" above). Outside a session root, and in a session carrying `.cs/local/disabled`, they pass through without effect.

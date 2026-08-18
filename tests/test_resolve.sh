@@ -13,12 +13,13 @@ setup() {
     # CS_ACTOR and the session env are the inputs under test; a developer's
     # exported ones would decide the result instead of the fixture.
     unset CS_ACTOR CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR
-    unset CLAUDE_PROJECT_DIR
+    unset CLAUDE_PROJECT_DIR CLAUDE_CODE_ENTRYPOINT CLAUDE_PID
 }
 
 teardown() {
     [ -n "$TEST_TMPDIR" ] && [ -d "$TEST_TMPDIR" ] && rm -rf "$TEST_TMPDIR"
     unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR CLAUDE_PROJECT_DIR
+    unset CLAUDE_CODE_ENTRYPOINT CLAUDE_PID
 }
 
 # Run the resolver in a subshell and print the resolved triple, or FAIL.
@@ -363,5 +364,170 @@ test_disabled_marker_opts_out_on_the_env_path() {
 
 run_test test_disabled_marker_opts_out
 run_test test_disabled_marker_opts_out_on_the_env_path
+
+# ============================================================================
+# Terminal CLI: a session is only ever entered there through `cs`, which
+# exports the contract, so the directory the shell happens to sit in says
+# nothing. Claude Code names its own front end in CLAUDE_CODE_ENTRYPOINT.
+# ============================================================================
+
+test_terminal_cli_does_not_derive_from_the_directory() {
+    _make_session "$TEST_TMPDIR/bare" "bare"
+    export CLAUDE_PROJECT_DIR="$TEST_TMPDIR/bare"
+    export CLAUDE_CODE_ENTRYPOINT="cli"
+    local got
+    got=$(_resolve '{}')
+    assert_eq "FAIL" "$got" "a bare terminal claude in a session folder stays cs-blind" || return 1
+}
+
+test_terminal_cli_does_not_derive_from_the_input_cwd() {
+    _make_session "$TEST_TMPDIR/barecwd" "barecwd"
+    export CLAUDE_CODE_ENTRYPOINT="cli"
+    local got
+    got=$(_resolve "{\"cwd\":\"$TEST_TMPDIR/barecwd\"}")
+    assert_eq "FAIL" "$got" "the cwd of a terminal claude is not a session signal" || return 1
+}
+
+# The gate reads the front end, not the session: `cs` exports the contract and
+# the env arm answers before any of this, so a cs launch is untouched by it.
+test_the_cli_gate_leaves_the_env_contract_alone() {
+    _make_session "$TEST_TMPDIR/cssess"
+    export CLAUDE_SESSION_NAME="from-cs"
+    export CLAUDE_SESSION_DIR="$TEST_TMPDIR/cssess"
+    export CLAUDE_SESSION_META_DIR="$TEST_TMPDIR/cssess/.cs"
+    export CLAUDE_CODE_ENTRYPOINT="cli"
+    local got
+    got=$(_resolve '{}')
+    assert_eq "from-cs|$TEST_TMPDIR/cssess|$TEST_TMPDIR/cssess/.cs" "$got" \
+        "a cs-launched CLI session resolves from its exported contract" || return 1
+}
+
+# The other direction, which is the whole reason the walk exists: desktop can
+# publish no contract, so the directory is all it has. Naming a front end the
+# gate does not know must not silence it either — only an affirmative "cli"
+# declines, so an unset or unfamiliar entrypoint still resolves.
+test_other_front_ends_still_derive_from_the_directory() {
+    local ep got failures=0
+    for ep in claude-desktop claude-desktop-3p claude-vscode claude-in-teams sdk-ts local-agent ""; do
+        _make_session "$TEST_TMPDIR/fe" "fe"
+        export CLAUDE_PROJECT_DIR="$TEST_TMPDIR/fe"
+        if [ -n "$ep" ]; then
+            export CLAUDE_CODE_ENTRYPOINT="$ep"
+        else
+            unset CLAUDE_CODE_ENTRYPOINT
+        fi
+        got=$(_resolve '{}')
+        if [ "$got" != "fe|$(_phys "$TEST_TMPDIR/fe")|$(_phys "$TEST_TMPDIR/fe")/.cs" ]; then
+            echo "  FAIL: entrypoint [${ep:-unset}] lost its session, got [$got]"
+            failures=$((failures + 1))
+        fi
+        rm -rf "$TEST_TMPDIR/fe"
+    done
+    [ "$failures" -eq 0 ] || return 1
+}
+
+run_test test_terminal_cli_does_not_derive_from_the_directory
+run_test test_terminal_cli_does_not_derive_from_the_input_cwd
+run_test test_the_cli_gate_leaves_the_env_contract_alone
+run_test test_other_front_ends_still_derive_from_the_directory
+
+# ============================================================================
+# Headless and teammates: both are terminal claudes, and only one is in the
+# session. `claude -p` derives sdk-cli; an agent-team teammate is respawned in
+# a tmux pane that inherits neither the contract nor an entrypoint, so it
+# derives plain cli and is indistinguishable from a bare claude by that alone.
+# ============================================================================
+
+# Start a process whose argv carries the flags under test, and print its pid
+# once ps can see it. A script file, not `bash -c`: bash exec's the last command
+# of a -c string over itself, so the process ps reports would be `sleep`, with
+# the arguments under test gone from its argv.
+_fake_claude() {  # [extra_args...]
+    local script="$TEST_TMPDIR/fake-claude.sh" pid i=0
+    printf '#!/usr/bin/env bash\nsleep 30\n' > "$script"
+    chmod +x "$script"
+    "$script" "$@" >/dev/null 2>&1 &
+    pid=$!
+    while [ "$i" -lt 50 ]; do
+        ps -o args= -p "$pid" 2>/dev/null | grep -q fake-claude && break
+        i=$((i + 1))
+        sleep 0.1
+    done
+    printf '%s\n' "$pid"
+}
+
+test_headless_cli_does_not_derive_from_the_directory() {
+    _make_session "$TEST_TMPDIR/headless" "headless"
+    export CLAUDE_PROJECT_DIR="$TEST_TMPDIR/headless"
+    export CLAUDE_CODE_ENTRYPOINT="sdk-cli"
+    local pid got
+    pid=$(_fake_claude); export CLAUDE_PID="$pid"
+    got=$(_resolve '{}')
+    kill "$pid" 2>/dev/null
+    assert_eq "FAIL" "$got" "a bare claude -p in a session folder stays cs-blind" || return 1
+}
+
+# The teammate is the reason the gate cannot be the entrypoint alone: Claude
+# Code launches it with --agent-id, and it works inside the session directory.
+test_a_teammate_keeps_its_session() {
+    _make_session "$TEST_TMPDIR/team" "team"
+    export CLAUDE_PROJECT_DIR="$TEST_TMPDIR/team"
+    export CLAUDE_CODE_ENTRYPOINT="cli"
+    local pid got
+    pid=$(_fake_claude --agent-id abc123 --agent-name mate --team-name t)
+    export CLAUDE_PID="$pid"
+    got=$(_resolve '{}')
+    kill "$pid" 2>/dev/null
+    assert_eq "team|$(_phys "$TEST_TMPDIR/team")|$(_phys "$TEST_TMPDIR/team")/.cs" "$got" \
+        "a tmux teammate resolves the session it was spawned into" || return 1
+}
+
+test_a_headless_teammate_keeps_its_session() {
+    _make_session "$TEST_TMPDIR/teamp" "teamp"
+    export CLAUDE_PROJECT_DIR="$TEST_TMPDIR/teamp"
+    export CLAUDE_CODE_ENTRYPOINT="sdk-cli"
+    local pid got
+    pid=$(_fake_claude --agent-id abc123 --agent-name mate --team-name t)
+    export CLAUDE_PID="$pid"
+    got=$(_resolve '{}')
+    kill "$pid" 2>/dev/null
+    assert_eq "teamp|$(_phys "$TEST_TMPDIR/teamp")|$(_phys "$TEST_TMPDIR/teamp")/.cs" "$got" \
+        "a headless teammate is still a teammate" || return 1
+}
+
+# A flag that merely CONTAINS the probe string is not the probe: matching a
+# bare substring would let `claude --agent-idle-whatever`, or a prompt
+# mentioning --agent-id, keep a session it is not in.
+test_a_lookalike_flag_is_not_a_teammate() {
+    _make_session "$TEST_TMPDIR/lookalike" "lookalike"
+    export CLAUDE_PROJECT_DIR="$TEST_TMPDIR/lookalike"
+    export CLAUDE_CODE_ENTRYPOINT="cli"
+    local pid got
+    pid=$(_fake_claude --agent-idler x); export CLAUDE_PID="$pid"
+    got=$(_resolve '{}')
+    kill "$pid" 2>/dev/null
+    assert_eq "FAIL" "$got" "a flag that only starts with the probe is not a teammate" || return 1
+}
+
+# Nothing to read means nothing to trust: an unreadable process cannot be shown
+# to be a teammate, and the terminal default is that it is not in the session.
+test_an_unreadable_process_is_not_a_teammate() {
+    _make_session "$TEST_TMPDIR/nopid" "nopid"
+    export CLAUDE_PROJECT_DIR="$TEST_TMPDIR/nopid"
+    export CLAUDE_CODE_ENTRYPOINT="cli"
+    local got
+    unset CLAUDE_PID
+    got=$(_resolve '{}')
+    assert_eq "FAIL" "$got" "no pid to inspect declines" || return 1
+    export CLAUDE_PID=999999
+    got=$(_resolve '{}')
+    assert_eq "FAIL" "$got" "a dead pid declines" || return 1
+}
+
+run_test test_headless_cli_does_not_derive_from_the_directory
+run_test test_a_teammate_keeps_its_session
+run_test test_a_headless_teammate_keeps_its_session
+run_test test_a_lookalike_flag_is_not_a_teammate
+run_test test_an_unreadable_process_is_not_a_teammate
 
 report_results

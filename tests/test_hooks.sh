@@ -2052,4 +2052,47 @@ run_test test_session_state_does_not_interpret_backslash_escapes_in_content
 run_test test_session_state_scrubs_a_real_control_byte_in_content
 run_test test_session_state_still_renders_its_own_line_breaks
 
+# ============================================================================
+# session-start.sh: publishing the session contract to the conversation
+# ============================================================================
+
+# CLAUDE_ENV_FILE is how a SessionStart hook hands variables to the rest of the
+# session. `cs` has already exported the contract before exec, so the write is
+# what carries it where the launch could not reach.
+test_session_start_publishes_the_contract_for_a_cs_launch() {
+    session_start_setup
+    local envfile="$TEST_TMPDIR/envfile"
+    : > "$envfile"
+
+    CLAUDE_ENV_FILE="$envfile" bash -c 'echo "{\"session_id\":\"s\",\"source\":\"startup\",\"cwd\":\"'"$CLAUDE_SESSION_DIR"'\",\"hook_event_name\":\"SessionStart\"}" | bash "'"$HOOKS_DIR"'/session-start.sh"' \
+        >/dev/null 2>&1
+
+    assert_file_contains "$envfile" "CLAUDE_SESSION_NAME" \
+        "a cs launch publishes its own contract" || { session_start_teardown; return 1; }
+    session_start_teardown
+}
+
+# A front end that reached the session by walking the directory it opened is
+# not the one cs launched, and the lock, the recorded conversation and the
+# index all key off that difference. Publishing the contract into such a
+# session would erase the distinction for every hook that fires after it.
+test_session_start_withholds_the_contract_from_a_walked_in_front_end() {
+    session_start_setup
+    local envfile="$TEST_TMPDIR/envfile" dir="$CLAUDE_SESSION_DIR"
+    : > "$envfile"
+
+    env -u CLAUDE_SESSION_NAME -u CLAUDE_SESSION_DIR -u CLAUDE_SESSION_META_DIR \
+        CLAUDE_CODE_ENTRYPOINT="claude-desktop" CLAUDE_PROJECT_DIR="$dir" \
+        CLAUDE_ENV_FILE="$envfile" \
+        bash -c 'echo "{\"session_id\":\"s\",\"source\":\"startup\",\"cwd\":\"'"$dir"'\",\"hook_event_name\":\"SessionStart\"}" | bash "'"$HOOKS_DIR"'/session-start.sh"' \
+        >/dev/null 2>&1
+
+    assert_file_not_contains "$envfile" "CLAUDE_SESSION_NAME" \
+        "a walked-in front end must not publish the contract" || { session_start_teardown; return 1; }
+    session_start_teardown
+}
+
+run_test test_session_start_publishes_the_contract_for_a_cs_launch
+run_test test_session_start_withholds_the_contract_from_a_walked_in_front_end
+
 report_results

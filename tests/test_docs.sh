@@ -72,6 +72,8 @@ test_hooks_doc_states_both_resolution_arms() {
         "the doc must state the arm that makes the claim false" || return 1
     assert_file_contains "$doc" "cs_resolve_session" \
         "and name the function that owns the contract" || return 1
+    assert_file_contains "$doc" "CLAUDE_CODE_ENTRYPOINT" \
+        "and the front-end test that keeps a terminal claude out of the walk" || return 1
 }
 
 run_test test_configuration_documents_every_env_var_the_readme_names
