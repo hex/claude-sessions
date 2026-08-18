@@ -30,7 +30,10 @@ cs_resolve_session() {  # [hook_input_json]
         : "${CLAUDE_SESSION_META_DIR:=$CLAUDE_SESSION_DIR/.cs}"
         export CLAUDE_SESSION_META_DIR
         _cs_session_is_enabled "$CLAUDE_SESSION_DIR" || return 1
-        CS_RESOLVED_FROM=env
+        # Preserved, not overwritten: a teammate is handed the contract AND
+        # this marker by session-start.sh, so its later hooks resolve here
+        # while session-end.sh can still see the launch was someone else's.
+        : "${CS_RESOLVED_FROM:=env}"
         export CS_RESOLVED_FROM
         return 0
     fi
@@ -106,22 +109,28 @@ _cs_find_session_root() {  # start_dir
     return 1
 }
 
-# Claude Code launches an agent-team teammate with --agent-id (with
-# --agent-name and --team-name, which it rejects unless all three are given).
-# CLAUDE_PID names the claude a hook is firing for, and a process that cannot
-# be read cannot be shown to be a teammate: in a terminal that means the
+# Claude Code launches an agent-team teammate with --agent-id, --agent-name and
+# --team-name, and rejects the launch unless all three are given. All three are
+# required here for that reason: one flag alone also matches a person asking
+# what --agent-id does, whose prompt is in the argv of a claude that is not a
+# teammate. CLAUDE_PID names the claude a hook is firing for, and a process that
+# cannot be read cannot be shown to be a teammate: in a terminal that means the
 # session was not entered through cs, which is the case for declining.
 _cs_is_teammate() {
     local args=""
     [ -n "${CLAUDE_PID:-}" ] || return 1
     args=$(ps -o args= -p "$CLAUDE_PID" 2>/dev/null) || return 1
     [ -n "$args" ] || return 1
-    # Padded on both sides so the match is the whole flag: --agent-idle-foo
-    # shares a prefix with it and is not it.
-    case " $args " in
-        *" --agent-id "*|*" --agent-id="*) return 0 ;;
-    esac
-    return 1
+    # Padded on both sides so each match is the whole flag: --agent-idle-foo
+    # shares a prefix with --agent-id and is not it.
+    local flag
+    for flag in --agent-id --agent-name --team-name; do
+        case " $args " in
+            *" $flag "*|*" $flag="*) ;;
+            *) return 1 ;;
+        esac
+    done
+    return 0
 }
 
 # A session opts out of hook behaviour with .cs/local/disabled. Before this

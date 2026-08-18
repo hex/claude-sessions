@@ -259,17 +259,30 @@ fi
 
 fi # end startup/resume guard
 
-# Export environment variables for the session via CLAUDE_ENV_FILE. Only for a
-# session cs launched: a front end that reached this session by walking the
-# directory it opened is not the one holding the lock or the recorded
-# conversation, and publishing the contract would make every hook it fires
-# afterwards indistinguishable from the launch that owns them.
-if [ -n "${CLAUDE_ENV_FILE:-}" ] && [ "${CS_RESOLVED_FROM:-env}" = "env" ]; then
+# Export environment variables for the session via CLAUDE_ENV_FILE, for the
+# launch cs made and for a teammate. A teammate reaches the session by walking
+# the directory it was spawned into, and needs the contract in its own
+# environment: `cs -secrets`, `cs -msg`, `cs -queue` and the status line all
+# read the session from there. It is still not the launch, so it carries the
+# marker out with it -- session-end.sh reads that to decide whether the lock is
+# this conversation's to remove, and a teammate's exit must not strip the
+# lead's. Any other walked-in front end gets nothing: publishing the contract
+# would make every hook it fires afterwards read as the launch that owns them.
+_cs_publish_to=""
+if [ "${CS_RESOLVED_FROM:-env}" = "env" ]; then
+    _cs_publish_to="launch"
+elif command -v _cs_is_teammate >/dev/null 2>&1 && _cs_is_teammate; then
+    _cs_publish_to="teammate"
+fi
+if [ -n "${CLAUDE_ENV_FILE:-}" ] && [ -n "$_cs_publish_to" ]; then
     cat >> "$CLAUDE_ENV_FILE" << EOF
 export CLAUDE_SESSION_NAME="$CLAUDE_SESSION_NAME"
 export CLAUDE_SESSION_DIR="$SESSION_DIR"
 export CLAUDE_SESSION_META_DIR="$META_DIR"
 EOF
+    if [ "$_cs_publish_to" = "teammate" ]; then
+        printf 'export CS_RESOLVED_FROM="%s"\n' "${CS_RESOLVED_FROM:-walk}" >> "$CLAUDE_ENV_FILE"
+    fi
 fi
 
 # Resolve who is driving this session, for the identity anchor below.

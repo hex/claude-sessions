@@ -530,4 +530,20 @@ run_test test_a_headless_teammate_keeps_its_session
 run_test test_a_lookalike_flag_is_not_a_teammate
 run_test test_an_unreadable_process_is_not_a_teammate
 
+# One flag is not the launch: a person asking what --agent-id does puts it in
+# the argv of a claude that is not a teammate. Claude Code never passes a
+# subset, so requiring all three costs a real teammate nothing.
+test_a_prompt_naming_the_flag_is_not_a_teammate() {
+    _make_session "$TEST_TMPDIR/prompted" "prompted"
+    export CLAUDE_PROJECT_DIR="$TEST_TMPDIR/prompted"
+    export CLAUDE_CODE_ENTRYPOINT="cli"
+    local pid got
+    pid=$(_fake_claude "what does --agent-id do?"); export CLAUDE_PID="$pid"
+    got=$(_resolve '{}')
+    kill "$pid" 2>/dev/null
+    assert_eq "FAIL" "$got" "a prompt naming the flag does not make a teammate" || return 1
+}
+
+run_test test_a_prompt_naming_the_flag_is_not_a_teammate
+
 report_results

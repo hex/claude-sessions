@@ -58,4 +58,19 @@ run_test test_create_allows_dotted_name
 run_test test_remove_rejects_dotdot
 run_test test_remove_rejects_traversal
 
+# A name cs creates is also a name cs must be able to dispatch back. Bare `cs`
+# in a session directory re-enters as `cs <name>`, and a leading hyphen lands
+# in the verb arms: a session named -uninstall would run that verb instead of
+# opening, and one named -rm would reach remove_session.
+test_a_leading_hyphen_is_rejected() {
+    local out
+    out=$(CS_SESSIONS_ROOT="$TEST_TMPDIR/sessions" "$CS_BIN" -adopt -uninstall 2>&1 </dev/null)
+    case "$out" in
+        *"Unknown command"*|*"cannot start"*) : ;;
+        *) echo "  FAIL: a leading-hyphen name was not refused, got [$out]"; return 1 ;;
+    esac
+}
+
+run_test test_a_leading_hyphen_is_rejected
+
 report_results

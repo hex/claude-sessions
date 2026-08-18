@@ -2095,4 +2095,36 @@ test_session_start_withholds_the_contract_from_a_walked_in_front_end() {
 run_test test_session_start_publishes_the_contract_for_a_cs_launch
 run_test test_session_start_withholds_the_contract_from_a_walked_in_front_end
 
+# A teammate resolves by walking, and is the one walked-in front end that needs
+# the contract: its own `cs -secrets`, `cs -msg` and status line read the
+# session out of the environment. What must survive is that it is not the
+# launch, which session-end.sh reads to decide whether it owns the lock.
+test_session_start_publishes_the_contract_to_a_teammate() {
+    session_start_setup
+    local envfile="$TEST_TMPDIR/envfile" dir="$CLAUDE_SESSION_DIR" script="$TEST_TMPDIR/fake-claude.sh"
+    : > "$envfile"
+    printf '#!/usr/bin/env bash\nsleep 30\n' > "$script"; chmod +x "$script"
+    "$script" --agent-id a1 --agent-name mate --team-name t >/dev/null 2>&1 &
+    local pid=$! i=0
+    while [ "$i" -lt 50 ]; do
+        ps -o args= -p "$pid" 2>/dev/null | grep -q fake-claude && break
+        i=$((i + 1)); sleep 0.1
+    done
+
+    env -u CLAUDE_SESSION_NAME -u CLAUDE_SESSION_DIR -u CLAUDE_SESSION_META_DIR \
+        CLAUDE_CODE_ENTRYPOINT="cli" CLAUDE_PID="$pid" CLAUDE_PROJECT_DIR="$dir" \
+        CLAUDE_ENV_FILE="$envfile" \
+        bash -c 'echo "{\"session_id\":\"s\",\"source\":\"startup\",\"cwd\":\"'"$dir"'\",\"hook_event_name\":\"SessionStart\"}" | bash "'"$HOOKS_DIR"'/session-start.sh"' \
+        >/dev/null 2>&1
+    kill "$pid" 2>/dev/null
+
+    assert_file_contains "$envfile" "CLAUDE_SESSION_NAME" \
+        "a teammate needs the session in its own environment" || { session_start_teardown; return 1; }
+    assert_file_contains "$envfile" "CS_RESOLVED_FROM=\"walk\"" \
+        "and must stay marked as not being the launch" || { session_start_teardown; return 1; }
+    session_start_teardown
+}
+
+run_test test_session_start_publishes_the_contract_to_a_teammate
+
 report_results
