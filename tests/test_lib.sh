@@ -295,7 +295,14 @@ assert_output_not_contains() {
 # while every one of them passes on a mac.
 _pty_run() {  # command, args...
     if script --version 2>/dev/null | grep -q util-linux; then
-        script -q -c "$*" /dev/null < /dev/null
+        # A newline, not /dev/null: util-linux hands the child a pty that never
+        # reaches EOF, so a command that stops to ask something waits on it for
+        # as long as the runner allows -- a cs launch asking whether to continue
+        # the previous conversation hung the whole Linux lane until the job's
+        # own timeout. The newline answers the way the rest of the suite does,
+        # by taking the default, and `timeout` bounds anything that asks twice
+        # so the next such prompt fails in seconds and names itself.
+        printf '\n' | timeout 60 script -q -c "$*" /dev/null
     else
         # script(1) tcgetattr's its OWN stdin and dies on a socket, which is
         # what a CI runner or an agent harness often hands it; /dev/null still
