@@ -12,7 +12,8 @@
 # cs session is identifiable on disk by its .cs/ directory.
 #
 # So: trust the env when it is there, and otherwise find the session the same
-# way a person would, by looking at where we are.
+# way a person would, by looking at where we are -- except in a terminal, where
+# `cs` is how a session is entered and the contract would have been exported.
 
 # Resolve the session and export the contract. Returns 0 when a session was
 # found, non-zero otherwise, leaving the caller's own decline path to run
@@ -32,6 +33,16 @@ cs_resolve_session() {  # [hook_input_json]
         CS_RESOLVED_FROM=env
         export CS_RESOLVED_FROM
         return 0
+    fi
+
+    # A terminal CLI enters a session through `cs`, which exports the contract
+    # above, so one arriving here was started another way and is not in a
+    # session -- the .cs/ it may be standing in belongs to a session, not to
+    # this conversation. Claude Code names its own front end here, and the test
+    # is affirmative on purpose: only "cli" declines, so an unset or unfamiliar
+    # entrypoint keeps the walk a front end that can publish nothing depends on.
+    if [ "${CLAUDE_CODE_ENTRYPOINT:-}" = "cli" ]; then
+        return 1
     fi
 
     # Prefer CLAUDE_PROJECT_DIR: it names the folder the session was opened on

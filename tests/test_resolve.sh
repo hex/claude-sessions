@@ -13,12 +13,13 @@ setup() {
     # CS_ACTOR and the session env are the inputs under test; a developer's
     # exported ones would decide the result instead of the fixture.
     unset CS_ACTOR CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR
-    unset CLAUDE_PROJECT_DIR
+    unset CLAUDE_PROJECT_DIR CLAUDE_CODE_ENTRYPOINT
 }
 
 teardown() {
     [ -n "$TEST_TMPDIR" ] && [ -d "$TEST_TMPDIR" ] && rm -rf "$TEST_TMPDIR"
     unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR CLAUDE_PROJECT_DIR
+    unset CLAUDE_CODE_ENTRYPOINT
 }
 
 # Run the resolver in a subshell and print the resolved triple, or FAIL.
@@ -363,5 +364,71 @@ test_disabled_marker_opts_out_on_the_env_path() {
 
 run_test test_disabled_marker_opts_out
 run_test test_disabled_marker_opts_out_on_the_env_path
+
+# ============================================================================
+# Terminal CLI: a session is only ever entered there through `cs`, which
+# exports the contract, so the directory the shell happens to sit in says
+# nothing. Claude Code names its own front end in CLAUDE_CODE_ENTRYPOINT.
+# ============================================================================
+
+test_terminal_cli_does_not_derive_from_the_directory() {
+    _make_session "$TEST_TMPDIR/bare" "bare"
+    export CLAUDE_PROJECT_DIR="$TEST_TMPDIR/bare"
+    export CLAUDE_CODE_ENTRYPOINT="cli"
+    local got
+    got=$(_resolve '{}')
+    assert_eq "FAIL" "$got" "a bare terminal claude in a session folder stays cs-blind" || return 1
+}
+
+test_terminal_cli_does_not_derive_from_the_input_cwd() {
+    _make_session "$TEST_TMPDIR/barecwd" "barecwd"
+    export CLAUDE_CODE_ENTRYPOINT="cli"
+    local got
+    got=$(_resolve "{\"cwd\":\"$TEST_TMPDIR/barecwd\"}")
+    assert_eq "FAIL" "$got" "the cwd of a terminal claude is not a session signal" || return 1
+}
+
+# The gate reads the front end, not the session: `cs` exports the contract and
+# the env arm answers before any of this, so a cs launch is untouched by it.
+test_the_cli_gate_leaves_the_env_contract_alone() {
+    _make_session "$TEST_TMPDIR/cssess"
+    export CLAUDE_SESSION_NAME="from-cs"
+    export CLAUDE_SESSION_DIR="$TEST_TMPDIR/cssess"
+    export CLAUDE_SESSION_META_DIR="$TEST_TMPDIR/cssess/.cs"
+    export CLAUDE_CODE_ENTRYPOINT="cli"
+    local got
+    got=$(_resolve '{}')
+    assert_eq "from-cs|$TEST_TMPDIR/cssess|$TEST_TMPDIR/cssess/.cs" "$got" \
+        "a cs-launched CLI session resolves from its exported contract" || return 1
+}
+
+# The other direction, which is the whole reason the walk exists: desktop can
+# publish no contract, so the directory is all it has. Naming a front end the
+# gate does not know must not silence it either — only an affirmative "cli"
+# declines, so an unset or unfamiliar entrypoint still resolves.
+test_other_front_ends_still_derive_from_the_directory() {
+    local ep got failures=0
+    for ep in claude-desktop claude-desktop-3p claude-vscode claude-in-teams sdk-ts local-agent ""; do
+        _make_session "$TEST_TMPDIR/fe" "fe"
+        export CLAUDE_PROJECT_DIR="$TEST_TMPDIR/fe"
+        if [ -n "$ep" ]; then
+            export CLAUDE_CODE_ENTRYPOINT="$ep"
+        else
+            unset CLAUDE_CODE_ENTRYPOINT
+        fi
+        got=$(_resolve '{}')
+        if [ "$got" != "fe|$(_phys "$TEST_TMPDIR/fe")|$(_phys "$TEST_TMPDIR/fe")/.cs" ]; then
+            echo "  FAIL: entrypoint [${ep:-unset}] lost its session, got [$got]"
+            failures=$((failures + 1))
+        fi
+        rm -rf "$TEST_TMPDIR/fe"
+    done
+    [ "$failures" -eq 0 ] || return 1
+}
+
+run_test test_terminal_cli_does_not_derive_from_the_directory
+run_test test_terminal_cli_does_not_derive_from_the_input_cwd
+run_test test_the_cli_gate_leaves_the_env_contract_alone
+run_test test_other_front_ends_still_derive_from_the_directory
 
 report_results
