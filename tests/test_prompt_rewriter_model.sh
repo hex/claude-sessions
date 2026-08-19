@@ -52,7 +52,10 @@ for _a in "$@"; do
     case "$_a" in --system-prompt) _skip_next=1; printf 'ARG=--system-prompt\n' >> "$CS_TEST_ENV_DUMP"; continue ;; esac
     printf 'ARG=%s\n' "$_a" >> "$CS_TEST_ENV_DUMP"
 done
-printf 'CWD_UNDER_HOME=%s\n' "$(case "$PWD/" in "${HOME:-/nonexistent}"/*) echo yes;; *) echo no;; esac)" >> "$CS_TEST_ENV_DUMP"
+case "$PWD/" in
+    "${HOME:-/nonexistent}"/*) printf 'CWD_UNDER_HOME=yes\n' >> "$CS_TEST_ENV_DUMP" ;;
+    *) printf 'CWD_UNDER_HOME=no\n' >> "$CS_TEST_ENV_DUMP" ;;
+esac
 printf 'REWRITTEN'
 FAKEEOF
     chmod +x "$FAKE_BIN/claude"
