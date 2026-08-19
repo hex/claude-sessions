@@ -382,9 +382,12 @@ first prompt so it starts on the handoff without you typing anything — the one
 thing `/clear` cannot do. `Y` (or Enter) resumes as usual and
 `n` starts fresh — both disarm the marker and say so, leaving the handoff
 itself pending so a later rotate can re-arm it. `d` discards the handoff
-outright. An armed marker names the handoff to offer; without one, or when it
-names a spent or missing file, the lexicographically last unconsumed basename
-wins — the `YYYY-MM-DD-` prefix makes that the newest. The marker takes
+outright. A handoff this checkout never wrote is labelled `(from another
+checkout)` at the prompt — it is still offered, because continuing your own
+rotation from a second machine is a working flow, but `r` on a colleague's live
+handoff consumes their artifact under your UUID, so the offer says whose it is.
+An armed marker names the handoff to offer; without one, or when it names a
+spent or missing file, the lexicographically last unconsumed basename wins — the `YYYY-MM-DD-` prefix makes that the newest. The marker takes
 precedence because `.cs/handoffs/` is shared and nothing deletes a handoff: a
 co-worker's file stays unconsumed indefinitely, and sorting last it would
 otherwise shadow the rotation this checkout armed.

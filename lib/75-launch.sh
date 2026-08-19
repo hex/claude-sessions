@@ -16,6 +16,24 @@ _handoff_is_unconsumed() {  # handoff_file
     ' "$1" 2>/dev/null
 }
 
+# True when the handoff's parent: UUID appears in this checkout's session log,
+# meaning this machine ran the conversation that wrote it. The log is
+# machine-local by design, so a co-worker's handoff — and this user's own from a
+# second machine — both read as absent. This is provenance for the offer to
+# show, not a filter: the pick deliberately still offers a handoff from
+# elsewhere, because continuing one on another machine is a working flow.
+_handoff_is_local() {  # handoff_file, session_dir
+    local log="$2/.cs/local/session.log" parent
+    [ -f "$log" ] || return 1
+    parent=$(awk '
+        NR==1 { if ($0 != "---") exit; next }
+        $0 == "---" { exit }
+        /^parent:[[:space:]]*/ { sub(/^parent:[[:space:]]*/, ""); print; exit }
+    ' "$1" 2>/dev/null)
+    [ -n "$parent" ] || return 1
+    grep -Fq "$parent" "$log" 2>/dev/null
+}
+
 # Drop a rotation marker the user declined to consume. Armed by the rotate
 # skill for a /clear, or by an earlier r, it must not outlive the answer: left
 # in place it would be consumed by an unrelated /clear hours later, injecting a
@@ -355,7 +373,14 @@ launch_claude_code() {
             response=""
         else
             if [ -n "$pending_handoff" ]; then
-                printf "${DIM}Rotation handoff pending:${NC} %s\n" "$(basename "$pending_handoff")"
+                # Answering blind is the hazard this label exists for: r arms
+                # the marker with this basename, and the next SessionStart flips
+                # that file to consumed under this machine's UUID — on a
+                # colleague's live rotation, that is their artifact being taken.
+                local _origin=""
+                _handoff_is_local "$pending_handoff" "$session_dir" \
+                    || _origin=" ${DIM}(from another checkout)${NC}"
+                printf "${DIM}Rotation handoff pending:${NC} %s%s\n" "$(basename "$pending_handoff")" "$_origin"
                 printf "${DIM}Continue previous conversation?${NC} [Y/n/r/d] ${DIM}(r = fresh conversation with handoff, d = discard handoff)${NC} "
             else
                 printf "${DIM}Continue previous conversation?${NC} [Y/n] "

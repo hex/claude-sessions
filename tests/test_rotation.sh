@@ -394,6 +394,36 @@ test_launcher_marker_with_a_path_falls_back_to_the_scan() {
         "a marker carrying a path is rejected and the scan wins" || return 1
 }
 
+# .cs/handoffs/ is shared and nothing retires a handoff written by another
+# checkout, so the offer recurs for one indefinitely. Answering it blind is the
+# hazard: r arms the marker with that basename and the next SessionStart flips
+# a colleague's live rotation to consumed under this machine's UUID. The pick
+# stays as it is — filtering on parent would also drop a same-user second-machine
+# handoff, which works today — so the offer says whose it is instead.
+test_offer_labels_a_handoff_from_another_checkout() {
+    _rot_session "rot-foreign"
+    local dir="$CS_SESSIONS_ROOT/rot-foreign"
+    _seed_handoff "$dir" "2026-07-16-theirs.md" "unconsumed"
+    local output
+    output=$("$CS_BIN" rot-foreign <<< "n" 2>&1) || true
+    assert_output_contains "$output" "another checkout" \
+        "a handoff whose parent this checkout never ran is labelled" || return 1
+}
+
+test_offer_leaves_a_local_handoff_unlabelled() {
+    _rot_session "rot-local"
+    local dir="$CS_SESSIONS_ROOT/rot-local"
+    _seed_handoff "$dir" "2026-07-16-mine.md" "unconsumed"
+    printf '%s - Session started (source: startup, ID: %s)\n' \
+        "2026-07-16 10:00:00" "$UUID_A" >> "$dir/.cs/local/session.log"
+    local output
+    output=$("$CS_BIN" rot-local <<< "n" 2>&1) || true
+    assert_output_contains "$output" "Rotation handoff pending" \
+        "the offer is still made for a local handoff" || return 1
+    assert_output_not_contains "$output" "another checkout" \
+        "a handoff this checkout wrote carries no foreign label" || return 1
+}
+
 test_discard_answer_dismisses_pending_handoff() {
     _rot_session "rot-d"
     local dir="$CS_SESSIONS_ROOT/rot-d"
@@ -523,6 +553,8 @@ run_test test_rotate_answer_auto_starts_handoff
 run_test test_continue_and_no_leave_handoff_unconsumed
 run_test test_consumed_handoffs_do_not_trigger_prompt
 run_test test_newest_of_multiple_handoffs_wins
+run_test test_offer_labels_a_handoff_from_another_checkout
+run_test test_offer_leaves_a_local_handoff_unlabelled
 run_test test_armed_marker_outranks_a_later_sorting_orphan
 run_test test_stale_marker_falls_back_to_the_scan
 run_test test_launcher_marker_with_a_path_falls_back_to_the_scan
