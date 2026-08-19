@@ -81,6 +81,23 @@ should do. If the user did not give one, ask before writing anything.
    step 6 arms is the exception — it names one handoff explicitly and the
    launcher honors it over that scan — but it covers only the file this
    rotation is arming, not the leftovers this step retires.
+
+   Then prune what is spent. A `consumed`, `discarded` or `superseded` handoff
+   has done its job, and git history keeps it after the file is gone, so
+   nothing is lost by dropping it. Delete one only when all three hold:
+
+   - its `status:` is one of those three — never `status: unconsumed`, which
+     may be a co-worker's armed rotation and is not yours to drop;
+   - its `created:` date is more than 30 days before today;
+   - it is not among the 10 newest handoffs in the directory by `created:`,
+     counting every handoff whatever its status, so a week of heavy rotation
+     never empties the store.
+
+   Take the age from `created:` in the frontmatter, never the file's mtime.
+   `.cs/handoffs/` is shared, and a clone stamps every file with its checkout
+   time: mtime would read as "all new" on a fresh machine and prune nothing,
+   while saying nothing about when the handoff was written. Stage the
+   deletions with step 5's commit.
 5. Commit the handoff and any supersedings (tracked session state, like
    narratives). Stage those paths by name.
 6. Arm the handoff: write its basename (no path) to

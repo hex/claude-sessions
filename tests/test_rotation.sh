@@ -128,6 +128,24 @@ test_rotate_skill_exists_with_frontmatter() {
     assert_file_contains "$skill" ".cs/handoffs/" "skill targets the tracked handoff store" || return 1
 }
 
+# Nothing else in cs deletes a handoff, so without a prune rule .cs/handoffs/
+# grows without bound in a tracked, shared directory. The rule has to be
+# spelled out precisely: which statuses are droppable, the age source, and the
+# floor that keeps a burst of rotations from emptying the store.
+test_rotate_skill_teaches_the_prune_rule() {
+    local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
+    assert_file_contains "$skill" "30 days" \
+        "skill names the age cutoff" || return 1
+    assert_file_contains "$skill" "10 newest" \
+        "skill names the floor that survives the cutoff" || return 1
+    assert_file_contains "$skill" "created:" \
+        "skill reads the age from the frontmatter date" || return 1
+    grep -q "never the file's mtime" "$skill" \
+        || { echo "  FAIL: skill must rule out mtime as the age source"; return 1; }
+    grep -q "never .status: unconsumed." "$skill" \
+        || { echo "  FAIL: skill must forbid deleting an unconsumed handoff"; return 1; }
+}
+
 test_rotate_skill_registered_in_both_manifests() {
     grep -A 5 '^CS_SKILLS=(' "$SCRIPT_DIR/../lib/00-header.sh" | grep -q 'rotate' \
         || { echo "  FAIL: rotate missing from lib/00-header.sh CS_SKILLS"; return 1; }
@@ -189,6 +207,7 @@ test_rotate_skill_reads_parent_from_state_not_the_launch_env() {
 }
 
 run_test test_rotate_skill_exists_with_frontmatter
+run_test test_rotate_skill_teaches_the_prune_rule
 run_test test_rotate_skill_registered_in_both_manifests
 run_test test_rotate_skill_documents_the_clear_route
 run_test test_rotate_skill_governs_what_goes_into_the_handoff

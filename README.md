@@ -353,8 +353,12 @@ nudges you (see below). It distills the live conversation into a
 lineage-stamped handoff — parent UUID, purpose, and a continuation plan —
 commits it to `.cs/handoffs/YYYY-MM-DD-<slug>.md`, and arms it by naming it in
 `.cs/local/pending-handoff`. Any earlier handoff of its own that is still
-pending is flipped to `superseded`. The conversation keeps running; nothing
-has ended yet.
+pending is flipped to `superseded`, and spent ones are pruned: a `consumed`,
+`discarded` or `superseded` handoff older than 30 days by its `created:` date
+is deleted, unless it is among the 10 newest in the store. Nothing else in cs
+deletes a handoff, so without that pass the directory grows without bound; git
+history keeps every one that is dropped. The conversation keeps running;
+nothing has ended yet.
 
 Because the handoff is committed and becomes the next conversation's opening
 prompt, the skill redacts credentials and personal data out of it (name the
