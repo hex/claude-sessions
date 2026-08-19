@@ -35,10 +35,21 @@ cfg="${XDG_CACHE_HOME:-$HOME/.cache}/cs/rewrite-config"
 # obeyed them and answered the user, and the answer replaced what the user had
 # typed. CLAUDE_CONFIG_DIR does not bound this; the working directory is the
 # whole vector, so the call runs from a directory no CLAUDE.md can sit above.
-_rundir="${TMPDIR:-/tmp}"
-case "$_rundir/" in
-    "$HOME"/*) _rundir=/tmp ;;
-esac
+# The directory must also be one nobody else can write to. ${TMPDIR:-/tmp}
+# resolves to a world-writable /tmp wherever TMPDIR is unset — a Linux login
+# shell, a container — and a directory anyone can write is a directory anyone
+# can drop a CLAUDE.md into. Since the rewrite's output is substituted straight
+# into the composer, that would let a local user choose the prompt this user's
+# agent then runs: a worse defect than the leak this fix exists to close. mktemp
+# creates with mode 700, so the call runs somewhere private either way.
+_rundir=$(mktemp -d 2>/dev/null) || _rundir=""
+if [ -n "$_rundir" ]; then
+    trap 'rm -rf "$_rundir" 2>/dev/null || true' EXIT
+else
+    # No writable temp dir at all: the config dir is wrong for the reason above,
+    # but a failed rewrite that leaves the buffer as typed beats a leaked one.
+    _rundir="$cfg"
+fi
 if [ ! -f "$cfg/settings.json" ]; then
     mkdir -p "$cfg" 2>/dev/null || exit 1
     printf '{"hasCompletedOnboarding":true}\n' > "$cfg/settings.json" 2>/dev/null || exit 1

@@ -56,6 +56,43 @@ test_output_not_contains_still_fails_on_a_real_hit() {
 # process table is a shared resource like ~/.claude/projects and the terminal:
 # setup() has to isolate it, or the isolation depends on every test author
 # remembering the seam.
+# The first version of this test called the shared setup() and passed, while two
+# dozen suites that define their own setup() went on reading the real ps. A test
+# that only proves the invariant where the fix already applies is worse than no
+# test: it reports the exposure as closed. Assert the property a suite with its
+# own setup() actually gets.
+test_process_table_isolation_survives_a_suite_that_overrides_setup() {
+    local probe="$TEST_TMPDIR/probe.sh"
+    cat > "$probe" <<PROBE
+#!/usr/bin/env bash
+SCRIPT_DIR="$SCRIPT_DIR"
+source "\$SCRIPT_DIR/test_lib.sh"
+setup() { :; }   # the pattern 24 suites use
+setup
+[ -n "\${CS_PS_BIN:-}" ] || { echo MISSING; exit 1; }
+"\$CS_PS_BIN" -Ao args= | head -1
+echo "OK"
+PROBE
+    chmod +x "$probe"
+    local out
+    out=$(/bin/bash "$probe" 2>&1) || { echo "  FAIL: probe suite errored: $out"; return 1; }
+    case "$out" in
+        MISSING*) echo "  FAIL: a suite with its own setup() gets no CS_PS_BIN"; return 1 ;;
+        OK) : ;;
+        *) echo "  FAIL: the argv scan returned output for an overriding suite: $out"; return 1 ;;
+    esac
+}
+
+# The stub must not blind the other ps consumers: the lock's ancestry walk and
+# presence's pid join read real per-process facts through the same seam.
+test_process_table_stub_passes_through_other_ps_forms() {
+    local out
+    out=$("$CS_PS_BIN" -o ppid= -p $$ 2>/dev/null | tr -d '[:space:]')
+    case "$out" in
+        ''|*[!0-9]*) echo "  FAIL: -o ppid= must return this process's real parent, got '$out'"; return 1 ;;
+    esac
+}
+
 test_setup_isolates_the_process_table() {
     [ -n "${CS_PS_BIN:-}" ] \
         || { echo "  FAIL: setup() must export CS_PS_BIN so no test reads the real ps"; return 1; }
@@ -81,5 +118,7 @@ run_test test_output_not_contains_survives_a_large_output
 run_test test_output_contains_still_fails_on_a_real_miss
 run_test test_output_not_contains_still_fails_on_a_real_hit
 run_test test_setup_isolates_the_process_table
+run_test test_process_table_isolation_survives_a_suite_that_overrides_setup
+run_test test_process_table_stub_passes_through_other_ps_forms
 
 report_results

@@ -28,10 +28,19 @@ _handoff_is_local() {  # handoff_file, session_dir
     parent=$(awk '
         NR==1 { if ($0 != "---") exit; next }
         $0 == "---" { exit }
-        /^parent:[[:space:]]*/ { sub(/^parent:[[:space:]]*/, ""); print; exit }
+        /^parent:[[:space:]]*/ {
+            sub(/^parent:[[:space:]]*/, "")
+            gsub(/[[:space:]\r]+$/, "")
+            print; exit
+        }
     ' "$1" 2>/dev/null)
     [ -n "$parent" ] || return 1
-    grep -Fq "$parent" "$log" 2>/dev/null
+    # Anchored to the line session-start.sh writes, not a bare substring: the
+    # bash-logger appends every command to this same file, so an unanchored
+    # match reads a logged `claude --resume <uuid>` as proof this checkout ran
+    # that conversation and drops the one warning shown before r.
+    grep -Fq "Session started" "$log" 2>/dev/null \
+        && grep -E -q "Session started \(.*ID: $parent\)" "$log" 2>/dev/null
 }
 
 # Drop a rotation marker the user declined to consume. Armed by the rotate

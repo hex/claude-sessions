@@ -410,6 +410,39 @@ test_offer_labels_a_handoff_from_another_checkout() {
         "a handoff whose parent this checkout never ran is labelled" || return 1
 }
 
+# hooks/bash-logger.sh appends every Bash command to the same session.log, so a
+# bare substring match reads a logged `claude --resume <uuid>` as proof this
+# checkout ran that conversation — silently dropping the one warning shown
+# before r mutates a colleague's handoff.
+test_a_logged_command_naming_a_uuid_is_not_provenance() {
+    _rot_session "rot-logline"
+    local dir="$CS_SESSIONS_ROOT/rot-logline"
+    _seed_handoff "$dir" "2026-07-16-theirs.md" "unconsumed"
+    printf '[2026-07-16 10:00:00] BASH: claude --resume %s\n' "$UUID_A" \
+        >> "$dir/.cs/local/session.log"
+    local output
+    output=$("$CS_BIN" rot-logline <<< "n" 2>&1) || true
+    assert_output_contains "$output" "another checkout" \
+        "a logged command mentioning the uuid is not a session this checkout ran" || return 1
+}
+
+# A handoff written with CRLF, or with a trailing space after the uuid, must
+# still be recognised as this checkout's — otherwise the user's own handoff is
+# labelled as a colleague's and the label stops meaning anything.
+test_a_trailing_carriage_return_still_reads_as_local() {
+    _rot_session "rot-crlf"
+    local dir="$CS_SESSIONS_ROOT/rot-crlf"
+    mkdir -p "$dir/.cs/handoffs"
+    printf -- '---\r\nparent: %s \r\ncreated: 2026-07-16T10:00:00Z\r\npurpose: t\r\nstatus: unconsumed\r\n---\r\n' \
+        "$UUID_A" > "$dir/.cs/handoffs/2026-07-16-mine.md"
+    printf '2026-07-16 10:00:00 - Session started (source: startup, ID: %s)\n' "$UUID_A" \
+        >> "$dir/.cs/local/session.log"
+    local output
+    output=$("$CS_BIN" rot-crlf <<< "n" 2>&1) || true
+    assert_output_not_contains "$output" "another checkout" \
+        "a trailing CR must not make this checkout's own handoff read as foreign" || return 1
+}
+
 test_offer_leaves_a_local_handoff_unlabelled() {
     _rot_session "rot-local"
     local dir="$CS_SESSIONS_ROOT/rot-local"
@@ -555,6 +588,8 @@ run_test test_consumed_handoffs_do_not_trigger_prompt
 run_test test_newest_of_multiple_handoffs_wins
 run_test test_offer_labels_a_handoff_from_another_checkout
 run_test test_offer_leaves_a_local_handoff_unlabelled
+run_test test_a_logged_command_naming_a_uuid_is_not_provenance
+run_test test_a_trailing_carriage_return_still_reads_as_local
 run_test test_armed_marker_outranks_a_later_sorting_orphan
 run_test test_stale_marker_falls_back_to_the_scan
 run_test test_launcher_marker_with_a_path_falls_back_to_the_scan

@@ -119,6 +119,41 @@ _stub_tools() {  # dir, tools...
 }
 
 
+# cs's live-duplicate guard scans the machine's whole process table for the
+# session name or its UUID. The gate runs suites in parallel and many of them
+# launch a session called test-session, so a suite reading the real `ps` sees a
+# sibling suite's process and is told the session is already running elsewhere.
+#
+# This is installed at source time, not in setup(): two dozen suites define
+# their own setup() and never call the shared one, and those are the heaviest
+# `cs` users — the collision would stay live in exactly the suites most likely
+# to hit it. Sourcing test_lib.sh is the one thing every suite does.
+#
+# It answers ONLY the machine-wide argv scan. The other consumers of CS_PS_BIN
+# read real per-process facts and must keep getting them: lib/15-lock.sh asks
+# `-o ppid=` to walk the invoker's ancestry, lib/56-presence.sh asks
+# `-o pid=,lstart=` to join against recycled pids. Answering those with silence
+# would make the ancestry walk fail closed and the presence join find nothing,
+# so a test touching either would pass or fail on the stub's invention.
+CS_PS_STUB="${TMPDIR:-/tmp}/cs-test-ps-stub.$$"
+cat > "$CS_PS_STUB" <<'PSSTUB'
+#!/bin/sh
+for _arg in "$@"; do
+    case "$_arg" in
+        -*A*o|-Ao|args=) exec true ;;
+    esac
+done
+exec /bin/ps "$@"
+PSSTUB
+chmod +x "$CS_PS_STUB"
+export CS_PS_STUB
+export CS_PS_BIN="$CS_PS_STUB"
+# No EXIT trap here: several suites set their own, and the last one registered
+# wins — a trap installed at source time is silently replaced, then fires in
+# whichever suite did not, where `set -u` makes the expansion fatal. The stub is
+# one small file under the temp dir the OS reclaims; leaking it beats owning an
+# exit path that belongs to the suite.
+
 # --- Setup / Teardown ---
 
 setup() {
@@ -141,10 +176,6 @@ setup() {
     # suite's process and call the session already running. Report no processes
     # by default; a test that exercises the guard overrides CS_PS_BIN with its
     # own canned output.
-    CS_PS_STUB="$TEST_TMPDIR/ps-stub"
-    printf '#!/bin/sh\nexit 0\n' > "$CS_PS_STUB"
-    chmod +x "$CS_PS_STUB"
-    export CS_PS_BIN="$CS_PS_STUB"
     # cs's terminal-theme signals are env-based, and a real cs session exports
     # them at launch. Clear them so a test controls its own inputs instead of
     # inheriting the developer's session.
@@ -155,7 +186,7 @@ teardown() {
     if [[ -n "$TEST_TMPDIR" ]] && [[ -d "$TEST_TMPDIR" ]]; then
         rm -rf "$TEST_TMPDIR"
     fi
-    unset CS_SESSIONS_ROOT CLAUDE_CODE_BIN CS_TRANSCRIPTS_DIR CS_NO_UPDATE_CHECK CS_NO_ITERM2 CS_PS_BIN
+    unset CS_SESSIONS_ROOT CLAUDE_CODE_BIN CS_TRANSCRIPTS_DIR CS_NO_UPDATE_CHECK CS_NO_ITERM2
 }
 
 # --- Test Runner ---

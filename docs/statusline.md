@@ -141,7 +141,7 @@ Claude Code reads both registrations at startup, so `enable` takes effect after 
 
 `cs -uninstall` removes both binaries and strips the `statusLine` and `subagentStatusLine` registrations only when they point at the cs binaries; a status line or row renderer you configured yourself is left untouched.
 
-`cs -doctor` includes a Statusline check and a parallel Subagent statusline check: OK when registered and executable, FAIL when a registration points at a missing binary, and informational otherwise (both are optional).
+`cs -doctor` includes a Statusline check and a parallel Subagent statusline check: OK when registered and executable, FAIL when a registration points at a missing binary. The Statusline check WARNs when cs-statusline is absent — unregistered, or a status line of your own — because it is the only writer of `.cs/local/context-pct`, and without that file the rotation nudge and the queue's context circuit breaker both go silently inert. The status line itself stays optional; the warning is about the gating that depends on it.
 
 ## Design notes
 

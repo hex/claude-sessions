@@ -41,8 +41,18 @@ done
 # The securestorage value is a config directory path, never a credential, and
 # the mirroring assertion needs it rather than a present/absent flag.
 printf 'SECURESTORAGE_VALUE=%s\n' "${CLAUDE_SECURESTORAGE_CONFIG_DIR-<unset>}" >> "$CS_TEST_ENV_DUMP"
-printf 'ARGV=%s\n' "$*" >> "$CS_TEST_ENV_DUMP"
-printf 'CWD=%s\n' "$PWD" >> "$CS_TEST_ENV_DUMP"
+# One line per argument: `$*` flattens quoting, so --tools "" and
+# --tools Bash,Edit collapse to the same text and an assertion on the flag
+# cannot tell tools-off from tools-on. The system prompt's value is the one
+# argument never recorded — this file is printed on failure, and the setup
+# comment's promise that no value reaches a test log has to keep holding.
+_skip_next=0
+for _a in "$@"; do
+    if [ "$_skip_next" = 1 ]; then _skip_next=0; continue; fi
+    case "$_a" in --system-prompt) _skip_next=1; printf 'ARG=--system-prompt\n' >> "$CS_TEST_ENV_DUMP"; continue ;; esac
+    printf 'ARG=%s\n' "$_a" >> "$CS_TEST_ENV_DUMP"
+done
+printf 'CWD_UNDER_HOME=%s\n' "$(case "$PWD/" in "${HOME:-/nonexistent}"/*) echo yes;; *) echo no;; esac)" >> "$CS_TEST_ENV_DUMP"
 printf 'REWRITTEN'
 FAKEEOF
     chmod +x "$FAKE_BIN/claude"
@@ -94,12 +104,8 @@ test_the_nested_call_runs_outside_home() {
 
 _assert_cwd_outside() {  # home_dir
     assert_exists "$ENV_DUMP" "the nested claude ran" || return 1
-    local cwd
-    cwd=$(awk -F= '/^CWD=/ { sub(/^CWD=/, ""); print; exit }' "$ENV_DUMP")
-    [ -n "$cwd" ] || { echo "  FAIL: the child recorded no working directory"; return 1; }
-    case "$cwd/" in
-        "$1"/*) echo "  FAIL: the child ran under HOME ($cwd), where the CLAUDE.md walk reaches it"; return 1 ;;
-    esac
+    assert_file_contains "$ENV_DUMP" '^CWD_UNDER_HOME=no' \
+        "the child must not run under HOME, where the CLAUDE.md walk reaches it" || return 1
 }
 
 # The rewriter transforms text and needs no tools. Left armed, the tool
@@ -109,8 +115,10 @@ _assert_cwd_outside() {  # home_dir
 test_the_nested_call_arms_no_tools() {
     run_rewrite >/dev/null
     assert_exists "$ENV_DUMP" "the nested claude ran" || return 1
-    assert_file_contains "$ENV_DUMP" '^ARGV=.*--tools' \
-        "the nested call must pass --tools" || return 1
+    # The empty value is the property under test, not the flag's presence.
+    grep -A1 '^ARG=--tools$' "$ENV_DUMP" | grep -qx 'ARG=' \
+        || { echo "  FAIL: --tools must be passed with an empty value (tools disabled)"; \
+             grep '^ARG=' "$ENV_DUMP" >&2; return 1; }
 }
 
 # Claude Code prefers an ambient API key over the user's claude.ai login. A key
