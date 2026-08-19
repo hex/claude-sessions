@@ -25,6 +25,20 @@ command -v claude >/dev/null 2>&1 || exit 1
 # never created, and the call reports "Not logged in". See the auth block
 # below for how the login is restored.
 cfg="${XDG_CACHE_HOME:-$HOME/.cache}/cs/rewrite-config"
+
+# Claude Code collects CLAUDE.md as PROJECT memory by walking up from the
+# working directory, and it labels what it finds as instructions that OVERRIDE
+# default behavior. Run from anywhere under $HOME — the hermetic dir included,
+# since it lives in the cache — and that walk reaches $HOME/.claude/CLAUDE.md,
+# whose "stop and ask the user for clarification" rules are the exact opposite
+# of this rewriter's contract: on a vague or question-shaped prompt the model
+# obeyed them and answered the user, and the answer replaced what the user had
+# typed. CLAUDE_CONFIG_DIR does not bound this; the working directory is the
+# whole vector, so the call runs from a directory no CLAUDE.md can sit above.
+_rundir="${TMPDIR:-/tmp}"
+case "$_rundir/" in
+    "$HOME"/*) _rundir=/tmp ;;
+esac
 if [ ! -f "$cfg/settings.json" ]; then
     mkdir -p "$cfg" 2>/dev/null || exit 1
     printf '{"hasCompletedOnboarding":true}\n' > "$cfg/settings.json" 2>/dev/null || exit 1
@@ -98,7 +112,7 @@ _securestore="${CLAUDE_SECURESTORAGE_CONFIG_DIR-${CLAUDE_CONFIG_DIR-}}"
 _attempt() {  # 1 = drop the ambient key, 0 = keep it
     local scrub="$1"
     if [ "$scrub" = 1 ]; then
-        cd "$cfg" 2>/dev/null && printf '%s' "$prompt" | CLAUDE_CONFIG_DIR="$cfg" \
+        cd "$_rundir" 2>/dev/null && printf '%s' "$prompt" | CLAUDE_CONFIG_DIR="$cfg" \
             CLAUDE_SECURESTORAGE_CONFIG_DIR="$_securestore" \
             env -u CLAUDE_COWORK_MEMORY_PATH_OVERRIDE -u CLAUDE_CODE_AUTO_MEMORY_PATH \
                 -u CLAUDE_SESSION_DIR -u CLAUDE_SESSION_META_DIR -u CLAUDE_SESSION_NAME \
@@ -106,15 +120,17 @@ _attempt() {  # 1 = drop the ambient key, 0 = keep it
                 -u ANTHROPIC_API_KEY \
             ${_tmo[@]+"${_tmo[@]}"} claude -p \
             --model "${CS_REWRITE_MODEL:-claude-haiku-4-5-20251001}" \
+            --tools "" \
             --system-prompt "$_system" 2>/dev/null
     else
-        cd "$cfg" 2>/dev/null && printf '%s' "$prompt" | CLAUDE_CONFIG_DIR="$cfg" \
+        cd "$_rundir" 2>/dev/null && printf '%s' "$prompt" | CLAUDE_CONFIG_DIR="$cfg" \
             CLAUDE_SECURESTORAGE_CONFIG_DIR="$_securestore" \
             env -u CLAUDE_COWORK_MEMORY_PATH_OVERRIDE -u CLAUDE_CODE_AUTO_MEMORY_PATH \
                 -u CLAUDE_SESSION_DIR -u CLAUDE_SESSION_META_DIR -u CLAUDE_SESSION_NAME \
                 -u CLAUDE_CODE_TASK_LIST_ID -u CLAUDE_PROJECT_DIR \
             ${_tmo[@]+"${_tmo[@]}"} claude -p \
             --model "${CS_REWRITE_MODEL:-claude-haiku-4-5-20251001}" \
+            --tools "" \
             --system-prompt "$_system" 2>/dev/null
     fi
 }

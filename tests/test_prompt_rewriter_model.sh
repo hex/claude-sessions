@@ -41,6 +41,8 @@ done
 # The securestorage value is a config directory path, never a credential, and
 # the mirroring assertion needs it rather than a present/absent flag.
 printf 'SECURESTORAGE_VALUE=%s\n' "${CLAUDE_SECURESTORAGE_CONFIG_DIR-<unset>}" >> "$CS_TEST_ENV_DUMP"
+printf 'ARGV=%s\n' "$*" >> "$CS_TEST_ENV_DUMP"
+printf 'CWD=%s\n' "$PWD" >> "$CS_TEST_ENV_DUMP"
 printf 'REWRITTEN'
 FAKEEOF
     chmod +x "$FAKE_BIN/claude"
@@ -54,6 +56,61 @@ teardown() {
 
 run_rewrite() {  # [prompt]
     printf '%s' "${1:-fix the login thing}" | "$MODEL" 2>/dev/null
+}
+
+# Claude Code walks up from the CWD collecting CLAUDE.md as PROJECT memory, and
+# the hermetic config dir lives under $HOME — so the walk reached
+# $HOME/.claude/CLAUDE.md and injected the user's private global instructions,
+# labelled as project instructions that OVERRIDE default behavior. Those
+# instructions tell an agent to stop and ask the user for clarification, which
+# is the exact opposite of this rewriter's contract, and on question-shaped
+# inputs the model obeyed them and answered the user instead of rewriting. The
+# config dir may stay where it is; the working directory is the vector.
+test_the_nested_call_runs_outside_home() {
+    # The default fixture points XDG_CACHE_HOME at a temp dir, so the hermetic
+    # dir already sits outside $HOME and the assertion would pass without
+    # exercising anything. Reproduce the shipped layout instead: no
+    # XDG_CACHE_HOME, so cfg resolves to $HOME/.cache/cs/rewrite-config.
+    # The fake HOME must not sit under the directory the call runs from, or the
+    # prefix test compares the wrong way round and reports a pass. TEST_TMPDIR
+    # is inside TMPDIR, which is exactly where the run dir resolves, so this
+    # home goes somewhere neither contains nor is contained by it.
+    local fake_home
+    fake_home=$(cd "$TEST_TMPDIR" && pwd -P)/../home-$$
+    mkdir -p "$fake_home"
+    fake_home=$(cd "$fake_home" && pwd -P)
+    # setup() exports XDG_CACHE_HOME, which wins over $HOME/.cache and would
+    # keep cfg out of the fake home entirely. Drop it so cfg resolves the way
+    # it does on a real machine.
+    ( unset XDG_CACHE_HOME; HOME="$fake_home" run_rewrite >/dev/null )
+    local cfg_under_home="$fake_home/.cache/cs/rewrite-config"
+    [ -d "$cfg_under_home" ] \
+        || { echo "  FAIL: fixture did not put the hermetic dir under HOME ($cfg_under_home)"; return 1; }
+    local rc=0
+    _assert_cwd_outside "$fake_home" || rc=1
+    rm -rf "$fake_home"
+    return "$rc"
+}
+
+_assert_cwd_outside() {  # home_dir
+    assert_exists "$ENV_DUMP" "the nested claude ran" || return 1
+    local cwd
+    cwd=$(awk -F= '/^CWD=/ { sub(/^CWD=/, ""); print; exit }' "$ENV_DUMP")
+    [ -n "$cwd" ] || { echo "  FAIL: the child recorded no working directory"; return 1; }
+    case "$cwd/" in
+        "$1"/*) echo "  FAIL: the child ran under HOME ($cwd), where the CLAUDE.md walk reaches it"; return 1 ;;
+    esac
+}
+
+# The rewriter transforms text and needs no tools. Left armed, the tool
+# definitions and their skills/agents reminders push the model back toward
+# acting like a coding agent — it narrated a blocked Read attempt and asked
+# whether to go ahead, instead of returning a rewritten request.
+test_the_nested_call_arms_no_tools() {
+    run_rewrite >/dev/null
+    assert_exists "$ENV_DUMP" "the nested claude ran" || return 1
+    assert_file_contains "$ENV_DUMP" '^ARGV=.*--tools' \
+        "the nested call must pass --tools" || return 1
 }
 
 # Claude Code prefers an ambient API key over the user's claude.ai login. A key
@@ -264,6 +321,8 @@ echo "Prompt rewriter model tests"
 echo "==========================="
 echo ""
 
+run_test test_the_nested_call_runs_outside_home
+run_test test_the_nested_call_arms_no_tools
 run_test test_the_api_key_is_not_handed_to_the_nested_call
 run_test test_the_auth_token_is_left_alone
 run_test test_the_securestorage_dir_mirrors_the_parent
