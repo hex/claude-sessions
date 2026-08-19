@@ -1,6 +1,21 @@
 # ABOUTME: launch_claude_code: the resume/name/color-aware claude exec path.
 # ABOUTME: The final step of opening any session.
 
+# True when a handoff's YAML frontmatter (line 1 "---" through the next "---")
+# carries status: unconsumed. Scoped to the frontmatter so a body that quotes
+# the contract line flush-left — the rotate skill's own doc does — never counts.
+_handoff_is_unconsumed() {  # handoff_file
+    awk '
+        NR==1 {
+            if ($0 != "---") { rc=1; closed=1; exit }
+            next
+        }
+        !closed && $0 == "---" { rc = (matched ? 0 : 1); closed=1; exit }
+        !closed && $0 == "status: unconsumed" { matched=1 }
+        END { if (!closed) rc=1; exit rc }
+    ' "$1" 2>/dev/null
+}
+
 # Drop a rotation marker the user declined to consume. Armed by the rotate
 # skill for a /clear, or by an earlier r, it must not outlive the answer: left
 # in place it would be consumed by an unrelated /clear hours later, injecting a
@@ -313,20 +328,27 @@ launch_claude_code() {
         local pending_handoff="" _hf
         for _hf in "$session_dir/.cs/handoffs"/*.md; do
             [ -f "$_hf" ] || continue
-            # Scope the scan to the YAML frontmatter (line 1 "---" through the
-            # next "---"): a body that quotes the contract line flush-left
-            # (the rotate skill's own doc does) must not count as a match.
-            awk '
-                NR==1 {
-                    if ($0 != "---") { rc=1; closed=1; exit }
-                    next
-                }
-                !closed && $0 == "---" { rc = (matched ? 0 : 1); closed=1; exit }
-                !closed && $0 == "status: unconsumed" { matched=1 }
-                END { if (!closed) rc=1; exit rc }
-            ' "$_hf" 2>/dev/null || continue
+            _handoff_is_unconsumed "$_hf" || continue
             pending_handoff="$_hf"
         done
+        # .cs/handoffs/ is shared and nothing ever deletes a handoff, so a file
+        # belonging to another checkout keeps status: unconsumed indefinitely —
+        # the rotate skill will not supersede one whose parent is absent from
+        # this machine's session.log, and correctly so. Sorting last, it would
+        # shadow the handoff this machine armed and r would rotate into someone
+        # else's plan. An armed marker is an explicit choice, so it outranks the
+        # scan; a marker naming a spent or absent file is stale and the scan
+        # still answers. The marker names a basename, never a path: a separator
+        # would resolve outside the handoff store.
+        local _marker="$session_dir/.cs/local/pending-handoff" _armed
+        if [ -f "$_marker" ]; then
+            _armed=$(cat "$_marker" 2>/dev/null | tr -d '[:space:]' || true)
+            case "$_armed" in */*|*\\*) _armed="" ;; esac
+            if [ -n "$_armed" ] && [ -f "$session_dir/.cs/handoffs/$_armed" ] \
+                && _handoff_is_unconsumed "$session_dir/.cs/handoffs/$_armed"; then
+                pending_handoff="$session_dir/.cs/handoffs/$_armed"
+            fi
+        fi
         # A spawned launch is unattended: take the default (resume) instead
         # of parking the tmux window on an interactive ask.
         if [ -n "$spawn_kick" ]; then

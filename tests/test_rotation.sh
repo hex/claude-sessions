@@ -318,6 +318,63 @@ test_newest_of_multiple_handoffs_wins() {
         "older handoff untouched" || return 1
 }
 
+# The launcher picks by lexicographic basename, but .cs/handoffs/ is shared and
+# nothing ever deletes a handoff: a co-worker's file, or one from a checkout that
+# no longer exists, keeps status: unconsumed forever because the rotate skill
+# refuses to supersede a handoff whose parent is absent from this machine's
+# session.log. If it sorts last it shadows the handoff this machine actually
+# armed, and r rotates into someone else's plan. The armed marker is an explicit
+# choice and outranks the scan.
+test_armed_marker_outranks_a_later_sorting_orphan() {
+    _rot_session "rot-orphan"
+    local dir="$CS_SESSIONS_ROOT/rot-orphan"
+    _seed_handoff "$dir" "2026-07-14-mine.md" "unconsumed"
+    _seed_handoff "$dir" "2026-07-16-orphan.md" "unconsumed"
+    printf '%s\n' "2026-07-14-mine.md" > "$dir/.cs/local/pending-handoff"
+    local output
+    output=$("$CS_BIN" rot-orphan <<< "r" 2>&1) || true
+    assert_output_contains "$output" "2026-07-14-mine.md" \
+        "the prompt names the armed handoff, not the orphan" || return 1
+    assert_eq "2026-07-14-mine.md" "$(cat "$dir/.cs/local/pending-handoff" 2>/dev/null | tr -d '[:space:]')" \
+        "r keeps the armed handoff" || return 1
+    assert_file_contains "$dir/.cs/handoffs/2026-07-16-orphan.md" "status: unconsumed" \
+        "the orphan is left alone, not retired behind the user's back" || return 1
+}
+
+# Fallback must be exact: a marker naming a spent or absent file is stale, and
+# the directory scan still owns the answer.
+test_stale_marker_falls_back_to_the_scan() {
+    _rot_session "rot-stale-marker"
+    local dir="$CS_SESSIONS_ROOT/rot-stale-marker"
+    _seed_handoff "$dir" "2026-07-16-real.md" "unconsumed"
+    _seed_handoff "$dir" "2026-07-15-spent.md" "consumed"
+    printf '%s\n' "2026-07-15-spent.md" > "$dir/.cs/local/pending-handoff"
+    local output
+    output=$("$CS_BIN" rot-stale-marker <<< "r" 2>&1) || true
+    assert_eq "2026-07-16-real.md" "$(cat "$dir/.cs/local/pending-handoff" 2>/dev/null | tr -d '[:space:]')" \
+        "a marker naming a consumed file falls back to the scan" || return 1
+    _rot_session "rot-absent-marker"
+    local dir2="$CS_SESSIONS_ROOT/rot-absent-marker"
+    _seed_handoff "$dir2" "2026-07-16-real.md" "unconsumed"
+    printf '%s\n' "2026-07-01-gone.md" > "$dir2/.cs/local/pending-handoff"
+    output=$("$CS_BIN" rot-absent-marker <<< "r" 2>&1) || true
+    assert_eq "2026-07-16-real.md" "$(cat "$dir2/.cs/local/pending-handoff" 2>/dev/null | tr -d '[:space:]')" \
+        "a marker naming a missing file falls back to the scan" || return 1
+}
+
+# The launcher now reads the marker, so it inherits the same traversal guard the
+# SessionStart consume path carries: a marker is a basename, never a path.
+test_launcher_marker_with_a_path_falls_back_to_the_scan() {
+    _rot_session "rot-marker-path"
+    local dir="$CS_SESSIONS_ROOT/rot-marker-path"
+    _seed_handoff "$dir" "2026-07-16-real.md" "unconsumed"
+    printf '%s\n' "../../../etc/passwd" > "$dir/.cs/local/pending-handoff"
+    local output
+    output=$("$CS_BIN" rot-marker-path <<< "r" 2>&1) || true
+    assert_eq "2026-07-16-real.md" "$(cat "$dir/.cs/local/pending-handoff" 2>/dev/null | tr -d '[:space:]')" \
+        "a marker carrying a path is rejected and the scan wins" || return 1
+}
+
 test_discard_answer_dismisses_pending_handoff() {
     _rot_session "rot-d"
     local dir="$CS_SESSIONS_ROOT/rot-d"
@@ -447,6 +504,9 @@ run_test test_rotate_answer_auto_starts_handoff
 run_test test_continue_and_no_leave_handoff_unconsumed
 run_test test_consumed_handoffs_do_not_trigger_prompt
 run_test test_newest_of_multiple_handoffs_wins
+run_test test_armed_marker_outranks_a_later_sorting_orphan
+run_test test_stale_marker_falls_back_to_the_scan
+run_test test_launcher_marker_with_a_path_falls_back_to_the_scan
 run_test test_discard_answer_dismisses_pending_handoff
 run_test test_discard_flip_spares_a_body_quote
 

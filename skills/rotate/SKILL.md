@@ -75,9 +75,12 @@ should do. If the user did not give one, ask before writing anything.
 
    Without this step an abandoned handoff stays pending forever, and the
    launch prompt keeps offering `[Y/n/r/d]` for context that is out of date.
-   Do not assume a newer handoff simply outranks it: the launcher picks the
-   lexicographically last basename, so among same-day files the slug decides
-   and a stale one can win.
+   Do not assume a newer handoff simply outranks it: among files the launcher
+   has to choose between, it picks the lexicographically last basename, so
+   among same-day files the slug decides and a stale one can win. The marker
+   step 6 arms is the exception — it names one handoff explicitly and the
+   launcher honors it over that scan — but it covers only the file this
+   rotation is arming, not the leftovers this step retires.
 5. Commit the handoff and any supersedings (tracked session state, like
    narratives). Stage those paths by name.
 6. Arm the handoff: write its basename (no path) to

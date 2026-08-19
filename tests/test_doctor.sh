@@ -578,6 +578,36 @@ test_doctor_statusline_no_fail_when_not_registered() {
     fi
 }
 
+# Without cs-statusline nothing writes .cs/local/context-pct, and both gates
+# that read it — the Stop hook's rotation nudge and the queue drain's context
+# circuit breaker — go silently inert. Reporting a bare "not registered (optional)"
+# is a clean bill of health for a session whose context gating is off, so the
+# check must name the consequence, not just the state.
+test_doctor_statusline_names_context_gating_when_absent() {
+    local fake_claude="$TEST_TMPDIR/sl-claude-gate-none"
+    mkdir -p "$fake_claude"
+    echo '{}' > "$fake_claude/settings.json"
+    local output
+    output=$(CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
+    echo "$output" | grep "Statusline" | grep -q "context-pct" \
+        || { echo "  FAIL: unregistered statusline must name context-pct as unwritten"; \
+             echo "$output" | grep "Statusline" || echo "  (no Statusline line)"; return 1; }
+    echo "$output" | grep "Statusline" | grep -q "WARN" \
+        || { echo "  FAIL: inert context gating is a WARN, not an OK"; return 1; }
+}
+
+test_doctor_statusline_names_context_gating_for_foreign_statusline() {
+    local fake_claude="$TEST_TMPDIR/sl-claude-gate-foreign"
+    mkdir -p "$fake_claude"
+    printf '{"statusLine":{"command":"/usr/local/bin/starship"}}\n' > "$fake_claude/settings.json"
+    local output
+    output=$(CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
+    echo "$output" | grep "Statusline" | grep -q "context-pct" \
+        || { echo "  FAIL: a non-cs statusline must name context-pct as unwritten"; return 1; }
+    echo "$output" | grep "Statusline" | grep -q "WARN" \
+        || { echo "  FAIL: a non-cs statusline leaves gating inert — WARN, not OK"; return 1; }
+}
+
 test_doctor_subagent_statusline_ok_when_registered_and_executable() {
     local fake_claude="$TEST_TMPDIR/ssl-claude"
     local fake_bin="$TEST_TMPDIR/ssl-bin"
@@ -756,6 +786,8 @@ run_test test_doctor_skips_inline_shell_hook_commands
 run_test test_doctor_statusline_ok_when_registered_and_executable
 run_test test_doctor_statusline_fails_when_binary_missing
 run_test test_doctor_statusline_no_fail_when_not_registered
+run_test test_doctor_statusline_names_context_gating_when_absent
+run_test test_doctor_statusline_names_context_gating_for_foreign_statusline
 run_test test_doctor_subagent_statusline_ok_when_registered_and_executable
 run_test test_doctor_subagent_statusline_fails_when_binary_missing
 run_test test_doctor_subagent_statusline_no_fail_when_not_registered

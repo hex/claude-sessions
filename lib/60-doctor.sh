@@ -456,8 +456,15 @@ _doctor_check_statusline() {
     if [ -f "$settings" ]; then
         cmd=$(jq -r '.statusLine.command // ""' "$settings" 2>/dev/null) || cmd=""
     fi
+    # cs-statusline is the only writer of .cs/local/context-pct, and two gates
+    # read it: the Stop hook's rotation nudge and the queue drain's context
+    # circuit breaker. Both skip silently when the file is absent, so anything
+    # other than cs-statusline leaves them inert with nothing said. Report that
+    # as a WARN rather than a clean OK — the gates being off is the news, the
+    # statusline itself is genuinely optional.
+    local gating="context-pct is never written, so the rotation nudge and the queue context breaker stay inert"
     if [ -z "$cmd" ]; then
-        _doctor_ok "Statusline: not registered (optional; enable with: cs -statusline enable)"
+        _doctor_warn "Statusline: not registered — $gating (enable with: cs -statusline enable)"
         return
     fi
     case "$cmd" in
@@ -470,7 +477,7 @@ _doctor_check_statusline() {
             fi
             ;;
         *)
-            _doctor_ok "Statusline: using a non-cs status line ($cmd)"
+            _doctor_warn "Statusline: using a non-cs status line ($cmd) — $gating"
             ;;
     esac
 }
