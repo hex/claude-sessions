@@ -49,6 +49,24 @@ test_output_not_contains_still_fails_on_a_real_hit() {
     [ "$rc" -ne 0 ] || { echo "assert_output_not_contains passed on a genuine hit"; return 1; }
 }
 
+# cs's live-duplicate guard scans the whole machine's process table for the
+# session name or its UUID. Suites run in parallel and fifteen of them launch a
+# session called test-session, so a suite that reads the real `ps` intermittently
+# sees a sibling suite's process and reports the session as already running. The
+# process table is a shared resource like ~/.claude/projects and the terminal:
+# setup() has to isolate it, or the isolation depends on every test author
+# remembering the seam.
+test_setup_isolates_the_process_table() {
+    [ -n "${CS_PS_BIN:-}" ] \
+        || { echo "  FAIL: setup() must export CS_PS_BIN so no test reads the real ps"; return 1; }
+    [ -x "$CS_PS_BIN" ] \
+        || { echo "  FAIL: CS_PS_BIN must point at an executable stub: $CS_PS_BIN"; return 1; }
+    local out
+    out="$("$CS_PS_BIN" -Ao args= 2>/dev/null)"
+    [ -z "$out" ] \
+        || { echo "  FAIL: the default ps stub must report no processes, got: $out"; return 1; }
+}
+
 # ============================================================================
 # Runner
 # ============================================================================
@@ -62,5 +80,6 @@ run_test test_output_contains_survives_an_early_match_in_a_large_output
 run_test test_output_not_contains_survives_a_large_output
 run_test test_output_contains_still_fails_on_a_real_miss
 run_test test_output_not_contains_still_fails_on_a_real_hit
+run_test test_setup_isolates_the_process_table
 
 report_results

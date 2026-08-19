@@ -135,6 +135,16 @@ setup() {
     # _doctor_check_token_cost and the Phase 8 binding helpers.
     export CS_TRANSCRIPTS_DIR="$TEST_TMPDIR/claude-projects"
     mkdir -p "$CS_SESSIONS_ROOT" "$CS_TRANSCRIPTS_DIR"
+    # cs's live-duplicate guard scans the machine's whole process table for the
+    # session name or UUID. Suites run in parallel and many launch a session
+    # called test-session, so reading the real `ps` lets one suite see another
+    # suite's process and call the session already running. Report no processes
+    # by default; a test that exercises the guard overrides CS_PS_BIN with its
+    # own canned output.
+    CS_PS_STUB="$TEST_TMPDIR/ps-stub"
+    printf '#!/bin/sh\nexit 0\n' > "$CS_PS_STUB"
+    chmod +x "$CS_PS_STUB"
+    export CS_PS_BIN="$CS_PS_STUB"
     # cs's terminal-theme signals are env-based, and a real cs session exports
     # them at launch. Clear them so a test controls its own inputs instead of
     # inheriting the developer's session.
@@ -145,7 +155,7 @@ teardown() {
     if [[ -n "$TEST_TMPDIR" ]] && [[ -d "$TEST_TMPDIR" ]]; then
         rm -rf "$TEST_TMPDIR"
     fi
-    unset CS_SESSIONS_ROOT CLAUDE_CODE_BIN CS_TRANSCRIPTS_DIR CS_NO_UPDATE_CHECK CS_NO_ITERM2
+    unset CS_SESSIONS_ROOT CLAUDE_CODE_BIN CS_TRANSCRIPTS_DIR CS_NO_UPDATE_CHECK CS_NO_ITERM2 CS_PS_BIN
 }
 
 # --- Test Runner ---
