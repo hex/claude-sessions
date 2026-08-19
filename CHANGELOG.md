@@ -4,6 +4,26 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.8.18
+
+### Fixes
+
+- **Your `CLAUDE.md` no longer reaches the prompt rewriter.** The rewrite ran from a directory under `$HOME`, and Claude Code collects `CLAUDE.md` by walking up from the working directory — so `~/.claude/CLAUDE.md` arrived labelled as project instructions that override default behavior. Its "stop and ask the user for clarification" rules are the inverse of the rewriter's contract, so on a vague or question-shaped prompt the model answered you instead, and that answer replaced what you had typed. It also sent your private global instructions to the model every time. The call now runs from a private `mktemp` directory and arms no tools.
+
+- **The resume prompt says when a handoff came from another checkout.** `.cs/handoffs/` is shared and nothing retires a handoff this machine never wrote, so one can keep being offered indefinitely. Answering `r` consumes it under your UUID — taking a colleague's pending rotation. The offer now names its origin, and a marker you armed outranks the directory scan.
+
+- **`cs -doctor` warns when context gating is inert.** `cs-statusline` is the only writer of `.cs/local/context-pct`; without it the rotation nudge and the queue's context breaker both go silently quiet. Doctor reported OK for that.
+
+### Features
+
+- **Spent handoffs are pruned.** The `rotate` skill deletes `consumed`, `discarded` and `superseded` handoffs older than 30 days, keeping the 10 newest. Git history keeps whatever it removes.
+
+### Internal
+
+- Parallel test suites no longer collide over the machine's process table, and five defects an adversarial review found in the above were fixed before release — including a world-writable rewrite directory that would have let a local user choose the text replacing your prompt.
+
+**Full Changelog**: https://github.com/hex/claude-sessions/compare/v2026.8.17...v2026.8.18
+
 ## 2026.8.17
 
 ### Features
