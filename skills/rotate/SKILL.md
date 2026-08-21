@@ -57,7 +57,9 @@ should do. If the user did not give one, ask before writing anything.
      `.cs/handoffs/` is tracked, so writing one here publishes it, and cs's
      own protocol is that credentials live in `cs -secrets`, never in a
      file. Name the secret's purpose instead: "the deploy token, in
-     `cs -secrets get DEPLOY_TOKEN`".
+     `cs -secrets get DEPLOY_TOKEN`". Re-read the finished body before step 5
+     commits it: the rule below asks for exact readings written down as they
+     were, and an exact reading is where a secret hides.
    - **Reference committed work; restate what a successor cannot recover.**
      Work captured in a commit, spec, plan, diff or narrative gets a path and
      a one-line pointer: re-summarising it spends the successor's opening

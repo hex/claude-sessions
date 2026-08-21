@@ -4,6 +4,22 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.8.19
+
+### Fixes
+
+- **A rotation handoff now carries the facts a successor cannot look up.** Measured blind on a real 1.08 MB conversation, a shipped handoff answered none of 60 questions about things that existed only in the conversation it replaced — a rejected alternative and why it lost, an exact reading taken while debugging, a run identifier, the order two events happened in.
+
+  One rule was the cause. "Reference, do not restate" is right for work a commit, spec, plan or narrative already holds, and it silently drops everything else, because a fact that lives nowhere else has no path to point at. The rule now says which half is which. On the same measurement, a handoff carrying those facts answered 12 of 12 where one without them answered 0 of 12, with control facts scoring equally on both.
+
+  It states no target length. Three sizes were measured and the smallest was a different artifact by a different author, so the curve says as much about format as about size; length is described as what it buys rather than as a number to hit.
+
+  Rotation also runs when context is already hot, and a compaction can land before the handoff is finished, leaving it distilled from a summary with the exact facts already gone. So those facts and the next step get written first, and a handoff written from compacted context says so rather than reading as complete.
+
+  Because the rule asks for exact readings written down as they were, and an exact reading is where a secret hides, redaction is now re-checked after the body is written.
+
+**Full Changelog**: https://github.com/hex/claude-sessions/compare/v2026.8.18...v2026.8.19
+
 ## 2026.8.18
 
 ### Fixes

@@ -192,6 +192,11 @@ test_rotate_skill_governs_what_goes_into_the_handoff() {
     # the verbatim facts, with nothing to show it happened.
     assert_file_contains "$skill" "say so in the handoff" \
         "a handoff written without full fidelity must label itself" || return 1
+    # The restate rule asks for exact readings written down as they were, and an
+    # exact reading is where a secret hides — in a tracked, shared file, judged
+    # at hot context. Redaction has to survive that pressure.
+    assert_file_contains "$skill" "Re-read the finished body" \
+        "redaction must be re-checked after the body is written" || return 1
 }
 
 test_rotate_skill_reads_parent_from_state_not_the_launch_env() {
