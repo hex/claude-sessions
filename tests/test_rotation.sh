@@ -179,8 +179,19 @@ test_rotate_skill_governs_what_goes_into_the_handoff() {
         "the redaction rule must name what to look for" || return 1
     assert_file_contains "$skill" "personally identifying" \
         "redaction covers personal data, not just credentials" || return 1
-    assert_file_contains "$skill" "Reference, do not restate" \
+    assert_file_contains "$skill" "Reference committed work" \
         "the skill must stop the handoff re-summarising committed work" || return 1
+    # A handoff scored 0 of 60 on facts that existed only in the conversation —
+    # rejected alternatives, exact readings, run ids, event order. The reference
+    # rule is right for committed work and silently drops everything else,
+    # because there is no path to point at.
+    assert_file_contains "$skill" "restate what a successor cannot recover" \
+        "the skill must require conversation-only facts be written down" || return 1
+    # Rotation fires when context is hot, and past ~88% an autocompaction can
+    # land first — the handoff would then be distilled from a summary, losing
+    # the verbatim facts, with nothing to show it happened.
+    assert_file_contains "$skill" "say so in the handoff" \
+        "a handoff written without full fidelity must label itself" || return 1
 }
 
 test_rotate_skill_reads_parent_from_state_not_the_launch_env() {

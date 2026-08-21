@@ -58,10 +58,23 @@ should do. If the user did not give one, ask before writing anything.
      own protocol is that credentials live in `cs -secrets`, never in a
      file. Name the secret's purpose instead: "the deploy token, in
      `cs -secrets get DEPLOY_TOKEN`".
-   - **Reference, do not restate.** Work already captured in a commit,
-     spec, plan or diff gets a path and a one-line pointer. Re-summarising
-     it spends the successor's opening context on what it can read for
-     itself, and a summary drifts from the file while the path does not.
+   - **Reference committed work; restate what a successor cannot recover.**
+     Work captured in a commit, spec, plan, diff or narrative gets a path and
+     a one-line pointer: re-summarising it spends the successor's opening
+     context on what it can read for itself, and a summary drifts from the
+     file while the path does not. But a fact that exists nowhere else has no
+     path to point at — a rejected alternative and the reason it lost, an
+     exact reading taken while debugging, a run identifier, a count observed
+     at one moment, the order two events actually happened in. Write those
+     down as they were, or they are gone with the conversation. Length spent
+     on them is not padding; it is how many of them survive.
+   - **Say what you could not carry.** Rotation runs when context is already
+     hot, and a compaction can land before you finish writing — in which case
+     you are distilling a summary, not the conversation, and the exact facts
+     above are already lost. Write the next step and the conversation-only
+     facts first, while fidelity is highest. If you end up working from
+     compacted context, or you cut the body short, say so in the handoff:
+     a thin handoff that admits it is thin beats one the successor trusts.
 4. Retire this machine's leftovers: for every OTHER file in `.cs/handoffs/`
    whose frontmatter still says `status: unconsumed`, flip that one
    frontmatter line to `status: superseded` — but only when its `parent:`
