@@ -59,7 +59,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 - **Health checks** - `cs -doctor` reports status of Keychain backend, hook registration, shadow-ref freshness, auto-memory writability, status line registration, Claude Code settings audit (hooks/MCPs/permissions/env vars counts), and cumulative token usage for the current project
 - **Usage attribution** - `cs -usage` shows which sessions are consuming the 5-hour and weekly rate-limit windows: per-session input/output token sums (deduplicated by API request, cache-read excluded), anchored at the true reset boundaries when the cs status line is active. `cs -usage <name>` breaks one session down per conversation with a lifetime column.
 - **Session tags** - `cs -tag add api` tags the current session in its README frontmatter (`tags: [api]` — the same field Obsidian indexes); `cs -list --tag api` filters the listing, and the picker filters live with `#api` in the search query (combining with fuzzy name search). Tags show in the preview card.
-- **Session archive** - `cs -archive <name>` drops a tracked `.cs/archived` marker that hides a finished session from the picker, `cs -list`, and `cs -search` (the marker syncs with the session, so archiving on one machine archives everywhere). `cs -list --archived` lists only archived sessions, `cs -search <q> --include-archived` searches them, and the picker toggles visibility with `A` (archived rows render dimmed). Opening an archived session unarchives it.
+- **Session archive** - `cs -archive <name>` drops a tracked `.cs/archived` marker that hides a finished session from the picker, `cs -list`, and `cs -search` (the marker syncs with the session, so archiving on one machine archives everywhere). `cs -list --archived` lists only archived sessions, `cs -search <q> --include-archived` searches them, and the picker toggles visibility with `A` (archived rows render dimmed) and archives or unarchives the selected session with `a`. Opening an archived session unarchives it.
 
 ### Unattended and multi-agent work
 
@@ -174,8 +174,6 @@ Running `cs` with no arguments launches an interactive TUI for browsing and mana
 The current directory decides, not any history: cs opens a session when that directory *is* one it knows by name (a session root, a `<base>@<feature>` worktree, or a project adopted with `cs -adopt`). A subdirectory of a session, any unrelated directory, and a shell inside a launched session all get the picker — inside a session, opening a second copy is never the intent.
 
 - **Navigate** with `j`/`k` or arrow keys; `g`/`G` for first/last; mouse scroll and click supported
-
-- **Navigate** with `j`/`k` or arrow keys; `g`/`G` for first/last; mouse scroll and click supported
 - **Sort** by column with `1`-`6` (toggles ascending/descending); opens sorted by recency — most-recently-modified first
 - **Recency at a glance** — a heat dot beside each session (green under an hour, cooling through gold and orange to grey once dormant) and a relative `Age` column (`2h`, `3d`, `1mo`) so active work stands out; the exact timestamp stays in the preview pane
 - **Liveness** — sessions with an open conversation carry a breathing teal `■` in place of the heat dot and count into the masthead's live tally. Detection is the cs lock plus a statusline heartbeat, so conversations opened outside cs register too; the preview state reads `■ live · locked <pid>` or `■ live · unlocked`, with the agent state appended when Claude Code publishes one (`■ live · locked 4242 · waiting`)
@@ -192,6 +190,7 @@ The current directory decides, not any history: cs opens a session when that dir
 - **Delete** with `d` (confirmation required)
 - **Batch operations** — mark sessions with `Space`, then `D` to batch delete
 - **Rename** with `r`
+- **Archive / unarchive** with `a` — toggles the selected session's `.cs/archived` marker by running `cs -archive` / `cs -unarchive`, so the picker never writes the marker itself and inherits the verb's refusal to archive a live session. Archived rows are hidden until `A` shows them, which is also how you reach one to unarchive
 - **Manage secrets** with `s` (view values with `v`, auto-redacts after 5 seconds)
 - **Queue a task** — focus the To-Do input with `Tab`, type a prompt, and press `Enter` to add it to the highlighted session's queue for a walk-away run; a `▰▱` meter with the count appears in the Queue column while that session's queue is non-empty
 - **Quit** with `q` or `Esc`
@@ -276,7 +275,8 @@ conversation:
 
 You don't have to remember the syntax: typing `cs myproj` while that session
 is already open offers to open one of its existing features, start a new
-parallel feature, force a second launch, or cancel. A worktree session also
+parallel feature, force a second launch, open the session manager to pick a
+different session, or cancel. A worktree session also
 knows what it is: Claude is told at launch that it runs in a feature worktree
 and that `cs myproj --merge <feature>` is the way back, so it won't merge the
 branch by hand.

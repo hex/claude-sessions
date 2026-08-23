@@ -31,7 +31,10 @@ _lock_collision_menu() {
             [ -d "$f" ] || continue          # literal glob when none exist
             features+=("${f##*/}")           # basename, fork-free
         done
-        [ "${#features[@]}" -gt 6 ] && features=("${features[@]:0:6}")
+        # Five, not six: the fixed rows below can run to four (force, new
+        # feature, session manager, cancel) and a tenth option would not be
+        # addressable by a single keypress.
+        [ "${#features[@]}" -gt 5 ] && features=("${features[@]:0:5}")
     fi
 
     echo
@@ -57,6 +60,12 @@ _lock_collision_menu() {
     if [ "$offers_worktree" -eq 1 ]; then
         _lock_menu_row "new" "$GREEN" 'new feature' 'its own worktree + branch'
     fi
+    # The way out that is neither forcing this session nor starting work here:
+    # go pick a different one. Offered only when a picker is installed, so the
+    # row can never name a command that answers with "not installed".
+    if _tui_bin >/dev/null 2>&1; then
+        _lock_menu_row "tui" "$GOLD" 'session manager' 'browse every session'
+    fi
     _lock_menu_row "cancel" "$COMMENT" 'cancel' 'default'
 
     echo
@@ -73,6 +82,7 @@ _lock_collision_menu() {
     case "$action" in
         force) return 0 ;;                              # force a second launch here
         open:*) exec "$0" "${action#open:}" ;;          # resume an existing feature
+        tui) exec "$0" -tui ;;                          # pick a different session
         new)
             printf '    %bFeature name%b  %b›%b ' "$WHITE" "$NC" "$GOLD" "$NC"
             read -r feature || feature=""

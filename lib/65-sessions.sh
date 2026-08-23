@@ -163,22 +163,31 @@ _bare_cs_target() {
     _session_name_for_dir "$PWD"
 }
 
+# The picker binary, or non-zero when none is installed. Every caller asks
+# through here — the collision menu offers its row only when this answers, so
+# the menu can never name a picker that run_tui would then fail to find.
+_tui_bin() {
+    local bin
+    bin="$(command -v cs-tui 2>/dev/null || true)"
+    if [ -z "$bin" ]; then
+        # Not on PATH (cs may be run by explicit path with its own dir off
+        # PATH, which the installer permits): probe the sibling next to this
+        # script.
+        local _self_dir
+        _self_dir="$(dirname "$0")"
+        if [ -x "$_self_dir/cs-tui" ]; then bin="$_self_dir/cs-tui"; fi
+    fi
+    [ -n "$bin" ] && [ -x "$bin" ] || return 1
+    printf '%s\n' "$bin"
+}
+
 # The interactive session manager. The picker prints its choice on stdout — the
 # session name, optionally followed by flags — and cs re-enters itself with it,
 # so every launch takes the same path an explicit `cs <name>` does. Returns
 # non-zero when no picker binary is installed, leaving the caller to say so.
 run_tui() {
     local tui_bin
-    tui_bin="$(command -v cs-tui 2>/dev/null || true)"
-    if [ -z "$tui_bin" ]; then
-        # Not on PATH (cs may be run by explicit path with its own dir off
-        # PATH, which the installer permits): probe the sibling next to this
-        # script.
-        local _self_dir
-        _self_dir="$(dirname "$0")"
-        if [ -x "$_self_dir/cs-tui" ]; then tui_bin="$_self_dir/cs-tui"; fi
-    fi
-    [ -n "$tui_bin" ] && [ -x "$tui_bin" ] || return 1
+    tui_bin="$(_tui_bin)" || return 1
 
     # Detect the terminal theme while cs still owns the tty so the picker gets
     # a light/dark palette; reused by the session we launch next.

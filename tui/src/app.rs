@@ -325,6 +325,7 @@ pub const MENU_ITEMS: &[(&str, &str)] = &[
     ("Delete", "d"),
     ("Rename", "r"),
     ("Secrets", "s"),
+    ("Archive", "a"),
 ];
 
 #[derive(Debug)]
@@ -995,6 +996,10 @@ impl App {
                 self.run_secrets_command();
                 Action::None
             }
+            KeyCode::Char('a') => {
+                self.toggle_archive();
+                Action::None
+            }
             KeyCode::Char('n') => {
                 self.create_input.clear();
                 self.mode = Mode::CreateSession;
@@ -1345,6 +1350,7 @@ impl App {
             KeyCode::Char('d') => self.execute_menu_action(1),
             KeyCode::Char('r') => self.execute_menu_action(2),
             KeyCode::Char('s') => self.execute_menu_action(3),
+            KeyCode::Char('a') => self.execute_menu_action(4),
             _ => Action::None,
         }
     }
@@ -1388,6 +1394,11 @@ impl App {
             3 => {
                 // Secrets
                 self.run_secrets_command();
+                Action::None
+            }
+            4 => {
+                // Archive / unarchive
+                self.toggle_archive();
                 Action::None
             }
             _ => Action::None,
@@ -1917,6 +1928,52 @@ impl App {
             }
         }
         self.mode = Mode::Normal;
+    }
+
+    /// Archive the selected session, or unarchive one that already is. The
+    /// `.cs/archived` marker is written by `cs -archive` / `cs -unarchive`
+    /// rather than here: the marker's date-and-actor stamp and the refusal to
+    /// archive a live session belong to that verb, and a second writer would
+    /// have to agree with it forever. cs's refusal — including the one naming
+    /// `--force`, a flag the picker deliberately does not offer — is passed
+    /// through to the status line as it was written.
+    fn toggle_archive(&mut self) {
+        let selected = self
+            .selected_session()
+            .map(|s| (s.name.clone(), s.archived));
+        let (name, was_archived) = match selected {
+            Some(pair) => pair,
+            None => return,
+        };
+        let verb = if was_archived { "-unarchive" } else { "-archive" };
+        let done = if was_archived { "Unarchived" } else { "Archived" };
+        match std::process::Command::new(cs_bin())
+            .args([verb, &name])
+            .output()
+        {
+            Ok(out) if out.status.success() => {
+                self.set_status(format!("{}: {}", done, name), StatusLevel::Success);
+                self.flash_row(name, FlashKind::Success);
+                self.sessions = session::scan_sessions();
+                // An archived row leaves the table unless `A` is showing them;
+                // the re-filter is what keeps the selection inside the list.
+                self.apply_filter_and_sort();
+            }
+            Ok(out) => {
+                let err = String::from_utf8_lossy(&out.stderr);
+                let reason = err.trim().lines().last().unwrap_or("").trim().to_string();
+                let reason = if reason.is_empty() {
+                    format!("cs {} refused", verb)
+                } else {
+                    reason
+                };
+                self.set_status(reason, StatusLevel::Error);
+                self.flash_row(name, FlashKind::Error);
+            }
+            Err(e) => {
+                self.set_status(format!("Archive failed: {}", e), StatusLevel::Error);
+            }
+        }
     }
 
     fn run_secrets_command(&mut self) {
@@ -4602,5 +4659,223 @@ mod tests {
             SortColumn::Name,
             "clicking the Session header cell should sort by Name"
         );
+    }
+
+    // ---------------------------------------------------------------
+    // Archiving. The `.cs/archived` marker is written by `cs -archive`,
+    // never here: its format, its date and actor stamp, and its refusal to
+    // archive a live session all belong to the shell verb, and a second
+    // writer would have to agree with it forever. These tests stand a
+    // recording stub in for cs and read back the argv it was handed.
+    // ---------------------------------------------------------------
+
+    /// A stub cs that logs its argv and performs the marker write the real
+    /// verb would, so the rescan afterwards has something true to find.
+    #[cfg(unix)]
+    fn archive_stub(dir: &std::path::Path) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let stub = dir.join("cs-stub");
+        let script = format!(
+            "#!/bin/sh\n\
+             printf '%s\\n' \"$@\" >> {log}\n\
+             case \"$1\" in\n\
+             -archive) mkdir -p \"{root}/$2/.cs\" && echo archived > \"{root}/$2/.cs/archived\" ;;\n\
+             -unarchive) rm -f \"{root}/$2/.cs/archived\" ;;\n\
+             esac\n",
+            log = dir.join("argv").display(),
+            root = dir.display()
+        );
+        std::fs::write(&stub, script).unwrap();
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        stub
+    }
+
+    /// A sessions root holding one session directory, named per test so
+    /// parallel threads never share one.
+    #[cfg(unix)]
+    fn archive_root(tag: &str) -> std::path::PathBuf {
+        let tmp = std::env::temp_dir().join(format!("cs-tui-{}-{}", tag, std::process::id()));
+        std::fs::remove_dir_all(&tmp).ok();
+        std::fs::create_dir_all(tmp.join("alpha/.cs")).unwrap();
+        tmp
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn archive_key_archives_the_selected_session() {
+        let _env = CS_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = archive_root("archive");
+        let stub = archive_stub(&tmp);
+        let _root = session::test_root::scoped(tmp.clone());
+        std::env::set_var("CS_BIN", &stub);
+
+        let mut app = App::new(session::scan_sessions());
+        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        std::env::remove_var("CS_BIN");
+
+        let argv = std::fs::read_to_string(tmp.join("argv")).unwrap_or_default();
+        assert_eq!(
+            argv, "-archive\nalpha\n",
+            "the picker must ask cs to archive the selected session, not write the marker itself"
+        );
+        assert!(
+            app.sessions.iter().any(|s| s.name == "alpha" && s.archived),
+            "the rescan after the verb must pick up the marker it wrote"
+        );
+        assert!(
+            app.filtered.is_empty(),
+            "a freshly archived row is hidden until A shows it, and the selection must survive that"
+        );
+        assert_eq!(app.table_state.selected(), None, "nothing left to select");
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn archive_key_unarchives_a_row_that_is_already_archived() {
+        let _env = CS_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = archive_root("unarchive");
+        std::fs::write(tmp.join("alpha/.cs/archived"), "archived: 2026-08-23 by test\n").unwrap();
+        let stub = archive_stub(&tmp);
+        let _root = session::test_root::scoped(tmp.clone());
+        std::env::set_var("CS_BIN", &stub);
+
+        let mut app = App::new(session::scan_sessions());
+        // Archived rows are hidden by default, so A is how one is reachable.
+        app.handle_key(KeyEvent::from(KeyCode::Char('A')));
+        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        std::env::remove_var("CS_BIN");
+
+        let argv = std::fs::read_to_string(tmp.join("argv")).unwrap_or_default();
+        assert_eq!(
+            argv, "-unarchive\nalpha\n",
+            "the key is a toggle: an archived row must take the opposite verb"
+        );
+        assert!(
+            app.sessions.iter().any(|s| s.name == "alpha" && !s.archived),
+            "the marker is gone, so the rescan must show the row unarchived"
+        );
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// The action bar is a second, independent route to the same action: its
+    /// own key arm, its own dispatch index, and its own MENU_ITEMS entry. All
+    /// three are deletable while the Normal-mode tests stay green, so the
+    /// menu route needs a test that actually drives it.
+    #[cfg(unix)]
+    #[test]
+    fn session_menu_archive_entry_reaches_the_same_verb() {
+        let _env = CS_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = archive_root("archive-menu");
+        let stub = archive_stub(&tmp);
+        let _root = session::test_root::scoped(tmp.clone());
+        std::env::set_var("CS_BIN", &stub);
+
+        let mut app = App::new(session::scan_sessions());
+        app.mode = Mode::SessionMenu;
+        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        std::env::remove_var("CS_BIN");
+
+        let argv = std::fs::read_to_string(tmp.join("argv")).unwrap_or_default();
+        assert_eq!(
+            argv, "-archive\nalpha\n",
+            "the menu entry must run the same verb the bare key does"
+        );
+        assert!(
+            MENU_ITEMS.iter().any(|(label, key)| *label == "Archive" && *key == "a"),
+            "the menu must carry an Archive entry for the key to select"
+        );
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// cs refusing is not cs failing to start: a live session exits non-zero
+    /// with its reason on stderr, and that reason is the whole point of
+    /// shelling out rather than writing the marker here. The spawn-failure
+    /// test below cannot reach this arm.
+    #[cfg(unix)]
+    #[test]
+    fn archive_passes_cs_refusal_through_to_the_status_line() {
+        use std::os::unix::fs::PermissionsExt;
+        let _env = CS_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = archive_root("archive-refused");
+        let stub = tmp.join("cs-refuses");
+        std::fs::write(
+            &stub,
+            "#!/bin/sh\necho \"Session 'alpha' is live (pid 4242); use --force to archive anyway\" >&2\nexit 1\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _root = session::test_root::scoped(tmp.clone());
+        std::env::set_var("CS_BIN", &stub);
+
+        let mut app = App::new(session::scan_sessions());
+        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        std::env::remove_var("CS_BIN");
+
+        let status = app.status_message.as_ref().expect("the refusal must be reported");
+        assert_eq!(status.level, StatusLevel::Error, "a refusal is not a success");
+        assert!(
+            status.text.contains("is live") && status.text.contains("--force"),
+            "cs's own words must survive to the status line, got: {}",
+            status.text
+        );
+        assert!(
+            app.sessions.iter().any(|s| s.name == "alpha" && !s.archived),
+            "a refused archive must leave the row as it was"
+        );
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// A refusal with nothing on stderr still has to say something: the status
+    /// line is the only place the user learns the archive did not happen.
+    #[cfg(unix)]
+    #[test]
+    fn archive_refusal_with_silent_stderr_still_reports() {
+        use std::os::unix::fs::PermissionsExt;
+        let _env = CS_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = archive_root("archive-silent");
+        let stub = tmp.join("cs-silent");
+        std::fs::write(&stub, "#!/bin/sh\nexit 1\n").unwrap();
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _root = session::test_root::scoped(tmp.clone());
+        std::env::set_var("CS_BIN", &stub);
+
+        let mut app = App::new(session::scan_sessions());
+        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        std::env::remove_var("CS_BIN");
+
+        let status = app.status_message.as_ref().expect("a silent refusal is still a refusal");
+        assert_eq!(status.level, StatusLevel::Error);
+        assert!(
+            status.text.contains("-archive"),
+            "the fallback must name the verb that refused, got: {}",
+            status.text
+        );
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// An archive that never happened must not be reported as one — the row
+    /// keeps its state and the failure reaches the status line. An unspawnable
+    /// helper stands in for every refusal, cs's own live-session refusal
+    /// included, and fails identically on every platform.
+    #[cfg(unix)]
+    #[test]
+    fn archive_failure_leaves_the_row_unchanged() {
+        let _env = CS_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = archive_root("archive-fail");
+        let _root = session::test_root::scoped(tmp.clone());
+        std::env::set_var("CS_BIN", "/nonexistent/cs");
+
+        let mut app = App::new(session::scan_sessions());
+        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        std::env::remove_var("CS_BIN");
+
+        assert!(
+            app.sessions.iter().any(|s| s.name == "alpha" && !s.archived),
+            "a refused archive must leave the row as it was"
+        );
+        let status = app.status_message.as_ref().expect("the refusal must be reported");
+        assert_eq!(status.level, StatusLevel::Error, "a refusal is not a success");
+        std::fs::remove_dir_all(&tmp).ok();
     }
 }
