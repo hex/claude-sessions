@@ -942,7 +942,11 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
                 "Space:mark  D:delete marked  Esc:clear marks  q:quit  Enter:open  /:search"
             }
             Mode::Normal => {
-                "q:quit  Enter:open  n:new  d:delete  r:rename  Tab:to-do  Space:mark  /:search  1-6:sort  A:archived  ?:legend"
+                // The hint clips at narrow widths, so the order is priority
+                // order: the two archive keys sit with the session actions
+                // they belong to rather than at the end where they would be
+                // the first thing lost.
+                "q:quit  Enter:open  n:new  d:delete  r:rename  a:archive  A:archived  Tab:to-do  Space:mark  /:search  1-6:sort  ?:legend"
             }
             Mode::SessionMenu => "j/k:navigate  Enter:select  Esc:cancel",
             Mode::ConfirmDelete | Mode::ConfirmBatchDelete => "y:confirm  n:cancel",
@@ -1041,6 +1045,11 @@ fn render_action_bar(app: &App, frame: &mut Frame, area: Rect) {
     let p = app.theme;
     let session = app.selected_session();
     let has_secrets = session.as_ref().map(|s| s.secrets_count > 0).unwrap_or(false);
+    // One key, two labels: the row's own state says which way the toggle goes.
+    let archive_label = match session.as_ref().map(|s| s.archived) {
+        Some(true) => "unarchive",
+        _ => "archive",
+    };
 
     let mut spans: Vec<Span> = Vec::new();
     spans.push(Span::styled(" ", Style::default()));
@@ -1051,6 +1060,7 @@ fn render_action_bar(app: &App, frame: &mut Frame, area: Rect) {
         ("d", "delete", true),
         ("r", "rename", true),
         ("s", "secrets", has_secrets),
+        ("a", archive_label, true),
     ];
 
     for (i, (key, label, available)) in actions.iter().enumerate() {
@@ -4147,6 +4157,32 @@ mod tests {
     /// threads, so an unguarded set_var races every concurrent footer render.
     static VERSION_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+    /// The archive key is a toggle, and the action bar has to say which way it
+    /// will go — offering "archive" on an already-archived row would promise
+    /// the opposite of what pressing it does.
+    #[test]
+    fn action_bar_names_the_direction_the_archive_key_will_take() {
+        let mut sessions = locked_and_recent_sessions();
+        let mut app = App::new(sessions.clone());
+        app.mode = Mode::SessionMenu;
+        let (_, rows) = render_app(&mut app);
+        let bar = rows.join("\n");
+        assert!(bar.contains("[a]archive"), "bar: {}", bar);
+
+        // Both, not one: the default sort decides which row lands under the
+        // cursor, and the assertion is about the selected row's state.
+        for s in sessions.iter_mut() {
+            s.archived = true;
+        }
+        let mut app = App::new(sessions);
+        app.show_archived = true;
+        app.apply_filter_and_sort();
+        app.mode = Mode::SessionMenu;
+        let (_, rows) = render_app(&mut app);
+        let bar = rows.join("\n");
+        assert!(bar.contains("[a]unarchive"), "bar: {}", bar);
+    }
+
     fn render_app(app: &mut App) -> (ratatui::buffer::Buffer, Vec<String>) {
         let backend = TestBackend::new(115, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -4211,6 +4247,11 @@ mod tests {
         let (_, rows) = render_app(&mut app);
         let footer = rows.last().unwrap();
         assert!(footer.contains("archived"), "footer: {}", footer);
+        assert!(
+            footer.contains("a archive"),
+            "the key that archives a session must survive the clip too, footer: {}",
+            footer
+        );
     }
 
     #[test]
