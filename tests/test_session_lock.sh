@@ -31,6 +31,22 @@ create_lock_test_session() {
     (cd "$session_dir" && git init -q 2>/dev/null && git add -A 2>/dev/null && git commit -q -m "init" 2>/dev/null) || true
 }
 
+# A picker on PATH, for the tests that assert the session-manager row or a
+# keypress number below it. The row is gated on a resolvable `cs-tui`, and CI
+# never builds one (bin/cs-tui is untracked), so a test that assumes the host
+# has one is asserting the developer's machine. Selecting nothing keeps
+# run_tui's exit path clean; callers that care record the call themselves.
+_stub_picker_dir() {
+    local dir="$TEST_TMPDIR/stubbin"
+    mkdir -p "$dir"
+    cat > "$dir/cs-tui" << 'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+    chmod +x "$dir/cs-tui"
+    printf '%s\n' "$dir"
+}
+
 # ============================================================================
 # Tests
 # ============================================================================
@@ -211,7 +227,7 @@ test_collision_menu_four_cancels() {
     local output status=0
     # Key '4' is the explicit cancel — force, new feature, session manager,
     # cancel. A single keypress, no Enter required.
-    output=$(printf '4' | CS_ASSUME_TTY=1 "$CS_BIN" test-session 2>&1) || status=$?
+    output=$(printf '4' | PATH="$(_stub_picker_dir):$PATH" CS_ASSUME_TTY=1 "$CS_BIN" test-session 2>&1) || status=$?
     assert_eq "0" "$status" "key 4 cancels and exits cleanly" || return 1
     assert_output_contains "$output" "Cancelled" "cancel message shown for key 4" || return 1
     # An unrecognised key cancels too, so the message alone would pass on any
@@ -245,7 +261,7 @@ test_collision_menu_offers_session_manager() {
     echo "$live_pid" > "$CS_SESSIONS_ROOT/test-session/.cs/session.lock"
 
     local output status=0
-    output=$(CS_ASSUME_TTY=1 "$CS_BIN" test-session < /dev/null 2>&1) || status=$?
+    output=$(PATH="$(_stub_picker_dir):$PATH" CS_ASSUME_TTY=1 "$CS_BIN" test-session < /dev/null 2>&1) || status=$?
     assert_output_contains "$output" "session manager" "menu offers the session manager" || return 1
 }
 
@@ -254,12 +270,13 @@ test_collision_menu_opens_session_manager() {
     create_lock_test_session "test-session"
     # A picker that records the call and selects nothing, so run_tui exits 0
     # instead of re-execing cs with a session name.
-    mkdir -p "$TEST_TMPDIR/stubbin"
-    cat > "$TEST_TMPDIR/stubbin/cs-tui" << STUB
+    local stubdir
+    stubdir=$(_stub_picker_dir)
+    cat > "$stubdir/cs-tui" << STUB
 #!/usr/bin/env bash
 touch "$TEST_TMPDIR/picker-ran"
 STUB
-    chmod +x "$TEST_TMPDIR/stubbin/cs-tui"
+    chmod +x "$stubdir/cs-tui"
 
     sleep 300 &
     local live_pid=$!
@@ -267,7 +284,7 @@ STUB
 
     local output status=0
     # '3' = session manager (force, new feature, session manager, cancel).
-    output=$(printf '3' | PATH="$TEST_TMPDIR/stubbin:$PATH" CS_ASSUME_TTY=1 "$CS_BIN" test-session 2>&1) || status=$?
+    output=$(printf '3' | PATH="$stubdir:$PATH" CS_ASSUME_TTY=1 "$CS_BIN" test-session 2>&1) || status=$?
     assert_eq "0" "$status" "session-manager path should exit cleanly, got: $output" || return 1
     assert_exists "$TEST_TMPDIR/picker-ran" "the picker was launched" || return 1
     assert_output_not_contains "$output" "Cancelled" "session manager must not fall through to cancel" || return 1
@@ -322,6 +339,30 @@ test_collision_menu_lists_existing_features() {
     output=$(CS_ASSUME_TTY=1 "$CS_BIN" test-session < /dev/null 2>&1) || status=$?
     assert_output_contains "$output" "open a feature" "menu shows the feature section" || return 1
     assert_output_contains "$output" "@fix-auth" "menu lists the existing feature" || return 1
+}
+
+# The menu reads a single keypress, so it can address at most nine options and
+# the feature list is capped to leave room for the four fixed rows. Nothing else
+# covers the cap, and exceeding it fails silently: the tenth row renders and
+# simply never responds to its own number.
+test_collision_menu_caps_features_so_every_row_stays_reachable() {
+    create_lock_test_session "test-session"
+    local f
+    for f in a b c d e g; do
+        mkdir -p "$CS_SESSIONS_ROOT/test-session@$f"
+    done
+    sleep 300 &
+    local live_pid=$!
+    echo "$live_pid" > "$CS_SESSIONS_ROOT/test-session/.cs/session.lock"
+
+    local output status=0
+    output=$(PATH="$(_stub_picker_dir):$PATH" CS_ASSUME_TTY=1 "$CS_BIN" test-session < /dev/null 2>&1) || status=$?
+
+    local listed
+    listed=$(grep -c 'resume · cs/' <<< "$output" || true)
+    assert_eq "5" "$listed" "six worktrees must be capped to five listed rows" || return 1
+    # The last row carries the highest number the keypress reader can accept.
+    assert_output_contains "$output" "9.*cancel" "cancel is the ninth and last addressable row" || return 1
 }
 
 # Choosing a listed feature resumes it (re-exec base@feature), never the
@@ -379,9 +420,13 @@ test_collision_menu_on_worktree_session_offers_no_new_task() {
     local output status=0
     # A worktree session offers no new-feature row, so its order is force,
     # session manager, cancel — '3' is cancel in that context.
-    output=$(printf '3' | CS_ASSUME_TTY=1 "$CS_BIN" "test-session@t1" 2>&1) || status=$?
+    output=$(printf '3' | PATH="$(_stub_picker_dir):$PATH" CS_ASSUME_TTY=1 "$CS_BIN" "test-session@t1" 2>&1) || status=$?
     assert_eq "0" "$status" "worktree collision exits cleanly" || return 1
     assert_output_not_contains "$output" "new feature" "no new-feature option for a worktree session" || return 1
+    # Any key past the last row cancels too, so pin the number the menu printed
+    # against cancel — otherwise this passes whether or not the row above it
+    # exists.
+    assert_output_contains "$output" "3.*cancel" "cancel is the third row on a worktree session" || return 1
     assert_not_exists "$CS_SESSIONS_ROOT/test-session@t1@n" "no nested worktree possible" || return 1
 }
 
@@ -408,6 +453,7 @@ run_test test_collision_menu_offers_session_manager
 run_test test_collision_menu_opens_session_manager
 run_test test_collision_menu_omits_session_manager_without_picker
 run_test test_collision_menu_lists_existing_features
+run_test test_collision_menu_caps_features_so_every_row_stays_reachable
 run_test test_collision_menu_opens_existing_feature
 run_test test_collision_menu_force_proceeds
 run_test test_collision_menu_force_bypasses_live_duplicate_guard

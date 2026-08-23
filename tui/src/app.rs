@@ -4758,6 +4758,72 @@ mod tests {
         std::fs::remove_dir_all(&tmp).ok();
     }
 
+    /// cs refusing is not cs failing to start: a live session exits non-zero
+    /// with its reason on stderr, and that reason is the whole point of
+    /// shelling out rather than writing the marker here. The spawn-failure
+    /// test below cannot reach this arm.
+    #[cfg(unix)]
+    #[test]
+    fn archive_passes_cs_refusal_through_to_the_status_line() {
+        use std::os::unix::fs::PermissionsExt;
+        let _env = CS_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = archive_root("archive-refused");
+        let stub = tmp.join("cs-refuses");
+        std::fs::write(
+            &stub,
+            "#!/bin/sh\necho \"Session 'alpha' is live (pid 4242); use --force to archive anyway\" >&2\nexit 1\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _root = session::test_root::scoped(tmp.clone());
+        std::env::set_var("CS_BIN", &stub);
+
+        let mut app = App::new(session::scan_sessions());
+        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        std::env::remove_var("CS_BIN");
+
+        let status = app.status_message.as_ref().expect("the refusal must be reported");
+        assert_eq!(status.level, StatusLevel::Error, "a refusal is not a success");
+        assert!(
+            status.text.contains("is live") && status.text.contains("--force"),
+            "cs's own words must survive to the status line, got: {}",
+            status.text
+        );
+        assert!(
+            app.sessions.iter().any(|s| s.name == "alpha" && !s.archived),
+            "a refused archive must leave the row as it was"
+        );
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// A refusal with nothing on stderr still has to say something: the status
+    /// line is the only place the user learns the archive did not happen.
+    #[cfg(unix)]
+    #[test]
+    fn archive_refusal_with_silent_stderr_still_reports() {
+        use std::os::unix::fs::PermissionsExt;
+        let _env = CS_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = archive_root("archive-silent");
+        let stub = tmp.join("cs-silent");
+        std::fs::write(&stub, "#!/bin/sh\nexit 1\n").unwrap();
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _root = session::test_root::scoped(tmp.clone());
+        std::env::set_var("CS_BIN", &stub);
+
+        let mut app = App::new(session::scan_sessions());
+        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        std::env::remove_var("CS_BIN");
+
+        let status = app.status_message.as_ref().expect("a silent refusal is still a refusal");
+        assert_eq!(status.level, StatusLevel::Error);
+        assert!(
+            status.text.contains("-archive"),
+            "the fallback must name the verb that refused, got: {}",
+            status.text
+        );
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
     /// An archive that never happened must not be reported as one — the row
     /// keeps its state and the failure reaches the status line. An unspawnable
     /// helper stands in for every refusal, cs's own live-session refusal
