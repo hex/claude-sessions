@@ -4758,6 +4758,36 @@ mod tests {
         std::fs::remove_dir_all(&tmp).ok();
     }
 
+    /// The action bar is a second, independent route to the same action: its
+    /// own key arm, its own dispatch index, and its own MENU_ITEMS entry. All
+    /// three are deletable while the Normal-mode tests stay green, so the
+    /// menu route needs a test that actually drives it.
+    #[cfg(unix)]
+    #[test]
+    fn session_menu_archive_entry_reaches_the_same_verb() {
+        let _env = CS_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = archive_root("archive-menu");
+        let stub = archive_stub(&tmp);
+        let _root = session::test_root::scoped(tmp.clone());
+        std::env::set_var("CS_BIN", &stub);
+
+        let mut app = App::new(session::scan_sessions());
+        app.mode = Mode::SessionMenu;
+        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        std::env::remove_var("CS_BIN");
+
+        let argv = std::fs::read_to_string(tmp.join("argv")).unwrap_or_default();
+        assert_eq!(
+            argv, "-archive\nalpha\n",
+            "the menu entry must run the same verb the bare key does"
+        );
+        assert!(
+            MENU_ITEMS.iter().any(|(label, key)| *label == "Archive" && *key == "a"),
+            "the menu must carry an Archive entry for the key to select"
+        );
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
     /// cs refusing is not cs failing to start: a live session exits non-zero
     /// with its reason on stderr, and that reason is the whole point of
     /// shelling out rather than writing the marker here. The spawn-failure

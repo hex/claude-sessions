@@ -47,6 +47,20 @@ STUB
     printf '%s\n' "$dir"
 }
 
+# A PATH with no cs-tui on any entry, for the tests that decide which of
+# _tui_bin's two probes is under test. Non-zero when one still resolves, so the
+# caller can skip rather than assert something it did not actually arrange.
+_path_without_picker() {
+    local out="" d
+    while IFS= read -r d; do
+        [ -n "$d" ] || continue
+        [ -x "$d/cs-tui" ] && continue
+        out="${out:+$out:}$d"
+    done <<< "$(printf '%s' "$PATH" | tr ':' '\n')"
+    PATH="$out" command -v cs-tui >/dev/null 2>&1 && return 1
+    printf '%s\n' "$out"
+}
+
 # ============================================================================
 # Tests
 # ============================================================================
@@ -294,6 +308,32 @@ STUB
         "lock untouched when the picker is opened" || return 1
 }
 
+# cs may be run by explicit path with its own directory off PATH, which the
+# installer permits — so _tui_bin falls back to the picker sitting beside the
+# running script. Only the miss path was covered; a probe that never fires
+# would look identical from every other test.
+test_collision_menu_finds_the_picker_beside_cs() {
+    create_lock_test_session "test-session"
+    local path_no_tui
+    path_no_tui=$(_path_without_picker) || { echo "    SKIP (cs-tui resolves from PATH regardless)"; return 0; }
+
+    # cs and a picker as siblings, reachable only by explicit path.
+    mkdir -p "$TEST_TMPDIR/sibling"
+    cp "$CS_BIN" "$TEST_TMPDIR/sibling/cs"
+    chmod +x "$TEST_TMPDIR/sibling/cs"
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$TEST_TMPDIR/sibling/cs-tui"
+    chmod +x "$TEST_TMPDIR/sibling/cs-tui"
+
+    sleep 300 &
+    local live_pid=$!
+    echo "$live_pid" > "$CS_SESSIONS_ROOT/test-session/.cs/session.lock"
+
+    local output status=0
+    output=$(PATH="$path_no_tui" CS_ASSUME_TTY=1 "$TEST_TMPDIR/sibling/cs" test-session < /dev/null 2>&1) || status=$?
+    assert_output_contains "$output" "session manager" \
+        "the picker beside cs must be found when PATH has none" || return 1
+}
+
 # No picker installed, no row: the option must not name a command that errors.
 # Both of cs's probes have to miss — the PATH, and the sibling next to the
 # running script — so cs is copied away from bin/ and the picker's directory
@@ -304,16 +344,8 @@ test_collision_menu_omits_session_manager_without_picker() {
     cp "$CS_BIN" "$TEST_TMPDIR/nopicker/cs"
     chmod +x "$TEST_TMPDIR/nopicker/cs"
 
-    local path_no_tui="" d
-    while IFS= read -r d; do
-        [ -n "$d" ] || continue
-        [ -x "$d/cs-tui" ] && continue
-        path_no_tui="${path_no_tui:+$path_no_tui:}$d"
-    done <<< "$(printf '%s' "$PATH" | tr ':' '\n')"
-    if PATH="$path_no_tui" command -v cs-tui >/dev/null 2>&1; then
-        echo "    SKIP (cs-tui still resolves with every holding directory dropped)"
-        return 0
-    fi
+    local path_no_tui
+    path_no_tui=$(_path_without_picker) || { echo "    SKIP (cs-tui still resolves with every holding directory dropped)"; return 0; }
 
     sleep 300 &
     local live_pid=$!
@@ -452,6 +484,7 @@ run_test test_collision_menu_shows_numbered_options
 run_test test_collision_menu_offers_session_manager
 run_test test_collision_menu_opens_session_manager
 run_test test_collision_menu_omits_session_manager_without_picker
+run_test test_collision_menu_finds_the_picker_beside_cs
 run_test test_collision_menu_lists_existing_features
 run_test test_collision_menu_caps_features_so_every_row_stays_reachable
 run_test test_collision_menu_opens_existing_feature
