@@ -202,19 +202,23 @@ test_collision_menu_force_proceeds() {
     assert_output_contains "$output" "Overriding active session lock" "force warning shown" || return 1
 }
 
-test_collision_menu_three_cancels() {
+test_collision_menu_four_cancels() {
     create_lock_test_session "test-session"
     sleep 300 &
     local live_pid=$!
     echo "$live_pid" > "$CS_SESSIONS_ROOT/test-session/.cs/session.lock"
 
     local output status=0
-    # Key '3' is the explicit cancel; a single keypress, no Enter required.
-    output=$(printf '3' | CS_ASSUME_TTY=1 "$CS_BIN" test-session 2>&1) || status=$?
-    assert_eq "0" "$status" "key 3 cancels and exits cleanly" || return 1
-    assert_output_contains "$output" "Cancelled" "cancel message shown for key 3" || return 1
+    # Key '4' is the explicit cancel — force, new feature, session manager,
+    # cancel. A single keypress, no Enter required.
+    output=$(printf '4' | CS_ASSUME_TTY=1 "$CS_BIN" test-session 2>&1) || status=$?
+    assert_eq "0" "$status" "key 4 cancels and exits cleanly" || return 1
+    assert_output_contains "$output" "Cancelled" "cancel message shown for key 4" || return 1
+    # An unrecognised key cancels too, so the message alone would pass on any
+    # numbering: pin that 4 is the number the menu printed against cancel.
+    assert_output_contains "$output" "4.*cancel" "cancel is the fourth row" || return 1
     assert_eq "$live_pid" "$(cat "$CS_SESSIONS_ROOT/test-session/.cs/session.lock")" \
-        "lock untouched on key-3 cancel" || return 1
+        "lock untouched on key-4 cancel" || return 1
 }
 
 test_collision_menu_shows_numbered_options() {
@@ -228,6 +232,81 @@ test_collision_menu_shows_numbered_options() {
     assert_output_contains "$output" "force start" "menu offers force start" || return 1
     assert_output_contains "$output" "new feature" "menu offers new feature" || return 1
     assert_output_contains "$output" "cancel" "menu offers cancel" || return 1
+}
+
+# The picker is the way out of a collision that is neither "force it" nor
+# "start something new here": another session entirely. Offered only when a
+# picker binary is actually resolvable — a row that can only fail is worse
+# than no row.
+test_collision_menu_offers_session_manager() {
+    create_lock_test_session "test-session"
+    sleep 300 &
+    local live_pid=$!
+    echo "$live_pid" > "$CS_SESSIONS_ROOT/test-session/.cs/session.lock"
+
+    local output status=0
+    output=$(CS_ASSUME_TTY=1 "$CS_BIN" test-session < /dev/null 2>&1) || status=$?
+    assert_output_contains "$output" "session manager" "menu offers the session manager" || return 1
+}
+
+# Choosing it runs the picker, never the force path and never cancel.
+test_collision_menu_opens_session_manager() {
+    create_lock_test_session "test-session"
+    # A picker that records the call and selects nothing, so run_tui exits 0
+    # instead of re-execing cs with a session name.
+    mkdir -p "$TEST_TMPDIR/stubbin"
+    cat > "$TEST_TMPDIR/stubbin/cs-tui" << STUB
+#!/usr/bin/env bash
+touch "$TEST_TMPDIR/picker-ran"
+STUB
+    chmod +x "$TEST_TMPDIR/stubbin/cs-tui"
+
+    sleep 300 &
+    local live_pid=$!
+    echo "$live_pid" > "$CS_SESSIONS_ROOT/test-session/.cs/session.lock"
+
+    local output status=0
+    # '3' = session manager (force, new feature, session manager, cancel).
+    output=$(printf '3' | PATH="$TEST_TMPDIR/stubbin:$PATH" CS_ASSUME_TTY=1 "$CS_BIN" test-session 2>&1) || status=$?
+    assert_eq "0" "$status" "session-manager path should exit cleanly, got: $output" || return 1
+    assert_exists "$TEST_TMPDIR/picker-ran" "the picker was launched" || return 1
+    assert_output_not_contains "$output" "Cancelled" "session manager must not fall through to cancel" || return 1
+    assert_output_not_contains "$output" "Overriding active session lock" \
+        "session manager must not force the lock" || return 1
+    assert_eq "$live_pid" "$(cat "$CS_SESSIONS_ROOT/test-session/.cs/session.lock")" \
+        "lock untouched when the picker is opened" || return 1
+}
+
+# No picker installed, no row: the option must not name a command that errors.
+# Both of cs's probes have to miss — the PATH, and the sibling next to the
+# running script — so cs is copied away from bin/ and the picker's directory
+# is dropped from PATH.
+test_collision_menu_omits_session_manager_without_picker() {
+    create_lock_test_session "test-session"
+    mkdir -p "$TEST_TMPDIR/nopicker"
+    cp "$CS_BIN" "$TEST_TMPDIR/nopicker/cs"
+    chmod +x "$TEST_TMPDIR/nopicker/cs"
+
+    local path_no_tui="" d
+    while IFS= read -r d; do
+        [ -n "$d" ] || continue
+        [ -x "$d/cs-tui" ] && continue
+        path_no_tui="${path_no_tui:+$path_no_tui:}$d"
+    done <<< "$(printf '%s' "$PATH" | tr ':' '\n')"
+    if PATH="$path_no_tui" command -v cs-tui >/dev/null 2>&1; then
+        echo "    SKIP (cs-tui still resolves with every holding directory dropped)"
+        return 0
+    fi
+
+    sleep 300 &
+    local live_pid=$!
+    echo "$live_pid" > "$CS_SESSIONS_ROOT/test-session/.cs/session.lock"
+
+    local output status=0
+    output=$(PATH="$path_no_tui" CS_ASSUME_TTY=1 "$TEST_TMPDIR/nopicker/cs" test-session < /dev/null 2>&1) || status=$?
+    assert_output_contains "$output" "force start" "the menu still renders without a picker" || return 1
+    assert_output_not_contains "$output" "session manager" \
+        "no session-manager row when no picker is installed" || return 1
 }
 
 # A base with existing feature worktrees lists them as openable options above
@@ -298,8 +377,9 @@ test_collision_menu_on_worktree_session_offers_no_new_task() {
     echo "$live_pid" > "$CS_SESSIONS_ROOT/test-session@t1/.cs/session.lock"
 
     local output status=0
-    # A worktree session offers only force/cancel; '2' is cancel in that context.
-    output=$(printf '2' | CS_ASSUME_TTY=1 "$CS_BIN" "test-session@t1" 2>&1) || status=$?
+    # A worktree session offers no new-feature row, so its order is force,
+    # session manager, cancel — '3' is cancel in that context.
+    output=$(printf '3' | CS_ASSUME_TTY=1 "$CS_BIN" "test-session@t1" 2>&1) || status=$?
     assert_eq "0" "$status" "worktree collision exits cleanly" || return 1
     assert_output_not_contains "$output" "new feature" "no new-feature option for a worktree session" || return 1
     assert_not_exists "$CS_SESSIONS_ROOT/test-session@t1@n" "no nested worktree possible" || return 1
@@ -322,8 +402,11 @@ run_test test_lock_cleaned_on_session_end
 run_test test_lock_contains_valid_pid
 run_test test_collision_menu_new_task_creates_worktree
 run_test test_collision_menu_cancel_is_default
-run_test test_collision_menu_three_cancels
+run_test test_collision_menu_four_cancels
 run_test test_collision_menu_shows_numbered_options
+run_test test_collision_menu_offers_session_manager
+run_test test_collision_menu_opens_session_manager
+run_test test_collision_menu_omits_session_manager_without_picker
 run_test test_collision_menu_lists_existing_features
 run_test test_collision_menu_opens_existing_feature
 run_test test_collision_menu_force_proceeds

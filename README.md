@@ -276,7 +276,8 @@ conversation:
 
 You don't have to remember the syntax: typing `cs myproj` while that session
 is already open offers to open one of its existing features, start a new
-parallel feature, force a second launch, or cancel. A worktree session also
+parallel feature, force a second launch, open the session manager to pick a
+different session, or cancel. A worktree session also
 knows what it is: Claude is told at launch that it runs in a feature worktree
 and that `cs myproj --merge <feature>` is the way back, so it won't merge the
 branch by hand.
