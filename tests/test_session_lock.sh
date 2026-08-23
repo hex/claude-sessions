@@ -159,9 +159,57 @@ test_lock_cleaned_on_session_end() {
     export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/test-session"
     export CLAUDE_SESSION_META_DIR="$meta_dir"
 
-    echo '{"session_id": "test-123"}' | "$SCRIPT_DIR/../hooks/session-end.sh"
+    # Pinned, not inherited. cs-resolve.sh preserves an existing
+    # CS_RESOLVED_FROM rather than setting it, and session-start.sh exports
+    # `walk` into a teammate's environment — so running this suite from a
+    # teammate shell silently tested the OTHER branch and reported a failure
+    # that looked like a flake.
+    echo '{"session_id": "test-123"}' | CS_RESOLVED_FROM=env "$SCRIPT_DIR/../hooks/session-end.sh"
 
     assert_not_exists "$meta_dir/session.lock" "Lock should be cleaned up by session-end hook" || return 1
+}
+
+# The other half of that branch, which nothing covered — which is why the
+# inherited value could flip the test above and read as a flake. A teammate
+# resolved by walking into the directory does not own the lock: stripping it
+# would let `cs <name>` open a duplicate of the lead with no collision menu.
+test_session_end_leaves_a_live_lock_it_does_not_own() {
+    create_lock_test_session "test-session"
+    local meta_dir="$CS_SESSIONS_ROOT/test-session/.cs"
+
+    sleep 300 &
+    local live_pid=$!
+    echo "$live_pid" > "$meta_dir/session.lock"
+
+    export CLAUDE_SESSION_NAME="test-session"
+    export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/test-session"
+    export CLAUDE_SESSION_META_DIR="$meta_dir"
+
+    echo '{"session_id": "test-123"}' | CS_RESOLVED_FROM=walk "$SCRIPT_DIR/../hooks/session-end.sh"
+
+    assert_exists "$meta_dir/session.lock" \
+        "a walked-in front end must not strip a live lock it did not take" || return 1
+    assert_eq "$live_pid" "$(cat "$meta_dir/session.lock")" \
+        "the owner's pid must survive untouched" || return 1
+}
+
+# ...but a stale one it does not own is still cleared, or a crashed session
+# stays locked out forever.
+test_session_end_clears_a_stale_lock_even_when_walked_in() {
+    create_lock_test_session "test-session"
+    local meta_dir="$CS_SESSIONS_ROOT/test-session/.cs"
+
+    # A pid that cannot be alive: max_pid + 1 on every platform cs supports.
+    echo "4194305" > "$meta_dir/session.lock"
+
+    export CLAUDE_SESSION_NAME="test-session"
+    export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/test-session"
+    export CLAUDE_SESSION_META_DIR="$meta_dir"
+
+    echo '{"session_id": "test-123"}' | CS_RESOLVED_FROM=walk "$SCRIPT_DIR/../hooks/session-end.sh"
+
+    assert_not_exists "$meta_dir/session.lock" \
+        "a dead owner's lock must be cleared however the hook resolved" || return 1
 }
 
 test_lock_contains_valid_pid() {
@@ -476,6 +524,8 @@ run_test test_lock_prevents_duplicate_session
 run_test test_stale_lock_is_reclaimed
 run_test test_force_overrides_live_lock
 run_test test_lock_cleaned_on_session_end
+run_test test_session_end_leaves_a_live_lock_it_does_not_own
+run_test test_session_end_clears_a_stale_lock_even_when_walked_in
 run_test test_lock_contains_valid_pid
 run_test test_collision_menu_new_task_creates_worktree
 run_test test_collision_menu_cancel_is_default
