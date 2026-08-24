@@ -1214,15 +1214,21 @@ test_no_gradient_without_columns() {
         "no gradient should render when COLUMNS is unknown" || return 1
 }
 
-test_no_gradient_without_bg_rgb() {
+# Was test_no_gradient_without_bg_rgb, which pinned the opposite: that COLUMNS
+# had no effect at all without a measured background. That WAS the behaviour,
+# and it meant the bar stopped mid-line on every terminal cs did not launch.
+# The tail now falls back to a theme-derived background, so COLUMNS takes
+# effect everywhere; only the fade's destination differs.
+test_columns_fills_the_bar_without_a_measured_bg() {
     export COLORTERM=truecolor
     unset CS_TERM_BG_RGB
     local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
     local out_unset out_wide
     out_unset=$(run_sl "$json")
     out_wide=$(COLUMNS=80 run_sl "$json")
-    assert_eq "$out_unset" "$out_wide" \
-        "COLUMNS must have no effect on rendering when CS_TERM_BG_RGB is unknown" || return 1
+    [ "$out_unset" != "$out_wide" ] || {
+        echo "    COLUMNS had no effect; the tail did not fall back to an assumed bg"; return 1; }
+    return 0
 }
 
 test_no_gradient_outside_truecolor() {
@@ -1469,6 +1475,55 @@ test_pane_segment_hidden_when_tmux_is_foreign() {
 }
 
 
+# The gradient used to exist only for sessions cs launched, because only cs's
+# launch-time OSC 11 ever learns the real background. Every other terminal — a
+# plain `claude`, an app that embeds one — got a bar that simply stopped
+# mid-line. With no measurement the theme still says light or dark, which is
+# enough to fade toward a conventional background of that class; a real
+# CS_TERM_BG_RGB always outranks the assumption.
+test_gradient_renders_without_a_measured_bg() {
+    export COLORTERM=truecolor
+    export COLUMNS=80
+    export CS_TERM_THEME=dark
+    unset CS_TERM_BG_RGB 2>/dev/null || true
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":5}}'
+    local out stripped width
+    out=$(run_sl "$json")
+    stripped=$(printf '%s' "$out" | sed -E $'s/\033\\[[0-9;]*m//g')
+    width=$( ( _load_sl_functions; _display_width "$stripped"; echo "$_WIDTH" ) )
+    assert_eq "80" "$width" "an unmeasured terminal should still fill exactly COLUMNS cells" || return 1
+}
+
+# The assumption is theme-derived, so the two classes must not land on the same
+# colour — otherwise "it renders" would be true while the fade ran the wrong way
+# on one of them.
+test_assumed_bg_differs_by_theme() {
+    export COLORTERM=truecolor
+    export COLUMNS=80
+    unset CS_TERM_BG_RGB 2>/dev/null || true
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
+    local out
+    out=$(CS_TERM_THEME=dark run_sl "$json")
+    assert_output_contains "$out" "48;2;30;30;30" \
+        "a dark terminal with no measurement should fade toward a dark background" || return 1
+    out=$(CS_TERM_THEME=light run_sl "$json")
+    assert_output_contains "$out" "48;2;250;250;250" \
+        "a light terminal with no measurement should fade toward a light background" || return 1
+}
+
+# A real measurement must still win: the assumption is a fallback, never an
+# override, or a correctly-measured cream terminal would fade to generic white.
+test_measured_bg_outranks_the_assumption() {
+    export COLORTERM=truecolor
+    export COLUMNS=80
+    export CS_TERM_THEME=light CS_TERM_BG_RGB="252;247;229"
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "48;2;252;247;229" \
+        "a measured background must still be the fade target" || return 1
+}
+
 run_test test_happy_path_docs_fixture_plain
 run_test test_all_segments_ordering_plain
 run_test test_limits_neutral_when_healthy
@@ -1542,10 +1597,13 @@ run_test test_lerp_channel_hits_exact_endpoints
 run_test test_build_gradient_cell_count_and_endpoints
 run_test test_build_gradient_noop_on_malformed_target
 run_test test_full_width_gradient_reaches_columns
+run_test test_gradient_renders_without_a_measured_bg
+run_test test_assumed_bg_differs_by_theme
+run_test test_measured_bg_outranks_the_assumption
 run_test test_tail_gradient_neutral_regardless_of_last_segment
 run_test test_narrow_terminal_no_gradient
 run_test test_no_gradient_without_columns
-run_test test_no_gradient_without_bg_rgb
+run_test test_columns_fills_the_bar_without_a_measured_bg
 run_test test_no_gradient_outside_truecolor
 
 # ============================================================================
