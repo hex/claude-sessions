@@ -197,7 +197,13 @@ main() {
             return $?
             ;;
         -detect-theme)
-            detect_term_theme
+            # --write is the tmux attach probe's body: measure and record,
+            # printing nothing. Bare -detect-theme keeps its reporting contract.
+            if [ "${2:-}" = "--write" ]; then
+                write_term_theme_state
+            else
+                detect_term_theme
+            fi
             return 0
             ;;
         -statusline)

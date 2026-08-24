@@ -1788,6 +1788,165 @@ test_sl_theme_non_macos_defaults_light() {
       assert_eq "0" "$_defaults_called" "non-macOS must not run the appearance probe" || return 1 )
 }
 
+# The probe is useless unless something calls it on attach. The hook is set on
+# the tmux session cs is running in and APPENDED, so a hook the user already had
+# survives; it is never set globally, which would reach every tmux session on
+# the server including ones cs has nothing to do with.
+test_attach_hook_is_session_scoped_and_appended() {
+    local log="$TEST_TMPDIR/tmux-args"
+    local stub="$TEST_TMPDIR/bin"; mkdir -p "$stub"
+    printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\nexit 0\n' "$log" > "$stub/tmux"
+    chmod +x "$stub/tmux"
+    ( PATH="$stub:$PATH"; TMUX="/tmp/fake,1,0"; CS_STATUSLINE_LIB=1; CS_BIN="/opt/example/bin/cs"
+      . "$SCRIPT_DIR/../lib/70-statusline.sh" 2>/dev/null || true
+      _arm_term_theme_probe 2>/dev/null || true )
+    assert_file_exists "$log" "the hook registration must call tmux" || return 1
+    assert_file_contains "$log" "/opt/example/bin/cs" \
+        "the hook must name cs by path, not by whatever \$0 happens to be" || return 1
+    assert_file_contains "$log" "set-hook" "a hook is registered" || return 1
+    assert_file_contains "$log" "client-attached" "on client-attached" || return 1
+    assert_file_contains "$log" "set-hook -a" "appended, so an existing hook survives" || return 1
+    # Every global spelling, not just a lone -g: `-ga` is the one that slips
+    # past a naive pattern, and it is exactly what an "append globally" edit
+    # would produce.
+    if grep -qE 'set-hook +(-[a-z]*g|-g)' "$log" 2>/dev/null; then
+        echo "  FAIL: the hook must not be registered globally"; return 1
+    fi
+}
+
+# Outside tmux there is no client to attach and no hook to set.
+test_attach_hook_not_armed_outside_tmux() {
+    local log="$TEST_TMPDIR/tmux-args2"
+    local stub="$TEST_TMPDIR/bin2"; mkdir -p "$stub"
+    printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\nexit 0\n' "$log" > "$stub/tmux"
+    chmod +x "$stub/tmux"
+    ( PATH="$stub:$PATH"; unset TMUX; CS_STATUSLINE_LIB=1
+      . "$SCRIPT_DIR/../lib/70-statusline.sh" 2>/dev/null || true
+      _arm_term_theme_probe 2>/dev/null || true )
+    assert_not_exists "$log" "no tmux call outside tmux" || return 1
+}
+
+# Re-measuring on attach is the only thing that can follow a tmux session moved
+# between terminals of different colours, since every launch-frozen signal
+# describes the terminal cs started in. `cs -detect-theme --write` is the probe
+# body: it runs in a throwaway pane (whose tty tmux proxies to the attached
+# client, so the OSC reply never reaches Claude Code) and records the same
+# triple the launch env carries, only fresher.
+test_detect_theme_write_records_the_triple() {
+    local sdir="$TEST_TMPDIR/sessions/probe-session"
+    mkdir -p "$sdir/.cs/local"
+    env -u CS_TERM_THEME -u CS_TERM_OS_THEME -u TMUX COLORFGBG="15;0" OSTYPE="darwin24" \
+        CLAUDE_SESSION_NAME="probe-session" CS_SESSIONS_ROOT="$TEST_TMPDIR/sessions" \
+        "$CS_BIN" -detect-theme --write > /dev/null 2>&1 < /dev/null || true
+    local f="$sdir/.cs/local/term-theme"
+    assert_file_exists "$f" "the probe must write the measured state" || return 1
+    assert_file_contains "$f" "^theme=dark$" "COLORFGBG 15;0 classifies dark" || return 1
+    assert_file_contains "$f" "^os_theme=" "the OS appearance at probe time is recorded" || return 1
+}
+
+# A probe that cannot resolve a session has nowhere to write; it must not create
+# stray files or fail the attach hook that called it.
+test_detect_theme_write_without_a_session_is_quiet() {
+    local rc=0
+    env -u CLAUDE_SESSION_NAME -u TMUX CS_SESSIONS_ROOT="$TEST_TMPDIR/sessions" \
+        "$CS_BIN" -detect-theme --write > /dev/null 2>&1 < /dev/null || rc=$?
+    assert_eq "0" "$rc" "a session-less probe must exit clean" || return 1
+}
+
+# The freshest measurement wins: a file written on attach outranks the launch
+# environment, which describes whichever terminal cs started in.
+test_sl_theme_prefers_the_probed_file_over_launch_env() {
+    ( _load_sl_functions
+      local sdir="$TEST_TMPDIR/sessions/probe-session"
+      mkdir -p "$sdir/.cs/local"
+      printf 'theme=dark\nrgb=20;20;20\nos_theme=light\n' > "$sdir/.cs/local/term-theme"
+      export CS_SESSIONS_ROOT="$TEST_TMPDIR/sessions" CLAUDE_SESSION_NAME="probe-session"
+      export CS_TERM_THEME=light CS_TERM_THEME_AUTO=1 CS_TERM_OS_THEME=light
+      OSTYPE="darwin24"
+      defaults() { return 1; }   # OS still light; the attached terminal is not
+      _sl_detect_theme
+      assert_eq "dark" "$SL_THEME" \
+        "a probe taken on attach outranks the launch environment" || return 1 )
+}
+
+# The decoupling rule above is inert unless launch records what the OS looked
+# like when it measured the terminal, so the export is pinned on its own.
+test_launch_records_the_os_appearance_alongside_the_theme() {
+    local out
+    out=$(env -u CS_TERM_THEME -u CS_TERM_OS_THEME OSTYPE="darwin24" \
+        bash -c 'CS_STATUSLINE_LIB=1; . "$1"/../lib/70-statusline.sh 2>/dev/null || true
+                 defaults() { return 1; }
+                 detect_term_theme_and_bg() { echo "dark 20;20;20"; }
+                 _export_term_theme
+                 printf "%s|%s" "${CS_TERM_THEME:-}" "${CS_TERM_OS_THEME:-}"' _ "$SCRIPT_DIR" 2>/dev/null)
+    assert_eq "dark|light" "$out" \
+        "launch must record both the measured theme and the OS appearance" || return 1
+}
+
+# The OS appearance is only a valid stand-in for the terminal when the terminal
+# actually follows the OS. cs records both at launch: the measured background's
+# class (CS_TERM_THEME) and the OS appearance at that moment (CS_TERM_OS_THEME).
+# When those disagreed, this terminal demonstrably does NOT track the OS — a
+# fixed-dark scheme under a light macOS, or an embedded terminal — so the live
+# OS appearance must never speak for it again.
+test_sl_theme_decoupled_terminal_ignores_os_appearance() {
+    ( _load_sl_functions
+      export CS_TERM_THEME=dark CS_TERM_THEME_AUTO=1 CS_TERM_OS_THEME=light
+      OSTYPE="darwin24"
+      defaults() { return 1; }   # OS is light, as it was at launch
+      _sl_detect_theme
+      assert_eq "dark" "$SL_THEME" \
+        "a terminal measured dark under a light OS must stay dark" || return 1 )
+}
+
+test_sl_theme_decoupled_light_terminal_ignores_dark_os() {
+    ( _load_sl_functions
+      export CS_TERM_THEME=light CS_TERM_THEME_AUTO=1 CS_TERM_OS_THEME=dark
+      OSTYPE="darwin24"
+      defaults() { return 0; }   # OS is dark, as it was at launch
+      _sl_detect_theme
+      assert_eq "light" "$SL_THEME" \
+        "a terminal measured light under a dark OS must stay light" || return 1 )
+}
+
+# The appearance probe forks `defaults` on every render, and the statusline
+# repaints once a second. A decoupled terminal must not pay that, not merely
+# arrive at the same answer after asking.
+test_sl_theme_decoupled_does_not_run_the_appearance_probe() {
+    ( _load_sl_functions
+      export CS_TERM_THEME=dark CS_TERM_THEME_AUTO=1 CS_TERM_OS_THEME=light
+      OSTYPE="darwin24"
+      _defaults_called=0; defaults() { _defaults_called=1; return 1; }
+      _sl_detect_theme
+      assert_eq "0" "$_defaults_called" \
+        "a decoupled terminal must not run the appearance probe" || return 1 )
+}
+
+# The complement: when the measurement AGREED with the OS at launch, the
+# terminal may well be following the OS, so a live switch is still tracked.
+test_sl_theme_agreeing_terminal_still_follows_the_os() {
+    ( _load_sl_functions
+      export CS_TERM_THEME=light CS_TERM_THEME_AUTO=1 CS_TERM_OS_THEME=light
+      OSTYPE="darwin24"
+      defaults() { return 0; }   # OS has since flipped to dark
+      _sl_detect_theme
+      assert_eq "dark" "$SL_THEME" \
+        "a terminal that matched the OS at launch keeps tracking it" || return 1 )
+}
+
+# Sessions launched before the marker existed carry no CS_TERM_OS_THEME; they
+# must behave exactly as they did rather than silently changing palette.
+test_sl_theme_without_launch_os_marker_keeps_following_the_os() {
+    ( _load_sl_functions
+      export CS_TERM_THEME=light CS_TERM_THEME_AUTO=1
+      unset CS_TERM_OS_THEME 2>/dev/null || true
+      OSTYPE="darwin24"
+      defaults() { return 0; }
+      _sl_detect_theme
+      assert_eq "dark" "$SL_THEME" \
+        "no launch OS marker means the previous behaviour is preserved" || return 1 )
+}
+
 # _sl_invalidate_stale_bg blanks CS_TERM_BG_RGB once the live theme (SL_THEME)
 # has left the launch theme (CS_TERM_THEME + auto marker), so surfaces/gradient
 # don't tint toward the old background.
@@ -1831,6 +1990,17 @@ run_test test_sl_theme_follows_macos_dark_appearance
 run_test test_sl_theme_follows_macos_light_appearance
 run_test test_sl_theme_non_macos_uses_frozen_launch_value
 run_test test_sl_theme_non_macos_defaults_light
+run_test test_attach_hook_is_session_scoped_and_appended
+run_test test_attach_hook_not_armed_outside_tmux
+run_test test_detect_theme_write_records_the_triple
+run_test test_detect_theme_write_without_a_session_is_quiet
+run_test test_sl_theme_prefers_the_probed_file_over_launch_env
+run_test test_launch_records_the_os_appearance_alongside_the_theme
+run_test test_sl_theme_decoupled_terminal_ignores_os_appearance
+run_test test_sl_theme_decoupled_light_terminal_ignores_dark_os
+run_test test_sl_theme_decoupled_does_not_run_the_appearance_probe
+run_test test_sl_theme_agreeing_terminal_still_follows_the_os
+run_test test_sl_theme_without_launch_os_marker_keeps_following_the_os
 run_test test_sl_bg_rgb_dropped_after_switch
 run_test test_sl_bg_rgb_kept_when_theme_matches
 run_test test_sl_bg_rgb_kept_for_manual_value

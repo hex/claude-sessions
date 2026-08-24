@@ -51,6 +51,11 @@ export CS_TERM_THEME="light"   # or "dark"
 # statusline's full-width gradient fade; unset means no gradient.
 export CS_TERM_BG_RGB="250;248;242"   # r;g;b, 0-255 each
 
+# Inside tmux, cs re-measures the terminal when a client attaches, so a session
+# re-attached from a terminal of a different colour repaints to match it. The
+# measurement lands in <session>/.cs/local/term-theme and outranks whatever was
+# detected at launch. An explicit CS_TERM_THEME pin still wins over both.
+
 # Disable colors (see https://no-color.org)
 export NO_COLOR="1"
 
