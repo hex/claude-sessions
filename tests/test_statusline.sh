@@ -1737,36 +1737,8 @@ test_sl_theme_user_pin_overrides() {
       assert_eq "dark" "$SL_THEME" "an explicit CS_TERM_THEME pin wins" || return 1 )
 }
 
-# A pin beats the live OS appearance even on macOS (terminal decoupled from OS).
-test_sl_theme_macos_pin_beats_live() {
-    ( _load_sl_functions
-      export CS_TERM_THEME=light
-      unset CS_TERM_THEME_AUTO 2>/dev/null || true
-      OSTYPE="darwin24"
-      defaults() { return 0; }   # OS is dark, but the pin says light
-      _sl_detect_theme
-      assert_eq "light" "$SL_THEME" "a pin overrides live macOS detection" || return 1 )
-}
 
-# Auto-detected launch value (CS_TERM_THEME + the AUTO marker) yields to the live
-# macOS appearance so a mid-session switch is tracked.
-test_sl_theme_follows_macos_dark_appearance() {
-    ( _load_sl_functions
-      export CS_TERM_THEME=light CS_TERM_THEME_AUTO=1   # launch detected light
-      OSTYPE="darwin24"
-      defaults() { return 0; }   # AppleInterfaceStyle key present => now dark
-      _sl_detect_theme
-      assert_eq "dark" "$SL_THEME" "live macOS dark appearance overrides the launch theme" || return 1 )
-}
 
-test_sl_theme_follows_macos_light_appearance() {
-    ( _load_sl_functions
-      export CS_TERM_THEME=dark CS_TERM_THEME_AUTO=1   # launch detected dark
-      OSTYPE="darwin24"
-      defaults() { return 1; }   # key absent => now light
-      _sl_detect_theme
-      assert_eq "light" "$SL_THEME" "live macOS light appearance overrides the launch theme" || return 1 )
-}
 
 test_sl_theme_non_macos_uses_frozen_launch_value() {
     ( _load_sl_functions
@@ -1798,82 +1770,50 @@ test_sl_theme_non_macos_defaults_dark() {
 
 
 
-# The decoupling rule above is inert unless launch records what the OS looked
-# like when it measured the terminal, so the export is pinned on its own.
-test_launch_records_the_os_appearance_alongside_the_theme() {
-    local out
-    out=$(env -u CS_TERM_THEME -u CS_TERM_OS_THEME OSTYPE="darwin24" \
-        bash -c 'CS_STATUSLINE_LIB=1; . "$1"/../lib/70-statusline.sh 2>/dev/null || true
-                 defaults() { return 1; }
-                 detect_term_theme_and_bg() { echo "dark 20;20;20"; }
-                 _export_term_theme
-                 printf "%s|%s" "${CS_TERM_THEME:-}" "${CS_TERM_OS_THEME:-}"' _ "$SCRIPT_DIR" 2>/dev/null)
-    assert_eq "dark|light" "$out" \
-        "launch must record both the measured theme and the OS appearance" || return 1
-}
 
-# The OS appearance is only a valid stand-in for the terminal when the terminal
-# actually follows the OS. cs records both at launch: the measured background's
-# class (CS_TERM_THEME) and the OS appearance at that moment (CS_TERM_OS_THEME).
-# When those disagreed, this terminal demonstrably does NOT track the OS — a
-# fixed-dark scheme under a light macOS, or an embedded terminal — so the live
-# OS appearance must never speak for it again.
-test_sl_theme_decoupled_terminal_ignores_os_appearance() {
-    ( _load_sl_functions
-      export CS_TERM_THEME=dark CS_TERM_THEME_AUTO=1 CS_TERM_OS_THEME=light
-      OSTYPE="darwin24"
-      defaults() { return 1; }   # OS is light, as it was at launch
-      _sl_detect_theme
-      assert_eq "dark" "$SL_THEME" \
-        "a terminal measured dark under a light OS must stay dark" || return 1 )
-}
 
-test_sl_theme_decoupled_light_terminal_ignores_dark_os() {
-    ( _load_sl_functions
-      export CS_TERM_THEME=light CS_TERM_THEME_AUTO=1 CS_TERM_OS_THEME=dark
-      OSTYPE="darwin24"
-      defaults() { return 0; }   # OS is dark, as it was at launch
-      _sl_detect_theme
-      assert_eq "light" "$SL_THEME" \
-        "a terminal measured light under a dark OS must stay light" || return 1 )
-}
 
-# The appearance probe forks `defaults` on every render, and the statusline
-# repaints once a second. A decoupled terminal must not pay that, not merely
-# arrive at the same answer after asking.
-test_sl_theme_decoupled_does_not_run_the_appearance_probe() {
+
+
+
+# The OS appearance describes the system, not the terminal the pills are drawn
+# on, and the two are unrelated for a fixed-theme terminal or one embedded in an
+# app. With no signal from the terminal itself, an unknown is now dark — the
+# assumption the rest of cs makes — rather than a guess sourced from the OS.
+test_sl_theme_unknown_is_dark_on_macos() {
     ( _load_sl_functions
-      export CS_TERM_THEME=dark CS_TERM_THEME_AUTO=1 CS_TERM_OS_THEME=light
+      unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_OS_THEME COLORFGBG TMUX 2>/dev/null || true
       OSTYPE="darwin24"
       _defaults_called=0; defaults() { _defaults_called=1; return 1; }
       _sl_detect_theme
-      assert_eq "0" "$_defaults_called" \
-        "a decoupled terminal must not run the appearance probe" || return 1 )
+      assert_eq "dark" "$SL_THEME" "an unknown terminal is dark, not whatever macOS is wearing" || return 1
+      assert_eq "0" "$_defaults_called" "and the OS is not consulted at all" || return 1 )
 }
 
-# The complement: when the measurement AGREED with the OS at launch, the
-# terminal may well be following the OS, so a live switch is still tracked.
-test_sl_theme_agreeing_terminal_still_follows_the_os() {
+# The cost of the above, pinned so it is a decision on the record rather than a
+# surprise: a light terminal that reports nothing now renders the dark palette.
+# Terminals that do report — or sessions cs launched, which measure the
+# background — are unaffected, which is what keeps the blast radius narrow.
+test_sl_theme_unknown_light_terminal_now_renders_dark() {
     ( _load_sl_functions
-      export CS_TERM_THEME=light CS_TERM_THEME_AUTO=1 CS_TERM_OS_THEME=light
-      OSTYPE="darwin24"
-      defaults() { return 0; }   # OS has since flipped to dark
+      unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_OS_THEME COLORFGBG 2>/dev/null || true
+      TMUX="/tmp/fake,1,0"; OSTYPE="darwin24"
+      tmux() { printf '\n'; }     # client reports no theme
+      defaults() { return 1; }    # macOS is light, and no longer consulted
       _sl_detect_theme
       assert_eq "dark" "$SL_THEME" \
-        "a terminal that matched the OS at launch keeps tracking it" || return 1 )
+        "a silent light terminal renders dark: the accepted cost of not asking the OS" || return 1 )
 }
 
-# Sessions launched before the marker existed carry no CS_TERM_OS_THEME; they
-# must behave exactly as they did rather than silently changing palette.
-test_sl_theme_without_launch_os_marker_keeps_following_the_os() {
+# A measured session still wins over the default: cs-launched sessions carry the
+# real background and must not be dragged to dark by it.
+test_sl_theme_measured_launch_beats_the_dark_default() {
     ( _load_sl_functions
+      unset CS_TERM_OS_THEME COLORFGBG TMUX 2>/dev/null || true
       export CS_TERM_THEME=light CS_TERM_THEME_AUTO=1
-      unset CS_TERM_OS_THEME 2>/dev/null || true
       OSTYPE="darwin24"
-      defaults() { return 0; }
       _sl_detect_theme
-      assert_eq "dark" "$SL_THEME" \
-        "no launch OS marker means the previous behaviour is preserved" || return 1 )
+      assert_eq "light" "$SL_THEME" "a measured light terminal stays light" || return 1 )
 }
 
 # A session cs did not launch carries none of cs's environment, so the ladder
@@ -1911,8 +1851,8 @@ test_sl_theme_ignores_colorfgbg_inside_tmux() {
       tmux() { return 1; }       # no client theme available
       defaults() { return 1; }   # macOS says light
       _sl_detect_theme
-      assert_eq "light" "$SL_THEME" \
-        "a stale COLORFGBG must not override the OS inside tmux" || return 1 )
+      assert_eq "dark" "$SL_THEME" \
+        "a stale COLORFGBG must not speak inside tmux; unknown falls through to dark" || return 1 )
 }
 
 # Inside tmux the live signal is the client's own reported theme, when the
@@ -1979,22 +1919,16 @@ run_test test_shared_clock_ignores_inherited_ready_flag
 run_test test_pulse_ignores_inherited_ready_flag
 run_test test_shared_clock_normalizes_leading_zero_pin
 run_test test_sl_theme_user_pin_overrides
-run_test test_sl_theme_macos_pin_beats_live
-run_test test_sl_theme_follows_macos_dark_appearance
-run_test test_sl_theme_follows_macos_light_appearance
 run_test test_sl_theme_non_macos_uses_frozen_launch_value
 run_test test_sl_theme_non_macos_defaults_dark
+run_test test_sl_theme_unknown_is_dark_on_macos
+run_test test_sl_theme_unknown_light_terminal_now_renders_dark
+run_test test_sl_theme_measured_launch_beats_the_dark_default
 run_test test_sl_theme_uses_colorfgbg_outside_tmux
 run_test test_sl_theme_colorfgbg_light_outside_tmux
 run_test test_sl_theme_ignores_colorfgbg_inside_tmux
 run_test test_sl_theme_uses_tmux_client_theme
 run_test test_sl_theme_falls_through_empty_client_theme
-run_test test_launch_records_the_os_appearance_alongside_the_theme
-run_test test_sl_theme_decoupled_terminal_ignores_os_appearance
-run_test test_sl_theme_decoupled_light_terminal_ignores_dark_os
-run_test test_sl_theme_decoupled_does_not_run_the_appearance_probe
-run_test test_sl_theme_agreeing_terminal_still_follows_the_os
-run_test test_sl_theme_without_launch_os_marker_keeps_following_the_os
 run_test test_sl_bg_rgb_dropped_after_switch
 run_test test_sl_bg_rgb_kept_when_theme_matches
 run_test test_sl_bg_rgb_kept_for_manual_value

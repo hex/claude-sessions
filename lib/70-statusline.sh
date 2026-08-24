@@ -233,14 +233,6 @@ _export_term_theme() {
     # hard override everywhere.
     export CS_TERM_THEME="$theme"
     export CS_TERM_THEME_AUTO=1
-    # What the OS looked like at the moment the terminal was measured. The
-    # statusline compares the two: when they disagree the terminal plainly does
-    # not follow the OS, so the live appearance must not speak for it later.
-    # Absent off macOS, where there is no appearance to read and the statusline
-    # never consults one.
-    local os_theme
-    os_theme=$(_theme_from_os_appearance)
-    [ "$os_theme" = "unknown" ] || export CS_TERM_OS_THEME="$os_theme"
     if [[ "$out" == *" "* ]] && [ -z "${CS_TERM_BG_RGB:-}" ]; then
         export CS_TERM_BG_RGB="${out#* }"
     fi
