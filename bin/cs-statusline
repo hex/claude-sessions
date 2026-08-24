@@ -759,6 +759,23 @@ _lerp_channel() {
 # caller can unconditionally append _GRADIENT with no separate validation
 # gate. Fork-free: no command substitution beyond the here-string splits
 # already used elsewhere in this script for delimited fields.
+# The background to fade the tail toward when cs never measured one.
+#
+# Only cs's launch-time OSC 11 ever learns the real background, so until now a
+# session cs did not launch had no destination and rendered no gradient at all —
+# the bar simply stopped mid-line, which is what most terminals anyone tries
+# actually showed. The theme still classifies the terminal as light or dark, and
+# that is enough to fade toward a conventional background of that class. Being a
+# few shades off reads as a soft band at the far right rather than a
+# wrong-coloured bar, and it is the same "one unknown, one answer" rule the
+# theme ladder already applies. A measured CS_TERM_BG_RGB always outranks it.
+# Assigns unconditionally, so an inherited variable of the same name cannot
+# seed it.
+_sl_assumed_bg_rgb() {
+    if [ "$SL_THEME" = "dark" ]; then _ASSUMED_BG="30;30;30"
+    else _ASSUMED_BG="250;250;250"; fi
+}
+
 _build_gradient() {
     local src="$1" dst="$2" cells="$3"
     _GRADIENT=""
@@ -956,7 +973,11 @@ _render() {
         if [ "$remaining" -gt 0 ]; then
             _sgr 48 surface; local tailrgb="$_RGB"
             [ -n "$tailrgb" ] || tailrgb="$lastrgb"
-            _build_gradient "$tailrgb" "${CS_TERM_BG_RGB:-}" "$remaining"
+            local gradient_dst="${CS_TERM_BG_RGB:-}"
+            if [ -z "$gradient_dst" ]; then
+                _sl_assumed_bg_rgb; gradient_dst="$_ASSUMED_BG"
+            fi
+            _build_gradient "$tailrgb" "$gradient_dst" "$remaining"
             out+="$_GRADIENT"
         fi
     fi
