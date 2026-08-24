@@ -262,9 +262,22 @@ fi
 chmod +x "$INSTALL_DIR/cs-subagent-statusline"
 
 # Install cs-tui (interactive session manager).
-if [ "$INSTALL_METHOD" = "local" ] && [ -f "$SCRIPT_DIR/bin/cs-tui" ]; then
+#
+# bin/cs-tui is a gitignored build artifact and nothing regenerates it: build.sh
+# assembles bin/cs from lib/ and has no TUI arm, while `cargo build --release`
+# writes to tui/target/release/. Installing bin/cs-tui unconditionally therefore
+# ships whatever binary happens to be sitting there, which has silently deployed
+# a picker weeks older than the release being installed. A version check cannot
+# catch it either: the picker carries no version of its own, so `cs -version`
+# reads correct while the picker is stale. Prefer whichever of the two is newer.
+_cs_tui_src="$SCRIPT_DIR/bin/cs-tui"
+_cs_tui_built="$SCRIPT_DIR/tui/target/release/cs-tui"
+if [ -f "$_cs_tui_built" ] && { [ ! -f "$_cs_tui_src" ] || [ "$_cs_tui_built" -nt "$_cs_tui_src" ]; }; then
+    _cs_tui_src="$_cs_tui_built"
+fi
+if [ "$INSTALL_METHOD" = "local" ] && [ -f "$_cs_tui_src" ]; then
     installed "cs-tui" "$INSTALL_DIR/cs-tui"
-    cp "$SCRIPT_DIR/bin/cs-tui" "$INSTALL_DIR/cs-tui"
+    cp "$_cs_tui_src" "$INSTALL_DIR/cs-tui"
     chmod +x "$INSTALL_DIR/cs-tui"
 elif [ "$INSTALL_METHOD" = "web" ]; then
     _cs_version=$(grep -m1 "^VERSION=" "$INSTALL_DIR/cs" 2>/dev/null | cut -d'"' -f2 || echo "")
