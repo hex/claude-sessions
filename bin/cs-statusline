@@ -72,7 +72,10 @@ _sl_detect_theme() {
         if defaults read -g AppleInterfaceStyle >/dev/null 2>&1; then SL_THEME="dark"; else SL_THEME="light"; fi
     else
         # Off macOS keep the theme cs detected at launch (CS_TERM_THEME).
-        SL_THEME="${CS_TERM_THEME:-light}"
+        # Unknown means dark, which is what the rest of cs assumes when it has
+        # nothing to go on (lib/05-term.sh, and the rewriter shim); the same
+        # unknown must not produce two different palettes in one product.
+        SL_THEME="${CS_TERM_THEME:-dark}"
     fi
 }
 
