@@ -16,17 +16,14 @@ export GIT_OPTIONAL_LOCKS=0
 # theme switch (macOS auto dark mode), and re-querying the terminal here would
 # corrupt claude's TUI, so on macOS read the live OS appearance instead. Assigns
 # SL_THEME directly rather than via `$(...)`, per this file's fork-free-hot-path
-# convention. KEEP the macOS branch IN SYNC with _theme_from_os_appearance in
-# lib/70-statusline.sh.
+# convention.
 #
-# The OS appearance stands in for the terminal, and only earns that when the
-# terminal follows the OS. Launch records both — the measured background's class
-# in CS_TERM_THEME and the OS appearance at that moment in CS_TERM_OS_THEME — so
-# a disagreement between them is proof this terminal does not track the OS: a
-# fixed scheme, or a terminal embedded in an app. For those the measurement is
-# the only signal that describes the surface the pills are drawn on, and the
-# appearance probe is skipped entirely rather than asked and discarded (it forks
-# `defaults`, and this bar repaints once a second).
+# The ladder asks the terminal, never the operating system. What macOS is
+# wearing says nothing about a terminal with a fixed scheme or one embedded in
+# an app, and that is exactly where it was reliably wrong; a terminal that can
+# answer for itself does so through the rungs below, and one that cannot is
+# taken to be dark rather than guessed at from the system.
+
 # The attached client's own reported theme, which tmux records when the terminal
 # tells it (Ghostty, kitty, WezTerm and the like; most terminals report nothing,
 # and then this answers nothing). Live, unlike anything captured at launch, and
@@ -61,20 +58,24 @@ _sl_detect_theme() {
         SL_THEME="$CS_TERM_THEME"
         return 0
     fi
-    if [ -n "${CS_TERM_THEME:-}" ] && [ -n "${CS_TERM_OS_THEME:-}" ] \
-         && [ "$CS_TERM_OS_THEME" != "$CS_TERM_THEME" ]; then
-        SL_THEME="$CS_TERM_THEME"
-    elif [ -n "${TMUX:-}" ] && _sl_theme_from_tmux_client; then
+    if [ -n "${TMUX:-}" ] && _sl_theme_from_tmux_client; then
         : # SL_THEME set from the attached client's own reported theme
     elif [ -z "${TMUX:-}" ] && [ -n "${COLORFGBG:-}" ] && _sl_theme_from_colorfgbg; then
         : # SL_THEME set from the terminal's own statement about itself
-    elif [[ "${OSTYPE:-}" == darwin* ]]; then
-        if defaults read -g AppleInterfaceStyle >/dev/null 2>&1; then SL_THEME="dark"; else SL_THEME="light"; fi
     else
-        # Off macOS keep the theme cs detected at launch (CS_TERM_THEME).
-        # Unknown means dark, which is what the rest of cs assumes when it has
-        # nothing to go on (lib/05-term.sh, and the rewriter shim); the same
-        # unknown must not produce two different palettes in one product.
+        # Whatever cs measured at launch, and dark when it measured nothing.
+        #
+        # The OS appearance is not consulted. It describes the system, and the
+        # pills are drawn on the terminal — unrelated for a terminal with a
+        # fixed scheme or one embedded in an app, which is where it was reliably
+        # wrong. It was only ever a guess that happened to be right when the
+        # terminal followed the system, and the rungs above now cover the
+        # terminals that can answer for themselves. Dark is the same assumption
+        # the rest of cs makes with nothing to go on (lib/05-term.sh, and the
+        # rewriter shim), so one unknown yields one palette.
+        #
+        # The cost, accepted: a light terminal that reports nothing and was not
+        # launched by cs renders the dark palette. Pin CS_TERM_THEME=light there.
         SL_THEME="${CS_TERM_THEME:-dark}"
     fi
 }
