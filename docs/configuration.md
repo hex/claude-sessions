@@ -94,8 +94,9 @@ export CS_REWRITE_DISABLE="1"
 # 2.0s. `claude-api` calls Anthropic's Messages endpoint instead of driving the
 # whole Claude Code agent, which is why the bare `claude` default takes ~13s.
 # Every -api arm needs that vendor's key and declines without one.
-export CS_REWRITE_PROVIDER="claude"          # claude | openai | gemini
-                                             # | openai-api | gemini-api | claude-api
+export CS_REWRITE_PROVIDER="claude"          # claude | openai | gemini | grok
+                                            # openai-api | gemini-api | claude-api reach a
+                                            # vendor API past an installed CLI
 
 # The model that rewrites prompts, and how long to wait for it. It reaches every
 # arm: the API request, `agy --model`, `codex -m`. Left unset, each vendor CLI

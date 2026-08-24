@@ -2,6 +2,15 @@
 # ABOUTME: Assembled last so 'main "$@"' runs after every definition.
 
 main() {
+    # cs IS the launch, and the hooks read that from the ABSENCE of this marker
+    # (hooks/cs-resolve.sh preserves an inherited value rather than setting
+    # one). A teammate's shell carries CS_RESOLVED_FROM=walk deliberately, so
+    # without this an inherited marker rides into everything cs starts —
+    # `cs -spawn` most of all — and that session's SessionEnd reads itself as a
+    # walked-in front end and declines to clear its own lock. cs never reads the
+    # variable, so dropping it here costs nothing and covers every exec path.
+    unset CS_RESOLVED_FROM
+
     # A launcher that composes `<binary> -- <operands>` hands cs the POSIX
     # end-of-options separator, which the unknown-verb arm read as a command
     # nobody could have typed. Drop one, and read the rest exactly as before.

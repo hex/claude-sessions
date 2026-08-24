@@ -387,6 +387,25 @@ test_the_provider_knob_selects_the_vendor_rewriter() {
         "CS_REWRITE_PROVIDER routes to the vendor rewriter"
 }
 
+# Every grok test drives the vendor script directly, so none of them touches the
+# shim's dispatch — the one line that decides `grok` is a vendor provider at all.
+# Trimmed from that case list, `CS_REWRITE_PROVIDER=grok` silently falls through
+# to the claude rewriter: the user gets a rewrite from the wrong engine rather
+# than a decline, and nothing goes red. Stubs curl rather than the vendor script
+# itself, so a test that dies midway cannot leave a tracked file replaced.
+test_grok_routes_to_the_vendor_rewriter() {
+    unset CS_REWRITE_CMD
+    local bin="$TEST_TMPDIR/bin"
+    mkdir -p "$bin"
+    printf '#!/bin/bash\nprintf "%%s" "{\\"choices\\":[{\\"message\\":{\\"content\\":\\"VIA XAI\\"},\\"finish_reason\\":\\"stop\\"}]}"\n' > "$bin/curl"
+    chmod +x "$bin/curl"
+    local f
+    f=$(composer_file "make the login thing better")
+    PATH="$bin:$PATH" XDG_CACHE_HOME="$TEST_TMPDIR/cache" \
+        CS_REWRITE_PROVIDER=grok XAI_API_KEY=not-a-real-key "$SHIM" "$f"
+    assert_file_contains "$f" 'VIA XAI' "grok routes to the vendor rewriter"
+}
+
 # CS_REWRITE_CMD is the older, wider contract: any executable reading the prompt
 # on stdin. A user who set it has said exactly what they want run, so the
 # provider knob must not quietly override it.
@@ -577,5 +596,6 @@ run_test test_the_provider_knob_selects_the_vendor_rewriter
 run_test test_an_explicit_rewrite_cmd_outranks_the_provider_knob
 run_test test_an_unknown_provider_falls_back_to_the_default_rewriter
 run_test test_claude_api_routes_to_the_vendor_rewriter
+run_test test_grok_routes_to_the_vendor_rewriter
 
 report_results

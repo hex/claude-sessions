@@ -312,6 +312,32 @@ test_collision_menu_shows_numbered_options() {
     assert_output_contains "$output" "cancel" "menu offers cancel" || return 1
 }
 
+# cs IS the launch, and the hooks derive "this is the launch" from the ABSENCE
+# of CS_RESOLVED_FROM (hooks/cs-resolve.sh preserves an inherited value rather
+# than setting one). A teammate shell carries CS_RESOLVED_FROM=walk on purpose,
+# so `cs -spawn` from one used to hand the new launch a marker saying it was
+# somebody else's — and that session then declined to clear its own lock at
+# SessionEnd. cs must not pass the marker on to anything it runs.
+test_launch_does_not_inherit_the_resolver_marker() {
+    create_lock_test_session "test-session"
+    cat > "$TEST_TMPDIR/claude-stub" << 'STUB'
+#!/bin/bash
+printf '%s\n' "${CS_RESOLVED_FROM-<unset>}" > "$CS_MARKER_PROBE"
+exit 0
+STUB
+    chmod +x "$TEST_TMPDIR/claude-stub"
+
+    local probe="$TEST_TMPDIR/marker-seen"
+    # 'n' declines the resume prompt, so the launch actually reaches the stub
+    # instead of exiting at EOF.
+    printf 'n' | CS_MARKER_PROBE="$probe" CLAUDE_CODE_BIN="$TEST_TMPDIR/claude-stub" \
+        CS_RESOLVED_FROM=walk CS_ASSUME_TTY=1 "$CS_BIN" test-session > /dev/null 2>&1 || true
+
+    assert_exists "$probe" "the stub launch must have run" || return 1
+    assert_eq "<unset>" "$(cat "$probe")" \
+        "cs must not carry an inherited resolver marker into the launch" || return 1
+}
+
 # The picker is the way out of a collision that is neither "force it" nor
 # "start something new here": another session entirely. Offered only when a
 # picker binary is actually resolvable — a row that can only fail is worse
@@ -531,6 +557,7 @@ run_test test_collision_menu_new_task_creates_worktree
 run_test test_collision_menu_cancel_is_default
 run_test test_collision_menu_four_cancels
 run_test test_collision_menu_shows_numbered_options
+run_test test_launch_does_not_inherit_the_resolver_marker
 run_test test_collision_menu_offers_session_manager
 run_test test_collision_menu_opens_session_manager
 run_test test_collision_menu_omits_session_manager_without_picker

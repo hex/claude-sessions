@@ -347,7 +347,7 @@ out="$target.cs-out"
 # absent on purpose: it IS the default rewriter, and only `claude-api` routes
 # elsewhere.
 case "${CS_REWRITE_PROVIDER:-}" in
-    openai|gemini|openai-api|gemini-api|claude-api)
+    openai|gemini|openai-api|gemini-api|claude-api|grok|xai)
         _rewriter="$(dirname "$0")/prompt-rewriter-vendor.sh" ;;
     *)  _rewriter="$(dirname "$0")/prompt-rewriter-model.sh" ;;
 esac
@@ -363,7 +363,7 @@ if [ -n "${CS_REWRITE_CMD:-}" ]; then
     _label=$(basename "${CS_REWRITE_CMD%% *}")
 else
     case "${CS_REWRITE_PROVIDER:-}" in
-        openai|gemini|openai-api|gemini-api|claude-api)
+        openai|gemini|openai-api|gemini-api|claude-api|grok|xai)
             _label=$("$_rewriter" --label </dev/null 2>/dev/null)
             _label="${_label:-$CS_REWRITE_PROVIDER}"
             # The vendor rewriter bounds itself with perl's alarm.

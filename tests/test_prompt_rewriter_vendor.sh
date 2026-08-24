@@ -12,7 +12,7 @@ setup() {
     local _v
     while IFS='=' read -r _v _; do
         case "$_v" in
-            CS_*|CLAUDE_*|ANTHROPIC_*|OPENAI_*|GEMINI_*|GOOGLE_*) unset "$_v" 2>/dev/null || true ;;
+            CS_*|CLAUDE_*|ANTHROPIC_*|OPENAI_*|GEMINI_*|GOOGLE_*|XAI_*|GROK_*) unset "$_v" 2>/dev/null || true ;;
         esac
     done < <(env)
     # Keep the hermetic run dir inside the test, so a run never touches the real
@@ -363,6 +363,56 @@ test_the_api_suffix_labels_itself_as_the_api() {
     [ "$out" = "api · gemini-flash-lite-latest" ] || { echo "expected 'api · gemini-flash-lite-latest', got '$out'"; return 1; }
 }
 
+# xAI ships no rewriter CLI, so `grok` is an API-only provider: there is no
+# binary to prefer and therefore no `-api` suffix to reach past one.
+test_grok_calls_the_xai_endpoint() {
+    fake_bin curl 'printf "%s" "{\"choices\":[{\"message\":{\"content\":\"VIA XAI\"},\"finish_reason\":\"stop\"}]}"'
+    local out rc=0
+    out=$(CS_REWRITE_PROVIDER=grok XAI_API_KEY=not-a-real-key run_rewrite) || rc=$?
+    [ "$rc" -eq 0 ] || { echo "expected the xai arm to answer, got $rc"; return 1; }
+    [ "$out" = "VIA XAI" ] || { echo "expected the extracted text, got: $out"; return 1; }
+    assert_file_contains "$ARGV_DUMP" 'api\.x\.ai/v1/chat/completions' \
+        "grok posts to the xAI chat-completions endpoint"
+}
+
+# GROK_API_KEY is the fallback spelling the xAI tooling on this machine already
+# accepts; a user who set only that must not be told they have no key.
+test_grok_accepts_the_grok_api_key_spelling() {
+    fake_bin curl 'printf "%s" "{\"choices\":[{\"message\":{\"content\":\"FALLBACK KEY\"},\"finish_reason\":\"stop\"}]}"'
+    local out rc=0
+    out=$(CS_REWRITE_PROVIDER=grok GROK_API_KEY=not-a-real-key run_rewrite) || rc=$?
+    [ "$rc" -eq 0 ] || { echo "expected GROK_API_KEY to be accepted, got $rc"; return 1; }
+    [ "$out" = "FALLBACK KEY" ] || { echo "expected the extracted text, got: $out"; return 1; }
+}
+
+test_grok_without_a_key_declines() {
+    fake_bin curl 'printf "%s" "{\"choices\":[{\"message\":{\"content\":\"SHOULD NOT RUN\"}}]}"'
+    local out rc=0
+    out=$(CS_REWRITE_PROVIDER=grok run_rewrite) || rc=$?
+    [ "$rc" -ne 0 ] || { echo "expected a decline with no key, got 0 and: $out"; return 1; }
+}
+
+# The default is measured, not chosen by recency: grok-4.3 kept every
+# unspecified thing as an open item across the benchmark, where the faster
+# non-reasoning model resolved them by fiat.
+test_grok_defaults_to_the_measured_model() {
+    fake_bin curl 'printf "%s" "{\"choices\":[{\"message\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}"'
+    CS_REWRITE_PROVIDER=grok XAI_API_KEY=k run_rewrite > /dev/null || return 1
+    assert_file_contains "$ARGV_DUMP" 'api\.x\.ai' "the xai arm ran" || return 1
+    local out
+    out=$(CS_REWRITE_PROVIDER=grok XAI_API_KEY=k "$VENDOR" --label < /dev/null)
+    [ "$out" = "api · grok-4.3" ] || { printf 'expected the measured default in the label, got: %s\n' "$out"; return 1; }
+}
+
+# A truncated xai answer must decline like every other arm: a non-empty but cut
+# rewrite reads as complete and silently drops what the user typed past the cut.
+test_a_truncated_xai_answer_declines() {
+    fake_bin curl 'printf "%s" "{\"choices\":[{\"message\":{\"content\":\"half a rew\"},\"finish_reason\":\"length\"}]}"'
+    local rc=0
+    CS_REWRITE_PROVIDER=grok XAI_API_KEY=k run_rewrite > /dev/null || rc=$?
+    [ "$rc" -ne 0 ] || { echo "expected a truncated xai answer to decline"; return 1; }
+}
+
 echo ""
 echo "Prompt rewriter vendor tests"
 echo "============================"
@@ -388,5 +438,10 @@ run_test test_an_unset_model_defers_to_the_cli_configuration
 run_test test_the_api_suffix_forces_the_api_arm_past_a_present_cli
 run_test test_claude_api_calls_the_messages_endpoint
 run_test test_the_api_suffix_labels_itself_as_the_api
+run_test test_grok_calls_the_xai_endpoint
+run_test test_grok_accepts_the_grok_api_key_spelling
+run_test test_grok_without_a_key_declines
+run_test test_grok_defaults_to_the_measured_model
+run_test test_a_truncated_xai_answer_declines
 
 report_results

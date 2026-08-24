@@ -32,6 +32,15 @@ _resolve() {
         gemini) [ -n "${GEMINI_API_KEY:-}" ] && printf 'api %s' "${CS_REWRITE_MODEL:-gemini-flash-lite-latest}" ;;
         openai) [ -n "${OPENAI_API_KEY:-}" ] && printf 'api %s' "${CS_REWRITE_MODEL:-gpt-4.1-mini}" ;;
         claude) [ -n "${ANTHROPIC_API_KEY:-}" ] && printf 'api %s' "${CS_REWRITE_MODEL:-claude-haiku-4-5-20251001}" ;;
+        # grok-4.3 rather than the newest or the fastest, and the choice is
+        # measured: 8 prompts run twice, of which 5 were deliberately vague,
+        # giving 10 vague runs per model. grok-4.3 kept every unspecified thing
+        # as an open item in all 10; grok-4.20-0309-non-reasoning resolved them
+        # by fiat in 7 -- answering "Use jq." to "should i use jq or awk here?"
+        # and echoing the input unchanged on another. A rewriter that decides
+        # for you is worse than no rewriter, so fidelity outranks the ~3.5s it
+        # costs against the fast model.
+        xai)    [ -n "${XAI_API_KEY:-${GROK_API_KEY:-}}" ] && printf 'api %s' "${CS_REWRITE_MODEL:-grok-4.3}" ;;
         *) return 1 ;;
     esac
 }
@@ -40,6 +49,9 @@ case "${CS_REWRITE_PROVIDER:-}" in
     gemini|gemini-api) _vendor=gemini ;;
     openai|openai-api) _vendor=openai ;;
     claude-api)        _vendor=claude ;;
+    # xAI ships no rewriter CLI, so there is nothing to prefer and nothing for
+    # an `-api` suffix to reach past: bare `grok` IS the API arm.
+    grok|xai)          _vendor=xai ;;
     *)                 _vendor='' ;;
 esac
 
@@ -210,6 +222,27 @@ _api_openai() {
     printf '%s' "$response" | jq -r '.choices[0].message.content // empty'
 }
 
+# xAI is OpenAI-compatible on this route, so the body and the extraction match
+# _api_openai exactly; only the host and the key header differ. Kept as its own
+# function rather than parameterising the OpenAI one, so a future divergence in
+# either vendor's schema changes one arm and not both.
+_api_xai() {
+    local payload response
+    payload=$(jq -n --arg p "$prompt" --arg s "$_system" \
+        --arg m "$_model" \
+        '{model:$m,
+          messages:[{role:"system",content:$s},{role:"user",content:$p}],
+          temperature:0.2,
+          max_completion_tokens:2048}') || return 1
+    response=$(_curl_json "https://api.x.ai/v1/chat/completions" \
+        "Authorization: Bearer ${XAI_API_KEY:-${GROK_API_KEY:-}}" "$payload") || return 1
+    case $(printf '%s' "$response" | jq -r '.choices[0].finish_reason // empty') in
+        ''|stop) ;;
+        *) return 1 ;;
+    esac
+    printf '%s' "$response" | jq -r '.choices[0].message.content // empty'
+}
+
 # The Messages API, not the agent. `claude -p` ships Claude Code's system prompt
 # and tool schemas on every call — 35k tokens measured for a 10-token prompt —
 # which is the whole reason the default rewriter takes ~13s where a completion
@@ -264,6 +297,7 @@ $prompt") || _rc=$?
             gemini) out=$(_api_gemini) || _rc=$? ;;
             openai) out=$(_api_openai) || _rc=$? ;;
             claude) out=$(_api_claude) || _rc=$? ;;
+            xai)    out=$(_api_xai) || _rc=$? ;;
         esac
         ;;
     *)

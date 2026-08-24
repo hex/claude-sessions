@@ -54,7 +54,11 @@ whose argv cannot be read is not a teammate, so it declines.
 
 Session identity is not the only thing that differs by path: only `cs` writes
 `.cs/session.lock`, so a hook that resolved by walking does not own it (see
-`session-end.sh` below).
+`session-end.sh` below). A launch is recognised by the *absence* of the
+resolver's marker, and cs drops any inherited one at entry — otherwise a
+`cs -spawn` issued from a teammate's shell, which carries that marker
+deliberately, would hand the new launch a claim that the lock belongs to
+someone else.
 
 Resolving a session is also not the same as *being* it. Every claude that resolves a
 session fires its hooks — agent-team teammates (full claude processes with their own
@@ -192,6 +196,8 @@ The default rewriter, `prompt-rewriter-model.sh`, calls a fast model with the pr
 **Forcing the API arm.** Appending `-api` to a provider name — `gemini-api`, `openai-api` — reaches that vendor's API even when its CLI is on PATH. It exists because agy's catalogue carries no lite models (eleven entries, and `gemini-3.5-flash-lite` and every variant of it are rejected as unrecognised), while the lite tier is the fastest option measured anywhere. On a machine with both CLIs installed: `gemini` 7.3s against `gemini-api` 0.9s, `openai` 12.8s against `openai-api` 2.0s. `claude-api` is the third: it posts to Anthropic's Messages endpoint rather than driving the Claude Code agent, which is what makes the bare `claude` default take roughly thirteen seconds — that call ships Claude Code's system prompt and tool schemas every time, measured at 35k tokens for a ten-token prompt. Each `-api` arm needs that vendor's key (`GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) and declines without one, leaving the prompt as typed. Bare `claude` has no suffix-free API form on purpose: it *is* the default rewriter, and it authenticates through your claude.ai login rather than a key.
 
 **Rewriting with OpenAI or Gemini.** `CS_REWRITE_PROVIDER=openai` or `=gemini` routes the rewrite to `prompt-rewriter-vendor.sh` instead. Each provider prefers that vendor's CLI when its binary is on PATH — `codex` and `agy` respectively — and falls back to the vendor's API, reading `OPENAI_API_KEY` or `GEMINI_API_KEY` from the environment, when it is not. This mirrors the claude-council's `prefer_cli_over_api` policy and for the same reason: the CLI carries your subscription and spends no API credit. It costs about ten seconds against about one for the API arm, and the interface is frozen throughout, so the trade is real in both directions. With neither a CLI nor a key the rewrite declines and your prompt stays as typed, which is also what an unknown provider name does.
+
+**Rewriting with Grok.** `CS_REWRITE_PROVIDER=grok` (or `xai`) routes to xAI's OpenAI-compatible endpoint, reading `XAI_API_KEY` or `GROK_API_KEY`. There is no `grok-api` spelling because xAI ships no rewriter CLI: there is nothing to prefer and so nothing for a suffix to reach past. The default model is `grok-4.3`, chosen by measurement rather than by recency. Over 8 prompts run twice against every candidate, `grok-4.3` preserved every unspecified thing as an open item; the much faster `grok-4.20-0309-non-reasoning` resolved them by fiat in 7 of 10 vague prompts — answering `Use jq.` to "should i use jq or awk here?", picking a database unprompted, and once returning the input verbatim. A rewriter that decides for you is worse than no rewriter. Note that Grok is not faster than what already ships: `gemini-flash-lite-latest` was the quickest model measured and matched `grok-4.3` on fidelity.
 
 The vendor rewriter runs the CLI from the same neutral directory the default uses, because `codex` reads `AGENTS.md` from its working directory and `agy` takes that directory as its workspace — launched from your checkout, the rewrite would inherit that project's instructions. It closes the CLI's stdin, since Claude Code hands the shim the real tty and an agentic CLI that decides it is interactive would paint over the progress screen. On the API arms the key travels in a mode-600 `curl --config` file and the prompt in a payload file, so neither reaches `argv`, where `ps` shows it to every user on the machine; the CLI arms are the exception, as `agy` and `codex` both take the prompt as an argument and offer no stdin path.
 

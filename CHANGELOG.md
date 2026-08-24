@@ -4,6 +4,38 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.8.20
+
+### Features
+
+- **The already-open menu can hand you the session manager.** Running `cs <name>` on a session that is already open offered three ways forward, all of them about that session: force a second launch, start a feature worktree, or give up. There is now a fourth — open the picker and choose a different session. The row appears only when a picker binary actually resolves, so it can never name a command that answers "cs-tui is not installed".
+
+- **The picker archives a session with `a`.** It could already see the archived marker — those rows render dimmed, and `A` decides whether they show at all — but archiving one still meant leaving the picker for `cs -archive`. `a` toggles it, on the bare key or from the action bar, which names the direction the key will take rather than offering "archive" on a row that is already archived. The marker itself is written by `cs -archive` / `cs -unarchive` and not by the picker, so its date-and-actor stamp and its refusal to archive a live session keep a single owner; cs's refusal reaches the status line in its own words.
+
+- **Rewriting with Grok.** `CS_REWRITE_PROVIDER=grok` (or `xai`) routes the prompt rewrite to xAI's OpenAI-compatible endpoint, reading `XAI_API_KEY` or `GROK_API_KEY`. There is no `grok-api` spelling because xAI ships no rewriter CLI: nothing to prefer, so nothing for a suffix to reach past.
+
+  The default model is `grok-4.3`, and it was measured rather than picked by recency. Across 8 prompts run twice against every candidate, `grok-4.3` kept every unspecified thing as an explicit open item. The much faster `grok-4.20-0309-non-reasoning` did not: on 7 of 10 vague runs it decided for you — answering `Use jq.` to "should i use jq or awk here?", choosing a database unprompted, inventing requirements like "accessible" and "polished" from "make the picker better", and once handing back the input unchanged. Since the rewritten text becomes your next message to the agent, an invented requirement becomes work you never asked for.
+
+  Worth saying plainly: Grok is not an upgrade to the default. `gemini-flash-lite-latest` was both the fastest model measured and tied for the best fidelity, so it remains the recommendation.
+
+### Fixes
+
+- **`cs` no longer passes the resolver's marker into what it launches.** Hooks infer "this is the launch" from the absence of `CS_RESOLVED_FROM`, and a teammate's shell carries `walk` deliberately — so an inherited value rode through `cs -spawn` into the new session, which then read itself as somebody else's front end and declined to clear its own lock at exit. The next open reclaimed the lock as stale, so the visible cost was a spurious collision menu, but the invariant the hooks depend on is now enforced rather than assumed.
+
+### Docs
+
+- `CS_REWRITE_PROVIDER`'s reference entry listed only three of its six values; the `-api` variants that reach a vendor API past an installed CLI were documented in the hooks guide but missing from the configuration reference.
+
+### Internal
+
+- The collision menu reads a single keypress, so it can address at most nine options. The feature-worktree list is capped to five to leave room for the fixed rows — past that, a row would render and never answer its own number.
+
+- Four independent reviews of this range found defects a green suite did not. Two of its own new tests asserted the developer's machine rather than the code: both needed a `cs-tui` on PATH, which CI never builds, so both would have gone red on every runner. A mutation review found four more paths deletable with the suite entirely green — the whole action-bar route to archiving, and the picker probe that finds a binary beside `cs`. A fourth found the Grok provider's own entry point unpinned, and the launch-marker bug above. Every test added here was checked by mutating the line it claims to protect.
+
+- `test_lock_cleaned_on_session_end` no longer reads its verdict from the shell that runs it, and the vendor-rewriter suite no longer inherits real xAI credentials from the developer's environment.
+
+**Full Changelog**: https://github.com/hex/claude-sessions/compare/v2026.8.19...v2026.8.20
+
 ## 2026.8.19
 
 ### Fixes
