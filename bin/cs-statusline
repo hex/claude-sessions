@@ -18,8 +18,46 @@ export GIT_OPTIONAL_LOCKS=0
 # SL_THEME directly rather than via `$(...)`, per this file's fork-free-hot-path
 # convention. KEEP the macOS branch IN SYNC with _theme_from_os_appearance in
 # lib/70-statusline.sh.
+#
+# The OS appearance stands in for the terminal, and only earns that when the
+# terminal follows the OS. Launch records both — the measured background's class
+# in CS_TERM_THEME and the OS appearance at that moment in CS_TERM_OS_THEME — so
+# a disagreement between them is proof this terminal does not track the OS: a
+# fixed scheme, or a terminal embedded in an app. For those the measurement is
+# the only signal that describes the surface the pills are drawn on, and the
+# appearance probe is skipped entirely rather than asked and discarded (it forks
+# `defaults`, and this bar repaints once a second).
+# Load the measurement the attach probe recorded, if any, over the launch
+# environment's copy of the same triple: both describe a terminal cs measured,
+# and the probe's describes the one currently attached. Pure bash read, no fork
+# — this runs on every render.
+_sl_load_probed_theme() {
+    local f="$SESSIONS_ROOT/${CLAUDE_SESSION_NAME:-}/.cs/local/term-theme"
+    [ -n "${CLAUDE_SESSION_NAME:-}" ] && [ -r "$f" ] || return 1
+    local line k v
+    while IFS= read -r line || [ -n "$line" ]; do
+        k="${line%%=*}"; v="${line#*=}"
+        case "$k" in
+            theme)    [ -n "$v" ] && CS_TERM_THEME="$v" ;;
+            rgb)      [ -n "$v" ] && CS_TERM_BG_RGB="$v" ;;
+            os_theme) CS_TERM_OS_THEME="$v" ;;
+        esac
+    done < "$f"
+    # A probed value is auto-detected, never a user pin.
+    [ -n "${CS_TERM_THEME:-}" ] && CS_TERM_THEME_AUTO=1
+    return 0
+}
+
 _sl_detect_theme() {
+    # An explicit pin outranks every measurement, so it is read before the probe
+    # file is allowed to overwrite anything.
     if [ -n "${CS_TERM_THEME:-}" ] && [ -z "${CS_TERM_THEME_AUTO:-}" ]; then
+        SL_THEME="$CS_TERM_THEME"
+        return 0
+    fi
+    _sl_load_probed_theme || true
+    if [ -n "${CS_TERM_THEME:-}" ] && [ -n "${CS_TERM_OS_THEME:-}" ] \
+         && [ "$CS_TERM_OS_THEME" != "$CS_TERM_THEME" ]; then
         SL_THEME="$CS_TERM_THEME"
     elif [[ "${OSTYPE:-}" == darwin* ]]; then
         if defaults read -g AppleInterfaceStyle >/dev/null 2>&1; then SL_THEME="dark"; else SL_THEME="light"; fi
