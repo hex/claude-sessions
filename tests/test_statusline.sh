@@ -20,7 +20,7 @@ setup() {
     local _v
     while IFS='=' read -r _v _; do
         case "$_v" in
-            CS_*|CLAUDE_*|NO_COLOR|COLORTERM|TERM_PROGRAM|FORCE_COLOR|TMUX|TMUX_PANE)
+            CS_*|CLAUDE_*|NO_COLOR|COLORTERM|TERM_PROGRAM|FORCE_COLOR|TMUX|TMUX_PANE|COLORFGBG)
                 unset "$_v" 2>/dev/null || true ;;
         esac
     done < <(env)
@@ -42,6 +42,7 @@ teardown() {
     if [[ -n "$TEST_TMPDIR" ]] && [[ -d "$TEST_TMPDIR" ]]; then
         rm -rf "$TEST_TMPDIR"
     fi
+    unset COLORFGBG 2>/dev/null || true
     unset CS_SESSIONS_ROOT CLAUDE_SESSION_NAME NO_COLOR COLORTERM TERM_PROGRAM \
         FORCE_COLOR CS_STATUSLINE_DISABLE CS_STATUSLINE_SEGMENTS CS_STATUSLINE_CTX_WARN \
         CS_STATUSLINE_CTX_CRIT CS_DISCOVERIES_MAX_SIZE COLUMNS CS_TERM_BG_RGB \
@@ -1871,6 +1872,71 @@ test_sl_theme_without_launch_os_marker_keeps_following_the_os() {
         "no launch OS marker means the previous behaviour is preserved" || return 1 )
 }
 
+# A session cs did not launch carries none of cs's environment, so the ladder
+# falls straight to the OS appearance and renders light on a dark terminal —
+# the palette follows macOS rather than the surface the pills sit on. Two rungs
+# fill that gap, each mirroring a policy the launch detector already has.
+
+# Outside tmux, COLORFGBG is the terminal's own statement about itself.
+test_sl_theme_uses_colorfgbg_outside_tmux() {
+    ( _load_sl_functions
+      unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_OS_THEME TMUX 2>/dev/null || true
+      COLORFGBG="15;0"; OSTYPE="darwin24"
+      defaults() { return 1; }   # macOS says light; the terminal says dark
+      _sl_detect_theme
+      assert_eq "dark" "$SL_THEME" \
+        "a terminal reporting a dark background outranks the OS appearance" || return 1 )
+}
+
+test_sl_theme_colorfgbg_light_outside_tmux() {
+    ( _load_sl_functions
+      unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_OS_THEME TMUX 2>/dev/null || true
+      COLORFGBG="0;15"; OSTYPE="darwin24"
+      defaults() { return 0; }   # macOS says dark; the terminal says light
+      _sl_detect_theme
+      assert_eq "light" "$SL_THEME" "and in the other direction" || return 1 )
+}
+
+# Inside tmux it is the tmux server's start-time snapshot and goes stale across
+# theme changes — the repo records observing 15;0 under a light terminal — so it
+# must not speak there, exactly as the launch detector refuses it.
+test_sl_theme_ignores_colorfgbg_inside_tmux() {
+    ( _load_sl_functions
+      unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_OS_THEME 2>/dev/null || true
+      TMUX="/tmp/fake,1,0"; COLORFGBG="15;0"; OSTYPE="darwin24"
+      tmux() { return 1; }       # no client theme available
+      defaults() { return 1; }   # macOS says light
+      _sl_detect_theme
+      assert_eq "light" "$SL_THEME" \
+        "a stale COLORFGBG must not override the OS inside tmux" || return 1 )
+}
+
+# Inside tmux the live signal is the client's own reported theme, when the
+# terminal reports one at all.
+test_sl_theme_uses_tmux_client_theme() {
+    ( _load_sl_functions
+      unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_OS_THEME COLORFGBG 2>/dev/null || true
+      TMUX="/tmp/fake,1,0"; OSTYPE="darwin24"
+      tmux() { printf 'dark\n'; }   # the attached client reports dark
+      defaults() { return 1; }      # macOS says light
+      _sl_detect_theme
+      assert_eq "dark" "$SL_THEME" \
+        "the attached client's reported theme outranks the OS" || return 1 )
+}
+
+# Empty is the common case — most terminals report nothing — and must fall
+# through rather than being read as a value.
+test_sl_theme_falls_through_empty_client_theme() {
+    ( _load_sl_functions
+      unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_OS_THEME COLORFGBG 2>/dev/null || true
+      TMUX="/tmp/fake,1,0"; OSTYPE="darwin24"
+      tmux() { printf '\n'; }
+      defaults() { return 0; }   # macOS says dark
+      _sl_detect_theme
+      assert_eq "dark" "$SL_THEME" \
+        "an empty client theme must fall through to the OS, not blank the palette" || return 1 )
+}
+
 # _sl_invalidate_stale_bg blanks CS_TERM_BG_RGB once the live theme (SL_THEME)
 # has left the launch theme (CS_TERM_THEME + auto marker), so surfaces/gradient
 # don't tint toward the old background.
@@ -1914,6 +1980,11 @@ run_test test_sl_theme_follows_macos_dark_appearance
 run_test test_sl_theme_follows_macos_light_appearance
 run_test test_sl_theme_non_macos_uses_frozen_launch_value
 run_test test_sl_theme_non_macos_defaults_light
+run_test test_sl_theme_uses_colorfgbg_outside_tmux
+run_test test_sl_theme_colorfgbg_light_outside_tmux
+run_test test_sl_theme_ignores_colorfgbg_inside_tmux
+run_test test_sl_theme_uses_tmux_client_theme
+run_test test_sl_theme_falls_through_empty_client_theme
 run_test test_launch_records_the_os_appearance_alongside_the_theme
 run_test test_sl_theme_decoupled_terminal_ignores_os_appearance
 run_test test_sl_theme_decoupled_light_terminal_ignores_dark_os
