@@ -196,7 +196,7 @@ The current directory decides, not any history: cs opens a session when that dir
 - **Quit** with `q` or `Esc`
 - **Light/dark palette** — the warm palette adapts to the terminal background detected at launch (`CS_TERM_THEME`); set the env var to force `light` or `dark`
 
-The TUI requires `cs-tui` (a small standalone Rust binary). Build from source: `cd tui && cargo build --release`.
+The TUI requires `cs-tui` (a small standalone Rust binary). Build from source: `cd tui && cargo build --release`. `./install.sh` picks up that build automatically — it installs whichever of `tui/target/release/cs-tui` and `bin/cs-tui` is newer, so a rebuild does not need copying into place first.
 
 ### Session Commands
 

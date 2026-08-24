@@ -101,6 +101,62 @@ EOF
     fi
 }
 
+# bin/cs-tui is a gitignored build artifact and NOTHING regenerates it: build.sh
+# assembles bin/cs from lib/ and has no TUI arm, while `cargo build --release`
+# writes to tui/target/release/. So a local install shipped whatever stale binary
+# happened to be sitting in bin/ — observed shipping a picker 17 days old while
+# reporting success, which is the failure mode a version check cannot catch
+# (the picker carries no version of its own).
+test_local_install_prefers_a_freshly_built_picker() {
+    local fake_home="$TEST_TMPDIR/home" repo="$TEST_TMPDIR/repo"
+    mkdir -p "$fake_home" "$repo/bin" "$repo/tui/target/release"
+    local real="$SCRIPT_DIR/.."
+    # Everything the installer reads, borrowed; only the two picker sources are
+    # ours, so the test says nothing about the rest of the tree.
+    local e
+    for e in hooks commands skills completions docs lib README.md CHANGELOG.md LICENSE build.sh; do
+        [ -e "$real/$e" ] && ln -s "$(cd "$real" && pwd)/$e" "$repo/$e"
+    done
+    cp "$real/install.sh" "$repo/install.sh"
+    cp "$real/bin/cs" "$real/bin/cs-secrets" "$real/bin/cs-statusline" \
+       "$real/bin/cs-subagent-statusline" "$repo/bin/" 2>/dev/null || true
+    printf 'STALE PICKER' > "$repo/bin/cs-tui"
+    chmod +x "$repo/bin/cs-tui"
+    # Distinct mtimes, oldest first: -nt is the whole decision.
+    printf 'FRESH PICKER' > "$repo/tui/target/release/cs-tui"
+    chmod +x "$repo/tui/target/release/cs-tui"
+    touch -t 202001010000 "$repo/bin/cs-tui"
+
+    HOME="$fake_home" bash "$repo/install.sh" > /dev/null 2>&1 || true
+
+    local installed="$fake_home/.local/bin/cs-tui"
+    assert_file_exists "$installed" "a picker should have been installed" || return 1
+    assert_eq "FRESH PICKER" "$(cat "$installed")" \
+        "the newer cargo build must win over a stale bin/cs-tui" || return 1
+}
+
+# The reverse: nothing built, so bin/cs-tui is all there is. A release tarball
+# ships that and no tui/target at all.
+test_local_install_uses_bin_picker_when_nothing_was_built() {
+    local fake_home="$TEST_TMPDIR/home2" repo="$TEST_TMPDIR/repo2"
+    mkdir -p "$fake_home" "$repo/bin"
+    local real="$SCRIPT_DIR/.."
+    local e
+    for e in hooks commands skills completions docs lib README.md CHANGELOG.md LICENSE build.sh; do
+        [ -e "$real/$e" ] && ln -s "$(cd "$real" && pwd)/$e" "$repo/$e"
+    done
+    cp "$real/install.sh" "$repo/install.sh"
+    cp "$real/bin/cs" "$real/bin/cs-secrets" "$real/bin/cs-statusline" \
+       "$real/bin/cs-subagent-statusline" "$repo/bin/" 2>/dev/null || true
+    printf 'ONLY PICKER' > "$repo/bin/cs-tui"
+    chmod +x "$repo/bin/cs-tui"
+
+    HOME="$fake_home" bash "$repo/install.sh" > /dev/null 2>&1 || true
+
+    assert_eq "ONLY PICKER" "$(cat "$fake_home/.local/bin/cs-tui" 2>/dev/null)" \
+        "with no build present the shipped picker must still install" || return 1
+}
+
 # ============================================================================
 # Manifest arrays: install.sh and bin/cs must agree, and must match the repo
 # ============================================================================
@@ -830,5 +886,7 @@ run_test test_uninstall_removes_zsh_completion_from_detected_dir
 run_test test_uninstall_removes_zsh_completion_from_default_dir
 run_test test_uninstall_removes_update_cache
 run_test test_install_recovers_from_invalid_settings_json
+run_test test_local_install_prefers_a_freshly_built_picker
+run_test test_local_install_uses_bin_picker_when_nothing_was_built
 run_test test_hook_registration_doc_matches_install
 report_results
