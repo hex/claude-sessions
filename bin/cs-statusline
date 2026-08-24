@@ -51,11 +51,69 @@ _sl_theme_from_colorfgbg() {
     esac
 }
 
+# Whether this process is genuinely inside the tmux server $TMUX names.
+#
+# TMUX is ordinary environment and is inherited wholesale: a program launched
+# from a tmux pane passes it to everything it spawns, including a window it
+# opens in a terminal of its own. That child then claims a tmux membership it
+# does not have, and every rung that keys off TMUX reads the wrong terminal —
+# the client rung asks a client that is not ours, and the COLORFGBG rung is
+# skipped to avoid a tmux staleness that does not apply.
+#
+# The second field of TMUX is the tmux SERVER pid (a daemon, reparented to 1).
+# It is the one part of the claim that can be checked rather than believed: a
+# process in a real pane has that server among its ancestors, an impostor does
+# not. One `ps` covers the whole walk, so this costs a single fork.
+#
+# $1: pid to start from (defaults to this process; the parameter exists so the
+# walk can be tested against a fixed table instead of the live process tree).
+_sl_tmux_is_real() {
+    [ -n "${TMUX:-}" ] || return 1
+    local srv start
+    srv=${TMUX#*,}; srv=${srv%%,*}
+    case "$srv" in ''|*[!0-9]*) return 1 ;; esac
+    start=${1:-$$}
+    # The loop is capped: a ppid table can be cyclic if a pid is reused between
+    # the read and the walk, and an uncapped walk would spin on the render path.
+    ps -ax -o pid=,ppid= 2>/dev/null | awk -v p="$start" -v s="$srv" '
+        { pp[$1] = $2 }
+        END {
+            for (n = 0; n < 24; n++) {
+                if (p == s) exit 0
+                if (!(p in pp)) exit 1
+                p = pp[p]
+                if (p <= 1) exit 1
+            }
+            exit 1
+        }'
+}
+
+# Whether the environment describes a terminal this process is not in. Settled
+# once per render, before anything reads it: an explicit CS_TERM_THEME pin
+# short-circuits theme detection, but the pane id still needs to know, and
+# "am I in this tmux" is a fact about the environment rather than the palette.
+_sl_mark_foreign_env() {
+    SL_ENV_FOREIGN=""
+    [ -n "${TMUX:-}" ] || return 0
+    _sl_tmux_is_real || SL_ENV_FOREIGN=1
+}
+
 _sl_detect_theme() {
     # An explicit pin outranks every measurement, so it is read before the probe
     # file is allowed to overwrite anything.
     if [ -n "${CS_TERM_THEME:-}" ] && [ -z "${CS_TERM_THEME_AUTO:-}" ]; then
         SL_THEME="$CS_TERM_THEME"
+        return 0
+    fi
+    # TMUX set but this process is not in that server: the environment was
+    # inherited from a terminal that is not the one being drawn on, so every
+    # value in it describes somewhere else. CS_TERM_THEME included — it is cs's
+    # measurement of the ORIGINAL terminal, and believing it is what paints a
+    # light bar on a dark window. Take dark, the answer cs gives everywhere it
+    # has nothing trustworthy to go on, and mark the environment so the
+    # background RGB and the pane id are not trusted either.
+    if [ -n "${SL_ENV_FOREIGN:-}" ]; then
+        SL_THEME="dark"
         return 0
     fi
     if [ -n "${TMUX:-}" ] && _sl_theme_from_tmux_client; then
@@ -88,11 +146,13 @@ _sl_detect_theme() {
 # leave light text on a near-light surface). A manually-set RGB carries no auto
 # marker and is never dropped.
 _sl_invalidate_stale_bg() {
-    if [ -n "${CS_TERM_BG_RGB:-}" ] && [ -n "${CS_TERM_THEME_AUTO:-}" ] && [ "$SL_THEME" != "${CS_TERM_THEME:-}" ]; then
+    if [ -n "${CS_TERM_BG_RGB:-}" ] && [ -n "${CS_TERM_THEME_AUTO:-}" ] &&
+       { [ -n "${SL_ENV_FOREIGN:-}" ] || [ "$SL_THEME" != "${CS_TERM_THEME:-}" ]; }; then
         CS_TERM_BG_RGB=""
     fi
 }
 
+_sl_mark_foreign_env
 _sl_detect_theme
 _sl_invalidate_stale_bg
 
@@ -575,11 +635,14 @@ _seg_mail() {
 }
 
 # The tmux pane hosting this conversation, as a target usable verbatim in
-# tmux commands and other chats ("%7"). TMUX_PANE is inherited environment,
-# so this adds zero forks to the render hot path; both vars are required so
-# a stale TMUX_PANE outside a live tmux client never renders.
+# tmux commands and other chats ("%7"). Both vars are inherited environment,
+# so neither is evidence on its own: a process that merely inherited them
+# would otherwise print a pane id belonging to another terminal's session.
+# SL_ENV_FOREIGN carries the ancestry check already done during theme
+# detection, so this adds no forks to the render hot path.
 _seg_pane() {
     [ -n "${TMUX:-}" ] && [ -n "${TMUX_PANE:-}" ] || return 0
+    [ -z "${SL_ENV_FOREIGN:-}" ] || return 0
     _add "${ICON_PANE}${TMUX_PANE}" "grey"
 }
 
