@@ -1298,6 +1298,177 @@ test_gauge_falls_back_to_grey_without_bg() {
 # ============================================================================
 echo "Running test_statusline.sh"
 echo ""
+# --- TMUX inherited into a terminal it does not describe -------------------
+#
+# TMUX is ordinary environment: anything a tmux-launched process spawns
+# inherits it, including an app that shells out and then draws its own window.
+# Such a process claims a tmux membership it does not have. _sl_tmux_is_real
+# settles it from the one fact that cannot be inherited: a genuine pane has the
+# tmux SERVER (TMUX's second field) among its ancestors.
+#
+# Stub `ps` with a fixed pid/ppid table so the walk is exercised without ever
+# reading — or touching — the real process tree or a live tmux server.
+_make_ps_chain() {
+    # $1: space-separated "pid:ppid" pairs forming the table `ps -ax` returns.
+    mkdir -p "$TEST_TMPDIR/fakebin"
+    {
+        printf '#!/bin/sh\n'
+        local _pair
+        for _pair in $1; do
+            printf 'echo "%s %s"\n' "${_pair%%:*}" "${_pair##*:}"
+        done
+    } > "$TEST_TMPDIR/fakebin/ps"
+    chmod +x "$TEST_TMPDIR/fakebin/ps"
+}
+
+test_sl_tmux_real_when_server_is_ancestor() {
+    ( _load_sl_functions
+      _make_ps_chain "500:400 400:300 300:2216 2216:1"
+      export TMUX="/tmp/fake,2216,0" PATH="$TEST_TMPDIR/fakebin:$PATH"
+      _sl_tmux_is_real 500
+      assert_eq "0" "$?" "server pid among the ancestors means a real pane" || return 1 )
+}
+
+# The bug case: TMUX present, but the walk never reaches the server because
+# this process descends from an app that merely inherited the variable.
+test_sl_tmux_fake_when_server_not_ancestor() {
+    ( _load_sl_functions
+      _make_ps_chain "500:400 400:300 300:99 99:1 2216:1"
+      export TMUX="/tmp/fake,2216,0" PATH="$TEST_TMPDIR/fakebin:$PATH"
+      _sl_tmux_is_real 500 && { echo "    expected non-zero"; return 1; }
+      return 0 )
+}
+
+test_sl_tmux_fake_when_server_field_malformed() {
+    ( _load_sl_functions
+      _make_ps_chain "500:2216 2216:1"
+      export TMUX="/tmp/fake,notapid,0" PATH="$TEST_TMPDIR/fakebin:$PATH"
+      _sl_tmux_is_real 500 && { echo "    expected non-zero"; return 1; }
+      return 0 )
+}
+
+# A pid reused between the ps read and the walk can make the table cyclic; the
+# walk must give up rather than spin on a once-a-second render path.
+test_sl_tmux_walk_terminates_on_cycle() {
+    ( _load_sl_functions
+      _make_ps_chain "500:400 400:500 2216:1"
+      export TMUX="/tmp/fake,2216,0" PATH="$TEST_TMPDIR/fakebin:$PATH"
+      _sl_tmux_is_real 500 && { echo "    expected non-zero"; return 1; }
+      return 0 )
+}
+
+# A foreign TMUX makes the whole inherited terminal description suspect, not
+# just the tmux rungs: CS_TERM_THEME describes the terminal cs measured, which
+# is not this one. Fall to dark, the same answer cs gives anywhere else it has
+# nothing trustworthy to go on, rather than believing the inherited light.
+test_sl_theme_dark_when_tmux_is_foreign() {
+    ( _load_sl_functions
+      _make_ps_chain "$$:99 99:1 2216:1"
+      export TMUX="/tmp/fake,2216,0" TMUX_PANE="%32" PATH="$TEST_TMPDIR/fakebin:$PATH"
+      export CS_TERM_THEME=light CS_TERM_THEME_AUTO=1
+      unset COLORFGBG 2>/dev/null || true
+      _sl_mark_foreign_env
+      _sl_detect_theme
+      assert_eq "dark" "$SL_THEME" \
+        "an inherited light theme from another terminal must not be believed" || return 1 )
+}
+
+# The regression guard for the ordinary case: a real pane still consults the
+# client rung, and a client that answers is still trusted.
+test_sl_theme_uses_client_rung_when_tmux_is_real() {
+    ( _load_sl_functions
+      _make_ps_chain "$$:2216 2216:1"
+      export TMUX="/tmp/fake,2216,0" PATH="$TEST_TMPDIR/fakebin:$PATH"
+      export CS_TERM_THEME=dark CS_TERM_THEME_AUTO=1
+      tmux() { printf 'light\n'; }
+      _sl_mark_foreign_env
+      _sl_detect_theme
+      assert_eq "light" "$SL_THEME" \
+        "a real pane must still take the attached client's own reported theme" || return 1 )
+}
+
+# SL_ENV_FOREIGN is a render-scoped flag, and bash seeds a bare global from an
+# inherited variable of the same name. A caller exporting it must not be able
+# to make a real pane look foreign — nor may the reset land after detection
+# has already set it, which silently blanks the finding.
+test_sl_env_foreign_ignores_inherited_value() {
+    local out
+    out=$(SL_ENV_FOREIGN=1 CS_TERM_THEME=light TMUX_PANE="%9" \
+          run_sl "$FIXTURE_DOCS" 2>/dev/null)
+    assert_output_contains "$out" "my-session" \
+        "an inherited SL_ENV_FOREIGN must not disturb a normal render" || return 1
+    ( _load_sl_functions
+      export SL_ENV_FOREIGN=1
+      _make_ps_chain "$$:2216 2216:1"
+      export TMUX="/tmp/fake,2216,0" PATH="$TEST_TMPDIR/fakebin:$PATH"
+      export CS_TERM_THEME=dark CS_TERM_THEME_AUTO=1
+      tmux() { printf 'light\n'; }
+      _sl_mark_foreign_env
+      _sl_detect_theme
+      assert_eq "light" "$SL_THEME" \
+        "an inherited foreign flag must not override a real pane's client theme" || return 1 )
+}
+
+# The theme comparison alone cannot catch a foreign environment: when the
+# inherited theme happens to equal the fallback, SL_THEME == CS_TERM_THEME and
+# the staleness test is satisfied while the RGB still describes another
+# terminal. The foreign flag is what distinguishes "same theme" from "same
+# terminal", so it must drop the tint on its own.
+test_sl_bg_rgb_dropped_when_foreign_despite_matching_theme() {
+    ( _load_sl_functions
+      export CS_TERM_THEME=dark CS_TERM_THEME_AUTO=1 CS_TERM_BG_RGB="252;247;229"
+      SL_THEME=dark          # equal to the launch theme: the old guard is satisfied
+      SL_ENV_FOREIGN=1       # but the environment came from another terminal
+      _sl_invalidate_stale_bg
+      assert_eq "" "$CS_TERM_BG_RGB" \
+        "a foreign environment's RGB must be dropped even when the themes agree" || return 1 )
+}
+
+# A hand-set RGB carries no auto marker and stays the user's business, foreign
+# environment or not — unchanged from the existing contract.
+test_sl_bg_rgb_kept_for_manual_value_when_foreign() {
+    ( _load_sl_functions
+      unset CS_TERM_THEME CS_TERM_THEME_AUTO 2>/dev/null || true
+      export CS_TERM_BG_RGB="1;2;3"
+      SL_THEME=dark
+      SL_ENV_FOREIGN=1
+      _sl_invalidate_stale_bg
+      assert_eq "1;2;3" "$CS_TERM_BG_RGB" \
+        "a manually-set RGB is never dropped, foreign environment included" || return 1 )
+}
+
+# Fake `ps` tables for render-level tests, where the walk starts inside the
+# cs-statusline process and its pid cannot be known in advance.
+#   real   : every process's parent is rewritten to the server, so the walk
+#            reaches it in one step from whatever pid it starts at.
+#   foreign: the table holds only the server, so the walk never finds its own
+#            starting pid and gives up — an app that merely inherited TMUX.
+_make_ps_table() {
+    mkdir -p "$TEST_TMPDIR/fakebin"
+    if [ "$1" = "real" ]; then
+        printf '#!/bin/sh\n/bin/ps -ax -o pid=,ppid= | sed "s/^ *\\([0-9][0-9]*\\).*/\\1 %s/"\necho "%s 1"\n' "$2" "$2" \
+            > "$TEST_TMPDIR/fakebin/ps"
+    else
+        printf '#!/bin/sh\necho "%s 1"\n' "$2" > "$TEST_TMPDIR/fakebin/ps"
+    fi
+    chmod +x "$TEST_TMPDIR/fakebin/ps"
+}
+
+# The pane id is a claim about where this conversation lives, and TMUX_PANE is
+# inherited alongside TMUX. Rendering it for a process that is not in that
+# server prints a pane belonging to someone else's terminal.
+test_pane_segment_hidden_when_tmux_is_foreign() {
+    export NO_COLOR=1
+    _make_ps_table foreign 12345
+    export TMUX="/tmp/tmux-1000/default,12345,0" TMUX_PANE="%7"
+    export PATH="$TEST_TMPDIR/fakebin:$PATH"
+    local out
+    out=$(run_sl "$FIXTURE_DOCS")
+    assert_output_not_contains "$out" "◫" \
+        "pane id must not render for a tmux membership this process does not have" || return 1
+}
+
+
 run_test test_happy_path_docs_fixture_plain
 run_test test_all_segments_ordering_plain
 run_test test_limits_neutral_when_healthy
@@ -1475,6 +1646,8 @@ test_mail_segment_ignores_non_json_entries() {
 }
 
 test_pane_segment_shows_tmux_pane_id() {
+    _make_ps_table real 12345
+    export PATH="$TEST_TMPDIR/fakebin:$PATH"
     export NO_COLOR=1
     export TMUX="/tmp/tmux-1000/default,12345,0"
     export TMUX_PANE="%7"
@@ -1594,6 +1767,7 @@ run_test test_mail_segment_shows_unread_count
 run_test test_mail_segment_absent_when_all_read
 run_test test_mail_segment_ignores_non_json_entries
 run_test test_pane_segment_shows_tmux_pane_id
+run_test test_pane_segment_hidden_when_tmux_is_foreign
 run_test test_pane_segment_absent_outside_tmux
 run_test test_pane_segment_needs_both_tmux_vars
 run_test test_segment_default_in_sync_across_docs_and_help
@@ -1932,4 +2106,13 @@ run_test test_sl_theme_falls_through_empty_client_theme
 run_test test_sl_bg_rgb_dropped_after_switch
 run_test test_sl_bg_rgb_kept_when_theme_matches
 run_test test_sl_bg_rgb_kept_for_manual_value
+run_test test_sl_tmux_real_when_server_is_ancestor
+run_test test_sl_tmux_fake_when_server_not_ancestor
+run_test test_sl_tmux_fake_when_server_field_malformed
+run_test test_sl_tmux_walk_terminates_on_cycle
+run_test test_sl_theme_dark_when_tmux_is_foreign
+run_test test_sl_theme_uses_client_rung_when_tmux_is_real
+run_test test_sl_env_foreign_ignores_inherited_value
+run_test test_sl_bg_rgb_dropped_when_foreign_despite_matching_theme
+run_test test_sl_bg_rgb_kept_for_manual_value_when_foreign
 report_results
