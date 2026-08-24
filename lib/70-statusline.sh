@@ -204,64 +204,6 @@ detect_term_theme_and_bg() {
     echo "$out"
 }
 
-# Arm the attach probe on the tmux session cs is running in. Every launch-frozen
-# signal describes the terminal cs started in, so a session re-attached from a
-# terminal of a different colour renders the wrong palette until something
-# measures again; client-attached is the moment that is knowable.
-#
-# Scoped to this tmux session and APPENDED: a global hook would fire for tmux
-# sessions cs has nothing to do with, and a bare set would drop a hook the user
-# already had. The probe runs as a detached window because the OSC query needs a
-# pane tty of its own — tmux proxies it to the attached client and routes the
-# reply back to that pane, never to the tty Claude Code owns.
-_arm_term_theme_probe() {
-    [ -n "${TMUX:-}" ] || return 0
-    command -v tmux >/dev/null 2>&1 || return 0
-    local self="${CS_BIN:-$0}"
-    tmux set-hook -a client-attached \
-        "run-shell -b '\"$self\" -detect-theme --write'" 2>/dev/null || true
-    return 0
-}
-
-# Measure the terminal and record it for the statusline to read. Written by the
-# tmux client-attached probe, which runs in a throwaway pane: tmux proxies that
-# pane's OSC 11 query to whichever client just attached and routes the reply back
-# to the pane, so the query never touches the tty Claude Code owns. The file
-# carries the same triple the launch environment does — measured theme, its RGB
-# when known, and the OS appearance at the moment of measurement — so the
-# statusline applies one rule to whichever source is fresher, rather than
-# carrying a second parallel mechanism.
-#
-# tmux asks exactly one client when several are attached to a session, so with a
-# light and a dark terminal on the same session the answer describes whichever
-# tmux picked. Documented rather than solved: no single answer is right for two
-# terminals at once.
-write_term_theme_state() {
-    local name="${CLAUDE_SESSION_NAME:-}"
-    # No session, nowhere to write. The attach hook must not fail on it.
-    [ -n "$name" ] || return 0
-    local dir="$SESSIONS_ROOT/$name/.cs/local"
-    [ -d "$dir" ] || return 0
-    local out theme rgb os_theme
-    out=$(detect_term_theme_and_bg)
-    theme="${out%% *}"
-    [ "$theme" = "unknown" ] && return 0
-    rgb=""
-    [[ "$out" == *" "* ]] && rgb="${out#* }"
-    os_theme=$(_theme_from_os_appearance)
-    [ "$os_theme" = "unknown" ] && os_theme=""
-    # tmp-then-rename: the statusline reads this file on every render and must
-    # never see a half-written one.
-    local tmp="$dir/.term-theme.$$"
-    {
-        printf 'theme=%s\n' "$theme"
-        printf 'rgb=%s\n' "$rgb"
-        printf 'os_theme=%s\n' "$os_theme"
-    } > "$tmp" 2>/dev/null || return 0
-    mv -f "$tmp" "$dir/term-theme" 2>/dev/null || rm -f "$tmp" 2>/dev/null
-    return 0
-}
-
 # Thin wrapper over detect_term_theme_and_bg that keeps the original
 # single-word contract (`cs -detect-theme`, and any caller that only needs the
 # light/dark/unknown classification, not the RGB).
@@ -299,9 +241,6 @@ _export_term_theme() {
     local os_theme
     os_theme=$(_theme_from_os_appearance)
     [ "$os_theme" = "unknown" ] || export CS_TERM_OS_THEME="$os_theme"
-    # Everything above describes the terminal cs was launched from. Arm the
-    # probe so a re-attach from a different one is measured too.
-    _arm_term_theme_probe
     if [[ "$out" == *" "* ]] && [ -z "${CS_TERM_BG_RGB:-}" ]; then
         export CS_TERM_BG_RGB="${out#* }"
     fi
