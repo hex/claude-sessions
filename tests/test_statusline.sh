@@ -1776,7 +1776,11 @@ test_sl_theme_non_macos_uses_frozen_launch_value() {
       assert_eq "dark" "$SL_THEME" "non-macOS keeps the launch theme" || return 1 )
 }
 
-test_sl_theme_non_macos_defaults_light() {
+# cs assumes dark wherever it has nothing to go on — lib/05-term.sh and the
+# rewriter shim both read ${CS_TERM_THEME:-dark}. The statusline read
+# ${CS_TERM_THEME:-light}, so the same unknown produced two different palettes
+# in one product. This pins them to agree.
+test_sl_theme_non_macos_defaults_dark() {
     ( _load_sl_functions
       unset CS_TERM_THEME CS_TERM_THEME_AUTO 2>/dev/null || true
       OSTYPE="linux-gnu"
@@ -1785,7 +1789,7 @@ test_sl_theme_non_macos_defaults_light() {
       # the same answer after asking.
       _defaults_called=0; defaults() { _defaults_called=1; return 0; }
       _sl_detect_theme
-      assert_eq "light" "$SL_THEME" "non-macOS with no launch theme defaults light" || return 1
+      assert_eq "dark" "$SL_THEME" "non-macOS with no launch theme defaults dark, as the rest of cs does" || return 1
       assert_eq "0" "$_defaults_called" "non-macOS must not run the appearance probe" || return 1 )
 }
 
@@ -1979,7 +1983,7 @@ run_test test_sl_theme_macos_pin_beats_live
 run_test test_sl_theme_follows_macos_dark_appearance
 run_test test_sl_theme_follows_macos_light_appearance
 run_test test_sl_theme_non_macos_uses_frozen_launch_value
-run_test test_sl_theme_non_macos_defaults_light
+run_test test_sl_theme_non_macos_defaults_dark
 run_test test_sl_theme_uses_colorfgbg_outside_tmux
 run_test test_sl_theme_colorfgbg_light_outside_tmux
 run_test test_sl_theme_ignores_colorfgbg_inside_tmux
