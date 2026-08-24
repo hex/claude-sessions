@@ -27,6 +27,33 @@ export GIT_OPTIONAL_LOCKS=0
 # the only signal that describes the surface the pills are drawn on, and the
 # appearance probe is skipped entirely rather than asked and discarded (it forks
 # `defaults`, and this bar repaints once a second).
+# The attached client's own reported theme, which tmux records when the terminal
+# tells it (Ghostty, kitty, WezTerm and the like; most terminals report nothing,
+# and then this answers nothing). Live, unlike anything captured at launch, and
+# it describes the terminal rather than the OS. Talks to the tmux server over
+# its socket, never the tty, so it is safe from a render.
+_sl_theme_from_tmux_client() {
+    local t
+    t=$(tmux display-message -p '#{client_theme}' 2>/dev/null) || return 1
+    case "$t" in
+        dark|light) SL_THEME="$t"; return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# COLORFGBG, outside tmux only. Inside it is the tmux server's start-time
+# snapshot and goes stale across theme changes — 15;0 has been observed there
+# under a light terminal — which is why the launch detector consults it in its
+# non-tmux branch alone. KEEP the classification IN SYNC with
+# _theme_from_colorfgbg in lib/70-statusline.sh.
+_sl_theme_from_colorfgbg() {
+    case "${COLORFGBG##*;}" in
+        7|9|1[0-5]) SL_THEME="light"; return 0 ;;
+        [0-8])      SL_THEME="dark";  return 0 ;;
+        *)          return 1 ;;
+    esac
+}
+
 _sl_detect_theme() {
     # An explicit pin outranks every measurement, so it is read before the probe
     # file is allowed to overwrite anything.
@@ -37,6 +64,10 @@ _sl_detect_theme() {
     if [ -n "${CS_TERM_THEME:-}" ] && [ -n "${CS_TERM_OS_THEME:-}" ] \
          && [ "$CS_TERM_OS_THEME" != "$CS_TERM_THEME" ]; then
         SL_THEME="$CS_TERM_THEME"
+    elif [ -n "${TMUX:-}" ] && _sl_theme_from_tmux_client; then
+        : # SL_THEME set from the attached client's own reported theme
+    elif [ -z "${TMUX:-}" ] && [ -n "${COLORFGBG:-}" ] && _sl_theme_from_colorfgbg; then
+        : # SL_THEME set from the terminal's own statement about itself
     elif [[ "${OSTYPE:-}" == darwin* ]]; then
         if defaults read -g AppleInterfaceStyle >/dev/null 2>&1; then SL_THEME="dark"; else SL_THEME="light"; fi
     else
