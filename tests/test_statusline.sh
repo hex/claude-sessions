@@ -1535,6 +1535,12 @@ test_unmeasured_tail_is_a_coverage_wash() {
     stripped=$(printf '%s' "$out" | sed -E $'s/\033\\[[0-9;]*m//g')
     width=$( ( _load_sl_functions; _display_width "$stripped"; echo "$_WIDTH" ) )
     assert_eq "80" "$width" "the wash must still fill exactly COLUMNS cells" || return 1
+    # 100% width: the wash runs to the edge. A blank tail would leave the bar
+    # visibly stopping short even though the line measures full width.
+    case "$stripped" in
+        *" ") echo "    the bar ends in blank cells; the wash must reach the edge"; return 1 ;;
+    esac
+    return 0
 }
 
 # The grey ramps toward the theme's own end of the greyscale: lighter on a light

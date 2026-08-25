@@ -777,19 +777,26 @@ _lerp_channel() {
 # ramp — 240-12 is 228, which is in the colour cube and renders yellow-green,
 # not grey — so the dark end is clamped to 232, the ramp's darkest entry.
 _build_wash() {
-    local cells="$1" i idx g from to drawn span
+    local cells="$1" i g from to span
     _WASH=""
     [ "$cells" -gt 0 ] 2>/dev/null || return 0
-    if [ "$SL_THEME" = "dark" ]; then from=240; to=232; else from=240; to=252; fi
-    drawn=$(( cells * 3 / 4 ))
-    [ "$drawn" -lt 1 ] && drawn=1
-    span=$(( drawn - 1 )); [ "$span" -lt 1 ] && span=1
+    # Discreet by construction: ░ covers about a quarter of its cell, and the
+    # grey stays near the theme's own end of the 256-colour greyscale, so the
+    # texture is a suggestion rather than a hatch. It runs the FULL width and
+    # fades to the ramp's last entry at the right edge, where a quarter-covered
+    # cell of near-background grey is close to invisible.
+    #
+    # The dark end is 232 and the light end 255 because those are the ends of
+    # the greyscale ramp: stepping past either lands in the colour cube and
+    # renders as a colour, not a grey.
+    if [ "$SL_THEME" = "dark" ]; then from=237; to=232; else from=252; to=255; fi
+    span=$(( cells - 1 )); [ "$span" -lt 1 ] && span=1
     local esc=$'\033' shade=$'\xe2\x96\x91'
     for ((i = 0; i < cells; i++)); do
-        if [ "$i" -ge "$drawn" ]; then _WASH+=" "; continue; fi
         g=$(( from + (to - from) * i / span ))
-        _WASH+="${esc}[38;5;${g}m${shade}${esc}[0m"
+        _WASH+="${esc}[38;5;${g}m${shade}"
     done
+    _WASH+="${esc}[0m"
 }
 
 _build_gradient() {
