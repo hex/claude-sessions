@@ -96,7 +96,7 @@ In truecolor mode the bar stretches to the terminal's full width: after the last
 This needs two pieces of information the bar doesn't otherwise require, and degrades gracefully (renders exactly as it would without this feature) when either is missing:
 
 - **Terminal width** — Claude Code sets `$COLUMNS` on the status-line process (documented behavior, Claude Code ≥ 2.1.153); older versions don't set it, and the gradient is simply skipped.
-- **The terminal's real background color** — known only when cs's own OSC 11 query succeeds at launch (see [Terminal theme](#terminal-theme) below); exported as `CS_TERM_BG_RGB`. Without it there is no honest fade target — `SGR 49` ("terminal default") is a discrete state, not a point in RGB space, so guessing a plausible background and fading toward the guess would show a visible seam wherever the guess is wrong. cs fails closed instead: no `CS_TERM_BG_RGB`, no gradient.
+- **The terminal's real background color** — known only when cs's own OSC 11 query succeeds at launch (see [Terminal theme](#terminal-theme) below); exported as `CS_TERM_BG_RGB`. Without it there is no honest fade target — `SGR 49` ("terminal default") is a discrete state, not a point in RGB space, so guessing a plausible background and fading toward the guess would show a visible seam wherever the guess is wrong. cs used to fail closed on that reasoning: no `CS_TERM_BG_RGB`, no gradient. That was correct about the seam and wrong about the cost — it meant no gradient at all in every terminal cs did not launch, which is most of them. The tail now fades toward a conventional background for the resolved theme, and the predicted seam is real: a generic fade can be made quiet but never invisible, because only the terminal's own pixel value ends exactly on itself. Where that edge matters, pin the real value — see [Pinning the background](#pinning-the-background).
 
 The gradient is truecolor-only (256-color and basic ANSI don't have the per-channel precision to fade smoothly; it would band). A narrow terminal whose bar already exceeds `$COLUMNS` gets no gradient either, since there is no room left to fill.
 
@@ -112,6 +112,22 @@ A session cs did not launch carries none of that, so two further rungs sit above
 Every signal above describes the terminal cs was launched from, which is the wrong terminal once a tmux session is re-attached from a different one — the palette then tracks the window cs started in rather than the window you are looking at, until the session is relaunched. Measuring again on attach needs a query the statusline cannot safely make from a render, and the attempts to make it from elsewhere each traded one fault for another; the reliable fix is for the host to report the theme it has already resolved.
 
 Only the OSC 11 path ever learns the terminal's actual background RGB — the `COLORFGBG`/OS-appearance fallbacks classify light or dark without it. When OSC 11 succeeds, cs exports that RGB as `CS_TERM_BG_RGB` (e.g. `250;248;242`) alongside `CS_TERM_THEME_AUTO`, which is what the [full-width gradient](#full-width-gradient) fades toward. When it is absent — every session cs did not launch, which is most terminals anyone tries — the gradient no longer disappears: the tail fades toward a conventional background for the resolved theme (`30;30;30` dark, `250;250;250` light), the same "one unknown, one answer" rule the theme ladder applies. The tail also starts one shade off that assumed background, exactly as the measured path starts at `_bg_shade(bg)` — anchoring it on the gauge surface instead would span an unrelated tone and smear a light band across a dark bar rather than fade into it. Being a few shades off shows as a soft band at the far right rather than a wrong-coloured bar, and a measured `CS_TERM_BG_RGB` always outranks the assumption. This RGB stays at its launch value even when the live theme flips on macOS, so the gradient tracks the light/dark class but not the exact new background. Set `CS_TERM_BG_RGB` yourself to override.
+
+### Pinning the background
+
+A measured background always outranks the assumption, and supplying one by hand is the only way to make the fade's far end vanish completely into the terminal. Export it in the shell that terminal starts:
+
+```sh
+export CS_TERM_BG_RGB='20;23;41'   # r;g;b, 0-255 each
+```
+
+To find the value: read it from the terminal's own theme settings, or screenshot the window and sample a pixel of empty background — anywhere with no text, well away from the status bar. Any image editor's colour picker will do; from the command line, with Pillow installed:
+
+```sh
+python3 -c "from PIL import Image; im=Image.open('shot.png').convert('RGB'); print(im.getpixel((100,40)))"
+```
+
+Sample two or three points and check they agree, so a compression artifact or a translucent window's blur does not become the pinned value.
 
 ## Configuration
 
