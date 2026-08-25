@@ -777,28 +777,33 @@ _lerp_channel() {
 # ramp — 240-12 is 228, which is in the colour cube and renders yellow-green,
 # not grey — so the dark end is clamped to 232, the ramp's darkest entry.
 _build_wash() {
-    local cells="$1" i g from to span
+    local cells="$1" i span
     _WASH=""
     [ "$cells" -gt 0 ] 2>/dev/null || return 0
-    # Discreet by construction: ░ covers about a quarter of its cell, and the
-    # grey stays near the theme's own end of the 256-colour greyscale, so the
-    # texture is a suggestion rather than a hatch. It runs the FULL width and
-    # fades to the ramp's last entry at the right edge, where a quarter-covered
-    # cell of near-background grey is close to invisible.
-    #
-    # The dark end is 232 and the light end 255 because those are the ends of
-    # the greyscale ramp: stepping past either lands in the colour cube and
-    # renders as a colour, not a grey.
-    if [ "$SL_THEME" = "dark" ]; then from=237; to=232; else from=252; to=255; fi
+    # ░ paints roughly a quarter of its cell, so three quarters of every cell is
+    # the terminal's own background and no colour is ever named for it. What the
+    # quarter is painted IN still matters: the 256-colour greyscale bottoms out
+    # at rgb(238,238,238), some fourteen units below a cream page, so ░ read as
+    # stipple there however the index was chosen. The tail is gated on truecolor
+    # already, so it ramps in truecolor and can finish within a couple of units
+    # of a conventional page of its theme.
+    local sr sg sb dr dg db
+    if [ "$SL_THEME" = "dark" ]; then
+        sr=52; sg=52; sb=52; dr=30; dg=30; db=30
+    else
+        sr=228; sg=224; sb=208; dr=250; dg=246; db=232
+    fi
     span=$(( cells - 1 )); [ "$span" -lt 1 ] && span=1
     # Cancel the previous segment's background before the first cell. The wash
-    # sets only a foreground, so without this the last pill's colour — amber on an
-    # escalated rate-limit block — stays in effect and floods the whole tail.
-    local esc=$'\033' shade=$'\xe2\x96\x91'
+    # sets only a foreground, so without this the last pill's colour — amber on
+    # an escalated rate-limit block — stays in effect and floods the whole tail.
+    local esc=$'\033' shade=$'\xe2\x96\x91' r g b
     _WASH="${esc}[0m"
     for ((i = 0; i < cells; i++)); do
-        g=$(( from + (to - from) * i / span ))
-        _WASH+="${esc}[38;5;${g}m${shade}"
+        _lerp_channel "$sr" "$dr" "$i" "$cells"; r="$_LC"
+        _lerp_channel "$sg" "$dg" "$i" "$cells"; g="$_LC"
+        _lerp_channel "$sb" "$db" "$i" "$cells"; b="$_LC"
+        _WASH+="${esc}[38;2;${r};${g};${b}m${shade}"
     done
     _WASH+="${esc}[0m"
 }

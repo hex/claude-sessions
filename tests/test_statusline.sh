@@ -1553,11 +1553,20 @@ test_wash_grey_ramps_toward_the_theme() {
     unset CS_TERM_BG_RGB 2>/dev/null || true
     local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
     local out
+    # Truecolor, not the 256 greyscale: that ramp's lightest entry is
+    # rgb(238,238,238), some fourteen units below a cream page, so ░ could never
+    # get closer than a visible stipple no matter which index was chosen. The
+    # tail is gated on truecolor already, so stepping down bought nothing.
     out=$(CS_TERM_THEME=light run_sl "$json")
-    assert_output_contains "$out" "38;5;252" "a light terminal's wash must end near white" || return 1
+    assert_output_contains "$out" "38;2;250;246;232" \
+        "a light tail must end within a couple of units of a light page" || return 1
+    assert_output_not_contains "$out" "38;5;" \
+        "the wash must not fall back to the 256-colour ramp" || return 1
     out=$(CS_TERM_THEME=dark run_sl "$json")
-    assert_output_contains "$out" "38;5;232" "a dark terminal's wash must end near black" || return 1
-    assert_output_not_contains "$out" "38;5;252" "a dark wash must not brighten toward white" || return 1
+    assert_output_contains "$out" "38;2;30;30;30" \
+        "a dark tail must end near a dark page" || return 1
+    assert_output_not_contains "$out" "38;2;250;246;232" \
+        "a dark tail must not brighten toward a light page" || return 1
 }
 
 # A measured background is still the better answer and keeps the colour fade:
@@ -1589,7 +1598,7 @@ test_wash_does_not_inherit_the_last_segment_background() {
     # Counting the amber code proves nothing: it is emitted once and then STAYS
     # in effect until something cancels it. The property is that a reset stands
     # between the last pill and the first wash cell, so assert the reset itself.
-    printf '%s' "$out" | grep -q $'\033\[0m\033\[38;5;[0-9]*m\xe2\x96\x91' || {
+    printf '%s' "$out" | grep -q $'\033\[0m\033\[38;2;[0-9;]*m\xe2\x96\x91' || {
         echo "    no background reset before the wash; the last pill's colour floods the tail"
         return 1
     }
