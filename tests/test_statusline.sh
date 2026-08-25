@@ -1719,6 +1719,13 @@ test_dotted_tail_fills_a_256_bar() {
     # syntax the segments are built from.
     printf '%s' "$out" | grep -q $'\033\[0m\033\[38;5;[0-9]*m' \
         || { echo "    the dots do not reset the previous pill's background"; return 1; }
+    # Pin the index: the dots are meant to read as texture, and one step of the
+    # greyscale is the difference between a hint and a row of punctuation.
+    assert_output_contains "$out" "38;5;252" \
+        "a light tail's dots must sit one step off the page" || return 1
+    out=$(CS_TERM_THEME=dark run_sl "$json")
+    assert_output_contains "$out" "38;5;237" \
+        "a dark tail's dots must sit one step off a dark page" || return 1
     stripped=$(printf '%s' "$out" | sed -E $'s/\033\\[[0-9;]*m//g')
     width=$( ( _load_sl_functions; _display_width "$stripped"; echo "$_WIDTH" ) )
     assert_eq "80" "$width" "the dotted tail must fill exactly COLUMNS cells" || return 1

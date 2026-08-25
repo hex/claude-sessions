@@ -844,7 +844,10 @@ _build_dots() {
     local cells="$1" i idx
     _DOTS=""
     [ "$cells" -gt 0 ] 2>/dev/null || return 0
-    [ "$SL_THEME" = "dark" ] && idx=239 || idx=250
+    # One step off the page rather than two: at 250 on a cream terminal the
+    # dots read as a row of punctuation, at 252 as texture. The dark side
+    # mirrors it — 237 against a dark page, not 239.
+    [ "$SL_THEME" = "dark" ] && idx=237 || idx=252
     local esc=$'\033' dot=$'\xc2\xb7'
     # Reset first: the dots set only a foreground, so without this the last
     # pill's background stays in effect and floods the tail.
