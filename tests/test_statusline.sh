@@ -1700,6 +1700,44 @@ test_level_stays_truecolor_outside_tmux() {
         "outside tmux nothing mutes the line, so the flag is irrelevant" || return 1 )
 }
 
+# In 256 mode the tail cannot ramp — the cube has no smooth path through warm
+# off-whites, which is why the gradient is truecolor-only and the bar simply
+# stopped after the last pill. Dots do not need a ramp: evenly spaced at one dim
+# palette grey, drawn as foreground on the default background, so the cells
+# between them are the terminal itself. Fixed spacing has no density to band.
+test_dotted_tail_fills_a_256_bar() {
+    export TERM=xterm-256color
+    export COLUMNS=80
+    export CS_TERM_THEME=light
+    unset COLORTERM CS_TERM_BG_RGB 2>/dev/null || true
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
+    local out stripped width
+    out=$(run_sl "$json")
+    assert_output_contains "$out" $'·' "a 256 bar should carry a dotted tail" || return 1
+    # Only the TAIL must be background-free; the pills before it legitimately
+    # paint 48;5; backgrounds, so testing the whole bar for that would ban the
+    # syntax the segments are built from.
+    printf '%s' "$out" | grep -q $'\033\[0m\033\[38;5;[0-9]*m' \
+        || { echo "    the dots do not reset the previous pill's background"; return 1; }
+    stripped=$(printf '%s' "$out" | sed -E $'s/\033\\[[0-9;]*m//g')
+    width=$( ( _load_sl_functions; _display_width "$stripped"; echo "$_WIDTH" ) )
+    assert_eq "80" "$width" "the dotted tail must fill exactly COLUMNS cells" || return 1
+}
+
+# Truecolor still gets the gradient: it can end exactly on the terminal's own
+# colour, which dots only gesture at.
+test_truecolor_keeps_the_gradient_not_dots() {
+    export COLORTERM=truecolor TERM=xterm-256color
+    export COLUMNS=80
+    export CS_TERM_THEME=light CS_TERM_BG_RGB="252;247;229"
+    unset TMUX 2>/dev/null || true
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "48;2;252;247;229" "truecolor still fades to the real background" || return 1
+    assert_output_not_contains "$out" $'·' "a gradient bar needs no dots" || return 1
+}
+
 run_test test_happy_path_docs_fixture_plain
 run_test test_all_segments_ordering_plain
 run_test test_limits_neutral_when_healthy
@@ -2346,6 +2384,8 @@ run_test test_client_cache_rejects_a_malformed_entry
 run_test test_level_drops_to_256_when_truecolor_will_be_muted
 run_test test_level_stays_truecolor_when_the_flag_is_present
 run_test test_level_stays_truecolor_outside_tmux
+run_test test_dotted_tail_fills_a_256_bar
+run_test test_truecolor_keeps_the_gradient_not_dots
 run_test test_sl_theme_falls_through_empty_client_theme
 run_test test_sl_bg_rgb_dropped_after_switch
 run_test test_sl_bg_rgb_kept_when_theme_matches

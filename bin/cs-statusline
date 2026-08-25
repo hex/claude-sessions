@@ -832,6 +832,29 @@ _lerp_channel() {
 # the last quarter is blank. Mirroring the light delta naively would leave that
 # ramp — 240-12 is 228, which is in the colour cube and renders yellow-green,
 # not grey — so the dark end is clamped to 232, the ramp's darkest entry.
+# The tail when the bar cannot ramp: evenly spaced dots at one dim palette grey.
+#
+# 256 mode has no smooth path through warm off-whites — that is why the gradient
+# is truecolor-only — so the bar used to stop dead after the last pill. Dots need
+# no ramp. They are drawn as foreground on the default background, so the cells
+# between them are the terminal's own colour whatever it is, and fixed spacing
+# has no density gradient to band. One index rather than a fade, chosen dim
+# enough to read as texture rather than content.
+_build_dots() {
+    local cells="$1" i idx
+    _DOTS=""
+    [ "$cells" -gt 0 ] 2>/dev/null || return 0
+    [ "$SL_THEME" = "dark" ] && idx=239 || idx=250
+    local esc=$'\033' dot=$'\xc2\xb7'
+    # Reset first: the dots set only a foreground, so without this the last
+    # pill's background stays in effect and floods the tail.
+    _DOTS="${esc}[0m${esc}[38;5;${idx}m"
+    for ((i = 0; i < cells; i++)); do
+        if [ $(( i % 3 )) -eq 1 ]; then _DOTS+="$dot"; else _DOTS+=" "; fi
+    done
+    _DOTS+="${esc}[0m"
+}
+
 _build_wash() {
     local cells="$1" i span
     _WASH=""
@@ -1052,19 +1075,25 @@ _render() {
     # 11 query succeeded at launch. `lastrgb` gates on a resolved truecolor bg.
     # Truecolor-only — 256-color/basic modes can't render a gradient without
     # banding.
-    if [ "$LEVEL" = "truecolor" ] && [ -n "$lastrgb" ] \
-        && [[ "${COLUMNS:-}" =~ ^[0-9]+$ ]] && [ "$COLUMNS" -ge 1 ] && [ "$COLUMNS" -le 2000 ]; then
+    # lastrgb is only ever set on the truecolor path, so it cannot gate a
+    # tail that 256 mode also draws. Each branch below asserts what it
+    # actually needs: the gradient needs a resolved truecolor background,
+    # the dots need nothing but width.
+    if [[ "${COLUMNS:-}" =~ ^[0-9]+$ ]] && [ "$COLUMNS" -ge 1 ] && [ "$COLUMNS" -le 2000 ]; then
         local remaining=$((COLUMNS - width))
         # Bounded independent of $COLUMNS itself: defense in depth for a loop
         # that runs on every render.
         [ "$remaining" -gt 500 ] && remaining=500
         if [ "$remaining" -gt 0 ]; then
-            if [ -n "${CS_TERM_BG_RGB:-}" ]; then
+            if [ "$LEVEL" != "truecolor" ]; then
+                _build_dots "$remaining"
+                out+="$_DOTS"
+            elif [ -n "$lastrgb" ] && [ -n "${CS_TERM_BG_RGB:-}" ]; then
                 _sgr 48 surface; local tailrgb="$_RGB"
                 [ -n "$tailrgb" ] || tailrgb="$lastrgb"
                 _build_gradient "$tailrgb" "$CS_TERM_BG_RGB" "$remaining"
                 out+="$_GRADIENT"
-            else
+            elif [ -n "$lastrgb" ]; then
                 _build_wash "$remaining"
                 out+="$_WASH"
             fi
