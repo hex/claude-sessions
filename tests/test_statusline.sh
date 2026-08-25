@@ -1605,6 +1605,64 @@ test_wash_does_not_inherit_the_last_segment_background() {
     return 0
 }
 
+# A pane cs did not launch carries none of cs's environment — an agent-teams
+# teammate is spawned straight off the tmux server and inherits TMUX but no
+# CS_TERM_*. It can still establish WHICH TERMINAL it is on, though: the tmux
+# client's tty, asked over the socket and therefore safe from a render. cs
+# writes its launch measurement under that key, so any pane on the same client
+# finds it.
+#
+# The key IS the terminal's identity, which is what makes this safe where a
+# tmux session variable was not: re-attach from a different terminal and the
+# tty differs, so the lookup MISSES and falls through to the default. The
+# failure mode is no answer, never a confidently stale one.
+test_client_cache_supplies_theme_and_background() {
+    ( _load_sl_functions
+      export HOME="$TEST_TMPDIR/home"; mkdir -p "$HOME/.cache/cs/term"
+      printf 'light 252;247;229\n' > "$HOME/.cache/cs/term/ttys002"
+      export TMUX="/tmp/fake,1,0"
+      unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_BG_RGB 2>/dev/null || true
+      tmux() { printf '/dev/ttys002\n'; }
+      _sl_theme_from_client_cache || { echo "    lookup failed"; return 1; }
+      assert_eq "light" "$SL_THEME" "the cached theme must be adopted" || return 1
+      assert_eq "252;247;229" "$CS_TERM_BG_RGB" "the cached background must be adopted" || return 1 )
+}
+
+test_client_cache_misses_after_reattach_from_another_terminal() {
+    ( _load_sl_functions
+      export HOME="$TEST_TMPDIR/home"; mkdir -p "$HOME/.cache/cs/term"
+      printf 'light 252;247;229\n' > "$HOME/.cache/cs/term/ttys002"
+      export TMUX="/tmp/fake,1,0"
+      unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_BG_RGB 2>/dev/null || true
+      tmux() { printf '/dev/ttys009\n'; }   # re-attached from a different terminal
+      _sl_theme_from_client_cache && { echo "    stale entry was used"; return 1; }
+      assert_eq "" "${CS_TERM_BG_RGB:-}" "a miss must not invent a background" || return 1 )
+}
+
+# A user-set background is the user's business and outranks anything cached.
+test_client_cache_does_not_override_an_explicit_background() {
+    ( _load_sl_functions
+      export HOME="$TEST_TMPDIR/home"; mkdir -p "$HOME/.cache/cs/term"
+      printf 'light 252;247;229\n' > "$HOME/.cache/cs/term/ttys002"
+      export TMUX="/tmp/fake,1,0" CS_TERM_BG_RGB="1;2;3"
+      unset CS_TERM_THEME CS_TERM_THEME_AUTO 2>/dev/null || true
+      tmux() { printf '/dev/ttys002\n'; }
+      _sl_theme_from_client_cache
+      assert_eq "1;2;3" "$CS_TERM_BG_RGB" "an explicit background must survive" || return 1 )
+}
+
+# Garbage in the cache must be refused rather than rendered.
+test_client_cache_rejects_a_malformed_entry() {
+    ( _load_sl_functions
+      export HOME="$TEST_TMPDIR/home"; mkdir -p "$HOME/.cache/cs/term"
+      printf 'chartreuse not-a-colour\n' > "$HOME/.cache/cs/term/ttys002"
+      export TMUX="/tmp/fake,1,0"
+      unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_BG_RGB 2>/dev/null || true
+      tmux() { printf '/dev/ttys002\n'; }
+      _sl_theme_from_client_cache && { echo "    malformed entry was accepted"; return 1; }
+      return 0 )
+}
+
 run_test test_happy_path_docs_fixture_plain
 run_test test_all_segments_ordering_plain
 run_test test_limits_neutral_when_healthy
@@ -2244,6 +2302,10 @@ run_test test_sl_theme_uses_colorfgbg_outside_tmux
 run_test test_sl_theme_colorfgbg_light_outside_tmux
 run_test test_sl_theme_ignores_colorfgbg_inside_tmux
 run_test test_sl_theme_uses_tmux_client_theme
+run_test test_client_cache_supplies_theme_and_background
+run_test test_client_cache_misses_after_reattach_from_another_terminal
+run_test test_client_cache_does_not_override_an_explicit_background
+run_test test_client_cache_rejects_a_malformed_entry
 run_test test_sl_theme_falls_through_empty_client_theme
 run_test test_sl_bg_rgb_dropped_after_switch
 run_test test_sl_bg_rgb_kept_when_theme_matches

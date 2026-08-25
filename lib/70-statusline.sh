@@ -218,6 +218,36 @@ detect_term_theme() {
 # launched next. A no-op when CS_TERM_THEME is already set, so a manual override
 # or an earlier detection wins. The OSC query must run here, never from a hook,
 # where its reply would race into claude's input stream.
+# Record the launch measurement where a pane cs did not launch can find it.
+#
+# Launch is the only moment cs owns the tty and can run the OSC 11 query, and
+# that measurement reaches children only through the environment — which an
+# agent-teams teammate, spawned straight off the tmux server, never inherits.
+# It then falls to the dark default and draws a dark bar on a light terminal.
+#
+# The key is the tmux CLIENT tty (cs's own tty outside tmux), because that is
+# the identity any pane can ask tmux for over the socket. It is also what makes
+# this safe where a tmux session variable was not: a session variable is shared
+# by every pane whatever terminal they are on, while re-attaching from a
+# different terminal changes this key, so the lookup misses rather than
+# returning a stale answer. Best-effort throughout: a launch must never fail
+# because a cache could not be written.
+_write_term_cache() {
+    local theme="$1" rgb="$2" tty key dir
+    if [ -n "${TMUX:-}" ]; then
+        tty=$(tmux display-message -p '#{client_tty}' 2>/dev/null) || tty=""
+    else
+        tty=$(tty 2>/dev/null) || tty=""
+    fi
+    [ -n "$tty" ] || return 0
+    key=${tty#/dev/}; key=${key//\//-}
+    case "$key" in ''|*[!A-Za-z0-9._-]*|.|..) return 0 ;; esac
+    dir="$HOME/.cache/cs/term"
+    mkdir -p "$dir" 2>/dev/null || return 0
+    printf '%s %s\n' "$theme" "$rgb" > "$dir/$key" 2>/dev/null || true
+    return 0
+}
+
 _export_term_theme() {
     [ -n "${CS_TERM_THEME:-}" ] && return 0
     local out theme
@@ -236,6 +266,7 @@ _export_term_theme() {
     if [[ "$out" == *" "* ]] && [ -z "${CS_TERM_BG_RGB:-}" ]; then
         export CS_TERM_BG_RGB="${out#* }"
     fi
+    _write_term_cache "$theme" "${CS_TERM_BG_RGB:-}"
 }
 
 # macOS reports dark mode by the presence of the AppleInterfaceStyle key;

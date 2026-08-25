@@ -238,6 +238,42 @@ test_export_term_theme_user_pin_passes_through() {
       case "$child" in *"CS_TERM_THEME_AUTO="*) echo "  FAIL: AUTO fallback set despite a user pin"; return 1;; esac )
 }
 
+# Launch is the only moment cs owns the tty and can measure the terminal, and
+# panes cs never launches cannot inherit that measurement. Write it under the
+# tmux CLIENT tty instead — the identity any pane on that client can ask for —
+# so an agent-teams teammate stops falling back to dark on a light terminal.
+test_export_term_theme_caches_under_the_client_tty() {
+    ( _load_cs_functions
+      local home; home=$(mktemp -d); export HOME="$home"
+      unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_BG_RGB 2>/dev/null || true
+      export TMUX="/tmp/fake,1,0"
+      tmux() { printf '/dev/ttys002\n'; }
+      detect_term_theme_and_bg() { echo "light 250;248;242"; }
+      _export_term_theme
+      local f="$home/.cache/cs/term/ttys002"
+      [ -f "$f" ] || { echo "  FAIL: no cache entry written for the client tty"; rm -rf "$home"; return 1; }
+      local got; got=$(cat "$f")
+      rm -rf "$home"
+      [ "$got" = "light 250;248;242" ] || { echo "  FAIL: cached '$got', want 'light 250;248;242'"; return 1; }
+      return 0 )
+}
+
+# Outside tmux the terminal is cs's own tty, and that is the key a later render
+# in the same terminal would look under.
+test_export_term_theme_caches_under_its_own_tty_outside_tmux() {
+    ( _load_cs_functions
+      local home; home=$(mktemp -d); export HOME="$home"
+      unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_BG_RGB TMUX 2>/dev/null || true
+      tty() { printf '/dev/ttys007\n'; }
+      detect_term_theme_and_bg() { echo "dark 20;20;20"; }
+      _export_term_theme
+      local f="$home/.cache/cs/term/ttys007" ok=0
+      [ -f "$f" ] && [ "$(cat "$f")" = "dark 20;20;20" ] && ok=1
+      rm -rf "$home"
+      [ "$ok" = 1 ] || { echo "  FAIL: no entry under the plain tty"; return 1; }
+      return 0 )
+}
+
 echo ""
 echo "cs theme detection tests"
 echo "========================"
@@ -290,6 +326,8 @@ run_test test_detect_theme_graceful_no_tmux
 run_test test_cs_term_theme_override_wins
 run_test test_export_term_theme_exports_theme_and_auto_marker
 run_test test_export_term_theme_user_pin_passes_through
+run_test test_export_term_theme_caches_under_the_client_tty
+run_test test_export_term_theme_caches_under_its_own_tty_outside_tmux
 run_test test_tmux_truecolor_exported_at_launch
 # The tab color is derived from a digest of the session name, and the point is
 # determinism: the same name always gets the same color. Without any digest tool
