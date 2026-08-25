@@ -14,7 +14,7 @@ export GIT_OPTIONAL_LOCKS=0
 # When launch auto-detected the theme it exports CS_TERM_THEME plus the
 # CS_TERM_THEME_AUTO=1 marker: that value can't follow a mid-session terminal
 # theme switch (macOS auto dark mode), and re-querying the terminal here would
-# corrupt claude's TUI, so on macOS read the live OS appearance instead. Assigns
+# corrupt claude's TUI, so the ladder below asks the terminal instead. Assigns
 # SL_THEME directly rather than via `$(...)`, per this file's fork-free-hot-path
 # convention.
 #
@@ -75,7 +75,15 @@ _sl_tmux_is_real() {
     start=${1:-$$}
     # The loop is capped: a ppid table can be cyclic if a pid is reused between
     # the read and the walk, and an uncapped walk would spin on the render path.
-    ps -ax -o pid=,ppid= 2>/dev/null | awk -v p="$start" -v s="$srv" '
+    # Capture first: under `set -o pipefail` a failing ps would decide the
+    # pipeline's status whatever awk concluded. An empty table means ps is
+    # missing or restricted, not that the server is absent — return 0 there,
+    # because a tool failure is not evidence of the negative, and scoring it as
+    # one makes a genuine pane render dark and lose its pane id.
+    local table
+    table=$(ps -ax -o pid=,ppid= 2>/dev/null) || table=""
+    [ -n "$table" ] || return 0
+    printf '%s\n' "$table" | awk -v p="$start" -v s="$srv" '
         { pp[$1] = $2 }
         END {
             for (n = 0; n < 24; n++) {
@@ -112,18 +120,34 @@ _sl_mark_foreign_env() {
 # variable was not (see the attach-probe revert): a session variable is shared
 # by every pane whatever terminal they are on, while the tty IS the terminal's
 # identity. Re-attach from a different terminal and the key differs, so the
-# lookup misses and the ladder falls through. The failure mode is no answer,
-# never a confidently stale one.
+# lookup misses and the ladder falls through. The key is not sufficient on its
+# own, though — tty names are recycled — so entries also expire by age.
 _sl_theme_from_client_cache() {
-    [ -n "${TMUX:-}" ] || return 1
     local tty key line theme rgb
-    tty=$(tmux display-message -p '#{client_tty}' 2>/dev/null) || return 1
+    # Inside tmux the terminal is the attached client; outside it, it is this
+    # process's own tty — which is the key _write_term_cache already uses, so
+    # refusing to look there left the answer on disk unreachable.
+    if [ -n "${TMUX:-}" ]; then
+        tty=$(tmux display-message -p '#{client_tty}' 2>/dev/null) || return 1
+    else
+        tty=$(tty 2>/dev/null) || return 1
+    fi
     [ -n "$tty" ] || return 1
     key=${tty#/dev/}; key=${key//\//-}
     # Refuse anything that is not a plain device name, so a hostile or garbled
     # client tty cannot reach outside the cache directory.
     case "$key" in ''|*[!A-Za-z0-9._-]*|.|..) return 1 ;; esac
-    line=$(cat "$HOME/.cache/cs/term/$key" 2>/dev/null) || return 1
+    local entry="$HOME/.cache/cs/term/$key"
+    [ -f "$entry" ] || return 1
+    # tty device names are recycled by the OS: a dark terminal on ttys002
+    # closes, a light one opens on the same device, and the entry becomes a
+    # confidently wrong answer rather than the miss the key alone would give.
+    # Age is the only signal available here, so an entry that has outlived a
+    # plausible terminal session is refused rather than trusted.
+    if [ -n "$(find "$entry" -mmin +720 2>/dev/null)" ]; then
+        return 1
+    fi
+    line=$(<"$entry") || return 1
     theme=${line%% *}
     case "$theme" in dark|light) ;; *) return 1 ;; esac
     rgb=${line#* }
@@ -363,8 +387,14 @@ _detect_level() {
     # index 224, a pink, so a smooth ramp came out as flat blocks with a pink
     # one in the middle. When the output is going to be quantised anyway, emit
     # palette entries in the first place and the quantisation becomes a no-op.
-    elif [ -n "${TMUX:-}" ] && [ -z "${CLAUDE_CODE_TMUX_TRUECOLOR:-}" ] \
-        && [[ "${TERM:-}" == *256color* ]]; then
+    elif [ -n "${TMUX:-}" ] && [ -z "${SL_ENV_FOREIGN:-}" ] \
+        && [ -z "${CLAUDE_CODE_TMUX_TRUECOLOR:-}" ]; then
+        # SL_ENV_FOREIGN is settled before this runs: a process that merely
+        # inherited TMUX is drawing on its own terminal, nothing is muting it,
+        # and downgrading would cost it colour for no reason. And the mute is
+        # the host's decision, not TERM's — gating on a "256color" substring
+        # skipped every tmux whose default-terminal is screen or similar,
+        # which is the population the workaround exists for.
         LEVEL="256"
     elif [ "${COLORTERM:-}" = "truecolor" ] || [ "${COLORTERM:-}" = "24bit" ] \
         || [ "${TERM_PROGRAM:-}" = "iTerm.app" ] || [ "${TERM_PROGRAM:-}" = "WezTerm" ]; then
@@ -859,7 +889,7 @@ _build_dots() {
 }
 
 _build_wash() {
-    local cells="$1" i span
+    local cells="$1" i
     _WASH=""
     [ "$cells" -gt 0 ] 2>/dev/null || return 0
     # ░ paints roughly a quarter of its cell, so three quarters of every cell is
@@ -875,7 +905,6 @@ _build_wash() {
     else
         sr=228; sg=224; sb=208; dr=250; dg=246; db=232
     fi
-    span=$(( cells - 1 )); [ "$span" -lt 1 ] && span=1
     # Cancel the previous segment's background before the first cell. The wash
     # sets only a foreground, so without this the last pill's colour — amber on
     # an escalated rate-limit block — stays in effect and floods the whole tail.
@@ -1088,13 +1117,19 @@ _render() {
         # that runs on every render.
         [ "$remaining" -gt 500 ] && remaining=500
         if [ "$remaining" -gt 0 ]; then
-            if [ "$LEVEL" != "truecolor" ]; then
+            if [ "$LEVEL" = "256" ]; then
                 _build_dots "$remaining"
                 out+="$_DOTS"
             elif [ -n "$lastrgb" ] && [ -n "${CS_TERM_BG_RGB:-}" ]; then
                 _sgr 48 surface; local tailrgb="$_RGB"
                 [ -n "$tailrgb" ] || tailrgb="$lastrgb"
                 _build_gradient "$tailrgb" "$CS_TERM_BG_RGB" "$remaining"
+                # _build_gradient validates the destination and returns empty
+                # when it will not parse. Reachable without user error: the
+                # client cache checks only the charset, so a truncated entry
+                # exports a malformed value. Fall through rather than leave
+                # the bar stopped dead.
+                [ -n "$_GRADIENT" ] || { _build_wash "$remaining"; _GRADIENT="$_WASH"; }
                 out+="$_GRADIENT"
             elif [ -n "$lastrgb" ]; then
                 _build_wash "$remaining"

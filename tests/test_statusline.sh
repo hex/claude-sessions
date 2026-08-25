@@ -1499,16 +1499,6 @@ test_gradient_renders_without_a_measured_bg() {
 
 # A real measurement must still win: the assumption is a fallback, never an
 # override, or a correctly-measured cream terminal would fade to generic white.
-test_measured_bg_outranks_the_assumption() {
-    export COLORTERM=truecolor
-    export COLUMNS=80
-    export CS_TERM_THEME=light CS_TERM_BG_RGB="252;247;229"
-    local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
-    local out
-    out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;252;247;229" \
-        "a measured background must still be the fade target" || return 1
-}
 
 # is a whisper: 226;222;206 -> 252;247;229 on a cream terminal. The unmeasured
 # path took its destination from the assumed background but left its START on
@@ -1745,6 +1735,120 @@ test_truecolor_keeps_the_gradient_not_dots() {
     assert_output_not_contains "$out" $'·' "a gradient bar needs no dots" || return 1
 }
 
+# A 16-colour terminal cannot render a 256-colour escape, so the dotted tail
+# must not fire there — the pills are 30-37/90-97 and dots at 38;5; would be
+# garbage or an unstyled row.
+test_basic_terminal_gets_no_dotted_tail() {
+    export TERM=xterm COLUMNS=60 CS_TERM_THEME=dark
+    unset COLORTERM TERM_PROGRAM CS_TERM_BG_RGB TMUX 2>/dev/null || true
+    local out
+    out=$(run_sl '{"session_name":"s","workspace":{"current_dir":"/none"}}')
+    assert_output_not_contains "$out" "38;5;" \
+        "a basic terminal must never be sent a 256-colour escape" || return 1
+}
+
+# The tmux mute only applies when this process is really in that tmux server.
+# A process that merely inherited TMUX is drawing on its own terminal, nothing
+# is quantising its output, and downgrading it discards colour for no reason.
+test_foreign_tmux_does_not_downgrade_a_real_truecolor_terminal() {
+    ( _load_sl_functions
+      _make_ps_chain "$$:99 99:1 2216:1"
+      export TMUX="/tmp/fake,2216,0" COLORTERM=truecolor TERM=xterm-256color
+      export PATH="$TEST_TMPDIR/fakebin:$PATH"
+      unset CLAUDE_CODE_TMUX_TRUECOLOR 2>/dev/null || true
+      _sl_mark_foreign_env
+      _detect_level
+      assert_eq "truecolor" "$LEVEL" \
+        "an inherited TMUX must not cost a real terminal its colour" || return 1 )
+}
+
+# The host quantises by muting truecolor, which has nothing to do with what TERM
+# says. Gating the workaround on a "256color" substring silently skips every
+# tmux whose default-terminal is screen, tmux-256color's cousins, or anything
+# else — the population the workaround exists for.
+test_tmux_mute_applies_regardless_of_term_name() {
+    ( _load_sl_functions
+      _make_ps_chain "$$:2216 2216:1"
+      export TMUX="/tmp/fake,2216,0" COLORTERM=truecolor TERM=screen
+      export PATH="$TEST_TMPDIR/fakebin:$PATH"
+      unset CLAUDE_CODE_TMUX_TRUECOLOR 2>/dev/null || true
+      _sl_mark_foreign_env
+      _detect_level
+      assert_eq "256" "$LEVEL" \
+        "the mute workaround must not depend on TERM naming 256color" || return 1 )
+}
+
+# A background that will not parse must fall through to the wash rather than
+# leaving the bar stopped dead. Reachable without user error: the client cache
+# validates only the charset, so a truncated entry exports a malformed value.
+test_malformed_background_falls_through_to_a_tail() {
+    export COLORTERM=truecolor COLUMNS=60 CS_TERM_THEME=light
+    export CS_TERM_BG_RGB="1;2"
+    unset TMUX COLORFGBG 2>/dev/null || true
+    local out stripped width
+    out=$(run_sl '{"session_name":"s","workspace":{"current_dir":"/none"}}')
+    stripped=$(printf '%s' "$out" | sed -E $'s/\033\\[[0-9;]*m//g')
+    width=$( ( _load_sl_functions; _display_width "$stripped"; echo "$_WIDTH" ) )
+    assert_eq "60" "$width" \
+        "a malformed background must not cost the bar its tail" || return 1
+}
+
+# The cache is keyed by terminal identity, and outside tmux that identity is
+# this process's own tty — which launch already writes under. Refusing to read
+# it there left the answer on disk unreachable.
+test_client_cache_is_read_outside_tmux_too() {
+    ( _load_sl_functions
+      export HOME="$TEST_TMPDIR/home"; mkdir -p "$HOME/.cache/cs/term"
+      printf 'light 252;247;229\n' > "$HOME/.cache/cs/term/ttys009"
+      unset TMUX CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_BG_RGB 2>/dev/null || true
+      tty() { printf '/dev/ttys009\n'; }
+      _sl_theme_from_client_cache || { echo "    cache unreadable outside tmux"; return 1; }
+      assert_eq "light" "$SL_THEME" "the plain-tty entry must be found" || return 1 )
+}
+
+# A ps that is missing or restricted returns an empty table, which the walk
+# cannot distinguish from "the server is not an ancestor". Scoring a tool
+# failure as proof of the negative makes a genuine pane render dark and lose
+# its pane id. An empty table means "cannot tell", so the claim stands.
+test_unusable_ps_is_not_evidence_of_a_foreign_tmux() {
+    ( _load_sl_functions
+      mkdir -p "$TEST_TMPDIR/fakebin"
+      printf '#!/bin/sh\nexit 1\n' > "$TEST_TMPDIR/fakebin/ps"
+      chmod +x "$TEST_TMPDIR/fakebin/ps"
+      export TMUX="/tmp/fake,2216,0" PATH="$TEST_TMPDIR/fakebin:$PATH"
+      _sl_mark_foreign_env
+      assert_eq "" "${SL_ENV_FOREIGN:-}" \
+        "a ps that cannot answer must not be read as a foreign environment" || return 1 )
+}
+
+# tty device names are recycled: a dark terminal on ttys002 closes, a light one
+# opens on the same device, and the cached entry is then a confidently wrong
+# answer rather than the miss the design depends on. Age is the only signal
+# available, so an entry older than the boundary is refused.
+test_client_cache_refuses_a_stale_entry() {
+    ( _load_sl_functions
+      export HOME="$TEST_TMPDIR/home"; mkdir -p "$HOME/.cache/cs/term"
+      local f="$HOME/.cache/cs/term/ttys002"
+      printf 'light 252;247;229\n' > "$f"
+      touch -t 202001010000 "$f"
+      export TMUX="/tmp/fake,1,0"
+      unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_BG_RGB 2>/dev/null || true
+      tmux() { printf '/dev/ttys002\n'; }
+      _sl_theme_from_client_cache && { echo "    a stale entry was used"; return 1; }
+      return 0 )
+}
+
+test_client_cache_accepts_a_fresh_entry() {
+    ( _load_sl_functions
+      export HOME="$TEST_TMPDIR/home"; mkdir -p "$HOME/.cache/cs/term"
+      printf 'light 252;247;229\n' > "$HOME/.cache/cs/term/ttys002"
+      export TMUX="/tmp/fake,1,0"
+      unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_BG_RGB 2>/dev/null || true
+      tmux() { printf '/dev/ttys002\n'; }
+      _sl_theme_from_client_cache || { echo "    a fresh entry was refused"; return 1; }
+      assert_eq "light" "$SL_THEME" "the fresh entry must be adopted" || return 1 )
+}
+
 run_test test_happy_path_docs_fixture_plain
 run_test test_all_segments_ordering_plain
 run_test test_limits_neutral_when_healthy
@@ -1819,7 +1923,6 @@ run_test test_build_gradient_cell_count_and_endpoints
 run_test test_build_gradient_noop_on_malformed_target
 run_test test_full_width_gradient_reaches_columns
 run_test test_gradient_renders_without_a_measured_bg
-run_test test_measured_bg_outranks_the_assumption
 run_test test_unmeasured_tail_is_a_coverage_wash
 run_test test_wash_does_not_inherit_the_last_segment_background
 run_test test_wash_grey_ramps_toward_the_theme
@@ -2194,8 +2297,6 @@ test_sl_theme_user_pin_overrides() {
 }
 
 
-
-
 test_sl_theme_non_macos_uses_frozen_launch_value() {
     ( _load_sl_functions
       export CS_TERM_THEME=dark CS_TERM_THEME_AUTO=1
@@ -2222,23 +2323,13 @@ test_sl_theme_non_macos_defaults_dark() {
 }
 
 
-
-
-
-
-
-
-
-
-
-
 # The OS appearance describes the system, not the terminal the pills are drawn
 # on, and the two are unrelated for a fixed-theme terminal or one embedded in an
 # app. With no signal from the terminal itself, an unknown is now dark — the
 # assumption the rest of cs makes — rather than a guess sourced from the OS.
 test_sl_theme_unknown_is_dark_on_macos() {
     ( _load_sl_functions
-      unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_OS_THEME COLORFGBG TMUX 2>/dev/null || true
+      unset CS_TERM_THEME CS_TERM_THEME_AUTO COLORFGBG TMUX 2>/dev/null || true
       OSTYPE="darwin24"
       _defaults_called=0; defaults() { _defaults_called=1; return 1; }
       _sl_detect_theme
@@ -2252,7 +2343,7 @@ test_sl_theme_unknown_is_dark_on_macos() {
 # background — are unaffected, which is what keeps the blast radius narrow.
 test_sl_theme_unknown_light_terminal_now_renders_dark() {
     ( _load_sl_functions
-      unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_OS_THEME COLORFGBG 2>/dev/null || true
+      unset CS_TERM_THEME CS_TERM_THEME_AUTO COLORFGBG 2>/dev/null || true
       TMUX="/tmp/fake,1,0"; OSTYPE="darwin24"
       tmux() { printf '\n'; }     # client reports no theme
       defaults() { return 1; }    # macOS is light, and no longer consulted
@@ -2265,7 +2356,7 @@ test_sl_theme_unknown_light_terminal_now_renders_dark() {
 # real background and must not be dragged to dark by it.
 test_sl_theme_measured_launch_beats_the_dark_default() {
     ( _load_sl_functions
-      unset CS_TERM_OS_THEME COLORFGBG TMUX 2>/dev/null || true
+      unset COLORFGBG TMUX 2>/dev/null || true
       export CS_TERM_THEME=light CS_TERM_THEME_AUTO=1
       OSTYPE="darwin24"
       _sl_detect_theme
@@ -2280,7 +2371,7 @@ test_sl_theme_measured_launch_beats_the_dark_default() {
 # Outside tmux, COLORFGBG is the terminal's own statement about itself.
 test_sl_theme_uses_colorfgbg_outside_tmux() {
     ( _load_sl_functions
-      unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_OS_THEME TMUX 2>/dev/null || true
+      unset CS_TERM_THEME CS_TERM_THEME_AUTO TMUX 2>/dev/null || true
       COLORFGBG="15;0"; OSTYPE="darwin24"
       defaults() { return 1; }   # macOS says light; the terminal says dark
       _sl_detect_theme
@@ -2290,7 +2381,7 @@ test_sl_theme_uses_colorfgbg_outside_tmux() {
 
 test_sl_theme_colorfgbg_light_outside_tmux() {
     ( _load_sl_functions
-      unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_OS_THEME TMUX 2>/dev/null || true
+      unset CS_TERM_THEME CS_TERM_THEME_AUTO TMUX 2>/dev/null || true
       COLORFGBG="0;15"; OSTYPE="darwin24"
       defaults() { return 0; }   # macOS says dark; the terminal says light
       _sl_detect_theme
@@ -2302,7 +2393,7 @@ test_sl_theme_colorfgbg_light_outside_tmux() {
 # must not speak there, exactly as the launch detector refuses it.
 test_sl_theme_ignores_colorfgbg_inside_tmux() {
     ( _load_sl_functions
-      unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_OS_THEME 2>/dev/null || true
+      unset CS_TERM_THEME CS_TERM_THEME_AUTO 2>/dev/null || true
       TMUX="/tmp/fake,1,0"; COLORFGBG="15;0"; OSTYPE="darwin24"
       tmux() { return 1; }       # no client theme available
       defaults() { return 1; }   # macOS says light
@@ -2315,7 +2406,7 @@ test_sl_theme_ignores_colorfgbg_inside_tmux() {
 # terminal reports one at all.
 test_sl_theme_uses_tmux_client_theme() {
     ( _load_sl_functions
-      unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_OS_THEME COLORFGBG 2>/dev/null || true
+      unset CS_TERM_THEME CS_TERM_THEME_AUTO COLORFGBG 2>/dev/null || true
       TMUX="/tmp/fake,1,0"; OSTYPE="darwin24"
       tmux() { printf 'dark\n'; }   # the attached client reports dark
       defaults() { return 1; }      # macOS says light
@@ -2328,7 +2419,7 @@ test_sl_theme_uses_tmux_client_theme() {
 # through rather than being read as a value.
 test_sl_theme_falls_through_empty_client_theme() {
     ( _load_sl_functions
-      unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_OS_THEME COLORFGBG 2>/dev/null || true
+      unset CS_TERM_THEME CS_TERM_THEME_AUTO COLORFGBG 2>/dev/null || true
       TMUX="/tmp/fake,1,0"; OSTYPE="darwin24"
       tmux() { printf '\n'; }
       defaults() { return 0; }   # macOS says dark
@@ -2391,6 +2482,14 @@ run_test test_client_cache_rejects_a_malformed_entry
 run_test test_level_drops_to_256_when_truecolor_will_be_muted
 run_test test_level_stays_truecolor_when_the_flag_is_present
 run_test test_level_stays_truecolor_outside_tmux
+run_test test_basic_terminal_gets_no_dotted_tail
+run_test test_foreign_tmux_does_not_downgrade_a_real_truecolor_terminal
+run_test test_tmux_mute_applies_regardless_of_term_name
+run_test test_malformed_background_falls_through_to_a_tail
+run_test test_client_cache_is_read_outside_tmux_too
+run_test test_unusable_ps_is_not_evidence_of_a_foreign_tmux
+run_test test_client_cache_refuses_a_stale_entry
+run_test test_client_cache_accepts_a_fresh_entry
 run_test test_dotted_tail_fills_a_256_bar
 run_test test_truecolor_keeps_the_gradient_not_dots
 run_test test_sl_theme_falls_through_empty_client_theme

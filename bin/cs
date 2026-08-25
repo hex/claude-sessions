@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.8.20"
+VERSION="2026.8.21"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 
@@ -6053,7 +6053,7 @@ _export_term_theme() {
     # children) render with the right palette. CS_TERM_THEME_AUTO is a bare
     # presence marker: it flags that CS_TERM_THEME came from launch auto-detection
     # rather than an explicit user pin, so the statusline knows it may override
-    # the launch theme with the live OS appearance (macOS auto dark mode). A
+    # the launch theme when the terminal itself reports a different one. A
     # user-set CS_TERM_THEME returned above and carries no marker, so it stays a
     # hard override everywhere.
     export CS_TERM_THEME="$theme"
@@ -6066,8 +6066,7 @@ _export_term_theme() {
 
 # macOS reports dark mode by the presence of the AppleInterfaceStyle key;
 # the key is absent in light mode (including auto mode while light). KEEP IN SYNC
-# with the macOS branch of _sl_detect_theme in bin/cs-statusline, which reads the
-# same key live per render (the statusline is standalone and sources nothing).
+# with the classification in bin/cs-statusline's own ladder.
 _theme_from_os_appearance() {
     [[ "$OSTYPE" == darwin* ]] || { echo "unknown"; return; }
     if defaults read -g AppleInterfaceStyle >/dev/null 2>&1; then
