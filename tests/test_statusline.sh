@@ -1524,6 +1524,34 @@ test_measured_bg_outranks_the_assumption() {
         "a measured background must still be the fade target" || return 1
 }
 
+# A measured terminal fades from _bg_shade(bg) to bg — a 10% nudge, so the tail
+# is a whisper: 226;222;206 -> 252;247;229 on a cream terminal. The unmeasured
+# path took its destination from the assumed background but left its START on
+# the gauge surface constant, an unrelated tone. On dark that produced
+# 140;132;122 -> 30;30;30, a 110-point smear across the bar instead of a fade
+# into it. The start must be shaded from the same background the fade targets.
+test_assumed_fade_is_as_subtle_as_a_measured_one() {
+    export COLORTERM=truecolor
+    export COLUMNS=80
+    unset CS_TERM_BG_RGB 2>/dev/null || true
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
+    local out maxr
+    out=$(CS_TERM_THEME=dark run_sl "$json")
+    assert_output_contains "$out" "48;2;52;52;52" \
+        "an unmeasured dark fade must start one shade off its own background" || return 1
+    # The trailing cells are the fade. Every one must live in the dark range:
+    # anchoring on the gauge surface (140;132;122) would put the brightest at
+    # 140 and smear a light band across the bar.
+    maxr=$(printf '%s' "$out" | sed -n l | grep -o '48;2;[0-9]*;[0-9]*;[0-9]*' \
+           | tail -20 | cut -d';' -f3 | sort -n | tail -1)
+    [ -n "$maxr" ] && [ "$maxr" -le 60 ] || {
+        echo "    brightest cell in the fade is $maxr (want <= 60)"; return 1; }
+    out=$(CS_TERM_THEME=light run_sl "$json")
+    assert_output_contains "$out" "48;2;225;225;225" \
+        "an unmeasured light fade must start one shade off its own background" || return 1
+    return 0
+}
+
 run_test test_happy_path_docs_fixture_plain
 run_test test_all_segments_ordering_plain
 run_test test_limits_neutral_when_healthy
@@ -1599,6 +1627,7 @@ run_test test_build_gradient_noop_on_malformed_target
 run_test test_full_width_gradient_reaches_columns
 run_test test_gradient_renders_without_a_measured_bg
 run_test test_assumed_bg_differs_by_theme
+run_test test_assumed_fade_is_as_subtle_as_a_measured_one
 run_test test_measured_bg_outranks_the_assumption
 run_test test_tail_gradient_neutral_regardless_of_last_segment
 run_test test_narrow_terminal_no_gradient
