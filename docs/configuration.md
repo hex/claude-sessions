@@ -48,10 +48,9 @@ export CS_TERM_THEME="light"   # or "dark"
 
 # Override the terminal's real background color (default: auto-detected via
 # the same OSC 11 query as CS_TERM_THEME, when it succeeds). Drives the
-# statusline's full-width gradient fade. Unset, the fade still renders
-# toward a conventional background for the resolved theme, which is quiet
-# but leaves a faint edge on a terminal whose background is not near-neutral;
-# setting the real value is what makes that edge vanish.
+# statusline's full-width gradient fade. Unset, the tail is drawn instead as
+# a coverage wash that needs no background colour at all; setting the real
+# value switches it to a colour fade that ends exactly on your terminal.
 export CS_TERM_BG_RGB="250;248;242"   # r;g;b, 0-255 each
 
 # Disable colors (see https://no-color.org)

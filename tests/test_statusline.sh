@@ -1494,22 +1494,8 @@ test_gradient_renders_without_a_measured_bg() {
     assert_eq "80" "$width" "an unmeasured terminal should still fill exactly COLUMNS cells" || return 1
 }
 
-# The assumption is theme-derived, so the two classes must not land on the same
 # colour — otherwise "it renders" would be true while the fade ran the wrong way
 # on one of them.
-test_assumed_bg_differs_by_theme() {
-    export COLORTERM=truecolor
-    export COLUMNS=80
-    unset CS_TERM_BG_RGB 2>/dev/null || true
-    local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
-    local out
-    out=$(CS_TERM_THEME=dark run_sl "$json")
-    assert_output_contains "$out" "48;2;30;30;30" \
-        "a dark terminal with no measurement should fade toward a dark background" || return 1
-    out=$(CS_TERM_THEME=light run_sl "$json")
-    assert_output_contains "$out" "48;2;250;250;250" \
-        "a light terminal with no measurement should fade toward a light background" || return 1
-}
 
 # A real measurement must still win: the assumption is a fallback, never an
 # override, or a correctly-measured cream terminal would fade to generic white.
@@ -1524,32 +1510,61 @@ test_measured_bg_outranks_the_assumption() {
         "a measured background must still be the fade target" || return 1
 }
 
-# A measured terminal fades from _bg_shade(bg) to bg — a 10% nudge, so the tail
 # is a whisper: 226;222;206 -> 252;247;229 on a cream terminal. The unmeasured
 # path took its destination from the assumed background but left its START on
 # the gauge surface constant, an unrelated tone. On dark that produced
 # 140;132;122 -> 30;30;30, a 110-point smear across the bar instead of a fade
 # into it. The start must be shaded from the same background the fade targets.
-test_assumed_fade_is_as_subtle_as_a_measured_one() {
+
+# An unmeasured terminal gets a coverage wash instead of a colour fade. A block
+# element paints only part of its cell, so what is NOT painted is the terminal's
+# own background — which is how the tail reaches the terminal colour without
+# ever naming it. Nothing in the tail may set a background.
+test_unmeasured_tail_is_a_coverage_wash() {
+    export COLORTERM=truecolor
+    export COLUMNS=80
+    export CS_TERM_THEME=dark
+    unset CS_TERM_BG_RGB 2>/dev/null || true
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
+    local out stripped width
+    out=$(run_sl "$json")
+    assert_output_contains "$out" $'░' \
+        "an unmeasured tail should be drawn with a light-shade block" || return 1
+    assert_output_not_contains "$out" "48;2;30;30;30" \
+        "no assumed background may be painted any more" || return 1
+    stripped=$(printf '%s' "$out" | sed -E $'s/\033\\[[0-9;]*m//g')
+    width=$( ( _load_sl_functions; _display_width "$stripped"; echo "$_WIDTH" ) )
+    assert_eq "80" "$width" "the wash must still fill exactly COLUMNS cells" || return 1
+}
+
+# The grey ramps toward the theme's own end of the greyscale: lighter on a light
+# terminal, darker on a dark one. Mirroring the light delta naively (240-12=228)
+# would leave the 232..255 greyscale ramp and land in the colour cube, which
+# renders as a yellow-green rather than a grey.
+test_wash_grey_ramps_toward_the_theme() {
     export COLORTERM=truecolor
     export COLUMNS=80
     unset CS_TERM_BG_RGB 2>/dev/null || true
     local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
-    local out maxr
-    out=$(CS_TERM_THEME=dark run_sl "$json")
-    assert_output_contains "$out" "48;2;52;52;52" \
-        "an unmeasured dark fade must start one shade off its own background" || return 1
-    # The trailing cells are the fade. Every one must live in the dark range:
-    # anchoring on the gauge surface (140;132;122) would put the brightest at
-    # 140 and smear a light band across the bar.
-    maxr=$(printf '%s' "$out" | sed -n l | grep -o '48;2;[0-9]*;[0-9]*;[0-9]*' \
-           | tail -20 | cut -d';' -f3 | sort -n | tail -1)
-    [ -n "$maxr" ] && [ "$maxr" -le 60 ] || {
-        echo "    brightest cell in the fade is $maxr (want <= 60)"; return 1; }
+    local out
     out=$(CS_TERM_THEME=light run_sl "$json")
-    assert_output_contains "$out" "48;2;225;225;225" \
-        "an unmeasured light fade must start one shade off its own background" || return 1
-    return 0
+    assert_output_contains "$out" "38;5;252" "a light terminal's wash must end near white" || return 1
+    out=$(CS_TERM_THEME=dark run_sl "$json")
+    assert_output_contains "$out" "38;5;232" "a dark terminal's wash must end near black" || return 1
+    assert_output_not_contains "$out" "38;5;252" "a dark wash must not brighten toward white" || return 1
+}
+
+# A measured background is still the better answer and keeps the colour fade:
+# it can end exactly on the terminal's own value, which a wash only approaches.
+test_measured_bg_still_uses_the_colour_fade() {
+    export COLORTERM=truecolor
+    export COLUMNS=80
+    export CS_TERM_THEME=light CS_TERM_BG_RGB="252;247;229"
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "48;2;252;247;229" \
+        "a measured terminal must still fade to its own background" || return 1
 }
 
 run_test test_happy_path_docs_fixture_plain
@@ -1626,9 +1641,10 @@ run_test test_build_gradient_cell_count_and_endpoints
 run_test test_build_gradient_noop_on_malformed_target
 run_test test_full_width_gradient_reaches_columns
 run_test test_gradient_renders_without_a_measured_bg
-run_test test_assumed_bg_differs_by_theme
-run_test test_assumed_fade_is_as_subtle_as_a_measured_one
 run_test test_measured_bg_outranks_the_assumption
+run_test test_unmeasured_tail_is_a_coverage_wash
+run_test test_wash_grey_ramps_toward_the_theme
+run_test test_measured_bg_still_uses_the_colour_fade
 run_test test_tail_gradient_neutral_regardless_of_last_segment
 run_test test_narrow_terminal_no_gradient
 run_test test_no_gradient_without_columns
