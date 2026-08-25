@@ -354,6 +354,18 @@ _fallback() {
 _detect_level() {
     if [ "${FORCE_COLOR:-}" = "0" ] || [ -n "${NO_COLOR:-}" ] || [ "${TERM:-}" = "dumb" ]; then
         LEVEL="plain"
+    # Inside tmux the host mutes a truecolor status line to a fallback palette
+    # unless CLAUDE_CODE_TMUX_TRUECOLOR is set; cs exports it at launch, so a
+    # pane cs launched keeps full colour. A pane cs did NOT launch — an
+    # agent-teams teammate is spawned straight off the tmux server and inherits
+    # nothing — does not have it, and its 24-bit output is snapped to the 256
+    # cube. That snap is not neutral: a warm off-white's nearest neighbour is
+    # index 224, a pink, so a smooth ramp came out as flat blocks with a pink
+    # one in the middle. When the output is going to be quantised anyway, emit
+    # palette entries in the first place and the quantisation becomes a no-op.
+    elif [ -n "${TMUX:-}" ] && [ -z "${CLAUDE_CODE_TMUX_TRUECOLOR:-}" ] \
+        && [[ "${TERM:-}" == *256color* ]]; then
+        LEVEL="256"
     elif [ "${COLORTERM:-}" = "truecolor" ] || [ "${COLORTERM:-}" = "24bit" ] \
         || [ "${TERM_PROGRAM:-}" = "iTerm.app" ] || [ "${TERM_PROGRAM:-}" = "WezTerm" ]; then
         LEVEL="truecolor"

@@ -1663,6 +1663,43 @@ test_client_cache_rejects_a_malformed_entry() {
       return 0 )
 }
 
+# Claude Code mutes a truecolor status line to a fallback palette inside tmux
+# unless CLAUDE_CODE_TMUX_TRUECOLOR is set (docs/statusline.md, lib/00-header.sh).
+# cs exports it at launch, so a pane cs launched has it — but an agent-teams
+# teammate is spawned straight off the tmux server and inherits nothing, so its
+# bar gets downsampled to the 256 cube. A warm off-white has no near neighbour
+# there and lands on index 224, which is pink: the smooth ramp came out as three
+# flat blocks, one of them pink.
+#
+# When the output is going to be snapped anyway, emit colours that are already
+# palette entries. Then the snap is a no-op and nothing shifts.
+test_level_drops_to_256_when_truecolor_will_be_muted() {
+    ( _load_sl_functions
+      export TMUX="/tmp/fake,1,0" COLORTERM=truecolor TERM=xterm-256color
+      unset CLAUDE_CODE_TMUX_TRUECOLOR NO_COLOR FORCE_COLOR 2>/dev/null || true
+      _detect_level
+      assert_eq "256" "$LEVEL" \
+        "inside tmux without the truecolor flag, cs must not emit 24-bit for the host to mangle" || return 1 )
+}
+
+test_level_stays_truecolor_when_the_flag_is_present() {
+    ( _load_sl_functions
+      export TMUX="/tmp/fake,1,0" COLORTERM=truecolor TERM=xterm-256color CLAUDE_CODE_TMUX_TRUECOLOR=1
+      unset NO_COLOR FORCE_COLOR 2>/dev/null || true
+      _detect_level
+      assert_eq "truecolor" "$LEVEL" \
+        "a pane cs launched keeps full colour" || return 1 )
+}
+
+test_level_stays_truecolor_outside_tmux() {
+    ( _load_sl_functions
+      export COLORTERM=truecolor TERM=xterm-256color
+      unset TMUX CLAUDE_CODE_TMUX_TRUECOLOR NO_COLOR FORCE_COLOR 2>/dev/null || true
+      _detect_level
+      assert_eq "truecolor" "$LEVEL" \
+        "outside tmux nothing mutes the line, so the flag is irrelevant" || return 1 )
+}
+
 run_test test_happy_path_docs_fixture_plain
 run_test test_all_segments_ordering_plain
 run_test test_limits_neutral_when_healthy
@@ -2306,6 +2343,9 @@ run_test test_client_cache_supplies_theme_and_background
 run_test test_client_cache_misses_after_reattach_from_another_terminal
 run_test test_client_cache_does_not_override_an_explicit_background
 run_test test_client_cache_rejects_a_malformed_entry
+run_test test_level_drops_to_256_when_truecolor_will_be_muted
+run_test test_level_stays_truecolor_when_the_flag_is_present
+run_test test_level_stays_truecolor_outside_tmux
 run_test test_sl_theme_falls_through_empty_client_theme
 run_test test_sl_bg_rgb_dropped_after_switch
 run_test test_sl_bg_rgb_kept_when_theme_matches
