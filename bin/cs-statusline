@@ -791,7 +791,11 @@ _build_wash() {
     # renders as a colour, not a grey.
     if [ "$SL_THEME" = "dark" ]; then from=237; to=232; else from=252; to=255; fi
     span=$(( cells - 1 )); [ "$span" -lt 1 ] && span=1
+    # Cancel the previous segment's background before the first cell. The wash
+    # sets only a foreground, so without this the last pill's colour — amber on an
+    # escalated rate-limit block — stays in effect and floods the whole tail.
     local esc=$'\033' shade=$'\xe2\x96\x91'
+    _WASH="${esc}[0m"
     for ((i = 0; i < cells; i++)); do
         g=$(( from + (to - from) * i / span ))
         _WASH+="${esc}[38;5;${g}m${shade}"

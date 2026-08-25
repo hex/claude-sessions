@@ -1573,6 +1573,29 @@ test_measured_bg_still_uses_the_colour_fade() {
         "a measured terminal must still fade to its own background" || return 1
 }
 
+# The wash paints no background of its own, which only works if the previous
+# segment's background has been switched off first. Without that reset the
+# amber of an escalated rate-limit block stays active and floods the entire
+# tail — the exact failure the colour-fade path already guards against, on a
+# branch that guard never ran on.
+test_wash_does_not_inherit_the_last_segment_background() {
+    export COLORTERM=truecolor
+    export COLUMNS=120
+    export CS_TERM_THEME=light
+    unset CS_TERM_BG_RGB 2>/dev/null || true
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8},"rate_limits":{"five_hour":{"used_percentage":20},"seven_day":{"used_percentage":83}}}'
+    local out
+    out=$(run_sl "$json")
+    # Counting the amber code proves nothing: it is emitted once and then STAYS
+    # in effect until something cancels it. The property is that a reset stands
+    # between the last pill and the first wash cell, so assert the reset itself.
+    printf '%s' "$out" | grep -q $'\033\[0m\033\[38;5;[0-9]*m\xe2\x96\x91' || {
+        echo "    no background reset before the wash; the last pill's colour floods the tail"
+        return 1
+    }
+    return 0
+}
+
 run_test test_happy_path_docs_fixture_plain
 run_test test_all_segments_ordering_plain
 run_test test_limits_neutral_when_healthy
@@ -1649,6 +1672,7 @@ run_test test_full_width_gradient_reaches_columns
 run_test test_gradient_renders_without_a_measured_bg
 run_test test_measured_bg_outranks_the_assumption
 run_test test_unmeasured_tail_is_a_coverage_wash
+run_test test_wash_does_not_inherit_the_last_segment_background
 run_test test_wash_grey_ramps_toward_the_theme
 run_test test_measured_bg_still_uses_the_colour_fade
 run_test test_tail_gradient_neutral_regardless_of_last_segment
