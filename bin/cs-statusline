@@ -975,7 +975,15 @@ _render() {
             [ -n "$tailrgb" ] || tailrgb="$lastrgb"
             local gradient_dst="${CS_TERM_BG_RGB:-}"
             if [ -z "$gradient_dst" ]; then
+                # No measurement: fade from one shade off the ASSUMED background
+                # to that background, exactly as the measured path fades from
+                # _bg_shade(bg) to bg. Anchoring the start on the gauge surface
+                # instead would span an unrelated tone — on dark that is
+                # 140;132;122 -> 30;30;30, a smear across the bar rather than a
+                # fade into it. The gauge surface itself is left alone; only the
+                # tail's own start moves.
                 _sl_assumed_bg_rgb; gradient_dst="$_ASSUMED_BG"
+                if _bg_shade "$gradient_dst"; then tailrgb="$_R;$_G;$_B"; fi
             fi
             _build_gradient "$tailrgb" "$gradient_dst" "$remaining"
             out+="$_GRADIENT"
