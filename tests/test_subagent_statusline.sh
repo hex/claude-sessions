@@ -19,7 +19,7 @@ setup() {
     local _v
     while IFS='=' read -r _v _; do
         case "$_v" in
-            CS_*|CLAUDE_*|NO_COLOR|COLORTERM|TERM_PROGRAM|FORCE_COLOR)
+            CS_*|CLAUDE_*|NO_COLOR|COLORTERM|TERM_PROGRAM|FORCE_COLOR|TMUX|TMUX_PANE|COLORFGBG)
                 unset "$_v" 2>/dev/null || true ;;
         esac
     done < <(env)
@@ -32,6 +32,7 @@ teardown() {
     if [[ -n "$TEST_TMPDIR" ]] && [[ -d "$TEST_TMPDIR" ]]; then
         rm -rf "$TEST_TMPDIR"
     fi
+    unset TMUX TMUX_PANE COLORFGBG 2>/dev/null || true
     unset NO_COLOR COLORTERM TERM_PROGRAM FORCE_COLOR CS_SUBAGENT_NOW_MS \
         CS_SUBAGENT_STATUSLINE_DISABLE CS_STATUSLINE_CTX_WARN CS_STATUSLINE_CTX_CRIT 2>/dev/null || true
 }
