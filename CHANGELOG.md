@@ -4,6 +4,40 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.8.21
+
+A statusline release. The bar reads the terminal instead of guessing at it, and it now draws a tail on terminals cs never measured — which is most of them.
+
+### Features
+
+- **The bar reaches the edge on terminals cs never measured.** The full-width gradient needs the terminal's real background, and only cs's own OSC 11 query at launch ever learns it — so on every session cs did not launch, the bar simply stopped after the last pill. The tail now falls back: where a background is known it still fades exactly onto it, and where none is, it draws a coverage wash of `░` as foreground on the terminal's default background, so the uncovered part of every cell is the terminal itself and no colour is ever named.
+
+- **A pane cs did not launch can still find the measurement.** An agent-teams teammate is spawned straight off the tmux server and inherits none of cs's environment, so it fell to the dark default and drew a dark bar on a light terminal. Launch now also writes its measurement to `~/.cache/cs/term/<key>`, keyed by the tmux client tty, and a render with no `CS_TERM_*` asks tmux which client its pane is on and reads it back. The key is the terminal's identity, so re-attaching from another terminal misses rather than returning a stale answer — and because tty names are recycled, entries also expire after twelve hours.
+
+- **A dotted tail where the bar cannot ramp.** Inside tmux the host mutes a truecolor status line unless `CLAUDE_CODE_TMUX_TRUECOLOR` is set, which cs exports at launch — so a pane cs did not launch had its 24-bit output snapped to the 256 palette, and a warm off-white's nearest neighbour there is a pink. cs now detects that case and drops to the palette deliberately; such a bar cannot ramp, so its tail is evenly spaced `·` at one dim grey.
+
+### Fixes
+
+- **The palette followed macOS, not the terminal.** The status line read the system appearance on every render, which says nothing about a terminal with a fixed scheme or one embedded in an app — exactly where it was reliably wrong. It now asks the terminal: the attached tmux client's own reported theme inside tmux, `COLORFGBG` outside it, and dark when nothing answers, the same assumption cs makes everywhere else with nothing to go on.
+
+- **The tmux claim is checked, not believed.** `TMUX` is ordinary environment and is inherited wholesale, so a program launched from a pane passes it to a window it opens in a terminal of its own. Every rung keyed off it then read the wrong terminal. cs now walks its ancestry for the tmux server named in `TMUX`; when it is absent the whole inherited terminal description is treated as describing somewhere else, and the pane id is hidden rather than printed from another session.
+
+- **An unknown theme means dark.** It previously meant "no palette", which rendered a bar with no theme applied at all.
+
+- **A local install shipped whatever picker was lying in `bin/`.** `bin/cs-tui` is a gitignored build artifact that nothing regenerates, so `./install.sh` copied whatever binary happened to be there — observed deploying a picker seventeen days older than the release being installed, while reporting success. No version check catches it: the picker carries no version of its own.
+
+- **Seven defects caught by review before shipping.** All seven were in this release's own work and all passed a green suite: a 16-colour terminal sent 256-colour escapes it cannot render; an inherited `TMUX` costing a real truecolor terminal its colour; the tmux-mute workaround gated on a `TERM` substring that does not track whether the host quantises, so it silently skipped `screen`; a malformed `CS_TERM_BG_RGB` leaving the bar stopped dead; a missing or restricted `ps` read as proof of a foreign environment, so a genuine pane rendered dark; recycled tty names letting the background cache return a confidently stale answer, which a comment and the docs both claimed was impossible; and a cache entry written under a plain tty that no render could read.
+
+### Docs
+
+- The theme ladder, the background cache, and both tail mechanisms are documented in `docs/statusline.md`, including how to pin `CS_TERM_BG_RGB` for a terminal cs cannot measure.
+- `docs/upstream/statusline-theme-request.md` writes up the upstream ask: Claude Code already resolves the terminal theme and tracks it live, and does not pass it to the status line. Every rung above exists because that field does not.
+
+### Internal
+
+- The attach probe was built and reverted. Four adversarial reviews found four distinct defect classes, and the last two were the design rather than the code; `tmux set-environment` is session-scoped while the identity it needed is per-window. The commit message records what not to try again.
+- `tests/test_subagent_statusline.sh` read `TMUX` from the developer's shell. Harmless until the colour ladder started consulting it, at which point three assertions passed outside tmux and failed inside it.
+
 ## 2026.8.20
 
 ### Features
