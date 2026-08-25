@@ -759,21 +759,37 @@ _lerp_channel() {
 # caller can unconditionally append _GRADIENT with no separate validation
 # gate. Fork-free: no command substitution beyond the here-string splits
 # already used elsewhere in this script for delimited fields.
-# The background to fade the tail toward when cs never measured one.
+
+# The tail for a terminal cs never measured: a coverage wash, not a colour fade.
 #
-# Only cs's launch-time OSC 11 ever learns the real background, so until now a
-# session cs did not launch had no destination and rendered no gradient at all —
-# the bar simply stopped mid-line, which is what most terminals anyone tries
-# actually showed. The theme still classifies the terminal as light or dark, and
-# that is enough to fade toward a conventional background of that class. Being a
-# few shades off reads as a soft band at the far right rather than a
-# wrong-coloured bar, and it is the same "one unknown, one answer" rule the
-# theme ladder already applies. A measured CS_TERM_BG_RGB always outranks it.
-# Assigns unconditionally, so an inherited variable of the same name cannot
-# seed it.
-_sl_assumed_bg_rgb() {
-    if [ "$SL_THEME" = "dark" ]; then _ASSUMED_BG="30;30;30"
-    else _ASSUMED_BG="250;250;250"; fi
+# A colour fade has to name the colour it ends on, and without a measurement
+# that name is a guess — it lands a few shades off and shows as a band. A block
+# element instead paints only PART of its cell (U+2591 ░ covers roughly a
+# quarter), so the rest of every cell is the terminal's own background, whatever
+# that is. Fading coverage therefore reaches the terminal exactly, on a light
+# terminal, a dark one, one that switches theme mid-session, and one with a
+# translucent or image background — none of which a named colour survives.
+#
+# Only four coverage levels exist in Unicode (█▓▒░), too few to be smooth, so
+# the grey does the fine work and the block stays ░ throughout: the drawn run
+# ramps from a mid grey to the theme's own end of the 256-colour greyscale, then
+# the last quarter is blank. Mirroring the light delta naively would leave that
+# ramp — 240-12 is 228, which is in the colour cube and renders yellow-green,
+# not grey — so the dark end is clamped to 232, the ramp's darkest entry.
+_build_wash() {
+    local cells="$1" i idx g from to drawn span
+    _WASH=""
+    [ "$cells" -gt 0 ] 2>/dev/null || return 0
+    if [ "$SL_THEME" = "dark" ]; then from=240; to=232; else from=240; to=252; fi
+    drawn=$(( cells * 3 / 4 ))
+    [ "$drawn" -lt 1 ] && drawn=1
+    span=$(( drawn - 1 )); [ "$span" -lt 1 ] && span=1
+    local esc=$'\033' shade=$'\xe2\x96\x91'
+    for ((i = 0; i < cells; i++)); do
+        if [ "$i" -ge "$drawn" ]; then _WASH+=" "; continue; fi
+        g=$(( from + (to - from) * i / span ))
+        _WASH+="${esc}[38;5;${g}m${shade}${esc}[0m"
+    done
 }
 
 _build_gradient() {
@@ -971,22 +987,15 @@ _render() {
         # that runs on every render.
         [ "$remaining" -gt 500 ] && remaining=500
         if [ "$remaining" -gt 0 ]; then
-            _sgr 48 surface; local tailrgb="$_RGB"
-            [ -n "$tailrgb" ] || tailrgb="$lastrgb"
-            local gradient_dst="${CS_TERM_BG_RGB:-}"
-            if [ -z "$gradient_dst" ]; then
-                # No measurement: fade from one shade off the ASSUMED background
-                # to that background, exactly as the measured path fades from
-                # _bg_shade(bg) to bg. Anchoring the start on the gauge surface
-                # instead would span an unrelated tone — on dark that is
-                # 140;132;122 -> 30;30;30, a smear across the bar rather than a
-                # fade into it. The gauge surface itself is left alone; only the
-                # tail's own start moves.
-                _sl_assumed_bg_rgb; gradient_dst="$_ASSUMED_BG"
-                if _bg_shade "$gradient_dst"; then tailrgb="$_R;$_G;$_B"; fi
+            if [ -n "${CS_TERM_BG_RGB:-}" ]; then
+                _sgr 48 surface; local tailrgb="$_RGB"
+                [ -n "$tailrgb" ] || tailrgb="$lastrgb"
+                _build_gradient "$tailrgb" "$CS_TERM_BG_RGB" "$remaining"
+                out+="$_GRADIENT"
+            else
+                _build_wash "$remaining"
+                out+="$_WASH"
             fi
-            _build_gradient "$tailrgb" "$gradient_dst" "$remaining"
-            out+="$_GRADIENT"
         fi
     fi
     out+="$reset"
