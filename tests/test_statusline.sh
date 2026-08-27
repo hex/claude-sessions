@@ -2691,4 +2691,76 @@ run_test test_refresh_no_fable_bucket_clears
 run_test test_refresh_without_a_token_still_schedules
 run_test test_refresh_respects_a_held_lock
 
+# Seed a cache record and a Claude config naming account "org-abc".
+# $1 org, $2 pct, $3 resets_at, $4 fetched_at, $5 next_poll_at.
+seed_usage_cache() {
+    export CS_USAGE_DIR="$TEST_TMPDIR/usage"
+    export CLAUDE_CONFIG_DIR="$TEST_TMPDIR"
+    mkdir -p "$CS_USAGE_DIR"
+    printf '%s' '{"oauthAccount":{"organizationUuid":"org-abc"}}' > "$TEST_TMPDIR/.claude.json"
+    jq -n --arg o "$1" --argjson p "$2" --arg r "$3" --argjson f "$4" --argjson n "$5" \
+        '{org:$o,pct:$p,resets_at:$r,fetched_at:$f,next_poll_at:$n}' > "$CS_USAGE_DIR/fable.json"
+}
+
+test_fable_read_returns_fresh_reading() {
+    _load_sl_functions
+    seed_usage_cache org-abc 86 "2026-08-29T03:59:59.686034+00:00" 1787816000 1787816300
+    CS_STATUSLINE_NOW=1787816100 _NOW="" _SL_NOW_READY="" _fable_read
+    assert_eq "$_FABLE_PCT" "86" "a fresh same-account reading must be returned" || return 1
+    assert_eq "$_FABLE_RESET" "1787975999" "resets_at must arrive as epoch seconds" || return 1
+    assert_eq "$_FABLE_DUE" "" "a cache inside its poll interval must not be due" || return 1
+}
+
+# Swapping accounts must blank the chip at once rather than leave the previous
+# account's percentage up until the next poll — an account swap happens when one
+# account is near a limit, which is exactly when a wrong number misleads most.
+test_fable_read_blanks_on_account_mismatch() {
+    _load_sl_functions
+    seed_usage_cache org-other 86 "2026-08-29T03:59:59Z" 1787816000 1787816300
+    CS_STATUSLINE_NOW=1787816100 _NOW="" _SL_NOW_READY="" _fable_read
+    assert_eq "$_FABLE_PCT" "" "a reading for another account must not render" || return 1
+    assert_eq "$_FABLE_DUE" "1" "an account mismatch must force a refresh" || return 1
+}
+
+test_fable_read_blanks_when_stale() {
+    _load_sl_functions
+    seed_usage_cache org-abc 86 "2026-08-29T03:59:59Z" 1787816000 1787819500
+    CS_STATUSLINE_NOW=1787819000 _NOW="" _SL_NOW_READY="" _fable_read   # 3000s after the fetch
+    assert_eq "$_FABLE_PCT" "" "a reading older than 1800s must not render" || return 1
+}
+
+test_fable_read_marks_due_past_next_poll() {
+    _load_sl_functions
+    seed_usage_cache org-abc 86 "2026-08-29T03:59:59Z" 1787816000 1787816300
+    CS_STATUSLINE_NOW=1787816400 _NOW="" _SL_NOW_READY="" _fable_read
+    assert_eq "$_FABLE_DUE" "1" "past next_poll_at the cache must be due" || return 1
+    assert_eq "$_FABLE_PCT" "86" "a due cache still renders its last good reading" || return 1
+}
+
+test_fable_read_absent_cache_is_due_and_blank() {
+    _load_sl_functions
+    export CS_USAGE_DIR="$TEST_TMPDIR/usage-none"
+    export CLAUDE_CONFIG_DIR="$TEST_TMPDIR"
+    printf '%s' '{"oauthAccount":{"organizationUuid":"org-abc"}}' > "$TEST_TMPDIR/.claude.json"
+    CS_STATUSLINE_NOW=1787816100 _NOW="" _SL_NOW_READY="" _fable_read
+    assert_eq "$_FABLE_PCT" "" "no cache means no reading" || return 1
+    assert_eq "$_FABLE_DUE" "1" "no cache must be due for a first fetch" || return 1
+}
+
+# A record written for an account with no Fable window carries pct null; that
+# must read as "nothing to show", not as a zero percent.
+test_fable_read_null_pct_is_blank_not_zero() {
+    _load_sl_functions
+    seed_usage_cache org-abc null "" 1787816000 1787816300
+    CS_STATUSLINE_NOW=1787816100 _NOW="" _SL_NOW_READY="" _fable_read
+    assert_eq "$_FABLE_PCT" "" "a null percentage must render nothing, not 0%" || return 1
+}
+
+run_test test_fable_read_returns_fresh_reading
+run_test test_fable_read_blanks_on_account_mismatch
+run_test test_fable_read_blanks_when_stale
+run_test test_fable_read_marks_due_past_next_poll
+run_test test_fable_read_absent_cache_is_due_and_blank
+run_test test_fable_read_null_pct_is_blank_not_zero
+
 report_results

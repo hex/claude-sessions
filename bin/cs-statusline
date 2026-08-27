@@ -764,6 +764,58 @@ EOF
     rm -f "$body" "$hdr" 2>/dev/null
 }
 
+USAGE_MAX_AGE=1800   # past this a reading is too old to sit beside a live countdown
+
+# Read the cached Fable window into _FABLE_PCT (integer) and _FABLE_RESET
+# (epoch), and raise _FABLE_DUE when a refresh should be kicked. One jq reads the
+# cache and Claude Code's config together, so proving the reading belongs to the
+# account signed in *now* costs no extra fork. Anything unreadable, too old, or
+# belonging to another account yields no reading at all: the chip may be absent,
+# but it must never carry a number that is not this account's, right now.
+_fable_read() {
+    _FABLE_PCT=""
+    _FABLE_RESET=""
+    _FABLE_DUE=""
+    command -v jq >/dev/null 2>&1 || return 0
+    local cache cfg
+    cache="$(_usage_cache_dir)/fable.json"
+    cfg=$(_claude_config_file)
+    if [ ! -f "$cache" ]; then _FABLE_DUE=1; return 0; fi
+    [ -f "$cfg" ] || return 0
+    _sl_now
+    [[ "${_NOW:-}" =~ ^[0-9]+$ ]] || return 0
+    local fields
+    # An empty org on either side is not evidence of a mismatch — a config
+    # without an oauthAccount (an API-key session) should not invalidate a
+    # reading; only two populated, differing values do.
+    fields=$(jq -r --slurpfile cfg "$cfg" '
+        (($cfg[0].oauthAccount.organizationUuid) // "") as $live
+        | [ (if (.org // "") == "" or $live == "" or (.org == $live) then "1" else "0" end),
+            (.pct // "" | tostring),
+            (.resets_at // ""),
+            (.fetched_at // 0 | tostring),
+            (.next_poll_at // 0 | tostring) ] | .[]' "$cache" 2>/dev/null) || return 0
+    local ok="" pct="" reset="" fetched="" next=""
+    {
+        IFS= read -r ok
+        IFS= read -r pct
+        IFS= read -r reset
+        IFS= read -r fetched
+        IFS= read -r next
+    } <<EOF
+$fields
+EOF
+    [[ "${next:-}" =~ ^[0-9]+$ ]] || next=0
+    [ "$_NOW" -ge "$next" ] && _FABLE_DUE=1
+    if [ "${ok:-0}" != "1" ]; then _FABLE_DUE=1; return 0; fi
+    [[ "${fetched:-}" =~ ^[0-9]+$ ]] || return 0
+    [ $(( _NOW - fetched )) -le "$USAGE_MAX_AGE" ] || return 0
+    [[ "${pct:-}" =~ ^[0-9]+(\.[0-9]+)?$ ]] || return 0
+    _FABLE_PCT="${pct%%.*}"
+    _iso_epoch "$reset"
+    _FABLE_RESET="${_EPOCH:-}"
+}
+
 # Read claude_session_color from a session's machine-local state file
 # (.cs/local/state) into _SESSION_COLOR (empty if none). Pure bash: this runs
 # once per render, where an awk fork is real cost. KEEP THE FORMAT IN SYNC
