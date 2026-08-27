@@ -60,6 +60,14 @@ export NO_COLOR="1"
 export CS_STATUSLINE_SEGMENTS="logo,session,notes,mail,pane,git,model,ctx,limits,fable"  # this is the default
 export CS_STATUSLINE_DISABLE="1"
 
+# Where the machine-global usage cache behind the `fable` segment lives
+# (default: $CS_SESSIONS_ROOT/.usage). One record per account per machine, not
+# one per session: the endpoint it draws on budgets requests per account.
+export CS_USAGE_DIR="$HOME/.claude-sessions/.usage"
+
+# Render the `fable` segment from cache only, never triggering a refresh
+export CS_USAGE_NO_REFRESH="1"
+
 # Opt a session out of the scope-prompt auto-grounding hook
 export CS_SCOPE_DISABLE="1"
 

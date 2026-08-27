@@ -4,6 +4,45 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.8.22
+
+A statusline release. On Fable, the bar was quietly showing you the wrong limit — this adds the right one.
+
+### Features
+
+- **A `fable` chip, on Fable sessions only.** Fable draws on its own model-scoped weekly bucket, and Claude Code puts only the two plan-wide windows on the statusline's stdin — so a Fable session showed `5h` and `wk` for a limit that was not the one about to bite. Verified live during development: `wk` read 49% while Fable's own window was at 97%. The new block reads `✧ fable 86% · 1d20h`, escalating amber at 70% and red at 90% like its neighbours, and appending the reset countdown at 80% and up as the weekly block does. It renders only when the active model is Fable; every other model returns at the gate having touched nothing.
+
+- **That one figure is fetched, because it cannot be read.** `GET /api/oauth/usage` is the same endpoint Claude Code polls, reached with Claude Code's own OAuth token — from the Keychain on macOS, from `<config_home>/.credentials.json` on Linux and WSL2. cs reads that credential and never refreshes or writes it: Claude Code owns the rotation, so an expired token is a 401 to back off from. The bearer travels to `curl` on stdin, never on a command line where `ps` would expose it.
+
+- **The render still performs no network I/O.** It reads a cache and, when that cache is due, detaches a refresh — a mode of the statusline script itself, so nothing new lands on the install manifest. The cache is machine-global at `$CS_SESSIONS_ROOT/.usage/`, not per-session, because the endpoint admits roughly 28–30 requests per account per rolling hour and capacity returns only as old requests age out; a 600-second floor holds cs to about six an hour however many sessions are open, leaving room for Claude Code and anything else on the machine.
+
+### Fixes
+
+Every one of these was found by adversarial review of this release's own work, and every one passed a green suite first.
+
+- **One account's usage could be shown as another's.** Several routes led there, and the fix was structural rather than another comparison: a cached reading is now addressed by the account it belongs to, so it can never be found under a different one. A refresh that cannot identify the account it fetched for stores no reading at all, and a swap detected mid-request discards the result rather than filing it under whoever is signed in now.
+
+- **Two accounts defeated the request budget entirely.** With one cache record for the machine, whichever account was not in it had to override the poll interval to replace it — so two sessions on different accounts each bypassed the other's backoff and fetched on every render. Measured at twelve requests inside a single ten-minute window, against a budget of roughly thirty an hour. Per-account records let the interval and the account stop competing; the same sequence now costs two requests, one each.
+
+- **The refresher ignored its own schedule.** It had no interval check, so any condition that marked the cache due — a corrupt record, an unreadable config — spent a request the cadence had already booked. It now declines under the lock, and holds the cadence even when the account cannot be named at all.
+
+- **A response that was not this API's could erase a good reading.** A captive portal or proxy answering 200 with an HTML interstitial parsed to no Fable window, which is indistinguishable from an account that genuinely has none — so it discarded the last good number and stamped the replacement fresh. Such a response is now treated as a failure, and failures keep the previous reading.
+
+- **A stale lock could be reclaimed twice.** Two refreshers both finding a lock abandoned could both proceed, the second deleting the first's fresh lock. Reclaim is now a rename, which is atomic, so exactly one contender wins.
+
+- **A corrupt cache never healed.** The parse failure returned before marking the cache due, so no refresh was ever kicked and the chip stayed dead until the file was deleted by hand.
+
+- **The Keychain call had no bound on the platform that needs one.** A locked login keychain can put `security` behind a prompt that never gets answered while the refresher holds the machine-wide lock. The existing helper falls through to unbounded execution when neither `timeout` nor `gtimeout` exists — which is stock macOS, the only platform where that prompt exists. It now falls back to `perl`'s `alarm`.
+
+- **A non-UTC reset stamp was read as UTC**, putting the countdown hours out. Any offset that is not `+00:00` is now refused: no countdown beats a confidently wrong one.
+
+- **A machine without `curl` forked a doomed refresher every render** — once a second, per Fable session — because the cache it could never write was perpetually due.
+
+### Docs
+
+- `docs/statusline.md` gains a Fable usage section covering the endpoint, the credential sources, the budget the cadence is shaped by, and every condition under which the chip does not render.
+- `docs/session-layout.md` documents `.usage/`; `docs/configuration.md` gains `CS_USAGE_DIR` and `CS_USAGE_NO_REFRESH`.
+
 ## 2026.8.21
 
 A statusline release. The bar reads the terminal instead of guessing at it, and it now draws a tail on terminals cs never measured — which is most of them.
