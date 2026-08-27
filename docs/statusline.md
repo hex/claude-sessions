@@ -23,19 +23,87 @@ Default order: `logo,session,notes,mail,pane,git,model,ctx,limits,fable`. A bran
 | `model` | Model display name plus effort level when present | stdin `model.display_name`, `effort.level` | Periwinkle accent (claude's usage-chip purple), white text |
 | `ctx` | Context window usage, `ctx 42%` | stdin `context_window.used_percentage` | Grey; amber at 50%, red at 80% (tunable) |
 | `limits` | 5-hour and weekly rate limit usage as two adjacent blocks, `5h 62% · 2h14m` and `wk 85% · 5d16h`; each block appends the time until its window resets when known, but only once usage is tight — the 5-hour countdown shows at 50% and up, the weekly at 80% and up, so the suffix appears as the window fills rather than while there's headroom. The countdown reads compactly (`45m`, `2h14m`), rolling into days past 24 hours (`5d16h`) | stdin `rate_limits.*.used_percentage`, `rate_limits.five_hour.resets_at`, `rate_limits.seven_day.resets_at` | Grey; each block escalates to amber at 70% and red at 90% on its own value |
+| `fable` | Fable's own weekly usage as a single block, `fable 86% · 1d20h`, rendered only when the active model is Fable. Fable draws on a model-scoped weekly bucket that the plan-wide `5h` and `wk` numbers do not describe, so without this block a Fable session shows two figures for a limit that is not the one about to bite. The countdown appends at 80% and up, like `wk` | `GET /api/oauth/usage`, cached machine-globally (see [Fable usage](#fable-usage)) | Grey; escalates to amber at 70% and red at 90% |
 | `cost` | Session cost, `$1.23` (opt-in; not in the default order) | stdin `cost.total_cost_usd` | Grey |
 
 Every segment is null-when-nothing: missing data means the segment and its separator simply do not render. Outside a cs session, `session` falls back to the directory name.
 
-Per-segment icons are standard Unicode glyphs (gauge `◔`, star `✦`, branch `⎇`, clock `◷`, half-circle `◑`, pane `◫`, envelope `✉`) from the Geometric Shapes and dingbat ranges, so they render in any monospace font without a patched Nerd Font. The `session` segment carries no icon — its `claude_session_color` background is identity enough. No Nerd Font or private-use glyphs are used.
+Per-segment icons are standard Unicode glyphs (gauge `◔`, star `✦`, branch `⎇`, clock `◷`, half-circle `◑`, open star `✧`, pane `◫`, envelope `✉`) from the Geometric Shapes and dingbat ranges, so they render in any monospace font without a patched Nerd Font. The `session` segment carries no icon — its `claude_session_color` background is identity enough. No Nerd Font or private-use glyphs are used.
 
 ## Data sources and performance
 
-The render path is deliberately thin: one `jq` pass over stdin, at most one git subprocess, and one small file read (`.cs/local/state` for the session color). There is no transcript parsing, no network access, and no caching. Data gathering is gated per segment, so disabling `git` in `CS_STATUSLINE_SEGMENTS` means the git subprocess never forks.
+The render path is deliberately thin: one `jq` pass over stdin, at most one git subprocess, and one small file read (`.cs/local/state` for the session color). There is no transcript parsing and no network access. Data gathering is gated per segment, so disabling `git` in `CS_STATUSLINE_SEGMENTS` means the git subprocess never forks — and a session on any model but Fable never touches the usage cache described below.
 
 The writes in the render path are machine-local and best-effort: each render stamps the current context-window usage, truncated to an integer, to `.cs/local/context-pct`. The task-queue gate (the `narrative-reminder.sh` Stop hook, see [hooks.md](hooks.md)) reads this file to decide whether to suggest compacting before a walk-away drain. Skipped outside a cs session or when the stdin JSON carries no context percentage.
 
 The same render also stamps `.cs/local/limits` (5-hour and weekly used percentages and reset epochs) so `cs -usage` can anchor its windows at the true reset boundaries; both files are machine-local and best-effort.
+
+## Fable usage
+
+One figure on the bar cannot come from stdin. Claude Code puts exactly two
+rate-limit windows there — the plan-wide five-hour and seven-day ones — and
+picks them explicitly; the per-model windows it also computes are projected only
+into its control-protocol `get_usage` response, which is the SDK and remote
+thin-client channel rather than anything a hook can read. Fable draws on a
+model-scoped weekly bucket, so on a Fable session the `5h` and `wk` numbers
+describe a limit that is not the one about to bite.
+
+So cs fetches that one figure itself, from the same endpoint Claude Code polls:
+
+```
+GET https://api.anthropic.com/api/oauth/usage
+```
+
+The Fable bucket is the entry in the response's `limits[]` array whose
+`scope.model.display_name` names a model — the unified windows ride in that same
+array with a null model scope, which is why the filter keys on the display name
+rather than on position. Its `percent` is already 0–100 on the wire, and its
+`resets_at` is an ISO 8601 string rather than the epoch integer the stdin schema
+uses, so it is converted at read time.
+
+The bearer is Claude Code's own OAuth token, read from the macOS Keychain
+(`security find-generic-password -s "Claude Code-credentials"`). cs **reads** that
+credential and never refreshes or writes it: Claude Code owns the refresh cycle,
+so an expired token surfaces here as a 401 to back off from, not as something to
+repair. The token reaches `curl` on stdin as a `-K` config line, never on a
+command line where `ps` would expose it to every process on the machine.
+
+**The render performs no network I/O.** It reads a cache, and only on a Fable
+session, where it costs one extra `jq` that reads the cache and Claude Code's
+config together. When that cache is due, the render detaches
+`cs-statusline --refresh-usage` — a mode of this same script, so the feature adds
+no second binary and nothing to the install manifest — and renders whatever the
+cache already holds.
+
+### Why the cache is machine-global
+
+That endpoint admits roughly **28–30 requests per identity per rolling
+60 minutes**, and under one of the two observed 429 regimes the identity is the
+account rather than the token. Capacity returns only as old requests age out, so
+a burst saturates the account for a full hour and pausing does not restore
+headroom early. The budget is shared with Claude Code itself and with any other
+tool on the machine that polls it.
+
+Hence one cache for the host, at `$CS_SESSIONS_ROOT/.usage/fable.json`, rather
+than one per session, and a 300-second floor between polls: cs contributes about
+twelve requests an hour however many sessions are open. A `mkdir` lock
+serialises refreshers across sessions (a lock older than 120 seconds is treated
+as abandoned), and a 429 backs off for `Retry-After` plus a minute, floored at
+ten — a 429 does not reliably clear at its stated horizon.
+
+Polling happens only while the active model is Fable, because the trigger lives
+inside the segment and the segment is gated on the model. A session on any other
+model costs the budget nothing.
+
+### When the chip does not render
+
+The chip is null-when-nothing, and deliberately strict about it: no cache, no
+Fable window on the account, no `jq` or `curl`, a reading older than 1800
+seconds, or a reading stamped with a different account than the one now signed
+in. That last check exists because accounts get swapped precisely when one is
+near a limit — the moment a stale percentage would mislead most. The countdown
+is always recomputed from `resets_at` at render time, so it stays accurate even
+when the percentage beside it is a few minutes old.
 
 The git call runs with `GIT_OPTIONAL_LOCKS=0` (no index locking for a read-only query) under a 2-second timeout, and is skipped entirely when the workspace has no `.git`.
 
@@ -150,6 +218,12 @@ export CS_STATUSLINE_SEGMENTS="session,ctx,git,limits"
 # Context thresholds (percent)
 export CS_STATUSLINE_CTX_WARN=50
 export CS_STATUSLINE_CTX_CRIT=80
+
+# Where the machine-global usage cache lives (default $CS_SESSIONS_ROOT/.usage)
+export CS_USAGE_DIR="$HOME/.claude-sessions/.usage"
+
+# Render the fable chip from cache only, never kicking a refresh
+export CS_USAGE_NO_REFRESH=1
 
 # Plain text, no colors
 export NO_COLOR=1
