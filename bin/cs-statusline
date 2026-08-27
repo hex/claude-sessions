@@ -6,6 +6,11 @@ set -uo pipefail
 
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 
+# This file re-invokes itself for the out-of-band usage refresh, so it needs its
+# own path — resolved at load, since $0 is the sourcing shell under the library
+# mode the test suite uses.
+_SL_SELF="${BASH_SOURCE[0]}"
+
 # Read-only status query; never take the index lock from a render.
 export GIT_OPTIONAL_LOCKS=0
 
@@ -251,6 +256,7 @@ ICON_NOTES=$'\xe2\x96\xa4 '     # U+25A4 square with horizontal fill (notes queu
 ICON_MAIL=$'\xe2\x9c\x89 '      # U+2709 envelope (unread cross-session mail)
 ICON_LOGO=$'\xe2\x9c\xb3'       # U+2733 eight-spoked asterisk (Claude mark)
 ICON_PANE=$'\xe2\x97\xab '      # U+25EB square with vertical bisect (tmux pane)
+ICON_FABLE=$'\xe2\x9c\xa7 '     # U+2727 white four-pointed star (model-scoped limit)
 
 # --- stdin -----------------------------------------------------------------
 
@@ -1012,6 +1018,32 @@ _seg_limits() {
     fi
 }
 
+# Fable's weekly window, which is model-scoped and so appears in none of the
+# rate_limits Claude Code puts on stdin. Rendered only on Fable: on any other
+# model the gate returns before the cache is touched, so the segment costs
+# nothing — no file read, no fork, and above all no poll against a request
+# budget shared with Claude Code itself.
+_seg_fable() {
+    case "${SL_MODEL_ID:-}" in claude-fable*) ;; *) return 0 ;; esac
+    _fable_read
+    if [ -n "$_FABLE_DUE" ] && [ "${CS_USAGE_NO_REFRESH:-}" != "1" ]; then
+        # Detached, so the render never waits on the network: the subshell exits
+        # at once and the refresher is orphaned. Its own lock is what keeps
+        # concurrent sessions from stampeding the endpoint.
+        ( "${BASH:-bash}" "$_SL_SELF" --refresh-usage >/dev/null 2>&1 & ) >/dev/null 2>&1
+    fi
+    [ -n "$_FABLE_PCT" ] || return 0
+    _thresh_color "$_FABLE_PCT" 70 90
+    local label="fable ${_FABLE_PCT}%"
+    # Gated at 80% like the weekly block: this is a seven-day window, so
+    # time-to-reset only becomes actionable as it nears exhaustion.
+    if [ "$_FABLE_PCT" -ge 80 ]; then
+        _fmt_rest "$_FABLE_RESET"
+        [ -n "$_REST" ] && label="$label · $_REST"
+    fi
+    _add "${ICON_FABLE}${label}" "$_COLOR"
+}
+
 _seg_cost() {
     [ -n "$SL_COST" ] || return 0
     local formatted
@@ -1398,7 +1430,7 @@ main() {
 
     _detect_level
 
-    local segments="${CS_STATUSLINE_SEGMENTS:-logo,session,notes,mail,pane,git,model,ctx,limits}"
+    local segments="${CS_STATUSLINE_SEGMENTS:-logo,session,notes,mail,pane,git,model,ctx,limits,fable}"
     local name names
     IFS=',' read -ra names <<< "$segments"
     for name in "${names[@]}"; do
@@ -1412,6 +1444,7 @@ main() {
             model)   _seg_model ;;
             git)     _seg_git ;;
             limits)  _seg_limits ;;
+            fable)   _seg_fable ;;
             cost)    _seg_cost ;;
         esac
     done

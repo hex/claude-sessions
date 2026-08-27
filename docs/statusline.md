@@ -10,7 +10,7 @@ With colors enabled, each segment renders as a square colored block; blocks abut
 
 ## Segments
 
-Default order: `logo,session,notes,mail,pane,git,model,ctx,limits`. A brand badge opens the bar, then identity (which session, which pane, which branch, which model), then the gauges. The `cost` segment ships but is off by default — add it to `CS_STATUSLINE_SEGMENTS` to show it.
+Default order: `logo,session,notes,mail,pane,git,model,ctx,limits,fable`. A brand badge opens the bar, then identity (which session, which pane, which branch, which model), then the gauges. The `cost` segment ships but is off by default — add it to `CS_STATUSLINE_SEGMENTS` to show it.
 
 | Segment | Shows | Source | Color |
 |---|---|---|---|

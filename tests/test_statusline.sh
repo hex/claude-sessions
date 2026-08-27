@@ -2518,11 +2518,11 @@ run_test test_sl_bg_rgb_kept_for_manual_value_when_foreign
 test_iso_epoch_parses_endpoint_format() {
     _load_sl_functions
     _iso_epoch "2026-08-29T03:59:59.686034+00:00"
-    assert_eq "$_EPOCH" "1787975999" "fractional seconds and +00:00 offset must parse as UTC" || return 1
+    assert_eq "1787975999" "$_EPOCH" "fractional seconds and +00:00 offset must parse as UTC" || return 1
     _iso_epoch "2026-08-29T03:59:59Z"
-    assert_eq "$_EPOCH" "1787975999" "a trailing Z must parse to the same instant" || return 1
+    assert_eq "1787975999" "$_EPOCH" "a trailing Z must parse to the same instant" || return 1
     _iso_epoch "2026-08-29T03:59:59"
-    assert_eq "$_EPOCH" "1787975999" "a bare timestamp must be read as UTC" || return 1
+    assert_eq "1787975999" "$_EPOCH" "a bare timestamp must be read as UTC" || return 1
 }
 
 # Garbage must yield empty, never a partial value and never a previous one left
@@ -2531,11 +2531,11 @@ test_iso_epoch_rejects_junk() {
     _load_sl_functions
     _iso_epoch "2026-08-29T03:59:59Z"
     _iso_epoch "not-a-timestamp"
-    assert_eq "$_EPOCH" "" "unparseable input must clear _EPOCH" || return 1
+    assert_eq "" "$_EPOCH" "unparseable input must clear _EPOCH" || return 1
     _iso_epoch ""
-    assert_eq "$_EPOCH" "" "empty input must yield empty" || return 1
+    assert_eq "" "$_EPOCH" "empty input must yield empty" || return 1
     _iso_epoch "2026-13-45T99:99:99Z"
-    assert_eq "$_EPOCH" "" "an out-of-range timestamp must yield empty" || return 1
+    assert_eq "" "$_EPOCH" "an out-of-range timestamp must yield empty" || return 1
 }
 
 run_test test_iso_epoch_parses_endpoint_format
@@ -2547,10 +2547,10 @@ run_test test_iso_epoch_rejects_junk
 test_parse_carries_model_id() {
     _load_sl_functions
     _parse_stdin '{"model":{"id":"claude-fable-5","display_name":"Fable"},"effort":{"level":"high"},"context_window":{"used_percentage":8}}'
-    assert_eq "$SL_MODEL_ID" "claude-fable-5" "model id must be parsed from stdin" || return 1
-    assert_eq "$SL_EFFORT" "high" "the field after model id must not be shifted" || return 1
-    assert_eq "$SL_CTX" "8" "the field before model id must not be shifted" || return 1
-    assert_eq "$SL_MODEL" "Fable" "display name must still land in SL_MODEL" || return 1
+    assert_eq "claude-fable-5" "$SL_MODEL_ID" "model id must be parsed from stdin" || return 1
+    assert_eq "high" "$SL_EFFORT" "the field after model id must not be shifted" || return 1
+    assert_eq "8" "$SL_CTX" "the field before model id must not be shifted" || return 1
+    assert_eq "Fable" "$SL_MODEL" "display name must still land in SL_MODEL" || return 1
 }
 
 run_test test_parse_carries_model_id
@@ -2630,8 +2630,8 @@ test_refresh_keeps_token_off_argv() {
     local on_argv=no on_stdin=no
     grep -q 'test-token-not-real' "$TEST_TMPDIR/curl-argv" && on_argv=yes
     grep -q 'test-token-not-real' "$TEST_TMPDIR/curl-stdin" && on_stdin=yes
-    assert_eq "$on_argv" "no" "the access token must not appear in curl's arguments" || return 1
-    assert_eq "$on_stdin" "yes" "the access token must reach curl on stdin" || return 1
+    assert_eq "no" "$on_argv" "the access token must not appear in curl's arguments" || return 1
+    assert_eq "yes" "$on_stdin" "the access token must reach curl on stdin" || return 1
 }
 
 # A 429 must not overwrite the last good reading, and must back off past the
@@ -2706,9 +2706,9 @@ test_fable_read_returns_fresh_reading() {
     _load_sl_functions
     seed_usage_cache org-abc 86 "2026-08-29T03:59:59.686034+00:00" 1787816000 1787816300
     CS_STATUSLINE_NOW=1787816100 _NOW="" _SL_NOW_READY="" _fable_read
-    assert_eq "$_FABLE_PCT" "86" "a fresh same-account reading must be returned" || return 1
-    assert_eq "$_FABLE_RESET" "1787975999" "resets_at must arrive as epoch seconds" || return 1
-    assert_eq "$_FABLE_DUE" "" "a cache inside its poll interval must not be due" || return 1
+    assert_eq "86" "$_FABLE_PCT" "a fresh same-account reading must be returned" || return 1
+    assert_eq "1787975999" "$_FABLE_RESET" "resets_at must arrive as epoch seconds" || return 1
+    assert_eq "" "$_FABLE_DUE" "a cache inside its poll interval must not be due" || return 1
 }
 
 # Swapping accounts must blank the chip at once rather than leave the previous
@@ -2718,23 +2718,23 @@ test_fable_read_blanks_on_account_mismatch() {
     _load_sl_functions
     seed_usage_cache org-other 86 "2026-08-29T03:59:59Z" 1787816000 1787816300
     CS_STATUSLINE_NOW=1787816100 _NOW="" _SL_NOW_READY="" _fable_read
-    assert_eq "$_FABLE_PCT" "" "a reading for another account must not render" || return 1
-    assert_eq "$_FABLE_DUE" "1" "an account mismatch must force a refresh" || return 1
+    assert_eq "" "$_FABLE_PCT" "a reading for another account must not render" || return 1
+    assert_eq "1" "$_FABLE_DUE" "an account mismatch must force a refresh" || return 1
 }
 
 test_fable_read_blanks_when_stale() {
     _load_sl_functions
     seed_usage_cache org-abc 86 "2026-08-29T03:59:59Z" 1787816000 1787819500
     CS_STATUSLINE_NOW=1787819000 _NOW="" _SL_NOW_READY="" _fable_read   # 3000s after the fetch
-    assert_eq "$_FABLE_PCT" "" "a reading older than 1800s must not render" || return 1
+    assert_eq "" "$_FABLE_PCT" "a reading older than 1800s must not render" || return 1
 }
 
 test_fable_read_marks_due_past_next_poll() {
     _load_sl_functions
     seed_usage_cache org-abc 86 "2026-08-29T03:59:59Z" 1787816000 1787816300
     CS_STATUSLINE_NOW=1787816400 _NOW="" _SL_NOW_READY="" _fable_read
-    assert_eq "$_FABLE_DUE" "1" "past next_poll_at the cache must be due" || return 1
-    assert_eq "$_FABLE_PCT" "86" "a due cache still renders its last good reading" || return 1
+    assert_eq "1" "$_FABLE_DUE" "past next_poll_at the cache must be due" || return 1
+    assert_eq "86" "$_FABLE_PCT" "a due cache still renders its last good reading" || return 1
 }
 
 test_fable_read_absent_cache_is_due_and_blank() {
@@ -2743,8 +2743,8 @@ test_fable_read_absent_cache_is_due_and_blank() {
     export CLAUDE_CONFIG_DIR="$TEST_TMPDIR"
     printf '%s' '{"oauthAccount":{"organizationUuid":"org-abc"}}' > "$TEST_TMPDIR/.claude.json"
     CS_STATUSLINE_NOW=1787816100 _NOW="" _SL_NOW_READY="" _fable_read
-    assert_eq "$_FABLE_PCT" "" "no cache means no reading" || return 1
-    assert_eq "$_FABLE_DUE" "1" "no cache must be due for a first fetch" || return 1
+    assert_eq "" "$_FABLE_PCT" "no cache means no reading" || return 1
+    assert_eq "1" "$_FABLE_DUE" "no cache must be due for a first fetch" || return 1
 }
 
 # A record written for an account with no Fable window carries pct null; that
@@ -2753,7 +2753,7 @@ test_fable_read_null_pct_is_blank_not_zero() {
     _load_sl_functions
     seed_usage_cache org-abc null "" 1787816000 1787816300
     CS_STATUSLINE_NOW=1787816100 _NOW="" _SL_NOW_READY="" _fable_read
-    assert_eq "$_FABLE_PCT" "" "a null percentage must render nothing, not 0%" || return 1
+    assert_eq "" "$_FABLE_PCT" "a null percentage must render nothing, not 0%" || return 1
 }
 
 run_test test_fable_read_returns_fresh_reading
@@ -2762,5 +2762,103 @@ run_test test_fable_read_blanks_when_stale
 run_test test_fable_read_marks_due_past_next_poll
 run_test test_fable_read_absent_cache_is_due_and_blank
 run_test test_fable_read_null_pct_is_blank_not_zero
+
+# The chip renders only on Fable. Every other model must pay nothing for it.
+test_fable_segment_only_on_fable() {
+    export NO_COLOR=1 CS_USAGE_NO_REFRESH=1
+    seed_usage_cache org-abc 86 "2026-08-29T03:59:59Z" 1787816000 1787816300
+    local json='{"session_name":"s","model":{"id":"claude-opus-5","display_name":"Opus"},"workspace":{"current_dir":"/none"}}'
+    local out; out=$(CS_STATUSLINE_NOW=1787816100 run_sl "$json")
+    assert_output_not_contains "$out" "fable" "a non-fable model must not render the fable chip" || return 1
+}
+
+test_fable_segment_renders_on_fable() {
+    export NO_COLOR=1 CS_USAGE_NO_REFRESH=1
+    seed_usage_cache org-abc 42 "2026-08-29T03:59:59Z" 1787816000 1787816300
+    local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"}}'
+    local out; out=$(CS_STATUSLINE_NOW=1787816100 run_sl "$json")
+    assert_output_contains "$out" "fable 42%" "a fable session must render the chip" || return 1
+    assert_output_not_contains "$out" "fable 42% ·" "below 80% the countdown must be withheld" || return 1
+}
+
+# A context-window suffix must not defeat the gate: the id arrives as
+# claude-fable-5[1m] on a 1M-context session.
+test_fable_segment_matches_1m_variant() {
+    export NO_COLOR=1 CS_USAGE_NO_REFRESH=1
+    seed_usage_cache org-abc 42 "2026-08-29T03:59:59Z" 1787816000 1787816300
+    local json='{"session_name":"s","model":{"id":"claude-fable-5[1m]","display_name":"Fable"},"workspace":{"current_dir":"/none"}}'
+    local out; out=$(CS_STATUSLINE_NOW=1787816100 run_sl "$json")
+    assert_output_contains "$out" "fable 42%" "claude-fable-5[1m] must still gate on" || return 1
+}
+
+# At 80% and up the countdown appears, matching the weekly block's gate. The
+# expected string comes from the two known instants (1787975999 - 1787816100 =
+# 159899s = 1d20h), not from _fmt_rest recomputing it the same way the code does.
+test_fable_segment_countdown_at_80() {
+    export NO_COLOR=1 CS_USAGE_NO_REFRESH=1
+    seed_usage_cache org-abc 86 "2026-08-29T03:59:59Z" 1787816000 1787816300
+    local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"}}'
+    local out; out=$(CS_STATUSLINE_NOW=1787816100 run_sl "$json")
+    assert_output_contains "$out" "fable 86% · 1d20h" "at 80%+ the countdown must be appended" || return 1
+}
+
+test_fable_segment_escalates_colour() {
+    export CS_USAGE_NO_REFRESH=1 COLORTERM=truecolor
+    seed_usage_cache org-abc 95 "2026-08-29T03:59:59Z" 1787816000 1787816300
+    local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"}}'
+    local out; out=$(CS_STATUSLINE_NOW=1787816100 run_sl "$json")
+    assert_output_contains "$out" "fable 95%" "the chip must render" || return 1
+    assert_output_contains "$out" "48;2;220;38;38" "at 90%+ the chip must go red" || return 1
+}
+
+# A stale or absent reading must cost the bar the chip, not give it a wrong one.
+test_fable_segment_absent_without_a_reading() {
+    export NO_COLOR=1 CS_USAGE_NO_REFRESH=1
+    export CS_USAGE_DIR="$TEST_TMPDIR/usage-none"
+    export CLAUDE_CONFIG_DIR="$TEST_TMPDIR"
+    printf '%s' '{"oauthAccount":{"organizationUuid":"org-abc"}}' > "$TEST_TMPDIR/.claude.json"
+    local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"}}'
+    local out; out=$(CS_STATUSLINE_NOW=1787816100 run_sl "$json")
+    assert_output_not_contains "$out" "fable " "no reading means no chip" || return 1
+    assert_output_contains "$out" "s" "the rest of the bar must still render" || return 1
+}
+
+# Cheapness off Fable is a design property, not an accident: a session on any
+# other model must not read the cache, create its directory, or poll.
+test_fable_segment_costs_nothing_off_fable() {
+    export NO_COLOR=1
+    export CS_USAGE_DIR="$TEST_TMPDIR/usage-untouched"
+    export CLAUDE_CONFIG_DIR="$TEST_TMPDIR"
+    printf '%s' '{"oauthAccount":{"organizationUuid":"org-abc"}}' > "$TEST_TMPDIR/.claude.json"
+    local json='{"session_name":"s","model":{"id":"claude-sonnet-5","display_name":"Sonnet"},"workspace":{"current_dir":"/none"}}'
+    run_sl "$json" >/dev/null
+    assert_not_exists "$CS_USAGE_DIR" "a non-fable session must not create the usage cache dir" || return 1
+}
+
+# The refresh must actually fire when the cache is due — a render that never
+# kicks one would leave the chip frozen at its first reading forever.
+test_fable_segment_kicks_a_refresh_when_due() {
+    export NO_COLOR=1
+    make_usage_shims 200 "$USAGE_BODY"
+    seed_usage_cache org-abc 42 "2026-08-29T03:59:59Z" 1787816000 1787816300
+    local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"}}'
+    PATH="$USAGE_BINDIR:$PATH" CS_STATUSLINE_NOW=1787816400 run_sl "$json" >/dev/null
+    # The refresher is detached, so wait for the write rather than racing it.
+    local i=0
+    while [ "$i" -lt 50 ] && [ "$(jq -r '.pct' "$CS_USAGE_DIR/fable.json")" = "42" ]; do
+        i=$(( i + 1 )); command sleep 0.1
+    done
+    assert_eq "$(jq -r '.pct' "$CS_USAGE_DIR/fable.json")" "86" \
+        "a due cache must trigger a detached refresh that rewrites the reading" || return 1
+}
+
+run_test test_fable_segment_only_on_fable
+run_test test_fable_segment_renders_on_fable
+run_test test_fable_segment_matches_1m_variant
+run_test test_fable_segment_countdown_at_80
+run_test test_fable_segment_escalates_colour
+run_test test_fable_segment_absent_without_a_reading
+run_test test_fable_segment_costs_nothing_off_fable
+run_test test_fable_segment_kicks_a_refresh_when_due
 
 report_results
