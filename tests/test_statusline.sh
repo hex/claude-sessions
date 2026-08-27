@@ -2668,7 +2668,7 @@ test_refresh_without_a_token_still_schedules() {
     printf '#!/bin/bash\nexit 1\n' > "$bindir/curl"
     chmod +x "$bindir/security" "$bindir/curl"
     export CS_SECURITY_BIN="$bindir/security"
-    PATH="$USAGE_BINDIR:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
+    PATH="$bindir:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
     assert_eq "$(jq -r '.next_poll_at' "$CS_USAGE_DIR/fable.json")" "1787816600" \
         "a missing credential must still back off rather than re-fire every render" || return 1
 }
@@ -2864,22 +2864,34 @@ test_fable_segment_absent_without_a_reading() {
     export CS_USAGE_DIR="$TEST_TMPDIR/usage-none"
     export CLAUDE_CONFIG_DIR="$TEST_TMPDIR"
     printf '%s' '{"oauthAccount":{"organizationUuid":"org-abc"}}' > "$TEST_TMPDIR/.claude.json"
-    local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"}}'
+    local json='{"session_name":"zulu-session","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"}}'
     local out; out=$(CS_STATUSLINE_NOW=1787816100 run_sl "$json")
     assert_output_not_contains "$out" "fable " "no reading means no chip" || return 1
-    assert_output_contains "$out" "s" "the rest of the bar must still render" || return 1
+    assert_output_contains "$out" "zulu-session" "the rest of the bar must still render" || return 1
 }
 
 # Cheapness off Fable is a design property, not an accident: a session on any
-# other model must not read the cache, create its directory, or poll.
+# other model must not read the cache, evaluate whether a poll is due, or add a
+# segment. Asserted synchronously against the segment function. An earlier
+# version watched for the detached refresher's side effects instead and was
+# vacuous — adversarial review proved it passed even with the gate widened to
+# every model, because assert_not_exists ran before the orphaned refresher
+# reached its mkdir.
 test_fable_segment_costs_nothing_off_fable() {
-    export NO_COLOR=1
-    export CS_USAGE_DIR="$TEST_TMPDIR/usage-untouched"
+    _load_sl_functions
     export CLAUDE_CONFIG_DIR="$TEST_TMPDIR"
     printf '%s' '{"oauthAccount":{"organizationUuid":"org-abc"}}' > "$TEST_TMPDIR/.claude.json"
-    local json='{"session_name":"s","model":{"id":"claude-sonnet-5","display_name":"Sonnet"},"workspace":{"current_dir":"/none"}}'
-    run_sl "$json" >/dev/null
-    assert_not_exists "$CS_USAGE_DIR" "a non-fable session must not create the usage cache dir" || return 1
+    export CS_USAGE_DIR="$TEST_TMPDIR/usage-untouched"
+    SL_MODEL_ID="claude-sonnet-5"
+    # Sentinels the gate must leave alone: _fable_read clears all three on its
+    # first lines, so surviving values prove it was never entered.
+    _FABLE_PCT=sentinel; _FABLE_RESET=sentinel; _FABLE_DUE=sentinel
+    _SEG_TEXT=(); _SEG_BG=(); _SEG_BOLD=()
+    _seg_fable
+    assert_eq "sentinel" "$_FABLE_PCT" "a non-fable model must not read the cache" || return 1
+    assert_eq "sentinel" "$_FABLE_DUE" "a non-fable model must not evaluate whether a poll is due" || return 1
+    assert_eq "0" "${#_SEG_TEXT[@]}" "a non-fable model must add no segment" || return 1
+    assert_not_exists "$CS_USAGE_DIR" "a non-fable model must not create the usage cache dir" || return 1
 }
 
 # The refresh must actually fire when the cache is due — a render that never
