@@ -60,13 +60,16 @@ an internal normalized store, not to this response. Do not scale it.
 not the epoch integer the stdin schema uses. `_fmt_rest` takes epoch, so the
 value is converted at parse time.
 
-The access token is Claude Code's own, read from the macOS Keychain:
+The access token is Claude Code's own. On macOS:
 
 ```
 /usr/bin/security find-generic-password -a "$USER" -s "Claude Code-credentials" -w
 ```
 
-which yields JSON whose `.claudeAiOauth.accessToken` is the bearer. cs **reads**
+On Linux and WSL2 there is no Keychain and Claude Code keeps the same document
+in plaintext at `<config_home>/.credentials.json`. Either way the bearer is
+`.claudeAiOauth.accessToken`. (The plaintext path was added during review: the
+first implementation was macOS-only and no document said so.) cs **reads**
 that credential and never refreshes or writes it — Claude Code owns it. An
 expired token therefore surfaces as a 401, which cs treats as a transient
 failure and backs off; Claude Code will rotate it on its own.
@@ -87,8 +90,12 @@ budget. Three consequences are binding on this design:
 1. **One poll per machine, not per session.** The cache is machine-global, under
    `$SESSIONS_ROOT/.usage/`, alongside the existing `.spawn` and `.voice`
    machine-global dirs. Every cs session on the host reads the same file.
-2. **A floor of 300 s between polls**, so cs contributes at most ~12 requests an
+2. **A floor of 600 s between polls**, so cs contributes about six requests an
    hour and leaves the rest of the budget to claude-swap and to Claude Code.
+   (Specified as 300 s; raised during review, which pointed out that
+   claude-swap's own 180 s floor already spends ~20/h on the same account, so
+   300 would have put the pair over the ceiling before Claude Code's own polls.
+   Nothing visible changes, because a reading stays usable for 1800 s.)
 3. **Polling happens only while the active model is Fable.** The trigger lives
    inside the segment, which is itself gated on the model, so a session on any
    other model costs nothing.
@@ -144,6 +151,30 @@ and no caching". This design changes that, deliberately and narrowly:
 
 A `mkdir` lock serialises refreshers across concurrent sessions; a lock older
 than 120 s is treated as abandoned and reclaimed.
+
+## Account identity is the load-bearing check
+
+The reading and the account label come from two different places: the number
+from whichever token the credential store holds, the label from
+`.claude.json`'s `oauthAccount.organizationUuid`. Anything that lets those
+disagree puts one account's usage on screen under another's name, which is worse
+than showing nothing — and it happens exactly when someone swaps accounts,
+i.e. when one is near a limit and the number matters most.
+
+Three guards, all added or hardened during review:
+
+- A **failed** refresh carries the previous reading forward only when its `org`
+  matches the account now signed in. Otherwise it is discarded. Without this a
+  429 after a swap re-labelled the old number *and* kept its `fetched_at`, so it
+  read as fresh and suppressed its own retry.
+- A **successful** refresh re-reads the org after the request and discards the
+  result if it changed, closing the window where a swap lands during the ~8 s
+  call.
+- The **render** compares the cached `org` against the live one and blanks on a
+  mismatch, so even a stale cache cannot mislabel.
+
+The residual is a swap whose credential and config writes straddle our credential
+read; that window is milliseconds and is bounded by the render-side check.
 
 ## Explicitly out of scope
 
