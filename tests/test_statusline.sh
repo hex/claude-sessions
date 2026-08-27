@@ -2615,7 +2615,7 @@ test_refresh_writes_fable_window() {
     make_usage_shims 200 "$USAGE_BODY"
     use_scratch_usage_env
     PATH="$USAGE_BINDIR:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
-    local cache="$CS_USAGE_DIR/fable.json"
+    local cache="$CS_USAGE_DIR/fable.org-abc.json"
     assert_file_exists "$cache" "refresh must write the cache" || return 1
     assert_eq "86" "$(jq -r '.pct' "$cache")" "must record the Fable bucket, not a unified window" || return 1
     assert_eq "2026-08-29T03:59:59.686034+00:00" "$(jq -r '.resets_at' "$cache")" "must record the Fable reset stamp" || return 1
@@ -2645,10 +2645,10 @@ test_refresh_429_backs_off_and_keeps_last_good() {
     use_scratch_usage_env
     mkdir -p "$CS_USAGE_DIR"
     printf '%s' '{"org":"org-abc","pct":42,"resets_at":"2026-08-29T03:59:59Z","fetched_at":1787815000,"next_poll_at":1787815300}' \
-        > "$CS_USAGE_DIR/fable.json"
+        > "$CS_USAGE_DIR/fable.org-abc.json"
     make_usage_shims 429 ''
     PATH="$USAGE_BINDIR:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
-    local cache="$CS_USAGE_DIR/fable.json"
+    local cache="$CS_USAGE_DIR/fable.org-abc.json"
     assert_eq "42" "$(jq -r '.pct' "$cache")" "a 429 must leave the last good reading intact" || return 1
     assert_eq "1787815000" "$(jq -r '.fetched_at' "$cache")" "a 429 must not restamp the reading as fresh" || return 1
     assert_eq "1787816600" "$(jq -r '.next_poll_at' "$cache")" "a 429 must back off at least the failure interval" || return 1
@@ -2660,7 +2660,7 @@ test_refresh_no_fable_bucket_clears() {
     use_scratch_usage_env
     make_usage_shims 200 '{"limits":[{"scope":{"type":"unified"},"percent":31,"resets_at":"2026-08-27T10:39:59Z"}]}'
     PATH="$USAGE_BINDIR:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
-    assert_eq "null" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.json")" \
+    assert_eq "null" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.org-abc.json")" \
         "an account with no Fable window must record no percentage" || return 1
 }
 
@@ -2674,7 +2674,7 @@ test_refresh_without_a_token_still_schedules() {
     chmod +x "$bindir/security" "$bindir/curl"
     export CS_SECURITY_BIN="$bindir/security"
     PATH="$bindir:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
-    assert_eq "1787816600" "$(jq -r '.next_poll_at' "$CS_USAGE_DIR/fable.json")" \
+    assert_eq "1787816600" "$(jq -r '.next_poll_at' "$CS_USAGE_DIR/fable.org-abc.json")" \
         "a missing credential must still back off rather than re-fire every render" || return 1
 }
 
@@ -2690,7 +2690,7 @@ test_refresh_respects_a_held_lock() {
     # moment real time overtook the pin.
     TZ=UTC touch -t 202608270732.40 "$CS_USAGE_DIR/.lock"
     PATH="$USAGE_BINDIR:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
-    assert_file_not_exists "$CS_USAGE_DIR/fable.json" \
+    assert_file_not_exists "$CS_USAGE_DIR/fable.org-abc.json" \
         "a refresher must not run while another holds a fresh lock" || return 1
 }
 
@@ -2703,7 +2703,7 @@ test_refresh_reclaims_an_abandoned_lock() {
     mkdir -p "$CS_USAGE_DIR/.lock"
     TZ=UTC touch -t 202608270730.00 "$CS_USAGE_DIR/.lock"   # 200s before the pin
     PATH="$USAGE_BINDIR:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
-    assert_eq "86" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.json")" \
+    assert_eq "86" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.org-abc.json")" \
         "a lock older than the reclaim window must not block a refresh" || return 1
     assert_not_exists "$CS_USAGE_DIR/.lock" "the reclaiming refresher must release the lock" || return 1
 }
@@ -2730,7 +2730,7 @@ CURL
     chmod +x "$bindir/security" "$bindir/curl"
     export CS_SECURITY_BIN="$bindir/security"
     PATH="$bindir:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
-    assert_eq "1787816960" "$(jq -r '.next_poll_at' "$CS_USAGE_DIR/fable.json")" \
+    assert_eq "1787816960" "$(jq -r '.next_poll_at' "$CS_USAGE_DIR/fable.org-abc.json")" \
         "Retry-After must be honoured with a 60s margin (900+60) over the 600s floor" || return 1
 }
 
@@ -2751,7 +2751,7 @@ seed_usage_cache() {
     mkdir -p "$CS_USAGE_DIR"
     printf '%s' '{"oauthAccount":{"organizationUuid":"org-abc"}}' > "$TEST_TMPDIR/.claude.json"
     jq -n --arg o "$1" --argjson p "$2" --arg r "$3" --argjson f "$4" --argjson n "$5" \
-        '{org:$o,pct:$p,resets_at:$r,fetched_at:$f,next_poll_at:$n}' > "$CS_USAGE_DIR/fable.json"
+        '{org:$o,pct:$p,resets_at:$r,fetched_at:$f,next_poll_at:$n}' > "$CS_USAGE_DIR/fable.$1.json"
 }
 
 test_fable_read_returns_fresh_reading() {
@@ -2909,10 +2909,10 @@ test_fable_segment_kicks_a_refresh_when_due() {
     PATH="$USAGE_BINDIR:$PATH" CS_STATUSLINE_NOW=1787816400 run_sl "$json" >/dev/null
     # The refresher is detached, so wait for the write rather than racing it.
     local i=0
-    while [ "$i" -lt 50 ] && [ "$(jq -r '.pct' "$CS_USAGE_DIR/fable.json")" = "42" ]; do
+    while [ "$i" -lt 50 ] && [ "$(jq -r '.pct' "$CS_USAGE_DIR/fable.org-abc.json")" = "42" ]; do
         i=$(( i + 1 )); command sleep 0.1
     done
-    assert_eq "86" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.json")" \
+    assert_eq "86" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.org-abc.json")" \
         "a due cache must trigger a detached refresh that rewrites the reading" || return 1
 }
 
@@ -2932,17 +2932,22 @@ run_test test_fable_segment_kicks_a_refresh_when_due
 test_refresh_failure_does_not_relabel_another_accounts_reading() {
     use_scratch_usage_env
     mkdir -p "$CS_USAGE_DIR"
+    # Another account's record, sitting in the same cache directory.
     printf '%s' '{"org":"org-other","pct":86,"resets_at":"2026-08-29T03:59:59Z","fetched_at":1787816000,"next_poll_at":1787816300}' \
-        > "$CS_USAGE_DIR/fable.json"
+        > "$CS_USAGE_DIR/fable.org-other.json"
     make_usage_shims 429 ''
     PATH="$USAGE_BINDIR:$PATH" CS_STATUSLINE_NOW=1787816100 bash "$SL" --refresh-usage
-    local cache="$CS_USAGE_DIR/fable.json"
-    assert_eq "null" "$(jq -r '.pct' "$cache")" \
-        "a failed fetch must discard a reading belonging to another account" || return 1
-    assert_eq "org-abc" "$(jq -r '.org' "$cache")" "the record must name the account now signed in" || return 1
-    # And it must not read as fresh: a discarded reading with a live timestamp
-    # would blank correctly but suppress the retry.
-    assert_eq "0" "$(jq -r '.fetched_at' "$cache")" "a discarded reading must not be stamped fresh" || return 1
+    # Records are addressed by account, so a failed fetch for org-abc cannot
+    # reach org-other's reading at all — the carry-forward has nothing of
+    # another account's to carry. This is the stronger form of the original
+    # guarantee: not "discards it correctly" but "can never see it".
+    assert_eq "86" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.org-other.json")" \
+        "another account's record must be untouched by this account's refresh" || return 1
+    local mine="$CS_USAGE_DIR/fable.org-abc.json"
+    assert_file_exists "$mine" "the failure must still schedule this account's retry" || return 1
+    assert_eq "null" "$(jq -r '.pct' "$mine")" "with no prior reading of its own, this account records none" || return 1
+    assert_eq "0" "$(jq -r '.fetched_at' "$mine")" "and it must not be stamped fresh" || return 1
+    assert_eq "1787816700" "$(jq -r '.next_poll_at' "$mine")" "a failure must back off 600s" || return 1
 }
 
 run_test test_refresh_failure_does_not_relabel_another_accounts_reading
@@ -2956,7 +2961,7 @@ test_fable_read_corrupt_cache_is_due() {
     export CLAUDE_CONFIG_DIR="$TEST_TMPDIR"
     mkdir -p "$CS_USAGE_DIR"
     printf '%s' '{"oauthAccount":{"organizationUuid":"org-abc"}}' > "$TEST_TMPDIR/.claude.json"
-    printf '%s' 'not json at all' > "$CS_USAGE_DIR/fable.json"
+    printf '%s' 'not json at all' > "$CS_USAGE_DIR/fable.org-abc.json"
     CS_STATUSLINE_NOW=1787816100 _NOW="" _SL_NOW_READY="" _fable_read
     assert_eq "" "$_FABLE_PCT" "a corrupt cache must render nothing" || return 1
     assert_eq "1" "$_FABLE_DUE" "a corrupt cache must be due so the next render repairs it" || return 1
@@ -2985,7 +2990,7 @@ CURL
     printf '%s' '{"claudeAiOauth":{"accessToken":"plaintext-token-not-real"}}' \
         > "$TEST_TMPDIR/cfg/.credentials.json"
     PATH="$bindir:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
-    assert_eq "86" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.json")" \
+    assert_eq "86" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.org-abc.json")" \
         "with no Keychain the plaintext credential file must be used" || return 1
     local on_stdin=no
     grep -q 'plaintext-token-not-real' "$TEST_TMPDIR/curl-stdin" && on_stdin=yes
@@ -3017,7 +3022,10 @@ test_fable_segment_does_not_spawn_a_refresher_without_curl() {
     SL_MODEL_ID="claude-fable-5"
     _SEG_TEXT=(); _SEG_BG=(); _SEG_BOLD=()
     local nocurl="$TEST_TMPDIR/nocurl"; mkdir -p "$nocurl"
-    cp "$(command -v jq)" "$nocurl/jq"
+    # Symlink, not copy: macOS kills a copied system binary whose code
+    # signature no longer validates (SIGKILL, exit 137), which would make this
+    # test report "no curl" for the wrong reason — it was jq that died.
+    ln -s "$(command -v jq)" "$nocurl/jq"
     # NOW is past next_poll_at, so this render is unambiguously due.
     CS_STATUSLINE_NOW=1787816400 _NOW="" _SL_NOW_READY="" PATH="$nocurl" _seg_fable
     assert_eq "1" "$_FABLE_DUE" "the cache must genuinely be due, or this test proves nothing" || return 1
@@ -3039,10 +3047,10 @@ test_fable_segment_does_spawn_when_curl_is_present() {
     # before it ever exists and leave teardown racing a live refresher. The
     # seeded pct differs from the shim body's 86 so the write is observable.
     local i=0
-    while [ "$i" -lt 50 ] && [ "$(jq -r '.pct' "$CS_USAGE_DIR/fable.json" 2>/dev/null)" != "86" ]; do
+    while [ "$i" -lt 50 ] && [ "$(jq -r '.pct' "$CS_USAGE_DIR/fable.org-abc.json" 2>/dev/null)" != "86" ]; do
         i=$(( i + 1 )); command sleep 0.1
     done
-    assert_eq "86" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.json")" "the kicked refresher must complete its write" || return 1
+    assert_eq "86" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.org-abc.json")" "the kicked refresher must complete its write" || return 1
     i=0
     while [ "$i" -lt 50 ] && [ -d "$CS_USAGE_DIR/.lock" ]; do
         i=$(( i + 1 )); command sleep 0.1
@@ -3076,8 +3084,12 @@ CURL
     chmod +x "$bindir/security" "$bindir/curl"
     export CS_SECURITY_BIN="$bindir/security"
     PATH="$bindir:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
-    assert_eq "null" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.json")" \
-        "a reading fetched for an account that is no longer signed in must be discarded" || return 1
+    # The result is discarded and the schedule recorded under the account that
+    # is signed in NOW, so nothing is ever attributed to the wrong one.
+    assert_file_not_exists "$CS_USAGE_DIR/fable.org-abc.json" \
+        "a reading for an account that swapped away must not be written under it" || return 1
+    assert_eq "null" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.org-swapped.json")" \
+        "and the new account records no reading it did not fetch" || return 1
 }
 
 run_test test_refresh_discards_a_result_if_the_account_changed_mid_fetch
@@ -3134,7 +3146,7 @@ CURL
     chmod +x "$bindir/security" "$bindir/curl"
     export CS_SECURITY_BIN="$bindir/security"
     PATH="$bindir:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
-    assert_eq "86" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.json")" \
+    assert_eq "86" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.org-abc.json")" \
         "an unreadable config is not evidence of a swap; the reading must survive" || return 1
 }
 
@@ -3145,7 +3157,7 @@ test_refresh_declines_when_the_cache_is_not_yet_due() {
     use_scratch_usage_env
     mkdir -p "$CS_USAGE_DIR"
     printf '%s' '{"org":"org-abc","pct":42,"resets_at":"2026-08-29T03:59:59Z","fetched_at":1787816000,"next_poll_at":1787816600}' \
-        > "$CS_USAGE_DIR/fable.json"
+        > "$CS_USAGE_DIR/fable.org-abc.json"
     local bindir="$TEST_TMPDIR/bin"; mkdir -p "$bindir"
     cat > "$bindir/security" <<'SEC'
 #!/bin/bash
@@ -3162,7 +3174,7 @@ CURL
     PATH="$bindir:$PATH" CS_STATUSLINE_NOW=1787816100 bash "$SL" --refresh-usage
     assert_file_not_exists "$TEST_TMPDIR/curl-hits" \
         "a refresher must not spend a request before its own next_poll_at" || return 1
-    assert_eq "42" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.json")" \
+    assert_eq "42" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.org-abc.json")" \
         "and must leave the not-yet-due reading exactly as it found it" || return 1
 }
 
@@ -3172,15 +3184,113 @@ test_refresh_proceeds_once_due() {
     use_scratch_usage_env
     mkdir -p "$CS_USAGE_DIR"
     printf '%s' '{"org":"org-abc","pct":42,"resets_at":"2026-08-29T03:59:59Z","fetched_at":1787816000,"next_poll_at":1787816600}' \
-        > "$CS_USAGE_DIR/fable.json"
+        > "$CS_USAGE_DIR/fable.org-abc.json"
     make_usage_shims 200 "$USAGE_BODY"
     PATH="$USAGE_BINDIR:$PATH" CS_STATUSLINE_NOW=1787816700 bash "$SL" --refresh-usage
-    assert_eq "86" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.json")" \
+    assert_eq "86" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.org-abc.json")" \
         "past next_poll_at the refresher must fetch" || return 1
 }
 
 run_test test_refresh_keeps_a_good_reading_when_the_config_is_unreadable_mid_fetch
 run_test test_refresh_declines_when_the_cache_is_not_yet_due
 run_test test_refresh_proceeds_once_due
+
+# Review finding 1: the cache is machine-global but held one account's record,
+# and an org mismatch deliberately overrides the interval — so two sessions
+# signed into different accounts each bypassed the other's stamped backoff and
+# fetched forever. Measured at 12 requests inside one 600s window. Per-account
+# cache files give each account its own cadence.
+test_two_accounts_do_not_defeat_the_poll_floor() {
+    local bindir="$TEST_TMPDIR/bin"; mkdir -p "$bindir" "$TEST_TMPDIR/cfgA" "$TEST_TMPDIR/cfgB"
+    cat > "$bindir/security" <<'SEC'
+#!/bin/bash
+printf '%s\n' '{"claudeAiOauth":{"accessToken":"test-token-not-real"}}'
+SEC
+    cat > "$bindir/curl" <<CURL
+#!/bin/bash
+cat > /dev/null
+echo hit >> "$TEST_TMPDIR/hits"
+out=""
+while [ \$# -gt 0 ]; do case "\$1" in -o) out="\$2"; shift 2 ;; *) shift ;; esac; done
+[ -n "\$out" ] && printf '%s' '$USAGE_BODY' > "\$out"
+printf '200'
+CURL
+    chmod +x "$bindir/security" "$bindir/curl"
+    export CS_SECURITY_BIN="$bindir/security"
+    export CS_USAGE_DIR="$TEST_TMPDIR/usage"
+    printf '%s' '{"oauthAccount":{"organizationUuid":"org-A"}}' > "$TEST_TMPDIR/cfgA/.claude.json"
+    printf '%s' '{"oauthAccount":{"organizationUuid":"org-B"}}' > "$TEST_TMPDIR/cfgB/.claude.json"
+    local i cfg
+    for i in 1 2 3; do
+        for cfg in cfgA cfgB; do
+            CLAUDE_CONFIG_DIR="$TEST_TMPDIR/$cfg" PATH="$bindir:$PATH" \
+                CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
+        done
+    done
+    local hits=0
+    [ -f "$TEST_TMPDIR/hits" ] && hits=$(wc -l < "$TEST_TMPDIR/hits" | tr -d ' ')
+    # One per account inside the window, not one per render.
+    assert_eq "2" "$hits" "two accounts must each poll once per window, not ping-pong past the floor" || return 1
+}
+
+# Review finding 2: _read_org yields "" for a torn config, the success path wrote
+# that as the record's org, and _fable_read treats an empty org as "matches" —
+# so the reading rendered for every account. Empty-org-is-unknown is the right
+# rule for READING a cache and the wrong one for writing one.
+test_refresh_never_writes_a_reading_under_an_empty_account() {
+    use_scratch_usage_env
+    local bindir="$TEST_TMPDIR/bin"; mkdir -p "$bindir"
+    cat > "$bindir/security" <<'SEC'
+#!/bin/bash
+printf '%s\n' '{"claudeAiOauth":{"accessToken":"test-token-not-real"}}'
+SEC
+    cat > "$bindir/curl" <<CURL
+#!/bin/bash
+cat > /dev/null
+out=""
+while [ \$# -gt 0 ]; do case "\$1" in -o) out="\$2"; shift 2 ;; *) shift ;; esac; done
+[ -n "\$out" ] && printf '%s' '$USAGE_BODY' > "\$out"
+printf '200'
+CURL
+    chmod +x "$bindir/security" "$bindir/curl"
+    export CS_SECURITY_BIN="$bindir/security"
+    printf '' > "$TEST_TMPDIR/.claude.json"     # torn at refresh time
+    PATH="$bindir:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
+    # Assert on the WRITE, not on the render. The render also refuses to
+    # address a record without an account, so a render-only assertion passes
+    # whether or not this guard exists — verified by mutation: seeding the
+    # write with a fallback name left a render-only version of this test green.
+    local written
+    written=$(find "$CS_USAGE_DIR" -maxdepth 1 -name 'fable.*.json' 2>/dev/null | wc -l | tr -d ' ')
+    assert_eq "0" "$written" \
+        "a reading fetched with no identifiable account must not be stored at all" || return 1
+    # And nothing may then render it for a named account.
+    printf '%s' '{"oauthAccount":{"organizationUuid":"org-A"}}' > "$TEST_TMPDIR/.claude.json"
+    local out
+    out=$(printf '%s' '{"session_name":"s","model":{"id":"claude-fable-5"},"workspace":{"current_dir":"/none"}}' \
+        | CS_USAGE_NO_REFRESH=1 NO_COLOR=1 CS_STATUSLINE_NOW=1787816100 bash "$SL")
+    assert_output_not_contains "$out" "fable 86%" \
+        "and it must never render for a named one" || return 1
+}
+
+# Review finding 3: a 200 whose body is not the API's JSON (a captive portal or
+# proxy interstitial) parsed to no Fable window, which is indistinguishable from
+# "this account has no Fable bucket" — so it wiped the last good reading and
+# stamped it fresh. The failure paths deliberately carry forward; this must too.
+test_refresh_treats_an_unparseable_200_as_a_failure() {
+    use_scratch_usage_env
+    mkdir -p "$CS_USAGE_DIR"
+    printf '%s' '{"org":"org-abc","pct":42,"resets_at":"2026-08-29T03:59:59Z","fetched_at":1787815000,"next_poll_at":1787815300}' \
+        > "$CS_USAGE_DIR/fable.org-abc.json"
+    make_usage_shims 200 '<html><body>Sign in to the network</body></html>'
+    PATH="$USAGE_BINDIR:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
+    local cache="$CS_USAGE_DIR/fable.org-abc.json"
+    assert_eq "42" "$(jq -r '.pct' "$cache")" "a non-API 200 must not discard the last good reading" || return 1
+    assert_eq "1787815000" "$(jq -r '.fetched_at' "$cache")" "and must not stamp it fresh" || return 1
+}
+
+run_test test_two_accounts_do_not_defeat_the_poll_floor
+run_test test_refresh_never_writes_a_reading_under_an_empty_account
+run_test test_refresh_treats_an_unparseable_200_as_a_failure
 
 report_results

@@ -89,9 +89,14 @@ a burst saturates the account for a full hour and pausing does not restore
 headroom early. The budget is shared with Claude Code itself and with any other
 tool on the machine that polls it.
 
-Hence one cache for the host, at `$CS_SESSIONS_ROOT/.usage/fable.json`, rather
-than one per session, and a 600-second floor between polls: cs contributes about
-six requests an hour however many sessions are open. The floor is 600 rather
+Hence one cache for the host, at `$CS_SESSIONS_ROOT/.usage/fable.<account>.json`,
+rather than one per session, and a 600-second floor between polls: cs
+contributes about six requests an hour per account, however many sessions are
+open. The file is keyed by account rather than holding one record for the
+machine, so that two sessions signed into different accounts each keep their own
+cadence — with a single shared record, whichever account was not in it had to
+override the interval to replace it, and two such sessions then fetched on every
+render, defeating the floor entirely. The floor is 600 rather
 than 300 because claude-swap, which many cs users run alongside, polls the same
 account on its own 180-second floor — at 300 the two together would already
 exceed the ceiling before Claude Code's own polls. Nothing visible changes,
@@ -110,11 +115,13 @@ model costs the budget nothing.
 ### When the chip does not render
 
 The chip is null-when-nothing, and deliberately strict about it: no cache, no
-Fable window on the account, no `jq` or `curl`, no readable credential, a
-reading older than 1800 seconds, or a reading stamped with a different account
-than the one now signed in. A failed refresh keeps the last good number but only
-within one account — across a swap the reading is discarded rather than
-re-labelled. That last check exists because accounts get swapped precisely when one is
+Fable window on the account, no `jq` or `curl`, no readable credential, or a
+reading older than 1800 seconds. Identity is structural rather than checked: a
+record is addressed by account, so a reading can never be found under the wrong
+one, and a refresh that cannot identify the account it fetched for stores
+nothing at all. A failed refresh keeps that account's last good number; a
+response that is not this API's JSON — a captive portal's 200, say — counts as a
+failure rather than as an account with no Fable window. That last check exists because accounts get swapped precisely when one is
 near a limit — the moment a stale percentage would mislead most. The countdown
 is always recomputed from `resets_at` at render time, so it stays accurate even
 when the percentage beside it is a few minutes old.

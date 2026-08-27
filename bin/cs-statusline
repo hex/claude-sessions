@@ -638,8 +638,8 @@ _fmt_rest() {
 # ~28-30 requests per account per rolling hour — capacity returns as old
 # requests age out, so a burst saturates the account for a full hour — and that
 # budget is shared with Claude Code itself and anything else on the machine. One
-# cache plus the interval floor below holds cs to ~12 requests an hour however
-# many sessions are open.
+# cache plus the interval floor below holds cs to ~6 requests an hour per
+# account, however many sessions are open.
 USAGE_URL="https://api.anthropic.com/api/oauth/usage"
 USAGE_BETA="oauth-2025-04-20"
 # 600, not 300: the endpoint's ceiling is ~28-30 requests per account per hour,
@@ -651,6 +651,47 @@ USAGE_MIN_INTERVAL=600     # floor between successful polls
 USAGE_FAIL_BACKOFF=600     # a 429 does not reliably clear at its stated horizon
 
 _usage_cache_dir() { printf '%s\n' "${CS_USAGE_DIR:-$SESSIONS_ROOT/.usage}"; }
+
+# The cache file for one account. Per-account, not one file for the machine:
+# with a single file an org mismatch had to override the interval (a cache
+# holding someone else's reading must be replaced now, not when its window
+# elapses), so two sessions signed into different accounts each bypassed the
+# other's stamped backoff and fetched on every render — measured at 12 requests
+# inside one 600s window against a ~28-30/hour budget. Giving each account its
+# own file lets the interval and the account check stop competing: every record
+# belongs to the account reading it, so the cadence is simply honoured.
+#
+# The org is a server-supplied UUID and lands in a path, so it is reduced to the
+# characters a UUID actually uses; anything else (including the traversal that a
+# hostile value would need) cannot survive. An empty org has no file at all.
+# The organizationUuid of the account signed in now, from $1 (Claude Code's
+# global config), in _ORG; empty when the file is missing or will not parse.
+# `--stream` walks the document instead of building it: this file accumulates
+# per-project prompt history and grows without bound, and the render path reads
+# it once a second. Measured on a 5.5 MB config, streaming a single key beats
+# parsing the whole document by roughly an order of magnitude.
+_read_org_from() {
+    _ORG=""
+    local cfg="${1:-}"
+    [ -f "$cfg" ] || return 0
+    # `first(...)` inside jq rather than a `head` pipe: piping would add a fork
+    # and, worse, a PATH dependency on a render path that must keep working
+    # when PATH holds little more than jq.
+    _ORG=$(jq -r --stream 'first(
+        select(length == 2 and .[0] == ["oauthAccount","organizationUuid"]) | .[1]
+    ) // empty' "$cfg" 2>/dev/null) || _ORG=""
+    [ "${_ORG:-}" = "null" ] && _ORG=""
+    return 0
+}
+
+_usage_cache_file() {
+    _CACHE_FILE=""
+    local org="${1:-}"
+    org="${org//[^A-Za-z0-9._-]/}"
+    org="${org//../}"
+    [ -n "$org" ] || return 1
+    _CACHE_FILE="$(_usage_cache_dir)/fable.$org.json"
+}
 
 # Claude Code's global config, whose oauthAccount names the account now signed
 # in. Mirrors Claude Code's own resolution: CLAUDE_CONFIG_DIR, else the homedir
@@ -695,7 +736,14 @@ _bounded_capture() {
 _usage_write() {
     local org="$1" pct="$2" reset="$3" offset="$4"
     local dir cache tmp
-    dir=$(_usage_cache_dir); cache="$dir/fable.json"; tmp="$cache.tmp.$$"
+    dir=$(_usage_cache_dir)
+    # A reading nobody can attribute must not be stored. _read_org yields empty
+    # for a torn or missing config, and _fable_read deliberately treats an empty
+    # cached org as "unknown, not a mismatch" — right for reading a record,
+    # catastrophic for writing one, since the reading would then render for
+    # every account. No account, no file.
+    _usage_cache_file "$org" || return 0
+    cache="$_CACHE_FILE"; tmp="$cache.tmp.$$"
     _sl_now
     [[ "${_NOW:-}" =~ ^[0-9]+$ ]] || return 0
     local fetched="$_NOW"
@@ -766,12 +814,7 @@ _refresh_usage() {
 
     local org="" cfg
     cfg=$(_claude_config_file)
-    _read_org() {
-        _ORG=""
-        [ -f "$cfg" ] || return 0
-        _ORG=$(jq -r '.oauthAccount.organizationUuid // ""' "$cfg" 2>/dev/null) || _ORG=""
-    }
-    _read_org; org="$_ORG"
+    _read_org_from "$cfg"; org="$_ORG"
 
     # Honour the cadence under the lock. The render kicks on _FABLE_DUE, which
     # is deliberately raised by conditions that are not "the interval elapsed" —
@@ -784,20 +827,20 @@ _refresh_usage() {
     # another account's reading must be replaced now, not when its window
     # happens to elapse. Ordering these the other way silently reintroduced the
     # cross-account defect this file's own test exists to catch.
-    local cache="$dir/fable.json"
-    if [ -f "$cache" ]; then
-        local sched cached_org="" due_at=0
-        sched=$(jq -r '[(.org // ""), (.next_poll_at // 0 | tostring)] | .[]' "$cache" 2>/dev/null) || sched=""
-        if [ -n "$sched" ]; then
-            { IFS= read -r cached_org; IFS= read -r due_at; } <<EOF
-$sched
-EOF
-        fi
+    # Honour the cadence under the lock, reading THIS account's own record. The
+    # render kicks on _FABLE_DUE, which is deliberately raised by conditions
+    # that are not "the interval elapsed" — a corrupt cache, an unreadable
+    # config — so without this a stray DUE spends a request the schedule had
+    # already booked. Because the record is per-account, the account check and
+    # the interval no longer compete: no mismatch can bypass a backoff.
+    local cache=""
+    if _usage_cache_file "$org" && [ -f "$_CACHE_FILE" ]; then
+        cache="$_CACHE_FILE"
+        local due_at
+        due_at=$(jq -r '(.next_poll_at // 0 | tostring)' "$cache" 2>/dev/null) || due_at=0
         [[ "${due_at:-}" =~ ^[0-9]+$ ]] || due_at=0
-        if [ "$cached_org" = "$org" ]; then
-            _sl_now
-            if [[ "${_NOW:-}" =~ ^[0-9]+$ ]] && [ "$_NOW" -lt "$due_at" ]; then return 0; fi
-        fi
+        _sl_now
+        if [[ "${_NOW:-}" =~ ^[0-9]+$ ]] && [ "$_NOW" -lt "$due_at" ]; then return 0; fi
     fi
 
     # Claude Code's own credential, read and never written: it owns the refresh
@@ -853,11 +896,20 @@ EOF
     # reading means the config was briefly unreadable, which _fable_read already
     # treats as unknown; disagreeing with it here would throw away a good
     # reading for the right account and blank the chip for a whole interval.
-    _read_org
+    _read_org_from "$cfg"
     if [ -n "$_ORG" ] && [ -n "$org" ] && [ "$_ORG" != "$org" ]; then
         _usage_write "$_ORG" null "" "$USAGE_MIN_INTERVAL"
         rm -f "$body" "$hdr" 2>/dev/null
         return 0
+    fi
+
+    # A 200 whose body is not this API's JSON — a captive portal or proxy
+    # interstitial — parses to no Fable window, which is indistinguishable from
+    # "this account has no Fable bucket" and would wipe the last good reading
+    # AND stamp it fresh. Require the response to be the shape we asked for;
+    # anything else is a failure, and the failure paths carry forward.
+    if [ "$code" = "200" ] && ! jq -e 'has("limits") or has("five_hour") or has("seven_day")' "$body" >/dev/null 2>&1; then
+        code="bad-body"
     fi
 
     if [ "$code" = "200" ]; then
@@ -905,27 +957,26 @@ _fable_read() {
     _FABLE_DUE=""
     command -v jq >/dev/null 2>&1 || return 0
     local cache cfg
-    cache="$(_usage_cache_dir)/fable.json"
     cfg=$(_claude_config_file)
-    if [ ! -f "$cache" ]; then _FABLE_DUE=1; return 0; fi
     [ -f "$cfg" ] || return 0
+    # Read this account's own record. Addressing by account rather than
+    # filtering one shared file means a reading can never be found under the
+    # wrong identity; an unreadable config yields no account and so no file.
+    _read_org_from "$cfg"
+    _usage_cache_file "${_ORG:-}" || return 0
+    cache="$_CACHE_FILE"
+    if [ ! -f "$cache" ]; then _FABLE_DUE=1; return 0; fi
     _sl_now
     [[ "${_NOW:-}" =~ ^[0-9]+$ ]] || return 0
     local fields
-    # An empty org on either side is not evidence of a mismatch — a config
-    # without an oauthAccount (an API-key session) should not invalidate a
-    # reading; only two populated, differing values do.
-    fields=$(jq -r --slurpfile cfg "$cfg" '
-        (($cfg[0].oauthAccount.organizationUuid) // "") as $live
-        | [ (if (.org // "") == "" or $live == "" or (.org == $live) then "1" else "0" end),
-            (.pct // "" | tostring),
+    fields=$(jq -r '
+        [ (.pct // "" | tostring),
             (.resets_at // ""),
             (.fetched_at // 0 | tostring),
             (.next_poll_at // 0 | tostring) ] | .[]' "$cache" 2>/dev/null) || { _FABLE_DUE=1; return 0; }
     if [ -z "$fields" ]; then _FABLE_DUE=1; return 0; fi
-    local ok="" pct="" reset="" fetched="" next=""
+    local pct="" reset="" fetched="" next=""
     {
-        IFS= read -r ok
         IFS= read -r pct
         IFS= read -r reset
         IFS= read -r fetched
@@ -935,7 +986,6 @@ $fields
 EOF
     [[ "${next:-}" =~ ^[0-9]+$ ]] || next=0
     [ "$_NOW" -ge "$next" ] && _FABLE_DUE=1
-    if [ "${ok:-0}" != "1" ]; then _FABLE_DUE=1; return 0; fi
     [[ "${fetched:-}" =~ ^[0-9]+$ ]] || return 0
     [ $(( _NOW - fetched )) -le "$USAGE_MAX_AGE" ] || return 0
     [[ "${pct:-}" =~ ^[0-9]+(\.[0-9]+)?$ ]] || return 0
