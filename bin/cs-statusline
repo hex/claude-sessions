@@ -563,18 +563,27 @@ _thresh_color() {
 # Convert an ISO 8601 timestamp into epoch seconds in _EPOCH; empty when the
 # value is missing or unparseable. The usage endpoint sends fractional seconds
 # and an explicit "+00:00" offset ("2026-08-29T03:59:59.686034+00:00"), so both
-# are trimmed and the remainder read as UTC — which is the only zone that
-# endpoint emits. The shape is checked with a glob before `date` sees it, so a
-# malformed value can never reach a locale-dependent parser and come back as
-# something plausible. BSD date (macOS, the 3.2 floor) takes -j -f; GNU date
-# takes -d, and each rejects the other's flags, so trying both in order needs no
-# platform probe.
+# are trimmed and the remainder read as UTC.
+#
+# Any other offset is refused rather than assumed: reading "+02:00" as UTC would
+# put the reset two hours late, and a countdown that is confidently wrong is
+# worse than no countdown. The glob then pins the field widths so a value that
+# is not a timestamp at all never reaches `date`. It does NOT catch day
+# overflow — BSD `date -j -f` normalises "2026-02-31" into March — which is
+# tolerable only because the field this parses is machine-generated.
+#
+# BSD date (macOS, the 3.2 floor) takes -j -f; GNU date takes -d, and each
+# rejects the other's flags, so trying both in order needs no platform probe.
 _iso_epoch() {
     _EPOCH=""
     local iso="${1:-}" base
     [ -n "$iso" ] || return 0
+    case "$iso" in
+        *+00:00|*+0000|*Z) ;;                 # explicit UTC
+        *+*|*T*-*) return 0 ;;                # any other offset: refuse
+    esac
     base="${iso%%.*}"     # drop fractional seconds
-    base="${base%%+*}"    # drop a "+HH:MM" offset
+    base="${base%%+*}"    # drop the "+00:00" offset
     base="${base%Z}"      # drop a trailing Z
     case "$base" in
         [0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]T[0-2][0-9]:[0-5][0-9]:[0-6][0-9]) ;;
@@ -633,7 +642,12 @@ _fmt_rest() {
 # many sessions are open.
 USAGE_URL="https://api.anthropic.com/api/oauth/usage"
 USAGE_BETA="oauth-2025-04-20"
-USAGE_MIN_INTERVAL=300     # floor between successful polls
+# 600, not 300: the endpoint's ceiling is ~28-30 requests per account per hour,
+# and claude-swap — which many cs users run alongside — polls the same account
+# on its own 180s floor. At 300 the two together (12/h + 20/h) already exceed
+# the ceiling before Claude Code's own polls. 600 costs nothing visible, since
+# USAGE_MAX_AGE is 1800.
+USAGE_MIN_INTERVAL=600     # floor between successful polls
 USAGE_FAIL_BACKOFF=600     # a 429 does not reliably clear at its stated horizon
 
 _usage_cache_dir() { printf '%s\n' "${CS_USAGE_DIR:-$SESSIONS_ROOT/.usage}"; }
@@ -706,16 +720,29 @@ _refresh_usage() {
     local dir lock
     dir=$(_usage_cache_dir); lock="$dir/.lock"
     mkdir -p "$dir" 2>/dev/null || return 0
-    # Reclaim a lock left behind by a refresher killed mid-flight.
+    # Reclaim a lock left behind by a refresher killed mid-flight. The reclaim
+    # is a rename, not an rmdir: with rmdir, two contenders that both see the
+    # stale lock can both proceed — the second removes the first's *fresh* lock
+    # and takes its own, and the first's EXIT trap then releases the second's.
+    # `mv` is atomic, so exactly one contender can move the stale directory
+    # aside and the loser's mv fails harmlessly.
     if [ -d "$lock" ]; then
         _file_age "$lock"
-        if [ -n "${_AGE:-}" ] && [ "$_AGE" -gt 120 ]; then rmdir "$lock" 2>/dev/null; fi
+        if [ -n "${_AGE:-}" ] && [ "$_AGE" -gt 120 ]; then
+            mv "$lock" "$lock.reclaimed.$$" 2>/dev/null && rmdir "$lock.reclaimed.$$" 2>/dev/null
+        fi
     fi
     mkdir "$lock" 2>/dev/null || return 0
     # The trap body is evaluated at exit, by which point a `local` is long out
     # of scope; the path has to survive in a global for the release to fire.
     _USAGE_LOCK="$lock"
-    trap 'rmdir "${_USAGE_LOCK:-}" 2>/dev/null' EXIT
+    _USAGE_TMP="$dir/.resp.$$ $dir/.hdr.$$"
+    # shellcheck disable=SC2064
+    trap 'rm -f ${_USAGE_TMP:-} 2>/dev/null; rmdir "${_USAGE_LOCK:-}" 2>/dev/null' EXIT
+    # Sweep anything a SIGKILLed predecessor left behind — the EXIT trap cannot
+    # fire for that one, and nothing else ever prunes this directory.
+    find "$dir" -maxdepth 1 -type f -name '.resp.*' -mmin +5 -delete 2>/dev/null
+    find "$dir" -maxdepth 1 -type f -name '.hdr.*' -mmin +5 -delete 2>/dev/null
 
     local org="" cfg
     cfg=$(_claude_config_file)
@@ -725,11 +752,24 @@ _refresh_usage() {
 
     # Claude Code's own credential, read and never written: it owns the refresh
     # cycle, so an expired token is a 401 to back off from, not ours to repair.
-    # The path is pinned absolute so a `security` planted earlier on PATH cannot
-    # intercept a credential read; CS_SECURITY_BIN exists for the test suite.
-    local creds token=""
-    creds=$("${CS_SECURITY_BIN:-/usr/bin/security}" find-generic-password \
-        -a "${USER:-$(id -un 2>/dev/null)}" -s "Claude Code-credentials" -w 2>/dev/null) || creds=""
+    # The default path is absolute so a `security` planted earlier on PATH
+    # cannot intercept a credential read. CS_SECURITY_BIN overrides it for the
+    # test suite; that is not a weakening, because anyone who can set the
+    # environment of this process can already redirect its `curl` and `jq`.
+    local creds="" token="" sec="${CS_SECURITY_BIN:-/usr/bin/security}"
+    if [ -x "$sec" ]; then
+        # Bounded: a locked login keychain can put `security` in front of a
+        # SecurityAgent prompt that never gets answered on a headless or ssh
+        # host, and this process is holding the machine-wide refresh lock.
+        creds=$(_timeout 5 "$sec" find-generic-password \
+            -a "${USER:-$(id -un 2>/dev/null)}" -s "Claude Code-credentials" -w 2>/dev/null) || creds=""
+    fi
+    if [ -z "$creds" ]; then
+        # Linux and WSL2 have no Keychain; Claude Code keeps the same document
+        # in plaintext there. Same shape, so the same extraction works.
+        local plain="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json"
+        [ -f "$plain" ] && creds=$(cat "$plain" 2>/dev/null)
+    fi
     if [ -n "$creds" ]; then
         token=$(printf '%s' "$creds" | jq -r '.claudeAiOauth.accessToken // empty' 2>/dev/null) || token=""
     fi
@@ -768,7 +808,11 @@ EOF
             # No `exit` in the awk: an early-exiting pipe consumer SIGPIPEs its
             # producer, which under `set -o pipefail` reports failure.
             ra=$(tr -d '\r' < "$hdr" | awk 'tolower($1)=="retry-after:"{v=$2} END{print v}') || ra=""
-            if [[ "${ra:-}" =~ ^[0-9]+$ ]] && [ $(( ra + 60 )) -gt "$wait" ]; then wait=$(( ra + 60 )); fi
+            # 10# forces base 10: a zero-padded value would otherwise be read
+            # as octal by $(( )) and abort the arithmetic on an 8 or 9.
+            if [[ "${ra:-}" =~ ^[0-9]+$ ]] && [ $(( 10#$ra + 60 )) -gt "$wait" ]; then
+                wait=$(( 10#$ra + 60 ))
+            fi
         fi
         _usage_write "$org" - "" "$wait"
     fi
@@ -1030,9 +1074,16 @@ _seg_limits() {
 # nothing — no file read, no fork, and above all no poll against a request
 # budget shared with Claude Code itself.
 _seg_fable() {
+    _FABLE_KICKED=""
     case "${SL_MODEL_ID:-}" in claude-fable*) ;; *) return 0 ;; esac
     _fable_read
-    if [ -n "$_FABLE_DUE" ] && [ "${CS_USAGE_NO_REFRESH:-}" != "1" ]; then
+    # A machine with no curl can never write the cache, so every render would be
+    # due and every render would fork a subshell plus a whole bash load of this
+    # script just to bail — once a second, per open Fable session. Check here
+    # instead, where the check is free.
+    if [ -n "$_FABLE_DUE" ] && [ "${CS_USAGE_NO_REFRESH:-}" != "1" ] \
+        && command -v curl >/dev/null 2>&1; then
+        _FABLE_KICKED=1
         # Detached, so the render never waits on the network: the subshell exits
         # at once and the refresher is orphaned. Its own lock is what keeps
         # concurrent sessions from stampeding the endpoint.

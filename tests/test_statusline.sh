@@ -2612,11 +2612,11 @@ test_refresh_writes_fable_window() {
     PATH="$USAGE_BINDIR:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
     local cache="$CS_USAGE_DIR/fable.json"
     assert_file_exists "$cache" "refresh must write the cache" || return 1
-    assert_eq "$(jq -r '.pct' "$cache")" "86" "must record the Fable bucket, not a unified window" || return 1
-    assert_eq "$(jq -r '.resets_at' "$cache")" "2026-08-29T03:59:59.686034+00:00" "must record the Fable reset stamp" || return 1
-    assert_eq "$(jq -r '.org' "$cache")" "org-abc" "must stamp the account the reading belongs to" || return 1
-    assert_eq "$(jq -r '.fetched_at' "$cache")" "1787816000" "must stamp when it was fetched" || return 1
-    assert_eq "$(jq -r '.next_poll_at' "$cache")" "1787816300" "next poll must be the 300s floor out" || return 1
+    assert_eq "86" "$(jq -r '.pct' "$cache")" "must record the Fable bucket, not a unified window" || return 1
+    assert_eq "2026-08-29T03:59:59.686034+00:00" "$(jq -r '.resets_at' "$cache")" "must record the Fable reset stamp" || return 1
+    assert_eq "org-abc" "$(jq -r '.org' "$cache")" "must stamp the account the reading belongs to" || return 1
+    assert_eq "1787816000" "$(jq -r '.fetched_at' "$cache")" "must stamp when it was fetched" || return 1
+    assert_eq "1787816600" "$(jq -r '.next_poll_at' "$cache")" "next poll must be the 600s floor out" || return 1
 }
 
 # The bearer must never reach argv, where any process on the machine can read it
@@ -2644,9 +2644,9 @@ test_refresh_429_backs_off_and_keeps_last_good() {
     make_usage_shims 429 ''
     PATH="$USAGE_BINDIR:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
     local cache="$CS_USAGE_DIR/fable.json"
-    assert_eq "$(jq -r '.pct' "$cache")" "42" "a 429 must leave the last good reading intact" || return 1
-    assert_eq "$(jq -r '.fetched_at' "$cache")" "1787815000" "a 429 must not restamp the reading as fresh" || return 1
-    assert_eq "$(jq -r '.next_poll_at' "$cache")" "1787816600" "a 429 must back off 600s, not the 300s floor" || return 1
+    assert_eq "42" "$(jq -r '.pct' "$cache")" "a 429 must leave the last good reading intact" || return 1
+    assert_eq "1787815000" "$(jq -r '.fetched_at' "$cache")" "a 429 must not restamp the reading as fresh" || return 1
+    assert_eq "1787816600" "$(jq -r '.next_poll_at' "$cache")" "a 429 must back off at least the failure interval" || return 1
 }
 
 # An account with no Fable window must record no percentage rather than leave a
@@ -2655,7 +2655,7 @@ test_refresh_no_fable_bucket_clears() {
     use_scratch_usage_env
     make_usage_shims 200 '{"limits":[{"scope":{"type":"unified"},"percent":31,"resets_at":"2026-08-27T10:39:59Z"}]}'
     PATH="$USAGE_BINDIR:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
-    assert_eq "$(jq -r '.pct' "$CS_USAGE_DIR/fable.json")" "null" \
+    assert_eq "null" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.json")" \
         "an account with no Fable window must record no percentage" || return 1
 }
 
@@ -2669,7 +2669,7 @@ test_refresh_without_a_token_still_schedules() {
     chmod +x "$bindir/security" "$bindir/curl"
     export CS_SECURITY_BIN="$bindir/security"
     PATH="$bindir:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
-    assert_eq "$(jq -r '.next_poll_at' "$CS_USAGE_DIR/fable.json")" "1787816600" \
+    assert_eq "1787816600" "$(jq -r '.next_poll_at' "$CS_USAGE_DIR/fable.json")" \
         "a missing credential must still back off rather than re-fire every render" || return 1
 }
 
@@ -2907,7 +2907,7 @@ test_fable_segment_kicks_a_refresh_when_due() {
     while [ "$i" -lt 50 ] && [ "$(jq -r '.pct' "$CS_USAGE_DIR/fable.json")" = "42" ]; do
         i=$(( i + 1 )); command sleep 0.1
     done
-    assert_eq "$(jq -r '.pct' "$CS_USAGE_DIR/fable.json")" "86" \
+    assert_eq "86" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.json")" \
         "a due cache must trigger a detached refresh that rewrites the reading" || return 1
 }
 
@@ -2958,5 +2958,87 @@ test_fable_read_corrupt_cache_is_due() {
 }
 
 run_test test_fable_read_corrupt_cache_is_due
+
+# Linux and WSL2 are supported platforms and have no Keychain: Claude Code keeps
+# the same credential in <config_home>/.credentials.json there. Without this the
+# chip could never render off macOS, which no doc said.
+test_refresh_reads_the_plaintext_credential_when_security_is_absent() {
+    use_scratch_usage_env
+    local bindir="$TEST_TMPDIR/bin"; mkdir -p "$bindir" "$TEST_TMPDIR/cfg"
+    cat > "$bindir/curl" <<CURL
+#!/bin/bash
+cat > "$TEST_TMPDIR/curl-stdin"
+out=""
+while [ \$# -gt 0 ]; do case "\$1" in -o) out="\$2"; shift 2 ;; *) shift ;; esac; done
+[ -n "\$out" ] && printf '%s' '$USAGE_BODY' > "\$out"
+printf '200'
+CURL
+    chmod +x "$bindir/curl"
+    export CS_SECURITY_BIN="$bindir/no-such-security"
+    export CLAUDE_CONFIG_DIR="$TEST_TMPDIR/cfg"
+    printf '%s' '{"oauthAccount":{"organizationUuid":"org-abc"}}' > "$TEST_TMPDIR/cfg/.claude.json"
+    printf '%s' '{"claudeAiOauth":{"accessToken":"plaintext-token-not-real"}}' \
+        > "$TEST_TMPDIR/cfg/.credentials.json"
+    PATH="$bindir:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
+    assert_eq "86" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.json")" \
+        "with no Keychain the plaintext credential file must be used" || return 1
+    local on_stdin=no
+    grep -q 'plaintext-token-not-real' "$TEST_TMPDIR/curl-stdin" && on_stdin=yes
+    assert_eq "yes" "$on_stdin" "the plaintext bearer must still travel on stdin" || return 1
+}
+
+# A non-UTC offset must be refused rather than silently read as UTC: the
+# endpoint sends +00:00 today, but reading "+02:00" as UTC would put the reset
+# two hours late, and a countdown that is confidently wrong is worse than none.
+test_iso_epoch_refuses_a_non_utc_offset() {
+    _load_sl_functions
+    _iso_epoch "2026-08-29T03:59:59.686034+02:00"
+    assert_eq "" "$_EPOCH" "a non-UTC offset must be refused, not silently read as UTC" || return 1
+    _iso_epoch "2026-08-29T03:59:59-05:00"
+    assert_eq "" "$_EPOCH" "a negative offset must be refused too" || return 1
+    _iso_epoch "2026-08-29T03:59:59+00:00"
+    assert_eq "1787975999" "$_EPOCH" "an explicit +00:00 must still parse" || return 1
+}
+
+run_test test_refresh_reads_the_plaintext_credential_when_security_is_absent
+run_test test_iso_epoch_refuses_a_non_utc_offset
+
+# M1: with no curl on the machine the cache is never written, so every render is
+# perpetually "due" — and each one forked a subshell plus a full bash load of
+# this script only to bail. Once a second, per open Fable session.
+test_fable_segment_does_not_spawn_a_refresher_without_curl() {
+    _load_sl_functions
+    seed_usage_cache org-abc 86 "2026-08-29T03:59:59Z" 1787816000 1787816300
+    SL_MODEL_ID="claude-fable-5"
+    _SEG_TEXT=(); _SEG_BG=(); _SEG_BOLD=()
+    local nocurl="$TEST_TMPDIR/nocurl"; mkdir -p "$nocurl"
+    cp "$(command -v jq)" "$nocurl/jq"
+    # NOW is past next_poll_at, so this render is unambiguously due.
+    CS_STATUSLINE_NOW=1787816400 _NOW="" _SL_NOW_READY="" PATH="$nocurl" _seg_fable
+    assert_eq "1" "$_FABLE_DUE" "the cache must genuinely be due, or this test proves nothing" || return 1
+    assert_eq "" "$_FABLE_KICKED" "with no curl the render must not fork a refresher it knows will fail" || return 1
+}
+
+# The other half: with curl present a due cache does kick, so the guard above
+# cannot be passing merely because nothing ever kicks.
+test_fable_segment_does_spawn_when_curl_is_present() {
+    _load_sl_functions
+    make_usage_shims 200 "$USAGE_BODY"
+    seed_usage_cache org-abc 86 "2026-08-29T03:59:59Z" 1787816000 1787816300
+    SL_MODEL_ID="claude-fable-5"
+    _SEG_TEXT=(); _SEG_BG=(); _SEG_BOLD=()
+    CS_STATUSLINE_NOW=1787816400 _NOW="" _SL_NOW_READY="" PATH="$USAGE_BINDIR:$PATH" _seg_fable
+    assert_eq "1" "$_FABLE_KICKED" "a due cache with curl available must kick a refresher" || return 1
+    # Let the refresher we just orphaned finish before teardown removes the
+    # directory under it, or rm reports a non-empty dir on stderr and the
+    # suite's output stops being pristine.
+    local i=0
+    while [ "$i" -lt 50 ] && [ -d "$CS_USAGE_DIR/.lock" ]; do
+        i=$(( i + 1 )); command sleep 0.1
+    done
+}
+
+run_test test_fable_segment_does_not_spawn_a_refresher_without_curl
+run_test test_fable_segment_does_spawn_when_curl_is_present
 
 report_results
