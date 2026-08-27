@@ -737,12 +737,17 @@ _usage_write() {
     local org="$1" pct="$2" reset="$3" offset="$4"
     local dir cache tmp
     dir=$(_usage_cache_dir)
-    # A reading nobody can attribute must not be stored. _read_org yields empty
-    # for a torn or missing config, and _fable_read deliberately treats an empty
-    # cached org as "unknown, not a mismatch" — right for reading a record,
-    # catastrophic for writing one, since the reading would then render for
-    # every account. No account, no file.
-    _usage_cache_file "$org" || return 0
+    # A reading nobody can attribute must not be stored: _read_org_from yields
+    # empty for a torn or missing config, and an unattributed reading would be
+    # rendered by whichever account looked next. But the request still spent
+    # budget, so the schedule is recorded under a reserved name — no reading,
+    # no attribution, just a next_poll_at the cadence check can honour.
+    # Without it an unreadable config meant no file, so no interval was read
+    # and none written, and every render fetched again.
+    if ! _usage_cache_file "$org"; then
+        _CACHE_FILE="$dir/fable.unattributed.json"
+        pct=null; reset=""
+    fi
     cache="$_CACHE_FILE"; tmp="$cache.tmp.$$"
     _sl_now
     [[ "${_NOW:-}" =~ ^[0-9]+$ ]] || return 0
@@ -834,7 +839,8 @@ _refresh_usage() {
     # already booked. Because the record is per-account, the account check and
     # the interval no longer compete: no mismatch can bypass a backoff.
     local cache=""
-    if _usage_cache_file "$org" && [ -f "$_CACHE_FILE" ]; then
+    _usage_cache_file "$org" || _CACHE_FILE="$dir/fable.unattributed.json"
+    if [ -f "$_CACHE_FILE" ]; then
         cache="$_CACHE_FILE"
         local due_at
         due_at=$(jq -r '(.next_poll_at // 0 | tostring)' "$cache" 2>/dev/null) || due_at=0
@@ -898,7 +904,14 @@ _refresh_usage() {
     # reading for the right account and blank the chip for a whole interval.
     _read_org_from "$cfg"
     if [ -n "$_ORG" ] && [ -n "$org" ] && [ "$_ORG" != "$org" ]; then
-        _usage_write "$_ORG" null "" "$USAGE_MIN_INTERVAL"
+        # Discard the result: it belongs to the account we started under, which
+        # is no longer signed in. Record the schedule against THAT account —
+        # its budget paid for the request — and leave the account swapped TO
+        # untouched. Writing to $_ORG here would blank a reading it already
+        # holds and restamp it fresh, emptying the chip for a full interval on
+        # the account that just became active, which is the swap case the whole
+        # feature is for. If it has no reading, the next render is due anyway.
+        _usage_write "$org" - "" "$USAGE_MIN_INTERVAL"
         rm -f "$body" "$hdr" 2>/dev/null
         return 0
     fi
@@ -946,11 +959,11 @@ EOF
 USAGE_MAX_AGE=1800   # past this a reading is too old to sit beside a live countdown
 
 # Read the cached Fable window into _FABLE_PCT (integer) and _FABLE_RESET
-# (epoch), and raise _FABLE_DUE when a refresh should be kicked. One jq reads the
-# cache and Claude Code's config together, so proving the reading belongs to the
-# account signed in *now* costs no extra fork. Anything unreadable, too old, or
-# belonging to another account yields no reading at all: the chip may be absent,
-# but it must never carry a number that is not this account's, right now.
+# (epoch), and raise _FABLE_DUE when a refresh should be kicked. Identity is
+# structural rather than checked: the record is addressed by the account signed
+# in now, so a reading can never be found under the wrong one and no comparison
+# is needed. Anything unreadable or too old yields no reading at all — the chip
+# may be absent, but it must never carry a number that is not this account's.
 _fable_read() {
     _FABLE_PCT=""
     _FABLE_RESET=""

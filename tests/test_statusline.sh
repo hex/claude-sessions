@@ -3083,16 +3083,68 @@ printf '200'
 CURL
     chmod +x "$bindir/security" "$bindir/curl"
     export CS_SECURITY_BIN="$bindir/security"
+    # The account swapped to already holds a good reading of its own. Seeding it
+    # is what makes this test able to fail: without it, "wrote null over
+    # nothing" and "wrote null over a good reading" look identical, and the
+    # assertion would codify the second as correct.
+    mkdir -p "$CS_USAGE_DIR"
+    printf '%s' '{"org":"org-swapped","pct":55,"resets_at":"2026-08-29T03:59:59Z","fetched_at":1787815990,"next_poll_at":1787816590}' \
+        > "$CS_USAGE_DIR/fable.org-swapped.json"
     PATH="$bindir:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
-    # The result is discarded and the schedule recorded under the account that
-    # is signed in NOW, so nothing is ever attributed to the wrong one.
-    assert_file_not_exists "$CS_USAGE_DIR/fable.org-abc.json" \
-        "a reading for an account that swapped away must not be written under it" || return 1
-    assert_eq "null" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.org-swapped.json")" \
-        "and the new account records no reading it did not fetch" || return 1
+    # org-abc's schedule may be recorded — its budget paid for the request —
+    # but never the reading, which is no longer attributable to a signed-in
+    # account.
+    if [ -f "$CS_USAGE_DIR/fable.org-abc.json" ]; then
+        assert_eq "null" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.org-abc.json")" \
+            "a reading for an account that swapped away must not be stored under it" || return 1
+    fi
+    # And the account swapped TO must be left entirely alone: it did not make
+    # this request, and blanking it would empty the chip for a full interval on
+    # the account that just became active.
+    assert_eq "55" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.org-swapped.json")" \
+        "the new account's own good reading must survive a swap detected mid-fetch" || return 1
+    assert_eq "1787815990" "$(jq -r '.fetched_at' "$CS_USAGE_DIR/fable.org-swapped.json")" \
+        "and must not be restamped, which would hide its age" || return 1
+}
+
+# Finding 3: with no identifiable account there was no file to address, so the
+# cadence check had nothing to read AND no schedule was written — every render
+# fetched again. The old shared-file code held the cadence even here; the
+# per-account rewrite dropped it.
+test_refresh_without_an_account_still_holds_the_cadence() {
+    use_scratch_usage_env
+    local bindir="$TEST_TMPDIR/bin"; mkdir -p "$bindir"
+    cat > "$bindir/security" <<'SEC'
+#!/bin/bash
+printf '%s\n' '{"claudeAiOauth":{"accessToken":"test-token-not-real"}}'
+SEC
+    cat > "$bindir/curl" <<CURL
+#!/bin/bash
+cat > /dev/null
+echo hit >> "$TEST_TMPDIR/hits"
+out=""
+while [ \$# -gt 0 ]; do case "\$1" in -o) out="\$2"; shift 2 ;; *) shift ;; esac; done
+[ -n "\$out" ] && printf '%s' '$USAGE_BODY' > "\$out"
+printf '200'
+CURL
+    chmod +x "$bindir/security" "$bindir/curl"
+    export CS_SECURITY_BIN="$bindir/security"
+    printf '' > "$TEST_TMPDIR/.claude.json"     # torn config: no account
+    local i
+    for i in 1 2 3 4 5; do
+        PATH="$bindir:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
+    done
+    local hits=0
+    [ -f "$TEST_TMPDIR/hits" ] && hits=$(wc -l < "$TEST_TMPDIR/hits" | tr -d ' ')
+    assert_eq "1" "$hits" "an unidentifiable account must still burn only one request per window" || return 1
+    # The schedule may be recorded, but never a reading: nothing is attributable.
+    local readings
+    readings=$(grep -l '"pct": *[0-9]' "$CS_USAGE_DIR"/*.json 2>/dev/null | wc -l | tr -d ' ')
+    assert_eq "0" "$readings" "and must still store no attributable reading" || return 1
 }
 
 run_test test_refresh_discards_a_result_if_the_account_changed_mid_fetch
+run_test test_refresh_without_an_account_still_holds_the_cadence
 
 # N1: the credential seam must stay closed on BOTH readers. setup() pins
 # CS_SECURITY_BIN at a nonexistent path, but the plaintext fallback reads
@@ -3260,10 +3312,13 @@ CURL
     # address a record without an account, so a render-only assertion passes
     # whether or not this guard exists — verified by mutation: seeding the
     # write with a fallback name left a render-only version of this test green.
-    local written
-    written=$(find "$CS_USAGE_DIR" -maxdepth 1 -name 'fable.*.json' 2>/dev/null | wc -l | tr -d ' ')
-    assert_eq "0" "$written" \
-        "a reading fetched with no identifiable account must not be stored at all" || return 1
+    # A schedule-only record is expected (it holds the cadence when the account
+    # cannot be named); what must never be stored is the reading itself, which
+    # nothing could later attribute.
+    local readings
+    readings=$(grep -l '"pct": *[0-9]' "$CS_USAGE_DIR"/fable.*.json 2>/dev/null | wc -l | tr -d ' ')
+    assert_eq "0" "$readings" \
+        "a reading fetched with no identifiable account must not be stored" || return 1
     # And nothing may then render it for a named account.
     printf '%s' '{"oauthAccount":{"organizationUuid":"org-A"}}' > "$TEST_TMPDIR/.claude.json"
     local out

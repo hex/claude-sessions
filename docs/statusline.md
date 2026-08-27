@@ -121,8 +121,12 @@ record is addressed by account, so a reading can never be found under the wrong
 one, and a refresh that cannot identify the account it fetched for stores
 nothing at all. A failed refresh keeps that account's last good number; a
 response that is not this API's JSON — a captive portal's 200, say — counts as a
-failure rather than as an account with no Fable window. That last check exists because accounts get swapped precisely when one is
-near a limit — the moment a stale percentage would mislead most. The countdown
+failure rather than as an account with no Fable window.
+
+Structure rather than comparison, because accounts get swapped precisely when
+one is near a limit — the moment a stale percentage misleads most, and the
+moment a check that has to be remembered at every read is likeliest to be missed
+at one of them. The countdown
 is always recomputed from `resets_at` at render time, so it stays accurate even
 when the percentage beside it is a few minutes old.
 
