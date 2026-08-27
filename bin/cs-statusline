@@ -612,6 +612,158 @@ _fmt_rest() {
     fi
 }
 
+# --- fable usage cache ------------------------------------------------------
+#
+# Fable's weekly window is model-scoped, and Claude Code puts only the two
+# plan-wide windows on the statusline's stdin, so this one figure has to be
+# fetched. It is fetched out of band and read from a cache: the render itself
+# never touches the network.
+#
+# The cache is machine-global, not per-session, because the endpoint admits only
+# ~28-30 requests per account per rolling hour — capacity returns as old
+# requests age out, so a burst saturates the account for a full hour — and that
+# budget is shared with Claude Code itself and anything else on the machine. One
+# cache plus the interval floor below holds cs to ~12 requests an hour however
+# many sessions are open.
+USAGE_URL="https://api.anthropic.com/api/oauth/usage"
+USAGE_BETA="oauth-2025-04-20"
+USAGE_MIN_INTERVAL=300     # floor between successful polls
+USAGE_FAIL_BACKOFF=600     # a 429 does not reliably clear at its stated horizon
+
+_usage_cache_dir() { printf '%s\n' "${CS_USAGE_DIR:-$SESSIONS_ROOT/.usage}"; }
+
+# Claude Code's global config, whose oauthAccount names the account now signed
+# in. Mirrors Claude Code's own resolution: CLAUDE_CONFIG_DIR, else the homedir
+# (note the asymmetry — .claude.json sits beside ~/.claude, not inside it).
+_claude_config_file() { printf '%s\n' "${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"; }
+
+# Seconds since $1 was last modified, in _AGE; empty when it cannot be read.
+# BSD stat takes -f %m and GNU stat -c %Y, and each rejects the other's flag, so
+# trying both in order needs no platform probe.
+_file_age() {
+    _AGE=""
+    local m
+    m=$(stat -f %m "$1" 2>/dev/null) || m=$(stat -c %Y "$1" 2>/dev/null) || return 0
+    [[ "$m" =~ ^[0-9]+$ ]] || return 0
+    _sl_now
+    [[ "${_NOW:-}" =~ ^[0-9]+$ ]] || return 0
+    _AGE=$(( _NOW - m ))
+}
+
+# Rewrite the cache atomically. $1 org, $2 pct (or "-" to carry the previous
+# reading forward untouched), $3 resets_at, $4 seconds until the next poll.
+# Carrying forward matters on a failed fetch: a transient 429 should cost the
+# bar its freshness, not its number — but it must not restamp fetched_at, or a
+# permanently failing account would look fresh forever.
+_usage_write() {
+    local org="$1" pct="$2" reset="$3" offset="$4"
+    local dir cache tmp
+    dir=$(_usage_cache_dir); cache="$dir/fable.json"; tmp="$cache.tmp.$$"
+    _sl_now
+    [[ "${_NOW:-}" =~ ^[0-9]+$ ]] || return 0
+    local fetched="$_NOW"
+    if [ "$pct" = "-" ]; then
+        pct=null; reset=""; fetched=0
+        if [ -f "$cache" ]; then
+            local prev
+            prev=$(jq -r '[(.pct // "null" | tostring), (.resets_at // ""), (.fetched_at // 0 | tostring)] | .[]' \
+                "$cache" 2>/dev/null) || prev=""
+            if [ -n "$prev" ]; then
+                { IFS= read -r pct; IFS= read -r reset; IFS= read -r fetched; } <<EOF
+$prev
+EOF
+            fi
+        fi
+    fi
+    [ -n "$pct" ] || pct=null
+    [[ "${fetched:-}" =~ ^[0-9]+$ ]] || fetched=0
+    jq -n --arg org "$org" --argjson pct "$pct" --arg reset "$reset" \
+        --argjson fetched "$fetched" --argjson next "$(( _NOW + offset ))" \
+        '{org:$org, pct:$pct, resets_at:$reset, fetched_at:$fetched, next_poll_at:$next}' \
+        > "$tmp" 2>/dev/null && mv "$tmp" "$cache" 2>/dev/null
+    rm -f "$tmp" 2>/dev/null
+}
+
+# Fetch the Fable weekly window and rewrite the cache. Detached from the render
+# and serialised machine-wide by a mkdir lock, so concurrent sessions cannot
+# stampede the endpoint. Every exit path stamps next_poll_at, including the
+# failures: without that, a broken account would make every render fire another
+# request at a budget that is already the scarce resource here.
+_refresh_usage() {
+    command -v jq >/dev/null 2>&1 || return 0
+    command -v curl >/dev/null 2>&1 || return 0
+    local dir lock
+    dir=$(_usage_cache_dir); lock="$dir/.lock"
+    mkdir -p "$dir" 2>/dev/null || return 0
+    # Reclaim a lock left behind by a refresher killed mid-flight.
+    if [ -d "$lock" ]; then
+        _file_age "$lock"
+        if [ -n "${_AGE:-}" ] && [ "$_AGE" -gt 120 ]; then rmdir "$lock" 2>/dev/null; fi
+    fi
+    mkdir "$lock" 2>/dev/null || return 0
+    # The trap body is evaluated at exit, by which point a `local` is long out
+    # of scope; the path has to survive in a global for the release to fire.
+    _USAGE_LOCK="$lock"
+    trap 'rmdir "${_USAGE_LOCK:-}" 2>/dev/null' EXIT
+
+    local org="" cfg
+    cfg=$(_claude_config_file)
+    if [ -f "$cfg" ]; then
+        org=$(jq -r '.oauthAccount.organizationUuid // ""' "$cfg" 2>/dev/null) || org=""
+    fi
+
+    # Claude Code's own credential, read and never written: it owns the refresh
+    # cycle, so an expired token is a 401 to back off from, not ours to repair.
+    # The path is pinned absolute so a `security` planted earlier on PATH cannot
+    # intercept a credential read; CS_SECURITY_BIN exists for the test suite.
+    local creds token=""
+    creds=$("${CS_SECURITY_BIN:-/usr/bin/security}" find-generic-password \
+        -a "${USER:-$(id -un 2>/dev/null)}" -s "Claude Code-credentials" -w 2>/dev/null) || creds=""
+    if [ -n "$creds" ]; then
+        token=$(printf '%s' "$creds" | jq -r '.claudeAiOauth.accessToken // empty' 2>/dev/null) || token=""
+    fi
+    creds=""
+    if [ -z "$token" ]; then
+        _usage_write "$org" - "" "$USAGE_FAIL_BACKOFF"
+        return 0
+    fi
+
+    local body="$dir/.resp.$$" hdr="$dir/.hdr.$$" code
+    # The bearer goes to curl on stdin as a -K config line. On argv it would sit
+    # in `ps` output for every process on the machine to read.
+    code=$(printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -sS -K - \
+        --max-time 8 -o "$body" -D "$hdr" -w '%{http_code}' \
+        -H "anthropic-beta: $USAGE_BETA" -H "User-Agent: cs-statusline" \
+        "$USAGE_URL" 2>/dev/null) || code=000
+    token=""
+
+    if [ "$code" = "200" ]; then
+        # The unified windows ride in the same limits[] array with a null model
+        # scope, so the Fable bucket is selected by its model display name —
+        # never by position, which would silently record the 5-hour number.
+        local fable pct="" reset=""
+        fable=$(jq -r 'first(.limits[]? | select((.scope.model.display_name // "") | test("^fable"; "i")))
+                       | [(.percent // "" | tostring), (.resets_at // "")] | .[]' "$body" 2>/dev/null) || fable=""
+        if [ -n "$fable" ]; then
+            { IFS= read -r pct; IFS= read -r reset; } <<EOF
+$fable
+EOF
+        fi
+        [[ "${pct:-}" =~ ^[0-9]+(\.[0-9]+)?$ ]] || pct=""
+        _usage_write "$org" "${pct:-null}" "${reset:-}" "$USAGE_MIN_INTERVAL"
+    else
+        local wait="$USAGE_FAIL_BACKOFF" ra=""
+        if [ "$code" = "429" ] && [ -f "$hdr" ]; then
+            # No `exit` in the awk: an early-exiting pipe consumer SIGPIPEs its
+            # producer, which under `set -o pipefail` reports failure.
+            ra=$(tr -d '\r' < "$hdr" | awk 'tolower($1)=="retry-after:"{v=$2} END{print v}') || ra=""
+            if [[ "${ra:-}" =~ ^[0-9]+$ ]] && [ $(( ra + 60 )) -gt "$wait" ]; then wait=$(( ra + 60 )); fi
+        fi
+        _usage_write "$org" - "" "$wait"
+    fi
+    rm -f "$body" "$hdr" 2>/dev/null
+}
+
 # Read claude_session_color from a session's machine-local state file
 # (.cs/local/state) into _SESSION_COLOR (empty if none). Pure bash: this runs
 # once per render, where an awk fork is real cost. KEEP THE FORMAT IN SYNC
@@ -1172,6 +1324,15 @@ _render() {
 
 main() {
     [ "${CS_STATUSLINE_DISABLE:-}" = "1" ] && exit 0
+
+    # Out-of-band refresh mode. Re-invoking this script rather than installing a
+    # second binary keeps the feature to one file and off the install manifest.
+    if [ "${1:-}" = "--refresh-usage" ]; then
+        _NOW=""
+        _SL_NOW_READY=""
+        _refresh_usage
+        exit 0
+    fi
 
     # Sanitize the shared-clock memo at the start of every render: neither the
     # value nor its ready flag may be seeded by an inherited environment variable

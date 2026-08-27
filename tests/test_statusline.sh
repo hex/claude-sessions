@@ -36,6 +36,9 @@ setup() {
     # CS_TERM_THEME is unset, which setup() strips above. The theme-resolution
     # tests unset this in their own subshells to exercise the live path.
     export CS_TERM_THEME="light"
+    # Fail closed on credentials: a test that forgets to install the keychain
+    # shim must read nothing, never the developer's real Claude Code token.
+    export CS_SECURITY_BIN="$TEST_TMPDIR/no-such-security"
 }
 
 teardown() {
@@ -46,6 +49,7 @@ teardown() {
     unset CS_SESSIONS_ROOT CLAUDE_SESSION_NAME NO_COLOR COLORTERM TERM_PROGRAM \
         FORCE_COLOR CS_STATUSLINE_DISABLE CS_STATUSLINE_SEGMENTS CS_STATUSLINE_CTX_WARN \
         CS_STATUSLINE_CTX_CRIT CS_DISCOVERIES_MAX_SIZE COLUMNS CS_TERM_BG_RGB \
+        CS_USAGE_DIR CS_USAGE_NO_REFRESH CS_SECURITY_BIN CLAUDE_CONFIG_DIR \
         TMUX TMUX_PANE 2>/dev/null || true
 }
 
@@ -2550,5 +2554,141 @@ test_parse_carries_model_id() {
 }
 
 run_test test_parse_carries_model_id
+
+# Put a fake keychain reader and a fake curl in place so the refresher runs its
+# real code path with no network and no Keychain. $1 is the HTTP status the fake
+# curl reports, $2 the body it writes to curl's -o target. Echoes the bin dir.
+# `security` is reached through CS_SECURITY_BIN rather than PATH because the
+# production path is pinned absolute (a credential reader must not be
+# interceptable by a PATH entry); curl is not a credential tool, so PATH is fine.
+#
+# Sets USAGE_BINDIR rather than echoing it, and MUST NOT be called through
+# $(...): the CS_SECURITY_BIN export would die with the substitution subshell
+# and the refresher would read the developer's real Keychain instead.
+make_usage_shims() {
+    local code="$1" body="$2"
+    local bindir="$TEST_TMPDIR/bin"
+    mkdir -p "$bindir"
+    cat > "$bindir/security" <<'SEC'
+#!/bin/bash
+printf '%s\n' '{"claudeAiOauth":{"accessToken":"test-token-not-real"}}'
+SEC
+    cat > "$bindir/curl" <<CURL
+#!/bin/bash
+# Record argv and stdin so a test can prove where the bearer travelled.
+printf '%s\n' "\$*" > "$TEST_TMPDIR/curl-argv"
+cat > "$TEST_TMPDIR/curl-stdin"
+out=""
+while [ \$# -gt 0 ]; do
+    case "\$1" in
+        -o) out="\$2"; shift 2 ;;
+        *) shift ;;
+    esac
+done
+[ -n "\$out" ] && printf '%s' '$body' > "\$out"
+printf '%s' '$code'
+CURL
+    chmod +x "$bindir/security" "$bindir/curl"
+    export CS_SECURITY_BIN="$bindir/security"
+    USAGE_BINDIR="$bindir"
+}
+
+# Point the refresher at a scratch cache and a scratch Claude config naming
+# account "org-abc".
+use_scratch_usage_env() {
+    export CS_USAGE_DIR="$TEST_TMPDIR/usage"
+    export CLAUDE_CONFIG_DIR="$TEST_TMPDIR"
+    printf '%s' '{"oauthAccount":{"organizationUuid":"org-abc"}}' > "$TEST_TMPDIR/.claude.json"
+}
+
+# Shaped like the real endpoint: the unified windows sit in the same limits[]
+# array with a null model scope and must be skipped. Selecting by position, or
+# taking the first entry, would silently record the 5-hour number as Fable's.
+USAGE_BODY='{"five_hour":{"utilization":31.0},"seven_day":{"utilization":49.0},"limits":[{"scope":{"type":"unified"},"percent":31,"resets_at":"2026-08-27T10:39:59.6Z"},{"scope":{"type":"unified"},"percent":49,"resets_at":"2026-08-29T03:59:59.6Z"},{"scope":{"model":{"display_name":"Fable"}},"percent":86,"resets_at":"2026-08-29T03:59:59.686034+00:00"}]}'
+
+test_refresh_writes_fable_window() {
+    make_usage_shims 200 "$USAGE_BODY"
+    use_scratch_usage_env
+    PATH="$USAGE_BINDIR:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
+    local cache="$CS_USAGE_DIR/fable.json"
+    assert_file_exists "$cache" "refresh must write the cache" || return 1
+    assert_eq "$(jq -r '.pct' "$cache")" "86" "must record the Fable bucket, not a unified window" || return 1
+    assert_eq "$(jq -r '.resets_at' "$cache")" "2026-08-29T03:59:59.686034+00:00" "must record the Fable reset stamp" || return 1
+    assert_eq "$(jq -r '.org' "$cache")" "org-abc" "must stamp the account the reading belongs to" || return 1
+    assert_eq "$(jq -r '.fetched_at' "$cache")" "1787816000" "must stamp when it was fetched" || return 1
+    assert_eq "$(jq -r '.next_poll_at' "$cache")" "1787816300" "next poll must be the 300s floor out" || return 1
+}
+
+# The bearer must never reach argv, where any process on the machine can read it
+# out of `ps`. It goes to curl on stdin as a -K config line.
+test_refresh_keeps_token_off_argv() {
+    make_usage_shims 200 "$USAGE_BODY"
+    use_scratch_usage_env
+    PATH="$USAGE_BINDIR:$PATH" bash "$SL" --refresh-usage
+    # Assert on a yes/no derivative, never on the captured bytes: an assertion
+    # that echoes its input prints a live credential the day this test fails.
+    local on_argv=no on_stdin=no
+    grep -q 'test-token-not-real' "$TEST_TMPDIR/curl-argv" && on_argv=yes
+    grep -q 'test-token-not-real' "$TEST_TMPDIR/curl-stdin" && on_stdin=yes
+    assert_eq "$on_argv" "no" "the access token must not appear in curl's arguments" || return 1
+    assert_eq "$on_stdin" "yes" "the access token must reach curl on stdin" || return 1
+}
+
+# A 429 must not overwrite the last good reading, and must back off past the
+# 300s floor: a 429 does not reliably clear at its stated horizon.
+test_refresh_429_backs_off_and_keeps_last_good() {
+    use_scratch_usage_env
+    mkdir -p "$CS_USAGE_DIR"
+    printf '%s' '{"org":"org-abc","pct":42,"resets_at":"2026-08-29T03:59:59Z","fetched_at":1787815000,"next_poll_at":1787815300}' \
+        > "$CS_USAGE_DIR/fable.json"
+    make_usage_shims 429 ''
+    PATH="$USAGE_BINDIR:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
+    local cache="$CS_USAGE_DIR/fable.json"
+    assert_eq "$(jq -r '.pct' "$cache")" "42" "a 429 must leave the last good reading intact" || return 1
+    assert_eq "$(jq -r '.fetched_at' "$cache")" "1787815000" "a 429 must not restamp the reading as fresh" || return 1
+    assert_eq "$(jq -r '.next_poll_at' "$cache")" "1787816600" "a 429 must back off 600s, not the 300s floor" || return 1
+}
+
+# An account with no Fable window must record no percentage rather than leave a
+# previous account's number standing behind a fresh timestamp.
+test_refresh_no_fable_bucket_clears() {
+    use_scratch_usage_env
+    make_usage_shims 200 '{"limits":[{"scope":{"type":"unified"},"percent":31,"resets_at":"2026-08-27T10:39:59Z"}]}'
+    PATH="$USAGE_BINDIR:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
+    assert_eq "$(jq -r '.pct' "$CS_USAGE_DIR/fable.json")" "null" \
+        "an account with no Fable window must record no percentage" || return 1
+}
+
+# Every failure path must still stamp next_poll_at, or a broken account makes
+# every single render fire another request at an already-strained budget.
+test_refresh_without_a_token_still_schedules() {
+    use_scratch_usage_env
+    local bindir="$TEST_TMPDIR/bin"; mkdir -p "$bindir"
+    printf '#!/bin/bash\nexit 44\n' > "$bindir/security"   # errSecItemNotFound
+    printf '#!/bin/bash\nexit 1\n' > "$bindir/curl"
+    chmod +x "$bindir/security" "$bindir/curl"
+    export CS_SECURITY_BIN="$bindir/security"
+    PATH="$USAGE_BINDIR:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
+    assert_eq "$(jq -r '.next_poll_at' "$CS_USAGE_DIR/fable.json")" "1787816600" \
+        "a missing credential must still back off rather than re-fire every render" || return 1
+}
+
+# A refresher already running holds the lock; a second must return rather than
+# queue behind it and fire a duplicate request.
+test_refresh_respects_a_held_lock() {
+    make_usage_shims 200 "$USAGE_BODY"
+    use_scratch_usage_env
+    mkdir -p "$CS_USAGE_DIR/.lock"
+    PATH="$USAGE_BINDIR:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
+    assert_file_not_exists "$CS_USAGE_DIR/fable.json" \
+        "a refresher must not run while another holds the lock" || return 1
+}
+
+run_test test_refresh_writes_fable_window
+run_test test_refresh_keeps_token_off_argv
+run_test test_refresh_429_backs_off_and_keeps_last_good
+run_test test_refresh_no_fable_bucket_clears
+run_test test_refresh_without_a_token_still_schedules
+run_test test_refresh_respects_a_held_lock
 
 report_results
