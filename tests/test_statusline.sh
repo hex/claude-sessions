@@ -3041,4 +3041,34 @@ test_fable_segment_does_spawn_when_curl_is_present() {
 run_test test_fable_segment_does_not_spawn_a_refresher_without_curl
 run_test test_fable_segment_does_spawn_when_curl_is_present
 
+# I4: an account swap that lands while the fetch is in flight would stamp the
+# old account's number with the new org and a fresh timestamp — C1's failure via
+# the success path, and immune to C1's fix because that only guards the
+# carry-forward branch. The fake curl performs the swap mid-request.
+test_refresh_discards_a_result_if_the_account_changed_mid_fetch() {
+    use_scratch_usage_env
+    local bindir="$TEST_TMPDIR/bin"; mkdir -p "$bindir"
+    cat > "$bindir/security" <<'SEC'
+#!/bin/bash
+printf '%s\n' '{"claudeAiOauth":{"accessToken":"test-token-not-real"}}'
+SEC
+    cat > "$bindir/curl" <<CURL
+#!/bin/bash
+cat > /dev/null
+# The swap happens here, between the org read and the write.
+printf '%s' '{"oauthAccount":{"organizationUuid":"org-swapped"}}' > "$TEST_TMPDIR/.claude.json"
+out=""
+while [ \$# -gt 0 ]; do case "\$1" in -o) out="\$2"; shift 2 ;; *) shift ;; esac; done
+[ -n "\$out" ] && printf '%s' '$USAGE_BODY' > "\$out"
+printf '200'
+CURL
+    chmod +x "$bindir/security" "$bindir/curl"
+    export CS_SECURITY_BIN="$bindir/security"
+    PATH="$bindir:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
+    assert_eq "null" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.json")" \
+        "a reading fetched for an account that is no longer signed in must be discarded" || return 1
+}
+
+run_test test_refresh_discards_a_result_if_the_account_changed_mid_fetch
+
 report_results

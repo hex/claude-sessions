@@ -746,9 +746,12 @@ _refresh_usage() {
 
     local org="" cfg
     cfg=$(_claude_config_file)
-    if [ -f "$cfg" ]; then
-        org=$(jq -r '.oauthAccount.organizationUuid // ""' "$cfg" 2>/dev/null) || org=""
-    fi
+    _read_org() {
+        _ORG=""
+        [ -f "$cfg" ] || return 0
+        _ORG=$(jq -r '.oauthAccount.organizationUuid // ""' "$cfg" 2>/dev/null) || _ORG=""
+    }
+    _read_org; org="$_ORG"
 
     # Claude Code's own credential, read and never written: it owns the refresh
     # cycle, so an expired token is a 401 to back off from, not ours to repair.
@@ -787,6 +790,17 @@ _refresh_usage() {
         -H "anthropic-beta: $USAGE_BETA" -H "User-Agent: cs-statusline" \
         "$USAGE_URL" 2>/dev/null) || code=000
     token=""
+
+    # An account swap during the request would otherwise stamp the account we
+    # asked about with the org that is signed in now — the same defect as
+    # re-labelling a carried-forward reading, but reached through success, so
+    # the carry-forward guard cannot see it. Discard rather than guess.
+    _read_org
+    if [ "$_ORG" != "$org" ]; then
+        _usage_write "$_ORG" null "" "$USAGE_MIN_INTERVAL"
+        rm -f "$body" "$hdr" 2>/dev/null
+        return 0
+    fi
 
     if [ "$code" = "200" ]; then
         # The unified windows ride in the same limits[] array with a null model
