@@ -36,9 +36,14 @@ setup() {
     # CS_TERM_THEME is unset, which setup() strips above. The theme-resolution
     # tests unset this in their own subshells to exercise the live path.
     export CS_TERM_THEME="light"
-    # Fail closed on credentials: a test that forgets to install the keychain
-    # shim must read nothing, never the developer's real Claude Code token.
+    # Fail closed on credentials, on BOTH readers: a test that forgets to
+    # install the shims must read nothing, never the developer's real Claude
+    # Code token. CS_SECURITY_BIN closes the Keychain path; CLAUDE_CONFIG_DIR
+    # closes the plaintext one, which would otherwise fall back to
+    # $HOME/.claude/.credentials.json — the live credential on every Linux box
+    # and on any Mac that has written one.
     export CS_SECURITY_BIN="$TEST_TMPDIR/no-such-security"
+    export CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-such-config"
 }
 
 teardown() {
@@ -3024,15 +3029,21 @@ test_fable_segment_does_not_spawn_a_refresher_without_curl() {
 test_fable_segment_does_spawn_when_curl_is_present() {
     _load_sl_functions
     make_usage_shims 200 "$USAGE_BODY"
-    seed_usage_cache org-abc 86 "2026-08-29T03:59:59Z" 1787816000 1787816300
+    seed_usage_cache org-abc 42 "2026-08-29T03:59:59Z" 1787816000 1787816300
     SL_MODEL_ID="claude-fable-5"
     _SEG_TEXT=(); _SEG_BG=(); _SEG_BOLD=()
     CS_STATUSLINE_NOW=1787816400 _NOW="" _SL_NOW_READY="" PATH="$USAGE_BINDIR:$PATH" _seg_fable
     assert_eq "1" "$_FABLE_KICKED" "a due cache with curl available must kick a refresher" || return 1
-    # Let the refresher we just orphaned finish before teardown removes the
-    # directory under it, or rm reports a non-empty dir on stderr and the
-    # suite's output stops being pristine.
+    # Wait for the refresher's WRITE, not for its lock: the lock appears tens of
+    # ms after the spawn, so a loop waiting for it to vanish can fall through
+    # before it ever exists and leave teardown racing a live refresher. The
+    # seeded pct differs from the shim body's 86 so the write is observable.
     local i=0
+    while [ "$i" -lt 50 ] && [ "$(jq -r '.pct' "$CS_USAGE_DIR/fable.json" 2>/dev/null)" != "86" ]; do
+        i=$(( i + 1 )); command sleep 0.1
+    done
+    assert_eq "86" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.json")" "the kicked refresher must complete its write" || return 1
+    i=0
     while [ "$i" -lt 50 ] && [ -d "$CS_USAGE_DIR/.lock" ]; do
         i=$(( i + 1 )); command sleep 0.1
     done
@@ -3070,5 +3081,106 @@ CURL
 }
 
 run_test test_refresh_discards_a_result_if_the_account_changed_mid_fetch
+
+# N1: the credential seam must stay closed on BOTH readers. setup() pins
+# CS_SECURITY_BIN at a nonexistent path, but the plaintext fallback reads
+# CLAUDE_CONFIG_DIR (defaulting to $HOME/.claude), so a test that forgets to
+# repoint it would read the developer's real credential on any Linux/WSL box —
+# and on a Mac that has ever written one. Fail closed on both, or the seam that
+# printed a live token during development is only half shut.
+test_setup_closes_both_credential_readers() {
+    local home="$TEST_TMPDIR/fakehome"
+    mkdir -p "$home/.claude"
+    printf '%s' '{"claudeAiOauth":{"accessToken":"home-token-not-real"}}' \
+        > "$home/.claude/.credentials.json"
+    local bindir="$TEST_TMPDIR/bin"; mkdir -p "$bindir"
+    cat > "$bindir/curl" <<CURL
+#!/bin/bash
+cat > "$TEST_TMPDIR/curl-stdin"
+printf '000'
+CURL
+    chmod +x "$bindir/curl"
+    export CS_USAGE_DIR="$TEST_TMPDIR/usage"
+    # Deliberately NOT setting CLAUDE_CONFIG_DIR: this test stands in for one
+    # that forgot to, and asserts setup()'s posture is safe by itself.
+    HOME="$home" PATH="$bindir:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
+    local leaked=no
+    [ -f "$TEST_TMPDIR/curl-stdin" ] && grep -q 'home-token-not-real' "$TEST_TMPDIR/curl-stdin" && leaked=yes
+    assert_eq "no" "$leaked" "setup() must close the plaintext credential reader too, not just the keychain one" || return 1
+}
+
+run_test test_setup_closes_both_credential_readers
+
+# N3(a): a torn or unreadable config during the request must not throw away a
+# good reading for the account we actually asked about. _fable_read already
+# treats an empty org as "unknown, not a mismatch"; the refresher must agree, or
+# the two disagree about the same value and the chip blanks for a full interval.
+test_refresh_keeps_a_good_reading_when_the_config_is_unreadable_mid_fetch() {
+    use_scratch_usage_env
+    local bindir="$TEST_TMPDIR/bin"; mkdir -p "$bindir"
+    cat > "$bindir/security" <<'SEC'
+#!/bin/bash
+printf '%s\n' '{"claudeAiOauth":{"accessToken":"test-token-not-real"}}'
+SEC
+    cat > "$bindir/curl" <<CURL
+#!/bin/bash
+cat > /dev/null
+printf '' > "$TEST_TMPDIR/.claude.json"      # torn mid-request, not swapped
+out=""
+while [ \$# -gt 0 ]; do case "\$1" in -o) out="\$2"; shift 2 ;; *) shift ;; esac; done
+[ -n "\$out" ] && printf '%s' '$USAGE_BODY' > "\$out"
+printf '200'
+CURL
+    chmod +x "$bindir/security" "$bindir/curl"
+    export CS_SECURITY_BIN="$bindir/security"
+    PATH="$bindir:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
+    assert_eq "86" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.json")" \
+        "an unreadable config is not evidence of a swap; the reading must survive" || return 1
+}
+
+# N2: the refresher must honour the interval it stamped. A stray DUE from the
+# render — a torn config, a corrupt cache — otherwise reaches an unguarded
+# fetcher and spends a request that the cadence had already scheduled.
+test_refresh_declines_when_the_cache_is_not_yet_due() {
+    use_scratch_usage_env
+    mkdir -p "$CS_USAGE_DIR"
+    printf '%s' '{"org":"org-abc","pct":42,"resets_at":"2026-08-29T03:59:59Z","fetched_at":1787816000,"next_poll_at":1787816600}' \
+        > "$CS_USAGE_DIR/fable.json"
+    local bindir="$TEST_TMPDIR/bin"; mkdir -p "$bindir"
+    cat > "$bindir/security" <<'SEC'
+#!/bin/bash
+printf '%s\n' '{"claudeAiOauth":{"accessToken":"test-token-not-real"}}'
+SEC
+    cat > "$bindir/curl" <<CURL
+#!/bin/bash
+cat > /dev/null
+echo hit >> "$TEST_TMPDIR/curl-hits"
+printf '000'
+CURL
+    chmod +x "$bindir/security" "$bindir/curl"
+    export CS_SECURITY_BIN="$bindir/security"
+    PATH="$bindir:$PATH" CS_STATUSLINE_NOW=1787816100 bash "$SL" --refresh-usage
+    assert_file_not_exists "$TEST_TMPDIR/curl-hits" \
+        "a refresher must not spend a request before its own next_poll_at" || return 1
+    assert_eq "42" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.json")" \
+        "and must leave the not-yet-due reading exactly as it found it" || return 1
+}
+
+# The other side: once the interval has elapsed the refresher must still fetch,
+# so the guard above cannot be passing by declining everything.
+test_refresh_proceeds_once_due() {
+    use_scratch_usage_env
+    mkdir -p "$CS_USAGE_DIR"
+    printf '%s' '{"org":"org-abc","pct":42,"resets_at":"2026-08-29T03:59:59Z","fetched_at":1787816000,"next_poll_at":1787816600}' \
+        > "$CS_USAGE_DIR/fable.json"
+    make_usage_shims 200 "$USAGE_BODY"
+    PATH="$USAGE_BINDIR:$PATH" CS_STATUSLINE_NOW=1787816700 bash "$SL" --refresh-usage
+    assert_eq "86" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.json")" \
+        "past next_poll_at the refresher must fetch" || return 1
+}
+
+run_test test_refresh_keeps_a_good_reading_when_the_config_is_unreadable_mid_fetch
+run_test test_refresh_declines_when_the_cache_is_not_yet_due
+run_test test_refresh_proceeds_once_due
 
 report_results

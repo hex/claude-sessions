@@ -670,6 +670,23 @@ _file_age() {
     _AGE=$(( _NOW - m ))
 }
 
+# Run "$@" with a hard wall-clock bound, echoing its stdout. Prefers coreutils
+# timeout, then perl's alarm (present on every macOS, where coreutils is not),
+# then bare execution. Unlike _timeout this never silently drops the bound on a
+# stock macOS, which matters when the caller holds a lock across the call.
+_bounded_capture() {
+    local secs="$1"; shift
+    if command -v timeout >/dev/null 2>&1; then
+        timeout "$secs" "$@"
+    elif command -v gtimeout >/dev/null 2>&1; then
+        gtimeout "$secs" "$@"
+    elif [ -x /usr/bin/perl ]; then
+        /usr/bin/perl -e 'alarm shift; exec @ARGV or exit 127' "$secs" "$@"
+    else
+        "$@"
+    fi
+}
+
 # Rewrite the cache atomically. $1 org, $2 pct (or "-" to carry the previous
 # reading forward untouched), $3 resets_at, $4 seconds until the next poll.
 # Carrying forward matters on a failed fetch: a transient 429 should cost the
@@ -743,6 +760,9 @@ _refresh_usage() {
     # fire for that one, and nothing else ever prunes this directory.
     find "$dir" -maxdepth 1 -type f -name '.resp.*' -mmin +5 -delete 2>/dev/null
     find "$dir" -maxdepth 1 -type f -name '.hdr.*' -mmin +5 -delete 2>/dev/null
+    # And any lock a reclaim renamed aside but could not remove; -type f above
+    # never matches a directory, so nothing else would ever clear these.
+    find "$dir" -maxdepth 1 -type d -name '.lock.reclaimed.*' -mmin +5 -exec rm -rf {} + 2>/dev/null
 
     local org="" cfg
     cfg=$(_claude_config_file)
@@ -753,6 +773,33 @@ _refresh_usage() {
     }
     _read_org; org="$_ORG"
 
+    # Honour the cadence under the lock. The render kicks on _FABLE_DUE, which
+    # is deliberately raised by conditions that are not "the interval elapsed" —
+    # a corrupt cache, an unreadable config — so without this a stray DUE spends
+    # a request the schedule had already booked. Re-read here rather than trust
+    # the caller: this is the one place that sees the cache under the lock,
+    # after any concurrent refresher has written.
+    #
+    # The account check comes FIRST and overrides the interval: a cache holding
+    # another account's reading must be replaced now, not when its window
+    # happens to elapse. Ordering these the other way silently reintroduced the
+    # cross-account defect this file's own test exists to catch.
+    local cache="$dir/fable.json"
+    if [ -f "$cache" ]; then
+        local sched cached_org="" due_at=0
+        sched=$(jq -r '[(.org // ""), (.next_poll_at // 0 | tostring)] | .[]' "$cache" 2>/dev/null) || sched=""
+        if [ -n "$sched" ]; then
+            { IFS= read -r cached_org; IFS= read -r due_at; } <<EOF
+$sched
+EOF
+        fi
+        [[ "${due_at:-}" =~ ^[0-9]+$ ]] || due_at=0
+        if [ "$cached_org" = "$org" ]; then
+            _sl_now
+            if [[ "${_NOW:-}" =~ ^[0-9]+$ ]] && [ "$_NOW" -lt "$due_at" ]; then return 0; fi
+        fi
+    fi
+
     # Claude Code's own credential, read and never written: it owns the refresh
     # cycle, so an expired token is a 401 to back off from, not ours to repair.
     # The default path is absolute so a `security` planted earlier on PATH
@@ -761,10 +808,16 @@ _refresh_usage() {
     # environment of this process can already redirect its `curl` and `jq`.
     local creds="" token="" sec="${CS_SECURITY_BIN:-/usr/bin/security}"
     if [ -x "$sec" ]; then
-        # Bounded: a locked login keychain can put `security` in front of a
-        # SecurityAgent prompt that never gets answered on a headless or ssh
-        # host, and this process is holding the machine-wide refresh lock.
-        creds=$(_timeout 5 "$sec" find-generic-password \
+        # A locked login keychain can put `security` behind a SecurityAgent
+        # prompt that never gets answered on a headless or ssh host, and this
+        # process holds the machine-wide refresh lock while it waits.
+        #
+        # _timeout is not enough here: it falls through to bare execution when
+        # neither timeout nor gtimeout exists, and stock macOS ships neither —
+        # which is the only platform where that prompt exists at all, so the
+        # bound would be missing exactly where it is needed. /usr/bin/perl is on
+        # every macOS and its alarm() needs no coreutils.
+        creds=$(_bounded_capture 5 "$sec" find-generic-password \
             -a "${USER:-$(id -un 2>/dev/null)}" -s "Claude Code-credentials" -w 2>/dev/null) || creds=""
     fi
     if [ -z "$creds" ]; then
@@ -795,8 +848,13 @@ _refresh_usage() {
     # asked about with the org that is signed in now — the same defect as
     # re-labelling a carried-forward reading, but reached through success, so
     # the carry-forward guard cannot see it. Discard rather than guess.
+    #
+    # Only two populated, differing values are evidence of a swap. An empty
+    # reading means the config was briefly unreadable, which _fable_read already
+    # treats as unknown; disagreeing with it here would throw away a good
+    # reading for the right account and blank the chip for a whole interval.
     _read_org
-    if [ "$_ORG" != "$org" ]; then
+    if [ -n "$_ORG" ] && [ -n "$org" ] && [ "$_ORG" != "$org" ]; then
         _usage_write "$_ORG" null "" "$USAGE_MIN_INTERVAL"
         rm -f "$body" "$hdr" 2>/dev/null
         return 0

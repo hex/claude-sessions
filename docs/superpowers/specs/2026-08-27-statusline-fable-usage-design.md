@@ -173,8 +173,16 @@ Three guards, all added or hardened during review:
 - The **render** compares the cached `org` against the live one and blanks on a
   mismatch, so even a stale cache cannot mislabel.
 
-The residual is a swap whose credential and config writes straddle our credential
-read; that window is milliseconds and is bounded by the render-side check.
+One residual is not closed by any of them, and is recorded rather than claimed
+away: if a swap writes the config *before* the credential, cs can read the new
+org and then the old token, fetch, and see the same new org on the recheck. The
+number is stamped under an org that genuinely is signed in, so the render-side
+check passes too and the wrong figure stands for up to 1800 s. The window is
+milliseconds wide and needs a swap to land inside it. Closing it means holding
+the token in memory across the fetch and re-reading the credential to compare —
+worth doing if the case is ever observed, and deliberately not done now, since
+it lengthens the lifetime of the one value this design works hardest to keep
+short-lived.
 
 ## Explicitly out of scope
 
