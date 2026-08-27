@@ -32,7 +32,9 @@ Per-segment icons are standard Unicode glyphs (gauge `◔`, star `✦`, branch `
 
 ## Data sources and performance
 
-The render path is deliberately thin: one `jq` pass over stdin, at most one git subprocess, and one small file read (`.cs/local/state` for the session color). There is no transcript parsing and no network access. Data gathering is gated per segment, so disabling `git` in `CS_STATUSLINE_SEGMENTS` means the git subprocess never forks — and a session on any model but Fable never touches the usage cache described below.
+The render path is deliberately thin: one `jq` pass over stdin, at most one git subprocess, and one small file read (`.cs/local/state` for the session color). There is no transcript parsing and no network access. Data gathering is gated per segment, so disabling `git` in `CS_STATUSLINE_SEGMENTS` means the git subprocess never forks.
+
+A Fable session is the one exception, and pays for the [fable segment](#fable-usage) exactly: a second `jq` that reads the usage cache and Claude Code's `.claude.json` together. Every other model returns at the model gate without touching either file.
 
 The writes in the render path are machine-local and best-effort: each render stamps the current context-window usage, truncated to an integer, to `.cs/local/context-pct`. The task-queue gate (the `narrative-reminder.sh` Stop hook, see [hooks.md](hooks.md)) reads this file to decide whether to suggest compacting before a walk-away drain. Skipped outside a cs session or when the stdin JSON carries no context percentage.
 
@@ -61,8 +63,11 @@ rather than on position. Its `percent` is already 0–100 on the wire, and its
 `resets_at` is an ISO 8601 string rather than the epoch integer the stdin schema
 uses, so it is converted at read time.
 
-The bearer is Claude Code's own OAuth token, read from the macOS Keychain
-(`security find-generic-password -s "Claude Code-credentials"`). cs **reads** that
+The bearer is Claude Code's own OAuth token. On macOS that comes from the
+Keychain (`security find-generic-password -s "Claude Code-credentials"`); on
+Linux and WSL2, where there is no Keychain, Claude Code keeps the same document
+in plaintext at `<config_home>/.credentials.json` and cs reads that instead. cs
+**reads** that
 credential and never refreshes or writes it: Claude Code owns the refresh cycle,
 so an expired token surfaces here as a 401 to back off from, not as something to
 repair. The token reaches `curl` on stdin as a `-K` config line, never on a
@@ -85,10 +90,17 @@ headroom early. The budget is shared with Claude Code itself and with any other
 tool on the machine that polls it.
 
 Hence one cache for the host, at `$CS_SESSIONS_ROOT/.usage/fable.json`, rather
-than one per session, and a 300-second floor between polls: cs contributes about
-twelve requests an hour however many sessions are open. A `mkdir` lock
-serialises refreshers across sessions (a lock older than 120 seconds is treated
-as abandoned), and a 429 backs off for `Retry-After` plus a minute, floored at
+than one per session, and a 600-second floor between polls: cs contributes about
+six requests an hour however many sessions are open. The floor is 600 rather
+than 300 because claude-swap, which many cs users run alongside, polls the same
+account on its own 180-second floor — at 300 the two together would already
+exceed the ceiling before Claude Code's own polls. Nothing visible changes,
+since a reading stays usable for 1800 seconds.
+
+A lock serialises refreshers across sessions. A lock older than 120 seconds is
+treated as abandoned and reclaimed by *renaming* it: with a plain remove, two
+contenders that both see it stale can both proceed, the second deleting the
+first's fresh lock. A 429 backs off for `Retry-After` plus a minute, floored at
 ten — a 429 does not reliably clear at its stated horizon.
 
 Polling happens only while the active model is Fable, because the trigger lives
@@ -98,9 +110,11 @@ model costs the budget nothing.
 ### When the chip does not render
 
 The chip is null-when-nothing, and deliberately strict about it: no cache, no
-Fable window on the account, no `jq` or `curl`, a reading older than 1800
-seconds, or a reading stamped with a different account than the one now signed
-in. That last check exists because accounts get swapped precisely when one is
+Fable window on the account, no `jq` or `curl`, no readable credential, a
+reading older than 1800 seconds, or a reading stamped with a different account
+than the one now signed in. A failed refresh keeps the last good number but only
+within one account — across a swap the reading is discarded rather than
+re-labelled. That last check exists because accounts get swapped precisely when one is
 near a limit — the moment a stale percentage would mislead most. The countdown
 is always recomputed from `resets_at` at render time, so it stays accurate even
 when the percentage beside it is a few minutes old.

@@ -18,6 +18,13 @@ choose.
 launch consumes fresh seeds (queued, armed, kick prompt); seeds older than an
 hour are set aside as `<name>.seed.stale` and never applied silently.
 
+`.usage/` at the sessions root holds `fable.json`, the machine-global cache
+behind the statusline's [fable segment](statusline.md#fable-usage), plus the
+`.lock` directory that serialises refreshers. It sits at the root rather than in
+any one session because the rate-limit budget it draws on belongs to the
+account, not the session: every cs session on the host must poll through one
+file. Machine-local and disposable — deleting it costs one refresh.
+
 The one distinction that governs everything below is **shared vs machine-local**:
 
 - **Shared** — committed to the session's git repo. When a session is cloned or
