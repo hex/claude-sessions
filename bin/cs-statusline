@@ -552,6 +552,31 @@ _thresh_color() {
     fi
 }
 
+# Convert an ISO 8601 timestamp into epoch seconds in _EPOCH; empty when the
+# value is missing or unparseable. The usage endpoint sends fractional seconds
+# and an explicit "+00:00" offset ("2026-08-29T03:59:59.686034+00:00"), so both
+# are trimmed and the remainder read as UTC — which is the only zone that
+# endpoint emits. The shape is checked with a glob before `date` sees it, so a
+# malformed value can never reach a locale-dependent parser and come back as
+# something plausible. BSD date (macOS, the 3.2 floor) takes -j -f; GNU date
+# takes -d, and each rejects the other's flags, so trying both in order needs no
+# platform probe.
+_iso_epoch() {
+    _EPOCH=""
+    local iso="${1:-}" base
+    [ -n "$iso" ] || return 0
+    base="${iso%%.*}"     # drop fractional seconds
+    base="${base%%+*}"    # drop a "+HH:MM" offset
+    base="${base%Z}"      # drop a trailing Z
+    case "$base" in
+        [0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]T[0-2][0-9]:[0-5][0-9]:[0-6][0-9]) ;;
+        *) return 0 ;;
+    esac
+    _EPOCH=$(TZ=UTC date -j -f "%Y-%m-%dT%H:%M:%S" "$base" +%s 2>/dev/null)
+    [ -n "$_EPOCH" ] || _EPOCH=$(date -u -d "$base" +%s 2>/dev/null)
+    [[ "${_EPOCH:-}" =~ ^[0-9]+$ ]] || _EPOCH=""
+}
+
 # Format seconds-until-reset into a compact "2h14m" / "45m" countdown in _REST.
 # $1 is the resets_at value (Unix epoch seconds, per the statusline schema).
 # Empty when it is missing, non-numeric, or already in the past. `now` comes

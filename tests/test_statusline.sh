@@ -2505,4 +2505,36 @@ run_test test_sl_theme_uses_client_rung_when_tmux_is_real
 run_test test_sl_env_foreign_ignores_inherited_value
 run_test test_sl_bg_rgb_dropped_when_foreign_despite_matching_theme
 run_test test_sl_bg_rgb_kept_for_manual_value_when_foreign
+
+# --- Fable usage segment ----------------------------------------------------
+
+# The usage endpoint sends ISO 8601 with fractional seconds and a +00:00 offset;
+# _fmt_rest wants epoch seconds. The expected value is an independently known
+# instant, not one recomputed with the same date call the helper uses.
+test_iso_epoch_parses_endpoint_format() {
+    _load_sl_functions
+    _iso_epoch "2026-08-29T03:59:59.686034+00:00"
+    assert_eq "$_EPOCH" "1787975999" "fractional seconds and +00:00 offset must parse as UTC" || return 1
+    _iso_epoch "2026-08-29T03:59:59Z"
+    assert_eq "$_EPOCH" "1787975999" "a trailing Z must parse to the same instant" || return 1
+    _iso_epoch "2026-08-29T03:59:59"
+    assert_eq "$_EPOCH" "1787975999" "a bare timestamp must be read as UTC" || return 1
+}
+
+# Garbage must yield empty, never a partial value and never a previous one left
+# standing: a stale epoch would render a confidently wrong countdown.
+test_iso_epoch_rejects_junk() {
+    _load_sl_functions
+    _iso_epoch "2026-08-29T03:59:59Z"
+    _iso_epoch "not-a-timestamp"
+    assert_eq "$_EPOCH" "" "unparseable input must clear _EPOCH" || return 1
+    _iso_epoch ""
+    assert_eq "$_EPOCH" "" "empty input must yield empty" || return 1
+    _iso_epoch "2026-13-45T99:99:99Z"
+    assert_eq "$_EPOCH" "" "an out-of-range timestamp must yield empty" || return 1
+}
+
+run_test test_iso_epoch_parses_endpoint_format
+run_test test_iso_epoch_rejects_junk
+
 report_results
