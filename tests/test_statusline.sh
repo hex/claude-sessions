@@ -2679,9 +2679,54 @@ test_refresh_respects_a_held_lock() {
     make_usage_shims 200 "$USAGE_BODY"
     use_scratch_usage_env
     mkdir -p "$CS_USAGE_DIR/.lock"
+    # Pin the lock's mtime 40s before the pinned clock. Without this the age is
+    # (pinned NOW - real mtime), which is negative and passes the freshness
+    # check for the wrong reason — the test would have started failing the
+    # moment real time overtook the pin.
+    TZ=UTC touch -t 202608270732.40 "$CS_USAGE_DIR/.lock"
     PATH="$USAGE_BINDIR:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
     assert_file_not_exists "$CS_USAGE_DIR/fable.json" \
-        "a refresher must not run while another holds the lock" || return 1
+        "a refresher must not run while another holds a fresh lock" || return 1
+}
+
+# The other half of the lock contract, which had no test at all: a lock left by
+# a refresher that was killed mid-flight must be reclaimed, or the chip is dead
+# on this machine until someone removes the directory by hand.
+test_refresh_reclaims_an_abandoned_lock() {
+    make_usage_shims 200 "$USAGE_BODY"
+    use_scratch_usage_env
+    mkdir -p "$CS_USAGE_DIR/.lock"
+    TZ=UTC touch -t 202608270730.00 "$CS_USAGE_DIR/.lock"   # 200s before the pin
+    PATH="$USAGE_BINDIR:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
+    assert_eq "86" "$(jq -r '.pct' "$CS_USAGE_DIR/fable.json")" \
+        "a lock older than the reclaim window must not block a refresh" || return 1
+    assert_not_exists "$CS_USAGE_DIR/.lock" "the reclaiming refresher must release the lock" || return 1
+}
+
+# The Retry-After branch had no test: a server asking for a longer wait than the
+# floor must be honoured, or cs keeps knocking while it is blocked.
+test_refresh_honours_retry_after() {
+    use_scratch_usage_env
+    local bindir="$TEST_TMPDIR/bin"; mkdir -p "$bindir"
+    cat > "$bindir/security" <<'SEC'
+#!/bin/bash
+printf '%s\n' '{"claudeAiOauth":{"accessToken":"test-token-not-real"}}'
+SEC
+    cat > "$bindir/curl" <<CURL
+#!/bin/bash
+cat > /dev/null
+hdr=""
+while [ \$# -gt 0 ]; do
+    case "\$1" in -D) hdr="\$2"; shift 2 ;; *) shift ;; esac
+done
+[ -n "\$hdr" ] && printf 'HTTP/2 429\r\nretry-after: 900\r\n\r\n' > "\$hdr"
+printf '429'
+CURL
+    chmod +x "$bindir/security" "$bindir/curl"
+    export CS_SECURITY_BIN="$bindir/security"
+    PATH="$bindir:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
+    assert_eq "1787816960" "$(jq -r '.next_poll_at' "$CS_USAGE_DIR/fable.json")" \
+        "Retry-After must be honoured with a 60s margin (900+60) over the 600s floor" || return 1
 }
 
 run_test test_refresh_writes_fable_window
@@ -2690,6 +2735,8 @@ run_test test_refresh_429_backs_off_and_keeps_last_good
 run_test test_refresh_no_fable_bucket_clears
 run_test test_refresh_without_a_token_still_schedules
 run_test test_refresh_respects_a_held_lock
+run_test test_refresh_reclaims_an_abandoned_lock
+run_test test_refresh_honours_retry_after
 
 # Seed a cache record and a Claude config naming account "org-abc".
 # $1 org, $2 pct, $3 resets_at, $4 fetched_at, $5 next_poll_at.
@@ -2860,5 +2907,44 @@ run_test test_fable_segment_escalates_colour
 run_test test_fable_segment_absent_without_a_reading
 run_test test_fable_segment_costs_nothing_off_fable
 run_test test_fable_segment_kicks_a_refresh_when_due
+
+# C1: a failed fetch must not re-label the previous account's reading with the
+# account signed in now. Carrying a number forward is only ever valid within one
+# account; across a swap it renders another account's usage as this one's, and
+# the carried fetched_at keeps it looking fresh so no refresh is even due.
+test_refresh_failure_does_not_relabel_another_accounts_reading() {
+    use_scratch_usage_env
+    mkdir -p "$CS_USAGE_DIR"
+    printf '%s' '{"org":"org-other","pct":86,"resets_at":"2026-08-29T03:59:59Z","fetched_at":1787816000,"next_poll_at":1787816300}' \
+        > "$CS_USAGE_DIR/fable.json"
+    make_usage_shims 429 ''
+    PATH="$USAGE_BINDIR:$PATH" CS_STATUSLINE_NOW=1787816100 bash "$SL" --refresh-usage
+    local cache="$CS_USAGE_DIR/fable.json"
+    assert_eq "null" "$(jq -r '.pct' "$cache")" \
+        "a failed fetch must discard a reading belonging to another account" || return 1
+    assert_eq "org-abc" "$(jq -r '.org' "$cache")" "the record must name the account now signed in" || return 1
+    # And it must not read as fresh: a discarded reading with a live timestamp
+    # would blank correctly but suppress the retry.
+    assert_eq "0" "$(jq -r '.fetched_at' "$cache")" "a discarded reading must not be stamped fresh" || return 1
+}
+
+run_test test_refresh_failure_does_not_relabel_another_accounts_reading
+
+# I2: a corrupt cache must still be due. Otherwise the jq failure returns before
+# _FABLE_DUE is raised, no refresh is ever kicked, and the chip stays dead until
+# somebody deletes the file by hand.
+test_fable_read_corrupt_cache_is_due() {
+    _load_sl_functions
+    export CS_USAGE_DIR="$TEST_TMPDIR/usage"
+    export CLAUDE_CONFIG_DIR="$TEST_TMPDIR"
+    mkdir -p "$CS_USAGE_DIR"
+    printf '%s' '{"oauthAccount":{"organizationUuid":"org-abc"}}' > "$TEST_TMPDIR/.claude.json"
+    printf '%s' 'not json at all' > "$CS_USAGE_DIR/fable.json"
+    CS_STATUSLINE_NOW=1787816100 _NOW="" _SL_NOW_READY="" _fable_read
+    assert_eq "" "$_FABLE_PCT" "a corrupt cache must render nothing" || return 1
+    assert_eq "1" "$_FABLE_DUE" "a corrupt cache must be due so the next render repairs it" || return 1
+}
+
+run_test test_fable_read_corrupt_cache_is_due
 
 report_results
