@@ -2537,4 +2537,18 @@ test_iso_epoch_rejects_junk() {
 run_test test_iso_epoch_parses_endpoint_format
 run_test test_iso_epoch_rejects_junk
 
+# The fable gate keys on the model id, so the parse must carry it. One value per
+# line means a field added in the wrong position silently shifts every later
+# field, so this pins a neighbour on each side rather than the new field alone.
+test_parse_carries_model_id() {
+    _load_sl_functions
+    _parse_stdin '{"model":{"id":"claude-fable-5","display_name":"Fable"},"effort":{"level":"high"},"context_window":{"used_percentage":8}}'
+    assert_eq "$SL_MODEL_ID" "claude-fable-5" "model id must be parsed from stdin" || return 1
+    assert_eq "$SL_EFFORT" "high" "the field after model id must not be shifted" || return 1
+    assert_eq "$SL_CTX" "8" "the field before model id must not be shifted" || return 1
+    assert_eq "$SL_MODEL" "Fable" "display name must still land in SL_MODEL" || return 1
+}
+
+run_test test_parse_carries_model_id
+
 report_results

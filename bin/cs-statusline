@@ -316,6 +316,7 @@ _parse_stdin() {
         [ (.session_name // ""),
           (.context_window.used_percentage // "" | tostring),
           (.model.display_name // ""),
+          (.model.id // ""),
           (.effort.level // ""),
           (.rate_limits.five_hour.used_percentage // "" | tostring),
           (.rate_limits.five_hour.resets_at // "" | tostring),
@@ -337,6 +338,7 @@ _parse_stdin() {
             fi
         fi
         IFS= read -r SL_MODEL
+        IFS= read -r SL_MODEL_ID
         IFS= read -r SL_EFFORT
         IFS= read -r SL_5H
         IFS= read -r SL_5H_RESET
