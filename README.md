@@ -142,6 +142,7 @@ cs -whoami                  # Show the current actor (for shared, multi-person s
 cs -who                     # Show who contributed to shared memory/narrative (git history)
 cs -search <query>          # Search across all sessions
 cs -checkpoint "<label>"    # Snapshot git state + narrative (also: list, show <name>)
+cs -narrative rotate        # Archive the oldest narrative sections once the file passes its budget (/wrap runs this)
 cs -queue add "<task>"      # Walk-away task queue (also: list, rm <n>, clear, log)
 cs -msg <session> "note"    # Send mail to another session (--kind notify|task|text|result; '-' body reads stdin); bare cs -msg reads
 cs -msg --reply <thread> "note"  # Reply into a thread; the target comes from the thread

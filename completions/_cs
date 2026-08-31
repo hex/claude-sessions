@@ -100,6 +100,7 @@ _cs() {
         '-who:Show who contributed to shared memory/narrative'
         '-secrets:Manage session secrets'
         '-checkpoint:Save or manage session checkpoints'
+        '-narrative:Archive the oldest sections of your session narrative'
         '-queue:Manage the session walk-away queue'
         '-msg:Send a message to another session'
         '-spawn:Open a session in a cs-owned tmux window'
