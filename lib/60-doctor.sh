@@ -537,6 +537,23 @@ _doctor_check_auto_memory() {
     fi
 }
 
+# A narrative past CS_NARRATIVE_MAX_BYTES is what `cs -narrative rotate` exists
+# for; doctor only reports, it never rotates.
+_doctor_check_narrative_size() {
+    local dir="$CLAUDE_SESSION_META_DIR/memory"
+    local max over=0 f sz
+    max=$(_narrative_budget "${CS_NARRATIVE_MAX_BYTES:-}" "$CS_NARRATIVE_MAX_DEFAULT")
+    for f in "$dir"/narrative*.md; do
+        [ -f "$f" ] || continue
+        sz=$(wc -c < "$f" | tr -d ' ')
+        if [ "$sz" -gt "$max" ]; then
+            _doctor_warn "Narrative: $(basename "$f") is $((sz / 1024)) KB (budget $((max / 1024)) KB) — run cs -narrative rotate"
+            over=$((over + 1))
+        fi
+    done
+    [ "$over" -gt 0 ] || _doctor_ok "Narrative: all within the $((max / 1024)) KB budget"
+}
+
 # Cross-check the session UUID recorded in .cs/local/state against
 # the live $CLAUDE_CODE_SESSION_ID (set by Claude Code inside its own session).
 # A mismatch means the running claude conversation is not the one cs thinks
@@ -589,6 +606,7 @@ run_doctor() {
         _doctor_check_shadow_ref
         _doctor_check_worktrees
         _doctor_check_auto_memory
+        _doctor_check_narrative_size
         _doctor_check_session_id_match
         _doctor_check_token_cost
     fi
