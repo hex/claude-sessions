@@ -210,6 +210,66 @@ test_rotate_handles_many_headings_without_a_broken_pipe() {
     assert_eq "0" "$leaked" "no rotation snapshot is left behind" || return 1
 }
 
+# ============================================================================
+# edge rules
+# ============================================================================
+
+test_rotate_keeps_an_oversized_final_section_whole() {
+    # 3 sections of 3000 bytes: every section alone exceeds KEEP=2048, so the
+    # tail is exactly the last section and the first two are archived.
+    _make_narrative "$LIVE" 3 3000
+    "$CS_BIN" -narrative rotate > /dev/null 2>&1 || return 1
+    assert_file_contains "$LIVE" "section 3$" "the final section is kept" || return 1
+    assert_file_not_contains "$LIVE" "section 2$" "section 2 is archived" || return 1
+    local heads
+    heads=$(grep -c '^## ' "$LIVE")
+    assert_eq "1" "$heads" "exactly one section remains" || return 1
+}
+
+test_rotate_with_a_single_section_is_a_warned_noop() {
+    _make_narrative "$LIVE" 1 6000
+    local before output
+    before=$(_bytes "$LIVE")
+    output=$("$CS_BIN" -narrative rotate 2>&1) || return 1
+    assert_eq "$before" "$(_bytes "$LIVE")" "a single-section file is left alone" || return 1
+    assert_output_contains "$output" "fewer than two sections" "explains why nothing moved" || return 1
+    assert_not_exists "$SESSION_DIR/.cs/narrative-archive" "no chunk is written" || return 1
+}
+
+test_rotate_never_leaves_the_removed_hunk_at_eof() {
+    # Whatever the budgets, at least one complete section must follow the cut.
+    export CS_NARRATIVE_KEEP_BYTES=1
+    _make_narrative "$LIVE" 10 500
+    "$CS_BIN" -narrative rotate > /dev/null 2>&1 || return 1
+    local heads
+    heads=$(grep -c '^## ' "$LIVE")
+    assert_eq "1" "$heads" "the final section survives even with KEEP=1" || return 1
+    assert_file_contains "$LIVE" "section 10$" "and it is the newest one" || return 1
+}
+
+test_rotate_treats_undated_headings_by_position() {
+    # An undated heading in the archived run neither breaks the cut nor the name:
+    # through-date comes from the last dated heading before the cut.
+    _make_narrative "$LIVE" 10 500
+    # Replace section 3's heading with an undated one, keeping the byte count
+    # irrelevant: the cut is by position, not by date.
+    sed 's/^## 2026-08-04 — section 3$/## undated topic note/' "$LIVE" > "$LIVE.tmp" && mv "$LIVE.tmp" "$LIVE"
+    "$CS_BIN" -narrative rotate > /dev/null 2>&1 || return 1
+    local chunk
+    chunk=$(find "$ARCHIVE_DIR" -name '*.md' | head -1)
+    assert_file_contains "$chunk" "^## undated topic note$" "the undated section rode along" || return 1
+    case "$(basename "$chunk")" in 2026-08-08-*.md) ;; *) echo "  FAIL: chunk name should carry through-date 2026-08-08: $(basename "$chunk")"; return 1 ;; esac
+}
+
+test_rotate_names_a_fully_undated_run_undated() {
+    _make_narrative "$LIVE" 10 500
+    sed 's/^## 2026-08-[0-9][0-9] — section \([1-7]\)$/## topic \1/' "$LIVE" > "$LIVE.tmp" && mv "$LIVE.tmp" "$LIVE"
+    "$CS_BIN" -narrative rotate > /dev/null 2>&1 || return 1
+    local chunk
+    chunk=$(find "$ARCHIVE_DIR" -name '*.md' | head -1)
+    case "$(basename "$chunk")" in undated-*.md) ;; *) echo "  FAIL: expected undated-<blob>.md, got $(basename "$chunk")"; return 1 ;; esac
+}
+
 echo ""
 echo "cs narrative rotation tests"
 echo "==========================="
@@ -227,5 +287,10 @@ run_test test_rotate_writes_one_chunk_whose_body_is_verbatim
 run_test test_rotate_reports_what_it_did
 run_test test_rotate_handles_a_narrative_with_no_header_block
 run_test test_rotate_handles_many_headings_without_a_broken_pipe
+run_test test_rotate_keeps_an_oversized_final_section_whole
+run_test test_rotate_with_a_single_section_is_a_warned_noop
+run_test test_rotate_never_leaves_the_removed_hunk_at_eof
+run_test test_rotate_treats_undated_headings_by_position
+run_test test_rotate_names_a_fully_undated_run_undated
 
 report_results
