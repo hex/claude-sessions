@@ -102,7 +102,7 @@ Pass 3, after the summary: run `cs -narrative rotate` and put its one-line outpu
 Old: *read all narrative.*.md on resume.*
 New: *read the live narrative.*.md on resume (rotation keeps them small); older sections are under `.cs/narrative-archive/<actor>/` — grep on demand, never preload.*
 
-Surfaces: `lib/35-claudemd.sh` (frontmatter `description`, MEMORY.md pointer line, session-protocol block), `hooks/session-start.sh` (key-files line, fresh-conversation notice), `commands/summary.md`, `README.md`, `docs/session-layout.md`. Plus a `migrate_session` phase that rewrites the `description:` line of existing `narrative.*.md` frontmatter and the existing MEMORY.md pointer line in place (both are literal strings cs wrote; MEMORY.md is `merge=ours`, so the rewrite stays local until the index next syncs, which is the existing behaviour for every index edit).
+Surfaces: `lib/35-claudemd.sh` (frontmatter `description`, MEMORY.md pointer line, session-protocol block), `hooks/session-start.sh` (key-files line, fresh-conversation notice), `commands/summary.md`, `README.md`, `docs/session-layout.md`. Plus a `migrate_session` phase that rewrites, in place, the `description:` line of existing `narrative.*.md` frontmatter, the existing MEMORY.md pointer line, and the two-line sentence in the `cs:session-protocol` block of an existing CLAUDE.local.md (Phase 5 only appends the block when absent; it never refreshes wording) (both are literal strings cs wrote; MEMORY.md is `merge=ours`, so the rewrite stays local until the index next syncs, which is the existing behaviour for every index edit).
 
 ### Multi-user classification
 
