@@ -545,7 +545,7 @@ _doctor_check_narrative_size() {
     max=$(_narrative_budget "${CS_NARRATIVE_MAX_BYTES:-}" "$CS_NARRATIVE_MAX_DEFAULT")
     for f in "$dir"/narrative*.md; do
         [ -f "$f" ] || continue
-        sz=$(wc -c < "$f" | tr -d ' ')
+        sz=$(wc -c < "$f" 2>/dev/null | tr -d ' ' || echo 0)
         if [ "$sz" -gt "$max" ]; then
             _doctor_warn "Narrative: $(basename "$f") is $((sz / 1024)) KB (budget $((max / 1024)) KB) — run cs -narrative rotate"
             over=$((over + 1))

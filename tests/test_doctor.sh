@@ -85,6 +85,17 @@ test_doctor_reports_ok_when_narratives_fit() {
     assert_output_not_contains "$output" "run cs -narrative rotate" "no warning" || return 1
 }
 
+test_doctor_survives_an_unreadable_narrative() {
+    local nf="$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    echo "# Session narrative (alice)" > "$nf"
+    chmod 000 "$nf"
+    local output
+    output=$("$CS_BIN" -doctor 2>&1) || true
+    chmod 644 "$nf"
+    assert_output_contains "$output" "Narrative:" "doctor still reaches the narrative line when a file cannot be read" || return 1
+    assert_output_contains "$output" "Complete" "and finishes its run" || return 1
+}
+
 test_doctor_fails_when_hook_not_executable() {
     local fake_hook_dir="$TEST_TMPDIR/hooks"
     mkdir -p "$fake_hook_dir"
@@ -783,6 +794,7 @@ run_test test_doctor_runs_default_checks_from_session
 run_test test_doctor_reports_pass_for_healthy_session
 run_test test_doctor_warns_on_a_narrative_over_budget
 run_test test_doctor_reports_ok_when_narratives_fit
+run_test test_doctor_survives_an_unreadable_narrative
 run_test test_doctor_fails_when_hook_not_executable
 run_test test_doctor_exits_nonzero_on_failure
 run_test test_doctor_completes_when_the_deploy_stamp_is_absent
