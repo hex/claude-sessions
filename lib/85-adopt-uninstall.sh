@@ -77,9 +77,36 @@ adopt_session() {
 
     validate_session_name "$session_name"
 
-    # Check if already a cs session
+    # A .cs/ directory with no session link is orphaned: `cs -rm`/the TUI's `d`
+    # only ever remove the symlink, by design, so records survive a removal —
+    # but re-adopting under the right name used to hit a flat "already a cs
+    # session" refusal with no way back in short of hand-deleting .cs/. Tell
+    # the two cases apart: a live link elsewhere names the session to resume
+    # instead; an orphan gets offered a re-adopt that keeps its records.
     if [ -d "$target_dir/.cs" ]; then
-        error "Directory is already a cs session (found .cs/ directory)"
+        local existing_link existing_name=""
+        for existing_link in "${SESSIONS_ROOT:-}"/*; do
+            [ -L "$existing_link" ] || continue
+            if [ "$(_resolve_symlink_dir "$existing_link")" = "$target_dir" ]; then
+                existing_name="$(basename "$existing_link")"
+                break
+            fi
+        done
+
+        if [ -n "$existing_name" ]; then
+            error "Directory is already adopted as session '$existing_name' (open it with: cs $existing_name)"
+        fi
+
+        if cs_interactive; then
+            local confirm
+            read -r -p "Found existing session records (.cs/) with no session link. Re-adopt as '$session_name', preserving them? [y/N] " confirm
+            if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+                info "Cancelled"
+                return 0
+            fi
+        else
+            error "Directory carries session records (.cs/) but no session link. Re-run interactively to re-adopt them as '$session_name', or remove .cs/ to adopt fresh."
+        fi
     fi
 
     # Check if session name is taken
