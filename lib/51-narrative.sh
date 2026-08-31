@@ -117,11 +117,20 @@ rotate_narrative() {
         created=1
     fi
 
+    # Test seam: lets a suite change the live file between the snapshot and the
+    # rewrite, which is the window every guard below exists for.
+    if [ -n "${CS_NARRATIVE_ROTATE_MIDPOINT:-}" ]; then
+        eval "$CS_NARRATIVE_ROTATE_MIDPOINT"
+    fi
+
     # The live file must still open with the same bytes the snapshot did up to the
     # cut; a peer merge or an edit inside the archived run means the cut no longer
-    # describes this file.
-    if ! cmp -s -n "$cut" "$snap" "$live"; then
-        rm -f "$snap" "$chunk"
+    # describes this file. Compared as equal-length truncated streams, not via
+    # `cmp -n`: on this platform's cmp, -n misreports EOF whenever the two files'
+    # total lengths differ, even when both are longer than the requested window.
+    if ! cmp -s <(head -c "$cut" "$snap") <(head -c "$cut" "$live"); then
+        rm -f "$snap"
+        [ "$created" -eq 1 ] && rm -f "$chunk"
         error "narrative.$actor.md changed during rotation; run cs -narrative rotate again"
     fi
     local live_tmp="$meta_dir/memory/.narrative.$actor.md.tmp"

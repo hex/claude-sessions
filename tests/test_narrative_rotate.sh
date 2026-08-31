@@ -328,6 +328,53 @@ test_rotate_refuses_a_differing_chunk_with_the_same_name() {
     assert_eq "not the same bytes" "$(head -1 "$ARCHIVE_DIR/$expected")" "existing chunk untouched" || return 1
 }
 
+# ============================================================================
+# concurrency
+# ============================================================================
+
+test_rotate_keeps_an_append_that_lands_mid_rotation() {
+    _make_narrative "$LIVE" 10 500
+    export CS_NARRATIVE_ROTATE_MIDPOINT="printf '\n## 2026-09-01 — late note\nlanded during rotation\n' >> '$LIVE'"
+    "$CS_BIN" -narrative rotate > /dev/null 2>&1 || return 1
+    assert_file_contains "$LIVE" "^## 2026-09-01 — late note$" "the late section is in the live file" || return 1
+    assert_file_contains "$LIVE" "landed during rotation" "with its body" || return 1
+    assert_file_contains "$LIVE" "section 8$" "and the rotation still happened" || return 1
+    assert_file_not_contains "$LIVE" "section 7$" "with section 7 archived" || return 1
+}
+
+test_rotate_aborts_when_the_archived_run_changed_underneath() {
+    _make_narrative "$LIVE" 10 500
+    cp "$LIVE" "$TEST_TMPDIR/original.md"
+    export CS_NARRATIVE_ROTATE_MIDPOINT="sed 's/^## 2026-08-03 — section 2$/## 2026-08-03 — section 2 (edited)/' '$LIVE' > '$LIVE.x' && mv '$LIVE.x' '$LIVE'"
+    local output
+    if output=$("$CS_BIN" -narrative rotate 2>&1); then
+        echo "  FAIL: must abort when the prefix changed"
+        return 1
+    fi
+    assert_output_contains "$output" "changed during rotation" "says what happened" || return 1
+    assert_file_contains "$LIVE" "section 2 (edited)" "the edited live file is left as the editor left it" || return 1
+    assert_file_contains "$LIVE" "section 1$" "nothing was removed" || return 1
+    assert_eq "0" "$(find "$SESSION_DIR/.cs/narrative-archive" -name '*.md' 2>/dev/null | wc -l | tr -d ' ')" "the chunk written this run is removed on abort" || return 1
+}
+
+test_rotate_abort_leaves_a_preexisting_identical_chunk_alone() {
+    _make_narrative "$LIVE" 10 500
+    cp "$LIVE" "$TEST_TMPDIR/original.md"
+    "$CS_BIN" -narrative rotate > /dev/null 2>&1 || return 1
+    cp "$TEST_TMPDIR/original.md" "$LIVE"
+    export CS_NARRATIVE_ROTATE_MIDPOINT="sed 's/^## 2026-08-03 — section 2$/## 2026-08-03 — section 2 (edited)/' '$LIVE' > '$LIVE.x' && mv '$LIVE.x' '$LIVE'"
+    "$CS_BIN" -narrative rotate > /dev/null 2>&1 && { echo "  FAIL: must abort"; return 1; }
+    assert_eq "1" "$(find "$ARCHIVE_DIR" -name '*.md' | wc -l | tr -d ' ')" "a chunk that predates this run survives the abort" || return 1
+}
+
+test_rotate_leaves_no_temp_files_behind() {
+    _make_narrative "$LIVE" 10 500
+    "$CS_BIN" -narrative rotate > /dev/null 2>&1 || return 1
+    local strays
+    strays=$(find "$SESSION_DIR/.cs" -name '.*rotate*' -o -name '.body.*' -o -name '*.md.tmp' | wc -l | tr -d ' ')
+    assert_eq "0" "$strays" "no snapshot, body or tmp files remain" || return 1
+}
+
 echo ""
 echo "cs narrative rotation tests"
 echo "==========================="
@@ -354,5 +401,9 @@ run_test test_rotate_chunk_name_is_content_addressed
 run_test test_rotate_rerun_is_a_noop
 run_test test_rotate_accepts_an_identical_existing_chunk
 run_test test_rotate_refuses_a_differing_chunk_with_the_same_name
+run_test test_rotate_keeps_an_append_that_lands_mid_rotation
+run_test test_rotate_aborts_when_the_archived_run_changed_underneath
+run_test test_rotate_abort_leaves_a_preexisting_identical_chunk_alone
+run_test test_rotate_leaves_no_temp_files_behind
 
 report_results
