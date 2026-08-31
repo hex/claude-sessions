@@ -82,20 +82,86 @@ EOF
         "CLAUDE.md must not gain the protocol" || return 1
 }
 
-test_adopt_fails_if_already_cs_session() {
+test_adopt_refuses_a_directory_already_linked() {
     local project_dir="$TEST_TMPDIR/my-project"
-    mkdir -p "$project_dir/.cs"
+    mkdir -p "$project_dir"
+    (cd "$project_dir" && "$CS_BIN" -adopt first-name >/dev/null 2>&1)
 
     local output
-    if output=$(cd "$project_dir" && "$CS_BIN" -adopt my-session 2>&1); then
-        echo "  FAIL: Should have failed for directory with existing .cs/"
+    if output=$(cd "$project_dir" && "$CS_BIN" -adopt second-name 2>&1); then
+        echo "  FAIL: Should have failed for a directory already linked under another name"
         return 1
     fi
+    if ! echo "$output" | grep -q "first-name"; then
+        echo "  FAIL: Error message should name the existing session 'first-name': $output"
+        return 1
+    fi
+    assert_not_exists "$CS_SESSIONS_ROOT/second-name" "no symlink should be created for the refused name" || return 1
+}
 
-    if ! echo "$output" | grep -qi "already"; then
-        echo "  FAIL: Error message should mention 'already': $output"
+test_adopt_relinks_orphaned_records_interactively() {
+    local project_dir="$TEST_TMPDIR/my-project"
+    mkdir -p "$project_dir"
+    (cd "$project_dir" && "$CS_BIN" -adopt old-name >/dev/null 2>&1)
+    rm "$CS_SESSIONS_ROOT/old-name"
+
+    local narrative
+    narrative=$(ls "$project_dir"/.cs/memory/narrative.*.md | head -1)
+    printf '\nmarker: orphaned-records-survive\n' >> "$narrative"
+    local before
+    before=$(cat "$narrative")
+
+    local output rc=0
+    output=$(cd "$project_dir" && printf 'y\n' | CS_ASSUME_TTY=1 "$CS_BIN" -adopt new-name 2>&1) || rc=$?
+    [ "$rc" -eq 0 ] || { echo "  FAIL: re-adopt should exit 0: $output"; return 1; }
+
+    assert_symlink "$CS_SESSIONS_ROOT/new-name" "new symlink should exist" || return 1
+    assert_not_exists "$CS_SESSIONS_ROOT/old-name" "old symlink name should stay gone" || return 1
+    local after
+    after=$(cat "$narrative")
+    assert_eq "$before" "$after" "narrative file should be byte-identical after re-adopt" || return 1
+}
+
+test_adopt_orphaned_records_noninteractive_hints() {
+    local project_dir="$TEST_TMPDIR/my-project"
+    mkdir -p "$project_dir"
+    (cd "$project_dir" && "$CS_BIN" -adopt old-name >/dev/null 2>&1)
+    rm "$CS_SESSIONS_ROOT/old-name"
+
+    local narrative
+    narrative=$(ls "$project_dir"/.cs/memory/narrative.*.md | head -1)
+    local before
+    before=$(cat "$narrative")
+
+    local output
+    if output=$(cd "$project_dir" && "$CS_BIN" -adopt new-name </dev/null 2>&1); then
+        echo "  FAIL: non-interactive re-adopt should fail without a terminal"
         return 1
     fi
+    if ! echo "$output" | grep -qi "re-run interactively"; then
+        echo "  FAIL: error should hint at re-running interactively: $output"
+        return 1
+    fi
+    assert_dir "$project_dir/.cs" ".cs/ should be untouched" || return 1
+    local after
+    after=$(cat "$narrative")
+    assert_eq "$before" "$after" "narrative file must not change on a refused re-adopt" || return 1
+}
+
+test_adopt_orphaned_records_decline_cancels() {
+    local project_dir="$TEST_TMPDIR/my-project"
+    mkdir -p "$project_dir"
+    (cd "$project_dir" && "$CS_BIN" -adopt old-name >/dev/null 2>&1)
+    rm "$CS_SESSIONS_ROOT/old-name"
+
+    local output rc=0
+    output=$(cd "$project_dir" && printf 'n\n' | CS_ASSUME_TTY=1 "$CS_BIN" -adopt new-name 2>&1) || rc=$?
+    [ "$rc" -eq 0 ] || { echo "  FAIL: declining re-adopt should exit 0: $output"; return 1; }
+    if ! echo "$output" | grep -qi "cancelled"; then
+        echo "  FAIL: output should say Cancelled: $output"
+        return 1
+    fi
+    assert_not_exists "$CS_SESSIONS_ROOT/new-name" "no symlink should be created on decline" || return 1
 }
 
 test_adopt_fails_if_session_name_exists() {
@@ -148,7 +214,7 @@ test_remove_adopted_session_removes_symlink_only() {
 
     (cd "$project_dir" && "$CS_BIN" -adopt my-session)
 
-    echo "y" | "$CS_BIN" -remove my-session 2>&1
+    echo "y" | CS_ASSUME_TTY=1 "$CS_BIN" -remove my-session 2>&1
 
     assert_not_exists "$CS_SESSIONS_ROOT/my-session" "Symlink should be removed" || return 1
     assert_dir "$project_dir" "Original project should still exist" || return 1
@@ -289,7 +355,10 @@ run_test test_adopt_creates_cs_structure
 run_test test_adopt_creates_symlink
 run_test test_adopt_creates_claude_local_md_when_none_exists
 run_test test_adopt_leaves_existing_claude_md_untouched
-run_test test_adopt_fails_if_already_cs_session
+run_test test_adopt_refuses_a_directory_already_linked
+run_test test_adopt_relinks_orphaned_records_interactively
+run_test test_adopt_orphaned_records_noninteractive_hints
+run_test test_adopt_orphaned_records_decline_cancels
 run_test test_adopt_fails_if_session_name_exists
 run_test test_adopt_validates_session_name
 run_test test_list_shows_adopted_sessions

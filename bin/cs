@@ -2495,8 +2495,12 @@ create_session_structure() {
     _set_local_state "$session_dir/.cs/local/state" claude_session_id "$claude_session_id"
     _set_local_state "$session_dir/.cs/local/state" claude_session_color "$claude_session_color"
 
-    # Create README.md with YAML frontmatter for structured queries
-    cat > "$session_dir/.cs/README.md" << EOF
+    # Create README.md with YAML frontmatter for structured queries. A brand
+    # new session never has one yet; adopt's orphaned-.cs re-adopt path is the
+    # one caller that runs this against a directory that already carries one,
+    # and its records must survive untouched.
+    if [ ! -f "$session_dir/.cs/README.md" ]; then
+        cat > "$session_dir/.cs/README.md" << EOF
 ---
 status: active
 created: $(date '+%Y-%m-%d')
@@ -2520,6 +2524,7 @@ aliases: ["$(basename "$session_dir")"]
 
 [To be filled when session is complete - summarize what was accomplished]
 EOF
+    fi
 
 
     write_session_claude_md "$session_dir"
@@ -5968,6 +5973,14 @@ _remove_one_session() {
         error "Session '$session_name' is live (pid $(read_lock_pid "$session_dir/.cs")); use --force to remove anyway"
     fi
 
+    # Every confirmation below reads from stdin; a script piping input through
+    # a non-tty without --force used to hit a `read` that failed silently and
+    # exited 1 with no explanation. Refuse loudly, before any mutation, unless
+    # --force stands in for the confirmation or a human is actually there to answer.
+    if [ -z "$force" ] && ! cs_interactive; then
+        error "cs -rm needs a terminal to confirm removing '$session_name'; use --force to skip confirmation"
+    fi
+
     # Worktree sessions: unregister from git, not just delete the directory.
     case "$session_name" in
         *@*)
@@ -5977,7 +5990,12 @@ _remove_one_session() {
             if [ -d "$wt_base_dir" ] && [ -f "$session_dir/.git" ]; then
                 local wt_branch
                 wt_branch=$(_read_local_state "$session_dir/.cs/local/state" task_branch)
-                read -r -p $'\033[0;31mRemove worktree session '"'$session_name'"$'? Uncommitted work in it is discarded. [y/N] \033[0m' confirm
+                local confirm
+                if [ -n "$force" ]; then
+                    confirm="y"
+                else
+                    read -r -p $'\033[0;31mRemove worktree session '"'$session_name'"$'? Uncommitted work in it is discarded. [y/N] \033[0m' confirm
+                fi
                 if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
                     info "Cancelled"
                     return 0
@@ -5986,7 +6004,11 @@ _remove_one_session() {
                     || error "git worktree remove failed for $session_dir"
                 if [ -n "$wt_branch" ] \
                     && git -C "$wt_base_dir" rev-parse -q --verify "refs/heads/$wt_branch" >/dev/null 2>&1; then
-                    read -r -p "Delete branch $wt_branch too? [y/N] " confirm
+                    if [ -n "$force" ]; then
+                        confirm="n"
+                    else
+                        read -r -p "Delete branch $wt_branch too? [y/N] " confirm
+                    fi
                     if [[ "$confirm" =~ ^[Yy]$ ]]; then
                         git -C "$wt_base_dir" branch -D "$wt_branch" 2>/dev/null || true
                     fi
@@ -5999,7 +6021,10 @@ _remove_one_session() {
     esac
 
     # Confirm deletion
-    if [ -L "$session_dir" ]; then
+    local confirm
+    if [ -n "$force" ]; then
+        confirm="y"
+    elif [ -L "$session_dir" ]; then
         local target
         target="$(_resolve_symlink_dir "$session_dir")"
         read -r -p $'\033[0;31mRemove adopted session '"'$session_name'"$'? (removes symlink only, project at '"$target"$' is preserved) [y/N] \033[0m' confirm
@@ -6968,9 +6993,36 @@ adopt_session() {
 
     validate_session_name "$session_name"
 
-    # Check if already a cs session
+    # A .cs/ directory with no session link is orphaned: `cs -rm`/the TUI's `d`
+    # only ever remove the symlink, by design, so records survive a removal —
+    # but re-adopting under the right name used to hit a flat "already a cs
+    # session" refusal with no way back in short of hand-deleting .cs/. Tell
+    # the two cases apart: a live link elsewhere names the session to resume
+    # instead; an orphan gets offered a re-adopt that keeps its records.
     if [ -d "$target_dir/.cs" ]; then
-        error "Directory is already a cs session (found .cs/ directory)"
+        local existing_link existing_name=""
+        for existing_link in "${SESSIONS_ROOT:-}"/*; do
+            [ -L "$existing_link" ] || continue
+            if [ "$(_resolve_symlink_dir "$existing_link")" = "$target_dir" ]; then
+                existing_name="$(basename "$existing_link")"
+                break
+            fi
+        done
+
+        if [ -n "$existing_name" ]; then
+            error "Directory is already adopted as session '$existing_name' (open it with: cs $existing_name)"
+        fi
+
+        if cs_interactive; then
+            local confirm
+            read -r -p "Found existing session records (.cs/) with no session link. Re-adopt as '$session_name', preserving them? [y/N] " confirm
+            if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+                info "Cancelled"
+                return 0
+            fi
+        else
+            error "Directory carries session records (.cs/) but no session link. Re-run interactively to re-adopt them as '$session_name', or remove .cs/ to adopt fresh."
+        fi
     fi
 
     # Check if session name is taken

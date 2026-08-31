@@ -78,8 +78,12 @@ create_session_structure() {
     _set_local_state "$session_dir/.cs/local/state" claude_session_id "$claude_session_id"
     _set_local_state "$session_dir/.cs/local/state" claude_session_color "$claude_session_color"
 
-    # Create README.md with YAML frontmatter for structured queries
-    cat > "$session_dir/.cs/README.md" << EOF
+    # Create README.md with YAML frontmatter for structured queries. A brand
+    # new session never has one yet; adopt's orphaned-.cs re-adopt path is the
+    # one caller that runs this against a directory that already carries one,
+    # and its records must survive untouched.
+    if [ ! -f "$session_dir/.cs/README.md" ]; then
+        cat > "$session_dir/.cs/README.md" << EOF
 ---
 status: active
 created: $(date '+%Y-%m-%d')
@@ -103,6 +107,7 @@ aliases: ["$(basename "$session_dir")"]
 
 [To be filled when session is complete - summarize what was accomplished]
 EOF
+    fi
 
 
     write_session_claude_md "$session_dir"
