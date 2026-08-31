@@ -3345,6 +3345,27 @@ rotate_narrative() {
     mv "$live_tmp" "$live"
     rm -f "$snap"
 
+    local chunk_rel=".cs/narrative-archive/$actor/$(basename "$chunk")"
+    if git -C "$session_dir" rev-parse --git-dir >/dev/null 2>&1 \
+        && git -C "$session_dir" ls-files --error-unmatch -- "$live" >/dev/null 2>&1; then
+        if ! { git -C "$session_dir" add -- "$live" "$chunk" \
+            && git -C "$session_dir" commit -q -m "cs: rotate narrative.$actor ($sections sections -> narrative-archive)"; } 2>/dev/null; then
+            warn "rotation written but the commit failed; commit .cs/memory/narrative.$actor.md and $chunk_rel by hand"
+        fi
+    else
+        info "narrative.$actor.md is not tracked by git here; the archive chunk is left uncommitted"
+    fi
+
+    local timeline="$meta_dir/timeline.jsonl"
+    _terminate_jsonl "$timeline"
+    jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+           --arg actor "$actor" \
+           --argjson sections "$sections" \
+           --argjson bytes "$((cut - head_end))" \
+           --arg archive "$chunk_rel" \
+           '{ts: $ts, event: "narrative_rotated", actor: $actor, sections: $sections, bytes: $bytes, archive: $archive}' \
+        >> "$timeline" 2>/dev/null || true
+
     local archived_kb now_kb
     archived_kb=$(( (cut - head_end) / 1024 ))
     now_kb=$(( $(wc -c < "$live" | tr -d ' ') / 1024 ))

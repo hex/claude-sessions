@@ -375,6 +375,74 @@ test_rotate_leaves_no_temp_files_behind() {
     assert_eq "0" "$strays" "no snapshot, body or tmp files remain" || return 1
 }
 
+# ============================================================================
+# git and timeline
+# ============================================================================
+
+_init_tracked_repo() {
+    (cd "$SESSION_DIR" && git init -q -b main && git config user.email alice@example.com && git config user.name alice \
+        && git add -A && git commit -q -m init)
+}
+
+test_rotate_commits_live_and_chunk_when_tracked() {
+    _make_narrative "$LIVE" 10 500
+    _init_tracked_repo
+    "$CS_BIN" -narrative rotate > /dev/null 2>&1 || return 1
+    local subject dirty
+    subject=$(git -C "$SESSION_DIR" log -1 --format=%s)
+    assert_eq "cs: rotate narrative.alice (7 sections -> narrative-archive)" "$subject" "one commit with the rotation subject" || return 1
+    dirty=$(git -C "$SESSION_DIR" status --porcelain -- .cs/memory .cs/narrative-archive)
+    assert_eq "" "$dirty" "live file and chunk are both committed" || return 1
+}
+
+test_rotate_skips_the_commit_when_cs_is_ignored() {
+    _make_narrative "$LIVE" 10 500
+    printf '.cs/\n' > "$SESSION_DIR/.gitignore"
+    (cd "$SESSION_DIR" && git init -q -b main && git config user.email alice@example.com && git config user.name alice \
+        && git add -A && git commit -q -m init)
+    local before output after
+    before=$(git -C "$SESSION_DIR" rev-list --count HEAD)
+    output=$("$CS_BIN" -narrative rotate 2>&1) || return 1
+    after=$(git -C "$SESSION_DIR" rev-list --count HEAD)
+    assert_eq "$before" "$after" "no commit when the narrative is not tracked" || return 1
+    assert_output_contains "$output" "not tracked" "says the archive was left uncommitted" || return 1
+    assert_file_contains "$LIVE" "section 8$" "the rotation itself still ran" || return 1
+}
+
+test_rotate_outside_git_still_rotates() {
+    _make_narrative "$LIVE" 10 500
+    "$CS_BIN" -narrative rotate > /dev/null 2>&1 || return 1
+    assert_file_contains "$LIVE" "section 8$" "rotation does not need a repo" || return 1
+}
+
+test_rotate_appends_a_timeline_event() {
+    _make_narrative "$LIVE" 10 500
+    "$CS_BIN" -narrative rotate > /dev/null 2>&1 || return 1
+    assert_exists "$SESSION_DIR/.cs/timeline.jsonl" "timeline written" || return 1
+    if ! jq -e 'select(.event == "narrative_rotated" and .actor == "alice" and .sections == 7)' \
+        "$SESSION_DIR/.cs/timeline.jsonl" > /dev/null; then
+        echo "  FAIL: expected a narrative_rotated event for alice with 7 sections"
+        cat "$SESSION_DIR/.cs/timeline.jsonl"
+        return 1
+    fi
+    local archive
+    archive=$(jq -r 'select(.event == "narrative_rotated") | .archive' "$SESSION_DIR/.cs/timeline.jsonl")
+    case "$archive" in .cs/narrative-archive/alice/2026-08-08-*.md) ;; *) echo "  FAIL: archive field should be session-relative: $archive"; return 1 ;; esac
+}
+
+test_rotate_does_not_splice_onto_a_torn_timeline() {
+    _make_narrative "$LIVE" 10 500
+    local timeline="$SESSION_DIR/.cs/timeline.jsonl"
+    printf '{"ts":"2026-01-01T00:00:00Z","event":"started","session_id":"1111"}\n' > "$timeline"
+    printf '{"ts":"2026-01-02T00:00:00Z","event":"rotated","reason":"torn"}' >> "$timeline"
+    jsonl_tail_is_torn "$timeline" || { echo "  FAIL: fixture is terminated; the splice cannot happen"; return 1; }
+    "$CS_BIN" -narrative rotate > /dev/null 2>&1 || return 1
+    local events
+    events=$(jsonl_events "$timeline")
+    assert_output_contains "$events" "rotated" "the torn record survives" || return 1
+    assert_output_contains "$events" "narrative_rotated" "and so does the record appended after it" || return 1
+}
+
 echo ""
 echo "cs narrative rotation tests"
 echo "==========================="
@@ -405,5 +473,10 @@ run_test test_rotate_keeps_an_append_that_lands_mid_rotation
 run_test test_rotate_aborts_when_the_archived_run_changed_underneath
 run_test test_rotate_abort_leaves_a_preexisting_identical_chunk_alone
 run_test test_rotate_leaves_no_temp_files_behind
+run_test test_rotate_commits_live_and_chunk_when_tracked
+run_test test_rotate_skips_the_commit_when_cs_is_ignored
+run_test test_rotate_outside_git_still_rotates
+run_test test_rotate_appends_a_timeline_event
+run_test test_rotate_does_not_splice_onto_a_torn_timeline
 
 report_results
