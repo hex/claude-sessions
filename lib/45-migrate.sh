@@ -290,17 +290,42 @@ migrate_narrative_resume_wording() {
             && mv "$tmp" "$f"
     fi
     f="$session_dir/CLAUDE.local.md"
-    if [ -f "$f" ] && grep -q 'read all narrative\.\*\.md on resume to restore your' "$f"; then
+    # cs has shipped two protocol-block wordings for the same sentence: the
+    # current two-line form, and the July-2026 four-line form ("Note:
+    # narratives are per-actor ... so co-developers never / conflict. Append
+    # only to your own ... read all / narrative.*.md on resume to restore
+    # your working narrative and see teammates' / in-progress findings.").
+    # Either grep alternative can match a line that a CRLF checkout split
+    # from its neighbour with a trailing \r, so the gate itself does not need
+    # \r-tolerance — only the awk's line-for-line comparisons do.
+    if [ -f "$f" ] && grep -qE 'read all narrative\.\*\.md on resume to restore your|so co-developers never' "$f"; then
         tmp="$f.tmp"
         awk '
-            $0 == "Append only to your own; read all narrative.*.md on resume to restore your" {
+            function strip(s) { sub(/\r$/, "", s); return s }
+            {
+                cur = strip($0)
+            }
+            cur == "Append only to your own; read all narrative.*.md on resume to restore your" {
+                line1 = $0
                 getline nextline
-                if (nextline ~ /^working narrative and see teammates/) {
+                if (strip(nextline) ~ /^working narrative and see teammates/) {
                     print "Append only to your own; on resume read the live narrative.*.md (rotation keeps"
                     print "them small). Older sections sit under .cs/narrative-archive/<actor>/ — grep on demand, never preload."
                     next
                 }
-                print; print nextline; next
+                print line1; print nextline; next
+            }
+            cur == "Note: narratives are per-actor (narrative.<actor>.md) so co-developers never" {
+                line1 = $0
+                getline line2
+                getline line3
+                getline line4
+                if (strip(line2) ~ /^conflict\. Append only to your own/ && strip(line3) ~ /^narrative\.\*\.md on resume/) {
+                    print "Append only to your own; on resume read the live narrative.*.md (rotation keeps"
+                    print "them small). Older sections sit under .cs/narrative-archive/<actor>/ — grep on demand, never preload."
+                    next
+                }
+                print line1; print line2; print line3; print line4; next
             }
             { print }
         ' "$f" > "$tmp" && mv "$tmp" "$f"
