@@ -375,6 +375,33 @@ test_rotate_leaves_no_temp_files_behind() {
     assert_eq "0" "$strays" "no snapshot, body or tmp files remain" || return 1
 }
 
+test_rotate_refuses_an_unreadable_narrative() {
+    _make_narrative "$LIVE" 10 500
+    chmod 000 "$LIVE"
+    local output status
+    output=$("$CS_BIN" -narrative rotate 2>&1)
+    status=$?
+    chmod 644 "$LIVE"
+    [ "$status" -ne 0 ] || { echo "  FAIL: must exit non-zero on an unreadable narrative"; return 1; }
+    assert_output_contains "$output" "Cannot read" "a cs error names the failure, not a bare bash message" || return 1
+}
+
+test_rotate_refuses_an_unwritable_archive_dir() {
+    _make_narrative "$LIVE" 10 500
+    mkdir -p "$ARCHIVE_DIR"
+    chmod 555 "$ARCHIVE_DIR"
+    local output status
+    output=$("$CS_BIN" -narrative rotate 2>&1)
+    status=$?
+    chmod 755 "$ARCHIVE_DIR"
+    [ "$status" -ne 0 ] || { echo "  FAIL: must exit non-zero when the archive dir cannot be written"; return 1; }
+    assert_output_contains "$output" "Cannot write" "a cs error names the failure" || return 1
+    local strays
+    strays=$(find "$SESSION_DIR/.cs/memory" -name '.narrative.*.rotate.*' | wc -l | tr -d ' ')
+    assert_eq "0" "$strays" "the snapshot is not left behind" || return 1
+    assert_file_contains "$LIVE" "section 10$" "the live file is untouched" || return 1
+}
+
 # ============================================================================
 # git and timeline
 # ============================================================================
@@ -529,6 +556,8 @@ run_test test_rotate_keeps_an_append_that_lands_mid_rotation
 run_test test_rotate_aborts_when_the_archived_run_changed_underneath
 run_test test_rotate_abort_leaves_a_preexisting_identical_chunk_alone
 run_test test_rotate_leaves_no_temp_files_behind
+run_test test_rotate_refuses_an_unreadable_narrative
+run_test test_rotate_refuses_an_unwritable_archive_dir
 run_test test_rotate_commits_live_and_chunk_when_tracked
 run_test test_rotate_skips_the_commit_when_cs_is_ignored
 run_test test_rotate_outside_git_still_rotates

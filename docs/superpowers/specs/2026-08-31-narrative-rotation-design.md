@@ -48,8 +48,8 @@ the live file, never let the removed hunk reach EOF.
 
 ### `cs -narrative rotate`
 
-Runs from inside a session (same guard as `-checkpoint`). Rotates the current
-actor's narrative only.
+Runs from inside a session (requires `CLAUDE_SESSION_META_DIR`). Rotates the
+current actor's narrative only.
 
 Inputs, all optional:
 
@@ -102,7 +102,7 @@ Pass 3, after the summary: run `cs -narrative rotate` and put its one-line outpu
 Old: *read all narrative.*.md on resume.*
 New: *read the live narrative.*.md on resume (rotation keeps them small); older sections are under `.cs/narrative-archive/<actor>/` — grep on demand, never preload.*
 
-Surfaces: `lib/35-claudemd.sh` (frontmatter `description`, MEMORY.md pointer line, session-protocol block), `hooks/session-start.sh` (key-files line, fresh-conversation notice), `commands/summary.md`, `README.md`, `docs/session-layout.md`. Plus a `migrate_session` phase that rewrites, in place, the `description:` line of existing `narrative.*.md` frontmatter, the existing MEMORY.md pointer line, and the two-line sentence in the `cs:session-protocol` block of an existing CLAUDE.local.md (Phase 5 only appends the block when absent; it never refreshes wording) (both are literal strings cs wrote; MEMORY.md is `merge=ours`, so the rewrite stays local until the index next syncs, which is the existing behaviour for every index edit).
+Surfaces: `lib/35-claudemd.sh` (frontmatter `description`, MEMORY.md pointer line, session-protocol block), `hooks/session-start.sh` (key-files line, fresh-conversation notice), `commands/summary.md`, `README.md`, `docs/session-layout.md`. Plus a `migrate_session` phase that rewrites, in place, the `description:` line of existing `narrative.*.md` frontmatter, the existing MEMORY.md pointer line, and the two-line sentence in the `cs:session-protocol` block of an existing CLAUDE.local.md, matching both protocol-block wordings cs has shipped (the current two-line form and the July-2026 four-line form), tolerant of CRLF (Phase 5 only appends the block when absent; it never refreshes wording) (both are literal strings cs wrote; MEMORY.md is `merge=ours`, so the rewrite stays local until the index next syncs, which is the existing behaviour for every index edit).
 
 ### Multi-user classification
 

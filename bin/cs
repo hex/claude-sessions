@@ -3328,6 +3328,7 @@ rotate_narrative() {
     actor=$(cs_actor_slug "$session_dir")
     local live="$meta_dir/memory/narrative.$actor.md"
     [ -f "$live" ] || error "No narrative for actor $actor at $live"
+    [ -r "$live" ] || error "Cannot read $live"
 
     local max keep size
     max=$(_narrative_budget "${CS_NARRATIVE_MAX_BYTES:-}" "$CS_NARRATIVE_MAX_DEFAULT")
@@ -3369,6 +3370,7 @@ rotate_narrative() {
 
     local arch_dir="$meta_dir/narrative-archive/$actor"
     mkdir -p "$arch_dir"
+    [ -w "$arch_dir" ] || { rm -f "$snap"; error "Cannot write to $arch_dir"; }
     local body="$arch_dir/.body.$$"
     # head first, tail second: the bounded producer runs to completion and the
     # consumer reads all of it. The other order lets head close the pipe early
