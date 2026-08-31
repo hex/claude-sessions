@@ -590,7 +590,25 @@ test_rm_worktree_unregisters_and_prompts_branch() {
         "branch kept when declined" || return 1
 }
 
+test_rm_worktree_force_noninteractive_keeps_branch() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+
+    "$CS_BIN" -rm "myproj@fix-auth" --force </dev/null >/dev/null 2>&1 || return 1
+
+    assert_not_exists "$wt" "worktree dir removed" || return 1
+    git -C "$base_dir" worktree list --porcelain | grep -q "myproj@fix-auth" \
+        && { echo "  FAIL: worktree still registered"; return 1; }
+    # The nested branch-delete question defaults to NO under --force: this
+    # assertion pins that rule, not just that removal succeeded.
+    assert_eq "  cs/fix-auth" "$(git -C "$base_dir" branch --list cs/fix-auth)" \
+        "branch kept under --force with no tty" || return 1
+}
+
 run_test test_rm_worktree_unregisters_and_prompts_branch
+run_test test_rm_worktree_force_noninteractive_keeps_branch
 
 test_doctor_flags_dangling_and_merged_worktrees() {
     local base_dir
