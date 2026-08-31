@@ -120,7 +120,7 @@ The platform is detected automatically. It decides one thing — whether secrets
 ## Concepts
 
 - **Sessions** — Isolated workspaces, each with their own git repo and documentation. `cs debug-api` creates one; running it again resumes it.
-- **Narrative** (`.cs/memory/narrative.<actor>.md`) — A per-actor lab notebook for findings, observations, and ideas during a session. Each co-developer writes their own file (so shared sessions never conflict) and everyone reads all of them on resume. Stored as native Claude Code memory files; see [docs/session-layout.md](docs/session-layout.md) for how that works.
+- **Narrative** (`.cs/memory/narrative.<actor>.md`) — A per-actor lab notebook for findings, observations, and ideas during a session. Each co-developer writes their own file (so shared sessions never conflict) and everyone reads the live files on resume. The notebook is append-only — a disproven entry gets a dated correction, never an edit — and `cs -narrative rotate` (run by `/wrap`, flagged by the Stop hook and `cs -doctor`) moves the oldest sections verbatim into `.cs/narrative-archive/<actor>/` once a file passes `CS_NARRATIVE_MAX_BYTES` (128 KiB), keeping a `CS_NARRATIVE_KEEP_BYTES` (64 KiB) tail. Stored as native Claude Code memory files; see [docs/session-layout.md](docs/session-layout.md) for how that works.
 - **Checkpoints** (`.cs/checkpoints/`) — Labelled narrative snapshots you can save mid-session with `/checkpoint`, capturing the narrative, changes, and the current git HEAD.
 - **Timeline** (`.cs/timeline.jsonl`) — A structured event log recording session starts, ends, and checkpoints as newline-delimited JSON.
 - **Auto-memory** (`.cs/memory/`) — Claude Code's persistent operational notes, redirected into the session and cleaned up with `cs -rm`.
@@ -238,6 +238,7 @@ This converts the current directory into a cs session in place:
 ├── .cs/                    # Session metadata
 │   ├── README.md           # Objective, environment, outcome
 │   ├── memory/             # Claude Code auto memory + per-actor narrative.<actor>.md lab notebooks
+│   ├── narrative-archive/  # Rotated narrative sections, one immutable chunk per rotation per actor
 │   ├── plans/              # Claude Code plans
 │   ├── timeline.jsonl      # Session event log (starts, ends, checkpoints)
 │   ├── checkpoints/        # Labelled narrative snapshots (/checkpoint)
@@ -261,6 +262,7 @@ Sessions are designed to be shared through git (push/pull the whole session dire
 - **Machine-local state never syncs.** The Claude conversation UUID, session color, and resume timestamps (in `.cs/local/state`) and the `session.log` command audit trail live under gitignored `.cs/local/` — each machine binds its own conversation and keeps its own log. A launch guard refuses to run if `.cs/local/` ever becomes tracked.
 - **Append-only files union-merge.** `timeline.jsonl` and the per-actor `narrative.*.md` notebooks carry `merge=union` in the session `.gitattributes`, so divergent appends interleave instead of conflicting.
 - **`MEMORY.md` resolves to the local copy** (`merge=ours`); each actor's pointer line is re-added idempotently on the next launch.
+- **Narrative rotation stays merge-safe.** `cs -narrative rotate` removes one interior run of sections and leaves the tail byte-identical, which is the only rewrite `merge=union` merges cleanly against a peer's append (renaming the file or truncating to EOF both resurrect the whole body — measured). Archive chunks are immutable and content-addressed, so two machines archiving the same sections produce the same file.
 - **Secrets sync per machine.** `cs -secrets export-file` writes `.cs/secrets.<machine-id>.age/.enc` — distinct files per machine instead of one shared encrypted blob whose bytes change every export — and `import-file` merges every sync file it can decrypt. See [docs/secrets.md](docs/secrets.md).
 - **What can still conflict is real content**: the README objective/outcome, memory entries, and your project files — places where two humans genuinely disagree and should reconcile by hand.
 
@@ -437,7 +439,7 @@ README objective instead.
 
 ## Slash Commands
 
-- `/wrap` — The canonical end-of-session command: runs the `/sweep` memory pass, then the `/summary` narrative, then the prose gate
+- `/wrap` — The canonical end-of-session command: runs the `/sweep` memory pass, then the `/summary` narrative, then `cs -narrative rotate`
 - `/sweep` — Distill the session into durable auto-memory entries (strict bar) and sweep findings into the narrative
 - `/summary` — Generate a narrative summary of the current session
 - `/checkpoint <label>` — Save a labelled state snapshot (narrative, changes, git HEAD)

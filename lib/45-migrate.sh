@@ -262,6 +262,45 @@ needs_cs_migration() {
     [[ ! -d "$session_dir/.cs" ]] && { [[ -d "$session_dir/logs" ]] || [[ -f "$session_dir/discoveries.md" ]]; }
 }
 
+# Rewrite the three read-all-narratives sentences cs wrote into existing
+# sessions: a narrative's frontmatter description, its MEMORY.md pointer and the
+# protocol block in CLAUDE.local.md. Only the exact sentences cs emitted are
+# touched — a narrative body or a user's own prose never is. Temp+mv rather than
+# sed -i (BSD/GNU disagree on -i). Idempotent: nothing matches on the second run.
+migrate_narrative_resume_wording() {
+    local session_dir="$1"
+    local mem="$session_dir/.cs/memory" f tmp
+    for f in "$mem"/narrative.*.md; do
+        [ -f "$f" ] || continue
+        head -8 "$f" | grep -q 'Read all narrative\.\*\.md on resume\.' || continue
+        tmp="$f.tmp"
+        sed '1,8s/Read all narrative\.\*\.md on resume\./Read the live narrative.*.md on resume; older sections are archived under .cs\/narrative-archive\/./' "$f" > "$tmp" \
+            && mv "$tmp" "$f"
+    done
+    f="$mem/MEMORY.md"
+    if [ -f "$f" ] && grep -q 'read all narrative\.\*\.md on resume' "$f"; then
+        tmp="$f.tmp"
+        sed 's/read all narrative\.\*\.md on resume/read the live narrative.*.md on resume, older sections under .cs\/narrative-archive\//' "$f" > "$tmp" \
+            && mv "$tmp" "$f"
+    fi
+    f="$session_dir/CLAUDE.local.md"
+    if [ -f "$f" ] && grep -q 'read all narrative\.\*\.md on resume to restore your' "$f"; then
+        tmp="$f.tmp"
+        awk '
+            $0 == "Append only to your own; read all narrative.*.md on resume to restore your" {
+                getline nextline
+                if (nextline ~ /^working narrative and see teammates/) {
+                    print "Append only to your own; on resume read the live narrative.*.md (rotation keeps"
+                    print "them small). Older sections sit under .cs/narrative-archive/<actor>/ — grep on demand, never preload."
+                    next
+                }
+                print; print nextline; next
+            }
+            { print }
+        ' "$f" > "$tmp" && mv "$tmp" "$f"
+    fi
+}
+
 # Migrate existing session to latest format
 migrate_session() {
     local session_dir="$1"
@@ -374,6 +413,10 @@ migrate_session() {
     # ensure the narrative file + index pointer exist (idempotent on every resume).
     migrate_discoveries_to_narrative "$session_dir"
     ensure_narrative_file "$session_dir"
+
+    # Phase 13: the resume protocol reads live narratives only; rewrite the
+    # read-all sentences cs wrote into files that predate rotation.
+    migrate_narrative_resume_wording "$session_dir"
 
     # Phase 5: move cs-managed sections out of CLAUDE.md, then ensure the
     # protocol is present in CLAUDE.local.md (machine-local, gitignored). A

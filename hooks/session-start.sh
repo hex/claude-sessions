@@ -321,7 +321,7 @@ Current actor: $ACTOR_SLUG ($ACTOR_RAW). Your narrative is .cs/memory/narrative.
 
 Key files to maintain:
 - .cs/README.md: Update objective and outcome
-- .cs/memory/narrative.$ACTOR_SLUG.md: append findings as you go; read all narrative.*.md on resume
+- .cs/memory/narrative.$ACTOR_SLUG.md: append findings as you go; on resume read the live narrative.*.md (older sections: .cs/narrative-archive/<actor>/, grep on demand)
 
 Secrets: never write credentials to project files — feed the value to 'cs -secrets set <name>' on stdin via a file redirect (argv, pipes and heredocs are all logged verbatim); retrieve with 'cs -secrets get <name>'. See CLAUDE.local.md, Secure Secrets Handling.
 
@@ -672,7 +672,7 @@ elif [ -n "$FRESH_NOTICE" ]; then
 The user explicitly started a fresh conversation in this cs session — the prior conversation's transcript is not loaded. Treat this as a clean break, not a continuation.
 
 For prior context, lazily consult as needed:
-- .cs/memory/narrative.*.md — findings and decisions from earlier work (append only to your own actor's file)
+- .cs/memory/narrative.*.md — findings and decisions from earlier work (append only to your own actor's file; older sections under .cs/narrative-archive/<actor>/)
 - .cs/README.md            — session objective
 
 Do not assume continuity with previous turns."

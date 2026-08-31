@@ -74,7 +74,7 @@ ensure_narrative_file() {
         cat > "$narrative" << EOF
 ---
 name: session-narrative-$actor
-description: Session lab-notebook and work-in-progress narrative for $actor. Looser bar than durable memory. Read all narrative.*.md on resume.
+description: Session lab-notebook and work-in-progress narrative for $actor. Looser bar than durable memory. Read the live narrative.*.md on resume; older sections are archived under .cs/narrative-archive/.
 type: narrative
 ---
 # Session narrative ($actor)
@@ -90,7 +90,7 @@ EOF
     fi
 
     if [ ! -f "$index" ] || ! grep -q "(narrative\.$actor\.md)" "$index" 2>/dev/null; then
-        printf -- '- [Session narrative — %s (lab notebook)](narrative.%s.md): looser-bar work-in-progress; read all narrative.*.md on resume\n' "$actor" "$actor" >> "$index"
+        printf -- '- [Session narrative — %s (lab notebook)](narrative.%s.md): looser-bar work-in-progress; read the live narrative.*.md on resume, older sections under .cs/narrative-archive/\n' "$actor" "$actor" >> "$index"
     fi
 }
 
@@ -177,8 +177,8 @@ At the start of every conversation in this session, read the following files to 
 3. **.cs/memory/narrative.*.md** - Per-actor lab notebooks (yours + teammates'): findings, in-progress state, observations
 
 Narratives are per-actor (narrative.<actor>.md) so co-developers never conflict.
-Append only to your own; read all narrative.*.md on resume to restore your
-working narrative and see teammates' in-progress findings.
+Append only to your own; on resume read the live narrative.*.md (rotation keeps
+them small). Older sections sit under .cs/narrative-archive/<actor>/ — grep on demand, never preload.
 
 ## Documentation Discipline
 

@@ -76,8 +76,28 @@ test_hooks_doc_states_both_resolution_arms() {
         "and the front-end test that keeps a terminal claude out of the walk" || return 1
 }
 
+
+# Rotation made "read all narratives on resume" false. No user-facing surface
+# may say it: the lib templates, the hooks, the commands, README and docs.
+# lib/45-migrate.sh is exempt: migrate_narrative_resume_wording's grep/sed/awk
+# patterns must name the dead sentence verbatim to find and rewrite it in files
+# cs already wrote. That is a matcher, not a surface telling anyone to read
+# every narrative.
+test_no_surface_tells_a_resume_to_read_every_narrative() {
+    local hits
+    hits=$(grep -rniE "read all narrative|read all of them|reads all of them|everyone reads all" \
+        "$REPO/lib" "$REPO/hooks" "$REPO/commands" "$REPO/README.md" "$REPO/docs"/*.md 2>/dev/null \
+        | grep -v '/lib/45-migrate\.sh:' || true)
+    if [ -n "$hits" ]; then
+        echo "  FAIL: these surfaces still tell a resume to read every narrative:"
+        printf '    %s\n' "$hits"
+        return 1
+    fi
+}
+
 run_test test_configuration_documents_every_env_var_the_readme_names
 run_test test_every_backend_the_code_accepts_is_documented
 run_test test_hooks_doc_states_both_resolution_arms
+run_test test_no_surface_tells_a_resume_to_read_every_narrative
 
 report_results

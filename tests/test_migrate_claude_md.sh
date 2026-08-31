@@ -297,4 +297,49 @@ test_migrate_does_not_strip_a_body_line_when_the_fence_is_unclosed() {
 run_test test_migrate_moves_machine_local_fields_out_of_a_crlf_readme
 run_test test_migrate_does_not_strip_a_body_line_when_the_fence_is_unclosed
 
+# Files cs wrote before rotation existed carry the read-all sentence in three
+# places cs owns: the narrative's own frontmatter, its MEMORY.md pointer and the
+# protocol block in CLAUDE.local.md. A resume rewrites all three once.
+test_migrate_rewrites_read_all_wording_cs_wrote() {
+    local dir
+    dir=$(create_test_session "wordy")
+    printf -- '---\nname: session-narrative-alice\ndescription: Session lab-notebook and work-in-progress narrative for alice. Looser bar than durable memory. Read all narrative.*.md on resume.\ntype: narrative\n---\n# Session narrative (alice)\n\n## 2026-01-01 — kept\nbody mentions Read all narrative.*.md on resume. verbatim\n' \
+        > "$dir/.cs/memory/narrative.alice.md"
+    printf -- '- [Session narrative — alice (lab notebook)](narrative.alice.md): looser-bar work-in-progress; read all narrative.*.md on resume\n' \
+        > "$dir/.cs/memory/MEMORY.md"
+    printf '<!-- cs:session-protocol -->\n# Session Documentation Protocol\n\nAppend only to your own; read all narrative.*.md on resume to restore your\nworking narrative and see teammates'"'"' in-progress findings.\n\n<!-- cs:memory-note -->\nnote\n' \
+        > "$dir/CLAUDE.local.md"
+    CS_ACTOR=alice "$CS_BIN" "wordy" < /dev/null > /dev/null 2>&1 || true
+
+    local desc
+    desc=$(sed -n '3p' "$dir/.cs/memory/narrative.alice.md")
+    case "$desc" in
+        *"Read all narrative"*) echo "  FAIL: frontmatter description still says read all: $desc"; return 1 ;;
+        *"narrative-archive"*) ;;
+        *) echo "  FAIL: frontmatter description does not point at the archive: $desc"; return 1 ;;
+    esac
+    assert_file_contains "$dir/.cs/memory/narrative.alice.md" "body mentions Read all narrative\.\*\.md on resume\. verbatim" \
+        "the narrative body is never rewritten" || return 1
+    assert_file_not_contains "$dir/.cs/memory/MEMORY.md" "read all narrative" "index pointer rewritten" || return 1
+    assert_file_contains "$dir/.cs/memory/MEMORY.md" "narrative-archive" "index pointer names the archive" || return 1
+    assert_file_not_contains "$dir/CLAUDE.local.md" "read all narrative" "protocol sentence rewritten" || return 1
+    assert_file_contains "$dir/CLAUDE.local.md" "grep on demand, never preload" "with the live-plus-archive instruction" || return 1
+    assert_file_contains "$dir/CLAUDE.local.md" "<!-- cs:memory-note -->" "the following block is untouched" || return 1
+}
+
+test_migrate_read_all_rewrite_is_idempotent() {
+    local dir
+    dir=$(create_test_session "wordy2")
+    printf -- '- [Session narrative — alice (lab notebook)](narrative.alice.md): looser-bar work-in-progress; read all narrative.*.md on resume\n' \
+        > "$dir/.cs/memory/MEMORY.md"
+    CS_ACTOR=alice "$CS_BIN" "wordy2" < /dev/null > /dev/null 2>&1 || true
+    local once
+    once=$(cat "$dir/.cs/memory/MEMORY.md")
+    CS_ACTOR=alice "$CS_BIN" "wordy2" < /dev/null > /dev/null 2>&1 || true
+    assert_eq "$once" "$(cat "$dir/.cs/memory/MEMORY.md")" "second resume leaves the index byte-identical" || return 1
+}
+
+run_test test_migrate_rewrites_read_all_wording_cs_wrote
+run_test test_migrate_read_all_rewrite_is_idempotent
+
 report_results
