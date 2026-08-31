@@ -214,7 +214,7 @@ test_remove_adopted_session_removes_symlink_only() {
 
     (cd "$project_dir" && "$CS_BIN" -adopt my-session)
 
-    echo "y" | "$CS_BIN" -remove my-session 2>&1
+    echo "y" | CS_ASSUME_TTY=1 "$CS_BIN" -remove my-session 2>&1
 
     assert_not_exists "$CS_SESSIONS_ROOT/my-session" "Symlink should be removed" || return 1
     assert_dir "$project_dir" "Original project should still exist" || return 1

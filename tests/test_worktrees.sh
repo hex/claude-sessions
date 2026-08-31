@@ -582,7 +582,7 @@ test_rm_worktree_unregisters_and_prompts_branch() {
     cs_launch "myproj@fix-auth"
     local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
     # Confirm removal, decline branch deletion
-    printf 'y\nn\n' | "$CS_BIN" -rm "myproj@fix-auth" > /dev/null 2>&1
+    printf 'y\nn\n' | CS_ASSUME_TTY=1 "$CS_BIN" -rm "myproj@fix-auth" > /dev/null 2>&1
     assert_not_exists "$wt" "worktree dir removed" || return 1
     git -C "$base_dir" worktree list --porcelain | grep -q "myproj@fix-auth" \
         && { echo "  FAIL: worktree still registered"; return 1; }

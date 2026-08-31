@@ -19,7 +19,7 @@ teardown() {
 test_remove_multiple_names_each_confirmed() {
     create_test_session r1 >/dev/null
     create_test_session r2 >/dev/null
-    printf 'y\ny\n' | "$CS_BIN" -rm r1 r2 >/dev/null 2>&1 || return 1
+    printf 'y\ny\n' | CS_ASSUME_TTY=1 "$CS_BIN" -rm r1 r2 >/dev/null 2>&1 || return 1
     [ ! -d "$CS_SESSIONS_ROOT/r1" ] || { echo "  r1 survived"; return 1; }
     [ ! -d "$CS_SESSIONS_ROOT/r2" ] || { echo "  r2 survived"; return 1; }
 }
@@ -27,14 +27,14 @@ test_remove_multiple_names_each_confirmed() {
 test_remove_decline_skips_that_session_only() {
     create_test_session r3 >/dev/null
     create_test_session r4 >/dev/null
-    printf 'n\ny\n' | "$CS_BIN" -rm r3 r4 >/dev/null 2>&1 || return 1
+    printf 'n\ny\n' | CS_ASSUME_TTY=1 "$CS_BIN" -rm r3 r4 >/dev/null 2>&1 || return 1
     [ -d "$CS_SESSIONS_ROOT/r3" ] || { echo "  declined r3 was removed"; return 1; }
     [ ! -d "$CS_SESSIONS_ROOT/r4" ] || { echo "  r4 survived"; return 1; }
 }
 
 test_remove_single_name_still_works() {
     create_test_session r5 >/dev/null
-    printf 'y\n' | "$CS_BIN" -rm r5 >/dev/null 2>&1 || return 1
+    printf 'y\n' | CS_ASSUME_TTY=1 "$CS_BIN" -rm r5 >/dev/null 2>&1 || return 1
     [ ! -d "$CS_SESSIONS_ROOT/r5" ] || { echo "  r5 survived"; return 1; }
 }
 
@@ -44,13 +44,13 @@ test_remove_no_name_errors() {
 
 test_remove_unknown_name_fails_fast() {
     create_test_session r6 >/dev/null
-    ! printf 'y\n' | "$CS_BIN" -rm nosuch r6 >/dev/null 2>&1 || return 1
+    ! printf 'y\n' | CS_ASSUME_TTY=1 "$CS_BIN" -rm nosuch r6 >/dev/null 2>&1 || return 1
     [ -d "$CS_SESSIONS_ROOT/r6" ] || { echo "  fail-fast still removed a later name"; return 1; }
 }
 
 test_remove_empty_name_rejected_before_any_deletion() {
     create_test_session r7 >/dev/null
-    ! printf 'y\ny\n' | "$CS_BIN" -rm r7 "" >/dev/null 2>&1 || return 1
+    ! printf 'y\ny\n' | CS_ASSUME_TTY=1 "$CS_BIN" -rm r7 "" >/dev/null 2>&1 || return 1
     [ -d "$CS_SESSIONS_ROOT" ] || { echo "  sessions root deleted"; return 1; }
     [ -d "$CS_SESSIONS_ROOT/r7" ] || { echo "  r7 removed despite invalid list"; return 1; }
     ! "$CS_BIN" -rm "" >/dev/null 2>&1 || return 1
@@ -63,7 +63,7 @@ test_remove_refuses_live_session_without_force() {
     echo "$live_pid" > "$CS_SESSIONS_ROOT/live1/.cs/session.lock"
 
     local out rc=0
-    out=$(printf 'y\n' | "$CS_BIN" -rm live1 2>&1) || rc=$?
+    out=$(printf 'y\n' | CS_ASSUME_TTY=1 "$CS_BIN" -rm live1 2>&1) || rc=$?
     if [ "$rc" -eq 0 ]; then
         kill "$live_pid" 2>/dev/null; wait "$live_pid" 2>/dev/null
         echo "  FAIL: live session must refuse removal without --force"
@@ -75,7 +75,7 @@ test_remove_refuses_live_session_without_force() {
         kill "$live_pid" 2>/dev/null; wait "$live_pid" 2>/dev/null
         echo "  FAIL: refused removal still deleted the session"; return 1; }
 
-    printf 'y\n' | "$CS_BIN" -rm live1 --force >/dev/null 2>&1
+    printf 'y\n' | CS_ASSUME_TTY=1 "$CS_BIN" -rm live1 --force >/dev/null 2>&1
     rc=$?
     kill "$live_pid" 2>/dev/null; wait "$live_pid" 2>/dev/null
     [ "$rc" -eq 0 ] || { echo "  FAIL: --force should remove a live session"; return 1; }
@@ -89,10 +89,10 @@ test_remove_discards_pending_spawn_seeds() {
     printf 'old\n' > "$CS_SESSIONS_ROOT/.spawn/seeded.seed.stale"
     printf 'other\n' > "$CS_SESSIONS_ROOT/.spawn/other.seed"
 
-    printf 'n\n' | "$CS_BIN" -rm seeded >/dev/null 2>&1 || return 1
+    printf 'n\n' | CS_ASSUME_TTY=1 "$CS_BIN" -rm seeded >/dev/null 2>&1 || return 1
     [ -f "$CS_SESSIONS_ROOT/.spawn/seeded.seed" ] || { echo "  declined removal still discarded the seed"; return 1; }
 
-    printf 'y\n' | "$CS_BIN" -rm seeded >/dev/null 2>&1 || return 1
+    printf 'y\n' | CS_ASSUME_TTY=1 "$CS_BIN" -rm seeded >/dev/null 2>&1 || return 1
     [ ! -f "$CS_SESSIONS_ROOT/.spawn/seeded.seed" ] || { echo "  seed survived removal"; return 1; }
     [ ! -f "$CS_SESSIONS_ROOT/.spawn/seeded.seed.stale" ] || { echo "  stale seed survived removal"; return 1; }
     [ -f "$CS_SESSIONS_ROOT/.spawn/other.seed" ] || { echo "  another session's seed was deleted"; return 1; }
@@ -109,7 +109,7 @@ test_remove_worktree_session_discards_seeds() {
     mkdir -p "$CS_SESSIONS_ROOT/.spawn"
     printf 'spawner\n' > "$CS_SESSIONS_ROOT/.spawn/wbase@t.seed"
 
-    printf 'y\n' | "$CS_BIN" -rm "wbase@t" >/dev/null 2>&1 || return 1
+    printf 'y\n' | CS_ASSUME_TTY=1 "$CS_BIN" -rm "wbase@t" >/dev/null 2>&1 || return 1
     [ ! -d "$CS_SESSIONS_ROOT/wbase@t" ] || { echo "  worktree session survived"; return 1; }
     [ ! -f "$CS_SESSIONS_ROOT/.spawn/wbase@t.seed" ] || { echo "  worktree seed survived removal"; return 1; }
 }
@@ -121,8 +121,33 @@ test_remove_allows_heartbeat_only_session_without_force() {
     create_test_session breathing >/dev/null
     mkdir -p "$CS_SESSIONS_ROOT/breathing/.cs/local"
     : > "$CS_SESSIONS_ROOT/breathing/.cs/local/context-pct"
-    printf 'y\n' | "$CS_BIN" -rm breathing >/dev/null 2>&1 || return 1
+    printf 'y\n' | CS_ASSUME_TTY=1 "$CS_BIN" -rm breathing >/dev/null 2>&1 || return 1
     [ ! -d "$CS_SESSIONS_ROOT/breathing" ] || { echo "  heartbeat-only session wrongly refused rm"; return 1; }
+}
+
+test_remove_noninteractive_without_force_errors_loudly() {
+    create_test_session n1 >/dev/null
+    local out rc=0
+    out=$("$CS_BIN" -rm n1 </dev/null 2>&1) || rc=$?
+    [ "$rc" -ne 0 ] || { echo "  FAIL: non-interactive rm without --force must not exit 0"; return 1; }
+    assert_output_contains "$out" "needs a terminal" "error names the missing terminal" || return 1
+    [ -d "$CS_SESSIONS_ROOT/n1" ] || { echo "  FAIL: session was removed despite the refusal"; return 1; }
+}
+
+test_remove_force_skips_the_prompt() {
+    create_test_session n2 >/dev/null
+    "$CS_BIN" -rm n2 --force </dev/null >/dev/null 2>&1 || return 1
+    [ ! -d "$CS_SESSIONS_ROOT/n2" ] || { echo "  FAIL: --force did not remove the session"; return 1; }
+}
+
+test_remove_force_on_adopted_removes_only_the_link() {
+    local project_dir="$TEST_TMPDIR/adopted-project"
+    mkdir -p "$project_dir"
+    (cd "$project_dir" && "$CS_BIN" -adopt n3 >/dev/null 2>&1)
+
+    "$CS_BIN" -rm n3 --force </dev/null >/dev/null 2>&1 || return 1
+    assert_not_exists "$CS_SESSIONS_ROOT/n3" "symlink should be gone" || return 1
+    assert_dir "$project_dir/.cs" "project .cs/ should still be present" || return 1
 }
 
 run_test test_remove_empty_name_rejected_before_any_deletion
@@ -135,5 +160,8 @@ run_test test_remove_decline_skips_that_session_only
 run_test test_remove_single_name_still_works
 run_test test_remove_no_name_errors
 run_test test_remove_unknown_name_fails_fast
+run_test test_remove_noninteractive_without_force_errors_loudly
+run_test test_remove_force_skips_the_prompt
+run_test test_remove_force_on_adopted_removes_only_the_link
 
 report_results
