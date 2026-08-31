@@ -490,6 +490,10 @@ test_two_clones_rotating_at_different_cuts_merge_clean() {
     git -C "$CLONE_A" merge -q --no-edit FETCH_HEAD > /dev/null 2>&1 || { echo "  FAIL: merge conflicted"; git -C "$CLONE_A" status --short; return 1; }
     local merged="$CLONE_A/.cs/memory/narrative.alice.md"
     assert_file_not_contains "$merged" "section 1$" "the earliest sections stay archived" || return 1
+    assert_file_not_contains "$merged" "section 5$" "B's cut (sections 1-5) is applied" || return 1
+    assert_file_contains "$merged" "section 6$" "the less aggressive cut wins: section 6 survives" || return 1
+    assert_file_contains "$merged" "section 7$" "and so does section 7" || return 1
+    assert_eq "5" "$(grep -c '^## ' "$merged")" "sections 6-10, no duplicated tail" || return 1
     assert_file_contains "$merged" "section 10$" "the newest section survives" || return 1
     # Both chunks exist; neither conflicts with the other (distinct names).
     assert_eq "2" "$(find "$CLONE_A/.cs/narrative-archive/alice" -name '*.md' | wc -l | tr -d ' ')" "two distinct chunks after the merge" || return 1
