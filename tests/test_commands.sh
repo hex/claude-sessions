@@ -459,4 +459,23 @@ test_release_gate_mandates_an_empirical_pass() {
 
 run_test test_release_gate_mandates_an_empirical_pass
 
+test_wrap_rotates_the_narrative_after_the_summary() {
+    assert_file_contains "$COMMANDS_DIR/wrap.md" "## Pass 3 — Narrative rotation" \
+        "wrap has a third pass" || return 1
+    assert_file_contains "$COMMANDS_DIR/wrap.md" 'cs -narrative rotate' \
+        "the pass runs the cs helper rather than describing file surgery" || return 1
+    assert_file_contains "$COMMANDS_DIR/wrap.md" '3\. \*\*Narrative:\*\*' \
+        "the report gains a third item" || return 1
+}
+
+test_summary_reads_live_narratives_not_archives() {
+    assert_file_not_contains "$COMMANDS_DIR/summary.md" "read all of them" \
+        "the read-all instruction is gone" || return 1
+    assert_file_contains "$COMMANDS_DIR/summary.md" "narrative-archive" \
+        "summary knows where older sections went" || return 1
+}
+
+run_test test_wrap_rotates_the_narrative_after_the_summary
+run_test test_summary_reads_live_narratives_not_archives
+
 report_results

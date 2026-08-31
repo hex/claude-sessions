@@ -625,9 +625,14 @@ if [ -f "$COOLDOWN_FILE" ]; then
     fi
 fi
 
-# Per-actor narratives: track the most recently modified narrative.*.md.
+# Per-actor narratives: track the most recently modified narrative.*.md, and
+# note any that has outgrown its byte budget. The same stat pass serves both.
 NARRATIVE_FILE=""
 NARRATIVE_MTIME=0
+# KEEP IN SYNC with CS_NARRATIVE_MAX_DEFAULT in lib/51-narrative.sh — hooks
+# cannot source lib/, so the default is duplicated here.
+NARRATIVE_MAX=$(_num_or "${CS_NARRATIVE_MAX_BYTES:-}" 131072)
+NARRATIVE_OVER=""
 for _nf in "$META_DIR"/memory/narrative*.md; do
     [ -f "$_nf" ] || continue
     if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -638,6 +643,11 @@ for _nf in "$META_DIR"/memory/narrative*.md; do
     if [ "$_m" -ge "$NARRATIVE_MTIME" ]; then
         NARRATIVE_MTIME="$_m"
         NARRATIVE_FILE="$_nf"
+    fi
+    _sz=$(wc -c < "$_nf" 2>/dev/null | tr -d ' ' || echo 0)
+    case "$_sz" in ''|*[!0-9]*) _sz=0 ;; esac
+    if [ "$_sz" -gt "$NARRATIVE_MAX" ]; then
+        NARRATIVE_OVER="${NARRATIVE_OVER} $(basename "$_nf") is $((_sz / 1024)) KB, over the $((NARRATIVE_MAX / 1024)) KB budget — if it is yours, run \`cs -narrative rotate\` before appending."
     fi
 done
 
@@ -657,7 +667,7 @@ fi
 # Update cooldown marker and remind
 echo "$CURRENT_TIME" > "$COOLDOWN_FILE"
 
-REASON="Narrative check. Update only your own narrative (run \`cs -whoami\` if unsure which actor you are; never edit a teammate's narrative). Newest on disk is $NARRATIVE_FILE. (1) If any of your own entries were disproven or superseded by your recent work, correct or remove them now. (2) Append any new findings as plain dated notes. If nothing needs changing, say so in one line and stop."
+REASON="Narrative check. Update only your own narrative (run \`cs -whoami\` if unsure which actor you are; never edit a teammate's narrative). Newest on disk is $NARRATIVE_FILE. (1) If recent work disproved or superseded one of your entries, append a dated correction that names it — never rewrite or delete earlier sections. (2) Append any new findings as plain dated notes. If nothing needs changing, say so in one line and stop.${NARRATIVE_OVER}"
 
 jq -nc --arg r "$REASON" '{decision: "block", reason: $r}'
 

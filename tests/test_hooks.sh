@@ -76,6 +76,65 @@ test_narrative_reminder_tracks_per_actor() {
     assert_output_contains "$output" "narrative.alex.md" "Reminder should point at the per-actor narrative" || return 1
 }
 
+test_narrative_reminder_asks_for_appended_corrections_not_rewrites() {
+    echo "# Session narrative (alice)" > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    local output
+    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
+    assert_output_contains "$output" "append a dated correction" "corrections are appended" || return 1
+    assert_output_contains "$output" "never rewrite or delete earlier sections" "earlier sections are immutable" || return 1
+    assert_output_not_contains "$output" "correct or remove them" "the in-place instruction is gone" || return 1
+}
+
+test_narrative_reminder_flags_a_narrative_over_budget() {
+    local nf="$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    { echo "# Session narrative (alice)"; head -c 3000 /dev/zero | tr '\0' 'x'; echo; } > "$nf"
+    _backdate "$nf"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    local output
+    output=$(echo '{}' | CS_NARRATIVE_MAX_BYTES=2048 bash "$HOOKS_DIR/narrative-reminder.sh")
+    assert_output_contains "$output" "narrative.alice.md is 2 KB, over the 2 KB budget" "names the file and the budget" || return 1
+    assert_output_contains "$output" "cs -narrative rotate" "points at the rotation" || return 1
+}
+
+test_narrative_reminder_is_silent_about_budget_when_under() {
+    local nf="$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    echo "# Session narrative (alice)" > "$nf"
+    _backdate "$nf"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    local output
+    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
+    assert_output_contains "$output" "block" "the reminder itself still fires" || return 1
+    assert_output_not_contains "$output" "over the" "no budget line under budget" || return 1
+}
+
+test_narrative_reminder_survives_an_unreadable_narrative() {
+    local nf="$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    echo "# Session narrative (alice)" > "$nf"
+    _backdate "$nf"
+    chmod 000 "$nf"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    local output
+    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
+    chmod 644 "$nf"
+    assert_output_contains "$output" "decision" "the hook still answers with JSON when a narrative cannot be read" || return 1
+}
+
+test_narrative_reminder_budget_line_covers_a_teammates_file() {
+    # The line names whichever file is over; the "if it is yours" clause leaves
+    # the decision to the reader, since the hook does not resolve the actor.
+    { echo "# Session narrative (bob)"; head -c 3000 /dev/zero | tr '\0' 'x'; echo; } > "$CLAUDE_SESSION_META_DIR/memory/narrative.bob.md"
+    echo "# Session narrative (alice)" > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.bob.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    local output
+    output=$(echo '{}' | CS_NARRATIVE_MAX_BYTES=2048 bash "$HOOKS_DIR/narrative-reminder.sh")
+    assert_output_contains "$output" "narrative.bob.md is 2 KB" "names bob's file" || return 1
+    assert_output_contains "$output" "if it is yours" "leaves ownership to the reader" || return 1
+}
+
 test_stop_raises_attention_marker() {
     # Turn end raises the machine-local attention flag the statusline blinks
     # until the user next interacts. Lives in .cs/local/ (never git-synced).
@@ -1345,6 +1404,11 @@ run_test test_narrative_reminder_approves_outside_session
 run_test test_narrative_reminder_approves_when_recently_modified
 run_test test_narrative_reminder_blocks_when_stale
 run_test test_narrative_reminder_tracks_per_actor
+run_test test_narrative_reminder_asks_for_appended_corrections_not_rewrites
+run_test test_narrative_reminder_flags_a_narrative_over_budget
+run_test test_narrative_reminder_is_silent_about_budget_when_under
+run_test test_narrative_reminder_survives_an_unreadable_narrative
+run_test test_narrative_reminder_budget_line_covers_a_teammates_file
 run_test test_narrative_reminder_respects_cooldown
 run_test test_stop_raises_attention_marker
 run_test test_stop_no_attention_marker_for_subagents

@@ -2,9 +2,9 @@
 model: claude-opus-5
 ---
 
-Wrap up this session: distill durable memory entries, then write a comprehensive summary. Run the two passes back-to-back and report.
+Wrap up this session: distill durable memory entries, write a comprehensive summary, then rotate the narrative. Run the three passes back-to-back and report.
 
-You are working in a cs session. The user has signaled they're winding down. Do the passes in order — memory first (so durable facts land in the right place before the narrative absorbs them), summary second (so the narrative reflects the final state including any memory entries just written).
+You are working in a cs session. The user has signaled they're winding down. Do the passes in order — memory first (so durable facts land in the right place before the narrative absorbs them), summary second (so the narrative reflects the final state including any memory entries just written), rotation third (so the summary was written from the whole live narrative before its oldest sections leave it).
 
 Each pass is owned by its own command file. Read that file and apply it — do not work from a remembered paraphrase. This command adds only the ordering and the combined report.
 
@@ -18,11 +18,16 @@ Read `~/.claude/commands/summary.md` and execute its steps 1-4: read all the ses
 
 Stop after step 4. Step 5's prose critic belongs to standalone `/summary`: it spawns a judge subagent and can run it twice, which is most of what a wrap costs. `/wrap` is the winding-down path and trades that pass for speed, so write the summary well the first time rather than planning to revise it.
 
+## Pass 3 — Narrative rotation
+
+Run `cs -narrative rotate` once and keep its single output line. It archives the oldest `## ` sections of your narrative verbatim into `.cs/narrative-archive/<actor>/` when the live file is over its byte budget, and prints `nothing to rotate` otherwise. Do not read or edit the narrative yourself for this pass; the helper does the byte-exact cut and commits it when the session is tracked.
+
 ## Report
 
-Output a brief report with the two labeled items below. No long prose; the summary IS the prose.
+Output a brief report with the three labeled items below. No long prose; the summary IS the prose.
 
 1. **Memory:** list the file paths you wrote in Pass 1, one per line. Or write `nothing to add` if the session didn't warrant memory entries.
 2. **Summary:** confirm `.cs/summary.md` was created.
+3. **Narrative:** the line `cs -narrative rotate` printed.
 
 That's it. Don't recap the conversation; the summary file does that already.

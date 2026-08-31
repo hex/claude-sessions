@@ -62,6 +62,40 @@ test_doctor_reports_pass_for_healthy_session() {
     assert_output_contains "$output" "OK" "healthy session should show OK status" || return 1
 }
 
+test_doctor_warns_on_a_narrative_over_budget() {
+    local nf="$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    { echo "# Session narrative (alice)"; head -c 3000 /dev/zero | tr '\0' 'x'; echo; } > "$nf"
+    local output
+    output=$(CS_NARRATIVE_MAX_BYTES=2048 "$CS_BIN" -doctor 2>&1) || true
+    # Colour escapes may sit between the [WARN] tag and the message, so the two
+    # are pinned separately.
+    assert_output_contains "$output" "Narrative: narrative.alice.md is 2 KB (budget 2 KB)" "warns with file and budget" || return 1
+    assert_output_contains "$output" "run cs -narrative rotate" "points at the rotation" || return 1
+    # This fixture never trips a FAIL check, so the summary takes the WARN
+    # branch ("Complete with N warning(s).") rather than the FAIL branch's
+    # "Warnings: N" — assert against the branch this scenario actually hits.
+    assert_output_contains "$output" "Complete with [1-9][0-9]* warning(s)\." "the warning is counted" || return 1
+}
+
+test_doctor_reports_ok_when_narratives_fit() {
+    echo "# Session narrative (alice)" > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    local output
+    output=$("$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Narrative: all within the 128 KB budget" "ok line names the budget" || return 1
+    assert_output_not_contains "$output" "run cs -narrative rotate" "no warning" || return 1
+}
+
+test_doctor_survives_an_unreadable_narrative() {
+    local nf="$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    echo "# Session narrative (alice)" > "$nf"
+    chmod 000 "$nf"
+    local output
+    output=$("$CS_BIN" -doctor 2>&1) || true
+    chmod 644 "$nf"
+    assert_output_contains "$output" "Narrative:" "doctor still reaches the narrative line when a file cannot be read" || return 1
+    assert_output_contains "$output" "Complete" "and finishes its run" || return 1
+}
+
 test_doctor_fails_when_hook_not_executable() {
     local fake_hook_dir="$TEST_TMPDIR/hooks"
     mkdir -p "$fake_hook_dir"
@@ -758,6 +792,9 @@ echo "Running doctor tests..."
 run_test test_doctor_subcommand_exists
 run_test test_doctor_runs_default_checks_from_session
 run_test test_doctor_reports_pass_for_healthy_session
+run_test test_doctor_warns_on_a_narrative_over_budget
+run_test test_doctor_reports_ok_when_narratives_fit
+run_test test_doctor_survives_an_unreadable_narrative
 run_test test_doctor_fails_when_hook_not_executable
 run_test test_doctor_exits_nonzero_on_failure
 run_test test_doctor_completes_when_the_deploy_stamp_is_absent

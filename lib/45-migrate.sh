@@ -262,6 +262,76 @@ needs_cs_migration() {
     [[ ! -d "$session_dir/.cs" ]] && { [[ -d "$session_dir/logs" ]] || [[ -f "$session_dir/discoveries.md" ]]; }
 }
 
+# Rewrite the three read-all-narratives sentences cs wrote into existing
+# sessions: a narrative's frontmatter description, its MEMORY.md pointer and the
+# protocol block in CLAUDE.local.md. Only the exact sentences cs emitted are
+# touched — a narrative body or a user's own prose never is. Temp+mv rather than
+# sed -i (BSD/GNU disagree on -i). Idempotent: nothing matches on the second run.
+migrate_narrative_resume_wording() {
+    local session_dir="$1"
+    local mem="$session_dir/.cs/memory" f tmp
+    for f in "$mem"/narrative.*.md; do
+        [ -f "$f" ] || continue
+        # Keyed to the description line specifically (not just "somewhere in the
+        # first 8 lines"): a cs-written narrative has exactly 7 header lines, so
+        # a body line beginning on line 8 sits inside a bare line-range window
+        # too and would otherwise be rewritten. No pipe into grep -q: under
+        # pipefail a huge first line can make `head -8 | grep -q` exit 141 and
+        # silently skip the file via `|| continue`.
+        awk 'NR <= 8 && /^description: .*Read all narrative\.\*\.md on resume\./ { f = 1 } NR > 8 { exit } END { exit !f }' "$f" || continue
+        tmp="$f.tmp"
+        sed '1,8{/^description: /s/Read all narrative\.\*\.md on resume\./Read the live narrative.*.md on resume; older sections are archived under .cs\/narrative-archive\/./;}' "$f" > "$tmp" \
+            && mv "$tmp" "$f"
+    done
+    f="$mem/MEMORY.md"
+    if [ -f "$f" ] && grep -q 'read all narrative\.\*\.md on resume' "$f"; then
+        tmp="$f.tmp"
+        sed 's/read all narrative\.\*\.md on resume/read the live narrative.*.md on resume, older sections under .cs\/narrative-archive\//' "$f" > "$tmp" \
+            && mv "$tmp" "$f"
+    fi
+    f="$session_dir/CLAUDE.local.md"
+    # cs has shipped two protocol-block wordings for the same sentence: the
+    # current two-line form, and the July-2026 four-line form ("Note:
+    # narratives are per-actor ... so co-developers never / conflict. Append
+    # only to your own ... read all / narrative.*.md on resume to restore
+    # your working narrative and see teammates' / in-progress findings.").
+    # Either grep alternative can match a line that a CRLF checkout split
+    # from its neighbour with a trailing \r, so the gate itself does not need
+    # \r-tolerance — only the awk's line-for-line comparisons do.
+    if [ -f "$f" ] && grep -qE 'read all narrative\.\*\.md on resume to restore your|so co-developers never' "$f"; then
+        tmp="$f.tmp"
+        awk '
+            function strip(s) { sub(/\r$/, "", s); return s }
+            {
+                cur = strip($0)
+            }
+            cur == "Append only to your own; read all narrative.*.md on resume to restore your" {
+                line1 = $0
+                getline nextline
+                if (strip(nextline) ~ /^working narrative and see teammates/) {
+                    print "Append only to your own; on resume read the live narrative.*.md (rotation keeps"
+                    print "them small). Older sections sit under .cs/narrative-archive/<actor>/ — grep on demand, never preload."
+                    next
+                }
+                print line1; print nextline; next
+            }
+            cur == "Note: narratives are per-actor (narrative.<actor>.md) so co-developers never" {
+                line1 = $0
+                getline line2
+                getline line3
+                getline line4
+                if (strip(line2) ~ /^conflict\. Append only to your own/ && strip(line3) ~ /^narrative\.\*\.md on resume/) {
+                    print "Append only to your own; on resume read the live narrative.*.md (rotation keeps"
+                    print "them small). Older sections sit under .cs/narrative-archive/<actor>/ — grep on demand, never preload."
+                    next
+                }
+                print line1; print line2; print line3; print line4; next
+            }
+            { print }
+        ' "$f" > "$tmp" && mv "$tmp" "$f"
+    fi
+}
+
 # Migrate existing session to latest format
 migrate_session() {
     local session_dir="$1"
@@ -374,6 +444,10 @@ migrate_session() {
     # ensure the narrative file + index pointer exist (idempotent on every resume).
     migrate_discoveries_to_narrative "$session_dir"
     ensure_narrative_file "$session_dir"
+
+    # Phase 13: the resume protocol reads live narratives only; rewrite the
+    # read-all sentences cs wrote into files that predate rotation.
+    migrate_narrative_resume_wording "$session_dir"
 
     # Phase 5: move cs-managed sections out of CLAUDE.md, then ensure the
     # protocol is present in CLAUDE.local.md (machine-local, gitignored). A

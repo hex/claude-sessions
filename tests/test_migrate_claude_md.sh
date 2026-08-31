@@ -297,4 +297,104 @@ test_migrate_does_not_strip_a_body_line_when_the_fence_is_unclosed() {
 run_test test_migrate_moves_machine_local_fields_out_of_a_crlf_readme
 run_test test_migrate_does_not_strip_a_body_line_when_the_fence_is_unclosed
 
+# Files cs wrote before rotation existed carry the read-all sentence in three
+# places cs owns: the narrative's own frontmatter, its MEMORY.md pointer and the
+# protocol block in CLAUDE.local.md. A resume rewrites all three once.
+test_migrate_rewrites_read_all_wording_cs_wrote() {
+    local dir
+    dir=$(create_test_session "wordy")
+    # Exactly 7 header lines (---, name, description, type, ---, title, blank),
+    # so this body line lands on line 8 — the same line the frontmatter gate and
+    # the 1,8 sed window reach. Pins the boundary: without the description-line
+    # anchor, this body line would get rewritten too.
+    printf -- '---\nname: session-narrative-alice\ndescription: Session lab-notebook and work-in-progress narrative for alice. Looser bar than durable memory. Read all narrative.*.md on resume.\ntype: narrative\n---\n# Session narrative (alice)\n\n## 2026-01-01 — kept: body mentions Read all narrative.*.md on resume. verbatim\n' \
+        > "$dir/.cs/memory/narrative.alice.md"
+    printf -- '- [Session narrative — alice (lab notebook)](narrative.alice.md): looser-bar work-in-progress; read all narrative.*.md on resume\n' \
+        > "$dir/.cs/memory/MEMORY.md"
+    printf '<!-- cs:session-protocol -->\n# Session Documentation Protocol\n\nAppend only to your own; read all narrative.*.md on resume to restore your\nworking narrative and see teammates'"'"' in-progress findings.\n\n<!-- cs:memory-note -->\nnote\n' \
+        > "$dir/CLAUDE.local.md"
+    CS_ACTOR=alice "$CS_BIN" "wordy" < /dev/null > /dev/null 2>&1 || true
+
+    local desc
+    desc=$(sed -n '3p' "$dir/.cs/memory/narrative.alice.md")
+    case "$desc" in
+        *"Read all narrative"*) echo "  FAIL: frontmatter description still says read all: $desc"; return 1 ;;
+        *"narrative-archive"*) ;;
+        *) echo "  FAIL: frontmatter description does not point at the archive: $desc"; return 1 ;;
+    esac
+    assert_file_contains "$dir/.cs/memory/narrative.alice.md" "body mentions Read all narrative\.\*\.md on resume\. verbatim" \
+        "the narrative body is never rewritten" || return 1
+    assert_eq "## 2026-01-01 — kept: body mentions Read all narrative.*.md on resume. verbatim" "$(sed -n '8p' "$dir/.cs/memory/narrative.alice.md")" \
+        "line 8 (first body line) untouched" || return 1
+    assert_file_not_contains "$dir/.cs/memory/MEMORY.md" "read all narrative" "index pointer rewritten" || return 1
+    assert_file_contains "$dir/.cs/memory/MEMORY.md" "narrative-archive" "index pointer names the archive" || return 1
+    assert_file_not_contains "$dir/CLAUDE.local.md" "read all narrative" "protocol sentence rewritten" || return 1
+    assert_file_contains "$dir/CLAUDE.local.md" "grep on demand, never preload" "with the live-plus-archive instruction" || return 1
+    assert_file_contains "$dir/CLAUDE.local.md" "<!-- cs:memory-note -->" "the following block is untouched" || return 1
+}
+
+test_migrate_read_all_rewrite_is_idempotent() {
+    local dir
+    dir=$(create_test_session "wordy2")
+    printf -- '- [Session narrative — alice (lab notebook)](narrative.alice.md): looser-bar work-in-progress; read all narrative.*.md on resume\n' \
+        > "$dir/.cs/memory/MEMORY.md"
+    CS_ACTOR=alice "$CS_BIN" "wordy2" < /dev/null > /dev/null 2>&1 || true
+    local once
+    once=$(cat "$dir/.cs/memory/MEMORY.md")
+    CS_ACTOR=alice "$CS_BIN" "wordy2" < /dev/null > /dev/null 2>&1 || true
+    assert_eq "$once" "$(cat "$dir/.cs/memory/MEMORY.md")" "second resume leaves the index byte-identical" || return 1
+}
+
+run_test test_migrate_rewrites_read_all_wording_cs_wrote
+run_test test_migrate_read_all_rewrite_is_idempotent
+
+# The protocol block cs shipped July-2026 through August-2026 wraps the same
+# sentence across four lines instead of two ("Note: narratives are per-actor
+# ... so co-developers never / conflict. Append only to your own ... read all /
+# narrative.*.md on resume to restore your working narrative and see teammates'
+# / in-progress findings."). A real-session survey found this vintage on 12 of
+# 17 sessions still carrying the read-all sentence — the majority, not an edge
+# case.
+test_migrate_rewrites_the_older_protocol_wording() {
+    local dir
+    dir=$(create_test_session "oldwordy")
+    printf '<!-- cs:session-protocol -->\n# Session Documentation Protocol\n\nNote: narratives are per-actor (narrative.<actor>.md) so co-developers never\nconflict. Append only to your own (run `cs -whoami` for your actor); read all\nnarrative.*.md on resume to restore your working narrative and see teammates'"'"'\nin-progress findings.\n\n<!-- cs:memory-note -->\nnote body\n' \
+        > "$dir/CLAUDE.local.md"
+    CS_ACTOR=alice "$CS_BIN" "oldwordy" < /dev/null > /dev/null 2>&1 || true
+
+    assert_file_not_contains "$dir/CLAUDE.local.md" "read all narrative" "old-vintage sentence rewritten" || return 1
+    assert_file_contains "$dir/CLAUDE.local.md" "grep on demand, never preload" "with the live-plus-archive instruction" || return 1
+    assert_file_contains "$dir/CLAUDE.local.md" "<!-- cs:memory-note -->" "the following block is untouched" || return 1
+    assert_file_contains "$dir/CLAUDE.local.md" "note body" "and its body survives" || return 1
+
+    local once
+    once=$(cat "$dir/CLAUDE.local.md")
+    CS_ACTOR=alice "$CS_BIN" "oldwordy" < /dev/null > /dev/null 2>&1 || true
+    assert_eq "$once" "$(cat "$dir/CLAUDE.local.md")" "second resume leaves the file byte-identical" || return 1
+}
+
+# A session repo cloned with autocrlf carries CRLF line endings in
+# CLAUDE.local.md too. The current-vintage awk match compares $0 (the whole
+# line, trailing \r included) against a literal LF-only string, so the exact
+# match never fires and the file churns identically on every resume instead of
+# ever getting rewritten.
+test_migrate_handles_a_crlf_protocol_block() {
+    local dir
+    dir=$(create_test_session "crlfwordy")
+    printf -- '<!-- cs:session-protocol -->\r\n# Session Documentation Protocol\r\n\r\nAppend only to your own; read all narrative.*.md on resume to restore your\r\nworking narrative and see teammates'"'"' in-progress findings.\r\n\r\n<!-- cs:memory-note -->\r\nnote\r\n' \
+        > "$dir/CLAUDE.local.md"
+    CS_ACTOR=alice "$CS_BIN" "crlfwordy" < /dev/null > /dev/null 2>&1 || true
+
+    assert_file_not_contains "$dir/CLAUDE.local.md" "read all narrative" "CRLF sentence rewritten" || return 1
+    assert_file_contains "$dir/CLAUDE.local.md" "grep on demand, never preload" "with the live-plus-archive instruction" || return 1
+
+    local once
+    once=$(cat "$dir/CLAUDE.local.md")
+    CS_ACTOR=alice "$CS_BIN" "crlfwordy" < /dev/null > /dev/null 2>&1 || true
+    assert_eq "$once" "$(cat "$dir/CLAUDE.local.md")" "second resume leaves the file byte-identical (no churn)" || return 1
+}
+
+run_test test_migrate_rewrites_the_older_protocol_wording
+run_test test_migrate_handles_a_crlf_protocol_block
+
 report_results

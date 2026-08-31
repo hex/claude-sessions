@@ -143,6 +143,11 @@ main() {
             run_checkpoint "$@"
             return 0
             ;;
+        -narrative)
+            shift
+            run_narrative "$@"
+            return 0
+            ;;
         -queue)
             shift
             run_queue "$@"
