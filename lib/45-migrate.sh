@@ -272,9 +272,15 @@ migrate_narrative_resume_wording() {
     local mem="$session_dir/.cs/memory" f tmp
     for f in "$mem"/narrative.*.md; do
         [ -f "$f" ] || continue
-        head -8 "$f" | grep -q 'Read all narrative\.\*\.md on resume\.' || continue
+        # Keyed to the description line specifically (not just "somewhere in the
+        # first 8 lines"): a cs-written narrative has exactly 7 header lines, so
+        # a body line beginning on line 8 sits inside a bare line-range window
+        # too and would otherwise be rewritten. No pipe into grep -q: under
+        # pipefail a huge first line can make `head -8 | grep -q` exit 141 and
+        # silently skip the file via `|| continue`.
+        awk 'NR <= 8 && /^description: .*Read all narrative\.\*\.md on resume\./ { f = 1 } NR > 8 { exit } END { exit !f }' "$f" || continue
         tmp="$f.tmp"
-        sed '1,8s/Read all narrative\.\*\.md on resume\./Read the live narrative.*.md on resume; older sections are archived under .cs\/narrative-archive\/./' "$f" > "$tmp" \
+        sed '1,8{/^description: /s/Read all narrative\.\*\.md on resume\./Read the live narrative.*.md on resume; older sections are archived under .cs\/narrative-archive\/./;}' "$f" > "$tmp" \
             && mv "$tmp" "$f"
     done
     f="$mem/MEMORY.md"

@@ -303,7 +303,11 @@ run_test test_migrate_does_not_strip_a_body_line_when_the_fence_is_unclosed
 test_migrate_rewrites_read_all_wording_cs_wrote() {
     local dir
     dir=$(create_test_session "wordy")
-    printf -- '---\nname: session-narrative-alice\ndescription: Session lab-notebook and work-in-progress narrative for alice. Looser bar than durable memory. Read all narrative.*.md on resume.\ntype: narrative\n---\n# Session narrative (alice)\n\n## 2026-01-01 — kept\nbody mentions Read all narrative.*.md on resume. verbatim\n' \
+    # Exactly 7 header lines (---, name, description, type, ---, title, blank),
+    # so this body line lands on line 8 — the same line the frontmatter gate and
+    # the 1,8 sed window reach. Pins the boundary: without the description-line
+    # anchor, this body line would get rewritten too.
+    printf -- '---\nname: session-narrative-alice\ndescription: Session lab-notebook and work-in-progress narrative for alice. Looser bar than durable memory. Read all narrative.*.md on resume.\ntype: narrative\n---\n# Session narrative (alice)\n\n## 2026-01-01 — kept: body mentions Read all narrative.*.md on resume. verbatim\n' \
         > "$dir/.cs/memory/narrative.alice.md"
     printf -- '- [Session narrative — alice (lab notebook)](narrative.alice.md): looser-bar work-in-progress; read all narrative.*.md on resume\n' \
         > "$dir/.cs/memory/MEMORY.md"
@@ -320,6 +324,8 @@ test_migrate_rewrites_read_all_wording_cs_wrote() {
     esac
     assert_file_contains "$dir/.cs/memory/narrative.alice.md" "body mentions Read all narrative\.\*\.md on resume\. verbatim" \
         "the narrative body is never rewritten" || return 1
+    assert_eq "## 2026-01-01 — kept: body mentions Read all narrative.*.md on resume. verbatim" "$(sed -n '8p' "$dir/.cs/memory/narrative.alice.md")" \
+        "line 8 (first body line) untouched" || return 1
     assert_file_not_contains "$dir/.cs/memory/MEMORY.md" "read all narrative" "index pointer rewritten" || return 1
     assert_file_contains "$dir/.cs/memory/MEMORY.md" "narrative-archive" "index pointer names the archive" || return 1
     assert_file_not_contains "$dir/CLAUDE.local.md" "read all narrative" "protocol sentence rewritten" || return 1
