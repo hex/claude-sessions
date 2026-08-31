@@ -1,6 +1,6 @@
 # Narrative rotation
 
-**Status:** design, awaiting review
+**Status:** implemented on feat/narrative-rotation (plan: docs/superpowers/plans/2026-08-31-narrative-rotation.md)
 **Date:** 2026-08-31
 **Origin:** mail `ff01ec` from session `sym` (2026-08-30); council run `.claude/council-cache/council-agents-1788149473.md`
 
