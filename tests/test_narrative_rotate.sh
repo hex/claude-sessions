@@ -163,6 +163,53 @@ test_rotate_reports_what_it_did() {
     assert_output_contains "$output" "narrative-archive/alice/" "names the archive path" || return 1
 }
 
+# ============================================================================
+# edge cases: a zero-length header, and a pipeline that must not close early
+# ============================================================================
+
+# No frontmatter, no H1: the first byte of the file is the first heading, so
+# head_end is 0. head -c 0 aborts on BSD, so the live rewrite must not run
+# head at all when there is nothing before the first kept section.
+test_rotate_handles_a_narrative_with_no_header_block() {
+    local n=10 body=500 i filler
+    filler=$(head -c "$body" /dev/zero | tr '\0' 'x')
+    {
+        i=1
+        while [ "$i" -le "$n" ]; do
+            if [ "$i" -eq 1 ]; then
+                printf '## 2026-08-%02d — section %d\n%s\n' $(( (i % 28) + 1 )) "$i" "$filler"
+            else
+                printf '\n## 2026-08-%02d — section %d\n%s\n' $(( (i % 28) + 1 )) "$i" "$filler"
+            fi
+            i=$((i + 1))
+        done
+    } > "$LIVE"
+    cp "$LIVE" "$TEST_TMPDIR/original.md"
+    "$CS_BIN" -narrative rotate > /dev/null 2>&1 || return 1
+    local first_line
+    first_line=$(head -1 "$LIVE")
+    case "$first_line" in "## "*) ;; *) echo "  FAIL: live file does not open on a heading: $first_line"; return 1 ;; esac
+    local chunk
+    chunk=$(find "$ARCHIVE_DIR" -name '*.md' | head -1)
+    [ -n "$chunk" ] || { echo "  FAIL: no archive chunk was written"; return 1; }
+    { sed '1,3d' "$chunk"; cat "$LIVE"; } > "$TEST_TMPDIR/rebuilt.md"
+    if ! cmp -s "$TEST_TMPDIR/original.md" "$TEST_TMPDIR/rebuilt.md"; then
+        echo "  FAIL: chunk body + live file does not rebuild the original byte for byte"
+        cmp "$TEST_TMPDIR/original.md" "$TEST_TMPDIR/rebuilt.md" || true
+        return 1
+    fi
+}
+
+# Past ~1700 headings, a `... | head -1 | cut ...` pipeline takes SIGPIPE when
+# head closes early; that must not leak the rotation snapshot under pipefail.
+test_rotate_handles_many_headings_without_a_broken_pipe() {
+    _make_narrative "$LIVE" 2000 20
+    "$CS_BIN" -narrative rotate > /dev/null 2>&1 || return 1
+    local leaked
+    leaked=$(find "$SESSION_DIR/.cs/memory" -name '.narrative.alice.rotate.*' | wc -l | tr -d ' ')
+    assert_eq "0" "$leaked" "no rotation snapshot is left behind" || return 1
+}
+
 echo ""
 echo "cs narrative rotation tests"
 echo "==========================="
@@ -178,5 +225,7 @@ run_test test_rotate_keeps_the_header_block
 run_test test_rotate_cuts_on_a_heading_boundary
 run_test test_rotate_writes_one_chunk_whose_body_is_verbatim
 run_test test_rotate_reports_what_it_did
+run_test test_rotate_handles_a_narrative_with_no_header_block
+run_test test_rotate_handles_many_headings_without_a_broken_pipe
 
 report_results

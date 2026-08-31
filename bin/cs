@@ -3277,7 +3277,9 @@ rotate_narrative() {
         warn "narrative.$actor.md is over budget but has fewer than two sections; nothing can be archived without touching the tail"
         return 0
     fi
-    head_end=$(printf '%s\n' "$headings" | head -1 | cut -d' ' -f1)
+    local first
+    first="${headings%%$'\n'*}"
+    head_end="${first%% *}"
     cut=$(_narrative_cut "$headings" "$size" "$keep")
     if [ "$cut" -le "$head_end" ]; then
         rm -f "$snap"
@@ -3319,7 +3321,7 @@ rotate_narrative() {
         error "narrative.$actor.md changed during rotation; run cs -narrative rotate again"
     fi
     local live_tmp="$meta_dir/memory/.narrative.$actor.md.tmp"
-    { head -c "$head_end" "$snap"; tail -c +$((cut + 1)) "$live"; } > "$live_tmp"
+    { [ "$head_end" -gt 0 ] && head -c "$head_end" "$snap"; tail -c +$((cut + 1)) "$live"; } > "$live_tmp"
     mv "$live_tmp" "$live"
     rm -f "$snap"
 
