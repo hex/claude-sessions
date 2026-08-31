@@ -99,6 +99,70 @@ test_help_shows_narrative() {
     assert_output_contains "$output" "-narrative rotate" "help must mention -narrative rotate" || return 1
 }
 
+# ============================================================================
+# over budget: the cut rule
+# ============================================================================
+
+test_rotate_archives_oldest_sections_and_keeps_tail() {
+    _make_narrative "$LIVE" 10 500
+    "$CS_BIN" -narrative rotate > /dev/null 2>&1 || return 1
+    assert_file_contains "$LIVE" "^## 2026-08-09 — section 8$" "section 8 opens the kept tail" || return 1
+    assert_file_contains "$LIVE" "section 10$" "the newest section stays" || return 1
+    assert_file_not_contains "$LIVE" "section 7$" "section 7 is archived" || return 1
+    assert_file_not_contains "$LIVE" "section 1$" "section 1 is archived" || return 1
+    local tail_bytes
+    tail_bytes=$(( $(_bytes "$LIVE") - $(head -7 "$LIVE" | wc -c | tr -d ' ') ))
+    assert_eq "1590" "$tail_bytes" "the tail is exactly sections 8, 9 and 10" || return 1
+}
+
+test_rotate_keeps_the_header_block() {
+    _make_narrative "$LIVE" 10 500
+    "$CS_BIN" -narrative rotate > /dev/null 2>&1 || return 1
+    local first six
+    first=$(head -1 "$LIVE")
+    assert_eq "---" "$first" "frontmatter still opens the file" || return 1
+    six=$(sed -n '6p' "$LIVE")
+    assert_eq "# Session narrative (alice)" "$six" "the H1 is still line 6" || return 1
+}
+
+test_rotate_cuts_on_a_heading_boundary() {
+    _make_narrative "$LIVE" 10 500
+    "$CS_BIN" -narrative rotate > /dev/null 2>&1 || return 1
+    # Line 7 is the blank line that precedes every section; line 8 is a heading.
+    local seven eight
+    seven=$(sed -n '7p' "$LIVE"); eight=$(sed -n '8p' "$LIVE")
+    assert_eq "" "$seven" "a blank line separates header and first kept section" || return 1
+    case "$eight" in "## "*) ;; *) echo "  FAIL: line 8 is not a heading: $eight"; return 1 ;; esac
+}
+
+test_rotate_writes_one_chunk_whose_body_is_verbatim() {
+    _make_narrative "$LIVE" 10 500
+    cp "$LIVE" "$TEST_TMPDIR/original.md"
+    "$CS_BIN" -narrative rotate > /dev/null 2>&1 || return 1
+    local count chunk
+    count=$(find "$ARCHIVE_DIR" -name '*.md' | wc -l | tr -d ' ')
+    assert_eq "1" "$count" "exactly one chunk" || return 1
+    chunk=$(find "$ARCHIVE_DIR" -name '*.md' | head -1)
+    # Chunk header is exactly two comment lines and a blank line.
+    assert_file_contains "$chunk" "^<!-- rotated from narrative\.alice\.md: 7 sections through 2026-08-08 -->$" "chunk names its origin, count and through-date" || return 1
+    # Verbatim: original == header block (lines 1-7) + archived body + kept
+    # tail (the rotated live file from line 8), byte for byte.
+    { head -7 "$TEST_TMPDIR/original.md"; sed '1,3d' "$chunk"; tail -n +8 "$LIVE"; } > "$TEST_TMPDIR/rebuilt.md"
+    if ! cmp -s "$TEST_TMPDIR/original.md" "$TEST_TMPDIR/rebuilt.md"; then
+        echo "  FAIL: header + chunk body + live tail does not rebuild the original byte for byte"
+        cmp "$TEST_TMPDIR/original.md" "$TEST_TMPDIR/rebuilt.md" || true
+        return 1
+    fi
+}
+
+test_rotate_reports_what_it_did() {
+    _make_narrative "$LIVE" 10 500
+    local output
+    output=$("$CS_BIN" -narrative rotate 2>&1) || return 1
+    assert_output_contains "$output" "rotated 7 sections" "reports the section count" || return 1
+    assert_output_contains "$output" "narrative-archive/alice/" "names the archive path" || return 1
+}
+
 echo ""
 echo "cs narrative rotation tests"
 echo "==========================="
@@ -109,5 +173,10 @@ run_test test_rotate_under_budget_is_a_noop
 run_test test_rotate_requires_a_session
 run_test test_rotate_rejects_unknown_subcommand
 run_test test_help_shows_narrative
+run_test test_rotate_archives_oldest_sections_and_keeps_tail
+run_test test_rotate_keeps_the_header_block
+run_test test_rotate_cuts_on_a_heading_boundary
+run_test test_rotate_writes_one_chunk_whose_body_is_verbatim
+run_test test_rotate_reports_what_it_did
 
 report_results
