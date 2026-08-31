@@ -184,4 +184,19 @@ run_test test_search_errors_on_uncompilable_pattern
 run_test test_search_error_does_not_mangle_a_backslash_pattern
 run_test test_search_output_does_not_mangle_a_matched_line
 
+test_search_finds_in_narrative_archive() {
+    create_test_session "project-beta"
+    mkdir -p "$CS_SESSIONS_ROOT/project-beta/.cs/narrative-archive/alice"
+    printf '<!-- rotated from narrative.alice.md: 3 sections through 2026-07-01 -->\n\n## 2026-06-30 — the vault incident\nrotated needle-vault\n' \
+        > "$CS_SESSIONS_ROOT/project-beta/.cs/narrative-archive/alice/2026-07-01-0123abcd.md"
+
+    local output
+    output=$("$CS_BIN" -search "needle-vault" 2>&1)
+
+    assert_output_contains "$output" "project-beta" "Should show session name" || return 1
+    assert_output_contains "$output" ".cs/narrative-archive/alice/2026-07-01-0123abcd.md" "Should show the archive path" || return 1
+}
+
+run_test test_search_finds_in_narrative_archive
+
 report_results

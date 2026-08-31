@@ -34,7 +34,7 @@ search_sessions() {
 
     local found=0
     local search_files=".cs/README.md"
-    local search_globs=".cs/memory/*.md"
+    local -a search_globs=(".cs/memory/*.md" ".cs/narrative-archive/*/*.md")
 
     for session_dir in "$SESSIONS_ROOT"/*/; do
         [ -d "$session_dir" ] || continue
@@ -63,19 +63,27 @@ search_sessions() {
             done <<< "$matches"
         done
 
-        # Search glob patterns (memory files)
-        for filepath in "$real_dir"/$search_globs; do
-            [ -f "$filepath" ] || continue
-            local relpath="${filepath#"$real_dir"/}"
-            local matches
-            matches=$(grep -in -- "$query" "$filepath" 2>/dev/null) || continue
-            while IFS= read -r line; do
-                # %s for the matched line: `echo -e` ate escapes in file content,
-                # so a line containing \c truncated the result there and dropped
-                # everything after it.
-                printf "${GOLD}%s${NC}: ${DIM}%s${NC}: %s\n" "$session_name" "$relpath" "$line"
-                found=$((found + 1))
-            done <<< "$matches"
+        # Search glob patterns (memory files and rotated narrative chunks).
+        # search_globs is an array, not a space-joined string split with an
+        # unquoted `for glob in $search_globs`: that split is also subject to
+        # pathname expansion, so a pattern like .cs/memory/*.md would expand
+        # against the caller's cwd (matching real files there) before it ever
+        # reached $real_dir, silently searching the wrong session.
+        local glob
+        for glob in "${search_globs[@]}"; do
+            for filepath in "$real_dir"/$glob; do
+                [ -f "$filepath" ] || continue
+                local relpath="${filepath#"$real_dir"/}"
+                local matches
+                matches=$(grep -in -- "$query" "$filepath" 2>/dev/null) || continue
+                while IFS= read -r line; do
+                    # %s for the matched line: `echo -e` ate escapes in file content,
+                    # so a line containing \c truncated the result there and dropped
+                    # everything after it.
+                    printf "${GOLD}%s${NC}: ${DIM}%s${NC}: %s\n" "$session_name" "$relpath" "$line"
+                    found=$((found + 1))
+                done <<< "$matches"
+            done
         done
     done
 
