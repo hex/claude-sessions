@@ -443,6 +443,58 @@ test_rotate_does_not_splice_onto_a_torn_timeline() {
     assert_output_contains "$events" "narrative_rotated" "and so does the record appended after it" || return 1
 }
 
+# ============================================================================
+# union merge across clones
+# ============================================================================
+
+# Origin with the narrative committed under merge=union, plus clones A and B
+# that each carry the session env when cs runs inside them.
+_make_clones() {
+    _make_narrative "$LIVE" 10 500
+    # The attributes a real session carries: without union on the timeline, two
+    # clones that each create .cs/timeline.jsonl would add/add-conflict.
+    printf '.cs/memory/narrative.*.md merge=union\n.cs/timeline.jsonl merge=union\n' > "$SESSION_DIR/.gitattributes"
+    (cd "$SESSION_DIR" && git init -q -b main && git config user.email alice@example.com && git config user.name alice \
+        && git add -A && git commit -q -m init)
+    CLONE_A="$TEST_TMPDIR/clone-a"; CLONE_B="$TEST_TMPDIR/clone-b"
+    git clone -q "$SESSION_DIR" "$CLONE_A" && git -C "$CLONE_A" config user.email alice@example.com && git -C "$CLONE_A" config user.name alice
+    git clone -q "$SESSION_DIR" "$CLONE_B" && git -C "$CLONE_B" config user.email alice@example.com && git -C "$CLONE_B" config user.name alice
+}
+
+_rotate_in() {  # clone dir, [keep bytes]
+    CLAUDE_SESSION_DIR="$1" CLAUDE_SESSION_META_DIR="$1/.cs" CS_NARRATIVE_KEEP_BYTES="${2:-$CS_NARRATIVE_KEEP_BYTES}" \
+        "$CS_BIN" -narrative rotate > /dev/null 2>&1
+}
+
+test_rotate_then_peer_append_merges_without_resurrection() {
+    _make_clones
+    _rotate_in "$CLONE_A" || return 1
+    printf '\n## 2026-09-02 — from b\nappended on the other machine\n' >> "$CLONE_B/.cs/memory/narrative.alice.md"
+    git -C "$CLONE_B" commit -qam "append on b"
+    git -C "$CLONE_A" fetch -q "$CLONE_B" main
+    git -C "$CLONE_A" merge -q --no-edit FETCH_HEAD > /dev/null 2>&1 || { echo "  FAIL: merge conflicted"; git -C "$CLONE_A" status --short; return 1; }
+    local merged="$CLONE_A/.cs/memory/narrative.alice.md"
+    assert_file_not_contains "$merged" "section 1$" "archived sections must not come back" || return 1
+    assert_file_not_contains "$merged" "section 7$" "none of them" || return 1
+    assert_file_contains "$merged" "section 8$" "the kept tail is intact" || return 1
+    assert_file_contains "$merged" "appended on the other machine" "and the peer's append survives" || return 1
+    assert_eq "4" "$(grep -c '^## ' "$merged")" "sections 8, 9, 10 and the appended one" || return 1
+}
+
+test_two_clones_rotating_at_different_cuts_merge_clean() {
+    _make_clones
+    _rotate_in "$CLONE_A" || return 1
+    # B rotates with a larger tail budget, so its cut is earlier.
+    _rotate_in "$CLONE_B" 3000 || return 1
+    git -C "$CLONE_A" fetch -q "$CLONE_B" main
+    git -C "$CLONE_A" merge -q --no-edit FETCH_HEAD > /dev/null 2>&1 || { echo "  FAIL: merge conflicted"; git -C "$CLONE_A" status --short; return 1; }
+    local merged="$CLONE_A/.cs/memory/narrative.alice.md"
+    assert_file_not_contains "$merged" "section 1$" "the earliest sections stay archived" || return 1
+    assert_file_contains "$merged" "section 10$" "the newest section survives" || return 1
+    # Both chunks exist; neither conflicts with the other (distinct names).
+    assert_eq "2" "$(find "$CLONE_A/.cs/narrative-archive/alice" -name '*.md' | wc -l | tr -d ' ')" "two distinct chunks after the merge" || return 1
+}
+
 echo ""
 echo "cs narrative rotation tests"
 echo "==========================="
@@ -478,5 +530,7 @@ run_test test_rotate_skips_the_commit_when_cs_is_ignored
 run_test test_rotate_outside_git_still_rotates
 run_test test_rotate_appends_a_timeline_event
 run_test test_rotate_does_not_splice_onto_a_torn_timeline
+run_test test_rotate_then_peer_append_merges_without_resurrection
+run_test test_two_clones_rotating_at_different_cuts_merge_clean
 
 report_results
