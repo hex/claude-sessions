@@ -270,6 +270,64 @@ test_rotate_names_a_fully_undated_run_undated() {
     case "$(basename "$chunk")" in undated-*.md) ;; *) echo "  FAIL: expected undated-<blob>.md, got $(basename "$chunk")"; return 1 ;; esac
 }
 
+# ============================================================================
+# content addressing
+# ============================================================================
+
+_expected_chunk_name() {  # original file (10x500 fixture)
+    local blob
+    blob=$(sed -n '8,28p' "$1" | git hash-object --stdin | cut -c1-8)
+    echo "2026-08-08-$blob.md"
+}
+
+test_rotate_chunk_name_is_content_addressed() {
+    _make_narrative "$LIVE" 10 500
+    local expected
+    expected=$(_expected_chunk_name "$LIVE")
+    "$CS_BIN" -narrative rotate > /dev/null 2>&1 || return 1
+    assert_file_exists "$ARCHIVE_DIR/$expected" "chunk is named <through-date>-<blob8>.md from its own bytes" || return 1
+}
+
+test_rotate_rerun_is_a_noop() {
+    _make_narrative "$LIVE" 10 500
+    "$CS_BIN" -narrative rotate > /dev/null 2>&1 || return 1
+    local after output
+    after=$(_bytes "$LIVE")
+    output=$("$CS_BIN" -narrative rotate 2>&1) || return 1
+    assert_output_contains "$output" "nothing to rotate" "second run finds the file under budget" || return 1
+    assert_eq "$after" "$(_bytes "$LIVE")" "second run changes nothing" || return 1
+    assert_eq "1" "$(find "$ARCHIVE_DIR" -name '*.md' | wc -l | tr -d ' ')" "still one chunk" || return 1
+}
+
+test_rotate_accepts_an_identical_existing_chunk() {
+    # Two machines archiving the same prefix produce the same file. Simulate the
+    # second machine by restoring the original narrative after a first rotation.
+    _make_narrative "$LIVE" 10 500
+    cp "$LIVE" "$TEST_TMPDIR/original.md"
+    "$CS_BIN" -narrative rotate > /dev/null 2>&1 || return 1
+    cp "$TEST_TMPDIR/original.md" "$LIVE"
+    "$CS_BIN" -narrative rotate > /dev/null 2>&1 || return 1
+    assert_eq "1" "$(find "$ARCHIVE_DIR" -name '*.md' | wc -l | tr -d ' ')" "the identical chunk is reused, not duplicated" || return 1
+    assert_file_contains "$LIVE" "section 8$" "and the live file was rotated again" || return 1
+}
+
+test_rotate_refuses_a_differing_chunk_with_the_same_name() {
+    _make_narrative "$LIVE" 10 500
+    local expected
+    expected=$(_expected_chunk_name "$LIVE")
+    mkdir -p "$ARCHIVE_DIR"
+    printf 'not the same bytes\n' > "$ARCHIVE_DIR/$expected"
+    local before output
+    before=$(_bytes "$LIVE")
+    if output=$("$CS_BIN" -narrative rotate 2>&1); then
+        echo "  FAIL: must refuse to overwrite a differing chunk"
+        return 1
+    fi
+    assert_output_contains "$output" "different content" "says why it refused" || return 1
+    assert_eq "$before" "$(_bytes "$LIVE")" "live file untouched after the refusal" || return 1
+    assert_eq "not the same bytes" "$(head -1 "$ARCHIVE_DIR/$expected")" "existing chunk untouched" || return 1
+}
+
 echo ""
 echo "cs narrative rotation tests"
 echo "==========================="
@@ -292,5 +350,9 @@ run_test test_rotate_with_a_single_section_is_a_warned_noop
 run_test test_rotate_never_leaves_the_removed_hunk_at_eof
 run_test test_rotate_treats_undated_headings_by_position
 run_test test_rotate_names_a_fully_undated_run_undated
+run_test test_rotate_chunk_name_is_content_addressed
+run_test test_rotate_rerun_is_a_noop
+run_test test_rotate_accepts_an_identical_existing_chunk
+run_test test_rotate_refuses_a_differing_chunk_with_the_same_name
 
 report_results

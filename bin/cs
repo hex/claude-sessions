@@ -3311,7 +3311,18 @@ rotate_narrative() {
         cat "$body"
     } > "$chunk_tmp"
     rm -f "$body"
-    mv "$chunk_tmp" "$chunk"
+    local created=0
+    if [ -f "$chunk" ]; then
+        if cmp -s "$chunk" "$chunk_tmp"; then
+            rm -f "$chunk_tmp"
+        else
+            rm -f "$chunk_tmp" "$snap"
+            error "archive chunk $chunk exists with different content; refusing to overwrite"
+        fi
+    else
+        mv "$chunk_tmp" "$chunk"
+        created=1
+    fi
 
     # The live file must still open with the same bytes the snapshot did up to the
     # cut; a peer merge or an edit inside the archived run means the cut no longer
