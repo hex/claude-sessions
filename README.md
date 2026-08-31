@@ -161,7 +161,7 @@ cs -detect-theme            # Show the detected terminal light/dark theme
 cs -list, -ls               # List all sessions
 cs -live                    # List sessions running right now on this machine, with what each is doing
 cs -status "<text>"         # Set this session's status (also: cs -status, cs -status --clear)
-cs -remove, -rm <name>...   # Remove sessions (each asks its own confirm; --force if live)
+cs -remove, -rm <name>...   # Remove sessions (each asks its own confirm; --force skips the confirm and the live lock)
 cs -update [--check|--force]   # Update to latest (--check: check only; --force: reinstall)
 cs -uninstall               # Uninstall cs
 cs -help, -h                # Show help message

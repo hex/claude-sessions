@@ -4,6 +4,31 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.8.23
+
+A rotation release: session lab notebooks stop growing forever, and an adopted project can always find its way back.
+
+### Features
+
+**Narrative rotation** — per-actor narratives no longer grow without bound. When `.cs/memory/narrative.<actor>.md` passes `CS_NARRATIVE_MAX_BYTES` (128 KiB), `cs -narrative rotate` moves the oldest `## ` sections verbatim into an immutable, content-addressed chunk under `.cs/narrative-archive/<actor>/`, keeping a `CS_NARRATIVE_KEEP_BYTES` (64 KiB) live tail byte-identical — the one rewrite shape that merges cleanly under `merge=union` against a peer's concurrent append (measured, and pinned by two-clone regression tests).
+
+- `/wrap` runs the rotation as its third pass; the Stop hook flags an over-budget narrative; `cs -doctor` warns.
+- `cs -search` covers archived chunks.
+- The resume protocol now reads the **live** narratives only; a migration rewrites the old "read all narrative.*.md" wording cs previously wrote (both protocol-block vintages, CRLF-tolerant) — measured against all 31 real sessions on this machine: fires on exactly the 17 that carry the old wording, rewrites all 17, touches nothing else.
+- The narrative contract is now append-only: corrections are new dated notes, never edits — that is what keeps rotation merge-safe.
+
+### Fixes
+
+- **Adopt no longer strands a project**: `cs -adopt` on a directory whose session link was removed (TUI `d` / `cs -rm`) now offers to re-adopt the existing `.cs/` records under the new name, preserving narrative and timeline byte-for-byte; if the directory is still linked, the error names the existing session. Previously the only way out was deleting `.cs/` by hand.
+- **`cs -rm` fails loudly without a terminal** instead of exiting silently, and `--force` now actually skips the confirmation prompts (the nested branch-deletion question defaults to keeping the branch).
+- Rotation-adjacent hardening, each found by review and measured on the BSD/bash-3.2 floor: `head -c 0` aborting after the chunk was committed; an early-closing `head -1` pipeline dying at exit 141 past ~1700 sections; BSD `cmp -n` misreporting unequal-length files; `wc -c` under `pipefail` killing the Stop hook and `cs -doctor` on an unreadable narrative; unreadable input and unwritable archive dirs now refused cleanly.
+
+### Docs
+
+- README, `docs/hooks.md`, `docs/session-layout.md`, `docs/configuration.md` updated for rotation, the append-only contract, the archive layout, and the new budgets; design spec and implementation plan shipped under `docs/superpowers/`.
+
+**Full Changelog**: https://github.com/hex/claude-sessions/compare/v2026.8.22...v2026.8.23
+
 ## 2026.8.22
 
 A statusline release. On Fable, the bar was quietly showing you the wrong limit — this adds the right one.
