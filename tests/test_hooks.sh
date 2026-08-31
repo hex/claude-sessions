@@ -109,6 +109,18 @@ test_narrative_reminder_is_silent_about_budget_when_under() {
     assert_output_not_contains "$output" "over the" "no budget line under budget" || return 1
 }
 
+test_narrative_reminder_survives_an_unreadable_narrative() {
+    local nf="$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    echo "# Session narrative (alice)" > "$nf"
+    _backdate "$nf"
+    chmod 000 "$nf"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    local output
+    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
+    chmod 644 "$nf"
+    assert_output_contains "$output" "decision" "the hook still answers with JSON when a narrative cannot be read" || return 1
+}
+
 test_narrative_reminder_budget_line_covers_a_teammates_file() {
     # The line names whichever file is over; the "if it is yours" clause leaves
     # the decision to the reader, since the hook does not resolve the actor.
@@ -1395,6 +1407,7 @@ run_test test_narrative_reminder_tracks_per_actor
 run_test test_narrative_reminder_asks_for_appended_corrections_not_rewrites
 run_test test_narrative_reminder_flags_a_narrative_over_budget
 run_test test_narrative_reminder_is_silent_about_budget_when_under
+run_test test_narrative_reminder_survives_an_unreadable_narrative
 run_test test_narrative_reminder_budget_line_covers_a_teammates_file
 run_test test_narrative_reminder_respects_cooldown
 run_test test_stop_raises_attention_marker

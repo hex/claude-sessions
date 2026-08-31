@@ -644,7 +644,7 @@ for _nf in "$META_DIR"/memory/narrative*.md; do
         NARRATIVE_MTIME="$_m"
         NARRATIVE_FILE="$_nf"
     fi
-    _sz=$(wc -c < "$_nf" 2>/dev/null | tr -d ' ')
+    _sz=$(wc -c < "$_nf" 2>/dev/null | tr -d ' ' || echo 0)
     case "$_sz" in ''|*[!0-9]*) _sz=0 ;; esac
     if [ "$_sz" -gt "$NARRATIVE_MAX" ]; then
         NARRATIVE_OVER="${NARRATIVE_OVER} $(basename "$_nf") is $((_sz / 1024)) KB, over the $((NARRATIVE_MAX / 1024)) KB budget — if it is yours, run \`cs -narrative rotate\` before appending."
