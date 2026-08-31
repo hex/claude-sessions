@@ -395,7 +395,7 @@ In `lib/51-narrative.sh`, add above `rotate_narrative`:
 # LC_ALL=C makes awk's length() count bytes, so offsets survive multibyte text
 # (real headings carry an em dash).
 _narrative_headings() {  # file
-    LC_ALL=C awk '{ if (substr($0, 1, 3) == "## ") print off, $0; off += length($0) + 1 }' "$1"
+    LC_ALL=C awk 'BEGIN { off = 0 } { if (substr($0, 1, 3) == "## ") print off, $0; off += length($0) + 1 }' "$1"
 }
 
 # Byte offset of the first heading to KEEP: the earliest one with at most KEEP
@@ -996,8 +996,9 @@ _make_clones() {
     git clone -q "$SESSION_DIR" "$CLONE_B" && git -C "$CLONE_B" config user.email alice@example.com && git -C "$CLONE_B" config user.name alice
 }
 
-_rotate_in() {  # clone dir
-    CLAUDE_SESSION_DIR="$1" CLAUDE_SESSION_META_DIR="$1/.cs" "$CS_BIN" -narrative rotate > /dev/null 2>&1
+_rotate_in() {  # clone dir, [keep bytes]
+    CLAUDE_SESSION_DIR="$1" CLAUDE_SESSION_META_DIR="$1/.cs" CS_NARRATIVE_KEEP_BYTES="${2:-$CS_NARRATIVE_KEEP_BYTES}" \
+        "$CS_BIN" -narrative rotate > /dev/null 2>&1
 }
 
 test_rotate_then_peer_append_merges_without_resurrection() {
@@ -1019,7 +1020,7 @@ test_two_clones_rotating_at_different_cuts_merge_clean() {
     _make_clones
     _rotate_in "$CLONE_A" || return 1
     # B rotates with a larger tail budget, so its cut is earlier.
-    CS_NARRATIVE_KEEP_BYTES=3000 _rotate_in "$CLONE_B" || return 1
+    _rotate_in "$CLONE_B" 3000 || return 1
     git -C "$CLONE_A" fetch -q "$CLONE_B" main
     git -C "$CLONE_A" merge -q --no-edit FETCH_HEAD > /dev/null 2>&1 || { echo "  FAIL: merge conflicted"; git -C "$CLONE_A" status --short; return 1; }
     local merged="$CLONE_A/.cs/memory/narrative.alice.md"
@@ -1130,6 +1131,8 @@ Replace the per-actor loop (from `# Per-actor narratives: track the most recentl
 # note any that has outgrown its byte budget. The same stat pass serves both.
 NARRATIVE_FILE=""
 NARRATIVE_MTIME=0
+# KEEP IN SYNC with CS_NARRATIVE_MAX_DEFAULT in lib/51-narrative.sh — hooks
+# cannot source lib/, so the default is duplicated here.
 NARRATIVE_MAX=$(_num_or "${CS_NARRATIVE_MAX_BYTES:-}" 131072)
 NARRATIVE_OVER=""
 for _nf in "$META_DIR"/memory/narrative*.md; do

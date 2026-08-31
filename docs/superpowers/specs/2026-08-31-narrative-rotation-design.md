@@ -140,3 +140,7 @@ TDD, one slice at a time, every suite runnable under `/bin/bash` 3.2 with BSD us
 ## Estimates
 
 Helper + its suite: ~3 h. Hook, doctor, search, wrap: ~1.5 h. Wording sweep, migration phase, docs: ~2 h. Adversarial review pass: ~1 h. Roughly one working day.
+
+## Known limitation
+
+The section scan is the same naive `^## ` line match the TUI's heading list uses: a `## ` line inside a fenced code block counts as a boundary, so in the worst case the rotated live file opens mid-fence. Byte-exactness and merge safety are unaffected (the bytes still rebuild). Inherited, not introduced; the real-data probe in the plan's final task is where it would show.
