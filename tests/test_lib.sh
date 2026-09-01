@@ -350,7 +350,7 @@ _pty_run() {  # command, args...
         # own timeout. The newline answers the way the rest of the suite does,
         # by taking the default, and `timeout` bounds anything that asks twice
         # so the next such prompt fails in seconds and names itself.
-        ( unset TMUX; printf '\n' | timeout 60 script -q -c "$*" /dev/null )
+        ( unset TMUX; printf '%s' "${PTY_INPUT:-$'\n'}" | timeout 60 script -q -c "$*" /dev/null )
     else
         # script(1) tcgetattr's its OWN stdin and dies on a socket, which is
         # what a CI runner or an agent harness often hands it; /dev/null still
@@ -362,12 +362,18 @@ _pty_run() {  # command, args...
         # EOF. A cs launch offering to continue a previous conversation sat on
         # that prompt for 92 minutes before anyone noticed the suite was not
         # slow but stuck. Bounded, the prompt fails in seconds and names itself.
-        # stdin is inherited when the caller piped something in, so a test can
-        # answer a prompt; /dev/null only when it did not, since script(1)
-        # tcgetattr's its own stdin and dies on the socket a CI runner or agent
-        # harness hands it.
-        if [ -p /dev/stdin ] || [ -f /dev/stdin ]; then
-            ( unset TMUX; timeout 60 script -q /dev/null "$@" )
+        # A test that needs to answer a prompt sets PTY_INPUT; everything else
+        # gets /dev/null. Deliberately an explicit opt-in rather than sniffing
+        # /dev/stdin: what the caller's stdin IS varies by environment (a
+        # terminal here, a file on the macOS runner, a socket under an agent
+        # harness), so the sniff answered differently on CI than locally and
+        # took all eight pty tests down with it. The answer is fed through a
+        # real file, which script(1) can tcgetattr safely.
+        if [ -n "${PTY_INPUT:-}" ]; then
+            local _pty_in="$TEST_TMPDIR/.pty-input.$$"
+            printf '%s' "$PTY_INPUT" > "$_pty_in"
+            ( unset TMUX; timeout 60 script -q /dev/null "$@" < "$_pty_in" )
+            rm -f "$_pty_in"
         else
             ( unset TMUX; timeout 60 script -q /dev/null "$@" < /dev/null )
         fi

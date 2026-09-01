@@ -277,23 +277,31 @@ test_resume_prompt_shows_the_previous_conversations_context() {
     # Piped stdout has no colour at all (setup_palette blanks every code when
     # stdout is not a TTY), so the escape belongs in the pty test below; here
     # only the text is assertable.
-    assert_output_contains "$output" "Last conversation here used 64% of its context" "the card must say how full the last conversation here was" || return 1
+    assert_output_contains "$output" "64% context used" "the card must carry a context row" || return 1
     assert_output_contains "$output" "Continue previous conversation?" "prompt still present" || return 1
 }
 
-# The percentage is the number the reader scans for, so it carries bold inside
-# the dim line rather than reading as flat as the prose around it. Only checkable
-# under a pty: setup_palette blanks every colour when stdout is not a TTY.
-test_resume_prompt_bolds_the_percentage_on_a_terminal() {
-    _rot_session "rot-bold"
-    printf '64\n' > "$CS_SESSIONS_ROOT/rot-bold/.cs/local/context-pct"
-    local output esc
+# The readout is a row in the launch card, carrying the gradient bar and sitting
+# with the other session facts — not a loose line above the prompt with nothing
+# separating it from the question. Only checkable under a pty: the card renders
+# the same either way, but this pins the row's place in the stack.
+test_context_row_sits_in_the_card_above_the_prompt() {
+    _rot_session "rot-card"
+    printf '64\n' > "$CS_SESSIONS_ROOT/rot-card/.cs/local/context-pct"
+    local output plain ctx_line prompt_line
     # Answer the resume prompt: this session already has a conversation, so the
-    # launch stops to ask, and the BSD pty arm's /dev/null stdin answers nothing.
-    output=$(printf 'n' | _pty_run "$CS_BIN" rot-bold 2>&1 || true)
-    esc=$(printf '\033')
-    printf '%s' "$output" | grep -q "${esc}\[1m64%" \
-        || { echo "  FAIL: the percentage must be bold under a pty"; return 1; }
+    # launch stops to ask, and _pty_run's default /dev/null answers nothing.
+    output=$(PTY_INPUT=n _pty_run "$CS_BIN" rot-card 2>&1 || true)
+    plain=$(printf '%s' "$output" | tr -d '\r' | sed 's/\x1b\[[0-9;]*m//g')
+    ctx_line=$(printf '%s\n' "$plain" | grep -n "64% context used" | head -1 | cut -d: -f1)
+    prompt_line=$(printf '%s\n' "$plain" | grep -n "Continue previous conversation" | head -1 | cut -d: -f1)
+    [ -n "$ctx_line" ] || { echo "  FAIL: no context row in the card"; return 1; }
+    [ -n "$prompt_line" ] || { echo "  FAIL: no resume prompt"; return 1; }
+    [ "$ctx_line" -lt "$prompt_line" ] \
+        || { echo "  FAIL: the context row must sit above the prompt (row $ctx_line, prompt $prompt_line)"; return 1; }
+    # The card's bar prefixes the row, which is what separates it from the prompt.
+    printf '%s\n' "$plain" | grep -q "▌.*64% context used" \
+        || { echo "  FAIL: the context row must carry the card's bar"; return 1; }
 }
 
 # Best-effort: the stamp only exists where cs-statusline is installed, so its
@@ -303,7 +311,7 @@ test_resume_prompt_omits_context_when_never_stamped() {
     rm -f "$CS_SESSIONS_ROOT/rot-noctx/.cs/local/context-pct"
     local output
     output=$("$CS_BIN" rot-noctx <<< "n" 2>&1) || true
-    assert_output_not_contains "$output" "of its context" "no readout without a stamp" || return 1
+    assert_output_not_contains "$output" "context used" "no readout without a stamp" || return 1
     assert_output_contains "$output" "Continue previous conversation?" "prompt still present" || return 1
 }
 
@@ -312,7 +320,7 @@ test_resume_prompt_ignores_a_junk_context_stamp() {
     printf 'not-a-number\n' > "$CS_SESSIONS_ROOT/rot-junk/.cs/local/context-pct"
     local output
     output=$("$CS_BIN" rot-junk <<< "n" 2>&1) || true
-    assert_output_not_contains "$output" "of its context" "a junk stamp reads as no stamp" || return 1
+    assert_output_not_contains "$output" "context used" "a junk stamp reads as no stamp" || return 1
 }
 
 test_resume_prompt_ignores_an_out_of_range_context_stamp() {
@@ -320,7 +328,7 @@ test_resume_prompt_ignores_an_out_of_range_context_stamp() {
     printf '150\n' > "$CS_SESSIONS_ROOT/rot-over/.cs/local/context-pct"
     local output
     output=$("$CS_BIN" rot-over <<< "n" 2>&1) || true
-    assert_output_not_contains "$output" "of its context" "a percentage over 100 is not a percentage" || return 1
+    assert_output_not_contains "$output" "context used" "a percentage over 100 is not a percentage" || return 1
 }
 
 # A zero-padded stamp must not be read as octal, and 08/09 would be a hard
@@ -330,7 +338,7 @@ test_resume_prompt_reads_a_zero_padded_context_stamp() {
     printf '08\n' > "$CS_SESSIONS_ROOT/rot-pad/.cs/local/context-pct"
     local output
     output=$("$CS_BIN" rot-pad <<< "n" 2>&1) || true
-    assert_output_contains "$output" "8% of its context" "08 is eight percent, not an octal error" || return 1
+    assert_output_contains "$output" "8% context used" "08 is eight percent, not an octal error" || return 1
 }
 
 # ESC at the continue prompt cancels the launch: the stub must not run.
@@ -610,7 +618,7 @@ test_marker_without_pending_handoff_is_disarmed() {
 
 run_test test_prompt_unchanged_without_handoff
 run_test test_resume_prompt_shows_the_previous_conversations_context
-run_test test_resume_prompt_bolds_the_percentage_on_a_terminal
+run_test test_context_row_sits_in_the_card_above_the_prompt
 run_test test_resume_prompt_omits_context_when_never_stamped
 run_test test_resume_prompt_ignores_a_junk_context_stamp
 run_test test_resume_prompt_ignores_an_out_of_range_context_stamp

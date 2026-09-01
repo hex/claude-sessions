@@ -50,9 +50,11 @@ setup_palette
 if [[ "${CS_NERD_FONTS:-}" == "1" ]]; then
     ICON_LOCK='󰌾'      # mdi-lock
     ICON_HOST='󰟀'      # mdi-monitor
+    ICON_CTX='󰍛'       # mdi-memory
 else
     ICON_LOCK='⚿'      # Unicode lock with key
     ICON_HOST='⌘'      # Unicode command/place of interest
+    ICON_CTX='◱'       # Unicode box with quadrant — a partly-filled window
 fi
 ICON_LOGO='✳'          # U+2733 eight-spoked asterisk (Claude mark); font-independent
 

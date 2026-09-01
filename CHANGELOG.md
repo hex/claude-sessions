@@ -4,6 +4,22 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.9.2
+
+A patch release: one visual tweak, and a test-harness leak that reached the developer's own terminal.
+
+### Fixes
+
+**The test suite no longer renames your tmux windows.** Tests that run cs under a pty — to exercise the paths gated on `[ -t 1 ]` — made that check true, so cs's terminal side effects fired for real. With `TMUX` exported, `set_tab_title` renamed the developer's *live* window to a test fixture's session name and ran `allow-rename off` to lock it there. cs undoes that in an EXIT trap it never reaches, because it `exec`s into claude, so the fixture name stuck until it was cleared by hand. Fixed in `_pty_run` rather than per-test: the leak is a property of running cs under a pty, not of any one test, so no future pty test can reach the real terminal either.
+
+**Two more gaps in the same helper.** Its BSD arm had no `timeout`, unlike the util-linux arm whose own comment explains exactly why one is needed — so a command that stops to ask something waited forever on a pty that never reaches EOF. It is bounded now, and a test that needs to *answer* a prompt sets `PTY_INPUT`. A guard on one platform arm was not a guard on the helper, and the input is an explicit opt-in rather than a sniff of what the caller's stdin happens to be — that varies by environment (a terminal locally, a file on a CI runner, a socket under an agent harness), which is how the first attempt at this passed here and took all eight pty tests down on macOS CI.
+
+### Changes
+
+- The resume card carries a context row — `◱ 44% context used` — beside the session's other facts, instead of a loose line above the prompt with nothing separating it from the question. It inherits the card's gradient bar, and appears only on a resume, where there is a conversation for the figure to describe.
+
+**Full Changelog**: https://github.com/hex/claude-sessions/compare/v2026.9.1...v2026.9.2
+
 ## 2026.9.1
 
 A picker release: the session menu becomes a real menu, narratives rotate from it, and the resume prompt stops asking blind.

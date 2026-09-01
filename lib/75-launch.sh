@@ -309,6 +309,17 @@ launch_claude_code() {
         [ "$secret_count" -gt 1 ] && secret_word="secrets"
         echo -e "${bars[$bar_idx]}${NC} ${COMMENT}${ICON_LOCK}${NC} ${YELLOW}$secret_count${NC} ${COMMENT}$secret_word${NC}"; ((++bar_idx))
     fi
+    # Context usage is a fact about the session, so it belongs in the card with
+    # the others rather than loose above the prompt, where nothing separated it
+    # from the question. Only on a resume: on a new session there is no
+    # conversation for the figure to describe.
+    if [ "$status_text" = "resuming" ]; then
+        local _card_ctx=""
+        _card_ctx=$(_resume_context_pct "$session_dir")
+        if [ -n "$_card_ctx" ]; then
+            echo -e "${bars[$bar_idx]}${NC} ${COMMENT}${ICON_CTX}${NC} ${YELLOW}${_card_ctx}%${NC} ${COMMENT}context used${NC}"; ((++bar_idx))
+        fi
+    fi
 
     if [ -n "$UPDATE_AVAILABLE" ]; then
         echo -e "${YELLOW}▌${NC} ${YELLOW}Update available:${NC} $VERSION ${COMMENT}→${NC} ${GREEN}$UPDATE_AVAILABLE${NC} ${COMMENT}(cs -update)${NC}"
@@ -402,14 +413,6 @@ launch_claude_code() {
         if [ -n "$spawn_kick" ]; then
             response=""
         else
-            # What the answer costs: continuing a conversation already deep into
-            # its window is the case the r answer exists for, and the card was
-            # asking without saying which case this is.
-            local _ctx=""
-            _ctx=$(_resume_context_pct "$session_dir")
-            if [ -n "$_ctx" ]; then
-                printf "${DIM}Last conversation here used ${BOLD}%s%%${NC}${DIM} of its context.${NC}\n" "$_ctx"
-            fi
             if [ -n "$pending_handoff" ]; then
                 # Answering blind is the hazard this label exists for: r arms
                 # the marker with this basename, and the next SessionStart flips
