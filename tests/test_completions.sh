@@ -594,6 +594,7 @@ test_bash_completion_offers_rotate_after_narrative() {
 }
 
 test_zsh_completion_offers_rotate_after_narrative() {
+    command -v zsh >/dev/null 2>&1 || { echo "    (zsh not installed, skipping)"; return 0; }
     put_built_cs_on_path
     local out
     out=$(zsh_candidates_words cs some-session -narrative "")
@@ -608,6 +609,7 @@ test_bash_completion_offers_rotate_after_the_global_narrative() {
 }
 
 test_zsh_completion_offers_rotate_after_the_global_narrative() {
+    command -v zsh >/dev/null 2>&1 || { echo "    (zsh not installed, skipping)"; return 0; }
     put_built_cs_on_path
     local out
     out=$(zsh_candidates_words cs -narrative "")
