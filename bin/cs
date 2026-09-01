@@ -3292,8 +3292,8 @@ run_checkpoint() {
 # Plain files so the standalone Stop hook can read them without bin/cs's
 # helpers.
 
-CS_NARRATIVE_MAX_DEFAULT=131072
-CS_NARRATIVE_KEEP_DEFAULT=65536
+CS_NARRATIVE_MAX_DEFAULT=524288
+CS_NARRATIVE_KEEP_DEFAULT=262144
 
 # A positive integer override, else the default. Empty, non-numeric and zero all
 # fall back: a zero budget would rotate on every run.

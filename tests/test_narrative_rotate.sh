@@ -680,6 +680,36 @@ test_named_rotate_refuses_a_directory_that_is_not_a_session() {
     assert_output_contains "$output" "No such session" "a directory with no .cs is not a session" || return 1
 }
 
+# The budget is what a resume carries, and it is duplicated: bin/cs is the built
+# artifact, lib/51-narrative.sh the source. A change to one alone drifts silently
+# — the tests source the lib while the user runs the binary, so the suite would
+# stay green while the shipped default was something else.
+test_narrative_budget_is_one_value_in_both_copies() {
+    local lib="$SCRIPT_DIR/../lib/51-narrative.sh" bin="$SCRIPT_DIR/../bin/cs"
+    local lib_max lib_keep bin_max bin_keep
+    lib_max=$(grep -o 'CS_NARRATIVE_MAX_DEFAULT=[0-9]*' "$lib" | head -1 | cut -d= -f2)
+    lib_keep=$(grep -o 'CS_NARRATIVE_KEEP_DEFAULT=[0-9]*' "$lib" | head -1 | cut -d= -f2)
+    bin_max=$(grep -o 'CS_NARRATIVE_MAX_DEFAULT=[0-9]*' "$bin" | head -1 | cut -d= -f2)
+    bin_keep=$(grep -o 'CS_NARRATIVE_KEEP_DEFAULT=[0-9]*' "$bin" | head -1 | cut -d= -f2)
+    [ -n "$lib_max" ] && [ -n "$bin_max" ] || { echo "  FAIL: budget constant missing from lib or bin"; return 1; }
+    assert_eq "$lib_max" "$bin_max" "the max budget must match between lib and bin" || return 1
+    assert_eq "$lib_keep" "$bin_keep" "the keep budget must match between lib and bin" || return 1
+    # A day of active work is ~65 sections at ~2 KB each, which filled the old
+    # 128 KiB budget outright — a resume then carried only that day. The budget
+    # holds about a week instead; the tail is what a resume reads, and 256 KiB
+    # of prose is a few percent of a 1M context, which is the right trade.
+    assert_eq "524288" "$lib_max" "the budget holds about a week of sections" || return 1
+    assert_eq "262144" "$lib_keep" "and the kept tail is half of it" || return 1
+    # A THIRD copy: the Stop hook measures every narrative against its own
+    # inline default to decide whether to nag. Left behind, it would keep
+    # flagging files that are comfortably under the real budget — a warning the
+    # user cannot act on, since cs -narrative rotate would call them a no-op.
+    local hook_max
+    hook_max=$(grep -o 'CS_NARRATIVE_MAX_BYTES:-}" [0-9]*' "$SCRIPT_DIR/../hooks/narrative-reminder.sh" \
+        | head -1 | grep -o '[0-9]*$')
+    assert_eq "$lib_max" "$hook_max" "the Stop hook must nag at the same threshold it rotates at" || return 1
+}
+
 test_named_rotate_refuses_a_dangling_adopted_link() {
     # An adopted session is a symlink into the user's project. When that project
     # moves, the link dangles — a bare -L guard admits it and the failure then
@@ -766,6 +796,7 @@ run_test test_named_rotate_under_budget_is_a_noop
 run_test test_named_rotate_refuses_an_unknown_session
 run_test test_named_rotate_usage_names_the_form_the_user_typed
 run_test test_named_rotate_refuses_a_directory_that_is_not_a_session
+run_test test_narrative_budget_is_one_value_in_both_copies
 run_test test_named_rotate_refuses_a_dangling_adopted_link
 run_test test_named_rotate_rejects_an_unknown_subcommand
 run_test test_unknown_session_command_error_lists_narrative

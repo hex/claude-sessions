@@ -154,8 +154,8 @@ export CS_CTX_WARN_CTX="60"
 export CS_ROTATE_NUDGE_CTX="80"
 
 # Narrative rotation: rotate when the live file passes MAX, keep about KEEP bytes
-export CS_NARRATIVE_MAX_BYTES="131072"
-export CS_NARRATIVE_KEEP_BYTES="65536"
+export CS_NARRATIVE_MAX_BYTES="524288"
+export CS_NARRATIVE_KEEP_BYTES="262144"
 
 # Queue circuit breakers: per-task tool failures, context %, 5h rate-limit %
 export CS_QUEUE_MAX_FAILURES="5"
