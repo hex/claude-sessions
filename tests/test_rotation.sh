@@ -283,24 +283,21 @@ test_resume_prompt_shows_the_previous_conversations_context() {
 
 # The readout is a row in the launch card, carrying the gradient bar and sitting
 # with the other session facts — not a loose line above the prompt with nothing
-# separating it from the question. Only checkable under a pty: the card renders
-# the same either way, but this pins the row's place in the stack.
+# separating it from the question. No pty needed: the card renders the same on a
+# pipe, and a pty here would stop on the resume prompt with nothing to answer it.
 test_context_row_sits_in_the_card_above_the_prompt() {
     _rot_session "rot-card"
     printf '64\n' > "$CS_SESSIONS_ROOT/rot-card/.cs/local/context-pct"
-    local output plain ctx_line prompt_line
-    # Answer the resume prompt: this session already has a conversation, so the
-    # launch stops to ask, and _pty_run's default /dev/null answers nothing.
-    output=$(PTY_INPUT=n _pty_run "$CS_BIN" rot-card 2>&1 || true)
-    plain=$(printf '%s' "$output" | tr -d '\r' | sed 's/\x1b\[[0-9;]*m//g')
-    ctx_line=$(printf '%s\n' "$plain" | grep -n "64% context used" | head -1 | cut -d: -f1)
-    prompt_line=$(printf '%s\n' "$plain" | grep -n "Continue previous conversation" | head -1 | cut -d: -f1)
+    local output ctx_line prompt_line
+    output=$("$CS_BIN" rot-card <<< "n" 2>&1) || true
+    ctx_line=$(printf '%s\n' "$output" | grep -n "64% context used" | head -1 | cut -d: -f1)
+    prompt_line=$(printf '%s\n' "$output" | grep -n "Continue previous conversation" | head -1 | cut -d: -f1)
     [ -n "$ctx_line" ] || { echo "  FAIL: no context row in the card"; return 1; }
     [ -n "$prompt_line" ] || { echo "  FAIL: no resume prompt"; return 1; }
     [ "$ctx_line" -lt "$prompt_line" ] \
         || { echo "  FAIL: the context row must sit above the prompt (row $ctx_line, prompt $prompt_line)"; return 1; }
     # The card's bar prefixes the row, which is what separates it from the prompt.
-    printf '%s\n' "$plain" | grep -q "▌.*64% context used" \
+    printf '%s\n' "$output" | grep -q "▌.*64% context used" \
         || { echo "  FAIL: the context row must carry the card's bar"; return 1; }
 }
 

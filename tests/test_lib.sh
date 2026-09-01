@@ -350,33 +350,20 @@ _pty_run() {  # command, args...
         # own timeout. The newline answers the way the rest of the suite does,
         # by taking the default, and `timeout` bounds anything that asks twice
         # so the next such prompt fails in seconds and names itself.
-        ( unset TMUX; printf '%s' "${PTY_INPUT:-$'\n'}" | timeout 60 script -q -c "$*" /dev/null )
+        ( unset TMUX; printf '\n' | timeout 60 script -q -c "$*" /dev/null )
     else
         # script(1) tcgetattr's its OWN stdin and dies on a socket, which is
         # what a CI runner or an agent harness often hands it; /dev/null still
         # gets the child a pty.
         #
-        # `timeout` for the same reason the util-linux arm has one, and it was
-        # missing here: a command that stops to ask something on the pty waits
-        # forever, since /dev/null answers nothing and the pty never reaches
-        # EOF. A cs launch offering to continue a previous conversation sat on
-        # that prompt for 92 minutes before anyone noticed the suite was not
-        # slow but stuck. Bounded, the prompt fails in seconds and names itself.
-        # A test that needs to answer a prompt sets PTY_INPUT; everything else
-        # gets /dev/null. Deliberately an explicit opt-in rather than sniffing
-        # /dev/stdin: what the caller's stdin IS varies by environment (a
-        # terminal here, a file on the macOS runner, a socket under an agent
-        # harness), so the sniff answered differently on CI than locally and
-        # took all eight pty tests down with it. The answer is fed through a
-        # real file, which script(1) can tcgetattr safely.
-        if [ -n "${PTY_INPUT:-}" ]; then
-            local _pty_in="$TEST_TMPDIR/.pty-input.$$"
-            printf '%s' "$PTY_INPUT" > "$_pty_in"
-            ( unset TMUX; timeout 60 script -q /dev/null "$@" < "$_pty_in" )
-            rm -f "$_pty_in"
-        else
-            ( unset TMUX; timeout 60 script -q /dev/null "$@" < /dev/null )
-        fi
+        # No `timeout` on this arm, unlike the util-linux one: timeout is GNU
+        # coreutils and stock BSD userland has none, so calling it here fails
+        # every pty suite on macos-latest with "command not found". Backgrounding
+        # script(1) under a watchdog instead costs it the controlling terminal it
+        # exists to provide. So a command that stops to ask something WILL hang
+        # this arm — a test that would prompt belongs on a plain pipe, where the
+        # same output renders and a here-string can answer.
+        ( unset TMUX; script -q /dev/null "$@" < /dev/null )
     fi
 }
 
