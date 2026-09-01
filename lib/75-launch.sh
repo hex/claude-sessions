@@ -54,8 +54,11 @@ _resume_context_pct() {  # session_dir
     [ -f "$f" ] || return 0
     v=$(tr -d '[:space:]' < "$f" 2>/dev/null || true)
     case "$v" in ''|*[!0-9]*) return 0 ;; esac
-    [ "$((10#$v))" -le 100 ] || return 0
-    printf '%s' "$((10#$v))"
+    # Assignment, not (( )): the latter returns 1 on a zero value, which under
+    # set -e would end the launch on a legitimately empty context window.
+    v=$((10#$v))
+    [ "$v" -le 100 ] || return 0
+    printf '%s' "$v"
 }
 
 # Drop a rotation marker the user declined to consume. Armed by the rotate

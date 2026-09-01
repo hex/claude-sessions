@@ -321,19 +321,44 @@ pub enum NotesFocus {
     Editing,
 }
 
-/// The session menu, in display order: label and the key that selects it. The
-/// single source for both the popup's rows and the key arms below — the menu
-/// used to carry a second, hand-kept copy of these labels in the renderer, and
-/// the two drifted. State-dependent entries (Archive's direction, Secrets'
-/// availability) are overridden in `menu_rows`, never duplicated here.
-pub const MENU_ITEMS: &[(&str, &str)] = &[
-    ("Open", "Enter"),
-    ("Delete", "d"),
-    ("Rename", "r"),
-    ("Secrets", "s"),
-    ("Archive", "a"),
-    ("Rotate narrative", "R"),
+/// What a menu entry does. Carried in the table rather than implied by the
+/// entry's position, so the dispatch cannot drift from the row that was drawn:
+/// reordering MENU_ITEMS used to shift every index below the moved entry
+/// silently, with the tests still green because each pressed its own key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MenuAction {
+    Open,
+    Delete,
+    Rename,
+    Secrets,
+    Archive,
+    RotateNarrative,
+}
+
+/// The session menu, in display order: what the entry does, its label, and the
+/// key that selects it. The single source for the popup's rows AND the key
+/// arms — the menu used to carry a second, hand-kept copy of these labels in
+/// the renderer, and the two drifted. State-dependent entries (Archive's
+/// direction, Secrets' availability) are overridden in `menu_rows`, matched on
+/// the action so a label rename cannot silently drop the override.
+pub const MENU_ITEMS: &[(MenuAction, &str, &str)] = &[
+    (MenuAction::Open, "Open", "Enter"),
+    (MenuAction::Delete, "Delete", "d"),
+    (MenuAction::Rename, "Rename", "r"),
+    (MenuAction::Secrets, "Secrets", "s"),
+    (MenuAction::Archive, "Archive", "a"),
+    (MenuAction::RotateNarrative, "Rotate narrative", "R"),
 ];
+
+/// The action a single-character shortcut selects, for both the menu and the
+/// list. Enter is deliberately absent: it opens the menu from the list, so
+/// Open is the one entry whose key is not a plain char.
+pub fn menu_action_for_key(c: char) -> Option<MenuAction> {
+    MENU_ITEMS
+        .iter()
+        .find(|(_, _, key)| key.len() == 1 && key.starts_with(c))
+        .map(|(action, _, _)| *action)
+}
 
 #[derive(Debug)]
 pub enum Action {
@@ -732,12 +757,18 @@ impl App {
     /// dropped when its name is no longer pending: something invalidated that
     /// session while its read was in flight (rotation does), and caching the
     /// bytes read BEFORE the change would put the stale preview straight back.
-    pub fn drain_previews(&mut self) {
+    /// Returns how many results were delivered, dropped ones included — the
+    /// render loop ignores it; a test waiting on the worker needs it to tell
+    /// "nothing arrived yet" from "it arrived and was correctly discarded".
+    pub fn drain_previews(&mut self) -> usize {
+        let mut delivered = 0;
         while let Ok((name, preview)) = self.preview_results.try_recv() {
+            delivered += 1;
             if self.preview_pending.remove(&name) {
                 self.preview_cache.insert(name, preview);
             }
         }
+        delivered
     }
 
     /// Block until every requested preview has landed in the cache.
@@ -989,36 +1020,6 @@ impl App {
                 self.mode = Mode::Legend;
                 Action::None
             }
-            KeyCode::Char('d') => {
-                if let Some(refusal) = self.locked_selection_refusal() {
-                    self.set_status(refusal, StatusLevel::Error);
-                } else if self.selected_session().is_some() {
-                    self.mode = Mode::ConfirmDelete;
-                    self.delete_countdown_start = Some(std::time::Instant::now());
-                }
-                Action::None
-            }
-            KeyCode::Char('r') => {
-                if let Some(name) = self.selected_session_name() {
-                    self.rename_input.set(&name);
-                    self.mode = Mode::Rename;
-                }
-                Action::None
-            }
-            KeyCode::Char('s') => {
-                self.run_secrets_command();
-                Action::None
-            }
-            KeyCode::Char('a') => {
-                self.toggle_archive();
-                Action::None
-            }
-            KeyCode::Char('R') => {
-                if self.selected_session().is_some() {
-                    self.mode = Mode::ConfirmRotate;
-                }
-                Action::None
-            }
             KeyCode::Char('n') => {
                 self.create_input.clear();
                 self.mode = Mode::CreateSession;
@@ -1091,6 +1092,14 @@ impl App {
                 self.show_archived = !self.show_archived;
                 self.apply_filter_and_sort();
                 Action::None
+            }
+            // Every menu shortcut works from the list too, through the same
+            // dispatch the menu uses — these were five verbatim copies of
+            // execute_menu_action's arms, and a change to one had to be made
+            // twice. Placed after the list's own Char arms so those still win.
+            KeyCode::Char(c) if menu_action_for_key(c).is_some() => {
+                let action = menu_action_for_key(c).expect("guarded above");
+                self.execute_menu_action(action)
             }
             KeyCode::Char('m') => {
                 if let Some(session) = self.selected_session() {
@@ -1364,21 +1373,24 @@ impl App {
                 }
                 Action::None
             }
-            KeyCode::Enter => self.execute_menu_action(self.menu_selected),
-            // Direct shortcut keys
-            KeyCode::Char('d') => self.execute_menu_action(1),
-            KeyCode::Char('r') => self.execute_menu_action(2),
-            KeyCode::Char('s') => self.execute_menu_action(3),
-            KeyCode::Char('a') => self.execute_menu_action(4),
-            KeyCode::Char('R') => self.execute_menu_action(5),
+            KeyCode::Enter => {
+                let action = MENU_ITEMS[self.menu_selected.min(MENU_ITEMS.len() - 1)].0;
+                self.execute_menu_action(action)
+            }
+            // Direct shortcut keys, resolved through the table: a key that
+            // labels a row always runs that row's action.
+            KeyCode::Char(c) => match menu_action_for_key(c) {
+                Some(action) => self.execute_menu_action(action),
+                None => Action::None,
+            },
             _ => Action::None,
         }
     }
 
-    fn execute_menu_action(&mut self, index: usize) -> Action {
+    fn execute_menu_action(&mut self, action: MenuAction) -> Action {
         self.mode = Mode::Normal;
-        match index {
-            0 => {
+        match action {
+            MenuAction::Open => {
                 // Open: same as old Enter logic
                 if let Some(session) = self.selected_session() {
                     if session.liveness.is_locked() {
@@ -1391,7 +1403,7 @@ impl App {
                     Action::None
                 }
             }
-            1 => {
+            MenuAction::Delete => {
                 // Delete. Same liveness guard as the `d` key: the removal
                 // refuses a lock-held session anyway, so opening the countdown
                 // here only promises a deletion that will not happen.
@@ -1403,7 +1415,7 @@ impl App {
                 }
                 Action::None
             }
-            2 => {
+            MenuAction::Rename => {
                 // Rename
                 if let Some(name) = self.selected_session_name() {
                     self.rename_input.set(&name);
@@ -1411,24 +1423,23 @@ impl App {
                 }
                 Action::None
             }
-            3 => {
+            MenuAction::Secrets => {
                 // Secrets
                 self.run_secrets_command();
                 Action::None
             }
-            4 => {
+            MenuAction::Archive => {
                 // Archive / unarchive
                 self.toggle_archive();
                 Action::None
             }
-            5 => {
+            MenuAction::RotateNarrative => {
                 // Rotate the narrative into its archive, after confirming
                 if self.selected_session().is_some() {
                     self.mode = Mode::ConfirmRotate;
                 }
                 Action::None
             }
-            _ => Action::None,
         }
     }
 
@@ -2148,17 +2159,18 @@ impl App {
     /// direction its key will actually take, and Secrets reads unavailable on
     /// a row that has none, so the menu never advertises an empty popup.
     /// Returned rather than duplicated in the renderer: those labels lived in
-    /// two places once, and the copies drifted.
-    pub fn menu_rows(&self) -> Vec<(&'static str, String, bool)> {
+    /// two places once, and the copies drifted. Matched on the action, so
+    /// renaming a label cannot silently drop its override.
+    pub fn menu_rows(&self) -> Vec<(&'static str, &'static str, bool)> {
         let session = self.selected_session();
         let archived = session.map(|s| s.archived).unwrap_or(false);
         let has_secrets = session.map(|s| s.secrets_count > 0).unwrap_or(false);
         MENU_ITEMS
             .iter()
-            .map(|(label, key)| match *label {
-                "Archive" if archived => (*key, "Unarchive".to_string(), true),
-                "Secrets" => (*key, (*label).to_string(), has_secrets),
-                _ => (*key, (*label).to_string(), true),
+            .map(|(action, label, key)| match action {
+                MenuAction::Archive if archived => (*key, "Unarchive", true),
+                MenuAction::Secrets => (*key, *label, has_secrets),
+                _ => (*key, *label, true),
             })
             .collect()
     }
@@ -4880,7 +4892,9 @@ mod tests {
             "the menu entry must run the same verb the bare key does"
         );
         assert!(
-            MENU_ITEMS.iter().any(|(label, key)| *label == "Archive" && *key == "a"),
+            MENU_ITEMS
+                .iter()
+                .any(|(action, _, key)| *action == MenuAction::Archive && *key == "a"),
             "the menu must carry an Archive entry for the key to select"
         );
         std::fs::remove_dir_all(&tmp).ok();
@@ -4975,7 +4989,11 @@ mod tests {
             "the menu entry must name the session it rotates"
         );
         assert!(
-            MENU_ITEMS.iter().any(|(label, key)| *label == "Rotate narrative" && *key == "R"),
+            MENU_ITEMS.iter().any(
+                |(action, label, key)| *action == MenuAction::RotateNarrative
+                    && *label == "Rotate narrative"
+                    && *key == "R"
+            ),
             "the menu must carry a Rotate narrative entry for the key to select"
         );
         std::fs::remove_dir_all(&tmp).ok();
@@ -5113,19 +5131,77 @@ mod tests {
         app.handle_key(KeyEvent::from(KeyCode::Char('y')));
         std::env::remove_var("CS_BIN");
 
-        // Give the worker every chance to deliver the pre-rotation read.
-        for _ in 0..100 {
-            app.drain_previews();
-            if app.preview_cache.contains_key("alpha") {
+        // Wait for the worker to actually deliver, then assert it was dropped.
+        // Breaking on delivery rather than on the assertion's negation matters
+        // twice: a passing run no longer sleeps the whole budget, and a run
+        // where the worker delivered nothing at all can no longer pass
+        // vacuously — "not cached" would be true either way.
+        let mut delivered = 0;
+        for _ in 0..200 {
+            delivered += app.drain_previews();
+            if delivered > 0 {
                 break;
             }
-            std::thread::sleep(std::time::Duration::from_millis(10));
+            std::thread::sleep(std::time::Duration::from_millis(5));
         }
+        assert!(delivered > 0, "the worker must have delivered the in-flight read");
         assert!(
             !app.preview_cache.contains_key("alpha"),
             "an in-flight read must not restore the pre-rotation preview"
         );
         std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// The row the cursor is on and the action Enter runs must be the same
+    /// entry. They were tied by array position once, so reordering MENU_ITEMS
+    /// shifted every dispatch index below the moved entry with no compile
+    /// error and every key-driven test still green.
+    #[test]
+    fn enter_runs_the_action_belonging_to_the_highlighted_row() {
+        for (i, (action, label, _)) in MENU_ITEMS.iter().enumerate() {
+            let mut app = App::new(sample_sessions());
+            app.mode = Mode::SessionMenu;
+            app.menu_selected = i;
+            let rows = app.menu_rows();
+            assert_eq!(
+                rows[i].1,
+                if *action == MenuAction::Archive && app.selected_session().unwrap().archived {
+                    "Unarchive"
+                } else {
+                    *label
+                },
+                "row {} must render the entry the cursor is on",
+                i
+            );
+            assert_eq!(
+                MENU_ITEMS[app.menu_selected].0,
+                *action,
+                "Enter at row {} must dispatch {:?}",
+                i,
+                action
+            );
+        }
+    }
+
+    /// Each entry's key selects its own action — the property the key column
+    /// in the popup asserts to the reader.
+    #[test]
+    fn every_shortcut_key_resolves_to_its_own_entry() {
+        for (action, label, key) in MENU_ITEMS {
+            if *key == "Enter" {
+                // Open's key is not a char: from the list Enter opens the menu.
+                assert_eq!(*action, MenuAction::Open, "only Open may lack a char key");
+                continue;
+            }
+            let c = key.chars().next().expect("a key is never empty");
+            assert_eq!(
+                menu_action_for_key(c),
+                Some(*action),
+                "{} ({}) must resolve to its own action",
+                label,
+                key
+            );
+        }
     }
 
     /// The menu is one row per entry, so navigation has to reach the last one.

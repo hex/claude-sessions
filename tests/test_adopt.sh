@@ -271,6 +271,26 @@ test_adopt_into_git_repo_without_claude_md_stages_bookkeeping() {
     fi
 }
 
+# Adoption commits inside the user's own project repo. A bare `git commit`
+# there commits the whole index, so work they had staged is swept into a commit
+# titled "Adopt as cs session" — the same defect the narrative rotation commit
+# carried, at the other site where cs commits into a checkout it does not own.
+test_adopt_commits_only_its_own_bookkeeping() {
+    local project_dir="$TEST_TMPDIR/staged-project"
+    mkdir -p "$project_dir"
+    (cd "$project_dir" && git init -q && git config user.email a@b.c && git config user.name A && git commit --allow-empty -m "initial" -q)
+    printf 'work in progress\n' > "$project_dir/user-file.txt"
+    git -C "$project_dir" add -- user-file.txt
+
+    (cd "$project_dir" && "$CS_BIN" -adopt staged-session)
+
+    local swept staged
+    swept=$(git -C "$project_dir" show --name-only --format= HEAD | grep -c 'user-file.txt' || true)
+    assert_eq "0" "$swept" "the user's staged file must not ride along in the adopt commit" || return 1
+    staged=$(git -C "$project_dir" diff --cached --name-only -- user-file.txt)
+    assert_eq "user-file.txt" "$staged" "and it must still be staged afterwards" || return 1
+}
+
 # ============================================================================
 # README.md frontmatter
 # ============================================================================
@@ -366,6 +386,7 @@ run_test test_remove_adopted_session_removes_symlink_only
 run_test test_adopt_preserves_existing_git_repo
 run_test test_adopt_inits_git_when_none_exists
 run_test test_adopt_into_git_repo_without_claude_md_stages_bookkeeping
+run_test test_adopt_commits_only_its_own_bookkeeping
 
 # README frontmatter
 run_test test_readme_has_yaml_frontmatter

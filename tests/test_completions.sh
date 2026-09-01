@@ -527,7 +527,7 @@ test_session_extraction_is_sane() {
 # file-wide grep goes green on a verb that no session context ever offers, which
 # is exactly how -narrative reached the dispatch uncompleted.
 bash_session_opts() {
-    grep -oE 'local session_opts="[^"]*"' "$BASH_COMP" | sed 's/.*="//; s/"$//' | tr ' ' '\n' | grep -E '^-' | sort -u
+    sed -n 's/.*local session_opts="\([^"]*\)".*/\1/p' "$BASH_COMP" | tr ' ' '\n' | grep -E '^-' | sort -u
 }
 
 zsh_session_opts() {

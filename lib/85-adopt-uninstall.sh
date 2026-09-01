@@ -152,8 +152,15 @@ adopt_session() {
             cd "$target_dir" || exit 0
             setup_merge_attributes "$target_dir"
             git add .cs/ .gitignore .gitattributes 2>/dev/null || true
-            if ! git diff --cached --quiet 2>/dev/null; then
-                git commit -q -m "Adopt as cs session: $session_name" 2>/dev/null || true
+            # The commit names its own paths: this runs inside the user's
+            # project repo, and a bare `git commit` would sweep whatever they
+            # had staged into a commit titled "Adopt as cs session". The
+            # --cached check is scoped the same way, or a user's unrelated
+            # staged file would make cs commit when it has nothing to say.
+            # (`git commit -- <paths>` only matches TRACKED paths, so the add
+            # above is what makes the new .cs files eligible.)
+            if ! git diff --cached --quiet -- .cs/ .gitignore .gitattributes 2>/dev/null; then
+                git commit -q -m "Adopt as cs session: $session_name" -- .cs/ .gitignore .gitattributes 2>/dev/null || true
             fi
         )
     fi

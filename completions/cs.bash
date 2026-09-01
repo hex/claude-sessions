@@ -141,7 +141,7 @@ _cs_completions() {
                 ;;
             *)
                 # A non-flag word that's not a subcommand is likely a session name
-                if ! $in_secrets && ! $after_remove && ! $in_update && ! $in_checkpoint && ! $in_queue && ! $in_narrative && ! $in_tag && ! $after_archive; then
+                if ! $in_secrets && ! $after_remove && ! $in_update && ! $in_checkpoint && ! $in_queue && ! $in_narrative && ! $in_tag && ! $in_list && ! $after_archive; then
                     has_session=true
                 fi
                 ;;

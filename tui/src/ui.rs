@@ -1048,7 +1048,7 @@ fn render_session_menu(app: &App, frame: &mut Frame) {
     let rows = app.menu_rows();
     // Keys are right-padded to the widest one ("Enter") so the labels line up
     // in a column instead of stepping in and out with each key's width.
-    let key_w = rows.iter().map(|(k, _, _)| k.chars().count()).max().unwrap_or(1);
+    let key_w = rows.iter().map(|(k, _, _)| k.width()).max().unwrap_or(1);
 
     let lines: Vec<Line> = rows
         .iter()
@@ -1072,14 +1072,11 @@ fn render_session_menu(app: &App, frame: &mut Frame) {
                     if selected { " >> " } else { "    " },
                     Style::default().fg(p.gold).add_modifier(Modifier::BOLD),
                 ),
-                Span::styled("[", Style::default().fg(key_color)),
                 Span::styled(
-                    (*key).to_string(),
+                    format!("[{}]{:pad$} ", key, "", pad = key_w - key.width()),
                     Style::default().fg(key_color).add_modifier(Modifier::BOLD),
                 ),
-                Span::styled("]", Style::default().fg(key_color)),
-                Span::raw(" ".repeat(key_w - key.chars().count() + 1)),
-                Span::styled(label.clone(), label_style),
+                Span::styled(*label, label_style),
             ])
         })
         .collect();
@@ -4267,7 +4264,7 @@ mod tests {
         app.mode = Mode::SessionMenu;
         let (_, rows) = render_app(&mut app);
         let menu = rows.join("\n");
-        for (label, _) in crate::app::MENU_ITEMS {
+        for (_, label, _) in crate::app::MENU_ITEMS {
             // Archive's label is state-dependent; the test above pins both
             // directions, so it is the one entry excused from a literal match.
             if *label == "Archive" {
