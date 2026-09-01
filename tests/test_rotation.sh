@@ -793,38 +793,93 @@ test_clear_source_consumes_pending_handoff() {
         || { echo "  FAIL: marker must be removed after a clear consumption"; return 1; }
 }
 
-# Consuming the handoff is not the same as ACTING on it. additionalContext is
-# read, not answered: Claude loads the rotation preamble and then waits for the
-# user to type "go". SessionStart's initialUserMessage is the field that submits
-# a real first turn (the bundle routes it to prependUserMessage), so a rotation
-# the user already committed to by running /clear continues on its own.
-test_clear_with_a_handoff_starts_the_work_itself() {
-    _rot_hook_session "rot-autostart"
+# additionalContext reaches the MODEL; systemMessage reaches the PERSON. After a
+# /clear the conversation is idle holding a loaded handoff, and without a line
+# addressed to the user that state is invisible — it reads as cs having done
+# nothing. Top-level field, not inside hookSpecificOutput.
+test_rotation_tells_the_user_one_message_starts_it() {
+    _rot_hook_session "rot-sysmsg"
+    _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "unconsumed"
+    printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
+    local out msg
+    out=$(_start_hook "$UUID_B" clear) || return 1
+    msg=$(printf '%s' "$out" | jq -r '.systemMessage // ""')
+    [ -n "$msg" ] || { echo "  FAIL: the user must be told the rotation is loaded"; return 1; }
+    case "$msg" in
+        *2026-07-16-test.md*) ;;
+        *) echo "  FAIL: the notice must name the handoff: $msg"; return 1 ;;
+    esac
+}
+
+# Scoped to a rotation: a plain /clear is a blank slate and has nothing to say.
+test_plain_clear_says_nothing_to_the_user() {
+    _rot_hook_session "rot-nosysmsg"
+    printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
+    local out msg
+    out=$(_start_hook "$UUID_B" clear) || return 1
+    msg=$(printf '%s' "$out" | jq -r '.systemMessage // ""')
+    # Positive anchor first: without it this passes when the hook early-exits or
+    # never produced output at all, which is true of a feature that was removed.
+    assert_output_contains "$out" "managed Claude Code session" "the hook must have run and produced its context" || return 1
+    [ -z "$msg" ] || { echo "  FAIL: a plain /clear must not announce anything: $msg"; return 1; }
+}
+
+# The r-answer path resolves the same handoff on source=startup, but cs has
+# already sent a positional kick there — the turn is starting. Telling the user
+# to send a message would be false, and it is the one render Fable caught me
+# measuring while believing I had measured /clear.
+test_startup_rotation_does_not_tell_the_user_to_send_a_message() {
+    _rot_hook_session "rot-startup-sys"
+    _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "unconsumed"
+    printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
+    local out msg
+    out=$(_start_hook "$UUID_B" startup) || return 1
+    assert_output_contains "$out" "Conversation Rotation" "startup still consumes and injects" || return 1
+    msg=$(printf '%s' "$out" | jq -r '.systemMessage // ""')
+    [ -z "$msg" ] || { echo "  FAIL: the r-path already kicked; the notice must not fire: $msg"; return 1; }
+}
+
+# A hook cannot start a turn, so the user sends one word. The preamble has to
+# make that word mean "begin" — otherwise the fresh conversation spends it
+# re-summarising the handoff and asking where to start, and the rotation costs
+# two round trips instead of one keystroke.
+test_rotation_preamble_makes_the_first_message_mean_begin() {
+    _rot_hook_session "rot-preamble"
+    _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "unconsumed"
+    printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
+    local out
+    out=$(_start_hook "$UUID_B" clear) || return 1
+    assert_output_contains "$out" "BARE NUDGE" "a bare nudge must read as begin" || return 1
+    assert_output_contains "$out" "without re-summarising" "and must not spend the turn restating the handoff" || return 1
+    # A first message with content is an instruction, not a go signal — the
+    # unnarrowed wording told the model to ignore what the user actually said.
+    assert_output_contains "$out" "takes precedence over the handoff" "content in the first message wins" || return 1
+    # The escape hatch covers missing/ambiguous; destructive needs its own.
+    assert_output_contains "$out" "destructive or irreversible" "a destructive next step still gets confirmed" || return 1
+    # The quotes were eaten by the enclosing double-quoted assignment: the text
+    # written was not the text delivered.
+    assert_output_contains "$out" '\\"go\\"' "the quotes around go must survive to the model" || return 1
+}
+
+# The hook must NOT emit initialUserMessage. It looks like the auto-start field
+# and Claude Code accepts it, but its only consumer feeds the stdin line-reader
+# of --input-format stream-json; an interactive TUI drops it. Measured on
+# 2.1.252 with a real logged-in terminal: handoff consumed, no turn started.
+# Pinned so nobody re-adds a field that reads as a working feature.
+test_clear_does_not_emit_a_dead_autostart_field() {
+    _rot_hook_session "rot-nodead"
     _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "unconsumed"
     printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
     printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
     local out msg
     out=$(_start_hook "$UUID_B" clear) || return 1
     msg=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.initialUserMessage // ""')
-    [ -n "$msg" ] \
-        || { echo "  FAIL: a consumed handoff must submit a first turn, not just inject context"; return 1; }
-    case "$msg" in
-        *2026-07-16-test.md*) ;;
-        *) echo "  FAIL: the first turn must name the handoff to continue: $msg"; return 1 ;;
-    esac
-}
-
-# The auto-start is scoped to the rotation. A plain /clear is the user asking
-# for a blank slate, and submitting a turn into it would be cs deciding what
-# they meant.
-test_clear_without_a_handoff_starts_nothing() {
-    _rot_hook_session "rot-noauto"
-    printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
-    local out msg
-    out=$(_start_hook "$UUID_B" clear) || return 1
-    msg=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.initialUserMessage // ""')
     [ -z "$msg" ] \
-        || { echo "  FAIL: a plain /clear must not submit a turn: $msg"; return 1; }
+        || { echo "  FAIL: initialUserMessage is dropped by the interactive TUI; do not emit it"; return 1; }
+    assert_output_contains "$out" "Conversation Rotation" "the preamble is still injected" || return 1
 }
 
 # compact and fork keep the transcript loaded, so consuming there would inject
@@ -919,8 +974,11 @@ test_fork_with_armed_marker_records_rebind() {
 }
 
 run_test test_clear_source_consumes_pending_handoff
-run_test test_clear_with_a_handoff_starts_the_work_itself
-run_test test_clear_without_a_handoff_starts_nothing
+run_test test_rotation_tells_the_user_one_message_starts_it
+run_test test_plain_clear_says_nothing_to_the_user
+run_test test_startup_rotation_does_not_tell_the_user_to_send_a_message
+run_test test_rotation_preamble_makes_the_first_message_mean_begin
+run_test test_clear_does_not_emit_a_dead_autostart_field
 run_test test_compact_and_fork_leave_marker_armed
 run_test test_spent_handoff_is_not_reconsumed
 run_test test_body_quote_does_not_revive_a_discarded_handoff

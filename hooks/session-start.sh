@@ -664,7 +664,9 @@ if [ -n "$ROTATION_HANDOFF" ]; then
     CONTEXT="${CONTEXT}
 
 --- Conversation Rotation ---
-This fresh conversation continues rotated work. Read .cs/handoffs/$ROTATION_HANDOFF FIRST — it is the previous conversation's handoff; continue per its next-step section. The prior transcript is not loaded; the handoff plus .cs/memory/narrative.*.md carry the context."
+This fresh conversation continues rotated work. Read .cs/handoffs/$ROTATION_HANDOFF FIRST — it is the previous conversation's handoff; the prior transcript is not loaded, and the handoff plus .cs/memory/narrative.*.md carry the context.
+
+Nothing has run yet: a hook can inject context but cannot start a turn, so the first message comes from the user. A BARE NUDGE — \"go\", \"continue\", \"ok\" — means begin: execute the handoff's next-step section and report what you did, without re-summarising it or asking which part to start with. A first message carrying its own content takes precedence over the handoff; answer that instead. Ask first only where you normally would: the handoff is missing, unreadable, or genuinely ambiguous, or its next step is destructive or irreversible."
 elif [ -n "$FRESH_NOTICE" ]; then
     CONTEXT="${CONTEXT}
 
@@ -728,28 +730,45 @@ if [ "$IS_LEAD" = 1 ] \
     MAIL_WATCH="$META_DIR/local/mail/new"
 fi
 
-# A consumed rotation submits its own first turn. additionalContext is READ,
-# not answered — Claude loads the preamble above and then waits for the user to
-# type "go", which is a step they already took by running /clear on an armed
-# handoff. initialUserMessage is the SessionStart field that submits a real
-# turn, so the rotation continues by itself. Scoped to a consumed handoff: a
-# plain /clear is a request for a blank slate, and starting work in one would
-# be cs deciding what the user meant.
-INITIAL_MESSAGE=""
-if [ -n "$ROTATION_HANDOFF" ]; then
-    INITIAL_MESSAGE="Continue the rotated work: read .cs/handoffs/$ROTATION_HANDOFF and pick up from its next-step section."
+# A /clear on an armed handoff consumes it and injects the preamble above, but
+# the user still has to say "go". That is a real gap and this hook CANNOT close
+# it. SessionStart accepts an `initialUserMessage` field that looks like the
+# answer — it is parsed, stored, and its only consumer calls prependUserMessage
+# on the stdin line-reader, which exists solely for --input-format stream-json.
+# An interactive TUI has no such stream, so the field is silently dropped.
+# Measured end to end (2.1.252, logged in, real terminal): the handoff flipped
+# to consumed and no turn began. Do not re-add it.
+#
+# What DOES auto-start a turn interactively is claude's positional prompt
+# argument, which cs already uses for spawn kicks and for the `r` answer at the
+# launch prompt (lib/40-state.sh's _exec_fresh_rebind). That is a launch-path
+# mechanism: cs must exec claude to use it, which a hook running inside an
+# already-started conversation cannot do. Closing the /clear gap therefore
+# belongs on the launch side, not here.
+
+# Tell the USER what the injected context cannot tell them: the rotation is
+# armed and loaded, and one word starts it. systemMessage is a top-level hook
+# field rendered to the person, not to the model — the only channel a hook has
+# to them. Without it the fresh conversation looks idle for no stated reason,
+# and the handoff it is holding is invisible.
+# Only on clear. ROTATION_HANDOFF also resolves on `startup`, but that is the
+# r-answer path, where _exec_fresh_rebind has already handed claude a positional
+# prompt — the turn is starting as the user reads this, so "send any message"
+# would be false. A /clear is the one route with no kick behind it.
+SYSTEM_MESSAGE=""
+if [ -n "$ROTATION_HANDOFF" ] && [ "$SOURCE" = "clear" ]; then
+    SYSTEM_MESSAGE="Rotation loaded from $ROTATION_HANDOFF — send any message (\"go\") to continue where the previous conversation left off."
 fi
 
 # Return additional context as JSON
-jq -n --arg context "$CONTEXT" --arg watch "$MAIL_WATCH" --arg initial "$INITIAL_MESSAGE" '{
+jq -n --arg context "$CONTEXT" --arg watch "$MAIL_WATCH" --arg sysmsg "$SYSTEM_MESSAGE" '{
     hookSpecificOutput: ({
         hookEventName: "SessionStart",
         additionalContext: $context,
         statusMessage: "Loading session..."
-    }
-    + (if $watch == "" then {} else {watchPaths: [$watch]} end)
-    + (if $initial == "" then {} else {initialUserMessage: $initial} end))
-}'
+    } + (if $watch == "" then {} else {watchPaths: [$watch]} end))
+}
++ (if $sysmsg == "" then {} else {systemMessage: $sysmsg} end)'
 
 _commit_digest "$META_DIR/local"
 
