@@ -653,36 +653,52 @@ else
     # terminal is attached, otherwise keep it and print how to switch.
     _statusline_cmd="$INSTALL_DIR/cs-statusline"
     _current_statusline=$(echo "$SETTINGS" | jq -r '.statusLine.command // ""')
+    # A "no" is remembered here so `cs -update` (which re-runs this installer)
+    # stops asking on every release. `cs -statusline enable` clears it,
+    # `cs -statusline disable` sets it (KEEP IN SYNC with lib/70-statusline.sh).
+    _statusline_declined="${XDG_CONFIG_HOME:-$HOME/.config}/cs/statusline-declined"
     # Each branch only decides consent; the registration itself happens once
     # below. "quiet" re-registers an existing cs-statusline entry (refreshing
     # the path) without announcing it.
     _register_statusline=""
     case "$_current_statusline" in
-        "")
-            # The status bar is user-visible UI: claim it only with consent.
-            # Interactive installs ask (default yes); non-interactive installs
-            # leave it off and say how to enable.
-            if [ -t 0 ]; then
-                read -p "Register cs-statusline as the Claude Code status line? [Y/n] " -n 1 -r
-                echo ""
-                [[ ! $REPLY =~ ^[Nn]$ ]] && _register_statusline=1
-            fi
-            if [ -z "$_register_statusline" ]; then
-                info "Status line not registered. Enable any time with: cs -statusline enable"
-            fi
-            ;;
         */cs-statusline)
             _register_statusline=quiet
             ;;
         *)
-            if [ -t 0 ]; then
-                read -p "Replace current status line ($_current_statusline) with cs-statusline? [y/N] " -n 1 -r
-                echo ""
-                [[ $REPLY =~ ^[Yy]$ ]] && _register_statusline=1
-            fi
-            if [ -z "$_register_statusline" ]; then
-                warn "Keeping current status line. To switch to cs-statusline:"
-                warn "  set statusLine.command to $_statusline_cmd in ~/.claude/settings.json"
+            if [ -f "$_statusline_declined" ]; then
+                info "Status line not registered (declined earlier). Enable any time with: cs -statusline enable"
+            elif [ -z "$_current_statusline" ]; then
+                # The status bar is user-visible UI: claim it only with consent.
+                # Interactive installs ask (default yes); non-interactive installs
+                # leave it off and say how to enable.
+                if [ -t 0 ]; then
+                    read -p "Register cs-statusline as the Claude Code status line? [Y/n] " -n 1 -r
+                    echo ""
+                    if [[ $REPLY =~ ^[Nn]$ ]]; then
+                        mkdir -p "$(dirname "$_statusline_declined")" && touch "$_statusline_declined"
+                        info "Status line not registered; cs -update won't ask again. Enable any time with: cs -statusline enable"
+                    else
+                        _register_statusline=1
+                    fi
+                else
+                    info "Status line not registered. Enable any time with: cs -statusline enable"
+                fi
+            else
+                if [ -t 0 ]; then
+                    read -p "Replace current status line ($_current_statusline) with cs-statusline? [y/N] " -n 1 -r
+                    echo ""
+                    if [[ $REPLY =~ ^[Yy]$ ]]; then
+                        _register_statusline=1
+                    else
+                        mkdir -p "$(dirname "$_statusline_declined")" && touch "$_statusline_declined"
+                        warn "Keeping current status line; cs -update won't ask again. To switch to cs-statusline:"
+                        warn "  cs -statusline enable"
+                    fi
+                else
+                    warn "Keeping current status line. To switch to cs-statusline:"
+                    warn "  set statusLine.command to $_statusline_cmd in ~/.claude/settings.json"
+                fi
             fi
             ;;
     esac

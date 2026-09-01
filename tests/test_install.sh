@@ -548,6 +548,112 @@ EOF
     assert_output_contains "$out" "cs-statusline" "install should mention how to enable cs-statusline" || return 1
 }
 
+# A declined status-line prompt is remembered, so `cs -update` (which re-runs
+# the installer) stops asking. With the marker present the installer says why
+# it skipped and how to enable, and never registers.
+test_install_honors_declined_statusline_marker() {
+    local fake_home="$TEST_TMPDIR/home-sl-declined"
+    mkdir -p "$fake_home/.config/cs"
+    touch "$fake_home/.config/cs/statusline-declined"
+    local out
+    out=$(HOME="$fake_home" bash "$INSTALL_SH" 2>&1 < /dev/null) || {
+        echo "  FAIL: install.sh exited non-zero"
+        return 1
+    }
+    local cmd
+    cmd=$(jq -r '.statusLine.command // ""' "$fake_home/.claude/settings.json")
+    if [ -n "$cmd" ]; then
+        echo "  FAIL: statusLine was registered despite the declined marker (got '$cmd')"
+        return 1
+    fi
+    assert_output_contains "$out" "declined earlier"         "install should say the status line was declined earlier" || return 1
+    assert_output_contains "$out" "cs -statusline enable"         "install should still say how to enable" || return 1
+}
+
+# The marker honors XDG_CONFIG_HOME, and it wins over a foreign status line's
+# replace prompt too (the branch the marker exists to silence on every update).
+test_install_declined_marker_honors_xdg_and_foreign_statusline() {
+    local fake_home="$TEST_TMPDIR/home-sl-declined-xdg"
+    local xdg="$TEST_TMPDIR/xdg-config"
+    mkdir -p "$fake_home/.claude" "$xdg/cs"
+    touch "$xdg/cs/statusline-declined"
+    echo '{"statusLine":{"type":"command","command":"node /x/omc-hud.mjs"}}' > "$fake_home/.claude/settings.json"
+    local out
+    out=$(HOME="$fake_home" XDG_CONFIG_HOME="$xdg" bash "$INSTALL_SH" 2>&1 < /dev/null) || {
+        echo "  FAIL: install.sh exited non-zero"
+        return 1
+    }
+    local cmd
+    cmd=$(jq -r '.statusLine.command // ""' "$fake_home/.claude/settings.json")
+    if [ "$cmd" != "node /x/omc-hud.mjs" ]; then
+        echo "  FAIL: foreign statusLine was replaced (now '$cmd')"
+        return 1
+    fi
+    assert_output_contains "$out" "declined earlier"         "install should say the status line was declined earlier" || return 1
+    assert_output_not_contains "$out" "Keeping current status line"         "the declined marker should silence the replace hint" || return 1
+}
+
+# An already-registered cs-statusline is refreshed regardless of the marker:
+# a stale marker must never make an update silently drop a working bar.
+test_install_refreshes_registered_statusline_despite_marker() {
+    local fake_home="$TEST_TMPDIR/home-sl-declined-registered"
+    mkdir -p "$fake_home/.claude" "$fake_home/.config/cs"
+    touch "$fake_home/.config/cs/statusline-declined"
+    echo '{"statusLine":{"type":"command","command":"/old/path/cs-statusline"}}' > "$fake_home/.claude/settings.json"
+    HOME="$fake_home" bash "$INSTALL_SH" > /dev/null 2>&1 < /dev/null || {
+        echo "  FAIL: install.sh exited non-zero"
+        return 1
+    }
+    local cmd
+    cmd=$(jq -r '.statusLine.command // ""' "$fake_home/.claude/settings.json")
+    if [ "$cmd" != "$fake_home/.local/bin/cs-statusline" ]; then
+        echo "  FAIL: registered cs-statusline was not refreshed (got '$cmd')"
+        return 1
+    fi
+}
+
+# disable records the opt-out; enable is the consent that clears it.
+test_statusline_disable_sets_and_enable_clears_declined_marker() {
+    local fake_home="$TEST_TMPDIR/home-sl-marker"
+    local marker="$fake_home/.config/cs/statusline-declined"
+    mkdir -p "$fake_home/.claude" "$fake_home/.local/bin"
+    echo '#!/bin/sh' > "$fake_home/.local/bin/cs-statusline"
+    chmod +x "$fake_home/.local/bin/cs-statusline"
+    echo '{}' > "$fake_home/.claude/settings.json"
+    HOME="$fake_home" "$CS_BIN" -statusline disable > /dev/null 2>&1 || {
+        echo "  FAIL: cs -statusline disable exited non-zero"
+        return 1
+    }
+    if [ ! -f "$marker" ]; then
+        echo "  FAIL: disable did not write the declined marker"
+        return 1
+    fi
+    HOME="$fake_home" "$CS_BIN" -statusline enable > /dev/null 2>&1 || {
+        echo "  FAIL: cs -statusline enable exited non-zero"
+        return 1
+    }
+    if [ -f "$marker" ]; then
+        echo "  FAIL: enable left the declined marker behind"
+        return 1
+    fi
+}
+
+test_uninstall_removes_declined_marker() {
+    local fake_home="$TEST_TMPDIR/uninstall-sl-marker"
+    local marker="$fake_home/.config/cs/statusline-declined"
+    mkdir -p "$fake_home/.local/bin" "$fake_home/.claude" "$fake_home/.config/cs"
+    touch "$marker"
+    echo '{}' > "$fake_home/.claude/settings.json"
+    printf 'y\n' | HOME="$fake_home" "$CS_BIN" -uninstall > /dev/null 2>&1 || {
+        echo "  FAIL: cs -uninstall exited non-zero"
+        return 1
+    }
+    if [ -f "$marker" ]; then
+        echo "  FAIL: declined marker survived uninstall"
+        return 1
+    fi
+}
+
 test_uninstall_removes_statusline() {
     local fake_home="$TEST_TMPDIR/uninstall-sl"
     mkdir -p "$fake_home/.local/bin" "$fake_home/.claude"
@@ -889,4 +995,9 @@ run_test test_install_recovers_from_invalid_settings_json
 run_test test_local_install_prefers_a_freshly_built_picker
 run_test test_local_install_uses_bin_picker_when_nothing_was_built
 run_test test_hook_registration_doc_matches_install
+run_test test_install_honors_declined_statusline_marker
+run_test test_install_declined_marker_honors_xdg_and_foreign_statusline
+run_test test_install_refreshes_registered_statusline_despite_marker
+run_test test_statusline_disable_sets_and_enable_clears_declined_marker
+run_test test_uninstall_removes_declined_marker
 report_results

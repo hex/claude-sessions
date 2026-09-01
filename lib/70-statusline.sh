@@ -33,10 +33,18 @@ _strip_subagent_statusline_registration() {
     return 2
 }
 
+# The installer remembers a declined status-line prompt here so `cs -update`
+# stops asking; enable clears it, disable sets it (KEEP IN SYNC with install.sh).
+_statusline_declined_marker() {
+    echo "${XDG_CONFIG_HOME:-$HOME/.config}/cs/statusline-declined"
+}
+
 # disable strips only a cs-statusline registration, never a foreign one.
 run_statusline_cmd() {
     local action="${1:-}"
     local settings="${CS_CLAUDE_DIR:-$HOME/.claude}/settings.json"
+    local declined
+    declined="$(_statusline_declined_marker)"
     local bin="$HOME/.local/bin/cs-statusline"
     local subbin="$HOME/.local/bin/cs-subagent-statusline"
     command -v jq >/dev/null 2>&1 || error "jq is required for cs -statusline"
@@ -55,6 +63,7 @@ run_statusline_cmd() {
                  | .subagentStatusLine = {type: "command", command: $subcmd}' \
                 "$settings" > "$_tmp" 2>/dev/null; then
                 mv "$_tmp" "$settings"
+                rm -f "$declined"
                 info "Registered cs-statusline as the Claude Code status line"
                 info "Registered cs-subagent-statusline for the agent panel rows"
                 info "Claude Code reads both at startup: restart it to see them."
@@ -81,6 +90,8 @@ run_statusline_cmd() {
                 1) : ;;
                 *) error "Could not update $settings" ;;
             esac
+            mkdir -p "$(dirname "$declined")" && touch "$declined"
+            info "cs -update won't offer the status line again; cs -statusline enable re-registers it."
             ;;
         *)
             error "Usage: cs -statusline enable|disable"
