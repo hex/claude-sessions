@@ -118,12 +118,22 @@ should do. If the user did not give one, ask before writing anything.
 6. Arm the handoff: write its basename (no path) to
    `.cs/local/pending-handoff`. This is machine-local state — do not commit
    it, and do not stage it in step 5.
-7. Tell the user: run `/clear` to rotate now — the fresh conversation picks
-   up this handoff automatically, without leaving Claude Code. It will not
-   act until they send their next message, which can simply be what they want
-   done next.
+7. Tell the user what the rotation now does on its own: the fresh
+   conversation picks up this handoff and begins its next step by itself, a
+   couple of seconds after the `/clear` — they do not need to type anything
+   to start it, and a message they do send takes precedence over the handoff.
 
    If they would rather stop for the day, exiting and answering `r` at the
    next `cs <session-name>` launch does the same thing. Answering `Y` or `n`
    there disarms the marker (the handoff itself stays pending, so a later
    rotate can re-arm it), and `d` discards the handoff outright.
+
+8. End your response with the instruction and nothing after it, on its own
+   final line, exactly:
+
+   **Run `/clear` now** — this conversation is ready to rotate.
+
+   This is the one step nothing can take for the user. A hook cannot submit
+   to Claude Code's command queue (it accepts the TUI's own input only), so
+   the keystroke is always theirs — which is why it must not end up buried
+   under a summary of what you just wrote.

@@ -880,7 +880,38 @@ test_filechanged_registration_carries_async_rewake() {
         || { echo "  FAIL: no rewakeMessage prefix; the payload would read as a Stop hook error"; return 1; }
 }
 
+# One FileChanged entry now serves two wake kinds — cross-session mail and the
+# /clear rotation kick — and the labels are static in settings.json, so they
+# cannot name one of them. A rotation auto-start announced as "New cs mail" is
+# the wrong story about what just started the turn, and this session's own rule
+# is that an unexplained label in the output is the finding, not noise.
+test_rewake_labels_do_not_claim_the_wake_is_mail() {
+    local inst="$SCRIPT_DIR/../install.sh"
+    if grep -qE 'rewake(Message|Summary): "[^"]*[Mm]ail' "$inst"; then
+        echo "  FAIL: the rewake labels must not say mail; FileChanged also carries the rotation kick"
+        return 1
+    fi
+    grep -q 'rewakeSummary' "$inst" \
+        || { echo "  FAIL: no rewakeSummary; the wake would render unlabelled"; return 1; }
+    # The greps above read install.sh's SOURCE, which is the mechanism. Assert
+    # the property too — what a real install actually writes into settings.json
+    # — or the test still passes when the jq emitting the labels breaks and no
+    # label reaches the file at all.
+    local fake_home="$TEST_TMPDIR/home-rewake"
+    mkdir -p "$fake_home"
+    HOME="$fake_home" bash "$INSTALL_SH" >/dev/null 2>&1 \
+        || { echo "  FAIL: install.sh exited non-zero"; return 1; }
+    local summary
+    summary=$(jq -r '.hooks.FileChanged[0].hooks[0].rewakeSummary // ""' \
+        "$fake_home/.claude/settings.json")
+    [ -n "$summary" ] || { echo "  FAIL: no rewakeSummary reached settings.json"; return 1; }
+    case "$summary" in
+        *[Mm]ail*) echo "  FAIL: the installed label claims mail: $summary"; return 1 ;;
+    esac
+}
+
 run_test test_filechanged_registration_carries_async_rewake
+run_test test_rewake_labels_do_not_claim_the_wake_is_mail
 run_test test_uninstall_preserves_foreign_statusline
 run_test test_uninstall_removes_zsh_completion_from_detected_dir
 run_test test_uninstall_removes_zsh_completion_from_default_dir

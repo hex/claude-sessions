@@ -167,6 +167,14 @@ export CS_QUEUE_MAX_5H="85"
 export CS_MAIL_WAKE_MAX="5"   # this is the default
 export CS_NO_MAIL_WAKE="1"
 
+# Rotation auto-start: after /clear on an armed handoff the session wakes
+# itself and begins the handoff's next step with no typing. The delay is how
+# long the kick waits for Claude Code's file watch to arm (measured at about a
+# second); a non-numeric value falls back to the default. The opt-out restores
+# the previous behaviour, where the rotation waits for a word from you.
+export CS_ROTATION_KICK_DELAY="2"   # this is the default
+export CS_NO_ROTATION_WAKE="1"
+
 # Disable the iTerm2 attention bounce (the dock bounce a finished turn starts,
 # and the attention marker the status line reads). The tab tint is NOT gated by
 # this: set_tab_title emits the iTerm2 escapes unconditionally at launch, and

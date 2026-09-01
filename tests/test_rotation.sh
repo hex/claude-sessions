@@ -132,6 +132,35 @@ test_rotate_skill_exists_with_frontmatter() {
 # grows without bound in a tracked, shared directory. The rule has to be
 # spelled out precisely: which statuses are droppable, the age source, and the
 # floor that keeps a burst of rotations from emptying the store.
+# The skill's last line is the only manual step left in a rotation, and a hook
+# cannot take it: nothing reachable from a tool result or a hook can submit to
+# Claude Code's command queue, so /clear is always the user's keystroke. That
+# makes it the one thing the skill must not bury in prose.
+test_rotate_skill_ends_on_the_one_manual_step() {
+    local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
+    # The property is what the skill INSTRUCTS Claude to emit, not where the
+    # instruction sits in the file. Pin the three parts that make it
+    # unmissable: the final line is the /clear call to action, nothing follows
+    # it, and it is set apart rather than folded into prose.
+    assert_file_contains "$skill" "End your response with the instruction" \
+        "the skill must direct the instruction to the end of the response" || return 1
+    assert_file_contains "$skill" "nothing after it" \
+        "and forbid a summary trailing it, which is what buried it before" || return 1
+    assert_file_contains "$skill" 'Run `/clear` now' \
+        "and give the exact line to emit, set apart in bold" || return 1
+}
+
+# The auto-start made the old wording false. "It will not act until they send
+# their next message" is precisely what the kick removed, and a skill that still
+# says it teaches the user to sit and wait for a prompt that never comes.
+test_rotate_skill_does_not_promise_the_rotation_waits() {
+    local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
+    assert_file_not_contains "$skill" "will not act until" \
+        "the rotation now starts itself; the skill must not say otherwise" || return 1
+    assert_file_contains "$skill" "on its own" \
+        "and must say the fresh conversation begins the work by itself" || return 1
+}
+
 test_rotate_skill_teaches_the_prune_rule() {
     local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
     assert_file_contains "$skill" "30 days" \
@@ -223,6 +252,8 @@ test_rotate_skill_reads_parent_from_state_not_the_launch_env() {
 }
 
 run_test test_rotate_skill_exists_with_frontmatter
+run_test test_rotate_skill_ends_on_the_one_manual_step
+run_test test_rotate_skill_does_not_promise_the_rotation_waits
 run_test test_rotate_skill_teaches_the_prune_rule
 run_test test_rotate_skill_registered_in_both_manifests
 run_test test_rotate_skill_documents_the_clear_route
@@ -695,9 +726,17 @@ run_test test_discard_flip_spares_a_body_quote
 # Cycle 4: SessionStart consumes the pending handoff
 # ============================================================================
 
+# The kick's detached child outlives the hook by design, so every clear-path
+# test would otherwise leave a real sleeper writing into a directory the harness
+# is about to tear down. Default it off; the tests that exercise the child set
+# CS_ROTATION_KICK_DELAY themselves, and the ones that exercise the opt-out set
+# CS_NO_ROTATION_WAKE explicitly — both override this, since a value the caller
+# exported wins over the default below.
 _start_hook() {  # session_id [source] [extra env pre-exported by caller]
+    local no_wake="${CS_NO_ROTATION_WAKE:-}"
+    [ -n "$no_wake" ] || [ -n "${CS_ROTATION_KICK_DELAY:-}" ] || no_wake=1
     echo "{\"session_id\":\"$1\",\"cwd\":\"$CLAUDE_SESSION_DIR\",\"source\":\"${2:-startup}\"}" \
-        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null
+        | CS_NO_ROTATION_WAKE="$no_wake" bash "$HOOKS_DIR/session-start.sh" 2>/dev/null
 }
 
 test_pending_handoff_is_consumed_and_injected() {
@@ -882,6 +921,273 @@ test_clear_does_not_emit_a_dead_autostart_field() {
     assert_output_contains "$out" "Conversation Rotation" "the preamble is still injected" || return 1
 }
 
+# --- the /clear auto-start ----------------------------------------------------
+# A hook cannot start a turn, but it can arm one. A file appearing under a
+# watched path fires FileChanged, and that hook exiting 2 (asyncRewake) wakes an
+# idle interactive session — measured on 2.1.252 against a real /clear, in a
+# conversation with zero turns. So the rotation watches its own kick directory
+# and drops a file into it a second later.
+test_clear_rotation_arms_a_kick_watch() {
+    _rot_hook_session "rot-kickwatch"
+    _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "unconsumed"
+    printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
+    local out watches
+    out=$(CS_ROTATION_KICK_DELAY=0 _start_hook "$UUID_B" clear) || return 1
+    watches=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.watchPaths // [] | join(" ")')
+    case "$watches" in
+        *"/local/rotation-kick"*) ;;
+        *) echo "  FAIL: the kick directory must be watched, got: $watches"; return 1 ;;
+    esac
+    # The watcher is handed the path with no existence check, and a watch armed
+    # on a missing directory never fires again for the process's lifetime.
+    [ -d "$CLAUDE_SESSION_META_DIR/local/rotation-kick" ] \
+        || { echo "  FAIL: the kick directory must exist before it is watched"; return 1; }
+    # The mail watch is not displaced by it.
+    case "$watches" in
+        *"/local/mail/new"*) ;;
+        *) echo "  FAIL: arming the kick must not drop the mail watch, got: $watches"; return 1 ;;
+    esac
+}
+
+# The rm of `delivered` at arm time is the ONLY thing that ever deletes it, and
+# every other test starts from a fresh session dir — so deleting that line would
+# silently cost every rotation after the first in a session's lifetime its wake,
+# with the whole suite still green.
+test_a_second_rotation_in_the_same_session_still_wakes() {
+    _rot_hook_session "rot-kick-second"
+    local d="$CLAUDE_SESSION_META_DIR/local/rotation-kick"
+    mkdir -p "$d"
+    : > "$d/delivered"                       # a previous rotation's marker
+    _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "unconsumed"
+    printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
+    CS_ROTATION_KICK_DELAY=0 _start_hook "$UUID_B" clear >/dev/null || return 1
+    [ ! -f "$d/delivered" ] \
+        || { echo "  FAIL: a stale delivered marker makes the new kick a no-op"; return 1; }
+}
+
+# A /clear that arms NO kick must spend any kick still in flight from a previous
+# one. Otherwise: /clear #1 arms and the child sleeps; the user runs /clear #2
+# at ~T+1.9 wanting a genuinely clean break (the handoff is consumed now, so the
+# fresh-conversation notice fires instead); the child's write lands before the
+# watch list is replaced, and the wake tells a conversation explicitly told
+# "clean break, not a continuation" to go execute a handoff.
+test_a_clear_without_a_rotation_spends_an_in_flight_kick() {
+    _rot_hook_session "rot-kick-inflight"
+    local d="$CLAUDE_SESSION_META_DIR/local/rotation-kick"
+    mkdir -p "$d"
+    printf '%s\n' "$(date +%s)" > "$d/rotation.kick"   # a kick already in flight
+    printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
+    CS_ROTATION_KICK_DELAY=0 _start_hook "$UUID_B" clear >/dev/null || return 1  # no handoff: arms nothing
+    [ -f "$d/delivered" ] \
+        || { echo "  FAIL: an in-flight kick must be spent, or it wakes a clean-break conversation"; return 1; }
+    # And the wake itself must now decline.
+    local rc=0
+    _rot_filechanged "$d/rotation.kick" add >/dev/null 2>&1 || rc=$?
+    assert_eq "0" "$rc" "the spent kick must not wake" || return 1
+}
+
+# Scoped exactly like the notice. A plain /clear has nothing to continue, and
+# the startup path has already been kicked by _exec_fresh_rebind — a wake there
+# would arrive on top of a turn that is already running.
+test_kick_watch_is_scoped_to_a_clear_rotation() {
+    local src
+    for src in startup resume compact; do
+        _rot_hook_session "rot-kickscope-$src"
+        _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "unconsumed"
+        printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+        printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
+        local out watches
+        out=$(CS_ROTATION_KICK_DELAY=0 _start_hook "$UUID_B" "$src") || return 1
+        watches=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.watchPaths // [] | join(" ")')
+        case "$watches" in
+            *rotation-kick*) echo "  FAIL: source $src must not arm a kick: $watches"; return 1 ;;
+        esac
+    done
+    # And a /clear with no rotation loaded.
+    _rot_hook_session "rot-kickscope-bare"
+    printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
+    local out watches
+    out=$(CS_ROTATION_KICK_DELAY=0 _start_hook "$UUID_B" clear) || return 1
+    watches=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.watchPaths // [] | join(" ")')
+    case "$watches" in
+        *rotation-kick*) echo "  FAIL: a bare /clear must not arm a kick: $watches"; return 1 ;;
+    esac
+    assert_output_contains "$out" "managed Claude Code session" "the hook still ran" || return 1
+}
+
+# The preamble is written for the path that actually happens. With a kick armed
+# the turn starts on a system-reminder, so "the first message comes from the
+# user" is simply false — and a model told to wait for a user message may treat
+# the wake as background noise rather than as the signal to begin.
+test_armed_rotation_preamble_expects_a_wake_not_a_message() {
+    _rot_hook_session "rot-preamble-armed"
+    _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "unconsumed"
+    printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
+    local out
+    out=$(CS_ROTATION_KICK_DELAY=0 _start_hook "$UUID_B" clear) || return 1
+    assert_output_contains "$out" "system-reminder" "the armed preamble names how the turn starts" || return 1
+    if printf '%s' "$out" | grep -q "the first message comes from the user"; then
+        echo "  FAIL: an armed rotation does not wait for a user message"
+        return 1
+    fi
+    # The kick can still lose the arm race, so the typed fallback must survive.
+    assert_output_contains "$out" "BARE NUDGE" "a typed nudge still means begin" || return 1
+    assert_output_contains "$out" "destructive or irreversible" "the confirm valve survives both paths" || return 1
+}
+
+# With no kick (the opt-out, or a teammate) the old wording is the true one.
+test_unarmed_rotation_preamble_still_expects_a_message() {
+    _rot_hook_session "rot-preamble-unarmed"
+    _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "unconsumed"
+    printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
+    local out
+    out=$(CS_NO_ROTATION_WAKE=1 _start_hook "$UUID_B" clear) || return 1
+    assert_output_contains "$out" "the first message comes from the user" \
+        "without a kick the turn really does wait for the user" || return 1
+    if printf '%s' "$out" | grep -q "system-reminder"; then
+        echo "  FAIL: no wake is coming, so the preamble must not promise one"
+        return 1
+    fi
+}
+
+# The opt-out has to reach the WATCH too, not just the wording — an armed watch
+# with no kick behind it is a watch that never fires.
+test_rotation_wake_opt_out_arms_nothing() {
+    _rot_hook_session "rot-optout"
+    _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "unconsumed"
+    printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
+    local out watches
+    out=$(CS_NO_ROTATION_WAKE=1 _start_hook "$UUID_B" clear) || return 1
+    watches=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.watchPaths // [] | join(" ")')
+    case "$watches" in
+        *rotation-kick*) echo "  FAIL: the opt-out must arm no kick: $watches"; return 1 ;;
+    esac
+    # And the user is still told what to do, since nothing will start on its own.
+    local msg; msg=$(printf '%s' "$out" | jq -r '.systemMessage // ""')
+    [ -n "$msg" ] || { echo "  FAIL: with no wake coming the notice matters more, not less"; return 1; }
+}
+
+# The one component with no coverage otherwise. Every other kick test either
+# asserts the watchPaths JSON or plants rotation.kick by hand — so the bridge
+# between them, the detached child actually producing the file, was untested.
+# Break the spawn (a refactor mangles the redirects, the subshell dies under
+# errexit) and every other test stays green while the feature is silently dead,
+# reverting to "type a word" — which nobody reports as a bug.
+test_the_detached_child_actually_writes_the_kick() {
+    _rot_hook_session "rot-kickchild"
+    _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "unconsumed"
+    printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
+    CS_ROTATION_KICK_DELAY=0 _start_hook "$UUID_B" clear >/dev/null || return 1
+    # The child outlives the hook, so the file need not exist the instant the
+    # hook returns even at delay 0. Poll rather than sleep a fixed time.
+    local kick="$CLAUDE_SESSION_META_DIR/local/rotation-kick/rotation.kick" i=0
+    while [ ! -f "$kick" ] && [ "$i" -lt 50 ]; do
+        i=$((i + 1))
+        sleep 0.1
+    done
+    [ -f "$kick" ] \
+        || { echo "  FAIL: the detached child never wrote the kick; the wake can never fire"; return 1; }
+    [ -s "$kick" ] || { echo "  FAIL: the kick is empty; the child died mid-write"; return 1; }
+}
+
+# --- the wake itself ----------------------------------------------------------
+# Drives narrative-reminder's FileChanged branch as this session's lead. The
+# payload rides on stderr and delivery IS the exit code, so streams pass
+# through untouched.
+_rot_filechanged() {  # file_path, [event]
+    jq -nc --arg p "$1" --arg e "${2:-add}" \
+        '{hook_event_name: "FileChanged", file_path: $p, event: $e}' \
+        | bash "$HOOKS_DIR/narrative-reminder.sh"
+}
+
+_arm_kick() {  # returns the kick file path on stdout
+    local d="$CLAUDE_SESSION_META_DIR/local/rotation-kick"
+    mkdir -p "$d"
+    printf '%s\n' "$(date +%s)" > "$d/rotation.kick"
+    printf '%s\n' "$d/rotation.kick"
+}
+
+test_rotation_kick_wakes_the_model() {
+    _rot_hook_session "rot-wake"
+    local kick; kick=$(_arm_kick)
+    local err rc=0
+    err=$(_rot_filechanged "$kick" add 2>&1 >/dev/null) || rc=$?
+    assert_eq "2" "$rc" "the kick delivers by exiting 2 (asyncRewake)" || return 1
+    # The wake arrives as a system-reminder, NOT a user message, so the reason
+    # has to carry the instruction the user's "go" would otherwise have carried.
+    assert_output_contains "$err" "rotation" "the reason names what woke it" || return 1
+    assert_output_contains "$err" "next-step" "and says to execute the handoff" || return 1
+    # The notice invites the user to type instead, and the kick is written
+    # regardless — so a user who types inside the arm window gets the wake
+    # ENQUEUED behind their own message, carrying an unconditional "execute the
+    # handoff now". The preamble's content-takes-precedence rule covers the
+    # FIRST message, not a system-reminder arriving after one. Without a yield
+    # clause the auto-start overrides the person it told to take over.
+    assert_output_contains "$err" "already sent a message" "the wake yields to a user who took over" || return 1
+}
+
+# One kick, one wake. The watcher fires on unlink as well as add, and the hook
+# clears the kick after delivering — so without a delivered-marker the cleanup
+# re-fires the event and the session wakes on its own tail forever.
+test_rotation_kick_wakes_exactly_once() {
+    _rot_hook_session "rot-wake-once"
+    local kick; kick=$(_arm_kick)
+    local rc=0
+    _rot_filechanged "$kick" add >/dev/null 2>&1 || rc=$?
+    assert_eq "2" "$rc" "first delivery wakes" || return 1
+    rc=0
+    _rot_filechanged "$kick" add >/dev/null 2>&1 || rc=$?
+    assert_eq "0" "$rc" "a second event on the same kick must not wake again" || return 1
+}
+
+# The kick does NOT yield to the queue, and that is the opposite of the mail
+# wake on purpose. Nothing resets queue.state on /clear (only bin/cs writes it),
+# so a drain that was armed or interrupted before the rotation leaves a STALE
+# armed/draining state behind — and 2s after a /clear no drain turn can be in
+# flight anyway. Yielding there swallowed the one event this kick will ever
+# produce, with no Stop-path retry to recover it (the mail wake has one; the
+# kick has none). Both the rotation AND the queue were then stranded: the drain
+# is Stop-driven, so with no wake there is no turn, and with no turn there is no
+# Stop. Waking runs the rotation turn, whose Stop then resumes the drain.
+test_rotation_kick_does_not_yield_to_a_stale_queue_state() {
+    _rot_hook_session "rot-wake-queue"
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local/queue"
+    printf '{"kind":"task"}\n' > "$CLAUDE_SESSION_META_DIR/local/queue/t1.json"
+    printf 'draining\n' > "$CLAUDE_SESSION_META_DIR/local/queue.state"
+    local kick; kick=$(_arm_kick)
+    local rc=0
+    _rot_filechanged "$kick" add >/dev/null 2>&1 || rc=$?
+    assert_eq "2" "$rc" \
+        "a stale drain state must not swallow the only kick event" || return 1
+}
+
+# Deleting a watched file fires FileChanged too — measured: rm of the kick
+# produced events on the still-armed watch. An unlink must never wake.
+test_rotation_kick_ignores_unlink() {
+    _rot_hook_session "rot-wake-unlink"
+    local kick; kick=$(_arm_kick)
+    local rc=0
+    _rot_filechanged "$kick" unlink >/dev/null 2>&1 || rc=$?
+    assert_eq "0" "$rc" "an unlink of the kick must not wake" || return 1
+}
+
+# A kick file that is not there is not a rotation. Guards the same class the
+# mail path guards: the path shape is not proof the document exists.
+test_rotation_kick_requires_the_file_to_exist() {
+    _rot_hook_session "rot-wake-ghost"
+    local d="$CLAUDE_SESSION_META_DIR/local/rotation-kick"
+    mkdir -p "$d"
+    local rc=0
+    _rot_filechanged "$d/rotation.kick" add >/dev/null 2>&1 || rc=$?
+    assert_eq "0" "$rc" "a missing kick file must not wake" || return 1
+}
+
 # compact and fork keep the transcript loaded, so consuming there would inject
 # "the prior transcript is not loaded" into a conversation where it is. The
 # marker is left ARMED — the pending rotation is still legitimate.
@@ -979,6 +1285,19 @@ run_test test_plain_clear_says_nothing_to_the_user
 run_test test_startup_rotation_does_not_tell_the_user_to_send_a_message
 run_test test_rotation_preamble_makes_the_first_message_mean_begin
 run_test test_clear_does_not_emit_a_dead_autostart_field
+run_test test_clear_rotation_arms_a_kick_watch
+run_test test_kick_watch_is_scoped_to_a_clear_rotation
+run_test test_a_second_rotation_in_the_same_session_still_wakes
+run_test test_a_clear_without_a_rotation_spends_an_in_flight_kick
+run_test test_the_detached_child_actually_writes_the_kick
+run_test test_rotation_kick_wakes_the_model
+run_test test_rotation_kick_wakes_exactly_once
+run_test test_rotation_kick_does_not_yield_to_a_stale_queue_state
+run_test test_rotation_kick_ignores_unlink
+run_test test_rotation_kick_requires_the_file_to_exist
+run_test test_armed_rotation_preamble_expects_a_wake_not_a_message
+run_test test_unarmed_rotation_preamble_still_expects_a_message
+run_test test_rotation_wake_opt_out_arms_nothing
 run_test test_compact_and_fork_leave_marker_armed
 run_test test_spent_handoff_is_not_reconsumed
 run_test test_body_quote_does_not_revive_a_discarded_handoff

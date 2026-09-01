@@ -657,6 +657,97 @@ case "$SOURCE" in
         ;;
 esac
 
+# Arm the /clear auto-start. A hook cannot start a turn, but it can arm one:
+# a file appearing under a watched path fires FileChanged, and that hook exiting
+# 2 (asyncRewake) wakes the model in an idle interactive session. Measured on
+# 2.1.252 against a real /clear, in a conversation with zero turns — the wake is
+# not conditional on the conversation having history.
+#
+# The kick therefore needs a directory to be watched and a file to arrive in it
+# AFTER the watch arms, which is only once this hook's output has been
+# processed. Hence a detached child: it outlives the hook, sleeps, and writes.
+# All three fds are redirected — a child holding this hook's stdout keeps Claude
+# Code waiting on the pipe, which would stall the very launch it is accelerating.
+#
+# Measured arm latency is ~1s (write at T+1.05s produced an event at T+1.75s), so
+# the default delay has room without being a visible pause. One sample, so the
+# fallback matters more than the margin: if the write lands early the event is
+# lost and the user is exactly where 06fbb44 left them, one word from starting.
+#
+# Scoped like the notice below: only a /clear that loaded a rotation. The startup
+# path is the r-answer, where _exec_fresh_rebind has already handed claude a
+# positional prompt — a wake there would arrive on top of a running turn.
+# Lead-only for the same reason the mail watch is: every claude resolving this
+# session runs this hook, and N kicks means N sessions racing on one rotation.
+ROTATION_KICK=""
+if [ -n "$ROTATION_HANDOFF" ] && [ "$SOURCE" = "clear" ] && [ "$IS_LEAD" = 1 ] \
+    && [ -z "${CS_NO_ROTATION_WAKE:-}" ]; then
+    _kick_dir="$META_DIR/local/rotation-kick"
+    # The watcher is handed the path with no existence check, and a watch armed
+    # on a missing directory never fires again for the process's lifetime.
+    if mkdir -p "$_kick_dir" 2>/dev/null; then
+        ROTATION_KICK="$_kick_dir"
+        # A stale marker from a previous rotation would make the FileChanged
+        # hook treat this kick as already delivered and exit silently.
+        rm -f "$_kick_dir/delivered" "$_kick_dir"/*.kick 2>/dev/null || true
+        # A non-integer override must not reach sleep: under errexit a failed
+        # sleep would kill the child before the write, arming a watch nothing
+        # ever fires. Same validation shape as narrative-reminder's _num_or,
+        # inlined because this hook sources no shared library.
+        _kick_delay="${CS_ROTATION_KICK_DELAY:-2}"
+        case "$_kick_delay" in ''|*[!0-9]*) _kick_delay=2 ;; esac
+        (
+            # tmp+rename, as every other watched-dir write in cs does: writing
+            # in place is create-then-write, two filesystem operations, and a
+            # watcher reporting both would race two hook instances through the
+            # compose-before-record window and could wake twice. The temp name
+            # deliberately does not end in .kick, so it does not match the
+            # hook's triage.
+            _write_kick() {
+                date +%s > "$_kick_dir/rotation.tmp.$$" 2>/dev/null \
+                    && mv "$_kick_dir/rotation.tmp.$$" "$_kick_dir/rotation.kick" 2>/dev/null
+            }
+            [ "$_kick_delay" = 0 ] || sleep "$_kick_delay"
+            _write_kick || true
+            # Written twice on purpose. The delay is one measurement on an idle
+            # machine, and if the watch arms after the first write that event is
+            # lost with no retry anywhere — the session then sits idle under a
+            # notice promising it would continue on its own, which is worse than
+            # the old "send any message" it replaced. A second write re-enters
+            # the branch (the triage filters only unlink), and the delivered
+            # marker makes it a no-op when the first write already woke.
+            [ "$_kick_delay" = 0 ] || sleep "$_kick_delay"
+            [ -f "$_kick_dir/delivered" ] || _write_kick || true
+        ) </dev/null >/dev/null 2>&1 &
+    fi
+elif [ "$SOURCE" = "clear" ]; then
+    # A /clear that arms nothing must SPEND any kick still in flight from a
+    # previous one. Otherwise: /clear #1 arms and its child sleeps; the user
+    # runs /clear #2 inside that window wanting a genuinely clean break (the
+    # handoff is consumed now, so the fresh-conversation notice fires instead);
+    # the child's write lands before Claude Code has replaced the watch list,
+    # and the wake tells a conversation explicitly told "clean break, not a
+    # continuation" to go execute a handoff it was never given.
+    _stale_kick="$META_DIR/local/rotation-kick"
+    if [ -d "$_stale_kick" ]; then
+        : > "$_stale_kick/delivered" 2>/dev/null || true
+    fi
+fi
+
+# How this turn actually begins differs by path, and the preamble has to say the
+# true one. With a kick armed the turn starts on a system-reminder that no human
+# sent; telling the model to wait for a user message there invites it to read
+# its own wake as background noise. Without one — the opt-out, or a teammate —
+# the old wording is the accurate one.
+#
+# Both branches keep the typed-nudge sentence that follows: the kick can lose
+# the arm race, and then a word from the user is all that is left.
+if [ -n "$ROTATION_KICK" ]; then
+    ROTATION_START="This conversation will be woken shortly by a system-reminder rather than by a user message; that wake is the signal to begin, and no keystroke is coming."
+else
+    ROTATION_START="A hook can inject context but cannot start a turn, so the first message comes from the user."
+fi
+
 # The rotation preamble and the fresh-conversation notice are mutually
 # exclusive: the rotate path is also a fresh start, and "clean break" plus
 # "continue per the handoff" would contradict each other.
@@ -666,7 +757,7 @@ if [ -n "$ROTATION_HANDOFF" ]; then
 --- Conversation Rotation ---
 This fresh conversation continues rotated work. Read .cs/handoffs/$ROTATION_HANDOFF FIRST — it is the previous conversation's handoff; the prior transcript is not loaded, and the handoff plus .cs/memory/narrative.*.md carry the context.
 
-Nothing has run yet: a hook can inject context but cannot start a turn, so the first message comes from the user. A BARE NUDGE — \"go\", \"continue\", \"ok\" — means begin: execute the handoff's next-step section and report what you did, without re-summarising it or asking which part to start with. A first message carrying its own content takes precedence over the handoff; answer that instead. Ask first only where you normally would: the handoff is missing, unreadable, or genuinely ambiguous, or its next step is destructive or irreversible."
+Nothing has run yet. $ROTATION_START A BARE NUDGE — \"go\", \"continue\", \"ok\" — means begin: execute the handoff's next-step section and report what you did, without re-summarising it or asking which part to start with. A first message carrying its own content takes precedence over the handoff; answer that instead. Ask first only where you normally would: the handoff is missing, unreadable, or genuinely ambiguous, or its next step is destructive or irreversible."
 elif [ -n "$FRESH_NOTICE" ]; then
     CONTEXT="${CONTEXT}
 
@@ -755,18 +846,31 @@ fi
 # r-answer path, where _exec_fresh_rebind has already handed claude a positional
 # prompt — the turn is starting as the user reads this, so "send any message"
 # would be false. A /clear is the one route with no kick behind it.
+# Two states, two true sentences. With a kick armed the work starts on its own,
+# and telling the user to type would make them race a wake that is already
+# coming. Without one nothing will happen until they speak, so the instruction
+# matters more, not less.
 SYSTEM_MESSAGE=""
 if [ -n "$ROTATION_HANDOFF" ] && [ "$SOURCE" = "clear" ]; then
-    SYSTEM_MESSAGE="Rotation loaded from $ROTATION_HANDOFF — send any message (\"go\") to continue where the previous conversation left off."
+    if [ -n "$ROTATION_KICK" ]; then
+        SYSTEM_MESSAGE="Rotation loaded from $ROTATION_HANDOFF — continuing automatically in a moment. Type to take over instead, or if nothing happens in a few seconds, send any message to start it."
+    else
+        SYSTEM_MESSAGE="Rotation loaded from $ROTATION_HANDOFF — send any message (\"go\") to continue where the previous conversation left off."
+    fi
 fi
 
 # Return additional context as JSON
-jq -n --arg context "$CONTEXT" --arg watch "$MAIL_WATCH" --arg sysmsg "$SYSTEM_MESSAGE" '{
+# watchPaths is a REPLACE, not a merge, so both paths ride one array — emitting
+# the kick alone would silently disarm the mailbox for the rest of the session.
+jq -n --arg context "$CONTEXT" --arg watch "$MAIL_WATCH" --arg kick "$ROTATION_KICK" \
+      --arg sysmsg "$SYSTEM_MESSAGE" '
+[$watch, $kick] | map(select(. != "")) as $paths |
+{
     hookSpecificOutput: ({
         hookEventName: "SessionStart",
         additionalContext: $context,
         statusMessage: "Loading session..."
-    } + (if $watch == "" then {} else {watchPaths: [$watch]} end))
+    } + (if ($paths | length) == 0 then {} else {watchPaths: $paths} end))
 }
 + (if $sysmsg == "" then {} else {systemMessage: $sysmsg} end)'
 
