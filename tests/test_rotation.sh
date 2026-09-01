@@ -274,8 +274,26 @@ test_resume_prompt_shows_the_previous_conversations_context() {
     printf '64\n' > "$CS_SESSIONS_ROOT/rot-ctx/.cs/local/context-pct"
     local output
     output=$("$CS_BIN" rot-ctx <<< "n" 2>&1) || true
+    # Piped stdout has no colour at all (setup_palette blanks every code when
+    # stdout is not a TTY), so the escape belongs in the pty test below; here
+    # only the text is assertable.
     assert_output_contains "$output" "Last conversation here used 64% of its context" "the card must say how full the last conversation here was" || return 1
     assert_output_contains "$output" "Continue previous conversation?" "prompt still present" || return 1
+}
+
+# The percentage is the number the reader scans for, so it carries bold inside
+# the dim line rather than reading as flat as the prose around it. Only checkable
+# under a pty: setup_palette blanks every colour when stdout is not a TTY.
+test_resume_prompt_bolds_the_percentage_on_a_terminal() {
+    _rot_session "rot-bold"
+    printf '64\n' > "$CS_SESSIONS_ROOT/rot-bold/.cs/local/context-pct"
+    local output esc
+    # Answer the resume prompt: this session already has a conversation, so the
+    # launch stops to ask, and the BSD pty arm's /dev/null stdin answers nothing.
+    output=$(printf 'n' | _pty_run "$CS_BIN" rot-bold 2>&1 || true)
+    esc=$(printf '\033')
+    printf '%s' "$output" | grep -q "${esc}\[1m64%" \
+        || { echo "  FAIL: the percentage must be bold under a pty"; return 1; }
 }
 
 # Best-effort: the stamp only exists where cs-statusline is installed, so its
@@ -592,6 +610,7 @@ test_marker_without_pending_handoff_is_disarmed() {
 
 run_test test_prompt_unchanged_without_handoff
 run_test test_resume_prompt_shows_the_previous_conversations_context
+run_test test_resume_prompt_bolds_the_percentage_on_a_terminal
 run_test test_resume_prompt_omits_context_when_never_stamped
 run_test test_resume_prompt_ignores_a_junk_context_stamp
 run_test test_resume_prompt_ignores_an_out_of_range_context_stamp

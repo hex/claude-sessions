@@ -324,6 +324,48 @@ run_test test_subdirectory_of_a_session_does_not_resolve
 run_test test_nested_session_below_a_session_does_not_resolve
 run_test test_legacy_claude_md_directory_does_not_resolve
 run_test test_unregistered_session_outside_the_root_does_not_resolve
+# A pty makes `[ -t 1 ]` true, so cs's terminal side effects fire for real.
+# Under a live tmux server that meant `tmux rename-window "cs: <fixture>"` plus
+# `allow-rename off` against the DEVELOPER's own window — a test fixture name
+# stuck on a real pane, and locked there because cs execs into claude and never
+# reaches reset_tab_title. _pty_run drops TMUX for exactly this reason.
+test_a_pty_test_cannot_rename_the_developers_tmux_window() {
+    local dir
+    dir=$(create_test_session "titletest")
+    local seen
+    # A tmux stub on PATH records any call; the real binary is never reached.
+    mkdir -p "$TEST_TMPDIR/tmuxbin"
+    cat > "$TEST_TMPDIR/tmuxbin/tmux" <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >> "$TEST_TMPDIR/tmux-calls"
+exit 0
+EOF
+    chmod +x "$TEST_TMPDIR/tmuxbin/tmux"
+    : > "$TEST_TMPDIR/tmux-calls"
+
+    (
+        cd "$dir" || exit 1
+        export PATH="$TEST_TMPDIR/tmuxbin:$PATH"
+        # Model a developer running the suite from inside tmux.
+        export TMUX="/tmp/fake-tmux-socket,1234,0"
+        export CLAUDE_CODE_BIN="echo"
+        export CS_TERM_THEME=dark
+        unset CLAUDE_SESSION_NAME
+        _pty_run "$CS_BIN" titletest >/dev/null 2>&1 || true
+    )
+
+    seen=$(cat "$TEST_TMPDIR/tmux-calls" 2>/dev/null || true)
+    if printf '%s' "$seen" | grep -q 'rename-window'; then
+        echo "  FAIL: a pty test renamed a tmux window: $seen"
+        return 1
+    fi
+    if printf '%s' "$seen" | grep -q 'allow-rename off'; then
+        echo "  FAIL: a pty test locked a tmux window's name: $seen"
+        return 1
+    fi
+}
+
+run_test test_a_pty_test_cannot_rename_the_developers_tmux_window
 run_test test_bare_cs_in_a_session_directory_opens_that_session
 run_test test_adopted_session_opens_under_its_cs_name
 run_test test_bare_cs_inside_a_launched_session_shows_the_picker

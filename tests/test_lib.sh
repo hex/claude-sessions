@@ -335,6 +335,13 @@ assert_output_not_contains() {
 # "the command drew nothing" and fails rendering assertions on the Linux lane
 # while every one of them passes on a mac.
 _pty_run() {  # command, args...
+    # A pty makes `[ -t 1 ]` true, so every terminal side effect cs normally
+    # suppresses under test fires for real — including `tmux rename-window` and
+    # `allow-rename off`, which renamed the DEVELOPER's live window to the
+    # fixture's session name and locked it there ("cs: adopted-name" is a test
+    # fixture, and it stuck because reset_tab_title never runs across cs's exec).
+    # TMUX is what set_tab_title branches on, so dropping it here contains every
+    # such test at the harness rather than asking each one to remember.
     if script --version 2>/dev/null | grep -q util-linux; then
         # A newline, not /dev/null: util-linux hands the child a pty that never
         # reaches EOF, so a command that stops to ask something waits on it for
@@ -343,12 +350,27 @@ _pty_run() {  # command, args...
         # own timeout. The newline answers the way the rest of the suite does,
         # by taking the default, and `timeout` bounds anything that asks twice
         # so the next such prompt fails in seconds and names itself.
-        printf '\n' | timeout 60 script -q -c "$*" /dev/null
+        ( unset TMUX; printf '\n' | timeout 60 script -q -c "$*" /dev/null )
     else
         # script(1) tcgetattr's its OWN stdin and dies on a socket, which is
         # what a CI runner or an agent harness often hands it; /dev/null still
         # gets the child a pty.
-        script -q /dev/null "$@" < /dev/null
+        #
+        # `timeout` for the same reason the util-linux arm has one, and it was
+        # missing here: a command that stops to ask something on the pty waits
+        # forever, since /dev/null answers nothing and the pty never reaches
+        # EOF. A cs launch offering to continue a previous conversation sat on
+        # that prompt for 92 minutes before anyone noticed the suite was not
+        # slow but stuck. Bounded, the prompt fails in seconds and names itself.
+        # stdin is inherited when the caller piped something in, so a test can
+        # answer a prompt; /dev/null only when it did not, since script(1)
+        # tcgetattr's its own stdin and dies on the socket a CI runner or agent
+        # harness hands it.
+        if [ -p /dev/stdin ] || [ -f /dev/stdin ]; then
+            ( unset TMUX; timeout 60 script -q /dev/null "$@" )
+        else
+            ( unset TMUX; timeout 60 script -q /dev/null "$@" < /dev/null )
+        fi
     fi
 }
 
