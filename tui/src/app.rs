@@ -4945,7 +4945,7 @@ mod tests {
         std::env::remove_var("CS_BIN");
 
         assert_ne!(app.mode, Mode::ConfirmRotate, "a locked row must not be offered the confirm");
-        assert!(!tmp.join("argv").exists(), "cs must not have run");
+        assert!(!rotate_was_invoked(&tmp), "cs must not have rotated");
         assert!(
             app.status_message.as_ref().is_some_and(|s| s.level == StatusLevel::Error),
             "the refusal must say why"
@@ -4971,8 +4971,8 @@ mod tests {
 
         assert_eq!(app.mode, Mode::ConfirmRotate, "R must ask, not rotate");
         assert!(
-            !tmp.join("argv").exists(),
-            "cs must not have run before the answer"
+            !rotate_was_invoked(&tmp),
+            "cs must not have rotated before the answer"
         );
         std::fs::remove_dir_all(&tmp).ok();
     }
@@ -4992,8 +4992,20 @@ mod tests {
         std::env::remove_var("CS_BIN");
 
         assert_eq!(app.mode, Mode::Normal, "declining returns to the list");
-        assert!(!tmp.join("argv").exists(), "declining must run nothing");
+        assert!(!rotate_was_invoked(&tmp), "declining must rotate nothing");
         std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// True when the stub recorded a `-narrative rotate` call. `CS_BIN` is
+    /// process-global while the temp root is per-test, so a concurrent test
+    /// that spawns cs during this test's window lands in the same argv log —
+    /// asserting the file is absent makes a passing test depend on what else
+    /// happens to be running. The invocation is what these tests mean.
+    #[cfg(unix)]
+    fn rotate_was_invoked(dir: &std::path::Path) -> bool {
+        std::fs::read_to_string(dir.join("argv"))
+            .unwrap_or_default()
+            .contains("-narrative")
     }
 
     /// A cs stub for the session-scoped form `cs <name> -narrative rotate`,
