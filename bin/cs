@@ -404,11 +404,12 @@ Commands:
   <base> -features          List a base's feature worktrees and their merge readiness
   <base> -finish <feature>  Open <base> and run the merge ritual for <feature>
   <name> -secrets <cmd>  Run secrets command on <name> without launching session
+  <name> -narrative rotate  Rotate <name>'s narrative without launching session
   -search <query>     Search across all sessions (--include-archived searches archived too)
   -checkpoint "<label>"  Save labelled state snapshot (run from inside a session)
   -checkpoint list    List checkpoints for current session
   -checkpoint show <name>  Print a specific checkpoint
-  -narrative rotate   Archive the oldest sections of your narrative once it passes its byte budget (run from inside a session; /wrap runs it)
+  -narrative rotate   Archive the oldest sections of your narrative once it passes its byte budget (/wrap runs it)
   -queue add "<task>" Add a task to the session's walk-away queue
   -queue list         Show pending and completed queued tasks
   -queue rm <n>       Remove pending task n
@@ -3429,8 +3430,13 @@ rotate_narrative() {
     local chunk_rel=".cs/narrative-archive/$actor/$(basename "$chunk")"
     if git -C "$session_dir" rev-parse --git-dir >/dev/null 2>&1 \
         && git -C "$session_dir" ls-files --error-unmatch -- "$live" >/dev/null 2>&1; then
+        # The commit carries an explicit pathspec: rotation runs inside the
+        # user's own checkout — an adopted session IS their project repo — and a
+        # bare `git commit` would sweep whatever they had staged into a commit
+        # titled "cs: rotate narrative". The `add` still runs first so the newly
+        # written chunk is known to git and the pathspec can match it.
         if ! { git -C "$session_dir" add -- "$live" "$chunk" \
-            && git -C "$session_dir" commit -q -m "cs: rotate narrative.$actor ($sections sections -> narrative-archive)"; } 2>/dev/null; then
+            && git -C "$session_dir" commit -q -m "cs: rotate narrative.$actor ($sections sections -> narrative-archive)" -- "$live" "$chunk"; } 2>/dev/null; then
             warn "rotation written but the commit failed; commit .cs/memory/narrative.$actor.md and $chunk_rel by hand"
         fi
     else
@@ -3461,7 +3467,11 @@ run_narrative() {
             rotate_narrative
             ;;
         *)
-            error "Usage: cs -narrative rotate   # from inside a session"
+            # Names both forms: this dispatcher is reached from inside a
+            # session AND from `cs <name> -narrative`, and a message that
+            # prescribes only the first sends a caller who correctly named a
+            # session off to rotate whichever one their shell is standing in.
+            error "Usage: cs -narrative rotate   |   cs <name> -narrative rotate"
             ;;
     esac
 }
@@ -6422,6 +6432,21 @@ _handoff_is_local() {  # handoff_file, session_dir
         && grep -E -q "Session started \(.*ID: $parent\)" "$log" 2>/dev/null
 }
 
+# The resumed conversation's context usage, 0-100, or nothing. cs-statusline
+# stamps .cs/local/context-pct on every render, so the last value on disk is the
+# high-water mark of the conversation the card is offering to continue. Silent
+# on every unusable shape — the stamp only exists where the status line is
+# installed, so the readout is a bonus and never a reason to fail a launch.
+# 10# because a stamp like 08 is a hard arithmetic error read as octal.
+_resume_context_pct() {  # session_dir
+    local f="$1/.cs/local/context-pct" v=""
+    [ -f "$f" ] || return 0
+    v=$(tr -d '[:space:]' < "$f" 2>/dev/null || true)
+    case "$v" in ''|*[!0-9]*) return 0 ;; esac
+    [ "$((10#$v))" -le 100 ] || return 0
+    printf '%s' "$((10#$v))"
+}
+
 # Drop a rotation marker the user declined to consume. Armed by the rotate
 # skill for a /clear, or by an earlier r, it must not outlive the answer: left
 # in place it would be consumed by an unrelated /clear hours later, injecting a
@@ -6760,6 +6785,14 @@ launch_claude_code() {
         if [ -n "$spawn_kick" ]; then
             response=""
         else
+            # What the answer costs: continuing a conversation already deep into
+            # its window is the case the r answer exists for, and the card was
+            # asking without saying which case this is.
+            local _ctx=""
+            _ctx=$(_resume_context_pct "$session_dir")
+            if [ -n "$_ctx" ]; then
+                printf "${DIM}Previous conversation used %s%% of its context.${NC}\n" "$_ctx"
+            fi
             if [ -n "$pending_handoff" ]; then
                 # Answering blind is the hazard this label exists for: r arms
                 # the marker with this basename, and the next SessionStart flips
@@ -7627,6 +7660,27 @@ main() {
                 run_conversations "$@"
                 return 0
                 ;;
+            -narrative)
+                shift
+                # Reachable from outside any session — the picker shells out
+                # this way. A worktree session's directory is literally
+                # "<base>@<task>" under the sessions root and carries its own
+                # .cs, so one path serves both forms: a worktree rotates its
+                # OWN narrative, unlike -secrets, which routes a worktree to
+                # the base's namespace. Guarded on cs's own is_session_dir, not
+                # on bare existence: an adopted session is a symlink into the
+                # user's project, and a dangling one passes -L but has no .cs
+                # behind it, so the failure would surface as rotate_narrative's
+                # "run from inside a session" — which answers the global form
+                # and misnames this one's fault.
+                is_session_dir "$SESSIONS_ROOT/$session_name" \
+                    || error "No such session: $session_name"
+                export CLAUDE_SESSION_NAME="$session_name"
+                export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
+                export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
+                run_narrative "$@"
+                return 0
+                ;;
             -usage)
                 shift
                 export CLAUDE_SESSION_NAME="$session_name"
@@ -7673,7 +7727,7 @@ main() {
                 shift
                 ;;
             *)
-                error "Unknown session command: $1. Use -secrets, -queue, -msg, -conversations, -usage, -tag, -features, -finish, --merge, or --force."
+                error "Unknown session command: $1. Use -secrets, -queue, -msg, -narrative, -conversations, -usage, -tag, -features, -finish, --merge, or --force."
                 ;;
         esac
     done

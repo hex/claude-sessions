@@ -19,11 +19,12 @@ Commands:
   <base> -features          List a base's feature worktrees and their merge readiness
   <base> -finish <feature>  Open <base> and run the merge ritual for <feature>
   <name> -secrets <cmd>  Run secrets command on <name> without launching session
+  <name> -narrative rotate  Rotate <name>'s narrative without launching session
   -search <query>     Search across all sessions (--include-archived searches archived too)
   -checkpoint "<label>"  Save labelled state snapshot (run from inside a session)
   -checkpoint list    List checkpoints for current session
   -checkpoint show <name>  Print a specific checkpoint
-  -narrative rotate   Archive the oldest sections of your narrative once it passes its byte budget (run from inside a session; /wrap runs it)
+  -narrative rotate   Archive the oldest sections of your narrative once it passes its byte budget (/wrap runs it)
   -queue add "<task>" Add a task to the session's walk-away queue
   -queue list         Show pending and completed queued tasks
   -queue rm <n>       Remove pending task n

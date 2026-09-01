@@ -120,7 +120,7 @@ The platform is detected automatically. It decides one thing — whether secrets
 ## Concepts
 
 - **Sessions** — Isolated workspaces, each with their own git repo and documentation. `cs debug-api` creates one; running it again resumes it.
-- **Narrative** (`.cs/memory/narrative.<actor>.md`) — A per-actor lab notebook for findings, observations, and ideas during a session. Each co-developer writes their own file (so shared sessions never conflict) and everyone reads the live files on resume. The notebook is append-only — a disproven entry gets a dated correction, never an edit — and `cs -narrative rotate` (run by `/wrap`, flagged by the Stop hook and `cs -doctor`) moves the oldest sections verbatim into `.cs/narrative-archive/<actor>/` once a file passes `CS_NARRATIVE_MAX_BYTES` (128 KiB), keeping a `CS_NARRATIVE_KEEP_BYTES` (64 KiB) tail. Stored as native Claude Code memory files; see [docs/session-layout.md](docs/session-layout.md) for how that works.
+- **Narrative** (`.cs/memory/narrative.<actor>.md`) — A per-actor lab notebook for findings, observations, and ideas during a session. Each co-developer writes their own file (so shared sessions never conflict) and everyone reads the live files on resume. The notebook is append-only — a disproven entry gets a dated correction, never an edit — and `cs -narrative rotate` (run by `/wrap`, by the session manager's **Rotate narrative** entry, flagged by the Stop hook and `cs -doctor`; `cs <name> -narrative rotate` reaches a session you are not in) moves the oldest sections verbatim into `.cs/narrative-archive/<actor>/` once a file passes `CS_NARRATIVE_MAX_BYTES` (128 KiB), keeping a `CS_NARRATIVE_KEEP_BYTES` (64 KiB) tail. Stored as native Claude Code memory files; see [docs/session-layout.md](docs/session-layout.md) for how that works.
 - **Checkpoints** (`.cs/checkpoints/`) — Labelled narrative snapshots you can save mid-session with `/checkpoint`, capturing the narrative, changes, and the current git HEAD.
 - **Timeline** (`.cs/timeline.jsonl`) — A structured event log recording session starts, ends, and checkpoints as newline-delimited JSON.
 - **Auto-memory** (`.cs/memory/`) — Claude Code's persistent operational notes, redirected into the session and cleaned up with `cs -rm`.
@@ -143,6 +143,7 @@ cs -who                     # Show who contributed to shared memory/narrative (g
 cs -search <query>          # Search across all sessions
 cs -checkpoint "<label>"    # Snapshot git state + narrative (also: list, show <name>)
 cs -narrative rotate        # Archive the oldest narrative sections once the file passes its budget (/wrap runs this)
+cs <name> -narrative rotate # Same, for a session you are not in (the session manager's Rotate narrative entry runs this)
 cs -queue add "<task>"      # Walk-away task queue (also: list, rm <n>, clear, log)
 cs -msg <session> "note"    # Send mail to another session (--kind notify|task|text|result; '-' body reads stdin); bare cs -msg reads
 cs -msg --reply <thread> "note"  # Reply into a thread; the target comes from the thread
@@ -184,7 +185,7 @@ The current directory decides, not any history: cs opens a session when that dir
 - **Symbol legend** — `● activity  ■ live  * marked  archived` sits in the table header's free width on wide terminals
 - **Fuzzy search** with `/` — matches characters in order with highlighting; Enter commits the filter. Add `#tag` anywhere in the query to AND-filter by tag (e.g. `#api backend`); combine multiple `#tag`s or mix with a fuzzy name remainder
 - **Time-based sections** — sessions grouped under Today, Yesterday, This Week, This Month, Older when sorted by date (the default view)
-- **Action bar** with `Enter` — inline bar shows available actions with shortcut keys
+- **Action menu** with `Enter` — a popup over the list, one action per row with its shortcut key; `j`/`k` move, `Enter` runs the highlighted action, `Esc` closes. Each letter shortcut (`d`, `r`, `s`, `a`, `R`) also works straight from the list, without opening the menu
 - **Preview & To-Do panes** — appear beside the list on wide landscape terminals (≥120 cols), or stacked below it (list, then details, then notes) on any window at least 40 cols by 26 rows; toggle with `p`
 - **Expand row** with `p` — shows session objective (auto-captured from your first prompt) and narrative inline
 - **Create session** with `n` — opens inline dialog to create a new session
@@ -193,6 +194,7 @@ The current directory decides, not any history: cs opens a session when that dir
 - **Rename** with `r`
 - **Archive / unarchive** with `a` — toggles the selected session's `.cs/archived` marker by running `cs -archive` / `cs -unarchive`, so the picker never writes the marker itself and inherits the verb's refusal to archive a live session. Archived rows are hidden until `A` shows them, which is also how you reach one to unarchive
 - **Manage secrets** with `s` (view values with `v`, auto-redacts after 5 seconds)
+- **Rotate narrative** with `R` — runs `cs <name> -narrative rotate` on the highlighted session and shows what it printed; a narrative under its byte budget rotates nothing and says so
 - **Queue a task** — focus the To-Do input with `Tab`, type a prompt, and press `Enter` to add it to the highlighted session's queue for a walk-away run; a `▰▱` meter with the count appears in the Queue column while that session's queue is non-empty
 - **Quit** with `q` or `Esc`
 - **Light/dark palette** — the warm palette adapts to the terminal background detected at launch (`CS_TERM_THEME`); set the env var to force `light` or `dark`
@@ -203,6 +205,7 @@ The TUI requires `cs-tui` (a small standalone Rust binary). Build from source: `
 
 ```bash
 cs <session> -secrets <cmd>   # Manage secrets for a session by name
+cs <session> -narrative rotate  # Rotate that session's narrative without launching it
 cs <session> --force          # Override active session lock
 ```
 
@@ -377,9 +380,16 @@ If you would rather stop for the day, the handoff stays armed and the next
 `cs <name>` launch offers a third answer at the resume prompt:
 
 ```
+Previous conversation used 64% of its context.
 Rotation handoff pending: 2026-07-16-continue-f5-plan.md
 Continue previous conversation? [Y/n/r/d] (r = fresh conversation with handoff, d = discard handoff)
 ```
+
+The context line says how full the conversation you would be resuming already
+is, so the choice between `Y` and `r` is not made blind. It reads the figure
+cs-statusline stamps on every render (`.cs/local/context-pct`), so it appears
+only where the status line is installed, and it is shown on the plain `[Y/n]`
+prompt too.
 
 `r` rotates the same way, and additionally hands the fresh conversation a
 first prompt so it starts on the handoff without you typing anything — the one

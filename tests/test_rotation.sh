@@ -265,6 +265,55 @@ test_prompt_unchanged_without_handoff() {
     fi
 }
 
+# The launch card asks whether to continue a conversation without saying how
+# much room that conversation has left. cs-statusline stamps the figure every
+# render, so the last value on disk is the resumed conversation's own.
+test_resume_prompt_shows_the_previous_conversations_context() {
+    _rot_session "rot-ctx"
+    printf '64\n' > "$CS_SESSIONS_ROOT/rot-ctx/.cs/local/context-pct"
+    local output
+    output=$("$CS_BIN" rot-ctx <<< "n" 2>&1) || true
+    assert_output_contains "$output" "64% of its context" "the card must say how full the resumed conversation was" || return 1
+    assert_output_contains "$output" "Continue previous conversation?" "prompt still present" || return 1
+}
+
+# Best-effort: the stamp only exists where cs-statusline is installed, so its
+# absence must cost nothing rather than print a blank or a zero.
+test_resume_prompt_omits_context_when_never_stamped() {
+    _rot_session "rot-noctx"
+    rm -f "$CS_SESSIONS_ROOT/rot-noctx/.cs/local/context-pct"
+    local output
+    output=$("$CS_BIN" rot-noctx <<< "n" 2>&1) || true
+    assert_output_not_contains "$output" "of its context" "no readout without a stamp" || return 1
+    assert_output_contains "$output" "Continue previous conversation?" "prompt still present" || return 1
+}
+
+test_resume_prompt_ignores_a_junk_context_stamp() {
+    _rot_session "rot-junk"
+    printf 'not-a-number\n' > "$CS_SESSIONS_ROOT/rot-junk/.cs/local/context-pct"
+    local output
+    output=$("$CS_BIN" rot-junk <<< "n" 2>&1) || true
+    assert_output_not_contains "$output" "of its context" "a junk stamp reads as no stamp" || return 1
+}
+
+test_resume_prompt_ignores_an_out_of_range_context_stamp() {
+    _rot_session "rot-over"
+    printf '150\n' > "$CS_SESSIONS_ROOT/rot-over/.cs/local/context-pct"
+    local output
+    output=$("$CS_BIN" rot-over <<< "n" 2>&1) || true
+    assert_output_not_contains "$output" "of its context" "a percentage over 100 is not a percentage" || return 1
+}
+
+# A zero-padded stamp must not be read as octal, and 08/09 would be a hard
+# arithmetic error rather than a wrong number.
+test_resume_prompt_reads_a_zero_padded_context_stamp() {
+    _rot_session "rot-pad"
+    printf '08\n' > "$CS_SESSIONS_ROOT/rot-pad/.cs/local/context-pct"
+    local output
+    output=$("$CS_BIN" rot-pad <<< "n" 2>&1) || true
+    assert_output_contains "$output" "8% of its context" "08 is eight percent, not an octal error" || return 1
+}
+
 # ESC at the continue prompt cancels the launch: the stub must not run.
 test_esc_at_continue_prompt_cancels_launch() {
     _rot_session "rot-esc"
@@ -541,6 +590,11 @@ test_marker_without_pending_handoff_is_disarmed() {
 }
 
 run_test test_prompt_unchanged_without_handoff
+run_test test_resume_prompt_shows_the_previous_conversations_context
+run_test test_resume_prompt_omits_context_when_never_stamped
+run_test test_resume_prompt_ignores_a_junk_context_stamp
+run_test test_resume_prompt_ignores_an_out_of_range_context_stamp
+run_test test_resume_prompt_reads_a_zero_padded_context_stamp
 run_test test_esc_at_continue_prompt_cancels_launch
 # r is only offered alongside a pending handoff. Pressed without one it falls
 # through to the resume default, which is a decline like any other.

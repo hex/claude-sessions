@@ -43,6 +43,21 @@ _handoff_is_local() {  # handoff_file, session_dir
         && grep -E -q "Session started \(.*ID: $parent\)" "$log" 2>/dev/null
 }
 
+# The resumed conversation's context usage, 0-100, or nothing. cs-statusline
+# stamps .cs/local/context-pct on every render, so the last value on disk is the
+# high-water mark of the conversation the card is offering to continue. Silent
+# on every unusable shape — the stamp only exists where the status line is
+# installed, so the readout is a bonus and never a reason to fail a launch.
+# 10# because a stamp like 08 is a hard arithmetic error read as octal.
+_resume_context_pct() {  # session_dir
+    local f="$1/.cs/local/context-pct" v=""
+    [ -f "$f" ] || return 0
+    v=$(tr -d '[:space:]' < "$f" 2>/dev/null || true)
+    case "$v" in ''|*[!0-9]*) return 0 ;; esac
+    [ "$((10#$v))" -le 100 ] || return 0
+    printf '%s' "$((10#$v))"
+}
+
 # Drop a rotation marker the user declined to consume. Armed by the rotate
 # skill for a /clear, or by an earlier r, it must not outlive the answer: left
 # in place it would be consumed by an unrelated /clear hours later, injecting a
@@ -381,6 +396,14 @@ launch_claude_code() {
         if [ -n "$spawn_kick" ]; then
             response=""
         else
+            # What the answer costs: continuing a conversation already deep into
+            # its window is the case the r answer exists for, and the card was
+            # asking without saying which case this is.
+            local _ctx=""
+            _ctx=$(_resume_context_pct "$session_dir")
+            if [ -n "$_ctx" ]; then
+                printf "${DIM}Previous conversation used %s%% of its context.${NC}\n" "$_ctx"
+            fi
             if [ -n "$pending_handoff" ]; then
                 # Answering blind is the hazard this label exists for: r arms
                 # the marker with this basename, and the next SessionStart flips
