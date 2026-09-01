@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.9.2"
+VERSION="2026.9.3"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 
@@ -3292,6 +3292,13 @@ run_checkpoint() {
 # Plain files so the standalone Stop hook can read them without bin/cs's
 # helpers.
 
+# 512 KiB budget, 256 KiB tail. Sized against real use rather than a round
+# number: sections run about 2 KB, and an active day produces 60-odd of them, so
+# the old 128 KiB held roughly ONE DAY — a resume read today's findings and
+# nothing before them. The tail is what a resume actually costs, and 256 KiB of
+# prose is a few percent of a 1M context, which is cheap for the file carrying
+# every hard-won result. The 2:1 ratio keeps rotation infrequent: a full tail's
+# worth must accumulate again before the next one.
 CS_NARRATIVE_MAX_DEFAULT=524288
 CS_NARRATIVE_KEEP_DEFAULT=262144
 

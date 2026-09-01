@@ -4,6 +4,30 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.9.3
+
+A rotation now continues by itself. After `/clear` on an armed handoff, the fresh conversation reads the handoff and starts its next step about two seconds later, with nothing typed.
+
+### Features
+
+**`/clear` on an armed handoff starts the work itself.** A hook cannot start a turn, but it can arm one: session-start watches `.cs/local/rotation-kick/` and leaves a detached child to drop a file there once Claude Code's file watch is up. That change wakes the model with a reason carrying the instruction your "go" used to carry. The wake yields to you — a message you send inside that window wins, and the notice says so. `CS_NO_ROTATION_WAKE=1` restores the old behaviour; `CS_ROTATION_KICK_DELAY` tunes the wait.
+
+Two decisions worth knowing. The kick is deliberately off the mail budget: `CS_MAIL_WAKE_MAX` bounds a volley of arrivals nobody asked for, while a kick is one file the session wrote for itself, so spending mail's allowance on it would silence real messages. And it does not yield to the queue, which is the opposite of the mail wake — nothing resets `queue.state` on a `/clear`, so an interrupted drain leaves a stale `draining` behind, and yielding there swallowed the only event the kick will ever produce, stranding the rotation *and* the queue.
+
+**The narrative budget is 512 KiB, with a 256 KiB tail.** Sections run about 2 KB and an active day produces sixty-odd of them, so the old 128 KiB held roughly one day — a resume read today's findings and nothing before them. The cap only sets how often rotation runs; the tail is the recurring cost, and a few percent of a 1M context is cheap for the file carrying a session's results.
+
+**The rotate skill ends on the one step nothing can take for you.** `/rotate` now closes with the `/clear` instruction and nothing after it. A hook cannot submit to Claude Code's command queue, so that keystroke is always yours — it should not be buried under a summary.
+
+### Fixes
+
+- The rotation notice and preamble now describe the path you are actually on. A wake arrives as a system-reminder, so "the first message comes from the user" is false when a kick is armed, and "send any message" would make you race a wake already coming.
+- The rewake label no longer claims every wake is mail. One `FileChanged` registration carries both cross-session mail and the rotation kick, so the label names neither and the reason says which.
+- A cancel test in the prompt-rewriter suite waited for any child process to appear, treating that as proof the shim's TERM trap was armed. It is not — the shim forks a command substitution to build its progress label *before* arming the trap, so under gate load the signal could land in the unprotected window and surface as a raw exit 143. It now waits for the shim's own `rewriter-forked` signal, which is written after the trap.
+
+### Tests
+
+- The six cs-secrets concurrency tests moved to their own suite. They hold a writer inside its critical section with deliberate sleeps — those sleeps are the assertion, not padding — and isolating them cut the parent suite from 89s to 56s, more than the tests themselves cost, because they were loading the box for every neighbour.
+
 ## 2026.9.2
 
 A patch release: one visual tweak, and a test-harness leak that reached the developer's own terminal.
