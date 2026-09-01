@@ -185,7 +185,7 @@ The current directory decides, not any history: cs opens a session when that dir
 - **Symbol legend** — `● activity  ■ live  * marked  archived` sits in the table header's free width on wide terminals
 - **Fuzzy search** with `/` — matches characters in order with highlighting; Enter commits the filter. Add `#tag` anywhere in the query to AND-filter by tag (e.g. `#api backend`); combine multiple `#tag`s or mix with a fuzzy name remainder
 - **Time-based sections** — sessions grouped under Today, Yesterday, This Week, This Month, Older when sorted by date (the default view)
-- **Action bar** with `Enter` — inline bar shows available actions with shortcut keys
+- **Action menu** with `Enter` — a popup over the list, one action per row with its shortcut key; `j`/`k` move, `Enter` runs, `Esc` closes, and every shortcut also works straight from the list
 - **Preview & To-Do panes** — appear beside the list on wide landscape terminals (≥120 cols), or stacked below it (list, then details, then notes) on any window at least 40 cols by 26 rows; toggle with `p`
 - **Expand row** with `p` — shows session objective (auto-captured from your first prompt) and narrative inline
 - **Create session** with `n` — opens inline dialog to create a new session
@@ -194,6 +194,7 @@ The current directory decides, not any history: cs opens a session when that dir
 - **Rename** with `r`
 - **Archive / unarchive** with `a` — toggles the selected session's `.cs/archived` marker by running `cs -archive` / `cs -unarchive`, so the picker never writes the marker itself and inherits the verb's refusal to archive a live session. Archived rows are hidden until `A` shows them, which is also how you reach one to unarchive
 - **Manage secrets** with `s` (view values with `v`, auto-redacts after 5 seconds)
+- **Rotate narrative** with `R` — runs `cs <name> -narrative rotate` on the highlighted session and shows what it printed; a narrative under its byte budget rotates nothing and says so
 - **Queue a task** — focus the To-Do input with `Tab`, type a prompt, and press `Enter` to add it to the highlighted session's queue for a walk-away run; a `▰▱` meter with the count appears in the Queue column while that session's queue is non-empty
 - **Quit** with `q` or `Esc`
 - **Light/dark palette** — the warm palette adapts to the terminal background detected at launch (`CS_TERM_THEME`); set the env var to force `light` or `dark`
@@ -204,6 +205,7 @@ The TUI requires `cs-tui` (a small standalone Rust binary). Build from source: `
 
 ```bash
 cs <session> -secrets <cmd>   # Manage secrets for a session by name
+cs <session> -narrative rotate  # Rotate that session's narrative without launching it
 cs <session> --force          # Override active session lock
 ```
 

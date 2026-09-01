@@ -218,13 +218,9 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         frame.area(),
     );
 
-    // When in SessionMenu mode, allocate an extra line for the inline action bar
-    let action_bar_height = if app.mode == Mode::SessionMenu { 1u16 } else { 0 };
-
     let chunks = Layout::vertical([
         Constraint::Length(2), // masthead: brand row + gradient rule
         Constraint::Min(5),
-        Constraint::Length(action_bar_height),
         Constraint::Length(1),
     ])
     .split(frame.area());
@@ -264,17 +260,14 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         }
     }
 
-    if app.mode == Mode::SessionMenu {
-        render_action_bar(app, frame, chunks[2]);
-    }
-
     match &app.mode {
-        Mode::Search => render_search_bar(app, frame, chunks[3]),
-        _ => render_footer(app, frame, chunks[3]),
+        Mode::Search => render_search_bar(app, frame, chunks[2]),
+        _ => render_footer(app, frame, chunks[2]),
     }
 
     // Overlay dialogs on top
     match &app.mode {
+        Mode::SessionMenu => render_session_menu(app, frame),
         Mode::ConfirmDelete => render_confirm_delete(app, frame),
         Mode::ConfirmBatchDelete => render_confirm_batch_delete(app, frame),
         Mode::ConfirmForceOpen => render_confirm_force_open(app, frame),
@@ -1041,61 +1034,69 @@ fn render_search_bar(app: &App, frame: &mut Frame, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
-fn render_action_bar(app: &App, frame: &mut Frame, area: Rect) {
+/// The session menu: a floating list of the actions the selected row accepts.
+/// Rows come from `App::menu_rows`, so MENU_ITEMS stays the single place an
+/// entry is declared — the renderer used to keep a second copy of the labels.
+fn render_session_menu(app: &App, frame: &mut Frame) {
     let p = app.theme;
-    let session = app.selected_session();
-    let has_secrets = session.as_ref().map(|s| s.secrets_count > 0).unwrap_or(false);
-    // One key, two labels: the row's own state says which way the toggle goes.
-    let archive_label = match session.as_ref().map(|s| s.archived) {
-        Some(true) => "unarchive",
-        _ => "archive",
-    };
+    let title = app
+        .selected_session()
+        .map(|s| s.name.clone())
+        .unwrap_or_else(|| "session".to_string());
+    let rows = app.menu_rows();
+    // Keys are right-padded to the widest one ("Enter") so the labels line up
+    // in a column instead of stepping in and out with each key's width.
+    let key_w = rows.iter().map(|(k, _, _)| k.chars().count()).max().unwrap_or(1);
 
-    let mut spans: Vec<Span> = Vec::new();
-    spans.push(Span::styled(" ", Style::default()));
+    let lines: Vec<Line> = rows
+        .iter()
+        .enumerate()
+        .map(|(i, (key, label, available))| {
+            let selected = i == app.menu_selected;
+            let (key_color, label_color) = if !*available {
+                (p.comment, p.comment)
+            } else if selected {
+                (p.gold, p.fg)
+            } else {
+                (p.gold, p.comment)
+            };
+            let label_style = if selected {
+                Style::default().fg(label_color).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(label_color)
+            };
+            Line::from(vec![
+                Span::styled(
+                    if selected { " >> " } else { "    " },
+                    Style::default().fg(p.gold).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("[", Style::default().fg(key_color)),
+                Span::styled(
+                    (*key).to_string(),
+                    Style::default().fg(key_color).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("]", Style::default().fg(key_color)),
+                Span::raw(" ".repeat(key_w - key.chars().count() + 1)),
+                Span::styled(label.clone(), label_style),
+            ])
+        })
+        .collect();
 
-    // Each action: [key]label with availability-based coloring
-    let actions: &[(&str, &str, bool)] = &[
-        ("Enter", "open", true),
-        ("d", "delete", true),
-        ("r", "rename", true),
-        ("s", "secrets", has_secrets),
-        ("a", archive_label, true),
-    ];
-
-    for (i, (key, label, available)) in actions.iter().enumerate() {
-        let is_selected = i == app.menu_selected;
-
-        if i > 0 {
-            spans.push(Span::styled("  ", Style::default()));
-        }
-
-        let (key_color, label_color) = if !available {
-            (p.comment, p.comment)
-        } else if is_selected {
-            (p.gold, p.fg)
-        } else {
-            (p.gold, p.comment)
-        };
-
-        let key_style = Style::default().fg(key_color).add_modifier(Modifier::BOLD);
-        let label_style = if is_selected {
-            Style::default().fg(label_color).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(label_color)
-        };
-
-        spans.push(Span::styled("[", Style::default().fg(key_color)));
-        spans.push(Span::styled(*key, key_style));
-        spans.push(Span::styled("]", Style::default().fg(key_color)));
-        spans.push(Span::styled(*label, label_style));
-    }
-
-    spans.push(Span::styled("  Esc:close", Style::default().fg(p.comment)));
-
-    let bar = Paragraph::new(Line::from(spans))
-        .style(Style::default().bg(p.soft));
-    frame.render_widget(bar, area);
+    let height = (lines.len() as u16 + 2).min(frame.area().height);
+    // Sized to the longest entry, not to a share of the screen: a six-line
+    // menu at a fixed percentage reads as a mostly-empty box on a wide
+    // terminal. Two borders plus a trailing column of padding, and never
+    // narrower than the title it frames.
+    let content_w = lines.iter().map(|l| l.width() as u16).max().unwrap_or(20);
+    let width = (content_w + 3).max(title.chars().count() as u16 + 4);
+    let popup_area = centered_cols(width, height, frame.area());
+    frame.render_widget(Clear, popup_area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(p.strong))
+        .title(format!(" {} ", title))
+        .title_style(Style::default().fg(p.ink).add_modifier(Modifier::BOLD));
+    frame.render_widget(Paragraph::new(lines).block(block), popup_area);
 }
 
 fn render_confirm_delete(app: &App, frame: &mut Frame) {
@@ -2056,6 +2057,20 @@ fn render_merge(app: &mut App, frame: &mut Frame, area: Rect) {
     }
 
     card_frame(frame.buffer_mut(), detail_area, &title, p.strong, p);
+}
+
+/// Centre a popup of an explicit cell width, for content whose natural size is
+/// known — `centered_rect`'s percentage suits a popup that should scale with
+/// the terminal, which a short fixed list does not.
+fn centered_cols(width: u16, height: u16, area: Rect) -> Rect {
+    let width = width.min(area.width);
+    let height = height.min(area.height);
+    Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    }
 }
 
 fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
@@ -4157,17 +4172,18 @@ mod tests {
     /// threads, so an unguarded set_var races every concurrent footer render.
     static VERSION_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-    /// The archive key is a toggle, and the action bar has to say which way it
-    /// will go — offering "archive" on an already-archived row would promise
-    /// the opposite of what pressing it does.
+    /// The archive key is a toggle, and the menu has to say which way it will
+    /// go — offering "Archive" on an already-archived row would promise the
+    /// opposite of what pressing it does.
     #[test]
-    fn action_bar_names_the_direction_the_archive_key_will_take() {
+    fn session_menu_names_the_direction_the_archive_key_will_take() {
         let mut sessions = locked_and_recent_sessions();
         let mut app = App::new(sessions.clone());
         app.mode = Mode::SessionMenu;
         let (_, rows) = render_app(&mut app);
-        let bar = rows.join("\n");
-        assert!(bar.contains("[a]archive"), "bar: {}", bar);
+        let menu = rows.join("\n");
+        assert!(menu.contains("Archive"), "menu: {}", menu);
+        assert!(!menu.contains("Unarchive"), "menu: {}", menu);
 
         // Both, not one: the default sort decides which row lands under the
         // cursor, and the assertion is about the selected row's state.
@@ -4179,8 +4195,166 @@ mod tests {
         app.apply_filter_and_sort();
         app.mode = Mode::SessionMenu;
         let (_, rows) = render_app(&mut app);
-        let bar = rows.join("\n");
-        assert!(bar.contains("[a]unarchive"), "bar: {}", bar);
+        let menu = rows.join("\n");
+        assert!(menu.contains("Unarchive"), "menu: {}", menu);
+    }
+
+    /// The whole point of the change: the menu is a floating popup, not a strip
+    /// pinned above the footer. Entries stack one per row inside a border, and
+    /// the row above the footer still belongs to what is underneath.
+    #[test]
+    fn session_menu_renders_as_a_popup_not_a_bottom_bar() {
+        let mut app = App::new(locked_and_recent_sessions());
+        app.mode = Mode::SessionMenu;
+        let (_, rows) = render_app(&mut app);
+        let open = rows
+            .iter()
+            .position(|r| r.contains("Open"))
+            .expect("the menu must list Open");
+        let rename = rows
+            .iter()
+            .position(|r| r.contains("Rename"))
+            .expect("the menu must list Rename");
+        assert_ne!(
+            open, rename,
+            "entries must stack on their own rows, not share one bar row"
+        );
+        assert!(
+            rows[open].contains('\u{2502}'),
+            "entries must sit inside a bordered popup: {}",
+            rows[open]
+        );
+        let above_footer = rows.len() - 2;
+        assert!(
+            !rows[above_footer].contains("Open") && !rows[above_footer].contains("Rename"),
+            "the menu must float rather than occupy the row above the footer: {}",
+            rows[above_footer]
+        );
+    }
+
+    /// Derived from MENU_ITEMS rather than a hand-written list: the renderer
+    /// used to keep its own second copy of these labels, so an entry added to
+    /// one and not the other left a key that worked but was never offered.
+    #[test]
+    fn session_menu_offers_every_entry_menu_items_declares() {
+        let mut app = App::new(locked_and_recent_sessions());
+        app.mode = Mode::SessionMenu;
+        let (_, rows) = render_app(&mut app);
+        let menu = rows.join("\n");
+        for (label, _) in crate::app::MENU_ITEMS {
+            // Archive's label is state-dependent; the test above pins both
+            // directions, so it is the one entry excused from a literal match.
+            if *label == "Archive" {
+                continue;
+            }
+            assert!(menu.contains(label), "the menu must offer {}: {}", label, menu);
+        }
+    }
+
+    /// A fixed share of the screen makes a six-line menu read as a mostly-empty
+    /// box on a wide terminal, so the popup is sized to its longest entry and
+    /// stays that width whatever the terminal does.
+    #[test]
+    fn session_menu_popup_is_sized_to_its_content_not_the_terminal() {
+        let menu_width_at = |cols: u16| -> usize {
+            let mut app = App::new(locked_and_recent_sessions());
+            app.mode = Mode::SessionMenu;
+            // Table-only, so the popup's own border is the only one on the row.
+            app.show_preview = false;
+            let backend = TestBackend::new(cols, 24);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal.draw(|frame| render(&mut app, frame)).unwrap();
+            let buf = terminal.backend().buffer().clone();
+            for y in 0..buf.area.height {
+                let row: Vec<char> = (0..buf.area.width)
+                    .map(|x| {
+                        buf.cell(ratatui::layout::Position::new(x, y))
+                            .unwrap()
+                            .symbol()
+                            .chars()
+                            .next()
+                            .unwrap_or(' ')
+                    })
+                    .collect();
+                if !row.iter().collect::<String>().contains("Rotate narrative") {
+                    continue;
+                }
+                let l = row.iter().position(|c| *c == '\u{2502}').expect("left border");
+                let r = row.iter().rposition(|c| *c == '\u{2502}').expect("right border");
+                return r - l + 1;
+            }
+            panic!("the menu must list Rotate narrative");
+        };
+        let narrow = menu_width_at(100);
+        let wide = menu_width_at(200);
+        assert_eq!(narrow, wide, "the popup width must not follow the terminal's");
+        assert!(wide < 45, "popup is {} cols wide for a ~28-col menu", wide);
+    }
+
+    /// Navigation is only visible if the cursor is: the selected row carries
+    /// the marker, and its neighbours do not.
+    #[test]
+    fn session_menu_marks_the_selected_entry() {
+        let mut app = App::new(locked_and_recent_sessions());
+        app.mode = Mode::SessionMenu;
+        app.menu_selected = 2; // Rename
+        let (_, rows) = render_app(&mut app);
+        let selected = rows
+            .iter()
+            .find(|r| r.contains("Rename"))
+            .expect("the menu must list Rename");
+        let other = rows
+            .iter()
+            .find(|r| r.contains("Delete"))
+            .expect("the menu must list Delete");
+        assert!(selected.contains(">>"), "selected row: {}", selected);
+        assert!(!other.contains(">>"), "unselected row: {}", other);
+    }
+
+    /// An entry whose verb has nothing to act on is offered dim: the Secrets
+    /// key is gold when the row has secrets and muted when it has none, so the
+    /// menu never advertises an empty popup.
+    #[test]
+    fn session_menu_dims_the_secrets_key_when_the_row_has_none() {
+        let p = Palette::dark();
+        let key_fg = |sessions: Vec<Session>| -> Color {
+            let mut app = App::new(sessions);
+            app.theme = p;
+            app.mode = Mode::SessionMenu;
+            let backend = TestBackend::new(115, 24);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal.draw(|frame| render(&mut app, frame)).unwrap();
+            let buf = terminal.backend().buffer().clone();
+            for y in 0..buf.area.height {
+                let cells: Vec<String> = (0..buf.area.width)
+                    .map(|x| {
+                        buf.cell(ratatui::layout::Position::new(x, y))
+                            .unwrap()
+                            .symbol()
+                            .to_string()
+                    })
+                    .collect();
+                if !cells.concat().contains("Secrets") {
+                    continue;
+                }
+                // The key cell is the 's' between the brackets on that row.
+                let open = cells.iter().position(|c| c == "[").expect("bracketed key");
+                return buf
+                    .cell(ratatui::layout::Position::new(open as u16 + 1, y))
+                    .unwrap()
+                    .fg;
+            }
+            panic!("the menu must list Secrets");
+        };
+
+        let none = locked_and_recent_sessions();
+        assert_eq!(key_fg(none), p.comment, "no secrets: the key reads unavailable");
+
+        let mut some = locked_and_recent_sessions();
+        for s in some.iter_mut() {
+            s.secrets_count = 2;
+        }
+        assert_eq!(key_fg(some), p.gold, "with secrets: the key reads available");
     }
 
     fn render_app(app: &mut App) -> (ratatui::buffer::Buffer, Vec<String>) {

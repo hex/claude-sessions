@@ -320,12 +320,18 @@ pub enum NotesFocus {
     Editing,
 }
 
+/// The session menu, in display order: label and the key that selects it. The
+/// single source for both the popup's rows and the key arms below — the menu
+/// used to carry a second, hand-kept copy of these labels in the renderer, and
+/// the two drifted. State-dependent entries (Archive's direction, Secrets'
+/// availability) are overridden in `menu_rows`, never duplicated here.
 pub const MENU_ITEMS: &[(&str, &str)] = &[
     ("Open", "Enter"),
     ("Delete", "d"),
     ("Rename", "r"),
     ("Secrets", "s"),
     ("Archive", "a"),
+    ("Rotate narrative", "R"),
 ];
 
 #[derive(Debug)]
@@ -1000,6 +1006,10 @@ impl App {
                 self.toggle_archive();
                 Action::None
             }
+            KeyCode::Char('R') => {
+                self.rotate_narrative();
+                Action::None
+            }
             KeyCode::Char('n') => {
                 self.create_input.clear();
                 self.mode = Mode::CreateSession;
@@ -1351,6 +1361,7 @@ impl App {
             KeyCode::Char('r') => self.execute_menu_action(2),
             KeyCode::Char('s') => self.execute_menu_action(3),
             KeyCode::Char('a') => self.execute_menu_action(4),
+            KeyCode::Char('R') => self.execute_menu_action(5),
             _ => Action::None,
         }
     }
@@ -1399,6 +1410,11 @@ impl App {
             4 => {
                 // Archive / unarchive
                 self.toggle_archive();
+                Action::None
+            }
+            5 => {
+                // Rotate the narrative into its archive
+                self.rotate_narrative();
                 Action::None
             }
             _ => Action::None,
@@ -2042,6 +2058,33 @@ impl App {
         succeeded
     }
 
+    /// Archive the selected session's oldest narrative sections through
+    /// `cs <name> -narrative rotate`. Both streams land in the output popup:
+    /// a narrative under budget rotates nothing and says so, and that sentence
+    /// is the whole answer as often as a rotation is. Unlike the secrets
+    /// helper this never sets `return_to_secrets`, so dismissing the output
+    /// returns to the list.
+    fn rotate_narrative(&mut self) {
+        let name = match self.selected_session_name() {
+            Some(n) => n,
+            None => return,
+        };
+        match std::process::Command::new(cs_bin())
+            .args([name.as_str(), "-narrative", "rotate"])
+            .output()
+        {
+            Ok(out) => {
+                let text = String::from_utf8_lossy(&out.stdout).to_string()
+                    + &String::from_utf8_lossy(&out.stderr);
+                self.mode = Mode::CommandOutput(text);
+            }
+            Err(e) => {
+                self.set_status(format!("Rotate failed: {}", e), StatusLevel::Error);
+                self.mode = Mode::Normal;
+            }
+        }
+    }
+
     fn peek_secret(&mut self, key_name: &str) {
         if let Some(session) = self.selected_session() {
             let name = session.name.clone();
@@ -2063,6 +2106,26 @@ impl App {
                 }
             }
         }
+    }
+
+    /// The session menu as it should be drawn for the selected row: MENU_ITEMS
+    /// with its two state-dependent overrides applied — Archive names the
+    /// direction its key will actually take, and Secrets reads unavailable on
+    /// a row that has none, so the menu never advertises an empty popup.
+    /// Returned rather than duplicated in the renderer: those labels lived in
+    /// two places once, and the copies drifted.
+    pub fn menu_rows(&self) -> Vec<(&'static str, String, bool)> {
+        let session = self.selected_session();
+        let archived = session.map(|s| s.archived).unwrap_or(false);
+        let has_secrets = session.map(|s| s.secrets_count > 0).unwrap_or(false);
+        MENU_ITEMS
+            .iter()
+            .map(|(label, key)| match *label {
+                "Archive" if archived => (*key, "Unarchive".to_string(), true),
+                "Secrets" => (*key, (*label).to_string(), has_secrets),
+                _ => (*key, (*label).to_string(), true),
+            })
+            .collect()
     }
 
     pub fn has_git_sessions(&self) -> bool {
@@ -4786,6 +4849,148 @@ mod tests {
             "the menu must carry an Archive entry for the key to select"
         );
         std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// A cs stub for the session-scoped form `cs <name> -narrative rotate`,
+    /// whose verb is $2 — unlike the global `-archive <name>` form, where it
+    /// is $1. `body` is the shell run for that arm.
+    #[cfg(unix)]
+    fn rotate_stub(dir: &std::path::Path, body: &str) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let stub = dir.join("cs-rotate-stub");
+        let script = format!(
+            "#!/bin/sh\n\
+             printf '%s\\n' \"$@\" >> {log}\n\
+             case \"$2\" in\n\
+             -narrative) {body} ;;\n\
+             esac\n",
+            log = dir.join("argv").display(),
+            body = body
+        );
+        std::fs::write(&stub, script).unwrap();
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        stub
+    }
+
+    /// Rotation is reached by session name, so the argv is the session-scoped
+    /// shape `cs <name> -narrative rotate` — not the global `cs -narrative`
+    /// form, which would rotate whichever session the picker's own shell is
+    /// standing in.
+    #[cfg(unix)]
+    #[test]
+    fn session_menu_rotate_entry_runs_the_narrative_verb() {
+        let _env = CS_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = archive_root("rotate-menu");
+        let stub = rotate_stub(&tmp, "echo rotated");
+        let _root = session::test_root::scoped(tmp.clone());
+        std::env::set_var("CS_BIN", &stub);
+
+        let mut app = App::new(session::scan_sessions());
+        app.mode = Mode::SessionMenu;
+        app.handle_key(KeyEvent::from(KeyCode::Char('R')));
+        std::env::remove_var("CS_BIN");
+
+        let argv = std::fs::read_to_string(tmp.join("argv")).unwrap_or_default();
+        assert_eq!(
+            argv, "alpha\n-narrative\nrotate\n",
+            "the menu entry must name the session it rotates"
+        );
+        assert!(
+            MENU_ITEMS.iter().any(|(label, key)| *label == "Rotate narrative" && *key == "R"),
+            "the menu must carry a Rotate narrative entry for the key to select"
+        );
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// What cs printed IS the answer here: a narrative under budget rotates
+    /// nothing and says so, and that sentence is the only feedback the picker
+    /// can give. Dropping it would leave the entry looking like a no-op.
+    #[cfg(unix)]
+    #[test]
+    fn rotate_shows_what_cs_printed_and_dismisses_back_to_the_list() {
+        let _env = CS_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = archive_root("rotate-output");
+        let stub = rotate_stub(&tmp, "echo 'nothing to rotate: 3 KB (budget 128 KB)'");
+        let _root = session::test_root::scoped(tmp.clone());
+        std::env::set_var("CS_BIN", &stub);
+
+        let mut app = App::new(session::scan_sessions());
+        app.mode = Mode::SessionMenu;
+        app.handle_key(KeyEvent::from(KeyCode::Char('R')));
+        std::env::remove_var("CS_BIN");
+
+        match &app.mode {
+            Mode::CommandOutput(text) => {
+                assert!(text.contains("nothing to rotate"), "output: {}", text)
+            }
+            other => panic!("expected the output popup, got {:?}", other),
+        }
+        app.handle_key(KeyEvent::from(KeyCode::Esc));
+        assert_eq!(app.mode, Mode::Normal, "dismissing returns to the list");
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// cs refusing is not cs failing to start, and rotate refuses on stderr —
+    /// an unwritable archive dir, a changed narrative, a chunk that already
+    /// exists with different bytes. Swallowing that stream would report those
+    /// as silence.
+    #[cfg(unix)]
+    #[test]
+    fn rotate_passes_a_refusal_through_to_the_output_popup() {
+        let _env = CS_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = archive_root("rotate-refused");
+        let stub = rotate_stub(&tmp, "echo 'Error: Cannot write to archive' >&2; exit 1");
+        let _root = session::test_root::scoped(tmp.clone());
+        std::env::set_var("CS_BIN", &stub);
+
+        let mut app = App::new(session::scan_sessions());
+        app.mode = Mode::SessionMenu;
+        app.handle_key(KeyEvent::from(KeyCode::Char('R')));
+        std::env::remove_var("CS_BIN");
+
+        match &app.mode {
+            Mode::CommandOutput(text) => {
+                assert!(text.contains("Cannot write to archive"), "output: {}", text)
+            }
+            other => panic!("expected the refusal in the output popup, got {:?}", other),
+        }
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// Every menu entry's shortcut also works straight from the list — that
+    /// invariant is what makes the key column in the menu truthful.
+    #[cfg(unix)]
+    #[test]
+    fn capital_r_rotates_from_the_list_too() {
+        let _env = CS_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = archive_root("rotate-normal");
+        let stub = rotate_stub(&tmp, "echo rotated");
+        let _root = session::test_root::scoped(tmp.clone());
+        std::env::set_var("CS_BIN", &stub);
+
+        let mut app = App::new(session::scan_sessions());
+        app.handle_key(KeyEvent::from(KeyCode::Char('R')));
+        std::env::remove_var("CS_BIN");
+
+        let argv = std::fs::read_to_string(tmp.join("argv")).unwrap_or_default();
+        assert_eq!(argv, "alpha\n-narrative\nrotate\n", "R from the list rotates too");
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// The menu is one row per entry, so navigation has to reach the last one.
+    #[test]
+    fn menu_navigation_reaches_every_entry() {
+        let mut app = App::new(sample_sessions());
+        app.mode = Mode::SessionMenu;
+        app.menu_selected = 0;
+        for _ in 0..MENU_ITEMS.len() {
+            app.handle_key(KeyEvent::from(KeyCode::Char('j')));
+        }
+        assert_eq!(
+            app.menu_selected,
+            MENU_ITEMS.len() - 1,
+            "j must reach the last entry and stop there"
+        );
     }
 
     /// cs refusing is not cs failing to start: a live session exits non-zero
