@@ -18,6 +18,7 @@ _cs_completions() {
 
     # Checkpoint subcommands
     local checkpoint_cmds="list show"
+    local narrative_cmds="rotate"
 
     # Queue subcommands
     local queue_cmds="add list ls rm clear start defer log"
@@ -57,6 +58,7 @@ _cs_completions() {
     local in_update=false
     local in_checkpoint=false
     local in_queue=false
+    local in_narrative=false
     local in_tag=false
     local in_list=false
     local has_session=false
@@ -72,6 +74,7 @@ _cs_completions() {
                 in_queue=false
                 in_tag=false
                 in_list=false
+                in_narrative=false
                 ;;
             -update)
                 in_update=true
@@ -80,6 +83,7 @@ _cs_completions() {
                 in_queue=false
                 in_tag=false
                 in_list=false
+                in_narrative=false
                 ;;
             -checkpoint)
                 in_checkpoint=true
@@ -88,12 +92,23 @@ _cs_completions() {
                 in_queue=false
                 in_tag=false
                 in_list=false
+                in_narrative=false
                 ;;
             -queue)
                 in_queue=true
                 in_secrets=false
                 in_update=false
                 in_checkpoint=false
+                in_tag=false
+                in_list=false
+                in_narrative=false
+                ;;
+            -narrative)
+                in_narrative=true
+                in_secrets=false
+                in_update=false
+                in_checkpoint=false
+                in_queue=false
                 in_tag=false
                 in_list=false
                 ;;
@@ -104,6 +119,7 @@ _cs_completions() {
                 in_checkpoint=false
                 in_queue=false
                 in_list=false
+                in_narrative=false
                 ;;
             -list|-ls)
                 in_list=true
@@ -112,6 +128,7 @@ _cs_completions() {
                 in_checkpoint=false
                 in_queue=false
                 in_tag=false
+                in_narrative=false
                 ;;
             -remove|-rm)
                 after_remove=true
@@ -124,7 +141,7 @@ _cs_completions() {
                 ;;
             *)
                 # A non-flag word that's not a subcommand is likely a session name
-                if ! $in_secrets && ! $after_remove && ! $in_update && ! $in_checkpoint && ! $in_queue && ! $in_tag && ! $after_archive; then
+                if ! $in_secrets && ! $after_remove && ! $in_update && ! $in_checkpoint && ! $in_queue && ! $in_narrative && ! $in_tag && ! $after_archive; then
                     has_session=true
                 fi
                 ;;
@@ -194,6 +211,12 @@ _cs_completions() {
     # Context: after -queue, complete with queue subcommands
     if $in_queue; then
         COMPREPLY=($(compgen -W "$queue_cmds" -- "$cur"))
+        return
+    fi
+
+    # Context: after -narrative (global or session-scoped), its one subcommand
+    if $in_narrative; then
+        COMPREPLY=($(compgen -W "$narrative_cmds" -- "$cur"))
         return
     fi
 

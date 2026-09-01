@@ -304,12 +304,14 @@ main() {
                 # "<base>@<task>" under the sessions root and carries its own
                 # .cs, so one path serves both forms: a worktree rotates its
                 # OWN narrative, unlike -secrets, which routes a worktree to
-                # the base's namespace. Guarded here rather than in
-                # rotate_narrative, whose "run from inside a session" message
-                # answers the global form and would misname this one's fault.
-                if [ ! -d "$SESSIONS_ROOT/$session_name" ] && [ ! -L "$SESSIONS_ROOT/$session_name" ]; then
-                    error "No such session: $session_name"
-                fi
+                # the base's namespace. Guarded on cs's own is_session_dir, not
+                # on bare existence: an adopted session is a symlink into the
+                # user's project, and a dangling one passes -L but has no .cs
+                # behind it, so the failure would surface as rotate_narrative's
+                # "run from inside a session" — which answers the global form
+                # and misnames this one's fault.
+                is_session_dir "$SESSIONS_ROOT/$session_name" \
+                    || error "No such session: $session_name"
                 export CLAUDE_SESSION_NAME="$session_name"
                 export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
                 export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"

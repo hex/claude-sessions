@@ -1088,7 +1088,7 @@ fn render_session_menu(app: &App, frame: &mut Frame) {
     // terminal. Two borders plus a trailing column of padding, and never
     // narrower than the title it frames.
     let content_w = lines.iter().map(|l| l.width() as u16).max().unwrap_or(20);
-    let width = (content_w + 3).max(title.chars().count() as u16 + 4);
+    let width = (content_w + 3).max(title.width() as u16 + 4);
     let popup_area = centered_cols(width, height, frame.area());
     frame.render_widget(Clear, popup_area);
     let block = Block::default()

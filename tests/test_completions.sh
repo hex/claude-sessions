@@ -559,10 +559,12 @@ test_every_session_subcommand_is_completed() {
         grep -qxF -- "$verb" <<< "$bash_opts" || missing_bash="$missing_bash $verb"
         grep -qxF -- "$verb" <<< "$zsh_opts"  || missing_zsh="$missing_zsh $verb"
     done <<< "$(session_subcommands)"
-    [ -z "$missing_bash" ] \
-        || { echo "  FAIL: completions/cs.bash session_opts is missing:$missing_bash"; return 1; }
-    [ -z "$missing_zsh" ] \
-        || { echo "  FAIL: completions/_cs session_opts is missing:$missing_zsh"; return 1; }
+    # Both reported before returning: an early return on the bash omission hides
+    # the zsh one, and a verb forgotten in one file is almost always forgotten
+    # in both — so the fixer would learn about the second only on a re-run.
+    [ -z "$missing_bash" ] || echo "  FAIL: completions/cs.bash session_opts is missing:$missing_bash"
+    [ -z "$missing_zsh" ]  || echo "  FAIL: completions/_cs session_opts is missing:$missing_zsh"
+    [ -z "$missing_bash" ] && [ -z "$missing_zsh" ]
 }
 
 # The catch-all arm tells the user what they could have typed, so it is a third
@@ -579,8 +581,45 @@ test_unknown_session_command_error_lists_every_verb() {
         || { echo "  FAIL: the unknown-session-command error omits:$missing"; return 1; }
 }
 
+# -narrative takes exactly one subcommand, and a verb with no context arm in
+# the word-scanning loop falls through to the generic flag case: the completion
+# then re-offers the session-option list — including -narrative itself — where
+# its subcommand belongs. Every peer verb (-queue, -secrets, -tag) sets a flag.
+test_bash_completion_offers_rotate_after_narrative() {
+    put_built_cs_on_path
+    local out
+    out=$(bash_candidates_words "$BASH_COMP" cs some-session -narrative "")
+    assert_candidate "$out" "rotate" "bash must offer rotate after a session's -narrative" || return 1
+    assert_not_candidate "$out" "-narrative" "the flag list must not be re-offered in its subcommand's place" || return 1
+}
+
+test_zsh_completion_offers_rotate_after_narrative() {
+    put_built_cs_on_path
+    local out
+    out=$(zsh_candidates_words cs some-session -narrative "")
+    assert_candidate "$out" "rotate" "zsh must offer rotate after a session's -narrative" || return 1
+}
+
+test_bash_completion_offers_rotate_after_the_global_narrative() {
+    put_built_cs_on_path
+    local out
+    out=$(bash_candidates_words "$BASH_COMP" cs -narrative "")
+    assert_candidate "$out" "rotate" "bash must offer rotate after the global -narrative" || return 1
+}
+
+test_zsh_completion_offers_rotate_after_the_global_narrative() {
+    put_built_cs_on_path
+    local out
+    out=$(zsh_candidates_words cs -narrative "")
+    assert_candidate "$out" "rotate" "zsh must offer rotate after the global -narrative" || return 1
+}
+
 run_test test_session_extraction_is_sane
 run_test test_session_opts_extraction_is_sane
+run_test test_bash_completion_offers_rotate_after_narrative
+run_test test_zsh_completion_offers_rotate_after_narrative
+run_test test_bash_completion_offers_rotate_after_the_global_narrative
+run_test test_zsh_completion_offers_rotate_after_the_global_narrative
 run_test test_every_session_subcommand_is_completed
 run_test test_unknown_session_command_error_lists_every_verb
 

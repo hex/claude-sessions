@@ -49,6 +49,10 @@ _cs() {
         'list:List checkpoints for current session'
         'show:Print a specific checkpoint'
     )
+    local -a narrative_cmds
+    narrative_cmds=(
+        'rotate:Archive the oldest narrative sections past the byte budget'
+    )
 
     # Queue subcommands with descriptions
     local -a queue_cmds
@@ -125,23 +129,24 @@ _cs() {
     )
 
     # Determine context
-    local in_secrets=false in_update=false in_checkpoint=false in_queue=false in_tag=false in_list=false has_session=false after_remove=false after_archive=false
+    local in_secrets=false in_update=false in_checkpoint=false in_queue=false in_narrative=false in_tag=false in_list=false has_session=false after_remove=false after_archive=false
     local i word
 
     for ((i=2; i < CURRENT; i++)); do
         word="${words[i]}"
         case "$word" in
-            -secrets) in_secrets=true; in_update=false; in_checkpoint=false; in_queue=false; in_tag=false; in_list=false ;;
-            -update) in_update=true; in_secrets=false; in_checkpoint=false; in_queue=false; in_tag=false; in_list=false ;;
-            -checkpoint) in_checkpoint=true; in_secrets=false; in_update=false; in_queue=false; in_tag=false; in_list=false ;;
-            -queue) in_queue=true; in_secrets=false; in_update=false; in_checkpoint=false; in_tag=false; in_list=false ;;
-            -tag) in_tag=true; in_secrets=false; in_update=false; in_checkpoint=false; in_queue=false; in_list=false ;;
-            -list|-ls) in_list=true; in_secrets=false; in_update=false; in_checkpoint=false; in_queue=false; in_tag=false ;;
+            -secrets) in_secrets=true; in_update=false; in_checkpoint=false; in_queue=false; in_tag=false; in_list=false; in_narrative=false ;;
+            -update) in_update=true; in_secrets=false; in_checkpoint=false; in_queue=false; in_tag=false; in_list=false; in_narrative=false ;;
+            -checkpoint) in_checkpoint=true; in_secrets=false; in_update=false; in_queue=false; in_tag=false; in_list=false; in_narrative=false ;;
+            -queue) in_queue=true; in_secrets=false; in_update=false; in_checkpoint=false; in_tag=false; in_list=false; in_narrative=false ;;
+            -narrative) in_narrative=true; in_secrets=false; in_update=false; in_checkpoint=false; in_queue=false; in_tag=false; in_list=false ;;
+            -tag) in_tag=true; in_secrets=false; in_update=false; in_checkpoint=false; in_queue=false; in_list=false; in_narrative=false ;;
+            -list|-ls) in_list=true; in_secrets=false; in_update=false; in_checkpoint=false; in_queue=false; in_tag=false; in_narrative=false ;;
             -remove|-rm) after_remove=true ;;
             -archive|-unarchive) after_archive=true ;;
             -*) ;;
             *)
-                if ! $in_secrets && ! $after_remove && ! $in_update && ! $in_checkpoint && ! $in_queue && ! $in_tag && ! $in_list && ! $after_archive; then
+                if ! $in_secrets && ! $after_remove && ! $in_update && ! $in_checkpoint && ! $in_queue && ! $in_narrative && ! $in_tag && ! $in_list && ! $after_archive; then
                     has_session=true
                 fi
                 ;;
@@ -198,6 +203,12 @@ _cs() {
     # Context: after -queue
     if $in_queue; then
         _describe 'queue command' queue_cmds
+        return
+    fi
+
+    # Context: after -narrative (global or session-scoped), its one subcommand
+    if $in_narrative; then
+        _describe 'narrative command' narrative_cmds
         return
     fi
 

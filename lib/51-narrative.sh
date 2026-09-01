@@ -143,8 +143,13 @@ rotate_narrative() {
     local chunk_rel=".cs/narrative-archive/$actor/$(basename "$chunk")"
     if git -C "$session_dir" rev-parse --git-dir >/dev/null 2>&1 \
         && git -C "$session_dir" ls-files --error-unmatch -- "$live" >/dev/null 2>&1; then
+        # The commit carries an explicit pathspec: rotation runs inside the
+        # user's own checkout — an adopted session IS their project repo — and a
+        # bare `git commit` would sweep whatever they had staged into a commit
+        # titled "cs: rotate narrative". The `add` still runs first so the newly
+        # written chunk is known to git and the pathspec can match it.
         if ! { git -C "$session_dir" add -- "$live" "$chunk" \
-            && git -C "$session_dir" commit -q -m "cs: rotate narrative.$actor ($sections sections -> narrative-archive)"; } 2>/dev/null; then
+            && git -C "$session_dir" commit -q -m "cs: rotate narrative.$actor ($sections sections -> narrative-archive)" -- "$live" "$chunk"; } 2>/dev/null; then
             warn "rotation written but the commit failed; commit .cs/memory/narrative.$actor.md and $chunk_rel by hand"
         fi
     else
@@ -175,7 +180,11 @@ run_narrative() {
             rotate_narrative
             ;;
         *)
-            error "Usage: cs -narrative rotate   # from inside a session"
+            # Names both forms: this dispatcher is reached from inside a
+            # session AND from `cs <name> -narrative`, and a message that
+            # prescribes only the first sends a caller who correctly named a
+            # session off to rotate whichever one their shell is standing in.
+            error "Usage: cs -narrative rotate   |   cs <name> -narrative rotate"
             ;;
     esac
 }

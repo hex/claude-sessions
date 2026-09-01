@@ -74,7 +74,10 @@ test_rotate_under_budget_is_a_noop() {
     output=$("$CS_BIN" -narrative rotate 2>&1) || return 1
     after=$(_bytes "$LIVE")
     assert_eq "$before" "$after" "live file must be untouched under budget" || return 1
-    assert_output_contains "$output" "nothing to rotate" "must say it did nothing" || return 1
+    # The BUDGET guard's own wording, not the bare "nothing to rotate" prefix:
+    # the first-section guard further down prints that too, so the loose pin
+    # stayed green with the budget check deleted.
+    assert_output_contains "$output" "nothing to rotate:.*(budget" "must name the budget it is under" || return 1
     assert_not_exists "$SESSION_DIR/.cs/narrative-archive" "no archive dir is created under budget" || return 1
 }
 
@@ -422,6 +425,23 @@ test_rotate_commits_live_and_chunk_when_tracked() {
     assert_eq "" "$dirty" "live file and chunk are both committed" || return 1
 }
 
+# Rotation commits inside the user's own checkout — and an adopted session IS
+# their project repo. A pathspec-less commit would sweep whatever they had
+# staged into a commit titled "cs: rotate narrative", which is now reachable
+# for any session from the picker rather than only the one you are sitting in.
+test_rotate_commits_only_its_own_two_files() {
+    _make_narrative "$LIVE" 10 500
+    _init_tracked_repo
+    printf 'work in progress\n' > "$SESSION_DIR/user-file.txt"
+    git -C "$SESSION_DIR" add -- user-file.txt
+    "$CS_BIN" -narrative rotate > /dev/null 2>&1 || return 1
+    local files staged
+    files=$(git -C "$SESSION_DIR" show --name-only --format= HEAD | grep -c 'user-file.txt' || true)
+    assert_eq "0" "$files" "the user's staged file must not ride along in the rotation commit" || return 1
+    staged=$(git -C "$SESSION_DIR" diff --cached --name-only -- user-file.txt)
+    assert_eq "user-file.txt" "$staged" "and it must still be staged afterwards" || return 1
+}
+
 test_rotate_skips_the_commit_when_cs_is_ignored() {
     _make_narrative "$LIVE" 10 500
     printf '.cs/\n' > "$SESSION_DIR/.gitignore"
@@ -598,7 +618,7 @@ test_named_rotate_under_budget_is_a_noop() {
     output=$("$CS_BIN" test-session -narrative rotate 2>&1) || return 1
     after=$(_bytes "$LIVE")
     assert_eq "$before" "$after" "live file must be untouched under budget" || return 1
-    assert_output_contains "$output" "nothing to rotate" "must say it did nothing" || return 1
+    assert_output_contains "$output" "nothing to rotate:.*(budget" "must name the budget it is under" || return 1
 }
 
 test_named_rotate_refuses_an_unknown_session() {
@@ -608,12 +628,44 @@ test_named_rotate_refuses_an_unknown_session() {
     assert_output_contains "$output" "No such session" "the error must name the real problem" || return 1
 }
 
+test_named_rotate_usage_names_the_form_the_user_typed() {
+    # The dispatcher's usage line is reached by BOTH forms. Telling someone who
+    # correctly named a session to run it "from inside a session" prescribes the
+    # precondition this arm exists to remove — and followed literally from
+    # another session it would rotate that session's narrative instead.
+    _leave_session
+    local output
+    output=$("$CS_BIN" test-session -narrative frobnicate 2>&1) && { echo "  FAIL: must refuse"; return 1; }
+    assert_output_contains "$output" "<name> -narrative rotate" "usage must name the session-scoped form" || return 1
+    assert_output_not_contains "$output" "from inside a session" "usage must not prescribe a precondition this form removes" || return 1
+}
+
+test_named_rotate_refuses_a_directory_that_is_not_a_session() {
+    _leave_session
+    mkdir -p "$CS_SESSIONS_ROOT/stray"
+    local output
+    output=$("$CS_BIN" stray -narrative rotate 2>&1) && { echo "  FAIL: must refuse a non-session directory"; return 1; }
+    assert_output_contains "$output" "No such session" "a directory with no .cs is not a session" || return 1
+}
+
+test_named_rotate_refuses_a_dangling_adopted_link() {
+    # An adopted session is a symlink into the user's project. When that project
+    # moves, the link dangles — a bare -L guard admits it and the failure then
+    # surfaces as the global form's message.
+    _leave_session
+    ln -s "$TEST_TMPDIR/gone" "$CS_SESSIONS_ROOT/dangling"
+    local output
+    output=$("$CS_BIN" dangling -narrative rotate 2>&1) && { echo "  FAIL: must refuse a broken link"; return 1; }
+    assert_output_contains "$output" "No such session" "a dangling adopted link is not a session" || return 1
+}
+
 test_named_rotate_rejects_an_unknown_subcommand() {
     _leave_session
-    if "$CS_BIN" test-session -narrative frobnicate > /dev/null 2>&1; then
-        echo "  FAIL: unknown subcommand must fail"
-        return 1
-    fi
+    local output
+    output=$("$CS_BIN" test-session -narrative frobnicate 2>&1) && { echo "  FAIL: unknown subcommand must fail"; return 1; }
+    # The dispatcher's own refusal, not just a nonzero exit: deleting the whole
+    # -narrative arm also exits nonzero, with "Unknown session command".
+    assert_output_contains "$output" "Usage: cs -narrative rotate" "the narrative dispatcher must be the one refusing" || return 1
 }
 
 test_unknown_session_command_error_lists_narrative() {
@@ -666,6 +718,7 @@ run_test test_rotate_leaves_no_temp_files_behind
 run_test test_rotate_refuses_an_unreadable_narrative
 run_test test_rotate_refuses_an_unwritable_archive_dir
 run_test test_rotate_commits_live_and_chunk_when_tracked
+run_test test_rotate_commits_only_its_own_two_files
 run_test test_rotate_skips_the_commit_when_cs_is_ignored
 run_test test_rotate_outside_git_still_rotates
 run_test test_rotate_appends_a_timeline_event
@@ -678,6 +731,9 @@ run_test test_named_rotate_on_a_worktree_uses_its_own_narrative
 run_test test_named_rotate_honours_the_caller_actor_over_the_session_identity
 run_test test_named_rotate_under_budget_is_a_noop
 run_test test_named_rotate_refuses_an_unknown_session
+run_test test_named_rotate_usage_names_the_form_the_user_typed
+run_test test_named_rotate_refuses_a_directory_that_is_not_a_session
+run_test test_named_rotate_refuses_a_dangling_adopted_link
 run_test test_named_rotate_rejects_an_unknown_subcommand
 run_test test_unknown_session_command_error_lists_narrative
 run_test test_help_shows_the_named_narrative_form
