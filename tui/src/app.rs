@@ -252,6 +252,7 @@ pub enum Mode {
     ConfirmDelete,
     ConfirmBatchDelete,
     ConfirmForceOpen,
+    ConfirmRotate,
     Rename,
     CreateSession,
     Secrets,
@@ -911,6 +912,7 @@ impl App {
             Mode::ConfirmDelete => self.handle_confirm_delete(key),
             Mode::ConfirmBatchDelete => self.handle_confirm_batch_delete(key),
             Mode::ConfirmForceOpen => self.handle_confirm_force_open(key),
+            Mode::ConfirmRotate => self.handle_confirm_rotate(key),
             Mode::Rename => self.handle_rename(key),
             Mode::CreateSession => self.handle_create_session(key),
             Mode::Secrets => self.handle_secrets(key),
@@ -1012,7 +1014,9 @@ impl App {
                 Action::None
             }
             KeyCode::Char('R') => {
-                self.rotate_narrative();
+                if self.selected_session().is_some() {
+                    self.mode = Mode::ConfirmRotate;
+                }
                 Action::None
             }
             KeyCode::Char('n') => {
@@ -1418,8 +1422,10 @@ impl App {
                 Action::None
             }
             5 => {
-                // Rotate the narrative into its archive
-                self.rotate_narrative();
+                // Rotate the narrative into its archive, after confirming
+                if self.selected_session().is_some() {
+                    self.mode = Mode::ConfirmRotate;
+                }
                 Action::None
             }
             _ => Action::None,
@@ -1524,6 +1530,18 @@ impl App {
                 Action::None
             }
         }
+    }
+
+    /// Rotation rewrites a narrative and commits, and R is one shift away from
+    /// r (rename), so it asks first. No countdown like the delete confirm: the
+    /// archive chunk is a verbatim copy of what left, so the answer here is
+    /// recoverable and a timed gate would only be friction.
+    fn handle_confirm_rotate(&mut self, key: KeyEvent) -> Action {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => self.rotate_narrative(),
+            _ => self.mode = Mode::Normal,
+        }
+        Action::None
     }
 
     fn handle_rename(&mut self, key: KeyEvent) -> Action {
@@ -2072,7 +2090,10 @@ impl App {
     fn rotate_narrative(&mut self) {
         let name = match self.selected_session_name() {
             Some(n) => n,
-            None => return,
+            None => {
+                self.mode = Mode::Normal;
+                return;
+            }
         };
         match std::process::Command::new(cs_bin())
             .args([name.as_str(), "-narrative", "rotate"])
@@ -4865,6 +4886,49 @@ mod tests {
         std::fs::remove_dir_all(&tmp).ok();
     }
 
+    /// Rotation rewrites a narrative and makes a commit, and R sits one shift
+    /// away from r (rename) — so it asks first. The archive chunk is verbatim,
+    /// so the answer is recoverable and this needs no delete-style countdown.
+    #[cfg(unix)]
+    #[test]
+    fn r_asks_before_it_rotates_anything() {
+        let _env = CS_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = archive_root("rotate-confirm");
+        let stub = rotate_stub(&tmp, "echo rotated");
+        let _root = session::test_root::scoped(tmp.clone());
+        std::env::set_var("CS_BIN", &stub);
+
+        let mut app = App::new(session::scan_sessions());
+        app.handle_key(KeyEvent::from(KeyCode::Char('R')));
+        std::env::remove_var("CS_BIN");
+
+        assert_eq!(app.mode, Mode::ConfirmRotate, "R must ask, not rotate");
+        assert!(
+            !tmp.join("argv").exists(),
+            "cs must not have run before the answer"
+        );
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn declining_the_rotate_confirm_runs_nothing() {
+        let _env = CS_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = archive_root("rotate-declined");
+        let stub = rotate_stub(&tmp, "echo rotated");
+        let _root = session::test_root::scoped(tmp.clone());
+        std::env::set_var("CS_BIN", &stub);
+
+        let mut app = App::new(session::scan_sessions());
+        app.handle_key(KeyEvent::from(KeyCode::Char('R')));
+        app.handle_key(KeyEvent::from(KeyCode::Char('n')));
+        std::env::remove_var("CS_BIN");
+
+        assert_eq!(app.mode, Mode::Normal, "declining returns to the list");
+        assert!(!tmp.join("argv").exists(), "declining must run nothing");
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
     /// A cs stub for the session-scoped form `cs <name> -narrative rotate`,
     /// whose verb is $2 — unlike the global `-archive <name>` form, where it
     /// is $1. `body` is the shell run for that arm.
@@ -4902,6 +4966,7 @@ mod tests {
         let mut app = App::new(session::scan_sessions());
         app.mode = Mode::SessionMenu;
         app.handle_key(KeyEvent::from(KeyCode::Char('R')));
+        app.handle_key(KeyEvent::from(KeyCode::Char('y')));
         std::env::remove_var("CS_BIN");
 
         let argv = std::fs::read_to_string(tmp.join("argv")).unwrap_or_default();
@@ -4931,6 +4996,7 @@ mod tests {
         let mut app = App::new(session::scan_sessions());
         app.mode = Mode::SessionMenu;
         app.handle_key(KeyEvent::from(KeyCode::Char('R')));
+        app.handle_key(KeyEvent::from(KeyCode::Char('y')));
         std::env::remove_var("CS_BIN");
 
         match &app.mode {
@@ -4960,6 +5026,7 @@ mod tests {
         let mut app = App::new(session::scan_sessions());
         app.mode = Mode::SessionMenu;
         app.handle_key(KeyEvent::from(KeyCode::Char('R')));
+        app.handle_key(KeyEvent::from(KeyCode::Char('y')));
         std::env::remove_var("CS_BIN");
 
         match &app.mode {
@@ -4984,6 +5051,7 @@ mod tests {
 
         let mut app = App::new(session::scan_sessions());
         app.handle_key(KeyEvent::from(KeyCode::Char('R')));
+        app.handle_key(KeyEvent::from(KeyCode::Char('y')));
         std::env::remove_var("CS_BIN");
 
         let argv = std::fs::read_to_string(tmp.join("argv")).unwrap_or_default();
@@ -5016,6 +5084,7 @@ mod tests {
             },
         );
         app.handle_key(KeyEvent::from(KeyCode::Char('R')));
+        app.handle_key(KeyEvent::from(KeyCode::Char('y')));
         std::env::remove_var("CS_BIN");
 
         assert!(
@@ -5041,6 +5110,7 @@ mod tests {
         app.request_preview();
         assert!(app.preview_pending.contains("alpha"), "the read must be in flight");
         app.handle_key(KeyEvent::from(KeyCode::Char('R')));
+        app.handle_key(KeyEvent::from(KeyCode::Char('y')));
         std::env::remove_var("CS_BIN");
 
         // Give the worker every chance to deliver the pre-rotation read.

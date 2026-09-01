@@ -271,6 +271,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         Mode::ConfirmDelete => render_confirm_delete(app, frame),
         Mode::ConfirmBatchDelete => render_confirm_batch_delete(app, frame),
         Mode::ConfirmForceOpen => render_confirm_force_open(app, frame),
+        Mode::ConfirmRotate => render_confirm_rotate(app, frame),
         Mode::Rename => render_rename_dialog(app, frame),
         Mode::CreateSession => render_create_dialog(app, frame),
         Mode::Secrets => render_secrets_popup(app, frame),
@@ -944,6 +945,7 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
             Mode::SessionMenu => "j/k:navigate  Enter:select  Esc:cancel",
             Mode::ConfirmDelete | Mode::ConfirmBatchDelete => "y:confirm  n:cancel",
             Mode::ConfirmForceOpen => "y:force open  n:cancel",
+            Mode::ConfirmRotate => "y:rotate  n/Esc:cancel",
             Mode::Rename | Mode::CreateSession => "Enter:confirm  Esc:cancel",
             Mode::Secrets => "j/k:navigate  v/Enter:view  d:remove  Esc:close",
             Mode::CommandOutput(_) => "Press any key to dismiss",
@@ -1212,6 +1214,30 @@ fn render_confirm_force_open(app: &App, frame: &mut Frame) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(p.yellow))
         .title(" Locked Session ")
+        .title_style(Style::default().fg(p.yellow).add_modifier(Modifier::BOLD));
+    let text = Paragraph::new(msg)
+        .style(Style::default().fg(p.fg))
+        .block(block)
+        .wrap(Wrap { trim: true });
+    frame.render_widget(text, popup_area);
+}
+
+fn render_confirm_rotate(app: &App, frame: &mut Frame) {
+    let p = app.theme;
+    let session = match app.selected_session() {
+        Some(s) => s,
+        None => return,
+    };
+    let msg = format!(
+        "Rotate {}'s narrative?\nArchives the oldest sections and commits.\nNothing happens if it is under budget.",
+        session.name
+    );
+    let popup_area = centered_rect(50, 7, frame.area());
+    frame.render_widget(Clear, popup_area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(p.yellow))
+        .title(" Rotate narrative ")
         .title_style(Style::default().fg(p.yellow).add_modifier(Modifier::BOLD));
     let text = Paragraph::new(msg)
         .style(Style::default().fg(p.fg))
