@@ -220,6 +220,7 @@ _cs() {
             '-secrets:Run secrets command'
             '-queue:Manage the session walk-away queue'
             '-msg:Send a message to another session'
+            '-narrative:Rotate this session'\''s narrative into its archive'
             '-conversations:Show the session'\''s conversation chain'
             '-usage:Show per-conversation token usage for this session'
             '-tag:Manage session tags'

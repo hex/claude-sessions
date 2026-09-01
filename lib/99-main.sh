@@ -297,6 +297,25 @@ main() {
                 run_conversations "$@"
                 return 0
                 ;;
+            -narrative)
+                shift
+                # Reachable from outside any session — the picker shells out
+                # this way. A worktree session's directory is literally
+                # "<base>@<task>" under the sessions root and carries its own
+                # .cs, so one path serves both forms: a worktree rotates its
+                # OWN narrative, unlike -secrets, which routes a worktree to
+                # the base's namespace. Guarded here rather than in
+                # rotate_narrative, whose "run from inside a session" message
+                # answers the global form and would misname this one's fault.
+                if [ ! -d "$SESSIONS_ROOT/$session_name" ] && [ ! -L "$SESSIONS_ROOT/$session_name" ]; then
+                    error "No such session: $session_name"
+                fi
+                export CLAUDE_SESSION_NAME="$session_name"
+                export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
+                export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
+                run_narrative "$@"
+                return 0
+                ;;
             -usage)
                 shift
                 export CLAUDE_SESSION_NAME="$session_name"
@@ -343,7 +362,7 @@ main() {
                 shift
                 ;;
             *)
-                error "Unknown session command: $1. Use -secrets, -queue, -msg, -conversations, -usage, -tag, -features, -finish, --merge, or --force."
+                error "Unknown session command: $1. Use -secrets, -queue, -msg, -narrative, -conversations, -usage, -tag, -features, -finish, --merge, or --force."
                 ;;
         esac
     done

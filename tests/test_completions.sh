@@ -521,20 +521,48 @@ test_session_extraction_is_sane() {
         || { echo "  FAIL: only $n session arms extracted; the range or regex is broken"; return 1; }
 }
 
+# The word list each completion offers AFTER a session name — the surface a
+# session verb actually has to reach. Scoped to that list rather than to the
+# whole file on purpose: every session verb also names a global flag, so a
+# file-wide grep goes green on a verb that no session context ever offers, which
+# is exactly how -narrative reached the dispatch uncompleted.
+bash_session_opts() {
+    grep -oE 'local session_opts="[^"]*"' "$BASH_COMP" | sed 's/.*="//; s/"$//' | tr ' ' '\n' | grep -E '^-' | sort -u
+}
+
+zsh_session_opts() {
+    awk '/^        session_opts=\(/,/^        \)/' "$ZSH_COMP" \
+        | grep -oE "'--?[a-zA-Z][a-zA-Z-]*:" | tr -d "':" | sort -u
+}
+
+test_session_opts_extraction_is_sane() {
+    local b z
+    b=$(bash_session_opts); z=$(zsh_session_opts)
+    assert_output_contains "$b" "-secrets" "bash session_opts extraction should find -secrets" || return 1
+    assert_output_contains "$z" "-secrets" "zsh session_opts extraction should find -secrets" || return 1
+    local nb nz
+    nb=$(printf '%s\n' "$b" | grep -c . | tr -d '[:space:]')
+    nz=$(printf '%s\n' "$z" | grep -c . | tr -d '[:space:]')
+    [ "${nb:-0}" -ge 8 ] || { echo "  FAIL: only $nb bash session opts extracted; the regex is broken"; return 1; }
+    [ "${nz:-0}" -ge 8 ] || { echo "  FAIL: only $nz zsh session opts extracted; the range or regex is broken"; return 1; }
+}
+
 # Derived, not a hand-written list: a verb added to the dispatch and forgotten in
 # a completion fails here without anyone remembering to update a pin. This is the
 # surface that has drifted before.
 test_every_session_subcommand_is_completed() {
-    local verb missing_bash="" missing_zsh=""
+    local verb missing_bash="" missing_zsh="" bash_opts zsh_opts
+    bash_opts=$(bash_session_opts)
+    zsh_opts=$(zsh_session_opts)
     while IFS= read -r verb; do
         [ -n "$verb" ] || continue
-        grep -qF -- "$verb" "$BASH_COMP" || missing_bash="$missing_bash $verb"
-        grep -qF -- "$verb" "$ZSH_COMP"  || missing_zsh="$missing_zsh $verb"
+        grep -qxF -- "$verb" <<< "$bash_opts" || missing_bash="$missing_bash $verb"
+        grep -qxF -- "$verb" <<< "$zsh_opts"  || missing_zsh="$missing_zsh $verb"
     done <<< "$(session_subcommands)"
     [ -z "$missing_bash" ] \
-        || { echo "  FAIL: completions/cs.bash is missing:$missing_bash"; return 1; }
+        || { echo "  FAIL: completions/cs.bash session_opts is missing:$missing_bash"; return 1; }
     [ -z "$missing_zsh" ] \
-        || { echo "  FAIL: completions/_cs is missing:$missing_zsh"; return 1; }
+        || { echo "  FAIL: completions/_cs session_opts is missing:$missing_zsh"; return 1; }
 }
 
 # The catch-all arm tells the user what they could have typed, so it is a third
@@ -552,6 +580,7 @@ test_unknown_session_command_error_lists_every_verb() {
 }
 
 run_test test_session_extraction_is_sane
+run_test test_session_opts_extraction_is_sane
 run_test test_every_session_subcommand_is_completed
 run_test test_unknown_session_command_error_lists_every_verb
 

@@ -526,6 +526,113 @@ test_two_clones_rotating_at_different_cuts_merge_clean() {
     assert_eq "2" "$(find "$CLONE_A/.cs/narrative-archive/alice" -name '*.md' | wc -l | tr -d ' ')" "two distinct chunks after the merge" || return 1
 }
 
+# ============================================================================
+# session-scoped form: cs <name> -narrative rotate
+# ============================================================================
+
+# Rotation is reachable from outside any session — the picker shells out this
+# way, and so does a plain terminal. Drop the ambient session env first so only
+# the positional name can resolve the target.
+_leave_session() {
+    unset CLAUDE_SESSION_NAME CLAUDE_SESSION_DIR CLAUDE_SESSION_META_DIR
+}
+
+test_named_rotate_works_from_outside_a_session() {
+    _make_narrative "$LIVE" 10 500
+    _leave_session
+    local output
+    output=$("$CS_BIN" test-session -narrative rotate 2>&1) || { echo "  FAIL: $output"; return 1; }
+    assert_output_contains "$output" "rotated" "the named form must rotate" || return 1
+    assert_dir "$ARCHIVE_DIR" "an archive chunk must be written" || return 1
+    assert_file_not_contains "$LIVE" "section 1$" "the oldest section must be archived" || return 1
+    assert_file_contains "$LIVE" "section 10$" "the newest section must survive" || return 1
+}
+
+test_named_rotate_targets_the_named_session_not_the_ambient_one() {
+    # An ambient session env must lose to the positional name, or the picker
+    # would rotate whichever session its own shell happened to be standing in.
+    local other="$CS_SESSIONS_ROOT/other"
+    mkdir -p "$other/.cs/local" "$other/.cs/memory"
+    _make_narrative "$other/.cs/memory/narrative.alice.md" 10 500
+    _make_narrative "$LIVE" 10 500
+    export CLAUDE_SESSION_NAME="other"
+    export CLAUDE_SESSION_DIR="$other"
+    export CLAUDE_SESSION_META_DIR="$other/.cs"
+    "$CS_BIN" test-session -narrative rotate > /dev/null 2>&1 || return 1
+    assert_file_not_contains "$LIVE" "section 1$" "the named session must rotate" || return 1
+    assert_file_contains "$other/.cs/memory/narrative.alice.md" "section 1$" "the ambient session must be untouched" || return 1
+}
+
+test_named_rotate_on_a_worktree_uses_its_own_narrative() {
+    # A worktree session's directory is literally "<base>@<task>" under the
+    # sessions root and carries its own .cs — so its narrative is its own,
+    # unlike its secrets, which -secrets deliberately routes to the base.
+    local wt="$CS_SESSIONS_ROOT/test-session@feat"
+    mkdir -p "$wt/.cs/local" "$wt/.cs/memory"
+    _make_narrative "$wt/.cs/memory/narrative.alice.md" 10 500
+    _make_narrative "$LIVE" 10 500
+    _leave_session
+    "$CS_BIN" test-session@feat -narrative rotate > /dev/null 2>&1 || return 1
+    assert_file_not_contains "$wt/.cs/memory/narrative.alice.md" "section 1$" "the worktree's own narrative must rotate" || return 1
+    assert_file_contains "$LIVE" "section 1$" "the base narrative must be untouched" || return 1
+}
+
+test_named_rotate_honours_the_caller_actor_over_the_session_identity() {
+    # cs_actor_slug puts $CS_ACTOR above the session's pinned local/identity,
+    # and the named form keeps that order: you rotate YOUR narrative in that
+    # session, never the one that machine last pinned there.
+    printf 'bob@example.com\n' > "$SESSION_DIR/.cs/local/identity"
+    _make_narrative "$LIVE" 10 500
+    _make_narrative "$SESSION_DIR/.cs/memory/narrative.bob-example-com.md" 10 500
+    _leave_session
+    "$CS_BIN" test-session -narrative rotate > /dev/null 2>&1 || return 1
+    assert_file_not_contains "$LIVE" "section 1$" "CS_ACTOR wins: alice's narrative rotates" || return 1
+    assert_file_contains "$SESSION_DIR/.cs/memory/narrative.bob-example-com.md" "section 1$" "bob's narrative is untouched" || return 1
+}
+
+test_named_rotate_under_budget_is_a_noop() {
+    _make_narrative "$LIVE" 2 100
+    _leave_session
+    local before after output
+    before=$(_bytes "$LIVE")
+    output=$("$CS_BIN" test-session -narrative rotate 2>&1) || return 1
+    after=$(_bytes "$LIVE")
+    assert_eq "$before" "$after" "live file must be untouched under budget" || return 1
+    assert_output_contains "$output" "nothing to rotate" "must say it did nothing" || return 1
+}
+
+test_named_rotate_refuses_an_unknown_session() {
+    _leave_session
+    local output
+    output=$("$CS_BIN" no-such-session -narrative rotate 2>&1) && { echo "  FAIL: must refuse an absent session"; return 1; }
+    assert_output_contains "$output" "No such session" "the error must name the real problem" || return 1
+}
+
+test_named_rotate_rejects_an_unknown_subcommand() {
+    _leave_session
+    if "$CS_BIN" test-session -narrative frobnicate > /dev/null 2>&1; then
+        echo "  FAIL: unknown subcommand must fail"
+        return 1
+    fi
+}
+
+test_unknown_session_command_error_lists_narrative() {
+    _leave_session
+    local output
+    output=$("$CS_BIN" test-session -bogus 2>&1) || true
+    assert_output_contains "$output" "-narrative" "the session-verb error must list -narrative" || return 1
+}
+
+test_help_shows_the_named_narrative_form() {
+    local output
+    output=$("$CS_BIN" -help 2>&1)
+    assert_output_contains "$output" "<name> -narrative rotate" "help must document the named form" || return 1
+    # show_verb_help derives from show_help, so the verb's own help answers for
+    # both forms in one edit.
+    output=$("$CS_BIN" -narrative --help 2>&1)
+    assert_output_contains "$output" "<name> -narrative rotate" "cs -narrative --help must show the named form" || return 1
+}
+
 echo ""
 echo "cs narrative rotation tests"
 echo "==========================="
@@ -565,5 +672,14 @@ run_test test_rotate_appends_a_timeline_event
 run_test test_rotate_does_not_splice_onto_a_torn_timeline
 run_test test_rotate_then_peer_append_merges_without_resurrection
 run_test test_two_clones_rotating_at_different_cuts_merge_clean
+run_test test_named_rotate_works_from_outside_a_session
+run_test test_named_rotate_targets_the_named_session_not_the_ambient_one
+run_test test_named_rotate_on_a_worktree_uses_its_own_narrative
+run_test test_named_rotate_honours_the_caller_actor_over_the_session_identity
+run_test test_named_rotate_under_budget_is_a_noop
+run_test test_named_rotate_refuses_an_unknown_session
+run_test test_named_rotate_rejects_an_unknown_subcommand
+run_test test_unknown_session_command_error_lists_narrative
+run_test test_help_shows_the_named_narrative_form
 
 report_results

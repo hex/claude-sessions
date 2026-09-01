@@ -120,7 +120,7 @@ The platform is detected automatically. It decides one thing — whether secrets
 ## Concepts
 
 - **Sessions** — Isolated workspaces, each with their own git repo and documentation. `cs debug-api` creates one; running it again resumes it.
-- **Narrative** (`.cs/memory/narrative.<actor>.md`) — A per-actor lab notebook for findings, observations, and ideas during a session. Each co-developer writes their own file (so shared sessions never conflict) and everyone reads the live files on resume. The notebook is append-only — a disproven entry gets a dated correction, never an edit — and `cs -narrative rotate` (run by `/wrap`, flagged by the Stop hook and `cs -doctor`) moves the oldest sections verbatim into `.cs/narrative-archive/<actor>/` once a file passes `CS_NARRATIVE_MAX_BYTES` (128 KiB), keeping a `CS_NARRATIVE_KEEP_BYTES` (64 KiB) tail. Stored as native Claude Code memory files; see [docs/session-layout.md](docs/session-layout.md) for how that works.
+- **Narrative** (`.cs/memory/narrative.<actor>.md`) — A per-actor lab notebook for findings, observations, and ideas during a session. Each co-developer writes their own file (so shared sessions never conflict) and everyone reads the live files on resume. The notebook is append-only — a disproven entry gets a dated correction, never an edit — and `cs -narrative rotate` (run by `/wrap`, by the session manager's **Rotate narrative** entry, flagged by the Stop hook and `cs -doctor`; `cs <name> -narrative rotate` reaches a session you are not in) moves the oldest sections verbatim into `.cs/narrative-archive/<actor>/` once a file passes `CS_NARRATIVE_MAX_BYTES` (128 KiB), keeping a `CS_NARRATIVE_KEEP_BYTES` (64 KiB) tail. Stored as native Claude Code memory files; see [docs/session-layout.md](docs/session-layout.md) for how that works.
 - **Checkpoints** (`.cs/checkpoints/`) — Labelled narrative snapshots you can save mid-session with `/checkpoint`, capturing the narrative, changes, and the current git HEAD.
 - **Timeline** (`.cs/timeline.jsonl`) — A structured event log recording session starts, ends, and checkpoints as newline-delimited JSON.
 - **Auto-memory** (`.cs/memory/`) — Claude Code's persistent operational notes, redirected into the session and cleaned up with `cs -rm`.
@@ -143,6 +143,7 @@ cs -who                     # Show who contributed to shared memory/narrative (g
 cs -search <query>          # Search across all sessions
 cs -checkpoint "<label>"    # Snapshot git state + narrative (also: list, show <name>)
 cs -narrative rotate        # Archive the oldest narrative sections once the file passes its budget (/wrap runs this)
+cs <name> -narrative rotate # Same, for a session you are not in (the session manager's Rotate narrative entry runs this)
 cs -queue add "<task>"      # Walk-away task queue (also: list, rm <n>, clear, log)
 cs -msg <session> "note"    # Send mail to another session (--kind notify|task|text|result; '-' body reads stdin); bare cs -msg reads
 cs -msg --reply <thread> "note"  # Reply into a thread; the target comes from the thread

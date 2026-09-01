@@ -404,11 +404,12 @@ Commands:
   <base> -features          List a base's feature worktrees and their merge readiness
   <base> -finish <feature>  Open <base> and run the merge ritual for <feature>
   <name> -secrets <cmd>  Run secrets command on <name> without launching session
+  <name> -narrative rotate  Rotate <name>'s narrative without launching session
   -search <query>     Search across all sessions (--include-archived searches archived too)
   -checkpoint "<label>"  Save labelled state snapshot (run from inside a session)
   -checkpoint list    List checkpoints for current session
   -checkpoint show <name>  Print a specific checkpoint
-  -narrative rotate   Archive the oldest sections of your narrative once it passes its byte budget (run from inside a session; /wrap runs it)
+  -narrative rotate   Archive the oldest sections of your narrative once it passes its byte budget (/wrap runs it)
   -queue add "<task>" Add a task to the session's walk-away queue
   -queue list         Show pending and completed queued tasks
   -queue rm <n>       Remove pending task n
@@ -7627,6 +7628,25 @@ main() {
                 run_conversations "$@"
                 return 0
                 ;;
+            -narrative)
+                shift
+                # Reachable from outside any session — the picker shells out
+                # this way. A worktree session's directory is literally
+                # "<base>@<task>" under the sessions root and carries its own
+                # .cs, so one path serves both forms: a worktree rotates its
+                # OWN narrative, unlike -secrets, which routes a worktree to
+                # the base's namespace. Guarded here rather than in
+                # rotate_narrative, whose "run from inside a session" message
+                # answers the global form and would misname this one's fault.
+                if [ ! -d "$SESSIONS_ROOT/$session_name" ] && [ ! -L "$SESSIONS_ROOT/$session_name" ]; then
+                    error "No such session: $session_name"
+                fi
+                export CLAUDE_SESSION_NAME="$session_name"
+                export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
+                export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
+                run_narrative "$@"
+                return 0
+                ;;
             -usage)
                 shift
                 export CLAUDE_SESSION_NAME="$session_name"
@@ -7673,7 +7693,7 @@ main() {
                 shift
                 ;;
             *)
-                error "Unknown session command: $1. Use -secrets, -queue, -msg, -conversations, -usage, -tag, -features, -finish, --merge, or --force."
+                error "Unknown session command: $1. Use -secrets, -queue, -msg, -narrative, -conversations, -usage, -tag, -features, -finish, --merge, or --force."
                 ;;
         esac
     done
