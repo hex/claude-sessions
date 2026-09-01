@@ -793,6 +793,40 @@ test_clear_source_consumes_pending_handoff() {
         || { echo "  FAIL: marker must be removed after a clear consumption"; return 1; }
 }
 
+# Consuming the handoff is not the same as ACTING on it. additionalContext is
+# read, not answered: Claude loads the rotation preamble and then waits for the
+# user to type "go". SessionStart's initialUserMessage is the field that submits
+# a real first turn (the bundle routes it to prependUserMessage), so a rotation
+# the user already committed to by running /clear continues on its own.
+test_clear_with_a_handoff_starts_the_work_itself() {
+    _rot_hook_session "rot-autostart"
+    _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "unconsumed"
+    printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
+    local out msg
+    out=$(_start_hook "$UUID_B" clear) || return 1
+    msg=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.initialUserMessage // ""')
+    [ -n "$msg" ] \
+        || { echo "  FAIL: a consumed handoff must submit a first turn, not just inject context"; return 1; }
+    case "$msg" in
+        *2026-07-16-test.md*) ;;
+        *) echo "  FAIL: the first turn must name the handoff to continue: $msg"; return 1 ;;
+    esac
+}
+
+# The auto-start is scoped to the rotation. A plain /clear is the user asking
+# for a blank slate, and submitting a turn into it would be cs deciding what
+# they meant.
+test_clear_without_a_handoff_starts_nothing() {
+    _rot_hook_session "rot-noauto"
+    printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
+    local out msg
+    out=$(_start_hook "$UUID_B" clear) || return 1
+    msg=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.initialUserMessage // ""')
+    [ -z "$msg" ] \
+        || { echo "  FAIL: a plain /clear must not submit a turn: $msg"; return 1; }
+}
+
 # compact and fork keep the transcript loaded, so consuming there would inject
 # "the prior transcript is not loaded" into a conversation where it is. The
 # marker is left ARMED — the pending rotation is still legitimate.
@@ -885,6 +919,8 @@ test_fork_with_armed_marker_records_rebind() {
 }
 
 run_test test_clear_source_consumes_pending_handoff
+run_test test_clear_with_a_handoff_starts_the_work_itself
+run_test test_clear_without_a_handoff_starts_nothing
 run_test test_compact_and_fork_leave_marker_armed
 run_test test_spent_handoff_is_not_reconsumed
 run_test test_body_quote_does_not_revive_a_discarded_handoff

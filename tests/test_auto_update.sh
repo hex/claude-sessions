@@ -394,7 +394,11 @@ test_launch_banner_shows_notes_card() {
         return 1
     }
     export CS_NO_UPDATE_CHECK=1 HOME="$ORIGINAL_HOME"
-    assert_output_contains "$out" "Update available:" "banner one-liner intact" || return 1
+    # The row names the new version and how to get it. Pinned as two facts
+    # rather than one literal sentence: the wording is design, the pair is the
+    # contract.
+    assert_output_contains "$out" "2026.99.3 available" "the row announces the version" || return 1
+    assert_output_contains "$out" "cs -update" "and names the command that gets it" || return 1
     assert_output_contains "$out" "2026.99.3" "card shows the newest version" || return 1
     assert_output_contains "$out" "One fix: the statusline is readable." "card shows its summary" || return 1
     assert_output_contains "$out" "and 1 earlier versions" "card shows the collapse line" || return 1
@@ -412,7 +416,8 @@ test_launch_banner_quiet_on_empty_notes_cache() {
         return 1
     }
     export CS_NO_UPDATE_CHECK=1 HOME="$ORIGINAL_HOME"
-    assert_output_contains "$out" "Update available:" "one-liner still shown" || return 1
+    assert_output_contains "$out" "2026.99.3 available" "the row is still shown" || return 1
+    assert_output_contains "$out" "cs -update" "and still names the command" || return 1
     assert_output_not_contains "$out" "One fix: the statusline is readable." \
         "no card rows from the tombstone (the populated-cache test proves this string DOES render when present)" || return 1
     assert_output_not_contains "$out" "earlier versions" "no collapse line from the tombstone" || return 1

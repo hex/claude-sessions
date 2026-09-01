@@ -728,13 +728,27 @@ if [ "$IS_LEAD" = 1 ] \
     MAIL_WATCH="$META_DIR/local/mail/new"
 fi
 
+# A consumed rotation submits its own first turn. additionalContext is READ,
+# not answered — Claude loads the preamble above and then waits for the user to
+# type "go", which is a step they already took by running /clear on an armed
+# handoff. initialUserMessage is the SessionStart field that submits a real
+# turn, so the rotation continues by itself. Scoped to a consumed handoff: a
+# plain /clear is a request for a blank slate, and starting work in one would
+# be cs deciding what the user meant.
+INITIAL_MESSAGE=""
+if [ -n "$ROTATION_HANDOFF" ]; then
+    INITIAL_MESSAGE="Continue the rotated work: read .cs/handoffs/$ROTATION_HANDOFF and pick up from its next-step section."
+fi
+
 # Return additional context as JSON
-jq -n --arg context "$CONTEXT" --arg watch "$MAIL_WATCH" '{
+jq -n --arg context "$CONTEXT" --arg watch "$MAIL_WATCH" --arg initial "$INITIAL_MESSAGE" '{
     hookSpecificOutput: ({
         hookEventName: "SessionStart",
         additionalContext: $context,
         statusMessage: "Loading session..."
-    } + (if $watch == "" then {} else {watchPaths: [$watch]} end))
+    }
+    + (if $watch == "" then {} else {watchPaths: [$watch]} end)
+    + (if $initial == "" then {} else {initialUserMessage: $initial} end))
 }'
 
 _commit_digest "$META_DIR/local"
