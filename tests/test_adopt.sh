@@ -284,7 +284,12 @@ test_adopt_commits_only_its_own_bookkeeping() {
 
     (cd "$project_dir" && "$CS_BIN" -adopt staged-session)
 
-    local swept staged
+    local subject swept staged
+    # HEAD must BE the adopt commit first: the fixture's initial commit predates
+    # user-file.txt, so "HEAD does not contain it" holds even when no adopt
+    # commit was made at all.
+    subject=$(git -C "$project_dir" log -1 --format=%s)
+    assert_eq "Adopt as cs session: staged-session" "$subject" "HEAD must be the adopt commit" || return 1
     swept=$(git -C "$project_dir" show --name-only --format= HEAD | grep -c 'user-file.txt' || true)
     assert_eq "0" "$swept" "the user's staged file must not ride along in the adopt commit" || return 1
     staged=$(git -C "$project_dir" diff --cached --name-only -- user-file.txt)

@@ -266,14 +266,15 @@ test_prompt_unchanged_without_handoff() {
 }
 
 # The launch card asks whether to continue a conversation without saying how
-# much room that conversation has left. cs-statusline stamps the figure every
-# render, so the last value on disk is the resumed conversation's own.
+# much room is left. cs-statusline stamps the figure every render, keyed by
+# session name — so the card reports the last conversation to render HERE, and
+# says exactly that rather than attributing it to the one being resumed.
 test_resume_prompt_shows_the_previous_conversations_context() {
     _rot_session "rot-ctx"
     printf '64\n' > "$CS_SESSIONS_ROOT/rot-ctx/.cs/local/context-pct"
     local output
     output=$("$CS_BIN" rot-ctx <<< "n" 2>&1) || true
-    assert_output_contains "$output" "64% of its context" "the card must say how full the resumed conversation was" || return 1
+    assert_output_contains "$output" "Last conversation here used 64% of its context" "the card must say how full the last conversation here was" || return 1
     assert_output_contains "$output" "Continue previous conversation?" "prompt still present" || return 1
 }
 

@@ -43,12 +43,15 @@ _handoff_is_local() {  # handoff_file, session_dir
         && grep -E -q "Session started \(.*ID: $parent\)" "$log" 2>/dev/null
 }
 
-# The resumed conversation's context usage, 0-100, or nothing. cs-statusline
-# stamps .cs/local/context-pct on every render, so the last value on disk is the
-# high-water mark of the conversation the card is offering to continue. Silent
-# on every unusable shape — the stamp only exists where the status line is
-# installed, so the readout is a bonus and never a reason to fail a launch.
-# 10# because a stamp like 08 is a hard arithmetic error read as octal.
+# The last context usage stamped in this session, 0-100, or nothing.
+# cs-statusline keys the stamp by SESSION NAME, not by conversation, so it is
+# the newest render from any conversation opened here — usually the one being
+# resumed, but not when a second conversation (a teammate, or one opened
+# outside cs) rendered more recently. The card words it that way rather than
+# claiming more than the file knows. Silent on every unusable shape: the stamp
+# only exists where the status line is installed, so the readout is a bonus and
+# never a reason to fail a launch. 10# because a stamp like 08 is a hard
+# arithmetic error read as octal.
 _resume_context_pct() {  # session_dir
     local f="$1/.cs/local/context-pct" v=""
     [ -f "$f" ] || return 0
@@ -405,7 +408,7 @@ launch_claude_code() {
             local _ctx=""
             _ctx=$(_resume_context_pct "$session_dir")
             if [ -n "$_ctx" ]; then
-                printf "${DIM}Previous conversation used %s%% of its context.${NC}\n" "$_ctx"
+                printf "${DIM}Last conversation here used %s%% of its context.${NC}\n" "$_ctx"
             fi
             if [ -n "$pending_handoff" ]; then
                 # Answering blind is the hazard this label exists for: r arms

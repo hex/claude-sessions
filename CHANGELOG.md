@@ -4,6 +4,40 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.9.1
+
+A picker release: the session menu becomes a real menu, narratives rotate from it, and the resume prompt stops asking blind.
+
+### Features
+
+**Session action menu** — `Enter` now opens a popup over the list, one action per row with its shortcut key, instead of a one-line bar wedged between the panes and the footer. It is sized to its content rather than to a share of the screen; `j`/`k` moves, `Enter` runs the highlighted action, `Esc` closes. Every letter shortcut (`d`, `r`, `s`, `a`, `R`) still works straight from the list without opening the menu.
+
+**Rotate a narrative from the picker** — `R` on any row (confirmation required) archives that session's oldest narrative sections and shows what cs printed. A narrative under its byte budget rotates nothing and says so, which is the answer as often as a rotation is. No countdown like the delete confirm: the archive chunk is a verbatim copy of what left, so the answer is recoverable.
+
+**`cs <name> -narrative rotate`** — rotation is reachable by session name from any terminal, not only from inside the session (this is what the picker shells out to). A worktree session rotates its own narrative, unlike `-secrets`, which routes a worktree to the base session's namespace.
+
+**The resume prompt says how full the conversation is** — `Previous conversation used 64% of its context.` above the `[Y/n]` prompt, so the choice between resuming and rotating is not made blind. It reads the figure cs-statusline already stamps to `.cs/local/context-pct`, so it appears wherever the status line is installed and costs nothing where it is not.
+
+### Fixes
+
+- **Rotation and adoption no longer commit your staged work.** Both ran a pathspec-less `git commit` inside a checkout cs does not own — an adopted session *is* your project repo — so anything you had staged was swept into a commit titled `cs: rotate narrative` or `Adopt as cs session`. Both now name their own paths, and adoption's "is there anything to commit" check is scoped the same way.
+- The picker's preview pane lists narrative headings and its cache never expired, so after a rotation it kept quoting headings that had just been archived, for the life of the picker. Preview reads are now keyed by request generation rather than by session name: the render that follows any keypress re-requests the selected session, so a read invalidated mid-flight and the fresh one queued right after it were indistinguishable, and the stale one landed first.
+- `R` refuses a session with a live conversation, the way `d` already did. It was the one mutating action with no liveness guard, and it rewrites a narrative and commits inside a checkout that conversation is still appending to.
+- The rotate confirmation said "Rotate *X*'s narrative", but rotation resolves the *caller's* actor — on a session whose narrative belongs to someone else that is a promise cs cannot keep. It now says "Rotate your narrative in *X*?".
+- Naming a pathspec makes the commit a partial commit, which git refuses inside a repository mid-merge — a state the old bare commit committed straight through. The refusal is the safer half of that trade, but the reason is no longer swallowed.
+- `cs <name> -narrative rotate` refuses a dangling adopted symlink or a directory with no `.cs`, rather than reporting them as a wrong invocation form.
+- `cs -narrative`'s usage line named only the global form, so a user who correctly named a session was told to run it from inside one — which, followed literally, would have rotated a different session.
+- Neither shell completion offered `rotate` after `-narrative`; the session-option list was re-offered in its place.
+- `cs.bash`'s session-name guard regains a term `_cs` already had (latent, but the parallel-flag shape is what hides that class).
+
+### Internal
+
+- Menu dispatch is carried in the table as an action, not implied by array position and matched on display strings. Reordering the menu would have run the wrong action for the highlighted row with every test still green; a swap now fails five.
+- The completion drift guard was scoped to each file's session-option list. Every session verb also names a global flag, so the file-wide grep it replaced went green on a verb no session context offered — which is how `-narrative` reached the dispatch uncompleted.
+- Five vacuous tests fixed, each confirmed by mutation. Deleting the rotation budget guard left all 47 narrative tests green (both under-budget tests pinned a message a *different* guard also prints). The preview test's wait loop broke on the negation of its own assertion, so it passed when its worker delivered nothing and always burned a full second. The menu's Enter test asserted `MENU_ITEMS[i] == MENU_ITEMS[i]` without ever pressing Enter. And both new commit-scoping tests passed when the commit never happened at all — their fixtures commit before the user's file exists, so "HEAD does not contain it" was true either way; an assertion of an absence needs a positive anchor beside it.
+
+**Full Changelog**: https://github.com/hex/claude-sessions/compare/v2026.8.23...v2026.9.1
+
 ## 2026.8.23
 
 A rotation release: session lab notebooks stop growing forever, and an adopted project can always find its way back.

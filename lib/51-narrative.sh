@@ -150,7 +150,15 @@ rotate_narrative() {
         # written chunk is known to git and the pathspec can match it.
         if ! { git -C "$session_dir" add -- "$live" "$chunk" \
             && git -C "$session_dir" commit -q -m "cs: rotate narrative.$actor ($sections sections -> narrative-archive)" -- "$live" "$chunk"; } 2>/dev/null; then
-            warn "rotation written but the commit failed; commit .cs/memory/narrative.$actor.md and $chunk_rel by hand"
+            # Naming a pathspec makes this a PARTIAL commit, which git refuses
+            # outright mid-merge — a state the old bare commit committed
+            # straight through. Refusing is the safer half of that trade; the
+            # message just has to say which failure it was.
+            if git -C "$session_dir" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+                warn "rotation written but the commit was refused: $session_dir is mid-merge, and cs commits only its own paths. Finish the merge, then commit .cs/memory/narrative.$actor.md and $chunk_rel"
+            else
+                warn "rotation written but the commit failed; commit .cs/memory/narrative.$actor.md and $chunk_rel by hand"
+            fi
         fi
     else
         info "narrative.$actor.md is not tracked by git here; the archive chunk is left uncommitted"

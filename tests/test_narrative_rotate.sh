@@ -435,11 +435,43 @@ test_rotate_commits_only_its_own_two_files() {
     printf 'work in progress\n' > "$SESSION_DIR/user-file.txt"
     git -C "$SESSION_DIR" add -- user-file.txt
     "$CS_BIN" -narrative rotate > /dev/null 2>&1 || return 1
-    local files staged
+    local subject files staged
+    # HEAD must BE the rotation commit first: the fixture commits before the
+    # user's file exists, so "HEAD does not contain user-file.txt" is also true
+    # when the rotation commit never happened.
+    subject=$(git -C "$SESSION_DIR" log -1 --format=%s)
+    case "$subject" in "cs: rotate narrative"*) ;; *) echo "  FAIL: HEAD is not the rotation commit: $subject"; return 1 ;; esac
     files=$(git -C "$SESSION_DIR" show --name-only --format= HEAD | grep -c 'user-file.txt' || true)
     assert_eq "0" "$files" "the user's staged file must not ride along in the rotation commit" || return 1
     staged=$(git -C "$SESSION_DIR" diff --cached --name-only -- user-file.txt)
     assert_eq "user-file.txt" "$staged" "and it must still be staged afterwards" || return 1
+}
+
+# Naming a pathspec makes the commit a PARTIAL commit, which git refuses inside
+# a repo mid-merge — a state the old pathspec-less commit committed straight
+# through. The refusal is the safer half of that trade, but the reason must
+# survive: the bare message sends the reader looking for a broken rotation.
+test_rotate_names_the_merge_state_when_the_commit_is_refused() {
+    _make_narrative "$LIVE" 10 500
+    _init_tracked_repo
+    # Manufacture a merge in progress: two divergent branches, conflicting file.
+    git -C "$SESSION_DIR" checkout -q -b other
+    printf 'theirs\n' > "$SESSION_DIR/conflict.txt"
+    git -C "$SESSION_DIR" add -- conflict.txt
+    git -C "$SESSION_DIR" commit -q -m theirs
+    git -C "$SESSION_DIR" checkout -q -
+    printf 'ours\n' > "$SESSION_DIR/conflict.txt"
+    git -C "$SESSION_DIR" add -- conflict.txt
+    git -C "$SESSION_DIR" commit -q -m ours
+    git -C "$SESSION_DIR" merge other > /dev/null 2>&1 || true
+    printf 'resolved\n' > "$SESSION_DIR/conflict.txt"
+    git -C "$SESSION_DIR" add -- conflict.txt
+    [ -f "$SESSION_DIR/.git/MERGE_HEAD" ] || { echo "  FAIL: fixture did not reach a mid-merge state"; return 1; }
+
+    local output
+    output=$("$CS_BIN" -narrative rotate 2>&1) || true
+    assert_output_contains "$output" "mid-merge" "the warning must name the real reason" || return 1
+    assert_file_not_contains "$LIVE" "section 1$" "the rotation itself still happened" || return 1
 }
 
 test_rotate_skips_the_commit_when_cs_is_ignored() {
@@ -719,6 +751,7 @@ run_test test_rotate_refuses_an_unreadable_narrative
 run_test test_rotate_refuses_an_unwritable_archive_dir
 run_test test_rotate_commits_live_and_chunk_when_tracked
 run_test test_rotate_commits_only_its_own_two_files
+run_test test_rotate_names_the_merge_state_when_the_commit_is_refused
 run_test test_rotate_skips_the_commit_when_cs_is_ignored
 run_test test_rotate_outside_git_still_rotates
 run_test test_rotate_appends_a_timeline_event

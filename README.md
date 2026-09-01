@@ -380,16 +380,19 @@ If you would rather stop for the day, the handoff stays armed and the next
 `cs <name>` launch offers a third answer at the resume prompt:
 
 ```
-Previous conversation used 64% of its context.
+Last conversation here used 64% of its context.
 Rotation handoff pending: 2026-07-16-continue-f5-plan.md
 Continue previous conversation? [Y/n/r/d] (r = fresh conversation with handoff, d = discard handoff)
 ```
 
-The context line says how full the conversation you would be resuming already
-is, so the choice between `Y` and `r` is not made blind. It reads the figure
+The context line says how full the last conversation in this session got, so
+the choice between `Y` and `r` is not made blind. It reads the figure
 cs-statusline stamps on every render (`.cs/local/context-pct`), so it appears
 only where the status line is installed, and it is shown on the plain `[Y/n]`
-prompt too.
+prompt too. The stamp is keyed by session, not by conversation — with a second
+conversation open here (a teammate, or one started outside cs) the figure is
+whichever rendered most recently, which is why the line says "here" rather than
+naming the conversation you are resuming.
 
 `r` rotates the same way, and additionally hands the fresh conversation a
 first prompt so it starts on the handoff without you typing anything — the one

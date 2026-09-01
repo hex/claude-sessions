@@ -942,7 +942,7 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
                 // the first thing lost.
                 "q:quit  Enter:open  n:new  d:delete  r:rename  a:archive  A:archived  Tab:to-do  Space:mark  /:search  1-6:sort  ?:legend"
             }
-            Mode::SessionMenu => "j/k:navigate  Enter:select  Esc:cancel",
+            Mode::SessionMenu => "j/k:navigate  Enter:select  key:run directly  q/Esc:close",
             Mode::ConfirmDelete | Mode::ConfirmBatchDelete => "y:confirm  n:cancel",
             Mode::ConfirmForceOpen => "y:force open  n:cancel",
             Mode::ConfirmRotate => "y:rotate  n/Esc:cancel",
@@ -1225,8 +1225,12 @@ fn render_confirm_rotate(app: &App, frame: &mut Frame) {
         Some(s) => s,
         None => return,
     };
+    // "your narrative in X", not "X's narrative": rotation resolves the CALLER's
+    // actor slug, so on a session whose narrative belongs to someone else the
+    // promise would be one cs cannot keep (it exits with "No narrative for
+    // actor <you>").
     let msg = format!(
-        "Rotate {}'s narrative?\nArchives the oldest sections and commits.\nNothing happens if it is under budget.",
+        "Rotate your narrative in {}?\nArchives its oldest sections and commits.\nNothing happens if it is under budget.",
         session.name
     );
     let popup_area = centered_rect(50, 7, frame.area());

@@ -470,11 +470,17 @@ pub struct App {
     pub preview_cache: HashMap<String, session::SessionPreview>,
     /// Session names handed to the preview worker, awaiting a result. Guards
     /// against re-queueing the selected session on every frame.
-    preview_pending: std::collections::HashSet<String>,
+    /// Session name -> the generation of the read currently in flight for it.
+    /// A result whose generation is not the one recorded here is stale and is
+    /// dropped; invalidating a session simply forgets its entry.
+    preview_pending: std::collections::HashMap<String, u64>,
+    /// Monotonic request counter. Never reset — a wrapped u64 would need one
+    /// read per nanosecond for centuries.
+    preview_generation: u64,
     /// Session names to load, drained by the preview worker.
-    preview_requests: std::sync::mpsc::Sender<String>,
+    preview_requests: std::sync::mpsc::Sender<(u64, String)>,
     /// Previews the worker has finished, drained once per event-loop tick.
-    preview_results: std::sync::mpsc::Receiver<(String, session::SessionPreview)>,
+    preview_results: std::sync::mpsc::Receiver<(u64, String, session::SessionPreview)>,
     /// Whether to show the preview pane on wide terminals (toggled with `p`).
     pub show_preview: bool,
     /// Whether archived sessions appear in the table (toggled with `A`).
@@ -513,19 +519,24 @@ pub struct App {
 ///
 /// `root` is passed in already resolved: tests override the sessions root
 /// through a thread-local, which a spawned thread would not see.
+/// Each request carries a generation, and the worker hands it back with the
+/// result. Identity by NAME is not enough: the render that follows any keypress
+/// re-requests the selected session, so a read invalidated mid-flight and the
+/// fresh read queued right after it are indistinguishable by name — the stale
+/// one lands first and is cached as if it were current.
 fn spawn_preview_worker(
     root: std::path::PathBuf,
 ) -> (
-    std::sync::mpsc::Sender<String>,
-    std::sync::mpsc::Receiver<(String, session::SessionPreview)>,
+    std::sync::mpsc::Sender<(u64, String)>,
+    std::sync::mpsc::Receiver<(u64, String, session::SessionPreview)>,
 ) {
-    let (request_tx, request_rx) = std::sync::mpsc::channel::<String>();
+    let (request_tx, request_rx) = std::sync::mpsc::channel::<(u64, String)>();
     let (result_tx, result_rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         // Ends when the App drops its sender.
-        for name in request_rx {
+        for (generation, name) in request_rx {
             let preview = session::load_preview(&root.join(&name));
-            if result_tx.send((name, preview)).is_err() {
+            if result_tx.send((generation, name, preview)).is_err() {
                 break;
             }
         }
@@ -573,7 +584,8 @@ impl App {
             marked_sessions: std::collections::HashSet::new(),
             expanded_session: None,
             preview_cache: HashMap::new(),
-            preview_pending: std::collections::HashSet::new(),
+            preview_pending: std::collections::HashMap::new(),
+            preview_generation: 0,
             preview_requests,
             preview_results,
             show_preview: true,
@@ -745,11 +757,13 @@ impl App {
         let Some(name) = self.selected_session_name() else {
             return;
         };
-        if self.preview_cache.contains_key(&name) || self.preview_pending.contains(&name) {
+        if self.preview_cache.contains_key(&name) || self.preview_pending.contains_key(&name) {
             return;
         }
-        if self.preview_requests.send(name.clone()).is_ok() {
-            self.preview_pending.insert(name);
+        self.preview_generation += 1;
+        let generation = self.preview_generation;
+        if self.preview_requests.send((generation, name.clone())).is_ok() {
+            self.preview_pending.insert(name, generation);
         }
     }
 
@@ -762,9 +776,10 @@ impl App {
     /// "nothing arrived yet" from "it arrived and was correctly discarded".
     pub fn drain_previews(&mut self) -> usize {
         let mut delivered = 0;
-        while let Ok((name, preview)) = self.preview_results.try_recv() {
+        while let Ok((generation, name, preview)) = self.preview_results.try_recv() {
             delivered += 1;
-            if self.preview_pending.remove(&name) {
+            if self.preview_pending.get(&name) == Some(&generation) {
+                self.preview_pending.remove(&name);
                 self.preview_cache.insert(name, preview);
             }
         }
@@ -776,8 +791,9 @@ impl App {
     fn wait_for_previews(&mut self) {
         while !self.preview_pending.is_empty() {
             match self.preview_results.recv() {
-                Ok((name, preview)) => {
-                    if self.preview_pending.remove(&name) {
+                Ok((generation, name, preview)) => {
+                    if self.preview_pending.get(&name) == Some(&generation) {
+                        self.preview_pending.remove(&name);
                         self.preview_cache.insert(name, preview);
                     }
                 }
@@ -1434,8 +1450,13 @@ impl App {
                 Action::None
             }
             MenuAction::RotateNarrative => {
-                // Rotate the narrative into its archive, after confirming
-                if self.selected_session().is_some() {
+                // Rotate the narrative into its archive, after confirming.
+                // Same liveness guard as Delete: this rewrites the narrative
+                // and commits inside a checkout a live conversation is still
+                // appending to, and nothing downstream refuses.
+                if let Some(refusal) = self.locked_selection_refusal() {
+                    self.set_status(refusal, StatusLevel::Error);
+                } else if self.selected_session().is_some() {
                     self.mode = Mode::ConfirmRotate;
                 }
                 Action::None
@@ -2116,8 +2137,11 @@ impl App {
                 // archive would leave the pane quoting them for the life of the
                 // picker. Dropped whatever cs did: a stale pane is a bug, one
                 // extra read is not.
-                // Both sets: dropping only the cache would let a read already
+                // Both maps: dropping only the cache would let a read already
                 // in flight land afterwards and restore the pre-rotation copy.
+                // Forgetting the pending generation is what makes that read
+                // stale — the next render immediately re-requests this session,
+                // so it cannot be recognised by name.
                 self.preview_cache.remove(&name);
                 self.preview_pending.remove(&name);
                 let text = String::from_utf8_lossy(&out.stdout).to_string()
@@ -4900,6 +4924,35 @@ mod tests {
         std::fs::remove_dir_all(&tmp).ok();
     }
 
+    /// Rotation rewrites the narrative and commits inside a checkout a live
+    /// conversation is appending to. Delete refuses a locked row for the same
+    /// reason; rotate was the only mutating action that did not.
+    #[cfg(unix)]
+    #[test]
+    fn r_refuses_a_locked_session() {
+        let _env = CS_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = archive_root("rotate-locked");
+        let stub = rotate_stub(&tmp, "echo rotated");
+        let _root = session::test_root::scoped(tmp.clone());
+        std::env::set_var("CS_BIN", &stub);
+
+        let mut app = App::new(session::scan_sessions());
+        for s in app.sessions.iter_mut() {
+            s.liveness = session::Liveness::Locked(4242);
+        }
+        app.apply_filter_and_sort();
+        app.handle_key(KeyEvent::from(KeyCode::Char('R')));
+        std::env::remove_var("CS_BIN");
+
+        assert_ne!(app.mode, Mode::ConfirmRotate, "a locked row must not be offered the confirm");
+        assert!(!tmp.join("argv").exists(), "cs must not have run");
+        assert!(
+            app.status_message.as_ref().is_some_and(|s| s.level == StatusLevel::Error),
+            "the refusal must say why"
+        );
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
     /// Rotation rewrites a narrative and makes a commit, and R sits one shift
     /// away from r (rename) — so it asks first. The archive chunk is verbatim,
     /// so the answer is recoverable and this needs no delete-style countdown.
@@ -5126,10 +5179,15 @@ mod tests {
 
         let mut app = App::new(session::scan_sessions());
         app.request_preview();
-        assert!(app.preview_pending.contains("alpha"), "the read must be in flight");
+        assert!(app.preview_pending.contains_key("alpha"), "the read must be in flight");
         app.handle_key(KeyEvent::from(KeyCode::Char('R')));
         app.handle_key(KeyEvent::from(KeyCode::Char('y')));
         std::env::remove_var("CS_BIN");
+
+        // The render that follows any keypress calls request_preview(), which
+        // re-arms pending for this very session — so name identity alone cannot
+        // tell the stale in-flight read from the fresh one it queues.
+        app.request_preview();
 
         // Wait for the worker to actually deliver, then assert it was dropped.
         // Breaking on delivery rather than on the assertion's negation matters
@@ -5173,13 +5231,29 @@ mod tests {
                 "row {} must render the entry the cursor is on",
                 i
             );
-            assert_eq!(
-                MENU_ITEMS[app.menu_selected].0,
-                *action,
-                "Enter at row {} must dispatch {:?}",
-                i,
-                action
-            );
+            // Drive the real dispatch: asserting MENU_ITEMS[selected] == action
+            // is MENU_ITEMS[i] == MENU_ITEMS[i], true however Enter is wired.
+            // Rename is the cheapest observable — it leaves a distinctive mode
+            // and prefills the input with the selected session's name.
+            app.menu_selected = i;
+            app.handle_key(KeyEvent::from(KeyCode::Enter));
+            if *action == MenuAction::Rename {
+                assert_eq!(
+                    app.mode,
+                    Mode::Rename,
+                    "Enter at row {} ({}) must reach the rename dialog",
+                    i,
+                    label
+                );
+            } else {
+                assert_ne!(
+                    app.mode,
+                    Mode::Rename,
+                    "Enter at row {} ({}) must not reach Rename's dialog",
+                    i,
+                    label
+                );
+            }
         }
     }
 
