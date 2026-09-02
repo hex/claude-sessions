@@ -49,6 +49,9 @@ should do. If the user did not give one, ask before writing anything.
    Request and Intent; 4. Key Technical Concepts; 5. Files and Code Sections
    (with the snippets that matter); 6. Problem Solving; 7. Pending Tasks;
    8. Current Work. Write for a successor with zero conversation memory.
+   Pending Tasks includes every open item on your native task list, with its
+   status: that list is keyed to this conversation and does not survive the
+   `/clear`, so an item recorded nowhere else goes with it.
 
    **Next Step opens the body.** The successor is told to execute it, and
    retrieval degrades over a long document — so the thing it needs first must

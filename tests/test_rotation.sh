@@ -253,6 +253,16 @@ test_rotate_skill_spends_length_asymmetrically() {
         "length is for the unrecoverable facts only; the rest stays concise" || return 1
 }
 
+# Claude Code keys the native task list to the conversation
+# (~/.claude/tasks/session-<uuid>/), so /clear drops it. Open items that live
+# only there have to be folded into Pending Tasks or they go with the
+# conversation, like every other conversation-only fact.
+test_rotate_skill_folds_native_tasks_into_pending_tasks() {
+    local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
+    assert_file_contains "$skill" "native task list" \
+        "open native tasks must be carried into Pending Tasks" || return 1
+}
+
 test_rotate_skill_ends_on_the_one_manual_step() {
     local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
     # The property is what the skill INSTRUCTS Claude to emit, not where the
@@ -376,6 +386,7 @@ run_test test_rotate_skill_arms_last
 run_test test_rotate_skill_pins_the_strongest_model
 run_test test_rotate_skill_keeps_the_users_words_close
 run_test test_rotate_skill_spends_length_asymmetrically
+run_test test_rotate_skill_folds_native_tasks_into_pending_tasks
 run_test test_rotate_skill_ends_on_the_one_manual_step
 run_test test_rotate_skill_does_not_promise_the_rotation_waits
 run_test test_rotate_skill_teaches_the_prune_rule
@@ -1065,6 +1076,22 @@ test_startup_rotation_does_not_tell_the_user_to_send_a_message() {
 # make that word mean "begin" — otherwise the fresh conversation spends it
 # re-summarising the handoff and asking where to start, and the rotation costs
 # two round trips instead of one keystroke.
+# The successor's native task list is empty at /clear, and the handoff's
+# next-step section is a multi-step plan nobody else is tracking. The preamble
+# asks for it to be mirrored into native tasks before work starts, the same
+# contract the walk-away drain already uses, so progress stays visible turn
+# to turn instead of living only in the handoff prose.
+test_rotation_preamble_mirrors_next_step_into_native_tasks() {
+    _rot_hook_session "rot-preamble-tasks"
+    _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "unconsumed"
+    printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
+    local out
+    out=$(_start_hook "$UUID_B" clear) || return 1
+    assert_output_contains "$out" "native task list" \
+        "the preamble must ask for the next-step section as native tasks" || return 1
+}
+
 test_rotation_preamble_makes_the_first_message_mean_begin() {
     _rot_hook_session "rot-preamble"
     _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "unconsumed"
@@ -1465,6 +1492,7 @@ run_test test_rotation_tells_the_user_one_message_starts_it
 run_test test_plain_clear_says_nothing_to_the_user
 run_test test_startup_rotation_does_not_tell_the_user_to_send_a_message
 run_test test_rotation_preamble_makes_the_first_message_mean_begin
+run_test test_rotation_preamble_mirrors_next_step_into_native_tasks
 run_test test_clear_does_not_emit_a_dead_autostart_field
 run_test test_clear_rotation_arms_a_kick_watch
 run_test test_kick_watch_is_scoped_to_a_clear_rotation

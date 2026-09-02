@@ -374,8 +374,9 @@ committed work by path rather than re-summarising it, keeps what you said
 close to your own words while condensing its own reasoning, and spends length
 only on the facts a successor cannot recover.
 
-Then rotate with **`/clear`**. The fresh conversation reads the handoff and
-continues from its next-step section — the old transcript is not loaded. It
+Then rotate with **`/clear`**. The fresh conversation reads the handoff,
+mirrors its next-step section into the native task list, and continues from
+it — the old transcript is not loaded. It
 waits for your next message, which can simply be what you want done next.
 
 If you would rather stop for the day, the handoff stays armed and the next

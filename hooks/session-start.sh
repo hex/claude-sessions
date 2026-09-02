@@ -757,7 +757,7 @@ if [ -n "$ROTATION_HANDOFF" ]; then
 --- Conversation Rotation ---
 This fresh conversation continues rotated work. Read .cs/handoffs/$ROTATION_HANDOFF FIRST — it is the previous conversation's handoff; the prior transcript is not loaded, and the handoff plus .cs/memory/narrative.*.md carry the context.
 
-Nothing has run yet. $ROTATION_START A BARE NUDGE — \"go\", \"continue\", \"ok\" — means begin: execute the handoff's next-step section and report what you did, without re-summarising it or asking which part to start with. A first message carrying its own content takes precedence over the handoff; answer that instead. Ask first only where you normally would: the handoff is missing, unreadable, or genuinely ambiguous, or its next step is destructive or irreversible."
+Nothing has run yet. $ROTATION_START A BARE NUDGE — \"go\", \"continue\", \"ok\" — means begin: mirror the handoff's next-step section into your native task list (one task per step, so progress stays visible turn to turn), then execute it and report what you did, without re-summarising it or asking which part to start with. A first message carrying its own content takes precedence over the handoff; answer that instead. Ask first only where you normally would: the handoff is missing, unreadable, or genuinely ambiguous, or its next step is destructive or irreversible."
 elif [ -n "$FRESH_NOTICE" ]; then
     CONTEXT="${CONTEXT}
 
