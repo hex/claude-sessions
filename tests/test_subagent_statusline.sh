@@ -79,6 +79,95 @@ test_row_has_model_name_desc_ctx_elapsed() {
     assert_output_contains "$c" "2m14s" "134 seconds elapsed" || return 1
 }
 
+# A point release renders as its own version. A name that is merely the wrong
+# version reads as correct, which is worse than a raw id that looks wrong.
+test_point_releases_do_not_collapse_into_the_base_version() {
+    export NO_COLOR=1
+    local fx out c
+    fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-fable-5-1","contextWindowSize":200000,"tokenCount":1000}]}'
+    out=$(run_ssl "$fx")
+    c=$(row_content "$out" "t1")
+    assert_output_contains "$c" "Fable 5.1" "a 5.1 agent must say 5.1" || return 1
+    # And the base version still resolves.
+    fx='{"columns":96,"tasks":[{"id":"t2","name":"a","description":"d","model":"claude-fable-5","contextWindowSize":200000,"tokenCount":1000}]}'
+    out=$(run_ssl "$fx")
+    c=$(row_content "$out" "t2")
+    assert_output_contains "$c" "Fable 5" "the base version is unchanged" || return 1
+    case "$c" in
+        *"Fable 5.1"*) echo "  FAIL: claude-fable-5 must not render as 5.1"; return 1 ;;
+    esac
+}
+
+# The model most sessions here run must render as a name, not an id.
+# The per-model arms only fix the ids someone thought to list. Every family has
+# the same trap, and each new point release is a silent regression until a human
+# notices a row naming the wrong version. The id already carries the version, so
+# derive it: a numeric segment after the family is the version, and a run of 8
+# digits is a DATE, which is a build stamp and not a version at all.
+test_every_family_resolves_its_point_release() {
+    export NO_COLOR=1
+    local id want fx out c
+    while read -r id want; do
+        [ -n "$id" ] || continue
+        fx="{\"columns\":96,\"tasks\":[{\"id\":\"t1\",\"name\":\"a\",\"description\":\"d\",\"model\":\"$id\",\"contextWindowSize\":200000,\"tokenCount\":1000}]}"
+        out=$(run_ssl "$fx")
+        c=$(row_content "$out" "t1")
+        assert_output_contains "$c" "$want" "$id must render as $want" || return 1
+    done <<'IDS'
+claude-sonnet-5-1 Sonnet 5.1
+claude-opus-5-1 Opus 5.1
+claude-haiku-4-5-1 Haiku 4.5.1
+IDS
+}
+
+# A dated build stamp is not a version. claude-sonnet-5-20260101 is Sonnet 5,
+# and a rule that reads trailing digits as a version number would call it
+# "Sonnet 5.20260101".
+# Two id shapes the derivation must keep resolving: the Vertex provider form
+# carries its build date after `@`, and a stage tag rides along as a word. A
+# date that is not last is not a shape we know — rendering "Sonnet 5" for
+# sonnet-5-20250101-1 would be the wrong-version case the derivation exists to
+# prevent — so it falls through verbatim.
+test_vertex_dates_tags_and_misplaced_dates() {
+    export NO_COLOR=1
+    local id want fx out c
+    while read -r id want; do
+        [ -n "$id" ] || continue
+        fx="{\"columns\":120,\"tasks\":[{\"id\":\"t1\",\"name\":\"a\",\"description\":\"d\",\"model\":\"$id\",\"contextWindowSize\":200000,\"tokenCount\":1000}]}"
+        out=$(run_ssl "$fx")
+        c=$(row_content "$out" "t1")
+        assert_output_contains "$c" "$want" "$id must render as $want" || return 1
+    done <<'IDS'
+claude-haiku-4-5@20251001 Haiku 4.5
+claude-sonnet-5-preview Sonnet 5 preview
+claude-sonnet-5-20250101-1 claude-sonnet-5-20250101-1
+IDS
+}
+
+test_dated_suffixes_are_not_versions() {
+    export NO_COLOR=1
+    local fx out c
+    fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-haiku-4-5-20251001","contextWindowSize":200000,"tokenCount":1000}]}'
+    out=$(run_ssl "$fx")
+    c=$(row_content "$out" "t1")
+    assert_output_contains "$c" "Haiku 4.5" "a dated id keeps its base version" || return 1
+    case "$c" in
+        *2025*) echo "  FAIL: a build date leaked into the version"; return 1 ;;
+    esac
+}
+
+test_opus_5_renders_as_a_name_not_an_id() {
+    export NO_COLOR=1
+    local fx out c
+    fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-opus-5","contextWindowSize":200000,"tokenCount":1000}]}'
+    out=$(run_ssl "$fx")
+    c=$(row_content "$out" "t1")
+    assert_output_contains "$c" "Opus 5" "Opus 5 must have a display name" || return 1
+    case "$c" in
+        *claude-opus-5*) echo "  FAIL: the raw id reached the row"; return 1 ;;
+    esac
+}
+
 test_no_model_means_no_model_and_no_ctx() {
     export NO_COLOR=1
     local fx out c
@@ -100,13 +189,23 @@ test_zero_context_window_is_not_a_divide_by_zero() {
     assert_output_contains "$c" "Sonnet 5" "model still renders" || return 1
 }
 
-test_unknown_model_id_renders_verbatim() {
+# The property is that a model never vanishes from the row, not that an unlisted
+# one is ugly. Deriving the name from the id means a family nobody has heard of
+# still reads as a name — which is the point of deriving rather than tabulating.
+# A shape the rule cannot parse falls back to the raw id, tested below.
+test_unknown_model_id_still_names_the_model() {
     export NO_COLOR=1
     local fx out c
     fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-zephyr-9"}]}'
     out=$(run_ssl "$fx")
     c=$(row_content "$out" "t1")
-    assert_output_contains "$c" "claude-zephyr-9" "an unknown model degrades to its id, never to invisible" || return 1
+    assert_output_contains "$c" "Zephyr 9" "an unlisted family still resolves from its id" || return 1
+    # A malformed id has no version to derive, so it degrades to itself rather
+    # than to nothing.
+    fx='{"columns":96,"tasks":[{"id":"t2","name":"a","description":"d","model":"gpt-4o-mini"}]}'
+    out=$(run_ssl "$fx")
+    c=$(row_content "$out" "t2")
+    assert_output_contains "$c" "gpt-4o-mini" "an unparseable id degrades to itself, never to invisible" || return 1
 }
 
 test_missing_name_falls_back_to_type() {
@@ -314,9 +413,14 @@ run_test test_empty_tasks_prints_nothing
 run_test test_malformed_stdin_exits_clean
 run_test test_disable_env_prints_nothing
 run_test test_row_has_model_name_desc_ctx_elapsed
+run_test test_point_releases_do_not_collapse_into_the_base_version
+run_test test_every_family_resolves_its_point_release
+run_test test_vertex_dates_tags_and_misplaced_dates
+run_test test_dated_suffixes_are_not_versions
+run_test test_opus_5_renders_as_a_name_not_an_id
 run_test test_no_model_means_no_model_and_no_ctx
 run_test test_zero_context_window_is_not_a_divide_by_zero
-run_test test_unknown_model_id_renders_verbatim
+run_test test_unknown_model_id_still_names_the_model
 run_test test_missing_name_falls_back_to_type
 run_test test_elapsed_over_an_hour_uses_hours
 run_test test_content_escapes_esc_as_unicode

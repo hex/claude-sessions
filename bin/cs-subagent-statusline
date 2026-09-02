@@ -69,17 +69,66 @@ _fixed_width() {
 }
 
 # Resolved model ids arrive here, not the display names the main bar receives.
-# Prefix matching so dated suffixes and `[1m]` context markers resolve. An
-# unrecognised id renders verbatim: a new model must degrade to ugly, not absent.
+# The name is derived from the id's own shape rather than looked up: a lookup
+# table renders the WRONG VERSION for any point release nobody listed, and a
+# wrong version reads as correct where a raw id looks wrong.
+#
+# Shape: `claude-<family>-<numeric parts>[-<tag>][-<8-digit date>][@<date>][[1m]]`.
+# Numeric parts join with dots (fable-5-1 -> "Fable 5.1"). A trailing
+# alphabetic segment is a stage tag and rides along (sonnet-5-preview ->
+# "Sonnet 5 preview"). An 8-digit run is a build date, dropped, and accepted
+# after either `-` or `@` (the Vertex provider form is haiku-4-5@20251001);
+# it must be LAST, or the id is not a shape we know. Anything else, and any
+# non-claude id, renders verbatim: a new model must degrade to ugly, not
+# absent.
+#
+# No forks: this runs per row per refresh, at sub-second cadence, on a path
+# the rest of the file keeps fork-free. Capitalisation is a parameter-expansion
+# lookup, not a pipeline.
 _model_display() {
-    case "$1" in
-        "")                _MODEL="" ;;
-        claude-fable-5*)   _MODEL="Fable 5" ;;
-        claude-opus-4-8*)  _MODEL="Opus 4.8" ;;
-        claude-sonnet-5*)  _MODEL="Sonnet 5" ;;
-        claude-haiku-4-5*) _MODEL="Haiku 4.5" ;;
-        *)                 _MODEL="$1" ;;
+    local id="$1" family="" version="" tag="" seg rest
+    _MODEL=""
+    [ -n "$id" ] || return 0
+    id="${id%%\[*}"
+    case "$id" in
+        claude-*) rest="${id#claude-}" ;;
+        *)        _MODEL="$1"; return 0 ;;
     esac
+    # A Vertex-style @date is a build stamp: strip it, but only when it is
+    # exactly eight digits, so an unknown suffix still falls through verbatim.
+    case "$rest" in
+        *@????????) seg="${rest##*@}"
+                    case "$seg" in *[!0-9]*) ;; *) rest="${rest%@*}" ;; esac ;;
+    esac
+    family="${rest%%-*}"
+    # Spelled-out class, not a range: [a-z] is collation-dependent under bash
+    # 3.2 in a UTF-8 locale and admits uppercase, which then finds no match
+    # in the capitalisation lookup below and drops the first letter.
+    local lower=abcdefghijklmnopqrstuvwxyz upper=ABCDEFGHIJKLMNOPQRSTUVWXYZ
+    case "$family" in ''|*[!"$lower"]*) _MODEL="$1"; return 0 ;; esac
+    rest="${rest#"$family"}"; rest="${rest#-}"
+    while [ -n "$rest" ]; do
+        case "$rest" in *-*) seg="${rest%%-*}"; rest="${rest#*-}" ;; *) seg="$rest"; rest="" ;; esac
+        case "$seg" in
+            '') _MODEL="$1"; return 0 ;;
+            *[!0-9]*)
+                # Alphabetic and last: a stage tag. Anything else: unknown shape.
+                case "$seg" in *[!"$lower"]*) _MODEL="$1"; return 0 ;; esac
+                [ -z "$rest" ] || { _MODEL="$1"; return 0; }
+                tag="$seg" ;;
+            ????????)
+                # A build date ends the id; a date in the middle is not a shape
+                # we know, and guessing "Sonnet 5" for sonnet-5-20250101-1 is the
+                # wrong-version-reads-as-correct case this function exists to
+                # prevent.
+                [ -z "$rest" ] || { _MODEL="$1"; return 0; } ;;
+            *) version="${version:+$version.}$seg" ;;
+        esac
+    done
+    [ -n "$version" ] || { _MODEL="$1"; return 0; }
+    local first before
+    first="${family%"${family#?}"}"; before="${lower%%"$first"*}"
+    _MODEL="${upper:${#before}:1}${family#?} $version${tag:+ $tag}"
 }
 
 # Seconds since the agent started, as "2m14s" or "1h05m". A negative value
