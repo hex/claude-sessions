@@ -121,7 +121,7 @@ EXPECT
     # A sample renders, and it renders BEFORE the question.
     local sample_line prompt_line
     sample_line=$(grep -n 'ctx ' "$out" | head -1 | cut -d: -f1)
-    prompt_line=$(grep -n 'Register cs-statusline' "$out" | head -1 | cut -d: -f1)
+    prompt_line=$(grep -n 'as the Claude Code status line' "$out" | head -1 | cut -d: -f1)
     [ -n "$sample_line" ] || { echo "  FAIL: no status line sample rendered"; return 1; }
     [ -n "$prompt_line" ] || { echo "  FAIL: no prompt"; return 1; }
     [ "$sample_line" -lt "$prompt_line" ] \
@@ -153,6 +153,17 @@ EXPECT
         || { echo "  FAIL: the sample must say what it is"; return 1; }
     [ "$label_line" -lt "$sample_line" ] \
         || { echo "  FAIL: the label must precede the sample it names"; return 1; }
+    # And it lines up with the block above it. Every installed-line carries
+    # three leading spaces; a flush-left label reads as output that escaped the
+    # formatting rather than as part of the run. The bar itself cannot be
+    # indented (its opening reset eats leading spaces), so the label is what
+    # carries the alignment.
+    local label_text
+    label_text=$(sed -n "${label_line}p" "$out" | sed 's/\x1b\[[0-9;]*m//g')
+    case "$label_text" in
+        "   "*) ;;
+        *) echo "  FAIL: the label must align with the installer's other lines"; return 1 ;;
+    esac
     # Fixed payload: the sample line itself must carry the placeholder session,
     # not whatever is live. Checked on the RENDERED LINE rather than the whole
     # transcript — the installer legitimately prints its own paths, and a
@@ -170,54 +181,35 @@ EXPECT
     esac
 }
 
-# A lowercase default means "not now", so enter must not opt the user out for
-# good. Only an explicit n is a decision worth remembering; enter keeps the
-# current bar for this run and leaves the question open for the next release.
-test_enter_at_the_replace_prompt_is_not_a_permanent_optout() {
+# Enter declines exactly as n does. The whole point of the change is that
+# cs -update stops asking, so a default that left the question open would
+# re-prompt the very people the feature was written for. The decline states
+# plainly that it is remembered, and cs -statusline enable reverses it.
+test_enter_declines_the_same_as_an_explicit_n() {
     command -v expect >/dev/null 2>&1 \
         || { echo "    SKIP (expect not installed; the prompt needs a tty)"; return 0; }
-    local fake_home="$TEST_TMPDIR/home-enter"
-    mkdir -p "$fake_home/.claude"
-    printf '{"statusLine":{"command":"/opt/other/bar"}}\n' > "$fake_home/.claude/settings.json"
-    local exp="$TEST_TMPDIR/enter.exp"
-    cat > "$exp" <<EXPECT
+    local ans
+    for ans in "" "n"; do
+        local fake_home="$TEST_TMPDIR/home-ans${ans:-enter}"
+        mkdir -p "$fake_home/.claude"
+        printf '{"statusLine":{"command":"/opt/other/bar"}}\n' > "$fake_home/.claude/settings.json"
+        local exp="$TEST_TMPDIR/ans${ans:-enter}.exp"
+        cat > "$exp" <<EXPECT
 set timeout 120
 spawn env HOME=$fake_home bash $INSTALL_SH
 expect {
-    -re {status line.*\[y/N\]} { send "\r"; exp_continue }
+    -re {status line.*\[y/N\]} { send "$ans\r"; exp_continue }
     -re {Complete|complete} { exp_continue }
     eof
 }
 EXPECT
-    expect -f "$exp" >/dev/null 2>&1 || true
-    [ ! -f "$fake_home/.config/cs/statusline-declined" ] \
-        || { echo "  FAIL: enter must not write the decline marker"; return 1; }
-    # The user's own bar is still kept, which is the other half of the default.
-    local sl
-    sl=$(jq -r '.statusLine.command // ""' "$fake_home/.claude/settings.json" 2>/dev/null)
-    assert_eq "/opt/other/bar" "$sl" "enter must keep the current status line" || return 1
-}
-
-# An explicit n IS a decision, and still gets remembered.
-test_explicit_n_at_the_replace_prompt_is_remembered() {
-    command -v expect >/dev/null 2>&1 \
-        || { echo "    SKIP (expect not installed; the prompt needs a tty)"; return 0; }
-    local fake_home="$TEST_TMPDIR/home-explicitn"
-    mkdir -p "$fake_home/.claude"
-    printf '{"statusLine":{"command":"/opt/other/bar"}}\n' > "$fake_home/.claude/settings.json"
-    local exp="$TEST_TMPDIR/explicitn.exp"
-    cat > "$exp" <<EXPECT
-set timeout 120
-spawn env HOME=$fake_home bash $INSTALL_SH
-expect {
-    -re {status line.*\[y/N\]} { send "n\r"; exp_continue }
-    -re {Complete|complete} { exp_continue }
-    eof
-}
-EXPECT
-    expect -f "$exp" >/dev/null 2>&1 || true
-    [ -f "$fake_home/.config/cs/statusline-declined" ] \
-        || { echo "  FAIL: an explicit n must be remembered"; return 1; }
+        expect -f "$exp" >/dev/null 2>&1 || true
+        [ -f "$fake_home/.config/cs/statusline-declined" ] \
+            || { echo "  FAIL: answer '${ans:-enter}' must be remembered"; return 1; }
+        local sl
+        sl=$(jq -r '.statusLine.command // ""' "$fake_home/.claude/settings.json" 2>/dev/null)
+        assert_eq "/opt/other/bar" "$sl" "answer '${ans:-enter}' must keep the current bar" || return 1
+    done
 }
 
 # Same guard on the disable path, which shares the construct.
@@ -1220,8 +1212,7 @@ test_filechanged_registration_carries_async_rewake() {
 run_test test_install_survives_an_unwritable_declined_marker_dir
 run_test test_install_previews_the_status_line_before_asking
 run_test test_declining_says_permanence_on_its_own_line
-run_test test_enter_at_the_replace_prompt_is_not_a_permanent_optout
-run_test test_explicit_n_at_the_replace_prompt_is_remembered
+run_test test_enter_declines_the_same_as_an_explicit_n
 run_test test_statusline_disable_survives_an_unwritable_marker_dir
 run_test test_marker_tests_do_not_touch_a_live_xdg_config_home
 run_test test_filechanged_registration_carries_async_rewake

@@ -14,6 +14,7 @@ if [[ -n "${NO_COLOR:-}" ]] || [[ ! -t 1 ]]; then
     GOLD=''
     RUST=''
     COMMENT=''
+    BOLD=''
     NC=''
 else
     RED='\033[38;2;239;83;80m'        # #ef5350 - warm red
@@ -23,6 +24,7 @@ else
     GOLD='\033[38;2;255;193;7m'       # #ffc107 - golden
     RUST='\033[38;2;230;74;25m'       # #e64a19 - terracotta
     COMMENT='\033[38;2;161;136;127m'  # #a1887f - warm taupe
+    BOLD='\033[1m'
     NC='\033[0m'
 fi
 
@@ -733,7 +735,7 @@ else
         # so an indented printf produced a bar flush against the margin while
         # every other line sat three spaces in.
         echo ""
-        info "This is what it looks like:"
+        info "   This is what it looks like:"
         printf '%s\n' "$rendered"
         echo ""
     }
@@ -755,7 +757,11 @@ else
                 # leave it off and say how to enable.
                 if [ -t 0 ]; then
                     _preview_statusline
-                    read -p "Register cs-statusline as the Claude Code status line? [Y/n] " -n 1 -r
+                    # read -p prints its argument verbatim, so an escape in it
+                    # would show as literal characters. Emit the styled prompt
+                    # with echo -e and read with no prompt of its own.
+                    echo -en "Register ${BOLD}cs-statusline${NC} as the Claude Code status line? [Y/n] "
+                    read -n 1 -r
                     echo ""
                     if [[ $REPLY =~ ^[Nn]$ ]]; then
                         _remember_statusline_decline \
@@ -770,23 +776,20 @@ else
             else
                 if [ -t 0 ]; then
                     _preview_statusline
-                    read -p "Replace current status line ($_current_statusline) with cs-statusline? [y/N] " -n 1 -r
+                    echo -en "Replace current status line ($_current_statusline) with ${BOLD}cs-statusline${NC}? [y/N] "
+                    read -n 1 -r
                     echo ""
+                    # Anything but y declines, enter included: the point of the
+                    # change is that cs -update stops asking, and a default that
+                    # left the question open would re-prompt the people it was
+                    # written for. The decline says plainly that it is
+                    # remembered, and cs -statusline enable reverses it.
                     if [[ $REPLY =~ ^[Yy]$ ]]; then
                         _register_statusline=1
-                    elif [[ $REPLY =~ ^[Nn]$ ]]; then
+                    else
                         _remember_statusline_decline \
                             "Keeping current status line." \
                             "To switch to cs-statusline: cs -statusline enable"
-                    else
-                        # Enter, the lowercase default, means "not now" — so it
-                        # keeps the bar for this run and leaves the question
-                        # open. Only a typed n is a decision worth remembering;
-                        # turning the safest keystroke into a permanent
-                        # preference is how someone ends up never asked again
-                        # without knowing they chose it.
-                        info "Keeping current status line."
-                        info "Asked again next release. To decide now: cs -statusline enable, or cs -statusline disable"
                     fi
                 else
                     warn "Keeping current status line. To switch to cs-statusline:"
