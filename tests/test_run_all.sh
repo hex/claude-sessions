@@ -315,6 +315,92 @@ test_run_all_runs_suites_under_nice() {
     [ -n "$n" ] && [ "$n" -ge 10 ] || { echo "suites must run at niceness >= 10, saw '${n:-none}'"; printf '%s\n' "$out"; return 1; }
 }
 
+# --changed runs only the suites that name a changed path, for the edit loop.
+# The fixture suites reference source paths in their text the way real suites
+# do; CS_TEST_CHANGED injects the changed list so the tests need no git repo.
+make_mapped_suite_dir() {
+    make_suite_dir 3
+    printf '# exercises hooks/foo-hook.sh\n' >> "$SUITE_DIR/test_fake1.sh"
+    printf '# exercises bin/cs-statusline\n' >> "$SUITE_DIR/test_fake2.sh"
+    printf '# exercises skills/bar/SKILL.md\n' >> "$SUITE_DIR/test_fake3.sh"
+}
+
+test_run_all_changed_selects_the_suites_naming_the_path() {
+    make_mapped_suite_dir
+    local out
+    out=$(CS_TEST_CHANGED="hooks/foo-hook.sh" CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" --changed 2>&1) || { echo "run failed"; printf '%s\n' "$out"; return 1; }
+    [ "$(ran_count)" -eq 1 ] || { echo "expected 1 suite, ran $(ran_count)"; printf '%s\n' "$out"; return 1; }
+    [ -f "$RAN_DIR/test_fake1.sh" ] || { echo "the suite naming the hook did not run"; return 1; }
+    printf '%s' "$out" | grep -q 'changed: 1 path' || { echo "must say what it selected and why"; printf '%s\n' "$out"; return 1; }
+}
+
+test_run_all_changed_runs_its_own_suite_for_a_test_file() {
+    make_mapped_suite_dir
+    local out
+    out=$(CS_TEST_CHANGED="tests/test_fake3.sh" CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" --changed 2>&1) || return 1
+    [ "$(ran_count)" -eq 1 ] && [ -f "$RAN_DIR/test_fake3.sh" ] || { echo "a changed suite must run itself, ran $(ran_count)"; return 1; }
+}
+
+# bin/cs is assembled from every lib fragment and 45 of 63 suites invoke it, so
+# a lib change has no honest subset: it is the full gate, and the runner says
+# so rather than guessing.
+test_run_all_changed_falls_back_to_the_full_gate_for_lib() {
+    make_mapped_suite_dir
+    local out
+    out=$(CS_TEST_CHANGED="lib/55-queue.sh" CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" --changed 2>&1) || return 1
+    [ "$(ran_count)" -eq 3 ] || { echo "a lib change must run every suite, ran $(ran_count)"; return 1; }
+    printf '%s' "$out" | grep -qi 'full gate' || { echo "must say it fell back to the full gate"; printf '%s\n' "$out"; return 1; }
+}
+
+test_run_all_changed_falls_back_for_the_harness_and_an_unmapped_path() {
+    make_mapped_suite_dir
+    CS_TEST_CHANGED="tests/test_lib.sh" CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" --changed >/dev/null 2>&1 || return 1
+    [ "$(ran_count)" -eq 3 ] || { echo "a harness change must run every suite, ran $(ran_count)"; return 1; }
+    rm -f "$RAN_DIR"/*
+    CS_TEST_CHANGED="some/new/file.txt" CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" --changed >/dev/null 2>&1 || return 1
+    [ "$(ran_count)" -eq 3 ] || { echo "an unmapped path must run every suite, ran $(ran_count)"; return 1; }
+}
+
+# Session state, docs and config are not code: they neither select a suite nor
+# force the full gate, so a dirty .cs/ or an edited README does not turn an
+# edit-loop run into twenty minutes.
+test_run_all_changed_ignores_non_code_paths() {
+    make_mapped_suite_dir
+    local out
+    out=$(CS_TEST_CHANGED="$(printf '.cs/memory/narrative.md\ndocs/hooks.md\nREADME.md\nhooks/foo-hook.sh')" CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" --changed 2>&1) || return 1
+    [ "$(ran_count)" -eq 1 ] && [ -f "$RAN_DIR/test_fake1.sh" ] || { echo "non-code paths must be ignored, ran $(ran_count)"; printf '%s\n' "$out"; return 1; }
+    rm -f "$RAN_DIR"/*
+    out=$(CS_TEST_CHANGED="docs/hooks.md" CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" --changed 2>&1) || return 1
+    [ "$(ran_count)" -eq 0 ] || { echo "docs alone must run nothing, ran $(ran_count)"; printf '%s\n' "$out"; return 1; }
+}
+
+# Skill and command markdown is source: suites pin its frontmatter and wording,
+# so a change there selects those suites rather than being waved through as
+# documentation.
+test_run_all_changed_treats_skill_markdown_as_source() {
+    make_mapped_suite_dir
+    local out
+    out=$(CS_TEST_CHANGED="skills/bar/SKILL.md" CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" --changed 2>&1) || return 1
+    [ "$(ran_count)" -eq 1 ] && [ -f "$RAN_DIR/test_fake3.sh" ] || { echo "a skill file must select the suite naming it, ran $(ran_count)"; printf '%s\n' "$out"; return 1; }
+}
+
+test_run_all_changed_with_nothing_changed_runs_nothing() {
+    make_mapped_suite_dir
+    local out rc=0
+    out=$(CS_TEST_CHANGED="" CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" --changed 2>&1) || rc=$?
+    [ "$rc" -eq 0 ] || { echo "nothing changed must exit 0, got $rc"; printf '%s\n' "$out"; return 1; }
+    [ "$(ran_count)" -eq 0 ] || { echo "nothing changed must run nothing, ran $(ran_count)"; return 1; }
+    printf '%s' "$out" | grep -qi 'nothing changed' || { echo "must say nothing changed"; printf '%s\n' "$out"; return 1; }
+}
+
+test_run_all_changed_unions_several_paths() {
+    make_mapped_suite_dir
+    local out
+    out=$(CS_TEST_CHANGED="$(printf 'hooks/foo-hook.sh\nbin/cs-statusline')" CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" --changed 2>&1) || return 1
+    [ "$(ran_count)" -eq 2 ] || { echo "two mapped paths must select two suites, ran $(ran_count)"; printf '%s\n' "$out"; return 1; }
+    [ ! -f "$RAN_DIR/test_fake3.sh" ] || { echo "an unrelated suite ran"; return 1; }
+}
+
 # ============================================================================
 # Runner
 # ============================================================================
@@ -345,5 +431,13 @@ run_test test_run_all_releases_the_lock_when_a_suite_fails
 run_test test_run_all_defaults_to_half_the_cores
 run_test test_run_all_keeps_at_least_one_lane_on_a_single_core
 run_test test_run_all_runs_suites_under_nice
+run_test test_run_all_changed_selects_the_suites_naming_the_path
+run_test test_run_all_changed_runs_its_own_suite_for_a_test_file
+run_test test_run_all_changed_falls_back_to_the_full_gate_for_lib
+run_test test_run_all_changed_falls_back_for_the_harness_and_an_unmapped_path
+run_test test_run_all_changed_ignores_non_code_paths
+run_test test_run_all_changed_treats_skill_markdown_as_source
+run_test test_run_all_changed_with_nothing_changed_runs_nothing
+run_test test_run_all_changed_unions_several_paths
 
 report_results

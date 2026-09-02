@@ -11,6 +11,23 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # they would glob this directory and recurse into themselves.
 SUITE_DIR="${CS_TEST_SUITE_DIR:-$SCRIPT_DIR}"
 
+# --changed: the edit-loop gate. Run only the suites that name a changed path.
+# The changed set is the working tree against HEAD plus untracked files, which
+# is what "did I break anything" means mid-edit; CS_TEST_CHANGED (one path per
+# line) replaces it for callers and for the runner's own tests. A suite is
+# selected when its text names the path, or when the path is the suite itself.
+# Three kinds of change have no honest subset and run the full gate instead:
+# lib/ and bin/cs (bin/cs is assembled from every lib fragment and 45 of 63
+# suites invoke it), tests/test_lib.sh (every suite sources it), and any path
+# no suite names (an unmapped file is a gap in the map, not a proof of safety).
+changed_mode=""
+for arg in "$@"; do
+    case "$arg" in
+        --changed) changed_mode=1 ;;
+        *) echo "unknown argument '$arg' (only --changed is accepted)" >&2; exit 2 ;;
+    esac
+done
+
 # Optional sharding for CI parallelism: CS_TEST_SHARD="N/M" runs shard N of M
 # (round-robin over the suite list, so slow suites spread across shards). Unset
 # runs every suite. The round-robin index counts only real suites (test_lib.sh
@@ -76,6 +93,53 @@ for suite in "$SUITE_DIR"/test_*.sh; do
     selected+=("$suite")
 done
 
+if [ -n "$changed_mode" ]; then
+    if [ -n "${CS_TEST_CHANGED+set}" ]; then
+        changed="$CS_TEST_CHANGED"
+    else
+        changed=$( { git -C "$SCRIPT_DIR/.." diff --name-only HEAD; git -C "$SCRIPT_DIR/.." ls-files --others --exclude-standard; } 2>/dev/null | sort -u)
+    fi
+    if [ -z "$changed" ]; then
+        echo "nothing changed against HEAD; no suites to run" >&2
+        exit 0
+    fi
+    npaths=$(printf '%s\n' "$changed" | grep -c .)
+    full_reason=""
+    picked=()
+    while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        case "$path" in
+            lib/*|bin/cs|tests/test_lib.sh|tests/run_all.sh) full_reason="$path"; break ;;
+            # Not code: session state, docs, plans, changelog, editor and CI
+            # config. A change here proves nothing about the suites, so it
+            # neither selects one nor forces the full gate. Skill and command
+            # markdown is NOT in this list: suites pin their frontmatter and
+            # wording, so those files match by content like any source path.
+            .cs/*|.claude*|docs/*|.github/*|.gitignore|assets/*|.superpowers/*|README.md|CHANGELOG.md|CONTRIBUTING.md|LICENSE*) continue ;;
+        esac
+        hit=""
+        base=$(basename "$path")
+        for suite in "${selected[@]}"; do
+            if [ "tests/$(basename "$suite")" = "$path" ] || grep -qF -- "$path" "$suite" 2>/dev/null; then
+                hit=1
+                case " ${picked[*]:-} " in *" $suite "*) ;; *) picked+=("$suite") ;; esac
+            fi
+        done
+        [ -n "$hit" ] || { full_reason="$path (no suite names it)"; break; }
+    done <<EOF_CHANGED
+$changed
+EOF_CHANGED
+    if [ -n "$full_reason" ]; then
+        echo "changed: $npaths path(s); $full_reason has no honest subset, running the full gate" >&2
+    elif [ "${#picked[@]}" -eq 0 ]; then
+        echo "changed: $npaths path(s), none of them code; no suites to run" >&2
+        exit 0
+    else
+        echo "changed: $npaths path(s) select ${#picked[@]} of ${#selected[@]} suites" >&2
+        selected=("${picked[@]}")
+    fi
+fi
+
 total=${#selected[@]}
 failed=()
 
@@ -106,6 +170,24 @@ if ! mkdir "$lock" 2>/dev/null; then
 fi
 printf '%s\n' "$$" > "$lock/pid"
 trap '_release_lock' EXIT
+# A trap runs only after the foreground command returns, so on INT or TERM the
+# runner stops the lanes and the suites by pid before exiting through the EXIT
+# trap; otherwise a killed gate leaves its suites running and its lock in
+# place. Pids, not the process group: a runner started from another script
+# shares that script's group, and killing the group would take the caller
+# down with it. Each lane records itself in lanes[] and each suite its pid in
+# the log dir, which is where _stop_everything finds them.
+lanes=()
+_stop_everything() {
+    trap - INT TERM
+    local f
+    for f in "$logdir"/*.pid; do
+        [ -f "$f" ] && kill -TERM "$(cat "$f" 2>/dev/null)" 2>/dev/null
+    done
+    [ "${#lanes[@]}" -gt 0 ] && kill -TERM "${lanes[@]}" 2>/dev/null
+    exit 130
+}
+trap '_stop_everything' INT TERM
 
 # Say what the run is about to do. A gate that takes minutes should account for
 # them, and the lane count is the one number that explains the wall time.
@@ -133,15 +215,22 @@ donefile="$logdir/done"
 # could not share. In serial mode the suite streams live and the log doubles
 # as the record.
 run_suite() {  # index
-    local k="$1" name t0 t1 secs mark
+    local k="$1" name t0 t1 secs mark pid
     name=$(basename "${selected[$k]}")
     t0=$(date +%s)
+    # The suite runs in the background and is waited on, never in the
+    # foreground: wait returns the moment a signal arrives, so the INT/TERM
+    # trap can stop the suite by the pid recorded here. Serial mode streams
+    # through tee for live output; the lanes capture to the log alone.
     if [ "$jobs_n" -gt 1 ]; then
-        nice -n 10 bash "${selected[$k]}" > "$logdir/$k.log" 2>&1 || : > "$logdir/$k.fail"
+        nice -n 10 bash "${selected[$k]}" > "$logdir/$k.log" 2>&1 &
     else
-        nice -n 10 bash "${selected[$k]}" 2>&1 | tee "$logdir/$k.log"
-        [ "${PIPESTATUS[0]}" -eq 0 ] || : > "$logdir/$k.fail"
+        nice -n 10 bash "${selected[$k]}" > >(tee "$logdir/$k.log") 2>&1 &
     fi
+    pid=$!
+    printf '%s\n' "$pid" > "$logdir/$k.pid"
+    wait "$pid" || : > "$logdir/$k.fail"
+    rm -f "$logdir/$k.pid"
     t1=$(date +%s)
     secs=$((t1 - t0))
     printf '%s\n' "$secs" > "$logdir/$k.secs"
@@ -165,6 +254,7 @@ if [ "$jobs_n" -gt 1 ] && [ "$total" -gt 1 ]; then
                 k=$((k + jobs_n))
             done
         ) &
+        lanes+=("$!")
         j=$((j + 1))
     done
     wait

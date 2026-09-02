@@ -64,8 +64,17 @@ The full gate takes minutes. Most of the time you do not want it.
 | Situation | Run |
 |---|---|
 | Red/green loop on one file | that file's suite alone, roughly a second or two |
-| About to commit | the affected suite, plus anything sharing a library you touched |
+| About to commit | `bash tests/run_all.sh --changed` |
 | About to merge, or cutting a release | `bash tests/run_all.sh` |
+
+`--changed` reads the working tree against `HEAD` plus untracked files and runs
+only the suites whose text names a changed path (a changed suite runs itself).
+Three kinds of change have no honest subset and run the full gate: anything
+under `lib/` or `bin/cs` (assembled from every fragment, invoked by most
+suites), `tests/test_lib.sh`, and a source path no suite names. Session state,
+docs and config (`.cs/`, `docs/`, the top-level `*.md`, `.github/`) are ignored
+either way; skill and command markdown counts as source.
+`CS_TEST_CHANGED` (one path per line) replaces the git-derived list.
 
 Order the gates so the cheap ones run first. A full sweep before a quick manual
 check that could send you back to the code is a sweep you pay for twice.
