@@ -657,6 +657,28 @@ else
     # stops asking on every release. `cs -statusline enable` clears it,
     # `cs -statusline disable` sets it (KEEP IN SYNC with lib/70-statusline.sh).
     _statusline_declined="${XDG_CONFIG_HOME:-$HOME/.config}/cs/statusline-declined"
+    # A preference memo must never take the install down with it. Both writes
+    # below run under errexit and `touch` ends the && list, so a failure — an
+    # unwritable ~/.config/cs, which an earlier root-run install leaves behind —
+    # aborted the run BEFORE settings.json was written: hooks copied but never
+    # registered, no version stamp, no completion message. Report and continue.
+    # The second message is used when the memo did not land, so the user is not
+    # told they will stop being asked when they will.
+    # Declining is permanent, so it gets its own line rather than a clause at
+    # the end of the outcome. The default answer at the replace prompt is "no",
+    # which means a user pressing enter to skip one release opts out for good —
+    # a decision they should see stated, not skim past.
+    _remember_statusline_decline() {  # outcome_line, undo_hint
+        if mkdir -p "$(dirname "$_statusline_declined")" 2>/dev/null \
+            && touch "$_statusline_declined" 2>/dev/null; then
+            info "$1"
+            info "You won't be asked again. $2"
+        else
+            warn "$1"
+            warn "  (could not record the choice in $_statusline_declined, so cs -update will ask again)"
+        fi
+    }
+
     # Each branch only decides consent; the registration itself happens once
     # below. "quiet" re-registers an existing cs-statusline entry (refreshing
     # the path) without announcing it.
@@ -676,8 +698,9 @@ else
                     read -p "Register cs-statusline as the Claude Code status line? [Y/n] " -n 1 -r
                     echo ""
                     if [[ $REPLY =~ ^[Nn]$ ]]; then
-                        mkdir -p "$(dirname "$_statusline_declined")" && touch "$_statusline_declined"
-                        info "Status line not registered; cs -update won't ask again. Enable any time with: cs -statusline enable"
+                        _remember_statusline_decline \
+                            "Status line not registered." \
+                            "Turn it on any time with: cs -statusline enable"
                     else
                         _register_statusline=1
                     fi
@@ -691,9 +714,9 @@ else
                     if [[ $REPLY =~ ^[Yy]$ ]]; then
                         _register_statusline=1
                     else
-                        mkdir -p "$(dirname "$_statusline_declined")" && touch "$_statusline_declined"
-                        warn "Keeping current status line; cs -update won't ask again. To switch to cs-statusline:"
-                        warn "  cs -statusline enable"
+                        _remember_statusline_decline \
+                            "Keeping current status line." \
+                            "To switch to cs-statusline: cs -statusline enable"
                     fi
                 else
                     warn "Keeping current status line. To switch to cs-statusline:"

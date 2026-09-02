@@ -90,8 +90,17 @@ run_statusline_cmd() {
                 1) : ;;
                 *) error "Could not update $settings" ;;
             esac
-            mkdir -p "$(dirname "$declined")" && touch "$declined"
-            info "cs -update won't offer the status line again; cs -statusline enable re-registers it."
+            # Guarded for the reason install.sh documents: this runs under
+            # errexit, so an unwritable config dir would abort after the
+            # registration was already stripped, leaving the command half done
+            # and exiting non-zero.
+            if mkdir -p "$(dirname "$declined")" 2>/dev/null \
+                && touch "$declined" 2>/dev/null; then
+                info "cs -update won't offer the status line again; cs -statusline enable re-registers it."
+            else
+                warn "Status line disabled, but the choice could not be recorded in $declined"
+                warn "  cs -update will ask again next release."
+            fi
             ;;
         *)
             error "Usage: cs -statusline enable|disable"

@@ -13,7 +13,113 @@ teardown() {
     if [[ -n "$TEST_TMPDIR" ]] && [[ -d "$TEST_TMPDIR" ]]; then
         rm -rf "$TEST_TMPDIR"
     fi
-    unset CS_SESSIONS_ROOT CLAUDE_CODE_BIN CS_TRANSCRIPTS_DIR
+    unset CS_SESSIONS_ROOT CLAUDE_CODE_BIN CS_TRANSCRIPTS_DIR XDG_CONFIG_HOME
+}
+
+# The declined marker is a preference memo, and a memo that cannot be written
+# must never take the install down with it. install.sh runs under errexit and
+# the marker write ends its && list, so a failing touch aborts before
+# settings.json is written: hooks land on disk unregistered, the version stamp
+# is missing, and the run ends with no completion message. An unwritable
+# ~/.config/cs is enough to trigger it — an earlier root-run install leaves
+# exactly that.
+test_install_survives_an_unwritable_declined_marker_dir() {
+    command -v expect >/dev/null 2>&1 \
+        || { echo "    SKIP (expect not installed; the decline needs a tty)"; return 0; }
+    local fake_home="$TEST_TMPDIR/home-nowrite"
+    mkdir -p "$fake_home/.claude" "$fake_home/.config/cs"
+    printf '{"statusLine":{"command":"/opt/other/bar"}}\n' > "$fake_home/.claude/settings.json"
+    chmod 500 "$fake_home/.config/cs"
+    # The decline only happens on a tty, and the pty helper cannot answer a
+    # prompt (see test_lib.sh) — so drive it with expect. Answering N is what
+    # reaches the marker write; a non-interactive run never does, which is why
+    # asserting this without a tty would pass while testing nothing.
+    local exp="$TEST_TMPDIR/decline.exp"
+    cat > "$exp" <<EXPECT
+set timeout 120
+spawn env HOME=$fake_home bash $INSTALL_SH
+expect {
+    -re {status line.*\[y/N\]} { send "n\r"; exp_continue }
+    -re {status line.*\[Y/n\]} { send "n\r"; exp_continue }
+    eof
+}
+catch wait result
+exit [lindex \$result 3]
+EXPECT
+    local rc=0
+    expect -f "$exp" >/dev/null 2>&1 || rc=$?
+    chmod 700 "$fake_home/.config/cs"
+    assert_eq "0" "$rc" "declining must not abort the install when the memo cannot be written" || return 1
+    # The properties that matter: the user's own bar survived, and the install
+    # actually finished rather than dying before it wrote settings.json.
+    local sl
+    sl=$(jq -r '.statusLine.command // ""' "$fake_home/.claude/settings.json" 2>/dev/null)
+    assert_eq "/opt/other/bar" "$sl" "a foreign status line must be kept" || return 1
+    jq -e '.hooks.SessionStart' "$fake_home/.claude/settings.json" >/dev/null 2>&1 \
+        || { echo "  FAIL: hooks were not registered; the install aborted before finishing"; return 1; }
+}
+
+# Declining is permanent, and that has to read as its own statement rather than
+# a clause at the end of a sentence about what did not happen. The [y/N] branch
+# is where it matters most: the DEFAULT answer opts the user out for good, so
+# someone pressing enter to skip one release is making a decision they did not
+# know they were making.
+test_declining_says_permanence_on_its_own_line() {
+    command -v expect >/dev/null 2>&1 \
+        || { echo "    SKIP (expect not installed; the decline needs a tty)"; return 0; }
+    local fake_home="$TEST_TMPDIR/home-declinemsg"
+    mkdir -p "$fake_home/.claude"
+    printf '{"statusLine":{"command":"/opt/other/bar"}}\n' > "$fake_home/.claude/settings.json"
+    local exp="$TEST_TMPDIR/declinemsg.exp" out="$TEST_TMPDIR/declinemsg.out"
+    cat > "$exp" <<EXPECT
+set timeout 120
+log_file -noappend $out
+spawn env HOME=$fake_home bash $INSTALL_SH
+expect {
+    -re {status line.*\[y/N\]} { send "\r"; exp_continue }
+    eof
+}
+EXPECT
+    expect -f "$exp" >/dev/null 2>&1 || true
+    # The permanence must be a line of its own, not a trailing clause.
+    grep -q "won't be asked again" "$out" \
+        || { echo "  FAIL: the decline must state plainly that it is remembered"; return 1; }
+    local line
+    line=$(grep "won't be asked again" "$out" | head -1)
+    case "$line" in
+        *"Keeping current status line"*)
+            echo "  FAIL: permanence must not ride on the same line as the outcome"; return 1 ;;
+    esac
+    # And the way back stays with it.
+    grep -q "cs -statusline enable" "$out" \
+        || { echo "  FAIL: the decline must name the command that undoes it"; return 1; }
+}
+
+# Same guard on the disable path, which shares the construct.
+test_statusline_disable_survives_an_unwritable_marker_dir() {
+    local fake_home="$TEST_TMPDIR/home-disable-nowrite"
+    mkdir -p "$fake_home/.claude" "$fake_home/.config/cs"
+    printf '{"statusLine":{"command":"%s/.local/bin/cs-statusline"}}\n' "$fake_home" \
+        > "$fake_home/.claude/settings.json"
+    chmod 500 "$fake_home/.config/cs"
+    local rc=0
+    HOME="$fake_home" bash "$SCRIPT_DIR/../bin/cs" -statusline disable >/dev/null 2>&1 || rc=$?
+    chmod 700 "$fake_home/.config/cs"
+    assert_eq "0" "$rc" "disable must not exit non-zero when the memo cannot be written" || return 1
+}
+
+# The suite must not read or write the developer's own XDG config dir. Three of
+# the marker tests resolved ~/.config/cs from a live XDG_CONFIG_HOME, so with it
+# set they failed AND the uninstall test deleted a real marker file.
+test_marker_tests_do_not_touch_a_live_xdg_config_home() {
+    local guard="$TEST_TMPDIR/xdg-guard"
+    mkdir -p "$guard/cs"
+    : > "$guard/cs/statusline-declined"
+    local fake_home="$TEST_TMPDIR/home-xdg"
+    mkdir -p "$fake_home/.claude"
+    XDG_CONFIG_HOME="$guard" HOME="$fake_home" bash "$INSTALL_SH" >/dev/null 2>&1 || true
+    [ -f "$guard/cs/statusline-declined" ] \
+        || { echo "  FAIL: a run deleted a marker outside its own fixture"; return 1; }
 }
 
 # ============================================================================
@@ -986,6 +1092,10 @@ test_filechanged_registration_carries_async_rewake() {
         || { echo "  FAIL: no rewakeMessage prefix; the payload would read as a Stop hook error"; return 1; }
 }
 
+run_test test_install_survives_an_unwritable_declined_marker_dir
+run_test test_declining_says_permanence_on_its_own_line
+run_test test_statusline_disable_survives_an_unwritable_marker_dir
+run_test test_marker_tests_do_not_touch_a_live_xdg_config_home
 run_test test_filechanged_registration_carries_async_rewake
 run_test test_uninstall_preserves_foreign_statusline
 run_test test_uninstall_removes_zsh_completion_from_detected_dir
