@@ -13,7 +13,230 @@ teardown() {
     if [[ -n "$TEST_TMPDIR" ]] && [[ -d "$TEST_TMPDIR" ]]; then
         rm -rf "$TEST_TMPDIR"
     fi
-    unset CS_SESSIONS_ROOT CLAUDE_CODE_BIN CS_TRANSCRIPTS_DIR
+    unset CS_SESSIONS_ROOT CLAUDE_CODE_BIN CS_TRANSCRIPTS_DIR XDG_CONFIG_HOME
+}
+
+# The declined marker is a preference memo, and a memo that cannot be written
+# must never take the install down with it. install.sh runs under errexit and
+# the marker write ends its && list, so a failing touch aborts before
+# settings.json is written: hooks land on disk unregistered, the version stamp
+# is missing, and the run ends with no completion message. An unwritable
+# ~/.config/cs is enough to trigger it — an earlier root-run install leaves
+# exactly that.
+test_install_survives_an_unwritable_declined_marker_dir() {
+    command -v expect >/dev/null 2>&1 \
+        || { echo "    SKIP (expect not installed; the decline needs a tty)"; return 0; }
+    local fake_home="$TEST_TMPDIR/home-nowrite"
+    mkdir -p "$fake_home/.claude" "$fake_home/.config/cs"
+    printf '{"statusLine":{"command":"/opt/other/bar"}}\n' > "$fake_home/.claude/settings.json"
+    chmod 500 "$fake_home/.config/cs"
+    # The decline only happens on a tty, and the pty helper cannot answer a
+    # prompt (see test_lib.sh) — so drive it with expect. Answering N is what
+    # reaches the marker write; a non-interactive run never does, which is why
+    # asserting this without a tty would pass while testing nothing.
+    local exp="$TEST_TMPDIR/decline.exp"
+    cat > "$exp" <<EXPECT
+set timeout 120
+spawn env HOME=$fake_home bash $INSTALL_SH
+expect {
+    -re {status line.*\[y/N\]} { send "n\r"; exp_continue }
+    -re {status line.*\[Y/n\]} { send "n\r"; exp_continue }
+    eof
+}
+catch wait result
+exit [lindex \$result 3]
+EXPECT
+    local rc=0
+    expect -f "$exp" >/dev/null 2>&1 || rc=$?
+    chmod 700 "$fake_home/.config/cs"
+    assert_eq "0" "$rc" "declining must not abort the install when the memo cannot be written" || return 1
+    # The properties that matter: the user's own bar survived, and the install
+    # actually finished rather than dying before it wrote settings.json.
+    local sl
+    sl=$(jq -r '.statusLine.command // ""' "$fake_home/.claude/settings.json" 2>/dev/null)
+    assert_eq "/opt/other/bar" "$sl" "a foreign status line must be kept" || return 1
+    jq -e '.hooks.SessionStart' "$fake_home/.claude/settings.json" >/dev/null 2>&1 \
+        || { echo "  FAIL: hooks were not registered; the install aborted before finishing"; return 1; }
+}
+
+# Declining is permanent, and that has to read as its own statement rather than
+# a clause at the end of a sentence about what did not happen. The [y/N] branch
+# is where it matters most: the DEFAULT answer opts the user out for good, so
+# someone pressing enter to skip one release is making a decision they did not
+# know they were making.
+test_declining_says_permanence_on_its_own_line() {
+    command -v expect >/dev/null 2>&1 \
+        || { echo "    SKIP (expect not installed; the decline needs a tty)"; return 0; }
+    local fake_home="$TEST_TMPDIR/home-declinemsg"
+    mkdir -p "$fake_home/.claude"
+    printf '{"statusLine":{"command":"/opt/other/bar"}}\n' > "$fake_home/.claude/settings.json"
+    local exp="$TEST_TMPDIR/declinemsg.exp" out="$TEST_TMPDIR/declinemsg.out"
+    cat > "$exp" <<EXPECT
+set timeout 120
+log_file -noappend $out
+spawn env HOME=$fake_home bash $INSTALL_SH
+expect {
+    -re {status line.*\[y/N\]} { send "n\r"; exp_continue }
+    eof
+}
+EXPECT
+    expect -f "$exp" >/dev/null 2>&1 || true
+    # The permanence must be a line of its own, not a trailing clause.
+    grep -q "won't be asked again" "$out" \
+        || { echo "  FAIL: the decline must state plainly that it is remembered"; return 1; }
+    local line
+    line=$(grep "won't be asked again" "$out" | head -1)
+    case "$line" in
+        *"Keeping current status line"*)
+            echo "  FAIL: permanence must not ride on the same line as the outcome"; return 1 ;;
+    esac
+    # And the way back stays with it.
+    grep -q "cs -statusline enable" "$out" \
+        || { echo "  FAIL: the decline must name the command that undoes it"; return 1; }
+}
+
+# Asking someone to install a status bar they have never seen is a weak prompt.
+# The installer renders a sample first, built from a fixed payload so the
+# preview is the same everywhere and never reads the machine it runs on: the
+# real segments pull git state, mail counts and rate limits from whatever
+# session is live, which would put a stranger's branch name and unread count
+# into an installer preview.
+test_install_previews_the_status_line_before_asking() {
+    command -v expect >/dev/null 2>&1 \
+        || { echo "    SKIP (expect not installed; the prompt needs a tty)"; return 0; }
+    local fake_home="$TEST_TMPDIR/home-preview"
+    mkdir -p "$fake_home/.claude"
+    local exp="$TEST_TMPDIR/preview.exp" out="$TEST_TMPDIR/preview.out"
+    cat > "$exp" <<EXPECT
+set timeout 120
+log_file -noappend $out
+spawn env HOME=$fake_home bash $INSTALL_SH
+expect {
+    -re {status line.*\[Y/n\]} { send "n\r"; exp_continue }
+    -re {Complete|complete} { exp_continue }
+    eof
+}
+EXPECT
+    expect -f "$exp" >/dev/null 2>&1 || true
+    # A sample renders, and it renders BEFORE the question.
+    local sample_line prompt_line
+    sample_line=$(grep -n 'ctx ' "$out" | head -1 | cut -d: -f1)
+    prompt_line=$(grep -n 'as the Claude Code status line' "$out" | head -1 | cut -d: -f1)
+    [ -n "$sample_line" ] || { echo "  FAIL: no status line sample rendered"; return 1; }
+    [ -n "$prompt_line" ] || { echo "  FAIL: no prompt"; return 1; }
+    [ "$sample_line" -lt "$prompt_line" ] \
+        || { echo "  FAIL: the sample must render before the question"; return 1; }
+    # Labelled: position alone leaves a cold reader with a coloured strip and
+    # no statement of what it is, sitting among the installer's own output.
+    local label_line
+    label_line=$(grep -n 'what it looks like' "$out" | head -1 | cut -d: -f1)
+    # The preview must be drawn for the terminal it appears in. The statusline
+    # falls back to its DARK palette whenever it can measure nothing, and a
+    # subprocess of the installer measures nothing — so a light terminal got a
+    # dark bar, which is the one thing a "this is what it looks like" sample
+    # must not get wrong. install.sh owns the tty and has just installed the
+    # binary that can answer, so it asks.
+    grep -q 'CS_TERM_THEME' "$SCRIPT_DIR/../install.sh" \
+        || { echo "  FAIL: the preview must render in the terminal's own theme"; return 1; }
+    # And it must not PROBE for it: an OSC query writes to /dev/tty, which no
+    # capture intercepts, so the escape and its reply paint over the installer.
+    # The invocation, not the word: the code comments explain why the probe is
+    # avoided, and matching prose would fail on its own rationale.
+    if grep -qE '(cs|\$INSTALL_DIR/cs)" *-detect-theme|cs -detect-theme\)' "$SCRIPT_DIR/../install.sh"; then
+        echo "  FAIL: the preview must not run the OSC probe; it leaks onto the screen"
+        return 1
+    fi
+    if grep -q ']11;?' "$out" 2>/dev/null; then
+        echo "  FAIL: a raw OSC escape reached the installer output"; return 1
+    fi
+    [ -n "$label_line" ] \
+        || { echo "  FAIL: the sample must say what it is"; return 1; }
+    [ "$label_line" -lt "$sample_line" ] \
+        || { echo "  FAIL: the label must precede the sample it names"; return 1; }
+    # And it lines up with the block above it. Every installed-line carries
+    # three leading spaces; a flush-left label reads as output that escaped the
+    # formatting rather than as part of the run. The bar itself cannot be
+    # indented (its opening reset eats leading spaces), so the label is what
+    # carries the alignment.
+    local label_text
+    label_text=$(sed -n "${label_line}p" "$out" | sed 's/\x1b\[[0-9;]*m//g')
+    case "$label_text" in
+        "   "*) ;;
+        *) echo "  FAIL: the label must align with the installer's other lines"; return 1 ;;
+    esac
+    # Fixed payload: the sample line itself must carry the placeholder session,
+    # not whatever is live. Checked on the RENDERED LINE rather than the whole
+    # transcript — the installer legitimately prints its own paths, and a
+    # transcript-wide grep matches those instead of a leak.
+    local sample
+    sample=$(sed -n "${sample_line}p" "$out")
+    case "$sample" in
+        *my-session*) ;;
+        *) echo "  FAIL: the sample must use the fixed placeholder session"; return 1 ;;
+    esac
+    # The live-only segments must not appear: they read git, mail and limits
+    # from the running machine.
+    case "$sample" in
+        *"⎇ "*) echo "  FAIL: the preview rendered the live git branch"; return 1 ;;
+    esac
+}
+
+# Enter declines exactly as n does. The whole point of the change is that
+# cs -update stops asking, so a default that left the question open would
+# re-prompt the very people the feature was written for. The decline states
+# plainly that it is remembered, and cs -statusline enable reverses it.
+test_enter_declines_the_same_as_an_explicit_n() {
+    command -v expect >/dev/null 2>&1 \
+        || { echo "    SKIP (expect not installed; the prompt needs a tty)"; return 0; }
+    local ans
+    for ans in "" "n"; do
+        local fake_home="$TEST_TMPDIR/home-ans${ans:-enter}"
+        mkdir -p "$fake_home/.claude"
+        printf '{"statusLine":{"command":"/opt/other/bar"}}\n' > "$fake_home/.claude/settings.json"
+        local exp="$TEST_TMPDIR/ans${ans:-enter}.exp"
+        cat > "$exp" <<EXPECT
+set timeout 120
+spawn env HOME=$fake_home bash $INSTALL_SH
+expect {
+    -re {status line.*\[y/N\]} { send "$ans\r"; exp_continue }
+    -re {Complete|complete} { exp_continue }
+    eof
+}
+EXPECT
+        expect -f "$exp" >/dev/null 2>&1 || true
+        [ -f "$fake_home/.config/cs/statusline-declined" ] \
+            || { echo "  FAIL: answer '${ans:-enter}' must be remembered"; return 1; }
+        local sl
+        sl=$(jq -r '.statusLine.command // ""' "$fake_home/.claude/settings.json" 2>/dev/null)
+        assert_eq "/opt/other/bar" "$sl" "answer '${ans:-enter}' must keep the current bar" || return 1
+    done
+}
+
+# Same guard on the disable path, which shares the construct.
+test_statusline_disable_survives_an_unwritable_marker_dir() {
+    local fake_home="$TEST_TMPDIR/home-disable-nowrite"
+    mkdir -p "$fake_home/.claude" "$fake_home/.config/cs"
+    printf '{"statusLine":{"command":"%s/.local/bin/cs-statusline"}}\n' "$fake_home" \
+        > "$fake_home/.claude/settings.json"
+    chmod 500 "$fake_home/.config/cs"
+    local rc=0
+    HOME="$fake_home" bash "$SCRIPT_DIR/../bin/cs" -statusline disable >/dev/null 2>&1 || rc=$?
+    chmod 700 "$fake_home/.config/cs"
+    assert_eq "0" "$rc" "disable must not exit non-zero when the memo cannot be written" || return 1
+}
+
+# The suite must not read or write the developer's own XDG config dir. Three of
+# the marker tests resolved ~/.config/cs from a live XDG_CONFIG_HOME, so with it
+# set they failed AND the uninstall test deleted a real marker file.
+test_marker_tests_do_not_touch_a_live_xdg_config_home() {
+    local guard="$TEST_TMPDIR/xdg-guard"
+    mkdir -p "$guard/cs"
+    : > "$guard/cs/statusline-declined"
+    local fake_home="$TEST_TMPDIR/home-xdg"
+    mkdir -p "$fake_home/.claude"
+    XDG_CONFIG_HOME="$guard" HOME="$fake_home" bash "$INSTALL_SH" >/dev/null 2>&1 || true
+    [ -f "$guard/cs/statusline-declined" ] \
+        || { echo "  FAIL: a run deleted a marker outside its own fixture"; return 1; }
 }
 
 # ============================================================================
@@ -548,6 +771,112 @@ EOF
     assert_output_contains "$out" "cs-statusline" "install should mention how to enable cs-statusline" || return 1
 }
 
+# A declined status-line prompt is remembered, so `cs -update` (which re-runs
+# the installer) stops asking. With the marker present the installer says why
+# it skipped and how to enable, and never registers.
+test_install_honors_declined_statusline_marker() {
+    local fake_home="$TEST_TMPDIR/home-sl-declined"
+    mkdir -p "$fake_home/.config/cs"
+    touch "$fake_home/.config/cs/statusline-declined"
+    local out
+    out=$(HOME="$fake_home" bash "$INSTALL_SH" 2>&1 < /dev/null) || {
+        echo "  FAIL: install.sh exited non-zero"
+        return 1
+    }
+    local cmd
+    cmd=$(jq -r '.statusLine.command // ""' "$fake_home/.claude/settings.json")
+    if [ -n "$cmd" ]; then
+        echo "  FAIL: statusLine was registered despite the declined marker (got '$cmd')"
+        return 1
+    fi
+    assert_output_contains "$out" "declined earlier"         "install should say the status line was declined earlier" || return 1
+    assert_output_contains "$out" "cs -statusline enable"         "install should still say how to enable" || return 1
+}
+
+# The marker honors XDG_CONFIG_HOME, and it wins over a foreign status line's
+# replace prompt too (the branch the marker exists to silence on every update).
+test_install_declined_marker_honors_xdg_and_foreign_statusline() {
+    local fake_home="$TEST_TMPDIR/home-sl-declined-xdg"
+    local xdg="$TEST_TMPDIR/xdg-config"
+    mkdir -p "$fake_home/.claude" "$xdg/cs"
+    touch "$xdg/cs/statusline-declined"
+    echo '{"statusLine":{"type":"command","command":"node /x/omc-hud.mjs"}}' > "$fake_home/.claude/settings.json"
+    local out
+    out=$(HOME="$fake_home" XDG_CONFIG_HOME="$xdg" bash "$INSTALL_SH" 2>&1 < /dev/null) || {
+        echo "  FAIL: install.sh exited non-zero"
+        return 1
+    }
+    local cmd
+    cmd=$(jq -r '.statusLine.command // ""' "$fake_home/.claude/settings.json")
+    if [ "$cmd" != "node /x/omc-hud.mjs" ]; then
+        echo "  FAIL: foreign statusLine was replaced (now '$cmd')"
+        return 1
+    fi
+    assert_output_contains "$out" "declined earlier"         "install should say the status line was declined earlier" || return 1
+    assert_output_not_contains "$out" "Keeping current status line"         "the declined marker should silence the replace hint" || return 1
+}
+
+# An already-registered cs-statusline is refreshed regardless of the marker:
+# a stale marker must never make an update silently drop a working bar.
+test_install_refreshes_registered_statusline_despite_marker() {
+    local fake_home="$TEST_TMPDIR/home-sl-declined-registered"
+    mkdir -p "$fake_home/.claude" "$fake_home/.config/cs"
+    touch "$fake_home/.config/cs/statusline-declined"
+    echo '{"statusLine":{"type":"command","command":"/old/path/cs-statusline"}}' > "$fake_home/.claude/settings.json"
+    HOME="$fake_home" bash "$INSTALL_SH" > /dev/null 2>&1 < /dev/null || {
+        echo "  FAIL: install.sh exited non-zero"
+        return 1
+    }
+    local cmd
+    cmd=$(jq -r '.statusLine.command // ""' "$fake_home/.claude/settings.json")
+    if [ "$cmd" != "$fake_home/.local/bin/cs-statusline" ]; then
+        echo "  FAIL: registered cs-statusline was not refreshed (got '$cmd')"
+        return 1
+    fi
+}
+
+# disable records the opt-out; enable is the consent that clears it.
+test_statusline_disable_sets_and_enable_clears_declined_marker() {
+    local fake_home="$TEST_TMPDIR/home-sl-marker"
+    local marker="$fake_home/.config/cs/statusline-declined"
+    mkdir -p "$fake_home/.claude" "$fake_home/.local/bin"
+    echo '#!/bin/sh' > "$fake_home/.local/bin/cs-statusline"
+    chmod +x "$fake_home/.local/bin/cs-statusline"
+    echo '{}' > "$fake_home/.claude/settings.json"
+    HOME="$fake_home" "$CS_BIN" -statusline disable > /dev/null 2>&1 || {
+        echo "  FAIL: cs -statusline disable exited non-zero"
+        return 1
+    }
+    if [ ! -f "$marker" ]; then
+        echo "  FAIL: disable did not write the declined marker"
+        return 1
+    fi
+    HOME="$fake_home" "$CS_BIN" -statusline enable > /dev/null 2>&1 || {
+        echo "  FAIL: cs -statusline enable exited non-zero"
+        return 1
+    }
+    if [ -f "$marker" ]; then
+        echo "  FAIL: enable left the declined marker behind"
+        return 1
+    fi
+}
+
+test_uninstall_removes_declined_marker() {
+    local fake_home="$TEST_TMPDIR/uninstall-sl-marker"
+    local marker="$fake_home/.config/cs/statusline-declined"
+    mkdir -p "$fake_home/.local/bin" "$fake_home/.claude" "$fake_home/.config/cs"
+    touch "$marker"
+    echo '{}' > "$fake_home/.claude/settings.json"
+    printf 'y\n' | HOME="$fake_home" "$CS_BIN" -uninstall > /dev/null 2>&1 || {
+        echo "  FAIL: cs -uninstall exited non-zero"
+        return 1
+    }
+    if [ -f "$marker" ]; then
+        echo "  FAIL: declined marker survived uninstall"
+        return 1
+    fi
+}
+
 test_uninstall_removes_statusline() {
     local fake_home="$TEST_TMPDIR/uninstall-sl"
     mkdir -p "$fake_home/.local/bin" "$fake_home/.claude"
@@ -910,6 +1239,12 @@ test_rewake_labels_do_not_claim_the_wake_is_mail() {
     esac
 }
 
+run_test test_install_survives_an_unwritable_declined_marker_dir
+run_test test_install_previews_the_status_line_before_asking
+run_test test_declining_says_permanence_on_its_own_line
+run_test test_enter_declines_the_same_as_an_explicit_n
+run_test test_statusline_disable_survives_an_unwritable_marker_dir
+run_test test_marker_tests_do_not_touch_a_live_xdg_config_home
 run_test test_filechanged_registration_carries_async_rewake
 run_test test_rewake_labels_do_not_claim_the_wake_is_mail
 run_test test_uninstall_preserves_foreign_statusline
@@ -920,4 +1255,9 @@ run_test test_install_recovers_from_invalid_settings_json
 run_test test_local_install_prefers_a_freshly_built_picker
 run_test test_local_install_uses_bin_picker_when_nothing_was_built
 run_test test_hook_registration_doc_matches_install
+run_test test_install_honors_declined_statusline_marker
+run_test test_install_declined_marker_honors_xdg_and_foreign_statusline
+run_test test_install_refreshes_registered_statusline_despite_marker
+run_test test_statusline_disable_sets_and_enable_clears_declined_marker
+run_test test_uninstall_removes_declined_marker
 report_results
