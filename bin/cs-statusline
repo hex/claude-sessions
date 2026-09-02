@@ -347,8 +347,8 @@ _parse_stdin() {
         if [ -n "${CLAUDE_SESSION_NAME:-}" ] && [ -n "${SL_CTX:-}" ]; then
             _pctdir="$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/local"
             if mkdir -p "$_pctdir" 2>/dev/null; then
-                _lead=$(awk '/^claude_session_id:/ { print $2; exit }' "$_pctdir/state" 2>/dev/null || true)
-                if [ -z "$_lead" ] || [ "$_lead" = "${SL_SESSION_ID:-}" ]; then
+                _read_state_key "$_pctdir/state" claude_session_id
+                if [ -z "$_STATE_VALUE" ] || [ "$_STATE_VALUE" = "${SL_SESSION_ID:-}" ]; then
                     printf '%s\n' "${SL_CTX%%.*}" > "$_pctdir/context-pct.tmp" 2>/dev/null \
                         && mv "$_pctdir/context-pct.tmp" "$_pctdir/context-pct" 2>/dev/null || true
                 else
@@ -1020,24 +1020,30 @@ EOF
     _FABLE_RESET="${_EPOCH:-}"
 }
 
-# Read claude_session_color from a session's machine-local state file
-# (.cs/local/state) into _SESSION_COLOR (empty if none). Pure bash: this runs
-# once per render, where an awk fork is real cost. KEEP THE FORMAT IN SYNC
-# WITH bin/cs's _read_local_state.
-_read_session_color() {
-    _SESSION_COLOR=""
-    local state="$1" line v
+# Read one key from a session's machine-local state file (.cs/local/state)
+# into _STATE_VALUE (empty if none). Pure bash: this runs per render, where an
+# awk fork is real cost. KEEP THE FORMAT IN SYNC WITH bin/cs's
+# _read_local_state.
+_read_state_key() {  # state-file key
+    _STATE_VALUE=""
+    local state="$1" key="$2" line v
     [ -f "$state" ] || return 0
     while IFS= read -r line; do
         case "$line" in
-            claude_session_color:*)
-                v="${line#claude_session_color:}"
+            "$key":*)
+                v="${line#"$key":}"
                 v="${v#"${v%%[![:space:]]*}"}"
-                _SESSION_COLOR="${v//\"/}"
+                _STATE_VALUE="${v//\"/}"
                 return 0
                 ;;
         esac
     done < "$state"
+}
+
+# Read claude_session_color into _SESSION_COLOR (empty if none).
+_read_session_color() {
+    _read_state_key "$1" claude_session_color
+    _SESSION_COLOR="$_STATE_VALUE"
 }
 
 # Format the git segment text for a workspace dir into _GIT_TEXT, empty when

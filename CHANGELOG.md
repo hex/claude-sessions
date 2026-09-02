@@ -4,6 +4,33 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.9.6
+
+Every cs session gets the native task list back. A tmux teammate no longer speaks for the lead: it cannot drain the queue, overwrite the context reading, or re-arm a one-time notice.
+
+### Features
+
+**Every cs session opts into the Task tools.** Claude Code 2.1.233+ leaves `TaskCreate`, `TaskList`, `TaskUpdate` and `TaskGet` out on Opus 4.8, Sonnet 5 and Fable 5 unless the session asks for them. The rotation wake, the walk-away drain and the rotate skill all address that list, so a cs launch now exports `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` next to the task-list id. Before this, a rotation on those models told the successor to reconcile a list it did not have. `CS_NO_TASK_TOOLS=1` hands the choice back to Claude Code for anyone who wants the context those tool definitions cost.
+
+**`/wrap`, `/sweep` and `/summary` pin the `opus` family.** The three passes named a point release, which keeps them on an older Opus once a newer one ships. They now pin the family alias, the way the rotate skill pins `fable`.
+
+### Fixes
+
+A tmux-backed agent-team teammate is a full claude in the same session directory, with its own Stop hook and its own statusline. Three per-session slots assumed one claude per directory:
+
+- **Only the lead's Stop drains the task queue.** An idle reviewer teammate popped every queued task in succession, declined each, and the lead's queue read "all tasks complete" with nothing done. The drain now runs under the same lead check as the mail wake; a teammate's Stop falls through to the narrative reminder.
+- **Only the launched conversation writes `context-pct`.** A teammate's statusline overwrote the lead's context reading, so each reported the other's number to every gate that reads the file. The statusline writes the value only when the payload's session id matches the id recorded at launch; other conversations still touch the file, which keeps the liveness heartbeat alive.
+- **A teammate's Stop no longer re-arms the lead's context notice.** The rotation nudge and the context warning kept a single-slot cursor, so a teammate's turn reset it and the lead's one-time notice fired again, five times in one afternoon. Both cursors are append-only lists of conversation ids; every conversation gets its own notice once.
+
+**The prose critic scores; `/summary` decides.** The critic subagent returns per-dimension scores and rewrites, no pass-or-revise verdict, and the command compares the total with the threshold itself, so the pass criterion never reaches the critic's prompt.
+
+### Docs
+
+- `docs/hooks.md`, `docs/statusline.md` and `docs/session-layout.md` describe the lead-only drain, the lead-only `context-pct` value and the append-only notice cursors.
+- `docs/configuration.md` and the README cover `CS_NO_TASK_TOOLS`.
+
+**Full Changelog**: https://github.com/hex/claude-sessions/compare/v2026.9.5...v2026.9.6
+
 ## 2026.9.5
 
 A handoff keeps your words and trims its own. Each walk-away task now carries its scope. A rotation reconciles the task list it inherits.

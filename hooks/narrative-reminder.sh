@@ -131,12 +131,23 @@ _qlen() {  # queue dir
 # can consume mail the lead then never sees. A session opened straight from a
 # front end is not a cs launch either and likewise does not wake; it is attended
 # by definition, and the prompt digest carries its mail.
+# Memoized: the drain gate and the mail wake both ask on one Stop, and the
+# resume-arm answer costs a ps fork.
+_IS_LEAD=""
 _mail_is_lead() {
-    [ -n "${CS_LEAD_PID:-}" ] && [ -n "${CLAUDE_PID:-}" ] || return 1
-    [ "$CLAUDE_PID" = "$CS_LEAD_PID" ] && return 0
-    local parent
-    parent=$(ps -o ppid= -p "$CLAUDE_PID" 2>/dev/null | tr -d '[:space:]' || true)
-    [ -n "$parent" ] && [ "$parent" = "$CS_LEAD_PID" ]
+    if [ -z "$_IS_LEAD" ]; then
+        _IS_LEAD=0
+        if [ -n "${CS_LEAD_PID:-}" ] && [ -n "${CLAUDE_PID:-}" ]; then
+            if [ "$CLAUDE_PID" = "$CS_LEAD_PID" ]; then
+                _IS_LEAD=1
+            else
+                local parent
+                parent=$(ps -o ppid= -p "$CLAUDE_PID" 2>/dev/null | tr -d '[:space:]' || true)
+                [ -n "$parent" ] && [ "$parent" = "$CS_LEAD_PID" ] && _IS_LEAD=1
+            fi
+        fi
+    fi
+    [ "$_IS_LEAD" = 1 ]
 }
 
 # Populate the MAIL_* globals. The re-wake guard is a snapshot of the filenames
