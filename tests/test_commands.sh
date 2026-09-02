@@ -134,6 +134,14 @@ test_prose_critic_pinned_and_contracted() {
         "the prose critic is a quality-judge task and must pin a capable tier" || return 1
     assert_file_contains "$COMMANDS_DIR/summary.md" "final message" \
         "the critic's deliverable must be demanded in its final message" || return 1
+    # The critic scores; the caller decides. A judge asked for its own verdict
+    # grades to the bar it was told, so the pass criterion stays out of its
+    # output contract and the comparison happens in summary.md.
+    assert_file_contains "$COMMANDS_DIR/summary.md" "the critic scores, it does not decide" \
+        "the critic must return scores and rewrites only, no verdict line" || return 1
+    if grep -q 'PASS\|REVISE' "$COMMANDS_DIR/summary.md"; then
+        echo "  FAIL: summary.md still asks the critic for a PASS/REVISE verdict"; return 1
+    fi
 }
 
 test_prose_hygiene_has_modes_and_technical_carveout() {

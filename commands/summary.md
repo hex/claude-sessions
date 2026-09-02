@@ -64,10 +64,10 @@ You are working in a cs session. Your task is to summarize the entire session by
 
 5. **Gate the prose on quality before finalizing:**
    - **Independent judge:** spawn a subagent as an impartial prose critic of `.cs/summary.md`:
-     - **Spawn:** Task tool, `model: opus`, `subagent_type: general-purpose`. Put every requirement below verbatim in its prompt — it starts with no context: the absolute paths to both `.cs/summary.md` and the skill, "judge only, never edit", and the exact final-message contract (scores, then the numbered violation list, then the verdict, nothing else).
+     - **Spawn:** Task tool, `model: opus`, `subagent_type: general-purpose`. Put every requirement below verbatim in its prompt — it starts with no context: the absolute paths to both `.cs/summary.md` and the skill, "judge only, never edit", and the exact final-message contract (scores, then the numbered violation list, nothing else).
      - **Reading:** it MUST read `~/.claude/skills/prose-hygiene/SKILL.md` and apply EVERY rule (the full taxonomy of phrases, structures, voice rules, and the scoring rubric).
-     - **Judge only, never edit.** Its final message contains only the deliverable: the per-dimension scores and total from the skill's rubric, then a numbered list giving, for every violation, the quoted text, the rule it breaks, and a concrete rewrite, then a final line reading `PASS` or `REVISE` (its total against the skill's revise threshold). No preamble, nothing else.
-     - **Apply + re-run:** apply every rewrite it returns to `.cs/summary.md`. If its verdict was `REVISE`, run the critic once more after applying them; after that second run, apply its rewrites and stop regardless of verdict.
+     - **Judge only, never edit.** Its final message contains only the deliverable: the per-dimension scores and total from the skill's rubric, then a numbered list giving, for every violation, the quoted text, the rule it breaks, and a concrete rewrite. No verdict line: the critic scores, it does not decide, so the pass criterion never reaches its prompt. No preamble, nothing else.
+     - **Decide, apply, re-run:** compare its total with the skill's revise threshold yourself. Apply every rewrite it returns to `.cs/summary.md`. If the total was below the threshold, run the critic once more after applying them; after that second run, apply its rewrites and stop regardless of the total.
 
 6. **Inform the user** when the summary is complete and where it was saved.
 
