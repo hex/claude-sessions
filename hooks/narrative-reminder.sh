@@ -513,6 +513,11 @@ if [ "$QLEN" -gt 0 ]; then
     QSTATE=$(cat "$QSTATE_FILE" 2>/dev/null | tr -d '[:space:]' || true)
     [ -n "$QSTATE" ] || QSTATE="idle"
 
+    # A walk-away run has nobody watching, so the handed task is the only
+    # scope guidance the agent gets: it says what the task asks for and
+    # nothing about what it does not.
+    SCOPE="Scope: implement every behavior the task asks for, completely, and nothing beyond it. A pre-existing bug, a performance concern or behavior the task does not mention stays untouched unless the task cannot work without it; report it as a follow-up in your summary. Where the task is ambiguous, implement the reading its wording and the surrounding code most directly support, state that assumption in your summary, and do not build for the other readings as well."
+
     if [ "$QSTATE" = "armed" ]; then
         TASK=""
         _first=$(_qfirst "$QUEUE") || _first=""
@@ -523,7 +528,9 @@ if [ "$QLEN" -gt 0 ]; then
             '{ts: ($ts|tonumber), event: "drain_started", queued: ($q|tonumber)}'
         REASON="cs task queue: starting a walk-away run. Work through the queued tasks one at a time; I will hand you the next after each finishes. Mirror the whole queue into your native task list now: run \`cs -queue list\` to see every queued item (this message shows only the first), create one task each, and mark each completed as you finish it. When a task is done, mark it completed and simply end your turn; the next task is delivered automatically on the next turn. Do not read or edit the queue yourself.
 
-First task: $TASK"
+First task: $TASK
+
+$SCOPE"
         jq -nc --arg r "$REASON" '{decision:"block", reason:$r}'
         exit 0
     fi
@@ -575,7 +582,9 @@ First task: $TASK"
             [ -n "$_first" ] && NEXT=$(cat "$_first" 2>/dev/null || true)
             REASON="cs task queue: next task ($NEWLEN remaining). Mark the previous native task completed and this one in-progress (create it if missing), then do it.
 
-Task: $NEXT"
+Task: $NEXT
+
+$SCOPE"
             jq -nc --arg r "$REASON" '{decision:"block", reason:$r}'
             exit 0
         else

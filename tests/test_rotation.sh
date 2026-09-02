@@ -229,6 +229,30 @@ test_rotate_skill_pins_the_strongest_model() {
     fi
 }
 
+# The handoff carries two voices, and they do not compress equally. What the
+# user said, asked for or corrected is the part a successor cannot re-derive
+# and the part most likely to drift when paraphrased; the writer's own
+# reasoning compresses to what it concluded. The best handoffs in this store
+# already quote the user's corrections verbatim in the request section; the
+# skill had no rule asking for it.
+test_rotate_skill_keeps_the_users_words_close() {
+    local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
+    assert_file_contains "$skill" "close to their own words" \
+        "what the user said must stay close to their own words" || return 1
+}
+
+# The only length instruction in the skill pointed one way: spend it on the
+# facts that exist nowhere else. Without a counterweight that reads as licence
+# for length everywhere, and a long handoff degrades retrieval of exactly the
+# facts it was meant to carry. There is no byte cap (a cap drops facts the
+# skill cannot rank), so the shape is asymmetric: complete on the
+# unrecoverable, concise on the rest.
+test_rotate_skill_spends_length_asymmetrically() {
+    local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
+    assert_file_contains "$skill" "keep everything else concise" \
+        "length is for the unrecoverable facts only; the rest stays concise" || return 1
+}
+
 test_rotate_skill_ends_on_the_one_manual_step() {
     local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
     # The property is what the skill INSTRUCTS Claude to emit, not where the
@@ -350,6 +374,8 @@ run_test test_rotate_skill_requires_provenance_on_claims
 run_test test_rotate_skill_puts_the_next_step_first
 run_test test_rotate_skill_arms_last
 run_test test_rotate_skill_pins_the_strongest_model
+run_test test_rotate_skill_keeps_the_users_words_close
+run_test test_rotate_skill_spends_length_asymmetrically
 run_test test_rotate_skill_ends_on_the_one_manual_step
 run_test test_rotate_skill_does_not_promise_the_rotation_waits
 run_test test_rotate_skill_teaches_the_prune_rule

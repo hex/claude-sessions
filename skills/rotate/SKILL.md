@@ -84,7 +84,15 @@ should do. If the user did not give one, ask before writing anything.
      exact reading taken while debugging, a run identifier, a count observed
      at one moment, the order two events actually happened in. Write those
      down as they were, or they are gone with the conversation. Length spent
-     on them is not padding; it is how many of them survive.
+     on them is not padding; it is how many of them survive. Be complete on
+     these even at the cost of length, and keep everything else concise: a
+     body that is long everywhere buries the facts it was written to carry.
+   - **Keep the user's words; condense your own.** The body carries two
+     voices, and they do not compress equally. What the user said, asked
+     for, shared or established stays careful and close to their own words:
+     a correction paraphrased is a correction drifted, and the successor has
+     no way back to the original. Your own explanations and reasoning can be
+     condensed much further, to what they concluded or produced.
    - **Say how each behavioural claim was established.** A claim read off a
      README and a claim measured live look identical to a successor with zero
      memory of how either was learned, and it will build on both equally.

@@ -431,6 +431,24 @@ test_drain_armed_states_stop_mechanic() {
     assert_output_contains "$out" "Do not read or edit the queue" "armed message must forbid manual queue edits" || return 1
 }
 
+# A walk-away run has nobody watching, so the handed task is the only scope
+# guidance the agent gets. Without it, a pre-existing bug found while testing
+# gets fixed in the same change, and an ambiguous task gets built for every
+# reading at once. Both injection points carry the block: the first task of a
+# run is as unwatched as the rest.
+test_drain_scopes_each_task_to_what_it_asks() {
+    qseed "task one" "task two"
+    printf 'armed\n' > "$(QDIR)/queue.state"
+    local out; out=$(drain)
+    assert_output_contains "$out" "report it as a follow-up in your summary" \
+        "first-task message must scope extras to the summary" || return 1
+    printf 'draining\n' > "$(QDIR)/queue.state"
+    out=$(drain)
+    assert_output_contains "$out" "task two" "draining injects the next task" || return 1
+    assert_output_contains "$out" "report it as a follow-up in your summary" \
+        "next-task message must scope extras to the summary" || return 1
+}
+
 test_drain_completion_asks_for_debrief() {
     # Popping the last task must close the final native task and prompt a debrief,
     # not merely announce that the queue is empty (which leaves a dangling in-progress).
@@ -476,6 +494,7 @@ run_test test_drain_declined_within_cooldown_falls_through
 run_test test_drain_ignores_subagents
 run_test test_drain_gate_mentions_high_context
 run_test test_drain_armed_states_stop_mechanic
+run_test test_drain_scopes_each_task_to_what_it_asks
 run_test test_drain_completion_asks_for_debrief
 run_test test_drain_high_context_defines_compact_action
 run_test test_drain_narrative_reminder_scopes_to_own
