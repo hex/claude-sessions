@@ -293,6 +293,7 @@ run_test test_launch_seed_bypasses_resume_ask
 # Drain harness (same recipe as tests/test_queue_supervision.sh): the Stop
 # hook is narrative-reminder.sh; CLAUDE_SESSION_* env selects the session.
 _worker_env() {
+    CS_LEAD_PID=$$ CLAUDE_PID=$$ \
     CLAUDE_SESSION_NAME="worker" \
     CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/worker" \
     CLAUDE_SESSION_META_DIR="$CS_SESSIONS_ROOT/worker/.cs" \

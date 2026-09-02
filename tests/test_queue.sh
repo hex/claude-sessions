@@ -316,7 +316,12 @@ run_test test_queue_requires_session
 run_test test_queue_add_via_session_scoped_arm
 
 QDIR() { printf '%s' "$CLAUDE_SESSION_META_DIR/local"; }
-drain() { echo "${1:-{}}" | bash "$HOOKS_DIR/narrative-reminder.sh" 2>/dev/null; }
+# Drive the Stop hook as the session's LEAD conversation: cs's exec arm replaces
+# its own process, so claude carries cs's pid and CS_LEAD_PID equals CLAUDE_PID.
+# A test that models a teammate unsets both first.
+drain() { echo "${1:-{}}" | CS_LEAD_PID=$$ CLAUDE_PID=$$ bash "$HOOKS_DIR/narrative-reminder.sh" 2>/dev/null; }
+# The same Stop from a tmux teammate: no CS_LEAD_PID in its environment at all.
+teammate_drain() { echo '{}' | env -u CS_LEAD_PID -u CLAUDE_PID bash "$HOOKS_DIR/narrative-reminder.sh" 2>/dev/null; }
 
 # Seed the queue directory with one file per task, in argument order.
 qseed() {
@@ -374,6 +379,34 @@ test_drain_draining_pops_and_injects_next() {
         [ -e "$f" ] && { echo "  pop staging leftover: $f"; return 1; }
     done
     return 0
+}
+
+# A tmux-backed teammate is a full claude with its own top-level Stop in the
+# same session directory, but tmux started it, so CS_LEAD_PID is absent from
+# its environment. Its Stop must not advance the drain: ungated, an idle
+# reviewer teammate pops every queued task in succession and the lead's queue
+# reads "all tasks complete" with nothing done.
+test_drain_ignores_a_teammate_stop() {
+    qseed "task one" "task two"
+    printf 'draining\n' > "$(QDIR)/queue.state"
+    local out
+    out=$(teammate_drain)
+    assert_output_not_contains "$out" "task two" "a teammate's stop injects nothing" || return 1
+    assert_eq "2" "$(qlen)" "a teammate's stop pops nothing" || return 1
+    assert_file_not_exists "$(QDIR)/queue.done" "nothing is logged done" || return 1
+    assert_eq "draining" "$(cat "$(QDIR)/queue.state" | tr -d '[:space:]')" "state is untouched" || return 1
+    out=$(drain)
+    assert_output_contains "$out" "task two" "the lead's next stop still advances" || return 1
+    assert_eq "1" "$(qlen)" "and pops one" || return 1
+}
+
+test_drain_gate_ignores_a_teammate_stop() {
+    qseed "do the thing"
+    local out
+    out=$(teammate_drain)
+    assert_output_not_contains "$out" "walk-away run" "a teammate is not asked to start the queue" || return 1
+    out=$(drain)
+    assert_output_contains "$out" '"block"' "the lead still gets the gate" || return 1
 }
 
 # The fail-safe: if the pop's rename fails, the drain disarms rather than
@@ -490,6 +523,8 @@ run_test test_drain_gates_when_idle_nonempty
 run_test test_drain_armed_injects_first_task_no_pop
 run_test test_drain_armed_mentions_queue_list
 run_test test_drain_draining_pops_and_injects_next
+run_test test_drain_ignores_a_teammate_stop
+run_test test_drain_gate_ignores_a_teammate_stop
 run_test test_drain_disarms_when_the_pop_fails
 run_test test_drain_empties_and_returns_idle
 run_test test_drain_declined_within_cooldown_falls_through

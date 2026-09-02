@@ -16,6 +16,8 @@ _qs_session() {  # name
     export CLAUDE_SESSION_NAME="$1"
     export CLAUDE_SESSION_DIR="$dir"
     export CLAUDE_SESSION_META_DIR="$dir/.cs"
+    # The drain answers only the lead's Stop: model a cs-launched conversation.
+    export CS_LEAD_PID=$$ CLAUDE_PID=$$
 }
 
 _fail_once() {  # simulate one tool failure through the real hook

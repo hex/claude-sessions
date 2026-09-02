@@ -508,8 +508,13 @@ _breaker_check() {
     return 1
 }
 
+# Only the lead's Stop advances or gates the queue. A tmux teammate shares the
+# session directory and fires its own top-level Stop, so ungated its every
+# idle turn pops a task: an eight-task queue reads "all tasks complete" after
+# eight reviewer turns with nothing done. A teammate falls through to the
+# narrative reminder like any other Stop.
 QLEN=$(_qlen "$QUEUE")
-if [ "$QLEN" -gt 0 ]; then
+if [ "$QLEN" -gt 0 ] && _mail_is_lead; then
     QSTATE=$(cat "$QSTATE_FILE" 2>/dev/null | tr -d '[:space:]' || true)
     [ -n "$QSTATE" ] || QSTATE="idle"
 
