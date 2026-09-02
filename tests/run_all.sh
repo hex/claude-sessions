@@ -84,26 +84,56 @@ fi
 # them, and the lane count is the one number that explains the wall time.
 echo "running $total suites at $jobs_n jobs" >&2
 
+# Every suite's log, exit and wall time land in one scratch directory keyed by
+# position, whether the lanes run concurrently or one at a time. Checked,
+# because an empty logdir is silently catastrophic rather than noisy: every
+# suite is launched with its output redirected into this directory, bash
+# abandons a command whose redirection fails, and the missing log then reads as
+# a suite that produced no output and did not fail. The gate would report every
+# suite passing having run none of them.
+logdir="$(mktemp -d)" || { echo "cannot create a scratch directory for the test logs" >&2; exit 2; }
+trap 'rm -rf "$logdir"' EXIT
+donefile="$logdir/done"
+: > "$donefile"
+
+# Run suite k: capture its output, stamp its seconds and whether it failed, and
+# say so on stderr the moment it finishes. The progress counter is the number
+# of suites finished so far, not k, so it climbs in finishing order while the
+# report below still replays in list order. The one-line append to the done
+# file is under PIPE_BUF, so concurrent lanes cannot tear it, and the count is
+# read back from that file rather than from a variable a background subshell
+# could not share. In serial mode the suite streams live and the log doubles
+# as the record.
+run_suite() {  # index
+    local k="$1" name t0 t1 secs mark
+    name=$(basename "${selected[$k]}")
+    t0=$(date +%s)
+    if [ "$jobs_n" -gt 1 ]; then
+        bash "${selected[$k]}" > "$logdir/$k.log" 2>&1 || : > "$logdir/$k.fail"
+    else
+        bash "${selected[$k]}" 2>&1 | tee "$logdir/$k.log"
+        [ "${PIPESTATUS[0]}" -eq 0 ] || : > "$logdir/$k.fail"
+    fi
+    t1=$(date +%s)
+    secs=$((t1 - t0))
+    printf '%s\n' "$secs" > "$logdir/$k.secs"
+    printf '%s\n' "$k" >> "$donefile"
+    mark=""
+    [ -f "$logdir/$k.fail" ] && mark=" FAIL"
+    printf '[%s/%s] %s %ss%s\n' "$(grep -c . "$donefile")" "$total" "$name" "$secs" "$mark" >&2
+}
+
 if [ "$jobs_n" -gt 1 ] && [ "$total" -gt 1 ]; then
     # Each suite writes to its own log keyed by position, so the report below
     # replays them in the same order a serial run would print them -- the
     # concurrency is invisible in the output. Failures are recorded as marker
     # files because a background subshell cannot append to the parent's array.
-    # Checked, because an empty logdir is silently catastrophic rather than
-    # noisy: every suite is launched with its output redirected into this
-    # directory, bash abandons a command whose redirection fails, and the
-    # missing log then reads as a suite that produced no output and did not
-    # fail. The gate would report every suite passing having run none of them.
-    logdir="$(mktemp -d)" || { echo "cannot create a scratch directory for the test logs" >&2; exit 2; }
-    trap 'rm -rf "$logdir"' EXIT
     j=0
     while [ "$j" -lt "$jobs_n" ]; do
         (
             k=$j
             while [ "$k" -lt "$total" ]; do
-                if ! bash "${selected[$k]}" > "$logdir/$k.log" 2>&1; then
-                    : > "$logdir/$k.fail"
-                fi
+                run_suite "$k"
                 k=$((k + jobs_n))
             done
         ) &
@@ -119,13 +149,26 @@ if [ "$jobs_n" -gt 1 ] && [ "$total" -gt 1 ]; then
         k=$((k + 1))
     done
 else
-    for suite in "${selected[@]}"; do
-        echo "=== $(basename "$suite") ==="
-        if ! bash "$suite"; then
-            failed+=("$(basename "$suite")")
-        fi
+    k=0
+    while [ "$k" -lt "$total" ]; do
+        echo "=== $(basename "${selected[$k]}") ==="
+        run_suite "$k"
+        [ -f "$logdir/$k.fail" ] && failed+=("$(basename "${selected[$k]}")")
+        k=$((k + 1))
     done
 fi
+
+# The slow suites get a name. Top of the list is where a minute of wall time
+# is hiding; the whole list is what a lane-count change has to be judged by.
+echo ""
+echo "slowest suites:"
+k=0
+while [ "$k" -lt "$total" ]; do
+    printf '%s %s\n' "$(cat "$logdir/$k.secs" 2>/dev/null || echo 0)" "$(basename "${selected[$k]}")"
+    k=$((k + 1))
+done | sort -rn | head -10 | while read -r secs name; do
+    printf '  %4ss  %s\n' "$secs" "$name"
+done
 
 echo ""
 echo "================================================================"

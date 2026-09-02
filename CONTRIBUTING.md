@@ -44,9 +44,12 @@ cargo test --manifest-path tui/Cargo.toml
 `run_all.sh` runs several suites at once by default and replays their output in
 the order a serial run would have printed it, so the concurrency is invisible
 unless something fails. It announces its plan first (`running 57 suites at 10
-jobs`); the lane count is what explains the wall time. `CS_TEST_JOBS=1` runs
-them one at a time and streams each suite's output as it happens, which is what
-you want when bisecting a failure inside a single suite.
+jobs`); the lane count is what explains the wall time. While it runs, each
+suite prints one line to stderr as it finishes (`[12/57] test_queue.sh 4s`,
+with `FAIL` appended when it failed), so a slow gate and a hung one look
+different. The report ends with the ten slowest suites and their seconds.
+`CS_TEST_JOBS=1` runs them one at a time and streams each suite's output as it
+happens, which is what you want when bisecting a failure inside a single suite.
 
 ### Which tests to run, and when
 

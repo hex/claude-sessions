@@ -190,6 +190,58 @@ test_run_all_does_not_oversubscribe_a_small_runner() {
     [ "$n" -eq 2 ] || { echo "a 2-core runner must use 2 lanes, got $n"; printf '%s\n' "$out"; return 1; }
 }
 
+# A gate that takes minutes says nothing between its opening line and its
+# report, so a slow run reads like a hung one. Each suite prints one line to
+# stderr the moment it finishes: its position, its name, its seconds. The
+# replayed report stays as it was.
+test_run_all_reports_each_suite_as_it_finishes() {
+    make_suite_dir 4
+    local err
+    err=$(CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" 2>&1 >/dev/null)
+    local i
+    for i in 1 2 3 4; do
+        printf '%s' "$err" | grep -q "test_fake$i.sh" \
+            || { echo "no progress line for test_fake$i.sh"; printf '%s\n' "$err"; return 1; }
+    done
+    printf '%s' "$err" | grep -Eq '\[[1-4]/4\] test_fake[1-4]\.sh .*[0-9]+s' \
+        || { echo "progress line must carry [n/total], the name and seconds"; printf '%s\n' "$err"; return 1; }
+    printf '%s' "$err" | grep -q '\[4/4\]' \
+        || { echo "the counter must reach the total"; printf '%s\n' "$err"; return 1; }
+}
+
+test_run_all_progress_line_marks_a_failing_suite() {
+    make_suite_dir 3 test_fake2.sh
+    local err
+    err=$(CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" 2>&1 >/dev/null) || true
+    printf '%s' "$err" | grep -E 'test_fake2\.sh' | grep -q 'FAIL' \
+        || { echo "a failing suite's progress line must say FAIL"; printf '%s\n' "$err"; return 1; }
+    printf '%s' "$err" | grep -E 'test_fake1\.sh' | grep -q 'FAIL' \
+        && { echo "a passing suite's progress line must not say FAIL"; return 1; }
+    return 0
+}
+
+# The report ends with the suites ranked by wall time, so the slow ones have a
+# name instead of a feeling.
+test_run_all_report_lists_slowest_suites() {
+    make_suite_dir 3
+    local out
+    out=$(CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" 2>/dev/null)
+    printf '%s' "$out" | grep -q 'slowest' \
+        || { echo "report has no slowest-suites table"; printf '%s\n' "$out"; return 1; }
+    printf '%s' "$out" | grep -Eq '[0-9]+s +test_fake[1-3]\.sh' \
+        || { echo "table rows must be '<seconds>s <suite>'"; printf '%s\n' "$out"; return 1; }
+}
+
+# Serial mode streams live and has no lanes, but the same three facts still
+# matter: it prints the same progress line after each suite.
+test_run_all_serial_mode_also_reports_progress() {
+    make_suite_dir 2
+    local err
+    err=$(CS_TEST_JOBS=1 CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" 2>&1 >/dev/null)
+    printf '%s' "$err" | grep -q '\[2/2\] test_fake2\.sh' \
+        || { echo "serial mode must print the progress line too"; printf '%s\n' "$err"; return 1; }
+}
+
 # ============================================================================
 # Runner
 # ============================================================================
@@ -210,5 +262,9 @@ run_test test_run_all_rejects_a_malformed_shard
 run_test test_run_all_rejects_a_malformed_job_count
 run_test test_run_all_scales_jobs_with_the_core_count
 run_test test_run_all_does_not_oversubscribe_a_small_runner
+run_test test_run_all_reports_each_suite_as_it_finishes
+run_test test_run_all_progress_line_marks_a_failing_suite
+run_test test_run_all_report_lists_slowest_suites
+run_test test_run_all_serial_mode_also_reports_progress
 
 report_results
