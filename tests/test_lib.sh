@@ -154,10 +154,37 @@ export CS_PS_BIN="$CS_PS_STUB"
 # one small file under the temp dir the OS reclaims; leaking it beats owning an
 # exit path that belongs to the suite.
 
+# --- Suite-wide isolation, applied when this file is sourced ---
+#
+# At source time rather than in setup(): 22 suites define their own setup()
+# and never call this one, so anything placed there reaches only the suites
+# that happen to inherit it. Sourcing is the one step every suite shares.
+#
+# A private HOME per suite process. A test that seeds a secret, a config
+# marker or a settings.json must never land it in the developer's real
+# dotfiles, and a launched cs must never write the real update cache.
+# git reads its identity from $HOME/.gitconfig, so the real one is carried
+# across in env-var form first, with a placeholder when there is none:
+# a bare CI runner has no global config, and every session-creating suite
+# commits.
+export GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-$(git config --global user.name 2>/dev/null || echo cs-test)}"
+export GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-$(git config --global user.email 2>/dev/null || echo cs-test@example.com)}"
+export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME" GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
+export HOME="$(mktemp -d)/home"
+mkdir -p "$HOME"
+export CS_NO_UPDATE_CHECK=1
+# The binaries under review come first on PATH, so a test that runs
+# `cs-secrets` exercises this tree and not whatever install.sh last put in
+# ~/.local/bin — and CI, which installs nothing, finds them at all.
+_CS_TEST_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/bin"
+case ":$PATH:" in *":$_CS_TEST_BIN:"*) ;; *) export PATH="$_CS_TEST_BIN:$PATH" ;; esac
+
 # --- Setup / Teardown ---
 
 setup() {
     TEST_TMPDIR="$(mktemp -d)"
+    export HOME="$TEST_TMPDIR/home"
+    mkdir -p "$HOME"
     export CS_SESSIONS_ROOT="$TEST_TMPDIR/sessions"
     export CLAUDE_CODE_BIN="echo"
     # Never hit GitHub or the real ~/.cache/cs from a test session launch.

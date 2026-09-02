@@ -297,8 +297,8 @@ launch_claude_code() {
     local BAR3='\033[38;2;255;152;0m▌'    # orange #ff9800
     local BAR4='\033[38;2;255;179;0m▌'    # amber #ffb300
 
-    # One bar per row, and the card can now reach six: version, session, path,
-    # secrets, context, update. The last colour repeats rather than the index
+    # One bar per row, and the card can reach five: version, session, path,
+    # secrets-and-context, update. The last colour repeats rather than the index
     # running off the end — under `set -u` that is an unbound-variable abort of
     # the whole launch, not a missing bar.
     local BAR5='\033[38;2;255;193;7m▌'    # amber-light #ffc107
@@ -310,28 +310,42 @@ launch_claude_code() {
     echo -e "${bars[$((bar_idx < ${#bars[@]} ? bar_idx : ${#bars[@]} - 1))]}${NC} ${ORANGE}cs${NC} ${GREEN}$VERSION${NC}"; ((++bar_idx))
     echo -e "${bars[$((bar_idx < ${#bars[@]} ? bar_idx : ${#bars[@]} - 1))]}${NC} ${WHITE}${BOLD}$session_name${NC} ${COMMENT}($status_icon $status_text)${NC} ${DIM}${ICON_HOST} $(hostname -s)${NC}"; ((++bar_idx))
     echo -e "${bars[$((bar_idx < ${#bars[@]} ? bar_idx : ${#bars[@]} - 1))]}${NC} ${GOLD}$session_dir${NC}"; ((++bar_idx))
+    # Secrets and context are one short fact each, so they share a row rather
+    # than costing the card two. Built as segments and emitted once: either can
+    # be absent (no secrets stored; a new session, which has no conversation for
+    # a context figure to describe), and the row appears whenever at least one
+    # is present.
+    local _seg_secrets="" _seg_ctx=""
     if [ "$secret_count" -gt 0 ]; then
         local secret_word="secret"
         [ "$secret_count" -gt 1 ] && secret_word="secrets"
-        echo -e "${bars[$((bar_idx < ${#bars[@]} ? bar_idx : ${#bars[@]} - 1))]}${NC} ${COMMENT}${ICON_LOCK}${NC} ${YELLOW}$secret_count${NC} ${COMMENT}$secret_word${NC}"; ((++bar_idx))
+        _seg_secrets="${COMMENT}${ICON_LOCK}${NC} ${YELLOW}$secret_count${NC} ${COMMENT}$secret_word${NC}"
     fi
-    # Context usage is a fact about the session, so it belongs in the card with
-    # the others rather than loose above the prompt, where nothing separated it
-    # from the question. Only on a resume: on a new session there is no
-    # conversation for the figure to describe.
     if [ "$status_text" = "resuming" ]; then
         local _card_ctx=""
         _card_ctx=$(_resume_context_pct "$session_dir")
         if [ -n "$_card_ctx" ]; then
-            echo -e "${bars[$((bar_idx < ${#bars[@]} ? bar_idx : ${#bars[@]} - 1))]}${NC} ${COMMENT}${ICON_CTX}${NC} ${YELLOW}${_card_ctx}%${NC} ${COMMENT}context used${NC}"; ((++bar_idx))
+            _seg_ctx="${COMMENT}${ICON_CTX}${NC} ${YELLOW}${_card_ctx}%${NC} ${COMMENT}context used${NC}"
         fi
+    fi
+    if [ -n "$_seg_secrets" ] || [ -n "$_seg_ctx" ]; then
+        local _row="$_seg_secrets"
+        # Literal glyph, not an escape: /bin/bash 3.2 (the floor) prints
+        # `\u00b7` from echo -e as six characters, and every other middle dot
+        # in cs is a literal for the same reason.
+        if [ -n "$_seg_secrets" ] && [ -n "$_seg_ctx" ]; then
+            _row="${_row}  ${DIM}·${NC}  ${_seg_ctx}"
+        else
+            _row="${_row}${_seg_ctx}"
+        fi
+        echo -e "${bars[$((bar_idx < ${#bars[@]} ? bar_idx : ${#bars[@]} - 1))]}${NC} ${_row}"; ((++bar_idx))
     fi
 
     if [ -n "$UPDATE_AVAILABLE" ]; then
         # The update block continues the card's bar stack rather than starting
         # its own column: same bar, same one-space gutter, so it reads as the
         # last fact about this session and not as a separate widget.
-        echo -e "${bars[$((bar_idx < ${#bars[@]} ? bar_idx : ${#bars[@]} - 1))]}${NC} ${BOLD}${YELLOW}${ICON_UP}${NC} ${BOLD}${GREEN}$UPDATE_AVAILABLE${NC} ${BOLD}${COMMENT}available${NC} ${BOLD}${DIM}(you have $VERSION \u2014 run${NC} ${BOLD}${GOLD}cs -update${NC}${BOLD}${DIM})${NC}"; ((++bar_idx))
+        echo -e "${bars[$((bar_idx < ${#bars[@]} ? bar_idx : ${#bars[@]} - 1))]}${NC} ${BOLD}${YELLOW}${ICON_UP}${NC} ${BOLD}${GREEN}$UPDATE_AVAILABLE${NC} ${BOLD}${COMMENT}available${NC} ${BOLD}${DIM}(you have $VERSION — run${NC} ${BOLD}${GOLD}cs -update${NC}${BOLD}${DIM})${NC}"; ((++bar_idx))
         local notes_cache="$HOME/.cache/cs/update-notes-$UPDATE_AVAILABLE"
         if [ -s "$notes_cache" ]; then
             local card_w nver nsum indent wrap_w line first

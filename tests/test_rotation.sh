@@ -332,6 +332,50 @@ test_context_row_sits_in_the_card_above_the_prompt() {
         || { echo "  FAIL: the context row must carry the card's bar"; return 1; }
 }
 
+# Secrets and context are both one short fact each, and stacking them made the
+# card two rows taller than it needed to be. They share a row when both are
+# present. Either alone still gets its own row, so the row is not conditional
+# on the pair.
+#
+# Drives the real seam rather than a fabricated one: the card counts via
+# `cs-secrets list`, so the test stores a secret in an isolated store and lets
+# the card find it. A test that stubbed the count would assert the layout
+# against a number the card never actually computes.
+test_secrets_and_context_share_one_card_row() {
+    command -v cs-secrets >/dev/null 2>&1 \
+        || { echo "    SKIP (cs-secrets not installed)"; return 0; }
+    _rot_session "rot-pair"
+    printf '64\n' > "$CS_SESSIONS_ROOT/rot-pair/.cs/local/context-pct"
+    printf 'v\n' | CS_SECRETS_BACKEND=encrypted CS_SECRETS_PASSWORD=test-pw \
+        CLAUDE_SESSION_NAME=rot-pair cs-secrets set PAIRKEY >/dev/null 2>&1 \
+        || { echo "    SKIP (could not seed a secret)"; return 0; }
+    local output line
+    output=$(CS_SECRETS_BACKEND=encrypted CS_SECRETS_PASSWORD=test-pw \
+        "$CS_BIN" rot-pair <<< "n" 2>&1) || true
+    line=$(printf '%s\n' "$output" | grep "context used" | head -1)
+    [ -n "$line" ] || { echo "  FAIL: no context row"; return 1; }
+    case "$line" in
+        *secret*) ;;
+        *) echo "  FAIL: secrets and context must share one row, got: $line"; return 1 ;;
+    esac
+    # One row, not two.
+    local n; n=$(printf '%s\n' "$output" | grep -c 'secret')
+    [ "$n" -eq 1 ] \
+        || { echo "  FAIL: the secret count appears on $n rows, want 1"; return 1; }
+}
+
+# Context alone keeps its own row — the merge must not make one fact depend on
+# the other being present. No secret is seeded here, so the count is zero.
+test_context_alone_still_gets_a_row() {
+    _rot_session "rot-ctxonly"
+    printf '64\n' > "$CS_SESSIONS_ROOT/rot-ctxonly/.cs/local/context-pct"
+    local output
+    output=$("$CS_BIN" rot-ctxonly <<< "n" 2>&1) || true
+    assert_output_contains "$output" "64% context used" "context still renders alone" || return 1
+    printf '%s\n' "$output" | grep -q "▌.*64% context used" \
+        || { echo "  FAIL: the lone context row must still carry the card's bar"; return 1; }
+}
+
 # Best-effort: the stamp only exists where cs-statusline is installed, so its
 # absence must cost nothing rather than print a blank or a zero.
 test_resume_prompt_omits_context_when_never_stamped() {
@@ -647,6 +691,8 @@ test_marker_without_pending_handoff_is_disarmed() {
 run_test test_prompt_unchanged_without_handoff
 run_test test_resume_prompt_shows_the_previous_conversations_context
 run_test test_context_row_sits_in_the_card_above_the_prompt
+run_test test_secrets_and_context_share_one_card_row
+run_test test_context_alone_still_gets_a_row
 run_test test_resume_prompt_omits_context_when_never_stamped
 run_test test_resume_prompt_ignores_a_junk_context_stamp
 run_test test_resume_prompt_ignores_an_out_of_range_context_stamp
