@@ -77,10 +77,12 @@ test_wrap_family_pinned_to_opus() {
     # Distilling a whole session's documentation into what is worth keeping is
     # judgment work, and the summary is the artifact the session is remembered
     # by, so these three passes run on the strongest model.
+    # The family alias, not a point release: `claude-opus-5` would keep an
+    # older Opus once a newer one ships, the same aging the rotate pin avoids.
     local cmd
     for cmd in wrap.md sweep.md summary.md; do
-        assert_file_contains "$COMMANDS_DIR/$cmd" "^model: claude-opus-5" \
-            "$cmd must pin model: claude-opus-5 in frontmatter" || return 1
+        assert_file_contains "$COMMANDS_DIR/$cmd" "^model: opus$" \
+            "$cmd must pin the opus family, not a point release, in frontmatter" || return 1
         if [ "$(head -1 "$COMMANDS_DIR/$cmd")" != "---" ]; then
             echo "  FAIL: $cmd must open with a YAML frontmatter block"
             return 1

@@ -1,5 +1,5 @@
 ---
-model: claude-opus-5
+model: opus
 ---
 
 Generate an intelligent summary of this cs session by synthesizing all documentation files.

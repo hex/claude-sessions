@@ -1,5 +1,5 @@
 ---
-model: claude-opus-5
+model: opus
 ---
 
 Distill the current session into durable auto-memory entries with a strict bar.

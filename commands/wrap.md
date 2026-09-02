@@ -1,5 +1,5 @@
 ---
-model: claude-opus-5
+model: opus
 ---
 
 Wrap up this session: distill durable memory entries, write a comprehensive summary, then rotate the narrative. Run the three passes back-to-back and report.
