@@ -4,6 +4,26 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.9.4
+
+The installer stops re-asking about the status line, and shows you the bar before it asks at all. The rotation handoff gets a home for rejected work, a provenance on every claim, and a safer ritual. And the subagent rows name the model that is actually running.
+
+### Features
+
+**`cs -update` remembers a declined status line.** Anyone who keeps their own bar has been re-answering the same prompt on every release. A decline is recorded in `~/.config/cs/statusline-declined` (under `$XDG_CONFIG_HOME` when set) and the installer prints one line instead of asking; `cs -statusline enable` reverses it, `cs -statusline disable` sets it without waiting for a prompt, and `cs -uninstall` removes it. Contributed by @nkonin.
+
+**The installer shows the bar before asking to install it.** A sample renders above the question, from a fixed payload pinned to the segments that need no live session, so a stranger's branch name and inbox never appear in their own installer. Best-effort: no `jq`, no binary yet, or a failed render all fall through to the question.
+
+**Handoffs have a home for rejected work, and every claim says how it was learned.** The rotate skill's body sections were Claude Code's own compaction template with the errors-and-feedback section removed — and that was where "a rejected alternative and the reason it lost" belonged. Across ten real handoffs that fact class landed in five different sections. `Settled and rejected` is now a section of its own, `none` required when empty. Behavioural claims carry a provenance (measured, read in source, inherited, assumed): the one measured silent failure in the store was a handoff asserting a tool did something it did not. Next Step opens the body, the body is written in two passes so a mid-rotation compaction cannot lose the part that matters, and arming is the last step, because the launch prompt disarms an armed marker and nothing re-arms it. The handoff is written on the `fable` family alias.
+
+### Fixes
+
+- A failed decline memo no longer aborts the install. Under errexit the marker write could exit before `settings.json` was written, leaving hooks copied but never registered.
+- Declining says plainly that it is remembered, on its own line, and enter declines the same as `n`.
+- Subagent rows derive the model name from the id instead of a lookup table: Fable 5.1 no longer renders as "Fable 5", Opus 5 no longer shows its raw id, and a family nobody has listed still resolves. Vertex `@date` ids and `-preview` tags are handled; an id that does not fit the shape renders verbatim.
+- The launch card puts the secret count and the context figure on one row, with a literal middle dot: `echo -e` escapes print as six characters under `/bin/bash` 3.2.
+- Three tests wrote into the developer's real `~/.config` and `~/.cs-secrets`. The test harness now scopes `HOME` and `PATH` for every suite at source time, carrying the git identity across so a bare runner still passes.
+
 ## 2026.9.3
 
 A rotation now continues by itself. After `/clear` on an armed handoff, the fresh conversation reads the handoff and starts its next step about two seconds later, with nothing typed.

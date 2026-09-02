@@ -258,7 +258,7 @@ export NO_COLOR=1
 
 ## Install, uninstall, doctor
 
-`install.sh` deploys the `cs-statusline` and `cs-subagent-statusline` binaries to `~/.local/bin` unconditionally, but the status bar itself is claimed only with consent: with a terminal attached the installer asks before registering (default yes; it also asks before replacing an existing status line), and a non-interactive install registers nothing and prints how to enable later. Consent registers both keys — the bar and the [subagent rows](#subagent-rows) — exactly as `cs -statusline enable` does.
+`install.sh` deploys the `cs-statusline` and `cs-subagent-statusline` binaries to `~/.local/bin` unconditionally, but the status bar itself is claimed only with consent: with a terminal attached the installer renders a sample of the bar (a fixed payload, pinned to the segments that need no live session, in the terminal's theme where it publishes one) and then asks before registering (default yes; it also asks before replacing an existing status line), and a non-interactive install registers nothing and prints how to enable later. Consent registers both keys — the bar and the [subagent rows](#subagent-rows) — exactly as `cs -statusline enable` does.
 
 A "no" is remembered in `~/.config/cs/statusline-declined` (under `$XDG_CONFIG_HOME` when set), so `cs -update` — which re-runs the installer — stops asking on every release and prints one line saying how to enable instead. `cs -statusline disable` writes the same marker; `cs -statusline enable` clears it, and `cs -uninstall` removes it. Turn both on or off any time:
 
