@@ -196,6 +196,13 @@ launch_claude_code() {
     local cs_base
     cs_base=$(_read_local_state "$session_dir/.cs/local/state" cs_base)
     export CLAUDE_CODE_TASK_LIST_ID="${cs_base:-$session_name}"
+    # Claude Code 2.1.233+ withholds the Task tools on Opus 4.8, Sonnet 5 and
+    # Fable 5 unless the session opts in. The rotation wake, the walk-away
+    # drain and the rotate skill all address the native task list, so a cs
+    # launch opts in; CS_NO_TASK_TOOLS=1 hands the choice back to Claude Code.
+    if [ -z "${CS_NO_TASK_TOOLS:-}" ]; then
+        export CLAUDE_CODE_ENABLE_TODO_TOOLS=1
+    fi
     if [ -n "$cs_base" ]; then
         export CS_SECRETS_SESSION="$cs_base"
     fi

@@ -181,6 +181,14 @@ export CS_NO_ROTATION_WAKE="1"
 # the colour resets when the session exits.
 export CS_NO_ITERM2="1"
 
+# Leave the Task tools to Claude Code's model default. A cs launch exports
+# CLAUDE_CODE_ENABLE_TODO_TOOLS=1 because Claude Code 2.1.233+ withholds
+# TaskCreate/TaskList/TaskUpdate/TaskGet on Opus 4.8, Sonnet 5 and Fable 5,
+# and the rotation wake, the walk-away drain and the rotate skill all address
+# the native task list. Set this to get the context those tool definitions
+# cost back; the drain and the handoff then coordinate by message text alone.
+export CS_NO_TASK_TOOLS="1"
+
 # Override the tmux binary cs -spawn uses (default: tmux on PATH)
 export CS_TMUX_BIN="/opt/homebrew/bin/tmux"
 

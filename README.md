@@ -378,7 +378,8 @@ said close to your own words while condensing its own reasoning.
 
 Then rotate with **`/clear`**. The fresh conversation reads the handoff,
 reconciles the native task list it inherited with it (cs keys that list to
-the session, not the conversation), and continues from its next-step
+the session, not the conversation, and opts every model into the Task tools;
+`CS_NO_TASK_TOOLS=1` leaves that to Claude Code), and continues from its next-step
 section — the old transcript is not loaded. It
 waits for your next message, which can simply be what you want done next.
 
