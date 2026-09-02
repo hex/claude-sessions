@@ -679,6 +679,65 @@ else
         fi
     }
 
+    # Show what is being offered before asking for it. The payload is fixed and
+    # the segments are pinned: the live ones read git state, unread mail and
+    # rate limits from whatever session is running, which would put the user's
+    # own branch name and inbox into an installer preview. Best-effort — a
+    # sample that cannot render must not stop the install, so every failure
+    # path here falls through to the question on its own.
+    _preview_statusline() {
+        command -v jq >/dev/null 2>&1 || return 0
+        [ -x "$INSTALL_DIR/cs-statusline" ] || return 0
+        local sample
+        sample=$(jq -nc '{
+            session_name: "my-session",
+            context_window: {used_percentage: 34},
+            model: {display_name: "Opus 5", id: "claude-opus-5"},
+            effort: {level: "high"},
+            rate_limits: {five_hour: {used_percentage: 41},
+                          seven_day: {used_percentage: 63}}
+        }' 2>/dev/null) || return 0
+        # Draw it for the terminal it will appear in. The statusline falls back
+        # to its dark palette whenever it can measure nothing, and a subprocess
+        # inherits no way to measure — so a light terminal saw a dark bar, which
+        # is precisely the thing a "what it looks like" sample must not get
+        # wrong. install.sh still owns the tty and has just installed the binary
+        # that can answer, so it asks; an unknown answer is left unset and the
+        # statusline keeps its own fallback.
+        # Only signals already in the environment. `cs -detect-theme` would be
+        # the accurate answer, but it asks the terminal over OSC 11 and writes
+        # that probe straight to /dev/tty — which no capture can intercept, so
+        # the escape and its reply paint themselves across the installer's
+        # output. A preview is not worth a garbled screen: read what the
+        # terminal has already published, and when it has published nothing,
+        # leave the statusline its own fallback.
+        local _theme="${CS_TERM_THEME:-}"
+        if [ -z "$_theme" ] && [ -n "${COLORFGBG:-}" ]; then
+            case "${COLORFGBG##*;}" in
+                7|9|1[0-5]) _theme="light" ;;
+                0|[1-6]|8)  _theme="dark" ;;
+            esac
+        fi
+        case "$_theme" in light|dark) ;; *) _theme="" ;; esac
+        # Exported in a subshell rather than as a command prefix: an empty
+        # ${_theme:+...} expansion would vanish and leave the binary running as
+        # the prefix's own argument list, which renders nothing.
+        local rendered
+        rendered=$(
+            export CS_STATUSLINE_SEGMENTS=logo,session,model,ctx,limits
+            [ -z "$_theme" ] || export CS_TERM_THEME="$_theme"
+            printf '%s' "$sample" | "$INSTALL_DIR/cs-statusline" 2>/dev/null
+        ) || return 0
+        [ -n "$rendered" ] || return 0
+        # No indent: the statusline opens with a reset that eats leading spaces,
+        # so an indented printf produced a bar flush against the margin while
+        # every other line sat three spaces in.
+        echo ""
+        info "This is what it looks like:"
+        printf '%s\n' "$rendered"
+        echo ""
+    }
+
     # Each branch only decides consent; the registration itself happens once
     # below. "quiet" re-registers an existing cs-statusline entry (refreshing
     # the path) without announcing it.
@@ -695,6 +754,7 @@ else
                 # Interactive installs ask (default yes); non-interactive installs
                 # leave it off and say how to enable.
                 if [ -t 0 ]; then
+                    _preview_statusline
                     read -p "Register cs-statusline as the Claude Code status line? [Y/n] " -n 1 -r
                     echo ""
                     if [[ $REPLY =~ ^[Nn]$ ]]; then
@@ -709,14 +769,24 @@ else
                 fi
             else
                 if [ -t 0 ]; then
+                    _preview_statusline
                     read -p "Replace current status line ($_current_statusline) with cs-statusline? [y/N] " -n 1 -r
                     echo ""
                     if [[ $REPLY =~ ^[Yy]$ ]]; then
                         _register_statusline=1
-                    else
+                    elif [[ $REPLY =~ ^[Nn]$ ]]; then
                         _remember_statusline_decline \
                             "Keeping current status line." \
                             "To switch to cs-statusline: cs -statusline enable"
+                    else
+                        # Enter, the lowercase default, means "not now" — so it
+                        # keeps the bar for this run and leaves the question
+                        # open. Only a typed n is a decision worth remembering;
+                        # turning the safest keystroke into a permanent
+                        # preference is how someone ends up never asked again
+                        # without knowing they chose it.
+                        info "Keeping current status line."
+                        info "Asked again next release. To decide now: cs -statusline enable, or cs -statusline disable"
                     fi
                 else
                     warn "Keeping current status line. To switch to cs-statusline:"

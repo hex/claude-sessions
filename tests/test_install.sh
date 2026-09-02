@@ -76,7 +76,7 @@ set timeout 120
 log_file -noappend $out
 spawn env HOME=$fake_home bash $INSTALL_SH
 expect {
-    -re {status line.*\[y/N\]} { send "\r"; exp_continue }
+    -re {status line.*\[y/N\]} { send "n\r"; exp_continue }
     eof
 }
 EXPECT
@@ -93,6 +93,131 @@ EXPECT
     # And the way back stays with it.
     grep -q "cs -statusline enable" "$out" \
         || { echo "  FAIL: the decline must name the command that undoes it"; return 1; }
+}
+
+# Asking someone to install a status bar they have never seen is a weak prompt.
+# The installer renders a sample first, built from a fixed payload so the
+# preview is the same everywhere and never reads the machine it runs on: the
+# real segments pull git state, mail counts and rate limits from whatever
+# session is live, which would put a stranger's branch name and unread count
+# into an installer preview.
+test_install_previews_the_status_line_before_asking() {
+    command -v expect >/dev/null 2>&1 \
+        || { echo "    SKIP (expect not installed; the prompt needs a tty)"; return 0; }
+    local fake_home="$TEST_TMPDIR/home-preview"
+    mkdir -p "$fake_home/.claude"
+    local exp="$TEST_TMPDIR/preview.exp" out="$TEST_TMPDIR/preview.out"
+    cat > "$exp" <<EXPECT
+set timeout 120
+log_file -noappend $out
+spawn env HOME=$fake_home bash $INSTALL_SH
+expect {
+    -re {status line.*\[Y/n\]} { send "n\r"; exp_continue }
+    -re {Complete|complete} { exp_continue }
+    eof
+}
+EXPECT
+    expect -f "$exp" >/dev/null 2>&1 || true
+    # A sample renders, and it renders BEFORE the question.
+    local sample_line prompt_line
+    sample_line=$(grep -n 'ctx ' "$out" | head -1 | cut -d: -f1)
+    prompt_line=$(grep -n 'Register cs-statusline' "$out" | head -1 | cut -d: -f1)
+    [ -n "$sample_line" ] || { echo "  FAIL: no status line sample rendered"; return 1; }
+    [ -n "$prompt_line" ] || { echo "  FAIL: no prompt"; return 1; }
+    [ "$sample_line" -lt "$prompt_line" ] \
+        || { echo "  FAIL: the sample must render before the question"; return 1; }
+    # Labelled: position alone leaves a cold reader with a coloured strip and
+    # no statement of what it is, sitting among the installer's own output.
+    local label_line
+    label_line=$(grep -n 'what it looks like' "$out" | head -1 | cut -d: -f1)
+    # The preview must be drawn for the terminal it appears in. The statusline
+    # falls back to its DARK palette whenever it can measure nothing, and a
+    # subprocess of the installer measures nothing — so a light terminal got a
+    # dark bar, which is the one thing a "this is what it looks like" sample
+    # must not get wrong. install.sh owns the tty and has just installed the
+    # binary that can answer, so it asks.
+    grep -q 'CS_TERM_THEME' "$SCRIPT_DIR/../install.sh" \
+        || { echo "  FAIL: the preview must render in the terminal's own theme"; return 1; }
+    # And it must not PROBE for it: an OSC query writes to /dev/tty, which no
+    # capture intercepts, so the escape and its reply paint over the installer.
+    # The invocation, not the word: the code comments explain why the probe is
+    # avoided, and matching prose would fail on its own rationale.
+    if grep -qE '(cs|\$INSTALL_DIR/cs)" *-detect-theme|cs -detect-theme\)' "$SCRIPT_DIR/../install.sh"; then
+        echo "  FAIL: the preview must not run the OSC probe; it leaks onto the screen"
+        return 1
+    fi
+    if grep -q ']11;?' "$out" 2>/dev/null; then
+        echo "  FAIL: a raw OSC escape reached the installer output"; return 1
+    fi
+    [ -n "$label_line" ] \
+        || { echo "  FAIL: the sample must say what it is"; return 1; }
+    [ "$label_line" -lt "$sample_line" ] \
+        || { echo "  FAIL: the label must precede the sample it names"; return 1; }
+    # Fixed payload: the sample line itself must carry the placeholder session,
+    # not whatever is live. Checked on the RENDERED LINE rather than the whole
+    # transcript — the installer legitimately prints its own paths, and a
+    # transcript-wide grep matches those instead of a leak.
+    local sample
+    sample=$(sed -n "${sample_line}p" "$out")
+    case "$sample" in
+        *my-session*) ;;
+        *) echo "  FAIL: the sample must use the fixed placeholder session"; return 1 ;;
+    esac
+    # The live-only segments must not appear: they read git, mail and limits
+    # from the running machine.
+    case "$sample" in
+        *"⎇ "*) echo "  FAIL: the preview rendered the live git branch"; return 1 ;;
+    esac
+}
+
+# A lowercase default means "not now", so enter must not opt the user out for
+# good. Only an explicit n is a decision worth remembering; enter keeps the
+# current bar for this run and leaves the question open for the next release.
+test_enter_at_the_replace_prompt_is_not_a_permanent_optout() {
+    command -v expect >/dev/null 2>&1 \
+        || { echo "    SKIP (expect not installed; the prompt needs a tty)"; return 0; }
+    local fake_home="$TEST_TMPDIR/home-enter"
+    mkdir -p "$fake_home/.claude"
+    printf '{"statusLine":{"command":"/opt/other/bar"}}\n' > "$fake_home/.claude/settings.json"
+    local exp="$TEST_TMPDIR/enter.exp"
+    cat > "$exp" <<EXPECT
+set timeout 120
+spawn env HOME=$fake_home bash $INSTALL_SH
+expect {
+    -re {status line.*\[y/N\]} { send "\r"; exp_continue }
+    -re {Complete|complete} { exp_continue }
+    eof
+}
+EXPECT
+    expect -f "$exp" >/dev/null 2>&1 || true
+    [ ! -f "$fake_home/.config/cs/statusline-declined" ] \
+        || { echo "  FAIL: enter must not write the decline marker"; return 1; }
+    # The user's own bar is still kept, which is the other half of the default.
+    local sl
+    sl=$(jq -r '.statusLine.command // ""' "$fake_home/.claude/settings.json" 2>/dev/null)
+    assert_eq "/opt/other/bar" "$sl" "enter must keep the current status line" || return 1
+}
+
+# An explicit n IS a decision, and still gets remembered.
+test_explicit_n_at_the_replace_prompt_is_remembered() {
+    command -v expect >/dev/null 2>&1 \
+        || { echo "    SKIP (expect not installed; the prompt needs a tty)"; return 0; }
+    local fake_home="$TEST_TMPDIR/home-explicitn"
+    mkdir -p "$fake_home/.claude"
+    printf '{"statusLine":{"command":"/opt/other/bar"}}\n' > "$fake_home/.claude/settings.json"
+    local exp="$TEST_TMPDIR/explicitn.exp"
+    cat > "$exp" <<EXPECT
+set timeout 120
+spawn env HOME=$fake_home bash $INSTALL_SH
+expect {
+    -re {status line.*\[y/N\]} { send "n\r"; exp_continue }
+    -re {Complete|complete} { exp_continue }
+    eof
+}
+EXPECT
+    expect -f "$exp" >/dev/null 2>&1 || true
+    [ -f "$fake_home/.config/cs/statusline-declined" ] \
+        || { echo "  FAIL: an explicit n must be remembered"; return 1; }
 }
 
 # Same guard on the disable path, which shares the construct.
@@ -1093,7 +1218,10 @@ test_filechanged_registration_carries_async_rewake() {
 }
 
 run_test test_install_survives_an_unwritable_declined_marker_dir
+run_test test_install_previews_the_status_line_before_asking
 run_test test_declining_says_permanence_on_its_own_line
+run_test test_enter_at_the_replace_prompt_is_not_a_permanent_optout
+run_test test_explicit_n_at_the_replace_prompt_is_remembered
 run_test test_statusline_disable_survives_an_unwritable_marker_dir
 run_test test_marker_tests_do_not_touch_a_live_xdg_config_home
 run_test test_filechanged_registration_carries_async_rewake
