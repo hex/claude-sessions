@@ -44,3 +44,35 @@ Nothing is in flight. `main` == `origin/main` at `8a99e50`, CI 5/5 on it, local 
 - Jina Reader's account balance is exhausted (402 InsufficientBalanceError); Firecrawl and plain curl worked for the Lenny fetch, output in `.claude/reads/` of this checkout under `.claude-crawl/reads/`.
 - Trap and obedience artifacts live only in the parent conversation's scratchpad (`design-test/{obey,obey-before,trap,trap-v3}`, `score.sh`, `score-trap.sh`, `accents.py`, `skill-v2.md`, `seed-v2.sh`, `skill-before.md`). They vanish with that scratchpad; the numbers above are the record.
 - Context at handoff: about 70%, written from live context, nothing compacted.
+
+## 3. Primary Request and Intent
+
+The conversation began as a rotation to apply three Fable 5.1 prompting-page rules to cs (done, released as v2026.9.5). Alex then asked, verbatim: "do we use claude tasks in the handoff? should we?" ("do them both"), "can we take soemthing away from this? it is from https://www.lennysnewsletter.com/p/how-to-turn-your-ai-into-a-world" ("do both"), "do an analysis of the skill with the council", "apply", "redo it" (the council review, on the revised skill), "test it first", "before and after", and finally chose "Fix the shared context-pct first" from the rotation menu. Standing corrections this afternoon: "close agents that finished and are not needed anymore"; "doesnt the full gate run on ci as well?" then "kill the local gate"; "why don't you use /skill-developer ?" (that skill's registry, `~/.claude/skills/skill-rules.json`, has one entry and no consuming hook; Claude Code's frontmatter discovery is the real trigger).
+
+## 4. Key Technical Concepts
+
+- **Scoring from files, never self-reports.** `score.sh` greps brand hex, `12,000`, `4\.8`, a three-column grid, `blog`, purple hexes, `linear-gradient`; `accents.py` lists saturated non-brand colors (HLS, sat > 0.25, 0.12 < l < 0.9) so darker tints of the brand hue (h148 to 151) and surfaces read as compliant; `score-trap.sh` adds `linear-gradient`, `<blockquote`, and `class="quote…"` counts. Three v2 trap runs used `div.quote-card` instead of `blockquote`; count both.
+- **Seed script contract** (`scripts/seed.sh`, bash 3.2, `set -euo pipefail`, `LC_ALL=C`): sha256 of a 40-char urandom seed (shasum, fallback sha256sum, else exit 2); byte N of the hash via `b()`; prints mode, bg_lightness_pct, bg_saturation_pct, accent_1_hue_deg, accent_saturation_pct, accent_count, accent_2_hue_deg (only when 2), primary_anchor_pct, primary_layout, type_scale, heading_weight, heading_tracking_em, heading_serifs, radius_px, spacing_scale, surface, motif_family, motif_prominence, motif_repeat_count, motif_abstraction. Spread over 30 draws was consistent with uniform (kimi's chi-square on round-one data).
+- **assert_file_contains is a line-based, case-sensitive BRE**: bit twice more today (a pin wrapped across two lines; "Reconcile" vs "reconcile"). Copy the pin from the production line.
+- **Teammate identity**: `_mail_is_lead` in `hooks/narrative-reminder.sh` (CS_LEAD_PID vs CLAUDE_PID or its parent) works for hooks; the statusline has neither, so it compares the payload `session_id` with `claude_session_id` in `.cs/local/state`, which the SessionStart hook rebinds only for the lead.
+
+## 5. Files and Code Sections
+
+- `~/.claude/skills/seeding-design-variety/SKILL.md` (1248 words) and `scripts/seed.sh`: dotfiles `b854d1a`; history `6e11fd9` (v1), `1f3c410` (v2).
+- `commands/summary.md` step 5, `tests/test_commands.sh` `test_prose_critic_pinned_and_contracted`: `681980d`.
+- `hooks/narrative-reminder.sh` lines ~660-690 (nudge and warn tiers), `tests/test_rotation.sh` `test_ctx_warning_survives_an_interleaved_teammate`, `docs/hooks.md` 137-138: `c2a7ee7`.
+- `bin/cs-statusline` `_parse_stdin` (session_id is now the first jq field; the stamp block gates on `_lead`), `tests/test_queue.sh` `test_statusline_teammate_touches_but_does_not_overwrite_context_pct`, `docs/session-layout.md` row `context-pct`, `docs/statusline.md` render-path paragraph: `8a99e50`.
+- Memory: `project_skill_examples_get_copied.md` (three extensions today), `project_native_tasks_per_conversation.md` (rewritten), `project_release_gate_skips_ci.md`, `project_code_review_skill_is_pr_shaped.md`, `project_assert_file_contains_regex.md` (extended), `MEMORY.md` lines updated.
+- Session: `.cs/summary.md` rewritten by `/wrap` at 15:30 (covers through v2026.9.5, not the skill work after it); `.cs/README.md` Outcome paragraph carries the afternoon.
+
+## 6. Problem Solving
+
+Three defects found by running things, not reading them: the example-copy attractor (two seeded runs identical to the table), the native-task premise (finder-B, then measured), and the shared context slot (five identical notices). Each was fixed with a test seen red first. The council's unanimous over-deletion fear was the opposite kind of finding: a premise nobody had tested that turned out false in 35 runs; the trap should have been run before the wording debate.
+
+## 7. Pending Tasks
+
+Native task list for this session: none created today (checked `~/.claude/tasks/claude-sessions/`, only housekeeping files). Open items, all in Next Step: council round three (A), the `opus` alias question (B1), the job-cap measurement (B2), the Vale-before-commit habit (B3). Untouched and not planned: the quality/preference test of seeded designs.
+
+## 8. Current Work
+
+Rotation ritual. All agents stopped (`ListAgents` shows none). CI polls finished. Nothing running.
