@@ -51,6 +51,12 @@ different. The report ends with the ten slowest suites and their seconds.
 `CS_TEST_JOBS=1` runs them one at a time and streams each suite's output as it
 happens, which is what you want when bisecting a failure inside a single suite.
 
+The lanes default to half the cores on a workstation (a runner with four cores
+or fewer keeps them all) and every suite runs under `nice -n 10`, so a gate
+leaves the machine usable while it runs. One gate per checkout: a second
+`run_all.sh` started while one is running refuses with the holder's pid and
+exits 3 (`tests/.run_all.lock`; a lock whose pid is dead is taken over).
+
 ### Which tests to run, and when
 
 The full gate takes minutes. Most of the time you do not want it.

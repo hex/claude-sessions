@@ -180,8 +180,9 @@ test_run_all_scales_jobs_with_the_core_count() {
     [ "$n" -gt 4 ] || { echo "16 cores must buy more than 4 lanes, got $n"; return 1; }
 }
 
-# The ceiling must not become a floor: a small CI runner keeps its own core
-# count rather than being oversubscribed up to the cap.
+# The ceiling must not become a floor, and the halving must not reach a small
+# runner: a 2-core CI box keeps 2 lanes rather than being cut to 1 or
+# oversubscribed up to the cap.
 test_run_all_does_not_oversubscribe_a_small_runner() {
     make_suite_dir 2
     local out n
@@ -242,6 +243,78 @@ test_run_all_serial_mode_also_reports_progress() {
         || { echo "serial mode must print the progress line too"; printf '%s\n' "$err"; return 1; }
 }
 
+# Two gates on one checkout do not overlap: they thrash. The first holds a
+# lock under the suite directory for its lifetime; a second refuses at once
+# with the holder's pid, runs nothing, and exits 3 so a caller can tell "busy"
+# from "failed". A lock whose pid is dead is stale and is taken over.
+test_run_all_refuses_a_second_gate_on_the_same_checkout() {
+    make_suite_dir 2
+    local lock="$SUITE_DIR/.run_all.lock"
+    mkdir -p "$lock"
+    printf '%s\n' "$$" > "$lock/pid"
+    local out rc=0
+    out=$(CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" 2>&1) || rc=$?
+    [ "$rc" -eq 3 ] || { echo "a busy checkout must exit 3, got $rc"; printf '%s\n' "$out"; return 1; }
+    printf '%s' "$out" | grep -q "$$" || { echo "the refusal must name the holder's pid"; printf '%s\n' "$out"; return 1; }
+    [ "$(ran_count)" -eq 0 ] || { echo "a refused gate ran $(ran_count) suites"; return 1; }
+    [ -d "$lock" ] || { echo "the refused gate must not remove the holder's lock"; return 1; }
+}
+
+test_run_all_takes_over_a_stale_lock() {
+    make_suite_dir 2
+    local lock="$SUITE_DIR/.run_all.lock"
+    mkdir -p "$lock"
+    # A pid no live process holds: fork a sleep-free child, let it exit, keep its pid.
+    ( : ) & local dead=$!; wait "$dead" 2>/dev/null
+    printf '%s\n' "$dead" > "$lock/pid"
+    local out rc=0
+    out=$(CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" 2>&1) || rc=$?
+    [ "$rc" -eq 0 ] || { echo "a stale lock must be taken over, got rc $rc"; printf '%s\n' "$out"; return 1; }
+    [ "$(ran_count)" -eq 2 ] || { echo "expected both suites to run"; return 1; }
+    [ ! -d "$lock" ] || { echo "the lock must be released on exit"; return 1; }
+}
+
+test_run_all_releases_the_lock_when_a_suite_fails() {
+    make_suite_dir 2 test_fake1.sh
+    local lock="$SUITE_DIR/.run_all.lock"
+    CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" >/dev/null 2>&1 || true
+    [ ! -d "$lock" ] || { echo "lock left behind after a failing run"; return 1; }
+}
+
+# Lanes default to half the cores on a workstation: each lane is a fork tree
+# of bash, git and cs, so ten lanes on fourteen cores drove the load average
+# to 147 and starved every other process on the box, the statusline included.
+# A small runner (four cores or fewer) keeps every core; the cap stays as a
+# ceiling above that.
+test_run_all_defaults_to_half_the_cores() {
+    make_suite_dir 2
+    local out n
+    out=$(PATH="$(fake_cores 14):$PATH" CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" 2>&1)
+    n=$(printf '%s' "$out" | sed -n 's/.*at \([0-9][0-9]*\) jobs.*/\1/p' | head -1)
+    [ "$n" -eq 7 ] || { echo "14 cores must default to 7 lanes, got $n"; printf '%s\n' "$out"; return 1; }
+}
+
+test_run_all_keeps_at_least_one_lane_on_a_single_core() {
+    make_suite_dir 2
+    local out n
+    out=$(PATH="$(fake_cores 1):$PATH" CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" 2>&1)
+    n=$(printf '%s' "$out" | sed -n 's/.*at \([0-9][0-9]*\) jobs.*/\1/p' | head -1)
+    [ "$n" -eq 1 ] || { echo "1 core must give 1 lane, got $n"; return 1; }
+}
+
+# Every lane runs its suites under nice so a gate yields to interactive work.
+# The fixture suite prints its own niceness; the runner must have raised it.
+test_run_all_runs_suites_under_nice() {
+    make_suite_dir 1
+    # BSD nice with no arguments prints usage, so the fixture reads its own
+    # niceness from ps, which both userlands print with -o nice=.
+    printf '#!/usr/bin/env bash\nps -o nice= -p $$ | tr -d " "\n: > "%s/test_fake1.sh"\n' "$RAN_DIR" > "$SUITE_DIR/test_fake1.sh"
+    local out n
+    out=$(CS_TEST_SUITE_DIR="$SUITE_DIR" CS_TEST_JOBS=1 bash "$RUN_ALL" 2>/dev/null)
+    n=$(printf '%s' "$out" | grep -E '^[0-9]+$' | head -1)
+    [ -n "$n" ] && [ "$n" -ge 10 ] || { echo "suites must run at niceness >= 10, saw '${n:-none}'"; printf '%s\n' "$out"; return 1; }
+}
+
 # ============================================================================
 # Runner
 # ============================================================================
@@ -266,5 +339,11 @@ run_test test_run_all_reports_each_suite_as_it_finishes
 run_test test_run_all_progress_line_marks_a_failing_suite
 run_test test_run_all_report_lists_slowest_suites
 run_test test_run_all_serial_mode_also_reports_progress
+run_test test_run_all_refuses_a_second_gate_on_the_same_checkout
+run_test test_run_all_takes_over_a_stale_lock
+run_test test_run_all_releases_the_lock_when_a_suite_fails
+run_test test_run_all_defaults_to_half_the_cores
+run_test test_run_all_keeps_at_least_one_lane_on_a_single_core
+run_test test_run_all_runs_suites_under_nice
 
 report_results

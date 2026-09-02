@@ -28,3 +28,4 @@ bin/cs-tui
 .claude/settings.local.json
 .obsidian/
 CLAUDE.local.md
+tests/.run_all.lock/

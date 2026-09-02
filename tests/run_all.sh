@@ -31,20 +31,24 @@ fi
 # How many suites run at once. Suites are independent -- test_lib.sh gives every
 # test its own mktemp -d and scopes CS_SESSIONS_ROOT, CS_TRANSCRIPTS_DIR, HOME,
 # CS_CLAUDE_DIR and CS_TMUX_BIN inside it -- so concurrent suites cannot collide.
-# The default tracks the core count up to a ceiling. Wall time is the greater of
-# the slowest single suite and the total divided by the lanes, so lanes keep
-# paying off until those two meet: measured over the real suite list, the total
-# is an order of magnitude larger than the slowest suite, and a 14-core box
-# finishes in 2.2 minutes at ten lanes against 5.0 at four. The ceiling is where
-# the two terms converge; past it the lanes idle, and because assignment is
-# round-robin rather than greedy, more lanes start losing to imbalance. Small CI
-# runners keep their own core count and are never oversubscribed up to it.
-# CS_TEST_JOBS=1 restores a serial run, which streams each suite's output live
-# rather than buffering it.
+# The default is half the cores on a workstation, up to a ceiling. A lane is
+# not one process: each suite forks a tree of bash, git and cs, so lanes equal
+# to the core count oversubscribe the box several times over (ten lanes on
+# fourteen cores drove the load average to 147 and starved the statusline, the
+# editor and every other session). Half leaves the other half for the person at
+# the keyboard. A small runner (four cores or fewer, the CI shape) has nobody
+# at the keyboard and keeps every core: halving it would double the CI lane's
+# wall time for no one's benefit. Wall time is the greater of the slowest
+# single suite and the total divided by the lanes, so lanes pay off until those
+# two meet; the ceiling is where they converge, and past it round-robin
+# assignment loses to imbalance. CS_TEST_JOBS overrides; CS_TEST_JOBS=1
+# restores a serial run, which streams each suite's output live rather than
+# buffering it.
 detect_jobs() {
     local n
     n="$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 1)"
     case "$n" in ''|*[!0-9]*) n=1 ;; esac
+    [ "$n" -gt 4 ] && n=$((n / 2))
     [ "$n" -ge 1 ] || n=1
     [ "$n" -le 10 ] || n=10
     printf '%s' "$n"
@@ -80,6 +84,29 @@ if [ "$total" -eq 0 ]; then
     exit 2
 fi
 
+# One gate per checkout. Two full gates on the same box do not overlap, they
+# thrash, and a second one started by mistake (a release step beside a manual
+# run) is the way a two-minute gate becomes twenty. The lock is a directory
+# under the suite dir, taken with mkdir because that is atomic on every
+# filesystem cs runs on and needs no flock, which macOS lacks. It holds the
+# owner's pid: a live pid means busy, exit 3 so a caller can tell busy from
+# failed; a dead pid is a crashed gate's leftover and is taken over.
+lock="$SUITE_DIR/.run_all.lock"
+_release_lock() {
+    [ "$(cat "$lock/pid" 2>/dev/null)" = "$$" ] && rm -rf "$lock"
+}
+if ! mkdir "$lock" 2>/dev/null; then
+    holder=$(cat "$lock/pid" 2>/dev/null || true)
+    if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null; then
+        echo "another run_all.sh holds $lock (pid $holder); wait for it or stop it" >&2
+        exit 3
+    fi
+    rm -rf "$lock"
+    mkdir "$lock" 2>/dev/null || { echo "cannot take $lock" >&2; exit 2; }
+fi
+printf '%s\n' "$$" > "$lock/pid"
+trap '_release_lock' EXIT
+
 # Say what the run is about to do. A gate that takes minutes should account for
 # them, and the lane count is the one number that explains the wall time.
 echo "running $total suites at $jobs_n jobs" >&2
@@ -92,12 +119,13 @@ echo "running $total suites at $jobs_n jobs" >&2
 # a suite that produced no output and did not fail. The gate would report every
 # suite passing having run none of them.
 logdir="$(mktemp -d)" || { echo "cannot create a scratch directory for the test logs" >&2; exit 2; }
-trap 'rm -rf "$logdir"' EXIT
+trap 'rm -rf "$logdir"; _release_lock' EXIT
 donefile="$logdir/done"
 : > "$donefile"
 
-# Run suite k: capture its output, stamp its seconds and whether it failed, and
-# say so on stderr the moment it finishes. The progress counter is the number
+# Run suite k under nice, so a gate yields to whoever is typing: capture its
+# output, stamp its seconds and whether it failed, and say so on stderr the
+# moment it finishes. The progress counter is the number
 # of suites finished so far, not k, so it climbs in finishing order while the
 # report below still replays in list order. The one-line append to the done
 # file is under PIPE_BUF, so concurrent lanes cannot tear it, and the count is
@@ -109,9 +137,9 @@ run_suite() {  # index
     name=$(basename "${selected[$k]}")
     t0=$(date +%s)
     if [ "$jobs_n" -gt 1 ]; then
-        bash "${selected[$k]}" > "$logdir/$k.log" 2>&1 || : > "$logdir/$k.fail"
+        nice -n 10 bash "${selected[$k]}" > "$logdir/$k.log" 2>&1 || : > "$logdir/$k.fail"
     else
-        bash "${selected[$k]}" 2>&1 | tee "$logdir/$k.log"
+        nice -n 10 bash "${selected[$k]}" 2>&1 | tee "$logdir/$k.log"
         [ "${PIPESTATUS[0]}" -eq 0 ] || : > "$logdir/$k.fail"
     fi
     t1=$(date +%s)
