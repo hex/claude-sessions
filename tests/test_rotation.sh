@@ -136,6 +136,99 @@ test_rotate_skill_exists_with_frontmatter() {
 # cannot take it: nothing reachable from a tool result or a hook can submit to
 # Claude Code's command queue, so /clear is always the user's keystroke. That
 # makes it the one thing the skill must not bury in prose.
+# The handoff is the only artifact that survives the /clear: the transcript is
+# gone, and whatever the handoff failed to carry is simply unknown to the next
+# conversation. That failure is silent — nothing looks broken, the work just
+# proceeds without facts nobody can tell are missing — so it runs on the
+# strongest model available rather than on whatever the session happened to be
+# using when context ran out.
+# The 7 body sections are Claude Code's own compaction template with two
+# deleted, and one of the deleted ones — "Errors and fixes", which the bundle
+# describes as covering user feedback and what was done differently — is where
+# "a rejected alternative and the reason it lost" belongs. That rule was added
+# later with no section to hold it, and across ten real handoffs the fact class
+# scattered across five different sections while 8 of 10 invented their own
+# structure for it. At 80% context the heading list is the writer's recall
+# scaffold: a fact with no container is not misfiled, it is never remembered.
+test_rotate_skill_has_a_home_for_rejected_alternatives() {
+    local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
+    assert_file_contains "$skill" "Settled and rejected" \
+        "the body needs a section for decisions and dead ends" || return 1
+    assert_file_contains "$skill" "rejected with the reason they lost" \
+        "and it must name rejected alternatives explicitly" || return 1
+    # An empty section must be stated, not skipped: a heading a writer may
+    # silently omit is the same as no heading under context pressure.
+    assert_file_contains "$skill" "none" \
+        "an empty section must say so rather than vanish" || return 1
+}
+
+# The one MEASURED silent failure in the corpus was provenance, not length: a
+# handoff asserted as fact that a tool rewrites a prompt, and its successor
+# recorded "It does not. I built an entire investigation on that unchecked
+# characterisation." The template asks for no epistemic status, so a claim read
+# off a README and a claim measured live look identical to a reader with zero
+# memory of how either was learned.
+test_rotate_skill_requires_provenance_on_claims() {
+    local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
+    assert_file_contains "$skill" "was established" \
+        "behavioural claims must carry their provenance" || return 1
+    assert_file_contains "$skill" "assumed" \
+        "and an honest default when the writer cannot recall it" || return 1
+}
+
+# The successor is told to execute the next-step section, and in-document
+# retrieval degrades with length — so the thing it needs first must not be the
+# thing it finds last. "Write it first" only means anything as tool-call order:
+# a Write lands whole or not at all, so the first pass is committed before the
+# second pass appends to it, or a compaction mid-rotation loses exactly what
+# was meant to survive it.
+test_rotate_skill_puts_the_next_step_first() {
+    local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
+    assert_file_contains "$skill" "1\. Next Step" \
+        "Next Step must open the body, not close it" || return 1
+    assert_file_contains "$skill" "append" \
+        "the second pass must append, since a Write replaces the whole file" || return 1
+    assert_file_contains "$skill" "second commit" \
+        "and land as its own commit, never an amend of the durable one" || return 1
+    if grep -q -- '--amend\|amend the' "$skill"; then
+        echo "  FAIL: amending replaces the only faithful copy of pass one"; return 1
+    fi
+}
+
+# Arming is the last step. An armed marker is disarmed by the launch prompt on
+# Y, n or Enter and nothing re-arms it, while an unarmed committed handoff is
+# still offered by that prompt's scan — so arming before the ritual can finish
+# turns an interruption into a bare /clear. Pinned by ORDER in the file: the arm
+# step must come after both commits and after the retire step.
+test_rotate_skill_arms_last() {
+    local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
+    local arm commit2 retire tell
+    arm=$(grep -n '^[0-9]*\. Arm it' "$skill" | head -1 | cut -d: -f1)
+    commit2=$(grep -n '^[0-9]*\. Second commit' "$skill" | head -1 | cut -d: -f1)
+    retire=$(grep -n '^[0-9]*\. Retire this machine' "$skill" | head -1 | cut -d: -f1)
+    tell=$(grep -n '^[0-9]*\. Tell the user' "$skill" | head -1 | cut -d: -f1)
+    [ -n "$arm" ] && [ -n "$commit2" ] && [ -n "$retire" ] && [ -n "$tell" ] \
+        || { echo "  FAIL: could not locate the arm, second-commit, retire and tell steps"; return 1; }
+    [ "$arm" -gt "$commit2" ] && [ "$arm" -gt "$retire" ] \
+        || { echo "  FAIL: arming must follow the second commit and the retire step (arm at $arm)"; return 1; }
+    [ "$arm" -lt "$tell" ] \
+        || { echo "  FAIL: arming must precede telling the user to /clear"; return 1; }
+}
+
+test_rotate_skill_pins_the_strongest_model() {
+    local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
+    # The family alias, not a point release. `claude-fable-5` would DOWNGRADE a
+    # session already on 5.1 to the older model — the opposite of "strongest
+    # available" — and a prefix regex would match both ids and never notice
+    # the pin aging. The bundle documents `fable` as a valid override.
+    assert_file_contains "$skill" "^model: fable$" \
+        "the rotate skill must pin the fable family, not a point release" || return 1
+    if [ "$(head -1 "$skill")" != "---" ]; then
+        echo "  FAIL: the skill must open with a YAML frontmatter block"
+        return 1
+    fi
+}
+
 test_rotate_skill_ends_on_the_one_manual_step() {
     local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
     # The property is what the skill INSTRUCTS Claude to emit, not where the
@@ -198,7 +291,7 @@ test_rotate_skill_documents_the_clear_route() {
 
 test_rotate_skill_governs_what_goes_into_the_handoff() {
     # The handoff is written by a model summarising a conversation, committed
-    # by step 5 into a store the session .gitignore does not cover, and read
+    # by step 4 into a store the session .gitignore does not cover, and read
     # back as the next conversation's prompt. Published and re-read: both
     # halves are why the body needs rules.
     local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
@@ -235,7 +328,7 @@ test_rotate_skill_reads_parent_from_state_not_the_launch_env() {
     # .cs/local/state is what tracks the current conversation, rebound by the
     # hook on every fresh conversation. The two agree only until the first
     # /clear, so preferring the env var writes the GRANDPARENT as parent: on a
-    # second rotation, and step 4 supersedes by matching parent: against the
+    # second rotation, and step 7 supersedes by matching parent: against the
     # session log.
     local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
     local state_line env_line
@@ -252,6 +345,11 @@ test_rotate_skill_reads_parent_from_state_not_the_launch_env() {
 }
 
 run_test test_rotate_skill_exists_with_frontmatter
+run_test test_rotate_skill_has_a_home_for_rejected_alternatives
+run_test test_rotate_skill_requires_provenance_on_claims
+run_test test_rotate_skill_puts_the_next_step_first
+run_test test_rotate_skill_arms_last
+run_test test_rotate_skill_pins_the_strongest_model
 run_test test_rotate_skill_ends_on_the_one_manual_step
 run_test test_rotate_skill_does_not_promise_the_rotation_waits
 run_test test_rotate_skill_teaches_the_prune_rule
@@ -342,13 +440,14 @@ test_context_row_sits_in_the_card_above_the_prompt() {
 # the card find it. A test that stubbed the count would assert the layout
 # against a number the card never actually computes.
 test_secrets_and_context_share_one_card_row() {
-    command -v cs-secrets >/dev/null 2>&1 \
-        || { echo "    SKIP (cs-secrets not installed)"; return 0; }
     _rot_session "rot-pair"
     printf '64\n' > "$CS_SESSIONS_ROOT/rot-pair/.cs/local/context-pct"
+    # No SKIP branch: test_lib puts bin/ on PATH and scopes HOME, so the seed
+    # runs the tree under review into a throwaway store, on CI as much as
+    # here. A skip would return 0 exactly where the suite is gated.
     printf 'v\n' | CS_SECRETS_BACKEND=encrypted CS_SECRETS_PASSWORD=test-pw \
-        CLAUDE_SESSION_NAME=rot-pair cs-secrets set PAIRKEY >/dev/null 2>&1 \
-        || { echo "    SKIP (could not seed a secret)"; return 0; }
+        CLAUDE_SESSION_NAME=rot-pair "$SCRIPT_DIR/../bin/cs-secrets" set PAIRKEY >/dev/null 2>&1 \
+        || { echo "  FAIL: could not seed a secret into the scoped store"; return 1; }
     local output line
     output=$(CS_SECRETS_BACKEND=encrypted CS_SECRETS_PASSWORD=test-pw \
         "$CS_BIN" rot-pair <<< "n" 2>&1) || true
@@ -357,6 +456,16 @@ test_secrets_and_context_share_one_card_row() {
     case "$line" in
         *secret*) ;;
         *) echo "  FAIL: secrets and context must share one row, got: $line"; return 1 ;;
+    esac
+    # The separator is a literal glyph. An echo -e escape (\u00b7) is printed
+    # as six characters by /bin/bash 3.2, the floor and the macOS CI lane, so
+    # assert the glyph itself rather than just the two facts around it.
+    case "$line" in
+        *'·'*) ;;
+        *) echo "  FAIL: the row must join its two facts with a middle dot, got: $line"; return 1 ;;
+    esac
+    case "$line" in
+        *'\u00b7'*) echo "  FAIL: the separator escape reached the terminal literally"; return 1 ;;
     esac
     # One row, not two.
     local n; n=$(printf '%s\n' "$output" | grep -c 'secret')

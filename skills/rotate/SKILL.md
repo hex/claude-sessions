@@ -1,4 +1,5 @@
 ---
+model: fable
 name: rotate
 description: Rotate the current cs conversation - write a lineage-stamped handoff to .cs/handoffs/, arm it, and tell the user to run /clear so a fresh conversation continues from it. Invoke when the user asks to rotate, or accepts a context-heavy rotation suggestion.
 ---
@@ -28,7 +29,7 @@ should do. If the user did not give one, ask before writing anything.
    this process's predecessor. The hook rebinds `claude_session_id` on every
    fresh conversation, so the two agree only until the first `/clear`. After
    that the env var names an ancestor, and `parent:` must be the conversation
-   that is writing this handoff — step 4 supersedes by matching it against
+   that is writing this handoff — step 7 supersedes by matching it against
    the session log.
 2. Pick a short kebab-case slug from the purpose (e.g. `continue-f5-plan`).
 3. Write `.cs/handoffs/YYYY-MM-DD-<slug>.md` (today's date; create the
@@ -44,12 +45,26 @@ should do. If the user did not give one, ask before writing anything.
    ```
 
    The body is a continuation plan with these sections, distilled from the
-   live conversation: 1. Primary Request and Intent; 2. Key Technical
-   Concepts; 3. Files and Code Sections (with the snippets that matter);
-   4. Problem Solving; 5. Pending Tasks; 6. Current Work; 7. Next Step.
-   Write for a successor with zero conversation memory.
+   live conversation: 1. Next Step; 2. Settled and rejected; 3. Primary
+   Request and Intent; 4. Key Technical Concepts; 5. Files and Code Sections
+   (with the snippets that matter); 6. Problem Solving; 7. Pending Tasks;
+   8. Current Work. Write for a successor with zero conversation memory.
 
-   Two rules govern the body, both following from where it goes — step 5
+   **Next Step opens the body.** The successor is told to execute it, and
+   retrieval degrades over a long document — so the thing it needs first must
+   not be the thing it finds last.
+
+   **Settled and rejected** holds decisions already made, alternatives
+   rejected with the reason they lost, and approaches tried that failed with
+   the symptom they failed on. Write `none` when there is nothing, rather
+   than dropping the heading: an empty section stated is a claim, a missing
+   one is indistinguishable from a section the writer ran out of context to
+   fill. This section exists because these facts have no other home — a
+   commit carries what was done and never what was rejected, so a successor
+   without them re-opens settled questions and retries dead ends with less
+   information than the person who first decided.
+
+   Two rules govern the body, both following from where it goes — step 4
    commits it, and the next conversation reads it as its opening prompt:
 
    - **Redact.** API keys, tokens, passwords and personally identifying
@@ -57,7 +72,7 @@ should do. If the user did not give one, ask before writing anything.
      `.cs/handoffs/` is tracked, so writing one here publishes it, and cs's
      own protocol is that credentials live in `cs -secrets`, never in a
      file. Name the secret's purpose instead: "the deploy token, in
-     `cs -secrets get DEPLOY_TOKEN`". Re-read the finished body before step 5
+     `cs -secrets get DEPLOY_TOKEN`". Re-read the finished body before step 4
      commits it: the rule below asks for exact readings written down as they
      were, and an exact reading is where a secret hides.
    - **Reference committed work; restate what a successor cannot recover.**
@@ -70,14 +85,49 @@ should do. If the user did not give one, ask before writing anything.
      at one moment, the order two events actually happened in. Write those
      down as they were, or they are gone with the conversation. Length spent
      on them is not padding; it is how many of them survive.
+   - **Say how each behavioural claim was established.** A claim read off a
+     README and a claim measured live look identical to a successor with zero
+     memory of how either was learned, and it will build on both equally.
+     Mark each: measured (with the reading), read in source (with the path),
+     inherited from a prior handoff or a reviewer, or assumed. When you cannot
+     recall which, `assumed` is the honest answer and costs nothing. This is
+     not hypothetical — a handoff in this store asserted that a tool rewrote
+     its input, and its successor recorded: "It does not. I built an entire
+     investigation on that unchecked characterisation."
    - **Say what you could not carry.** Rotation runs when context is already
      hot, and a compaction can land before you finish writing — in which case
      you are distilling a summary, not the conversation, and the exact facts
-     above are already lost. Write the next step and the conversation-only
-     facts first, while fidelity is highest. If you end up working from
-     compacted context, or you cut the body short, say so in the handoff:
-     a thin handoff that admits it is thin beats one the successor trusts.
-4. Retire this machine's leftovers: for every OTHER file in `.cs/handoffs/`
+     above are already lost.
+
+     So write the body in TWO passes, and make the first one durable. The
+     first Write carries the frontmatter, Next Step, Settled and rejected,
+     and every conversation-only fact — the material that dies with the
+     conversation. Commit that (step 4) before continuing. The second pass
+     then APPENDS the remaining sections (step 5) — recoverable from the
+     repo if this rotation never finishes — and lands as a second commit.
+
+     Append, never a second Write: a Write replaces the whole file, so it
+     re-emits pass one from whatever context you have by then, and a
+     compaction between the two passes is exactly the case this guards
+     against. And never amend: the first commit is the only faithful copy of
+     pass one, and an amend replaces it.
+
+     Ordering the sections in your head does nothing: a Write lands whole or
+     not at all, so a compaction between distilling and writing takes
+     everything. Only a committed first pass survives it.
+
+     If you end up working from compacted context, or you cut the body short,
+     say so in the handoff: a thin handoff that admits it is thin beats one
+     the successor trusts.
+4. Commit the first pass. Stage the handoff by name. Re-read the body for
+   secrets first (the Redact rule above) — the same re-read runs again before
+   step 6, because pass two is where exact readings live.
+5. Append the second pass with Edit or `cat >>`, never Write.
+6. Second commit for the appended body. Re-read it for secrets first.
+
+   The handoff's CONTENT is now safe: two commits, nothing left to lose. It
+   is not yet armed — that is deliberate, see step 9.
+7. Retire this machine's leftovers: for every OTHER file in `.cs/handoffs/`
    whose frontmatter still says `status: unconsumed`, flip that one
    frontmatter line to `status: superseded` — but only when its `parent:`
    UUID appears in `.cs/local/session.log`, which records every conversation
@@ -93,7 +143,7 @@ should do. If the user did not give one, ask before writing anything.
    Do not assume a newer handoff simply outranks it: among files the launcher
    has to choose between, it picks the lexicographically last basename, so
    among same-day files the slug decides and a stale one can win. The marker
-   step 6 arms is the exception — it names one handoff explicitly and the
+   step 9 arms is the exception — it names one handoff explicitly and the
    launcher honors it over that scan — but it covers only the file this
    rotation is arming, not the leftovers this step retires.
 
@@ -112,13 +162,23 @@ should do. If the user did not give one, ask before writing anything.
    `.cs/handoffs/` is shared, and a clone stamps every file with its checkout
    time: mtime would read as "all new" on a fresh machine and prune nothing,
    while saying nothing about when the handoff was written. Stage the
-   deletions with step 5's commit.
-5. Commit the handoff and any supersedings (tracked session state, like
-   narratives). Stage those paths by name.
-6. Arm the handoff: write its basename (no path) to
-   `.cs/local/pending-handoff`. This is machine-local state — do not commit
-   it, and do not stage it in step 5.
-7. Tell the user what the rotation now does on its own: the fresh
+   deletions with step 8's commit.
+8. Commit the supersedings and any tracked session state, like narratives.
+   Stage those paths by name.
+9. Arm it, LAST: write its basename (no path) to `.cs/local/pending-handoff`.
+   Machine-local state — never commit it.
+
+   Arming is the final step because an armed marker is fragile in a way a
+   committed file is not. If Claude Code exits before the ritual finishes and
+   the user relaunches, `cs <name>`'s prompt disarms the marker on `Y`, `n`
+   or Enter (lib/75-launch.sh), and nothing re-arms it; a later `/clear`
+   then opens a bare conversation with this handoff left `unconsumed`. The
+   launch prompt recovers either state — it scans the store and offers an
+   unconsumed handoff with `r` whether or not it was armed — but only the
+   marker makes `/clear` continue, and only an interrupted ritual leaves a
+   disarmed one behind. So arm once nothing remains that could be
+   interrupted.
+10. Tell the user what the rotation now does on its own: the fresh
    conversation picks up this handoff and begins its next step by itself, a
    couple of seconds after the `/clear` — they do not need to type anything
    to start it, and a message they do send takes precedence over the handoff.
@@ -128,7 +188,7 @@ should do. If the user did not give one, ask before writing anything.
    there disarms the marker (the handoff itself stays pending, so a later
    rotate can re-arm it), and `d` discards the handoff outright.
 
-8. End your response with the instruction and nothing after it, on its own
+11. End your response with the instruction and nothing after it, on its own
    final line, exactly:
 
    **Run `/clear` now** — this conversation is ready to rotate.
