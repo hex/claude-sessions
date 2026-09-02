@@ -30,6 +30,7 @@ EOF
 if [ "$HOOK_EVENT" = "FileChanged" ]; then
     case "$FC_PATH" in
         */.cs/local/mail/new/*.json) [ "$FC_EVENT" != "unlink" ] || exit 0 ;;
+        */.cs/local/rotation-kick/*.kick) [ "$FC_EVENT" != "unlink" ] || exit 0 ;;
         *) exit 0 ;;
     esac
 fi
@@ -291,6 +292,74 @@ fi
 # exiting 2 — grep and jq both use 2 for errors — would deliver a phantom wake
 # carrying whatever noise reached stderr. Exit 2 must be reachable only on
 # purpose.
+# --- FileChanged: the rotation kick -------------------------------------------
+# A /clear on an armed handoff consumes it and injects the preamble, but a hook
+# cannot start a turn — so session-start.sh arms a watch on the kick directory
+# and a detached child drops a file into it a second later. That event lands
+# here, and exiting 2 wakes the model with nobody at the keyboard. Measured on
+# 2.1.252 against a real /clear in a zero-turn conversation.
+#
+# Deliberately NOT on the mail budget. CS_MAIL_WAKE_MAX bounds a volley of
+# arrivals nobody asked for; a rotation kick is one file this session wrote for
+# itself, exactly once per /clear, and spending mail's allowance on it would let
+# a rotation silence the next five real messages.
+#
+# Sits above the mail branch: the two shapes are disjoint, but the mail branch's
+# path check would reject a kick and exit 0, swallowing it.
+#
+# Every command is guarded, for the reason the mail branch documents: under
+# errexit an incidental failure exiting 2 delivers a phantom wake carrying
+# whatever noise reached stderr. Exit 2 must be reachable only on purpose.
+if [ "$HOOK_EVENT" = "FileChanged" ] && [ "${FC_PATH%/*.kick}" != "$FC_PATH" ]; then
+    _kick_dir="$META_DIR/local/rotation-kick"
+    _kick_name="${FC_PATH##*/}"
+    # The path shape is not proof the document exists, and the watcher reports
+    # the platform's own spelling — ask whether the file is in THIS session's
+    # kick directory rather than whether the two strings agree.
+    [ -f "$_kick_dir/$_kick_name" ] || exit 0
+    _mail_is_lead || exit 0
+    # One kick, one wake. Claude Code fires FileChanged on unlink as well as
+    # add, so clearing the kick would re-enter this branch; the marker makes the
+    # second event a no-op even before the unlink triage above catches it, and
+    # covers a re-add of the same name too.
+    [ ! -f "$_kick_dir/delivered" ] || exit 0
+    # No queue gate here, deliberately — the opposite of the mail wake.
+    #
+    # Nothing resets queue.state on a /clear: only bin/cs writes it, so a drain
+    # that was armed or interrupted beforehand leaves a STALE armed/draining
+    # state that survives into the fresh conversation. And two seconds after a
+    # /clear no drain turn can be in flight, so the reason the mail wake
+    # yields — a rewake between drain turns shifts the pop one turn late — does
+    # not apply.
+    #
+    # Yielding cost more than it saved. This add event is the only one this kick
+    # will ever produce and there is no Stop-path retry to recover it (the mail
+    # wake rescans at every turn end; the kick has no such counterpart), so the
+    # rotation was stranded under a notice promising it would continue on its
+    # own. The queue was stranded with it: the drain is Stop-driven, so no wake
+    # means no turn, and no turn means no Stop. Waking runs the rotation turn,
+    # whose Stop then resumes the drain normally.
+    # Compose before recording, as the mail path does: a kill between the two
+    # costs a duplicate wake, while recording first costs a silent strand — and
+    # a strand is unrecoverable for an idle session, which submits no prompt and
+    # ends no turn.
+    #
+    # The wake arrives as a system-reminder, not a user message, so the reason
+    # has to carry the instruction the user's "go" would otherwise have carried.
+    # It restates rather than referring back: the preamble is in context, but a
+    # reason that says only "the rotation is loaded" leaves the model to guess
+    # whether a wake is permission to act.
+    # The yield clause is not decoration. The notice invites the user to type
+    # instead, and the kick is written either way, so a wake can arrive ENQUEUED
+    # behind a message they already sent — and the preamble's
+    # content-takes-precedence rule covers only a FIRST message, not a
+    # system-reminder landing after one. Unconditional wording here would let
+    # the auto-start override the person it just told to take over.
+    printf '%s\n' "The rotation is loaded and nothing has run yet. Execute the handoff's next-step section now and report what you did, without re-summarising it or asking which part to start with. If the user has already sent a message of their own, theirs wins — do what they asked and treat this wake as spent. Ask first only where you normally would: the handoff is missing, unreadable, or genuinely ambiguous, or its next step is destructive or irreversible." >&2
+    : > "$_kick_dir/delivered" 2>/dev/null || true
+    exit 2
+fi
+
 if [ "$HOOK_EVENT" = "FileChanged" ]; then
     # Shape and unlink were triaged above, before the library source; this is
     # the precise check that the file belongs to THIS session's mailbox rather
@@ -631,7 +700,7 @@ NARRATIVE_FILE=""
 NARRATIVE_MTIME=0
 # KEEP IN SYNC with CS_NARRATIVE_MAX_DEFAULT in lib/51-narrative.sh — hooks
 # cannot source lib/, so the default is duplicated here.
-NARRATIVE_MAX=$(_num_or "${CS_NARRATIVE_MAX_BYTES:-}" 131072)
+NARRATIVE_MAX=$(_num_or "${CS_NARRATIVE_MAX_BYTES:-}" 524288)
 NARRATIVE_OVER=""
 for _nf in "$META_DIR"/memory/narrative*.md; do
     [ -f "$_nf" ] || continue

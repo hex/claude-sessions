@@ -154,8 +154,8 @@ export CS_CTX_WARN_CTX="60"
 export CS_ROTATE_NUDGE_CTX="80"
 
 # Narrative rotation: rotate when the live file passes MAX, keep about KEEP bytes
-export CS_NARRATIVE_MAX_BYTES="131072"
-export CS_NARRATIVE_KEEP_BYTES="65536"
+export CS_NARRATIVE_MAX_BYTES="524288"
+export CS_NARRATIVE_KEEP_BYTES="262144"
 
 # Queue circuit breakers: per-task tool failures, context %, 5h rate-limit %
 export CS_QUEUE_MAX_FAILURES="5"
@@ -166,6 +166,14 @@ export CS_QUEUE_MAX_5H="85"
 # and the switch that silences them entirely (see hooks.md)
 export CS_MAIL_WAKE_MAX="5"   # this is the default
 export CS_NO_MAIL_WAKE="1"
+
+# Rotation auto-start: after /clear on an armed handoff the session wakes
+# itself and begins the handoff's next step with no typing. The delay is how
+# long the kick waits for Claude Code's file watch to arm (measured at about a
+# second); a non-numeric value falls back to the default. The opt-out restores
+# the previous behaviour, where the rotation waits for a word from you.
+export CS_ROTATION_KICK_DELAY="2"   # this is the default
+export CS_NO_ROTATION_WAKE="1"
 
 # Disable the iTerm2 attention bounce (the dock bounce a finished turn starts,
 # and the attention marker the status line reads). The tab tint is NOT gated by

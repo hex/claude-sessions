@@ -595,6 +595,13 @@ else
         # implies async, so it does not also need the async flag. Without it the
         # hook still runs and its output is discarded — the wake becomes a
         # five-second toast nobody reads.
+        #
+        # The labels are static in settings.json while the one FileChanged entry
+        # now carries two wake kinds — cross-session mail and the /clear
+        # rotation kick — so they name neither. The stderr reason says which it
+        # is; a label claiming "mail" would tell the user the wrong story about
+        # what started the turn, and was doing exactly that until it was caught
+        # in a live rotation.
         append=$(jq -n --arg cmd "$tilde" --argjson timeout "$timeout" \
             --arg matcher "$matcher" --arg async "$async" --arg rewake "$rewake" '
             (if $matcher != "" then {matcher: $matcher} else {} end)
@@ -603,8 +610,8 @@ else
                 + (if $async == "true" then {async: true} else {} end)
                 + (if $rewake == "true" then {
                        asyncRewake: true,
-                       rewakeMessage: "Cross-session mail arrived:",
-                       rewakeSummary: "New cs mail"
+                       rewakeMessage: "cs woke this session:",
+                       rewakeSummary: "cs"
                    } else {} end)
               ]}
         ')

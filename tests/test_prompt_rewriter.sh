@@ -297,18 +297,27 @@ test_cancel_keeps_the_original_and_exits_clean() {
     printf '#!/bin/bash\nsleep 120\nprintf "PRECISE: rewritten"\n' > "$slow"
     chmod +x "$slow"
     local f; f=$(composer_file "make the login thing better")
-    CS_REWRITE_CMD="$slow" "$SHIM" "$f" >/dev/null 2>&1 &
+    # Wait on the shim's own readiness signal, not on a child being visible.
+    # `pgrep -P` was the previous gate and it is not a proof: the shim forks a
+    # command substitution to build its progress label BEFORE arming the trap,
+    # so a poll could see that transient child, return early, and deliver TERM
+    # into the unprotected window — a raw 143 instead of the trap's clean 0.
+    # `rewriter-forked` is traced only after both the trap and the real fork, so
+    # its presence is exactly the precondition this test needs. Under gate load
+    # that window is wide enough to hit: this failed once in a full parallel run
+    # and passes 38/38 alone, which is the signature of a readiness race rather
+    # than a broken trap.
+    local trace_dir="$TEST_TMPDIR/rewrite-trace"
+    mkdir -p "$trace_dir/local"
+    CLAUDE_SESSION_META_DIR="$trace_dir" CS_REWRITE_CMD="$slow" "$SHIM" "$f" >/dev/null 2>&1 &
     local shim=$!
-    # Wait for the shim to fork the rewriter rather than guessing at a delay.
-    # The trap is armed before that fork, so a visible child proves the handler
-    # is installed. A fixed sleep raced it whenever the gate's other lanes made
-    # forking slow, and the lost signal let the rewrite land.
+    local trace="$trace_dir/local/rewrite.trace"
     local waited=0
-    while [ "$waited" -lt 50 ] && ! pgrep -P "$shim" >/dev/null 2>&1; do
+    while [ "$waited" -lt 100 ] && ! grep -q 'rewriter-forked' "$trace" 2>/dev/null; do
         sleep 0.1
         waited=$((waited + 1))
     done
-    [ "$waited" -lt 50 ] || { echo "shim never forked a rewriter"; kill "$shim" 2>/dev/null; return 1; }
+    [ "$waited" -lt 100 ] || { echo "shim never signalled rewriter-forked"; kill "$shim" 2>/dev/null; return 1; }
     kill -TERM "$shim" 2>/dev/null
     local st=0; wait "$shim" || st=$?
     assert_eq "0" "$st" "exits 0, so Claude Code reports no editor error" || return 1

@@ -81,7 +81,16 @@ test_doctor_reports_ok_when_narratives_fit() {
     echo "# Session narrative (alice)" > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
     local output
     output=$("$CS_BIN" -doctor 2>&1) || true
-    assert_output_contains "$output" "Narrative: all within the 128 KB budget" "ok line names the budget" || return 1
+    # Derive the budget rather than pinning a literal: the number is a tuning
+    # decision that has already moved once (128 KiB held about a day of
+    # sections), and a hardcoded KB figure here fails the gate on the change
+    # itself while catching no defect. What must stay true is that the line
+    # names the SAME budget the tool would rotate at.
+    local budget_kb
+    budget_kb=$(( $(grep -o 'CS_NARRATIVE_MAX_DEFAULT=[0-9]*' "$SCRIPT_DIR/../lib/51-narrative.sh" \
+        | head -1 | cut -d= -f2) / 1024 ))
+    assert_output_contains "$output" "Narrative: all within the $budget_kb KB budget" \
+        "ok line names the budget cs -narrative rotate would use" || return 1
     assert_output_not_contains "$output" "run cs -narrative rotate" "no warning" || return 1
 }
 
