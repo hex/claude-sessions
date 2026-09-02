@@ -661,10 +661,11 @@ NUDGE_UUID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)
 NUDGE_PCT=$(cat "$QDIR/context-pct" 2>/dev/null | tr -d '[:space:]' || true)
 case "$NUDGE_PCT" in ''|*[!0-9]*) NUDGE_PCT="";; esac
 if [ -n "$NUDGE_PCT" ] && [ -n "$NUDGE_UUID" ] && [ "$NUDGE_PCT" -ge "$NUDGE_CTX" ]; then
-    NUDGED=$(cat "$QDIR/rotate-nudged" 2>/dev/null | tr -d '[:space:]' || true)
-    if [ "$NUDGED" != "$NUDGE_UUID" ]; then
-        printf '%s\n' "$NUDGE_UUID" > "$QDIR/rotate-nudged.tmp" \
-            && mv "$QDIR/rotate-nudged.tmp" "$QDIR/rotate-nudged"
+    # Append-only list of nudged conversations: a tmux teammate shares this
+    # directory and runs the same Stop, so a single-slot cursor let each
+    # teammate's stop cancel the lead's notice and re-arm it every turn.
+    if ! grep -qx "$NUDGE_UUID" "$QDIR/rotate-nudged" 2>/dev/null; then
+        printf '%s\n' "$NUDGE_UUID" >> "$QDIR/rotate-nudged"
         REASON="Context is at ${NUDGE_PCT}% — consider rotating this conversation. Invoke the rotate skill to distill a handoff into .cs/handoffs/ and arm it; the user then runs /clear to continue in a fresh conversation, without leaving Claude Code. One-time notice for this conversation; if now is a bad time, simply continue."
         jq -nc --arg r "$REASON" '{decision: "block", reason: $r}'
         exit 0
@@ -674,14 +675,12 @@ fi
 # --- Context warning ----------------------------------------------------------
 # One-time heads-up when context crosses the wind-down band [warn, nudge).
 # At or above the nudge threshold the rotation nudge above owns the turn;
-# this tier never fires there. Cursor: conversation UUID last warned.
+# this tier never fires there. Cursor: append-only list of warned UUIDs.
 WARN_CTX=$(_num_or "${CS_CTX_WARN_CTX:-}" 60)
 if [ -n "$NUDGE_PCT" ] && [ -n "$NUDGE_UUID" ] \
     && [ "$NUDGE_PCT" -ge "$WARN_CTX" ] && [ "$NUDGE_PCT" -lt "$NUDGE_CTX" ]; then
-    WARNED=$(cat "$QDIR/ctx-warned" 2>/dev/null | tr -d '[:space:]' || true)
-    if [ "$WARNED" != "$NUDGE_UUID" ]; then
-        printf '%s\n' "$NUDGE_UUID" > "$QDIR/ctx-warned.tmp" \
-            && mv "$QDIR/ctx-warned.tmp" "$QDIR/ctx-warned"
+    if ! grep -qx "$NUDGE_UUID" "$QDIR/ctx-warned" 2>/dev/null; then
+        printf '%s\n' "$NUDGE_UUID" >> "$QDIR/ctx-warned"
         REASON="Context is at ${NUDGE_PCT}% — past the comfortable-headroom mark. Briefly let the user know so they can steer toward a natural stopping point or plan a rotation; the rotate nudge follows at 80%. One-time notice for this conversation; no action needed now."
         jq -nc --arg r "$REASON" '{decision: "block", reason: $r}'
         exit 0

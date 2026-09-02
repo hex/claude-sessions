@@ -1952,7 +1952,34 @@ test_ctx_warning_band_edges() {
     fi
 }
 
+# A tmux-backed teammate is a full claude sharing this session directory: its
+# Stop passes the agent_id guard, reads the same stamped context-pct, and wrote
+# its own UUID into the single-slot cursor, so the lead's next stop saw a
+# mismatch and warned again. Measured live: five "one-time" notices in a row
+# while ten teammates ran. Every conversation still gets its one notice; none
+# may cancel another's.
+test_ctx_warning_survives_an_interleaved_teammate() {
+    _rot_hook_session "rot-warn-teammate"
+    _stop_with_ctx 60 "$UUID_A" >/dev/null || return 1
+    _stop_with_ctx 60 "$UUID_B" >/dev/null || return 1
+    local out
+    out=$(_stop_with_ctx 60 "$UUID_A") || return 1
+    if printf '%s' "$out" | grep -q "stopping point"; then
+        echo "  FAIL: a teammate's warning must not re-arm the lead's"
+        return 1
+    fi
+    out=$(_stop_with_ctx 85 "$UUID_A") || return 1
+    assert_output_contains "$out" "consider rotating" "the nudge still fires once for A" || return 1
+    _stop_with_ctx 85 "$UUID_B" >/dev/null || return 1
+    out=$(_stop_with_ctx 85 "$UUID_A") || return 1
+    if printf '%s' "$out" | grep -q "consider rotating"; then
+        echo "  FAIL: a teammate's nudge must not re-arm the lead's"
+        return 1
+    fi
+}
+
 run_test test_ctx_warning_fires_once_in_band
+run_test test_ctx_warning_survives_an_interleaved_teammate
 run_test test_ctx_warning_rearms_for_new_conversation
 run_test test_ctx_warning_silent_below_band
 run_test test_ctx_warning_yields_to_nudge_at_high_ctx
