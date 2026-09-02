@@ -2,7 +2,8 @@
 parent: bd55ba81-293a-49f2-a154-e0666426e611
 created: 2026-09-02T10:55:07Z
 purpose: Apply the three Fable 5.1 prompting-page changes: two-voices and asymmetric-length rules in the rotate skill, scope block in the queue drain prompt
-status: unconsumed
+status: consumed
+consumed_by: 1e2d2b00-99bd-407d-a484-1613dc9525f4
 ---
 
 ## 1. Next Step
