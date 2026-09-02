@@ -41,3 +41,38 @@ Three small changes, each TDD (failing test first), then the full gate, then com
 - The page's six-item preservation list maps onto the rotate skill's sections almost one to one: (1) problems and resolutions = Problem Solving, (2) options tried/set aside = Settled and rejected, (3) decisions "stated exactly" and (6) exact details = the restate-what-cannot-be-recovered rule, (4) where things stand = Current Work, (5) open items = Pending Tasks. The two-voices rule and the asymmetric-length sentence are the only two items with no counterpart. Inherited from my own read of both texts, not measured.
 - Fable 5.1 page also says compacting early "may no longer be the right cost-intelligence tradeoff" because cache reads are cheaper. Not actionable for cs (the 80% nudge threshold is about Claude Code's context, not API cost), noted so nobody proposes raising `CS_ROTATE_NUDGE_CTX` on that basis without measuring.
 - Context at handoff time: 81%. Written from live context, not compacted; nothing cut short.
+
+## 3. Primary Request and Intent
+
+Alex asked, verbatim: "anything valubale for our project here: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-1 ?" I answered three things apply (the two skill rules and the queue scope block) and asked whether to apply them; the 81% context nudge fired and Alex chose "Rotate, purpose: apply the three changes". So the intent is: make those three edits, nothing wider. The page is mostly API-caller guidance; do not go looking for more to apply.
+
+## 4. Key Technical Concepts
+
+- **`assert_file_contains` is a BRE matcher** (memory `project_assert_file_contains_regex.md`): pin literal phrases on one line; escape `*`, `[`, `.` or they silently never match.
+- **bin/cs is assembled from lib/*.sh by `./build.sh`**; the hook files under `hooks/` are standalone (not assembled). `narrative-reminder.sh` is a hook, so edit it directly; the skill is a plain markdown file. Only `lib/` edits need a rebuild — none planned here, but run build.sh anyway before staging (memory `project_lib_bin_build_drift.md`).
+- **Test isolation lives at `tests/test_lib.sh` source time** (memory `project_test_lib_source_time_isolation.md`): HOME, PATH to bin/, git identity. Bare-runner check: `env -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL HOME=$(mktemp -d)/home /bin/bash tests/run_all.sh` — measured 63/63 yesterday.
+- **Floor is /bin/bash 3.2 + BSD userland**; run suites with `/bin/bash tests/<suite>.sh`, not bare `bash` (5.x here). `echo -e '\uXXXX'` prints literally under 3.2; use literal glyphs.
+- **The queue drain** is the Stop path in `hooks/narrative-reminder.sh`: `_qlen`, `queue.state` armed|draining, and the `block` reason carrying `Task: $NEXT`. Its tests are `tests/test_queue.sh` and `tests/test_queue_supervision.sh`.
+- **Skill frontmatter `model:`** accepts family aliases (`fable`, `opus`, `sonnet`, `haiku`); measured in bundle 2.1.258 yesterday.
+
+## 5. Files and Code Sections
+
+- `skills/rotate/SKILL.md` — body rules block, lines ~67-111 (bullets: Redact; Reference committed work; Say how each behavioural claim was established; Say what you could not carry). Add the two new bullets there. Cross-references use step numbers 1-11; do not renumber steps.
+- `tests/test_rotation.sh` — skill pins live near line ~140-200 (`test_rotate_skill_has_a_home_for_rejected_alternatives`, `..._requires_provenance_on_claims`, `..._puts_the_next_step_first`, `..._arms_last`, `..._pins_the_strongest_model`); register new tests in the `run_test` list right after `run_test test_rotate_skill_pins_the_strongest_model`. Suite was 98/98.
+- `hooks/narrative-reminder.sh` — the drain block reason, `grep -n 'Task: \$NEXT'` (~line 578). Every command in FileChanged/Stop branches is guarded for errexit; keep the edit inside the existing jq string.
+- `tests/test_queue.sh` — find the test asserting the reason contains `Task:`; add the scope assertion beside it.
+- `.cs/memory/narrative.hex-users-noreply-github-com.md` — lab notebook, ~110 KB, machine-local (gitignored). Yesterday's entries cover every decision above in more depth.
+
+## 6. Problem Solving
+
+Nothing debugged for this task yet. Context inherited from the last two days that will bite if forgotten: a test written to reproduce a defect must be seen RED before its pass means anything (two green-on-first-run tests yesterday were vacuous); and a review claim about "every suite" is a population claim — count the consumers (`grep -l '^setup()' tests/*.sh` → 22 override setup()).
+
+## 7. Pending Tasks
+
+1. The three changes in Next Step (A1, A2, B), then C.
+2. Not this task, noted: decide whether `commands/{wrap,sweep,summary}.md` should pin `opus` (alias) instead of `claude-opus-5`, by the same argument as the rotate pin.
+3. Not this task, noted: the test gate's job cap (`tests/run_all.sh` `detect_jobs`, cap 10 on a 14-core box) was never measured on an idle machine; the serial timing table showed no long pole (top suite 218 s of 2711 s).
+
+## 8. Current Work
+
+`main` == `origin/main` at `e3dd2de` (Release v2026.9.4) plus this handoff's commits on top. v2026.9.4 is released with all 12 signed assets (the release workflow needed one rerun after a runner DNS failure on the arm64 leg). PR #11 merged. Working tree clean apart from this handoff. Local install is on 2026.9.4. Session model was switched to Fable 5.1 so `/code-review` runs on it; that command inherits the session model and has no model parameter.
