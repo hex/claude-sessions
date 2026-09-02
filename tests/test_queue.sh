@@ -508,7 +508,29 @@ test_statusline_stamps_context_pct() {
     assert_file_contains "$(QDIR)/context-pct" "73" "stamps truncated integer" || return 1
 }
 
+# The file is two things: a heartbeat (mtime, read by the lock code and the
+# TUI) and the lead's context reading (value, read by the nudge tiers and the
+# queue gates). A tmux teammate runs the same statusline in the same session
+# directory with no CS_LEAD_PID to tell it apart, so it must keep the heartbeat
+# alive but leave the value to the conversation .cs/local/state names.
+test_statusline_teammate_touches_but_does_not_overwrite_context_pct() {
+    local sl="$SCRIPT_DIR/../bin/cs-statusline"
+    local lead="aaaaaaaa-0000-4000-8000-000000000001" mate="bbbbbbbb-0000-4000-8000-000000000002"
+    printf 'claude_session_id: %s\n' "$lead" > "$(QDIR)/state"
+    echo "{\"session_id\":\"$lead\",\"context_window\":{\"used_percentage\":73.4}}" | bash "$sl" >/dev/null 2>&1 || true
+    assert_file_contains "$(QDIR)/context-pct" "73" "lead stamps its reading" || return 1
+    touch -t 200001010000 "$(QDIR)/context-pct"
+    echo "{\"session_id\":\"$mate\",\"context_window\":{\"used_percentage\":12.0}}" | bash "$sl" >/dev/null 2>&1 || true
+    assert_file_contains "$(QDIR)/context-pct" "73" "a teammate leaves the lead's reading" || return 1
+    if grep -q "12" "$(QDIR)/context-pct"; then
+        echo "  FAIL: the teammate's reading overwrote the lead's"; return 1
+    fi
+    local y; y=$(date -r "$(QDIR)/context-pct" +%Y 2>/dev/null || stat -c %y "$(QDIR)/context-pct" | cut -c1-4)
+    [ "$y" != "2000" ] || { echo "  FAIL: the teammate must still touch the heartbeat"; return 1; }
+}
+
 run_test test_statusline_stamps_context_pct
+run_test test_statusline_teammate_touches_but_does_not_overwrite_context_pct
 
 # --- Queued text crosses a session boundary and is not trusted ---
 # `cs -msg <target> -k task "<body>"` writes a task file straight into ANOTHER

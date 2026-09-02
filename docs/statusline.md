@@ -36,7 +36,7 @@ The render path is deliberately thin: one `jq` pass over stdin, at most one git 
 
 A Fable session is the one exception, and pays for the [fable segment](#fable-usage) exactly: a second `jq` that reads the usage cache and Claude Code's `.claude.json` together. Every other model returns at the model gate without touching either file.
 
-The writes in the render path are machine-local and best-effort: each render stamps the current context-window usage, truncated to an integer, to `.cs/local/context-pct`. The task-queue gate (the `narrative-reminder.sh` Stop hook, see [hooks.md](hooks.md)) reads this file to decide whether to suggest compacting before a walk-away drain. Skipped outside a cs session or when the stdin JSON carries no context percentage.
+The writes in the render path are machine-local and best-effort: each render stamps the current context-window usage, truncated to an integer, to `.cs/local/context-pct`; the value is written only by the conversation whose id `.cs/local/state` records as launched, and any other conversation in the directory (a tmux teammate) touches the file instead, keeping the liveness heartbeat alive without replacing the lead's reading. The task-queue gate (the `narrative-reminder.sh` Stop hook, see [hooks.md](hooks.md)) reads this file to decide whether to suggest compacting before a walk-away drain. Skipped outside a cs session or when the stdin JSON carries no context percentage.
 
 The same render also stamps `.cs/local/limits` (5-hour and weekly used percentages and reset epochs) so `cs -usage` can anchor its windows at the true reset boundaries; both files are machine-local and best-effort.
 

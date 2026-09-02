@@ -319,7 +319,8 @@ _parse_stdin() {
     command -v jq >/dev/null 2>&1 || return 1
     [ -n "$input" ] || return 1
     fields=$(printf '%s' "$input" | jq -r '
-        [ (.session_name // ""),
+        [ (.session_id // ""),
+          (.session_name // ""),
           (.context_window.used_percentage // "" | tostring),
           (.model.display_name // ""),
           (.model.id // ""),
@@ -332,15 +333,27 @@ _parse_stdin() {
           (.workspace.current_dir // .cwd // "")
         ] | .[]' 2>/dev/null) || return 1
     {
+        IFS= read -r SL_SESSION_ID
         IFS= read -r SL_SESSION
         IFS= read -r SL_CTX
         # Stamp context % for the task-queue gate (the Stop hook reads this file).
         # Machine-local, per the .cs/local partition; truncated to an integer.
+        # The file is also the liveness heartbeat (its mtime), so every
+        # conversation touches it, but only the launched conversation named in
+        # .cs/local/state writes the value: a tmux teammate shares this
+        # directory and runs this same statusline with nothing in its
+        # environment to tell it apart, and its reading would replace the
+        # lead's for every gate that reads the file.
         if [ -n "${CLAUDE_SESSION_NAME:-}" ] && [ -n "${SL_CTX:-}" ]; then
             _pctdir="$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/local"
             if mkdir -p "$_pctdir" 2>/dev/null; then
-                printf '%s\n' "${SL_CTX%%.*}" > "$_pctdir/context-pct.tmp" 2>/dev/null \
-                    && mv "$_pctdir/context-pct.tmp" "$_pctdir/context-pct" 2>/dev/null || true
+                _lead=$(awk '/^claude_session_id:/ { print $2; exit }' "$_pctdir/state" 2>/dev/null || true)
+                if [ -z "$_lead" ] || [ "$_lead" = "${SL_SESSION_ID:-}" ]; then
+                    printf '%s\n' "${SL_CTX%%.*}" > "$_pctdir/context-pct.tmp" 2>/dev/null \
+                        && mv "$_pctdir/context-pct.tmp" "$_pctdir/context-pct" 2>/dev/null || true
+                else
+                    touch "$_pctdir/context-pct" 2>/dev/null || true
+                fi
             fi
         fi
         IFS= read -r SL_MODEL
