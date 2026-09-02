@@ -355,7 +355,7 @@ if [ "$HOOK_EVENT" = "FileChanged" ] && [ "${FC_PATH%/*.kick}" != "$FC_PATH" ]; 
     # content-takes-precedence rule covers only a FIRST message, not a
     # system-reminder landing after one. Unconditional wording here would let
     # the auto-start override the person it just told to take over.
-    printf '%s\n' "The rotation is loaded and nothing has run yet. Execute the handoff's next-step section now and report what you did, without re-summarising it or asking which part to start with. If the user has already sent a message of their own, theirs wins — do what they asked and treat this wake as spent. Ask first only where you normally would: the handoff is missing, unreadable, or genuinely ambiguous, or its next step is destructive or irreversible." >&2
+    printf '%s\n' "The rotation is loaded and nothing has run yet. First reconcile your native task list, which carried over from the previous conversation, with the handoff, then execute the handoff's next-step section now and report what you did, without re-summarising it or asking which part to start with. If the user has already sent a message of their own, theirs wins — do what they asked and treat this wake as spent. Ask first only where you normally would: the handoff is missing, unreadable, or genuinely ambiguous, or its next step is destructive or irreversible." >&2
     : > "$_kick_dir/delivered" 2>/dev/null || true
     exit 2
 fi
@@ -516,7 +516,7 @@ if [ "$QLEN" -gt 0 ]; then
     # A walk-away run has nobody watching, so the handed task is the only
     # scope guidance the agent gets: it says what the task asks for and
     # nothing about what it does not.
-    SCOPE="Scope: implement every behavior the task asks for, completely, and nothing beyond it. A pre-existing bug, a performance concern or behavior the task does not mention stays untouched unless the task cannot work without it; report it as a follow-up in your summary. Where the task is ambiguous, implement the reading its wording and the surrounding code most directly support, state that assumption in your summary, and do not build for the other readings as well."
+    SCOPE="Scope: implement every behavior the task asks for, completely, and nothing beyond it. A pre-existing bug, a performance concern or behavior the task does not mention stays untouched unless the task cannot work without it; report it as a follow-up in your narrative, which outlives this run's compactions. Where the task is ambiguous, implement the reading its wording and the surrounding code most directly support, state that assumption in the narrative as well, and do not build for the other readings."
 
     if [ "$QSTATE" = "armed" ]; then
         TASK=""

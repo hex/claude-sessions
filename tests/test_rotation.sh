@@ -233,18 +233,17 @@ test_rotate_skill_pins_the_strongest_model() {
 # user said, asked for or corrected is the part a successor cannot re-derive
 # and the part most likely to drift when paraphrased; the writer's own
 # reasoning compresses to what it concluded. The best handoffs in this store
-# already quote the user's corrections verbatim in the request section; the
-# skill had no rule asking for it.
+# quote the user's corrections verbatim in the request section; this pin makes
+# that an instruction rather than a habit.
 test_rotate_skill_keeps_the_users_words_close() {
     local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
     assert_file_contains "$skill" "close to their own words" \
         "what the user said must stay close to their own words" || return 1
 }
 
-# The only length instruction in the skill pointed one way: spend it on the
-# facts that exist nowhere else. Without a counterweight that reads as licence
-# for length everywhere, and a long handoff degrades retrieval of exactly the
-# facts it was meant to carry. There is no byte cap (a cap drops facts the
+# The skill asks for length on the facts that exist nowhere else. Without a
+# counterweight that reads as licence for length everywhere, and a long handoff
+# degrades retrieval of exactly the facts it was meant to carry. There is no byte cap (a cap drops facts the
 # skill cannot rank), so the shape is asymmetric: complete on the
 # unrecoverable, concise on the rest.
 test_rotate_skill_spends_length_asymmetrically() {
@@ -253,14 +252,19 @@ test_rotate_skill_spends_length_asymmetrically() {
         "length is for the unrecoverable facts only; the rest stays concise" || return 1
 }
 
-# Claude Code keys the native task list to the conversation
-# (~/.claude/tasks/session-<uuid>/), so /clear drops it. Open items that live
-# only there have to be folded into Pending Tasks or they go with the
-# conversation, like every other conversation-only fact.
-test_rotate_skill_folds_native_tasks_into_pending_tasks() {
+# cs launches claude with CLAUDE_CODE_TASK_LIST_ID set to the session name
+# (lib/75-launch.sh), and Claude Code resolves ~/.claude/tasks/<id>/ from it,
+# so under cs the native task list is keyed to the SESSION and survives the
+# /clear: the successor inherits it. The skill has to say so, or a writer
+# assumes the default per-conversation keying and a successor mirrors a list
+# it already holds, splitting progress across duplicates. Measured 2026-09-02
+# against the 2.1.258 bundle and the live processes.
+test_rotate_skill_says_native_tasks_survive_the_clear() {
     local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
-    assert_file_contains "$skill" "native task list" \
-        "open native tasks must be carried into Pending Tasks" || return 1
+    assert_file_contains "$skill" "native task list is keyed to the session" \
+        "the skill must state that the native list is per session under cs" || return 1
+    assert_file_contains "$skill" "inherits it" \
+        "and that the successor inherits it rather than starting empty" || return 1
 }
 
 test_rotate_skill_ends_on_the_one_manual_step() {
@@ -386,7 +390,7 @@ run_test test_rotate_skill_arms_last
 run_test test_rotate_skill_pins_the_strongest_model
 run_test test_rotate_skill_keeps_the_users_words_close
 run_test test_rotate_skill_spends_length_asymmetrically
-run_test test_rotate_skill_folds_native_tasks_into_pending_tasks
+run_test test_rotate_skill_says_native_tasks_survive_the_clear
 run_test test_rotate_skill_ends_on_the_one_manual_step
 run_test test_rotate_skill_does_not_promise_the_rotation_waits
 run_test test_rotate_skill_teaches_the_prune_rule
@@ -1076,20 +1080,24 @@ test_startup_rotation_does_not_tell_the_user_to_send_a_message() {
 # make that word mean "begin" — otherwise the fresh conversation spends it
 # re-summarising the handoff and asking where to start, and the rotation costs
 # two round trips instead of one keystroke.
-# The successor's native task list is empty at /clear, and the handoff's
-# next-step section is a multi-step plan nobody else is tracking. The preamble
-# asks for it to be mirrored into native tasks before work starts, the same
-# contract the walk-away drain already uses, so progress stays visible turn
-# to turn instead of living only in the handoff prose.
-test_rotation_preamble_mirrors_next_step_into_native_tasks() {
+# Under cs the native task list survives the /clear (see the skill test
+# above), so the successor holds the predecessor's items already. Told to
+# "mirror" the handoff into it, the model creates duplicates and progress
+# splits across two copies; told to reconcile, it closes what the handoff
+# says is done and adds only the next-step steps that are missing. Pinned on
+# preamble-only wording, since "native task list" also appears in
+# always-emitted context.
+test_rotation_preamble_reconciles_the_inherited_native_tasks() {
     _rot_hook_session "rot-preamble-tasks"
     _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "unconsumed"
     printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
     printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
     local out
     out=$(_start_hook "$UUID_B" clear) || return 1
-    assert_output_contains "$out" "native task list" \
-        "the preamble must ask for the next-step section as native tasks" || return 1
+    assert_output_contains "$out" "reconcile your native task list" \
+        "the preamble must ask for a reconcile, not a mirror into an empty list" || return 1
+    assert_output_contains "$out" "carried over from the previous conversation" \
+        "and say the list is inherited, so the model does not assume it is empty" || return 1
 }
 
 test_rotation_preamble_makes_the_first_message_mean_begin() {
@@ -1331,6 +1339,11 @@ test_rotation_kick_wakes_the_model() {
     # has to carry the instruction the user's "go" would otherwise have carried.
     assert_output_contains "$err" "rotation" "the reason names what woke it" || return 1
     assert_output_contains "$err" "next-step" "and says to execute the handoff" || return 1
+    # The wake restates the preamble's instruction rather than referring back
+    # to it (see the hook), so the reconcile step has to be restated too or the
+    # default /clear path never carries it.
+    assert_output_contains "$err" "reconcile your native task list" \
+        "and carries the reconcile step the preamble asks for" || return 1
     # The notice invites the user to type instead, and the kick is written
     # regardless — so a user who types inside the arm window gets the wake
     # ENQUEUED behind their own message, carrying an unconditional "execute the
@@ -1492,7 +1505,7 @@ run_test test_rotation_tells_the_user_one_message_starts_it
 run_test test_plain_clear_says_nothing_to_the_user
 run_test test_startup_rotation_does_not_tell_the_user_to_send_a_message
 run_test test_rotation_preamble_makes_the_first_message_mean_begin
-run_test test_rotation_preamble_mirrors_next_step_into_native_tasks
+run_test test_rotation_preamble_reconciles_the_inherited_native_tasks
 run_test test_clear_does_not_emit_a_dead_autostart_field
 run_test test_clear_rotation_arms_a_kick_watch
 run_test test_kick_watch_is_scoped_to_a_clear_rotation

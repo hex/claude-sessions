@@ -49,9 +49,12 @@ should do. If the user did not give one, ask before writing anything.
    Request and Intent; 4. Key Technical Concepts; 5. Files and Code Sections
    (with the snippets that matter); 6. Problem Solving; 7. Pending Tasks;
    8. Current Work. Write for a successor with zero conversation memory.
-   Pending Tasks includes every open item on your native task list, with its
-   status: that list is keyed to this conversation and does not survive the
-   `/clear`, so an item recorded nowhere else goes with it.
+   Under cs the native task list is keyed to the session, not to this
+   conversation (`CLAUDE_CODE_TASK_LIST_ID` is the session name), so it
+   survives the `/clear` and the successor inherits it. Pending Tasks still
+   lists every open native item with its status: the handoff has to read
+   whole on its own, and the successor reconciles the list it inherited
+   against what you wrote rather than mirroring the handoff into it.
 
    **Next Step opens the body.** The successor is told to execute it, and
    retrieval degrades over a long document — so the thing it needs first must

@@ -435,17 +435,19 @@ test_drain_armed_states_stop_mechanic() {
 # guidance the agent gets. Without it, a pre-existing bug found while testing
 # gets fixed in the same change, and an ambiguous task gets built for every
 # reading at once. Both injection points carry the block: the first task of a
-# run is as unwatched as the rest.
+# run is as unwatched as the rest. Follow-ups go to the narrative, not "your
+# summary": a drained task ends its turn with no summary, and a note deferred
+# to the end-of-run debrief can be compacted away before the run gets there.
 test_drain_scopes_each_task_to_what_it_asks() {
     qseed "task one" "task two"
     printf 'armed\n' > "$(QDIR)/queue.state"
     local out; out=$(drain)
-    assert_output_contains "$out" "report it as a follow-up in your summary" \
+    assert_output_contains "$out" "report it as a follow-up in your narrative" \
         "first-task message must scope extras to the summary" || return 1
     printf 'draining\n' > "$(QDIR)/queue.state"
     out=$(drain)
     assert_output_contains "$out" "task two" "draining injects the next task" || return 1
-    assert_output_contains "$out" "report it as a follow-up in your summary" \
+    assert_output_contains "$out" "report it as a follow-up in your narrative" \
         "next-task message must scope extras to the summary" || return 1
 }
 

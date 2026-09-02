@@ -332,7 +332,10 @@ no further prompts until the queue is empty; "Not yet" waits and re-asks
 after about 10 minutes, or as soon as the queue changes. There's no
 mid-drain pause — once started it runs to the end, trusting Claude Code's
 own auto-compact. As it drains, cs instructs Claude to mirror the queue
-into the native task list so progress stays visible. (The gate itself
+into the native task list so progress stays visible, and hands each task
+over with its scope: do what the task asks, leave a pre-existing bug or
+unmentioned behavior as a follow-up in the narrative, and state the reading
+taken of an ambiguous task. (The gate itself
 runs `cs -queue start` / `cs -queue defer` on your behalf — you don't
 need to run those directly.)
 
@@ -370,13 +373,13 @@ nothing has ended yet.
 Because the handoff is committed and becomes the next conversation's opening
 prompt, the skill redacts credentials and personal data out of it (name the
 secret's purpose and its `cs -secrets get` key instead), references
-committed work by path rather than re-summarising it, keeps what you said
-close to your own words while condensing its own reasoning, and spends length
-only on the facts a successor cannot recover.
+committed work by path rather than re-summarising it, and keeps what you
+said close to your own words while condensing its own reasoning.
 
 Then rotate with **`/clear`**. The fresh conversation reads the handoff,
-mirrors its next-step section into the native task list, and continues from
-it — the old transcript is not loaded. It
+reconciles the native task list it inherited with it (cs keys that list to
+the session, not the conversation), and continues from its next-step
+section — the old transcript is not loaded. It
 waits for your next message, which can simply be what you want done next.
 
 If you would rather stop for the day, the handoff stays armed and the next

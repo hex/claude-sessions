@@ -4,6 +4,24 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.9.5
+
+A handoff keeps your words and trims its own. Each walk-away task now carries its scope. A rotation reconciles the task list it inherits.
+
+### Features
+
+**Handoffs keep the user's words and condense the writer's.** Two rules join the rotate skill's body rules. What you said, asked for or corrected stays close to your own words: a paraphrased correction has drifted, and the successor cannot get the original back. The writer's own reasoning compresses to what it concluded. Length goes to the facts a successor cannot recover and nowhere else, so a body that runs long everywhere no longer buries the facts it exists to carry. No byte cap, still.
+
+**Every drained task carries a scope block.** Nobody watches a walk-away run, so the handed task is the only scope guidance the agent gets. The drain now appends one to every task, the first included: do every behavior the task asks for, leave a pre-existing bug or unmentioned behavior as a follow-up in the narrative unless the task cannot work without it, take the most direct reading of an ambiguous task and say so.
+
+**A rotation reconciles the native task list instead of rebuilding it.** cs launches claude with the task list keyed to the session name, so the list survives `/clear` and the fresh conversation already holds it. The rotate skill says so and still lists every open item under Pending Tasks, so the handoff reads whole on its own. The rotation preamble and the wake that follows `/clear` ask the successor to reconcile the inherited list with the handoff (close what it marks finished, add the next-step steps that are missing) rather than mirror the handoff into it and split progress across duplicates.
+
+### Docs
+
+- README and `docs/hooks.md` cover the new handoff rules, the scope block, and the task-list mirror.
+
+**Full Changelog**: https://github.com/hex/claude-sessions/compare/v2026.9.4...v2026.9.5
+
 ## 2026.9.4
 
 The installer stops re-asking about the status line, and shows you the bar before it asks at all. The rotation handoff gets a home for rejected work, a provenance on every claim, and a safer ritual. And the subagent rows name the model that is actually running.
