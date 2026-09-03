@@ -2,7 +2,8 @@
 parent: 12c1b55d-c4ec-4f0e-a166-91b2c05651d7
 created: 2026-09-03T03:56:08Z
 purpose: check follow-ups 2 and 3 on the other actor's 801 KB narrative: make the resume read rule honest (own narrative in full, others by delta), and sweep the dormant file once for facts that belong in the shared memory buckets
-status: unconsumed
+status: consumed
+consumed_by: 4171d0ba-77c4-40cb-be99-2782bb5d026e
 ---
 
 ## 1. Next Step
