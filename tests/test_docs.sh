@@ -77,15 +77,18 @@ test_hooks_doc_states_both_resolution_arms() {
 }
 
 
-# Rotation made "read all narratives on resume" false. No user-facing surface
-# may say it: the lib templates, the hooks, the commands, README and docs.
+# Rotation made "read all narratives on resume" false, and size made "read the
+# live narratives" false too (one teammate file measured 801 KB): a resume reads
+# its own narrative in full and a teammate's only from the line the digest
+# names. No user-facing surface may say otherwise: the lib templates, the
+# hooks, the commands, README and docs.
 # lib/45-migrate.sh is exempt: migrate_narrative_resume_wording's grep/sed/awk
 # patterns must name the dead sentence verbatim to find and rewrite it in files
 # cs already wrote. That is a matcher, not a surface telling anyone to read
 # every narrative.
 test_no_surface_tells_a_resume_to_read_every_narrative() {
     local hits
-    hits=$(grep -rniE "read all narrative|read all of them|reads all of them|everyone reads all" \
+    hits=$(grep -rniE "read all narrative|read all of them|reads all of them|everyone reads all|read the live narrative|reads the live files|read the live files" \
         "$REPO/lib" "$REPO/hooks" "$REPO/commands" "$REPO/README.md" "$REPO/docs"/*.md 2>/dev/null \
         | grep -v '/lib/45-migrate\.sh:' || true)
     if [ -n "$hits" ]; then

@@ -127,8 +127,10 @@ test_scoring_threshold_owned_by_skill() {
 # ============================================================================
 
 test_summary_reads_narrative() {
-    assert_file_contains "$COMMANDS_DIR/summary.md" 'memory/narrative\.\*\.md' \
+    assert_file_contains "$COMMANDS_DIR/summary.md" 'memory/narrative\.<actor>\.md' \
         "summary must read the per-actor session narratives" || return 1
+    assert_file_contains "$COMMANDS_DIR/summary.md" "your own in full; a teammate's only from the line the resume digest named" \
+        "summary reads its own narrative whole and a teammate's by the digest delta, never the whole file" || return 1
 }
 
 test_prose_critic_pinned_and_contracted() {

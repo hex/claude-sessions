@@ -321,7 +321,7 @@ Current actor: $ACTOR_SLUG ($ACTOR_RAW). Your narrative is .cs/memory/narrative.
 
 Key files to maintain:
 - .cs/README.md: Update objective and outcome
-- .cs/memory/narrative.$ACTOR_SLUG.md: append findings as you go; on resume read the live narrative.*.md (older sections: .cs/narrative-archive/<actor>/, grep on demand)
+- .cs/memory/narrative.$ACTOR_SLUG.md: append findings as you go; on resume read it in full. A teammate's narrative: only the lines the resume digest names (older sections: .cs/narrative-archive/<actor>/, grep on demand)
 
 Secrets: never write credentials to project files — feed the value to 'cs -secrets set <name>' on stdin via a file redirect (argv, pipes and heredocs are all logged verbatim); retrieve with 'cs -secrets get <name>'. See CLAUDE.local.md, Secure Secrets Handling.
 
@@ -779,7 +779,7 @@ if [ -n "$ROTATION_HANDOFF" ]; then
     CONTEXT="${CONTEXT}
 
 --- Conversation Rotation ---
-This fresh conversation continues rotated work. Read .cs/handoffs/$ROTATION_HANDOFF FIRST — it is the previous conversation's handoff; the prior transcript is not loaded, and the handoff plus .cs/memory/narrative.*.md carry the context.
+This fresh conversation continues rotated work. Read .cs/handoffs/$ROTATION_HANDOFF FIRST — it is the previous conversation's handoff; the prior transcript is not loaded, and the handoff plus your own .cs/memory/narrative.$ACTOR_SLUG.md carry the context.
 
 Nothing has run yet. $ROTATION_START A BARE NUDGE — \"go\", \"continue\", \"ok\" — means begin: reconcile your native task list, which carried over from the previous conversation, with the handoff (mark what it says is done, add any next-step step that is missing, one task per step), then execute the next step and report what you did, without re-summarising it or asking which part to start with. A first message carrying its own content takes precedence over the handoff; answer that instead. Ask first only where you normally would: the handoff is missing, unreadable, or genuinely ambiguous, or its next step is destructive or irreversible."
 elif [ -n "$FRESH_NOTICE" ]; then
@@ -789,7 +789,7 @@ elif [ -n "$FRESH_NOTICE" ]; then
 The user explicitly started a fresh conversation in this cs session — the prior conversation's transcript is not loaded. Treat this as a clean break, not a continuation.
 
 For prior context, lazily consult as needed:
-- .cs/memory/narrative.*.md — findings and decisions from earlier work (append only to your own actor's file; older sections under .cs/narrative-archive/<actor>/)
+- .cs/memory/narrative.$ACTOR_SLUG.md — your findings and decisions from earlier work (append only here; a teammate's narrative only from the line the resume digest names; older sections under .cs/narrative-archive/<actor>/)
 - .cs/README.md            — session objective
 
 Do not assume continuity with previous turns."

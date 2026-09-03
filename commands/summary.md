@@ -10,7 +10,7 @@ You are working in a cs session. Your task is to summarize the entire session by
 
 1. **Read all session documentation:**
    - .cs/README.md (objective, environment, outcome)
-   - .cs/memory/narrative.*.md (per-actor lab notebooks — the live files hold recent findings, observations, in-progress state; older sections were rotated into .cs/narrative-archive/<actor>/ and are history — grep one only when the summary needs a date or a detail the live file no longer carries)
+   - .cs/memory/narrative.<actor>.md (per-actor lab notebooks — your own in full; a teammate's only from the line the resume digest named for it, or its last few sections, never the whole file; older sections were rotated into .cs/narrative-archive/<actor>/ and are history — grep one only when the summary needs a date or a detail the live file no longer carries)
    - .cs/timeline.jsonl (structured session events: starts, ends, checkpoints)
 
 2. **Synthesize into a cohesive summary** that tells the story of this session. The summary should:

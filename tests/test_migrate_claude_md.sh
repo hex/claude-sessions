@@ -345,7 +345,39 @@ test_migrate_read_all_rewrite_is_idempotent() {
     assert_eq "$once" "$(cat "$dir/.cs/memory/MEMORY.md")" "second resume leaves the index byte-identical" || return 1
 }
 
+# The wording that replaced read-all said "read the live narrative.*.md on
+# resume", which nobody can do at 801 KB either. A resume rewrites that vintage
+# too, in the same three places, to the owner-in-full / teammate-by-digest rule.
+test_migrate_rewrites_read_the_live_wording_cs_wrote() {
+    local dir
+    dir=$(create_test_session "livewordy")
+    printf -- '---\nname: session-narrative-alice\ndescription: Session lab-notebook and work-in-progress narrative for alice. Looser bar than durable memory. Read the live narrative.*.md on resume; older sections are archived under .cs/narrative-archive/.\ntype: narrative\n---\n# Session narrative (alice)\n\n## 2026-01-01 — kept: body says Read the live narrative.*.md on resume verbatim\n' \
+        > "$dir/.cs/memory/narrative.alice.md"
+    printf -- '- [Session narrative — alice (lab notebook)](narrative.alice.md): looser-bar work-in-progress; read the live narrative.*.md on resume, older sections under .cs/narrative-archive/\n' \
+        > "$dir/.cs/memory/MEMORY.md"
+    printf '<!-- cs:session-protocol -->\n# Session Documentation Protocol\n\nAppend only to your own; on resume read the live narrative.*.md (rotation keeps\nthem small). Older sections sit under .cs/narrative-archive/<actor>/ — grep on demand, never preload.\n\n<!-- cs:memory-note -->\nnote\n' \
+        > "$dir/CLAUDE.local.md"
+    CS_ACTOR=alice "$CS_BIN" "livewordy" < /dev/null > /dev/null 2>&1 || true
+
+    local desc
+    desc=$(sed -n '3p' "$dir/.cs/memory/narrative.alice.md")
+    case "$desc" in
+        *"Read the live narrative"*) echo "  FAIL: frontmatter description still says read the live: $desc"; return 1 ;;
+        *"resume digest names"*) ;;
+        *) echo "  FAIL: frontmatter description does not carry the digest rule: $desc"; return 1 ;;
+    esac
+    assert_eq "## 2026-01-01 — kept: body says Read the live narrative.*.md on resume verbatim" "$(sed -n '8p' "$dir/.cs/memory/narrative.alice.md")" \
+        "line 8 (first body line) untouched" || return 1
+    assert_file_not_contains "$dir/.cs/memory/MEMORY.md" "read the live narrative" "index pointer rewritten" || return 1
+    assert_file_contains "$dir/.cs/memory/MEMORY.md" "resume digest names" "index pointer carries the digest rule" || return 1
+    assert_file_not_contains "$dir/CLAUDE.local.md" "read the live narrative" "protocol sentence rewritten" || return 1
+    assert_file_contains "$dir/CLAUDE.local.md" "read your own in full" "with the owner-in-full rule" || return 1
+    assert_file_contains "$dir/CLAUDE.local.md" "grep on demand, never preload" "archive instruction kept" || return 1
+    assert_file_contains "$dir/CLAUDE.local.md" "<!-- cs:memory-note -->" "the following block is untouched" || return 1
+}
+
 run_test test_migrate_rewrites_read_all_wording_cs_wrote
+run_test test_migrate_rewrites_read_the_live_wording_cs_wrote
 run_test test_migrate_read_all_rewrite_is_idempotent
 
 # The protocol block cs shipped July-2026 through August-2026 wraps the same

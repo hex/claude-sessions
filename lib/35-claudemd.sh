@@ -74,7 +74,7 @@ ensure_narrative_file() {
         cat > "$narrative" << EOF
 ---
 name: session-narrative-$actor
-description: Session lab-notebook and work-in-progress narrative for $actor. Looser bar than durable memory. Read the live narrative.*.md on resume; older sections are archived under .cs/narrative-archive/.
+description: Session lab-notebook and work-in-progress narrative for $actor. Looser bar than durable memory. Its owner reads it in full on resume; anyone else reads only the lines the resume digest names. Older sections are archived under .cs/narrative-archive/.
 type: narrative
 ---
 # Session narrative ($actor)
@@ -90,7 +90,7 @@ EOF
     fi
 
     if [ ! -f "$index" ] || ! grep -q "(narrative\.$actor\.md)" "$index" 2>/dev/null; then
-        printf -- '- [Session narrative — %s (lab notebook)](narrative.%s.md): looser-bar work-in-progress; read the live narrative.*.md on resume, older sections under .cs/narrative-archive/\n' "$actor" "$actor" >> "$index"
+        printf -- '- [Session narrative — %s (lab notebook)](narrative.%s.md): looser-bar work-in-progress; its owner reads it in full on resume, anyone else only the lines the resume digest names; older sections under .cs/narrative-archive/\n' "$actor" "$actor" >> "$index"
     fi
 }
 
@@ -174,11 +174,12 @@ At the start of every conversation in this session, read the following files to 
 
 1. **.cs/summary.md** - If exists, read first for previous session overview
 2. **.cs/README.md** - Session objective, environment, and outcome
-3. **.cs/memory/narrative.*.md** - Per-actor lab notebooks (yours + teammates'): findings, in-progress state, observations
+3. **.cs/memory/narrative.<actor>.md** - Per-actor lab notebooks: findings, in-progress state, observations. Yours in full; a teammate's only where the resume digest says it grew
 
 Narratives are per-actor (narrative.<actor>.md) so co-developers never conflict.
-Append only to your own; on resume read the live narrative.*.md (rotation keeps
-them small). Older sections sit under .cs/narrative-archive/<actor>/ — grep on demand, never preload.
+Append only to your own; on resume read your own in full, and a teammate narrative only
+from the line the resume digest names for it (nothing, when it names none). Older sections
+sit under .cs/narrative-archive/<actor>/ — grep on demand, never preload.
 
 ## Documentation Discipline
 
