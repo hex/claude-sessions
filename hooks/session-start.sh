@@ -529,42 +529,55 @@ if [ "$SOURCE" = "resume" ] && git -C "$SESSION_DIR" rev-parse --git-dir >/dev/n
     LAST_SEEN=""
     [ -f "$WATERMARK_FILE" ] && LAST_SEEN=$(cat "$WATERMARK_FILE" 2>/dev/null || true)
     HEAD_SHA=$(git -C "$SESSION_DIR" rev-parse -q --verify HEAD 2>/dev/null || true)
-    if [ -n "$LAST_SEEN" ] && [ -n "$HEAD_SHA" ] && [ "$LAST_SEEN" != "$HEAD_SHA" ] \
+    if [ -n "$LAST_SEEN" ] && [ -n "$HEAD_SHA" ] \
         && git -C "$SESSION_DIR" rev-parse -q --verify "$LAST_SEEN" >/dev/null 2>&1; then
         DIGEST=$(git -C "$SESSION_DIR" log --no-merges --format='%an' "$LAST_SEEN..HEAD" -- .cs/memory 2>/dev/null \
             | sort | uniq -c | sort -rn \
             | sed 's/^[[:space:]]*\([0-9][0-9]*\)[[:space:]]*\(.*\)$/\2 (\1)/' \
             | paste -sd', ' - 2>/dev/null || true)
-        if [ -n "$DIGEST" ]; then
-            # Reading a whole teammate narrative is not an option (one dormant
-            # file measured 801 KB); the digest names where each one grew
-            # instead. The first line of new content is the start of the first
-            # hunk that adds lines, read from the diff's own headers, so
-            # uncommitted tail appends and head-truncating rotations (which
-            # only delete) cannot move it. The actor's own file is read in
-            # full and is not a delta.
-            NARRATIVE_DELTA=""
-            while IFS=$'\t' read -r _added _deleted _path; do
-                case "$_path" in .cs/memory/narrative.*.md) ;; *) continue ;; esac
-                [ "$_path" = ".cs/memory/narrative.$ACTOR_SLUG.md" ] && continue
-                [ -f "$SESSION_DIR/$_path" ] || continue
-                case "$_added" in ''|-|0) continue ;; esac
-                _hunks=$(git -C "$SESSION_DIR" diff -U0 "$LAST_SEEN..HEAD" -- "$_path" 2>/dev/null || true)
-                _sections=$(printf '%s\n' "$_hunks" | grep -c '^+## ' || true)
-                _start=$(printf '%s\n' "$_hunks" | awk '/^@@/ { split($3, p, ","); n = (p[2] == "" ? 1 : p[2]); if (n > 0 && !s) s = substr(p[1], 2) } END { print s }')
-                [ -n "$_start" ] || continue
-                NARRATIVE_DELTA="${NARRATIVE_DELTA}${NARRATIVE_DELTA:+; }${_path}: ${_sections} new section(s) from line ${_start}"
-            done <<NUMSTAT
-$(git -C "$SESSION_DIR" diff --numstat "$LAST_SEEN..HEAD" -- .cs/memory 2>/dev/null || true)
+        # Reading a whole teammate narrative is not an option (one dormant
+        # file measured 801 KB); the digest names where each one grew
+        # instead. The watermark commit is compared against the WORKING TREE,
+        # not HEAD: in a shared-directory tmux team nobody commits .cs/memory,
+        # so committed-only growth would leave every teammate notebook unread.
+        # Uncommitted growth is therefore named again on each resume until it
+        # is committed. The first line of new content is the start of the
+        # first hunk that adds lines, read from the diff's own headers, so a
+        # head-truncating rotation (which only deletes) cannot move it. The
+        # actor's own file is read in full and is not a delta.
+        NARRATIVE_DELTA=""
+        while IFS=$'\t' read -r _added _deleted _path; do
+            case "$_path" in .cs/memory/narrative.*.md) ;; *) continue ;; esac
+            [ "$_path" = ".cs/memory/narrative.$ACTOR_SLUG.md" ] && continue
+            [ -f "$SESSION_DIR/$_path" ] || continue
+            case "$_added" in ''|-|0) continue ;; esac
+            _hunks=$(git -C "$SESSION_DIR" diff -U0 "$LAST_SEEN" -- "$_path" 2>/dev/null || true)
+            _sections=$(printf '%s\n' "$_hunks" | grep -c '^+## ' || true)
+            _start=$(printf '%s\n' "$_hunks" | awk '/^@@/ { split($3, p, ","); n = (p[2] == "" ? 1 : p[2]); if (n > 0 && !s) s = substr(p[1], 2) } END { print s }')
+            [ -n "$_start" ] || continue
+            NARRATIVE_DELTA="${NARRATIVE_DELTA}${NARRATIVE_DELTA:+; }${_path}: ${_sections} new section(s) from line ${_start}"
+        done <<NUMSTAT
+$(git -C "$SESSION_DIR" diff --numstat "$LAST_SEEN" -- .cs/memory 2>/dev/null || true)
 NUMSTAT
-            DYNAMIC="${DYNAMIC}Since your last session, teammates committed to shared memory/narrative (author: commits): ${DIGEST}."
-            if [ -n "$NARRATIVE_DELTA" ]; then
-                DYNAMIC="${DYNAMIC} Their narratives grew: ${NARRATIVE_DELTA}. Read your own narrative.$ACTOR_SLUG.md in full, and of theirs only those added lines (sed -n 'N,\$p'), never the whole file."
-            else
-                DYNAMIC="${DYNAMIC} No teammate narrative grew; read your own narrative.$ACTOR_SLUG.md in full and none of theirs."
-            fi
-            DYNAMIC="${DYNAMIC}${_NL}"
+        # A teammate who has never committed their narrative is still a teammate.
+        while IFS= read -r _path; do
+            [ -n "$_path" ] || continue
+            [ "$_path" = ".cs/memory/narrative.$ACTOR_SLUG.md" ] && continue
+            _sections=$(grep -c '^## ' "$SESSION_DIR/$_path" 2>/dev/null || true)
+            NARRATIVE_DELTA="${NARRATIVE_DELTA}${NARRATIVE_DELTA:+; }${_path}: ${_sections} new section(s) from line 1"
+        done <<UNTRACKED
+$(git -C "$SESSION_DIR" ls-files --others --exclude-standard -- '.cs/memory/narrative.*.md' 2>/dev/null || true)
+UNTRACKED
+        DELTA_LINE=""
+        if [ -n "$NARRATIVE_DELTA" ]; then
+            DELTA_LINE="Since your last session, teammate narratives grew: ${NARRATIVE_DELTA}. Read your own narrative.$ACTOR_SLUG.md in full, and of theirs only those added lines (sed -n 'N,\$p'), never the whole file."
+        elif [ -n "$DIGEST" ]; then
+            DELTA_LINE="Since your last session, no teammate narrative grew; read your own narrative.$ACTOR_SLUG.md in full and none of theirs."
         fi
+        if [ -n "$DIGEST" ]; then
+            DELTA_LINE="Since your last session, teammates committed to shared memory/narrative (author: commits): ${DIGEST}. ${DELTA_LINE#Since your last session, }"
+        fi
+        [ -n "$DELTA_LINE" ] && DYNAMIC="${DYNAMIC}${DELTA_LINE}${_NL}"
     fi
     # Advance the watermark to current HEAD (also seeds it on first resume).
     [ -n "$HEAD_SHA" ] && echo "$HEAD_SHA" > "$WATERMARK_FILE"
