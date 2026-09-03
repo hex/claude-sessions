@@ -278,7 +278,10 @@ needs_cs_migration() {
 migrate_narrative_resume_wording() {
     local session_dir="$1"
     local mem="$session_dir/.cs/memory" f tmp
-    for f in "$mem"/narrative.*.md; do
+    # Only the actor's own narrative: a teammate's file is theirs to migrate on
+    # their own resume, and a committed edit to its head would show up in their
+    # teammates' digests as growth that is not a tail.
+    for f in "$mem/narrative.$(cs_actor_slug "$session_dir").md"; do
         [ -f "$f" ] || continue
         # Keyed to the description line specifically (not just "somewhere in the
         # first 8 lines"): a cs-written narrative has exactly 7 header lines, so
@@ -306,7 +309,7 @@ migrate_narrative_resume_wording() {
     # Either grep alternative can match a line that a CRLF checkout split
     # from its neighbour with a trailing \r, so the gate itself does not need
     # \r-tolerance — only the awk's line-for-line comparisons do.
-    if [ -f "$f" ] && grep -qE "read all narrative\.\*\.md on resume to restore your|so co-developers never|on resume read the live narrative\.\*\.md \(rotation keeps|lab notebooks \(yours \+ teammates'\)" "$f"; then
+    if [ -f "$f" ] && grep -qE "read all narrative\.\*\.md on resume to restore your|^Note: narratives are per-actor \(narrative\.<actor>\.md\) so co-developers never|on resume read the live narrative\.\*\.md \(rotation keeps|lab notebooks \(yours \+ teammates'\)" "$f"; then
         tmp="$f.tmp"
         awk '
             function strip(s) { sub(/\r$/, "", s); return s }

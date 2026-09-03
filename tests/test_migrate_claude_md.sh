@@ -357,7 +357,12 @@ test_migrate_rewrites_read_the_live_wording_cs_wrote() {
         > "$dir/.cs/memory/MEMORY.md"
     printf '<!-- cs:session-protocol -->\n# Session Documentation Protocol\n\n3. **.cs/memory/narrative.*.md** - Per-actor lab notebooks (yours + teammates'"'"'): findings, in-progress state, observations\n\nAppend only to your own; on resume read the live narrative.*.md (rotation keeps\nthem small). Older sections sit under .cs/narrative-archive/<actor>/ — grep on demand, never preload.\n\n<!-- cs:memory-note -->\nnote\n' \
         > "$dir/CLAUDE.local.md"
+    # A teammate's narrative carries the same old wording and is not ours to touch.
+    printf -- '---\nname: session-narrative-bob\ndescription: Session lab-notebook and work-in-progress narrative for bob. Looser bar than durable memory. Read the live narrative.*.md on resume; older sections are archived under .cs/narrative-archive/.\ntype: narrative\n---\n# Session narrative (bob)\n' \
+        > "$dir/.cs/memory/narrative.bob.md"
     CS_ACTOR=alice "$CS_BIN" "livewordy" < /dev/null > /dev/null 2>&1 || true
+    assert_file_contains "$dir/.cs/memory/narrative.bob.md" "Read the live narrative" \
+        "a teammate's narrative is never rewritten by this actor's resume" || return 1
     assert_file_not_contains "$dir/CLAUDE.local.md" "yours + teammates" "the read-list item is rewritten too" || return 1
     assert_file_contains "$dir/CLAUDE.local.md" "Yours in full; a teammate's only where the resume digest says it grew" \
         "the read-list item carries the delta rule" || return 1
@@ -379,7 +384,24 @@ test_migrate_rewrites_read_the_live_wording_cs_wrote() {
     assert_file_contains "$dir/CLAUDE.local.md" "<!-- cs:memory-note -->" "the following block is untouched" || return 1
 }
 
+# The current template's own "Narratives are per-actor (...) so co-developers
+# never conflict." line must not trip the rewrite gate, or every resume rewrites
+# CLAUDE.local.md (mtime churn; a symlink becomes a regular file).
+test_migrate_leaves_a_current_protocol_block_alone() {
+    local dir
+    dir=$(create_test_session "current")
+    CS_ACTOR=alice "$CS_BIN" "current" < /dev/null > /dev/null 2>&1 || true
+    assert_file_contains "$dir/CLAUDE.local.md" "so co-developers never conflict" "fixture carries the current template" || return 1
+    touch -t 202001010000 "$dir/CLAUDE.local.md"
+    touch -t 202101010000 "$dir/.cs/mtime-ref"
+    CS_ACTOR=alice "$CS_BIN" "current" < /dev/null > /dev/null 2>&1 || true
+    if [ "$dir/CLAUDE.local.md" -nt "$dir/.cs/mtime-ref" ]; then
+        echo "  FAIL: a second resume rewrote an already-current CLAUDE.local.md"; return 1
+    fi
+}
+
 run_test test_migrate_rewrites_read_all_wording_cs_wrote
+run_test test_migrate_leaves_a_current_protocol_block_alone
 run_test test_migrate_rewrites_read_the_live_wording_cs_wrote
 run_test test_migrate_read_all_rewrite_is_idempotent
 

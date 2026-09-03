@@ -88,7 +88,7 @@ test_hooks_doc_states_both_resolution_arms() {
 # every narrative.
 test_no_surface_tells_a_resume_to_read_every_narrative() {
     local hits
-    hits=$(grep -rniE "read all narrative|read all of them|reads all of them|everyone reads all|read the live narrative|reads the live files|read the live files" \
+    hits=$(grep -rniE "read all narrative|read all of them|reads all of them|everyone reads all|read the live narrative|reads the live files|read the live files|read all the session documentation" \
         "$REPO/lib" "$REPO/hooks" "$REPO/commands" "$REPO/README.md" "$REPO/docs"/*.md 2>/dev/null \
         | grep -v '/lib/45-migrate\.sh:' || true)
     if [ -n "$hits" ]; then

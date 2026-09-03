@@ -14,7 +14,7 @@ Read `~/.claude/commands/sweep.md` and execute it end to end: the strict bar wit
 
 ## Pass 2 — Session summary
 
-Read `~/.claude/commands/summary.md` and execute its steps 1-4: read all the session documentation it lists (including the per-actor `.cs/memory/narrative.*.md` notebooks) and synthesize the narrative at `.cs/summary.md` using its structure. If `.cs/summary.md` already exists, this run **replaces** it — `/wrap` writes the canonical end-of-session narrative.
+Read `~/.claude/commands/summary.md` and execute its steps 1-4: read the session documentation it lists (your own `.cs/memory/narrative.<actor>.md` in full; a teammate's only from the line the resume digest named, never whole) and synthesize the narrative at `.cs/summary.md` using its structure. If `.cs/summary.md` already exists, this run **replaces** it — `/wrap` writes the canonical end-of-session narrative.
 
 Stop after step 4. Step 5's prose critic belongs to standalone `/summary`: it spawns a judge subagent and can run it twice, which is most of what a wrap costs. `/wrap` is the winding-down path and trades that pass for speed, so write the summary well the first time rather than planning to revise it.
 

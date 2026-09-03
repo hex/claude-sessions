@@ -710,6 +710,42 @@ test_resume_digest_delta_survives_a_rotated_teammate_narrative() {
         "after a head-truncating rotation the delta is still the tail" || return 1
 }
 
+# The start line must come from the committed delta itself, not from the
+# working-tree length: a teammate's uncommitted tail appends would otherwise
+# push the named line past the committed sections. Two commits after the
+# watermark also pin the range to the watermark rather than to HEAD~1.
+test_resume_digest_start_line_ignores_uncommitted_tail() {
+    session_start_setup
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    local bob="$CLAUDE_SESSION_DIR/.cs/memory/narrative.bob.md"
+    printf -- '---\nname: session-narrative-bob\ndescription: lab notebook\ntype: narrative\n---\n# Session narrative (bob)\n\n## 2026-01-01 first\nold finding\n\n## 2026-01-02 second\nanother old finding\n' > "$bob"
+    ( cd "$CLAUDE_SESSION_DIR" && git add -A && git commit -q -m "narratives" --author="Bob <bob@example.com>" )
+    git -C "$CLAUDE_SESSION_DIR" rev-parse HEAD > "$CLAUDE_SESSION_META_DIR/local/watermark"
+    printf -- '\n## 2026-01-03 third\nnew finding\n' >> "$bob"
+    ( cd "$CLAUDE_SESSION_DIR" && git add -A && git commit -q -m "append 1" --author="Bob <bob@example.com>" )
+    printf -- '\n## 2026-01-04 fourth\nnewer finding\n' >> "$bob"
+    ( cd "$CLAUDE_SESSION_DIR" && git add -A && git commit -q -m "append 2" --author="Bob <bob@example.com>" )
+    # Uncommitted growth on top: must not move the committed start line (13).
+    printf -- '\n## 2026-01-05 uncommitted\nnot yet committed\n' >> "$bob"
+
+    local output context
+    output=$(echo '{"session_id":"s","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+    assert_output_contains "$context" "narrative.bob.md: 2 new section(s) from line 13" \
+        "two commits since the watermark count, and uncommitted tail lines do not shift the start" || return 1
+}
+
+# The hooks must parse under the floor shell. An apostrophe inside a heredoc
+# that sits inside $(...) is accepted by bash 5 and rejected by bash 3.2, so
+# a suite that runs the hooks under whichever bash leads PATH cannot see it.
+test_hooks_parse_under_bin_bash() {
+    local f
+    for f in "$HOOKS_DIR"/*.sh; do
+        /bin/bash -n "$f" 2>/dev/null || { echo "  FAIL: /bin/bash -n rejects $(basename "$f")"; return 1; }
+    done
+}
+
 test_resume_digest_silent_without_watermark() {
     session_start_setup
     rm -f "$CLAUDE_SESSION_META_DIR/local/watermark"
@@ -1509,6 +1545,8 @@ run_test test_resume_digest_reports_memory_activity
 run_test test_resume_digest_silent_without_watermark
 run_test test_resume_digest_names_where_a_teammates_narrative_grew
 run_test test_resume_digest_delta_survives_a_rotated_teammate_narrative
+run_test test_resume_digest_start_line_ignores_uncommitted_tail
+run_test test_hooks_parse_under_bin_bash
 run_test test_session_start_includes_sibling_sessions
 run_test test_session_start_excludes_current_session
 run_test test_session_start_sibling_block_mandates_asking

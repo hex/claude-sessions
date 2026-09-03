@@ -321,7 +321,7 @@ Current actor: $ACTOR_SLUG ($ACTOR_RAW). Your narrative is .cs/memory/narrative.
 
 Key files to maintain:
 - .cs/README.md: Update objective and outcome
-- .cs/memory/narrative.$ACTOR_SLUG.md: append findings as you go; on resume read it in full. A teammate's narrative: only the lines the resume digest names (older sections: .cs/narrative-archive/<actor>/, grep on demand)
+- .cs/memory/narrative.$ACTOR_SLUG.md: append findings as you go; on resume read it in full; of a teammate narrative only the lines the resume digest names (older sections: .cs/narrative-archive/<actor>/, grep on demand)
 
 Secrets: never write credentials to project files — feed the value to 'cs -secrets set <name>' on stdin via a file redirect (argv, pipes and heredocs are all logged verbatim); retrieve with 'cs -secrets get <name>'. See CLAUDE.local.md, Secure Secrets Handling.
 
@@ -536,21 +536,24 @@ if [ "$SOURCE" = "resume" ] && git -C "$SESSION_DIR" rev-parse --git-dir >/dev/n
             | sed 's/^[[:space:]]*\([0-9][0-9]*\)[[:space:]]*\(.*\)$/\2 (\1)/' \
             | paste -sd', ' - 2>/dev/null || true)
         if [ -n "$DIGEST" ]; then
-            # Narratives are append-only (head-truncated only by rotation), so
-            # every line a teammate committed since the watermark sits at the
-            # tail of the current file: it starts at (lines now - lines added).
             # Reading a whole teammate narrative is not an option (one dormant
-            # file measured 801 KB); the digest names the tail instead. The
-            # actor's own file is read in full and is not a delta.
+            # file measured 801 KB); the digest names where each one grew
+            # instead. The first line of new content is the start of the first
+            # hunk that adds lines, read from the diff's own headers, so
+            # uncommitted tail appends and head-truncating rotations (which
+            # only delete) cannot move it. The actor's own file is read in
+            # full and is not a delta.
             NARRATIVE_DELTA=""
             while IFS=$'\t' read -r _added _deleted _path; do
                 case "$_path" in .cs/memory/narrative.*.md) ;; *) continue ;; esac
                 [ "$_path" = ".cs/memory/narrative.$ACTOR_SLUG.md" ] && continue
                 [ -f "$SESSION_DIR/$_path" ] || continue
                 case "$_added" in ''|-|0) continue ;; esac
-                _total=$(wc -l < "$SESSION_DIR/$_path" | tr -d '[:space:]')
-                _sections=$(git -C "$SESSION_DIR" diff -U0 "$LAST_SEEN..HEAD" -- "$_path" 2>/dev/null | grep -c '^+## ' || true)
-                NARRATIVE_DELTA="${NARRATIVE_DELTA}${NARRATIVE_DELTA:+; }${_path}: ${_sections} new section(s) from line $((_total - _added + 1))"
+                _hunks=$(git -C "$SESSION_DIR" diff -U0 "$LAST_SEEN..HEAD" -- "$_path" 2>/dev/null || true)
+                _sections=$(printf '%s\n' "$_hunks" | grep -c '^+## ' || true)
+                _start=$(printf '%s\n' "$_hunks" | awk '/^@@/ { split($3, p, ","); n = (p[2] == "" ? 1 : p[2]); if (n > 0 && !s) s = substr(p[1], 2) } END { print s }')
+                [ -n "$_start" ] || continue
+                NARRATIVE_DELTA="${NARRATIVE_DELTA}${NARRATIVE_DELTA:+; }${_path}: ${_sections} new section(s) from line ${_start}"
             done <<NUMSTAT
 $(git -C "$SESSION_DIR" diff --numstat "$LAST_SEEN..HEAD" -- .cs/memory 2>/dev/null || true)
 NUMSTAT
