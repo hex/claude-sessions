@@ -415,7 +415,9 @@ session_start_setup() {
     setup
     # Isolate from an ambient CS_FRESH_REBIND (set when the suite runs from inside
     # a freshly-rebound cs session); the positive test re-supplies it inline.
-    unset CS_FRESH_REBIND 2>/dev/null || true
+    # CS_RESOLVED_FROM=walk is what a tmux teammate inherits; it empties the
+    # publish target and fails the cs-launch contract test from inside a team.
+    unset CS_FRESH_REBIND CS_RESOLVED_FROM 2>/dev/null || true
     # Model a cs-launched lead: the hook rebinds the recorded conversation only
     # when the claude firing it is the process cs exec'd into. Tests that model
     # a child claude or a walked-in front end override CLAUDE_PID inline.
@@ -781,6 +783,62 @@ test_resume_digest_names_an_untracked_teammate_narrative() {
     context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
     assert_output_contains "$context" "narrative.bob.md: 2 new section(s) from line 1" \
         "an untracked teammate narrative is reported from its first line" || return 1
+}
+
+# A head edit (the migration rewriting a description line, a dated correction)
+# is not growth. The named line is the LAST added hunk: append-only means real
+# growth is the final hunk, and a head edit alone still reports zero sections.
+test_resume_digest_start_line_ignores_a_head_edit() {
+    session_start_setup
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    local bob="$CLAUDE_SESSION_DIR/.cs/memory/narrative.bob.md"
+    printf -- '---\nname: session-narrative-bob\ndescription: lab notebook\ntype: narrative\n---\n# Session narrative (bob)\n\n## 2026-01-01 first\nold finding\n\n## 2026-01-02 second\nanother old finding\n' > "$bob"
+    ( cd "$CLAUDE_SESSION_DIR" && git add -A && git commit -q -m "narratives" --author="Bob <bob@example.com>" )
+    git -C "$CLAUDE_SESSION_DIR" rev-parse HEAD > "$CLAUDE_SESSION_META_DIR/local/watermark"
+    sed 's/^description: lab notebook$/description: rewritten by migration/' "$bob" > "$bob.tmp" && mv "$bob.tmp" "$bob"
+    printf -- '\n## 2026-01-03 third\nnew finding\n' >> "$bob"
+
+    local output context
+    output=$(echo '{"session_id":"s","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+    assert_output_contains "$context" "narrative.bob.md: 1 new section(s) from line 13" \
+        "a head edit must not pull the start line to the head" || return 1
+}
+
+# git diff --numstat prints repo-root-relative paths; a session directory that
+# sits inside a larger repository must still match its own .cs/memory files.
+test_resume_digest_works_when_the_session_is_a_repo_subdirectory() {
+    session_start_setup
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    # Re-root: the session dir becomes a subdirectory of a parent repository.
+    rm -rf "$CLAUDE_SESSION_DIR/.git"
+    ( cd "$CS_SESSIONS_ROOT" && git init -q -b main && git config user.email t@t && git config user.name T && git add -A && git commit -q -m root )
+    local bob="$CLAUDE_SESSION_DIR/.cs/memory/narrative.bob.md"
+    printf -- '---\nname: session-narrative-bob\ntype: narrative\n---\n## 2026-01-01 first\nold finding\n' > "$bob"
+    ( cd "$CS_SESSIONS_ROOT" && git add -A && git commit -q -m "narratives" --author="Bob <bob@example.com>" )
+    git -C "$CLAUDE_SESSION_DIR" rev-parse HEAD > "$CLAUDE_SESSION_META_DIR/local/watermark"
+    printf -- '\n## 2026-01-02 second\nnew finding\n' >> "$bob"
+
+    local output context
+    output=$(echo '{"session_id":"s","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+    assert_output_contains "$context" "narrative.bob.md: 1 new section(s) from line 7" \
+        "a subdirectory session must still see its teammate narrative grow" || return 1
+}
+
+# Watermark at HEAD and nothing changed: no digest line at all, not a dangling
+# "Since your last session," with an empty tail.
+test_resume_digest_silent_when_nothing_changed() {
+    session_start_setup
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    git -C "$CLAUDE_SESSION_DIR" rev-parse HEAD > "$CLAUDE_SESSION_META_DIR/local/watermark"
+
+    local output
+    output=$(echo '{"session_id":"s","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    assert_output_not_contains "$output" "Since your last session" "no digest when nothing changed since the watermark" || return 1
 }
 
 test_resume_digest_silent_without_watermark() {
@@ -1586,6 +1644,9 @@ run_test test_resume_digest_counts_two_commits_and_an_uncommitted_tail
 run_test test_hooks_parse_under_bin_bash
 run_test test_resume_digest_reports_uncommitted_teammate_growth
 run_test test_resume_digest_names_an_untracked_teammate_narrative
+run_test test_resume_digest_start_line_ignores_a_head_edit
+run_test test_resume_digest_works_when_the_session_is_a_repo_subdirectory
+run_test test_resume_digest_silent_when_nothing_changed
 run_test test_session_start_includes_sibling_sessions
 run_test test_session_start_excludes_current_session
 run_test test_session_start_sibling_block_mandates_asking

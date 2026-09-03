@@ -542,9 +542,11 @@ if [ "$SOURCE" = "resume" ] && git -C "$SESSION_DIR" rev-parse --git-dir >/dev/n
         # so committed-only growth would leave every teammate notebook unread.
         # Uncommitted growth is therefore named again on each resume until it
         # is committed. The first line of new content is the start of the
-        # first hunk that adds lines, read from the diff's own headers, so a
-        # head-truncating rotation (which only deletes) cannot move it. The
-        # actor's own file is read in full and is not a delta.
+        # LAST hunk that adds lines, read from the diff's own headers: growth
+        # is appended, so it is the final hunk, while a head edit (the
+        # migration rewriting a description line, a dated correction) or a
+        # head-truncating rotation cannot move it. The actor's own file is
+        # read in full and is not a delta.
         NARRATIVE_DELTA=""
         while IFS=$'\t' read -r _added _deleted _path; do
             case "$_path" in .cs/memory/narrative.*.md) ;; *) continue ;; esac
@@ -553,11 +555,11 @@ if [ "$SOURCE" = "resume" ] && git -C "$SESSION_DIR" rev-parse --git-dir >/dev/n
             case "$_added" in ''|-|0) continue ;; esac
             _hunks=$(git -C "$SESSION_DIR" diff -U0 "$LAST_SEEN" -- "$_path" 2>/dev/null || true)
             _sections=$(printf '%s\n' "$_hunks" | grep -c '^+## ' || true)
-            _start=$(printf '%s\n' "$_hunks" | awk '/^@@/ { split($3, p, ","); n = (p[2] == "" ? 1 : p[2]); if (n > 0 && !s) s = substr(p[1], 2) } END { print s }')
+            _start=$(printf '%s\n' "$_hunks" | awk '/^@@/ { split($3, p, ","); n = (p[2] == "" ? 1 : p[2]); if (n > 0) s = substr(p[1], 2) } END { print s }')
             [ -n "$_start" ] || continue
             NARRATIVE_DELTA="${NARRATIVE_DELTA}${NARRATIVE_DELTA:+; }${_path}: ${_sections} new section(s) from line ${_start}"
         done <<NUMSTAT
-$(git -C "$SESSION_DIR" diff --numstat "$LAST_SEEN" -- .cs/memory 2>/dev/null || true)
+$(git -C "$SESSION_DIR" diff --numstat --relative "$LAST_SEEN" -- .cs/memory 2>/dev/null || true)
 NUMSTAT
         # A teammate who has never committed their narrative is still a teammate.
         while IFS= read -r _path; do
@@ -568,14 +570,17 @@ NUMSTAT
         done <<UNTRACKED
 $(git -C "$SESSION_DIR" ls-files --others --exclude-standard -- '.cs/memory/narrative.*.md' 2>/dev/null || true)
 UNTRACKED
-        DELTA_LINE=""
+        DELTA_TAIL=""
         if [ -n "$NARRATIVE_DELTA" ]; then
-            DELTA_LINE="Since your last session, teammate narratives grew: ${NARRATIVE_DELTA}. Read your own narrative.$ACTOR_SLUG.md in full, and of theirs only those added lines (sed -n 'N,\$p'), never the whole file."
+            DELTA_TAIL="teammate narratives grew: ${NARRATIVE_DELTA}. Read your own narrative.$ACTOR_SLUG.md in full, and of theirs only those added lines (sed -n 'N,\$p'), never the whole file."
         elif [ -n "$DIGEST" ]; then
-            DELTA_LINE="Since your last session, no teammate narrative grew; read your own narrative.$ACTOR_SLUG.md in full and none of theirs."
+            DELTA_TAIL="no teammate narrative grew; read your own narrative.$ACTOR_SLUG.md in full and none of theirs."
         fi
+        DELTA_LINE=""
         if [ -n "$DIGEST" ]; then
-            DELTA_LINE="Since your last session, teammates committed to shared memory/narrative (author: commits): ${DIGEST}. ${DELTA_LINE#Since your last session, }"
+            DELTA_LINE="Since your last session, teammates committed to shared memory/narrative (author: commits): ${DIGEST}; ${DELTA_TAIL}"
+        elif [ -n "$DELTA_TAIL" ]; then
+            DELTA_LINE="Since your last session, ${DELTA_TAIL}"
         fi
         [ -n "$DELTA_LINE" ] && DYNAMIC="${DYNAMIC}${DELTA_LINE}${_NL}"
     fi
