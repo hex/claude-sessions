@@ -400,7 +400,32 @@ test_migrate_leaves_a_current_protocol_block_alone() {
     fi
 }
 
+# The protocol paragraph exists in two places cs owns: the template a fresh
+# session gets, and the awk that rewrites an old session's copy. Nothing else
+# compares them, so a wording change landing in one produces sessions whose
+# CLAUDE.local.md disagrees with a fresh one, with every gate green.
+test_migrated_protocol_matches_the_template() {
+    local fresh migrated
+    fresh=$(create_test_session "freshproto")
+    CS_ACTOR=alice "$CS_BIN" "freshproto" < /dev/null > /dev/null 2>&1 || true
+
+    migrated=$(create_test_session "oldproto")
+    printf '<!-- cs:session-protocol -->\n# Session Documentation Protocol\n\nAppend only to your own; read all narrative.*.md on resume to restore your\nworking narrative and see teammates'"'"' in-progress findings.\n\n<!-- cs:memory-note -->\nnote\n' \
+        > "$migrated/CLAUDE.local.md"
+    CS_ACTOR=alice "$CS_BIN" "oldproto" < /dev/null > /dev/null 2>&1 || true
+
+    local want got
+    want=$(grep -n 'Append only to your own' "$fresh/CLAUDE.local.md" | head -1 | cut -d: -f1)
+    [ -n "$want" ] || { echo "  FAIL: the template has no protocol paragraph to compare against"; return 1; }
+    want=$(sed -n "${want},$((want + 2))p" "$fresh/CLAUDE.local.md")
+    got=$(grep -n 'Append only to your own' "$migrated/CLAUDE.local.md" | head -1 | cut -d: -f1)
+    [ -n "$got" ] || { echo "  FAIL: the migrated file has no protocol paragraph"; return 1; }
+    got=$(sed -n "${got},$((got + 2))p" "$migrated/CLAUDE.local.md")
+    assert_eq "$want" "$got" "the migration must write the same protocol paragraph the template does" || return 1
+}
+
 run_test test_migrate_rewrites_read_all_wording_cs_wrote
+run_test test_migrated_protocol_matches_the_template
 run_test test_migrate_leaves_a_current_protocol_block_alone
 run_test test_migrate_rewrites_read_the_live_wording_cs_wrote
 run_test test_migrate_read_all_rewrite_is_idempotent

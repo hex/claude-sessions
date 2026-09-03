@@ -115,16 +115,27 @@ if [ -n "$changed_mode" ]; then
             # neither selects one nor forces the full gate. Skill and command
             # markdown is NOT in this list: suites pin their frontmatter and
             # wording, so those files match by content like any source path.
-            .cs/*|.claude*|docs/*|.github/*|.gitignore|assets/*|.superpowers/*|README.md|CHANGELOG.md|CONTRIBUTING.md|LICENSE*) continue ;;
+            # tui/ is the Rust crate: no bash suite reads it, and cargo test
+            # covers it separately, so a Rust edit must not drag in all 63.
+            .cs/*|.claude*|docs/*|.github/*|.gitignore|assets/*|.superpowers/*|tui/*|README.md|CHANGELOG.md|CONTRIBUTING.md|LICENSE*) continue ;;
         esac
+        # One grep across every suite rather than one per (path, suite) pair:
+        # the selection runs before any test does, on the gate that exists to
+        # be fast.
         hit=""
-        base=$(basename "$path")
         for suite in "${selected[@]}"; do
-            if [ "tests/$(basename "$suite")" = "$path" ] || grep -qF -- "$path" "$suite" 2>/dev/null; then
+            if [ "tests/${suite##*/}" = "$path" ]; then
                 hit=1
                 case " ${picked[*]:-} " in *" $suite "*) ;; *) picked+=("$suite") ;; esac
             fi
         done
+        while IFS= read -r suite; do
+            [ -n "$suite" ] || continue
+            hit=1
+            case " ${picked[*]:-} " in *" $suite "*) ;; *) picked+=("$suite") ;; esac
+        done <<EOF_MATCHED
+$(grep -lF -- "$path" "${selected[@]}" 2>/dev/null || true)
+EOF_MATCHED
         [ -n "$hit" ] || { full_reason="$path (no suite names it)"; break; }
     done <<EOF_CHANGED
 $changed
@@ -212,27 +223,37 @@ donefile="$logdir/done"
 # report below still replays in list order. The one-line append to the done
 # file is under PIPE_BUF, so concurrent lanes cannot tear it, and the count is
 # read back from that file rather than from a variable a background subshell
-# could not share. In serial mode the suite streams live and the log doubles
-# as the record.
+# could not share. Serial runs stream straight to the terminal and keep no log:
+# nothing replays them.
+# One predicate for both halves of the run: whether the suites are actually
+# interleaved. Lane count alone is not it — a single selected suite runs serial
+# whatever the lane count says, and deciding to capture on one test while
+# deciding to replay on another discards that suite's output entirely.
+parallel=""
+[ "$jobs_n" -gt 1 ] && [ "$total" -gt 1 ] && parallel=1
+
 run_suite() {  # index
-    local k="$1" name t0 t1 secs mark pid
-    name=$(basename "${selected[$k]}")
-    t0=$(date +%s)
+    # SECONDS and ${x##*/} are builtins: a gate of 63 suites otherwise forks
+    # date twice and basename three times per suite for values bash has. Both
+    # SECONDS readings come from the same clock date +%s reads, and SECONDS is
+    # inherited by a lane subshell rather than reset.
+    local k="$1" name t0 secs mark pid
+    name="${selected[$k]##*/}"
+    t0=$SECONDS
     # The suite runs in the background and is waited on, never in the
     # foreground: wait returns the moment a signal arrives, so the INT/TERM
-    # trap can stop the suite by the pid recorded here. Serial mode streams
-    # through tee for live output; the lanes capture to the log alone.
-    if [ "$jobs_n" -gt 1 ]; then
+    # trap can stop the suite by the pid recorded here. Serial runs stream
+    # straight through; only interleaved lanes capture to a log.
+    if [ -n "$parallel" ]; then
         nice -n 10 bash "${selected[$k]}" > "$logdir/$k.log" 2>&1 &
     else
-        nice -n 10 bash "${selected[$k]}" > >(tee "$logdir/$k.log") 2>&1 &
+        nice -n 10 bash "${selected[$k]}" 2>&1 &
     fi
     pid=$!
     printf '%s\n' "$pid" > "$logdir/$k.pid"
     wait "$pid" || : > "$logdir/$k.fail"
     rm -f "$logdir/$k.pid"
-    t1=$(date +%s)
-    secs=$((t1 - t0))
+    secs=$((SECONDS - t0))
     printf '%s\n' "$secs" > "$logdir/$k.secs"
     printf '%s\n' "$k" >> "$donefile"
     mark=""
@@ -240,7 +261,7 @@ run_suite() {  # index
     printf '[%s/%s] %s %ss%s\n' "$(grep -c . "$donefile")" "$total" "$name" "$secs" "$mark" >&2
 }
 
-if [ "$jobs_n" -gt 1 ] && [ "$total" -gt 1 ]; then
+if [ -n "$parallel" ]; then
     # Each suite writes to its own log keyed by position, so the report below
     # replays them in the same order a serial run would print them -- the
     # concurrency is invisible in the output. Failures are recorded as marker
@@ -261,17 +282,17 @@ if [ "$jobs_n" -gt 1 ] && [ "$total" -gt 1 ]; then
 
     k=0
     while [ "$k" -lt "$total" ]; do
-        echo "=== $(basename "${selected[$k]}") ==="
+        echo "=== ${selected[$k]##*/} ==="
         cat "$logdir/$k.log" 2>/dev/null
-        [ -f "$logdir/$k.fail" ] && failed+=("$(basename "${selected[$k]}")")
+        [ -f "$logdir/$k.fail" ] && failed+=("${selected[$k]##*/}")
         k=$((k + 1))
     done
 else
     k=0
     while [ "$k" -lt "$total" ]; do
-        echo "=== $(basename "${selected[$k]}") ==="
+        echo "=== ${selected[$k]##*/} ==="
         run_suite "$k"
-        [ -f "$logdir/$k.fail" ] && failed+=("$(basename "${selected[$k]}")")
+        [ -f "$logdir/$k.fail" ] && failed+=("${selected[$k]##*/}")
         k=$((k + 1))
     done
 fi
@@ -282,7 +303,9 @@ echo ""
 echo "slowest suites:"
 k=0
 while [ "$k" -lt "$total" ]; do
-    printf '%s %s\n' "$(cat "$logdir/$k.secs" 2>/dev/null || echo 0)" "$(basename "${selected[$k]}")"
+    secs=0
+    [ -f "$logdir/$k.secs" ] && read -r secs < "$logdir/$k.secs"
+    printf '%s %s\n' "${secs:-0}" "${selected[$k]##*/}"
     k=$((k + 1))
 done | sort -rn | head -10 | while read -r secs name; do
     printf '  %4ss  %s\n' "$secs" "$name"

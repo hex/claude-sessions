@@ -281,23 +281,26 @@ migrate_narrative_resume_wording() {
     # Only the actor's own narrative: a teammate's file is theirs to migrate on
     # their own resume, and a committed edit to its head would show up in their
     # teammates' digests as growth that is not a tail.
-    for f in "$mem/narrative.$(cs_actor_slug "$session_dir").md"; do
-        [ -f "$f" ] || continue
-        # Keyed to the description line specifically (not just "somewhere in the
-        # first 8 lines"): a cs-written narrative has exactly 7 header lines, so
-        # a body line beginning on line 8 sits inside a bare line-range window
-        # too and would otherwise be rewritten. No pipe into grep -q: under
-        # pipefail a huge first line can make `head -8 | grep -q` exit 141 and
-        # silently skip the file via `|| continue`.
-        awk 'NR <= 8 && /^description: .*Read (all|the live) narrative\.\*\.md on resume[.;]/ { f = 1 } NR > 8 { exit } END { exit !f }' "$f" || continue
+    f="$mem/narrative.$(cs_actor_slug "$session_dir").md"
+    # Keyed to the description line specifically (not just "somewhere in the
+    # first 8 lines"): a cs-written narrative has exactly 7 header lines, so
+    # a body line beginning on line 8 sits inside a bare line-range window
+    # too and would otherwise be rewritten. No pipe into grep -q: under
+    # pipefail a huge first line can make `head -8 | grep -q` exit 141 and
+    # silently skip the file.
+    if [ -f "$f" ] \
+        && awk 'NR <= 8 && /^description: .*Read (all|the live) narrative\.\*\.md on resume[.;]/ { f = 1 } NR > 8 { exit } END { exit !f }' "$f"; then
         tmp="$f.tmp"
-        sed '1,8{/^description: /{s/Read all narrative\.\*\.md on resume\./Its owner reads it in full on resume; anyone else reads only the lines the resume digest names. Older sections are archived under .cs\/narrative-archive\/./;s/Read the live narrative\.\*\.md on resume; older sections are archived under \.cs\/narrative-archive\/\./Its owner reads it in full on resume; anyone else reads only the lines the resume digest names. Older sections are archived under .cs\/narrative-archive\/./;};}' "$f" > "$tmp" \
+        # One replacement for both vintages: the pattern alternates, the
+        # sentence appears once, so a typo cannot migrate half the population
+        # to a wording no later gate matches.
+        sed -E '1,8{/^description: /s/Read (all narrative\.\*\.md on resume\.|the live narrative\.\*\.md on resume; older sections are archived under \.cs\/narrative-archive\/\.)/Its owner reads it in full on resume; anyone else reads only the lines the resume digest names. Older sections are archived under .cs\/narrative-archive\/./;}' "$f" > "$tmp" \
             && mv "$tmp" "$f"
-    done
+    fi
     f="$mem/MEMORY.md"
     if [ -f "$f" ] && grep -qE 'read (all|the live) narrative\.\*\.md on resume' "$f"; then
         tmp="$f.tmp"
-        sed 's/read all narrative\.\*\.md on resume/its owner reads it in full on resume, anyone else only the lines the resume digest names; older sections under .cs\/narrative-archive\//;s/read the live narrative\.\*\.md on resume, older sections under \.cs\/narrative-archive\//its owner reads it in full on resume, anyone else only the lines the resume digest names; older sections under .cs\/narrative-archive\//' "$f" > "$tmp" \
+        sed -E 's/read (all narrative\.\*\.md on resume|the live narrative\.\*\.md on resume, older sections under \.cs\/narrative-archive\/)/its owner reads it in full on resume, anyone else only the lines the resume digest names; older sections under .cs\/narrative-archive\//' "$f" > "$tmp" \
             && mv "$tmp" "$f"
     fi
     f="$session_dir/CLAUDE.local.md"
@@ -313,6 +316,11 @@ migrate_narrative_resume_wording() {
         tmp="$f.tmp"
         awk '
             function strip(s) { sub(/\r$/, "", s); return s }
+            function protocol_para() {
+                print "Append only to your own; on resume read your own in full, and a teammate narrative only"
+                print "from the line the resume digest names for it (nothing, when it names none). Older sections"
+                print "sit under .cs/narrative-archive/<actor>/ — grep on demand, never preload."
+            }
             {
                 cur = strip($0)
             }
@@ -320,9 +328,7 @@ migrate_narrative_resume_wording() {
                 line1 = $0
                 getline nextline
                 if (strip(nextline) ~ /^working narrative and see teammates/) {
-                    print "Append only to your own; on resume read your own in full, and a teammate narrative only"
-                    print "from the line the resume digest names for it (nothing, when it names none). Older sections"
-                    print "sit under .cs/narrative-archive/<actor>/ — grep on demand, never preload."
+                    protocol_para()
                     next
                 }
                 print line1; print nextline; next
@@ -335,9 +341,7 @@ migrate_narrative_resume_wording() {
                 line1 = $0
                 getline nextline
                 if (strip(nextline) ~ /^them small\)\. Older sections sit under/) {
-                    print "Append only to your own; on resume read your own in full, and a teammate narrative only"
-                    print "from the line the resume digest names for it (nothing, when it names none). Older sections"
-                    print "sit under .cs/narrative-archive/<actor>/ — grep on demand, never preload."
+                    protocol_para()
                     next
                 }
                 print line1; print nextline; next
@@ -348,9 +352,7 @@ migrate_narrative_resume_wording() {
                 getline line3
                 getline line4
                 if (strip(line2) ~ /^conflict\. Append only to your own/ && strip(line3) ~ /^narrative\.\*\.md on resume/) {
-                    print "Append only to your own; on resume read your own in full, and a teammate narrative only"
-                    print "from the line the resume digest names for it (nothing, when it names none). Older sections"
-                    print "sit under .cs/narrative-archive/<actor>/ — grep on demand, never preload."
+                    protocol_para()
                     next
                 }
                 print line1; print line2; print line3; print line4; next

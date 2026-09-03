@@ -334,6 +334,18 @@ test_run_all_changed_selects_the_suites_naming_the_path() {
     printf '%s' "$out" | grep -q 'changed: 1 path' || { echo "must say what it selected and why"; printf '%s\n' "$out"; return 1; }
 }
 
+# A one-suite selection is the normal --changed case, and it must still show
+# the suite's own output: the lane count says nothing about how many suites
+# there are, so a runner that captures on lane count alone and replays on
+# suite count discards everything the single suite printed.
+test_run_all_shows_suite_output_when_only_one_suite_runs() {
+    make_mapped_suite_dir
+    local out
+    out=$(CS_TEST_JOBS=4 CS_TEST_CHANGED="hooks/foo-hook.sh" CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" --changed 2>&1) || { echo "run failed"; printf '%s\n' "$out"; return 1; }
+    [ "$(ran_count)" -eq 1 ] || { echo "expected 1 suite, ran $(ran_count)"; return 1; }
+    printf '%s' "$out" | grep -q 'marker-from-test_fake1.sh' || { echo "the only suite's output was swallowed"; printf '%s\n' "$out"; return 1; }
+}
+
 test_run_all_changed_runs_its_own_suite_for_a_test_file() {
     make_mapped_suite_dir
     local out
@@ -433,10 +445,21 @@ run_test test_run_all_keeps_at_least_one_lane_on_a_single_core
 run_test test_run_all_runs_suites_under_nice
 run_test test_run_all_changed_selects_the_suites_naming_the_path
 run_test test_run_all_changed_runs_its_own_suite_for_a_test_file
+run_test test_run_all_shows_suite_output_when_only_one_suite_runs
 run_test test_run_all_changed_falls_back_to_the_full_gate_for_lib
 run_test test_run_all_changed_falls_back_for_the_harness_and_an_unmapped_path
 run_test test_run_all_changed_ignores_non_code_paths
+# The Rust crate has no bash suite: cargo test covers it, so a tui/ edit must
+# not fall through to the full gate the way an unrecognised source path does.
+test_run_all_changed_ignores_the_rust_crate() {
+    make_mapped_suite_dir
+    local out
+    out=$(CS_TEST_CHANGED="tui/src/main.rs" CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" --changed 2>&1) || { echo "run failed"; printf '%s\n' "$out"; return 1; }
+    [ "$(ran_count)" -eq 0 ] || { echo "a tui-only change must run no bash suite, ran $(ran_count)"; printf '%s\n' "$out"; return 1; }
+}
+
 run_test test_run_all_changed_treats_skill_markdown_as_source
+run_test test_run_all_changed_ignores_the_rust_crate
 run_test test_run_all_changed_with_nothing_changed_runs_nothing
 run_test test_run_all_changed_unions_several_paths
 

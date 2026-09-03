@@ -548,25 +548,35 @@ if [ "$SOURCE" = "resume" ] && git -C "$SESSION_DIR" rev-parse --git-dir >/dev/n
         # head-truncating rotation cannot move it. The actor's own file is
         # read in full and is not a delta.
         NARRATIVE_DELTA=""
+        # One renderer for both paths: the tracked loop and the untracked one
+        # below describe the same thing to the model, and two copies of the
+        # sentence drift apart while both their tests stay green.
+        _add_delta() {  # path sections start
+            [ "$1" = ".cs/memory/narrative.$ACTOR_SLUG.md" ] && return 0
+            NARRATIVE_DELTA="${NARRATIVE_DELTA}${NARRATIVE_DELTA:+; }$1: $2 new section(s) from line $3"
+        }
         while IFS=$'\t' read -r _added _deleted _path; do
             case "$_path" in .cs/memory/narrative.*.md) ;; *) continue ;; esac
-            [ "$_path" = ".cs/memory/narrative.$ACTOR_SLUG.md" ] && continue
             [ -f "$SESSION_DIR/$_path" ] || continue
             case "$_added" in ''|-|0) continue ;; esac
-            _hunks=$(git -C "$SESSION_DIR" diff -U0 "$LAST_SEEN" -- "$_path" 2>/dev/null || true)
-            _sections=$(printf '%s\n' "$_hunks" | grep -c '^+## ' || true)
-            _start=$(printf '%s\n' "$_hunks" | awk '/^@@/ { split($3, p, ","); n = (p[2] == "" ? 1 : p[2]); if (n > 0) s = substr(p[1], 2) } END { print s }')
-            [ -n "$_start" ] || continue
-            NARRATIVE_DELTA="${NARRATIVE_DELTA}${NARRATIVE_DELTA:+; }${_path}: ${_sections} new section(s) from line ${_start}"
+            # One pass for both numbers: the diff of a rotated narrative is
+            # the size of the file, and piping it twice costs two copies of it.
+            # Only @@ lines are read, so a mnemonic-prefix diff config cannot
+            # change what this parses.
+            _delta=$(git -C "$SESSION_DIR" diff -U0 "$LAST_SEEN" -- "$_path" 2>/dev/null \
+                | awk '/^@@/ { split($3, p, ","); n = (p[2] == "" ? 1 : p[2]); if (n > 0) s = substr(p[1], 2); next }
+                       /^\+## / { sec++ }
+                       END { if (s != "") printf "%s %s", sec + 0, s }' || true)
+            [ -n "$_delta" ] || continue
+            _add_delta "$_path" ${_delta}
         done <<NUMSTAT
 $(git -C "$SESSION_DIR" diff --numstat --relative "$LAST_SEEN" -- .cs/memory 2>/dev/null || true)
 NUMSTAT
         # A teammate who has never committed their narrative is still a teammate.
         while IFS= read -r _path; do
             [ -n "$_path" ] || continue
-            [ "$_path" = ".cs/memory/narrative.$ACTOR_SLUG.md" ] && continue
             _sections=$(grep -c '^## ' "$SESSION_DIR/$_path" 2>/dev/null || true)
-            NARRATIVE_DELTA="${NARRATIVE_DELTA}${NARRATIVE_DELTA:+; }${_path}: ${_sections} new section(s) from line 1"
+            _add_delta "$_path" "$_sections" 1
         done <<UNTRACKED
 $(git -C "$SESSION_DIR" ls-files --others --exclude-standard -- '.cs/memory/narrative.*.md' 2>/dev/null || true)
 UNTRACKED

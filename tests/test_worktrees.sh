@@ -259,16 +259,20 @@ test_worktree_launch_exports_base_identity() {
 # opt in or those instructions land on a conversation with no list to keep.
 # CS_NO_TASK_TOOLS=1 leaves the choice to Claude Code for users who want the
 # context back.
+# Both launches run under `env -u CLAUDE_CODE_ENABLE_TODO_TOOLS`: a cs session
+# exports it, so a suite run from inside one inherits it and the opt-out arm
+# reads the developer's environment instead of what cs decided. CI never sets
+# it, so the failure appears only on a developer machine.
 test_launch_enables_the_task_tools_unless_opted_out() {
     local stub env_out
     stub=$(_make_env_stub)
     for _try in 1 2 3 4 5; do
-        env_out=$(CLAUDE_CODE_BIN="$stub" "$CS_BIN" "tasktools" <<< "n" 2>/dev/null || true)
+        env_out=$(env -u CLAUDE_CODE_ENABLE_TODO_TOOLS CLAUDE_CODE_BIN="$stub" "$CS_BIN" "tasktools" <<< "n" 2>/dev/null || true)
         case "$env_out" in *"CLAUDE_SESSION_NAME=tasktools"*) break ;; esac
     done
     assert_output_contains "$env_out" "CLAUDE_CODE_ENABLE_TODO_TOOLS=1" "a cs launch opts the session into the Task tools" || return 1
     for _try in 1 2 3 4 5; do
-        env_out=$(CS_NO_TASK_TOOLS=1 CLAUDE_CODE_BIN="$stub" "$CS_BIN" "tasktools-off" <<< "n" 2>/dev/null || true)
+        env_out=$(env -u CLAUDE_CODE_ENABLE_TODO_TOOLS CS_NO_TASK_TOOLS=1 CLAUDE_CODE_BIN="$stub" "$CS_BIN" "tasktools-off" <<< "n" 2>/dev/null || true)
         case "$env_out" in *"CLAUDE_SESSION_NAME=tasktools-off"*) break ;; esac
     done
     assert_output_not_contains "$env_out" "CLAUDE_CODE_ENABLE_TODO_TOOLS=" "CS_NO_TASK_TOOLS leaves the decision to Claude Code" || return 1

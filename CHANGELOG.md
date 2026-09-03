@@ -4,6 +4,33 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.9.7
+
+A resume used to tell Claude to read every narrative in the session. One of them is 801 KB, so nobody did, and the instruction was a fiction. It now says where each teammate notebook grew and nothing more. Separately, the test gate stops taking the machine down with it.
+
+### Features
+
+**The resume digest names where each teammate narrative grew.** It compares your `.cs/local/watermark` against the working tree and reports, per teammate notebook, how many sections it gained and the line the new content starts on. A notebook nobody has committed yet counts from line 1, and the digest names still-uncommitted growth again on each resume until a commit carries it. Read your own narrative in full; read a teammate's only from the line the digest names.
+
+**Every surface says the same thing.** The `CLAUDE.local.md` template, the narrative frontmatter and its `MEMORY.md` pointer, the three session-start context blocks, `/summary`, `/wrap`, the README and the docs. Resuming an older session rewrites the previous wording in place, the way it rewrote the wording before that.
+
+**The test gate leaves the machine usable.** `tests/run_all.sh` prints one line per suite as it finishes and ranks the ten slowest, takes half the cores above four, runs every suite under `nice`, and refuses a second gate on the same checkout instead of stacking. `--changed` runs only the suites a change can reach; a full gate that took 1413 s while stacked now takes 279 s.
+
+### Fixes
+
+- **`run_all.sh --changed` no longer swallows a single suite's output.** The capture and the replay disagreed about what counts as parallel, so a one-suite selection on a multi-lane box ran the suite and discarded everything it printed, including the failure text. That is the exact shape of the edit loop.
+- **A Rust-only change runs no bash suite.** `tui/` was missing from the ignore list, so editing the crate ran all 63 suites for code none of them reads.
+- **The migration rewrites your own narrative, not your teammates'.** It looped over every notebook in `.cs/memory`, and a committed edit to a teammate's head shows up in their teammates' digests as growth that is not a tail.
+- **A current `CLAUDE.local.md` stays untouched.** The rewrite gate matched the current template's own text, so every resume of every session rewrote the file: identical content, a new mtime, and a symlinked file replaced by a regular one.
+- **The digest survives a session inside a larger repository.** `git diff --numstat` prints repo-root paths, so a session in a subdirectory never matched its own `.cs/memory` files.
+- **A head edit no longer drags the reader to the top of the file.** The start line comes from the last hunk that adds lines, so rewriting a description line reports no growth rather than pointing at line 3 of an 801 KB notebook.
+
+### Other
+
+- A test parses every hook under bash 3.2: an apostrophe inside a heredoc inside a command substitution parses under bash 5 and fails on the floor shell, and every local gate had missed it.
+- One `git diff` per teammate notebook instead of three, and the gate drops roughly 250 forks per run.
+- `test_worktrees.sh` no longer asserts the developer's environment: cs exports the variable the opt-out test expects to be unset.
+
 ## 2026.9.6
 
 Every cs session gets the native task list back. A tmux teammate no longer speaks for the lead: it cannot drain the queue, overwrite the context reading, or re-arm a one-time notice.
