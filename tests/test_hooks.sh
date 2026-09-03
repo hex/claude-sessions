@@ -687,6 +687,29 @@ test_resume_digest_names_where_a_teammates_narrative_grew() {
         "the whole-file skim instruction is gone" || return 1
 }
 
+# Rotation head-truncates a narrative (oldest sections move to the archive), so
+# the file can shrink at the top while it grows at the tail. The start line is
+# still (lines now - lines added + 1), and the count is of added sections only.
+test_resume_digest_delta_survives_a_rotated_teammate_narrative() {
+    session_start_setup
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    local bob="$CLAUDE_SESSION_DIR/.cs/memory/narrative.bob.md"
+    printf -- '---\nname: session-narrative-bob\ntype: narrative\n---\n# Session narrative (bob)\n\n## 2026-01-01 first\nold finding\n\n## 2026-01-02 second\nanother old finding\n' > "$bob"
+    ( cd "$CLAUDE_SESSION_DIR" && git add -A && git commit -q -m "narratives" --author="Bob <bob@example.com>" )
+    git -C "$CLAUDE_SESSION_DIR" rev-parse HEAD > "$CLAUDE_SESSION_META_DIR/local/watermark"
+    # Rotate away the first section (3 lines gone from the head), then append one.
+    printf -- '---\nname: session-narrative-bob\ntype: narrative\n---\n# Session narrative (bob)\n\n## 2026-01-02 second\nanother old finding\n\n## 2026-01-03 third\nnew finding\n' > "$bob"
+    ( cd "$CLAUDE_SESSION_DIR" && git add -A && git commit -q -m "rotate and append" --author="Bob <bob@example.com>" )
+
+    local output context
+    output=$(echo '{"session_id":"s","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+    # 11 lines now, 3 added: the new section starts on line 9.
+    assert_output_contains "$context" "narrative.bob.md: 1 new section(s) from line 9" \
+        "after a head-truncating rotation the delta is still the tail" || return 1
+}
+
 test_resume_digest_silent_without_watermark() {
     session_start_setup
     rm -f "$CLAUDE_SESSION_META_DIR/local/watermark"
@@ -1485,6 +1508,7 @@ run_test test_session_start_secrets_guidance_is_stdin_and_backend_neutral
 run_test test_resume_digest_reports_memory_activity
 run_test test_resume_digest_silent_without_watermark
 run_test test_resume_digest_names_where_a_teammates_narrative_grew
+run_test test_resume_digest_delta_survives_a_rotated_teammate_narrative
 run_test test_session_start_includes_sibling_sessions
 run_test test_session_start_excludes_current_session
 run_test test_session_start_sibling_block_mandates_asking

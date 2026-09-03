@@ -306,7 +306,7 @@ migrate_narrative_resume_wording() {
     # Either grep alternative can match a line that a CRLF checkout split
     # from its neighbour with a trailing \r, so the gate itself does not need
     # \r-tolerance — only the awk's line-for-line comparisons do.
-    if [ -f "$f" ] && grep -qE 'read all narrative\.\*\.md on resume to restore your|so co-developers never|on resume read the live narrative\.\*\.md \(rotation keeps' "$f"; then
+    if [ -f "$f" ] && grep -qE "read all narrative\.\*\.md on resume to restore your|so co-developers never|on resume read the live narrative\.\*\.md \(rotation keeps|lab notebooks \(yours \+ teammates'\)" "$f"; then
         tmp="$f.tmp"
         awk '
             function strip(s) { sub(/\r$/, "", s); return s }
@@ -323,6 +323,10 @@ migrate_narrative_resume_wording() {
                     next
                 }
                 print line1; print nextline; next
+            }
+            cur == "3. **.cs/memory/narrative.*.md** - Per-actor lab notebooks (yours + teammates\047): findings, in-progress state, observations" {
+                print "3. **.cs/memory/narrative.<actor>.md** - Per-actor lab notebooks: findings, in-progress state, observations. Yours in full; a teammate\047s only where the resume digest says it grew"
+                next
             }
             cur == "Append only to your own; on resume read the live narrative.*.md (rotation keeps" {
                 line1 = $0

@@ -355,9 +355,12 @@ test_migrate_rewrites_read_the_live_wording_cs_wrote() {
         > "$dir/.cs/memory/narrative.alice.md"
     printf -- '- [Session narrative — alice (lab notebook)](narrative.alice.md): looser-bar work-in-progress; read the live narrative.*.md on resume, older sections under .cs/narrative-archive/\n' \
         > "$dir/.cs/memory/MEMORY.md"
-    printf '<!-- cs:session-protocol -->\n# Session Documentation Protocol\n\nAppend only to your own; on resume read the live narrative.*.md (rotation keeps\nthem small). Older sections sit under .cs/narrative-archive/<actor>/ — grep on demand, never preload.\n\n<!-- cs:memory-note -->\nnote\n' \
+    printf '<!-- cs:session-protocol -->\n# Session Documentation Protocol\n\n3. **.cs/memory/narrative.*.md** - Per-actor lab notebooks (yours + teammates'"'"'): findings, in-progress state, observations\n\nAppend only to your own; on resume read the live narrative.*.md (rotation keeps\nthem small). Older sections sit under .cs/narrative-archive/<actor>/ — grep on demand, never preload.\n\n<!-- cs:memory-note -->\nnote\n' \
         > "$dir/CLAUDE.local.md"
     CS_ACTOR=alice "$CS_BIN" "livewordy" < /dev/null > /dev/null 2>&1 || true
+    assert_file_not_contains "$dir/CLAUDE.local.md" "yours + teammates" "the read-list item is rewritten too" || return 1
+    assert_file_contains "$dir/CLAUDE.local.md" "Yours in full; a teammate's only where the resume digest says it grew" \
+        "the read-list item carries the delta rule" || return 1
 
     local desc
     desc=$(sed -n '3p' "$dir/.cs/memory/narrative.alice.md")
