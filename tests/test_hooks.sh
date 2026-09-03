@@ -654,6 +654,39 @@ test_resume_digest_reports_memory_activity() {
     assert_eq "$head" "$wm" "watermark should advance to HEAD after resume" || return 1
 }
 
+# Nobody can read a teammate's whole narrative on resume (one dormant file
+# measured 801 KB). Narratives are append-only, so everything committed since
+# this actor's watermark is a tail: the digest names each teammate file that
+# grew, how many sections were added, and the line the new content starts on.
+# The actor's own file is read in full and never listed here.
+test_resume_digest_names_where_a_teammates_narrative_grew() {
+    session_start_setup
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    local bob="$CLAUDE_SESSION_DIR/.cs/memory/narrative.bob.md"
+    local mine="$CLAUDE_SESSION_DIR/.cs/memory/narrative.t-t.md"
+    printf -- '---\nname: session-narrative-bob\ndescription: lab notebook\ntype: narrative\n---\n# Session narrative (bob)\n\n## 2026-01-01 first\nold finding\n\n## 2026-01-02 second\nanother old finding\n' > "$bob"
+    printf -- '---\nname: session-narrative-t-t\ntype: narrative\n---\n## mine\nown line\n' > "$mine"
+    ( cd "$CLAUDE_SESSION_DIR" && git add -A && git commit -q -m "narratives" --author="Bob <bob@example.com>" )
+    git -C "$CLAUDE_SESSION_DIR" rev-parse HEAD > "$CLAUDE_SESSION_META_DIR/local/watermark"
+    # bob's file is 12 lines; the appended section starts on line 13.
+    printf -- '\n## 2026-01-03 third\nnew finding\n' >> "$bob"
+    printf -- '\n## mine again\nown new line\n' >> "$mine"
+    ( cd "$CLAUDE_SESSION_DIR" && git add -A && git commit -q -m "append" --author="Bob <bob@example.com>" )
+
+    local output context
+    output=$(echo '{"session_id":"s","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+    assert_output_contains "$context" "narrative.bob.md: 1 new section(s) from line 13" \
+        "digest must name the teammate file, the section count and the first new line" || return 1
+    assert_output_contains "$context" "narrative.t-t.md in full" \
+        "digest must tell the actor to read its own narrative in full" || return 1
+    assert_output_not_contains "$context" "narrative\.t-t\.md: [0-9][0-9]* new section" \
+        "the actor's own narrative is never listed as a teammate delta" || return 1
+    assert_output_not_contains "$context" "Skim their narrative" \
+        "the whole-file skim instruction is gone" || return 1
+}
+
 test_resume_digest_silent_without_watermark() {
     session_start_setup
     rm -f "$CLAUDE_SESSION_META_DIR/local/watermark"
@@ -1451,6 +1484,7 @@ run_test test_session_start_narrative_is_per_actor
 run_test test_session_start_secrets_guidance_is_stdin_and_backend_neutral
 run_test test_resume_digest_reports_memory_activity
 run_test test_resume_digest_silent_without_watermark
+run_test test_resume_digest_names_where_a_teammates_narrative_grew
 run_test test_session_start_includes_sibling_sessions
 run_test test_session_start_excludes_current_session
 run_test test_session_start_sibling_block_mandates_asking

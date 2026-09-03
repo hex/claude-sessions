@@ -536,7 +536,31 @@ if [ "$SOURCE" = "resume" ] && git -C "$SESSION_DIR" rev-parse --git-dir >/dev/n
             | sed 's/^[[:space:]]*\([0-9][0-9]*\)[[:space:]]*\(.*\)$/\2 (\1)/' \
             | paste -sd', ' - 2>/dev/null || true)
         if [ -n "$DIGEST" ]; then
-            DYNAMIC="${DYNAMIC}Since your last session, teammates committed to shared memory/narrative (author: commits): ${DIGEST}. Skim their narrative.*.md before working in overlapping areas.${_NL}"
+            # Narratives are append-only (head-truncated only by rotation), so
+            # every line a teammate committed since the watermark sits at the
+            # tail of the current file: it starts at (lines now - lines added).
+            # Reading a whole teammate narrative is not an option (one dormant
+            # file measured 801 KB); the digest names the tail instead. The
+            # actor's own file is read in full and is not a delta.
+            NARRATIVE_DELTA=""
+            while IFS=$'\t' read -r _added _deleted _path; do
+                case "$_path" in .cs/memory/narrative.*.md) ;; *) continue ;; esac
+                [ "$_path" = ".cs/memory/narrative.$ACTOR_SLUG.md" ] && continue
+                [ -f "$SESSION_DIR/$_path" ] || continue
+                case "$_added" in ''|-|0) continue ;; esac
+                _total=$(wc -l < "$SESSION_DIR/$_path" | tr -d '[:space:]')
+                _sections=$(git -C "$SESSION_DIR" diff -U0 "$LAST_SEEN..HEAD" -- "$_path" 2>/dev/null | grep -c '^+## ' || true)
+                NARRATIVE_DELTA="${NARRATIVE_DELTA}${NARRATIVE_DELTA:+; }${_path}: ${_sections} new section(s) from line $((_total - _added + 1))"
+            done <<NUMSTAT
+$(git -C "$SESSION_DIR" diff --numstat "$LAST_SEEN..HEAD" -- .cs/memory 2>/dev/null || true)
+NUMSTAT
+            DYNAMIC="${DYNAMIC}Since your last session, teammates committed to shared memory/narrative (author: commits): ${DIGEST}."
+            if [ -n "$NARRATIVE_DELTA" ]; then
+                DYNAMIC="${DYNAMIC} Their narratives grew: ${NARRATIVE_DELTA}. Read your own narrative.$ACTOR_SLUG.md in full, and of theirs only those added lines (sed -n 'N,\$p'), never the whole file."
+            else
+                DYNAMIC="${DYNAMIC} No teammate narrative grew; read your own narrative.$ACTOR_SLUG.md in full and none of theirs."
+            fi
+            DYNAMIC="${DYNAMIC}${_NL}"
         fi
     fi
     # Advance the watermark to current HEAD (also seeds it on first resume).
