@@ -1,5 +1,5 @@
 ---
-model: fable
+model: opus
 name: rotate
 description: Rotate the current cs conversation - write a lineage-stamped handoff to .cs/handoffs/, arm it, and tell the user to run /clear so a fresh conversation continues from it. Invoke when the user asks to rotate, or accepts a context-heavy rotation suggestion.
 ---

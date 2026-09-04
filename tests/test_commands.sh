@@ -78,7 +78,7 @@ test_wrap_family_pinned_to_opus() {
     # judgment work, and the summary is the artifact the session is remembered
     # by, so these three passes run on the strongest model.
     # The family alias, not a point release: `claude-opus-5` would keep an
-    # older Opus once a newer one ships, the same aging the rotate pin avoids.
+    # older Opus once a newer one ships.
     local cmd
     for cmd in wrap.md sweep.md summary.md; do
         assert_file_contains "$COMMANDS_DIR/$cmd" "^model: opus$" \

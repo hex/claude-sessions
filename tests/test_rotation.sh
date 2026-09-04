@@ -215,14 +215,18 @@ test_rotate_skill_arms_last() {
         || { echo "  FAIL: arming must precede telling the user to /clear"; return 1; }
 }
 
-test_rotate_skill_pins_the_strongest_model() {
+test_rotate_skill_pins_a_model_that_cannot_refuse() {
     local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
-    # The family alias, not a point release. `claude-fable-5` would DOWNGRADE a
-    # session already on 5.1 to the older model — the opposite of "strongest
-    # available" — and a prefix regex would match both ids and never notice
-    # the pin aging. The bundle documents `fable` as a valid override.
-    assert_file_contains "$skill" "^model: fable$" \
-        "the rotate skill must pin the fable family, not a point release" || return 1
+    # A handoff is selection under judgment, and author draw moves what a
+    # successor can recover as much as length does, so the artifact gets a
+    # quality floor rather than whatever model the session happens to be on.
+    # The family alias, not a point release: a point release keeps an older
+    # Opus once a newer one ships, and a prefix regex would match both ids and
+    # never notice the pin aging. Fable is unusable here whatever its quality:
+    # it is the one model that requires usage credits, so a session out of
+    # credits loses the command at the exact moment context is nearly full.
+    assert_file_contains "$skill" "^model: opus$" \
+        "the rotate skill must pin the opus family, not a point release and not a credit-gated model" || return 1
     if [ "$(head -1 "$skill")" != "---" ]; then
         echo "  FAIL: the skill must open with a YAML frontmatter block"
         return 1
@@ -387,7 +391,7 @@ run_test test_rotate_skill_has_a_home_for_rejected_alternatives
 run_test test_rotate_skill_requires_provenance_on_claims
 run_test test_rotate_skill_puts_the_next_step_first
 run_test test_rotate_skill_arms_last
-run_test test_rotate_skill_pins_the_strongest_model
+run_test test_rotate_skill_pins_a_model_that_cannot_refuse
 run_test test_rotate_skill_keeps_the_users_words_close
 run_test test_rotate_skill_spends_length_asymmetrically
 run_test test_rotate_skill_says_native_tasks_survive_the_clear
