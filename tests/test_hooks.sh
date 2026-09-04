@@ -770,7 +770,11 @@ test_resume_digest_reports_uncommitted_teammate_growth() {
 }
 
 # A teammate who has not committed their narrative at all is still a teammate.
-test_resume_digest_names_an_untracked_teammate_narrative() {
+# A never-committed teammate narrative has no watermark to measure against, so
+# the only honest report is its whole length — which is the instruction this
+# digest exists to replace, repeated on every resume with no state that could
+# ever stop it. Silence is what a resume did before the digest existed.
+test_resume_digest_says_nothing_about_an_untracked_teammate_narrative() {
     session_start_setup
     mkdir -p "$CLAUDE_SESSION_META_DIR/local"
     git -C "$CLAUDE_SESSION_DIR" rev-parse HEAD > "$CLAUDE_SESSION_META_DIR/local/watermark"
@@ -781,8 +785,8 @@ test_resume_digest_names_an_untracked_teammate_narrative() {
     output=$(echo '{"session_id":"s","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
         | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
     context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
-    assert_output_contains "$context" "narrative.bob.md: 2 new section(s) from line 1" \
-        "an untracked teammate narrative is reported from its first line" || return 1
+    assert_output_not_contains "$context" "narrative\.bob\.md" \
+        "an untracked teammate narrative must not be named at all" || return 1
 }
 
 # A head edit (the migration rewriting a description line, a dated correction)
@@ -1643,7 +1647,7 @@ run_test test_resume_digest_delta_survives_a_rotated_teammate_narrative
 run_test test_resume_digest_counts_two_commits_and_an_uncommitted_tail
 run_test test_hooks_parse_under_bin_bash
 run_test test_resume_digest_reports_uncommitted_teammate_growth
-run_test test_resume_digest_names_an_untracked_teammate_narrative
+run_test test_resume_digest_says_nothing_about_an_untracked_teammate_narrative
 run_test test_resume_digest_start_line_ignores_a_head_edit
 run_test test_resume_digest_works_when_the_session_is_a_repo_subdirectory
 run_test test_resume_digest_silent_when_nothing_changed

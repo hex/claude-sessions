@@ -546,7 +546,9 @@ if [ "$SOURCE" = "resume" ] && git -C "$SESSION_DIR" rev-parse --git-dir >/dev/n
         # is appended, so it is the final hunk, while a head edit (the
         # migration rewriting a description line, a dated correction) or a
         # head-truncating rotation cannot move it. The actor's own file is
-        # read in full and is not a delta.
+        # read in full and is not a delta. A narrative nobody has committed
+        # has nothing to measure against, so it goes unmentioned rather than
+        # named whole on every resume.
         NARRATIVE_DELTA=""
         # One renderer for both paths: the tracked loop and the untracked one
         # below describe the same thing to the model, and two copies of the
@@ -572,14 +574,6 @@ if [ "$SOURCE" = "resume" ] && git -C "$SESSION_DIR" rev-parse --git-dir >/dev/n
         done <<NUMSTAT
 $(git -C "$SESSION_DIR" diff --numstat --relative "$LAST_SEEN" -- .cs/memory 2>/dev/null || true)
 NUMSTAT
-        # A teammate who has never committed their narrative is still a teammate.
-        while IFS= read -r _path; do
-            [ -n "$_path" ] || continue
-            _sections=$(grep -c '^## ' "$SESSION_DIR/$_path" 2>/dev/null || true)
-            _add_delta "$_path" "$_sections" 1
-        done <<UNTRACKED
-$(git -C "$SESSION_DIR" ls-files --others --exclude-standard -- '.cs/memory/narrative.*.md' 2>/dev/null || true)
-UNTRACKED
         DELTA_TAIL=""
         if [ -n "$NARRATIVE_DELTA" ]; then
             DELTA_TAIL="teammate narratives grew: ${NARRATIVE_DELTA}. Read your own narrative.$ACTOR_SLUG.md in full, and of theirs only those added lines (sed -n 'N,\$p'), never the whole file."
