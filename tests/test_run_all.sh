@@ -74,7 +74,12 @@ test_run_all_runs_every_suite_exactly_once() {
 test_run_all_skips_the_shared_harness() {
     make_suite_dir 3
     local out
-    out=$(CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" 2>&1) || return 1
+    # Pin the lanes. Unset, the nested runner reads the host's core count, so
+    # this asserted the developer's machine: 8 lanes on a many-core box, nested
+    # inside the outer gate's own lanes, and one suite's log came back empty.
+    # Three still exercises interleaved collection, and does it the same way
+    # everywhere.
+    out=$(CS_TEST_JOBS=3 CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" 2>&1) || return 1
     [ ! -f "$RAN_DIR/test_lib.sh" ] || { echo "test_lib.sh was run as a suite"; return 1; }
     printf '%s' "$out" | grep -q 'all 3 suites passed' || { echo "harness counted as a suite"; return 1; }
 }

@@ -766,31 +766,49 @@ fi
 # a subagent the ambient session id names the parent. The consent belongs to a
 # turn that can ask a human, so the nudge asks the model to ask.
 ADVISOR_NUDGE=""
-ADVISOR_COOLDOWN_FILE="$META_DIR/.advisor-nudge-cooldown"
+# .cs/local/, not the session root: this is per-machine state, and every
+# session already gitignores that directory. A stamp at the root would ride
+# into a git-synced session and conflict between machines.
+ADVISOR_COOLDOWN_FILE="$META_DIR/local/.advisor-nudge-cooldown"
 ADVISOR_COOLDOWN_SECONDS=1800  # 30 minutes: a standing reminder, not a nag
 
 _council_is_installed() {
     local record path
-    record="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_plugins.json"
+    # HOME can be unset, and a bare expansion under `set -u` aborts the hook
+    # before it emits, losing the reminder entirely.
+    record="${CLAUDE_CONFIG_DIR:-${HOME:-/nonexistent}/.claude}/plugins/installed_plugins.json"
     [ -r "$record" ] || return 1
     command -v jq >/dev/null 2>&1 || return 1
-    # installPath is authoritative and version-current; a computed path would go
-    # stale on the next plugin update.
-    path=$(jq -r '.plugins["claude-council@hex-plugins"][0].installPath // empty' \
-        "$record" 2>/dev/null | tr -d '\r')
-    [ -n "$path" ] || return 1
-    # The record outlives an uninstall, so the command file decides, not the
-    # record: suggesting a command the user cannot run is worse than silence.
-    [ -f "$path/commands/advise.md" ]
+    # Every entry under any marketplace, not just [0] of the hex one: a plugin
+    # carries one record per scope in no guaranteed order, and the docs promise
+    # "when the plugin is present" rather than "when it came from one source".
+    # installPath is read rather than computed — a computed path goes stale on
+    # the next update.
+    while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        # The record outlives an uninstall, so the command file decides, not
+        # the record: naming a command the user cannot run is worse than silence.
+        [ -f "$path/commands/advise.md" ] && return 0
+    done <<EOF
+$(jq -r '(.plugins // {}) | to_entries[]
+         | select(.key | startswith("claude-council@"))
+         | .value[]?.installPath // empty' "$record" 2>/dev/null | tr -d '\r')
+EOF
+    return 1
 }
 
-if _council_is_installed; then
+# Lead only. A tmux teammate is a full claude in the same directory with its
+# own Stop, and the cooldown is one stamp for the session: an ungated nudge
+# lets a teammate consume the lead's slot, and in a walk-away run the lead can
+# stop seeing the suggestion altogether.
+if _mail_is_lead && _council_is_installed; then
     _adv_last=0
     if [ -f "$ADVISOR_COOLDOWN_FILE" ]; then
         _adv_last=$(_num_or "$(cat "$ADVISOR_COOLDOWN_FILE" 2>/dev/null | tr -d '[:space:]')" 0)
+        _adv_last=$((10#$_adv_last))
     fi
     if [ "$((CURRENT_TIME - _adv_last))" -ge "$ADVISOR_COOLDOWN_SECONDS" ]; then
-        echo "$CURRENT_TIME" > "$ADVISOR_COOLDOWN_FILE"
+        echo "$CURRENT_TIME" > "$ADVISOR_COOLDOWN_FILE" 2>/dev/null || true
         ADVISOR_NUDGE=" Standing note: at a real decision point — about to commit to an approach, stuck after repeated attempts, or about to call the work done — \`/claude-council:advise\` puts this conversation to external models for a second opinion. You judge whether the moment qualifies; most turns do not. It sends a digest of the conversation to third-party providers, so ask the user before running it and show them what would go."
     fi
 fi

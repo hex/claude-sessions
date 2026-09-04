@@ -4,6 +4,18 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.9.9
+
+### Features
+- The Stop reminder names `/claude-council:advise` when you have the [claude-council](https://github.com/hex/claude-council) plugin, so a second opinion is one command away at a decision point. It suggests and never sends, and asks Claude to check with you first, because the digest goes to third-party providers. Detection reads `installPath` from the plugin record and then requires the command file on disk, so an uninstall that leaves its record behind produces silence rather than a command you cannot run. Only the launched conversation nudges, at most once every 30 minutes.
+
+### Fixes
+- The test gate no longer reports success when a suite's output goes missing. A lane that died printed a header with an empty body and the run still ended `OK`, so a lost suite read as a quiet one. It now names the suite and fails.
+- Pin the lane count in the gate runner's own output test. It read the host's core count, so it ran eight lanes on a many-core machine and three on a laptop, and only the wide one lost a log.
+
+### Docs
+- Document the advisor note in `docs/hooks.md` and the README feature list.
+
 ## 2026.9.8
 
 `/rotate` answered "You're out of usage credits" and did nothing. Fable is the one model that needs credits, so pinning a skill to it means the command dies exactly when context is nearly full and the handoff is most expensive to lose.

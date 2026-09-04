@@ -283,7 +283,14 @@ if [ -n "$parallel" ]; then
     k=0
     while [ "$k" -lt "$total" ]; do
         echo "=== ${selected[$k]##*/} ==="
-        cat "$logdir/$k.log" 2>/dev/null
+        if [ -f "$logdir/$k.log" ]; then
+            cat "$logdir/$k.log"
+        else
+            # Without this the header prints with an empty body and the run
+            # still reports OK, so a lane that died looks like a quiet suite.
+            echo "no log captured for ${selected[$k]##*/} — treating as a failure" >&2
+            failed+=("${selected[$k]##*/}")
+        fi
         [ -f "$logdir/$k.fail" ] && failed+=("${selected[$k]##*/}")
         k=$((k + 1))
     done

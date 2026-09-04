@@ -2430,7 +2430,7 @@ test_advisor_nudge_appears_when_the_council_is_installed() {
     echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
     _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" \
-          "$CLAUDE_SESSION_META_DIR/.advisor-nudge-cooldown"
+          "$CLAUDE_SESSION_META_DIR/local/.advisor-nudge-cooldown"
 
     local output
     output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
@@ -2446,7 +2446,7 @@ test_advisor_nudge_is_silent_when_the_recorded_path_is_gone() {
     echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
     _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" \
-          "$CLAUDE_SESSION_META_DIR/.advisor-nudge-cooldown"
+          "$CLAUDE_SESSION_META_DIR/local/.advisor-nudge-cooldown"
 
     local output
     output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
@@ -2460,7 +2460,7 @@ test_advisor_nudge_tells_the_model_to_ask_before_sending() {
     echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
     _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" \
-          "$CLAUDE_SESSION_META_DIR/.advisor-nudge-cooldown"
+          "$CLAUDE_SESSION_META_DIR/local/.advisor-nudge-cooldown"
 
     local output
     output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
@@ -2473,7 +2473,7 @@ test_advisor_nudge_tells_the_model_to_ask_before_sending() {
 test_advisor_nudge_does_not_repeat_within_its_cooldown() {
     _install_fake_council
     echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
-    date +%s > "$CLAUDE_SESSION_META_DIR/.advisor-nudge-cooldown"
+    date +%s > "$CLAUDE_SESSION_META_DIR/local/.advisor-nudge-cooldown"
     _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
 
@@ -2490,5 +2490,161 @@ run_test test_advisor_nudge_is_silent_when_the_recorded_path_is_gone
 run_test test_advisor_nudge_tells_the_model_to_ask_before_sending
 run_test test_advisor_nudge_does_not_repeat_within_its_cooldown
 
+
+
+test_advisor_nudge_cooldown_lands_in_the_machine_local_dir() {
+    _install_fake_council
+    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" \
+          "$CLAUDE_SESSION_META_DIR/local/.advisor-nudge-cooldown"
+
+    echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh" >/dev/null
+
+    # Per-machine state belongs under .cs/local/, which every session already
+    # gitignores. A new stamp at the session root would ride into a git-synced
+    # session and conflict between machines.
+    assert_file_exists "$CLAUDE_SESSION_META_DIR/local/.advisor-nudge-cooldown" \
+        "Cooldown should be written under .cs/local/" || return 1
+    if [ -f "$CLAUDE_SESSION_META_DIR/.advisor-nudge-cooldown" ]; then
+        echo "Cooldown must not be written at the session root"
+        return 1
+    fi
+    unset CLAUDE_CONFIG_DIR
+}
+
+test_advisor_nudge_survives_an_unset_home() {
+    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+
+    # A bare $HOME under `set -u` aborts the hook before it emits, losing the
+    # reminder entirely. The sibling session-end hook is tested for the same
+    # property; this path must not reintroduce the class.
+    local output
+    # env -i, not env -u: an ambient CLAUDE_CONFIG_DIR makes the $HOME
+    # expansion unreachable, so the test passes without proving anything.
+    output=$(echo '{}' | env -i PATH="$PATH" \
+        CLAUDE_SESSION_NAME="$CLAUDE_SESSION_NAME" \
+        CLAUDE_SESSION_DIR="$CLAUDE_SESSION_DIR" \
+        CLAUDE_SESSION_META_DIR="$CLAUDE_SESSION_META_DIR" \
+        bash "$HOOKS_DIR/narrative-reminder.sh" 2>/dev/null)
+    assert_output_contains "$output" "Narrative check" \
+        "Hook should still emit its reminder with HOME unset" || return 1
+}
+
+run_test test_advisor_nudge_cooldown_lands_in_the_machine_local_dir
+run_test test_advisor_nudge_survives_an_unset_home
+
+
+test_advisor_nudge_finds_a_record_that_is_not_first() {
+    local root="$TEST_TMPDIR/claude"
+    local plug="$root/plugins/cache/hex-plugins/claude-council/2026.9.9"
+    mkdir -p "$plug/commands" "$root/plugins"
+    touch "$plug/commands/advise.md"
+    # Real records carry several entries per plugin and the order is not
+    # guaranteed; reading only [0] reads the oldest scope, not the live one.
+    cat > "$root/plugins/installed_plugins.json" << JSON
+{"version": 1, "plugins": {"claude-council@hex-plugins": [
+  {"scope": "project", "installPath": "$root/plugins/cache/gone", "version": "2026.1.1"},
+  {"scope": "user", "installPath": "$plug", "version": "2026.9.9"}]}}
+JSON
+    export CLAUDE_CONFIG_DIR="$root"
+    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" \
+          "$CLAUDE_SESSION_META_DIR/local/.advisor-nudge-cooldown"
+
+    local output
+    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
+    unset CLAUDE_CONFIG_DIR
+    assert_output_contains "$output" "claude-council:advise" \
+        "Should find a usable record that is not the first entry" || return 1
+}
+
+test_advisor_nudge_finds_the_plugin_in_any_marketplace() {
+    local root="$TEST_TMPDIR/claude"
+    local plug="$root/plugins/cache/other-market/claude-council/2026.9.9"
+    mkdir -p "$plug/commands" "$root/plugins"
+    touch "$plug/commands/advise.md"
+    # The docs say "when the plugin is present", not "when it came from one
+    # marketplace"; a fork or a rename must not silence the nudge.
+    cat > "$root/plugins/installed_plugins.json" << JSON
+{"version": 1, "plugins": {"claude-council@other-market": [
+  {"scope": "user", "installPath": "$plug", "version": "2026.9.9"}]}}
+JSON
+    export CLAUDE_CONFIG_DIR="$root"
+    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" \
+          "$CLAUDE_SESSION_META_DIR/local/.advisor-nudge-cooldown"
+
+    local output
+    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
+    unset CLAUDE_CONFIG_DIR
+    assert_output_contains "$output" "claude-council:advise" \
+        "Marketplace name should not gate detection" || return 1
+}
+
+test_advisor_nudge_survives_an_unwritable_cooldown_dir() {
+    _install_fake_council
+    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    rm -rf "$CLAUDE_SESSION_META_DIR/local"
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    chmod 500 "$CLAUDE_SESSION_META_DIR/local"
+
+    # Hooks fail open: a stamp that cannot be written must never cost the user
+    # the reminder it rides on.
+    local output
+    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh" 2>/dev/null)
+    chmod 700 "$CLAUDE_SESSION_META_DIR/local"
+    unset CLAUDE_CONFIG_DIR
+    assert_output_contains "$output" "Narrative check" \
+        "An unwritable cooldown dir must not lose the reminder" || return 1
+}
+
+test_advisor_nudge_tolerates_a_padded_cooldown_stamp() {
+    _install_fake_council
+    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    # A leading zero is a valid integer to _num_or but octal to $(( )).
+    printf '0%s' "$(date +%s)" > "$CLAUDE_SESSION_META_DIR/local/.advisor-nudge-cooldown"
+
+    local output
+    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh" 2>/dev/null)
+    unset CLAUDE_CONFIG_DIR
+    assert_output_contains "$output" "Narrative check" \
+        "A padded stamp must not break the arithmetic" || return 1
+}
+
+run_test test_advisor_nudge_finds_a_record_that_is_not_first
+run_test test_advisor_nudge_finds_the_plugin_in_any_marketplace
+run_test test_advisor_nudge_survives_an_unwritable_cooldown_dir
+run_test test_advisor_nudge_tolerates_a_padded_cooldown_stamp
+
+
+test_advisor_nudge_stays_silent_for_a_teammate() {
+    _install_fake_council
+    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" \
+          "$CLAUDE_SESSION_META_DIR/local/.advisor-nudge-cooldown"
+
+    # A tmux teammate is a full claude in the same directory with its own Stop.
+    # It shares the one cooldown stamp, so an ungated nudge lets a teammate
+    # consume the lead's 30-minute slot — and in a walk-away run the lead can
+    # stop seeing the suggestion entirely.
+    local output
+    output=$(echo '{}' | CS_LEAD_PID=1 CLAUDE_PID=99999 \
+        bash "$HOOKS_DIR/narrative-reminder.sh")
+    unset CLAUDE_CONFIG_DIR
+    assert_output_not_contains "$output" "claude-council" \
+        "A teammate should not consume the lead's nudge slot" || return 1
+}
+
+run_test test_advisor_nudge_stays_silent_for_a_teammate
 
 report_results
