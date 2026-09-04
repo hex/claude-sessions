@@ -4,6 +4,16 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.9.8
+
+`/rotate` answered "You're out of usage credits" and did nothing. Fable is the one model that needs credits, so pinning a skill to it means the command dies exactly when context is nearly full and the handoff is most expensive to lose.
+
+### Fixes
+
+**`/rotate` runs on the opus family.** It no longer depends on a credit-gated model, so running out of credits cannot take the command away. The pin still exists for the reason it always did: a handoff is selection under judgment, and who writes it moves what a successor can recover as much as its length does, so the artifact should not depend on whichever model the session happens to be on. Opus is the tier `/wrap`, `/sweep` and `/summary` already run on for the same work.
+
+**A narrative nobody has committed goes unmentioned.** The resume digest measures a teammate narrative against the watermark commit. One with no commit behind it had nothing to measure against, so the hook named it from line 1 with its whole section count, and no state existed that could stop it repeating. In a shared team, where nothing commits `.cs/memory`, every resume then said to read the file from its first line, which is the instruction this digest exists to replace. It now says nothing about such a file, the way a resume did before the digest existed.
+
 ## 2026.9.7
 
 A resume used to tell Claude to read every narrative in the session. One of them is 801 KB, so nobody did, and the instruction was a fiction. It now says where each teammate notebook grew and nothing more. Separately, the test gate stops taking the machine down with it.
