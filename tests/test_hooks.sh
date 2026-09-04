@@ -2391,4 +2391,104 @@ test_session_start_publishes_the_contract_to_a_teammate() {
 
 run_test test_session_start_publishes_the_contract_to_a_teammate
 
+
+# ============================================================================
+# narrative-reminder.sh — council advisor nudge
+# ============================================================================
+
+# A fake plugin install record plus the command file it points at. Both halves
+# matter: the record can name a directory a later uninstall removed.
+_install_fake_council() {
+    local root="$TEST_TMPDIR/claude"
+    local plug="$root/plugins/cache/hex-plugins/claude-council/2026.9.9"
+    mkdir -p "$plug/commands" "$root/plugins"
+    touch "$plug/commands/advise.md"
+    cat > "$root/plugins/installed_plugins.json" << JSON
+{"version": 1, "plugins": {"claude-council@hex-plugins": [
+  {"scope": "user", "installPath": "$plug", "version": "2026.9.9"}]}}
+JSON
+    export CLAUDE_CONFIG_DIR="$root"
+}
+
+test_advisor_nudge_is_silent_without_the_council_plugin() {
+    export CLAUDE_CONFIG_DIR="$TEST_TMPDIR/empty-claude"
+    mkdir -p "$CLAUDE_CONFIG_DIR"
+    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+
+    local output
+    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
+    # Never advertise a command the user cannot run.
+    assert_output_not_contains "$output" "claude-council" \
+        "Should not mention the council when the plugin is absent" || return 1
+    unset CLAUDE_CONFIG_DIR
+}
+
+test_advisor_nudge_appears_when_the_council_is_installed() {
+    _install_fake_council
+    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" \
+          "$CLAUDE_SESSION_META_DIR/.advisor-nudge-cooldown"
+
+    local output
+    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
+    assert_output_contains "$output" "claude-council:advise" \
+        "Should name the command when the plugin is installed" || return 1
+    unset CLAUDE_CONFIG_DIR
+}
+
+test_advisor_nudge_is_silent_when_the_recorded_path_is_gone() {
+    _install_fake_council
+    # An uninstall removes the directory; the record can outlive it.
+    rm -rf "$TEST_TMPDIR/claude/plugins/cache/hex-plugins/claude-council/2026.9.9"
+    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" \
+          "$CLAUDE_SESSION_META_DIR/.advisor-nudge-cooldown"
+
+    local output
+    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
+    assert_output_not_contains "$output" "claude-council" \
+        "A stale install record should not produce a suggestion" || return 1
+    unset CLAUDE_CONFIG_DIR
+}
+
+test_advisor_nudge_tells_the_model_to_ask_before_sending() {
+    _install_fake_council
+    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" \
+          "$CLAUDE_SESSION_META_DIR/.advisor-nudge-cooldown"
+
+    local output
+    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
+    # Suggest, never send: the conversation goes to third parties.
+    assert_output_contains "$output" "ask" \
+        "The nudge must say to ask before sending" || return 1
+    unset CLAUDE_CONFIG_DIR
+}
+
+test_advisor_nudge_does_not_repeat_within_its_cooldown() {
+    _install_fake_council
+    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    date +%s > "$CLAUDE_SESSION_META_DIR/.advisor-nudge-cooldown"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+
+    local output
+    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
+    assert_output_not_contains "$output" "claude-council" \
+        "A fresh cooldown should suppress the nudge" || return 1
+    unset CLAUDE_CONFIG_DIR
+}
+
+run_test test_advisor_nudge_is_silent_without_the_council_plugin
+run_test test_advisor_nudge_appears_when_the_council_is_installed
+run_test test_advisor_nudge_is_silent_when_the_recorded_path_is_gone
+run_test test_advisor_nudge_tells_the_model_to_ask_before_sending
+run_test test_advisor_nudge_does_not_repeat_within_its_cooldown
+
+
 report_results

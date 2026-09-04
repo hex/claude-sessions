@@ -757,10 +757,48 @@ if [ "$NARRATIVE_AGE" -lt "$COOLDOWN_SECONDS" ]; then
     exit 0
 fi
 
+# The council advisor nudge rides the narrative reminder rather than taking its
+# own Stop entry: the Stop hook has one emit slot, so a second registration
+# would compete with this one instead of composing with it.
+#
+# It suggests and never sends. A digest of the conversation goes to third-party
+# providers, and nothing a hook can read tells it whose words it holds — inside
+# a subagent the ambient session id names the parent. The consent belongs to a
+# turn that can ask a human, so the nudge asks the model to ask.
+ADVISOR_NUDGE=""
+ADVISOR_COOLDOWN_FILE="$META_DIR/.advisor-nudge-cooldown"
+ADVISOR_COOLDOWN_SECONDS=1800  # 30 minutes: a standing reminder, not a nag
+
+_council_is_installed() {
+    local record path
+    record="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_plugins.json"
+    [ -r "$record" ] || return 1
+    command -v jq >/dev/null 2>&1 || return 1
+    # installPath is authoritative and version-current; a computed path would go
+    # stale on the next plugin update.
+    path=$(jq -r '.plugins["claude-council@hex-plugins"][0].installPath // empty' \
+        "$record" 2>/dev/null | tr -d '\r')
+    [ -n "$path" ] || return 1
+    # The record outlives an uninstall, so the command file decides, not the
+    # record: suggesting a command the user cannot run is worse than silence.
+    [ -f "$path/commands/advise.md" ]
+}
+
+if _council_is_installed; then
+    _adv_last=0
+    if [ -f "$ADVISOR_COOLDOWN_FILE" ]; then
+        _adv_last=$(_num_or "$(cat "$ADVISOR_COOLDOWN_FILE" 2>/dev/null | tr -d '[:space:]')" 0)
+    fi
+    if [ "$((CURRENT_TIME - _adv_last))" -ge "$ADVISOR_COOLDOWN_SECONDS" ]; then
+        echo "$CURRENT_TIME" > "$ADVISOR_COOLDOWN_FILE"
+        ADVISOR_NUDGE=" Standing note: at a real decision point — about to commit to an approach, stuck after repeated attempts, or about to call the work done — \`/claude-council:advise\` puts this conversation to external models for a second opinion. You judge whether the moment qualifies; most turns do not. It sends a digest of the conversation to third-party providers, so ask the user before running it and show them what would go."
+    fi
+fi
+
 # Update cooldown marker and remind
 echo "$CURRENT_TIME" > "$COOLDOWN_FILE"
 
-REASON="Narrative check. Update only your own narrative (run \`cs -whoami\` if unsure which actor you are; never edit a teammate's narrative). Newest on disk is $NARRATIVE_FILE. (1) If recent work disproved or superseded one of your entries, append a dated correction that names it — never rewrite or delete earlier sections. (2) Append any new findings as plain dated notes. If nothing needs changing, say so in one line and stop.${NARRATIVE_OVER}"
+REASON="Narrative check. Update only your own narrative (run \`cs -whoami\` if unsure which actor you are; never edit a teammate's narrative). Newest on disk is $NARRATIVE_FILE. (1) If recent work disproved or superseded one of your entries, append a dated correction that names it — never rewrite or delete earlier sections. (2) Append any new findings as plain dated notes. If nothing needs changing, say so in one line and stop.${NARRATIVE_OVER}${ADVISOR_NUDGE}"
 
 jq -nc --arg r "$REASON" '{decision: "block", reason: $r}'
 
