@@ -339,26 +339,60 @@ test_usage_scoped_unknown_session_errors() {
     assert_output_contains "$output" "No such session" "clear error for unknown session" || return 1
 }
 
-# A subagent transcript lives in a subdir named after its parent conversation's
-# uuid; the scoped view must fold its tokens into that conversation's row.
+# Subagent transcripts live under <uuid>/subagents/, and workflow agents one
+# level deeper still (<uuid>/subagents/workflows/<run>/); the scoped view must
+# fold every one of them into that conversation's row.
 test_usage_scoped_folds_subagent_transcripts() {
     local sdir="$CS_SESSIONS_ROOT/subagent-sess"
     mkdir -p "$sdir/.cs/local"
-    local proj
+    local proj uuid
     proj=$(_transcripts_for "$sdir")
-    cat > "$proj/cccc1111-2222-3333-4444-555566667777.jsonl" << EOF
+    uuid=cccc1111-2222-3333-4444-555566667777
+    cat > "$proj/$uuid.jsonl" << EOF
 {"type":"assistant","requestId":"r1","timestamp":"$(_iso_mins_ago 5)","message":{"model":"claude-fable-5","usage":{"input_tokens":1000,"cache_creation_input_tokens":0,"output_tokens":100}}}
 EOF
-    mkdir -p "$proj/cccc1111-2222-3333-4444-555566667777"
-    cat > "$proj/cccc1111-2222-3333-4444-555566667777/agent-x.jsonl" << EOF
-{"type":"assistant","requestId":"r2","timestamp":"$(_iso_mins_ago 5)","message":{"model":"claude-fable-5","usage":{"input_tokens":500,"cache_creation_input_tokens":0,"output_tokens":50}}}
+    mkdir -p "$proj/$uuid/subagents/workflows/wf_1"
+    cat > "$proj/$uuid/subagents/agent-x.jsonl" << EOF
+{"type":"assistant","requestId":"r2","timestamp":"$(_iso_mins_ago 5)","message":{"model":"claude-haiku-4-5","usage":{"input_tokens":500,"cache_creation_input_tokens":0,"output_tokens":50}}}
+EOF
+    cat > "$proj/$uuid/subagents/workflows/wf_1/agent-y.jsonl" << EOF
+{"type":"assistant","requestId":"r3","timestamp":"$(_iso_mins_ago 5)","message":{"model":"claude-haiku-4-5","usage":{"input_tokens":500,"cache_creation_input_tokens":0,"output_tokens":50}}}
 EOF
     local output
     output=$("$CS_BIN" -usage subagent-sess 2>&1) || true
     assert_output_contains "$output" "cccc1111" "conversation row present" || return 1
-    # Combined: in 1000+500=1500 -> 1.5K, out 100+50=150.
-    echo "$output" | grep "cccc1111" | grep -q "1.5K / 150" || {
-        echo "  FAIL: 5h cell should fold subagent tokens into 1.5K / 150"
+    # Combined: in 1000+500+500=2000 -> 2.0K, out 100+50+50=200.
+    echo "$output" | grep "cccc1111" | grep -q "2.0K / 200" || {
+        echo "  FAIL: 5h cell should fold both subagent layers into 2.0K / 200"
+        return 1
+    }
+    # MODEL names the conversation's own model, not whatever the last subagent ran.
+    echo "$output" | grep "cccc1111" | grep -q "claude-fable-5" || {
+        echo "  FAIL: MODEL column should stay claude-fable-5 (subagents ran haiku)"
+        echo "$output" | grep "cccc1111"
+        return 1
+    }
+}
+
+# The per-session window table has to see the same subagent files.
+test_usage_window_table_folds_subagent_transcripts() {
+    local sdir="$CS_SESSIONS_ROOT/window-sub-sess"
+    mkdir -p "$sdir/.cs/local"
+    local proj uuid
+    proj=$(_transcripts_for "$sdir")
+    uuid=dddd1111-2222-3333-4444-555566667777
+    cat > "$proj/$uuid.jsonl" << EOF
+{"type":"assistant","requestId":"w1","timestamp":"$(_iso_mins_ago 5)","message":{"model":"claude-fable-5","usage":{"input_tokens":1000,"cache_creation_input_tokens":0,"output_tokens":100}}}
+EOF
+    mkdir -p "$proj/$uuid/subagents"
+    cat > "$proj/$uuid/subagents/agent-z.jsonl" << EOF
+{"type":"assistant","requestId":"w2","timestamp":"$(_iso_mins_ago 5)","message":{"model":"claude-fable-5","usage":{"input_tokens":500,"cache_creation_input_tokens":0,"output_tokens":50}}}
+EOF
+    local output
+    output=$("$CS_BIN" -usage 2>&1) || true
+    echo "$output" | grep "window-sub-sess" | grep -q "1.5K / 150" || {
+        echo "  FAIL: session row should fold the subagent transcript into 1.5K / 150"
+        echo "$output" | grep "window-sub-sess"
         return 1
     }
 }
@@ -367,4 +401,5 @@ run_test test_usage_scoped_per_conversation
 run_test test_usage_scoped_site_b
 run_test test_usage_scoped_unknown_session_errors
 run_test test_usage_scoped_folds_subagent_transcripts
+run_test test_usage_window_table_folds_subagent_transcripts
 report_results

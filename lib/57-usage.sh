@@ -22,22 +22,25 @@ _usage_fmt() {
 # repeat message.usage once per content block), then sum token components per
 # window. Windows are [boundary, now]; an empty boundary skips that window.
 # Args: five_start_iso week_start_iso file...
-# Output: "in5 cc5 out5 inW ccW outW inL ccL outL model" (model: last seen, or -)
+# Output: "in5 cc5 out5 inW ccW outW inL ccL outL model". The model is the
+# last one seen in the FIRST file, which callers make the conversation's own
+# transcript: subagent files follow it and may run a different model.
 _usage_scan() {
     local w5="$1" wk="$2"
     shift 2
     [ $# -gt 0 ] || { echo "0 0 0 0 0 0 0 0 0 -"; return 0; }
-    jq -R -r 'fromjson? // empty | select(.type == "assistant" and (.message.usage? != null)) |
+    jq -R -r --arg main "$1" 'fromjson? // empty | select(.type == "assistant" and (.message.usage? != null)) |
         [ (.timestamp // ""),
           (.requestId // .message.id // .uuid // ""),
           (.message.usage.input_tokens // 0),
           (.message.usage.cache_creation_input_tokens // 0),
           (.message.usage.output_tokens // 0),
-          (.message.model // "") ] | @tsv' "$@" 2>/dev/null \
+          (.message.model // ""),
+          (input_filename == $main) ] | @tsv' "$@" 2>/dev/null \
     | awk -F'\t' -v w5="$w5" -v wk="$wk" '
         seen[$2]++ { next }
         {
-            if ($6 != "") model = $6
+            if ($6 != "" && $7 == "true") model = $6
             inL += $3; ccL += $4; outL += $5
             if (w5 != "" && $1 >= w5) { in5 += $3; cc5 += $4; out5 += $5 }
             if (wk != "" && $1 >= wk) { inW += $3; ccW += $4; outW += $5 }
@@ -49,14 +52,32 @@ _usage_scan() {
         }'
 }
 
+# Subagent transcripts for a conversation live under a directory named after
+# it: <uuid>/subagents/agent-*.jsonl for Agent-tool subagents, and one level
+# deeper again (<uuid>/subagents/workflows/<run>/agent-*.jsonl) for workflow
+# agents. The depth keeps changing with Claude Code releases, so walk the whole
+# conversation directory rather than pinning one. Extra find predicates (an
+# mtime prefilter, say) are passed through. One path per line on stdout.
+_usage_subagent_files() {
+    local proj="$1" uuid="$2"
+    shift 2
+    [ -d "$proj/$uuid" ] || return 0
+    find "$proj/$uuid" -type f -name '*.jsonl' "$@" 2>/dev/null
+}
+
 # List transcript files for a session dir worth parsing for the window table:
-# top-level conversations plus per-conversation subagent transcripts, skipping
+# top-level conversations plus every subagent transcript beneath them, skipping
 # files untouched for 8+ days (they cannot contribute to either window).
 # One path per line on stdout.
 _usage_window_files() {
     local proj="$1"
     [ -d "$proj" ] || return 0
-    find "$proj" -maxdepth 2 -name '*.jsonl' -mtime -8 2>/dev/null
+    local f
+    for f in "$proj"/*.jsonl; do
+        [ -e "$f" ] || continue
+        find "$f" -mtime -8 2>/dev/null
+        _usage_subagent_files "$proj" "$(basename "$f" .jsonl)" -mtime -8
+    done
 }
 
 # Render "IN / OUT" with humanized numbers, or "-" when both are zero.
@@ -144,15 +165,13 @@ _usage_session_detail() {
     local in5 cc5 out5 inW ccW outW inL ccL outL
     for f in "${files[@]}"; do
         uuid=$(basename "$f" .jsonl)
-        # Subagent transcripts for this conversation live in a sibling subdir
-        # named after the conversation; include them when present.
-        local extra=()
-        if [ -d "$proj/$uuid" ]; then
-            local sub
-            for sub in "$proj/$uuid"/*.jsonl; do
-                [ -e "$sub" ] && extra+=("$sub")
-            done
-        fi
+        # Lifetime column, so no mtime prefilter on the subagent walk.
+        local extra=() sub
+        while IFS= read -r sub; do
+            [ -n "$sub" ] && extra+=("$sub")
+        done <<EOF
+$(_usage_subagent_files "$proj" "$uuid")
+EOF
         sums=$(_usage_scan "$U_W5_ISO" "$U_WK_ISO" "$f" ${extra[@]+"${extra[@]}"})
         read -r in5 cc5 out5 inW ccW outW inL ccL outL model <<EOF
 $sums
