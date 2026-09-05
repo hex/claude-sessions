@@ -110,7 +110,9 @@ _usage_window_files() {
 }
 
 # Render large reads as "untargeted/all ~tokens", the tokens being the
-# untargeted characters at 4 per token, or "-" when there were none.
+# untargeted characters at 4 per token, or "-" when there were none. The cell
+# fits its 15-column slot up to 999 reads; past that it widens the row, as
+# every other cell does at its own extreme, and that is accepted.
 _usage_reads_cell() {
     local all="$1" untargeted="$2" chars="$3"
     if [ "$all" -eq 0 ]; then
