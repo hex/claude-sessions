@@ -979,4 +979,72 @@ test_doctor_does_not_call_a_valid_settings_file_invalid_without_jq() {
 
 run_test test_doctor_does_not_call_a_valid_settings_file_invalid_without_jq
 
+
+# Hooks install silently and can change what the model sees; a terminal title
+# needs opt-in but a context injection does not. The authority section makes
+# every such injection visible with the switch that turns it off.
+test_doctor_lists_every_context_injecting_hook_with_its_switch() {
+    local output
+    output=$(CS_CLAUDE_DIR="$TEST_TMPDIR/claude-auth" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Authority" "Doctor should have an authority section" || return 1
+    assert_output_contains "$output" "scope-prompt" "Should list the grounding hook" || return 1
+    assert_output_contains "$output" "CS_SCOPE_DISABLE" "Should name the grounding off-switch" || return 1
+    assert_output_contains "$output" "CS_CLARIFY_DISABLE" "Should name the clarify off-switch" || return 1
+    assert_output_contains "$output" "CS_REWRITE_DISABLE" "Should name the rewriter off-switch" || return 1
+    assert_output_contains "$output" ".cs/local/disabled" "Should name the universal off-switch" || return 1
+}
+
+test_doctor_authority_section_shows_a_disabled_injection_as_off() {
+    local output
+    output=$(CS_SCOPE_DISABLE=1 CS_CLAUDE_DIR="$TEST_TMPDIR/claude-auth" "$CS_BIN" -doctor 2>&1) || true
+    # The line for grounding must read as off when its switch is set, or the
+    # section reports configuration rather than what is actually happening.
+    local line
+    line=$(printf '%s\n' "$output" | grep -i "grounding" | head -1)
+    [ -n "$line" ] || { echo "no grounding line in authority section"; return 1; }
+    # The state is the FIRST field. Every row also carries "off:" as the label
+    # for its switch, so a substring match on "off" passes with the state
+    # hardcoded to on — which is exactly what this test exists to catch.
+    local state
+    state=$(printf '%s\n' "$line" | awk '{print $1}')
+    [ "$state" = "off" ] || { echo "grounding state is '$state', expected off: $line"; return 1; }
+}
+
+run_test test_doctor_lists_every_context_injecting_hook_with_its_switch
+run_test test_doctor_authority_section_shows_a_disabled_injection_as_off
+
+
+# The merge driver is per-clone config that setup_merge_attributes writes with
+# `|| true`, so a clone where that write failed keeps `.gitattributes` saying
+# merge=ours with nothing behind it — and MEMORY.md text-merges on the next
+# pull. cs cannot see a pull it was not part of, but it can name the gap.
+test_doctor_warns_when_the_session_clone_lacks_the_merge_driver() {
+    local sess="$TEST_TMPDIR/sess-nodriver"
+    mkdir -p "$sess/.cs/memory"
+    git -C "$sess" init -q
+    printf '.cs/memory/MEMORY.md merge=ours\n' > "$sess/.gitattributes"
+    local output
+    output=$(CLAUDE_SESSION_DIR="$sess" CLAUDE_SESSION_META_DIR="$sess/.cs" \
+        CS_CLAUDE_DIR="$TEST_TMPDIR/claude-nd" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "merge.ours.driver" \
+        "Doctor should name the missing merge driver" || return 1
+    assert_output_contains "$output" "WARN" "A missing driver is a warning" || return 1
+}
+
+test_doctor_is_quiet_when_the_session_clone_has_the_merge_driver() {
+    local sess="$TEST_TMPDIR/sess-driver"
+    mkdir -p "$sess/.cs/memory"
+    git -C "$sess" init -q
+    git -C "$sess" config merge.ours.driver true
+    printf '.cs/memory/MEMORY.md merge=ours\n' > "$sess/.gitattributes"
+    local output
+    output=$(CLAUDE_SESSION_DIR="$sess" CLAUDE_SESSION_META_DIR="$sess/.cs" \
+        CS_CLAUDE_DIR="$TEST_TMPDIR/claude-d" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_not_contains "$output" "merge.ours.driver not set" \
+        "A clone with the driver should not be warned about" || return 1
+}
+
+run_test test_doctor_warns_when_the_session_clone_lacks_the_merge_driver
+run_test test_doctor_is_quiet_when_the_session_clone_has_the_merge_driver
+
 report_results

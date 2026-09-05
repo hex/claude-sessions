@@ -68,6 +68,9 @@ export CS_USAGE_DIR="$HOME/.claude-sessions/.usage"
 # Render the `fable` segment from cache only, never triggering a refresh
 export CS_USAGE_NO_REFRESH="1"
 
+# Every switch below that silences something the model would otherwise see is
+# listed by `cs -doctor` under "Authority", with its live on/off state.
+
 # Opt a session out of the scope-prompt auto-grounding hook
 export CS_SCOPE_DISABLE="1"
 

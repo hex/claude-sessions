@@ -5573,6 +5573,53 @@ _doctor_check_narrative_size() {
 # resolved its own session ID. The recorded UUID is the source of truth for
 # cs and hooks; doctor surfaces the divergence so the user can decide whether
 # to relaunch via cs or accept the drift.
+# Every place a cs hook changes what the model sees, with the switch that turns
+# it off. The consent rule covers what the user looks at — status line, titles —
+# but a hook that injects context installs silently, so this is where that
+# authority is made visible. State is read live, not from config: a switch that
+# is set shows the injection as off.
+_doctor_check_hook_authority() {
+    echo ""
+    echo "  Authority — hooks that inject into the model's context:"
+    local disabled_all=""
+    if [ -n "${CLAUDE_SESSION_META_DIR:-}" ] && [ -f "${CLAUDE_SESSION_META_DIR}/local/disabled" ]; then
+        disabled_all=1
+    fi
+    _doctor_authority_row() {  # label hook switch is_off
+        local state="on"
+        if [ -n "$disabled_all" ] || [ -n "$4" ]; then state="off"; fi
+        printf "    %-4s %-22s %-20s off: %s\n" "$state" "$1" "$2" "$3"
+    }
+    _doctor_authority_row "grounding"     "scope-prompt"       'CS_SCOPE_DISABLE=1'             "${CS_SCOPE_DISABLE:-}"
+    _doctor_authority_row "clarify"       "scope-prompt"       'CS_CLARIFY_DISABLE=1'           "${CS_CLARIFY_DISABLE:-}"
+    _doctor_authority_row "objective"     "scope-prompt"       'CS_OBJECTIVE_CAPTURE_DISABLE=1' "${CS_OBJECTIVE_CAPTURE_DISABLE:-}"
+    _doctor_authority_row "rewrite"       "prompt-rewriter"    'CS_REWRITE_DISABLE=1'           "${CS_REWRITE_DISABLE:-}"
+    _doctor_authority_row "narrative"     "narrative-reminder" '.cs/local/disabled'             ""
+    _doctor_authority_row "council nudge" "narrative-reminder" '.cs/local/disabled or uninstall the plugin' ""
+    _doctor_authority_row "ctx warning"   "narrative-reminder" 'CS_CTX_WARN_CTX=101'            ""
+    _doctor_authority_row "rotate nudge"  "narrative-reminder" 'CS_ROTATE_NUDGE_CTX=101'        ""
+    _doctor_authority_row "subagent ctx"  "subagent-context"   '.cs/local/disabled'             ""
+    _doctor_authority_row "session ctx"   "session-start"      '.cs/local/disabled'             ""
+    echo "    .cs/local/disabled turns every row off for that session."
+}
+
+# setup_merge_attributes writes the per-clone merge driver with `|| true`, so a
+# clone where that write failed keeps a .gitattributes that says merge=ours with
+# nothing behind it, and MEMORY.md text-merges on the next pull. The driver is
+# deliberately per-clone and never global — cs does not write to ~/.gitconfig —
+# so a clone cs has not launched in is out of reach; this names the one it can see.
+_doctor_check_merge_driver() {
+    local dir="${CLAUDE_SESSION_DIR:-}"
+    [ -n "$dir" ] || return 0
+    git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 || return 0
+    grep -q 'merge=ours' "$dir/.gitattributes" 2>/dev/null || return 0
+    if [ "$(git -C "$dir" config --get merge.ours.driver 2>/dev/null)" = "true" ]; then
+        _doctor_ok "Merge driver: merge.ours.driver set for this clone"
+    else
+        _doctor_warn "Merge driver: merge.ours.driver not set in this clone — MEMORY.md will text-merge on pull. Launch the session once with cs, or: git config merge.ours.driver true"
+    fi
+}
+
 _doctor_check_session_id_match() {
     local state="$CLAUDE_SESSION_META_DIR/local/state"
     local recorded
@@ -5612,9 +5659,11 @@ run_doctor() {
     _doctor_check_subagent_statusline
     _doctor_check_iterm2
     _doctor_check_spawn
+    _doctor_check_hook_authority
 
     if [ -n "${CLAUDE_SESSION_META_DIR:-}" ] && [ -d "${CLAUDE_SESSION_META_DIR:-}" ]; then
         _doctor_check_shadow_ref
+        _doctor_check_merge_driver
         _doctor_check_worktrees
         _doctor_check_auto_memory
         _doctor_check_narrative_size
