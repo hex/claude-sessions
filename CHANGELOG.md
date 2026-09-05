@@ -4,6 +4,11 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## Unreleased
+
+### Fixes
+- A tmux teammate no longer warns about the lead's context. `.cs/local/context-pct` holds the launched conversation's reading alone, and the 60% warning and 80% rotate nudge read it for every conversation in the directory, so a teammate at 4% told its user "context is at 60%". Both tiers now see no reading unless the firing claude is the lead. The 2026.9.8 fix kept each conversation's notice separate; this keeps the reading with the conversation it describes.
+
 ## 2026.9.10
 
 ### Features
