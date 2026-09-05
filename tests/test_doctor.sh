@@ -1013,4 +1013,38 @@ test_doctor_authority_section_shows_a_disabled_injection_as_off() {
 run_test test_doctor_lists_every_context_injecting_hook_with_its_switch
 run_test test_doctor_authority_section_shows_a_disabled_injection_as_off
 
+
+# The merge driver is per-clone config that setup_merge_attributes writes with
+# `|| true`, so a clone where that write failed keeps `.gitattributes` saying
+# merge=ours with nothing behind it — and MEMORY.md text-merges on the next
+# pull. cs cannot see a pull it was not part of, but it can name the gap.
+test_doctor_warns_when_the_session_clone_lacks_the_merge_driver() {
+    local sess="$TEST_TMPDIR/sess-nodriver"
+    mkdir -p "$sess/.cs/memory"
+    git -C "$sess" init -q
+    printf '.cs/memory/MEMORY.md merge=ours\n' > "$sess/.gitattributes"
+    local output
+    output=$(CLAUDE_SESSION_DIR="$sess" CLAUDE_SESSION_META_DIR="$sess/.cs" \
+        CS_CLAUDE_DIR="$TEST_TMPDIR/claude-nd" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "merge.ours.driver" \
+        "Doctor should name the missing merge driver" || return 1
+    assert_output_contains "$output" "WARN" "A missing driver is a warning" || return 1
+}
+
+test_doctor_is_quiet_when_the_session_clone_has_the_merge_driver() {
+    local sess="$TEST_TMPDIR/sess-driver"
+    mkdir -p "$sess/.cs/memory"
+    git -C "$sess" init -q
+    git -C "$sess" config merge.ours.driver true
+    printf '.cs/memory/MEMORY.md merge=ours\n' > "$sess/.gitattributes"
+    local output
+    output=$(CLAUDE_SESSION_DIR="$sess" CLAUDE_SESSION_META_DIR="$sess/.cs" \
+        CS_CLAUDE_DIR="$TEST_TMPDIR/claude-d" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_not_contains "$output" "merge.ours.driver not set" \
+        "A clone with the driver should not be warned about" || return 1
+}
+
+run_test test_doctor_warns_when_the_session_clone_lacks_the_merge_driver
+run_test test_doctor_is_quiet_when_the_session_clone_has_the_merge_driver
+
 report_results

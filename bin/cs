@@ -5603,6 +5603,23 @@ _doctor_check_hook_authority() {
     echo "    .cs/local/disabled turns every row off for that session."
 }
 
+# setup_merge_attributes writes the per-clone merge driver with `|| true`, so a
+# clone where that write failed keeps a .gitattributes that says merge=ours with
+# nothing behind it, and MEMORY.md text-merges on the next pull. The driver is
+# deliberately per-clone and never global — cs does not write to ~/.gitconfig —
+# so a clone cs has not launched in is out of reach; this names the one it can see.
+_doctor_check_merge_driver() {
+    local dir="${CLAUDE_SESSION_DIR:-}"
+    [ -n "$dir" ] || return 0
+    git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 || return 0
+    grep -q 'merge=ours' "$dir/.gitattributes" 2>/dev/null || return 0
+    if [ "$(git -C "$dir" config --get merge.ours.driver 2>/dev/null)" = "true" ]; then
+        _doctor_ok "Merge driver: merge.ours.driver set for this clone"
+    else
+        _doctor_warn "Merge driver: merge.ours.driver not set in this clone — MEMORY.md will text-merge on pull. Launch the session once with cs, or: git config merge.ours.driver true"
+    fi
+}
+
 _doctor_check_session_id_match() {
     local state="$CLAUDE_SESSION_META_DIR/local/state"
     local recorded
@@ -5646,6 +5663,7 @@ run_doctor() {
 
     if [ -n "${CLAUDE_SESSION_META_DIR:-}" ] && [ -d "${CLAUDE_SESSION_META_DIR:-}" ]; then
         _doctor_check_shadow_ref
+        _doctor_check_merge_driver
         _doctor_check_worktrees
         _doctor_check_auto_memory
         _doctor_check_narrative_size
