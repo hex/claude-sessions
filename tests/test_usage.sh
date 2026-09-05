@@ -402,4 +402,77 @@ run_test test_usage_scoped_site_b
 run_test test_usage_scoped_unknown_session_errors
 run_test test_usage_scoped_folds_subagent_transcripts
 run_test test_usage_window_table_folds_subagent_transcripts
+
+# A Read tool result whose numLines exceeds 350 counts as a large read. It is
+# "targeted" when the model asked for a slice (startLine > 1, or fewer lines
+# than the file holds); untargeted large reads are the ones a size gate could
+# have intercepted, so the column shows untargeted/all and the untargeted
+# bytes as ~tokens at 4 chars each. Fixture, all timestamps inside the week
+# except E:
+#   A 400 of 400 lines from line 1, 4000 chars   -> large, untargeted (~1000 tok)
+#   B 500 of 900 lines from line 10, 2000 chars  -> large, targeted
+#   C 350 of 350 lines                            -> not large (threshold is >350)
+#   D toolUseResult is a string (a declined call) -> ignored
+#   E 600 of 600 lines, 6000 chars, 10 days old   -> large, outside the week
+#   F 500 of 900 lines from line 1, 2000 chars   -> large, targeted (limit only)
+# Week cell: 1/3 ~1.0K.
+test_usage_counts_large_reads() {
+    local sdir="$CS_SESSIONS_ROOT/reads-sess"
+    mkdir -p "$sdir/.cs/local"
+    local proj now old c4k c2k c6k
+    proj=$(_transcripts_for "$sdir")
+    now=$(_iso_mins_ago 5); old=$(_iso_mins_ago 14400)
+    c4k=$(head -c 4000 /dev/zero | tr '\0' x)
+    c2k=$(head -c 2000 /dev/zero | tr '\0' x)
+    c6k=$(head -c 6000 /dev/zero | tr '\0' x)
+    cat > "$proj/aaaa1111-2222-3333-4444-555566667777.jsonl" << EOF
+{"type":"assistant","requestId":"r1","timestamp":"$now","message":{"model":"m","usage":{"input_tokens":100,"cache_creation_input_tokens":0,"output_tokens":10}}}
+{"type":"user","uuid":"uA","timestamp":"$now","toolUseResult":{"type":"text","file":{"filePath":"/a","content":"$c4k","numLines":400,"startLine":1,"totalLines":400}}}
+{"type":"user","uuid":"uB","timestamp":"$now","toolUseResult":{"type":"text","file":{"filePath":"/b","content":"$c2k","numLines":500,"startLine":10,"totalLines":900}}}
+{"type":"user","uuid":"uC","timestamp":"$now","toolUseResult":{"type":"text","file":{"filePath":"/c","content":"$c2k","numLines":350,"startLine":1,"totalLines":350}}}
+{"type":"user","uuid":"uD","timestamp":"$now","toolUseResult":"The user declined"}
+{"type":"user","uuid":"uE","timestamp":"$old","toolUseResult":{"type":"text","file":{"filePath":"/e","content":"$c6k","numLines":600,"startLine":1,"totalLines":600}}}
+{"type":"user","uuid":"uF","timestamp":"$now","toolUseResult":{"type":"text","file":{"filePath":"/f","content":"$c2k","numLines":500,"startLine":1,"totalLines":900}}}
+EOF
+    local output
+    output=$("$CS_BIN" -usage 2>&1) || true
+    assert_output_contains "$output" "READS>350L" "table has a large-reads column" || return 1
+    echo "$output" | grep "reads-sess" | grep -q "1/3 ~1.0K" || {
+        echo "  FAIL: week cell should read 1/3 ~1.0K, got: $(echo "$output" | grep reads-sess)"
+        return 1
+    }
+}
+
+run_test test_usage_counts_large_reads
+
+# The scoped view counts large reads over the conversation's lifetime, so E
+# joins A and B here: 2 untargeted of 3, (4000 + 6000) / 4 = 2500 tokens.
+# The model name carries a space, which the scan's positional output must
+# survive.
+test_usage_scoped_counts_large_reads_lifetime() {
+    local sdir="$CS_SESSIONS_ROOT/reads-life"
+    mkdir -p "$sdir/.cs/local"
+    local proj now old c4k c2k c6k
+    proj=$(_transcripts_for "$sdir")
+    now=$(_iso_mins_ago 5); old=$(_iso_mins_ago 14400)
+    c4k=$(head -c 4000 /dev/zero | tr '\0' x)
+    c2k=$(head -c 2000 /dev/zero | tr '\0' x)
+    c6k=$(head -c 6000 /dev/zero | tr '\0' x)
+    cat > "$proj/cccc1111-2222-3333-4444-555566667777.jsonl" << EOF
+{"type":"assistant","requestId":"r1","timestamp":"$now","message":{"model":"custom model","usage":{"input_tokens":100,"cache_creation_input_tokens":0,"output_tokens":10}}}
+{"type":"user","uuid":"uA","timestamp":"$now","toolUseResult":{"type":"text","file":{"filePath":"/a","content":"$c4k","numLines":400,"startLine":1,"totalLines":400}}}
+{"type":"user","uuid":"uB","timestamp":"$now","toolUseResult":{"type":"text","file":{"filePath":"/b","content":"$c2k","numLines":500,"startLine":10,"totalLines":900}}}
+{"type":"user","uuid":"uE","timestamp":"$old","toolUseResult":{"type":"text","file":{"filePath":"/e","content":"$c6k","numLines":600,"startLine":1,"totalLines":600}}}
+EOF
+    local output
+    output=$("$CS_BIN" -usage reads-life 2>&1) || true
+    assert_output_contains "$output" "READS>350L" "scoped view has a large-reads column" || return 1
+    assert_output_contains "$output" "custom model" "model column keeps a name with a space" || return 1
+    echo "$output" | grep "cccc1111" | grep -q "2/3 ~2.5K" || {
+        echo "  FAIL: lifetime cell should read 2/3 ~2.5K, got: $(echo "$output" | grep cccc1111)"
+        return 1
+    }
+}
+
+run_test test_usage_scoped_counts_large_reads_lifetime
 report_results

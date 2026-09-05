@@ -4487,37 +4487,66 @@ _usage_fmt() {
     }'
 }
 
+# A Read tool result returning more lines than this is a large read.
+_USAGE_LARGE_READ_LINES=350
+
 # Scan transcript files: dedup usage lines by requestId (streamed responses
 # repeat message.usage once per content block), then sum token components per
 # window. Windows are [boundary, now]; an empty boundary skips that window.
 # Args: five_start_iso week_start_iso file...
-# Output: "in5 cc5 out5 inW ccW outW inL ccL outL model". The model is the
-# last one seen in the FIRST file, which callers make the conversation's own
-# transcript: subagent files follow it and may run a different model.
+# Output: "in5 cc5 out5 inW ccW outW inL ccL outL lrW lruW lrcW lrL lruL lrcL model".
+# The model is the last one seen in the FIRST file, which callers make the
+# conversation's own transcript: subagent files follow it and may run a
+# different model; it stays the final field because a model name may contain
+# spaces and `read` gives its last variable the rest of the line. The lr*
+# fields count large Read tool results (see _USAGE_LARGE_READ_LINES) for the
+# week and lifetime: all of them, the untargeted ones, and the untargeted
+# characters. A read is targeted when it returned fewer lines than the file
+# holds, which is what an offset or a limit produces. (A default-capped read
+# of a file longer than the tool's cap also looks targeted; none occurred in a
+# week of real transcripts.) Untargeted large reads are the ones a size gate
+# could intercept, so the two are counted apart. Bash reads (cat, head) leave
+# no file shape and are not seen here. Consumers read fields positionally.
 _usage_scan() {
     local w5="$1" wk="$2"
     shift 2
-    [ $# -gt 0 ] || { echo "0 0 0 0 0 0 0 0 0 -"; return 0; }
-    jq -R -r --arg main "$1" 'fromjson? // empty | select(.type == "assistant" and (.message.usage? != null)) |
-        [ (.timestamp // ""),
-          (.requestId // .message.id // .uuid // ""),
-          (.message.usage.input_tokens // 0),
-          (.message.usage.cache_creation_input_tokens // 0),
-          (.message.usage.output_tokens // 0),
-          (.message.model // ""),
-          (input_filename == $main) ] | @tsv' "$@" 2>/dev/null \
+    [ $# -gt 0 ] || { echo "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -"; return 0; }
+    jq -R -r --arg main "$1" --argjson big "$_USAGE_LARGE_READ_LINES" 'fromjson? // empty |
+        if .type == "assistant" and (.message.usage? != null) then
+          [ "u", (.timestamp // ""),
+            (.requestId // .message.id // .uuid // ""),
+            (.message.usage.input_tokens // 0),
+            (.message.usage.cache_creation_input_tokens // 0),
+            (.message.usage.output_tokens // 0),
+            (.message.model // ""),
+            (input_filename == $main) ]
+        elif .type == "user" and (.toolUseResult | type == "object")
+             and (.toolUseResult.file | type == "object")
+             and (.toolUseResult.file.numLines | type == "number")
+             and .toolUseResult.file.numLines > $big then
+          .toolUseResult.file as $f |
+          [ "r", (.timestamp // ""), (.uuid // ""),
+            ($f.content | if type == "string" then length else 0 end),
+            (if $f.numLines < ($f.totalLines // $f.numLines) then 1 else 0 end) ]
+        else empty end | @tsv' "$@" 2>/dev/null \
     | awk -F'\t' -v w5="$w5" -v wk="$wk" '
-        seen[$2]++ { next }
+        $1 == "r" {
+            lrL++; if ($5 == 0) { lruL++; lrcL += $4 }
+            if (wk != "" && $2 >= wk) { lrW++; if ($5 == 0) { lruW++; lrcW += $4 } }
+            next
+        }
+        seen[$3]++ { next }
         {
-            if ($6 != "" && $7 == "true") model = $6
-            inL += $3; ccL += $4; outL += $5
-            if (w5 != "" && $1 >= w5) { in5 += $3; cc5 += $4; out5 += $5 }
-            if (wk != "" && $1 >= wk) { inW += $3; ccW += $4; outW += $5 }
+            if ($7 != "" && $8 == "true") model = $7
+            inL += $4; ccL += $5; outL += $6
+            if (w5 != "" && $2 >= w5) { in5 += $4; cc5 += $5; out5 += $6 }
+            if (wk != "" && $2 >= wk) { inW += $4; ccW += $5; outW += $6 }
         }
         END {
             if (model == "") model = "-"
-            printf "%d %d %d %d %d %d %d %d %d %s\n", \
-                in5, cc5, out5, inW, ccW, outW, inL, ccL, outL, model
+            printf "%d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %s\n", \
+                in5, cc5, out5, inW, ccW, outW, inL, ccL, outL, \
+                lrW, lruW, lrcW, lrL, lruL, lrcL, model
         }'
 }
 
@@ -4547,6 +4576,17 @@ _usage_window_files() {
         find "$f" -mtime -8 2>/dev/null
         _usage_subagent_files "$proj" "$(basename "$f" .jsonl)" -mtime -8
     done
+}
+
+# Render large reads as "untargeted/all ~tokens", the tokens being the
+# untargeted characters at 4 per token, or "-" when there were none.
+_usage_reads_cell() {
+    local all="$1" untargeted="$2" chars="$3"
+    if [ "$all" -eq 0 ]; then
+        printf -- '-'
+    else
+        printf '%s/%s ~%s' "$untargeted" "$all" "$(_usage_fmt $((chars / 4)))"
+    fi
 }
 
 # Render "IN / OUT" with humanized numbers, or "-" when both are zero.
@@ -4628,10 +4668,10 @@ _usage_session_detail() {
         return 0
     fi
 
-    printf '%-10s  %-22s  %-15s  %-15s  %-15s  %s\n' \
-        "CONV" "MODEL" "5H IN/OUT" "WEEK IN/OUT" "LIFETIME" "LAST ACTIVE"
+    printf '%-10s  %-22s  %-15s  %-15s  %-15s  %-15s  %s\n' \
+        "CONV" "MODEL" "5H IN/OUT" "WEEK IN/OUT" "LIFETIME" "READS>350L" "LAST ACTIVE"
     local f uuid sums model age
-    local in5 cc5 out5 inW ccW outW inL ccL outL
+    local in5 cc5 out5 inW ccW outW inL ccL outL lrW lruW lrcW lrL lruL lrcL
     for f in "${files[@]}"; do
         uuid=$(basename "$f" .jsonl)
         # Lifetime column, so no mtime prefilter on the subagent walk.
@@ -4642,15 +4682,16 @@ _usage_session_detail() {
 $(_usage_subagent_files "$proj" "$uuid")
 EOF
         sums=$(_usage_scan "$U_W5_ISO" "$U_WK_ISO" "$f" ${extra[@]+"${extra[@]}"})
-        read -r in5 cc5 out5 inW ccW outW inL ccL outL model <<EOF
+        read -r in5 cc5 out5 inW ccW outW inL ccL outL lrW lruW lrcW lrL lruL lrcL model <<EOF
 $sums
 EOF
         age=$(_humanize_secs $(( U_NOW - $(_epoch_mtime "$f") )))
-        printf '%-10s  %-22s  %-15s  %-15s  %-15s  %s\n' \
+        printf '%-10s  %-22s  %-15s  %-15s  %-15s  %-15s  %s\n' \
             "$(printf '%.8s' "$uuid")" "$model" \
             "$(_usage_cell $((in5 + cc5)) "$out5")" \
             "$(_usage_cell $((inW + ccW)) "$outW")" \
             "$(_usage_cell $((inL + ccL)) "$outL")" \
+            "$(_usage_reads_cell "$lrL" "$lruL" "$lrcL")" \
             "$age"
     done
 }
@@ -4700,22 +4741,22 @@ run_usage() {
     echo "$header"
     echo ""
 
-    printf '%-24s  %-15s  %-15s  %s\n' "SESSION" "5H IN/OUT" "WEEK IN/OUT" "LAST ACTIVE"
+    printf '%-24s  %-15s  %-15s  %-15s  %s\n' "SESSION" "5H IN/OUT" "WEEK IN/OUT" "READS>350L" "LAST ACTIVE"
     local rows dir name proj files sums marker age newest old_ifs
-    local in5 cc5 out5 inW ccW outW rest
+    local in5 cc5 out5 inW ccW outW inL ccL outL lrW lruW lrcW rest
     rows=$(while IFS= read -r -d '' dir; do
         is_session_dir "$dir" || continue
         name=$(basename "$dir")
         proj=$(_claude_project_dir "$dir")
         files=$(_usage_window_files "$proj")
-        in5=0; cc5=0; out5=0; inW=0; ccW=0; outW=0
+        in5=0; cc5=0; out5=0; inW=0; ccW=0; outW=0; lrW=0; lruW=0; lrcW=0
         if [ -n "$files" ]; then
             old_ifs="$IFS"; IFS=$'\n'
             # shellcheck disable=SC2086
             set -- $files
             IFS="$old_ifs"
             sums=$(_usage_scan "$U_W5_ISO" "$U_WK_ISO" "$@")
-            read -r in5 cc5 out5 inW ccW outW rest <<EOF
+            read -r in5 cc5 out5 inW ccW outW inL ccL outL lrW lruW lrcW rest <<EOF
 $sums
 EOF
         fi
@@ -4730,9 +4771,10 @@ EOF
             age=$(_humanize_secs $(( U_NOW - $(_epoch_mtime "$newest") )))
         fi
         printf '%s\t%s\t%s\n' "$((in5 + cc5 + out5))" "$((inW + ccW + outW))" \
-            "$(printf '%-22s %s  %-15s  %-15s  %s' "$name" "$marker" \
+            "$(printf '%-22s %s  %-15s  %-15s  %-15s  %s' "$name" "$marker" \
                 "$(_usage_cell $((in5 + cc5)) "$out5")" \
                 "$(_usage_cell $((inW + ccW)) "$outW")" \
+                "$(_usage_reads_cell "$lrW" "$lruW" "$lrcW")" \
                 "$age")"
     done < <(find "$SESSIONS_ROOT" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) -print0 2>/dev/null | sort -z))
 
