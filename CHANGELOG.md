@@ -4,6 +4,11 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## Unreleased
+
+### Fixes
+- `cs -usage` counts subagent tokens again. Claude Code moved subagent transcripts from `<conversation>/` to `<conversation>/subagents/`, and workflow agents sit one level deeper still, so both the session table and the per-conversation view had been reading the main transcript alone. One conversation on this machine went from 3.6M to 13.5M lifetime input tokens once the count included its agents. The walk now covers the whole conversation directory, and the model column comes from the conversation's own transcript rather than from the last subagent the scan happened to reach.
+
 ## 2026.9.9
 
 ### Features
