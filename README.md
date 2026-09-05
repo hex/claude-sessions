@@ -270,7 +270,7 @@ Sessions are designed to be shared through git (push/pull the whole session dire
 - **Secrets sync per machine.** `cs -secrets export-file` writes `.cs/secrets.<machine-id>.age/.enc` — distinct files per machine instead of one shared encrypted blob whose bytes change every export — and `import-file` merges every sync file it can decrypt. See [docs/secrets.md](docs/secrets.md).
 - **What can still conflict is real content**: the README objective/outcome, memory entries, and your project files — places where two humans genuinely disagree and should reconcile by hand.
 
-The custom `merge=ours` driver is git config, not part of the repository, so a clone has to receive it separately. The installer sets it globally, which covers every clone on that machine, and each `cs <name>` launch still sets it per clone for installs that predate the global one. The remaining gap is a machine that has never run the installer: pull there before installing cs, and `MEMORY.md` falls back to an ordinary text merge.
+One caveat: the custom `merge=ours` driver is per-clone git config, installed by every `cs <name>` launch and never written anywhere wider. If you pull on a brand-new clone *before* ever launching the session through cs, `MEMORY.md` falls back to an ordinary text merge. `cs -doctor` warns when the clone it runs in lacks the driver.
 
 ### Parallel feature worktrees
 
