@@ -4,13 +4,20 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
-## Unreleased
+## 2026.9.10
 
 ### Features
-- The prompt hook names the day when it changes. The session context states the date once at startup, so a conversation that lives across midnight kept believing yesterday's date and worked out "today" from it. On every prompt the hook compares the calendar day against the one this conversation was last told, kept per conversation under `.cs/local/context-date/`, and adds one line naming both dates when they differ; on the same day it adds nothing. A lead and a tmux teammate sharing the directory each keep their own day. Off switch: `CS_DATE_REMINDER_DISABLE=1`, listed by `cs -doctor` under Authority.
+- The prompt hook names the day when it changes. The session context states the date once at startup, so a conversation that lives across midnight kept believing yesterday's date and worked out "today" from it. On every prompt the hook compares the calendar day against the one this conversation was last told, kept per conversation under `.cs/local/context-date/`, and adds one line naming both dates when they differ; on the same day it adds nothing. A lead and a tmux teammate sharing the directory each keep their own day. Off switch: `CS_DATE_REMINDER_DISABLE=1`.
+- `cs -doctor` gains an Authority section: one row per hook that injects into the model's context, with the switch that turns it off and whether that switch is on right now. A status line needs opt-in, a context injection did not, and nothing listed them in one place.
+- `cs -doctor` warns when the clone it runs in lacks the `merge=ours` driver. The driver is per-clone git config, installed by every `cs <name>` launch, so a pull on a brand-new clone before the first launch text-merges `MEMORY.md`. The warning names the one-line fix.
+- CI runs shellcheck at error severity over every shell file, with an rc that knows `lib/` fragments carry no shebang by design.
 
 ### Fixes
 - `cs -usage` counts subagent tokens again. Claude Code moved subagent transcripts from `<conversation>/` to `<conversation>/subagents/`, and workflow agents sit one level deeper still, so both the session table and the per-conversation view had been reading the main transcript alone. One conversation on this machine went from 3.6M to 13.5M lifetime input tokens once the count included its agents. The walk now covers the whole conversation directory, and the model column comes from the conversation's own transcript rather than from the last subagent the scan happened to reach.
+- The Authority section reads a switch exported as `0` as on. Every hook tests its switch with `= "1"`, and the section tested for a non-empty value, so `CS_SCOPE_DISABLE=0` read as off while the hook kept injecting.
+
+### Docs
+- The README states that the merge driver stays per-clone and that `cs -doctor` names a clone without it.
 
 ## 2026.9.9
 
