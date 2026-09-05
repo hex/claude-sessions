@@ -1982,7 +1982,41 @@ test_ctx_warning_survives_an_interleaved_teammate() {
     fi
 }
 
+# context-pct holds the LEAD's reading only (the status line writes it for the
+# launched conversation alone), so a teammate acting on it announces someone
+# else's context as its own: a Sonnet teammate at 4% told its user "context is
+# at 60%" on 2026-09-05. Both tiers stay silent unless the firing claude is the
+# lead. The cursor fix of 2026-09-02 kept each conversation's notice separate;
+# this keeps the reading with the conversation it describes.
+_stop_with_ctx_as_teammate() {  # ctx-pct, session_id
+    printf '%s\n' "$1" > "$CLAUDE_SESSION_META_DIR/local/context-pct"
+    echo "{\"session_id\":\"$2\"}" | CLAUDE_PID=999999 bash "$HOOKS_DIR/narrative-reminder.sh"
+}
+
+test_ctx_tiers_are_silent_for_a_teammate() {
+    _rot_hook_session "rot-ctx-teammate"
+    local out
+    out=$(_stop_with_ctx_as_teammate 64 "$UUID_B") || return 1
+    if printf '%s' "$out" | grep -q "stopping point"; then
+        echo "  FAIL: a teammate must not be warned with the lead's reading"
+        return 1
+    fi
+    if grep -qx "$UUID_B" "$CLAUDE_SESSION_META_DIR/local/ctx-warned" 2>/dev/null; then
+        echo "  FAIL: a teammate must not spend a warning cursor on the lead's reading"
+        return 1
+    fi
+    out=$(_stop_with_ctx_as_teammate 85 "$UUID_B") || return 1
+    if printf '%s' "$out" | grep -q "consider rotating"; then
+        echo "  FAIL: a teammate must not be nudged to rotate on the lead's reading"
+        return 1
+    fi
+    # The lead, same directory, same reading: the notice is its.
+    out=$(_stop_with_ctx 64 "$UUID_A") || return 1
+    assert_output_contains "$out" "stopping point" "the lead is still warned" || return 1
+}
+
 run_test test_ctx_warning_fires_once_in_band
+run_test test_ctx_tiers_are_silent_for_a_teammate
 run_test test_ctx_warning_survives_an_interleaved_teammate
 run_test test_ctx_warning_rearms_for_new_conversation
 run_test test_ctx_warning_silent_below_band

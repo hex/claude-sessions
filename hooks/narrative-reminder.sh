@@ -676,6 +676,11 @@ NUDGE_CTX=$(_num_or "${CS_ROTATE_NUDGE_CTX:-}" 80)
 NUDGE_UUID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)
 NUDGE_PCT=$(cat "$QDIR/context-pct" 2>/dev/null | tr -d '[:space:]' || true)
 case "$NUDGE_PCT" in ''|*[!0-9]*) NUDGE_PCT="";; esac
+# The file holds the LEAD's reading only: the status line writes it for the
+# launched conversation alone. A teammate's Stop acting on it announces
+# someone else's context as its own, so for any other claude both tiers
+# below see no reading at all.
+_mail_is_lead || NUDGE_PCT=""
 if [ -n "$NUDGE_PCT" ] && [ -n "$NUDGE_UUID" ] && [ "$NUDGE_PCT" -ge "$NUDGE_CTX" ]; then
     # Append-only list of nudged conversations: a tmux teammate shares this
     # directory and runs the same Stop, so a single-slot cursor let each
