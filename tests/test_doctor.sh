@@ -979,4 +979,38 @@ test_doctor_does_not_call_a_valid_settings_file_invalid_without_jq() {
 
 run_test test_doctor_does_not_call_a_valid_settings_file_invalid_without_jq
 
+
+# Hooks install silently and can change what the model sees; a terminal title
+# needs opt-in but a context injection does not. The authority section makes
+# every such injection visible with the switch that turns it off.
+test_doctor_lists_every_context_injecting_hook_with_its_switch() {
+    local output
+    output=$(CS_CLAUDE_DIR="$TEST_TMPDIR/claude-auth" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Authority" "Doctor should have an authority section" || return 1
+    assert_output_contains "$output" "scope-prompt" "Should list the grounding hook" || return 1
+    assert_output_contains "$output" "CS_SCOPE_DISABLE" "Should name the grounding off-switch" || return 1
+    assert_output_contains "$output" "CS_CLARIFY_DISABLE" "Should name the clarify off-switch" || return 1
+    assert_output_contains "$output" "CS_REWRITE_DISABLE" "Should name the rewriter off-switch" || return 1
+    assert_output_contains "$output" ".cs/local/disabled" "Should name the universal off-switch" || return 1
+}
+
+test_doctor_authority_section_shows_a_disabled_injection_as_off() {
+    local output
+    output=$(CS_SCOPE_DISABLE=1 CS_CLAUDE_DIR="$TEST_TMPDIR/claude-auth" "$CS_BIN" -doctor 2>&1) || true
+    # The line for grounding must read as off when its switch is set, or the
+    # section reports configuration rather than what is actually happening.
+    local line
+    line=$(printf '%s\n' "$output" | grep -i "grounding" | head -1)
+    [ -n "$line" ] || { echo "no grounding line in authority section"; return 1; }
+    # The state is the FIRST field. Every row also carries "off:" as the label
+    # for its switch, so a substring match on "off" passes with the state
+    # hardcoded to on — which is exactly what this test exists to catch.
+    local state
+    state=$(printf '%s\n' "$line" | awk '{print $1}')
+    [ "$state" = "off" ] || { echo "grounding state is '$state', expected off: $line"; return 1; }
+}
+
+run_test test_doctor_lists_every_context_injecting_hook_with_its_switch
+run_test test_doctor_authority_section_shows_a_disabled_injection_as_off
+
 report_results
