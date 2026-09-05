@@ -43,6 +43,36 @@ jobs:
           git diff --exit-code bin/cs \
             || { echo "::error::bin/cs is out of sync with lib/. Run ./build.sh and commit bin/cs."; exit 1; }
 
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # A linter ships new checks in every release, so an unpinned one reddens
+      # main on a commit nobody touched. This job blocks, so the binary is pinned
+      # by digest: the tag names a release, only the hash names the bytes.
+      - name: Install shellcheck
+        env:
+          SHELLCHECK_VERSION: v0.11.0
+          SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+        run: |
+          curl -fsSL --retry 3 --retry-delay 2 --retry-all-errors -o shellcheck.tar.xz \
+            "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          echo "${SHELLCHECK_SHA256}  shellcheck.tar.xz" | sha256sum -c -
+          sudo tar -xJf shellcheck.tar.xz --strip-components=1 -C /usr/local/bin \
+            "shellcheck-${SHELLCHECK_VERSION}/shellcheck"
+          shellcheck --version
+
+      # Every tracked script plus the assembled binaries, which carry no .sh.
+      # Gated at error severity: that floor is green today; the ~110 warnings
+      # are a separate cleanup, and a gate that starts red is a gate nobody
+      # reads. .shellcheckrc declares the shell for the lib/ fragments and
+      # excludes the test harness's deliberate subshells.
+      - name: Lint shell scripts
+        run: |
+          { git ls-files '*.sh'; printf '%s\n' bin/cs bin/cs-secrets bin/cs-statusline bin/cs-subagent-statusline; } \
+            | xargs shellcheck -S error
+
   rust:
     strategy:
       fail-fast: false

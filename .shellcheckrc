@@ -1,0 +1,11 @@
+# lib/*.sh are fragments that build.sh assembles into bin/cs, so they carry no
+# shebang by design; declare the shell so tips are accurate and SC2148 is moot.
+shell=bash
+
+# Hooks and lib source siblings by computed path; let shellcheck follow them.
+external-sources=true
+source-path=SCRIPTDIR
+
+# The test harness runs each test in a subshell on purpose, so "modified in a
+# subshell" fires on every assertion helper. Structural, not a defect.
+disable=SC2030,SC2031

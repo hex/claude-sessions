@@ -264,7 +264,7 @@ test_zsh_completion_covers_all_commands() {
 test_bash_completion_covers_all_commands() {
     local missing="" cmd
     for cmd in $(dispatch_commands); do
-        if ! grep -qE "[\" ]$cmd[\" ]" "$BASH_COMP" 2>/dev/null; then
+        if ! grep -qE "[\" ]${cmd}[\" ]" "$BASH_COMP" 2>/dev/null; then
             missing="$missing $cmd"
         fi
     done
@@ -290,7 +290,7 @@ test_zsh_completion_covers_all_secrets_subcommands() {
 test_bash_completion_covers_all_secrets_subcommands() {
     local missing="" cmd
     for cmd in $(secrets_subcommands); do
-        if ! grep -qE "[\" ]$cmd[\" ]" "$BASH_COMP" 2>/dev/null; then
+        if ! grep -qE "[\" ]${cmd}[\" ]" "$BASH_COMP" 2>/dev/null; then
             missing="$missing $cmd"
         fi
     done
