@@ -990,6 +990,7 @@ test_doctor_lists_every_context_injecting_hook_with_its_switch() {
     assert_output_contains "$output" "scope-prompt" "Should list the grounding hook" || return 1
     assert_output_contains "$output" "CS_SCOPE_DISABLE" "Should name the grounding off-switch" || return 1
     assert_output_contains "$output" "CS_CLARIFY_DISABLE" "Should name the clarify off-switch" || return 1
+    assert_output_contains "$output" "CS_DATE_REMINDER_DISABLE" "Should name the date reminder off-switch" || return 1
     assert_output_contains "$output" "CS_REWRITE_DISABLE" "Should name the rewriter off-switch" || return 1
     assert_output_contains "$output" ".cs/local/disabled" "Should name the universal off-switch" || return 1
 }
@@ -1010,7 +1011,20 @@ test_doctor_authority_section_shows_a_disabled_injection_as_off() {
     [ "$state" = "off" ] || { echo "grounding state is '$state', expected off: $line"; return 1; }
 }
 
+# The hooks read their switch as `= "1"`, so an exported 0 leaves the
+# injection on. The section must say on, or it reports the variable's
+# presence rather than what the hook does with it.
+test_doctor_authority_section_shows_a_zero_switch_as_on() {
+    local output line state
+    output=$(CS_SCOPE_DISABLE=0 CS_CLAUDE_DIR="$TEST_TMPDIR/claude-auth" "$CS_BIN" -doctor 2>&1) || true
+    line=$(printf '%s\n' "$output" | grep -i "grounding" | head -1)
+    [ -n "$line" ] || { echo "no grounding line in authority section"; return 1; }
+    state=$(printf '%s\n' "$line" | awk '{print $1}')
+    [ "$state" = "on" ] || { echo "grounding state is '$state' with the switch at 0, expected on: $line"; return 1; }
+}
+
 run_test test_doctor_lists_every_context_injecting_hook_with_its_switch
+run_test test_doctor_authority_section_shows_a_zero_switch_as_on
 run_test test_doctor_authority_section_shows_a_disabled_injection_as_off
 
 

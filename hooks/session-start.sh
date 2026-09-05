@@ -129,6 +129,7 @@ echo "$(date '+%Y-%m-%d %H:%M:%S') - Session started (source: $SOURCE, ID: $SESS
 echo "  Working directory: $CWD" >> "$META_DIR/local/session.log"
 echo "" >> "$META_DIR/local/session.log"
 
+
 # Auto-pull and crash recovery only on fresh start or resume
 # Skip on clear/compact since the session is already running
 if [ "$SOURCE" = "startup" ] || [ "$SOURCE" = "resume" ]; then
@@ -308,9 +309,14 @@ ACTOR_SLUG=$(printf '%s' "$ACTOR_RAW" \
     | sed 's/[^a-z0-9][^a-z0-9]*/-/g; s/^-//; s/-*$//')
 
 # Provide context to Claude about the session
+# Sampled once: the day the context block names below is the day the stamp at
+# the end records, so a startup that straddles midnight cannot tell the model
+# one date and file another.
+CONTEXT_LOADED=$(date '+%Y-%m-%d %H:%M:%S %Z')
+CONTEXT_DAY=${CONTEXT_LOADED%% *}
 CONTEXT=$(cat << EOF
 You are working in a managed Claude Code session: $CLAUDE_SESSION_NAME
-Context loaded: $(date '+%Y-%m-%d %H:%M:%S %Z') ($(date -u +%Y-%m-%dT%H:%M:%SZ))
+Context loaded: $CONTEXT_LOADED ($(date -u +%Y-%m-%dT%H:%M:%SZ))
 
 Session directory: $CLAUDE_SESSION_DIR
 
@@ -924,5 +930,20 @@ jq -n --arg context "$CONTEXT" --arg watch "$MAIL_WATCH" --arg kick "$ROTATION_K
 + (if $sysmsg == "" then {} else {systemMessage: $sysmsg} end)'
 
 _commit_digest "$META_DIR/local"
+
+# The context block above told the conversation today's date. Record which day
+# this conversation heard, one file per conversation, so scope-prompt.sh can say
+# when the day has moved on. Written after the emit, so a hook killed before
+# delivery leaves no stamp claiming the date was heard. The id becomes a
+# filename: anything outside the uuid alphabet, or dot-led like the temp files
+# beside it, is not stamped.
+case "$SESSION_ID" in
+    ''|.*|*[!A-Za-z0-9._-]*) ;;
+    *)
+        mkdir -p "$META_DIR/local/context-date" 2>/dev/null \
+            && printf '%s\n' "$CONTEXT_DAY" > "$META_DIR/local/context-date/.$SESSION_ID.$$.tmp" 2>/dev/null \
+            && mv "$META_DIR/local/context-date/.$SESSION_ID.$$.tmp" "$META_DIR/local/context-date/$SESSION_ID" 2>/dev/null || true
+        ;;
+esac
 
 exit 0

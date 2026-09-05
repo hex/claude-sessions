@@ -79,7 +79,7 @@ run_hook() {
     # A leading-slash argument can be rewritten before jq sees it, so
     # "/color red" would arrive as some other absolute path.
     local _in
-    _in=$(printf '%s' "$1" | jq -Rs '{prompt: ., hook_event_name: "UserPromptSubmit"}')
+    _in=$(printf '%s' "$1" | jq -Rs '{prompt: ., hook_event_name: "UserPromptSubmit", session_id: "sid-test"}')
     bash "$HOOK" <<< "$_in"
 }
 
@@ -737,5 +737,171 @@ run_test test_stage_trace_records_the_run_in_order
 run_test test_stage_trace_stops_where_a_killed_run_stopped
 run_test test_stage_trace_records_the_invoking_directory
 run_test test_stage_trace_opt_out
+
+# ============================================================================
+# Date reminder: one line when the calendar day changed since the conversation
+# last heard the date, silence otherwise
+# ============================================================================
+
+_today() { date '+%Y-%m-%d'; }
+_stamp_file() { printf '%s' "$CLAUDE_SESSION_META_DIR/local/context-date/${1:-sid-test}"; }
+_write_stamp() {  # date [conversation]
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local/context-date"
+    printf '%s\n' "$1" > "$(_stamp_file "${2:-}")"
+}
+
+test_date_note_fires_when_the_day_changed() {
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    _write_stamp 2026-01-01
+    local out ac
+    out=$(run_hook "hello")
+    ac=$(additional_context "$out")
+    assert_output_contains "$ac" "$(_today)" "note should carry today's date" || return 1
+    assert_output_contains "$ac" "2026-01-01" "note should name the date the conversation last knew" || return 1
+    # The stamp advances so the note is not repeated on the next prompt.
+    assert_file_contains "$(_stamp_file)" "^$(_today)\$" "stamp should advance to today" || return 1
+}
+
+test_date_note_silent_when_the_day_is_unchanged() {
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    _write_stamp "$(_today)"
+    local out ac
+    out=$(run_hook "hello")
+    ac=$(additional_context "$out")
+    assert_output_not_contains "$ac" "## Date" "no note on the same day" || return 1
+}
+
+test_date_note_silent_without_a_stamp_and_writes_one() {
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    rm -f "$(_stamp_file)"
+    local out ac
+    out=$(run_hook "hello")
+    ac=$(additional_context "$out")
+    assert_output_not_contains "$ac" "## Date" "a missing baseline is not a change" || return 1
+    assert_file_contains "$(_stamp_file)" "^$(_today)\$" "first sight writes the baseline" || return 1
+}
+
+test_date_note_stamps_are_per_conversation() {
+    # A lead and a tmux teammate share .cs/local. Each conversation keeps its
+    # own day, so one hearing the new date never silences the other.
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    _write_stamp 2026-01-01 sid-other
+    local out ac
+    out=$(run_hook "hello")
+    ac=$(additional_context "$out")
+    assert_output_not_contains "$ac" "## Date" "another conversation's stamp is not our baseline" || return 1
+    assert_file_contains "$(_stamp_file)" "^$(_today)\$" "our own stamp is written" || return 1
+    assert_file_contains "$(_stamp_file sid-other)" "^2026-01-01\$" "the other conversation's stamp is untouched" || return 1
+}
+
+test_date_note_silent_on_the_prompt_after_it_fired() {
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    _write_stamp 2026-01-01
+    local out ac
+    out=$(run_hook "hello")
+    ac=$(additional_context "$out")
+    assert_output_contains "$ac" "## Date" "first prompt of the day carries the note" || return 1
+    out=$(run_hook "hello again")
+    ac=$(additional_context "$out")
+    assert_output_not_contains "$ac" "## Date" "second prompt of the day is silent" || return 1
+}
+
+test_date_note_treats_a_malformed_stamp_as_missing() {
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local/context-date"
+    # CRLF and trailing junk: neither is a date, and neither may read as "a
+    # different day" and fire.
+    printf '%s\r\n' "$(_today)" > "$(_stamp_file)"
+    local out ac
+    out=$(run_hook "hello")
+    ac=$(additional_context "$out")
+    assert_output_not_contains "$ac" "## Date" "a CR-terminated stamp of today is today" || return 1
+    printf 'not a date\n' > "$(_stamp_file)"
+    out=$(run_hook "hello")
+    ac=$(additional_context "$out")
+    assert_output_not_contains "$ac" "## Date" "garbage is a missing baseline, not a changed day" || return 1
+    assert_file_contains "$(_stamp_file)" "^$(_today)\$" "garbage is replaced by today" || return 1
+}
+
+test_date_note_skips_a_dot_led_conversation_id() {
+    # Temp files are dot-led in the same directory, so a dot-led id could be
+    # another writer's temp name. Uuids never start with a dot; refuse the class.
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    local _in out
+    _in=$(jq -n '{prompt: "hello", hook_event_name: "UserPromptSubmit", session_id: ".abc.123.tmp"}')
+    out=$(bash "$HOOK" <<< "$_in")
+    [ -z "$(ls -A "$CLAUDE_SESSION_META_DIR/local/context-date" 2>/dev/null)" ] || { echo "  FAIL: dot-led id reached the stamp directory"; return 1; }
+    assert_output_not_contains "$(additional_context "$out")" "## Date" "no note for a dot-led id" || return 1
+}
+
+test_date_note_stamp_stays_put_when_emission_fails() {
+    # The stamp advances only once the note has gone out. A jq that cannot build
+    # the output object stands in for the emission failing.
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local" "$TEST_TMPDIR/bin"
+    _write_stamp 2026-01-01
+    local real_jq
+    real_jq=$(command -v jq)
+    printf '#!/bin/sh\n[ "$1" = "-n" ] && exit 1\nexec %s "$@"\n' "$real_jq" > "$TEST_TMPDIR/bin/jq"
+    chmod +x "$TEST_TMPDIR/bin/jq"
+    local out
+    out=$(PATH="$TEST_TMPDIR/bin:$PATH" run_hook "hello")
+    [ -z "$out" ] || { echo "  FAIL: stub should have suppressed the output object"; return 1; }
+    assert_file_contains "$(_stamp_file)" "^2026-01-01\$" "an unheard note leaves the stamp for the next prompt" || return 1
+}
+
+test_date_note_skips_a_conversation_id_that_is_not_a_filename() {
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    local _in out
+    _in=$(jq -n '{prompt: "hello", hook_event_name: "UserPromptSubmit", session_id: "../../escape"}')
+    out=$(bash "$HOOK" <<< "$_in")
+    [ ! -e "$CLAUDE_SESSION_META_DIR/local/context-date/../../escape" ] || { echo "  FAIL: id used as a path"; return 1; }
+    [ ! -e "$CLAUDE_SESSION_META_DIR/escape" ] || { echo "  FAIL: stamp escaped the directory"; return 1; }
+    assert_output_not_contains "$(additional_context "$out")" "## Date" "no note for an unusable id" || return 1
+}
+
+test_date_note_disabled_by_env() {
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    _write_stamp 2026-01-01
+    local out ac
+    out=$(CS_DATE_REMINDER_DISABLE=1 run_hook "hello")
+    ac=$(additional_context "$out")
+    assert_output_not_contains "$ac" "## Date" "switch silences the note" || return 1
+}
+
+test_date_note_fires_on_an_empty_prompt_too() {
+    # A mail wake carries no prompt; the day can still have changed under it.
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    _write_stamp 2026-01-01
+    local out ac
+    out=$(run_hook "")
+    ac=$(additional_context "$out")
+    assert_output_contains "$ac" "$(_today)" "note reaches an unattended turn" || return 1
+}
+
+test_date_note_stamp_advances_on_a_code_work_prompt_too() {
+    # A code-work prompt leaves through the scope-block exit, not the digest
+    # exit; both must commit the stamp or the note repeats on every such prompt.
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    seed_repo "src/auth.sh"
+    _write_stamp 2026-01-01
+    local out ac
+    out=$(run_hook "fix the login bug in auth.sh")
+    ac=$(additional_context "$out")
+    assert_output_contains "$ac" "Scope (auto-grounded)" "prompt should take the scope-block path" || return 1
+    assert_output_contains "$ac" "$(_today)" "note rides along with the scope block" || return 1
+    assert_file_contains "$(_stamp_file)" "^$(_today)\$" "stamp advances on this path as well" || return 1
+}
+
+run_test test_date_note_fires_when_the_day_changed
+run_test test_date_note_silent_when_the_day_is_unchanged
+run_test test_date_note_silent_without_a_stamp_and_writes_one
+run_test test_date_note_stamps_are_per_conversation
+run_test test_date_note_silent_on_the_prompt_after_it_fired
+run_test test_date_note_treats_a_malformed_stamp_as_missing
+run_test test_date_note_skips_a_conversation_id_that_is_not_a_filename
+run_test test_date_note_skips_a_dot_led_conversation_id
+run_test test_date_note_stamp_stays_put_when_emission_fails
+run_test test_date_note_disabled_by_env
+run_test test_date_note_fires_on_an_empty_prompt_too
+run_test test_date_note_stamp_advances_on_a_code_work_prompt_too
 
 report_results

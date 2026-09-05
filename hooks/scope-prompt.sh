@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: UserPromptSubmit hook: records the first prompt as the session Objective, then
-# ABOUTME: grounds code-work prompts in a bounded "Scope (auto-grounded)" block
+# ABOUTME: grounds code-work prompts in a bounded "Scope (auto-grounded)" block, and names the day when it changed
 
 # No `set -e`: this hook must NEVER block the prompt. Every error path exits 0.
 set -uo pipefail
@@ -126,6 +126,60 @@ _trace input
 if [ -n "$PROMPT" ] && [ -n "${CLAUDE_SESSION_META_DIR:-}" ]; then
     rm -f "$CLAUDE_SESSION_META_DIR/local/mail/wakes" 2>/dev/null || true
 fi
+
+# --- Date reminder (every prompt; speaks only when the calendar day changed) ---
+
+# The session context stamps the date once, at SessionStart, and a conversation
+# that lives across midnight keeps believing it. `.cs/local/context-date/<id>`
+# holds the day conversation <id> was last told, one file per conversation: a
+# lead and a tmux teammate share this directory, and a single shared slot would
+# let either one's new day silence the other's. A different day yields one note
+# naming both dates; the same day yields nothing; a missing or unreadable stamp
+# yields nothing and just sets the baseline. The stamp is written only after
+# the note has been emitted, like the inbox cursor: a hook killed mid-run may
+# repeat a note, never lose one. Empty prompts count too: a mail wake can land
+# on a new day. The id becomes a filename, so anything outside the uuid
+# alphabet skips the whole feature rather than reaching the filesystem. The
+# directory is machine-local and the user's own; a FIFO or symlink planted
+# there is someone with write access to the home directory, and that is not a
+# case this hook defends against (do not re-fix).
+DATE_NOTE=""
+DATE_STAMP_PENDING=""
+DATE_STAMP_CONV=""
+if [ "${CS_DATE_REMINDER_DISABLE:-}" != "1" ] && [ -n "${CLAUDE_SESSION_META_DIR:-}" ]; then
+    _conv=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null) || _conv=""
+    # Dot-led names are the temp files in the same directory.
+    case "$_conv" in ''|.*|*[!A-Za-z0-9._-]*) _conv="" ;; esac
+    _today=$(date '+%Y-%m-%d' 2>/dev/null) || _today=""
+    case "$_today" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;; *) _conv="" ;; esac
+    if [ -n "$_conv" ]; then
+        _stamp_file="$CLAUDE_SESSION_META_DIR/local/context-date/$_conv"
+        _known_day=""
+        if [ -f "$_stamp_file" ]; then
+            IFS= read -r _known_day < "$_stamp_file" || true
+            _known_day=${_known_day%$'\r'}
+            case "$_known_day" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;; *) _known_day="" ;; esac
+        fi
+        if [ -n "$_known_day" ] && [ "$_known_day" != "$_today" ]; then
+            DATE_NOTE="## Date
+
+It is now $_today. The date this conversation last heard was $_known_day, so any \"today\" worked out before this turn is stale."
+        fi
+        if [ "$_known_day" != "$_today" ]; then
+            DATE_STAMP_PENDING="$_today"
+            DATE_STAMP_CONV="$_conv"
+        fi
+    fi
+fi
+_commit_date_stamp() {  # meta_local_dir
+    [ -n "${DATE_STAMP_PENDING:-}" ] || return 0
+    local dir="$1/context-date"
+    mkdir -p "$dir" 2>/dev/null || return 0
+    printf '%s\n' "$DATE_STAMP_PENDING" > "$dir/.$DATE_STAMP_CONV.$$.tmp" 2>/dev/null \
+        && mv "$dir/.$DATE_STAMP_CONV.$$.tmp" "$dir/$DATE_STAMP_CONV" 2>/dev/null || true
+    DATE_STAMP_PENDING=""
+}
+_trace date
 
 # --- Clarify guideline (every prompt; the model judges ambiguity, not a regex) ---
 
@@ -293,8 +347,12 @@ $part"
 }
 
 _digest_exit() {
-    _emit_context "$DIGEST" "$CLARIFY"
+    local _emitted=0
+    _emit_context "$DATE_NOTE" "$DIGEST" "$CLARIFY" || _emitted=$?
     _commit_digest "${CLAUDE_SESSION_META_DIR:-}/local"
+    # An emission that failed left the note unheard; the stamp waits for the
+    # next prompt to carry it.
+    [ "$_emitted" -eq 0 ] && _commit_date_stamp "${CLAUDE_SESSION_META_DIR:-}/local"
     _trace exit
     exit 0
 }
@@ -525,7 +583,9 @@ fi
 # scope block goes LAST because a truncated one must end with its truncation
 # marker — nothing severed may read as a complete path, and anything appended
 # after the marker breaks that.
-_emit_context "$DIGEST" "$CLARIFY" "$BLOCK"
+_emitted=0
+_emit_context "$DATE_NOTE" "$DIGEST" "$CLARIFY" "$BLOCK" || _emitted=$?
 _commit_digest "${CLAUDE_SESSION_META_DIR:-}/local"
+[ "$_emitted" -eq 0 ] && _commit_date_stamp "${CLAUDE_SESSION_META_DIR:-}/local"
 _trace emit
 exit 0

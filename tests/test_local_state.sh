@@ -301,6 +301,21 @@ test_session_start_rebinds_uuid_in_local_state() {
         "rebind must leave README byte-identical" || return 1
 }
 
+# The date reminder in scope-prompt.sh compares each prompt's day against the
+# day this conversation was last told. SessionStart is where it was told first,
+# so it writes the baseline; a conversation started at 23:59 then gets its note
+# on the 00:01 prompt instead of silently resetting.
+test_session_start_stamps_the_context_date_for_this_conversation() {
+    hook_setup
+
+    echo '{"session_id":"cccccccc-1111-2222-3333-444444444444","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>&1
+
+    assert_file_contains "$CLAUDE_SESSION_META_DIR/local/context-date/cccccccc-1111-2222-3333-444444444444" \
+        "^$(date '+%Y-%m-%d')$" \
+        "hook should stamp today's date under this conversation's id" || return 1
+}
+
 test_session_start_writes_last_resumed_to_local_state() {
     hook_setup
 
@@ -406,6 +421,7 @@ run_test test_migration_readme_survives_a_failed_frontmatter_write
 run_test test_migration_moves_fields_from_readme_to_local_state
 run_test test_migration_moves_session_log_to_local
 run_test test_session_start_rebinds_uuid_in_local_state
+run_test test_session_start_stamps_the_context_date_for_this_conversation
 run_test test_session_start_writes_last_resumed_to_local_state
 run_test test_session_end_leaves_readme_untouched
 run_test test_union_merge_attributes_written
