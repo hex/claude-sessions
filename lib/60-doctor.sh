@@ -574,9 +574,11 @@ _doctor_check_hook_authority() {
     if [ -n "${CLAUDE_SESSION_META_DIR:-}" ] && [ -f "${CLAUDE_SESSION_META_DIR}/local/disabled" ]; then
         disabled_all=1
     fi
-    _doctor_authority_row() {  # label hook switch is_off
+    # The hooks read their switch as `= "1"`, so the row must too: an exported
+    # 0 leaves the injection on and has to read as on here.
+    _doctor_authority_row() {  # label hook switch value
         local state="on"
-        if [ -n "$disabled_all" ] || [ -n "$4" ]; then state="off"; fi
+        if [ -n "$disabled_all" ] || [ "$4" = "1" ]; then state="off"; fi
         printf "    %-4s %-22s %-20s off: %s\n" "$state" "$1" "$2" "$3"
     }
     _doctor_authority_row "grounding"     "scope-prompt"       'CS_SCOPE_DISABLE=1'             "${CS_SCOPE_DISABLE:-}"
