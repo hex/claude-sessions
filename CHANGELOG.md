@@ -6,6 +6,9 @@ All notable changes to cs are documented here. Release notes are also available 
 
 ## Unreleased
 
+### Features
+- The prompt hook names the day when it changes. The session context states the date once at startup, so a conversation that lives across midnight kept believing yesterday's date and worked out "today" from it. On every prompt the hook compares the calendar day against the one this conversation was last told, kept per conversation under `.cs/local/context-date/`, and adds one line naming both dates when they differ; on the same day it adds nothing. A lead and a tmux teammate sharing the directory each keep their own day. Off switch: `CS_DATE_REMINDER_DISABLE=1`, listed by `cs -doctor` under Authority.
+
 ### Fixes
 - `cs -usage` counts subagent tokens again. Claude Code moved subagent transcripts from `<conversation>/` to `<conversation>/subagents/`, and workflow agents sit one level deeper still, so both the session table and the per-conversation view had been reading the main transcript alone. One conversation on this machine went from 3.6M to 13.5M lifetime input tokens once the count included its agents. The walk now covers the whole conversation directory, and the model column comes from the conversation's own transcript rather than from the last subagent the scan happened to reach.
 

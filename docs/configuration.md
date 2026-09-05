@@ -80,6 +80,11 @@ export CS_SCOPE_TRACE_DISABLE="1"
 # Opt a session out of first-prompt Objective capture (see hooks.md)
 export CS_OBJECTIVE_CAPTURE_DISABLE="1"
 
+# Opt a session out of the date reminder: the one-line note scope-prompt adds
+# when the calendar day has changed since the conversation last heard the date
+# (see hooks.md).
+export CS_DATE_REMINDER_DISABLE="1"
+
 # Opt a session out of the clarify guideline (see hooks.md).
 # Separate from CS_SCOPE_DISABLE on purpose: silencing grounding should not
 # silence the questions. Skip a single turn instead with a leading ~ .

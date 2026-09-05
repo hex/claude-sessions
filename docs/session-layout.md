@@ -86,6 +86,7 @@ user-owned `CLAUDE.md` is never touched.
 | `notifications.jsonl` | Per-machine queue inbox — drain lifecycle events (`drain_started`, `task_done`, `breaker_tripped`, `drain_finished`) read by `cs -queue log` and the surface-once digest. |
 | `notifications.seen` | Cursor for that digest, so unseen inbox entries surface at most once. |
 | `ctx-warned` | Conversation UUID already given the one-time 60% context warning (the tier below the rotation nudge). |
+| `context-date/` | One file per conversation, named by its id, holding the `YYYY-MM-DD` that conversation was last told; written at session start and advanced by `scope-prompt` when it emits the date note. Per conversation because a lead and a tmux teammate share this directory and each hears the date on its own. |
 | `scope-prompt.trace` | One line per stage of each `scope-prompt` run, appended as that stage finishes — so a run its timeout killed still names the stage it hung on. Opt out with `CS_SCOPE_TRACE_DISABLE=1`. |
 | `rewrite.trace` | One line per `ctrl+g` invocation and the path it took. The rewriter shim draws onto a screen that is torn down and leaves the buffer unchanged on every one of its several do-nothing paths, so without this a rewrite that declined is indistinguishable from one that was never asked for. |
 | `watermark` | Per-actor high-water mark for the "shared memory/narrative activity since you were last here" digest injected on resume. |
