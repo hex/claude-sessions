@@ -1260,4 +1260,19 @@ run_test test_install_declined_marker_honors_xdg_and_foreign_statusline
 run_test test_install_refreshes_registered_statusline_despite_marker
 run_test test_statusline_disable_sets_and_enable_clears_declined_marker
 run_test test_uninstall_removes_declined_marker
+
+# The per-clone merge driver only exists after a cs launch, so a session pulled
+# onto a fresh machine before the first `cs <name>` text-merges MEMORY.md — the
+# README's own caveat. A global driver closes that window for every clone.
+test_install_registers_the_merge_driver_globally() {
+    local fake_home="$TEST_TMPDIR/home-merge"
+    mkdir -p "$fake_home/.claude"
+    HOME="$fake_home" bash "$INSTALL_SH" >/dev/null 2>&1 </dev/null || true
+    local driver
+    driver=$(HOME="$fake_home" git config --global --get merge.ours.driver 2>/dev/null)
+    [ "$driver" = "true" ] || { echo "merge.ours.driver not set globally (got: '$driver')"; return 1; }
+}
+
+run_test test_install_registers_the_merge_driver_globally
+
 report_results
