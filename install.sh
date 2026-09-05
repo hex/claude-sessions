@@ -508,15 +508,6 @@ else
     fi
 fi
 
-# The merge driver that keeps MEMORY.md from text-merging is otherwise set
-# per clone, and only by a cs launch — so a session pulled onto a fresh machine
-# before its first `cs <name>` merges as plain text. Global closes that window
-# for every clone. Idempotent, and the value is git's own built-in "ours".
-if command -v git >/dev/null 2>&1; then
-    git config --global merge.ours.driver true 2>/dev/null || warn "Could not set the global merge.ours driver"
-    installed "merge driver" "git config --global merge.ours.driver"
-fi
-
 # Configure Claude Code settings
 installed "hook config" "~/.claude/settings.json"
 
