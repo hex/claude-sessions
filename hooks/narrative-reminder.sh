@@ -702,7 +702,7 @@ if [ -n "$NUDGE_PCT" ] && [ -n "$NUDGE_UUID" ] \
     && [ "$NUDGE_PCT" -ge "$WARN_CTX" ] && [ "$NUDGE_PCT" -lt "$NUDGE_CTX" ]; then
     if ! grep -qx "$NUDGE_UUID" "$QDIR/ctx-warned" 2>/dev/null; then
         printf '%s\n' "$NUDGE_UUID" >> "$QDIR/ctx-warned"
-        REASON="Context is at ${NUDGE_PCT}% — past the comfortable-headroom mark. Briefly let the user know so they can steer toward a natural stopping point or plan a rotation; the rotate nudge follows at 80%. One-time notice for this conversation; no action needed now."
+        REASON="Context is at ${NUDGE_PCT}% — past the comfortable-headroom mark. Briefly let the user know so they can steer toward a natural stopping point or plan a rotation; the rotate nudge follows at ${NUDGE_CTX}%. One-time notice for this conversation; no action needed now."
         jq -nc --arg r "$REASON" '{decision: "block", reason: $r}'
         exit 0
     fi
