@@ -1180,7 +1180,7 @@ _seg_pane() {
 _seg_ctx() {
     local v="${SL_CTX%%.*}"
     [ -n "$v" ] || return 0
-    local warn="${CS_STATUSLINE_CTX_WARN:-50}" crit="${CS_STATUSLINE_CTX_CRIT:-80}"
+    local warn="${CS_STATUSLINE_CTX_WARN:-50}" crit="${CS_STATUSLINE_CTX_CRIT:-70}"
     local notice="${CS_STATUSLINE_CTX_NOTICE:-40}"
     _thresh_color "$v" "$warn" "$crit"
     case "$notice" in

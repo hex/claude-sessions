@@ -836,10 +836,10 @@ test_non_git_workspace_absent() {
 
 test_ctx_threshold_red() {
     export COLORTERM=truecolor
-    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":84}}'
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":70}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "220;38;38" "ctx 84% should use the red background rgb"
+    assert_output_contains "$out" "220;38;38" "ctx 70% should use the red background rgb" || return 1
     if ! printf '%s' "$out" | grep -qF "$(printf '\033[0m')"; then
         echo "  FAIL: colored line must contain a reset"
         return 1
@@ -881,6 +881,15 @@ test_ctx_warn_band_still_amber() {
     out=$(run_sl "$json")
     assert_output_contains "$out" "255;183;77" "ctx 50% should still use the amber background rgb" || return 1
     assert_output_not_contains "$out" "202;138;4" "ctx 50% must not fall back to yellow" || return 1
+}
+
+test_ctx_below_crit_is_amber_not_red() {
+    export COLORTERM=truecolor
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":69}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "255;183;77" "ctx 69% should still be amber" || return 1
+    assert_output_not_contains "$out" "220;38;38" "ctx 69% must not use red" || return 1
 }
 
 test_ctx_notice_threshold_is_configurable() {
@@ -1949,6 +1958,7 @@ run_test test_ctx_normal_neutral_not_red
 run_test test_ctx_notice_band_is_yellow
 run_test test_ctx_below_notice_is_neutral
 run_test test_ctx_warn_band_still_amber
+run_test test_ctx_below_crit_is_amber_not_red
 run_test test_ctx_notice_threshold_is_configurable
 run_test test_model_neutral_not_blue
 run_test test_white_text_on_periwinkle

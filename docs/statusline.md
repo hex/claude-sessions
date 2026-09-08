@@ -21,7 +21,7 @@ Default order: `logo,session,notes,mail,pane,git,model,ctx,limits,fable`. A bran
 | `pane` | The tmux pane hosting the conversation, `◫ %7` — a target usable verbatim in tmux commands and other chats | `TMUX_PANE` from inherited environment (no fork); requires `TMUX` too, and that this process is genuinely inside that tmux server, so an inherited pane id never renders | Grey; hidden outside tmux |
 | `git` | Branch, ahead/behind arrows, staged `+N` and modified `!N` counts | One `git status --porcelain=v1 -b` call | Bold slate-blue accent `rgb(79,91,140)`, chip text color |
 | `model` | Model display name plus effort level when present | stdin `model.display_name`, `effort.level` | Periwinkle accent (claude's usage-chip purple), white text |
-| `ctx` | Context window usage, `ctx 42%` | stdin `context_window.used_percentage` | Grey; yellow at 40%, amber at 50%, red at 80% (tunable) |
+| `ctx` | Context window usage, `ctx 42%` | stdin `context_window.used_percentage` | Grey; yellow at 40%, amber at 50%, red at 70% (tunable) |
 | `limits` | 5-hour and weekly rate limit usage as two adjacent blocks, `5h 62% · 2h14m` and `wk 85% · 5d16h`; each block appends the time until its window resets when known, but only once usage is tight — the 5-hour countdown shows at 50% and up, the weekly at 80% and up, so the suffix appears as the window fills rather than while there's headroom. The countdown reads compactly (`45m`, `2h14m`), rolling into days past 24 hours (`5d16h`) | stdin `rate_limits.*.used_percentage`, `rate_limits.five_hour.resets_at`, `rate_limits.seven_day.resets_at` | Grey; each block escalates to amber at 70% and red at 90% on its own value |
 | `fable` | Fable's own weekly usage as a single block, `fable 86% · 1d20h`, rendered only when the active model is Fable. Fable draws on a model-scoped weekly bucket that the plan-wide `5h` and `wk` numbers do not describe, so without this block a Fable session shows two figures for a limit that is not the one about to bite. The countdown appends at 80% and up, like `wk` | `GET /api/oauth/usage`, cached machine-globally (see [Fable usage](#fable-usage)) | Grey; escalates to amber at 70% and red at 90% |
 | `cost` | Session cost, `$1.23` (opt-in; not in the default order) | stdin `cost.total_cost_usd` | Grey |
@@ -243,7 +243,7 @@ export CS_STATUSLINE_SEGMENTS="session,ctx,git,limits"
 # Context thresholds (percent)
 export CS_STATUSLINE_CTX_NOTICE=40
 export CS_STATUSLINE_CTX_WARN=50
-export CS_STATUSLINE_CTX_CRIT=80
+export CS_STATUSLINE_CTX_CRIT=70
 
 # Where the machine-global usage cache lives (default $CS_SESSIONS_ROOT/.usage)
 export CS_USAGE_DIR="$HOME/.claude-sessions/.usage"
