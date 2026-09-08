@@ -777,7 +777,9 @@ ADVISOR_NUDGE=""
 ADVISOR_COOLDOWN_FILE="$META_DIR/local/.advisor-nudge-cooldown"
 ADVISOR_COOLDOWN_SECONDS=1800  # 30 minutes: a standing reminder, not a nag
 
-_council_is_installed() {
+# $1 is the installed_plugins.json key prefix, $2 a command file the plugin
+# must still carry on disk.
+_plugin_is_installed() {
     local record path
     # HOME can be unset, and a bare expansion under `set -u` aborts the hook
     # before it emits, losing the reminder entirely.
@@ -793,10 +795,10 @@ _council_is_installed() {
         [ -n "$path" ] || continue
         # The record outlives an uninstall, so the command file decides, not
         # the record: naming a command the user cannot run is worse than silence.
-        [ -f "$path/commands/advise.md" ] && return 0
+        [ -f "$path/$2" ] && return 0
     done <<EOF
-$(jq -r '(.plugins // {}) | to_entries[]
-         | select(.key | startswith("claude-council@"))
+$(jq -r --arg k "$1" '(.plugins // {}) | to_entries[]
+         | select(.key | startswith($k))
          | .value[]?.installPath // empty' "$record" 2>/dev/null | tr -d '\r')
 EOF
     return 1
@@ -806,15 +808,32 @@ EOF
 # own Stop, and the cooldown is one stamp for the session: an ungated nudge
 # lets a teammate consume the lead's slot, and in a walk-away run the lead can
 # stop seeing the suggestion altogether.
-if _mail_is_lead && _council_is_installed; then
-    _adv_last=0
-    if [ -f "$ADVISOR_COOLDOWN_FILE" ]; then
-        _adv_last=$(_num_or "$(cat "$ADVISOR_COOLDOWN_FILE" 2>/dev/null | tr -d '[:space:]')" 0)
-        _adv_last=$((10#$_adv_last))
-    fi
-    if [ "$((CURRENT_TIME - _adv_last))" -ge "$ADVISOR_COOLDOWN_SECONDS" ]; then
-        echo "$CURRENT_TIME" > "$ADVISOR_COOLDOWN_FILE" 2>/dev/null || true
-        ADVISOR_NUDGE=" Standing note: at a real decision point — about to commit to an approach, stuck after repeated attempts, or about to call the work done — \`/claude-council:advise\` puts this conversation to external models for a second opinion. You judge whether the moment qualifies; most turns do not. It sends a digest of the conversation to third-party providers, so ask the user before running it and show them what would go."
+if _mail_is_lead; then
+    _has_council=0; _has_codex=0
+    _plugin_is_installed "claude-council@" "commands/advise.md" && _has_council=1
+    _plugin_is_installed "codex@" "commands/review.md" && _has_codex=1
+    if [ "$((_has_council + _has_codex))" -gt 0 ]; then
+        _adv_last=0
+        if [ -f "$ADVISOR_COOLDOWN_FILE" ]; then
+            _adv_last=$(_num_or "$(cat "$ADVISOR_COOLDOWN_FILE" 2>/dev/null | tr -d '[:space:]')" 0)
+            _adv_last=$((10#$_adv_last))
+        fi
+        if [ "$((CURRENT_TIME - _adv_last))" -ge "$ADVISOR_COOLDOWN_SECONDS" ]; then
+            echo "$CURRENT_TIME" > "$ADVISOR_COOLDOWN_FILE" 2>/dev/null || true
+            # One note and one cooldown slot however many channels are present:
+            # two independent nudges would double the appended text and race
+            # the same stamp.
+            ADVISOR_NUDGE=" Standing note: at a real decision point — about to commit to an approach, stuck after repeated attempts, or about to call the work done — a second opinion is available."
+            if [ "$_has_council" -eq 1 ]; then
+                ADVISOR_NUDGE="$ADVISOR_NUDGE \`/claude-council:advise\` puts this conversation to external models; it sends a digest to third-party providers, so ask the user before running it and show them what would go."
+            fi
+            if [ "$_has_codex" -eq 1 ]; then
+                # review and adversarial-review carry disable-model-invocation,
+                # so they are the user's to type; offer them, never run them.
+                ADVISOR_NUDGE="$ADVISOR_NUDGE Offer \`/codex:review\` before calling built work done — the user runs it, you cannot. \`/codex:rescue\` is yours to invoke when genuinely stuck."
+            fi
+            ADVISOR_NUDGE="$ADVISOR_NUDGE You judge whether the moment qualifies; most turns do not."
+        fi
     fi
 fi
 
