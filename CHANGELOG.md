@@ -4,6 +4,21 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## 2026.9.12
+
+### Features
+- The context gauge reads in four states instead of three. Below 40% it stays neutral, from 40% it turns yellow, from 50% amber, and from 70% red — the reading at which cs asks for a rotation, so the colour and the instruction now agree. `CS_STATUSLINE_CTX_NOTICE` sets the new band; `CS_STATUSLINE_CTX_WARN` and `CS_STATUSLINE_CTX_CRIT` keep their meaning.
+- The wind-down tiers move earlier. The one-time heads-up arrives at 40% context and the rotation nudge at 70%, so a conversation is offered a stopping point while it still has room to write a handoff. Both stay tunable through `CS_CTX_WARN_CTX` and `CS_ROTATE_NUDGE_CTX`.
+- `cs -usage` counts oversized Read results per session and shows what they cost.
+
+### Fixes
+- The context warning named a threshold it no longer had, telling a conversation the nudge would follow at 80% when it now follows at 70%.
+- Agent-panel rows turned red at a different reading than the bar, so an agent at 75% context read amber in the panel and red in the bar.
+- The reads column counted only one of the two shapes a Read result arrives in, missing 36% of large reads corpus-wide and 76% of those inside subagent transcripts.
+- The reads column called a read targeted whenever it was truncated, so a read the model never sliced counted as deliberate; targeting now comes from the call itself.
+- One malformed transcript entry ended the usage scan for every file after it, silently.
+- A non-numeric threshold override disabled the gauge's notice band instead of falling back to its default.
+
 ## 2026.9.11
 
 ### Fixes
