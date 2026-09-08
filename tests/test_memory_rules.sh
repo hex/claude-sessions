@@ -571,6 +571,40 @@ test_delegate_block_is_removed_when_it_sits_mid_file() {
     assert_file_contains "$session_dir/CLAUDE.local.md" "Head prose that must survive"         "content above must survive" || return 1
 }
 
+# One real session had the block as its ENTIRE CLAUDE.local.md. Stripping it
+# leaves nothing, and a guard that only writes a non-empty result would leave
+# the dead instruction in place in exactly that session.
+test_delegate_block_is_removed_when_it_is_the_whole_file() {
+    local name="delegate-only" 
+    local session_dir="$CS_SESSIONS_ROOT/$name"
+    mkdir -p "$session_dir/.cs"/{local,memory}
+    cat > "$session_dir/.cs/README.md" << EOF
+---
+status: active
+created: 2026-01-01
+tags: []
+aliases: ["$name"]
+---
+# Session: $name
+EOF
+    echo "# Session narrative" > "$session_dir/.cs/memory/narrative.md"
+    {
+        printf '%s\n' '<!-- cs:delegate -->'
+        echo "## External delegation (cs)"
+        echo
+        echo "When the Agent tool is denied with a reason that begins \`cs-delegate:\`, run the command it names."
+    } > "$session_dir/CLAUDE.local.md"
+    (cd "$session_dir" && git init -q && git add -A && git commit -q -m init)
+
+    "$CS_BIN" "$name" <<< "" >/dev/null 2>&1 || true
+
+    assert_file_not_contains "$session_dir/CLAUDE.local.md" "cs:delegate" \
+        "a block that is the whole file must still be removed" || return 1
+    assert_file_not_contains "$session_dir/CLAUDE.local.md" "cs-delegate:" \
+        "and its prose with it" || return 1
+}
+
+run_test test_delegate_block_is_removed_when_it_is_the_whole_file
 run_test test_delegate_block_is_removed_when_it_sits_at_eof
 run_test test_delegate_block_is_removed_when_it_sits_mid_file
 

@@ -3165,15 +3165,18 @@ EOF
         # Drops the sentinel through to the next cs: sentinel or EOF, plus the
         # blank lines that separated it from the block above, so removing a
         # mid-file block does not weld its neighbours together.
-        awk '
+        # awk's own exit status decides, not the size of what it wrote: a file
+        # whose entire content was the block reduces to nothing legitimately,
+        # and an emptiness test would leave the dead instruction in place in
+        # exactly that session.
+        if awk '
             /^<!-- cs:delegate -->$/ { skip = 1; blanks = 0; next }
             skip && /^<!-- cs:/       { skip = 0 }
             skip                      { next }
             /^[[:space:]]*$/          { blanks = blanks "\n"; next }
             { printf "%s", blanks; blanks = ""; print }
             END { if (!skip && blanks != "") printf "%s", blanks }
-        ' "$claude_md_p9" > "$_tmp_p15" 2>/dev/null || { rm -f "$_tmp_p15"; _tmp_p15=""; }
-        if [ -n "$_tmp_p15" ] && [ -s "$_tmp_p15" ]; then
+        ' "$claude_md_p9" > "$_tmp_p15" 2>/dev/null; then
             mv "$_tmp_p15" "$claude_md_p9"
             warn "Removed the retired external-delegation block from CLAUDE.local.md"
         else
