@@ -490,4 +490,88 @@ test_subagent_secrets_rule_names_the_redirect_form() {
 }
 
 run_test test_subagent_secrets_rule_names_the_redirect_form
+
+# ============================================================================
+# The delegation block is retired: nothing on main generates or reads it, so a
+# session carrying it instructs the model to run a verb that does not exist.
+# ============================================================================
+
+_seed_session_with_delegate_block() {
+    # Args: $1 = session name, $2 = "eof" or "midfile"
+    local name="$1" where="$2"
+    local session_dir="$CS_SESSIONS_ROOT/$name"
+    mkdir -p "$session_dir/.cs"/{local,memory}
+    cat > "$session_dir/.cs/README.md" << EOF
+---
+status: active
+created: 2026-01-01
+tags: []
+aliases: ["$name"]
+---
+# Session: $name
+EOF
+    echo "# Session narrative" > "$session_dir/.cs/memory/narrative.md"
+
+    {
+        echo "# Session Documentation Protocol"
+        echo
+        echo "Head prose that must survive."
+        echo
+        if [ "$where" = "midfile" ]; then
+            printf '%s\n' '<!-- cs:delegate -->'
+            echo "## External delegation (cs)"
+            echo
+            echo "When the Agent tool is denied with a reason that begins \`cs-delegate:\`, run the command it names."
+            echo
+            printf '%s\n' '<!-- cs:wrap-cues -->'
+            echo "## Session wrap-up cues"
+            echo
+            echo "Tail prose that must survive."
+        else
+            printf '%s\n' '<!-- cs:wrap-cues -->'
+            echo "## Session wrap-up cues"
+            echo
+            echo "Tail prose that must survive."
+            echo
+            printf '%s\n' '<!-- cs:delegate -->'
+            echo "## External delegation (cs)"
+            echo
+            echo "When the Agent tool is denied with a reason that begins \`cs-delegate:\`, run the command it names."
+        fi
+    } > "$session_dir/CLAUDE.local.md"
+    (cd "$session_dir" && git init -q && git add -A && git commit -q -m init)
+    echo "$session_dir"
+}
+
+test_delegate_block_is_removed_when_it_sits_at_eof() {
+    local session_dir
+    session_dir=$(_seed_session_with_delegate_block "delegate-eof" "eof")
+    assert_file_contains "$session_dir/CLAUDE.local.md" "cs:delegate"         "precondition: the block is present" || return 1
+
+    "$CS_BIN" delegate-eof <<< "" >/dev/null 2>&1 || true
+
+    assert_file_not_contains "$session_dir/CLAUDE.local.md" "cs:delegate"         "the sentinel must go — nothing re-adds it, so a tombstone guards nothing" || return 1
+    assert_file_not_contains "$session_dir/CLAUDE.local.md" "External delegation"         "the heading must go" || return 1
+    assert_file_not_contains "$session_dir/CLAUDE.local.md" "cs-delegate:"         "the prose naming the dead verb must go" || return 1
+    assert_file_contains "$session_dir/CLAUDE.local.md" "cs:wrap-cues"         "the neighbouring managed block must survive" || return 1
+    assert_file_contains "$session_dir/CLAUDE.local.md" "Head prose that must survive"         "content above must survive" || return 1
+    assert_file_contains "$session_dir/CLAUDE.local.md" "Tail prose that must survive"         "content below must survive" || return 1
+}
+
+test_delegate_block_is_removed_when_it_sits_mid_file() {
+    local session_dir
+    session_dir=$(_seed_session_with_delegate_block "delegate-mid" "midfile")
+
+    "$CS_BIN" delegate-mid <<< "" >/dev/null 2>&1 || true
+
+    assert_file_not_contains "$session_dir/CLAUDE.local.md" "cs:delegate"         "a mid-file block must be removed too" || return 1
+    assert_file_not_contains "$session_dir/CLAUDE.local.md" "cs-delegate:"         "and its prose with it" || return 1
+    assert_file_contains "$session_dir/CLAUDE.local.md" "cs:wrap-cues"         "the block that followed it must survive" || return 1
+    assert_file_contains "$session_dir/CLAUDE.local.md" "Tail prose that must survive"         "and that block's content with it" || return 1
+    assert_file_contains "$session_dir/CLAUDE.local.md" "Head prose that must survive"         "content above must survive" || return 1
+}
+
+run_test test_delegate_block_is_removed_when_it_sits_at_eof
+run_test test_delegate_block_is_removed_when_it_sits_mid_file
+
 report_results
