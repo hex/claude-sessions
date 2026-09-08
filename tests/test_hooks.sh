@@ -2484,6 +2484,69 @@ test_advisor_nudge_does_not_repeat_within_its_cooldown() {
     unset CLAUDE_CONFIG_DIR
 }
 
+# The codex plugin ships its own commands; the record key and the probe file
+# are its own, so the nudge must key on codex, not on the council being there.
+_install_fake_codex() {
+    local root="$TEST_TMPDIR/claude"
+    local plug="$root/plugins/cache/openai-codex/codex/1.0.6"
+    mkdir -p "$plug/commands" "$root/plugins"
+    touch "$plug/commands/review.md"
+    cat > "$root/plugins/installed_plugins.json" << JSON
+{"version": 1, "plugins": {"codex@openai-codex": [
+  {"scope": "user", "installPath": "$plug", "version": "1.0.6"}]}}
+JSON
+    export CLAUDE_CONFIG_DIR="$root"
+}
+
+test_advisor_nudge_names_codex_when_only_codex_is_installed() {
+    _install_fake_codex
+    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" \
+          "$CLAUDE_SESSION_META_DIR/local/.advisor-nudge-cooldown"
+
+    local output
+    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
+    assert_output_contains "$output" "codex:review" \
+        "Should name the codex review command when codex is installed" || return 1
+    # The council is absent here; naming it would advertise a missing command.
+    assert_output_not_contains "$output" "claude-council" \
+        "Should not name the council when only codex is installed" || return 1
+    unset CLAUDE_CONFIG_DIR
+}
+
+run_test test_advisor_nudge_names_codex_when_only_codex_is_installed
+test_advisor_nudge_names_both_channels_when_both_are_installed() {
+    local root="$TEST_TMPDIR/claude"
+    local council="$root/plugins/cache/hex-plugins/claude-council/2026.9.9"
+    local codex="$root/plugins/cache/openai-codex/codex/1.0.6"
+    mkdir -p "$council/commands" "$codex/commands" "$root/plugins"
+    touch "$council/commands/advise.md" "$codex/commands/review.md"
+    cat > "$root/plugins/installed_plugins.json" << JSON
+{"version": 1, "plugins": {
+  "claude-council@hex-plugins": [{"scope": "user", "installPath": "$council", "version": "2026.9.9"}],
+  "codex@openai-codex": [{"scope": "user", "installPath": "$codex", "version": "1.0.6"}]}}
+JSON
+    export CLAUDE_CONFIG_DIR="$root"
+    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" \
+          "$CLAUDE_SESSION_META_DIR/local/.advisor-nudge-cooldown"
+
+    local output
+    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
+    assert_output_contains "$output" "claude-council:advise" \
+        "Both installed: the council command should still be named" || return 1
+    assert_output_contains "$output" "codex:review" \
+        "Both installed: the codex command should also be named" || return 1
+    # One note, one slot: a second standing note would double the text.
+    local heads
+    heads=$(printf '%s' "$output" | grep -o "Standing note" | wc -l | tr -d ' ')
+    assert_eq "1" "$heads" "Both installed should still emit one standing note" || return 1
+    unset CLAUDE_CONFIG_DIR
+}
+
+run_test test_advisor_nudge_names_both_channels_when_both_are_installed
 run_test test_advisor_nudge_is_silent_without_the_council_plugin
 run_test test_advisor_nudge_appears_when_the_council_is_installed
 run_test test_advisor_nudge_is_silent_when_the_recorded_path_is_gone
