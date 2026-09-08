@@ -65,6 +65,22 @@ run_sl() {
     printf '%s' "$1" | bash "$SL"
 }
 
+# Run the statusline with $1 as stdin JSON; prints its stderr, discarding stdout.
+# A threshold the shell cannot compare errors from inside `[`, which leaves the
+# rendered line looking plausible while a band silently stops working, so the
+# quiet channel is the one worth asserting on.
+run_sl_stderr() {
+    printf '%s' "$1" | bash "$SL" 2>&1 >/dev/null
+}
+
+# Isolate the ctx pill from a rendered line ($1) given its reading ($2): split
+# on ESC and keep the run carrying the gauge text. The neutral surface grey is
+# shared with the session and limits pills, so a whole-line match cannot say
+# whose colour it found — only a negative assertion scoped to this pill can.
+ctx_pill() {
+    printf '%s' "$1" | tr '\033' '\n' | grep -F "ctx ${2}%" | head -1
+}
+
 # Source cs-statusline's functions without running main, so internal helpers can
 # be unit tested directly instead of only through a full run_sl invocation.
 _load_sl_functions() {
@@ -870,8 +886,12 @@ test_ctx_below_notice_is_neutral() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":39}}'
     local out
     out=$(run_sl "$json")
-    assert_output_not_contains "$out" "202;138;4" "ctx 39% must not use yellow" || return 1
-    assert_output_not_contains "$out" "255;183;77" "ctx 39% must not use amber" || return 1
+    local pill
+    pill=$(ctx_pill "$out" 39)
+    assert_output_contains "$pill" "48;2;128;120;110" "ctx 39% should sit on the neutral grey" || return 1
+    assert_output_not_contains "$pill" "202;138;4" "ctx 39% must not use yellow" || return 1
+    assert_output_not_contains "$pill" "255;183;77" "ctx 39% must not use amber" || return 1
+    assert_output_not_contains "$pill" "220;38;38" "ctx 39% must not use red" || return 1
 }
 
 test_ctx_warn_band_still_amber() {
@@ -899,6 +919,59 @@ test_ctx_notice_threshold_is_configurable() {
     local out
     out=$(run_sl "$json")
     assert_output_contains "$out" "202;138;4" "ctx 25% should be yellow when notice is 20" || return 1
+}
+
+# The notice band's lower edge is inclusive, and 40 is the only reading that
+# tells `-ge` apart from `-gt`.
+test_ctx_notice_edge_is_yellow_at_the_threshold() {
+    export COLORTERM=truecolor
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":40}}'
+    local out
+    out=$(run_sl "$json")
+    local pill
+    pill=$(ctx_pill "$out" 40)
+    assert_output_contains "$pill" "48;2;202;138;4" "ctx 40% is inside the notice band" || return 1
+    assert_output_not_contains "$pill" "48;2;128;120;110" "ctx 40% must not stay neutral" || return 1
+    assert_output_not_contains "$pill" "255;183;77" "ctx 40% must not reach amber" || return 1
+}
+
+# A threshold override is environment, so it can be anything. Anything that is
+# not a plain integer of at most three digits takes the default, the way the
+# Stop hook's tiers do: a word must not switch a band off, and a number too wide
+# for the shell's integers must not error inside `[`.
+test_ctx_threshold_non_numeric_falls_back_to_default() {
+    export COLORTERM=truecolor
+    export CS_STATUSLINE_CTX_NOTICE=banana CS_STATUSLINE_CTX_WARN=banana CS_STATUSLINE_CTX_CRIT=banana
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":42}}'
+    local out err
+    out=$(run_sl "$json")
+    err=$(run_sl_stderr "$json")
+    assert_output_contains "$out" "202;138;4" "a word override keeps the default 40 notice band" || return 1
+    assert_eq "" "$err" "a word override must not reach the shell's integer comparison" || return 1
+}
+
+test_ctx_threshold_out_of_range_falls_back_to_default() {
+    export COLORTERM=truecolor
+    local huge=999999999999999999999999
+    export CS_STATUSLINE_CTX_NOTICE="$huge" CS_STATUSLINE_CTX_WARN="$huge" CS_STATUSLINE_CTX_CRIT="$huge"
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":42}}'
+    local out err
+    out=$(run_sl "$json")
+    err=$(run_sl_stderr "$json")
+    assert_output_contains "$out" "202;138;4" "an oversized override keeps the default 40 notice band" || return 1
+    assert_eq "" "$err" "an oversized override must not error inside \`[\`" || return 1
+}
+
+# Three digits, not 0-100: a threshold above any reachable reading is how a band
+# is turned off, and cs -doctor already uses that idiom on the Stop hook's tiers.
+test_ctx_threshold_above_100_disables_its_band() {
+    export COLORTERM=truecolor
+    export CS_STATUSLINE_CTX_CRIT=101
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":100}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "255;183;77" "ctx 100% stays amber when crit is out of reach" || return 1
+    assert_output_not_contains "$out" "220;38;38" "a crit of 101 must switch red off, not fall back to 70" || return 1
 }
 
 test_model_neutral_not_blue() {
@@ -1960,6 +2033,10 @@ run_test test_ctx_below_notice_is_neutral
 run_test test_ctx_warn_band_still_amber
 run_test test_ctx_below_crit_is_amber_not_red
 run_test test_ctx_notice_threshold_is_configurable
+run_test test_ctx_notice_edge_is_yellow_at_the_threshold
+run_test test_ctx_threshold_non_numeric_falls_back_to_default
+run_test test_ctx_threshold_out_of_range_falls_back_to_default
+run_test test_ctx_threshold_above_100_disables_its_band
 run_test test_model_neutral_not_blue
 run_test test_white_text_on_periwinkle
 run_test test_accent_segments_bold
