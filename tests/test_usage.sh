@@ -12,6 +12,12 @@ _iso_mins_ago() {
         || date -u -d "$1 minutes ago" +%Y-%m-%dT%H:%M:%S.000Z
 }
 
+# A JSON string body of N lines: N runs of nine x's joined by escaped
+# newlines, so it decodes to exactly N lines and 10N - 1 characters.
+_json_lines() {
+    awk -v n="$1" 'BEGIN { for (i = 1; i <= n; i++) { if (i > 1) printf "%s", "\\n"; printf "%s", "xxxxxxxxx" } }'
+}
+
 # Write a transcript project dir for a session dir, echoing the project dir.
 # Uses the same symlink-resolved encoding as _claude_project_dir.
 _transcripts_for() {
@@ -485,4 +491,103 @@ EOF
 }
 
 run_test test_usage_scoped_counts_large_reads_lifetime
+
+# Subagent transcripts usually carry no toolUseResult at all: the file text
+# arrives only in the tool_result content block, and the offset and limit only
+# in the Read tool_use the block answers. The scan must join the two. Fixture
+# (one session, all inside the week):
+#   b1 400-line block, Read input has no offset/limit -> large, untargeted
+#      400 lines of nine x's plus 399 newlines = 3999 chars, 3999 / 4 = 999
+#   b2 500-line block, Read input has offset 100      -> large, targeted
+#   b3 350-line block                                  -> not large (>350)
+#   b4 900-line block answering a Bash tool_use        -> not a Read, ignored
+# Week cell: 1/2 ~999.
+test_usage_counts_large_reads_without_tool_use_result() {
+    local sdir="$CS_SESSIONS_ROOT/reads-block"
+    mkdir -p "$sdir/.cs/local"
+    local proj now l400 l500 l350 l900
+    proj=$(_transcripts_for "$sdir")
+    now=$(_iso_mins_ago 5)
+    l400=$(_json_lines 400); l500=$(_json_lines 500)
+    l350=$(_json_lines 350); l900=$(_json_lines 900)
+    cat > "$proj/bbbb1111-2222-3333-4444-555566667777.jsonl" << EOF
+{"type":"assistant","requestId":"r1","timestamp":"$now","message":{"model":"m","usage":{"input_tokens":100,"cache_creation_input_tokens":0,"output_tokens":10}}}
+{"type":"assistant","timestamp":"$now","message":{"role":"assistant","content":[{"type":"tool_use","id":"s1","name":"Read","input":{"file_path":"/p"}}]}}
+{"type":"user","uuid":"b1","timestamp":"$now","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"s1","content":"$l400"}]}}
+{"type":"assistant","timestamp":"$now","message":{"role":"assistant","content":[{"type":"tool_use","id":"s2","name":"Read","input":{"file_path":"/q","offset":100}}]}}
+{"type":"user","uuid":"b2","timestamp":"$now","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"s2","content":"$l500"}]}}
+{"type":"assistant","timestamp":"$now","message":{"role":"assistant","content":[{"type":"tool_use","id":"s3","name":"Read","input":{"file_path":"/r"}}]}}
+{"type":"user","uuid":"b3","timestamp":"$now","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"s3","content":"$l350"}]}}
+{"type":"assistant","timestamp":"$now","message":{"role":"assistant","content":[{"type":"tool_use","id":"s4","name":"Bash","input":{"command":"ls"}}]}}
+{"type":"user","uuid":"b4","timestamp":"$now","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"s4","content":"$l900"}]}}
+EOF
+    local output
+    output=$("$CS_BIN" -usage 2>&1) || true
+    echo "$output" | grep "reads-block" | grep -q "1/2 ~999" || {
+        echo "  FAIL: week cell should read 1/2 ~999, got: $(echo "$output" | grep reads-block)"
+        return 1
+    }
+}
+
+run_test test_usage_counts_large_reads_without_tool_use_result
+
+# A bare Read of a file longer than the harness cap returns fewer lines than
+# the file holds without the model having asked for anything. That is not a
+# slice: it is the largest kind of untargeted read there is, and its
+# characters belong in the ~tokens figure. 1000 of 1687 lines, 4000 chars, a
+# Read input carrying only file_path -> 1/1 ~1.0K (4000 / 4 = 1000).
+test_usage_default_capped_read_is_untargeted() {
+    local sdir="$CS_SESSIONS_ROOT/reads-capped"
+    mkdir -p "$sdir/.cs/local"
+    local proj now c4k
+    proj=$(_transcripts_for "$sdir")
+    now=$(_iso_mins_ago 5)
+    c4k=$(head -c 4000 /dev/zero | tr '\0' x)
+    cat > "$proj/dddd1111-2222-3333-4444-555566667777.jsonl" << EOF
+{"type":"assistant","requestId":"r1","timestamp":"$now","message":{"model":"m","usage":{"input_tokens":100,"cache_creation_input_tokens":0,"output_tokens":10}}}
+{"type":"assistant","timestamp":"$now","message":{"role":"assistant","content":[{"type":"tool_use","id":"c1","name":"Read","input":{"file_path":"/big"}}]}}
+{"type":"user","uuid":"k1","timestamp":"$now","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"c1","content":"ok"}]},"toolUseResult":{"type":"text","file":{"filePath":"/big","content":"$c4k","numLines":1000,"startLine":1,"totalLines":1687}}}
+EOF
+    local output
+    output=$("$CS_BIN" -usage 2>&1) || true
+    echo "$output" | grep "reads-capped" | grep -q "1/1 ~1.0K" || {
+        echo "  FAIL: a default-capped read is untargeted, cell should read 1/1 ~1.0K, got: $(echo "$output" | grep reads-capped)"
+        return 1
+    }
+}
+
+run_test test_usage_default_capped_read_is_untargeted
+
+# The scan carries state across every line of every file, so one malformed
+# entry must not end it. Two entries that are valid JSON but the wrong shape
+# sit between two counted reads: a usage that is a string rather than an
+# object, and a string toolUseResult on an entry that does carry tool_result
+# blocks. Both reads must still count: 4000 + 6000 = 10000 chars, 2/2 ~2.5K.
+test_usage_survives_wrong_shaped_entries() {
+    local sdir="$CS_SESSIONS_ROOT/reads-bomb"
+    mkdir -p "$sdir/.cs/local"
+    local proj now c4k c6k
+    proj=$(_transcripts_for "$sdir")
+    now=$(_iso_mins_ago 5)
+    c4k=$(head -c 4000 /dev/zero | tr '\0' x)
+    c6k=$(head -c 6000 /dev/zero | tr '\0' x)
+    cat > "$proj/eeee1111-2222-3333-4444-555566667777.jsonl" << EOF
+{"type":"assistant","requestId":"r1","timestamp":"$now","message":{"model":"m","usage":{"input_tokens":100,"cache_creation_input_tokens":0,"output_tokens":10}}}
+{"type":"assistant","timestamp":"$now","message":{"role":"assistant","content":[{"type":"tool_use","id":"m1","name":"Read","input":{"file_path":"/a"}}]}}
+{"type":"user","uuid":"z1","timestamp":"$now","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"m1","content":"ok"}]},"toolUseResult":{"type":"text","file":{"filePath":"/a","content":"$c4k","numLines":400,"startLine":1,"totalLines":400}}}
+{"type":"assistant","requestId":"rz","timestamp":"$now","message":{"model":"m","usage":"not-an-object"}}
+{"type":"user","uuid":"z2","timestamp":"$now","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"m1","content":"declined"}]},"toolUseResult":"The user declined"}
+{"type":"assistant","timestamp":"$now","message":{"role":"assistant","content":[{"type":"tool_use","id":"m2","name":"Read","input":{"file_path":"/b"}}]}}
+{"type":"user","uuid":"z3","timestamp":"$now","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"m2","content":"ok"}]},"toolUseResult":{"type":"text","file":{"filePath":"/b","content":"$c6k","numLines":500,"startLine":1,"totalLines":500}}}
+EOF
+    local output
+    output=$("$CS_BIN" -usage 2>&1) || true
+    echo "$output" | grep "reads-bomb" | grep -q "2/2 ~2.5K" || {
+        echo "  FAIL: both reads should survive the wrong-shaped entries (2/2 ~2.5K), got: $(echo "$output" | grep reads-bomb)"
+        return 1
+    }
+}
+
+run_test test_usage_survives_wrong_shaped_entries
+
 report_results

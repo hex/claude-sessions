@@ -4501,34 +4501,94 @@ _USAGE_LARGE_READ_LINES=350
 # spaces and `read` gives its last variable the rest of the line. The lr*
 # fields count large Read tool results (see _USAGE_LARGE_READ_LINES) for the
 # week and lifetime: all of them, the untargeted ones, and the untargeted
-# characters. A read is targeted when it returned fewer lines than the file
-# holds, which is what an offset or a limit produces. (A default-capped read
-# of a file longer than the tool's cap also looks targeted; none occurred in a
-# week of real transcripts.) Untargeted large reads are the ones a size gate
-# could intercept, so the two are counted apart. Bash reads (cat, head) leave
-# no file shape and are not seen here. Consumers read fields positionally.
+# characters. Untargeted large reads are the ones a size gate could intercept,
+# so the two are counted apart. Bash reads (cat, head) leave no file shape and
+# are not seen here. Consumers read fields positionally.
+#
+# A Read result reaches the transcript in one of two shapes. Top-level
+# conversations carry `toolUseResult.file`, with the line counts already
+# broken out. Subagent transcripts (<uuid>/subagents/agent-*.jsonl) usually
+# carry no `toolUseResult` at all and keep the file text only in the
+# `tool_result` content block, so the fallback counts that block's own lines;
+# 78% of subagent Read results arrive that way, and reading only the first
+# shape hid 36% of the large reads in a corpus of 8489 transcripts.
+#
+# A read is targeted when the model's Read input carried an offset or a limit,
+# which is why the scan tracks Read tool_use ids as it goes and joins each
+# result back to its call. Returning fewer lines than the file holds is NOT
+# the same thing: the harness caps a bare Read of a long file, and those
+# default-capped reads are the largest untargeted reads there are — 44 of them
+# in the same corpus were being filed as slices and dropped from the character
+# total the column exists to report. A dict-shaped result whose tool_use is
+# not among the scanned files counts as untargeted (none occurred in the
+# corpus; the alternative is dropping a read that plainly happened).
+#
+# Carrying that state means one `foreach` over every line of every file, so a
+# jq error no longer costs one line — it would end the scan for all remaining
+# files, silently, since stderr goes to /dev/null. The update is therefore
+# wrapped in try/catch: a malformed entry is skipped and the state survives.
 _usage_scan() {
     local w5="$1" wk="$2"
     shift 2
     [ $# -gt 0 ] || { echo "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -"; return 0; }
-    jq -R -r --arg main "$1" --argjson big "$_USAGE_LARGE_READ_LINES" 'fromjson? // empty |
-        if .type == "assistant" and (.message.usage? != null) then
-          [ "u", (.timestamp // ""),
-            (.requestId // .message.id // .uuid // ""),
-            (.message.usage.input_tokens // 0),
-            (.message.usage.cache_creation_input_tokens // 0),
-            (.message.usage.output_tokens // 0),
-            (.message.model // ""),
-            (input_filename == $main) ]
-        elif .type == "user" and (.toolUseResult | type == "object")
-             and (.toolUseResult.file | type == "object")
-             and (.toolUseResult.file.numLines | type == "number")
-             and .toolUseResult.file.numLines > $big then
-          .toolUseResult.file as $f |
-          [ "r", (.timestamp // ""), (.uuid // ""),
-            ($f.content | if type == "string" then length else 0 end),
-            (if $f.numLines < ($f.totalLines // $f.numLines) then 1 else 0 end) ]
-        else empty end | @tsv' "$@" 2>/dev/null \
+    jq -R -r -n --arg main "$1" --argjson big "$_USAGE_LARGE_READ_LINES" '
+        def obj: if type == "object" then . else {} end;
+        def blocktext:
+          if type == "string" then .
+          elif type == "array" then
+            ([ .[] | select(type == "object" and .type == "text") | .text // "" ] | add // "")
+          else "" end;
+        foreach inputs as $line (
+          {fn: null, uses: {}, out: []};
+          . as $prev
+          | try (
+              (input_filename) as $f
+              | (if $f == .fn then .out = [] else {fn: $f, uses: {}, out: []} end)
+              | ($line | fromjson? // null) as $e
+              | if ($e | type) != "object" then .
+                elif $e.type == "assistant" then
+                  .uses = (reduce ($e.message | obj | .content
+                                   | if type == "array" then .[] else empty end) as $b
+                             (.uses;
+                              if ($b | type) == "object" and $b.type == "tool_use"
+                                 and $b.name == "Read"
+                              then .[($b.id // "" | tostring)] =
+                                     (($b.input | obj) as $i |
+                                      if ($i.offset != null) or ($i.limit != null)
+                                      then 1 else 0 end)
+                              else . end))
+                  | if ($e.message | obj | .usage) != null then
+                      .out = [[ "u", ($e.timestamp // ""),
+                                ($e.requestId // $e.message.id // $e.uuid // ""),
+                                ($e.message.usage.input_tokens // 0),
+                                ($e.message.usage.cache_creation_input_tokens // 0),
+                                ($e.message.usage.output_tokens // 0),
+                                ($e.message.model // ""), ($f == $main) ]]
+                    else . end
+                elif $e.type == "user" then
+                  . as $s
+                  | ($e.toolUseResult | obj | .file | obj) as $tf
+                  | ([ $e.message | obj | .content
+                       | if type == "array" then .[] else empty end
+                       | select(type == "object" and .type == "tool_result") ]) as $blocks
+                  | if ($tf.numLines | type) == "number" and $tf.numLines > $big then
+                      .out = [[ "r", ($e.timestamp // ""), ($e.uuid // ""),
+                                ($tf.content | if type == "string" then length else 0 end),
+                                ($s.uses[($blocks[0].tool_use_id // "" | tostring)] // 0) ]]
+                    elif ($tf | length) == 0 then
+                      .out = [ $blocks[]
+                               | ($s.uses[(.tool_use_id // "" | tostring)]) as $t
+                               | select($t != null)
+                               | (.content | blocktext) as $txt
+                               | select(($txt | length) > 0
+                                        and (($txt / "\n") | length) > $big)
+                               | [ "r", ($e.timestamp // ""), ($e.uuid // ""),
+                                   ($txt | length), $t ] ]
+                    else . end
+                else . end
+            ) catch ($prev | .out = []);
+          .out[] | @tsv
+        )' "$@" 2>/dev/null \
     | awk -F'\t' -v w5="$w5" -v wk="$wk" '
         $1 == "r" {
             lrL++; if ($5 == 0) { lruL++; lrcL += $4 }
