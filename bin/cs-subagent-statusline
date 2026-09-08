@@ -200,6 +200,11 @@ render_rows() {
     # so splitting on tab is exact and fork-free.
     local tab=$'\t'
     local line id cols model name desc ctx elapsed
+    # Same escalation thresholds as the bar, resolved once: a row and the bar
+    # reading one env var must never disagree about where red starts.
+    local ctx_warn ctx_crit
+    _num_or "${CS_STATUSLINE_CTX_WARN:-}" 50; ctx_warn="$_NUM"
+    _num_or "${CS_STATUSLINE_CTX_CRIT:-}" 70; ctx_crit="$_NUM"
     while IFS= read -r line; do
         [ -n "$line" ] || continue
         id="${line%%$tab*}";    line="${line#*$tab}"
@@ -257,7 +262,7 @@ render_rows() {
             content="${content} ${_PAINTED}"
         fi
         if [ -n "$ctx" ]; then
-            _thresh_color "$ctx" "${CS_STATUSLINE_CTX_WARN:-50}" "${CS_STATUSLINE_CTX_CRIT:-80}" rowmeta
+            _thresh_color "$ctx" "$ctx_warn" "$ctx_crit" rowmeta
             _paint "${ICON_CTX}ctx ${ctx}%" "$_COLOR"
             content="${content}  ${_PAINTED}"
         fi
