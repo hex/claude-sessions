@@ -566,7 +566,7 @@ _add() {
 # for a signed integer both error to stderr and leave the band unrendered. Three
 # digits rather than 0-100 so a value above 100 still reads as "turn this band
 # off", the idiom the Stop hook's tiers already use.
-_num_or() {  # value, default -> _NUM
+_num_or() {  # value, default -> _NUM (the hook's namesake prints instead)
     case "$1" in
         ''|*[!0-9]*|????*) _NUM="$2" ;;
         *)                 _NUM="$1" ;;

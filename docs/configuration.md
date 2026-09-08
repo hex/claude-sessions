@@ -150,7 +150,10 @@ export CS_REWRITE_PROGRESS="screen"          # screen | native | line | static
 # rewrite to stdout, non-zero to leave the prompt untouched.
 export CS_REWRITE_CMD="/path/to/my-rewriter"
 
-# Statusline context gauge escalation thresholds (see statusline.md)
+# Statusline context gauge escalation thresholds (see statusline.md). Each takes
+# a plain integer of at most three digits; anything else falls back to the
+# default shown. A value above 100 is out of the gauge's reach and so switches
+# that band off, the same idiom cs -doctor uses on the Stop hook's tiers below.
 export CS_STATUSLINE_CTX_NOTICE="40"
 export CS_STATUSLINE_CTX_WARN="50"
 export CS_STATUSLINE_CTX_CRIT="70"
