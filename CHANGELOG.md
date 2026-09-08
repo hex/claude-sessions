@@ -4,6 +4,14 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## Unreleased
+
+### Changed
+- The Stop hook's second-opinion note names whichever review channels you have, not the council alone. With the codex plugin present it offers `/codex:review` before Claude calls built work done and names `/codex:rescue` for a stalled run. With both plugins it still emits one note against one cooldown stamp. The note offers `/codex:review` and never runs it: that command carries `disable-model-invocation`, so only you can type it.
+
+### Fixes
+- A session carrying the retired external-delegation block in `CLAUDE.local.md` has it removed on next launch. The block named `cs -delegate` and a hook denial prefix that both went away with the roles router, so it instructed Claude to run a command that no longer exists.
+
 ## 2026.9.12
 
 ### Features
