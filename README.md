@@ -420,13 +420,13 @@ otherwise shadow the rotation this checkout armed.
 A compaction or a context-limit fork between arming and rotating leaves the
 marker alone, so a pending rotation survives either.
 
-At 60% context, the narrative-reminder Stop hook surfaces a
+At 40% context, the narrative-reminder Stop hook surfaces a
 once-per-conversation heads-up so you can steer toward a natural stopping
 point (`CS_CTX_WARN_CTX` overrides it; the warning stays silent at or above
-the nudge threshold, where rotation takes over). Past 80% context, the same
+the nudge threshold, where rotation takes over). Past 70% context, the same
 hook nudges once per conversation to invoke the rotate skill
 (`CS_ROTATE_NUDGE_CTX` overrides the threshold; a non-numeric value falls
-back to 80). Both tiers yield to an armed or draining task queue, which
+back to 70). Both tiers yield to an armed or draining task queue, which
 owns the turn loop while it runs.
 
 Every rotation, deliberate or not, appends a `rotated` event to

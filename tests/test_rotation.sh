@@ -1617,10 +1617,10 @@ _stop_with_ctx() {  # ctx-pct-or-empty, session_id
 test_nudge_fires_once_at_threshold() {
     _rot_hook_session "rot-nudge"
     local out
-    out=$(_stop_with_ctx 80 "$UUID_A") || return 1
+    out=$(_stop_with_ctx 70 "$UUID_A") || return 1
     assert_output_contains "$out" '"decision":"block"' "nudge delivered as a block" || return 1
     assert_output_contains "$out" "rotate" "nudge names the rotate skill" || return 1
-    assert_output_contains "$out" "80%" "nudge names the reading" || return 1
+    assert_output_contains "$out" "70%" "nudge names the reading" || return 1
     assert_eq "$UUID_A" "$(cat "$CLAUDE_SESSION_META_DIR/local/rotate-nudged" | tr -d '[:space:]')" \
         "cursor records the nudged conversation" || return 1
     out=$(_stop_with_ctx 85 "$UUID_A") || return 1
@@ -1632,18 +1632,18 @@ test_nudge_fires_once_at_threshold() {
 
 test_nudge_rearms_for_new_conversation() {
     _rot_hook_session "rot-nudge-rearm"
-    _stop_with_ctx 80 "$UUID_A" >/dev/null || return 1
+    _stop_with_ctx 70 "$UUID_A" >/dev/null || return 1
     local out
-    out=$(_stop_with_ctx 80 "$UUID_B") || return 1
+    out=$(_stop_with_ctx 70 "$UUID_B") || return 1
     assert_output_contains "$out" "rotate" "new conversation UUID re-arms the nudge" || return 1
 }
 
 test_nudge_silent_below_threshold_and_without_signal() {
     _rot_hook_session "rot-nudge-quiet"
     local out
-    out=$(_stop_with_ctx 79 "$UUID_A") || return 1
+    out=$(_stop_with_ctx 69 "$UUID_A") || return 1
     if printf '%s' "$out" | grep -q "rotate skill"; then
-        echo "  FAIL: 79 must not nudge at default threshold"
+        echo "  FAIL: 69 must not nudge at default threshold"
         return 1
     fi
     out=$(_stop_with_ctx "" "$UUID_A") || return 1
@@ -1882,9 +1882,9 @@ test_ctx_warning_rearms_for_new_conversation() {
 test_ctx_warning_silent_below_band() {
     _rot_hook_session "rot-warn-low"
     local out
-    out=$(_stop_with_ctx 59 "$UUID_A") || return 1
+    out=$(_stop_with_ctx 39 "$UUID_A") || return 1
     if printf '%s' "$out" | grep -q "stopping point"; then
-        echo "  FAIL: 59 must not warn at default threshold"
+        echo "  FAIL: 39 must not warn at default threshold"
         return 1
     fi
 }
@@ -1911,22 +1911,22 @@ test_ctx_warning_yields_to_nudge_at_high_ctx() {
 
 test_ctx_warning_threshold_override() {
     _rot_hook_session "rot-warn-env"
-    export CS_CTX_WARN_CTX=70
+    export CS_CTX_WARN_CTX=50
     local out
-    out=$(_stop_with_ctx 65 "$UUID_A") || { unset CS_CTX_WARN_CTX; return 1; }
+    out=$(_stop_with_ctx 45 "$UUID_A") || { unset CS_CTX_WARN_CTX; return 1; }
     if printf '%s' "$out" | grep -q "stopping point"; then
         unset CS_CTX_WARN_CTX
-        echo "  FAIL: 65 under a 70 override must not warn"
+        echo "  FAIL: 45 under a 50 override must not warn"
         return 1
     fi
-    out=$(_stop_with_ctx 70 "$UUID_A") || { unset CS_CTX_WARN_CTX; return 1; }
+    out=$(_stop_with_ctx 50 "$UUID_A") || { unset CS_CTX_WARN_CTX; return 1; }
     unset CS_CTX_WARN_CTX
-    assert_output_contains "$out" "stopping point" "70 at a 70 override warns" || return 1
+    assert_output_contains "$out" "stopping point" "50 at a 50 override warns" || return 1
     _rot_hook_session "rot-warn-env2"
     export CS_CTX_WARN_CTX=banana
-    out=$(_stop_with_ctx 60 "$UUID_B") || { unset CS_CTX_WARN_CTX; return 1; }
+    out=$(_stop_with_ctx 40 "$UUID_B") || { unset CS_CTX_WARN_CTX; return 1; }
     unset CS_CTX_WARN_CTX
-    assert_output_contains "$out" "stopping point" "non-numeric override falls back to 60" || return 1
+    assert_output_contains "$out" "stopping point" "non-numeric override falls back to 40" || return 1
 }
 
 test_ctx_warning_escalates_to_nudge_same_conversation() {
@@ -1945,11 +1945,11 @@ test_ctx_warning_escalates_to_nudge_same_conversation() {
 test_ctx_warning_band_edges() {
     _rot_hook_session "rot-warn-edges"
     local out
-    out=$(_stop_with_ctx 79 "$UUID_A") || return 1
-    assert_output_contains "$out" "stopping point" "79 is inside the band" || return 1
-    _rot_hook_session "rot-warn-edge80"
-    _stop_with_ctx 80 "$UUID_B" >/dev/null || return 1
-    out=$(_stop_with_ctx 80 "$UUID_B") || return 1
+    out=$(_stop_with_ctx 69 "$UUID_A") || return 1
+    assert_output_contains "$out" "stopping point" "69 is inside the band" || return 1
+    _rot_hook_session "rot-warn-edge70"
+    _stop_with_ctx 70 "$UUID_B" >/dev/null || return 1
+    out=$(_stop_with_ctx 70 "$UUID_B") || return 1
     if printf '%s' "$out" | grep -q "stopping point"; then
         echo "  FAIL: exactly the nudge threshold is outside the band even when the nudge is spent"
         return 1

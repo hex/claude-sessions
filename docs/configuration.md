@@ -159,8 +159,8 @@ export CS_STATUSLINE_CTX_CRIT="80"
 export CS_SUBAGENT_STATUSLINE_DISABLE="1"
 
 # Context tiers in the Stop hook: one-time warning band start, rotation nudge
-export CS_CTX_WARN_CTX="60"
-export CS_ROTATE_NUDGE_CTX="80"
+export CS_CTX_WARN_CTX="40"
+export CS_ROTATE_NUDGE_CTX="70"
 
 # Narrative rotation: rotate when the live file passes MAX, keep about KEEP bytes
 export CS_NARRATIVE_MAX_BYTES="524288"
