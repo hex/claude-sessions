@@ -53,7 +53,7 @@ teardown() {
     unset COLORFGBG 2>/dev/null || true
     unset CS_SESSIONS_ROOT CLAUDE_SESSION_NAME NO_COLOR COLORTERM TERM_PROGRAM \
         FORCE_COLOR CS_STATUSLINE_DISABLE CS_STATUSLINE_SEGMENTS CS_STATUSLINE_CTX_WARN \
-        CS_STATUSLINE_CTX_CRIT CS_DISCOVERIES_MAX_SIZE COLUMNS CS_TERM_BG_RGB \
+        CS_STATUSLINE_CTX_CRIT CS_STATUSLINE_CTX_NOTICE CS_DISCOVERIES_MAX_SIZE COLUMNS CS_TERM_BG_RGB \
         CS_USAGE_DIR CS_USAGE_NO_REFRESH CS_SECURITY_BIN CLAUDE_CONFIG_DIR \
         TMUX TMUX_PANE 2>/dev/null || true
 }
@@ -853,6 +853,43 @@ test_ctx_normal_neutral_not_red() {
     out=$(run_sl "$json")
     assert_output_not_contains "$out" "0;135;0" "healthy ctx must not shout green" || return 1
     assert_output_not_contains "$out" "220;38;38" "ctx 8% must not use red" || return 1
+}
+
+test_ctx_notice_band_is_yellow() {
+    export COLORTERM=truecolor
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":42}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "202;138;4" "ctx 42% should use the yellow background rgb" || return 1
+    assert_output_not_contains "$out" "255;183;77" "ctx 42% must not reach amber" || return 1
+    assert_output_not_contains "$out" "220;38;38" "ctx 42% must not use red" || return 1
+}
+
+test_ctx_below_notice_is_neutral() {
+    export COLORTERM=truecolor
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":39}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_not_contains "$out" "202;138;4" "ctx 39% must not use yellow" || return 1
+    assert_output_not_contains "$out" "255;183;77" "ctx 39% must not use amber" || return 1
+}
+
+test_ctx_warn_band_still_amber() {
+    export COLORTERM=truecolor
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":50}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "255;183;77" "ctx 50% should still use the amber background rgb" || return 1
+    assert_output_not_contains "$out" "202;138;4" "ctx 50% must not fall back to yellow" || return 1
+}
+
+test_ctx_notice_threshold_is_configurable() {
+    export COLORTERM=truecolor
+    export CS_STATUSLINE_CTX_NOTICE=20
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":25}}'
+    local out
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "202;138;4" "ctx 25% should be yellow when notice is 20" || return 1
 }
 
 test_model_neutral_not_blue() {
@@ -1909,6 +1946,10 @@ run_test test_malformed_stdin_fallback
 run_test test_non_git_workspace_absent
 run_test test_ctx_threshold_red
 run_test test_ctx_normal_neutral_not_red
+run_test test_ctx_notice_band_is_yellow
+run_test test_ctx_below_notice_is_neutral
+run_test test_ctx_warn_band_still_amber
+run_test test_ctx_notice_threshold_is_configurable
 run_test test_model_neutral_not_blue
 run_test test_white_text_on_periwinkle
 run_test test_accent_segments_bold

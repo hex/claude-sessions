@@ -34,7 +34,7 @@ teardown() {
     fi
     unset TMUX TMUX_PANE COLORFGBG 2>/dev/null || true
     unset NO_COLOR COLORTERM TERM_PROGRAM FORCE_COLOR CS_SUBAGENT_NOW_MS \
-        CS_SUBAGENT_STATUSLINE_DISABLE CS_STATUSLINE_CTX_WARN CS_STATUSLINE_CTX_CRIT 2>/dev/null || true
+        CS_SUBAGENT_STATUSLINE_DISABLE CS_STATUSLINE_CTX_WARN CS_STATUSLINE_CTX_CRIT CS_STATUSLINE_CTX_NOTICE 2>/dev/null || true
 }
 
 # Run the row renderer with $1 as stdin JSON; prints its stdout.

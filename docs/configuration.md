@@ -151,6 +151,7 @@ export CS_REWRITE_PROGRESS="screen"          # screen | native | line | static
 export CS_REWRITE_CMD="/path/to/my-rewriter"
 
 # Statusline context gauge escalation thresholds (see statusline.md)
+export CS_STATUSLINE_CTX_NOTICE="40"
 export CS_STATUSLINE_CTX_WARN="50"
 export CS_STATUSLINE_CTX_CRIT="80"
 
