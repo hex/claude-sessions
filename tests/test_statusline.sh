@@ -941,7 +941,11 @@ test_ctx_notice_edge_is_yellow_at_the_threshold() {
 # for the shell's integers must not error inside `[`.
 test_ctx_threshold_non_numeric_falls_back_to_default() {
     export COLORTERM=truecolor
-    export CS_STATUSLINE_CTX_NOTICE=banana CS_STATUSLINE_CTX_WARN=banana CS_STATUSLINE_CTX_CRIT=banana
+    # A three-character word, not a long one: a long word is also too wide to be
+    # a threshold, so it would be rejected by the width rule alone and never
+    # exercise the digits rule. Short enough to pass the width rule is the only
+    # value that tells the two apart.
+    export CS_STATUSLINE_CTX_NOTICE=hot CS_STATUSLINE_CTX_WARN=hot CS_STATUSLINE_CTX_CRIT=hot
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":42}}'
     local out err
     out=$(run_sl "$json")

@@ -271,6 +271,22 @@ test_ctx_crit_edge_matches_the_bar() {
     assert_output_not_contains "$c" "38;2;255;183;77" "70% context must not stay amber" || return 1
 }
 
+# Amber's cut point is inclusive too, and 50 is the only reading that separates
+# it from 51.
+test_ctx_warn_edge_is_amber_at_the_threshold() {
+    export COLORTERM=truecolor
+    local fx out c
+    # 98000/200000 = 49% -> one below warn -> quiet
+    fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":98000}]}'
+    out=$(run_ssl "$fx"); c=$(row_content "$out" "t1")
+    assert_output_not_contains "$c" "38;2;255;183;77" "49% context must not reach amber" || return 1
+
+    # 100000/200000 = 50% -> at warn -> amber
+    fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":100000}]}'
+    out=$(run_ssl "$fx"); c=$(row_content "$out" "t1")
+    assert_output_contains "$c" "38;2;255;183;77" "50% context renders amber" || return 1
+}
+
 # A row has no notice band: yellow on the bar pairs with the Stop hook's
 # heads-up about winding this conversation down, and an agent has no rotation
 # to wind toward. Two tiers here, four there, one pair of env vars.
@@ -293,13 +309,18 @@ test_ctx_has_no_notice_band() {
 test_ctx_threshold_overrides_are_validated() {
     export COLORTERM=truecolor
     local fx out c err
-    fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":140000}]}'
-    export CS_STATUSLINE_CTX_WARN=banana CS_STATUSLINE_CTX_CRIT=999999999999999999999999
+    # 55%, not a reading past crit: crit is compared first and short-circuits,
+    # so a row that is already red never compares warn at all and a broken warn
+    # would go unnoticed. A three-character word, because a long one is rejected
+    # for its width before its digits are ever looked at.
+    fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":110000}]}'
+    export CS_STATUSLINE_CTX_WARN=hot CS_STATUSLINE_CTX_CRIT=999999999999999999999999
     err=$(printf '%s' "$fx" | bash "$SSL" 2>&1 >/dev/null)
     out=$(run_ssl "$fx"); c=$(row_content "$out" "t1")
     unset CS_STATUSLINE_CTX_WARN CS_STATUSLINE_CTX_CRIT
     assert_eq "" "$err" "a bad override must not reach the shell's integer comparison" || return 1
-    assert_output_contains "$c" "38;2;220;38;38" "70% still reads red on the defaults the bad overrides fell back to" || return 1
+    assert_output_contains "$c" "38;2;255;183;77" "55% reads amber on the defaults the bad overrides fell back to" || return 1
+    assert_output_not_contains "$c" "38;2;220;38;38" "an oversized crit must not fall back into red at 55%" || return 1
 }
 
 test_plain_mode_has_no_escape_sequences() {
@@ -476,6 +497,7 @@ run_test test_elapsed_over_an_hour_uses_hours
 run_test test_content_escapes_esc_as_unicode
 run_test test_ctx_escalates_to_amber_then_red
 run_test test_ctx_crit_edge_matches_the_bar
+run_test test_ctx_warn_edge_is_amber_at_the_threshold
 run_test test_ctx_has_no_notice_band
 run_test test_ctx_threshold_overrides_are_validated
 run_test test_plain_mode_has_no_escape_sequences
