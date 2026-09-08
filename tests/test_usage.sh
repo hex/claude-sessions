@@ -404,17 +404,18 @@ run_test test_usage_scoped_folds_subagent_transcripts
 run_test test_usage_window_table_folds_subagent_transcripts
 
 # A Read tool result whose numLines exceeds 350 counts as a large read. It is
-# "targeted" when the model asked for a slice (startLine > 1, or fewer lines
-# than the file holds); untargeted large reads are the ones a size gate could
-# have intercepted, so the column shows untargeted/all and the untargeted
-# bytes as ~tokens at 4 chars each. Fixture, all timestamps inside the week
-# except E:
-#   A 400 of 400 lines from line 1, 4000 chars   -> large, untargeted (~1000 tok)
-#   B 500 of 900 lines from line 10, 2000 chars  -> large, targeted
+# "targeted" when the model's Read input carried an offset or a limit;
+# untargeted large reads are the ones a size gate could have intercepted, so
+# the column shows untargeted/all and the untargeted bytes as ~tokens at 4
+# chars each. Each result is preceded by the assistant tool_use it answers,
+# which is where the offset and the limit live. Fixture, all timestamps inside
+# the week except E:
+#   A 400 of 400 lines from line 1, 4000 chars, no offset/limit -> untargeted
+#   B 500 of 900 lines from line 10, 2000 chars, offset 10      -> targeted
 #   C 350 of 350 lines                            -> not large (threshold is >350)
 #   D toolUseResult is a string (a declined call) -> ignored
 #   E 600 of 600 lines, 6000 chars, 10 days old   -> large, outside the week
-#   F 500 of 900 lines from line 1, 2000 chars   -> large, targeted (limit only)
+#   F 500 of 900 lines from line 1, 2000 chars, limit 500       -> targeted
 # Week cell: 1/3 ~1.0K.
 test_usage_counts_large_reads() {
     local sdir="$CS_SESSIONS_ROOT/reads-sess"
@@ -427,12 +428,18 @@ test_usage_counts_large_reads() {
     c6k=$(head -c 6000 /dev/zero | tr '\0' x)
     cat > "$proj/aaaa1111-2222-3333-4444-555566667777.jsonl" << EOF
 {"type":"assistant","requestId":"r1","timestamp":"$now","message":{"model":"m","usage":{"input_tokens":100,"cache_creation_input_tokens":0,"output_tokens":10}}}
-{"type":"user","uuid":"uA","timestamp":"$now","toolUseResult":{"type":"text","file":{"filePath":"/a","content":"$c4k","numLines":400,"startLine":1,"totalLines":400}}}
-{"type":"user","uuid":"uB","timestamp":"$now","toolUseResult":{"type":"text","file":{"filePath":"/b","content":"$c2k","numLines":500,"startLine":10,"totalLines":900}}}
-{"type":"user","uuid":"uC","timestamp":"$now","toolUseResult":{"type":"text","file":{"filePath":"/c","content":"$c2k","numLines":350,"startLine":1,"totalLines":350}}}
-{"type":"user","uuid":"uD","timestamp":"$now","toolUseResult":"The user declined"}
-{"type":"user","uuid":"uE","timestamp":"$old","toolUseResult":{"type":"text","file":{"filePath":"/e","content":"$c6k","numLines":600,"startLine":1,"totalLines":600}}}
-{"type":"user","uuid":"uF","timestamp":"$now","toolUseResult":{"type":"text","file":{"filePath":"/f","content":"$c2k","numLines":500,"startLine":1,"totalLines":900}}}
+{"type":"assistant","timestamp":"$now","message":{"role":"assistant","content":[{"type":"tool_use","id":"tA","name":"Read","input":{"file_path":"/a"}}]}}
+{"type":"user","uuid":"uA","timestamp":"$now","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tA","content":"ok"}]},"toolUseResult":{"type":"text","file":{"filePath":"/a","content":"$c4k","numLines":400,"startLine":1,"totalLines":400}}}
+{"type":"assistant","timestamp":"$now","message":{"role":"assistant","content":[{"type":"tool_use","id":"tB","name":"Read","input":{"file_path":"/b","offset":10}}]}}
+{"type":"user","uuid":"uB","timestamp":"$now","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tB","content":"ok"}]},"toolUseResult":{"type":"text","file":{"filePath":"/b","content":"$c2k","numLines":500,"startLine":10,"totalLines":900}}}
+{"type":"assistant","timestamp":"$now","message":{"role":"assistant","content":[{"type":"tool_use","id":"tC","name":"Read","input":{"file_path":"/c"}}]}}
+{"type":"user","uuid":"uC","timestamp":"$now","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tC","content":"ok"}]},"toolUseResult":{"type":"text","file":{"filePath":"/c","content":"$c2k","numLines":350,"startLine":1,"totalLines":350}}}
+{"type":"assistant","timestamp":"$now","message":{"role":"assistant","content":[{"type":"tool_use","id":"tD","name":"Read","input":{"file_path":"/d"}}]}}
+{"type":"user","uuid":"uD","timestamp":"$now","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tD","content":"ok"}]},"toolUseResult":"The user declined"}
+{"type":"assistant","timestamp":"$old","message":{"role":"assistant","content":[{"type":"tool_use","id":"tE","name":"Read","input":{"file_path":"/e"}}]}}
+{"type":"user","uuid":"uE","timestamp":"$old","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tE","content":"ok"}]},"toolUseResult":{"type":"text","file":{"filePath":"/e","content":"$c6k","numLines":600,"startLine":1,"totalLines":600}}}
+{"type":"assistant","timestamp":"$now","message":{"role":"assistant","content":[{"type":"tool_use","id":"tF","name":"Read","input":{"file_path":"/f","limit":500}}]}}
+{"type":"user","uuid":"uF","timestamp":"$now","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tF","content":"ok"}]},"toolUseResult":{"type":"text","file":{"filePath":"/f","content":"$c2k","numLines":500,"startLine":1,"totalLines":900}}}
 EOF
     local output
     output=$("$CS_BIN" -usage 2>&1) || true
@@ -460,9 +467,12 @@ test_usage_scoped_counts_large_reads_lifetime() {
     c6k=$(head -c 6000 /dev/zero | tr '\0' x)
     cat > "$proj/cccc1111-2222-3333-4444-555566667777.jsonl" << EOF
 {"type":"assistant","requestId":"r1","timestamp":"$now","message":{"model":"custom model","usage":{"input_tokens":100,"cache_creation_input_tokens":0,"output_tokens":10}}}
-{"type":"user","uuid":"uA","timestamp":"$now","toolUseResult":{"type":"text","file":{"filePath":"/a","content":"$c4k","numLines":400,"startLine":1,"totalLines":400}}}
-{"type":"user","uuid":"uB","timestamp":"$now","toolUseResult":{"type":"text","file":{"filePath":"/b","content":"$c2k","numLines":500,"startLine":10,"totalLines":900}}}
-{"type":"user","uuid":"uE","timestamp":"$old","toolUseResult":{"type":"text","file":{"filePath":"/e","content":"$c6k","numLines":600,"startLine":1,"totalLines":600}}}
+{"type":"assistant","timestamp":"$now","message":{"role":"assistant","content":[{"type":"tool_use","id":"tA","name":"Read","input":{"file_path":"/a"}}]}}
+{"type":"user","uuid":"uA","timestamp":"$now","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tA","content":"ok"}]},"toolUseResult":{"type":"text","file":{"filePath":"/a","content":"$c4k","numLines":400,"startLine":1,"totalLines":400}}}
+{"type":"assistant","timestamp":"$now","message":{"role":"assistant","content":[{"type":"tool_use","id":"tB","name":"Read","input":{"file_path":"/b","offset":10}}]}}
+{"type":"user","uuid":"uB","timestamp":"$now","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tB","content":"ok"}]},"toolUseResult":{"type":"text","file":{"filePath":"/b","content":"$c2k","numLines":500,"startLine":10,"totalLines":900}}}
+{"type":"assistant","timestamp":"$old","message":{"role":"assistant","content":[{"type":"tool_use","id":"tE","name":"Read","input":{"file_path":"/e"}}]}}
+{"type":"user","uuid":"uE","timestamp":"$old","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tE","content":"ok"}]},"toolUseResult":{"type":"text","file":{"filePath":"/e","content":"$c6k","numLines":600,"startLine":1,"totalLines":600}}}
 EOF
     local output
     output=$("$CS_BIN" -usage reads-life 2>&1) || true
