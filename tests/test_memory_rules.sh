@@ -566,7 +566,10 @@ test_delegate_block_is_removed_when_it_sits_mid_file() {
 
     assert_file_not_contains "$session_dir/CLAUDE.local.md" "cs:delegate"         "a mid-file block must be removed too" || return 1
     assert_file_not_contains "$session_dir/CLAUDE.local.md" "cs-delegate:"         "and its prose with it" || return 1
-    assert_file_contains "$session_dir/CLAUDE.local.md" "cs:wrap-cues"         "the block that followed it must survive" || return 1
+    # Anchored, not a substring: a stray character welded to the front of the
+    # sentinel leaves "cs:wrap-cues" findable while the line no longer matches
+    # the ^...$ pattern every other phase keys on.
+    assert_file_contains "$session_dir/CLAUDE.local.md" '^<!-- cs:wrap-cues -->$' "the block that followed it must survive with its sentinel line intact" || return 1
     assert_file_contains "$session_dir/CLAUDE.local.md" "Tail prose that must survive"         "and that block's content with it" || return 1
     assert_file_contains "$session_dir/CLAUDE.local.md" "Head prose that must survive"         "content above must survive" || return 1
 }
@@ -605,6 +608,41 @@ EOF
 }
 
 run_test test_delegate_block_is_removed_when_it_is_the_whole_file
+# A session checked out with CRLF endings carries the sentinel as
+# "<!-- cs:delegate -->\r". The outer grep is a substring match and still
+# succeeds, so the phase reports a clean removal on every resume while the
+# retired instructions stay in the file.
+test_delegate_block_is_removed_from_a_crlf_file() {
+    local name="delegate-crlf"
+    local session_dir="$CS_SESSIONS_ROOT/$name"
+    mkdir -p "$session_dir/.cs"/{local,memory}
+    cat > "$session_dir/.cs/README.md" << EOF
+---
+status: active
+created: 2026-01-01
+tags: []
+aliases: ["$name"]
+---
+# Session: $name
+EOF
+    echo "# Session narrative" > "$session_dir/.cs/memory/narrative.md"
+    printf 'head prose\r\n\r\n<!-- cs:delegate -->\r\n## External delegation (cs)\r\n\r\nRun `cs-delegate:` work here.\r\n\r\n<!-- cs:wrap-cues -->\r\n## Wrap\r\n\r\ntail prose\r\n' \
+        > "$session_dir/CLAUDE.local.md"
+    (cd "$session_dir" && git init -q && git add -A && git commit -q -m init)
+
+    "$CS_BIN" "$name" <<< "" >/dev/null 2>&1 || true
+
+    assert_file_not_contains "$session_dir/CLAUDE.local.md" "cs:delegate" \
+        "a CRLF sentinel must be recognised and removed" || return 1
+    assert_file_not_contains "$session_dir/CLAUDE.local.md" "cs-delegate:" \
+        "and its prose with it" || return 1
+    assert_file_contains "$session_dir/CLAUDE.local.md" "cs:wrap-cues" \
+        "the following managed block must survive" || return 1
+    assert_file_contains "$session_dir/CLAUDE.local.md" "tail prose" \
+        "and its content with it" || return 1
+}
+
+run_test test_delegate_block_is_removed_from_a_crlf_file
 run_test test_delegate_block_is_removed_when_it_sits_at_eof
 run_test test_delegate_block_is_removed_when_it_sits_mid_file
 

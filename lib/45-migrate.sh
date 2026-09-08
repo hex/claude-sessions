@@ -746,11 +746,17 @@ EOF
         # whose entire content was the block reduces to nothing legitimately,
         # and an emptiness test would leave the dead instruction in place in
         # exactly that session.
+        # Matching is done on a CR-stripped copy so a CRLF checkout is
+        # recognised; printing uses $0, so line endings survive untouched.
+        # The outer grep is a substring match and succeeds either way, which
+        # is what would make a CRLF miss look like a clean removal on every
+        # resume.
         if awk '
-            /^<!-- cs:delegate -->$/ { skip = 1; blanks = 0; next }
-            skip && /^<!-- cs:/       { skip = 0 }
-            skip                      { next }
-            /^[[:space:]]*$/          { blanks = blanks "\n"; next }
+            { line = $0; sub(/\r$/, "", line) }
+            line == "<!-- cs:delegate -->" { skip = 1; blanks = ""; next }
+            skip && line ~ /^<!-- cs:/     { skip = 0 }
+            skip                           { next }
+            line ~ /^[[:space:]]*$/        { blanks = blanks $0 "\n"; next }
             { printf "%s", blanks; blanks = ""; print }
             END { if (!skip && blanks != "") printf "%s", blanks }
         ' "$claude_md_p9" > "$_tmp_p15" 2>/dev/null; then
