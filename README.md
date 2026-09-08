@@ -35,7 +35,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 - **Session locking** - PID-based lock prevents the same session from being opened in two terminals simultaneously; use `--force` to override. cs also treats a session as live when its statusline heartbeat is fresh — in the TUI (`■ live · unlocked`), `cs -live`, and the `cs -usage` marker — so a conversation opened outside cs still registers as live. The destructive guards (`cs -rm`/`-archive`/`-spawn`) stay on the strict PID lock, so a session whose process is gone is still removable without `--force`
 - **Deterministic Claude-session resume** - Each session pre-allocates a conversation UUID in the gitignored `.cs/local/state`, so `cs <name>` resumes the *exact* conversation via `claude --resume <uuid>`, not the most-recent one `--continue` might pick from a sibling. A `ps`-based guard refuses to launch a second claude for the same conversation (`--force` overrides), and every launch passes `--name` plus a per-session `/color` so parallel sessions stay visually distinct.
 - **Per-session memory path redirect** - cs points Claude Code's built-in auto-memory writer at `<session>/.cs/memory/` (via `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE`) so durable facts land in the session instead of the global project store. The harness owns how memory files are written (naming, frontmatter, `MEMORY.md` index); cs owns only the storage path.
-- **Conversation rotation** - a heavy conversation can hand off to a fresh one without losing context: the `rotate` skill (self-invoked, or nudged once per conversation past 80% context) writes a lineage-stamped handoff to `.cs/handoffs/` and arms it, then `/clear` continues from it without leaving Claude Code — and continues on its own, since the session wakes itself a moment later and starts the handoff's next step with nothing typed (`CS_NO_ROTATION_WAKE=1` to wait for a word instead). Exiting and answering `r` at the next `cs <name>` launch does the same; `d` discards the handoff. `cs -conversations` shows the resulting chain.
+- **Conversation rotation** - a heavy conversation can hand off to a fresh one without losing context: the `rotate` skill (self-invoked, or nudged once per conversation at 70% context) writes a lineage-stamped handoff to `.cs/handoffs/` and arms it, then `/clear` continues from it without leaving Claude Code — and continues on its own, since the session wakes itself a moment later and starts the handoff's next step with nothing typed (`CS_NO_ROTATION_WAKE=1` to wait for a word instead). Exiting and answering `r` at the next `cs <name>` launch does the same; `d` discards the handoff. `cs -conversations` shows the resulting chain.
 - **Works outside the `cs` launcher** - a session is any directory containing `.cs/`, so the hooks find it whether `cs <name>` started the conversation or you opened the folder in a front end that cannot export environment into it — Claude Code desktop, an IDE, a plugin. A terminal is the exception, because there a session is entered by running `cs`: `claude` typed in a session directory stays cs-blind. `cs` still owns creating sessions and the launch experience (resume prompt, rotation menu, statusline, tmux spawner); what carries over is the documentation, narrative, timeline, autosave, and scope grounding. The session's recorded conversation stays with the `cs` launch, so a conversation opened another way — or a teammate claude working in the same folder — contributes to the session without becoming the one `cs <name>` resumes. When one of those is newer than the recorded conversation, the next launch says so and names it, rather than resuming the older one in silence:
 
   ```
@@ -420,13 +420,13 @@ otherwise shadow the rotation this checkout armed.
 A compaction or a context-limit fork between arming and rotating leaves the
 marker alone, so a pending rotation survives either.
 
-At 60% context, the narrative-reminder Stop hook surfaces a
+At 40% context, the narrative-reminder Stop hook surfaces a
 once-per-conversation heads-up so you can steer toward a natural stopping
 point (`CS_CTX_WARN_CTX` overrides it; the warning stays silent at or above
-the nudge threshold, where rotation takes over). Past 80% context, the same
+the nudge threshold, where rotation takes over). At 70% context, the same
 hook nudges once per conversation to invoke the rotate skill
 (`CS_ROTATE_NUDGE_CTX` overrides the threshold; a non-numeric value falls
-back to 80). Both tiers yield to an armed or draining task queue, which
+back to 70). Both tiers yield to an armed or draining task queue, which
 owns the turn loop while it runs.
 
 Every rotation, deliberate or not, appends a `rotated` event to

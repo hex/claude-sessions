@@ -150,16 +150,20 @@ export CS_REWRITE_PROGRESS="screen"          # screen | native | line | static
 # rewrite to stdout, non-zero to leave the prompt untouched.
 export CS_REWRITE_CMD="/path/to/my-rewriter"
 
-# Statusline context gauge escalation thresholds (see statusline.md)
+# Statusline context gauge escalation thresholds (see statusline.md). Each takes
+# a plain integer of at most three digits; anything else falls back to the
+# default shown. A value above 100 is out of the gauge's reach and so switches
+# that band off, the same idiom cs -doctor uses on the Stop hook's tiers below.
+export CS_STATUSLINE_CTX_NOTICE="40"
 export CS_STATUSLINE_CTX_WARN="50"
-export CS_STATUSLINE_CTX_CRIT="80"
+export CS_STATUSLINE_CTX_CRIT="70"
 
 # Disable the subagent (agent-panel) statusline rows without unregistering
 export CS_SUBAGENT_STATUSLINE_DISABLE="1"
 
 # Context tiers in the Stop hook: one-time warning band start, rotation nudge
-export CS_CTX_WARN_CTX="60"
-export CS_ROTATE_NUDGE_CTX="80"
+export CS_CTX_WARN_CTX="40"
+export CS_ROTATE_NUDGE_CTX="70"
 
 # Narrative rotation: rotate when the live file passes MAX, keep about KEEP bytes
 export CS_NARRATIVE_MAX_BYTES="524288"

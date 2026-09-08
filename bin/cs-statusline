@@ -560,6 +560,19 @@ _add() {
     _SEG_BOLD+=("${3:-}")
 }
 
+# Resolve a threshold override into _NUM: the value when it is a plain integer
+# of at most three digits, the default otherwise. Thresholds arrive from the
+# environment and land in `[ ... -ge ... ]`, where a word and a number too wide
+# for a signed integer both error to stderr and leave the band unrendered. Three
+# digits rather than 0-100 so a value above 100 still reads as "turn this band
+# off", the idiom the Stop hook's tiers already use.
+_num_or() {  # value, default -> _NUM (the hook's namesake prints instead)
+    case "$1" in
+        ''|*[!0-9]*|????*) _NUM="$2" ;;
+        *)                 _NUM="$1" ;;
+    esac
+}
+
 # Set _COLOR by mapping a value against warn/crit thresholds; below warn it
 # takes the healthy color ($4, default the bg-derived surface).
 _thresh_color() {
@@ -1173,11 +1186,21 @@ _seg_pane() {
     _add "${ICON_PANE}${TMUX_PANE}" "grey"
 }
 
+# Context carries a fourth band the shared threshold helper does not: a notice
+# tier below the warning, so the ramp reads neutral, yellow, amber, red. The
+# notice colour is chosen only when the helper settled on the healthy colour,
+# which keeps the warning and critical cut points the single source of truth.
 _seg_ctx() {
     local v="${SL_CTX%%.*}"
     [ -n "$v" ] || return 0
-    local warn="${CS_STATUSLINE_CTX_WARN:-50}" crit="${CS_STATUSLINE_CTX_CRIT:-80}"
+    local warn crit notice
+    _num_or "${CS_STATUSLINE_CTX_WARN:-}" 50;   warn="$_NUM"
+    _num_or "${CS_STATUSLINE_CTX_CRIT:-}" 70;   crit="$_NUM"
+    _num_or "${CS_STATUSLINE_CTX_NOTICE:-}" 40; notice="$_NUM"
     _thresh_color "$v" "$warn" "$crit"
+    if [ "$_COLOR" = surface ] && [ "$v" -ge "$notice" ]; then
+        _COLOR=yellow
+    fi
     _add "${ICON_CTX}ctx ${v}%" "$_COLOR"
 }
 
