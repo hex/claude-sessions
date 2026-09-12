@@ -2596,7 +2596,27 @@ test_advisor_nudge_survives_an_unset_home() {
         "Hook should still emit its reminder with HOME unset" || return 1
 }
 
+test_reminder_carries_the_commit_cadence() {
+    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+
+    # Sessions that track .cs/ were committing once per append (328 such
+    # commits in one repo, 74 in a day). The reminder is the only surface that
+    # fires AT the append, so the cadence rides with it rather than in the
+    # session protocol, which is read once at startup and stale by then.
+    local output
+    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh" 2>/dev/null)
+    assert_output_contains "$output" "never one commit per append" \
+        "Reminder should carry the commit cadence" || return 1
+    # Naming the safe alternative matters: without it the instruction reads as
+    # a reason to delay appends, which loses work the autosave ref already holds.
+    assert_output_contains "$output" "autosave" \
+        "Cadence should say uncommitted appends are safe" || return 1
+}
+
 run_test test_advisor_nudge_cooldown_lands_in_the_machine_local_dir
+run_test test_reminder_carries_the_commit_cadence
 run_test test_advisor_nudge_survives_an_unset_home
 
 
