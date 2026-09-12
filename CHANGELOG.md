@@ -4,13 +4,20 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
-## Unreleased
+## 2026.9.13
+
+### Features
+- The narrative reminder carries a commit cadence. In a session whose `.cs/` is tracked, appends were landing one commit each — 328 such commits in one repo, 74 in a single day, over half that day's history. The reminder now asks for them batched at a handoff or wrap, and says outright that uncommitted appends are safe because the autosave shadow ref already holds every edit. It rides the reminder rather than the session protocol because the protocol is read once at startup and is stale by the time a commit happens, while the reminder fires at the append itself — and because the reason string is rebuilt every run, every existing session picks it up on upgrade with no migration.
+- `/sweep` keeps the memory index under its load budget. `MEMORY.md` loads in full at every session start against a hard size limit, and nothing checked it, so the index grew until it silently truncated and the entries past the cut stopped being read. The pass now checks the size after writing any pointer and names every over-long one, printing length with text so the long ones can be found. It rewrites rather than truncates: a mechanical 200-character cut had turned "push the release commit, tag only after CI is green" into "push the release commit", and left a consent rule as a dangling list of examples — both of which pass every shape check. Entries and pointers are never deleted or merged to save space.
 
 ### Changed
 - The Stop hook's second-opinion note names whichever review channels you have, not the council alone. With the codex plugin present it offers `/codex:review` before Claude calls built work done and names `/codex:rescue` for a stalled run. With both plugins it still emits one note against one cooldown stamp. The note offers `/codex:review` and never runs it: that command carries `disable-model-invocation`, so only you can type it.
 
+### Removed
+- The migration phase that stripped the retired external-delegation block from `CLAUDE.local.md`. It removed the block through to the next cs sentinel or end of file, and because that block was always appended last there was never a following sentinel — so anything you had written below it was deleted, silently, while the phase reported a clean removal. No release ever wrote the block and no session carried it, so the phase only ever risked loss without doing work.
+
 ### Fixes
-- A session carrying the retired external-delegation block in `CLAUDE.local.md` has it removed on next launch. The block named `cs -delegate` and a hook denial prefix that both went away with the roles router, so it instructed Claude to run a command that no longer exists.
+- The `CLAUDE.local.md` migration strip is judged by awk's exit status rather than by the size of what it wrote, keeps a following sentinel intact, and recognises a CRLF checkout.
 
 ## 2026.9.12
 

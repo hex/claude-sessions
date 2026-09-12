@@ -731,42 +731,6 @@ EOF
         warn "Appended session wrap-up cues to CLAUDE.local.md"
     fi
 
-    # Phase 15: Strip the retired external-delegation block. The verb it names
-    # (`cs -delegate`) and the hook that produced the denial were both reset off
-    # main, so a session still carrying the block instructs the model to run a
-    # command that does not exist. The sentinel goes with the prose: the
-    # tombstone convention guards against a generator re-adding a section, and
-    # there is no longer a generator to guard against.
-    if [ -f "$claude_md_p9" ] && grep -q 'cs:delegate' "$claude_md_p9"; then
-        local _tmp_p15="$claude_md_p9.p15.$$"
-        # Drops the sentinel through to the next cs: sentinel or EOF, plus the
-        # blank lines that separated it from the block above, so removing a
-        # mid-file block does not weld its neighbours together.
-        # awk's own exit status decides, not the size of what it wrote: a file
-        # whose entire content was the block reduces to nothing legitimately,
-        # and an emptiness test would leave the dead instruction in place in
-        # exactly that session.
-        # Matching is done on a CR-stripped copy so a CRLF checkout is
-        # recognised; printing uses $0, so line endings survive untouched.
-        # The outer grep is a substring match and succeeds either way, which
-        # is what would make a CRLF miss look like a clean removal on every
-        # resume.
-        if awk '
-            { line = $0; sub(/\r$/, "", line) }
-            line == "<!-- cs:delegate -->" { skip = 1; blanks = ""; next }
-            skip && line ~ /^<!-- cs:/     { skip = 0 }
-            skip                           { next }
-            line ~ /^[[:space:]]*$/        { blanks = blanks $0 "\n"; next }
-            { printf "%s", blanks; blanks = ""; print }
-            END { if (!skip && blanks != "") printf "%s", blanks }
-        ' "$claude_md_p9" > "$_tmp_p15" 2>/dev/null; then
-            mv "$_tmp_p15" "$claude_md_p9"
-            warn "Removed the retired external-delegation block from CLAUDE.local.md"
-        else
-            rm -f "$_tmp_p15"
-        fi
-    fi
-
     # Phase 11: Backfill claude_session_color in local state when absent.
     # Picks one of the 8 colors claude's /color command accepts. Idempotent —
     # runs only when the field is missing. Legacy sessions (pre-v2026.5.7)
