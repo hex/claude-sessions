@@ -840,7 +840,17 @@ fi
 # Update cooldown marker and remind
 echo "$CURRENT_TIME" > "$COOLDOWN_FILE"
 
-REASON="Narrative check. Update only your own narrative (run \`cs -whoami\` if unsure which actor you are; never edit a teammate's narrative). Newest on disk is $NARRATIVE_FILE. (1) If recent work disproved or superseded one of your entries, append a dated correction that names it — never rewrite or delete earlier sections. (2) Append any new findings as plain dated notes. If nothing needs changing, say so in one line and stop.${NARRATIVE_OVER}${ADVISOR_NUDGE}"
+# Sessions whose .cs/ is tracked were committing once per narrative append —
+# 328 such commits in one repo, 74 in a single day, burying the project's own
+# history. The cadence rides on THIS string rather than the session protocol
+# because the protocol is read once at startup and is a hundred turns stale by
+# the time an append happens; the reminder fires at the append itself. It is
+# unconditional on purpose: testing whether .cs/ is tracked would be cheap here,
+# but the advice is inert rather than wrong where it is gitignored, and a
+# condition the model must evaluate is one it will not.
+COMMIT_CADENCE=" Batch narrative appends: commit them at a handoff or wrap, never one commit per append. Uncommitted appends are safe — autosave snapshots every edit to a shadow ref."
+
+REASON="Narrative check. Update only your own narrative (run \`cs -whoami\` if unsure which actor you are; never edit a teammate's narrative). Newest on disk is $NARRATIVE_FILE. (1) If recent work disproved or superseded one of your entries, append a dated correction that names it — never rewrite or delete earlier sections. (2) Append any new findings as plain dated notes. If nothing needs changing, say so in one line and stop.${COMMIT_CADENCE}${NARRATIVE_OVER}${ADVISOR_NUDGE}"
 
 jq -nc --arg r "$REASON" '{decision: "block", reason: $r}'
 
