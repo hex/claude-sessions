@@ -48,7 +48,46 @@ Both are written in parallel from the conversation — narrative is not the upst
 
 4. **Narrative sweep — looser bar.** Resolve `<actor>` with `cs -whoami` first, then append only to your own narrative file. If a substantive finding from this session is not yet in your narrative (`.cs/memory/narrative.<actor>.md`), append it as a dated section. Substantive = something a future session resuming this work would want to know.
 
-5. **Write quietly.** No chat summary. List the files you wrote (one line each) or say "nothing to add" if the session didn't warrant entries.
+5. **Keep the index under budget.** `MEMORY.md` loads in full at every session start against a hard
+   size limit; past it Claude Code loads only part of the file and the entries beyond the cut are never
+   read again. After writing any pointer — and once per sweep even if you wrote none, since another
+   actor may have pushed it over — check:
+
+   ```sh
+   wc -c < .cs/memory/MEMORY.md                                    # budget ~24400 BYTES
+   awk '/^- \[/{print length($0)"\t"$0}' .cs/memory/MEMORY.md \
+     | sort -rn | awk -F'\t' '$1>200' | cut -c1-120                # every over-long pointer, with its text
+   ```
+
+   The FILE size is the hard constraint — that is what truncates. The 200 figure is only a heuristic
+   for finding candidates: a longer pointer is fine if it carries a rule that would be unsafe to drop,
+   and the file still fits. Note `awk length` counts characters while the budget is bytes, so a
+   200-character line with em dashes or backticks exceeds 200 bytes.
+
+   If over budget, **rewrite** the longest pointers shorter. A pointer is a recall HOOK, not a summary:
+   it needs the distinctive noun that makes a future session open the file, plus any negation that
+   makes the entry safe to act on. Detail belongs in the topic file, which loads lazily.
+
+   **Rewrite; never truncate.** Do not cut a line at a character limit, by script or by hand — read the
+   topic file's `description:` and compose a shorter sentence. A truncation that drops a trailing
+   clause silently deletes the operative rule: on 2026-09-08 a mechanical 200-char cut turned "push the
+   release commit, tag only after CI is green" into "push the release commit", and left a consent rule
+   as a dangling list of examples. Every repaired line must still read as a whole thought and must keep
+   its "never"/"only"/"must".
+
+   **Compress; never delete** an entry or its pointer to save space, and never merge two pointers into
+   one — an unindexed entry is never read again. If compression alone cannot fit the budget, say so and
+   ask; do not resolve it by dropping entries.
+
+   **After rewriting, verify twice.** Re-run `wc -c` to confirm the file still fits, and re-read each
+   rewritten pointer against its topic file. Syntactic health is not semantic health: a shortened line
+   can be perfectly formed and still have dropped an authorization boundary ("nothing is ever pushed"),
+   a precondition ("only after exact existence is established"), or an exception ("not only security
+   work"). Those losses pass every shape check — count, links, balanced quotes — and are exactly what
+   this step exists to prevent. Ask of each line: would someone acting on this pointer alone do the
+   right thing?
+
+6. **Write quietly.** No chat summary. List the files you wrote (one line each) or say "nothing to add" if the session didn't warrant entries.
 
 ## When NOT to write a strict-bucket entry
 
