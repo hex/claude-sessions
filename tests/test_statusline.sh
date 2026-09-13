@@ -1191,6 +1191,9 @@ test_bg_shade_noop_on_malformed() {
 
 test_gauge_uses_bg_derived_surface() {
     export COLORTERM=truecolor CS_TERM_THEME=light CS_TERM_BG_RGB="250;248;242"
+    # No CLAUDE_SESSION_NAME/claude_session_color here on purpose: with one, the
+    # session name would paint in that colour instead of plain ink, and the
+    # bold-ink pin below assumes ink.
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":10}}'
     local out
     # 250;248;242 shaded 10% darker is 225;223;217; its 35% shade (ink) is

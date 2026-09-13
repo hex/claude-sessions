@@ -554,14 +554,20 @@ _sgr() {
                 brandshade) idx=167 ;;
                 white)
                     [ "$SL_THEME" = "dark" ] && idx=254 || idx=255 ;;
-                # The capsule fill: reads like the truecolor surface on Alex's
+                # The capsule fill: reads like the truecolor surface on a
                 # cream terminal without CS_TERM_BG_RGB to shade (a tmux pane
                 # cs did not launch has no truecolor flag and no measured
                 # background, so this is what an agent-team teammate's row
-                # renders in). Unknown names fall back to the same value, so
-                # they read as the capsule surface rather than a stray grey.
+                # renders in).
                 surface)
                     [ "$SL_THEME" = "dark" ] && idx=237 || idx=254 ;;
+                # Unknown names fall back to the surface value rather than a
+                # stray grey. Safe only because every ink this file paints is
+                # one of the named cases above: an unlisted foreground token
+                # would land on the same code as its own fill and paint
+                # invisible. _seg_session's colour-name allow-list is what
+                # keeps a bogus claude_session_color from ever reaching here
+                # as a foreground name.
                 *)
                     [ "$SL_THEME" = "dark" ] && idx=237 || idx=254 ;;
             esac
@@ -1184,7 +1190,8 @@ _seg_logo() {
 # one (the same palette Claude Code's own tab and /color share), else primary
 # ink. A colour outside that palette (state hand-edited or from a future
 # claude release) falls back to ink rather than reaching _sgr with a name it
-# does not resolve.
+# does not resolve. KEEP IN SYNC with the eight names in _sgr and
+# _session_color_rgb in bin/cs.
 _seg_session() {
     local name="$SL_SESSION"
     [ -n "$name" ] || name="${CLAUDE_SESSION_NAME:-}"

@@ -81,7 +81,7 @@ default becomes `logo,session,notes,mail,git,model,ctx,limits`. Each name maps t
 | Name | Group | Rest | Hot | Hidden when |
 |---|---|---|---|---|
 | `logo` | identity | `✳` in brand coral, bold; pulses brand/brandshade by epoch parity while `.cs/local/attention` exists | — | plain mode (no colour) |
-| `session` | identity | name, primary ink, bold | — | never |
+| `session` | identity | name, bold, in its `claude_session_color` when the session has one, else primary ink | — | never |
 | `notes` | identity | `▤ N`, amber ink, regular, directly after the session | — | queue empty or absent |
 | `mail` | identity | `✉ N`, amber ink, regular, after notes | — | nothing unread |
 | `pane` | identity | `◫ 33` (the `%` dropped), secondary ink; only when named | — | not named, or outside a real tmux |
@@ -111,12 +111,14 @@ untouched. Hiding a capsule never hides a heartbeat.
 
 | Token | Role | Truecolor | 256 | Basic |
 |---|---|---|---|---|
-| `surface` | every capsule fill | as today: `CS_TERM_BG_RGB` shaded 10% away from itself (`_bg_shade`), taupe fallback when unmeasured | 244/245 | 90 |
-| `ink` | primary text | as today's surface text: a 35% shade of the surface on a light surface, `white` on a dark one | 235/231 | 97 |
-| `ink2` | secondary text, dots, effort, gauge labels | a 55% shade of the surface when the surface is light (luminance ≥ 1530000), else each channel lifted by 55% toward white — `227;221;204` → `124;121;112`, the light taupe → `197;194;189`, the dark taupe → `203;199;195` | 238/252 | 37/97 |
+| `surface` | every capsule fill | as today: `CS_TERM_BG_RGB` shaded 10% away from itself (`_bg_shade`), taupe fallback when unmeasured | 254/237 | 90 |
+| `ink` | primary text | as today's surface text: a 35% shade of the surface on a light surface, `white` on a dark one | 236/255 | 97 |
+| `ink2` | secondary text, dots, effort, gauge labels | a 55% shade of the surface when the surface is light (luminance ≥ 1530000), else each channel lifted by 55% toward white — `227;221;204` → `124;121;112`, the light taupe → `197;194;189`, the dark taupe → `203;199;195` | 241/250 | 37/97 |
 | `brand` | the mark | unchanged `217;119;87` | 173 | 33 |
 | `brandshade` | the pulse's dim phase | unchanged `184;101;74` | 167 | 33 |
-| `amberink` | hot numbers, notes and mail counts | light: `180;83;9`; dark: `245;165;36` | 130/215 | 33 |
+| `slate` | the branch item | light: `31;41;55`; dark: `229;231;235` | 238/253 | 30/97 |
+| `periwinkle` | the model item | light: `76;29;149`; dark: `196;181;253` | 55/147 | 35/95 |
+| `amberink` | hot numbers, notes and mail counts | light: `146;64;14`; dark: `253;230;138` | 94/221 | 33 |
 | `crit` | inverted capsule fill | light: `215;0;21`; dark: `255;69;58` | 160/203 | 31 |
 | `critink` | inverted capsule text | light: `255;255;255`; dark: `37;0;0` | 231/232 | 97/30 |
 
