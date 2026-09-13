@@ -938,7 +938,31 @@ test_integrate_tracked_mode_union_merges_shared_records() {
     assert_eq "" "$(git -C "$base_dir" status --porcelain -- .gitattributes)" "no tree is dirtied to get the policy" || return 1
 }
 
+# The base's own landing is the one merge cs does NOT run with hooks
+# suppressed: it is the user's checkout and their post-merge hook is entitled
+# to fire. A hook that commits leaves base past the commit cs just landed, so
+# the summary must name where the base actually ended up.
+test_integrate_survives_a_base_post_merge_hook_that_commits() {
+    local sha base_dir output status=0
+    sha=$(integrate_fixture myproj fix-auth)
+    base_dir="$CS_SESSIONS_ROOT/myproj"
+    mkdir -p "$base_dir/.git/hooks"
+    cat > "$base_dir/.git/hooks/post-merge" << 'HOOK'
+#!/usr/bin/env bash
+git commit -q --allow-empty -m "post-merge bookkeeping"
+HOOK
+    chmod +x "$base_dir/.git/hooks/post-merge"
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- true 2>&1) || status=$?
+    assert_eq "0" "$status" "a landing whose hook commits still succeeds: $output" || return 1
+    assert_eq "post-merge bookkeeping" "$(git -C "$base_dir" log -1 --format=%s)" "the hook's commit is the base tip" || return 1
+    assert_output_contains "$output" "post-merge hook moved" "the hook's move is announced" || return 1
+    assert_output_contains "$output" "integrated fix-auth $sha -> $(git -C "$base_dir" rev-parse HEAD)" \
+        "the summary names the head the base really has" || return 1
+    assert_file_exists "$base_dir/feature.txt" "the feature still landed" || return 1
+}
+
 run_test test_integrate_lands_a_no_ff_merge_and_keeps_everything
+run_test test_integrate_survives_a_base_post_merge_hook_that_commits
 run_test test_integrate_tracked_mode_union_merges_shared_records
 run_test test_integrate_then_merge_verb_takes_the_ancestor_path
 run_test test_integrate_red_gate_leaves_base_untouched

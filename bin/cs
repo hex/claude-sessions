@@ -1972,6 +1972,15 @@ Move or delete these untracked files in $base_dir, then re-run /finish $task"
         error "Base $base_dir moved or changed during the gates (was $B); re-run /finish $task
 ${ff_err:-(no output from git merge --ff-only)}"
     fi
+    # The base's landing is the one merge that runs with the project's hooks
+    # live — it is the user's checkout, and a post-merge hook is entitled to
+    # fire there. One that commits leaves base past the commit cs landed, so
+    # read HEAD back and report where the base actually is.
+    local landed
+    landed=$(git -C "$base_dir" rev-parse HEAD)
+    if [ "$landed" != "$R" ]; then
+        warn "A post-merge hook moved $base_dir to $landed after landing $R"
+    fi
     # Keep _INTEGRATE_TMP until the removal is verified, so the EXIT cleanup
     # still has the path if this removal fails; a leftover temp is reported,
     # never silently forgotten.
@@ -1986,10 +1995,10 @@ ${ff_err:-(no output from git merge --ff-only)}"
            --arg event "feature-integrated" \
            --arg task "$task" \
            --arg sha "$sha" \
-           --arg result "$R" \
+           --arg result "$landed" \
         '{ts: $ts, event: $event, task: $task, sha: $sha, result: $result}' \
         >> "$base_dir/.cs/timeline.jsonl" 2>/dev/null || true
-    printf 'integrated %s %s -> %s\n' "$task" "$sha" "$R"
+    printf 'integrated %s %s -> %s\n' "$task" "$sha" "$landed"
 }
 
 # Append one JSONL file onto another, keeping every record on its own line. A
