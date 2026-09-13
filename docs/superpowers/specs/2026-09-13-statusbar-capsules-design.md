@@ -120,7 +120,7 @@ untouched. Hiding a capsule never hides a heartbeat.
 | `crit` | inverted capsule fill | light: `215;0;21`; dark: `255;69;58` | 160/203 | 31 |
 | `critink` | inverted capsule text | light: `255;255;255`; dark: `37;0;0` | 231/232 | 97/30 |
 
-On a cream terminal (`253;246;227`) the derived surface is `228;221;204`, within a few
+On a cream terminal (`253;246;227`) the derived surface is `227;221;204`, within a few
 shades of the council's `#ECE9E0` reference, so the surface stays derived and the hex
 values above are the fallback and the documentation reference, not fixed paints.
 
