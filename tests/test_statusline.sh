@@ -755,7 +755,10 @@ test_ctx_normal_neutral_not_red() {
     local out
     out=$(run_sl "$json")
     assert_output_not_contains "$out" "0;135;0" "healthy ctx must not shout green" || return 1
-    assert_output_not_contains "$out" "220;38;38" "ctx 8% must not use red" || return 1
+    assert_output_not_contains "$out" "48;2;215;0;21" "ctx 8% must not use the crit fill" || return 1
+    local pill
+    pill=$(ctx_num_run "$out" 8)
+    assert_output_contains "$pill" "38;2;119;117;110;22m" "ctx 8% number should sit at the secondary ink" || return 1
 }
 
 test_ctx_amber_band_is_amber() {
@@ -817,6 +820,7 @@ test_ctx_warn_edge_is_amber_at_the_threshold() {
     local pill
     pill=$(ctx_pill "$out" 40)
     assert_output_contains_f "$pill" "38;2;180;83;9;22m" "ctx 40% is inside the amber band" || return 1
+    assert_output_not_contains_f "$out" "48;2;215;0;21" "ctx 40% must not reach the crit fill" || return 1
 }
 
 # A threshold override is environment, so it can be anything. Anything that is
@@ -1109,18 +1113,23 @@ test_unknown_segment_ignored() {
 }
 
 # ============================================================================
-# A session color name outside the table falls back to neutral grey, no crash
+# claude_session_color never reaches the bar: the render is identical whether
+# the state file names a valid palette color or a bogus one
 # ============================================================================
 
-test_unknown_session_color_falls_back() {
+test_session_color_never_reaches_the_bar() {
     export COLORTERM="truecolor"
+    export CS_TERM_BG_RGB="253;246;227"
     export CLAUDE_SESSION_NAME="weird"
-    make_cs_session "weird" 1024 chartreuse   # not one of the 8 valid color names
     local json='{"session_name":"weird","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":5}}'
-    local out
-    out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;128;120;110" \
-        "unknown session color should fall back to neutral grey"
+    make_cs_session "weird" 1024 chartreuse   # not one of the 8 valid color names
+    local out_bogus; out_bogus=$(run_sl "$json")
+    make_cs_session "weird" 1024 blue         # a valid palette color
+    local out_valid; out_valid=$(run_sl "$json")
+    assert_eq "$out_bogus" "$out_valid" \
+        "a bogus vs. a valid claude_session_color must render identically" || return 1
+    assert_output_not_contains_f "$out_bogus" "48;2;106;155;204" "the session palette blue must never be a fill" || return 1
+    assert_output_not_contains_f "$out_valid" "48;2;106;155;204" "the session palette blue must never be a fill" || return 1
 }
 
 # ============================================================================
@@ -1193,8 +1202,11 @@ test_gauge_uses_bg_derived_surface() {
     IFS=';' read -r sr sg sb <<< "$surface"
     tr=$((sr * 35 / 100)); tg=$((sg * 35 / 100)); tb=$((sb * 35 / 100))
     out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;${surface};38;2;${tr};${tg};${tb}" \
-        "a healthy gauge should render on the bg-derived surface with softened tonal text" || return 1
+    assert_output_contains_f "$out" "48;2;${surface};38;2;${tr};${tg};${tb};1m" \
+        "identity should render on the bg-derived surface with softened tonal text" || return 1
+    local pill; pill=$(ctx_num_run "$out" 10)
+    assert_output_contains_f "$pill" "48;2;${surface};38;2;119;117;110;22m" \
+        "a healthy gauge number should sit on the bg-derived surface at the secondary ink" || return 1
     assert_output_not_contains "$out" "48;2;128;120;110" \
         "a gauge with a known background must not use the fixed grey" || return 1
 }
@@ -1205,8 +1217,11 @@ test_gauge_falls_back_to_grey_without_bg() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":10}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;128;120;110;38;2;255;255;255" \
-        "with no known background a gauge falls back to the warm neutral grey with light text" || return 1
+    assert_output_contains_f "$out" "48;2;128;120;110;38;2;255;255;255;1m" \
+        "identity falls back to the warm neutral grey with light text" || return 1
+    local pill; pill=$(ctx_num_run "$out" 10)
+    assert_output_contains_f "$pill" "48;2;128;120;110;38;2;119;117;110;22m" \
+        "with no known background a gauge number falls back to the warm neutral grey at the secondary ink" || return 1
 }
 
 # ============================================================================
@@ -1634,7 +1649,7 @@ run_test test_force_color_zero_is_plain
 run_test test_io_gating_git_subprocess
 run_test test_ctx_zero_vs_absent
 run_test test_unknown_segment_ignored
-run_test test_unknown_session_color_falls_back
+run_test test_session_color_never_reaches_the_bar
 run_test test_display_width_counts_codepoints_not_bytes
 run_test test_parse_rgb_triplet_accepts_valid_and_rejects_malformed
 
