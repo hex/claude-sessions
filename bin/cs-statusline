@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ABOUTME: Claude Code statusLine command — renders one line of squared, abutting pills
+# ABOUTME: Claude Code statusLine command — renders one line of rounded capsules on the terminal's own background
 # ABOUTME: Reads the statusline JSON on stdin and prints session/ctx/model/git/limits/cost
 
 set -uo pipefail
@@ -197,7 +197,7 @@ _sl_detect_theme() {
         # Whatever cs measured at launch, and dark when it measured nothing.
         #
         # The OS appearance is not consulted. It describes the system, and the
-        # pills are drawn on the terminal — unrelated for a terminal with a
+        # capsules are drawn on the terminal — unrelated for a terminal with a
         # fixed scheme or one embedded in an app, which is where it was reliably
         # wrong. It was only ever a guess that happened to be right when the
         # terminal followed the system, and the rungs above now cover the
@@ -214,7 +214,7 @@ _sl_detect_theme() {
 # Blank CS_TERM_BG_RGB when the launch-captured background is stale: once the
 # live theme (SL_THEME) has switched away from the theme cs detected at launch
 # (CS_TERM_THEME, present with the auto marker), the RGB no longer matches the
-# terminal, so drop it and let the gauge surface and gradient fall back to
+# terminal, so drop it and let the gauge surface fall back to
 # theme-based values instead of tinting toward the old background (which could
 # leave light text on a near-light surface). A manually-set RGB carries no auto
 # marker and is never dropped.
@@ -438,8 +438,8 @@ _sgr() {
             local rgb
             case "$name" in
                 # Session-color palette: Claude Code's own /color values (the
-                # shared dark/light theme `*_FOR_SUBAGENTS_ONLY` tokens), so the
-                # session pill matches CC's session accent and the terminal tab.
+                # shared dark/light theme `*_FOR_SUBAGENTS_ONLY` tokens): the tab
+                # color and Claude Code's own session accent share this palette.
                 # KEEP IN SYNC with _session_color_rgb in bin/cs (tab color).
                 red)    rgb="220;38;38" ;;
                 blue)   rgb="106;155;204" ;;
@@ -452,14 +452,14 @@ _sgr() {
                 periwinkle) rgb="138;134;236" ;;
                 rowname)
                     # A subagent row's agent name sits on the bare terminal, not
-                    # a pill, so it takes ink that contrasts the canvas: near-white
+                    # a capsule, so it takes ink that contrasts the canvas: near-white
                     # on a dark terminal, dark on a light one.
                     [ "$SL_THEME" = "dark" ] && rgb="240;242;255" || rgb="48;42;36" ;;
                 rowmeta)
                     # The row's description, ctx and elapsed: quieter than the
                     # name, still readable against the terminal on either theme.
                     [ "$SL_THEME" = "dark" ] && rgb="170;161;148" || rgb="128;116;106" ;;
-                # Inks. `amber` is a foreground now: the hot number's colour on
+                # Inks. `amber` is a foreground: the hot number's colour on
                 # the neutral capsule, dark enough to hold contrast on cream and
                 # bright enough on a dark surface. Nothing paints amber as a fill.
                 amber)
@@ -502,7 +502,7 @@ _sgr() {
                     # Softer text on dark terminals to avoid glare.
                     [ "$SL_THEME" = "dark" ] && rgb="230;230;230" || rgb="255;255;255" ;;
                 surface)
-                    # The quiet gauge pills, tinted from the terminal background
+                    # The capsule surface, tinted from the terminal background
                     # so they harmonize with it instead of sitting on top: a
                     # shade of CS_TERM_BG_RGB (darker on a light terminal,
                     # lighter on a dark one), resolved once per render and cached
@@ -517,7 +517,7 @@ _sgr() {
                 *)
                     # Warm neutral (R>G>B) so the quiet blocks read as taupe,
                     # not steel; light enough that the gauges recede beside the
-                    # vivid session/model accents while white label text holds.
+                    # identity capsule's ink while white label text holds.
                     [ "$SL_THEME" = "dark" ] && rgb="140;132;122" || rgb="128;120;110" ;;
             esac
             _SGR="${kind};2;${rgb}"; _RGB="$rgb" ;;
@@ -1162,7 +1162,7 @@ _seg_logo() {
 }
 
 # The session name, bold primary ink. Its claude_session_color stays on the
-# terminal tab and in claude's own accent; the bar no longer paints it.
+# terminal tab and in claude's own accent; the bar does not paint it.
 _seg_session() {
     local name="$SL_SESSION"
     [ -n "$name" ] || name="${CLAUDE_SESSION_NAME:-}"
@@ -1176,7 +1176,7 @@ _seg_session() {
 # Count of queued tasks for the current session (one file per task in
 # .cs/local/queue/), shown right after the session name. Hidden when the
 # queue is empty or absent. Only regular files count, so a subdirectory or
-# an unmatched glob (bash 3.2 has no nullglob) never inflates the badge.
+# an unmatched glob (bash 3.2 has no nullglob) never inflates the count.
 _seg_notes() {
     [ -n "${CLAUDE_SESSION_NAME:-}" ] || return 0
     local qdir="$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/local/queue"
@@ -1311,7 +1311,8 @@ _seg_limits() {
 # The `fable` name alone: the Fable window only. When `limits` is also named
 # (in either order) that segment owns all three windows and this one is a
 # no-op, so the two-capsule cap holds across the whole bar. Kept so a
-# CS_STATUSLINE_SEGMENTS written for the old bar still shows the Fable window.
+# CS_STATUSLINE_SEGMENTS written before `limits` covered the Fable window still
+# shows it.
 _seg_fable() {
     [ -z "${_LIMITS_NAMED:-}" ] || return 0
     _LIM_NAME=(); _LIM_PCT=(); _LIM_RESET=(); _LIM_GATE=(); _LIM_ICON=()
@@ -1354,7 +1355,8 @@ _seg_cost() {
 # the duration of this function regardless of the ambient locale or this
 # bash's own multibyte awareness, so continuation bytes (the 0x80-0xBF range)
 # can be counted and subtracted out: every codepoint has exactly one leading
-# (non-continuation) byte. No subprocess.
+# (non-continuation) byte. No subprocess. Used by bin/cs-subagent-statusline's
+# _truncate; no caller in this file.
 _display_width() {
     local LC_ALL=C s="$1" i n=0
     local len=${#s}
@@ -1389,9 +1391,8 @@ _luminance() {
 
 # Set _R/_G/_B to a shade of the color "$1", nudged away from itself: darker
 # when it is light, lighter when it is dark, classified by BT.709 luminance.
-# Used both for the gauge surface (a shade of the terminal background) and for
-# the divider sliver (a shade of the pill's own background). Returns non-zero
-# on a color that does not parse, so callers can fall back.
+# Its only caller is the surface: a shade of the terminal background. Returns
+# non-zero on a color that does not parse, so callers can fall back.
 _bg_shade() {
     _parse_rgb_triplet "$1" || return 1
     local r="$_R" g="$_G" b="$_B" shift=10

@@ -58,11 +58,11 @@ export NO_COLOR="1"
 # Status line: choose/order segments, or disable entirely
 export CS_STATUSLINE_SEGMENTS="logo,session,notes,mail,git,model,ctx,limits"  # this is the default
 
+export CS_STATUSLINE_DISABLE="1"
+
 # Draw the capsules with square ends instead of the Powerline rounded caps
 # (U+E0B6/U+E0B4), for a font that lacks the glyphs
 export CS_STATUSLINE_CAPS="0"
-
-export CS_STATUSLINE_DISABLE="1"
 
 # Where the machine-global usage cache behind the `fable` segment lives
 # (default: $CS_SESSIONS_ROOT/.usage). One record per account per machine, not

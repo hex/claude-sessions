@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ABOUTME: Tests for bin/cs-statusline, the Claude Code squared-pill statusline
+# ABOUTME: Tests for bin/cs-statusline, the Claude Code capsule statusline
 # ABOUTME: Covers segment rendering, ordering, thresholds, color ladder, and defensive fallbacks
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -91,7 +91,7 @@ assert_output_not_contains_f() {
 }
 
 # The SGR run carrying the ctx NUMBER ($2, e.g. 42): the label and the number
-# are separate items now, so a run never carries both. Replaces ctx_pill for
+# are separate items, so a run never carries both. Replaces ctx_pill for
 # every test that isolates the gauge's colour.
 ctx_num_run() {
     printf '%s' "$1" | tr '\033' '\n' | grep -F "m${2}%" | head -1
@@ -262,7 +262,7 @@ test_limits_threshold_per_block() {
     assert_output_not_contains_f "$out" "◷ 5h" "the healthy 5h window stays hidden entirely" || return 1
 }
 
-test_logo_badge_is_brand_coral() {
+test_logo_mark_is_brand_ink() {
     export COLORTERM=truecolor
     # The bar opens with the Claude mark, coral ink on the identity capsule.
     local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
@@ -274,7 +274,8 @@ test_logo_badge_is_brand_coral() {
 }
 
 # ============================================================================
-# Segment icons are standard Unicode (render in any monospace font)
+# Segment icons are standard Unicode; the capsule caps are the only
+# private-use glyphs
 # ============================================================================
 
 test_segment_icons_are_unicode() {
@@ -326,8 +327,8 @@ test_no_powerline_arrow() {
     arrow=$'\xee\x82\xb0'        # U+E0B0 powerline arrow (private-use glyph)
     chevron=$'\xee\x82\xb1'      # U+E0B1 powerline chevron (private-use glyph)
     branch_icon=$'\xe2\x8e\x87'  # U+2387 branch (standard Unicode)
-    assert_output_not_contains "$out" "$arrow" "squared pills must not use the powerline arrow" || return 1
-    assert_output_not_contains "$out" "$chevron" "squared pills must not use the powerline chevron" || return 1
+    assert_output_not_contains "$out" "$arrow" "capsules must not use the powerline arrow" || return 1
+    assert_output_not_contains "$out" "$chevron" "capsules must not use the powerline chevron" || return 1
     assert_output_contains "$out" "$branch_icon" "standard Unicode icons still render" || return 1
 }
 
@@ -1590,7 +1591,7 @@ run_test test_bg_shade_lightens_dark_background
 run_test test_bg_shade_noop_on_malformed
 run_test test_gauge_uses_bg_derived_surface
 run_test test_gauge_falls_back_to_grey_without_bg
-run_test test_logo_badge_is_brand_coral
+run_test test_logo_mark_is_brand_ink
 run_test test_segment_icons_are_unicode
 run_test test_tab_color_palette_matches_statusline
 run_test test_no_powerline_arrow
@@ -1919,7 +1920,7 @@ test_shared_clock_replaces_inherited_garbage() {
 
 # The attention pulse parity uses the shared clock; an inherited garbage _NOW must
 # not reach the arithmetic (crashes bash 3.2 under set -u). With the pin at an even
-# second the mark renders chiptext regardless of the inherited value.
+# second the mark renders brand regardless of the inherited value.
 test_pulse_ignores_inherited_now() {
     export COLORTERM=truecolor
     export CLAUDE_SESSION_NAME="inhpulse"
@@ -2013,10 +2014,11 @@ test_sl_theme_non_macos_defaults_dark() {
 }
 
 
-# The OS appearance describes the system, not the terminal the pills are drawn
-# on, and the two are unrelated for a fixed-theme terminal or one embedded in an
-# app. With no signal from the terminal itself, an unknown is now dark — the
-# assumption the rest of cs makes — rather than a guess sourced from the OS.
+# The OS appearance describes the system, not the terminal the capsules are
+# drawn on, and the two are unrelated for a fixed-theme terminal or one
+# embedded in an app. With no signal from the terminal itself, an unknown is
+# now dark — the assumption the rest of cs makes — rather than a guess sourced
+# from the OS.
 test_sl_theme_unknown_is_dark_on_macos() {
     ( _load_sl_functions
       unset CS_TERM_THEME CS_TERM_THEME_AUTO COLORFGBG TMUX 2>/dev/null || true
@@ -2055,8 +2057,8 @@ test_sl_theme_measured_launch_beats_the_dark_default() {
 
 # A session cs did not launch carries none of cs's environment, so the ladder
 # falls straight to the OS appearance and renders light on a dark terminal —
-# the palette follows macOS rather than the surface the pills sit on. Two rungs
-# fill that gap, each mirroring a policy the launch detector already has.
+# the palette follows macOS rather than the surface the capsules sit on. Two
+# rungs fill that gap, each mirroring a policy the launch detector already has.
 
 # Outside tmux, COLORFGBG is the terminal's own statement about itself.
 test_sl_theme_uses_colorfgbg_outside_tmux() {

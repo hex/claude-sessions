@@ -275,12 +275,11 @@ _color_from_name() {
     echo "${colors[$index]}"
 }
 
-# Map a claude_session_color name to its RGB (comma form for set_tab_title), so
-# the terminal tab color matches the statusline session block exactly.
+# Map a claude_session_color name to its RGB (comma form for set_tab_title).
 # These are Claude Code's own /color palette (the shared dark/light theme
-# `*_FOR_SUBAGENTS_ONLY` tokens) so the tab, the session pill, and Claude Code's
-# own session accent all agree. KEEP IN SYNC with cs-statusline's truecolor
-# session palette.
+# `*_FOR_SUBAGENTS_ONLY` tokens): the tab color and Claude Code's own session
+# accent share the statusline's eight-color palette. KEEP IN SYNC with the
+# session palette in _sgr (bin/cs-statusline).
 _session_color_rgb() {
     case "$1" in
         red)    echo "220,38,38" ;;
@@ -308,9 +307,9 @@ _session_pill() {
         return
     fi
     rgb="${rgb//,/;}"   # comma form -> semicolon for SGR
-    # Claude-coral (217;119;87) and chiptext (240;242;255) match cs-statusline's
-    # brand/chiptext SGR; chiptext reads on both the coral and session-color bg.
-    # KEEP IN SYNC with cs-statusline's _seg_logo/_seg_session colors.
+    # The pill owns its two colors: Claude-coral (217;119;87) and 240;242;255,
+    # which reads on both the coral and the session-color bg.
+    # KEEP IN SYNC with the session palette in _sgr (bin/cs-statusline).
     printf '\033[48;2;217;119;87;38;2;240;242;255m %s \033[48;2;%s;38;2;240;242;255m %s \033[0m' \
         "$ICON_LOGO" "$rgb" "$name"
 }

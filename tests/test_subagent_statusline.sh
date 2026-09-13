@@ -463,7 +463,7 @@ test_light_theme_row_paints_dark_ink() {
     assert_output_contains "$c" "38;2;48;42;36" "light theme paints the agent name in dark ink" || return 1
     assert_output_contains "$c" "38;2;128;116;106" "light theme paints row meta in readable taupe" || return 1
     assert_output_not_contains "$c" "38;2;240;242;255" "no near-white name on a light terminal" || return 1
-    assert_output_not_contains "$c" "38;2;170;161;148" "no light hairline meta on a light terminal" || return 1
+    assert_output_not_contains "$c" "38;2;170;161;148" "no dark-theme row-meta ink on a light terminal" || return 1
 }
 
 test_dark_theme_row_keeps_light_ink() {
