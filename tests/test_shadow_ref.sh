@@ -143,6 +143,80 @@ test_autosave_writes_per_conversation_ref() {
     case "$msg" in *"cs-base: "*) : ;; *) echo "  FAIL: per-conversation autosave must keep the cs-base trailer"; return 1 ;; esac
 }
 
+# A HEAD that moves while the snapshot is in flight must not relabel the OLD
+# tree as sitting on the NEW head: crash recovery reads cs-base to decide
+# whether a whole-tree restore is safe. Stage the move with a git shim that
+# advances HEAD the moment the hook asks for write-tree — the exact window an
+# integrate's fast-forward can land in.
+test_autosave_labels_the_head_it_started_from() {
+    local real_git shim_dir head_before
+    real_git=$(command -v git)
+    shim_dir="$TEST_TMPDIR/shim"
+    mkdir -p "$shim_dir"
+    cat > "$shim_dir/git" << SHIM
+#!/usr/bin/env bash
+if [ "\${1:-}" = "write-tree" ]; then
+    ( unset GIT_INDEX_FILE; "$real_git" commit -q --allow-empty -m moved ) >/dev/null 2>&1
+fi
+exec "$real_git" "\$@"
+SHIM
+    chmod +x "$shim_dir/git"
+    head_before=$(git -C "$CLAUDE_SESSION_DIR" rev-parse HEAD)
+
+    echo "## New Finding" >> "$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"
+    echo '{"session_id":"22222222-2222-2222-2222-222222222222","tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
+        | PATH="$shim_dir:$PATH" bash "$HOOKS_DIR/autosave-commits.sh"
+
+    # Positive control: the shim really moved HEAD, or the test proves nothing.
+    [ "$(git -C "$CLAUDE_SESSION_DIR" rev-parse HEAD)" != "$head_before" ] \
+        || { echo "  FAIL: the shim did not move HEAD; the test staged nothing"; return 1; }
+    local msg
+    msg=$(git -C "$CLAUDE_SESSION_DIR" log -1 --format=%B refs/worktree/cs/session/22222222-2222-2222-2222-222222222222 2>/dev/null || true)
+    case "$msg" in
+        *"cs-base: $head_before"*) return 0 ;;
+        *) echo "  FAIL: cs-base must be the HEAD at hook start ($head_before)"
+           echo "    message: $msg"
+           return 1 ;;
+    esac
+}
+
+# An integrate in progress holds <common-dir>/cs/integrate.lock. A snapshot
+# taken mid-merge is garbage, so the hook skips — never waits, never steals.
+test_autosave_skips_while_the_integrate_lock_is_held() {
+    mkdir -p "$CLAUDE_SESSION_DIR/.git/cs/integrate.lock"
+    echo "## New Finding" >> "$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"
+    echo '{"session_id":"22222222-2222-2222-2222-222222222222","tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
+        | bash "$HOOKS_DIR/autosave-commits.sh"
+    if git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify refs/worktree/cs/session/22222222-2222-2222-2222-222222222222 >/dev/null 2>&1; then
+        echo "  FAIL: no snapshot may be written while the integrate lock is held"; return 1
+    fi
+    assert_dir "$CLAUDE_SESSION_DIR/.git/cs/integrate.lock" "the hook must not remove a lock it does not hold" || return 1
+}
+
+test_autosave_holds_the_lock_during_the_snapshot_and_releases_it() {
+    # Observe the lock at write-tree time through a git shim; a release
+    # assertion alone passes when no lock is ever taken.
+    local real_git shim_dir
+    real_git=$(command -v git)
+    shim_dir="$TEST_TMPDIR/shim"
+    mkdir -p "$shim_dir"
+    cat > "$shim_dir/git" << SHIM
+#!/usr/bin/env bash
+if [ "\${1:-}" = "write-tree" ]; then
+    if [ -d .git/cs/integrate.lock ]; then echo held > "$TEST_TMPDIR/lock-seen"; else echo absent > "$TEST_TMPDIR/lock-seen"; fi
+fi
+exec "$real_git" "\$@"
+SHIM
+    chmod +x "$shim_dir/git"
+    echo "## New Finding" >> "$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"
+    echo '{"session_id":"22222222-2222-2222-2222-222222222222","tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
+        | PATH="$shim_dir:$PATH" bash "$HOOKS_DIR/autosave-commits.sh"
+    git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify refs/worktree/cs/session/22222222-2222-2222-2222-222222222222 >/dev/null 2>&1 \
+        || { echo "  FAIL: snapshot should have been written"; return 1; }
+    assert_eq "held" "$(cat "$TEST_TMPDIR/lock-seen" 2>/dev/null)" "the lock is held while the tree is written" || return 1
+    assert_not_exists "$CLAUDE_SESSION_DIR/.git/cs/integrate.lock" "the hook releases the lock after the snapshot" || return 1
+}
+
 test_autosave_skips_malformed_session_id() {
     echo "## New Finding" >> "$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"
     echo '{"session_id":"not-a-uuid","tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
@@ -854,6 +928,9 @@ run_test test_autosave_does_not_touch_main
 run_test test_autosave_chains_multiple_saves
 run_test test_autosave_stamps_base_head
 run_test test_autosave_writes_per_conversation_ref
+run_test test_autosave_labels_the_head_it_started_from
+run_test test_autosave_skips_while_the_integrate_lock_is_held
+run_test test_autosave_holds_the_lock_during_the_snapshot_and_releases_it
 run_test test_autosave_skips_malformed_session_id
 run_test test_session_end_deletes_shadow_ref
 run_test test_session_end_deletes_only_own_conversation_ref
