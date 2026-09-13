@@ -953,6 +953,37 @@ run_test test_gc_prunes_stale_foreign_refs_only
 run_test test_shadow_ref_not_pushed
 run_test test_autosave_logs_per_actor_narrative_edit
 run_test test_autosave_refs_isolated_per_worktree
+# The lock is per-CHECKOUT: a feature worktree keeps snapshotting while its
+# base is being landed on, and stops only for a lock in its OWN gitdir. A
+# common-dir lock would silence every worktree of the repo for the length of
+# a gate run — the case this pins from both directions.
+test_autosave_in_a_worktree_ignores_the_bases_lock_and_honours_its_own() {
+    local base_dir wt wt_gitdir
+    base_dir=$(create_test_session_with_git "test-session")
+    wt="$CS_SESSIONS_ROOT/test-session@t1"
+    git -C "$base_dir" worktree add -b cs/t1 "$wt" -q
+    mkdir -p "$base_dir/.git/cs/integrate.lock"
+    (cd "$wt" && echo y > g.txt && \
+        CS_TEST_SYNC=1 CLAUDE_SESSION_NAME=test-session@t1 CLAUDE_SESSION_DIR="$wt" \
+        bash "$HOOKS_DIR/autosave-commits.sh" \
+        <<< '{"session_id":"44444444-4444-4444-4444-444444444444","tool_name":"Write","tool_input":{"file_path":"g.txt"}}')
+    git -C "$wt" rev-parse -q --verify refs/worktree/cs/session/44444444-4444-4444-4444-444444444444 >/dev/null \
+        || { echo "  FAIL: a lock in the BASE's gitdir must not stop a worktree's autosave"; return 1; }
+    assert_dir "$base_dir/.git/cs/integrate.lock" "the base's lock is left alone" || return 1
+
+    wt_gitdir=$(cd "$wt" && git rev-parse --git-dir)
+    mkdir -p "$wt_gitdir/cs/integrate.lock"
+    (cd "$wt" && echo z >> g.txt && \
+        CS_TEST_SYNC=1 CLAUDE_SESSION_NAME=test-session@t1 CLAUDE_SESSION_DIR="$wt" \
+        bash "$HOOKS_DIR/autosave-commits.sh" \
+        <<< '{"session_id":"55555555-5555-5555-5555-555555555555","tool_name":"Write","tool_input":{"file_path":"g.txt"}}')
+    if git -C "$wt" rev-parse -q --verify refs/worktree/cs/session/55555555-5555-5555-5555-555555555555 >/dev/null 2>&1; then
+        echo "  FAIL: a lock in the worktree's OWN gitdir must stop its autosave"; return 1
+    fi
+    assert_dir "$wt_gitdir/cs/integrate.lock" "the hook must not remove a lock it does not hold" || return 1
+}
+
 run_test test_autosave_works_in_linked_worktree
+run_test test_autosave_in_a_worktree_ignores_the_bases_lock_and_honours_its_own
 
 report_results

@@ -878,6 +878,8 @@ test_integrate_conflict_names_the_path_and_leaves_no_merge_head() {
     output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- true 2>&1) || status=$?
     assert_eq "1" "$status" "a conflict refuses" || return 1
     assert_output_contains "$output" "shared.txt" "names the conflicting path" || return 1
+    assert_output_contains "$output" "git merge $(git -C "$base_dir" symbolic-ref --short HEAD) in $wt" \
+        "the advice names the base's real branch and the worktree to run it in" || return 1
     assert_file_not_exists "$base_dir/.git/MERGE_HEAD" "no MERGE_HEAD in the base" || return 1
     assert_eq "$head" "$(git -C "$base_dir" rev-parse HEAD)" "base HEAD unchanged" || return 1
     assert_output_not_contains "$(git -C "$base_dir" worktree list)" "cs/finish" "temp worktree removed" || return 1

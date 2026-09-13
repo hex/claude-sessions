@@ -1883,11 +1883,15 @@ _integrate_in_temp() {  # base_dir wt_dir task sha common from_remote gate...
     # empty one.
     local no_hooks
     no_hooks=$(mktemp -d "${TMPDIR:-/tmp}/cs-nohooks.XXXXXX")
+    # Armed before the add, not after: an add that fails half-way leaves a
+    # directory and a registration behind, and only a _INTEGRATE_TMP the
+    # cleanup can see gets them removed. The cleanup tolerates a path that
+    # was never created and prunes either way.
+    _INTEGRATE_TMP="$tmp"
     if ! git -C "$base_dir" -c core.hooksPath="$no_hooks" worktree add --detach "$tmp" "$B" >/dev/null 2>&1; then
         rmdir "$no_hooks"
         error "git worktree add failed for $tmp"
     fi
-    _INTEGRATE_TMP="$tmp"
 
     local mode
     mode=$(_read_local_state "$wt_dir/.cs/local/state" cs_mode)
@@ -1915,11 +1919,20 @@ _integrate_in_temp() {  # base_dir wt_dir task sha common from_remote gate...
     [ "$merge_status" = 0 ] && M=$(git -C "$tmp" rev-parse HEAD)
     if [ "$merge_status" != 0 ]; then
         rmdir "$no_hooks"
-        local conflicts
+        local conflicts base_branch advice
         conflicts=$(git -C "$tmp" diff --name-only --diff-filter=U 2>/dev/null || true)
+        base_branch=$(git -C "$base_dir" symbolic-ref -q --short HEAD 2>/dev/null || echo HEAD)
+        if [ -n "$from_remote" ]; then
+            # Nothing of the feature's is in this conflict: it is the base's
+            # own commits against what origin carries, so the feature worktree
+            # is the wrong place to fix it.
+            advice="Resolve it in the base (git -C \"$base_dir\" merge origin/$base_branch): the conflict is between $base_dir's local commits and origin's $base_branch, not with the feature. Then re-run /finish $task"
+        else
+            advice="Resolve on the feature branch (git merge $base_branch in $wt_dir), then re-run /finish $task"
+        fi
         error "Merge of $sha conflicts with $base_dir at $B; base untouched. Conflicting paths:
 ${conflicts:-(none reported; see git -C \"$tmp\" status)}
-Resolve on the feature branch (git merge <base branch> in $wt_dir), then re-run /finish $task"
+$advice"
     fi
     # An untracked file in the base colliding with a path the merge touches
     # passes _tree_is_dirty (tracked-only) and the temp merge itself, then
