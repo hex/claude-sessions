@@ -323,7 +323,27 @@ run_test test_prepare_reports_an_open_pr
 run_test test_prepare_calls_two_open_prs_unknown
 run_test test_prepare_calls_a_reused_branch_unknown
 run_test test_prepare_reports_closed_unmerged_as_closed
+# A gh that hangs (a stalled network call, an auth prompt) must not hold the
+# whole ritual open. The ceiling is enforced by killing the child, not by
+# waiting for it.
+test_prepare_gives_up_on_a_gh_that_hangs() {
+    finish_fixture myproj fix-auth > /dev/null
+    mkdir -p "$TEST_TMPDIR/bin"
+    printf '#!/usr/bin/env bash\nexec sleep 12\n' > "$TEST_TMPDIR/bin/gh"
+    chmod +x "$TEST_TMPDIR/bin/gh"
+    local started ended out
+    started=$(date +%s)
+    out=$(PATH="$TEST_TMPDIR/bin:$PATH" CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" \
+        CLAUDE_SESSION_NAME="myproj" bash "$FINISH" prepare fix-auth 2>&1)
+    ended=$(date +%s)
+    assert_eq "unknown" "$(key "$out" pr_state)" "a hung gh is unknown, never none" || return 1
+    assert_output_contains "$out" "pr_reason: gh timed out after 10 s" "names the timeout" || return 1
+    [ "$((ended - started))" -lt 15 ] \
+        || { echo "  FAIL: the lookup must give up at the ceiling; it took $((ended - started))s"; return 1; }
+}
+
 run_test test_prepare_never_reads_a_gh_failure_as_no_pr
+run_test test_prepare_gives_up_on_a_gh_that_hangs
 run_test test_prepare_treats_a_vanished_head_repo_as_unknown
 run_test test_prepare_skips_the_lookup_for_a_non_github_origin
 run_test test_report_after_a_local_integrate_gives_the_retire_line

@@ -41,10 +41,12 @@ github_repo() {  # dir
     printf '%s\n' "$url"
 }
 
-# gh with a 10 s ceiling. perl's alarm exists on every platform cs supports;
-# GNU timeout does not.
+# gh with a 10 s ceiling. perl's alarm and fork exist on every platform cs
+# supports; GNU timeout does not. The alarm has to reach a forked child: a
+# bare `alarm; exec` replaces the perl process, taking the pending alarm's
+# handler with it, and the ceiling never fires. Exits 143 on the kill.
 gh_timed() {
-    perl -e 'alarm 10; exec @ARGV or exit 127' -- gh "$@"
+    perl -e '$p=fork; exec @ARGV or exit 127 unless $p; $SIG{ALRM}=sub{kill TERM,$p}; alarm 10; waitpid $p,0; exit(($?&127)?128+($?&127):$?>>8)' -- gh "$@"
 }
 
 # PR state for a head branch, as pr_* lines. Three shapes only: none, a state
@@ -64,10 +66,18 @@ pr_lookup() {  # base_dir branch
         return 0
     fi
     err=$(mktemp "${TMPDIR:-/tmp}/finish-gh.XXXXXX")
-    if ! json=$(gh_timed pr list --repo "$repo" --head "$2" --state all --limit 100 \
-            --json number,state,url,mergeCommit,mergedAt,baseRefName,headRefOid,headRepositoryOwner,isCrossRepository 2>"$err"); then
+    local gh_status=0
+    json=$(gh_timed pr list --repo "$repo" --head "$2" --state all --limit 100 \
+            --json number,state,url,mergeCommit,mergedAt,baseRefName,headRefOid,headRepositoryOwner,isCrossRepository 2>"$err") \
+        || gh_status=$?
+    if [ "$gh_status" != 0 ]; then
         echo "pr_state: unknown"
-        echo "pr_reason: gh pr list failed: $(head -c 200 "$err" | tr '\n' ' ')"
+        # A killed child says nothing on stderr; the ceiling is the diagnosis.
+        if [ "$gh_status" = 143 ] || [ "$gh_status" = 142 ]; then
+            echo "pr_reason: gh timed out after 10 s"
+        else
+            echo "pr_reason: gh pr list failed: $(head -c 200 "$err" | tr '\n' ' ')"
+        fi
         rm -f "$err"
         return 0
     fi
