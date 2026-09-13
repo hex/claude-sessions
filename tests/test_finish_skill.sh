@@ -53,8 +53,8 @@ test_finish_skill_teaches_the_ritual() {
     assert_file_contains "$SKILL" "temporary detached worktree" "gates run in the temp" || return 1
     assert_file_contains "$SKILL" "pr_state" "reads the PR state keys" || return 1
     assert_file_contains "$SKILL" "unknown" "the unknown PR state exists" || return 1
-    assert_file_contains "$SKILL" "AskUserQuestion" "OPEN/unknown need explicit confirmation" || return 1
-    assert_file_contains "$SKILL" "do NOT run" "squash notice" || return 1
+    assert_file_contains "$SKILL" "Same AskUserQuestion as OPEN" "OPEN/unknown need explicit confirmation" || return 1
+    assert_file_contains "$SKILL" "do NOT run cs <base> --merge <task>" "squash notice" || return 1
     assert_file_contains "$SKILL" "cs <base> --merge <task>" "names the retire verb" || return 1
     assert_file_contains "$SKILL" "removes nothing" "retention promise stated" || return 1
     assert_file_contains "$SKILL" "handoff:" "feature-session hand-off documented" || return 1
@@ -63,7 +63,7 @@ test_finish_skill_teaches_the_ritual() {
 
 test_finish_skill_keeps_the_plain_branch_context() {
     assert_file_contains "$SKILL" "git merge --no-ff" "ordinary feature branches still merge --no-ff" || return 1
-    assert_file_contains "$SKILL" "merged result" "gates run again after a plain-branch merge" || return 1
+    assert_file_contains "$SKILL" "gates again on the merged result" "gates run again after a plain-branch merge" || return 1
 }
 
 test_finish_skill_never_list() {

@@ -86,15 +86,22 @@ commands become `-- sh -c 'first && second'`.
    local integrate, cs makes one merge commit joining the two histories.
    If `pr_head_oid` differs from the captured `sha`, say so: the PR landed
    an older or newer tip than the worktree holds now.
-5. **Report.** Run
+5. **Report.** The entry's own summary line says what happened:
+   `integrated <task> <sha> -> <result>`, `already-integrated <task> <sha>`,
+   or a refusal (a red gate, a conflict, or a base that moved) that leaves
+   the base untouched and names the next command. On a refusal, report that
+   message verbatim and stop; never run `report` against a base the entry
+   never touched.
+
+   Only after an `integrated` or `already-integrated` line, run
    `~/.claude/skills/finish/scripts/finish.sh report <base> <task> <sha>`
    and end with, in this order: what landed (`sha -> base_head`); the
    `not_integrated` count ("N commits on cs/<task> after the captured
    commit are NOT integrated"); the dirt list; the PR line; and the
    `retire:` line verbatim. When `landed: no` after a PR path, the retire
-   line is the **squash notice** — print it exactly; do NOT run
-   `cs <base> --merge <task>` for this task and say why: the branch is not
-   an ancestor of base, so the verb will try to merge it again.
+   line is the **squash notice** — print it exactly; do NOT run cs <base> --merge <task>
+   for this task and say why: the branch is not an ancestor of base, so
+   the verb tries to merge it again.
 
 ## After a green integrate — offers, not actions
 
@@ -110,16 +117,22 @@ commands become `-- sh -c 'first && second'`.
 An ordinary checkout on a non-default branch, not a cs worktree. A clean
 tree is required (`git status --porcelain` empty; offer to commit, stop if
 declined). Preflight gates on the branch; `git checkout <target>`, then
-`git merge --no-ff <branch>` with a message summarising the feature; gates
-again on the merged result; delete the merged branch with `git branch -d`
-only when the post-merge gates are green. Ask when the target is ambiguous.
+`git merge --no-ff <branch>` with a message summarising the feature; run
+gates again on the merged result; delete the merged branch with
+`git branch -d` only when the post-merge gates are green. Ask when the
+target is ambiguous.
 
 ## When a gate fails
 
-Diagnose it — that is why this is a skill and not a script. Find the root
-cause per the project's debugging rules, fix forward on the feature branch,
-and re-run the ritual from the top: the capture takes the new commit. Never
-bypass, skip, or weaken a gate.
+Diagnose it — that is why this is a skill and not a script. In the ritual
+above, the base session has no checkout of the feature branch to fix
+anything in: report the gate's output and stop, and never reproduce or
+patch the failure locally against the base or its temp worktree. The fix
+lands in the feature session, or the user makes it directly; once it
+lands, re-run `/finish` from the top and the new capture picks it up. In
+**Plain branch**, this checkout already holds the branch, so find the root
+cause per the project's debugging rules and fix forward here before
+re-running gates. Never bypass, skip, or weaken a gate.
 
 ## Never
 
