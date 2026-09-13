@@ -34,7 +34,7 @@ teardown() {
     fi
     unset TMUX TMUX_PANE COLORFGBG 2>/dev/null || true
     unset NO_COLOR COLORTERM TERM_PROGRAM FORCE_COLOR CS_SUBAGENT_NOW_MS \
-        CS_SUBAGENT_STATUSLINE_DISABLE CS_STATUSLINE_CTX_WARN CS_STATUSLINE_CTX_CRIT CS_STATUSLINE_CTX_NOTICE 2>/dev/null || true
+        CS_SUBAGENT_STATUSLINE_DISABLE CS_STATUSLINE_CTX_WARN CS_STATUSLINE_CTX_CRIT 2>/dev/null || true
 }
 
 # Run the row renderer with $1 as stdin JSON; prints its stdout.
@@ -241,67 +241,62 @@ test_content_escapes_esc_as_unicode() {
 test_ctx_escalates_to_amber_then_red() {
     export COLORTERM=truecolor
     local fx out c
-    # 110000/200000 = 55% -> past warn (50), below crit (70) -> amber 255;183;77
+    # 110000/200000 = 55% -> past warn (40), below crit (65) -> amber 255;183;77
     fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":110000}]}'
     out=$(run_ssl "$fx"); c=$(row_content "$out" "t1")
     assert_output_contains "$c" "38;2;255;183;77" "55% context renders amber" || return 1
 
-    # 170000/200000 = 85% -> past crit (70) -> red 220;38;38
+    # 170000/200000 = 85% -> past crit (65) -> red 220;38;38
     fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":170000}]}'
     out=$(run_ssl "$fx"); c=$(row_content "$out" "t1")
     assert_output_contains "$c" "38;2;220;38;38" "85% context renders red" || return 1
 }
 
 # The row's crit default is the bar's, so red starts where the rotation nudge
-# does. Only readings either side of the cut point tell 70 apart from 80, and
+# does. Only readings either side of the cut point tell 65 apart from 66, and
 # only an exact multiple of the window keeps jq's floor out of it.
 test_ctx_crit_edge_matches_the_bar() {
     export COLORTERM=truecolor
     local fx out c
-    # 138000/200000 = 69% -> one below crit -> still amber
-    fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":138000}]}'
+    # 128000/200000 = 64% -> one below crit -> still amber
+    fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":128000}]}'
     out=$(run_ssl "$fx"); c=$(row_content "$out" "t1")
-    assert_output_contains "$c" "38;2;255;183;77" "69% context is still amber" || return 1
-    assert_output_not_contains "$c" "38;2;220;38;38" "69% context must not reach red" || return 1
+    assert_output_contains "$c" "38;2;255;183;77" "64% context is still amber" || return 1
+    assert_output_not_contains "$c" "38;2;220;38;38" "64% context must not reach red" || return 1
 
-    # 140000/200000 = 70% -> at crit -> red
-    fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":140000}]}'
+    # 130000/200000 = 65% -> at crit -> red
+    fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":130000}]}'
     out=$(run_ssl "$fx"); c=$(row_content "$out" "t1")
-    assert_output_contains "$c" "38;2;220;38;38" "70% context renders red, as it does on the bar" || return 1
-    assert_output_not_contains "$c" "38;2;255;183;77" "70% context must not stay amber" || return 1
+    assert_output_contains "$c" "38;2;220;38;38" "65% context renders red, as it does on the bar" || return 1
+    assert_output_not_contains "$c" "38;2;255;183;77" "65% context must not stay amber" || return 1
 }
 
-# Amber's cut point is inclusive too, and 50 is the only reading that separates
-# it from 51.
+# Amber's cut point is inclusive too, and 40 is the only reading that separates
+# it from 39.
 test_ctx_warn_edge_is_amber_at_the_threshold() {
     export COLORTERM=truecolor
     local fx out c
-    # 98000/200000 = 49% -> one below warn -> quiet
-    fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":98000}]}'
+    # 78000/200000 = 39% -> one below warn -> quiet
+    fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":78000}]}'
     out=$(run_ssl "$fx"); c=$(row_content "$out" "t1")
-    assert_output_not_contains "$c" "38;2;255;183;77" "49% context must not reach amber" || return 1
+    assert_output_not_contains "$c" "38;2;255;183;77" "39% context must not reach amber" || return 1
 
-    # 100000/200000 = 50% -> at warn -> amber
-    fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":100000}]}'
+    # 80000/200000 = 40% -> at warn -> amber
+    fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":80000}]}'
     out=$(run_ssl "$fx"); c=$(row_content "$out" "t1")
-    assert_output_contains "$c" "38;2;255;183;77" "50% context renders amber" || return 1
+    assert_output_contains "$c" "38;2;255;183;77" "40% context renders amber" || return 1
 }
 
-# A row has no notice band: yellow on the bar pairs with the Stop hook's
-# heads-up about winding this conversation down, and an agent has no rotation
-# to wind toward. Two tiers here, four there, one pair of env vars.
-test_ctx_has_no_notice_band() {
+# A row's crit default is the bar's default, so a reading that is amber on the
+# bar is amber on a row too — the same env vars, the same cut points, just two
+# tiers here where the bar also has none of its own extra band.
+test_ctx_amber_band_matches_the_bar() {
     export COLORTERM=truecolor CS_TERM_THEME=light
     local fx out c
-    # 84000/200000 = 42% -> inside the bar's notice band, below the row's warn
+    # 84000/200000 = 42% -> inside the bar's amber band, and the row's
     fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":84000}]}'
     out=$(run_ssl "$fx"); c=$(row_content "$out" "t1")
-    assert_output_not_contains "$c" "38;2;202;138;4" "42% context must not paint a row yellow" || return 1
-    # Anchored on the gauge glyph: the row's meta taupe is also the description's,
-    # so an unanchored match cannot say which of the two it found. The theme is
-    # pinned because that taupe is derived from the terminal background.
-    assert_output_contains "$c" "128;116;106m◔ ctx 42%" \
-        "42% context keeps the row's quiet meta taupe" || return 1
+    assert_output_contains "$c" "38;2;255;183;77" "42% context paints a row amber" || return 1
 }
 
 # Overrides are environment: a word must take the default rather than switch a
@@ -498,7 +493,7 @@ run_test test_content_escapes_esc_as_unicode
 run_test test_ctx_escalates_to_amber_then_red
 run_test test_ctx_crit_edge_matches_the_bar
 run_test test_ctx_warn_edge_is_amber_at_the_threshold
-run_test test_ctx_has_no_notice_band
+run_test test_ctx_amber_band_matches_the_bar
 run_test test_ctx_threshold_overrides_are_validated
 run_test test_plain_mode_has_no_escape_sequences
 run_test test_narrow_columns_truncates_description_keeps_ctx

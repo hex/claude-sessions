@@ -77,7 +77,7 @@ user-owned `CLAUDE.md` is never touched.
 | `attention` | Status-line attention marker — raised by the `Stop` hook when Claude finishes, cleared on the next prompt. |
 | `presence` | This session's advertised status (`cs -status`): a single line read by `cs -live`. Falls back to the README objective when unset. |
 | `pending-handoff` | Basename of the `.cs/handoffs/` file to rotate into — armed by the `rotate` skill (for `/clear`) or by the `r` answer at the resume prompt. Consumed and cleared by the next SessionStart whose source is `startup` or `clear`; left armed on any other source; disarmed by any other resume-prompt answer. |
-| `rotate-nudged` | Conversation UUID last nudged to rotate by the narrative reminder — keeps the 70%-context nudge to once per conversation. |
+| `rotate-nudged` | Conversation UUID last nudged to rotate by the narrative reminder — keeps the 65%-context nudge to once per conversation. |
 | `disabled` | Opts the directory out of cs's hooks entirely. Present, the hooks decline as if it were not a session, whichever front end opened it. Before hooks resolved a session from the directory, a `claude` started outside `cs` in a session folder was inert; this restores that on request instead of by accident. |
 | `queue/` | The walk-away task queue (`cs -queue`): one file per task, staged in `queue.tmp/` and renamed into place so the drain never reads a torn entry. The drain pops the lexically first file by moving it aside — atomic against a second drain. |
 | `queue.state` | Drain state machine for the queue: `idle`, `armed`, or `draining`. |

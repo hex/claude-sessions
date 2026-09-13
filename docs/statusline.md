@@ -21,7 +21,7 @@ Default order: `logo,session,notes,mail,pane,git,model,ctx,limits,fable`. A bran
 | `pane` | The tmux pane hosting the conversation, `◫ %7` — a target usable verbatim in tmux commands and other chats | `TMUX_PANE` from inherited environment (no fork); requires `TMUX` too, and that this process is genuinely inside that tmux server, so an inherited pane id never renders | Grey; hidden outside tmux |
 | `git` | Branch, ahead/behind arrows, staged `+N` and modified `!N` counts | One `git status --porcelain=v1 -b` call | Bold slate-blue accent `rgb(79,91,140)`, chip text color |
 | `model` | Model display name plus effort level when present | stdin `model.display_name`, `effort.level` | Periwinkle accent (claude's usage-chip purple), white text |
-| `ctx` | Context window usage, `ctx 42%` | stdin `context_window.used_percentage` | Grey; yellow at 40%, amber at 50%, red at 70% (tunable) |
+| `ctx` | Context window usage, `ctx 42%` | stdin `context_window.used_percentage` | Grey; amber at 40%, red at 65% (tunable) |
 | `limits` | 5-hour and weekly rate limit usage as two adjacent blocks, `5h 62% · 2h14m` and `wk 85% · 5d16h`; each block appends the time until its window resets when known, but only once usage is tight — the 5-hour countdown shows at 50% and up, the weekly at 80% and up, so the suffix appears as the window fills rather than while there's headroom. The countdown reads compactly (`45m`, `2h14m`), rolling into days past 24 hours (`5d16h`) | stdin `rate_limits.*.used_percentage`, `rate_limits.five_hour.resets_at`, `rate_limits.seven_day.resets_at` | Grey; each block escalates to amber at 70% and red at 90% on its own value |
 | `fable` | Fable's own weekly usage as a single block, `fable 86% · 1d20h`, rendered only when the active model is Fable. Fable draws on a model-scoped weekly bucket that the plan-wide `5h` and `wk` numbers do not describe, so without this block a Fable session shows two figures for a limit that is not the one about to bite. The countdown appends at 80% and up, like `wk` | `GET /api/oauth/usage`, cached machine-globally (see [Fable usage](#fable-usage)) | Grey; escalates to amber at 70% and red at 90% |
 | `cost` | Session cost, `$1.23` (opt-in; not in the default order) | stdin `cost.total_cost_usd` | Grey |
@@ -144,7 +144,7 @@ The healthy bar carries the identity blocks as bold accents: the session name in
 
 The quiet gauges (ctx, the rate limits, and cost) rest on a surface derived from the terminal's own background — a shade of `CS_TERM_BG_RGB`, darker on a light terminal and lighter on a dark one — so they harmonize with the terminal instead of sitting on a fixed grey. Their text is picked for contrast against that surface: a soft warm-dark tone (a heavily darkened shade of the surface, not a harsh near-black) on a light surface, light text on a dark one. When the terminal background is unknown (no OSC 11 result at launch, or outside truecolor) the gauges fall back to a warm neutral taupe with white text.
 
-Color beyond the identity accents is state: yellow `rgb(202,138,4)` where the context gauge alone marks its notice band, warm amber `rgb(255,183,77)` (cs's warning color) past warn thresholds, red past crit. A glance answers in order: which session, which branch, which model, and is anything on fire.
+Color beyond the identity accents is state: warm amber `rgb(255,183,77)` (cs's warning color) past warn thresholds, red past crit. A glance answers in order: which session, which branch, which model, and is anything on fire.
 
 Adjacent segments join with a faint one-eighth bar (`▏`, U+258F) whenever they resolve to the same rendered color, since a plain color-change divider would vanish between two identical blocks; segments with genuinely different colors abut with no glyph, since the color change is already a clear divider. The sliver is inked in a faint shade of the neighbors' own shared background, so it reads as a discreet tonal step rather than a foreign grey line (a light warm grey is the fallback outside truecolor). This is decided by comparing each segment's *resolved* color, not its name: a `claude_session_color` of `orange` renders to the exact same RGB as the logo's coral under a different name, so a name-only comparison would miss that collision.
 
@@ -161,7 +161,7 @@ Inside tmux, Claude Code mutes its own branding and any truecolor status line to
 ⤷ ✦ Opus 4.8  code-reviewer · Review the diff  ◔ ctx 61%  ◷ 0m18s
 ```
 
-Left to right: a descent glyph marking the row as spawned work, the model chip in the bar's periwinkle, the agent's name (falling back to its `type`), the description, the agent's **own** context-window usage, and time since it started. Model, context, and elapsed are the three columns Claude Code's default row (`name · description · token count`) lacks, and they are what make agents at different tiers distinguishable — a recon agent at ctx 12% and a synthesizer dying at ctx 84% otherwise look identical. The gauge escalates amber/red on the same `CS_STATUSLINE_CTX_WARN`/`CS_STATUSLINE_CTX_CRIT` thresholds the bar uses, and stops there — a row has two tiers where the bar has four. The bar's yellow notice band pairs with the Stop hook's one-time heads-up about winding this conversation down; an agent has no rotation to wind toward, so yellow on a row would be colour with no instruction behind it.
+Left to right: a descent glyph marking the row as spawned work, the model chip in the bar's periwinkle, the agent's name (falling back to its `type`), the description, the agent's **own** context-window usage, and time since it started. Model, context, and elapsed are the three columns Claude Code's default row (`name · description · token count`) lacks, and they are what make agents at different tiers distinguishable — a recon agent at ctx 12% and a synthesizer dying at ctx 84% otherwise look identical. The gauge escalates amber/red on the same `CS_STATUSLINE_CTX_WARN`/`CS_STATUSLINE_CTX_CRIT` thresholds the bar uses, so a row and the bar always agree on where amber and red start.
 
 Rows are null-when-nothing like the bar's segments: no `model` means no chip and no gauge (`contextWindowSize` arrives only once the model is resolved, Claude Code ≥ 2.1.205), a `contextWindowSize` of 0 means no gauge, no `startTime` means no clock. Model ids arrive resolved (`claude-sonnet-5`), not as the display names the main bar receives, and the name is derived from the id rather than looked up: the family is capitalised, numeric parts join with dots (`claude-fable-5-1` → `Fable 5.1`), a trailing word is kept as a stage tag (`-preview`), and an 8-digit build date (after `-` or Vertex's `@`) and a `[1m]` context marker are dropped. A family nobody has listed still resolves (`claude-zephyr-9` → `Zephyr 9`); an id that does not fit the shape renders verbatim — a new model must degrade to ugly, never to invisible.
 
@@ -241,9 +241,8 @@ export CS_SUBAGENT_STATUSLINE_DISABLE=1
 export CS_STATUSLINE_SEGMENTS="session,ctx,git,limits"
 
 # Context thresholds (percent)
-export CS_STATUSLINE_CTX_NOTICE=40
-export CS_STATUSLINE_CTX_WARN=50
-export CS_STATUSLINE_CTX_CRIT=70
+export CS_STATUSLINE_CTX_WARN=40
+export CS_STATUSLINE_CTX_CRIT=65
 
 # Where the machine-global usage cache lives (default $CS_SESSIONS_ROOT/.usage)
 export CS_USAGE_DIR="$HOME/.claude-sessions/.usage"

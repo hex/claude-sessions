@@ -10,7 +10,11 @@ All notable changes to cs are documented here. Release notes are also available 
 - `/finish <feature>` integrates a feature worktree while its conversation stays open. It captures the feature commit, merges base and feature in a temporary detached worktree under the repo's git directory, runs the repo's gates there, and fast-forwards the base onto the result: a red gate, a conflict, or a base that moved during the gates leaves the base exactly as it was. It reports GitHub PR state for the branch (none, open, merged, closed, or unknown with the reason — a `gh` failure is never read as "no PR") and lands a merged PR by its merge commit, so local integrates and remote PRs mix freely. It removes nothing. Retirement stays `cs <base> --merge <feature>`, and after a squash-merged PR the skill says not to run it.
 
 ### Changed
+- The context gauge reads in three states instead of four: neutral below 40%, amber from 40% to 64%, red from 65%. The rotation nudge moves to 65% so its reading and the colour that asks for it agree.
 - `/merge` is retired; `/finish` replaces it. `cs <base> -finish <feature>` and the TUI's Enter on the readiness screen now arm `/finish`, which keeps the worktree. The TUI's ON FINISH plan describes the new shape.
+
+### Removed
+- `CS_STATUSLINE_CTX_NOTICE`, with the yellow notice band it configured.
 
 ### Fixes
 - The autosave hook labels each snapshot with the HEAD it started from, read before the tree is written. A HEAD that moved mid-snapshot was labelled onto the old tree, which is the exact case the label exists to expose at crash recovery. The hook also skips (never waits) while an integrate holds the repo's integrate mutex, and holds that mutex itself for the tree write.
