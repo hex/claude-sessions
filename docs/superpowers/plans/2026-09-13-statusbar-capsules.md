@@ -18,6 +18,8 @@
 4. Effort is its own identity item joined by one space, so it can take secondary ink while the model name is bold primary.
 5. The pulse's bright phase is `brand`, its dim phase `brandshade`. Today's bright phase is `chiptext`, which is removed with the pills.
 6. The tail case `test_columns_fills_the_bar_without_a_measured_bg` (its name lacks the spec's five words) is the sixteenth deletion.
+7. Eight non-tail tests go too, all in Task 2 Step 1: five that pin the hairline and logo-boundary dividers the pills had (`test_thin_bar_between_same_bg`, `test_abut_between_different_bg`, `test_logo_boundary_gets_thin_darker_coral_hairline`, `test_segment_after_logo_divider_drops_redundant_leading_pad`, `test_logo_divider_survives_orange_session_color_collision`), and the three logo-phase tests, replaced by two that pin the same states on the new inks. Decision 10 named only the tail cases; these need Alex's yes.
+8. `_read_session_color` and `_SESSION_COLOR` leave `bin/cs-statusline` with the session fill (no caller remains); the SYNC comment in `lib/40-state.sh` drops its cs-statusline clause.
 
 ## Global Constraints
 
@@ -25,7 +27,7 @@
 - The render hot path forks nothing new: no command substitution, no subprocess in `_render` or any `_seg_*`.
 - The eight session colours in `_sgr` (`red) rgb="220;38;38"` … `cyan)`) are Claude Code's tab palette, KEEP IN SYNC with `_session_color_rgb` in `bin/cs`; `tests/test_statusline.sh::test_tab_color_palette_matches_statusline` greps their exact line shape. Do not rename, reorder or reformat them.
 - The default segment list is spelled in four sites and `test_segment_default_in_sync_across_docs_and_help` pins them equal: `bin/cs-statusline` (`CS_STATUSLINE_SEGMENTS:-…`), `lib/10-help.sh:84`, `docs/configuration.md:60`, `docs/statusline.md:13`. Change all four in the same commit.
-- `assert_file_contains` is a BRE, line-based, case-sensitive; every assert in a test needs `|| return 1` (`run_test` disables errexit).
+- `assert_file_contains`, `assert_output_contains` and `assert_output_not_contains` are `grep -q` (BRE, case-sensitive): a pattern opening with `[` is an unterminated bracket expression and fails on a correct build. Every capsule pin therefore uses the fixed-string helpers `assert_output_contains_f` / `assert_output_not_contains_f` that Task 2 Step 2 defines (`grep -qF`). Every assert in a test needs `|| return 1` (`run_test` disables errexit).
 - Test output must be pristine: no stray stderr from a fixture.
 - No real names, emails or handles in fixtures; `example.com` placeholders only.
 - Never push. Commit on `feat/statusbar-capsules`.
@@ -237,7 +239,8 @@ Expected: rc=0, all cases pass.
 ### Task 2: Capsule renderer, identity and ctx capsules, no tail
 
 **Files:**
-- Modify: `bin/cs-statusline` — `_add` (~line 557), `_seg_logo` through `_seg_ctx`, `_seg_model`, `_seg_git`, `_seg_cost` (~lines 1115–1290), `_render` (~line 1458), removals of `_build_dots`, `_build_wash`, `_build_gradient`, `_lerp_channel` (~lines 1321–1431) and `ICON_LOGO`'s comment if it mentions the badge
+- Modify: `bin/cs-statusline` — `_add` (~line 557), `_seg_logo` through `_seg_ctx`, `_seg_model`, `_seg_git`, `_seg_cost` (~lines 1115–1290), `_render` (~line 1458), removals of `_build_dots`, `_build_wash`, `_build_gradient`, `_lerp_channel` (~lines 1321–1431), `_read_session_color` (~line 1057) and `ICON_LOGO`'s comment if it mentions the badge
+- Modify: `lib/40-state.sh:36-38` — the `_read_local_state` comment's SYNC clause
 - Test: `tests/test_statusline.sh`
 
 **Interfaces:**
@@ -250,7 +253,7 @@ Expected: rc=0, all cases pass.
 
 - [ ] **Step 1: Delete the tail and hairline tests**
 
-Delete these sixteen functions and their `run_test` lines: `test_build_gradient_cell_count_and_endpoints`, `test_build_gradient_noop_on_malformed_target`, `test_full_width_gradient_reaches_columns`, `test_gradient_renders_without_a_measured_bg`, `test_unmeasured_tail_is_a_coverage_wash`, `test_wash_does_not_inherit_the_last_segment_background`, `test_wash_grey_ramps_toward_the_theme`, `test_measured_bg_still_uses_the_colour_fade`, `test_tail_gradient_neutral_regardless_of_last_segment`, `test_narrow_terminal_no_gradient`, `test_no_gradient_without_columns`, `test_columns_fills_the_bar_without_a_measured_bg`, `test_no_gradient_outside_truecolor`, `test_basic_terminal_gets_no_dotted_tail`, `test_malformed_background_falls_through_to_a_tail`, `test_dotted_tail_fills_a_256_bar`, `test_truecolor_keeps_the_gradient_not_dots`. Also delete `test_thin_bar_between_same_bg`, `test_abut_between_different_bg`, `test_logo_boundary_gets_thin_darker_coral_hairline`, `test_segment_after_logo_divider_drops_redundant_leading_pad`, `test_logo_divider_survives_orange_session_color_collision` (hairline and logo-boundary behaviour, gone with the pills). Alex approved the tail deletions (Decision 10); the five hairline cases follow Decision 9. Any other test whose name contains `gradient`, `wash`, `dots`, `dotted`, `tail`, `hairline` or `divider` goes too — grep for them and list what you deleted in the commit body.
+Delete these sixteen functions and their `run_test` lines: `test_build_gradient_cell_count_and_endpoints`, `test_build_gradient_noop_on_malformed_target`, `test_full_width_gradient_reaches_columns`, `test_gradient_renders_without_a_measured_bg`, `test_unmeasured_tail_is_a_coverage_wash`, `test_wash_does_not_inherit_the_last_segment_background`, `test_wash_grey_ramps_toward_the_theme`, `test_measured_bg_still_uses_the_colour_fade`, `test_tail_gradient_neutral_regardless_of_last_segment`, `test_narrow_terminal_no_gradient`, `test_no_gradient_without_columns`, `test_columns_fills_the_bar_without_a_measured_bg`, `test_no_gradient_outside_truecolor`, `test_basic_terminal_gets_no_dotted_tail`, `test_malformed_background_falls_through_to_a_tail`, `test_dotted_tail_fills_a_256_bar`, `test_truecolor_keeps_the_gradient_not_dots`. Also delete `test_thin_bar_between_same_bg`, `test_abut_between_different_bg`, `test_logo_boundary_gets_thin_darker_coral_hairline`, `test_segment_after_logo_divider_drops_redundant_leading_pad`, `test_logo_divider_survives_orange_session_color_collision` (hairline and logo-boundary behaviour, gone with the pills), and `test_logo_pulses_bright_phase_with_attention_marker`, `test_logo_pulses_dim_phase_with_attention_marker`, `test_logo_steady_without_attention_marker` (superseded by `test_logo_pulse_alternates_brand_and_brandshade` and `test_logo_is_brand_ink_inside_identity` in Step 2, which pin the same three states on the new inks). Alex approved the tail deletions (Decision 10); the other eight are Departure 7. Any other test whose name contains `gradient`, `wash`, `dots`, `dotted`, `tail`, `hairline` or `divider` goes too — grep for them and list what you deleted in the commit body.
 
 - [ ] **Step 2: Write the failing render tests**
 
@@ -263,6 +266,20 @@ Append above the `run_test` block:
 
 CAPL=$'\xee\x82\xb6'   # U+E0B6 rounded left cap
 CAPR=$'\xee\x82\xb4'   # U+E0B4 rounded right cap
+ESC_=$'\033'
+
+# Fixed-string output asserts: the capsule pins open with `[`, which the
+# grep-based helpers in test_lib.sh read as a bracket expression.
+assert_output_contains_f() {
+    grep -qF -- "$2" <<< "$1" || {
+        echo "  FAIL: ${3:-output should contain '$2'}"
+        echo "    output: $(head -3 <<< "$1")"
+        return 1
+    }
+}
+assert_output_not_contains_f() {
+    ! grep -qF -- "$2" <<< "$1" || { echo "  FAIL: ${3:-output should not contain '$2'}"; return 1; }
+}
 
 test_plain_joins_identity_with_dots_and_capsules_with_gt() {
     export NO_COLOR=1
@@ -287,15 +304,15 @@ test_identity_is_one_capsule_on_the_surface() {
     json=$(jq -nc --arg dir "$work" '{session_name:"s", model:{display_name:"Opus"}, workspace:{current_dir:$dir}, context_window:{used_percentage:8}}')
     local out; out=$(run_sl "$json")
     # One left cap opens identity, inked in the surface on the default bg.
-    assert_output_contains "$out" "[49;38;2;227;221;204m${CAPL}" "left cap is surface ink on the terminal bg" || return 1
+    assert_output_contains_f "$out" "[49;38;2;227;221;204m${CAPL}" "left cap is surface ink on the terminal bg" || return 1
     # Session and branch sit on the same fill; neither has a fill of its own.
-    assert_output_contains "$out" "48;2;227;221;204;38;2;79;77;71;1ms" "session is bold ink on the surface" || return 1
-    assert_output_contains "$out" "48;2;227;221;204;38;2;79;77;71;1m⎇ main +1!1" "branch is bold ink on the same surface" || return 1
-    assert_output_not_contains "$out" "48;2;79;91;140" "no slate fill" || return 1
-    assert_output_not_contains "$out" "48;2;138;134;236" "no periwinkle fill" || return 1
-    assert_output_not_contains "$out" "48;2;8;145;178" "no session-colour fill" || return 1
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;79;77;71;1ms" "session is bold ink on the surface" || return 1
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;79;77;71;1m⎇ main +1!1" "branch is bold ink on the same surface" || return 1
+    assert_output_not_contains_f "$out" "48;2;79;91;140" "no slate fill" || return 1
+    assert_output_not_contains_f "$out" "48;2;138;134;236" "no periwinkle fill" || return 1
+    assert_output_not_contains_f "$out" "48;2;8;145;178" "no session-colour fill" || return 1
     # Items join with a secondary-ink dot inside the capsule.
-    assert_output_contains "$out" "48;2;227;221;204;38;2;119;117;110;22m  ·  " "dot joiner in ink2" || return 1
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;119;117;110;22m  ·  " "dot joiner in ink2" || return 1
     # Exactly one identity capsule: one left cap before ctx's, two in total.
     local caps; caps=$(printf '%s' "$out" | grep -o "$CAPL" | wc -l | tr -d ' ')
     assert_eq "2" "$caps" "identity and ctx are the only two capsules" || return 1
@@ -308,9 +325,9 @@ test_capsule_gap_two_cells_after_identity_one_after_gauges() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8},"cost":{"total_cost_usd":1.5}}'
     local out; out=$(run_sl "$json")
     local esc=$'\033'
-    assert_output_contains "$out" "${CAPR}${esc}[0m  ${esc}[49;38;2;227;221;204m${CAPL}" \
+    assert_output_contains_f "$out" "${CAPR}${esc}[0m  ${esc}[49;38;2;227;221;204m${CAPL}" \
         "two default-bg cells between identity and ctx" || return 1
-    assert_output_contains "$out" "8%${esc}[48;2;227;221;204m ${esc}[49;38;2;227;221;204m${CAPR}${esc}[0m ${esc}[49;38;2;227;221;204m${CAPL}" \
+    assert_output_contains_f "$out" "8%${esc}[48;2;227;221;204m ${esc}[49;38;2;227;221;204m${CAPR}${esc}[0m ${esc}[49;38;2;227;221;204m${CAPL}" \
         "one cell between ctx and cost" || return 1
 }
 
@@ -320,9 +337,9 @@ test_caps_off_gives_square_chips() {
     export CS_STATUSLINE_CAPS=0
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8}}'
     local out; out=$(run_sl "$json")
-    assert_output_not_contains "$out" "$CAPL" "no left cap glyph" || return 1
-    assert_output_not_contains "$out" "$CAPR" "no right cap glyph" || return 1
-    assert_output_contains "$out" "[48;2;227;221;204m ${ESC_}[48;2;227;221;204;38;2;79;77;71;1ms" \
+    assert_output_not_contains_f "$out" "$CAPL" "no left cap glyph" || return 1
+    assert_output_not_contains_f "$out" "$CAPR" "no right cap glyph" || return 1
+    assert_output_contains_f "$out" "[48;2;227;221;204m ${ESC_}[48;2;227;221;204;38;2;79;77;71;1ms" \
         "the chip opens with a fill space, then the bold session name" || return 1
 }
 
@@ -338,8 +355,8 @@ test_line_ends_at_the_last_cap_regardless_of_columns() {
         *"${CAPR}"$'\033[0m') ;;
         *) echo "    line must end with the right cap and a reset"; return 1 ;;
     esac
-    assert_output_not_contains "$wide" "░" "no coverage wash" || return 1
-    assert_output_not_contains "$wide" "·  ·" "no dotted tail" || return 1
+    assert_output_not_contains_f "$wide" "░" "no coverage wash" || return 1
+    assert_output_not_contains_f "$wide" "·  ·" "no dotted tail" || return 1
 }
 
 test_ctx_amber_is_ink_on_the_surface() {
@@ -347,10 +364,10 @@ test_ctx_amber_is_ink_on_the_surface() {
     export CS_TERM_BG_RGB="253;246;227"
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":42}}'
     local out; out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;227;221;204;38;2;180;83;9;22m42%" "the number is amber ink" || return 1
-    assert_output_not_contains "$out" "48;2;255;183;77" "no amber fill anywhere" || return 1
-    assert_output_not_contains "$out" "48;2;180;83;9" "amber never becomes a fill" || return 1
-    assert_output_contains "$out" "38;2;119;117;110;22m◔ ctx" "the label stays secondary ink" || return 1
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;180;83;9;22m42%" "the number is amber ink" || return 1
+    assert_output_not_contains_f "$out" "48;2;255;183;77" "no amber fill anywhere" || return 1
+    assert_output_not_contains_f "$out" "48;2;180;83;9" "amber never becomes a fill" || return 1
+    assert_output_contains_f "$out" "38;2;119;117;110;22m◔ ctx" "the label stays secondary ink" || return 1
 }
 
 test_ctx_crit_inverts_only_its_capsule() {
@@ -358,11 +375,11 @@ test_ctx_crit_inverts_only_its_capsule() {
     export CS_TERM_BG_RGB="253;246;227"
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":71}}'
     local out; out=$(run_sl "$json")
-    assert_output_contains "$out" "[49;38;2;215;0;21m${CAPL}" "ctx capsule's caps take the crit fill" || return 1
-    assert_output_contains "$out" "48;2;215;0;21;38;2;255;255;255;1m◔ ctx" "label inverts to critink bold" || return 1
-    assert_output_contains "$out" "48;2;215;0;21;38;2;255;255;255;1m71%" "number inverts too" || return 1
-    assert_output_contains "$out" "48;2;227;221;204;38;2;79;77;71;1ms" "identity stays on the surface" || return 1
-    assert_output_not_contains "$out" "48;2;220;38;38" "the session palette red is not the crit fill" || return 1
+    assert_output_contains_f "$out" "[49;38;2;215;0;21m${CAPL}" "ctx capsule's caps take the crit fill" || return 1
+    assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◔ ctx" "label inverts to critink bold" || return 1
+    assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m71%" "number inverts too" || return 1
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;79;77;71;1ms" "identity stays on the surface" || return 1
+    assert_output_not_contains_f "$out" "48;2;220;38;38" "the session palette red is not the crit fill" || return 1
 }
 
 test_logo_is_brand_ink_inside_identity() {
@@ -370,9 +387,9 @@ test_logo_is_brand_ink_inside_identity() {
     export CS_TERM_BG_RGB="253;246;227"
     local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
     local out; out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;227;221;204;38;2;217;119;87;1m✳" "the mark is coral ink on the surface" || return 1
-    assert_output_not_contains "$out" "48;2;217;119;87" "no coral fill" || return 1
-    assert_output_contains "$out" "✳${ESC_}[48;2;227;221;204m ${ESC_}[48;2;227;221;204;38;2;79;77;71;1ms" \
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;217;119;87;1m✳" "the mark is coral ink on the surface" || return 1
+    assert_output_not_contains_f "$out" "48;2;217;119;87" "no coral fill" || return 1
+    assert_output_contains_f "$out" "✳${ESC_}[48;2;227;221;204m ${ESC_}[48;2;227;221;204;38;2;79;77;71;1ms" \
         "one fill space between the mark and the session name" || return 1
 }
 
@@ -387,8 +404,8 @@ test_logo_pulse_alternates_brand_and_brandshade() {
     local even odd
     even=$(CS_STATUSLINE_NOW=1000 run_sl "$json")
     odd=$(CS_STATUSLINE_NOW=1001 run_sl "$json")
-    assert_output_contains "$even" "38;2;217;119;87;1m✳" "even second: brand" || return 1
-    assert_output_contains "$odd"  "38;2;184;101;74;1m✳" "odd second: brandshade" || return 1
+    assert_output_contains_f "$even" "38;2;217;119;87;1m✳" "even second: brand" || return 1
+    assert_output_contains_f "$odd"  "38;2;184;101;74;1m✳" "odd second: brandshade" || return 1
 }
 
 test_effort_is_secondary_ink_after_the_model() {
@@ -396,8 +413,8 @@ test_effort_is_secondary_ink_after_the_model() {
     export CS_TERM_BG_RGB="253;246;227"
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"model":{"display_name":"Opus"},"effort":{"level":"high"}}'
     local out; out=$(run_sl "$json")
-    assert_output_contains "$out" "38;2;79;77;71;1m✦ Opus" "model name bold primary" || return 1
-    assert_output_contains "$out" "✦ Opus${ESC_}[48;2;227;221;204m ${ESC_}[48;2;227;221;204;38;2;119;117;110;22mhigh" \
+    assert_output_contains_f "$out" "38;2;79;77;71;1m✦ Opus" "model name bold primary" || return 1
+    assert_output_contains_f "$out" "✦ Opus${ESC_}[48;2;227;221;204m ${ESC_}[48;2;227;221;204;38;2;119;117;110;22mhigh" \
         "effort one space after, secondary, regular" || return 1
 }
 
@@ -412,14 +429,14 @@ test_notes_and_mail_are_amber_ink_after_the_session() {
     printf '{}' > "$CS_SESSIONS_ROOT/qsess/.cs/local/mail/new/1.json"
     local json='{"session_name":"qsess","workspace":{"current_dir":"/none"}}'
     local out; out=$(run_sl "$json")
-    assert_output_contains "$out" "qsess${ESC_}[48;2;227;221;204m  ${ESC_}[48;2;227;221;204;38;2;180;83;9;22m▤ 2" \
+    assert_output_contains_f "$out" "qsess${ESC_}[48;2;227;221;204m  ${ESC_}[48;2;227;221;204;38;2;180;83;9;22m▤ 2" \
         "notes: two fill spaces then amber ink" || return 1
-    assert_output_contains "$out" "38;2;180;83;9;22m✉ 1" "mail in amber ink" || return 1
-    assert_output_not_contains "$out" "48;2;255;183;77" "no amber fill" || return 1
+    assert_output_contains_f "$out" "38;2;180;83;9;22m✉ 1" "mail in amber ink" || return 1
+    assert_output_not_contains_f "$out" "48;2;255;183;77" "no amber fill" || return 1
 }
 ```
 
-Add `ESC_=$'\033'` next to the `CAPL`/`CAPR` definitions. Add the `run_test` lines for all eleven.
+Add the `run_test` lines for all eleven.
 
 - [ ] **Step 3: Run and watch them fail**
 
@@ -664,7 +681,7 @@ _render() {
 }
 ```
 
-Delete `_build_dots`, `_build_wash`, `_build_gradient`, `_lerp_channel` and their comment blocks. Keep `_display_width` (the agent rows' `_truncate` uses it), `_parse_rgb_triplet`, `_luminance`, `_bg_shade`. Delete the `hairline`, `chiptext`, `periwinkle`, `slate`, `black` and `brandshade`-comment-only lines from all three `_sgr` arms EXCEPT `brandshade` itself (the pulse uses it); leave the eight session-palette lines and their KEEP IN SYNC comment exactly as they are. Grep the file for `_SEG_BG`, `boldattention`, `chiptext`, `hairline`, `logosepfg`, `_GRADIENT`, `_WASH`, `_DOTS`, `COLUMNS` and remove every remaining reference.
+Delete `_build_dots`, `_build_wash`, `_build_gradient`, `_lerp_channel` and their comment blocks. Keep `_display_width` (the agent rows' `_truncate` uses it), `_parse_rgb_triplet`, `_luminance`, `_bg_shade`. Delete the `hairline`, `chiptext`, `periwinkle`, `slate`, `black` and `brandshade`-comment-only lines from all three `_sgr` arms EXCEPT `brandshade` itself (the pulse uses it); leave the eight session-palette lines and their KEEP IN SYNC comment exactly as they are. Delete `_read_session_color` and its comment (no caller remains once `_seg_session` stops painting the session colour). In `lib/40-state.sh` change the comment sentence `KEEP THE FORMAT IN SYNC WITH bin/cs-statusline's _read_session_color (a pure-bash copy on the render hot path) and hooks/session-start.sh's local_state_set.` to `KEEP THE FORMAT IN SYNC WITH hooks/session-start.sh's local_state_set.` Grep the file for `_SEG_BG`, `boldattention`, `chiptext`, `hairline`, `logosepfg`, `_GRADIENT`, `_WASH`, `_DOTS`, `_SESSION_COLOR`, `COLUMNS` and remove every remaining reference.
 
 - [ ] **Step 7: Run the whole suite and rewrite the old pins**
 
@@ -674,9 +691,9 @@ The eleven new cases pass. Every remaining failure is an old pin; rewrite each b
 
 | Old pin | New assert |
 |---|---|
-| `48;2;<session rgb>` or `48;2;79;91;140` or `48;2;138;134;236` (a fill on session/git/model) | `48;2;227;221;204;38;2;79;77;71;1m<text>` when the test exports `CS_TERM_BG_RGB="253;246;227"` (add that export); otherwise assert the item text is present and `assert_output_not_contains` the old fill |
+| `48;2;<session rgb>` or `48;2;79;91;140` or `48;2;138;134;236` (a fill on session/git/model) | `48;2;227;221;204;38;2;79;77;71;1m<text>` when the test exports `CS_TERM_BG_RGB="253;246;227"` (add that export); otherwise assert the item text is present and `assert_output_not_contains_f` the old fill |
 | `240;242;255` (chiptext) | `38;2;79;77;71` on a light surface |
-| `255;183;77` as `48;2;…` (amber fill) | `38;2;180;83;9` on the number, plus `assert_output_not_contains "48;2;255;183;77"` |
+| `255;183;77` as `48;2;…` (amber fill) | `38;2;180;83;9` on the number, plus `assert_output_not_contains_f "48;2;255;183;77"` |
 | `220;38;38` as `48;2;…` on a gauge (red fill) | `48;2;215;0;21` and `38;2;255;255;255;1m` on that capsule's items |
 | `128;120;110` / `140;132;122` (unmeasured surface) | unchanged when the test has no `CS_TERM_BG_RGB`; the fill is still the taupe |
 | `▏` or `hairline` | delete the assertion (the test should already be gone) |
@@ -684,7 +701,7 @@ The eleven new cases pass. Every remaining failure is an old pin; rewrite each b
 | a plain full-line `assert_eq` with ` > ` between identity items | ` · ` between identity items, ` > ` before `◔ ctx`; healthy limits stay visible until Task 3, so keep ` > ◷ 5h 23% > ◑ wk 41%` in this task |
 | `test_no_powerline_arrow` | keep as is: it pins U+E0B0/U+E0B1, which the caps are not |
 | `test_segment_icons_are_unicode` | keep; if it asserts the badge, assert the mark instead |
-| `test_logo_badge_is_brand_coral` | rewrite to assert `38;2;217;119;87;1m✳` and `assert_output_not_contains "48;2;217;119;87"` |
+| `test_logo_badge_is_brand_coral` | rewrite to assert `38;2;217;119;87;1m✳` and `assert_output_not_contains_f "48;2;217;119;87"` |
 | `test_two_accents_default`, `test_git_branch_bold_slate_accent` | rename to `test_identity_items_are_bold_ink` and `test_git_branch_is_bold_ink_no_fill`; assert per row one |
 
 Do not delete any test other than the ones Step 1 named. If a pin cannot be mapped by the table, stop and report it rather than deleting it.
@@ -704,7 +721,7 @@ Expected: PARSE_OK; one line that, in the terminal, shows a rounded capsule `✳
 - [ ] **Step 9: Commit**
 
 ```bash
-git add bin/cs-statusline tests/test_statusline.sh
+git add bin/cs-statusline lib/40-state.sh tests/test_statusline.sh
 git commit -m "feat(statusline): capsules — one identity capsule, ctx capsule, caps, no tail" \
   -m "Deleted tail and hairline tests: <list from Step 1>."
 ```
@@ -749,11 +766,11 @@ test_limits_hot_window_is_amber_ink_then_crit_capsule() {
     export CS_TERM_BG_RGB="253;246;227"
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":75},"seven_day":{"used_percentage":12}}}'
     local out; out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;227;221;204;38;2;180;83;9;22m75%" "5h 75 is amber ink on the surface" || return 1
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;180;83;9;22m75%" "5h 75 is amber ink on the surface" || return 1
     json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":91},"seven_day":{"used_percentage":12}}}'
     out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;215;0;21;38;2;255;255;255;1m◷ 5h" "5h 91 inverts its capsule" || return 1
-    assert_output_contains "$out" "48;2;227;221;204;38;2;79;77;71;1ms" "identity is untouched" || return 1
+    assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◷ 5h" "5h 91 inverts its capsule" || return 1
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;79;77;71;1ms" "identity is untouched" || return 1
 }
 
 test_limits_three_hot_show_top_two_descending() {
@@ -761,16 +778,16 @@ test_limits_three_hot_show_top_two_descending() {
     seed_usage_cache org-abc 85 "2026-08-29T03:59:59Z" 1787816000 1787816300
     local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":72},"seven_day":{"used_percentage":95}}}'
     local out; out=$(CS_STATUSLINE_NOW=1787816100 run_sl "$json")
-    assert_output_contains "$out" "◑ wk 95% > ✧ fable 85%" "wk then fable, highest first" || return 1
-    assert_output_not_contains "$out" "5h" "the third window stays hidden" || return 1
+    assert_output_contains_f "$out" "◑ wk 95% > ✧ fable 85%" "wk then fable, highest first" || return 1
+    assert_output_not_contains_f "$out" "5h" "the third window stays hidden" || return 1
 }
 
 test_limits_countdown_rules_survive_gating() {
     export NO_COLOR=1
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":72,"resets_at":1787816200},"seven_day":{"used_percentage":72,"resets_at":1787816200}}}'
     local out; out=$(CS_STATUSLINE_NOW=1787816100 run_sl "$json")
-    assert_output_contains "$out" "◷ 5h 72% · 1m" "5h shows its countdown once visible" || return 1
-    assert_output_not_contains "$out" "wk 72% ·" "wk withholds the countdown below 80" || return 1
+    assert_output_contains_f "$out" "◷ 5h 72% · 1m" "5h shows its countdown once visible" || return 1
+    assert_output_not_contains_f "$out" "wk 72% ·" "wk withholds the countdown below 80" || return 1
 }
 
 test_fable_folds_into_limits_and_keeps_polling_while_hidden() {
@@ -778,7 +795,7 @@ test_fable_folds_into_limits_and_keeps_polling_while_hidden() {
     seed_usage_cache org-abc 25 "2026-08-29T03:59:59Z" 1787816000 1787816300
     local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"}}'
     local out; out=$(CS_STATUSLINE_NOW=1787816100 run_sl "$json")
-    assert_output_not_contains "$out" "fable" "fable at 25 is hidden" || return 1
+    assert_output_not_contains_f "$out" "fable 25%" "fable at 25 is hidden" || return 1
     # The read still happens: with the cache past next_poll_at and refresh
     # allowed, the segment kicks the refresher. Prove it by the kick's marker.
     _load_sl_functions
@@ -814,7 +831,7 @@ test_pane_off_by_default_and_rendered_when_named() {
     export TMUX="/tmp/tmux-1000/default,12345,0"
     export TMUX_PANE="%7"
     local out; out=$(run_sl "$FIXTURE_DOCS")
-    assert_output_not_contains "$out" "◫" "pane is not in the default order" || return 1
+    assert_output_not_contains_f "$out" "◫" "pane is not in the default order" || return 1
     out=$(CS_STATUSLINE_SEGMENTS="session,pane,ctx" run_sl "$FIXTURE_DOCS")
     assert_eq "my-session ◫ 7 > ◔ ctx 8%" "$out" "named: the pane number without its %, inside identity" || return 1
 }
@@ -1095,5 +1112,7 @@ Hand back: suite count and rc, the doctor lines, the three renders, and every de
 **Spec coverage.** Layout and states → Task 2 (render, gaps, caps, crit inversion) and Task 3 (hot limits). Segments table → Task 2 (logo, session, notes, mail, pane, git, model, ctx, cost) and Task 3 (limits, fable, default order, names). Colour table → Task 1. Render model → Task 2. Consumers → Tasks 1 (agent rows), 3 (help, sync), 4 (docs, README, changelog), 5 (other suites, install). Out of scope → none planned. Commits → Tasks 2, 3, 4 map to the spec's three; Task 1 is split out so the token change lands green on its own.
 
 **Placeholders.** None: every code step carries the code; the pin-rewrite table in Task 2 Step 7 names the replacement for each class, and instructs a stop rather than a deletion when a pin has no row.
+
+**Staged.** Task 2's `_add`, `_invert` and `_render` blocks were run as written with a stub `_sgr` returning the light-theme values; the bytes matched the gap, logo, crit-inversion and plain-mode assertions exactly (surface `227;221;204` measured through `_bg_shade`, `1m` and `5d16h` measured through `_fmt_rest`).
 
 **Type consistency.** `_add TEXT GROUP INK WEIGHT JOIN` is used with the same positional shape in Tasks 2 and 3; `_invert GROUP` likewise; `_thresh_color` emits `crit`/`amber`/healthy in Task 1 and every later caller tests `[ "$_COLOR" = "crit" ]`; group names `identity`, `ctx`, `lim-5h`, `lim-wk`, `lim-fable`, `cost` are spelled the same in code and tests; `CAPL`/`CAPR`/`ESC_` are defined once in the suite before the tests that use them.
