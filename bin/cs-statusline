@@ -1240,9 +1240,9 @@ _seg_git() {
 }
 
 # One rate-limit capsule: label in secondary ink, the number in the threshold
-# colour, crit inverting the capsule. $4 is the usage floor above which the
-# reset countdown is appended (5h at 50, the seven-day windows at 80: the
-# coarse windows only make time-to-reset actionable near exhaustion).
+# colour, crit inverting the capsule. $4 is the usage floor at or above which
+# the reset countdown is appended (5h at 70, the reveal; the seven-day windows
+# at 80: the coarse windows only make time-to-reset actionable near exhaustion).
 _limits_render() {
     local name="$1" pct="$2" reset="$3" gate="$4" icon="$5"
     _thresh_color "$pct" 70 90

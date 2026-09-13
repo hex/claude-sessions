@@ -23,12 +23,12 @@ Default order: `logo,session,notes,mail,git,model,ctx,limits`. One capsule holds
 | `model` | identity | display name in primary ink bold, effort in secondary ink regular | — | no model on stdin | stdin `model.display_name`, `effort.level` |
 | `ctx` | ctx | `◔ ctx N%`, secondary ink | amber ink on the number at 40; crit inversion at 65 (`CS_STATUSLINE_CTX_WARN`/`_CRIT` as today) | no `context_window` on stdin | stdin `context_window.used_percentage` |
 | `limits` | limits | hidden | one capsule per hot window: `5h N% · 2h14m`, `wk N% · 5d16h`, `fable N% · 18h`; amber ink at 70, crit inversion at 90 | every window below 70 | stdin `rate_limits.*.used_percentage`, `rate_limits.five_hour.resets_at`, `rate_limits.seven_day.resets_at`, plus the usage cache when the model is Fable |
-| `fable` | limits | accepted as a name; adds nothing `limits` does not already cover | — | — | `GET /api/oauth/usage`, cached machine-globally (see [Fable usage](#fable-usage)) |
+| `fable` | limits | accepted as a name: the Fable window alone when `limits` is not named; a no-op beside `limits` | — | below 70, like every window | `GET /api/oauth/usage`, cached machine-globally (see [Fable usage](#fable-usage)) |
 | `cost` | cost | `$N.NN`, secondary ink, its own capsule after limits; only when named | — | not named, or no cost on stdin | stdin `cost.total_cost_usd` |
 
 Every segment is null-when-nothing: missing data means the segment and its separator simply do not render. Outside a cs session, `session` falls back to the directory name. `pane`, `fable` and `cost` ship but stay off the default order — name them in `CS_STATUSLINE_SEGMENTS` to turn them on.
 
-The limits group folds the three windows into one rule. The Fable window is model-scoped and lives only in the usage cache (see [Fable usage](#fable-usage)); it joins the candidate list only on a Fable session, and its refresh kick keeps its existing gate: the cache is read and the refresher detached whether or not the capsule ends up shown, so a hidden Fable window is still polled at its 600-second floor. Countdown rules stay as they were: 5h at 50 and up (always true once shown), wk and fable at 80 and up.
+The limits group folds the three windows into one rule. The Fable window is model-scoped and lives only in the usage cache (see [Fable usage](#fable-usage)); it joins the candidate list only on a Fable session, and its refresh kick keeps its existing gate: the cache is read and the refresher detached whether or not the capsule ends up shown, so a hidden Fable window is still polled at its 600-second floor. The countdown appears once a window is tight: for 5h whenever it shows (its reveal and its countdown gate are both 70), for wk and fable at 80 and up.
 
 The two files the render writes, `.cs/local/context-pct` and `.cs/local/limits`, are produced in `_parse_stdin` before any segment runs and stay untouched by the gating above. Hiding a capsule never hides a heartbeat.
 
@@ -118,7 +118,7 @@ model costs the budget nothing.
 
 ### When the chip does not render
 
-The chip is null-when-nothing, and deliberately strict about it: no cache, no
+The chip is null-when-nothing, and deliberately strict about it: usage below 70%, no cache, no
 Fable window on the account, no `jq` or `curl`, no readable credential, or a
 reading older than 1800 seconds. Identity is structural rather than checked: a
 record is addressed by account, so a reading can never be found under the wrong
@@ -157,7 +157,7 @@ Every capsule fill is `surface`, a shade of the terminal's own background so the
 
 `amber` is ink, painted straight onto the capsule surface rather than as a fill of its own — a fill chosen for black text on it fails contrast once it is the text color instead, which is why hot numbers use this separate ink token. The session palette (`red`, `blue`, … `orange`) stays in `_sgr` untouched: it is Claude Code's shared eight-color tab palette, KEEP IN SYNC with `_session_color_rgb` in `bin/cs`, and the bar no longer draws it. `crit` is its own token so the gauge's red never depends on that palette's `red`.
 
-Removed from the bar: `hairline`, `chiptext` (the mark's bright phase now uses `ink` on a light surface and `white` on a dark one), `slate`, `black`, and `amber` as a fill. `periwinkle` stays in `_sgr`, but only the [subagent rows'](#subagent-rows) model chip still paints with it — the bar itself no longer does. Those rows otherwise paint with `rowname`, `rowmeta`, `amber` and `crit` through `_paint` → `_sgr`, the same `amber`/`crit` tokens the bar uses, so a row's hot ctx and the bar always agree on the two hot colors.
+Removed from the bar: `hairline`, `chiptext` (the mark's bright phase uses `brand` instead), `slate`, `black`, and `amber` as a fill. `periwinkle` stays in `_sgr`, but only the [subagent rows'](#subagent-rows) model chip still paints with it — the bar itself no longer does. Those rows otherwise paint with `rowname`, `rowmeta`, `amber` and `crit` through `_paint` → `_sgr`, the same `amber`/`crit` tokens the bar uses, so a row's hot ctx and the bar always agree on the two hot colors.
 
 Capsule ends are the Powerline glyphs U+E0B6 and U+E0B4, drawn as fill-colored ink on the terminal's default background so they read as rounded ends. They need a font that carries them (any Nerd Font does); cs cannot probe a font, so `CS_STATUSLINE_CAPS=0` drops the glyphs and the capsules become square chips with the same spacing. Caps render at every color level — the cap's ink is the capsule's fill, which 256-color and basic terminals both have — and never in plain mode.
 
@@ -176,7 +176,7 @@ Left to right: a descent glyph marking the row as spawned work, the model chip i
 
 Rows are null-when-nothing like the bar's segments: no `model` means no chip and no gauge (`contextWindowSize` arrives only once the model is resolved, Claude Code ≥ 2.1.205), a `contextWindowSize` of 0 means no gauge, no `startTime` means no clock. Model ids arrive resolved (`claude-sonnet-5`), not as the display names the main bar receives, and the name is derived from the id rather than looked up: the family is capitalised, numeric parts join with dots (`claude-fable-5-1` → `Fable 5.1`), a trailing word is kept as a stage tag (`-preview`), and an 8-digit build date (after `-` or Vertex's `@`) and a `[1m]` context marker are dropped. A family nobody has listed still resolves (`claude-zephyr-9` → `Zephyr 9`); an id that does not fit the shape renders verbatim — a new model must degrade to ugly, never to invisible.
 
-A row never exceeds the payload's `columns`, because one that does wraps the panel. Parts are shed in order of what they are worth: first the description's tail, cut with a single ellipsis; then the description entirely, once its remainder falls under a small floor; then elapsed. The ctx gauge outranks all of them, because a runaway agent's percentage is the thing worth seeing. When even the core — glyph, model chip, name, gauge — will not fit, the row is not emitted at all, and Claude Code's default rendering stands; a default row beats a wrapped one. Unlike the bar, rows are not self-backgrounded pills: they sit on the terminal background inside Claude Code's own panel, so only foreground colors are used.
+A row never exceeds the payload's `columns`, because one that does wraps the panel. Parts are shed in order of what they are worth: first the description's tail, cut with a single ellipsis; then the description entirely, once its remainder falls under a small floor; then elapsed. The ctx gauge outranks all of them, because a runaway agent's percentage is the thing worth seeing. When even the core — glyph, model chip, name, gauge — will not fit, the row is not emitted at all, and Claude Code's default rendering stands; a default row beats a wrapped one. Unlike the bar, rows are not self-backgrounded capsules: they sit on the terminal background inside Claude Code's own panel, so only foreground colors are used.
 
 Tabs, newlines, and carriage returns in a name or description are collapsed to spaces before the fields are packed. The pack is `jq`'s `@tsv`, which would otherwise encode them as the two-character sequences `\t` and `\n` — a transport detail that would then render literally in the panel. `@tsv` also doubles a backslash, which the reader undoes, so a description containing one keeps a single backslash.
 
@@ -249,7 +249,7 @@ export CS_STATUSLINE_CTX_CRIT=65
 # Where the machine-global usage cache lives (default $CS_SESSIONS_ROOT/.usage)
 export CS_USAGE_DIR="$HOME/.claude-sessions/.usage"
 
-# Render the fable chip from cache only, never kicking a refresh
+# Render the fable capsule from cache only, never kicking a refresh
 export CS_USAGE_NO_REFRESH=1
 
 # Plain text, no colors

@@ -187,10 +187,10 @@ test_all_segments_ordering_plain() {
 }
 
 # ============================================================================
-# Limits render quietly when healthy: grey blocks, no accent colors
+# Limits hide when healthy: nothing renders below 70
 # ============================================================================
 
-test_limits_neutral_when_healthy() {
+test_limits_hidden_when_healthy() {
     export COLORTERM=truecolor
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":23},"seven_day":{"used_percentage":41}}}'
     local out
@@ -249,7 +249,7 @@ test_git_branch_is_bold_ink_no_fill() {
 }
 
 # ============================================================================
-# Limits thresholds escalate per block: healthy 5h stays periwinkle, hot wk red
+# Limits thresholds escalate per block: a healthy 5h hides; a hot wk shows and escalates on its own value
 # ============================================================================
 
 test_limits_threshold_per_block() {
@@ -1581,7 +1581,7 @@ test_client_cache_accepts_a_fresh_entry() {
 
 run_test test_happy_path_docs_fixture_plain
 run_test test_all_segments_ordering_plain
-run_test test_limits_neutral_when_healthy
+run_test test_limits_hidden_when_healthy
 run_test test_identity_items_are_bold_ink
 run_test test_git_branch_is_bold_ink_no_fill
 run_test test_limits_threshold_per_block
@@ -2499,7 +2499,7 @@ test_fable_segment_only_on_fable() {
     assert_output_not_contains "$out" "fable" "a non-fable model must not render the fable chip" || return 1
 }
 
-test_fable_segment_renders_on_fable() {
+test_fable_segment_hidden_below_seventy_on_fable() {
     export NO_COLOR=1 CS_USAGE_NO_REFRESH=1
     seed_usage_cache org-abc 42 "2026-08-29T03:59:59Z" 1787816000 1787816300
     local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"}}'
@@ -2601,7 +2601,7 @@ test_fable_segment_kicks_a_refresh_when_due() {
 }
 
 run_test test_fable_segment_only_on_fable
-run_test test_fable_segment_renders_on_fable
+run_test test_fable_segment_hidden_below_seventy_on_fable
 run_test test_fable_segment_renders_when_hot
 run_test test_fable_segment_matches_1m_variant
 run_test test_fable_segment_countdown_at_80
