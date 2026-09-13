@@ -995,11 +995,15 @@ _integrate_in_temp() {  # base_dir wt_dir task sha common from_remote gate...
     # empty one.
     local no_hooks
     no_hooks=$(mktemp -d "${TMPDIR:-/tmp}/cs-nohooks.XXXXXX")
+    # Armed before the add, not after: an add that fails half-way leaves a
+    # directory and a registration behind, and only a _INTEGRATE_TMP the
+    # cleanup can see gets them removed. The cleanup tolerates a path that
+    # was never created and prunes either way.
+    _INTEGRATE_TMP="$tmp"
     if ! git -C "$base_dir" -c core.hooksPath="$no_hooks" worktree add --detach "$tmp" "$B" >/dev/null 2>&1; then
         rmdir "$no_hooks"
         error "git worktree add failed for $tmp"
     fi
-    _INTEGRATE_TMP="$tmp"
 
     local mode
     mode=$(_read_local_state "$wt_dir/.cs/local/state" cs_mode)
@@ -1020,13 +1024,47 @@ _integrate_in_temp() {  # base_dir wt_dir task sha common from_remote gate...
         git -C "$tmp" -c core.hooksPath="$no_hooks" merge --no-ff --no-edit \
             -m "Merge feature $task ($sha7)" "$sha" >/dev/null 2>&1 || merge_status=$?
     fi
+    # The merge commit this integrate will land, read before the gate runs.
+    # Everything after the gate is measured against it: what lands is this
+    # commit, never whatever the temp holds when the gate is done.
+    local M=""
+    [ "$merge_status" = 0 ] && M=$(git -C "$tmp" rev-parse HEAD)
     if [ "$merge_status" != 0 ]; then
         rmdir "$no_hooks"
-        local conflicts
+        local conflicts base_branch advice
         conflicts=$(git -C "$tmp" diff --name-only --diff-filter=U 2>/dev/null || true)
+        base_branch=$(git -C "$base_dir" symbolic-ref -q --short HEAD 2>/dev/null || echo HEAD)
+        if [ -n "$from_remote" ]; then
+            # Nothing of the feature's is in this conflict: it is the base's
+            # own commits against what origin carries, so the feature worktree
+            # is the wrong place to fix it.
+            advice="Resolve it in the base (git -C \"$base_dir\" merge origin/$base_branch): the conflict is between $base_dir's local commits and origin's $base_branch, not with the feature. Then re-run /finish $task"
+        else
+            advice="Resolve on the feature branch (git merge $base_branch in $wt_dir), then re-run /finish $task"
+        fi
         error "Merge of $sha conflicts with $base_dir at $B; base untouched. Conflicting paths:
 ${conflicts:-(none reported; see git -C \"$tmp\" status)}
-Resolve on the feature branch (git merge <base branch> in $wt_dir), then re-run /finish $task"
+$advice"
+    fi
+    # An untracked file in the base colliding with a path the merge touches
+    # passes _tree_is_dirty (tracked-only) and the temp merge itself, then
+    # aborts the ff-only landing with a message that blames the wrong cause.
+    # Caught here, before the gate spends any cost on a doomed landing.
+    local touched_file others_file collisions
+    touched_file=$(mktemp "${TMPDIR:-/tmp}/cs-touched.XXXXXX")
+    others_file=$(mktemp "${TMPDIR:-/tmp}/cs-untracked.XXXXXX")
+    git -C "$tmp" diff --name-only "$B" HEAD > "$touched_file"
+    git -C "$base_dir" ls-files --others --exclude-standard > "$others_file"
+    collisions=""
+    if [ -s "$touched_file" ] && [ -s "$others_file" ]; then
+        collisions=$(grep -Fxf "$touched_file" "$others_file" 2>/dev/null || true)
+    fi
+    rm -f "$touched_file" "$others_file"
+    if [ -n "$collisions" ]; then
+        rmdir "$no_hooks"
+        error "Untracked files in $base_dir collide with paths the feature adds; base untouched. Colliding paths:
+$collisions
+Move or delete these untracked files in $base_dir, then re-run /finish $task"
     fi
     # Submodules after the merge, so the gates see the MERGED gitlinks: a
     # feature that adds or bumps a submodule is otherwise gated against
@@ -1039,12 +1077,40 @@ Resolve on the feature branch (git merge <base branch> in $wt_dir), then re-run 
 
     local gate_log
     gate_log=$(mktemp "${TMPDIR:-/tmp}/cs-gate.XXXXXX")
-    if ! (cd "$tmp" && "$@") > "$gate_log" 2>&1; then
+    # </dev/null: a gate that reads stdin would otherwise consume whatever cs
+    # was given and block a non-interactive run forever.
+    if ! (cd "$tmp" && "$@") > "$gate_log" 2>&1 < /dev/null; then
         cat "$gate_log" >&2
         rm -f "$gate_log"
         error "Gate failed in $tmp (output above); base $base_dir untouched at $B"
     fi
     rm -f "$gate_log"
+
+    # A green gate that changed the temp is still a refusal. What lands is M,
+    # so a file the gate wrote is either dropped on the floor or — once the
+    # gate commits it — rides into the base unreviewed. Generated output
+    # belongs on the feature branch, committed by the person who ran the build.
+    local gate_head gate_dirt tampered
+    gate_head=$(git -C "$tmp" rev-parse HEAD 2>/dev/null || echo "")
+    gate_dirt=$(git -C "$tmp" status --porcelain --untracked-files=no 2>/dev/null || true)
+    tampered=""
+    if [ -n "$gate_dirt" ]; then
+        tampered="tracked files or submodules changed:
+$gate_dirt"
+    fi
+    if [ "$gate_head" != "$M" ]; then
+        tampered="${tampered:+$tampered
+}HEAD moved to ${gate_head:-(unreadable)}"
+    fi
+    if git -C "$tmp" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+        tampered="${tampered:+$tampered
+}a merge is in progress"
+    fi
+    if [ -n "$tampered" ]; then
+        error "The gate changed the temp checkout; base $base_dir untouched at $B. What the gate changed:
+$tampered
+Commit the generated output on the feature branch, then re-run /finish $task"
+    fi
 
     # Re-verify the base immediately before landing. --ff-only alone is not
     # the "base unchanged" check: a base reset to an ancestor of B still
@@ -1059,10 +1125,21 @@ Resolve on the feature branch (git merge <base branch> in $wt_dir), then re-run 
     fi
     # Fast-forward BEFORE removing the temp: until then the merge commit is
     # reachable only from the temp's detached HEAD.
-    local R
-    R=$(git -C "$tmp" rev-parse HEAD)
-    if ! git -C "$base_dir" merge --ff-only "$R" >/dev/null 2>&1; then
-        error "Base $base_dir moved or changed during the gates (was $B); re-run /finish $task"
+    local R ff_err ff_status=0
+    R="$M"
+    ff_err=$(git -C "$base_dir" merge --ff-only "$R" 2>&1 >/dev/null) || ff_status=$?
+    if [ "$ff_status" != 0 ]; then
+        error "Base $base_dir moved or changed during the gates (was $B); re-run /finish $task
+${ff_err:-(no output from git merge --ff-only)}"
+    fi
+    # The base's landing is the one merge that runs with the project's hooks
+    # live — it is the user's checkout, and a post-merge hook is entitled to
+    # fire there. One that commits leaves base past the commit cs landed, so
+    # read HEAD back and report where the base actually is.
+    local landed
+    landed=$(git -C "$base_dir" rev-parse HEAD)
+    if [ "$landed" != "$R" ]; then
+        warn "A post-merge hook moved $base_dir to $landed after landing $R"
     fi
     # Keep _INTEGRATE_TMP until the removal is verified, so the EXIT cleanup
     # still has the path if this removal fails; a leftover temp is reported,
@@ -1078,10 +1155,10 @@ Resolve on the feature branch (git merge <base branch> in $wt_dir), then re-run 
            --arg event "feature-integrated" \
            --arg task "$task" \
            --arg sha "$sha" \
-           --arg result "$R" \
+           --arg result "$landed" \
         '{ts: $ts, event: $event, task: $task, sha: $sha, result: $result}' \
         >> "$base_dir/.cs/timeline.jsonl" 2>/dev/null || true
-    printf 'integrated %s %s -> %s\n' "$task" "$sha" "$R"
+    printf 'integrated %s %s -> %s\n' "$task" "$sha" "$landed"
 }
 ```
 

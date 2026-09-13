@@ -715,7 +715,11 @@ Move or delete these untracked files in $base_dir, then re-run /finish $task"
     local gate_head gate_dirt tampered
     gate_head=$(git -C "$tmp" rev-parse HEAD 2>/dev/null || echo "")
     gate_dirt=$(git -C "$tmp" status --porcelain --untracked-files=no 2>/dev/null || true)
-    tampered="$gate_dirt"
+    tampered=""
+    if [ -n "$gate_dirt" ]; then
+        tampered="tracked files or submodules changed:
+$gate_dirt"
+    fi
     if [ "$gate_head" != "$M" ]; then
         tampered="${tampered:+$tampered
 }HEAD moved to ${gate_head:-(unreadable)}"
@@ -725,7 +729,7 @@ Move or delete these untracked files in $base_dir, then re-run /finish $task"
 }a merge is in progress"
     fi
     if [ -n "$tampered" ]; then
-        error "The gate modified tracked files in the temp checkout; base $base_dir untouched at $B. What the gate changed:
+        error "The gate changed the temp checkout; base $base_dir untouched at $B. What the gate changed:
 $tampered
 Commit the generated output on the feature branch, then re-run /finish $task"
     fi
