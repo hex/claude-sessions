@@ -83,7 +83,7 @@ CS_SKILLS=(
     store-secret
     prose-hygiene
     rotate
-    merge
+    finish
     write-as-me
 )
 
@@ -95,12 +95,14 @@ CS_SKILLS=(
 # else ever removes it.
 RETIRED_SKILLS=(
     voice   # renamed to write-as-me; Claude Code 2.1.227 ships a built-in /voice (Toggle voice mode)
+    merge   # replaced by finish: integrate and report, never remove
 )
 
 # Support files skills ship beyond SKILL.md, as skills/<skill>/<path> entries.
 # KEEP THIS LIST IN SYNC WITH install.sh's CS_SKILL_FILES.
 CS_SKILL_FILES=(
     write-as-me/scripts/build-corpus.sh
+    finish/scripts/finish.sh
 )
 
 # Deployed-hooks directory; CS_HOOKS_DIR overrides it for tests.
@@ -406,7 +408,7 @@ Commands:
   <base>@<feature>    Open a parallel feature worktree of session <base>
   <base> --merge <feature>  Merge a feature worktree back into <base> and remove it
   <base> -features          List a base's feature worktrees and their merge readiness
-  <base> -finish <feature>  Open <base> and run the merge ritual for <feature>
+  <base> -finish <feature>  Open <base> and run /finish for <feature> (integrate, keep the worktree)
   <name> -secrets <cmd>  Run secrets command on <name> without launching session
   <name> -narrative rotate  Rotate <name>'s narrative without launching session
   -search <query>     Search across all sessions (--include-archived searches archived too)
@@ -7188,7 +7190,7 @@ launch_claude_code() {
     # point, so nothing is lost — but the drain is the Stop hook, which fires
     # at the first turn end, so do not promise it runs after the merge.
     local merge_kick=""
-    [ -n "$merge_feature" ] && merge_kick="/merge $merge_feature"
+    [ -n "$merge_feature" ] && merge_kick="/finish $merge_feature"
     if [ -n "$merge_kick" ] && [ -n "$spawn_kick" ]; then
         warn "A walk-away queue is armed here; it will begin at the first turn end."
     fi

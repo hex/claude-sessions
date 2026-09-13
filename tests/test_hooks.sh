@@ -632,8 +632,10 @@ test_subagent_context_announces_worktree_task() {
     output=$(echo '{}' | CLAUDE_SESSION_NAME="myproj@fix-auth" bash "$HOOKS_DIR/subagent-context.sh" 2>/dev/null)
     assert_output_contains "$output" "feature worktree" \
         "subagents must inherit worktree awareness" || return 1
+    assert_output_contains "$output" "/finish" \
+        "subagents must know integration goes through /finish in the base" || return 1
     assert_output_contains "$output" "cs --merge" \
-        "subagents must know integration goes through cs --merge" || return 1
+        "subagents must know retirement goes through cs --merge" || return 1
 }
 
 test_resume_digest_reports_memory_activity() {

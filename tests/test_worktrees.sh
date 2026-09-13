@@ -1416,7 +1416,7 @@ test_finish_arms_the_ritual_without_merging() {
     (cd "$wt" && git add -A && git commit -q -m "task work")
     local output
     output=$("$CS_BIN" "myproj" -finish "fix-auth" <<< "" 2>&1 || true)
-    assert_output_contains "$output" "/merge fix-auth" "the launch prompt must arm the ritual" || return 1
+    assert_output_contains "$output" "/finish fix-auth" "the launch prompt must arm the ritual" || return 1
     assert_dir "$wt" "the worktree must survive -finish" || return 1
     assert_file_not_exists "$base_dir/auth.txt" "-finish must not merge" || return 1
 }
@@ -1432,7 +1432,7 @@ test_finish_survives_declining_the_resume() {
         > "$CS_SESSIONS_ROOT/myproj/.cs/local/state"
     local output
     output=$("$CS_BIN" "myproj" -finish "fix-auth" <<< "n" 2>&1 || true)
-    assert_output_contains "$output" "/merge fix-auth" "a declined resume must keep the merge kick" || return 1
+    assert_output_contains "$output" "/finish fix-auth" "a declined resume must keep the merge kick" || return 1
 }
 
 run_test test_finish_survives_declining_the_resume
@@ -1477,7 +1477,7 @@ test_finish_warns_when_it_displaces_a_spawn_kick() {
     printf 'other-session\nfirst staged task\n' > "$CS_SESSIONS_ROOT/.spawn/myproj.seed"
     local output
     output=$("$CS_BIN" "myproj" -finish "fix-auth" < /dev/null 2>&1 || true)
-    assert_output_contains "$output" "/merge fix-auth" "the merge kick takes the slot" || return 1
+    assert_output_contains "$output" "/finish fix-auth" "the merge kick takes the slot" || return 1
     assert_output_contains "$output" "walk-away queue is armed" "the displacement must be announced" || return 1
     assert_output_not_contains "$output" "after the merge" "must not promise sequencing it cannot enforce" || return 1
 }
@@ -1506,7 +1506,7 @@ EOF
     output=$("$CS_BIN" "myproj" -finish "fix-auth" <<< "r" 2>&1 || true)
     assert_output_contains "$output" "Rotation handoff takes this launch; re-run: cs myproj -finish fix-auth" \
         "the displaced merge must be announced" || return 1
-    assert_output_not_contains "$output" "/merge fix-auth" "the explicit r choice must not be overridden" || return 1
+    assert_output_not_contains "$output" "/finish fix-auth" "the explicit r choice must not be overridden" || return 1
     assert_output_contains "$output" ".cs/handoffs/2026-07-16-test.md" "the handoff prompt must run instead" || return 1
 }
 

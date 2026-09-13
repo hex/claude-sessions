@@ -56,6 +56,18 @@ test_voice_is_listed_as_retired() {
     done
 }
 
+# /merge was replaced by /finish: a merge skill directory left from an older
+# install keeps answering /merge with the old ritual, which removes worktrees.
+test_merge_is_listed_as_retired() {
+    local f
+    for f in "$INSTALL_SH" "$CS_BIN"; do
+        if ! rs_extract_array "$f" RETIRED_SKILLS | grep -qx "merge"; then
+            echo "  FAIL: merge missing from RETIRED_SKILLS in $f"
+            return 1
+        fi
+    done
+}
+
 # A retired skill must not also ship, or install would recreate what it deletes.
 test_retired_skills_are_not_in_the_repo() {
     local skill
@@ -123,6 +135,7 @@ echo ""
 run_test test_retired_skills_array_exists_in_both_copies
 run_test test_retired_skills_in_sync
 run_test test_voice_is_listed_as_retired
+run_test test_merge_is_listed_as_retired
 run_test test_retired_skills_are_not_in_the_repo
 run_test test_install_removes_a_retired_skill_directory
 run_test test_uninstall_removes_a_retired_skill_directory

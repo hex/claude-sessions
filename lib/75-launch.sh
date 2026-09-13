@@ -271,7 +271,7 @@ launch_claude_code() {
     # point, so nothing is lost — but the drain is the Stop hook, which fires
     # at the first turn end, so do not promise it runs after the merge.
     local merge_kick=""
-    [ -n "$merge_feature" ] && merge_kick="/merge $merge_feature"
+    [ -n "$merge_feature" ] && merge_kick="/finish $merge_feature"
     if [ -n "$merge_kick" ] && [ -n "$spawn_kick" ]; then
         warn "A walk-away queue is armed here; it will begin at the first turn end."
     fi

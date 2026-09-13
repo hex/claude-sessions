@@ -144,7 +144,7 @@ CS_SKILLS=(
     store-secret
     prose-hygiene
     rotate
-    merge
+    finish
     write-as-me
 )
 
@@ -156,12 +156,14 @@ CS_SKILLS=(
 # else ever removes it.
 RETIRED_SKILLS=(
     voice   # renamed to write-as-me; Claude Code 2.1.227 ships a built-in /voice (Toggle voice mode)
+    merge   # replaced by finish: integrate and report, never remove
 )
 
 # Support files skills ship beyond SKILL.md, as skills/<skill>/<path> entries.
 # KEEP THIS LIST IN SYNC WITH bin/cs's CS_SKILL_FILES.
 CS_SKILL_FILES=(
     write-as-me/scripts/build-corpus.sh
+    finish/scripts/finish.sh
 )
 
 # Completion URLs for web install
