@@ -339,6 +339,16 @@ main() {
                 run_features "$session_name" "$@"
                 return 0
                 ;;
+            -integrate-feature) # hidden: driven by skills/finish/scripts/finish.sh, not typed by a user
+                shift
+                [ -n "${1:-}" ] || error "Usage: cs <base> -integrate-feature <task> <sha> [--from-remote] -- <gate command...>"
+                # Validate <base>@<feature> the same way --merge does, so a
+                # task name with path separators is rejected before any
+                # filesystem lookup.
+                cs_split_worktree_name "$session_name@$1" >/dev/null
+                integrate_feature_worktree "$session_name" "$@"
+                return 0
+                ;;
             --merge)
                 shift
                 [ -n "${1:-}" ] || error "Usage: cs <base> --merge <feature>"

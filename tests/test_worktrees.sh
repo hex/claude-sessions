@@ -507,6 +507,176 @@ run_test test_merge_reused_live_pid_is_not_treated_as_own_lock
 run_test test_merge_conflict_stops_and_preserves
 run_test test_merge_rejects_traversal_task_name
 
+# --- -integrate-feature: integrate while the feature stays open, remove nothing ---
+
+# Build base + feature with one feature commit; prints the feature SHA.
+integrate_fixture() {  # base task
+    local base_dir wt
+    base_dir=$(create_test_session_with_git "$1")
+    cs_launch "$1@$2"
+    wt="$CS_SESSIONS_ROOT/$1@$2"
+    echo "feature work" > "$wt/feature.txt"
+    (cd "$wt" && git add feature.txt && git commit -q -m "feature work")
+    git -C "$wt" rev-parse HEAD
+}
+
+test_integrate_refuses_unknown_worktree() {
+    create_test_session_with_git "myproj" > /dev/null
+    mkdir -p "$CS_SESSIONS_ROOT/myproj@ghost"
+    local output status=0
+    output=$("$CS_BIN" myproj -integrate-feature ghost HEAD -- true 2>&1) || status=$?
+    assert_eq "1" "$status" "an unregistered worktree refuses" || return 1
+    assert_output_contains "$output" "not a registered worktree" "names the reason" || return 1
+}
+
+test_integrate_refuses_sha_not_on_feature_branch() {
+    local sha base_dir
+    sha=$(integrate_fixture myproj fix-auth)
+    base_dir="$CS_SESSIONS_ROOT/myproj"
+    (cd "$base_dir" && git commit -q --allow-empty -m "base only")
+    local stray output status=0
+    stray=$(git -C "$base_dir" rev-parse HEAD)
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$stray" -- true 2>&1) || status=$?
+    assert_eq "1" "$status" "a commit not reachable from cs/<task> refuses" || return 1
+    assert_output_contains "$output" "not reachable from cs/fix-auth" "names the branch" || return 1
+}
+
+test_integrate_reports_already_integrated_and_does_nothing() {
+    local sha base_dir
+    sha=$(integrate_fixture myproj fix-auth)
+    base_dir="$CS_SESSIONS_ROOT/myproj"
+    (cd "$base_dir" && git merge -q --no-ff --no-edit cs/fix-auth)
+    local head output status=0
+    head=$(git -C "$base_dir" rev-parse HEAD)
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- true 2>&1) || status=$?
+    assert_eq "0" "$status" "already integrated exits 0: $output" || return 1
+    assert_output_contains "$output" "already-integrated fix-auth $sha" "machine line printed" || return 1
+    assert_eq "$head" "$(git -C "$base_dir" rev-parse HEAD)" "no commit is made" || return 1
+}
+
+test_integrate_refuses_dirty_base() {
+    local sha base_dir
+    sha=$(integrate_fixture myproj fix-auth)
+    base_dir="$CS_SESSIONS_ROOT/myproj"
+    echo "edit" >> "$base_dir/CLAUDE.md"
+    local head output status=0
+    head=$(git -C "$base_dir" rev-parse HEAD)
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- true 2>&1) || status=$?
+    assert_eq "1" "$status" "dirty base refuses" || return 1
+    assert_output_contains "$output" "uncommitted changes" "names the dirt" || return 1
+    assert_eq "$head" "$(git -C "$base_dir" rev-parse HEAD)" "base HEAD unchanged" || return 1
+}
+
+test_integrate_refuses_foreign_live_base_lock() {
+    local sha base_dir
+    sha=$(integrate_fixture myproj fix-auth)
+    base_dir="$CS_SESSIONS_ROOT/myproj"
+    # A live PID that is not an ancestor of the cs process: the ps stub reports
+    # PID 1 as every process's parent, so the ancestry walk never reaches $$.
+    echo "$$" > "$base_dir/.cs/session.lock"
+    local ps_stub output status=0
+    ps_stub=$(fixed_parent_ps_stub 1)
+    output=$(CLAUDE_SESSION_NAME="other" CS_PS_BIN="$ps_stub" \
+        "$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- true 2>&1) || status=$?
+    assert_eq "1" "$status" "a foreign live base lock refuses" || return 1
+    assert_output_contains "$output" "open elsewhere" "names the live base" || return 1
+}
+
+test_integrate_ignores_the_feature_lock() {
+    # The feature session stays open: its lock is not a blocker because the
+    # integrate never touches the feature worktree. Here it only has to get
+    # PAST every refusal, which Task 2's placeholder proves by refusing with
+    # its own fixed message. Task 3 replaces this pin with the real happy path
+    # (test_integrate_lands_a_no_ff_merge_and_keeps_everything repeats the
+    # live-lock setup there).
+    local sha base_dir wt
+    sha=$(integrate_fixture myproj fix-auth)
+    base_dir="$CS_SESSIONS_ROOT/myproj"
+    wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "$$" > "$wt/.cs/session.lock"
+    local ps_stub output status=0
+    ps_stub=$(fixed_parent_ps_stub 1)
+    output=$(CS_PS_BIN="$ps_stub" "$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- true 2>&1) || status=$?
+    assert_eq "1" "$status" "the placeholder refuses" || return 1
+    assert_output_contains "$output" "integrate is not implemented yet (refusals passed)" \
+        "every refusal was passed with the feature lock live" || return 1
+}
+
+test_integrate_refuses_merge_in_progress() {
+    local sha base_dir
+    sha=$(integrate_fixture myproj fix-auth)
+    base_dir="$CS_SESSIONS_ROOT/myproj"
+    # Stage a MERGE_HEAD without dirtying the tracked tree.
+    git -C "$base_dir" rev-parse HEAD > "$base_dir/.git/MERGE_HEAD"
+    local output status=0
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- true 2>&1) || status=$?
+    rm -f "$base_dir/.git/MERGE_HEAD"
+    assert_eq "1" "$status" "a merge in progress refuses" || return 1
+    assert_output_contains "$output" "merge or rebase in progress" "names the state" || return 1
+}
+
+test_integrate_refuses_stale_mutex_and_names_it() {
+    local sha base_dir
+    sha=$(integrate_fixture myproj fix-auth)
+    base_dir="$CS_SESSIONS_ROOT/myproj"
+    mkdir -p "$base_dir/.git/cs/integrate.lock"
+    local output status=0
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- true 2>&1) || status=$?
+    assert_eq "1" "$status" "an existing mutex refuses" || return 1
+    assert_output_contains "$output" "$base_dir/.git/cs/integrate.lock" "the refusal names the path" || return 1
+    assert_dir "$base_dir/.git/cs/integrate.lock" "the mutex is never stolen" || return 1
+}
+
+test_integrate_requires_a_gate_command() {
+    local sha output status=0
+    sha=$(integrate_fixture myproj fix-auth)
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" 2>&1) || status=$?
+    assert_eq "1" "$status" "missing gate argv refuses" || return 1
+    assert_output_contains "$output" "Usage: cs <base> -integrate-feature" "prints usage" || return 1
+}
+
+test_integrate_requires_a_sha() {
+    # `set -u` would otherwise turn a missing positional into an unbound-variable
+    # crash instead of the usage line.
+    integrate_fixture myproj fix-auth > /dev/null
+    local output status=0
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth 2>&1) || status=$?
+    assert_eq "1" "$status" "missing sha refuses" || return 1
+    assert_output_contains "$output" "Usage: cs <base> -integrate-feature" "prints usage, not a shell error" || return 1
+    assert_output_not_contains "$output" "unbound variable" "no set -u crash" || return 1
+}
+
+test_integrate_is_hidden_from_completion_and_unknown_command_text() {
+    grep -q '^            -integrate-feature) # hidden' "$SCRIPT_DIR/../lib/99-main.sh" \
+        || { echo "  FAIL: the arm must carry '# hidden' on its own line for test_completions"; return 1; }
+    assert_file_not_contains "$SCRIPT_DIR/../lib/99-main.sh" 'Unknown session command.*-integrate-feature' \
+        "the unknown-command string must not advertise the entry" || return 1
+    assert_file_not_contains "$SCRIPT_DIR/../lib/10-help.sh" 'integrate-feature' "help never lists it" || return 1
+    assert_file_not_contains "$SCRIPT_DIR/../completions/_cs" 'integrate-feature' "zsh completion never lists it" || return 1
+    assert_file_not_contains "$SCRIPT_DIR/../completions/cs.bash" 'integrate-feature' "bash completion never lists it" || return 1
+    assert_file_not_contains "$SCRIPT_DIR/../README.md" 'integrate-feature' "README never lists it" || return 1
+}
+
+test_integrate_and_autosave_spell_one_mutex_path() {
+    # The hook cannot source lib/, so the path is spelled twice; this is the
+    # only thing that keeps the two spellings equal.
+    assert_file_contains "$SCRIPT_DIR/../hooks/autosave-commits.sh" 'cs/integrate\.lock' "hook names the mutex" || return 1
+    assert_file_contains "$SCRIPT_DIR/../lib/30-worktree.sh" 'cs/integrate\.lock' "entry names the mutex" || return 1
+}
+
+run_test test_integrate_refuses_unknown_worktree
+run_test test_integrate_refuses_sha_not_on_feature_branch
+run_test test_integrate_reports_already_integrated_and_does_nothing
+run_test test_integrate_refuses_dirty_base
+run_test test_integrate_refuses_foreign_live_base_lock
+run_test test_integrate_ignores_the_feature_lock
+run_test test_integrate_refuses_merge_in_progress
+run_test test_integrate_refuses_stale_mutex_and_names_it
+run_test test_integrate_requires_a_gate_command
+run_test test_integrate_requires_a_sha
+run_test test_integrate_is_hidden_from_completion_and_unknown_command_text
+run_test test_integrate_and_autosave_spell_one_mutex_path
+
 test_merge_ignored_mode_fuses_records() {
     local base_dir="$CS_SESSIONS_ROOT/proj"
     mkdir -p "$base_dir/.cs"/{memory,local}
