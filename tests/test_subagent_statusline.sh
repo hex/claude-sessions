@@ -287,9 +287,9 @@ test_ctx_warn_edge_is_amber_at_the_threshold() {
     assert_output_contains "$c" "38;2;255;183;77" "40% context renders amber" || return 1
 }
 
-# A row's crit default is the bar's default, so a reading that is amber on the
-# bar is amber on a row too — the same env vars, the same cut points, just two
-# tiers here where the bar also has none of its own extra band.
+# A row's warn default is the bar's default, so a reading that is amber on the
+# bar is amber on a row too — the same env vars, the same cut points, the same
+# three bands.
 test_ctx_amber_band_matches_the_bar() {
     export COLORTERM=truecolor CS_TERM_THEME=light
     local fx out c
