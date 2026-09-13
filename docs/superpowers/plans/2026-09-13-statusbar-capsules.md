@@ -12,6 +12,8 @@
 
 **Review trail:** advisor pass (BRE asserts, logo succession, departures 7–8), then a Codex read-only pass (18 findings: 7 P1, 9 P2, 2 P3), every one verified against the source and folded below.
 
+**Superseded after the final review (2026-09-13):** the `ink2` values this plan carries (`119;117;110` / `168;170;166`, 256 `244/248`, basic `90`) shipped and were found equal to the fill on unmeasured, 256 and basic surfaces; the final fix wave made `ink2` surface-derived (55% shade or lift, `238/252`, `37/97`) and basic `ink` `97`. The spec's Colour table is the shipped one; the values below are the history.
+
 **Departures from the spec, decided while planning (Alex rules on these at review):**
 
 1. `_display_width` stays: `bin/cs-subagent-statusline` `_truncate` calls it (its line 68). The spec listed it among the removals.

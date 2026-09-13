@@ -112,8 +112,8 @@ untouched. Hiding a capsule never hides a heartbeat.
 | Token | Role | Truecolor | 256 | Basic |
 |---|---|---|---|---|
 | `surface` | every capsule fill | as today: `CS_TERM_BG_RGB` shaded 10% away from itself (`_bg_shade`), taupe fallback when unmeasured | 244/245 | 90 |
-| `ink` | primary text | as today's surface text: a 35% shade of the surface on a light surface, `white` on a dark one | 235/231 | 30/97 |
-| `ink2` | secondary text, dots, effort, gauge labels | light: `119;117;110`; dark: `168;170;166` | 244/248 | 90 |
+| `ink` | primary text | as today's surface text: a 35% shade of the surface on a light surface, `white` on a dark one | 235/231 | 97 |
+| `ink2` | secondary text, dots, effort, gauge labels | a 55% shade of the surface when the surface is light (luminance ≥ 1530000), else each channel lifted by 55% toward white — `227;221;204` → `124;121;112`, the light taupe → `197;194;189`, the dark taupe → `203;199;195` | 238/252 | 37/97 |
 | `brand` | the mark | unchanged `217;119;87` | 173 | 33 |
 | `brandshade` | the pulse's dim phase | unchanged `184;101;74` | 167 | 33 |
 | `amberink` | hot numbers, notes and mail counts | light: `180;83;9`; dark: `245;165;36` | 130/215 | 33 |
@@ -130,8 +130,13 @@ in `_sgr` untouched: it is Claude Code's shared eight-colour tab palette, KEEP I
 `_session_color_rgb` in `bin/cs`, and no longer drawn by the bar. `crit` is its own token so
 the gauge's red never depends on that palette's `red`.
 
-Removed tokens: `hairline`, `chiptext` (the mark's bright phase uses `ink` on a light
-surface and `white` on a dark one), `periwinkle`, `slate`, `black`, `amber` as a fill.
+Removed tokens: `hairline`, `chiptext` (the mark's bright phase is `brand`), `slate`, `black`,
+`amber` as a fill. `periwinkle` stays for the agent rows' model name.
+
+The secondary ink follows the surface for the same reason the primary ink does: the three
+final reviewers found the first fixed values (`119;117;110`, and `244`/`90` at 256/basic)
+equal to the fill on every surface cs cannot measure, which is where tmux teammate panes
+render.
 `bin/cs-subagent-statusline` sources this file as a library (its line 8) and paints with
 `rowname`, `rowmeta`, `amber`, `red` through `_paint` → `_sgr`; those four names stay, with
 `amber` and `red` resolving to `amberink` and `crit` so an agent row's hot ctx keeps the same
