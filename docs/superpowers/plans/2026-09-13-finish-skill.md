@@ -23,6 +23,11 @@ Read these before Task 1; each is a fact found in the source, not a design chang
 7. **The lock-inspection loop in `merge_worktree_session` (`lib/30-worktree.sh:353-368`) is extracted into `_foreign_live_lock_pid`** so the new entry and the verb share one ownership implementation. The verb's behaviour and its eight lock tests are unchanged.
 8. **The "already integrated" outcome prints a machine line `already-integrated <task> <sha>`**, parallel to `integrated <task> <sha> -> <R>`, so `finish.sh`/the skill parse one shape.
 9. **`CHANGELOG.md` has no `## Unreleased` heading today**; Task 8 adds one.
+10. **In tracked-`.cs` mode the integrate's own `feature-integrated` timeline event dirties the base**, and the retire verb refuses dirt (`lib/30-worktree.sh:381-382`). Retirement is not changed; the report's `retire:` line tells the user to commit the bookkeeping first, and the load-bearing "then `--merge` takes the ancestor path" test stages exactly that sequence.
+11. **Every cleanup trap is `EXIT` plus `INT TERM`** (measured: a TERM'd bash skips `EXIT`, exit 143, no cleanup), as `lib/75-launch.sh:112-113` already does. Submodules are updated after the temp merge, not before, so gates see the merged gitlinks.
+12. **`finish.sh` reports every porcelain line, including `.cs/`**; the retire verb's untracked filter is a removal-risk filter and integrate removes nothing. And PR lookup answers `unknown` for two OPEN PRs or a MERGED beside an OPEN one (a reused branch), naming the numbers, rather than picking one.
+
+A Codex read-only pass (2026-09-13, sandboxed, no git probes possible there) produced fourteen findings; every one was checked against the source and folded, which is where departures 10–12, the pre-landing re-verification in Task 3, the four launch-kick pins in Task 6, the two extra TUI tests in Task 7, and the exit-status capture in every validation command come from.
 
 ## Global Constraints
 
@@ -108,12 +113,27 @@ test_autosave_skips_while_the_integrate_lock_is_held() {
     assert_dir "$CLAUDE_SESSION_DIR/.git/cs/integrate.lock" "the hook must not remove a lock it does not hold" || return 1
 }
 
-test_autosave_releases_its_own_lock() {
+test_autosave_holds_the_lock_during_the_snapshot_and_releases_it() {
+    # Observe the lock at write-tree time through a git shim; a release
+    # assertion alone passes when no lock is ever taken.
+    local real_git shim_dir
+    real_git=$(command -v git)
+    shim_dir="$TEST_TMPDIR/shim"
+    mkdir -p "$shim_dir"
+    cat > "$shim_dir/git" << SHIM
+#!/usr/bin/env bash
+if [ "\${1:-}" = "write-tree" ]; then
+    if [ -d .git/cs/integrate.lock ]; then echo held > "$TEST_TMPDIR/lock-seen"; else echo absent > "$TEST_TMPDIR/lock-seen"; fi
+fi
+exec "$real_git" "\$@"
+SHIM
+    chmod +x "$shim_dir/git"
     echo "## New Finding" >> "$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"
     echo '{"session_id":"22222222-2222-2222-2222-222222222222","tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
-        | bash "$HOOKS_DIR/autosave-commits.sh"
+        | PATH="$shim_dir:$PATH" bash "$HOOKS_DIR/autosave-commits.sh"
     git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify refs/worktree/cs/session/22222222-2222-2222-2222-222222222222 >/dev/null 2>&1 \
         || { echo "  FAIL: snapshot should have been written"; return 1; }
+    assert_eq "held" "$(cat "$TEST_TMPDIR/lock-seen" 2>/dev/null)" "the lock is held while the tree is written" || return 1
     assert_not_exists "$CLAUDE_SESSION_DIR/.git/cs/integrate.lock" "the hook releases the lock after the snapshot" || return 1
 }
 ```
@@ -123,13 +143,13 @@ Add to the `run_test` block, next to the other autosave tests:
 ```bash
 run_test test_autosave_labels_the_head_it_started_from
 run_test test_autosave_skips_while_the_integrate_lock_is_held
-run_test test_autosave_releases_its_own_lock
+run_test test_autosave_holds_the_lock_during_the_snapshot_and_releases_it
 ```
 
 - [ ] **Step 2: Run the suite to see the three fail**
 
-Run: `bash tests/test_shadow_ref.sh 2>&1 | tail -20`
-Expected: the first fails with `cs-base must be the HEAD at hook start`, the second with `no snapshot may be written`, the third with `the hook releases the lock` (lock never created, so `assert_not_exists` passes — the third may pass vacuously; it becomes meaningful once the lock exists. Keep it: it guards against a future `mkdir` without the trap).
+Run: `bash tests/test_shadow_ref.sh > "$TMPDIR/t1.out" 2>&1; echo "rc=$?"; grep -A3 'FAIL' "$TMPDIR/t1.out"`
+Expected: rc=1; the first fails with `cs-base must be the HEAD at hook start`, the second with `no snapshot may be written`, the third with `the lock is held while the tree is written` (the shim saw `absent`).
 
 - [ ] **Step 3: Rewrite `autosave_to_shadow_ref`**
 
@@ -160,7 +180,10 @@ autosave_to_shadow_ref() {
     mkdir -p "$GIT_COMMON/cs" 2>/dev/null || return 0
     mkdir "$GIT_COMMON/cs/integrate.lock" 2>/dev/null || return 0
     (
+        # EXIT does not fire on TERM/INT (measured: exit 143, no cleanup), so
+        # both get a handler that releases and then exits.
         trap 'rmdir "$GIT_COMMON/cs/integrate.lock" 2>/dev/null' EXIT
+        trap 'rmdir "$GIT_COMMON/cs/integrate.lock" 2>/dev/null; exit 143' TERM INT
 
         TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 
@@ -320,10 +343,11 @@ test_integrate_refuses_foreign_live_base_lock() {
 
 test_integrate_ignores_the_feature_lock() {
     # The feature session stays open: its lock is not a blocker because the
-    # integrate never touches the feature worktree. Combined with Task 3's
-    # happy path this is the whole point of /finish; here it only has to get
-    # PAST the lock checks, so the gate is `false` and the refusal must be the
-    # gate's, not the lock's.
+    # integrate never touches the feature worktree. Here it only has to get
+    # PAST every refusal, which Task 2's placeholder proves by refusing with
+    # its own fixed message. Task 3 replaces this pin with the real happy path
+    # (test_integrate_lands_a_no_ff_merge_and_keeps_everything repeats the
+    # live-lock setup there).
     local sha base_dir wt
     sha=$(integrate_fixture myproj fix-auth)
     base_dir="$CS_SESSIONS_ROOT/myproj"
@@ -331,9 +355,10 @@ test_integrate_ignores_the_feature_lock() {
     echo "$$" > "$wt/.cs/session.lock"
     local ps_stub output status=0
     ps_stub=$(fixed_parent_ps_stub 1)
-    output=$(CS_PS_BIN="$ps_stub" "$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- false 2>&1) || status=$?
-    assert_output_not_contains "$output" "open elsewhere" "the feature lock must not block" || return 1
-    assert_output_not_contains "$output" "close it before" "the feature lock must not block" || return 1
+    output=$(CS_PS_BIN="$ps_stub" "$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- true 2>&1) || status=$?
+    assert_eq "1" "$status" "the placeholder refuses" || return 1
+    assert_output_contains "$output" "integrate is not implemented yet (refusals passed)" \
+        "every refusal was passed with the feature lock live" || return 1
 }
 
 test_integrate_refuses_merge_in_progress() {
@@ -518,9 +543,13 @@ Insert after `merge_worktree_session` (after line 425, before `_append_jsonl`):
 # integrate_feature_worktree, including error's exit 1. Globals because an
 # EXIT trap runs after the function's locals are gone.
 _integrate_cleanup() {
-    if [ -n "${_INTEGRATE_TMP:-}" ] && [ -d "$_INTEGRATE_TMP" ]; then
-        git -C "$_INTEGRATE_BASE_DIR" worktree remove --force "$_INTEGRATE_TMP" >/dev/null 2>&1 \
-            || rm -rf "$_INTEGRATE_TMP"
+    if [ -n "${_INTEGRATE_TMP:-}" ]; then
+        # Remove if present, then prune regardless: a directory gone with its
+        # registration surviving is exactly what prune exists for.
+        if [ -d "$_INTEGRATE_TMP" ]; then
+            git -C "$_INTEGRATE_BASE_DIR" worktree remove --force "$_INTEGRATE_TMP" >/dev/null 2>&1 \
+                || rm -rf "$_INTEGRATE_TMP"
+        fi
         git -C "$_INTEGRATE_BASE_DIR" worktree prune >/dev/null 2>&1 || true
     fi
     [ -n "${_INTEGRATE_LOCK:-}" ] && rmdir "$_INTEGRATE_LOCK" 2>/dev/null
@@ -609,28 +638,22 @@ integrate_feature_worktree() {  # base_name task sha [--from-remote] -- gate...
     _INTEGRATE_LOCK="$lock"
     _INTEGRATE_BASE_DIR="$base_dir"
     _INTEGRATE_TMP=""
+    # EXIT alone is not enough: a TERM/INT'd bash skips the EXIT trap
+    # (measured: exit 143, no cleanup), stranding the mutex and the temp.
+    # Same shape as lib/75-launch.sh:112-113.
     trap '_integrate_cleanup' EXIT
+    trap '_integrate_cleanup; exit 130' INT TERM
 
     _integrate_in_temp "$base_dir" "$wt_dir" "$task" "$sha" "$common" "$from_remote" "$@"
 }
 ```
 
-Then add the stub Task 3 replaces (so Task 2 ships a working entry whose refusals are complete and whose mutation is a visible placeholder — the test `test_integrate_ignores_the_feature_lock` passes because `false` fails here):
+Then add the stub Task 3 replaces. It runs NOTHING — never the gate argv, which could be a build or formatter that mutates the live base — and refuses with a fixed message the feature-lock test pins:
 
 ```bash
 # Temp-worktree merge, gates, fast-forward. Task 3 of the plan.
 _integrate_in_temp() {  # base_dir wt_dir task sha common from_remote gate...
-    local base_dir="$1"
-    shift 6
-    local gate_log
-    gate_log=$(mktemp "${TMPDIR:-/tmp}/cs-gate.XXXXXX")
-    if ! (cd "$base_dir" && "$@") > "$gate_log" 2>&1; then
-        cat "$gate_log" >&2
-        rm -f "$gate_log"
-        error "Gate failed"
-    fi
-    rm -f "$gate_log"
-    error "integrate is not implemented yet"
+    error "integrate is not implemented yet (refusals passed)"
 }
 ```
 
@@ -709,15 +732,31 @@ test_integrate_lands_a_no_ff_merge_and_keeps_everything() {
 }
 
 # The load-bearing local happy path: after an integrate, today's retire verb
-# takes its "already merged; cleaning up" branch and merges NOTHING.
+# takes its "already merged; cleaning up" branch and merges NOTHING. In
+# tracked mode the integrate's own timeline event dirties the base (the
+# timeline is tracked there), and the verb refuses dirt — so the test stages
+# the general case: a tracked timeline, the refusal, the user's commit of the
+# bookkeeping, then the ancestor path. Retirement semantics are unchanged.
 test_integrate_then_merge_verb_takes_the_ancestor_path() {
     local sha base_dir wt output status=0
-    sha=$(integrate_fixture myproj fix-auth)
-    base_dir="$CS_SESSIONS_ROOT/myproj"
+    base_dir=$(create_test_session_with_git "myproj")
+    echo '{"ts":"2026-01-01T00:00:00Z","event":"seed"}' > "$base_dir/.cs/timeline.jsonl"
+    (cd "$base_dir" && git add .cs/timeline.jsonl && git commit -q -m seed)
+    cs_launch "myproj@fix-auth"
     wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "feature work" > "$wt/feature.txt"
+    (cd "$wt" && git add feature.txt && git commit -q -m "feature work")
+    sha=$(git -C "$wt" rev-parse HEAD)
     "$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- true >/dev/null 2>&1 || return 1
+    assert_eq " M .cs/timeline.jsonl" "$(git -C "$base_dir" status --porcelain)" \
+        "the only dirt after an integrate is the tracked timeline event" || return 1
+    output=$("$CS_BIN" myproj --merge fix-auth 2>&1) || status=$?
+    assert_eq "1" "$status" "retire refuses the dirty base, as it always has" || return 1
+    assert_output_contains "$output" "Base session has uncommitted changes" "the refusal is the verb's own" || return 1
+    (cd "$base_dir" && git add .cs/timeline.jsonl && git commit -q -m "record the integrate")
     local head_after_integrate
     head_after_integrate=$(git -C "$base_dir" rev-parse HEAD)
+    status=0
     output=$("$CS_BIN" myproj --merge fix-auth 2>&1) || status=$?
     assert_eq "0" "$status" "retire succeeds after integrate: $output" || return 1
     assert_output_contains "$output" "already merged; cleaning up" "the verb skips the merge" || return 1
@@ -732,8 +771,11 @@ test_integrate_red_gate_leaves_base_untouched() {
     base_dir="$CS_SESSIONS_ROOT/myproj"
     local head
     head=$(git -C "$base_dir" rev-parse HEAD)
-    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- sh -c 'echo GATE-SAYS-NO; exit 3' 2>&1) || status=$?
+    # The gate records where it ran: a red gate in the LIVE base would also
+    # "leave HEAD unchanged", so location is part of what this proves.
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- sh -c 'pwd > "$0/where"; echo GATE-SAYS-NO; exit 3' "$TEST_TMPDIR" 2>&1) || status=$?
     assert_eq "1" "$status" "a red gate refuses" || return 1
+    assert_output_contains "$(cat "$TEST_TMPDIR/where" 2>/dev/null)" "/.git/cs/finish/fix-auth." "the red gate ran in the temp" || return 1
     assert_output_contains "$output" "GATE-SAYS-NO" "the gate output is shown" || return 1
     assert_output_contains "$output" "Gate failed" "names the cause" || return 1
     assert_eq "$head" "$(git -C "$base_dir" rev-parse HEAD)" "base HEAD unchanged" || return 1
@@ -769,6 +811,49 @@ test_integrate_refuses_when_base_moved_during_gates() {
     assert_file_not_exists "$base_dir/feature.txt" "nothing landed" || return 1
     assert_output_not_contains "$(git -C "$base_dir" worktree list)" "cs/finish" "temp worktree removed" || return 1
     assert_not_exists "$base_dir/.git/cs/integrate.lock" "mutex released" || return 1
+}
+
+test_integrate_refuses_when_base_reset_to_an_ancestor_during_gates() {
+    # --ff-only would happily land on a base that went BACKWARDS; the explicit
+    # HEAD == B check is what refuses it.
+    local sha base_dir output status=0
+    sha=$(integrate_fixture myproj fix-auth)
+    base_dir="$CS_SESSIONS_ROOT/myproj"
+    (cd "$base_dir" && git commit -q --allow-empty -m "will be reset away")
+    local head
+    head=$(git -C "$base_dir" rev-parse HEAD)
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- git -C "$base_dir" reset -q --hard HEAD~1 2>&1) || status=$?
+    assert_eq "1" "$status" "a base reset during gates refuses" || return 1
+    assert_output_contains "$output" "moved during the gates" "names the cause" || return 1
+    assert_file_not_exists "$base_dir/feature.txt" "nothing landed" || return 1
+    assert_not_exists "$base_dir/.git/cs/integrate.lock" "mutex released" || return 1
+}
+
+test_integrate_refuses_when_base_dirtied_during_gates() {
+    local sha base_dir output status=0
+    sha=$(integrate_fixture myproj fix-auth)
+    base_dir="$CS_SESSIONS_ROOT/myproj"
+    local head
+    head=$(git -C "$base_dir" rev-parse HEAD)
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- sh -c 'echo edit >> "$0/CLAUDE.md"' "$base_dir" 2>&1) || status=$?
+    assert_eq "1" "$status" "dirt introduced during gates refuses" || return 1
+    assert_output_contains "$output" "changed during the gates" "names the cause" || return 1
+    assert_eq "$head" "$(git -C "$base_dir" rev-parse HEAD)" "base HEAD unchanged" || return 1
+    assert_file_not_exists "$base_dir/feature.txt" "nothing landed" || return 1
+}
+
+test_integrate_terminated_mid_gate_leaves_no_lock_or_temp() {
+    # TERM during the gate must still release the mutex and remove the temp:
+    # a plain EXIT trap does not fire on TERM. The gate finds cs as its
+    # grandparent (the gate subshell is cs's child) and terminates it.
+    local sha base_dir output status=0
+    sha=$(integrate_fixture myproj fix-auth)
+    base_dir="$CS_SESSIONS_ROOT/myproj"
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- sh -c 'kill -TERM "$(ps -o ppid= -p $PPID | tr -d " ")"; sleep 2' 2>&1) || status=$?
+    [ "$status" != 0 ] || { echo "  FAIL: a terminated integrate must not exit 0"; return 1; }
+    assert_not_exists "$base_dir/.git/cs/integrate.lock" "mutex released on TERM" || return 1
+    assert_output_not_contains "$(git -C "$base_dir" worktree list)" "cs/finish" "temp worktree removed on TERM" || return 1
+    assert_file_not_exists "$base_dir/feature.txt" "nothing landed" || return 1
 }
 
 test_integrate_conflict_names_the_path_and_leaves_no_merge_head() {
@@ -854,6 +939,9 @@ run_test test_integrate_then_merge_verb_takes_the_ancestor_path
 run_test test_integrate_red_gate_leaves_base_untouched
 run_test test_integrate_gates_run_in_the_temp_not_the_live_trees
 run_test test_integrate_refuses_when_base_moved_during_gates
+run_test test_integrate_refuses_when_base_reset_to_an_ancestor_during_gates
+run_test test_integrate_refuses_when_base_dirtied_during_gates
+run_test test_integrate_terminated_mid_gate_leaves_no_lock_or_temp
 run_test test_integrate_conflict_names_the_path_and_leaves_no_merge_head
 run_test test_integrate_ignored_mode_fuses_nothing
 run_test test_integrate_tracked_mode_warns_on_memory_index_change
@@ -894,10 +982,6 @@ _integrate_in_temp() {  # base_dir wt_dir task sha common from_remote gate...
         error "git worktree add failed for $tmp"
     fi
     _INTEGRATE_TMP="$tmp"
-    if [ -f "$tmp/.gitmodules" ]; then
-        git -C "$tmp" submodule update --init --recursive -q >/dev/null 2>&1 \
-            || { rmdir "$no_hooks"; error "submodule init failed in $tmp"; }
-    fi
 
     local mode
     mode=$(_read_local_state "$wt_dir/.cs/local/state" cs_mode)
@@ -918,14 +1002,22 @@ _integrate_in_temp() {  # base_dir wt_dir task sha common from_remote gate...
         git -C "$tmp" -c core.hooksPath="$no_hooks" merge --no-ff --no-edit \
             -m "Merge feature $task ($sha7)" "$sha" >/dev/null 2>&1 || merge_status=$?
     fi
-    rmdir "$no_hooks"
     if [ "$merge_status" != 0 ]; then
+        rmdir "$no_hooks"
         local conflicts
         conflicts=$(git -C "$tmp" diff --name-only --diff-filter=U 2>/dev/null || true)
         error "Merge of $sha conflicts with $base_dir at $B; base untouched. Conflicting paths:
 ${conflicts:-(none reported; see git -C \"$tmp\" status)}
 Resolve on the feature branch (git merge <base branch> in $wt_dir), then re-run /finish $task"
     fi
+    # Submodules after the merge, so the gates see the MERGED gitlinks: a
+    # feature that adds or bumps a submodule is otherwise gated against
+    # absent or stale contents.
+    if [ -f "$tmp/.gitmodules" ]; then
+        git -C "$tmp" -c core.hooksPath="$no_hooks" submodule update --init --recursive -q >/dev/null 2>&1 \
+            || { rmdir "$no_hooks"; error "submodule update failed in $tmp"; }
+    fi
+    rmdir "$no_hooks"
 
     local gate_log
     gate_log=$(mktemp "${TMPDIR:-/tmp}/cs-gate.XXXXXX")
@@ -936,6 +1028,17 @@ Resolve on the feature branch (git merge <base branch> in $wt_dir), then re-run 
     fi
     rm -f "$gate_log"
 
+    # Re-verify the base immediately before landing. --ff-only alone is not
+    # the "base unchanged" check: a base reset to an ancestor of B still
+    # fast-forwards, and unrelated tracked dirt survives one. The residual
+    # window between this check and the merge is the one race left; the
+    # mutex keeps cs's own writer (the autosave hook) out of it.
+    if [ "$(git -C "$base_dir" rev-parse HEAD)" != "$B" ]; then
+        error "Base $base_dir moved during the gates (was $B, now $(git -C "$base_dir" rev-parse --short HEAD)); re-run /finish $task"
+    fi
+    if _tree_is_dirty "$base_dir" || git -C "$base_dir" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+        error "Base $base_dir changed during the gates (uncommitted changes or a merge in progress); commit or abort, then re-run /finish $task"
+    fi
     # Fast-forward BEFORE removing the temp: until then the merge commit is
     # reachable only from the temp's detached HEAD.
     local R
@@ -943,8 +1046,14 @@ Resolve on the feature branch (git merge <base branch> in $wt_dir), then re-run 
     if ! git -C "$base_dir" merge --ff-only "$R" >/dev/null 2>&1; then
         error "Base $base_dir moved or changed during the gates (was $B); re-run /finish $task"
     fi
-    git -C "$base_dir" worktree remove --force "$tmp" >/dev/null 2>&1 || true
-    _INTEGRATE_TMP=""
+    # Keep _INTEGRATE_TMP until the removal is verified, so the EXIT cleanup
+    # still has the path if this removal fails; a leftover temp is reported,
+    # never silently forgotten.
+    if git -C "$base_dir" worktree remove --force "$tmp" >/dev/null 2>&1; then
+        _INTEGRATE_TMP=""
+    else
+        warn "Temporary worktree $tmp could not be removed; run: git -C \"$base_dir\" worktree remove --force \"$tmp\""
+    fi
 
     _terminate_jsonl "$base_dir/.cs/timeline.jsonl"
     jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -1190,15 +1299,56 @@ test_prepare_in_base_captures_sha_branch_and_dirt() {
     local sha out
     sha=$(finish_fixture myproj fix-auth)
     echo "uncommitted" > "$CS_SESSIONS_ROOT/myproj@fix-auth/scratch.txt"
+    # Tracked-mode session records are the user's work too: never filtered.
+    mkdir -p "$CS_SESSIONS_ROOT/myproj@fix-auth/.cs/plans"
+    echo "# plan" > "$CS_SESSIONS_ROOT/myproj@fix-auth/.cs/plans/next.md"
     stub_gh '[]'
     out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" \
         bash "$FINISH" prepare fix-auth 2>&1)
     assert_eq "base" "$(key "$out" role)" "base role" || return 1
+    assert_eq "yes" "$(key "$out" cs_session)" "a cs base is recognised" || return 1
     assert_eq "$sha" "$(key "$out" sha)" "captured sha is the feature HEAD" || return 1
     assert_eq "cs/fix-auth" "$(key "$out" branch)" "feature is on its branch" || return 1
-    assert_eq "1" "$(key "$out" dirt_count)" "one dirty path counted" || return 1
+    assert_eq "2" "$(key "$out" dirt_count)" "both dirty paths counted, .cs/ included" || return 1
     assert_output_contains "$out" "dirt: ?? scratch.txt" "dirt is listed as porcelain" || return 1
+    assert_output_contains "$out" "dirt: ?? .cs/plans/" "session records under .cs/ are reported" || return 1
     assert_eq "none" "$(key "$out" pr_state)" "no PR" || return 1
+}
+
+test_prepare_in_a_plain_checkout_says_so() {
+    local dir="$TEST_TMPDIR/plain"
+    mkdir -p "$dir"
+    (cd "$dir" && git init -q && git commit -q --allow-empty -m init && git checkout -q -b topic)
+    local out
+    out=$(CLAUDE_SESSION_DIR="$dir" CLAUDE_SESSION_NAME="plain" bash "$FINISH" prepare 2>&1)
+    assert_eq "no" "$(key "$out" cs_session)" "an ordinary checkout is not a cs session" || return 1
+    assert_eq "topic" "$(key "$out" base_branch)" "branch reported" || return 1
+}
+
+test_prepare_calls_two_open_prs_unknown() {
+    finish_fixture myproj fix-auth > /dev/null
+    stub_gh '[
+      {"number":3,"state":"OPEN","url":"https://github.com/example-org/example-repo/pull/3","mergeCommit":null,"mergedAt":null,"baseRefName":"main","headRefOid":"aaa","headRepositoryOwner":{"login":"example-org"},"isCrossRepository":false},
+      {"number":5,"state":"OPEN","url":"https://github.com/example-org/example-repo/pull/5","mergeCommit":null,"mergedAt":null,"baseRefName":"release","headRefOid":"aaa","headRepositoryOwner":{"login":"example-org"},"isCrossRepository":false}
+    ]'
+    local out
+    out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" bash "$FINISH" prepare fix-auth 2>&1)
+    assert_eq "unknown" "$(key "$out" pr_state)" "two open PRs are ambiguous" || return 1
+    assert_output_contains "$out" "pr_reason: ambiguous — #3 OPEN, #5 OPEN" "both are named" || return 1
+}
+
+test_prepare_calls_a_reused_branch_unknown() {
+    # An old MERGED PR beside a newer OPEN one on the same head: the branch
+    # was reused after a landing; neither state describes this capture.
+    finish_fixture myproj fix-auth > /dev/null
+    stub_gh '[
+      {"number":7,"state":"MERGED","url":"https://github.com/example-org/example-repo/pull/7","mergeCommit":{"oid":"abc123"},"mergedAt":"2026-09-01T09:00:00Z","baseRefName":"main","headRefOid":"old","headRepositoryOwner":{"login":"example-org"},"isCrossRepository":false},
+      {"number":9,"state":"OPEN","url":"https://github.com/example-org/example-repo/pull/9","mergeCommit":null,"mergedAt":null,"baseRefName":"main","headRefOid":"new","headRepositoryOwner":{"login":"example-org"},"isCrossRepository":false}
+    ]'
+    local out
+    out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" bash "$FINISH" prepare fix-auth 2>&1)
+    assert_eq "unknown" "$(key "$out" pr_state)" "merged beside open is ambiguous" || return 1
+    assert_output_contains "$out" "#7 MERGED, #9 OPEN" "both are named" || return 1
 }
 
 test_prepare_refuses_a_worktree_off_its_branch() {
@@ -1214,9 +1364,9 @@ test_prepare_refuses_a_worktree_off_its_branch() {
 test_prepare_reports_a_merged_pr_and_filters_forks() {
     finish_fixture myproj fix-auth > /dev/null
     stub_gh '[
-      {"number":9,"state":"MERGED","url":"https://github.com/other-org/example-repo/pull/9","mergeCommit":{"oid":"ffff"},"mergedAt":"2026-09-13T09:00:00Z","baseRefName":"main","headRepositoryOwner":{"login":"other-org"}},
-      {"number":7,"state":"MERGED","url":"https://github.com/example-org/example-repo/pull/7","mergeCommit":{"oid":"abc123"},"mergedAt":"2026-09-12T09:00:00Z","baseRefName":"main","headRepositoryOwner":{"login":"example-org"}},
-      {"number":8,"state":"MERGED","url":"https://github.com/example-org/example-repo/pull/8","mergeCommit":{"oid":"def456"},"mergedAt":"2026-09-12T10:00:00Z","baseRefName":"main","headRepositoryOwner":{"login":"example-org"}}
+      {"number":9,"state":"MERGED","url":"https://github.com/other-org/example-repo/pull/9","mergeCommit":{"oid":"ffff"},"mergedAt":"2026-09-13T09:00:00Z","baseRefName":"main","headRefOid":"f0f0","headRepositoryOwner":{"login":"other-org"},"isCrossRepository":true},
+      {"number":7,"state":"MERGED","url":"https://github.com/example-org/example-repo/pull/7","mergeCommit":{"oid":"abc123"},"mergedAt":"2026-09-12T09:00:00Z","baseRefName":"main","headRefOid":"a1a1","headRepositoryOwner":{"login":"example-org"},"isCrossRepository":false},
+      {"number":8,"state":"MERGED","url":"https://github.com/example-org/example-repo/pull/8","mergeCommit":{"oid":"def456"},"mergedAt":"2026-09-12T10:00:00Z","baseRefName":"main","headRefOid":"b2b2","headRepositoryOwner":{"login":"example-org"},"isCrossRepository":false}
     ]'
     local out
     out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" \
@@ -1225,13 +1375,15 @@ test_prepare_reports_a_merged_pr_and_filters_forks() {
     assert_eq "8" "$(key "$out" pr_number)" "newest mergedAt wins among this repo's PRs; the fork's #9 is ignored" || return 1
     assert_eq "def456" "$(key "$out" pr_merge_commit)" "merge commit oid" || return 1
     assert_eq "main" "$(key "$out" pr_base_ref)" "base ref" || return 1
+    assert_eq "b2b2" "$(key "$out" pr_head_oid)" "head oid passed through for the skill to compare with the capture" || return 1
     assert_file_contains "$TEST_TMPDIR/gh.argv" "pr list --repo example-org/example-repo --head cs/fix-auth --state all --limit 100" \
         "gh is asked for every state, scoped to origin's repo" || return 1
+    assert_file_contains "$TEST_TMPDIR/gh.argv" "headRefOid,headRepositoryOwner,isCrossRepository" "the spec's fields are requested" || return 1
 }
 
 test_prepare_reports_an_open_pr() {
     finish_fixture myproj fix-auth > /dev/null
-    stub_gh '[{"number":3,"state":"OPEN","url":"https://github.com/example-org/example-repo/pull/3","mergeCommit":null,"mergedAt":null,"baseRefName":"main","headRepositoryOwner":{"login":"example-org"}}]'
+    stub_gh '[{"number":3,"state":"OPEN","url":"https://github.com/example-org/example-repo/pull/3","mergeCommit":null,"mergedAt":null,"baseRefName":"main","headRefOid":"aaa","headRepositoryOwner":{"login":"example-org"},"isCrossRepository":false}]'
     local out
     out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" bash "$FINISH" prepare fix-auth 2>&1)
     assert_eq "OPEN" "$(key "$out" pr_state)" "open state" || return 1
@@ -1240,7 +1392,7 @@ test_prepare_reports_an_open_pr() {
 
 test_prepare_reports_closed_unmerged_as_closed() {
     finish_fixture myproj fix-auth > /dev/null
-    stub_gh '[{"number":4,"state":"CLOSED","url":"https://github.com/example-org/example-repo/pull/4","mergeCommit":null,"mergedAt":null,"baseRefName":"main","headRepositoryOwner":{"login":"example-org"}}]'
+    stub_gh '[{"number":4,"state":"CLOSED","url":"https://github.com/example-org/example-repo/pull/4","mergeCommit":null,"mergedAt":null,"baseRefName":"main","headRefOid":"aaa","headRepositoryOwner":{"login":"example-org"},"isCrossRepository":false}]'
     local out
     out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" bash "$FINISH" prepare fix-auth 2>&1)
     assert_eq "CLOSED" "$(key "$out" pr_state)" "closed state" || return 1
@@ -1258,7 +1410,7 @@ test_prepare_never_reads_a_gh_failure_as_no_pr() {
 
 test_prepare_treats_a_vanished_head_repo_as_unknown() {
     finish_fixture myproj fix-auth > /dev/null
-    stub_gh '[{"number":5,"state":"MERGED","url":"https://github.com/example-org/example-repo/pull/5","mergeCommit":{"oid":"aaa"},"mergedAt":"2026-09-12T09:00:00Z","baseRefName":"main","headRepositoryOwner":null}]'
+    stub_gh '[{"number":5,"state":"MERGED","url":"https://github.com/example-org/example-repo/pull/5","mergeCommit":{"oid":"aaa"},"mergedAt":"2026-09-12T09:00:00Z","baseRefName":"main","headRefOid":"aaa","headRepositoryOwner":null,"isCrossRepository":false}]'
     local out
     out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" bash "$FINISH" prepare fix-auth 2>&1)
     assert_eq "unknown" "$(key "$out" pr_state)" "a PR whose head repository is gone cannot be attributed" || return 1
@@ -1306,9 +1458,12 @@ test_report_after_a_squash_landing_gives_the_squash_notice() {
 
 run_test test_prepare_in_feature_session_hands_off
 run_test test_prepare_in_base_captures_sha_branch_and_dirt
+run_test test_prepare_in_a_plain_checkout_says_so
 run_test test_prepare_refuses_a_worktree_off_its_branch
 run_test test_prepare_reports_a_merged_pr_and_filters_forks
 run_test test_prepare_reports_an_open_pr
+run_test test_prepare_calls_two_open_prs_unknown
+run_test test_prepare_calls_a_reused_branch_unknown
 run_test test_prepare_reports_closed_unmerged_as_closed
 run_test test_prepare_never_reads_a_gh_failure_as_no_pr
 run_test test_prepare_treats_a_vanished_head_repo_as_unknown
@@ -1394,7 +1549,7 @@ pr_lookup() {  # base_dir branch
     fi
     err=$(mktemp "${TMPDIR:-/tmp}/finish-gh.XXXXXX")
     if ! json=$(gh_timed pr list --repo "$repo" --head "$2" --state all --limit 100 \
-            --json number,state,url,mergeCommit,mergedAt,baseRefName,headRepositoryOwner 2>"$err"); then
+            --json number,state,url,mergeCommit,mergedAt,baseRefName,headRefOid,headRepositoryOwner,isCrossRepository 2>"$err"); then
         echo "pr_state: unknown"
         echo "pr_reason: gh pr list failed: $(head -c 200 "$err" | tr '\n' ' ')"
         rm -f "$err"
@@ -1414,37 +1569,50 @@ pr_lookup() {  # base_dir branch
         return 0
     fi
     # A fork's same-named branch is not this PR.
-    json=$(printf '%s' "$json" | jq -c --arg owner "$owner" '[.[] | select(.headRepositoryOwner.login == $owner)]')
+    json=$(printf '%s' "$json" | jq -c --arg owner "$owner" \
+        '[.[] | select(.headRepositoryOwner.login == $owner and .isCrossRepository == false)]')
     n=$(printf '%s' "$json" | jq 'length')
     if [ "$n" = 0 ]; then
         echo "pr_state: none"
+        return 0
+    fi
+    # Selection policy. One MERGED (newest mergedAt when several, a re-opened
+    # and re-merged branch) or one OPEN is a state. Two OPEN PRs, or a MERGED
+    # PR beside an OPEN one (branch reused after a landing), cannot be told
+    # apart from here: unknown, with the numbers, never a guess.
+    local n_open n_merged
+    n_open=$(printf '%s' "$json" | jq '[.[] | select(.state == "OPEN")] | length')
+    n_merged=$(printf '%s' "$json" | jq '[.[] | select(.state == "MERGED")] | length')
+    if [ "$n_open" -gt 1 ] || { [ "$n_open" -gt 0 ] && [ "$n_merged" -gt 0 ]; }; then
+        echo "pr_state: unknown"
+        echo "pr_reason: ambiguous — $(printf '%s' "$json" | jq -r '[.[] | "#\(.number) \(.state)"] | join(", ")') all have head $2; pick one on GitHub"
         return 0
     fi
     local merged open
     merged=$(printf '%s' "$json" | jq -c '[.[] | select(.state == "MERGED")] | sort_by(.mergedAt) | last // empty')
     if [ -n "$merged" ]; then
         echo "pr_state: MERGED"
-        printf '%s' "$merged" | jq -r '"pr_number: \(.number)\npr_url: \(.url)\npr_merge_commit: \(.mergeCommit.oid // "")\npr_base_ref: \(.baseRefName)"'
+        printf '%s' "$merged" | jq -r '"pr_number: \(.number)\npr_url: \(.url)\npr_merge_commit: \(.mergeCommit.oid // "")\npr_base_ref: \(.baseRefName)\npr_head_oid: \(.headRefOid)"'
         return 0
     fi
     open=$(printf '%s' "$json" | jq -c '[.[] | select(.state == "OPEN")] | first // empty')
     if [ -n "$open" ]; then
         echo "pr_state: OPEN"
-        printf '%s' "$open" | jq -r '"pr_number: \(.number)\npr_url: \(.url)\npr_base_ref: \(.baseRefName)"'
+        printf '%s' "$open" | jq -r '"pr_number: \(.number)\npr_url: \(.url)\npr_base_ref: \(.baseRefName)\npr_head_oid: \(.headRefOid)"'
         return 0
     fi
     echo "pr_state: CLOSED"
     printf '%s' "$json" | jq -r 'first | "pr_number: \(.number)\npr_url: \(.url)"'
 }
 
-# Uncommitted work in the worktree, as porcelain lines. Untracked paths that
-# are cs's own bookkeeping (the same three lib/30-worktree.sh's
-# _worktree_untracked_at_risk drops) are not the user's dirt.
+# Everything uncommitted in the worktree, as porcelain lines, unfiltered. The
+# retire verb's untracked filter (lib/30-worktree.sh _worktree_untracked_at_risk)
+# is a REMOVAL-risk filter that drops records because retirement fuses them;
+# integrate fuses nothing, so a new tracked-mode plan or memory file under
+# .cs/ is exactly the dirt the user must hear about.
 dirt_lines() {  # dir
     local dirt
-    dirt=$(git -C "$1" status --porcelain 2>/dev/null \
-        | grep -v -e '^?? \.cs/' -e '^?? \.claude/settings\.local\.json$' -e '^?? CLAUDE\.local\.md$' \
-        || true)
+    dirt=$(git -C "$1" status --porcelain 2>/dev/null || true)
     echo "dirt_count: $(printf '%s' "$dirt" | grep -c . || true)"
     [ -z "$dirt" ] || printf '%s\n' "$dirt" | sed 's/^/dirt: /'
 }
@@ -1464,6 +1632,10 @@ cmd_prepare() {  # [feature]
     fi
     echo "role: base"
     echo "base: $session_name"
+    # A cs session has a .cs/ directory; an ordinary checkout does not. The
+    # skill's plain-branch path (checkout + merge + branch -d) is only for the
+    # latter — a cs base on a non-default branch must never enter it.
+    if [ -d "$session_dir/.cs" ]; then echo "cs_session: yes"; else echo "cs_session: no"; fi
     echo "base_branch: $(git -C "$session_dir" symbolic-ref -q --short HEAD 2>/dev/null || echo detached)"
     if [ -z "$feature" ]; then
         echo "task: "
@@ -1501,7 +1673,14 @@ cmd_report() {  # base task sha
     dirt_lines "$wt"
     pr_lookup "$session_dir" "cs/$task"
     if [ "$landed" = "yes" ]; then
-        echo "retire: close the feature session, then: cs $base --merge $task"
+        # Tracked-.cs mode: the integrate's timeline event dirties the base,
+        # and the retire verb refuses dirt. Say so rather than let the verb's
+        # refusal be the first the user hears of it.
+        if [ -n "$(git -C "$session_dir" status --porcelain -- .cs 2>/dev/null)" ]; then
+            echo "retire: commit the session bookkeeping in $base (git status -- .cs), close the feature session, then: cs $base --merge $task"
+        else
+            echo "retire: close the feature session, then: cs $base --merge $task"
+        fi
     else
         echo "retire: do NOT run cs $base --merge $task — cs/$task is not an ancestor of base (squash or rebase landing) and the verb will try to merge the branch again; continue on a new task and leave this worktree until the preservation-first retire spec ships"
     fi
@@ -1518,8 +1697,8 @@ Then: `chmod +x skills/finish/scripts/finish.sh`.
 
 - [ ] **Step 4: Run**
 
-Run: `bash tests/test_finish_script.sh 2>&1 | tail -15`
-Expected: `Results: 11/11 passed`. The report tests need Task 3's built `bin/cs`.
+Run: `bash tests/test_finish_script.sh > "$TMPDIR/t5.out" 2>&1; echo "rc=$?"; grep -E 'Results:|FAIL' "$TMPDIR/t5.out"`
+Expected: `rc=0`, `Results: 15/15 passed`. The report tests need Task 3's built `bin/cs`.
 
 - [ ] **Step 5: Portability check under bash 3.2**
 
@@ -1630,6 +1809,8 @@ test_finish_skill_never_list() {
     assert_file_contains "$SKILL" "branch -D" "force delete forbidden" || return 1
     assert_file_contains "$SKILL" "Never treat a gh failure as no PR" "gh failure rail" || return 1
     assert_file_contains "$SKILL" "never runs gates in a live tree" "live-tree rail" || return 1
+    assert_file_contains "$SKILL" "cs_session: yes" "a cs base never enters the plain-branch path" || return 1
+    assert_file_contains "$SKILL" "Never enter" "plain-branch exclusion stated" || return 1
     assert_file_contains "$SKILL" "Never delete" "deletion rail" || return 1
 }
 
@@ -1710,10 +1891,17 @@ workspace and read its `key: value` lines.
    (`/finish fix-auth`, which is what `cs <base> -finish <feature>` arms from
    the TUI picker). Follow **The ritual** below with the keys `prepare`
    printed. An `error:` line is a stop: print it and stop.
-3. **`role: base` with an empty task and a non-default `base_branch`** — an
-   ordinary feature branch, not a cs worktree. Follow **Plain branch** below.
-4. Otherwise (base session, default branch, no feature named) say there is
-   nothing to finish and stop.
+3. **`role: base`, `cs_session: yes`, no task** — a cs base session with no
+   feature named. Run `cs <base> -features`, show the list, and ask which
+   feature to finish (AskUserQuestion). Never enter **Plain branch** from a
+   cs session, whatever branch it is on: that path checks out another branch
+   and deletes the current one.
+4. **`role: base`, `cs_session: no`, non-default `base_branch`** — an
+   ordinary checkout on a feature branch, not a cs session. Follow **Plain
+   branch** below; it is the one place this skill runs gates in a live tree
+   and deletes a branch, both scoped to that ordinary checkout.
+5. Otherwise (default branch, nothing named) say there is nothing to finish
+   and stop.
 
 ## Discover the gates
 
@@ -1759,8 +1947,12 @@ commands become `-- sh -c 'first && second'`.
 4. **PR path.** `git fetch origin`. Confirm `base_branch` equals
    `pr_base_ref`; if not, stop and say which branch to check out. Then
    `cs <base> -integrate-feature <task> <pr_merge_commit> --from-remote -- <gate command words>`.
-   The same temporary detached worktree, gate and fast-forward apply; the
-   landing commit already exists on origin, so no new merge commit is made.
+   The same temporary detached worktree, gate and fast-forward apply. When
+   the base has nothing origin lacks this fast-forwards onto the PR's
+   landing commit and makes no new commit; when the base already carries a
+   local integrate, cs makes one merge commit joining the two histories.
+   If `pr_head_oid` differs from the captured `sha`, say so: the PR landed
+   an older or newer tip than the worktree holds now.
 5. **Report.** Run
    `~/.claude/skills/finish/scripts/finish.sh report <base> <task> <sha>`
    and end with, in this order: what landed (`sha -> base_head`); the
@@ -1799,12 +1991,15 @@ bypass, skip, or weaken a gate.
 ## Never
 
 - Never push, to any remote — publishing is the user's decision.
-- Never delete anything: no worktree removal, no `git branch -d` and never
-  `git branch -D` on a cs branch, no `cs <base> --merge` on the user's behalf.
+- Never delete anything in a cs session: no worktree removal, no
+  `git branch -d` and never `git branch -D` on a cs branch, no
+  `cs <base> --merge` on the user's behalf. (**Plain branch** on an ordinary
+  checkout may `git branch -d` a merged branch after green gates.)
 - Never merge over dirt or copy `.env`/untracked inputs into the temp.
 - Never mutate a live foreign base: the entry refuses; do not work around it.
 - Never treat a gh failure as no PR.
-- Never run gates in a live tree; the entry runs them in the temp.
+- Never run gates in a live cs tree; the entry runs them in the temp.
+  (**Plain branch** runs them in its ordinary checkout, as before.)
 ```
 
 - [ ] **Step 4: Manifests, kick, hooks, help, completion**
@@ -1833,6 +2028,8 @@ CS_SKILL_FILES=(
 
 `lib/75-launch.sh:274`: `[ -n "$merge_feature" ] && merge_kick="/finish $merge_feature"`. Also the comment above it (lines 267-270, "Arming the ritual…") still reads true; leave it.
 
+Four existing pins in `tests/test_worktrees.sh` name the old kick and must follow it, or three fail and the fourth goes vacuous: at lines 974, 990 and 1035 change `"/merge fix-auth"` to `"/finish fix-auth"` (positive assertions), and at line 1064 change the negative `"/merge fix-auth"` to `"/finish fix-auth"` so it still detects the kick wrongly overriding the rotation choice. Read each line before editing; the line numbers are as of `14d1a48` and Tasks 2–4 appended below them, so they should be unchanged.
+
 `git rm -r skills/merge`.
 
 `hooks/session-start.sh:670-673` becomes:
@@ -1857,13 +2054,21 @@ Check `tests/test_hooks.sh` for pins on the old sentence first: `grep -n 'ask th
 
 - [ ] **Step 5: Build, run every touched suite**
 
-Run: `./build.sh && for s in test_finish_skill test_retired_skills test_install test_hooks test_help test_completions test_write_as_me_skill; do bash tests/$s.sh 2>&1 | tail -1; done`
-Expected: every line `… 0 failed`. `test_install.sh` covers manifest sync with the built binary and `finish/scripts/finish.sh` being executable in the repo.
+Run (capture each suite's exit status; a `| tail` would report tail's):
+
+```bash
+./build.sh
+for s in test_finish_skill test_retired_skills test_install test_hooks test_help test_completions test_write_as_me_skill test_worktrees; do
+    bash "tests/$s.sh" > "$TMPDIR/$s.out" 2>&1; echo "$s rc=$?"; grep -E '^Results:' "$TMPDIR/$s.out"
+done
+```
+
+Expected: every `rc=0` and every `Results:` line `0 failed`. `test_install.sh` covers manifest sync with the built binary and `finish/scripts/finish.sh` being executable in the repo; `test_worktrees.sh` covers the four kick pins.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add -A skills/finish skills/merge lib/00-header.sh install.sh lib/75-launch.sh hooks/session-start.sh hooks/subagent-context.sh lib/10-help.sh completions/_cs bin/cs tests/test_finish_skill.sh tests/test_retired_skills.sh tests/test_hooks.sh
+git add -A skills/finish skills/merge lib/00-header.sh install.sh lib/75-launch.sh hooks/session-start.sh hooks/subagent-context.sh lib/10-help.sh completions/_cs bin/cs tests/test_finish_skill.sh tests/test_retired_skills.sh tests/test_hooks.sh tests/test_worktrees.sh
 git status --short   # nothing unexpected staged
 git commit -m "feat(finish): /finish replaces /merge — integrate and report, never remove"
 ```
@@ -1918,10 +2123,31 @@ In `merge_screen_keeps_the_whole_plan_on_a_short_terminal`, change the assertion
 
 In `merge_screen_does_not_promise_a_merge_for_an_already_merged_feature`, change `"already merged"` to `"already integrated"` and keep the "neither merge shape" assertion.
 
+In `merge_screen_does_not_promise_a_merge_for_a_branch_at_base_head` (`ui.rs:4489`), change `"nothing to merge"` to `"nothing to land"` and add `assert!(!text.contains("temp checkout"), "no gate runs when nothing lands:\n{text}")` — the entry returns before creating any checkout in that case.
+
+Replace `merge_screen_names_fast_forward_versus_merge_commit` (`ui.rs:4742`) — its ff-versus-merge distinction no longer exists, every ordinary landing is a merge commit — with:
+
+```rust
+    #[test]
+    fn merge_screen_promises_a_merge_commit_for_every_ordinary_landing() {
+        // The entry merges --no-ff, so the ff/merge-commit split the old
+        // verb had is gone: both rows promise a merge commit.
+        let mut app = merge_app();
+        let text = render_wide(&mut app);
+        assert!(text.contains("merge commit"), "an ff-able feature still lands as a merge commit:\n{text}");
+        assert!(!text.contains("fast-forward "), "fast-forward is never promised for the landing shape:\n{text}");
+        app.merge_selected = 1; // ff: false
+        let text = render_wide(&mut app);
+        assert!(text.contains("merge commit"), "a non-ff feature lands as a merge commit:\n{text}");
+    }
+```
+
+(The assertion uses `"fast-forward "` with a trailing space so the step-2 phrase "fast-forward myproj onto the result" — which is the base fast-forwarding onto the temp's result, not the landing shape — needs renaming too: use "land on myproj (merge commit)" for step 2; see Step 3.)
+
 - [ ] **Step 2: Run to see them fail**
 
-Run: `cargo test --manifest-path tui/Cargo.toml merge_screen 2>&1 | tail -15`
-Expected: the four tests fail on the old wording.
+Run: `cargo test --manifest-path tui/Cargo.toml merge_screen > "$TMPDIR/t7.out" 2>&1; echo "rc=$?"; grep -E 'test result|FAILED|panicked' "$TMPDIR/t7.out"`
+Expected: rc=101; the six rewritten tests fail on the old wording.
 
 - [ ] **Step 3: Rewrite the plan block**
 
@@ -1934,15 +2160,20 @@ Replace `tui/src/ui.rs:2045-2076` (from the `// Enter arms /merge` comment throu
         // separate verb. `ahead == 0` is the entry's own "already integrated"
         // condition (is-ancestor of base HEAD), so no merge is promised then.
         let nothing_to_merge = f.ahead == 0;
-        let step2 = if nothing_to_merge {
-            format!("    2  already integrated into {} \u{b7} nothing to land", app.merge_base)
+        // The whole plan is conditional: when nothing lands, the entry
+        // returns before creating a checkout or running a gate.
+        let (step1, step2) = if nothing_to_merge {
+            (
+                format!("    1  already integrated into {} \u{b7} nothing to land", app.merge_base),
+                "    2  no checkout, no gates".to_string(),
+            )
         } else {
-            format!("    2  fast-forward {} onto the result (merge commit)", app.merge_base)
+            (
+                format!("    1  merge {} + {} in a temp checkout \u{b7} gates there", app.merge_base, f.branch),
+                format!("    2  land on {} (merge commit)", app.merge_base),
+            )
         };
-        lines.push(Line::from(Span::styled(
-            format!("    1  merge {} + {} in a temp checkout \u{b7} gates there", app.merge_base, f.branch),
-            Style::default().fg(p.ink),
-        )));
+        lines.push(Line::from(Span::styled(step1, Style::default().fg(p.ink))));
         lines.push(Line::from(Span::styled(step2, Style::default().fg(p.ink))));
         // Two lines: Paragraph truncates rather than wraps, and a real base
         // and task name would push the verb off the tail of one line.
@@ -2020,7 +2251,15 @@ Insert above `## 2026.9.13`:
 
 - [ ] **Step 3: Named suites locally, the full gate on ghost**
 
-`lib/` and `hooks/` changed, so `--changed` would run the full suite locally; skip it. Run `./build.sh`, then the touched suites by name: `test_shadow_ref test_worktrees test_finish_script test_finish_skill test_retired_skills test_install test_hooks test_help test_completions test_docs`, each as `bash tests/<suite>.sh 2>&1 | tail -1`. Then invoke the `claude-tmux:remote-tests` skill for the full suite on ghost, in the background, with its output captured to a file under the scratchpad.
+`lib/` and `hooks/` changed, so `--changed` would run the full suite locally; skip it. Run `./build.sh`, then the touched suites by name, each with its exit status captured (never `| tail`, which reports tail's status and can SIGPIPE the suite):
+
+```bash
+for s in test_shadow_ref test_worktrees test_finish_script test_finish_skill test_retired_skills test_install test_hooks test_help test_completions test_docs; do
+    bash "tests/$s.sh" > "$TMPDIR/$s.out" 2>&1; echo "$s rc=$?"; grep -E '^Results:' "$TMPDIR/$s.out"
+done
+```
+
+Then invoke the `claude-tmux:remote-tests` skill for the full suite on ghost, in the background, with its output captured to a file under the scratchpad.
 
 Expected on ghost: every suite green, `bin/cs` in sync.
 
