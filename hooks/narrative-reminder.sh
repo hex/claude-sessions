@@ -672,7 +672,7 @@ fi
 # reaches here (its branches exit above), so the drain's context breaker owns
 # hot-context handling during walk-away runs. Cursor: the conversation UUID
 # last nudged, machine-local.
-NUDGE_CTX=$(_num_or "${CS_ROTATE_NUDGE_CTX:-}" 70)
+NUDGE_CTX=$(_num_or "${CS_ROTATE_NUDGE_CTX:-}" 65)
 NUDGE_UUID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)
 NUDGE_PCT=$(cat "$QDIR/context-pct" 2>/dev/null | tr -d '[:space:]' || true)
 case "$NUDGE_PCT" in ''|*[!0-9]*) NUDGE_PCT="";; esac

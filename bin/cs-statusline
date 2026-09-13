@@ -1186,21 +1186,15 @@ _seg_pane() {
     _add "${ICON_PANE}${TMUX_PANE}" "grey"
 }
 
-# Context carries a fourth band the shared threshold helper does not: a notice
-# tier below the warning, so the ramp reads neutral, yellow, amber, red. The
-# notice colour is chosen only when the helper settled on the healthy colour,
-# which keeps the warning and critical cut points the single source of truth.
+# The ramp reads neutral, amber, red — the shared threshold helper's own two
+# cut points, with nothing layered on top.
 _seg_ctx() {
     local v="${SL_CTX%%.*}"
     [ -n "$v" ] || return 0
-    local warn crit notice
-    _num_or "${CS_STATUSLINE_CTX_WARN:-}" 50;   warn="$_NUM"
-    _num_or "${CS_STATUSLINE_CTX_CRIT:-}" 70;   crit="$_NUM"
-    _num_or "${CS_STATUSLINE_CTX_NOTICE:-}" 40; notice="$_NUM"
+    local warn crit
+    _num_or "${CS_STATUSLINE_CTX_WARN:-}" 40; warn="$_NUM"
+    _num_or "${CS_STATUSLINE_CTX_CRIT:-}" 65; crit="$_NUM"
     _thresh_color "$v" "$warn" "$crit"
-    if [ "$_COLOR" = surface ] && [ "$v" -ge "$notice" ]; then
-        _COLOR=yellow
-    fi
     _add "${ICON_CTX}ctx ${v}%" "$_COLOR"
 }
 

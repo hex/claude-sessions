@@ -154,16 +154,15 @@ export CS_REWRITE_CMD="/path/to/my-rewriter"
 # a plain integer of at most three digits; anything else falls back to the
 # default shown. A value above 100 is out of the gauge's reach and so switches
 # that band off, the same idiom cs -doctor uses on the Stop hook's tiers below.
-export CS_STATUSLINE_CTX_NOTICE="40"
-export CS_STATUSLINE_CTX_WARN="50"
-export CS_STATUSLINE_CTX_CRIT="70"
+export CS_STATUSLINE_CTX_WARN="40"
+export CS_STATUSLINE_CTX_CRIT="65"
 
 # Disable the subagent (agent-panel) statusline rows without unregistering
 export CS_SUBAGENT_STATUSLINE_DISABLE="1"
 
 # Context tiers in the Stop hook: one-time warning band start, rotation nudge
 export CS_CTX_WARN_CTX="40"
-export CS_ROTATE_NUDGE_CTX="70"
+export CS_ROTATE_NUDGE_CTX="65"
 
 # Narrative rotation: rotate when the live file passes MAX, keep about KEEP bytes
 export CS_NARRATIVE_MAX_BYTES="524288"

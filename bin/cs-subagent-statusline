@@ -203,8 +203,8 @@ render_rows() {
     # Same escalation thresholds as the bar, resolved once: a row and the bar
     # reading one env var must never disagree about where red starts.
     local ctx_warn ctx_crit
-    _num_or "${CS_STATUSLINE_CTX_WARN:-}" 50; ctx_warn="$_NUM"
-    _num_or "${CS_STATUSLINE_CTX_CRIT:-}" 70; ctx_crit="$_NUM"
+    _num_or "${CS_STATUSLINE_CTX_WARN:-}" 40; ctx_warn="$_NUM"
+    _num_or "${CS_STATUSLINE_CTX_CRIT:-}" 65; ctx_crit="$_NUM"
     while IFS= read -r line; do
         [ -n "$line" ] || continue
         id="${line%%$tab*}";    line="${line#*$tab}"
