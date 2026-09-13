@@ -962,7 +962,57 @@ HOOK
 }
 
 run_test test_integrate_lands_a_no_ff_merge_and_keeps_everything
+# The gate runs the project's build, and a build that writes into the tree
+# would otherwise land content nobody reviewed: what cs fast-forwards the base
+# onto is the merge commit, so a gate-written file either vanishes or, once
+# committed by the gate, rides in unseen. Refuse instead.
+test_integrate_refuses_a_gate_that_writes_into_the_temp() {
+    local sha base_dir head output status=0
+    sha=$(integrate_fixture myproj fix-auth)
+    base_dir="$CS_SESSIONS_ROOT/myproj"
+    head=$(git -C "$base_dir" rev-parse HEAD)
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- sh -c 'echo stale > CLAUDE.md' 2>&1) || status=$?
+    assert_eq "1" "$status" "a tree-writing gate refuses" || return 1
+    assert_output_contains "$output" "CLAUDE.md" "names the path the gate changed" || return 1
+    assert_output_contains "$output" "re-run /finish fix-auth" "names the next command" || return 1
+    assert_eq "$head" "$(git -C "$base_dir" rev-parse HEAD)" "base HEAD unchanged" || return 1
+    assert_file_not_exists "$base_dir/feature.txt" "nothing landed" || return 1
+    assert_output_not_contains "$output" "integrated fix-auth" "no summary line" || return 1
+    assert_output_not_contains "$(git -C "$base_dir" worktree list)" "cs/finish" "temp worktree removed" || return 1
+    assert_not_exists "$base_dir/.git/cs/integrate.lock" "mutex released" || return 1
+}
+
+test_integrate_refuses_a_gate_that_commits_in_the_temp() {
+    local sha base_dir head output status=0
+    sha=$(integrate_fixture myproj fix-auth)
+    base_dir="$CS_SESSIONS_ROOT/myproj"
+    head=$(git -C "$base_dir" rev-parse HEAD)
+    # A real commit: `git add . && git commit` with nothing changed exits 1 and
+    # would be caught as a red gate instead, proving nothing.
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- sh -c 'echo generated > built.txt && git add . && git commit -q -m gate-made' 2>&1) || status=$?
+    assert_eq "1" "$status" "a committing gate refuses" || return 1
+    assert_output_not_contains "$output" "Gate failed" "the gate itself was green; this is the tamper refusal" || return 1
+    assert_output_contains "$output" "re-run /finish fix-auth" "names the next command" || return 1
+    assert_eq "$head" "$(git -C "$base_dir" rev-parse HEAD)" "base HEAD unchanged" || return 1
+    assert_output_not_contains "$output" "integrated fix-auth" "no summary line" || return 1
+}
+
+test_integrate_refuses_a_gate_that_moves_the_temp_head() {
+    local sha base_dir head output status=0
+    sha=$(integrate_fixture myproj fix-auth)
+    base_dir="$CS_SESSIONS_ROOT/myproj"
+    head=$(git -C "$base_dir" rev-parse HEAD)
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- git checkout -q "$head" 2>&1) || status=$?
+    assert_eq "1" "$status" "a gate that moves the temp HEAD refuses" || return 1
+    assert_eq "$head" "$(git -C "$base_dir" rev-parse HEAD)" "base HEAD unchanged" || return 1
+    assert_output_not_contains "$output" "integrated fix-auth" "no summary line" || return 1
+    assert_file_not_exists "$base_dir/feature.txt" "nothing landed" || return 1
+}
+
 run_test test_integrate_survives_a_base_post_merge_hook_that_commits
+run_test test_integrate_refuses_a_gate_that_writes_into_the_temp
+run_test test_integrate_refuses_a_gate_that_commits_in_the_temp
+run_test test_integrate_refuses_a_gate_that_moves_the_temp_head
 run_test test_integrate_tracked_mode_union_merges_shared_records
 run_test test_integrate_then_merge_verb_takes_the_ancestor_path
 run_test test_integrate_red_gate_leaves_base_untouched

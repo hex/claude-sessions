@@ -640,6 +640,11 @@ _integrate_in_temp() {  # base_dir wt_dir task sha common from_remote gate...
         git -C "$tmp" -c core.hooksPath="$no_hooks" merge --no-ff --no-edit \
             -m "Merge feature $task ($sha7)" "$sha" >/dev/null 2>&1 || merge_status=$?
     fi
+    # The merge commit this integrate will land, read before the gate runs.
+    # Everything after the gate is measured against it: what lands is this
+    # commit, never whatever the temp holds when the gate is done.
+    local M=""
+    [ "$merge_status" = 0 ] && M=$(git -C "$tmp" rev-parse HEAD)
     if [ "$merge_status" != 0 ]; then
         rmdir "$no_hooks"
         local conflicts
@@ -679,12 +684,36 @@ Move or delete these untracked files in $base_dir, then re-run /finish $task"
 
     local gate_log
     gate_log=$(mktemp "${TMPDIR:-/tmp}/cs-gate.XXXXXX")
-    if ! (cd "$tmp" && "$@") > "$gate_log" 2>&1; then
+    # </dev/null: a gate that reads stdin would otherwise consume whatever cs
+    # was given and block a non-interactive run forever.
+    if ! (cd "$tmp" && "$@") > "$gate_log" 2>&1 < /dev/null; then
         cat "$gate_log" >&2
         rm -f "$gate_log"
         error "Gate failed in $tmp (output above); base $base_dir untouched at $B"
     fi
     rm -f "$gate_log"
+
+    # A green gate that changed the temp is still a refusal. What lands is M,
+    # so a file the gate wrote is either dropped on the floor or — once the
+    # gate commits it — rides into the base unreviewed. Generated output
+    # belongs on the feature branch, committed by the person who ran the build.
+    local gate_head gate_dirt tampered
+    gate_head=$(git -C "$tmp" rev-parse HEAD 2>/dev/null || echo "")
+    gate_dirt=$(git -C "$tmp" status --porcelain --untracked-files=no 2>/dev/null || true)
+    tampered="$gate_dirt"
+    if [ "$gate_head" != "$M" ]; then
+        tampered="${tampered:+$tampered
+}HEAD moved to ${gate_head:-(unreadable)}"
+    fi
+    if git -C "$tmp" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+        tampered="${tampered:+$tampered
+}a merge is in progress"
+    fi
+    if [ -n "$tampered" ]; then
+        error "The gate modified tracked files in the temp checkout; base $base_dir untouched at $B. What the gate changed:
+$tampered
+Commit the generated output on the feature branch, then re-run /finish $task"
+    fi
 
     # Re-verify the base immediately before landing. --ff-only alone is not
     # the "base unchanged" check: a base reset to an ancestor of B still
@@ -700,7 +729,7 @@ Move or delete these untracked files in $base_dir, then re-run /finish $task"
     # Fast-forward BEFORE removing the temp: until then the merge commit is
     # reachable only from the temp's detached HEAD.
     local R ff_err ff_status=0
-    R=$(git -C "$tmp" rev-parse HEAD)
+    R="$M"
     ff_err=$(git -C "$base_dir" merge --ff-only "$R" 2>&1 >/dev/null) || ff_status=$?
     if [ "$ff_status" != 0 ]; then
         error "Base $base_dir moved or changed during the gates (was $B); re-run /finish $task
