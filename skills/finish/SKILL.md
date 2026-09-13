@@ -105,6 +105,9 @@ commands become `-- sh -c 'first && second'`.
 
 ## After a green integrate — offers, not actions
 
+- If the repo has submodules, tell the user to run `git submodule update` in
+  the base after a landing: the merge moved the gitlinks, the working
+  contents did not follow.
 - Offer `/checkpoint <feature>-integrated`.
 - If the project instructions document a deploy step, offer it (one
   question). Never deploy unprompted.
