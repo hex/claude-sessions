@@ -35,8 +35,7 @@ _alloc_random_color() {
 
 # Read a key's value from a machine-local state file. Prints the value to
 # stdout, or empty if absent or unreadable. Never errors. KEEP THE FORMAT IN
-# SYNC WITH bin/cs-statusline's _read_session_color (a pure-bash copy on the
-# render hot path) and hooks/session-start.sh's local_state_set.
+# SYNC WITH hooks/session-start.sh's local_state_set.
 _read_local_state() {
     local state="$1" key="$2"
     [ -f "$state" ] || return 0

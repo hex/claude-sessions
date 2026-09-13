@@ -24,8 +24,8 @@ setup() {
                 unset "$_v" 2>/dev/null || true ;;
         esac
     done < <(env)
-    # COLUMNS drives the full-width gradient; unset so tests never inherit
-    # whatever width the ambient terminal running the suite happens to have.
+    # The render no longer reads COLUMNS, but unset it anyway so no test can
+    # accidentally depend on the ambient terminal's width.
     unset COLUMNS 2>/dev/null || true
     export CS_SESSIONS_ROOT="$TEST_TMPDIR/sessions"
     mkdir -p "$CS_SESSIONS_ROOT"
@@ -73,12 +73,35 @@ run_sl_stderr() {
     printf '%s' "$1" | bash "$SL" 2>&1 >/dev/null
 }
 
-# Isolate the ctx pill from a rendered line ($1) given its reading ($2): split
-# on ESC and keep the run carrying the gauge text. The neutral surface grey is
-# shared with the session and limits pills, so a whole-line match cannot say
-# whose colour it found — only a negative assertion scoped to this pill can.
+CAPL=$'\xee\x82\xb6'   # U+E0B6 rounded left cap
+CAPR=$'\xee\x82\xb4'   # U+E0B4 rounded right cap
+ESC_=$'\033'
+
+# Fixed-string output asserts: the capsule pins open with `[`, which the
+# grep-based helpers in test_lib.sh read as a bracket expression.
+assert_output_contains_f() {
+    grep -qF -- "$2" <<< "$1" || {
+        echo "  FAIL: ${3:-output should contain '$2'}"
+        echo "    output: $(head -3 <<< "$1")"
+        return 1
+    }
+}
+assert_output_not_contains_f() {
+    ! grep -qF -- "$2" <<< "$1" || { echo "  FAIL: ${3:-output should not contain '$2'}"; return 1; }
+}
+
+# The SGR run carrying the ctx NUMBER ($2, e.g. 42): the label and the number
+# are separate items now, so a run never carries both. Replaces ctx_pill for
+# every test that isolates the gauge's colour.
+ctx_num_run() {
+    printf '%s' "$1" | tr '\033' '\n' | grep -F "m${2}%" | head -1
+}
+
+# Isolate the ctx pill from a rendered line ($1) given its reading ($2): the
+# label and the number are separate items now, so this just forwards to the
+# run carrying the number.
 ctx_pill() {
-    printf '%s' "$1" | tr '\033' '\n' | grep -F "ctx ${2}%" | head -1
+    ctx_num_run "$1" "$2"
 }
 
 # Source cs-statusline's functions without running main, so internal helpers can
@@ -131,7 +154,7 @@ test_happy_path_docs_fixture_plain() {
     local out
     out=$(run_sl "$FIXTURE_DOCS")
     # git absent (non-git dir) and disc absent (no cs session).
-    assert_eq "my-session > ✦ Opus high > ◔ ctx 8% > ◷ 5h 23% > ◑ wk 41%" "$out" \
+    assert_eq "my-session · ✦ Opus high > ◔ ctx 8% > ◷ 5h 23% > ◑ wk 41%" "$out" \
         "docs fixture should render identity first, then gauges (no badge in plain mode)"
 }
 
@@ -158,7 +181,7 @@ test_all_segments_ordering_plain() {
     }')
     local out
     out=$(run_sl "$json")
-    assert_eq "mysess > ⎇ main +1!1 > ✦ Opus high > ◔ ctx 34% > ◷ 5h 23% > ◑ wk 41%" "$out" \
+    assert_eq "mysess · ⎇ main +1!1 · ✦ Opus high > ◔ ctx 34% > ◷ 5h 23% > ◑ wk 41%" "$out" \
         "all segments should render in order: session, branch, model, then gauges (no badge in plain mode)"
 }
 
@@ -171,40 +194,40 @@ test_limits_neutral_when_healthy() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":23},"seven_day":{"used_percentage":41}}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "5h 23%" "5h block should render" || return 1
-    assert_output_contains "$out" "wk 41%" "wk block should render" || return 1
+    assert_output_contains "$out" "◷ 5h" "5h block should render" || return 1
+    assert_output_contains "$out" "23%" "5h reading should render" || return 1
+    assert_output_contains "$out" "◑ wk" "wk block should render" || return 1
+    assert_output_contains "$out" "41%" "wk reading should render" || return 1
     assert_output_not_contains "$out" "48;2;138;134;236" "healthy limits must not take the accent periwinkle" || return 1
     assert_output_not_contains "$out" "48;2;255;183;77" "healthy limits must not show amber" || return 1
 }
 
 # ============================================================================
-# Two accents by default: session color and model; every other healthy
-# segment is quiet grey
+# Identity items are bold ink on the shared surface; no item carries a fill
+# of its own
 # ============================================================================
 
-test_two_accents_default() {
+test_identity_items_are_bold_ink() {
     export COLORTERM=truecolor
+    export CS_TERM_BG_RGB="253;246;227"
     export CLAUDE_SESSION_NAME="accents"
     make_cs_session "accents" 30720 cyan
     local json='{"session_name":"accents","model":{"display_name":"Opus"},"workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8},"cost":{"total_cost_usd":1.0},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":40}}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;8;145;178" "session block should carry the session color (cyan)" || return 1
-    assert_output_contains "$out" "48;2;138;134;236;38;2;240;242;255" "model should be the usage-chip periwinkle with the chip's text color" || return 1
-    local greys
-    greys=$(printf '%s' "$out" | grep -o '48;2;128;120;110' | grep -c . ) || greys=0
-    if [ "$greys" -lt 3 ]; then
-        echo "  FAIL: expected ctx, 5h, wk on grey (got $greys grey blocks)"
-        return 1
-    fi
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;79;77;71;1maccents" "session is bold ink on the surface" || return 1
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;79;77;71;1m✦ Opus" "model is bold ink on the surface" || return 1
+    assert_output_not_contains "$out" "48;2;8;145;178" "no session-colour fill" || return 1
+    assert_output_not_contains "$out" "48;2;138;134;236" "no periwinkle fill" || return 1
 }
 
 # ============================================================================
-# The branch pill is a bold slate-blue accent, ordered before the model
+# The branch item is bold ink, no fill of its own, ordered before the model
 # ============================================================================
 
-test_git_branch_bold_slate_accent() {
+test_git_branch_is_bold_ink_no_fill() {
     export COLORTERM=truecolor
+    export CS_TERM_BG_RGB="253;246;227"
     local work
     work=$(make_git_work)
     local json
@@ -215,15 +238,15 @@ test_git_branch_bold_slate_accent() {
     }')
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;79;91;140;38;2;240;242;255;1" \
-        "branch should render bold in slate-blue with the chip text color" || return 1
-    # Branch sits before the model: the slate branch bg appears earlier in the
-    # output stream than the periwinkle model bg.
-    local slate_pos peri_pos
-    slate_pos=$(printf '%s' "$out" | grep -bo '48;2;79;91;140' | head -1 | cut -d: -f1)
-    peri_pos=$(printf '%s' "$out" | grep -bo '48;2;138;134;236' | head -1 | cut -d: -f1)
-    [ -n "$slate_pos" ] && [ -n "$peri_pos" ] && [ "$slate_pos" -lt "$peri_pos" ] || {
-        echo "  FAIL: branch (slate@$slate_pos) should appear before model (periwinkle@$peri_pos)"
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;79;77;71;1m⎇ main +1!1" \
+        "branch is bold ink on the surface" || return 1
+    assert_output_not_contains "$out" "48;2;79;91;140" "no slate fill" || return 1
+    # Branch sits before the model, both inside the identity capsule.
+    local branch_pos model_pos
+    branch_pos=$(printf '%s' "$out" | grep -bo '⎇ main' | head -1 | cut -d: -f1)
+    model_pos=$(printf '%s' "$out" | grep -bo '✦ Opus' | head -1 | cut -d: -f1)
+    [ -n "$branch_pos" ] && [ -n "$model_pos" ] && [ "$branch_pos" -lt "$model_pos" ] || {
+        echo "  FAIL: branch@$branch_pos should appear before model@$model_pos"
         return 1
     }
 }
@@ -237,156 +260,20 @@ test_limits_threshold_per_block() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":95}}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;220;38;38" "wk 95% block should go red" || return 1
+    assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◑ wk" "wk 95% block should invert to the crit fill" || return 1
+    assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m95%" "the wk number inverts too" || return 1
     assert_output_not_contains "$out" "48;2;255;183;77" "healthy 5h block must not show amber" || return 1
-}
-
-# ============================================================================
-# Squared pills: same-bg neighbors join with a faint bar, and
-# differing-bg neighbors abut so the color change itself is the divider
-# ============================================================================
-
-test_thin_bar_between_same_bg() {
-    export COLORTERM=truecolor
-    export CS_TERM_BG_RGB="250;248;242"
-    # Two healthy gauges share the bg-derived surface: ctx next to a 5h block,
-    # both the surface shade (segment order trimmed so the two are neighbors).
-    # They are split by a thin one-eighth bar inked in a faint shade of that
-    # surface — a discreet tonal step, not a wide gap and not a foreign grey.
-    export CS_STATUSLINE_SEGMENTS="ctx,limits"
-    local json='{"workspace":{"current_dir":"/none"},"context_window":{"used_percentage":10},"rate_limits":{"five_hour":{"used_percentage":20}}}'
-    local out surface ink
-    surface=$( ( _load_sl_functions; _bg_shade "250;248;242"; echo "$_R;$_G;$_B" ) )
-    ink=$( ( _load_sl_functions; _bg_shade "$surface"; echo "$_R;$_G;$_B" ) )
-    out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;${surface};38;2;${ink}m▏" \
-        "same-surface neighbors should join with a thin bar inked in a faint shade of the surface" || return 1
-}
-
-test_abut_between_different_bg() {
-    export COLORTERM=truecolor
-    # session grey then the periwinkle model accent (logo excluded — it always
-    # gets its own hairline, tested separately below): differing neighbors
-    # abut squarely, with no divider glyph — the color change is the boundary.
-    export CS_STATUSLINE_SEGMENTS="session,model"
-    local json='{"session_name":"s","model":{"display_name":"Opus"},"workspace":{"current_dir":"/none"}}'
-    local out
-    out=$(run_sl "$json")
-    assert_output_not_contains "$out" "▏" "no faint bar between differing backgrounds" || return 1
 }
 
 test_logo_badge_is_brand_coral() {
     export COLORTERM=truecolor
-    # The bar opens with a brand badge: the Claude mark on the Claude-coral bg.
+    # The bar opens with the Claude mark, coral ink on the identity capsule.
     local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "✳" "logo badge glyph should render" || return 1
-    assert_output_contains "$out" "48;2;217;119;87" "logo badge should sit on the Claude-coral background" || return 1
-}
-
-# Claude Code's TUI parses the statusline ANSI and re-emits only bold/fg/bg,
-# so terminal blink (SGR 5) can never reach the screen. The pulse is instead
-# software-driven: while the attention marker exists the mark's foreground
-# alternates chiptext/brandshade by epoch-second parity, and the statusLine
-# registration's refreshInterval repaints the bar every second while idle so
-# the phase keeps advancing. CS_STATUSLINE_NOW pins the clock for tests.
-test_logo_pulses_bright_phase_with_attention_marker() {
-    export COLORTERM=truecolor
-    export CLAUDE_SESSION_NAME="blinksess"
-    make_cs_session "blinksess" 1024 blue
-    mkdir -p "$CS_SESSIONS_ROOT/blinksess/.cs/local"
-    touch "$CS_SESSIONS_ROOT/blinksess/.cs/local/attention"
-    local json='{"session_name":"blinksess","workspace":{"current_dir":"/none"}}'
-    local out
-    out=$(CS_STATUSLINE_NOW=1000 run_sl "$json")
-    assert_output_contains "$out" '240;242;255;1m ✳' \
-        "even-second phase should render the mark in chiptext" || return 1
-}
-
-test_logo_pulses_dim_phase_with_attention_marker() {
-    export COLORTERM=truecolor
-    export CLAUDE_SESSION_NAME="blinksess"
-    make_cs_session "blinksess" 1024 blue
-    mkdir -p "$CS_SESSIONS_ROOT/blinksess/.cs/local"
-    touch "$CS_SESSIONS_ROOT/blinksess/.cs/local/attention"
-    local json='{"session_name":"blinksess","workspace":{"current_dir":"/none"}}'
-    local out
-    out=$(CS_STATUSLINE_NOW=1001 run_sl "$json")
-    assert_output_contains "$out" '184;101;74;1m ✳' \
-        "odd-second phase should dim the mark to brandshade" || return 1
-}
-
-test_logo_steady_without_attention_marker() {
-    export COLORTERM=truecolor
-    export CLAUDE_SESSION_NAME="steadysess"
-    make_cs_session "steadysess" 1024 blue
-    local json='{"session_name":"steadysess","workspace":{"current_dir":"/none"}}'
-    local out
-    out=$(CS_STATUSLINE_NOW=1001 run_sl "$json")
-    assert_output_contains "$out" '240;242;255;1m ✳' \
-        "without the marker the mark stays chiptext on every phase" || return 1
-}
-
-test_logo_boundary_gets_thin_darker_coral_hairline() {
-    export COLORTERM=truecolor
-    # The logo (coral) and a blue session pill are visibly different colors,
-    # but the logo is a fixed brand mark, so its boundary always gets a
-    # divider. It works exactly like every other hairline in the bar: a
-    # `▏` (U+258F) glyph, which inks only its LEFT ~1/8 with the foreground
-    # color and shows the cell BACKGROUND in the other ~7/8. The one thing
-    # that makes any hairline read as *thin* is that its background matches a
-    # neighbor, so 7/8 of the cell disappears into that pill and only the 1/8
-    # ink sliver is visible. Here the non-logo neighbor is the session pill,
-    # so the divider's background is the session color (blue) and the ink is
-    # the darker coral. Every earlier attempt gave the cell a distinct
-    # background (bright coral, darker coral, grey, black), which made the
-    # whole one-column cell read as a solid block, not a thin line.
-    export CLAUDE_SESSION_NAME="s"
-    make_cs_session "s" 1024 blue
-    local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
-    local out
-    out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;106;155;204;38;2;184;101;74m▏" \
-        "the divider background should be the session color with a thin darker-coral ink sliver" || return 1
-    assert_output_not_contains "$out" "48;2;184;101;74" \
-        "the darker coral must never be a background (that is the full-width block bug), only the thin ink" || return 1
-    assert_output_not_contains "$out" "38;2;30;30;30m▏" "the logo boundary must not use near-black" || return 1
-    assert_output_not_contains "$out" "38;2;170;161;148m▏" "the logo boundary must not use the light hairline grey" || return 1
-}
-
-test_segment_after_logo_divider_drops_redundant_leading_pad() {
-    export COLORTERM=truecolor
-    # The logo divider is a full cell painted in the session's background, so
-    # the session pill's own leading pad space would stack a second
-    # session-colored cell to the left of the name — making it sit one column
-    # right of centre while every other pill is symmetric. The divider cell IS
-    # the leading pad, so the name must start immediately after it: the session
-    # SGR is followed directly by the name character, never by a space.
-    export CLAUDE_SESSION_NAME="s"
-    make_cs_session "s" 1024 blue
-    local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
-    local out
-    out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;106;155;204;38;2;240;242;255;1ms" \
-        "the session name must start immediately after the logo divider (no redundant leading pad)" || return 1
-    assert_output_not_contains "$out" "48;2;106;155;204;38;2;240;242;255;1m s" \
-        "the session pill after the logo divider must not add its own leading pad space" || return 1
-}
-
-test_logo_divider_survives_orange_session_color_collision() {
-    export COLORTERM=truecolor
-    # The "orange" session color and the logo's "brand" color share the exact
-    # same RGB (217;119;87). The divider background is the session's color
-    # (bright coral here), so its 7/8 merges into the orange session pill; the
-    # thin darker-coral ink sliver is still visibly distinct from both, so the
-    # logo and an identically-colored session never merge into one block.
-    export CLAUDE_SESSION_NAME="s"
-    make_cs_session "s" 1024 orange
-    local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
-    local out
-    out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;217;119;87;38;2;184;101;74m▏" "logo and an orange session pill must still show a visible ink sliver" || return 1
+    assert_output_contains "$out" "✳" "the mark should render" || return 1
+    assert_output_contains_f "$out" "38;2;217;119;87;1m✳" "the mark should be coral ink" || return 1
+    assert_output_not_contains_f "$out" "48;2;217;119;87" "the coral must never be a fill" || return 1
 }
 
 # ============================================================================
@@ -775,7 +662,7 @@ test_missing_session_name_dir_fallback() {
     local json='{"model":{"display_name":"Opus"},"workspace":{"current_dir":"/tmp/alpha/beta"},"context_window":{"used_percentage":5}}'
     local out
     out=$(run_sl "$json")
-    assert_eq "beta > ✦ Opus > ◔ ctx 5%" "$out" \
+    assert_eq "beta · ✦ Opus > ◔ ctx 5%" "$out" \
         "session label should fall back to basename of current_dir"
 }
 
@@ -842,7 +729,7 @@ test_non_git_workspace_absent() {
     out=$(run_sl "$json")
     # current_dir is a real, non-git directory; output must end at the ctx
     # segment with no git slot appended.
-    assert_eq "s > ✦ Opus > ◔ ctx 5%" "$out" \
+    assert_eq "s · ✦ Opus > ◔ ctx 5%" "$out" \
         "git segment should be absent for a non-git workspace"
 }
 
@@ -855,7 +742,7 @@ test_ctx_threshold_red() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":65}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "220;38;38" "ctx 65% should use the red background rgb" || return 1
+    assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◔ ctx" "ctx 65% should invert to the crit fill" || return 1
     if ! printf '%s' "$out" | grep -qF "$(printf '\033[0m')"; then
         echo "  FAIL: colored line must contain a reset"
         return 1
@@ -876,8 +763,9 @@ test_ctx_amber_band_is_amber() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":42}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "255;183;77" "ctx 42% should use the amber background rgb" || return 1
-    assert_output_not_contains "$out" "220;38;38" "ctx 42% must not use red" || return 1
+    assert_output_contains_f "$out" "38;2;180;83;9;22m42%" "ctx 42% should use the amber ink" || return 1
+    assert_output_not_contains "$out" "48;2;255;183;77" "ctx 42% amber must never be a fill" || return 1
+    assert_output_not_contains "$out" "48;2;215;0;21" "ctx 42% must not use the crit fill" || return 1
 }
 
 test_ctx_below_warn_is_neutral() {
@@ -887,9 +775,9 @@ test_ctx_below_warn_is_neutral() {
     out=$(run_sl "$json")
     local pill
     pill=$(ctx_pill "$out" 39)
-    assert_output_contains "$pill" "48;2;128;120;110" "ctx 39% should sit on the neutral grey" || return 1
-    assert_output_not_contains "$pill" "255;183;77" "ctx 39% must not use amber" || return 1
-    assert_output_not_contains "$pill" "220;38;38" "ctx 39% must not use red" || return 1
+    assert_output_contains "$pill" "38;2;119;117;110;22m" "ctx 39% should sit at the secondary ink" || return 1
+    assert_output_not_contains "$pill" "180;83;9" "ctx 39% must not use amber" || return 1
+    assert_output_not_contains "$pill" "215;0;21" "ctx 39% must not use the crit fill" || return 1
 }
 
 test_ctx_warn_band_still_amber() {
@@ -897,8 +785,8 @@ test_ctx_warn_band_still_amber() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":50}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "255;183;77" "ctx 50% should still use the amber background rgb" || return 1
-    assert_output_not_contains "$out" "220;38;38" "ctx 50% must not use red" || return 1
+    assert_output_contains_f "$out" "38;2;180;83;9;22m50%" "ctx 50% should still use the amber ink" || return 1
+    assert_output_not_contains "$out" "48;2;215;0;21" "ctx 50% must not use the crit fill" || return 1
 }
 
 test_ctx_below_crit_is_amber_not_red() {
@@ -906,8 +794,8 @@ test_ctx_below_crit_is_amber_not_red() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":64}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "255;183;77" "ctx 64% should still be amber" || return 1
-    assert_output_not_contains "$out" "220;38;38" "ctx 64% must not use red" || return 1
+    assert_output_contains_f "$out" "38;2;180;83;9;22m64%" "ctx 64% should still be amber" || return 1
+    assert_output_not_contains "$out" "48;2;215;0;21" "ctx 64% must not use the crit fill" || return 1
 }
 
 test_ctx_warn_threshold_is_configurable() {
@@ -916,7 +804,7 @@ test_ctx_warn_threshold_is_configurable() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":25}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "255;183;77" "ctx 25% should be amber when warn is 20" || return 1
+    assert_output_contains_f "$out" "38;2;180;83;9;22m25%" "ctx 25% should be amber when warn is 20" || return 1
 }
 
 # The amber band's lower edge is inclusive, and 40 is the only reading that
@@ -928,9 +816,7 @@ test_ctx_warn_edge_is_amber_at_the_threshold() {
     out=$(run_sl "$json")
     local pill
     pill=$(ctx_pill "$out" 40)
-    assert_output_contains "$pill" "48;2;255;183;77" "ctx 40% is inside the amber band" || return 1
-    assert_output_not_contains "$pill" "48;2;128;120;110" "ctx 40% must not stay neutral" || return 1
-    assert_output_not_contains "$pill" "48;2;220;38;38" "ctx 40% must not reach red" || return 1
+    assert_output_contains_f "$pill" "38;2;180;83;9;22m" "ctx 40% is inside the amber band" || return 1
 }
 
 # A threshold override is environment, so it can be anything. Anything that is
@@ -948,7 +834,7 @@ test_ctx_threshold_non_numeric_falls_back_to_default() {
     local out err
     out=$(run_sl "$json")
     err=$(run_sl_stderr "$json")
-    assert_output_contains "$out" "255;183;77" "a word override keeps the default 40 amber band" || return 1
+    assert_output_contains_f "$out" "38;2;180;83;9;22m42%" "a word override keeps the default 40 amber band" || return 1
     assert_eq "" "$err" "a word override must not reach the shell's integer comparison" || return 1
 }
 
@@ -960,7 +846,7 @@ test_ctx_threshold_out_of_range_falls_back_to_default() {
     local out err
     out=$(run_sl "$json")
     err=$(run_sl_stderr "$json")
-    assert_output_contains "$out" "255;183;77" "an oversized override keeps the default 40 amber band" || return 1
+    assert_output_contains_f "$out" "38;2;180;83;9;22m42%" "an oversized override keeps the default 40 amber band" || return 1
     assert_eq "" "$err" "an oversized override must not error inside \`[\`" || return 1
 }
 
@@ -972,8 +858,8 @@ test_ctx_threshold_above_100_disables_its_band() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":100}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "255;183;77" "ctx 100% stays amber when crit is out of reach" || return 1
-    assert_output_not_contains "$out" "220;38;38" "a crit of 101 must switch red off, not fall back to 65" || return 1
+    assert_output_contains_f "$out" "38;2;180;83;9;22m100%" "ctx 100% stays amber when crit is out of reach" || return 1
+    assert_output_not_contains "$out" "48;2;215;0;21" "a crit of 101 must switch the crit fill off, not fall back to 65" || return 1
 }
 
 test_model_neutral_not_blue() {
@@ -985,41 +871,42 @@ test_model_neutral_not_blue() {
     assert_output_not_contains "$out" "0;95;175" "model segment must not use the blue background" || return 1
 }
 
-test_white_text_on_periwinkle() {
+test_model_is_bold_ink_no_fill() {
     export COLORTERM=truecolor
+    export CS_TERM_BG_RGB="253;246;227"
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"model":{"display_name":"Opus"}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;138;134;236;38;2;240;242;255" \
-        "the periwinkle model accent carries the chip's text color rgb(240,242,255)" || return 1
+    assert_output_contains_f "$out" "38;2;79;77;71;1m✦ Opus" "the model is bold ink on the surface" || return 1
+    assert_output_not_contains_f "$out" "48;2;138;134;236" "no periwinkle fill" || return 1
 }
 
 test_accent_segments_bold() {
     export COLORTERM=truecolor
+    export CS_TERM_BG_RGB="253;246;227"
     export CLAUDE_SESSION_NAME="boldsess"
     make_cs_session "boldsess" 1000 cyan
     local json='{"session_name":"boldsess","model":{"display_name":"Opus"},"workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;8;145;178;38;2;240;242;255;1" \
-        "the session accent should render bold in the chip text color" || return 1
-    assert_output_contains "$out" "48;2;138;134;236;38;2;240;242;255;1" \
-        "the model accent should render bold in the chip text color" || return 1
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;79;77;71;1mboldsess" \
+        "the session name should render bold in the surface ink" || return 1
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;79;77;71;1m✦ Opus" \
+        "the model should render bold in the surface ink" || return 1
     # SGR bold is stateful: a segment that does not explicitly emit normal
     # intensity (22) inherits bold from the accent before it.
-    assert_output_contains "$out" "48;2;128;120;110;38;2;255;255;255;22" \
-        "grey segments must explicitly reset to normal intensity" || return 1
-    assert_output_not_contains "$out" "48;2;128;120;110;38;2;255;255;255;1m" \
-        "grey segments must not render bold" || return 1
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;119;117;110;22m◔ ctx" \
+        "the ctx label must explicitly reset to normal intensity" || return 1
+    assert_output_not_contains "$out" "48;2;8;145;178" "no session-colour fill" || return 1
 }
 
-test_dark_text_on_amber_warn() {
+test_ctx_amber_is_ink_not_dark_fill_text() {
     export COLORTERM=truecolor
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":55}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;255;183;77;38;2;30;30;30" \
-        "warn blocks should be warm amber with dark text" || return 1
+    assert_output_contains_f "$out" "38;2;180;83;9;22m55%" "warn readings should be amber ink, not a fill" || return 1
+    assert_output_not_contains "$out" "48;2;255;183;77" "amber must never be a fill" || return 1
 }
 
 # ============================================================================
@@ -1031,7 +918,7 @@ test_limits_threshold_red() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":95}}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "220;38;38" "wk 95% should drive the limits bg red"
+    assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◑ wk" "wk 95% should invert the lim-wk capsule to the crit fill"
 }
 
 # ============================================================================
@@ -1097,10 +984,11 @@ test_color_level_basic() {
     out=$(run_sl "$json")
     assert_output_not_contains "$out" "48;5;" "basic level must not emit indexed codes"
     assert_output_not_contains "$out" "48;2;" "basic level must not emit truecolor codes"
-    # session bg = grey -> basic bg code 100, text fg white -> 97; the
-    # session accent carries bold (1), plain segments normal intensity (22)
-    assert_output_contains "$out" "100;97;1m" "basic level should emit 8/16-color SGR codes with accent bold"
-    assert_output_contains "$out" "100;97;22m" "basic level plain segments should reset to normal intensity"
+    # The surface fill is basic bg code 100; identity's primary ink is fg 30
+    # (light theme) with bold (1), ctx's secondary ink is fg 90 with normal
+    # intensity (22): fill 100 is the surface base 90 shifted by 10.
+    assert_output_contains "$out" "100;30;1m" "basic level should emit 8/16-color SGR codes with identity bold"
+    assert_output_contains "$out" "100;90;22m" "basic level plain segments should reset to normal intensity"
 }
 
 # ============================================================================
@@ -1217,7 +1105,7 @@ test_unknown_segment_ignored() {
     export NO_COLOR=1
     export CS_STATUSLINE_SEGMENTS="session,bogus,model"
     local json='{"session_name":"s","model":{"display_name":"Opus"},"workspace":{"current_dir":"/none"}}'
-    assert_eq "s > ✦ Opus" "$(run_sl "$json")" "unknown segment tokens should be skipped"
+    assert_eq "s · ✦ Opus" "$(run_sl "$json")" "unknown segment tokens should be skipped"
 }
 
 # ============================================================================
@@ -1236,7 +1124,7 @@ test_unknown_session_color_falls_back() {
 }
 
 # ============================================================================
-# Full-width gradient: display-width counting, RGB lerp, and the fade itself
+# Display-width counting and RGB triplet parsing
 # ============================================================================
 
 test_display_width_counts_codepoints_not_bytes() {
@@ -1263,114 +1151,6 @@ test_parse_rgb_triplet_accepts_valid_and_rejects_malformed() {
       _parse_rgb_triplet "1;2;3;4"; assert_eq "1" "$?" "an extra field should be rejected" || exit 1
       _parse_rgb_triplet "1;2;300"; assert_eq "1" "$?" "an out-of-range channel should be rejected" || exit 1
       _parse_rgb_triplet "r;g;b"; assert_eq "1" "$?" "non-numeric channels should be rejected" )
-}
-
-test_lerp_channel_hits_exact_endpoints() {
-    ( _load_sl_functions
-      _lerp_channel 20 200 0 8
-      assert_eq "20" "$_LC" "the first cell (i=0) must equal the source channel exactly" || exit 1
-      _lerp_channel 20 200 7 8
-      assert_eq "200" "$_LC" "the last cell (i=steps-1) must equal the destination channel exactly" || exit 1
-      _lerp_channel 20 200 0 1
-      assert_eq "200" "$_LC" "a single-cell gradient should jump straight to the destination" )
-}
-
-test_build_gradient_cell_count_and_endpoints() {
-    ( _load_sl_functions
-      _build_gradient "128;120;110" "250;248;242" 4
-      local count
-      count=$(printf '%s' "$_GRADIENT" | grep -o '48;2;' | grep -c .)
-      assert_eq "4" "$count" "requesting 4 cells should emit exactly 4 background SGRs" || exit 1
-      assert_output_contains "$_GRADIENT" "48;2;128;120;110" "the gradient should start at the source color" || exit 1
-      assert_output_contains "$_GRADIENT" "48;2;250;248;242" "the gradient should end at the destination color" )
-}
-
-test_build_gradient_noop_on_malformed_target() {
-    ( _load_sl_functions
-      _build_gradient "128;120;110" "not-a-color" 10
-      assert_eq "" "$_GRADIENT" "a malformed destination should produce no gradient at all" )
-}
-
-test_full_width_gradient_reaches_columns() {
-    export COLORTERM=truecolor
-    export COLUMNS=80
-    export CS_TERM_BG_RGB="250;248;242"
-    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":5}}'
-    local out stripped width
-    out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;250;248;242" \
-        "a wide terminal with a known bg should render a gradient reaching that color" || return 1
-    stripped=$(printf '%s' "$out" | sed -E $'s/\033\\[[0-9;]*m//g')
-    width=$( ( _load_sl_functions; _display_width "$stripped"; echo "$_WIDTH" ) )
-    assert_eq "80" "$width" "the bar plus its gradient should fill exactly COLUMNS cells"
-}
-
-# The trailing gradient anchors on the neutral surface color, never the last
-# segment's — otherwise an escalated limit (amber/red) would flood the empty
-# tail. 5h is kept low so only the wk block is amber: that amber (255;183;77)
-# must appear exactly once (its own pill), not a second time as the gradient's
-# start cell.
-test_tail_gradient_neutral_regardless_of_last_segment() {
-    export COLORTERM=truecolor
-    export COLUMNS=120
-    export CS_TERM_BG_RGB="250;248;242"
-    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8},"rate_limits":{"five_hour":{"used_percentage":20},"seven_day":{"used_percentage":83}}}'
-    local out amber
-    out=$(run_sl "$json")
-    amber=$(printf '%s' "$out" | grep -o '48;2;255;183;77' | grep -c .) || amber=0
-    assert_eq "1" "$amber" "tail gradient must not inherit the escalated wk amber (only the pill itself)" || return 1
-    assert_output_contains "$out" "48;2;250;248;242" "the gradient still fades to the terminal bg"
-}
-
-test_narrow_terminal_no_gradient() {
-    export COLORTERM=truecolor
-    export COLUMNS=5
-    export CS_TERM_BG_RGB="250;248;242"
-    local json='{"session_name":"averylongsessionnamethatfillsthebar","workspace":{"current_dir":"/none"}}'
-    local out
-    out=$(run_sl "$json")
-    assert_output_not_contains "$out" "48;2;250;248;242" \
-        "a bar already wider than COLUMNS should add no gradient" || return 1
-}
-
-test_no_gradient_without_columns() {
-    export COLORTERM=truecolor
-    export CS_TERM_BG_RGB="250;248;242"
-    unset COLUMNS
-    local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
-    local out
-    out=$(run_sl "$json")
-    assert_output_not_contains "$out" "48;2;250;248;242" \
-        "no gradient should render when COLUMNS is unknown" || return 1
-}
-
-# Was test_no_gradient_without_bg_rgb, which pinned the opposite: that COLUMNS
-# had no effect at all without a measured background. That WAS the behaviour,
-# and it meant the bar stopped mid-line on every terminal cs did not launch.
-# The tail now falls back to a theme-derived background, so COLUMNS takes
-# effect everywhere; only the fade's destination differs.
-test_columns_fills_the_bar_without_a_measured_bg() {
-    export COLORTERM=truecolor
-    unset CS_TERM_BG_RGB
-    local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
-    local out_unset out_wide
-    out_unset=$(run_sl "$json")
-    out_wide=$(COLUMNS=80 run_sl "$json")
-    [ "$out_unset" != "$out_wide" ] || {
-        echo "    COLUMNS had no effect; the tail did not fall back to an assumed bg"; return 1; }
-    return 0
-}
-
-test_no_gradient_outside_truecolor() {
-    export TERM="xterm-256color"
-    unset COLORTERM
-    export COLUMNS=80
-    export CS_TERM_BG_RGB="250;248;242"
-    local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
-    local out
-    out=$(run_sl "$json")
-    assert_output_not_contains "$out" "48;2;250;248;242" \
-        "256-color/basic modes should not attempt a truecolor gradient" || return 1
 }
 
 # ============================================================================
@@ -1605,126 +1385,6 @@ test_pane_segment_hidden_when_tmux_is_foreign() {
 }
 
 
-# The gradient used to exist only for sessions cs launched, because only cs's
-# launch-time OSC 11 ever learns the real background. Every other terminal — a
-# plain `claude`, an app that embeds one — got a bar that simply stopped
-# mid-line. With no measurement the theme still says light or dark, which is
-# enough to fade toward a conventional background of that class; a real
-# CS_TERM_BG_RGB always outranks the assumption.
-test_gradient_renders_without_a_measured_bg() {
-    export COLORTERM=truecolor
-    export COLUMNS=80
-    export CS_TERM_THEME=dark
-    unset CS_TERM_BG_RGB 2>/dev/null || true
-    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":5}}'
-    local out stripped width
-    out=$(run_sl "$json")
-    stripped=$(printf '%s' "$out" | sed -E $'s/\033\\[[0-9;]*m//g')
-    width=$( ( _load_sl_functions; _display_width "$stripped"; echo "$_WIDTH" ) )
-    assert_eq "80" "$width" "an unmeasured terminal should still fill exactly COLUMNS cells" || return 1
-}
-
-# colour — otherwise "it renders" would be true while the fade ran the wrong way
-# on one of them.
-
-# A real measurement must still win: the assumption is a fallback, never an
-# override, or a correctly-measured cream terminal would fade to generic white.
-
-# is a whisper: 226;222;206 -> 252;247;229 on a cream terminal. The unmeasured
-# path took its destination from the assumed background but left its START on
-# the gauge surface constant, an unrelated tone. On dark that produced
-# 140;132;122 -> 30;30;30, a 110-point smear across the bar instead of a fade
-# into it. The start must be shaded from the same background the fade targets.
-
-# An unmeasured terminal gets a coverage wash instead of a colour fade. A block
-# element paints only part of its cell, so what is NOT painted is the terminal's
-# own background — which is how the tail reaches the terminal colour without
-# ever naming it. Nothing in the tail may set a background.
-test_unmeasured_tail_is_a_coverage_wash() {
-    export COLORTERM=truecolor
-    export COLUMNS=80
-    export CS_TERM_THEME=dark
-    unset CS_TERM_BG_RGB 2>/dev/null || true
-    local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
-    local out stripped width
-    out=$(run_sl "$json")
-    assert_output_contains "$out" $'░' \
-        "an unmeasured tail should be drawn with a light-shade block" || return 1
-    assert_output_not_contains "$out" "48;2;30;30;30" \
-        "no assumed background may be painted any more" || return 1
-    stripped=$(printf '%s' "$out" | sed -E $'s/\033\\[[0-9;]*m//g')
-    width=$( ( _load_sl_functions; _display_width "$stripped"; echo "$_WIDTH" ) )
-    assert_eq "80" "$width" "the wash must still fill exactly COLUMNS cells" || return 1
-    # 100% width: the wash runs to the edge. A blank tail would leave the bar
-    # visibly stopping short even though the line measures full width.
-    case "$stripped" in
-        *" ") echo "    the bar ends in blank cells; the wash must reach the edge"; return 1 ;;
-    esac
-    return 0
-}
-
-# The grey ramps toward the theme's own end of the greyscale: lighter on a light
-# terminal, darker on a dark one. Mirroring the light delta naively (240-12=228)
-# would leave the 232..255 greyscale ramp and land in the colour cube, which
-# renders as a yellow-green rather than a grey.
-test_wash_grey_ramps_toward_the_theme() {
-    export COLORTERM=truecolor
-    export COLUMNS=80
-    unset CS_TERM_BG_RGB 2>/dev/null || true
-    local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
-    local out
-    # Truecolor, not the 256 greyscale: that ramp's lightest entry is
-    # rgb(238,238,238), some fourteen units below a cream page, so ░ could never
-    # get closer than a visible stipple no matter which index was chosen. The
-    # tail is gated on truecolor already, so stepping down bought nothing.
-    out=$(CS_TERM_THEME=light run_sl "$json")
-    assert_output_contains "$out" "38;2;250;246;232" \
-        "a light tail must end within a couple of units of a light page" || return 1
-    assert_output_not_contains "$out" "38;5;" \
-        "the wash must not fall back to the 256-colour ramp" || return 1
-    out=$(CS_TERM_THEME=dark run_sl "$json")
-    assert_output_contains "$out" "38;2;30;30;30" \
-        "a dark tail must end near a dark page" || return 1
-    assert_output_not_contains "$out" "38;2;250;246;232" \
-        "a dark tail must not brighten toward a light page" || return 1
-}
-
-# A measured background is still the better answer and keeps the colour fade:
-# it can end exactly on the terminal's own value, which a wash only approaches.
-test_measured_bg_still_uses_the_colour_fade() {
-    export COLORTERM=truecolor
-    export COLUMNS=80
-    export CS_TERM_THEME=light CS_TERM_BG_RGB="252;247;229"
-    local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
-    local out
-    out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;252;247;229" \
-        "a measured terminal must still fade to its own background" || return 1
-}
-
-# The wash paints no background of its own, which only works if the previous
-# segment's background has been switched off first. Without that reset the
-# amber of an escalated rate-limit block stays active and floods the entire
-# tail — the exact failure the colour-fade path already guards against, on a
-# branch that guard never ran on.
-test_wash_does_not_inherit_the_last_segment_background() {
-    export COLORTERM=truecolor
-    export COLUMNS=120
-    export CS_TERM_THEME=light
-    unset CS_TERM_BG_RGB 2>/dev/null || true
-    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8},"rate_limits":{"five_hour":{"used_percentage":20},"seven_day":{"used_percentage":83}}}'
-    local out
-    out=$(run_sl "$json")
-    # Counting the amber code proves nothing: it is emitted once and then STAYS
-    # in effect until something cancels it. The property is that a reset stands
-    # between the last pill and the first wash cell, so assert the reset itself.
-    printf '%s' "$out" | grep -q $'\033\[0m\033\[38;2;[0-9;]*m\xe2\x96\x91' || {
-        echo "    no background reset before the wash; the last pill's colour floods the tail"
-        return 1
-    }
-    return 0
-}
-
 # A pane cs did not launch carries none of cs's environment — an agent-teams
 # teammate is spawned straight off the tmux server and inherits TMUX but no
 # CS_TERM_*. It can still establish WHICH TERMINAL it is on, though: the tmux
@@ -1820,63 +1480,6 @@ test_level_stays_truecolor_outside_tmux() {
         "outside tmux nothing mutes the line, so the flag is irrelevant" || return 1 )
 }
 
-# In 256 mode the tail cannot ramp — the cube has no smooth path through warm
-# off-whites, which is why the gradient is truecolor-only and the bar simply
-# stopped after the last pill. Dots do not need a ramp: evenly spaced at one dim
-# palette grey, drawn as foreground on the default background, so the cells
-# between them are the terminal itself. Fixed spacing has no density to band.
-test_dotted_tail_fills_a_256_bar() {
-    export TERM=xterm-256color
-    export COLUMNS=80
-    export CS_TERM_THEME=light
-    unset COLORTERM CS_TERM_BG_RGB 2>/dev/null || true
-    local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
-    local out stripped width
-    out=$(run_sl "$json")
-    assert_output_contains "$out" $'·' "a 256 bar should carry a dotted tail" || return 1
-    # Only the TAIL must be background-free; the pills before it legitimately
-    # paint 48;5; backgrounds, so testing the whole bar for that would ban the
-    # syntax the segments are built from.
-    printf '%s' "$out" | grep -q $'\033\[0m\033\[38;5;[0-9]*m' \
-        || { echo "    the dots do not reset the previous pill's background"; return 1; }
-    # Pin the index: the dots are meant to read as texture, and one step of the
-    # greyscale is the difference between a hint and a row of punctuation.
-    assert_output_contains "$out" "38;5;252" \
-        "a light tail's dots must sit one step off the page" || return 1
-    out=$(CS_TERM_THEME=dark run_sl "$json")
-    assert_output_contains "$out" "38;5;237" \
-        "a dark tail's dots must sit one step off a dark page" || return 1
-    stripped=$(printf '%s' "$out" | sed -E $'s/\033\\[[0-9;]*m//g')
-    width=$( ( _load_sl_functions; _display_width "$stripped"; echo "$_WIDTH" ) )
-    assert_eq "80" "$width" "the dotted tail must fill exactly COLUMNS cells" || return 1
-}
-
-# Truecolor still gets the gradient: it can end exactly on the terminal's own
-# colour, which dots only gesture at.
-test_truecolor_keeps_the_gradient_not_dots() {
-    export COLORTERM=truecolor TERM=xterm-256color
-    export COLUMNS=80
-    export CS_TERM_THEME=light CS_TERM_BG_RGB="252;247;229"
-    unset TMUX 2>/dev/null || true
-    local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
-    local out
-    out=$(run_sl "$json")
-    assert_output_contains "$out" "48;2;252;247;229" "truecolor still fades to the real background" || return 1
-    assert_output_not_contains "$out" $'·' "a gradient bar needs no dots" || return 1
-}
-
-# A 16-colour terminal cannot render a 256-colour escape, so the dotted tail
-# must not fire there — the pills are 30-37/90-97 and dots at 38;5; would be
-# garbage or an unstyled row.
-test_basic_terminal_gets_no_dotted_tail() {
-    export TERM=xterm COLUMNS=60 CS_TERM_THEME=dark
-    unset COLORTERM TERM_PROGRAM CS_TERM_BG_RGB TMUX 2>/dev/null || true
-    local out
-    out=$(run_sl '{"session_name":"s","workspace":{"current_dir":"/none"}}')
-    assert_output_not_contains "$out" "38;5;" \
-        "a basic terminal must never be sent a 256-colour escape" || return 1
-}
-
 # The tmux mute only applies when this process is really in that tmux server.
 # A process that merely inherited TMUX is drawing on its own terminal, nothing
 # is quantising its output, and downgrading it discards colour for no reason.
@@ -1906,21 +1509,6 @@ test_tmux_mute_applies_regardless_of_term_name() {
       _detect_level
       assert_eq "256" "$LEVEL" \
         "the mute workaround must not depend on TERM naming 256color" || return 1 )
-}
-
-# A background that will not parse must fall through to the wash rather than
-# leaving the bar stopped dead. Reachable without user error: the client cache
-# validates only the charset, so a truncated entry exports a malformed value.
-test_malformed_background_falls_through_to_a_tail() {
-    export COLORTERM=truecolor COLUMNS=60 CS_TERM_THEME=light
-    export CS_TERM_BG_RGB="1;2"
-    unset TMUX COLORFGBG 2>/dev/null || true
-    local out stripped width
-    out=$(run_sl '{"session_name":"s","workspace":{"current_dir":"/none"}}')
-    stripped=$(printf '%s' "$out" | sed -E $'s/\033\\[[0-9;]*m//g')
-    width=$( ( _load_sl_functions; _display_width "$stripped"; echo "$_WIDTH" ) )
-    assert_eq "60" "$width" \
-        "a malformed background must not cost the bar its tail" || return 1
 }
 
 # The cache is keyed by terminal identity, and outside tmux that identity is
@@ -1982,23 +1570,15 @@ test_client_cache_accepts_a_fresh_entry() {
 run_test test_happy_path_docs_fixture_plain
 run_test test_all_segments_ordering_plain
 run_test test_limits_neutral_when_healthy
-run_test test_two_accents_default
-run_test test_git_branch_bold_slate_accent
+run_test test_identity_items_are_bold_ink
+run_test test_git_branch_is_bold_ink_no_fill
 run_test test_limits_threshold_per_block
-run_test test_thin_bar_between_same_bg
 run_test test_bg_shade_darkens_light_background
 run_test test_bg_shade_lightens_dark_background
 run_test test_bg_shade_noop_on_malformed
 run_test test_gauge_uses_bg_derived_surface
 run_test test_gauge_falls_back_to_grey_without_bg
 run_test test_logo_badge_is_brand_coral
-run_test test_logo_pulses_bright_phase_with_attention_marker
-run_test test_logo_pulses_dim_phase_with_attention_marker
-run_test test_logo_steady_without_attention_marker
-run_test test_logo_boundary_gets_thin_darker_coral_hairline
-run_test test_segment_after_logo_divider_drops_redundant_leading_pad
-run_test test_logo_divider_survives_orange_session_color_collision
-run_test test_abut_between_different_bg
 run_test test_segment_icons_are_unicode
 run_test test_tab_color_palette_matches_statusline
 run_test test_no_powerline_arrow
@@ -2040,9 +1620,9 @@ run_test test_ctx_threshold_non_numeric_falls_back_to_default
 run_test test_ctx_threshold_out_of_range_falls_back_to_default
 run_test test_ctx_threshold_above_100_disables_its_band
 run_test test_model_neutral_not_blue
-run_test test_white_text_on_periwinkle
+run_test test_model_is_bold_ink_no_fill
 run_test test_accent_segments_bold
-run_test test_dark_text_on_amber_warn
+run_test test_ctx_amber_is_ink_not_dark_fill_text
 run_test test_limits_threshold_red
 run_test test_segments_subset
 run_test test_git_untracked_not_modified
@@ -2057,20 +1637,6 @@ run_test test_unknown_segment_ignored
 run_test test_unknown_session_color_falls_back
 run_test test_display_width_counts_codepoints_not_bytes
 run_test test_parse_rgb_triplet_accepts_valid_and_rejects_malformed
-run_test test_lerp_channel_hits_exact_endpoints
-run_test test_build_gradient_cell_count_and_endpoints
-run_test test_build_gradient_noop_on_malformed_target
-run_test test_full_width_gradient_reaches_columns
-run_test test_gradient_renders_without_a_measured_bg
-run_test test_unmeasured_tail_is_a_coverage_wash
-run_test test_wash_does_not_inherit_the_last_segment_background
-run_test test_wash_grey_ramps_toward_the_theme
-run_test test_measured_bg_still_uses_the_colour_fade
-run_test test_tail_gradient_neutral_regardless_of_last_segment
-run_test test_narrow_terminal_no_gradient
-run_test test_no_gradient_without_columns
-run_test test_columns_fills_the_bar_without_a_measured_bg
-run_test test_no_gradient_outside_truecolor
 
 # ============================================================================
 # Notes segment: queue depth after the session name
@@ -2177,7 +1743,7 @@ test_pane_segment_shows_tmux_pane_id() {
     export TMUX_PANE="%7"
     local out
     out=$(run_sl "$FIXTURE_DOCS")
-    assert_output_contains "$out" "◫ %7" "pane segment shows the tmux pane id" || return 1
+    assert_output_contains "$out" "◫ 7" "pane segment shows the tmux pane id" || return 1
 }
 
 test_pane_segment_absent_outside_tmux() {
@@ -2211,22 +1777,6 @@ test_segment_default_in_sync_across_docs_and_help() {
             return 1
         }
     done
-}
-
-test_session_state_color_roundtrip() {
-    # cs's _set_local_state is the writer; the statusline's _read_session_color
-    # re-implements the parser (documented standalone necessity). This pins the
-    # format so a serialization change in cs fails here instead of silently
-    # stripping session colors.
-    local state="$TEST_TMPDIR/state"
-    ( source "$SCRIPT_DIR/../lib/40-state.sh" 2>/dev/null \
-        && _set_local_state "$state" claude_session_color cyan ) || {
-        echo "  FAIL: could not write state via lib/40-state.sh _set_local_state"
-        return 1
-    }
-    local got
-    got=$( CS_STATUSLINE_LIB=1 . "$SL" >/dev/null 2>&1; _read_session_color "$state"; printf '%s' "$_SESSION_COLOR" )
-    assert_eq "cyan" "$got" "statusline reader must parse cs's state writer output" || return 1
 }
 
 test_library_mode_defines_helpers_without_rendering() {
@@ -2295,7 +1845,6 @@ run_test test_pane_segment_hidden_when_tmux_is_foreign
 run_test test_pane_segment_absent_outside_tmux
 run_test test_pane_segment_needs_both_tmux_vars
 run_test test_segment_default_in_sync_across_docs_and_help
-run_test test_session_state_color_roundtrip
 run_test test_library_mode_defines_helpers_without_rendering
 run_test test_library_mode_prints_nothing
 run_test test_executed_directly_still_renders
@@ -2378,7 +1927,7 @@ test_pulse_ignores_inherited_now() {
     local json='{"session_name":"inhpulse","workspace":{"current_dir":"/none"}}'
     local out
     out=$(_NOW=garbage CS_STATUSLINE_NOW=1000 run_sl "$json")
-    assert_output_contains "$out" '240;242;255;1m ✳' "pin wins over inherited _NOW; even second stays chiptext" || return 1
+    assert_output_contains_f "$out" '38;2;217;119;87;1m✳' "pin wins over inherited _NOW; even second stays brand" || return 1
 }
 
 # The memo ready-flag itself must not be trusted from the environment: with BOTH
@@ -2404,7 +1953,7 @@ test_pulse_ignores_inherited_ready_flag() {
     local json='{"session_name":"inhrpulse","workspace":{"current_dir":"/none"}}'
     local out
     out=$(_SL_NOW_READY=1 _NOW=garbage CS_STATUSLINE_NOW=1000 run_sl "$json")
-    assert_output_contains "$out" '240;242;255;1m ✳' "inherited ready flag + garbage _NOW sanitized; pin parity holds" || return 1
+    assert_output_contains_f "$out" '38;2;217;119;87;1m✳' "inherited ready flag + garbage _NOW sanitized; pin parity holds" || return 1
 }
 
 # A leading-zero clock value (e.g. a pin of 08) passes a bare digit check but is
@@ -2568,8 +2117,8 @@ test_sl_theme_falls_through_empty_client_theme() {
 }
 
 # _sl_invalidate_stale_bg blanks CS_TERM_BG_RGB once the live theme (SL_THEME)
-# has left the launch theme (CS_TERM_THEME + auto marker), so surfaces/gradient
-# don't tint toward the old background.
+# has left the launch theme (CS_TERM_THEME + auto marker), so the surface
+# doesn't tint toward the old background.
 test_sl_bg_rgb_dropped_after_switch() {
     ( _load_sl_functions
       export CS_TERM_THEME=light CS_TERM_THEME_AUTO=1 CS_TERM_BG_RGB="250;248;242"
@@ -2621,16 +2170,12 @@ run_test test_client_cache_rejects_a_malformed_entry
 run_test test_level_drops_to_256_when_truecolor_will_be_muted
 run_test test_level_stays_truecolor_when_the_flag_is_present
 run_test test_level_stays_truecolor_outside_tmux
-run_test test_basic_terminal_gets_no_dotted_tail
 run_test test_foreign_tmux_does_not_downgrade_a_real_truecolor_terminal
 run_test test_tmux_mute_applies_regardless_of_term_name
-run_test test_malformed_background_falls_through_to_a_tail
 run_test test_client_cache_is_read_outside_tmux_too
 run_test test_unusable_ps_is_not_evidence_of_a_foreign_tmux
 run_test test_client_cache_refuses_a_stale_entry
 run_test test_client_cache_accepts_a_fresh_entry
-run_test test_dotted_tail_fills_a_256_bar
-run_test test_truecolor_keeps_the_gradient_not_dots
 run_test test_sl_theme_falls_through_empty_client_theme
 run_test test_sl_bg_rgb_dropped_after_switch
 run_test test_sl_bg_rgb_kept_when_theme_matches
@@ -2989,8 +2534,8 @@ test_fable_segment_escalates_colour() {
     seed_usage_cache org-abc 95 "2026-08-29T03:59:59Z" 1787816000 1787816300
     local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"}}'
     local out; out=$(CS_STATUSLINE_NOW=1787816100 run_sl "$json")
-    assert_output_contains "$out" "fable 95%" "the chip must render" || return 1
-    assert_output_contains "$out" "48;2;220;38;38" "at 90%+ the chip must go red" || return 1
+    assert_output_contains "$out" "fable" "the chip must render" || return 1
+    assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m95%" "at 90%+ the capsule must invert to the crit fill" || return 1
 }
 
 # A stale or absent reading must cost the bar the chip, not give it a wrong one.
@@ -3021,7 +2566,8 @@ test_fable_segment_costs_nothing_off_fable() {
     # Sentinels the gate must leave alone: _fable_read clears all three on its
     # first lines, so surviving values prove it was never entered.
     _FABLE_PCT=sentinel; _FABLE_RESET=sentinel; _FABLE_DUE=sentinel
-    _SEG_TEXT=(); _SEG_BG=(); _SEG_BOLD=()
+    _SEG_TEXT=(); _SEG_GROUP=(); _SEG_INK=(); _SEG_BOLD=(); _SEG_JOIN=()
+    _GROUPS=(); _GROUPS_SEEN=""
     _seg_fable
     assert_eq "sentinel" "$_FABLE_PCT" "a non-fable model must not read the cache" || return 1
     assert_eq "sentinel" "$_FABLE_DUE" "a non-fable model must not evaluate whether a poll is due" || return 1
@@ -3150,7 +2696,8 @@ test_fable_segment_does_not_spawn_a_refresher_without_curl() {
     _load_sl_functions
     seed_usage_cache org-abc 86 "2026-08-29T03:59:59Z" 1787816000 1787816300
     SL_MODEL_ID="claude-fable-5"
-    _SEG_TEXT=(); _SEG_BG=(); _SEG_BOLD=()
+    _SEG_TEXT=(); _SEG_GROUP=(); _SEG_INK=(); _SEG_BOLD=(); _SEG_JOIN=()
+    _GROUPS=(); _GROUPS_SEEN=""
     local nocurl="$TEST_TMPDIR/nocurl"; mkdir -p "$nocurl"
     # Symlink, not copy: macOS kills a copied system binary whose code
     # signature no longer validates (SIGKILL, exit 137), which would make this
@@ -3169,7 +2716,8 @@ test_fable_segment_does_spawn_when_curl_is_present() {
     make_usage_shims 200 "$USAGE_BODY"
     seed_usage_cache org-abc 42 "2026-08-29T03:59:59Z" 1787816000 1787816300
     SL_MODEL_ID="claude-fable-5"
-    _SEG_TEXT=(); _SEG_BG=(); _SEG_BOLD=()
+    _SEG_TEXT=(); _SEG_GROUP=(); _SEG_INK=(); _SEG_BOLD=(); _SEG_JOIN=()
+    _GROUPS=(); _GROUPS_SEEN=""
     CS_STATUSLINE_NOW=1787816400 _NOW="" _SL_NOW_READY="" PATH="$USAGE_BINDIR:$PATH" _seg_fable
     assert_eq "1" "$_FABLE_KICKED" "a due cache with curl available must kick a refresher" || return 1
     # Wait for the refresher's WRITE, not for its lock: the lock appears tens of
@@ -3545,5 +3093,190 @@ run_test test_sgr_ink_tokens_truecolor_dark
 run_test test_sgr_ink_follows_surface_luminance
 run_test test_sgr_ink_tokens_256_and_basic
 run_test test_thresh_color_emits_crit_and_defaults_to_ink2
+
+# ============================================================================
+# Capsules: one identity capsule, a ctx capsule, caps, no tail
+# ============================================================================
+
+test_interleaved_segments_still_one_identity_capsule() {
+    export COLORTERM=truecolor
+    export CS_TERM_BG_RGB="253;246;227"
+    export CS_STATUSLINE_SEGMENTS="session,ctx,model"
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":8}}'
+    local out; out=$(run_sl "$json")
+    local caps; caps=$(printf '%s' "$out" | grep -o "$CAPL" | wc -l | tr -d ' ')
+    assert_eq "2" "$caps" "session and model share one capsule even with ctx named between them" || return 1
+    assert_output_contains_f "$out" "1ms${ESC_}[48;2;227;221;204;38;2;119;117;110;22m  ·  ${ESC_}[48;2;227;221;204;38;2;79;77;71;1m✦ Opus" \
+        "model follows session inside identity" || return 1
+    out=$(NO_COLOR=1 run_sl "$json")
+    assert_eq "s · ✦ Opus > ◔ ctx 8%" "$out" "plain: groups render in first-seen order, items in their own order" || return 1
+}
+
+test_plain_joins_identity_with_dots_and_capsules_with_gt() {
+    export NO_COLOR=1
+    export CLAUDE_SESSION_NAME="mysess"
+    make_cs_session "mysess" 49152 cyan
+    local work; work=$(make_git_work)
+    local json
+    json=$(jq -nc --arg dir "$work" '{
+        session_name:"mysess", model:{display_name:"Opus"}, effort:{level:"high"},
+        workspace:{current_dir:$dir}, context_window:{used_percentage:34}
+    }')
+    local out; out=$(run_sl "$json")
+    assert_eq "mysess · ⎇ main +1!1 · ✦ Opus high > ◔ ctx 34%" "$out" \
+        "plain: identity items joined by a dot, capsules by ' > '" || return 1
+}
+
+test_identity_is_one_capsule_on_the_surface() {
+    export COLORTERM=truecolor
+    export CS_TERM_BG_RGB="253;246;227"
+    local work; work=$(make_git_work)
+    local json
+    json=$(jq -nc --arg dir "$work" '{session_name:"s", model:{display_name:"Opus"}, workspace:{current_dir:$dir}, context_window:{used_percentage:8}}')
+    local out; out=$(run_sl "$json")
+    # One left cap opens identity, inked in the surface on the default bg.
+    assert_output_contains_f "$out" "[49;38;2;227;221;204m${CAPL}" "left cap is surface ink on the terminal bg" || return 1
+    # Session and branch sit on the same fill; neither has a fill of its own.
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;79;77;71;1ms" "session is bold ink on the surface" || return 1
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;79;77;71;1m⎇ main +1!1" "branch is bold ink on the same surface" || return 1
+    assert_output_not_contains_f "$out" "48;2;79;91;140" "no slate fill" || return 1
+    assert_output_not_contains_f "$out" "48;2;138;134;236" "no periwinkle fill" || return 1
+    assert_output_not_contains_f "$out" "48;2;8;145;178" "no session-colour fill" || return 1
+    # Items join with a secondary-ink dot inside the capsule.
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;119;117;110;22m  ·  " "dot joiner in ink2" || return 1
+    # Exactly one identity capsule: one left cap before ctx's, two in total.
+    local caps; caps=$(printf '%s' "$out" | grep -o "$CAPL" | wc -l | tr -d ' ')
+    assert_eq "2" "$caps" "identity and ctx are the only two capsules" || return 1
+}
+
+test_capsule_gap_two_cells_after_identity_one_after_gauges() {
+    export COLORTERM=truecolor
+    export CS_TERM_BG_RGB="253;246;227"
+    export CS_STATUSLINE_SEGMENTS="session,ctx,cost"
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8},"cost":{"total_cost_usd":1.5}}'
+    local out; out=$(run_sl "$json")
+    local esc=$'\033'
+    assert_output_contains_f "$out" "${CAPR}${esc}[0m  ${esc}[49;38;2;227;221;204m${CAPL}" \
+        "two default-bg cells between identity and ctx" || return 1
+    assert_output_contains_f "$out" "8%${esc}[48;2;227;221;204m ${esc}[49;38;2;227;221;204m${CAPR}${esc}[0m ${esc}[49;38;2;227;221;204m${CAPL}" \
+        "one cell between ctx and cost" || return 1
+}
+
+test_caps_off_gives_square_chips() {
+    export COLORTERM=truecolor
+    export CS_TERM_BG_RGB="253;246;227"
+    export CS_STATUSLINE_CAPS=0
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8}}'
+    local out; out=$(run_sl "$json")
+    assert_output_not_contains_f "$out" "$CAPL" "no left cap glyph" || return 1
+    assert_output_not_contains_f "$out" "$CAPR" "no right cap glyph" || return 1
+    assert_output_contains_f "$out" "[48;2;227;221;204m ${ESC_}[48;2;227;221;204;38;2;79;77;71;1ms" \
+        "the chip opens with a fill space, then the bold session name" || return 1
+}
+
+test_line_ends_at_the_last_cap_regardless_of_columns() {
+    export COLORTERM=truecolor
+    export CS_TERM_BG_RGB="253;246;227"
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8}}'
+    local narrow wide
+    narrow=$(run_sl "$json")
+    wide=$(COLUMNS=200 run_sl "$json")
+    assert_eq "$narrow" "$wide" "COLUMNS no longer changes the render" || return 1
+    case "$wide" in
+        *"${CAPR}"$'\033[0m') ;;
+        *) echo "    line must end with the right cap and a reset"; return 1 ;;
+    esac
+    assert_output_not_contains_f "$wide" "░" "no coverage wash" || return 1
+    assert_output_not_contains_f "$wide" "·  ·" "no dotted tail" || return 1
+}
+
+test_ctx_amber_is_ink_on_the_surface() {
+    export COLORTERM=truecolor
+    export CS_TERM_BG_RGB="253;246;227"
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":42}}'
+    local out; out=$(run_sl "$json")
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;180;83;9;22m42%" "the number is amber ink" || return 1
+    assert_output_not_contains_f "$out" "48;2;255;183;77" "no amber fill anywhere" || return 1
+    assert_output_not_contains_f "$out" "48;2;180;83;9" "amber never becomes a fill" || return 1
+    assert_output_contains_f "$out" "38;2;119;117;110;22m◔ ctx" "the label stays secondary ink" || return 1
+}
+
+test_ctx_crit_inverts_only_its_capsule() {
+    export COLORTERM=truecolor
+    export CS_TERM_BG_RGB="253;246;227"
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":71}}'
+    local out; out=$(run_sl "$json")
+    assert_output_contains_f "$out" "[49;38;2;215;0;21m${CAPL}" "ctx capsule's caps take the crit fill" || return 1
+    assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◔ ctx" "label inverts to critink bold" || return 1
+    assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m71%" "number inverts too" || return 1
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;79;77;71;1ms" "identity stays on the surface" || return 1
+    assert_output_not_contains_f "$out" "48;2;220;38;38" "the session palette red is not the crit fill" || return 1
+}
+
+test_logo_is_brand_ink_inside_identity() {
+    export COLORTERM=truecolor
+    export CS_TERM_BG_RGB="253;246;227"
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"}}'
+    local out; out=$(run_sl "$json")
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;217;119;87;1m✳" "the mark is coral ink on the surface" || return 1
+    assert_output_not_contains_f "$out" "48;2;217;119;87" "no coral fill" || return 1
+    assert_output_contains_f "$out" "✳${ESC_}[48;2;227;221;204m ${ESC_}[48;2;227;221;204;38;2;79;77;71;1ms" \
+        "one fill space between the mark and the session name" || return 1
+}
+
+test_logo_pulse_alternates_brand_and_brandshade() {
+    export COLORTERM=truecolor
+    export CS_TERM_BG_RGB="253;246;227"
+    export CLAUDE_SESSION_NAME="blinksess"
+    make_cs_session "blinksess" 1024 blue
+    mkdir -p "$CS_SESSIONS_ROOT/blinksess/.cs/local"
+    touch "$CS_SESSIONS_ROOT/blinksess/.cs/local/attention"
+    local json='{"session_name":"blinksess","workspace":{"current_dir":"/none"}}'
+    local even odd
+    even=$(CS_STATUSLINE_NOW=1000 run_sl "$json")
+    odd=$(CS_STATUSLINE_NOW=1001 run_sl "$json")
+    assert_output_contains_f "$even" "38;2;217;119;87;1m✳" "even second: brand" || return 1
+    assert_output_contains_f "$odd"  "38;2;184;101;74;1m✳" "odd second: brandshade" || return 1
+}
+
+test_effort_is_secondary_ink_after_the_model() {
+    export COLORTERM=truecolor
+    export CS_TERM_BG_RGB="253;246;227"
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"model":{"display_name":"Opus"},"effort":{"level":"high"}}'
+    local out; out=$(run_sl "$json")
+    assert_output_contains_f "$out" "38;2;79;77;71;1m✦ Opus" "model name bold primary" || return 1
+    assert_output_contains_f "$out" "✦ Opus${ESC_}[48;2;227;221;204m ${ESC_}[48;2;227;221;204;38;2;119;117;110;22mhigh" \
+        "effort one space after, secondary, regular" || return 1
+}
+
+test_notes_and_mail_are_amber_ink_after_the_session() {
+    export COLORTERM=truecolor
+    export CS_TERM_BG_RGB="253;246;227"
+    export CLAUDE_SESSION_NAME="qsess"
+    make_cs_session "qsess" 1024 blue
+    mkdir -p "$CS_SESSIONS_ROOT/qsess/.cs/local/queue" "$CS_SESSIONS_ROOT/qsess/.cs/local/mail/new"
+    printf 'x\n' > "$CS_SESSIONS_ROOT/qsess/.cs/local/queue/a"
+    printf 'x\n' > "$CS_SESSIONS_ROOT/qsess/.cs/local/queue/b"
+    printf '{}' > "$CS_SESSIONS_ROOT/qsess/.cs/local/mail/new/1.json"
+    local json='{"session_name":"qsess","workspace":{"current_dir":"/none"}}'
+    local out; out=$(run_sl "$json")
+    assert_output_contains_f "$out" "qsess${ESC_}[48;2;227;221;204m  ${ESC_}[48;2;227;221;204;38;2;180;83;9;22m▤ 2" \
+        "notes: two fill spaces then amber ink" || return 1
+    assert_output_contains_f "$out" "38;2;180;83;9;22m✉ 1" "mail in amber ink" || return 1
+    assert_output_not_contains_f "$out" "48;2;255;183;77" "no amber fill" || return 1
+}
+
+run_test test_interleaved_segments_still_one_identity_capsule
+run_test test_plain_joins_identity_with_dots_and_capsules_with_gt
+run_test test_identity_is_one_capsule_on_the_surface
+run_test test_capsule_gap_two_cells_after_identity_one_after_gauges
+run_test test_caps_off_gives_square_chips
+run_test test_line_ends_at_the_last_cap_regardless_of_columns
+run_test test_ctx_amber_is_ink_on_the_surface
+run_test test_ctx_crit_inverts_only_its_capsule
+run_test test_logo_is_brand_ink_inside_identity
+run_test test_logo_pulse_alternates_brand_and_brandshade
+run_test test_effort_is_secondary_ink_after_the_model
+run_test test_notes_and_mail_are_amber_ink_after_the_session
 
 report_results
