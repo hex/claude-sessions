@@ -475,8 +475,10 @@ _sgr() {
                     elif [ "$SL_THEME" = "dark" ]; then rgb="230;230;230"
                     else rgb="255;255;255"; fi ;;
                 # Secondary text: separators, effort, gauge labels, resting
-                # numbers. A shade of the surface like `ink`, so it tracks
-                # measured, fallback and low-colour fills alike.
+                # numbers. A shade of the surface like `ink`, so it tracks both
+                # the measured background and the taupe fallback; the 256 and
+                # basic arms instead pick fixed values that contrast their
+                # fixed fills.
                 ink2)
                     _sgr 48 surface
                     _parse_rgb_triplet "$_RGB"
@@ -970,14 +972,14 @@ _refresh_usage() {
     # Only two populated, differing values are evidence of a swap. An empty
     # reading means the config was briefly unreadable, which _fable_read already
     # treats as unknown; disagreeing with it here would throw away a good
-    # reading for the right account and blank the chip for a whole interval.
+    # reading for the right account and blank the capsule for a whole interval.
     _read_org_from "$cfg"
     if [ -n "$_ORG" ] && [ -n "$org" ] && [ "$_ORG" != "$org" ]; then
         # Discard the result: it belongs to the account we started under, which
         # is no longer signed in. Record the schedule against THAT account —
         # its budget paid for the request — and leave the account swapped TO
         # untouched. Writing to $_ORG here would blank a reading it already
-        # holds and restamp it fresh, emptying the chip for a full interval on
+        # holds and restamp it fresh, emptying the capsule for a full interval on
         # the account that just became active, which is the swap case the whole
         # feature is for. If it has no reading, the next render is due anyway.
         _usage_write "$org" - "" "$USAGE_MIN_INTERVAL"
@@ -1031,7 +1033,7 @@ USAGE_MAX_AGE=1800   # past this a reading is too old to sit beside a live count
 # (epoch), and raise _FABLE_DUE when a refresh should be kicked. Identity is
 # structural rather than checked: the record is addressed by the account signed
 # in now, so a reading can never be found under the wrong one and no comparison
-# is needed. Anything unreadable or too old yields no reading at all — the chip
+# is needed. Anything unreadable or too old yields no reading at all — the capsule
 # may be absent, but it must never carry a number that is not this account's.
 _fable_read() {
     _FABLE_PCT=""
@@ -1355,8 +1357,8 @@ _seg_cost() {
 # the duration of this function regardless of the ambient locale or this
 # bash's own multibyte awareness, so continuation bytes (the 0x80-0xBF range)
 # can be counted and subtracted out: every codepoint has exactly one leading
-# (non-continuation) byte. No subprocess. Used by bin/cs-subagent-statusline's
-# _truncate; no caller in this file.
+# (non-continuation) byte. No subprocess. Used by bin/cs-subagent-statusline
+# (_fixed_width and _truncate); no caller in this file.
 _display_width() {
     local LC_ALL=C s="$1" i n=0
     local len=${#s}

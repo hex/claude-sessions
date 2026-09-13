@@ -98,7 +98,7 @@ ctx_num_run() {
 }
 
 # Isolate the ctx pill from a rendered line ($1) given its reading ($2): the
-# label and the number are separate items now, so this just forwards to the
+# label and the number are separate items, so this just forwards to the
 # run carrying the number.
 ctx_pill() {
     ctx_num_run "$1" "$2"
@@ -2017,7 +2017,7 @@ test_sl_theme_non_macos_defaults_dark() {
 # The OS appearance describes the system, not the terminal the capsules are
 # drawn on, and the two are unrelated for a fixed-theme terminal or one
 # embedded in an app. With no signal from the terminal itself, an unknown is
-# now dark — the assumption the rest of cs makes — rather than a guess sourced
+# dark — the assumption the rest of cs makes — rather than a guess sourced
 # from the OS.
 test_sl_theme_unknown_is_dark_on_macos() {
     ( _load_sl_functions
