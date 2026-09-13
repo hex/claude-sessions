@@ -369,6 +369,17 @@ test_integrate_requires_a_gate_command() {
     assert_output_contains "$output" "Usage: cs <base> -integrate-feature" "prints usage" || return 1
 }
 
+test_integrate_requires_a_sha() {
+    # `set -u` would otherwise turn a missing positional into an unbound-variable
+    # crash instead of the usage line.
+    integrate_fixture myproj fix-auth > /dev/null
+    local output status=0
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth 2>&1) || status=$?
+    assert_eq "1" "$status" "missing sha refuses" || return 1
+    assert_output_contains "$output" "Usage: cs <base> -integrate-feature" "prints usage, not a shell error" || return 1
+    assert_output_not_contains "$output" "unbound variable" "no set -u crash" || return 1
+}
+
 test_integrate_is_hidden_from_completion_and_unknown_command_text() {
     grep -q '^            -integrate-feature) # hidden' "$SCRIPT_DIR/../lib/99-main.sh" \
         || { echo "  FAIL: the arm must carry '# hidden' on its own line for test_completions"; return 1; }
@@ -396,6 +407,7 @@ run_test test_integrate_ignores_the_feature_lock
 run_test test_integrate_refuses_merge_in_progress
 run_test test_integrate_refuses_stale_mutex_and_names_it
 run_test test_integrate_requires_a_gate_command
+run_test test_integrate_requires_a_sha
 run_test test_integrate_is_hidden_from_completion_and_unknown_command_text
 run_test test_integrate_and_autosave_spell_one_mutex_path
 ```
@@ -434,6 +446,28 @@ _git_path_abs() {  # checkout_dir rev-parse-flag
         /*) printf '%s\n' "$p" ;;
         *) printf '%s\n' "$1/$p" ;;
     esac
+}
+
+# The same merge policy setup_merge_attributes (lib/45-migrate.sh:4) gives a
+# checkout, written clone-local: merge.ours.driver into the shared config and
+# the three attribute lines into <common>/info/attributes, which every
+# worktree of the repo reads and which dirties no tree. The temp worktree
+# checks out whatever .gitattributes the base has committed, which may lack
+# these lines; without them tracked-mode timeline and narrative appends on
+# both sides conflict instead of union-merging.
+_setup_merge_attributes_clone_local() {  # base_dir common_dir
+    git -C "$1" config merge.ours.driver true 2>/dev/null || true
+    local attrs="$2/info/attributes"
+    mkdir -p "$2/info"
+    if ! grep -q 'MEMORY\.md merge=ours' "$attrs" 2>/dev/null; then
+        printf '.cs/memory/MEMORY.md merge=ours\n' >> "$attrs"
+    fi
+    if ! grep -q 'timeline\.jsonl merge=union' "$attrs" 2>/dev/null; then
+        printf '.cs/timeline.jsonl merge=union\n' >> "$attrs"
+    fi
+    if ! grep -q 'narrative\.\*\.md merge=union' "$attrs" 2>/dev/null; then
+        printf '.cs/memory/narrative.*.md merge=union\n' >> "$attrs"
+    fi
 }
 
 # Tracked-.cs mode: MEMORY.md merges with merge=ours, so a change to it on the
@@ -502,9 +536,10 @@ _integrate_cleanup() {
 # that skills/finish/scripts/finish.sh drives. Every refusal is an error that
 # names the next command.
 integrate_feature_worktree() {  # base_name task sha [--from-remote] -- gate...
+    local usage="Usage: cs <base> -integrate-feature <task> <sha> [--from-remote] -- <gate command...>"
+    [ $# -ge 3 ] || error "$usage"
     local base_name="$1" task="$2" sha="$3"
     shift 3
-    local usage="Usage: cs <base> -integrate-feature <task> <sha> [--from-remote] -- <gate command...>"
     local from_remote=""
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -569,7 +604,7 @@ integrate_feature_worktree() {  # base_name task sha [--from-remote] -- gate...
     local lock="$common/cs/integrate.lock"
     mkdir -p "$common/cs"
     if ! mkdir "$lock" 2>/dev/null; then
-        error "Another integrate holds $lock; if none is running, remove that directory and re-run"
+        error "Another integrate or an in-flight autosave holds $lock; wait a few seconds and re-run. Remove that directory only if it persists with no cs running"
     fi
     _INTEGRATE_LOCK="$lock"
     _INTEGRATE_BASE_DIR="$base_dir"
@@ -661,7 +696,10 @@ test_integrate_lands_a_no_ff_merge_and_keeps_everything() {
     assert_eq "3" "$(git -C "$base_dir" rev-list --parents -n1 HEAD | wc -w | tr -d ' ')" \
         "base HEAD is a merge commit: its sha plus two parents (--no-ff)" || return 1
     assert_dir "$wt" "the feature worktree remains" || return 1
-    assert_eq "cs/fix-auth" "$(git -C "$base_dir" branch --list cs/fix-auth | tr -d ' *')" "the branch remains" || return 1
+    # rev-parse, not `branch --list`: git prefixes a branch checked out in a
+    # linked worktree with `+`, so the listing never equals the bare name.
+    git -C "$base_dir" rev-parse -q --verify refs/heads/cs/fix-auth >/dev/null 2>&1 \
+        || { echo "  FAIL: the branch must remain"; return 1; }
     assert_output_not_contains "$(git -C "$base_dir" worktree list)" "cs/finish" "no temp worktree left registered" || return 1
     assert_not_exists "$base_dir/.git/cs/integrate.lock" "mutex released" || return 1
     assert_file_contains "$base_dir/.cs/timeline.jsonl" '"event":"feature-integrated"' "timeline records the integrate" || return 1
@@ -789,7 +827,29 @@ test_integrate_tracked_mode_warns_on_memory_index_change() {
     assert_output_contains "$output" "MEMORY.md changed on $sha" "merge=ours drop is announced" || return 1
 }
 
+test_integrate_tracked_mode_union_merges_shared_records() {
+    # Both sides append to the tracked timeline; the verb's merge policy
+    # (merge=union) must reach the temp worktree or this conflicts.
+    local sha base_dir wt output status=0
+    base_dir=$(create_test_session_with_git "myproj")
+    echo '{"ts":"2026-01-01T00:00:00Z","event":"seed"}' > "$base_dir/.cs/timeline.jsonl"
+    (cd "$base_dir" && git add .cs/timeline.jsonl && git commit -q -m seed)
+    cs_launch "myproj@fix-auth"
+    wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo '{"ts":"2026-01-02T00:00:00Z","event":"feature-side"}' >> "$wt/.cs/timeline.jsonl"
+    (cd "$wt" && git add .cs/timeline.jsonl && git commit -q -m "feature event")
+    sha=$(git -C "$wt" rev-parse HEAD)
+    echo '{"ts":"2026-01-03T00:00:00Z","event":"base-side"}' >> "$base_dir/.cs/timeline.jsonl"
+    (cd "$base_dir" && git add .cs/timeline.jsonl && git commit -q -m "base event")
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- true 2>&1) || status=$?
+    assert_eq "0" "$status" "union merge lands: $output" || return 1
+    assert_file_contains "$base_dir/.cs/timeline.jsonl" "feature-side" "feature line kept" || return 1
+    assert_file_contains "$base_dir/.cs/timeline.jsonl" "base-side" "base line kept" || return 1
+    assert_eq "" "$(git -C "$base_dir" status --porcelain -- .gitattributes)" "no tree is dirtied to get the policy" || return 1
+}
+
 run_test test_integrate_lands_a_no_ff_merge_and_keeps_everything
+run_test test_integrate_tracked_mode_union_merges_shared_records
 run_test test_integrate_then_merge_verb_takes_the_ancestor_path
 run_test test_integrate_red_gate_leaves_base_untouched
 run_test test_integrate_gates_run_in_the_temp_not_the_live_trees
@@ -841,7 +901,10 @@ _integrate_in_temp() {  # base_dir wt_dir task sha common from_remote gate...
 
     local mode
     mode=$(_read_local_state "$wt_dir/.cs/local/state" cs_mode)
-    [ "$mode" = "tracked" ] && _warn_memory_index_changed "$base_dir" "$sha"
+    if [ "$mode" = "tracked" ]; then
+        _setup_merge_attributes_clone_local "$base_dir" "$common"
+        _warn_memory_index_changed "$base_dir" "$sha"
+    fi
 
     # --no-ff locally: the merge commit names the feature and is the audit
     # trail /finish leaves, and it gives the retire verb's ancestor check
@@ -1275,7 +1338,10 @@ usage() {
 }
 
 session_dir="${CLAUDE_SESSION_DIR:-$PWD}"
-sessions_root="${CS_SESSIONS_ROOT:-$(dirname "$session_dir")}"
+# Never `dirname "$session_dir"`: an adopted session's CLAUDE_SESSION_DIR is
+# the resolved project path, whose parent is not the sessions root. Same
+# default write-as-me's build-corpus.sh uses.
+sessions_root="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 session_name="${CLAUDE_SESSION_NAME:-$(basename "$session_dir")}"
 
 for tool in git jq perl; do
@@ -1371,9 +1437,14 @@ pr_lookup() {  # base_dir branch
     printf '%s' "$json" | jq -r 'first | "pr_number: \(.number)\npr_url: \(.url)"'
 }
 
+# Uncommitted work in the worktree, as porcelain lines. Untracked paths that
+# are cs's own bookkeeping (the same three lib/30-worktree.sh's
+# _worktree_untracked_at_risk drops) are not the user's dirt.
 dirt_lines() {  # dir
     local dirt
-    dirt=$(git -C "$1" status --porcelain 2>/dev/null || true)
+    dirt=$(git -C "$1" status --porcelain 2>/dev/null \
+        | grep -v -e '^?? \.cs/' -e '^?? \.claude/settings\.local\.json$' -e '^?? CLAUDE\.local\.md$' \
+        || true)
     echo "dirt_count: $(printf '%s' "$dirt" | grep -c . || true)"
     [ -z "$dirt" ] || printf '%s\n' "$dirt" | sed 's/^/dirt: /'
 }
@@ -1873,11 +1944,16 @@ Replace `tui/src/ui.rs:2045-2076` (from the `// Enter arms /merge` comment throu
             Style::default().fg(p.ink),
         )));
         lines.push(Line::from(Span::styled(step2, Style::default().fg(p.ink))));
+        // Two lines: Paragraph truncates rather than wraps, and a real base
+        // and task name would push the verb off the tail of one line.
+        lines.push(Line::from(Span::styled("    3  worktree, branch and session stay", Style::default().fg(p.ink))));
         lines.push(Line::from(Span::styled(
-            format!("    3  worktree, branch and session stay \u{b7} retire later: cs {} --merge {}", app.merge_base, f.task),
-            Style::default().fg(p.ink),
+            format!("       retire later: cs {} --merge {}", app.merge_base, f.task),
+            Style::default().fg(p.mut_),
         )));
 ```
+
+The detail body grew by one line; if `merge_screen_keeps_the_whole_plan_on_a_short_terminal` (21 rows) fails on the retire line, lower the list's minimum height by one in the same layout arithmetic that already yields to the detail pane (find it by the test's own comment "the list must yield"), rather than shortening the plan.
 
 Check the field names on the feature record (`f.branch`, `f.task`) against the struct the porcelain parser fills (`grep -n 'struct.*Feature\|pub branch\|pub task' tui/src/app.rs`) and use the real names. If `f.ff` is now unread anywhere, `cargo build` warns `dead_code`; keep the field (it is the porcelain contract, column 5) and silence with `#[allow(dead_code)]` on that field only, with a one-line comment naming the column.
 
@@ -1942,10 +2018,9 @@ Insert above `## 2026.9.13`:
 - The autosave hook labels each snapshot with the HEAD it started from, read before the tree is written. A HEAD that moved mid-snapshot was labelled onto the old tree, which is the exact case the label exists to expose at crash recovery. The hook also skips (never waits) while an integrate holds the repo's integrate mutex, and holds that mutex itself for the tree write.
 ```
 
-- [ ] **Step 3: Edit-loop gate, then the full gate on ghost**
+- [ ] **Step 3: Named suites locally, the full gate on ghost**
 
-Run: `./build.sh && bash tests/run_all.sh --changed 2>&1 | tail -5`
-Expected: `lib/` and `hooks/` changed, so `--changed` runs the full suite locally — do NOT let it: interrupt and instead invoke the `claude-tmux:remote-tests` skill for the full suite on ghost, in the background, and capture its output to a file. Locally run only the touched suites by name (Tasks 1–6 list them) plus `bash tests/test_docs.sh`.
+`lib/` and `hooks/` changed, so `--changed` would run the full suite locally; skip it. Run `./build.sh`, then the touched suites by name: `test_shadow_ref test_worktrees test_finish_script test_finish_skill test_retired_skills test_install test_hooks test_help test_completions test_docs`, each as `bash tests/<suite>.sh 2>&1 | tail -1`. Then invoke the `claude-tmux:remote-tests` skill for the full suite on ghost, in the background, with its output captured to a file under the scratchpad.
 
 Expected on ghost: every suite green, `bin/cs` in sync.
 
@@ -1978,4 +2053,4 @@ Do not merge or release. Report: the branch, the ghost result file, and the thre
 - **Testing section**: every listed `test_worktrees.sh` case has a test (Tasks 2–4); both `test_hooks.sh` cases are in `test_shadow_ref.sh` (Task 1, flagged); `test_finish_skill.sh` (Task 6); `test_install.sh` needs no edit — its existing derived checks cover `finish/scripts/finish.sh` and `merge` retirement.
 - **Files section**: `docs/hooks.md` (Task 1), README and CHANGELOG (Task 8), `skills/merge/` removed (Task 6). `tests/test_hooks.sh` is touched only for the subagent-context pin.
 - **Placeholder scan**: no TBD/TODO; every code step carries its code.
-- **Name consistency**: `integrate_feature_worktree`, `_integrate_in_temp`, `_integrate_cleanup`, `_foreign_live_lock_pid`, `_git_path_abs`, `_warn_memory_index_changed`, `finish.sh prepare|report`, keys `role/base/task/handoff/worktree/branch/sha/dirt_count/dirt/base_branch/pr_state/pr_number/pr_url/pr_merge_commit/pr_base_ref/pr_reason/landed/base_head/not_integrated/retire`, summary lines `integrated … -> …` and `already-integrated …`, event `feature-integrated`, mutex `<common>/cs/integrate.lock`, temp `<common>/cs/finish/<task>.<pid>` — used identically in every task.
+- **Name consistency**: `integrate_feature_worktree`, `_integrate_in_temp`, `_integrate_cleanup`, `_foreign_live_lock_pid`, `_git_path_abs`, `_setup_merge_attributes_clone_local`, `_warn_memory_index_changed`, `finish.sh prepare|report`, keys `role/base/task/handoff/worktree/branch/sha/dirt_count/dirt/base_branch/pr_state/pr_number/pr_url/pr_merge_commit/pr_base_ref/pr_reason/landed/base_head/not_integrated/retire`, summary lines `integrated … -> …` and `already-integrated …`, event `feature-integrated`, mutex `<common>/cs/integrate.lock`, temp `<common>/cs/finish/<task>.<pid>` — used identically in every task.
