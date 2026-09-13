@@ -1239,38 +1239,28 @@ _seg_git() {
     _add "${ICON_GIT}${t}" identity ink bold
 }
 
-_seg_limits() {
-    local h="${SL_5H%%.*}" w="${SL_WK%%.*}"
-    if [ -n "$h" ]; then
-        _thresh_color "$h" 70 90
-        [ "$_COLOR" = "crit" ] && _invert lim-5h
-        local label="${h}%"
-        if [ "$h" -ge 50 ]; then
-            _fmt_rest "$SL_5H_RESET"
-            [ -n "$_REST" ] && label="$label · $_REST"
-        fi
-        _add "${ICON_5H}5h" lim-5h ink2 "" none
-        _add "$label" lim-5h "$_COLOR" "" space
+# One rate-limit capsule: label in secondary ink, the number in the threshold
+# colour, crit inverting the capsule. $4 is the usage floor above which the
+# reset countdown is appended (5h at 50, the seven-day windows at 80: the
+# coarse windows only make time-to-reset actionable near exhaustion).
+_limits_render() {
+    local name="$1" pct="$2" reset="$3" gate="$4" icon="$5"
+    _thresh_color "$pct" 70 90
+    [ "$_COLOR" = "crit" ] && _invert "lim-$name"
+    local label="${pct}%"
+    if [ "$pct" -ge "$gate" ]; then
+        _fmt_rest "$reset"
+        [ -n "$_REST" ] && label="$label · $_REST"
     fi
-    if [ -n "$w" ]; then
-        _thresh_color "$w" 70 90
-        [ "$_COLOR" = "crit" ] && _invert lim-wk
-        local wlabel="${w}%"
-        if [ "$w" -ge 80 ]; then
-            _fmt_rest "$SL_WK_RESET"
-            [ -n "$_REST" ] && wlabel="$wlabel · $_REST"
-        fi
-        _add "${ICON_WK}wk" lim-wk ink2 "" none
-        _add "$wlabel" lim-wk "$_COLOR" "" space
-    fi
+    _add "${icon}${name}" "lim-$name" ink2 "" none
+    _add "$label" "lim-$name" "$_COLOR" "" space
 }
 
-# Fable's weekly window, which is model-scoped and so appears in none of the
-# rate_limits Claude Code puts on stdin. Rendered only on Fable: on any other
-# model the gate returns before the cache is touched, so the segment costs
-# nothing — no file read, no fork, and above all no poll against a request
-# budget shared with Claude Code itself.
-_seg_fable() {
+# Read the Fable window into the candidate list. Model-scoped, so it is only
+# ever a candidate on a Fable session; the cache read and the refresh kick run
+# whether or not the capsule is shown, so a hidden window keeps polling at its
+# floor. See _fable_read and _refresh_usage.
+_fable_candidate() {
     _FABLE_KICKED=""
     case "${SL_MODEL_ID:-}" in claude-fable*) ;; *) return 0 ;; esac
     _fable_read
@@ -1287,15 +1277,57 @@ _seg_fable() {
         ( "${BASH:-bash}" "$_SL_SELF" --refresh-usage >/dev/null 2>&1 & ) >/dev/null 2>&1
     fi
     [ -n "$_FABLE_PCT" ] || return 0
-    _thresh_color "$_FABLE_PCT" 70 90
-    [ "$_COLOR" = "crit" ] && _invert lim-fable
-    local label="${_FABLE_PCT}%"
-    if [ "$_FABLE_PCT" -ge 80 ]; then
-        _fmt_rest "$_FABLE_RESET"
-        [ -n "$_REST" ] && label="$label · $_REST"
+    _LIM_NAME+=("fable"); _LIM_PCT+=("$_FABLE_PCT"); _LIM_RESET+=("$_FABLE_RESET")
+    _LIM_GATE+=(80); _LIM_ICON+=("$ICON_FABLE")
+}
+
+# Rate limits are hidden until hot: every window at or past 70 becomes a
+# candidate, the two highest render highest-first, the rest stay hidden. Their
+# arrival is the signal. The three windows are 5h and wk from stdin and, on a
+# Fable session, the model-scoped weekly window from the usage cache. The 5h
+# countdown gate equals the reveal (70): a lower gate would be unobservable.
+_seg_limits() {
+    _LIM_NAME=(); _LIM_PCT=(); _LIM_RESET=(); _LIM_GATE=(); _LIM_ICON=()
+    local h="${SL_5H%%.*}" w="${SL_WK%%.*}"
+    if [ -n "$h" ]; then
+        _LIM_NAME+=("5h"); _LIM_PCT+=("$h"); _LIM_RESET+=("$SL_5H_RESET"); _LIM_GATE+=(70); _LIM_ICON+=("$ICON_5H")
     fi
-    _add "${ICON_FABLE}fable" lim-fable ink2 "" none
-    _add "$label" lim-fable "$_COLOR" "" space
+    if [ -n "$w" ]; then
+        _LIM_NAME+=("wk"); _LIM_PCT+=("$w"); _LIM_RESET+=("$SL_WK_RESET"); _LIM_GATE+=(80); _LIM_ICON+=("$ICON_WK")
+    fi
+    _fable_candidate
+    _limits_emit_hot
+}
+
+# The `fable` name alone: the Fable window only. When `limits` is also named
+# (in either order) that segment owns all three windows and this one is a
+# no-op, so the two-capsule cap holds across the whole bar. Kept so a
+# CS_STATUSLINE_SEGMENTS written for the old bar still shows the Fable window.
+_seg_fable() {
+    [ -z "${_LIMITS_NAMED:-}" ] || return 0
+    _LIM_NAME=(); _LIM_PCT=(); _LIM_RESET=(); _LIM_GATE=(); _LIM_ICON=()
+    _fable_candidate
+    _limits_emit_hot
+}
+
+# Render the two hottest candidates at or past 70, highest first. At most
+# three candidates, so a pass that picks the max twice is the whole sort; no
+# subprocess, no bash 4 features.
+_limits_emit_hot() {
+    local n=${#_LIM_NAME[@]} shown=0 best i
+    while [ "$shown" -lt 2 ]; do
+        best=-1
+        for ((i = 0; i < n; i++)); do
+            [ -n "${_LIM_NAME[i]}" ] || continue
+            [ "${_LIM_PCT[i]}" -ge 70 ] || continue
+            if [ "$best" -lt 0 ] || [ "${_LIM_PCT[i]}" -gt "${_LIM_PCT[best]}" ]; then best=$i; fi
+        done
+        [ "$best" -ge 0 ] || return 0
+        _limits_render "${_LIM_NAME[best]}" "${_LIM_PCT[best]}" "${_LIM_RESET[best]}" \
+            "${_LIM_GATE[best]}" "${_LIM_ICON[best]}"
+        _LIM_NAME[best]=""
+        shown=$((shown + 1))
+    done
 }
 
 _seg_cost() {
@@ -1473,7 +1505,9 @@ main() {
 
     _detect_level
 
-    local segments="${CS_STATUSLINE_SEGMENTS:-logo,session,notes,mail,pane,git,model,ctx,limits,fable}"
+    local segments="${CS_STATUSLINE_SEGMENTS:-logo,session,notes,mail,git,model,ctx,limits}"
+    _LIMITS_NAMED=""
+    case ",$segments," in *,limits,*) _LIMITS_NAMED=1 ;; esac
     local name names
     IFS=',' read -ra names <<< "$segments"
     for name in "${names[@]}"; do

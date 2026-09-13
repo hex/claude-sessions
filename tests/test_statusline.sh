@@ -153,9 +153,10 @@ test_happy_path_docs_fixture_plain() {
     export NO_COLOR=1
     local out
     out=$(run_sl "$FIXTURE_DOCS")
-    # git absent (non-git dir) and disc absent (no cs session).
-    assert_eq "my-session · ✦ Opus high > ◔ ctx 8% > ◷ 5h 23% > ◑ wk 41%" "$out" \
-        "docs fixture should render identity first, then gauges (no badge in plain mode)"
+    # git absent (non-git dir) and disc absent (no cs session); both rate-limit
+    # windows sit below seventy, so limits stays hidden entirely.
+    assert_eq "my-session · ✦ Opus high > ◔ ctx 8%" "$out" \
+        "docs fixture should render identity first, then the ctx gauge (no badge in plain mode)"
 }
 
 
@@ -176,13 +177,13 @@ test_all_segments_ordering_plain() {
         effort:{level:"high"},
         workspace:{current_dir:$dir},
         context_window:{used_percentage:34},
-        rate_limits:{five_hour:{used_percentage:23.5},seven_day:{used_percentage:41.2}},
+        rate_limits:{five_hour:{used_percentage:95},seven_day:{used_percentage:72}},
         cost:{total_cost_usd:1.23}
     }')
     local out
     out=$(run_sl "$json")
-    assert_eq "mysess · ⎇ main +1!1 · ✦ Opus high > ◔ ctx 34% > ◷ 5h 23% > ◑ wk 41%" "$out" \
-        "all segments should render in order: session, branch, model, then gauges (no badge in plain mode)"
+    assert_eq "mysess · ⎇ main +1!1 · ✦ Opus high > ◔ ctx 34% > ◷ 5h 95% > ◑ wk 72%" "$out" \
+        "all segments should render in order: session, branch, model, ctx, then the two hot limits highest first"
 }
 
 # ============================================================================
@@ -194,12 +195,8 @@ test_limits_neutral_when_healthy() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":23},"seven_day":{"used_percentage":41}}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "◷ 5h" "5h block should render" || return 1
-    assert_output_contains "$out" "23%" "5h reading should render" || return 1
-    assert_output_contains "$out" "◑ wk" "wk block should render" || return 1
-    assert_output_contains "$out" "41%" "wk reading should render" || return 1
-    assert_output_not_contains "$out" "48;2;138;134;236" "healthy limits must not take the accent periwinkle" || return 1
-    assert_output_not_contains "$out" "48;2;255;183;77" "healthy limits must not show amber" || return 1
+    assert_output_not_contains "$out" "◷ 5h" "5h block stays hidden while healthy" || return 1
+    assert_output_not_contains "$out" "◑ wk" "wk block stays hidden while healthy" || return 1
 }
 
 # ============================================================================
@@ -262,7 +259,7 @@ test_limits_threshold_per_block() {
     out=$(run_sl "$json")
     assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◑ wk" "wk 95% block should invert to the crit fill" || return 1
     assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m95%" "the wk number inverts too" || return 1
-    assert_output_not_contains "$out" "48;2;255;183;77" "healthy 5h block must not show amber" || return 1
+    assert_output_not_contains_f "$out" "◷ 5h" "the healthy 5h window stays hidden entirely" || return 1
 }
 
 test_logo_badge_is_brand_coral() {
@@ -290,7 +287,7 @@ test_segment_icons_are_unicode() {
         model:{display_name:"Opus"},
         workspace:{current_dir:$dir},
         context_window:{used_percentage:34},
-        rate_limits:{five_hour:{used_percentage:23},seven_day:{used_percentage:41}}
+        rate_limits:{five_hour:{used_percentage:75},seven_day:{used_percentage:41}}
     }')
     local out branch_glyph clock_glyph
     out=$(run_sl "$json")
@@ -463,11 +460,11 @@ test_5h_rest_time_appended() {
     json=$(jq -nc --argjson r "$reset_at" '{
         session_name:"s",
         workspace:{current_dir:"/none"},
-        rate_limits:{five_hour:{used_percentage:55,resets_at:$r}}
+        rate_limits:{five_hour:{used_percentage:75,resets_at:$r}}
     }')
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "5h 55% · 2h14m" "5h block should append time until reset"
+    assert_output_contains "$out" "5h 75% · 2h14m" "5h block should append time until reset"
 }
 
 # The reset countdown must render even under bash <4.2, which lacks the
@@ -488,11 +485,11 @@ test_5h_rest_time_on_old_bash() {
     json=$(jq -nc --argjson r "$reset_at" '{
         session_name:"s",
         workspace:{current_dir:"/none"},
-        rate_limits:{five_hour:{used_percentage:55,resets_at:$r}}
+        rate_limits:{five_hour:{used_percentage:75,resets_at:$r}}
     }')
     local out
     out=$(printf '%s' "$json" | "$old_bash" "$SL")
-    assert_output_contains "$out" "5h 55% · 2h14m" "reset countdown must render under bash <4.2 via date fallback"
+    assert_output_contains "$out" "5h 75% · 2h14m" "reset countdown must render under bash <4.2 via date fallback"
 }
 
 # Under an hour the rest time is minutes-only, with no zero-hour prefix.
@@ -505,11 +502,11 @@ test_5h_rest_time_minutes_only() {
     json=$(jq -nc --argjson r "$reset_at" '{
         session_name:"s",
         workspace:{current_dir:"/none"},
-        rate_limits:{five_hour:{used_percentage:50,resets_at:$r}}
+        rate_limits:{five_hour:{used_percentage:75,resets_at:$r}}
     }')
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "5h 50% · 45m" "5h block should show minutes-only rest time under an hour" || return 1
+    assert_output_contains "$out" "5h 75% · 45m" "5h block should show minutes-only rest time under an hour" || return 1
     assert_output_not_contains "$out" "0h" "minutes-only rest time must not carry a zero-hour prefix"
 }
 
@@ -534,10 +531,10 @@ test_5h_rest_time_sub_minute() {
 # No reset suffix when resets_at is missing.
 test_5h_rest_time_absent_without_resets_at() {
     export NO_COLOR=1
-    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":55}}}'
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":75}}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "5h 55%" "5h percentage should render" || return 1
+    assert_output_contains "$out" "5h 75%" "5h percentage should render" || return 1
     assert_output_not_contains "$out" "·" "no reset separator when resets_at is absent"
 }
 
@@ -551,17 +548,17 @@ test_5h_rest_time_absent_when_past() {
     json=$(jq -nc --argjson r "$reset_at" '{
         session_name:"s",
         workspace:{current_dir:"/none"},
-        rate_limits:{five_hour:{used_percentage:55,resets_at:$r}}
+        rate_limits:{five_hour:{used_percentage:75,resets_at:$r}}
     }')
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "5h 55%" "5h percentage should still render" || return 1
+    assert_output_contains "$out" "5h 75%" "5h percentage should still render" || return 1
     assert_output_not_contains "$out" "·" "no reset separator when the window already reset"
 }
 
-# The 5h reset countdown is gated on usage: below 50% it stays hidden even when
-# resets_at is known, so the suffix only appears as the window gets tight.
-test_5h_rest_hidden_below_50() {
+# The 5h window is hidden until it is hot: below 70% it does not render at all,
+# reset countdown included.
+test_5h_hidden_below_seventy() {
     export NO_COLOR=1
     local now reset_at
     now=$(date +%s)
@@ -570,12 +567,11 @@ test_5h_rest_hidden_below_50() {
     json=$(jq -nc --argjson r "$reset_at" '{
         session_name:"s",
         workspace:{current_dir:"/none"},
-        rate_limits:{five_hour:{used_percentage:40,resets_at:$r}}
+        rate_limits:{five_hour:{used_percentage:69,resets_at:$r}}
     }')
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "5h 40%" "5h percentage should render" || return 1
-    assert_output_not_contains "$out" "·" "5h reset suffix is hidden below 50% usage"
+    assert_output_not_contains "$out" "5h" "5h stays hidden below seventy" || return 1
 }
 
 # The weekly block gains a reset countdown, gated at 80%: at or above 80% it
@@ -645,11 +641,11 @@ test_wk_rest_hidden_below_80() {
     json=$(jq -nc --argjson r "$reset_at" '{
         session_name:"s",
         workspace:{current_dir:"/none"},
-        rate_limits:{seven_day:{used_percentage:41,resets_at:$r}}
+        rate_limits:{seven_day:{used_percentage:75,resets_at:$r}}
     }')
     local out
     out=$(run_sl "$json")
-    assert_output_contains "$out" "wk 41%" "wk percentage should render" || return 1
+    assert_output_contains "$out" "wk 75%" "wk percentage should render once hot" || return 1
     assert_output_not_contains "$out" "·" "wk reset suffix is hidden below 80% usage"
 }
 
@@ -922,7 +918,8 @@ test_limits_threshold_red() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":95}}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◑ wk" "wk 95% should invert the lim-wk capsule to the crit fill"
+    assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◑ wk" "wk 95% should invert the lim-wk capsule to the crit fill" || return 1
+    assert_output_not_contains_f "$out" "◷ 5h" "the healthy 5h window stays hidden entirely"
 }
 
 # ============================================================================
@@ -1613,7 +1610,7 @@ run_test test_5h_rest_time_minutes_only
 run_test test_5h_rest_time_sub_minute
 run_test test_5h_rest_time_absent_without_resets_at
 run_test test_5h_rest_time_absent_when_past
-run_test test_5h_rest_hidden_below_50
+run_test test_5h_hidden_below_seventy
 run_test test_wk_rest_shown_at_or_above_80
 run_test test_wk_rest_hidden_below_80
 run_test test_wk_rest_time_days_format
@@ -1750,17 +1747,6 @@ test_mail_segment_ignores_non_json_entries() {
     assert_output_contains "$out" "✉ 3" "non-.json entries are not counted as unread" || return 1
 }
 
-test_pane_segment_shows_tmux_pane_id() {
-    _make_ps_table real 12345
-    export PATH="$TEST_TMPDIR/fakebin:$PATH"
-    export NO_COLOR=1
-    export TMUX="/tmp/tmux-1000/default,12345,0"
-    export TMUX_PANE="%7"
-    local out
-    out=$(run_sl "$FIXTURE_DOCS")
-    assert_output_contains "$out" "◫ 7" "pane segment shows the tmux pane id" || return 1
-}
-
 test_pane_segment_absent_outside_tmux() {
     export NO_COLOR=1
     local out
@@ -1855,7 +1841,6 @@ run_test test_notes_segment_counts_only_files
 run_test test_mail_segment_shows_unread_count
 run_test test_mail_segment_absent_when_all_read
 run_test test_mail_segment_ignores_non_json_entries
-run_test test_pane_segment_shows_tmux_pane_id
 run_test test_pane_segment_hidden_when_tmux_is_foreign
 run_test test_pane_segment_absent_outside_tmux
 run_test test_pane_segment_needs_both_tmux_vars
@@ -2519,18 +2504,25 @@ test_fable_segment_renders_on_fable() {
     seed_usage_cache org-abc 42 "2026-08-29T03:59:59Z" 1787816000 1787816300
     local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"}}'
     local out; out=$(CS_STATUSLINE_NOW=1787816100 run_sl "$json")
-    assert_output_contains "$out" "fable 42%" "a fable session must render the chip" || return 1
-    assert_output_not_contains "$out" "fable 42% ·" "below 80% the countdown must be withheld" || return 1
+    assert_output_not_contains "$out" "fable 42%" "a fable window below seventy stays hidden" || return 1
+}
+
+test_fable_segment_renders_when_hot() {
+    export NO_COLOR=1 CS_USAGE_NO_REFRESH=1
+    seed_usage_cache org-abc 85 "2026-08-29T03:59:59Z" 1787816000 1787816300
+    local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"}}'
+    local out; out=$(CS_STATUSLINE_NOW=1787816100 run_sl "$json")
+    assert_output_contains "$out" "fable 85%" "a hot fable session renders the window" || return 1
 }
 
 # A context-window suffix must not defeat the gate: the id arrives as
 # claude-fable-5[1m] on a 1M-context session.
 test_fable_segment_matches_1m_variant() {
     export NO_COLOR=1 CS_USAGE_NO_REFRESH=1
-    seed_usage_cache org-abc 42 "2026-08-29T03:59:59Z" 1787816000 1787816300
+    seed_usage_cache org-abc 85 "2026-08-29T03:59:59Z" 1787816000 1787816300
     local json='{"session_name":"s","model":{"id":"claude-fable-5[1m]","display_name":"Fable"},"workspace":{"current_dir":"/none"}}'
     local out; out=$(CS_STATUSLINE_NOW=1787816100 run_sl "$json")
-    assert_output_contains "$out" "fable 42%" "claude-fable-5[1m] must still gate on" || return 1
+    assert_output_contains "$out" "fable 85% · 1d20h" "claude-fable-5[1m] must still gate on" || return 1
 }
 
 # At 80% and up the countdown appears, matching the weekly block's gate. The
@@ -2578,12 +2570,13 @@ test_fable_segment_costs_nothing_off_fable() {
     printf '%s' '{"oauthAccount":{"organizationUuid":"org-abc"}}' > "$TEST_TMPDIR/.claude.json"
     export CS_USAGE_DIR="$TEST_TMPDIR/usage-untouched"
     SL_MODEL_ID="claude-sonnet-5"
+    SL_5H=""; SL_WK=""
     # Sentinels the gate must leave alone: _fable_read clears all three on its
     # first lines, so surviving values prove it was never entered.
     _FABLE_PCT=sentinel; _FABLE_RESET=sentinel; _FABLE_DUE=sentinel
     _SEG_TEXT=(); _SEG_GROUP=(); _SEG_INK=(); _SEG_BOLD=(); _SEG_JOIN=()
-    _GROUPS=(); _GROUPS_SEEN=""
-    _seg_fable
+    _GROUPS=(); _GROUPS_SEEN=""; _CRIT_GROUPS=""
+    _seg_limits
     assert_eq "sentinel" "$_FABLE_PCT" "a non-fable model must not read the cache" || return 1
     assert_eq "sentinel" "$_FABLE_DUE" "a non-fable model must not evaluate whether a poll is due" || return 1
     assert_eq "0" "${#_SEG_TEXT[@]}" "a non-fable model must add no segment" || return 1
@@ -2609,6 +2602,7 @@ test_fable_segment_kicks_a_refresh_when_due() {
 
 run_test test_fable_segment_only_on_fable
 run_test test_fable_segment_renders_on_fable
+run_test test_fable_segment_renders_when_hot
 run_test test_fable_segment_matches_1m_variant
 run_test test_fable_segment_countdown_at_80
 run_test test_fable_segment_escalates_colour
@@ -2711,15 +2705,16 @@ test_fable_segment_does_not_spawn_a_refresher_without_curl() {
     _load_sl_functions
     seed_usage_cache org-abc 86 "2026-08-29T03:59:59Z" 1787816000 1787816300
     SL_MODEL_ID="claude-fable-5"
+    SL_5H=""; SL_WK=""
     _SEG_TEXT=(); _SEG_GROUP=(); _SEG_INK=(); _SEG_BOLD=(); _SEG_JOIN=()
-    _GROUPS=(); _GROUPS_SEEN=""
+    _GROUPS=(); _GROUPS_SEEN=""; _CRIT_GROUPS=""
     local nocurl="$TEST_TMPDIR/nocurl"; mkdir -p "$nocurl"
     # Symlink, not copy: macOS kills a copied system binary whose code
     # signature no longer validates (SIGKILL, exit 137), which would make this
     # test report "no curl" for the wrong reason — it was jq that died.
     ln -s "$(command -v jq)" "$nocurl/jq"
     # NOW is past next_poll_at, so this render is unambiguously due.
-    CS_STATUSLINE_NOW=1787816400 _NOW="" _SL_NOW_READY="" PATH="$nocurl" _seg_fable
+    CS_STATUSLINE_NOW=1787816400 _NOW="" _SL_NOW_READY="" PATH="$nocurl" _seg_limits
     assert_eq "1" "$_FABLE_DUE" "the cache must genuinely be due, or this test proves nothing" || return 1
     assert_eq "" "$_FABLE_KICKED" "with no curl the render must not fork a refresher it knows will fail" || return 1
 }
@@ -2731,10 +2726,12 @@ test_fable_segment_does_spawn_when_curl_is_present() {
     make_usage_shims 200 "$USAGE_BODY"
     seed_usage_cache org-abc 42 "2026-08-29T03:59:59Z" 1787816000 1787816300
     SL_MODEL_ID="claude-fable-5"
+    SL_5H=""; SL_WK=""
     _SEG_TEXT=(); _SEG_GROUP=(); _SEG_INK=(); _SEG_BOLD=(); _SEG_JOIN=()
-    _GROUPS=(); _GROUPS_SEEN=""
-    CS_STATUSLINE_NOW=1787816400 _NOW="" _SL_NOW_READY="" PATH="$USAGE_BINDIR:$PATH" _seg_fable
+    _GROUPS=(); _GROUPS_SEEN=""; _CRIT_GROUPS=""
+    CS_STATUSLINE_NOW=1787816400 _NOW="" _SL_NOW_READY="" PATH="$USAGE_BINDIR:$PATH" _seg_limits
     assert_eq "1" "$_FABLE_KICKED" "a due cache with curl available must kick a refresher" || return 1
+    assert_eq "0" "${#_SEG_TEXT[@]}" "a window below seventy stays hidden even while a refresh is kicked" || return 1
     # Wait for the refresher's WRITE, not for its lock: the lock appears tens of
     # ms after the spawn, so a loop waiting for it to vanish can fall through
     # before it ever exists and leave teardown racing a live refresher. The
@@ -3293,5 +3290,110 @@ run_test test_logo_is_brand_ink_inside_identity
 run_test test_logo_pulse_alternates_brand_and_brandshade
 run_test test_effort_is_secondary_ink_after_the_model
 run_test test_notes_and_mail_are_amber_ink_after_the_session
+
+# ============================================================================
+# Limits: hidden until hot, tightest first, at most two, fable folded in
+# ============================================================================
+
+test_limits_hidden_below_seventy() {
+    export NO_COLOR=1
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8},"rate_limits":{"five_hour":{"used_percentage":69},"seven_day":{"used_percentage":69.9}}}'
+    local out; out=$(run_sl "$json")
+    assert_eq "s > ◔ ctx 8%" "$out" "both windows at 69 stay hidden" || return 1
+}
+
+test_limits_one_hot_window_appears_alone() {
+    export NO_COLOR=1
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":70}}}'
+    local out; out=$(run_sl "$json")
+    assert_eq "s > ◔ ctx 8% > ◑ wk 70%" "$out" "wk at 70 appears; healthy 5h does not" || return 1
+}
+
+test_limits_hot_window_is_amber_ink_then_crit_capsule() {
+    export COLORTERM=truecolor
+    export CS_TERM_BG_RGB="253;246;227"
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":75},"seven_day":{"used_percentage":12}}}'
+    local out; out=$(run_sl "$json")
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;180;83;9;22m75%" "5h 75 is amber ink on the surface" || return 1
+    json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":91},"seven_day":{"used_percentage":12}}}'
+    out=$(run_sl "$json")
+    assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◷ 5h" "5h 91 inverts its capsule" || return 1
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;79;77;71;1ms" "identity is untouched" || return 1
+}
+
+test_limits_three_hot_show_top_two_descending() {
+    export NO_COLOR=1 CS_USAGE_NO_REFRESH=1
+    seed_usage_cache org-abc 85 "2026-08-29T03:59:59Z" 1787816000 1787816300
+    local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":72},"seven_day":{"used_percentage":95}}}'
+    local out; out=$(CS_STATUSLINE_NOW=1787816100 run_sl "$json")
+    assert_output_contains_f "$out" "◑ wk 95% > ✧ fable 85% · 1d20h" "wk then fable, highest first; fable past 80 carries its countdown" || return 1
+    assert_output_not_contains_f "$out" "5h" "the third window stays hidden" || return 1
+}
+
+test_limits_countdown_rules_survive_gating() {
+    export NO_COLOR=1
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":72,"resets_at":1787816200},"seven_day":{"used_percentage":72,"resets_at":1787816200}}}'
+    local out; out=$(CS_STATUSLINE_NOW=1787816100 run_sl "$json")
+    assert_output_contains_f "$out" "◷ 5h 72% · 1m" "5h shows its countdown once visible" || return 1
+    assert_output_not_contains_f "$out" "wk 72% ·" "wk withholds the countdown below 80" || return 1
+}
+
+test_fable_hidden_below_seventy_but_cache_still_read() {
+    export NO_COLOR=1 CS_USAGE_NO_REFRESH=1
+    seed_usage_cache org-abc 25 "2026-08-29T03:59:59Z" 1787816000 1787816300
+    local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"}}'
+    local out; out=$(CS_STATUSLINE_NOW=1787816100 run_sl "$json")
+    assert_output_not_contains_f "$out" "fable 25%" "fable at 25 is hidden" || return 1
+    # The cache is still read on the hidden path (the kick itself is proven by
+    # the two existing kick tests, moved onto _seg_limits in Step 4).
+    _load_sl_functions
+    SL_MODEL_ID="claude-fable-5"; SL_5H=""; SL_WK=""; _NOW=1787816400; _SL_NOW_READY=1; LEVEL=plain
+    _SEG_TEXT=(); _SEG_GROUP=(); _SEG_INK=(); _SEG_BOLD=(); _SEG_JOIN=(); _GROUPS=(); _GROUPS_SEEN=""; _CRIT_GROUPS=""
+    _seg_limits
+    assert_eq "1" "${_FABLE_DUE:-}" "the cache was read and found due even though nothing rendered" || return 1
+    assert_eq "0" "${#_SEG_TEXT[@]}" "nothing was added for a 25% window" || return 1
+}
+
+test_fable_named_alone_renders_only_the_fable_window() {
+    export NO_COLOR=1 CS_USAGE_NO_REFRESH=1
+    export CS_STATUSLINE_SEGMENTS="session,fable"
+    seed_usage_cache org-abc 85 "2026-08-29T03:59:59Z" 1787816000 1787816300
+    local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":95},"seven_day":{"used_percentage":95}}}'
+    local out; out=$(CS_STATUSLINE_NOW=1787816100 run_sl "$json")
+    assert_eq "s > ✧ fable 85% · 1d20h" "$out" "fable by name: its window, not the plan windows" || return 1
+}
+
+test_limits_and_fable_both_named_render_once_in_either_order() {
+    export NO_COLOR=1 CS_USAGE_NO_REFRESH=1
+    seed_usage_cache org-abc 85 "2026-08-29T03:59:59Z" 1787816000 1787816300
+    local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":72},"seven_day":{"used_percentage":95}}}'
+    local out
+    out=$(CS_STATUSLINE_SEGMENTS="session,limits,fable" CS_STATUSLINE_NOW=1787816100 run_sl "$json")
+    assert_eq "s > ◑ wk 95% > ✧ fable 85% · 1d20h" "$out" "limits then fable: one pass, top two of three" || return 1
+    out=$(CS_STATUSLINE_SEGMENTS="session,fable,limits" CS_STATUSLINE_NOW=1787816100 run_sl "$json")
+    assert_eq "s > ◑ wk 95% > ✧ fable 85% · 1d20h" "$out" "fable named first changes nothing: limits owns all three windows" || return 1
+}
+
+test_pane_off_by_default_and_rendered_when_named() {
+    _make_ps_table real 12345
+    export PATH="$TEST_TMPDIR/fakebin:$PATH"
+    export NO_COLOR=1
+    export TMUX="/tmp/tmux-1000/default,12345,0"
+    export TMUX_PANE="%7"
+    local out; out=$(run_sl "$FIXTURE_DOCS")
+    assert_output_not_contains_f "$out" "◫" "pane is not in the default order" || return 1
+    out=$(CS_STATUSLINE_SEGMENTS="session,pane,ctx" run_sl "$FIXTURE_DOCS")
+    assert_eq "my-session ◫ 7 > ◔ ctx 8%" "$out" "named: the pane number without its %, inside identity" || return 1
+}
+
+run_test test_limits_hidden_below_seventy
+run_test test_limits_one_hot_window_appears_alone
+run_test test_limits_hot_window_is_amber_ink_then_crit_capsule
+run_test test_limits_three_hot_show_top_two_descending
+run_test test_limits_countdown_rules_survive_gating
+run_test test_fable_hidden_below_seventy_but_cache_still_read
+run_test test_fable_named_alone_renders_only_the_fable_window
+run_test test_limits_and_fable_both_named_render_once_in_either_order
+run_test test_pane_off_by_default_and_rendered_when_named
 
 report_results
