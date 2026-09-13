@@ -25,9 +25,9 @@ Read these before Task 1; each is a fact found in the source, not a design chang
 9. **`CHANGELOG.md` has no `## Unreleased` heading today**; Task 8 adds one.
 10. **In tracked-`.cs` mode the integrate's own `feature-integrated` timeline event dirties the base**, and the retire verb refuses dirt (`lib/30-worktree.sh:381-382`). Retirement is not changed; the report's `retire:` line tells the user to commit the bookkeeping first, and the load-bearing "then `--merge` takes the ancestor path" test stages exactly that sequence.
 11. **Every cleanup trap is `EXIT` plus `INT TERM`** (measured: a TERM'd bash skips `EXIT`, exit 143, no cleanup), as `lib/75-launch.sh:112-113` already does. Submodules are updated after the temp merge, not before, so gates see the merged gitlinks.
-13. **A final whole-branch review wave (opus, Codex, Fable) changed four decisions and one invariant.** The mutex is per-CHECKOUT, `<git-dir>/cs/integrate.lock` in both the hook and the entry, so a feature worktree keeps autosaving through a landing on its base; the entry retries the `mkdir` five times a second apart before refusing, because the base's own autosave holds the same directory for a tree write; a lock left by a killed integrate is reported by a `cs -doctor` check, not by adding `HUP` to traps the codebase writes as `INT TERM`; the base's landing runs with the project's hooks live, so cs re-reads base HEAD afterwards and reports where a `post-merge` hook left it instead of suppressing it; and a gate that writes into, commits in, or moves the HEAD of the temp checkout is a refusal — what lands is the merge commit read BEFORE the gate ran, so gate-written output would either vanish or ride in unreviewed.
-
 12. **`finish.sh` reports every porcelain line, including `.cs/`**; the retire verb's untracked filter is a removal-risk filter and integrate removes nothing. And PR lookup answers `unknown` for two OPEN PRs or a MERGED beside an OPEN one (a reused branch), naming the numbers, rather than picking one.
+
+13. **A final whole-branch review wave (opus, Codex, Fable) changed four decisions and one invariant.** The mutex is per-CHECKOUT, `<git-dir>/cs/integrate.lock` in both the hook and the entry, so a feature worktree keeps autosaving through a landing on its base; the entry retries the `mkdir` five times a second apart before refusing, because the base's own autosave holds the same directory for a tree write; a lock left by a killed integrate is reported by a `cs -doctor` check, not by adding `HUP` to traps the codebase writes as `INT TERM`; the base's landing runs with the project's hooks live, so cs re-reads base HEAD afterwards and reports where a `post-merge` hook left it instead of suppressing it; and a gate that writes into, commits in, or moves the HEAD of the temp checkout is a refusal — what lands is the merge commit read BEFORE the gate ran, so gate-written output would either vanish or ride in unreviewed.
 
 A Codex read-only pass (2026-09-13, sandboxed, no git probes possible there) produced fourteen findings; every one was checked against the source and folded, which is where departures 10–12, the pre-landing re-verification in Task 3, the four launch-kick pins in Task 6, the two extra TUI tests in Task 7, and the exit-status capture in every validation command come from.
 
@@ -102,7 +102,7 @@ SHIM
     esac
 }
 
-# An integrate in progress holds <common-dir>/cs/integrate.lock. A snapshot
+# An integrate in progress holds <git-dir>/cs/integrate.lock. A snapshot
 # taken mid-merge is garbage, so the hook skips — never waits, never steals.
 test_autosave_skips_while_the_integrate_lock_is_held() {
     mkdir -p "$CLAUDE_SESSION_DIR/.git/cs/integrate.lock"
@@ -175,17 +175,19 @@ autosave_to_shadow_ref() {
     # directory while it merges and fast-forwards the base. Skip, never wait:
     # a snapshot taken mid-merge is garbage and the next Edit takes another.
     # Taken here, inside the backgrounded function, so there is no window
-    # between the check and the fork. Common dir, not --git-dir: a linked
-    # worktree's --git-dir is private to that worktree and the integrate runs
-    # from the base. lib/30-worktree.sh spells the same path; a test pins both.
-    GIT_COMMON=$(git rev-parse --git-common-dir 2>/dev/null) || return 0
-    mkdir -p "$GIT_COMMON/cs" 2>/dev/null || return 0
-    mkdir "$GIT_COMMON/cs/integrate.lock" 2>/dev/null || return 0
+    # between the check and the fork. --git-dir, not the common dir: the lock
+    # is per-CHECKOUT, so only the checkout an integrate is landing on stops
+    # snapshotting — a feature worktree keeps autosaving through a gate run
+    # on its base. GIT_DIR is git's own answer from this session directory,
+    # resolved above. lib/30-worktree.sh spells the same path; a test pins both.
+    LOCK_DIR="$GIT_DIR/cs/integrate.lock"
+    mkdir -p "$GIT_DIR/cs" 2>/dev/null || return 0
+    mkdir "$LOCK_DIR" 2>/dev/null || return 0
     (
         # EXIT does not fire on TERM/INT (measured: exit 143, no cleanup), so
         # both get a handler that releases and then exits.
-        trap 'rmdir "$GIT_COMMON/cs/integrate.lock" 2>/dev/null' EXIT
-        trap 'rmdir "$GIT_COMMON/cs/integrate.lock" 2>/dev/null; exit 143' TERM INT
+        trap 'rmdir "$LOCK_DIR" 2>/dev/null' EXIT
+        trap 'rmdir "$LOCK_DIR" 2>/dev/null; exit 143' TERM INT
 
         TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 
@@ -630,13 +632,27 @@ integrate_feature_worktree() {  # base_name task sha [--from-remote] -- gate...
     fi
 
     # The mutex the autosave hook honours (hooks/autosave-commits.sh spells
-    # the same path). An existing directory is a refusal, never stolen: a
-    # stale one is the user's to inspect and remove.
-    local lock="$common/cs/integrate.lock"
-    mkdir -p "$common/cs"
-    if ! mkdir "$lock" 2>/dev/null; then
-        error "Another integrate or an in-flight autosave holds $lock; wait a few seconds and re-run. Remove that directory only if it persists with no cs running"
-    fi
+    # the same path). Per-CHECKOUT, not per-clone: the base is always a main
+    # checkout, so its --git-dir is the common dir, while a feature
+    # worktree's autosave takes its own private gitdir's lock and never
+    # contends with this integrate — the feature conversation stays open and
+    # keeps snapshotting throughout a gate run. An existing directory is a
+    # refusal, never stolen: a stale one is the user's to inspect and remove
+    # (cs -doctor names it).
+    local lock="$git_dir/cs/integrate.lock"
+    mkdir -p "$git_dir/cs"
+    # The base's own autosave takes this same lock for the length of one tree
+    # write, so a refusal on the first try is far more often a snapshot in
+    # flight than another integrate. Five tries a second apart outlast that
+    # and still refuse promptly on a genuinely held lock.
+    local tries=0
+    while ! mkdir "$lock" 2>/dev/null; do
+        tries=$((tries + 1))
+        if [ "$tries" -ge 5 ]; then
+            error "Another integrate or an in-flight autosave holds $lock; wait a few seconds and re-run. Remove that directory only if it persists with no cs running"
+        fi
+        sleep 1
+    done
     _INTEGRATE_LOCK="$lock"
     _INTEGRATE_BASE_DIR="$base_dir"
     _INTEGRATE_TMP=""
