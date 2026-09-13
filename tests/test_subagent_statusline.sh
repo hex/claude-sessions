@@ -241,10 +241,10 @@ test_content_escapes_esc_as_unicode() {
 test_ctx_escalates_to_amber_then_red() {
     export COLORTERM=truecolor CS_TERM_THEME=light
     local fx out c
-    # 110000/200000 = 55% -> past warn (40), below crit (65) -> amber ink 180;83;9
+    # 110000/200000 = 55% -> past warn (40), below crit (65) -> amber ink 146;64;14
     fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":110000}]}'
     out=$(run_ssl "$fx"); c=$(row_content "$out" "t1")
-    assert_output_contains "$c" "38;2;180;83;9" "55% context renders amber" || return 1
+    assert_output_contains "$c" "38;2;146;64;14" "55% context renders amber" || return 1
 
     # 170000/200000 = 85% -> past crit (65) -> crit 215;0;21
     fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":170000}]}'
@@ -261,14 +261,14 @@ test_ctx_crit_edge_matches_the_bar() {
     # 128000/200000 = 64% -> one below crit -> still amber
     fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":128000}]}'
     out=$(run_ssl "$fx"); c=$(row_content "$out" "t1")
-    assert_output_contains "$c" "38;2;180;83;9" "64% context is still amber" || return 1
+    assert_output_contains "$c" "38;2;146;64;14" "64% context is still amber" || return 1
     assert_output_not_contains "$c" "38;2;215;0;21" "64% context must not reach red" || return 1
 
     # 130000/200000 = 65% -> at crit -> crit fill
     fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":130000}]}'
     out=$(run_ssl "$fx"); c=$(row_content "$out" "t1")
     assert_output_contains "$c" "38;2;215;0;21" "65% context renders red, as it does on the bar" || return 1
-    assert_output_not_contains "$c" "38;2;180;83;9" "65% context must not stay amber" || return 1
+    assert_output_not_contains "$c" "38;2;146;64;14" "65% context must not stay amber" || return 1
 }
 
 # Amber's cut point is inclusive too, and 40 is the only reading that separates
@@ -279,12 +279,12 @@ test_ctx_warn_edge_is_amber_at_the_threshold() {
     # 78000/200000 = 39% -> one below warn -> quiet
     fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":78000}]}'
     out=$(run_ssl "$fx"); c=$(row_content "$out" "t1")
-    assert_output_not_contains "$c" "38;2;180;83;9" "39% context must not reach amber" || return 1
+    assert_output_not_contains "$c" "38;2;146;64;14" "39% context must not reach amber" || return 1
 
     # 80000/200000 = 40% -> at warn -> amber ink
     fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":80000}]}'
     out=$(run_ssl "$fx"); c=$(row_content "$out" "t1")
-    assert_output_contains "$c" "38;2;180;83;9" "40% context renders amber" || return 1
+    assert_output_contains "$c" "38;2;146;64;14" "40% context renders amber" || return 1
 }
 
 # A row's warn default is the bar's default, so a reading that is amber on the
@@ -296,7 +296,7 @@ test_ctx_amber_band_matches_the_bar() {
     # 84000/200000 = 42% -> inside the bar's amber band, and the row's
     fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":84000}]}'
     out=$(run_ssl "$fx"); c=$(row_content "$out" "t1")
-    assert_output_contains "$c" "38;2;180;83;9" "42% context paints a row amber" || return 1
+    assert_output_contains "$c" "38;2;146;64;14" "42% context paints a row amber" || return 1
 }
 
 # Overrides are environment: a word must take the default rather than switch a
@@ -314,7 +314,7 @@ test_ctx_threshold_overrides_are_validated() {
     out=$(run_ssl "$fx"); c=$(row_content "$out" "t1")
     unset CS_STATUSLINE_CTX_WARN CS_STATUSLINE_CTX_CRIT
     assert_eq "" "$err" "a bad override must not reach the shell's integer comparison" || return 1
-    assert_output_contains "$c" "38;2;180;83;9" "55% reads amber on the defaults the bad overrides fell back to" || return 1
+    assert_output_contains "$c" "38;2;146;64;14" "55% reads amber on the defaults the bad overrides fell back to" || return 1
     assert_output_not_contains "$c" "38;2;215;0;21" "an oversized crit must not fall back into red at 55%" || return 1
 }
 
