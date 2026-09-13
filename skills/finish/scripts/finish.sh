@@ -84,9 +84,27 @@ pr_lookup() {  # base_dir branch
         echo "pr_reason: a PR on $2 has no head repository (deleted fork?); inspect it on GitHub"
         return 0
     fi
-    # A fork's same-named branch is not this PR.
+    # Every field the filter and the selection policy read must be present and
+    # the right shape. A record missing one silently falls out of the filter
+    # below and would be reported as "no PR" — the one answer that must never
+    # be a guess.
+    local malformed
+    malformed=$(printf '%s' "$json" | jq -r '
+        [ .[]
+          | select( ( (.state == "OPEN" or .state == "MERGED" or .state == "CLOSED")
+                      and (.headRepositoryOwner | type) == "object"
+                      and (.headRepositoryOwner.login | type) == "string"
+                      and (.isCrossRepository | type) == "boolean" ) | not )
+          | "#\(.number // "?")" ] | join(", ")')
+    if [ -n "$malformed" ]; then
+        echo "pr_state: unknown"
+        echo "pr_reason: gh returned a PR record with missing or malformed fields ($malformed)"
+        return 0
+    fi
+    # A fork's same-named branch is not this PR. GitHub logins are
+    # case-insensitive and origin's URL carries whatever case was typed.
     json=$(printf '%s' "$json" | jq -c --arg owner "$owner" \
-        '[.[] | select(.headRepositoryOwner.login == $owner and .isCrossRepository == false)]')
+        '[.[] | select((.headRepositoryOwner.login | ascii_downcase) == ($owner | ascii_downcase) and .isCrossRepository == false)]')
     n=$(printf '%s' "$json" | jq 'length')
     if [ "$n" = 0 ]; then
         echo "pr_state: none"
@@ -107,6 +125,13 @@ pr_lookup() {  # base_dir branch
     local merged open
     merged=$(printf '%s' "$json" | jq -c '[.[] | select(.state == "MERGED")] | sort_by(.mergedAt) | last // empty')
     if [ -n "$merged" ]; then
+        # pr_merge_commit is the PR path's input to cs; without it there is
+        # nothing to integrate and the skill must not proceed on a blank.
+        if [ -z "$(printf '%s' "$merged" | jq -r '.mergeCommit.oid // ""')" ]; then
+            echo "pr_state: unknown"
+            echo "pr_reason: PR $(printf '%s' "$merged" | jq -r '"#\(.number)"') is MERGED with no merge commit recorded; inspect it on GitHub"
+            return 0
+        fi
         echo "pr_state: MERGED"
         printf '%s' "$merged" | jq -r '"pr_number: \(.number)\npr_url: \(.url)\npr_merge_commit: \(.mergeCommit.oid // "")\npr_base_ref: \(.baseRefName)\npr_head_oid: \(.headRefOid)"'
         return 0
@@ -115,6 +140,12 @@ pr_lookup() {  # base_dir branch
     if [ -n "$open" ]; then
         echo "pr_state: OPEN"
         printf '%s' "$open" | jq -r '"pr_number: \(.number)\npr_url: \(.url)\npr_base_ref: \(.baseRefName)\npr_head_oid: \(.headRefOid)"'
+        return 0
+    fi
+    # CLOSED is stated, never inferred from "neither OPEN nor MERGED".
+    if [ "$(printf '%s' "$json" | jq '[.[] | select(.state == "CLOSED")] | length')" != "$n" ]; then
+        echo "pr_state: unknown"
+        echo "pr_reason: gh returned a PR state this script does not classify: $(printf '%s' "$json" | jq -r '[.[] | "#\(.number) \(.state)"] | join(", ")')"
         return 0
     fi
     echo "pr_state: CLOSED"
