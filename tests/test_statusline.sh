@@ -3396,4 +3396,13 @@ run_test test_fable_named_alone_renders_only_the_fable_window
 run_test test_limits_and_fable_both_named_render_once_in_either_order
 run_test test_pane_off_by_default_and_rendered_when_named
 
+test_caps_switch_is_documented() {
+    assert_file_contains "$SCRIPT_DIR/../docs/configuration.md" "CS_STATUSLINE_CAPS" \
+        "the caps switch must be in the env reference" || return 1
+    assert_file_contains "$SCRIPT_DIR/../docs/statusline.md" "CS_STATUSLINE_CAPS" \
+        "the caps switch must be in the design doc's Configuration section" || return 1
+}
+
+run_test test_caps_switch_is_documented
+
 report_results

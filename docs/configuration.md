@@ -47,10 +47,9 @@ export CS_NERD_FONTS="1"
 export CS_TERM_THEME="light"   # or "dark"
 
 # Override the terminal's real background color (default: auto-detected via
-# the same OSC 11 query as CS_TERM_THEME, when it succeeds). Drives the
-# statusline's full-width gradient fade. Unset, the tail is drawn instead as
-# a coverage wash that needs no background colour at all; setting the real
-# value switches it to a colour fade that ends exactly on your terminal.
+# the same OSC 11 query as CS_TERM_THEME, when it succeeds). The statusline's
+# capsule surface is a shade of it; unset, the surface falls back to a fixed
+# warm taupe per theme.
 export CS_TERM_BG_RGB="250;248;242"   # r;g;b, 0-255 each
 
 # Disable colors (see https://no-color.org)
@@ -58,6 +57,11 @@ export NO_COLOR="1"
 
 # Status line: choose/order segments, or disable entirely
 export CS_STATUSLINE_SEGMENTS="logo,session,notes,mail,git,model,ctx,limits"  # this is the default
+
+# Draw the capsules with square ends instead of the Powerline rounded caps
+# (U+E0B6/U+E0B4), for a font that lacks the glyphs
+export CS_STATUSLINE_CAPS="0"
+
 export CS_STATUSLINE_DISABLE="1"
 
 # Where the machine-global usage cache behind the `fable` segment lives
