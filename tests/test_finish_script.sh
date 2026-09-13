@@ -205,6 +205,22 @@ test_report_after_a_local_integrate_gives_the_retire_line() {
     assert_eq "yes" "$(key "$out" landed)" "captured sha is an ancestor of base" || return 1
     assert_eq "$(git -C "$CS_SESSIONS_ROOT/myproj" rev-parse HEAD)" "$(key "$out" base_head)" "base head reported" || return 1
     assert_eq "1" "$(key "$out" not_integrated)" "one commit after capture" || return 1
+    assert_output_contains "$out" "retire: 1 commit(s) on cs/fix-auth after the captured commit are not integrated; run /finish fix-auth again before retiring" \
+        "a tip past the landing is not ready to retire" || return 1
+    assert_output_not_contains "$out" "cs myproj --merge fix-auth" "and the retire verb is not offered yet" || return 1
+}
+
+# The tip IS the commit that landed: retiring now fuses exactly what the base
+# already has, so the plain retire line is the right advice.
+test_report_with_an_integrated_tip_gives_the_plain_retire_line() {
+    local sha out
+    sha=$(finish_fixture myproj fix-auth)
+    stub_gh '[]'
+    "$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- true > /dev/null 2>&1 || { echo "  FAIL: integrate failed"; return 1; }
+    (cd "$CS_SESSIONS_ROOT/myproj" && git add .cs && git commit -q -m "bookkeeping")
+    out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" \
+        bash "$FINISH" report myproj fix-auth "$sha" 2>&1)
+    assert_eq "0" "$(key "$out" not_integrated)" "nothing after the capture" || return 1
     assert_output_contains "$out" "retire: close the feature session, then: cs myproj --merge fix-auth" "retire line" || return 1
 }
 
@@ -213,7 +229,6 @@ test_report_names_uncommitted_bookkeeping_before_retire() {
     sha=$(finish_fixture myproj fix-auth)
     stub_gh '[]'
     "$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- true > /dev/null 2>&1 || { echo "  FAIL: integrate failed"; return 1; }
-    (cd "$CS_SESSIONS_ROOT/myproj@fix-auth" && git commit -q --allow-empty -m "after capture")
     out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" \
         bash "$FINISH" report myproj fix-auth "$sha" 2>&1)
     assert_output_contains "$out" "retire: commit the session bookkeeping in myproj" "names the uncommitted bookkeeping" || return 1
@@ -246,6 +261,7 @@ run_test test_prepare_never_reads_a_gh_failure_as_no_pr
 run_test test_prepare_treats_a_vanished_head_repo_as_unknown
 run_test test_prepare_skips_the_lookup_for_a_non_github_origin
 run_test test_report_after_a_local_integrate_gives_the_retire_line
+run_test test_report_with_an_integrated_tip_gives_the_plain_retire_line
 run_test test_report_names_uncommitted_bookkeeping_before_retire
 run_test test_report_after_a_squash_landing_gives_the_squash_notice
 
