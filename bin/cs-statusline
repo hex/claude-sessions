@@ -1413,13 +1413,14 @@ _bg_shade() {
 # --- render ----------------------------------------------------------------
 
 # One line of capsules on the terminal's own background. Each group of items
-# becomes one capsule: a rounded left cap, a fill space, the items (joined as
-# each asked), a fill space, a rounded right cap; two default-background cells
-# follow the identity capsule and one follows every other. The caps are
-# Powerline glyphs (U+E0B6/U+E0B4) drawn as fill-coloured ink on the default
-# background, so they read as the capsule's rounded ends; CS_STATUSLINE_CAPS=0
-# drops the glyphs for a font without them and the fill spaces become square
-# edges. A crit capsule takes the crit fill and paints every item critink bold.
+# becomes one capsule: a rounded left cap, the items (joined as each asked), a
+# rounded right cap, with no fill space between a cap and the item beside it;
+# two default-background cells follow the identity capsule and one follows
+# every other. The caps are Powerline glyphs (U+E0B6/U+E0B4) drawn as
+# fill-coloured ink on the default background, so they read as the capsule's
+# rounded ends; CS_STATUSLINE_CAPS=0 drops the glyphs for a font without them
+# and each cap is replaced by a fill space, giving the chip a square edge.
+# A crit capsule takes the crit fill and paints every item critink bold.
 # SGR bold is stateful, so every item emits its intensity explicitly (1 or 22).
 # No width accounting and no tail: the line ends at the last cap.
 _render() {
@@ -1462,8 +1463,11 @@ _render() {
         case "$_CRIT_GROUPS" in *" $g "*) fill=crit ;; esac
         _sgr 48 "$fill"; fillsgr="$_SGR"
         _sgr 38 "$fill"; capsgr="$_SGR"
-        [ -n "$capl" ] && out+="${esc}[49;${capsgr}m${capl}"
-        out+="${esc}[${fillsgr}m "
+        if [ -n "$capl" ]; then
+            out+="${esc}[49;${capsgr}m${capl}"
+        else
+            out+="${esc}[${fillsgr}m "
+        fi
         first=1
         for ((i = 0; i < n; i++)); do
             [ "${_SEG_GROUP[i]}" = "$g" ] || continue
@@ -1481,8 +1485,11 @@ _render() {
             _sgr 38 "$ink"
             out+="${esc}[${fillsgr};${_SGR};${weight}m${_SEG_TEXT[i]}"
         done
-        out+="${esc}[${fillsgr}m "
-        [ -n "$capr" ] && out+="${esc}[49;${capsgr}m${capr}"
+        if [ -n "$capr" ]; then
+            out+="${esc}[49;${capsgr}m${capr}"
+        else
+            out+="${esc}[${fillsgr}m "
+        fi
         out+="$reset"
         if [ $((k + 1)) -lt ${#_GROUPS[@]} ]; then
             if [ "$g" = "identity" ]; then out+="  "; else out+=" "; fi

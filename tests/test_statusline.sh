@@ -3177,7 +3177,7 @@ test_capsule_gap_two_cells_after_identity_one_after_gauges() {
     local esc=$'\033'
     assert_output_contains_f "$out" "${CAPR}${esc}[0m  ${esc}[49;38;2;227;221;204m${CAPL}" \
         "two default-bg cells between identity and ctx" || return 1
-    assert_output_contains_f "$out" "8%${esc}[48;2;227;221;204m ${esc}[49;38;2;227;221;204m${CAPR}${esc}[0m ${esc}[49;38;2;227;221;204m${CAPL}" \
+    assert_output_contains_f "$out" "8%${esc}[49;38;2;227;221;204m${CAPR}${esc}[0m ${esc}[49;38;2;227;221;204m${CAPL}" \
         "one cell between ctx and cost" || return 1
 }
 
@@ -3434,5 +3434,22 @@ test_ink_tokens_contrast_every_surface() {
 }
 
 run_test test_ink_tokens_contrast_every_surface
+
+# With caps on, a capsule opens cap-then-item and closes item-then-cap: no fill
+# space sits between the cap glyph and the item beside it (CS_STATUSLINE_CAPS=0
+# keeps that fill space as the chip's square edge; see test_caps_off_gives_square_chips).
+test_capsule_has_no_inner_padding() {
+    export COLORTERM=truecolor
+    export CS_TERM_BG_RGB="253;246;227"
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8}}'
+    local out; out=$(run_sl "$json")
+    local esc=$'\033'
+    assert_output_contains_f "$out" "${CAPL}${esc}[48;2;227;221;204;38;2;217;119;87;1m" \
+        "the left cap opens directly into the first item's SGR, no fill space" || return 1
+    assert_output_contains_f "$out" "8%${esc}[49;38;2;227;221;204m${CAPR}" \
+        "the last item's text runs directly into the right cap, no fill space" || return 1
+}
+
+run_test test_capsule_has_no_inner_padding
 
 report_results
