@@ -45,7 +45,7 @@ Alex's calls, 2026-09-13, in order:
    though both leave the default order. Nothing a user wrote stops working.
 9. **`_render` is rewritten** around capsule groups (approach A). The hairline and
    logo-boundary machinery has no consumer afterwards and is removed.
-10. **The 15 tail tests are deleted** and one case asserts the line ends at the last cap.
+10. **The 17 tail tests are deleted** and one case asserts the line ends at the last cap.
 
 ## Layout
 
@@ -80,7 +80,7 @@ default becomes `logo,session,notes,mail,git,model,ctx,limits`. Each name maps t
 
 | Name | Group | Rest | Hot | Hidden when |
 |---|---|---|---|---|
-| `logo` | identity | `✳` in brand coral, bold; pulses chiptext/brandshade by epoch parity while `.cs/local/attention` exists | — | plain mode (no colour) |
+| `logo` | identity | `✳` in brand coral, bold; pulses brand/brandshade by epoch parity while `.cs/local/attention` exists | — | plain mode (no colour) |
 | `session` | identity | name, primary ink, bold | — | never |
 | `notes` | identity | `▤ N`, amber ink, regular, directly after the session | — | queue empty or absent |
 | `mail` | identity | `✉ N`, amber ink, regular, after notes | — | nothing unread |
@@ -169,8 +169,9 @@ the logo-boundary branch lose their only caller and are removed; `_bg_shade`,
 - `bin/cs-subagent-statusline` — sources the library; token names it uses are kept (above).
   No edit expected; its suite proves it.
 - `lib/70-statusline.sh` — registration with `refreshInterval: 1`; unchanged.
-- `tests/test_statusline.sh` (199 cases) — the 15 tail cases (every `run_test` whose name
-  contains `gradient`, `wash`, `dots`, `dotted` or `tail`) are deleted per Decision 10; `test_logo_boundary_gets_thin_darker_coral_hairline`,
+- `tests/test_statusline.sh` (199 cases) — the 17 tail cases (every `run_test` whose name
+  contains `gradient`, `wash`, `dots`, `dotted`, `tail` or `fade`, plus
+  `test_columns_fills_the_bar_without_a_measured_bg`) are deleted per Decision 10; `test_logo_boundary_gets_thin_darker_coral_hairline`,
   `test_segment_after_logo_divider_drops_redundant_leading_pad`,
   `test_logo_divider_survives_orange_session_color_collision` go with the hairline; the
   four `test_pane_segment_*` cases become "hidden by default" plus "shown when named";

@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-13-statusbar-capsules-design.md`
 
+**Review trail:** advisor pass (BRE asserts, logo succession, departures 7–8), then a Codex read-only pass (18 findings: 7 P1, 9 P2, 2 P3), every one verified against the source and folded below.
+
 **Departures from the spec, decided while planning (Alex rules on these at review):**
 
 1. `_display_width` stays: `bin/cs-subagent-statusline` `_truncate` calls it (its line 68). The spec listed it among the removals.
@@ -17,8 +19,10 @@
 3. The amber ink keeps the name `amber` (no `amberink` token); nothing paints amber as a fill any more. `_thresh_color` emits `crit` in place of `red`, so `red` stays untouched as the session palette entry the tab-colour test pins.
 4. Effort is its own identity item joined by one space, so it can take secondary ink while the model name is bold primary.
 5. The pulse's bright phase is `brand`, its dim phase `brandshade`. Today's bright phase is `chiptext`, which is removed with the pills.
-6. The tail case `test_columns_fills_the_bar_without_a_measured_bg` (its name lacks the spec's five words) is the sixteenth deletion.
+6. Seventeen tail cases go, not fifteen: the spec's name filter misses `test_columns_fills_the_bar_without_a_measured_bg` and `test_measured_bg_still_uses_the_colour_fade`. Task 2 Step 1 lists all seventeen by name.
 7. Eight non-tail tests go too, all in Task 2 Step 1: five that pin the hairline and logo-boundary dividers the pills had (`test_thin_bar_between_same_bg`, `test_abut_between_different_bg`, `test_logo_boundary_gets_thin_darker_coral_hairline`, `test_segment_after_logo_divider_drops_redundant_leading_pad`, `test_logo_divider_survives_orange_session_color_collision`), and the three logo-phase tests, replaced by two that pin the same states on the new inks. Decision 10 named only the tail cases; Alex approved these eight, and the ninth under departure 8, on 2026-09-13.
+9. `periwinkle` stays in all three `_sgr` arms: `bin/cs-subagent-statusline:253` paints the agent-row model name with it, and `test_library_mode_defines_helpers_without_rendering` (tests/test_statusline.sh:~2239) pins its 256 index. The spec listed it among the removed tokens.
+10. The 5h reset countdown's own gate (50) is unobservable once the window hides below 70, so `_limits_render` is passed 70 for 5h; wk and fable keep 80. The three `test_5h_rest_*` fixtures move from 50–55 to 75 and `test_5h_rest_hidden_below_50` becomes a hidden-below-70 case.
 8. `_read_session_color` and `_SESSION_COLOR` leave `bin/cs-statusline` with the session fill (no production caller remains); the SYNC comment in `lib/40-state.sh` drops its cs-statusline clause, and `test_session_state_color_roundtrip` (tests/test_statusline.sh:~2217, the writer/reader format-sync case) is deleted with it in Task 2 Step 1.
 
 ## Global Constraints
@@ -31,6 +35,7 @@
 - Test output must be pristine: no stray stderr from a fixture.
 - No real names, emails or handles in fixtures; `example.com` placeholders only.
 - Never push. Commit on `feat/statusbar-capsules`.
+- `tests/test_statusline.sh` interleaves function definitions with `run_test` blocks, and `run_test` executes immediately as the file is sourced: a `run_test` placed in the first block (~line 1982) runs before helpers defined later exist (`seed_usage_cache` is at ~2878). Every new test function AND its `run_test` line go at the END of the file, after the last existing `run_test`. Task 1's five may sit anywhere after `_load_sl_functions`; put them at the end too.
 - `run_sl` in the statusline suite pipes JSON to `bash "$SL"`; `setup()` unsets every `CS_*`/`CLAUDE_*`/terminal variable and pins `CS_TERM_THEME=light`, `TERM=xterm-256color`. Truecolor tests export `COLORTERM=truecolor`; plain tests export `NO_COLOR=1`.
 
 ---
@@ -63,7 +68,7 @@
 
 - [ ] **Step 1: Write the failing token tests**
 
-Append to `tests/test_statusline.sh` directly above the first `run_test` line (the block that begins `run_test test_happy_path_docs_fixture_plain`):
+Append to the END of `tests/test_statusline.sh`, after the last `run_test` line:
 
 ```bash
 # ============================================================================
@@ -129,7 +134,7 @@ test_thresh_color_emits_crit_and_defaults_to_ink2() {
 }
 ```
 
-And add, at the top of the `run_test` block:
+And add, after them:
 
 ```bash
 run_test test_sgr_ink_tokens_truecolor_light
@@ -222,7 +227,7 @@ Expected: five PASS. The rest of the suite is now partly red (old `red`/amber-fi
 
 - [ ] **Step 5: Move the agent-row pins**
 
-In `tests/test_subagent_statusline.sh`, the two tests at ~line 241 and ~255 pin `38;2;255;183;77` and `38;2;220;38;38`. That suite's `setup()` does not pin `CS_TERM_THEME`; check the file and, if it is unset, `export CS_TERM_THEME=light` inside each of the two tests. Then replace every `38;2;255;183;77` with `38;2;180;83;9` and every `38;2;220;38;38` with `38;2;215;0;21`, and update the two comments (`amber 255;183;77` → `amber ink 180;83;9`; `red 220;38;38` → `crit 215;0;21`).
+In `tests/test_subagent_statusline.sh`, FIVE threshold tests pin the old values (functions at ~lines 241, 255, 276, 293, 305; grep `255;183;77\|220;38;38` to find every line). The suite's `setup()` does not pin `CS_TERM_THEME` and the new inks are theme-dependent, so add `export CS_TERM_THEME=light` inside each of the five (two already export it beside `COLORTERM`). Then replace every `38;2;255;183;77` with `38;2;180;83;9` and every `38;2;220;38;38` with `38;2;215;0;21`, positive and negative assertions alike, and update the comments (`amber 255;183;77` → `amber ink 180;83;9`; `red 220;38;38` → `crit 215;0;21`). `periwinkle` is untouched in this task and stays in Task 2 (departure 9).
 
 Run: `bash tests/test_subagent_statusline.sh > /tmp/sub.out 2>&1; echo rc=$?; tail -3 /tmp/sub.out`
 Expected: rc=0, all cases pass.
@@ -253,11 +258,11 @@ Expected: rc=0, all cases pass.
 
 - [ ] **Step 1: Delete the tail and hairline tests**
 
-Delete these sixteen functions and their `run_test` lines: `test_build_gradient_cell_count_and_endpoints`, `test_build_gradient_noop_on_malformed_target`, `test_full_width_gradient_reaches_columns`, `test_gradient_renders_without_a_measured_bg`, `test_unmeasured_tail_is_a_coverage_wash`, `test_wash_does_not_inherit_the_last_segment_background`, `test_wash_grey_ramps_toward_the_theme`, `test_measured_bg_still_uses_the_colour_fade`, `test_tail_gradient_neutral_regardless_of_last_segment`, `test_narrow_terminal_no_gradient`, `test_no_gradient_without_columns`, `test_columns_fills_the_bar_without_a_measured_bg`, `test_no_gradient_outside_truecolor`, `test_basic_terminal_gets_no_dotted_tail`, `test_malformed_background_falls_through_to_a_tail`, `test_dotted_tail_fills_a_256_bar`, `test_truecolor_keeps_the_gradient_not_dots`. Also delete `test_thin_bar_between_same_bg`, `test_abut_between_different_bg`, `test_logo_boundary_gets_thin_darker_coral_hairline`, `test_segment_after_logo_divider_drops_redundant_leading_pad`, `test_logo_divider_survives_orange_session_color_collision` (hairline and logo-boundary behaviour, gone with the pills), and `test_logo_pulses_bright_phase_with_attention_marker`, `test_logo_pulses_dim_phase_with_attention_marker`, `test_logo_steady_without_attention_marker` (superseded by `test_logo_pulse_alternates_brand_and_brandshade` and `test_logo_is_brand_ink_inside_identity` in Step 2, which pin the same three states on the new inks). Also delete `test_session_state_color_roundtrip` (it exercises `_read_session_color`, removed in Step 6; Departure 8). Alex approved the tail deletions (Decision 10); the other nine are Departures 7 and 8. Any other test whose name contains `gradient`, `wash`, `dots`, `dotted`, `tail`, `hairline` or `divider` goes too — grep for them and list what you deleted in the commit body.
+Delete these seventeen functions and their `run_test` lines: `test_build_gradient_cell_count_and_endpoints`, `test_build_gradient_noop_on_malformed_target`, `test_full_width_gradient_reaches_columns`, `test_gradient_renders_without_a_measured_bg`, `test_unmeasured_tail_is_a_coverage_wash`, `test_wash_does_not_inherit_the_last_segment_background`, `test_wash_grey_ramps_toward_the_theme`, `test_measured_bg_still_uses_the_colour_fade`, `test_tail_gradient_neutral_regardless_of_last_segment`, `test_narrow_terminal_no_gradient`, `test_no_gradient_without_columns`, `test_columns_fills_the_bar_without_a_measured_bg`, `test_no_gradient_outside_truecolor`, `test_basic_terminal_gets_no_dotted_tail`, `test_malformed_background_falls_through_to_a_tail`, `test_dotted_tail_fills_a_256_bar`, `test_truecolor_keeps_the_gradient_not_dots`. Also delete `test_thin_bar_between_same_bg`, `test_abut_between_different_bg`, `test_logo_boundary_gets_thin_darker_coral_hairline`, `test_segment_after_logo_divider_drops_redundant_leading_pad`, `test_logo_divider_survives_orange_session_color_collision` (hairline and logo-boundary behaviour, gone with the pills), and `test_logo_pulses_bright_phase_with_attention_marker`, `test_logo_pulses_dim_phase_with_attention_marker`, `test_logo_steady_without_attention_marker` (superseded by `test_logo_pulse_alternates_brand_and_brandshade` and `test_logo_is_brand_ink_inside_identity` in Step 2, which pin the same three states on the new inks). Also delete `test_session_state_color_roundtrip` (it exercises `_read_session_color`, removed in Step 6; Departure 8). Alex approved the tail deletions (Decision 10); the other nine are Departures 7 and 8. Any other test whose name contains `gradient`, `wash`, `dots`, `dotted`, `tail`, `hairline` or `divider` goes too — grep for them and list what you deleted in the commit body.
 
 - [ ] **Step 2: Write the failing render tests**
 
-Append above the `run_test` block:
+Append to the END of the file:
 
 ```bash
 # ============================================================================
@@ -279,6 +284,27 @@ assert_output_contains_f() {
 }
 assert_output_not_contains_f() {
     ! grep -qF -- "$2" <<< "$1" || { echo "  FAIL: ${3:-output should not contain '$2'}"; return 1; }
+}
+
+# The SGR run carrying the ctx NUMBER ($2, e.g. 42): the label and the number
+# are separate items now, so a run never carries both. Replaces ctx_pill for
+# every test that isolates the gauge's colour.
+ctx_num_run() {
+    printf '%s' "$1" | tr '\033' '\n' | grep -F "m${2}%" | head -1
+}
+
+test_interleaved_segments_still_one_identity_capsule() {
+    export COLORTERM=truecolor
+    export CS_TERM_BG_RGB="253;246;227"
+    export CS_STATUSLINE_SEGMENTS="session,ctx,model"
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":8}}'
+    local out; out=$(run_sl "$json")
+    local caps; caps=$(printf '%s' "$out" | grep -o "$CAPL" | wc -l | tr -d ' ')
+    assert_eq "2" "$caps" "session and model share one capsule even with ctx named between them" || return 1
+    assert_output_contains_f "$out" "1ms${ESC_}[48;2;227;221;204;38;2;119;117;110;22m  ·  ${ESC_}[48;2;227;221;204;38;2;79;77;71;1m✦ Opus" \
+        "model follows session inside identity" || return 1
+    out=$(NO_COLOR=1 run_sl "$json")
+    assert_eq "s · ✦ Opus > ◔ ctx 8%" "$out" "plain: groups render in first-seen order, items in their own order" || return 1
 }
 
 test_plain_joins_identity_with_dots_and_capsules_with_gt() {
@@ -436,7 +462,7 @@ test_notes_and_mail_are_amber_ink_after_the_session() {
 }
 ```
 
-Add the `run_test` lines for all eleven.
+Add the `run_test` lines for all twelve. Then replace the body of the existing `ctx_pill` helper (~line 80) with a call to `ctx_num_run "$1" "$2"` so its three callers keep working; do not delete `ctx_pill`.
 
 - [ ] **Step 3: Run and watch them fail**
 
@@ -460,6 +486,8 @@ _add() {
     _SEG_INK+=("${3:-ink2}")
     _SEG_BOLD+=("${4:-}")
     _SEG_JOIN+=("${5:-dot}")
+    # First-seen group order, the order capsules render in.
+    case " ${_GROUPS_SEEN:-} " in *" $2 "*) ;; *) _GROUPS+=("$2"); _GROUPS_SEEN="${_GROUPS_SEEN:-} $2" ;; esac
 }
 
 # Mark a capsule crit: the renderer fills it with `crit` and paints every item
@@ -470,7 +498,7 @@ _invert() {
 }
 ```
 
-Find every `_SEG_TEXT=()`-style initialisation (grep `_SEG_BG=(`) and replace `_SEG_BG` with `_SEG_GROUP`, adding `_SEG_INK=()` and `_SEG_JOIN=()` beside them.
+Find every `_SEG_TEXT=()`-style initialisation (grep `_SEG_BG=(`) and replace `_SEG_BG` with `_SEG_GROUP`, adding `_SEG_INK=()`, `_SEG_JOIN=()`, `_GROUPS=()` and `_GROUPS_SEEN=""` beside them. Tests that reset the arrays by hand (Task 3's hidden-fable case) reset these two as well.
 
 - [ ] **Step 5: Migrate the segments**
 
@@ -588,7 +616,7 @@ _seg_limits() {
 }
 ```
 
-and in `_seg_fable` replace the final two lines (`_thresh_color … _add`) with:
+and in `_seg_fable` replace everything from the line `_thresh_color "$_FABLE_PCT" 70 90` through the final `_add` (label construction and countdown included; the cache read and refresh kick above them stay) with:
 
 ```bash
     _thresh_color "$_FABLE_PCT" 70 90
@@ -625,17 +653,22 @@ _render() {
     local i g="" out=""
 
     if [ "$LEVEL" = "plain" ]; then
-        for ((i = 0; i < n; i++)); do
-            if [ "${_SEG_GROUP[i]}" != "$g" ]; then
-                [ -n "$g" ] && out+=" > "
-                g="${_SEG_GROUP[i]}"
-            else
-                case "${_SEG_JOIN[i]}" in
-                    dot)       out+=" · " ;;
-                    pad|space) out+=" " ;;
-                esac
-            fi
-            out+="${_SEG_TEXT[i]}"
+        local k first
+        for ((k = 0; k < ${#_GROUPS[@]}; k++)); do
+            g="${_GROUPS[k]}"
+            [ "$k" -gt 0 ] && out+=" > "
+            first=1
+            for ((i = 0; i < n; i++)); do
+                [ "${_SEG_GROUP[i]}" = "$g" ] || continue
+                if [ -z "$first" ]; then
+                    case "${_SEG_JOIN[i]}" in
+                        dot)       out+=" · " ;;
+                        pad|space) out+=" " ;;
+                    esac
+                fi
+                first=""
+                out+="${_SEG_TEXT[i]}"
+            done
         done
         printf '%s\n' "$out"
         return 0
@@ -644,44 +677,47 @@ _render() {
     local esc=$'\033' reset=$'\033[0m'
     local capl=$'\xee\x82\xb6' capr=$'\xee\x82\xb4'   # U+E0B6, U+E0B4
     [ "${CS_STATUSLINE_CAPS:-1}" = "0" ] && { capl=""; capr=""; }
-    local fill="" fillsgr="" capsgr="" ink weight
+    local fill fillsgr capsgr ink weight first k
     out="$reset"
-    for ((i = 0; i < n; i++)); do
-        if [ "${_SEG_GROUP[i]}" != "$g" ]; then
-            if [ -n "$g" ]; then
-                out+="${esc}[${fillsgr}m "
-                [ -n "$capr" ] && out+="${esc}[49;${capsgr}m${capr}"
-                out+="$reset"
-                if [ "$g" = "identity" ]; then out+="  "; else out+=" "; fi
+    # Capsules in first-seen group order; a group's items in their own order,
+    # even when CS_STATUSLINE_SEGMENTS interleaves them (session,ctx,model).
+    for ((k = 0; k < ${#_GROUPS[@]}; k++)); do
+        g="${_GROUPS[k]}"
+        fill=surface
+        case "$_CRIT_GROUPS" in *" $g "*) fill=crit ;; esac
+        _sgr 48 "$fill"; fillsgr="$_SGR"
+        _sgr 38 "$fill"; capsgr="$_SGR"
+        [ -n "$capl" ] && out+="${esc}[49;${capsgr}m${capl}"
+        out+="${esc}[${fillsgr}m "
+        first=1
+        for ((i = 0; i < n; i++)); do
+            [ "${_SEG_GROUP[i]}" = "$g" ] || continue
+            if [ -z "$first" ]; then
+                case "${_SEG_JOIN[i]}" in
+                    dot)   _sgr 38 ink2; out+="${esc}[${fillsgr};${_SGR};22m  ·  " ;;
+                    pad)   out+="${esc}[${fillsgr}m  " ;;
+                    space) out+="${esc}[${fillsgr}m " ;;
+                esac
             fi
-            g="${_SEG_GROUP[i]}"
-            fill=surface
-            case "$_CRIT_GROUPS" in *" $g "*) fill=crit ;; esac
-            _sgr 48 "$fill"; fillsgr="$_SGR"
-            _sgr 38 "$fill"; capsgr="$_SGR"
-            [ -n "$capl" ] && out+="${esc}[49;${capsgr}m${capl}"
-            out+="${esc}[${fillsgr}m "
-        else
-            case "${_SEG_JOIN[i]}" in
-                dot)   _sgr 38 ink2; out+="${esc}[${fillsgr};${_SGR};22m  ·  " ;;
-                pad)   out+="${esc}[${fillsgr}m  " ;;
-                space) out+="${esc}[${fillsgr}m " ;;
-            esac
+            first=""
+            ink="${_SEG_INK[i]}"; weight=22
+            [ -n "${_SEG_BOLD[i]}" ] && weight=1
+            if [ "$fill" = "crit" ]; then ink=critink; weight=1; fi
+            _sgr 38 "$ink"
+            out+="${esc}[${fillsgr};${_SGR};${weight}m${_SEG_TEXT[i]}"
+        done
+        out+="${esc}[${fillsgr}m "
+        [ -n "$capr" ] && out+="${esc}[49;${capsgr}m${capr}"
+        out+="$reset"
+        if [ $((k + 1)) -lt ${#_GROUPS[@]} ]; then
+            if [ "$g" = "identity" ]; then out+="  "; else out+=" "; fi
         fi
-        ink="${_SEG_INK[i]}"; weight=22
-        [ -n "${_SEG_BOLD[i]}" ] && weight=1
-        if [ "$fill" = "crit" ]; then ink=critink; weight=1; fi
-        _sgr 38 "$ink"
-        out+="${esc}[${fillsgr};${_SGR};${weight}m${_SEG_TEXT[i]}"
     done
-    out+="${esc}[${fillsgr}m "
-    [ -n "$capr" ] && out+="${esc}[49;${capsgr}m${capr}"
-    out+="$reset"
     printf '%s\n' "$out"
 }
 ```
 
-Delete `_build_dots`, `_build_wash`, `_build_gradient`, `_lerp_channel` and their comment blocks. Keep `_display_width` (the agent rows' `_truncate` uses it), `_parse_rgb_triplet`, `_luminance`, `_bg_shade`. Delete the `hairline`, `chiptext`, `periwinkle`, `slate`, `black` and `brandshade`-comment-only lines from all three `_sgr` arms EXCEPT `brandshade` itself (the pulse uses it); leave the eight session-palette lines and their KEEP IN SYNC comment exactly as they are. Delete `_read_session_color` and its comment (no caller remains once `_seg_session` stops painting the session colour). In `lib/40-state.sh` change the comment sentence `KEEP THE FORMAT IN SYNC WITH bin/cs-statusline's _read_session_color (a pure-bash copy on the render hot path) and hooks/session-start.sh's local_state_set.` to `KEEP THE FORMAT IN SYNC WITH hooks/session-start.sh's local_state_set.` Grep the file for `_SEG_BG`, `boldattention`, `chiptext`, `hairline`, `logosepfg`, `_GRADIENT`, `_WASH`, `_DOTS`, `_SESSION_COLOR`, `COLUMNS` and remove every remaining reference.
+Delete `_build_dots`, `_build_wash`, `_build_gradient`, `_lerp_channel` and their comment blocks. Keep `_display_width` (the agent rows' `_truncate` uses it), `_parse_rgb_triplet`, `_luminance`, `_bg_shade`. Delete the `hairline`, `chiptext`, `slate` and `black` lines from all three `_sgr` arms. KEEP `periwinkle` (the agent rows paint their model name with it, `bin/cs-subagent-statusline:253`) and `brandshade` (the pulse); leave the eight session-palette lines and their KEEP IN SYNC comment exactly as they are. Delete `_read_session_color` and its comment (no caller remains once `_seg_session` stops painting the session colour). In `lib/40-state.sh` change the comment sentence `KEEP THE FORMAT IN SYNC WITH bin/cs-statusline's _read_session_color (a pure-bash copy on the render hot path) and hooks/session-start.sh's local_state_set.` to `KEEP THE FORMAT IN SYNC WITH hooks/session-start.sh's local_state_set.` Grep the file for `_SEG_BG`, `boldattention`, `chiptext`, `hairline`, `logosepfg`, `_GRADIENT`, `_WASH`, `_DOTS`, `_SESSION_COLOR`, `COLUMNS` and remove every remaining reference.
 
 - [ ] **Step 7: Run the whole suite and rewrite the old pins**
 
@@ -699,6 +735,13 @@ The eleven new cases pass. Every remaining failure is an old pin; rewrite each b
 | `▏` or `hairline` | delete the assertion (the test should already be gone) |
 | `◫ %7` | `◫ 7` |
 | a plain full-line `assert_eq` with ` > ` between identity items | ` · ` between identity items, ` > ` before `◔ ctx`; healthy limits stay visible until Task 3, so keep ` > ◷ 5h 23% > ◑ wk 41%` in this task |
+| the three `ctx_pill` callers (`test_ctx_below_warn_is_neutral`, `test_ctx_warn_edge_is_amber_at_the_threshold`, one more; grep) | `ctx_pill` now returns the number's run; assert `38;2;119;117;110;22m` in it below warn and `38;2;180;83;9;22m` at warn; drop any `assert_output_not_contains` of the surface fill — the surface is now the capsule under both states |
+| `test_color_level_basic` (`100;97;1m`, `100;97;22m`) | light theme basic: identity bold is `100;30;1m`, secondary regular is `100;90;22m` (fill 100 = surface base 90 + 10) |
+| `test_library_mode_defines_helpers_without_rendering` (`38;5;105`) | keep: `periwinkle` stays (departure 9) |
+| `test_pulse_ignores_inherited_now`, `test_pulse_ignores_inherited_ready_flag` (`240;242;255;1m ✳`) | `38;2;217;119;87;1m✳` (even second is brand; no leading space) — keep their inherited-clock fixtures exactly |
+| `test_gauge_uses_bg_derived_surface` (~1404) | scope with `ctx_num_run`: the number's run is `48;2;${surface};38;2;119;117;110;22m`; identity carries `48;2;${surface};38;2;${tr};${tg};${tb};1m` (the 35% ink) |
+| the unmeasured-surface fallback test (~1422, `48;2;128;120;110;38;2;255;255;255`) | identity is `48;2;128;120;110;38;2;255;255;255;1m` (taupe is below the pivot, so ink is white); the number's run is `48;2;128;120;110;38;2;119;117;110;22m` |
+| `test_white_text_on_periwinkle` (~988) | rename `test_model_is_bold_ink_no_fill`; assert `38;2;79;77;71;1m✦ Opus` with `CS_TERM_BG_RGB` exported and `assert_output_not_contains_f "48;2;138;134;236"` |
 | `test_no_powerline_arrow` | keep as is: it pins U+E0B0/U+E0B1, which the caps are not |
 | `test_segment_icons_are_unicode` | keep; if it asserts the badge, assert the mark instead |
 | `test_logo_badge_is_brand_coral` | rewrite to assert `38;2;217;119;87;1m✳` and `assert_output_not_contains_f "48;2;217;119;87"` |
@@ -740,7 +783,7 @@ git commit -m "feat(statusline): capsules — one identity capsule, ctx capsule,
 
 - [ ] **Step 1: Write the failing gating tests**
 
-Append above the `run_test` block:
+Append to the END of the file:
 
 ```bash
 # ============================================================================
@@ -778,7 +821,7 @@ test_limits_three_hot_show_top_two_descending() {
     seed_usage_cache org-abc 85 "2026-08-29T03:59:59Z" 1787816000 1787816300
     local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":72},"seven_day":{"used_percentage":95}}}'
     local out; out=$(CS_STATUSLINE_NOW=1787816100 run_sl "$json")
-    assert_output_contains_f "$out" "◑ wk 95% > ✧ fable 85%" "wk then fable, highest first" || return 1
+    assert_output_contains_f "$out" "◑ wk 95% > ✧ fable 85% · 1d20h" "wk then fable, highest first; fable past 80 carries its countdown" || return 1
     assert_output_not_contains_f "$out" "5h" "the third window stays hidden" || return 1
 }
 
@@ -790,20 +833,20 @@ test_limits_countdown_rules_survive_gating() {
     assert_output_not_contains_f "$out" "wk 72% ·" "wk withholds the countdown below 80" || return 1
 }
 
-test_fable_folds_into_limits_and_keeps_polling_while_hidden() {
+test_fable_hidden_below_seventy_but_cache_still_read() {
     export NO_COLOR=1 CS_USAGE_NO_REFRESH=1
     seed_usage_cache org-abc 25 "2026-08-29T03:59:59Z" 1787816000 1787816300
     local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"}}'
     local out; out=$(CS_STATUSLINE_NOW=1787816100 run_sl "$json")
     assert_output_not_contains_f "$out" "fable 25%" "fable at 25 is hidden" || return 1
-    # The read still happens: with the cache past next_poll_at and refresh
-    # allowed, the segment kicks the refresher. Prove it by the kick's marker.
+    # The cache is still read on the hidden path (the kick itself is proven by
+    # the two existing kick tests, moved onto _seg_limits in Step 4).
     _load_sl_functions
-    export CS_USAGE_NO_REFRESH=1
-    SL_MODEL_ID="claude-fable-5"; _NOW=1787816400; _SL_NOW_READY=1; LEVEL=plain
-    _SEG_TEXT=(); _SEG_GROUP=(); _SEG_INK=(); _SEG_BOLD=(); _SEG_JOIN=(); _CRIT_GROUPS=""
+    SL_MODEL_ID="claude-fable-5"; SL_5H=""; SL_WK=""; _NOW=1787816400; _SL_NOW_READY=1; LEVEL=plain
+    _SEG_TEXT=(); _SEG_GROUP=(); _SEG_INK=(); _SEG_BOLD=(); _SEG_JOIN=(); _GROUPS=(); _GROUPS_SEEN=""; _CRIT_GROUPS=""
     _seg_limits
     assert_eq "1" "${_FABLE_DUE:-}" "the cache was read and found due even though nothing rendered" || return 1
+    assert_eq "0" "${#_SEG_TEXT[@]}" "nothing was added for a 25% window" || return 1
 }
 
 test_fable_named_alone_renders_only_the_fable_window() {
@@ -812,16 +855,18 @@ test_fable_named_alone_renders_only_the_fable_window() {
     seed_usage_cache org-abc 85 "2026-08-29T03:59:59Z" 1787816000 1787816300
     local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":95},"seven_day":{"used_percentage":95}}}'
     local out; out=$(CS_STATUSLINE_NOW=1787816100 run_sl "$json")
-    assert_eq "s > ✧ fable 85%" "$out" "fable by name: its window, not the plan windows" || return 1
+    assert_eq "s > ✧ fable 85% · 1d20h" "$out" "fable by name: its window, not the plan windows" || return 1
 }
 
-test_limits_and_fable_both_named_render_fable_once() {
+test_limits_and_fable_both_named_render_once_in_either_order() {
     export NO_COLOR=1 CS_USAGE_NO_REFRESH=1
-    export CS_STATUSLINE_SEGMENTS="session,limits,fable"
     seed_usage_cache org-abc 85 "2026-08-29T03:59:59Z" 1787816000 1787816300
-    local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"}}'
-    local out; out=$(CS_STATUSLINE_NOW=1787816100 run_sl "$json")
-    assert_eq "s > ✧ fable 85%" "$out" "one fable capsule, not two" || return 1
+    local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":72},"seven_day":{"used_percentage":95}}}'
+    local out
+    out=$(CS_STATUSLINE_SEGMENTS="session,limits,fable" CS_STATUSLINE_NOW=1787816100 run_sl "$json")
+    assert_eq "s > ◑ wk 95% > ✧ fable 85% · 1d20h" "$out" "limits then fable: one pass, top two of three" || return 1
+    out=$(CS_STATUSLINE_SEGMENTS="session,fable,limits" CS_STATUSLINE_NOW=1787816100 run_sl "$json")
+    assert_eq "s > ◑ wk 95% > ✧ fable 85% · 1d20h" "$out" "fable named first changes nothing: limits owns all three windows" || return 1
 }
 
 test_pane_off_by_default_and_rendered_when_named() {
@@ -842,7 +887,7 @@ Add nine `run_test` lines. The existing `test_pane_segment_shows_tmux_pane_id` b
 - [ ] **Step 2: Run and watch them fail**
 
 Run: `bash tests/test_statusline.sh > /tmp/sl.out 2>&1; grep -E 'limits_hidden|one_hot|hot_window_is|three_hot|countdown_rules|fable_folds|fable_named|both_named|pane_off' /tmp/sl.out`
-Expected: nine FAIL (healthy windows render; three windows render; fable renders at 25; `◫ 7` present by default).
+Expected: eight FAIL (healthy windows render; three windows render; fable renders at 25; `◫ 7` present by default). `test_limits_countdown_rules_survive_gating` PASSES already — both 72% windows render today with the same countdown rules; it is a regression guard for Step 3, not a fixture defect.
 
 - [ ] **Step 3: Implement the gated limits**
 
@@ -887,30 +932,29 @@ _fable_candidate() {
 # Rate limits are hidden until hot: every window at or past 70 becomes a
 # candidate, the two highest render highest-first, the rest stay hidden. Their
 # arrival is the signal. The three windows are 5h and wk from stdin and, on a
-# Fable session, the model-scoped weekly window from the usage cache.
-_LIMITS_DONE=""
+# Fable session, the model-scoped weekly window from the usage cache. The 5h
+# countdown gate equals the reveal (70): a lower gate would be unobservable.
 _seg_limits() {
     _LIM_NAME=(); _LIM_PCT=(); _LIM_RESET=(); _LIM_GATE=(); _LIM_ICON=()
     local h="${SL_5H%%.*}" w="${SL_WK%%.*}"
     if [ -n "$h" ]; then
-        _LIM_NAME+=("5h"); _LIM_PCT+=("$h"); _LIM_RESET+=("$SL_5H_RESET"); _LIM_GATE+=(50); _LIM_ICON+=("$ICON_5H")
+        _LIM_NAME+=("5h"); _LIM_PCT+=("$h"); _LIM_RESET+=("$SL_5H_RESET"); _LIM_GATE+=(70); _LIM_ICON+=("$ICON_5H")
     fi
     if [ -n "$w" ]; then
         _LIM_NAME+=("wk"); _LIM_PCT+=("$w"); _LIM_RESET+=("$SL_WK_RESET"); _LIM_GATE+=(80); _LIM_ICON+=("$ICON_WK")
     fi
-    [ -n "$_LIMITS_DONE" ] || _fable_candidate
-    _LIMITS_DONE=1
+    _fable_candidate
     _limits_emit_hot
 }
 
-# The `fable` name alone: the Fable window only, unless `limits` already
-# rendered it. Kept so a CS_STATUSLINE_SEGMENTS written for the old bar still
-# shows the Fable window.
+# The `fable` name alone: the Fable window only. When `limits` is also named
+# (in either order) that segment owns all three windows and this one is a
+# no-op, so the two-capsule cap holds across the whole bar. Kept so a
+# CS_STATUSLINE_SEGMENTS written for the old bar still shows the Fable window.
 _seg_fable() {
-    [ -z "$_LIMITS_DONE" ] || return 0
+    [ -z "${_LIMITS_NAMED:-}" ] || return 0
     _LIM_NAME=(); _LIM_PCT=(); _LIM_RESET=(); _LIM_GATE=(); _LIM_ICON=()
     _fable_candidate
-    _LIMITS_DONE=1
     _limits_emit_hot
 }
 
@@ -935,12 +979,14 @@ _limits_emit_hot() {
 }
 ```
 
-Delete the old `_seg_fable` body entirely (the new one above replaces it; its `_FABLE_KICKED` contract moves into `_fable_candidate`). Grep the tests for `_FABLE_KICKED` and `_seg_fable` unit calls: a test that calls `_seg_fable` directly to check the kick must now call `_fable_candidate` — update the call, not the assertion.
+Delete the old `_seg_fable` body entirely (the new one above replaces it; its `_FABLE_KICKED` contract moves into `_fable_candidate`). The two kick tests (~lines 3160 and 3173, `PATH=… _seg_fable` then `assert_eq … "$_FABLE_KICKED"`) now call `_seg_limits` in place of `_seg_fable` with `SL_5H="" SL_WK=""` set beside the other inline assignments, so the kick is proven through the integrated path; the 42% one additionally asserts `assert_eq "0" "${#_SEG_TEXT[@]}"` (hidden, still kicked). Any other direct `_seg_fable` unit call (~3025) becomes `_seg_limits` the same way.
 
-Change the default in `main`:
+Change the default in `main`, and settle `_LIMITS_NAMED` before the dispatch loop:
 
 ```bash
     local segments="${CS_STATUSLINE_SEGMENTS:-logo,session,notes,mail,git,model,ctx,limits}"
+    _LIMITS_NAMED=""
+    case ",$segments," in *,limits,*) _LIMITS_NAMED=1 ;; esac
 ```
 
 And the three prose copies in the same commit: `lib/10-help.sh:84`, `docs/configuration.md:60`, `docs/statusline.md:13` — replace `logo,session,notes,mail,pane,git,model,ctx,limits,fable` with `logo,session,notes,mail,git,model,ctx,limits` (prose around them is Task 4's).
@@ -955,7 +1001,9 @@ The nine pass. Old cases that assumed healthy limits render (`test_limits_neutra
 - "per block escalation" → seed one window hot and assert its capsule alone carries amber ink / crit fill; the healthy sibling absent.
 - `test_fable_segment_only_on_fable`, `_absent_without_a_reading`: unchanged in intent; they pass or need only the `fable` text expectation.
 - `test_fable_segment_renders_on_fable` at 42: becomes "hidden at 42", plus a sibling at 85 asserting `fable 85%`.
-- `test_fable_segment_countdown_at_80`, `_matches_1m_variant`, `_escalates_colour`: seed ≥ 80/90 as they do; update `48;2;220;38;38` → `48;2;215;0;21`.
+- `test_fable_segment_countdown_at_80`, `_escalates_colour`: seed ≥ 80/90 as they do; update `48;2;220;38;38` → `48;2;215;0;21` and add `38;2;255;255;255;1m` on the inverted items.
+- `test_fable_segment_matches_1m_variant` seeds 42 (hidden now): seed 85 and assert `fable 85% · 1d20h` while keeping the `claude-fable-5[1m]` model id — the suffix coverage is the point of the test.
+- The countdown tests at ~570–760 (`test_5h_rest_time_appended`, `_on_old_bash`, `_minutes_only`, `_sub_minute`, `_absent_without_resets_at`, `_absent_when_past`) seed 50–55: raise each to 75 and keep every text pin as it is (the countdown text does not change). `test_5h_rest_hidden_below_50` becomes `test_5h_hidden_below_seventy`: seed 69 and assert `5h` absent (departure 10). `test_wk_rest_hidden_below_80` seeds 41: seed 75 so the capsule shows without its countdown; `test_wk_rest_shown_at_or_above_80`, `_days_format`, `test_rest_time_just_over_a_day` keep their ≥ 80 fixtures.
 - `test_limits_file_*`: the files are written in `_parse_stdin`, independent of rendering; they must pass untouched. If one fails, the parse was broken — stop and report.
 
 Loop until rc=0 and no FAIL. Then run `bash tests/test_subagent_statusline.sh`, `bash tests/test_install.sh`, `bash tests/test_doctor.sh`, `bash tests/test_queue.sh`, `bash tests/test_rotation.sh`, `bash tests/test_theme.sh`, each `> /tmp/x.out 2>&1; echo rc=$?` — all rc=0.
@@ -981,7 +1029,7 @@ Loop until rc=0 and no FAIL. Then run `bash tests/test_subagent_statusline.sh`, 
 
 - [ ] **Step 1: Write the failing docs pin**
 
-Append above the `run_test` block, plus its `run_test`:
+Append to the END of the file, plus its `run_test`:
 
 ```bash
 test_caps_switch_is_documented() {
@@ -1016,7 +1064,7 @@ One capsule carries identity — the Claude mark, the session, the branch, the m
 Capsule ends are the Powerline glyphs U+E0B6 and U+E0B4, drawn as fill-coloured ink on the terminal's default background so they read as rounded ends. They need a font that carries them (any Nerd Font does); cs cannot probe a font, so `CS_STATUSLINE_CAPS=0` drops the glyphs and the capsules become square chips with the same spacing. Caps render at every colour level — the cap's ink is the capsule's fill, which 256-colour and basic terminals both have — and never in plain mode.
 ```
 
-`## Full-width gradient`: delete the section. `### Pinning the background`: replace its first sentence with "A measured background always outranks the assumption, and supplying one by hand is how the capsule surface becomes an exact shade of your terminal rather than a shade of the theme's guess." — the rest stands. `## Configuration`: add a `CS_STATUSLINE_CAPS` row/line matching the section's existing shape (read it first), and update any sentence naming `COLUMNS` or the fade. `## Subagent rows`: if it names the amber or red RGB, update to the ink values; otherwise leave it.
+`## Full-width gradient`: delete the section, and grep the whole file for `gradient`, `wash`, `dots`, `COLUMNS` and `#full-width-gradient`: the Terminal theme section (~lines 203–211) describes the wash and dotted tail and links the deleted section; rewrite those sentences to say the measured background shades the capsule surface and nothing else depends on it. When copying the spec's Segments table, the `logo` row must read `pulses brand/brandshade by epoch parity` (the spec's copy says chiptext; departure 5). `### Pinning the background`: replace its first sentence with "A measured background always outranks the assumption, and supplying one by hand is how the capsule surface becomes an exact shade of your terminal rather than a shade of the theme's guess." — the rest stands. `## Configuration`: add a `CS_STATUSLINE_CAPS` row/line matching the section's existing shape (read it first), and update any sentence naming `COLUMNS` or the fade. `## Subagent rows`: if it names the amber or red RGB, update to the ink values; otherwise leave it.
 
 - [ ] **Step 3: `docs/configuration.md`**
 
@@ -1025,8 +1073,8 @@ Replace lines 49–53 (the `CS_TERM_BG_RGB` comment) with:
 ```sh
 # Override the terminal's real background color (default: auto-detected via
 # the same OSC 11 query as CS_TERM_THEME, when it succeeds). The statusline's
-# capsule surface is a shade of it; unset, the surface is a shade of the
-# theme's assumed background instead.
+# capsule surface is a shade of it; unset, the surface falls back to a fixed
+# warm taupe per theme.
 ```
 
 After the `CS_STATUSLINE_SEGMENTS` line add:
@@ -1096,12 +1144,18 @@ Expected: both rc=0; doctor shows the statusline registered and no new WARN (two
 
 ```bash
 J='{"session_name":"demo","model":{"id":"claude-fable-5","display_name":"Fable 5.1"},"effort":{"level":"medium"},"workspace":{"current_dir":"/none"},"context_window":{"used_percentage":33},"rate_limits":{"five_hour":{"used_percentage":9},"seven_day":{"used_percentage":84,"resets_at":'$(( $(date +%s) + 490000 ))'}}}'
-for t in light dark; do printf '%s' "$J" | COLORTERM=truecolor CS_TERM_THEME=$t CS_USAGE_NO_REFRESH=1 bash bin/cs-statusline; done
+export CS_USAGE_NO_REFRESH=1 CS_USAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/slusage.XXXXXX")"   # no poll, no ambient cache
+for t in light dark; do printf '%s' "$J" | COLORTERM=truecolor CS_TERM_THEME=$t bash bin/cs-statusline; done
 printf '%s' "$J" | NO_COLOR=1 bash bin/cs-statusline
 ```
 Expected, in order: a light bar `✳ demo · ✦ Fable 5.1 medium   ◔ ctx 33%   ◑ wk 84% · 5d16h` with 84% in amber; the same on a dark strip; the plain line `demo · ✦ Fable 5.1 medium > ◔ ctx 33% > ◑ wk 84% · 5d16h`. Report the three lines through `cat -v` in the hand-back.
 
-- [ ] **Step 4: Report**
+- [ ] **Step 4: Registration and the cold open**
+
+Run: `jq -r '.statusLine.command, .statusLine.refreshInterval' ~/.claude/settings.json`
+Expected: the installed `cs-statusline` path and `1`. If the command is the iterm sidebar's `statusline-bridge.sh` instead, say so in the hand-back: the redesign is then invisible in Alex's live bar until that bridge hands off, and the cold open below is his to do in a terminal where the bridge is not registered. The cold open itself — open a fresh `cs` session and look at the bar with nothing typed — is Alex's discoverability pass, not the implementer's; report what registration shows and stop.
+
+- [ ] **Step 5: Report**
 
 Hand back: suite count and rc, the doctor lines, the three renders, and every departure the implementation took from this plan.
 
@@ -1112,6 +1166,8 @@ Hand back: suite count and rc, the doctor lines, the three renders, and every de
 **Spec coverage.** Layout and states → Task 2 (render, gaps, caps, crit inversion) and Task 3 (hot limits). Segments table → Task 2 (logo, session, notes, mail, pane, git, model, ctx, cost) and Task 3 (limits, fable, default order, names). Colour table → Task 1. Render model → Task 2. Consumers → Tasks 1 (agent rows), 3 (help, sync), 4 (docs, README, changelog), 5 (other suites, install). Out of scope → none planned. Commits → Tasks 2, 3, 4 map to the spec's three; Task 1 is split out so the token change lands green on its own.
 
 **Placeholders.** None: every code step carries the code; the pin-rewrite table in Task 2 Step 7 names the replacement for each class, and instructs a stop rather than a deletion when a pin has no row.
+
+**Reviewed.** Codex's 18 findings: five subagent pins (T1 S5), `periwinkle` kept (dep. 9), `ctx_pill` → number run, basic-level and library-mode and pulse pins mapped (T2 S7), new tests at end of file (constraints), Fable countdown `1d20h` in four expectations, `_LIMITS_NAMED` replaces `_LIMITS_DONE` with an either-order test, kick tests through `_seg_limits`, the 1m fixture at 85, countdown fixtures at 75 and the 5h gate at 70 (dep. 10), regression-guard note on the countdown test, Terminal-theme and config prose, isolated cache and the registration check in Task 5, seventeen deletions, the `_seg_fable` boundary.
 
 **Staged.** Task 2's `_add`, `_invert` and `_render` blocks were run as written with a stub `_sgr` returning the light-theme values; the bytes matched the gap, logo, crit-inversion and plain-mode assertions exactly (surface `227;221;204` measured through `_bg_shade`, `1m` and `5d16h` measured through `_fmt_rest`).
 
