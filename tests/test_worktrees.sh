@@ -755,6 +755,27 @@ test_integrate_red_gate_leaves_base_untouched() {
     assert_not_exists "$base_dir/.git/cs/integrate.lock" "mutex released on failure" || return 1
 }
 
+# An untracked base file colliding with a path the feature adds must be caught
+# before the gate runs at all: _tree_is_dirty only sees tracked dirt, so
+# without this check the gate would run to completion and only THEN hit an
+# un-diagnosable ff-only abort.
+test_integrate_refuses_untracked_collision_before_the_gate() {
+    local sha base_dir output status=0
+    sha=$(integrate_fixture myproj fix-auth)
+    base_dir="$CS_SESSIONS_ROOT/myproj"
+    echo "stale" > "$base_dir/feature.txt"
+    local head
+    head=$(git -C "$base_dir" rev-parse HEAD)
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- sh -c 'touch "$0/marker"' "$TEST_TMPDIR" 2>&1) || status=$?
+    assert_eq "1" "$status" "an untracked collision refuses" || return 1
+    assert_output_contains "$output" "feature.txt" "names the colliding path" || return 1
+    assert_file_not_exists "$TEST_TMPDIR/marker" "the gate never ran" || return 1
+    assert_eq "$head" "$(git -C "$base_dir" rev-parse HEAD)" "base HEAD unchanged" || return 1
+    assert_eq "stale" "$(cat "$base_dir/feature.txt")" "the untracked file survives with its content" || return 1
+    assert_output_not_contains "$(git -C "$base_dir" worktree list)" "cs/finish" "temp worktree removed" || return 1
+    assert_not_exists "$base_dir/.git/cs/integrate.lock" "mutex released" || return 1
+}
+
 test_integrate_gates_run_in_the_temp_not_the_live_trees() {
     local sha base_dir wt output status=0
     sha=$(integrate_fixture myproj fix-auth)
@@ -921,6 +942,7 @@ run_test test_integrate_lands_a_no_ff_merge_and_keeps_everything
 run_test test_integrate_tracked_mode_union_merges_shared_records
 run_test test_integrate_then_merge_verb_takes_the_ancestor_path
 run_test test_integrate_red_gate_leaves_base_untouched
+run_test test_integrate_refuses_untracked_collision_before_the_gate
 run_test test_integrate_gates_run_in_the_temp_not_the_live_trees
 run_test test_integrate_refuses_when_base_moved_during_gates
 run_test test_integrate_refuses_when_base_reset_to_an_ancestor_during_gates

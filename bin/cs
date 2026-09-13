@@ -1898,6 +1898,26 @@ _integrate_in_temp() {  # base_dir wt_dir task sha common from_remote gate...
 ${conflicts:-(none reported; see git -C \"$tmp\" status)}
 Resolve on the feature branch (git merge <base branch> in $wt_dir), then re-run /finish $task"
     fi
+    # An untracked file in the base colliding with a path the merge touches
+    # passes _tree_is_dirty (tracked-only) and the temp merge itself, then
+    # aborts the ff-only landing with a message that blames the wrong cause.
+    # Caught here, before the gate spends any cost on a doomed landing.
+    local touched_file others_file collisions
+    touched_file=$(mktemp "${TMPDIR:-/tmp}/cs-touched.XXXXXX")
+    others_file=$(mktemp "${TMPDIR:-/tmp}/cs-untracked.XXXXXX")
+    git -C "$tmp" diff --name-only "$B" HEAD > "$touched_file"
+    git -C "$base_dir" ls-files --others --exclude-standard > "$others_file"
+    collisions=""
+    if [ -s "$touched_file" ] && [ -s "$others_file" ]; then
+        collisions=$(grep -Fxf "$touched_file" "$others_file" 2>/dev/null || true)
+    fi
+    rm -f "$touched_file" "$others_file"
+    if [ -n "$collisions" ]; then
+        rmdir "$no_hooks"
+        error "Untracked files in $base_dir collide with paths the feature adds; base untouched. Colliding paths:
+$collisions
+Move or delete these untracked files in $base_dir, then re-run /finish $task"
+    fi
     # Submodules after the merge, so the gates see the MERGED gitlinks: a
     # feature that adds or bumps a submodule is otherwise gated against
     # absent or stale contents.
@@ -1929,10 +1949,12 @@ Resolve on the feature branch (git merge <base branch> in $wt_dir), then re-run 
     fi
     # Fast-forward BEFORE removing the temp: until then the merge commit is
     # reachable only from the temp's detached HEAD.
-    local R
+    local R ff_err ff_status=0
     R=$(git -C "$tmp" rev-parse HEAD)
-    if ! git -C "$base_dir" merge --ff-only "$R" >/dev/null 2>&1; then
-        error "Base $base_dir moved or changed during the gates (was $B); re-run /finish $task"
+    ff_err=$(git -C "$base_dir" merge --ff-only "$R" 2>&1 >/dev/null) || ff_status=$?
+    if [ "$ff_status" != 0 ]; then
+        error "Base $base_dir moved or changed during the gates (was $B); re-run /finish $task
+${ff_err:-(no output from git merge --ff-only)}"
     fi
     # Keep _INTEGRATE_TMP until the removal is verified, so the EXIT cleanup
     # still has the path if this removal fails; a leftover temp is reported,
