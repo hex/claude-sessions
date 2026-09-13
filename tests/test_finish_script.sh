@@ -225,7 +225,7 @@ test_report_after_a_squash_landing_gives_the_squash_notice() {
     sha=$(finish_fixture myproj fix-auth)
     stub_gh '[]'
     # Squash-shaped landing: the content arrives as an unrelated commit, F is not an ancestor.
-    (cd "$CS_SESSIONS_ROOT/myproj" && git merge -q --squash cs/fix-auth && git commit -q -m "feature (#7)")
+    (cd "$CS_SESSIONS_ROOT/myproj" && git merge -q --squash cs/fix-auth >/dev/null && git commit -q -m "feature (#7)")
     out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" \
         bash "$FINISH" report myproj fix-auth "$sha" 2>&1)
     assert_eq "no" "$(key "$out" landed)" "F is not an ancestor after a squash" || return 1
