@@ -120,7 +120,7 @@ EXPECT
     expect -f "$exp" >/dev/null 2>&1 || true
     # A sample renders, and it renders BEFORE the question.
     local sample_line prompt_line
-    sample_line=$(grep -n 'ctx ' "$out" | head -1 | cut -d: -f1)
+    sample_line=$(grep -n 'ctx' "$out" | head -1 | cut -d: -f1)
     prompt_line=$(grep -n 'as the Claude Code status line' "$out" | head -1 | cut -d: -f1)
     [ -n "$sample_line" ] || { echo "  FAIL: no status line sample rendered"; return 1; }
     [ -n "$prompt_line" ] || { echo "  FAIL: no prompt"; return 1; }
