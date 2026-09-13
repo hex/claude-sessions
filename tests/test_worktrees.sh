@@ -1526,4 +1526,103 @@ test_features_table_says_one_file_not_one_files() {
 
 run_test test_features_table_says_one_file_not_one_files
 
+# --- -integrate-feature --from-remote: land a PR's merge commit ---
+
+# Base + feature + a bare origin that already carries the base branch. Prints
+# the feature SHA. The caller lands the PR on origin however the scenario
+# needs (merge commit, squash) and fetches.
+integrate_remote_fixture() {  # base task
+    local sha base_dir origin
+    sha=$(integrate_fixture "$1" "$2")
+    base_dir="$CS_SESSIONS_ROOT/$1"
+    origin="$TEST_TMPDIR/origin.git"
+    git init -q --bare "$origin"
+    git -C "$base_dir" remote add origin "$origin"
+    git -C "$base_dir" push -q origin HEAD >/dev/null 2>&1
+    git -C "$base_dir" push -q origin "cs/$2" >/dev/null 2>&1
+    printf '%s\n' "$sha"
+}
+
+# Land the feature on origin's base branch the way a merged PR does (a merge
+# commit), through a throwaway clone. Prints the landing commit.
+land_pr_on_origin() {  # base_dir task [--squash]
+    local base_dir="$1" task="$2" how="${3:-}" clone branch
+    branch=$(git -C "$base_dir" symbolic-ref --short HEAD)
+    clone="$TEST_TMPDIR/pr-clone"
+    rm -rf "$clone"
+    git clone -q "$TEST_TMPDIR/origin.git" "$clone" 2>/dev/null
+    git -C "$clone" checkout -q "$branch"
+    if [ "$how" = "--squash" ]; then
+        git -C "$clone" merge -q --squash "origin/cs/$task" >/dev/null 2>&1
+        git -C "$clone" commit -q -m "feature ($task) (#7)"
+    else
+        git -C "$clone" merge -q --no-ff --no-edit -m "Merge pull request #7 from example-org/cs/$task" "origin/cs/$task"
+    fi
+    git -C "$clone" push -q origin "$branch" >/dev/null 2>&1
+    git -C "$clone" rev-parse HEAD
+}
+
+test_integrate_from_remote_fast_forwards_onto_the_pr_merge_commit() {
+    local sha base_dir M output status=0
+    sha=$(integrate_remote_fixture myproj fix-auth)
+    base_dir="$CS_SESSIONS_ROOT/myproj"
+    M=$(land_pr_on_origin "$base_dir" fix-auth)
+    git -C "$base_dir" fetch -q origin
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$M" --from-remote -- true 2>&1) || status=$?
+    assert_eq "0" "$status" "remote landing succeeds: $output" || return 1
+    assert_eq "$M" "$(git -C "$base_dir" rev-parse HEAD)" "base fast-forwards to the PR merge commit, no extra commit" || return 1
+    assert_file_exists "$base_dir/feature.txt" "feature content on base" || return 1
+    git -C "$base_dir" merge-base --is-ancestor "$sha" HEAD \
+        || { echo "  FAIL: F should be an ancestor after a merge-commit landing"; return 1; }
+    assert_output_contains "$output" "integrated fix-auth $M -> $M" "summary line" || return 1
+}
+
+test_integrate_from_remote_after_a_local_integrate_still_lands() {
+    # grok's inoperability case: base has a commit origin lacks, so a
+    # whole-branch --ff-only would refuse forever. Merging the PR's landing
+    # commit as an ordinary merge must still work.
+    local sha base_dir M output status=0
+    sha=$(integrate_remote_fixture myproj fix-auth)
+    base_dir="$CS_SESSIONS_ROOT/myproj"
+    (cd "$base_dir" && git commit -q --allow-empty -m "local only")
+    M=$(land_pr_on_origin "$base_dir" fix-auth)
+    git -C "$base_dir" fetch -q origin
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$M" --from-remote -- true 2>&1) || status=$?
+    assert_eq "0" "$status" "mixed landing succeeds: $output" || return 1
+    git -C "$base_dir" merge-base --is-ancestor "$M" HEAD \
+        || { echo "  FAIL: the PR merge commit must be reachable from base HEAD"; return 1; }
+    assert_file_exists "$base_dir/feature.txt" "feature content on base" || return 1
+}
+
+test_integrate_from_remote_refuses_a_commit_origin_does_not_have() {
+    local sha base_dir output status=0
+    sha=$(integrate_remote_fixture myproj fix-auth)
+    base_dir="$CS_SESSIONS_ROOT/myproj"
+    git -C "$base_dir" fetch -q origin
+    # F is on origin/cs/fix-auth but NOT on origin/<base branch>.
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" --from-remote -- true 2>&1) || status=$?
+    assert_eq "1" "$status" "refuses" || return 1
+    assert_output_contains "$output" "not reachable from origin/" "names the remote branch" || return 1
+}
+
+test_integrate_from_remote_squash_leaves_feature_tip_unintegrated() {
+    # The squash case the skill must report: M lands, F is not an ancestor.
+    local sha base_dir M status=0
+    sha=$(integrate_remote_fixture myproj fix-auth)
+    base_dir="$CS_SESSIONS_ROOT/myproj"
+    M=$(land_pr_on_origin "$base_dir" fix-auth --squash)
+    git -C "$base_dir" fetch -q origin
+    "$CS_BIN" myproj -integrate-feature fix-auth "$M" --from-remote -- true >/dev/null 2>&1 || status=$?
+    assert_eq "0" "$status" "squash landing succeeds" || return 1
+    assert_file_exists "$base_dir/feature.txt" "content landed" || return 1
+    if git -C "$base_dir" merge-base --is-ancestor "$sha" HEAD 2>/dev/null; then
+        echo "  FAIL: after a squash F must NOT be an ancestor (the report depends on it)"; return 1
+    fi
+}
+
+run_test test_integrate_from_remote_fast_forwards_onto_the_pr_merge_commit
+run_test test_integrate_from_remote_after_a_local_integrate_still_lands
+run_test test_integrate_from_remote_refuses_a_commit_origin_does_not_have
+run_test test_integrate_from_remote_squash_leaves_feature_tip_unintegrated
+
 report_results
