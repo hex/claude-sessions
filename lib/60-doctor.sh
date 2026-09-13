@@ -612,6 +612,25 @@ _doctor_check_merge_driver() {
     fi
 }
 
+# `cs <base> -integrate-feature` takes <git-dir>/cs/integrate.lock for the
+# length of a landing, and the autosave hook skips its snapshot while it
+# exists. A lock left behind by a killed integrate silences this checkout's
+# autosave with nothing on screen to say why, so name it and the one command
+# that clears it.
+_doctor_check_integrate_lock() {
+    local dir="${CLAUDE_SESSION_DIR:-}"
+    [ -n "$dir" ] || return 0
+    local git_dir lock
+    git_dir=$(_git_path_abs "$dir" --git-dir) || return 0
+    lock="$git_dir/cs/integrate.lock"
+    [ -d "$lock" ] || return 0
+    if pgrep -f 'cs .*-integrate-feature' >/dev/null 2>&1; then
+        _doctor_ok "Integrate lock: $lock held by a running integrate"
+    else
+        _doctor_warn "Integrate lock: $lock exists with no integrate running; autosave skips while it does. Remove it with: rmdir \"$lock\""
+    fi
+}
+
 _doctor_check_session_id_match() {
     local state="$CLAUDE_SESSION_META_DIR/local/state"
     local recorded
@@ -656,6 +675,7 @@ run_doctor() {
     if [ -n "${CLAUDE_SESSION_META_DIR:-}" ] && [ -d "${CLAUDE_SESSION_META_DIR:-}" ]; then
         _doctor_check_shadow_ref
         _doctor_check_merge_driver
+        _doctor_check_integrate_lock
         _doctor_check_worktrees
         _doctor_check_auto_memory
         _doctor_check_narrative_size

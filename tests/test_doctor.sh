@@ -1061,4 +1061,36 @@ test_doctor_is_quiet_when_the_session_clone_has_the_merge_driver() {
 run_test test_doctor_warns_when_the_session_clone_lacks_the_merge_driver
 run_test test_doctor_is_quiet_when_the_session_clone_has_the_merge_driver
 
+
+# `cs <base> -integrate-feature` takes <git-dir>/cs/integrate.lock and the
+# autosave hook skips its snapshot while it exists. A lock left behind by a
+# killed integrate would silence autosave forever, with nothing to say why.
+test_doctor_names_a_stale_integrate_lock() {
+    local sess="$TEST_TMPDIR/sess-stalelock"
+    mkdir -p "$sess/.cs/memory"
+    git -C "$sess" init -q
+    mkdir -p "$sess/.git/cs/integrate.lock"
+    local output
+    output=$(CLAUDE_SESSION_DIR="$sess" CLAUDE_SESSION_META_DIR="$sess/.cs" \
+        CS_CLAUDE_DIR="$TEST_TMPDIR/claude-sl" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "$sess/.git/cs/integrate.lock" \
+        "Doctor should name the stale lock by path" || return 1
+    assert_output_contains "$output" "rmdir" "and the command that clears it" || return 1
+    assert_output_contains "$output" "WARN" "a stale lock is a warning" || return 1
+}
+
+test_doctor_is_silent_with_no_integrate_lock() {
+    local sess="$TEST_TMPDIR/sess-nolock"
+    mkdir -p "$sess/.cs/memory"
+    git -C "$sess" init -q
+    local output
+    output=$(CLAUDE_SESSION_DIR="$sess" CLAUDE_SESSION_META_DIR="$sess/.cs" \
+        CS_CLAUDE_DIR="$TEST_TMPDIR/claude-nl" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_not_contains "$output" "integrate.lock" \
+        "no lock, nothing to report" || return 1
+}
+
+run_test test_doctor_names_a_stale_integrate_lock
+run_test test_doctor_is_silent_with_no_integrate_lock
+
 report_results

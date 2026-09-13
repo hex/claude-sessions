@@ -83,7 +83,7 @@ CS_SKILLS=(
     store-secret
     prose-hygiene
     rotate
-    merge
+    finish
     write-as-me
 )
 
@@ -95,12 +95,14 @@ CS_SKILLS=(
 # else ever removes it.
 RETIRED_SKILLS=(
     voice   # renamed to write-as-me; Claude Code 2.1.227 ships a built-in /voice (Toggle voice mode)
+    merge   # replaced by finish: integrate and report, never remove
 )
 
 # Support files skills ship beyond SKILL.md, as skills/<skill>/<path> entries.
 # KEEP THIS LIST IN SYNC WITH install.sh's CS_SKILL_FILES.
 CS_SKILL_FILES=(
     write-as-me/scripts/build-corpus.sh
+    finish/scripts/finish.sh
 )
 
 # Deployed-hooks directory; CS_HOOKS_DIR overrides it for tests.
@@ -406,7 +408,7 @@ Commands:
   <base>@<feature>    Open a parallel feature worktree of session <base>
   <base> --merge <feature>  Merge a feature worktree back into <base> and remove it
   <base> -features          List a base's feature worktrees and their merge readiness
-  <base> -finish <feature>  Open <base> and run the merge ritual for <feature>
+  <base> -finish <feature>  Open <base> and run /finish for <feature> (integrate, keep the worktree)
   <name> -secrets <cmd>  Run secrets command on <name> without launching session
   <name> -narrative rotate  Rotate <name>'s narrative without launching session
   -search <query>     Search across all sessions (--include-archived searches archived too)
@@ -1336,6 +1338,65 @@ _worktree_untracked_at_risk() {  # wt_dir
         || true
 }
 
+# Print the PID of a live lock on a session that the invoker does not own:
+# empty when the lock is absent, its process is dead, or the lock is the
+# invoking conversation's own (session_lock_owned_by_invoker). The merge verb
+# and the integrate entry both refuse on a non-empty answer.
+_foreign_live_lock_pid() {  # session_name lock_file
+    local pid
+    [ -f "$2" ] || return 0
+    pid=$(cat "$2" 2>/dev/null || echo "")
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 0
+    session_lock_owned_by_invoker "$1" "$pid" && return 0
+    printf '%s\n' "$pid"
+}
+
+# Absolute form of a `git rev-parse` path answer (--git-dir, --git-common-dir).
+# git answers relative to the checkout from a main worktree and absolute from
+# a linked one; every path built on the answer (the integrate mutex, the temp
+# worktree) must resolve the same from both.
+_git_path_abs() {  # checkout_dir rev-parse-flag
+    local p
+    p=$(git -C "$1" rev-parse "$2" 2>/dev/null) || return 1
+    case "$p" in
+        /*) printf '%s\n' "$p" ;;
+        *) printf '%s\n' "$1/$p" ;;
+    esac
+}
+
+# The same merge policy setup_merge_attributes (lib/45-migrate.sh:4) gives a
+# checkout, written clone-local: merge.ours.driver into the shared config and
+# the three attribute lines into <common>/info/attributes, which every
+# worktree of the repo reads and which dirties no tree. The temp worktree
+# checks out whatever .gitattributes the base has committed, which may lack
+# these lines; without them tracked-mode timeline and narrative appends on
+# both sides conflict instead of union-merging.
+_setup_merge_attributes_clone_local() {  # base_dir common_dir
+    git -C "$1" config merge.ours.driver true 2>/dev/null || true
+    local attrs="$2/info/attributes"
+    mkdir -p "$2/info"
+    if ! grep -q 'MEMORY\.md merge=ours' "$attrs" 2>/dev/null; then
+        printf '.cs/memory/MEMORY.md merge=ours\n' >> "$attrs"
+    fi
+    if ! grep -q 'timeline\.jsonl merge=union' "$attrs" 2>/dev/null; then
+        printf '.cs/timeline.jsonl merge=union\n' >> "$attrs"
+    fi
+    if ! grep -q 'narrative\.\*\.md merge=union' "$attrs" 2>/dev/null; then
+        printf '.cs/memory/narrative.*.md merge=union\n' >> "$attrs"
+    fi
+}
+
+# Tracked-.cs mode: MEMORY.md merges with merge=ours, so a change to it on the
+# feature is silently dropped by the merge that follows; say so first.
+_warn_memory_index_changed() {  # base_dir ref
+    local mb
+    mb=$(git -C "$1" merge-base HEAD "$2" 2>/dev/null || echo "")
+    if [ -n "$mb" ] \
+        && ! git -C "$1" diff --quiet "$mb" "$2" -- .cs/memory/MEMORY.md 2>/dev/null; then
+        warn "MEMORY.md changed on $2; merge=ours keeps the base copy. Review: git -C \"$1\" diff $mb $2 -- .cs/memory/MEMORY.md"
+    fi
+}
+
 # Print the task name of every verified feature worktree of a base, one per
 # line. Glob the sessions root then ask git to confirm each candidate — the
 # reverse direction would enumerate the main checkout, and for an adopted base
@@ -1620,14 +1681,9 @@ merge_worktree_session() {
         else
             lock="$wt_dir/.cs/session.lock"
         fi
-        if [ -f "$lock" ]; then
-            pid=$(cat "$lock" 2>/dev/null || echo "")
-            if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-                if session_lock_owned_by_invoker "$lock_session" "$pid"; then
-                    continue
-                fi
-                error "A session is open (PID $pid, $lock); close it before merging"
-            fi
+        pid=$(_foreign_live_lock_pid "$lock_session" "$lock")
+        if [ -n "$pid" ]; then
+            error "A session is open (PID $pid, $lock); close it before merging"
         fi
     done
 
@@ -1655,12 +1711,7 @@ $wt_untracked"
         info "Branch $branch is already merged; cleaning up"
     else
         if [ "$mode" = "tracked" ]; then
-            local mb
-            mb=$(git -C "$base_dir" merge-base HEAD "$branch" 2>/dev/null || echo "")
-            if [ -n "$mb" ] \
-                && ! git -C "$base_dir" diff --quiet "$mb" "$branch" -- .cs/memory/MEMORY.md 2>/dev/null; then
-                warn "MEMORY.md changed on $branch; merge=ours keeps the base copy. Review: git -C \"$base_dir\" diff $mb $branch -- .cs/memory/MEMORY.md"
-            fi
+            _warn_memory_index_changed "$base_dir" "$branch"
         fi
         if ! git -C "$base_dir" merge --no-edit "$branch"; then
             error "Merge conflicts in $base_dir; resolve and commit (or git merge --abort), then re-run: cs $base_name --merge $task"
@@ -1686,6 +1737,316 @@ $wt_untracked"
         '{ts: $ts, event: $event, task: $task}' \
         >> "$base_dir/.cs/timeline.jsonl" 2>/dev/null || true
     info "Merged $branch and removed worktree $base_name@$task"
+}
+
+# Remove the temp worktree and release the mutex on every exit path of
+# integrate_feature_worktree, including error's exit 1. Globals because an
+# EXIT trap runs after the function's locals are gone.
+_integrate_cleanup() {
+    if [ -n "${_INTEGRATE_TMP:-}" ]; then
+        # Remove if present, then prune regardless: a directory gone with its
+        # registration surviving is exactly what prune exists for.
+        if [ -d "$_INTEGRATE_TMP" ]; then
+            git -C "$_INTEGRATE_BASE_DIR" worktree remove --force "$_INTEGRATE_TMP" >/dev/null 2>&1 \
+                || rm -rf "$_INTEGRATE_TMP"
+        fi
+        git -C "$_INTEGRATE_BASE_DIR" worktree prune >/dev/null 2>&1 || true
+    fi
+    [ -n "${_INTEGRATE_LOCK:-}" ] && rmdir "$_INTEGRATE_LOCK" 2>/dev/null
+    return 0
+}
+
+# Integrate a feature worktree's captured commit into the base session while
+# the feature stays open: merge base HEAD + <sha> in a temporary detached
+# worktree, run the gates there, fast-forward the base onto the result. Removes
+# nothing — the worktree, the branch and the feature session all remain; the
+# merge verb retires them later. Backs the unadvertised
+# `cs <base> -integrate-feature <task> <sha> [--from-remote] -- <gate...>`
+# that skills/finish/scripts/finish.sh drives. Every refusal is an error that
+# names the next command.
+integrate_feature_worktree() {  # base_name task sha [--from-remote] -- gate...
+    local usage="Usage: cs <base> -integrate-feature <task> <sha> [--from-remote] -- <gate command...>"
+    [ $# -ge 3 ] || error "$usage"
+    local base_name="$1" task="$2" sha="$3"
+    shift 3
+    local from_remote=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --from-remote) from_remote=1; shift ;;
+            --) shift; break ;;
+            *) error "$usage" ;;
+        esac
+    done
+    [ $# -gt 0 ] || error "$usage (a gate command is required; pass -- true to run none)"
+
+    local base_dir wt_dir branch
+    base_dir=$(_resolve_session_dir "$base_name")
+    wt_dir="$SESSIONS_ROOT/$base_name@$task"
+    branch="cs/$task"
+    [ -d "$base_dir" ] || error "Base session not found: $base_name"
+    [ -d "$wt_dir" ] || error "No worktree for feature '$task' (expected $wt_dir)"
+    # Herestring, not a pipe: grep -q's early exit would SIGPIPE the writer
+    # and pipefail would read that as "not registered".
+    local features
+    features=$(_worktree_features "$base_name")
+    grep -qxF -- "$task" <<< "$features" \
+        || error "$wt_dir is not a registered worktree of $base_name (see: git -C \"$base_dir\" worktree list)"
+
+    # Only the base lock matters: the feature worktree is never touched, so
+    # its conversation may stay open. A live base that is not this
+    # conversation is a refusal, never a wait.
+    local pid
+    pid=$(_foreign_live_lock_pid "$base_name" "$base_dir/.cs/session.lock")
+    [ -z "$pid" ] || error "Base session '$base_name' is open elsewhere (PID $pid); run /finish $task from that conversation"
+
+    sha=$(git -C "$base_dir" rev-parse -q --verify "$sha^{commit}" 2>/dev/null) \
+        || error "Commit not found in $base_name: $sha"
+    # Before the split: a detached base has no branch to land on either way,
+    # and the ff-only would move a detached HEAD while the branch stays put.
+    local base_branch
+    base_branch=$(git -C "$base_dir" symbolic-ref -q --short HEAD 2>/dev/null) \
+        || error "Base checkout is detached; check out the branch to land on (for a PR, the branch it targets), then re-run"
+    if [ -n "$from_remote" ]; then
+        git -C "$base_dir" merge-base --is-ancestor "$sha" "refs/remotes/origin/$base_branch" 2>/dev/null \
+            || error "$sha is not reachable from origin/$base_branch; run: git -C \"$base_dir\" fetch origin, then check the PR's base branch"
+    else
+        git -C "$base_dir" merge-base --is-ancestor "$sha" "$branch" 2>/dev/null \
+            || error "$sha is not reachable from $branch; capture the feature HEAD again"
+    fi
+    if git -C "$base_dir" merge-base --is-ancestor "$sha" HEAD 2>/dev/null; then
+        printf 'already-integrated %s %s\n' "$task" "$sha"
+        return 0
+    fi
+
+    if _tree_is_dirty "$base_dir"; then
+        error "Base session has uncommitted changes; commit them in $base_dir first"
+    fi
+    local git_dir common
+    git_dir=$(_git_path_abs "$base_dir" --git-dir) || error "Not a git checkout: $base_dir"
+    common=$(_git_path_abs "$base_dir" --git-common-dir) || error "Not a git checkout: $base_dir"
+    if git -C "$base_dir" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1 \
+        || [ -d "$git_dir/rebase-merge" ] || [ -d "$git_dir/rebase-apply" ]; then
+        error "Base checkout has a merge or rebase in progress; finish or abort it, then re-run"
+    fi
+
+    # The mutex the autosave hook honours (hooks/autosave-commits.sh spells
+    # the same path). Per-CHECKOUT, not per-clone: the base is always a main
+    # checkout, so its --git-dir is the common dir, while a feature
+    # worktree's autosave takes its own private gitdir's lock and never
+    # contends with this integrate — the feature conversation stays open and
+    # keeps snapshotting throughout a gate run. An existing directory is a
+    # refusal, never stolen: a stale one is the user's to inspect and remove
+    # (cs -doctor names it).
+    local lock="$git_dir/cs/integrate.lock"
+    mkdir -p "$git_dir/cs"
+    # The base's own autosave takes this same lock for the length of one tree
+    # write, so a refusal on the first try is far more often a snapshot in
+    # flight than another integrate. Five tries a second apart outlast that
+    # and still refuse promptly on a genuinely held lock.
+    local tries=0
+    while ! mkdir "$lock" 2>/dev/null; do
+        tries=$((tries + 1))
+        if [ "$tries" -ge 5 ]; then
+            error "Another integrate or an in-flight autosave holds $lock; wait a few seconds and re-run. Remove that directory only if it persists with no cs running"
+        fi
+        sleep 1
+    done
+    _INTEGRATE_LOCK="$lock"
+    _INTEGRATE_BASE_DIR="$base_dir"
+    _INTEGRATE_TMP=""
+    # EXIT alone is not enough: a TERM/INT'd bash skips the EXIT trap
+    # (measured: exit 143, no cleanup), stranding the mutex and the temp.
+    # Same shape as lib/75-launch.sh:112-113.
+    trap '_integrate_cleanup' EXIT
+    trap '_integrate_cleanup; exit 130' INT TERM
+
+    _integrate_in_temp "$base_dir" "$wt_dir" "$task" "$sha" "$common" "$from_remote" "$@"
+}
+
+# The mutation half of integrate_feature_worktree, entered with the mutex
+# held and the cleanup trap armed: merge base HEAD + <sha> in a temporary
+# detached worktree under <common>/cs/finish/, run the gate argv there, then
+# fast-forward the base onto the result. The fast-forward is the atomic
+# "base has not moved" check; a red gate or a conflict leaves base exactly
+# as it was. No hook of the project fires inside the temp (core.hooksPath
+# points at an empty directory for the add and the merge): the gate argv is
+# the project's gate, run explicitly.
+_integrate_in_temp() {  # base_dir wt_dir task sha common from_remote gate...
+    local base_dir="$1" wt_dir="$2" task="$3" sha="$4" common="$5" from_remote="$6"
+    shift 6
+
+    local B
+    B=$(git -C "$base_dir" rev-parse HEAD)
+    local tmp="$common/cs/finish/$task.$$"
+    mkdir -p "$common/cs/finish"
+    # /dev/null is not a directory on BSD, so hooks are silenced with a real
+    # empty one.
+    local no_hooks
+    no_hooks=$(mktemp -d "${TMPDIR:-/tmp}/cs-nohooks.XXXXXX")
+    # Armed before the add, not after: an add that fails half-way leaves a
+    # directory and a registration behind, and only a _INTEGRATE_TMP the
+    # cleanup can see gets them removed. The cleanup tolerates a path that
+    # was never created and prunes either way.
+    _INTEGRATE_TMP="$tmp"
+    if ! git -C "$base_dir" -c core.hooksPath="$no_hooks" worktree add --detach "$tmp" "$B" >/dev/null 2>&1; then
+        rmdir "$no_hooks"
+        error "git worktree add failed for $tmp"
+    fi
+
+    local mode
+    mode=$(_read_local_state "$wt_dir/.cs/local/state" cs_mode)
+    if [ "$mode" = "tracked" ]; then
+        _setup_merge_attributes_clone_local "$base_dir" "$common"
+        _warn_memory_index_changed "$base_dir" "$sha"
+    fi
+
+    # --no-ff locally: the merge commit names the feature and is the audit
+    # trail /finish leaves, and it gives the retire verb's ancestor check
+    # something to find. --from-remote: the landing commit already exists on
+    # origin and names the PR, so a fast-forward is the right shape there.
+    local sha7 merge_status=0
+    sha7=$(printf '%s' "$sha" | cut -c1-7)
+    if [ -n "$from_remote" ]; then
+        git -C "$tmp" -c core.hooksPath="$no_hooks" merge --no-edit "$sha" >/dev/null 2>&1 || merge_status=$?
+    else
+        git -C "$tmp" -c core.hooksPath="$no_hooks" merge --no-ff --no-edit \
+            -m "Merge feature $task ($sha7)" "$sha" >/dev/null 2>&1 || merge_status=$?
+    fi
+    # The merge commit this integrate will land, read before the gate runs.
+    # Everything after the gate is measured against it: what lands is this
+    # commit, never whatever the temp holds when the gate is done.
+    local M=""
+    [ "$merge_status" = 0 ] && M=$(git -C "$tmp" rev-parse HEAD)
+    if [ "$merge_status" != 0 ]; then
+        rmdir "$no_hooks"
+        local conflicts base_branch advice
+        conflicts=$(git -C "$tmp" diff --name-only --diff-filter=U 2>/dev/null || true)
+        base_branch=$(git -C "$base_dir" symbolic-ref -q --short HEAD 2>/dev/null || echo HEAD)
+        if [ -n "$from_remote" ]; then
+            # Nothing of the feature's is in this conflict: it is the base's
+            # own commits against what origin carries, so the feature worktree
+            # is the wrong place to fix it.
+            advice="Resolve it in the base (git -C \"$base_dir\" merge origin/$base_branch): the conflict is between $base_dir's local commits and origin's $base_branch, not with the feature. Then re-run /finish $task"
+        else
+            advice="Resolve on the feature branch (git merge $base_branch in $wt_dir), then re-run /finish $task"
+        fi
+        error "Merge of $sha conflicts with $base_dir at $B; base untouched. Conflicting paths:
+${conflicts:-(none reported; see git -C \"$tmp\" status)}
+$advice"
+    fi
+    # An untracked file in the base colliding with a path the merge touches
+    # passes _tree_is_dirty (tracked-only) and the temp merge itself, then
+    # aborts the ff-only landing with a message that blames the wrong cause.
+    # Caught here, before the gate spends any cost on a doomed landing.
+    local touched_file others_file collisions
+    touched_file=$(mktemp "${TMPDIR:-/tmp}/cs-touched.XXXXXX")
+    others_file=$(mktemp "${TMPDIR:-/tmp}/cs-untracked.XXXXXX")
+    git -C "$tmp" diff --name-only "$B" HEAD > "$touched_file"
+    git -C "$base_dir" ls-files --others --exclude-standard > "$others_file"
+    collisions=""
+    if [ -s "$touched_file" ] && [ -s "$others_file" ]; then
+        collisions=$(grep -Fxf "$touched_file" "$others_file" 2>/dev/null || true)
+    fi
+    rm -f "$touched_file" "$others_file"
+    if [ -n "$collisions" ]; then
+        rmdir "$no_hooks"
+        error "Untracked files in $base_dir collide with paths the feature adds; base untouched. Colliding paths:
+$collisions
+Move or delete these untracked files in $base_dir, then re-run /finish $task"
+    fi
+    # Submodules after the merge, so the gates see the MERGED gitlinks: a
+    # feature that adds or bumps a submodule is otherwise gated against
+    # absent or stale contents.
+    if [ -f "$tmp/.gitmodules" ]; then
+        git -C "$tmp" -c core.hooksPath="$no_hooks" submodule update --init --recursive -q >/dev/null 2>&1 \
+            || { rmdir "$no_hooks"; error "submodule update failed in $tmp"; }
+    fi
+    rmdir "$no_hooks"
+
+    local gate_log
+    gate_log=$(mktemp "${TMPDIR:-/tmp}/cs-gate.XXXXXX")
+    # </dev/null: a gate that reads stdin would otherwise consume whatever cs
+    # was given and block a non-interactive run forever.
+    if ! (cd "$tmp" && "$@") > "$gate_log" 2>&1 < /dev/null; then
+        cat "$gate_log" >&2
+        rm -f "$gate_log"
+        error "Gate failed in $tmp (output above); base $base_dir untouched at $B"
+    fi
+    rm -f "$gate_log"
+
+    # A green gate that changed the temp is still a refusal. What lands is M,
+    # so a file the gate wrote is either dropped on the floor or — once the
+    # gate commits it — rides into the base unreviewed. Generated output
+    # belongs on the feature branch, committed by the person who ran the build.
+    local gate_head gate_dirt tampered
+    gate_head=$(git -C "$tmp" rev-parse HEAD 2>/dev/null || echo "")
+    gate_dirt=$(git -C "$tmp" status --porcelain --untracked-files=no 2>/dev/null || true)
+    tampered=""
+    if [ -n "$gate_dirt" ]; then
+        tampered="tracked files or submodules changed:
+$gate_dirt"
+    fi
+    if [ "$gate_head" != "$M" ]; then
+        tampered="${tampered:+$tampered
+}HEAD moved to ${gate_head:-(unreadable)}"
+    fi
+    if git -C "$tmp" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+        tampered="${tampered:+$tampered
+}a merge is in progress"
+    fi
+    if [ -n "$tampered" ]; then
+        error "The gate changed the temp checkout; base $base_dir untouched at $B. What the gate changed:
+$tampered
+Commit the generated output on the feature branch, then re-run /finish $task"
+    fi
+
+    # Re-verify the base immediately before landing. --ff-only alone is not
+    # the "base unchanged" check: a base reset to an ancestor of B still
+    # fast-forwards, and unrelated tracked dirt survives one. The residual
+    # window between this check and the merge is the one race left; the
+    # mutex keeps cs's own writer (the autosave hook) out of it.
+    if [ "$(git -C "$base_dir" rev-parse HEAD)" != "$B" ]; then
+        error "Base $base_dir moved during the gates (was $B, now $(git -C "$base_dir" rev-parse --short HEAD)); re-run /finish $task"
+    fi
+    if _tree_is_dirty "$base_dir" || git -C "$base_dir" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+        error "Base $base_dir changed during the gates (uncommitted changes or a merge in progress); commit or abort, then re-run /finish $task"
+    fi
+    # Fast-forward BEFORE removing the temp: until then the merge commit is
+    # reachable only from the temp's detached HEAD.
+    local R ff_err ff_status=0
+    R="$M"
+    ff_err=$(git -C "$base_dir" merge --ff-only "$R" 2>&1 >/dev/null) || ff_status=$?
+    if [ "$ff_status" != 0 ]; then
+        error "Base $base_dir moved or changed during the gates (was $B); re-run /finish $task
+${ff_err:-(no output from git merge --ff-only)}"
+    fi
+    # The base's landing is the one merge that runs with the project's hooks
+    # live — it is the user's checkout, and a post-merge hook is entitled to
+    # fire there. One that commits leaves base past the commit cs landed, so
+    # read HEAD back and report where the base actually is.
+    local landed
+    landed=$(git -C "$base_dir" rev-parse HEAD)
+    if [ "$landed" != "$R" ]; then
+        warn "A post-merge hook moved $base_dir to $landed after landing $R"
+    fi
+    # Keep _INTEGRATE_TMP until the removal is verified, so the EXIT cleanup
+    # still has the path if this removal fails; a leftover temp is reported,
+    # never silently forgotten.
+    if git -C "$base_dir" worktree remove --force "$tmp" >/dev/null 2>&1; then
+        _INTEGRATE_TMP=""
+    else
+        warn "Temporary worktree $tmp could not be removed; run: git -C \"$base_dir\" worktree remove --force \"$tmp\""
+    fi
+
+    _terminate_jsonl "$base_dir/.cs/timeline.jsonl"
+    jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+           --arg event "feature-integrated" \
+           --arg task "$task" \
+           --arg sha "$sha" \
+           --arg result "$landed" \
+        '{ts: $ts, event: $event, task: $task, sha: $sha, result: $result}' \
+        >> "$base_dir/.cs/timeline.jsonl" 2>/dev/null || true
+    printf 'integrated %s %s -> %s\n' "$task" "$sha" "$landed"
 }
 
 # Append one JSONL file onto another, keeping every record on its own line. A
@@ -5746,6 +6107,25 @@ _doctor_check_merge_driver() {
     fi
 }
 
+# `cs <base> -integrate-feature` takes <git-dir>/cs/integrate.lock for the
+# length of a landing, and the autosave hook skips its snapshot while it
+# exists. A lock left behind by a killed integrate silences this checkout's
+# autosave with nothing on screen to say why, so name it and the one command
+# that clears it.
+_doctor_check_integrate_lock() {
+    local dir="${CLAUDE_SESSION_DIR:-}"
+    [ -n "$dir" ] || return 0
+    local git_dir lock
+    git_dir=$(_git_path_abs "$dir" --git-dir) || return 0
+    lock="$git_dir/cs/integrate.lock"
+    [ -d "$lock" ] || return 0
+    if pgrep -f 'cs .*-integrate-feature' >/dev/null 2>&1; then
+        _doctor_ok "Integrate lock: $lock held by a running integrate"
+    else
+        _doctor_warn "Integrate lock: $lock exists with no integrate running; autosave skips while it does. Remove it with: rmdir \"$lock\""
+    fi
+}
+
 _doctor_check_session_id_match() {
     local state="$CLAUDE_SESSION_META_DIR/local/state"
     local recorded
@@ -5790,6 +6170,7 @@ run_doctor() {
     if [ -n "${CLAUDE_SESSION_META_DIR:-}" ] && [ -d "${CLAUDE_SESSION_META_DIR:-}" ]; then
         _doctor_check_shadow_ref
         _doctor_check_merge_driver
+        _doctor_check_integrate_lock
         _doctor_check_worktrees
         _doctor_check_auto_memory
         _doctor_check_narrative_size
@@ -6900,7 +7281,7 @@ launch_claude_code() {
     # point, so nothing is lost — but the drain is the Stop hook, which fires
     # at the first turn end, so do not promise it runs after the merge.
     local merge_kick=""
-    [ -n "$merge_feature" ] && merge_kick="/merge $merge_feature"
+    [ -n "$merge_feature" ] && merge_kick="/finish $merge_feature"
     if [ -n "$merge_kick" ] && [ -n "$spawn_kick" ]; then
         warn "A walk-away queue is armed here; it will begin at the first turn end."
     fi
@@ -8008,6 +8389,16 @@ main() {
             -features)
                 shift
                 run_features "$session_name" "$@"
+                return 0
+                ;;
+            -integrate-feature) # hidden: driven by skills/finish/scripts/finish.sh, not typed by a user
+                shift
+                [ -n "${1:-}" ] || error "Usage: cs <base> -integrate-feature <task> <sha> [--from-remote] -- <gate command...>"
+                # Validate <base>@<feature> the same way --merge does, so a
+                # task name with path separators is rejected before any
+                # filesystem lookup.
+                cs_split_worktree_name "$session_name@$1" >/dev/null
+                integrate_feature_worktree "$session_name" "$@"
                 return 0
                 ;;
             --merge)

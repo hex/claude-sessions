@@ -137,7 +137,7 @@ cs <session-name> --force   # Override active session lock
 cs <base>@<feature>         # Create/resume a parallel feature worktree off <base>
 cs <base> --merge <feature> # Merge a feature worktree back into <base>
 cs <base> -features         # List a base's feature worktrees and their merge readiness
-cs <base> -finish <feature> # Open <base> and run the merge ritual for <feature>
+cs <base> -finish <feature> # Open <base> and run /finish for <feature> (integrate, keep the worktree)
 cs -adopt <name>            # Adopt current directory as a session
 cs -whoami                  # Show the current actor (for shared, multi-person sessions)
 cs -who                     # Show who contributed to shared memory/narrative (git history)
@@ -182,7 +182,7 @@ The current directory decides, not any history: cs opens a session when that dir
 - **Liveness** — sessions with an open conversation carry a breathing teal `■` in place of the heat dot and count into the masthead's live tally. Detection is the cs lock plus a statusline heartbeat, so conversations opened outside cs register too; the preview state reads `■ live · locked <pid>` or `■ live · unlocked`, with the agent state appended when Claude Code publishes one (`■ live · locked 4242 · waiting`)
 - **Unread mail** — a session with unread cross-session mail (`cs -msg`) shows an amber `✉` and the count in its row; it clears as the recipient reads with `cs -msg`
 - **Worktree nesting** — `base@feature` sessions attach under their base with tree connectors as indented `@feature` rows, inherit the base's time section, and the preview names the lineage both ways (`worktree @feature · off base` on the feature, a `features` list on the base). Deleting a worktree row unregisters it from the base repo, like `cs -rm`
-- **Merge readiness** with `m` — replaces the panes with a base's feature worktrees and why each can or cannot merge (commits ahead, dirty tree, untracked files, a live lock, already merged). The detail pane names what finishing will do, down to whether the merge fast-forwards or writes a merge commit. Enter leaves the picker and runs `cs <base> -finish <feature>`, which opens the base with the `/merge` ritual armed. The picker never merges anything itself
+- **Merge readiness** with `m` — replaces the panes with a base's feature worktrees and why each can or cannot merge (commits ahead, dirty tree, untracked files, a live lock, already merged). The detail pane names what finishing will do, down to the merge commit it will land. Enter leaves the picker and runs `cs <base> -finish <feature>`, which opens the base with `/finish <feature>` armed: it integrates the feature and keeps the worktree. The picker never merges anything itself
 - **Symbol legend** — `● activity  ■ live  * marked  archived` sits in the table header's free width on wide terminals
 - **Fuzzy search** with `/` — matches characters in order with highlighting; Enter commits the filter. Add `#tag` anywhere in the query to AND-filter by tag (e.g. `#api backend`); combine multiple `#tag`s or mix with a fuzzy name remainder
 - **Time-based sections** — sessions grouped under Today, Yesterday, This Week, This Month, Older when sorted by date (the default view)
@@ -284,19 +284,23 @@ You don't have to remember the syntax: typing `cs myproj` while that session
 is already open offers to open one of its existing features, start a new
 parallel feature, force a second launch, open the session manager to pick a
 different session, or cancel. A worktree session also
-knows what it is: Claude is told at launch that it runs in a feature worktree
-and that `cs myproj --merge <feature>` is the way back, so it won't merge the
-branch by hand.
+knows what it is: Claude is told at launch that it runs in a feature worktree,
+that `/finish <feature>` in the base session integrates the work while this
+one stays open, and that `cs myproj --merge <feature>` retires it afterwards,
+so it won't merge or delete the branch by hand.
 
-The `merge` skill (`/merge` in a conversation) wraps this — and ordinary
-feature branches — in the full gated ritual: tests before, `--no-ff` merge,
-tests again on the merged result, cleanup only when green. It is user-invoked
-only (`disable-model-invocation: true`): merging and deleting a branch is
-never something Claude should start on its own initiative.
+The `finish` skill (`/finish <feature>` in the base session) lands a feature
+while its conversation stays open: it captures the feature commit, merges
+base and feature in a temporary detached worktree, runs the repo's gates
+there, fast-forwards the base onto the result, and reports whether a GitHub
+PR exists for the branch. It removes nothing. Ordinary feature branches get
+the older gated `--no-ff` ritual from the same skill. It is user-invoked
+only (`disable-model-invocation: true`).
 
 Each worktree is a full cs session (own conversation, color, crash
-recovery) that shares the base session's task list and secrets. Session
-records fork with the branch and re-fuse at merge:
+recovery) that shares the base session's task list and secrets.
+
+Retirement stays a separate, explicit verb:
 
     cs myproj --merge fix-auth   # merge cs/fix-auth, fuse records, remove worktree
 

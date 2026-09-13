@@ -17,7 +17,7 @@ Commands:
   <base>@<feature>    Open a parallel feature worktree of session <base>
   <base> --merge <feature>  Merge a feature worktree back into <base> and remove it
   <base> -features          List a base's feature worktrees and their merge readiness
-  <base> -finish <feature>  Open <base> and run the merge ritual for <feature>
+  <base> -finish <feature>  Open <base> and run /finish for <feature> (integrate, keep the worktree)
   <name> -secrets <cmd>  Run secrets command on <name> without launching session
   <name> -narrative rotate  Rotate <name>'s narrative without launching session
   -search <query>     Search across all sessions (--include-archived searches archived too)

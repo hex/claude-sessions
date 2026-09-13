@@ -667,9 +667,9 @@ if [ -n "$TASK_BRANCH" ] && [[ "$CLAUDE_SESSION_NAME" == *@* ]]; then
 --- Feature Worktree ---
 This session is a feature worktree of session '$CS_BASE' on branch $TASK_BRANCH. Work and commit here as normal; the checkout is disposable once the feature is integrated.
 
-When the feature is complete, ask the user to run: cs $CS_BASE --merge $TASK_NAME
-That command merges the branch into the base session, fuses the session records (timeline, narrative), and removes this worktree. It refuses while either session is open, so it runs from a free terminal after this session closes.
-
+To integrate this feature while keeping this worktree, ask the user to run /finish $TASK_NAME in session $CS_BASE: it merges a captured commit into the base after the gates pass there and removes nothing, so this session stays open.
+When the feature is retired, ask the user to run: cs $CS_BASE --merge $TASK_NAME
+That command merges anything not yet integrated, fuses the session records (timeline, narrative), and removes this worktree. It refuses while either session is open, so it runs from a free terminal after this session closes.
 Do NOT merge $TASK_BRANCH into the base branch manually and do not delete the branch — that bypasses the record fuse and the cleanup. To abandon the feature instead, ask the user to run: cs -rm $CLAUDE_SESSION_NAME — never run this yourself; it deletes this worktree and its session records."
 fi
 

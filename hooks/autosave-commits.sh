@@ -90,42 +90,64 @@ esac
 autosave_to_shadow_ref() {
     cd "$SESSION_DIR" || return 0
 
-    TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
-
-    # Create temporary index from current index
-    TEMP_INDEX=$(mktemp)
-    cp "$GIT_DIR/index" "$TEMP_INDEX"
-
-    # Stage all current files in the temporary index
-    GIT_INDEX_FILE="$TEMP_INDEX" git add -A 2>/dev/null || { rm -f "$TEMP_INDEX"; return 0; }
-
-    # Write tree object from temporary index
-    tree=$(GIT_INDEX_FILE="$TEMP_INDEX" git write-tree 2>/dev/null) || { rm -f "$TEMP_INDEX"; return 0; }
-    rm -f "$TEMP_INDEX"
-
-    # Record the HEAD this snapshot sits on, so crash recovery can tell whether
-    # HEAD has since moved (commit/rebase) and the blanket restore would splice
-    # a stale snapshot over diverged history. Absent (unborn HEAD) => no trailer,
-    # which recovery reads as "unknown base" and refuses the blanket restore.
+    # The HEAD this snapshot sits on, read BEFORE the tree is written. An
+    # integrate can fast-forward HEAD while the snapshot is in flight; a label
+    # read afterwards would claim the old tree sits on the new HEAD, which is
+    # exactly the stale-snapshot case the cs-base trailer exists to expose.
+    # Absent (unborn HEAD) => no trailer, which recovery reads as "unknown base"
+    # and refuses the blanket restore.
     base=$(git rev-parse -q --verify HEAD 2>/dev/null || true)
-    msg="autosave: $TIMESTAMP"
-    [ -n "$base" ] && msg="$msg
+
+    # Serialise against `cs <base> -integrate-feature`, which holds the same
+    # directory while it merges and fast-forwards the base. Skip, never wait:
+    # a snapshot taken mid-merge is garbage and the next Edit takes another.
+    # Taken here, inside the backgrounded function, so there is no window
+    # between the check and the fork. --git-dir, not the common dir: the lock
+    # is per-CHECKOUT, so only the checkout an integrate is landing on stops
+    # snapshotting — a feature worktree keeps autosaving through a gate run
+    # on its base. GIT_DIR is git's own answer from this session directory,
+    # resolved above. lib/30-worktree.sh spells the same path; a test pins both.
+    LOCK_DIR="$GIT_DIR/cs/integrate.lock"
+    mkdir -p "$GIT_DIR/cs" 2>/dev/null || return 0
+    mkdir "$LOCK_DIR" 2>/dev/null || return 0
+    (
+        # EXIT does not fire on TERM/INT (measured: exit 143, no cleanup), so
+        # both get a handler that releases and then exits.
+        trap 'rmdir "$LOCK_DIR" 2>/dev/null' EXIT
+        trap 'rmdir "$LOCK_DIR" 2>/dev/null; exit 143' TERM INT
+
+        TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+
+        # Create temporary index from current index
+        TEMP_INDEX=$(mktemp "${TMPDIR:-/tmp}/cs-autosave.XXXXXX")
+        cp "$GIT_DIR/index" "$TEMP_INDEX"
+
+        # Stage all current files in the temporary index
+        GIT_INDEX_FILE="$TEMP_INDEX" git add -A 2>/dev/null || { rm -f "$TEMP_INDEX"; exit 0; }
+
+        # Write tree object from temporary index
+        tree=$(GIT_INDEX_FILE="$TEMP_INDEX" git write-tree 2>/dev/null) || { rm -f "$TEMP_INDEX"; exit 0; }
+        rm -f "$TEMP_INDEX"
+
+        msg="autosave: $TIMESTAMP"
+        [ -n "$base" ] && msg="$msg
 
 cs-base: $base"
 
-    # Chain onto this conversation's previous autosave if it exists
-    parent=$(git rev-parse -q --verify "$SESSION_REF" 2>/dev/null || true)
-    if [ -n "$parent" ]; then
-        commit=$(printf '%s\n' "$msg" | git commit-tree "$tree" -p "$parent" 2>/dev/null) || return 0
-    else
-        commit=$(printf '%s\n' "$msg" | git commit-tree "$tree" 2>/dev/null) || return 0
-    fi
+        # Chain onto this conversation's previous autosave if it exists
+        parent=$(git rev-parse -q --verify "$SESSION_REF" 2>/dev/null || true)
+        if [ -n "$parent" ]; then
+            commit=$(printf '%s\n' "$msg" | git commit-tree "$tree" -p "$parent" 2>/dev/null) || exit 0
+        else
+            commit=$(printf '%s\n' "$msg" | git commit-tree "$tree" 2>/dev/null) || exit 0
+        fi
 
-    git update-ref "$SESSION_REF" "$commit" 2>/dev/null || return 0
+        git update-ref "$SESSION_REF" "$commit" 2>/dev/null || exit 0
 
-    if [ -n "$LATEST_ENTRY" ]; then
-        echo "[$TIMESTAMP] Autosave: $LATEST_ENTRY" >> "$META_DIR/local/session.log"
-    fi
+        if [ -n "$LATEST_ENTRY" ]; then
+            echo "[$TIMESTAMP] Autosave: $LATEST_ENTRY" >> "$META_DIR/local/session.log"
+        fi
+    )
 }
 
 if [ "${CS_TEST_SYNC:-}" = "1" ]; then
