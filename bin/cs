@@ -1828,13 +1828,27 @@ integrate_feature_worktree() {  # base_name task sha [--from-remote] -- gate...
     fi
 
     # The mutex the autosave hook honours (hooks/autosave-commits.sh spells
-    # the same path). An existing directory is a refusal, never stolen: a
-    # stale one is the user's to inspect and remove.
-    local lock="$common/cs/integrate.lock"
-    mkdir -p "$common/cs"
-    if ! mkdir "$lock" 2>/dev/null; then
-        error "Another integrate or an in-flight autosave holds $lock; wait a few seconds and re-run. Remove that directory only if it persists with no cs running"
-    fi
+    # the same path). Per-CHECKOUT, not per-clone: the base is always a main
+    # checkout, so its --git-dir is the common dir, while a feature
+    # worktree's autosave takes its own private gitdir's lock and never
+    # contends with this integrate — the feature conversation stays open and
+    # keeps snapshotting throughout a gate run. An existing directory is a
+    # refusal, never stolen: a stale one is the user's to inspect and remove
+    # (cs -doctor names it).
+    local lock="$git_dir/cs/integrate.lock"
+    mkdir -p "$git_dir/cs"
+    # The base's own autosave takes this same lock for the length of one tree
+    # write, so a refusal on the first try is far more often a snapshot in
+    # flight than another integrate. Five tries a second apart outlast that
+    # and still refuse promptly on a genuinely held lock.
+    local tries=0
+    while ! mkdir "$lock" 2>/dev/null; do
+        tries=$((tries + 1))
+        if [ "$tries" -ge 5 ]; then
+            error "Another integrate or an in-flight autosave holds $lock; wait a few seconds and re-run. Remove that directory only if it persists with no cs running"
+        fi
+        sleep 1
+    done
     _INTEGRATE_LOCK="$lock"
     _INTEGRATE_BASE_DIR="$base_dir"
     _INTEGRATE_TMP=""

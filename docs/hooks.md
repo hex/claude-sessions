@@ -105,7 +105,7 @@ Runs after any file modification (Write or Edit), providing crash recovery for a
 - Does not create commits on `main` or touch the working tree index
 - Chains each snapshot onto that conversation's previous one (a linked list per conversation)
 - Records the HEAD the snapshot sits on as a `cs-base` commit trailer, read before the tree is written so a HEAD that moves mid-snapshot is never mislabelled; crash recovery uses it to tell whether HEAD has since moved and refuse an unsafe whole-tree restore
-- Skips the snapshot (never waits) while `<git-common-dir>/cs/integrate.lock` exists — the mutex `cs <base> -integrate-feature` holds while it fast-forwards the base — and holds that same directory itself for the duration of the tree write
+- Skips the snapshot (never waits) while `<git-dir>/cs/integrate.lock` exists — the per-checkout mutex `cs <base> -integrate-feature` holds while it fast-forwards the base, so only the checkout being landed on pauses — and holds that same directory itself for the duration of the tree write
 - For narrative file edits, also logs the latest heading/bullet to `session.log`
 - Runs in background to avoid blocking the session
 

@@ -102,17 +102,19 @@ autosave_to_shadow_ref() {
     # directory while it merges and fast-forwards the base. Skip, never wait:
     # a snapshot taken mid-merge is garbage and the next Edit takes another.
     # Taken here, inside the backgrounded function, so there is no window
-    # between the check and the fork. Common dir, not --git-dir: a linked
-    # worktree's --git-dir is private to that worktree and the integrate runs
-    # from the base. lib/30-worktree.sh spells the same path; a test pins both.
-    GIT_COMMON=$(git rev-parse --git-common-dir 2>/dev/null) || return 0
-    mkdir -p "$GIT_COMMON/cs" 2>/dev/null || return 0
-    mkdir "$GIT_COMMON/cs/integrate.lock" 2>/dev/null || return 0
+    # between the check and the fork. --git-dir, not the common dir: the lock
+    # is per-CHECKOUT, so only the checkout an integrate is landing on stops
+    # snapshotting — a feature worktree keeps autosaving through a gate run
+    # on its base. GIT_DIR is git's own answer from this session directory,
+    # resolved above. lib/30-worktree.sh spells the same path; a test pins both.
+    LOCK_DIR="$GIT_DIR/cs/integrate.lock"
+    mkdir -p "$GIT_DIR/cs" 2>/dev/null || return 0
+    mkdir "$LOCK_DIR" 2>/dev/null || return 0
     (
         # EXIT does not fire on TERM/INT (measured: exit 143, no cleanup), so
         # both get a handler that releases and then exits.
-        trap 'rmdir "$GIT_COMMON/cs/integrate.lock" 2>/dev/null' EXIT
-        trap 'rmdir "$GIT_COMMON/cs/integrate.lock" 2>/dev/null; exit 143' TERM INT
+        trap 'rmdir "$LOCK_DIR" 2>/dev/null' EXIT
+        trap 'rmdir "$LOCK_DIR" 2>/dev/null; exit 143' TERM INT
 
         TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 
