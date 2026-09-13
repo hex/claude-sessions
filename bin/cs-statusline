@@ -474,9 +474,18 @@ _sgr() {
                         rgb="$((_R * 35 / 100));$((_G * 35 / 100));$((_B * 35 / 100))"
                     elif [ "$SL_THEME" = "dark" ]; then rgb="230;230;230"
                     else rgb="255;255;255"; fi ;;
-                # Secondary text: separators, effort, gauge labels, resting numbers.
+                # Secondary text: separators, effort, gauge labels, resting
+                # numbers. A shade of the surface like `ink`, so it tracks
+                # measured, fallback and low-colour fills alike.
                 ink2)
-                    [ "$SL_THEME" = "dark" ] && rgb="168;170;166" || rgb="119;117;110" ;;
+                    _sgr 48 surface
+                    _parse_rgb_triplet "$_RGB"
+                    _luminance
+                    if [ "$_LUM" -ge 1530000 ]; then
+                        rgb="$((_R * 55 / 100));$((_G * 55 / 100));$((_B * 55 / 100))"
+                    else
+                        rgb="$((_R + (255 - _R) * 55 / 100));$((_G + (255 - _G) * 55 / 100));$((_B + (255 - _B) * 55 / 100))"
+                    fi ;;
                 # The inverted capsule at crit. Its own token, never the session
                 # palette's red: that palette is the tab colour and may change.
                 crit)
@@ -528,7 +537,7 @@ _sgr() {
                 rowmeta) [ "$SL_THEME" = "dark" ] && idx=248 || idx=244 ;;
                 amber)   [ "$SL_THEME" = "dark" ] && idx=215 || idx=130 ;;
                 ink)     [ "$SL_THEME" = "dark" ] && idx=231 || idx=235 ;;
-                ink2)    [ "$SL_THEME" = "dark" ] && idx=248 || idx=244 ;;
+                ink2)    [ "$SL_THEME" = "dark" ] && idx=252 || idx=238 ;;
                 crit)    [ "$SL_THEME" = "dark" ] && idx=203 || idx=160 ;;
                 critink) [ "$SL_THEME" = "dark" ] && idx=232 || idx=231 ;;
                 brand)  idx=173 ;;
@@ -554,8 +563,8 @@ _sgr() {
                 rowname) [ "$SL_THEME" = "dark" ] && base=97 || base=30 ;;
                 rowmeta) base=90 ;;
                 amber)  base=33 ;;
-                ink)     [ "$SL_THEME" = "dark" ] && base=97 || base=30 ;;
-                ink2)    base=90 ;;
+                ink)     base=97 ;;
+                ink2)    [ "$SL_THEME" = "dark" ] && base=97 || base=37 ;;
                 crit)    base=31 ;;
                 critink) [ "$SL_THEME" = "dark" ] && base=30 || base=97 ;;
                 white)  base=97 ;;

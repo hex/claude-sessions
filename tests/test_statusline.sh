@@ -754,7 +754,7 @@ test_ctx_normal_neutral_not_red() {
     assert_output_not_contains "$out" "48;2;215;0;21" "ctx 8% must not use the crit fill" || return 1
     local pill
     pill=$(ctx_num_run "$out" 8)
-    assert_output_contains "$pill" "38;2;119;117;110;22m" "ctx 8% number should sit at the secondary ink" || return 1
+    assert_output_contains "$pill" "38;2;197;194;189;22m" "ctx 8% number should sit at the secondary ink" || return 1
 }
 
 test_ctx_amber_band_is_amber() {
@@ -774,7 +774,7 @@ test_ctx_below_warn_is_neutral() {
     out=$(run_sl "$json")
     local pill
     pill=$(ctx_pill "$out" 39)
-    assert_output_contains "$pill" "38;2;119;117;110;22m" "ctx 39% should sit at the secondary ink" || return 1
+    assert_output_contains "$pill" "38;2;197;194;189;22m" "ctx 39% should sit at the secondary ink" || return 1
     assert_output_not_contains "$pill" "180;83;9" "ctx 39% must not use amber" || return 1
     assert_output_not_contains "$pill" "215;0;21" "ctx 39% must not use the crit fill" || return 1
 }
@@ -895,7 +895,7 @@ test_accent_segments_bold() {
         "the model should render bold in the surface ink" || return 1
     # SGR bold is stateful: a segment that does not explicitly emit normal
     # intensity (22) inherits bold from the accent before it.
-    assert_output_contains_f "$out" "48;2;227;221;204;38;2;119;117;110;22m◔ ctx" \
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;124;121;112;22m◔ ctx" \
         "the ctx label must explicitly reset to normal intensity" || return 1
     assert_output_not_contains "$out" "48;2;8;145;178" "no session-colour fill" || return 1
 }
@@ -985,11 +985,11 @@ test_color_level_basic() {
     out=$(run_sl "$json")
     assert_output_not_contains "$out" "48;5;" "basic level must not emit indexed codes"
     assert_output_not_contains "$out" "48;2;" "basic level must not emit truecolor codes"
-    # The surface fill is basic bg code 100; identity's primary ink is fg 30
-    # (light theme) with bold (1), ctx's secondary ink is fg 90 with normal
+    # The surface fill is basic bg code 100; identity's primary ink is fg 97
+    # with bold (1), ctx's secondary ink is fg 37 (light theme) with normal
     # intensity (22): fill 100 is the surface base 90 shifted by 10.
-    assert_output_contains "$out" "100;30;1m" "basic level should emit 8/16-color SGR codes with identity bold"
-    assert_output_contains "$out" "100;90;22m" "basic level plain segments should reset to normal intensity"
+    assert_output_contains "$out" "100;97;1m" "basic level should emit 8/16-color SGR codes with identity bold"
+    assert_output_contains "$out" "100;37;22m" "basic level plain segments should reset to normal intensity"
 }
 
 # ============================================================================
@@ -1194,15 +1194,14 @@ test_gauge_uses_bg_derived_surface() {
     export CLAUDE_SESSION_NAME="s"
     make_cs_session "s" 1024 red
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":10}}'
-    local out surface sr sg sb tr tg tb
-    surface=$( ( _load_sl_functions; _bg_shade "250;248;242"; echo "$_R;$_G;$_B" ) )
-    IFS=';' read -r sr sg sb <<< "$surface"
-    tr=$((sr * 35 / 100)); tg=$((sg * 35 / 100)); tb=$((sb * 35 / 100))
+    local out
+    # 250;248;242 shaded 10% darker is 225;223;217; its 35% shade (ink) is
+    # 78;78;75 and its 55% shade (ink2) is 123;122;119.
     out=$(run_sl "$json")
-    assert_output_contains_f "$out" "48;2;${surface};38;2;${tr};${tg};${tb};1m" \
+    assert_output_contains_f "$out" "48;2;225;223;217;38;2;78;78;75;1m" \
         "identity should render on the bg-derived surface with softened tonal text" || return 1
     local pill; pill=$(ctx_num_run "$out" 10)
-    assert_output_contains_f "$pill" "48;2;${surface};38;2;119;117;110;22m" \
+    assert_output_contains_f "$pill" "48;2;225;223;217;38;2;123;122;119;22m" \
         "a healthy gauge number should sit on the bg-derived surface at the secondary ink" || return 1
     assert_output_not_contains "$out" "48;2;128;120;110" \
         "a gauge with a known background must not use the fixed grey" || return 1
@@ -1217,7 +1216,7 @@ test_gauge_falls_back_to_grey_without_bg() {
     assert_output_contains_f "$out" "48;2;128;120;110;38;2;255;255;255;1m" \
         "identity falls back to the warm neutral grey with light text" || return 1
     local pill; pill=$(ctx_num_run "$out" 10)
-    assert_output_contains_f "$pill" "48;2;128;120;110;38;2;119;117;110;22m" \
+    assert_output_contains_f "$pill" "48;2;128;120;110;38;2;197;194;189;22m" \
         "with no known background a gauge number falls back to the warm neutral grey at the secondary ink" || return 1
 }
 
@@ -1387,6 +1386,7 @@ _make_ps_table() {
 # server prints a pane belonging to someone else's terminal.
 test_pane_segment_hidden_when_tmux_is_foreign() {
     export NO_COLOR=1
+    export CS_STATUSLINE_SEGMENTS="session,pane,ctx"
     _make_ps_table foreign 12345
     export TMUX="/tmp/tmux-1000/default,12345,0" TMUX_PANE="%7"
     export PATH="$TEST_TMPDIR/fakebin:$PATH"
@@ -1749,6 +1749,7 @@ test_mail_segment_ignores_non_json_entries() {
 
 test_pane_segment_absent_outside_tmux() {
     export NO_COLOR=1
+    export CS_STATUSLINE_SEGMENTS="session,pane,ctx"
     local out
     out=$(run_sl "$FIXTURE_DOCS")
     assert_output_not_contains "$out" "◫" "pane segment hidden outside tmux" || return 1
@@ -1757,6 +1758,7 @@ test_pane_segment_absent_outside_tmux() {
 test_pane_segment_needs_both_tmux_vars() {
     # A stale TMUX_PANE without TMUX (e.g. env leaked past a detach) must not render.
     export NO_COLOR=1
+    export CS_STATUSLINE_SEGMENTS="session,pane,ctx"
     export TMUX_PANE="%7"
     local out
     out=$(run_sl "$FIXTURE_DOCS")
@@ -3045,8 +3047,8 @@ run_test test_refresh_treats_an_unparseable_200_as_a_failure
 test_sgr_ink_tokens_truecolor_light() {
     export CS_TERM_THEME=light
     _load_sl_functions
-    LEVEL=truecolor; SL_THEME=light; _SURFACE_RGB=""
-    _sgr 38 ink2;    assert_eq "38;2;119;117;110" "$_SGR" "ink2 light" || return 1
+    LEVEL=truecolor; SL_THEME=light; _SURFACE_RGB="227;221;204"
+    _sgr 38 ink2;    assert_eq "38;2;124;121;112" "$_SGR" "ink2 light" || return 1
     _sgr 38 amber;   assert_eq "38;2;180;83;9"    "$_SGR" "amber is an ink on light" || return 1
     _sgr 48 crit;    assert_eq "48;2;215;0;21"    "$_SGR" "crit fill light" || return 1
     _sgr 38 critink; assert_eq "38;2;255;255;255" "$_SGR" "crit ink light" || return 1
@@ -3054,8 +3056,8 @@ test_sgr_ink_tokens_truecolor_light() {
 
 test_sgr_ink_tokens_truecolor_dark() {
     _load_sl_functions
-    LEVEL=truecolor; SL_THEME=dark; _SURFACE_RGB=""
-    _sgr 38 ink2;    assert_eq "38;2;168;170;166" "$_SGR" "ink2 dark" || return 1
+    LEVEL=truecolor; SL_THEME=dark; _SURFACE_RGB="46;48;50"
+    _sgr 38 ink2;    assert_eq "38;2;160;161;162" "$_SGR" "ink2 dark" || return 1
     _sgr 38 amber;   assert_eq "38;2;245;165;36"  "$_SGR" "amber ink dark" || return 1
     _sgr 48 crit;    assert_eq "48;2;255;69;58"   "$_SGR" "crit fill dark" || return 1
     _sgr 38 critink; assert_eq "38;2;37;0;0"      "$_SGR" "crit ink dark" || return 1
@@ -3074,21 +3076,24 @@ test_sgr_ink_follows_surface_luminance() {
 test_sgr_ink_tokens_256_and_basic() {
     _load_sl_functions
     LEVEL=256; SL_THEME=light
-    _sgr 38 ink2;    assert_eq "38;5;244" "$_SGR" "ink2 256 light" || return 1
+    _sgr 38 ink2;    assert_eq "38;5;238" "$_SGR" "ink2 256 light" || return 1
     _sgr 38 amber;   assert_eq "38;5;130" "$_SGR" "amber 256 light" || return 1
     _sgr 48 crit;    assert_eq "48;5;160" "$_SGR" "crit 256 light" || return 1
     _sgr 38 critink; assert_eq "38;5;231" "$_SGR" "critink 256 light" || return 1
     SL_THEME=dark
-    _sgr 38 ink2;    assert_eq "38;5;248" "$_SGR" "ink2 256 dark" || return 1
+    _sgr 38 ink2;    assert_eq "38;5;252" "$_SGR" "ink2 256 dark" || return 1
     _sgr 38 amber;   assert_eq "38;5;215" "$_SGR" "amber 256 dark" || return 1
     _sgr 48 crit;    assert_eq "48;5;203" "$_SGR" "crit 256 dark" || return 1
     _sgr 38 critink; assert_eq "38;5;232" "$_SGR" "critink 256 dark" || return 1
     LEVEL=basic; SL_THEME=light
-    _sgr 38 ink2;    assert_eq "90" "$_SGR" "ink2 basic" || return 1
+    _sgr 38 ink;     assert_eq "97" "$_SGR" "ink basic light" || return 1
+    _sgr 38 ink2;    assert_eq "37" "$_SGR" "ink2 basic light" || return 1
     _sgr 38 amber;   assert_eq "33" "$_SGR" "amber basic" || return 1
     _sgr 48 crit;    assert_eq "41" "$_SGR" "crit basic bg" || return 1
     _sgr 38 critink; assert_eq "97" "$_SGR" "critink basic light" || return 1
     SL_THEME=dark
+    _sgr 38 ink;     assert_eq "97" "$_SGR" "ink basic dark" || return 1
+    _sgr 38 ink2;    assert_eq "97" "$_SGR" "ink2 basic dark" || return 1
     _sgr 38 critink; assert_eq "30" "$_SGR" "critink basic dark" || return 1
 }
 
@@ -3118,7 +3123,7 @@ test_interleaved_segments_still_one_identity_capsule() {
     local out; out=$(run_sl "$json")
     local caps; caps=$(printf '%s' "$out" | grep -o "$CAPL" | wc -l | tr -d ' ')
     assert_eq "2" "$caps" "session and model share one capsule even with ctx named between them" || return 1
-    assert_output_contains_f "$out" "1ms${ESC_}[48;2;227;221;204;38;2;119;117;110;22m  ·  ${ESC_}[48;2;227;221;204;38;2;79;77;71;1m✦ Opus" \
+    assert_output_contains_f "$out" "1ms${ESC_}[48;2;227;221;204;38;2;124;121;112;22m  ·  ${ESC_}[48;2;227;221;204;38;2;79;77;71;1m✦ Opus" \
         "model follows session inside identity" || return 1
     out=$(NO_COLOR=1 run_sl "$json")
     assert_eq "s · ✦ Opus > ◔ ctx 8%" "$out" "plain: groups render in first-seen order, items in their own order" || return 1
@@ -3155,7 +3160,7 @@ test_identity_is_one_capsule_on_the_surface() {
     assert_output_not_contains_f "$out" "48;2;138;134;236" "no periwinkle fill" || return 1
     assert_output_not_contains_f "$out" "48;2;8;145;178" "no session-colour fill" || return 1
     # Items join with a secondary-ink dot inside the capsule.
-    assert_output_contains_f "$out" "48;2;227;221;204;38;2;119;117;110;22m  ·  " "dot joiner in ink2" || return 1
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;124;121;112;22m  ·  " "dot joiner in ink2" || return 1
     # Exactly one identity capsule: one left cap before ctx's, two in total.
     local caps; caps=$(printf '%s' "$out" | grep -o "$CAPL" | wc -l | tr -d ' ')
     assert_eq "2" "$caps" "identity and ctx are the only two capsules" || return 1
@@ -3210,7 +3215,7 @@ test_ctx_amber_is_ink_on_the_surface() {
     assert_output_contains_f "$out" "48;2;227;221;204;38;2;180;83;9;22m42%" "the number is amber ink" || return 1
     assert_output_not_contains_f "$out" "48;2;255;183;77" "no amber fill anywhere" || return 1
     assert_output_not_contains_f "$out" "48;2;180;83;9" "amber never becomes a fill" || return 1
-    assert_output_contains_f "$out" "38;2;119;117;110;22m◔ ctx" "the label stays secondary ink" || return 1
+    assert_output_contains_f "$out" "38;2;124;121;112;22m◔ ctx" "the label stays secondary ink" || return 1
 }
 
 test_ctx_crit_inverts_only_its_capsule() {
@@ -3257,7 +3262,7 @@ test_effort_is_secondary_ink_after_the_model() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"model":{"display_name":"Opus"},"effort":{"level":"high"}}'
     local out; out=$(run_sl "$json")
     assert_output_contains_f "$out" "38;2;79;77;71;1m✦ Opus" "model name bold primary" || return 1
-    assert_output_contains_f "$out" "✦ Opus${ESC_}[48;2;227;221;204m ${ESC_}[48;2;227;221;204;38;2;119;117;110;22mhigh" \
+    assert_output_contains_f "$out" "✦ Opus${ESC_}[48;2;227;221;204m ${ESC_}[48;2;227;221;204;38;2;124;121;112;22mhigh" \
         "effort one space after, secondary, regular" || return 1
 }
 
@@ -3404,5 +3409,28 @@ test_caps_switch_is_documented() {
 }
 
 run_test test_caps_switch_is_documented
+
+# ink2 and ink must both read against the surface they sit on, at every color
+# level and theme: a token that lands on the same SGR parameters as the fill
+# beneath it is invisible on that terminal. Compared at a shared kind (38) so
+# a truecolor/256 "38;..." prefix and a basic bare code line up the same way.
+test_ink_tokens_contrast_every_surface() {
+    _load_sl_functions
+    local level theme surface ink ink2
+    for level in truecolor 256 basic; do
+        for theme in light dark; do
+            LEVEL="$level"; SL_THEME="$theme"; _SURFACE_RGB=""
+            _sgr 38 surface; surface="${_SGR#38;}"
+            _sgr 38 ink2;    ink2="${_SGR#38;}"
+            _sgr 38 ink;     ink="${_SGR#38;}"
+            [ "$ink2" != "$surface" ] \
+                || { echo "  FAIL: $level/$theme ink2 ($ink2) does not contrast the surface"; return 1; }
+            [ "$ink" != "$surface" ] \
+                || { echo "  FAIL: $level/$theme ink ($ink) does not contrast the surface"; return 1; }
+        done
+    done
+}
+
+run_test test_ink_tokens_contrast_every_surface
 
 report_results

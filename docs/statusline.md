@@ -145,8 +145,8 @@ Color depth is detected per render, in priority order: `FORCE_COLOR=0`, `NO_COLO
 | Token | Role | Truecolor | 256 | Basic |
 |---|---|---|---|---|
 | `surface` | every capsule fill | `CS_TERM_BG_RGB` shaded 10% away from itself (`_bg_shade`), taupe fallback when unmeasured | 244/245 | 90 |
-| `ink` | primary text | a 35% shade of the surface on a light surface, `white` on a dark one | 235/231 | 30/97 |
-| `ink2` | secondary text, dots, effort, gauge labels | light: `119;117;110`; dark: `168;170;166` | 244/248 | 90 |
+| `ink` | primary text | a 35% shade of the surface on a light surface, `white` on a dark one | 235/231 | 97 |
+| `ink2` | secondary text, dots, effort, gauge labels | a 55% shade of the surface (lifted toward white on a dark surface), like `ink` | 238/252 | 37/97 |
 | `brand` | the mark | `217;119;87` | 173 | 33 |
 | `brandshade` | the pulse's dim phase | `184;101;74` | 167 | 33 |
 | `amber` | hot numbers, notes and mail counts | light: `180;83;9`; dark: `245;165;36` | 130/215 | 33 |
