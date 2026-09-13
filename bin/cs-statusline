@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ABOUTME: Claude Code statusLine command — renders one line of squared, abutting pills
+# ABOUTME: Claude Code statusLine command — renders one line of rounded capsules on the terminal's own background
 # ABOUTME: Reads the statusline JSON on stdin and prints session/ctx/model/git/limits/cost
 
 set -uo pipefail
@@ -197,7 +197,7 @@ _sl_detect_theme() {
         # Whatever cs measured at launch, and dark when it measured nothing.
         #
         # The OS appearance is not consulted. It describes the system, and the
-        # pills are drawn on the terminal — unrelated for a terminal with a
+        # capsules are drawn on the terminal — unrelated for a terminal with a
         # fixed scheme or one embedded in an app, which is where it was reliably
         # wrong. It was only ever a guess that happened to be right when the
         # terminal followed the system, and the rungs above now cover the
@@ -214,7 +214,7 @@ _sl_detect_theme() {
 # Blank CS_TERM_BG_RGB when the launch-captured background is stale: once the
 # live theme (SL_THEME) has switched away from the theme cs detected at launch
 # (CS_TERM_THEME, present with the auto marker), the RGB no longer matches the
-# terminal, so drop it and let the gauge surface and gradient fall back to
+# terminal, so drop it and let the gauge surface fall back to
 # theme-based values instead of tinting toward the old background (which could
 # leave light text on a near-light surface). A manually-set RGB carries no auto
 # marker and is never dropped.
@@ -234,12 +234,14 @@ SL_SESSION=""; SL_CTX=""; SL_MODEL=""; SL_EFFORT=""
 SL_5H=""; SL_5H_RESET=""; SL_WK=""; SL_WK_RESET=""; SL_COST=""; SL_DIR=""
 
 # Collected segments (parallel arrays) and chosen color level.
-_SEG_TEXT=(); _SEG_BG=(); _SEG_BOLD=(); LEVEL="basic"
+_SEG_TEXT=(); _SEG_GROUP=(); _SEG_INK=(); _SEG_BOLD=(); _SEG_JOIN=()
+_GROUPS=(); _GROUPS_SEEN=""
+LEVEL="basic"
 
 # Scratch globals used in place of command substitution (keeps the per-render
 # hot path fork-free; this script runs on every assistant message).
 _SGR=""; _COLOR=""; _RGB=""
-_WIDTH=""; _LC=""; _R=""; _G=""; _B=""; _GRADIENT=""; _LUM=""
+_WIDTH=""; _R=""; _G=""; _B=""; _LUM=""
 # The gauge surface is a shade of the terminal background — the same for every
 # gauge — so it is resolved once per render (process) and cached here.
 _SURFACE_RGB=""
@@ -436,8 +438,8 @@ _sgr() {
             local rgb
             case "$name" in
                 # Session-color palette: Claude Code's own /color values (the
-                # shared dark/light theme `*_FOR_SUBAGENTS_ONLY` tokens), so the
-                # session pill matches CC's session accent and the terminal tab.
+                # shared dark/light theme `*_FOR_SUBAGENTS_ONLY` tokens): the tab
+                # color and Claude Code's own session accent share this palette.
                 # KEEP IN SYNC with _session_color_rgb in bin/cs (tab color).
                 red)    rgb="220;38;38" ;;
                 blue)   rgb="106;155;204" ;;
@@ -448,36 +450,61 @@ _sgr() {
                 pink)   rgb="196;102;134" ;;
                 cyan)   rgb="8;145;178" ;;
                 periwinkle) rgb="138;134;236" ;;
-                slate)  rgb="79;91;140" ;;
-                chiptext) rgb="240;242;255" ;;
                 rowname)
                     # A subagent row's agent name sits on the bare terminal, not
-                    # a pill, so it takes ink that contrasts the canvas: near-white
+                    # a capsule, so it takes ink that contrasts the canvas: near-white
                     # on a dark terminal, dark on a light one.
                     [ "$SL_THEME" = "dark" ] && rgb="240;242;255" || rgb="48;42;36" ;;
                 rowmeta)
                     # The row's description, ctx and elapsed: quieter than the
                     # name, still readable against the terminal on either theme.
                     [ "$SL_THEME" = "dark" ] && rgb="170;161;148" || rgb="128;116;106" ;;
-                amber)  rgb="255;183;77" ;;
+                # Inks. `amber` is a foreground: the hot number's colour on
+                # the neutral capsule, dark enough to hold contrast on cream and
+                # bright enough on a dark surface. Nothing paints amber as a fill.
+                amber)
+                    [ "$SL_THEME" = "dark" ] && rgb="245;165;36" || rgb="180;83;9" ;;
+                # Primary text on the capsule surface: a warm 35% shade of the
+                # surface on a light one, the soft white on a dark one — the same
+                # contrast pivot the old surface text used, resolved from the
+                # surface's own luminance rather than the theme flag.
+                ink)
+                    _sgr 48 surface
+                    if _parse_rgb_triplet "$_RGB" && { _luminance; [ "$_LUM" -ge 1530000 ]; }; then
+                        rgb="$((_R * 35 / 100));$((_G * 35 / 100));$((_B * 35 / 100))"
+                    elif [ "$SL_THEME" = "dark" ]; then rgb="230;230;230"
+                    else rgb="255;255;255"; fi ;;
+                # Secondary text: separators, effort, gauge labels, resting
+                # numbers. A shade of the surface like `ink`, so it tracks both
+                # the measured background and the taupe fallback; the 256 and
+                # basic arms instead pick fixed values that contrast their
+                # fixed fills.
+                ink2)
+                    _sgr 48 surface
+                    _parse_rgb_triplet "$_RGB"
+                    _luminance
+                    if [ "$_LUM" -ge 1530000 ]; then
+                        rgb="$((_R * 55 / 100));$((_G * 55 / 100));$((_B * 55 / 100))"
+                    else
+                        rgb="$((_R + (255 - _R) * 55 / 100));$((_G + (255 - _G) * 55 / 100));$((_B + (255 - _B) * 55 / 100))"
+                    fi ;;
+                # The inverted capsule at crit. Its own token, never the session
+                # palette's red: that palette is the tab colour and may change.
+                crit)
+                    [ "$SL_THEME" = "dark" ] && rgb="255;69;58" || rgb="215;0;21" ;;
+                critink)
+                    [ "$SL_THEME" = "dark" ] && rgb="37;0;0" || rgb="255;255;255" ;;
                 brand)  rgb="217;119;87" ;;   # Claude coral (#D97757)
                 brandshade)
-                    # The logo badge's own divider ink: a coral a shade darker
-                    # than the badge, distinct enough to read as a divider
-                    # sliver against both the badge and the session pill,
-                    # without being so dark it looks like a foreign color.
+                    # The mark's dim pulse phase: a coral a shade darker than
+                    # brand, distinct enough to read as a change without
+                    # looking like a foreign color.
                     rgb="184;101;74" ;;
                 white)
                     # Softer text on dark terminals to avoid glare.
                     [ "$SL_THEME" = "dark" ] && rgb="230;230;230" || rgb="255;255;255" ;;
-                black)  rgb="30;30;30" ;;
-                hairline)
-                    # The thin divider between same-background pills: a light
-                    # warm grey, lighter than the taupe block but softer than
-                    # the white label text, so it reads as a faint line.
-                    rgb="170;161;148" ;;
                 surface)
-                    # The quiet gauge pills, tinted from the terminal background
+                    # The capsule surface, tinted from the terminal background
                     # so they harmonize with it instead of sitting on top: a
                     # shade of CS_TERM_BG_RGB (darker on a light terminal,
                     # lighter on a dark one), resolved once per render and cached
@@ -492,7 +519,7 @@ _sgr() {
                 *)
                     # Warm neutral (R>G>B) so the quiet blocks read as taupe,
                     # not steel; light enough that the gauges recede beside the
-                    # vivid session/model accents while white label text holds.
+                    # identity capsule's ink while white label text holds.
                     [ "$SL_THEME" = "dark" ] && rgb="140;132;122" || rgb="128;120;110" ;;
             esac
             _SGR="${kind};2;${rgb}"; _RGB="$rgb" ;;
@@ -508,17 +535,17 @@ _sgr() {
                 pink)   idx=162 ;;
                 cyan)   idx=30 ;;
                 periwinkle) idx=105 ;;
-                slate)  idx=60 ;;
-                chiptext) idx=231 ;;
                 rowname) [ "$SL_THEME" = "dark" ] && idx=231 || idx=235 ;;
                 rowmeta) [ "$SL_THEME" = "dark" ] && idx=248 || idx=244 ;;
-                amber)  idx=215 ;;
+                amber)   [ "$SL_THEME" = "dark" ] && idx=215 || idx=130 ;;
+                ink)     [ "$SL_THEME" = "dark" ] && idx=231 || idx=235 ;;
+                ink2)    [ "$SL_THEME" = "dark" ] && idx=252 || idx=238 ;;
+                crit)    [ "$SL_THEME" = "dark" ] && idx=203 || idx=160 ;;
+                critink) [ "$SL_THEME" = "dark" ] && idx=232 || idx=231 ;;
                 brand)  idx=173 ;;
                 brandshade) idx=167 ;;
-                hairline) idx=248 ;;
                 white)
                     [ "$SL_THEME" = "dark" ] && idx=254 || idx=255 ;;
-                black)  idx=235 ;;
                 *)
                     [ "$SL_THEME" = "dark" ] && idx=245 || idx=244 ;;
             esac
@@ -535,16 +562,16 @@ _sgr() {
                 pink)   base=95 ;;
                 cyan)   base=36 ;;
                 periwinkle) base=94 ;;
-                slate)  base=34 ;;
-                chiptext) base=97 ;;
                 rowname) [ "$SL_THEME" = "dark" ] && base=97 || base=30 ;;
                 rowmeta) base=90 ;;
                 amber)  base=33 ;;
+                ink)     base=97 ;;
+                ink2)    [ "$SL_THEME" = "dark" ] && base=97 || base=37 ;;
+                crit)    base=31 ;;
+                critink) [ "$SL_THEME" = "dark" ] && base=30 || base=97 ;;
                 white)  base=97 ;;
-                black)  base=30 ;;
                 brand)  base=33 ;;
                 brandshade) base=33 ;;
-                hairline) base=90 ;;
                 *)      base=90 ;;
             esac
             if [ "$kind" = "48" ]; then _SGR=$((base + 10)); else _SGR="$base"; fi ;;
@@ -553,11 +580,27 @@ _sgr() {
 
 # --- segment helpers -------------------------------------------------------
 
-# Append a segment (text + background color name).
+# Append one item to a capsule. $1 text; $2 capsule group ("identity", "ctx",
+# "lim-5h", "cost" …) — items sharing a group render inside one capsule, in
+# first-seen order; $3 ink token (default the secondary ink); $4 "bold" or
+# empty; $5 how this item joins the one before it inside the capsule: "dot"
+# (default) a secondary-ink "  ·  ", "pad" two fill spaces, "space" one,
+# "none" nothing. The first item of a capsule never gets a joiner.
 _add() {
     _SEG_TEXT+=("$1")
-    _SEG_BG+=("$2")
-    _SEG_BOLD+=("${3:-}")
+    _SEG_GROUP+=("$2")
+    _SEG_INK+=("${3:-ink2}")
+    _SEG_BOLD+=("${4:-}")
+    _SEG_JOIN+=("${5:-dot}")
+    # First-seen group order, the order capsules render in.
+    case " ${_GROUPS_SEEN:-} " in *" $2 "*) ;; *) _GROUPS+=("$2"); _GROUPS_SEEN="${_GROUPS_SEEN:-} $2" ;; esac
+}
+
+# Mark a capsule crit: the renderer fills it with `crit` and paints every item
+# in it critink bold. A space-delimited list so bash 3.2 needs no map.
+_CRIT_GROUPS=""
+_invert() {
+    _CRIT_GROUPS="$_CRIT_GROUPS $1 "
 }
 
 # Resolve a threshold override into _NUM: the value when it is a plain integer
@@ -573,12 +616,14 @@ _num_or() {  # value, default -> _NUM (the hook's namesake prints instead)
     esac
 }
 
-# Set _COLOR by mapping a value against warn/crit thresholds; below warn it
-# takes the healthy color ($4, default the bg-derived surface).
+# Set _COLOR by mapping a value against warn/crit thresholds: `crit` at or past
+# crit, `amber` at or past warn, else the healthy name ($4, default the
+# secondary ink). Callers paint the NUMBER with it; `crit` also tells the
+# renderer to invert the whole capsule.
 _thresh_color() {
-    local v="$1" warn="$2" crit="$3" healthy="${4:-surface}"
+    local v="$1" warn="$2" crit="$3" healthy="${4:-ink2}"
     if [ "$v" -ge "$crit" ]; then
-        _COLOR=red
+        _COLOR=crit
     elif [ "$v" -ge "$warn" ]; then
         _COLOR=amber
     else
@@ -927,14 +972,14 @@ _refresh_usage() {
     # Only two populated, differing values are evidence of a swap. An empty
     # reading means the config was briefly unreadable, which _fable_read already
     # treats as unknown; disagreeing with it here would throw away a good
-    # reading for the right account and blank the chip for a whole interval.
+    # reading for the right account and blank the capsule for a whole interval.
     _read_org_from "$cfg"
     if [ -n "$_ORG" ] && [ -n "$org" ] && [ "$_ORG" != "$org" ]; then
         # Discard the result: it belongs to the account we started under, which
         # is no longer signed in. Record the schedule against THAT account —
         # its budget paid for the request — and leave the account swapped TO
         # untouched. Writing to $_ORG here would blank a reading it already
-        # holds and restamp it fresh, emptying the chip for a full interval on
+        # holds and restamp it fresh, emptying the capsule for a full interval on
         # the account that just became active, which is the swap case the whole
         # feature is for. If it has no reading, the next render is due anyway.
         _usage_write "$org" - "" "$USAGE_MIN_INTERVAL"
@@ -988,7 +1033,7 @@ USAGE_MAX_AGE=1800   # past this a reading is too old to sit beside a live count
 # (epoch), and raise _FABLE_DUE when a refresh should be kicked. Identity is
 # structural rather than checked: the record is addressed by the account signed
 # in now, so a reading can never be found under the wrong one and no comparison
-# is needed. Anything unreadable or too old yields no reading at all — the chip
+# is needed. Anything unreadable or too old yields no reading at all — the capsule
 # may be absent, but it must never carry a number that is not this account's.
 _fable_read() {
     _FABLE_PCT=""
@@ -1053,12 +1098,6 @@ _read_state_key() {  # state-file key
     done < "$state"
 }
 
-# Read claude_session_color into _SESSION_COLOR (empty if none).
-_read_session_color() {
-    _read_state_key "$1" claude_session_color
-    _SESSION_COLOR="$_STATE_VALUE"
-}
-
 # Format the git segment text for a workspace dir into _GIT_TEXT, empty when
 # it is not a git repo / git is unavailable / git times out.
 _git_text() {
@@ -1107,20 +1146,25 @@ EOF
 
 # --- segments --------------------------------------------------------------
 
-# A brand badge: the Claude mark on the Claude-coral background, opening the
-# bar. Icon only, no label; the render's own padding squares it off. The badge
-# is the background, so it is omitted when color is off (plain has none).
-# While the session's attention marker exists (raised by the Stop hook when
-# Claude finishes a turn, cleared on the next prompt) the mark's color pulses.
+# The Claude mark, coral ink on the identity capsule. While the session's
+# attention marker exists (raised by the Stop hook when Claude finishes a turn,
+# cleared on the next prompt) the mark alternates brand/brandshade by epoch-
+# second parity; the statusLine registration's refreshInterval repaints the bar
+# every second while idle so the phase keeps advancing. CS_STATUSLINE_NOW pins
+# the clock for tests. Plain mode has no colour, so no mark.
 _seg_logo() {
     [ "$LEVEL" = "plain" ] && return 0
-    local attr=bold
-    [ -n "${CLAUDE_SESSION_NAME:-}" ] \
-        && [ -f "$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/local/attention" ] \
-        && attr=boldattention
-    _add "${ICON_LOGO}" "brand" "$attr"
+    local ink=brand
+    if [ -n "${CLAUDE_SESSION_NAME:-}" ] \
+        && [ -f "$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/local/attention" ]; then
+        _sl_now
+        [ $(( ${_NOW:-0} % 2 )) -eq 1 ] && ink=brandshade
+    fi
+    _add "${ICON_LOGO}" identity "$ink" bold
 }
 
+# The session name, bold primary ink. Its claude_session_color stays on the
+# terminal tab and in claude's own accent; the bar does not paint it.
 _seg_session() {
     local name="$SL_SESSION"
     [ -n "$name" ] || name="${CLAUDE_SESSION_NAME:-}"
@@ -1128,19 +1172,13 @@ _seg_session() {
         local dir="${SL_DIR:-$PWD}"
         name="${dir##*/}"
     fi
-    local bg="grey" color=""
-    if [ -n "${CLAUDE_SESSION_NAME:-}" ]; then
-        _read_session_color "$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/local/state"
-        color="$_SESSION_COLOR"
-        [ -n "$color" ] && bg="$color"
-    fi
-    _add "${name}" "$bg" bold
+    _add "${name}" identity ink bold space
 }
 
 # Count of queued tasks for the current session (one file per task in
 # .cs/local/queue/), shown right after the session name. Hidden when the
 # queue is empty or absent. Only regular files count, so a subdirectory or
-# an unmatched glob (bash 3.2 has no nullglob) never inflates the badge.
+# an unmatched glob (bash 3.2 has no nullglob) never inflates the count.
 _seg_notes() {
     [ -n "${CLAUDE_SESSION_NAME:-}" ] || return 0
     local qdir="$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/local/queue"
@@ -1151,7 +1189,7 @@ _seg_notes() {
         n=$((n + 1))
     done
     [ "$n" -gt 0 ] || return 0
-    _add "${ICON_NOTES}${n}" "amber"
+    _add "${ICON_NOTES}${n}" identity amber "" pad
 }
 
 # Unread cross-session mail for the current session, shown after the notes
@@ -1171,23 +1209,21 @@ _seg_mail() {
         unread=$((unread + 1))
     done
     [ "$unread" -gt 0 ] || return 0
-    _add "${ICON_MAIL}${unread}" "amber"
+    _add "${ICON_MAIL}${unread}" identity amber "" pad
 }
 
-# The tmux pane hosting this conversation, as a target usable verbatim in
-# tmux commands and other chats ("%7"). Both vars are inherited environment,
-# so neither is evidence on its own: a process that merely inherited them
-# would otherwise print a pane id belonging to another terminal's session.
-# SL_ENV_FOREIGN carries the ancestry check already done during theme
-# detection, so this adds no forks to the render hot path.
+# The tmux pane hosting this conversation, "◫ 7": the number without its "%"
+# so it cannot read as a percentage; prefix it back for a tmux target. Both
+# vars are inherited environment, so neither is evidence on its own (see
+# SL_ENV_FOREIGN). Off the default order; renders when named.
 _seg_pane() {
     [ -n "${TMUX:-}" ] && [ -n "${TMUX_PANE:-}" ] || return 0
     [ -z "${SL_ENV_FOREIGN:-}" ] || return 0
-    _add "${ICON_PANE}${TMUX_PANE}" "grey"
+    _add "${ICON_PANE}${TMUX_PANE#%}" identity ink2 "" pad
 }
 
-# The ramp reads neutral, amber, red — the shared threshold helper's own two
-# cut points, with nothing layered on top.
+# Two items in the ctx capsule: the label in secondary ink, the number in the
+# threshold colour. At crit the whole capsule inverts.
 _seg_ctx() {
     local v="${SL_CTX%%.*}"
     [ -n "$v" ] || return 0
@@ -1195,56 +1231,47 @@ _seg_ctx() {
     _num_or "${CS_STATUSLINE_CTX_WARN:-}" 40; warn="$_NUM"
     _num_or "${CS_STATUSLINE_CTX_CRIT:-}" 65; crit="$_NUM"
     _thresh_color "$v" "$warn" "$crit"
-    _add "${ICON_CTX}ctx ${v}%" "$_COLOR"
+    [ "$_COLOR" = "crit" ] && _invert ctx
+    _add "${ICON_CTX}ctx" ctx ink2 "" none
+    _add "${v}%" ctx "$_COLOR" "" space
 }
 
 _seg_model() {
     [ -n "$SL_MODEL" ] || return 0
-    local t="$SL_MODEL"
-    [ -n "$SL_EFFORT" ] && t="$t $SL_EFFORT"
-    _add "${ICON_MODEL}${t}" "periwinkle" bold
+    _add "${ICON_MODEL}${SL_MODEL}" identity ink bold
+    [ -n "$SL_EFFORT" ] && _add "$SL_EFFORT" identity ink2 "" space
+    return 0
 }
 
 _seg_git() {
     _git_text "$SL_DIR"
     local t="$_GIT_TEXT"
     [ -n "$t" ] || return 0
-    _add "${ICON_GIT}${t}" "slate" bold
+    _add "${ICON_GIT}${t}" identity ink bold
 }
 
-# Each limits block escalates on its own value; both rest on grey.
-_seg_limits() {
-    local h="${SL_5H%%.*}" w="${SL_WK%%.*}"
-    if [ -n "$h" ]; then
-        _thresh_color "$h" 70 90
-        local label="5h ${h}%"
-        # Show the reset countdown only once 5h usage is tight (>=50%), so the
-        # suffix appears as the window fills rather than while there's headroom.
-        if [ "$h" -ge 50 ]; then
-            _fmt_rest "$SL_5H_RESET"
-            [ -n "$_REST" ] && label="$label · $_REST"
-        fi
-        _add "${ICON_5H}${label}" "$_COLOR"
+# One rate-limit capsule: label in secondary ink, the number in the threshold
+# colour, crit inverting the capsule. $4 is the usage floor at or above which
+# the reset countdown is appended (5h at 70, the reveal; the seven-day windows
+# at 80: the coarse windows only make time-to-reset actionable near exhaustion).
+_limits_render() {
+    local name="$1" pct="$2" reset="$3" gate="$4" icon="$5"
+    _thresh_color "$pct" 70 90
+    [ "$_COLOR" = "crit" ] && _invert "lim-$name"
+    local label="${pct}%"
+    if [ "$pct" -ge "$gate" ]; then
+        _fmt_rest "$reset"
+        [ -n "$_REST" ] && label="$label · $_REST"
     fi
-    if [ -n "$w" ]; then
-        _thresh_color "$w" 70 90
-        local wlabel="wk ${w}%"
-        # The weekly countdown gates higher (>=80%): the seven-day window is
-        # coarse, so time-to-reset only matters once it is nearly spent.
-        if [ "$w" -ge 80 ]; then
-            _fmt_rest "$SL_WK_RESET"
-            [ -n "$_REST" ] && wlabel="$wlabel · $_REST"
-        fi
-        _add "${ICON_WK}${wlabel}" "$_COLOR"
-    fi
+    _add "${icon}${name}" "lim-$name" ink2 "" none
+    _add "$label" "lim-$name" "$_COLOR" "" space
 }
 
-# Fable's weekly window, which is model-scoped and so appears in none of the
-# rate_limits Claude Code puts on stdin. Rendered only on Fable: on any other
-# model the gate returns before the cache is touched, so the segment costs
-# nothing — no file read, no fork, and above all no poll against a request
-# budget shared with Claude Code itself.
-_seg_fable() {
+# Read the Fable window into the candidate list. Model-scoped, so it is only
+# ever a candidate on a Fable session; the cache read and the refresh kick run
+# whether or not the capsule is shown, so a hidden window keeps polling at its
+# floor. See _fable_read and _refresh_usage.
+_fable_candidate() {
     _FABLE_KICKED=""
     case "${SL_MODEL_ID:-}" in claude-fable*) ;; *) return 0 ;; esac
     _fable_read
@@ -1261,25 +1288,68 @@ _seg_fable() {
         ( "${BASH:-bash}" "$_SL_SELF" --refresh-usage >/dev/null 2>&1 & ) >/dev/null 2>&1
     fi
     [ -n "$_FABLE_PCT" ] || return 0
-    _thresh_color "$_FABLE_PCT" 70 90
-    local label="fable ${_FABLE_PCT}%"
-    # Gated at 80% like the weekly block: this is a seven-day window, so
-    # time-to-reset only becomes actionable as it nears exhaustion.
-    if [ "$_FABLE_PCT" -ge 80 ]; then
-        _fmt_rest "$_FABLE_RESET"
-        [ -n "$_REST" ] && label="$label · $_REST"
+    _LIM_NAME+=("fable"); _LIM_PCT+=("$_FABLE_PCT"); _LIM_RESET+=("$_FABLE_RESET")
+    _LIM_GATE+=(80); _LIM_ICON+=("$ICON_FABLE")
+}
+
+# Rate limits are hidden until hot: every window at or past 70 becomes a
+# candidate, the two highest render highest-first, the rest stay hidden. Their
+# arrival is the signal. The three windows are 5h and wk from stdin and, on a
+# Fable session, the model-scoped weekly window from the usage cache. The 5h
+# countdown gate equals the reveal (70): a lower gate would be unobservable.
+_seg_limits() {
+    _LIM_NAME=(); _LIM_PCT=(); _LIM_RESET=(); _LIM_GATE=(); _LIM_ICON=()
+    local h="${SL_5H%%.*}" w="${SL_WK%%.*}"
+    if [ -n "$h" ]; then
+        _LIM_NAME+=("5h"); _LIM_PCT+=("$h"); _LIM_RESET+=("$SL_5H_RESET"); _LIM_GATE+=(70); _LIM_ICON+=("$ICON_5H")
     fi
-    _add "${ICON_FABLE}${label}" "$_COLOR"
+    if [ -n "$w" ]; then
+        _LIM_NAME+=("wk"); _LIM_PCT+=("$w"); _LIM_RESET+=("$SL_WK_RESET"); _LIM_GATE+=(80); _LIM_ICON+=("$ICON_WK")
+    fi
+    _fable_candidate
+    _limits_emit_hot
+}
+
+# The `fable` name alone: the Fable window only. When `limits` is also named
+# (in either order) that segment owns all three windows and this one is a
+# no-op, so the two-capsule cap holds across the whole bar. Kept so a
+# CS_STATUSLINE_SEGMENTS written before `limits` covered the Fable window still
+# shows it.
+_seg_fable() {
+    [ -z "${_LIMITS_NAMED:-}" ] || return 0
+    _LIM_NAME=(); _LIM_PCT=(); _LIM_RESET=(); _LIM_GATE=(); _LIM_ICON=()
+    _fable_candidate
+    _limits_emit_hot
+}
+
+# Render the two hottest candidates at or past 70, highest first. At most
+# three candidates, so a pass that picks the max twice is the whole sort; no
+# subprocess, no bash 4 features.
+_limits_emit_hot() {
+    local n=${#_LIM_NAME[@]} shown=0 best i
+    while [ "$shown" -lt 2 ]; do
+        best=-1
+        for ((i = 0; i < n; i++)); do
+            [ -n "${_LIM_NAME[i]}" ] || continue
+            [ "${_LIM_PCT[i]}" -ge 70 ] || continue
+            if [ "$best" -lt 0 ] || [ "${_LIM_PCT[i]}" -gt "${_LIM_PCT[best]}" ]; then best=$i; fi
+        done
+        [ "$best" -ge 0 ] || return 0
+        _limits_render "${_LIM_NAME[best]}" "${_LIM_PCT[best]}" "${_LIM_RESET[best]}" \
+            "${_LIM_GATE[best]}" "${_LIM_ICON[best]}"
+        _LIM_NAME[best]=""
+        shown=$((shown + 1))
+    done
 }
 
 _seg_cost() {
     [ -n "$SL_COST" ] || return 0
     local formatted
     printf -v formatted '$%.2f' "$SL_COST" 2>/dev/null || return 0
-    _add "$formatted" "surface"
+    _add "$formatted" cost
 }
 
-# --- full-width gradient -----------------------------------------------------
+# --- color math --------------------------------------------------------------
 
 # Set _WIDTH to the display width (cells) of "$1": UTF-8 codepoints, not
 # bytes — every icon and label this script emits is single-width, so
@@ -1287,7 +1357,8 @@ _seg_cost() {
 # the duration of this function regardless of the ambient locale or this
 # bash's own multibyte awareness, so continuation bytes (the 0x80-0xBF range)
 # can be counted and subtracted out: every codepoint has exactly one leading
-# (non-continuation) byte. No subprocess.
+# (non-continuation) byte. No subprocess. Used by bin/cs-subagent-statusline
+# (_fixed_width and _truncate); no caller in this file.
 _display_width() {
     local LC_ALL=C s="$1" i n=0
     local len=${#s}
@@ -1313,119 +1384,6 @@ _parse_rgb_triplet() {
     _R="$r"; _G="$g"; _B="$b"
 }
 
-# Set _LC to the integer channel value at index $3 of $4 total steps, lerping
-# from $1 to $2 (round-to-nearest). Bash's integer division truncates toward
-# zero, which would bias every intermediate step toward $1 — the
-# doubled-numerator trick corrects that without floats or a fork. i=0 hits $1
-# exactly; i=steps-1 hits $2 exactly.
-_lerp_channel() {
-    local c0="$1" c1="$2" i="$3" steps="$4"
-    local last=$((steps - 1))
-    if [ "$last" -le 0 ]; then _LC="$c1"; return; fi
-    local delta=$(( (c1 - c0) * i )) num den
-    num=$((delta * 2)); den=$((last * 2))
-    if [ "$delta" -ge 0 ]; then
-        _LC=$(( c0 + (num + last) / den ))
-    else
-        _LC=$(( c0 + (num - last) / den ))
-    fi
-}
-
-# Set _GRADIENT to "$3" background-only SGR cells fading from "$1" (an r;g;b
-# triplet) to "$2". Empty (no cells) if either triplet fails to parse, so a
-# caller can unconditionally append _GRADIENT with no separate validation
-# gate. Fork-free: no command substitution beyond the here-string splits
-# already used elsewhere in this script for delimited fields.
-
-# The tail for a terminal cs never measured: a coverage wash, not a colour fade.
-#
-# A colour fade has to name the colour it ends on, and without a measurement
-# that name is a guess — it lands a few shades off and shows as a band. A block
-# element instead paints only PART of its cell (U+2591 ░ covers roughly a
-# quarter), so the rest of every cell is the terminal's own background, whatever
-# that is. Fading coverage therefore reaches the terminal exactly, on a light
-# terminal, a dark one, one that switches theme mid-session, and one with a
-# translucent or image background — none of which a named colour survives.
-#
-# Only four coverage levels exist in Unicode (█▓▒░), too few to be smooth, so
-# the grey does the fine work and the block stays ░ throughout: the drawn run
-# ramps from a mid grey to the theme's own end of the 256-colour greyscale, then
-# the last quarter is blank. Mirroring the light delta naively would leave that
-# ramp — 240-12 is 228, which is in the colour cube and renders yellow-green,
-# not grey — so the dark end is clamped to 232, the ramp's darkest entry.
-# The tail when the bar cannot ramp: evenly spaced dots at one dim palette grey.
-#
-# 256 mode has no smooth path through warm off-whites — that is why the gradient
-# is truecolor-only — so the bar used to stop dead after the last pill. Dots need
-# no ramp. They are drawn as foreground on the default background, so the cells
-# between them are the terminal's own colour whatever it is, and fixed spacing
-# has no density gradient to band. One index rather than a fade, chosen dim
-# enough to read as texture rather than content.
-_build_dots() {
-    local cells="$1" i idx
-    _DOTS=""
-    [ "$cells" -gt 0 ] 2>/dev/null || return 0
-    # One step off the page rather than two: at 250 on a cream terminal the
-    # dots read as a row of punctuation, at 252 as texture. The dark side
-    # mirrors it — 237 against a dark page, not 239.
-    [ "$SL_THEME" = "dark" ] && idx=237 || idx=252
-    local esc=$'\033' dot=$'\xc2\xb7'
-    # Reset first: the dots set only a foreground, so without this the last
-    # pill's background stays in effect and floods the tail.
-    _DOTS="${esc}[0m${esc}[38;5;${idx}m"
-    for ((i = 0; i < cells; i++)); do
-        if [ $(( i % 3 )) -eq 1 ]; then _DOTS+="$dot"; else _DOTS+=" "; fi
-    done
-    _DOTS+="${esc}[0m"
-}
-
-_build_wash() {
-    local cells="$1" i
-    _WASH=""
-    [ "$cells" -gt 0 ] 2>/dev/null || return 0
-    # ░ paints roughly a quarter of its cell, so three quarters of every cell is
-    # the terminal's own background and no colour is ever named for it. What the
-    # quarter is painted IN still matters: the 256-colour greyscale bottoms out
-    # at rgb(238,238,238), some fourteen units below a cream page, so ░ read as
-    # stipple there however the index was chosen. The tail is gated on truecolor
-    # already, so it ramps in truecolor and can finish within a couple of units
-    # of a conventional page of its theme.
-    local sr sg sb dr dg db
-    if [ "$SL_THEME" = "dark" ]; then
-        sr=52; sg=52; sb=52; dr=30; dg=30; db=30
-    else
-        sr=228; sg=224; sb=208; dr=250; dg=246; db=232
-    fi
-    # Cancel the previous segment's background before the first cell. The wash
-    # sets only a foreground, so without this the last pill's colour — amber on
-    # an escalated rate-limit block — stays in effect and floods the whole tail.
-    local esc=$'\033' shade=$'\xe2\x96\x91' r g b
-    _WASH="${esc}[0m"
-    for ((i = 0; i < cells; i++)); do
-        _lerp_channel "$sr" "$dr" "$i" "$cells"; r="$_LC"
-        _lerp_channel "$sg" "$dg" "$i" "$cells"; g="$_LC"
-        _lerp_channel "$sb" "$db" "$i" "$cells"; b="$_LC"
-        _WASH+="${esc}[38;2;${r};${g};${b}m${shade}"
-    done
-    _WASH+="${esc}[0m"
-}
-
-_build_gradient() {
-    local src="$1" dst="$2" cells="$3"
-    _GRADIENT=""
-    _parse_rgb_triplet "$src" || return 0
-    local sr="$_R" sg="$_G" sb="$_B"
-    _parse_rgb_triplet "$dst" || return 0
-    local dr="$_R" dg="$_G" db="$_B"
-    local esc=$'\033' i r g b
-    for ((i = 0; i < cells; i++)); do
-        _lerp_channel "$sr" "$dr" "$i" "$cells"; r="$_LC"
-        _lerp_channel "$sg" "$dg" "$i" "$cells"; g="$_LC"
-        _lerp_channel "$sb" "$db" "$i" "$cells"; b="$_LC"
-        _GRADIENT+="${esc}[48;2;${r};${g};${b}m "
-    done
-}
-
 # Set _LUM to the BT.709 relative luminance of _R/_G/_B, scaled by 10000 (so
 # the mid-grey pivot is 1275000). Reads the channels _parse_rgb_triplet leaves
 # behind; fork-free.
@@ -1435,9 +1393,8 @@ _luminance() {
 
 # Set _R/_G/_B to a shade of the color "$1", nudged away from itself: darker
 # when it is light, lighter when it is dark, classified by BT.709 luminance.
-# Used both for the gauge surface (a shade of the terminal background) and for
-# the divider sliver (a shade of the pill's own background). Returns non-zero
-# on a color that does not parse, so callers can fall back.
+# Its only caller is the surface: a shade of the terminal background. Returns
+# non-zero on a color that does not parse, so callers can fall back.
 _bg_shade() {
     _parse_rgb_triplet "$1" || return 1
     local r="$_R" g="$_G" b="$_B" shift=10
@@ -1455,180 +1412,82 @@ _bg_shade() {
 
 # --- render ----------------------------------------------------------------
 
+# One line of capsules on the terminal's own background. Each group of items
+# becomes one capsule: a rounded left cap, a fill space, the items (joined as
+# each asked), a fill space, a rounded right cap; two default-background cells
+# follow the identity capsule and one follows every other. The caps are
+# Powerline glyphs (U+E0B6/U+E0B4) drawn as fill-coloured ink on the default
+# background, so they read as the capsule's rounded ends; CS_STATUSLINE_CAPS=0
+# drops the glyphs for a font without them and the fill spaces become square
+# edges. A crit capsule takes the crit fill and paints every item critink bold.
+# SGR bold is stateful, so every item emits its intensity explicitly (1 or 22).
+# No width accounting and no tail: the line ends at the last cap.
 _render() {
     local n=${#_SEG_TEXT[@]}
     [ "$n" -gt 0 ] || return 0
+    local i g="" out=""
 
     if [ "$LEVEL" = "plain" ]; then
-        local i out=""
-        for ((i = 0; i < n; i++)); do
-            [ -n "$out" ] && out+=" > "
-            out+="${_SEG_TEXT[i]}"
+        local k first
+        for ((k = 0; k < ${#_GROUPS[@]}; k++)); do
+            g="${_GROUPS[k]}"
+            [ "$k" -gt 0 ] && out+=" > "
+            first=1
+            for ((i = 0; i < n; i++)); do
+                [ "${_SEG_GROUP[i]}" = "$g" ] || continue
+                if [ -z "$first" ]; then
+                    case "${_SEG_JOIN[i]}" in
+                        dot)       out+=" · " ;;
+                        pad|space) out+=" " ;;
+                    esac
+                fi
+                first=""
+                out+="${_SEG_TEXT[i]}"
+            done
         done
         printf '%s\n' "$out"
         return 0
     fi
 
-    # Squared pills that abut: each segment is a flat block with square edges,
-    # and the divider between differing backgrounds is just the color change,
-    # the most discreet separator there is. Same-background neighbors get a thin
-    # one-eighth bar in a light warm grey so the boundary does not vanish.
-    # Renders in any monospace font.
-    local esc=$'\033' reset=$'\033[0m' thin=$'\xe2\x96\x8f'   # U+258F ▏
-    # The divider ink colors are loop-invariant, so resolve them once: the
-    # light warm grey for same-color pairs, and a darker coral for the logo's
-    # boundary. A hairline reads as *thin* only because its cell background
-    # matches a neighbor — U+258F inks just its left ~1/8, so the other ~7/8
-    # must disappear into an adjacent pill or the whole one-column cell shows
-    # as a solid block. Same-color pairs share a background, so their divider
-    # cell takes that shared color; the logo boundary sits between two
-    # differing colors, so its divider cell takes the NON-logo neighbor's
-    # color (resolved per boundary, below), leaving only the thin ink sliver.
-    _sgr 38 hairline; local hairfg="$_SGR"
-    _sgr 38 brandshade; local logosepfg="$_SGR"
-
-    # Lead with a reset so any residual SGR state from the caller's terminal
-    # cannot bleed into the first segment's text.
-    local i out="$reset" bg nbg bgsgr fgtext width=0 lastrgb="" sepbg lead same pulse
-    for ((i = 0; i < n; i++)); do
-        bg="${_SEG_BG[i]}"
-        _sgr 48 "$bg"; bgsgr="$_SGR"; lastrgb="$_RGB"
-        # Light backgrounds take dark text; accents take the usage chip's
-        # text color, everything else plain white. SGR bold is stateful, so
-        # every segment emits its intensity explicitly (1 accent, 22 normal)
-        # or it would inherit bold from the accent before it.
-        case "$bg" in
-            amber|white) _sgr 38 black ;;
-            surface)
-                # Contrast against the resolved surface: dark text only on a
-                # clearly light shade, light text otherwise. The pivot sits at
-                # ~0.6 luminance (not 0.5) so the mid taupe greys of the
-                # unknown-background fallback keep their light text; only the
-                # genuinely light bg-derived surfaces flip to dark text.
-                if [ "$LEVEL" = "truecolor" ] && _parse_rgb_triplet "$lastrgb" \
-                    && { _luminance; [ "$_LUM" -ge 1530000 ]; }; then
-                    # A heavily darkened shade of the surface: dark enough to
-                    # read, but a warm tonal ink rather than a harsh near-black.
-                    _SGR="38;2;$((_R * 35 / 100));$((_G * 35 / 100));$((_B * 35 / 100))"
-                else
-                    _sgr 38 white
-                fi ;;
-            *)
-                # Claude Code's TUI re-emits only bold/fg/bg from the
-                # statusline's ANSI, so terminal blink (SGR 5) never reaches
-                # the screen. The attention pulse is software-driven instead:
-                # the flagged mark alternates chiptext/brandshade by epoch-
-                # second parity, and the statusLine registration's
-                # refreshInterval repaints the bar every second while idle so
-                # the phase keeps advancing. CS_STATUSLINE_NOW pins the clock
-                # for tests.
-                if [ "${_SEG_BOLD[i]}" = "boldattention" ]; then
-                    _sl_now
-                    pulse="${_NOW:-0}"
-                    if [ $(( pulse % 2 )) -eq 1 ]; then _sgr 38 brandshade; else _sgr 38 chiptext; fi
-                elif [ -n "${_SEG_BOLD[i]}" ]; then _sgr 38 chiptext; else _sgr 38 white; fi ;;
-        esac
-        fgtext="$_SGR"
-        if [ -n "${_SEG_BOLD[i]}" ]; then fgtext+=";1"; else fgtext+=";22"; fi
-        # A segment immediately after the logo inherits that boundary's divider
-        # cell as its leading pad — the cell already carries this segment's
-        # background — so it drops its own leading space to stay symmetric with
-        # every other pill. The trailing space is always emitted.
-        lead=" "
-        [ "$i" -gt 0 ] && [ "${_SEG_BG[i - 1]}" = "brand" ] && lead=""
-        out+="${esc}[${bgsgr};${fgtext}m${lead}${_SEG_TEXT[i]} "
-        _display_width "${_SEG_TEXT[i]}"; width=$((width + 1 + ${#lead} + _WIDTH))
-        if [ $((i + 1)) -lt "$n" ]; then
-            nbg="${_SEG_BG[i + 1]}"
-            if [ "$bg" = "brand" ] || [ "$nbg" = "brand" ]; then
-                # The logo is a fixed brand mark, not part of the flowing
-                # identity/gauge segments, so its boundary always shows a
-                # divider: the same thin `▏` glyph every other divider uses,
-                # inked in darker coral, on a background matching the non-logo
-                # neighbor so the glyph's uninked ~7/8 merges into that pill
-                # and only the thin sliver shows.
-                if [ "$bg" = "brand" ]; then _sgr 48 "$nbg"; else _sgr 48 "$bg"; fi
-                sepbg="$_SGR"
-                out+="${esc}[${sepbg};${logosepfg}m${thin}"
-                width=$((width + 1))
-            else
-                # Differing backgrounds abut; the color change is the divider.
-                # Backgrounds that resolve to the SAME rendered color get a
-                # thin bar in the light warm grey (lighter than the block,
-                # softer than the white label) so the boundary does not
-                # vanish. Comparing resolved RGB rather than color names is
-                # what this needs: a `claude_session_color` of "orange"
-                # renders identically to the logo's "brand" coral under a
-                # different name, so a name-equality check would miss that
-                # collision — moot here since the logo branch above already
-                # covers every logo boundary, but the same principle applies
-                # to any other pair of segments that might one day share an
-                # RGB under different names.
-                same=""
-                if [ "$LEVEL" = "truecolor" ]; then
-                    _sgr 48 "$nbg"; [ "$_RGB" = "$lastrgb" ] && same=1
-                elif [ "$nbg" = "$bg" ]; then
-                    same=1
-                fi
-                if [ -n "$same" ]; then
-                    # Ink the sliver in a faint shade of the pill's own
-                    # background so the separator reads as a tonal step rather
-                    # than a foreign grey line — more discreet, and it follows
-                    # whatever color the neighbors share. The warm grey stays as
-                    # the fallback where there is no per-channel background.
-                    local hairink="$hairfg"
-                    if [ "$LEVEL" = "truecolor" ] && _bg_shade "$lastrgb"; then
-                        hairink="38;2;${_R};${_G};${_B}"
-                    fi
-                    out+="${esc}[${bgsgr};${hairink}m${thin}"
-                    width=$((width + 1))
-                fi
+    local esc=$'\033' reset=$'\033[0m'
+    local capl=$'\xee\x82\xb6' capr=$'\xee\x82\xb4'   # U+E0B6, U+E0B4
+    [ "${CS_STATUSLINE_CAPS:-1}" = "0" ] && { capl=""; capr=""; }
+    local fill fillsgr capsgr ink weight first k
+    out="$reset"
+    # Capsules in first-seen group order; a group's items in their own order,
+    # even when CS_STATUSLINE_SEGMENTS interleaves them (session,ctx,model).
+    for ((k = 0; k < ${#_GROUPS[@]}; k++)); do
+        g="${_GROUPS[k]}"
+        fill=surface
+        case "$_CRIT_GROUPS" in *" $g "*) fill=crit ;; esac
+        _sgr 48 "$fill"; fillsgr="$_SGR"
+        _sgr 38 "$fill"; capsgr="$_SGR"
+        [ -n "$capl" ] && out+="${esc}[49;${capsgr}m${capl}"
+        out+="${esc}[${fillsgr}m "
+        first=1
+        for ((i = 0; i < n; i++)); do
+            [ "${_SEG_GROUP[i]}" = "$g" ] || continue
+            if [ -z "$first" ]; then
+                case "${_SEG_JOIN[i]}" in
+                    dot)   _sgr 38 ink2; out+="${esc}[${fillsgr};${_SGR};22m  ·  " ;;
+                    pad)   out+="${esc}[${fillsgr}m  " ;;
+                    space) out+="${esc}[${fillsgr}m " ;;
+                esac
             fi
+            first=""
+            ink="${_SEG_INK[i]}"; weight=22
+            [ -n "${_SEG_BOLD[i]}" ] && weight=1
+            if [ "$fill" = "crit" ]; then ink=critink; weight=1; fi
+            _sgr 38 "$ink"
+            out+="${esc}[${fillsgr};${_SGR};${weight}m${_SEG_TEXT[i]}"
+        done
+        out+="${esc}[${fillsgr}m "
+        [ -n "$capr" ] && out+="${esc}[49;${capsgr}m${capr}"
+        out+="$reset"
+        if [ $((k + 1)) -lt ${#_GROUPS[@]} ]; then
+            if [ "$g" = "identity" ]; then out+="  "; else out+=" "; fi
         fi
     done
-    # Stretch the bar to the full terminal width by fading the trailing edge
-    # from the neutral surface tone into the terminal's real background color.
-    # The fade anchors on `surface`, NOT the last pill's own color: the last
-    # segment is often a gauge that escalates to amber/red (e.g. a near-limit
-    # rate-limit block), and inheriting that would flood the whole empty tail
-    # with the alarm color. Keeping the tail on the quiet surface tone means the
-    # bar's empty end stays quiet regardless of usage. Both inputs are
-    # prerequisites Claude Code and cs may not provide: $COLUMNS is only set on
-    # Claude Code >= 2.1.153, and CS_TERM_BG_RGB is only known when cs's own OSC
-    # 11 query succeeded at launch. `lastrgb` gates on a resolved truecolor bg.
-    # Truecolor-only — 256-color/basic modes can't render a gradient without
-    # banding.
-    # lastrgb is only ever set on the truecolor path, so it cannot gate a
-    # tail that 256 mode also draws. Each branch below asserts what it
-    # actually needs: the gradient needs a resolved truecolor background,
-    # the dots need nothing but width.
-    if [[ "${COLUMNS:-}" =~ ^[0-9]+$ ]] && [ "$COLUMNS" -ge 1 ] && [ "$COLUMNS" -le 2000 ]; then
-        local remaining=$((COLUMNS - width))
-        # Bounded independent of $COLUMNS itself: defense in depth for a loop
-        # that runs on every render.
-        [ "$remaining" -gt 500 ] && remaining=500
-        if [ "$remaining" -gt 0 ]; then
-            if [ "$LEVEL" = "256" ]; then
-                _build_dots "$remaining"
-                out+="$_DOTS"
-            elif [ -n "$lastrgb" ] && [ -n "${CS_TERM_BG_RGB:-}" ]; then
-                _sgr 48 surface; local tailrgb="$_RGB"
-                [ -n "$tailrgb" ] || tailrgb="$lastrgb"
-                _build_gradient "$tailrgb" "$CS_TERM_BG_RGB" "$remaining"
-                # _build_gradient validates the destination and returns empty
-                # when it will not parse. Reachable without user error: the
-                # client cache checks only the charset, so a truncated entry
-                # exports a malformed value. Fall through rather than leave
-                # the bar stopped dead.
-                [ -n "$_GRADIENT" ] || { _build_wash "$remaining"; _GRADIENT="$_WASH"; }
-                out+="$_GRADIENT"
-            elif [ -n "$lastrgb" ]; then
-                _build_wash "$remaining"
-                out+="$_WASH"
-            fi
-        fi
-    fi
-    out+="$reset"
     printf '%s\n' "$out"
 }
 
@@ -1658,7 +1517,9 @@ main() {
 
     _detect_level
 
-    local segments="${CS_STATUSLINE_SEGMENTS:-logo,session,notes,mail,pane,git,model,ctx,limits,fable}"
+    local segments="${CS_STATUSLINE_SEGMENTS:-logo,session,notes,mail,git,model,ctx,limits}"
+    _LIMITS_NAMED=""
+    case ",$segments," in *,limits,*) _LIMITS_NAMED=1 ;; esac
     local name names
     IFS=',' read -ra names <<< "$segments"
     for name in "${names[@]}"; do

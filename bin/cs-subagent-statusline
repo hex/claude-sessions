@@ -153,7 +153,7 @@ _emit_row() {
 }
 
 # Rows sit on the terminal background inside Claude Code's own panel, not on
-# self-backgrounded pills, so only foreground colors are used. LEVEL=plain is
+# self-backgrounded capsules, so only foreground colors are used. LEVEL=plain is
 # handled here, not in _sgr, whose case falls through to basic ANSI.
 _paint() {
     if [ "$LEVEL" = "plain" ]; then

@@ -706,7 +706,7 @@ else
             model: {display_name: "Opus 5", id: "claude-opus-5"},
             effort: {level: "high"},
             rate_limits: {five_hour: {used_percentage: 41},
-                          seven_day: {used_percentage: 63}}
+                          seven_day: {used_percentage: 72}}
         }' 2>/dev/null) || return 0
         # Draw it for the terminal it will appear in. The statusline falls back
         # to its dark palette whenever it can measure nothing, and a subprocess
