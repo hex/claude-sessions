@@ -844,7 +844,12 @@ test_integrate_terminated_mid_gate_leaves_no_lock_or_temp() {
     local sha base_dir output status=0
     sha=$(integrate_fixture myproj fix-auth)
     base_dir="$CS_SESSIONS_ROOT/myproj"
+    # The marker is written only after the gate has SEEN the mutex held, so a
+    # run that never took the lock (or never reached the gate) cannot pass the
+    # release assertions below by never having acquired anything.
     output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- sh -c '
+        test -d "$0" || exit 9
+        : > "$1"
         target=""; p=$PPID
         while [ "${p:-1}" -gt 1 ]; do
             case "$(ps -o args= -p "$p" 2>/dev/null)" in
@@ -854,8 +859,9 @@ test_integrate_terminated_mid_gate_leaves_no_lock_or_temp() {
             p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d " ")
         done
         kill -TERM "$target"; sleep 2
-    ' 2>&1) || status=$?
+    ' "$base_dir/.git/cs/integrate.lock" "$TEST_TMPDIR/gate-ran" 2>&1) || status=$?
     [ "$status" != 0 ] || { echo "  FAIL: a terminated integrate must not exit 0"; return 1; }
+    assert_file_exists "$TEST_TMPDIR/gate-ran" "the gate ran with the mutex held" || return 1
     assert_not_exists "$base_dir/.git/cs/integrate.lock" "mutex released on TERM" || return 1
     assert_output_not_contains "$(git -C "$base_dir" worktree list)" "cs/finish" "temp worktree removed on TERM" || return 1
     assert_file_not_exists "$base_dir/feature.txt" "nothing landed" || return 1
@@ -1679,12 +1685,16 @@ test_integrate_from_remote_after_a_local_integrate_still_lands() {
     sha=$(integrate_remote_fixture myproj fix-auth)
     base_dir="$CS_SESSIONS_ROOT/myproj"
     (cd "$base_dir" && git commit -q --allow-empty -m "local only")
+    local L
+    L=$(git -C "$base_dir" rev-parse HEAD)
     M=$(land_pr_on_origin "$base_dir" fix-auth)
     git -C "$base_dir" fetch -q origin
     output=$("$CS_BIN" myproj -integrate-feature fix-auth "$M" --from-remote -- true 2>&1) || status=$?
     assert_eq "0" "$status" "mixed landing succeeds: $output" || return 1
     git -C "$base_dir" merge-base --is-ancestor "$M" HEAD \
         || { echo "  FAIL: the PR merge commit must be reachable from base HEAD"; return 1; }
+    git -C "$base_dir" merge-base --is-ancestor "$L" HEAD \
+        || { echo "  FAIL: the base's local-only commit must survive the landing"; return 1; }
     assert_file_exists "$base_dir/feature.txt" "feature content on base" || return 1
 }
 
