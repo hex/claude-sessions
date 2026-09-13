@@ -535,10 +535,12 @@ integrate_feature_worktree() {  # base_name task sha [--from-remote] -- gate...
 
     sha=$(git -C "$base_dir" rev-parse -q --verify "$sha^{commit}" 2>/dev/null) \
         || error "Commit not found in $base_name: $sha"
+    # Before the split: a detached base has no branch to land on either way,
+    # and the ff-only would move a detached HEAD while the branch stays put.
+    local base_branch
+    base_branch=$(git -C "$base_dir" symbolic-ref -q --short HEAD 2>/dev/null) \
+        || error "Base checkout is detached; check out the branch to land on (for a PR, the branch it targets), then re-run"
     if [ -n "$from_remote" ]; then
-        local base_branch
-        base_branch=$(git -C "$base_dir" symbolic-ref -q --short HEAD 2>/dev/null) \
-            || error "Base checkout is detached; check out the branch the PR targets, then re-run"
         git -C "$base_dir" merge-base --is-ancestor "$sha" "refs/remotes/origin/$base_branch" 2>/dev/null \
             || error "$sha is not reachable from origin/$base_branch; run: git -C \"$base_dir\" fetch origin, then check the PR's base branch"
     else
