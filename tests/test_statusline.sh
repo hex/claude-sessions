@@ -212,10 +212,10 @@ test_identity_items_are_bold_ink() {
     local json='{"session_name":"accents","model":{"display_name":"Opus"},"workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8},"cost":{"total_cost_usd":1.0},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":40}}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains_f "$out" "48;2;227;221;204;38;2;79;77;71;1maccents" "session is bold ink on the surface" || return 1
-    assert_output_contains_f "$out" "48;2;227;221;204;38;2;79;77;71;1m✦ Opus" "model is bold ink on the surface" || return 1
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;8;145;178;1maccents" "session is bold in its session colour (cyan) on the surface" || return 1
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;76;29;149;1m✦ Opus" "model is bold periwinkle on the surface" || return 1
     assert_output_not_contains "$out" "48;2;8;145;178" "no session-colour fill" || return 1
-    assert_output_not_contains "$out" "48;2;138;134;236" "no periwinkle fill" || return 1
+    assert_output_not_contains "$out" "48;2;76;29;149" "no periwinkle fill" || return 1
 }
 
 # ============================================================================
@@ -235,9 +235,9 @@ test_git_branch_is_bold_ink_no_fill() {
     }')
     local out
     out=$(run_sl "$json")
-    assert_output_contains_f "$out" "48;2;227;221;204;38;2;79;77;71;1m⎇ main +1!1" \
-        "branch is bold ink on the surface" || return 1
-    assert_output_not_contains "$out" "48;2;79;91;140" "no slate fill" || return 1
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;31;41;55;1m⎇ main +1!1" \
+        "branch is bold slate on the surface" || return 1
+    assert_output_not_contains "$out" "48;2;31;41;55" "no slate fill" || return 1
     # Branch sits before the model, both inside the identity capsule.
     local branch_pos model_pos
     branch_pos=$(printf '%s' "$out" | grep -bo '⎇ main' | head -1 | cut -d: -f1)
@@ -763,7 +763,7 @@ test_ctx_amber_band_is_amber() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":42}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains_f "$out" "38;2;180;83;9;22m42%" "ctx 42% should use the amber ink" || return 1
+    assert_output_contains_f "$out" "38;2;146;64;14;22m42%" "ctx 42% should use the amber ink" || return 1
     assert_output_not_contains "$out" "48;2;255;183;77" "ctx 42% amber must never be a fill" || return 1
     assert_output_not_contains "$out" "48;2;215;0;21" "ctx 42% must not use the crit fill" || return 1
 }
@@ -776,7 +776,7 @@ test_ctx_below_warn_is_neutral() {
     local pill
     pill=$(ctx_pill "$out" 39)
     assert_output_contains "$pill" "38;2;197;194;189;22m" "ctx 39% should sit at the secondary ink" || return 1
-    assert_output_not_contains "$pill" "180;83;9" "ctx 39% must not use amber" || return 1
+    assert_output_not_contains "$pill" "146;64;14" "ctx 39% must not use amber" || return 1
     assert_output_not_contains "$pill" "215;0;21" "ctx 39% must not use the crit fill" || return 1
 }
 
@@ -785,7 +785,7 @@ test_ctx_warn_band_still_amber() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":50}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains_f "$out" "38;2;180;83;9;22m50%" "ctx 50% should still use the amber ink" || return 1
+    assert_output_contains_f "$out" "38;2;146;64;14;22m50%" "ctx 50% should still use the amber ink" || return 1
     assert_output_not_contains "$out" "48;2;215;0;21" "ctx 50% must not use the crit fill" || return 1
 }
 
@@ -794,7 +794,7 @@ test_ctx_below_crit_is_amber_not_red() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":64}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains_f "$out" "38;2;180;83;9;22m64%" "ctx 64% should still be amber" || return 1
+    assert_output_contains_f "$out" "38;2;146;64;14;22m64%" "ctx 64% should still be amber" || return 1
     assert_output_not_contains "$out" "48;2;215;0;21" "ctx 64% must not use the crit fill" || return 1
 }
 
@@ -804,7 +804,7 @@ test_ctx_warn_threshold_is_configurable() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":25}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains_f "$out" "38;2;180;83;9;22m25%" "ctx 25% should be amber when warn is 20" || return 1
+    assert_output_contains_f "$out" "38;2;146;64;14;22m25%" "ctx 25% should be amber when warn is 20" || return 1
 }
 
 # The amber band's lower edge is inclusive, and 40 is the only reading that
@@ -816,7 +816,7 @@ test_ctx_warn_edge_is_amber_at_the_threshold() {
     out=$(run_sl "$json")
     local pill
     pill=$(ctx_pill "$out" 40)
-    assert_output_contains_f "$pill" "38;2;180;83;9;22m" "ctx 40% is inside the amber band" || return 1
+    assert_output_contains_f "$pill" "38;2;146;64;14;22m" "ctx 40% is inside the amber band" || return 1
     assert_output_not_contains_f "$out" "48;2;215;0;21" "ctx 40% must not reach the crit fill" || return 1
 }
 
@@ -835,7 +835,7 @@ test_ctx_threshold_non_numeric_falls_back_to_default() {
     local out err
     out=$(run_sl "$json")
     err=$(run_sl_stderr "$json")
-    assert_output_contains_f "$out" "38;2;180;83;9;22m42%" "a word override keeps the default 40 amber band" || return 1
+    assert_output_contains_f "$out" "38;2;146;64;14;22m42%" "a word override keeps the default 40 amber band" || return 1
     assert_eq "" "$err" "a word override must not reach the shell's integer comparison" || return 1
 }
 
@@ -847,7 +847,7 @@ test_ctx_threshold_out_of_range_falls_back_to_default() {
     local out err
     out=$(run_sl "$json")
     err=$(run_sl_stderr "$json")
-    assert_output_contains_f "$out" "38;2;180;83;9;22m42%" "an oversized override keeps the default 40 amber band" || return 1
+    assert_output_contains_f "$out" "38;2;146;64;14;22m42%" "an oversized override keeps the default 40 amber band" || return 1
     assert_eq "" "$err" "an oversized override must not error inside \`[\`" || return 1
 }
 
@@ -859,7 +859,7 @@ test_ctx_threshold_above_100_disables_its_band() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":100}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains_f "$out" "38;2;180;83;9;22m100%" "ctx 100% stays amber when crit is out of reach" || return 1
+    assert_output_contains_f "$out" "38;2;146;64;14;22m100%" "ctx 100% stays amber when crit is out of reach" || return 1
     assert_output_not_contains "$out" "48;2;215;0;21" "a crit of 101 must switch the crit fill off, not fall back to 65" || return 1
 }
 
@@ -878,8 +878,8 @@ test_model_is_bold_ink_no_fill() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"model":{"display_name":"Opus"}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains_f "$out" "38;2;79;77;71;1m✦ Opus" "the model is bold ink on the surface" || return 1
-    assert_output_not_contains_f "$out" "48;2;138;134;236" "no periwinkle fill" || return 1
+    assert_output_contains_f "$out" "38;2;76;29;149;1m✦ Opus" "the model is bold periwinkle on the surface" || return 1
+    assert_output_not_contains_f "$out" "48;2;76;29;149" "no periwinkle fill" || return 1
 }
 
 test_accent_segments_bold() {
@@ -890,10 +890,10 @@ test_accent_segments_bold() {
     local json='{"session_name":"boldsess","model":{"display_name":"Opus"},"workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains_f "$out" "48;2;227;221;204;38;2;79;77;71;1mboldsess" \
-        "the session name should render bold in the surface ink" || return 1
-    assert_output_contains_f "$out" "48;2;227;221;204;38;2;79;77;71;1m✦ Opus" \
-        "the model should render bold in the surface ink" || return 1
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;8;145;178;1mboldsess" \
+        "the session name should render bold in its session colour (cyan)" || return 1
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;76;29;149;1m✦ Opus" \
+        "the model should render bold periwinkle" || return 1
     # SGR bold is stateful: a segment that does not explicitly emit normal
     # intensity (22) inherits bold from the accent before it.
     assert_output_contains_f "$out" "48;2;227;221;204;38;2;124;121;112;22m◔ ctx" \
@@ -906,7 +906,7 @@ test_ctx_amber_is_ink_not_dark_fill_text() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":55}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains_f "$out" "38;2;180;83;9;22m55%" "warn readings should be amber ink, not a fill" || return 1
+    assert_output_contains_f "$out" "38;2;146;64;14;22m55%" "warn readings should be amber ink, not a fill" || return 1
     assert_output_not_contains "$out" "48;2;255;183;77" "amber must never be a fill" || return 1
 }
 
@@ -1111,23 +1111,24 @@ test_unknown_segment_ignored() {
 }
 
 # ============================================================================
-# claude_session_color never reaches the bar: the render is identical whether
-# the state file names a valid palette color or a bogus one
+# claude_session_color is the session name's ink; a bogus name falls back to
+# ink, and the colour is never a fill
 # ============================================================================
 
-test_session_color_never_reaches_the_bar() {
+test_session_color_is_the_session_name_ink() {
     export COLORTERM="truecolor"
     export CS_TERM_BG_RGB="253;246;227"
     export CLAUDE_SESSION_NAME="weird"
     local json='{"session_name":"weird","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":5}}'
-    make_cs_session "weird" 1024 chartreuse   # not one of the 8 valid color names
-    local out_bogus; out_bogus=$(run_sl "$json")
     make_cs_session "weird" 1024 blue         # a valid palette color
     local out_valid; out_valid=$(run_sl "$json")
-    assert_eq "$out_bogus" "$out_valid" \
-        "a bogus vs. a valid claude_session_color must render identically" || return 1
-    assert_output_not_contains_f "$out_bogus" "48;2;106;155;204" "the session palette blue must never be a fill" || return 1
+    assert_output_contains_f "$out_valid" "38;2;106;155;204;1mweird" \
+        "the session name paints in its session colour (blue)" || return 1
     assert_output_not_contains_f "$out_valid" "48;2;106;155;204" "the session palette blue must never be a fill" || return 1
+    make_cs_session "weird" 1024 chartreuse   # not one of the 8 valid color names
+    local out_bogus; out_bogus=$(run_sl "$json")
+    assert_output_contains_f "$out_bogus" "38;2;79;77;71;1mweird" \
+        "a claude_session_color outside the palette falls back to ink" || return 1
 }
 
 # ============================================================================
@@ -1190,10 +1191,9 @@ test_bg_shade_noop_on_malformed() {
 
 test_gauge_uses_bg_derived_surface() {
     export COLORTERM=truecolor CS_TERM_THEME=light CS_TERM_BG_RGB="250;248;242"
-    # A colored session so the only thing that could show the fixed grey is a
-    # gauge wrongly ignoring the derived surface.
-    export CLAUDE_SESSION_NAME="s"
-    make_cs_session "s" 1024 red
+    # No CLAUDE_SESSION_NAME/claude_session_color here on purpose: with one, the
+    # session name would paint in that colour instead of plain ink, and the
+    # bold-ink pin below assumes ink.
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":10}}'
     local out
     # 250;248;242 shaded 10% darker is 225;223;217; its 35% shade (ink) is
@@ -1647,7 +1647,7 @@ run_test test_force_color_zero_is_plain
 run_test test_io_gating_git_subprocess
 run_test test_ctx_zero_vs_absent
 run_test test_unknown_segment_ignored
-run_test test_session_color_never_reaches_the_bar
+run_test test_session_color_is_the_session_name_ink
 run_test test_display_width_counts_codepoints_not_bytes
 run_test test_parse_rgb_triplet_accepts_valid_and_rejects_malformed
 
@@ -1790,7 +1790,7 @@ test_library_mode_defines_helpers_without_rendering() {
            _sgr 38 periwinkle; \
            printf 'LEVEL=%s SGR=%s' "$LEVEL" "$_SGR" )
     assert_output_contains "$out" "LEVEL=256" "library mode runs _detect_level" || return 1
-    assert_output_contains "$out" "SGR=38;5;105" "library mode exposes _sgr's periwinkle" || return 1
+    assert_output_contains "$out" "SGR=38;5;55" "library mode exposes _sgr's periwinkle" || return 1
 }
 
 test_library_mode_prints_nothing() {
@@ -3051,7 +3051,7 @@ test_sgr_ink_tokens_truecolor_light() {
     _load_sl_functions
     LEVEL=truecolor; SL_THEME=light; _SURFACE_RGB="227;221;204"
     _sgr 38 ink2;    assert_eq "38;2;124;121;112" "$_SGR" "ink2 light" || return 1
-    _sgr 38 amber;   assert_eq "38;2;180;83;9"    "$_SGR" "amber is an ink on light" || return 1
+    _sgr 38 amber;   assert_eq "38;2;146;64;14"    "$_SGR" "amber is an ink on light" || return 1
     _sgr 48 crit;    assert_eq "48;2;215;0;21"    "$_SGR" "crit fill light" || return 1
     _sgr 38 critink; assert_eq "38;2;255;255;255" "$_SGR" "crit ink light" || return 1
 }
@@ -3060,7 +3060,7 @@ test_sgr_ink_tokens_truecolor_dark() {
     _load_sl_functions
     LEVEL=truecolor; SL_THEME=dark; _SURFACE_RGB="46;48;50"
     _sgr 38 ink2;    assert_eq "38;2;160;161;162" "$_SGR" "ink2 dark" || return 1
-    _sgr 38 amber;   assert_eq "38;2;245;165;36"  "$_SGR" "amber ink dark" || return 1
+    _sgr 38 amber;   assert_eq "38;2;253;230;138"  "$_SGR" "amber ink dark" || return 1
     _sgr 48 crit;    assert_eq "48;2;255;69;58"   "$_SGR" "crit fill dark" || return 1
     _sgr 38 critink; assert_eq "38;2;37;0;0"      "$_SGR" "crit ink dark" || return 1
 }
@@ -3078,13 +3078,21 @@ test_sgr_ink_follows_surface_luminance() {
 test_sgr_ink_tokens_256_and_basic() {
     _load_sl_functions
     LEVEL=256; SL_THEME=light
-    _sgr 38 ink2;    assert_eq "38;5;238" "$_SGR" "ink2 256 light" || return 1
-    _sgr 38 amber;   assert_eq "38;5;130" "$_SGR" "amber 256 light" || return 1
+    _sgr 48 surface;    assert_eq "48;5;254" "$_SGR" "surface 256 light" || return 1
+    _sgr 38 ink;        assert_eq "38;5;236" "$_SGR" "ink 256 light" || return 1
+    _sgr 38 ink2;    assert_eq "38;5;241" "$_SGR" "ink2 256 light" || return 1
+    _sgr 38 slate;      assert_eq "38;5;238" "$_SGR" "slate 256 light" || return 1
+    _sgr 38 periwinkle; assert_eq "38;5;55"  "$_SGR" "periwinkle 256 light" || return 1
+    _sgr 38 amber;   assert_eq "38;5;94" "$_SGR" "amber 256 light" || return 1
     _sgr 48 crit;    assert_eq "48;5;160" "$_SGR" "crit 256 light" || return 1
     _sgr 38 critink; assert_eq "38;5;231" "$_SGR" "critink 256 light" || return 1
     SL_THEME=dark
-    _sgr 38 ink2;    assert_eq "38;5;252" "$_SGR" "ink2 256 dark" || return 1
-    _sgr 38 amber;   assert_eq "38;5;215" "$_SGR" "amber 256 dark" || return 1
+    _sgr 48 surface;    assert_eq "48;5;237" "$_SGR" "surface 256 dark" || return 1
+    _sgr 38 ink;        assert_eq "38;5;255" "$_SGR" "ink 256 dark" || return 1
+    _sgr 38 ink2;    assert_eq "38;5;250" "$_SGR" "ink2 256 dark" || return 1
+    _sgr 38 slate;      assert_eq "38;5;253" "$_SGR" "slate 256 dark" || return 1
+    _sgr 38 periwinkle; assert_eq "38;5;147" "$_SGR" "periwinkle 256 dark" || return 1
+    _sgr 38 amber;   assert_eq "38;5;221" "$_SGR" "amber 256 dark" || return 1
     _sgr 48 crit;    assert_eq "48;5;203" "$_SGR" "crit 256 dark" || return 1
     _sgr 38 critink; assert_eq "38;5;232" "$_SGR" "critink 256 dark" || return 1
     LEVEL=basic; SL_THEME=light
@@ -3125,7 +3133,7 @@ test_interleaved_segments_still_one_identity_capsule() {
     local out; out=$(run_sl "$json")
     local caps; caps=$(printf '%s' "$out" | grep -o "$CAPL" | wc -l | tr -d ' ')
     assert_eq "2" "$caps" "session and model share one capsule even with ctx named between them" || return 1
-    assert_output_contains_f "$out" "1ms${ESC_}[48;2;227;221;204;38;2;124;121;112;22m  ·  ${ESC_}[48;2;227;221;204;38;2;79;77;71;1m✦ Opus" \
+    assert_output_contains_f "$out" "1ms${ESC_}[48;2;227;221;204;38;2;124;121;112;22m  ·  ${ESC_}[48;2;227;221;204;38;2;76;29;149;1m✦ Opus" \
         "model follows session inside identity" || return 1
     out=$(NO_COLOR=1 run_sl "$json")
     assert_eq "s · ✦ Opus > ◔ ctx 8%" "$out" "plain: groups render in first-seen order, items in their own order" || return 1
@@ -3157,9 +3165,9 @@ test_identity_is_one_capsule_on_the_surface() {
     assert_output_contains_f "$out" "[49;38;2;227;221;204m${CAPL}" "left cap is surface ink on the terminal bg" || return 1
     # Session and branch sit on the same fill; neither has a fill of its own.
     assert_output_contains_f "$out" "48;2;227;221;204;38;2;79;77;71;1ms" "session is bold ink on the surface" || return 1
-    assert_output_contains_f "$out" "48;2;227;221;204;38;2;79;77;71;1m⎇ main +1!1" "branch is bold ink on the same surface" || return 1
-    assert_output_not_contains_f "$out" "48;2;79;91;140" "no slate fill" || return 1
-    assert_output_not_contains_f "$out" "48;2;138;134;236" "no periwinkle fill" || return 1
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;31;41;55;1m⎇ main +1!1" "branch is bold slate on the same surface" || return 1
+    assert_output_not_contains_f "$out" "48;2;31;41;55" "no slate fill" || return 1
+    assert_output_not_contains_f "$out" "48;2;76;29;149" "no periwinkle fill" || return 1
     assert_output_not_contains_f "$out" "48;2;8;145;178" "no session-colour fill" || return 1
     # Items join with a secondary-ink dot inside the capsule.
     assert_output_contains_f "$out" "48;2;227;221;204;38;2;124;121;112;22m  ·  " "dot joiner in ink2" || return 1
@@ -3177,7 +3185,7 @@ test_capsule_gap_two_cells_after_identity_one_after_gauges() {
     local esc=$'\033'
     assert_output_contains_f "$out" "${CAPR}${esc}[0m  ${esc}[49;38;2;227;221;204m${CAPL}" \
         "two default-bg cells between identity and ctx" || return 1
-    assert_output_contains_f "$out" "8%${esc}[48;2;227;221;204m ${esc}[49;38;2;227;221;204m${CAPR}${esc}[0m ${esc}[49;38;2;227;221;204m${CAPL}" \
+    assert_output_contains_f "$out" "8%${esc}[49;38;2;227;221;204m${CAPR}${esc}[0m ${esc}[49;38;2;227;221;204m${CAPL}" \
         "one cell between ctx and cost" || return 1
 }
 
@@ -3214,9 +3222,9 @@ test_ctx_amber_is_ink_on_the_surface() {
     export CS_TERM_BG_RGB="253;246;227"
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":42}}'
     local out; out=$(run_sl "$json")
-    assert_output_contains_f "$out" "48;2;227;221;204;38;2;180;83;9;22m42%" "the number is amber ink" || return 1
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;146;64;14;22m42%" "the number is amber ink" || return 1
     assert_output_not_contains_f "$out" "48;2;255;183;77" "no amber fill anywhere" || return 1
-    assert_output_not_contains_f "$out" "48;2;180;83;9" "amber never becomes a fill" || return 1
+    assert_output_not_contains_f "$out" "48;2;146;64;14" "amber never becomes a fill" || return 1
     assert_output_contains_f "$out" "38;2;124;121;112;22m◔ ctx" "the label stays secondary ink" || return 1
 }
 
@@ -3263,7 +3271,7 @@ test_effort_is_secondary_ink_after_the_model() {
     export CS_TERM_BG_RGB="253;246;227"
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"model":{"display_name":"Opus"},"effort":{"level":"high"}}'
     local out; out=$(run_sl "$json")
-    assert_output_contains_f "$out" "38;2;79;77;71;1m✦ Opus" "model name bold primary" || return 1
+    assert_output_contains_f "$out" "38;2;76;29;149;1m✦ Opus" "model name bold periwinkle" || return 1
     assert_output_contains_f "$out" "✦ Opus${ESC_}[48;2;227;221;204m ${ESC_}[48;2;227;221;204;38;2;124;121;112;22mhigh" \
         "effort one space after, secondary, regular" || return 1
 }
@@ -3279,9 +3287,9 @@ test_notes_and_mail_are_amber_ink_after_the_session() {
     printf '{}' > "$CS_SESSIONS_ROOT/qsess/.cs/local/mail/new/1.json"
     local json='{"session_name":"qsess","workspace":{"current_dir":"/none"}}'
     local out; out=$(run_sl "$json")
-    assert_output_contains_f "$out" "qsess${ESC_}[48;2;227;221;204m  ${ESC_}[48;2;227;221;204;38;2;180;83;9;22m▤ 2" \
+    assert_output_contains_f "$out" "qsess${ESC_}[48;2;227;221;204m  ${ESC_}[48;2;227;221;204;38;2;146;64;14;22m▤ 2" \
         "notes: two fill spaces then amber ink" || return 1
-    assert_output_contains_f "$out" "38;2;180;83;9;22m✉ 1" "mail in amber ink" || return 1
+    assert_output_contains_f "$out" "38;2;146;64;14;22m✉ 1" "mail in amber ink" || return 1
     assert_output_not_contains_f "$out" "48;2;255;183;77" "no amber fill" || return 1
 }
 
@@ -3321,7 +3329,7 @@ test_limits_hot_window_is_amber_ink_then_crit_capsule() {
     export CS_TERM_BG_RGB="253;246;227"
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":75},"seven_day":{"used_percentage":12}}}'
     local out; out=$(run_sl "$json")
-    assert_output_contains_f "$out" "48;2;227;221;204;38;2;180;83;9;22m75%" "5h 75 is amber ink on the surface" || return 1
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;146;64;14;22m75%" "5h 75 is amber ink on the surface" || return 1
     json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":91},"seven_day":{"used_percentage":12}}}'
     out=$(run_sl "$json")
     assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◷ 5h" "5h 91 inverts its capsule" || return 1
@@ -3418,21 +3426,37 @@ run_test test_caps_switch_is_documented
 # a truecolor/256 "38;..." prefix and a basic bare code line up the same way.
 test_ink_tokens_contrast_every_surface() {
     _load_sl_functions
-    local level theme surface ink ink2
+    local level theme surface token color
     for level in truecolor 256 basic; do
         for theme in light dark; do
             LEVEL="$level"; SL_THEME="$theme"; _SURFACE_RGB=""
             _sgr 38 surface; surface="${_SGR#38;}"
-            _sgr 38 ink2;    ink2="${_SGR#38;}"
-            _sgr 38 ink;     ink="${_SGR#38;}"
-            [ "$ink2" != "$surface" ] \
-                || { echo "  FAIL: $level/$theme ink2 ($ink2) does not contrast the surface"; return 1; }
-            [ "$ink" != "$surface" ] \
-                || { echo "  FAIL: $level/$theme ink ($ink) does not contrast the surface"; return 1; }
+            for token in ink2 ink slate periwinkle amber; do
+                _sgr 38 "$token"; color="${_SGR#38;}"
+                [ "$color" != "$surface" ] \
+                    || { echo "  FAIL: $level/$theme $token ($color) does not contrast the surface"; return 1; }
+            done
         done
     done
 }
 
 run_test test_ink_tokens_contrast_every_surface
+
+# With caps on, a capsule opens cap-then-item and closes item-then-cap: no fill
+# space sits between the cap glyph and the item beside it (CS_STATUSLINE_CAPS=0
+# keeps that fill space as the chip's square edge; see test_caps_off_gives_square_chips).
+test_capsule_has_no_inner_padding() {
+    export COLORTERM=truecolor
+    export CS_TERM_BG_RGB="253;246;227"
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8}}'
+    local out; out=$(run_sl "$json")
+    local esc=$'\033'
+    assert_output_contains_f "$out" "${CAPL}${esc}[48;2;227;221;204;38;2;217;119;87;1m" \
+        "the left cap opens directly into the first item's SGR, no fill space" || return 1
+    assert_output_contains_f "$out" "8%${esc}[49;38;2;227;221;204m${CAPR}" \
+        "the last item's text runs directly into the right cap, no fill space" || return 1
+}
+
+run_test test_capsule_has_no_inner_padding
 
 report_results

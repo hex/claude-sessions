@@ -449,7 +449,14 @@ _sgr() {
                 orange) rgb="217;119;87" ;;
                 pink)   rgb="196;102;134" ;;
                 cyan)   rgb="8;145;178" ;;
-                periwinkle) rgb="138;134;236" ;;
+                # The branch item's ink: a cool slate, distinct from the warm
+                # neutral the untouched tokens fall back to.
+                slate)
+                    [ "$SL_THEME" = "dark" ] && rgb="229;231;235" || rgb="31;41;55" ;;
+                # The model name's ink: a violet distinct from the session
+                # palette and from slate/amber.
+                periwinkle)
+                    [ "$SL_THEME" = "dark" ] && rgb="196;181;253" || rgb="76;29;149" ;;
                 rowname)
                     # A subagent row's agent name sits on the bare terminal, not
                     # a capsule, so it takes ink that contrasts the canvas: near-white
@@ -463,7 +470,7 @@ _sgr() {
                 # the neutral capsule, dark enough to hold contrast on cream and
                 # bright enough on a dark surface. Nothing paints amber as a fill.
                 amber)
-                    [ "$SL_THEME" = "dark" ] && rgb="245;165;36" || rgb="180;83;9" ;;
+                    [ "$SL_THEME" = "dark" ] && rgb="253;230;138" || rgb="146;64;14" ;;
                 # Primary text on the capsule surface: a warm 35% shade of the
                 # surface on a light one, the soft white on a dark one — the same
                 # contrast pivot the old surface text used, resolved from the
@@ -534,20 +541,35 @@ _sgr() {
                 orange) idx=166 ;;
                 pink)   idx=162 ;;
                 cyan)   idx=30 ;;
-                periwinkle) idx=105 ;;
+                slate)      [ "$SL_THEME" = "dark" ] && idx=253 || idx=238 ;;
+                periwinkle) [ "$SL_THEME" = "dark" ] && idx=147 || idx=55 ;;
                 rowname) [ "$SL_THEME" = "dark" ] && idx=231 || idx=235 ;;
                 rowmeta) [ "$SL_THEME" = "dark" ] && idx=248 || idx=244 ;;
-                amber)   [ "$SL_THEME" = "dark" ] && idx=215 || idx=130 ;;
-                ink)     [ "$SL_THEME" = "dark" ] && idx=231 || idx=235 ;;
-                ink2)    [ "$SL_THEME" = "dark" ] && idx=252 || idx=238 ;;
+                amber)   [ "$SL_THEME" = "dark" ] && idx=221 || idx=94 ;;
+                ink)     [ "$SL_THEME" = "dark" ] && idx=255 || idx=236 ;;
+                ink2)    [ "$SL_THEME" = "dark" ] && idx=250 || idx=241 ;;
                 crit)    [ "$SL_THEME" = "dark" ] && idx=203 || idx=160 ;;
                 critink) [ "$SL_THEME" = "dark" ] && idx=232 || idx=231 ;;
                 brand)  idx=173 ;;
                 brandshade) idx=167 ;;
                 white)
                     [ "$SL_THEME" = "dark" ] && idx=254 || idx=255 ;;
+                # The capsule fill: reads like the truecolor surface on a
+                # cream terminal without CS_TERM_BG_RGB to shade (a tmux pane
+                # cs did not launch has no truecolor flag and no measured
+                # background, so this is what an agent-team teammate's row
+                # renders in).
+                surface)
+                    [ "$SL_THEME" = "dark" ] && idx=237 || idx=254 ;;
+                # Unknown names fall back to the surface value rather than a
+                # stray grey. Safe only because every ink this file paints is
+                # one of the named cases above: an unlisted foreground token
+                # would land on the same code as its own fill and paint
+                # invisible. _seg_session's colour-name allow-list is what
+                # keeps a bogus claude_session_color from ever reaching here
+                # as a foreground name.
                 *)
-                    [ "$SL_THEME" = "dark" ] && idx=245 || idx=244 ;;
+                    [ "$SL_THEME" = "dark" ] && idx=237 || idx=254 ;;
             esac
             _SGR="${kind};5;${idx}" ;;
         *)
@@ -561,10 +583,11 @@ _sgr() {
                 orange) base=33 ;;
                 pink)   base=95 ;;
                 cyan)   base=36 ;;
-                periwinkle) base=94 ;;
+                slate)      [ "$SL_THEME" = "dark" ] && base=97 || base=30 ;;
+                periwinkle) [ "$SL_THEME" = "dark" ] && base=95 || base=35 ;;
                 rowname) [ "$SL_THEME" = "dark" ] && base=97 || base=30 ;;
                 rowmeta) base=90 ;;
-                amber)  base=33 ;;
+                amber)  [ "$SL_THEME" = "dark" ] && base=93 || base=33 ;;
                 ink)     base=97 ;;
                 ink2)    [ "$SL_THEME" = "dark" ] && base=97 || base=37 ;;
                 crit)    base=31 ;;
@@ -1163,8 +1186,12 @@ _seg_logo() {
     _add "${ICON_LOGO}" identity "$ink" bold
 }
 
-# The session name, bold primary ink. Its claude_session_color stays on the
-# terminal tab and in claude's own accent; the bar does not paint it.
+# The session name, bold, in its own claude_session_color when the session has
+# one (the same palette Claude Code's own tab and /color share), else primary
+# ink. A colour outside that palette (state hand-edited or from a future
+# claude release) falls back to ink rather than reaching _sgr with a name it
+# does not resolve. KEEP IN SYNC with the eight names in _sgr and
+# _session_color_rgb in bin/cs.
 _seg_session() {
     local name="$SL_SESSION"
     [ -n "$name" ] || name="${CLAUDE_SESSION_NAME:-}"
@@ -1172,7 +1199,14 @@ _seg_session() {
         local dir="${SL_DIR:-$PWD}"
         name="${dir##*/}"
     fi
-    _add "${name}" identity ink bold space
+    local ink=ink
+    if [ -n "${CLAUDE_SESSION_NAME:-}" ]; then
+        _read_state_key "$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/local/state" claude_session_color
+        case "$_STATE_VALUE" in
+            red|blue|green|yellow|purple|orange|pink|cyan) ink="$_STATE_VALUE" ;;
+        esac
+    fi
+    _add "${name}" identity "$ink" bold space
 }
 
 # Count of queued tasks for the current session (one file per task in
@@ -1238,7 +1272,7 @@ _seg_ctx() {
 
 _seg_model() {
     [ -n "$SL_MODEL" ] || return 0
-    _add "${ICON_MODEL}${SL_MODEL}" identity ink bold
+    _add "${ICON_MODEL}${SL_MODEL}" identity periwinkle bold
     [ -n "$SL_EFFORT" ] && _add "$SL_EFFORT" identity ink2 "" space
     return 0
 }
@@ -1247,7 +1281,7 @@ _seg_git() {
     _git_text "$SL_DIR"
     local t="$_GIT_TEXT"
     [ -n "$t" ] || return 0
-    _add "${ICON_GIT}${t}" identity ink bold
+    _add "${ICON_GIT}${t}" identity slate bold
 }
 
 # One rate-limit capsule: label in secondary ink, the number in the threshold
@@ -1413,13 +1447,14 @@ _bg_shade() {
 # --- render ----------------------------------------------------------------
 
 # One line of capsules on the terminal's own background. Each group of items
-# becomes one capsule: a rounded left cap, a fill space, the items (joined as
-# each asked), a fill space, a rounded right cap; two default-background cells
-# follow the identity capsule and one follows every other. The caps are
-# Powerline glyphs (U+E0B6/U+E0B4) drawn as fill-coloured ink on the default
-# background, so they read as the capsule's rounded ends; CS_STATUSLINE_CAPS=0
-# drops the glyphs for a font without them and the fill spaces become square
-# edges. A crit capsule takes the crit fill and paints every item critink bold.
+# becomes one capsule: a rounded left cap, the items (joined as each asked), a
+# rounded right cap, with no fill space between a cap and the item beside it;
+# two default-background cells follow the identity capsule and one follows
+# every other. The caps are Powerline glyphs (U+E0B6/U+E0B4) drawn as
+# fill-coloured ink on the default background, so they read as the capsule's
+# rounded ends; CS_STATUSLINE_CAPS=0 drops the glyphs for a font without them
+# and each cap is replaced by a fill space, giving the chip a square edge.
+# A crit capsule takes the crit fill and paints every item critink bold.
 # SGR bold is stateful, so every item emits its intensity explicitly (1 or 22).
 # No width accounting and no tail: the line ends at the last cap.
 _render() {
@@ -1462,8 +1497,11 @@ _render() {
         case "$_CRIT_GROUPS" in *" $g "*) fill=crit ;; esac
         _sgr 48 "$fill"; fillsgr="$_SGR"
         _sgr 38 "$fill"; capsgr="$_SGR"
-        [ -n "$capl" ] && out+="${esc}[49;${capsgr}m${capl}"
-        out+="${esc}[${fillsgr}m "
+        if [ -n "$capl" ]; then
+            out+="${esc}[49;${capsgr}m${capl}"
+        else
+            out+="${esc}[${fillsgr}m "
+        fi
         first=1
         for ((i = 0; i < n; i++)); do
             [ "${_SEG_GROUP[i]}" = "$g" ] || continue
@@ -1481,8 +1519,11 @@ _render() {
             _sgr 38 "$ink"
             out+="${esc}[${fillsgr};${_SGR};${weight}m${_SEG_TEXT[i]}"
         done
-        out+="${esc}[${fillsgr}m "
-        [ -n "$capr" ] && out+="${esc}[49;${capsgr}m${capr}"
+        if [ -n "$capr" ]; then
+            out+="${esc}[49;${capsgr}m${capr}"
+        else
+            out+="${esc}[${fillsgr}m "
+        fi
         out+="$reset"
         if [ $((k + 1)) -lt ${#_GROUPS[@]} ]; then
             if [ "$g" = "identity" ]; then out+="  "; else out+=" "; fi
