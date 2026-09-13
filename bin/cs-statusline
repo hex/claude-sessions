@@ -459,7 +459,30 @@ _sgr() {
                     # The row's description, ctx and elapsed: quieter than the
                     # name, still readable against the terminal on either theme.
                     [ "$SL_THEME" = "dark" ] && rgb="170;161;148" || rgb="128;116;106" ;;
-                amber)  rgb="255;183;77" ;;
+                # Inks. `amber` is a foreground now: the hot number's colour on
+                # the neutral capsule, dark enough to hold contrast on cream and
+                # bright enough on a dark surface. Nothing paints amber as a fill.
+                amber)
+                    [ "$SL_THEME" = "dark" ] && rgb="245;165;36" || rgb="180;83;9" ;;
+                # Primary text on the capsule surface: a warm 35% shade of the
+                # surface on a light one, the soft white on a dark one — the same
+                # contrast pivot the old surface text used, resolved from the
+                # surface's own luminance rather than the theme flag.
+                ink)
+                    _sgr 48 surface
+                    if _parse_rgb_triplet "$_RGB" && { _luminance; [ "$_LUM" -ge 1530000 ]; }; then
+                        rgb="$((_R * 35 / 100));$((_G * 35 / 100));$((_B * 35 / 100))"
+                    elif [ "$SL_THEME" = "dark" ]; then rgb="230;230;230"
+                    else rgb="255;255;255"; fi ;;
+                # Secondary text: separators, effort, gauge labels, resting numbers.
+                ink2)
+                    [ "$SL_THEME" = "dark" ] && rgb="168;170;166" || rgb="119;117;110" ;;
+                # The inverted capsule at crit. Its own token, never the session
+                # palette's red: that palette is the tab colour and may change.
+                crit)
+                    [ "$SL_THEME" = "dark" ] && rgb="255;69;58" || rgb="215;0;21" ;;
+                critink)
+                    [ "$SL_THEME" = "dark" ] && rgb="37;0;0" || rgb="255;255;255" ;;
                 brand)  rgb="217;119;87" ;;   # Claude coral (#D97757)
                 brandshade)
                     # The logo badge's own divider ink: a coral a shade darker
@@ -512,7 +535,11 @@ _sgr() {
                 chiptext) idx=231 ;;
                 rowname) [ "$SL_THEME" = "dark" ] && idx=231 || idx=235 ;;
                 rowmeta) [ "$SL_THEME" = "dark" ] && idx=248 || idx=244 ;;
-                amber)  idx=215 ;;
+                amber)   [ "$SL_THEME" = "dark" ] && idx=215 || idx=130 ;;
+                ink)     [ "$SL_THEME" = "dark" ] && idx=231 || idx=235 ;;
+                ink2)    [ "$SL_THEME" = "dark" ] && idx=248 || idx=244 ;;
+                crit)    [ "$SL_THEME" = "dark" ] && idx=203 || idx=160 ;;
+                critink) [ "$SL_THEME" = "dark" ] && idx=232 || idx=231 ;;
                 brand)  idx=173 ;;
                 brandshade) idx=167 ;;
                 hairline) idx=248 ;;
@@ -540,6 +567,10 @@ _sgr() {
                 rowname) [ "$SL_THEME" = "dark" ] && base=97 || base=30 ;;
                 rowmeta) base=90 ;;
                 amber)  base=33 ;;
+                ink)     [ "$SL_THEME" = "dark" ] && base=97 || base=30 ;;
+                ink2)    base=90 ;;
+                crit)    base=31 ;;
+                critink) [ "$SL_THEME" = "dark" ] && base=30 || base=97 ;;
                 white)  base=97 ;;
                 black)  base=30 ;;
                 brand)  base=33 ;;
@@ -573,12 +604,14 @@ _num_or() {  # value, default -> _NUM (the hook's namesake prints instead)
     esac
 }
 
-# Set _COLOR by mapping a value against warn/crit thresholds; below warn it
-# takes the healthy color ($4, default the bg-derived surface).
+# Set _COLOR by mapping a value against warn/crit thresholds: `crit` at or past
+# crit, `amber` at or past warn, else the healthy name ($4, default the
+# secondary ink). Callers paint the NUMBER with it; `crit` also tells the
+# renderer to invert the whole capsule.
 _thresh_color() {
-    local v="$1" warn="$2" crit="$3" healthy="${4:-surface}"
+    local v="$1" warn="$2" crit="$3" healthy="${4:-ink2}"
     if [ "$v" -ge "$crit" ]; then
-        _COLOR=red
+        _COLOR=crit
     elif [ "$v" -ge "$warn" ]; then
         _COLOR=amber
     else

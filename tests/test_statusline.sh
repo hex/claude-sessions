@@ -3478,4 +3478,72 @@ run_test test_two_accounts_do_not_defeat_the_poll_floor
 run_test test_refresh_never_writes_a_reading_under_an_empty_account
 run_test test_refresh_treats_an_unparseable_200_as_a_failure
 
+# ============================================================================
+# Capsule colour tokens: the four inks and the crit fill, per level and theme
+# ============================================================================
+
+test_sgr_ink_tokens_truecolor_light() {
+    export CS_TERM_THEME=light
+    _load_sl_functions
+    LEVEL=truecolor; SL_THEME=light; _SURFACE_RGB=""
+    _sgr 38 ink2;    assert_eq "38;2;119;117;110" "$_SGR" "ink2 light" || return 1
+    _sgr 38 amber;   assert_eq "38;2;180;83;9"    "$_SGR" "amber is an ink on light" || return 1
+    _sgr 48 crit;    assert_eq "48;2;215;0;21"    "$_SGR" "crit fill light" || return 1
+    _sgr 38 critink; assert_eq "38;2;255;255;255" "$_SGR" "crit ink light" || return 1
+}
+
+test_sgr_ink_tokens_truecolor_dark() {
+    _load_sl_functions
+    LEVEL=truecolor; SL_THEME=dark; _SURFACE_RGB=""
+    _sgr 38 ink2;    assert_eq "38;2;168;170;166" "$_SGR" "ink2 dark" || return 1
+    _sgr 38 amber;   assert_eq "38;2;245;165;36"  "$_SGR" "amber ink dark" || return 1
+    _sgr 48 crit;    assert_eq "48;2;255;69;58"   "$_SGR" "crit fill dark" || return 1
+    _sgr 38 critink; assert_eq "38;2;37;0;0"      "$_SGR" "crit ink dark" || return 1
+}
+
+test_sgr_ink_follows_surface_luminance() {
+    # ink is the 35% shade of a light surface and white on a dark one, exactly
+    # the contrast rule the old surface text used.
+    _load_sl_functions
+    LEVEL=truecolor; SL_THEME=light; _SURFACE_RGB="227;221;204"
+    _sgr 38 ink; assert_eq "38;2;79;77;71" "$_SGR" "ink on a light surface is its 35% shade" || return 1
+    SL_THEME=dark; _SURFACE_RGB="46;48;50"
+    _sgr 38 ink; assert_eq "38;2;230;230;230" "$_SGR" "ink on a dark surface is the soft white" || return 1
+}
+
+test_sgr_ink_tokens_256_and_basic() {
+    _load_sl_functions
+    LEVEL=256; SL_THEME=light
+    _sgr 38 ink2;    assert_eq "38;5;244" "$_SGR" "ink2 256 light" || return 1
+    _sgr 38 amber;   assert_eq "38;5;130" "$_SGR" "amber 256 light" || return 1
+    _sgr 48 crit;    assert_eq "48;5;160" "$_SGR" "crit 256 light" || return 1
+    _sgr 38 critink; assert_eq "38;5;231" "$_SGR" "critink 256 light" || return 1
+    SL_THEME=dark
+    _sgr 38 ink2;    assert_eq "38;5;248" "$_SGR" "ink2 256 dark" || return 1
+    _sgr 38 amber;   assert_eq "38;5;215" "$_SGR" "amber 256 dark" || return 1
+    _sgr 48 crit;    assert_eq "48;5;203" "$_SGR" "crit 256 dark" || return 1
+    _sgr 38 critink; assert_eq "38;5;232" "$_SGR" "critink 256 dark" || return 1
+    LEVEL=basic; SL_THEME=light
+    _sgr 38 ink2;    assert_eq "90" "$_SGR" "ink2 basic" || return 1
+    _sgr 38 amber;   assert_eq "33" "$_SGR" "amber basic" || return 1
+    _sgr 48 crit;    assert_eq "41" "$_SGR" "crit basic bg" || return 1
+    _sgr 38 critink; assert_eq "97" "$_SGR" "critink basic light" || return 1
+    SL_THEME=dark
+    _sgr 38 critink; assert_eq "30" "$_SGR" "critink basic dark" || return 1
+}
+
+test_thresh_color_emits_crit_and_defaults_to_ink2() {
+    _load_sl_functions
+    _thresh_color 10 40 65; assert_eq "ink2"  "$_COLOR" "below warn is the secondary ink" || return 1
+    _thresh_color 40 40 65; assert_eq "amber" "$_COLOR" "at warn is amber" || return 1
+    _thresh_color 65 40 65; assert_eq "crit"  "$_COLOR" "at crit is crit, not red" || return 1
+    _thresh_color 10 40 65 rowmeta; assert_eq "rowmeta" "$_COLOR" "an explicit healthy name is honoured" || return 1
+}
+
+run_test test_sgr_ink_tokens_truecolor_light
+run_test test_sgr_ink_tokens_truecolor_dark
+run_test test_sgr_ink_follows_surface_luminance
+run_test test_sgr_ink_tokens_256_and_basic
+run_test test_thresh_color_emits_crit_and_defaults_to_ink2
+
 report_results
