@@ -2042,38 +2042,34 @@ fn render_merge(app: &mut App, frame: &mut Frame, area: Rect) {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled("  ON FINISH", Style::default().fg(p.mut_))));
 
-        // Enter arms /merge, which is the RITUAL: gates, merge, gates, cleanup.
-        // The ritual has no already-merged carve-out — only the `git merge`
-        // inside `cs --merge` is skipped — so both gate passes belong in every
-        // plan. And `cs --merge` merges, fuses records, removes the worktree and
-        // deletes the branch in one invocation, before the post-merge gate: a
-        // plan listing removal last implies a red gate leaves a worktree to go
-        // back to, and by then there is none.
-        //
-        // The predicate is `ahead == 0`, not `merged`. merge_worktree_session
-        // asks plain `is-ancestor branch HEAD`, true at EQUAL tips;
-        // _feature_readiness's `merged` adds a strictness guard so the STATE
-        // word does not call a fresh worktree merged. `rev-list --count
-        // HEAD..branch == 0` is exactly the verb's own condition.
+        // Enter arms /finish: cs merges base + the captured feature commit in
+        // a temporary detached worktree, runs the gates THERE, and fast-forwards
+        // the base onto the result. Nothing is removed; retirement is a later,
+        // separate verb. `ahead == 0` is the entry's own "already integrated"
+        // condition (is-ancestor of base HEAD), so no merge is promised then.
         let nothing_to_merge = f.ahead == 0;
-        let step2 = if nothing_to_merge {
-            let why = if f.merged { "already merged into" } else { "nothing to merge into" };
-            format!(
-                "    2  {} {} \u{b7} fuse records, remove worktree, delete branch",
-                why, app.merge_base
+        // The whole plan is conditional: when nothing lands, the entry
+        // returns before creating a checkout or running a gate.
+        let (step1, step2) = if nothing_to_merge {
+            (
+                format!("    1  already integrated into {} \u{b7} nothing to land", app.merge_base),
+                "    2  no checkout, no gates".to_string(),
             )
         } else {
-            // `git merge --no-edit` carries no --no-ff, so a feature whose base
-            // has not moved fast-forwards and leaves no merge commit.
-            let shape = if f.ff { "fast-forward" } else { "merge commit" };
-            format!(
-                "    2  merge into {} ({}) \u{b7} fuse records, remove worktree, delete branch",
-                app.merge_base, shape
+            (
+                format!("    1  merge {} + {} in a temp checkout \u{b7} gates there", app.merge_base, f.branch),
+                format!("    2  land on {} (merge commit)", app.merge_base),
             )
         };
-        lines.push(Line::from(Span::styled("    1  gates in this worktree", Style::default().fg(p.ink))));
+        lines.push(Line::from(Span::styled(step1, Style::default().fg(p.ink))));
         lines.push(Line::from(Span::styled(step2, Style::default().fg(p.ink))));
-        lines.push(Line::from(Span::styled(format!("    3  gates in {}", app.merge_base), Style::default().fg(p.ink))));
+        // Two lines: Paragraph truncates rather than wraps, and a real base
+        // and task name would push the verb off the tail of one line.
+        lines.push(Line::from(Span::styled("    3  worktree, branch and session stay", Style::default().fg(p.ink))));
+        lines.push(Line::from(Span::styled(
+            format!("       retire later: cs {} --merge {}", app.merge_base, f.task),
+            Style::default().fg(p.mut_),
+        )));
         let body = Rect::new(
             detail_area.x + 1,
             detail_area.y + 2,
@@ -4503,45 +4499,36 @@ mod tests {
             "nothing is merged at equal tips, so no merge may be promised:\n{text}"
         );
         assert!(
-            text.contains("nothing to merge"),
-            "the plan must say there is nothing to merge:\n{text}"
+            text.contains("nothing to land"),
+            "the plan must say there is nothing to land:\n{text}"
+        );
+        assert!(
+            !text.contains("temp checkout"),
+            "no gate runs when nothing lands:\n{text}"
         );
     }
 
     #[test]
-    fn merge_screen_keeps_the_gates_in_the_cleanup_plan() {
-        // Enter arms /merge, which is the ritual: gates, merge, gates, cleanup.
-        // The ritual has no already-merged carve-out — only the `git merge`
-        // inside `cs --merge` is skipped. A "cleanup only" plan hides two full
-        // gate runs.
+    fn merge_screen_names_the_temp_gate_and_keeps_the_worktree() {
+        // Enter arms /finish: merge in a temp worktree, gate there, fast-forward
+        // the base, keep everything. The plan must say where the gate runs and
+        // that nothing is removed.
         let mut app = merge_app();
-        app.merge_features[0].merged = true;
-        app.merge_features[0].ahead = 0;
-        app.merge_selected = 0;
         let text = render_wide(&mut app);
-        assert!(text.contains("already merged"), "wording must name the state:\n{text}");
-        assert!(
-            text.contains("gates in this worktree") && text.contains("gates in myproj"),
-            "both gate passes still run and must be listed:\n{text}"
-        );
+        assert!(text.contains("temp checkout"), "the gate location must be named:\n{text}");
+        assert!(text.contains("stay"), "retention must be stated:\n{text}");
+        assert!(!text.contains("remove worktree"), "/finish removes nothing:\n{text}");
+        assert!(!text.contains("delete branch"), "/finish deletes nothing:\n{text}");
     }
 
     #[test]
-    fn merge_screen_puts_removal_in_the_merge_step_not_after_the_gates() {
-        // `cs <base> --merge <task>` merges, fuses records, removes the worktree
-        // and deletes the branch in ONE invocation — before any post-merge gate.
-        // Listing removal after the gates implies a red gate leaves a worktree
-        // to return to; by then it is gone.
+    fn merge_screen_points_retirement_at_the_verb() {
+        // Retirement is still cs <base> --merge <task>, run later by the user.
         let mut app = merge_app();
         let text = render_wide(&mut app);
-        let merge_line = text
-            .lines()
-            .find(|l| l.contains("merge into myproj"))
-            .expect("the merge step should render")
-            .to_string();
         assert!(
-            merge_line.contains("remove worktree"),
-            "removal happens inside the merge step:\n{merge_line}"
+            text.contains("cs myproj --merge"),
+            "the retire verb must be named as a later step:\n{text}"
         );
     }
 
@@ -4622,8 +4609,8 @@ mod tests {
         let mut app = merge_app();
         let text = render_at(&mut app, 100, 21);
         assert!(
-            text.contains("remove worktree"),
-            "the destructive step must survive a 21-row terminal:\n{text}"
+            text.contains("cs myproj --merge"),
+            "the retire line must survive a 21-row terminal:\n{text}"
         );
     }
 
@@ -4638,7 +4625,7 @@ mod tests {
         app.merge_selected = 0;
         let text = render_wide(&mut app);
         assert!(
-            text.contains("already merged"),
+            text.contains("already integrated"),
             "an already-merged feature must say so:\n{text}"
         );
         assert!(
@@ -4739,17 +4726,16 @@ mod tests {
     }
 
     #[test]
-    fn merge_screen_names_fast_forward_versus_merge_commit() {
-        // cs runs `git merge --no-edit` with no --no-ff, so a feature whose
-        // base has not moved leaves no merge commit. One affordance must not
-        // hide two behaviours.
+    fn merge_screen_promises_a_merge_commit_for_every_ordinary_landing() {
+        // The entry merges --no-ff, so the ff/merge-commit split the old
+        // verb had is gone: both rows promise a merge commit.
         let mut app = merge_app();
         let text = render_wide(&mut app);
-        assert!(text.contains("fast-forward"), "an ff merge must say so:\n{text}");
-
+        assert!(text.contains("merge commit"), "an ff-able feature still lands as a merge commit:\n{text}");
+        assert!(!text.contains("fast-forward "), "fast-forward is never promised for the landing shape:\n{text}");
         app.merge_selected = 1; // ff: false
         let text = render_wide(&mut app);
-        assert!(text.contains("merge commit"), "a non-ff merge must say so:\n{text}");
+        assert!(text.contains("merge commit"), "a non-ff feature lands as a merge commit:\n{text}");
     }
 
     #[test]
