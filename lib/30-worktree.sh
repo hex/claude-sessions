@@ -581,9 +581,113 @@ integrate_feature_worktree() {  # base_name task sha [--from-remote] -- gate...
     _integrate_in_temp "$base_dir" "$wt_dir" "$task" "$sha" "$common" "$from_remote" "$@"
 }
 
-# Temp-worktree merge, gates, fast-forward. Task 3 of the plan.
+# The mutation half of integrate_feature_worktree, entered with the mutex
+# held and the cleanup trap armed: merge base HEAD + <sha> in a temporary
+# detached worktree under <common>/cs/finish/, run the gate argv there, then
+# fast-forward the base onto the result. The fast-forward is the atomic
+# "base has not moved" check; a red gate or a conflict leaves base exactly
+# as it was. No hook of the project fires inside the temp (core.hooksPath
+# points at an empty directory for the add and the merge): the gate argv is
+# the project's gate, run explicitly.
 _integrate_in_temp() {  # base_dir wt_dir task sha common from_remote gate...
-    error "integrate is not implemented yet (refusals passed)"
+    local base_dir="$1" wt_dir="$2" task="$3" sha="$4" common="$5" from_remote="$6"
+    shift 6
+
+    local B
+    B=$(git -C "$base_dir" rev-parse HEAD)
+    local tmp="$common/cs/finish/$task.$$"
+    mkdir -p "$common/cs/finish"
+    # /dev/null is not a directory on BSD, so hooks are silenced with a real
+    # empty one.
+    local no_hooks
+    no_hooks=$(mktemp -d "${TMPDIR:-/tmp}/cs-nohooks.XXXXXX")
+    if ! git -C "$base_dir" -c core.hooksPath="$no_hooks" worktree add --detach "$tmp" "$B" >/dev/null 2>&1; then
+        rmdir "$no_hooks"
+        error "git worktree add failed for $tmp"
+    fi
+    _INTEGRATE_TMP="$tmp"
+
+    local mode
+    mode=$(_read_local_state "$wt_dir/.cs/local/state" cs_mode)
+    if [ "$mode" = "tracked" ]; then
+        _setup_merge_attributes_clone_local "$base_dir" "$common"
+        _warn_memory_index_changed "$base_dir" "$sha"
+    fi
+
+    # --no-ff locally: the merge commit names the feature and is the audit
+    # trail /finish leaves, and it gives the retire verb's ancestor check
+    # something to find. --from-remote: the landing commit already exists on
+    # origin and names the PR, so a fast-forward is the right shape there.
+    local sha7 merge_status=0
+    sha7=$(printf '%s' "$sha" | cut -c1-7)
+    if [ -n "$from_remote" ]; then
+        git -C "$tmp" -c core.hooksPath="$no_hooks" merge --no-edit "$sha" >/dev/null 2>&1 || merge_status=$?
+    else
+        git -C "$tmp" -c core.hooksPath="$no_hooks" merge --no-ff --no-edit \
+            -m "Merge feature $task ($sha7)" "$sha" >/dev/null 2>&1 || merge_status=$?
+    fi
+    if [ "$merge_status" != 0 ]; then
+        rmdir "$no_hooks"
+        local conflicts
+        conflicts=$(git -C "$tmp" diff --name-only --diff-filter=U 2>/dev/null || true)
+        error "Merge of $sha conflicts with $base_dir at $B; base untouched. Conflicting paths:
+${conflicts:-(none reported; see git -C \"$tmp\" status)}
+Resolve on the feature branch (git merge <base branch> in $wt_dir), then re-run /finish $task"
+    fi
+    # Submodules after the merge, so the gates see the MERGED gitlinks: a
+    # feature that adds or bumps a submodule is otherwise gated against
+    # absent or stale contents.
+    if [ -f "$tmp/.gitmodules" ]; then
+        git -C "$tmp" -c core.hooksPath="$no_hooks" submodule update --init --recursive -q >/dev/null 2>&1 \
+            || { rmdir "$no_hooks"; error "submodule update failed in $tmp"; }
+    fi
+    rmdir "$no_hooks"
+
+    local gate_log
+    gate_log=$(mktemp "${TMPDIR:-/tmp}/cs-gate.XXXXXX")
+    if ! (cd "$tmp" && "$@") > "$gate_log" 2>&1; then
+        cat "$gate_log" >&2
+        rm -f "$gate_log"
+        error "Gate failed in $tmp (output above); base $base_dir untouched at $B"
+    fi
+    rm -f "$gate_log"
+
+    # Re-verify the base immediately before landing. --ff-only alone is not
+    # the "base unchanged" check: a base reset to an ancestor of B still
+    # fast-forwards, and unrelated tracked dirt survives one. The residual
+    # window between this check and the merge is the one race left; the
+    # mutex keeps cs's own writer (the autosave hook) out of it.
+    if [ "$(git -C "$base_dir" rev-parse HEAD)" != "$B" ]; then
+        error "Base $base_dir moved during the gates (was $B, now $(git -C "$base_dir" rev-parse --short HEAD)); re-run /finish $task"
+    fi
+    if _tree_is_dirty "$base_dir" || git -C "$base_dir" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+        error "Base $base_dir changed during the gates (uncommitted changes or a merge in progress); commit or abort, then re-run /finish $task"
+    fi
+    # Fast-forward BEFORE removing the temp: until then the merge commit is
+    # reachable only from the temp's detached HEAD.
+    local R
+    R=$(git -C "$tmp" rev-parse HEAD)
+    if ! git -C "$base_dir" merge --ff-only "$R" >/dev/null 2>&1; then
+        error "Base $base_dir moved or changed during the gates (was $B); re-run /finish $task"
+    fi
+    # Keep _INTEGRATE_TMP until the removal is verified, so the EXIT cleanup
+    # still has the path if this removal fails; a leftover temp is reported,
+    # never silently forgotten.
+    if git -C "$base_dir" worktree remove --force "$tmp" >/dev/null 2>&1; then
+        _INTEGRATE_TMP=""
+    else
+        warn "Temporary worktree $tmp could not be removed; run: git -C \"$base_dir\" worktree remove --force \"$tmp\""
+    fi
+
+    _terminate_jsonl "$base_dir/.cs/timeline.jsonl"
+    jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+           --arg event "feature-integrated" \
+           --arg task "$task" \
+           --arg sha "$sha" \
+           --arg result "$R" \
+        '{ts: $ts, event: $event, task: $task, sha: $sha, result: $result}' \
+        >> "$base_dir/.cs/timeline.jsonl" 2>/dev/null || true
+    printf 'integrated %s %s -> %s\n' "$task" "$sha" "$R"
 }
 
 # Append one JSONL file onto another, keeping every record on its own line. A

@@ -584,22 +584,21 @@ test_integrate_refuses_foreign_live_base_lock() {
 
 test_integrate_ignores_the_feature_lock() {
     # The feature session stays open: its lock is not a blocker because the
-    # integrate never touches the feature worktree. Here it only has to get
-    # PAST every refusal, which Task 2's placeholder proves by refusing with
-    # its own fixed message. Task 3 replaces this pin with the real happy path
-    # (test_integrate_lands_a_no_ff_merge_and_keeps_everything repeats the
-    # live-lock setup there).
-    local sha base_dir wt
+    # integrate never touches the feature worktree.
+    local sha base_dir wt output status=0
     sha=$(integrate_fixture myproj fix-auth)
     base_dir="$CS_SESSIONS_ROOT/myproj"
     wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
     echo "$$" > "$wt/.cs/session.lock"
-    local ps_stub output status=0
+    local ps_stub
     ps_stub=$(fixed_parent_ps_stub 1)
     output=$(CS_PS_BIN="$ps_stub" "$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- true 2>&1) || status=$?
-    assert_eq "1" "$status" "the placeholder refuses" || return 1
-    assert_output_contains "$output" "integrate is not implemented yet (refusals passed)" \
-        "every refusal was passed with the feature lock live" || return 1
+    assert_eq "0" "$status" "integrate succeeds with the feature lock live: $output" || return 1
+    local head
+    head=$(git -C "$base_dir" rev-parse HEAD)
+    assert_output_contains "$output" "integrated fix-auth $sha -> $head" "summary line names the result" || return 1
+    assert_file_exists "$base_dir/feature.txt" "feature content is on base" || return 1
+    assert_dir "$wt" "the feature worktree remains" || return 1
 }
 
 test_integrate_refuses_merge_in_progress() {
@@ -676,6 +675,260 @@ run_test test_integrate_requires_a_gate_command
 run_test test_integrate_requires_a_sha
 run_test test_integrate_is_hidden_from_completion_and_unknown_command_text
 run_test test_integrate_and_autosave_spell_one_mutex_path
+
+test_integrate_lands_a_no_ff_merge_and_keeps_everything() {
+    local sha base_dir wt output status=0
+    sha=$(integrate_fixture myproj fix-auth)
+    base_dir="$CS_SESSIONS_ROOT/myproj"
+    wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- true 2>&1) || status=$?
+    assert_eq "0" "$status" "integrate succeeds: $output" || return 1
+    local head
+    head=$(git -C "$base_dir" rev-parse HEAD)
+    assert_output_contains "$output" "integrated fix-auth $sha -> $head" "summary line names the result" || return 1
+    assert_file_exists "$base_dir/feature.txt" "feature content is on base" || return 1
+    assert_eq "3" "$(git -C "$base_dir" rev-list --parents -n1 HEAD | wc -w | tr -d ' ')" \
+        "base HEAD is a merge commit: its sha plus two parents (--no-ff)" || return 1
+    assert_dir "$wt" "the feature worktree remains" || return 1
+    # rev-parse, not `branch --list`: git prefixes a branch checked out in a
+    # linked worktree with `+`, so the listing never equals the bare name.
+    git -C "$base_dir" rev-parse -q --verify refs/heads/cs/fix-auth >/dev/null 2>&1 \
+        || { echo "  FAIL: the branch must remain"; return 1; }
+    assert_output_not_contains "$(git -C "$base_dir" worktree list)" "cs/finish" "no temp worktree left registered" || return 1
+    assert_not_exists "$base_dir/.git/cs/integrate.lock" "mutex released" || return 1
+    assert_file_contains "$base_dir/.cs/timeline.jsonl" '"event":"feature-integrated"' "timeline records the integrate" || return 1
+    assert_file_contains "$base_dir/.cs/timeline.jsonl" "\"sha\":\"$sha\"" "event carries the sha" || return 1
+    # The merge commit names the feature: it is the only audit trail /finish leaves.
+    assert_output_contains "$(git -C "$base_dir" log -1 --format=%s)" "Merge feature fix-auth" "merge subject names the feature" || return 1
+}
+
+# The load-bearing local happy path: after an integrate, today's retire verb
+# takes its "already merged; cleaning up" branch and merges NOTHING. In
+# tracked mode the integrate's own timeline event dirties the base (the
+# timeline is tracked there), and the verb refuses dirt — so the test stages
+# the general case: a tracked timeline, the refusal, the user's commit of the
+# bookkeeping, then the ancestor path. Retirement semantics are unchanged.
+test_integrate_then_merge_verb_takes_the_ancestor_path() {
+    local sha base_dir wt output status=0
+    base_dir=$(create_test_session_with_git "myproj")
+    echo '{"ts":"2026-01-01T00:00:00Z","event":"seed"}' > "$base_dir/.cs/timeline.jsonl"
+    (cd "$base_dir" && git add .cs/timeline.jsonl && git commit -q -m seed)
+    cs_launch "myproj@fix-auth"
+    wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "feature work" > "$wt/feature.txt"
+    (cd "$wt" && git add feature.txt && git commit -q -m "feature work")
+    sha=$(git -C "$wt" rev-parse HEAD)
+    "$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- true >/dev/null 2>&1 || return 1
+    assert_eq " M .cs/timeline.jsonl" "$(git -C "$base_dir" status --porcelain)" \
+        "the only dirt after an integrate is the tracked timeline event" || return 1
+    output=$("$CS_BIN" myproj --merge fix-auth 2>&1) || status=$?
+    assert_eq "1" "$status" "retire refuses the dirty base, as it always has" || return 1
+    assert_output_contains "$output" "Base session has uncommitted changes" "the refusal is the verb's own" || return 1
+    (cd "$base_dir" && git add .cs/timeline.jsonl && git commit -q -m "record the integrate")
+    local head_after_integrate
+    head_after_integrate=$(git -C "$base_dir" rev-parse HEAD)
+    status=0
+    output=$("$CS_BIN" myproj --merge fix-auth 2>&1) || status=$?
+    assert_eq "0" "$status" "retire succeeds after integrate: $output" || return 1
+    assert_output_contains "$output" "already merged; cleaning up" "the verb skips the merge" || return 1
+    assert_eq "$head_after_integrate" "$(git -C "$base_dir" rev-parse HEAD)" "retire makes no new commit" || return 1
+    assert_not_exists "$wt" "retire removed the worktree" || return 1
+    assert_eq "" "$(git -C "$base_dir" branch --list cs/fix-auth)" "retire deleted the branch" || return 1
+}
+
+test_integrate_red_gate_leaves_base_untouched() {
+    local sha base_dir output status=0
+    sha=$(integrate_fixture myproj fix-auth)
+    base_dir="$CS_SESSIONS_ROOT/myproj"
+    local head
+    head=$(git -C "$base_dir" rev-parse HEAD)
+    # The gate records where it ran: a red gate in the LIVE base would also
+    # "leave HEAD unchanged", so location is part of what this proves.
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- sh -c 'pwd > "$0/where"; echo GATE-SAYS-NO; exit 3' "$TEST_TMPDIR" 2>&1) || status=$?
+    assert_eq "1" "$status" "a red gate refuses" || return 1
+    assert_output_contains "$(cat "$TEST_TMPDIR/where" 2>/dev/null)" "/.git/cs/finish/fix-auth." "the red gate ran in the temp" || return 1
+    assert_output_contains "$output" "GATE-SAYS-NO" "the gate output is shown" || return 1
+    assert_output_contains "$output" "Gate failed" "names the cause" || return 1
+    assert_eq "$head" "$(git -C "$base_dir" rev-parse HEAD)" "base HEAD unchanged" || return 1
+    assert_file_not_exists "$base_dir/feature.txt" "base tree unchanged" || return 1
+    assert_output_not_contains "$(git -C "$base_dir" worktree list)" "cs/finish" "temp worktree removed" || return 1
+    assert_not_exists "$base_dir/.git/cs/integrate.lock" "mutex released on failure" || return 1
+}
+
+test_integrate_gates_run_in_the_temp_not_the_live_trees() {
+    local sha base_dir wt output status=0
+    sha=$(integrate_fixture myproj fix-auth)
+    base_dir="$CS_SESSIONS_ROOT/myproj"
+    wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    # The gate records where it ran and proves the merged tree is there.
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- sh -c 'pwd > "$0/where"; test -f feature.txt' "$TEST_TMPDIR" 2>&1) || status=$?
+    assert_eq "0" "$status" "gate saw the merged tree: $output" || return 1
+    local where
+    where=$(cat "$TEST_TMPDIR/where")
+    assert_output_contains "$where" "/.git/cs/finish/fix-auth." "gate ran in the temp worktree" || return 1
+    assert_output_not_contains "$where" "$wt" "gate did not run in the feature worktree" || return 1
+    [ "$where" != "$base_dir" ] || { echo "  FAIL: gate ran in the live base"; return 1; }
+}
+
+test_integrate_refuses_when_base_moved_during_gates() {
+    local sha base_dir output status=0
+    sha=$(integrate_fixture myproj fix-auth)
+    base_dir="$CS_SESSIONS_ROOT/myproj"
+    # The gate itself moves base HEAD: deterministic, no timing.
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- git -C "$base_dir" commit -q --allow-empty -m moved 2>&1) || status=$?
+    assert_eq "1" "$status" "a moved base refuses" || return 1
+    assert_output_contains "$output" "moved during the gates" "names the cause" || return 1
+    assert_eq "moved" "$(git -C "$base_dir" log -1 --format=%s)" "base keeps only its own new commit" || return 1
+    assert_file_not_exists "$base_dir/feature.txt" "nothing landed" || return 1
+    assert_output_not_contains "$(git -C "$base_dir" worktree list)" "cs/finish" "temp worktree removed" || return 1
+    assert_not_exists "$base_dir/.git/cs/integrate.lock" "mutex released" || return 1
+}
+
+test_integrate_refuses_when_base_reset_to_an_ancestor_during_gates() {
+    # --ff-only would happily land on a base that went BACKWARDS; the explicit
+    # HEAD == B check is what refuses it.
+    local sha base_dir output status=0
+    sha=$(integrate_fixture myproj fix-auth)
+    base_dir="$CS_SESSIONS_ROOT/myproj"
+    (cd "$base_dir" && git commit -q --allow-empty -m "will be reset away")
+    local head
+    head=$(git -C "$base_dir" rev-parse HEAD)
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- git -C "$base_dir" reset -q --hard HEAD~1 2>&1) || status=$?
+    assert_eq "1" "$status" "a base reset during gates refuses" || return 1
+    assert_output_contains "$output" "moved during the gates" "names the cause" || return 1
+    assert_file_not_exists "$base_dir/feature.txt" "nothing landed" || return 1
+    assert_not_exists "$base_dir/.git/cs/integrate.lock" "mutex released" || return 1
+}
+
+test_integrate_refuses_when_base_dirtied_during_gates() {
+    local sha base_dir output status=0
+    sha=$(integrate_fixture myproj fix-auth)
+    base_dir="$CS_SESSIONS_ROOT/myproj"
+    local head
+    head=$(git -C "$base_dir" rev-parse HEAD)
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- sh -c 'echo edit >> "$0/CLAUDE.md"' "$base_dir" 2>&1) || status=$?
+    assert_eq "1" "$status" "dirt introduced during gates refuses" || return 1
+    assert_output_contains "$output" "changed during the gates" "names the cause" || return 1
+    assert_eq "$head" "$(git -C "$base_dir" rev-parse HEAD)" "base HEAD unchanged" || return 1
+    assert_file_not_exists "$base_dir/feature.txt" "nothing landed" || return 1
+}
+
+test_integrate_terminated_mid_gate_leaves_no_lock_or_temp() {
+    # TERM during the gate must still release the mutex and remove the temp:
+    # a plain EXIT trap does not fire on TERM. Bash exec-optimizes the last
+    # command of `(cd "$tmp" && "$@")`, so the gate's PPID is cs itself, not
+    # a subshell one level down — walk up while the ancestor's argv still
+    # names -integrate-feature and terminate the topmost one, which lands on
+    # cs under either fork shape.
+    local sha base_dir output status=0
+    sha=$(integrate_fixture myproj fix-auth)
+    base_dir="$CS_SESSIONS_ROOT/myproj"
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- sh -c '
+        target=""; p=$PPID
+        while [ "${p:-1}" -gt 1 ]; do
+            case "$(ps -o args= -p "$p" 2>/dev/null)" in
+                *" -integrate-feature "*) target=$p ;;
+                *) break ;;
+            esac
+            p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d " ")
+        done
+        kill -TERM "$target"; sleep 2
+    ' 2>&1) || status=$?
+    [ "$status" != 0 ] || { echo "  FAIL: a terminated integrate must not exit 0"; return 1; }
+    assert_not_exists "$base_dir/.git/cs/integrate.lock" "mutex released on TERM" || return 1
+    assert_output_not_contains "$(git -C "$base_dir" worktree list)" "cs/finish" "temp worktree removed on TERM" || return 1
+    assert_file_not_exists "$base_dir/feature.txt" "nothing landed" || return 1
+}
+
+test_integrate_conflict_names_the_path_and_leaves_no_merge_head() {
+    local base_dir wt sha output status=0
+    base_dir=$(create_test_session_with_git "myproj")
+    echo "base line" > "$base_dir/shared.txt"
+    (cd "$base_dir" && git add shared.txt && git commit -q -m "base file")
+    cs_launch "myproj@fix-auth"
+    wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "task line" > "$wt/shared.txt"
+    (cd "$wt" && git add shared.txt && git commit -q -m "task edit")
+    sha=$(git -C "$wt" rev-parse HEAD)
+    echo "conflicting base line" > "$base_dir/shared.txt"
+    (cd "$base_dir" && git add shared.txt && git commit -q -m "base edit")
+    local head
+    head=$(git -C "$base_dir" rev-parse HEAD)
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- true 2>&1) || status=$?
+    assert_eq "1" "$status" "a conflict refuses" || return 1
+    assert_output_contains "$output" "shared.txt" "names the conflicting path" || return 1
+    assert_file_not_exists "$base_dir/.git/MERGE_HEAD" "no MERGE_HEAD in the base" || return 1
+    assert_eq "$head" "$(git -C "$base_dir" rev-parse HEAD)" "base HEAD unchanged" || return 1
+    assert_output_not_contains "$(git -C "$base_dir" worktree list)" "cs/finish" "temp worktree removed" || return 1
+}
+
+test_integrate_ignored_mode_fuses_nothing() {
+    # Ignored mode: the feature's .cs/ never rides the merge and /finish fuses
+    # no records (retire does). The base timeline must gain exactly one event.
+    local base_dir="$CS_SESSIONS_ROOT/proj"
+    mkdir -p "$base_dir/.cs"/{memory,local}
+    echo "# readme" > "$base_dir/README.md"
+    printf '.cs/\n' > "$base_dir/.gitignore"
+    (cd "$base_dir" && git init -q && git add -A && git commit -q -m init)
+    cs_launch "proj@t1"
+    local wt="$CS_SESSIONS_ROOT/proj@t1"
+    echo '{"ts":"2026-01-01T00:00:00Z","event":"task","note":"feature-side"}' >> "$wt/.cs/timeline.jsonl"
+    echo "work" > "$wt/result.txt"
+    (cd "$wt" && git add result.txt && git commit -q -m work)
+    local sha
+    sha=$(git -C "$wt" rev-parse HEAD)
+    "$CS_BIN" proj -integrate-feature t1 "$sha" -- true >/dev/null 2>&1 || { echo "  FAIL: integrate failed"; return 1; }
+    assert_file_exists "$base_dir/result.txt" "code landed" || return 1
+    assert_file_not_contains "$base_dir/.cs/timeline.jsonl" "feature-side" "feature records are not fused by integrate" || return 1
+    assert_dir "$wt/.cs" "feature .cs untouched" || return 1
+}
+
+test_integrate_tracked_mode_warns_on_memory_index_change() {
+    local sha base_dir wt output status=0
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "- [x](x.md) — feature-side pointer" >> "$wt/.cs/memory/MEMORY.md"
+    (cd "$wt" && git add .cs/memory/MEMORY.md && git commit -q -m "index")
+    sha=$(git -C "$wt" rev-parse HEAD)
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- true 2>&1) || status=$?
+    assert_eq "0" "$status" "integrate succeeds: $output" || return 1
+    assert_output_contains "$output" "MEMORY.md changed on $sha" "merge=ours drop is announced" || return 1
+}
+
+test_integrate_tracked_mode_union_merges_shared_records() {
+    # Both sides append to the tracked timeline; the verb's merge policy
+    # (merge=union) must reach the temp worktree or this conflicts.
+    local sha base_dir wt output status=0
+    base_dir=$(create_test_session_with_git "myproj")
+    echo '{"ts":"2026-01-01T00:00:00Z","event":"seed"}' > "$base_dir/.cs/timeline.jsonl"
+    (cd "$base_dir" && git add .cs/timeline.jsonl && git commit -q -m seed)
+    cs_launch "myproj@fix-auth"
+    wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo '{"ts":"2026-01-02T00:00:00Z","event":"feature-side"}' >> "$wt/.cs/timeline.jsonl"
+    (cd "$wt" && git add .cs/timeline.jsonl && git commit -q -m "feature event")
+    sha=$(git -C "$wt" rev-parse HEAD)
+    echo '{"ts":"2026-01-03T00:00:00Z","event":"base-side"}' >> "$base_dir/.cs/timeline.jsonl"
+    (cd "$base_dir" && git add .cs/timeline.jsonl && git commit -q -m "base event")
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- true 2>&1) || status=$?
+    assert_eq "0" "$status" "union merge lands: $output" || return 1
+    assert_file_contains "$base_dir/.cs/timeline.jsonl" "feature-side" "feature line kept" || return 1
+    assert_file_contains "$base_dir/.cs/timeline.jsonl" "base-side" "base line kept" || return 1
+    assert_eq "" "$(git -C "$base_dir" status --porcelain -- .gitattributes)" "no tree is dirtied to get the policy" || return 1
+}
+
+run_test test_integrate_lands_a_no_ff_merge_and_keeps_everything
+run_test test_integrate_tracked_mode_union_merges_shared_records
+run_test test_integrate_then_merge_verb_takes_the_ancestor_path
+run_test test_integrate_red_gate_leaves_base_untouched
+run_test test_integrate_gates_run_in_the_temp_not_the_live_trees
+run_test test_integrate_refuses_when_base_moved_during_gates
+run_test test_integrate_refuses_when_base_reset_to_an_ancestor_during_gates
+run_test test_integrate_refuses_when_base_dirtied_during_gates
+run_test test_integrate_terminated_mid_gate_leaves_no_lock_or_temp
+run_test test_integrate_conflict_names_the_path_and_leaves_no_merge_head
+run_test test_integrate_ignored_mode_fuses_nothing
+run_test test_integrate_tracked_mode_warns_on_memory_index_change
 
 test_merge_ignored_mode_fuses_records() {
     local base_dir="$CS_SESSIONS_ROOT/proj"
