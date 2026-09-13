@@ -472,7 +472,7 @@ Environment:
   NO_COLOR            Disable all colors (see no-color.org)
   CS_STATUSLINE_DISABLE   Set to 1 to render nothing in the status line
   CS_STATUSLINE_SEGMENTS  Status line segments, csv order (default:
-                          logo,session,notes,mail,pane,git,model,ctx,limits,fable;
+                          logo,session,notes,mail,git,model,ctx,limits;
                           'cost' also available, off by default)
   CS_TERM_THEME           Override terminal theme detection (light|dark);
                           cs -detect-theme shows what detection yields.
@@ -2531,8 +2531,7 @@ _alloc_random_color() {
 
 # Read a key's value from a machine-local state file. Prints the value to
 # stdout, or empty if absent or unreadable. Never errors. KEEP THE FORMAT IN
-# SYNC WITH bin/cs-statusline's _read_session_color (a pure-bash copy on the
-# render hot path) and hooks/session-start.sh's local_state_set.
+# SYNC WITH hooks/session-start.sh's local_state_set.
 _read_local_state() {
     local state="$1" key="$2"
     [ -f "$state" ] || return 0
