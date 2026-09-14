@@ -337,7 +337,7 @@ create_worktree_session() {
     # covered by the base's own .gitignore entry — but a base committed
     # before the CLAUDE.local.md backfill (and never relaunched since)
     # checks out a .gitignore missing it, which would otherwise leave the
-    # file untracked and block `cs <base> --merge`'s preflight. The exclude
+    # file untracked and block retirement's preflight. The exclude
     # entry is clone-local and harmless alongside a .gitignore entry (never
     # tracked, never dirties the task branch; shared with the base checkout
     # through the common git dir).
@@ -346,7 +346,7 @@ create_worktree_session() {
     # A worktree's git-path resolves to the common git dir, which git reports
     # as an absolute path. Reading that as relative would prepend $wt_dir,
     # writing the exclude entry to a nonsense path and leaving the protocol file
-    # untracked, which then blocks `cs <base> --merge`.
+    # untracked, which then blocks retirement.
     case "$exclude" in
         "") : ;;
         /*) : ;;

@@ -232,22 +232,19 @@ cmd_report() {  # base task sha
     echo "not_integrated: $n_after"
     dirt_lines "$wt"
     pr_lookup "$session_dir" "cs/$task"
+    # What the retire entry will do with this worktree. It removes the
+    # worktree and branch and never merges, so a tip the base does not have
+    # is another /finish first, and a branch that is not an ancestor (a
+    # squash or rebase landing) is retirable only on the PR's own evidence.
     if [ "$landed" = "yes" ]; then
-        # Retirement fuses the BRANCH, not the captured commit. A tip the base
-        # does not have would arrive unreviewed and ungated through the retire
-        # verb, so the advice is another /finish, not --merge.
-        if ! git -C "$session_dir" merge-base --is-ancestor "$tip" HEAD 2>/dev/null; then
-            echo "retire: $n_after commit(s) on cs/$task after the captured commit are not integrated; run /finish $task again before retiring"
-        # Tracked-.cs mode: the integrate's timeline event dirties the base,
-        # and the retire verb refuses dirt. Say so rather than let the verb's
-        # refusal be the first the user hears of it.
-        elif [ -n "$(git -C "$session_dir" status --porcelain -- .cs 2>/dev/null)" ]; then
-            echo "retire: commit the session bookkeeping in $base (git status -- .cs), close the feature session, then: cs $base --merge $task"
+        if git -C "$session_dir" merge-base --is-ancestor "$tip" HEAD 2>/dev/null; then
+            echo "retire: ready"
         else
-            echo "retire: close the feature session, then: cs $base --merge $task"
+            echo "retire: $n_after commit(s) on cs/$task after the captured commit are not integrated; run /finish $task again before retiring"
         fi
     else
-        echo "retire: do NOT run cs $base --merge $task — cs/$task is not an ancestor of base (squash or rebase landing) and the verb will try to merge the branch again; continue on a new task and leave this worktree until the preservation-first retire spec ships"
+        echo "retire: not-landed"
+        echo "retire_note: cs/$task is not an ancestor of base (a squash or rebase landing); retire with --force only on a MERGED pr_state"
     fi
 }
 

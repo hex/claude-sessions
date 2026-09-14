@@ -1,14 +1,19 @@
 ---
 name: finish
-description: Integrate a finished feature into its base while the feature conversation stays open - capture the feature commit, merge base+feature in a temporary worktree, run the repo's gates there, fast-forward the base, and report GitHub PR state. Removes nothing; retirement stays with cs <base> --merge. Invoke when the user asks to finish, land, or integrate a feature or worktree.
+description: Land a finished feature in its base and retire its worktree - capture the feature commit, merge base+feature in a temporary worktree, run the repo's gates there, fast-forward the base, report GitHub PR state, then remove the worktree and branch once the feature conversation is closed. Invoke when the user asks to finish, land, integrate or retire a feature or worktree.
 disable-model-invocation: true
 ---
 
 Finishing is a ritual, not a git command: capture, gates on the merged
-result, land, report. This skill integrates work that is already reviewed
-to the user's standard; it is the mechanical closer, not a review. It
-**removes nothing**: the feature worktree, its branch and its session all
-remain until the user retires them with `cs <base> --merge <task>`.
+result, land, report, retire. This skill integrates work that is already
+reviewed to the user's standard; it is the mechanical closer, not a review.
+The landing never touches the feature worktree. Retirement (fuse its session
+records into the base, remove the worktree, delete the branch) runs in the
+same ritual, but only once the feature conversation is closed: a directory
+cannot be removed from under a running Claude, so while that conversation is
+still open the skill says so plainly and the user closes it and runs
+`/finish <task>` again. Abandoning a feature instead is `cs -rm <base>@<task>`,
+the user's own call.
 
 ## Detect the context
 
@@ -95,13 +100,29 @@ commands become `-- sh -c 'first && second'`.
 
    Only after an `integrated` or `already-integrated` line, run
    `~/.claude/skills/finish/scripts/finish.sh report <base> <task> <sha>`
-   and end with, in this order: what landed (`sha -> base_head`); the
-   `not_integrated` count ("N commits on cs/<task> after the captured
-   commit are NOT integrated"); the dirt list; the PR line; and the
-   `retire:` line verbatim. When `landed: no` after a PR path, the retire
-   line is the **squash notice** — print it exactly; do NOT run cs <base> --merge <task>
-   for this task and say why: the branch is not an ancestor of base, so
-   the verb tries to merge it again.
+   and read its `retire:` key.
+6. **Retire.** The worktree goes through one entry and nothing else:
+   - `retire: ready` — run `cs <base> -retire-feature <task> <sha>`.
+   - `retire: not-landed` — the branch is not an ancestor of base (a squash
+     or rebase landing). When `pr_state` is `MERGED`, that is the PR's
+     evidence the work is in: run
+     `cs <base> -retire-feature <task> <sha> --force`. Any other state:
+     print `retire_note` and stop; nothing is removed.
+   - `retire: N commit(s) ... not integrated` — print it and stop; the next
+     `/finish <task>` captures them.
+
+   The entry answers `retired <task> <sha>` or refuses. Print a refusal
+   verbatim: it is written for the user, and the one that matters most says
+   the feature conversation is still open and asks them to close it
+   themselves and run `/finish <task>` here again. Never work around a
+   refusal — no `git worktree remove`, no `git branch -d`/`-D`, no signals
+   or keystrokes into the other session.
+7. **Report.** End with, in this order: what landed (`sha -> base_head`);
+   the `not_integrated` count ("N commits on cs/<task> after the captured
+   commit are NOT integrated"); the dirt list ("NOT part of this integrate",
+   and now gone with the worktree when retirement succeeded — say so); the
+   PR line; and the retirement outcome (the `retired` line, or the refusal
+   and what the user does next).
 
 ## After a green integrate — offers, not actions
 
@@ -111,7 +132,8 @@ commands become `-- sh -c 'first && second'`.
 - Offer `/checkpoint <feature>-integrated`.
 - If the project instructions document a deploy step, offer it (one
   question). Never deploy unprompted.
-- Keep-working advice for the feature session: `git merge <base branch>`
+- When retirement was refused because the feature conversation is still
+  open and the user means to keep working there: `git merge <base branch>`
   in the worktree brings the landing back; never rebase once a PR exists;
   after a squash landing, continue on a new task.
 
@@ -140,10 +162,12 @@ re-running gates. Never bypass, skip, or weaken a gate.
 ## Never
 
 - Never push, to any remote — publishing is the user's decision.
-- Never delete anything in a cs session: no worktree removal, no
-  `git branch -d` and never `git branch -D` on a cs branch, no
-  `cs <base> --merge` on the user's behalf. (**Plain branch** on an ordinary
-  checkout may `git branch -d` a merged branch after green gates.)
+- Never delete anything in a cs session yourself: no `git worktree remove`,
+  no `git branch -d` and never `git branch -D` on a cs branch. Removal
+  happens only inside `cs <base> -retire-feature`, which refuses over an
+  open conversation, dirt, or a branch the base lacks. (**Plain branch** on
+  an ordinary checkout may `git branch -d` a merged branch after green
+  gates.)
 - Never merge over dirt or copy `.env`/untracked inputs into the temp.
 - Never mutate a live foreign base: the entry refuses; do not work around it.
 - Never treat a gh failure as no PR.

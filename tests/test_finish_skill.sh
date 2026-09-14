@@ -54,9 +54,12 @@ test_finish_skill_teaches_the_ritual() {
     assert_file_contains "$SKILL" "pr_state" "reads the PR state keys" || return 1
     assert_file_contains "$SKILL" "unknown" "the unknown PR state exists" || return 1
     assert_file_contains "$SKILL" "Same AskUserQuestion as OPEN" "OPEN/unknown need explicit confirmation" || return 1
-    assert_file_contains "$SKILL" "do NOT run cs <base> --merge <task>" "squash notice" || return 1
-    assert_file_contains "$SKILL" "cs <base> --merge <task>" "names the retire verb" || return 1
-    assert_file_contains "$SKILL" "removes nothing" "retention promise stated" || return 1
+    assert_file_contains "$SKILL" "cs <base> -retire-feature <task> <sha>" "retires only through the hidden entry" || return 1
+    assert_file_contains "$SKILL" "retire: ready" "reads the report's retire key" || return 1
+    assert_file_contains "$SKILL" "retire: not-landed" "the squash case exists" || return 1
+    assert_file_contains "$SKILL" "[-]-force" "and takes force only on PR evidence" || return 1
+    assert_file_contains "$SKILL" "conversation is still open" "the open-conversation refusal is the user's to act on" || return 1
+    assert_file_not_contains "$SKILL" "[-]-merge" "the retired verb is never named" || return 1
     assert_file_contains "$SKILL" "handoff:" "feature-session hand-off documented" || return 1
     assert_file_contains "$SKILL" "NOT part of this integrate" "dirt is reported" || return 1
 }

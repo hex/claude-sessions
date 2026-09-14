@@ -56,7 +56,7 @@ EOF
 TASK_BRANCH=$(awk '/^task_branch:/ { print $2; exit }' "$SESSION_DIR/.cs/local/state" 2>/dev/null || true)
 if [ -n "$TASK_BRANCH" ]; then
     CONTEXT="${CONTEXT}
-- This session is a feature worktree on branch $TASK_BRANCH; integration happens only via /finish in the base session (run by the user, keeps this worktree) and retirement only via cs --merge after this session closes — never merge or delete that branch yourself"
+- This session is a feature worktree on branch $TASK_BRANCH; integration happens only via /finish in the base session, run by the user, and retirement is /finish too, once this session is closed — never merge or delete that branch or this worktree yourself"
 fi
 
 jq -n --arg context "$CONTEXT" '{
