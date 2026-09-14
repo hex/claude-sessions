@@ -465,8 +465,17 @@ _sgr() {
                 # Inks. `amber` is a foreground: the hot number's colour on
                 # the neutral capsule, dark enough to hold contrast on cream and
                 # bright enough on a dark surface. Nothing paints amber as a fill.
+                # It pivots on the measured terminal background when there is
+                # one (the bar's surface is a shade of it, the agent rows sit on
+                # it directly) and on the theme flag only without a measurement:
+                # a light background under a theme that resolved dark would
+                # otherwise get the pale amber on cream.
                 amber)
-                    [ "$SL_THEME" = "dark" ] && rgb="253;230;138" || rgb="146;64;14" ;;
+                    if _parse_rgb_triplet "${CS_TERM_BG_RGB:-}"; then
+                        _luminance
+                        [ "$_LUM" -ge 1275000 ] && rgb="146;64;14" || rgb="253;230;138"
+                    elif [ "$SL_THEME" = "dark" ]; then rgb="253;230;138"
+                    else rgb="146;64;14"; fi ;;
                 # Primary text on the capsule surface: a warm 35% shade of the
                 # surface on a light one, the soft white on a dark one — the same
                 # contrast pivot the old surface text used, resolved from the

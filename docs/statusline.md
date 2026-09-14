@@ -150,7 +150,7 @@ Color depth is detected per render, in priority order: `FORCE_COLOR=0`, `NO_COLO
 | `brand` | the mark | `217;119;87` | 173 | 33 |
 | `brandshade` | the pulse's dim phase | `184;101;74` | 167 | 33 |
 | `periwinkle` | the subagent rows' model capsule | light: `76;29;149`; dark: `196;181;253` | 55/147 | 35/95 |
-| `amber` | hot numbers, notes and mail counts | light: `146;64;14`; dark: `253;230;138` | 94/221 | 33/93 |
+| `amber` | hot numbers, notes and mail counts | light: `146;64;14`; dark: `253;230;138` — light/dark by the measured `CS_TERM_BG_RGB`, by theme only when unmeasured | 94/221 | 33/93 |
 | `crit` | inverted capsule fill | light: `215;0;21`; dark: `255;69;58` | 160/203 | 31 |
 | `critink` | inverted capsule text | light: `255;255;255`; dark: `37;0;0` | 231/232 | 97/30 |
 

@@ -3064,6 +3064,19 @@ test_sgr_ink_tokens_truecolor_dark() {
     _sgr 38 critink; assert_eq "38;2;37;0;0"      "$_SGR" "crit ink dark" || return 1
 }
 
+test_sgr_amber_follows_surface_luminance_not_the_theme() {
+    # A measured light background with a theme that resolved dark (no rung
+    # answered, or a manual CS_TERM_BG_RGB) must still paint the light amber:
+    # the number sits on that background, not on the theme.
+    _load_sl_functions
+    LEVEL=truecolor; SL_THEME=dark; CS_TERM_BG_RGB="253;246;227"
+    _sgr 38 amber; assert_eq "38;2;146;64;14" "$_SGR" "light background takes the light amber under a dark theme" || return 1
+    SL_THEME=light; CS_TERM_BG_RGB="30;30;30"
+    _sgr 38 amber; assert_eq "38;2;253;230;138" "$_SGR" "dark background takes the dark amber under a light theme" || return 1
+    SL_THEME=dark; CS_TERM_BG_RGB=""
+    _sgr 38 amber; assert_eq "38;2;253;230;138" "$_SGR" "no measurement: the theme decides" || return 1
+}
+
 test_sgr_ink_follows_surface_luminance() {
     # ink is the 35% shade of a light surface and white on a dark one, exactly
     # the contrast rule the old surface text used.
@@ -3114,6 +3127,7 @@ test_thresh_color_emits_crit_and_defaults_to_ink2() {
 
 run_test test_sgr_ink_tokens_truecolor_light
 run_test test_sgr_ink_tokens_truecolor_dark
+run_test test_sgr_amber_follows_surface_luminance_not_the_theme
 run_test test_sgr_ink_follows_surface_luminance
 run_test test_sgr_ink_tokens_256_and_basic
 run_test test_thresh_color_emits_crit_and_defaults_to_ink2
