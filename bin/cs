@@ -4064,8 +4064,10 @@ run_spawn() {
         fi
         {
             printf '%s\n' "${CLAUDE_SESSION_NAME:-}"
+            # An empty array is unbound under bash 3.2's set -u, and a brief
+            # alone leaves it empty; the guard expands to nothing in that case.
             local _t
-            for _t in "${tasks[@]}"; do printf '%s\n' "$_t"; done
+            for _t in ${tasks[@]+"${tasks[@]}"}; do printf '%s\n' "$_t"; done
         } > "$seed.tmp" && mv "$seed.tmp" "$seed"
     fi
     _spawn_window "$name"
