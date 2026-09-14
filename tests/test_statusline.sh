@@ -3075,6 +3075,11 @@ test_sgr_amber_follows_surface_luminance_not_the_theme() {
     _sgr 38 amber; assert_eq "38;2;253;230;138" "$_SGR" "dark background takes the dark amber under a light theme" || return 1
     SL_THEME=dark; CS_TERM_BG_RGB=""
     _sgr 38 amber; assert_eq "38;2;253;230;138" "$_SGR" "no measurement: the theme decides" || return 1
+    # A mid-grey terminal (luminance between the shading pivot and the ink
+    # pivot) gets white ink on its surface, so amber must take the pale shade
+    # there too: the two inks flip at the same brightness.
+    SL_THEME=light; CS_TERM_BG_RGB="128;128;128"
+    _sgr 38 amber; assert_eq "38;2;253;230;138" "$_SGR" "mid-grey background: pale amber, like white ink" || return 1
 }
 
 test_sgr_ink_follows_surface_luminance() {

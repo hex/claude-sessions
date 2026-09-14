@@ -469,11 +469,13 @@ _sgr() {
                 # one (the bar's surface is a shade of it, the agent rows sit on
                 # it directly) and on the theme flag only without a measurement:
                 # a light background under a theme that resolved dark would
-                # otherwise get the pale amber on cream.
+                # otherwise get the pale amber on cream. The pivot is `ink`'s
+                # (1530000), not `_bg_shade`'s: a mid-grey terminal gets white
+                # ink, so its amber must be the pale one too.
                 amber)
                     if _parse_rgb_triplet "${CS_TERM_BG_RGB:-}"; then
                         _luminance
-                        [ "$_LUM" -ge 1275000 ] && rgb="180;83;9" || rgb="253;230;138"
+                        [ "$_LUM" -ge 1530000 ] && rgb="180;83;9" || rgb="253;230;138"
                     elif [ "$SL_THEME" = "dark" ]; then rgb="253;230;138"
                     else rgb="180;83;9"; fi ;;
                 # Primary text on the capsule surface: a warm 35% shade of the
