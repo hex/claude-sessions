@@ -523,8 +523,12 @@ test_session_start_announces_worktree_task() {
     context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
     assert_output_contains "$context" "feature worktree of session 'myproj'" \
         "worktree sessions must be told what they are (on every source)" || return 1
-    assert_output_contains "$context" "cs myproj --merge fix-auth" \
+    assert_output_contains "$context" "/finish fix-auth in session myproj" \
         "the integration command must be spelled out" || return 1
+    assert_output_contains "$context" "the user closes this session themselves, and runs /finish fix-auth again in myproj" \
+        "and the retirement rule: the user closes this session, then /finish again" || return 1
+    assert_output_not_contains "$context" "cs myproj --merge" \
+        "the retired verb is never named" || return 1
     assert_output_contains "$context" "Do NOT merge" \
         "manual merges must be warned against" || return 1
 }
@@ -634,8 +638,8 @@ test_subagent_context_announces_worktree_task() {
         "subagents must inherit worktree awareness" || return 1
     assert_output_contains "$output" "/finish" \
         "subagents must know integration goes through /finish in the base" || return 1
-    assert_output_contains "$output" "cs --merge" \
-        "subagents must know retirement goes through cs --merge" || return 1
+    assert_output_contains "$output" "retirement is /finish too" \
+        "subagents must know retirement goes through /finish as well" || return 1
 }
 
 test_resume_digest_reports_memory_activity() {

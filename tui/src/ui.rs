@@ -2065,9 +2065,9 @@ fn render_merge(app: &mut App, frame: &mut Frame, area: Rect) {
         lines.push(Line::from(Span::styled(step2, Style::default().fg(p.ink))));
         // Two lines: Paragraph truncates rather than wraps, and a real base
         // and task name would push the verb off the tail of one line.
-        lines.push(Line::from(Span::styled("    3  worktree, branch and session stay", Style::default().fg(p.ink))));
+        lines.push(Line::from(Span::styled("    3  retire: fuse records, remove worktree + branch", Style::default().fg(p.ink))));
         lines.push(Line::from(Span::styled(
-            format!("       retire later: cs {} --merge {}", app.merge_base, f.task),
+            format!("       needs the {}@{} conversation closed first", app.merge_base, f.task),
             Style::default().fg(p.mut_),
         )));
         let body = Rect::new(
@@ -4509,26 +4509,25 @@ mod tests {
     }
 
     #[test]
-    fn merge_screen_names_the_temp_gate_and_keeps_the_worktree() {
+    fn merge_screen_names_the_temp_gate_and_the_retire_step() {
         // Enter arms /finish: merge in a temp worktree, gate there, fast-forward
-        // the base, keep everything. The plan must say where the gate runs and
-        // that nothing is removed.
+        // the base, then retire the worktree. The plan must say where the gate
+        // runs and what the retire step removes.
         let mut app = merge_app();
         let text = render_wide(&mut app);
         assert!(text.contains("temp checkout"), "the gate location must be named:\n{text}");
-        assert!(text.contains("stay"), "retention must be stated:\n{text}");
-        assert!(!text.contains("remove worktree"), "/finish removes nothing:\n{text}");
-        assert!(!text.contains("delete branch"), "/finish deletes nothing:\n{text}");
+        assert!(text.contains("remove worktree + branch"), "the retire step must say what goes:\n{text}");
+        assert!(!text.contains("stay"), "the old retention promise must be gone:\n{text}");
     }
 
     #[test]
-    fn merge_screen_points_retirement_at_the_verb() {
-        // Retirement is still cs <base> --merge <task>, run later by the user.
+    fn merge_screen_says_retirement_needs_the_conversation_closed() {
+        // /finish retires the worktree itself; the plan says what that needs.
         let mut app = merge_app();
         let text = render_wide(&mut app);
         assert!(
-            text.contains("cs myproj --merge"),
-            "the retire verb must be named as a later step:\n{text}"
+            text.contains("needs the myproj@fix-auth conversation closed first"),
+            "the retire step must name its precondition:\n{text}"
         );
     }
 
@@ -4609,7 +4608,7 @@ mod tests {
         let mut app = merge_app();
         let text = render_at(&mut app, 100, 21);
         assert!(
-            text.contains("cs myproj --merge"),
+            text.contains("needs the myproj@fix-auth conversation closed first"),
             "the retire line must survive a 21-row terminal:\n{text}"
         );
     }

@@ -206,7 +206,7 @@ test_report_after_a_local_integrate_gives_the_retire_line() {
     assert_eq "1" "$(key "$out" not_integrated)" "one commit after capture" || return 1
     assert_output_contains "$out" "retire: 1 commit(s) on cs/fix-auth after the captured commit are not integrated; run /finish fix-auth again before retiring" \
         "a tip past the landing is not ready to retire" || return 1
-    assert_output_not_contains "$out" "cs myproj --merge fix-auth" "and the retire verb is not offered yet" || return 1
+    assert_output_not_contains "$out" "retire: ready" "and retirement is not offered yet" || return 1
 }
 
 # The tip IS the commit that landed: retiring now fuses exactly what the base
@@ -220,18 +220,19 @@ test_report_with_an_integrated_tip_gives_the_plain_retire_line() {
     out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" \
         bash "$FINISH" report myproj fix-auth "$sha" 2>&1)
     assert_eq "0" "$(key "$out" not_integrated)" "nothing after the capture" || return 1
-    assert_output_contains "$out" "retire: close the feature session, then: cs myproj --merge fix-auth" "retire line" || return 1
+    assert_eq "ready" "$(key "$out" retire)" "retire line" || return 1
 }
 
-test_report_names_uncommitted_bookkeeping_before_retire() {
+test_report_is_ready_to_retire_over_uncommitted_bookkeeping() {
     local sha out
     sha=$(finish_fixture myproj fix-auth)
     stub_gh '[]'
     "$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- true > /dev/null 2>&1 || { echo "  FAIL: integrate failed"; return 1; }
     out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" \
         bash "$FINISH" report myproj fix-auth "$sha" 2>&1)
-    assert_output_contains "$out" "retire: commit the session bookkeeping in myproj" "names the uncommitted bookkeeping" || return 1
-    assert_output_contains "$out" "then: cs myproj --merge fix-auth$" "still carries the retire verb" || return 1
+    # The retire entry tolerates the base's own .cs/ dirt, so the tracked-mode
+    # timeline event the integrate just wrote is no reason to wait.
+    assert_eq "ready" "$(key "$out" retire)" "ready despite the uncommitted bookkeeping" || return 1
 }
 
 test_report_after_a_squash_landing_gives_the_squash_notice() {
@@ -243,8 +244,9 @@ test_report_after_a_squash_landing_gives_the_squash_notice() {
     out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" \
         bash "$FINISH" report myproj fix-auth "$sha" 2>&1)
     assert_eq "no" "$(key "$out" landed)" "F is not an ancestor after a squash" || return 1
-    assert_output_contains "$out" "retire: do NOT run cs myproj --merge fix-auth" "squash notice leads the retire line" || return 1
-    assert_output_contains "$out" "will try to merge the branch again" "names what the verb would do" || return 1
+    assert_eq "not-landed" "$(key "$out" retire)" "a squash landing is not retirable on ancestry" || return 1
+    assert_output_contains "$out" "retire_note: cs/fix-auth is not an ancestor of base (a squash or rebase landing); retire with --force only on a MERGED pr_state" \
+        "the note says when force is legitimate" || return 1
 }
 
 run_test test_prepare_in_feature_session_hands_off
@@ -348,7 +350,7 @@ run_test test_prepare_treats_a_vanished_head_repo_as_unknown
 run_test test_prepare_skips_the_lookup_for_a_non_github_origin
 run_test test_report_after_a_local_integrate_gives_the_retire_line
 run_test test_report_with_an_integrated_tip_gives_the_plain_retire_line
-run_test test_report_names_uncommitted_bookkeeping_before_retire
+run_test test_report_is_ready_to_retire_over_uncommitted_bookkeeping
 run_test test_report_after_a_squash_landing_gives_the_squash_notice
 
 report_results

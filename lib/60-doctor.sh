@@ -373,7 +373,7 @@ _doctor_check_worktrees() {
         if [ -n "$pinned" ] \
             && git -C "$base_dir" merge-base --is-ancestor "$pinned" HEAD 2>/dev/null \
             && [ "$(git -C "$base_dir" rev-parse "$pinned" 2>/dev/null)" != "$(git -C "$base_dir" rev-parse HEAD 2>/dev/null)" ]; then
-            _doctor_warn "Worktrees: $name branch $pinned is fully merged; finish with: cs $base_name --merge ${name#*@}"
+            _doctor_warn "Worktrees: $name branch $pinned is fully merged; retire it with: /finish ${name#*@} in $base_name"
         else
             _doctor_ok "Worktrees: $name on ${head_branch:-<detached>}"
         fi

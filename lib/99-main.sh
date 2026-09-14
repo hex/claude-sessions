@@ -342,28 +342,28 @@ main() {
             -integrate-feature) # hidden: driven by skills/finish/scripts/finish.sh, not typed by a user
                 shift
                 [ -n "${1:-}" ] || error "Usage: cs <base> -integrate-feature <task> <sha> [--from-remote] -- <gate command...>"
-                # Validate <base>@<feature> the same way --merge does, so a
+                # Validate <base>@<feature> the same way the launch path does, so a
                 # task name with path separators is rejected before any
                 # filesystem lookup.
                 cs_split_worktree_name "$session_name@$1" >/dev/null
                 integrate_feature_worktree "$session_name" "$@"
                 return 0
                 ;;
-            --merge)
+            -retire-feature) # hidden: driven by skills/finish/scripts/finish.sh, not typed by a user
                 shift
-                [ -n "${1:-}" ] || error "Usage: cs <base> --merge <feature>"
+                [ -n "${1:-}" ] || error "Usage: cs <base> -retire-feature <task> <sha> [--force]"
                 # Validate <base>@<feature> the same way the launch path does,
                 # so a task name with path separators (which would build an
                 # escaping worktree path) is rejected before any filesystem
                 # lookup. cs_split_worktree_name errors on a bad base or task.
                 cs_split_worktree_name "$session_name@$1" >/dev/null
-                merge_worktree_session "$session_name" "$1"
+                retire_feature_worktree "$session_name" "$@"
                 return 0
                 ;;
             -finish)
                 shift
                 [ -n "${1:-}" ] || error "Usage: cs <base> -finish <feature>"
-                # Validate the same way --merge does, so a feature name with
+                # Validate the same way the launch path does, so a feature name with
                 # path separators is rejected before any filesystem lookup.
                 cs_split_worktree_name "$session_name@$1" >/dev/null
                 merge_feature="$1"
@@ -374,7 +374,7 @@ main() {
                 shift
                 ;;
             *)
-                error "Unknown session command: $1. Use -secrets, -queue, -msg, -narrative, -conversations, -usage, -tag, -features, -finish, --merge, or --force."
+                error "Unknown session command: $1. Use -secrets, -queue, -msg, -narrative, -conversations, -usage, -tag, -features, -finish, or --force."
                 ;;
         esac
     done

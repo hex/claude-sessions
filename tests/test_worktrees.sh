@@ -33,6 +33,15 @@ cs_launch() {
     "$CS_BIN" "$1" < /dev/null > /dev/null 2>&1 || true
 }
 
+# Land the feature tip into the base through the integrate entry with a
+# trivial gate, the way /finish does before it retires; prints the sha.
+land_feature() {  # base task
+    local wt="$CS_SESSIONS_ROOT/$1@$2" sha
+    sha=$(git -C "$wt" rev-parse HEAD) || return 1
+    "$CS_BIN" "$1" -integrate-feature "$2" "$sha" -- true >/dev/null 2>&1 || return 1
+    printf '%s\n' "$sha"
+}
+
 # Build a ps seam for the ownership walk. Process inspection may be restricted
 # in a test sandbox; production uses BSD ps, while these integration tests
 # inject the one parent edge relevant to the scenario.
@@ -124,8 +133,9 @@ test_ignored_mode_worktree_starts_with_nothing_untracked() {
     assert_eq "" "$others" "a fresh ignored-mode worktree must have nothing untracked" || return 1
 }
 
-test_ignored_mode_worktree_merges_without_a_manual_exclude() {
-    # The end the user actually hits: create, commit work, merge.
+test_ignored_mode_worktree_retires_without_a_manual_exclude() {
+    # The end the user actually hits: create, commit work, /finish lands it,
+    # then retires the worktree.
     local base_dir="$CS_SESSIONS_ROOT/proj"
     mkdir -p "$base_dir/.cs"/{memory,local}
     echo "# Project readme" > "$base_dir/README.md"
@@ -136,14 +146,15 @@ test_ignored_mode_worktree_merges_without_a_manual_exclude() {
     local wt="$CS_SESSIONS_ROOT/proj@task1"
     echo "feature" > "$wt/feature.txt"
     (cd "$wt" && git add feature.txt && git commit -q -m "task work")
-    local output
-    output=$("$CS_BIN" "proj" --merge "task1" 2>&1 || true)
+    local sha output
+    sha=$(land_feature proj task1) || { echo "  FAIL: integrate fixture"; return 1; }
+    output=$("$CS_BIN" "proj" -retire-feature "task1" "$sha" 2>&1 || true)
     assert_output_not_contains "$output" "untracked files that removal would destroy" \
         "cs must not refuse over the .cs skeleton it wrote itself" || return 1
-    assert_file_exists "$base_dir/feature.txt" "the feature merged into the base" || return 1
+    assert_not_exists "$wt" "the worktree is retired" || return 1
 }
 
-test_merge_tolerates_a_worktree_predating_the_cs_exclude() {
+test_retire_tolerates_a_worktree_predating_the_cs_exclude() {
     # A worktree created before cs excluded its own bookkeeping still has .cs/
     # untracked, and upgrading cs must unblock it without the user editing
     # info/exclude by hand. Model that by stripping the entry after creation.
@@ -172,16 +183,17 @@ test_merge_tolerates_a_worktree_predating_the_cs_exclude() {
 
     echo "feature" > "$wt/feature.txt"
     (cd "$wt" && git add feature.txt && git commit -q -m "task work")
-    local output
-    output=$("$CS_BIN" "proj" --merge "task1" 2>&1 || true)
+    local sha output
+    sha=$(land_feature proj task1) || { echo "  FAIL: integrate fixture"; return 1; }
+    output=$("$CS_BIN" "proj" -retire-feature "task1" "$sha" 2>&1 || true)
     assert_output_not_contains "$output" "untracked files that removal would destroy" \
-        "an older worktree's .cs skeleton must not block the merge" || return 1
-    assert_file_exists "$base_dir/feature.txt" "the feature merged into the base" || return 1
+        "an older worktree's .cs skeleton must not block retirement" || return 1
+    assert_not_exists "$wt" "the worktree is retired" || return 1
 }
 
-test_merge_still_refuses_real_untracked_work() {
+test_retire_still_refuses_real_untracked_work() {
     # The carve-out is scoped to cs's own bookkeeping. A file the user would
-    # lose must still stop the merge — that is what the gate is for.
+    # lose must still stop the removal — that is what the gate is for.
     local base_dir="$CS_SESSIONS_ROOT/proj"
     mkdir -p "$base_dir/.cs"/{memory,local}
     echo "# Project readme" > "$base_dir/README.md"
@@ -191,8 +203,9 @@ test_merge_still_refuses_real_untracked_work() {
     cs_launch "proj@task1"
     local wt="$CS_SESSIONS_ROOT/proj@task1"
     echo "unsaved" > "$wt/notes.txt"
-    local output
-    output=$("$CS_BIN" "proj" --merge "task1" 2>&1 || true)
+    local sha output
+    sha=$(land_feature proj task1) || { echo "  FAIL: integrate fixture"; return 1; }
+    output=$("$CS_BIN" "proj" -retire-feature "task1" "$sha" 2>&1 || true)
     assert_output_contains "$output" "untracked files that removal would destroy" \
         "real untracked work must still refuse" || return 1
     assert_output_contains "$output" "notes.txt" "the refusal names the file at risk" || return 1
@@ -278,7 +291,7 @@ test_launch_enables_the_task_tools_unless_opted_out() {
     assert_output_not_contains "$env_out" "CLAUDE_CODE_ENABLE_TODO_TOOLS=" "CS_NO_TASK_TOOLS leaves the decision to Claude Code" || return 1
 }
 
-test_merge_tracked_worktree_fuses_and_cleans_up() {
+test_retire_after_integrate_removes_worktree_and_branch() {
     local base_dir
     base_dir=$(create_test_session_with_git "myproj")
     cs_launch "myproj@fix-auth"
@@ -287,40 +300,48 @@ test_merge_tracked_worktree_fuses_and_cleans_up() {
     echo "fix" > "$wt/auth.txt"
     echo '{"ts":"2026-07-02T00:00:00Z","event":"task"}' >> "$wt/.cs/timeline.jsonl"
     (cd "$wt" && git add -A && git commit -q -m "task work")
-    local output
-    output=$("$CS_BIN" "myproj" --merge "fix-auth" 2>&1)
-    assert_file_exists "$base_dir/auth.txt" "code merged into base" || return 1
+    local sha output
+    sha=$(land_feature myproj fix-auth) || { echo "  FAIL: integrate fixture"; return 1; }
+    output=$("$CS_BIN" "myproj" -retire-feature "fix-auth" "$sha" 2>&1)
+    assert_eq "retired fix-auth $sha" "$output" "the entry's own summary line" || return 1
+    assert_file_exists "$base_dir/auth.txt" "code landed by the integrate" || return 1
     assert_file_contains "$base_dir/.cs/timeline.jsonl" '"event":"task"' "timeline union-merged" || return 1
-    assert_not_exists "$wt" "worktree removed after merge" || return 1
+    assert_not_exists "$wt" "worktree removed" || return 1
     assert_eq "" "$(git -C "$base_dir" branch --list cs/fix-auth)" "branch deleted" || return 1
-    assert_file_contains "$base_dir/.cs/timeline.jsonl" "worktree-merged" "merge recorded" || return 1
+    assert_file_contains "$base_dir/.cs/timeline.jsonl" "worktree-retired" "retirement recorded" || return 1
 }
 
-test_merge_refuses_dirty_worktree() {
+test_retire_refuses_dirty_worktree() {
     local base_dir
     base_dir=$(create_test_session_with_git "myproj")
     cs_launch "myproj@fix-auth"
     local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
     echo "uncommitted" >> "$wt/CLAUDE.md"
-    local output
-    output=$("$CS_BIN" "myproj" --merge "fix-auth" 2>&1 || true)
+    local sha output
+    sha=$(land_feature myproj fix-auth) || { echo "  FAIL: integrate fixture"; return 1; }
+    output=$("$CS_BIN" "myproj" -retire-feature "fix-auth" "$sha" 2>&1 || true)
     assert_output_contains "$output" "uncommitted" "dirty worktree refused" || return 1
     assert_dir "$wt" "worktree preserved on refusal" || return 1
 }
 
-test_merge_refuses_live_session() {
+test_retire_refuses_a_live_feature_session_and_says_what_to_do() {
     local base_dir
     base_dir=$(create_test_session_with_git "myproj")
     cs_launch "myproj@fix-auth"
     local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    local sha output
+    sha=$(land_feature myproj fix-auth) || { echo "  FAIL: integrate fixture"; return 1; }
     echo "$$" > "$wt/.cs/session.lock"   # this test process is alive
-    local output
-    output=$("$CS_BIN" "myproj" --merge "fix-auth" 2>&1 || true)
-    assert_output_contains "$output" "session is open" "live lock refused" || return 1
+    output=$("$CS_BIN" "myproj" -retire-feature "fix-auth" "$sha" 2>&1 || true)
+    assert_output_contains "$output" "the 'myproj@fix-auth' conversation is open in it (PID $$)" \
+        "the refusal names the open conversation" || return 1
+    assert_output_contains "$output" "Close that session yourself (/exit there), then run /finish fix-auth here again" \
+        "and tells the user, plainly, what to do" || return 1
+    assert_dir "$wt" "worktree preserved" || return 1
     rm -f "$wt/.cs/session.lock"
 }
 
-test_merge_from_live_base_session_succeeds() {
+test_retire_from_live_base_session_succeeds() {
     local base_dir
     base_dir=$(create_test_session_with_git "myproj")
     local base_uuid="11111111-1111-4111-8111-111111111111"
@@ -330,6 +351,8 @@ test_merge_from_live_base_session_succeeds() {
     local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
     echo "fix" > "$wt/auth.txt"
     (cd "$wt" && git add auth.txt && git commit -q -m "task work")
+    local sha
+    sha=$(land_feature myproj fix-auth) || { echo "  FAIL: integrate fixture"; return 1; }
 
     # The lock owner is this test shell, an ancestor of the cs subprocess just
     # like a cs launcher/Claude process is an ancestor of an in-session Bash tool.
@@ -338,15 +361,14 @@ test_merge_from_live_base_session_succeeds() {
     ps_stub=$(fixed_parent_ps_stub "$$")
     output=$(CLAUDE_SESSION_NAME="myproj" CS_PS_BIN="$ps_stub" \
         CS_CLAUDE_SESSION_ID="$base_uuid" \
-        "$CS_BIN" "myproj" --merge "fix-auth" 2>&1) || status=$?
+        "$CS_BIN" "myproj" -retire-feature "fix-auth" "$sha" 2>&1) || status=$?
 
-    assert_eq "0" "$status" "the live base session should be allowed to merge: $output" || return 1
-    assert_file_exists "$base_dir/auth.txt" "feature code merged into the base" || return 1
-    assert_not_exists "$wt" "merged worktree removed" || return 1
-    assert_eq "" "$(git -C "$base_dir" branch --list cs/fix-auth)" "merged branch deleted" || return 1
+    assert_eq "0" "$status" "the live base session should be allowed to retire: $output" || return 1
+    assert_not_exists "$wt" "retired worktree removed" || return 1
+    assert_eq "" "$(git -C "$base_dir" branch --list cs/fix-auth)" "retired branch deleted" || return 1
 }
 
-test_merge_from_live_worktree_session_requires_handoff() {
+test_retire_from_inside_the_feature_session_refuses() {
     local base_dir
     base_dir=$(create_test_session_with_git "myproj")
     cs_launch "myproj@fix-auth"
@@ -355,23 +377,24 @@ test_merge_from_live_worktree_session_requires_handoff() {
     wt_uuid=$(awk -F': ' '/^claude_session_id/{print $2; exit}' "$wt/.cs/local/state")
     echo "fix" > "$wt/auth.txt"
     (cd "$wt" && git add auth.txt && git commit -q -m "task work")
+    local sha
+    sha=$(land_feature myproj fix-auth) || { echo "  FAIL: integrate fixture"; return 1; }
 
     echo "$$" > "$wt/.cs/session.lock"
     local output status=0
     output=$(cd "$wt" && CLAUDE_SESSION_NAME="myproj@fix-auth" \
         CS_CLAUDE_SESSION_ID="$wt_uuid" \
-        "$CS_BIN" "myproj" --merge "fix-auth" 2>&1) || status=$?
+        "$CS_BIN" "myproj" -retire-feature "fix-auth" "$sha" 2>&1) || status=$?
 
     [ "$status" -ne 0 ] || { echo "  FAIL: a feature session must not remove its own live worktree"; return 1; }
-    assert_output_contains "$output" "Cannot merge 'myproj@fix-auth' from inside that worktree session" \
-        "self-merge refusal identifies the dangerous scenario" || return 1
-    assert_output_contains "$output" "Close 'myproj@fix-auth'" \
-        "self-merge refusal gives the narrowed hand-off" || return 1
-    assert_dir "$wt" "self-merge refusal preserves the worktree" || return 1
-    assert_file_not_exists "$base_dir/auth.txt" "self-merge refusal leaves the base unchanged" || return 1
+    assert_output_contains "$output" "This is the 'myproj@fix-auth' conversation itself" \
+        "self-retire refusal identifies the dangerous scenario" || return 1
+    assert_output_contains "$output" "Close this session, then run /finish fix-auth in 'myproj'" \
+        "self-retire refusal gives the hand-off" || return 1
+    assert_dir "$wt" "self-retire refusal preserves the worktree" || return 1
 }
 
-test_merge_foreign_live_base_lock_still_refuses() {
+test_retire_foreign_live_base_lock_still_refuses() {
     local base_dir
     base_dir=$(create_test_session_with_git "myproj")
     local base_uuid="22222222-2222-4222-8222-222222222222"
@@ -379,19 +402,21 @@ test_merge_foreign_live_base_lock_still_refuses() {
     printf 'claude_session_id: %s\n' "$base_uuid" > "$base_dir/.cs/local/state"
     cs_launch "myproj@fix-auth"
     local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    local sha
+    sha=$(land_feature myproj fix-auth) || { echo "  FAIL: integrate fixture"; return 1; }
     echo "$$" > "$base_dir/.cs/session.lock"
 
     local output status=0
     output=$(CLAUDE_SESSION_NAME="foreign" \
         CS_CLAUDE_SESSION_ID="$base_uuid" \
-        "$CS_BIN" "myproj" --merge "fix-auth" 2>&1) || status=$?
+        "$CS_BIN" "myproj" -retire-feature "fix-auth" "$sha" 2>&1) || status=$?
 
     [ "$status" -ne 0 ] || { echo "  FAIL: a foreign live base lock must refuse"; return 1; }
-    assert_output_contains "$output" "session is open" "foreign live lock keeps the hard refusal" || return 1
+    assert_output_contains "$output" "is open elsewhere" "foreign live lock keeps the hard refusal" || return 1
     assert_dir "$wt" "foreign-lock refusal preserves the worktree" || return 1
 }
 
-test_merge_reused_live_pid_is_not_treated_as_own_lock() {
+test_retire_reused_live_pid_is_not_treated_as_own_lock() {
     local base_dir
     base_dir=$(create_test_session_with_git "myproj")
     local base_uuid="33333333-3333-4333-8333-333333333333"
@@ -399,6 +424,8 @@ test_merge_reused_live_pid_is_not_treated_as_own_lock() {
     printf 'claude_session_id: %s\n' "$base_uuid" > "$base_dir/.cs/local/state"
     cs_launch "myproj@fix-auth"
     local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    local sha
+    sha=$(land_feature myproj fix-auth) || { echo "  FAIL: integrate fixture"; return 1; }
 
     # A stale lock can point at a PID later reused by an unrelated live process.
     # The matching name and UUID are insufficient: that PID must own this cs call.
@@ -409,48 +436,197 @@ test_merge_reused_live_pid_is_not_treated_as_own_lock() {
     ps_stub=$(fixed_parent_ps_stub "1")
     output=$(CLAUDE_SESSION_NAME="myproj" CS_PS_BIN="$ps_stub" \
         CS_CLAUDE_SESSION_ID="$base_uuid" \
-        "$CS_BIN" "myproj" --merge "fix-auth" 2>&1) || status=$?
+        "$CS_BIN" "myproj" -retire-feature "fix-auth" "$sha" 2>&1) || status=$?
     kill "$reused_pid" 2>/dev/null || true
     wait "$reused_pid" 2>/dev/null || true
 
     [ "$status" -ne 0 ] || { echo "  FAIL: a reused foreign PID must not be exempted"; return 1; }
-    assert_output_contains "$output" "session is open" "reused live PID keeps the hard refusal" || return 1
+    assert_output_contains "$output" "is open elsewhere" "reused live PID keeps the hard refusal" || return 1
     assert_dir "$wt" "reused-PID refusal preserves the worktree" || return 1
 }
 
-test_merge_conflict_stops_and_preserves() {
+test_retire_refuses_an_unintegrated_feature() {
+    # Retirement never merges: a commit the base lacks is a refusal that
+    # names /finish, whatever the old merge verb would have done with it.
     local base_dir
     base_dir=$(create_test_session_with_git "myproj")
-    echo "base line" > "$base_dir/shared.txt"
-    (cd "$base_dir" && git add shared.txt && git commit -q -m "base file")
     cs_launch "myproj@fix-auth"
     local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
     echo "task line" > "$wt/shared.txt"
     (cd "$wt" && git add shared.txt && git commit -q -m "task edit")
-    echo "conflicting base line" > "$base_dir/shared.txt"
-    (cd "$base_dir" && git add shared.txt && git commit -q -m "base edit")
-    local output
-    output=$("$CS_BIN" "myproj" --merge "fix-auth" 2>&1 || true)
-    assert_output_contains "$output" "conflict" "conflict reported" || return 1
-    assert_dir "$wt" "worktree preserved on conflict" || return 1
-    (cd "$base_dir" && git merge --abort 2>/dev/null || true)
+    local sha output status=0
+    sha=$(git -C "$wt" rev-parse HEAD)
+    output=$("$CS_BIN" "myproj" -retire-feature "fix-auth" "$sha" 2>&1) || status=$?
+    assert_eq "1" "$status" "an unintegrated feature is refused" || return 1
+    assert_output_contains "$output" "is not integrated into myproj; run /finish fix-auth before retiring" \
+        "the refusal names /finish" || return 1
+    assert_dir "$wt" "worktree preserved" || return 1
+    assert_file_not_exists "$base_dir/shared.txt" "nothing was merged" || return 1
+    assert_eq "cs/fix-auth" "$(git -C "$base_dir" branch --list cs/fix-auth | tr -d ' *+')" "branch kept" || return 1
 }
 
-test_merge_rejects_traversal_task_name() {
+test_retire_refuses_commits_after_the_captured_one() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "one" > "$wt/one.txt"
+    (cd "$wt" && git add one.txt && git commit -q -m one)
+    local sha output status=0
+    sha=$(land_feature myproj fix-auth) || { echo "  FAIL: integrate fixture"; return 1; }
+    echo "two" > "$wt/two.txt"
+    (cd "$wt" && git add two.txt && git commit -q -m two)
+    output=$("$CS_BIN" "myproj" -retire-feature "fix-auth" "$sha" 2>&1) || status=$?
+    assert_eq "1" "$status" "a tip the base lacks is refused" || return 1
+    assert_output_contains "$output" "1 commit(s) on cs/fix-auth after $sha are not integrated; run /finish fix-auth again" \
+        "the refusal counts the commits and names /finish" || return 1
+    assert_dir "$wt" "worktree preserved" || return 1
+}
+
+test_retire_force_takes_a_squash_landed_branch() {
+    # A PR squash-merged on GitHub leaves cs/<task> a non-ancestor of the base
+    # forever; the skill passes --force on that evidence, and the branch goes
+    # with -D since -d would refuse it.
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "squashed elsewhere" > "$wt/feature.txt"
+    (cd "$wt" && git add feature.txt && git commit -q -m "feature work")
+    local sha output status=0
+    sha=$(git -C "$wt" rev-parse HEAD)
+    output=$("$CS_BIN" "myproj" -retire-feature "fix-auth" "$sha" --force 2>&1) || status=$?
+    assert_eq "0" "$status" "force retires: $output" || return 1
+    assert_eq "retired fix-auth $sha" "$output" "the summary line" || return 1
+    assert_not_exists "$wt" "worktree removed" || return 1
+    assert_eq "" "$(git -C "$base_dir" branch --list cs/fix-auth)" "unmerged branch deleted under force" || return 1
+    assert_file_not_exists "$base_dir/feature.txt" "force never merges" || return 1
+}
+
+test_retire_force_refuses_commits_after_the_captured_one() {
+    # --force skips only "is the captured commit in the base": a commit made
+    # on the branch after the PR's capture is work the PR never carried, and
+    # deleting the branch would lose it.
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "in the pr" > "$wt/a.txt"
+    (cd "$wt" && git add a.txt && git commit -q -m "A")
+    local sha output status=0
+    sha=$(git -C "$wt" rev-parse HEAD)
+    echo "after the pr" > "$wt/b.txt"
+    (cd "$wt" && git add b.txt && git commit -q -m "B")
+    output=$("$CS_BIN" "myproj" -retire-feature "fix-auth" "$sha" --force 2>&1) || status=$?
+    assert_eq "1" "$status" "force refuses a tip past the captured commit" || return 1
+    assert_output_contains "$output" "1 commit(s) on cs/fix-auth after $sha are not integrated; run /finish fix-auth again" \
+        "the refusal counts the unlanded commits" || return 1
+    assert_dir "$wt" "worktree preserved" || return 1
+    assert_eq "+cs/fix-auth" "$(git -C "$base_dir" branch --list cs/fix-auth | tr -d ' ')" "branch kept" || return 1
+}
+
+test_retire_fuses_nothing_when_removal_fails_and_retry_fuses_once() {
+    # Records are fused only once the worktree is gone: a removal that fails
+    # (here: a locked worktree) leaves the base's records untouched and the
+    # worktree's own in place, so the retry after unlocking fuses exactly once.
+    local base_dir="$CS_SESSIONS_ROOT/proj"
+    mkdir -p "$base_dir/.cs"/{memory,local}
+    echo "# P" > "$base_dir/README.md"
+    printf '.cs/\n.claude/settings.local.json\n' > "$base_dir/.gitignore"
+    (cd "$base_dir" && git init -q && git config core.autocrlf false && git add -A && git commit -q -m init)
+    printf '{"event":"base-seed"}\n' > "$base_dir/.cs/timeline.jsonl"
+    cs_launch "proj@t1"
+    local wt="$CS_SESSIONS_ROOT/proj@t1"
+    echo "done" > "$wt/result.txt"
+    (cd "$wt" && git add result.txt && git commit -q -m "task")
+    printf '{"event":"from-task"}\n' > "$wt/.cs/timeline.jsonl"
+    local sha output status=0
+    sha=$(land_feature proj t1) || { echo "  FAIL: integrate fixture"; return 1; }
+    git -C "$base_dir" worktree lock "$wt"
+    output=$("$CS_BIN" "proj" -retire-feature "t1" "$sha" 2>&1) || status=$?
+    assert_eq "1" "$status" "a locked worktree cannot be removed: $output" || return 1
+    assert_dir "$wt" "worktree survives" || return 1
+    assert_file_exists "$wt/.cs/timeline.jsonl" "the worktree's records are back where they were" || return 1
+    assert_eq "1" "$(grep -c "base-seed" "$base_dir/.cs/timeline.jsonl")" "base records untouched" || return 1
+    assert_file_not_contains "$base_dir/.cs/timeline.jsonl" "from-task" "nothing fused on a failed removal" || return 1
+    git -C "$base_dir" worktree unlock "$wt"
+    status=0
+    output=$("$CS_BIN" "proj" -retire-feature "t1" "$sha" 2>&1) || status=$?
+    assert_eq "0" "$status" "retry retires: $output" || return 1
+    assert_not_exists "$wt" "worktree removed on retry" || return 1
+    assert_eq "1" "$(grep -c "from-task" "$base_dir/.cs/timeline.jsonl")" "fused exactly once" || return 1
+}
+
+test_retire_refusal_for_an_open_session_comes_after_the_landing_check() {
+    # An open conversation on an UNLANDED feature must hear "/finish first",
+    # not "the feature is landed, close the session".
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "work" > "$wt/w.txt"
+    (cd "$wt" && git add w.txt && git commit -q -m work)
+    local sha output status=0
+    sha=$(git -C "$wt" rev-parse HEAD)
+    echo "$$" > "$wt/.cs/session.lock"
+    output=$("$CS_BIN" "myproj" -retire-feature "fix-auth" "$sha" 2>&1) || status=$?
+    rm -f "$wt/.cs/session.lock"
+    assert_eq "1" "$status" "refused" || return 1
+    assert_output_contains "$output" "is not integrated into myproj; run /finish fix-auth before retiring" "the landing check speaks first" || return 1
+    assert_output_not_contains "$output" "The feature is landed" "no false reassurance" || return 1
+}
+
+test_retire_force_still_refuses_untracked_work() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "precious" > "$wt/never-added.txt"
+    local sha output status=0
+    sha=$(git -C "$wt" rev-parse HEAD)
+    output=$("$CS_BIN" "myproj" -retire-feature "fix-auth" "$sha" --force 2>&1) || status=$?
+    assert_eq "1" "$status" "force skips the ancestry check only" || return 1
+    assert_output_contains "$output" "never-added.txt" "the refusal names the path" || return 1
+    assert_dir "$wt" "worktree preserved" || return 1
+}
+
+test_retire_rejects_traversal_task_name() {
     local base_dir
     base_dir=$(create_test_session_with_git "myproj")
     # A task argument with path separators would build an escaping worktree
-    # path; --merge must reject it with the feature-name charset error before
+    # path; the entry must reject it with the feature-name charset error before
     # touching the filesystem, matching the launch path's validation.
     local output status=0
-    output=$("$CS_BIN" "myproj" --merge "e/../../x" 2>&1) || status=$?
+    output=$("$CS_BIN" "myproj" -retire-feature "e/../../x" deadbeef 2>&1) || status=$?
     [ "$status" -ne 0 ] || { echo "  FAIL: a task name with path separators must be rejected"; return 1; }
     assert_output_contains "$output" "alphanumeric" "rejects a traversal task name with the charset error" || return 1
 }
 
+test_retire_is_hidden_from_completion_and_unknown_command_text() {
+    grep -q '^            -retire-feature) # hidden' "$SCRIPT_DIR/../lib/99-main.sh" \
+        || { echo "  FAIL: the arm must carry '# hidden' on its own line for test_completions"; return 1; }
+    assert_file_not_contains "$SCRIPT_DIR/../lib/99-main.sh" 'Unknown session command.*-retire-feature' \
+        "the unknown-command string must not advertise the entry" || return 1
+    assert_file_not_contains "$SCRIPT_DIR/../lib/10-help.sh" 'retire-feature' "help never lists it" || return 1
+    assert_file_not_contains "$SCRIPT_DIR/../completions/_cs" 'retire-feature' "zsh completion never lists it" || return 1
+    assert_file_not_contains "$SCRIPT_DIR/../completions/cs.bash" 'retire-feature' "bash completion never lists it" || return 1
+    assert_file_not_contains "$SCRIPT_DIR/../README.md" 'retire-feature' "README never lists it" || return 1
+}
+
+test_merge_verb_is_gone() {
+    local base_dir output status=0
+    base_dir=$(create_test_session_with_git "myproj")
+    output=$("$CS_BIN" "myproj" --merge "fix-auth" 2>&1) || status=$?
+    assert_eq "1" "$status" "--merge is not a session command any more" || return 1
+    assert_output_contains "$output" "Unknown session command: --merge" "and says so" || return 1
+    assert_file_not_contains "$SCRIPT_DIR/../lib/10-help.sh" '[-]-merge' "help does not list it" || return 1
+    assert_file_not_contains "$SCRIPT_DIR/../completions/_cs" '[-]-merge' "zsh completion does not list it" || return 1
+    assert_file_not_contains "$SCRIPT_DIR/../completions/cs.bash" '[-]-merge' "bash completion does not list it" || return 1
+}
+
 # With core.autocrlf enabled, a CRLF-rewritten .gitignore
 # carries a trailing \r on every pattern and matches nothing, so files cs means
-# to ignore surface as untracked — which then blocks `cs --merge`.
+# to ignore surface as untracked — which then blocks retirement.
 test_session_repo_pins_autocrlf_off() {
     local cfg="$TEST_TMPDIR/gitconfig-autocrlf"
     printf '[core]\n\tautocrlf = true\n' > "$cfg"
@@ -466,7 +642,7 @@ test_session_repo_pins_autocrlf_off() {
 # cs records the protocol file in the worktree's info/exclude, at whatever path
 # git reports for it. A worktree's git-path is absolute; mis-reading that as
 # relative sends the entry to a nonsense path,
-# leaves CLAUDE.local.md untracked, and blocks `cs <base> --merge`.
+# leaves CLAUDE.local.md untracked, and blocks retirement.
 test_worktree_excludes_protocol_file() {
     local base_dir="$CS_SESSIONS_ROOT/proj"
     mkdir -p "$base_dir/.cs"/{memory,local}
@@ -489,23 +665,31 @@ run_test test_worktree_create_refuses_dirty_base
 run_test test_worktree_create_reuses_existing_branch
 run_test test_worktree_create_ignored_mode_bootstraps_cs
 run_test test_ignored_mode_worktree_starts_with_nothing_untracked
-run_test test_ignored_mode_worktree_merges_without_a_manual_exclude
-run_test test_merge_tolerates_a_worktree_predating_the_cs_exclude
-run_test test_merge_still_refuses_real_untracked_work
+run_test test_ignored_mode_worktree_retires_without_a_manual_exclude
+run_test test_retire_tolerates_a_worktree_predating_the_cs_exclude
+run_test test_retire_still_refuses_real_untracked_work
 run_test test_worktree_of_worktree_refused
 run_test test_worktree_create_succeeds_with_untracked_base
 run_test test_worktree_reopen_preserves_project_claude_md
 run_test test_worktree_launch_exports_base_identity
 run_test test_launch_enables_the_task_tools_unless_opted_out
-run_test test_merge_tracked_worktree_fuses_and_cleans_up
-run_test test_merge_refuses_dirty_worktree
-run_test test_merge_refuses_live_session
-run_test test_merge_from_live_base_session_succeeds
-run_test test_merge_from_live_worktree_session_requires_handoff
-run_test test_merge_foreign_live_base_lock_still_refuses
-run_test test_merge_reused_live_pid_is_not_treated_as_own_lock
-run_test test_merge_conflict_stops_and_preserves
-run_test test_merge_rejects_traversal_task_name
+run_test test_retire_after_integrate_removes_worktree_and_branch
+run_test test_retire_refuses_dirty_worktree
+run_test test_retire_refuses_a_live_feature_session_and_says_what_to_do
+run_test test_retire_from_live_base_session_succeeds
+run_test test_retire_from_inside_the_feature_session_refuses
+run_test test_retire_foreign_live_base_lock_still_refuses
+run_test test_retire_reused_live_pid_is_not_treated_as_own_lock
+run_test test_retire_refuses_an_unintegrated_feature
+run_test test_retire_refuses_commits_after_the_captured_one
+run_test test_retire_force_takes_a_squash_landed_branch
+run_test test_retire_force_still_refuses_untracked_work
+run_test test_retire_force_refuses_commits_after_the_captured_one
+run_test test_retire_fuses_nothing_when_removal_fails_and_retry_fuses_once
+run_test test_retire_refusal_for_an_open_session_comes_after_the_landing_check
+run_test test_retire_rejects_traversal_task_name
+run_test test_retire_is_hidden_from_completion_and_unknown_command_text
+run_test test_merge_verb_is_gone
 
 # --- -integrate-feature: integrate while the feature stays open, remove nothing ---
 
@@ -708,7 +892,11 @@ test_integrate_lands_a_no_ff_merge_and_keeps_everything() {
 # timeline is tracked there), and the verb refuses dirt — so the test stages
 # the general case: a tracked timeline, the refusal, the user's commit of the
 # bookkeeping, then the ancestor path. Retirement semantics are unchanged.
-test_integrate_then_merge_verb_takes_the_ancestor_path() {
+test_integrate_then_retire_tolerates_tracked_bookkeeping_dirt() {
+    # In tracked-.cs mode the integrate's own timeline event dirties the base.
+    # Retirement touches no base file, so that dirt is no reason to refuse:
+    # /finish lands and retires in one run, and the bookkeeping stays the
+    # user's to commit.
     local sha base_dir wt output status=0
     base_dir=$(create_test_session_with_git "myproj")
     echo '{"ts":"2026-01-01T00:00:00Z","event":"seed"}' > "$base_dir/.cs/timeline.jsonl"
@@ -717,23 +905,33 @@ test_integrate_then_merge_verb_takes_the_ancestor_path() {
     wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
     echo "feature work" > "$wt/feature.txt"
     (cd "$wt" && git add feature.txt && git commit -q -m "feature work")
-    sha=$(git -C "$wt" rev-parse HEAD)
-    "$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- true >/dev/null 2>&1 || return 1
+    sha=$(land_feature myproj fix-auth) || { echo "  FAIL: integrate fixture"; return 1; }
     assert_eq " M .cs/timeline.jsonl" "$(git -C "$base_dir" status --porcelain)" \
         "the only dirt after an integrate is the tracked timeline event" || return 1
-    output=$("$CS_BIN" myproj --merge fix-auth 2>&1) || status=$?
-    assert_eq "1" "$status" "retire refuses the dirty base, as it always has" || return 1
-    assert_output_contains "$output" "Base session has uncommitted changes" "the refusal is the verb's own" || return 1
-    (cd "$base_dir" && git add .cs/timeline.jsonl && git commit -q -m "record the integrate")
     local head_after_integrate
     head_after_integrate=$(git -C "$base_dir" rev-parse HEAD)
-    status=0
-    output=$("$CS_BIN" myproj --merge fix-auth 2>&1) || status=$?
-    assert_eq "0" "$status" "retire succeeds after integrate: $output" || return 1
-    assert_output_contains "$output" "already merged; cleaning up" "the verb skips the merge" || return 1
+    output=$("$CS_BIN" myproj -retire-feature fix-auth "$sha" 2>&1) || status=$?
+    assert_eq "0" "$status" "retire succeeds over bookkeeping dirt: $output" || return 1
     assert_eq "$head_after_integrate" "$(git -C "$base_dir" rev-parse HEAD)" "retire makes no new commit" || return 1
+    assert_eq " M .cs/timeline.jsonl" "$(git -C "$base_dir" status --porcelain)" \
+        "and commits nothing on the user's behalf" || return 1
     assert_not_exists "$wt" "retire removed the worktree" || return 1
     assert_eq "" "$(git -C "$base_dir" branch --list cs/fix-auth)" "retire deleted the branch" || return 1
+}
+
+test_retire_still_refuses_real_base_dirt() {
+    local sha base_dir wt output status=0
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "feature work" > "$wt/feature.txt"
+    (cd "$wt" && git add feature.txt && git commit -q -m "feature work")
+    sha=$(land_feature myproj fix-auth) || { echo "  FAIL: integrate fixture"; return 1; }
+    echo "half-typed" >> "$base_dir/CLAUDE.md"
+    output=$("$CS_BIN" myproj -retire-feature fix-auth "$sha" 2>&1) || status=$?
+    assert_eq "1" "$status" "a dirty base file outside .cs still refuses" || return 1
+    assert_output_contains "$output" "Base session has uncommitted changes" "the refusal is the verb's own" || return 1
+    assert_dir "$wt" "worktree preserved" || return 1
 }
 
 test_integrate_red_gate_leaves_base_untouched() {
@@ -1040,7 +1238,8 @@ test_integrate_refuses_a_detached_base() {
 run_test test_integrate_refuses_a_gate_that_moves_the_temp_head
 run_test test_integrate_refuses_a_detached_base
 run_test test_integrate_tracked_mode_union_merges_shared_records
-run_test test_integrate_then_merge_verb_takes_the_ancestor_path
+run_test test_integrate_then_retire_tolerates_tracked_bookkeeping_dirt
+run_test test_retire_still_refuses_real_base_dirt
 run_test test_integrate_red_gate_leaves_base_untouched
 run_test test_integrate_refuses_untracked_collision_before_the_gate
 run_test test_integrate_gates_run_in_the_temp_not_the_live_trees
@@ -1052,7 +1251,7 @@ run_test test_integrate_conflict_names_the_path_and_leaves_no_merge_head
 run_test test_integrate_ignored_mode_fuses_nothing
 run_test test_integrate_tracked_mode_warns_on_memory_index_change
 
-test_merge_ignored_mode_fuses_records() {
+test_retire_ignored_mode_fuses_records() {
     local base_dir="$CS_SESSIONS_ROOT/proj"
     mkdir -p "$base_dir/.cs"/{memory,local}
     echo "base note" > "$base_dir/.cs/memory/note-base.md"
@@ -1080,10 +1279,12 @@ test_merge_ignored_mode_fuses_records() {
         > "$wt/.cs/memory/narrative.plain.md"
     echo "task version" > "$wt/.cs/memory/note-base.md"
     local output merge_status
-    output=$("$CS_BIN" "proj" --merge "t1" 2>&1)
+    local sha
+    sha=$(land_feature proj t1) || { echo "  FAIL: integrate fixture"; return 1; }
+    output=$("$CS_BIN" "proj" -retire-feature "t1" "$sha" 2>&1)
     merge_status=$?
-    assert_eq "0" "$merge_status" "merge exits 0" \
-        || { echo "  merge output: $output"; return 1; }
+    assert_eq "0" "$merge_status" "retire exits 0" \
+        || { echo "  retire output: $output"; return 1; }
     assert_output_contains "$output" "memory/note-base.md already exists in the base; skipped" \
         "memory collision warned" || return 1
     assert_eq "base note" "$(cat "$base_dir/.cs/memory/note-base.md")" "memory collision keeps base copy" || return 1
@@ -1102,12 +1303,12 @@ test_merge_ignored_mode_fuses_records() {
     assert_file_exists "$base_dir/.cs/memory/narrative.other.md" "unseen narrative copied" || return 1
     assert_file_contains "$base_dir/.cs/memory/narrative.other.md" "name: other-n" "first copy keeps frontmatter" || return 1
     assert_not_exists "$wt" "worktree removed" || return 1
-    assert_file_exists "$base_dir/result.txt" "code merged" || return 1
+    assert_file_exists "$base_dir/result.txt" "code landed by the integrate" || return 1
 }
 
-run_test test_merge_ignored_mode_fuses_records
+run_test test_retire_ignored_mode_fuses_records
 
-test_merge_fuse_survives_a_torn_timeline_tail() {
+test_retire_fuse_survives_a_torn_timeline_tail() {
     # A crash mid-append leaves a last line with no newline. Appending onto it
     # splices two records into one, and the reader's tolerant `fromjson? //
     # empty` then drops BOTH — the splice and the record that followed it.
@@ -1130,10 +1331,12 @@ test_merge_fuse_survives_a_torn_timeline_tail() {
         "fixture must leave the base timeline unterminated" || return 1
 
     local output merge_status
-    output=$("$CS_BIN" "proj" --merge "t1" 2>&1)
+    local sha
+    sha=$(land_feature proj t1) || { echo "  FAIL: integrate fixture"; return 1; }
+    output=$("$CS_BIN" "proj" -retire-feature "t1" "$sha" 2>&1)
     merge_status=$?
-    assert_eq "0" "$merge_status" "merge exits 0" \
-        || { echo "  merge output: $output"; return 1; }
+    assert_eq "0" "$merge_status" "retire exits 0" \
+        || { echo "  retire output: $output"; return 1; }
 
     # Parse the way cs reads it: one record per line, malformed lines dropped.
     local events
@@ -1145,7 +1348,7 @@ test_merge_fuse_survives_a_torn_timeline_tail() {
         "the fused record must survive the fuse" || return 1
 }
 
-run_test test_merge_fuse_survives_a_torn_timeline_tail
+run_test test_retire_fuse_survives_a_torn_timeline_tail
 
 test_rm_worktree_unregisters_and_prompts_branch() {
     local base_dir
@@ -1216,7 +1419,7 @@ test_doctor_fresh_worktree_not_flagged_merged() {
 run_test test_doctor_fresh_worktree_not_flagged_merged
 
 
-test_merge_refuses_untracked_worktree() {
+test_retire_refuses_untracked_worktree() {
     local base_dir
     base_dir=$(create_test_session_with_git "myproj")
     cs_launch "myproj@fix-auth"
@@ -1225,15 +1428,17 @@ test_merge_refuses_untracked_worktree() {
     (cd "$wt" && git add done.txt && git commit -q -m work)
     echo "precious" > "$wt/never-added.txt"   # untracked user work
     local output status=0
-    output=$("$CS_BIN" "myproj" --merge "fix-auth" 2>&1) || status=$?
-    [ "$status" -ne 0 ] || { echo "  FAIL: merge must refuse"; return 1; }
+    local sha
+    sha=$(land_feature myproj fix-auth) || { echo "  FAIL: integrate fixture"; return 1; }
+    output=$("$CS_BIN" "myproj" -retire-feature "fix-auth" "$sha" 2>&1) || status=$?
+    [ "$status" -ne 0 ] || { echo "  FAIL: retire must refuse"; return 1; }
     assert_output_contains "$output" "untracked" "refusal names the problem" || return 1
     assert_output_contains "$output" "never-added.txt" "refusal names the exact path" || return 1
     assert_dir "$wt" "worktree preserved" || return 1
     assert_eq "precious" "$(cat "$wt/never-added.txt")" "untracked work survives" || return 1
 }
 
-run_test test_merge_refuses_untracked_worktree
+run_test test_retire_refuses_untracked_worktree
 
 test_worktree_secrets_flag_targets_base_namespace() {
     create_test_session_with_git "myproj" > /dev/null

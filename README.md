@@ -135,9 +135,8 @@ cs -- <session-name>        # '--' ends the options, for launchers that insert o
 cs <session-name>           # Create or resume a session
 cs <session-name> --force   # Override active session lock
 cs <base>@<feature>         # Create/resume a parallel feature worktree off <base>
-cs <base> --merge <feature> # Merge a feature worktree back into <base>
 cs <base> -features         # List a base's feature worktrees and their merge readiness
-cs <base> -finish <feature> # Open <base> and run /finish for <feature> (integrate, keep the worktree)
+cs <base> -finish <feature> # Open <base> and run /finish for <feature> (integrate, then retire the worktree)
 cs -adopt <name>            # Adopt current directory as a session
 cs -whoami                  # Show the current actor (for shared, multi-person sessions)
 cs -who                     # Show who contributed to shared memory/narrative (git history)
@@ -182,7 +181,7 @@ The current directory decides, not any history: cs opens a session when that dir
 - **Liveness** — sessions with an open conversation carry a breathing teal `■` in place of the heat dot and count into the masthead's live tally. Detection is the cs lock plus a statusline heartbeat, so conversations opened outside cs register too; the preview state reads `■ live · locked <pid>` or `■ live · unlocked`, with the agent state appended when Claude Code publishes one (`■ live · locked 4242 · waiting`)
 - **Unread mail** — a session with unread cross-session mail (`cs -msg`) shows an amber `✉` and the count in its row; it clears as the recipient reads with `cs -msg`
 - **Worktree nesting** — `base@feature` sessions attach under their base with tree connectors as indented `@feature` rows, inherit the base's time section, and the preview names the lineage both ways (`worktree @feature · off base` on the feature, a `features` list on the base). Deleting a worktree row unregisters it from the base repo, like `cs -rm`
-- **Merge readiness** with `m` — replaces the panes with a base's feature worktrees and why each can or cannot merge (commits ahead, dirty tree, untracked files, a live lock, already merged). The detail pane names what finishing will do, down to the merge commit it will land. Enter leaves the picker and runs `cs <base> -finish <feature>`, which opens the base with `/finish <feature>` armed: it integrates the feature and keeps the worktree. The picker never merges anything itself
+- **Merge readiness** with `m` — replaces the panes with a base's feature worktrees and why each can or cannot merge (commits ahead, dirty tree, untracked files, a live lock, already merged). The detail pane names what finishing will do, down to the merge commit it will land. Enter leaves the picker and runs `cs <base> -finish <feature>`, which opens the base with `/finish <feature>` armed: it integrates the feature and then retires the worktree once its conversation is closed. The picker never merges or removes anything itself
 - **Symbol legend** — `● activity  ■ live  * marked  archived` sits in the table header's free width on wide terminals
 - **Fuzzy search** with `/` — matches characters in order with highlighting; Enter commits the filter. Add `#tag` anywhere in the query to AND-filter by tag (e.g. `#api backend`); combine multiple `#tag`s or mix with a fuzzy name remainder
 - **Time-based sections** — sessions grouped under Today, Yesterday, This Week, This Month, Older when sorted by date (the default view)
@@ -285,36 +284,32 @@ is already open offers to open one of its existing features, start a new
 parallel feature, force a second launch, open the session manager to pick a
 different session, or cancel. A worktree session also
 knows what it is: Claude is told at launch that it runs in a feature worktree,
-that `/finish <feature>` in the base session integrates the work while this
-one stays open, and that `cs myproj --merge <feature>` retires it afterwards,
-so it won't merge or delete the branch by hand.
+that `/finish <feature>` in the base session integrates the work and then
+retires this worktree once its conversation is closed, so it won't merge or
+delete the branch by hand.
 
 The `finish` skill (`/finish <feature>` in the base session) lands a feature
-while its conversation stays open: it captures the feature commit, merges
-base and feature in a temporary detached worktree, runs the repo's gates
-there, fast-forwards the base onto the result, and reports whether a GitHub
-PR exists for the branch. It removes nothing. Ordinary feature branches get
-the older gated `--no-ff` ritual from the same skill. It is user-invoked
-only (`disable-model-invocation: true`).
+and retires its worktree: it captures the feature commit, merges base and
+feature in a temporary detached worktree, runs the repo's gates there,
+fast-forwards the base onto the result, reports whether a GitHub PR exists
+for the branch, then fuses the worktree's session records into the base and
+removes the worktree and branch. That last step needs the feature
+conversation closed, because a directory cannot be removed from under a
+running Claude: while it is open, `/finish` lands the work, says so in plain
+words, and you close that session and run `/finish <feature>` again. Nothing
+is ever removed by a keystroke or signal into the other session. Ordinary
+feature branches get the older gated `--no-ff` ritual from the same skill. It
+is user-invoked only (`disable-model-invocation: true`).
 
 Each worktree is a full cs session (own conversation, color, crash
 recovery) that shares the base session's task list and secrets.
 
-Retirement stays a separate, explicit verb:
-
-    cs myproj --merge fix-auth   # merge cs/fix-auth, fuse records, remove worktree
-
-Run this from the base session, which merges while holding its own lock, or
-from any free terminal once the feature session is closed; only merging from
-inside the feature session hands off, since it can't remove its own working
-directory.
-
-cs never commits for you: merge refuses dirty checkouts and tells you what
-to commit, and creating a feature from a base with uncommitted changes asks
+cs never commits for you: retirement refuses dirty checkouts and tells you
+what to commit, and creating a feature from a base with uncommitted changes asks
 before branching from the last commit (interactive sessions) or refuses
 (scripts). Abandon a feature with `cs -rm myproj@fix-auth`. Repos that
-gitignore `.cs/` get a per-worktree `.cs/` whose records are fused explicitly
-at merge. Requires git >= 2.20.
+gitignore `.cs/` get a per-worktree `.cs/` whose records are fused into the
+base at retirement. Requires git >= 2.20.
 
 ### Task queue
 
