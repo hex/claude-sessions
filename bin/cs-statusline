@@ -1345,22 +1345,22 @@ _fable_candidate() {
     fi
     [ -n "$_FABLE_PCT" ] || return 0
     _LIM_NAME+=("fable"); _LIM_PCT+=("$_FABLE_PCT"); _LIM_RESET+=("$_FABLE_RESET")
-    _LIM_GATE+=(80); _LIM_ICON+=("$ICON_FABLE")
+    _LIM_GATE+=(80); _LIM_ICON+=("$ICON_FABLE"); _LIM_SHOW+=(50)
 }
 
-# Rate limits are hidden until hot: every window at or past 70 becomes a
-# candidate, the two highest render highest-first, the rest stay hidden. Their
-# arrival is the signal. The three windows are 5h and wk from stdin and, on a
-# Fable session, the model-scoped weekly window from the usage cache. The 5h
-# countdown gate equals the reveal (70): a lower gate would be unobservable.
+# The 5h window is the one being spent right now, so it is always on the bar.
+# The coarse windows — wk from stdin and, on a Fable session, the model-scoped
+# weekly window from the usage cache — arrive at 50 and stay hidden below it;
+# their arrival is the signal. Reveal and colour are separate: every window is
+# neutral below 70, amber from 70, crit from 90 (see _limits_render).
 _seg_limits() {
-    _LIM_NAME=(); _LIM_PCT=(); _LIM_RESET=(); _LIM_GATE=(); _LIM_ICON=()
+    _LIM_NAME=(); _LIM_PCT=(); _LIM_RESET=(); _LIM_GATE=(); _LIM_ICON=(); _LIM_SHOW=()
     local h="${SL_5H%%.*}" w="${SL_WK%%.*}"
     if [ -n "$h" ]; then
-        _LIM_NAME+=("5h"); _LIM_PCT+=("$h"); _LIM_RESET+=("$SL_5H_RESET"); _LIM_GATE+=(70); _LIM_ICON+=("$ICON_5H")
+        _LIM_NAME+=("5h"); _LIM_PCT+=("$h"); _LIM_RESET+=("$SL_5H_RESET"); _LIM_GATE+=(70); _LIM_ICON+=("$ICON_5H"); _LIM_SHOW+=(0)
     fi
     if [ -n "$w" ]; then
-        _LIM_NAME+=("wk"); _LIM_PCT+=("$w"); _LIM_RESET+=("$SL_WK_RESET"); _LIM_GATE+=(80); _LIM_ICON+=("$ICON_WK")
+        _LIM_NAME+=("wk"); _LIM_PCT+=("$w"); _LIM_RESET+=("$SL_WK_RESET"); _LIM_GATE+=(80); _LIM_ICON+=("$ICON_WK"); _LIM_SHOW+=(50)
     fi
     _fable_candidate
     _limits_emit_hot
@@ -1373,28 +1373,29 @@ _seg_limits() {
 # shows it.
 _seg_fable() {
     [ -z "${_LIMITS_NAMED:-}" ] || return 0
-    _LIM_NAME=(); _LIM_PCT=(); _LIM_RESET=(); _LIM_GATE=(); _LIM_ICON=()
+    _LIM_NAME=(); _LIM_PCT=(); _LIM_RESET=(); _LIM_GATE=(); _LIM_ICON=(); _LIM_SHOW=()
     _fable_candidate
     _limits_emit_hot
 }
 
-# Render the two hottest candidates at or past 70, highest first. At most
-# three candidates, so a pass that picks the max twice is the whole sort; no
-# subprocess, no bash 4 features.
+# Render every candidate at or past its own reveal floor (_LIM_SHOW): the
+# fixed 5h window first, then the coarse windows highest first. At most three
+# candidates, so a pass that picks the max is the whole sort; no subprocess,
+# no bash 4 features.
 _limits_emit_hot() {
-    local n=${#_LIM_NAME[@]} shown=0 best i
-    while [ "$shown" -lt 2 ]; do
+    local n=${#_LIM_NAME[@]} best i
+    while :; do
         best=-1
         for ((i = 0; i < n; i++)); do
             [ -n "${_LIM_NAME[i]}" ] || continue
-            [ "${_LIM_PCT[i]}" -ge 70 ] || continue
+            [ "${_LIM_PCT[i]}" -ge "${_LIM_SHOW[i]}" ] || continue
+            if [ "${_LIM_SHOW[i]}" -eq 0 ]; then best=$i; break; fi
             if [ "$best" -lt 0 ] || [ "${_LIM_PCT[i]}" -gt "${_LIM_PCT[best]}" ]; then best=$i; fi
         done
         [ "$best" -ge 0 ] || return 0
         _limits_render "${_LIM_NAME[best]}" "${_LIM_PCT[best]}" "${_LIM_RESET[best]}" \
             "${_LIM_GATE[best]}" "${_LIM_ICON[best]}"
         _LIM_NAME[best]=""
-        shown=$((shown + 1))
     done
 }
 

@@ -7,6 +7,7 @@ All notable changes to cs are documented here. Release notes are also available 
 ## Unreleased
 
 ### Changed
+- The 5h rate-limit capsule is always on the bar, and the coarse windows (wk, and fable on a Fable session) join it at 50% instead of 70%, highest first after 5h. Reveal and colour are now separate: every window is neutral below 70, amber from 70, red from 90, and the reset countdown still joins 5h at 70 and the coarse windows at 80.
 - The rounded capsule caps are drawn only once a machine has said its font has them. They are the bar's one private-use glyph, and a font without them showed a box at every capsule edge. The installer now shows a sample capsule and asks whether its ends look rounded, recording the answer in `~/.config/cs/statusline-caps`; until then the capsules have square ends. `cs -statusline caps on|off|ask` rewrites the answer, `cs -doctor` reports it, and `CS_STATUSLINE_CAPS=1`/`0` still overrides.
 - The context gauge's icon is a pie that fills as context does: `○` below 13%, `◔` up to the warn threshold, `◑` through the amber band, `◕` at crit, `●` from 88%. The half and three-quarter steps sit on `CS_STATUSLINE_CTX_WARN` and `_CRIT`, so the shape changes exactly where the ink does. Agent rows in the subagent panel carry the same pie. The weekly rate-limit icon moves from the half circle to `◶` so a hot week beside a mid context no longer reads as two of one thing.
 

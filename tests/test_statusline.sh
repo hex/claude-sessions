@@ -161,8 +161,8 @@ test_happy_path_docs_fixture_plain() {
     out=$(run_sl "$FIXTURE_DOCS")
     # git absent (non-git dir) and disc absent (no cs session); both rate-limit
     # windows sit below seventy, so limits stays hidden entirely.
-    assert_eq "my-session · ✦ Opus high > ○ ctx 8%" "$out" \
-        "docs fixture should render identity first, then the ctx gauge (no badge in plain mode)"
+    assert_eq "my-session · ✦ Opus high > ○ ctx 8% > ◷ 5h 23%" "$out" \
+        "docs fixture should render identity first, the ctx gauge, then the always-on 5h window (no badge in plain mode)"
 }
 
 
@@ -196,13 +196,14 @@ test_all_segments_ordering_plain() {
 # Limits hide when healthy: nothing renders below 70
 # ============================================================================
 
-test_limits_hidden_when_healthy() {
+test_limits_healthy_shows_5h_and_hides_wk() {
     export COLORTERM=truecolor
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":23},"seven_day":{"used_percentage":41}}}'
     local out
     out=$(run_sl "$json")
-    assert_output_not_contains "$out" "◷ 5h" "5h block stays hidden while healthy" || return 1
-    assert_output_not_contains "$out" "◶ wk" "wk block stays hidden while healthy" || return 1
+    assert_output_contains "$out" "◷ 5h" "5h stays on the bar while healthy" || return 1
+    assert_output_contains_f "$out" "22m23%" "5h 23 sits at normal intensity, the secondary ink" || return 1
+    assert_output_not_contains "$out" "◶ wk" "wk at 41 stays hidden below fifty" || return 1
 }
 
 # ============================================================================
@@ -264,7 +265,8 @@ test_limits_threshold_per_block() {
     out=$(CS_STATUSLINE_NOW=1000 run_sl "$json")
     assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◶ wk" "wk 95% block should invert to the crit fill" || return 1
     assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m95%" "the wk number inverts too" || return 1
-    assert_output_not_contains_f "$out" "◷ 5h" "the healthy 5h window stays hidden entirely" || return 1
+    assert_output_contains_f "$out" "◷ 5h" "the healthy 5h window stays on the bar" || return 1
+    assert_output_not_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◷ 5h" "a 5h at 12 is never inverted" || return 1
 }
 
 test_logo_mark_is_brand_ink() {
@@ -564,7 +566,7 @@ test_5h_rest_time_absent_when_past() {
 
 # The 5h window is hidden until it is hot: below 70% it does not render at all,
 # reset countdown included.
-test_5h_hidden_below_seventy() {
+test_5h_below_seventy_shows_without_countdown() {
     export NO_COLOR=1
     local now reset_at
     now=$(date +%s)
@@ -577,7 +579,8 @@ test_5h_hidden_below_seventy() {
     }')
     local out
     out=$(run_sl "$json")
-    assert_output_not_contains "$out" "5h" "5h stays hidden below seventy" || return 1
+    assert_output_contains "$out" "◷ 5h 69%" "5h at 69 is on the bar" || return 1
+    assert_output_not_contains "$out" "69% ·" "5h withholds the countdown below seventy" || return 1
 }
 
 # The weekly block gains a reset countdown, gated at 80%: at or above 80% it
@@ -938,7 +941,7 @@ test_limits_threshold_red() {
     local out
     out=$(CS_STATUSLINE_NOW=1000 run_sl "$json")
     assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◶ wk" "wk 95% should invert the lim-wk capsule to the crit fill" || return 1
-    assert_output_not_contains_f "$out" "◷ 5h" "the healthy 5h window stays hidden entirely"
+    assert_output_contains_f "$out" "◷ 5h" "the healthy 5h window stays on the bar"
 }
 
 # ============================================================================
@@ -1600,7 +1603,7 @@ test_client_cache_accepts_a_fresh_entry() {
 
 run_test test_happy_path_docs_fixture_plain
 run_test test_all_segments_ordering_plain
-run_test test_limits_hidden_when_healthy
+run_test test_limits_healthy_shows_5h_and_hides_wk
 run_test test_identity_items_are_bold_ink
 run_test test_git_branch_is_bold_ink_no_fill
 run_test test_limits_threshold_per_block
@@ -1629,7 +1632,7 @@ run_test test_5h_rest_time_minutes_only
 run_test test_5h_rest_time_sub_minute
 run_test test_5h_rest_time_absent_without_resets_at
 run_test test_5h_rest_time_absent_when_past
-run_test test_5h_hidden_below_seventy
+run_test test_5h_below_seventy_shows_without_countdown
 run_test test_wk_rest_shown_at_or_above_80
 run_test test_wk_rest_hidden_below_80
 run_test test_wk_rest_time_days_format
@@ -3397,11 +3400,33 @@ run_test test_notes_and_mail_are_amber_ink_after_the_session
 # Limits: hidden until hot, tightest first, at most two, fable folded in
 # ============================================================================
 
-test_limits_hidden_below_seventy() {
+# 5h is the window you spend today, so it is always on the bar; the coarse
+# windows (wk, fable) arrive at 50. Reveal and colour are separate: every
+# window is neutral below 70, amber from 70, crit from 90.
+test_limits_5h_always_shown_and_coarse_windows_arrive_at_fifty() {
+    export NO_COLOR=1
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":49.9}}}'
+    local out; out=$(run_sl "$json")
+    assert_eq "s > ○ ctx 8% > ◷ 5h 12%" "$out" "5h at 12 shows; wk at 49 stays hidden" || return 1
+    json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":50}}}'
+    out=$(run_sl "$json")
+    assert_eq "s > ○ ctx 8% > ◷ 5h 12% > ◶ wk 50%" "$out" "wk arrives at 50, after the fixed 5h" || return 1
+}
+
+test_limits_shown_window_is_neutral_below_seventy() {
+    export COLORTERM=truecolor
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":31},"seven_day":{"used_percentage":55}}}'
+    local out; out=$(run_sl "$json")
+    assert_output_not_contains "$out" "180;83;9" "no amber below 70" || return 1
+    assert_output_not_contains "$out" "48;2;215;0;21" "no crit fill below 90" || return 1
+    assert_output_contains_f "$out" "38;2;197;194;189;22m31%" "5h 31 sits at the secondary ink" || return 1
+}
+
+test_limits_at_sixty_nine_show_5h_then_wk() {
     export NO_COLOR=1
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8},"rate_limits":{"five_hour":{"used_percentage":69},"seven_day":{"used_percentage":69.9}}}'
     local out; out=$(run_sl "$json")
-    assert_eq "s > ○ ctx 8%" "$out" "both windows at 69 stay hidden" || return 1
+    assert_eq "s > ○ ctx 8% > ◷ 5h 69% > ◶ wk 69%" "$out" "both at 69 show, 5h first, neutral" || return 1
 }
 
 # The weekly icon must not be the half pie the ctx gauge now shows in its
@@ -3410,14 +3435,14 @@ test_wk_icon_differs_from_the_half_pie() {
     export NO_COLOR=1
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":47},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":72}}}'
     local out; out=$(run_sl "$json")
-    assert_eq "s > ◑ ctx 47% > ◶ wk 72%" "$out" "wk takes the lower-left quadrant, distinct from the ctx half pie" || return 1
+    assert_eq "s > ◑ ctx 47% > ◷ 5h 12% > ◶ wk 72%" "$out" "wk takes the lower-left quadrant, distinct from the ctx half pie" || return 1
 }
 
-test_limits_one_hot_window_appears_alone() {
+test_limits_wk_arrives_after_the_fixed_5h() {
     export NO_COLOR=1
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":70}}}'
     local out; out=$(run_sl "$json")
-    assert_eq "s > ○ ctx 8% > ◶ wk 70%" "$out" "wk at 70 appears; healthy 5h does not" || return 1
+    assert_eq "s > ○ ctx 8% > ◷ 5h 12% > ◶ wk 70%" "$out" "wk at 70 appears after the fixed 5h" || return 1
 }
 
 test_limits_hot_window_is_amber_ink_then_crit_capsule() {
@@ -3432,13 +3457,12 @@ test_limits_hot_window_is_amber_ink_then_crit_capsule() {
     assert_output_contains_f "$out" "48;2;227;221;204;38;2;79;77;71;1ms" "identity is untouched" || return 1
 }
 
-test_limits_three_hot_show_top_two_descending() {
+test_limits_all_three_show_5h_first_then_highest() {
     export NO_COLOR=1 CS_USAGE_NO_REFRESH=1
     seed_usage_cache org-abc 85 "2026-08-29T03:59:59Z" 1787816000 1787816300
     local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":72},"seven_day":{"used_percentage":95}}}'
     local out; out=$(CS_STATUSLINE_NOW=1787816100 run_sl "$json")
-    assert_output_contains_f "$out" "◶ wk 95% > ✧ fable 85% · 1d20h" "wk then fable, highest first; fable past 80 carries its countdown" || return 1
-    assert_output_not_contains_f "$out" "5h" "the third window stays hidden" || return 1
+    assert_output_contains_f "$out" "◷ 5h 72% > ◶ wk 95% > ✧ fable 85% · 1d20h" "5h first, then wk and fable highest first; fable past 80 carries its countdown" || return 1
 }
 
 test_limits_countdown_rules_survive_gating() {
@@ -3480,9 +3504,9 @@ test_limits_and_fable_both_named_render_once_in_either_order() {
     local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":72},"seven_day":{"used_percentage":95}}}'
     local out
     out=$(CS_STATUSLINE_SEGMENTS="session,limits,fable" CS_STATUSLINE_NOW=1787816100 run_sl "$json")
-    assert_eq "s > ◶ wk 95% > ✧ fable 85% · 1d20h" "$out" "limits then fable: one pass, top two of three" || return 1
+    assert_eq "s > ◷ 5h 72% > ◶ wk 95% > ✧ fable 85% · 1d20h" "$out" "limits then fable: one pass, all three, 5h first" || return 1
     out=$(CS_STATUSLINE_SEGMENTS="session,fable,limits" CS_STATUSLINE_NOW=1787816100 run_sl "$json")
-    assert_eq "s > ◶ wk 95% > ✧ fable 85% · 1d20h" "$out" "fable named first changes nothing: limits owns all three windows" || return 1
+    assert_eq "s > ◷ 5h 72% > ◶ wk 95% > ✧ fable 85% · 1d20h" "$out" "fable named first changes nothing: limits owns all three windows" || return 1
 }
 
 test_pane_off_by_default_and_rendered_when_named() {
@@ -3497,11 +3521,13 @@ test_pane_off_by_default_and_rendered_when_named() {
     assert_eq "my-session ◫ 7 > ○ ctx 8%" "$out" "named: the pane number without its %, inside identity" || return 1
 }
 
-run_test test_limits_hidden_below_seventy
+run_test test_limits_5h_always_shown_and_coarse_windows_arrive_at_fifty
+run_test test_limits_shown_window_is_neutral_below_seventy
+run_test test_limits_at_sixty_nine_show_5h_then_wk
 run_test test_wk_icon_differs_from_the_half_pie
-run_test test_limits_one_hot_window_appears_alone
+run_test test_limits_wk_arrives_after_the_fixed_5h
 run_test test_limits_hot_window_is_amber_ink_then_crit_capsule
-run_test test_limits_three_hot_show_top_two_descending
+run_test test_limits_all_three_show_5h_first_then_highest
 run_test test_limits_countdown_rules_survive_gating
 run_test test_fable_hidden_below_seventy_but_cache_still_read
 run_test test_fable_named_alone_renders_only_the_fable_window
