@@ -25,8 +25,8 @@ _queue_convert_legacy() {  # qdir
             # it would splice two tasks into one. The converter skips the blank
             # line this adds when the leftover was already terminated, and the
             # queue executes what it reads, so a splice is worse than anything.
-            printf '\n' >> "$legacy" 2>/dev/null || return 0
-            cat "$qdir/queue" >> "$legacy" 2>/dev/null || return 0
+            { printf '\n' >> "$legacy"; } 2>/dev/null || return 0
+            { cat "$qdir/queue" >> "$legacy"; } 2>/dev/null || return 0
             rm -f "$qdir/queue"
         else
             mv "$qdir/queue" "$legacy" 2>/dev/null || return 0
@@ -194,8 +194,8 @@ run_queue() {
         defer) mkdir -p "$qdir"; printf '%s\n' "$(date +%s)" > "$qdir/queue.declined.tmp" \
                    && mv "$qdir/queue.declined.tmp" "$qdir/queue.declined"
                _terminate_jsonl "$qdir/notifications.jsonl"
-               jq -nc --arg ts "$(date +%s)" '{ts: ($ts|tonumber), event: "gate_declined"}' \
-                   >> "$qdir/notifications.jsonl" 2>/dev/null || true;;
+               { jq -nc --arg ts "$(date +%s)" '{ts: ($ts|tonumber), event: "gate_declined"}' \
+                   >> "$qdir/notifications.jsonl"; } 2>/dev/null || true;;
         log)   _queue_log "$qdir";;
         *)     error "Usage: cs -queue [add \"<task>\" | list | rm <n> | clear | log]";;
     esac

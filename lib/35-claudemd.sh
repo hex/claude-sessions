@@ -16,9 +16,9 @@ setup_auto_memory() {
         # file truncates it before jq parses, so one syntax error in a
         # hand-edited file would cost the user every setting it holds. A file
         # jq cannot read is left alone, like the no-jq case below.
-        if echo "$current" | jq --arg m "$memory_path" \
+        if echo "$current" | { jq --arg m "$memory_path" \
             '.autoMemoryDirectory = $m | .plansDirectory = ".cs/plans"' \
-            > "$settings_file.tmp" 2>/dev/null; then
+            > "$settings_file.tmp"; } 2>/dev/null; then
             mv "$settings_file.tmp" "$settings_file"
         else
             rm -f "$settings_file.tmp"

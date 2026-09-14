@@ -52,7 +52,7 @@ _file_mode() {
 _deny_writes() {  # dir
     local dir="$1"
     chmod 500 "$dir" 2>/dev/null || return 2
-    if : > "$dir/.write-probe" 2>/dev/null; then
+    if { : > "$dir/.write-probe"; } 2>/dev/null; then
         rm -f "$dir/.write-probe" 2>/dev/null || true
         chmod 700 "$dir" 2>/dev/null || true
         echo "    SKIP (this filesystem does not deny the owner writes to a read-only directory)"

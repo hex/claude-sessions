@@ -146,7 +146,7 @@ _discover_session_uuid_in() {
 _terminate_jsonl() {  # file
     [ -s "$1" ] || return 0
     [ -n "$(tail -c 1 "$1" 2>/dev/null)" ] || return 0
-    printf '\n' >> "$1" 2>/dev/null || true
+    { printf '\n' >> "$1"; } 2>/dev/null || true
 }
 
 # Append a rotated event to the tracked timeline: the durable link between
@@ -156,14 +156,14 @@ _terminate_jsonl() {  # file
 _timeline_rotated() {  # session_dir, from, to, reason, [handoff]
     local session_dir="$1" from="$2" to="$3" reason="$4" handoff="${5:-}"
     _terminate_jsonl "$session_dir/.cs/timeline.jsonl"
-    jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    { jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
            --arg from "$from" \
            --arg to "$to" \
            --arg reason "$reason" \
            --arg handoff "$handoff" \
            '{ts: $ts, event: "rotated", from: $from, to: $to, reason: $reason}
             + (if $handoff == "" then {} else {handoff: $handoff} end)' \
-        >> "$session_dir/.cs/timeline.jsonl" 2>/dev/null || true
+        >> "$session_dir/.cs/timeline.jsonl"; } 2>/dev/null || true
 }
 
 # Allocate a fresh UUID, rewrite the local state's claude_session_id to it, export

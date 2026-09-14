@@ -7,7 +7,7 @@ _strip_statusline_registration() {
     jq -e '.statusLine.command // "" | endswith("/cs-statusline")' "$settings_file" >/dev/null 2>&1 || return 1
     local _tmp
     _tmp=$(mktemp)
-    if jq 'del(.statusLine)' "$settings_file" > "$_tmp" 2>/dev/null; then
+    if { jq 'del(.statusLine)' "$settings_file" > "$_tmp"; } 2>/dev/null; then
         mv "$_tmp" "$settings_file"
         return 0
     fi
@@ -25,7 +25,7 @@ _strip_subagent_statusline_registration() {
         "$settings_file" >/dev/null 2>&1 || return 1
     local _tmp
     _tmp=$(mktemp)
-    if jq 'del(.subagentStatusLine)' "$settings_file" > "$_tmp" 2>/dev/null; then
+    if { jq 'del(.subagentStatusLine)' "$settings_file" > "$_tmp"; } 2>/dev/null; then
         mv "$_tmp" "$settings_file"
         return 0
     fi
@@ -52,7 +52,7 @@ _statusline_caps_file() {
 _statusline_caps_write() {  # on|off -> 0 written, 1 not
     local f
     f="$(_statusline_caps_file)"
-    mkdir -p "$(dirname "$f")" 2>/dev/null && printf '%s\n' "$1" > "$f" 2>/dev/null
+    mkdir -p "$(dirname "$f")" 2>/dev/null && { printf '%s\n' "$1" > "$f"; } 2>/dev/null
 }
 
 # Show the caps and ask whether they render. Only for an attached terminal:
@@ -91,10 +91,10 @@ run_statusline_cmd() {
             _tmp=$(mktemp)
             # refreshInterval keeps the bar repainting once a second while
             # idle; the logo's attention pulse animates on that timer.
-            if jq --arg cmd "$bin" --arg subcmd "$subbin" \
+            if { jq --arg cmd "$bin" --arg subcmd "$subbin" \
                 '.statusLine = {type: "command", command: $cmd, refreshInterval: 1}
                  | .subagentStatusLine = {type: "command", command: $subcmd}' \
-                "$settings" > "$_tmp" 2>/dev/null; then
+                "$settings" > "$_tmp"; } 2>/dev/null; then
                 mv "$_tmp" "$settings"
                 rm -f "$declined"
                 info "Registered cs-statusline as the Claude Code status line"
@@ -316,7 +316,7 @@ _write_term_cache() {
     case "$key" in ''|*[!A-Za-z0-9._-]*|.|..) return 0 ;; esac
     dir="$HOME/.cache/cs/term"
     mkdir -p "$dir" 2>/dev/null || return 0
-    printf '%s %s\n' "$theme" "$rgb" > "$dir/$key" 2>/dev/null || true
+    { printf '%s %s\n' "$theme" "$rgb" > "$dir/$key"; } 2>/dev/null || true
     return 0
 }
 

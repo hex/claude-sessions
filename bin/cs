@@ -1776,11 +1776,11 @@ $remove_err"
     _spawn_discard_seeds "$wt_name"
 
     _terminate_jsonl "$base_dir/.cs/timeline.jsonl"
-    jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    { jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
            --arg event "worktree-retired" \
            --arg task "$task" \
         '{ts: $ts, event: $event, task: $task}' \
-        >> "$base_dir/.cs/timeline.jsonl" 2>/dev/null || true
+        >> "$base_dir/.cs/timeline.jsonl"; } 2>/dev/null || true
     printf 'retired %s %s\n' "$task" "$sha"
 }
 
@@ -2084,13 +2084,13 @@ ${ff_err:-(no output from git merge --ff-only)}"
     fi
 
     _terminate_jsonl "$base_dir/.cs/timeline.jsonl"
-    jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    { jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
            --arg event "feature-integrated" \
            --arg task "$task" \
            --arg sha "$sha" \
            --arg result "$landed" \
         '{ts: $ts, event: $event, task: $task, sha: $sha, result: $result}' \
-        >> "$base_dir/.cs/timeline.jsonl" 2>/dev/null || true
+        >> "$base_dir/.cs/timeline.jsonl"; } 2>/dev/null || true
     printf 'integrated %s %s -> %s\n' "$task" "$sha" "$landed"
 }
 
@@ -2216,9 +2216,9 @@ setup_auto_memory() {
         # file truncates it before jq parses, so one syntax error in a
         # hand-edited file would cost the user every setting it holds. A file
         # jq cannot read is left alone, like the no-jq case below.
-        if echo "$current" | jq --arg m "$memory_path" \
+        if echo "$current" | { jq --arg m "$memory_path" \
             '.autoMemoryDirectory = $m | .plansDirectory = ".cs/plans"' \
-            > "$settings_file.tmp" 2>/dev/null; then
+            > "$settings_file.tmp"; } 2>/dev/null; then
             mv "$settings_file.tmp" "$settings_file"
         else
             rm -f "$settings_file.tmp"
@@ -2687,7 +2687,7 @@ _discover_session_uuid_in() {
 _terminate_jsonl() {  # file
     [ -s "$1" ] || return 0
     [ -n "$(tail -c 1 "$1" 2>/dev/null)" ] || return 0
-    printf '\n' >> "$1" 2>/dev/null || true
+    { printf '\n' >> "$1"; } 2>/dev/null || true
 }
 
 # Append a rotated event to the tracked timeline: the durable link between
@@ -2697,14 +2697,14 @@ _terminate_jsonl() {  # file
 _timeline_rotated() {  # session_dir, from, to, reason, [handoff]
     local session_dir="$1" from="$2" to="$3" reason="$4" handoff="${5:-}"
     _terminate_jsonl "$session_dir/.cs/timeline.jsonl"
-    jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    { jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
            --arg from "$from" \
            --arg to "$to" \
            --arg reason "$reason" \
            --arg handoff "$handoff" \
            '{ts: $ts, event: "rotated", from: $from, to: $to, reason: $reason}
             + (if $handoff == "" then {} else {handoff: $handoff} end)' \
-        >> "$session_dir/.cs/timeline.jsonl" 2>/dev/null || true
+        >> "$session_dir/.cs/timeline.jsonl"; } 2>/dev/null || true
 }
 
 # Allocate a fresh UUID, rewrite the local state's claude_session_id to it, export
@@ -3284,7 +3284,7 @@ migrate_session() {
         # rather than leaving the rule (and a stray .tmp) behind.
         local ga="$session_dir/.gitattributes"
         if [ -f "$ga" ] && grep -q 'logs/session\.log merge=union' "$ga"; then
-            grep -v 'logs/session\.log merge=union' "$ga" > "$ga.tmp" 2>/dev/null || true
+            { grep -v 'logs/session\.log merge=union' "$ga" > "$ga.tmp"; } 2>/dev/null || true
             mv "$ga.tmp" "$ga" 2>/dev/null || rm -f "$ga.tmp"
         fi
         warn "Moved .cs/logs/session.log to machine-local .cs/local/session.log"
@@ -3369,7 +3369,7 @@ migrate_session() {
         # Temp+mv, like every neighbouring write: redirecting onto the README
         # truncates the user's file before the block writes a byte, so a write
         # that does not complete leaves nothing behind.
-        if {
+        if { {
             echo "---"
             echo "status: active"
             echo "created: $created_date"
@@ -3377,7 +3377,7 @@ migrate_session() {
             echo "aliases: [\"$session_name\"]"
             echo "---"
             echo "$existing_content"
-        } > "$readme.tmp" 2>/dev/null && mv "$readme.tmp" "$readme"; then
+        } > "$readme.tmp"; } 2>/dev/null && mv "$readme.tmp" "$readme"; then
             warn "Added frontmatter to .cs/README.md"
         else
             rm -f "$readme.tmp" 2>/dev/null || true
@@ -3646,13 +3646,13 @@ save_checkpoint() {
     local timeline_branch
     timeline_branch=$(git -C "$session_dir" branch --show-current 2>/dev/null || echo "")
     _terminate_jsonl "$timeline_file"
-    jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    { jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
            --arg event "checkpoint" \
            --arg label "$label" \
            --arg file "$filename" \
            --arg branch "$timeline_branch" \
            '{ts: $ts, event: $event, label: $label, file: $file, branch: $branch}' \
-        >> "$timeline_file" 2>/dev/null || true
+        >> "$timeline_file"; } 2>/dev/null || true
 
     info "Checkpoint saved: $filename"
     echo "  Label: $label"
@@ -3899,13 +3899,13 @@ rotate_narrative() {
 
     local timeline="$meta_dir/timeline.jsonl"
     _terminate_jsonl "$timeline"
-    jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    { jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
            --arg actor "$actor" \
            --argjson sections "$sections" \
            --argjson bytes "$((cut - head_end))" \
            --arg archive "$chunk_rel" \
            '{ts: $ts, event: "narrative_rotated", actor: $actor, sections: $sections, bytes: $bytes, archive: $archive}' \
-        >> "$timeline" 2>/dev/null || true
+        >> "$timeline"; } 2>/dev/null || true
 
     local archived_kb now_kb
     archived_kb=$(( (cut - head_end) / 1024 ))
@@ -4119,7 +4119,7 @@ _mail_keep_sent() {  # line, fname
     [ -n "${CLAUDE_SESSION_META_DIR:-}" ] || return 0
     local mine="$CLAUDE_SESSION_META_DIR/local/mail"
     _mail_ensure_maildir "$mine" 2>/dev/null || return 0
-    if ! { printf '%s\n' "$1" > "$mine/tmp/$2" 2>/dev/null \
+    if ! { { printf '%s\n' "$1" > "$mine/tmp/$2"; } 2>/dev/null \
             && mv "$mine/tmp/$2" "$mine/out/$2" 2>/dev/null; }; then
         rm -f "$mine/tmp/$2" 2>/dev/null || true
     fi
@@ -4543,8 +4543,8 @@ _queue_convert_legacy() {  # qdir
             # it would splice two tasks into one. The converter skips the blank
             # line this adds when the leftover was already terminated, and the
             # queue executes what it reads, so a splice is worse than anything.
-            printf '\n' >> "$legacy" 2>/dev/null || return 0
-            cat "$qdir/queue" >> "$legacy" 2>/dev/null || return 0
+            { printf '\n' >> "$legacy"; } 2>/dev/null || return 0
+            { cat "$qdir/queue" >> "$legacy"; } 2>/dev/null || return 0
             rm -f "$qdir/queue"
         else
             mv "$qdir/queue" "$legacy" 2>/dev/null || return 0
@@ -4712,8 +4712,8 @@ run_queue() {
         defer) mkdir -p "$qdir"; printf '%s\n' "$(date +%s)" > "$qdir/queue.declined.tmp" \
                    && mv "$qdir/queue.declined.tmp" "$qdir/queue.declined"
                _terminate_jsonl "$qdir/notifications.jsonl"
-               jq -nc --arg ts "$(date +%s)" '{ts: ($ts|tonumber), event: "gate_declined"}' \
-                   >> "$qdir/notifications.jsonl" 2>/dev/null || true;;
+               { jq -nc --arg ts "$(date +%s)" '{ts: ($ts|tonumber), event: "gate_declined"}' \
+                   >> "$qdir/notifications.jsonl"; } 2>/dev/null || true;;
         log)   _queue_log "$qdir";;
         *)     error "Usage: cs -queue [add \"<task>\" | list | rm <n> | clear | log]";;
     esac
@@ -6797,7 +6797,7 @@ _strip_statusline_registration() {
     jq -e '.statusLine.command // "" | endswith("/cs-statusline")' "$settings_file" >/dev/null 2>&1 || return 1
     local _tmp
     _tmp=$(mktemp)
-    if jq 'del(.statusLine)' "$settings_file" > "$_tmp" 2>/dev/null; then
+    if { jq 'del(.statusLine)' "$settings_file" > "$_tmp"; } 2>/dev/null; then
         mv "$_tmp" "$settings_file"
         return 0
     fi
@@ -6815,7 +6815,7 @@ _strip_subagent_statusline_registration() {
         "$settings_file" >/dev/null 2>&1 || return 1
     local _tmp
     _tmp=$(mktemp)
-    if jq 'del(.subagentStatusLine)' "$settings_file" > "$_tmp" 2>/dev/null; then
+    if { jq 'del(.subagentStatusLine)' "$settings_file" > "$_tmp"; } 2>/dev/null; then
         mv "$_tmp" "$settings_file"
         return 0
     fi
@@ -6842,7 +6842,7 @@ _statusline_caps_file() {
 _statusline_caps_write() {  # on|off -> 0 written, 1 not
     local f
     f="$(_statusline_caps_file)"
-    mkdir -p "$(dirname "$f")" 2>/dev/null && printf '%s\n' "$1" > "$f" 2>/dev/null
+    mkdir -p "$(dirname "$f")" 2>/dev/null && { printf '%s\n' "$1" > "$f"; } 2>/dev/null
 }
 
 # Show the caps and ask whether they render. Only for an attached terminal:
@@ -6881,10 +6881,10 @@ run_statusline_cmd() {
             _tmp=$(mktemp)
             # refreshInterval keeps the bar repainting once a second while
             # idle; the logo's attention pulse animates on that timer.
-            if jq --arg cmd "$bin" --arg subcmd "$subbin" \
+            if { jq --arg cmd "$bin" --arg subcmd "$subbin" \
                 '.statusLine = {type: "command", command: $cmd, refreshInterval: 1}
                  | .subagentStatusLine = {type: "command", command: $subcmd}' \
-                "$settings" > "$_tmp" 2>/dev/null; then
+                "$settings" > "$_tmp"; } 2>/dev/null; then
                 mv "$_tmp" "$settings"
                 rm -f "$declined"
                 info "Registered cs-statusline as the Claude Code status line"
@@ -7106,7 +7106,7 @@ _write_term_cache() {
     case "$key" in ''|*[!A-Za-z0-9._-]*|.|..) return 0 ;; esac
     dir="$HOME/.cache/cs/term"
     mkdir -p "$dir" 2>/dev/null || return 0
-    printf '%s %s\n' "$theme" "$rgb" > "$dir/$key" 2>/dev/null || true
+    { printf '%s %s\n' "$theme" "$rgb" > "$dir/$key"; } 2>/dev/null || true
     return 0
 }
 
@@ -7680,14 +7680,14 @@ EOF
                 if [ -n "$pending_handoff" ]; then
                     # Flip only the first status line (the frontmatter's); a
                     # body quoting the contract line flush-left stays intact.
-                    awk '
+                    { awk '
                         !flipped && $0 == "status: unconsumed" {
                             print "status: discarded"
                             flipped = 1
                             next
                         }
                         { print }
-                    ' "$pending_handoff" > "$pending_handoff.tmp" 2>/dev/null \
+                    ' "$pending_handoff" > "$pending_handoff.tmp"; } 2>/dev/null \
                         && mv "$pending_handoff.tmp" "$pending_handoff" 2>/dev/null \
                         || rm -f "$pending_handoff.tmp" 2>/dev/null || true
                     printf "${DIM}Handoff discarded:${NC} %s\n" "$(basename "$pending_handoff")"

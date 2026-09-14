@@ -76,7 +76,7 @@ _trace_open() {  # meta_local_dir
     # trims it, often enough that it cannot run away and rare enough that the
     # fork stays out of the common path.
     if [ $(( $$ % 64 )) -eq 0 ] && [ -f "$_TRACE" ]; then
-        tail -n 2000 "$_TRACE" > "$_TRACE.tmp" 2>/dev/null \
+        { tail -n 2000 "$_TRACE" > "$_TRACE.tmp"; } 2>/dev/null \
             && mv "$_TRACE.tmp" "$_TRACE" 2>/dev/null || true
     fi
     # The start mark carries the origin every later mark is relative to, so one
@@ -86,14 +86,14 @@ _trace_open() {  # meta_local_dir
     # the same event. The directory is the rest of the line, never a field —
     # paths hold spaces. A newline in one would split the mark in two, so it
     # collapses to a space (a shell substitution: still no fork).
-    printf '%s %s start %s\n' "$$" "$_TRACE_T0" "${PWD//$'\n'/ }" \
-        >> "$_TRACE" 2>/dev/null || true
+    { printf '%s %s start %s\n' "$$" "$_TRACE_T0" "${PWD//$'\n'/ }" \
+        >> "$_TRACE"; } 2>/dev/null || true
 }
 
 _trace() {  # stage
     [ -n "$_TRACE" ] || return 0
     _now_ms
-    printf '%s %s %s\n' "$$" "$(( _MS - _TRACE_T0 ))" "$1" >> "$_TRACE" 2>/dev/null || true
+    { printf '%s %s %s\n' "$$" "$(( _MS - _TRACE_T0 ))" "$1" >> "$_TRACE"; } 2>/dev/null || true
 }
 
 _trace_open "${CLAUDE_SESSION_META_DIR:-}/local"
@@ -175,7 +175,7 @@ _commit_date_stamp() {  # meta_local_dir
     [ -n "${DATE_STAMP_PENDING:-}" ] || return 0
     local dir="$1/context-date"
     mkdir -p "$dir" 2>/dev/null || return 0
-    printf '%s\n' "$DATE_STAMP_PENDING" > "$dir/.$DATE_STAMP_CONV.$$.tmp" 2>/dev/null \
+    { printf '%s\n' "$DATE_STAMP_PENDING" > "$dir/.$DATE_STAMP_CONV.$$.tmp"; } 2>/dev/null \
         && mv "$dir/.$DATE_STAMP_CONV.$$.tmp" "$dir/$DATE_STAMP_CONV" 2>/dev/null || true
     DATE_STAMP_PENDING=""
 }
@@ -247,7 +247,7 @@ _build_digest() {  # meta_local_dir
 # can at worst repeat a digest, which is the harmless direction to fail in.
 _commit_digest() {  # meta_local_dir
     [ -n "${DIGEST_PENDING:-}" ] || return 0
-    printf '%s\n' "$DIGEST_PENDING" > "$1/notifications.seen.tmp" 2>/dev/null \
+    { printf '%s\n' "$DIGEST_PENDING" > "$1/notifications.seen.tmp"; } 2>/dev/null \
         && mv "$1/notifications.seen.tmp" "$1/notifications.seen" 2>/dev/null || true
     DIGEST_PENDING=""
 }
@@ -382,11 +382,11 @@ if [ "${CS_OBJECTIVE_CAPTURE_DISABLE:-}" != "1" ] \
         # only the Objective-section placeholder line is replaced, all others
         # pass through verbatim; tmp+mv keeps the write atomic.
         _obj_tmp=$(mktemp 2>/dev/null) || _obj_tmp=""
-        if [ -n "$_obj_tmp" ] && OBJ="$_obj" awk '
+        if [ -n "$_obj_tmp" ] && { OBJ="$_obj" awk '
                 /^## / { in_obj = ($0 ~ /^## Objective/) }
                 in_obj && /^\[.*\]$/ { print ENVIRON["OBJ"]; next }
                 { print }
-            ' "$_obj_readme" > "$_obj_tmp" 2>/dev/null; then
+            ' "$_obj_readme" > "$_obj_tmp"; } 2>/dev/null; then
             mv "$_obj_tmp" "$_obj_readme" 2>/dev/null || rm -f "$_obj_tmp" 2>/dev/null
         else
             [ -n "$_obj_tmp" ] && rm -f "$_obj_tmp" 2>/dev/null

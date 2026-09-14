@@ -48,7 +48,7 @@ if ! command -v _cs_terminate_jsonl >/dev/null 2>&1; then
     _cs_terminate_jsonl() {
         [ -s "$1" ] || return 0
         [ -n "$(tail -c 1 "$1" 2>/dev/null)" ] || return 0
-        printf '\n' >> "$1" 2>/dev/null || true
+        { printf '\n' >> "$1"; } 2>/dev/null || true
     }
 fi
 # Not in a cs session, do nothing. Resolves from the env under the CLI and
@@ -94,7 +94,7 @@ _build_digest() {  # meta_local_dir
 # can at worst repeat a digest, which is the harmless direction to fail in.
 _commit_digest() {  # meta_local_dir
     [ -n "${DIGEST_PENDING:-}" ] || return 0
-    printf '%s\n' "$DIGEST_PENDING" > "$1/notifications.seen.tmp" 2>/dev/null \
+    { printf '%s\n' "$DIGEST_PENDING" > "$1/notifications.seen.tmp"; } 2>/dev/null \
         && mv "$1/notifications.seen.tmp" "$1/notifications.seen" 2>/dev/null || true
     DIGEST_PENDING=""
 }
@@ -434,14 +434,14 @@ if [ "$IS_LEAD" = 1 ] && [[ "$SESSION_ID" =~ $UUID_RE ]]; then
         # (/clear) and carries the handoff name; otherwise it is one cs
         # discovered — CC's context-limit fork, or a manual resume of a
         # different conversation. Shape shared with bin/cs's _timeline_rotated.
-        jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        { jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
                --arg from "${RECORDED_UUID:-}" \
                --arg to "$SESSION_ID" \
                --arg handoff "$ROTATION_HANDOFF" \
                '{ts: $ts, event: "rotated", from: $from, to: $to,
                  reason: (if $handoff == "" then "rebind" else "handoff" end)}
                 + (if $handoff == "" then {} else {handoff: $handoff} end)' \
-            >> "$META_DIR/timeline.jsonl" 2>/dev/null || true
+            >> "$META_DIR/timeline.jsonl"; } 2>/dev/null || true
         # Follow the autosave ref to the new UUID so a future crash of this
         # (continued) conversation is recoverable under its live identity. A
         # rebind is a clean continuation, so there is no crash to recover here.
@@ -476,13 +476,13 @@ fi
 TIMELINE_FILE="$META_DIR/timeline.jsonl"
 TIMELINE_BRANCH=$(git -C "$SESSION_DIR" branch --show-current 2>/dev/null || echo "")
 _cs_terminate_jsonl "$TIMELINE_FILE" 2>/dev/null || true
-jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+{ jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
        --arg event "started" \
        --arg source "$SOURCE" \
        --arg session_id "$SESSION_ID" \
        --arg branch "$TIMELINE_BRANCH" \
        '{ts: $ts, event: $event, source: $source, session_id: $session_id, branch: $branch}' \
-    >> "$TIMELINE_FILE" 2>/dev/null || true
+    >> "$TIMELINE_FILE"; } 2>/dev/null || true
 
 # Update last_resumed in local state on resume
 if [ "$SOURCE" = "resume" ]; then
@@ -737,7 +737,7 @@ fi
 # line (the frontmatter's) flips; a body quoting it flush-left stays intact.
 if [ -n "$ROTATION_HANDOFF" ]; then
     HANDOFF_FILE="$META_DIR/handoffs/$ROTATION_HANDOFF"
-    awk -v uuid="$SESSION_ID" '
+    { awk -v uuid="$SESSION_ID" '
         !flipped && $0 == "status: unconsumed" {
             print "status: consumed"
             print "consumed_by: " uuid
@@ -745,7 +745,7 @@ if [ -n "$ROTATION_HANDOFF" ]; then
             next
         }
         { print }
-    ' "$HANDOFF_FILE" > "$HANDOFF_FILE.tmp" 2>/dev/null \
+    ' "$HANDOFF_FILE" > "$HANDOFF_FILE.tmp"; } 2>/dev/null \
         && mv "$HANDOFF_FILE.tmp" "$HANDOFF_FILE" 2>/dev/null \
         || rm -f "$HANDOFF_FILE.tmp" 2>/dev/null || true
     rm -f "$PENDING_MARKER" 2>/dev/null || true
@@ -818,7 +818,7 @@ if [ -n "$ROTATION_HANDOFF" ] && [ "$SOURCE" = "clear" ] && [ "$IS_LEAD" = 1 ] \
             # deliberately does not end in .kick, so it does not match the
             # hook's triage.
             _write_kick() {
-                date +%s > "$_kick_dir/rotation.tmp.$$" 2>/dev/null \
+                { date +%s > "$_kick_dir/rotation.tmp.$$"; } 2>/dev/null \
                     && mv "$_kick_dir/rotation.tmp.$$" "$_kick_dir/rotation.kick" 2>/dev/null
             }
             [ "$_kick_delay" = 0 ] || sleep "$_kick_delay"
@@ -844,7 +844,7 @@ elif [ "$SOURCE" = "clear" ]; then
     # continuation" to go execute a handoff it was never given.
     _stale_kick="$META_DIR/local/rotation-kick"
     if [ -d "$_stale_kick" ]; then
-        : > "$_stale_kick/delivered" 2>/dev/null || true
+        { : > "$_stale_kick/delivered"; } 2>/dev/null || true
     fi
 fi
 
@@ -1000,7 +1000,7 @@ case "$SESSION_ID" in
     ''|.*|*[!A-Za-z0-9._-]*) ;;
     *)
         mkdir -p "$META_DIR/local/context-date" 2>/dev/null \
-            && printf '%s\n' "$CONTEXT_DAY" > "$META_DIR/local/context-date/.$SESSION_ID.$$.tmp" 2>/dev/null \
+            && { printf '%s\n' "$CONTEXT_DAY" > "$META_DIR/local/context-date/.$SESSION_ID.$$.tmp"; } 2>/dev/null \
             && mv "$META_DIR/local/context-date/.$SESSION_ID.$$.tmp" "$META_DIR/local/context-date/$SESSION_ID" 2>/dev/null || true
         ;;
 esac

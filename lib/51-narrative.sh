@@ -176,13 +176,13 @@ rotate_narrative() {
 
     local timeline="$meta_dir/timeline.jsonl"
     _terminate_jsonl "$timeline"
-    jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    { jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
            --arg actor "$actor" \
            --argjson sections "$sections" \
            --argjson bytes "$((cut - head_end))" \
            --arg archive "$chunk_rel" \
            '{ts: $ts, event: "narrative_rotated", actor: $actor, sections: $sections, bytes: $bytes, archive: $archive}' \
-        >> "$timeline" 2>/dev/null || true
+        >> "$timeline"; } 2>/dev/null || true
 
     local archived_kb now_kb
     archived_kb=$(( (cut - head_end) / 1024 ))

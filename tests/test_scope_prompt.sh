@@ -806,6 +806,25 @@ test_date_note_silent_on_the_prompt_after_it_fired() {
     assert_output_not_contains "$ac" "## Date" "second prompt of the day is silent" || return 1
 }
 
+# The stamp is written tmp-then-rename into a directory mkdir -p accepts as
+# already present; when that directory cannot take a file, the failed `>`
+# must not reach stderr (a trailing 2>/dev/null applies after it reports).
+test_date_stamp_write_fails_quietly() {
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local/context-date"
+    rm -f "$(_stamp_file)"
+    _deny_writes "$CLAUDE_SESSION_META_DIR/local/context-date" || return 0
+    local _in out
+    _in=$(printf '%s' "hello" | jq -Rs '{prompt: ., hook_event_name: "UserPromptSubmit", session_id: "sid-test"}')
+    out=$(bash "$HOOK" <<< "$_in" 2>"$TEST_TMPDIR/stderr") || return 1
+    _allow_writes "$CLAUDE_SESSION_META_DIR/local/context-date"
+    # The stamp is committed at the emit, so a parsed payload proves the write
+    # was attempted; the file's absence proves it was denied, not skipped.
+    printf '%s' "$out" | jq -e '.hookSpecificOutput' >/dev/null || { echo "  FAIL: hook did not reach its emit"; return 1; }
+    assert_not_exists "$(_stamp_file)" "the denied stamp was not written" || return 1
+    assert_file_not_contains "$TEST_TMPDIR/stderr" "Permission denied" \
+        "a stamp that cannot be written is not reported" || return 1
+}
+
 test_date_note_treats_a_malformed_stamp_as_missing() {
     mkdir -p "$CLAUDE_SESSION_META_DIR/local/context-date"
     # CRLF and trailing junk: neither is a date, and neither may read as "a
@@ -897,6 +916,7 @@ run_test test_date_note_silent_without_a_stamp_and_writes_one
 run_test test_date_note_stamps_are_per_conversation
 run_test test_date_note_silent_on_the_prompt_after_it_fired
 run_test test_date_note_treats_a_malformed_stamp_as_missing
+run_test test_date_stamp_write_fails_quietly
 run_test test_date_note_skips_a_conversation_id_that_is_not_a_filename
 run_test test_date_note_skips_a_dot_led_conversation_id
 run_test test_date_note_stamp_stays_put_when_emission_fails

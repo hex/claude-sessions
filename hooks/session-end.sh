@@ -46,7 +46,7 @@ if ! command -v _cs_terminate_jsonl >/dev/null 2>&1; then
     _cs_terminate_jsonl() {
         [ -s "$1" ] || return 0
         [ -n "$(tail -c 1 "$1" 2>/dev/null)" ] || return 0
-        printf '\n' >> "$1" 2>/dev/null || true
+        { printf '\n' >> "$1"; } 2>/dev/null || true
     }
 fi
 # Not in a cs session, do nothing. Resolves from the env under the CLI and
@@ -71,13 +71,13 @@ echo "$(date '+%Y-%m-%d %H:%M:%S') - Session ended (source: $SOURCE, ID: $SESSIO
 TIMELINE_FILE="$META_DIR/timeline.jsonl"
 TIMELINE_BRANCH=$(git -C "$SESSION_DIR" branch --show-current 2>/dev/null || echo "")
 _cs_terminate_jsonl "$TIMELINE_FILE" 2>/dev/null || true
-jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+{ jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
        --arg event "ended" \
        --arg source "$SOURCE" \
        --arg session_id "$SESSION_ID" \
        --arg branch "$TIMELINE_BRANCH" \
        '{ts: $ts, event: $event, source: $source, session_id: $session_id, branch: $branch}' \
-    >> "$TIMELINE_FILE" 2>/dev/null || true
+    >> "$TIMELINE_FILE"; } 2>/dev/null || true
 
 # Delete only the ending conversation's own autosave ref (no longer needed
 # after a clean end). A sibling conversation's ref is left untouched, so a
@@ -130,7 +130,7 @@ case "$SESSION_DIR_PHYS" in
 esac
 if [ -n "$SESSIONS_ROOT" ] && [ -d "$SESSIONS_ROOT" ]; then
     INDEX_FILE="$SESSIONS_ROOT/index.md"
-    {
+    { {
         echo "# Sessions"
         echo ""
         echo "> Auto-generated on session end. Do not edit manually."
@@ -150,7 +150,7 @@ if [ -n "$SESSIONS_ROOT" ] && [ -d "$SESSIONS_ROOT" ]; then
             [[ "$local_obj" == "["*"]" ]] && local_obj=""
             echo "| [${local_name}](${local_name}/.cs/README.md) | ${local_status:-—} | ${local_obj:-—} | ${local_created:-—} |"
         done
-    } > "$INDEX_FILE" 2>/dev/null || true
+    } > "$INDEX_FILE"; } 2>/dev/null || true
 fi
 
 echo "Session management cleanup complete" >> "$META_DIR/local/session.log"

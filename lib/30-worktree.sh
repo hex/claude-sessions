@@ -511,11 +511,11 @@ $remove_err"
     _spawn_discard_seeds "$wt_name"
 
     _terminate_jsonl "$base_dir/.cs/timeline.jsonl"
-    jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    { jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
            --arg event "worktree-retired" \
            --arg task "$task" \
         '{ts: $ts, event: $event, task: $task}' \
-        >> "$base_dir/.cs/timeline.jsonl" 2>/dev/null || true
+        >> "$base_dir/.cs/timeline.jsonl"; } 2>/dev/null || true
     printf 'retired %s %s\n' "$task" "$sha"
 }
 
@@ -819,13 +819,13 @@ ${ff_err:-(no output from git merge --ff-only)}"
     fi
 
     _terminate_jsonl "$base_dir/.cs/timeline.jsonl"
-    jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    { jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
            --arg event "feature-integrated" \
            --arg task "$task" \
            --arg sha "$sha" \
            --arg result "$landed" \
         '{ts: $ts, event: $event, task: $task, sha: $sha, result: $result}' \
-        >> "$base_dir/.cs/timeline.jsonl" 2>/dev/null || true
+        >> "$base_dir/.cs/timeline.jsonl"; } 2>/dev/null || true
     printf 'integrated %s %s -> %s\n' "$task" "$sha" "$landed"
 }
 

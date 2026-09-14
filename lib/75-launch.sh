@@ -538,14 +538,14 @@ EOF
                 if [ -n "$pending_handoff" ]; then
                     # Flip only the first status line (the frontmatter's); a
                     # body quoting the contract line flush-left stays intact.
-                    awk '
+                    { awk '
                         !flipped && $0 == "status: unconsumed" {
                             print "status: discarded"
                             flipped = 1
                             next
                         }
                         { print }
-                    ' "$pending_handoff" > "$pending_handoff.tmp" 2>/dev/null \
+                    ' "$pending_handoff" > "$pending_handoff.tmp"; } 2>/dev/null \
                         && mv "$pending_handoff.tmp" "$pending_handoff" 2>/dev/null \
                         || rm -f "$pending_handoff.tmp" 2>/dev/null || true
                     printf "${DIM}Handoff discarded:${NC} %s\n" "$(basename "$pending_handoff")"

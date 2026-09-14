@@ -70,7 +70,7 @@ if ! command -v _cs_terminate_jsonl >/dev/null 2>&1; then
     _cs_terminate_jsonl() {
         [ -s "$1" ] || return 0
         [ -n "$(tail -c 1 "$1" 2>/dev/null)" ] || return 0
-        printf '\n' >> "$1" 2>/dev/null || true
+        { printf '\n' >> "$1"; } 2>/dev/null || true
     }
 fi
 # Only run in cs sessions
@@ -232,7 +232,7 @@ _mail_from_clause() {
 # overlaps itself: two writers sharing one tmp name splice each other, and the
 # rename then publishes the splice.
 _mail_record() {
-    printf '%s' "$MAIL_NAMES" > "$MAIL_WOKE.tmp.$$" 2>/dev/null \
+    { printf '%s' "$MAIL_NAMES" > "$MAIL_WOKE.tmp.$$"; } 2>/dev/null \
         && mv "$MAIL_WOKE.tmp.$$" "$MAIL_WOKE" 2>/dev/null || true
 }
 
@@ -262,7 +262,7 @@ _mail_apply_silencers() {
 }
 
 _mail_count_wake() {
-    printf '%s\n' "$((MAIL_WAKES + 1))" > "$MAILDIR/wakes.tmp.$$" 2>/dev/null \
+    { printf '%s\n' "$((MAIL_WAKES + 1))" > "$MAILDIR/wakes.tmp.$$"; } 2>/dev/null \
         && mv "$MAILDIR/wakes.tmp.$$" "$MAILDIR/wakes" 2>/dev/null || true
 }
 
@@ -369,7 +369,7 @@ if [ "$HOOK_EVENT" = "FileChanged" ] && [ "${FC_PATH%/*.kick}" != "$FC_PATH" ]; 
     # system-reminder landing after one. Unconditional wording here would let
     # the auto-start override the person it just told to take over.
     printf '%s\n' "The rotation is loaded and nothing has run yet. First reconcile your native task list, which carried over from the previous conversation, with the handoff, then execute the handoff's next-step section now and report what you did, without re-summarising it or asking which part to start with. If the user has already sent a message of their own, theirs wins — do what they asked and treat this wake as spent. Ask first only where you normally would: the handoff is missing, unreadable, or genuinely ambiguous, or its next step is destructive or irreversible." >&2
-    : > "$_kick_dir/delivered" 2>/dev/null || true
+    { : > "$_kick_dir/delivered"; } 2>/dev/null || true
     exit 2
 fi
 
@@ -467,7 +467,7 @@ _qdone_len() {  # done file
 # record and this one. Best-effort: inbox failure must never break the drain.
 _inbox_append() {  # jq --arg/--argjson pairs..., then the jq object program
     _cs_terminate_jsonl "$QDIR/notifications.jsonl" 2>/dev/null || true
-    jq -nc "$@" >> "$QDIR/notifications.jsonl" 2>/dev/null || true
+    { jq -nc "$@" >> "$QDIR/notifications.jsonl"; } 2>/dev/null || true
 }
 
 # Mail a spawned worker's spawner (recorded in spawned-by by the launch).
@@ -821,7 +821,7 @@ if _mail_is_lead; then
             _adv_last=$((10#$_adv_last))
         fi
         if [ "$((CURRENT_TIME - _adv_last))" -ge "$ADVISOR_COOLDOWN_SECONDS" ]; then
-            echo "$CURRENT_TIME" > "$ADVISOR_COOLDOWN_FILE" 2>/dev/null || true
+            { echo "$CURRENT_TIME" > "$ADVISOR_COOLDOWN_FILE"; } 2>/dev/null || true
             # One note and one cooldown slot however many channels are present:
             # two independent nudges would double the appended text and race
             # the same stamp.

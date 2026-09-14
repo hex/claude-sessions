@@ -1612,6 +1612,18 @@ test_index_has_auto_generated_notice() {
 # timeline.jsonl
 # ============================================================================
 
+# The timeline append is best-effort. Redirections apply left to right, so
+# with a trailing 2>/dev/null a failed `>>` reports before stderr moves; the
+# braced form is what keeps a hook that cannot write quiet.
+test_session_start_timeline_write_fails_quietly() {
+    session_start_setup
+    mkdir -p "$CLAUDE_SESSION_META_DIR/timeline.jsonl"
+    echo '{"session_id":"abc","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>"$TEST_TMPDIR/stderr" || return 1
+    assert_file_not_contains "$TEST_TMPDIR/stderr" "Is a directory" \
+        "a timeline that cannot be appended to is not reported" || return 1
+}
+
 test_session_start_appends_to_timeline() {
     local timeline="$CLAUDE_SESSION_META_DIR/timeline.jsonl"
     rm -f "$timeline"
@@ -1856,6 +1868,7 @@ run_test test_index_has_auto_generated_notice
 
 # Timeline
 run_test test_session_start_appends_to_timeline
+run_test test_session_start_timeline_write_fails_quietly
 
 # ============================================================================
 # session-start.sh: CS_FRESH_REBIND signal — tailored additionalContext when
@@ -2853,16 +2866,22 @@ test_advisor_nudge_survives_an_unwritable_cooldown_dir() {
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
     rm -rf "$CLAUDE_SESSION_META_DIR/local"
     mkdir -p "$CLAUDE_SESSION_META_DIR/local"
-    chmod 500 "$CLAUDE_SESSION_META_DIR/local"
+    _deny_writes "$CLAUDE_SESSION_META_DIR/local" || return 0
 
     # Hooks fail open: a stamp that cannot be written must never cost the user
-    # the reminder it rides on.
+    # the reminder it rides on. The stamp is written for the lead only, so the
+    # lead is modelled inline rather than inherited from an earlier test.
     local output
-    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh" 2>/dev/null)
-    chmod 700 "$CLAUDE_SESSION_META_DIR/local"
+    output=$(echo '{}' | CS_LEAD_PID=$$ CLAUDE_PID=$$ bash "$HOOKS_DIR/narrative-reminder.sh" 2>"$TEST_TMPDIR/stderr")
+    _allow_writes "$CLAUDE_SESSION_META_DIR/local"
     unset CLAUDE_CONFIG_DIR
     assert_output_contains "$output" "Narrative check" \
         "An unwritable cooldown dir must not lose the reminder" || return 1
+    # A trailing 2>/dev/null applies after the `>` has already reported, so
+    # the failed write must be silenced by the braced form or it reaches the
+    # user's terminal as noise from a hook that meant to fail quietly.
+    assert_file_not_contains "$TEST_TMPDIR/stderr" "Permission denied" \
+        "a stamp that cannot be written is not reported" || return 1
 }
 
 test_advisor_nudge_tolerates_a_padded_cooldown_stamp() {

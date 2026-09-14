@@ -23,9 +23,9 @@ _trace() {  # stage
     # stays off the keypress path. Without this the trace grows for the life of
     # the session directory.
     if [ $(( $$ % 64 )) -eq 0 ] && [ -f "$f" ]; then
-        tail -n 2000 "$f" > "$f.tmp" 2>/dev/null && mv "$f.tmp" "$f" 2>/dev/null || true
+        { tail -n 2000 "$f" > "$f.tmp"; } 2>/dev/null && mv "$f.tmp" "$f" 2>/dev/null || true
     fi
-    printf '%s %s %s\n' "$$" "$(date '+%Y-%m-%dT%H:%M:%S')" "$1" >> "$f" 2>/dev/null || true
+    { printf '%s %s %s\n' "$$" "$(date '+%Y-%m-%dT%H:%M:%S')" "$1" >> "$f"; } 2>/dev/null || true
 }
 
 _trace "start ${CS_REWRITE_PROVIDER:-claude} $(basename "${target:-<none>}")"
@@ -405,7 +405,7 @@ trap _keep_original INT TERM
 # Job control for the fork alone, so the rewriter and everything it starts land
 # in one process group that the trap above can address as a unit.
 set -m
-( printf '%s' "$prompt" | ${CS_REWRITE_CMD:-"$_rewriter"} > "$out" 2>/dev/null ) &
+( printf '%s' "$prompt" | { ${CS_REWRITE_CMD:-"$_rewriter"} > "$out"; } 2>/dev/null ) &
 _rw=$!
 set +m
 
@@ -420,7 +420,7 @@ rm -f "$out" 2>/dev/null
 [ -n "${rewritten//[[:space:]]/}" ] || { _trace 'exit empty-rewrite'; exit 0; }
 
 # tmp+rename so a crash mid-write cannot leave a truncated buffer.
-printf '%s' "$rewritten" > "$target.cs-tmp" 2>/dev/null || exit 0
+{ printf '%s' "$rewritten" > "$target.cs-tmp"; } 2>/dev/null || exit 0
 mv "$target.cs-tmp" "$target" 2>/dev/null || rm -f "$target.cs-tmp" 2>/dev/null
 _trace 'exit rewritten'
 exit 0

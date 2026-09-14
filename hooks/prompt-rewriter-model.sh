@@ -52,7 +52,7 @@ else
 fi
 if [ ! -f "$cfg/settings.json" ]; then
     mkdir -p "$cfg" 2>/dev/null || exit 1
-    printf '{"hasCompletedOnboarding":true}\n' > "$cfg/settings.json" 2>/dev/null || exit 1
+    { printf '{"hasCompletedOnboarding":true}\n' > "$cfg/settings.json"; } 2>/dev/null || exit 1
 fi
 
 # The prompt is untrusted DATA, never instructions to the rewriter, and it is

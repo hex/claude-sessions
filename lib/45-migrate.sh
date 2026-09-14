@@ -455,7 +455,7 @@ migrate_session() {
         # rather than leaving the rule (and a stray .tmp) behind.
         local ga="$session_dir/.gitattributes"
         if [ -f "$ga" ] && grep -q 'logs/session\.log merge=union' "$ga"; then
-            grep -v 'logs/session\.log merge=union' "$ga" > "$ga.tmp" 2>/dev/null || true
+            { grep -v 'logs/session\.log merge=union' "$ga" > "$ga.tmp"; } 2>/dev/null || true
             mv "$ga.tmp" "$ga" 2>/dev/null || rm -f "$ga.tmp"
         fi
         warn "Moved .cs/logs/session.log to machine-local .cs/local/session.log"
@@ -540,7 +540,7 @@ migrate_session() {
         # Temp+mv, like every neighbouring write: redirecting onto the README
         # truncates the user's file before the block writes a byte, so a write
         # that does not complete leaves nothing behind.
-        if {
+        if { {
             echo "---"
             echo "status: active"
             echo "created: $created_date"
@@ -548,7 +548,7 @@ migrate_session() {
             echo "aliases: [\"$session_name\"]"
             echo "---"
             echo "$existing_content"
-        } > "$readme.tmp" 2>/dev/null && mv "$readme.tmp" "$readme"; then
+        } > "$readme.tmp"; } 2>/dev/null && mv "$readme.tmp" "$readme"; then
             warn "Added frontmatter to .cs/README.md"
         else
             rm -f "$readme.tmp" 2>/dev/null || true

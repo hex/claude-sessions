@@ -41,7 +41,7 @@ _mail_keep_sent() {  # line, fname
     [ -n "${CLAUDE_SESSION_META_DIR:-}" ] || return 0
     local mine="$CLAUDE_SESSION_META_DIR/local/mail"
     _mail_ensure_maildir "$mine" 2>/dev/null || return 0
-    if ! { printf '%s\n' "$1" > "$mine/tmp/$2" 2>/dev/null \
+    if ! { { printf '%s\n' "$1" > "$mine/tmp/$2"; } 2>/dev/null \
             && mv "$mine/tmp/$2" "$mine/out/$2" 2>/dev/null; }; then
         rm -f "$mine/tmp/$2" 2>/dev/null || true
     fi
