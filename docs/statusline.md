@@ -10,19 +10,19 @@ One capsule carries identity — the Claude mark, the session, the branch, the m
 
 ## Segments
 
-Default order: `logo,session,notes,mail,git,model,ctx,limits`. One capsule holds identity (which session, which branch, which model); one holds the context gauge; rate-limit capsules follow, one per hot window. `pane` and `fable` ship but leave the default order — name them in `CS_STATUSLINE_SEGMENTS` to show them. The `cost` segment ships too, off by default the same way.
+Default order: `logo,session,notes,mail,git,model,ctx,limits`. One capsule holds identity (which session, which branch, which model); one holds the context gauge; rate-limit capsules follow only for hot windows, the two hottest at most, highest first. `pane` and `fable` ship but leave the default order — name them in `CS_STATUSLINE_SEGMENTS` to show them. The `cost` segment ships too, off by default the same way.
 
 | Name | Group | Rest | Hot | Hidden when | Source |
 |---|---|---|---|---|---|
 | `logo` | identity | `✳` in brand coral, bold; pulses brand/brandshade by epoch parity while `.cs/local/attention` exists | — | plain mode (no colour) | `.cs/local/attention` marker (raised by the Stop hook, cleared on the next prompt or session start) |
-| `session` | identity | name, bold, in its `claude_session_color` when the session has one, else primary ink | — | never | stdin `session_name`, falling back to `CLAUDE_SESSION_NAME`, then the workspace dir basename; the color from `.cs/local/state` |
+| `session` | identity | name, bold, primary ink | — | never | stdin `session_name`, falling back to `CLAUDE_SESSION_NAME`, then the workspace dir basename |
 | `notes` | identity | `▤ N`, amber ink, regular, directly after the session | — | queue empty or absent | Task files in `.cs/local/queue/` (one file per task) |
 | `mail` | identity | `✉ N`, amber ink, regular, after notes | — | nothing unread | Count of `.cs/local/mail/new/*.json` documents (`cs -msg` moves what it prints to `cur/`); only `.json` files count, so a stray `.DS_Store` or staging leftover never shows a phantom unread |
 | `pane` | identity | `◫ 7` (the `%` dropped), secondary ink; only when named | — | not named, or outside a real tmux | `TMUX_PANE` from inherited environment (no fork); requires `TMUX` too, and that this process is genuinely inside that tmux server, so an inherited pane id never renders |
 | `git` | identity | branch with the arrows and `+N!N` marks, bold ink | — | no `.git` | One `git status --porcelain=v1 -b` call |
 | `model` | identity | display name in bold ink, effort in secondary ink regular | — | no model on stdin | stdin `model.display_name`, `effort.level` |
 | `ctx` | ctx | `◔ ctx N%`, secondary ink | amber ink on the number at 40; crit inversion at 65 (`CS_STATUSLINE_CTX_WARN`/`_CRIT`) | no `context_window` on stdin | stdin `context_window.used_percentage` |
-| `limits` | limits | hidden | one capsule per hot window: `5h N% · 2h14m`, `wk N% · 5d16h`, `fable N% · 18h`; amber ink at 70, crit inversion at 90 | every window below 70 | stdin `rate_limits.*.used_percentage`, `rate_limits.five_hour.resets_at`, `rate_limits.seven_day.resets_at`, plus the usage cache when the model is Fable |
+| `limits` | limits | hidden | one capsule per hot window, the two hottest at most: `5h N% · 2h14m`, `wk N% · 5d16h`, `fable N% · 18h`; amber ink at 70, crit inversion at 90 | every window below 70 | stdin `rate_limits.*.used_percentage`, `rate_limits.five_hour.resets_at`, `rate_limits.seven_day.resets_at`, plus the usage cache when the model is Fable |
 | `fable` | limits | accepted as a name: the Fable window alone when `limits` is not named; a no-op beside `limits` | — | below 70, like every window | `GET /api/oauth/usage`, cached machine-globally (see [Fable usage](#fable-usage)) |
 | `cost` | cost | `$N.NN`, secondary ink, its own capsule after limits; only when named | — | not named, or no cost on stdin | stdin `cost.total_cost_usd` |
 
