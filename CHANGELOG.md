@@ -4,6 +4,11 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## Unreleased
+
+### Fixes
+- Every conversation start re-asserts the session's tab title. cs set `cs: <name>` once at launch and its reset never ran, because cs execs into claude; a second session launched on the same terminal (`cs other` from Claude Code's `!` prefix) left `cs: other` on the first session's tab for good. The SessionStart hook now sets the title again on startup, resume, `/clear` and compaction: through the tmux server inside tmux, and as the title escape to the terminal device outside it; a front end with no terminal skips it.
+
 ## 2026.9.15
 
 ### Features

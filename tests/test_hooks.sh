@@ -423,6 +423,12 @@ session_start_setup() {
     # a child claude or a walked-in front end override CLAUDE_PID inline.
     export CS_LEAD_PID=$$
     export CLAUDE_PID=$$
+    # The hook re-asserts the session's tab title. Without these, a suite run
+    # from inside tmux renames the developer's live window to the fixture's
+    # name, and one run in a plain terminal paints its tab: the title goes to
+    # the tmux server when TMUX is set, and to a terminal device otherwise.
+    unset TMUX TMUX_PANE 2>/dev/null || true
+    export CS_TITLE_TTY="$TEST_TMPDIR/title-tty"
     export CS_SESSIONS_ROOT="$TEST_TMPDIR/sessions"
     mkdir -p "$CS_SESSIONS_ROOT"
 
@@ -454,7 +460,80 @@ EOF
 
 session_start_teardown() {
     teardown
-    unset CS_SESSIONS_ROOT 2>/dev/null || true
+    unset CS_SESSIONS_ROOT CS_TITLE_TTY 2>/dev/null || true
+}
+
+# A tmux stub on PATH that records every call's argv, one bracketed word per
+# argument so a title split at its space is distinguishable from one passed
+# whole. Sets FAKE_TMUX_PATH and FAKE_TMUX_CALLS.
+_fake_tmux() {
+    FAKE_TMUX_PATH="$TEST_TMPDIR/tmuxbin"
+    FAKE_TMUX_CALLS="$TEST_TMPDIR/tmux-calls"
+    mkdir -p "$FAKE_TMUX_PATH"
+    cat > "$FAKE_TMUX_PATH/tmux" <<EOF
+#!/bin/sh
+{ printf '[%s]' "\$@"; echo; } >> "$FAKE_TMUX_CALLS"
+exit 0
+EOF
+    chmod +x "$FAKE_TMUX_PATH/tmux"
+    : > "$FAKE_TMUX_CALLS"
+}
+
+# cs sets the tab title once at launch and never resets it: its EXIT trap is
+# unreachable because cs execs into claude. A nested launch on the same tty
+# (`cs other` from the `!` prefix) therefore leaves "cs: other" on this
+# session's tab for good. Every conversation start re-asserts the title, and
+# on `clear` too: that is the first start after a nested launch.
+test_session_start_reasserts_tab_title_through_tmux() {
+    session_start_setup
+    _fake_tmux
+    echo '{"session_id":"s","source":"clear","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | PATH="$FAKE_TMUX_PATH:$PATH" TMUX="/tmp/tmux-1000/default,1234,0" TMUX_PANE="%3" \
+          bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>&1 || return 1
+    assert_file_contains "$FAKE_TMUX_CALLS" "^\[select-pane\]\[-t\]\[%3\]\[-T\]\[cs: current-session\]$" \
+        "the pane title is re-asserted on the hook's own pane, as one argument" || return 1
+    assert_file_contains "$FAKE_TMUX_CALLS" "^\[rename-window\]\[-t\]\[%3\]\[cs: current-session\]$" \
+        "the window name is re-asserted too" || return 1
+    assert_file_not_exists "$CS_TITLE_TTY" \
+        "under tmux the server carries the title; no escape is written to a tty" || return 1
+}
+
+# A tmux teammate is a full claude with its own SessionStart, and Claude Code
+# titles its pane with the agent's name. The tab being repaired is the lead's.
+test_session_start_tab_title_leaves_a_teammate_pane_alone() {
+    session_start_setup
+    _fake_tmux
+    echo '{"session_id":"s","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | PATH="$FAKE_TMUX_PATH:$PATH" TMUX="/tmp/tmux-1000/default,1234,0" TMUX_PANE="%9" \
+          CS_LEAD_PID=1 CLAUDE_PID=99999 bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>&1 || return 1
+    assert_file_not_contains "$FAKE_TMUX_CALLS" "select-pane\|rename-window" \
+        "a teammate's pane title and window name are not touched" || return 1
+}
+
+# Outside tmux the OSC 0 escape has to reach the terminal itself. A hook's
+# stdout is Claude's, so the escape is written to the terminal device.
+test_session_start_reasserts_tab_title_on_the_terminal_device() {
+    session_start_setup
+    echo '{"session_id":"s","source":"clear","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>&1 || return 1
+    assert_file_exists "$CS_TITLE_TTY" "the title escape is written to the terminal device" || return 1
+    local expected
+    expected=$(printf '\033]0;cs: current-session\007' | od -An -c | tr -s ' ')
+    assert_eq "$expected" "$(od -An -c < "$CS_TITLE_TTY" | tr -s ' ')" \
+        "the device receives exactly one OSC 0 title escape" || return 1
+}
+
+# No tmux and no terminal device (the desktop app, a headless front end): the
+# title is skipped and the hook's context payload is unaffected.
+test_session_start_tab_title_skips_silently_without_a_terminal() {
+    session_start_setup
+    local output
+    output=$(echo '{"session_id":"s","source":"clear","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | CS_TITLE_TTY="$TEST_TMPDIR/no-such-dir/tty" bash "$HOOKS_DIR/session-start.sh" 2>"$TEST_TMPDIR/stderr") || return 1
+    assert_output_contains "$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')" \
+        "managed Claude Code session: current-session" "the context payload still parses" || return 1
+    assert_file_not_contains "$TEST_TMPDIR/stderr" "no-such-dir" \
+        "a missing terminal device is not reported" || return 1
 }
 
 # Helper: create a sibling session with an objective
@@ -1634,6 +1713,10 @@ run_test test_failure_skips_outside_session
 run_test test_failure_handles_missing_error
 
 # Session start: cross-session context
+run_test test_session_start_reasserts_tab_title_through_tmux
+run_test test_session_start_tab_title_leaves_a_teammate_pane_alone
+run_test test_session_start_reasserts_tab_title_on_the_terminal_device
+run_test test_session_start_tab_title_skips_silently_without_a_terminal
 run_test test_session_start_emits_session_state_on_resume
 run_test test_session_start_emits_session_state_in_a_worktree
 run_test test_session_start_announces_worktree_task

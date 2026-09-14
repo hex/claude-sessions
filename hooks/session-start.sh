@@ -500,6 +500,31 @@ if [ -z "${CS_NO_ITERM2:-}" ] && [ "${TERM_PROGRAM:-}" = "iTerm.app" ]; then
     { [ -x "$_it2" ] && "$_it2" stop > "${CS_IT2_TTY:-/dev/tty}"; } 2>/dev/null || true
 fi
 
+# Re-assert this session's tab title. cs sets it once at launch and the reset
+# in its EXIT trap never runs, because cs execs into claude; a nested launch on
+# the same tty (`cs other` from the `!` prefix) leaves "cs: other" on this
+# session's tab for the rest of the conversation. Inside tmux the title goes
+# through the server, which needs no tty, and select-pane -T is not subject to
+# the allow-set-title lock the launch applied. Outside tmux the OSC 0 escape
+# has to reach the terminal itself, and a hook's stdout is Claude's, so it is
+# written to the terminal device; a front end without one (the desktop app)
+# skips it. Same value the launch set, so no new consent is asked. Lead only:
+# Claude Code titles a teammate's pane with the agent's name, and the tab this
+# repairs is the launched conversation's.
+_title="cs: $CLAUDE_SESSION_NAME"
+if [ "$IS_LEAD" != 1 ]; then
+    :
+elif [ -n "${TMUX:-}" ]; then
+    # An empty array is unbound under bash 3.2's set -u, hence the expansion.
+    _pane="${TMUX_PANE:-}"
+    tmux select-pane ${_pane:+-t "$_pane"} -T "$_title" 2>/dev/null || true
+    tmux rename-window ${_pane:+-t "$_pane"} "$_title" 2>/dev/null || true
+else
+    # Braced so the redirection failure itself is silenced: a trailing
+    # 2>/dev/null applies after the `>` has already reported.
+    { printf '\033]0;%s\007' "$_title" > "${CS_TITLE_TTY:-/dev/tty}"; } 2>/dev/null || true
+fi
+
 # Dynamic context: add session state info on resume. The repo test is
 # rev-parse, not `-d .git`: in a feature worktree .git is a FILE, and a
 # directory test there skipped this whole block on every resume.
