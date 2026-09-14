@@ -118,7 +118,7 @@ untouched. Hiding a capsule never hides a heartbeat.
 | `periwinkle` | the agent rows' model name | light: `76;29;149`; dark: `196;181;253` | 55/147 | 35/95 |
 | `amberink` | hot numbers, notes and mail counts | light: `146;64;14`; dark: `253;230;138` | 94/221 | 33 |
 | `crit` | inverted capsule fill | light: `215;0;21`; dark: `255;69;58` | 160/203 | 31 |
-| `critink` | inverted capsule text | light: `255;255;255`; dark: `37;0;0` | 231/232 | 97/30 |
+| `critink` | inverted capsule text | `255;255;255` on both themes | 231 | 97 |
 
 On a cream terminal (`253;246;227`) the derived surface is `227;221;204`, within a few
 shades of the council's `#ECE9E0` reference, so the surface stays derived and the hex

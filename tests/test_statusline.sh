@@ -3061,7 +3061,7 @@ test_sgr_ink_tokens_truecolor_dark() {
     _sgr 38 ink2;    assert_eq "38;2;160;161;162" "$_SGR" "ink2 dark" || return 1
     _sgr 38 amber;   assert_eq "38;2;253;230;138"  "$_SGR" "amber ink dark" || return 1
     _sgr 48 crit;    assert_eq "48;2;255;69;58"   "$_SGR" "crit fill dark" || return 1
-    _sgr 38 critink; assert_eq "38;2;37;0;0"      "$_SGR" "crit ink dark" || return 1
+    _sgr 38 critink; assert_eq "38;2;255;255;255" "$_SGR" "crit ink is white on dark too" || return 1
 }
 
 test_sgr_amber_follows_surface_luminance_not_the_theme() {
@@ -3104,7 +3104,7 @@ test_sgr_ink_tokens_256_and_basic() {
     _sgr 38 periwinkle; assert_eq "38;5;147" "$_SGR" "periwinkle 256 dark" || return 1
     _sgr 38 amber;   assert_eq "38;5;221" "$_SGR" "amber 256 dark" || return 1
     _sgr 48 crit;    assert_eq "48;5;203" "$_SGR" "crit 256 dark" || return 1
-    _sgr 38 critink; assert_eq "38;5;232" "$_SGR" "critink 256 dark" || return 1
+    _sgr 38 critink; assert_eq "38;5;231" "$_SGR" "critink 256 dark is white" || return 1
     LEVEL=basic; SL_THEME=light
     _sgr 38 ink;     assert_eq "97" "$_SGR" "ink basic light" || return 1
     _sgr 38 ink2;    assert_eq "37" "$_SGR" "ink2 basic light" || return 1
@@ -3114,7 +3114,7 @@ test_sgr_ink_tokens_256_and_basic() {
     SL_THEME=dark
     _sgr 38 ink;     assert_eq "97" "$_SGR" "ink basic dark" || return 1
     _sgr 38 ink2;    assert_eq "97" "$_SGR" "ink2 basic dark" || return 1
-    _sgr 38 critink; assert_eq "30" "$_SGR" "critink basic dark" || return 1
+    _sgr 38 critink; assert_eq "97" "$_SGR" "critink basic dark is white" || return 1
 }
 
 test_thresh_color_emits_crit_and_defaults_to_ink2() {

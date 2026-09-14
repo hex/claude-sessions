@@ -152,7 +152,7 @@ Color depth is detected per render, in priority order: `FORCE_COLOR=0`, `NO_COLO
 | `periwinkle` | the subagent rows' model capsule | light: `76;29;149`; dark: `196;181;253` | 55/147 | 35/95 |
 | `amber` | hot numbers, notes and mail counts | light: `146;64;14`; dark: `253;230;138` — light/dark by the measured `CS_TERM_BG_RGB`, by theme only when unmeasured | 94/221 | 33/93 |
 | `crit` | inverted capsule fill | light: `215;0;21`; dark: `255;69;58` | 160/203 | 31 |
-| `critink` | inverted capsule text | light: `255;255;255`; dark: `37;0;0` | 231/232 | 97/30 |
+| `critink` | inverted capsule text | `255;255;255` on both themes | 231 | 97 |
 
 Every capsule fill is `surface`, a shade of the terminal's own background so the bar harmonizes with the terminal instead of sitting on a fixed grey; darker on a light terminal, lighter on a dark one. On a cream terminal (`253;246;227`) the derived surface comes out `227;221;204`, a warm off-white a few shades darker — so the values above are the fallback for an unmeasured background and a reference for what the derived shade lands near, not fixed paints.
 

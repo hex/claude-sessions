@@ -504,8 +504,9 @@ _sgr() {
                 # palette's red: that palette is the tab colour and may change.
                 crit)
                     [ "$SL_THEME" = "dark" ] && rgb="255;69;58" || rgb="215;0;21" ;;
-                critink)
-                    [ "$SL_THEME" = "dark" ] && rgb="37;0;0" || rgb="255;255;255" ;;
+                # White on the red fill whatever the theme: the fill is the
+                # same hue on both, so its ink is too.
+                critink) rgb="255;255;255" ;;
                 brand)  rgb="217;119;87" ;;   # Claude coral (#D97757)
                 brandshade)
                     # The mark's dim pulse phase: a coral a shade darker than
@@ -553,7 +554,7 @@ _sgr() {
                 ink)     [ "$SL_THEME" = "dark" ] && idx=255 || idx=236 ;;
                 ink2)    [ "$SL_THEME" = "dark" ] && idx=250 || idx=241 ;;
                 crit)    [ "$SL_THEME" = "dark" ] && idx=203 || idx=160 ;;
-                critink) [ "$SL_THEME" = "dark" ] && idx=232 || idx=231 ;;
+                critink) idx=231 ;;
                 brand)  idx=173 ;;
                 brandshade) idx=167 ;;
                 white)
@@ -594,7 +595,7 @@ _sgr() {
                 ink)     base=97 ;;
                 ink2)    [ "$SL_THEME" = "dark" ] && base=97 || base=37 ;;
                 crit)    base=31 ;;
-                critink) [ "$SL_THEME" = "dark" ] && base=30 || base=97 ;;
+                critink) base=97 ;;
                 white)  base=97 ;;
                 brand)  base=33 ;;
                 brandshade) base=33 ;;
