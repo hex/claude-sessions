@@ -525,6 +525,39 @@ else
     { printf '\033]0;%s\007' "$_title" > "${CS_TITLE_TTY:-/dev/tty}"; } 2>/dev/null || true
 fi
 
+# A narrative over its budget. The protocol above says to read your own in
+# full, and the Read tool refuses a file over 256 KiB; the budget sits under
+# that ceiling so the file is still readable once, but every append moves it
+# closer, and nothing rotates it but the user's own verb (rotation commits, and
+# cs never commits on its own). So the same payload that says "read it" says
+# "rotate first" for that file. Every source and every actor, not the lead
+# alone: a teammate's SessionStart reads the same files. KEEP IN SYNC with
+# CS_NARRATIVE_MAX_DEFAULT in lib/51-narrative.sh (hooks cannot source lib/);
+# the validation mirrors _narrative_budget there.
+NARRATIVE_MAX="${CS_NARRATIVE_MAX_BYTES:-}"
+case "$NARRATIVE_MAX" in ''|*[!0-9]*|0) NARRATIVE_MAX=229376 ;; esac
+NARRATIVE_OVER=""
+for _nf in "$META_DIR"/memory/narrative.*.md; do
+    [ -f "$_nf" ] || continue
+    _sz=$(wc -c < "$_nf" 2>/dev/null | tr -d ' ' || echo 0)
+    case "$_sz" in ''|*[!0-9]*) _sz=0 ;; esac
+    [ "$_sz" -gt "$NARRATIVE_MAX" ] || continue
+    _nb=$(basename "$_nf")
+    if [ "$_nb" = "narrative.$ACTOR_SLUG.md" ]; then
+        _whose="yours: run \`cs -narrative rotate\` BEFORE reading it in full, or the Read will be refused"
+    else
+        _whose="not yours: read it only from the line the digest names, never whole"
+    fi
+    NARRATIVE_OVER="${NARRATIVE_OVER}- $_nb is $((_sz / 1024)) KB, over the $((NARRATIVE_MAX / 1024)) KB budget; $_whose
+"
+done
+if [ -n "$NARRATIVE_OVER" ]; then
+    CONTEXT="${CONTEXT}
+
+--- NARRATIVE OVER BUDGET ---
+${NARRATIVE_OVER}"
+fi
+
 # Dynamic context: add session state info on resume. The repo test is
 # rev-parse, not `-d .git`: in a feature worktree .git is a FILE, and a
 # directory test there skipped this whole block on every resume.

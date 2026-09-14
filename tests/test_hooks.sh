@@ -536,6 +536,58 @@ test_session_start_tab_title_skips_silently_without_a_terminal() {
         "a missing terminal device is not reported" || return 1
 }
 
+# The resume instruction is "read your narrative in full", and the Read tool
+# refuses a file over 256 KiB. A narrative past its budget is on its way there,
+# so the same payload that says "read it" has to say "rotate first" for that
+# file, name it and its size, and say whose it is when the actor matches.
+test_session_start_warns_about_an_over_budget_narrative() {
+    session_start_setup
+    { echo "# Session narrative (alice)"; head -c 3000 /dev/zero | tr '\0' 'x'; echo; } \
+        > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    echo "# Session narrative (bob)" > "$CLAUDE_SESSION_META_DIR/memory/narrative.bob.md"
+    local output context
+    output=$(echo '{"session_id":"s","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | CS_NARRATIVE_MAX_BYTES=2048 CS_ACTOR=alice bash "$HOOKS_DIR/session-start.sh" 2>/dev/null) || return 1
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+    assert_output_contains "$context" "NARRATIVE OVER BUDGET" "the warning is loud" || return 1
+    assert_output_contains "$context" "narrative.alice.md is 2 KB, over the 2 KB budget" \
+        "the file and its size are named" || return 1
+    assert_output_contains "$context" "yours: run \`cs -narrative rotate\` BEFORE reading it in full" \
+        "the actor's own file is told to rotate before the full read" || return 1
+    assert_output_not_contains "$context" "narrative.bob.md is" "a file within budget is not named" || return 1
+}
+
+# A teammate's file over budget is that actor's to rotate; the notice still
+# names it, so the digest's "read from line N" is not attempted on a file the
+# Read tool would refuse.
+test_session_start_names_a_teammate_narrative_over_budget_as_theirs() {
+    session_start_setup
+    { echo "# Session narrative (bob)"; head -c 3000 /dev/zero | tr '\0' 'x'; echo; } \
+        > "$CLAUDE_SESSION_META_DIR/memory/narrative.bob.md"
+    local context
+    context=$(echo '{"session_id":"s","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | CS_NARRATIVE_MAX_BYTES=2048 CS_ACTOR=alice bash "$HOOKS_DIR/session-start.sh" 2>/dev/null \
+        | jq -r '.hookSpecificOutput.additionalContext') || return 1
+    assert_output_contains "$context" "narrative.bob.md is 2 KB, over the 2 KB budget" \
+        "the teammate's file is named" || return 1
+    assert_output_contains "$context" "not yours: read it only from the line the digest names" \
+        "the teammate's file is theirs to rotate" || return 1
+    assert_output_not_contains "$context" "run \`cs -narrative rotate\` BEFORE" \
+        "the rotate instruction is for the actor's own file only" || return 1
+}
+
+# Within budget, nothing is added: the warning would otherwise ride every
+# conversation start as noise and stop reading as a warning.
+test_session_start_is_silent_when_narratives_fit() {
+    session_start_setup
+    echo "# Session narrative (alice)" > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    local context
+    context=$(echo '{"session_id":"s","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | CS_ACTOR=alice bash "$HOOKS_DIR/session-start.sh" 2>/dev/null \
+        | jq -r '.hookSpecificOutput.additionalContext') || return 1
+    assert_output_not_contains "$context" "OVER BUDGET" "no warning within budget" || return 1
+}
+
 # Helper: create a sibling session with an objective
 create_sibling_session() {
     local name="$1"
@@ -1717,6 +1769,9 @@ run_test test_session_start_reasserts_tab_title_through_tmux
 run_test test_session_start_tab_title_leaves_a_teammate_pane_alone
 run_test test_session_start_reasserts_tab_title_on_the_terminal_device
 run_test test_session_start_tab_title_skips_silently_without_a_terminal
+run_test test_session_start_warns_about_an_over_budget_narrative
+run_test test_session_start_names_a_teammate_narrative_over_budget_as_theirs
+run_test test_session_start_is_silent_when_narratives_fit
 run_test test_session_start_emits_session_state_on_resume
 run_test test_session_start_emits_session_state_in_a_worktree
 run_test test_session_start_announces_worktree_task

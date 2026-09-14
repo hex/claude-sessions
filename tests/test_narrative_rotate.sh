@@ -708,6 +708,11 @@ test_narrative_budget_is_one_value_in_both_copies() {
     hook_max=$(grep -o 'CS_NARRATIVE_MAX_BYTES:-}" [0-9]*' "$SCRIPT_DIR/../hooks/narrative-reminder.sh" \
         | head -1 | grep -o '[0-9]*$')
     assert_eq "$lib_max" "$hook_max" "the Stop hook must nag at the same threshold it rotates at" || return 1
+    # A FOURTH: SessionStart warns before the resume read, against its own
+    # inline default for the same reason.
+    local start_max
+    start_max=$(grep -o 'NARRATIVE_MAX=[0-9][0-9]*' "$SCRIPT_DIR/../hooks/session-start.sh" | head -1 | cut -d= -f2)
+    assert_eq "$lib_max" "$start_max" "SessionStart must warn at the same threshold it rotates at" || return 1
 }
 
 test_named_rotate_refuses_a_dangling_adopted_link() {
