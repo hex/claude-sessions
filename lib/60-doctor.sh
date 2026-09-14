@@ -479,7 +479,7 @@ _doctor_check_statusline() {
             # the font question; until then the bar shows square ends.
             local caps_file caps=""
             caps_file="$(_statusline_caps_file)"
-            [ -r "$caps_file" ] && IFS= read -r caps < "$caps_file"
+            [ -f "$caps_file" ] && [ -r "$caps_file" ] && { IFS= read -r caps < "$caps_file"; } 2>/dev/null
             case "$caps" in
                 on)  _doctor_ok "Statusline caps: rounded (this machine's font has the Powerline caps)" ;;
                 off) _doctor_ok "Statusline caps: square (answered off; cs -statusline caps ask to revisit)" ;;

@@ -3240,6 +3240,21 @@ test_caps_unanswered_renders_square() {
     assert_output_not_contains_f "$out" "$CAPR" "unanswered: no right cap glyph" || return 1
 }
 
+# A directory where the answer file should be is not an answer: square ends,
+# and nothing on stderr, since the bar repaints every second.
+test_caps_path_that_is_a_directory_renders_square_and_silent() {
+    export COLORTERM=truecolor
+    export CS_TERM_BG_RGB="253;246;227"
+    rm -f "$XDG_CONFIG_HOME/cs/statusline-caps"
+    mkdir -p "$XDG_CONFIG_HOME/cs/statusline-caps"
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8}}'
+    local out err
+    out=$(run_sl "$json")
+    err=$(run_sl_stderr "$json")
+    assert_output_not_contains_f "$out" "$CAPL" "a directory is not an answer: no cap glyph" || return 1
+    assert_eq "" "$err" "nothing on stderr for a directory at the caps path" || return 1
+}
+
 test_caps_file_off_renders_square() {
     export COLORTERM=truecolor
     export CS_TERM_BG_RGB="253;246;227"
@@ -3404,6 +3419,7 @@ run_test test_plain_joins_identity_with_dots_and_capsules_with_gt
 run_test test_identity_is_one_capsule_on_the_surface
 run_test test_capsule_gap_one_cell_between_every_capsule
 run_test test_caps_unanswered_renders_square
+run_test test_caps_path_that_is_a_directory_renders_square_and_silent
 run_test test_caps_file_off_renders_square
 run_test test_caps_env_overrides_file_both_ways
 run_test test_caps_off_gives_square_chips

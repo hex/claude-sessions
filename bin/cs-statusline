@@ -1534,7 +1534,9 @@ _caps_wanted() {
     esac
     local f answer=""
     f=$(_caps_file)
-    [ -r "$f" ] && IFS= read -r answer < "$f"
+    # A regular, readable file only: a directory at the path would print "Is a
+    # directory" on every repaint, and a broken symlink is no answer either.
+    [ -f "$f" ] && [ -r "$f" ] && { IFS= read -r answer < "$f"; } 2>/dev/null
     [ "$answer" = "on" ]
 }
 

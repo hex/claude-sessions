@@ -817,12 +817,24 @@ else
     if [ -n "$_register_statusline" ] && [ ! -f "$_statusline_caps" ]; then
         if [ -t 0 ]; then
             printf '\n  %s\n' "$(printf '\xee\x82\xb6')cs-statusline$(printf '\xee\x82\xb4')"
-            echo -en "Do the ends of that capsule render as rounded shapes (not boxes)? [Y/n] "
-            read -n 1 -r
-            echo ""
-            _caps_answer=on
-            [[ $REPLY =~ ^[Nn]$ ]] && _caps_answer=off
-            if mkdir -p "$(dirname "$_statusline_caps")" 2>/dev/null \
+            # An explicit y or n only: the registration question just above
+            # reads one key, so an Enter typed after it is still queued and
+            # would answer this one. EOF (Ctrl-D) leaves the question
+            # unanswered and lets the install finish; `read` returning
+            # non-zero must not trip errexit before settings.json is written.
+            _caps_answer=""
+            while :; do
+                echo -en "Do the ends of that capsule render as rounded shapes (not boxes)? [y/n] "
+                if ! read -n 1 -r; then echo ""; break; fi
+                echo ""
+                case "$REPLY" in
+                    [Yy]) _caps_answer=on; break ;;
+                    [Nn]) _caps_answer=off; break ;;
+                esac
+            done
+            if [ -z "$_caps_answer" ]; then
+                info "Capsule caps: left unanswered (square ends). Answer later with: cs -statusline caps ask"
+            elif mkdir -p "$(dirname "$_statusline_caps")" 2>/dev/null \
                 && printf '%s\n' "$_caps_answer" > "$_statusline_caps" 2>/dev/null; then
                 info "Capsule caps: $_caps_answer. Change later with: cs -statusline caps on|off|ask"
             else

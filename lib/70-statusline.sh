@@ -60,10 +60,16 @@ _statusline_caps_write() {  # on|off -> 0 written, 1 not
 # on or off; enter means on, since the person is looking at the sample.
 _statusline_caps_ask() {
     printf '\n  %s\n' "$(printf '\xee\x82\xb6')cs-statusline$(printf '\xee\x82\xb4')"
-    echo -en "Do the ends of that capsule render as rounded shapes (not boxes)? [Y/n] "
-    read -n 1 -r
-    echo ""
-    if [[ $REPLY =~ ^[Nn]$ ]]; then _CAPS_ANSWER=off; else _CAPS_ANSWER=on; fi
+    _CAPS_ANSWER=""
+    while :; do
+        echo -en "Do the ends of that capsule render as rounded shapes (not boxes)? [y/n] "
+        if ! read -n 1 -r; then echo ""; break; fi
+        echo ""
+        case "$REPLY" in
+            [Yy]) _CAPS_ANSWER=on; break ;;
+            [Nn]) _CAPS_ANSWER=off; break ;;
+        esac
+    done
 }
 
 # disable strips only a cs-statusline registration, never a foreign one.
@@ -137,6 +143,7 @@ run_statusline_cmd() {
                     cs_interactive || error "cs -statusline caps ask needs a terminal; use caps on|off"
                     _statusline_caps_ask
                     answer="$_CAPS_ANSWER"
+                    [ -n "$answer" ] || error "No answer recorded; run cs -statusline caps on|off"
                     ;;
                 *) error "Usage: cs -statusline caps on|off|ask" ;;
             esac
