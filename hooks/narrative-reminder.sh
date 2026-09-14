@@ -729,7 +729,7 @@ NARRATIVE_FILE=""
 NARRATIVE_MTIME=0
 # KEEP IN SYNC with CS_NARRATIVE_MAX_DEFAULT in lib/51-narrative.sh — hooks
 # cannot source lib/, so the default is duplicated here.
-NARRATIVE_MAX=$(_num_or "${CS_NARRATIVE_MAX_BYTES:-}" 524288)
+NARRATIVE_MAX=$(_num_or "${CS_NARRATIVE_MAX_BYTES:-}" 229376)
 NARRATIVE_OVER=""
 for _nf in "$META_DIR"/memory/narrative*.md; do
     [ -f "$_nf" ] || continue

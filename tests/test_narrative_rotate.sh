@@ -694,12 +694,12 @@ test_narrative_budget_is_one_value_in_both_copies() {
     [ -n "$lib_max" ] && [ -n "$bin_max" ] || { echo "  FAIL: budget constant missing from lib or bin"; return 1; }
     assert_eq "$lib_max" "$bin_max" "the max budget must match between lib and bin" || return 1
     assert_eq "$lib_keep" "$bin_keep" "the keep budget must match between lib and bin" || return 1
-    # A day of active work is ~65 sections at ~2 KB each, which filled the old
-    # 128 KiB budget outright — a resume then carried only that day. The budget
-    # holds about a week instead; the tail is what a resume reads, and 256 KiB
-    # of prose is a few percent of a 1M context, which is the right trade.
-    assert_eq "524288" "$lib_max" "the budget holds about a week of sections" || return 1
-    assert_eq "262144" "$lib_keep" "and the kept tail is half of it" || return 1
+    # The resume reads the live file in one Read call, and that tool refuses a
+    # file over 256 KiB. The budget sits well under the ceiling so a file that
+    # has passed it is still readable while the warning is on screen, and the
+    # kept tail leaves a working day of headroom before the next rotation.
+    assert_eq "229376" "$lib_max" "the budget stays under the Read tool's 256 KiB ceiling" || return 1
+    assert_eq "114688" "$lib_keep" "and the kept tail is half of it" || return 1
     # A THIRD copy: the Stop hook measures every narrative against its own
     # inline default to decide whether to nag. Left behind, it would keep
     # flagging files that are comfortably under the real budget — a warning the
