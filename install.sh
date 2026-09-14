@@ -145,6 +145,7 @@ CS_SKILLS=(
     prose-hygiene
     rotate
     finish
+    feature
     write-as-me
 )
 

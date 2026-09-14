@@ -14,9 +14,13 @@ not, because that directory is the user's own project and its mode is theirs to
 choose.
 
 `.spawn/` at the sessions root stages `<name>.seed` files written by
-`cs -spawn --task`: line 1 is the spawner, remaining lines are tasks. The
-launch consumes fresh seeds (queued, armed, kick prompt); seeds older than an
-hour are set aside as `<name>.seed.stale` and never applied silently.
+`cs -spawn`: line 1 is the spawner, remaining lines are `--task` items. cs
+stages a `--brief <file>` beside it as `<name>.brief.md`, and a brief alone
+still writes a seed, since the seed carries the spawner. The launch consumes
+fresh seeds (tasks queued and armed, the brief moved to the session's
+`.cs/brief.md`, kick prompt); seeds older than an hour are set aside as
+`<name>.seed.stale` with their brief as `<name>.brief.md.stale` and never
+applied silently.
 
 `.usage/` at the sessions root holds `fable.<account>.json`, the machine-global cache
 behind the statusline's [fable segment](statusline.md#fable-usage), plus the
@@ -50,6 +54,7 @@ The one distinction that governs everything below is **shared vs machine-local**
 | `.cs/archived` | Archive marker written by `cs -archive` (date + actor). Tracked so the archived state syncs; removed on open or `cs -unarchive`. | default |
 | `.cs/handoffs/` | Lineage-stamped conversation handoffs written by the `rotate` skill (parent UUID, purpose, continuation plan). Each carries a `status:` field — `unconsumed` while pending, flipped to `consumed` by the SessionStart that rotates into it, to `discarded` by the resume prompt's `d` answer, or to `superseded` when a later rotation retires it. The `rotate` skill also prunes as it goes, deleting `consumed`, `discarded` and `superseded` files older than 30 days by `created:` unless they are among the 10 newest — instructions the skill follows, not a cs command; nothing in cs itself deletes a handoff. | default |
 | `.cs/plans/` | Design plans and specs kept with the session. | default |
+| `.cs/brief.md` | The brief a `cs -spawn --brief` (or the `feature` skill) handed this session, moved in at launch; the wake-up line sends the session to it first. Written once per spawn, replacing an earlier one. | default |
 | `.cs/age-recipients/*.pub` | age public keys of everyone allowed to decrypt the session's synced secrets. | default |
 | `.cs/secrets.<machine-id>.age` | Per-machine encrypted secret sync file (age; preferred). Each machine writes its own so exports never collide. | default |
 | `.cs/secrets.<machine-id>.enc` | Per-machine encrypted secret sync file (OpenSSL + password; legacy). | default |

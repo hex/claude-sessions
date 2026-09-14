@@ -6,6 +6,9 @@ All notable changes to cs are documented here. Release notes are also available 
 
 ## Unreleased
 
+### Features
+- A session can start a feature itself. The `feature` skill (`/feature fix-auth`) writes a brief from the conversation, with the goal, what done looks like, the constraints the new session cannot otherwise know and how to report back, and spawns `<base>@fix-auth` as a parallel worktree session in the cs tmux session. The new session reads the brief at `.cs/brief.md` before its first turn; the result comes back as `cs -msg` mail, and `/finish fix-auth` lands it. Underneath, `cs -spawn` takes `--brief <file>`: cs stages the brief beside the seed, moves it into the session at launch, sets it aside with a stale seed, deletes it with the session on `cs -rm`, and `cs -doctor` counts a stale one. The spawn keeps its permission prompt.
+
 ### Fixes
 - Every conversation start re-asserts the session's tab title. cs set `cs: <name>` once at launch and its reset never ran, because cs execs into claude; a second session launched on the same terminal (`cs other` from Claude Code's `!` prefix) left `cs: other` on the first session's tab for good. The SessionStart hook now sets the title again on startup, resume, `/clear` and compaction: through the tmux server inside tmux, and as the title escape to the terminal device outside it; a front end with no terminal skips it.
 

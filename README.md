@@ -66,7 +66,8 @@ No git repo required. No project structure needed. Just a name for what you're w
 - **Cross-session mail** - `cs -msg <session> "note"` drops a message in another session's machine-local mailbox (`--kind notify|task|text|result`; `task` also lands in its walk-away queue). Delivery is atomic — each message is its own file, written whole and renamed into place, so concurrent senders can never interleave. Bodies may be up to 64KB, and a lone `-` body reads from stdin (`cs -msg <session> -`). The recipient sees the unread bodies inlined into its context on every prompt until it reads them with `cs -msg` (bounded to 5, truncated; `task` kind shows a count-only label since it is already queued). Same-machine only; attribution is unauthenticated by design.
 - **Threads** - every message carries a thread id, and the sender keeps its own copy, so an exchange can be re-read from either end — including after a rotation, when an agent otherwise has no way to find out what it already said. `cs -msg --reply <thread> "body"` answers without naming the peer (it comes from the thread; naming a different one is an error, not an override), and `cs -msg thread <id>` prints the conversation ordered by what answers what — not by time, since a question and its reply usually land in the same whole second.
 - **Mail wakes** - unread mail takes a turn instead of waiting for a keystroke, so agent-to-agent work advances unattended. A session that just finished a turn is woken at that boundary; a session already parked at the prompt is woken by Claude Code's file watcher noticing the delivery, which arrives as a system-reminder rather than as synthesised typing. Either way the wake names who the new mail is from, so the woken session knows its correspondent before it opens the mailbox. Fires once per arrival, never for `task` kind (the queue owns those), never while a walk-away drain is running, and only in the launched conversation — not in teammates sharing the mailbox. Bounded by `CS_MAIL_WAKE_MAX` (default 5) wakes between prompts so two sessions cannot volley forever; `CS_NO_MAIL_WAKE=1` silences it without swallowing the message.
-- **tmux spawner** - `cs -spawn <name>` opens a session in a cs-owned tmux session (`tmux attach -t cs`); `--task "..."` seeds and arms its walk-away queue so it starts working unattended, and the spawner hears back over cross-session mail when the queue drains. Same-machine only.
+- **tmux spawner** - `cs -spawn <name>` opens a session in a cs-owned tmux session (`tmux attach -t cs`); `--brief <file>` hands it a brief it reads at its first turn (landing as the session's `.cs/brief.md`), `--task "..."` seeds and arms its walk-away queue so it starts working unattended, and the spawner hears back over cross-session mail when the queue drains. Same-machine only.
+- **Features from inside a session** - the `feature` skill (`/feature fix-auth`) writes a brief from the conversation and spawns `<base>@fix-auth` as a parallel worktree session with it, so a session can hand off a feature and keep working. The spawn keeps its permission prompt; `/finish fix-auth` lands the result.
 
 ### Terminal experience
 
@@ -106,7 +107,7 @@ Or clone and run `./install.sh`.
 The installer:
 - Adds `cs`, `cs-secrets`, `cs-statusline`, `cs-subagent-statusline`, and `cs-tui` to `~/.local/bin/`
 - Installs the cs [hooks](docs/hooks.md) to `~/.claude/hooks/cs/` for session tracking (including the `scope-prompt` auto-grounding hook on UserPromptSubmit)
-- Adds `/summary`, `/checkpoint`, `/sweep`, and `/wrap` commands, and the `store-secret`, `prose-hygiene`, `rotate`, `finish`, and `write-as-me` skills to `~/.claude/`
+- Adds `/summary`, `/checkpoint`, `/sweep`, and `/wrap` commands, and the `store-secret`, `prose-hygiene`, `rotate`, `finish`, `feature`, and `write-as-me` skills to `~/.claude/`
 - Installs shell completions for bash and zsh
 - Configures hook entries in `~/.claude/settings.json`
 
@@ -147,7 +148,7 @@ cs -msg <session> "note"    # Send mail to another session (--kind notify|task|t
 cs -msg --reply <thread> "note"  # Reply into a thread; the target comes from the thread
 cs -msg thread <id>         # Show one thread as a conversation, oldest first
 cs -msg log                 # This session's full mail history, sent and received
-cs -spawn <name> [--task ..]  # Open a session in a cs-owned tmux window; --task arms its walk-away queue
+cs -spawn <name> [--brief <file>] [--task ..]  # Open a session in a cs-owned tmux window; --brief hands it a brief, --task arms its queue
 cs -doctor, -diag           # Run health checks (Keychain, hooks, memory, audit, tokens)
 cs -usage [--all] [<name>]  # Per-session token usage over the 5h/weekly rate-limit windows
 cs -tag add|rm <tag>        # Tag the current session (also: cs <name> -tag ..., -tag list)
@@ -298,6 +299,16 @@ words, and you close that session and run `/finish <feature>` again. Nothing
 is ever removed by a keystroke or signal into the other session. Ordinary
 feature branches get the older gated `--no-ff` ritual from the same skill. It
 is user-invoked only (`disable-model-invocation: true`).
+
+The `feature` skill (`/feature <name>` in any cs session) is the other end:
+it writes a brief from the conversation (goal, done-when, constraints, how to
+report back) and runs `cs -spawn <base>@<name> --brief <file>`, so the
+feature opens as a parallel worktree session in the cs tmux session and reads
+its brief at `.cs/brief.md` before its first turn. The base session keeps
+working; the result arrives as `cs -msg` mail, and `/finish <name>` lands it.
+The model may invoke it, and the permission prompt on `cs -spawn` is the
+user's confirmation that a worktree, a branch and a window are about to
+exist.
 
 Each worktree is a full cs session (own conversation, color, crash
 recovery) that shares the base session's task list and secrets.
