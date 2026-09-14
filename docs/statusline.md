@@ -6,7 +6,7 @@
 ✳ claude-sessions  ·  ⎇ main↑1 +2!1  ·  ✦ Fable 5.1 medium  ◔ ctx 42% ◑ wk 84% · 5d16h
 ```
 
-One capsule carries identity — the Claude mark, the session, the branch, the model — and one carries the context gauge. Rate-limit capsules appear only when a window is hot. Colour is state: bold amber ink on a number past its warn threshold, and the capsule inverts to red with white text at crit. The plain form (`NO_COLOR=1`) is `claude-sessions · ⎇ main↑1 +2!1 · ✦ Fable 5.1 medium > ◔ ctx 42% > ◑ wk 84% · 5d16h`.
+One capsule carries identity — the Claude mark, the session, the branch, the model — and one carries the context gauge. Rate-limit capsules appear only when a window is hot. Colour is state: bold amber ink on a number past its warn threshold, and the capsule inverts to red at crit, its text pulsing white/pink on the attention clock. The plain form (`NO_COLOR=1`) is `claude-sessions · ⎇ main↑1 +2!1 · ✦ Fable 5.1 medium > ◔ ctx 42% > ◑ wk 84% · 5d16h`.
 
 ## Segments
 
@@ -150,9 +150,10 @@ Color depth is detected per render, in priority order: `FORCE_COLOR=0`, `NO_COLO
 | `brand` | the mark | `217;119;87` | 173 | 33 |
 | `brandshade` | the pulse's dim phase | `184;101;74` | 167 | 33 |
 | `periwinkle` | the subagent rows' model capsule | light: `76;29;149`; dark: `196;181;253` | 55/147 | 35/95 |
-| `amber` | hot numbers, notes and mail counts | light: `146;64;14`; dark: `253;230;138` — light/dark by the measured `CS_TERM_BG_RGB`, by theme only when unmeasured | 94/221 | 33/93 |
+| `amber` | hot numbers, notes and mail counts | light: `180;83;9`; dark: `253;230;138` — light/dark by the measured `CS_TERM_BG_RGB`, by theme only when unmeasured | 130/221 | 33/93 |
 | `crit` | inverted capsule fill | light: `215;0;21`; dark: `255;69;58` | 160/203 | 31 |
 | `critink` | inverted capsule text | `255;255;255` on both themes | 231 | 97 |
+| `critshade` | the crit pulse's dim phase | `255;205;200` | 224 | 97 |
 
 Every capsule fill is `surface`, a shade of the terminal's own background so the bar harmonizes with the terminal instead of sitting on a fixed grey; darker on a light terminal, lighter on a dark one. On a cream terminal (`253;246;227`) the derived surface comes out `227;221;204`, a warm off-white a few shades darker — so the values above are the fallback for an unmeasured background and a reference for what the derived shade lands near, not fixed paints.
 

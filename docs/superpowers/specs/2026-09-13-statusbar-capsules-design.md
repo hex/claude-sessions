@@ -116,9 +116,10 @@ untouched. Hiding a capsule never hides a heartbeat.
 | `brand` | the mark | unchanged `217;119;87` | 173 | 33 |
 | `brandshade` | the pulse's dim phase | unchanged `184;101;74` | 167 | 33 |
 | `periwinkle` | the agent rows' model name | light: `76;29;149`; dark: `196;181;253` | 55/147 | 35/95 |
-| `amberink` | hot numbers, notes and mail counts | light: `146;64;14`; dark: `253;230;138` | 94/221 | 33 |
+| `amberink` | hot numbers, notes and mail counts | light: `180;83;9`; dark: `253;230;138` | 130/221 | 33 |
 | `crit` | inverted capsule fill | light: `215;0;21`; dark: `255;69;58` | 160/203 | 31 |
 | `critink` | inverted capsule text | `255;255;255` on both themes | 231 | 97 |
+| `critshade` | the crit pulse's dim phase | `255;205;200` | 224 | 97 |
 
 On a cream terminal (`253;246;227`) the derived surface is `227;221;204`, within a few
 shades of the council's `#ECE9E0` reference, so the surface stays derived and the hex

@@ -473,9 +473,9 @@ _sgr() {
                 amber)
                     if _parse_rgb_triplet "${CS_TERM_BG_RGB:-}"; then
                         _luminance
-                        [ "$_LUM" -ge 1275000 ] && rgb="146;64;14" || rgb="253;230;138"
+                        [ "$_LUM" -ge 1275000 ] && rgb="180;83;9" || rgb="253;230;138"
                     elif [ "$SL_THEME" = "dark" ]; then rgb="253;230;138"
-                    else rgb="146;64;14"; fi ;;
+                    else rgb="180;83;9"; fi ;;
                 # Primary text on the capsule surface: a warm 35% shade of the
                 # surface on a light one, the soft white on a dark one — the same
                 # contrast pivot the old surface text used, resolved from the
@@ -507,6 +507,8 @@ _sgr() {
                 # White on the red fill whatever the theme: the fill is the
                 # same hue on both, so its ink is too.
                 critink) rgb="255;255;255" ;;
+                # The crit pulse's dim phase: white warmed toward the fill.
+                critshade) rgb="255;205;200" ;;
                 brand)  rgb="217;119;87" ;;   # Claude coral (#D97757)
                 brandshade)
                     # The mark's dim pulse phase: a coral a shade darker than
@@ -550,11 +552,12 @@ _sgr() {
                 periwinkle) [ "$SL_THEME" = "dark" ] && idx=147 || idx=55 ;;
                 rowname) [ "$SL_THEME" = "dark" ] && idx=231 || idx=235 ;;
                 rowmeta) [ "$SL_THEME" = "dark" ] && idx=248 || idx=244 ;;
-                amber)   [ "$SL_THEME" = "dark" ] && idx=221 || idx=94 ;;
+                amber)   [ "$SL_THEME" = "dark" ] && idx=221 || idx=130 ;;
                 ink)     [ "$SL_THEME" = "dark" ] && idx=255 || idx=236 ;;
                 ink2)    [ "$SL_THEME" = "dark" ] && idx=250 || idx=241 ;;
                 crit)    [ "$SL_THEME" = "dark" ] && idx=203 || idx=160 ;;
                 critink) idx=231 ;;
+                critshade) idx=224 ;;
                 brand)  idx=173 ;;
                 brandshade) idx=167 ;;
                 white)
@@ -596,6 +599,7 @@ _sgr() {
                 ink2)    [ "$SL_THEME" = "dark" ] && base=97 || base=37 ;;
                 crit)    base=31 ;;
                 critink) base=97 ;;
+                critshade) base=97 ;;
                 white)  base=97 ;;
                 brand)  base=33 ;;
                 brandshade) base=33 ;;
@@ -1485,7 +1489,13 @@ _render() {
     local esc=$'\033' reset=$'\033[0m'
     local capl=$'\xee\x82\xb6' capr=$'\xee\x82\xb4'   # U+E0B6, U+E0B4
     [ "${CS_STATUSLINE_CAPS:-1}" = "0" ] && { capl=""; capr=""; }
-    local fill fillsgr capsgr ink weight first k
+    local fill fillsgr capsgr ink weight first k critink=critink
+    # A red capsule's text pulses white/critshade on the same epoch-second
+    # clock as the attention mark, so a crit reading moves while the bar idles.
+    if [ -n "$_CRIT_GROUPS" ]; then
+        _sl_now
+        [ $(( ${_NOW:-0} % 2 )) -eq 1 ] && critink=critshade
+    fi
     out="$reset"
     # Capsules in first-seen group order; a group's items in their own order,
     # even when CS_STATUSLINE_SEGMENTS interleaves them (session,ctx,model).
@@ -1513,7 +1523,7 @@ _render() {
             first=""
             ink="${_SEG_INK[i]}"; weight=22
             [ -n "${_SEG_BOLD[i]}" ] && weight=1
-            if [ "$fill" = "crit" ]; then ink=critink; weight=1; fi
+            if [ "$fill" = "crit" ]; then ink="$critink"; weight=1; fi
             _sgr 38 "$ink"
             out+="${esc}[${fillsgr};${_SGR};${weight}m${_SEG_TEXT[i]}"
         done
