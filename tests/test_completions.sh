@@ -514,7 +514,7 @@ test_session_extraction_is_sane() {
     local cmds
     cmds=$(session_subcommands)
     assert_output_contains "$cmds" "-secrets" "extraction should find -secrets" || return 1
-    assert_output_contains "$cmds" "--merge" "extraction should find --merge" || return 1
+    assert_output_contains "$cmds" "-finish" "extraction should find -finish" || return 1
     local n
     n=$(printf '%s\n' "$cmds" | grep -c . | tr -d '[:space:]')
     [ "${n:-0}" -ge 8 ] \
