@@ -77,6 +77,18 @@ test_doctor_warns_on_a_narrative_over_budget() {
     assert_output_contains "$output" "Complete with [1-9][0-9]* warning(s)\." "the warning is counted" || return 1
 }
 
+# A leading zero passes the digit check and reaches the KB arithmetic as an
+# octal literal; `08` is not octal, and under errexit doctor would die there.
+test_doctor_reads_a_leading_zero_budget_as_decimal() {
+    local nf="$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    { echo "# Session narrative (alice)"; head -c 3000 /dev/zero | tr '\0' 'x'; echo; } > "$nf"
+    local output
+    output=$(CS_NARRATIVE_MAX_BYTES=08 "$CS_BIN" -doctor 2>&1) || true
+    assert_output_not_contains "$output" "value too great for base" "no octal abort" || return 1
+    assert_output_contains "$output" "Narrative: narrative.alice.md is 2 KB (budget 0 KB)" "the override is decimal 8" || return 1
+    assert_output_contains "$output" "Complete with [1-9][0-9]* warning(s)\." "doctor ran to its summary" || return 1
+}
+
 test_doctor_reports_ok_when_narratives_fit() {
     echo "# Session narrative (alice)" > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
     local output
@@ -831,6 +843,7 @@ run_test test_doctor_subcommand_exists
 run_test test_doctor_runs_default_checks_from_session
 run_test test_doctor_reports_pass_for_healthy_session
 run_test test_doctor_warns_on_a_narrative_over_budget
+run_test test_doctor_reads_a_leading_zero_budget_as_decimal
 run_test test_doctor_reports_ok_when_narratives_fit
 run_test test_doctor_survives_an_unreadable_narrative
 run_test test_doctor_fails_when_hook_not_executable

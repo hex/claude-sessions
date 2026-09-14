@@ -98,6 +98,19 @@ test_narrative_reminder_flags_a_narrative_over_budget() {
     assert_output_contains "$output" "cs -narrative rotate" "points at the rotation" || return 1
 }
 
+# The same octal trap as SessionStart's: `08` passes _num_or and aborts the
+# KB arithmetic, and a Stop hook that dies emits no decision at all.
+test_narrative_reminder_reads_a_leading_zero_budget_as_decimal() {
+    local nf="$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    { echo "# Session narrative (alice)"; head -c 3000 /dev/zero | tr '\0' 'x'; echo; } > "$nf"
+    _backdate "$nf"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    local output
+    output=$(echo '{}' | CS_NARRATIVE_MAX_BYTES=08 bash "$HOOKS_DIR/narrative-reminder.sh" 2>"$TEST_TMPDIR/stderr")
+    assert_file_not_contains "$TEST_TMPDIR/stderr" "value too great for base" "no octal abort" || return 1
+    assert_output_contains "$output" "narrative.alice.md is 2 KB, over the 0 KB budget" "the override is decimal 8" || return 1
+}
+
 test_narrative_reminder_is_silent_about_budget_when_under() {
     local nf="$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
     echo "# Session narrative (alice)" > "$nf"
@@ -1752,6 +1765,7 @@ run_test test_narrative_reminder_blocks_when_stale
 run_test test_narrative_reminder_tracks_per_actor
 run_test test_narrative_reminder_asks_for_appended_corrections_not_rewrites
 run_test test_narrative_reminder_flags_a_narrative_over_budget
+run_test test_narrative_reminder_reads_a_leading_zero_budget_as_decimal
 run_test test_narrative_reminder_is_silent_about_budget_when_under
 run_test test_narrative_reminder_survives_an_unreadable_narrative
 run_test test_narrative_reminder_budget_line_covers_a_teammates_file

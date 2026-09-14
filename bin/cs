@@ -3736,9 +3736,11 @@ CS_NARRATIVE_MAX_DEFAULT=229376
 CS_NARRATIVE_KEEP_DEFAULT=114688
 
 # A positive integer override, else the default. Empty, non-numeric and zero all
-# fall back: a zero budget would rotate on every run.
+# fall back: a zero budget would rotate on every run. Printed as decimal: a
+# leading zero would reach the callers' arithmetic as an octal literal, and
+# `08` aborts it.
 _narrative_budget() {  # value, default
-    case "${1:-}" in ''|*[!0-9]*|0) echo "$2";; *) echo "$1";; esac
+    case "${1:-}" in ''|*[!0-9]*|0) echo "$2";; *) echo "$((10#$1))";; esac
 }
 
 # One line per '## ' heading: the heading's byte offset, a space, the heading.
