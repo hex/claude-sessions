@@ -3176,15 +3176,16 @@ test_identity_is_one_capsule_on_the_surface() {
     assert_eq "2" "$caps" "identity and ctx are the only two capsules" || return 1
 }
 
-test_capsule_gap_two_cells_after_identity_one_after_gauges() {
+test_capsule_gap_one_cell_between_every_capsule() {
     export COLORTERM=truecolor
     export CS_TERM_BG_RGB="253;246;227"
     export CS_STATUSLINE_SEGMENTS="session,ctx,cost"
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8},"cost":{"total_cost_usd":1.5}}'
     local out; out=$(run_sl "$json")
     local esc=$'\033'
-    assert_output_contains_f "$out" "${CAPR}${esc}[0m  ${esc}[49;38;2;227;221;204m${CAPL}" \
-        "two default-bg cells between identity and ctx" || return 1
+    assert_output_contains_f "$out" "s${esc}[49;38;2;227;221;204m${CAPR}${esc}[0m ${esc}[49;38;2;227;221;204m${CAPL}" \
+        "one default-bg cell between identity and ctx" || return 1
+    assert_output_not_contains_f "$out" "${esc}[0m  ${esc}[49" "no two-cell gap anywhere" || return 1
     assert_output_contains_f "$out" "8%${esc}[49;38;2;227;221;204m${CAPR}${esc}[0m ${esc}[49;38;2;227;221;204m${CAPL}" \
         "one cell between ctx and cost" || return 1
 }
@@ -3296,7 +3297,7 @@ test_notes_and_mail_are_amber_ink_after_the_session() {
 run_test test_interleaved_segments_still_one_identity_capsule
 run_test test_plain_joins_identity_with_dots_and_capsules_with_gt
 run_test test_identity_is_one_capsule_on_the_surface
-run_test test_capsule_gap_two_cells_after_identity_one_after_gauges
+run_test test_capsule_gap_one_cell_between_every_capsule
 run_test test_caps_off_gives_square_chips
 run_test test_line_ends_at_the_last_cap_regardless_of_columns
 run_test test_ctx_amber_is_ink_on_the_surface

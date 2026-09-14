@@ -49,13 +49,12 @@ Alex's calls, 2026-09-13, in order:
 
 ## Layout
 
-One physical line. Capsules sit on the terminal's own background. Two empty cells separate
-the identity capsule from the gauges; one empty cell separates gauge capsules from each
-other. Inside the identity capsule, items join with `  ·  ` (two spaces, middle dot, two
-spaces) in secondary ink.
+One physical line. Capsules sit on the terminal's own background, one empty cell apart.
+Inside the identity capsule, items join with `  ·  ` (two spaces, middle dot, two spaces)
+in secondary ink.
 
 ```
- ✳ claude-sessions  ▤ 2  ✉ 1  ·  feat/ctx-three-bands +2!1  ·  Fable 5.1 medium    ◔ ctx 33% 
+ ✳ claude-sessions  ▤ 2  ✉ 1  ·  feat/ctx-three-bands +2!1  ·  Fable 5.1 medium   ◔ ctx 33% 
 ```
 
 | State | Bar |

@@ -1525,9 +1525,7 @@ _render() {
             out+="${esc}[${fillsgr}m "
         fi
         out+="$reset"
-        if [ $((k + 1)) -lt ${#_GROUPS[@]} ]; then
-            if [ "$g" = "identity" ]; then out+="  "; else out+=" "; fi
-        fi
+        [ $((k + 1)) -lt ${#_GROUPS[@]} ] && out+=" "
     done
     printf '%s\n' "$out"
 }
