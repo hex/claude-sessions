@@ -536,6 +536,9 @@ fi
 # the validation mirrors _narrative_budget there.
 NARRATIVE_MAX="${CS_NARRATIVE_MAX_BYTES:-}"
 case "$NARRATIVE_MAX" in ''|*[!0-9]*|0) NARRATIVE_MAX=229376 ;; esac
+# Decimal, whatever the digits: a leading zero would make the KB arithmetic
+# below read the value as octal, and `08` aborts it.
+NARRATIVE_MAX=$((10#$NARRATIVE_MAX))
 NARRATIVE_OVER=""
 for _nf in "$META_DIR"/memory/narrative.*.md; do
     [ -f "$_nf" ] || continue
@@ -544,7 +547,7 @@ for _nf in "$META_DIR"/memory/narrative.*.md; do
     [ "$_sz" -gt "$NARRATIVE_MAX" ] || continue
     _nb=$(basename "$_nf")
     if [ "$_nb" = "narrative.$ACTOR_SLUG.md" ]; then
-        _whose="yours: run \`cs -narrative rotate\` BEFORE reading it in full, or the Read will be refused"
+        _whose="yours: run \`cs -narrative rotate\` BEFORE reading it in full (the Read tool refuses a file over 256 KiB)"
     else
         _whose="not yours: read it only from the line the digest names, never whole"
     fi

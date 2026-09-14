@@ -552,7 +552,7 @@ test_session_start_warns_about_an_over_budget_narrative() {
     assert_output_contains "$context" "NARRATIVE OVER BUDGET" "the warning is loud" || return 1
     assert_output_contains "$context" "narrative.alice.md is 2 KB, over the 2 KB budget" \
         "the file and its size are named" || return 1
-    assert_output_contains "$context" "yours: run \`cs -narrative rotate\` BEFORE reading it in full" \
+    assert_output_contains "$context" "yours: run \`cs -narrative rotate\` BEFORE reading it in full (the Read tool refuses a file over 256 KiB)" \
         "the actor's own file is told to rotate before the full read" || return 1
     assert_output_not_contains "$context" "narrative.bob.md is" "a file within budget is not named" || return 1
 }
@@ -585,7 +585,25 @@ test_session_start_is_silent_when_narratives_fit() {
     context=$(echo '{"session_id":"s","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
         | CS_ACTOR=alice bash "$HOOKS_DIR/session-start.sh" 2>/dev/null \
         | jq -r '.hookSpecificOutput.additionalContext') || return 1
+    assert_output_contains "$context" "managed Claude Code session: current-session" \
+        "the payload is a real context, not an empty emit" || return 1
     assert_output_not_contains "$context" "OVER BUDGET" "no warning within budget" || return 1
+}
+
+# A leading zero in the override is a plain integer to the validator and an
+# octal literal to the arithmetic that renders the budget in KB; `08` is not
+# octal, and under errexit that abort would end the hook before its JSON.
+test_session_start_survives_a_leading_zero_budget_override() {
+    session_start_setup
+    { echo "# Session narrative (alice)"; head -c 3000 /dev/zero | tr '\0' 'x'; echo; } \
+        > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    local output context
+    output=$(echo '{"session_id":"s","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | CS_NARRATIVE_MAX_BYTES=08 CS_ACTOR=alice bash "$HOOKS_DIR/session-start.sh" 2>"$TEST_TMPDIR/stderr") || return 1
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext') || return 1
+    assert_output_contains "$context" "narrative.alice.md is 2 KB, over the 0 KB budget" \
+        "the override is read as decimal 8" || return 1
+    assert_file_not_contains "$TEST_TMPDIR/stderr" "value too great for base" "no octal abort" || return 1
 }
 
 # Helper: create a sibling session with an objective
@@ -1772,6 +1790,7 @@ run_test test_session_start_tab_title_skips_silently_without_a_terminal
 run_test test_session_start_warns_about_an_over_budget_narrative
 run_test test_session_start_names_a_teammate_narrative_over_budget_as_theirs
 run_test test_session_start_is_silent_when_narratives_fit
+run_test test_session_start_survives_a_leading_zero_budget_override
 run_test test_session_start_emits_session_state_on_resume
 run_test test_session_start_emits_session_state_in_a_worktree
 run_test test_session_start_announces_worktree_task
