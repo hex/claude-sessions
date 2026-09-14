@@ -503,6 +503,79 @@ test_retire_force_takes_a_squash_landed_branch() {
     assert_file_not_exists "$base_dir/feature.txt" "force never merges" || return 1
 }
 
+test_retire_force_refuses_commits_after_the_captured_one() {
+    # --force skips only "is the captured commit in the base": a commit made
+    # on the branch after the PR's capture is work the PR never carried, and
+    # deleting the branch would lose it.
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "in the pr" > "$wt/a.txt"
+    (cd "$wt" && git add a.txt && git commit -q -m "A")
+    local sha output status=0
+    sha=$(git -C "$wt" rev-parse HEAD)
+    echo "after the pr" > "$wt/b.txt"
+    (cd "$wt" && git add b.txt && git commit -q -m "B")
+    output=$("$CS_BIN" "myproj" -retire-feature "fix-auth" "$sha" --force 2>&1) || status=$?
+    assert_eq "1" "$status" "force refuses a tip past the captured commit" || return 1
+    assert_output_contains "$output" "1 commit(s) on cs/fix-auth after $sha are not integrated; run /finish fix-auth again" \
+        "the refusal counts the unlanded commits" || return 1
+    assert_dir "$wt" "worktree preserved" || return 1
+    assert_eq "+cs/fix-auth" "$(git -C "$base_dir" branch --list cs/fix-auth | tr -d ' ')" "branch kept" || return 1
+}
+
+test_retire_fuses_nothing_when_removal_fails_and_retry_fuses_once() {
+    # Records are fused only once the worktree is gone: a removal that fails
+    # (here: a locked worktree) leaves the base's records untouched and the
+    # worktree's own in place, so the retry after unlocking fuses exactly once.
+    local base_dir="$CS_SESSIONS_ROOT/proj"
+    mkdir -p "$base_dir/.cs"/{memory,local}
+    echo "# P" > "$base_dir/README.md"
+    printf '.cs/\n.claude/settings.local.json\n' > "$base_dir/.gitignore"
+    (cd "$base_dir" && git init -q && git config core.autocrlf false && git add -A && git commit -q -m init)
+    printf '{"event":"base-seed"}\n' > "$base_dir/.cs/timeline.jsonl"
+    cs_launch "proj@t1"
+    local wt="$CS_SESSIONS_ROOT/proj@t1"
+    echo "done" > "$wt/result.txt"
+    (cd "$wt" && git add result.txt && git commit -q -m "task")
+    printf '{"event":"from-task"}\n' > "$wt/.cs/timeline.jsonl"
+    local sha output status=0
+    sha=$(land_feature proj t1) || { echo "  FAIL: integrate fixture"; return 1; }
+    git -C "$base_dir" worktree lock "$wt"
+    output=$("$CS_BIN" "proj" -retire-feature "t1" "$sha" 2>&1) || status=$?
+    assert_eq "1" "$status" "a locked worktree cannot be removed: $output" || return 1
+    assert_dir "$wt" "worktree survives" || return 1
+    assert_file_exists "$wt/.cs/timeline.jsonl" "the worktree's records are back where they were" || return 1
+    assert_eq "1" "$(grep -c "base-seed" "$base_dir/.cs/timeline.jsonl")" "base records untouched" || return 1
+    assert_file_not_contains "$base_dir/.cs/timeline.jsonl" "from-task" "nothing fused on a failed removal" || return 1
+    git -C "$base_dir" worktree unlock "$wt"
+    status=0
+    output=$("$CS_BIN" "proj" -retire-feature "t1" "$sha" 2>&1) || status=$?
+    assert_eq "0" "$status" "retry retires: $output" || return 1
+    assert_not_exists "$wt" "worktree removed on retry" || return 1
+    assert_eq "1" "$(grep -c "from-task" "$base_dir/.cs/timeline.jsonl")" "fused exactly once" || return 1
+}
+
+test_retire_refusal_for_an_open_session_comes_after_the_landing_check() {
+    # An open conversation on an UNLANDED feature must hear "/finish first",
+    # not "the feature is landed, close the session".
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "work" > "$wt/w.txt"
+    (cd "$wt" && git add w.txt && git commit -q -m work)
+    local sha output status=0
+    sha=$(git -C "$wt" rev-parse HEAD)
+    echo "$$" > "$wt/.cs/session.lock"
+    output=$("$CS_BIN" "myproj" -retire-feature "fix-auth" "$sha" 2>&1) || status=$?
+    rm -f "$wt/.cs/session.lock"
+    assert_eq "1" "$status" "refused" || return 1
+    assert_output_contains "$output" "is not integrated into myproj; run /finish fix-auth before retiring" "the landing check speaks first" || return 1
+    assert_output_not_contains "$output" "The feature is landed" "no false reassurance" || return 1
+}
+
 test_retire_force_still_refuses_untracked_work() {
     local base_dir
     base_dir=$(create_test_session_with_git "myproj")
@@ -611,6 +684,9 @@ run_test test_retire_refuses_an_unintegrated_feature
 run_test test_retire_refuses_commits_after_the_captured_one
 run_test test_retire_force_takes_a_squash_landed_branch
 run_test test_retire_force_still_refuses_untracked_work
+run_test test_retire_force_refuses_commits_after_the_captured_one
+run_test test_retire_fuses_nothing_when_removal_fails_and_retry_fuses_once
+run_test test_retire_refusal_for_an_open_session_comes_after_the_landing_check
 run_test test_retire_rejects_traversal_task_name
 run_test test_retire_is_hidden_from_completion_and_unknown_command_text
 run_test test_merge_verb_is_gone

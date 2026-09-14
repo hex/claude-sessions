@@ -104,10 +104,14 @@ commands become `-- sh -c 'first && second'`.
 6. **Retire.** The worktree goes through one entry and nothing else:
    - `retire: ready` — run `cs <base> -retire-feature <task> <sha>`.
    - `retire: not-landed` — the branch is not an ancestor of base (a squash
-     or rebase landing). When `pr_state` is `MERGED`, that is the PR's
-     evidence the work is in: run
-     `cs <base> -retire-feature <task> <sha> --force`. Any other state:
-     print `retire_note` and stop; nothing is removed.
+     or rebase landing). When `pr_state` is `MERGED` AND `pr_head_oid`
+     equals the captured `sha`, that is the PR's evidence the work is in:
+     run `cs <base> -retire-feature <task> <sha> --force`. A `pr_head_oid`
+     that differs means the PR landed an older or newer tip than the
+     worktree holds, so the branch may carry work the PR never had: print
+     both shas and stop. Any other `pr_state`: print `retire_note` and
+     stop; nothing is removed. (The entry refuses a tip past the captured
+     commit under --force as well.)
    - `retire: N commit(s) ... not integrated` — print it and stop; the next
      `/finish <task>` captures them.
 

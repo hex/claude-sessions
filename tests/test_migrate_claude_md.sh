@@ -178,7 +178,7 @@ test_old_template_head_moves_wholesale() {
 # does not migrate the base). Its checked-out .gitignore has no
 # CLAUDE.local.md entry, so the worktree's own copy of the file must be
 # covered by the clone-local info/exclude in tracked mode too, or it reads
-# as untracked and blocks `cs base --merge task`'s preflight.
+# as untracked and blocks retirement's preflight.
 test_worktree_from_unmigrated_base_can_merge() {
     local dir
     dir=$(create_test_session "unmigrated")

@@ -1338,8 +1338,8 @@ _worktree_untracked_at_risk() {  # wt_dir
 
 # Print the PID of a live lock on a session that the invoker does not own:
 # empty when the lock is absent, its process is dead, or the lock is the
-# invoking conversation's own (session_lock_owned_by_invoker). The merge verb
-# and the integrate entry both refuse on a non-empty answer.
+# invoking conversation's own (session_lock_owned_by_invoker). The integrate
+# and retire entries both refuse on a non-empty answer.
 _foreign_live_lock_pid() {  # session_name lock_file
     local pid
     [ -f "$2" ] || return 0
@@ -1688,6 +1688,26 @@ retire_feature_worktree() {  # base_name task sha [--force]
         error "This is the '$wt_name' conversation itself, and a worktree can't remove the directory it is running in. Close this session, then run /finish $task in '$base_name'."
     fi
 
+    sha=$(git -C "$base_dir" rev-parse -q --verify "$sha^{commit}" 2>/dev/null) \
+        || error "Commit not found in $base_name: $sha"
+    local tip
+    tip=$(git -C "$wt_dir" rev-parse HEAD 2>/dev/null) || error "Not a git checkout: $wt_dir"
+    # Without --force the captured commit must be in the base. With it (a
+    # squash-merged PR, on GitHub's evidence) that check is skipped, but the
+    # branch tip must still be at or behind the captured commit either way:
+    # a commit made after the capture is work no landing carried, and
+    # deleting the branch would lose it.
+    if [ -z "$force" ]; then
+        git -C "$base_dir" merge-base --is-ancestor "$sha" HEAD 2>/dev/null \
+            || error "$sha is not integrated into $base_name; run /finish $task before retiring"
+    fi
+    if ! git -C "$base_dir" merge-base --is-ancestor "$tip" "$sha" 2>/dev/null \
+        && { [ -n "$force" ] || ! git -C "$base_dir" merge-base --is-ancestor "$tip" HEAD 2>/dev/null; }; then
+        local n_after
+        n_after=$(git -C "$wt_dir" rev-list --count "$sha..HEAD" 2>/dev/null || echo "?")
+        error "$n_after commit(s) on $branch after $sha are not integrated; run /finish $task again before retiring"
+    fi
+
     local pid
     pid=$(_foreign_live_lock_pid "$wt_name" "$wt_dir/.cs/session.lock")
     if [ -n "$pid" ]; then
@@ -1696,20 +1716,6 @@ retire_feature_worktree() {  # base_name task sha [--force]
     pid=$(_foreign_live_lock_pid "$base_name" "$base_dir/.cs/session.lock")
     if [ -n "$pid" ]; then
         error "Base session '$base_name' is open elsewhere (PID $pid); run /finish $task from that conversation"
-    fi
-
-    sha=$(git -C "$base_dir" rev-parse -q --verify "$sha^{commit}" 2>/dev/null) \
-        || error "Commit not found in $base_name: $sha"
-    local tip
-    tip=$(git -C "$wt_dir" rev-parse HEAD 2>/dev/null) || error "Not a git checkout: $wt_dir"
-    if [ -z "$force" ]; then
-        git -C "$base_dir" merge-base --is-ancestor "$sha" HEAD 2>/dev/null \
-            || error "$sha is not integrated into $base_name; run /finish $task before retiring"
-        if ! git -C "$base_dir" merge-base --is-ancestor "$tip" HEAD 2>/dev/null; then
-            local n_after
-            n_after=$(git -C "$wt_dir" rev-list --count "$sha..HEAD" 2>/dev/null || echo "?")
-            error "$n_after commit(s) on $branch after $sha are not integrated; run /finish $task again before retiring"
-        fi
     fi
 
     if _tree_is_dirty "$wt_dir"; then
@@ -1729,14 +1735,26 @@ $wt_untracked"
         error "Base session has uncommitted changes; commit them in $base_dir first"
     fi
 
-    local mode
+    # Ignored-mode records are fused only once the worktree is gone: set them
+    # aside, remove, then fuse from the copy, so a removal that fails (a
+    # locked worktree, say) leaves the base's records untouched and puts the
+    # worktree's own back, and the retry fuses exactly once.
+    local mode aside=""
     mode=$(_read_local_state "$wt_dir/.cs/local/state" cs_mode)
     if [ "$mode" = "ignored" ]; then
-        fuse_session_records "$wt_dir/.cs" "$base_dir/.cs"
+        aside=$(mktemp -d "${TMPDIR:-/tmp}/cs-retire.XXXXXX")
+        mv "$wt_dir/.cs" "$aside/cs" || error "Could not set aside $wt_dir/.cs for the record fuse"
     fi
-
-    git -C "$base_dir" worktree remove --force "$wt_dir" \
-        || error "git worktree remove failed for $wt_dir"
+    local remove_err
+    if ! remove_err=$(git -C "$base_dir" worktree remove --force "$wt_dir" 2>&1); then
+        [ -n "$aside" ] && mv "$aside/cs" "$wt_dir/.cs" 2>/dev/null && rmdir "$aside" 2>/dev/null
+        error "git worktree remove failed for $wt_dir; nothing was fused or deleted
+$remove_err"
+    fi
+    if [ -n "$aside" ]; then
+        fuse_session_records "$aside/cs" "$base_dir/.cs"
+        rm -rf "$aside"
+    fi
     if [ -n "$force" ]; then
         git -C "$base_dir" branch -D "$branch" >/dev/null 2>&1 \
             || warn "Branch $branch was not deleted"
@@ -1775,8 +1793,8 @@ _integrate_cleanup() {
 # Integrate a feature worktree's captured commit into the base session while
 # the feature stays open: merge base HEAD + <sha> in a temporary detached
 # worktree, run the gates there, fast-forward the base onto the result. Removes
-# nothing — the worktree, the branch and the feature session all remain; the
-# merge verb retires them later. Backs the unadvertised
+# nothing — the worktree, the branch and the feature session all remain until
+# retire_feature_worktree, the same skill's closing step. Backs the unadvertised
 # `cs <base> -integrate-feature <task> <sha> [--from-remote] -- <gate...>`
 # that skills/finish/scripts/finish.sh drives. Every refusal is an error that
 # names the next command.
