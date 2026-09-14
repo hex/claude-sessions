@@ -155,7 +155,7 @@ test_happy_path_docs_fixture_plain() {
     out=$(run_sl "$FIXTURE_DOCS")
     # git absent (non-git dir) and disc absent (no cs session); both rate-limit
     # windows sit below seventy, so limits stays hidden entirely.
-    assert_eq "my-session · ✦ Opus high > ◔ ctx 8%" "$out" \
+    assert_eq "my-session · ✦ Opus high > ○ ctx 8%" "$out" \
         "docs fixture should render identity first, then the ctx gauge (no badge in plain mode)"
 }
 
@@ -182,7 +182,7 @@ test_all_segments_ordering_plain() {
     }')
     local out
     out=$(run_sl "$json")
-    assert_eq "mysess · ⎇ main +1!1 · ✦ Opus high > ◔ ctx 34% > ◷ 5h 95% > ◑ wk 72%" "$out" \
+    assert_eq "mysess · ⎇ main +1!1 · ✦ Opus high > ◔ ctx 34% > ◷ 5h 95% > ◶ wk 72%" "$out" \
         "all segments should render in order: session, branch, model, ctx, then the two hot limits highest first"
 }
 
@@ -196,7 +196,7 @@ test_limits_hidden_when_healthy() {
     local out
     out=$(run_sl "$json")
     assert_output_not_contains "$out" "◷ 5h" "5h block stays hidden while healthy" || return 1
-    assert_output_not_contains "$out" "◑ wk" "wk block stays hidden while healthy" || return 1
+    assert_output_not_contains "$out" "◶ wk" "wk block stays hidden while healthy" || return 1
 }
 
 # ============================================================================
@@ -256,7 +256,7 @@ test_limits_threshold_per_block() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":95}}}'
     local out
     out=$(CS_STATUSLINE_NOW=1000 run_sl "$json")
-    assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◑ wk" "wk 95% block should invert to the crit fill" || return 1
+    assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◶ wk" "wk 95% block should invert to the crit fill" || return 1
     assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m95%" "the wk number inverts too" || return 1
     assert_output_not_contains_f "$out" "◷ 5h" "the healthy 5h window stays hidden entirely" || return 1
 }
@@ -658,7 +658,7 @@ test_missing_session_name_dir_fallback() {
     local json='{"model":{"display_name":"Opus"},"workspace":{"current_dir":"/tmp/alpha/beta"},"context_window":{"used_percentage":5}}'
     local out
     out=$(run_sl "$json")
-    assert_eq "beta · ✦ Opus > ◔ ctx 5%" "$out" \
+    assert_eq "beta · ✦ Opus > ○ ctx 5%" "$out" \
         "session label should fall back to basename of current_dir"
 }
 
@@ -725,7 +725,7 @@ test_non_git_workspace_absent() {
     out=$(run_sl "$json")
     # current_dir is a real, non-git directory; output must end at the ctx
     # segment with no git slot appended.
-    assert_eq "s · ✦ Opus > ◔ ctx 5%" "$out" \
+    assert_eq "s · ✦ Opus > ○ ctx 5%" "$out" \
         "git segment should be absent for a non-git workspace"
 }
 
@@ -738,7 +738,7 @@ test_ctx_threshold_red() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":65}}'
     local out
     out=$(CS_STATUSLINE_NOW=1000 run_sl "$json")
-    assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◔ ctx" "ctx 65% should invert to the crit fill" || return 1
+    assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◕ ctx" "ctx 65% should invert to the crit fill" || return 1
     if ! printf '%s' "$out" | grep -qF "$(printf '\033[0m')"; then
         echo "  FAIL: colored line must contain a reset"
         return 1
@@ -765,6 +765,19 @@ test_ctx_amber_band_is_amber() {
     assert_output_contains_f "$out" "38;2;180;83;9;1m42%" "ctx 42% should use the amber ink" || return 1
     assert_output_not_contains "$out" "48;2;255;183;77" "ctx 42% amber must never be a fill" || return 1
     assert_output_not_contains "$out" "48;2;215;0;21" "ctx 42% must not use the crit fill" || return 1
+}
+
+# The ctx icon is a pie that fills with the band: empty below 13, quarter to
+# the warn threshold, half through the amber band, three-quarters at crit,
+# full from 88. The shape changes where the ink changes, so the two agree.
+test_ctx_icon_fills_with_band() {
+    export NO_COLOR=1
+    local pct icon out
+    for pair in "8:○" "31:◔" "47:◑" "71:◕" "92:●"; do
+        pct="${pair%%:*}"; icon="${pair#*:}"
+        out=$(CS_STATUSLINE_NOW=1000 run_sl "{\"session_name\":\"s\",\"workspace\":{\"current_dir\":\"/none\"},\"context_window\":{\"used_percentage\":$pct}}")
+        assert_output_contains "$out" "$icon ctx ${pct}%" "ctx ${pct}% should show the $icon pie" || return 1
+    done
 }
 
 test_ctx_below_warn_is_neutral() {
@@ -895,7 +908,7 @@ test_accent_segments_bold() {
         "the model should render bold ink" || return 1
     # SGR bold is stateful: a segment that does not explicitly emit normal
     # intensity (22) inherits bold from the accent before it.
-    assert_output_contains_f "$out" "48;2;227;221;204;38;2;124;121;112;22m◔ ctx" \
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;124;121;112;22m○ ctx" \
         "the ctx label must explicitly reset to normal intensity" || return 1
     assert_output_not_contains "$out" "8;145;178" "the session colour never reaches the bar" || return 1
 }
@@ -918,7 +931,7 @@ test_limits_threshold_red() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":95}}}'
     local out
     out=$(CS_STATUSLINE_NOW=1000 run_sl "$json")
-    assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◑ wk" "wk 95% should invert the lim-wk capsule to the crit fill" || return 1
+    assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◶ wk" "wk 95% should invert the lim-wk capsule to the crit fill" || return 1
     assert_output_not_contains_f "$out" "◷ 5h" "the healthy 5h window stays hidden entirely"
 }
 
@@ -1093,7 +1106,7 @@ EOF
 test_ctx_zero_vs_absent() {
     export NO_COLOR=1
     local with0='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":0}}'
-    assert_eq "s > ◔ ctx 0%" "$(run_sl "$with0")" "ctx 0% should render explicitly"
+    assert_eq "s > ○ ctx 0%" "$(run_sl "$with0")" "ctx 0% should render explicitly"
     local without='{"session_name":"s","workspace":{"current_dir":"/none"}}'
     assert_eq "s" "$(run_sl "$without")" "absent used_percentage should omit the ctx segment"
 }
@@ -1623,6 +1636,7 @@ run_test test_non_git_workspace_absent
 run_test test_ctx_threshold_red
 run_test test_ctx_normal_neutral_not_red
 run_test test_ctx_amber_band_is_amber
+run_test test_ctx_icon_fills_with_band
 run_test test_ctx_below_warn_is_neutral
 run_test test_ctx_warn_band_still_amber
 run_test test_ctx_below_crit_is_amber_not_red
@@ -3152,7 +3166,7 @@ test_interleaved_segments_still_one_identity_capsule() {
     assert_output_contains_f "$out" "1ms${ESC_}[48;2;227;221;204;38;2;124;121;112;22m  ·  ${ESC_}[48;2;227;221;204;38;2;79;77;71;1m✦ Opus" \
         "model follows session inside identity" || return 1
     out=$(NO_COLOR=1 run_sl "$json")
-    assert_eq "s · ✦ Opus > ◔ ctx 8%" "$out" "plain: groups render in first-seen order, items in their own order" || return 1
+    assert_eq "s · ✦ Opus > ○ ctx 8%" "$out" "plain: groups render in first-seen order, items in their own order" || return 1
 }
 
 test_plain_joins_identity_with_dots_and_capsules_with_gt() {
@@ -3241,7 +3255,7 @@ test_ctx_amber_is_ink_on_the_surface() {
     assert_output_contains_f "$out" "48;2;227;221;204;38;2;180;83;9;1m42%" "the number is amber ink" || return 1
     assert_output_not_contains_f "$out" "48;2;255;183;77" "no amber fill anywhere" || return 1
     assert_output_not_contains_f "$out" "48;2;180;83;9" "amber never becomes a fill" || return 1
-    assert_output_contains_f "$out" "38;2;124;121;112;22m◔ ctx" "the label stays secondary ink" || return 1
+    assert_output_contains_f "$out" "38;2;124;121;112;22m◑ ctx" "the label stays secondary ink" || return 1
 }
 
 test_ctx_crit_inverts_only_its_capsule() {
@@ -3250,7 +3264,7 @@ test_ctx_crit_inverts_only_its_capsule() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":71}}'
     local out; out=$(CS_STATUSLINE_NOW=1000 run_sl "$json")
     assert_output_contains_f "$out" "[49;38;2;215;0;21m${CAPL}" "ctx capsule's caps take the crit fill" || return 1
-    assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◔ ctx" "label inverts to critink bold" || return 1
+    assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◕ ctx" "label inverts to critink bold" || return 1
     assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m71%" "number inverts too" || return 1
     assert_output_contains_f "$out" "48;2;227;221;204;38;2;79;77;71;1ms" "identity stays on the surface" || return 1
     assert_output_not_contains_f "$out" "48;2;220;38;38" "the session palette red is not the crit fill" || return 1
@@ -3291,7 +3305,7 @@ test_crit_text_pulses_white_and_critshade() {
     odd=$(CS_STATUSLINE_NOW=1001 run_sl "$json")
     assert_output_contains_f "$even" "48;2;215;0;21;38;2;255;255;255;1m71%" "even second: white on the red fill" || return 1
     assert_output_contains_f "$odd"  "48;2;215;0;21;38;2;255;205;200;1m71%" "odd second: the reddish white" || return 1
-    assert_output_contains_f "$odd"  "48;2;215;0;21;38;2;255;205;200;1m◔ ctx" "the label pulses with the number" || return 1
+    assert_output_contains_f "$odd"  "48;2;215;0;21;38;2;255;205;200;1m◕ ctx" "the label pulses with the number" || return 1
     assert_output_not_contains_f "$odd" "38;2;255;255;255" "no white left on the odd second" || return 1
 }
 
@@ -3344,14 +3358,23 @@ test_limits_hidden_below_seventy() {
     export NO_COLOR=1
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8},"rate_limits":{"five_hour":{"used_percentage":69},"seven_day":{"used_percentage":69.9}}}'
     local out; out=$(run_sl "$json")
-    assert_eq "s > ◔ ctx 8%" "$out" "both windows at 69 stay hidden" || return 1
+    assert_eq "s > ○ ctx 8%" "$out" "both windows at 69 stay hidden" || return 1
+}
+
+# The weekly icon must not be the half pie the ctx gauge now shows in its
+# amber band, or a hot week next to a mid context reads as two of one thing.
+test_wk_icon_differs_from_the_half_pie() {
+    export NO_COLOR=1
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":47},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":72}}}'
+    local out; out=$(run_sl "$json")
+    assert_eq "s > ◑ ctx 47% > ◶ wk 72%" "$out" "wk takes the lower-left quadrant, distinct from the ctx half pie" || return 1
 }
 
 test_limits_one_hot_window_appears_alone() {
     export NO_COLOR=1
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":70}}}'
     local out; out=$(run_sl "$json")
-    assert_eq "s > ◔ ctx 8% > ◑ wk 70%" "$out" "wk at 70 appears; healthy 5h does not" || return 1
+    assert_eq "s > ○ ctx 8% > ◶ wk 70%" "$out" "wk at 70 appears; healthy 5h does not" || return 1
 }
 
 test_limits_hot_window_is_amber_ink_then_crit_capsule() {
@@ -3371,7 +3394,7 @@ test_limits_three_hot_show_top_two_descending() {
     seed_usage_cache org-abc 85 "2026-08-29T03:59:59Z" 1787816000 1787816300
     local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":72},"seven_day":{"used_percentage":95}}}'
     local out; out=$(CS_STATUSLINE_NOW=1787816100 run_sl "$json")
-    assert_output_contains_f "$out" "◑ wk 95% > ✧ fable 85% · 1d20h" "wk then fable, highest first; fable past 80 carries its countdown" || return 1
+    assert_output_contains_f "$out" "◶ wk 95% > ✧ fable 85% · 1d20h" "wk then fable, highest first; fable past 80 carries its countdown" || return 1
     assert_output_not_contains_f "$out" "5h" "the third window stays hidden" || return 1
 }
 
@@ -3414,9 +3437,9 @@ test_limits_and_fable_both_named_render_once_in_either_order() {
     local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":72},"seven_day":{"used_percentage":95}}}'
     local out
     out=$(CS_STATUSLINE_SEGMENTS="session,limits,fable" CS_STATUSLINE_NOW=1787816100 run_sl "$json")
-    assert_eq "s > ◑ wk 95% > ✧ fable 85% · 1d20h" "$out" "limits then fable: one pass, top two of three" || return 1
+    assert_eq "s > ◶ wk 95% > ✧ fable 85% · 1d20h" "$out" "limits then fable: one pass, top two of three" || return 1
     out=$(CS_STATUSLINE_SEGMENTS="session,fable,limits" CS_STATUSLINE_NOW=1787816100 run_sl "$json")
-    assert_eq "s > ◑ wk 95% > ✧ fable 85% · 1d20h" "$out" "fable named first changes nothing: limits owns all three windows" || return 1
+    assert_eq "s > ◶ wk 95% > ✧ fable 85% · 1d20h" "$out" "fable named first changes nothing: limits owns all three windows" || return 1
 }
 
 test_pane_off_by_default_and_rendered_when_named() {
@@ -3428,10 +3451,11 @@ test_pane_off_by_default_and_rendered_when_named() {
     local out; out=$(run_sl "$FIXTURE_DOCS")
     assert_output_not_contains_f "$out" "◫" "pane is not in the default order" || return 1
     out=$(CS_STATUSLINE_SEGMENTS="session,pane,ctx" run_sl "$FIXTURE_DOCS")
-    assert_eq "my-session ◫ 7 > ◔ ctx 8%" "$out" "named: the pane number without its %, inside identity" || return 1
+    assert_eq "my-session ◫ 7 > ○ ctx 8%" "$out" "named: the pane number without its %, inside identity" || return 1
 }
 
 run_test test_limits_hidden_below_seventy
+run_test test_wk_icon_differs_from_the_half_pie
 run_test test_limits_one_hot_window_appears_alone
 run_test test_limits_hot_window_is_amber_ink_then_crit_capsule
 run_test test_limits_three_hot_show_top_two_descending

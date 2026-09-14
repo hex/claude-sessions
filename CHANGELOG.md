@@ -4,6 +4,11 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## Unreleased
+
+### Changed
+- The context gauge's icon is a pie that fills as context does: `○` below 13%, `◔` up to the warn threshold, `◑` through the amber band, `◕` at crit, `●` from 88%. The half and three-quarter steps sit on `CS_STATUSLINE_CTX_WARN` and `_CRIT`, so the shape changes exactly where the ink does. Agent rows in the subagent panel carry the same pie. The weekly rate-limit icon moves from the half circle to `◶` so a hot week beside a mid context no longer reads as two of one thing.
+
 ## 2026.9.14
 
 ### Features

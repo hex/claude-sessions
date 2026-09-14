@@ -8,7 +8,7 @@
 CS_STATUSLINE_LIB=1 . "$(dirname "$0")/cs-statusline" 2>/dev/null || exit 0
 
 # U+2937 arrow pointing rightwards then curving downwards: the row hangs off the
-# main thread. ICON_MODEL (✦), ICON_CTX (◔) and ICON_5H (◷) come from the source.
+# main thread. ICON_MODEL (✦), the ctx pies and _ctx_pie, and ICON_5H (◷) come from the source.
 ICON_ROW=$'\xe2\xa4\xb7 '
 
 _STDIN=""
@@ -263,7 +263,8 @@ render_rows() {
         fi
         if [ -n "$ctx" ]; then
             _thresh_color "$ctx" "$ctx_warn" "$ctx_crit" rowmeta
-            _paint "${ICON_CTX}ctx ${ctx}%" "$_COLOR"
+            _ctx_pie "$ctx" "$ctx_warn" "$ctx_crit"
+            _paint "${_PIE}ctx ${ctx}%" "$_COLOR"
             content="${content}  ${_PAINTED}"
         fi
         if [ -n "$_ELAPSED" ]; then

@@ -79,6 +79,21 @@ test_row_has_model_name_desc_ctx_elapsed() {
     assert_output_contains "$c" "2m14s" "134 seconds elapsed" || return 1
 }
 
+# Agent rows carry the same filling pie as the main bar's ctx capsule, so a
+# half pie means the same thing on every line: the amber band.
+test_row_ctx_pie_fills_with_band() {
+    export NO_COLOR=1
+    local fx out c
+    fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":94000}]}'
+    out=$(run_ssl "$fx")
+    c=$(row_content "$out" "t1")
+    assert_output_contains "$c" "◑ ctx 47%" "94000/200000 sits in the amber band, a half pie" || return 1
+    fx='{"columns":96,"tasks":[{"id":"t2","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":16000}]}'
+    out=$(run_ssl "$fx")
+    c=$(row_content "$out" "t2")
+    assert_output_contains "$c" "○ ctx 8%" "16000/200000 is below 13, an empty pie" || return 1
+}
+
 # A point release renders as its own version. A name that is merely the wrong
 # version reads as correct, which is worse than a raw id that looks wrong.
 test_point_releases_do_not_collapse_into_the_base_version() {
@@ -479,6 +494,7 @@ run_test test_empty_tasks_prints_nothing
 run_test test_malformed_stdin_exits_clean
 run_test test_disable_env_prints_nothing
 run_test test_row_has_model_name_desc_ctx_elapsed
+run_test test_row_ctx_pie_fills_with_band
 run_test test_point_releases_do_not_collapse_into_the_base_version
 run_test test_every_family_resolves_its_point_release
 run_test test_vertex_dates_tags_and_misplaced_dates

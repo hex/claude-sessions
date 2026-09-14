@@ -249,11 +249,15 @@ _SURFACE_RGB=""
 # Per-segment icons. Standard Unicode (Geometric Shapes + dingbats) that render
 # in any monospace font — not Nerd Font private-use glyphs — so the bar looks
 # right without a patched font. The session segment carries no icon.
-ICON_CTX=$'\xe2\x97\x94 '       # U+25D4 quadrant circle (gauge)
+ICON_CTX=$'\xe2\x97\x94 '       # U+25D4 quarter pie (gauge, the healthy band)
+ICON_CTX_EMPTY=$'\xe2\x97\x8b ' # U+25CB empty pie (a fresh context)
+ICON_CTX_HALF=$'\xe2\x97\x91 '  # U+25D1 half pie (the amber band)
+ICON_CTX_3Q=$'\xe2\x97\x95 '    # U+25D5 three-quarter pie (crit)
+ICON_CTX_FULL=$'\xe2\x97\x8f '  # U+25CF full pie (88 and up)
 ICON_MODEL=$'\xe2\x9c\xa6 '     # U+2726 four-pointed star
 ICON_GIT=$'\xe2\x8e\x87 '       # U+2387 branch
 ICON_5H=$'\xe2\x97\xb7 '        # U+25F7 clock
-ICON_WK=$'\xe2\x97\x91 '        # U+25D1 half circle
+ICON_WK=$'\xe2\x97\xb6 '        # U+25F6 lower-left quadrant (the week; ◑ is the ctx half pie)
 ICON_NOTES=$'\xe2\x96\xa4 '     # U+25A4 square with horizontal fill (notes queue)
 ICON_MAIL=$'\xe2\x9c\x89 '      # U+2709 envelope (unread cross-session mail)
 ICON_LOGO=$'\xe2\x9c\xb3'       # U+2733 eight-spoked asterisk (Claude mark)
@@ -1260,8 +1264,21 @@ _seg_pane() {
     _add "${ICON_PANE}${TMUX_PANE#%}" identity ink2 "" pad
 }
 
-# Two items in the ctx capsule: the label in secondary ink, the number in the
-# threshold colour. At crit the whole capsule inverts.
+# The ctx icon is a pie that fills as context does. Its quarter and
+# three-quarter steps sit at the warn and crit thresholds so the shape changes
+# exactly where the ink does; the empty and full ends sit at fixed 13 and 88.
+_ctx_pie() {  # pct warn crit -> _PIE
+    local v="$1" warn="$2" crit="$3"
+    if [ "$v" -ge 88 ]; then _PIE="$ICON_CTX_FULL"
+    elif [ "$v" -ge "$crit" ]; then _PIE="$ICON_CTX_3Q"
+    elif [ "$v" -ge "$warn" ]; then _PIE="$ICON_CTX_HALF"
+    elif [ "$v" -ge 13 ]; then _PIE="$ICON_CTX"
+    else _PIE="$ICON_CTX_EMPTY"
+    fi
+}
+
+# Two items in the ctx capsule: the pie and label in secondary ink, the number
+# in the threshold colour. At crit the whole capsule inverts.
 _seg_ctx() {
     local v="${SL_CTX%%.*}"
     [ -n "$v" ] || return 0
@@ -1270,7 +1287,8 @@ _seg_ctx() {
     _num_or "${CS_STATUSLINE_CTX_CRIT:-}" 65; crit="$_NUM"
     _thresh_color "$v" "$warn" "$crit"
     [ "$_COLOR" = "crit" ] && _invert ctx
-    _add "${ICON_CTX}ctx" ctx ink2 "" none
+    _ctx_pie "$v" "$warn" "$crit"
+    _add "${_PIE}ctx" ctx ink2 "" none
     _add "${v}%" ctx "$_COLOR" "$_HOT_WEIGHT" space
 }
 

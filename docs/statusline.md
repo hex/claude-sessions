@@ -3,10 +3,10 @@
 `cs-statusline` is the Claude Code status line shipped with cs. It reads the JSON Claude Code pipes to the registered `statusLine.command` on every render and prints exactly one line of rounded capsules on the terminal's own background.
 
 ```
-✳ claude-sessions  ·  ⎇ main↑1 +2!1  ·  ✦ Fable 5.1 medium  ◔ ctx 42% ◑ wk 84% · 5d16h
+✳ claude-sessions  ·  ⎇ main↑1 +2!1  ·  ✦ Fable 5.1 medium  ◑ ctx 42% ◶ wk 84% · 5d16h
 ```
 
-One capsule carries identity — the Claude mark, the session, the branch, the model — and one carries the context gauge. Rate-limit capsules appear only when a window is hot. Colour is state: bold amber ink on a number past its warn threshold, and the capsule inverts to red at crit, its text pulsing white/pink on the attention clock. The plain form (`NO_COLOR=1`) is `claude-sessions · ⎇ main↑1 +2!1 · ✦ Fable 5.1 medium > ◔ ctx 42% > ◑ wk 84% · 5d16h`.
+One capsule carries identity — the Claude mark, the session, the branch, the model — and one carries the context gauge. Rate-limit capsules appear only when a window is hot. Colour is state: bold amber ink on a number past its warn threshold, and the capsule inverts to red at crit, its text pulsing white/pink on the attention clock. The plain form (`NO_COLOR=1`) is `claude-sessions · ⎇ main↑1 +2!1 · ✦ Fable 5.1 medium > ◑ ctx 42% > ◶ wk 84% · 5d16h`.
 
 ## Segments
 
@@ -21,7 +21,7 @@ Default order: `logo,session,notes,mail,git,model,ctx,limits`. One capsule holds
 | `pane` | identity | `◫ 7` (the `%` dropped), secondary ink; only when named | — | not named, or outside a real tmux | `TMUX_PANE` from inherited environment (no fork); requires `TMUX` too, and that this process is genuinely inside that tmux server, so an inherited pane id never renders |
 | `git` | identity | branch with the arrows and `+N!N` marks, bold ink | — | no `.git` | One `git status --porcelain=v1 -b` call |
 | `model` | identity | display name in bold ink, effort in secondary ink regular | — | no model on stdin | stdin `model.display_name`, `effort.level` |
-| `ctx` | ctx | `◔ ctx N%`, secondary ink | amber ink on the number at 40; crit inversion at 65 (`CS_STATUSLINE_CTX_WARN`/`_CRIT`) | no `context_window` on stdin | stdin `context_window.used_percentage` |
+| `ctx` | ctx | `◔ ctx N%`, secondary ink; the pie fills with the band: `○` below 13, `◔` to warn, `◑` through amber, `◕` at crit, `●` from 88 | amber ink on the number at 40; crit inversion at 65 (`CS_STATUSLINE_CTX_WARN`/`_CRIT`; the half and three-quarter steps follow them) | no `context_window` on stdin | stdin `context_window.used_percentage` |
 | `limits` | limits | hidden | one capsule per hot window, the two hottest at most: `5h N% · 2h14m`, `wk N% · 5d16h`, `fable N% · 18h`; amber ink at 70, crit inversion at 90 | every window below 70 | stdin `rate_limits.*.used_percentage`, `rate_limits.five_hour.resets_at`, `rate_limits.seven_day.resets_at`, plus the usage cache when the model is Fable |
 | `fable` | limits | accepted as a name: the Fable window alone when `limits` is not named; a no-op beside `limits` | — | below 70, like every window | `GET /api/oauth/usage`, cached machine-globally (see [Fable usage](#fable-usage)) |
 | `cost` | cost | `$N.NN`, secondary ink, its own capsule after limits; only when named | — | not named, or no cost on stdin | stdin `cost.total_cost_usd` |
@@ -32,7 +32,7 @@ The limits group folds the three windows into one rule. The Fable window is mode
 
 The two files the render writes, `.cs/local/context-pct` and `.cs/local/limits`, are produced in `_parse_stdin` before any segment runs and stay untouched by the gating above. Hiding a capsule never hides a heartbeat.
 
-Segment icons are standard Unicode glyphs (gauge `◔`, star `✦`, branch `⎇`, clock `◷`, half-circle `◑`, open star `✧`, pane `◫`, envelope `✉`) from the Geometric Shapes and dingbat ranges, so they render in any monospace font without a patched Nerd Font. The `session` segment carries no icon — the capsule and its position are the identity. The capsule caps (U+E0B6, U+E0B4) are the one private-use exception; `CS_STATUSLINE_CAPS=0` removes them.
+Segment icons are standard Unicode glyphs (the context pie `○ ◔ ◑ ◕ ●`, star `✦`, branch `⎇`, clock `◷`, week `◶`, open star `✧`, pane `◫`, envelope `✉`) from the Geometric Shapes and dingbat ranges, so they render in any monospace font without a patched Nerd Font. The `session` segment carries no icon — the capsule and its position are the identity. The capsule caps (U+E0B6, U+E0B4) are the one private-use exception; `CS_STATUSLINE_CAPS=0` removes them.
 
 ## Data sources and performance
 
@@ -170,8 +170,8 @@ Inside tmux, Claude Code mutes its own branding and any truecolor status line to
 `cs-subagent-statusline` styles Claude Code's agent panel — the task tree under the prompt while subagents run — the way `cs-statusline` styles the bar. Claude Code pipes `{columns, tasks[]}` to the registered `subagentStatusLine.command` on every panel repaint; the script prints one `{"id","content"}` JSON line per row it overrides. An omitted `id` keeps that row's default rendering, which is why printing nothing is always safe.
 
 ```
-⤷ ✦ Sonnet 5  bundle-recon · Spelunk CC bundle  ◔ ctx 12%  ◷ 2m14s
-⤷ ✦ Opus 4.8  code-reviewer · Review the diff  ◔ ctx 61%  ◷ 0m18s
+⤷ ✦ Sonnet 5  bundle-recon · Spelunk CC bundle  ○ ctx 12%  ◷ 2m14s
+⤷ ✦ Opus 4.8  code-reviewer · Review the diff  ◑ ctx 61%  ◷ 0m18s
 ```
 
 Left to right: a descent glyph marking the row as spawned work, the model capsule in the bar's periwinkle, the agent's name (falling back to its `type`), the description, the agent's **own** context-window usage, and time since it started. Model, context, and elapsed are the three columns Claude Code's default row (`name · description · token count`) lacks, and they are what make agents at different tiers distinguishable — a recon agent at ctx 12% and a synthesizer dying at ctx 84% otherwise look identical. The gauge escalates amber/red on the same `CS_STATUSLINE_CTX_WARN`/`CS_STATUSLINE_CTX_CRIT` thresholds the bar uses, so a row and the bar always agree on where amber and red start.
