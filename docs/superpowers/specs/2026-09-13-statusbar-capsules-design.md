@@ -115,8 +115,7 @@ untouched. Hiding a capsule never hides a heartbeat.
 | `ink2` | secondary text, dots, effort, gauge labels | a 55% shade of the surface when the surface is light (luminance ≥ 1530000), else each channel lifted by 55% toward white — `227;221;204` → `124;121;112`, the light taupe → `197;194;189`, the dark taupe → `203;199;195` | 241/250 | 37/97 |
 | `brand` | the mark | unchanged `217;119;87` | 173 | 33 |
 | `brandshade` | the pulse's dim phase | unchanged `184;101;74` | 167 | 33 |
-| `slate` | the branch item | light: `31;41;55`; dark: `229;231;235` | 238/253 | 30/97 |
-| `periwinkle` | the model item | light: `76;29;149`; dark: `196;181;253` | 55/147 | 35/95 |
+| `periwinkle` | the agent rows' model name | light: `76;29;149`; dark: `196;181;253` | 55/147 | 35/95 |
 | `amberink` | hot numbers, notes and mail counts | light: `146;64;14`; dark: `253;230;138` | 94/221 | 33 |
 | `crit` | inverted capsule fill | light: `215;0;21`; dark: `255;69;58` | 160/203 | 31 |
 | `critink` | inverted capsule text | light: `255;255;255`; dark: `37;0;0` | 231/232 | 97/30 |

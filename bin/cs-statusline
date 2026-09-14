@@ -449,12 +449,8 @@ _sgr() {
                 orange) rgb="217;119;87" ;;
                 pink)   rgb="196;102;134" ;;
                 cyan)   rgb="8;145;178" ;;
-                # The branch item's ink: a cool slate, distinct from the warm
-                # neutral the untouched tokens fall back to.
-                slate)
-                    [ "$SL_THEME" = "dark" ] && rgb="229;231;235" || rgb="31;41;55" ;;
-                # The model name's ink: a violet distinct from the session
-                # palette and from slate/amber.
+                # The agent rows' model name: a violet distinct from the
+                # session palette and from amber.
                 periwinkle)
                     [ "$SL_THEME" = "dark" ] && rgb="196;181;253" || rgb="76;29;149" ;;
                 rowname)
@@ -541,7 +537,6 @@ _sgr() {
                 orange) idx=166 ;;
                 pink)   idx=162 ;;
                 cyan)   idx=30 ;;
-                slate)      [ "$SL_THEME" = "dark" ] && idx=253 || idx=238 ;;
                 periwinkle) [ "$SL_THEME" = "dark" ] && idx=147 || idx=55 ;;
                 rowname) [ "$SL_THEME" = "dark" ] && idx=231 || idx=235 ;;
                 rowmeta) [ "$SL_THEME" = "dark" ] && idx=248 || idx=244 ;;
@@ -583,7 +578,6 @@ _sgr() {
                 orange) base=33 ;;
                 pink)   base=95 ;;
                 cyan)   base=36 ;;
-                slate)      [ "$SL_THEME" = "dark" ] && base=97 || base=30 ;;
                 periwinkle) [ "$SL_THEME" = "dark" ] && base=95 || base=35 ;;
                 rowname) [ "$SL_THEME" = "dark" ] && base=97 || base=30 ;;
                 rowmeta) base=90 ;;
@@ -1199,14 +1193,7 @@ _seg_session() {
         local dir="${SL_DIR:-$PWD}"
         name="${dir##*/}"
     fi
-    local ink=ink
-    if [ -n "${CLAUDE_SESSION_NAME:-}" ]; then
-        _read_state_key "$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/local/state" claude_session_color
-        case "$_STATE_VALUE" in
-            red|blue|green|yellow|purple|orange|pink|cyan) ink="$_STATE_VALUE" ;;
-        esac
-    fi
-    _add "${name}" identity "$ink" bold space
+    _add "${name}" identity ink bold space
 }
 
 # Count of queued tasks for the current session (one file per task in
@@ -1272,7 +1259,7 @@ _seg_ctx() {
 
 _seg_model() {
     [ -n "$SL_MODEL" ] || return 0
-    _add "${ICON_MODEL}${SL_MODEL}" identity periwinkle bold
+    _add "${ICON_MODEL}${SL_MODEL}" identity ink bold
     [ -n "$SL_EFFORT" ] && _add "$SL_EFFORT" identity ink2 "" space
     return 0
 }
@@ -1281,7 +1268,7 @@ _seg_git() {
     _git_text "$SL_DIR"
     local t="$_GIT_TEXT"
     [ -n "$t" ] || return 0
-    _add "${ICON_GIT}${t}" identity slate bold
+    _add "${ICON_GIT}${t}" identity ink bold
 }
 
 # One rate-limit capsule: label in secondary ink, the number in the threshold

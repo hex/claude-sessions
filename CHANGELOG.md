@@ -17,7 +17,7 @@ All notable changes to cs are documented here. Release notes are also available 
 - `/merge` is retired; `/finish` replaces it. `cs <base> -finish <feature>` and the TUI's Enter on the readiness screen now arm `/finish`, which keeps the worktree. The TUI's ON FINISH plan describes the new shape.
 - The status bar is one line of rounded capsules on the terminal's own background. Identity — the Claude mark, session, branch, model — shares one neutral capsule; the context gauge has its own; rate-limit capsules appear only when a window reaches 70%, the tightest first and at most two, with Fable's model-scoped window folded into the same rule. Colour is state: amber ink on a number past its warn threshold, a red capsule at crit. The default `CS_STATUSLINE_SEGMENTS` is `logo,session,notes,mail,git,model,ctx,limits`; `pane` (now `◫ 7`, without the `%`) and `fable` still render when named.
 - The agent-panel rows' hot colours move with the bar: amber ink `146;64;14` (light) / `253;230;138` (dark), crit `215;0;21` / `255;69;58`.
-- The session name paints in its own colour when the session has one; the branch item is slate, the model item periwinkle, and amber reads deeper on both themes. Capsules no longer carry inner padding: a cap opens or closes directly on the item beside it.
+- Amber reads deeper on both themes. Capsules no longer carry inner padding: a cap opens or closes directly on the item beside it, and every capsule sits one cell from the next.
 
 ### Removed
 - `CS_STATUSLINE_CTX_NOTICE`, with the yellow notice band it configured.
