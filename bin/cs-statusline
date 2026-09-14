@@ -515,6 +515,17 @@ _sgr() {
                 critink) rgb="255;255;255" ;;
                 # The crit pulse's dim phase: white warmed toward the fill.
                 critshade) rgb="255;205;200" ;;
+                # The effort word wears Claude Code's own /effort picker
+                # colours (pixel-sampled from the light picker); on dark they
+                # are lifted a third of the way to white so they keep reading
+                # on the dark surface. max is a gradient across its letters.
+                effort-low)    [ "$SL_THEME" = "dark" ] && rgb="187;159;109" || rgb="150;108;30" ;;
+                effort-medium) [ "$SL_THEME" = "dark" ] && rgb="118;169;126" || rgb="44;122;57" ;;
+                effort-high)   [ "$SL_THEME" = "dark" ] && rgb="146;158;250" || rgb="87;105;247" ;;
+                effort-xhigh)  [ "$SL_THEME" = "dark" ] && rgb="177;89;255" || rgb="135;0;255" ;;
+                effort-max-1)  [ "$SL_THEME" = "dark" ] && rgb="174;200;232" || rgb="130;170;220" ;;
+                effort-max-2)  [ "$SL_THEME" = "dark" ] && rgb="190;174;219" || rgb="155;130;200" ;;
+                effort-max-3)  [ "$SL_THEME" = "dark" ] && rgb="219;174;206" || rgb="200;130;179" ;;
                 brand)  rgb="217;119;87" ;;   # Claude coral (#D97757)
                 brandshade)
                     # The mark's dim pulse phase: a coral a shade darker than
@@ -564,6 +575,13 @@ _sgr() {
                 crit)    [ "$SL_THEME" = "dark" ] && idx=203 || idx=160 ;;
                 critink) idx=231 ;;
                 critshade) idx=224 ;;
+                effort-low)    [ "$SL_THEME" = "dark" ] && idx=179 || idx=136 ;;
+                effort-medium) [ "$SL_THEME" = "dark" ] && idx=71  || idx=28 ;;
+                effort-high)   [ "$SL_THEME" = "dark" ] && idx=105 || idx=63 ;;
+                effort-xhigh)  [ "$SL_THEME" = "dark" ] && idx=135 || idx=93 ;;
+                effort-max-1)  [ "$SL_THEME" = "dark" ] && idx=153 || idx=110 ;;
+                effort-max-2)  [ "$SL_THEME" = "dark" ] && idx=183 || idx=140 ;;
+                effort-max-3)  [ "$SL_THEME" = "dark" ] && idx=218 || idx=175 ;;
                 brand)  idx=173 ;;
                 brandshade) idx=167 ;;
                 white)
@@ -606,6 +624,13 @@ _sgr() {
                 crit)    base=31 ;;
                 critink) base=97 ;;
                 critshade) base=97 ;;
+                effort-low)    base=33 ;;
+                effort-medium) base=32 ;;
+                effort-high)   base=34 ;;
+                effort-xhigh)  base=35 ;;
+                effort-max-1)  base=36 ;;
+                effort-max-2)  base=35 ;;
+                effort-max-3)  base=95 ;;
                 white)  base=97 ;;
                 brand)  base=33 ;;
                 brandshade) base=33 ;;
@@ -1292,10 +1317,23 @@ _seg_ctx() {
     _add "${v}%" ctx "$_COLOR" "$_HOT_WEIGHT" space
 }
 
+# The effort word after the model wears Claude Code's own /effort colour for
+# that level, bold; max is painted letter by letter through its gradient. A
+# level the picker does not have stays secondary ink.
 _seg_model() {
     [ -n "$SL_MODEL" ] || return 0
     _add "${ICON_MODEL}${SL_MODEL}" identity ink bold
-    [ -n "$SL_EFFORT" ] && _add "$SL_EFFORT" identity ink2 "" space
+    [ -n "$SL_EFFORT" ] || return 0
+    case "$SL_EFFORT" in
+        low|medium|high|xhigh)
+            _add "$SL_EFFORT" identity "effort-$SL_EFFORT" bold space ;;
+        max)
+            _add "m" identity effort-max-1 bold space
+            _add "a" identity effort-max-2 bold none
+            _add "x" identity effort-max-3 bold none ;;
+        *)
+            _add "$SL_EFFORT" identity ink2 "" space ;;
+    esac
     return 0
 }
 

@@ -20,7 +20,7 @@ Default order: `logo,session,notes,mail,git,model,ctx,limits`. One capsule holds
 | `mail` | identity | `✉ N`, amber ink, regular, after notes | — | nothing unread | Count of `.cs/local/mail/new/*.json` documents (`cs -msg` moves what it prints to `cur/`); only `.json` files count, so a stray `.DS_Store` or staging leftover never shows a phantom unread |
 | `pane` | identity | `◫ 7` (the `%` dropped), secondary ink; only when named | — | not named, or outside a real tmux | `TMUX_PANE` from inherited environment (no fork); requires `TMUX` too, and that this process is genuinely inside that tmux server, so an inherited pane id never renders |
 | `git` | identity | branch with the arrows and `+N!N` marks, bold ink | — | no `.git` | One `git status --porcelain=v1 -b` call |
-| `model` | identity | display name in bold ink, effort in secondary ink regular | — | no model on stdin | stdin `model.display_name`, `effort.level` |
+| `model` | identity | display name in bold ink; the effort word bold in Claude Code's own `/effort` colour for its level (low gold, medium green, high blue, xhigh violet, max a blue-to-pink gradient across its letters) | — | no model on stdin | stdin `model.display_name`, `effort.level` |
 | `ctx` | ctx | `◔ ctx N%`, secondary ink; the pie fills with the band: `○` below 13, `◔` to warn, `◑` through amber, `◕` at crit, `●` from 88 | amber ink on the number at 40; crit inversion at 65 (`CS_STATUSLINE_CTX_WARN`/`_CRIT`; the half and three-quarter steps follow them) | no `context_window` on stdin | stdin `context_window.used_percentage` |
 | `limits` | limits | `◷ 5h N%` | the quota capsule `5h N% ⋮ wk N%` (5h always, wk from 50, joined by a vertical ellipsis) and a separate `fable N%` capsule from 50 on a Fable session: `5h N% · 2h14m`, `wk N% · 5d16h`, `fable N% · 18h`; neutral below 70, amber ink at 70, crit inversion at 90; the countdown joins 5h at 70 and the coarse windows at 80 | wk and fable below 50 | stdin `rate_limits.*.used_percentage`, `rate_limits.five_hour.resets_at`, `rate_limits.seven_day.resets_at`, plus the usage cache when the model is Fable |
 | `fable` | limits | accepted as a name: the Fable window alone when `limits` is not named; a no-op beside `limits` | — | below 70, like every window | `GET /api/oauth/usage`, cached machine-globally (see [Fable usage](#fable-usage)) |
@@ -146,13 +146,14 @@ Color depth is detected per render, in priority order: `FORCE_COLOR=0`, `NO_COLO
 |---|---|---|---|---|
 | `surface` | every capsule fill | `CS_TERM_BG_RGB` shaded 10% away from itself (`_bg_shade`), taupe fallback when unmeasured | 254/237 | 90 |
 | `ink` | primary text | a 35% shade of the surface on a light surface, `white` on a dark one | 236/255 | 97 |
-| `ink2` | secondary text, dots, effort, gauge labels | a 55% shade of the surface (lifted toward white on a dark surface), like `ink` | 241/250 | 37/97 |
+| `ink2` | secondary text, dots, gauge labels | a 55% shade of the surface (lifted toward white on a dark surface), like `ink` | 241/250 | 37/97 |
 | `brand` | the mark | `217;119;87` | 173 | 33 |
 | `brandshade` | the pulse's dim phase | `184;101;74` | 167 | 33 |
 | `periwinkle` | the subagent rows' model capsule | light: `76;29;149`; dark: `196;181;253` | 55/147 | 35/95 |
 | `amber` | hot numbers, notes and mail counts | light: `180;83;9`; dark: `253;230;138` — light/dark by the measured `CS_TERM_BG_RGB`, by theme only when unmeasured | 130/221 | 33/93 |
 | `crit` | inverted capsule fill | light: `215;0;21`; dark: `255;69;58` | 160/203 | 31 |
 | `critink` | inverted capsule text | `255;255;255` on both themes | 231 | 97 |
+| `effort-*` | the effort word | Claude Code's /effort picker colours, pixel-sampled; lifted a third toward white on dark; `effort-max-1..3` are the gradient stops | 136/179, 28/71, 63/105, 93/135, 110·140·175 / 153·183·218 | 33, 32, 34, 35, 36·35·95 |
 | `critshade` | the crit pulse's dim phase | `255;205;200` | 224 | 97 |
 
 Every capsule fill is `surface`, a shade of the terminal's own background so the bar harmonizes with the terminal instead of sitting on a fixed grey; darker on a light terminal, lighter on a dark one. On a cream terminal (`253;246;227`) the derived surface comes out `227;221;204`, a warm off-white a few shades darker — so the values above are the fallback for an unmeasured background and a reference for what the derived shade lands near, not fixed paints.

@@ -3352,14 +3352,34 @@ test_crit_text_pulses_white_and_critshade() {
     assert_output_not_contains_f "$odd" "38;2;255;255;255" "no white left on the odd second" || return 1
 }
 
-test_effort_is_secondary_ink_after_the_model() {
+# The effort word takes Claude Code's own /effort colours (pixel-sampled from
+# its light picker, 2026-09-14): low gold, medium green, high blue, xhigh
+# violet, and max a three-stop gradient across its letters.
+test_effort_takes_claude_codes_effort_colours() {
     export COLORTERM=truecolor
     export CS_TERM_BG_RGB="253;246;227"
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"model":{"display_name":"Opus"},"effort":{"level":"high"}}'
     local out; out=$(run_sl "$json")
     assert_output_contains_f "$out" "38;2;79;77;71;1m✦ Opus" "model name bold ink" || return 1
-    assert_output_contains_f "$out" "✦ Opus${ESC_}[48;2;227;221;204m ${ESC_}[48;2;227;221;204;38;2;124;121;112;22mhigh" \
-        "effort one space after, secondary, regular" || return 1
+    assert_output_contains_f "$out" "✦ Opus${ESC_}[48;2;227;221;204m ${ESC_}[48;2;227;221;204;38;2;87;105;247;1mhigh" \
+        "high: one space after the model, Claude Code's blue, bold" || return 1
+    for pair in "low:150;108;30" "medium:44;122;57" "xhigh:135;0;255"; do
+        json="{\"session_name\":\"s\",\"workspace\":{\"current_dir\":\"/none\"},\"model\":{\"display_name\":\"Opus\"},\"effort\":{\"level\":\"${pair%%:*}\"}}"
+        out=$(run_sl "$json")
+        assert_output_contains_f "$out" "38;2;${pair#*:};1m${pair%%:*}" "${pair%%:*} takes its sampled colour" || return 1
+    done
+}
+
+test_effort_max_is_a_gradient_across_its_letters() {
+    export COLORTERM=truecolor
+    export CS_TERM_BG_RGB="253;246;227"
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"model":{"display_name":"Opus"},"effort":{"level":"max"}}'
+    local out; out=$(run_sl "$json")
+    assert_output_contains_f "$out" "38;2;130;170;220;1mm${ESC_}[48;2;227;221;204;38;2;155;130;200;1ma${ESC_}[48;2;227;221;204;38;2;200;130;179;1mx" \
+        "m blue, a lavender, x pink, no joiner between the letters" || return 1
+    export NO_COLOR=1
+    out=$(run_sl "$json")
+    assert_output_contains "$out" "✦ Opus max" "plain mode keeps the word whole" || return 1
 }
 
 test_notes_and_mail_are_amber_ink_after_the_session() {
@@ -3393,7 +3413,8 @@ run_test test_ctx_crit_inverts_only_its_capsule
 run_test test_logo_is_brand_ink_inside_identity
 run_test test_logo_pulse_alternates_brand_and_brandshade
 run_test test_crit_text_pulses_white_and_critshade
-run_test test_effort_is_secondary_ink_after_the_model
+run_test test_effort_takes_claude_codes_effort_colours
+run_test test_effort_max_is_a_gradient_across_its_letters
 run_test test_notes_and_mail_are_amber_ink_after_the_session
 
 # ============================================================================
