@@ -1446,9 +1446,9 @@ _feature_readiness() {  # base_name task
     ahead=$(git -C "$base_dir" rev-list --count "HEAD..$branch" 2>/dev/null || echo 0)
 
     # "Already merged" needs the tip STRICTLY behind base HEAD. A fresh
-    # worktree's branch sits AT base HEAD, where is-ancestor is also true, and
-    # merge_worktree_session reads is-ancestor as "already merged; cleaning up"
-    # and then removes the worktree. Same guard as _doctor_check_worktrees.
+    # worktree's branch sits AT base HEAD, where is-ancestor is also true, so
+    # a bare is-ancestor would report untouched work as landed. Same guard as
+    # _doctor_check_worktrees.
     if git -C "$base_dir" merge-base --is-ancestor "$branch" HEAD 2>/dev/null \
         && [ "$(git -C "$base_dir" rev-parse "$branch" 2>/dev/null)" \
              != "$(git -C "$base_dir" rev-parse HEAD 2>/dev/null)" ]; then
@@ -1488,7 +1488,7 @@ _feature_readiness() {  # base_name task
         break
     done
 
-    # State is the first blocker merge_worktree_session would hit, in its order.
+    # State is the first blocker retire_feature_worktree would hit, in its order.
     local state="ready"
     if [ "$lock" != "none" ]; then
         state="locked"
@@ -1739,15 +1739,25 @@ $wt_untracked"
     # aside, remove, then fuse from the copy, so a removal that fails (a
     # locked worktree, say) leaves the base's records untouched and puts the
     # worktree's own back, and the retry fuses exactly once.
+    # The staging directory sits beside the worktree, on its filesystem, so
+    # both moves are renames: nothing is half-copied on a failure.
     local mode aside=""
     mode=$(_read_local_state "$wt_dir/.cs/local/state" cs_mode)
     if [ "$mode" = "ignored" ]; then
-        aside=$(mktemp -d "${TMPDIR:-/tmp}/cs-retire.XXXXXX")
-        mv "$wt_dir/.cs" "$aside/cs" || error "Could not set aside $wt_dir/.cs for the record fuse"
+        aside="$SESSIONS_ROOT/.retire-$wt_name.$$"
+        mkdir "$aside" 2>/dev/null || error "Could not create $aside to set aside $wt_dir/.cs for the record fuse"
+        mv "$wt_dir/.cs" "$aside/cs" || { rmdir "$aside" 2>/dev/null; error "Could not set aside $wt_dir/.cs for the record fuse"; }
     fi
     local remove_err
     if ! remove_err=$(git -C "$base_dir" worktree remove --force "$wt_dir" 2>&1); then
-        [ -n "$aside" ] && mv "$aside/cs" "$wt_dir/.cs" 2>/dev/null && rmdir "$aside" 2>/dev/null
+        if [ -n "$aside" ]; then
+            if mv "$aside/cs" "$wt_dir/.cs"; then
+                rmdir "$aside" 2>/dev/null
+            else
+                error "git worktree remove failed for $wt_dir, and its session records could not be put back: they are at $aside/cs (move that directory to $wt_dir/.cs by hand)
+$remove_err"
+            fi
+        fi
         error "git worktree remove failed for $wt_dir; nothing was fused or deleted
 $remove_err"
     fi
