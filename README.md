@@ -1,4 +1,4 @@
-# cs - Claude Code Session Manager
+<img src="https://raw.githubusercontent.com/hex/claude-sessions/main/assets/banner.svg" width="100%" alt="cs: a session manager for Claude Code">
 
 [![Test](https://github.com/hex/claude-sessions/actions/workflows/test.yml/badge.svg)](https://github.com/hex/claude-sessions/actions/workflows/test.yml)
 
