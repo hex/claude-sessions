@@ -762,7 +762,7 @@ test_ctx_amber_band_is_amber() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":42}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains_f "$out" "38;2;146;64;14;22m42%" "ctx 42% should use the amber ink" || return 1
+    assert_output_contains_f "$out" "38;2;146;64;14;1m42%" "ctx 42% should use the amber ink" || return 1
     assert_output_not_contains "$out" "48;2;255;183;77" "ctx 42% amber must never be a fill" || return 1
     assert_output_not_contains "$out" "48;2;215;0;21" "ctx 42% must not use the crit fill" || return 1
 }
@@ -784,7 +784,7 @@ test_ctx_warn_band_still_amber() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":50}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains_f "$out" "38;2;146;64;14;22m50%" "ctx 50% should still use the amber ink" || return 1
+    assert_output_contains_f "$out" "38;2;146;64;14;1m50%" "ctx 50% should still use the amber ink" || return 1
     assert_output_not_contains "$out" "48;2;215;0;21" "ctx 50% must not use the crit fill" || return 1
 }
 
@@ -793,7 +793,7 @@ test_ctx_below_crit_is_amber_not_red() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":64}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains_f "$out" "38;2;146;64;14;22m64%" "ctx 64% should still be amber" || return 1
+    assert_output_contains_f "$out" "38;2;146;64;14;1m64%" "ctx 64% should still be amber" || return 1
     assert_output_not_contains "$out" "48;2;215;0;21" "ctx 64% must not use the crit fill" || return 1
 }
 
@@ -803,7 +803,7 @@ test_ctx_warn_threshold_is_configurable() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":25}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains_f "$out" "38;2;146;64;14;22m25%" "ctx 25% should be amber when warn is 20" || return 1
+    assert_output_contains_f "$out" "38;2;146;64;14;1m25%" "ctx 25% should be amber when warn is 20" || return 1
 }
 
 # The amber band's lower edge is inclusive, and 40 is the only reading that
@@ -815,7 +815,7 @@ test_ctx_warn_edge_is_amber_at_the_threshold() {
     out=$(run_sl "$json")
     local pill
     pill=$(ctx_pill "$out" 40)
-    assert_output_contains_f "$pill" "38;2;146;64;14;22m" "ctx 40% is inside the amber band" || return 1
+    assert_output_contains_f "$pill" "38;2;146;64;14;1m" "ctx 40% is inside the amber band" || return 1
     assert_output_not_contains_f "$out" "48;2;215;0;21" "ctx 40% must not reach the crit fill" || return 1
 }
 
@@ -834,7 +834,7 @@ test_ctx_threshold_non_numeric_falls_back_to_default() {
     local out err
     out=$(run_sl "$json")
     err=$(run_sl_stderr "$json")
-    assert_output_contains_f "$out" "38;2;146;64;14;22m42%" "a word override keeps the default 40 amber band" || return 1
+    assert_output_contains_f "$out" "38;2;146;64;14;1m42%" "a word override keeps the default 40 amber band" || return 1
     assert_eq "" "$err" "a word override must not reach the shell's integer comparison" || return 1
 }
 
@@ -846,7 +846,7 @@ test_ctx_threshold_out_of_range_falls_back_to_default() {
     local out err
     out=$(run_sl "$json")
     err=$(run_sl_stderr "$json")
-    assert_output_contains_f "$out" "38;2;146;64;14;22m42%" "an oversized override keeps the default 40 amber band" || return 1
+    assert_output_contains_f "$out" "38;2;146;64;14;1m42%" "an oversized override keeps the default 40 amber band" || return 1
     assert_eq "" "$err" "an oversized override must not error inside \`[\`" || return 1
 }
 
@@ -858,7 +858,7 @@ test_ctx_threshold_above_100_disables_its_band() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":100}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains_f "$out" "38;2;146;64;14;22m100%" "ctx 100% stays amber when crit is out of reach" || return 1
+    assert_output_contains_f "$out" "38;2;146;64;14;1m100%" "ctx 100% stays amber when crit is out of reach" || return 1
     assert_output_not_contains "$out" "48;2;215;0;21" "a crit of 101 must switch the crit fill off, not fall back to 65" || return 1
 }
 
@@ -905,7 +905,7 @@ test_ctx_amber_is_ink_not_dark_fill_text() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":55}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains_f "$out" "38;2;146;64;14;22m55%" "warn readings should be amber ink, not a fill" || return 1
+    assert_output_contains_f "$out" "38;2;146;64;14;1m55%" "warn readings should be amber ink, not a fill" || return 1
     assert_output_not_contains "$out" "48;2;255;183;77" "amber must never be a fill" || return 1
 }
 
@@ -3233,7 +3233,7 @@ test_ctx_amber_is_ink_on_the_surface() {
     export CS_TERM_BG_RGB="253;246;227"
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":42}}'
     local out; out=$(run_sl "$json")
-    assert_output_contains_f "$out" "48;2;227;221;204;38;2;146;64;14;22m42%" "the number is amber ink" || return 1
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;146;64;14;1m42%" "the number is amber ink" || return 1
     assert_output_not_contains_f "$out" "48;2;255;183;77" "no amber fill anywhere" || return 1
     assert_output_not_contains_f "$out" "48;2;146;64;14" "amber never becomes a fill" || return 1
     assert_output_contains_f "$out" "38;2;124;121;112;22m◔ ctx" "the label stays secondary ink" || return 1
@@ -3340,7 +3340,7 @@ test_limits_hot_window_is_amber_ink_then_crit_capsule() {
     export CS_TERM_BG_RGB="253;246;227"
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":75},"seven_day":{"used_percentage":12}}}'
     local out; out=$(run_sl "$json")
-    assert_output_contains_f "$out" "48;2;227;221;204;38;2;146;64;14;22m75%" "5h 75 is amber ink on the surface" || return 1
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;146;64;14;1m75%" "5h 75 is amber ink on the surface" || return 1
     json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":91},"seven_day":{"used_percentage":12}}}'
     out=$(run_sl "$json")
     assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◷ 5h" "5h 91 inverts its capsule" || return 1

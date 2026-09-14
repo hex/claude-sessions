@@ -6,7 +6,7 @@
 ✳ claude-sessions  ·  ⎇ main↑1 +2!1  ·  ✦ Fable 5.1 medium  ◔ ctx 42% ◑ wk 84% · 5d16h
 ```
 
-One capsule carries identity — the Claude mark, the session, the branch, the model — and one carries the context gauge. Rate-limit capsules appear only when a window is hot. Colour is state: amber ink on a number past its warn threshold, and the capsule inverts to red at crit. The plain form (`NO_COLOR=1`) is `claude-sessions · ⎇ main↑1 +2!1 · ✦ Fable 5.1 medium > ◔ ctx 42% > ◑ wk 84% · 5d16h`.
+One capsule carries identity — the Claude mark, the session, the branch, the model — and one carries the context gauge. Rate-limit capsules appear only when a window is hot. Colour is state: bold amber ink on a number past its warn threshold, and the capsule inverts to red with white text at crit. The plain form (`NO_COLOR=1`) is `claude-sessions · ⎇ main↑1 +2!1 · ✦ Fable 5.1 medium > ◔ ctx 42% > ◑ wk 84% · 5d16h`.
 
 ## Segments
 

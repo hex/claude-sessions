@@ -240,7 +240,7 @@ LEVEL="basic"
 
 # Scratch globals used in place of command substitution (keeps the per-render
 # hot path fork-free; this script runs on every assistant message).
-_SGR=""; _COLOR=""; _RGB=""
+_SGR=""; _COLOR=""; _HOT_WEIGHT=""; _RGB=""
 _WIDTH=""; _R=""; _G=""; _B=""; _LUM=""
 # The gauge surface is a shade of the terminal background — the same for every
 # gauge — so it is resolved once per render (process) and cached here.
@@ -649,10 +649,11 @@ _num_or() {  # value, default -> _NUM (the hook's namesake prints instead)
 # renderer to invert the whole capsule.
 _thresh_color() {
     local v="$1" warn="$2" crit="$3" healthy="${4:-ink2}"
+    _HOT_WEIGHT=""
     if [ "$v" -ge "$crit" ]; then
         _COLOR=crit
     elif [ "$v" -ge "$warn" ]; then
-        _COLOR=amber
+        _COLOR=amber; _HOT_WEIGHT=bold
     else
         _COLOR="$healthy"
     fi
@@ -1264,7 +1265,7 @@ _seg_ctx() {
     _thresh_color "$v" "$warn" "$crit"
     [ "$_COLOR" = "crit" ] && _invert ctx
     _add "${ICON_CTX}ctx" ctx ink2 "" none
-    _add "${v}%" ctx "$_COLOR" "" space
+    _add "${v}%" ctx "$_COLOR" "$_HOT_WEIGHT" space
 }
 
 _seg_model() {
@@ -1295,7 +1296,7 @@ _limits_render() {
         [ -n "$_REST" ] && label="$label · $_REST"
     fi
     _add "${icon}${name}" "lim-$name" ink2 "" none
-    _add "$label" "lim-$name" "$_COLOR" "" space
+    _add "$label" "lim-$name" "$_COLOR" "$_HOT_WEIGHT" space
 }
 
 # Read the Fable window into the candidate list. Model-scoped, so it is only
