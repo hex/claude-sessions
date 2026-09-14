@@ -4,8 +4,6 @@
 
 A session manager for [Claude Code](https://github.com/anthropics/claude-code) that creates isolated workspaces with automatic documentation.
 
-![cs session demo](assets/screenshot.png)
-
 ## Why cs?
 
 Claude Code doesn't require a project. You can spin up an instance to debug an API, troubleshoot home automation, research a hardware problem, or explore any idea that comes to mind.
