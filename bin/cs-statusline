@@ -1311,7 +1311,7 @@ _seg_git() {
 # appended (5h at 70, the reveal; the seven-day windows at 80: the coarse
 # windows only make time-to-reset actionable near exhaustion). $6 is the
 # capsule the window lands in and $7 the join before its label: 5h and wk
-# share the quota capsule, joined by a bar; fable has its own. A crit window
+# share the quota capsule, joined by a vertical ellipsis (U+22EE, text height); fable has its own. A crit window
 # inverts its whole capsule, so one hot window reddens the pair: throttling is
 # near for the account, whichever window tripped.
 _limits_render() {
@@ -1516,7 +1516,7 @@ _render() {
                 if [ -z "$first" ]; then
                     case "${_SEG_JOIN[i]}" in
                         dot)       out+=" · " ;;
-                        bar)       out+=" │ " ;;
+                        bar)       out+=" ⋮ " ;;
                         pad|space) out+=" " ;;
                     esac
                 fi
@@ -1558,7 +1558,7 @@ _render() {
             if [ -z "$first" ]; then
                 case "${_SEG_JOIN[i]}" in
                     dot)   _sgr 38 ink2; out+="${esc}[${fillsgr};${_SGR};22m  ·  " ;;
-                    bar)   _sgr 38 ink2; out+="${esc}[${fillsgr};${_SGR};22m  │  " ;;
+                    bar)   _sgr 38 ink2; out+="${esc}[${fillsgr};${_SGR};22m ⋮ " ;;
                     pad)   out+="${esc}[${fillsgr}m  " ;;
                     space) out+="${esc}[${fillsgr}m " ;;
                 esac
