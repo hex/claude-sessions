@@ -62,6 +62,7 @@ teardown() {
 }
 
 SEED() { printf '%s' "$CS_SESSIONS_ROOT/.spawn/worker.seed"; }
+BRIEF() { printf '%s' "$CS_SESSIONS_ROOT/.spawn/worker.brief.md"; }
 
 test_spawn_rejects_bad_names_and_missing_tmux() {
     ! "$CS_BIN" -spawn "bad name" >/dev/null 2>&1 || return 1
@@ -111,6 +112,48 @@ test_spawn_empty_spawner_writes_blank_first_line() {
 test_spawn_without_task_writes_no_seed() {
     "$CS_BIN" -spawn worker >/dev/null 2>&1 || return 1
     [ ! -f "$(SEED)" ] || { echo "  seed written without --task"; return 1; }
+}
+
+# A brief is the multi-line counterpart of --task: a file the spawned session
+# reads before it begins. It is staged beside the seed, verbatim, and a brief
+# alone is reason enough for a seed, since the seed carries the spawner.
+test_spawn_stages_brief_beside_the_seed() {
+    printf '# Goal\n\nAdd the refresh-token path.\n\n## Done when\n- suite green\n' > "$TEST_TMPDIR/brief.md"
+    CLAUDE_SESSION_NAME="boss" "$CS_BIN" -spawn worker --brief "$TEST_TMPDIR/brief.md" >/dev/null 2>&1 || return 1
+    assert_file_exists "$(BRIEF)" "brief staged" || return 1
+    cmp -s "$TEST_TMPDIR/brief.md" "$(BRIEF)" || { echo "  staged brief differs from the source"; return 1; }
+    assert_file_exists "$(SEED)" "a brief alone writes a seed" || return 1
+    assert_eq "boss" "$(sed -n 1p "$(SEED)")" "seed carries the spawner" || return 1
+    assert_eq "1" "$(wc -l < "$(SEED)" | tr -d ' ')" "seed carries no tasks" || return 1
+}
+
+test_spawn_brief_and_tasks_stage_together() {
+    printf 'brief body\n' > "$TEST_TMPDIR/brief.md"
+    "$CS_BIN" -spawn worker --brief "$TEST_TMPDIR/brief.md" --task "first job" >/dev/null 2>&1 || return 1
+    assert_file_exists "$(BRIEF)" "brief staged" || return 1
+    assert_eq "first job" "$(sed -n 2p "$(SEED)")" "task staged with the brief" || return 1
+}
+
+test_spawn_rejects_unreadable_or_empty_brief_before_staging() {
+    ! "$CS_BIN" -spawn worker --brief "$TEST_TMPDIR/absent.md" >/dev/null 2>&1 || return 1
+    : > "$TEST_TMPDIR/empty.md"
+    ! "$CS_BIN" -spawn worker --brief "$TEST_TMPDIR/empty.md" >/dev/null 2>&1 || return 1
+    ! "$CS_BIN" -spawn worker --brief >/dev/null 2>&1 || return 1
+    [ ! -f "$(SEED)" ] || { echo "  seed written on a rejected brief"; return 1; }
+    [ ! -f "$(BRIEF)" ] || { echo "  brief staged on a rejected brief"; return 1; }
+    [ ! -f "$FAKE_TMUX_DIR/log" ] || { echo "  a window was opened on a rejected brief"; return 1; }
+}
+
+# The seed refusal already covers a pending brief: a brief never exists
+# without its seed. This pins that a second spawn cannot swap the brief out
+# from under the pending one.
+test_spawn_refuses_to_replace_a_pending_brief() {
+    printf 'first\n' > "$TEST_TMPDIR/one.md"
+    printf 'second\n' > "$TEST_TMPDIR/two.md"
+    "$CS_BIN" -spawn worker --brief "$TEST_TMPDIR/one.md" >/dev/null 2>&1 || return 1
+    rm -f "$FAKE_TMUX_DIR/session-exists"
+    ! "$CS_BIN" -spawn worker --brief "$TEST_TMPDIR/two.md" >/dev/null 2>&1 || return 1
+    assert_eq "first" "$(cat "$(BRIEF)")" "pending brief untouched" || return 1
 }
 
 test_spawn_attach_hint_uses_switch_client_inside_tmux() {
@@ -221,6 +264,48 @@ test_launch_empty_spawner_gets_no_reply_wiring() {
     assert_output_not_contains "$out" "-k result" "no reply instructions" || return 1
 }
 
+# A staged brief becomes the session's own file, .cs/brief.md, and the kick
+# sends the session to it before anything else. With no tasks there is no
+# queue to drain, so the report-back is by hand and the kick says how.
+test_launch_moves_brief_into_the_session_and_kicks_to_it() {
+    mkdir -p "$CS_SESSIONS_ROOT/.spawn"
+    printf 'boss\n' > "$CS_SESSIONS_ROOT/.spawn/worker.seed"
+    printf '# Goal\nrefresh tokens\n' > "$CS_SESSIONS_ROOT/.spawn/worker.brief.md"
+    local out; out=$(_launch_worker) || return 1
+    assert_file_exists "$CS_SESSIONS_ROOT/worker/.cs/brief.md" "brief moved into the session" || return 1
+    assert_file_contains "$CS_SESSIONS_ROOT/worker/.cs/brief.md" "refresh tokens" "brief content kept" || return 1
+    [ ! -f "$CS_SESSIONS_ROOT/.spawn/worker.brief.md" ] || { echo "  staged brief left behind"; return 1; }
+    [ ! -f "$CS_SESSIONS_ROOT/.spawn/worker.seed" ] || { echo "  seed not deleted"; return 1; }
+    assert_output_contains "$out" "Spawned by boss" "spawner named" || return 1
+    assert_output_contains "$out" "Your brief is .cs/brief.md" "kick names the brief" || return 1
+    assert_output_not_contains "$out" "armed with" "no queue promised without tasks" || return 1
+    assert_output_contains "$out" "cs -msg boss -k result" "reply instructions present" || return 1
+    assert_file_contains "$(WQ)/spawned-by" "boss" "spawned-by recorded for a brief-only spawn" || return 1
+    [ ! -f "$(WQ)/queue.state" ] || { echo "  queue armed with no tasks"; return 1; }
+}
+
+test_launch_brief_with_tasks_kicks_to_both() {
+    mkdir -p "$CS_SESSIONS_ROOT/.spawn"
+    printf 'boss\nfirst job\n' > "$CS_SESSIONS_ROOT/.spawn/worker.seed"
+    printf 'brief body\n' > "$CS_SESSIONS_ROOT/.spawn/worker.brief.md"
+    local out; out=$(_launch_worker) || return 1
+    assert_output_contains "$out" "Your brief is .cs/brief.md" "kick names the brief" || return 1
+    assert_output_contains "$out" "armed with 1 task(s)" "kick counts tasks" || return 1
+    assert_file_contains "$(WQ)/queue.state" "armed" "queue armed" || return 1
+}
+
+test_launch_stale_seed_sets_its_brief_aside_too() {
+    mkdir -p "$CS_SESSIONS_ROOT/.spawn"
+    printf 'boss\n' > "$CS_SESSIONS_ROOT/.spawn/worker.seed"
+    printf 'old brief\n' > "$CS_SESSIONS_ROOT/.spawn/worker.brief.md"
+    touch -t 202401010000 "$CS_SESSIONS_ROOT/.spawn/worker.seed"
+    local out; out=$(_launch_worker) || return 1
+    assert_file_exists "$CS_SESSIONS_ROOT/.spawn/worker.brief.md.stale" "stale brief set aside" || return 1
+    [ ! -f "$CS_SESSIONS_ROOT/.spawn/worker.brief.md" ] || { echo "  stale brief still staged"; return 1; }
+    [ ! -f "$CS_SESSIONS_ROOT/worker/.cs/brief.md" ] || { echo "  stale brief applied to the session"; return 1; }
+    assert_output_not_contains "$out" "Your brief is" "no kick from a stale brief" || return 1
+}
+
 test_launch_without_seed_keeps_color_behavior() {
     local out; out=$(_launch_worker) || return 1
     assert_output_not_contains "$out" "armed with" "no kick without seed" || return 1
@@ -272,6 +357,10 @@ run_test test_spawn_rejects_bad_names_and_missing_tmux
 run_test test_spawn_rejects_live_target
 run_test test_spawn_writes_seed_and_opens_window
 run_test test_spawn_without_task_writes_no_seed
+run_test test_spawn_stages_brief_beside_the_seed
+run_test test_spawn_brief_and_tasks_stage_together
+run_test test_spawn_rejects_unreadable_or_empty_brief_before_staging
+run_test test_spawn_refuses_to_replace_a_pending_brief
 run_test test_spawn_attach_hint_uses_switch_client_inside_tmux
 run_test test_spawn_refuses_existing_seed
 run_test test_spawn_rejects_multiline_and_empty_task
@@ -285,6 +374,9 @@ run_test test_spawn_empty_spawner_writes_blank_first_line
 run_test test_launch_consumes_seed_queues_arms_and_kicks
 run_test test_launch_empty_spawner_gets_no_reply_wiring
 run_test test_launch_without_seed_keeps_color_behavior
+run_test test_launch_moves_brief_into_the_session_and_kicks_to_it
+run_test test_launch_brief_with_tasks_kicks_to_both
+run_test test_launch_stale_seed_sets_its_brief_aside_too
 run_test test_launch_sets_aside_stale_seed
 run_test test_launch_stale_warning_names_the_stale_file
 run_test test_launch_fresh_boundary_seed_is_consumed

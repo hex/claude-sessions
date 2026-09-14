@@ -229,21 +229,24 @@ launch_claude_code() {
     # headless `claude -p` carries this value while owning a different pid.
     export CS_LEAD_PID=$$
 
-    # Spawn seed: tasks staged by cs -spawn for this session. Consumed here,
-    # after the already-running guard and before any exec arm, so a window
-    # that died before launching self-heals on the session's next open. A
-    # stale seed (>1h) is set aside, never silently armed days later.
+    # Spawn seed: tasks and a brief staged by cs -spawn for this session.
+    # Consumed here, after the already-running guard and before any exec arm,
+    # so a window that died before launching self-heals on the session's next
+    # open. A stale seed (>1h) is set aside with its brief, never silently
+    # armed days later.
     local spawn_kick=""
     local _seed="$SESSIONS_ROOT/.spawn/$session_name.seed"
+    local _brief="$SESSIONS_ROOT/.spawn/$session_name.brief.md"
     if [ -f "$_seed" ]; then
         local _now _age
         _now=$(date +%s)
         _age=$(( _now - $(_epoch_mtime "$_seed") ))
         if [ "$_age" -gt 3600 ]; then
             mv "$_seed" "$_seed.stale" 2>/dev/null || true
+            [ ! -f "$_brief" ] || mv "$_brief" "$_brief.stale" 2>/dev/null || true
             warn "Stale spawn seed set aside: $_seed.stale (re-run cs -spawn if still wanted)"
         else
-            local _spawner="" _line _n=0 _first=1
+            local _spawner="" _line _n=0 _first=1 _has_brief=0
             while IFS= read -r _line || [ -n "$_line" ]; do
                 if [ "$_first" = 1 ]; then _spawner="$_line"; _first=0; continue; fi
                 # Skip whitespace-only lines, not merely empty ones: _queue_add
@@ -254,13 +257,25 @@ launch_claude_code() {
                 _queue_add "$session_dir/.cs/local" "$_line"
                 _n=$((_n + 1))
             done < "$_seed"
-            if [ "$_n" -gt 0 ]; then
-                _queue_set_state "$session_dir/.cs/local" armed
+            # The brief becomes the session's own file, replacing any earlier
+            # one: this spawn's brief is the one the session was opened for.
+            if [ -f "$_brief" ]; then
+                mv "$_brief" "$session_dir/.cs/brief.md" && _has_brief=1
+            fi
+            [ "$_n" -eq 0 ] || _queue_set_state "$session_dir/.cs/local" armed
+            if [ "$_n" -gt 0 ] || [ "$_has_brief" = 1 ]; then
+                local _work=""
+                [ "$_has_brief" = 1 ] && _work="Your brief is .cs/brief.md: read it first."
+                if [ "$_n" -gt 0 ]; then
+                    _work="${_work:+$_work }Your walk-away queue is armed with $_n task(s); begin."
+                else
+                    _work="$_work Then begin."
+                fi
                 if [ -n "$_spawner" ]; then
                     printf '%s\n' "$_spawner" > "$session_dir/.cs/local/spawned-by"
-                    spawn_kick="Spawned by $_spawner. Your walk-away queue is armed with $_n task(s); begin. Send results with: cs -msg $_spawner -k result \"...\""
+                    spawn_kick="Spawned by $_spawner. $_work Send results with: cs -msg $_spawner -k result \"...\""
                 else
-                    spawn_kick="Your walk-away queue is armed with $_n task(s); begin."
+                    spawn_kick="$_work"
                 fi
             fi
             rm -f "$_seed"

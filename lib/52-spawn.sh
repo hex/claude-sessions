@@ -20,11 +20,12 @@ _cs_self() {
     esac
 }
 
-# Delete any staged or stale seed for a name. Called when the session is
-# deleted: a leftover seed would block re-spawning the name and arm a
-# future same-name session with dead tasks.
+# Delete any staged or stale seed and brief for a name. Called when the
+# session is deleted: a leftover seed would block re-spawning the name and arm
+# a future same-name session with dead tasks and a dead brief.
 _spawn_discard_seeds() {  # name
-    rm -f "$SESSIONS_ROOT/.spawn/$1.seed" "$SESSIONS_ROOT/.spawn/$1.seed.stale"
+    rm -f "$SESSIONS_ROOT/.spawn/$1.seed" "$SESSIONS_ROOT/.spawn/$1.seed.stale" \
+          "$SESSIONS_ROOT/.spawn/$1.brief.md" "$SESSIONS_ROOT/.spawn/$1.brief.md.stale"
 }
 
 # True when the tmux session named 'cs' carries cs's ownership stamp. Only
@@ -86,8 +87,9 @@ _spawn_window() {  # name
 }
 
 run_spawn() {
-    local name="" nl='
+    local name="" brief="" nl='
 '
+    local usage='Usage: cs -spawn <name> [--brief <file>] [--task "..."] ...'
     local tasks
     tasks=()
     while [ $# -gt 0 ]; do
@@ -100,19 +102,28 @@ run_spawn() {
                 [ -n "$t" ] || error "cs -spawn --task needs a non-empty task"
                 case "$t" in *"$nl"*) error "task bodies must be a single line (the queue's done log and listing are line-oriented)";; esac
                 tasks+=("$t");;
-            -*) error "Unknown option: $1. Usage: cs -spawn <name> [--task \"...\"] ...";;
+            --brief)
+                [ $# -ge 2 ] || error "--brief needs a file"
+                shift
+                [ -z "$brief" ] || error "cs -spawn takes one --brief"
+                [ -f "$1" ] && [ -r "$1" ] || error "cs -spawn --brief: cannot read $1"
+                [ -s "$1" ] || error "cs -spawn --brief: $1 is empty"
+                brief="$1";;
+            -*) error "Unknown option: $1. $usage";;
             *)
                 [ -z "$name" ] || error "cs -spawn takes exactly one session name"
                 name="$1";;
         esac
         shift
     done
-    [ -n "$name" ] || error "Usage: cs -spawn <name> [--task \"...\"] ..."
+    [ -n "$name" ] || error "$usage"
     if ! cs_split_worktree_name "$name"; then
         validate_session_name "$name"
     fi
     _spawn_precheck "$name"
-    if [ "${#tasks[@]}" -gt 0 ]; then
+    # A brief is staged with a seed even when there are no tasks: the seed
+    # carries the spawner, which the brief's report-back line needs.
+    if [ "${#tasks[@]}" -gt 0 ] || [ -n "$brief" ]; then
         local sdir="$SESSIONS_ROOT/.spawn" seed
         seed="$sdir/$name.seed"
         # The check-then-write below is deliberately unlocked. The tmp+mv makes
@@ -121,6 +132,11 @@ run_spawn() {
         # buy nothing for that benign race.
         [ ! -f "$seed" ] || error "A pending spawn for $name exists: $seed"
         mkdir -p "$sdir"
+        # Brief before seed: the launch treats the seed as the signal, so a
+        # brief must never be missing once the seed is visible.
+        if [ -n "$brief" ]; then
+            cp "$brief" "$sdir/$name.brief.md.tmp" && mv "$sdir/$name.brief.md.tmp" "$sdir/$name.brief.md"
+        fi
         {
             printf '%s\n' "${CLAUDE_SESSION_NAME:-}"
             local _t

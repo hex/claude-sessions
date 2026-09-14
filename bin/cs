@@ -3944,11 +3944,12 @@ _cs_self() {
     esac
 }
 
-# Delete any staged or stale seed for a name. Called when the session is
-# deleted: a leftover seed would block re-spawning the name and arm a
-# future same-name session with dead tasks.
+# Delete any staged or stale seed and brief for a name. Called when the
+# session is deleted: a leftover seed would block re-spawning the name and arm
+# a future same-name session with dead tasks and a dead brief.
 _spawn_discard_seeds() {  # name
-    rm -f "$SESSIONS_ROOT/.spawn/$1.seed" "$SESSIONS_ROOT/.spawn/$1.seed.stale"
+    rm -f "$SESSIONS_ROOT/.spawn/$1.seed" "$SESSIONS_ROOT/.spawn/$1.seed.stale" \
+          "$SESSIONS_ROOT/.spawn/$1.brief.md" "$SESSIONS_ROOT/.spawn/$1.brief.md.stale"
 }
 
 # True when the tmux session named 'cs' carries cs's ownership stamp. Only
@@ -4010,8 +4011,9 @@ _spawn_window() {  # name
 }
 
 run_spawn() {
-    local name="" nl='
+    local name="" brief="" nl='
 '
+    local usage='Usage: cs -spawn <name> [--brief <file>] [--task "..."] ...'
     local tasks
     tasks=()
     while [ $# -gt 0 ]; do
@@ -4024,19 +4026,28 @@ run_spawn() {
                 [ -n "$t" ] || error "cs -spawn --task needs a non-empty task"
                 case "$t" in *"$nl"*) error "task bodies must be a single line (the queue's done log and listing are line-oriented)";; esac
                 tasks+=("$t");;
-            -*) error "Unknown option: $1. Usage: cs -spawn <name> [--task \"...\"] ...";;
+            --brief)
+                [ $# -ge 2 ] || error "--brief needs a file"
+                shift
+                [ -z "$brief" ] || error "cs -spawn takes one --brief"
+                [ -f "$1" ] && [ -r "$1" ] || error "cs -spawn --brief: cannot read $1"
+                [ -s "$1" ] || error "cs -spawn --brief: $1 is empty"
+                brief="$1";;
+            -*) error "Unknown option: $1. $usage";;
             *)
                 [ -z "$name" ] || error "cs -spawn takes exactly one session name"
                 name="$1";;
         esac
         shift
     done
-    [ -n "$name" ] || error "Usage: cs -spawn <name> [--task \"...\"] ..."
+    [ -n "$name" ] || error "$usage"
     if ! cs_split_worktree_name "$name"; then
         validate_session_name "$name"
     fi
     _spawn_precheck "$name"
-    if [ "${#tasks[@]}" -gt 0 ]; then
+    # A brief is staged with a seed even when there are no tasks: the seed
+    # carries the spawner, which the brief's report-back line needs.
+    if [ "${#tasks[@]}" -gt 0 ] || [ -n "$brief" ]; then
         local sdir="$SESSIONS_ROOT/.spawn" seed
         seed="$sdir/$name.seed"
         # The check-then-write below is deliberately unlocked. The tmp+mv makes
@@ -4045,6 +4056,11 @@ run_spawn() {
         # buy nothing for that benign race.
         [ ! -f "$seed" ] || error "A pending spawn for $name exists: $seed"
         mkdir -p "$sdir"
+        # Brief before seed: the launch treats the seed as the signal, so a
+        # brief must never be missing once the seed is visible.
+        if [ -n "$brief" ]; then
+            cp "$brief" "$sdir/$name.brief.md.tmp" && mv "$sdir/$name.brief.md.tmp" "$sdir/$name.brief.md"
+        fi
         {
             printf '%s\n' "${CLAUDE_SESSION_NAME:-}"
             local _t
@@ -7345,21 +7361,24 @@ launch_claude_code() {
     # headless `claude -p` carries this value while owning a different pid.
     export CS_LEAD_PID=$$
 
-    # Spawn seed: tasks staged by cs -spawn for this session. Consumed here,
-    # after the already-running guard and before any exec arm, so a window
-    # that died before launching self-heals on the session's next open. A
-    # stale seed (>1h) is set aside, never silently armed days later.
+    # Spawn seed: tasks and a brief staged by cs -spawn for this session.
+    # Consumed here, after the already-running guard and before any exec arm,
+    # so a window that died before launching self-heals on the session's next
+    # open. A stale seed (>1h) is set aside with its brief, never silently
+    # armed days later.
     local spawn_kick=""
     local _seed="$SESSIONS_ROOT/.spawn/$session_name.seed"
+    local _brief="$SESSIONS_ROOT/.spawn/$session_name.brief.md"
     if [ -f "$_seed" ]; then
         local _now _age
         _now=$(date +%s)
         _age=$(( _now - $(_epoch_mtime "$_seed") ))
         if [ "$_age" -gt 3600 ]; then
             mv "$_seed" "$_seed.stale" 2>/dev/null || true
+            [ ! -f "$_brief" ] || mv "$_brief" "$_brief.stale" 2>/dev/null || true
             warn "Stale spawn seed set aside: $_seed.stale (re-run cs -spawn if still wanted)"
         else
-            local _spawner="" _line _n=0 _first=1
+            local _spawner="" _line _n=0 _first=1 _has_brief=0
             while IFS= read -r _line || [ -n "$_line" ]; do
                 if [ "$_first" = 1 ]; then _spawner="$_line"; _first=0; continue; fi
                 # Skip whitespace-only lines, not merely empty ones: _queue_add
@@ -7370,13 +7389,25 @@ launch_claude_code() {
                 _queue_add "$session_dir/.cs/local" "$_line"
                 _n=$((_n + 1))
             done < "$_seed"
-            if [ "$_n" -gt 0 ]; then
-                _queue_set_state "$session_dir/.cs/local" armed
+            # The brief becomes the session's own file, replacing any earlier
+            # one: this spawn's brief is the one the session was opened for.
+            if [ -f "$_brief" ]; then
+                mv "$_brief" "$session_dir/.cs/brief.md" && _has_brief=1
+            fi
+            [ "$_n" -eq 0 ] || _queue_set_state "$session_dir/.cs/local" armed
+            if [ "$_n" -gt 0 ] || [ "$_has_brief" = 1 ]; then
+                local _work=""
+                [ "$_has_brief" = 1 ] && _work="Your brief is .cs/brief.md: read it first."
+                if [ "$_n" -gt 0 ]; then
+                    _work="${_work:+$_work }Your walk-away queue is armed with $_n task(s); begin."
+                else
+                    _work="$_work Then begin."
+                fi
                 if [ -n "$_spawner" ]; then
                     printf '%s\n' "$_spawner" > "$session_dir/.cs/local/spawned-by"
-                    spawn_kick="Spawned by $_spawner. Your walk-away queue is armed with $_n task(s); begin. Send results with: cs -msg $_spawner -k result \"...\""
+                    spawn_kick="Spawned by $_spawner. $_work Send results with: cs -msg $_spawner -k result \"...\""
                 else
-                    spawn_kick="Your walk-away queue is armed with $_n task(s); begin."
+                    spawn_kick="$_work"
                 fi
             fi
             rm -f "$_seed"
