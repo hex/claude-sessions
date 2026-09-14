@@ -116,7 +116,7 @@ _cs() {
         '-unarchive:Restore an archived session'
         '-status:Set or show this session'\''s advertised status'
         '-search:Search across all sessions'
-        '-statusline:Manage the cs status line (enable|disable)'
+        '-statusline:Manage the cs status line (enable|disable|caps)'
         '-detect-theme:Detect terminal background theme'
         '-doctor:Run health checks'
         '-diag:Run health checks (alias)'

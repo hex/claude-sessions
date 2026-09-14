@@ -1479,6 +1479,26 @@ _bg_shade() {
 # A crit capsule takes the crit fill and paints every item critink bold.
 # SGR bold is stateful, so every item emits its intensity explicitly (1 or 22).
 # No width accounting and no tail: the line ends at the last cap.
+
+# Whether to draw the Powerline caps. They are the bar's one private-use glyph,
+# so nothing draws them until this machine has said its font has them: the
+# installer asks once and records the answer in the per-machine caps file
+# (`cs -statusline caps` rewrites it). CS_STATUSLINE_CAPS=1/0 in the
+# environment overrides the file either way. Unanswered means square ends.
+_caps_file() {
+    printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/cs/statusline-caps"
+}
+_caps_wanted() {
+    case "${CS_STATUSLINE_CAPS:-}" in
+        1) return 0 ;;
+        0) return 1 ;;
+    esac
+    local f answer=""
+    f=$(_caps_file)
+    [ -r "$f" ] && IFS= read -r answer < "$f"
+    [ "$answer" = "on" ]
+}
+
 _render() {
     local n=${#_SEG_TEXT[@]}
     [ "$n" -gt 0 ] || return 0
@@ -1508,7 +1528,7 @@ _render() {
 
     local esc=$'\033' reset=$'\033[0m'
     local capl=$'\xee\x82\xb6' capr=$'\xee\x82\xb4'   # U+E0B6, U+E0B4
-    [ "${CS_STATUSLINE_CAPS:-1}" = "0" ] && { capl=""; capr=""; }
+    _caps_wanted || { capl=""; capr=""; }
     local fill fillsgr capsgr ink weight first k critink=critink
     # A red capsule's text pulses white/critshade on the same epoch-second
     # clock as the attention mark, so a crit reading moves while the bar idles.

@@ -44,6 +44,12 @@ setup() {
     # and on any Mac that has written one.
     export CS_SECURITY_BIN="$TEST_TMPDIR/no-such-security"
     export CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-such-config"
+    # The capsule pins below were written for rounded caps, which the renderer
+    # draws only once this machine has answered the install question. Answer
+    # it here; the caps tests remove or rewrite the file for their own cases.
+    export XDG_CONFIG_HOME="$TEST_TMPDIR/xdg"
+    mkdir -p "$XDG_CONFIG_HOME/cs"
+    printf 'on\n' > "$XDG_CONFIG_HOME/cs/statusline-caps"
 }
 
 teardown() {
@@ -3219,6 +3225,40 @@ test_capsule_gap_one_cell_between_every_capsule() {
         "one cell between ctx and cost" || return 1
 }
 
+# The rounded caps are the one private-use glyph in the bar, so a machine
+# that has not answered the install question gets square ends, not tofu.
+test_caps_unanswered_renders_square() {
+    export COLORTERM=truecolor
+    export CS_TERM_BG_RGB="253;246;227"
+    rm -f "$XDG_CONFIG_HOME/cs/statusline-caps"
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8}}'
+    local out; out=$(run_sl "$json")
+    assert_output_not_contains_f "$out" "$CAPL" "unanswered: no left cap glyph" || return 1
+    assert_output_not_contains_f "$out" "$CAPR" "unanswered: no right cap glyph" || return 1
+}
+
+test_caps_file_off_renders_square() {
+    export COLORTERM=truecolor
+    export CS_TERM_BG_RGB="253;246;227"
+    printf 'off\n' > "$XDG_CONFIG_HOME/cs/statusline-caps"
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8}}'
+    local out; out=$(run_sl "$json")
+    assert_output_not_contains_f "$out" "$CAPL" "file off: no left cap glyph" || return 1
+}
+
+test_caps_env_overrides_file_both_ways() {
+    export COLORTERM=truecolor
+    export CS_TERM_BG_RGB="253;246;227"
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8}}'
+    local out
+    printf 'off\n' > "$XDG_CONFIG_HOME/cs/statusline-caps"
+    out=$(CS_STATUSLINE_CAPS=1 run_sl "$json")
+    assert_output_contains_f "$out" "$CAPL" "env 1 beats file off" || return 1
+    printf 'on\n' > "$XDG_CONFIG_HOME/cs/statusline-caps"
+    out=$(CS_STATUSLINE_CAPS=0 run_sl "$json")
+    assert_output_not_contains_f "$out" "$CAPL" "env 0 beats file on" || return 1
+}
+
 test_caps_off_gives_square_chips() {
     export COLORTERM=truecolor
     export CS_TERM_BG_RGB="253;246;227"
@@ -3340,6 +3380,9 @@ run_test test_interleaved_segments_still_one_identity_capsule
 run_test test_plain_joins_identity_with_dots_and_capsules_with_gt
 run_test test_identity_is_one_capsule_on_the_surface
 run_test test_capsule_gap_one_cell_between_every_capsule
+run_test test_caps_unanswered_renders_square
+run_test test_caps_file_off_renders_square
+run_test test_caps_env_overrides_file_both_ways
 run_test test_caps_off_gives_square_chips
 run_test test_line_ends_at_the_last_cap_regardless_of_columns
 run_test test_ctx_amber_is_ink_on_the_surface

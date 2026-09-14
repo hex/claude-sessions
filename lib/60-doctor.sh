@@ -475,6 +475,16 @@ _doctor_check_statusline() {
             else
                 _doctor_fail "Statusline: registered as $cmd but the binary is missing or not executable"
             fi
+            # The rounded caps are drawn only once this machine has answered
+            # the font question; until then the bar shows square ends.
+            local caps_file caps=""
+            caps_file="$(_statusline_caps_file)"
+            [ -r "$caps_file" ] && IFS= read -r caps < "$caps_file"
+            case "$caps" in
+                on)  _doctor_ok "Statusline caps: rounded (this machine's font has the Powerline caps)" ;;
+                off) _doctor_ok "Statusline caps: square (answered off; cs -statusline caps ask to revisit)" ;;
+                *)   _doctor_warn "Statusline caps: square until answered — run: cs -statusline caps ask" ;;
+            esac
             ;;
         *)
             _doctor_warn "Statusline: using a non-cs status line ($cmd) — $gating"

@@ -60,8 +60,8 @@ export CS_STATUSLINE_SEGMENTS="logo,session,notes,mail,git,model,ctx,limits"  # 
 
 export CS_STATUSLINE_DISABLE="1"
 
-# Draw the capsules with square ends instead of the Powerline rounded caps
-# (U+E0B6/U+E0B4), for a font that lacks the glyphs
+# Force the Powerline rounded caps (U+E0B6/U+E0B4) on (1) or off (0),
+# overriding this machine's recorded answer in ~/.config/cs/statusline-caps
 export CS_STATUSLINE_CAPS="0"
 
 # Where the machine-global usage cache behind the `fable` segment lives

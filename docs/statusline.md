@@ -32,7 +32,7 @@ The limits group folds the three windows into one rule. The Fable window is mode
 
 The two files the render writes, `.cs/local/context-pct` and `.cs/local/limits`, are produced in `_parse_stdin` before any segment runs and stay untouched by the gating above. Hiding a capsule never hides a heartbeat.
 
-Segment icons are standard Unicode glyphs (the context pie `○ ◔ ◑ ◕ ●`, star `✦`, branch `⎇`, clock `◷`, week `◶`, open star `✧`, pane `◫`, envelope `✉`) from the Geometric Shapes and dingbat ranges, so they render in any monospace font without a patched Nerd Font. The `session` segment carries no icon — the capsule and its position are the identity. The capsule caps (U+E0B6, U+E0B4) are the one private-use exception; `CS_STATUSLINE_CAPS=0` removes them.
+Segment icons are standard Unicode glyphs (the context pie `○ ◔ ◑ ◕ ●`, star `✦`, branch `⎇`, clock `◷`, week `◶`, open star `✧`, pane `◫`, envelope `✉`) from the Geometric Shapes and dingbat ranges, so they render in any monospace font without a patched Nerd Font. The `session` segment carries no icon — the capsule and its position are the identity. The capsule caps (U+E0B6, U+E0B4) are the one private-use exception, so they are drawn only once this machine has answered the installer's question about them (see [Colors](#colors)).
 
 ## Data sources and performance
 
@@ -161,7 +161,7 @@ Every capsule fill is `surface`, a shade of the terminal's own background so the
 
 Removed from the bar: `hairline`, `chiptext` (the mark's bright phase uses `brand` instead), `black`, and `amber` as a fill. `periwinkle` stays for the [subagent rows'](#subagent-rows) model capsule. Those rows otherwise paint with `rowname`, `rowmeta`, `amber` and `crit` through `_paint` → `_sgr`, the same `amber`/`crit` tokens the bar uses, so a row's hot ctx and the bar always agree on the two hot colors.
 
-Capsule ends are the Powerline glyphs U+E0B6 and U+E0B4, drawn as fill-colored ink on the terminal's default background so they read as rounded ends. They need a font that carries them (any Nerd Font does); cs cannot probe a font, so `CS_STATUSLINE_CAPS=0` drops the glyphs and the capsules become square chips with the same spacing. Caps render at every color level — the cap's ink is the capsule's fill, which 256-color and basic terminals both have — and never in plain mode.
+Capsule ends are the Powerline glyphs U+E0B6 and U+E0B4, drawn as fill-colored ink on the terminal's default background so they read as rounded ends. They need a font that carries them (any Nerd Font does), and a font without them shows a box at every capsule edge. A terminal cannot be asked whether it has a glyph, so cs asks you: the installer shows a sample capsule and asks whether its ends look rounded, and records the answer per machine in `~/.config/cs/statusline-caps` (`on` or `off`). Until a machine has answered, the capsules are square chips with the same spacing. `cs -statusline caps on|off|ask` rewrites the answer, `cs -doctor` reports it, and `CS_STATUSLINE_CAPS=1` or `=0` in the environment overrides the file either way. Caps render at every color level — the cap's ink is the capsule's fill, which 256-color and basic terminals both have — and never in plain mode.
 
 Inside tmux, Claude Code mutes its own branding and any truecolor status line to a fallback palette. cs sets `CLAUDE_CODE_TMUX_TRUECOLOR=1` in claude's environment at launch (unless you set it yourself) to keep these colors at full saturation.
 
@@ -240,8 +240,8 @@ export CS_SUBAGENT_STATUSLINE_DISABLE=1
 # Choose and order segments
 export CS_STATUSLINE_SEGMENTS="session,ctx,git,limits"
 
-# Draw the capsules with square ends instead of the Powerline rounded caps
-# (U+E0B6/U+E0B4), for a font that lacks the glyphs
+# Force the Powerline rounded caps (U+E0B6/U+E0B4) on (1) or off (0),
+# overriding this machine's recorded answer in ~/.config/cs/statusline-caps
 export CS_STATUSLINE_CAPS="0"
 
 # Context thresholds (percent)

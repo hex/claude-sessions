@@ -37,7 +37,7 @@ Commands:
   -spawn <name>       Open a session in the cs tmux session (--task "..." seeds and arms its queue)
   -conversations      Show the session's conversation chain (rotations, lineage)
   -doctor, -diag      Run health checks (Keychain, hooks, memory, audit, tokens)
-  -statusline <cmd>   enable|disable the cs status line in Claude Code settings
+  -statusline <cmd>   enable|disable the cs status line; caps on|off|ask records whether your font has the rounded caps
   -detect-theme       Show the detected terminal theme (light|dark)
   -tui                Open the interactive session manager (bare 'cs' does too, outside a session)
   -list, -ls          List sessions (--tag <tag> filters; --archived shows only archived)

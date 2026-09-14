@@ -214,6 +214,17 @@ EXPECT
     done
 }
 
+# `cs -statusline caps on|off` records this machine's answer to the rounded-
+# caps question, the file bin/cs-statusline reads before drawing a cap.
+test_statusline_caps_on_off_writes_the_answer_file() {
+    local fake_home="$TEST_TMPDIR/home-caps"
+    mkdir -p "$fake_home/.claude"
+    HOME="$fake_home" bash "$SCRIPT_DIR/../bin/cs" -statusline caps on >/dev/null 2>&1 || return 1
+    assert_file_contains "$fake_home/.config/cs/statusline-caps" "^on$" "caps on writes on" || return 1
+    HOME="$fake_home" bash "$SCRIPT_DIR/../bin/cs" -statusline caps off >/dev/null 2>&1 || return 1
+    assert_file_contains "$fake_home/.config/cs/statusline-caps" "^off$" "caps off writes off" || return 1
+}
+
 # Same guard on the disable path, which shares the construct.
 test_statusline_disable_survives_an_unwritable_marker_dir() {
     local fake_home="$TEST_TMPDIR/home-disable-nowrite"
@@ -1245,6 +1256,7 @@ run_test test_install_survives_an_unwritable_declined_marker_dir
 run_test test_install_previews_the_status_line_before_asking
 run_test test_declining_says_permanence_on_its_own_line
 run_test test_enter_declines_the_same_as_an_explicit_n
+run_test test_statusline_caps_on_off_writes_the_answer_file
 run_test test_statusline_disable_survives_an_unwritable_marker_dir
 run_test test_marker_tests_do_not_touch_a_live_xdg_config_home
 run_test test_filechanged_registration_carries_async_rewake

@@ -608,6 +608,24 @@ test_doctor_statusline_fails_when_binary_missing() {
     fi
 }
 
+# The bar draws square ends until this machine answers the caps question, so
+# doctor says which state it is in and how to answer.
+test_doctor_statusline_caps_row_names_the_answer_or_the_ask() {
+    local fake_claude="$TEST_TMPDIR/sl-claude-caps"
+    local fake_bin="$TEST_TMPDIR/sl-bin-caps"
+    local xdg="$TEST_TMPDIR/xdg-caps"
+    mkdir -p "$fake_claude" "$fake_bin" "$xdg/cs"
+    printf '#!/bin/sh\n' > "$fake_bin/cs-statusline"
+    chmod +x "$fake_bin/cs-statusline"
+    printf '{"statusLine":{"type":"command","command":"%s"}}\n' "$fake_bin/cs-statusline" > "$fake_claude/settings.json"
+    local output
+    output=$(XDG_CONFIG_HOME="$xdg" CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "cs -statusline caps ask" "unanswered: doctor names the ask" || return 1
+    printf 'on\n' > "$xdg/cs/statusline-caps"
+    output=$(XDG_CONFIG_HOME="$xdg" CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "caps: rounded" "answered on: doctor says rounded" || return 1
+}
+
 test_doctor_statusline_no_fail_when_not_registered() {
     local fake_claude="$TEST_TMPDIR/sl-claude-none"
     mkdir -p "$fake_claude"
@@ -831,6 +849,7 @@ run_test test_doctor_settings_hooks_resolve_expands_tilde
 run_test test_doctor_skips_inline_shell_hook_commands
 run_test test_doctor_statusline_ok_when_registered_and_executable
 run_test test_doctor_statusline_fails_when_binary_missing
+run_test test_doctor_statusline_caps_row_names_the_answer_or_the_ask
 run_test test_doctor_statusline_no_fail_when_not_registered
 run_test test_doctor_statusline_names_context_gating_when_absent
 run_test test_doctor_statusline_names_context_gating_for_foreign_statusline

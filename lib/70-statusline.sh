@@ -39,6 +39,33 @@ _statusline_declined_marker() {
     echo "${XDG_CONFIG_HOME:-$HOME/.config}/cs/statusline-declined"
 }
 
+# The rounded capsule caps are the bar's one private-use glyph, so nothing
+# draws them until this machine has said its font has them. The answer lives
+# here, per machine; bin/cs-statusline reads it before every render (KEEP THE
+# PATH IN SYNC with _caps_file there and with install.sh).
+_statusline_caps_file() {
+    echo "${XDG_CONFIG_HOME:-$HOME/.config}/cs/statusline-caps"
+}
+
+# Record the answer; guarded like the declined marker so an unwritable config
+# dir reports instead of aborting under errexit. Prints nothing itself.
+_statusline_caps_write() {  # on|off -> 0 written, 1 not
+    local f
+    f="$(_statusline_caps_file)"
+    mkdir -p "$(dirname "$f")" 2>/dev/null && printf '%s\n' "$1" > "$f" 2>/dev/null
+}
+
+# Show the caps and ask whether they render. Only for an attached terminal:
+# the caller decides what a non-interactive run does. Sets _CAPS_ANSWER to
+# on or off; enter means on, since the person is looking at the sample.
+_statusline_caps_ask() {
+    printf '\n  %s\n' "$(printf '\xee\x82\xb6')cs-statusline$(printf '\xee\x82\xb4')"
+    echo -en "Do the ends of that capsule render as rounded shapes (not boxes)? [Y/n] "
+    read -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Nn]$ ]]; then _CAPS_ANSWER=off; else _CAPS_ANSWER=on; fi
+}
+
 # disable strips only a cs-statusline registration, never a foreign one.
 run_statusline_cmd() {
     local action="${1:-}"
@@ -102,8 +129,26 @@ run_statusline_cmd() {
                 warn "  cs -update will ask again next release."
             fi
             ;;
+        caps)
+            local answer="${2:-}"
+            case "$answer" in
+                on|off) ;;
+                ask)
+                    cs_interactive || error "cs -statusline caps ask needs a terminal; use caps on|off"
+                    _statusline_caps_ask
+                    answer="$_CAPS_ANSWER"
+                    ;;
+                *) error "Usage: cs -statusline caps on|off|ask" ;;
+            esac
+            if _statusline_caps_write "$answer"; then
+                info "Capsule caps: $answer (recorded in $(_statusline_caps_file))"
+                info "Claude Code repaints the bar on its next refresh."
+            else
+                error "Could not record the answer in $(_statusline_caps_file)"
+            fi
+            ;;
         *)
-            error "Usage: cs -statusline enable|disable"
+            error "Usage: cs -statusline enable|disable|caps on|off|ask"
             ;;
     esac
 }

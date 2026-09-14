@@ -807,6 +807,32 @@ else
             fi
             ;;
     esac
+    # The rounded capsule caps are the bar's one private-use glyph, so the
+    # renderer draws square ends until this machine has said its font has
+    # them. Ask once, here, while the sample is still on screen; the answer
+    # is per machine and `cs -statusline caps on|off|ask` rewrites it (KEEP
+    # THE PATH IN SYNC with lib/70-statusline.sh and bin/cs-statusline).
+    # Non-interactive installs write nothing and say how to answer later.
+    _statusline_caps="${XDG_CONFIG_HOME:-$HOME/.config}/cs/statusline-caps"
+    if [ -n "$_register_statusline" ] && [ ! -f "$_statusline_caps" ]; then
+        if [ -t 0 ]; then
+            printf '\n  %s\n' "$(printf '\xee\x82\xb6')cs-statusline$(printf '\xee\x82\xb4')"
+            echo -en "Do the ends of that capsule render as rounded shapes (not boxes)? [Y/n] "
+            read -n 1 -r
+            echo ""
+            _caps_answer=on
+            [[ $REPLY =~ ^[Nn]$ ]] && _caps_answer=off
+            if mkdir -p "$(dirname "$_statusline_caps")" 2>/dev/null \
+                && printf '%s\n' "$_caps_answer" > "$_statusline_caps" 2>/dev/null; then
+                info "Capsule caps: $_caps_answer. Change later with: cs -statusline caps on|off|ask"
+            else
+                warn "Capsule caps: $_caps_answer, but the answer could not be recorded in $_statusline_caps"
+                warn "  The bar shows square ends until: cs -statusline caps $_caps_answer"
+            fi
+        else
+            info "Capsule caps: square ends until you answer once with: cs -statusline caps ask"
+        fi
+    fi
     if [ -n "$_register_statusline" ]; then
         # refreshInterval keeps the bar repainting once a second while idle;
         # the logo's attention pulse animates on that timer. Registers BOTH
