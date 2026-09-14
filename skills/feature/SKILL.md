@@ -49,10 +49,16 @@ One paragraph: what to build and why.
   decisions already made, things rejected, files to leave alone).
 
 ## Report back
-When done, send a one-line result to the base session with:
-cs -msg <base> -k result "<what landed, what is left>"
-Then the base session lands the work with /finish <feature>.
+When done, send a one-line result to the session that spawned you:
+cs -msg <spawner> -k result "<what landed, what is left>"
+The base session <base> then lands the work with /finish <feature>.
 ```
+
+`<spawner>` is `$CLAUDE_SESSION_NAME`, this session, whatever its name: the
+result comes back here, to the conversation that asked for the feature.
+`<base>` is the repository the feature forks from, and the two differ when
+this session is itself a feature worktree. cs writes the same recipient into the new
+session's wake-up line, so the brief and the kick agree.
 
 Keep it to what the new session needs; it has the repo, CLAUDE.md and the
 session's own docs, so do not repeat those. If the user's request is too

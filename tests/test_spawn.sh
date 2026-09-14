@@ -138,10 +138,33 @@ test_spawn_rejects_unreadable_or_empty_brief_before_staging() {
     ! "$CS_BIN" -spawn worker --brief "$TEST_TMPDIR/absent.md" >/dev/null 2>&1 || return 1
     : > "$TEST_TMPDIR/empty.md"
     ! "$CS_BIN" -spawn worker --brief "$TEST_TMPDIR/empty.md" >/dev/null 2>&1 || return 1
+    printf 'secret brief\n' > "$TEST_TMPDIR/locked.md"
+    chmod 000 "$TEST_TMPDIR/locked.md"
+    local rc=0
+    "$CS_BIN" -spawn worker --brief "$TEST_TMPDIR/locked.md" >/dev/null 2>&1 && rc=1
+    chmod 600 "$TEST_TMPDIR/locked.md"
+    [ "$rc" = 0 ] || { echo "  an unreadable brief was accepted"; return 1; }
     ! "$CS_BIN" -spawn worker --brief >/dev/null 2>&1 || return 1
     [ ! -f "$(SEED)" ] || { echo "  seed written on a rejected brief"; return 1; }
     [ ! -f "$(BRIEF)" ] || { echo "  brief staged on a rejected brief"; return 1; }
     [ ! -f "$FAKE_TMUX_DIR/log" ] || { echo "  a window was opened on a rejected brief"; return 1; }
+}
+
+# The seed is the launch's signal that staging is complete. A brief that
+# could not be copied must stop the spawn before the seed exists, or the
+# window opens and the session launches without the brief it was promised.
+test_spawn_failed_brief_copy_publishes_no_seed() {
+    printf 'brief body\n' > "$TEST_TMPDIR/brief.md"
+    mkdir -p "$CS_SESSIONS_ROOT/.spawn"
+    chmod 500 "$CS_SESSIONS_ROOT/.spawn"
+    local rc=0
+    "$CS_BIN" -spawn worker --brief "$TEST_TMPDIR/brief.md" >/dev/null 2>&1 && rc=1
+    chmod 700 "$CS_SESSIONS_ROOT/.spawn"
+    [ "$rc" = 0 ] || { echo "  a failed brief copy still reported success"; return 1; }
+    [ ! -f "$(SEED)" ] || { echo "  seed published after the brief copy failed"; return 1; }
+    # The precheck's has-session is logged too; only the window commands count.
+    ! grep -E -q '^(new-session|new-window) ' "$FAKE_TMUX_DIR/log" 2>/dev/null \
+        || { echo "  a window was opened after the brief copy failed"; return 1; }
 }
 
 # The seed refusal already covers a pending brief: a brief never exists
@@ -294,6 +317,32 @@ test_launch_brief_with_tasks_kicks_to_both() {
     assert_file_contains "$(WQ)/queue.state" "armed" "queue armed" || return 1
 }
 
+# A brief the launch cannot move into the session must stop the launch with
+# the seed and brief still staged, so the next open retries; consuming the
+# seed would start the session without the brief, and leave the brief to
+# attach to some later, unrelated spawn of the same name.
+test_launch_failed_brief_delivery_keeps_the_seed_and_brief() {
+    # First open creates the session; then the brief's destination is made
+    # undeliverable (a sealed directory in its place) while the staging
+    # directory stays writable, so only the delivery can fail.
+    _launch_worker >/dev/null || return 1
+    mkdir -p "$CS_SESSIONS_ROOT/worker/.cs/brief.md"
+    chmod 500 "$CS_SESSIONS_ROOT/worker/.cs/brief.md"
+    mkdir -p "$CS_SESSIONS_ROOT/.spawn"
+    printf 'boss\nfirst job\n' > "$CS_SESSIONS_ROOT/.spawn/worker.seed"
+    printf 'brief body\n' > "$CS_SESSIONS_ROOT/.spawn/worker.brief.md"
+    local rc=0 out
+    out=$(_launch_worker) || rc=$?
+    chmod 700 "$CS_SESSIONS_ROOT/worker/.cs/brief.md"
+    [ "$rc" != 0 ] || { echo "  launch succeeded without delivering the brief"; return 1; }
+    assert_file_exists "$CS_SESSIONS_ROOT/.spawn/worker.seed" "seed kept for a retry" || return 1
+    assert_file_exists "$CS_SESSIONS_ROOT/.spawn/worker.brief.md" "brief kept for a retry" || return 1
+    [ ! -f "$CS_SESSIONS_ROOT/worker/.cs/brief.md/worker.brief.md" ] || { echo "  a brief appeared in the session anyway"; return 1; }
+    assert_eq "0" "$(WQ_COUNT)" "no task queued without the brief" || return 1
+    assert_output_not_contains "$out" "Spawned by" "no kick without the brief" || return 1
+    assert_output_contains "$out" "brief" "the failure names the brief" || return 1
+}
+
 test_launch_stale_seed_sets_its_brief_aside_too() {
     mkdir -p "$CS_SESSIONS_ROOT/.spawn"
     printf 'boss\n' > "$CS_SESSIONS_ROOT/.spawn/worker.seed"
@@ -360,6 +409,7 @@ run_test test_spawn_without_task_writes_no_seed
 run_test test_spawn_stages_brief_beside_the_seed
 run_test test_spawn_brief_and_tasks_stage_together
 run_test test_spawn_rejects_unreadable_or_empty_brief_before_staging
+run_test test_spawn_failed_brief_copy_publishes_no_seed
 run_test test_spawn_refuses_to_replace_a_pending_brief
 run_test test_spawn_attach_hint_uses_switch_client_inside_tmux
 run_test test_spawn_refuses_existing_seed
@@ -376,6 +426,7 @@ run_test test_launch_empty_spawner_gets_no_reply_wiring
 run_test test_launch_without_seed_keeps_color_behavior
 run_test test_launch_moves_brief_into_the_session_and_kicks_to_it
 run_test test_launch_brief_with_tasks_kicks_to_both
+run_test test_launch_failed_brief_delivery_keeps_the_seed_and_brief
 run_test test_launch_stale_seed_sets_its_brief_aside_too
 run_test test_launch_sets_aside_stale_seed
 run_test test_launch_stale_warning_names_the_stale_file

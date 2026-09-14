@@ -133,9 +133,13 @@ run_spawn() {
         [ ! -f "$seed" ] || error "A pending spawn for $name exists: $seed"
         mkdir -p "$sdir"
         # Brief before seed: the launch treats the seed as the signal, so a
-        # brief must never be missing once the seed is visible.
+        # brief must never be missing once the seed is visible. A copy that
+        # fails stops here, before the seed and the window: errexit does not
+        # see a failed left operand, so the abort is explicit.
         if [ -n "$brief" ]; then
-            cp "$brief" "$sdir/$name.brief.md.tmp" && mv "$sdir/$name.brief.md.tmp" "$sdir/$name.brief.md"
+            cp "$brief" "$sdir/$name.brief.md.tmp" \
+                && mv "$sdir/$name.brief.md.tmp" "$sdir/$name.brief.md" \
+                || { rm -f "$sdir/$name.brief.md.tmp"; error "cs -spawn --brief: cannot stage $brief in $sdir"; }
         fi
         {
             printf '%s\n' "${CLAUDE_SESSION_NAME:-}"

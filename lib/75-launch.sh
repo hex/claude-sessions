@@ -247,6 +247,17 @@ launch_claude_code() {
             warn "Stale spawn seed set aside: $_seed.stale (re-run cs -spawn if still wanted)"
         else
             local _spawner="" _line _n=0 _first=1 _has_brief=0
+            # The brief moves in before any task is queued, and a move that
+            # fails stops the launch with the seed and brief still staged, so
+            # the next open retries. Consuming the seed regardless would start
+            # the session without the brief it was opened for, and leave the
+            # brief to attach to a later spawn of the same name. errexit does
+            # not see a failed left operand, so the abort is explicit.
+            if [ -f "$_brief" ]; then
+                mv "$_brief" "$session_dir/.cs/brief.md" \
+                    || error "Spawn brief could not be delivered to $session_dir/.cs/brief.md (seed kept; re-open the session to retry)"
+                _has_brief=1
+            fi
             while IFS= read -r _line || [ -n "$_line" ]; do
                 if [ "$_first" = 1 ]; then _spawner="$_line"; _first=0; continue; fi
                 # Skip whitespace-only lines, not merely empty ones: _queue_add
@@ -257,11 +268,6 @@ launch_claude_code() {
                 _queue_add "$session_dir/.cs/local" "$_line"
                 _n=$((_n + 1))
             done < "$_seed"
-            # The brief becomes the session's own file, replacing any earlier
-            # one: this spawn's brief is the one the session was opened for.
-            if [ -f "$_brief" ]; then
-                mv "$_brief" "$session_dir/.cs/brief.md" && _has_brief=1
-            fi
             [ "$_n" -eq 0 ] || _queue_set_state "$session_dir/.cs/local" armed
             if [ "$_n" -gt 0 ] || [ "$_has_brief" = 1 ]; then
                 local _work=""
