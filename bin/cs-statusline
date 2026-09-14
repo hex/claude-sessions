@@ -1351,8 +1351,9 @@ _fable_candidate() {
 # The 5h window is the one being spent right now, so it is always on the bar.
 # The coarse windows — wk from stdin and, on a Fable session, the model-scoped
 # weekly window from the usage cache — arrive at 50 and stay hidden below it;
-# their arrival is the signal. Reveal and colour are separate: every window is
-# neutral below 70, amber from 70, crit from 90 (see _limits_render).
+# their arrival is the signal. The order is fixed: 5h, wk, fable. Reveal and
+# colour are separate: every window is neutral below 70, amber from 70, crit
+# from 90 (see _limits_render).
 _seg_limits() {
     _LIM_NAME=(); _LIM_PCT=(); _LIM_RESET=(); _LIM_GATE=(); _LIM_ICON=(); _LIM_SHOW=()
     local h="${SL_5H%%.*}" w="${SL_WK%%.*}"
@@ -1378,24 +1379,16 @@ _seg_fable() {
     _limits_emit_hot
 }
 
-# Render every candidate at or past its own reveal floor (_LIM_SHOW): the
-# fixed 5h window first, then the coarse windows highest first. At most three
-# candidates, so a pass that picks the max is the whole sort; no subprocess,
-# no bash 4 features.
+# Render every candidate at or past its own reveal floor (_LIM_SHOW), in the
+# order they were registered: 5h, wk, fable. The order is fixed so capsules
+# never swap places as the numbers move.
 _limits_emit_hot() {
-    local n=${#_LIM_NAME[@]} best i
-    while :; do
-        best=-1
-        for ((i = 0; i < n; i++)); do
-            [ -n "${_LIM_NAME[i]}" ] || continue
-            [ "${_LIM_PCT[i]}" -ge "${_LIM_SHOW[i]}" ] || continue
-            if [ "${_LIM_SHOW[i]}" -eq 0 ]; then best=$i; break; fi
-            if [ "$best" -lt 0 ] || [ "${_LIM_PCT[i]}" -gt "${_LIM_PCT[best]}" ]; then best=$i; fi
-        done
-        [ "$best" -ge 0 ] || return 0
-        _limits_render "${_LIM_NAME[best]}" "${_LIM_PCT[best]}" "${_LIM_RESET[best]}" \
-            "${_LIM_GATE[best]}" "${_LIM_ICON[best]}"
-        _LIM_NAME[best]=""
+    local n=${#_LIM_NAME[@]} i
+    for ((i = 0; i < n; i++)); do
+        [ -n "${_LIM_NAME[i]}" ] || continue
+        [ "${_LIM_PCT[i]}" -ge "${_LIM_SHOW[i]}" ] || continue
+        _limits_render "${_LIM_NAME[i]}" "${_LIM_PCT[i]}" "${_LIM_RESET[i]}" \
+            "${_LIM_GATE[i]}" "${_LIM_ICON[i]}"
     done
 }
 

@@ -3457,12 +3457,21 @@ test_limits_hot_window_is_amber_ink_then_crit_capsule() {
     assert_output_contains_f "$out" "48;2;227;221;204;38;2;79;77;71;1ms" "identity is untouched" || return 1
 }
 
-test_limits_all_three_show_5h_first_then_highest() {
+# Capsules never swap places as numbers move: the order is fixed 5h, wk, fable.
+test_limits_order_is_fixed_5h_wk_fable() {
+    export NO_COLOR=1 CS_USAGE_NO_REFRESH=1
+    seed_usage_cache org-abc 95 "2026-08-29T03:59:59Z" 1787816000 1787816300
+    local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":55}}}'
+    local out; out=$(CS_STATUSLINE_NOW=1787816100 run_sl "$json")
+    assert_eq "s · ✦ Fable > ◷ 5h 12% > ◶ wk 55% > ✧ fable 95% · 1d20h" "$out" "fable hotter than wk still renders after it" || return 1
+}
+
+test_limits_all_three_show_in_fixed_order() {
     export NO_COLOR=1 CS_USAGE_NO_REFRESH=1
     seed_usage_cache org-abc 85 "2026-08-29T03:59:59Z" 1787816000 1787816300
     local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":72},"seven_day":{"used_percentage":95}}}'
     local out; out=$(CS_STATUSLINE_NOW=1787816100 run_sl "$json")
-    assert_output_contains_f "$out" "◷ 5h 72% > ◶ wk 95% > ✧ fable 85% · 1d20h" "5h first, then wk and fable highest first; fable past 80 carries its countdown" || return 1
+    assert_output_contains_f "$out" "◷ 5h 72% > ◶ wk 95% > ✧ fable 85% · 1d20h" "5h, wk, fable in that order; fable past 80 carries its countdown" || return 1
 }
 
 test_limits_countdown_rules_survive_gating() {
@@ -3527,7 +3536,8 @@ run_test test_limits_at_sixty_nine_show_5h_then_wk
 run_test test_wk_icon_differs_from_the_half_pie
 run_test test_limits_wk_arrives_after_the_fixed_5h
 run_test test_limits_hot_window_is_amber_ink_then_crit_capsule
-run_test test_limits_all_three_show_5h_first_then_highest
+run_test test_limits_order_is_fixed_5h_wk_fable
+run_test test_limits_all_three_show_in_fixed_order
 run_test test_limits_countdown_rules_survive_gating
 run_test test_fable_hidden_below_seventy_but_cache_still_read
 run_test test_fable_named_alone_renders_only_the_fable_window
