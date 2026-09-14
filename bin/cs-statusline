@@ -1306,21 +1306,25 @@ _seg_git() {
     _add "${ICON_GIT}${t}" identity ink bold
 }
 
-# One rate-limit capsule: label in secondary ink, the number in the threshold
-# colour, crit inverting the capsule. $4 is the usage floor at or above which
-# the reset countdown is appended (5h at 70, the reveal; the seven-day windows
-# at 80: the coarse windows only make time-to-reset actionable near exhaustion).
+# One rate-limit window: label in secondary ink, the number in the threshold
+# colour. $4 is the usage floor at or above which the reset countdown is
+# appended (5h at 70, the reveal; the seven-day windows at 80: the coarse
+# windows only make time-to-reset actionable near exhaustion). $6 is the
+# capsule the window lands in and $7 the join before its label: 5h and wk
+# share the quota capsule, joined by a bar; fable has its own. A crit window
+# inverts its whole capsule, so one hot window reddens the pair: throttling is
+# near for the account, whichever window tripped.
 _limits_render() {
-    local name="$1" pct="$2" reset="$3" gate="$4" icon="$5"
+    local name="$1" pct="$2" reset="$3" gate="$4" icon="$5" group="$6" join="$7"
     _thresh_color "$pct" 70 90
-    [ "$_COLOR" = "crit" ] && _invert "lim-$name"
+    [ "$_COLOR" = "crit" ] && _invert "$group"
     local label="${pct}%"
     if [ "$pct" -ge "$gate" ]; then
         _fmt_rest "$reset"
         [ -n "$_REST" ] && label="$label · $_REST"
     fi
-    _add "${icon}${name}" "lim-$name" ink2 "" none
-    _add "$label" "lim-$name" "$_COLOR" "$_HOT_WEIGHT" space
+    _add "${icon}${name}" "$group" ink2 "" "$join"
+    _add "$label" "$group" "$_COLOR" "$_HOT_WEIGHT" space
 }
 
 # Read the Fable window into the candidate list. Model-scoped, so it is only
@@ -1345,7 +1349,7 @@ _fable_candidate() {
     fi
     [ -n "$_FABLE_PCT" ] || return 0
     _LIM_NAME+=("fable"); _LIM_PCT+=("$_FABLE_PCT"); _LIM_RESET+=("$_FABLE_RESET")
-    _LIM_GATE+=(80); _LIM_ICON+=("$ICON_FABLE"); _LIM_SHOW+=(50)
+    _LIM_GATE+=(80); _LIM_ICON+=("$ICON_FABLE"); _LIM_SHOW+=(50); _LIM_GROUP+=("lim-fable")
 }
 
 # The 5h window is the one being spent right now, so it is always on the bar.
@@ -1355,13 +1359,13 @@ _fable_candidate() {
 # colour are separate: every window is neutral below 70, amber from 70, crit
 # from 90 (see _limits_render).
 _seg_limits() {
-    _LIM_NAME=(); _LIM_PCT=(); _LIM_RESET=(); _LIM_GATE=(); _LIM_ICON=(); _LIM_SHOW=()
+    _LIM_NAME=(); _LIM_PCT=(); _LIM_RESET=(); _LIM_GATE=(); _LIM_ICON=(); _LIM_SHOW=(); _LIM_GROUP=()
     local h="${SL_5H%%.*}" w="${SL_WK%%.*}"
     if [ -n "$h" ]; then
-        _LIM_NAME+=("5h"); _LIM_PCT+=("$h"); _LIM_RESET+=("$SL_5H_RESET"); _LIM_GATE+=(70); _LIM_ICON+=("$ICON_5H"); _LIM_SHOW+=(0)
+        _LIM_NAME+=("5h"); _LIM_PCT+=("$h"); _LIM_RESET+=("$SL_5H_RESET"); _LIM_GATE+=(70); _LIM_ICON+=("$ICON_5H"); _LIM_SHOW+=(0); _LIM_GROUP+=("limits")
     fi
     if [ -n "$w" ]; then
-        _LIM_NAME+=("wk"); _LIM_PCT+=("$w"); _LIM_RESET+=("$SL_WK_RESET"); _LIM_GATE+=(80); _LIM_ICON+=("$ICON_WK"); _LIM_SHOW+=(50)
+        _LIM_NAME+=("wk"); _LIM_PCT+=("$w"); _LIM_RESET+=("$SL_WK_RESET"); _LIM_GATE+=(80); _LIM_ICON+=("$ICON_WK"); _LIM_SHOW+=(50); _LIM_GROUP+=("limits")
     fi
     _fable_candidate
     _limits_emit_hot
@@ -1374,7 +1378,7 @@ _seg_limits() {
 # shows it.
 _seg_fable() {
     [ -z "${_LIMITS_NAMED:-}" ] || return 0
-    _LIM_NAME=(); _LIM_PCT=(); _LIM_RESET=(); _LIM_GATE=(); _LIM_ICON=(); _LIM_SHOW=()
+    _LIM_NAME=(); _LIM_PCT=(); _LIM_RESET=(); _LIM_GATE=(); _LIM_ICON=(); _LIM_SHOW=(); _LIM_GROUP=()
     _fable_candidate
     _limits_emit_hot
 }
@@ -1383,12 +1387,15 @@ _seg_fable() {
 # order they were registered: 5h, wk, fable. The order is fixed so capsules
 # never swap places as the numbers move.
 _limits_emit_hot() {
-    local n=${#_LIM_NAME[@]} i
+    local n=${#_LIM_NAME[@]} i join opened=" "
     for ((i = 0; i < n; i++)); do
         [ -n "${_LIM_NAME[i]}" ] || continue
         [ "${_LIM_PCT[i]}" -ge "${_LIM_SHOW[i]}" ] || continue
+        join=none
+        case "$opened" in *" ${_LIM_GROUP[i]} "*) join=bar ;; esac
+        opened="${opened}${_LIM_GROUP[i]} "
         _limits_render "${_LIM_NAME[i]}" "${_LIM_PCT[i]}" "${_LIM_RESET[i]}" \
-            "${_LIM_GATE[i]}" "${_LIM_ICON[i]}"
+            "${_LIM_GATE[i]}" "${_LIM_ICON[i]}" "${_LIM_GROUP[i]}" "$join"
     done
 }
 
@@ -1509,6 +1516,7 @@ _render() {
                 if [ -z "$first" ]; then
                     case "${_SEG_JOIN[i]}" in
                         dot)       out+=" · " ;;
+                        bar)       out+=" │ " ;;
                         pad|space) out+=" " ;;
                     esac
                 fi
@@ -1550,6 +1558,7 @@ _render() {
             if [ -z "$first" ]; then
                 case "${_SEG_JOIN[i]}" in
                     dot)   _sgr 38 ink2; out+="${esc}[${fillsgr};${_SGR};22m  ·  " ;;
+                    bar)   _sgr 38 ink2; out+="${esc}[${fillsgr};${_SGR};22m  │  " ;;
                     pad)   out+="${esc}[${fillsgr}m  " ;;
                     space) out+="${esc}[${fillsgr}m " ;;
                 esac

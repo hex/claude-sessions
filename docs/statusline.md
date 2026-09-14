@@ -3,14 +3,14 @@
 `cs-statusline` is the Claude Code status line shipped with cs. It reads the JSON Claude Code pipes to the registered `statusLine.command` on every render and prints exactly one line of rounded capsules on the terminal's own background.
 
 ```
-✳ claude-sessions  ·  ⎇ main↑1 +2!1  ·  ✦ Fable 5.1 medium  ◑ ctx 42% ◷ 5h 31% ◶ wk 84% · 5d16h
+✳ claude-sessions  ·  ⎇ main↑1 +2!1  ·  ✦ Fable 5.1 medium  ◑ ctx 42%  ◷ 5h 31% │ ◶ wk 84% · 5d16h
 ```
 
-One capsule carries identity — the Claude mark, the session, the branch, the model — and one carries the context gauge. The 5h capsule is always there; the coarse windows appear at 50. Colour is state: bold amber ink on a number past its warn threshold, and the capsule inverts to red at crit, its text pulsing white/pink on the attention clock. The plain form (`NO_COLOR=1`) is `claude-sessions · ⎇ main↑1 +2!1 · ✦ Fable 5.1 medium > ◑ ctx 42% > ◷ 5h 31% > ◶ wk 84% · 5d16h`.
+One capsule carries identity — the Claude mark, the session, the branch, the model — and one carries the context gauge. The quota capsule (5h, joined by a bar to wk once wk reaches 50) is always there; the Fable window gets its own capsule at 50. Colour is state: bold amber ink on a number past its warn threshold, and the capsule inverts to red at crit, its text pulsing white/pink on the attention clock. The plain form (`NO_COLOR=1`) is `claude-sessions · ⎇ main↑1 +2!1 · ✦ Fable 5.1 medium > ◑ ctx 42% > ◷ 5h 31% │ ◶ wk 84% · 5d16h`.
 
 ## Segments
 
-Default order: `logo,session,notes,mail,git,model,ctx,limits`. One capsule holds identity (which session, which branch, which model); one holds the context gauge; the 5h window always follows; the coarse windows (wk, and fable on a Fable session) join it at 50, in that fixed order. `pane` and `fable` ship but leave the default order — name them in `CS_STATUSLINE_SEGMENTS` to show them. The `cost` segment ships too, off by default the same way.
+Default order: `logo,session,notes,mail,git,model,ctx,limits`. One capsule holds identity (which session, which branch, which model); one holds the context gauge; one quota capsule always follows, holding 5h and, from 50, wk after a bar; on a Fable session the model window gets its own capsule from 50. `pane` and `fable` ship but leave the default order — name them in `CS_STATUSLINE_SEGMENTS` to show them. The `cost` segment ships too, off by default the same way.
 
 | Name | Group | Rest | Hot | Hidden when | Source |
 |---|---|---|---|---|---|
@@ -22,7 +22,7 @@ Default order: `logo,session,notes,mail,git,model,ctx,limits`. One capsule holds
 | `git` | identity | branch with the arrows and `+N!N` marks, bold ink | — | no `.git` | One `git status --porcelain=v1 -b` call |
 | `model` | identity | display name in bold ink, effort in secondary ink regular | — | no model on stdin | stdin `model.display_name`, `effort.level` |
 | `ctx` | ctx | `◔ ctx N%`, secondary ink; the pie fills with the band: `○` below 13, `◔` to warn, `◑` through amber, `◕` at crit, `●` from 88 | amber ink on the number at 40; crit inversion at 65 (`CS_STATUSLINE_CTX_WARN`/`_CRIT`; the half and three-quarter steps follow them) | no `context_window` on stdin | stdin `context_window.used_percentage` |
-| `limits` | limits | `◷ 5h N%` | one capsule per window in the fixed order 5h, wk, fable: 5h always, the other two from 50: `5h N% · 2h14m`, `wk N% · 5d16h`, `fable N% · 18h`; neutral below 70, amber ink at 70, crit inversion at 90; the countdown joins 5h at 70 and the coarse windows at 80 | wk and fable below 50 | stdin `rate_limits.*.used_percentage`, `rate_limits.five_hour.resets_at`, `rate_limits.seven_day.resets_at`, plus the usage cache when the model is Fable |
+| `limits` | limits | `◷ 5h N%` | the quota capsule `5h N% │ wk N%` (5h always, wk from 50, joined by a bar) and a separate `fable N%` capsule from 50 on a Fable session: `5h N% · 2h14m`, `wk N% · 5d16h`, `fable N% · 18h`; neutral below 70, amber ink at 70, crit inversion at 90; the countdown joins 5h at 70 and the coarse windows at 80 | wk and fable below 50 | stdin `rate_limits.*.used_percentage`, `rate_limits.five_hour.resets_at`, `rate_limits.seven_day.resets_at`, plus the usage cache when the model is Fable |
 | `fable` | limits | accepted as a name: the Fable window alone when `limits` is not named; a no-op beside `limits` | — | below 70, like every window | `GET /api/oauth/usage`, cached machine-globally (see [Fable usage](#fable-usage)) |
 | `cost` | cost | `$N.NN`, secondary ink, its own capsule after limits; only when named | — | not named, or no cost on stdin | stdin `cost.total_cost_usd` |
 

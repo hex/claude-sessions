@@ -188,8 +188,8 @@ test_all_segments_ordering_plain() {
     }')
     local out
     out=$(run_sl "$json")
-    assert_eq "mysess · ⎇ main +1!1 · ✦ Opus high > ◔ ctx 34% > ◷ 5h 95% > ◶ wk 72%" "$out" \
-        "all segments should render in order: session, branch, model, ctx, then the two hot limits highest first"
+    assert_eq "mysess · ⎇ main +1!1 · ✦ Opus high > ◔ ctx 34% > ◷ 5h 95% │ ◶ wk 72%" "$out" \
+        "all segments should render in order: session, branch, model, ctx, then the shared quota capsule, 5h then wk"
 }
 
 # ============================================================================
@@ -266,7 +266,7 @@ test_limits_threshold_per_block() {
     assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◶ wk" "wk 95% block should invert to the crit fill" || return 1
     assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m95%" "the wk number inverts too" || return 1
     assert_output_contains_f "$out" "◷ 5h" "the healthy 5h window stays on the bar" || return 1
-    assert_output_not_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◷ 5h" "a 5h at 12 is never inverted" || return 1
+    assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◷ 5h" "5h at 12 rides the shared capsule, which a wk at 95 inverts whole" || return 1
 }
 
 test_logo_mark_is_brand_ink() {
@@ -3410,7 +3410,7 @@ test_limits_5h_always_shown_and_coarse_windows_arrive_at_fifty() {
     assert_eq "s > ○ ctx 8% > ◷ 5h 12%" "$out" "5h at 12 shows; wk at 49 stays hidden" || return 1
     json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":50}}}'
     out=$(run_sl "$json")
-    assert_eq "s > ○ ctx 8% > ◷ 5h 12% > ◶ wk 50%" "$out" "wk arrives at 50, after the fixed 5h" || return 1
+    assert_eq "s > ○ ctx 8% > ◷ 5h 12% │ ◶ wk 50%" "$out" "wk arrives at 50, beside the fixed 5h, joined by a bar" || return 1
 }
 
 test_limits_shown_window_is_neutral_below_seventy() {
@@ -3426,7 +3426,7 @@ test_limits_at_sixty_nine_show_5h_then_wk() {
     export NO_COLOR=1
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8},"rate_limits":{"five_hour":{"used_percentage":69},"seven_day":{"used_percentage":69.9}}}'
     local out; out=$(run_sl "$json")
-    assert_eq "s > ○ ctx 8% > ◷ 5h 69% > ◶ wk 69%" "$out" "both at 69 show, 5h first, neutral" || return 1
+    assert_eq "s > ○ ctx 8% > ◷ 5h 69% │ ◶ wk 69%" "$out" "both at 69 show, 5h first, neutral" || return 1
 }
 
 # The weekly icon must not be the half pie the ctx gauge now shows in its
@@ -3435,14 +3435,14 @@ test_wk_icon_differs_from_the_half_pie() {
     export NO_COLOR=1
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":47},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":72}}}'
     local out; out=$(run_sl "$json")
-    assert_eq "s > ◑ ctx 47% > ◷ 5h 12% > ◶ wk 72%" "$out" "wk takes the lower-left quadrant, distinct from the ctx half pie" || return 1
+    assert_eq "s > ◑ ctx 47% > ◷ 5h 12% │ ◶ wk 72%" "$out" "wk takes the lower-left quadrant, distinct from the ctx half pie" || return 1
 }
 
 test_limits_wk_arrives_after_the_fixed_5h() {
     export NO_COLOR=1
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":70}}}'
     local out; out=$(run_sl "$json")
-    assert_eq "s > ○ ctx 8% > ◷ 5h 12% > ◶ wk 70%" "$out" "wk at 70 appears after the fixed 5h" || return 1
+    assert_eq "s > ○ ctx 8% > ◷ 5h 12% │ ◶ wk 70%" "$out" "wk at 70 appears beside the fixed 5h" || return 1
 }
 
 test_limits_hot_window_is_amber_ink_then_crit_capsule() {
@@ -3458,12 +3458,31 @@ test_limits_hot_window_is_amber_ink_then_crit_capsule() {
 }
 
 # Capsules never swap places as numbers move: the order is fixed 5h, wk, fable.
+# 5h and wk are one quota, so they share a capsule joined by a bar; the
+# model-scoped fable window stays a capsule of its own.
+test_limits_5h_and_wk_share_a_capsule_fable_stands_alone() {
+    export NO_COLOR=1 CS_USAGE_NO_REFRESH=1
+    seed_usage_cache org-abc 95 "2026-08-29T03:59:59Z" 1787816000 1787816300
+    local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":55}}}'
+    local out; out=$(CS_STATUSLINE_NOW=1787816100 run_sl "$json")
+    assert_eq "s · ✦ Fable > ◷ 5h 12% │ ◶ wk 55% > ✧ fable 95% · 1d20h" "$out" "5h and wk joined by a bar in one capsule; fable is its own" || return 1
+}
+
+# One hot window inverts the shared quota capsule as a whole: a red capsule
+# means throttling is near, whichever window tripped.
+test_limits_shared_capsule_inverts_when_either_window_is_crit() {
+    export COLORTERM=truecolor
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":95}}}'
+    local out; out=$(CS_STATUSLINE_NOW=1000 run_sl "$json")
+    assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◷ 5h" "5h at 12 is painted on the crit fill beside a wk at 95" || return 1
+}
+
 test_limits_order_is_fixed_5h_wk_fable() {
     export NO_COLOR=1 CS_USAGE_NO_REFRESH=1
     seed_usage_cache org-abc 95 "2026-08-29T03:59:59Z" 1787816000 1787816300
     local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":55}}}'
     local out; out=$(CS_STATUSLINE_NOW=1787816100 run_sl "$json")
-    assert_eq "s · ✦ Fable > ◷ 5h 12% > ◶ wk 55% > ✧ fable 95% · 1d20h" "$out" "fable hotter than wk still renders after it" || return 1
+    assert_eq "s · ✦ Fable > ◷ 5h 12% │ ◶ wk 55% > ✧ fable 95% · 1d20h" "$out" "fable hotter than wk still renders after it" || return 1
 }
 
 test_limits_all_three_show_in_fixed_order() {
@@ -3471,7 +3490,7 @@ test_limits_all_three_show_in_fixed_order() {
     seed_usage_cache org-abc 85 "2026-08-29T03:59:59Z" 1787816000 1787816300
     local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":72},"seven_day":{"used_percentage":95}}}'
     local out; out=$(CS_STATUSLINE_NOW=1787816100 run_sl "$json")
-    assert_output_contains_f "$out" "◷ 5h 72% > ◶ wk 95% > ✧ fable 85% · 1d20h" "5h, wk, fable in that order; fable past 80 carries its countdown" || return 1
+    assert_output_contains_f "$out" "◷ 5h 72% │ ◶ wk 95% > ✧ fable 85% · 1d20h" "5h, wk, fable in that order; fable past 80 carries its countdown" || return 1
 }
 
 test_limits_countdown_rules_survive_gating() {
@@ -3513,9 +3532,9 @@ test_limits_and_fable_both_named_render_once_in_either_order() {
     local json='{"session_name":"s","model":{"id":"claude-fable-5","display_name":"Fable"},"workspace":{"current_dir":"/none"},"rate_limits":{"five_hour":{"used_percentage":72},"seven_day":{"used_percentage":95}}}'
     local out
     out=$(CS_STATUSLINE_SEGMENTS="session,limits,fable" CS_STATUSLINE_NOW=1787816100 run_sl "$json")
-    assert_eq "s > ◷ 5h 72% > ◶ wk 95% > ✧ fable 85% · 1d20h" "$out" "limits then fable: one pass, all three, 5h first" || return 1
+    assert_eq "s > ◷ 5h 72% │ ◶ wk 95% > ✧ fable 85% · 1d20h" "$out" "limits then fable: one pass, all three, 5h first" || return 1
     out=$(CS_STATUSLINE_SEGMENTS="session,fable,limits" CS_STATUSLINE_NOW=1787816100 run_sl "$json")
-    assert_eq "s > ◷ 5h 72% > ◶ wk 95% > ✧ fable 85% · 1d20h" "$out" "fable named first changes nothing: limits owns all three windows" || return 1
+    assert_eq "s > ◷ 5h 72% │ ◶ wk 95% > ✧ fable 85% · 1d20h" "$out" "fable named first changes nothing: limits owns all three windows" || return 1
 }
 
 test_pane_off_by_default_and_rendered_when_named() {
@@ -3536,6 +3555,8 @@ run_test test_limits_at_sixty_nine_show_5h_then_wk
 run_test test_wk_icon_differs_from_the_half_pie
 run_test test_limits_wk_arrives_after_the_fixed_5h
 run_test test_limits_hot_window_is_amber_ink_then_crit_capsule
+run_test test_limits_5h_and_wk_share_a_capsule_fable_stands_alone
+run_test test_limits_shared_capsule_inverts_when_either_window_is_crit
 run_test test_limits_order_is_fixed_5h_wk_fable
 run_test test_limits_all_three_show_in_fixed_order
 run_test test_limits_countdown_rules_survive_gating
