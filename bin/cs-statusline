@@ -1318,19 +1318,19 @@ _seg_ctx() {
 }
 
 # The effort word after the model wears Claude Code's own /effort colour for
-# that level, bold; max is painted letter by letter through its gradient. A
-# level the picker does not have stays secondary ink.
+# that level, regular weight; max is painted letter by letter through its
+# gradient. A level the picker does not have stays secondary ink.
 _seg_model() {
     [ -n "$SL_MODEL" ] || return 0
     _add "${ICON_MODEL}${SL_MODEL}" identity ink bold
     [ -n "$SL_EFFORT" ] || return 0
     case "$SL_EFFORT" in
         low|medium|high|xhigh)
-            _add "$SL_EFFORT" identity "effort-$SL_EFFORT" bold space ;;
+            _add "$SL_EFFORT" identity "effort-$SL_EFFORT" "" space ;;
         max)
-            _add "m" identity effort-max-1 bold space
-            _add "a" identity effort-max-2 bold none
-            _add "x" identity effort-max-3 bold none ;;
+            _add "m" identity effort-max-1 "" space
+            _add "a" identity effort-max-2 "" none
+            _add "x" identity effort-max-3 "" none ;;
         *)
             _add "$SL_EFFORT" identity ink2 "" space ;;
     esac

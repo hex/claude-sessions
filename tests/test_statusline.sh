@@ -3361,12 +3361,12 @@ test_effort_takes_claude_codes_effort_colours() {
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"model":{"display_name":"Opus"},"effort":{"level":"high"}}'
     local out; out=$(run_sl "$json")
     assert_output_contains_f "$out" "38;2;79;77;71;1m✦ Opus" "model name bold ink" || return 1
-    assert_output_contains_f "$out" "✦ Opus${ESC_}[48;2;227;221;204m ${ESC_}[48;2;227;221;204;38;2;87;105;247;1mhigh" \
-        "high: one space after the model, Claude Code's blue, bold" || return 1
+    assert_output_contains_f "$out" "✦ Opus${ESC_}[48;2;227;221;204m ${ESC_}[48;2;227;221;204;38;2;87;105;247;22mhigh" \
+        "high: one space after the model, Claude Code's blue, regular weight" || return 1
     for pair in "low:150;108;30" "medium:44;122;57" "xhigh:135;0;255"; do
         json="{\"session_name\":\"s\",\"workspace\":{\"current_dir\":\"/none\"},\"model\":{\"display_name\":\"Opus\"},\"effort\":{\"level\":\"${pair%%:*}\"}}"
         out=$(run_sl "$json")
-        assert_output_contains_f "$out" "38;2;${pair#*:};1m${pair%%:*}" "${pair%%:*} takes its sampled colour" || return 1
+        assert_output_contains_f "$out" "38;2;${pair#*:};22m${pair%%:*}" "${pair%%:*} takes its sampled colour" || return 1
     done
 }
 
@@ -3375,7 +3375,7 @@ test_effort_max_is_a_gradient_across_its_letters() {
     export CS_TERM_BG_RGB="253;246;227"
     local json='{"session_name":"s","workspace":{"current_dir":"/none"},"model":{"display_name":"Opus"},"effort":{"level":"max"}}'
     local out; out=$(run_sl "$json")
-    assert_output_contains_f "$out" "38;2;130;170;220;1mm${ESC_}[48;2;227;221;204;38;2;155;130;200;1ma${ESC_}[48;2;227;221;204;38;2;200;130;179;1mx" \
+    assert_output_contains_f "$out" "38;2;130;170;220;22mm${ESC_}[48;2;227;221;204;38;2;155;130;200;22ma${ESC_}[48;2;227;221;204;38;2;200;130;179;22mx" \
         "m blue, a lavender, x pink, no joiner between the letters" || return 1
     export NO_COLOR=1
     out=$(run_sl "$json")
