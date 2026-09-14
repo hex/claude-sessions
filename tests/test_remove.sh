@@ -98,6 +98,22 @@ test_remove_discards_pending_spawn_seeds() {
     [ -f "$CS_SESSIONS_ROOT/.spawn/other.seed" ] || { echo "  another session's seed was deleted"; return 1; }
 }
 
+# The brief staged with a seed dies with the session too: a leftover would
+# reach a future same-name session as a brief nobody wrote for it.
+test_remove_discards_pending_spawn_brief() {
+    create_test_session briefed >/dev/null
+    mkdir -p "$CS_SESSIONS_ROOT/.spawn"
+    printf 'spawner\n' > "$CS_SESSIONS_ROOT/.spawn/briefed.seed"
+    printf 'do this\n' > "$CS_SESSIONS_ROOT/.spawn/briefed.brief.md"
+    printf 'old\n' > "$CS_SESSIONS_ROOT/.spawn/briefed.brief.md.stale"
+    printf 'theirs\n' > "$CS_SESSIONS_ROOT/.spawn/other.brief.md"
+
+    printf 'y\n' | CS_ASSUME_TTY=1 "$CS_BIN" -rm briefed >/dev/null 2>&1 || return 1
+    [ ! -f "$CS_SESSIONS_ROOT/.spawn/briefed.brief.md" ] || { echo "  brief survived removal"; return 1; }
+    [ ! -f "$CS_SESSIONS_ROOT/.spawn/briefed.brief.md.stale" ] || { echo "  stale brief survived removal"; return 1; }
+    [ -f "$CS_SESSIONS_ROOT/.spawn/other.brief.md" ] || { echo "  another session's brief was deleted"; return 1; }
+}
+
 test_remove_worktree_session_discards_seeds() {
     local base="$CS_SESSIONS_ROOT/wbase"
     create_test_session wbase >/dev/null
@@ -154,6 +170,7 @@ run_test test_remove_empty_name_rejected_before_any_deletion
 run_test test_remove_refuses_live_session_without_force
 run_test test_remove_allows_heartbeat_only_session_without_force
 run_test test_remove_discards_pending_spawn_seeds
+run_test test_remove_discards_pending_spawn_brief
 run_test test_remove_worktree_session_discards_seeds
 run_test test_remove_multiple_names_each_confirmed
 run_test test_remove_decline_skips_that_session_only

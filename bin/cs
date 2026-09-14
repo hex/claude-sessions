@@ -5768,8 +5768,8 @@ _doctor_check_iterm2() {
 }
 
 # Spawn hygiene, all best-effort warnings:
-#   - .seed.stale files accumulate in .spawn/ (the launch path sets aged-out
-#     seeds aside but never deletes them),
+#   - .seed.stale and .brief.md.stale files accumulate in .spawn/ (the launch
+#     path sets aged-out seeds and their briefs aside but never deletes them),
 #   - a pending .seed for a session that does not exist blocks re-spawning
 #     that name until it is removed,
 #   - a spawned-by pointer at a deleted session sends the drain notify nowhere,
@@ -5781,7 +5781,7 @@ _doctor_check_spawn() {
     local f name
 
     if [ -d "$spawn_dir" ]; then
-        for f in "$spawn_dir"/*.seed.stale; do
+        for f in "$spawn_dir"/*.seed.stale "$spawn_dir"/*.brief.md.stale; do
             [ -e "$f" ] || continue
             stale+=("$(basename "$f")")
         done
@@ -5792,7 +5792,7 @@ _doctor_check_spawn() {
         done
     fi
     if [ ${#stale[@]} -gt 0 ]; then
-        _doctor_warn "Spawn seeds: ${#stale[@]} aged-out .seed.stale file(s) in .spawn/ (nothing prunes them; safe to delete): ${stale[*]}"
+        _doctor_warn "Spawn seeds: ${#stale[@]} aged-out .stale file(s) in .spawn/ (nothing prunes them; safe to delete): ${stale[*]}"
         clean=0
     fi
     if [ ${#orphan[@]} -gt 0 ]; then

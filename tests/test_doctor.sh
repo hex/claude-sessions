@@ -742,6 +742,17 @@ test_doctor_warns_on_stale_spawn_seeds() {
         "doctor should warn about aged-out seeds that nothing prunes" || return 1
 }
 
+# A brief set aside with a stale seed is a second file nothing prunes.
+test_doctor_warns_on_stale_spawn_brief() {
+    mkdir -p "$CS_SESSIONS_ROOT/.spawn"
+    : > "$CS_SESSIONS_ROOT/.spawn/gone.seed.stale"
+    : > "$CS_SESSIONS_ROOT/.spawn/gone.brief.md.stale"
+    local output
+    output=$(CS_TMUX_BIN="$(_doctor_tmux_fake '' '')" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "gone.brief.md.stale" \
+        "doctor should name the aged-out brief beside its seed" || return 1
+}
+
 test_doctor_warns_on_orphaned_spawn_seed() {
     mkdir -p "$CS_SESSIONS_ROOT/.spawn"
     printf 'boss\ndo work\n' > "$CS_SESSIONS_ROOT/.spawn/ghost.seed"
@@ -860,6 +871,7 @@ run_test test_doctor_runs_token_cost_check
 run_test test_doctor_token_cost_sums_jsonl
 run_test test_doctor_token_cost_handles_no_transcripts
 run_test test_doctor_warns_on_stale_spawn_seeds
+run_test test_doctor_warns_on_stale_spawn_brief
 run_test test_doctor_completes_after_spawn_warning
 run_test test_doctor_warns_on_orphaned_spawn_seed
 run_test test_doctor_spawn_ok_when_seeds_clean
