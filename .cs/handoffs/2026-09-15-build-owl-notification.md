@@ -2,7 +2,8 @@
 parent: b8e266c9-e804-4e3a-b38f-6afbff6170d3
 created: 2026-09-15T14:52:07Z
 purpose: build the owl macOS notification (task #629), then forced rotation with grace (#628), then resume the held v2026.9.16 release (#622)
-status: unconsumed
+status: consumed
+consumed_by: c9bd309e-6a80-4ae2-bc3c-67e2d83a68b9
 ---
 
 ## 1. Next Step
