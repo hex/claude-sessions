@@ -728,6 +728,82 @@ test_live_duplicate_force_overrides() {
         "with --force the live-duplicate refusal must not fire" || return 1
 }
 
+# A Bash-tool child inherits the session's UUID in its argv: the shell snapshot
+# it is started from exports it (a plugin's CODEX_COMPANION_SESSION_ID), and a
+# probe left running in the background outlives the conversation as an orphan.
+# Seen 2026-09-15: a port-forward loop three hours old blocked a relaunch while
+# `cs -live` showed nothing running. Only claude's own argv shapes count.
+test_live_duplicate_ignores_the_uuid_in_a_non_claude_argv() {
+    local uuid="11111111-2222-4333-8444-555555555555"
+    _seed_doctor_session "test-session" "$uuid" > /dev/null
+
+    local stub="$TEST_TMPDIR/ps-stub-child"
+    cat > "$stub" << STUB
+#!/usr/bin/env bash
+echo "  40334 ??       0:00.10 /bin/zsh -c source snapshot.sh && export CODEX_COMPANION_SESSION_ID='$uuid' && sleep 300"
+STUB
+    chmod +x "$stub"
+
+    local output
+    output=$(CS_PS_BIN="$stub" "$CS_BIN" test-session <<< "" 2>&1) || true
+
+    assert_output_not_contains "$output" "already running" \
+        "a UUID inside another program's argv is not a live claude" || return 1
+    assert_output_contains "$output" "--resume $uuid" \
+        "the launch proceeds to resume the recorded conversation" || return 1
+}
+
+# `claude -r <uuid>` is the short spelling of --resume; a conversation opened
+# that way by hand is as live as one cs launched.
+test_live_duplicate_refuses_a_short_resume_flag() {
+    local uuid="11111111-2222-4333-8444-555555555555"
+    _seed_doctor_session "test-session" "$uuid" > /dev/null
+    local stub="$TEST_TMPDIR/ps-stub-r"
+    cat > "$stub" << STUB
+#!/usr/bin/env bash
+echo "claude -r $uuid"
+STUB
+    chmod +x "$stub"
+    local output rc=0
+    output=$(CS_PS_BIN="$stub" "$CS_BIN" test-session <<< "" 2>&1) || rc=$?
+    [ "$rc" -ne 0 ] || { echo "  FAIL: a claude resumed with -r must count as running"; return 1; }
+    assert_output_contains "$output" "already running" "the short resume flag is a live claude" || return 1
+}
+
+# A teammate pane carries the lead's UUID as --parent-session-id and nothing
+# else the guard reads (no --name, no --resume). One that outlived its lead is
+# still writing to .cs/local/, so a second lead must not start over it.
+test_live_duplicate_refuses_a_surviving_teammate() {
+    local uuid="11111111-2222-4333-8444-555555555555"
+    _seed_doctor_session "test-session" "$uuid" > /dev/null
+    local stub="$TEST_TMPDIR/ps-stub-teammate"
+    cat > "$stub" << STUB
+#!/usr/bin/env bash
+echo "/usr/local/bin/claude --agent-id reviewer@session-abc --team-name t --parent-session-id $uuid --model opus"
+STUB
+    chmod +x "$stub"
+    local output rc=0
+    output=$(CS_PS_BIN="$stub" "$CS_BIN" test-session <<< "" 2>&1) || rc=$?
+    [ "$rc" -ne 0 ] || { echo "  FAIL: a teammate holding the UUID must count as running"; return 1; }
+    assert_output_contains "$output" "already running" "a surviving teammate holds the session" || return 1
+}
+
+# The hand-typed `--resume=<uuid>` spelling is the same live claude.
+test_live_duplicate_refuses_the_equals_spelling() {
+    local uuid="11111111-2222-4333-8444-555555555555"
+    _seed_doctor_session "test-session" "$uuid" > /dev/null
+    local stub="$TEST_TMPDIR/ps-stub-eq"
+    cat > "$stub" << STUB
+#!/usr/bin/env bash
+echo "claude --resume=$uuid"
+STUB
+    chmod +x "$stub"
+    local output rc=0
+    output=$(CS_PS_BIN="$stub" "$CS_BIN" test-session <<< "" 2>&1) || rc=$?
+    [ "$rc" -ne 0 ] || { echo "  FAIL: --resume=<uuid> must count as running"; return 1; }
+    assert_output_contains "$output" "already running" "the = spelling is a live claude" || return 1
+}
+
 # Build a ps stub whose argv names a session but carries an unrelated UUID —
 # the shape a live conversation takes after an in-app /clear rebinds state.
 _seed_ps_stub_with_name() {  # session_name, launch_uuid
@@ -777,6 +853,10 @@ test_live_duplicate_ignores_a_longer_sibling_name() {
 
 run_test test_live_duplicate_refuses_without_force
 run_test test_live_duplicate_force_overrides
+run_test test_live_duplicate_ignores_the_uuid_in_a_non_claude_argv
+run_test test_live_duplicate_refuses_a_short_resume_flag
+run_test test_live_duplicate_refuses_a_surviving_teammate
+run_test test_live_duplicate_refuses_the_equals_spelling
 run_test test_live_duplicate_detected_after_clear_rebind
 run_test test_live_duplicate_ignores_a_longer_sibling_name
 

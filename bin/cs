@@ -7361,8 +7361,22 @@ launch_claude_code() {
         # --name is stable for the process's whole life. The trailing delimiter
         # keeps a name that prefixes another (sym vs sym-comfy-nodes) from
         # matching; the appended newline covers --name being the final argument.
+        # The UUID counts only after a flag claude takes it with (--session-id
+        # at launch, --resume or -r on a continue, --parent-session-id on a
+        # teammate that outlived its lead and still writes to .cs/local/): a
+        # Bash-tool child carries the same UUID in the shell snapshot it is
+        # started from, and one left running in the background outlives the
+        # conversation as an orphan. Each flag in both spellings, with a space
+        # or with `=`.
         _ps_out="$_ps_out"$'\n'
-        if [[ "$_ps_out" == *"$claude_session_id"* ]] \
+        local _flag _hit=""
+        for _flag in "--session-id " "--session-id=" "--resume " "--resume=" " -r " "--parent-session-id " "--parent-session-id="; do
+            if [[ "$_ps_out" == *"$_flag$claude_session_id "* ]] \
+                || [[ "$_ps_out" == *"$_flag$claude_session_id"$'\n'* ]]; then
+                _hit=1; break
+            fi
+        done
+        if [ -n "$_hit" ] \
             || [[ "$_ps_out" == *"--name $session_name "* ]] \
             || [[ "$_ps_out" == *"--name $session_name"$'\n'* ]]; then
             error "Session $session_name is already running elsewhere (UUID $claude_session_id). Use --force to override."
