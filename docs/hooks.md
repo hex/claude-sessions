@@ -280,7 +280,12 @@ past crit the mod also checks that the cwd has `.cs/local`, that
 `claude_session_id` in `.cs/local/state`. A teammate claude in the same
 directory, or a plain Claude conversation, gets no button, because the handoff
 the skill writes carries that id and arms the marker cs launched the lead
-with.
+with. The plugin's own id follows `/clear` (measured: after a `/clear` the band
+returned only once `.cs/local/state` named the new transcript), and cs's
+SessionStart hook rebinds `state` on every fresh conversation, so the lead
+keeps its button across rotations. Past crit a render costs one `cwd`, two
+`exists`, one `read` and one `id` call; the band renders a handful of times per
+turn, not per keystroke.
 
 The mod is opt-in, and stays out of `install.sh`, because Claude Code loads function
 hooks only behind `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`. To enable it on one
