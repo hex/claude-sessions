@@ -7,6 +7,7 @@ All notable changes to cs are documented here. Release notes are also available 
 ## Unreleased
 
 ### Changed
+- The hooks run cs's own actor and narrative-budget code instead of a copy. `./build.sh` folds `lib/02-shared.sh` into `bin/cs` and writes it to `hooks/cs-shared.sh`, a library deployed beside the hooks like `cs-resolve.sh`; CI fails when the committed copy differs from the build. The two hooks that carried their own versions of the actor precedence and the budget validation now source it, so `CS_NARRATIVE_MAX_BYTES=0` reads as the default in the Stop hook too, as it already did everywhere else. A hook deployed without the library names the actor `unknown`, says which library is missing and that `./install.sh` or `cs -update` redeploys the hooks, and skips the over-budget warning rather than guess a budget.
 - The session name on the status bar paints in the session's own colour again, the one its tab and Claude Code's `/color` accent already carry; branch and model stay plain ink.
 
 ### Features

@@ -63,6 +63,7 @@ CS_HOOKS=(
 # KEEP THIS LIST IN SYNC WITH install.sh's CS_HOOK_LIBS.
 CS_HOOK_LIBS=(
     cs-resolve.sh
+    cs-shared.sh
     prompt-rewriter.sh
     prompt-rewriter-model.sh
     prompt-rewriter-vendor.sh

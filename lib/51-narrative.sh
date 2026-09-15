@@ -1,25 +1,6 @@
 # ABOUTME: Rotates the current actor's narrative once it passes its byte budget: the
 # ABOUTME: oldest '## ' sections move verbatim to .cs/narrative-archive/. Backs 'cs -narrative'.
 
-# 224 KiB budget, 112 KiB tail. The ceiling is the Read tool's: it refuses a
-# file over 256 KiB, and the resume reads the live narrative in one call, so a
-# file past that size cannot be read in full at all. The budget sits under the
-# ceiling with room for the appends made while the over-budget warning is on
-# screen and before anyone rotates. The tail is what a resume actually costs;
-# sections run about 2 KB and an active day produces 60-odd of them, so 112 KiB
-# is most of a day. The 2:1 ratio keeps rotation infrequent: a full tail's
-# worth must accumulate again before the next one.
-CS_NARRATIVE_MAX_DEFAULT=229376
-CS_NARRATIVE_KEEP_DEFAULT=114688
-
-# A positive integer override, else the default. Empty, non-numeric and zero all
-# fall back: a zero budget would rotate on every run. Printed as decimal: a
-# leading zero would reach the callers' arithmetic as an octal literal, and
-# `08` aborts it.
-_narrative_budget() {  # value, default
-    case "${1:-}" in ''|*[!0-9]*|0) echo "$2";; *) echo "$((10#$1))";; esac
-}
-
 # One line per '## ' heading: the heading's byte offset, a space, the heading.
 # LC_ALL=C makes awk's length() count bytes, so offsets survive multibyte text
 # (real headings carry an em dash).

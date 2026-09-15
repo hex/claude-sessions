@@ -1776,7 +1776,40 @@ run_test test_narrative_reminder_approves_when_recently_modified
 run_test test_narrative_reminder_blocks_when_stale
 run_test test_narrative_reminder_tracks_per_actor
 run_test test_narrative_reminder_asks_for_appended_corrections_not_rewrites
+# Without the shared library the budget is unknown, and a warning built on a
+# guessed budget is worse than none: the reminder runs and says nothing about
+# size. (The actor line is SessionStart's to flag; a Stop hook has no channel.)
+test_narrative_reminder_skips_the_budget_check_without_the_shared_library() {
+    local nf="$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    { echo "# Session narrative (alice)"; head -c 3000 /dev/zero | tr '\0' 'x'; echo; } > "$nf"
+    _backdate "$nf"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    local partial="$TEST_TMPDIR/partial-hooks"
+    mkdir -p "$partial"
+    cp "$HOOKS_DIR"/*.sh "$partial/"
+    rm "$partial/cs-shared.sh"
+    local output
+    output=$(echo '{}' | CS_NARRATIVE_MAX_BYTES=2048 bash "$partial/narrative-reminder.sh")
+    assert_output_contains "$output" "Narrative check" "the reminder itself still fires" || return 1
+    assert_output_not_contains "$output" "over the" "no budget warning without the budget" || return 1
+}
+
 run_test test_narrative_reminder_flags_a_narrative_over_budget
+# A zero budget from the library is a budget of zero, as doctor and the rotate
+# verb read it, not the absence of a budget: the "library missing" state that
+# skips the check must not be confused with a value that happens to be 0.
+test_narrative_reminder_warns_at_a_zero_budget() {
+    local nf="$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    { echo "# Session narrative (alice)"; head -c 3000 /dev/zero | tr '\0' 'x'; echo; } > "$nf"
+    _backdate "$nf"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    local output
+    output=$(echo '{}' | CS_NARRATIVE_MAX_BYTES=00 bash "$HOOKS_DIR/narrative-reminder.sh")
+    assert_output_contains "$output" "narrative.alice.md is 2 KB, over the 0 KB budget" \
+        "00 is a zero budget, not a missing one" || return 1
+}
+
+run_test test_narrative_reminder_skips_the_budget_check_without_the_shared_library
 run_test test_narrative_reminder_reads_a_leading_zero_budget_as_decimal
 run_test test_narrative_reminder_is_silent_about_budget_when_under
 run_test test_narrative_reminder_survives_an_unreadable_narrative
@@ -2227,8 +2260,31 @@ test_session_start_does_not_arm_the_watcher_for_a_teammate() {
 run_test test_session_start_arms_the_mail_watcher
 run_test test_session_start_does_not_arm_the_watcher_for_a_teammate
 run_test test_session_start_warns_that_memory_is_shared
+# The shared library ships beside the hooks; a partial deployment (an older
+# ~/.claude/hooks/cs/ under a newer session-start.sh) has the hook without it.
+# The hook must not carry its own copy of the actor rules as a fallback (that
+# copy is the drift this library removed), so it says what is missing and what
+# redeploys it, and names no actor cs would not.
+test_session_start_says_what_to_run_when_the_shared_library_is_missing() {
+    _seed_identity_git "john.doe@example.com"
+    local partial="$TEST_TMPDIR/partial-hooks"
+    mkdir -p "$partial"
+    cp "$HOOKS_DIR"/*.sh "$partial/"
+    rm "$partial/cs-shared.sh"
+    local out
+    out=$(echo "{\"session_id\":\"11111111-2222-4333-8444-555555555555\",\"cwd\":\"$CLAUDE_SESSION_DIR\",\"source\":\"startup\"}" \
+        | bash "$partial/session-start.sh" 2>/dev/null)
+    assert_output_contains "$out" "Current actor: unknown" \
+        "no actor is guessed without the shared rules" || return 1
+    assert_output_not_contains "$out" "john-doe-example-com" \
+        "the hook must not resolve the actor from its own copy of the rules" || return 1
+    assert_output_contains "$out" "cs-shared.sh" "names the missing library" || return 1
+    assert_output_contains "$out" "install.sh" "names what redeploys it" || return 1
+}
+
 run_test test_session_start_actor_honours_pinned_identity
 run_test test_session_start_actor_matches_cs_on_a_blank_pin
+run_test test_session_start_says_what_to_run_when_the_shared_library_is_missing
 
 # CS_SESSIONS_ROOT is read by session-end.sh but never exported into a session,
 # so `dirname "$SESSION_DIR"` always decides. That is right for a session under

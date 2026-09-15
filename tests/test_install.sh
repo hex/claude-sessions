@@ -393,6 +393,24 @@ test_local_install_uses_bin_picker_when_nothing_was_built() {
         "with no build present the shipped picker must still install" || return 1
 }
 
+# hooks/cs-shared.sh is a build artifact: build.sh writes it from lib/02-shared.sh
+# so the hooks and cs run ONE copy of the actor and narrative-budget code. The
+# committed file must be exactly what the build writes, or the hooks ship code
+# the tests never ran (the same drift CI's build-sync job catches for bin/cs).
+test_build_generates_the_shared_hook_fragment() {
+    local repo="$TEST_TMPDIR/build-repo" real="$SCRIPT_DIR/.."
+    mkdir -p "$repo/bin" "$repo/hooks"
+    cp -R "$real/lib" "$repo/lib"
+    cp "$real/build.sh" "$repo/build.sh"
+    (cd "$repo" && bash build.sh > /dev/null) || { echo "  FAIL: build.sh failed"; return 1; }
+    assert_file_exists "$repo/hooks/cs-shared.sh" "build.sh writes hooks/cs-shared.sh" || return 1
+    if ! diff -u "$real/hooks/cs-shared.sh" "$repo/hooks/cs-shared.sh" > "$TEST_TMPDIR/shared.diff" 2>&1; then
+        echo "  FAIL: committed hooks/cs-shared.sh is not what build.sh generates (run ./build.sh)"
+        head -20 "$TEST_TMPDIR/shared.diff"
+        return 1
+    fi
+}
+
 # ============================================================================
 # Manifest arrays: install.sh and bin/cs must agree, and must match the repo
 # ============================================================================
@@ -1334,6 +1352,7 @@ run_test test_uninstall_removes_update_cache
 run_test test_install_recovers_from_invalid_settings_json
 run_test test_local_install_prefers_a_freshly_built_picker
 run_test test_local_install_uses_bin_picker_when_nothing_was_built
+run_test test_build_generates_the_shared_hook_fragment
 run_test test_hook_registration_doc_matches_install
 run_test test_install_honors_declined_statusline_marker
 run_test test_install_declined_marker_honors_xdg_and_foreign_statusline

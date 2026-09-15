@@ -102,6 +102,7 @@ CS_HOOKS=(
 # KEEP THIS LIST IN SYNC WITH bin/cs.
 CS_HOOK_LIBS=(
     cs-resolve.sh
+    cs-shared.sh
     prompt-rewriter.sh
     prompt-rewriter-model.sh
     prompt-rewriter-vendor.sh

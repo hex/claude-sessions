@@ -47,6 +47,9 @@ fi
 # before its own decline, silently. When the library is absent the fallback
 # is the env-only check this guard replaced, so the hook behaves as it used to.
 _cs_lib="$(dirname "$0")/cs-resolve.sh"
+# cs-shared.sh is build.sh's copy of lib/02-shared.sh, the narrative budget
+# among it, one source for cs and its hooks. Same guard, same reasons.
+_cs_shared="$(dirname "$0")/cs-shared.sh"
 # shellcheck source=cs-resolve.sh
 # Parse-check before sourcing: a truncated or corrupt library is readable,
 # and sourcing it aborts the hook at the syntax error, before the fallback
@@ -60,6 +63,8 @@ _cs_lib="$(dirname "$0")/cs-resolve.sh"
 case $- in *e*) _cs_had_e=1 ;; *) _cs_had_e=0 ;; esac
 set +e
 [ -r "$_cs_lib" ] && "${BASH:-/bin/bash}" -n "$_cs_lib" 2>/dev/null && . "$_cs_lib"
+# shellcheck source=cs-shared.sh
+[ -r "$_cs_shared" ] && "${BASH:-/bin/bash}" -n "$_cs_shared" 2>/dev/null && . "$_cs_shared"
 if [ "$_cs_had_e" = 1 ]; then set -e; fi
 if ! command -v cs_resolve_session >/dev/null 2>&1; then
     cs_resolve_session() {
@@ -729,9 +734,13 @@ fi
 # note any that has outgrown its byte budget. The same stat pass serves both.
 NARRATIVE_FILE=""
 NARRATIVE_MTIME=0
-# KEEP IN SYNC with CS_NARRATIVE_MAX_DEFAULT in lib/51-narrative.sh — hooks
-# cannot source lib/, so the default is duplicated here.
-NARRATIVE_MAX=$(_num_or "${CS_NARRATIVE_MAX_BYTES:-}" 229376)
+# The budget and its validation come from cs-shared.sh; without the library
+# the budget is unknown and the size check is skipped (SessionStart names the
+# missing library; a Stop hook has no channel for it). The mtime pass still runs.
+NARRATIVE_MAX=""
+if command -v _narrative_budget >/dev/null 2>&1; then
+    NARRATIVE_MAX=$(_narrative_budget "${CS_NARRATIVE_MAX_BYTES:-}" "$CS_NARRATIVE_MAX_DEFAULT")
+fi
 NARRATIVE_OVER=""
 for _nf in "$META_DIR"/memory/narrative*.md; do
     [ -f "$_nf" ] || continue
@@ -746,7 +755,7 @@ for _nf in "$META_DIR"/memory/narrative*.md; do
     fi
     _sz=$(wc -c < "$_nf" 2>/dev/null | tr -d ' ' || echo 0)
     case "$_sz" in ''|*[!0-9]*) _sz=0 ;; esac
-    if [ "$_sz" -gt "$NARRATIVE_MAX" ]; then
+    if [ -n "$NARRATIVE_MAX" ] && [ "$_sz" -gt "$NARRATIVE_MAX" ]; then
         NARRATIVE_OVER="${NARRATIVE_OVER} $(basename "$_nf") is $((_sz / 1024)) KB, over the $((NARRATIVE_MAX / 1024)) KB budget — if it is yours, run \`cs -narrative rotate\` before appending."
     fi
 done

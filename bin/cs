@@ -63,6 +63,7 @@ CS_HOOKS=(
 # KEEP THIS LIST IN SYNC WITH install.sh's CS_HOOK_LIBS.
 CS_HOOK_LIBS=(
     cs-resolve.sh
+    cs-shared.sh
     prompt-rewriter.sh
     prompt-rewriter-model.sh
     prompt-rewriter-vendor.sh
@@ -122,6 +123,65 @@ HOOKS_DEPLOY_DIR="${CS_HOOKS_DIR:-$HOME/.claude/hooks/cs}"
 # directory names under ~/.claude/projects/ (each `/` and `.` becomes `-`).
 # Used by setup_auto_memory and _doctor_check_token_cost to locate the
 # transcript directory for a given workspace.
+# Normalize an arbitrary identity string to a filesystem-safe slug.
+_slugify() {
+    printf '%s' "$1" \
+        | tr '[:upper:]' '[:lower:]' \
+        | sed 's/[^a-z0-9][^a-z0-9]*/-/g; s/^-//; s/-*$//'
+}
+
+# The raw identity driving a session, before slugging. Args: the session root
+# (where git config is read) and its meta dir (where the pinned identity lives);
+# either may be empty. Precedence: $CS_ACTOR > <meta>/local/identity > git
+# user.email > git user.name > "unknown". if/elif/else, not three independent
+# tests: a pinned identity file ends the search by EXISTING, so a blank pin
+# resolves to "unknown" rather than falling through to git.
+cs_actor_raw() {  # session_dir, meta_dir
+    local sdir="${1:-}" meta="${2:-}" raw=""
+    if [ -n "${CS_ACTOR:-}" ]; then
+        raw="$CS_ACTOR"
+    elif [ -n "$meta" ] && [ -f "$meta/local/identity" ]; then
+        IFS= read -r raw < "$meta/local/identity" || true
+    else
+        local gitdir="${sdir:-.}"
+        raw=$(git -C "$gitdir" config user.email 2>/dev/null || true)
+        [ -z "$raw" ] && raw=$(git -C "$gitdir" config user.name 2>/dev/null || true)
+    fi
+    [ -z "$raw" ] && raw="unknown"
+    printf '%s\n' "$raw"
+}
+
+# Resolve the current actor as a slug. With a session_dir arg, resolve the
+# pinned identity and git config from that dir (callers may run before
+# CLAUDE_SESSION_META_DIR is exported). Without, use env + cwd.
+cs_actor_slug() {
+    local sdir="${1:-}" meta=""
+    if [ -n "$sdir" ]; then
+        meta="$sdir/.cs"
+    else
+        meta="${CLAUDE_SESSION_META_DIR:-}"
+    fi
+    _slugify "$(cs_actor_raw "$sdir" "$meta")"
+}
+
+# 224 KiB budget, 112 KiB tail. The ceiling is the Read tool's: it refuses a
+# file over 256 KiB, and the resume reads the live narrative in one call, so a
+# file past that size cannot be read in full at all. The budget sits under the
+# ceiling with room for the appends made while the over-budget warning is on
+# screen and before anyone rotates. The tail is what a resume actually costs;
+# sections run about 2 KB and an active day produces 60-odd of them, so 112 KiB
+# is most of a day. The 2:1 ratio keeps rotation infrequent: a full tail's
+# worth must accumulate again before the next one.
+CS_NARRATIVE_MAX_DEFAULT=229376
+CS_NARRATIVE_KEEP_DEFAULT=114688
+
+# A positive integer override, else the default. Empty, non-numeric and zero all
+# fall back: a zero budget would rotate on every run. Printed as decimal: a
+# leading zero would reach the callers' arithmetic as an octal literal, and
+# `08` aborts it.
+_narrative_budget() {  # value, default
+    case "${1:-}" in ''|*[!0-9]*|0) echo "$2";; *) echo "$((10#$1))";; esac
+}
 _claude_encode_path() {
     local p="$1"
     p="${p//\//-}"
@@ -2778,39 +2838,6 @@ _exec_fresh_rebind() {
     exec $CLAUDE_CODE_BIN --name "$session_name" --session-id "$new_uuid" ${launch_prompt:+"$launch_prompt"}
 }
 
-# Normalize an arbitrary identity string to a filesystem-safe slug.
-_slugify() {
-    printf '%s' "$1" \
-        | tr '[:upper:]' '[:lower:]' \
-        | sed 's/[^a-z0-9][^a-z0-9]*/-/g; s/^-//; s/-*$//'
-}
-
-# Resolve the current actor as a slug. With a session_dir arg, resolve the
-# pinned identity and git config from that dir (callers may run before
-# CLAUDE_SESSION_META_DIR is exported). Without, use env + cwd.
-# Precedence: $CS_ACTOR > <meta>/local/identity > git user.email > git user.name > "unknown"
-cs_actor_slug() {
-    local sdir="${1:-}"
-    local meta=""
-    if [ -n "$sdir" ]; then
-        meta="$sdir/.cs"
-    else
-        meta="${CLAUDE_SESSION_META_DIR:-}"
-    fi
-    local raw=""
-    if [ -n "${CS_ACTOR:-}" ]; then
-        raw="$CS_ACTOR"
-    elif [ -n "$meta" ] && [ -f "$meta/local/identity" ]; then
-        IFS= read -r raw < "$meta/local/identity"
-    else
-        local gitdir="${sdir:-.}"
-        raw=$(git -C "$gitdir" config user.email 2>/dev/null || true)
-        [ -z "$raw" ] && raw=$(git -C "$gitdir" config user.name 2>/dev/null || true)
-    fi
-    [ -z "$raw" ] && raw="unknown"
-    _slugify "$raw"
-}
-
 # Resolve a SPECIFIC session's actor slug from its own dir, bypassing $CS_ACTOR
 # (which cs_actor_slug honours first and would otherwise stamp the caller's
 # identity onto every 'cs -live' row). Arg: session_dir (session root).
@@ -3753,25 +3780,6 @@ run_checkpoint() {
 # queue.done, queue.state (idle|armed|draining), queue.declined (epoch).
 # Plain files so the standalone Stop hook can read them without bin/cs's
 # helpers.
-
-# 224 KiB budget, 112 KiB tail. The ceiling is the Read tool's: it refuses a
-# file over 256 KiB, and the resume reads the live narrative in one call, so a
-# file past that size cannot be read in full at all. The budget sits under the
-# ceiling with room for the appends made while the over-budget warning is on
-# screen and before anyone rotates. The tail is what a resume actually costs;
-# sections run about 2 KB and an active day produces 60-odd of them, so 112 KiB
-# is most of a day. The 2:1 ratio keeps rotation infrequent: a full tail's
-# worth must accumulate again before the next one.
-CS_NARRATIVE_MAX_DEFAULT=229376
-CS_NARRATIVE_KEEP_DEFAULT=114688
-
-# A positive integer override, else the default. Empty, non-numeric and zero all
-# fall back: a zero budget would rotate on every run. Printed as decimal: a
-# leading zero would reach the callers' arithmetic as an octal literal, and
-# `08` aborts it.
-_narrative_budget() {  # value, default
-    case "${1:-}" in ''|*[!0-9]*|0) echo "$2";; *) echo "$((10#$1))";; esac
-}
 
 # One line per '## ' heading: the heading's byte offset, a space, the heading.
 # LC_ALL=C makes awk's length() count bytes, so offsets survive multibyte text

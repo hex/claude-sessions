@@ -25,6 +25,9 @@ SOURCE=$(echo "$INPUT" | jq -r '.source // "startup"')
 # before its own decline, silently. When the library is absent the fallback
 # is the env-only check this guard replaced, so the hook behaves as it used to.
 _cs_lib="$(dirname "$0")/cs-resolve.sh"
+# cs-shared.sh is build.sh's copy of lib/02-shared.sh: the actor rules and the
+# narrative budget, one source for cs and its hooks. Same guard, same reasons.
+_cs_shared="$(dirname "$0")/cs-shared.sh"
 # shellcheck source=cs-resolve.sh
 # Parse-check before sourcing: a truncated or corrupt library is readable,
 # and sourcing it aborts the hook at the syntax error, before the fallback
@@ -38,6 +41,8 @@ _cs_lib="$(dirname "$0")/cs-resolve.sh"
 case $- in *e*) _cs_had_e=1 ;; *) _cs_had_e=0 ;; esac
 set +e
 [ -r "$_cs_lib" ] && "${BASH:-/bin/bash}" -n "$_cs_lib" 2>/dev/null && . "$_cs_lib"
+# shellcheck source=cs-shared.sh
+[ -r "$_cs_shared" ] && "${BASH:-/bin/bash}" -n "$_cs_shared" 2>/dev/null && . "$_cs_shared"
 if [ "$_cs_had_e" = 1 ]; then set -e; fi
 if ! command -v cs_resolve_session >/dev/null 2>&1; then
     cs_resolve_session() {
@@ -286,27 +291,21 @@ EOF
     fi
 fi
 
-# Resolve who is driving this session, for the identity anchor below.
-# KEEP IN SYNC with cs_actor_slug()/_slugify() in lib/40-state.sh — hooks cannot
-# source lib/, and shelling out to cs would make the hook depend on cs being on
-# PATH. Same precedence: $CS_ACTOR, then the pinned identity, then git.
-# if/elif/else, not three independent tests: a pinned identity file ends the
-# search by EXISTING, so a blank pin resolves to "unknown" rather than falling
-# through to git. Naming an actor cs would not resolve is the whole defect this
-# anchor exists to prevent.
-ACTOR_RAW=""
-if [ -n "${CS_ACTOR:-}" ]; then
-    ACTOR_RAW="$CS_ACTOR"
-elif [ -f "$META_DIR/local/identity" ]; then
-    IFS= read -r ACTOR_RAW < "$META_DIR/local/identity" || true
+# Resolve who is driving this session, for the identity anchor below, with the
+# rules cs itself runs (cs_actor_raw in cs-shared.sh; shelling out to cs would
+# make the hook depend on cs being on PATH). Naming an actor cs would not
+# resolve is the whole defect this anchor exists to prevent, so without the
+# library the hook guesses nothing: it names the gap and what closes it.
+ACTOR_NOTE=""
+if command -v cs_actor_raw >/dev/null 2>&1; then
+    ACTOR_RAW=$(cs_actor_raw "$SESSION_DIR" "$META_DIR")
+    ACTOR_SLUG=$(_slugify "$ACTOR_RAW")
 else
-    ACTOR_RAW=$(git -C "$SESSION_DIR" config user.email 2>/dev/null || true)
-    [ -n "$ACTOR_RAW" ] || ACTOR_RAW=$(git -C "$SESSION_DIR" config user.name 2>/dev/null || true)
+    ACTOR_RAW="unresolved"
+    ACTOR_SLUG="unknown"
+    ACTOR_NOTE="
+Actor unresolved: cs-shared.sh is missing or broken beside this hook, so the actor rules could not run. Run ./install.sh from the cs checkout (or cs -update) to redeploy the hooks, then cs -whoami."
 fi
-[ -n "$ACTOR_RAW" ] || ACTOR_RAW="unknown"
-ACTOR_SLUG=$(printf '%s' "$ACTOR_RAW" \
-    | tr '[:upper:]' '[:lower:]' \
-    | sed 's/[^a-z0-9][^a-z0-9]*/-/g; s/^-//; s/-*$//')
 
 # Provide context to Claude about the session
 # Sampled once: the day the context block names below is the day the stamp at
@@ -322,7 +321,7 @@ Session directory: $CLAUDE_SESSION_DIR
 
 Session metadata is in the .cs/ directory. The session root is your workspace.
 
-Current actor: $ACTOR_SLUG ($ACTOR_RAW). Your narrative is .cs/memory/narrative.$ACTOR_SLUG.md.
+Current actor: $ACTOR_SLUG ($ACTOR_RAW). Your narrative is .cs/memory/narrative.$ACTOR_SLUG.md.${ACTOR_NOTE}
 .cs/memory/ is shared by multiple actors, but only narratives are partitioned: a durable memory entry naming someone else as the user was written by or for another actor and does not describe who you are talking to. Identity comes from this line and the live environment, never from a memory entry.
 
 Key files to maintain:
@@ -531,16 +530,17 @@ fi
 # closer, and nothing rotates it but the user's own verb (rotation commits, and
 # cs never commits on its own). So the same payload that says "read it" says
 # "rotate first" for that file. Every source and every actor, not the lead
-# alone: a teammate's SessionStart reads the same files. KEEP IN SYNC with
-# CS_NARRATIVE_MAX_DEFAULT in lib/51-narrative.sh (hooks cannot source lib/);
-# the validation mirrors _narrative_budget there.
-NARRATIVE_MAX="${CS_NARRATIVE_MAX_BYTES:-}"
-case "$NARRATIVE_MAX" in ''|*[!0-9]*|0) NARRATIVE_MAX=229376 ;; esac
-# Decimal, whatever the digits: a leading zero would make the KB arithmetic
-# below read the value as octal, and `08` aborts it.
-NARRATIVE_MAX=$((10#$NARRATIVE_MAX))
+# alone: a teammate's SessionStart reads the same files. The budget and its
+# validation come from cs-shared.sh; without the library the budget is unknown,
+# and a warning built on a guessed number is worse than none, so the check
+# is skipped (the actor line above already says the library is missing).
+NARRATIVE_MAX=""
+if command -v _narrative_budget >/dev/null 2>&1; then
+    NARRATIVE_MAX=$(_narrative_budget "${CS_NARRATIVE_MAX_BYTES:-}" "$CS_NARRATIVE_MAX_DEFAULT")
+fi
 NARRATIVE_OVER=""
 for _nf in "$META_DIR"/memory/narrative.*.md; do
+    [ -n "$NARRATIVE_MAX" ] || break
     [ -f "$_nf" ] || continue
     _sz=$(wc -c < "$_nf" 2>/dev/null | tr -d ' ' || echo 0)
     case "$_sz" in ''|*[!0-9]*) _sz=0 ;; esac
