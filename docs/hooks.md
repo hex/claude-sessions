@@ -267,18 +267,20 @@ A run that overruns the hook's timeout leaves a trail that stops mid-run, which 
 
 `mods/cs-rotate/` is a Claude Code function-hooks plugin: TypeScript that runs
 inside Claude Code's own process rather than a shell script it spawns. It adds
-one key to conversation rotation. Once the context window reaches the crit band
-(65%, where the status bar turns red and the Stop hook nudges), the band directly
-above the prompt draws `1: rotate this conversation`. Pressing `1` from an empty
+one key to conversation rotation. Once the context window reaches 40% (the
+status bar's warn band, where the Stop hook gives its headroom notice), the
+band directly above the prompt draws `1: rotate this conversation`.
+`CS_ROTATE_BUTTON_CTX=<percent>` in the shell that launches cs moves it (unset
+or not a number means 40). Pressing `1` from an empty
 composer fills the composer with `/rotate ` and sends nothing: the `rotate`
 skill asks for a purpose line, so the person finishes the command and presses
 Enter. Below the band the mod draws nothing, and it draws nothing while a turn
 runs or while a survey holds the band. It never submits a prompt and never runs
 a command itself.
 
-The button is for the lead conversation of a cs session only: past crit the mod
-also checks that the cwd has `.cs/local`, that `.cs/local/disabled` is absent,
-and that its own conversation id is the `claude_session_id` in
+The button is for the lead conversation of a cs session only: past the threshold
+the mod also checks that the cwd has `.cs/local`, that `.cs/local/disabled` is
+absent, and that its own conversation id is the `claude_session_id` in
 `.cs/local/state`. A teammate claude in the same directory, or a plain Claude
 conversation, gets no button, because the handoff the skill writes carries that
 id and arms the marker cs launched the lead with. The plugin's own id follows
@@ -315,11 +317,12 @@ and never run it. Doctor says nothing when the mod is not installed, or outside
 a session. The deploy-drift check compares the deployed files against `mods/`
 in the checkout the way it does hooks, commands and skills.
 
-Two limits of the plugin runtime shape the code. It has no environment
-accessor, so `CS_STATUSLINE_CTX_CRIT` cannot reach it: the threshold is a
-literal in `register.tsx`, and `tests/test_mod_rotate.sh` pins it to the
-status line's default. And a hot reload resets module state, so the mod keeps
-none.
+Two facts about the plugin runtime shape the code. A module reads the
+environment through `$.env.get` with a literal name, which `claude plugin
+validate` lists, so the threshold is one variable read per render past the
+band; the default is a literal in `register.tsx` that `tests/test_mod_rotate.sh`
+pins to the status line's warn default. And a hot reload resets module state,
+so the mod keeps none.
 
 Tests: `tests/test_mod_rotate.sh` runs the bun unit tests under
 `mods/cs-rotate/test/` (a fake engine drives the band, the press and the

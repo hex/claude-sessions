@@ -6,7 +6,7 @@ import { test, expect, beforeEach } from 'bun:test'
 ;(globalThis as any).h = (type: any, props: any, ...children: any[]) => ({ type, props: props ?? {}, children })
 ;(globalThis as any).Fragment = 'Fragment'
 
-import { register, CRIT_PERCENT } from '../hooks/register.tsx'
+import { register, DEFAULT_PERCENT } from '../hooks/register.tsx'
 
 type Hook = ($: any, e: any, next: (e: any) => Promise<any>) => Promise<any>
 const hooks: Record<string, Hook> = {}
@@ -22,7 +22,9 @@ let written: Record<string, string>
 let existing: Set<string>
 let files: Record<string, string>
 let sessionId: string
+let envVars: Record<string, string | undefined>
 const $ = {
+  env: { get: async (name: string) => envVars[name] },
   session: {
     usage: async () => ({ context: { percent } }),
     cwd: async () => '/work',
@@ -53,21 +55,44 @@ beforeEach(() => {
   percent = undefined; filled = []; written = {}; existing = new Set(['/work/.cs/local'])
   // The default fixture is the lead conversation of a cs session.
   sessionId = 'uuid-lead'
+  envVars = {}
   files = { '/work/.cs/local/state': 'claude_session_color: red\nclaude_session_id: uuid-lead\n' }
   register(on as any)
 })
 
-test('the crit threshold matches the statusline default', () => {
-  expect(CRIT_PERCENT).toBe(65)
+test('the default threshold is the statusline warn band', () => {
+  expect(DEFAULT_PERCENT).toBe(40)
 })
 
-test('below crit the band passes the drawn tree through untouched', async () => {
-  percent = 64
+test('below the threshold the band passes the drawn tree through untouched', async () => {
+  percent = 39
   expect(await band()).toBe(DRAWN)
 })
 
-test('at crit the band adds one button on hotkey 1 beneath what was drawn', async () => {
-  percent = 65
+test('CS_ROTATE_BUTTON_CTX in the process environment sets the threshold', async () => {
+  envVars.CS_ROTATE_BUTTON_CTX = '55'
+  percent = 54
+  expect(await band()).toBe(DRAWN)
+  percent = 55
+  expect(findButton(await band())).toBeDefined()
+})
+
+test('an unusable CS_ROTATE_BUTTON_CTX falls back to the default', async () => {
+  envVars.CS_ROTATE_BUTTON_CTX = 'soon'
+  percent = 39
+  expect(await band()).toBe(DRAWN)
+  percent = 40
+  expect(findButton(await band())).toBeDefined()
+})
+
+test('a quoted claude_session_id in state still names the lead', async () => {
+  files['/work/.cs/local/state'] = 'claude_session_id: "uuid-lead"  \n'
+  percent = 40
+  expect(findButton(await band())).toBeDefined()
+})
+
+test('at the threshold the band adds one button on hotkey 1 beneath what was drawn', async () => {
+  percent = 40
   const tree = await band()
   expect(tree).not.toBe(DRAWN)
   expect(buttons(tree)).toHaveLength(1)
