@@ -2,7 +2,8 @@
 parent: 4a1fde55-8afe-4076-aa94-eae817d4624a
 created: 2026-09-15T13:49:05Z
 purpose: test the visual and the feeling of the cs-rotate mod live (capsule band, the 1-key press, the armed /clear state) and build what that turns up; the v2026.9.16 release (#622) stays held until after that
-status: unconsumed
+status: consumed
+consumed_by: b8e266c9-e804-4e3a-b38f-6afbff6170d3
 ---
 
 ## 1. Next Step
