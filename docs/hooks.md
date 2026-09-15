@@ -268,15 +268,15 @@ A run that overruns the hook's timeout leaves a trail that stops mid-run, which 
 `mods/cs-rotate/` is a Claude Code function-hooks plugin: TypeScript that runs
 inside Claude Code's own process rather than a shell script it spawns. It adds
 one key to conversation rotation. Once the context window reaches 40% (the
-status bar's warn band, where the Stop hook gives its headroom notice), the
-band directly above the prompt draws `1: rotate this conversation`.
+status bar's warn band, where the Stop hook gives its headroom notice), the band
+directly above the prompt draws `1: rotate this conversation`.
 `CS_ROTATE_BUTTON_CTX=<percent>` in the shell that launches cs moves it (unset
-or not a number means 40). Pressing `1` from an empty
-composer fills the composer with `/rotate ` and sends nothing: the `rotate`
-skill asks for a purpose line, so the person finishes the command and presses
-Enter. Below the band the mod draws nothing, and it draws nothing while a turn
-runs or while a survey holds the band. It never submits a prompt and never runs
-a command itself.
+or not a number means 40). Pressing `1` from an empty composer fills the
+composer with `/rotate ` and sends nothing: the `rotate` skill asks for a
+purpose line, so the person finishes the command and presses Enter. Below the
+band the mod draws nothing, and it draws nothing while a turn runs or while a
+survey holds the band. It never submits a prompt and never runs a command
+itself.
 
 The button is for the lead conversation of a cs session only: past the threshold
 the mod also checks that the cwd has `.cs/local`, that `.cs/local/disabled` is
