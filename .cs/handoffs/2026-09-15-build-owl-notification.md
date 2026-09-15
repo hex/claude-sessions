@@ -156,3 +156,150 @@ After #629: task #628 (forced rotation with grace), then #622 (the release).
   logo: "let's generate an icon for our tool", "go", "use gpt-image-2.5",
   "C1 i LIke", "c1 b is nicer", "commit", "can we use it somewhere?",
   "1 and 3". On the branch: "merge".
+
+## 3. Primary Request and Intent
+
+This conversation woke on a rotation to test how the cs-rotate mod looks and
+feels live, and to build whatever that turned up. It did that, then took three
+more requests from Alex in sequence: a design exploration of the band ("what
+kind of design are we able to do here? what are our constraints?" →
+"let's do some variants in an html editor"), which produced the capsule the mod
+now draws; forced rotation at critical context ("can we force /rotation when
+context is critical?" → "with grace"), which is built but not started; and a
+logo for cs ("let's generate an icon for our tool"), which is on main and whose
+two uses he picked with "1 and 3".
+
+The v2026.9.16 release stays held behind all of it, as it has since he said
+"we are not ready to release yet" two conversations ago.
+
+## 4. Key Technical Concepts
+
+- **cs-rotate mod** — `mods/cs-rotate/hooks/register.tsx`, TypeScript running
+  inside Claude Code's process behind `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`,
+  which every cs launch exports. Contract: `.cs/research/spike-rotate/claude-code.d.ts`
+  (10,736 lines, the authority — read it rather than guessing). Two hooks:
+  `session.start` writes the doctor heartbeat, `ui.render{component=AbovePrompt}`
+  draws the capsule. Deployed by the installer to `~/.claude/skills/cs-rotate/`.
+- **The capsule, as of `f77b728`** — a keyed round Box, border in the gauge ink
+  (coral when armed), coral `✳` mark, the engine's `1: label` button, and a
+  ten-cell meter with the percentage. `hover={{borderColor: INK.coral}}`. The
+  ink table `INK` holds five triplets copied from `bin/cs-statusline`, pinned by
+  `test_mod_inks_match_the_statusline_inks`.
+- **Plugin UI primitives** — Box, Text, Button only. Box: borderStyle,
+  borderColor, borderDimColor, backgroundColor, the flexbox props, hover. Text:
+  color, backgroundColor, dimColor, bold, italic, underline, strikethrough,
+  inverse, wrap. Colours are a theme key or a raw colour. The band has
+  `maxRows`/`bodyColumns`; a tree taller than `maxRows` scrolls and LOSES its
+  hotkeys. `hasSurvey` and `isWorking` are the two gates a band must honour.
+- **For #628 (grace)** — `$.ui.invalidate('ui.render')` redraws the band, at
+  most ten a second and thirty for the band specifically, and the contract's own
+  example for it is a countdown (claude-code.d.ts:1838-1856). `$.clock.after`
+  and `$.clock.every` both return a cancel (2515-2550). `turn.complete` carries
+  `reason: 'answer' | 'aborted' | 'refusal' | 'error'` (8391-8420). UNMEASURED:
+  whether `$.command.run` works from a `turn.complete` hook or from a clock
+  callback — it is measured only from a button press. Measure that first.
+- **Image generation** — `~/.claude/plugins/cache/hex-plugins/claude-image-generation/2026.9.0/scripts/{gemini,openai,xai,openrouter}.sh`.
+  Gemini `--image-size 2K` returns 2048 px, not the 1536 the skill asks for.
+  OpenAI `--size 1024x1024 --quality high --background opaque`. Six parallel
+  calls with `&` and `wait` worked fine; `run-all.sh` is for one prompt across
+  providers, not six different prompts.
+- **Codex direct** — the plugin's queued-job path is unrecoverable (no prompt
+  stored); run it directly and read the output file. It finished this
+  conversation's review in about four minutes.
+
+## 5. Files and Code Sections
+
+Read the commits rather than a summary: `git log --oneline b2d73dc..f77b728`
+is the whole conversation's output (the logo, the mod commit, the merge).
+
+The two hook sites #629 edits, quoted as they stand:
+
+`hooks/narrative-reminder.sh` around line 435 (raise):
+
+```sh
+if [ -z "${CS_NO_ITERM2:-}" ] && [ "${TERM_PROGRAM:-}" = "iTerm.app" ]; then
+    _it2="${CS_IT2_DIR:-$HOME/.iterm2}/it2attention"
+    { [ -x "$_it2" ] && "$_it2" start > "${CS_IT2_TTY:-/dev/tty}"; } 2>/dev/null || true
+fi
+```
+
+`hooks/scope-prompt.sh` around line 107 (clear, at the user's next prompt) and
+`hooks/session-start.sh` around line 497 (clear, on a fresh conversation) carry
+the same block with `stop` instead of `start`.
+
+The manifest the icon joins, `lib/01-manifests.sh:42`:
+
+```sh
+CS_HOOK_LIBS=(
+    cs-resolve.sh
+    cs-shared.sh
+    prompt-rewriter.sh
+    prompt-rewriter-model.sh
+    prompt-rewriter-vendor.sh
+)
+```
+
+`install.sh.in:91` unions it with the hooks; `lib/85-adopt-uninstall.sh:262`
+removes both; `lib/60-doctor.sh:88` drift-checks it. `./build.sh` writes
+`bin/cs`, `install.sh` and `hooks/cs-shared.sh` from the lib sources — edit the
+sources, never the outputs, and run `./build.sh` last before committing.
+
+This conversation's scratchpad (`/private/tmp/claude-501/-Users-alex-geana--claude-sessions-claude-sessions/b8e266c9-e804-4e3a-b38f-6afbff6170d3/scratchpad/`),
+which the successor cannot reach — copy anything still needed BEFORE `/clear`:
+
+- `capsule-lab.html` — the published design lab's source.
+- `logo/` — `A1,A2,B1,B2,C1,C2.png` (the six candidates), `A3,A4.png` (the two
+  2.5 probes), `C1a.png` (Gemini refinement, rejected), `C1b.png` (the chosen
+  one, now `assets/logo.png`), `social-1280x640.png` (Alex's upload), each with
+  its `.prompt.txt`, plus `gen.sh`.
+- `feel/` — `feel.sh` (the live driver: launches a real `cs <name>` in a tmux
+  window, runs two turns, optionally arms a handoff, captures with and without
+  `-e`, presses `1`) and `evidence/` (ten captures).
+- `spike-inks/` — the throwaway mod that measured raw colours and the
+  duplicate hotkey, with `drive.sh` and its evidence.
+- `codex-inks.out` — the Codex review, both findings.
+- `fold-codex.py` — the fold, already applied.
+- `release-notes.md` and `section-2026.9.16.md` — the release draft, which
+  PREDATES 22 commits and needs the new Changed/Fixes/Features lines folded in.
+
+## 6. Problem Solving
+
+- Gates run this conversation: bun 27/27, `tests/test_mod_rotate.sh` 6/6 on
+  bash 5 and 3.2, the full suite 66/66 (exit 0), one Codex read-only round
+  (1 Important + 1 Minor, both folded), three mutations proven.
+- The live loop was measured end to end in real cs sessions, not fixtures:
+  pressing `1` on the capsule ran `/rotate`, which wrote and armed a handoff
+  and flipped the capsule to coral by itself; pressing `1` again ran `/clear`,
+  and the successor woke and executed the handoff's next step. Both presses,
+  both states, captured.
+- Two driver traps worth keeping: a "wait for `done`" check matches the
+  PREVIOUS turn's line, so count the done lines and wait for the count to grow;
+  and mask UUIDs at read time, never at capture time, or the captured evidence
+  is garbage.
+
+## 7. Pending Tasks
+
+The native task list is keyed to the session and survives the `/clear`.
+Reconcile, do not mirror:
+
+- **#629 pending** — the owl notification. This handoff's Next Step.
+- **#628 pending** — forced rotation with grace. Alex chose "with grace" over
+  rotate-only. Full design in the task description.
+- **#622 pending** — the HELD release v2026.9.16. Content re-push needed (20
+  commits), CI wait (background it), notes refresh, version bump in
+  `lib/00-header.sh`, `./build.sh`, Alex's approval, tag only after CI is green.
+- **#554, #603, #609 pending; #606 postponed** — the standing backlog.
+- **#627 completed** this conversation.
+- Not requested, noted only: two KEEP IN SYNC sites remain (the statusline
+  declined-marker and ZSH_COMPLETION_DIR, both install.sh ↔ lib).
+
+## 8. Current Work
+
+Nothing in flight. Main is `f77b728`, tree clean, everything built and
+installed, deploy drift OK. Rotating at 46% context on Alex's word, before
+starting #629.
+
+## Completeness of this handoff
+
+Written from the live conversation, not from compacted context. Two passes, as
+the skill asks. Nothing was cut for length.
