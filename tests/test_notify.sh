@@ -39,22 +39,24 @@ FAKE
     export PATH="$FAKE_BIN:$PATH"
 }
 
-# The Stop hook's exit status and stderr, kept so a negative arm can tell "did
-# not post" from "died before it could": an exit 2 here blocks Claude Code.
-STOP_EC=0
-_stop() {
-    STOP_EC=0
-    echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh" >/dev/null 2>"$TEST_TMPDIR/stop.err" || STOP_EC=$?
+# Each hook's exit status and stderr are kept so a negative arm can tell "did
+# not post" from "died before it could": an exit 2 blocks Claude Code, and
+# stderr reaches the user.
+HOOK_EC=0
+_hook() {  # hook-file json
+    HOOK_EC=0
+    echo "$2" | bash "$HOOKS_DIR/$1" >/dev/null 2>"$TEST_TMPDIR/hook.err" || HOOK_EC=$?
 }
+_stop() { _hook narrative-reminder.sh '{}'; }
 
 _assert_no_post() {  # why
     if [ -f "$NOTIFY_LOG" ]; then
         echo "  FAIL: $1: $(cat "$NOTIFY_LOG")"
         return 1
     fi
-    assert_eq "0" "$STOP_EC" "the Stop hook must exit 0 on the no-post path" || return 1
-    if [ -s "$TEST_TMPDIR/stop.err" ]; then
-        echo "  FAIL: the Stop hook wrote to stderr on the no-post path: $(head -c 200 "$TEST_TMPDIR/stop.err")"
+    assert_eq "0" "$HOOK_EC" "the hook must exit 0 on the no-post path" || return 1
+    if [ -s "$TEST_TMPDIR/hook.err" ]; then
+        echo "  FAIL: the hook wrote to stderr on the no-post path: $(head -c 200 "$TEST_TMPDIR/hook.err")"
         return 1
     fi
 }
@@ -174,7 +176,7 @@ test_prompt_hook_still_reads_the_prompt_after_the_remove() {
 test_teammate_prompt_leaves_the_notification() {
     _notify_session "matesprompt"
     unset CS_NO_NOTIFY CS_LEAD_PID
-    echo '{"prompt":"a message from the lead"}' | bash "$HOOKS_DIR/scope-prompt.sh" >/dev/null 2>&1 || true
+    _hook scope-prompt.sh '{"prompt":"a message from the lead"}'
     _assert_no_post "a teammate's prompt must not remove the lead's notification" || return 1
 }
 
@@ -190,7 +192,7 @@ test_session_start_removes_the_notification() {
 test_teammate_session_start_leaves_the_notification() {
     _notify_session "matestart"
     unset CS_NO_NOTIFY CS_LEAD_PID
-    echo '{"source":"startup"}' | bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>&1 || true
+    _hook session-start.sh '{"source":"startup"}'
     _assert_no_post "a teammate's start must not remove the lead's notification" || return 1
 }
 
