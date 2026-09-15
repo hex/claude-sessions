@@ -216,6 +216,35 @@ _doctor_check_iterm2() {
     fi
 }
 
+# The finished-turn notification's poster. The bundle carries the owl; its
+# binary is a signed copy of the terminal-notifier on PATH, and the installer
+# records the source's digest beside it, so a digest that no longer matches
+# is a bundle a brew upgrade left behind. Silent off macOS with nothing
+# installed.
+_doctor_check_notify() {
+    local app bin recorded current
+    app="$(cs_notifier_app)/Contents/MacOS/terminal-notifier"
+    bin=$(cs_notifier_source_bin) || bin=""
+    if [ -n "${CS_NO_NOTIFY:-}" ]; then
+        _doctor_ok "Notification: disabled (CS_NO_NOTIFY)"
+    elif [ -x "$app" ]; then
+        recorded=$(cat "$(cs_notifier_app)/Contents/Resources/cs-source.sha256" 2>/dev/null || true)
+        current=""
+        [ -n "$bin" ] && current=$(shasum -a 256 "$bin" 2>/dev/null | cut -d' ' -f1)
+        if [ -z "$bin" ]; then
+            _doctor_ok "Notification: cs.app bundle active (owl icon); terminal-notifier is not on PATH"
+        elif [ -n "$recorded" ] && [ "$recorded" = "$current" ]; then
+            _doctor_ok "Notification: cs.app bundle active (owl icon)"
+        else
+            _doctor_warn "Notification: cs.app bundle differs from the installed terminal-notifier (run ./install.sh)"
+        fi
+    elif [ -n "$bin" ]; then
+        _doctor_warn "Notification: terminal-notifier on PATH, no cs.app bundle (no owl icon; run ./install.sh)"
+    elif [ "$(uname -s)" = "Darwin" ]; then
+        _doctor_ok "Notification: off (brew install terminal-notifier, then ./install.sh)"
+    fi
+}
+
 # Spawn hygiene, all best-effort warnings:
 #   - .seed.stale and .brief.md.stale files accumulate in .spawn/ (the launch
 #     path sets aged-out seeds and their briefs aside but never deletes them),
@@ -706,6 +735,7 @@ run_doctor() {
     _doctor_check_statusline
     _doctor_check_subagent_statusline
     _doctor_check_iterm2
+    _doctor_check_notify
     _doctor_check_spawn
     _doctor_check_hook_authority
 

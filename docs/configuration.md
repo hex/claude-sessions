@@ -202,9 +202,10 @@ export CS_NO_ROTATION_WAKE="1"
 export CS_NO_ITERM2="1"
 
 # Disable the finished-turn macOS notification (the one the Stop hook posts
-# through terminal-notifier when the terminal is not the frontmost app, with
-# the cs owl as its icon, taken down at your next prompt). Without
-# terminal-notifier on PATH there is nothing to disable.
+# when the terminal is not the frontmost app, with the cs owl as its icon,
+# taken down at your next prompt). Without terminal-notifier installed
+# there is nothing to disable. The installer builds the owl sender, cs.app,
+# under $XDG_DATA_HOME/cs (~/.local/share/cs by default).
 export CS_NO_NOTIFY="1"
 
 # Leave the Task tools to Claude Code's model default. A cs launch exports

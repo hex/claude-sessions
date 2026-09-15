@@ -447,7 +447,14 @@ fi
 # guess. One group per session, so a repeat replaces the last one; scope-prompt.sh
 # removes it at the next prompt and session-start.sh at launch. Lead only: a
 # tmux teammate ends turns of its own while the user is away. CS_NO_NOTIFY=1
-# disables; silent wherever terminal-notifier is not on PATH.
+# disables; silent wherever no poster is installed. The poster is the cs.app
+# bundle the installer assembles (its icon is the owl; macOS shows the
+# sender's icon and ignores any the poster names) or, without it, the
+# terminal-notifier on PATH; cs_notifier_bin picks, so the removes reach the
+# same sender the post did.
+if ! command -v cs_notifier_bin >/dev/null 2>&1; then
+    cs_notifier_bin() { command -v terminal-notifier 2>/dev/null; }
+fi
 _cs_terminal_bundle() {
     if [ -n "${__CFBundleIdentifier:-}" ]; then
         printf '%s' "$__CFBundleIdentifier"
@@ -469,14 +476,13 @@ _cs_frontmost_bundle() {
     [ -n "$line" ] || return 1
     printf '%s' "$line"
 }
-if [ -z "${CS_NO_NOTIFY:-}" ] && command -v terminal-notifier >/dev/null 2>&1 \
+if [ -z "${CS_NO_NOTIFY:-}" ] && _notifier=$(cs_notifier_bin) && [ -n "$_notifier" ] \
     && _mail_is_lead; then
     _term=$(_cs_terminal_bundle) || _term=""
     _front=$(_cs_frontmost_bundle) || _front=""
     if [ -n "$_term" ] && [ -n "$_front" ] && [ "$_term" != "$_front" ]; then
-        terminal-notifier -group "cs:$CLAUDE_SESSION_NAME" -title "cs: $CLAUDE_SESSION_NAME" \
-            -message "finished a turn" -appIcon "$(cd "$(dirname "$0")" && pwd)/cs-logo.png" \
-            -activate "$_term" </dev/null >/dev/null 2>&1 || true
+        "$_notifier" -group "cs:$CLAUDE_SESSION_NAME" -title "cs: $CLAUDE_SESSION_NAME" \
+            -message "finished a turn" -activate "$_term" </dev/null >/dev/null 2>&1 || true
     fi
 fi
 

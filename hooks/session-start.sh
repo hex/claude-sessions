@@ -500,9 +500,15 @@ if [ -z "${CS_NO_ITERM2:-}" ] && [ "${TERM_PROGRAM:-}" = "iTerm.app" ]; then
 fi
 
 # macOS: also take down the finished-turn notification the previous
-# conversation's last Stop may have posted. Lead only, as the post is.
-if [ -z "${CS_NO_NOTIFY:-}" ] && [ "$IS_LEAD" = 1 ] && command -v terminal-notifier >/dev/null 2>&1; then
-    terminal-notifier -remove "cs:$CLAUDE_SESSION_NAME" </dev/null >/dev/null 2>&1 || true
+# conversation's last Stop may have posted. Lead only, as the post is, and
+# through the same poster (cs_notifier_bin from cs-shared.sh: the cs.app
+# bundle when installed, else terminal-notifier on PATH), since a
+# notification group belongs to the app that posted it.
+if ! command -v cs_notifier_bin >/dev/null 2>&1; then
+    cs_notifier_bin() { command -v terminal-notifier 2>/dev/null; }
+fi
+if [ -z "${CS_NO_NOTIFY:-}" ] && [ "$IS_LEAD" = 1 ] && _notifier=$(cs_notifier_bin) && [ -n "$_notifier" ]; then
+    "$_notifier" -remove "cs:$CLAUDE_SESSION_NAME" </dev/null >/dev/null 2>&1 || true
 fi
 
 # Re-assert this session's tab title. cs sets it once at launch and the reset

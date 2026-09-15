@@ -66,14 +66,13 @@ test_stop_posts_when_the_terminal_is_not_frontmost() {
     unset CS_NO_NOTIFY
     _stop
     [ -f "$NOTIFY_LOG" ] || { echo "  FAIL: terminal-notifier never ran"; return 1; }
-    local want="-group cs:away -title cs: away -message finished a turn -appIcon $HOOKS_DIR/cs-logo.png -activate com.googlecode.iterm2"
+    local want="-group cs:away -title cs: away -message finished a turn -activate com.googlecode.iterm2"
     if ! grep -Fxq -- "$want" "$NOTIFY_LOG"; then
         echo "  FAIL: argv pin"
         echo "    want: $want"
         echo "    got:  $(cat "$NOTIFY_LOG")"
         return 1
     fi
-    [ -f "$HOOKS_DIR/cs-logo.png" ] || { echo "  FAIL: the icon the argv names does not exist"; return 1; }
 }
 
 test_no_post_when_the_terminal_is_frontmost() {
@@ -196,6 +195,93 @@ test_teammate_session_start_leaves_the_notification() {
     _assert_no_post "a teammate's start must not remove the lead's notification" || return 1
 }
 
+# A fake cs.app under the test HOME, where the installer assembles the real
+# one: its binary logs argv like the PATH fake, tagged so the two can be told
+# apart. Groups are per sender app, so the post and both removes must reach
+# the same binary or a remove can never clear a post.
+_fake_bundle() {
+    export FAKE_APP="$HOME/.local/share/cs/cs.app"
+    mkdir -p "$FAKE_APP/Contents/MacOS"
+    printf '#!/bin/sh\ncat >/dev/null\necho "bundle $@" >> "%s"\n' "$NOTIFY_LOG" > "$FAKE_APP/Contents/MacOS/terminal-notifier"
+    chmod +x "$FAKE_APP/Contents/MacOS/terminal-notifier"
+}
+
+test_post_and_removes_go_through_the_bundle_when_installed() {
+    _notify_session "owl"
+    unset CS_NO_NOTIFY
+    _fake_bundle
+    _stop
+    _hook scope-prompt.sh '{"prompt":"back"}'
+    _hook session-start.sh '{"source":"startup"}'
+    [ -f "$NOTIFY_LOG" ] || { echo "  FAIL: nothing ran"; return 1; }
+    grep -Fq -- "bundle -group cs:owl -title cs: owl -message finished a turn -activate com.googlecode.iterm2" "$NOTIFY_LOG" \
+        || { echo "  FAIL: the post did not go through the bundle: $(cat "$NOTIFY_LOG")"; return 1; }
+    [ "$(grep -Fxc -- "bundle -remove cs:owl" "$NOTIFY_LOG")" = 2 ] \
+        || { echo "  FAIL: both removes must go through the bundle: $(cat "$NOTIFY_LOG")"; return 1; }
+    if grep -q '^-' "$NOTIFY_LOG"; then
+        echo "  FAIL: a call reached the PATH notifier while the bundle exists: $(cat "$NOTIFY_LOG")"
+        return 1
+    fi
+}
+
+test_post_falls_back_to_the_path_notifier_without_the_bundle() {
+    _notify_session "plainpath"
+    unset CS_NO_NOTIFY
+    _stop
+    grep -Fxq -- "-group cs:plainpath -title cs: plainpath -message finished a turn -activate com.googlecode.iterm2" "$NOTIFY_LOG" \
+        || { echo "  FAIL: argv pin without the bundle: $(cat "$NOTIFY_LOG")"; return 1; }
+}
+
+test_doctor_reports_the_notifier() {
+    _notify_session "doc"
+    unset CS_NO_NOTIFY
+    local out
+    out=$(cd "$CLAUDE_SESSION_DIR" && "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$out" "Notification: terminal-notifier on PATH, no cs.app bundle (no owl icon; run ./install.sh)" \
+        "PATH notifier without the bundle reads as owl-less" || return 1
+    _fake_bundle
+    out=$(cd "$CLAUDE_SESSION_DIR" && "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$out" "Notification: cs.app bundle differs from the installed terminal-notifier (run ./install.sh)" \
+        "a bundle whose binary is not the PATH notifier's reads as stale" || return 1
+    mkdir -p "$FAKE_APP/Contents/Resources"
+    shasum -a 256 "$FAKE_BIN/terminal-notifier" | cut -d' ' -f1 > "$FAKE_APP/Contents/Resources/cs-source.sha256"
+    out=$(cd "$CLAUDE_SESSION_DIR" && "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$out" "Notification: cs.app bundle active (owl icon)" \
+        "a bundle recording the PATH notifier's digest reads as active" || return 1
+    export CS_NO_NOTIFY=1
+    out=$(cd "$CLAUDE_SESSION_DIR" && "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$out" "Notification: disabled (CS_NO_NOTIFY)" "the opt-out is reported" || return 1
+}
+
+# Homebrew's bin/terminal-notifier is a wrapper script beside the app; the
+# installer assembles from the app's binary and records its digest, so the
+# doctor must hash that binary, not the wrapper it found on PATH.
+test_doctor_hashes_the_keg_app_binary_not_the_wrapper() {
+    _notify_session "keg"
+    unset CS_NO_NOTIFY
+    local keg="$TEST_TMPDIR/keg"
+    mkdir -p "$keg/bin" "$keg/terminal-notifier.app/Contents/MacOS"
+    printf '#!/bin/sh\nexec "$(dirname "$0")/../terminal-notifier.app/Contents/MacOS/terminal-notifier" "$@"\n' > "$keg/bin/terminal-notifier"
+    printf '#!/bin/sh\ncat >/dev/null\nexit 0\n' > "$keg/terminal-notifier.app/Contents/MacOS/terminal-notifier"
+    chmod +x "$keg/bin/terminal-notifier" "$keg/terminal-notifier.app/Contents/MacOS/terminal-notifier"
+    rm -f "$FAKE_BIN/terminal-notifier"
+    ln -s "$keg/bin/terminal-notifier" "$FAKE_BIN/terminal-notifier"
+    _fake_bundle
+    mkdir -p "$FAKE_APP/Contents/Resources"
+    shasum -a 256 "$keg/terminal-notifier.app/Contents/MacOS/terminal-notifier" | cut -d' ' -f1 > "$FAKE_APP/Contents/Resources/cs-source.sha256"
+    local out
+    out=$(cd "$CLAUDE_SESSION_DIR" && "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$out" "Notification: cs.app bundle active (owl icon)" \
+        "the recorded digest is the keg app binary's, and the doctor hashes the same file" || return 1
+}
+
+test_uninstall_removes_the_bundle() {
+    _notify_session "uninst"
+    _fake_bundle
+    "$CS_BIN" -uninstall <<< "y" >/dev/null 2>&1 || true
+    [ ! -e "$FAKE_APP" ] || { echo "  FAIL: cs -uninstall left $FAKE_APP"; return 1; }
+}
+
 test_icon_ships_with_the_hooks() {
     grep -q '^    cs-logo.png$' "$SCRIPT_DIR/../lib/01-manifests.sh" \
         || { echo "  FAIL: cs-logo.png is not in CS_HOOK_LIBS"; return 1; }
@@ -215,6 +301,11 @@ run_test test_prompt_hook_still_reads_the_prompt_after_the_remove
 run_test test_teammate_prompt_leaves_the_notification
 run_test test_session_start_removes_the_notification
 run_test test_teammate_session_start_leaves_the_notification
+run_test test_post_and_removes_go_through_the_bundle_when_installed
+run_test test_post_falls_back_to_the_path_notifier_without_the_bundle
+run_test test_doctor_reports_the_notifier
+run_test test_doctor_hashes_the_keg_app_binary_not_the_wrapper
+run_test test_uninstall_removes_the_bundle
 run_test test_icon_ships_with_the_hooks
 
 report_results
