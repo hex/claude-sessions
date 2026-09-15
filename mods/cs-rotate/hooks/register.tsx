@@ -2,7 +2,7 @@
 /* @jsx h */
 /* @jsxFrag Fragment */
 // ABOUTME: cs-rotate mod: one button above the prompt, rotate past the threshold or /clear once a handoff is armed.
-// ABOUTME: The rotate press fills the composer; the armed press runs /clear; session.start writes a heartbeat for doctor.
+// ABOUTME: The rotate press runs /rotate, the armed press runs /clear; session.start writes a heartbeat for doctor.
 import type { On, EngineInterface } from 'claude-code'
 
 declare const h: any
@@ -43,26 +43,53 @@ export function register(on: On) {
     // A survey owns the band; a running turn cannot be rotated out of.
     if (e.props.hasSurvey || e.props.isWorking) return drawn
     const armed = await handoffArmed($)
-    if (!armed) {
-      const { context } = await $.session.usage()
-      if (context.percent === undefined || context.percent < (await threshold($))) return drawn
-    }
+    const { context } = await $.session.usage()
+    const percent = context.percent
+    if (!armed && (percent === undefined || percent < (await threshold($)))) return drawn
     if (!(await ownsRotation($))) return drawn
-    const { Box, Button } = await $.ui.resolve(e)
+    const { Box, Text, Button } = await $.ui.resolve(e)
+    // One capsule in the status bar's idiom: the Claude mark in coral, the
+    // button, and the context gauge that explains why the capsule is there,
+    // in the ink the bar paints that band (amber past warn, red past crit).
     return (
       <Box flexDirection="column">
         {drawn}
         <Box>
-          {/* plain draws "1: label", so the hotkey is discoverable */}
-          {armed
-            ? <Button key="cs-rotate" hotkey="1" plain label="/clear and continue from the handoff"
-                      onPress={() => clearAndContinue($)} />
-            : <Button key="cs-rotate" hotkey="1" plain label="rotate this conversation"
-                      onPress={() => rotate($)} />}
+          <Box borderStyle="round" borderColor={armed ? 'claude' : gaugeColor(percent)} paddingX={1}>
+            <Text color="claude" bold>{'\u2733 '}</Text>
+            {/* plain draws "1: label", so the hotkey is discoverable */}
+            {armed
+              ? <Button key="cs-rotate" hotkey="1" plain label="/clear and continue from the handoff"
+                        onPress={() => clearAndContinue($)} />
+              : <Button key="cs-rotate" hotkey="1" plain label="rotate this conversation"
+                        onPress={() => rotate($)} />}
+            {percent !== undefined && (
+              <Text>
+                <Text dimColor>{'  \u00b7  '}</Text>
+                <Text color={gaugeColor(percent)} bold>{`${pie(percent)} ctx ${percent}%`}</Text>
+              </Text>
+            )}
+          </Box>
         </Box>
       </Box>
     )
   })
+}
+
+// KEEP IN SYNC with the pie steps and bands in bin/cs-statusline (_ctx_pie,
+// _seg_ctx): the gauge reads as the bar's own.
+export function pie(percent: number): string {
+  if (percent >= 88) return '\u25cf'
+  if (percent >= 65) return '\u25d5'
+  if (percent >= 40) return '\u25d1'
+  if (percent >= 13) return '\u25d4'
+  return '\u25cb'
+}
+export function gaugeColor(percent: number | undefined): string {
+  if (percent === undefined) return 'text'
+  if (percent >= 65) return 'error'
+  if (percent >= 40) return 'warning'
+  return 'text'
 }
 
 // The variable's name is a literal: `claude plugin validate` lists what a
@@ -123,10 +150,10 @@ async function ownsRotation($: EngineInterface): Promise<boolean> {
   return lead !== undefined && lead === (await $.session.id())
 }
 
-// Fill, never submit: the rotate skill asks for a purpose line, so the person
-// finishes the command and sends it themselves.
+// Runs the rotate skill as if the person had typed /rotate: the skill draws
+// the purpose from the conversation itself.
 async function rotate($: EngineInterface) {
-  await $.prompt.fill({ text: '/rotate ' })
+  await $.command.run({ command: 'rotate', args: '' })
 }
 
 // The one command the mod runs itself: /clear ends this conversation, and cs's

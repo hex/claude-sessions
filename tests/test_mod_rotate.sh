@@ -64,10 +64,10 @@ test_mod_validate_inventories_the_hooks_and_calls() {
     assert_eq "0" "$status" "validate exits 0" || { echo "$out"; return 1; }
     assert_output_contains "$out" "Validation passed" "manifest and hooks validate" || return 1
     assert_output_contains "$out" "hooks: session.start, ui.render{component=AbovePrompt}" "both hooks inventoried" || return 1
-    assert_output_contains "$out" '$.prompt.fill' "the press fills the composer" || return 1
+    assert_output_not_contains "$out" '$.prompt.fill' "nothing fills the composer any more" || return 1
     assert_output_contains "$out" '$.env.get' "the threshold is read from the environment" || return 1
     assert_output_not_contains "$out" '$.prompt.submit' "and never submits" || return 1
-    assert_output_contains "$out" '$.command.run (via clearAndContinue)' "the armed press runs /clear, and nothing else runs a command" || return 1
+    assert_output_contains "$out" '$.command.run (via clearAndContinue, rotate)' "the two presses run their commands, and nothing else runs one" || return 1
 }
 
 run_test test_mod_manifest_names_the_plugin_and_its_module

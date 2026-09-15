@@ -103,11 +103,17 @@ test('at the threshold the band adds one button on hotkey 1 beneath what was dra
   expect(button.props.plain).toBe(true)
   expect(button.props.label).toMatch(/rotate/)
   expect(JSON.stringify(tree)).toContain('"Survey"')
+  expect(JSON.stringify(tree)).toContain('"borderStyle":"round"')
 })
 
-test('the band does not repeat the context percentage', async () => {
+test('the band carries the context gauge in the status bar\'s own steps and inks', async () => {
   percent = 71
-  expect(JSON.stringify(await band())).not.toMatch(/71|ctx/)
+  const tree = JSON.stringify(await band())
+  expect(tree).toContain('\u25d5 ctx 71%')
+  expect(tree).toContain('"color":"error"')
+  percent = 45
+  expect(JSON.stringify(await band())).toContain('\u25d1 ctx 45%')
+  expect(JSON.stringify(await band())).toContain('"color":"warning"')
 })
 
 test('while a turn runs the button is hidden', async () => {
@@ -125,11 +131,12 @@ test('an unknown percentage draws nothing', async () => {
   expect(await band()).toBe(DRAWN)
 })
 
-test('a press fills the composer with the rotate command and sends nothing', async () => {
+test('a press runs the rotate skill and fills nothing', async () => {
   percent = 80
   const button = findButton(await band())
   await button.props.onPress()
-  expect(filled).toEqual([{ text: '/rotate ' }])
+  expect(ran).toEqual([{ command: 'rotate', args: '' }])
+  expect(filled).toEqual([])
 })
 
 test('outside a cs session the band draws nothing at crit', async () => {
@@ -182,10 +189,10 @@ test('pressing the clear button runs /clear and fills nothing', async () => {
   expect(filled).toEqual([])
 })
 
-test('the rotate press never runs a command', async () => {
+test('the rotate press never clears', async () => {
   percent = 80
   await findButton(await band()).props.onPress()
-  expect(ran).toEqual([])
+  expect(ran).not.toContainEqual({ command: 'clear', args: '' })
 })
 
 test('an armed handoff is still lead-only and yields to a running turn', async () => {

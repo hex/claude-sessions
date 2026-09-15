@@ -205,7 +205,7 @@ should do. If the user did not give one, ask before writing anything.
 11. End your response with the instruction and nothing after it, on its own
    final line, exactly:
 
-   **Run `/clear` now** (or press `1` on the band above the prompt) — this conversation is ready to rotate.
+   **Run `/clear` now** (or press `1` on the capsule above the prompt) — this conversation is ready to rotate.
 
    This is the one step you cannot take for the user. A hook cannot submit
    to Claude Code's command queue (it accepts the TUI's own input only); the

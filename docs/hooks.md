@@ -271,16 +271,18 @@ one key to conversation rotation. Once the context window reaches 40% (the
 status bar's warn band, where the Stop hook gives its headroom notice), the band
 directly above the prompt draws `1: rotate this conversation`.
 `CS_ROTATE_BUTTON_CTX=<percent>` in the shell that launches cs moves it (unset
-or not a number means 40). Pressing `1` from an empty composer fills the
-composer with `/rotate ` and sends nothing: the `rotate` skill asks for a
-purpose line, so the person finishes the command and presses Enter. Below the
-band the mod draws nothing, and it draws nothing while a turn runs or while a
-survey holds the band. It never submits a prompt.
+or not a number means 40). The band is one rounded capsule in the status bar's
+idiom: the Claude mark in coral, the button, and the context gauge in the bar's
+own pie steps and inks (amber past warn, red past crit). Pressing `1` from an
+empty composer runs `/rotate`, as if typed: the `rotate` skill draws the
+purpose from the conversation. Below the band the mod draws nothing, and it
+draws nothing while a turn runs or while a survey holds the band. It never
+submits a prompt of its own.
 
 The same button has a second state. Once the `rotate` skill has armed a
 handoff (`.cs/local/pending-handoff` names one), the band draws
 `1: /clear and continue from the handoff` whatever the context reads, and
-pressing `1` runs `/clear` itself, the one command the mod runs: the
+pressing `1` runs `/clear` itself: the
 conversation ends, and cs's SessionStart hook starts the handoff's next step in
 the new one, as it does after a typed `/clear`. The mod does not touch the
 marker; the hook consumes it. The button appears only for a marker the hook
