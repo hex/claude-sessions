@@ -638,6 +638,29 @@ test_doctor_statusline_caps_row_names_the_answer_or_the_ask() {
     assert_output_contains "$output" "caps: rounded" "answered on: doctor says rounded" || return 1
 }
 
+# The cs-rotate mod is an opt-in the user links under ~/.claude/skills. Doctor
+# says nothing when it is absent, and once present it reports the mod RUNNING
+# (a heartbeat the mod writes on session.start), never mere presence: the
+# loader is flag-gated, and a managed machine can load a mod and never run it.
+test_doctor_rotate_mod_row_observes_execution_not_presence() {
+    local fake_claude="$TEST_TMPDIR/claude-mod"
+    mkdir -p "$fake_claude"
+    echo '{}' > "$fake_claude/settings.json"
+    local output
+    output=$(CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_not_contains "$output" "cs-rotate" "absent opt-in: nothing said" || return 1
+    mkdir -p "$fake_claude/skills/cs-rotate/hooks"
+    rm -f "$CLAUDE_SESSION_META_DIR/local/cs-rotate.heartbeat"
+    output=$(CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "cs-rotate mod: installed but has not run" "installed, never ran: WARN" || return 1
+    assert_output_contains "$output" "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1" "and names the flag that gates the loader" || return 1
+    echo "$output" | grep "cs-rotate" | grep -q "WARN" || { echo "  FAIL: never-ran must be a WARN"; return 1; }
+    printf '2026-09-15T05:00:00.000Z\n' > "$CLAUDE_SESSION_META_DIR/local/cs-rotate.heartbeat"
+    output=$(CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "cs-rotate mod: last ran 2026-09-15T05:00:00.000Z" "heartbeat: OK with the stamp" || return 1
+    echo "$output" | grep "cs-rotate" | grep -q "OK" || { echo "  FAIL: a heartbeat is an OK row"; return 1; }
+}
+
 test_doctor_statusline_no_fail_when_not_registered() {
     local fake_claude="$TEST_TMPDIR/sl-claude-none"
     mkdir -p "$fake_claude"
@@ -874,6 +897,7 @@ run_test test_doctor_skips_inline_shell_hook_commands
 run_test test_doctor_statusline_ok_when_registered_and_executable
 run_test test_doctor_statusline_fails_when_binary_missing
 run_test test_doctor_statusline_caps_row_names_the_answer_or_the_ask
+run_test test_doctor_rotate_mod_row_observes_execution_not_presence
 run_test test_doctor_statusline_no_fail_when_not_registered
 run_test test_doctor_statusline_names_context_gating_when_absent
 run_test test_doctor_statusline_names_context_gating_for_foreign_statusline

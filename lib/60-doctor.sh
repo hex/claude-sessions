@@ -661,6 +661,25 @@ _doctor_check_session_id_match() {
     fi
 }
 
+# The cs-rotate mod is an opt-in Claude Code function-hooks plugin the user
+# links under ~/.claude/skills. Absent, it is not news. Present, the row reads
+# the heartbeat the mod writes on session.start rather than the directory: the
+# loader sits behind CLAUDE_CODE_ENABLE_FUNCTION_HOOKS, and a managed machine's
+# policy can load a mod and never run it, so presence proves nothing.
+_doctor_check_rotate_mod() {
+    local claude_dir="${CS_CLAUDE_DIR:-$HOME/.claude}"
+    [ -d "$claude_dir/skills/cs-rotate" ] || return 0
+    local beat="${CLAUDE_SESSION_META_DIR:-}/local/cs-rotate.heartbeat" stamp=""
+    if [ -n "${CLAUDE_SESSION_META_DIR:-}" ] && [ -f "$beat" ] && [ -r "$beat" ]; then
+        { IFS= read -r stamp < "$beat"; } 2>/dev/null || stamp=""
+    fi
+    if [ -n "$stamp" ]; then
+        _doctor_ok "cs-rotate mod: last ran $stamp in this session"
+    else
+        _doctor_warn "cs-rotate mod: installed but has not run in this session — the loader needs CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 in the shell that launches cs"
+    fi
+}
+
 run_doctor() {
     local DOCTOR_FAIL=0
     local DOCTOR_WARN=0
@@ -678,6 +697,7 @@ run_doctor() {
     _doctor_check_claude_audit
     _doctor_check_statusline
     _doctor_check_subagent_statusline
+    _doctor_check_rotate_mod
     _doctor_check_iterm2
     _doctor_check_spawn
     _doctor_check_hook_authority
