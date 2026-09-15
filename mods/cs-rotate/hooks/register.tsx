@@ -8,11 +8,14 @@ import type { On, EngineInterface } from 'claude-code'
 declare const h: any
 declare const Fragment: any
 
-// KEEP IN SYNC with the ctx warn default in bin/cs-statusline (_seg_ctx): by
-// default the band appears where the status bar turns amber and the Stop hook
-// gives its headroom notice. CS_ROTATE_BUTTON_CTX in the process environment
-// moves it; this value applies when the variable is unset or not a number.
+// KEEP IN SYNC with the ctx warn and crit defaults in bin/cs-statusline
+// (_seg_ctx): by default the band appears where the status bar turns amber and
+// the Stop hook gives its headroom notice, and the gauge changes ink where the
+// bar's does. CS_STATUSLINE_CTX_WARN and _CRIT in the process environment move
+// both, as they move the bar; CS_ROTATE_BUTTON_CTX moves the band alone. A
+// value that is not a number is ignored.
 export const DEFAULT_PERCENT = 40
+export const DEFAULT_CRIT = 65
 
 // Doctor observes the mod RUNNING, not merely installed: under a managed
 // machine's policy a mod can load and never run. Written when the plugin loads
@@ -45,7 +48,8 @@ export function register(on: On) {
     const armed = await handoffArmed($)
     const { context } = await $.session.usage()
     const percent = context.percent
-    if (!armed && (percent === undefined || percent < (await threshold($)))) return drawn
+    const bands = await gaugeBands($)
+    if (!armed && (percent === undefined || percent < (await threshold($, bands)))) return drawn
     if (!(await ownsRotation($))) return drawn
     const { Box, Text, Button } = await $.ui.resolve(e)
     // One capsule in the status bar's idiom: the Claude mark in coral, the
@@ -55,7 +59,7 @@ export function register(on: On) {
       <Box flexDirection="column">
         {drawn}
         <Box>
-          <Box borderStyle="round" borderColor={armed ? 'claude' : gaugeColor(percent)} paddingX={1}>
+          <Box borderStyle="round" borderColor={armed ? 'claude' : gaugeColor(percent, bands)} paddingX={1}>
             <Text color="claude" bold>{'\u2733 '}</Text>
             {/* plain draws "1: label", so the hotkey is discoverable */}
             {armed
@@ -66,7 +70,7 @@ export function register(on: On) {
             {percent !== undefined && (
               <Text>
                 <Text dimColor>{'  \u00b7  '}</Text>
-                <Text color={gaugeColor(percent)} bold>{`${pie(percent)} ctx ${percent}%`}</Text>
+                <Text color={gaugeColor(percent, bands)} bold>{`${pie(percent, bands)} ctx ${percent}%`}</Text>
               </Text>
             )}
           </Box>
@@ -76,27 +80,42 @@ export function register(on: On) {
   })
 }
 
-// KEEP IN SYNC with the pie steps and bands in bin/cs-statusline (_ctx_pie,
-// _seg_ctx): the gauge reads as the bar's own.
-export function pie(percent: number): string {
+export type Bands = { warn: number; crit: number }
+
+// KEEP IN SYNC with the pie steps in bin/cs-statusline (_ctx_pie): the two
+// fixed steps, 13 and 88, and the two that follow the bands.
+export function pie(percent: number, bands: Bands): string {
   if (percent >= 88) return '\u25cf'
-  if (percent >= 65) return '\u25d5'
-  if (percent >= 40) return '\u25d1'
+  if (percent >= bands.crit) return '\u25d5'
+  if (percent >= bands.warn) return '\u25d1'
   if (percent >= 13) return '\u25d4'
   return '\u25cb'
 }
-export function gaugeColor(percent: number | undefined): string {
+export function gaugeColor(percent: number | undefined, bands: Bands): string {
   if (percent === undefined) return 'text'
-  if (percent >= 65) return 'error'
-  if (percent >= 40) return 'warning'
+  if (percent >= bands.crit) return 'error'
+  if (percent >= bands.warn) return 'warning'
   return 'text'
 }
 
-// The variable's name is a literal: `claude plugin validate` lists what a
+// The bar's own bands, read the way the bar reads them. Each variable's name
+// is a literal: `claude plugin validate` lists what a module reads, and a
+// name it does not spell is refused.
+async function gaugeBands($: EngineInterface): Promise<Bands> {
+  return {
+    warn: numberOr(await $.env.get("CS_STATUSLINE_CTX_WARN"), DEFAULT_PERCENT),
+    crit: numberOr(await $.env.get("CS_STATUSLINE_CTX_CRIT"), DEFAULT_CRIT),
+  }
+}
+
+function numberOr(raw: string | undefined, fallback: number): number {
+  return raw !== undefined && /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : fallback
+}
+
+// The band's own threshold; without one it is the bar's warn band. `claude plugin validate` lists what a
 // module reads, and a name it does not spell is refused.
-async function threshold($: EngineInterface): Promise<number> {
-  const raw = await $.env.get("CS_ROTATE_BUTTON_CTX")
-  return raw !== undefined && /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : DEFAULT_PERCENT
+async function threshold($: EngineInterface, bands: Bands): Promise<number> {
+  return numberOr(await $.env.get("CS_ROTATE_BUTTON_CTX"), bands.warn)
 }
 
 // Armed means the marker names a handoff the SessionStart hook will accept
@@ -156,8 +175,8 @@ async function rotate($: EngineInterface) {
   await $.command.run({ command: 'rotate', args: '' })
 }
 
-// The one command the mod runs itself: /clear ends this conversation, and cs's
-// SessionStart hook then starts the armed handoff's next step in the new one.
+// /clear ends this conversation, and cs's SessionStart hook then starts the
+// armed handoff's next step in the new one.
 // Measured: the run resolves once the screen has cleared and a new transcript
 // is open; the marker is the hook's to consume.
 async function clearAndContinue($: EngineInterface) {

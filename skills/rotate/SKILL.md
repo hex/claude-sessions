@@ -16,7 +16,10 @@ Only works in a cs session: check that `$CLAUDE_SESSION_NAME` is set. If
 empty, tell the user rotation needs a cs session and stop.
 
 A rotation needs a purpose — one line describing what the next conversation
-should do. If the user did not give one, ask before writing anything.
+should do. If the user did not give one, take it from the conversation: the
+work in flight and its next step. Do not stop to ask; the `cs-rotate` mod's
+button runs `/rotate` with no argument, and a question there would defeat the
+one-key rotation it exists for.
 
 ## Process
 

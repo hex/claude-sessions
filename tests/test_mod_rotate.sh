@@ -27,6 +27,17 @@ test_mod_default_threshold_matches_the_statusline_warn_default() {
     [ -n "$mod_default" ] || { echo "  FAIL: DEFAULT_PERCENT literal not found in register.tsx"; return 1; }
     [ -n "$sl_warn" ] || { echo "  FAIL: ctx warn default not found in bin/cs-statusline"; return 1; }
     assert_eq "$sl_warn" "$mod_default" "mod default == statusline warn default" || return 1
+    local mod_crit sl_crit
+    mod_crit="$(sed -n 's/^export const DEFAULT_CRIT = \([0-9]*\)$/\1/p' "$MOD/hooks/register.tsx")"
+    sl_crit="$(sed -n 's/.*_num_or "\${CS_STATUSLINE_CTX_CRIT:-}" \([0-9]*\).*/\1/p' "$SCRIPT_DIR/../bin/cs-statusline")"
+    [ -n "$mod_crit" ] && [ -n "$sl_crit" ] || { echo "  FAIL: crit default literal not found in one of the two"; return 1; }
+    assert_eq "$sl_crit" "$mod_crit" "mod crit == statusline crit default" || return 1
+    # The two fixed pie steps, 13 and 88, are literals in both languages too.
+    local sl_steps mod_steps
+    sl_steps="$(sed -n '/^_ctx_pie()/,/^}/p' "$SCRIPT_DIR/../bin/cs-statusline" | grep -o '\-ge [0-9][0-9]*' | grep -o '[0-9]*' | sort -n | tr '\n' ' ')"
+    mod_steps="$(sed -n '/^export function pie(/,/^}/p' "$MOD/hooks/register.tsx" | grep -o '>= [0-9][0-9]*' | grep -o '[0-9]*' | sort -n | tr '\n' ' ')"
+    assert_eq "13 88 " "$sl_steps" "statusline pie has two fixed steps, 13 and 88" || return 1
+    assert_eq "$sl_steps" "$mod_steps" "mod pie steps == statusline pie steps" || return 1
 }
 
 # The installer deploys the mod under ~/.claude/skills/cs-rotate and a cs
@@ -65,7 +76,7 @@ test_mod_validate_inventories_the_hooks_and_calls() {
     assert_output_contains "$out" "Validation passed" "manifest and hooks validate" || return 1
     assert_output_contains "$out" "hooks: session.start, ui.render{component=AbovePrompt}" "both hooks inventoried" || return 1
     assert_output_not_contains "$out" '$.prompt.fill' "nothing fills the composer any more" || return 1
-    assert_output_contains "$out" '$.env.get' "the threshold is read from the environment" || return 1
+    assert_output_contains "$out" 'env reads: CS_ROTATE_BUTTON_CTX, CS_STATUSLINE_CTX_CRIT, CS_STATUSLINE_CTX_WARN' "the threshold and the bar's bands are read from the environment" || return 1
     assert_output_not_contains "$out" '$.prompt.submit' "and never submits" || return 1
     assert_output_contains "$out" '$.command.run (via clearAndContinue, rotate)' "the two presses run their commands, and nothing else runs one" || return 1
 }

@@ -6,7 +6,7 @@ import { test, expect, beforeEach } from 'bun:test'
 ;(globalThis as any).h = (type: any, props: any, ...children: any[]) => ({ type, props: props ?? {}, children })
 ;(globalThis as any).Fragment = 'Fragment'
 
-import { register, DEFAULT_PERCENT } from '../hooks/register.tsx'
+import { register, DEFAULT_PERCENT, DEFAULT_CRIT, pie, gaugeColor } from '../hooks/register.tsx'
 
 type Hook = ($: any, e: any, next: (e: any) => Promise<any>) => Promise<any>
 const hooks: Record<string, Hook> = {}
@@ -64,6 +64,38 @@ beforeEach(() => {
 
 test('the default threshold is the statusline warn band', () => {
   expect(DEFAULT_PERCENT).toBe(40)
+  expect(DEFAULT_CRIT).toBe(65)
+})
+
+test('the pie and ink step exactly where the status bar steps', () => {
+  const bands = { warn: 40, crit: 65 }
+  const table: [number, string, string][] = [
+    [0, '\u25cb', 'text'], [12, '\u25cb', 'text'], [13, '\u25d4', 'text'], [39, '\u25d4', 'text'],
+    [40, '\u25d1', 'warning'], [64, '\u25d1', 'warning'], [65, '\u25d5', 'error'], [87, '\u25d5', 'error'],
+    [88, '\u25cf', 'error'], [100, '\u25cf', 'error'],
+  ]
+  for (const [p, glyph, color] of table) {
+    expect([p, pie(p, bands), gaugeColor(p, bands)]).toEqual([p, glyph, color])
+  }
+})
+
+test('CS_STATUSLINE_CTX_WARN and _CRIT move the gauge, the band and its threshold together', async () => {
+  envVars.CS_STATUSLINE_CTX_WARN = '50'; envVars.CS_STATUSLINE_CTX_CRIT = '70'
+  percent = 49
+  expect(await band()).toBe(DRAWN)
+  percent = 50
+  let tree = JSON.stringify(await band())
+  expect(tree).toContain('\u25d1 ctx 50%')
+  expect(tree).toContain('"color":"warning"')
+  percent = 69
+  expect(JSON.stringify(await band())).not.toContain('"color":"error"')
+  percent = 70
+  tree = JSON.stringify(await band())
+  expect(tree).toContain('\u25d5 ctx 70%')
+  expect(tree).toContain('"borderColor":"error"')
+  envVars.CS_ROTATE_BUTTON_CTX = '10'
+  percent = 10
+  expect(findButton(await band())).toBeDefined()
 })
 
 test('below the threshold the band passes the drawn tree through untouched', async () => {
@@ -179,6 +211,12 @@ test('an armed handoff turns the button into the clear button, whatever the cont
     expect(button.props.hotkey).toBe('1')
     expect(button.props.plain).toBe(true)
     expect(button.props.label).toBe('/clear and continue from the handoff')
+    const json = JSON.stringify(tree)
+    expect(json).toContain('"borderStyle":"round"')
+    expect(json).toContain('"borderColor":"claude"')
+    expect(json).not.toContain('undefined')
+    if (p === undefined) expect(json).not.toContain('ctx')
+    else expect(json).toContain(`ctx ${p}%`)
   }
 })
 

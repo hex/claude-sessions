@@ -270,10 +270,13 @@ inside Claude Code's own process rather than a shell script it spawns. It adds
 one key to conversation rotation. Once the context window reaches 40% (the
 status bar's warn band, where the Stop hook gives its headroom notice), the band
 directly above the prompt draws `1: rotate this conversation`.
-`CS_ROTATE_BUTTON_CTX=<percent>` in the shell that launches cs moves it (unset
-or not a number means 40). The band is one rounded capsule in the status bar's
-idiom: the Claude mark in coral, the button, and the context gauge in the bar's
-own pie steps and inks (amber past warn, red past crit). Pressing `1` from an
+`CS_ROTATE_BUTTON_CTX=<percent>` in the shell that launches cs moves it; unset
+or not a number, the band follows the bar's own warn band
+(`CS_STATUSLINE_CTX_WARN`, 40 by default). The band is one rounded capsule in
+the status bar's idiom: the Claude mark in coral, the button, and the context
+gauge in the bar's own pie steps and inks, read from the same
+`CS_STATUSLINE_CTX_WARN` and `CS_STATUSLINE_CTX_CRIT` the bar reads (amber past
+warn, red past crit, 40 and 65 by default). Pressing `1` from an
 empty composer runs `/rotate`, as if typed: the `rotate` skill draws the
 purpose from the conversation. Below the band the mod draws nothing, and it
 draws nothing while a turn runs or while a survey holds the band. It never
@@ -333,9 +336,9 @@ in the checkout the way it does hooks, commands and skills.
 
 Two facts about the plugin runtime shape the code. A module reads the
 environment through `$.env.get` with a literal name, which `claude plugin
-validate` lists, so the threshold is one variable read per render past the
-band; the default is a literal in `register.tsx` that `tests/test_mod_rotate.sh`
-pins to the status line's warn default. And a hot reload resets module state,
+validate` lists, so the threshold and the bands are three variable reads per
+render; the defaults and the pie's two fixed steps are literals in
+`register.tsx` that `tests/test_mod_rotate.sh` pins to the status line's. And a hot reload resets module state,
 so the mod keeps none.
 
 Tests: `tests/test_mod_rotate.sh` runs the bun unit tests under
