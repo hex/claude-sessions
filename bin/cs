@@ -6227,11 +6227,13 @@ _doctor_check_session_id_match() {
 }
 
 # The cs-rotate mod is an opt-in Claude Code function-hooks plugin the user
-# links under ~/.claude/skills. Runs inside the session guard: the heartbeat is
-# per session. Absent, it is not news. Present, the row reads
-# the heartbeat the mod writes on session.start rather than the directory: the
-# loader sits behind CLAUDE_CODE_ENABLE_FUNCTION_HOOKS, and a managed machine's
-# policy can load a mod and never run it, so presence proves nothing.
+# links under ~/.claude/skills. Absent, it is not news. Present, the row reads
+# the heartbeat the mod writes when Claude Code loads it, never the directory:
+# the loader sits behind CLAUDE_CODE_ENABLE_FUNCTION_HOOKS, and a managed
+# machine's policy can load a mod and never run it, so presence proves nothing.
+# The heartbeat is per session, hence the session guard around the call. A
+# teammate process with the flag on writes it too, so OK says the mod ran in
+# this directory, not that the lead's shell carries the flag.
 _doctor_check_rotate_mod() {
     local claude_dir="${CS_CLAUDE_DIR:-$HOME/.claude}"
     [ -d "$claude_dir/skills/cs-rotate" ] || return 0
@@ -6242,7 +6244,7 @@ _doctor_check_rotate_mod() {
     if [ -n "$stamp" ]; then
         _doctor_ok "cs-rotate mod: last ran $stamp in this session"
     else
-        _doctor_warn "cs-rotate mod: installed but has not run in this session — the loader needs CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 in the shell that launches cs"
+        _doctor_warn "cs-rotate mod: linked but has not run in this session — the loader needs CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 in the shell that launches cs"
     fi
 }
 

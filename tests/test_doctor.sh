@@ -652,7 +652,7 @@ test_doctor_rotate_mod_row_observes_execution_not_presence() {
     mkdir -p "$fake_claude/skills/cs-rotate/hooks"
     rm -f "$CLAUDE_SESSION_META_DIR/local/cs-rotate.heartbeat"
     output=$(CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
-    assert_output_contains "$output" "cs-rotate mod: installed but has not run" "installed, never ran: WARN" || return 1
+    assert_output_contains "$output" "cs-rotate mod: linked but has not run" "linked, never ran: WARN" || return 1
     assert_output_contains "$output" "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1" "and names the flag that gates the loader" || return 1
     echo "$output" | grep "cs-rotate" | grep -q "WARN" || { echo "  FAIL: never-ran must be a WARN"; return 1; }
     printf '2026-09-15T05:00:00.000Z\n' > "$CLAUDE_SESSION_META_DIR/local/cs-rotate.heartbeat"

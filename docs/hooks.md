@@ -274,7 +274,9 @@ composer fills the composer with `/rotate ` and sends nothing: the `rotate`
 skill asks for a purpose line, so the person finishes the command and presses
 Enter. Below the band the mod draws nothing, and it draws nothing while a turn
 runs or while a survey holds the band. It never submits a prompt and never runs
-a command itself. The button is for the lead conversation of a cs session only:
+a command itself.
+
+The button is for the lead conversation of a cs session only:
 past crit the mod also checks that the cwd has `.cs/local`, that
 `.cs/local/disabled` is absent, and that its own conversation id is the
 `claude_session_id` in `.cs/local/state`. A teammate claude in the same
@@ -302,12 +304,11 @@ the link removes the mod.
 When Claude Code loads the plugin, at process start or on a plugin reload but
 not on `/clear`, the mod writes `.cs/local/cs-rotate.heartbeat` (one UTC
 timestamp) when the cwd has `.cs/local`, and `cs -doctor` reports the mod by
-that file inside a session: `last ran <stamp>
-in this session` as OK, or a WARN naming the flag when the link exists
-but no heartbeat exists. Doctor reads the heartbeat rather than the directory
-because a machine's policy can load a mod and never run it, and because the flag
-is per shell. Doctor says nothing when the mod is not linked, or outside a
-session.
+that file inside a session: `last ran <stamp> in this session` as OK, or a WARN
+naming the flag when the link is there and no heartbeat is. Doctor reads the
+heartbeat rather than the directory because a machine's policy can load a mod
+and never run it, and because the flag is per shell. Doctor says nothing when
+the mod is not linked, or outside a session.
 
 Two limits of the plugin runtime shape the code. It has no environment
 accessor, so `CS_STATUSLINE_CTX_CRIT` cannot reach it: the threshold is a
