@@ -32,12 +32,41 @@ test_mod_default_threshold_matches_the_statusline_warn_default() {
     sl_crit="$(sed -n 's/.*_num_or "\${CS_STATUSLINE_CTX_CRIT:-}" \([0-9]*\).*/\1/p' "$SCRIPT_DIR/../bin/cs-statusline")"
     [ -n "$mod_crit" ] && [ -n "$sl_crit" ] || { echo "  FAIL: crit default literal not found in one of the two"; return 1; }
     assert_eq "$sl_crit" "$mod_crit" "mod crit == statusline crit default" || return 1
-    # The two fixed pie steps, 13 and 88, are literals in both languages too.
-    local sl_steps mod_steps
-    sl_steps="$(sed -n '/^_ctx_pie()/,/^}/p' "$SCRIPT_DIR/../bin/cs-statusline" | grep -o '\-ge [0-9][0-9]*' | grep -o '[0-9]*' | sort -n | tr '\n' ' ')"
-    mod_steps="$(sed -n '/^export function pie(/,/^}/p' "$MOD/hooks/register.tsx" | grep -o '>= [0-9][0-9]*' | grep -o '[0-9]*' | sort -n | tr '\n' ' ')"
-    assert_eq "13 88 " "$sl_steps" "statusline pie has two fixed steps, 13 and 88" || return 1
-    assert_eq "$sl_steps" "$mod_steps" "mod pie steps == statusline pie steps" || return 1
+}
+
+# The capsule paints the bar's own truecolor inks. Each triplet is a literal in
+# both files (KEEP IN SYNC): the bar's `rgb="r;g;b"` arms of _sgr, the mod's
+# `rgb(r,g,b)` strings. brand has one value; amber and crit pivot on the theme.
+test_mod_inks_match_the_statusline_inks() {
+    local sl="$SCRIPT_DIR/../bin/cs-statusline" mod="$MOD/hooks/register.tsx"
+    local brand amber_light amber_dark crit_light crit_dark
+    brand="$(sed -n 's/^ *brand) *rgb="\([0-9;]*\)".*/\1/p' "$sl" | head -1)"
+    amber_light="$(sed -n '/^ *amber)/,/;;/p' "$sl" | grep -o 'else rgb="[0-9;]*"' | grep -o '[0-9;]*' | tail -1)"
+    amber_dark="$(sed -n '/^ *amber)/,/;;/p' "$sl" | grep -o 'dark" ]; then rgb="[0-9;]*"' | sed 's/.*rgb="//; s/"//')"
+    crit_dark="$(sed -n '/^ *crit)/,/;;/p' "$sl" | grep -o 'dark" ] && rgb="[0-9;]*"' | sed 's/.*rgb="//; s/"//')"
+    crit_light="$(sed -n '/^ *crit)/,/;;/p' "$sl" | grep -o '|| rgb="[0-9;]*"' | grep -o '[0-9;]*')"
+    # The amber arm spells each value twice: once on the measured-background
+    # branch (luminance), once on the theme branch. Both spellings are pinned.
+    local amber_lum_light amber_lum_dark
+    amber_lum_light="$(sed -n '/^ *amber)/,/;;/p' "$sl" | grep -o '1530000 ] && rgb="[0-9;]*"' | sed 's/.*rgb="//; s/"//')"
+    amber_lum_dark="$(sed -n '/^ *amber)/,/;;/p' "$sl" | grep -o '1530000 ] && rgb="[0-9;]*" || rgb="[0-9;]*"' | sed 's/.*|| rgb="//; s/"//')"
+    [ -n "$amber_lum_light" ] && [ -n "$amber_lum_dark" ] \
+        || { echo "  FAIL: the amber arm's measured-background branch not found in bin/cs-statusline"; return 1; }
+    assert_eq "$amber_light" "$amber_lum_light" "statusline amber light: theme branch == luminance branch" || return 1
+    assert_eq "$amber_dark" "$amber_lum_dark" "statusline amber dark: theme branch == luminance branch" || return 1
+    [ -n "$brand" ] && [ -n "$amber_light" ] && [ -n "$amber_dark" ] && [ -n "$crit_dark" ] && [ -n "$crit_light" ] \
+        || { echo "  FAIL: an ink is missing from bin/cs-statusline (brand=$brand amber=$amber_light/$amber_dark crit=$crit_light/$crit_dark)"; return 1; }
+    local mod_coral mod_amber_light mod_amber_dark mod_crit_light mod_crit_dark
+    mod_coral="$(sed -n "s/^ *coral: *'rgb(\([0-9,]*\))'.*/\1/p" "$mod" | tr ',' ';')"
+    mod_amber_light="$(sed -n "s/^ *amber: *{ *light: *'rgb(\([0-9,]*\))'.*/\1/p" "$mod" | tr ',' ';')"
+    mod_amber_dark="$(sed -n "s/^ *amber: *{.*dark: *'rgb(\([0-9,]*\))'.*/\1/p" "$mod" | tr ',' ';')"
+    mod_crit_light="$(sed -n "s/^ *crit: *{ *light: *'rgb(\([0-9,]*\))'.*/\1/p" "$mod" | tr ',' ';')"
+    mod_crit_dark="$(sed -n "s/^ *crit: *{.*dark: *'rgb(\([0-9,]*\))'.*/\1/p" "$mod" | tr ',' ';')"
+    assert_eq "$brand" "$mod_coral" "mod coral == statusline brand" || return 1
+    assert_eq "$amber_light" "$mod_amber_light" "mod amber light == statusline amber light" || return 1
+    assert_eq "$amber_dark" "$mod_amber_dark" "mod amber dark == statusline amber dark" || return 1
+    assert_eq "$crit_light" "$mod_crit_light" "mod crit light == statusline crit light" || return 1
+    assert_eq "$crit_dark" "$mod_crit_dark" "mod crit dark == statusline crit dark" || return 1
 }
 
 # The installer deploys the mod under ~/.claude/skills/cs-rotate and a cs
@@ -76,13 +105,14 @@ test_mod_validate_inventories_the_hooks_and_calls() {
     assert_output_contains "$out" "Validation passed" "manifest and hooks validate" || return 1
     assert_output_contains "$out" "hooks: session.start, ui.render{component=AbovePrompt}" "both hooks inventoried" || return 1
     assert_output_not_contains "$out" '$.prompt.fill' "nothing fills the composer any more" || return 1
-    assert_output_contains "$out" 'env reads: CS_ROTATE_BUTTON_CTX, CS_STATUSLINE_CTX_CRIT, CS_STATUSLINE_CTX_WARN' "the threshold and the bar's bands are read from the environment" || return 1
+    assert_output_contains "$out" 'env reads: CS_ROTATE_BUTTON_CTX, CS_STATUSLINE_CTX_CRIT, CS_STATUSLINE_CTX_WARN, CS_TERM_THEME' "the threshold, the bar's bands and the theme are read from the environment" || return 1
     assert_output_not_contains "$out" '$.prompt.submit' "and never submits" || return 1
     assert_output_contains "$out" '$.command.run (via clearAndContinue, rotate)' "the two presses run their commands, and nothing else runs one" || return 1
 }
 
 run_test test_mod_manifest_names_the_plugin_and_its_module
 run_test test_mod_default_threshold_matches_the_statusline_warn_default
+run_test test_mod_inks_match_the_statusline_inks
 run_test test_mod_is_deployed_by_the_installer_and_enabled_at_launch
 run_test test_mod_unit_tests_pass_under_bun
 run_test test_mod_validate_inventories_the_hooks_and_calls

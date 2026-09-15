@@ -6,7 +6,7 @@ import { test, expect, beforeEach } from 'bun:test'
 ;(globalThis as any).h = (type: any, props: any, ...children: any[]) => ({ type, props: props ?? {}, children })
 ;(globalThis as any).Fragment = 'Fragment'
 
-import { register, DEFAULT_PERCENT, DEFAULT_CRIT, pie, gaugeColor } from '../hooks/register.tsx'
+import { register, DEFAULT_PERCENT, DEFAULT_CRIT, gaugeColor, meter, INK } from '../hooks/register.tsx'
 
 type Hook = ($: any, e: any, next: (e: any) => Promise<any>) => Promise<any>
 const hooks: Record<string, Hook> = {}
@@ -67,16 +67,27 @@ test('the default threshold is the statusline warn band', () => {
   expect(DEFAULT_CRIT).toBe(65)
 })
 
-test('the pie and ink step exactly where the status bar steps', () => {
+// The status bar's truecolor inks, as bin/cs-statusline paints them on each
+// theme (tests/test_mod_rotate.sh pins the triplets against that file).
+test('the gauge ink steps where the status bar steps, in the theme\'s own ink', () => {
   const bands = { warn: 40, crit: 65 }
   const table: [number, string, string][] = [
-    [0, '\u25cb', 'text'], [12, '\u25cb', 'text'], [13, '\u25d4', 'text'], [39, '\u25d4', 'text'],
-    [40, '\u25d1', 'warning'], [64, '\u25d1', 'warning'], [65, '\u25d5', 'error'], [87, '\u25d5', 'error'],
-    [88, '\u25cf', 'error'], [100, '\u25cf', 'error'],
+    [0, 'text', 'text'], [39, 'text', 'text'],
+    [40, 'rgb(180,83,9)', 'rgb(253,230,138)'], [64, 'rgb(180,83,9)', 'rgb(253,230,138)'],
+    [65, 'rgb(215,0,21)', 'rgb(255,69,58)'], [100, 'rgb(215,0,21)', 'rgb(255,69,58)'],
   ]
-  for (const [p, glyph, color] of table) {
-    expect([p, pie(p, bands), gaugeColor(p, bands)]).toEqual([p, glyph, color])
+  for (const [p, light, dark] of table) {
+    expect([p, gaugeColor(p, bands, 'light'), gaugeColor(p, bands, 'dark')]).toEqual([p, light, dark])
   }
+  expect(gaugeColor(undefined, bands, 'light')).toBe('text')
+})
+
+test('the meter fills one cell per ten percent, ten cells wide', () => {
+  expect(meter(0)).toEqual(['', '\u2591'.repeat(10)])
+  expect(meter(4)).toEqual(['', '\u2591'.repeat(10)])
+  expect(meter(5)).toEqual(['\u2588', '\u2591'.repeat(9)])
+  expect(meter(47)).toEqual(['\u2588'.repeat(5), '\u2591'.repeat(5)])
+  expect(meter(100)).toEqual(['\u2588'.repeat(10), ''])
 })
 
 test('CS_STATUSLINE_CTX_WARN and _CRIT move the gauge, the band and its threshold together', async () => {
@@ -85,14 +96,15 @@ test('CS_STATUSLINE_CTX_WARN and _CRIT move the gauge, the band and its threshol
   expect(await band()).toBe(DRAWN)
   percent = 50
   let tree = JSON.stringify(await band())
-  expect(tree).toContain('\u25d1 ctx 50%')
-  expect(tree).toContain('"color":"warning"')
+  expect(tree).toContain('"\u2588\u2588\u2588\u2588\u2588"')
+  expect(tree).toContain('" 50%"')
+  expect(tree).toContain(`"color":"${INK.amber.dark}"`)
   percent = 69
-  expect(JSON.stringify(await band())).not.toContain('"color":"error"')
+  expect(JSON.stringify(await band())).not.toContain(INK.crit.dark)
   percent = 70
   tree = JSON.stringify(await band())
-  expect(tree).toContain('\u25d5 ctx 70%')
-  expect(tree).toContain('"borderColor":"error"')
+  expect(tree).toContain('" 70%"')
+  expect(tree).toContain(`"borderColor":"${INK.crit.dark}"`)
   envVars.CS_ROTATE_BUTTON_CTX = '10'
   percent = 10
   expect(findButton(await band())).toBeDefined()
@@ -138,14 +150,32 @@ test('at the threshold the band adds one button on hotkey 1 beneath what was dra
   expect(JSON.stringify(tree)).toContain('"borderStyle":"round"')
 })
 
-test('the band carries the context gauge in the status bar\'s own steps and inks', async () => {
+test('the band carries the context meter in the status bar\'s own inks for the theme cs detected', async () => {
   percent = 71
-  const tree = JSON.stringify(await band())
-  expect(tree).toContain('\u25d5 ctx 71%')
-  expect(tree).toContain('"color":"error"')
+  let tree = JSON.stringify(await band())
+  expect(tree).toContain('"\u2588\u2588\u2588\u2588\u2588\u2588\u2588"')
+  expect(tree).toContain('"\u2591\u2591\u2591"')
+  expect(tree).toContain('" 71%"')
+  expect(tree).toContain(`"color":"${INK.crit.dark}"`)
+  expect(tree).not.toContain('ctx')
+  envVars.CS_TERM_THEME = 'light'
+  tree = JSON.stringify(await band())
+  expect(tree).toContain(`"borderColor":"${INK.crit.light}"`)
+  expect(tree).toContain(`"color":"${INK.crit.light}"`)
+  expect(tree).not.toContain(INK.crit.dark)
   percent = 45
-  expect(JSON.stringify(await band())).toContain('\u25d1 ctx 45%')
-  expect(JSON.stringify(await band())).toContain('"color":"warning"')
+  tree = JSON.stringify(await band())
+  expect(tree).toContain('" 45%"')
+  expect(tree).toContain(`"color":"${INK.amber.light}"`)
+})
+
+test('the capsule is a keyed box that turns coral under the pointer, with the mark in coral', async () => {
+  percent = 40
+  const tree = JSON.stringify(await band())
+  expect(tree).toContain('"key":"cs-rotate-band"')
+  expect(tree).toContain(`"hover":{"borderColor":"${INK.coral}"}`)
+  expect(tree).toContain(`"color":"${INK.coral}","bold":true},"children":["\u2733 "]`)
+  expect(tree).not.toContain('"claude"')
 })
 
 test('while a turn runs the button is hidden', async () => {
@@ -213,10 +243,10 @@ test('an armed handoff turns the button into the clear button, whatever the cont
     expect(button.props.label).toBe('/clear and continue from the handoff')
     const json = JSON.stringify(tree)
     expect(json).toContain('"borderStyle":"round"')
-    expect(json).toContain('"borderColor":"claude"')
+    expect(json).toContain(`"borderColor":"${INK.coral}"`)
     expect(json).not.toContain('undefined')
-    if (p === undefined) expect(json).not.toContain('ctx')
-    else expect(json).toContain(`ctx ${p}%`)
+    if (p === undefined) expect(json).not.toContain('%')
+    else expect(json).toContain(`" ${p}%"`)
   }
 })
 
