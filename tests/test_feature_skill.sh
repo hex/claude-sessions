@@ -36,7 +36,7 @@ test_feature_skill_is_model_invocable_and_keeps_the_prompt() {
 
 test_feature_registered_in_all_manifests() {
     local f
-    for f in "$REPO/lib/00-header.sh" "$REPO/install.sh" "$CS_BIN"; do
+    for f in "$REPO/lib/01-manifests.sh" "$REPO/install.sh" "$CS_BIN"; do
         skill_array "$f" CS_SKILLS | grep -qx feature \
             || { echo "  FAIL: feature missing from CS_SKILLS in $f"; return 1; }
     done

@@ -311,8 +311,8 @@ test_rotate_skill_teaches_the_prune_rule() {
 }
 
 test_rotate_skill_registered_in_both_manifests() {
-    grep -A 5 '^CS_SKILLS=(' "$SCRIPT_DIR/../lib/00-header.sh" | grep -q 'rotate' \
-        || { echo "  FAIL: rotate missing from lib/00-header.sh CS_SKILLS"; return 1; }
+    grep -A 5 '^CS_SKILLS=(' "$SCRIPT_DIR/../lib/01-manifests.sh" | grep -q 'rotate' \
+        || { echo "  FAIL: rotate missing from lib/01-manifests.sh CS_SKILLS"; return 1; }
     grep -A 5 '^CS_SKILLS=(' "$SCRIPT_DIR/../install.sh" | grep -q 'rotate' \
         || { echo "  FAIL: rotate missing from install.sh CS_SKILLS"; return 1; }
 }

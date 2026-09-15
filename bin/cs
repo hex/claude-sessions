@@ -23,8 +23,15 @@ REPO_URL="https://github.com/hex/claude-sessions"
 RELEASES_BASE="https://github.com/hex/claude-sessions/releases"
 CHANGELOG_RAW_URL="https://raw.githubusercontent.com/hex/claude-sessions/main/CHANGELOG.md"
 
+# Deployed-hooks directory; CS_HOOKS_DIR overrides it for tests.
+HOOKS_DEPLOY_DIR="${CS_HOOKS_DIR:-$HOME/.claude/hooks/cs}"
+
+# Encode an absolute filesystem path the way Claude Code does for project
+# directory names under ~/.claude/projects/ (each `/` and `.` becomes `-`).
+# Used by setup_auto_memory and _doctor_check_token_cost to locate the
+# transcript directory for a given workspace.
 # Hooks retired in past versions but possibly still installed from older cs versions.
-# install.sh and run_uninstall both clean these up. KEEP IN SYNC WITH install.sh's RETIRED_HOOKS.
+# install.sh and run_uninstall both clean these up.
 # When retiring a hook in a release, add its filename here.
 RETIRED_HOOKS=(
     narrative-precompact.sh   # retired: PreCompact cannot inject context (no hookSpecificOutput/additionalContext); Stop reminder covers capture
@@ -43,7 +50,7 @@ RETIRED_HOOKS=(
 )
 
 # Hook scripts cs ships; deployed to ~/.claude/hooks/cs/ and registered in
-# settings.json. KEEP THIS LIST IN SYNC WITH install.sh's CS_HOOKS.
+# settings.json.
 CS_HOOKS=(
     session-start.sh
     autosave-commits.sh
@@ -60,7 +67,6 @@ CS_HOOKS=(
 # rather than files Claude Code invokes as hooks. Deployed and removed alongside
 # the hooks, never registered against an event. The prompt-rewriter scripts are
 # reached through $EDITOR, not through any hook event.
-# KEEP THIS LIST IN SYNC WITH install.sh's CS_HOOK_LIBS.
 CS_HOOK_LIBS=(
     cs-resolve.sh
     cs-shared.sh
@@ -70,7 +76,6 @@ CS_HOOK_LIBS=(
 )
 
 # Slash commands cs ships; deployed to ~/.claude/commands/.
-# KEEP THIS LIST IN SYNC WITH install.sh's CS_COMMANDS.
 CS_COMMANDS=(
     summary.md
     checkpoint.md
@@ -79,7 +84,6 @@ CS_COMMANDS=(
 )
 
 # Skills cs ships; each deploys as ~/.claude/skills/<name>/SKILL.md.
-# KEEP THIS LIST IN SYNC WITH install.sh's CS_SKILLS.
 CS_SKILLS=(
     store-secret
     prose-hygiene
@@ -91,7 +95,6 @@ CS_SKILLS=(
 
 # Skills retired or renamed in past versions but possibly still installed from
 # older cs versions. install.sh and run_uninstall both delete these directories.
-# KEEP THIS LIST IN SYNC WITH install.sh's RETIRED_SKILLS.
 # When retiring or renaming a skill in a release, add its OLD name here: a skill
 # directory left behind keeps answering its slash command forever, and nothing
 # else ever removes it.
@@ -101,7 +104,6 @@ RETIRED_SKILLS=(
 )
 
 # Support files skills ship beyond SKILL.md, as skills/<skill>/<path> entries.
-# KEEP THIS LIST IN SYNC WITH install.sh's CS_SKILL_FILES.
 CS_SKILL_FILES=(
     write-as-me/scripts/build-corpus.sh
     finish/scripts/finish.sh
@@ -109,20 +111,28 @@ CS_SKILL_FILES=(
 
 # Mods cs ships: Claude Code function-hooks plugins, deployed file by file as
 # ~/.claude/skills/<mod>/<path> (the mod's bun tests stay in the checkout).
-# KEEP THIS LIST IN SYNC WITH install.sh's CS_MOD_FILES.
 CS_MOD_FILES=(
     cs-rotate/.claude-plugin/plugin.json
     cs-rotate/hooks/hooks.json
     cs-rotate/hooks/register.tsx
 )
 
-# Deployed-hooks directory; CS_HOOKS_DIR overrides it for tests.
-HOOKS_DEPLOY_DIR="${CS_HOOKS_DIR:-$HOME/.claude/hooks/cs}"
-
-# Encode an absolute filesystem path the way Claude Code does for project
-# directory names under ~/.claude/projects/ (each `/` and `.` becomes `-`).
-# Used by setup_auto_memory and _doctor_check_token_cost to locate the
-# transcript directory for a given workspace.
+# Remove a hook registration from any event in a settings JSON string,
+# matching either path spelling; drops wrappers that empty out. Prints the
+# updated JSON.
+_strip_hook_registration() {
+    local settings="$1" p="$2" t="$3"
+    echo "$settings" | jq --arg p "$p" --arg t "$t" '
+        if .hooks then
+            .hooks |= with_entries(
+                .value |= (
+                    map(.hooks |= map(select(.command != $p and .command != $t)))
+                    | map(select(.hooks | length > 0))
+                )
+            )
+        else . end
+    '
+}
 # Normalize an arbitrary identity string to a filesystem-safe slug.
 _slugify() {
     printf '%s' "$1" \
@@ -8030,25 +8040,6 @@ adopt_session() {
     info "Adopted $(basename "$target_dir") as session '$session_name'"
     echo -e "${DIM}Symlink: $session_link -> $target_dir${NC}"
     echo -e "${DIM}Resume with: cs $session_name${NC}"
-}
-
-# Remove a hook registration from any event in a settings JSON string,
-# matching either path spelling; drops wrappers that empty out. Prints the
-# updated JSON.
-# KEEP THE jq FILTER IN SYNC WITH install.sh's _strip_hook_registration —
-# tests/test_install.sh diffs the two filter bodies.
-_strip_hook_registration() {
-    local settings="$1" p="$2" t="$3"
-    echo "$settings" | jq --arg p "$p" --arg t "$t" '
-        if .hooks then
-            .hooks |= with_entries(
-                .value |= (
-                    map(.hooks |= map(select(.command != $p and .command != $t)))
-                    | map(select(.hooks | length > 0))
-                )
-            )
-        else . end
-    '
 }
 
 # Uninstall cs and all components

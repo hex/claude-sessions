@@ -31,7 +31,7 @@ test_finish_skill_is_user_invoked_only() {
 
 test_finish_registered_and_merge_retired_in_both_manifests() {
     local f
-    for f in "$REPO/lib/00-header.sh" "$REPO/install.sh" "$CS_BIN"; do
+    for f in "$REPO/lib/01-manifests.sh" "$REPO/install.sh" "$CS_BIN"; do
         skill_array "$f" CS_SKILLS | grep -qx finish \
             || { echo "  FAIL: finish missing from CS_SKILLS in $f"; return 1; }
         skill_array "$f" CS_SKILLS | grep -qx merge \
