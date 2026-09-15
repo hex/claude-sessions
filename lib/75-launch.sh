@@ -203,6 +203,13 @@ launch_claude_code() {
     if [ -z "${CS_NO_TASK_TOOLS:-}" ]; then
         export CLAUDE_CODE_ENABLE_TODO_TOOLS=1
     fi
+    # Claude Code loads function-hooks plugins only behind this early-access
+    # flag, and the rotate mod the installer deploys is one. A cs launch turns
+    # them on for the session; CS_NO_FUNCTION_HOOKS=1 withholds the flag, and
+    # a value the shell already set (0 to keep them off) is kept, not forced.
+    if [ -z "${CS_NO_FUNCTION_HOOKS:-}" ]; then
+        export CLAUDE_CODE_ENABLE_FUNCTION_HOOKS="${CLAUDE_CODE_ENABLE_FUNCTION_HOOKS:-1}"
+    fi
     if [ -n "$cs_base" ]; then
         export CS_SECRETS_SESSION="$cs_base"
     fi

@@ -289,26 +289,27 @@ keeps its button across rotations. Past crit a render costs one `cwd`, two
 `exists`, one `read` and one `id` call; the band renders a handful of times per
 turn, not per keystroke.
 
-The mod is opt-in, and stays out of `install.sh`, because Claude Code loads function
-hooks only behind `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`. To enable it on one
-machine:
-
-```bash
-ln -s "$(pwd)/mods/cs-rotate" ~/.claude/skills/cs-rotate   # from the cs checkout
-export CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1                  # in the shell that launches cs
-```
-
-A plugin under `~/.claude/skills/<name>/` loads with no settings edit. Removing
-the link removes the mod.
+`install.sh` deploys the mod's three files under `~/.claude/skills/cs-rotate/`
+beside the skills (the installer replaces a symlink an earlier opt-in left there
+with a real directory), and `cs -uninstall` removes the directory. Claude Code loads
+function-hooks plugins only behind `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`, an
+early-access flag, so every `cs <name>` launch exports it for that session; a
+bare `claude` gets no flag and no button. The flag is not scoped to cs's own
+mod: any other function-hooks plugin on the machine loads in cs sessions too.
+`CS_NO_FUNCTION_HOOKS=1` withholds the flag, and cs keeps a value the shell
+already set (0 to keep them off). cs writes no settings file.
 
 When Claude Code loads the plugin, at process start or on a plugin reload but
 not on `/clear`, the mod writes `.cs/local/cs-rotate.heartbeat` (one UTC
 timestamp) when the cwd has `.cs/local`, and `cs -doctor` reports the mod by
 that file inside a session: `last ran <stamp> in this session` as OK, or a WARN
-naming the flag when the link is there and no heartbeat is. Doctor reads the
+when the directory is there and no heartbeat is, naming the three ways that
+happens (a conversation launched without cs, `CS_NO_FUNCTION_HOOKS` set, or a
+Claude Code that no longer loads mods behind the flag). Doctor reads the
 heartbeat rather than the directory because a machine's policy can load a mod
-and never run it, and because the flag is per shell. Doctor says nothing when
-the mod is not linked, or outside a session.
+and never run it. Doctor says nothing when the mod is not installed, or outside
+a session. The deploy-drift check compares the deployed files against `mods/`
+in the checkout the way it does hooks, commands and skills.
 
 Two limits of the plugin runtime shape the code. It has no environment
 accessor, so `CS_STATUSLINE_CTX_CRIT` cannot reach it: the threshold is a

@@ -28,10 +28,13 @@ test_mod_crit_threshold_matches_the_statusline_default() {
     assert_eq "$sl_crit" "$mod_crit" "mod crit == statusline crit default" || return 1
 }
 
-# The mod is a plugin under the user's own skills dir; the installer must not
-# deploy it while the loader is behind CLAUDE_CODE_ENABLE_FUNCTION_HOOKS.
-test_mod_is_not_in_the_install_manifest() {
-    assert_file_not_contains "$SCRIPT_DIR/../install.sh" "cs-rotate" "install.sh leaves the mod alone" || return 1
+# The installer deploys the mod under ~/.claude/skills/cs-rotate and a cs
+# launch exports the flag Claude Code loads it behind, so the mod runs with
+# nothing for the person to place. Both halves are pinned here by name; the
+# install and launch suites test the behaviour.
+test_mod_is_deployed_by_the_installer_and_enabled_at_launch() {
+    assert_file_contains "$SCRIPT_DIR/../install.sh" "cs-rotate/hooks/register.tsx" "install.sh lists the module" || return 1
+    assert_file_contains "$SCRIPT_DIR/../lib/75-launch.sh" "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS" "launch exports the loader flag" || return 1
 }
 
 test_mod_unit_tests_pass_under_bun() {
@@ -67,7 +70,7 @@ test_mod_validate_inventories_the_hooks_and_calls() {
 
 run_test test_mod_manifest_names_the_plugin_and_its_module
 run_test test_mod_crit_threshold_matches_the_statusline_default
-run_test test_mod_is_not_in_the_install_manifest
+run_test test_mod_is_deployed_by_the_installer_and_enabled_at_launch
 run_test test_mod_unit_tests_pass_under_bun
 run_test test_mod_validate_inventories_the_hooks_and_calls
 

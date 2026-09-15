@@ -412,7 +412,7 @@ extract_array() {
 
 test_manifest_arrays_in_sync() {
     local arr a b
-    for arr in CS_HOOKS CS_HOOK_LIBS RETIRED_HOOKS CS_COMMANDS CS_SKILLS RETIRED_SKILLS CS_SKILL_FILES; do
+    for arr in CS_HOOKS CS_HOOK_LIBS RETIRED_HOOKS CS_COMMANDS CS_SKILLS RETIRED_SKILLS CS_SKILL_FILES CS_MOD_FILES; do
         a=$(extract_array "$SCRIPT_DIR/../install.sh" "$arr" | sort)
         b=$(extract_array "$CS_BIN" "$arr" | sort)
         if [ -z "$a" ]; then
@@ -506,6 +506,59 @@ test_manifest_arrays_match_repo_files() {
         diff <(echo "$listed") <(echo "$actual") | head -10
         return 1
     fi
+}
+
+# The rotate mod deploys as plain files under ~/.claude/skills/cs-rotate, so
+# the manifest lists each one. Every listed file exists, and every file the
+# mod needs (manifest, hooks list, module) is listed; the bun tests are not.
+test_mod_files_manifest_matches_the_repo() {
+    local entry listed actual
+    for entry in $(extract_array "$SCRIPT_DIR/../install.sh" CS_MOD_FILES); do
+        [ -f "$SCRIPT_DIR/../mods/$entry" ] \
+            || { echo "  FAIL: CS_MOD_FILES entry missing from repo: mods/$entry"; return 1; }
+    done
+    listed=$(extract_array "$SCRIPT_DIR/../install.sh" CS_MOD_FILES | sort)
+    actual=$(cd "$SCRIPT_DIR/../mods" && find . -type f -not -path '*/test/*' | sed 's|^\./||' | sort)
+    if [ "$listed" != "$actual" ]; then
+        echo "  FAIL: CS_MOD_FILES does not match the files under mods/ (test/ excluded)"
+        diff <(echo "$listed") <(echo "$actual") | head -10
+        return 1
+    fi
+}
+
+# A local install deploys the mod byte for byte beside the skills, and
+# uninstall takes the directory away again.
+test_install_deploys_the_rotate_mod_and_uninstall_removes_it() {
+    local fake_home="$TEST_TMPDIR/mod-home"
+    mkdir -p "$fake_home/.claude"
+    HOME="$fake_home" bash "$INSTALL_SH" > /dev/null 2>&1 < /dev/null || { echo "  FAIL: install.sh exited non-zero"; return 1; }
+    local entry
+    for entry in $(extract_array "$SCRIPT_DIR/../install.sh" CS_MOD_FILES); do
+        cmp -s "$SCRIPT_DIR/../mods/$entry" "$fake_home/.claude/skills/$entry" \
+            || { echo "  FAIL: mod file not deployed or differs: $entry"; return 1; }
+    done
+    [ ! -e "$fake_home/.claude/skills/cs-rotate/test" ] \
+        || { echo "  FAIL: the mod's bun tests were deployed"; return 1; }
+    printf 'y\n' | HOME="$fake_home" "$CS_BIN" -uninstall > /dev/null 2>&1 || { echo "  FAIL: cs -uninstall exited non-zero"; return 1; }
+    [ ! -d "$fake_home/.claude/skills/cs-rotate" ] \
+        || { echo "  FAIL: uninstall left ~/.claude/skills/cs-rotate behind"; return 1; }
+}
+
+# An earlier opt-in shape had the person symlink ~/.claude/skills/cs-rotate at
+# the checkout. Copying through that link would overwrite the checkout's own
+# files and leave the link in place; the installer replaces the link with a
+# real directory and leaves the link's target alone.
+test_install_replaces_a_symlinked_mod_directory() {
+    local fake_home="$TEST_TMPDIR/modlink-home" elsewhere="$TEST_TMPDIR/modlink-target"
+    mkdir -p "$fake_home/.claude/skills" "$elsewhere/hooks"
+    echo 'sentinel' > "$elsewhere/hooks/register.tsx"
+    ln -s "$elsewhere" "$fake_home/.claude/skills/cs-rotate"
+    HOME="$fake_home" bash "$INSTALL_SH" > /dev/null 2>&1 < /dev/null || { echo "  FAIL: install.sh exited non-zero"; return 1; }
+    [ ! -L "$fake_home/.claude/skills/cs-rotate" ] && [ -d "$fake_home/.claude/skills/cs-rotate" ] \
+        || { echo "  FAIL: the symlink was not replaced by a real directory"; return 1; }
+    assert_eq "sentinel" "$(cat "$elsewhere/hooks/register.tsx")" "the link's target is untouched" || return 1
+    cmp -s "$SCRIPT_DIR/../mods/cs-rotate/hooks/register.tsx" "$fake_home/.claude/skills/cs-rotate/hooks/register.tsx" \
+        || { echo "  FAIL: the module was not deployed into the real directory"; return 1; }
 }
 
 test_skill_files_exist_in_repo() {
@@ -1169,6 +1222,9 @@ run_test test_install_respects_custom_fpath_dir
 run_test test_manifest_arrays_in_sync
 run_test test_manifest_arrays_match_repo_files
 run_test test_skill_files_exist_in_repo
+run_test test_mod_files_manifest_matches_the_repo
+run_test test_install_deploys_the_rotate_mod_and_uninstall_removes_it
+run_test test_install_replaces_a_symlinked_mod_directory
 run_test test_strip_filters_in_sync
 run_test test_install_deploys_hooks_to_cs_subdir
 run_test test_install_migrates_flat_hook_layout

@@ -291,6 +291,31 @@ test_launch_enables_the_task_tools_unless_opted_out() {
     assert_output_not_contains "$env_out" "CLAUDE_CODE_ENABLE_TODO_TOOLS=" "CS_NO_TASK_TOOLS leaves the decision to Claude Code" || return 1
 }
 
+# Claude Code loads function-hooks plugins, cs's rotate mod among them, only
+# behind CLAUDE_CODE_ENABLE_FUNCTION_HOOKS. A cs launch exports it so the mod
+# the installer deployed actually runs; CS_NO_FUNCTION_HOOKS=1 withholds it,
+# and a value the shell already set (0 to keep them off) is kept, not forced.
+# `env -u` for the same reason as the Task tools test above.
+test_launch_enables_function_hooks_unless_opted_out() {
+    local stub env_out
+    stub=$(_make_env_stub)
+    for _try in 1 2 3 4 5; do
+        env_out=$(env -u CLAUDE_CODE_ENABLE_FUNCTION_HOOKS CLAUDE_CODE_BIN="$stub" "$CS_BIN" "fnhooks" <<< "n" 2>/dev/null || true)
+        case "$env_out" in *"CLAUDE_SESSION_NAME=fnhooks"*) break ;; esac
+    done
+    assert_output_contains "$env_out" "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1" "a cs launch turns function hooks on" || return 1
+    for _try in 1 2 3 4 5; do
+        env_out=$(env -u CLAUDE_CODE_ENABLE_FUNCTION_HOOKS CS_NO_FUNCTION_HOOKS=1 CLAUDE_CODE_BIN="$stub" "$CS_BIN" "fnhooks-off" <<< "n" 2>/dev/null || true)
+        case "$env_out" in *"CLAUDE_SESSION_NAME=fnhooks-off"*) break ;; esac
+    done
+    assert_output_not_contains "$env_out" "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=" "CS_NO_FUNCTION_HOOKS withholds the flag" || return 1
+    for _try in 1 2 3 4 5; do
+        env_out=$(CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=0 CLAUDE_CODE_BIN="$stub" "$CS_BIN" "fnhooks-kept" <<< "n" 2>/dev/null || true)
+        case "$env_out" in *"CLAUDE_SESSION_NAME=fnhooks-kept"*) break ;; esac
+    done
+    assert_output_contains "$env_out" "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=0" "a value the shell set is kept" || return 1
+}
+
 test_retire_after_integrate_removes_worktree_and_branch() {
     local base_dir
     base_dir=$(create_test_session_with_git "myproj")
@@ -673,6 +698,7 @@ run_test test_worktree_create_succeeds_with_untracked_base
 run_test test_worktree_reopen_preserves_project_claude_md
 run_test test_worktree_launch_exports_base_identity
 run_test test_launch_enables_the_task_tools_unless_opted_out
+run_test test_launch_enables_function_hooks_unless_opted_out
 run_test test_retire_after_integrate_removes_worktree_and_branch
 run_test test_retire_refuses_dirty_worktree
 run_test test_retire_refuses_a_live_feature_session_and_says_what_to_do

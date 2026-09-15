@@ -106,6 +106,15 @@ CS_SKILL_FILES=(
     finish/scripts/finish.sh
 )
 
+# Mods cs ships: Claude Code function-hooks plugins, deployed file by file as
+# ~/.claude/skills/<mod>/<path> (the mod's bun tests stay in the checkout).
+# KEEP THIS LIST IN SYNC WITH install.sh's CS_MOD_FILES.
+CS_MOD_FILES=(
+    cs-rotate/.claude-plugin/plugin.json
+    cs-rotate/hooks/hooks.json
+    cs-rotate/hooks/register.tsx
+)
+
 # Deployed-hooks directory; CS_HOOKS_DIR overrides it for tests.
 HOOKS_DEPLOY_DIR="${CS_HOOKS_DIR:-$HOME/.claude/hooks/cs}"
 

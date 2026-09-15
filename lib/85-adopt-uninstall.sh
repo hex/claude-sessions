@@ -319,6 +319,16 @@ run_uninstall() {
         fi
     done
 
+    # Remove mods: each deploys under its own directory beside the skills.
+    local mod_file mod
+    for mod_file in "${CS_MOD_FILES[@]}"; do
+        mod="${mod_file%%/*}"
+        if [ -d "$skills_dir/$mod" ]; then
+            rm -rf "$skills_dir/$mod"
+            info "Removed $skills_dir/$mod/"
+        fi
+    done
+
     # Remove shell completions
     if [ -f "$bash_completion_dir/cs.bash" ]; then
         rm "$bash_completion_dir/cs.bash"

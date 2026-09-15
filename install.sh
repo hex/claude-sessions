@@ -167,6 +167,15 @@ CS_SKILL_FILES=(
     finish/scripts/finish.sh
 )
 
+# Mods cs ships: Claude Code function-hooks plugins, deployed file by file as
+# ~/.claude/skills/<mod>/<path> (the mod's bun tests stay in the checkout).
+# KEEP THIS LIST IN SYNC WITH lib/00-header.sh's CS_MOD_FILES.
+CS_MOD_FILES=(
+    cs-rotate/.claude-plugin/plugin.json
+    cs-rotate/hooks/hooks.json
+    cs-rotate/hooks/register.tsx
+)
+
 # Completion URLs for web install
 COMPLETION_BASH_URL="${REPO_URL}/completions/cs.bash"
 COMPLETION_ZSH_URL="${REPO_URL}/completions/_cs"
@@ -434,6 +443,7 @@ fi
 # Install skills
 SKILLS_DIR="$HOME/.claude/skills"
 SKILLS_SOURCE="$SCRIPT_DIR/skills"
+MODS_SOURCE="$SCRIPT_DIR/mods"
 installed "skills" "$SKILLS_DIR/"
 
 # Drop skill directories earlier cs versions installed but no longer ship. A
@@ -450,6 +460,16 @@ for skill in "${CS_SKILLS[@]}"; do
     mkdir -p "$SKILLS_DIR/$skill"
 done
 
+# A mod directory that is a symlink (an earlier opt-in had the person link it
+# at the checkout) is replaced by a real directory: copying through the link
+# would write into its target instead of deploying.
+_mod_dir_real() {
+    if [ -L "$SKILLS_DIR/$1" ]; then
+        rm "$SKILLS_DIR/$1"
+        info "  Replaced symlink $SKILLS_DIR/$1 with a deployed copy"
+    fi
+}
+
 if [ "$INSTALL_METHOD" = "local" ]; then
     for skill in "${CS_SKILLS[@]}"; do
         cp "$SKILLS_SOURCE/$skill/SKILL.md" "$SKILLS_DIR/$skill/"
@@ -457,6 +477,11 @@ if [ "$INSTALL_METHOD" = "local" ]; then
     for skill_file in "${CS_SKILL_FILES[@]}"; do
         mkdir -p "$SKILLS_DIR/$(dirname "$skill_file")"
         cp -p "$SKILLS_SOURCE/$skill_file" "$SKILLS_DIR/$skill_file"
+    done
+    for mod_file in "${CS_MOD_FILES[@]}"; do
+        _mod_dir_real "${mod_file%%/*}"
+        mkdir -p "$SKILLS_DIR/$(dirname "$mod_file")"
+        cp -p "$MODS_SOURCE/$mod_file" "$SKILLS_DIR/$mod_file"
     done
 else
     if command -v curl >/dev/null 2>&1; then
@@ -468,6 +493,11 @@ else
             curl -fsSL "$REPO_URL/skills/$skill_file" -o "$SKILLS_DIR/$skill_file" || error "Failed to download $skill_file"
             chmod +x "$SKILLS_DIR/$skill_file"
         done
+        for mod_file in "${CS_MOD_FILES[@]}"; do
+            _mod_dir_real "${mod_file%%/*}"
+            mkdir -p "$SKILLS_DIR/$(dirname "$mod_file")"
+            curl -fsSL "$REPO_URL/mods/$mod_file" -o "$SKILLS_DIR/$mod_file" || error "Failed to download $mod_file"
+        done
     elif command -v wget >/dev/null 2>&1; then
         for skill in "${CS_SKILLS[@]}"; do
             wget -q "$REPO_URL/skills/$skill/SKILL.md" -O "$SKILLS_DIR/$skill/SKILL.md" || error "Failed to download $skill skill"
@@ -476,6 +506,11 @@ else
             mkdir -p "$SKILLS_DIR/$(dirname "$skill_file")"
             wget -q "$REPO_URL/skills/$skill_file" -O "$SKILLS_DIR/$skill_file" || error "Failed to download $skill_file"
             chmod +x "$SKILLS_DIR/$skill_file"
+        done
+        for mod_file in "${CS_MOD_FILES[@]}"; do
+            _mod_dir_real "${mod_file%%/*}"
+            mkdir -p "$SKILLS_DIR/$(dirname "$mod_file")"
+            wget -q "$REPO_URL/mods/$mod_file" -O "$SKILLS_DIR/$mod_file" || error "Failed to download $mod_file"
         done
     fi
 fi

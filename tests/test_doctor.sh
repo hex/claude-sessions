@@ -240,6 +240,24 @@ test_doctor_drift_silent_when_in_sync() {
     fi
 }
 
+# The rotate mod deploys under ~/.claude/skills/cs-rotate from mods/ in the
+# checkout, so the drift scan has to read that tree too, or an edited module
+# ships nowhere and doctor stays green.
+test_doctor_warns_on_mod_drift() {
+    local checkout="$TEST_TMPDIR/modco" deployed="$TEST_TMPDIR/moddep" skills="$TEST_TMPDIR/modskills"
+    make_fake_checkout "$checkout" "$deployed"
+    mkdir -p "$checkout/mods/cs-rotate/hooks" "$skills/cs-rotate/hooks"
+    echo 'export const CRIT_PERCENT = 65' > "$checkout/mods/cs-rotate/hooks/register.tsx"
+    echo 'export const CRIT_PERCENT = 66' > "$skills/cs-rotate/hooks/register.tsx"
+    local output
+    output=$(cd "$checkout" && CS_HOOKS_DIR="$deployed" CS_SKILLS_DIR="$skills" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Mod drift: deployed copy differs from source: cs-rotate/hooks/register.tsx" \
+        "an edited module the installer has not copied is drift" || return 1
+    cp "$checkout/mods/cs-rotate/hooks/register.tsx" "$skills/cs-rotate/hooks/register.tsx"
+    output=$(cd "$checkout" && CS_HOOKS_DIR="$deployed" CS_SKILLS_DIR="$skills" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_not_contains "$output" "Mod drift" "in sync: silent" || return 1
+}
+
 test_doctor_drift_skipped_outside_checkout() {
     local plain="$TEST_TMPDIR/not-a-checkout" deployed="$TEST_TMPDIR/deployed"
     mkdir -p "$plain" "$deployed"
@@ -652,7 +670,7 @@ test_doctor_rotate_mod_row_observes_execution_not_presence() {
     mkdir -p "$fake_claude/skills/cs-rotate/hooks"
     rm -f "$CLAUDE_SESSION_META_DIR/local/cs-rotate.heartbeat"
     output=$(CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
-    assert_output_contains "$output" "cs-rotate mod: linked but has not run" "linked, never ran: WARN" || return 1
+    assert_output_contains "$output" "cs-rotate mod: installed but has not run" "installed, never ran: WARN" || return 1
     assert_output_contains "$output" "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1" "and names the flag that gates the loader" || return 1
     echo "$output" | grep "cs-rotate" | grep -q "WARN" || { echo "  FAIL: never-ran must be a WARN"; return 1; }
     printf '2026-09-15T05:00:00.000Z\n' > "$CLAUDE_SESSION_META_DIR/local/cs-rotate.heartbeat"
@@ -881,6 +899,7 @@ run_test test_doctor_drift_ignores_a_checkout_that_did_not_produce_the_install
 run_test test_doctor_warns_on_hook_drift
 run_test test_doctor_warns_on_undeployed_hook
 run_test test_doctor_drift_silent_when_in_sync
+run_test test_doctor_warns_on_mod_drift
 run_test test_doctor_drift_skipped_outside_checkout
 run_test test_doctor_warns_on_command_drift
 run_test test_doctor_warns_on_skill_script_drift

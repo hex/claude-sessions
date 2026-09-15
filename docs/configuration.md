@@ -204,6 +204,12 @@ export CS_NO_ITERM2="1"
 # cost back; the drain and the handoff then coordinate by message text alone.
 export CS_NO_TASK_TOOLS="1"
 
+# Withhold CLAUDE_CODE_ENABLE_FUNCTION_HOOKS from the launch. A cs launch
+# exports it so the rotate mod the installer deployed (the "1: rotate this
+# conversation" button past 65% context) loads; the flag also loads any other
+# function-hooks plugin on the machine. A value already in the shell is kept.
+export CS_NO_FUNCTION_HOOKS="1"
+
 # Override the tmux binary cs -spawn uses (default: tmux on PATH)
 export CS_TMUX_BIN="/opt/homebrew/bin/tmux"
 

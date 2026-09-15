@@ -169,6 +169,9 @@ _doctor_check_hook_drift() {
             elif [[ "$src" == skills/*/scripts/* ]]; then
                 name="${src#skills/}"
                 deployed="$deploy_root/$name"
+            elif [[ "$src" == mods/* ]]; then
+                name="${src#mods/}"
+                deployed="$deploy_root/$name"
             else
                 name=$(basename "$src")
                 deployed="$deploy_root/$name"
@@ -192,9 +195,10 @@ _doctor_check_hook_drift() {
     _drift_scan "Hook" "$hooks_dir" hooks/*.sh
     _drift_scan "Command" "$commands_dir" commands/*.md
     _drift_scan "Skill" "$skills_dir" skills/*/SKILL.md skills/*/scripts/*.sh
+    _drift_scan "Mod" "$skills_dir" mods/*/.claude-plugin/plugin.json mods/*/hooks/*
 
     if [ "$clean" = "1" ]; then
-        _doctor_ok "Deploy drift: hooks, commands, and skills match checkout source"
+        _doctor_ok "Deploy drift: hooks, commands, skills, and mods match checkout source"
     fi
 }
 
@@ -661,11 +665,12 @@ _doctor_check_session_id_match() {
     fi
 }
 
-# The cs-rotate mod is an opt-in Claude Code function-hooks plugin the user
-# links under ~/.claude/skills. Absent, it is not news. Present, the row reads
+# The cs-rotate mod is a Claude Code function-hooks plugin the installer
+# deploys under ~/.claude/skills. Absent, it is not news. Present, the row reads
 # the heartbeat the mod writes when Claude Code loads it, never the directory:
-# the loader sits behind CLAUDE_CODE_ENABLE_FUNCTION_HOOKS, and a managed
-# machine's policy can load a mod and never run it, so presence proves nothing.
+# the loader sits behind CLAUDE_CODE_ENABLE_FUNCTION_HOOKS, which a cs launch
+# exports and CS_NO_FUNCTION_HOOKS withholds, and a managed machine's policy
+# can load a mod and never run it, so presence proves nothing.
 # The heartbeat is per session, hence the session guard around the call. A
 # teammate process with the flag on writes it too, so OK says the mod ran in
 # this directory, not that the lead's shell carries the flag.
@@ -679,7 +684,7 @@ _doctor_check_rotate_mod() {
     if [ -n "$stamp" ]; then
         _doctor_ok "cs-rotate mod: last ran $stamp in this session"
     else
-        _doctor_warn "cs-rotate mod: linked but has not run in this session — the loader needs CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 in the shell that launches cs"
+        _doctor_warn "cs-rotate mod: installed but has not run in this session — launched without cs, CS_NO_FUNCTION_HOOKS set, or Claude Code no longer loads mods behind CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1"
     fi
 }
 
