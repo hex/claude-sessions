@@ -982,6 +982,7 @@ test_integrate_red_gate_leaves_base_untouched() {
     assert_output_contains "$(cat "$TEST_TMPDIR/where" 2>/dev/null)" "/.git/cs/finish/fix-auth." "the red gate ran in the temp" || return 1
     assert_output_contains "$output" "GATE-SAYS-NO" "the gate output is shown" || return 1
     assert_output_contains "$output" "Gate failed" "names the cause" || return 1
+    assert_output_contains "$output" "clean checkout" "and says the gate ran without gitignored files" || return 1
     assert_eq "$head" "$(git -C "$base_dir" rev-parse HEAD)" "base HEAD unchanged" || return 1
     assert_file_not_exists "$base_dir/feature.txt" "base tree unchanged" || return 1
     assert_output_not_contains "$(git -C "$base_dir" worktree list)" "cs/finish" "temp worktree removed" || return 1
@@ -1938,6 +1939,39 @@ test_integrate_from_remote_after_a_local_integrate_still_lands() {
     assert_file_exists "$base_dir/feature.txt" "feature content on base" || return 1
 }
 
+# The PR's landing commit already passed origin's CI. When the base has nothing
+# origin lacks, the temp merge is a fast-forward onto that very commit, so a
+# local gate would only re-run CI's work in a clean checkout that lacks the
+# project's gitignored dependencies. Skip it, and say so.
+test_integrate_from_remote_skips_the_gate_when_base_is_an_ancestor() {
+    local sha base_dir M output status=0
+    sha=$(integrate_remote_fixture myproj fix-auth)
+    base_dir="$CS_SESSIONS_ROOT/myproj"
+    M=$(land_pr_on_origin "$base_dir" fix-auth)
+    git -C "$base_dir" fetch -q origin
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$M" --from-remote -- sh -c 'touch "$0/gate-ran"' "$TEST_TMPDIR" 2>&1) || status=$?
+    assert_eq "0" "$status" "remote landing succeeds: $output" || return 1
+    assert_not_exists "$TEST_TMPDIR/gate-ran" "the gate did not run" || return 1
+    assert_output_contains "$output" "gate skipped" "the report says the gate was skipped" || return 1
+    assert_output_contains "$output" "CI" "and why: origin's CI covered the commit" || return 1
+    assert_eq "$M" "$(git -C "$base_dir" rev-parse HEAD)" "base still fast-forwards to the PR merge commit" || return 1
+}
+
+# The base's own commit is a tree origin's CI never saw, so the merge of the
+# two must still pass the gate.
+test_integrate_from_remote_runs_the_gate_when_base_diverged() {
+    local sha base_dir M output status=0
+    sha=$(integrate_remote_fixture myproj fix-auth)
+    base_dir="$CS_SESSIONS_ROOT/myproj"
+    (cd "$base_dir" && git commit -q --allow-empty -m "local only")
+    M=$(land_pr_on_origin "$base_dir" fix-auth)
+    git -C "$base_dir" fetch -q origin
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$M" --from-remote -- sh -c 'touch "$0/gate-ran"' "$TEST_TMPDIR" 2>&1) || status=$?
+    assert_eq "0" "$status" "mixed landing succeeds: $output" || return 1
+    assert_exists "$TEST_TMPDIR/gate-ran" "the gate ran on the merge CI never saw" || return 1
+    assert_output_not_contains "$output" "gate skipped" "no skip reported" || return 1
+}
+
 test_integrate_from_remote_refuses_a_commit_origin_does_not_have() {
     local sha base_dir output status=0
     sha=$(integrate_remote_fixture myproj fix-auth)
@@ -1966,6 +2000,8 @@ test_integrate_from_remote_squash_leaves_feature_tip_unintegrated() {
 
 run_test test_integrate_from_remote_fast_forwards_onto_the_pr_merge_commit
 run_test test_integrate_from_remote_after_a_local_integrate_still_lands
+run_test test_integrate_from_remote_skips_the_gate_when_base_is_an_ancestor
+run_test test_integrate_from_remote_runs_the_gate_when_base_diverged
 run_test test_integrate_from_remote_refuses_a_commit_origin_does_not_have
 run_test test_integrate_from_remote_squash_leaves_feature_tip_unintegrated
 

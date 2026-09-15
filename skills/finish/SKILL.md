@@ -56,6 +56,12 @@ for the gate command and use it for the rest of the conversation.
 The gate is passed to cs as words after `--`, never as a shell string. Two
 commands become `-- sh -c 'first && second'`.
 
+The gate runs in a clean detached checkout of the merged commit, so gitignored
+files are not there: installed dependencies, `.env`, build output. When the
+project needs an install step before its tests (a lockfile, a `.env.example`,
+a vendored directory) and its instructions do not say so, ask the user once
+what creates them and fold it into the gate: `-- sh -c 'npm ci && npm test'`.
+
 ## The ritual
 
 1. **Capture.** From `prepare`: `sha` is the feature commit this integrate
@@ -85,10 +91,13 @@ commands become `-- sh -c 'first && second'`.
 4. **PR path.** `git fetch origin`. Confirm `base_branch` equals
    `pr_base_ref`; if not, stop and say which branch to check out. Then
    `cs <base> -integrate-feature <task> <pr_merge_commit> --from-remote -- <gate command words>`.
-   The same temporary detached worktree, gate and fast-forward apply. When
-   the base has nothing origin lacks this fast-forwards onto the PR's
-   landing commit and makes no new commit; when the base already carries a
-   local integrate, cs makes one merge commit joining the two histories.
+   The same temporary detached worktree and fast-forward apply. When the
+   base has nothing origin lacks this fast-forwards onto the PR's landing
+   commit and makes no new commit, and cs skips the gate (the report says
+   `gate skipped`: the commit passed the PR's CI and there is nothing local
+   to test); when the base already carries a local integrate, cs makes one
+   merge commit joining the two histories, a tree CI never saw, and the
+   gate runs on it.
    If `pr_head_oid` differs from the captured `sha`, say so: the PR landed
    an older or newer tip than the worktree holds now.
 5. **Report.** The entry's own summary line says what happened:

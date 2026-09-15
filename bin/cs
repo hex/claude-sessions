@@ -2017,16 +2017,31 @@ Move or delete these untracked files in $base_dir, then re-run /finish $task"
     fi
     rmdir "$no_hooks"
 
-    local gate_log
-    gate_log=$(mktemp "${TMPDIR:-/tmp}/cs-gate.XXXXXX")
-    # </dev/null: a gate that reads stdin would otherwise consume whatever cs
-    # was given and block a non-interactive run forever.
-    if ! (cd "$tmp" && "$@") > "$gate_log" 2>&1 < /dev/null; then
-        cat "$gate_log" >&2
-        rm -f "$gate_log"
-        error "Gate failed in $tmp (output above); base $base_dir untouched at $B"
+    # A remote landing whose base has nothing origin lacks fast-forwards onto
+    # the PR's landing commit, a tree origin's CI already ran; the temp holds
+    # exactly that tree, so a local gate would only repeat CI's work in a
+    # checkout without the project's gitignored dependencies. Skip it and say
+    # so. A base carrying its own commits makes a merge CI never saw, and
+    # then the gate runs.
+    local gate_skipped="" B7
+    B7=$(printf '%s' "$B" | cut -c1-7)
+    if [ -n "$from_remote" ] && git -C "$base_dir" merge-base --is-ancestor "$B" "$sha" 2>/dev/null; then
+        gate_skipped=1
+        echo "gate skipped: $base_dir at $B7 is an ancestor of $sha7, which origin's CI landed; nothing local to test"
     fi
-    rm -f "$gate_log"
+    local gate_log
+    if [ -z "$gate_skipped" ]; then
+        gate_log=$(mktemp "${TMPDIR:-/tmp}/cs-gate.XXXXXX")
+        # </dev/null: a gate that reads stdin would otherwise consume whatever
+        # cs was given and block a non-interactive run forever.
+        if ! (cd "$tmp" && "$@") > "$gate_log" 2>&1 < /dev/null; then
+            cat "$gate_log" >&2
+            rm -f "$gate_log"
+            error "Gate failed in $tmp (output above); base $base_dir untouched at $B
+The gate ran in a clean checkout of the merged commit: gitignored files (installed dependencies, .env, build output) are not there. A gate that needs them must create them first, e.g. -- sh -c 'npm ci && npm test'"
+        fi
+        rm -f "$gate_log"
+    fi
 
     # A green gate that changed the temp is still a refusal. What lands is M,
     # so a file the gate wrote is either dropped on the floor or — once the
