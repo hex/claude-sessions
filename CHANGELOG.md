@@ -6,6 +6,9 @@ All notable changes to cs are documented here. Release notes are also available 
 
 ## Unreleased
 
+### Changed
+- The session name on the status bar paints in the session's own colour again, the one its tab and Claude Code's `/color` accent already carry; branch and model stay plain ink.
+
 ### Features
 - A session can start a feature itself. The `feature` skill (`/feature fix-auth`) writes a brief from the conversation, with the goal, what done looks like, the constraints the new session cannot otherwise know and how to report back, and spawns `<base>@fix-auth` as a parallel worktree session in the cs tmux session. The new session reads the brief at `.cs/brief.md` before its first turn; the result comes back as `cs -msg` mail, and `/finish fix-auth` lands it. Underneath, `cs -spawn` takes `--brief <file>`: cs stages the brief beside the seed, moves it into the session at launch, sets it aside with a stale seed, deletes it with the session on `cs -rm`, and `cs -doctor` counts a stale one. The spawn keeps its permission prompt.
 

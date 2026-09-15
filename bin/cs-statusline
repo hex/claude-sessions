@@ -1239,7 +1239,14 @@ _seg_session() {
         local dir="${SL_DIR:-$PWD}"
         name="${dir##*/}"
     fi
-    _add "${name}" identity ink bold space
+    local ink=ink
+    if [ -n "${CLAUDE_SESSION_NAME:-}" ]; then
+        _read_state_key "$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/local/state" claude_session_color
+        case "$_STATE_VALUE" in
+            red|blue|green|yellow|purple|orange|pink|cyan) ink="$_STATE_VALUE" ;;
+        esac
+    fi
+    _add "${name}" identity "$ink" bold space
 }
 
 # Count of queued tasks for the current session (one file per task in

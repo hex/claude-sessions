@@ -219,9 +219,9 @@ test_identity_items_are_bold_ink() {
     local json='{"session_name":"accents","model":{"display_name":"Opus"},"workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8},"cost":{"total_cost_usd":1.0},"rate_limits":{"five_hour":{"used_percentage":12},"seven_day":{"used_percentage":40}}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains_f "$out" "48;2;227;221;204;38;2;79;77;71;1maccents" "session is bold ink on the surface" || return 1
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;8;145;178;1maccents" "session is bold in its session colour (cyan) on the surface" || return 1
     assert_output_contains_f "$out" "48;2;227;221;204;38;2;79;77;71;1m✦ Opus" "model is bold ink on the surface" || return 1
-    assert_output_not_contains "$out" "8;145;178" "the session colour never reaches the bar" || return 1
+    assert_output_not_contains "$out" "48;2;8;145;178" "the session colour is never a fill" || return 1
     assert_output_not_contains "$out" "76;29;149" "no periwinkle in the bar" || return 1
 }
 
@@ -911,15 +911,15 @@ test_accent_segments_bold() {
     local json='{"session_name":"boldsess","model":{"display_name":"Opus"},"workspace":{"current_dir":"/none"},"context_window":{"used_percentage":8}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains_f "$out" "48;2;227;221;204;38;2;79;77;71;1mboldsess" \
-        "the session name should render bold ink" || return 1
+    assert_output_contains_f "$out" "48;2;227;221;204;38;2;8;145;178;1mboldsess" \
+        "the session name should render bold in its session colour (cyan)" || return 1
     assert_output_contains_f "$out" "48;2;227;221;204;38;2;79;77;71;1m✦ Opus" \
         "the model should render bold ink" || return 1
     # SGR bold is stateful: a segment that does not explicitly emit normal
     # intensity (22) inherits bold from the accent before it.
     assert_output_contains_f "$out" "48;2;227;221;204;38;2;124;121;112;22m○ ctx" \
         "the ctx label must explicitly reset to normal intensity" || return 1
-    assert_output_not_contains "$out" "8;145;178" "the session colour never reaches the bar" || return 1
+    assert_output_not_contains "$out" "48;2;8;145;178" "the session colour is never a fill" || return 1
 }
 
 test_ctx_amber_is_ink_not_dark_fill_text() {
@@ -1136,20 +1136,20 @@ test_unknown_segment_ignored() {
 # ink, and the colour is never a fill
 # ============================================================================
 
-test_session_color_never_reaches_the_bar() {
+test_session_color_is_the_session_name_ink() {
     export COLORTERM="truecolor"
     export CS_TERM_BG_RGB="253;246;227"
     export CLAUDE_SESSION_NAME="weird"
     local json='{"session_name":"weird","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":5}}'
     make_cs_session "weird" 1024 blue         # a valid palette color
     local out_valid; out_valid=$(run_sl "$json")
-    assert_output_contains_f "$out_valid" "38;2;79;77;71;1mweird" \
-        "the session name is ink even when the session has a colour" || return 1
-    assert_output_not_contains_f "$out_valid" "106;155;204" "the session palette blue never reaches the bar" || return 1
+    assert_output_contains_f "$out_valid" "38;2;106;155;204;1mweird" \
+        "the session name paints in its session colour (blue)" || return 1
+    assert_output_not_contains_f "$out_valid" "48;2;106;155;204" "the session palette blue must never be a fill" || return 1
     make_cs_session "weird" 1024 chartreuse   # not one of the 8 valid color names
     local out_bogus; out_bogus=$(run_sl "$json")
     assert_output_contains_f "$out_bogus" "38;2;79;77;71;1mweird" \
-        "a claude_session_color outside the palette is ink too" || return 1
+        "a claude_session_color outside the palette falls back to ink" || return 1
 }
 
 # ============================================================================
@@ -1669,7 +1669,7 @@ run_test test_force_color_zero_is_plain
 run_test test_io_gating_git_subprocess
 run_test test_ctx_zero_vs_absent
 run_test test_unknown_segment_ignored
-run_test test_session_color_never_reaches_the_bar
+run_test test_session_color_is_the_session_name_ink
 run_test test_display_width_counts_codepoints_not_bytes
 run_test test_parse_rgb_triplet_accepts_valid_and_rejects_malformed
 
