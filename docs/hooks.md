@@ -282,13 +282,13 @@ submits a prompt of its own.
 The same button has a second state. Once the `rotate` skill has armed a
 handoff (`.cs/local/pending-handoff` names one), the band draws
 `1: /clear and continue from the handoff` whatever the context reads, and
-pressing `1` runs `/clear` itself: the
-conversation ends, and cs's SessionStart hook starts the handoff's next step in
-the new one, as it does after a typed `/clear`. The mod does not touch the
-marker; the hook consumes it. The button appears only for a marker the hook
-accepts: a bare basename, a file in `.cs/handoffs/`, frontmatter still
-`status: unconsumed`. An empty marker, or one an aborted rotation left naming a
-handoff since consumed or gone, leaves the rotate button in place.
+pressing `1` runs `/clear` itself: the conversation ends, and cs's SessionStart
+hook starts the handoff's next step in the new one, as it does after a typed
+`/clear`. The mod does not touch the marker; the hook consumes it. The button
+appears only for a marker the hook accepts: a bare basename, a file in
+`.cs/handoffs/`, frontmatter still `status: unconsumed`. An empty marker, or one
+an aborted rotation left naming a handoff since consumed or gone, leaves the
+rotate button in place.
 
 The button is for the lead conversation of a cs session only: past the threshold
 the mod also checks that the cwd has `.cs/local`, that `.cs/local/disabled` is
