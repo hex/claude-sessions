@@ -53,8 +53,11 @@ test_mod_validate_inventories_the_hooks_and_calls() {
         echo "    SKIP: claude not on PATH"
         return 0
     fi
-    local out
-    out="$(env -u ANTHROPIC_API_KEY claude plugin validate "$MOD" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')"
+    local out raw="${TMPDIR:-/tmp}/cs-mod-validate.$$"
+    env -u ANTHROPIC_API_KEY claude plugin validate "$MOD" > "$raw" 2>&1
+    local status=$?
+    out="$(sed 's/\x1b\[[0-9;]*m//g' "$raw")"; rm -f "$raw"
+    assert_eq "0" "$status" "validate exits 0" || { echo "$out"; return 1; }
     assert_output_contains "$out" "Validation passed" "manifest and hooks validate" || return 1
     assert_output_contains "$out" "hooks: session.start, ui.render{component=AbovePrompt}" "both hooks inventoried" || return 1
     assert_output_contains "$out" '$.prompt.fill' "the press fills the composer" || return 1

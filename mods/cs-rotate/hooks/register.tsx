@@ -15,8 +15,10 @@ declare const Fragment: any
 export const CRIT_PERCENT = 65
 
 // Doctor observes the mod RUNNING, not merely installed: under a managed
-// machine's policy a mod can load and never run. Path is relative to the
-// session's cwd, which under cs is the session directory (or its worktree).
+// machine's policy a mod can load and never run. Written when the plugin loads
+// (process start or reload; session.start does not fire on /clear). Path is
+// relative to the session's cwd, which under cs is the session directory (or
+// its worktree).
 export const HEARTBEAT = '.cs/local/cs-rotate.heartbeat'
 
 export function register(on: On) {
@@ -35,6 +37,7 @@ export function register(on: On) {
     if (e.props.hasSurvey || e.props.isWorking) return drawn
     const { context } = await $.session.usage()
     if (context.percent === undefined || context.percent < CRIT_PERCENT) return drawn
+    if (!(await ownsRotation($))) return drawn
     const { Box, Button } = await $.ui.resolve(e)
     return (
       <Box flexDirection="column">
@@ -47,6 +50,25 @@ export function register(on: On) {
       </Box>
     )
   })
+}
+
+// Only the lead conversation of a cs session may be offered a rotation. The
+// rotate skill refuses outside a cs session, .cs/local/disabled opts a
+// directory out of cs entirely, and the handoff it writes carries the UUID in
+// .cs/local/state, which belongs to the one conversation cs launched: a
+// teammate claude in the same directory would arm the lead's marker under the
+// lead's identity. The checks run only past crit, so an idle band costs no stat.
+async function ownsRotation($: EngineInterface): Promise<boolean> {
+  const local = `${await $.session.cwd()}/.cs/local`
+  if (!(await $.fs.exists(local)) || (await $.fs.exists(`${local}/disabled`))) return false
+  let state: string
+  try {
+    state = await $.fs.read(`${local}/state`)
+  } catch {
+    return false
+  }
+  const lead = state.match(/^claude_session_id: *(\S+)/m)?.[1]
+  return lead !== undefined && lead === (await $.session.id())
 }
 
 // Fill, never submit: the rotate skill asks for a purpose line, so the person

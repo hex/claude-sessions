@@ -659,6 +659,11 @@ test_doctor_rotate_mod_row_observes_execution_not_presence() {
     output=$(CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
     assert_output_contains "$output" "cs-rotate mod: last ran 2026-09-15T05:00:00.000Z" "heartbeat: OK with the stamp" || return 1
     echo "$output" | grep "cs-rotate" | grep -q "OK" || { echo "  FAIL: a heartbeat is an OK row"; return 1; }
+    # No session selected: the heartbeat is per session, so there is nothing to
+    # judge and the row must not warn about a session that was never named.
+    output=$(env -u CLAUDE_SESSION_META_DIR -u CLAUDE_SESSION_DIR -u CLAUDE_SESSION_NAME \
+        CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_not_contains "$output" "cs-rotate" "linked but no session: nothing said" || return 1
 }
 
 test_doctor_statusline_no_fail_when_not_registered() {

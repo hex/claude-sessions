@@ -20,13 +20,20 @@ let percent: number | undefined
 let filled: any[]
 let written: Record<string, string>
 let existing: Set<string>
+let files: Record<string, string>
+let sessionId: string
 const $ = {
-  session: { usage: async () => ({ context: { percent } }) },
+  session: {
+    usage: async () => ({ context: { percent } }),
+    cwd: async () => '/work',
+    id: async () => sessionId,
+  },
   prompt: { fill: async (args: any) => { filled.push(args); return { isFilled: true } } },
   ui: { resolve: async () => ({ Box: 'Box', Text: 'Text', Button: 'Button' }) },
   fs: {
     write: async (path: string, text: string) => { written[path] = text },
-    exists: async (path: string) => existing.has(path),
+    exists: async (path: string) => existing.has(path) || path in files,
+    read: async (path: string) => { if (path in files) return files[path]; throw new Error(`ENOENT ${path}`) },
   },
 }
 
@@ -34,16 +41,19 @@ const DRAWN = { type: 'Survey', props: {}, children: [] }
 const band = (props: Partial<{ isWorking: boolean; hasSurvey: boolean }> = {}) =>
   hooks['ui.render:AbovePrompt']($, { props: { isWorking: false, hasSurvey: false, ...props } }, async () => DRAWN)
 
-function findButton(tree: any): any {
-  if (!tree || typeof tree !== 'object') return undefined
-  if (tree.type === 'Button') return tree
-  for (const c of tree.children ?? []) { const b = findButton(c); if (b) return b }
-  return undefined
+function buttons(tree: any): any[] {
+  if (!tree || typeof tree !== 'object') return []
+  if (tree.type === 'Button') return [tree]
+  return (tree.children ?? []).flatMap(buttons)
 }
+const findButton = (tree: any) => buttons(tree)[0]
 
 beforeEach(() => {
   for (const k of Object.keys(hooks)) delete hooks[k]
-  percent = undefined; filled = []; written = {}; existing = new Set()
+  percent = undefined; filled = []; written = {}; existing = new Set(['/work/.cs/local'])
+  // The default fixture is the lead conversation of a cs session.
+  sessionId = 'uuid-lead'
+  files = { '/work/.cs/local/state': 'claude_session_color: red\nclaude_session_id: uuid-lead\n' }
   register(on as any)
 })
 
@@ -60,6 +70,7 @@ test('at crit the band adds one button on hotkey 1 beneath what was drawn', asyn
   percent = 65
   const tree = await band()
   expect(tree).not.toBe(DRAWN)
+  expect(buttons(tree)).toHaveLength(1)
   const button = findButton(tree)
   expect(button.props.hotkey).toBe('1')
   expect(button.props.plain).toBe(true)
@@ -94,8 +105,31 @@ test('a press fills the composer with the rotate command and sends nothing', asy
   expect(filled).toEqual([{ text: '/rotate ' }])
 })
 
+test('outside a cs session the band draws nothing at crit', async () => {
+  percent = 90
+  existing = new Set(); files = {}
+  expect(await band()).toBe(DRAWN)
+})
+
+test('a session opted out with .cs/local/disabled gets no button', async () => {
+  percent = 90
+  existing.add('/work/.cs/local/disabled')
+  expect(await band()).toBe(DRAWN)
+})
+
+test('a teammate conversation (not the one .cs/local/state names) gets no button', async () => {
+  percent = 90
+  sessionId = 'uuid-teammate'
+  expect(await band()).toBe(DRAWN)
+})
+
+test('with no state file to name the lead the band draws nothing', async () => {
+  percent = 90
+  files = {}
+  expect(await band()).toBe(DRAWN)
+})
+
 test('session.start writes a heartbeat under the session meta dir', async () => {
-  existing.add('/work/.cs/local')
   const r = await hooks['session.start']($, { cwd: '/work', surface: 'terminal', isInteractive: true }, async (e) => ({ cwd: e.cwd }))
   expect(r).toEqual({ cwd: '/work' })
   const text = written['/work/.cs/local/cs-rotate.heartbeat']
