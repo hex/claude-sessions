@@ -1,5 +1,5 @@
 // ABOUTME: Unit tests for the cs-rotate mod against a fake engine `$`.
-// ABOUTME: Covers the band's gate (crit, working, survey), the press, and the heartbeat.
+// ABOUTME: Covers the band's gate (crit, working, survey), both presses, the armed handoff, and the heartbeat.
 import { test, expect, beforeEach } from 'bun:test'
 
 // The plugin realm provides `h` and `Fragment` as globals; the test does the same.
@@ -18,6 +18,7 @@ const on = (event: string, a: any, b?: any) => {
 
 let percent: number | undefined
 let filled: any[]
+let ran: any[]
 let written: Record<string, string>
 let existing: Set<string>
 let files: Record<string, string>
@@ -31,6 +32,7 @@ const $ = {
     id: async () => sessionId,
   },
   prompt: { fill: async (args: any) => { filled.push(args); return { isFilled: true } } },
+  command: { run: async (args: any) => { ran.push(args); return { text: '' } } },
   ui: { resolve: async () => ({ Box: 'Box', Text: 'Text', Button: 'Button' }) },
   fs: {
     write: async (path: string, text: string) => { written[path] = text },
@@ -52,7 +54,7 @@ const findButton = (tree: any) => buttons(tree)[0]
 
 beforeEach(() => {
   for (const k of Object.keys(hooks)) delete hooks[k]
-  percent = undefined; filled = []; written = {}; existing = new Set(['/work/.cs/local'])
+  percent = undefined; filled = []; ran = []; written = {}; existing = new Set(['/work/.cs/local'])
   // The default fixture is the lead conversation of a cs session.
   sessionId = 'uuid-lead'
   envVars = {}
@@ -152,6 +154,68 @@ test('with no state file to name the lead the band draws nothing', async () => {
   percent = 90
   files = {}
   expect(await band()).toBe(DRAWN)
+})
+
+const MARKER = '/work/.cs/local/pending-handoff'
+const HANDOFF = '/work/.cs/handoffs/2026-09-15-next-step.md'
+const UNCONSUMED = '---\nparent: uuid-lead\nstatus: unconsumed\n---\n\n## 1. Next Step\n'
+// Armed the way the rotate skill leaves it: an unconsumed handoff, then the marker.
+const arm = () => { files[HANDOFF] = UNCONSUMED; files[MARKER] = '2026-09-15-next-step.md\n' }
+
+test('an armed handoff turns the button into the clear button, whatever the context', async () => {
+  arm()
+  for (const p of [undefined, 3, 90]) {
+    percent = p
+    const tree = await band()
+    expect(buttons(tree)).toHaveLength(1)
+    const button = findButton(tree)
+    expect(button.props.hotkey).toBe('1')
+    expect(button.props.plain).toBe(true)
+    expect(button.props.label).toBe('/clear and continue from the handoff')
+  }
+})
+
+test('pressing the clear button runs /clear and fills nothing', async () => {
+  arm(); percent = 3
+  await findButton(await band()).props.onPress()
+  expect(ran).toEqual([{ command: 'clear', args: '' }])
+  expect(filled).toEqual([])
+})
+
+test('the rotate press never runs a command', async () => {
+  percent = 80
+  await findButton(await band()).props.onPress()
+  expect(ran).toEqual([])
+})
+
+test('an armed handoff is still lead-only and yields to a running turn', async () => {
+  arm(); percent = 90
+  expect(await band({ isWorking: true })).toBe(DRAWN)
+  expect(await band({ hasSurvey: true })).toBe(DRAWN)
+  sessionId = 'uuid-teammate'
+  expect(await band()).toBe(DRAWN)
+})
+
+test('a marker naming a handoff that is gone, consumed, or outside the store does not arm', async () => {
+  percent = 39
+  arm(); delete files[HANDOFF]
+  expect(await band()).toBe(DRAWN)
+  arm(); files[HANDOFF] = UNCONSUMED.replace('status: unconsumed', 'status: consumed')
+  expect(await band()).toBe(DRAWN)
+  arm(); files[HANDOFF] = '## no frontmatter\nstatus: unconsumed\n'
+  expect(await band()).toBe(DRAWN)
+  arm(); files[MARKER] = '../local/state\n'
+  expect(await band()).toBe(DRAWN)
+  percent = 40
+  expect(findButton(await band()).props.label).toMatch(/rotate/)
+})
+
+test('an empty marker names no handoff, so the band behaves as unarmed', async () => {
+  files[MARKER] = '\n'
+  percent = 39
+  expect(await band()).toBe(DRAWN)
+  percent = 40
+  expect(findButton(await band()).props.label).toMatch(/rotate/)
 })
 
 test('session.start writes a heartbeat under the session meta dir', async () => {

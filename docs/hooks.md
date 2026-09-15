@@ -275,8 +275,18 @@ or not a number means 40). Pressing `1` from an empty composer fills the
 composer with `/rotate ` and sends nothing: the `rotate` skill asks for a
 purpose line, so the person finishes the command and presses Enter. Below the
 band the mod draws nothing, and it draws nothing while a turn runs or while a
-survey holds the band. It never submits a prompt and never runs a command
-itself.
+survey holds the band. It never submits a prompt.
+
+The same button has a second state. Once the `rotate` skill has armed a
+handoff (`.cs/local/pending-handoff` names one), the band draws
+`1: /clear and continue from the handoff` whatever the context reads, and
+pressing `1` runs `/clear` itself, the one command the mod runs: the
+conversation ends, and cs's SessionStart hook starts the handoff's next step in
+the new one, as it does after a typed `/clear`. The mod does not touch the
+marker; the hook consumes it. The button appears only for a marker the hook
+accepts: a bare basename, a file in `.cs/handoffs/`, frontmatter still
+`status: unconsumed`. An empty marker, or one an aborted rotation left naming a
+handoff since consumed or gone, leaves the rotate button in place.
 
 The button is for the lead conversation of a cs session only: past the threshold
 the mod also checks that the cwd has `.cs/local`, that `.cs/local/disabled` is
@@ -287,8 +297,10 @@ id and arms the marker cs launched the lead with. The plugin's own id follows
 `/clear` (measured: after a `/clear` the band returned only once
 `.cs/local/state` named the new transcript), and cs's SessionStart hook rebinds
 `state` on every fresh conversation, so the lead keeps its button across
-rotations. Past crit a render costs one `cwd`, two `exists`, one `read` and one
-`id` call; the band renders a handful of times per turn, not per keystroke.
+rotations. Every render costs one `cwd` and one `exists` for the marker; with
+a marker there it reads it and the handoff it names; past the threshold or with
+a handoff armed it adds one `cwd`, two `exists`, one `read` and one `id` call.
+The band renders a handful of times per turn, not per keystroke.
 
 
 `install.sh` deploys the mod's three files under `~/.claude/skills/cs-rotate/`

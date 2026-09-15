@@ -205,9 +205,11 @@ should do. If the user did not give one, ask before writing anything.
 11. End your response with the instruction and nothing after it, on its own
    final line, exactly:
 
-   **Run `/clear` now** — this conversation is ready to rotate.
+   **Run `/clear` now** (or press `1` on the band above the prompt) — this conversation is ready to rotate.
 
-   This is the one step nothing can take for the user. A hook cannot submit
-   to Claude Code's command queue (it accepts the TUI's own input only), so
-   the keystroke is always theirs — which is why it must not end up buried
-   under a summary of what you just wrote.
+   This is the one step you cannot take for the user. A hook cannot submit
+   to Claude Code's command queue (it accepts the TUI's own input only); the
+   `cs-rotate` mod's button can, and once the marker is armed it reads
+   `1: /clear and continue from the handoff`. Either way the keystroke is
+   theirs — which is why the line must not end up buried under a summary of
+   what you just wrote.

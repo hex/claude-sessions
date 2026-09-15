@@ -67,7 +67,7 @@ test_mod_validate_inventories_the_hooks_and_calls() {
     assert_output_contains "$out" '$.prompt.fill' "the press fills the composer" || return 1
     assert_output_contains "$out" '$.env.get' "the threshold is read from the environment" || return 1
     assert_output_not_contains "$out" '$.prompt.submit' "and never submits" || return 1
-    assert_output_not_contains "$out" '$.command.run' "and never runs a command itself" || return 1
+    assert_output_contains "$out" '$.command.run (via clearAndContinue)' "the armed press runs /clear, and nothing else runs a command" || return 1
 }
 
 run_test test_mod_manifest_names_the_plugin_and_its_module
