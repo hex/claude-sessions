@@ -544,19 +544,23 @@ _integrate_cleanup() {
 # `cs <base> -integrate-feature <task> <sha> [--from-remote] -- <gate...>`
 # that skills/finish/scripts/finish.sh drives. Every refusal is an error that
 # names the next command.
-integrate_feature_worktree() {  # base_name task sha [--from-remote] -- gate...
-    local usage="Usage: cs <base> -integrate-feature <task> <sha> [--from-remote] -- <gate command...>"
+integrate_feature_worktree() {  # base_name task sha [--from-remote [--ci-green]] -- gate...
+    local usage="Usage: cs <base> -integrate-feature <task> <sha> [--from-remote [--ci-green]] -- <gate command...>"
     [ $# -ge 3 ] || error "$usage"
     local base_name="$1" task="$2" sha="$3"
     shift 3
-    local from_remote=""
+    local from_remote="" ci_green=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --from-remote) from_remote=1; shift ;;
+            # The caller vouches that the PR's checks passed on the landing
+            # commit; the entry has no GitHub access and never infers it.
+            --ci-green) ci_green=1; shift ;;
             --) shift; break ;;
             *) error "$usage" ;;
         esac
     done
+    [ -z "$ci_green" ] || [ -n "$from_remote" ] || error "$usage (--ci-green needs --from-remote: it describes a PR's checks)"
     [ $# -gt 0 ] || error "$usage (a gate command is required; pass -- true to run none)"
 
     local base_dir wt_dir branch
@@ -640,7 +644,7 @@ integrate_feature_worktree() {  # base_name task sha [--from-remote] -- gate...
     trap '_integrate_cleanup' EXIT
     trap '_integrate_cleanup; exit 130' INT TERM
 
-    _integrate_in_temp "$base_dir" "$wt_dir" "$task" "$sha" "$common" "$from_remote" "$@"
+    _integrate_in_temp "$base_dir" "$wt_dir" "$task" "$sha" "$common" "$from_remote" "$ci_green" "$@"
 }
 
 # The mutation half of integrate_feature_worktree, entered with the mutex
@@ -651,9 +655,9 @@ integrate_feature_worktree() {  # base_name task sha [--from-remote] -- gate...
 # as it was. No hook of the project fires inside the temp (core.hooksPath
 # points at an empty directory for the add and the merge): the gate argv is
 # the project's gate, run explicitly.
-_integrate_in_temp() {  # base_dir wt_dir task sha common from_remote gate...
-    local base_dir="$1" wt_dir="$2" task="$3" sha="$4" common="$5" from_remote="$6"
-    shift 6
+_integrate_in_temp() {  # base_dir wt_dir task sha common from_remote ci_green gate...
+    local base_dir="$1" wt_dir="$2" task="$3" sha="$4" common="$5" from_remote="$6" ci_green="$7"
+    shift 7
 
     local B
     B=$(git -C "$base_dir" rev-parse HEAD)
@@ -744,16 +748,17 @@ Move or delete these untracked files in $base_dir, then re-run /finish $task"
     rmdir "$no_hooks"
 
     # A remote landing whose base has nothing origin lacks fast-forwards onto
-    # the PR's landing commit, a tree origin's CI already ran; the temp holds
-    # exactly that tree, so a local gate would only repeat CI's work in a
-    # checkout without the project's gitignored dependencies. Skip it and say
-    # so. A base carrying its own commits makes a merge CI never saw, and
-    # then the gate runs.
+    # the PR's landing commit; the temp holds exactly that tree. When the
+    # caller vouches (--ci-green) that the PR's checks passed on it, a local
+    # gate would only repeat them in a checkout without the project's
+    # gitignored dependencies, so skip it and say so. A base carrying its own
+    # commits makes a merge those checks never saw, and then the gate runs.
     local gate_skipped="" B7
     B7=$(printf '%s' "$B" | cut -c1-7)
-    if [ -n "$from_remote" ] && git -C "$base_dir" merge-base --is-ancestor "$B" "$sha" 2>/dev/null; then
+    if [ -n "$from_remote" ] && [ -n "$ci_green" ] \
+        && git -C "$base_dir" merge-base --is-ancestor "$B" "$sha" 2>/dev/null; then
         gate_skipped=1
-        echo "gate skipped: $base_dir at $B7 is an ancestor of $sha7, which origin's CI landed; nothing local to test"
+        echo "gate skipped: $base_dir at $B7 fast-forwards onto $sha7, whose PR checks passed on origin; nothing local to test"
     fi
     local gate_log
     if [ -z "$gate_skipped" ]; then

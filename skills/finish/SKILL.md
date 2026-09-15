@@ -91,13 +91,16 @@ what creates them and fold it into the gate: `-- sh -c 'npm ci && npm test'`.
 4. **PR path.** `git fetch origin`. Confirm `base_branch` equals
    `pr_base_ref`; if not, stop and say which branch to check out. Then
    `cs <base> -integrate-feature <task> <pr_merge_commit> --from-remote -- <gate command words>`.
-   The same temporary detached worktree and fast-forward apply. When the
-   base has nothing origin lacks this fast-forwards onto the PR's landing
-   commit and makes no new commit, and cs skips the gate (the report says
-   `gate skipped`: the commit passed the PR's CI and there is nothing local
-   to test); when the base already carries a local integrate, cs makes one
-   merge commit joining the two histories, a tree CI never saw, and the
-   gate runs on it.
+   Add `--ci-green` after `--from-remote` only when `prepare` reported
+   `pr_checks: success`; with `failure`, `pending`, `none` or no line, leave
+   it off and say in the report why the gate ran. The same temporary
+   detached worktree and fast-forward apply. When the base has nothing
+   origin lacks this fast-forwards onto the PR's landing commit and makes no
+   new commit, and with `--ci-green` cs skips the gate (the report says
+   `gate skipped`: the PR's checks passed on that tree and there is
+   nothing local to test); when the base already carries a local integrate,
+   cs makes one merge commit joining the two histories, a tree those checks
+   never saw, and the gate runs on it.
    If `pr_head_oid` differs from the captured `sha`, say so: the PR landed
    an older or newer tip than the worktree holds now.
 5. **Report.** The entry's own summary line says what happened:

@@ -111,6 +111,28 @@ test_prepare_calls_a_reused_branch_unknown() {
     assert_output_contains "$out" "#7 MERGED, #9 OPEN" "both are named" || return 1
 }
 
+# pr_checks folds the PR's status-check rollup into one word the skill can
+# act on: success (every check green, skipped or neutral), failure (any red),
+# pending (some still running), none (no checks at all).
+test_prepare_reports_pr_checks() {
+    local pr='{"number":7,"state":"MERGED","url":"https://github.com/example-org/example-repo/pull/7","mergeCommit":{"oid":"abc123"},"mergedAt":"2026-09-12T09:00:00Z","baseRefName":"main","headRefOid":"a1a1","headRepositoryOwner":{"login":"example-org"},"isCrossRepository":false,"statusCheckRollup":ROLLUP}'
+    local out
+    finish_fixture myproj fix-auth > /dev/null
+    stub_gh "[${pr/ROLLUP/[{\"__typename\":\"CheckRun\",\"conclusion\":\"SUCCESS\"},{\"__typename\":\"StatusContext\",\"state\":\"SUCCESS\"},{\"__typename\":\"CheckRun\",\"conclusion\":\"SKIPPED\"}]}]"
+    out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" bash "$FINISH" prepare fix-auth 2>&1)
+    assert_eq "success" "$(key "$out" pr_checks)" "all green or skipped" || return 1
+    stub_gh "[${pr/ROLLUP/[{\"__typename\":\"CheckRun\",\"conclusion\":\"SUCCESS\"},{\"__typename\":\"CheckRun\",\"conclusion\":\"FAILURE\"}]}]"
+    out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" bash "$FINISH" prepare fix-auth 2>&1)
+    assert_eq "failure" "$(key "$out" pr_checks)" "one red is failure" || return 1
+    stub_gh "[${pr/ROLLUP/[{\"__typename\":\"CheckRun\",\"conclusion\":\"SUCCESS\"},{\"__typename\":\"CheckRun\",\"status\":\"IN_PROGRESS\",\"conclusion\":null}]}]"
+    out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" bash "$FINISH" prepare fix-auth 2>&1)
+    assert_eq "pending" "$(key "$out" pr_checks)" "an unfinished check is pending" || return 1
+    stub_gh "[${pr/ROLLUP/[]}]"
+    out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" bash "$FINISH" prepare fix-auth 2>&1)
+    assert_eq "none" "$(key "$out" pr_checks)" "no checks at all is none, never success" || return 1
+    assert_file_contains "$TEST_TMPDIR/gh.argv" "statusCheckRollup" "the rollup is requested" || return 1
+}
+
 test_prepare_refuses_a_worktree_off_its_branch() {
     finish_fixture myproj fix-auth > /dev/null
     git -C "$CS_SESSIONS_ROOT/myproj@fix-auth" checkout -q --detach
@@ -315,6 +337,7 @@ test_prepare_calls_a_merged_pr_without_a_merge_commit_unknown() {
 }
 
 run_test test_prepare_reports_a_merged_pr
+run_test test_prepare_reports_pr_checks
 run_test test_prepare_filters_a_cross_repository_pr_from_the_same_owner_login
 run_test test_prepare_filters_a_pr_whose_head_owner_is_another_account
 run_test test_prepare_matches_the_owner_login_case_insensitively
