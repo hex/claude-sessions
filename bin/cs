@@ -1834,7 +1834,7 @@ integrate_feature_worktree() {  # base_name task sha [--from-remote [--ci-green]
             *) error "$usage" ;;
         esac
     done
-    [ -z "$ci_green" ] || [ -n "$from_remote" ] || error "$usage (--ci-green needs --from-remote: it describes a PR's checks)"
+    [ -z "$ci_green" ] || [ -n "$from_remote" ] || error "$usage (--ci-green needs --from-remote: it describes the landing commit's checks on origin)"
     [ $# -gt 0 ] || error "$usage (a gate command is required; pass -- true to run none)"
 
     local base_dir wt_dir branch
@@ -2023,16 +2023,17 @@ Move or delete these untracked files in $base_dir, then re-run /finish $task"
 
     # A remote landing whose base has nothing origin lacks fast-forwards onto
     # the PR's landing commit; the temp holds exactly that tree. When the
-    # caller vouches (--ci-green) that the PR's checks passed on it, a local
-    # gate would only repeat them in a checkout without the project's
-    # gitignored dependencies, so skip it and say so. A base carrying its own
-    # commits makes a merge those checks never saw, and then the gate runs.
+    # caller vouches (--ci-green) that origin's checks passed on that very
+    # commit, a local gate would only repeat them in a checkout without the
+    # project's gitignored dependencies, so skip it and say so. A base carrying
+    # its own commits makes a merge those checks never saw, and then the gate
+    # runs.
     local gate_skipped="" B7
     B7=$(printf '%s' "$B" | cut -c1-7)
     if [ -n "$from_remote" ] && [ -n "$ci_green" ] \
         && git -C "$base_dir" merge-base --is-ancestor "$B" "$sha" 2>/dev/null; then
         gate_skipped=1
-        echo "gate skipped: $base_dir at $B7 fast-forwards onto $sha7, whose PR checks passed on origin; nothing local to test"
+        echo "gate skipped: $base_dir at $B7 fast-forwards onto $sha7, whose checks passed on origin; nothing local to test"
     fi
     local gate_log
     if [ -z "$gate_skipped" ]; then
