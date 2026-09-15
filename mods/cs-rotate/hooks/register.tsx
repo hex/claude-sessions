@@ -17,6 +17,19 @@ declare const Fragment: any
 export const DEFAULT_PERCENT = 40
 export const DEFAULT_CRIT = 65
 
+// KEEP IN SYNC with the truecolor inks in bin/cs-statusline (_sgr: brand,
+// amber, crit): the capsule paints the bar's own inks, not the theme's
+// nearest keys, so it reads as one more capsule of the bar. The bar pivots
+// amber on the measured terminal background when it has one; the mod has only
+// the theme cs detected at launch (CS_TERM_THEME), dark when unset, as cs's
+// own hooks read it.
+export const INK = {
+  coral: 'rgb(217,119,87)',
+  amber: { light: 'rgb(180,83,9)', dark: 'rgb(253,230,138)' },
+  crit: { light: 'rgb(215,0,21)', dark: 'rgb(255,69,58)' },
+}
+export type Theme = 'light' | 'dark'
+
 // Doctor observes the mod RUNNING, not merely installed: under a managed
 // machine's policy a mod can load and never run. Written when the plugin loads
 // (process start or reload; session.start does not fire on /clear). Path is
@@ -51,16 +64,21 @@ export function register(on: On) {
     const bands = await gaugeBands($)
     if (!armed && (percent === undefined || percent < (await threshold($, bands)))) return drawn
     if (!(await ownsRotation($))) return drawn
+    const theme = await termTheme($)
+    const ink = gaugeColor(percent, bands, theme)
     const { Box, Text, Button } = await $.ui.resolve(e)
     // One capsule in the status bar's idiom: the Claude mark in coral, the
-    // button, and the context gauge that explains why the capsule is there,
+    // button, and the context meter that explains why the capsule is there,
     // in the ink the bar paints that band (amber past warn, red past crit).
+    // The keyed box lights coral under the pointer; the engine restyles it
+    // without running the hook.
     return (
       <Box flexDirection="column">
         {drawn}
         <Box>
-          <Box borderStyle="round" borderColor={armed ? 'claude' : gaugeColor(percent, bands)} paddingX={1}>
-            <Text color="claude" bold>{'\u2733 '}</Text>
+          <Box key="cs-rotate-band" borderStyle="round" borderColor={armed ? INK.coral : ink} paddingX={1}
+               hover={{ borderColor: INK.coral }}>
+            <Text color={INK.coral} bold>{'\u2733 '}</Text>
             {/* plain draws "1: label", so the hotkey is discoverable */}
             {armed
               ? <Button key="cs-rotate" hotkey="1" plain label="/clear and continue from the handoff"
@@ -70,7 +88,9 @@ export function register(on: On) {
             {percent !== undefined && (
               <Text>
                 <Text dimColor>{'  \u00b7  '}</Text>
-                <Text color={gaugeColor(percent, bands)} bold>{`${pie(percent, bands)} ctx ${percent}%`}</Text>
+                <Text color={ink}>{meter(percent)[0]}</Text>
+                <Text dimColor>{meter(percent)[1]}</Text>
+                <Text color={ink} bold>{` ${percent}%`}</Text>
               </Text>
             )}
           </Box>
@@ -82,20 +102,23 @@ export function register(on: On) {
 
 export type Bands = { warn: number; crit: number }
 
-// KEEP IN SYNC with the pie steps in bin/cs-statusline (_ctx_pie): the two
-// fixed steps, 13 and 88, and the two that follow the bands.
-export function pie(percent: number, bands: Bands): string {
-  if (percent >= 88) return '\u25cf'
-  if (percent >= bands.crit) return '\u25d5'
-  if (percent >= bands.warn) return '\u25d1'
-  if (percent >= 13) return '\u25d4'
-  return '\u25cb'
+// Ten cells, one per ten percent, rounded: the filled run and the empty run.
+export function meter(percent: number): [string, string] {
+  const n = Math.min(10, Math.max(0, Math.round(percent / 10)))
+  return ['\u2588'.repeat(n), '\u2591'.repeat(10 - n)]
 }
-export function gaugeColor(percent: number | undefined, bands: Bands): string {
+
+// Below warn the capsule is only ever drawn armed, in the theme's plain ink.
+export function gaugeColor(percent: number | undefined, bands: Bands, theme: Theme): string {
   if (percent === undefined) return 'text'
-  if (percent >= bands.crit) return 'error'
-  if (percent >= bands.warn) return 'warning'
+  if (percent >= bands.crit) return INK.crit[theme]
+  if (percent >= bands.warn) return INK.amber[theme]
   return 'text'
+}
+
+// The theme cs detected at launch; anything but "light" is dark, as cs's hooks read it.
+async function termTheme($: EngineInterface): Promise<Theme> {
+  return (await $.env.get("CS_TERM_THEME")) === 'light' ? 'light' : 'dark'
 }
 
 // The bar's own bands, read the way the bar reads them. Each variable's name

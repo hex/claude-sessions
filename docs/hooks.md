@@ -285,10 +285,17 @@ directly above the prompt draws `1: rotate this conversation`.
 `CS_ROTATE_BUTTON_CTX=<percent>` in the shell that launches cs moves it; unset
 or not a number, the band follows the bar's own warn band
 (`CS_STATUSLINE_CTX_WARN`, 40 by default). The band is one rounded capsule in
-the status bar's idiom: the Claude mark in coral, the button, and the context
-gauge in the bar's own pie steps and inks, read from the same
-`CS_STATUSLINE_CTX_WARN` and `CS_STATUSLINE_CTX_CRIT` the bar reads (amber past
-warn, red past crit, 40 and 65 by default). Pressing `1` from an
+the status bar's idiom: the Claude mark in coral, the button, and a ten-cell
+context meter with the percentage (`█████░░░░░ 47%`). The border and the meter
+take the bar's own truecolor inks, not the theme's nearest keys, so the capsule
+reads as one more capsule of the bar: amber past warn, red past crit, read from
+the same `CS_STATUSLINE_CTX_WARN` and `CS_STATUSLINE_CTX_CRIT` the bar reads (40
+and 65 by default), in the light or dark value for the theme cs detected at
+launch (`CS_TERM_THEME`; unset reads as dark, as cs's hooks read it). The bar
+itself picks its amber from the measured terminal background when it has one;
+the mod has only the theme, so on a terminal whose background contradicts the
+theme flag the two ambers can differ. Under the mouse pointer the border turns
+coral. Pressing `1` from an
 empty composer runs `/rotate`, as if typed: the `rotate` skill draws the
 purpose from the conversation. Below the band the mod draws nothing, and it
 draws nothing while a turn runs or while a survey holds the band. It never
@@ -349,9 +356,9 @@ in the checkout the way it does hooks, commands and skills.
 Two facts about the plugin runtime shape the code. A module reads the
 environment through `$.env.get` with a literal name, which `claude plugin
 validate` lists, so the threshold and the bands are three variable reads per
-render; the defaults and the pie's two fixed steps are literals in
-`register.tsx` that `tests/test_mod_rotate.sh` pins to the status line's. And a hot reload resets module state,
-so the mod keeps none.
+render, the theme a fourth; the defaults and the five ink triplets are literals
+in `register.tsx` that `tests/test_mod_rotate.sh` pins to the status line's. And
+a hot reload resets module state, so the mod keeps none.
 
 Tests: `tests/test_mod_rotate.sh` runs the bun unit tests under
 `mods/cs-rotate/test/` (a fake engine drives the band, the press and the
