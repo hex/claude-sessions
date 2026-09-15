@@ -15,7 +15,7 @@ Default order: `logo,session,notes,mail,git,model,ctx,limits`. One capsule holds
 | Name | Group | Rest | Hot | Hidden when | Source |
 |---|---|---|---|---|---|
 | `logo` | identity | `✳` in brand coral, bold; pulses brand/brandshade by epoch parity while `.cs/local/attention` exists | — | plain mode (no colour) | `.cs/local/attention` marker (raised by the Stop hook, cleared on the next prompt or session start) |
-| `session` | identity | name, bold, in the session's own colour (`claude_session_color`, the palette the tab and `/color` share) or primary ink when it has none | — | never | stdin `session_name`, falling back to `CLAUDE_SESSION_NAME`, then the workspace dir basename |
+| `session` | identity | name, bold, primary ink | — | never | stdin `session_name`, falling back to `CLAUDE_SESSION_NAME`, then the workspace dir basename |
 | `notes` | identity | `▤ N`, amber ink, regular, directly after the session | — | queue empty or absent | Task files in `.cs/local/queue/` (one file per task) |
 | `mail` | identity | `✉ N`, amber ink, regular, after notes | — | nothing unread | Count of `.cs/local/mail/new/*.json` documents (`cs -msg` moves what it prints to `cur/`); only `.json` files count, so a stray `.DS_Store` or staging leftover never shows a phantom unread |
 | `pane` | identity | `◫ 7` (the `%` dropped), secondary ink; only when named | — | not named, or outside a real tmux | `TMUX_PANE` from inherited environment (no fork); requires `TMUX` too, and that this process is genuinely inside that tmux server, so an inherited pane id never renders |
