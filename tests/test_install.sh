@@ -708,6 +708,49 @@ test_install_assembles_the_notifier_bundle_on_macos() {
     [ ! -e "$app/Contents/leftover" ] || { echo "  FAIL: the rebuild kept a file from the old bundle"; return 1; }
 }
 
+# A source whose executable cannot run (an Intel-only app without Rosetta,
+# say) must not replace a working bundle: the staged copy is smoked before
+# the previous one is touched, and a failed smoke leaves the previous bundle
+# in place so the hooks keep posting through it.
+test_install_keeps_the_previous_bundle_when_the_new_one_does_not_run() {
+    if [ "$(uname -s)" != "Darwin" ] || ! command -v iconutil >/dev/null 2>&1; then
+        echo "    SKIP (macOS with iconutil only)"
+        return 0
+    fi
+    local fake_home="$TEST_TMPDIR/keep-home" good="$TEST_TMPDIR/good.app" bad="$TEST_TMPDIR/bad.app"
+    mkdir -p "$fake_home/.claude"
+    _fake_notifier_src "$good"
+    HOME="$fake_home" CS_NOTIFIER_SRC_APP="$good" bash "$INSTALL_SH" > /dev/null 2>&1 < /dev/null \
+        || { echo "  FAIL: install.sh exited non-zero"; return 1; }
+    local app="$fake_home/.local/share/cs/cs.app" before
+    before=$(cat "$app/Contents/Resources/cs-source.sha256")
+    _fake_notifier_src "$bad"
+    cp /usr/bin/false "$bad/Contents/MacOS/terminal-notifier"
+    HOME="$fake_home" CS_NOTIFIER_SRC_APP="$bad" bash "$INSTALL_SH" > "$TEST_TMPDIR/install.out" 2>&1 < /dev/null \
+        || { echo "  FAIL: install.sh exited non-zero on a bundle that does not run"; return 1; }
+    assert_eq "$before" "$(cat "$app/Contents/Resources/cs-source.sha256")" \
+        "the previous bundle stays when the new one fails its smoke run" || return 1
+    assert_file_contains "$TEST_TMPDIR/install.out" "does not run" "the installer says the new bundle does not run" || return 1
+    [ -z "$(ls -d "$fake_home/.local/share/cs/cs.app."* 2>/dev/null)" ] \
+        || { echo "  FAIL: staging left behind: $(ls -d "$fake_home/.local/share/cs/cs.app."*)"; return 1; }
+}
+
+# An unwritable data directory costs the owl, not the install.
+test_install_survives_an_unwritable_notifier_destination() {
+    if [ "$(uname -s)" != "Darwin" ]; then
+        echo "    SKIP (macOS only: the bundle step returns before its mkdir elsewhere)"
+        return 0
+    fi
+    local fake_home="$TEST_TMPDIR/ro-home" src="$TEST_TMPDIR/ro-src.app"
+    mkdir -p "$fake_home/.claude"
+    _fake_notifier_src "$src"
+    HOME="$fake_home" XDG_DATA_HOME="/nonexistent-cs-data-root/share" CS_NOTIFIER_SRC_APP="$src" bash "$INSTALL_SH" > "$TEST_TMPDIR/install.out" 2>&1 < /dev/null \
+        || { echo "  FAIL: install.sh exited non-zero on an unwritable XDG_DATA_HOME"; return 1; }
+    [ -f "$fake_home/.claude/hooks/cs/session-start.sh" ] && [ -d "$fake_home/.claude/skills/cs-rotate" ] \
+        || { echo "  FAIL: the install stopped short after the bundle step"; return 1; }
+    assert_file_contains "$TEST_TMPDIR/install.out" "notifier bundle" "the installer says why there is no bundle" || return 1
+}
+
 test_install_skips_the_notifier_bundle_without_a_source_app() {
     local fake_home="$TEST_TMPDIR/noowl-home"
     mkdir -p "$fake_home/.claude"
@@ -715,6 +758,8 @@ test_install_skips_the_notifier_bundle_without_a_source_app() {
         || { echo "  FAIL: install.sh exited non-zero"; return 1; }
     [ ! -e "$fake_home/.local/share/cs/cs.app" ] \
         || { echo "  FAIL: a bundle was assembled with no source app"; return 1; }
+    # The hint is macOS-only, like the notification.
+    [ "$(uname -s)" = "Darwin" ] || return 0
     assert_file_contains "$TEST_TMPDIR/install.out" "brew install terminal-notifier" \
         "the installer says how to get the owl notification" || return 1
 }
@@ -1410,6 +1455,8 @@ run_test test_skill_files_exist_in_repo
 run_test test_mod_files_manifest_matches_the_repo
 run_test test_install_deploys_the_rotate_mod_and_uninstall_removes_it
 run_test test_install_assembles_the_notifier_bundle_on_macos
+run_test test_install_keeps_the_previous_bundle_when_the_new_one_does_not_run
+run_test test_install_survives_an_unwritable_notifier_destination
 run_test test_install_skips_the_notifier_bundle_without_a_source_app
 run_test test_install_replaces_a_symlinked_mod_directory
 run_test test_strip_filters_in_sync

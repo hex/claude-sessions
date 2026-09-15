@@ -37,8 +37,8 @@ if ! command -v cs_resolve_session >/dev/null 2>&1; then
         [ -n "${CLAUDE_SESSION_NAME:-}" ] && [ -n "${CLAUDE_SESSION_DIR:-}" ]
     }
 fi
-if ! command -v cs_notifier_bin >/dev/null 2>&1; then
-    cs_notifier_bin() { command -v terminal-notifier 2>/dev/null; }
+if ! command -v cs_notifier_bins >/dev/null 2>&1; then
+    cs_notifier_bins() { command -v terminal-notifier 2>/dev/null; }
 fi
 # Only run inside a cs session. No input yet at this point (it is read further
 # down), so resolution relies on the env or CLAUDE_PROJECT_DIR.
@@ -123,14 +123,15 @@ fi
 # lead (claude carrying cs's pid, or claude as cs's child): a tmux teammate
 # takes prompts from the lead while the user is still away, and each would
 # clear the notification the user has not seen. Mirrors the guard in
-# narrative-reminder.sh (hooks are standalone). The poster is whichever
-# cs_notifier_bin picks (the cs.app bundle, else terminal-notifier on PATH),
-# the same one the Stop hook posted through: a group belongs to its sender.
-# Stdin is closed on the call: terminal-notifier reads piped stdin as message
+# narrative-reminder.sh (hooks are standalone). The remove goes to every
+# poster present (cs_notifier_bins: the cs.app bundle and terminal-notifier
+# on PATH), since a group belongs to its sender and the Stop hook may have
+# posted through either before an install changed which one it uses. Stdin
+# is closed on the call: terminal-notifier reads piped stdin as message
 # data, and this runs before the prompt below is read from it.
 if [ -z "${CS_NO_NOTIFY:-}" ] && [ -n "${CLAUDE_SESSION_NAME:-}" ] \
     && [ -n "${CS_LEAD_PID:-}" ] && [ -n "${CLAUDE_PID:-}" ] \
-    && _notifier=$(cs_notifier_bin) && [ -n "$_notifier" ]; then
+    && _notifiers=$(cs_notifier_bins) && [ -n "$_notifiers" ]; then
     _is_lead=0
     if [ "$CLAUDE_PID" = "$CS_LEAD_PID" ]; then
         _is_lead=1
@@ -138,7 +139,11 @@ if [ -z "${CS_NO_NOTIFY:-}" ] && [ -n "${CLAUDE_SESSION_NAME:-}" ] \
         _parent=$(ps -o ppid= -p "$CLAUDE_PID" 2>/dev/null | tr -d '[:space:]' || true)
         [ -n "$_parent" ] && [ "$_parent" = "$CS_LEAD_PID" ] && _is_lead=1
     fi
-    [ "$_is_lead" = 1 ] && "$_notifier" -remove "cs:$CLAUDE_SESSION_NAME" </dev/null >/dev/null 2>&1 || true
+    if [ "$_is_lead" = 1 ]; then
+        while IFS= read -r _notifier; do
+            [ -n "$_notifier" ] && "$_notifier" -remove "cs:$CLAUDE_SESSION_NAME" </dev/null >/dev/null 2>&1 || true
+        done <<< "$_notifiers"
+    fi
 fi
 
 # Read the prompt purely as DATA: jq decodes it, and it is only ever fed to other

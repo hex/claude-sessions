@@ -172,6 +172,11 @@ export GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-$(git config --global user.email 2>
 export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME" GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
 export HOME="$(mktemp -d)/home"
 mkdir -p "$HOME"
+# The notifier bundle lives under XDG_DATA_HOME when that is set; inherited
+# from the developer's shell it would point the install and uninstall tests
+# at the real bundle, whatever HOME says. Scoped here, at source time, as
+# HOME is.
+unset XDG_DATA_HOME
 export CS_NO_UPDATE_CHECK=1
 # Never post a macOS notification from a test run: terminal-notifier is on
 # PATH on a developer's Mac, and the hooks run under every suite's Stop and

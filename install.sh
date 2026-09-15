@@ -471,8 +471,11 @@ install_notifier_bundle() {
     local dest="${XDG_DATA_HOME:-$HOME/.local/share}/cs/cs.app"
     case "$dest" in */cs.app) ;; *) warn "notifier bundle: refusing an unexpected destination: $dest"; return 0 ;; esac
     local stage="$dest.staging.$$" iconset="$dest.$$.iconset" size
-    rm -rf "$stage" "$iconset"
-    mkdir -p "$(dirname "$dest")" "$iconset"
+    rm -rf "$stage" "$iconset" 2>/dev/null || true
+    if ! mkdir -p "$(dirname "$dest")" "$iconset" 2>/dev/null; then
+        warn "notifier bundle: cannot write $(dirname "$dest"); the notification keeps terminal-notifier's own icon"
+        return 0
+    fi
     # Sizes stop at 256, the source's own size: the banner shows the icon at
     # a few dozen pixels, and a full set to 1024 would be an upscaled 1.4 MB.
     for size in 16 32 128 256; do
@@ -500,13 +503,18 @@ install_notifier_bundle() {
         rm -rf "$stage"
         return 0
     fi
+    # Smoke the staged copy before touching the previous bundle: an
+    # executable that cannot run here (Gatekeeper, a foreign architecture)
+    # passes the -x test the hooks make, so promoting it would lose every
+    # notification silently.
+    if ! "$stage/Contents/MacOS/terminal-notifier" -help </dev/null >/dev/null 2>&1; then
+        warn "notifier bundle: the assembled copy does not run (Gatekeeper? architecture?); keeping what is installed"
+        rm -rf "$stage"
+        return 0
+    fi
     rm -rf "$dest"
     mv "$stage" "$dest"
     /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$dest" >/dev/null 2>&1 || true
-    if ! "$dest/Contents/MacOS/terminal-notifier" -help </dev/null >/dev/null 2>&1; then
-        warn "notifier bundle: $dest does not run (Gatekeeper?); the hooks fall back to terminal-notifier on PATH"
-        return 0
-    fi
     installed "notifier bundle" "$dest"
 }
 install_notifier_bundle

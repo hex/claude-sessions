@@ -218,10 +218,25 @@ test_post_and_removes_go_through_the_bundle_when_installed() {
         || { echo "  FAIL: the post did not go through the bundle: $(cat "$NOTIFY_LOG")"; return 1; }
     [ "$(grep -Fxc -- "bundle -remove cs:owl" "$NOTIFY_LOG")" = 2 ] \
         || { echo "  FAIL: both removes must go through the bundle: $(cat "$NOTIFY_LOG")"; return 1; }
-    if grep -q '^-' "$NOTIFY_LOG"; then
-        echo "  FAIL: a call reached the PATH notifier while the bundle exists: $(cat "$NOTIFY_LOG")"
+    if grep -q '^-group' "$NOTIFY_LOG"; then
+        echo "  FAIL: the post reached the PATH notifier while the bundle exists: $(cat "$NOTIFY_LOG")"
         return 1
     fi
+}
+
+# A notification posted through PATH's notifier before the bundle was
+# installed belongs to that sender; the removes clear both senders when both
+# exist, so no notification outlives the install that changed the poster.
+test_removes_clear_both_senders_when_both_exist() {
+    _notify_session "both"
+    unset CS_NO_NOTIFY
+    _fake_bundle
+    _hook scope-prompt.sh '{"prompt":"back"}'
+    _hook session-start.sh '{"source":"startup"}'
+    [ "$(grep -Fxc -- "bundle -remove cs:both" "$NOTIFY_LOG")" = 2 ] \
+        || { echo "  FAIL: removes through the bundle: $(cat "$NOTIFY_LOG")"; return 1; }
+    [ "$(grep -Fxc -- "-remove cs:both" "$NOTIFY_LOG")" = 2 ] \
+        || { echo "  FAIL: removes through the PATH notifier: $(cat "$NOTIFY_LOG")"; return 1; }
 }
 
 test_post_falls_back_to_the_path_notifier_without_the_bundle() {
@@ -302,6 +317,7 @@ run_test test_teammate_prompt_leaves_the_notification
 run_test test_session_start_removes_the_notification
 run_test test_teammate_session_start_leaves_the_notification
 run_test test_post_and_removes_go_through_the_bundle_when_installed
+run_test test_removes_clear_both_senders_when_both_exist
 run_test test_post_falls_back_to_the_path_notifier_without_the_bundle
 run_test test_doctor_reports_the_notifier
 run_test test_doctor_hashes_the_keg_app_binary_not_the_wrapper
