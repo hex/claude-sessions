@@ -499,6 +499,12 @@ if [ -z "${CS_NO_ITERM2:-}" ] && [ "${TERM_PROGRAM:-}" = "iTerm.app" ]; then
     { [ -x "$_it2" ] && "$_it2" stop > "${CS_IT2_TTY:-/dev/tty}"; } 2>/dev/null || true
 fi
 
+# macOS: also take down the finished-turn notification the previous
+# conversation's last Stop may have posted. Lead only, as the post is.
+if [ -z "${CS_NO_NOTIFY:-}" ] && [ "$IS_LEAD" = 1 ] && command -v terminal-notifier >/dev/null 2>&1; then
+    terminal-notifier -remove "cs:$CLAUDE_SESSION_NAME" >/dev/null 2>&1 || true
+fi
+
 # Re-assert this session's tab title. cs sets it once at launch and the reset
 # in its EXIT trap never runs, because cs execs into claude; a nested launch on
 # the same tty (`cs other` from the `!` prefix) leaves "cs: other" on this

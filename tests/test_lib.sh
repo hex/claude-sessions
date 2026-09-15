@@ -192,6 +192,9 @@ setup() {
     # Never fire iTerm2 escapes (dock bounce) at the developer's terminal from
     # a test run; the iterm2 suite re-enables this per test with its own seams.
     export CS_NO_ITERM2=1
+    # Never post a macOS notification from a test run; terminal-notifier is on
+    # PATH on a developer's Mac. The notify suite re-enables this per test.
+    export CS_NO_NOTIFY=1
     # Isolate from the developer's real ~/.claude/projects/ so transcript
     # discovery sees only what the test seeds. Same env var used by
     # _doctor_check_token_cost and the Phase 8 binding helpers.
@@ -213,7 +216,7 @@ teardown() {
     if [[ -n "$TEST_TMPDIR" ]] && [[ -d "$TEST_TMPDIR" ]]; then
         rm -rf "$TEST_TMPDIR"
     fi
-    unset CS_SESSIONS_ROOT CLAUDE_CODE_BIN CS_TRANSCRIPTS_DIR CS_NO_UPDATE_CHECK CS_NO_ITERM2
+    unset CS_SESSIONS_ROOT CLAUDE_CODE_BIN CS_TRANSCRIPTS_DIR CS_NO_UPDATE_CHECK CS_NO_ITERM2 CS_NO_NOTIFY
 }
 
 # --- Test Runner ---

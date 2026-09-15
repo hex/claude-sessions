@@ -559,14 +559,15 @@ test_strip_filters_in_sync() {
 test_manifest_arrays_match_repo_files() {
     local listed actual
     # hooks/ holds two kinds of file: hooks, which install.sh registers against
-    # an event, and libraries the hooks source, which must ship and be removed
-    # with them but must never be registered. Together they must account for
-    # every file, so a new one cannot be silently left uninstalled.
+    # an event, and libraries the hooks source or hand to another tool (the
+    # notification icon included), which must ship and be removed with them
+    # but must never be registered. Together they must account for every
+    # file, so a new one cannot be silently left uninstalled.
     listed=$( { extract_array "$SCRIPT_DIR/../install.sh" CS_HOOKS
                 extract_array "$SCRIPT_DIR/../install.sh" CS_HOOK_LIBS; } | sort)
-    actual=$(cd "$SCRIPT_DIR/../hooks" && ls *.sh | sort)
+    actual=$(cd "$SCRIPT_DIR/../hooks" && ls | sort)
     if [ "$listed" != "$actual" ]; then
-        echo "  FAIL: CS_HOOKS + CS_HOOK_LIBS does not match hooks/*.sh"
+        echo "  FAIL: CS_HOOKS + CS_HOOK_LIBS does not match the files under hooks/"
         diff <(echo "$listed") <(echo "$actual") | head -10
         return 1
     fi

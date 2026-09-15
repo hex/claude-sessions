@@ -110,6 +110,25 @@ if [ -z "${CS_NO_ITERM2:-}" ] && [ "${TERM_PROGRAM:-}" = "iTerm.app" ]; then
     { [ -x "$_it2" ] && "$_it2" stop > "${CS_IT2_TTY:-/dev/tty}"; } 2>/dev/null || true
 fi
 
+# macOS: the finished-turn notification the Stop hook posted comes down at the
+# next prompt. Lead only, by the same two shapes session-start.sh calls the
+# lead (claude carrying cs's pid, or claude as cs's child): a tmux teammate
+# takes prompts from the lead while the user is still away, and each would
+# clear the notification the user has not seen. Mirrors the guard in
+# narrative-reminder.sh (hooks are standalone).
+if [ -z "${CS_NO_NOTIFY:-}" ] && [ -n "${CLAUDE_SESSION_NAME:-}" ] \
+    && [ -n "${CS_LEAD_PID:-}" ] && [ -n "${CLAUDE_PID:-}" ] \
+    && command -v terminal-notifier >/dev/null 2>&1; then
+    _is_lead=0
+    if [ "$CLAUDE_PID" = "$CS_LEAD_PID" ]; then
+        _is_lead=1
+    else
+        _parent=$(ps -o ppid= -p "$CLAUDE_PID" 2>/dev/null | tr -d '[:space:]' || true)
+        [ -n "$_parent" ] && [ "$_parent" = "$CS_LEAD_PID" ] && _is_lead=1
+    fi
+    [ "$_is_lead" = 1 ] && terminal-notifier -remove "cs:$CLAUDE_SESSION_NAME" >/dev/null 2>&1 || true
+fi
+
 # Read the prompt purely as DATA: jq decodes it, and it is only ever fed to other
 # commands as quoted stdin or written to a file via awk ENVIRON — never eval'd or
 # expanded into a shell context.
