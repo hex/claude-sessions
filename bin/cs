@@ -66,10 +66,12 @@ CS_HOOKS=(
 # Files under hooks/ that the hooks source, or that cs points other tools at,
 # rather than files Claude Code invokes as hooks. Deployed and removed alongside
 # the hooks, never registered against an event. The prompt-rewriter scripts are
-# reached through $EDITOR, not through any hook event.
+# reached through $EDITOR, not through any hook event. cs-logo.png is the icon
+# the Stop hook hands terminal-notifier for the finished-turn notification.
 CS_HOOK_LIBS=(
     cs-resolve.sh
     cs-shared.sh
+    cs-logo.png
     prompt-rewriter.sh
     prompt-rewriter-model.sh
     prompt-rewriter-vendor.sh
@@ -5809,7 +5811,7 @@ _doctor_check_hook_drift() {
         fi
     }
 
-    _drift_scan "Hook" "$hooks_dir" hooks/*.sh
+    _drift_scan "Hook" "$hooks_dir" hooks/*.sh hooks/*.png
     _drift_scan "Command" "$commands_dir" commands/*.md
     _drift_scan "Skill" "$skills_dir" skills/*/SKILL.md skills/*/scripts/*.sh
     _drift_scan "Mod" "$skills_dir" mods/*/.claude-plugin/plugin.json mods/*/hooks/*

@@ -192,7 +192,7 @@ _doctor_check_hook_drift() {
         fi
     }
 
-    _drift_scan "Hook" "$hooks_dir" hooks/*.sh
+    _drift_scan "Hook" "$hooks_dir" hooks/*.sh hooks/*.png
     _drift_scan "Command" "$commands_dir" commands/*.md
     _drift_scan "Skill" "$skills_dir" skills/*/SKILL.md skills/*/scripts/*.sh
     _drift_scan "Mod" "$skills_dir" mods/*/.claude-plugin/plugin.json mods/*/hooks/*
