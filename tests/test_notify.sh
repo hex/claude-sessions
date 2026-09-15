@@ -297,6 +297,15 @@ test_uninstall_removes_the_bundle() {
     [ ! -e "$FAKE_APP" ] || { echo "  FAIL: cs -uninstall left $FAKE_APP"; return 1; }
 }
 
+# The bundle lives under XDG_DATA_HOME when set. A value inherited from the
+# developer's shell would point every install and uninstall fixture at the
+# real bundle, whatever HOME says, so test_lib drops it at source time.
+test_test_lib_drops_an_inherited_xdg_data_home() {
+    local seen
+    seen=$(XDG_DATA_HOME="$TEST_TMPDIR/inherited" bash -c 'SCRIPT_DIR="$(dirname "$1")"; source "$1" >/dev/null 2>&1; printf "%s" "${XDG_DATA_HOME:-unset}"' _ "$SCRIPT_DIR/test_lib.sh")
+    assert_eq "unset" "$seen" "test_lib must unset an inherited XDG_DATA_HOME" || return 1
+}
+
 test_icon_ships_with_the_hooks() {
     grep -q '^    cs-logo.png$' "$SCRIPT_DIR/../lib/01-manifests.sh" \
         || { echo "  FAIL: cs-logo.png is not in CS_HOOK_LIBS"; return 1; }
@@ -322,6 +331,7 @@ run_test test_post_falls_back_to_the_path_notifier_without_the_bundle
 run_test test_doctor_reports_the_notifier
 run_test test_doctor_hashes_the_keg_app_binary_not_the_wrapper
 run_test test_uninstall_removes_the_bundle
+run_test test_test_lib_drops_an_inherited_xdg_data_home
 run_test test_icon_ships_with_the_hooks
 
 report_results
