@@ -263,6 +263,49 @@ Known multi-machine limitation: if a session is cloned to a second machine while
 
 A run that overruns the hook's timeout leaves a trail that stops mid-run, which names the stage it hung on — the only evidence such a run ever produces, since it never reaches an exit where it could write a summary. A trail ending anywhere but `exit` or `emit` marks a killed run. The trace reads the clock through shell builtins only (`$EPOCHREALTIME`, or `$SECONDS` on bash 3.2), so it adds no forks to a hook already under suspicion for running slow. The file is machine-local — which machine was slow is half the finding — and one run in 64 trims it to its last 2000 lines. Opt-out per-session: `export CS_SCOPE_TRACE_DISABLE=1`.
 
+## cs-rotate (not a hook script — an opt-in Claude Code mod)
+
+`mods/cs-rotate/` is a Claude Code function-hooks plugin: TypeScript that runs
+inside Claude Code's own process rather than a shell script it spawns. It adds
+one key to conversation rotation. Once the context window reaches the crit band
+(65%, where the status bar turns red and the Stop hook nudges), the band directly
+above the prompt draws `1: rotate this conversation`. Pressing `1` from an empty
+composer fills the composer with `/rotate ` and sends nothing: the `rotate`
+skill asks for a purpose line, so the person finishes the command and presses
+Enter. Below the band the mod draws nothing, and it draws nothing while a turn
+runs or while a survey holds the band. It never submits a prompt and never runs
+a command itself.
+
+The mod is opt-in, and stays out of `install.sh`, because Claude Code loads function
+hooks only behind `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`. To enable it on one
+machine:
+
+```bash
+ln -s "$(pwd)/mods/cs-rotate" ~/.claude/skills/cs-rotate   # from the cs checkout
+export CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1                  # in the shell that launches cs
+```
+
+A plugin under `~/.claude/skills/<name>/` loads with no settings edit. Removing
+the link removes the mod.
+
+On every session start the mod writes `.cs/local/cs-rotate.heartbeat` (one
+UTC timestamp), and `cs -doctor` reports the mod by that file: `last ran <stamp>
+in this session` as OK, or a WARN naming the flag when the link exists
+but no heartbeat exists. Doctor reads the heartbeat rather than the directory
+because a machine's policy can load a mod and never run it, and because the flag
+is per shell. Doctor says nothing when the mod is not linked.
+
+Two limits of the plugin runtime shape the code. It has no environment
+accessor, so `CS_STATUSLINE_CTX_CRIT` cannot reach it: the threshold is a
+literal in `register.tsx`, and `tests/test_mod_rotate.sh` pins it to the
+status line's default. And a hot reload resets module state, so the mod keeps
+none.
+
+Tests: `tests/test_mod_rotate.sh` runs the bun unit tests under
+`mods/cs-rotate/test/` (a fake engine drives the band, the press and the
+heartbeat) and `claude plugin validate` when each binary is on PATH, and
+always checks the manifest, the threshold pin and the install exclusion.
+
 ## Hook Configuration
 
 The hooks are configured in `~/.claude/settings.json`:

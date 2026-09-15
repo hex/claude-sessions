@@ -40,7 +40,8 @@ export function register(on: On) {
       <Box flexDirection="column">
         {drawn}
         <Box>
-          <Button key="cs-rotate" hotkey="1" label="rotate this conversation"
+          {/* plain draws "1: label", so the hotkey is discoverable */}
+          <Button key="cs-rotate" hotkey="1" plain label="rotate this conversation"
                   onPress={() => rotate($)} />
         </Box>
       </Box>

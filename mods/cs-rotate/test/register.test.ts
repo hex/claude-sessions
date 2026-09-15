@@ -62,6 +62,7 @@ test('at crit the band adds one button on hotkey 1 beneath what was drawn', asyn
   expect(tree).not.toBe(DRAWN)
   const button = findButton(tree)
   expect(button.props.hotkey).toBe('1')
+  expect(button.props.plain).toBe(true)
   expect(button.props.label).toMatch(/rotate/)
   expect(JSON.stringify(tree)).toContain('"Survey"')
 })
