@@ -476,7 +476,9 @@ test_build_outputs_are_world_readable() {
     (cd "$repo" && bash build.sh > /dev/null) || { echo "  FAIL: build.sh failed"; return 1; }
     local f mode
     for f in bin/cs hooks/cs-shared.sh install.sh; do
-        mode=$(stat -f '%Lp' "$repo/$f" 2>/dev/null || stat -c '%a' "$repo/$f")
+        # GNU stat first: its -c is invalid on BSD stat (no output, exit 1), while
+        # BSD's -f means "filesystem" to GNU stat and prints a block before failing.
+        mode=$(stat -c '%a' "$repo/$f" 2>/dev/null || stat -f '%Lp' "$repo/$f")
         assert_eq "755" "$mode" "$f is built 0755" || return 1
     done
 }

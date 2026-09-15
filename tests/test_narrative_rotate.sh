@@ -717,6 +717,20 @@ test_narrative_budget_is_one_value_in_both_copies() {
     done
 }
 
+# The validator's zero check runs on the normalised number, not the text: a
+# `0` pattern matches one zero and lets `00` through as a zero-byte budget,
+# which rotates on every run and warns on every narrative.
+test_narrative_budget_reads_any_spelling_of_zero_as_the_default() {
+    # shellcheck source=../lib/02-shared.sh
+    . "$SCRIPT_DIR/../lib/02-shared.sh"
+    assert_eq "5" "$(_narrative_budget 0 5)" "0 falls back" || return 1
+    assert_eq "5" "$(_narrative_budget 00 5)" "00 falls back" || return 1
+    assert_eq "5" "$(_narrative_budget 000 5)" "000 falls back" || return 1
+    assert_eq "8" "$(_narrative_budget 08 5)" "08 is decimal 8" || return 1
+    assert_eq "5" "$(_narrative_budget "" 5)" "empty falls back" || return 1
+    assert_eq "5" "$(_narrative_budget abc 5)" "non-numeric falls back" || return 1
+}
+
 test_named_rotate_refuses_a_dangling_adopted_link() {
     # An adopted session is a symlink into the user's project. When that project
     # moves, the link dangles — a bare -L guard admits it and the failure then
@@ -804,6 +818,7 @@ run_test test_named_rotate_refuses_an_unknown_session
 run_test test_named_rotate_usage_names_the_form_the_user_typed
 run_test test_named_rotate_refuses_a_directory_that_is_not_a_session
 run_test test_narrative_budget_is_one_value_in_both_copies
+run_test test_narrative_budget_reads_any_spelling_of_zero_as_the_default
 run_test test_named_rotate_refuses_a_dangling_adopted_link
 run_test test_named_rotate_rejects_an_unknown_subcommand
 run_test test_unknown_session_command_error_lists_narrative

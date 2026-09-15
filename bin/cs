@@ -185,12 +185,16 @@ cs_actor_slug() {
 CS_NARRATIVE_MAX_DEFAULT=229376
 CS_NARRATIVE_KEEP_DEFAULT=114688
 
-# A positive integer override, else the default. Empty, non-numeric and zero all
-# fall back: a zero budget would rotate on every run. Printed as decimal: a
-# leading zero would reach the callers' arithmetic as an octal literal, and
-# `08` aborts it.
+# A positive integer override, else the default. Empty, non-numeric and zero
+# in any spelling (0, 00) all fall back: a zero budget would rotate on every
+# run. The zero check runs on the number, not the text, and the number is
+# decimal: a leading zero would reach the callers' arithmetic as an octal
+# literal, and `08` aborts it.
 _narrative_budget() {  # value, default
-    case "${1:-}" in ''|*[!0-9]*|0) echo "$2";; *) echo "$((10#$1))";; esac
+    local n
+    case "${1:-}" in ''|*[!0-9]*) echo "$2"; return;; esac
+    n=$((10#$1))
+    if [ "$n" -gt 0 ]; then echo "$n"; else echo "$2"; fi
 }
 _claude_encode_path() {
     local p="$1"

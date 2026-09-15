@@ -84,8 +84,11 @@ CS_SUBAGENT_STATUSLINE_URL="${REPO_URL}/bin/cs-subagent-statusline"
 
 # @@CS_MANIFESTS@@
 
-# Everything that lands in HOOKS_DIR, for the copy and cleanup loops.
-CS_HOOK_FILES=("${CS_HOOKS[@]}" "${CS_HOOK_LIBS[@]}")
+# Everything that lands in HOOKS_DIR, for the copy and cleanup loops. The
+# libraries go first: a web install that stops partway then leaves new
+# libraries under old hooks, which still run, rather than new hooks without
+# the library they source.
+CS_HOOK_FILES=("${CS_HOOK_LIBS[@]}" "${CS_HOOKS[@]}")
 
 # Completion URLs for web install
 COMPLETION_BASH_URL="${REPO_URL}/completions/cs.bash"

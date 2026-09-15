@@ -1795,21 +1795,22 @@ test_narrative_reminder_skips_the_budget_check_without_the_shared_library() {
 }
 
 run_test test_narrative_reminder_flags_a_narrative_over_budget
-# A zero budget from the library is a budget of zero, as doctor and the rotate
-# verb read it, not the absence of a budget: the "library missing" state that
-# skips the check must not be confused with a value that happens to be 0.
-test_narrative_reminder_warns_at_a_zero_budget() {
+# A zero budget in any spelling is the default, not "warn on everything": the
+# validator runs its zero check on the normalised number, and the hook reads
+# the result rather than keeping a rule of its own.
+test_narrative_reminder_reads_a_double_zero_budget_as_the_default() {
     local nf="$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
     { echo "# Session narrative (alice)"; head -c 3000 /dev/zero | tr '\0' 'x'; echo; } > "$nf"
     _backdate "$nf"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
     local output
     output=$(echo '{}' | CS_NARRATIVE_MAX_BYTES=00 bash "$HOOKS_DIR/narrative-reminder.sh")
-    assert_output_contains "$output" "narrative.alice.md is 2 KB, over the 0 KB budget" \
-        "00 is a zero budget, not a missing one" || return 1
+    assert_output_contains "$output" "Narrative check" "the reminder itself still fires" || return 1
+    assert_output_not_contains "$output" "over the" "00 is the default budget, and 3 KB is under it" || return 1
 }
 
 run_test test_narrative_reminder_skips_the_budget_check_without_the_shared_library
+run_test test_narrative_reminder_reads_a_double_zero_budget_as_the_default
 run_test test_narrative_reminder_reads_a_leading_zero_budget_as_decimal
 run_test test_narrative_reminder_is_silent_about_budget_when_under
 run_test test_narrative_reminder_survives_an_unreadable_narrative
