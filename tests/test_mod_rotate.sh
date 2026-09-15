@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: Tests for the cs-rotate mod under mods/cs-rotate (a Claude Code function-hooks plugin).
-# ABOUTME: Pins the manifest shape and the crit threshold; runs the bun unit tests and plugin validate when present.
+# ABOUTME: Pins the manifest shape and the default threshold; runs the bun unit tests and plugin validate when present.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/test_lib.sh"
@@ -17,15 +17,16 @@ test_mod_manifest_names_the_plugin_and_its_module() {
     assert_file_exists "$MOD/hooks/$module" "the named module exists" || return 1
 }
 
-# The band appears where the status bar turns red. Both defaults are literals in
-# two languages, so this test is the only thing holding them together.
-test_mod_crit_threshold_matches_the_statusline_default() {
-    local mod_crit sl_crit
-    mod_crit="$(sed -n 's/^export const CRIT_PERCENT = \([0-9]*\)$/\1/p' "$MOD/hooks/register.tsx")"
-    sl_crit="$(sed -n 's/.*_num_or "\${CS_STATUSLINE_CTX_CRIT:-}" \([0-9]*\).*/\1/p' "$SCRIPT_DIR/../bin/cs-statusline")"
-    [ -n "$mod_crit" ] || { echo "  FAIL: CRIT_PERCENT literal not found in register.tsx"; return 1; }
-    [ -n "$sl_crit" ] || { echo "  FAIL: ctx crit default not found in bin/cs-statusline"; return 1; }
-    assert_eq "$sl_crit" "$mod_crit" "mod crit == statusline crit default" || return 1
+# By default the band appears where the status bar turns amber and the Stop
+# hook gives its one-time headroom notice. Both defaults are literals in two
+# languages, so this test is the only thing holding them together.
+test_mod_default_threshold_matches_the_statusline_warn_default() {
+    local mod_default sl_warn
+    mod_default="$(sed -n 's/^export const DEFAULT_PERCENT = \([0-9]*\)$/\1/p' "$MOD/hooks/register.tsx")"
+    sl_warn="$(sed -n 's/.*_num_or "\${CS_STATUSLINE_CTX_WARN:-}" \([0-9]*\).*/\1/p' "$SCRIPT_DIR/../bin/cs-statusline")"
+    [ -n "$mod_default" ] || { echo "  FAIL: DEFAULT_PERCENT literal not found in register.tsx"; return 1; }
+    [ -n "$sl_warn" ] || { echo "  FAIL: ctx warn default not found in bin/cs-statusline"; return 1; }
+    assert_eq "$sl_warn" "$mod_default" "mod default == statusline warn default" || return 1
 }
 
 # The installer deploys the mod under ~/.claude/skills/cs-rotate and a cs
@@ -64,12 +65,13 @@ test_mod_validate_inventories_the_hooks_and_calls() {
     assert_output_contains "$out" "Validation passed" "manifest and hooks validate" || return 1
     assert_output_contains "$out" "hooks: session.start, ui.render{component=AbovePrompt}" "both hooks inventoried" || return 1
     assert_output_contains "$out" '$.prompt.fill' "the press fills the composer" || return 1
+    assert_output_contains "$out" '$.env.get' "the threshold is read from the environment" || return 1
     assert_output_not_contains "$out" '$.prompt.submit' "and never submits" || return 1
     assert_output_not_contains "$out" '$.command.run' "and never runs a command itself" || return 1
 }
 
 run_test test_mod_manifest_names_the_plugin_and_its_module
-run_test test_mod_crit_threshold_matches_the_statusline_default
+run_test test_mod_default_threshold_matches_the_statusline_warn_default
 run_test test_mod_is_deployed_by_the_installer_and_enabled_at_launch
 run_test test_mod_unit_tests_pass_under_bun
 run_test test_mod_validate_inventories_the_hooks_and_calls

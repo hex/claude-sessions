@@ -168,6 +168,11 @@ export CS_SUBAGENT_STATUSLINE_DISABLE="1"
 export CS_CTX_WARN_CTX="40"
 export CS_ROTATE_NUDGE_CTX="65"
 
+# Context percentage at which the rotate mod's "1: rotate this conversation"
+# button appears above the prompt (default: the status line's warn band).
+# The mod reads it from the launched process's environment.
+export CS_ROTATE_BUTTON_CTX="40"
+
 # Narrative rotation: rotate when the live file passes MAX, keep about KEEP bytes
 export CS_NARRATIVE_MAX_BYTES="229376"
 export CS_NARRATIVE_KEEP_BYTES="114688"
