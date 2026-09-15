@@ -276,6 +276,44 @@ test_launch_consumes_seed_queues_arms_and_kicks() {
     assert_output_contains "$out" "cs -msg boss -k result" "reply instructions present" || return 1
 }
 
+# A pane claude splits off for an agent-team teammate is started by the tmux
+# server with the tmux session's environment, not the lead's, so the truecolor
+# override cs exports for claude never reaches it and the teammate's status
+# line renders in the 256-colour fallback. The launch publishes the value into
+# the tmux session it runs in. The fake tmux is also first on PATH: the tab
+# title code calls tmux by name, and with TMUX set a real tmux would rename the
+# window this suite runs in.
+_launch_worker_in_tmux() {  # [truecolor value]
+    mkdir -p "$TEST_TMPDIR/bin" && ln -sf "$CS_TMUX_BIN" "$TEST_TMPDIR/bin/tmux"
+    # The default case unsets the variable: a suite run from a shell that
+    # carries one (every cs session does) would otherwise test that value.
+    if [ $# -gt 0 ]; then
+        PATH="$TEST_TMPDIR/bin:$PATH" TMUX="/tmp/fake,1,0" CLAUDE_CODE_TMUX_TRUECOLOR="$1" "$CS_BIN" worker <<< "" > /dev/null 2>&1
+    else
+        ( unset CLAUDE_CODE_TMUX_TRUECOLOR; PATH="$TEST_TMPDIR/bin:$PATH" TMUX="/tmp/fake,1,0" "$CS_BIN" worker <<< "" > /dev/null 2>&1 )
+    fi
+}
+
+test_launch_publishes_truecolor_to_the_tmux_session() {
+    _launch_worker_in_tmux || true
+    assert_file_contains "$FAKE_TMUX_DIR/log" "^set-environment CLAUDE_CODE_TMUX_TRUECOLOR 1$" \
+        "the launch sets the truecolor flag in the tmux session env" || return 1
+}
+
+# The user's own value wins, as it does for claude's environment.
+test_launch_publishes_the_users_truecolor_value() {
+    _launch_worker_in_tmux 0 || true
+    assert_file_contains "$FAKE_TMUX_DIR/log" "^set-environment CLAUDE_CODE_TMUX_TRUECOLOR 0$" \
+        "a preset value is published as given" || return 1
+}
+
+test_launch_outside_tmux_touches_no_tmux_environment() {
+    _launch_worker > /dev/null 2>&1 || true
+    if [ -f "$FAKE_TMUX_DIR/log" ] && grep -q "set-environment" "$FAKE_TMUX_DIR/log"; then
+        echo "  FAIL: set-environment called with no tmux around"; return 1
+    fi
+}
+
 test_launch_empty_spawner_gets_no_reply_wiring() {
     mkdir -p "$CS_SESSIONS_ROOT/.spawn"
     printf '\nonly job\n' > "$CS_SESSIONS_ROOT/.spawn/worker.seed"
@@ -441,6 +479,9 @@ run_test test_spawn_new_session_race_falls_through_to_new_window
 run_test test_spawn_tmux_targets_are_exact_match_anchored
 run_test test_spawn_empty_spawner_writes_blank_first_line
 run_test test_launch_consumes_seed_queues_arms_and_kicks
+run_test test_launch_publishes_truecolor_to_the_tmux_session
+run_test test_launch_publishes_the_users_truecolor_value
+run_test test_launch_outside_tmux_touches_no_tmux_environment
 run_test test_launch_empty_spawner_gets_no_reply_wiring
 run_test test_launch_without_seed_keeps_color_behavior
 run_test test_launch_moves_brief_into_the_session_and_kicks_to_it
