@@ -99,7 +99,7 @@ test_doctor_reports_ok_when_narratives_fit() {
     # itself while catching no defect. What must stay true is that the line
     # names the SAME budget the tool would rotate at.
     local budget_kb
-    budget_kb=$(( $(grep -o 'CS_NARRATIVE_MAX_DEFAULT=[0-9]*' "$SCRIPT_DIR/../lib/51-narrative.sh" \
+    budget_kb=$(( $(grep -o 'CS_NARRATIVE_MAX_DEFAULT=[0-9]*' "$SCRIPT_DIR/../lib/02-shared.sh" \
         | head -1 | cut -d= -f2) / 1024 ))
     assert_output_contains "$output" "Narrative: all within the $budget_kb KB budget" \
         "ok line names the budget cs -narrative rotate would use" || return 1

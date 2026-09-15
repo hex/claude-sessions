@@ -37,11 +37,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Verify bin/cs is in sync with lib/
+      - name: Verify the built files are in sync with lib/ and install.sh.in
         run: |
           bash build.sh
-          git diff --exit-code bin/cs \
-            || { echo "::error::bin/cs is out of sync with lib/. Run ./build.sh and commit bin/cs."; exit 1; }
+          git diff --exit-code bin/cs hooks/cs-shared.sh install.sh \
+            || { echo "::error::bin/cs, hooks/cs-shared.sh or install.sh is out of sync with lib/ or install.sh.in. Run ./build.sh and commit all three."; exit 1; }
 
   shellcheck:
     runs-on: ubuntu-latest

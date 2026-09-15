@@ -685,7 +685,7 @@ test_named_rotate_refuses_a_directory_that_is_not_a_session() {
 # — the tests source the lib while the user runs the binary, so the suite would
 # stay green while the shipped default was something else.
 test_narrative_budget_is_one_value_in_both_copies() {
-    local lib="$SCRIPT_DIR/../lib/51-narrative.sh" bin="$SCRIPT_DIR/../bin/cs"
+    local lib="$SCRIPT_DIR/../lib/02-shared.sh" bin="$SCRIPT_DIR/../bin/cs"
     local lib_max lib_keep bin_max bin_keep
     lib_max=$(grep -o 'CS_NARRATIVE_MAX_DEFAULT=[0-9]*' "$lib" | head -1 | cut -d= -f2)
     lib_keep=$(grep -o 'CS_NARRATIVE_KEEP_DEFAULT=[0-9]*' "$lib" | head -1 | cut -d= -f2)
@@ -700,19 +700,35 @@ test_narrative_budget_is_one_value_in_both_copies() {
     # kept tail leaves a working day of headroom before the next rotation.
     assert_eq "229376" "$lib_max" "the budget stays under the Read tool's 256 KiB ceiling" || return 1
     assert_eq "114688" "$lib_keep" "and the kept tail is half of it" || return 1
-    # A THIRD copy: the Stop hook measures every narrative against its own
-    # inline default to decide whether to nag. Left behind, it would keep
-    # flagging files that are comfortably under the real budget — a warning the
+    # The hooks carry no copy of their own: both take the budget from
+    # cs-shared.sh, build.sh's copy of the lib fragment (test_install pins that
+    # file to the build). A numeric default left behind in a hook would keep
+    # flagging files that are comfortably under the real budget, a warning the
     # user cannot act on, since cs -narrative rotate would call them a no-op.
-    local hook_max
-    hook_max=$(grep -o 'CS_NARRATIVE_MAX_BYTES:-}" [0-9]*' "$SCRIPT_DIR/../hooks/narrative-reminder.sh" \
-        | head -1 | grep -o '[0-9]*$')
-    assert_eq "$lib_max" "$hook_max" "the Stop hook must nag at the same threshold it rotates at" || return 1
-    # A FOURTH: SessionStart warns before the resume read, against its own
-    # inline default for the same reason.
-    local start_max
-    start_max=$(grep -o 'NARRATIVE_MAX=[0-9][0-9]*' "$SCRIPT_DIR/../hooks/session-start.sh" | head -1 | cut -d= -f2)
-    assert_eq "$lib_max" "$start_max" "SessionStart must warn at the same threshold it rotates at" || return 1
+    local shared="$SCRIPT_DIR/../hooks/cs-shared.sh" hook
+    assert_eq "$lib_max" "$(grep -o 'CS_NARRATIVE_MAX_DEFAULT=[0-9]*' "$shared" | head -1 | cut -d= -f2)" \
+        "the hooks' library carries the same budget" || return 1
+    for hook in narrative-reminder.sh session-start.sh; do
+        assert_file_contains "$SCRIPT_DIR/../hooks/$hook" '_narrative_budget "${CS_NARRATIVE_MAX_BYTES:-}" "$CS_NARRATIVE_MAX_DEFAULT"' \
+            "$hook takes the budget from the shared library" || return 1
+        if grep -q -e 'NARRATIVE_MAX=[0-9]' -e 'MAX_BYTES:-}" [0-9]' "$SCRIPT_DIR/../hooks/$hook"; then
+            echo "  FAIL: $hook carries its own numeric budget default"; return 1
+        fi
+    done
+}
+
+# The validator's zero check runs on the normalised number, not the text: a
+# `0` pattern matches one zero and lets `00` through as a zero-byte budget,
+# which rotates on every run and warns on every narrative.
+test_narrative_budget_reads_any_spelling_of_zero_as_the_default() {
+    # shellcheck source=../lib/02-shared.sh
+    . "$SCRIPT_DIR/../lib/02-shared.sh"
+    assert_eq "5" "$(_narrative_budget 0 5)" "0 falls back" || return 1
+    assert_eq "5" "$(_narrative_budget 00 5)" "00 falls back" || return 1
+    assert_eq "5" "$(_narrative_budget 000 5)" "000 falls back" || return 1
+    assert_eq "8" "$(_narrative_budget 08 5)" "08 is decimal 8" || return 1
+    assert_eq "5" "$(_narrative_budget "" 5)" "empty falls back" || return 1
+    assert_eq "5" "$(_narrative_budget abc 5)" "non-numeric falls back" || return 1
 }
 
 test_named_rotate_refuses_a_dangling_adopted_link() {
@@ -802,6 +818,7 @@ run_test test_named_rotate_refuses_an_unknown_session
 run_test test_named_rotate_usage_names_the_form_the_user_typed
 run_test test_named_rotate_refuses_a_directory_that_is_not_a_session
 run_test test_narrative_budget_is_one_value_in_both_copies
+run_test test_narrative_budget_reads_any_spelling_of_zero_as_the_default
 run_test test_named_rotate_refuses_a_dangling_adopted_link
 run_test test_named_rotate_rejects_an_unknown_subcommand
 run_test test_unknown_session_command_error_lists_narrative

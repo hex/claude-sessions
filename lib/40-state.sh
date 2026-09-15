@@ -207,39 +207,6 @@ _exec_fresh_rebind() {
     exec $CLAUDE_CODE_BIN --name "$session_name" --session-id "$new_uuid" ${launch_prompt:+"$launch_prompt"}
 }
 
-# Normalize an arbitrary identity string to a filesystem-safe slug.
-_slugify() {
-    printf '%s' "$1" \
-        | tr '[:upper:]' '[:lower:]' \
-        | sed 's/[^a-z0-9][^a-z0-9]*/-/g; s/^-//; s/-*$//'
-}
-
-# Resolve the current actor as a slug. With a session_dir arg, resolve the
-# pinned identity and git config from that dir (callers may run before
-# CLAUDE_SESSION_META_DIR is exported). Without, use env + cwd.
-# Precedence: $CS_ACTOR > <meta>/local/identity > git user.email > git user.name > "unknown"
-cs_actor_slug() {
-    local sdir="${1:-}"
-    local meta=""
-    if [ -n "$sdir" ]; then
-        meta="$sdir/.cs"
-    else
-        meta="${CLAUDE_SESSION_META_DIR:-}"
-    fi
-    local raw=""
-    if [ -n "${CS_ACTOR:-}" ]; then
-        raw="$CS_ACTOR"
-    elif [ -n "$meta" ] && [ -f "$meta/local/identity" ]; then
-        IFS= read -r raw < "$meta/local/identity"
-    else
-        local gitdir="${sdir:-.}"
-        raw=$(git -C "$gitdir" config user.email 2>/dev/null || true)
-        [ -z "$raw" ] && raw=$(git -C "$gitdir" config user.name 2>/dev/null || true)
-    fi
-    [ -z "$raw" ] && raw="unknown"
-    _slugify "$raw"
-}
-
 # Resolve a SPECIFIC session's actor slug from its own dir, bypassing $CS_ACTOR
 # (which cs_actor_slug honours first and would otherwise stamp the caller's
 # identity onto every 'cs -live' row). Arg: session_dir (session root).

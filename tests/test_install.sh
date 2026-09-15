@@ -393,6 +393,96 @@ test_local_install_uses_bin_picker_when_nothing_was_built() {
         "with no build present the shipped picker must still install" || return 1
 }
 
+# hooks/cs-shared.sh is a build artifact: build.sh writes it from lib/02-shared.sh
+# so the hooks and cs run ONE copy of the actor and narrative-budget code. The
+# committed file must be exactly what the build writes, or the hooks ship code
+# the tests never ran (the same drift CI's build-sync job catches for bin/cs).
+test_build_generates_the_shared_hook_fragment() {
+    local repo="$TEST_TMPDIR/build-repo" real="$SCRIPT_DIR/.."
+    mkdir -p "$repo/bin" "$repo/hooks"
+    cp -R "$real/lib" "$repo/lib"
+    cp "$real/build.sh" "$real/install.sh.in" "$repo/"
+    (cd "$repo" && bash build.sh > /dev/null) || { echo "  FAIL: build.sh failed"; return 1; }
+    assert_file_exists "$repo/hooks/cs-shared.sh" "build.sh writes hooks/cs-shared.sh" || return 1
+    if ! diff -u "$real/hooks/cs-shared.sh" "$repo/hooks/cs-shared.sh" > "$TEST_TMPDIR/shared.diff" 2>&1; then
+        echo "  FAIL: committed hooks/cs-shared.sh is not what build.sh generates (run ./build.sh)"
+        head -20 "$TEST_TMPDIR/shared.diff"
+        return 1
+    fi
+}
+
+# install.sh is a build artifact too: build.sh splices lib/01-manifests.sh (the
+# deploy manifests and the settings-strip filter, the code install.sh shares
+# with bin/cs) into install.sh.in. A web install runs install.sh from a curl
+# pipe and can source nothing, so the sharing happens at build time, and the
+# committed install.sh must be what the build writes.
+test_build_generates_install_sh_from_its_template() {
+    local repo="$TEST_TMPDIR/build-repo2" real="$SCRIPT_DIR/.."
+    mkdir -p "$repo/bin" "$repo/hooks"
+    cp -R "$real/lib" "$repo/lib"
+    cp "$real/build.sh" "$real/install.sh.in" "$repo/"
+    (cd "$repo" && bash build.sh > /dev/null) || { echo "  FAIL: build.sh failed"; return 1; }
+    assert_file_exists "$repo/install.sh" "build.sh writes install.sh" || return 1
+    [ -x "$repo/install.sh" ] || { echo "  FAIL: the generated install.sh is not executable"; return 1; }
+    if ! diff -u "$real/install.sh" "$repo/install.sh" > "$TEST_TMPDIR/install.diff" 2>&1; then
+        echo "  FAIL: committed install.sh is not what build.sh generates (run ./build.sh)"
+        head -20 "$TEST_TMPDIR/install.diff"
+        return 1
+    fi
+}
+
+# A template without exactly one splice marker would build an install.sh with
+# no manifests at all, and `bash -n` passes that; set -u would fail it at the
+# user's terminal instead.
+test_build_refuses_a_template_without_the_marker() {
+    local repo="$TEST_TMPDIR/build-repo3" real="$SCRIPT_DIR/.."
+    mkdir -p "$repo/bin" "$repo/hooks"
+    cp -R "$real/lib" "$repo/lib"
+    cp "$real/build.sh" "$repo/"
+    grep -v '^# @@CS_MANIFESTS@@$' "$real/install.sh.in" > "$repo/install.sh.in"
+    local out
+    if out=$(cd "$repo" && bash build.sh 2>&1); then
+        echo "  FAIL: build.sh accepted a template with no splice marker"; return 1
+    fi
+    assert_output_contains "$out" "CS_MANIFESTS" "the error names the marker" || return 1
+    assert_not_exists "$repo/install.sh" "no install.sh is written from a bad template" || return 1
+}
+
+# awk reads a missing splice source as an empty file and exits 0, and an
+# installer with no manifests passes bash -n, so the build has to check for the
+# source itself or publish an installer that deploys nothing.
+test_build_refuses_a_missing_manifests_source() {
+    local repo="$TEST_TMPDIR/build-repo4" real="$SCRIPT_DIR/.."
+    mkdir -p "$repo/bin" "$repo/hooks"
+    cp -R "$real/lib" "$repo/lib"
+    cp "$real/build.sh" "$real/install.sh.in" "$repo/"
+    rm "$repo/lib/01-manifests.sh"
+    local out
+    if out=$(cd "$repo" && bash build.sh 2>&1); then
+        echo "  FAIL: build.sh built an installer with no manifests source"; return 1
+    fi
+    assert_output_contains "$out" "01-manifests.sh" "the error names the missing source" || return 1
+    assert_not_exists "$repo/install.sh" "no install.sh is written without its manifests" || return 1
+}
+
+# The built files are read by whoever runs them: a shared checkout's other
+# users, and every hook the deployed copy is sourced from. mktemp makes a
+# private file, so the mode is set on purpose rather than inherited.
+test_build_outputs_are_world_readable() {
+    local repo="$TEST_TMPDIR/build-repo5" real="$SCRIPT_DIR/.."
+    mkdir -p "$repo/bin" "$repo/hooks"
+    cp -R "$real/lib" "$repo/lib"
+    cp "$real/build.sh" "$real/install.sh.in" "$repo/"
+    (cd "$repo" && bash build.sh > /dev/null) || { echo "  FAIL: build.sh failed"; return 1; }
+    local f mode
+    for f in bin/cs hooks/cs-shared.sh install.sh; do
+        # GNU stat first: its -c is invalid on BSD stat (no output, exit 1), while
+        # BSD's -f means "filesystem" to GNU stat and prints a block before failing.
+        mode=$(stat -c '%a' "$repo/$f" 2>/dev/null || stat -f '%Lp' "$repo/$f")
+        assert_eq "755" "$mode" "$f is built 0755" || return 1
+    done
+}
+
 # ============================================================================
 # Manifest arrays: install.sh and bin/cs must agree, and must match the repo
 # ============================================================================
@@ -1334,6 +1424,11 @@ run_test test_uninstall_removes_update_cache
 run_test test_install_recovers_from_invalid_settings_json
 run_test test_local_install_prefers_a_freshly_built_picker
 run_test test_local_install_uses_bin_picker_when_nothing_was_built
+run_test test_build_generates_the_shared_hook_fragment
+run_test test_build_generates_install_sh_from_its_template
+run_test test_build_refuses_a_template_without_the_marker
+run_test test_build_refuses_a_missing_manifests_source
+run_test test_build_outputs_are_world_readable
 run_test test_hook_registration_doc_matches_install
 run_test test_install_honors_declined_statusline_marker
 run_test test_install_declined_marker_honors_xdg_and_foreign_statusline

@@ -170,25 +170,6 @@ adopt_session() {
     echo -e "${DIM}Resume with: cs $session_name${NC}"
 }
 
-# Remove a hook registration from any event in a settings JSON string,
-# matching either path spelling; drops wrappers that empty out. Prints the
-# updated JSON.
-# KEEP THE jq FILTER IN SYNC WITH install.sh's _strip_hook_registration —
-# tests/test_install.sh diffs the two filter bodies.
-_strip_hook_registration() {
-    local settings="$1" p="$2" t="$3"
-    echo "$settings" | jq --arg p "$p" --arg t "$t" '
-        if .hooks then
-            .hooks |= with_entries(
-                .value |= (
-                    map(.hooks |= map(select(.command != $p and .command != $t)))
-                    | map(select(.hooks | length > 0))
-                )
-            )
-        else . end
-    '
-}
-
 # Uninstall cs and all components
 run_uninstall() {
     local install_dir="$HOME/.local/bin"

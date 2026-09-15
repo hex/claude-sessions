@@ -84,12 +84,13 @@ Update the VERSION line in `lib/00-header.sh`, then run `./build.sh` to regenera
 
 ### 2. Verify Install/Uninstall Parity
 
-Check that `install.sh` and `run_uninstall()` in `bin/cs` are in sync. Both derive from shared manifest arrays (`CS_HOOKS`, `RETIRED_HOOKS`, `CS_COMMANDS`, `CS_SKILLS`, duplicated between the two files behind KEEP IN SYNC comments), and the sync is machine-checked:
+Check that `install.sh` and `run_uninstall()` in `bin/cs` are in sync. Both read the manifest arrays (`CS_HOOKS`, `CS_HOOK_LIBS`, `RETIRED_HOOKS`, `CS_COMMANDS`, `CS_SKILLS`, `RETIRED_SKILLS`, `CS_SKILL_FILES`, `CS_MOD_FILES`) and the settings-strip filter from one file, `lib/01-manifests.sh`: `./build.sh` folds it into `bin/cs` and splices it into `install.sh` from `install.sh.in`. Edit the lib file or the template, never `install.sh`. The sync is machine-checked:
 
 ```bash
-# The manifest sync tests are the authoritative parity check: they compare
-# the arrays between install.sh and bin/cs AND against the actual repo
-# contents of hooks/, commands/, skills/, plus the settings-strip jq filter.
+# The manifest tests are the authoritative parity check: they rebuild
+# install.sh and hooks/cs-shared.sh from source and diff them against the
+# committed files, and compare the arrays against the actual repo contents
+# of hooks/, commands/, skills/ and mods/.
 bash tests/test_install.sh
 ```
 
@@ -97,7 +98,7 @@ bash tests/test_install.sh
 - Every binary installed (`cs`, `cs-secrets`, `cs-statusline`, `cs-tui`) is removed by `run_uninstall()`
 - Every settings.json hook event configured by `install.sh` is cleaned up by `run_uninstall()`
 
-**Fix any drift immediately** — update install.sh, the `run_uninstall()` source in `lib/85-adopt-uninstall.sh` (then re-run `./build.sh` to regenerate bin/cs), and docs/hooks.md before proceeding. Never hand-edit bin/cs; it is assembled from lib/.
+**Fix any drift immediately** — update `install.sh.in`, `lib/01-manifests.sh` or the `run_uninstall()` source in `lib/85-adopt-uninstall.sh` (then re-run `./build.sh` to regenerate bin/cs and install.sh), and docs/hooks.md before proceeding. Never hand-edit bin/cs or install.sh; both come out of `./build.sh`.
 
 ### 3. Review Documentation
 

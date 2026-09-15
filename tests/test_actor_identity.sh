@@ -54,6 +54,22 @@ test_actor_slug_local_file_over_git() {
     assert_output_contains "$out" "carol-team-io" "local/identity file should override git identity" || return 1
 }
 
+# A pin written without a trailing newline (printf, an editor that strips it)
+# still resolves: `read` returns 1 on such a file after filling the variable,
+# and the hooks and cs must both read the value rather than stop there.
+test_actor_slug_from_a_pin_without_a_trailing_newline() {
+    local project_dir="$TEST_TMPDIR/proj"
+    mkdir -p "$project_dir"
+    ( cd "$project_dir" && git init -q && git config user.email "alex@example.com" )
+    ( cd "$project_dir" && "$CS_BIN" -adopt s1 >/dev/null 2>&1 )
+    mkdir -p "$project_dir/.cs/local"
+    printf 'carol@team.io' > "$project_dir/.cs/local/identity"
+
+    local out
+    out=$(_whoami_in "$project_dir")
+    assert_output_contains "$out" "actor: carol-team-io" "a pin with no trailing newline resolves" || return 1
+}
+
 test_whoami_warns_on_identity_mismatch() {
     local project_dir="$TEST_TMPDIR/proj"
     mkdir -p "$project_dir"
@@ -180,6 +196,7 @@ echo ""
 run_test test_actor_slug_from_git_email
 run_test test_actor_slug_env_override_wins
 run_test test_actor_slug_local_file_over_git
+run_test test_actor_slug_from_a_pin_without_a_trailing_newline
 run_test test_whoami_warns_on_identity_mismatch
 run_test test_local_dir_created_on_adopt
 run_test test_guard_blocks_tracked_local
