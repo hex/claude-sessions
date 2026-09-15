@@ -320,6 +320,25 @@ test_launch_brief_with_tasks_kicks_to_both() {
 # A brief the launch cannot move into the session must stop the launch with
 # the seed and brief still staged, so the next open retries; consuming the
 # seed would start the session without the brief, and leave the brief to
+# A writable directory at the brief's destination is worse than a sealed one:
+# mv would put the brief INSIDE it, the launch would count the delivery a
+# success, and Claude would be told to read a directory.
+test_launch_refuses_a_directory_at_the_briefs_destination() {
+    _launch_worker >/dev/null || return 1
+    mkdir -p "$CS_SESSIONS_ROOT/worker/.cs/brief.md"
+    mkdir -p "$CS_SESSIONS_ROOT/.spawn"
+    printf 'boss\nfirst job\n' > "$CS_SESSIONS_ROOT/.spawn/worker.seed"
+    printf 'brief body\n' > "$CS_SESSIONS_ROOT/.spawn/worker.brief.md"
+    local rc=0 out
+    out=$(_launch_worker) || rc=$?
+    [ "$rc" != 0 ] || { echo "  launch succeeded with a directory in the brief's place"; return 1; }
+    [ ! -e "$CS_SESSIONS_ROOT/worker/.cs/brief.md/worker.brief.md" ] || { echo "  the brief was moved inside the directory"; return 1; }
+    assert_file_exists "$CS_SESSIONS_ROOT/.spawn/worker.seed" "seed kept for a retry" || return 1
+    assert_file_exists "$CS_SESSIONS_ROOT/.spawn/worker.brief.md" "brief kept for a retry" || return 1
+    assert_eq "0" "$(WQ_COUNT)" "no task queued without the brief" || return 1
+    assert_output_contains "$out" "brief" "the failure names the brief" || return 1
+}
+
 # attach to some later, unrelated spawn of the same name.
 test_launch_failed_brief_delivery_keeps_the_seed_and_brief() {
     # First open creates the session; then the brief's destination is made
@@ -426,6 +445,7 @@ run_test test_launch_empty_spawner_gets_no_reply_wiring
 run_test test_launch_without_seed_keeps_color_behavior
 run_test test_launch_moves_brief_into_the_session_and_kicks_to_it
 run_test test_launch_brief_with_tasks_kicks_to_both
+run_test test_launch_refuses_a_directory_at_the_briefs_destination
 run_test test_launch_failed_brief_delivery_keeps_the_seed_and_brief
 run_test test_launch_stale_seed_sets_its_brief_aside_too
 run_test test_launch_sets_aside_stale_seed

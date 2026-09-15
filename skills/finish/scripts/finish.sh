@@ -49,6 +49,41 @@ gh_timed() {
     perl -e '$p=fork; exec @ARGV or exit 127 unless $p; $SIG{ALRM}=sub{kill TERM,$p}; alarm 10; waitpid $p,0; exit(($?&127)?128+($?&127):$?>>8)' -- gh "$@"
 }
 
+# One word for the checks of the commit the PR landed as, so the skill can
+# decide whether that commit is vouched for. The PR's own rollup describes its
+# head, and a merge commit with newer base changes is a tree the head's checks
+# never ran on, so the fold reads the landing commit's check runs and commit
+# statuses: a check run carries a conclusion (null while it runs), a status a
+# state; nothing at all is "none", never "success"; a gh failure is "unknown"
+# with the reason, never a guess.
+landing_checks() {  # repo sha
+    local err runs statuses status=0
+    err=$(mktemp "${TMPDIR:-/tmp}/finish-gh.XXXXXX")
+    # Both lists page at 30; a red context on page two must not hide behind
+    # thirty green ones on page one.
+    runs=$(gh_timed api --paginate "repos/$1/commits/$2/check-runs" --jq '.check_runs[] | .conclusion // "PENDING"' 2>"$err") || status=$?
+    if [ "$status" = 0 ]; then
+        statuses=$(gh_timed api --paginate "repos/$1/commits/$2/status" --jq '.statuses[] | .state' 2>"$err") || status=$?
+    fi
+    if [ "$status" != 0 ]; then
+        echo "pr_checks: unknown"
+        # A killed child says nothing on stderr; the ceiling is the diagnosis.
+        if [ "$status" = 143 ] || [ "$status" = 142 ]; then
+            echo "pr_checks_reason: gh timed out after 10 s reading the checks of $2"
+        else
+            echo "pr_checks_reason: gh api failed reading the checks of $2: $(head -c 200 "$err" | tr '\n' ' ')"
+        fi
+        rm -f "$err"; return 0
+    fi
+    rm -f "$err"
+    printf 'pr_checks: %s\n' "$(printf '%s\n%s\n' "$runs" "$statuses" | jq -R -s '
+        [split("\n")[] | select(. != "") | ascii_upcase] as $v
+        | if ($v | length) == 0 then "none"
+          elif ($v | any(. == "FAILURE" or . == "ERROR" or . == "CANCELLED" or . == "TIMED_OUT" or . == "ACTION_REQUIRED" or . == "STALE" or . == "STARTUP_FAILURE")) then "failure"
+          elif ($v | all(. == "SUCCESS" or . == "SKIPPED" or . == "NEUTRAL")) then "success"
+          else "pending" end' -r)"
+}
+
 # PR state for a head branch, as pr_* lines. Three shapes only: none, a state
 # with its fields, or unknown with a reason. A gh failure is never "none".
 pr_lookup() {  # base_dir branch
@@ -68,7 +103,7 @@ pr_lookup() {  # base_dir branch
     err=$(mktemp "${TMPDIR:-/tmp}/finish-gh.XXXXXX")
     local gh_status=0
     json=$(gh_timed pr list --repo "$repo" --head "$2" --state all --limit 100 \
-            --json number,state,url,mergeCommit,mergedAt,baseRefName,headRefOid,headRepositoryOwner,isCrossRepository,statusCheckRollup 2>"$err") \
+            --json number,state,url,mergeCommit,mergedAt,baseRefName,headRefOid,headRepositoryOwner,isCrossRepository 2>"$err") \
         || gh_status=$?
     if [ "$gh_status" != 0 ]; then
         echo "pr_state: unknown"
@@ -144,15 +179,7 @@ pr_lookup() {  # base_dir branch
         fi
         echo "pr_state: MERGED"
         printf '%s' "$merged" | jq -r '"pr_number: \(.number)\npr_url: \(.url)\npr_merge_commit: \(.mergeCommit.oid // "")\npr_base_ref: \(.baseRefName)\npr_head_oid: \(.headRefOid)"'
-        # One word for the PR's checks, so the skill can decide whether the
-        # landing commit is vouched for: a CheckRun carries a conclusion, a
-        # StatusContext a state; nothing at all is "none", never "success".
-        printf 'pr_checks: %s\n' "$(printf '%s' "$merged" | jq -r '
-            [.statusCheckRollup // [] | .[] | (.conclusion // .state // "PENDING") | ascii_upcase] as $v
-            | if ($v | length) == 0 then "none"
-              elif ($v | any(. == "FAILURE" or . == "ERROR" or . == "CANCELLED" or . == "TIMED_OUT" or . == "ACTION_REQUIRED" or . == "STALE")) then "failure"
-              elif ($v | all(. == "SUCCESS" or . == "SKIPPED" or . == "NEUTRAL")) then "success"
-              else "pending" end')"
+        landing_checks "$repo" "$(printf '%s' "$merged" | jq -r '.mergeCommit.oid')"
         return 0
     fi
     open=$(printf '%s' "$json" | jq -c '[.[] | select(.state == "OPEN")] | first // empty')

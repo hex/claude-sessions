@@ -111,26 +111,76 @@ test_prepare_calls_a_reused_branch_unknown() {
     assert_output_contains "$out" "#7 MERGED, #9 OPEN" "both are named" || return 1
 }
 
-# pr_checks folds the PR's status-check rollup into one word the skill can
-# act on: success (every check green, skipped or neutral), failure (any red),
-# pending (some still running), none (no checks at all).
-test_prepare_reports_pr_checks() {
-    local pr='{"number":7,"state":"MERGED","url":"https://github.com/example-org/example-repo/pull/7","mergeCommit":{"oid":"abc123"},"mergedAt":"2026-09-12T09:00:00Z","baseRefName":"main","headRefOid":"a1a1","headRepositoryOwner":{"login":"example-org"},"isCrossRepository":false,"statusCheckRollup":ROLLUP}'
+# A gh on PATH that answers by route: the PR list for `pr list`, and the
+# landing commit's check runs and statuses for `api .../check-runs` and
+# `api .../status`. A route file named `<route>.fail` makes that call exit 1.
+stub_gh_routes() {  # prlist-json checkruns-json status-json
+    mkdir -p "$TEST_TMPDIR/bin" "$TEST_TMPDIR/gh-routes"
+    printf '%s\n' "$1" > "$TEST_TMPDIR/gh-routes/prlist"
+    printf '%s\n' "$2" > "$TEST_TMPDIR/gh-routes/check-runs"
+    printf '%s\n' "$3" > "$TEST_TMPDIR/gh-routes/status"
+    cat > "$TEST_TMPDIR/bin/gh" << STUB
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$TEST_TMPDIR/gh.argv"
+case "\$*" in
+    *check-runs*) route=check-runs ;;
+    */status*) route=status ;;
+    *) route=prlist ;;
+esac
+# A route's .fail file holds the exit code (1 when empty; 143 plays a gh_timed kill, which says nothing on stderr).
+if [ -f "$TEST_TMPDIR/gh-routes/\$route.fail" ]; then code=\$(cat "$TEST_TMPDIR/gh-routes/\$route.fail"); [ "\$code" = 143 ] || echo "gh \$route failed" >&2; exit "\${code:-1}"; fi
+# gh applies --jq itself; the stub does the same so the script sees lines, not JSON.
+expr=""; while [ \$# -gt 0 ]; do [ "\$1" = "--jq" ] && { expr="\$2"; break; }; shift; done
+if [ -n "\$expr" ]; then jq -r "\$expr" "$TEST_TMPDIR/gh-routes/\$route"; else cat "$TEST_TMPDIR/gh-routes/\$route"; fi
+STUB
+    chmod +x "$TEST_TMPDIR/bin/gh"
+    export PATH="$TEST_TMPDIR/bin:$PATH"
+}
+
+# pr_checks folds the LANDING commit's checks into one word the skill can act
+# on: success (every check green, skipped or neutral), failure (any red),
+# pending (some still running), none (no checks at all), unknown (gh failed).
+# The PR's own rollup describes its head, which the landing commit may not be
+# (a merge with newer base changes is a tree the head's checks never saw), so
+# the fold reads the check runs and statuses of pr_merge_commit itself.
+test_prepare_reports_the_landing_commits_checks() {
+    local pr='[{"number":7,"state":"MERGED","url":"https://github.com/example-org/example-repo/pull/7","mergeCommit":{"oid":"abc123"},"mergedAt":"2026-09-12T09:00:00Z","baseRefName":"main","headRefOid":"a1a1","headRepositoryOwner":{"login":"example-org"},"isCrossRepository":false}]'
     local out
     finish_fixture myproj fix-auth > /dev/null
-    stub_gh "[${pr/ROLLUP/[{\"__typename\":\"CheckRun\",\"conclusion\":\"SUCCESS\"},{\"__typename\":\"StatusContext\",\"state\":\"SUCCESS\"},{\"__typename\":\"CheckRun\",\"conclusion\":\"SKIPPED\"}]}]"
+    stub_gh_routes "$pr" '{"check_runs":[{"conclusion":"success"},{"conclusion":"skipped"},{"conclusion":"neutral"}]}' '{"statuses":[{"state":"success"}]}'
     out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" bash "$FINISH" prepare fix-auth 2>&1)
-    assert_eq "success" "$(key "$out" pr_checks)" "all green or skipped" || return 1
-    stub_gh "[${pr/ROLLUP/[{\"__typename\":\"CheckRun\",\"conclusion\":\"SUCCESS\"},{\"__typename\":\"CheckRun\",\"conclusion\":\"FAILURE\"}]}]"
+    assert_eq "success" "$(key "$out" pr_checks)" "all green, skipped or neutral" || return 1
+    assert_file_contains "$TEST_TMPDIR/gh.argv" "api --paginate repos/example-org/example-repo/commits/abc123/check-runs" "the landing commit's check runs are read, every page" || return 1
+    assert_file_contains "$TEST_TMPDIR/gh.argv" "api --paginate repos/example-org/example-repo/commits/abc123/status" "and its statuses, every page" || return 1
+    ! grep -q 'a1a1' "$TEST_TMPDIR/gh.argv" || { echo "  the head commit was queried instead of the landing commit"; return 1; }
+    stub_gh_routes "$pr" '{"check_runs":[{"conclusion":"success"},{"conclusion":"failure"}]}' '{"statuses":[]}'
     out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" bash "$FINISH" prepare fix-auth 2>&1)
-    assert_eq "failure" "$(key "$out" pr_checks)" "one red is failure" || return 1
-    stub_gh "[${pr/ROLLUP/[{\"__typename\":\"CheckRun\",\"conclusion\":\"SUCCESS\"},{\"__typename\":\"CheckRun\",\"status\":\"IN_PROGRESS\",\"conclusion\":null}]}]"
+    assert_eq "failure" "$(key "$out" pr_checks)" "one red check run is failure" || return 1
+    stub_gh_routes "$pr" '{"check_runs":[{"conclusion":"success"}]}' '{"statuses":[{"state":"error"}]}'
     out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" bash "$FINISH" prepare fix-auth 2>&1)
-    assert_eq "pending" "$(key "$out" pr_checks)" "an unfinished check is pending" || return 1
-    stub_gh "[${pr/ROLLUP/[]}]"
+    assert_eq "failure" "$(key "$out" pr_checks)" "one errored status is failure" || return 1
+    stub_gh_routes "$pr" '{"check_runs":[{"conclusion":"startup_failure"}]}' '{"statuses":[]}'
+    out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" bash "$FINISH" prepare fix-auth 2>&1)
+    assert_eq "failure" "$(key "$out" pr_checks)" "a startup failure is a failure, not pending" || return 1
+    stub_gh_routes "$pr" '{"check_runs":[{"conclusion":"success"},{"status":"in_progress","conclusion":null}]}' '{"statuses":[]}'
+    out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" bash "$FINISH" prepare fix-auth 2>&1)
+    assert_eq "pending" "$(key "$out" pr_checks)" "an unfinished check run is pending" || return 1
+    stub_gh_routes "$pr" '{"check_runs":[]}' '{"statuses":[{"state":"pending"}]}'
+    out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" bash "$FINISH" prepare fix-auth 2>&1)
+    assert_eq "pending" "$(key "$out" pr_checks)" "a pending status is pending" || return 1
+    stub_gh_routes "$pr" '{"check_runs":[]}' '{"statuses":[]}'
     out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" bash "$FINISH" prepare fix-auth 2>&1)
     assert_eq "none" "$(key "$out" pr_checks)" "no checks at all is none, never success" || return 1
-    assert_file_contains "$TEST_TMPDIR/gh.argv" "statusCheckRollup" "the rollup is requested" || return 1
+    stub_gh_routes "$pr" '{"check_runs":[{"conclusion":"success"}]}' '{"statuses":[]}'
+    touch "$TEST_TMPDIR/gh-routes/status.fail"
+    out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" bash "$FINISH" prepare fix-auth 2>&1)
+    assert_eq "unknown" "$(key "$out" pr_checks)" "a failed gh call is unknown, never success" || return 1
+    assert_output_contains "$out" "pr_checks_reason: gh api failed reading the checks of abc123: gh status failed" "with gh's own words" || return 1
+    assert_eq "MERGED" "$(key "$out" pr_state)" "the PR state itself still reports" || return 1
+    echo 143 > "$TEST_TMPDIR/gh-routes/check-runs.fail"
+    out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" bash "$FINISH" prepare fix-auth 2>&1)
+    assert_eq "unknown" "$(key "$out" pr_checks)" "a killed gh is unknown" || return 1
+    assert_output_contains "$out" "pr_checks_reason: gh timed out after 10 s" "and names the ceiling, since a killed child says nothing" || return 1
 }
 
 test_prepare_refuses_a_worktree_off_its_branch() {
@@ -337,7 +387,7 @@ test_prepare_calls_a_merged_pr_without_a_merge_commit_unknown() {
 }
 
 run_test test_prepare_reports_a_merged_pr
-run_test test_prepare_reports_pr_checks
+run_test test_prepare_reports_the_landing_commits_checks
 run_test test_prepare_filters_a_cross_repository_pr_from_the_same_owner_login
 run_test test_prepare_filters_a_pr_whose_head_owner_is_another_account
 run_test test_prepare_matches_the_owner_login_case_insensitively
