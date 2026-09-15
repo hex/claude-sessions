@@ -64,3 +64,57 @@ _narrative_budget() {  # value, default
     n=$((10#$1))
     if [ "$n" -gt 0 ]; then echo "$n"; else echo "$2"; fi
 }
+
+# The finished-turn notification's poster. The installer assembles cs.app, a
+# copy of terminal-notifier.app whose icon is the cs owl, because macOS shows
+# a notification with its SENDER's icon and nothing a poster passes
+# (-appIcon, -contentImage) changes that. Groups are per sender app too, so
+# the post and the removes must all go through one binary: the bundle's when
+# it is installed, else terminal-notifier from PATH, else nothing (rc 1).
+cs_notifier_app() {
+    printf '%s' "${XDG_DATA_HOME:-$HOME/.local/share}/cs/cs.app"
+}
+cs_notifier_bin() {
+    local app
+    app="$(cs_notifier_app)/Contents/MacOS/terminal-notifier"
+    if [ -x "$app" ]; then
+        printf '%s' "$app"
+        return 0
+    fi
+    command -v terminal-notifier 2>/dev/null
+}
+# Every poster present, one per line, for the removes: a notification posted
+# through PATH's notifier before the bundle was installed belongs to that
+# sender, and clearing both is what keeps no notification outliving the
+# install that changed the poster. rc 1 when there is none.
+cs_notifier_bins() {
+    local app bin found=1
+    app="$(cs_notifier_app)/Contents/MacOS/terminal-notifier"
+    if [ -x "$app" ]; then
+        printf '%s\n' "$app"
+        found=0
+    fi
+    if bin=$(command -v terminal-notifier 2>/dev/null) && [ -n "$bin" ]; then
+        printf '%s\n' "$bin"
+        found=0
+    fi
+    return $found
+}
+
+# The binary a bundle is assembled from: the terminal-notifier.app Homebrew
+# keeps beside the bin/ wrapper that PATH resolves to (that wrapper is a
+# 124-byte script, not the poster), or the resolved PATH entry itself in any
+# other layout. install.sh resolves the source app the same way; the doctor
+# hashes this to tell a bundle a brew upgrade left behind. rc 1 when there
+# is no terminal-notifier on PATH.
+cs_notifier_source_bin() {
+    local bin real app
+    bin=$(command -v terminal-notifier 2>/dev/null) || return 1
+    real=$(readlink -f "$bin" 2>/dev/null) || real="$bin"
+    app="$(dirname "$real")/../terminal-notifier.app/Contents/MacOS/terminal-notifier"
+    if [ -x "$app" ]; then
+        printf '%s' "$app"
+    else
+        printf '%s' "$real"
+    fi
+}

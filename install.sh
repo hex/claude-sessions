@@ -441,6 +441,84 @@ fi
 
 chmod +x "$HOOKS_DIR"/*.sh
 
+# Finished-turn notification, macOS only. A notification shows its SENDER's
+# icon and nothing the poster passes changes that, so the owl needs a sender
+# of its own: a copy of the terminal-notifier.app Homebrew ships, the owl
+# built into its icns from the deployed cs-logo.png, cs's bundle id and name,
+# an ad-hoc signature. The hooks post and remove through this bundle when it
+# exists (cs_notifier_bin in cs-shared.sh) and through PATH's terminal-notifier
+# otherwise, with the stock icon. The source app is found from the
+# terminal-notifier on PATH (Homebrew links bin/terminal-notifier into the
+# keg beside the app); CS_NOTIFIER_SRC_APP names it directly. Assembled in a
+# staging directory and moved into place whole, so a failed build leaves the
+# previous bundle standing. The source lookup mirrors cs_notifier_source_bin
+# in lib/02-shared.sh, which the doctor hashes against the recorded digest;
+# this file cannot source lib/ (it runs from a curl pipe).
+install_notifier_bundle() {
+    [ "$(uname -s)" = "Darwin" ] || return 0
+    local src="${CS_NOTIFIER_SRC_APP:-}" bin real
+    if [ -z "$src" ]; then
+        bin=$(command -v terminal-notifier 2>/dev/null) || bin=""
+        if [ -n "$bin" ]; then
+            real=$(readlink -f "$bin" 2>/dev/null) || real="$bin"
+            src="$(dirname "$real")/../terminal-notifier.app"
+        fi
+    fi
+    if [ ! -x "$src/Contents/MacOS/terminal-notifier" ]; then
+        info "Finished-turn notification off: brew install terminal-notifier, then re-run ./install.sh for the owl notification"
+        return 0
+    fi
+    local dest="${XDG_DATA_HOME:-$HOME/.local/share}/cs/cs.app"
+    case "$dest" in */cs.app) ;; *) warn "notifier bundle: refusing an unexpected destination: $dest"; return 0 ;; esac
+    local stage="$dest.staging.$$" iconset="$dest.$$.iconset" size
+    rm -rf "$stage" "$iconset" 2>/dev/null || true
+    if ! mkdir -p "$(dirname "$dest")" "$iconset" 2>/dev/null; then
+        warn "notifier bundle: cannot write $(dirname "$dest"); the notification keeps terminal-notifier's own icon"
+        return 0
+    fi
+    # Sizes stop at 256, the source's own size: the banner shows the icon at
+    # a few dozen pixels, and a full set to 1024 would be an upscaled 1.4 MB.
+    for size in 16 32 128 256; do
+        sips -z "$size" "$size" "$HOOKS_DIR/cs-logo.png" --out "$iconset/icon_${size}x${size}.png" >/dev/null 2>&1 || { warn "notifier bundle: sips could not build the icon set"; rm -rf "$iconset"; return 0; }
+    done
+    cp "$iconset/icon_32x32.png" "$iconset/icon_16x16@2x.png"
+    cp "$iconset/icon_256x256.png" "$iconset/icon_128x128@2x.png"
+    sips -z 64 64 "$HOOKS_DIR/cs-logo.png" --out "$iconset/icon_32x32@2x.png" >/dev/null 2>&1 || true
+    if ! cp -R "$src" "$stage" \
+        || ! iconutil -c icns "$iconset" -o "$stage/Contents/Resources/Terminal.icns" 2>/dev/null \
+        || ! /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.hex.cs.notifier' -c 'Set :CFBundleName cs' "$stage/Contents/Info.plist" >/dev/null 2>&1; then
+        warn "notifier bundle: could not assemble $dest; the notification keeps terminal-notifier's own icon"
+        rm -rf "$stage" "$iconset"
+        return 0
+    fi
+    rm -rf "$iconset"
+    # Signing rewrites the binary, so the doctor cannot compare bytes to tell
+    # a bundle from a brew upgrade apart; it compares the source's digest,
+    # recorded here inside the sealed resources.
+    shasum -a 256 "$src/Contents/MacOS/terminal-notifier" 2>/dev/null | cut -d' ' -f1 > "$stage/Contents/Resources/cs-source.sha256" || true
+    /usr/libexec/PlistBuddy -c 'Delete :CFBundleDisplayName' "$stage/Contents/Info.plist" >/dev/null 2>&1 || true
+    /usr/libexec/PlistBuddy -c 'Add :CFBundleDisplayName string cs' "$stage/Contents/Info.plist" >/dev/null 2>&1 || true
+    if ! codesign --force --deep -s - "$stage" >/dev/null 2>&1; then
+        warn "notifier bundle: codesign failed (Xcode command line tools?); the notification keeps terminal-notifier's own icon"
+        rm -rf "$stage"
+        return 0
+    fi
+    # Smoke the staged copy before touching the previous bundle: an
+    # executable that cannot run here (Gatekeeper, a foreign architecture)
+    # passes the -x test the hooks make, so promoting it would lose every
+    # notification silently.
+    if ! "$stage/Contents/MacOS/terminal-notifier" -help </dev/null >/dev/null 2>&1; then
+        warn "notifier bundle: the assembled copy does not run (Gatekeeper? architecture?); keeping what is installed"
+        rm -rf "$stage"
+        return 0
+    fi
+    rm -rf "$dest"
+    mv "$stage" "$dest"
+    /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$dest" >/dev/null 2>&1 || true
+    installed "notifier bundle" "$dest"
+}
+install_notifier_bundle
+
 # Install commands
 installed "commands" "$COMMANDS_DIR/"
 mkdir -p "$COMMANDS_DIR"

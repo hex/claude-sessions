@@ -13,6 +13,9 @@ set -uo pipefail
 # before its own decline, silently. When the library is absent the fallback
 # is the env-only check this guard replaced, so the hook behaves as it used to.
 _cs_lib="$(dirname "$0")/cs-resolve.sh"
+# cs-shared.sh is build.sh's copy of lib/02-shared.sh; this hook needs its
+# notifier resolver. Same guard, same reasons.
+_cs_shared="$(dirname "$0")/cs-shared.sh"
 # shellcheck source=cs-resolve.sh
 # Parse-check before sourcing: a truncated or corrupt library is readable,
 # and sourcing it aborts the hook at the syntax error, before the fallback
@@ -26,11 +29,16 @@ _cs_lib="$(dirname "$0")/cs-resolve.sh"
 case $- in *e*) _cs_had_e=1 ;; *) _cs_had_e=0 ;; esac
 set +e
 [ -r "$_cs_lib" ] && "${BASH:-/bin/bash}" -n "$_cs_lib" 2>/dev/null && . "$_cs_lib"
+# shellcheck source=cs-shared.sh
+[ -r "$_cs_shared" ] && "${BASH:-/bin/bash}" -n "$_cs_shared" 2>/dev/null && . "$_cs_shared"
 if [ "$_cs_had_e" = 1 ]; then set -e; fi
 if ! command -v cs_resolve_session >/dev/null 2>&1; then
     cs_resolve_session() {
         [ -n "${CLAUDE_SESSION_NAME:-}" ] && [ -n "${CLAUDE_SESSION_DIR:-}" ]
     }
+fi
+if ! command -v cs_notifier_bins >/dev/null 2>&1; then
+    cs_notifier_bins() { command -v terminal-notifier 2>/dev/null; }
 fi
 # Only run inside a cs session. No input yet at this point (it is read further
 # down), so resolution relies on the env or CLAUDE_PROJECT_DIR.
@@ -115,12 +123,15 @@ fi
 # lead (claude carrying cs's pid, or claude as cs's child): a tmux teammate
 # takes prompts from the lead while the user is still away, and each would
 # clear the notification the user has not seen. Mirrors the guard in
-# narrative-reminder.sh (hooks are standalone). Stdin is closed on the call:
-# terminal-notifier reads piped stdin as message data, and this runs before
-# the prompt below is read from it.
+# narrative-reminder.sh (hooks are standalone). The remove goes to every
+# poster present (cs_notifier_bins: the cs.app bundle and terminal-notifier
+# on PATH), since a group belongs to its sender and the Stop hook may have
+# posted through either before an install changed which one it uses. Stdin
+# is closed on the call: terminal-notifier reads piped stdin as message
+# data, and this runs before the prompt below is read from it.
 if [ -z "${CS_NO_NOTIFY:-}" ] && [ -n "${CLAUDE_SESSION_NAME:-}" ] \
     && [ -n "${CS_LEAD_PID:-}" ] && [ -n "${CLAUDE_PID:-}" ] \
-    && command -v terminal-notifier >/dev/null 2>&1; then
+    && _notifiers=$(cs_notifier_bins) && [ -n "$_notifiers" ]; then
     _is_lead=0
     if [ "$CLAUDE_PID" = "$CS_LEAD_PID" ]; then
         _is_lead=1
@@ -128,7 +139,11 @@ if [ -z "${CS_NO_NOTIFY:-}" ] && [ -n "${CLAUDE_SESSION_NAME:-}" ] \
         _parent=$(ps -o ppid= -p "$CLAUDE_PID" 2>/dev/null | tr -d '[:space:]' || true)
         [ -n "$_parent" ] && [ "$_parent" = "$CS_LEAD_PID" ] && _is_lead=1
     fi
-    [ "$_is_lead" = 1 ] && terminal-notifier -remove "cs:$CLAUDE_SESSION_NAME" </dev/null >/dev/null 2>&1 || true
+    if [ "$_is_lead" = 1 ]; then
+        while IFS= read -r _notifier; do
+            [ -n "$_notifier" ] && "$_notifier" -remove "cs:$CLAUDE_SESSION_NAME" </dev/null >/dev/null 2>&1 || true
+        done <<< "$_notifiers"
+    fi
 fi
 
 # Read the prompt purely as DATA: jq decodes it, and it is only ever fed to other
