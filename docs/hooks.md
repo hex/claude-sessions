@@ -276,30 +276,31 @@ Enter. Below the band the mod draws nothing, and it draws nothing while a turn
 runs or while a survey holds the band. It never submits a prompt and never runs
 a command itself.
 
-The button is for the lead conversation of a cs session only:
-past crit the mod also checks that the cwd has `.cs/local`, that
-`.cs/local/disabled` is absent, and that its own conversation id is the
-`claude_session_id` in `.cs/local/state`. A teammate claude in the same
-directory, or a plain Claude conversation, gets no button, because the handoff
-the skill writes carries that id and arms the marker cs launched the lead
-with. The plugin's own id follows `/clear` (measured: after a `/clear` the band
-returned only once `.cs/local/state` named the new transcript), and cs's
-SessionStart hook rebinds `state` on every fresh conversation, so the lead
-keeps its button across rotations. Past crit a render costs one `cwd`, two
-`exists`, one `read` and one `id` call; the band renders a handful of times per
-turn, not per keystroke.
+The button is for the lead conversation of a cs session only: past crit the mod
+also checks that the cwd has `.cs/local`, that `.cs/local/disabled` is absent,
+and that its own conversation id is the `claude_session_id` in
+`.cs/local/state`. A teammate claude in the same directory, or a plain Claude
+conversation, gets no button, because the handoff the skill writes carries that
+id and arms the marker cs launched the lead with. The plugin's own id follows
+`/clear` (measured: after a `/clear` the band returned only once
+`.cs/local/state` named the new transcript), and cs's SessionStart hook rebinds
+`state` on every fresh conversation, so the lead keeps its button across
+rotations. Past crit a render costs one `cwd`, two `exists`, one `read` and one
+`id` call; the band renders a handful of times per turn, not per keystroke.
+
 
 `install.sh` deploys the mod's three files under `~/.claude/skills/cs-rotate/`
 beside the skills (the installer replaces a symlink an earlier opt-in left there
-with a real directory), and `cs -uninstall` removes the directory. Claude Code loads
-function-hooks plugins only behind `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`, an
-early-access flag, so every `cs <name>` launch exports it for that session. A
-`claude` started outside cs has the flag only if its shell carries one (a
-shell inside a cs session does), and without the flag there is no button. The
-flag is not scoped to cs's own mod: any other function-hooks plugin on the
-machine loads in cs sessions too. cs keeps a value the shell already set (0
-keeps function hooks off), and `CS_NO_FUNCTION_HOOKS=1` leaves the session
-without the flag even when the shell carried one. cs writes no settings file.
+with a real directory), and `cs -uninstall` removes the directory. Claude Code
+loads function-hooks plugins only behind `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`,
+an early-access flag, so every `cs <name>` launch exports it for that session. A
+`claude` started outside cs has the flag only if its shell carries one (a shell
+inside a cs session does), and without the flag there is no button. The flag is
+not scoped to cs's own mod: any other function-hooks plugin on the machine loads
+in cs sessions too. cs keeps a value the shell already set (0 keeps function
+hooks off), and `CS_NO_FUNCTION_HOOKS=1` leaves the session without the flag
+even when the shell carried one. cs writes no settings file.
+
 
 When Claude Code loads the plugin, at process start or on a plugin reload but
 not on `/clear`, the mod writes `.cs/local/cs-rotate.heartbeat` (one UTC
