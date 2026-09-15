@@ -173,6 +173,12 @@ export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME" GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EM
 export HOME="$(mktemp -d)/home"
 mkdir -p "$HOME"
 export CS_NO_UPDATE_CHECK=1
+# Never post a macOS notification from a test run: terminal-notifier is on
+# PATH on a developer's Mac, and the hooks run under every suite's Stop and
+# prompt fixtures. Set here, at source time, because many suites override
+# setup(); the notify suite unsets it per test. It also reads the prompt's
+# stdin as message data, which is what test_notify pins.
+export CS_NO_NOTIFY=1
 # The binaries under review come first on PATH, so a test that runs
 # `cs-secrets` exercises this tree and not whatever install.sh last put in
 # ~/.local/bin — and CI, which installs nothing, finds them at all.
@@ -192,8 +198,6 @@ setup() {
     # Never fire iTerm2 escapes (dock bounce) at the developer's terminal from
     # a test run; the iterm2 suite re-enables this per test with its own seams.
     export CS_NO_ITERM2=1
-    # Never post a macOS notification from a test run; terminal-notifier is on
-    # PATH on a developer's Mac. The notify suite re-enables this per test.
     export CS_NO_NOTIFY=1
     # Isolate from the developer's real ~/.claude/projects/ so transcript
     # discovery sees only what the test seeds. Same env var used by

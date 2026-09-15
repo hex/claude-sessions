@@ -502,7 +502,7 @@ fi
 # macOS: also take down the finished-turn notification the previous
 # conversation's last Stop may have posted. Lead only, as the post is.
 if [ -z "${CS_NO_NOTIFY:-}" ] && [ "$IS_LEAD" = 1 ] && command -v terminal-notifier >/dev/null 2>&1; then
-    terminal-notifier -remove "cs:$CLAUDE_SESSION_NAME" >/dev/null 2>&1 || true
+    terminal-notifier -remove "cs:$CLAUDE_SESSION_NAME" </dev/null >/dev/null 2>&1 || true
 fi
 
 # Re-assert this session's tab title. cs sets it once at launch and the reset

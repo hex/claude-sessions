@@ -476,7 +476,7 @@ if [ -z "${CS_NO_NOTIFY:-}" ] && command -v terminal-notifier >/dev/null 2>&1 \
     if [ -n "$_term" ] && [ -n "$_front" ] && [ "$_term" != "$_front" ]; then
         terminal-notifier -group "cs:$CLAUDE_SESSION_NAME" -title "cs: $CLAUDE_SESSION_NAME" \
             -message "finished a turn" -appIcon "$(cd "$(dirname "$0")" && pwd)/cs-logo.png" \
-            -activate "$_term" >/dev/null 2>&1 || true
+            -activate "$_term" </dev/null >/dev/null 2>&1 || true
     fi
 fi
 

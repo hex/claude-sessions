@@ -115,7 +115,9 @@ fi
 # lead (claude carrying cs's pid, or claude as cs's child): a tmux teammate
 # takes prompts from the lead while the user is still away, and each would
 # clear the notification the user has not seen. Mirrors the guard in
-# narrative-reminder.sh (hooks are standalone).
+# narrative-reminder.sh (hooks are standalone). Stdin is closed on the call:
+# terminal-notifier reads piped stdin as message data, and this runs before
+# the prompt below is read from it.
 if [ -z "${CS_NO_NOTIFY:-}" ] && [ -n "${CLAUDE_SESSION_NAME:-}" ] \
     && [ -n "${CS_LEAD_PID:-}" ] && [ -n "${CLAUDE_PID:-}" ] \
     && command -v terminal-notifier >/dev/null 2>&1; then
@@ -126,7 +128,7 @@ if [ -z "${CS_NO_NOTIFY:-}" ] && [ -n "${CLAUDE_SESSION_NAME:-}" ] \
         _parent=$(ps -o ppid= -p "$CLAUDE_PID" 2>/dev/null | tr -d '[:space:]' || true)
         [ -n "$_parent" ] && [ "$_parent" = "$CS_LEAD_PID" ] && _is_lead=1
     fi
-    [ "$_is_lead" = 1 ] && terminal-notifier -remove "cs:$CLAUDE_SESSION_NAME" >/dev/null 2>&1 || true
+    [ "$_is_lead" = 1 ] && terminal-notifier -remove "cs:$CLAUDE_SESSION_NAME" </dev/null >/dev/null 2>&1 || true
 fi
 
 # Read the prompt purely as DATA: jq decodes it, and it is only ever fed to other

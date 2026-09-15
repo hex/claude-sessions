@@ -26,7 +26,7 @@ _notify_session() {  # name
     export FAKE_FRONT_BUNDLE="com.apple.Safari"
     export FAKE_BIN="$TEST_TMPDIR/fakebin"
     mkdir -p "$FAKE_BIN"
-    printf '#!/bin/sh\necho "$@" >> "%s"\n' "$NOTIFY_LOG" > "$FAKE_BIN/terminal-notifier"
+    printf '#!/bin/sh\ncat >/dev/null\necho "$@" >> "%s"\n' "$NOTIFY_LOG" > "$FAKE_BIN/terminal-notifier"
     cat > "$FAKE_BIN/lsappinfo" <<'FAKE'
 #!/bin/sh
 case "$1" in
@@ -39,11 +39,22 @@ FAKE
     export PATH="$FAKE_BIN:$PATH"
 }
 
-_stop() { echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh" >/dev/null 2>&1 || true; }
+# The Stop hook's exit status and stderr, kept so a negative arm can tell "did
+# not post" from "died before it could": an exit 2 here blocks Claude Code.
+STOP_EC=0
+_stop() {
+    STOP_EC=0
+    echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh" >/dev/null 2>"$TEST_TMPDIR/stop.err" || STOP_EC=$?
+}
 
 _assert_no_post() {  # why
     if [ -f "$NOTIFY_LOG" ]; then
         echo "  FAIL: $1: $(cat "$NOTIFY_LOG")"
+        return 1
+    fi
+    assert_eq "0" "$STOP_EC" "the Stop hook must exit 0 on the no-post path" || return 1
+    if [ -s "$TEST_TMPDIR/stop.err" ]; then
+        echo "  FAIL: the Stop hook wrote to stderr on the no-post path: $(head -c 200 "$TEST_TMPDIR/stop.err")"
         return 1
     fi
 }
@@ -134,9 +145,8 @@ test_missing_notifier_is_silent_and_harmless() {
     unset IFS
     export PATH="$newpath"
     command -v terminal-notifier >/dev/null 2>&1 && { echo "  FAIL: fixture: terminal-notifier still on PATH"; return 1; }
-    local ec=0
-    echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh" >/dev/null 2>&1 || ec=$?
-    assert_eq "0" "$ec" "hook must not fail when terminal-notifier is absent" || return 1
+    _stop
+    _assert_no_post "posted with no terminal-notifier on PATH" || return 1
 }
 
 test_prompt_hook_removes_the_notification() {
@@ -146,6 +156,19 @@ test_prompt_hook_removes_the_notification() {
     [ -f "$NOTIFY_LOG" ] || { echo "  FAIL: terminal-notifier never ran"; return 1; }
     grep -Fxq -- "-remove cs:back" "$NOTIFY_LOG" \
         || { echo "  FAIL: a new prompt should remove the group: $(cat "$NOTIFY_LOG")"; return 1; }
+}
+
+test_prompt_hook_still_reads_the_prompt_after_the_remove() {
+    _notify_session "stdin"
+    unset CS_NO_NOTIFY
+    # The fake drains stdin as the real terminal-notifier does (piped stdin is
+    # message data): a hook that hands it the prompt's stdin swallows every
+    # prompt in production, and a fake that ignored stdin would pass it here.
+    touch "$CLAUDE_SESSION_META_DIR/local/mail/wakes" 2>/dev/null || { mkdir -p "$CLAUDE_SESSION_META_DIR/local/mail"; touch "$CLAUDE_SESSION_META_DIR/local/mail/wakes"; }
+    echo '{"prompt":"back at the keyboard"}' | bash "$HOOKS_DIR/scope-prompt.sh" >/dev/null 2>&1 || true
+    grep -Fxq -- "-remove cs:stdin" "$NOTIFY_LOG" || { echo "  FAIL: the remove never ran"; return 1; }
+    [ ! -e "$CLAUDE_SESSION_META_DIR/local/mail/wakes" ] \
+        || { echo "  FAIL: the hook lost the prompt to terminal-notifier's stdin (wake budget not reset)"; return 1; }
 }
 
 test_teammate_prompt_leaves_the_notification() {
@@ -186,6 +209,7 @@ run_test test_no_post_when_disabled
 run_test test_no_post_from_a_teammate
 run_test test_missing_notifier_is_silent_and_harmless
 run_test test_prompt_hook_removes_the_notification
+run_test test_prompt_hook_still_reads_the_prompt_after_the_remove
 run_test test_teammate_prompt_leaves_the_notification
 run_test test_session_start_removes_the_notification
 run_test test_teammate_session_start_leaves_the_notification
