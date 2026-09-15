@@ -684,7 +684,7 @@ _doctor_check_rotate_mod() {
     if [ -n "$stamp" ]; then
         _doctor_ok "cs-rotate mod: last ran $stamp in this session"
     else
-        _doctor_warn "cs-rotate mod: installed but has not run in this session — launched without cs, CS_NO_FUNCTION_HOOKS set, or Claude Code no longer loads mods behind CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1"
+        _doctor_warn "cs-rotate mod: installed but has not run in this session — no cs launch since the install, function hooks withheld (CS_NO_FUNCTION_HOOKS, or CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=0), or Claude Code no longer loads mods behind that flag"
     fi
 }
 

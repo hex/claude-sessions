@@ -350,7 +350,7 @@ test_local_install_prefers_a_freshly_built_picker() {
     # Everything the installer reads, borrowed; only the two picker sources are
     # ours, so the test says nothing about the rest of the tree.
     local e
-    for e in hooks commands skills completions docs lib README.md CHANGELOG.md LICENSE build.sh; do
+    for e in hooks commands skills mods completions docs lib README.md CHANGELOG.md LICENSE build.sh; do
         [ -e "$real/$e" ] && ln -s "$(cd "$real" && pwd)/$e" "$repo/$e"
     done
     cp "$real/install.sh" "$repo/install.sh"
@@ -378,7 +378,7 @@ test_local_install_uses_bin_picker_when_nothing_was_built() {
     mkdir -p "$fake_home" "$repo/bin"
     local real="$SCRIPT_DIR/.."
     local e
-    for e in hooks commands skills completions docs lib README.md CHANGELOG.md LICENSE build.sh; do
+    for e in hooks commands skills mods completions docs lib README.md CHANGELOG.md LICENSE build.sh; do
         [ -e "$real/$e" ] && ln -s "$(cd "$real" && pwd)/$e" "$repo/$e"
     done
     cp "$real/install.sh" "$repo/install.sh"
@@ -559,6 +559,16 @@ test_install_replaces_a_symlinked_mod_directory() {
     assert_eq "sentinel" "$(cat "$elsewhere/hooks/register.tsx")" "the link's target is untouched" || return 1
     cmp -s "$SCRIPT_DIR/../mods/cs-rotate/hooks/register.tsx" "$fake_home/.claude/skills/cs-rotate/hooks/register.tsx" \
         || { echo "  FAIL: the module was not deployed into the real directory"; return 1; }
+    # A real mod directory whose hooks/ is the symlink redirects the copy the
+    # same way; the installer replaces that link too.
+    local sub_home="$TEST_TMPDIR/modsub-home" sub_target="$TEST_TMPDIR/modsub-target"
+    mkdir -p "$sub_home/.claude/skills/cs-rotate" "$sub_target"
+    echo 'sentinel' > "$sub_target/register.tsx"
+    ln -s "$sub_target" "$sub_home/.claude/skills/cs-rotate/hooks"
+    HOME="$sub_home" bash "$INSTALL_SH" > /dev/null 2>&1 < /dev/null || { echo "  FAIL: install.sh exited non-zero (subdir link)"; return 1; }
+    [ ! -L "$sub_home/.claude/skills/cs-rotate/hooks" ] && [ -d "$sub_home/.claude/skills/cs-rotate/hooks" ] \
+        || { echo "  FAIL: the hooks/ symlink was not replaced by a real directory"; return 1; }
+    assert_eq "sentinel" "$(cat "$sub_target/register.tsx")" "the subdirectory link's target is untouched" || return 1
 }
 
 test_skill_files_exist_in_repo() {

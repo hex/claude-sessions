@@ -6258,7 +6258,7 @@ _doctor_check_rotate_mod() {
     if [ -n "$stamp" ]; then
         _doctor_ok "cs-rotate mod: last ran $stamp in this session"
     else
-        _doctor_warn "cs-rotate mod: installed but has not run in this session — launched without cs, CS_NO_FUNCTION_HOOKS set, or Claude Code no longer loads mods behind CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1"
+        _doctor_warn "cs-rotate mod: installed but has not run in this session — no cs launch since the install, function hooks withheld (CS_NO_FUNCTION_HOOKS, or CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=0), or Claude Code no longer loads mods behind that flag"
     fi
 }
 
@@ -7384,9 +7384,12 @@ launch_claude_code() {
     fi
     # Claude Code loads function-hooks plugins only behind this early-access
     # flag, and the rotate mod the installer deploys is one. A cs launch turns
-    # them on for the session; CS_NO_FUNCTION_HOOKS=1 withholds the flag, and
-    # a value the shell already set (0 to keep them off) is kept, not forced.
-    if [ -z "${CS_NO_FUNCTION_HOOKS:-}" ]; then
+    # them on for the session, keeping a value the shell already set (0 keeps
+    # them off). CS_NO_FUNCTION_HOOKS=1 leaves the session without the flag
+    # even when the shell carried one, as a nested launch inherits it.
+    if [ -n "${CS_NO_FUNCTION_HOOKS:-}" ]; then
+        unset CLAUDE_CODE_ENABLE_FUNCTION_HOOKS
+    else
         export CLAUDE_CODE_ENABLE_FUNCTION_HOOKS="${CLAUDE_CODE_ENABLE_FUNCTION_HOOKS:-1}"
     fi
     if [ -n "$cs_base" ]; then
@@ -8146,6 +8149,8 @@ run_uninstall() {
     done
 
     # Remove mods: each deploys under its own directory beside the skills.
+    # Ownership is by name, as for the skills above: cs deploys these names
+    # and removes them whole, extra files included. Do not re-fix.
     local mod_file mod
     for mod_file in "${CS_MOD_FILES[@]}"; do
         mod="${mod_file%%/*}"

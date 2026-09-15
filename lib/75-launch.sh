@@ -205,9 +205,12 @@ launch_claude_code() {
     fi
     # Claude Code loads function-hooks plugins only behind this early-access
     # flag, and the rotate mod the installer deploys is one. A cs launch turns
-    # them on for the session; CS_NO_FUNCTION_HOOKS=1 withholds the flag, and
-    # a value the shell already set (0 to keep them off) is kept, not forced.
-    if [ -z "${CS_NO_FUNCTION_HOOKS:-}" ]; then
+    # them on for the session, keeping a value the shell already set (0 keeps
+    # them off). CS_NO_FUNCTION_HOOKS=1 leaves the session without the flag
+    # even when the shell carried one, as a nested launch inherits it.
+    if [ -n "${CS_NO_FUNCTION_HOOKS:-}" ]; then
+        unset CLAUDE_CODE_ENABLE_FUNCTION_HOOKS
+    else
         export CLAUDE_CODE_ENABLE_FUNCTION_HOOKS="${CLAUDE_CODE_ENABLE_FUNCTION_HOOKS:-1}"
     fi
     if [ -n "$cs_base" ]; then

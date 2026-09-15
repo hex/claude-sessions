@@ -263,7 +263,7 @@ Known multi-machine limitation: if a session is cloned to a second machine while
 
 A run that overruns the hook's timeout leaves a trail that stops mid-run, which names the stage it hung on — the only evidence such a run ever produces, since it never reaches an exit where it could write a summary. A trail ending anywhere but `exit` or `emit` marks a killed run. The trace reads the clock through shell builtins only (`$EPOCHREALTIME`, or `$SECONDS` on bash 3.2), so it adds no forks to a hook already under suspicion for running slow. The file is machine-local — which machine was slow is half the finding — and one run in 64 trims it to its last 2000 lines. Opt-out per-session: `export CS_SCOPE_TRACE_DISABLE=1`.
 
-## cs-rotate (not a hook script — an opt-in Claude Code mod)
+## cs-rotate (not a hook script — a Claude Code mod)
 
 `mods/cs-rotate/` is a Claude Code function-hooks plugin: TypeScript that runs
 inside Claude Code's own process rather than a shell script it spawns. It adds
@@ -293,19 +293,22 @@ turn, not per keystroke.
 beside the skills (the installer replaces a symlink an earlier opt-in left there
 with a real directory), and `cs -uninstall` removes the directory. Claude Code loads
 function-hooks plugins only behind `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`, an
-early-access flag, so every `cs <name>` launch exports it for that session; a
-bare `claude` gets no flag and no button. The flag is not scoped to cs's own
-mod: any other function-hooks plugin on the machine loads in cs sessions too.
-`CS_NO_FUNCTION_HOOKS=1` withholds the flag, and cs keeps a value the shell
-already set (0 to keep them off). cs writes no settings file.
+early-access flag, so every `cs <name>` launch exports it for that session. A
+`claude` started outside cs has the flag only if its shell carries one (a
+shell inside a cs session does), and without the flag there is no button. The
+flag is not scoped to cs's own mod: any other function-hooks plugin on the
+machine loads in cs sessions too. cs keeps a value the shell already set (0
+keeps function hooks off), and `CS_NO_FUNCTION_HOOKS=1` leaves the session
+without the flag even when the shell carried one. cs writes no settings file.
 
 When Claude Code loads the plugin, at process start or on a plugin reload but
 not on `/clear`, the mod writes `.cs/local/cs-rotate.heartbeat` (one UTC
 timestamp) when the cwd has `.cs/local`, and `cs -doctor` reports the mod by
 that file inside a session: `last ran <stamp> in this session` as OK, or a WARN
-when the directory is there and no heartbeat is, naming the three ways that
-happens (a conversation launched without cs, `CS_NO_FUNCTION_HOOKS` set, or a
-Claude Code that no longer loads mods behind the flag). Doctor reads the
+when the directory is there and no heartbeat is, naming the ways that happens
+(no cs launch since the install, function hooks withheld by
+`CS_NO_FUNCTION_HOOKS` or a preset `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=0`, or
+a Claude Code that no longer loads mods behind the flag). Doctor reads the
 heartbeat rather than the directory because a machine's policy can load a mod
 and never run it. Doctor says nothing when the mod is not installed, or outside
 a session. The deploy-drift check compares the deployed files against `mods/`
@@ -320,7 +323,8 @@ none.
 Tests: `tests/test_mod_rotate.sh` runs the bun unit tests under
 `mods/cs-rotate/test/` (a fake engine drives the band, the press and the
 heartbeat) and `claude plugin validate` when each binary is on PATH, and
-always checks the manifest, the threshold pin and the install exclusion.
+always checks the manifest, the threshold pin, and that the installer and
+the launch name the mod and the flag.
 
 ## Hook Configuration
 

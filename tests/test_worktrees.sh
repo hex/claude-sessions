@@ -300,15 +300,24 @@ test_launch_enables_function_hooks_unless_opted_out() {
     local stub env_out
     stub=$(_make_env_stub)
     for _try in 1 2 3 4 5; do
-        env_out=$(env -u CLAUDE_CODE_ENABLE_FUNCTION_HOOKS CLAUDE_CODE_BIN="$stub" "$CS_BIN" "fnhooks" <<< "n" 2>/dev/null || true)
+        env_out=$(env -u CLAUDE_CODE_ENABLE_FUNCTION_HOOKS -u CS_NO_FUNCTION_HOOKS CLAUDE_CODE_BIN="$stub" "$CS_BIN" "fnhooks" <<< "n" 2>/dev/null || true)
         case "$env_out" in *"CLAUDE_SESSION_NAME=fnhooks"*) break ;; esac
     done
     assert_output_contains "$env_out" "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1" "a cs launch turns function hooks on" || return 1
+    # The negative arms first prove the launch happened: an empty capture would
+    # satisfy "not contains" without testing anything.
     for _try in 1 2 3 4 5; do
         env_out=$(env -u CLAUDE_CODE_ENABLE_FUNCTION_HOOKS CS_NO_FUNCTION_HOOKS=1 CLAUDE_CODE_BIN="$stub" "$CS_BIN" "fnhooks-off" <<< "n" 2>/dev/null || true)
         case "$env_out" in *"CLAUDE_SESSION_NAME=fnhooks-off"*) break ;; esac
     done
+    assert_output_contains "$env_out" "CLAUDE_SESSION_NAME=fnhooks-off" "the opt-out launch reached claude" || return 1
     assert_output_not_contains "$env_out" "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=" "CS_NO_FUNCTION_HOOKS withholds the flag" || return 1
+    for _try in 1 2 3 4 5; do
+        env_out=$(CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 CS_NO_FUNCTION_HOOKS=1 CLAUDE_CODE_BIN="$stub" "$CS_BIN" "fnhooks-inherited" <<< "n" 2>/dev/null || true)
+        case "$env_out" in *"CLAUDE_SESSION_NAME=fnhooks-inherited"*) break ;; esac
+    done
+    assert_output_contains "$env_out" "CLAUDE_SESSION_NAME=fnhooks-inherited" "the inherited-flag launch reached claude" || return 1
+    assert_output_not_contains "$env_out" "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=" "CS_NO_FUNCTION_HOOKS also drops a flag the shell inherited" || return 1
     for _try in 1 2 3 4 5; do
         env_out=$(CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=0 CLAUDE_CODE_BIN="$stub" "$CS_BIN" "fnhooks-kept" <<< "n" 2>/dev/null || true)
         case "$env_out" in *"CLAUDE_SESSION_NAME=fnhooks-kept"*) break ;; esac

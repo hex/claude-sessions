@@ -320,6 +320,8 @@ run_uninstall() {
     done
 
     # Remove mods: each deploys under its own directory beside the skills.
+    # Ownership is by name, as for the skills above: cs deploys these names
+    # and removes them whole, extra files included. Do not re-fix.
     local mod_file mod
     for mod_file in "${CS_MOD_FILES[@]}"; do
         mod="${mod_file%%/*}"

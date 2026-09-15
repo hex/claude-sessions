@@ -460,14 +460,19 @@ for skill in "${CS_SKILLS[@]}"; do
     mkdir -p "$SKILLS_DIR/$skill"
 done
 
-# A mod directory that is a symlink (an earlier opt-in had the person link it
-# at the checkout) is replaced by a real directory: copying through the link
-# would write into its target instead of deploying.
-_mod_dir_real() {
-    if [ -L "$SKILLS_DIR/$1" ]; then
-        rm "$SKILLS_DIR/$1"
-        info "  Replaced symlink $SKILLS_DIR/$1 with a deployed copy"
-    fi
+# A symlink anywhere on a mod file's deploy path (an earlier opt-in had the
+# person link the whole directory at the checkout) is replaced by a real
+# directory or file: copying through the link would write into its target
+# instead of deploying. Checks the mod directory, the file's directory and
+# the file itself.
+_mod_path_real() {
+    local rel="$1" p
+    for p in "${rel%%/*}" "$(dirname "$rel")" "$rel"; do
+        if [ -L "$SKILLS_DIR/$p" ]; then
+            rm "$SKILLS_DIR/$p"
+            info "  Replaced symlink $SKILLS_DIR/$p with a deployed copy"
+        fi
+    done
 }
 
 if [ "$INSTALL_METHOD" = "local" ]; then
@@ -479,7 +484,7 @@ if [ "$INSTALL_METHOD" = "local" ]; then
         cp -p "$SKILLS_SOURCE/$skill_file" "$SKILLS_DIR/$skill_file"
     done
     for mod_file in "${CS_MOD_FILES[@]}"; do
-        _mod_dir_real "${mod_file%%/*}"
+        _mod_path_real "$mod_file"
         mkdir -p "$SKILLS_DIR/$(dirname "$mod_file")"
         cp -p "$MODS_SOURCE/$mod_file" "$SKILLS_DIR/$mod_file"
     done
@@ -494,7 +499,7 @@ else
             chmod +x "$SKILLS_DIR/$skill_file"
         done
         for mod_file in "${CS_MOD_FILES[@]}"; do
-            _mod_dir_real "${mod_file%%/*}"
+            _mod_path_real "$mod_file"
             mkdir -p "$SKILLS_DIR/$(dirname "$mod_file")"
             curl -fsSL "$REPO_URL/mods/$mod_file" -o "$SKILLS_DIR/$mod_file" || error "Failed to download $mod_file"
         done
@@ -508,7 +513,7 @@ else
             chmod +x "$SKILLS_DIR/$skill_file"
         done
         for mod_file in "${CS_MOD_FILES[@]}"; do
-            _mod_dir_real "${mod_file%%/*}"
+            _mod_path_real "$mod_file"
             mkdir -p "$SKILLS_DIR/$(dirname "$mod_file")"
             wget -q "$REPO_URL/mods/$mod_file" -O "$SKILLS_DIR/$mod_file" || error "Failed to download $mod_file"
         done
