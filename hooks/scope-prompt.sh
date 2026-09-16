@@ -105,7 +105,9 @@ _trace() {  # stage
 }
 
 # The hook's own clock, kept apart from the trace's (which a session can opt
-# out of): the deadline below reads it.
+# out of): the deadline below reads it. It starts here, after the library
+# parse checks and the session resolve above, so what those forks cost under
+# load is not counted; the registered timeout counts it, and is the backstop.
 _now_ms
 _T0=$_MS
 # Set where the deadline trips; the digest exit carries it in the block's place.
