@@ -94,7 +94,7 @@ export function register(on: On) {
     // (`auto mode on`) owns the engine's line, which in a cs session it
     // always does; a tree is drawn beneath that notice, which stays.
     const { Text } = await $.ui.resolve(e)
-    return <Text dimColor>{hint}</Text>
+    return <Text dimColor wrap="truncate">{hint}</Text>
   })
 }
 

@@ -75,7 +75,8 @@ const line = async (props: Partial<{ isDraft: boolean; isWorking: boolean }> = {
     return ENGINE_HINT
   }
   expect(out.type).toBe('Text')
-  expect(out.props).toEqual({ dimColor: true })
+  // One line, as the engine's own hint line is drawn: truncated, never wrapped.
+  expect(out.props).toEqual({ dimColor: true, wrap: 'truncate' })
   return out.children.join('') as string
 }
 
@@ -357,4 +358,15 @@ test('an errored turn does not advance the tips', async () => {
   await turn('error')
   await turn('refusal')
   expect(await line()).toBe(first)
+})
+
+test('the tips step through the list in order, one per turn, the first tip skipped, and wrap around', async () => {
+  const rest = TIPS.filter(t => t !== TIPS[0])
+  expect(await line()).toBe(TIPS[0])
+  for (const expected of rest) {
+    await turn()
+    expect(await line()).toBe(expected)
+  }
+  await turn()
+  expect(await line()).toBe(rest[0])
 })
