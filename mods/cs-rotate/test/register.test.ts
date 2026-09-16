@@ -690,3 +690,34 @@ test('resuming a conversation that was once judged adopts it afresh: the old jud
   expect(timers.map(t => t.kind)).toEqual(['after'])
   expect(toasts).toHaveLength(1)
 })
+
+test('a /clear the mod runs itself that is rejected leaves no birth behind: a later /resume past the threshold is forced', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  $.command.run = async () => { throw new Error('no session') }
+  await tick(GRACE_SECONDS)
+  $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
+  expect(toasts).toEqual(['cs-rotate: /clear did not run: Error: no session'])
+  files = { '/work/.cs/local/state': 'claude_session_id: uuid-resumed\n' }
+  sessionId = 'uuid-resumed'
+  percent = 72
+  await turnComplete()
+  expect(timers.filter(t => t.kind === 'after' && !t.cancelled)).toHaveLength(1)
+  expect(toasts).toHaveLength(1)
+})
+
+test('a typed /clear that the engine refuses leaves no birth behind either', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  percent = 30
+  await turnComplete()
+  const e = { command: 'clear', args: '', origin: { kind: 'composer' }, presentation: { layout: 'main', columns: 80 } }
+  await expect(hooks['command.run:clear']($, e, async () => { throw new Error('refused') })).rejects.toThrow('refused')
+  files = { '/work/.cs/local/state': 'claude_session_id: uuid-resumed\n' }
+  sessionId = 'uuid-resumed'
+  percent = 72
+  await turnComplete()
+  expect(timers.map(t => t.kind)).toEqual(['after'])
+  expect(toasts).toEqual([])
+})

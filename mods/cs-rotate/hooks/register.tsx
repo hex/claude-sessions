@@ -108,7 +108,12 @@ export function register(on: On) {
   on('command.run', { command: 'clear' }, async ($, e, next) => {
     clearSeen = true
     if (ticker) stopCountdown($)
-    return next(e)
+    try {
+      return await next(e)
+    } catch (err) {
+      clearSeen = false
+      throw err
+    }
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
@@ -358,5 +363,10 @@ async function rotate($: EngineInterface) {
 async function clearAndContinue($: EngineInterface) {
   clearSeen = true
   if (ticker) stopCountdown($)
-  await $.command.run({ command: 'clear', args: '' })
+  try {
+    await $.command.run({ command: 'clear', args: '' })
+  } catch (err) {
+    clearSeen = false
+    throw err
+  }
 }

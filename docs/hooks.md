@@ -403,8 +403,10 @@ Two facts about the plugin runtime shape the code. A module reads the
 environment through `$.env.get` with a literal name, which `claude plugin
 validate` lists, so the threshold and the bands are three variable reads per
 render, the theme a fourth; the defaults and the five ink triplets are literals
-in `register.tsx` that `tests/test_mod_rotate.sh` pins to the status line's. And
-a hot reload resets module state, so the mod keeps none.
+in `register.tsx` that `tests/test_mod_rotate.sh` pins to the status line's. The
+module state the forced mode keeps (the countdown, the conversation it is
+judging) is reset by a hot reload, which drops a running countdown and adopts
+the conversation it meets next unjudged.
 
 Tests: `tests/test_mod_rotate.sh` runs the bun unit tests under
 `mods/cs-rotate/test/` (a fake engine drives the band, the press and the
