@@ -1,0 +1,71 @@
+       75   decides whether a conversation may claim the session's single
+       76   `claude_session_id` slot. Teammates and walked-in front ends must decline.
+       77
+       78 ## 5. Files and Code Sections
+       79
+       80 Everything below is a pointer, deliberately. The files are committed in the
+       81 `claude-sessions` checkout and readable in full; re-summarising them here would
+       82 spend a successor's opening context on what it can read for itself.
+       83
+       84 - `tests/test_hooks.sh` — hook behaviour suite. Structure: per-hook sections,
+       85   then a flat runner of `run_test <name>` calls at the bottom, then
+       86   `report_results`. Some test functions are defined *inside* the runner region
+       87   rather than above it (e.g. the narrative-budget and advisor-nudge cases), so
+       88   the file is not cleanly split into "definitions then runner".
+       89 - `tests/test_install.sh` — install/uninstall/build suite. Uses `expect` for
+       90   the tty-gated status-line prompt cases and skips them when `expect` is
+       91   absent. Contains the manifest-sync tests that compare arrays extracted from
+       92   `install.sh` against the same arrays in `bin/cs` and against the repo tree.
+       93 - `lib/75-launch.sh` — `launch_claude_code()`, the final step of opening any
+       94   session: lock acquisition, live-duplicate guard via `ps`, env exports, spawn
+       95   seed consumption, the launch banner, and the `[Y/n]` or `[Y/n/r/d]` resume
+       96   prompt. Helpers at the top: `_handoff_is_unconsumed`, `_handoff_is_local`,
+       97   `_resume_context_pct`, `_disarm_rotation_marker`.
+       98
+       99 One detail worth having at hand because this rotation depends on it, read in
+      100 source at `lib/75-launch.sh`: the launch prompt disarms
+      101 `.cs/local/pending-handoff` on `Y`, `n` or Enter, and `d` flips the handoff's
+      102 first `status: unconsumed` line to `status: discarded`. `r` re-arms the marker
+      103 and execs a fresh rebind.
+      104
+      105 ## 6. Problem Solving
+      106
+      107 One problem, already solved: the first two Read calls failed because the paths
+      108 were relative to `grace-live2`, which has no `tests/`. Resolved by Alex
+      109 supplying absolute paths into the `claude-sessions` checkout. Nothing else went
+      110 wrong.
+      111
+      112 Both large test files came back truncated on the first Read — `test_hooks.sh`
+      113 returned lines 1-1008 of 2997, `test_install.sh` lines 1-991 of 1573 (measured,
+      114 from the tool's own truncation notices). Paging with `offset`/`limit` completed
+      115 both. A successor asked to read them "in full" should expect three calls for
+      116 `test_hooks.sh` and two for `test_install.sh`.
+      117
+      118 ## 7. Pending Tasks
+      119
+      120 No native task-list items were created in the parent conversation, and none
+      121 were inherited. The native list is keyed to the session name `grace-live2` and
+      122 survives the `/clear`; reconcile whatever it holds against this section, which
+      123 claims it holds nothing.
+      124
+      125 ## 8. Current Work
+      126
+      127 Nothing in flight. The parent conversation's last substantive act was reading
+      128 the third file. No file in any repo was modified. The `grace-live2` working
+      129 tree was clean at conversation start (one commit, `74e3bd7 Initial session
+      130 structure`) and nothing in this conversation touched it.
+      131
+      132 ## Completeness of this handoff
+      133
+      134 Written from live context, not a compaction — nothing was lost to a summary.
+      135 The body is short because the conversation was short, not because it was cut.
+      136 The one genuine gap is intent: Alex never said why he wanted those files read,
+      137 and this handoff does not know.
+
+✳ Proofing… (1m 6s · ↓ 3.5k tokens · thinking with low effort)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                Image in clipboard · ctrl+v to paste
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── grace-live2 ─
+❯ 
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  ⏵⏵ auto mode on (shift+tab to cycle)

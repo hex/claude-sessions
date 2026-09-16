@@ -1,0 +1,16 @@
+   0s │ ✳ 1: rotate this conversation  ·  █░░░░░░░░░ 7% │|
+ 179s 
+ 196s │ ✳ 1: rotate this conversation  ·  █░░░░░░░░░ 8% │|
+ 279s 
+ 374s        82 spend a successor's opening context on what it can read for itself.|       97   `_resume_context_pct`, `_disarm_rotation_marker`.|      134 Written from live context, not a compaction — nothing was lost to a summary.|
+ 387s       134 Written from live context, not a compaction — nothing was lost to a summary.|     [Describe the system, server, or context you're working in]|
+ 397s      [Describe the system, server, or context you're working in]|
+ 410s 
+ 433s │ ✳ 1: /clear and continue from the handoff  ·  /clear in 19s  ·  ██░░░░░░░░ 22% │|
+ 436s │ ✳ 1: /clear and continue from the handoff  ·  /clear in 16s  ·  ██░░░░░░░░ 22% │|
+ 440s │ ✳ 1: /clear and continue from the handoff  ·  /clear in 13s  ·  ██░░░░░░░░ 22% │|
+ 443s │ ✳ 1: /clear and continue from the handoff  ·  /clear in 9s  ·  ██░░░░░░░░ 22% │|
+ 446s │ ✳ 1: /clear and continue from the handoff  ·  /clear in 6s  ·  ██░░░░░░░░ 22% │|
+ 450s │ ✳ 1: /clear and continue from the handoff  ·  /clear in 3s  ·  ██░░░░░░░░ 22% │|
+ 453s 
+ 506s   The three files from the previous conversation are loaded as context pointers only, not in memory. They live under ~/.claude-sessions/claude-sessions/: tests/test_hooks.sh, tests/test_install.sh, lib/75-launch.sh.|│ ✳ 1: rotate this conversation  ·  █░░░░░░░░░ 8% │|

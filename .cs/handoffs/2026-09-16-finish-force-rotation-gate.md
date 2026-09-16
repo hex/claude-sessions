@@ -2,7 +2,8 @@
 parent: 1654089a-200d-4ea6-a7c5-c6891366149a
 created: 2026-09-16T07:40:00Z
 purpose: finish the #628 gate (live run 2, Codex round 3, ghost re-run), take the merge decision to Alex, then the held release #622
-status: unconsumed
+status: consumed
+consumed_by: e85ddb49-003a-4a7c-993a-f8b8c6da2179
 ---
 
 ## 1. Next Step

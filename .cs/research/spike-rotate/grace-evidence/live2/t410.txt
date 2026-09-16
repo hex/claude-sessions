@@ -1,0 +1,71 @@
+
+⏺ Update(/Users/alex.geana/.claude-sessions/grace-live2/.cs/README.md)
+  ⎿  Added 2 lines, removed 1 line
+      11
+      12  ## Objective
+      13
+      14 -reply with the single word ok
+      14 +Read-only orientation over the cs repo's hook and install test suites and its
+      15 +launch library. No task stated beyond the reads.
+      16
+      17  ## Environment
+      18
+  ⎿  PostToolUse:Edit hook returned blocking error
+  ⎿  [~/.claude/hooks/vale-lint.sh]: Vale found prose issues:
+     /Users/alex.geana/.claude-sessions/grace-live2/.cs/README.md:12:4:write-good.TooWordy:'Objective' is too wordy.
+     /Users/alex.geana/.claude-sessions/grace-live2/.cs/README.md:23:5:write-good.Passive:'be filled' may be passive voice. Use active voice if you can.
+     /Users/alex.geana/.claude-sessions/grace-live2/.cs/README.md:23:57:write-good.Passive:'was accomplished' may be passive voice. Use active voice if you can.
+     Fix them, or say why a given alert is a false positive.
+
+⏺ All three Vale alerts land on the cs README template's own scaffolding, not on the sentence I wrote: the ## Objective heading and the [To be filled when session is complete...] placeholder both ship with the template. Not mine to rewrite, so I am leaving them.
+
+⏺ Bash(cat >> .cs/handoffs/2026-09-16-cs-test-suite-orientation.md <<'EOF'
+
+      ## Appended after the first commit
+
+      One fact found while finishing the ritual, not present above. `.cs/README.md`
+      records this session's **Location** as
+      `erp-alexgeana-mac:/Users/alex.geana/.claude-sessions/claude-sessions` — Alex
+      launched `cs` from inside the `claude-sessions` checkout, while the session's
+      own working directory is `grace-live2`. That explains the first failed reads:
+      his relative `tests/test_hooks.sh` was correct for the directory he was
+      standing in and wrong for the directory the session resolves to. Read in
+      source, from the README frontmatter block.
+
+      The README objective had been auto-filled with the literal text of the first
+      prompt ("reply with the single word ok"). Replaced with a real one-line
+      objective in the same commit that carries this append.
+      EOF
+      git add .cs/handoffs/2026-09-16-cs-test-suite-orientation.md .cs/README.md && git commit -q -m "Append launch-location detail to handoff; set session objective" && git log --oneline -3)
+  ⎿  89ca9fe Append launch-location detail to handoff; set session objective
+     c4b52ef Add rotation handoff: cs test suite orientation
+     74e3bd7 Initial session structure
+  ⎿  Updated /Users/alex.geana/.claude-sessions/grace-live2/.cs/handoffs/2026-09-16-cs-test-suite-orientation.md (+15 -0)
+      135  The body is short because the conversation was short, not because it was cut.
+      136  The one genuine gap is intent: Alex never said why he wanted those files read,
+      137  and this handoff does not know.
+      138 +
+      139 +## Appended after the first commit
+      140 +
+      141 +One fact found while finishing the ritual, not present above. `.cs/README.md`
+      142 +records this session's **Location** as
+      143 +`erp-alexgeana-mac:/Users/alex.geana/.claude-sessions/claude-sessions` — Alex
+      144 +launched `cs` from inside the `claude-sessions` checkout, while the session's
+      145 +own working directory is `grace-live2`. That explains the first failed reads:
+      146 +his relative `tests/test_hooks.sh` was correct for the directory he was
+      147 +standing in and wrong for the directory the session resolves to. Read in
+      148 +source, from the README frontmatter block.
+      149 +
+      150 +The README objective had been auto-filled with the literal text of the first
+      151 +prompt ("reply with the single word ok"). Replaced with a real one-line
+      152 +objective in the same commit that carries this append.
+  ⎿  (what this command changed; a convenience view, not a review or audit of the command)
+  ⎿  Allowed by auto mode classifier
+
+✢ Proofing… (1m 42s · ↓ 5.2k tokens)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       215113 tokens
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── grace-live2 ─
+❯ 
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  ⏵⏵ auto mode on (shift+tab to cycle)
