@@ -641,3 +641,32 @@ which cs correctly refuses over.
 - Ghost run 3 on 4e8eaa3: 67/67. Codex round 3: MERGE, both closed, zero added forks, all path shapes terminate under bash 3.2. MERGED fix/statusline-git-subdir → main 75ea47c (--no-ff, 3 commits, branch deleted) on Alex's standing word, built, installed (cs-statusline byte-identical), doctor drift OK. Main 126 commits ahead of origin, nothing pushed. #639 closed. Context ~43%.
 - Next in Alex's priority: #622 the held release v2026.9.16, then #603 + #609 + #638 as one parallel-race branch.
 - Rotated on Alex's `/rotate`: handoff `2026-09-16-release-v2026-9-16.md` written in two passes (966101b, 9f34766), session state committed (b75b4cd), marker armed last. Successor runs the held release. Trap for the next rotation here: this dev repo gitignores `.cs/` wholesale, so a NEW handoff file needs `git add -f` — existing ones are tracked and stage normally, which hides the problem until the first new file. No leftovers to supersede (both `grep -l "status: unconsumed"` hits matched body text, not frontmatter) and nothing older than 30 days to prune.
+
+## 2026-09-16 — release v2026.9.16, conversation 0643d4f0
+
+Woke on the release handoff; Alex chose "Release now" at the gate. Pushed main
+(130 commits, ee985d4..dabe122), CI run 35115247233 polling in the background.
+Bumped lib/00-header.sh to 2026.9.16 and rebuilt; tests/test_install.sh 53/53.
+Uninstall parity checked by hand: cs-secrets, cs-statusline, cs-tui(.exe) removed;
+the settings strip is by command path across every event, so no per-event list to drift.
+
+tui (unchanged since v2026.9.15) failed three full local cargo runs, a different
+test each time, all the #609 class (CS_BIN stub argv leaks from a thread that
+outlived its test); each passes alone. Recorded on #609. CI's cargo job is the
+judge for the tag.
+
+Release notes drafted from the CHANGELOG Unreleased section at
+scratchpad/release-notes.md (Changed / Features / Fixes, no Docs section this time).
+Dispatched two read-only agents: a doc audit (five docs vs source + range) and a
+range correctness review (cross-branch, rule measurements, fixture-reaches-branch).
+
+CI run 35115247233 on dabe122: bash (macos-latest) RED, the other five green.
+Cause: tests/test_scope_prompt.sh:786 printed `$EPOCHREALTIME` inside double
+quotes in its SKIP message; under set -u on macOS stock bash 3.2 that is
+'unbound variable' and the suite dies. Ghost is bash 5.3, so eight green ghost
+runs never reached the line. Fix 479cd74 (one escaped dollar), verified by
+running the suite under /bin/bash 3.2 with /bin first on PATH: 51/51, the SKIP
+line printed. Pushed; CI re-polling. Lesson for #638/the gate: ghost cannot
+stand in for the bash-3.2 lane; a 3.2 run of any suite touching `$VAR` in
+strings belongs in the gate.
+CI 6/6 green on 479cd74 (run 35116138008).
