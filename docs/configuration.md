@@ -82,9 +82,10 @@ export CS_SCOPE_DISABLE="1"
 export CS_SCOPE_TRACE_DISABLE="1"
 
 # Milliseconds the scope-prompt hook allows its cheap front half before it
-# skips the grounded scan on a slow machine (default 1500; the digests, the
-# date note and the clarify guideline always arrive). 0 skips the scan on
-# every prompt; a value that is not a number is the default.
+# skips the grounded scan on a slow machine (default 1500), so the digests,
+# the date note and the clarify guideline reach the model instead of dying
+# with a scan the registered timeout kills. 0 skips the scan on every prompt;
+# a value that is not a number, or longer than seven digits, is the default.
 export CS_SCOPE_BUDGET_MS="1500"
 
 # Opt a session out of first-prompt Objective capture (see hooks.md)
