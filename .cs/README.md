@@ -110,3 +110,7 @@ Seed-logging harness (2026-09-02 evening, `.cs/local/design-test/`, 30 Sonnet ru
 Released v2026.9.6 (2026-09-02 evening, tag on `416f7f7`): every cs session opts into the Task tools (`CS_NO_TASK_TOOLS=1` opts out), wrap/sweep/summary pin the `opus` family, and three teammate-slot fixes (lead-only drain, lead-only `context-pct` value, append-only notice cursors). Next: the test gate gets per-suite progress and timing, half-core lanes under nice with a checkout lock, and a `--changed` fast lane.
 
 Test gate rework (2026-09-02 late, `ce5855a`, `d3985b6`, `7d81064` on main): per-suite progress lines and a slowest-ten table, half-core lanes under nice with a checkout lock, and `run_all.sh --changed` for the edit loop. Full gate through the new runner: 63 suites in 279 s at 7 lanes.
+
+2026-09-16: cs-hint mod (#635) built and merged to main 08788f9: one dim line under the prompt in the lead conversation of a cs session (mail, armed handoff, queue/gate, resumed handoff's purpose, else a cs tip), drawn as the mod's own tree beneath the permission-mode notice because a PromptHint rewrite draws nothing there on 2.1.273. Installed; not pushed; release v2026.9.16 still held (#622).
+
+2026-09-16: scope-prompt deadline (#631) merged to main d5a25e4: the UserPromptSubmit hook checks its own clock before the scan stages and gives up the scope block instead of being killed whole, so the queue and mail digests, the date note and the clarify guideline survive a loaded machine. Registration 3 to 5 seconds. Installed; not pushed.

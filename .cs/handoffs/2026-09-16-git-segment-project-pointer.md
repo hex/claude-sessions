@@ -2,7 +2,8 @@
 parent: c29bfd1e-9c09-4f7c-abaf-87f97e976ed9
 created: 2026-09-16T10:13:56Z
 purpose: build the git-segment project pointer (task #633, the firstborn `main !2` bar); #622 the held release and the stray X-Fake edit in hooks/prompt-rewriter-vendor.sh carry over
-status: unconsumed
+status: consumed
+consumed_by: e9b1ea62-024f-4308-994e-42de824a4fae
 ---
 
 ## 1. Next Step

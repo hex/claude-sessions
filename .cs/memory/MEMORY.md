@@ -127,3 +127,6 @@
 - [Alex is both actor slugs](user_two_actor_identities.md): hex-users-noreply-github-com and alex-geana-erepubliklabs-com are one person, two git identities; rotate the other with CS_ACTOR=<email>
 - [Hook subprocess eats stdin](project_hook_subprocess_eats_stdin.md): a tool run before the hook reads its stdin can consume the event JSON (terminal-notifier did); `</dev/null` every such call, fakes must drain stdin
 - [Claude scratch disk pressure](project_claude_scratch_disk_pressure.md): /private/tmp/claude-501 fills the disk; delete only sessions with no live claude cwd (lsof), by explicit path, never the prior conversation's dir
+- [Mods type contract on disk](reference_mods_type_contract.md): ~/.claude/plugins/marketplaces/claude-code-plugins/mods/types/claude-code.d.ts is the authority for events, $.ui and element tables; the capsule lab covers a subset
+- [PromptHint rewrite draws nothing](project_prompthint_rewrite_draws_nothing.md): on 2.1.273 a `hint` rewrite never shows under the permission-mode notice; a mod draws its own tree (one extra row); debug via CLAUDE_CODE_BIN='claude --debug'
+- [Commit before mutating](feedback_commit_before_mutating.md): `git checkout <file>` after a mutation drops uncommitted work too; commit green first, assert the mutation landed
