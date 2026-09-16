@@ -177,6 +177,11 @@ mkdir -p "$HOME"
 # at the real bundle, whatever HOME says. Scoped here, at source time, as
 # HOME is.
 unset XDG_DATA_HOME
+# The scope-prompt hook's own deadline (CS_SCOPE_BUDGET_MS) is off the table
+# for every suite that drives the hook: tests time nothing, and a loaded
+# runner must not turn a scan assertion into a skip. The deadline tests in
+# test_scope_prompt.sh set their own budgets per run.
+export CS_SCOPE_BUDGET_MS="600000"
 # The SessionStart hook re-asserts the session's tab title: through the tmux
 # server when TMUX is set, else as an escape on a terminal device. Fourteen
 # suites run that hook, and under the developer's own tmux the fixture's name
