@@ -761,13 +761,36 @@ test_budget_within_runs_the_scan() {
 # A budget that is not a number is the default, not a zero: a typo must not
 # silence grounding on every prompt. Nor may a number too long for the shell's
 # arithmetic, which wraps to zero or negative and would skip every scan.
+# Judged without the clock: on a loaded runner the default budget itself can
+# expire, and then the skip line names the budget the hook normalised to.
+_scanned_or_skipped_at_default() {  # ctx, msg
+    case "$1" in
+        *"Scope (auto-grounded)"*|*"of its 1500 ms budget"*) return 0 ;;
+    esac
+    echo "  FAIL: $2"; printf '%s\n' "$1" | head -5; return 1
+}
 test_budget_garbage_is_the_default() {
     seed_repo "src/api.ts"
     local ctx
     ctx=$(additional_context "$(CS_SCOPE_BUDGET_MS=fast run_hook "fix the handler in src/api.ts" 2>/dev/null)")
-    assert_output_contains "$ctx" "Scope (auto-grounded)" "garbage budget reads as the default" || return 1
+    _scanned_or_skipped_at_default "$ctx" "garbage budget reads as the default" || return 1
     ctx=$(additional_context "$(CS_SCOPE_BUDGET_MS=18446744073709551616 run_hook "fix the handler in src/api.ts" 2>/dev/null)")
-    assert_output_contains "$ctx" "Scope (auto-grounded)" "an overflowing budget reads as the default" || return 1
+    _scanned_or_skipped_at_default "$ctx" "an overflowing budget reads as the default" || return 1
+}
+
+# A positive budget expires: one millisecond is always spent by the time the
+# check runs, so the clock, not the zero shortcut, decides. Skipped on a bash
+# without $EPOCHREALTIME, where the clock ticks in whole seconds.
+test_budget_of_one_millisecond_expires() {
+    if [ -z "$(bash -c 'printf %s "${EPOCHREALTIME:-}"')" ]; then
+        echo "    SKIP: this bash has no $EPOCHREALTIME; elapsed is whole seconds"
+        return 0
+    fi
+    seed_repo "src/api.ts"
+    local ctx
+    ctx=$(additional_context "$(CS_SCOPE_BUDGET_MS=1 run_hook "fix the handler in src/api.ts" 2>/dev/null)")
+    assert_output_contains "$ctx" "of its 1 ms budget" "a one-millisecond budget has expired by the check" || return 1
+    assert_output_not_contains "$ctx" "Scope (auto-grounded)" "and the scan did not run" || return 1
 }
 
 # The digest's surface-once budget is spent only by a delivered emission: an
@@ -1015,6 +1038,7 @@ run_test test_date_note_stamp_advances_on_a_code_work_prompt_too
 run_test test_budget_exhausted_skips_the_scan_and_keeps_the_rest
 run_test test_budget_within_runs_the_scan
 run_test test_budget_garbage_is_the_default
+run_test test_budget_of_one_millisecond_expires
 run_test test_failed_emission_leaves_the_digest_cursor_unspent
 
 report_results
