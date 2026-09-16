@@ -3679,7 +3679,11 @@ count_render_forks() {  # json
     fi
     : > "$log"
     printf '%s' "$1" > "$TEST_TMPDIR/stdin.json"
-    PATH="$shims:$PATH" bash "$SL" < "$TEST_TMPDIR/stdin.json" >/dev/null 2>&1
+    # Output to a file, not a substitution: the render's parent must stay this
+    # shell (see above).
+    PATH="$shims:$PATH" bash "$SL" < "$TEST_TMPDIR/stdin.json" > "$TEST_TMPDIR/stdout.txt" 2>/dev/null
+    FORKS_RC=$?
+    FORKS_OUT=$(cat "$TEST_TMPDIR/stdout.txt")
     FORKS=0
     local line
     while IFS= read -r line; do FORKS=$((FORKS + 1)); done < "$log"
@@ -3687,9 +3691,12 @@ count_render_forks() {  # json
 
 # A lead Fable render with every optional stage live: a matching session id in
 # state (so context-pct is written), rate limits (the limits stamp), a Fable
-# model id with an org and a fresh usage cache (the fable window), a git work
-# tree, and a TMUX claim (the ancestry walk). Sets FULL_JSON; the environment
-# it exports is part of the fixture, so it runs in the caller's shell.
+# model id with an org and the usage record the refresher leaves (JSON and its
+# sidecar), a git work tree, and a real tmux pane whose theme comes from the
+# attached client (the ancestry verdict a first render would have cached, a
+# fake tmux that reports no theme, the launch's terminal measurement). Sets
+# FULL_JSON; the environment it exports is part of the fixture, so it runs in
+# the caller's shell.
 make_full_render_fixture() {
     export CLAUDE_SESSION_NAME=s
     local sdir="$CS_SESSIONS_ROOT/s/.cs/local"
@@ -3701,7 +3708,15 @@ make_full_render_fixture() {
     export CS_USAGE_NO_REFRESH=1
     printf '{"org":"org-1","pct":12,"resets_at":"2099-01-01T00:00:00Z","fetched_at":4102444800,"next_poll_at":4102444800}\n' \
         > "$CS_USAGE_DIR/fable.org-1.json"
+    printf '%s\n' 12 "2099-01-01T00:00:00Z" 4102444800 4102444800 4070908800 > "$CS_USAGE_DIR/fable.org-1.json.fields"
     export TMUX="/tmp/fake,1,0" TMUX_PANE="%1"
+    unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_BG_RGB 2>/dev/null || true
+    mkdir -p "$TEST_TMPDIR/fakebin" "$HOME/.cache/cs/tmux-real" "$HOME/.cache/cs/term"
+    printf '#!/bin/sh\nprintf "\\t/dev/ttys002\\n"\n' > "$TEST_TMPDIR/fakebin/tmux"
+    chmod +x "$TEST_TMPDIR/fakebin/tmux"
+    export PATH="$TEST_TMPDIR/fakebin:$PATH"
+    printf '%s\t%s\nreal\n' "$(date +%s)" "$$,$TMUX" > "$HOME/.cache/cs/tmux-real/$$,-tmp-fake,1,0"
+    printf 'light 252;247;229 %s\n' "$(date +%s)" > "$HOME/.cache/cs/term/ttys002"
     local work
     work=$(make_git_work)
     FULL_JSON=$(jq -nc --arg dir "$work" '{
@@ -3723,9 +3738,22 @@ make_full_render_fixture() {
 # forks a dozen runs past Claude Code's limit and the tick is killed.
 test_warm_render_forks_only_the_interpreter_and_jq() {
     make_full_render_fixture
+    # What the bar shows without the shims, rendered from this same shell (a
+    # pipeline would give it another parent and so another ancestry verdict).
+    printf '%s' "$FULL_JSON" > "$TEST_TMPDIR/stdin.json"
+    bash "$SL" < "$TEST_TMPDIR/stdin.json" > "$TEST_TMPDIR/plain.txt" 2>/dev/null
+    local plain; plain=$(cat "$TEST_TMPDIR/plain.txt")
     count_render_forks "$FULL_JSON"   # the cold render fills the caches
     count_render_forks "$FULL_JSON"
-    [ "$FORKS" -le 2 ] || { echo "  FAIL: warm render forked $FORKS external commands (limit 2):"; sed 's/^/    /' "$TEST_TMPDIR/forks"; return 1; }
+    assert_eq "0" "$FORKS_RC" "the counted render exits cleanly" || return 1
+    assert_eq "$plain" "$FORKS_OUT" "the counted render draws the same line" || return 1
+    assert_output_contains_f "$FORKS_OUT" "main +1!1" "and the line carries the git segment" || return 1
+    assert_output_contains_f "$FORKS_OUT" "5h" "and the limits" || return 1
+    # A bash without a builtin clock (3.2, macOS stock) forks date once for the
+    # render's shared clock; nothing else is allowed through.
+    local limit=2
+    bash -c 'printf "%(%s)T" -1' >/dev/null 2>&1 || limit=3
+    [ "$FORKS" -le "$limit" ] || { echo "  FAIL: warm render forked $FORKS external commands (limit $limit):"; sed 's/^/    /' "$TEST_TMPDIR/forks"; return 1; }
 }
 
 run_test test_warm_render_forks_only_the_interpreter_and_jq
@@ -3825,23 +3853,34 @@ test_context_pct_rewritten_on_change_or_once_a_minute() {
 
 run_test test_context_pct_rewritten_on_change_or_once_a_minute
 
-# The fable record's fields are laid beside the JSON after the first read, one
-# per line with the reset as an epoch, so the next render parses nothing.
+# The refresher lays the record's fields beside the JSON, one per line with the
+# reset as an epoch, and a render takes them over the JSON: no jq, no date.
+# The render itself never writes the sidecar, so a slow parse of an old record
+# cannot overwrite a refresher's newer one.
 test_fable_fields_written_beside_the_json() {
     _load_sl_functions
-    seed_usage_cache org-abc 86 "2026-08-29T03:59:59.686034+00:00" 1787816000 1787816300
-    CS_STATUSLINE_NOW=1787816100 _NOW="" _SL_NOW_READY="" _fable_read
+    export CS_USAGE_DIR="$TEST_TMPDIR/usage"; mkdir -p "$CS_USAGE_DIR"
+    export CLAUDE_CONFIG_DIR="$TEST_TMPDIR"
+    printf '%s' '{"oauthAccount":{"organizationUuid":"org-abc"}}' > "$TEST_TMPDIR/.claude.json"
+    CS_STATUSLINE_NOW=1787816000 _NOW="" _SL_NOW_READY="" _usage_write org-abc 86 "2026-08-29T03:59:59.686034+00:00" 600
     local f="$CS_USAGE_DIR/fable.org-abc.json.fields"
-    assert_file_exists "$f" "the fields file is written by the first read" || return 1
+    assert_file_exists "$f" "the refresher writes the sidecar with the record" || return 1
     assert_eq "86
 2026-08-29T03:59:59.686034+00:00
 1787816000
-1787816300
+1787816600
 1787975999" "$(cat "$f")" "pct, resets_at, fetched_at, next_poll_at, reset epoch" || return 1
-    # A later read takes the fields file: the JSON can say anything.
     printf 'not json\n' > "$CS_USAGE_DIR/fable.org-abc.json"
     CS_STATUSLINE_NOW=1787816100 _NOW="" _SL_NOW_READY="" _fable_read
-    assert_eq "86" "$_FABLE_PCT" "the second read comes from the fields file" || return 1
+    assert_eq "86" "$_FABLE_PCT" "the render reads the sidecar, not the JSON" || return 1
+    assert_eq "1787975999" "$_FABLE_RESET" "with the reset already an epoch" || return 1
+    # A record with no sidecar (written before it existed) is parsed, and the
+    # render leaves no sidecar behind.
+    rm -f "$f"
+    seed_usage_cache org-abc 86 "2026-08-29T03:59:59.686034+00:00" 1787816000 1787816300
+    CS_STATUSLINE_NOW=1787816100 _NOW="" _SL_NOW_READY="" _fable_read
+    assert_eq "86" "$_FABLE_PCT" "a record without a sidecar is still read" || return 1
+    assert_file_not_exists "$f" "and the render does not write one" || return 1
 }
 
 run_test test_fable_fields_written_beside_the_json
@@ -3865,5 +3904,102 @@ test_theme_pass_queries_tmux_once() {
 }
 
 run_test test_theme_pass_queries_tmux_once
+
+
+# Two workspaces whose paths sanitise to the same file name never answer for
+# each other: the entry carries the path it was made from.
+test_git_cache_entries_are_bound_to_their_path() {
+    export CS_TERM_THEME=light FORCE_COLOR=0
+    local a="$TEST_TMPDIR/x/a/b" b="$TEST_TMPDIR/x/a-b"
+    mkdir -p "$a" "$b"
+    for d in "$a" "$b"; do
+        git -C "$d" init -q; git -C "$d" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m i
+    done
+    git -C "$b" checkout -q -b other
+    local ja jb
+    ja=$(jq -nc --arg dir "$a" '{workspace:{current_dir:$dir}}')
+    jb=$(jq -nc --arg dir "$b" '{workspace:{current_dir:$dir}}')
+    local outa outb
+    outa=$(CS_STATUSLINE_NOW=1000 run_sl "$ja")
+    outb=$(CS_STATUSLINE_NOW=1001 run_sl "$jb")
+    assert_output_contains_f "$outa" "⎇ " "the first workspace shows a branch" || return 1
+    assert_output_not_contains_f "$outa" "⎇ other" "and it is its own" || return 1
+    assert_output_contains_f "$outb" "⎇ other" "the second, one second later, shows its own branch and not the first's" || return 1
+}
+
+run_test test_git_cache_entries_are_bound_to_their_path
+
+# A workspace path between 100 and 200 characters is cached like any other.
+test_git_cache_keys_a_long_path() {
+    export CS_TERM_THEME=light FORCE_COLOR=0
+    local long="$TEST_TMPDIR/$(printf 'd%.0s' $(seq 1 60))/$(printf 'e%.0s' $(seq 1 60))"
+    mkdir -p "$long"
+    git -C "$long" init -q; git -C "$long" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m i
+    local json; json=$(jq -nc --arg dir "$long" '{workspace:{current_dir:$dir}}')
+    CS_STATUSLINE_NOW=1000 run_sl "$json" >/dev/null
+    git -C "$long" checkout -q -b other
+    local out; out=$(CS_STATUSLINE_NOW=1002 run_sl "$json")
+    assert_output_not_contains_f "$out" "⎇ other" "within the TTL the long path's cached branch answers" || return 1
+}
+
+run_test test_git_cache_keys_a_long_path
+
+# The refresher never trusts the cached account id: it attributes a reading and
+# detects a swap across its own fetch, and a stale identity there would file one
+# account's usage under another.
+test_refresher_reads_the_account_fresh() {
+    ( _load_sl_functions
+      local cfg="$TEST_TMPDIR/cfg.json"
+      printf '{"oauthAccount":{"organizationUuid":"org-1"}}\n' > "$cfg"
+      CS_STATUSLINE_NOW=1000 _NOW="" _SL_NOW_READY="" _read_org_from "$cfg"
+      printf '{"oauthAccount":{"organizationUuid":"org-2"}}\n' > "$cfg"
+      CS_STATUSLINE_NOW=1010 _NOW="" _SL_NOW_READY="" _read_org_from "$cfg" fresh
+      assert_eq "org-2" "$_ORG" "a fresh read parses the config whatever the cache holds" || return 1
+      CS_STATUSLINE_NOW=1011 _NOW="" _SL_NOW_READY="" _read_org_from "$cfg"
+      assert_eq "org-2" "$_ORG" "and renews the cache for the renders" || return 1 )
+}
+
+run_test test_refresher_reads_the_account_fresh
+
+# The attached client's answer is kept for TMUX_CLIENT_CACHE_TTL: a theme
+# toggle shows within it, and the once-a-second repaint asks once in five.
+test_tmux_client_answer_is_cached_for_the_ttl() {
+    ( _load_sl_functions
+      export TMUX="/tmp/fake,2216,0" PATH="$TEST_TMPDIR/fakebin:$PATH"
+      _make_ps_chain "$$:2216 2216:1"
+      unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_BG_RGB 2>/dev/null || true
+      tmux() { printf 'q\n' >> "$TEST_TMPDIR/tmux-calls"; printf 'light\t/dev/ttys002\n'; }
+      CS_STATUSLINE_NOW=1000 _NOW="" _SL_NOW_READY="" _sl_mark_foreign_env
+      CS_STATUSLINE_NOW=1000 _NOW="" _SL_NOW_READY="" _sl_detect_theme
+      assert_eq "light" "$SL_THEME" "the client's theme" || return 1
+      tmux() { printf 'q\n' >> "$TEST_TMPDIR/tmux-calls"; printf 'dark\t/dev/ttys002\n'; }
+      CS_STATUSLINE_NOW=1003 _NOW="" _SL_NOW_READY="" _sl_detect_theme
+      assert_eq "light" "$SL_THEME" "within the TTL the cached answer stands" || return 1
+      assert_eq "1" "$(wc -l < "$TEST_TMPDIR/tmux-calls" | tr -d ' ')" "and tmux was not asked again" || return 1
+      CS_STATUSLINE_NOW=1006 _NOW="" _SL_NOW_READY="" _sl_detect_theme
+      assert_eq "dark" "$SL_THEME" "past the TTL the client is asked again" || return 1 )
+}
+
+run_test test_tmux_client_answer_is_cached_for_the_ttl
+
+# A teammate's heartbeat touch keeps its own cadence record, so lead and
+# teammate renders alternating do not read each other's value as a change and
+# rewrite the file every second between them.
+test_teammate_heartbeat_does_not_reset_the_lead_cadence() {
+    export CLAUDE_SESSION_NAME=altsess
+    local dir="$CS_SESSIONS_ROOT/altsess/.cs/local"
+    mkdir -p "$dir"
+    printf 'claude_session_id: "lead"\n' > "$dir/state"
+    local lead='{"session_id":"lead","context_window":{"used_percentage":30},"workspace":{"current_dir":"/none"}}'
+    local mate='{"session_id":"mate","context_window":{"used_percentage":55},"workspace":{"current_dir":"/none"}}'
+    CS_STATUSLINE_NOW=1000 run_sl "$lead" >/dev/null
+    CS_STATUSLINE_NOW=1001 run_sl "$mate" >/dev/null
+    CS_STATUSLINE_NOW=1002 run_sl "$lead" >/dev/null
+    assert_eq "30" "$(cat "$dir/context-pct")" "the lead's value stands" || return 1
+    assert_eq "1000 30" "$(cat "$dir/context-pct.at")" "the lead's cadence record was not reset by the teammate" || return 1
+    assert_eq "1001 " "$(cat "$dir/context-pct.heartbeat.at")" "the teammate keeps its own" || return 1
+}
+
+run_test test_teammate_heartbeat_does_not_reset_the_lead_cadence
 
 report_results
