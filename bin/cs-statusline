@@ -1189,17 +1189,15 @@ _refresh_usage() {
     _usage_cache_file "$org" || _CACHE_FILE="$dir/fable.unattributed.json"
     if [ -f "$_CACHE_FILE" ]; then
         cache="$_CACHE_FILE"
-        # The schedule comes from the sidecar when there is one, the same file
-        # the render reads, so the two never disagree about what is due: a
-        # refresher killed between the JSON and the sidecar leaves a stale
-        # sidecar whose schedule is already past, and the next refresh
-        # rewrites both.
-        local due_at=""
-        if [ -f "$cache.fields" ]; then
-            { IFS= read -r due_at; IFS= read -r due_at; IFS= read -r due_at; IFS= read -r due_at; } < "$cache.fields"
-        else
-            due_at=$(jq -r '(.next_poll_at // 0 | tostring)' "$cache" 2>/dev/null) || due_at=0
-        fi
+        # The JSON is the record; its schedule is the one honoured, so a
+        # backoff a 429 recorded is never skipped. A sidecar that disagrees
+        # with it (a refresher killed between writing the two, or a record an
+        # older cs wrote alone) is rewritten from the JSON here, without a
+        # fetch: the render reads the sidecar, so the disagreement is what it
+        # kicked this refresher over.
+        local due_at
+        due_at=$(jq -r '(.next_poll_at // 0 | tostring)' "$cache" 2>/dev/null) || due_at=0
+        _usage_fields_repair "$cache" "$due_at"
         [[ "${due_at:-}" =~ ^[0-9]+$ ]] || due_at=0
         _sl_now
         if [[ "${_NOW:-}" =~ ^[0-9]+$ ]] && [ "$_NOW" -lt "$due_at" ]; then return 0; fi
@@ -1379,6 +1377,26 @@ EOF
     _FABLE_PCT="${pct%%.*}"
     [[ "${reset_epoch:-}" =~ ^[0-9]+$ ]] || reset_epoch=""
     _FABLE_RESET="$reset_epoch"
+}
+
+# Rewrite cache file $1's sidecar from its JSON when the sidecar is missing or
+# its schedule is not $2 (the JSON's next_poll_at). Best effort.
+_usage_fields_repair() {  # cache next_poll_at
+    local have=""
+    if [ -f "$1.fields" ]; then
+        { IFS= read -r have; IFS= read -r have; IFS= read -r have; IFS= read -r have; } < "$1.fields"
+        [ "$have" = "$2" ] && return 0
+    fi
+    local fields pct="" reset="" fetched="" next=""
+    fields=$(jq -r '[ (.pct // "" | tostring), (.resets_at // ""),
+        (.fetched_at // 0 | tostring), (.next_poll_at // 0 | tostring) ] | .[]' "$1" 2>/dev/null) || return 0
+    [ -n "$fields" ] || return 0
+    { IFS= read -r pct; IFS= read -r reset; IFS= read -r fetched; IFS= read -r next; } <<EOF
+$fields
+EOF
+    [ "$pct" = "null" ] && pct=""
+    _iso_epoch "$reset"
+    _usage_fields_write "$1" "$pct" "$reset" "$fetched" "$next" "${_EPOCH:-}"
 }
 
 # The render-side copy of a usage record: cache file $1's fields one per line

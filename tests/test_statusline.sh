@@ -3941,7 +3941,8 @@ test_git_cache_keys_a_long_path() {
     git -C "$long" init -q; git -C "$long" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m i
     local json; json=$(jq -nc --arg dir "$long" '{workspace:{current_dir:$dir}}')
     CS_STATUSLINE_NOW=1000 run_sl "$json" >/dev/null
-    git -C "$long" checkout -q -b other
+    git -C "$long" checkout -q -b other || { echo "  FAIL: could not switch the branch"; return 1; }
+    [ "$(git -C "$long" rev-parse --abbrev-ref HEAD)" = "other" ] || { echo "  FAIL: the tree is not on the new branch"; return 1; }
     local out; out=$(CS_STATUSLINE_NOW=1002 run_sl "$json")
     assert_output_contains_f "$out" "⎇ ma" "the long path's cached branch (main or master) answers" || return 1
     assert_output_not_contains_f "$out" "⎇ other" "within the TTL, not the new one" || return 1
@@ -4063,10 +4064,10 @@ test_cache_read_rejects_a_half_written_entry() {
 
 run_test test_cache_read_rejects_a_half_written_entry
 
-# The refresher takes its schedule from the sidecar the render reads, so a
-# stale sidecar (its refresher killed before rewriting it) is past due and the
-# next refresh rewrites both rather than declining against the JSON's schedule.
-test_refresher_schedule_comes_from_the_sidecar() {
+# The JSON's schedule is the one the refresher honours, so a backoff a 429
+# recorded is never skipped; a sidecar left stale by a killed refresher is
+# rewritten from the JSON without a fetch.
+test_refresher_repairs_a_stale_sidecar_without_fetching() {
     use_scratch_usage_env
     local bindir="$TEST_TMPDIR/bin"; mkdir -p "$bindir"
     cat > "$bindir/security" <<'SEC'
@@ -4081,18 +4082,20 @@ printf '500'
 CURL
     chmod +x "$bindir/security" "$bindir/curl"
     export CS_SECURITY_BIN="$bindir/security"
-    # JSON says not due for a long time; the sidecar (stale) says due long ago.
+    # JSON: a backoff into the future. Sidecar: stale, its schedule long past.
     mkdir -p "$CS_USAGE_DIR"
     printf '%s' '{"org":"org-abc","pct":55,"resets_at":"2026-08-29T03:59:59Z","fetched_at":1787815990,"next_poll_at":1787999999}' \
         > "$CS_USAGE_DIR/fable.org-abc.json"
-    printf '%s\n' 55 "2026-08-29T03:59:59Z" 1787815990 1787815000 1787975999 > "$CS_USAGE_DIR/fable.org-abc.json.fields"
+    printf '%s\n' 41 "2026-08-28T03:59:59Z" 1787700000 1787815000 1787889599 > "$CS_USAGE_DIR/fable.org-abc.json.fields"
     PATH="$bindir:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
-    assert_file_exists "$TEST_TMPDIR/curl-hits" "the refresher fetched: the sidecar's schedule was past due" || return 1
-    # A failed fetch keeps the reading and its fetched_at; the schedule moves.
-    assert_eq "1787816600" "$(sed -n 4p "$CS_USAGE_DIR/fable.org-abc.json.fields")" "and the sidecar was rewritten with the JSON's new schedule" || return 1
-    assert_eq "1787816600" "$(jq -r '.next_poll_at' "$CS_USAGE_DIR/fable.org-abc.json")" "the two agree" || return 1
+    assert_file_not_exists "$TEST_TMPDIR/curl-hits" "the recorded backoff is honoured: no fetch" || return 1
+    assert_eq "55
+2026-08-29T03:59:59Z
+1787815990
+1787999999
+1787975999" "$(cat "$CS_USAGE_DIR/fable.org-abc.json.fields")" "the sidecar is rewritten from the JSON" || return 1
 }
 
-run_test test_refresher_schedule_comes_from_the_sidecar
+run_test test_refresher_repairs_a_stale_sidecar_without_fetching
 
 report_results
