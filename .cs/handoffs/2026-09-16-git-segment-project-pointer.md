@@ -115,3 +115,78 @@ v2026.9.16** (81 commits go to origin; Alex's release shape is in memory
 ## 4. What this handoff could not carry
 
 Written from live, uncompacted context at ~50%. Nothing cut.
+
+## 5. Primary Request and Intent
+
+This conversation woke on `2026-09-16-release-and-statusline.md`, asked Alex
+which of #622 (release) and #632 (statusline render cost) came first; he
+picked #632 and asked me to coordinate with the iterm-agents-sidebar session.
+The sidebar had already fixed the BLANK line on its side (async bridge with a
+cached line, their main `cde0558`). Re-measuring showed the handoff's
+diagnosis was wrong: git was a quarter of the cost; fork count × load was the
+whole of it. Built the fork diet on `fix/statusline-fork-diet`, gated it
+(ghost ×4, Codex ×4, mutations), merged at Alex's polish-first pick, installed.
+Then Alex's screenshot of the firstborn bar became #633 and he chose to
+rotate into building it.
+
+## 6. Key Technical Concepts
+
+- `bin/cs-statusline` is Claude Code's statusLine command, once a second per
+  session, bash 3.2 + BSD floor. Its hot path is fork-free by convention;
+  every fork now sits behind `_cache_read`/`_cache_write` (top of the file)
+  or a stamp cadence (`_stamp_due`/`_stamp_written`). Read
+  `docs/statusline.md` "Data sources and performance" — it has the table.
+- The theme ladder runs at SOURCE time (before `main`), so anything it calls
+  must be defined above it; `_sl_now` lives above it for that reason.
+- `_read_state_key` reads one key from `.cs/local/state` with builtins — the
+  likely reader for a `project` pointer.
+- Test suites run on ghost only (`feedback_full_gate_runs_on_ghost`); single
+  tests run in-process via the scratchpad runner or the handoff's eval shape.
+
+## 7. Files and Code Sections
+
+All committed on main; paths only.
+- `bin/cs-statusline` — `_cache_key/_cache_read/_cache_write`,
+  `_sl_parent_pid`, `_sl_tmux_client`, `_sl_tmux_is_real`/`_sl_tmux_walk`,
+  `_git_text`/`_git_status_text`, `_read_org_from cfg [fresh]`,
+  `_fable_read`, `_usage_fields_write/_usage_fields_repair`, `_stamp_due/
+  _stamp_written`, `_parse_stdin`'s stamp block.
+- `lib/70-statusline.sh` `_write_term_cache` — `theme rgb epoch` (KEEP IN
+  SYNC with `_sl_theme_from_client_cache`).
+- `tests/test_statusline.sh` — `count_render_forks` (PATH shims),
+  `make_full_render_fixture`, the fork gate and ~15 cache/cadence pins at the
+  end; setup() now gives each test its own HOME.
+- `tests/test_theme.sh` — the two term-cache assertions accept the epoch.
+- `docs/statusline.md`, `CHANGELOG.md` (Unreleased → Fixes, first entry),
+  `README.md` (status line bullet).
+
+## 8. Problem Solving
+
+- Three reviewers again found different things: my trace found the fork
+  count; ghost found the cached-org Blocker as a red test before Codex named
+  it; Codex found the key collision, the length bug, the double date, the
+  sidecar races and the vacuous gate. Every fix got its own red-first test
+  and a mutation.
+- Codex's fix for one finding (schedule from the sidecar) created the next
+  (skipped backoff) — verify a reviewer's proposed fix like a plan.
+
+## 9. Pending Tasks
+
+- **#633 pending** — the git-segment project pointer. See Next Step.
+- **#622 pending** — HELD release v2026.9.16, now 81 commits.
+- **#631 pending** — scope-prompt.sh own deadline (filed, not approved to build).
+- **#603, #609, #554 pending; #606 postponed** — standing backlog.
+- **#632 completed** this conversation; #628, #629, #630 earlier. Do not reopen.
+- Unfiled: the stray `X-Fake` edit (section 2); the `.cache/cs` caches have no
+  pruning (entries are tiny; noted, not requested).
+
+## 10. Current Work
+
+Nothing in flight. Main `d98c755` + this handoff's commits, 81+ ahead of
+origin, tree clean except the stray vendor edit, installed binaries match
+main, doctor: drift OK, WARNs = sidebar bridge as statusLine (expected) and
+the shadow ref for the stray edit.
+
+## Completeness
+
+Written from live, uncompacted context at ~50%, two passes. Nothing cut.
