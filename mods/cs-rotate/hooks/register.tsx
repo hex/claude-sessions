@@ -62,9 +62,10 @@ export const GRACE_SECONDS = 20
 // armed the band draws the confirmation on `3` instead. A held key repeats on
 // keydown (contract), and no elapsed time tells a repeat from a deliberate
 // second press (the first repeat lands 225 ms or more after the press, inside
-// a double-press), so the confirmation is a different key: however long `2`
-// is held, nothing on `2` is left to press. A prompt, a /clear or a
-// conversation switch meanwhile disarms it.
+// a double-press), so the confirmation is a different key. `2` keeps a
+// button while armed that only re-arms: a digit with no button on it lands
+// in the composer (measured), and a non-empty composer takes every hotkey
+// with it. A prompt, a /clear or a conversation switch meanwhile disarms it.
 export const WRAP_ARM_MS = 5000
 let wrapArmed = false
 let wrapTimer: { cancel: () => void } | undefined
@@ -171,7 +172,8 @@ export function register(on: On) {
                         onPress={() => rotate($)} />}
             {/* a Button is a block: nested in a Text the engine refuses the whole tree (measured), so the separator stands beside it */}
             {!armed && <Text dimColor>{'  \u00b7  '}</Text>}
-            {!armed && !wrapArmed && <Button key="cs-wrap" hotkey="2" plain label="wrap up this session" onPress={() => armWrap($)} />}
+            {!armed && <Button key="cs-wrap" hotkey="2" plain label={wrapArmed ? 'wrap up this session?' : 'wrap up this session'} onPress={() => armWrap($)} />}
+            {!armed && wrapArmed && <Text dimColor>{'  \u00b7  '}</Text>}
             {!armed && wrapArmed && <Button key="cs-wrap-confirm" hotkey="3" plain label="yes, run /wrap" onPress={() => runWrap($)} />}
             {/* the forced rotation's grace: the seconds left before the mod runs the /clear itself */}
             {armed && left !== undefined && (
@@ -380,8 +382,10 @@ async function rotate($: EngineInterface) {
   await $.command.run({ command: 'rotate', args: '' })
 }
 
-// `2` arms the key for the window and redraws the band with the confirmation.
+// `2` arms the key for the window and redraws the band with the confirmation;
+// pressed again while armed it restarts the window.
 function armWrap($: EngineInterface) {
+  wrapTimer?.cancel()
   wrapArmed = true
   wrapTimer = $.clock.after(WRAP_ARM_MS, () => disarmWrap($))
   $.ui.invalidate('ui.render')

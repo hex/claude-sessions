@@ -305,9 +305,11 @@ session`. That key runs `/wrap`, which distills memory, replaces
 helper, minutes and real tokens, so it takes two keys: `2` runs nothing and
 turns the key into `3: yes, run /wrap` for five seconds, and `3` within that
 window runs it. The confirmation is a different key on purpose: a held key
-repeats, and no timing tells a repeat from a second press, but a held `2`
-finds nothing on `2` left to press. A prompt entering the session, a `/clear`,
-or a switch to another conversation disarms it. Below the band the mod draws nothing, and it draws nothing while a
+repeats, and no timing tells a repeat from a second press. `2` keeps its
+button while armed (`2: wrap up this session?`) and only restarts the window,
+since a digit with no button lands in the composer and a non-empty composer
+takes every hotkey with it. A prompt entering the session, a `/clear`, or a
+switch to another conversation disarms it. Below the band the mod draws nothing, and it draws nothing while a
 turn runs or while a survey holds the band. It never submits a prompt of its
 own.
 

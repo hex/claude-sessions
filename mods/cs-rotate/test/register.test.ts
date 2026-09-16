@@ -753,7 +753,7 @@ test('the wrap key needs two keys: 2 arms it for a moment and runs nothing, 3 wh
   expect(ran).toEqual([])
   expect(invalidated).toEqual(['ui.render'])
   let tree = await band()
-  expect(wrapButton(tree)).toBeUndefined()
+  expect(wrapButton(tree).props.label).toBe('wrap up this session?')
   expect(confirmButton(tree).props.plain).toBe(true)
   expect(confirmButton(tree).props.label).toBe('yes, run /wrap')
   await confirmButton(tree).props.onPress()
@@ -820,19 +820,25 @@ test('no button is ever nested in a Text: armed or not, arming the wrap key or n
   expect(buttonsUnderText(await band())).toBe(0)
 })
 
-// The contract lets a held key repeat on keydown. The confirmation is a
-// different key, so however long `2` is held it arms and re-arms, and the
-// armed band has no button on `2` for a repeat to press.
-test('a held 2 never confirms: while armed there is no button on 2, and the confirmation sits on 3', async () => {
+// The contract lets a held key repeat on keydown, and a digit with no button
+// on it lands in the composer (measured: a second `2` while armed typed `2`,
+// and a non-empty composer takes every hotkey with it). So `2` keeps a button
+// while armed: each press only re-arms, the window restarts, nothing is typed,
+// and the confirmation sits on `3`.
+test('a held 2 never confirms: while armed 2 only re-arms, restarting the window, and the confirmation sits on 3', async () => {
   percent = 40
   await wrapButton(await band()).props.onPress()
   for (let i = 0; i < 20; i++) {
     const tree = await band()
-    expect(wrapButton(tree)).toBeUndefined()
+    expect(wrapButton(tree).props.hotkey).toBe('2')
     expect(confirmButton(tree).props.hotkey).toBe('3')
+    await wrapButton(tree).props.onPress()
   }
   expect(ran).toEqual([])
-  expect(timers.filter(t => t.kind === 'after' && !t.cancelled)).toHaveLength(1)
+  const afters = timers.filter(t => t.kind === 'after')
+  expect(afters).toHaveLength(21)
+  expect(afters.filter(t => !t.cancelled)).toHaveLength(1)
+  expect(afters[afters.length - 1].cancelled).toBe(false)
 })
 
 test('the arm does not survive a conversation switch: the first press in the new one only arms', async () => {
