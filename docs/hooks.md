@@ -303,7 +303,7 @@ purpose from the conversation. Beside it the band draws `2: wrap up this
 session`. That key runs `/wrap`, which distills memory, replaces
 `.cs/summary.md` and rotates the narrative: two Opus passes and a shell
 helper, minutes and real tokens, so it takes two keys: `2` runs nothing and
-turns the key into `3: yes, run /wrap` for five seconds, and `3` within that
+draws `3: yes, run /wrap` beside it for five seconds, and `3` within that
 window runs it. The confirmation is a different key on purpose: a held key
 repeats, and no timing tells a repeat from a second press. `2` keeps its
 button while armed (`2: wrap up this session?`) and only restarts the window,
