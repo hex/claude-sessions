@@ -418,6 +418,58 @@ heartbeat) and `claude plugin validate` when each binary is on PATH, and
 always checks the manifest, the threshold pin, and that the installer and
 the launch name the mod and the flag.
 
+## cs-hint (not a hook script — a Claude Code mod)
+
+`mods/cs-hint/` is a second function-hooks plugin, deployed, enabled, observed
+and removed the same way as cs-rotate (installer, `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS`,
+a heartbeat at `.cs/local/cs-hint.heartbeat`, `cs -doctor`, `cs -uninstall`, the
+deploy-drift check). It rewrites the dim hint line under the prompt, the one
+that reads `? for shortcuts`, so a cs session says what is waiting for it
+instead. The line is the lead conversation's only (the UUID in
+`.cs/local/state`), and only while the composer is empty and idle: while you
+type, and while a turn runs, the engine's own line stays, since that is where
+the shortcuts and the interrupt key are. Outside a cs session, in a teammate
+claude, with `CS_NO_HINTS=1` in the launching shell, or with a `hints: off`
+line in `.cs/local/state`, the engine's line is untouched.
+
+What it says, in priority order, at most two joined by ` · `:
+
+- `2 messages from <session> · cs -msg`: files under `.cs/local/mail/new/`,
+  the newest one's sender; a sender outside a cs session writes `""` and is
+  not named.
+- `handoff armed · /clear continues it`: `.cs/local/pending-handoff` names a
+  handoff the SessionStart hook would accept (a bare basename, present,
+  frontmatter still `status: unconsumed`; the same rule as cs-rotate's button,
+  which `tests/test_mod_hint.sh` pins equal). Below cs-rotate's context
+  threshold this line is the one place the armed handoff shows.
+- `3 queued · gate waiting`, `· deferred` or `· draining`: files under
+  `.cs/local/queue/`; the word follows the narrative-reminder hook's rule
+  (`queue.state` `armed` or `draining` is draining; `queue.declined` younger
+  than ten minutes is deferred; otherwise the gate will ask at the next turn's
+  end). An empty queue says nothing, whatever the state file records.
+- `continuing: <purpose>`: the handoff whose frontmatter says
+  `consumed_by: <this conversation's id>`, its `purpose:` line (its name when
+  there is none), shown until your first prompt in the conversation; the
+  rotation's own wake, a peer's message or a plugin's prompt does not end it.
+- Otherwise one tip from a fixed list in `register.tsx`, never generated. The
+  first fits the session: `/finish` in a worktree session (`task_branch` in the
+  state file), the caps consent (`cs -statusline caps`) on a Fable model,
+  `/feature` elsewhere; the rest step once per finished turn of the
+  conversation (a subagent's, an interrupted or an errored turn does not
+  count), never on a timer, so the line holds still while it is read.
+
+The facts change from outside the process (another session's `cs -msg`, the
+queue drain, the rotate skill), so once the lead has drawn the line it is
+redrawn every five seconds; a redraw costs one directory listing per fact
+source and a read of the marker and the state file. Module state (the tip
+index, the resumed handoff, the ticker) survives `/clear` and is reset by a
+plugin reload.
+
+Tests: `tests/test_mod_hint.sh` runs the bun unit tests under
+`mods/cs-hint/test/` and `claude plugin validate` when each binary is on
+PATH, and always checks the manifest, the handoff-rule pin, and that the
+installer and the launch name the mod and the flag.
+
 ## Hook Configuration
 
 The hooks are configured in `~/.claude/settings.json`:
