@@ -90,8 +90,8 @@ test('a teammate, a plain conversation and a draft all get the engine\'s own lin
   expect(await line({ isWorking: true })).toBe(ENGINE_HINT)
 })
 
-const mail = (name: string, from: string) => {
-  files[`/work/.cs/local/mail/new/${name}`] = JSON.stringify({ id: name, ts: 1784400076, from, actor: 'x', kind: 'result', ref: null, body: 'hi' })
+const mail = (name: string, from: string, ts = Number(name.split('-')[0])) => {
+  files[`/work/.cs/local/mail/new/${name}.json`] = JSON.stringify({ id: name, ts, from, actor: 'x', kind: 'result', ref: null, body: 'hi' })
 }
 
 test('unread mail leads the line, counted from mail/new, the newest sender named', async () => {
@@ -107,6 +107,16 @@ test('unread mail leads the line, counted from mail/new, the newest sender named
   // A teammate in the same directory does not read the lead's mail.
   sessionId = 'uuid-mate'
   expect(await line()).toBe(ENGINE_HINT)
+})
+
+test('only the .json files cs reads count as mail, and the sender named is the latest by its timestamp, not by name', async () => {
+  existing.add('/work/.cs/local/mail/new')
+  files['/work/.cs/local/mail/new/notes.txt'] = 'not mail'
+  expectTip(await line())
+  // Same second, pids 900 then 1000: the name order puts 1000 first, the timestamps say 900 came... later.
+  mail('1784400000-900', 'earlier', 1784400000)
+  mail('1784400000-1000', 'later', 1784400001)
+  expect(await line()).toBe('2 messages from later \u00b7 cs -msg')
 })
 
 const HANDOFF = '---\nparent: x\nstatus: unconsumed\n---\n\n## 1. Next Step\n'
@@ -132,6 +142,12 @@ test('a marker the SessionStart hook would refuse does not arm the line', async 
   expectTip(await line())
   arm('2026-09-16-next.md', '---\nstatus: unconsumed\n')
   expectTip(await line())
+})
+
+test('the marker is read as the hook reads it: every whitespace character dropped', async () => {
+  arm('2026-09-16-next.md')
+  files['/work/.cs/local/pending-handoff'] = ' 2026-09-16-\tnext.md \n'
+  expect(await line()).toBe('handoff armed \u00b7 /clear continues it')
 })
 
 const queue = (n: number) => {
@@ -173,7 +189,7 @@ test('the line carries at most two facts, in priority order', async () => {
   existing.add('/work/.cs/local/mail/new')
   mail('1784400000-1-a', 'alpha')
   expect(await line()).toBe('1 message from alpha · cs -msg · handoff armed · /clear continues it')
-  delete files['/work/.cs/local/mail/new/1784400000-1-a']
+  delete files['/work/.cs/local/mail/new/1784400000-1-a.json']
   expect(await line()).toBe('handoff armed · /clear continues it · 1 queued · gate waiting')
 })
 
@@ -191,6 +207,22 @@ test('a conversation continuing a handoff shows its purpose until the person typ
   await submit('task-notification')
   expect(await line()).toBe('continuing: build the hint mod')
   await submit('composer')
+  expectTip(await line())
+})
+
+test('the person\'s prompt ends the resumed step even before the line was ever drawn, and through a reload', async () => {
+  consumed('uuid-lead')
+  await submit('composer')
+  expectTip(await line())
+  // The flag outlives the module: a reload must not bring the step back.
+  register(on as any)
+  expectTip(await line())
+})
+
+test('a Remote Control message is the person too', async () => {
+  consumed('uuid-lead')
+  expect(await line()).toBe('continuing: build the hint mod')
+  await submit('bridge')
   expectTip(await line())
 })
 
@@ -222,12 +254,24 @@ test('with nothing waiting the line is one cs tip, which changes at the end of a
   expect(await line()).toBe(second)
 })
 
-test('the first tip fits the session: /feature in a plain one, /finish in a worktree, the caps consent on Fable', async () => {
-  expect(await line()).toMatch(/^\/feature /)
+test('the first tip fits the session: /feature in a plain one, /finish in a worktree', async () => {
+  expect(await line()).toBe('/feature <name> spawns a worktree session from a brief')
   files['/work/.cs/local/state'] += 'task_branch: feat/thing\n'
-  expect(await line()).toMatch(/^\/finish /)
-  model = 'claude-fable-5-1'
-  expect(await line()).toMatch(/cs -statusline caps/)
+  expect(await line()).toBe('/finish <name> lands a feature branch and retires its worktree')
+})
+
+test('a new conversation starts the tips over', async () => {
+  const first = await line()
+  await turn()
+  expect(await line()).not.toBe(first)
+  sessionId = 'uuid-next'
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-next\n'
+  expect(await line()).toBe(first)
+})
+
+test('the caps tip describes what cs -statusline caps does: the rounded capsule ends, not the plan limits', () => {
+  const caps = TIPS.find(t => t.includes('cs -statusline caps'))
+  expect(caps).toBe('cs -statusline caps ask checks whether your font draws the rounded capsule ends')
 })
 
 test('a fact always outranks a tip', async () => {
@@ -262,4 +306,15 @@ test('the lead\'s first render starts one five-second ticker that redraws the li
   expect(timers.map(t => [t.kind, t.ms])).toEqual([['every', 5000]])
   timers[0].fn()
   expect(invalidated).toEqual(['ui.render'])
+})
+
+test('a dotfile in the queue is not a task, and a state word the hook does not know promises no gate', async () => {
+  existing.add('/work/.cs/local/queue')
+  files['/work/.cs/local/queue/.DS_Store'] = ''
+  expectTip(await line())
+  queue(1)
+  files['/work/.cs/local/queue.state'] = 'broken\n'
+  expect(await line()).toBe('1 queued')
+  files['/work/.cs/local/queue.state'] = ' ar med \n'
+  expect(await line()).toBe('1 queued · draining')
 })

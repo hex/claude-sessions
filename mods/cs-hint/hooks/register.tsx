@@ -4,13 +4,19 @@ import type { On, EngineInterface } from 'claude-code'
 
 // The handoff this conversation continues, found once per conversation id
 // (the store only grows, and the hook writes consumed_by before the first
-// render), and whether the person has spoken in it since. Module state
-// survives a /clear, so the id is what keys it.
-let resumed: { id: string; purpose?: string; spoken: boolean } | undefined
+// render). Module state survives a /clear, so the id is what keys it.
+let resumed: { id: string; purpose?: string } | undefined
+
+// The conversation the person has spoken in, by id: once they have, the
+// resumed step is theirs to remember. On disk, not in module state: a reload
+// of the mod must not bring the step back, and a prompt can land before the
+// line is ever drawn.
+export const SPOKEN = '.cs/local/cs-hint.spoken'
 
 // Which tip the line shows when nothing is waiting: one step per turn of the
 // conversation, never on a timer, so the line holds still while it is read.
-let turns = 0
+// A new conversation (a new id) starts over.
+let turns = { id: '', count: 0 }
 
 // The refresh: mail, the queue and the marker change from outside the process
 // (another session's cs -msg, the queue drain, the rotate skill), so once the
@@ -30,7 +36,7 @@ export const HEARTBEAT = '.cs/local/cs-hint.heartbeat'
 export const TIPS = [
   '/feature <name> spawns a worktree session from a brief',
   '/finish <name> lands a feature branch and retires its worktree',
-  'cs -statusline caps on|off shows the plan limits in the status bar',
+  'cs -statusline caps ask checks whether your font draws the rounded capsule ends',
   '/rotate hands a heavy conversation to a fresh one',
   'press 1 on the band above the prompt to rotate',
   'cs -msg <session> "text" mails another session',
@@ -46,7 +52,7 @@ export const TIPS = [
 ]
 
 export function register(on: On) {
-  resumed = undefined; turns = 0; ticker = undefined
+  resumed = undefined; turns = { id: '', count: 0 }; ticker = undefined
   on('session.start', async ($, e, next) => {
     // Only a cs session has .cs/local; anywhere else the mod stays silent.
     if (await $.fs.exists(`${e.cwd}/.cs/local`)) {
@@ -56,13 +62,15 @@ export function register(on: On) {
   })
   on('turn.complete', async ($, e, next) => {
     // A subagent's turn, an interrupted or an errored one is not a turn of the conversation.
-    if (e.reason === 'answer' && e.agentId === undefined) turns += 1
+    if (e.reason === 'answer' && e.agentId === undefined) (await turnsOf($)).count += 1
     return next(e)
   })
   // The person's own prompt ends the resumed step's showing; the rotation
   // wake, a peer's message or a plugin's prompt is not the person.
   on('prompt.submit', async ($, e, next) => {
-    if ((e.origin.kind === 'composer' || e.origin.kind === 'bridge') && resumed?.id === (await $.session.id())) resumed.spoken = true
+    if (e.origin.kind === 'composer' || e.origin.kind === 'bridge') {
+      await $.fs.write(`${await $.session.cwd()}/${SPOKEN}`, `${await $.session.id()}\n`)
+    }
     return next(e)
   })
   on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
@@ -76,10 +84,11 @@ export function register(on: On) {
   })
 }
 
-// Mail cs delivered to this session and no conversation has read: the files
-// under mail/new, as cs's own reader counts them. Names sort by arrival, so
-// the last is the newest, and its sender names the line; a sender outside a
-// cs session writes "" (never null), and then no sender is named.
+// Mail cs delivered to this session and no conversation has read: the .json
+// files under mail/new, as cs's own reader (_mail_read) selects them. The
+// sender named is the one with the latest `ts` (names carry the epoch too,
+// but cs warns that their order is not arrival order); a sender outside a cs
+// session writes "" (never null), and then no sender is named.
 export const MAIL_NEW = '.cs/local/mail/new'
 
 // The rotate skill's last step writes the handoff's basename here; cs's
@@ -108,9 +117,17 @@ async function gatherFacts($: EngineInterface): Promise<string[]> {
 // consumes the marker). Shown until the person's first prompt here.
 async function resumedStep($: EngineInterface, cwd: string): Promise<string | undefined> {
   const id = await $.session.id()
-  if (resumed?.id !== id) resumed = { id, purpose: await purposeConsumedBy($, cwd, id), spoken: false }
-  if (resumed.spoken || resumed.purpose === undefined) return undefined
+  if (resumed?.id !== id) resumed = { id, purpose: await purposeConsumedBy($, cwd, id) }
+  if (resumed.purpose === undefined) return undefined
+  if ((await readOr($, `${cwd}/${SPOKEN}`)).trim() === id) return undefined
   return `continuing: ${resumed.purpose}`
+}
+
+// The tip counter of the current conversation, started over for a new id.
+async function turnsOf($: EngineInterface) {
+  const id = await $.session.id()
+  if (turns.id !== id) turns = { id, count: 0 }
+  return turns
 }
 
 async function purposeConsumedBy($: EngineInterface, cwd: string, id: string): Promise<string | undefined> {
@@ -139,22 +156,29 @@ function frontmatter(text: string): Record<string, string> {
 }
 
 // The walk-away queue, as cs -queue and the narrative-reminder hook keep it:
-// one file per task under queue/, one word in queue.state, and queue.declined
-// holding the epoch of a "Not yet" the hook honours for ten minutes. An empty
-// queue is never gating, whatever the state file records (the hook's rule).
+// one file per task under queue/ (a glob, so a dotfile is not a task), one
+// word in queue.state, and queue.declined holding the epoch of a "Not yet"
+// the hook honours for ten minutes. An empty queue is never gating, whatever
+// the state file records (the hook's rule).
 export const QUEUE = '.cs/local/queue'
 export const DECLINE_SECONDS = 600
 
 async function queuedTasks($: EngineInterface, cwd: string): Promise<string | undefined> {
   if (!(await $.fs.exists(`${cwd}/${QUEUE}`))) return undefined
-  const count = (await $.fs.list(`${cwd}/${QUEUE}`)).filter(f => f.kind === 'file').length
+  const count = (await $.fs.list(`${cwd}/${QUEUE}`)).filter(f => f.kind === 'file' && !f.name.startsWith('.')).length
   if (count === 0) return undefined
-  return `${count} queued \u00b7 ${await gateState($, cwd)}`
+  const gate = await gateState($, cwd)
+  return gate ? `${count} queued \u00b7 ${gate}` : `${count} queued`
 }
 
-async function gateState($: EngineInterface, cwd: string): Promise<string> {
-  const state = (await readOr($, `${cwd}/${QUEUE}.state`)).trim()
+// The hook's reading of the state word (every whitespace character dropped):
+// armed or draining is a drain in progress; idle, or no word, is a gate the
+// Stop hook will raise unless a decline is still fresh; any other word the
+// hook does not act on, so nothing is promised for it.
+async function gateState($: EngineInterface, cwd: string): Promise<string | undefined> {
+  const state = (await readOr($, `${cwd}/${QUEUE}.state`)).replace(/\s+/g, '')
   if (state === 'armed' || state === 'draining') return 'draining'
+  if (state !== '' && state !== 'idle') return undefined
   const declined = (await readOr($, `${cwd}/${QUEUE}.declined`)).trim()
   if (/^\d+$/.test(declined) && Date.now() / 1000 - Number(declined) < DECLINE_SECONDS) return 'deferred'
   return 'gate waiting'
@@ -172,14 +196,18 @@ async function readOr($: EngineInterface, path: string): Promise<string> {
 async function unreadMail($: EngineInterface, cwd: string): Promise<string | undefined> {
   const dir = `${cwd}/${MAIL_NEW}`
   if (!(await $.fs.exists(dir))) return undefined
-  const names = (await $.fs.list(dir)).filter(f => f.kind === 'file').map(f => f.name).sort()
+  const names = (await $.fs.list(dir)).filter(f => f.kind === 'file' && f.name.endsWith('.json')).map(f => f.name).sort()
   if (names.length === 0) return undefined
   let from = ''
-  try {
-    const parsed = JSON.parse(await $.fs.read(`${dir}/${names[names.length - 1]}`))
-    if (typeof parsed?.from === 'string') from = parsed.from
-  } catch {
-    // an unreadable or half-written message still counts; it just names nobody
+  let latest = -Infinity
+  for (const name of names) {
+    try {
+      const parsed = JSON.parse(await $.fs.read(`${dir}/${name}`))
+      const ts = typeof parsed?.ts === 'number' ? parsed.ts : 0
+      if (ts >= latest) { latest = ts; from = typeof parsed?.from === 'string' ? parsed.from : '' }
+    } catch {
+      // an unreadable or half-written message still counts; it just names nobody
+    }
   }
   const count = `${names.length} message${names.length === 1 ? '' : 's'}`
   return `${count}${from ? ` from ${from}` : ''} \u00b7 cs -msg`
@@ -215,26 +243,25 @@ function stateValue(state: string, key: string): string | undefined {
 async function tip($: EngineInterface): Promise<string> {
   const first = await firstTip($)
   const rest = TIPS.filter(t => t !== first)
-  return turns === 0 ? first : rest[(turns - 1) % rest.length]
+  const { count } = await turnsOf($)
+  return count === 0 ? first : rest[(count - 1) % rest.length]
 }
 
 // A worktree session (task_branch pinned in the state file) is there to be
-// landed; a plain one can spawn worktrees; a Fable session has plan limits
-// the status bar shows only with consent.
+// landed; a plain one can spawn worktrees.
 async function firstTip($: EngineInterface): Promise<string> {
-  if ((await $.session.model()).includes('fable')) return TIPS[2]
   const state = await readOr($, `${await $.session.cwd()}/.cs/local/state`)
   return stateValue(state, 'task_branch') !== undefined ? TIPS[1] : TIPS[0]
 }
 
 // Armed means the marker names a handoff the SessionStart hook will accept
-// after the /clear: a bare basename (the hook rejects a separator), a file in
-// the store, and frontmatter that still says unconsumed. Same rule as the
-// cs-rotate mod's handoffArmed (KEEP IN SYNC).
+// after the /clear: a bare basename read as the hook reads it (every
+// whitespace character dropped; a separator is rejected), a file in the
+// store, and frontmatter that still says unconsumed.
 async function handoffArmed($: EngineInterface, cwd: string): Promise<boolean> {
   if (!(await $.fs.exists(`${cwd}/${MARKER}`))) return false
   try {
-    const name = (await $.fs.read(`${cwd}/${MARKER}`)).trim()
+    const name = (await $.fs.read(`${cwd}/${MARKER}`)).replace(/\s+/g, '')
     if (name === '' || /[/\\]/.test(name)) return false
     return isUnconsumed(await $.fs.read(`${cwd}/${HANDOFFS}/${name}`))
   } catch {
