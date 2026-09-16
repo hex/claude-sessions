@@ -2,6 +2,10 @@
 // ABOUTME: Covers the line's gate (lead, draft, working), each fact in priority order, the tips and the off switch.
 import { test, expect, beforeEach } from 'bun:test'
 
+// The plugin realm provides `h` and `Fragment` as globals; the test does the same.
+;(globalThis as any).h = (type: any, props: any, ...children: any[]) => ({ type, props: props ?? {}, children })
+;(globalThis as any).Fragment = 'Fragment'
+
 import { register, TIPS } from '../hooks/register.tsx'
 
 type Hook = ($: any, e: any, next: (e: any) => Promise<any>) => Promise<any>
@@ -42,7 +46,7 @@ const $ = {
     id: async () => sessionId,
     model: async () => model,
   },
-  ui: { invalidate: (event: string) => { invalidated.push(event) } },
+  ui: { resolve: async () => ({ Box: 'Box', Text: 'Text' }), invalidate: (event: string) => { invalidated.push(event) } },
   clock: { after: timer('after'), every: timer('every') },
   fs: {
     write: async (path: string, text: string) => { written[path] = text; files[path] = text },
@@ -54,14 +58,25 @@ const $ = {
 
 const ENGINE_HINT = '? for shortcuts'
 let received: any
-// The site is a props rewrite: `next` records what it was handed and draws it.
-const next = async (e: any) => { received = e; return { drawn: e.props.hint } }
+const DRAWN = { engine: true }
+// `next` records what it was handed and stands for the engine's own draw.
+const next = async (e: any) => { received = e; return DRAWN }
 // Nothing waiting on the lead: the line is one of the tips, not the engine's.
 const expectTip = (text: string) => expect(TIPS).toContain(text)
+// What the line reads after the hook: the engine's own text when the hook
+// left it alone (a rewrite of `hint` draws nothing on this build while the
+// permission-mode notice owns the line, measured on 2.1.273), else the text
+// of the one dim Text the mod draws beneath it.
 const line = async (props: Partial<{ isDraft: boolean; isWorking: boolean }> = {}) => {
   const e = { props: { isDraft: false, isWorking: false, hint: ENGINE_HINT, ...props } }
-  await hooks['ui.render:PromptHint']($, e, next)
-  return received.props.hint as string
+  const out = await hooks['ui.render:PromptHint']($, e, next)
+  if (out === DRAWN) {
+    expect(received).toBe(e)
+    return ENGINE_HINT
+  }
+  expect(out.type).toBe('Text')
+  expect(out.props).toEqual({ dimColor: true })
+  return out.children.join('') as string
 }
 
 beforeEach(() => {

@@ -1,6 +1,12 @@
-// ABOUTME: cs-hint mod: the hint line under the prompt tells the lead conversation of a cs session what is waiting.
-// ABOUTME: Unread mail, an armed handoff, queued tasks, the resumed handoff's step, else one cs tip; the engine's line while typing.
+/* @jsxRuntime classic */
+/* @jsx h */
+/* @jsxFrag Fragment */
+// ABOUTME: cs-hint mod: one dim line under the prompt tells the lead conversation of a cs session what is waiting.
+// ABOUTME: Unread mail, an armed handoff, queued tasks, the resumed handoff's step, else one cs tip; nothing while typing or working.
 import type { On, EngineInterface } from 'claude-code'
+
+declare const h: any
+declare const Fragment: any
 
 // The handoff this conversation continues, found once per conversation id
 // (the store only grows, and the hook writes consumed_by before the first
@@ -80,7 +86,12 @@ export function register(on: On) {
     if (!ticker) ticker = $.clock.every(REFRESH_MS, () => $.ui.invalidate('ui.render'))
     const facts = await gatherFacts($)
     const hint = facts.length > 0 ? facts.slice(0, 2).join(' \u00b7 ') : await tip($)
-    return next({ ...e, props: { ...e.props, hint } })
+    // The mod draws its own line rather than rewriting `hint`: measured on
+    // 2.1.273, a rewrite draws nothing while the permission-mode notice
+    // (`auto mode on`) owns the engine's line, which in a cs session it
+    // always does; a tree is drawn beneath that notice, which stays.
+    const { Text } = await $.ui.resolve(e)
+    return <Text dimColor>{hint}</Text>
   })
 }
 
