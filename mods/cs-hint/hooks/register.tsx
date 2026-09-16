@@ -73,8 +73,11 @@ export function register(on: On) {
   })
   // The person's own prompt ends the resumed step's showing; the rotation
   // wake, a peer's message or a plugin's prompt is not the person.
+  // Recorded only where the line is drawn: a teammate's prompt must not
+  // stand for the lead's, and outside a cs session (or with the line off)
+  // nothing is written, since fs.write would create .cs/local there.
   on('prompt.submit', async ($, e, next) => {
-    if (e.origin.kind === 'composer' || e.origin.kind === 'bridge') {
+    if ((e.origin.kind === 'composer' || e.origin.kind === 'bridge') && (await ownsLine($))) {
       await $.fs.write(`${await $.session.cwd()}/${SPOKEN}`, `${await $.session.id()}\n`)
     }
     return next(e)
@@ -103,9 +106,8 @@ export function register(on: On) {
 export const MAIL_NEW = '.cs/local/mail/new'
 
 // The rotate skill's last step writes the handoff's basename here; cs's
-// SessionStart hook reads it on the next conversation. The cs-rotate mod draws
-// its /clear button for this above the prompt only past the context threshold;
-// below it this line is the one place the armed handoff shows.
+// SessionStart hook reads it on the next conversation. The cs-rotate mod's
+// capsule offers the /clear too; this line says so in words, in its own slot.
 export const MARKER = '.cs/local/pending-handoff'
 export const HANDOFFS = '.cs/handoffs'
 

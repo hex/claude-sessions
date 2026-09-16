@@ -333,3 +333,28 @@ test('a dotfile in the queue is not a task, and a state word the hook does not k
   files['/work/.cs/local/queue.state'] = ' ar med \n'
   expect(await line()).toBe('1 queued · draining')
 })
+
+test('only the lead of a cs session records a spoken prompt: a teammate, a plain directory and the off switch write nothing', async () => {
+  consumed('uuid-lead')
+  sessionId = 'uuid-mate'
+  await submit('composer')
+  expect(written['/work/.cs/local/cs-hint.spoken']).toBeUndefined()
+  sessionId = 'uuid-lead'
+  expect(await line()).toBe('continuing: build the hint mod')
+  existing.delete('/work/.cs/local')
+  delete files['/work/.cs/local/state']
+  await submit('composer')
+  expect(Object.keys(written)).toEqual([])
+  existing.add('/work/.cs/local')
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-lead\n'
+  envVars.CS_NO_HINTS = '1'
+  await submit('composer')
+  expect(Object.keys(written)).toEqual([])
+})
+
+test('an errored turn does not advance the tips', async () => {
+  const first = await line()
+  await turn('error')
+  await turn('refusal')
+  expect(await line()).toBe(first)
+})
