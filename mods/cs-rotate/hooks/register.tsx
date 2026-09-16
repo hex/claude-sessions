@@ -74,10 +74,11 @@ let bandIdle = false
 let adopted: string | undefined
 let started: { id: string; percent: number | undefined } | undefined
 let clearSeen = false
+let birth: string | undefined
 
 export function register(on: On) {
   // A (re)load has no countdown: the engine cancelled the old one's timers.
-  left = undefined; ticker = undefined; bandIdle = false; adopted = undefined; started = undefined; clearSeen = false
+  left = undefined; ticker = undefined; bandIdle = false; adopted = undefined; started = undefined; clearSeen = false; birth = undefined
   on('session.start', async ($, e, next) => {
     // Only a cs session has .cs/local; anywhere else the mod stays silent.
     const local = `${e.cwd}/.cs/local`
@@ -112,6 +113,9 @@ export function register(on: On) {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const drawn = await next(e)
+    // The band draws in a new conversation before any of its turns end, so
+    // the birth is settled here: a later /resume is not mistaken for it.
+    noteConversation(await $.session.id())
     // A survey owns the band; a running turn cannot be rotated out of.
     bandIdle = !e.props.hasSurvey && !e.props.isWorking
     if (!bandIdle) return drawn
@@ -203,6 +207,18 @@ async function forceThreshold($: EngineInterface): Promise<number | undefined> {
   return raw !== undefined && /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : undefined
 }
 
+// A conversation id the mod has not met yet is the current one from here on.
+// It is a birth, to be judged by its first turn's end, only when a /clear was
+// seen since the last id; a /resume, a launch or a reload adopt unjudged, and
+// an earlier judgment of the same id is dropped with them.
+function noteConversation(id: string) {
+  if (id === adopted) return
+  adopted = id
+  started = undefined
+  birth = clearSeen ? id : undefined
+  clearSeen = false
+}
+
 // Runs /rotate for the person once a turn ends past the force threshold, once
 // per conversation, from a timer: the contract refuses `$.command.run` inside
 // a hook the turn is waiting on, and a `clock.after` callback runs once the
@@ -214,15 +230,13 @@ async function forceRotation($: EngineInterface) {
   if (!(await ownsRotation($))) return
   const id = await $.session.id()
   const { context } = await $.session.usage()
-  if (id !== adopted) {
-    if (clearSeen) {
-      started = { id, percent: context.percent }
-      if (started.percent !== undefined && started.percent >= force) {
-        $.ui.toast(`cs-rotate: CS_ROTATE_FORCE_CTX=${force} is below this conversation's starting context (${started.percent}%); not forcing a rotation`)
-      }
+  noteConversation(id)
+  if (birth === id) {
+    birth = undefined
+    started = { id, percent: context.percent }
+    if (started.percent !== undefined && started.percent >= force) {
+      $.ui.toast(`cs-rotate: CS_ROTATE_FORCE_CTX=${force} is below this conversation's starting context (${started.percent}%); not forcing a rotation`)
     }
-    adopted = id
-    clearSeen = false
   }
   if (await handoffArmed($)) {
     if (!ticker) startCountdown($)

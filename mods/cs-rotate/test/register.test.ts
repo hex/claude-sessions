@@ -652,3 +652,41 @@ test('the /clear the mod runs itself marks the successor as /clear-born too, so 
   expect(timers.filter(t => t.kind === 'after')).toEqual([])
   expect(toasts).toHaveLength(1)
 })
+
+test('a /clear whose successor never answers does not mark a later /resume as /clear-born: the band drawn in the successor consumes the birth', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  percent = 30
+  await turnComplete()
+  await clearRun()
+  sessionId = 'uuid-wake'
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-wake\n'
+  await band()
+  sessionId = 'uuid-resumed'
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-resumed\n'
+  percent = 72
+  await turnComplete()
+  expect(timers.map(t => t.kind)).toEqual(['after'])
+  expect(toasts).toEqual([])
+})
+
+test('resuming a conversation that was once judged adopts it afresh: the old judgment is dropped', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  percent = 30
+  await turnComplete()
+  await clearRun()
+  sessionId = 'uuid-judged'
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-judged\n'
+  percent = 75
+  await turnComplete()
+  expect(timers).toEqual([])
+  sessionId = 'uuid-other'
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-other\n'
+  percent = 20
+  await turnComplete()
+  sessionId = 'uuid-judged'
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-judged\n'
+  percent = 75
+  await turnComplete()
+  expect(timers.map(t => t.kind)).toEqual(['after'])
+  expect(toasts).toHaveLength(1)
+})

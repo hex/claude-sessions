@@ -178,7 +178,8 @@ export CS_ROTATE_BUTTON_CTX="40"
 # conversation, then counts the band down for 20 seconds and runs the /clear
 # that continues from the handoff. Pressing 1 clears at once; sending a
 # prompt stops the countdown. Not a number, or unset: never forced. A
-# conversation that starts past it is never forced (a toast says so once).
+# conversation born of a /clear that already starts past it is never forced
+# (a toast says so once); one met at launch or through /resume is.
 export CS_ROTATE_FORCE_CTX="70"
 
 # Narrative rotation: rotate when the live file passes MAX, keep about KEEP bytes
