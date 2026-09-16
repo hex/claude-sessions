@@ -1439,7 +1439,23 @@ _git_text() {
     _GIT_TEXT=""
     local dir="$1"
     [ -n "$dir" ] || return 0
-    [ -e "$dir/.git" ] || return 0
+    # The workspace directory follows the Bash tool's cwd, so a subdirectory
+    # of the checkout must read as the checkout: climb to the nearest ancestor
+    # holding .git (a directory, or the file a worktree keeps), in-process, and
+    # key the cache on it so every subdirectory shares one entry. Trailing
+    # slashes are dropped at every step, so `/repo/`, `/repo//sub/` and
+    # `/repo/sub` all name the `/repo` entry; the climb ends at `/` itself,
+    # checked once. A relative path climbs its own components and never `.`
+    # (the workspace path is absolute).
+    while :; do
+        while [ "$dir" != / ] && [ "${dir%/}" != "$dir" ]; do dir="${dir%/}"; done
+        [ -e "$dir/.git" ] && break
+        case "$dir" in
+            /) return 0 ;;
+            */*) dir="${dir%/*}"; [ -n "$dir" ] || dir=/ ;;
+            *) return 0 ;;
+        esac
+    done
     if _cache_read git "$dir" "$GIT_CACHE_TTL"; then
         _GIT_TEXT="$_CACHE_TEXT"
         return 0
