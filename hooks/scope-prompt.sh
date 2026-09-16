@@ -110,7 +110,8 @@ _trace() {  # stage
 # load is not counted; the registered timeout counts it, and is the backstop.
 _now_ms
 _T0=$_MS
-# Set where the deadline trips; the digest exit carries it in the block's place.
+# What the deadline below says when it fires; every exit emits it in the scope
+# block's place, and it is empty on every run that reaches the scan.
 SKIP_NOTE=""
 
 _trace_open "${CLAUDE_SESSION_META_DIR:-}/local"
@@ -495,10 +496,13 @@ _trace classify
 # past the shell's arithmetic cannot wrap to a zero that would. The registered
 # timeout stays the backstop for a scan that is itself slow.
 _BUDGET_MS="${CS_SCOPE_BUDGET_MS:-1500}"
-case "$_BUDGET_MS" in ''|*[!0-9]*|????????*) _BUDGET_MS=1500 ;; esac
+# 10# forces base 10 once the value is known to be digits, so a budget written
+# 0100 is a hundred milliseconds rather than an invalid octal — and the note
+# below quotes the number the hook actually used.
+case "$_BUDGET_MS" in ''|*[!0-9]*|????????*) _BUDGET_MS=1500 ;; *) _BUDGET_MS=$(( 10#$_BUDGET_MS )) ;; esac
 _now_ms
 _ELAPSED_MS=$(( _MS - _T0 ))
-if [ "$_ELAPSED_MS" -ge "$(( 10#$_BUDGET_MS ))" ]; then
+if [ "$_ELAPSED_MS" -ge "$_BUDGET_MS" ]; then
     SKIP_NOTE="Scope: skipped, slow machine (this hook's front half took ${_ELAPSED_MS} ms of its ${_BUDGET_MS} ms budget, so the grounded scan was not run; locate the relevant files yourself)"
     _trace skip
     _digest_exit
