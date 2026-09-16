@@ -76,7 +76,6 @@ No git repo required. No project structure needed. Just a name for what you're w
 
   ![cs-statusline: the identity and context capsules, amber ink past a warn threshold, a red capsule at crit](assets/screenshot2.png)
 - **iTerm2 awareness** - inside iTerm2 the session color tints the tab (native escapes, reset on exit), and with iTerm2 shell integration installed a finished turn bounces the dock until your next prompt. `CS_NO_ITERM2=1` disables the bounce; `cs -doctor` reports the integration surface.
-- **Finished-turn notification** - on macOS with [terminal-notifier](https://github.com/julienXX/terminal-notifier) installed (`brew install terminal-notifier`, before `./install.sh`), a turn that ends while the terminal is not the frontmost app posts a notification with the cs owl as its icon; clicking it brings the terminal forward, and your next prompt takes it down. The installer builds the owl into a `cs.app` sender under `~/.local/share/cs/`, since macOS shows a notification with its sender's icon; macOS asks once whether cs may notify. `CS_NO_NOTIFY=1` disables; `cs -doctor` reports the state.
 
 ### Security and trust
 

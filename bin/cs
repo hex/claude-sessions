@@ -66,12 +66,10 @@ CS_HOOKS=(
 # Files under hooks/ that the hooks source, or that cs points other tools at,
 # rather than files Claude Code invokes as hooks. Deployed and removed alongside
 # the hooks, never registered against an event. The prompt-rewriter scripts are
-# reached through $EDITOR, not through any hook event. cs-logo.png is the icon
-# the Stop hook hands terminal-notifier for the finished-turn notification.
+# reached through $EDITOR, not through any hook event.
 CS_HOOK_LIBS=(
     cs-resolve.sh
     cs-shared.sh
-    cs-logo.png
     prompt-rewriter.sh
     prompt-rewriter-model.sh
     prompt-rewriter-vendor.sh
@@ -202,59 +200,6 @@ _narrative_budget() {  # value, default
     if [ "$n" -gt 0 ]; then echo "$n"; else echo "$2"; fi
 }
 
-# The finished-turn notification's poster. The installer assembles cs.app, a
-# copy of terminal-notifier.app whose icon is the cs owl, because macOS shows
-# a notification with its SENDER's icon and nothing a poster passes
-# (-appIcon, -contentImage) changes that. Groups are per sender app too, so
-# the post and the removes must all go through one binary: the bundle's when
-# it is installed, else terminal-notifier from PATH, else nothing (rc 1).
-cs_notifier_app() {
-    printf '%s' "${XDG_DATA_HOME:-$HOME/.local/share}/cs/cs.app"
-}
-cs_notifier_bin() {
-    local app
-    app="$(cs_notifier_app)/Contents/MacOS/terminal-notifier"
-    if [ -x "$app" ]; then
-        printf '%s' "$app"
-        return 0
-    fi
-    command -v terminal-notifier 2>/dev/null
-}
-# Every poster present, one per line, for the removes: a notification posted
-# through PATH's notifier before the bundle was installed belongs to that
-# sender, and clearing both is what keeps no notification outliving the
-# install that changed the poster. rc 1 when there is none.
-cs_notifier_bins() {
-    local app bin found=1
-    app="$(cs_notifier_app)/Contents/MacOS/terminal-notifier"
-    if [ -x "$app" ]; then
-        printf '%s\n' "$app"
-        found=0
-    fi
-    if bin=$(command -v terminal-notifier 2>/dev/null) && [ -n "$bin" ]; then
-        printf '%s\n' "$bin"
-        found=0
-    fi
-    return $found
-}
-
-# The binary a bundle is assembled from: the terminal-notifier.app Homebrew
-# keeps beside the bin/ wrapper that PATH resolves to (that wrapper is a
-# 124-byte script, not the poster), or the resolved PATH entry itself in any
-# other layout. install.sh resolves the source app the same way; the doctor
-# hashes this to tell a bundle a brew upgrade left behind. rc 1 when there
-# is no terminal-notifier on PATH.
-cs_notifier_source_bin() {
-    local bin real app
-    bin=$(command -v terminal-notifier 2>/dev/null) || return 1
-    real=$(readlink -f "$bin" 2>/dev/null) || real="$bin"
-    app="$(dirname "$real")/../terminal-notifier.app/Contents/MacOS/terminal-notifier"
-    if [ -x "$app" ]; then
-        printf '%s' "$app"
-    else
-        printf '%s' "$real"
-    fi
-}
 _claude_encode_path() {
     local p="$1"
     p="${p//\//-}"
@@ -5892,35 +5837,6 @@ _doctor_check_iterm2() {
     fi
 }
 
-# The finished-turn notification's poster. The bundle carries the owl; its
-# binary is a signed copy of the terminal-notifier on PATH, and the installer
-# records the source's digest beside it, so a digest that no longer matches
-# is a bundle a brew upgrade left behind. Silent off macOS with nothing
-# installed.
-_doctor_check_notify() {
-    local app bin recorded current
-    app="$(cs_notifier_app)/Contents/MacOS/terminal-notifier"
-    bin=$(cs_notifier_source_bin) || bin=""
-    if [ -n "${CS_NO_NOTIFY:-}" ]; then
-        _doctor_ok "Notification: disabled (CS_NO_NOTIFY)"
-    elif [ -x "$app" ]; then
-        recorded=$(cat "$(cs_notifier_app)/Contents/Resources/cs-source.sha256" 2>/dev/null || true)
-        current=""
-        [ -n "$bin" ] && current=$(shasum -a 256 "$bin" 2>/dev/null | cut -d' ' -f1)
-        if [ -z "$bin" ]; then
-            _doctor_ok "Notification: cs.app bundle active (owl icon); terminal-notifier is not on PATH"
-        elif [ -n "$recorded" ] && [ "$recorded" = "$current" ]; then
-            _doctor_ok "Notification: cs.app bundle active (owl icon)"
-        else
-            _doctor_warn "Notification: cs.app bundle differs from the installed terminal-notifier (run ./install.sh)"
-        fi
-    elif [ -n "$bin" ]; then
-        _doctor_warn "Notification: terminal-notifier on PATH, no cs.app bundle (no owl icon; run ./install.sh)"
-    elif [ "$(uname -s)" = "Darwin" ]; then
-        _doctor_ok "Notification: off (brew install terminal-notifier, then ./install.sh)"
-    fi
-}
-
 # Spawn hygiene, all best-effort warnings:
 #   - .seed.stale and .brief.md.stale files accumulate in .spawn/ (the launch
 #     path sets aged-out seeds and their briefs aside but never deletes them),
@@ -6411,7 +6327,6 @@ run_doctor() {
     _doctor_check_statusline
     _doctor_check_subagent_statusline
     _doctor_check_iterm2
-    _doctor_check_notify
     _doctor_check_spawn
     _doctor_check_hook_authority
 
@@ -8304,19 +8219,6 @@ run_uninstall() {
             info "Removed $skills_dir/$mod/"
         fi
     done
-
-    # Remove the notifier bundle the installer assembled. Its path ends in
-    # cs.app by construction; the check keeps a wrong XDG_DATA_HOME from
-    # widening the rm.
-    local notifier_app
-    notifier_app=$(cs_notifier_app)
-    case "$notifier_app" in
-        */cs.app)
-            if [ -d "$notifier_app" ]; then
-                rm -rf "$notifier_app"
-                info "Removed $notifier_app/"
-            fi ;;
-    esac
 
     # Remove shell completions
     if [ -f "$bash_completion_dir/cs.bash" ]; then

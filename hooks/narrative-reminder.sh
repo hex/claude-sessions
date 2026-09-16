@@ -438,54 +438,6 @@ if [ -z "${CS_NO_ITERM2:-}" ] && [ "${TERM_PROGRAM:-}" = "iTerm.app" ]; then
     { [ -x "$_it2" ] && "$_it2" start > "${CS_IT2_TTY:-/dev/tty}"; } 2>/dev/null || true
 fi
 
-# macOS: post a notification when the terminal is not the frontmost app, so a
-# finished turn reaches the user in another window. Frontmost comes from
-# lsappinfo; the terminal's own bundle id from __CFBundleIdentifier, which
-# LaunchServices sets on every process a GUI app started and tmux passes
-# through (TERM_PROGRAM reads "tmux" there), with the TERM_PROGRAM table as
-# the fallback. When either side is unknown nothing is posted rather than a
-# guess. One group per session, so a repeat replaces the last one; scope-prompt.sh
-# removes it at the next prompt and session-start.sh at launch. Lead only: a
-# tmux teammate ends turns of its own while the user is away. CS_NO_NOTIFY=1
-# disables; silent wherever no poster is installed. The poster is the cs.app
-# bundle the installer assembles (its icon is the owl; macOS shows the
-# sender's icon and ignores any the poster names) or, without it, the
-# terminal-notifier on PATH; cs_notifier_bin picks, so the removes reach the
-# same sender the post did.
-if ! command -v cs_notifier_bin >/dev/null 2>&1; then
-    cs_notifier_bin() { command -v terminal-notifier 2>/dev/null; }
-fi
-_cs_terminal_bundle() {
-    if [ -n "${__CFBundleIdentifier:-}" ]; then
-        printf '%s' "$__CFBundleIdentifier"
-        return 0
-    fi
-    case "${TERM_PROGRAM:-}" in
-        iTerm.app) printf 'com.googlecode.iterm2' ;;
-        Apple_Terminal) printf 'com.apple.Terminal' ;;
-        *) [ "${LC_TERMINAL:-}" = "iTerm2" ] && printf 'com.googlecode.iterm2' ;;
-    esac
-}
-_cs_frontmost_bundle() {
-    local asn line
-    asn=$(lsappinfo front 2>/dev/null) || return 1
-    [ -n "$asn" ] || return 1
-    line=$(lsappinfo info -only bundleid "$asn" 2>/dev/null) || return 1
-    line=${line##*=}
-    line=${line//\"/}
-    [ -n "$line" ] || return 1
-    printf '%s' "$line"
-}
-if [ -z "${CS_NO_NOTIFY:-}" ] && _notifier=$(cs_notifier_bin) && [ -n "$_notifier" ] \
-    && _mail_is_lead; then
-    _term=$(_cs_terminal_bundle) || _term=""
-    _front=$(_cs_frontmost_bundle) || _front=""
-    if [ -n "$_term" ] && [ -n "$_front" ] && [ "$_term" != "$_front" ]; then
-        "$_notifier" -group "cs:$CLAUDE_SESSION_NAME" -title "cs: $CLAUDE_SESSION_NAME" \
-            -message "finished a turn" -activate "$_term" </dev/null >/dev/null 2>&1 || true
-    fi
-fi
-
 # --- Task queue drain (walk-away mode) ---------------------------------------
 # Hands the agent its next queued task when armed; asks once when idle. Wins
 # over the narrative nag (returns early). Queue text is arbitrary -> jq emit.

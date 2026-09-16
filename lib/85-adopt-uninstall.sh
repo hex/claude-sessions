@@ -312,19 +312,6 @@ run_uninstall() {
         fi
     done
 
-    # Remove the notifier bundle the installer assembled. Its path ends in
-    # cs.app by construction; the check keeps a wrong XDG_DATA_HOME from
-    # widening the rm.
-    local notifier_app
-    notifier_app=$(cs_notifier_app)
-    case "$notifier_app" in
-        */cs.app)
-            if [ -d "$notifier_app" ]; then
-                rm -rf "$notifier_app"
-                info "Removed $notifier_app/"
-            fi ;;
-    esac
-
     # Remove shell completions
     if [ -f "$bash_completion_dir/cs.bash" ]; then
         rm "$bash_completion_dir/cs.bash"

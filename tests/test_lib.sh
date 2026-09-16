@@ -172,10 +172,9 @@ export GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-$(git config --global user.email 2>
 export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME" GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
 export HOME="$(mktemp -d)/home"
 mkdir -p "$HOME"
-# The notifier bundle lives under XDG_DATA_HOME when that is set; inherited
-# from the developer's shell it would point the install and uninstall tests
-# at the real bundle, whatever HOME says. Scoped here, at source time, as
-# HOME is.
+# XDG_DATA_HOME inherited from the developer's shell would point the install
+# and uninstall tests at the real data directory, whatever HOME says. Scoped
+# here, at source time, as HOME is.
 unset XDG_DATA_HOME
 # The scope-prompt hook's own deadline (CS_SCOPE_BUDGET_MS) is off the table
 # for every suite that drives the hook: tests time nothing, and a loaded
@@ -190,12 +189,6 @@ export CS_SCOPE_BUDGET_MS="600000"
 unset TMUX TMUX_PANE
 export CS_TITLE_TTY="$HOME/title-tty"
 export CS_NO_UPDATE_CHECK=1
-# Never post a macOS notification from a test run: terminal-notifier is on
-# PATH on a developer's Mac, and the hooks run under every suite's Stop and
-# prompt fixtures. Set here, at source time, because many suites override
-# setup(); the notify suite unsets it per test. It also reads the prompt's
-# stdin as message data, which is what test_notify pins.
-export CS_NO_NOTIFY=1
 # The binaries under review come first on PATH, so a test that runs
 # `cs-secrets` exercises this tree and not whatever install.sh last put in
 # ~/.local/bin — and CI, which installs nothing, finds them at all.
@@ -215,7 +208,6 @@ setup() {
     # Never fire iTerm2 escapes (dock bounce) at the developer's terminal from
     # a test run; the iterm2 suite re-enables this per test with its own seams.
     export CS_NO_ITERM2=1
-    export CS_NO_NOTIFY=1
     # Isolate from the developer's real ~/.claude/projects/ so transcript
     # discovery sees only what the test seeds. Same env var used by
     # _doctor_check_token_cost and the Phase 8 binding helpers.
@@ -237,7 +229,7 @@ teardown() {
     if [[ -n "$TEST_TMPDIR" ]] && [[ -d "$TEST_TMPDIR" ]]; then
         rm -rf "$TEST_TMPDIR"
     fi
-    unset CS_SESSIONS_ROOT CLAUDE_CODE_BIN CS_TRANSCRIPTS_DIR CS_NO_UPDATE_CHECK CS_NO_ITERM2 CS_NO_NOTIFY
+    unset CS_SESSIONS_ROOT CLAUDE_CODE_BIN CS_TRANSCRIPTS_DIR CS_NO_UPDATE_CHECK CS_NO_ITERM2
 }
 
 # --- Test Runner ---
