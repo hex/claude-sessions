@@ -3749,6 +3749,10 @@ test_warm_render_forks_only_the_interpreter_and_jq() {
     assert_eq "$plain" "$FORKS_OUT" "the counted render draws the same line" || return 1
     assert_output_contains_f "$FORKS_OUT" "main +1!1" "and the line carries the git segment" || return 1
     assert_output_contains_f "$FORKS_OUT" "5h" "and the limits" || return 1
+    # The instrumentation itself: the two forks every render makes must have
+    # been seen, or the shims were never installed and the count means nothing.
+    grep -qx bash "$TEST_TMPDIR/forks" || { echo "  FAIL: the interpreter was not counted; shims missing"; return 1; }
+    grep -qx jq "$TEST_TMPDIR/forks" || { echo "  FAIL: jq was not counted; shims missing"; return 1; }
     # A bash without a builtin clock (3.2, macOS stock) forks date once for the
     # render's shared clock; nothing else is allowed through.
     local limit=2
@@ -3939,7 +3943,8 @@ test_git_cache_keys_a_long_path() {
     CS_STATUSLINE_NOW=1000 run_sl "$json" >/dev/null
     git -C "$long" checkout -q -b other
     local out; out=$(CS_STATUSLINE_NOW=1002 run_sl "$json")
-    assert_output_not_contains_f "$out" "⎇ other" "within the TTL the long path's cached branch answers" || return 1
+    assert_output_contains_f "$out" "⎇ ma" "the long path's cached branch (main or master) answers" || return 1
+    assert_output_not_contains_f "$out" "⎇ other" "within the TTL, not the new one" || return 1
 }
 
 run_test test_git_cache_keys_a_long_path
@@ -4018,5 +4023,76 @@ test_org_cache_does_not_remember_an_empty_answer() {
 }
 
 run_test test_org_cache_does_not_remember_an_empty_answer
+
+
+# A wrapper Claude Code runs in place of this script names the pid it is the
+# child of in CS_STATUSLINE_PARENT, and the per-conversation caches key on
+# that, so a bridge that is a new process every tick still hits them.
+test_cache_keys_on_the_named_parent() {
+    ( _load_sl_functions
+      export TMUX="/tmp/fake,2216,0" PATH="$TEST_TMPDIR/fakebin:$PATH"
+      _make_ps_chain "$$:2216 2216:1"
+      CS_STATUSLINE_PARENT=4242 CS_STATUSLINE_NOW=1000 _NOW="" _SL_NOW_READY="" _sl_tmux_is_real \
+          || { echo "    a real chain must pass"; return 1; }
+      _make_ps_chain "$$:1"
+      CS_STATUSLINE_PARENT=4242 CS_STATUSLINE_NOW=1010 _NOW="" _SL_NOW_READY="" _sl_tmux_is_real \
+          || { echo "    the verdict cached under the named parent must answer"; return 1; }
+      CS_STATUSLINE_NOW=1011 _NOW="" _SL_NOW_READY="" _sl_tmux_is_real \
+          && { echo "    without the name the key is this shell's own parent, a miss"; return 1; }
+      return 0 )
+}
+
+run_test test_cache_keys_on_the_named_parent
+
+# A cache file caught between its two lines is a miss, not an empty answer.
+test_cache_read_rejects_a_half_written_entry() {
+    ( _load_sl_functions
+      mkdir -p "$HOME/.cache/cs/org"
+      _cache_key "/c.json"
+      printf '1000\t/c.json\n' > "$HOME/.cache/cs/org/$_CACHE_KEY"
+      CS_STATUSLINE_NOW=1001 _NOW="" _SL_NOW_READY="" _cache_read org /c.json 300 \
+          && { echo "    a header with no text line was taken as a hit"; return 1; }
+      printf '1000\t/c.json\norg-1' > "$HOME/.cache/cs/org/$_CACHE_KEY"
+      CS_STATUSLINE_NOW=1001 _NOW="" _SL_NOW_READY="" _cache_read org /c.json 300 \
+          && { echo "    an unterminated text line was taken as a hit"; return 1; }
+      printf '1000\t/c.json\norg-1\n' > "$HOME/.cache/cs/org/$_CACHE_KEY"
+      CS_STATUSLINE_NOW=1001 _NOW="" _SL_NOW_READY="" _cache_read org /c.json 300 \
+          || { echo "    a complete entry must hit"; return 1; }
+      assert_eq "org-1" "$_CACHE_TEXT" "with its text" || return 1 )
+}
+
+run_test test_cache_read_rejects_a_half_written_entry
+
+# The refresher takes its schedule from the sidecar the render reads, so a
+# stale sidecar (its refresher killed before rewriting it) is past due and the
+# next refresh rewrites both rather than declining against the JSON's schedule.
+test_refresher_schedule_comes_from_the_sidecar() {
+    use_scratch_usage_env
+    local bindir="$TEST_TMPDIR/bin"; mkdir -p "$bindir"
+    cat > "$bindir/security" <<'SEC'
+#!/bin/bash
+printf '%s\n' '{"claudeAiOauth":{"accessToken":"test-token-not-real"}}'
+SEC
+    cat > "$bindir/curl" <<CURL
+#!/bin/bash
+cat > /dev/null
+echo hit >> "$TEST_TMPDIR/curl-hits"
+printf '500'
+CURL
+    chmod +x "$bindir/security" "$bindir/curl"
+    export CS_SECURITY_BIN="$bindir/security"
+    # JSON says not due for a long time; the sidecar (stale) says due long ago.
+    mkdir -p "$CS_USAGE_DIR"
+    printf '%s' '{"org":"org-abc","pct":55,"resets_at":"2026-08-29T03:59:59Z","fetched_at":1787815990,"next_poll_at":1787999999}' \
+        > "$CS_USAGE_DIR/fable.org-abc.json"
+    printf '%s\n' 55 "2026-08-29T03:59:59Z" 1787815990 1787815000 1787975999 > "$CS_USAGE_DIR/fable.org-abc.json.fields"
+    PATH="$bindir:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
+    assert_file_exists "$TEST_TMPDIR/curl-hits" "the refresher fetched: the sidecar's schedule was past due" || return 1
+    # A failed fetch keeps the reading and its fetched_at; the schedule moves.
+    assert_eq "1787816600" "$(sed -n 4p "$CS_USAGE_DIR/fable.org-abc.json.fields")" "and the sidecar was rewritten with the JSON's new schedule" || return 1
+    assert_eq "1787816600" "$(jq -r '.next_poll_at' "$CS_USAGE_DIR/fable.org-abc.json")" "the two agree" || return 1
+}
+
+run_test test_refresher_schedule_comes_from_the_sidecar
 
 report_results

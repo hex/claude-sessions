@@ -77,7 +77,9 @@ _cache_read() {
     _cache_key "$2"; [ -n "$_CACHE_KEY" ] || return 1
     local f="$HOME/.cache/cs/$1/$_CACHE_KEY" head="" text="" when
     [ -f "$f" ] || return 1
-    { IFS= read -r head; IFS= read -r text; } < "$f"
+    # Both lines must be complete (each read succeeds only at a newline): a
+    # write caught halfway is a miss, not an empty or partial answer.
+    { IFS= read -r head && IFS= read -r text; } < "$f" || return 1
     [ "${head#*$'\t'}" = "$2" ] || return 1
     when="${head%%$'\t'*}"
     [[ "$when" =~ ^[0-9]+$ ]] || return 1
@@ -95,6 +97,20 @@ _cache_write() {
     local d="$HOME/.cache/cs/$1"
     [ -d "$d" ] || mkdir -p "$d" 2>/dev/null || return 0
     { printf '%s\t%s\n%s\n' "$_NOW" "$2" "$3" > "$d/$_CACHE_KEY"; } 2>/dev/null || true
+}
+
+# The process the per-conversation caches are keyed on. Claude Code is the
+# render's parent and the same for every render of a conversation, so PPID is
+# the key; a wrapper that Claude Code runs instead (a status-line bridge that
+# then runs this script, a new process each tick) names the pid it is itself
+# the child of in CS_STATUSLINE_PARENT, which is set per run by that wrapper
+# and never inherited from a launch, so it cannot make an impostor a member.
+_sl_parent_pid() {
+    _PARENT="$PPID"
+    case "${CS_STATUSLINE_PARENT:-}" in
+        ''|*[!0-9]*) ;;
+        *) _PARENT="$CS_STATUSLINE_PARENT" ;;
+    esac
 }
 
 # Resolve SL_THEME for this render. CS_TERM_THEME set on its own (no
@@ -139,11 +155,12 @@ _sl_tmux_client() {
     [ -z "$_TMUX_CLIENT_ASKED" ] || return 0
     _TMUX_CLIENT_ASKED=1
     local out
-    if _cache_read tmux-client "$PPID,${TMUX:-}" "$TMUX_CLIENT_CACHE_TTL"; then
+    _sl_parent_pid
+    if _cache_read tmux-client "$_PARENT,${TMUX:-}" "$TMUX_CLIENT_CACHE_TTL"; then
         out="$_CACHE_TEXT"
     else
         out=$(tmux display-message -p '#{client_theme}'$'\t''#{client_tty}' 2>/dev/null) || return 0
-        case "$out" in *$'\t'*) _cache_write tmux-client "$PPID,${TMUX:-}" "$out" ;; esac
+        case "$out" in *$'\t'*) _cache_write tmux-client "$_PARENT,${TMUX:-}" "$out" ;; esac
     fi
     case "$out" in
         *$'\t'*) _TMUX_CLIENT_THEME="${out%%$'\t'*}"; _TMUX_CLIENT_TTY="${out#*$'\t'}" ;;
@@ -196,7 +213,7 @@ _sl_tmux_is_real() {
     # A caller that names a start pid is a test of the walk itself; only the
     # render's own question is cached.
     local ident="" verdict
-    [ -n "${1:-}" ] || ident="$PPID,$TMUX"
+    if [ -z "${1:-}" ]; then _sl_parent_pid; ident="$_PARENT,$TMUX"; fi
     if [ -n "$ident" ] && _cache_read tmux-real "$ident" "$TMUX_REAL_CACHE_TTL"; then
         case "$_CACHE_TEXT" in
             real) return 0 ;;
@@ -1172,8 +1189,17 @@ _refresh_usage() {
     _usage_cache_file "$org" || _CACHE_FILE="$dir/fable.unattributed.json"
     if [ -f "$_CACHE_FILE" ]; then
         cache="$_CACHE_FILE"
-        local due_at
-        due_at=$(jq -r '(.next_poll_at // 0 | tostring)' "$cache" 2>/dev/null) || due_at=0
+        # The schedule comes from the sidecar when there is one, the same file
+        # the render reads, so the two never disagree about what is due: a
+        # refresher killed between the JSON and the sidecar leaves a stale
+        # sidecar whose schedule is already past, and the next refresh
+        # rewrites both.
+        local due_at=""
+        if [ -f "$cache.fields" ]; then
+            { IFS= read -r due_at; IFS= read -r due_at; IFS= read -r due_at; IFS= read -r due_at; } < "$cache.fields"
+        else
+            due_at=$(jq -r '(.next_poll_at // 0 | tostring)' "$cache" 2>/dev/null) || due_at=0
+        fi
         [[ "${due_at:-}" =~ ^[0-9]+$ ]] || due_at=0
         _sl_now
         if [[ "${_NOW:-}" =~ ^[0-9]+$ ]] && [ "$_NOW" -lt "$due_at" ]; then return 0; fi
