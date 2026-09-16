@@ -1,0 +1,1 @@
+{"name":"cs-hint","version":"0.1.0","description":"The hint line under the prompt tells a cs session what is waiting: unread mail, an armed handoff, queued tasks, a resumed handoff, else one cs tip","author":{"name":"cs"}}
