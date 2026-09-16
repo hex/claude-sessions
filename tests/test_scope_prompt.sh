@@ -771,20 +771,24 @@ test_budget_garbage_is_the_default() {
 }
 
 # The digest's surface-once budget is spent only by a delivered emission: an
-# emission the hook could not write (stdout closed) leaves the cursor where it
-# was, on the deadline exit as on the others.
+# emission the hook could not write leaves the cursor where it was, on the
+# deadline exit as on the others. Stdout is CLOSED here (`>&-`), which jq
+# reports as a failed write; /dev/full is not writable on macOS.
 test_failed_emission_leaves_the_digest_cursor_unspent() {
     seed_repo "src/api.ts"
     mkdir -p "$CLAUDE_SESSION_META_DIR/local"
     printf '%s\n' '{"event":"task_done"}' > "$CLAUDE_SESSION_META_DIR/local/notifications.jsonl"
     local _in
     _in=$(printf '%s' "implement a retry wrapper in src/api.ts" | jq -Rs '{prompt: ., hook_event_name: "UserPromptSubmit", session_id: "sid-test"}')
-    CS_SCOPE_BUDGET_MS=0 bash "$HOOK" <<< "$_in" > /dev/full 2>/dev/null
+    CS_SCOPE_BUDGET_MS=0 bash "$HOOK" <<< "$_in" >&- 2>/dev/null
     [ ! -e "$CLAUDE_SESSION_META_DIR/local/notifications.seen" ] \
         || { echo "  FAIL: a digest nobody received must not spend the cursor (deadline exit)"; return 1; }
-    bash "$HOOK" <<< "$_in" > /dev/full 2>/dev/null
+    bash "$HOOK" <<< "$_in" >&- 2>/dev/null
     [ ! -e "$CLAUDE_SESSION_META_DIR/local/notifications.seen" ] \
         || { echo "  FAIL: a digest nobody received must not spend the cursor (scan exit)"; return 1; }
+    # And the same prompt with stdout open spends it: the fixture is live.
+    run_hook "implement a retry wrapper in src/api.ts" >/dev/null 2>&1
+    assert_file_exists "$CLAUDE_SESSION_META_DIR/local/notifications.seen" "a delivered digest spends the cursor" || return 1
 }
 
 run_test test_large_multiline_prompt_still_classifies_positive
