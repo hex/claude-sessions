@@ -704,6 +704,48 @@ test_grep_fallback_still_classifies_chitchat_negative() {
     esac
 }
 
+# ============================================================================
+# The hook's own deadline: past its budget it drops the scan, never the digests
+# ============================================================================
+
+# CS_SCOPE_BUDGET_MS is the clock's stub: at 0 the front half has always
+# overrun by the time the check runs, so this is the slow-machine path with
+# nothing timed. The digests, the date and the clarify guideline still arrive;
+# the scope block is replaced by one line that says why; the trace names the
+# stage and never reaches the scan.
+test_budget_exhausted_skips_the_scan_and_keeps_the_rest() {
+    seed_repo "src/api.ts"
+    local out ctx
+    out=$(CS_SCOPE_BUDGET_MS=0 run_hook "implement a retry wrapper around the fetch call in src/api.ts" 2>/dev/null) || { echo "  FAIL: hook must exit 0 (got $?)"; return 1; }
+    ctx=$(additional_context "$out")
+    assert_output_not_contains "$ctx" "Scope (auto-grounded)" "no scope block past the budget" || return 1
+    assert_output_contains "$ctx" "Scope: skipped, slow machine" "one line says the scan was skipped" || return 1
+    assert_output_contains "$ctx" "## Clarify" "the clarify guideline still arrives" || return 1
+    local stages; stages=$(_trace_stages)
+    assert_output_contains "$stages" "skip" "the trace names the skip" || return 1
+    assert_output_not_contains "$stages" "scan" "the scan never ran" || return 1
+    assert_output_contains "$stages" "exit" "a skipped run still exits through the digest path" || return 1
+}
+
+test_budget_within_runs_the_scan() {
+    seed_repo "src/api.ts"
+    local out ctx
+    out=$(CS_SCOPE_BUDGET_MS=60000 run_hook "implement a retry wrapper around the fetch call in src/api.ts" 2>/dev/null) || return 1
+    ctx=$(additional_context "$out")
+    assert_output_contains "$ctx" "Scope (auto-grounded)" "the scope block is there under budget" || return 1
+    assert_output_not_contains "$ctx" "Scope: skipped" "and no skip line" || return 1
+    assert_output_not_contains "$(_trace_stages)" "skip" "no skip stage under budget" || return 1
+}
+
+# A budget that is not a number is the default, not a zero: a typo must not
+# silence grounding on every prompt.
+test_budget_garbage_is_the_default() {
+    seed_repo "src/api.ts"
+    local ctx
+    ctx=$(additional_context "$(CS_SCOPE_BUDGET_MS=fast run_hook "fix the handler in src/api.ts" 2>/dev/null)")
+    assert_output_contains "$ctx" "Scope (auto-grounded)" "garbage budget reads as the default" || return 1
+}
+
 run_test test_large_multiline_prompt_still_classifies_positive
 run_test test_classifier_falls_back_to_grep_without_ripgrep
 run_test test_grep_fallback_still_classifies_chitchat_negative
@@ -737,6 +779,9 @@ run_test test_stage_trace_records_the_run_in_order
 run_test test_stage_trace_stops_where_a_killed_run_stopped
 run_test test_stage_trace_records_the_invoking_directory
 run_test test_stage_trace_opt_out
+run_test test_budget_exhausted_skips_the_scan_and_keeps_the_rest
+run_test test_budget_within_runs_the_scan
+run_test test_budget_garbage_is_the_default
 
 # ============================================================================
 # Date reminder: one line when the calendar day changed since the conversation

@@ -104,6 +104,13 @@ _trace() {  # stage
     { printf '%s %s %s\n' "$$" "$(( _MS - _TRACE_T0 ))" "$1" >> "$_TRACE"; } 2>/dev/null || true
 }
 
+# The hook's own clock, kept apart from the trace's (which a session can opt
+# out of): the deadline below reads it.
+_now_ms
+_T0=$_MS
+# Set where the deadline trips; the digest exit carries it in the block's place.
+SKIP_NOTE=""
+
 _trace_open "${CLAUDE_SESSION_META_DIR:-}/local"
 
 # The user is back: drop the statusline's finished-blink marker before any
@@ -384,7 +391,7 @@ $part"
 
 _digest_exit() {
     local _emitted=0
-    _emit_context "$DATE_NOTE" "$DIGEST" "$CLARIFY" || _emitted=$?
+    _emit_context "$DATE_NOTE" "$DIGEST" "$CLARIFY" "$SKIP_NOTE" || _emitted=$?
     _commit_digest "${CLAUDE_SESSION_META_DIR:-}/local"
     # An emission that failed left the note unheard; the stamp waits for the
     # next prompt to carry it.
@@ -469,6 +476,28 @@ else
     fi
 fi
 _trace classify
+
+# --- The hook's own deadline ---
+# Claude Code kills this hook where it stands when it overruns its registered
+# timeout, and everything built so far dies with it: the queue and mail
+# digests, the date note, the clarify guideline. The cheap front half takes
+# well under 300 ms on an idle machine and 1.7 s under a load of 25 (a full
+# test suite beside it); the scan stages below are what runs the rest of the
+# way into the kill. So the hook checks its own clock here, once, through the
+# same builtins the trace reads: past the budget it gives up the scope block,
+# says so in one line, and still delivers the rest. CS_SCOPE_BUDGET_MS moves
+# the budget; anything that is not a number is the default, so a typo cannot
+# silence grounding on every prompt. The registered timeout stays the
+# backstop for a scan that is itself slow.
+_BUDGET_MS="${CS_SCOPE_BUDGET_MS:-1500}"
+case "$_BUDGET_MS" in ''|*[!0-9]*) _BUDGET_MS=1500 ;; esac
+_now_ms
+_ELAPSED_MS=$(( _MS - _T0 ))
+if [ "$_ELAPSED_MS" -ge "$(( 10#$_BUDGET_MS ))" ]; then
+    SKIP_NOTE="Scope: skipped, slow machine (this hook's front half took ${_ELAPSED_MS} ms of its ${_BUDGET_MS} ms budget, so the grounded scan was not run; locate the relevant files yourself)"
+    _trace skip
+    _digest_exit
+fi
 
 # No cache: a grounding hook must reflect the CURRENT tree. A prompt-only cache key served
 # stale ground after commits/edits, and a repo-state-aware key would almost never hit in an
