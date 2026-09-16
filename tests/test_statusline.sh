@@ -3715,16 +3715,155 @@ make_full_render_fixture() {
     }')
 }
 
-# The bar repaints once a second; a render that has painted once before must
-# not fork more than four external commands, or a loaded machine (0.3 s per
-# fork at load 25) pushes it past Claude Code's limit and the tick is killed.
-test_warm_render_forks_at_most_four() {
+# The bar repaints once a second; a render that has painted once before, in
+# the same second, forks exactly two external commands: the interpreter and jq
+# for stdin. Every other fork is behind a cache (git line, tmux ancestry, org
+# id, fable fields) or a stamp cadence, and comes back at most once in its
+# interval. On a loaded machine a fork costs 0.3 s (load 25), so a render that
+# forks a dozen runs past Claude Code's limit and the tick is killed.
+test_warm_render_forks_only_the_interpreter_and_jq() {
     make_full_render_fixture
     count_render_forks "$FULL_JSON"   # the cold render fills the caches
     count_render_forks "$FULL_JSON"
-    [ "$FORKS" -le 4 ] || { echo "  FAIL: warm render forked $FORKS external commands (limit 4):"; sed 's/^/    /' "$TEST_TMPDIR/forks"; return 1; }
+    [ "$FORKS" -le 2 ] || { echo "  FAIL: warm render forked $FORKS external commands (limit 2):"; sed 's/^/    /' "$TEST_TMPDIR/forks"; return 1; }
 }
 
-run_test test_warm_render_forks_at_most_four
+run_test test_warm_render_forks_only_the_interpreter_and_jq
+
+
+# The git line is reused for GIT_CACHE_TTL seconds and re-read after: a change
+# to the tree shows within the TTL, and the clock is the pinned one.
+test_git_line_is_cached_for_the_ttl_then_refreshed() {
+    export CS_TERM_THEME=light FORCE_COLOR=0
+    local work json
+    work=$(make_git_work)
+    json=$(jq -nc --arg dir "$work" '{workspace:{current_dir:$dir}}')
+    local first second third
+    first=$(CS_STATUSLINE_NOW=1000 run_sl "$json")
+    printf 'more\n' >> "$work/a.txt"; printf 'new\n' > "$work/c.txt"; git -C "$work" add c.txt
+    second=$(CS_STATUSLINE_NOW=1004 run_sl "$json")
+    third=$(CS_STATUSLINE_NOW=1006 run_sl "$json")
+    assert_output_contains_f "$first" "main +1!1" "the first render reads the tree" || return 1
+    assert_eq "$first" "$second" "within the TTL the cached line is reused" || return 1
+    assert_output_contains_f "$third" "main +2!1" "past the TTL the tree is read again" || return 1
+}
+
+run_test test_git_line_is_cached_for_the_ttl_then_refreshed
+
+# The tmux-ancestry verdict is kept for TMUX_REAL_CACHE_TTL under the parent
+# pid and the TMUX claim: the walk (ps and awk) runs once per conversation,
+# not once per second, and a stale verdict is re-walked.
+test_tmux_ancestry_verdict_is_cached_then_rewalked() {
+    ( _load_sl_functions
+      export TMUX="/tmp/fake,2216,0" PATH="$TEST_TMPDIR/fakebin:$PATH"
+      _make_ps_chain "$$:2216 2216:1"
+      CS_STATUSLINE_NOW=1000 _NOW="" _SL_NOW_READY="" _sl_tmux_is_real \
+          || { echo "    a real chain must pass"; return 1; }
+      _make_ps_chain "$$:1"      # the process tree now says foreign
+      CS_STATUSLINE_NOW=1010 _NOW="" _SL_NOW_READY="" _sl_tmux_is_real \
+          || { echo "    within the TTL the cached verdict must answer"; return 1; }
+      CS_STATUSLINE_NOW=1301 _NOW="" _SL_NOW_READY="" _sl_tmux_is_real \
+          && { echo "    past the TTL the tree must be walked again"; return 1; }
+      return 0 )
+}
+
+run_test test_tmux_ancestry_verdict_is_cached_then_rewalked
+
+# A ps that cannot answer leaves no verdict behind: the next render walks again
+# rather than trusting a guess for five minutes.
+test_unusable_ps_verdict_is_not_cached() {
+    ( _load_sl_functions
+      export TMUX="/tmp/fake,2216,0" PATH="$TEST_TMPDIR/fakebin:$PATH"
+      mkdir -p "$TEST_TMPDIR/fakebin"; printf '#!/bin/sh\nexit 1\n' > "$TEST_TMPDIR/fakebin/ps"; chmod +x "$TEST_TMPDIR/fakebin/ps"
+      CS_STATUSLINE_NOW=1000 _NOW="" _SL_NOW_READY="" _sl_tmux_is_real \
+          || { echo "    a failing ps is not evidence of a foreign tmux"; return 1; }
+      _make_ps_chain "$$:2216 2216:1"
+      CS_STATUSLINE_NOW=1001 _NOW="" _SL_NOW_READY="" _sl_tmux_is_real \
+          || { echo "    the failed walk must not have been cached as a verdict"; return 1; }
+      return 0 )
+}
+
+run_test test_unusable_ps_verdict_is_not_cached
+
+# The org id is kept for ORG_CACHE_TTL under the config path, so an account
+# swap shows within five minutes and a render never walks the config twice in
+# that time.
+test_org_id_is_cached_then_reread() {
+    ( _load_sl_functions
+      local cfg="$TEST_TMPDIR/cfg.json"
+      printf '{"oauthAccount":{"organizationUuid":"org-1"}}\n' > "$cfg"
+      CS_STATUSLINE_NOW=1000 _NOW="" _SL_NOW_READY="" _read_org_from "$cfg"
+      assert_eq "org-1" "$_ORG" "first read parses the config" || return 1
+      printf '{"oauthAccount":{"organizationUuid":"org-2"}}\n' > "$cfg"
+      CS_STATUSLINE_NOW=1010 _NOW="" _SL_NOW_READY="" _read_org_from "$cfg"
+      assert_eq "org-1" "$_ORG" "within the TTL the cached org answers" || return 1
+      CS_STATUSLINE_NOW=1301 _NOW="" _SL_NOW_READY="" _read_org_from "$cfg"
+      assert_eq "org-2" "$_ORG" "past the TTL the config is read again" || return 1 )
+}
+
+run_test test_org_id_is_cached_then_reread
+
+# An unchanged context is stamped once a minute, not once a second: the mv is
+# a fork, and the heartbeat readers allow fifteen minutes. A changed value is
+# written at once.
+test_context_pct_rewritten_on_change_or_once_a_minute() {
+    export CLAUDE_SESSION_NAME=stampsess
+    local dir="$CS_SESSIONS_ROOT/stampsess/.cs/local"
+    mkdir -p "$dir"
+    local at="$dir/context-pct.at" pct="$dir/context-pct"
+    CS_STATUSLINE_NOW=1000 run_sl '{"context_window":{"used_percentage":30},"workspace":{"current_dir":"/none"}}' >/dev/null
+    assert_eq "30" "$(cat "$pct")" "first render writes the value" || return 1
+    assert_eq "1000 30" "$(cat "$at")" "and records the write" || return 1
+    CS_STATUSLINE_NOW=1010 run_sl '{"context_window":{"used_percentage":30},"workspace":{"current_dir":"/none"}}' >/dev/null
+    assert_eq "1000 30" "$(cat "$at")" "an unchanged value ten seconds later is not rewritten" || return 1
+    CS_STATUSLINE_NOW=1020 run_sl '{"context_window":{"used_percentage":31},"workspace":{"current_dir":"/none"}}' >/dev/null
+    assert_eq "31" "$(cat "$pct")" "a changed value is written at once" || return 1
+    assert_eq "1020 31" "$(cat "$at")" "and recorded" || return 1
+    CS_STATUSLINE_NOW=1081 run_sl '{"context_window":{"used_percentage":31},"workspace":{"current_dir":"/none"}}' >/dev/null
+    assert_eq "1081 31" "$(cat "$at")" "an unchanged value is rewritten after a minute (the heartbeat)" || return 1
+}
+
+run_test test_context_pct_rewritten_on_change_or_once_a_minute
+
+# The fable record's fields are laid beside the JSON after the first read, one
+# per line with the reset as an epoch, so the next render parses nothing.
+test_fable_fields_written_beside_the_json() {
+    _load_sl_functions
+    seed_usage_cache org-abc 86 "2026-08-29T03:59:59.686034+00:00" 1787816000 1787816300
+    CS_STATUSLINE_NOW=1787816100 _NOW="" _SL_NOW_READY="" _fable_read
+    local f="$CS_USAGE_DIR/fable.org-abc.json.fields"
+    assert_file_exists "$f" "the fields file is written by the first read" || return 1
+    assert_eq "86
+2026-08-29T03:59:59.686034+00:00
+1787816000
+1787816300
+1787975999" "$(cat "$f")" "pct, resets_at, fetched_at, next_poll_at, reset epoch" || return 1
+    # A later read takes the fields file: the JSON can say anything.
+    printf 'not json\n' > "$CS_USAGE_DIR/fable.org-abc.json"
+    CS_STATUSLINE_NOW=1787816100 _NOW="" _SL_NOW_READY="" _fable_read
+    assert_eq "86" "$_FABLE_PCT" "the second read comes from the fields file" || return 1
+}
+
+run_test test_fable_fields_written_beside_the_json
+
+
+# One theme pass asks the tmux server once, whatever rungs it climbs: the
+# client's own theme and its tty come back from the same query, so a client
+# that reports no theme costs no second fork on the way to the cached one.
+test_theme_pass_queries_tmux_once() {
+    ( _load_sl_functions
+      export TMUX="/tmp/fake,2216,0" PATH="$TEST_TMPDIR/fakebin:$PATH"
+      _make_ps_chain "$$:2216 2216:1"
+      unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_BG_RGB 2>/dev/null || true
+      mkdir -p "$HOME/.cache/cs/term"
+      printf 'light 252;247;229 %s\n' "$(date +%s)" > "$HOME/.cache/cs/term/ttys002"
+      tmux() { printf 'q\n' >> "$TEST_TMPDIR/tmux-calls"; printf '\t/dev/ttys002\n'; }
+      _sl_mark_foreign_env
+      _sl_detect_theme
+      assert_eq "light" "$SL_THEME" "the cached measurement answers when the client reports no theme" || return 1
+      assert_eq "1" "$(wc -l < "$TEST_TMPDIR/tmux-calls" | tr -d ' ')" "tmux was asked once for both theme and tty" || return 1 )
+}
+
+run_test test_theme_pass_queries_tmux_once
 
 report_results
