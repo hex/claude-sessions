@@ -143,7 +143,7 @@ at one of them. The countdown
 is always recomputed from `resets_at` at render time, so it stays accurate even
 when the percentage beside it is a few minutes old.
 
-The git call runs with `GIT_OPTIONAL_LOCKS=0` (no index locking for a read-only query) under a 2-second timeout, and is skipped entirely when the workspace has no `.git`.
+The git call runs with `GIT_OPTIONAL_LOCKS=0` (no index locking for a read-only query) under a 2-second timeout, and is skipped entirely when the workspace has no `.git`. The workspace is Claude Code's `workspace.current_dir`: in a session adopted with `cs -adopt`, or a `<base>@<feature>` worktree, that is the checkout itself, so the branch shown is the project's. A plain session directory is its own one-commit repo on `main`, and a bar reading `main !2` there is that repo and its dirty `.cs` files, not some project the conversation happens to discuss; adopt the project to see its branch.
 
 Failure posture is fail-open: malformed stdin, a missing `jq`, or any internal error degrades to a plain directory-name line and exit 0. A broken status line never breaks the prompt.
 
