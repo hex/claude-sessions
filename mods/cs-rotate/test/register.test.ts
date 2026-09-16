@@ -319,15 +319,11 @@ test('outside a cs session no heartbeat is written', async () => {
 // A turn's end, the way the engine reports it: answered on the main loop unless said otherwise.
 const turnComplete = (e: Partial<{ reason: string; agentId: string }> = {}) =>
   hooks['turn.complete']($, { reason: 'answer', answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', ...e }, async () => ({ text: 'ok' }))
-// A conversation's first turn, ending before any context figure exists, so
-// the mod sees it start low; the force guard reads a starting context.
-const startLow = async () => { const p = percent; percent = undefined; await turnComplete(); percent = p }
 // The pending `after` timers, run the way the clock would run them.
 const fireAfter = async () => { for (const t of timers.filter(t => t.kind === 'after' && !t.cancelled)) { t.cancelled = true; await t.fn() } }
 
 test('with CS_ROTATE_FORCE_CTX set, a turn ending past it schedules /rotate from a timer, not from the hook', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
-  await startLow()
   percent = 70
   await turnComplete()
   expect(ran).toEqual([])
@@ -345,7 +341,6 @@ test('without CS_ROTATE_FORCE_CTX a turn ending at 100% forces nothing', async (
 
 test('below the force threshold, or with an unusable value, a turn ending forces nothing', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
-  await startLow()
   percent = 69
   await turnComplete()
   envVars.CS_ROTATE_FORCE_CTX = 'critical'
@@ -356,7 +351,6 @@ test('below the force threshold, or with an unusable value, a turn ending forces
 
 test('a forced rotation runs once per conversation, and a failed /rotate is not retried', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
-  await startLow()
   percent = 80
   await turnComplete()
   expect(written['/work/.cs/local/cs-rotate.forced']).toBe('uuid-lead\n')
@@ -377,7 +371,6 @@ test('a forced rotation runs once per conversation, and a failed /rotate is not 
 
 test('a subagent\'s turn, an aborted, errored or refused one, a teammate, or an unarmed non-cs directory forces nothing', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
-  await startLow()
   percent = 90
   await turnComplete({ agentId: 'agent-1' })
   await turnComplete({ reason: 'aborted' })
@@ -393,7 +386,6 @@ test('a subagent\'s turn, an aborted, errored or refused one, a teammate, or an 
 
 test('a turn ending past the force threshold with a handoff already armed runs no second /rotate', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
-  await startLow()
   percent = 90
   arm()
   await turnComplete()
@@ -409,7 +401,6 @@ const promptSubmit = (text = 'keep going') =>
 
 test('with the handoff armed and force on, a turn ending starts a countdown the band shows, one redraw a second', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
-  await startLow()
   arm(); percent = 80
   await band()
   await turnComplete()
@@ -427,7 +418,6 @@ test('with the handoff armed and force on, a turn ending starts a countdown the 
 
 test('at zero the countdown runs /clear, once, and stops ticking', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
-  await startLow()
   arm(); percent = 80
   await band()
   await turnComplete()
@@ -440,7 +430,6 @@ test('at zero the countdown runs /clear, once, and stops ticking', async () => {
 
 test('a prompt entering the session stops the countdown and passes through', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
-  await startLow()
   arm(); percent = 80
   await band()
   await turnComplete()
@@ -457,7 +446,6 @@ test('a prompt entering the session stops the countdown and passes through', asy
 
 test('pressing the clear button mid-countdown stops the ticker before it clears', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
-  await startLow()
   arm(); percent = 80
   await band()
   await turnComplete()
@@ -470,7 +458,6 @@ test('pressing the clear button mid-countdown stops the ticker before it clears'
 
 test('a countdown reaching zero while a turn runs or a survey holds the band clears nothing and stops', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
-  await startLow()
   arm(); percent = 80
   for (const props of [{ isWorking: true }, { hasSurvey: true }]) {
     await band()
@@ -485,7 +472,6 @@ test('a countdown reaching zero while a turn runs or a survey holds the band cle
 
 test('a countdown reaching zero re-checks the handoff: one consumed meanwhile clears nothing', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
-  await startLow()
   arm(); percent = 80
   await band()
   await turnComplete()
@@ -495,12 +481,10 @@ test('a countdown reaching zero re-checks the handoff: one consumed meanwhile cl
 })
 
 test('without force, or outside the lead, an armed handoff starts no countdown and prompt.submit passes through', async () => {
-  await startLow()
   arm(); percent = 80
   await turnComplete()
   envVars.CS_ROTATE_FORCE_CTX = '70'
   sessionId = 'uuid-teammate'
-  await startLow()
   await turnComplete()
   expect(timers).toEqual([])
   expect(toasts).toEqual([])
@@ -509,7 +493,6 @@ test('without force, or outside the lead, an armed handoff starts no countdown a
 
 test('a prompt arriving while the zero tick is still checking the handoff wins: nothing clears', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
-  await startLow()
   arm(); percent = 80
   await band()
   await turnComplete()
@@ -530,7 +513,6 @@ test('a prompt arriving while the zero tick is still checking the handoff wins: 
 
 test('a /clear run from anywhere else ends the countdown, so no timer outlives the conversation', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
-  await startLow()
   arm(); percent = 80
   await band()
   await turnComplete()
@@ -543,7 +525,6 @@ test('a /clear run from anywhere else ends the countdown, so no timer outlives t
 
 test('a rejected /clear at zero shows a toast and clears nothing else', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
-  await startLow()
   arm(); percent = 80
   await band()
   await turnComplete()
@@ -566,7 +547,6 @@ test('isUnconsumed follows the hook: unclosed frontmatter, or a status after it,
 
 test('a tick that lands while the zero tick is still reading does not push the count negative or clear twice', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
-  await startLow()
   arm(); percent = 80
   await band()
   await turnComplete()
@@ -579,21 +559,39 @@ test('a tick that lands while the zero tick is still reading does not push the c
   expect(JSON.stringify(await band())).not.toContain('/clear in -')
 })
 
-test('a conversation whose first turn already ends past the force threshold is never forced, and says so once', async () => {
-  envVars.CS_ROTATE_FORCE_CTX = '5'
-  percent = 8
-  await turnComplete()
-  percent = 90
-  await turnComplete(); await turnComplete()
-  expect(timers).toEqual([])
-  expect(toasts).toEqual(['cs-rotate: CS_ROTATE_FORCE_CTX=5 is below this conversation\'s starting context (8%); not forcing a rotation'])
-  expect(written).toEqual({})
-  // the next conversation starts below it and is forced as usual
-  sessionId = 'uuid-next'
-  files['/work/.cs/local/state'] = 'claude_session_id: uuid-next\n'
-  percent = 3
-  await turnComplete()
-  percent = 90
+test('a conversation met at load is forced whatever it started at; one born of a /clear that starts past the threshold is not, and says so once', async () => {
+  // resumed (or launched) already past the line: forced, as asked
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  percent = 72
   await turnComplete()
   expect(timers.map(t => t.kind)).toEqual(['after'])
+  expect(toasts).toEqual([])
+  // the successor wakes past the line: that is the loop, and it stops here
+  sessionId = 'uuid-next'
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-next\n'
+  percent = 71
+  await turnComplete(); await turnComplete()
+  expect(timers).toHaveLength(1)
+  expect(toasts).toEqual(['cs-rotate: CS_ROTATE_FORCE_CTX=70 is below this conversation\'s starting context (71%); not forcing a rotation'])
+  // a teammate past the line is not the lead: no rotation, and no toast about one
+  sessionId = 'uuid-teammate'
+  percent = 90
+  await turnComplete()
+  expect(timers).toHaveLength(1)
+  expect(toasts).toHaveLength(1)
+  // a successor that starts below and works its way past is forced as usual
+  sessionId = 'uuid-later'
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-later\n'
+  percent = 30
+  await turnComplete()
+  percent = 90
+  await turnComplete()
+  expect(timers).toHaveLength(2)
+  // a reload forgets: the conversation it meets next is adopted, whatever it reads
+  register(on as any)
+  sessionId = 'uuid-reloaded'
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-reloaded\n'
+  percent = 95
+  await turnComplete()
+  expect(timers).toHaveLength(3)
 })

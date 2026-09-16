@@ -63,17 +63,20 @@ let left: number | undefined
 let ticker: { cancel: () => void } | undefined
 let bandIdle = false
 
-// The context a conversation started with: its first turn's end, by id. A
-// conversation that already sits past the force threshold when it starts did
-// not get there by working, and forcing it would rotate again as soon as the
-// next one woke (measured at 1%). Module state, kept across /clear; a reload
-// mid-conversation forgets it and takes that conversation's next turn as its
-// start, which can only withhold a rotation, never add one.
+// The conversation the mod met when it loaded, and the context each later
+// one started with. A conversation that begins past the force threshold did
+// not get there by working: forcing it would rotate again as soon as its
+// successor woke (measured at 1%). Only a conversation born of a /clear in
+// this process is judged that way, by its first turn's end; the one met at
+// load (a launch, a resume at 72%, a reload) is adopted unjudged, since past
+// the line is exactly where the person asked to be rotated. Module state is
+// kept across /clear, which is what makes the birth visible.
+let adopted: string | undefined
 let started: { id: string; percent: number | undefined } | undefined
 
 export function register(on: On) {
   // A (re)load has no countdown: the engine cancelled the old one's timers.
-  left = undefined; ticker = undefined; bandIdle = false; started = undefined
+  left = undefined; ticker = undefined; bandIdle = false; adopted = undefined; started = undefined
   on('session.start', async ($, e, next) => {
     // Only a cs session has .cs/local; anywhere else the mod stays silent.
     const local = `${e.cwd}/.cs/local`
@@ -206,21 +209,22 @@ async function forceThreshold($: EngineInterface): Promise<number | undefined> {
 async function forceRotation($: EngineInterface) {
   const force = await forceThreshold($)
   if (force === undefined) return
+  if (!(await ownsRotation($))) return
   const id = await $.session.id()
   const { context } = await $.session.usage()
-  if (started?.id !== id) {
+  if (adopted === undefined) adopted = id
+  if (id !== adopted && started?.id !== id) {
     started = { id, percent: context.percent }
     if (started.percent !== undefined && started.percent >= force) {
       $.ui.toast(`cs-rotate: CS_ROTATE_FORCE_CTX=${force} is below this conversation's starting context (${started.percent}%); not forcing a rotation`)
     }
   }
-  if (started.percent !== undefined && started.percent >= force) return
+  if (started?.id === id && started.percent !== undefined && started.percent >= force) return
   if (await handoffArmed($)) {
-    if (!ticker && (await ownsRotation($))) startCountdown($)
+    if (!ticker) startCountdown($)
     return
   }
   if (context.percent === undefined || context.percent < force) return
-  if (!(await ownsRotation($))) return
   const forced = `${await $.session.cwd()}/${FORCED}`
   if ((await $.fs.exists(forced)) && (await $.fs.read(forced)).trim() === id) return
   await $.fs.write(forced, `${id}\n`)
