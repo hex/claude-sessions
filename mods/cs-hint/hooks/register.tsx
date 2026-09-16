@@ -36,12 +36,35 @@ export const REFRESH_MS = 5000
 // session's cwd, which under cs is the session directory (or its worktree).
 export const HEARTBEAT = '.cs/local/cs-hint.heartbeat'
 
+// Mail cs delivered to this session and no conversation has read: the .json
+// files under mail/new, as cs's own reader (_mail_read) selects them. The
+// sender named is the one with the latest `ts` (names carry the epoch too,
+// but cs warns that their order is not arrival order); a sender outside a cs
+// session writes "" (never null), and then no sender is named.
+export const MAIL_NEW = '.cs/local/mail/new'
+
+// The rotate skill's last step writes the handoff's basename here; cs's
+// SessionStart hook reads it on the next conversation. The cs-rotate mod's
+// capsule offers the /clear too; this line says so in words, in its own slot.
+export const MARKER = '.cs/local/pending-handoff'
+export const HANDOFFS = '.cs/handoffs'
+
+// The walk-away queue, as cs -queue and the narrative-reminder hook keep it:
+// one file per task under queue/ (a glob, so a dotfile is not a task), one
+// word in queue.state, and queue.declined holding the epoch of a "Not yet"
+// the hook honours for ten minutes. An empty queue is never gating, whatever
+// the state file records (the hook's rule).
+export const QUEUE = '.cs/local/queue'
+export const DECLINE_SECONDS = 600
+
 // The tips, fixed and never generated. The first shown fits the session
 // (see firstTip); the rest rotate by turn count. Each names one cs surface
 // the person may not have found. Short: the line truncates.
+const PLAIN_SESSION_TIP = '/feature <name> spawns a worktree session from a brief'
+const WORKTREE_SESSION_TIP = '/finish <name> lands a feature branch and retires its worktree'
 export const TIPS = [
-  '/feature <name> spawns a worktree session from a brief',
-  '/finish <name> lands a feature branch and retires its worktree',
+  PLAIN_SESSION_TIP,
+  WORKTREE_SESSION_TIP,
   'cs -statusline caps ask checks whether your font draws the rounded capsule ends',
   '/rotate hands a heavy conversation to a fresh one',
   'press 1 on the band above the prompt to rotate',
@@ -97,19 +120,6 @@ export function register(on: On) {
     return <Text dimColor wrap="truncate">{hint}</Text>
   })
 }
-
-// Mail cs delivered to this session and no conversation has read: the .json
-// files under mail/new, as cs's own reader (_mail_read) selects them. The
-// sender named is the one with the latest `ts` (names carry the epoch too,
-// but cs warns that their order is not arrival order); a sender outside a cs
-// session writes "" (never null), and then no sender is named.
-export const MAIL_NEW = '.cs/local/mail/new'
-
-// The rotate skill's last step writes the handoff's basename here; cs's
-// SessionStart hook reads it on the next conversation. The cs-rotate mod's
-// capsule offers the /clear too; this line says so in words, in its own slot.
-export const MARKER = '.cs/local/pending-handoff'
-export const HANDOFFS = '.cs/handoffs'
 
 // What is waiting, in the order the person should learn it: mail first.
 async function gatherFacts($: EngineInterface): Promise<string[]> {
@@ -168,14 +178,6 @@ function frontmatter(text: string): Record<string, string> {
   return {}
 }
 
-// The walk-away queue, as cs -queue and the narrative-reminder hook keep it:
-// one file per task under queue/ (a glob, so a dotfile is not a task), one
-// word in queue.state, and queue.declined holding the epoch of a "Not yet"
-// the hook honours for ten minutes. An empty queue is never gating, whatever
-// the state file records (the hook's rule).
-export const QUEUE = '.cs/local/queue'
-export const DECLINE_SECONDS = 600
-
 async function queuedTasks($: EngineInterface, cwd: string): Promise<string | undefined> {
   if (!(await $.fs.exists(`${cwd}/${QUEUE}`))) return undefined
   const count = (await $.fs.list(`${cwd}/${QUEUE}`)).filter(f => f.kind === 'file' && !f.name.startsWith('.')).length
@@ -232,6 +234,7 @@ async function unreadMail($: EngineInterface, cwd: string): Promise<string | und
 // claude in the same directory would read the lead's mail as its own). The
 // value may be quoted and may carry trailing spaces, as cs's own state readers
 // allow.
+//
 // A user-visible surface needs a revocable off switch: CS_NO_HINTS=1 in the
 // launching shell (the literal name: `claude plugin validate` lists what a
 // module reads), or `hints: off` in the state file for one session.
@@ -264,7 +267,7 @@ async function tip($: EngineInterface): Promise<string> {
 // landed; a plain one can spawn worktrees.
 async function firstTip($: EngineInterface): Promise<string> {
   const state = await readOr($, `${await $.session.cwd()}/.cs/local/state`)
-  return stateValue(state, 'task_branch') !== undefined ? TIPS[1] : TIPS[0]
+  return stateValue(state, 'task_branch') !== undefined ? WORKTREE_SESSION_TIP : PLAIN_SESSION_TIP
 }
 
 // Armed means the marker names a handoff the SessionStart hook will accept
