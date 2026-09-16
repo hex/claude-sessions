@@ -313,6 +313,29 @@ appears only for a marker the hook accepts: a bare basename, a file in
 an aborted rotation left naming a handoff since consumed or gone, leaves the
 rotate button in place.
 
+The mod can also press the button for you. With `CS_ROTATE_FORCE_CTX=<percent>`
+in the shell that launches cs (off unless set, and off for a value that is not
+a number), the end of a turn whose context reads at or past that percentage
+runs `/rotate` as if you had pressed `1`, once per conversation: the mod
+records the conversation id in `.cs/local/cs-rotate.forced` before it schedules
+the run, so a `/rotate` that fails is not tried again at the end of every turn
+(the failure shows as a toast, and the button stays). Only a turn that ended
+with an answer counts, on the main loop, in the lead conversation, with no
+handoff already armed: an interrupted or errored turn, or a subagent's, starts
+nothing. The run is scheduled from a timer rather than from the turn's own
+hook, which the plugin contract refuses a command from. Once the rotate skill
+has armed its handoff, the next turn's end starts a 20-second grace: the
+capsule reads `1: /clear and continue from the handoff  ·  /clear in 20s`,
+redrawn once a second, and at zero the mod runs the `/clear` itself, only if
+the band is idle at that moment (no turn running, no survey), the handoff still
+armed and this still the lead; otherwise the count stops and the button waits
+for you. Pressing `1` during the count clears at once. Sending a prompt, from
+the composer or anywhere else a prompt enters the session, stops the count;
+the next turn's end starts it again from 20. The count is module state: it
+does not survive a reload of the mod, and every path that ends it cancels its
+timer, because a timer started before a `/clear` keeps firing after one
+(measured).
+
 The button is for the lead conversation of a cs session only: past the threshold
 the mod also checks that the cwd has `.cs/local`, that `.cs/local/disabled` is
 absent, and that its own conversation id is the `claude_session_id` in
