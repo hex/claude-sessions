@@ -254,7 +254,11 @@ test_export_term_theme_caches_under_the_client_tty() {
       [ -f "$f" ] || { echo "  FAIL: no cache entry written for the client tty"; rm -rf "$home"; return 1; }
       local got; got=$(cat "$f")
       rm -rf "$home"
-      [ "$got" = "light 250;248;242" ] || { echo "  FAIL: cached '$got', want 'light 250;248;242'"; return 1; }
+      # theme, rgb, then the epoch the render ages the entry by
+      case "$got" in
+          "light 250;248;242 "[1-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ;;
+          *) echo "  FAIL: cached '$got', want 'light 250;248;242 <epoch>'"; return 1 ;;
+      esac
       return 0 )
 }
 
@@ -268,7 +272,7 @@ test_export_term_theme_caches_under_its_own_tty_outside_tmux() {
       detect_term_theme_and_bg() { echo "dark 20;20;20"; }
       _export_term_theme
       local f="$home/.cache/cs/term/ttys007" ok=0
-      [ -f "$f" ] && [ "$(cat "$f")" = "dark 20;20;20" ] && ok=1
+      [ -f "$f" ] && case "$(cat "$f")" in "dark 20;20;20 "[1-9]*) ok=1 ;; esac
       rm -rf "$home"
       [ "$ok" = 1 ] || { echo "  FAIL: no entry under the plain tty"; return 1; }
       return 0 )

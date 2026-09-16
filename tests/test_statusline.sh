@@ -29,6 +29,12 @@ setup() {
     unset COLUMNS 2>/dev/null || true
     export CS_SESSIONS_ROOT="$TEST_TMPDIR/sessions"
     mkdir -p "$CS_SESSIONS_ROOT"
+    # A private HOME per test: the render keeps its caches (git line, tmux
+    # ancestry verdict, org id) under ~/.cache/cs, keyed on values that many
+    # tests here share (a fake TMUX server pid, this runner's parent pid), so a
+    # suite-wide HOME would let one test's verdict answer the next.
+    export HOME="$TEST_TMPDIR/home"
+    mkdir -p "$HOME"
     # Neutral terminal by default; per-test overrides as needed.
     export TERM="xterm-256color"
     # Pin the theme so render tests are deterministic regardless of the runner's
@@ -1329,7 +1335,7 @@ test_sl_theme_uses_client_rung_when_tmux_is_real() {
       _make_ps_chain "$$:2216 2216:1"
       export TMUX="/tmp/fake,2216,0" PATH="$TEST_TMPDIR/fakebin:$PATH"
       export CS_TERM_THEME=dark CS_TERM_THEME_AUTO=1
-      tmux() { printf 'light\n'; }
+      tmux() { printf 'light\t/dev/ttys002\n'; }
       _sl_mark_foreign_env
       _sl_detect_theme
       assert_eq "light" "$SL_THEME" \
@@ -1351,7 +1357,7 @@ test_sl_env_foreign_ignores_inherited_value() {
       _make_ps_chain "$$:2216 2216:1"
       export TMUX="/tmp/fake,2216,0" PATH="$TEST_TMPDIR/fakebin:$PATH"
       export CS_TERM_THEME=dark CS_TERM_THEME_AUTO=1
-      tmux() { printf 'light\n'; }
+      tmux() { printf 'light\t/dev/ttys002\n'; }
       _sl_mark_foreign_env
       _sl_detect_theme
       assert_eq "light" "$SL_THEME" \
@@ -1433,10 +1439,10 @@ test_pane_segment_hidden_when_tmux_is_foreign() {
 test_client_cache_supplies_theme_and_background() {
     ( _load_sl_functions
       export HOME="$TEST_TMPDIR/home"; mkdir -p "$HOME/.cache/cs/term"
-      printf 'light 252;247;229\n' > "$HOME/.cache/cs/term/ttys002"
+      printf 'light 252;247;229 %s\n' "$(date +%s)" > "$HOME/.cache/cs/term/ttys002"
       export TMUX="/tmp/fake,1,0"
       unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_BG_RGB 2>/dev/null || true
-      tmux() { printf '/dev/ttys002\n'; }
+      tmux() { printf '\t/dev/ttys002\n'; }
       _sl_theme_from_client_cache || { echo "    lookup failed"; return 1; }
       assert_eq "light" "$SL_THEME" "the cached theme must be adopted" || return 1
       assert_eq "252;247;229" "$CS_TERM_BG_RGB" "the cached background must be adopted" || return 1 )
@@ -1445,10 +1451,10 @@ test_client_cache_supplies_theme_and_background() {
 test_client_cache_misses_after_reattach_from_another_terminal() {
     ( _load_sl_functions
       export HOME="$TEST_TMPDIR/home"; mkdir -p "$HOME/.cache/cs/term"
-      printf 'light 252;247;229\n' > "$HOME/.cache/cs/term/ttys002"
+      printf 'light 252;247;229 %s\n' "$(date +%s)" > "$HOME/.cache/cs/term/ttys002"
       export TMUX="/tmp/fake,1,0"
       unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_BG_RGB 2>/dev/null || true
-      tmux() { printf '/dev/ttys009\n'; }   # re-attached from a different terminal
+      tmux() { printf '\t/dev/ttys009\n'; }   # re-attached from a different terminal
       _sl_theme_from_client_cache && { echo "    stale entry was used"; return 1; }
       assert_eq "" "${CS_TERM_BG_RGB:-}" "a miss must not invent a background" || return 1 )
 }
@@ -1457,10 +1463,10 @@ test_client_cache_misses_after_reattach_from_another_terminal() {
 test_client_cache_does_not_override_an_explicit_background() {
     ( _load_sl_functions
       export HOME="$TEST_TMPDIR/home"; mkdir -p "$HOME/.cache/cs/term"
-      printf 'light 252;247;229\n' > "$HOME/.cache/cs/term/ttys002"
+      printf 'light 252;247;229 %s\n' "$(date +%s)" > "$HOME/.cache/cs/term/ttys002"
       export TMUX="/tmp/fake,1,0" CS_TERM_BG_RGB="1;2;3"
       unset CS_TERM_THEME CS_TERM_THEME_AUTO 2>/dev/null || true
-      tmux() { printf '/dev/ttys002\n'; }
+      tmux() { printf '\t/dev/ttys002\n'; }
       _sl_theme_from_client_cache
       assert_eq "1;2;3" "$CS_TERM_BG_RGB" "an explicit background must survive" || return 1 )
 }
@@ -1469,10 +1475,10 @@ test_client_cache_does_not_override_an_explicit_background() {
 test_client_cache_rejects_a_malformed_entry() {
     ( _load_sl_functions
       export HOME="$TEST_TMPDIR/home"; mkdir -p "$HOME/.cache/cs/term"
-      printf 'chartreuse not-a-colour\n' > "$HOME/.cache/cs/term/ttys002"
+      printf 'chartreuse not-a-colour %s\n' "$(date +%s)" > "$HOME/.cache/cs/term/ttys002"
       export TMUX="/tmp/fake,1,0"
       unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_BG_RGB 2>/dev/null || true
-      tmux() { printf '/dev/ttys002\n'; }
+      tmux() { printf '\t/dev/ttys002\n'; }
       _sl_theme_from_client_cache && { echo "    malformed entry was accepted"; return 1; }
       return 0 )
 }
@@ -1551,7 +1557,7 @@ test_tmux_mute_applies_regardless_of_term_name() {
 test_client_cache_is_read_outside_tmux_too() {
     ( _load_sl_functions
       export HOME="$TEST_TMPDIR/home"; mkdir -p "$HOME/.cache/cs/term"
-      printf 'light 252;247;229\n' > "$HOME/.cache/cs/term/ttys009"
+      printf 'light 252;247;229 %s\n' "$(date +%s)" > "$HOME/.cache/cs/term/ttys009"
       unset TMUX CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_BG_RGB 2>/dev/null || true
       tty() { printf '/dev/ttys009\n'; }
       _sl_theme_from_client_cache || { echo "    cache unreadable outside tmux"; return 1; }
@@ -1581,11 +1587,10 @@ test_client_cache_refuses_a_stale_entry() {
     ( _load_sl_functions
       export HOME="$TEST_TMPDIR/home"; mkdir -p "$HOME/.cache/cs/term"
       local f="$HOME/.cache/cs/term/ttys002"
-      printf 'light 252;247;229\n' > "$f"
-      touch -t 202001010000 "$f"
+      printf 'light 252;247;229 %s\n' "$(( $(date +%s) - 43201 ))" > "$f"
       export TMUX="/tmp/fake,1,0"
       unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_BG_RGB 2>/dev/null || true
-      tmux() { printf '/dev/ttys002\n'; }
+      tmux() { printf '\t/dev/ttys002\n'; }
       _sl_theme_from_client_cache && { echo "    a stale entry was used"; return 1; }
       return 0 )
 }
@@ -1593,10 +1598,10 @@ test_client_cache_refuses_a_stale_entry() {
 test_client_cache_accepts_a_fresh_entry() {
     ( _load_sl_functions
       export HOME="$TEST_TMPDIR/home"; mkdir -p "$HOME/.cache/cs/term"
-      printf 'light 252;247;229\n' > "$HOME/.cache/cs/term/ttys002"
+      printf 'light 252;247;229 %s\n' "$(date +%s)" > "$HOME/.cache/cs/term/ttys002"
       export TMUX="/tmp/fake,1,0"
       unset CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_BG_RGB 2>/dev/null || true
-      tmux() { printf '/dev/ttys002\n'; }
+      tmux() { printf '\t/dev/ttys002\n'; }
       _sl_theme_from_client_cache || { echo "    a fresh entry was refused"; return 1; }
       assert_eq "light" "$SL_THEME" "the fresh entry must be adopted" || return 1 )
 }
@@ -2059,7 +2064,7 @@ test_sl_theme_unknown_light_terminal_now_renders_dark() {
     ( _load_sl_functions
       unset CS_TERM_THEME CS_TERM_THEME_AUTO COLORFGBG 2>/dev/null || true
       TMUX="/tmp/fake,1,0"; OSTYPE="darwin24"
-      tmux() { printf '\n'; }     # client reports no theme
+      tmux() { printf '\t/dev/ttys002\n'; }     # client reports no theme
       defaults() { return 1; }    # macOS is light, and no longer consulted
       _sl_detect_theme
       assert_eq "dark" "$SL_THEME" \
@@ -2122,7 +2127,7 @@ test_sl_theme_uses_tmux_client_theme() {
     ( _load_sl_functions
       unset CS_TERM_THEME CS_TERM_THEME_AUTO COLORFGBG 2>/dev/null || true
       TMUX="/tmp/fake,1,0"; OSTYPE="darwin24"
-      tmux() { printf 'dark\n'; }   # the attached client reports dark
+      tmux() { printf 'dark\t/dev/ttys002\n'; }   # the attached client reports dark
       defaults() { return 1; }      # macOS says light
       _sl_detect_theme
       assert_eq "dark" "$SL_THEME" \
@@ -2135,7 +2140,7 @@ test_sl_theme_falls_through_empty_client_theme() {
     ( _load_sl_functions
       unset CS_TERM_THEME CS_TERM_THEME_AUTO COLORFGBG 2>/dev/null || true
       TMUX="/tmp/fake,1,0"; OSTYPE="darwin24"
-      tmux() { printf '\n'; }
+      tmux() { printf '\t/dev/ttys002\n'; }
       defaults() { return 0; }   # macOS says dark
       _sl_detect_theme
       assert_eq "dark" "$SL_THEME" \
@@ -3649,5 +3654,77 @@ test_capsule_has_no_inner_padding() {
 }
 
 run_test test_capsule_has_no_inner_padding
+
+# --- Render cost ------------------------------------------------------------
+
+# Count, into FORKS, the external commands one render forks. Every executable the script
+# names is shadowed on PATH by a shim that logs its name and execs the real
+# one, PATH left shadowed so a child process (git under timeout) is logged too.
+# Not a command substitution: the render's parent must be this shell on every
+# run, as Claude Code is for every render of a conversation, or the ancestry
+# verdict cache (keyed on the parent pid) can never hit.
+# The shim list is derived from the script's own text, so a command it starts
+# calling is counted without anyone maintaining a list. Under load a render's
+# wall time is this count times the per-fork cost, so the count is the cost.
+count_render_forks() {  # json
+    local shims="$TEST_TMPDIR/shims" log="$TEST_TMPDIR/forks" word
+    if [ ! -d "$shims" ]; then
+        mkdir -p "$shims"
+        printf '#!/bin/bash\nprintf "%%s\\n" "${0##*/}" >> %q\nexec "$(PATH=%q command -v "${0##*/}")" "$@"\n' \
+            "$log" "$PATH" > "$shims/.shim"
+        chmod +x "$shims/.shim"
+        for word in $(grep -oE '\b[a-z][a-z0-9_-]+\b' "$SL" | sort -u); do
+            case "$(type -t "$word" 2>/dev/null)" in file) ln -s "$shims/.shim" "$shims/$word" ;; esac
+        done
+    fi
+    : > "$log"
+    printf '%s' "$1" > "$TEST_TMPDIR/stdin.json"
+    PATH="$shims:$PATH" bash "$SL" < "$TEST_TMPDIR/stdin.json" >/dev/null 2>&1
+    FORKS=0
+    local line
+    while IFS= read -r line; do FORKS=$((FORKS + 1)); done < "$log"
+}
+
+# A lead Fable render with every optional stage live: a matching session id in
+# state (so context-pct is written), rate limits (the limits stamp), a Fable
+# model id with an org and a fresh usage cache (the fable window), a git work
+# tree, and a TMUX claim (the ancestry walk). Sets FULL_JSON; the environment
+# it exports is part of the fixture, so it runs in the caller's shell.
+make_full_render_fixture() {
+    export CLAUDE_SESSION_NAME=s
+    local sdir="$CS_SESSIONS_ROOT/s/.cs/local"
+    mkdir -p "$sdir"
+    printf 'claude_session_id: "sid-1"\n' > "$sdir/state"
+    export CLAUDE_CONFIG_DIR="$TEST_TMPDIR/cfg"; mkdir -p "$CLAUDE_CONFIG_DIR"
+    printf '{"oauthAccount":{"organizationUuid":"org-1"}}\n' > "$CLAUDE_CONFIG_DIR/.claude.json"
+    export CS_USAGE_DIR="$TEST_TMPDIR/usage"; mkdir -p "$CS_USAGE_DIR"
+    export CS_USAGE_NO_REFRESH=1
+    printf '{"org":"org-1","pct":12,"resets_at":"2099-01-01T00:00:00Z","fetched_at":4102444800,"next_poll_at":4102444800}\n' \
+        > "$CS_USAGE_DIR/fable.org-1.json"
+    export TMUX="/tmp/fake,1,0" TMUX_PANE="%1"
+    local work
+    work=$(make_git_work)
+    FULL_JSON=$(jq -nc --arg dir "$work" '{
+        session_id:"sid-1", session_name:"s",
+        model:{id:"claude-fable-5-1", display_name:"Fable"},
+        effort:{level:"high"},
+        workspace:{current_dir:$dir},
+        context_window:{used_percentage:30},
+        rate_limits:{five_hour:{used_percentage:42, resets_at:"2099-01-01T00:00:00Z"},
+                     seven_day:{used_percentage:55, resets_at:"2099-01-01T00:00:00Z"}}
+    }')
+}
+
+# The bar repaints once a second; a render that has painted once before must
+# not fork more than four external commands, or a loaded machine (0.3 s per
+# fork at load 25) pushes it past Claude Code's limit and the tick is killed.
+test_warm_render_forks_at_most_four() {
+    make_full_render_fixture
+    count_render_forks "$FULL_JSON"   # the cold render fills the caches
+    count_render_forks "$FULL_JSON"
+    [ "$FORKS" -le 4 ] || { echo "  FAIL: warm render forked $FORKS external commands (limit 4):"; sed 's/^/    /' "$TEST_TMPDIR/forks"; return 1; }
+}
+
+run_test test_warm_render_forks_at_most_four
 
 report_results

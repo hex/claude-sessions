@@ -316,7 +316,10 @@ _write_term_cache() {
     case "$key" in ''|*[!A-Za-z0-9._-]*|.|..) return 0 ;; esac
     dir="$HOME/.cache/cs/term"
     mkdir -p "$dir" 2>/dev/null || return 0
-    { printf '%s %s\n' "$theme" "$rgb" > "$dir/$key"; } 2>/dev/null || true
+    # `theme rgb epoch`, rgb as `-` when there is none: the render refuses an
+    # entry older than twelve hours by that epoch (KEEP IN SYNC with
+    # _sl_theme_from_client_cache in bin/cs-statusline).
+    { printf '%s %s %s\n' "$theme" "${rgb:--}" "$(date +%s)" > "$dir/$key"; } 2>/dev/null || true
     return 0
 }
 
