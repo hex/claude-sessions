@@ -63,9 +63,17 @@ let left: number | undefined
 let ticker: { cancel: () => void } | undefined
 let bandIdle = false
 
+// The context a conversation started with: its first turn's end, by id. A
+// conversation that already sits past the force threshold when it starts did
+// not get there by working, and forcing it would rotate again as soon as the
+// next one woke (measured at 1%). Module state, kept across /clear; a reload
+// mid-conversation forgets it and takes that conversation's next turn as its
+// start, which can only withhold a rotation, never add one.
+let started: { id: string; percent: number | undefined } | undefined
+
 export function register(on: On) {
   // A (re)load has no countdown: the engine cancelled the old one's timers.
-  left = undefined; ticker = undefined; bandIdle = false
+  left = undefined; ticker = undefined; bandIdle = false; started = undefined
   on('session.start', async ($, e, next) => {
     // Only a cs session has .cs/local; anywhere else the mod stays silent.
     const local = `${e.cwd}/.cs/local`
@@ -198,15 +206,22 @@ async function forceThreshold($: EngineInterface): Promise<number | undefined> {
 async function forceRotation($: EngineInterface) {
   const force = await forceThreshold($)
   if (force === undefined) return
+  const id = await $.session.id()
+  const { context } = await $.session.usage()
+  if (started?.id !== id) {
+    started = { id, percent: context.percent }
+    if (started.percent !== undefined && started.percent >= force) {
+      $.ui.toast(`cs-rotate: CS_ROTATE_FORCE_CTX=${force} is below this conversation's starting context (${started.percent}%); not forcing a rotation`)
+    }
+  }
+  if (started.percent !== undefined && started.percent >= force) return
   if (await handoffArmed($)) {
     if (!ticker && (await ownsRotation($))) startCountdown($)
     return
   }
-  const { context } = await $.session.usage()
   if (context.percent === undefined || context.percent < force) return
   if (!(await ownsRotation($))) return
   const forced = `${await $.session.cwd()}/${FORCED}`
-  const id = await $.session.id()
   if ((await $.fs.exists(forced)) && (await $.fs.read(forced)).trim() === id) return
   await $.fs.write(forced, `${id}\n`)
   $.clock.after(0, () => {
@@ -223,7 +238,9 @@ async function forceRotation($: EngineInterface) {
 function startCountdown($: EngineInterface) {
   left = GRACE_SECONDS
   ticker = $.clock.every(1000, async () => {
-    if (left === undefined) return
+    // Nothing to count once stopped, and nothing below zero: a period that
+    // lands while the zero tick is still reading leaves the count where it is.
+    if (left === undefined || left <= 0) return
     left -= 1
     $.ui.invalidate('ui.render')
     if (left > 0) return

@@ -346,8 +346,12 @@ Pick the percentage above a fresh conversation's own footprint. The wake turn
 after the `/clear` is an ordinary turn, and the once-per-conversation record
 belongs to the conversation that ended, so a threshold a fresh conversation
 already sits past (a session that loads a large CLAUDE.md and memory, say,
-with the knob at 5) rotates again as soon as it wakes, and again after that
-(measured at 1). The bar's crit band, 65, is the intended neighbourhood.
+with the knob at 5) would rotate again as soon as it woke, and again after
+that (measured at 1). The mod refuses that loop: it remembers the context each
+conversation's first turn ended with, and a conversation that already sat past
+the threshold when it started is never forced; a toast says so once
+(`CS_ROTATE_FORCE_CTX=5 is below this conversation's starting context (8%)`),
+and the button stays. The bar's crit band, 65, is the intended neighbourhood.
 
 The button is for the lead conversation of a cs session only: past the threshold
 the mod also checks that the cwd has `.cs/local`, that `.cs/local/disabled` is
