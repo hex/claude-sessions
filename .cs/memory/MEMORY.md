@@ -130,3 +130,4 @@
 - [Mods type contract on disk](reference_mods_type_contract.md): ~/.claude/plugins/marketplaces/claude-code-plugins/mods/types/claude-code.d.ts is the authority for events, $.ui and element tables; the capsule lab covers a subset
 - [PromptHint rewrite draws nothing](project_prompthint_rewrite_draws_nothing.md): on 2.1.273 a `hint` rewrite never shows under the permission-mode notice; a mod draws its own tree (one extra row); debug via CLAUDE_CODE_BIN='claude --debug'
 - [Commit before mutating](feedback_commit_before_mutating.md): `git checkout <file>` after a mutation drops uncommitted work too; commit green first, assert the mutation landed
+- [Mod Button in a Text is refused](project_mod_button_inline_refused.md): the engine drops the whole band silently while the fake engine stays green; --debug throwaway before believing any new element
