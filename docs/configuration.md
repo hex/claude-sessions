@@ -173,6 +173,15 @@ export CS_ROTATE_NUDGE_CTX="65"
 # The mod reads it from the launched process's environment.
 export CS_ROTATE_BUTTON_CTX="40"
 
+# Forced rotation with grace (off unless set): once a turn ends with context
+# at or past this percentage the mod runs /rotate itself, once per
+# conversation, then counts the band down for 20 seconds and runs the /clear
+# that continues from the handoff. Pressing 1 clears at once; sending a
+# prompt stops the countdown. Not a number, or unset: never forced. A
+# conversation born of a /clear that already starts past it is never forced
+# (a toast says so once); one met at launch or through /resume is.
+export CS_ROTATE_FORCE_CTX="70"
+
 # Narrative rotation: rotate when the live file passes MAX, keep about KEEP bytes
 export CS_NARRATIVE_MAX_BYTES="229376"
 export CS_NARRATIVE_KEEP_BYTES="114688"

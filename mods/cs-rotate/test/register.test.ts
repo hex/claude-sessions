@@ -6,14 +6,15 @@ import { test, expect, beforeEach } from 'bun:test'
 ;(globalThis as any).h = (type: any, props: any, ...children: any[]) => ({ type, props: props ?? {}, children })
 ;(globalThis as any).Fragment = 'Fragment'
 
-import { register, DEFAULT_PERCENT, DEFAULT_CRIT, gaugeColor, meter, INK } from '../hooks/register.tsx'
+import { register, DEFAULT_PERCENT, DEFAULT_CRIT, GRACE_SECONDS, gaugeColor, meter, isUnconsumed, INK } from '../hooks/register.tsx'
 
 type Hook = ($: any, e: any, next: (e: any) => Promise<any>) => Promise<any>
 const hooks: Record<string, Hook> = {}
 const on = (event: string, a: any, b?: any) => {
   const matcher = b ? a : undefined
   const fn: Hook = b ?? a
-  hooks[matcher?.component ? `${event}:${matcher.component}` : event] = fn
+  const narrowed = matcher?.component ?? matcher?.command
+  hooks[narrowed ? `${event}:${narrowed}` : event] = fn
 }
 
 let percent: number | undefined
@@ -24,6 +25,14 @@ let existing: Set<string>
 let files: Record<string, string>
 let sessionId: string
 let envVars: Record<string, string | undefined>
+let timers: { ms: number; fn: () => void; kind: 'after' | 'every'; cancelled: boolean }[]
+let invalidated: string[]
+let toasts: string[]
+const timer = (kind: 'after' | 'every') => (ms: number, fn: () => void) => {
+  const t = { ms, fn, kind, cancelled: false }
+  timers.push(t)
+  return { cancel: () => { t.cancelled = true } }
+}
 const $ = {
   env: { get: async (name: string) => envVars[name] },
   session: {
@@ -33,9 +42,10 @@ const $ = {
   },
   prompt: { fill: async (args: any) => { filled.push(args); return { isFilled: true } } },
   command: { run: async (args: any) => { ran.push(args); return { text: '' } } },
-  ui: { resolve: async () => ({ Box: 'Box', Text: 'Text', Button: 'Button' }) },
+  ui: { resolve: async () => ({ Box: 'Box', Text: 'Text', Button: 'Button' }), invalidate: (event: string) => { invalidated.push(event) }, toast: (text: string) => { toasts.push(text) } },
+  clock: { after: timer('after'), every: timer('every') },
   fs: {
-    write: async (path: string, text: string) => { written[path] = text },
+    write: async (path: string, text: string) => { written[path] = text; files[path] = text },
     exists: async (path: string) => existing.has(path) || path in files,
     read: async (path: string) => { if (path in files) return files[path]; throw new Error(`ENOENT ${path}`) },
   },
@@ -55,6 +65,7 @@ const findButton = (tree: any) => buttons(tree)[0]
 beforeEach(() => {
   for (const k of Object.keys(hooks)) delete hooks[k]
   percent = undefined; filled = []; ran = []; written = {}; existing = new Set(['/work/.cs/local'])
+  timers = []; invalidated = []; toasts = []
   // The default fixture is the lead conversation of a cs session.
   sessionId = 'uuid-lead'
   envVars = {}
@@ -303,4 +314,410 @@ test('session.start writes a heartbeat under the session meta dir', async () => 
 test('outside a cs session no heartbeat is written', async () => {
   await hooks['session.start']($, { cwd: '/plain', surface: 'terminal', isInteractive: true }, async (e) => ({ cwd: e.cwd }))
   expect(Object.keys(written)).toEqual([])
+})
+
+// A turn's end, the way the engine reports it: answered on the main loop unless said otherwise.
+const turnComplete = (e: Partial<{ reason: string; agentId: string }> = {}) =>
+  hooks['turn.complete']($, { reason: 'answer', answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', ...e }, async () => ({ text: 'ok' }))
+// The pending `after` timers, run the way the clock would run them.
+const fireAfter = async () => { for (const t of timers.filter(t => t.kind === 'after' && !t.cancelled)) { t.cancelled = true; await t.fn() } }
+
+test('with CS_ROTATE_FORCE_CTX set, a turn ending past it schedules /rotate from a timer, not from the hook', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  percent = 70
+  await turnComplete()
+  expect(ran).toEqual([])
+  expect(timers.map(t => t.kind)).toEqual(['after'])
+  await fireAfter()
+  expect(ran).toEqual([{ command: 'rotate', args: '' }])
+})
+
+test('without CS_ROTATE_FORCE_CTX a turn ending at 100% forces nothing', async () => {
+  percent = 100
+  await turnComplete()
+  expect(timers).toEqual([])
+  expect(ran).toEqual([])
+})
+
+test('below the force threshold, or with an unusable value, a turn ending forces nothing', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  percent = 69
+  await turnComplete()
+  envVars.CS_ROTATE_FORCE_CTX = 'critical'
+  percent = 100
+  await turnComplete()
+  expect(timers).toEqual([])
+})
+
+test('a forced rotation runs once per conversation, and a failed /rotate is not retried', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  percent = 80
+  await turnComplete()
+  expect(written['/work/.cs/local/cs-rotate.forced']).toBe('uuid-lead\n')
+  await turnComplete(); await turnComplete()
+  expect(timers).toHaveLength(1)
+  // the marker is written before the timer is scheduled, so a rejected run stays rejected
+  $.command.run = async () => { throw new Error('unknown command') }
+  await fireAfter()
+  expect(toasts).toEqual(['cs-rotate: /rotate did not run: Error: unknown command'])
+  await turnComplete()
+  expect(timers).toHaveLength(1)
+  $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
+  // a marker from an earlier conversation of the session does not count
+  files['/work/.cs/local/cs-rotate.forced'] = 'uuid-earlier\n'
+  await turnComplete()
+  expect(timers).toHaveLength(2)
+})
+
+test('a subagent\'s turn, an aborted, errored or refused one, a teammate, or an unarmed non-cs directory forces nothing', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  percent = 90
+  await turnComplete({ agentId: 'agent-1' })
+  await turnComplete({ reason: 'aborted' })
+  await turnComplete({ reason: 'error' })
+  await turnComplete({ reason: 'refusal' })
+  sessionId = 'uuid-teammate'
+  await turnComplete()
+  sessionId = 'uuid-lead'; existing = new Set(); files = {}
+  await turnComplete()
+  expect(timers).toEqual([])
+  expect(Object.keys(written)).toEqual([])
+})
+
+test('a turn ending past the force threshold with a handoff already armed runs no second /rotate', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  percent = 90
+  arm()
+  await turnComplete()
+  await fireAfter()
+  expect(ran).toEqual([])
+})
+
+// The countdown's ticker, and one tick of it as the clock would run it.
+const ticker = () => timers.find(t => t.kind === 'every' && !t.cancelled)
+const tick = async (n = 1) => { for (let i = 0; i < n; i++) await ticker()!.fn() }
+const promptSubmit = (text = 'keep going') =>
+  hooks['prompt.submit']($, { text, wait: false, origin: { kind: 'composer' } }, async (e) => ({ text: e.text }))
+
+test('with the handoff armed and force on, a turn ending starts a countdown the band shows, one redraw a second', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  expect(ticker()?.ms).toBe(1000)
+  expect(GRACE_SECONDS).toBe(20)
+  expect(JSON.stringify(await band())).toContain(`/clear in ${GRACE_SECONDS}s`)
+  await tick(3)
+  expect(invalidated).toEqual(['ui.render', 'ui.render', 'ui.render'])
+  expect(JSON.stringify(await band())).toContain(`/clear in ${GRACE_SECONDS - 3}s`)
+  expect(ran).toEqual([])
+  // one countdown at a time: another turn ending does not start a second
+  await turnComplete()
+  expect(timers.filter(t => t.kind === 'every')).toHaveLength(1)
+})
+
+test('at zero the countdown runs /clear, once, and stops ticking', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  const t = ticker()!
+  await tick(GRACE_SECONDS)
+  expect(ran).toEqual([{ command: 'clear', args: '' }])
+  expect(t.cancelled).toBe(true)
+  expect(JSON.stringify(await band())).not.toContain('/clear in')
+})
+
+test('a prompt entering the session stops the countdown and passes through', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  await tick(2)
+  const t = ticker()!
+  expect(await promptSubmit('one more thing')).toEqual({ text: 'one more thing' })
+  expect(t.cancelled).toBe(true)
+  expect(JSON.stringify(await band())).not.toContain('/clear in')
+  expect(ran).toEqual([])
+  // the next turn ending restarts it from the top
+  await turnComplete()
+  expect(JSON.stringify(await band())).toContain(`/clear in ${GRACE_SECONDS}s`)
+})
+
+test('pressing the clear button mid-countdown stops the ticker before it clears', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  await tick(2)
+  const t = ticker()!
+  await findButton(await band()).props.onPress()
+  expect(t.cancelled).toBe(true)
+  expect(ran).toEqual([{ command: 'clear', args: '' }])
+})
+
+test('a countdown reaching zero while a turn runs or a survey holds the band clears nothing and stops', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  for (const props of [{ isWorking: true }, { hasSurvey: true }]) {
+    await band()
+    await turnComplete()
+    const t = ticker()!
+    await band(props)
+    await tick(GRACE_SECONDS)
+    expect(ran).toEqual([])
+    expect(t.cancelled).toBe(true)
+  }
+})
+
+test('a countdown reaching zero re-checks the handoff: one consumed meanwhile clears nothing', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  files[HANDOFF] = UNCONSUMED.replace('status: unconsumed', 'status: consumed')
+  await tick(GRACE_SECONDS)
+  expect(ran).toEqual([])
+})
+
+test('without force, or outside the lead, an armed handoff starts no countdown and prompt.submit passes through', async () => {
+  arm(); percent = 80
+  await turnComplete()
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  sessionId = 'uuid-teammate'
+  await turnComplete()
+  expect(timers).toEqual([])
+  expect(toasts).toEqual([])
+  expect(await promptSubmit()).toEqual({ text: 'keep going' })
+})
+
+test('a prompt arriving while the zero tick is still checking the handoff wins: nothing clears', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  await tick(GRACE_SECONDS - 1)
+  const zero = tick()
+  await promptSubmit('wait, one more thing')
+  await zero
+  expect(ran).toEqual([])
+  // and a press racing the zero tick clears once, not twice
+  await turnComplete()
+  await tick(GRACE_SECONDS - 1)
+  const button = findButton(await band())
+  const zero2 = tick()
+  await button.props.onPress()
+  await zero2
+  expect(ran).toEqual([{ command: 'clear', args: '' }])
+})
+
+test('a /clear run from anywhere else ends the countdown, so no timer outlives the conversation', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  const t = ticker()!
+  const e = { command: 'clear', args: '', origin: { kind: 'composer' }, presentation: { layout: 'main', columns: 80 } }
+  expect(await hooks['command.run:clear']($, e, async () => ({ text: '' }))).toEqual({ text: '' })
+  expect(t.cancelled).toBe(true)
+  expect(JSON.stringify(await band())).not.toContain('/clear in')
+})
+
+test('a rejected /clear at zero shows a toast and clears nothing else', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  $.command.run = async () => { throw new Error('no session') }
+  await tick(GRACE_SECONDS)
+  $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
+  expect(toasts).toEqual(['cs-rotate: /clear did not run: Error: no session'])
+  expect(ran).toEqual([])
+})
+
+// The SessionStart hook's own rule (_handoff_is_unconsumed): the frontmatter
+// must close, and the status must sit inside it.
+test('isUnconsumed follows the hook: unclosed frontmatter, or a status after it, is not armed', () => {
+  expect(isUnconsumed('---\nstatus: unconsumed\n---\n')).toBe(true)
+  expect(isUnconsumed('---\nstatus: unconsumed\n')).toBe(false)
+  expect(isUnconsumed('---\nparent: x\n---\nstatus: unconsumed\n')).toBe(false)
+  expect(isUnconsumed('---\nstatus: consumed\n---\n')).toBe(false)
+  expect(isUnconsumed('')).toBe(false)
+})
+
+test('a tick that lands while the zero tick is still reading does not push the count negative or clear twice', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  await tick(GRACE_SECONDS - 1)
+  const t = ticker()!
+  const first = t.fn()
+  const second = t.fn()
+  await first; await second
+  expect(ran).toEqual([{ command: 'clear', args: '' }])
+  expect(JSON.stringify(await band())).not.toContain('/clear in -')
+})
+
+test('a conversation met at load is forced whatever it started at; one born of a /clear that starts past the threshold is not, and says so once', async () => {
+  // resumed (or launched) already past the line: forced, as asked
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  percent = 72
+  await turnComplete()
+  expect(timers.map(t => t.kind)).toEqual(['after'])
+  expect(toasts).toEqual([])
+  // the successor wakes past the line: that is the loop, and it stops here
+  await clearRun()
+  sessionId = 'uuid-next'
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-next\n'
+  percent = 71
+  await turnComplete(); await turnComplete()
+  expect(timers).toHaveLength(1)
+  expect(toasts).toEqual(['cs-rotate: CS_ROTATE_FORCE_CTX=70 is below this conversation\'s starting context (71%); not forcing a rotation'])
+  // a teammate past the line is not the lead: no rotation, and no toast about one
+  sessionId = 'uuid-teammate'
+  percent = 90
+  await turnComplete()
+  expect(timers).toHaveLength(1)
+  expect(toasts).toHaveLength(1)
+  // a successor that starts below and works its way past is forced as usual
+  sessionId = 'uuid-later'
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-later\n'
+  percent = 30
+  await turnComplete()
+  percent = 90
+  await turnComplete()
+  expect(timers).toHaveLength(2)
+  // a reload forgets: the conversation it meets next is adopted, whatever it reads
+  register(on as any)
+  sessionId = 'uuid-reloaded'
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-reloaded\n'
+  percent = 95
+  await turnComplete()
+  expect(timers).toHaveLength(3)
+})
+
+const clearRun = () =>
+  hooks['command.run:clear']($, { command: 'clear', args: '', origin: { kind: 'composer' }, presentation: { layout: 'main', columns: 80 } }, async () => ({ text: '' }))
+
+test('a successor that starts past the threshold still gets the countdown once the person arms a handoff themselves', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  percent = 30
+  await turnComplete()
+  await clearRun()
+  sessionId = 'uuid-next'
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-next\n'
+  percent = 75
+  await turnComplete()
+  expect(timers).toEqual([])
+  arm()
+  await turnComplete()
+  expect(ticker()).toBeDefined()
+})
+
+test('a /clear before any turn ends still marks the next conversation as /clear-born: past the threshold it is not forced', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  await clearRun()
+  sessionId = 'uuid-next'
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-next\n'
+  percent = 75
+  await turnComplete()
+  expect(timers).toEqual([])
+  expect(toasts).toHaveLength(1)
+})
+
+test('a new conversation id with no /clear seen in this process is a resume: adopted and forced as asked', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  percent = 30
+  await turnComplete()
+  sessionId = 'uuid-resumed'
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-resumed\n'
+  percent = 72
+  await turnComplete()
+  expect(timers.map(t => t.kind)).toEqual(['after'])
+  expect(toasts).toEqual([])
+})
+
+test('the /clear the mod runs itself marks the successor as /clear-born too, so a wake past the threshold is not forced', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  await findButton(await band()).props.onPress()
+  expect(ran).toEqual([{ command: 'clear', args: '' }])
+  files = { '/work/.cs/local/state': 'claude_session_id: uuid-next\n' }
+  sessionId = 'uuid-next'
+  percent = 75
+  await turnComplete()
+  expect(timers.filter(t => t.kind === 'after')).toEqual([])
+  expect(toasts).toHaveLength(1)
+})
+
+test('a /clear whose successor never answers does not mark a later /resume as /clear-born: the band drawn in the successor consumes the birth', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  percent = 30
+  await turnComplete()
+  await clearRun()
+  sessionId = 'uuid-wake'
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-wake\n'
+  await band()
+  sessionId = 'uuid-resumed'
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-resumed\n'
+  percent = 72
+  await turnComplete()
+  expect(timers.map(t => t.kind)).toEqual(['after'])
+  expect(toasts).toEqual([])
+})
+
+test('resuming a conversation that was once judged adopts it afresh: the old judgment is dropped', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  percent = 30
+  await turnComplete()
+  await clearRun()
+  sessionId = 'uuid-judged'
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-judged\n'
+  percent = 75
+  await turnComplete()
+  expect(timers).toEqual([])
+  sessionId = 'uuid-other'
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-other\n'
+  percent = 20
+  await turnComplete()
+  sessionId = 'uuid-judged'
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-judged\n'
+  percent = 75
+  await turnComplete()
+  expect(timers.map(t => t.kind)).toEqual(['after'])
+  expect(toasts).toHaveLength(1)
+})
+
+test('a /clear the mod runs itself that is rejected leaves no birth behind: a later /resume past the threshold is forced', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  $.command.run = async () => { throw new Error('no session') }
+  await tick(GRACE_SECONDS)
+  $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
+  expect(toasts).toEqual(['cs-rotate: /clear did not run: Error: no session'])
+  files = { '/work/.cs/local/state': 'claude_session_id: uuid-resumed\n' }
+  sessionId = 'uuid-resumed'
+  percent = 72
+  await turnComplete()
+  expect(timers.filter(t => t.kind === 'after' && !t.cancelled)).toHaveLength(1)
+  expect(toasts).toHaveLength(1)
+})
+
+test('a typed /clear that the engine refuses leaves no birth behind either', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  percent = 30
+  await turnComplete()
+  const e = { command: 'clear', args: '', origin: { kind: 'composer' }, presentation: { layout: 'main', columns: 80 } }
+  await expect(hooks['command.run:clear']($, e, async () => { throw new Error('refused') })).rejects.toThrow('refused')
+  files = { '/work/.cs/local/state': 'claude_session_id: uuid-resumed\n' }
+  sessionId = 'uuid-resumed'
+  percent = 72
+  await turnComplete()
+  expect(timers.map(t => t.kind)).toEqual(['after'])
+  expect(toasts).toEqual([])
 })

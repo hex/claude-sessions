@@ -103,11 +103,18 @@ test_mod_validate_inventories_the_hooks_and_calls() {
     out="$(sed 's/\x1b\[[0-9;]*m//g' "$raw")"; rm -f "$raw"
     assert_eq "0" "$status" "validate exits 0" || { echo "$out"; return 1; }
     assert_output_contains "$out" "Validation passed" "manifest and hooks validate" || return 1
-    assert_output_contains "$out" "hooks: session.start, ui.render{component=AbovePrompt}" "both hooks inventoried" || return 1
+    # A Claude Code from before function hooks validates the manifest and
+    # prints no inventory; the pins below are about the inventory.
+    if ! printf '%s' "$out" | grep -q 'hooks:'; then
+        echo "    SKIP: this claude ($(claude --version 2>/dev/null | head -1)) does not inventory function hooks"
+        return 0
+    fi
+    assert_output_contains "$out" "hooks: session.start, turn.complete, prompt.submit, command.run{command=clear}, ui.render{component=AbovePrompt}" "all five hooks inventoried" || return 1
     assert_output_not_contains "$out" '$.prompt.fill' "nothing fills the composer any more" || return 1
-    assert_output_contains "$out" 'env reads: CS_ROTATE_BUTTON_CTX, CS_STATUSLINE_CTX_CRIT, CS_STATUSLINE_CTX_WARN, CS_TERM_THEME' "the threshold, the bar's bands and the theme are read from the environment" || return 1
+    assert_output_contains "$out" 'env reads: CS_ROTATE_BUTTON_CTX, CS_ROTATE_FORCE_CTX, CS_STATUSLINE_CTX_CRIT, CS_STATUSLINE_CTX_WARN, CS_TERM_THEME' "the two thresholds, the bar's bands and the theme are read from the environment" || return 1
     assert_output_not_contains "$out" '$.prompt.submit' "and never submits" || return 1
     assert_output_contains "$out" '$.command.run (via clearAndContinue, rotate)' "the two presses run their commands, and nothing else runs one" || return 1
+    assert_output_contains "$out" '$.clock.after (via forceRotation), $.clock.every (via startCountdown)' "the forced /rotate is a one-shot timer and the grace a ticker, nowhere else" || return 1
 }
 
 run_test test_mod_manifest_names_the_plugin_and_its_module

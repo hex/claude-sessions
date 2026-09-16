@@ -313,6 +313,51 @@ appears only for a marker the hook accepts: a bare basename, a file in
 an aborted rotation left naming a handoff since consumed or gone, leaves the
 rotate button in place.
 
+The mod can also press the button for you. With `CS_ROTATE_FORCE_CTX=<percent>`
+in the shell that launches cs (off unless set, and off for a value that is not
+a number), the end of a turn whose context reads at or past that percentage
+runs `/rotate` as if you had pressed `1`, once per conversation: the mod
+records the conversation id in `.cs/local/cs-rotate.forced` before it schedules
+the run, so a `/rotate` that fails is not tried again at the end of every turn. A run
+the engine refuses shows as a toast; a run that starts but whose turn ends
+without arming a handoff (the skill refused, or was interrupted) is not seen
+by the mod, and the rotate button simply stays for you: the forced rotation
+is one attempt per conversation, never a retry loop. Only a turn that ended
+with an answer counts, on the main loop, in the lead conversation, with no
+handoff already armed: an interrupted or errored turn, or a subagent's, starts
+nothing. The run is scheduled from a timer rather than from the turn's own
+hook, which the plugin contract refuses a command from. Once the rotate skill
+has armed its handoff, the next turn's end starts a 20-second grace: the
+capsule reads `1: /clear and continue from the handoff  ·  /clear in 20s`,
+redrawn once a second, and at zero the mod runs the `/clear` itself, only if
+the band is idle at that moment (no turn running, no survey), the handoff still
+armed and this still the lead; otherwise the count stops and the button waits
+for you. Pressing `1` during the count clears at once. Sending a prompt, from
+the composer or anywhere else a prompt enters the session, stops the count;
+the next turn's end starts it again from 20. A `/clear` from anywhere else
+(typed, or another plugin's) ends it too. The count is module state: it does
+not survive a reload of the mod, and every path that ends it cancels its
+timer, because a timer started before a `/clear` keeps firing after one
+(measured). At zero the mod re-reads the handoff with the SessionStart hook's
+own rule (frontmatter opened and closed by `---`, `status: unconsumed`
+inside), so a truncated handoff is never cleared into.
+
+Pick the percentage above a fresh conversation's own footprint. The wake turn
+after the `/clear` is an ordinary turn, and the once-per-conversation record
+belongs to the conversation that ended, so a threshold a fresh conversation
+already sits past (a session that loads a large CLAUDE.md and memory, say,
+with the knob at 5) would rotate again as soon as it woke, and again after
+that (measured at 1). The mod refuses that loop: a conversation born of a
+`/clear` it saw run (its own at zero, or one typed) is judged by the context its
+first turn ended with, and one that already sat past the threshold is never
+forced; a toast says so once
+(`CS_ROTATE_FORCE_CTX=5 is below this conversation's starting context (8%)`),
+and the button stays. The conversation the mod meets at launch, after a reload,
+or through a `/resume` is not judged: a session resumed at 72% with the knob at
+70 is exactly the one the person asked to have rotated. A handoff the person
+arms by hand in a judged conversation still gets the countdown. The bar's crit
+band, 65, is the intended neighbourhood.
+
 The button is for the lead conversation of a cs session only: past the threshold
 the mod also checks that the cwd has `.cs/local`, that `.cs/local/disabled` is
 absent, and that its own conversation id is the `claude_session_id` in
@@ -358,8 +403,10 @@ Two facts about the plugin runtime shape the code. A module reads the
 environment through `$.env.get` with a literal name, which `claude plugin
 validate` lists, so the threshold and the bands are three variable reads per
 render, the theme a fourth; the defaults and the five ink triplets are literals
-in `register.tsx` that `tests/test_mod_rotate.sh` pins to the status line's. And
-a hot reload resets module state, so the mod keeps none.
+in `register.tsx` that `tests/test_mod_rotate.sh` pins to the status line's. The
+module state the forced mode keeps (the countdown, the conversation it is
+judging) is reset by a hot reload, which drops a running countdown and adopts
+the conversation it meets next unjudged.
 
 Tests: `tests/test_mod_rotate.sh` runs the bun unit tests under
 `mods/cs-rotate/test/` (a fake engine drives the band, the press and the
