@@ -104,6 +104,16 @@ _trace() {  # stage
     { printf '%s %s %s\n' "$$" "$(( _MS - _TRACE_T0 ))" "$1" >> "$_TRACE"; } 2>/dev/null || true
 }
 
+# The hook's own clock, kept apart from the trace's (which a session can opt
+# out of): the deadline below reads it. It starts here, after the library
+# parse checks and the session resolve above, so what those forks cost under
+# load is not counted; the registered timeout counts it, and is the backstop.
+_now_ms
+_T0=$_MS
+# What the deadline below says when it fires; every exit emits it in the scope
+# block's place, and it is empty on every run that reaches the scan.
+SKIP_NOTE=""
+
 _trace_open "${CLAUDE_SESSION_META_DIR:-}/local"
 
 # The user is back: drop the statusline's finished-blink marker before any
@@ -384,11 +394,13 @@ $part"
 
 _digest_exit() {
     local _emitted=0
-    _emit_context "$DATE_NOTE" "$DIGEST" "$CLARIFY" || _emitted=$?
-    _commit_digest "${CLAUDE_SESSION_META_DIR:-}/local"
-    # An emission that failed left the note unheard; the stamp waits for the
-    # next prompt to carry it.
-    [ "$_emitted" -eq 0 ] && _commit_date_stamp "${CLAUDE_SESSION_META_DIR:-}/local"
+    _emit_context "$DATE_NOTE" "$DIGEST" "$CLARIFY" "$SKIP_NOTE" || _emitted=$?
+    # An emission that failed left the digest and the note unheard; the cursor
+    # and the stamp wait for the next prompt to carry them.
+    if [ "$_emitted" -eq 0 ]; then
+        _commit_digest "${CLAUDE_SESSION_META_DIR:-}/local"
+        _commit_date_stamp "${CLAUDE_SESSION_META_DIR:-}/local"
+    fi
     _trace exit
     exit 0
 }
@@ -469,6 +481,32 @@ else
     fi
 fi
 _trace classify
+
+# --- The hook's own deadline ---
+# Claude Code kills this hook where it stands when it overruns its registered
+# timeout, and everything built so far dies with it: the queue and mail
+# digests, the date note, the clarify guideline. The cheap front half takes
+# well under 300 ms on an idle machine and 1.7 s under a load of 25 (a full
+# test suite beside it); the scan stages below are what runs the rest of the
+# way into the kill. So the hook checks its own clock here, once, through the
+# same builtins the trace reads: past the budget it gives up the scope block,
+# says so in one line, and still delivers the rest. CS_SCOPE_BUDGET_MS moves
+# the budget; anything that is not a number of at most seven digits is the
+# default, so a typo cannot silence grounding on every prompt, and a number
+# past the shell's arithmetic cannot wrap to a zero that would. The registered
+# timeout stays the backstop for a scan that is itself slow.
+_BUDGET_MS="${CS_SCOPE_BUDGET_MS:-1500}"
+# 10# forces base 10 once the value is known to be digits, so a budget written
+# 0100 is a hundred milliseconds rather than an invalid octal — and the note
+# below quotes the number the hook actually used.
+case "$_BUDGET_MS" in ''|*[!0-9]*|????????*) _BUDGET_MS=1500 ;; *) _BUDGET_MS=$(( 10#$_BUDGET_MS )) ;; esac
+_now_ms
+_ELAPSED_MS=$(( _MS - _T0 ))
+if [ "$_ELAPSED_MS" -ge "$_BUDGET_MS" ]; then
+    SKIP_NOTE="Scope: skipped, slow machine (this hook's front half took ${_ELAPSED_MS} ms of its ${_BUDGET_MS} ms budget, so the grounded scan was not run; locate the relevant files yourself)"
+    _trace skip
+    _digest_exit
+fi
 
 # No cache: a grounding hook must reflect the CURRENT tree. A prompt-only cache key served
 # stale ground after commits/edits, and a repo-state-aware key would almost never hit in an
@@ -621,7 +659,9 @@ fi
 # after the marker breaks that.
 _emitted=0
 _emit_context "$DATE_NOTE" "$DIGEST" "$CLARIFY" "$BLOCK" || _emitted=$?
-_commit_digest "${CLAUDE_SESSION_META_DIR:-}/local"
-[ "$_emitted" -eq 0 ] && _commit_date_stamp "${CLAUDE_SESSION_META_DIR:-}/local"
+if [ "$_emitted" -eq 0 ]; then
+    _commit_digest "${CLAUDE_SESSION_META_DIR:-}/local"
+    _commit_date_stamp "${CLAUDE_SESSION_META_DIR:-}/local"
+fi
 _trace emit
 exit 0
