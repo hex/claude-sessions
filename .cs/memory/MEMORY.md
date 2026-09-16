@@ -46,7 +46,7 @@
 - [Validate after the transform](project_validate_after_transform.md): close the class structurally over a deny-list; where one is unavoidable validate the OUTPUT, test BOTH directions, measure against real data
 - [Verify the mutation landed](project_verify_mutation_landed.md): a green mutation test is meaningless until you confirm the sed/perl actually changed the file
 - [Hold for adversarial review](feedback_hold_for_adversarial_review.md): Alex holds for an independent Fable review even when Claude says all gates are green — NOT only security work; wait for a slow reviewer on any release
-- [Subagent idle is not dead](project_subagent_idle_not_dead.md): never judge by mtime or an unanswered ping; NAMED agents are tmux-backed (list-panes); past a time box re-dispatch the prompt UNNAMED or via codex exec </dev/null
+- [Subagent idle is not dead](project_subagent_idle_not_dead.md): never judge by mtime or an unanswered ping; NAMED agents are tmux-backed; past a time box re-dispatch the prompt UNNAMED or via codex exec </dev/null
 - [SessionEnd source asymmetry](project_sessionend_source_asymmetry.md): a `/clear` ends as `user_exit`, not `clear` — only SessionStart can tell a rotation from a quit, so put lineage logic there
 - [/code-review lead never reports](project_code_review_skill_is_pr_shaped.md): accepts a range now, spawns 8 finders whose JSON lands in your inbox (16 KB truncation), lead parks forever
 - [No real identities in fixtures](feedback_no_real_identities_in_fixtures.md): never a real name, email or handle in fixtures, test names, assertions, comments or docs; example.com placeholders keep the shape
@@ -63,7 +63,7 @@
 - [Tests stage their preconditions](project_test_stages_its_precondition.md): a test whose outcome depends on state it never sets asserts the developer's machine
 - [Mutation testing needs isolation](project_mutation_testing_needs_isolation.md): one clone per mutating agent — a peer-reverted mutation looks exactly like a vacuous test
 - [BSD cmp -n is length-sensitive](project_bsd_cmp_n_length.md): `cmp -n N a b` fails when a and b differ in total length even with identical first N bytes — compare `<(head -c N a)` streams
-- [Subagents never dump the environment](project_subagent_no_env_dump.md): `env | grep` in a subagent wrote live secrets to its transcript; dispatch prompts forbid env, printenv, set AND export -p; probe one var with ${NAME:+set}
+- [Subagents never dump the environment](project_subagent_no_env_dump.md): `env | grep` in a subagent wrote live secrets to its transcript; forbid env, printenv, set AND export -p; probe one var with ${NAME:+set}
 - [lib/bin build drift](project_lib_bin_build_drift.md): tests source lib/ while users run the assembled bin/cs — only CI's build-sync sees the gap; run ./build.sh last before committing
 - [Rank from the complete measurement](feedback_rank_from_complete_measurement.md): don't rank fixes from a snapshot while the settling measurement is still running
 - [Fork CI waits at action_required](project_fork_ci_action_required.md): an empty statusCheckRollup on a fork PR is a run awaiting approval, not "no checks yet"
