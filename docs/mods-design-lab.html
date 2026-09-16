@@ -82,28 +82,82 @@ table.props td:first-child{font-family:"JetBrains Mono",monospace;white-space:no
 .b{font-weight:700}
 .ok{color:#2C7A39}.no{color:var(--error)}
 details summary{cursor:pointer;font-weight:600;font-size:13px}
+
+/* ---- shell: rail + stage, one panel on screen ---- */
+body{padding:0}
+.shell{display:grid;grid-template-columns:232px 1fr;min-height:100vh}
+.rail{position:sticky;top:0;height:100vh;overflow-y:auto;border-right:1px solid var(--line);padding:22px 12px;display:flex;flex-direction:column;gap:2px;background:var(--page)}
+.rail .grp{font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--fg2);margin:14px 8px 4px}
+.rail .grp:first-child{margin-top:0}
+.rail a{display:flex;align-items:baseline;gap:8px;padding:6px 8px;border-radius:4px;color:var(--fg);text-decoration:none;font-size:13.5px;border:1px solid transparent;transition:background .12s ease-out,border-color .12s ease-out}
+.rail a:hover{background:var(--panel)}
+.rail a.on{background:var(--panel);border-color:var(--line);box-shadow:inset 2px 0 0 var(--coral)}
+.rail a .hk{font:12px "JetBrains Mono",monospace;color:var(--hot);min-width:1.2ch}
+.rail a.on .hk{color:var(--coral)}
+.rail a .cnt{margin-left:auto;font-size:11px;color:var(--fg2)}
+.stage{min-width:0}
+.head{position:sticky;top:0;z-index:5;background:var(--page);border-bottom:1px solid var(--line);padding:14px clamp(16px,3vw,40px) 10px;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 18px}
+.head h1{margin:0;font-size:18px}
+.head .sub{margin:0;font-size:12.5px;flex:1 1 320px}
+.head .top{flex-basis:100%}
+.top{margin-bottom:0}
+.keys{margin-left:auto;font-size:11.5px;color:var(--fg2)}
+kbd{font:11px "JetBrains Mono",monospace;background:var(--panel);border:1px solid var(--line);border-bottom-width:2px;border-radius:3px;padding:0 5px}
+.content{padding:6px clamp(16px,3vw,40px) 60px}
+.panel{display:none}
+.panel.on{display:block;animation:panelIn .2s cubic-bezier(.16,1,.3,1)}
+@keyframes panelIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.panel h2{margin-top:20px}
+.lab{grid-template-columns:280px minmax(0,1fr)}
+.lab > div:last-child{position:sticky;top:calc(var(--head-h,96px) + 12px);max-height:calc(100vh - var(--head-h,96px) - 24px);overflow-y:auto}
+.controls{max-height:calc(100vh - var(--head-h,96px) - 24px);overflow-y:auto;position:sticky;top:calc(var(--head-h,96px) + 12px)}
+.term{transition:box-shadow .25s ease-out}
+.term.tick{box-shadow:0 0 0 2px var(--coral) inset}
+.specwrap{position:relative}
+.specwrap pre.spec{padding-right:72px}
+.panel h2{scroll-margin-top:calc(var(--head-h,96px) + 12px)}
+.copy{position:absolute;top:8px;right:8px;font:11.5px "IBM Plex Sans",sans-serif;background:var(--page);color:var(--fg2);border:1px solid var(--line);padding:3px 8px;cursor:pointer;border-radius:3px;transition:color .12s,border-color .12s}
+.copy:hover{color:var(--fg);border-color:var(--coral)}
+.copy.done{color:var(--coral);border-color:var(--coral)}
+.finder{position:fixed;inset:auto 0 0 0;margin:0 auto;bottom:24px;width:min(560px,90vw);background:var(--panel);border:1px solid var(--line);box-shadow:0 12px 32px rgba(0,0,0,.18);z-index:9;display:none;padding:8px}
+.finder.on{display:block;animation:panelIn .18s cubic-bezier(.16,1,.3,1)}
+.finder input{width:100%;font-size:14px}
+.finder .hits{max-height:40vh;overflow:auto;margin-top:6px}
+.finder .hit{display:flex;gap:10px;padding:6px 8px;cursor:pointer;font-size:13px;border-radius:3px}
+.finder .hit:hover,.finder .hit.on{background:var(--page)}
+.finder .hit code{border:0;background:none;padding:0}
+.finder .hit .where{margin-left:auto;color:var(--fg2);font-size:12px}
+@media (max-width:900px){.shell{grid-template-columns:1fr}.rail{position:static;height:auto;flex-direction:row;flex-wrap:wrap;border-right:0;border-bottom:1px solid var(--line)}.rail .grp{display:none}.lab > div:last-child{position:static}.controls{max-height:none}}
+@media (prefers-reduced-motion:reduce){.panel.on,.finder.on{animation:none}.term,.rail a,.copy{transition:none}}
 </style>
 
+<div class="shell">
+<aside class="rail" id="rail"></aside>
+<div class="stage">
+<header class="head">
 <h1>Mods Design Lab</h1>
-<p class="sub">Everything a Claude Code mod (function-hooks plugin) can draw on the terminal, from the type contract shipped with Claude Code 2.1.273: nine elements with every prop, eight border styles, the theme palette, the fourteen render sites and their read-only props, the hotkey, hover, focus and redraw rules. Move a knob, read the JSX it maps to. The cs-rotate capsule presets are at the end.</p>
+<p class="sub">Everything a Claude Code mod can draw on the terminal, from the contract shipped with 2.1.273. Pick a panel, move a knob, copy the JSX.</p>
 
 <div class="top">
   <label>Theme <select id="theme"><option value="light">light (cream terminal)</option><option value="dark">dark</option></select></label>
   <label>Columns <input id="cols" type="number" min="40" max="200" value="80" style="width:70px"></label>
-  <span class="sub" style="margin:0;font-size:12px">Source: <code>~/.claude/plugins/marketplaces/claude-code-plugins/mods/types/claude-code.d.ts</code> and the 2.1.273 binary (border glyphs, palette).</span>
+  <span class="sub" style="margin:0;font-size:12px" title="~/.claude/plugins/marketplaces/claude-code-plugins/mods/types/claude-code.d.ts and the 2.1.273 binary (border glyphs, palette)">Source: <code>claude-code.d.ts</code> + binary</span>
+  <span class="keys" aria-hidden="true">↑↓ or hotkey switches panels · <kbd>t</kbd> theme · <kbd>/</kbd> find a prop</span>
 </div>
+</header>
 
-<nav class="toc">
-  <a href="#sites">Render sites</a><a href="#box">Box</a><a href="#text">Text</a><a href="#button">Button</a><a href="#input">Input</a><a href="#select">Select</a><a href="#link">Link</a><a href="#code">Code</a><a href="#raster">Raster</a><a href="#client">Client</a><a href="#borders">Borders</a><a href="#palette">Palette</a><a href="#rules">Rules</a><a href="#rotate">Rotate capsule</a><a href="#coverage">Coverage</a>
-</nav>
+<main class="content">
 
 <!-- ============================== SITES ============================== -->
+<section class="panel" id="p-sites">
 <h2 id="sites">Where a mod draws <span class="src">RenderComponent, RenderPropsOf</span></h2>
-<p class="sub">A hook on <code>ui.render</code> matches one component. Two sites take a tree of the mod's own (AbovePrompt, Pane); the others draw the engine's component from props the hook may rewrite. Only the band honours hotkeys.</p>
+<p class="sub">Source: <code>~/.claude/plugins/marketplaces/claude-code-plugins/mods/types/claude-code.d.ts</code> (10.8k lines) and the 2.1.273 binary for border glyphs and the palette. A hook on <code>ui.render</code> matches one component. Two sites take a tree of the mod's own (AbovePrompt, Pane); the others draw the engine's component from props the hook may rewrite. Only the band honours hotkeys.</p>
 <div class="tabs" id="siteTabs"></div>
 <div id="siteBody"></div>
 
 <!-- ============================== BOX ============================== -->
+</section>
+<section class="panel" id="p-box">
 <h2 id="box">Box <span class="src">BoxProps, BoxHoverProps</span></h2>
 <div class="lab">
   <div class="controls">
@@ -142,6 +196,8 @@ details summary{cursor:pointer;font-weight:600;font-size:13px}
 </div>
 
 <!-- ============================== TEXT ============================== -->
+</section>
+<section class="panel" id="p-text">
 <h2 id="text">Text <span class="src">TextProps, TextHoverProps</span></h2>
 <div class="lab">
   <div class="controls">
@@ -172,6 +228,8 @@ details summary{cursor:pointer;font-weight:600;font-size:13px}
 </div>
 
 <!-- ============================== BUTTON ============================== -->
+</section>
+<section class="panel" id="p-button">
 <h2 id="button">Button <span class="src">ButtonProps</span></h2>
 <div class="lab">
   <div class="controls">
@@ -203,6 +261,8 @@ details summary{cursor:pointer;font-weight:600;font-size:13px}
 </div>
 
 <!-- ============================== INPUT ============================== -->
+</section>
+<section class="panel" id="p-input">
 <h2 id="input">Input <span class="src">InputProps</span></h2>
 <div class="lab">
   <div class="controls">
@@ -227,6 +287,8 @@ details summary{cursor:pointer;font-weight:600;font-size:13px}
 </div>
 
 <!-- ============================== SELECT ============================== -->
+</section>
+<section class="panel" id="p-select">
 <h2 id="select">Select <span class="src">SelectProps, SelectOption</span></h2>
 <div class="lab">
   <div class="controls">
@@ -249,6 +311,8 @@ none|start fresh</textarea></label>
 </div>
 
 <!-- ============================== LINK ============================== -->
+</section>
+<section class="panel" id="p-link">
 <h2 id="link">Link <span class="src">LinkProps</span></h2>
 <div class="lab">
   <div class="controls">
@@ -266,6 +330,8 @@ none|start fresh</textarea></label>
 </div>
 
 <!-- ============================== CODE ============================== -->
+</section>
+<section class="panel" id="p-code">
 <h2 id="code">Code <span class="src">CodeProps</span></h2>
 <div class="lab">
   <div class="controls">
@@ -291,6 +357,8 @@ none|start fresh</textarea></label>
 </div>
 
 <!-- ============================== RASTER ============================== -->
+</section>
+<section class="panel" id="p-raster">
 <h2 id="raster">Raster <span class="src">RasterProps, $.ui.blit</span></h2>
 <div class="lab">
   <div class="controls">
@@ -316,6 +384,8 @@ none|start fresh</textarea></label>
 </div>
 
 <!-- ============================== CLIENT ============================== -->
+</section>
+<section class="panel" id="p-client">
 <h2 id="client">Client <span class="src">ClientProps, ClientElements</span></h2>
 <div class="lab">
   <div class="controls">
@@ -338,15 +408,21 @@ none|start fresh</textarea></label>
 </div>
 
 <!-- ============================== BORDERS ============================== -->
+</section>
+<section class="panel" id="p-borders">
 <h2 id="borders">Border styles <span class="src">borderStyle, from the 2.1.273 binary</span></h2>
 <div class="gallery" id="borders-gallery"></div>
 
 <!-- ============================== PALETTE ============================== -->
+</section>
+<section class="panel" id="p-palette">
 <h2 id="palette">Theme palette <span class="src">the theme keys a color prop accepts</span></h2>
 <p class="sub">The keys below are the ones a mod would reach for; the theme object in the binary has about seventy. A raw <code>rgb(r,g,b)</code> or <code>#rrggbb</code> bypasses the theme. ANSI themes map the same keys to the sixteen terminal colors.</p>
 <div class="swatches" id="swatches"></div>
 
 <!-- ============================== RULES ============================== -->
+</section>
+<section class="panel" id="p-rules">
 <h2 id="rules">Rules the contract enforces</h2>
 <div class="two">
   <div>
@@ -382,6 +458,8 @@ none|start fresh</textarea></label>
 </div>
 
 <!-- ============================== ROTATE ============================== -->
+</section>
+<section class="panel" id="p-rotate">
 <h2 id="rotate">Rotate capsule presets <span class="src">the cs-rotate band, as shipped</span></h2>
 <p class="sub">The band the cs-rotate mod draws above the prompt. Move the knobs, pick a preset, read the JSX it maps to. Inks come from <code>bin/cs-statusline</code>; the shipped capsule is the "Inked" preset.</p>
 <div class="lab">
@@ -409,6 +487,8 @@ none|start fresh</textarea></label>
 </ul>
 
 <!-- ============================== COVERAGE ============================== -->
+</section>
+<section class="panel" id="p-coverage">
 <h2 id="coverage">Coverage check</h2>
 <p class="sub">The prop names this page knows, per element, against the contract. Regenerate the contract list with the command below and paste it in; the page reports what it lacks. Empty means the lab covers every prop the contract names.</p>
 <pre class="spec">awk '/export type (BoxProps|TextProps|ButtonProps|InputProps|SelectProps|LinkProps|CodeProps|RasterProps|ClientProps) = \{/{t=$3} \
@@ -417,6 +497,10 @@ none|start fresh</textarea></label>
 <textarea id="cov-in" placeholder="paste the command's output here"></textarea>
 <pre class="spec" id="cov-out">Known to the page: (loads below)</pre>
 
+</section>
+</main>
+</div>
+</div>
 <script>
 const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;");
@@ -873,12 +957,90 @@ function coverage(){
   $("cov-out").textContent=out;
 }
 
+// ---------- shell: rail, hotkeys, finder, copy ----------
+const NAV=[
+  {grp:"Where"},{id:"sites",hk:"1",label:"Render sites",cnt:"14"},
+  {grp:"Elements"},{id:"box",hk:"2",label:"Box",cnt:"36 props"},{id:"text",hk:"3",label:"Text",cnt:"10"},{id:"button",hk:"4",label:"Button",cnt:"9"},{id:"input",hk:"5",label:"Input",cnt:"8"},{id:"select",hk:"6",label:"Select",cnt:"6"},{id:"link",hk:"7",label:"Link",cnt:"2"},{id:"code",hk:"8",label:"Code",cnt:"6"},{id:"raster",hk:"9",label:"Raster",cnt:"4"},{id:"client",hk:"0",label:"Client",cnt:"6"},
+  {grp:"Reference"},{id:"borders",hk:"b",label:"Border styles",cnt:"8"},{id:"palette",hk:"p",label:"Palette",cnt:"17"},{id:"rules",hk:"u",label:"Rules"},
+  {grp:"cs-rotate"},{id:"rotate",hk:"r",label:"Rotate capsule",cnt:"9 presets"},{id:"coverage",hk:"c",label:"Coverage check"},
+];
+const PANELS=NAV.filter(n=>n.id);
+function buildRail(){
+  const r=$("rail"); r.innerHTML="";
+  NAV.forEach(n=>{ if(n.grp){ r.insertAdjacentHTML("beforeend",`<div class="grp">${n.grp}</div>`); return; }
+    r.insertAdjacentHTML("beforeend",`<a href="#${n.id}" data-id="${n.id}"><span class="hk">${n.hk}</span>${n.label}${n.cnt?`<span class="cnt">${n.cnt}</span>`:""}</a>`); });
+}
+function show(id,push=true){
+  if(!PANELS.some(p=>p.id===id)) id="sites";
+  document.querySelectorAll(".panel").forEach(p=>p.classList.toggle("on",p.id==="p-"+id));
+  document.querySelectorAll(".rail a").forEach(a=>a.classList.toggle("on",a.dataset.id===id));
+  if(push&&location.hash!=="#"+id) history.replaceState(null,"","#"+id);
+  $("rail").querySelector("a.on")?.scrollIntoView({block:"nearest"});
+  requestAnimationFrame(()=>window.scrollTo({top:0,behavior:matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth"}));
+}
+history.scrollRestoration="manual";
+const current=()=>PANELS.findIndex(p=>document.getElementById("p-"+p.id).classList.contains("on"));
+function step(d){ const i=current(); show(PANELS[(i+d+PANELS.length)%PANELS.length].id); }
+// The same rule the band follows: a hotkey presses from an empty composer, never while typing.
+document.addEventListener("keydown",e=>{
+  const typing=/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName||"");
+  if(e.key==="Escape"){ $("finder").classList.remove("on"); document.activeElement?.blur(); return; }
+  if(typing) return;
+  if(e.key==="/"){ e.preventDefault(); openFinder(); return; }
+  if(e.key==="ArrowDown"||e.key==="j"){ e.preventDefault(); step(1); return; }
+  if(e.key==="ArrowUp"||e.key==="k"){ e.preventDefault(); step(-1); return; }
+  if(e.key==="t"){ $("theme").value=theme()==="light"?"dark":"light"; renderAll(); return; }
+  const hit=PANELS.find(p=>p.hk===e.key); if(hit) show(hit.id);
+});
+window.addEventListener("hashchange",()=>show(location.hash.slice(1),false));
+// Copy buttons on every JSX block.
+function copyButtons(){
+  document.querySelectorAll("pre.spec").forEach(pre=>{
+    if(pre.parentElement.classList.contains("specwrap")) return;
+    const w=document.createElement("div"); w.className="specwrap"; pre.replaceWith(w); w.appendChild(pre);
+    const b=document.createElement("button"); b.className="copy"; b.textContent="copy"; b.type="button";
+    b.onclick=async()=>{ try{ await navigator.clipboard.writeText(pre.textContent); b.textContent="copied"; b.classList.add("done"); setTimeout(()=>{b.textContent="copy";b.classList.remove("done");},1200); }catch{ b.textContent="select it"; } };
+    w.appendChild(b);
+  });
+}
+// A knob change flashes the preview it changed, so the eye lands on what moved.
+function tick(el){ if(!el) return; el.classList.remove("tick"); void el.offsetWidth; el.classList.add("tick"); clearTimeout(el._t); el._t=setTimeout(()=>el.classList.remove("tick"),350); }
+// Finder: every prop and site name → the panel that has it.
+const INDEX=[];
+function buildIndex(){
+  Object.entries(KNOWN).forEach(([t,ps])=>{ const id=t.replace("Props","").toLowerCase(); ps.forEach(p=>INDEX.push({k:p,where:t.replace("Props",""),id})); });
+  SITES.forEach(s=>{ INDEX.push({k:s.name,where:"render site",id:"sites"}); s.props.forEach(p=>INDEX.push({k:p[0].replace("?",""),where:s.name,id:"sites"})); });
+  Object.keys(BORDERS).forEach(b=>INDEX.push({k:b,where:"borderStyle",id:"borders"}));
+  Object.keys(PALETTE).forEach(c=>INDEX.push({k:c,where:"theme key",id:"palette"}));
+  ["invalidate","blit","toast","log","clock.every","clock.after","open","close","focus","scroll","hotkey rule","surfaces"].forEach(k=>INDEX.push({k,where:"rules",id:"rules"}));
+}
+function openFinder(){ const f=$("finder"); f.classList.add("on"); const i=f.querySelector("input"); i.value=""; i.focus(); renderHits(""); }
+function renderHits(q){
+  const hits=$("finder").querySelector(".hits"); q=q.trim().toLowerCase();
+  const list=(q?INDEX.filter(x=>x.k.toLowerCase().includes(q)||x.where.toLowerCase().includes(q)):INDEX.slice(0,12)).slice(0,40);
+  hits.innerHTML=list.map((x,i)=>`<div class="hit${i===0?" on":""}" data-id="${x.id}"><code>${esc(x.k)}</code><span class="where">${esc(x.where)}</span></div>`).join("")||`<div class="hit">nothing named that</div>`;
+  hits.querySelectorAll(".hit[data-id]").forEach(h=>h.onclick=()=>{ show(h.dataset.id); $("finder").classList.remove("on"); });
+}
+function finderUI(){
+  document.body.insertAdjacentHTML("beforeend",`<div class="finder" id="finder" role="dialog" aria-label="find a prop"><input type="text" placeholder="prop, element, site, theme key…" aria-label="find"><div class="hits"></div></div>`);
+  const f=$("finder"), i=f.querySelector("input");
+  i.addEventListener("input",()=>renderHits(i.value));
+  i.addEventListener("keydown",e=>{ const hs=[...f.querySelectorAll(".hit[data-id]")]; let n=hs.findIndex(h=>h.classList.contains("on"));
+    if(e.key==="ArrowDown"){e.preventDefault(); hs[n]?.classList.remove("on"); hs[Math.min(hs.length-1,n+1)]?.classList.add("on");}
+    else if(e.key==="ArrowUp"){e.preventDefault(); hs[n]?.classList.remove("on"); hs[Math.max(0,n-1)]?.classList.add("on");}
+    else if(e.key==="Enter"){ hs[n]?.click(); }
+    else if(e.key==="Escape"){ f.classList.remove("on"); } });
+  document.addEventListener("click",e=>{ if(f.classList.contains("on")&&!f.contains(e.target)) f.classList.remove("on"); });
+}
+
 // ---------- wire ----------
 function renderAll(){
   document.documentElement.setAttribute("data-theme",theme());
   boxRender(); textRender(); buttonRender(); inputRender(); selectRender(); linkRender(); codeRender(); rasterRender(); clientRender(); bordersGallery(); swatches(); rotateRender(); coverage();
 }
-sitesUI();
-document.querySelectorAll("input,select,textarea").forEach(el=>el.addEventListener("input",renderAll));
-renderAll();
+sitesUI(); buildRail(); buildIndex(); finderUI();
+const headH=()=>document.documentElement.style.setProperty("--head-h",document.querySelector(".head").offsetHeight+"px"); new ResizeObserver(headH).observe(document.querySelector(".head")); headH();
+document.querySelectorAll("input,select,textarea").forEach(el=>el.addEventListener("input",()=>{ renderAll(); tick(el.closest(".lab")?.querySelector(".term")); }));
+renderAll(); copyButtons();
+show(location.hash.slice(1)||"sites",false);
 </script>
