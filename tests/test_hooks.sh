@@ -470,7 +470,8 @@ EOF
 
 session_start_teardown() {
     teardown
-    unset CS_SESSIONS_ROOT CS_TITLE_TTY 2>/dev/null || true
+    unset CS_SESSIONS_ROOT 2>/dev/null || true
+    export CS_TITLE_TTY="$HOME/title-tty"
 }
 
 # A tmux stub on PATH that records every call's argv, one bracketed word per
@@ -503,6 +504,17 @@ test_test_lib_drops_an_inherited_tmux_and_routes_the_title_to_a_file() {
     assert_eq "unset|unset" "${seen%|*}" "test_lib must unset an inherited TMUX and TMUX_PANE" || return 1
     case "${seen##*|}" in
         unset|/dev/tty) echo "  FAIL: CS_TITLE_TTY must point at a scratch file, got '${seen##*|}'"; return 1 ;;
+    esac
+}
+
+# A session-start test points CS_TITLE_TTY at its own fixture; its teardown
+# must hand the scratch file back, or every later hook run in the suite
+# reaches the terminal again.
+test_session_start_teardown_keeps_the_title_off_the_terminal() {
+    session_start_setup
+    session_start_teardown
+    case "${CS_TITLE_TTY:-unset}" in
+        unset|/dev/tty) echo "  FAIL: CS_TITLE_TTY must still point at a scratch file after teardown, got '${CS_TITLE_TTY:-unset}'"; return 1 ;;
     esac
 }
 
@@ -1853,6 +1865,7 @@ run_test test_failure_handles_missing_error
 
 # Session start: cross-session context
 run_test test_test_lib_drops_an_inherited_tmux_and_routes_the_title_to_a_file
+run_test test_session_start_teardown_keeps_the_title_off_the_terminal
 run_test test_session_start_reasserts_tab_title_through_tmux
 run_test test_session_start_tab_title_leaves_a_teammate_pane_alone
 run_test test_session_start_reasserts_tab_title_on_the_terminal_device

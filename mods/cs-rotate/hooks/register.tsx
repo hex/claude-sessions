@@ -63,20 +63,21 @@ let left: number | undefined
 let ticker: { cancel: () => void } | undefined
 let bandIdle = false
 
-// The conversation the mod met when it loaded, and the context each later
+// The conversation whose turns are being judged, and the context a /clear-born
 // one started with. A conversation that begins past the force threshold did
 // not get there by working: forcing it would rotate again as soon as its
-// successor woke (measured at 1%). Only a conversation born of a /clear in
-// this process is judged that way, by its first turn's end; the one met at
-// load (a launch, a resume at 72%, a reload) is adopted unjudged, since past
+// successor woke (measured at 1%). Only a conversation born of a /clear seen
+// in this process is judged that way, by its first turn's end. Any other new
+// id (a launch, a reload, a /resume at 72%) is adopted unjudged, since past
 // the line is exactly where the person asked to be rotated. Module state is
 // kept across /clear, which is what makes the birth visible.
 let adopted: string | undefined
 let started: { id: string; percent: number | undefined } | undefined
+let clearSeen = false
 
 export function register(on: On) {
   // A (re)load has no countdown: the engine cancelled the old one's timers.
-  left = undefined; ticker = undefined; bandIdle = false; adopted = undefined; started = undefined
+  left = undefined; ticker = undefined; bandIdle = false; adopted = undefined; started = undefined; clearSeen = false
   on('session.start', async ($, e, next) => {
     // Only a cs session has .cs/local; anywhere else the mod stays silent.
     const local = `${e.cwd}/.cs/local`
@@ -104,6 +105,7 @@ export function register(on: On) {
   // A /clear from anywhere else (typed, another plugin) ends the conversation
   // the count belongs to; the timer must not outlive it into the next one.
   on('command.run', { command: 'clear' }, async ($, e, next) => {
+    clearSeen = true
     if (ticker) stopCountdown($)
     return next(e)
   })
@@ -212,18 +214,21 @@ async function forceRotation($: EngineInterface) {
   if (!(await ownsRotation($))) return
   const id = await $.session.id()
   const { context } = await $.session.usage()
-  if (adopted === undefined) adopted = id
-  if (id !== adopted && started?.id !== id) {
-    started = { id, percent: context.percent }
-    if (started.percent !== undefined && started.percent >= force) {
-      $.ui.toast(`cs-rotate: CS_ROTATE_FORCE_CTX=${force} is below this conversation's starting context (${started.percent}%); not forcing a rotation`)
+  if (id !== adopted) {
+    if (clearSeen) {
+      started = { id, percent: context.percent }
+      if (started.percent !== undefined && started.percent >= force) {
+        $.ui.toast(`cs-rotate: CS_ROTATE_FORCE_CTX=${force} is below this conversation's starting context (${started.percent}%); not forcing a rotation`)
+      }
     }
+    adopted = id
+    clearSeen = false
   }
-  if (started?.id === id && started.percent !== undefined && started.percent >= force) return
   if (await handoffArmed($)) {
     if (!ticker) startCountdown($)
     return
   }
+  if (started?.id === id && started.percent !== undefined && started.percent >= force) return
   if (context.percent === undefined || context.percent < force) return
   const forced = `${await $.session.cwd()}/${FORCED}`
   if ((await $.fs.exists(forced)) && (await $.fs.read(forced)).trim() === id) return
@@ -337,6 +342,7 @@ async function rotate($: EngineInterface) {
 // Measured: the run resolves once the screen has cleared and a new transcript
 // is open; the marker is the hook's to consume.
 async function clearAndContinue($: EngineInterface) {
+  clearSeen = true
   if (ticker) stopCountdown($)
   await $.command.run({ command: 'clear', args: '' })
 }

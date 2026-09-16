@@ -567,6 +567,7 @@ test('a conversation met at load is forced whatever it started at; one born of a
   expect(timers.map(t => t.kind)).toEqual(['after'])
   expect(toasts).toEqual([])
   // the successor wakes past the line: that is the loop, and it stops here
+  await clearRun()
   sessionId = 'uuid-next'
   files['/work/.cs/local/state'] = 'claude_session_id: uuid-next\n'
   percent = 71
@@ -594,4 +595,60 @@ test('a conversation met at load is forced whatever it started at; one born of a
   percent = 95
   await turnComplete()
   expect(timers).toHaveLength(3)
+})
+
+const clearRun = () =>
+  hooks['command.run:clear']($, { command: 'clear', args: '', origin: { kind: 'composer' }, presentation: { layout: 'main', columns: 80 } }, async () => ({ text: '' }))
+
+test('a successor that starts past the threshold still gets the countdown once the person arms a handoff themselves', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  percent = 30
+  await turnComplete()
+  await clearRun()
+  sessionId = 'uuid-next'
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-next\n'
+  percent = 75
+  await turnComplete()
+  expect(timers).toEqual([])
+  arm()
+  await turnComplete()
+  expect(ticker()).toBeDefined()
+})
+
+test('a /clear before any turn ends still marks the next conversation as /clear-born: past the threshold it is not forced', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  await clearRun()
+  sessionId = 'uuid-next'
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-next\n'
+  percent = 75
+  await turnComplete()
+  expect(timers).toEqual([])
+  expect(toasts).toHaveLength(1)
+})
+
+test('a new conversation id with no /clear seen in this process is a resume: adopted and forced as asked', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  percent = 30
+  await turnComplete()
+  sessionId = 'uuid-resumed'
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-resumed\n'
+  percent = 72
+  await turnComplete()
+  expect(timers.map(t => t.kind)).toEqual(['after'])
+  expect(toasts).toEqual([])
+})
+
+test('the /clear the mod runs itself marks the successor as /clear-born too, so a wake past the threshold is not forced', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  await findButton(await band()).props.onPress()
+  expect(ran).toEqual([{ command: 'clear', args: '' }])
+  files = { '/work/.cs/local/state': 'claude_session_id: uuid-next\n' }
+  sessionId = 'uuid-next'
+  percent = 75
+  await turnComplete()
+  expect(timers.filter(t => t.kind === 'after')).toEqual([])
+  expect(toasts).toHaveLength(1)
 })
