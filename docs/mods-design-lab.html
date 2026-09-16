@@ -78,6 +78,20 @@ table.props td:first-child{font-family:"JetBrains Mono",monospace;white-space:no
 .tabs button.on{border-color:var(--coral);box-shadow:inset 0 0 0 1px var(--coral)}
 .site{display:none}.site.on{display:block}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+.screen{background:var(--term);color:var(--term-fg);font:13px/1.4 "JetBrains Mono",ui-monospace,Menlo,monospace;border:1px solid var(--line);padding:0;white-space:pre;overflow-x:auto;margin:0 0 18px;max-width:100%}
+.screen .titlebar{font:11.5px "IBM Plex Sans",sans-serif;color:var(--fg2);background:var(--panel);border-bottom:1px solid var(--line);padding:5px 10px;display:flex;gap:6px;align-items:center;white-space:normal}
+.screen .titlebar i{width:9px;height:9px;border-radius:50%;background:var(--line);display:inline-block}
+.screen .body{padding:10px 12px 8px;display:grid;grid-template-columns:1fr;gap:0}
+.screen .body.docked{grid-template-columns:minmax(0,1fr) 34%;column-gap:10px}
+.screen .site{display:block;padding:1px 4px;margin:1px -4px;border:1px solid transparent;border-radius:2px;opacity:.42;transition:opacity .2s ease-out,border-color .2s ease-out,background .2s ease-out}
+.screen .site.on{opacity:1;border-color:var(--coral);background:color-mix(in srgb,var(--coral) 8%,transparent)}
+.screen .site .tag{float:right;font:10px "IBM Plex Sans",sans-serif;color:var(--coral);letter-spacing:.06em;text-transform:uppercase;opacity:0;margin-left:8px}
+.screen .site.on .tag{opacity:1}
+.screen .dimline{opacity:.42}
+.screen .pane{border:1px solid var(--line);padding:4px 6px;align-self:start;grid-column:2;grid-row:1}
+.screen .body.docked > div:first-child{grid-column:1;grid-row:1;min-width:0;overflow:hidden}
+.screen .cap{background:var(--surface);color:var(--ink);padding:0 2px}
+@media (prefers-reduced-motion:reduce){.screen .site{transition:none}}
 @media (max-width:860px){.two{grid-template-columns:1fr}}
 .b{font-weight:700}
 .ok{color:#2C7A39}.no{color:var(--error)}
@@ -601,13 +615,50 @@ const SITES=[
   {name:"CommandOutput",own:false,blurb:"The output row a slash command printed in the transcript, under its echo.",props:[["command","string","read-only, no slash"],["args","string","as the echo shows them"],["text","string","what the command printed, or a hook's text"],["isErrored","boolean","the run's error line"]],can:["rewrite text"],cannot:["change command"]},
   {name:"AskUserQuestion",own:false,blurb:"The dialog the AskUserQuestion tool opens. A rewrite must still fit the tool's schema or the original is drawn.",props:[["tool","string","AskUserQuestion"],["questions","unknown[]","the tool's input as the dialog draws it"],["metadataSource?","string","who asked; analytics only"]],can:["rewrite questions within schema"],cannot:["free-form tree"]},
 ];
+// A Claude Code screen with every render site in its place; `lit` is the one the tab shows.
+function screenMock(lit){
+  const S=(name,inner,extra="")=>`<span class="site${name===lit?" on":""}" data-site="${name}"${extra}>${inner}<span class="tag">${name}</span></span>`;
+  const dim=t=>`<span class="dimline">${esc(t)}</span>`;
+  const c=k=>`color:${col(k)}`;
+  const claude=span("✳",c("claude")+";font-weight:700");
+  const docked=lit==="Pane";
+  const left=[
+    S("InfoNotice", span("  ",c("claude"))+span("Claude Code",c("claude")+";font-weight:700")+span(" v2.1.273",c("inactive"))+"\n  "+span("Fable 5.1 · low effort · ",c("inactive"))+span("/model to change",c("suggestion"))),
+    " ",
+    S("UserMessage", span("❯ ",c("promptBorder"))+"rotate this conversation when it gets heavy"),
+    " ",
+    S("AssistantMessage", claude+" I will add a band above the prompt that offers the rotation once the\n  context passes the warn threshold, and runs /rotate on a press."),
+    " ",
+    S("ToolUse", span("⏺ ",c("success"))+span("Read",";font-weight:700")+"(mods/cs-rotate/hooks/register.tsx)"),
+    S("ToolResult", "  ⎿  "+span("Read 374 lines",c("inactive"))+"\n     "+span("export function register(on: On) {",c("inactive"))),
+    " ",
+    S("ToolGroup", span("⏺ ",c("success"))+span("Read 3 files, ran 2 shell commands",c("inactive"))+span("  ctrl+o to expand",c("subtle"))),
+    " ",
+    S("CommandOutput", span("❯ ",c("promptBorder"))+span("/rotate",c("suggestion"))+"\n  ⎿  "+"handoff written: .cs/handoffs/2026-09-16-release.md, armed"),
+    " ",
+    S("AskUserQuestion", span("╭─ ",c("permission"))+span("Which comes first?",";font-weight:700")+"\n  "+span("1: ",c("suggestion"))+"the held release   "+span("2: ",c("suggestion"))+"the statusline cost   "+span("3: ",c("suggestion"))+"other"),
+    " ",
+    S("Spinner", span("✻ ",c("claude"))+span("Cooking… ",c("claude"))+span("(12s · ↓ 2.1k tokens · esc to interrupt)",c("inactive"))),
+    S("TurnDuration", span("✻ Baked for 11s",c("inactive"))),
+    " ",
+    S("AbovePrompt", span("╭",c("warning"))+span("─".repeat(44),c("warning"))+span("╮",c("warning"))+"\n"+span("│",c("warning"))+" "+claude+" "+span("1",c("suggestion"))+": rotate this conversation  ·  "+span("◑ 47%",c("warning")+";font-weight:700")+" "+span("│",c("warning"))+"\n"+span("╰",c("warning"))+span("─".repeat(44),c("warning"))+span("╯",c("warning"))),
+    span("─".repeat(docked?52:78),c("subtle")),
+    span("❯ ",c("promptBorder"))+span("Try \"fix the failing test\"",c("subtle")),
+    span("─".repeat(docked?52:78),c("subtle")),
+    S("PromptHint", span("? for shortcuts",c("inactive")))+"   "+S("SessionMode", span("auto-accept  ·  focus",c("inactive"))),
+    dim(" ")+`<span class="dimline"><span class="cap"> ✳ claude-sessions · ⎇ main </span> <span class="cap"> ✦ Fable 5.1 low </span> <span class="cap"> ◑ ctx 47% · 5h 18% </span></span>`+span("  ← statusLine: a shell command, not a render site",c("subtle")),
+  ].join("\n");
+  const pane=docked?`<div class="pane">${S("Pane", span("handoff preview",";font-weight:700")+span("  ⌃x x to close",c("subtle"))+"\n"+span("─".repeat(28),c("subtle"))+"\n"+span("## 1. Next Step",c("suggestion"))+"\nNothing is in flight. Main is\nat d98c755, 81 commits ahead\nof origin, nothing pushed.\n\n"+span("## 2. Settled",c("suggestion"))+"\n- the bar is not a defect\n- hide-the-segment rejected\n"+span("\n▾ 30 more",c("subtle")))}</div>`:"";
+  return `<div class="titlebar"><i></i><i></i><i></i>&nbsp; claude — cs: claude-sessions &nbsp;·&nbsp; ${docked?"fullscreen, ≥110 columns, pane docked":"main screen"}</div><div class="body${docked?" docked":""}"><div>${left}</div>${pane}</div>`;
+}
+function drawScreens(){ document.querySelectorAll(".screen[data-screen]").forEach(el=>{ el.innerHTML=screenMock(el.dataset.screen); }); }
 function sitesUI(){
   const tabs=$("siteTabs"), body=$("siteBody");
   SITES.forEach((s,i)=>{
     const b=document.createElement("button"); b.textContent=s.name+(s.own?" ✦":""); b.onclick=()=>{[...tabs.children].forEach(x=>x.classList.remove("on")); b.classList.add("on"); [...body.children].forEach(x=>x.classList.remove("on")); $("site-"+i).classList.add("on");}; if(i===0) b.classList.add("on"); tabs.appendChild(b);
     const d=document.createElement("div"); d.className="site"+(i===0?" on":""); d.id="site-"+i;
     const rows=s.props.map(p=>`<tr><td>${esc(p[0])}</td><td><code>${esc(p[1])}</code></td><td>${esc(p[2])}</td></tr>`).join("");
-    d.innerHTML=`<div class="two"><div><h3>${s.name}${s.own?" <span style='font-weight:400;color:var(--fg2);font-size:12px'>draws the mod's own tree</span>":" <span style='font-weight:400;color:var(--fg2);font-size:12px'>rewrites the engine's props</span>"}</h3><p class="sub" style="font-size:13px">${esc(s.blurb)}</p>
+    d.innerHTML=`<div class="screen" data-screen="${s.name}"></div><div class="two"><div><h3>${s.name}${s.own?" <span style='font-weight:400;color:var(--fg2);font-size:12px'>draws the mod's own tree</span>":" <span style='font-weight:400;color:var(--fg2);font-size:12px'>rewrites the engine's props</span>"}</h3><p class="sub" style="font-size:13px">${esc(s.blurb)}</p>
       <table class="props"><tr><th>e.props</th><th>type</th><th></th></tr>${rows}</table></div>
       <div><h3>Works here</h3><ul class="notes">${s.can.map(c=>`<li class="ok">✓ ${esc(c)}</li>`).join("")}${s.cannot.map(c=>`<li class="no">✗ ${esc(c)}</li>`).join("")}</ul>
       <pre class="spec">on('ui.render', { component: '${s.name}' }, async ($, e, next) => {
@@ -1036,7 +1087,7 @@ function finderUI(){
 // ---------- wire ----------
 function renderAll(){
   document.documentElement.setAttribute("data-theme",theme());
-  boxRender(); textRender(); buttonRender(); inputRender(); selectRender(); linkRender(); codeRender(); rasterRender(); clientRender(); bordersGallery(); swatches(); rotateRender(); coverage();
+  drawScreens(); boxRender(); textRender(); buttonRender(); inputRender(); selectRender(); linkRender(); codeRender(); rasterRender(); clientRender(); bordersGallery(); swatches(); rotateRender(); coverage();
 }
 sitesUI(); buildRail(); buildIndex(); finderUI();
 const headH=()=>document.documentElement.style.setProperty("--head-h",document.querySelector(".head").offsetHeight+"px"); new ResizeObserver(headH).observe(document.querySelector(".head")); headH();
