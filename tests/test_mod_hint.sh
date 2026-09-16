@@ -73,6 +73,8 @@ test_mod_validate_inventories_the_hooks_and_calls() {
     assert_output_not_contains "$out" '$.command.run' "nothing runs a command" || return 1
     assert_output_not_contains "$out" '$.prompt.' "nothing fills or submits the composer" || return 1
     assert_output_contains "$out" '$.clock.every' "the refresh is a ticker" || return 1
+    assert_output_contains "$out" '$.ui.resolve' "the line is a tree of the mod's own (a hint rewrite draws nothing under the mode notice)" || return 1
+    assert_output_not_contains "$out" '$.session.model' "the model is not read: no tip depends on it" || return 1
     assert_output_not_contains "$out" '$.clock.after' "and nothing else is timed" || return 1
 }
 
