@@ -4002,4 +4002,21 @@ test_teammate_heartbeat_does_not_reset_the_lead_cadence() {
 
 run_test test_teammate_heartbeat_does_not_reset_the_lead_cadence
 
+
+# A config that yields no account (caught mid-rewrite, or malformed) leaves no
+# cache entry behind: the next render parses it again rather than showing no
+# Fable window for the whole TTL.
+test_org_cache_does_not_remember_an_empty_answer() {
+    ( _load_sl_functions
+      local cfg="$TEST_TMPDIR/cfg.json"
+      printf '{"oauthAccount":{"organizationUu\n' > "$cfg"
+      CS_STATUSLINE_NOW=1000 _NOW="" _SL_NOW_READY="" _read_org_from "$cfg"
+      assert_eq "" "$_ORG" "a torn config yields no account" || return 1
+      printf '{"oauthAccount":{"organizationUuid":"org-1"}}\n' > "$cfg"
+      CS_STATUSLINE_NOW=1001 _NOW="" _SL_NOW_READY="" _read_org_from "$cfg"
+      assert_eq "org-1" "$_ORG" "the next read parses the config again" || return 1 )
+}
+
+run_test test_org_cache_does_not_remember_an_empty_answer
+
 report_results

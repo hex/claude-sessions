@@ -1004,7 +1004,9 @@ _read_org_from() {  # config [fresh]
         select(length == 2 and .[0] == ["oauthAccount","organizationUuid"]) | .[1]
     ) // empty' "$cfg" 2>/dev/null) || _ORG=""
     [ "${_ORG:-}" = "null" ] && _ORG=""
-    _cache_write org "$cfg" "$_ORG"
+    # An empty answer is not cached: a config caught mid-rewrite yields none,
+    # and remembering that would blank the Fable window for the whole TTL.
+    [ -n "$_ORG" ] && _cache_write org "$cfg" "$_ORG"
     return 0
 }
 
