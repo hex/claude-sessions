@@ -1439,7 +1439,14 @@ _git_text() {
     _GIT_TEXT=""
     local dir="$1"
     [ -n "$dir" ] || return 0
-    [ -e "$dir/.git" ] || return 0
+    # The workspace directory follows the Bash tool's cwd, so a subdirectory
+    # of the checkout must read as the checkout: climb to the nearest ancestor
+    # holding .git (a directory, or the file a worktree keeps), in-process, and
+    # key the cache on it so every subdirectory shares one entry.
+    while [ ! -e "$dir/.git" ]; do
+        case "$dir" in */*) dir="${dir%/*}" ;; *) return 0 ;; esac
+        [ -n "$dir" ] || return 0
+    done
     if _cache_read git "$dir" "$GIT_CACHE_TTL"; then
         _GIT_TEXT="$_CACHE_TEXT"
         return 0
