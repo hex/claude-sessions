@@ -1,6 +1,6 @@
 ---
 name: full-gate-runs-on-ghost
-description: EVERY full test gate for cs runs on the ghost machine through the claude-tmux remote-tests script, never on the dev box; a mods-only or tests-only change is not an exemption
+description: EVERY test suite for cs runs on the ghost machine through the claude-tmux remote-tests script, never on the dev box; a mods-only change is not an exemption and neither is running a SINGLE suite locally
 metadata:
   type: feedback
 ---
@@ -22,3 +22,9 @@ docs/ branch ran locally at 7 jobs: load 22-28 for 40 minutes, the SessionStart 
 inherited TMUX renamed Alex's live window `cs: test-session` (task #630), and the 3 s
 scope-prompt hook was killed on one of his prompts (task #631). "Only mods changed" was the
 rationalisation; the cost is the same whatever the diff touches.
+
+Repeated a third time 2026-09-16 ("why do we run tests here? it hogs the machine") when ONE suite
+(`tests/test_hooks.sh`, twice: a mutation pass and the real pass) ran locally at load 32. A single
+suite is not an exemption either. What IS fine locally: `bun test` for a mod, `tests/test_mod_rotate.sh`
+(seconds), and a one-second in-process check that sources test_lib and runs one test function against
+a mutated helper. Anything that runs `tests/test_*.sh` end to end goes to ghost.
