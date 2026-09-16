@@ -274,6 +274,8 @@ Known multi-machine limitation: if a session is cloned to a second machine while
 21204 272 emit
 ```
 
+**Own deadline.** The hook checks its own clock once, after the classifier and before the scan stages (`tokens`, `scan`, `gitlog`, `gitdiff`), through the same builtins the trace reads. Past `CS_SCOPE_BUDGET_MS` (1500 by default; a value that is not a number is the default) it gives up the scope block, puts one line in its place (`Scope: skipped, slow machine (...)`, so the model knows to locate the files itself), writes a `skip` stage to the trace and exits through the digest path: the queue and mail digests, the date note and the clarify guideline still arrive. Measured: the front half takes under 300 ms idle and about 1.7 s at a load of 25 (a full test suite on the same box), and it was the scan running on from there that the 3 s registration killed, taking the digests with it. The registered timeout is 5 s now and stays the backstop for a scan that is itself slow.
+
 A run that overruns the hook's timeout leaves a trail that stops mid-run, which names the stage it hung on — the only evidence such a run ever produces, since it never reaches an exit where it could write a summary. A trail ending anywhere but `exit` or `emit` marks a killed run. The trace reads the clock through shell builtins only (`$EPOCHREALTIME`, or `$SECONDS` on bash 3.2), so it adds no forks to a hook already under suspicion for running slow. The file is machine-local — which machine was slow is half the finding — and one run in 64 trims it to its last 2000 lines. Opt-out per-session: `export CS_SCOPE_TRACE_DISABLE=1`.
 
 ## cs-rotate (not a hook script — a Claude Code mod)
@@ -519,7 +521,7 @@ The hooks are configured in `~/.claude/settings.json`:
       { "matcher": "Write|Edit", "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/session-auto-approve.sh", "timeout": 5 }] }
     ],
     "UserPromptSubmit": [
-      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/scope-prompt.sh", "timeout": 3 }] }
+      { "hooks": [{ "type": "command", "command": "~/.claude/hooks/cs/scope-prompt.sh", "timeout": 5 }] }
     ]
   }
 }
