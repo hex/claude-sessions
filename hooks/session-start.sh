@@ -499,21 +499,6 @@ if [ -z "${CS_NO_ITERM2:-}" ] && [ "${TERM_PROGRAM:-}" = "iTerm.app" ]; then
     { [ -x "$_it2" ] && "$_it2" stop > "${CS_IT2_TTY:-/dev/tty}"; } 2>/dev/null || true
 fi
 
-# macOS: also take down the finished-turn notification the previous
-# conversation's last Stop may have posted. Lead only, as the post is, and
-# through every poster present (cs_notifier_bins from cs-shared.sh: the
-# cs.app bundle and terminal-notifier on PATH), since a notification group
-# belongs to the app that posted it and an install may have changed which
-# one the Stop hook used.
-if ! command -v cs_notifier_bins >/dev/null 2>&1; then
-    cs_notifier_bins() { command -v terminal-notifier 2>/dev/null; }
-fi
-if [ -z "${CS_NO_NOTIFY:-}" ] && [ "$IS_LEAD" = 1 ] && _notifiers=$(cs_notifier_bins) && [ -n "$_notifiers" ]; then
-    while IFS= read -r _notifier; do
-        [ -n "$_notifier" ] && "$_notifier" -remove "cs:$CLAUDE_SESSION_NAME" </dev/null >/dev/null 2>&1 || true
-    done <<< "$_notifiers"
-fi
-
 # Re-assert this session's tab title. cs sets it once at launch and the reset
 # in its EXIT trap never runs, because cs execs into claude; a nested launch on
 # the same tty (`cs other` from the `!` prefix) leaves "cs: other" on this

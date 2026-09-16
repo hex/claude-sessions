@@ -217,14 +217,6 @@ export CS_NO_ROTATION_WAKE="1"
 # the colour resets when the session exits.
 export CS_NO_ITERM2="1"
 
-# Disable the finished-turn macOS notification (the one the Stop hook posts
-# when the terminal is not the frontmost app, with the cs owl as its icon,
-# taken down at your next prompt). The poster is the cs.app sender the
-# installer builds under $XDG_DATA_HOME/cs (~/.local/share/cs by default)
-# from terminal-notifier, or terminal-notifier itself when there is no
-# bundle; with neither present there is nothing to disable.
-export CS_NO_NOTIFY="1"
-
 # Leave the Task tools to Claude Code's model default. A cs launch exports
 # CLAUDE_CODE_ENABLE_TODO_TOOLS=1 because Claude Code 2.1.233+ withholds
 # TaskCreate/TaskList/TaskUpdate/TaskGet on Opus 4.8, Sonnet 5 and Fable 5,
