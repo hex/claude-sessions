@@ -301,11 +301,12 @@ coral. Pressing `1` from an
 empty composer runs `/rotate`, as if typed: the `rotate` skill draws the
 purpose from the conversation. Beside it the band draws `2: wrap up this
 session`. That key runs `/wrap`, which distills memory, replaces
-`.cs/summary.md` and rotates the narrative, three Opus passes that cost
-minutes and real tokens, so it takes two presses: the first turns the label
-into `2: press 2 again to /wrap` for five seconds and runs nothing, the second
-within that window runs it. A prompt entering the session, or a `/clear`,
-disarms it. Below the band the mod draws nothing, and it draws nothing while a
+`.cs/summary.md` and rotates the narrative: two Opus passes and a shell
+helper, minutes and real tokens, so it takes two presses: the first turns the
+label into `2: press 2 again to /wrap` for five seconds and runs nothing, the
+second within that window runs it. A press inside the first 400 ms is a held
+key's repeat, not a confirmation, and leaves the key armed. A prompt entering
+the session, a `/clear`, or a switch to another conversation disarms it. Below the band the mod draws nothing, and it draws nothing while a
 turn runs or while a survey holds the band. It never submits a prompt of its
 own.
 

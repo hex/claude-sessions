@@ -1,12 +1,12 @@
 // ABOUTME: Unit tests for the cs-rotate mod against a fake engine `$`.
 // ABOUTME: Covers the band's gate (crit, working, survey), the three presses and the wrap key's two-press guard, the armed handoff, and the heartbeat.
-import { test, expect, beforeEach } from 'bun:test'
+import { test, expect, beforeEach, setSystemTime } from 'bun:test'
 
 // The plugin realm provides `h` and `Fragment` as globals; the test does the same.
 ;(globalThis as any).h = (type: any, props: any, ...children: any[]) => ({ type, props: props ?? {}, children })
 ;(globalThis as any).Fragment = 'Fragment'
 
-import { register, DEFAULT_PERCENT, DEFAULT_CRIT, GRACE_SECONDS, gaugeColor, meter, isUnconsumed, INK } from '../hooks/register.tsx'
+import { register, DEFAULT_PERCENT, DEFAULT_CRIT, GRACE_SECONDS, WRAP_CONFIRM_AFTER_MS, gaugeColor, meter, isUnconsumed, INK } from '../hooks/register.tsx'
 
 type Hook = ($: any, e: any, next: (e: any) => Promise<any>) => Promise<any>
 const hooks: Record<string, Hook> = {}
@@ -63,6 +63,7 @@ function buttons(tree: any): any[] {
 const findButton = (tree: any) => buttons(tree)[0]
 
 beforeEach(() => {
+  setSystemTime(new Date(now))
   for (const k of Object.keys(hooks)) delete hooks[k]
   percent = undefined; filled = []; ran = []; written = {}; existing = new Set(['/work/.cs/local'])
   timers = []; invalidated = []; toasts = []
@@ -750,6 +751,7 @@ test('the wrap key needs two presses: the first arms it for a moment and runs no
   expect(invalidated).toEqual(['ui.render'])
   const armedLabel = wrapButton(await band()).props.label
   expect(armedLabel).toBe('press 2 again to /wrap')
+  later(WRAP_CONFIRM_AFTER_MS)
   await wrapButton(await band()).props.onPress()
   expect(ran).toEqual([{ command: 'wrap', args: '' }])
   expect(filled).toEqual([])
@@ -758,6 +760,10 @@ test('the wrap key needs two presses: the first arms it for a moment and runs no
   await wrapButton(await band()).props.onPress()
   expect(ran).toHaveLength(1)
 })
+
+// The clock the press reads. bun's setSystemTime moves Date.now for the module too.
+let now = 1_700_000_000_000
+const later = (ms: number) => { now += ms; setSystemTime(new Date(now)) }
 
 test('an armed wrap key disarms on its own after a moment, and a press then only re-arms', async () => {
   percent = 40
@@ -786,6 +792,7 @@ test('a rejected /wrap shows a toast and leaves the key disarmed', async () => {
   percent = 40
   $.command.run = async () => { throw new Error('no such command') }
   await wrapButton(await band()).props.onPress()
+  later(WRAP_CONFIRM_AFTER_MS)
   await wrapButton(await band()).props.onPress()
   expect(toasts).toEqual(['cs-rotate: /wrap did not run: Error: no such command'])
   expect(wrapButton(await band()).props.label).toBe('wrap up this session')
@@ -807,6 +814,34 @@ test('no button is ever nested in a Text: armed or not, arming the wrap key or n
   expect(buttonsUnderText(await band())).toBe(0)
   await wrapButton(await band()).props.onPress()
   expect(buttonsUnderText(await band())).toBe(0)
+  later(WRAP_CONFIRM_AFTER_MS); await wrapButton(await band()).props.onPress()
   arm()
   expect(buttonsUnderText(await band())).toBe(0)
+})
+
+// The contract lets a held key repeat: a `2` held down would arm on its first
+// keydown and confirm on the next repeat, some 30 ms later. A confirmation
+// needs a second physical press, so presses inside the settle window after
+// arming are ignored and the key stays armed.
+test('presses inside the settle window after arming are ignored: a held key cannot confirm', async () => {
+  percent = 40
+  await wrapButton(await band()).props.onPress()
+  for (let i = 0; i < 5; i++) { later(30); await wrapButton(await band()).props.onPress() }
+  expect(ran).toEqual([])
+  expect(wrapButton(await band()).props.label).toBe('press 2 again to /wrap')
+  later(WRAP_CONFIRM_AFTER_MS)
+  await wrapButton(await band()).props.onPress()
+  expect(ran).toEqual([{ command: 'wrap', args: '' }])
+})
+
+test('the arm does not survive a conversation switch: the first press in the new one only arms', async () => {
+  percent = 40
+  await wrapButton(await band()).props.onPress()
+  sessionId = 'uuid-resumed'
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-resumed\n'
+  expect(wrapButton(await band()).props.label).toBe('wrap up this session')
+  later(WRAP_CONFIRM_AFTER_MS)
+  await wrapButton(await band()).props.onPress()
+  expect(ran).toEqual([])
+  expect(wrapButton(await band()).props.label).toBe('press 2 again to /wrap')
 })

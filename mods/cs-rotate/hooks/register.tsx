@@ -56,12 +56,17 @@ export const FORCED = '.cs/local/cs-rotate.forced'
 // prompt stops it.
 export const GRACE_SECONDS = 20
 
-// The wrap key's guard. /wrap replaces .cs/summary.md and runs three Opus
-// passes, so a mis-hit costs more than a mis-hit rotation: the first press
-// only arms the key, for this many milliseconds, and the second press within
-// that window runs it. A prompt or a /clear meanwhile disarms it.
+// The wrap key's guard. /wrap replaces .cs/summary.md and runs two Opus
+// passes before the narrative rotation, so a mis-hit costs more than a
+// mis-hit rotation: the first press only arms the key, for WRAP_ARM_MS, and
+// the second press within that window runs it. A held key repeats (contract),
+// some 30 ms apart, so a press inside WRAP_CONFIRM_AFTER_MS of the arming is
+// not a second press and leaves the key armed. A prompt, a /clear or a
+// conversation switch meanwhile disarms it.
 export const WRAP_ARM_MS = 5000
+export const WRAP_CONFIRM_AFTER_MS = 400
 let wrapArmed = false
+let wrapArmedAt = 0
 let wrapTimer: { cancel: () => void } | undefined
 
 // The countdown: seconds left, its ticker, and what the band last saw. Module
@@ -88,7 +93,7 @@ let startPercent: number | undefined
 export function register(on: On) {
   // A (re)load has no countdown: the engine cancelled the old one's timers.
   left = undefined; ticker = undefined; bandIdle = false; adopted = undefined; clearSeen = false; birth = undefined; startPercent = undefined
-  wrapArmed = false; wrapTimer = undefined
+  wrapArmed = false; wrapArmedAt = 0; wrapTimer = undefined
   on('session.start', async ($, e, next) => {
     // Only a cs session has .cs/local; anywhere else the mod stays silent.
     const local = `${e.cwd}/.cs/local`
@@ -133,7 +138,7 @@ export function register(on: On) {
     const drawn = await next(e)
     // The band draws in a new conversation before any of its turns end, so
     // the birth is settled here: a later /resume is not mistaken for it.
-    noteConversation(await $.session.id())
+    if (noteConversation(await $.session.id()) && wrapArmed) disarmWrap($)
     // A survey owns the band; a running turn cannot be rotated out of.
     bandIdle = !e.props.hasSurvey && !e.props.isWorking
     if (!bandIdle) return drawn
@@ -231,16 +236,18 @@ async function forceThreshold($: EngineInterface): Promise<number | undefined> {
   return raw !== undefined && /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : undefined
 }
 
-// A conversation id the mod has not met yet is the current one from here on.
-// It is a birth, to be judged by its first turn's end, only when a /clear was
-// seen since the last id; a /resume, a launch or a reload adopt unjudged, and
-// an earlier judgment of the same id is dropped with them.
-function noteConversation(id: string) {
-  if (id === adopted) return
+// A conversation id the mod has not met yet is the current one from here on,
+// and the call says so. It is a birth, to be judged by its first turn's end,
+// only when a /clear was seen since the last id; a /resume, a launch or a
+// reload adopt unjudged, and an earlier judgment of the same id is dropped
+// with them.
+function noteConversation(id: string): boolean {
+  if (id === adopted) return false
   adopted = id
   startPercent = undefined
   birth = clearSeen ? id : undefined
   clearSeen = false
+  return true
 }
 
 // Runs /rotate for the person once a turn ends past the force threshold, once
@@ -381,10 +388,12 @@ async function rotate($: EngineInterface) {
 async function pressWrap($: EngineInterface) {
   if (!wrapArmed) {
     wrapArmed = true
+    wrapArmedAt = Date.now()
     wrapTimer = $.clock.after(WRAP_ARM_MS, () => disarmWrap($))
     $.ui.invalidate('ui.render')
     return
   }
+  if (Date.now() - wrapArmedAt < WRAP_CONFIRM_AFTER_MS) return
   disarmWrap($)
   try {
     await $.command.run({ command: 'wrap', args: '' })
