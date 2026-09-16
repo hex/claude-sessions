@@ -169,3 +169,120 @@ After #628: #622, the held release.
   `/var/folders/jw/.../T/owl/`): `codex-prompt{,2,3,4}.md`, `codex{,2,3,4}.out`,
   `full-suite{,2,3,4}.log`, `install{2,3,4}.log`, `app/` (the probe bundle and
   its 1.4 MB icns, superseded by the installer's). Nothing there is needed.
+
+## 3. Primary Request and Intent
+
+This conversation woke on a rotation to build the owl notification (#629). It
+built it twice: first as a Stop-hook post through `terminal-notifier
+-appIcon`, merged as `c98ebdc`; then, after Alex's screenshot showed the
+Terminal icon instead of the owl, as a `cs.app` sender bundle the installer
+assembles, merged as `07a1f4c`. Alex then typed `628` and accepted "Rotate
+first" so the grace-rotation build starts with headroom. The v2026.9.16
+release (#622) stays held behind it, as it has since "we are not ready to
+release yet" three conversations ago.
+
+## 4. Key Technical Concepts
+
+- **cs-rotate mod** — `mods/cs-rotate/hooks/register.tsx` (207 lines),
+  TypeScript inside Claude Code's process behind
+  `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`, which every cs launch exports.
+  Contract: `.cs/research/spike-rotate/claude-code.d.ts` (10,736 lines, the
+  authority; read it rather than guess). Two hooks today: `session.start`
+  (heartbeat) and `ui.render{component=AbovePrompt}` (the capsule). Exports
+  `DEFAULT_PERCENT=40`, `DEFAULT_CRIT=65`, `INK`, `meter`, `gaugeColor`,
+  `isUnconsumed`, `HEARTBEAT`, `MARKER`, `HANDOFFS`. Helpers `ownsRotation`
+  (lead check against `.cs/local/state`), `handoffArmed`, `threshold`,
+  `gaugeBands`, `termTheme`. Deployed to `~/.claude/skills/cs-rotate/` by
+  the installer; `tests/test_mod_rotate.sh` runs `bun test` and `claude
+  plugin validate` and pins the inks against `bin/cs-statusline`.
+- **Contract facts for #628** (all read in source): `$.ui.invalidate(event)`
+  at 1838-1856; `$.clock.now/sleep/after/every` at 2510-2550, `after` and
+  `every` are `TimerCall = (ms, fn) => Timer` with `cancel()` (7850);
+  `turn.complete` input at 8347-8420 (`answer`, `durationMs`, `reason`,
+  `usage`), result `{ text, usage? }`; `prompt.submit` input at 5681
+  (`text`, `attachments?`, context), result at 5734; `$.command.run` at
+  2338-2346 (queued until idle, refused inside a waiting hook).
+- **Notification path** (shipped this conversation): Stop hook →
+  `cs_notifier_bin` (bundle else PATH) → post; prompt and start hooks →
+  `cs_notifier_bins` (every poster) → remove. `lib/02-shared.sh` holds
+  `cs_notifier_app/bin/bins/source_bin`; `install.sh.in`
+  `install_notifier_bundle` (macOS only, `CS_NOTIFIER_SRC_APP` override,
+  staged then smoked then promoted, source sha256 recorded); doctor
+  `_doctor_check_notify`; uninstall removes `cs.app`.
+- **Codex direct** — the plugin's queued path is unrecoverable; run it
+  directly and read the output file.
+
+## 5. Files and Code Sections
+
+Read the commits: `git log --oneline f77b728..07a1f4c` is this conversation's
+output (7 commits on two branches plus two merges and two handoff commits).
+
+The test harness the #628 tests extend, `mods/cs-rotate/test/register.test.ts`
+lines 11-40 (the fake `on` keys hooks as `event` or `event:component`; the
+fake `$` has `env.get`, `session.usage/cwd/id`, `prompt.fill`, `command.run`
+recording into `ran`, `ui.resolve`, `fs.write/exists/read`). #628 needs
+`clock.after`/`clock.every` fakes that record `(ms, fn)` and return
+`{ cancel }`, a `ui.invalidate` recorder, and `hooks['turn.complete']` /
+`hooks['prompt.submit']` invocations.
+
+The band gate as it stands, `register.tsx:56-62`:
+
+```tsx
+    const drawn = await next(e)
+    if (e.props.hasSurvey || e.props.isWorking) return drawn
+    const armed = await handoffArmed($)
+    const { context } = await $.session.usage()
+    const percent = context.percent
+    const bands = await gaugeBands($)
+    if (!armed && (percent === undefined || percent < (await threshold($, bands)))) return drawn
+    if (!(await ownsRotation($))) return drawn
+```
+
+The knob docs live in `docs/configuration.md` (around line 190, the
+`CS_ROTATION_KICK_DELAY` / `CS_NO_ROTATION_WAKE` / `CS_NO_ITERM2` /
+`CS_NO_NOTIFY` block) and `docs/hooks.md` (the mod's section; grep
+`CS_ROTATE_BUTTON_CTX`).
+
+## 6. Problem Solving
+
+- The first full suite caught what four Codex rounds and my own tests
+  missed: a subprocess called before a hook reads its stdin eats the event
+  JSON. Only visible because `tests/test_msg.sh` overrides `setup()` and so
+  lost the `CS_NO_NOTIFY` guard; Codex's Minor about that guard was the crack
+  the real bug showed through. Memory: `project_hook_subprocess_eats_stdin`.
+- The installer's assembly first failed silently on the iconset directory
+  name; `bash -x` on install.sh found it in one run.
+- The doctor row first said "differs" on a correct install because it hashed
+  Homebrew's wrapper script; fixed by resolving the keg's app binary in a
+  shared function the installer mirrors.
+- Two driver traps from the previous handoff still apply: count `done` lines
+  rather than matching one; mask UUIDs at read time, never at capture time.
+
+## 7. Pending Tasks
+
+The native task list is keyed to the session and survives the `/clear`.
+Reconcile, do not mirror:
+
+- **#628 pending** — forced rotation with grace. This handoff's Next Step.
+- **#622 pending** — the HELD release v2026.9.16. Content re-push needed (34
+  commits now), CI wait (background it), notes refresh (the draft predates
+  everything since `ee985d4`; the scratchpad copy is gone, regenerate from
+  CHANGELOG Unreleased), version bump in `lib/00-header.sh`, `./build.sh`,
+  Alex's approval, tag only after CI is green.
+- **#554, #603, #609 pending; #606 postponed** — the standing backlog.
+- **#629 completed** this conversation (subject carries both merge shas).
+- Not requested, noted only: the tmux dock-bounce gap; the four-copy lead
+  gate; the doctor's `-x` cannot tell an unrunnable bundle from a working one
+  after install time; two KEEP IN SYNC sites (statusline declined-marker,
+  ZSH_COMPLETION_DIR).
+
+## 8. Current Work
+
+Nothing in flight. Main is `07a1f4c` plus this handoff's commits, tree clean,
+everything built and installed, doctor drift OK, the owl delivered. Rotating
+on Alex's word before starting #628.
+
+## Completeness of this handoff
+
+Written from the live conversation, not from compacted context. Two passes,
+as the skill asks. Nothing was cut for length.
