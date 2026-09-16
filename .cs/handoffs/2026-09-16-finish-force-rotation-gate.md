@@ -339,3 +339,23 @@ and on `/bin/bash` 3.2, the full local suite 67/67 (on `f0f6e05`), ghost 66/67
 
 Written from live, uncompacted context at 40%, in two passes as the skill
 asks. Nothing was cut for length.
+
+## Addendum, written minutes after pass two
+
+**Live run 2, corrected.** The heavy turn in the driver named its files
+RELATIVE (`tests/test_hooks.sh`), and a cs session's cwd is its own session
+directory, not this repo — so the reads resolved to
+`~/.claude-sessions/grace-live2/tests/...` and failed. Context stayed at 8%,
+under the knob at 10, and nothing forced. That is the mod behaving correctly
+on a turn that read nothing, not a measurement.
+
+I re-sent the prompt with ABSOLUTE paths
+(`/Users/alex.geana/.claude-sessions/claude-sessions/tests/test_hooks.sh`,
+`tests/test_install.sh`, `lib/75-launch.sh`) and the reads started. Pane
+`%242` is mid-turn as this is written. When that turn ends, context should
+pass 10 and the forced sequence should run. If it still has not crossed,
+send another read of
+`/Users/alex.geana/.claude-sessions/claude-sessions/.cs/research/spike-rotate/claude-code.d.ts`
+(10,736 lines), which will certainly cross it.
+
+Any driver written for a cs session must use absolute paths for repo files.
