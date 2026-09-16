@@ -66,4 +66,3 @@ _narrative_budget() {  # value, default
     n=$((10#$1))
     if [ "$n" -gt 0 ]; then echo "$n"; else echo "$2"; fi
 }
-

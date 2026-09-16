@@ -2,7 +2,9 @@
 # ABOUTME: left behind) and the settings-strip filter; build.sh folds this into bin/cs
 # ABOUTME: and splices it into install.sh, so the installer and the tool read one list.
 
-# Hooks retired in past versions but possibly still installed from older cs versions.
+# Files a past version deployed into the hooks directory and this one does not:
+# retired hooks, and any support file that went with them. Removed on install
+# and on uninstall, wherever an older cs left them.
 # install.sh and run_uninstall both clean these up.
 # When retiring a hook in a release, add its filename here.
 RETIRED_HOOKS=(
@@ -14,6 +16,7 @@ RETIRED_HOOKS=(
     gotcha-prewriter.sh       # retired: brief pre-write gotcha-surfacing experiment; approach was rethought
     aboutme-validator.sh      # retired: never-shipped PostToolUse-on-Write experiment from a feature branch that registered the hook in settings.json without the file ever landing in source
     command-tracker.sh        # retired: CLI command capture; @-included payload did not influence model behaviour at a rate justifying its context cost
+    cs-logo.png               # retired: the icon source for the finished-turn notification, which the iTerm2 sidebar owns now (not a hook; a file the hooks directory carried)
     files-scan.sh             # retired: workspace file indexer for .cs/files.md (assumption that the agent can't introspect file sizes has expired)
     files-context.sh          # retired: PreToolUse:Read context injector that surfaced files.md token estimates
     changes-tracker.sh        # retired: PostToolUse change log re-narrating git history into .cs/changes.md; git log/diff/status is authoritative
