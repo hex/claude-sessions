@@ -164,12 +164,11 @@ export function register(on: On) {
                         onPress={() => clearAndContinue($)} />
               : <Button key="cs-rotate" hotkey="1" plain label="rotate this conversation"
                         onPress={() => rotate($)} />}
+            {/* a Button is a block: nested in a Text the engine refuses the whole tree (measured), so the separator stands beside it */}
+            {!armed && <Text dimColor>{'  \u00b7  '}</Text>}
             {!armed && (
-              <Text>
-                <Text dimColor>{'  \u00b7  '}</Text>
-                <Button key="cs-wrap" hotkey="2" plain label={wrapArmed ? 'press 2 again to /wrap' : 'wrap up this session'}
-                        onPress={() => pressWrap($)} />
-              </Text>
+              <Button key="cs-wrap" hotkey="2" plain label={wrapArmed ? 'press 2 again to /wrap' : 'wrap up this session'}
+                      onPress={() => pressWrap($)} />
             )}
             {/* the forced rotation's grace: the seconds left before the mod runs the /clear itself */}
             {armed && left !== undefined && (

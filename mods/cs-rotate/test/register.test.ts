@@ -791,3 +791,22 @@ test('a rejected /wrap shows a toast and leaves the key disarmed', async () => {
   expect(wrapButton(await band()).props.label).toBe('wrap up this session')
   $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
 })
+
+// The engine refuses a tree with a Button under an inline element (measured
+// on 2.1.273: "Button inside an inline element; drawing the engine's own"),
+// and the whole band vanishes with it.
+function buttonsUnderText(tree: any, inText = false): number {
+  if (!tree || typeof tree !== 'object') return 0
+  if (tree.type === 'Button' && inText) return 1
+  const inline = inText || tree.type === 'Text'
+  return (tree.children ?? []).reduce((n: number, c: any) => n + buttonsUnderText(c, inline), 0)
+}
+
+test('no button is ever nested in a Text: armed or not, arming the wrap key or not', async () => {
+  percent = 40
+  expect(buttonsUnderText(await band())).toBe(0)
+  await wrapButton(await band()).props.onPress()
+  expect(buttonsUnderText(await band())).toBe(0)
+  arm()
+  expect(buttonsUnderText(await band())).toBe(0)
+})
