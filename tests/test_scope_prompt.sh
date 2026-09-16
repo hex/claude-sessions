@@ -783,7 +783,7 @@ test_budget_garbage_is_the_default() {
 # without $EPOCHREALTIME, where the clock ticks in whole seconds.
 test_budget_of_one_millisecond_expires() {
     if [ -z "$(bash -c 'printf %s "${EPOCHREALTIME:-}"')" ]; then
-        echo "    SKIP: this bash has no $EPOCHREALTIME; elapsed is whole seconds"
+        echo "    SKIP: this bash has no \$EPOCHREALTIME; elapsed is whole seconds"
         return 0
     fi
     seed_repo "src/api.ts"
