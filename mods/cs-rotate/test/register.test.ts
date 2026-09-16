@@ -24,6 +24,13 @@ let existing: Set<string>
 let files: Record<string, string>
 let sessionId: string
 let envVars: Record<string, string | undefined>
+let timers: { ms: number; fn: () => void; kind: 'after' | 'every'; cancelled: boolean }[]
+let invalidated: string[]
+const timer = (kind: 'after' | 'every') => (ms: number, fn: () => void) => {
+  const t = { ms, fn, kind, cancelled: false }
+  timers.push(t)
+  return { cancel: () => { t.cancelled = true } }
+}
 const $ = {
   env: { get: async (name: string) => envVars[name] },
   session: {
@@ -33,7 +40,8 @@ const $ = {
   },
   prompt: { fill: async (args: any) => { filled.push(args); return { isFilled: true } } },
   command: { run: async (args: any) => { ran.push(args); return { text: '' } } },
-  ui: { resolve: async () => ({ Box: 'Box', Text: 'Text', Button: 'Button' }) },
+  ui: { resolve: async () => ({ Box: 'Box', Text: 'Text', Button: 'Button' }), invalidate: (event: string) => { invalidated.push(event) } },
+  clock: { after: timer('after'), every: timer('every') },
   fs: {
     write: async (path: string, text: string) => { written[path] = text },
     exists: async (path: string) => existing.has(path) || path in files,
@@ -55,6 +63,7 @@ const findButton = (tree: any) => buttons(tree)[0]
 beforeEach(() => {
   for (const k of Object.keys(hooks)) delete hooks[k]
   percent = undefined; filled = []; ran = []; written = {}; existing = new Set(['/work/.cs/local'])
+  timers = []; invalidated = []
   // The default fixture is the lead conversation of a cs session.
   sessionId = 'uuid-lead'
   envVars = {}
@@ -303,4 +312,37 @@ test('session.start writes a heartbeat under the session meta dir', async () => 
 test('outside a cs session no heartbeat is written', async () => {
   await hooks['session.start']($, { cwd: '/plain', surface: 'terminal', isInteractive: true }, async (e) => ({ cwd: e.cwd }))
   expect(Object.keys(written)).toEqual([])
+})
+
+// A turn's end, the way the engine reports it: answered on the main loop unless said otherwise.
+const turnComplete = (e: Partial<{ reason: string; agentId: string }> = {}) =>
+  hooks['turn.complete']($, { reason: 'answer', answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', ...e }, async () => ({ text: 'ok' }))
+// The pending `after` timers, run the way the clock would run them.
+const fireAfter = async () => { for (const t of timers.filter(t => t.kind === 'after' && !t.cancelled)) { t.cancelled = true; await t.fn() } }
+
+test('with CS_ROTATE_FORCE_CTX set, a turn ending past it schedules /rotate from a timer, not from the hook', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  percent = 70
+  await turnComplete()
+  expect(ran).toEqual([])
+  expect(timers.map(t => t.kind)).toEqual(['after'])
+  await fireAfter()
+  expect(ran).toEqual([{ command: 'rotate', args: '' }])
+})
+
+test('without CS_ROTATE_FORCE_CTX a turn ending at 100% forces nothing', async () => {
+  percent = 100
+  await turnComplete()
+  expect(timers).toEqual([])
+  expect(ran).toEqual([])
+})
+
+test('below the force threshold, or with an unusable value, a turn ending forces nothing', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  percent = 69
+  await turnComplete()
+  envVars.CS_ROTATE_FORCE_CTX = 'critical'
+  percent = 100
+  await turnComplete()
+  expect(timers).toEqual([])
 })

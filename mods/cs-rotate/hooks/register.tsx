@@ -2,7 +2,7 @@
 /* @jsx h */
 /* @jsxFrag Fragment */
 // ABOUTME: cs-rotate mod: one button above the prompt, rotate past the threshold or /clear once a handoff is armed.
-// ABOUTME: The rotate press runs /rotate, the armed press runs /clear; session.start writes a heartbeat for doctor.
+// ABOUTME: With CS_ROTATE_FORCE_CTX set a turn ending past it runs /rotate itself; session.start writes a heartbeat for doctor.
 import type { On, EngineInterface } from 'claude-code'
 
 declare const h: any
@@ -44,6 +44,13 @@ export const HEARTBEAT = '.cs/local/cs-rotate.heartbeat'
 export const MARKER = '.cs/local/pending-handoff'
 export const HANDOFFS = '.cs/handoffs'
 
+// The conversation a forced rotation already ran /rotate for, by id. Written
+// BEFORE the run is scheduled: a rotation that fails must not be retried at
+// the end of every turn. Module state would not do: it survives a /clear
+// (measured; a ticker started before one kept firing after it) and is lost
+// on a reload of the mod.
+export const FORCED = '.cs/local/cs-rotate.forced'
+
 export function register(on: On) {
   on('session.start', async ($, e, next) => {
     // Only a cs session has .cs/local; anywhere else the mod stays silent.
@@ -51,6 +58,14 @@ export function register(on: On) {
     if (await $.fs.exists(local)) {
       await $.fs.write(`${e.cwd}/${HEARTBEAT}`, `${new Date().toISOString()}\n`)
     }
+    return next(e)
+  })
+
+  // The end of a turn is the one moment a rotation can be started for the
+  // person: the answer is in, nothing runs. An aborted or errored turn is no
+  // place to start one, and a subagent's turn ends in the same event.
+  on('turn.complete', async ($, e, next) => {
+    if (e.reason === 'answer' && e.agentId === undefined) await forceRotation($)
     return next(e)
   })
 
@@ -133,6 +148,34 @@ async function gaugeBands($: EngineInterface): Promise<Bands> {
 
 function numberOr(raw: string | undefined, fallback: number): number {
   return raw !== undefined && /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : fallback
+}
+
+// Off unless CS_ROTATE_FORCE_CTX names a percentage. `claude plugin validate`
+// lists what a module reads, and a name it does not spell is refused.
+async function forceThreshold($: EngineInterface): Promise<number | undefined> {
+  const raw = await $.env.get("CS_ROTATE_FORCE_CTX")
+  return raw !== undefined && /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : undefined
+}
+
+// Runs /rotate for the person once a turn ends past the force threshold, once
+// per conversation, from a timer: the contract refuses `$.command.run` inside
+// a hook the turn is waiting on, and a `clock.after` callback runs once the
+// hook has returned (measured: a 0 ms timer scheduled in turn.complete ran the
+// command). A rejected run is not retried; the button stays for the person.
+async function forceRotation($: EngineInterface) {
+  const force = await forceThreshold($)
+  if (force === undefined) return
+  if (await handoffArmed($)) return
+  const { context } = await $.session.usage()
+  if (context.percent === undefined || context.percent < force) return
+  if (!(await ownsRotation($))) return
+  const forced = `${await $.session.cwd()}/${FORCED}`
+  const id = await $.session.id()
+  if ((await $.fs.exists(forced)) && (await $.fs.read(forced)).trim() === id) return
+  await $.fs.write(forced, `${id}\n`)
+  $.clock.after(0, () => {
+    rotate($).catch(err => $.ui.toast(`cs-rotate: /rotate did not run: ${String(err)}`))
+  })
 }
 
 // The band's own threshold; without one it is the bar's warn band. `claude plugin validate` lists what a
