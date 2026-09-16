@@ -2,7 +2,8 @@
 parent: e85ddb49-003a-4a7c-993a-f8b8c6da2179
 created: 2026-09-16T08:57:10Z
 purpose: take the held release v2026.9.16 to Alex's gate, then cut cs-statusline's render cost (#632)
-status: unconsumed
+status: consumed
+consumed_by: c29bfd1e-9c09-4f7c-abaf-87f97e976ed9
 ---
 
 ## 1. Next Step

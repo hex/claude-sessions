@@ -6,6 +6,15 @@ set -uo pipefail
 
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 
+# The shared-clock memo (see _sl_now) starts empty: neither the value nor its
+# ready flag may be seeded by an inherited environment variable of the same
+# name, or a stale/garbage _NOW would poison the limits stamp and crash the
+# pulse arithmetic (bash 3.2 set -u). Once, here, before the theme ladder below
+# first reads the clock, and nowhere later: a bash without a builtin clock
+# (3.2) forks date to fill the memo, and a second reset would fork it again.
+_NOW=""
+_SL_NOW_READY=""
+
 # This file re-invokes itself for the out-of-band usage refresh, so it needs its
 # own path — resolved at load, since $0 is the sourcing shell under the library
 # mode the test suite uses.
@@ -13,6 +22,96 @@ _SL_SELF="${BASH_SOURCE[0]}"
 
 # Read-only status query; never take the index lock from a render.
 export GIT_OPTIONAL_LOCKS=0
+
+# Current epoch for this render, read at most once. Honors CS_STATUSLINE_NOW
+# (test/pin), then the fork-free printf builtin, then a date fork (macOS bash
+# 3.2 lacks %(...)T). Memoized so the limits stamp, countdown, and attention
+# pulse share one clock instead of forking date up to three times a render.
+# The memo gate is a dedicated flag, not the value: even when every clock source
+# fails and _NOW ends empty, the flag records that this render already tried, so
+# a later caller does not re-fork date. main() zeroes both _NOW and the flag at
+# render start, so an inherited value can never seed the memo. Always overwrites
+# _NOW in-process and validates it numeric; leaves it empty when every source
+# fails, so callers apply their own fallback.
+_sl_now() {
+    [ -n "${_SL_NOW_READY:-}" ] && return 0
+    _SL_NOW_READY=1
+    if [ -n "${CS_STATUSLINE_NOW:-}" ]; then
+        _NOW="$CS_STATUSLINE_NOW"
+    else
+        printf -v _NOW '%(%s)T' -1 2>/dev/null
+        [[ "${_NOW:-}" =~ ^[0-9]+$ ]] || _NOW=$(date +%s 2>/dev/null)
+    fi
+    # Normalize to canonical base-10: a leading-zero value (e.g. a pin of 08) is
+    # read as octal by bash arithmetic and aborts on an 8/9 digit. 10# forces
+    # base-10 so the countdown, stamp, and pulse all get a safe integer.
+    if [[ "${_NOW:-}" =~ ^[0-9]+$ ]]; then _NOW=$((10#$_NOW)); else _NOW=""; fi
+}
+
+# --- render caches ----------------------------------------------------------
+#
+# What a render forks, it forks once per interval, not once per second: the
+# answers live under ~/.cache/cs/<kind>/<key>, two lines each. The first is
+# `epoch<TAB>identity`, the identity being the raw value the key was made from
+# (a workspace path, a config path, `<parent pid>,<TMUX>`), so two values that
+# sanitise to one key can never answer for each other; the second is the text.
+# Written by a builtin printf, so a torn read, a missing file or a foreign
+# identity is a miss and never a wrong answer. Ages are arithmetic against the
+# render's one clock, never a stat or find.
+
+# The file-name key for identity $1, in _CACHE_KEY; empty when it cannot be
+# keyed. Slashes become dashes, anything else outside a safe set an underscore,
+# and the tail of a long value is kept (NAME_MAX is 255).
+_cache_key() {
+    local key="${1//\//-}"
+    key="${key//[^A-Za-z0-9._,-]/_}"
+    [ "${#key}" -gt 200 ] && key="${key: -200}"
+    case "$key" in ''|.|..) key="" ;; esac
+    _CACHE_KEY="$key"
+}
+
+# Read kind $1's entry for identity $2, no older than $3 seconds: 0 with the
+# text in _CACHE_TEXT, 1 on any miss.
+_cache_read() {
+    _CACHE_TEXT=""
+    _cache_key "$2"; [ -n "$_CACHE_KEY" ] || return 1
+    local f="$HOME/.cache/cs/$1/$_CACHE_KEY" head="" text="" when
+    [ -f "$f" ] || return 1
+    # Both lines must be complete (each read succeeds only at a newline): a
+    # write caught halfway is a miss, not an empty or partial answer.
+    { IFS= read -r head && IFS= read -r text; } < "$f" || return 1
+    [ "${head#*$'\t'}" = "$2" ] || return 1
+    when="${head%%$'\t'*}"
+    [[ "$when" =~ ^[0-9]+$ ]] || return 1
+    _sl_now
+    [[ "${_NOW:-}" =~ ^[0-9]+$ ]] || return 1
+    [ $(( _NOW - when )) -le "$3" ] || return 1
+    _CACHE_TEXT="$text"
+}
+
+# Write kind $1's entry for identity $2 with text $3, stamped now. Best effort.
+_cache_write() {
+    _cache_key "$2"; [ -n "$_CACHE_KEY" ] || return 0
+    _sl_now
+    [[ "${_NOW:-}" =~ ^[0-9]+$ ]] || return 0
+    local d="$HOME/.cache/cs/$1"
+    [ -d "$d" ] || mkdir -p "$d" 2>/dev/null || return 0
+    { printf '%s\t%s\n%s\n' "$_NOW" "$2" "$3" > "$d/$_CACHE_KEY"; } 2>/dev/null || true
+}
+
+# The process the per-conversation caches are keyed on. Claude Code is the
+# render's parent and the same for every render of a conversation, so PPID is
+# the key. A program Claude Code runs in this script's place (a status-line
+# bridge that then runs this script, a new process each tick) names the pid it
+# is itself the child of in CS_STATUSLINE_PARENT; that program sets it per run,
+# and a launch never exports it, so it cannot make an impostor a member.
+_sl_parent_pid() {
+    _PARENT="$PPID"
+    case "${CS_STATUSLINE_PARENT:-}" in
+        ''|*[!0-9]*) ;;
+        *) _PARENT="$CS_STATUSLINE_PARENT" ;;
+    esac
+}
 
 # Resolve SL_THEME for this render. CS_TERM_THEME set on its own (no
 # CS_TERM_THEME_AUTO marker) is an explicit user pin (see `cs -help`) and wins.
@@ -35,11 +134,36 @@ export GIT_OPTIONAL_LOCKS=0
 # it describes the terminal rather than the OS. Talks to the tmux server over
 # its socket, never the tty, so it is safe from a render.
 _sl_theme_from_tmux_client() {
-    local t
-    t=$(tmux display-message -p '#{client_theme}' 2>/dev/null) || return 1
-    case "$t" in
-        dark|light) SL_THEME="$t"; return 0 ;;
+    _sl_tmux_client
+    case "${_TMUX_CLIENT_THEME:-}" in
+        dark|light) SL_THEME="$_TMUX_CLIENT_THEME"; return 0 ;;
         *) return 1 ;;
+    esac
+}
+
+# Ask the tmux server, once per theme pass, what the attached client reports
+# as its theme and which tty it is on, one query for the two rungs that need
+# them. Tab-separated so an empty theme (most terminals report none) still
+# leaves the tty in its own field. The answer is kept for
+# TMUX_CLIENT_CACHE_TTL under the parent pid and the TMUX claim, so the bar's
+# once-a-second repaint asks once in five: a theme toggle or a re-attach from
+# another terminal shows within that. Sets _TMUX_CLIENT_THEME and
+# _TMUX_CLIENT_TTY; both empty when tmux cannot answer.
+TMUX_CLIENT_CACHE_TTL=5
+_TMUX_CLIENT_ASKED=""; _TMUX_CLIENT_THEME=""; _TMUX_CLIENT_TTY=""
+_sl_tmux_client() {
+    [ -z "$_TMUX_CLIENT_ASKED" ] || return 0
+    _TMUX_CLIENT_ASKED=1
+    local out
+    _sl_parent_pid
+    if _cache_read tmux-client "$_PARENT,${TMUX:-}" "$TMUX_CLIENT_CACHE_TTL"; then
+        out="$_CACHE_TEXT"
+    else
+        out=$(tmux display-message -p '#{client_theme}'$'\t''#{client_tty}' 2>/dev/null) || return 0
+        case "$out" in *$'\t'*) _cache_write tmux-client "$_PARENT,${TMUX:-}" "$out" ;; esac
+    fi
+    case "$out" in
+        *$'\t'*) _TMUX_CLIENT_THEME="${out%%$'\t'*}"; _TMUX_CLIENT_TTY="${out#*$'\t'}" ;;
     esac
 }
 
@@ -72,22 +196,55 @@ _sl_theme_from_colorfgbg() {
 #
 # $1: pid to start from (defaults to this process; the parameter exists so the
 # walk can be tested against a fixed table instead of the live process tree).
+# Cached per parent process: the parent (Claude Code, for a render) is the same
+# across every render of a conversation, and a process the parent did not spawn
+# into this pane cannot inherit its verdict because the parent pid is not
+# environment. Keyed on the parent pid and the TMUX claim, expiring after
+# TMUX_REAL_CACHE_TTL so a recycled pid cannot inherit a stale verdict for
+# long. The walk itself is two forks (ps and awk), so a hit saves both.
+TMUX_REAL_CACHE_TTL=300
+
 _sl_tmux_is_real() {
     [ -n "${TMUX:-}" ] || return 1
     local srv start
     srv=${TMUX#*,}; srv=${srv%%,*}
     case "$srv" in ''|*[!0-9]*) return 1 ;; esac
     start=${1:-$$}
+    # A caller that names a start pid is a test of the walk itself; only the
+    # render's own question is cached.
+    local ident="" verdict
+    if [ -z "${1:-}" ]; then _sl_parent_pid; ident="$_PARENT,$TMUX"; fi
+    if [ -n "$ident" ] && _cache_read tmux-real "$ident" "$TMUX_REAL_CACHE_TTL"; then
+        case "$_CACHE_TEXT" in
+            real) return 0 ;;
+            foreign) return 1 ;;
+        esac
+    fi
+    _sl_tmux_walk "$start" "$srv"
+    local rc=$?
+    if [ -n "$ident" ] && [ "$rc" -ne 2 ]; then
+        verdict=foreign; [ "$rc" -eq 0 ] && verdict=real
+        _cache_write tmux-real "$ident" "$verdict"
+    fi
+    [ "$rc" -eq 2 ] && rc=0
+    return "$rc"
+}
+
+# The walk itself: 0 when the tmux server pid $2 is an ancestor of $1, 1 when
+# it is not, 2 when ps could not answer (treated as real by the caller, and
+# never cached, because a tool failure is not evidence of the negative).
+_sl_tmux_walk() {  # start-pid server-pid
+    local start="$1" srv="$2"
     # The loop is capped: a ppid table can be cyclic if a pid is reused between
     # the read and the walk, and an uncapped walk would spin on the render path.
     # Capture first: under `set -o pipefail` a failing ps would decide the
     # pipeline's status whatever awk concluded. An empty table means ps is
-    # missing or restricted, not that the server is absent — return 0 there,
+    # missing or restricted, not that the server is absent — return 2 there,
     # because a tool failure is not evidence of the negative, and scoring it as
     # one makes a genuine pane render dark and lose its pane id.
     local table
     table=$(ps -ax -o pid=,ppid= 2>/dev/null) || table=""
-    [ -n "$table" ] || return 0
+    [ -n "$table" ] || return 2
     printf '%s\n' "$table" | awk -v p="$start" -v s="$srv" '
         { pp[$1] = $2 }
         END {
@@ -127,13 +284,16 @@ _sl_mark_foreign_env() {
 # identity. Re-attach from a different terminal and the key differs, so the
 # lookup misses and the ladder falls through. The key is not sufficient on its
 # own, though — tty names are recycled — so entries also expire by age.
+TERM_CACHE_MAX_AGE=43200   # twelve hours, a plausible terminal session
+
 _sl_theme_from_client_cache() {
     local tty key line theme rgb
     # Inside tmux the terminal is the attached client; outside it, it is this
     # process's own tty — which is the key _write_term_cache already uses, so
     # refusing to look there left the answer on disk unreachable.
     if [ -n "${TMUX:-}" ]; then
-        tty=$(tmux display-message -p '#{client_tty}' 2>/dev/null) || return 1
+        _sl_tmux_client
+        tty="${_TMUX_CLIENT_TTY:-}"
     else
         tty=$(tty 2>/dev/null) || return 1
     fi
@@ -148,15 +308,22 @@ _sl_theme_from_client_cache() {
     # closes, a light one opens on the same device, and the entry becomes a
     # confidently wrong answer rather than the miss the key alone would give.
     # Age is the only signal available here, so an entry that has outlived a
-    # plausible terminal session is refused rather than trusted.
-    if [ -n "$(find "$entry" -mmin +720 2>/dev/null)" ]; then
-        return 1
-    fi
-    line=$(<"$entry") || return 1
+    # plausible terminal session is refused rather than trusted. The entry
+    # carries the epoch it was written at (third field; the writer is
+    # _write_term_cache in lib/70-statusline.sh, KEEP IN SYNC), so the age
+    # check is arithmetic rather than a find fork; an entry without one is
+    # refused the same way.
+    local written
+    IFS= read -r line < "$entry" || return 1
     theme=${line%% *}
     case "$theme" in dark|light) ;; *) return 1 ;; esac
-    rgb=${line#* }
-    [ "$rgb" = "$line" ] && rgb=""
+    written=${line##* }
+    [[ "$written" =~ ^[0-9]+$ ]] || return 1
+    _sl_now
+    [[ "${_NOW:-}" =~ ^[0-9]+$ ]] || return 1
+    [ $(( _NOW - written )) -le "$TERM_CACHE_MAX_AGE" ] || return 1
+    rgb=${line#* }; rgb=${rgb% *}
+    [ "$rgb" = "-" ] && rgb=""
     SL_THEME="$theme"
     # Only supplies what is missing: a background set by hand is the user's and
     # outranks anything cs measured earlier.
@@ -170,6 +337,8 @@ _sl_theme_from_client_cache() {
 }
 
 _sl_detect_theme() {
+    # One tmux query serves every rung of this pass; a later pass asks again.
+    _TMUX_CLIENT_ASKED=""
     # An explicit pin outranks every measurement, so it is read before the probe
     # file is allowed to overwrite anything.
     if [ -n "${CS_TERM_THEME:-}" ] && [ -z "${CS_TERM_THEME_AUTO:-}" ]; then
@@ -291,30 +460,6 @@ _read_stdin() {
     _STDIN+="$line"   # trailing partial line (no newline) or empty
 }
 
-# Current epoch for this render, read at most once. Honors CS_STATUSLINE_NOW
-# (test/pin), then the fork-free printf builtin, then a date fork (macOS bash
-# 3.2 lacks %(...)T). Memoized so the limits stamp, countdown, and attention
-# pulse share one clock instead of forking date up to three times a render.
-# The memo gate is a dedicated flag, not the value: even when every clock source
-# fails and _NOW ends empty, the flag records that this render already tried, so
-# a later caller does not re-fork date. main() zeroes both _NOW and the flag at
-# render start, so an inherited value can never seed the memo. Always overwrites
-# _NOW in-process and validates it numeric; leaves it empty when every source
-# fails, so callers apply their own fallback.
-_sl_now() {
-    [ -n "${_SL_NOW_READY:-}" ] && return 0
-    _SL_NOW_READY=1
-    if [ -n "${CS_STATUSLINE_NOW:-}" ]; then
-        _NOW="$CS_STATUSLINE_NOW"
-    else
-        printf -v _NOW '%(%s)T' -1 2>/dev/null
-        [[ "${_NOW:-}" =~ ^[0-9]+$ ]] || _NOW=$(date +%s 2>/dev/null)
-    fi
-    # Normalize to canonical base-10: a leading-zero value (e.g. a pin of 08) is
-    # read as octal by bash arithmetic and aborts on an 8/9 digit. 10# forces
-    # base-10 so the countdown, stamp, and pulse all get a safe integer.
-    if [[ "${_NOW:-}" =~ ^[0-9]+$ ]]; then _NOW=$((10#$_NOW)); else _NOW=""; fi
-}
 
 # Extract every field we need in one jq pass, one value per line. Returns
 # non-zero (caller falls back) when jq is missing, stdin is empty, or the JSON
@@ -350,15 +495,30 @@ _parse_stdin() {
         # directory and runs this same statusline with nothing in its
         # environment to tell it apart, and its reading would replace the
         # lead's for every gate that reads the file.
+        #
+        # The write is a fork (mv, or touch), and the bar repaints once a
+        # second, so it runs only when the value changed or the last write is
+        # older than STAMP_EVERY: the heartbeat readers allow 900 s, the limits
+        # readers 1800 s. The sibling `.at` file holds the last write's epoch,
+        # because a render cannot read an mtime without forking stat.
         if [ -n "${CLAUDE_SESSION_NAME:-}" ] && [ -n "${SL_CTX:-}" ]; then
             _pctdir="$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/local"
-            if mkdir -p "$_pctdir" 2>/dev/null; then
+            if [ -d "$_pctdir" ] || mkdir -p "$_pctdir" 2>/dev/null; then
                 _read_state_key "$_pctdir/state" claude_session_id
                 if [ -z "$_STATE_VALUE" ] || [ "$_STATE_VALUE" = "${SL_SESSION_ID:-}" ]; then
-                    printf '%s\n' "${SL_CTX%%.*}" > "$_pctdir/context-pct.tmp" 2>/dev/null \
-                        && mv "$_pctdir/context-pct.tmp" "$_pctdir/context-pct" 2>/dev/null || true
+                    _stamp_due "$_pctdir/context-pct" "${SL_CTX%%.*}"
+                    if [ -n "$_STAMP_DUE" ]; then
+                        printf '%s\n' "${SL_CTX%%.*}" > "$_pctdir/context-pct.tmp" 2>/dev/null \
+                            && mv "$_pctdir/context-pct.tmp" "$_pctdir/context-pct" 2>/dev/null \
+                            && _stamp_written "$_pctdir/context-pct"
+                    fi
                 else
-                    touch "$_pctdir/context-pct" 2>/dev/null || true
+                    # Its own cadence record: sharing the lead's would make
+                    # each side see the other's value as a change.
+                    _stamp_due "$_pctdir/context-pct.heartbeat" ""
+                    if [ -n "$_STAMP_DUE" ]; then
+                        touch "$_pctdir/context-pct" 2>/dev/null && _stamp_written "$_pctdir/context-pct.heartbeat"
+                    fi
                 fi
             fi
         fi
@@ -378,19 +538,53 @@ EOF
     # rules as context-pct: machine-local, atomic, best-effort.
     if [ -n "${CLAUDE_SESSION_NAME:-}" ] && { [ -n "${SL_5H:-}" ] || [ -n "${SL_WK:-}" ]; }; then
         _limdir="$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/local"
-        if mkdir -p "$_limdir" 2>/dev/null; then
+        if [ -d "$_limdir" ] || mkdir -p "$_limdir" 2>/dev/null; then
             _sl_now
-            {
-                printf 'five_hour_used_pct: %s\n' "${SL_5H%%.*}"
-                printf 'five_hour_resets_at: %s\n' "${SL_5H_RESET:-}"
-                printf 'seven_day_used_pct: %s\n' "${SL_WK%%.*}"
-                printf 'seven_day_resets_at: %s\n' "${SL_WK_RESET:-}"
-                printf 'stamped_at: %s\n' "${_NOW}"
-            } > "$_limdir/limits.tmp" 2>/dev/null \
-                && mv "$_limdir/limits.tmp" "$_limdir/limits" 2>/dev/null || true
+            _stamp_due "$_limdir/limits" "${SL_5H%%.*} ${SL_5H_RESET:-} ${SL_WK%%.*} ${SL_WK_RESET:-}"
+            if [ -n "$_STAMP_DUE" ]; then
+                {
+                    printf 'five_hour_used_pct: %s\n' "${SL_5H%%.*}"
+                    printf 'five_hour_resets_at: %s\n' "${SL_5H_RESET:-}"
+                    printf 'seven_day_used_pct: %s\n' "${SL_WK%%.*}"
+                    printf 'seven_day_resets_at: %s\n' "${SL_WK_RESET:-}"
+                    printf 'stamped_at: %s\n' "${_NOW}"
+                } > "$_limdir/limits.tmp" 2>/dev/null \
+                    && mv "$_limdir/limits.tmp" "$_limdir/limits" 2>/dev/null \
+                    && _stamp_written "$_limdir/limits"
+            fi
         fi
     fi
     return 0
+}
+
+# Seconds between rewrites of a stamp file whose value has not changed. The
+# stamp files are read for their mtime (the liveness heartbeat, 900 s window)
+# and their stamped_at (the limits readers, 1800 s window); a minute keeps
+# both fresh without a fork per second.
+STAMP_EVERY=60
+
+# Whether stamp file $1 needs rewriting for value $2: yes when its sibling
+# `$1.at` does not record a write, records a different value, or records one
+# older than STAMP_EVERY. Sets _STAMP_DUE (1 or empty). Builtins only.
+_stamp_due() {  # file value
+    _STAMP_DUE=1; _STAMP_VALUE="$2"
+    local at="$1.at" line="" when
+    [ -f "$at" ] || return 0
+    IFS= read -r line < "$at" || return 0
+    when="${line%% *}"
+    [[ "$when" =~ ^[0-9]+$ ]] || return 0
+    [ "${line#* }" = "$2" ] || return 0
+    _sl_now
+    [[ "${_NOW:-}" =~ ^[0-9]+$ ]] || return 0
+    [ $(( _NOW - when )) -ge "$STAMP_EVERY" ] || _STAMP_DUE=""
+}
+
+# Record that stamp file $1 was just written with value $2 (the value _stamp_due
+# was asked about). A builtin write; a torn read of it only costs one early
+# rewrite.
+_stamp_written() {  # file
+    _sl_now
+    { printf '%s %s\n' "${_NOW:-0}" "$_STAMP_VALUE" > "$1.at"; } 2>/dev/null || true
 }
 
 # Print the dir basename as a last-resort plain status, then exit cleanly.
@@ -804,10 +998,22 @@ _usage_cache_dir() { printf '%s\n' "${CS_USAGE_DIR:-$SESSIONS_ROOT/.usage}"; }
 # per-project prompt history and grows without bound, and the render path reads
 # it once a second. Measured on a 5.5 MB config, streaming a single key beats
 # parsing the whole document by roughly an order of magnitude.
-_read_org_from() {
+# The account changes at a sign-in, not once a second, so a render takes the
+# answer kept for ORG_CACHE_TTL under the config's path: a swap shows within
+# five minutes instead of costing a jq walk of a multi-megabyte file per
+# render. The refresher passes `fresh`: it attributes a reading and detects a
+# swap across its own fetch, and a cached identity there would file one
+# account's usage under another. Its fresh answer renews the cache.
+ORG_CACHE_TTL=300
+
+_read_org_from() {  # config [fresh]
     _ORG=""
     local cfg="${1:-}"
     [ -f "$cfg" ] || return 0
+    if [ "${2:-}" != "fresh" ] && _cache_read org "$cfg" "$ORG_CACHE_TTL"; then
+        _ORG="$_CACHE_TEXT"
+        return 0
+    fi
     # `first(...)` inside jq rather than a `head` pipe: piping would add a fork
     # and, worse, a PATH dependency on a render path that must keep working
     # when PATH holds little more than jq.
@@ -815,6 +1021,9 @@ _read_org_from() {
         select(length == 2 and .[0] == ["oauthAccount","organizationUuid"]) | .[1]
     ) // empty' "$cfg" 2>/dev/null) || _ORG=""
     [ "${_ORG:-}" = "null" ] && _ORG=""
+    # An empty answer is not cached: a config caught mid-rewrite yields none,
+    # and remembering that would blank the Fable window for the whole TTL.
+    [ -n "$_ORG" ] && _cache_write org "$cfg" "$_ORG"
     return 0
 }
 
@@ -906,10 +1115,14 @@ EOF
     fi
     [ -n "$pct" ] || pct=null
     [[ "${fetched:-}" =~ ^[0-9]+$ ]] || fetched=0
-    jq -n --arg org "$org" --argjson pct "$pct" --arg reset "$reset" \
+    if jq -n --arg org "$org" --argjson pct "$pct" --arg reset "$reset" \
         --argjson fetched "$fetched" --argjson next "$(( _NOW + offset ))" \
         '{org:$org, pct:$pct, resets_at:$reset, fetched_at:$fetched, next_poll_at:$next}' \
-        > "$tmp" 2>/dev/null && mv "$tmp" "$cache" 2>/dev/null
+        > "$tmp" 2>/dev/null && mv "$tmp" "$cache" 2>/dev/null; then
+        local shown="$pct"; [ "$shown" = "null" ] && shown=""
+        _iso_epoch "$reset"
+        _usage_fields_write "$cache" "$shown" "$reset" "$fetched" "$(( _NOW + offset ))" "${_EPOCH:-}"
+    fi
     rm -f "$tmp" 2>/dev/null
 }
 
@@ -953,7 +1166,7 @@ _refresh_usage() {
 
     local org="" cfg
     cfg=$(_claude_config_file)
-    _read_org_from "$cfg"; org="$_ORG"
+    _read_org_from "$cfg" fresh; org="$_ORG"
 
     # Honour the cadence under the lock. The render kicks on _FABLE_DUE, which
     # is deliberately raised by conditions that are not "the interval elapsed" —
@@ -976,8 +1189,15 @@ _refresh_usage() {
     _usage_cache_file "$org" || _CACHE_FILE="$dir/fable.unattributed.json"
     if [ -f "$_CACHE_FILE" ]; then
         cache="$_CACHE_FILE"
+        # The JSON is the record; its schedule is the one honoured, so a
+        # backoff a 429 recorded is never skipped. A sidecar that disagrees
+        # with it (a refresher killed between writing the two, or a record an
+        # older cs wrote alone) is rewritten from the JSON here, without a
+        # fetch: the render reads the sidecar, so the disagreement is what it
+        # kicked this refresher over.
         local due_at
         due_at=$(jq -r '(.next_poll_at // 0 | tostring)' "$cache" 2>/dev/null) || due_at=0
+        _usage_fields_repair "$cache" "$due_at"
         [[ "${due_at:-}" =~ ^[0-9]+$ ]] || due_at=0
         _sl_now
         if [[ "${_NOW:-}" =~ ^[0-9]+$ ]] && [ "$_NOW" -lt "$due_at" ]; then return 0; fi
@@ -1036,7 +1256,7 @@ _refresh_usage() {
     # reading means the config was briefly unreadable, which _fable_read already
     # treats as unknown; disagreeing with it here would throw away a good
     # reading for the right account and blank the capsule for a whole interval.
-    _read_org_from "$cfg"
+    _read_org_from "$cfg" fresh
     if [ -n "$_ORG" ] && [ -n "$org" ] && [ "$_ORG" != "$org" ]; then
         # Discard the result: it belongs to the account we started under, which
         # is no longer signed in. Record the schedule against THAT account —
@@ -1115,30 +1335,77 @@ _fable_read() {
     if [ ! -f "$cache" ]; then _FABLE_DUE=1; return 0; fi
     _sl_now
     [[ "${_NOW:-}" =~ ^[0-9]+$ ]] || return 0
-    local fields
-    fields=$(jq -r '
-        [ (.pct // "" | tostring),
-            (.resets_at // ""),
-            (.fetched_at // 0 | tostring),
-            (.next_poll_at // 0 | tostring) ] | .[]' "$cache" 2>/dev/null) || { _FABLE_DUE=1; return 0; }
-    if [ -z "$fields" ]; then _FABLE_DUE=1; return 0; fi
-    local pct="" reset="" fetched="" next=""
-    {
-        IFS= read -r pct
-        IFS= read -r reset
-        IFS= read -r fetched
-        IFS= read -r next
-    } <<EOF
+    # The record's fields, one per line, from the sibling `.fields` file the
+    # refresher writes with the JSON (see _usage_fields_write): pct, resets_at,
+    # fetched_at, next_poll_at, and resets_at as an epoch, so the render neither
+    # parses JSON nor forks date. A record without one (written before the
+    # sidecar existed) is parsed with jq until the next refresh, within the
+    # poll interval; the render never writes the sidecar itself, so it cannot
+    # race a refresher's newer one with an older parse.
+    local pct="" reset="" fetched="" next="" reset_epoch=""
+    if [ -f "$cache.fields" ]; then
+        {
+            IFS= read -r pct
+            IFS= read -r reset
+            IFS= read -r fetched
+            IFS= read -r next
+            IFS= read -r reset_epoch
+        } < "$cache.fields"
+    else
+        local fields
+        fields=$(jq -r '
+            [ (.pct // "" | tostring),
+                (.resets_at // ""),
+                (.fetched_at // 0 | tostring),
+                (.next_poll_at // 0 | tostring) ] | .[]' "$cache" 2>/dev/null) || { _FABLE_DUE=1; return 0; }
+        if [ -z "$fields" ]; then _FABLE_DUE=1; return 0; fi
+        {
+            IFS= read -r pct
+            IFS= read -r reset
+            IFS= read -r fetched
+            IFS= read -r next
+        } <<EOF
 $fields
 EOF
+        _iso_epoch "$reset"; reset_epoch="${_EPOCH:-}"
+    fi
     [[ "${next:-}" =~ ^[0-9]+$ ]] || next=0
     [ "$_NOW" -ge "$next" ] && _FABLE_DUE=1
     [[ "${fetched:-}" =~ ^[0-9]+$ ]] || return 0
     [ $(( _NOW - fetched )) -le "$USAGE_MAX_AGE" ] || return 0
     [[ "${pct:-}" =~ ^[0-9]+(\.[0-9]+)?$ ]] || return 0
     _FABLE_PCT="${pct%%.*}"
+    [[ "${reset_epoch:-}" =~ ^[0-9]+$ ]] || reset_epoch=""
+    _FABLE_RESET="$reset_epoch"
+}
+
+# Rewrite cache file $1's sidecar from its JSON when the sidecar is missing or
+# its schedule is not $2 (the JSON's next_poll_at). Best effort.
+_usage_fields_repair() {  # cache next_poll_at
+    local have=""
+    if [ -f "$1.fields" ]; then
+        { IFS= read -r have; IFS= read -r have; IFS= read -r have; IFS= read -r have; } < "$1.fields"
+        [ "$have" = "$2" ] && return 0
+    fi
+    local fields pct="" reset="" fetched="" next=""
+    fields=$(jq -r '[ (.pct // "" | tostring), (.resets_at // ""),
+        (.fetched_at // 0 | tostring), (.next_poll_at // 0 | tostring) ] | .[]' "$1" 2>/dev/null) || return 0
+    [ -n "$fields" ] || return 0
+    { IFS= read -r pct; IFS= read -r reset; IFS= read -r fetched; IFS= read -r next; } <<EOF
+$fields
+EOF
+    [ "$pct" = "null" ] && pct=""
     _iso_epoch "$reset"
-    _FABLE_RESET="${_EPOCH:-}"
+    _usage_fields_write "$1" "$pct" "$reset" "$fetched" "$next" "${_EPOCH:-}"
+}
+
+# The render-side copy of a usage record: cache file $1's fields one per line
+# (pct, resets_at, fetched_at, next_poll_at, resets_at as an epoch), written
+# beside the JSON by the refresher, the JSON's only writer, so a render reads
+# it with builtins. Best effort; a missing file only costs the render a jq.
+_usage_fields_write() {  # cache pct reset fetched next reset_epoch
+    { printf '%s\n' "$2" "$3" "$4" "$5" "$6" > "$1.fields.tmp.$$" \
+        && mv "$1.fields.tmp.$$" "$1.fields"; } 2>/dev/null || rm -f "$1.fields.tmp.$$" 2>/dev/null
 }
 
 # Read one key from a session's machine-local state file (.cs/local/state)
@@ -1163,12 +1430,28 @@ _read_state_key() {  # state-file key
 
 # Format the git segment text for a workspace dir into _GIT_TEXT, empty when
 # it is not a git repo / git is unavailable / git times out.
+# git status is the one fork here that also reads the working tree, and the bar
+# repaints once a second; a reading is reused for GIT_CACHE_TTL seconds, keyed
+# by the workspace path, so at most one render in five pays for it.
+GIT_CACHE_TTL=5
+
 _git_text() {
     _GIT_TEXT=""
     local dir="$1"
     [ -n "$dir" ] || return 0
     [ -e "$dir/.git" ] || return 0
-    local out
+    if _cache_read git "$dir" "$GIT_CACHE_TTL"; then
+        _GIT_TEXT="$_CACHE_TEXT"
+        return 0
+    fi
+    _git_status_text "$dir"
+    _cache_write git "$dir" "$_GIT_TEXT"
+}
+
+# One git status, parsed into _GIT_TEXT (empty when git is unavailable, times
+# out, or reports no branch).
+_git_status_text() {
+    local dir="$1" out
     out=$(_timeout 2 git -C "$dir" status --porcelain=v1 -b 2>/dev/null) || return 0
     local branch="" ahead=0 behind=0 staged=0 modified=0 first=1 line x y h
     while IFS= read -r line; do
@@ -1629,18 +1912,9 @@ main() {
     # Out-of-band refresh mode. Re-invoking this script rather than installing a
     # second binary keeps the feature to one file and off the install manifest.
     if [ "${1:-}" = "--refresh-usage" ]; then
-        _NOW=""
-        _SL_NOW_READY=""
         _refresh_usage
         exit 0
     fi
-
-    # Sanitize the shared-clock memo at the start of every render: neither the
-    # value nor its ready flag may be seeded by an inherited environment variable
-    # of the same name. Otherwise a stale/garbage _NOW would poison the limits
-    # stamp and crash the pulse arithmetic (bash 3.2 set -u). Free, no fork.
-    _NOW=""
-    _SL_NOW_READY=""
 
     _read_stdin
     _parse_stdin "$_STDIN" || _fallback
