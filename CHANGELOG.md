@@ -4,7 +4,7 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
-## Unreleased
+## 2026.9.16
 
 ### Changed
 - One list of what cs deploys. `install.sh` and `bin/cs` each carried the manifest arrays (hooks, their libraries, commands, skills, mods, and what past versions left behind) and the settings-strip filter behind KEEP IN SYNC comments; they now come from `lib/01-manifests.sh`, which `./build.sh` folds into `bin/cs` and splices into `install.sh` from `install.sh.in`, so `install.sh` is a built file like `bin/cs` and CI fails when the committed copy differs from the build. A web install works as before: the file it runs still carries everything inline.
