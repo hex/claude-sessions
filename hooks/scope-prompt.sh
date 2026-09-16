@@ -392,10 +392,12 @@ $part"
 _digest_exit() {
     local _emitted=0
     _emit_context "$DATE_NOTE" "$DIGEST" "$CLARIFY" "$SKIP_NOTE" || _emitted=$?
-    _commit_digest "${CLAUDE_SESSION_META_DIR:-}/local"
-    # An emission that failed left the note unheard; the stamp waits for the
-    # next prompt to carry it.
-    [ "$_emitted" -eq 0 ] && _commit_date_stamp "${CLAUDE_SESSION_META_DIR:-}/local"
+    # An emission that failed left the digest and the note unheard; the cursor
+    # and the stamp wait for the next prompt to carry them.
+    if [ "$_emitted" -eq 0 ]; then
+        _commit_digest "${CLAUDE_SESSION_META_DIR:-}/local"
+        _commit_date_stamp "${CLAUDE_SESSION_META_DIR:-}/local"
+    fi
     _trace exit
     exit 0
 }
@@ -486,11 +488,12 @@ _trace classify
 # way into the kill. So the hook checks its own clock here, once, through the
 # same builtins the trace reads: past the budget it gives up the scope block,
 # says so in one line, and still delivers the rest. CS_SCOPE_BUDGET_MS moves
-# the budget; anything that is not a number is the default, so a typo cannot
-# silence grounding on every prompt. The registered timeout stays the
-# backstop for a scan that is itself slow.
+# the budget; anything that is not a number of at most seven digits is the
+# default, so a typo cannot silence grounding on every prompt, and a number
+# past the shell's arithmetic cannot wrap to a zero that would. The registered
+# timeout stays the backstop for a scan that is itself slow.
 _BUDGET_MS="${CS_SCOPE_BUDGET_MS:-1500}"
-case "$_BUDGET_MS" in ''|*[!0-9]*) _BUDGET_MS=1500 ;; esac
+case "$_BUDGET_MS" in ''|*[!0-9]*|????????*) _BUDGET_MS=1500 ;; esac
 _now_ms
 _ELAPSED_MS=$(( _MS - _T0 ))
 if [ "$_ELAPSED_MS" -ge "$(( 10#$_BUDGET_MS ))" ]; then
@@ -650,7 +653,9 @@ fi
 # after the marker breaks that.
 _emitted=0
 _emit_context "$DATE_NOTE" "$DIGEST" "$CLARIFY" "$BLOCK" || _emitted=$?
-_commit_digest "${CLAUDE_SESSION_META_DIR:-}/local"
-[ "$_emitted" -eq 0 ] && _commit_date_stamp "${CLAUDE_SESSION_META_DIR:-}/local"
+if [ "$_emitted" -eq 0 ]; then
+    _commit_digest "${CLAUDE_SESSION_META_DIR:-}/local"
+    _commit_date_stamp "${CLAUDE_SESSION_META_DIR:-}/local"
+fi
 _trace emit
 exit 0

@@ -54,6 +54,10 @@ setup() {
     export CLAUDE_SESSION_NAME="test-scope"
     export CLAUDE_SESSION_DIR="$TEST_TMPDIR/session"
     export CLAUDE_SESSION_META_DIR="$CLAUDE_SESSION_DIR/.cs"
+    # The hook's own deadline is off the table here: these tests time nothing,
+    # and a loaded runner must not turn a scan test into a skip. The deadline
+    # tests set their own budget.
+    export CS_SCOPE_BUDGET_MS="600000"
     mkdir -p "$CLAUDE_SESSION_DIR"
     git -C "$CLAUDE_SESSION_DIR" init -q
     git -C "$CLAUDE_SESSION_DIR" config user.email "test@cs.local"
@@ -715,12 +719,29 @@ test_grep_fallback_still_classifies_chitchat_negative() {
 # stage and never reaches the scan.
 test_budget_exhausted_skips_the_scan_and_keeps_the_rest() {
     seed_repo "src/api.ts"
+    # Everything the front half builds is live at once: a pending queue
+    # digest, unread mail, and a date stamp from another day.
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local/mail/new"
+    printf '%s\n' '{"event":"task_done"}' > "$CLAUDE_SESSION_META_DIR/local/notifications.jsonl"
+    printf '%s\n' '{"id":"m1","ts":1,"from":"peer","actor":"","kind":"text","ref":null,"body":"hello from a peer"}' \
+        > "$CLAUDE_SESSION_META_DIR/local/mail/new/0000000001-m1.json"
+    _write_stamp "2001-01-01"
     local out ctx
     out=$(CS_SCOPE_BUDGET_MS=0 run_hook "implement a retry wrapper around the fetch call in src/api.ts" 2>/dev/null) || { echo "  FAIL: hook must exit 0 (got $?)"; return 1; }
     ctx=$(additional_context "$out")
     assert_output_not_contains "$ctx" "Scope (auto-grounded)" "no scope block past the budget" || return 1
     assert_output_contains "$ctx" "Scope: skipped, slow machine" "one line says the scan was skipped" || return 1
     assert_output_contains "$ctx" "## Clarify" "the clarify guideline still arrives" || return 1
+    assert_output_contains "$ctx" "task(s) done" "the queue digest still arrives" || return 1
+    assert_output_contains "$ctx" "hello from a peer" "the mail digest still arrives" || return 1
+    assert_output_contains "$ctx" "## Date" "the date note still arrives" || return 1
+    # And the news is spent only once it was delivered: the cursor and the stamp
+    # are committed after the emission, as on every other exit.
+    assert_file_exists "$CLAUDE_SESSION_META_DIR/local/notifications.seen" "the digest cursor advanced after the write" || return 1
+    assert_eq "$(_today)" "$(cat "$(_stamp_file)")" "the date stamp moved to today" || return 1
+    # The skip line sits where the block would: last, after the guideline.
+    [ "$(printf '%s' "$ctx" | grep -n 'Scope: skipped' | cut -d: -f1)" -gt "$(printf '%s' "$ctx" | grep -n '## Clarify' | cut -d: -f1)" ] \
+        || { echo "  FAIL: the skip line must follow the clarify guideline"; return 1; }
     local stages; stages=$(_trace_stages)
     assert_output_contains "$stages" "skip" "the trace names the skip" || return 1
     assert_output_not_contains "$stages" "scan" "the scan never ran" || return 1
@@ -738,12 +759,32 @@ test_budget_within_runs_the_scan() {
 }
 
 # A budget that is not a number is the default, not a zero: a typo must not
-# silence grounding on every prompt.
+# silence grounding on every prompt. Nor may a number too long for the shell's
+# arithmetic, which wraps to zero or negative and would skip every scan.
 test_budget_garbage_is_the_default() {
     seed_repo "src/api.ts"
     local ctx
     ctx=$(additional_context "$(CS_SCOPE_BUDGET_MS=fast run_hook "fix the handler in src/api.ts" 2>/dev/null)")
     assert_output_contains "$ctx" "Scope (auto-grounded)" "garbage budget reads as the default" || return 1
+    ctx=$(additional_context "$(CS_SCOPE_BUDGET_MS=18446744073709551616 run_hook "fix the handler in src/api.ts" 2>/dev/null)")
+    assert_output_contains "$ctx" "Scope (auto-grounded)" "an overflowing budget reads as the default" || return 1
+}
+
+# The digest's surface-once budget is spent only by a delivered emission: an
+# emission the hook could not write (stdout closed) leaves the cursor where it
+# was, on the deadline exit as on the others.
+test_failed_emission_leaves_the_digest_cursor_unspent() {
+    seed_repo "src/api.ts"
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    printf '%s\n' '{"event":"task_done"}' > "$CLAUDE_SESSION_META_DIR/local/notifications.jsonl"
+    local _in
+    _in=$(printf '%s' "implement a retry wrapper in src/api.ts" | jq -Rs '{prompt: ., hook_event_name: "UserPromptSubmit", session_id: "sid-test"}')
+    CS_SCOPE_BUDGET_MS=0 bash "$HOOK" <<< "$_in" > /dev/full 2>/dev/null
+    [ ! -e "$CLAUDE_SESSION_META_DIR/local/notifications.seen" ] \
+        || { echo "  FAIL: a digest nobody received must not spend the cursor (deadline exit)"; return 1; }
+    bash "$HOOK" <<< "$_in" > /dev/full 2>/dev/null
+    [ ! -e "$CLAUDE_SESSION_META_DIR/local/notifications.seen" ] \
+        || { echo "  FAIL: a digest nobody received must not spend the cursor (scan exit)"; return 1; }
 }
 
 run_test test_large_multiline_prompt_still_classifies_positive
@@ -779,9 +820,6 @@ run_test test_stage_trace_records_the_run_in_order
 run_test test_stage_trace_stops_where_a_killed_run_stopped
 run_test test_stage_trace_records_the_invoking_directory
 run_test test_stage_trace_opt_out
-run_test test_budget_exhausted_skips_the_scan_and_keeps_the_rest
-run_test test_budget_within_runs_the_scan
-run_test test_budget_garbage_is_the_default
 
 # ============================================================================
 # Date reminder: one line when the calendar day changed since the conversation
@@ -968,5 +1006,11 @@ run_test test_date_note_stamp_stays_put_when_emission_fails
 run_test test_date_note_disabled_by_env
 run_test test_date_note_fires_on_an_empty_prompt_too
 run_test test_date_note_stamp_advances_on_a_code_work_prompt_too
+
+# The deadline tests use the date-stamp helpers defined above, so they run after them.
+run_test test_budget_exhausted_skips_the_scan_and_keeps_the_rest
+run_test test_budget_within_runs_the_scan
+run_test test_budget_garbage_is_the_default
+run_test test_failed_emission_leaves_the_digest_cursor_unspent
 
 report_results
