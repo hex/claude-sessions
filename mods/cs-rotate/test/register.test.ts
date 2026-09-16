@@ -26,6 +26,7 @@ let sessionId: string
 let envVars: Record<string, string | undefined>
 let timers: { ms: number; fn: () => void; kind: 'after' | 'every'; cancelled: boolean }[]
 let invalidated: string[]
+let toasts: string[]
 const timer = (kind: 'after' | 'every') => (ms: number, fn: () => void) => {
   const t = { ms, fn, kind, cancelled: false }
   timers.push(t)
@@ -40,7 +41,7 @@ const $ = {
   },
   prompt: { fill: async (args: any) => { filled.push(args); return { isFilled: true } } },
   command: { run: async (args: any) => { ran.push(args); return { text: '' } } },
-  ui: { resolve: async () => ({ Box: 'Box', Text: 'Text', Button: 'Button' }), invalidate: (event: string) => { invalidated.push(event) } },
+  ui: { resolve: async () => ({ Box: 'Box', Text: 'Text', Button: 'Button' }), invalidate: (event: string) => { invalidated.push(event) }, toast: (text: string) => { toasts.push(text) } },
   clock: { after: timer('after'), every: timer('every') },
   fs: {
     write: async (path: string, text: string) => { written[path] = text },
@@ -63,7 +64,7 @@ const findButton = (tree: any) => buttons(tree)[0]
 beforeEach(() => {
   for (const k of Object.keys(hooks)) delete hooks[k]
   percent = undefined; filled = []; ran = []; written = {}; existing = new Set(['/work/.cs/local'])
-  timers = []; invalidated = []
+  timers = []; invalidated = []; toasts = []
   // The default fixture is the lead conversation of a cs session.
   sessionId = 'uuid-lead'
   envVars = {}
@@ -345,4 +346,49 @@ test('below the force threshold, or with an unusable value, a turn ending forces
   percent = 100
   await turnComplete()
   expect(timers).toEqual([])
+})
+
+test('a forced rotation runs once per conversation, and a failed /rotate is not retried', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  percent = 80
+  await turnComplete()
+  expect(written['/work/.cs/local/cs-rotate.forced']).toBe('uuid-lead\n')
+  files['/work/.cs/local/cs-rotate.forced'] = written['/work/.cs/local/cs-rotate.forced']
+  await turnComplete(); await turnComplete()
+  expect(timers).toHaveLength(1)
+  // the marker is written before the timer is scheduled, so a rejected run stays rejected
+  $.command.run = async () => { throw new Error('unknown command') }
+  await fireAfter()
+  expect(toasts).toEqual(['cs-rotate: /rotate did not run: Error: unknown command'])
+  await turnComplete()
+  expect(timers).toHaveLength(1)
+  $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
+  // a marker from an earlier conversation of the session does not count
+  files['/work/.cs/local/cs-rotate.forced'] = 'uuid-earlier\n'
+  await turnComplete()
+  expect(timers).toHaveLength(2)
+})
+
+test('a subagent\'s turn, an aborted, errored or refused one, a teammate, or an unarmed non-cs directory forces nothing', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  percent = 90
+  await turnComplete({ agentId: 'agent-1' })
+  await turnComplete({ reason: 'aborted' })
+  await turnComplete({ reason: 'error' })
+  await turnComplete({ reason: 'refusal' })
+  sessionId = 'uuid-teammate'
+  await turnComplete()
+  sessionId = 'uuid-lead'; existing = new Set(); files = {}
+  await turnComplete()
+  expect(timers).toEqual([])
+  expect(Object.keys(written)).toEqual([])
+})
+
+test('a turn ending past the force threshold with a handoff already armed runs no second /rotate', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  percent = 90
+  arm()
+  await turnComplete()
+  await fireAfter()
+  expect(ran).toEqual([])
 })
