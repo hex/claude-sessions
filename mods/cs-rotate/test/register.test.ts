@@ -6,7 +6,7 @@ import { test, expect, beforeEach } from 'bun:test'
 ;(globalThis as any).h = (type: any, props: any, ...children: any[]) => ({ type, props: props ?? {}, children })
 ;(globalThis as any).Fragment = 'Fragment'
 
-import { register, DEFAULT_PERCENT, DEFAULT_CRIT, gaugeColor, meter, INK } from '../hooks/register.tsx'
+import { register, DEFAULT_PERCENT, DEFAULT_CRIT, GRACE_SECONDS, gaugeColor, meter, INK } from '../hooks/register.tsx'
 
 type Hook = ($: any, e: any, next: (e: any) => Promise<any>) => Promise<any>
 const hooks: Record<string, Hook> = {}
@@ -391,4 +391,101 @@ test('a turn ending past the force threshold with a handoff already armed runs n
   await turnComplete()
   await fireAfter()
   expect(ran).toEqual([])
+})
+
+// The countdown's ticker, and one tick of it as the clock would run it.
+const ticker = () => timers.find(t => t.kind === 'every' && !t.cancelled)
+const tick = async (n = 1) => { for (let i = 0; i < n; i++) await ticker()!.fn() }
+const promptSubmit = (text = 'keep going') =>
+  hooks['prompt.submit']($, { text, wait: false, origin: { kind: 'composer' } }, async (e) => ({ text: e.text }))
+
+test('with the handoff armed and force on, a turn ending starts a countdown the band shows, one redraw a second', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  expect(ticker()?.ms).toBe(1000)
+  expect(GRACE_SECONDS).toBe(20)
+  expect(JSON.stringify(await band())).toContain(`/clear in ${GRACE_SECONDS}s`)
+  await tick(3)
+  expect(invalidated).toEqual(['ui.render', 'ui.render', 'ui.render'])
+  expect(JSON.stringify(await band())).toContain(`/clear in ${GRACE_SECONDS - 3}s`)
+  expect(ran).toEqual([])
+  // one countdown at a time: another turn ending does not start a second
+  await turnComplete()
+  expect(timers.filter(t => t.kind === 'every')).toHaveLength(1)
+})
+
+test('at zero the countdown runs /clear, once, and stops ticking', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  const t = ticker()!
+  await tick(GRACE_SECONDS)
+  expect(ran).toEqual([{ command: 'clear', args: '' }])
+  expect(t.cancelled).toBe(true)
+  expect(JSON.stringify(await band())).not.toContain('/clear in')
+})
+
+test('a prompt entering the session stops the countdown and passes through', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  await tick(2)
+  const t = ticker()!
+  expect(await promptSubmit('one more thing')).toEqual({ text: 'one more thing' })
+  expect(t.cancelled).toBe(true)
+  expect(JSON.stringify(await band())).not.toContain('/clear in')
+  expect(ran).toEqual([])
+  // the next turn ending restarts it from the top
+  await turnComplete()
+  expect(JSON.stringify(await band())).toContain(`/clear in ${GRACE_SECONDS}s`)
+})
+
+test('pressing the clear button mid-countdown stops the ticker before it clears', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  await tick(2)
+  const t = ticker()!
+  await findButton(await band()).props.onPress()
+  expect(t.cancelled).toBe(true)
+  expect(ran).toEqual([{ command: 'clear', args: '' }])
+})
+
+test('a countdown reaching zero while a turn runs or a survey holds the band clears nothing and stops', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  for (const props of [{ isWorking: true }, { hasSurvey: true }]) {
+    await band()
+    await turnComplete()
+    const t = ticker()!
+    await band(props)
+    await tick(GRACE_SECONDS)
+    expect(ran).toEqual([])
+    expect(t.cancelled).toBe(true)
+  }
+})
+
+test('a countdown reaching zero re-checks the handoff: one consumed meanwhile clears nothing', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  files[HANDOFF] = UNCONSUMED.replace('status: unconsumed', 'status: consumed')
+  await tick(GRACE_SECONDS)
+  expect(ran).toEqual([])
+})
+
+test('without force, or outside the lead, an armed handoff starts no countdown and prompt.submit passes through', async () => {
+  arm(); percent = 80
+  await turnComplete()
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  sessionId = 'uuid-teammate'
+  await turnComplete()
+  expect(timers).toEqual([])
+  expect(await promptSubmit()).toEqual({ text: 'keep going' })
 })

@@ -51,7 +51,21 @@ export const HANDOFFS = '.cs/handoffs'
 // on a reload of the mod.
 export const FORCED = '.cs/local/cs-rotate.forced'
 
+// Once the forced rotation has armed its handoff, how long the band counts
+// down before the mod runs the /clear itself. Pressing the button or sending a
+// prompt stops it.
+export const GRACE_SECONDS = 20
+
+// The countdown: seconds left, its ticker, and what the band last saw. Module
+// state survives a /clear (measured), so every path that ends the countdown
+// cancels the ticker; a reload of the mod drops it with its timers.
+let left: number | undefined
+let ticker: { cancel: () => void } | undefined
+let bandIdle = false
+
 export function register(on: On) {
+  // A (re)load has no countdown: the engine cancelled the old one's timers.
+  left = undefined; ticker = undefined; bandIdle = false
   on('session.start', async ($, e, next) => {
     // Only a cs session has .cs/local; anywhere else the mod stays silent.
     const local = `${e.cwd}/.cs/local`
@@ -69,10 +83,18 @@ export function register(on: On) {
     return next(e)
   })
 
+  // A prompt entering the session, from anywhere, means the conversation is
+  // not done with: the countdown stops and the prompt goes through untouched.
+  on('prompt.submit', async ($, e, next) => {
+    if (ticker) stopCountdown($)
+    return next(e)
+  })
+
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const drawn = await next(e)
     // A survey owns the band; a running turn cannot be rotated out of.
-    if (e.props.hasSurvey || e.props.isWorking) return drawn
+    bandIdle = !e.props.hasSurvey && !e.props.isWorking
+    if (!bandIdle) return drawn
     const armed = await handoffArmed($)
     const { context } = await $.session.usage()
     const percent = context.percent
@@ -100,6 +122,10 @@ export function register(on: On) {
                         onPress={() => clearAndContinue($)} />
               : <Button key="cs-rotate" hotkey="1" plain label="rotate this conversation"
                         onPress={() => rotate($)} />}
+            {/* the forced rotation's grace: the seconds left before the mod runs the /clear itself */}
+            {armed && left !== undefined && (
+              <Text><Text dimColor>{'  \u00b7  '}</Text><Text color={INK.coral} bold>{`/clear in ${left}s`}</Text></Text>
+            )}
             {percent !== undefined && (
               <Text>
                 <Text dimColor>{'  \u00b7  '}</Text>
@@ -165,7 +191,10 @@ async function forceThreshold($: EngineInterface): Promise<number | undefined> {
 async function forceRotation($: EngineInterface) {
   const force = await forceThreshold($)
   if (force === undefined) return
-  if (await handoffArmed($)) return
+  if (await handoffArmed($)) {
+    if (!ticker && (await ownsRotation($))) startCountdown($)
+    return
+  }
   const { context } = await $.session.usage()
   if (context.percent === undefined || context.percent < force) return
   if (!(await ownsRotation($))) return
@@ -176,6 +205,33 @@ async function forceRotation($: EngineInterface) {
   $.clock.after(0, () => {
     rotate($).catch(err => $.ui.toast(`cs-rotate: /rotate did not run: ${String(err)}`))
   })
+}
+
+// Counts the band down, one redraw a second (the contract folds calls past
+// ten a second). Each redraw re-reads the marker and the handoff: the count
+// must see the press and the prompt that stop it, so nothing here is cached.
+// At zero the /clear runs only where the band would draw the button: the band
+// idle, the handoff still armed, this the lead; otherwise the count stops and
+// the button stays for the person.
+function startCountdown($: EngineInterface) {
+  left = GRACE_SECONDS
+  ticker = $.clock.every(1000, async () => {
+    if (left === undefined) return
+    left -= 1
+    $.ui.invalidate('ui.render')
+    if (left > 0) return
+    stopCountdown($)
+    if (bandIdle && (await handoffArmed($)) && (await ownsRotation($))) {
+      await clearAndContinue($).catch(err => $.ui.toast(`cs-rotate: /clear did not run: ${String(err)}`))
+    }
+  })
+}
+
+function stopCountdown($: EngineInterface) {
+  ticker?.cancel()
+  ticker = undefined
+  left = undefined
+  $.ui.invalidate('ui.render')
 }
 
 // The band's own threshold; without one it is the bar's warn band. `claude plugin validate` lists what a
@@ -246,5 +302,6 @@ async function rotate($: EngineInterface) {
 // Measured: the run resolves once the screen has cleared and a new transcript
 // is open; the marker is the hook's to consume.
 async function clearAndContinue($: EngineInterface) {
+  if (ticker) stopCountdown($)
   await $.command.run({ command: 'clear', args: '' })
 }
