@@ -113,8 +113,8 @@ test_mod_validate_inventories_the_hooks_and_calls() {
     assert_output_not_contains "$out" '$.prompt.fill' "nothing fills the composer any more" || return 1
     assert_output_contains "$out" 'env reads: CS_ROTATE_BUTTON_CTX, CS_ROTATE_FORCE_CTX, CS_STATUSLINE_CTX_CRIT, CS_STATUSLINE_CTX_WARN, CS_TERM_THEME' "the two thresholds, the bar's bands and the theme are read from the environment" || return 1
     assert_output_not_contains "$out" '$.prompt.submit' "and never submits" || return 1
-    assert_output_contains "$out" '$.command.run (via clearAndContinue, rotate)' "the two presses run their commands, and nothing else runs one" || return 1
-    assert_output_contains "$out" '$.clock.after (via forceRotation), $.clock.every (via startCountdown)' "the forced /rotate is a one-shot timer and the grace a ticker, nowhere else" || return 1
+    assert_output_contains "$out" '$.command.run (via clearAndContinue, pressWrap, rotate)' "the three presses run their commands, and nothing else runs one" || return 1
+    assert_output_contains "$out" '$.clock.after (via forceRotation, pressWrap), $.clock.every (via startCountdown)' "the forced /rotate and the wrap key's arm window are one-shot timers and the grace a ticker, nowhere else" || return 1
 }
 
 run_test test_mod_manifest_names_the_plugin_and_its_module

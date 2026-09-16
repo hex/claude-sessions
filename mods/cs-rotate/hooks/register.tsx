@@ -1,7 +1,7 @@
 /* @jsxRuntime classic */
 /* @jsx h */
 /* @jsxFrag Fragment */
-// ABOUTME: cs-rotate mod: one button above the prompt, rotate past the threshold or /clear once a handoff is armed.
+// ABOUTME: cs-rotate mod: keys above the prompt: rotate past the threshold, wrap up (two presses), or /clear once a handoff is armed.
 // ABOUTME: With CS_ROTATE_FORCE_CTX set a turn ending past it runs /rotate itself; session.start writes a heartbeat for doctor.
 import type { On, EngineInterface } from 'claude-code'
 
@@ -56,6 +56,14 @@ export const FORCED = '.cs/local/cs-rotate.forced'
 // prompt stops it.
 export const GRACE_SECONDS = 20
 
+// The wrap key's guard. /wrap replaces .cs/summary.md and runs three Opus
+// passes, so a mis-hit costs more than a mis-hit rotation: the first press
+// only arms the key, for this many milliseconds, and the second press within
+// that window runs it. A prompt or a /clear meanwhile disarms it.
+export const WRAP_ARM_MS = 5000
+let wrapArmed = false
+let wrapTimer: { cancel: () => void } | undefined
+
 // The countdown: seconds left, its ticker, and what the band last saw. Module
 // state survives a /clear (measured), so every path that ends the countdown
 // cancels the ticker; a reload of the mod drops it with its timers.
@@ -80,6 +88,7 @@ let startPercent: number | undefined
 export function register(on: On) {
   // A (re)load has no countdown: the engine cancelled the old one's timers.
   left = undefined; ticker = undefined; bandIdle = false; adopted = undefined; clearSeen = false; birth = undefined; startPercent = undefined
+  wrapArmed = false; wrapTimer = undefined
   on('session.start', async ($, e, next) => {
     // Only a cs session has .cs/local; anywhere else the mod stays silent.
     const local = `${e.cwd}/.cs/local`
@@ -101,6 +110,7 @@ export function register(on: On) {
   // not done with: the countdown stops and the prompt goes through untouched.
   on('prompt.submit', async ($, e, next) => {
     if (ticker) stopCountdown($)
+    if (wrapArmed) disarmWrap($)
     return next(e)
   })
 
@@ -110,6 +120,7 @@ export function register(on: On) {
   on('command.run', { command: 'clear' }, async ($, e, next) => {
     clearSeen = true
     if (ticker) stopCountdown($)
+    if (wrapArmed) disarmWrap($)
     try {
       return await next(e)
     } catch (err) {
@@ -153,6 +164,13 @@ export function register(on: On) {
                         onPress={() => clearAndContinue($)} />
               : <Button key="cs-rotate" hotkey="1" plain label="rotate this conversation"
                         onPress={() => rotate($)} />}
+            {!armed && (
+              <Text>
+                <Text dimColor>{'  \u00b7  '}</Text>
+                <Button key="cs-wrap" hotkey="2" plain label={wrapArmed ? 'press 2 again to /wrap' : 'wrap up this session'}
+                        onPress={() => pressWrap($)} />
+              </Text>
+            )}
             {/* the forced rotation's grace: the seconds left before the mod runs the /clear itself */}
             {armed && left !== undefined && (
               <Text><Text dimColor>{'  \u00b7  '}</Text><Text color={INK.coral} bold>{`/clear in ${left}s`}</Text></Text>
@@ -356,6 +374,31 @@ async function ownsRotation($: EngineInterface): Promise<boolean> {
 // the purpose from the conversation itself.
 async function rotate($: EngineInterface) {
   await $.command.run({ command: 'rotate', args: '' })
+}
+
+// The first press arms the key and redraws it; the second, inside the
+// window, runs /wrap as if the person had typed it. The key is disarmed
+// BEFORE the run: a run that fails must not leave the next press live.
+async function pressWrap($: EngineInterface) {
+  if (!wrapArmed) {
+    wrapArmed = true
+    wrapTimer = $.clock.after(WRAP_ARM_MS, () => disarmWrap($))
+    $.ui.invalidate('ui.render')
+    return
+  }
+  disarmWrap($)
+  try {
+    await $.command.run({ command: 'wrap', args: '' })
+  } catch (err) {
+    $.ui.toast(`cs-rotate: /wrap did not run: ${String(err)}`)
+  }
+}
+
+function disarmWrap($: EngineInterface) {
+  wrapTimer?.cancel()
+  wrapTimer = undefined
+  wrapArmed = false
+  $.ui.invalidate('ui.render')
 }
 
 // /clear ends this conversation, and cs's SessionStart hook then starts the

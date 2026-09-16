@@ -299,13 +299,21 @@ the mod has only the theme, so on a terminal whose background contradicts the
 theme flag the two ambers can differ. Under the mouse pointer the border turns
 coral. Pressing `1` from an
 empty composer runs `/rotate`, as if typed: the `rotate` skill draws the
-purpose from the conversation. Below the band the mod draws nothing, and it
-draws nothing while a turn runs or while a survey holds the band. It never
-submits a prompt of its own.
+purpose from the conversation. Beside it the band draws `2: wrap up this
+session`. That key runs `/wrap`, which distills memory, replaces
+`.cs/summary.md` and rotates the narrative, three Opus passes that cost
+minutes and real tokens, so it takes two presses: the first turns the label
+into `2: press 2 again to /wrap` for five seconds and runs nothing, the second
+within that window runs it. A prompt entering the session, or a `/clear`,
+disarms it. Below the band the mod draws nothing, and it draws nothing while a
+turn runs or while a survey holds the band. It never submits a prompt of its
+own.
 
 The same button has a second state. Once the `rotate` skill has armed a
 handoff (`.cs/local/pending-handoff` names one), the band draws
-`1: /clear and continue from the handoff` whatever the context reads, and
+`1: /clear and continue from the handoff` whatever the context reads, alone
+(the wrap key hides: with a handoff armed the conversation has nothing left to
+do but the `/clear`), and
 pressing `1` runs `/clear` itself: the conversation ends, and cs's SessionStart
 hook starts the handoff's next step in the new one, as it does after a typed
 `/clear`. The mod does not touch the marker; the hook consumes it. The button

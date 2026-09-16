@@ -1,5 +1,5 @@
 // ABOUTME: Unit tests for the cs-rotate mod against a fake engine `$`.
-// ABOUTME: Covers the band's gate (crit, working, survey), both presses, the armed handoff, and the heartbeat.
+// ABOUTME: Covers the band's gate (crit, working, survey), the three presses and the wrap key's two-press guard, the armed handoff, and the heartbeat.
 import { test, expect, beforeEach } from 'bun:test'
 
 // The plugin realm provides `h` and `Fragment` as globals; the test does the same.
@@ -148,11 +148,11 @@ test('a quoted claude_session_id in state still names the lead', async () => {
   expect(findButton(await band())).toBeDefined()
 })
 
-test('at the threshold the band adds one button on hotkey 1 beneath what was drawn', async () => {
+test('at the threshold the band adds the rotate key on hotkey 1, first, beneath what was drawn', async () => {
   percent = 40
   const tree = await band()
   expect(tree).not.toBe(DRAWN)
-  expect(buttons(tree)).toHaveLength(1)
+  expect(buttons(tree)).toHaveLength(2)
   const button = findButton(tree)
   expect(button.props.hotkey).toBe('1')
   expect(button.props.plain).toBe(true)
@@ -720,4 +720,74 @@ test('a typed /clear that the engine refuses leaves no birth behind either', asy
   await turnComplete()
   expect(timers.map(t => t.kind)).toEqual(['after'])
   expect(toasts).toEqual([])
+})
+
+// The wrap key: a second button on hotkey 2 that runs /wrap. It draws only
+// where the band draws unarmed; once a handoff is armed the band's one job is
+// the /clear.
+const wrapButton = (tree: any) => buttons(tree).find((b: any) => b.props.hotkey === '2')
+
+test('at the threshold the band adds a second button on hotkey 2 that reads as the wrap key, after the rotate key', async () => {
+  percent = 40
+  const tree = await band()
+  expect(buttons(tree)).toHaveLength(2)
+  expect(buttons(tree)[0].props.hotkey).toBe('1')
+  const button = wrapButton(tree)
+  expect(button.props.plain).toBe(true)
+  expect(button.props.label).toBe('wrap up this session')
+})
+
+test('an armed handoff draws the clear key alone: no wrap key', async () => {
+  arm(); percent = 90
+  expect(buttons(await band())).toHaveLength(1)
+  expect(wrapButton(await band())).toBeUndefined()
+})
+
+test('the wrap key needs two presses: the first arms it for a moment and runs nothing, the second runs /wrap', async () => {
+  percent = 40
+  await wrapButton(await band()).props.onPress()
+  expect(ran).toEqual([])
+  expect(invalidated).toEqual(['ui.render'])
+  const armedLabel = wrapButton(await band()).props.label
+  expect(armedLabel).toBe('press 2 again to /wrap')
+  await wrapButton(await band()).props.onPress()
+  expect(ran).toEqual([{ command: 'wrap', args: '' }])
+  expect(filled).toEqual([])
+  // Disarmed by the run: the label is back and a third press only re-arms.
+  expect(wrapButton(await band()).props.label).toBe('wrap up this session')
+  await wrapButton(await band()).props.onPress()
+  expect(ran).toHaveLength(1)
+})
+
+test('an armed wrap key disarms on its own after a moment, and a press then only re-arms', async () => {
+  percent = 40
+  await wrapButton(await band()).props.onPress()
+  const t = timers.find(t => t.kind === 'after')
+  expect(t).toBeDefined()
+  expect(t!.ms).toBe(5000)
+  t!.fn()
+  expect(wrapButton(await band()).props.label).toBe('wrap up this session')
+  await wrapButton(await band()).props.onPress()
+  expect(ran).toEqual([])
+})
+
+test('a prompt entering the session, or a /clear, disarms the wrap key', async () => {
+  percent = 40
+  await wrapButton(await band()).props.onPress()
+  await hooks['prompt.submit']($, { text: 'hi' }, async e => e)
+  expect(wrapButton(await band()).props.label).toBe('wrap up this session')
+  await wrapButton(await band()).props.onPress()
+  await hooks['command.run:clear']($, {}, async e => e)
+  expect(wrapButton(await band()).props.label).toBe('wrap up this session')
+  expect(ran).toEqual([])
+})
+
+test('a rejected /wrap shows a toast and leaves the key disarmed', async () => {
+  percent = 40
+  $.command.run = async () => { throw new Error('no such command') }
+  await wrapButton(await band()).props.onPress()
+  await wrapButton(await band()).props.onPress()
+  expect(toasts).toEqual(['cs-rotate: /wrap did not run: Error: no such command'])
+  expect(wrapButton(await band()).props.label).toBe('wrap up this session')
+  $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
 })
