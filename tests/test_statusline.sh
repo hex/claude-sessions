@@ -4121,6 +4121,8 @@ test_git_branch_shows_from_a_subdirectory_of_the_checkout() {
     assert_output_not_contains_f "$first" "⎇ other" "not from a fresh read" || return 1
     slash=$(CS_STATUSLINE_NOW=1002 run_sl "$(jq -nc --arg dir "$work/" '{workspace:{current_dir:$dir}}')")
     assert_output_contains_f "$slash" "⎇ main +1!1" "the checkout path with a trailing slash is the same entry" || return 1
+    slash=$(CS_STATUSLINE_NOW=1003 run_sl "$(jq -nc --arg dir "$work//mods/deep/" '{workspace:{current_dir:$dir}}')")
+    assert_output_contains_f "$slash" "⎇ main +1!1" "a doubled slash inside the path climbs to the same entry" || return 1
     later=$(CS_STATUSLINE_NOW=1006 run_sl "$json_sub")
     assert_output_contains_f "$later" "⎇ other" "past the TTL the subdirectory reads the tree" || return 1
     # A worktree checkout's .git is a file, not a directory: it is found too.
