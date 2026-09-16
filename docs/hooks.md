@@ -408,6 +408,10 @@ module state the forced mode keeps (the countdown, the conversation it is
 judging) is reset by a hot reload, which drops a running countdown and adopts
 the conversation it meets next unjudged.
 
+Design lab: `docs/cs-rotate-capsule-lab.html` (open it in a browser) shows the
+capsule's presets and knobs side by side, each state printing the Box/Text/Button
+JSX it maps to, in the status line's inks; the shipped capsule is its "Inked" preset.
+
 Tests: `tests/test_mod_rotate.sh` runs the bun unit tests under
 `mods/cs-rotate/test/` (a fake engine drives the band, the press and the
 heartbeat) and `claude plugin validate` when each binary is on PATH, and
