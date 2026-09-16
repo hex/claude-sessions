@@ -6,14 +6,15 @@ import { test, expect, beforeEach } from 'bun:test'
 ;(globalThis as any).h = (type: any, props: any, ...children: any[]) => ({ type, props: props ?? {}, children })
 ;(globalThis as any).Fragment = 'Fragment'
 
-import { register, DEFAULT_PERCENT, DEFAULT_CRIT, GRACE_SECONDS, gaugeColor, meter, INK } from '../hooks/register.tsx'
+import { register, DEFAULT_PERCENT, DEFAULT_CRIT, GRACE_SECONDS, gaugeColor, meter, isUnconsumed, INK } from '../hooks/register.tsx'
 
 type Hook = ($: any, e: any, next: (e: any) => Promise<any>) => Promise<any>
 const hooks: Record<string, Hook> = {}
 const on = (event: string, a: any, b?: any) => {
   const matcher = b ? a : undefined
   const fn: Hook = b ?? a
-  hooks[matcher?.component ? `${event}:${matcher.component}` : event] = fn
+  const narrowed = matcher?.component ?? matcher?.command
+  hooks[narrowed ? `${event}:${narrowed}` : event] = fn
 }
 
 let percent: number | undefined
@@ -44,7 +45,7 @@ const $ = {
   ui: { resolve: async () => ({ Box: 'Box', Text: 'Text', Button: 'Button' }), invalidate: (event: string) => { invalidated.push(event) }, toast: (text: string) => { toasts.push(text) } },
   clock: { after: timer('after'), every: timer('every') },
   fs: {
-    write: async (path: string, text: string) => { written[path] = text },
+    write: async (path: string, text: string) => { written[path] = text; files[path] = text },
     exists: async (path: string) => existing.has(path) || path in files,
     read: async (path: string) => { if (path in files) return files[path]; throw new Error(`ENOENT ${path}`) },
   },
@@ -353,7 +354,6 @@ test('a forced rotation runs once per conversation, and a failed /rotate is not 
   percent = 80
   await turnComplete()
   expect(written['/work/.cs/local/cs-rotate.forced']).toBe('uuid-lead\n')
-  files['/work/.cs/local/cs-rotate.forced'] = written['/work/.cs/local/cs-rotate.forced']
   await turnComplete(); await turnComplete()
   expect(timers).toHaveLength(1)
   // the marker is written before the timer is scheduled, so a rejected run stays rejected
@@ -488,4 +488,58 @@ test('without force, or outside the lead, an armed handoff starts no countdown a
   await turnComplete()
   expect(timers).toEqual([])
   expect(await promptSubmit()).toEqual({ text: 'keep going' })
+})
+
+test('a prompt arriving while the zero tick is still checking the handoff wins: nothing clears', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  await tick(GRACE_SECONDS - 1)
+  const zero = tick()
+  await promptSubmit('wait, one more thing')
+  await zero
+  expect(ran).toEqual([])
+  // and a press racing the zero tick clears once, not twice
+  await turnComplete()
+  await tick(GRACE_SECONDS - 1)
+  const button = findButton(await band())
+  const zero2 = tick()
+  await button.props.onPress()
+  await zero2
+  expect(ran).toEqual([{ command: 'clear', args: '' }])
+})
+
+test('a /clear run from anywhere else ends the countdown, so no timer outlives the conversation', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  const t = ticker()!
+  const e = { command: 'clear', args: '', origin: { kind: 'composer' }, presentation: { layout: 'main', columns: 80 } }
+  expect(await hooks['command.run:clear']($, e, async () => ({ text: '' }))).toEqual({ text: '' })
+  expect(t.cancelled).toBe(true)
+  expect(JSON.stringify(await band())).not.toContain('/clear in')
+})
+
+test('a rejected /clear at zero shows a toast and clears nothing else', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  $.command.run = async () => { throw new Error('no session') }
+  await tick(GRACE_SECONDS)
+  $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
+  expect(toasts).toEqual(['cs-rotate: /clear did not run: Error: no session'])
+  expect(ran).toEqual([])
+})
+
+// The SessionStart hook's own rule (_handoff_is_unconsumed): the frontmatter
+// must close, and the status must sit inside it.
+test('isUnconsumed follows the hook: unclosed frontmatter, or a status after it, is not armed', () => {
+  expect(isUnconsumed('---\nstatus: unconsumed\n---\n')).toBe(true)
+  expect(isUnconsumed('---\nstatus: unconsumed\n')).toBe(false)
+  expect(isUnconsumed('---\nparent: x\n---\nstatus: unconsumed\n')).toBe(false)
+  expect(isUnconsumed('---\nstatus: consumed\n---\n')).toBe(false)
+  expect(isUnconsumed('')).toBe(false)
 })

@@ -318,8 +318,11 @@ in the shell that launches cs (off unless set, and off for a value that is not
 a number), the end of a turn whose context reads at or past that percentage
 runs `/rotate` as if you had pressed `1`, once per conversation: the mod
 records the conversation id in `.cs/local/cs-rotate.forced` before it schedules
-the run, so a `/rotate` that fails is not tried again at the end of every turn
-(the failure shows as a toast, and the button stays). Only a turn that ended
+the run, so a `/rotate` that fails is not tried again at the end of every turn. A run
+the engine refuses shows as a toast; a run that starts but whose turn ends
+without arming a handoff (the skill refused, or was interrupted) is not seen
+by the mod, and the rotate button simply stays for you: the forced rotation
+is one attempt per conversation, never a retry loop. Only a turn that ended
 with an answer counts, on the main loop, in the lead conversation, with no
 handoff already armed: an interrupted or errored turn, or a subagent's, starts
 nothing. The run is scheduled from a timer rather than from the turn's own
@@ -331,10 +334,20 @@ the band is idle at that moment (no turn running, no survey), the handoff still
 armed and this still the lead; otherwise the count stops and the button waits
 for you. Pressing `1` during the count clears at once. Sending a prompt, from
 the composer or anywhere else a prompt enters the session, stops the count;
-the next turn's end starts it again from 20. The count is module state: it
-does not survive a reload of the mod, and every path that ends it cancels its
+the next turn's end starts it again from 20. A `/clear` from anywhere else
+(typed, or another plugin's) ends it too. The count is module state: it does
+not survive a reload of the mod, and every path that ends it cancels its
 timer, because a timer started before a `/clear` keeps firing after one
-(measured).
+(measured). At zero the mod re-reads the handoff with the SessionStart hook's
+own rule (frontmatter opened and closed by `---`, `status: unconsumed`
+inside), so a truncated handoff is never cleared into.
+
+Pick the percentage above a fresh conversation's own footprint. The wake turn
+after the `/clear` is an ordinary turn, and the once-per-conversation record
+belongs to the conversation that ended, so a threshold a fresh conversation
+already sits past (a session that loads a large CLAUDE.md and memory, say,
+with the knob at 5) rotates again as soon as it wakes, and again after that
+(measured at 1). The bar's crit band, 65, is the intended neighbourhood.
 
 The button is for the lead conversation of a cs session only: past the threshold
 the mod also checks that the cwd has `.cs/local`, that `.cs/local/disabled` is

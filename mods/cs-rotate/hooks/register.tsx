@@ -90,6 +90,13 @@ export function register(on: On) {
     return next(e)
   })
 
+  // A /clear from anywhere else (typed, another plugin) ends the conversation
+  // the count belongs to; the timer must not outlive it into the next one.
+  on('command.run', { command: 'clear' }, async ($, e, next) => {
+    if (ticker) stopCountdown($)
+    return next(e)
+  })
+
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const drawn = await next(e)
     // A survey owns the band; a running turn cannot be rotated out of.
@@ -220,10 +227,13 @@ function startCountdown($: EngineInterface) {
     left -= 1
     $.ui.invalidate('ui.render')
     if (left > 0) return
+    // The count holds at zero through the reads below: a prompt or a press
+    // landing meanwhile stops it (left becomes undefined), and this tick
+    // then does nothing, so nothing clears twice or behind a new turn.
+    const idle = bandIdle && (await handoffArmed($)) && (await ownsRotation($))
+    if (left !== 0) return
     stopCountdown($)
-    if (bandIdle && (await handoffArmed($)) && (await ownsRotation($))) {
-      await clearAndContinue($).catch(err => $.ui.toast(`cs-rotate: /clear did not run: ${String(err)}`))
-    }
+    if (idle) await clearAndContinue($).catch(err => $.ui.toast(`cs-rotate: /clear did not run: ${String(err)}`))
   })
 }
 
@@ -258,14 +268,18 @@ async function handoffArmed($: EngineInterface): Promise<boolean> {
   }
 }
 
-// The hook's own rule: a frontmatter block opened by `---` on the first line,
-// carrying `status: unconsumed` before the closing `---`.
+// The hook's own rule (_handoff_is_unconsumed in hooks/session-start.sh): a
+// frontmatter block opened by `---` on the first line and CLOSED by the next
+// `---`, carrying `status: unconsumed` between them. A file the closing line
+// never reaches (a truncated write) is not armed: the hook would refuse it,
+// and a /clear on it would land in a conversation with nothing to continue.
 export function isUnconsumed(text: string): boolean {
   const lines = text.split('\n')
   if (lines[0] !== '---') return false
+  let matched = false
   for (const line of lines.slice(1)) {
-    if (line === '---') return false
-    if (line === 'status: unconsumed') return true
+    if (line === '---') return matched
+    if (line === 'status: unconsumed') matched = true
   }
   return false
 }

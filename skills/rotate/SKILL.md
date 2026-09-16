@@ -213,6 +213,7 @@ one-key rotation it exists for.
    This is the one step you cannot take for the user. A hook cannot submit
    to Claude Code's command queue (it accepts the TUI's own input only); the
    `cs-rotate` mod's button can, and once the marker is armed it reads
-   `1: /clear and continue from the handoff`. Either way the keystroke is
-   theirs — which is why the line must not end up buried under a summary of
-   what you just wrote.
+   `1: /clear and continue from the handoff`. The keystroke is theirs unless
+   they launched with `CS_ROTATE_FORCE_CTX`, when the mod counts twenty
+   seconds down and runs the `/clear` itself — which is why the line must not
+   end up buried under a summary of what you just wrote.

@@ -177,7 +177,9 @@ export CS_ROTATE_BUTTON_CTX="40"
 # at or past this percentage the mod runs /rotate itself, once per
 # conversation, then counts the band down for 20 seconds and runs the /clear
 # that continues from the handoff. Pressing 1 clears at once; sending a
-# prompt stops the countdown. Not a number, or unset: never forced.
+# prompt stops the countdown. Not a number, or unset: never forced. Keep it
+# above a fresh conversation's own footprint: a threshold the wake turn
+# already sits past rotates again at once.
 export CS_ROTATE_FORCE_CTX="70"
 
 # Narrative rotation: rotate when the live file passes MAX, keep about KEEP bytes
