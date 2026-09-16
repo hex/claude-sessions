@@ -2,7 +2,8 @@
 parent: c9bd309e-6a80-4ae2-bc3c-67e2d83a68b9
 created: 2026-09-16T06:15:52Z
 purpose: build forced rotation with grace (task #628), then resume the held v2026.9.16 release (#622)
-status: unconsumed
+status: consumed
+consumed_by: 1654089a-200d-4ea6-a7c5-c6891366149a
 ---
 
 ## 1. Next Step
