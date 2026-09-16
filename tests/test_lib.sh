@@ -177,6 +177,13 @@ mkdir -p "$HOME"
 # at the real bundle, whatever HOME says. Scoped here, at source time, as
 # HOME is.
 unset XDG_DATA_HOME
+# The SessionStart hook re-asserts the session's tab title: through the tmux
+# server when TMUX is set, else as an escape on a terminal device. Fourteen
+# suites run that hook, and under the developer's own tmux the fixture's name
+# lands on the live window (`cs: test-session`). Scoped here, at source time,
+# so no suite has to remember to.
+unset TMUX TMUX_PANE
+export CS_TITLE_TTY="$HOME/title-tty"
 export CS_NO_UPDATE_CHECK=1
 # Never post a macOS notification from a test run: terminal-notifier is on
 # PATH on a developer's Mac, and the hooks run under every suite's Stop and

@@ -436,11 +436,8 @@ session_start_setup() {
     # a child claude or a walked-in front end override CLAUDE_PID inline.
     export CS_LEAD_PID=$$
     export CLAUDE_PID=$$
-    # The hook re-asserts the session's tab title. Without these, a suite run
-    # from inside tmux renames the developer's live window to the fixture's
-    # name, and one run in a plain terminal paints its tab: the title goes to
-    # the tmux server when TMUX is set, and to a terminal device otherwise.
-    unset TMUX TMUX_PANE 2>/dev/null || true
+    # test_lib scopes TMUX and the title device at source time; the title
+    # tests read the escape from a file of their own.
     export CS_TITLE_TTY="$TEST_TMPDIR/title-tty"
     export CS_SESSIONS_ROOT="$TEST_TMPDIR/sessions"
     mkdir -p "$CS_SESSIONS_ROOT"
@@ -497,6 +494,18 @@ EOF
 # (`cs other` from the `!` prefix) therefore leaves "cs: other" on this
 # session's tab for good. Every conversation start re-asserts the title, and
 # on `clear` too: that is the first start after a nested launch.
+# Every suite that runs the hook inherits the developer's TMUX, and the hook
+# renames that window to the fixture's name; outside tmux it paints the tab.
+# test_lib scopes both at source time, so no suite has to remember to.
+test_test_lib_drops_an_inherited_tmux_and_routes_the_title_to_a_file() {
+    local seen
+    seen=$(TMUX="/tmp/tmux-1000/default,1234,0" TMUX_PANE="%7" bash -c 'SCRIPT_DIR="$(dirname "$1")"; source "$1" >/dev/null 2>&1; printf "%s|%s|%s" "${TMUX:-unset}" "${TMUX_PANE:-unset}" "${CS_TITLE_TTY:-unset}"' _ "$SCRIPT_DIR/test_lib.sh")
+    assert_eq "unset|unset" "${seen%|*}" "test_lib must unset an inherited TMUX and TMUX_PANE" || return 1
+    case "${seen##*|}" in
+        unset|/dev/tty) echo "  FAIL: CS_TITLE_TTY must point at a scratch file, got '${seen##*|}'"; return 1 ;;
+    esac
+}
+
 test_session_start_reasserts_tab_title_through_tmux() {
     session_start_setup
     _fake_tmux
@@ -1843,6 +1852,7 @@ run_test test_failure_skips_outside_session
 run_test test_failure_handles_missing_error
 
 # Session start: cross-session context
+run_test test_test_lib_drops_an_inherited_tmux_and_routes_the_title_to_a_file
 run_test test_session_start_reasserts_tab_title_through_tmux
 run_test test_session_start_tab_title_leaves_a_teammate_pane_alone
 run_test test_session_start_reasserts_tab_title_on_the_terminal_device
