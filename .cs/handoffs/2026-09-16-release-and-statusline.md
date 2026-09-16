@@ -141,3 +141,118 @@ Written from live, uncompacted context at ~41%. Nothing was cut for length. The
 session was already wrapped when this was written, so `.cs/summary.md` carries
 the narrative version of the same story and this file carries only what the
 successor needs to act.
+
+## 5. Primary Request and Intent
+
+This conversation woke on `2026-09-16-finish-force-rotation-gate.md` to finish
+the gate for task **#628, forced rotation with grace**, which Alex asked for as
+*"can we force /rotation when context is critical?"* and, offered the diff
+between force-with-grace and force-rotate-only, answered *"with grace"*.
+
+It collected the two measurements that were in flight, ran three more Codex
+rounds and four ghost runs, folded every finding, polished at Alex's pick, and
+merged. Two interruptions from Alex shaped the session: the local test run
+(*"why do we run tests here? it hogs the machine"*) and the blank status line
+in new sessions, which became task #632. The session was then wrapped on his
+pick at the release gate (*"wrap the session first"*).
+
+## 6. Key Technical Concepts
+
+- **cs-rotate mod** — `mods/cs-rotate/hooks/register.tsx`, TypeScript running
+  inside Claude Code's process behind `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`,
+  which every cs launch exports. Its type contract is
+  `.cs/research/spike-rotate/claude-code.d.ts` (10,736 lines) — READ IT rather
+  than guess. Five hooks: `session.start` (heartbeat), `turn.complete` (the
+  forced rotation and the countdown's start), `prompt.submit` (cancels),
+  `command.run{command=clear}` (cancels, and marks the next conversation), and
+  `ui.render{component=AbovePrompt}` (the capsule).
+- **The birth rule, as merged.** `noteConversation(id)` runs at every band
+  render and at every judged turn end. A new id becomes `adopted`, drops any
+  `startPercent`, and is `birth` only when `clearSeen` was set since the last
+  id. `clearSeen` is set by the `command.run{clear}` hook and by the mod's own
+  `clearAndContinue`, and rolled back in both when the run rejects. A birth is
+  judged by the context its first answered lead turn ends with.
+- **`claude plugin validate`** inventories a module's hooks, its `$` calls and
+  the literal env names it reads, with the function-hooks flag OFF, and
+  `tests/test_mod_rotate.sh` pins that output. Copy new pins FROM the real
+  output, never by hand. The pins SKIP when validate prints no `hooks:` line,
+  which is what a pre-function-hooks Claude Code (ghost's 2.1.72) does.
+- **The remote gate.**
+  `bash /Users/alex.geana/.claude/plugins/cache/hex-plugins/claude-tmux/2026.9.1/scripts/remote-tests.sh --host ghost@ghost`
+  from the repo root, `</dev/null`. Remove `ci/claude-sessions/suite.status`
+  on ghost FIRST or the poll reads the previous verdict. The literal
+  `ghost@ghost` works; `--host ghost` alone fails (no host store here).
+
+## 7. Files and Code Sections
+
+Everything below is committed; paths, not restatements.
+
+- `mods/cs-rotate/hooks/register.tsx` — the mod. The guard is `forceRotation`
+  plus `noteConversation`; the countdown is `startCountdown`/`stopCountdown`,
+  whose zero tick holds `left` at 0 across its async reads so a prompt or press
+  landing in that window wins.
+- `mods/cs-rotate/test/register.test.ts` — 54 tests. The fake `$` carries
+  `clock.after`/`clock.every` recording `(ms, fn)`, `ui.invalidate`, `ui.toast`
+  and a coherent fs. Helpers at the bottom: `turnComplete()`, `fireAfter()`,
+  `ticker()`, `tick(n)`, `promptSubmit()`, `clearRun()`, `arm()`.
+- `tests/test_lib.sh` — the source-time block beside the `XDG_DATA_HOME` unset:
+  `unset TMUX TMUX_PANE` and `export CS_TITLE_TTY="$HOME/title-tty"`.
+- `tests/test_hooks.sh` — `session_start_teardown` re-exports the scratch
+  `CS_TITLE_TTY`; two pins, one for the source-time block and one for the
+  teardown.
+- `docs/hooks.md` (the cs-rotate section), `docs/configuration.md`,
+  `CHANGELOG.md` (the one-key entry), `README.md`, `skills/rotate/SKILL.md`
+  step 11.
+- `.cs/summary.md` — this session's narrative, written at the wrap.
+- `bin/cs-statusline:1172` — the `git status` call behind #632, already under
+  `_timeout 2`.
+- `lib/70-statusline.sh:92-95` and `install.sh.in:864-870` — the two copies of
+  the statusLine registration recipe, marked KEEP IN SYNC. Both write
+  `refreshInterval: 1`.
+
+## 8. Problem Solving
+
+- **Three reviewers found different things and all three mattered.** The
+  advisor caught the guard false-negative that two Codex rounds missed; Codex
+  caught the zero-tick race, the frontmatter mismatch, and three separate
+  lifecycle holes in the guard; the live run caught nothing the reviews had not,
+  which is itself the result worth recording.
+- **The fix for a review finding is a plan and needs the same verification.**
+  Each of rounds 3, 4 and 5 produced a fix whose own test was written red
+  first and whose arms were mutated individually.
+- **Ghost's verdict goes stale the moment any tracked file changes.** Four
+  separate ghost runs were needed because `tests/test_hooks.sh` kept moving.
+  Remove `suite.status` before each launch.
+
+## 9. Pending Tasks
+
+The native task list is keyed to the session and survives the `/clear`.
+Reconcile against this list; do not mirror it.
+
+- **#622 pending** — the HELD release v2026.9.16. See Next Step.
+- **#632 pending** — cs-statusline's render cost. Filed this session with the
+  full diagnosis in its description. See Next Step.
+- **#631 pending** — `scope-prompt.sh`'s own deadline before its scan stages,
+  so a loaded machine loses the scope block rather than the digests. Alex
+  approved FILING it, not building it. Its own branch.
+- **#603, #609, #554 pending; #606 postponed** — the standing backlog.
+- **#628, #629, #630 completed** this session or the last; do not reopen.
+- Noted, not requested: the it2 dock bounce never fires inside tmux (three hook
+  sites plus a doctor row gate on `TERM_PROGRAM = iTerm.app`); the doctor's
+  `-x` check cannot tell an unrunnable notifier bundle from a working one; two
+  KEEP IN SYNC sites remain (the statusline declined-marker and
+  `ZSH_COMPLETION_DIR`).
+
+## 10. Current Work
+
+Nothing in flight. Main is at `f4af664` plus this handoff's commits, **61
+commits ahead of origin**, tree otherwise clean, working directory
+`/Users/alex.geana/.claude-sessions/claude-sessions`. Everything merged today
+is installed, and `cs -doctor` reports deploy drift OK with one standing WARN
+(the statusline points at the iterm-agents-sidebar bridge rather than at
+cs-statusline directly, which is expected and is the subject of #632).
+
+## Completeness of this handoff
+
+Written from live, uncompacted context at ~41%, in two passes as the skill
+asks. Nothing was cut for length.
