@@ -4109,15 +4109,20 @@ test_git_branch_shows_from_a_subdirectory_of_the_checkout() {
     sub="$work/mods/deep"; mkdir -p "$sub"
     json_top=$(jq -nc --arg dir "$work" '{workspace:{current_dir:$dir}}')
     json_sub=$(jq -nc --arg dir "$sub" '{workspace:{current_dir:$dir}}')
-    local top first second
+    local top first slash later
     top=$(CS_STATUSLINE_NOW=1000 run_sl "$json_top")
     assert_output_contains_f "$top" "⎇ main +1!1" "the checkout itself shows the branch" || return 1
-    first=$(CS_STATUSLINE_NOW=1001 run_sl "$json_sub")
-    assert_output_contains_f "$first" "⎇ main +1!1" "a subdirectory shows the checkout's branch" || return 1
+    # The checkout alone is warm. A subdirectory rendered inside the TTL must
+    # answer from that entry: one that read the tree itself would see the new
+    # branch. A trailing slash on the checkout path names the same entry.
     git -C "$work" checkout -q -b other
-    second=$(CS_STATUSLINE_NOW=1003 run_sl "$json_sub")
-    assert_output_contains_f "$second" "⎇ main" "within the TTL the subdirectory answers from the checkout's own cache entry" || return 1
-    assert_output_not_contains_f "$second" "⎇ other" "not from a fresh read" || return 1
+    first=$(CS_STATUSLINE_NOW=1001 run_sl "$json_sub")
+    assert_output_contains_f "$first" "⎇ main +1!1" "a subdirectory answers from the checkout's own cache entry" || return 1
+    assert_output_not_contains_f "$first" "⎇ other" "not from a fresh read" || return 1
+    slash=$(CS_STATUSLINE_NOW=1002 run_sl "$(jq -nc --arg dir "$work/" '{workspace:{current_dir:$dir}}')")
+    assert_output_contains_f "$slash" "⎇ main +1!1" "the checkout path with a trailing slash is the same entry" || return 1
+    later=$(CS_STATUSLINE_NOW=1006 run_sl "$json_sub")
+    assert_output_contains_f "$later" "⎇ other" "past the TTL the subdirectory reads the tree" || return 1
     # A worktree checkout's .git is a file, not a directory: it is found too.
     local wt="$TEST_TMPDIR/wt"
     git -C "$work" worktree add -q "$wt" -b wt-branch 2>/dev/null || { echo "  FAIL: could not add a worktree"; return 1; }
