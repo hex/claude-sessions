@@ -302,11 +302,12 @@ empty composer runs `/rotate`, as if typed: the `rotate` skill draws the
 purpose from the conversation. Beside it the band draws `2: wrap up this
 session`. That key runs `/wrap`, which distills memory, replaces
 `.cs/summary.md` and rotates the narrative: two Opus passes and a shell
-helper, minutes and real tokens, so it takes two presses: the first turns the
-label into `2: press 2 again to /wrap` for five seconds and runs nothing, the
-second within that window runs it. A press inside the first 400 ms is a held
-key's repeat, not a confirmation, and leaves the key armed. A prompt entering
-the session, a `/clear`, or a switch to another conversation disarms it. Below the band the mod draws nothing, and it draws nothing while a
+helper, minutes and real tokens, so it takes two keys: `2` runs nothing and
+turns the key into `3: yes, run /wrap` for five seconds, and `3` within that
+window runs it. The confirmation is a different key on purpose: a held key
+repeats, and no timing tells a repeat from a second press, but a held `2`
+finds nothing on `2` left to press. A prompt entering the session, a `/clear`,
+or a switch to another conversation disarms it. Below the band the mod draws nothing, and it draws nothing while a
 turn runs or while a survey holds the band. It never submits a prompt of its
 own.
 

@@ -58,15 +58,15 @@ export const GRACE_SECONDS = 20
 
 // The wrap key's guard. /wrap replaces .cs/summary.md and runs two Opus
 // passes before the narrative rotation, so a mis-hit costs more than a
-// mis-hit rotation: the first press only arms the key, for WRAP_ARM_MS, and
-// the second press within that window runs it. A held key repeats (contract),
-// some 30 ms apart, so a press inside WRAP_CONFIRM_AFTER_MS of the arming is
-// not a second press and leaves the key armed. A prompt, a /clear or a
+// mis-hit rotation: `2` only arms the key, for WRAP_ARM_MS, and while it is
+// armed the band draws the confirmation on `3` instead. A held key repeats on
+// keydown (contract), and no elapsed time tells a repeat from a deliberate
+// second press (the first repeat lands 225 ms or more after the press, inside
+// a double-press), so the confirmation is a different key: however long `2`
+// is held, nothing on `2` is left to press. A prompt, a /clear or a
 // conversation switch meanwhile disarms it.
 export const WRAP_ARM_MS = 5000
-export const WRAP_CONFIRM_AFTER_MS = 400
 let wrapArmed = false
-let wrapArmedAt = 0
 let wrapTimer: { cancel: () => void } | undefined
 
 // The countdown: seconds left, its ticker, and what the band last saw. Module
@@ -93,7 +93,7 @@ let startPercent: number | undefined
 export function register(on: On) {
   // A (re)load has no countdown: the engine cancelled the old one's timers.
   left = undefined; ticker = undefined; bandIdle = false; adopted = undefined; clearSeen = false; birth = undefined; startPercent = undefined
-  wrapArmed = false; wrapArmedAt = 0; wrapTimer = undefined
+  wrapArmed = false; wrapTimer = undefined
   on('session.start', async ($, e, next) => {
     // Only a cs session has .cs/local; anywhere else the mod stays silent.
     const local = `${e.cwd}/.cs/local`
@@ -171,10 +171,8 @@ export function register(on: On) {
                         onPress={() => rotate($)} />}
             {/* a Button is a block: nested in a Text the engine refuses the whole tree (measured), so the separator stands beside it */}
             {!armed && <Text dimColor>{'  \u00b7  '}</Text>}
-            {!armed && (
-              <Button key="cs-wrap" hotkey="2" plain label={wrapArmed ? 'press 2 again to /wrap' : 'wrap up this session'}
-                      onPress={() => pressWrap($)} />
-            )}
+            {!armed && !wrapArmed && <Button key="cs-wrap" hotkey="2" plain label="wrap up this session" onPress={() => armWrap($)} />}
+            {!armed && wrapArmed && <Button key="cs-wrap-confirm" hotkey="3" plain label="yes, run /wrap" onPress={() => runWrap($)} />}
             {/* the forced rotation's grace: the seconds left before the mod runs the /clear itself */}
             {armed && left !== undefined && (
               <Text><Text dimColor>{'  \u00b7  '}</Text><Text color={INK.coral} bold>{`/clear in ${left}s`}</Text></Text>
@@ -382,18 +380,16 @@ async function rotate($: EngineInterface) {
   await $.command.run({ command: 'rotate', args: '' })
 }
 
-// The first press arms the key and redraws it; the second, inside the
-// window, runs /wrap as if the person had typed it. The key is disarmed
-// BEFORE the run: a run that fails must not leave the next press live.
-async function pressWrap($: EngineInterface) {
-  if (!wrapArmed) {
-    wrapArmed = true
-    wrapArmedAt = Date.now()
-    wrapTimer = $.clock.after(WRAP_ARM_MS, () => disarmWrap($))
-    $.ui.invalidate('ui.render')
-    return
-  }
-  if (Date.now() - wrapArmedAt < WRAP_CONFIRM_AFTER_MS) return
+// `2` arms the key for the window and redraws the band with the confirmation.
+function armWrap($: EngineInterface) {
+  wrapArmed = true
+  wrapTimer = $.clock.after(WRAP_ARM_MS, () => disarmWrap($))
+  $.ui.invalidate('ui.render')
+}
+
+// `3` while armed runs /wrap as if the person had typed it. The key is
+// disarmed BEFORE the run: a run that fails must not leave the next press live.
+async function runWrap($: EngineInterface) {
   disarmWrap($)
   try {
     await $.command.run({ command: 'wrap', args: '' })
