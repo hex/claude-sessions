@@ -63,22 +63,23 @@ let left: number | undefined
 let ticker: { cancel: () => void } | undefined
 let bandIdle = false
 
-// The conversation whose turns are being judged, and the context a /clear-born
-// one started with. A conversation that begins past the force threshold did
-// not get there by working: forcing it would rotate again as soon as its
-// successor woke (measured at 1%). Only a conversation born of a /clear seen
-// in this process is judged that way, by its first turn's end. Any other new
-// id (a launch, a reload, a /resume at 72%) is adopted unjudged, since past
-// the line is exactly where the person asked to be rotated. Module state is
-// kept across /clear, which is what makes the birth visible.
+// Which conversation the turns belong to, and whether it is being judged. A
+// conversation that begins past the force threshold did not get there by
+// working: forcing it would rotate again as soon as its successor woke
+// (measured at 1%). Only a conversation born of a /clear seen in this process
+// (`clearSeen`, then `birth`) is judged that way, by the context its first
+// turn ended with (`startPercent`). Any other new id (a launch, a reload, a
+// /resume at 72%) is adopted unjudged, since past the line is exactly where
+// the person asked to be rotated. Module state is kept across /clear, which
+// is what makes the birth visible.
 let adopted: string | undefined
-let started: { id: string; percent: number | undefined } | undefined
 let clearSeen = false
 let birth: string | undefined
+let startPercent: number | undefined
 
 export function register(on: On) {
   // A (re)load has no countdown: the engine cancelled the old one's timers.
-  left = undefined; ticker = undefined; bandIdle = false; adopted = undefined; started = undefined; clearSeen = false; birth = undefined
+  left = undefined; ticker = undefined; bandIdle = false; adopted = undefined; clearSeen = false; birth = undefined; startPercent = undefined
   on('session.start', async ($, e, next) => {
     // Only a cs session has .cs/local; anywhere else the mod stays silent.
     const local = `${e.cwd}/.cs/local`
@@ -104,7 +105,8 @@ export function register(on: On) {
   })
 
   // A /clear from anywhere else (typed, another plugin) ends the conversation
-  // the count belongs to; the timer must not outlive it into the next one.
+  // the count belongs to, so the timer must not outlive it, and makes the
+  // next conversation a birth; a run the engine refuses makes nothing.
   on('command.run', { command: 'clear' }, async ($, e, next) => {
     clearSeen = true
     if (ticker) stopCountdown($)
@@ -219,7 +221,7 @@ async function forceThreshold($: EngineInterface): Promise<number | undefined> {
 function noteConversation(id: string) {
   if (id === adopted) return
   adopted = id
-  started = undefined
+  startPercent = undefined
   birth = clearSeen ? id : undefined
   clearSeen = false
 }
@@ -238,16 +240,16 @@ async function forceRotation($: EngineInterface) {
   noteConversation(id)
   if (birth === id) {
     birth = undefined
-    started = { id, percent: context.percent }
-    if (started.percent !== undefined && started.percent >= force) {
-      $.ui.toast(`cs-rotate: CS_ROTATE_FORCE_CTX=${force} is below this conversation's starting context (${started.percent}%); not forcing a rotation`)
+    startPercent = context.percent
+    if (startPercent !== undefined && startPercent >= force) {
+      $.ui.toast(`cs-rotate: CS_ROTATE_FORCE_CTX=${force} is below this conversation's starting context (${startPercent}%); not forcing a rotation`)
     }
   }
   if (await handoffArmed($)) {
     if (!ticker) startCountdown($)
     return
   }
-  if (started?.id === id && started.percent !== undefined && started.percent >= force) return
+  if (startPercent !== undefined && startPercent >= force) return
   if (context.percent === undefined || context.percent < force) return
   const forced = `${await $.session.cwd()}/${FORCED}`
   if ((await $.fs.exists(forced)) && (await $.fs.read(forced)).trim() === id) return
