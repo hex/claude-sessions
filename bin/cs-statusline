@@ -10,8 +10,8 @@ SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 # ready flag may be seeded by an inherited environment variable of the same
 # name, or a stale/garbage _NOW would poison the limits stamp and crash the
 # pulse arithmetic (bash 3.2 set -u). Once, here, before the theme ladder below
-# first reads the clock: resetting again in main() cost bash 3.2 a second date
-# fork per render, since that bash has no builtin clock.
+# first reads the clock, and nowhere later: a bash without a builtin clock
+# (3.2) forks date to fill the memo, and a second reset would fork it again.
 _NOW=""
 _SL_NOW_READY=""
 
@@ -101,10 +101,10 @@ _cache_write() {
 
 # The process the per-conversation caches are keyed on. Claude Code is the
 # render's parent and the same for every render of a conversation, so PPID is
-# the key; a wrapper that Claude Code runs instead (a status-line bridge that
-# then runs this script, a new process each tick) names the pid it is itself
-# the child of in CS_STATUSLINE_PARENT, which is set per run by that wrapper
-# and never inherited from a launch, so it cannot make an impostor a member.
+# the key. A program Claude Code runs in this script's place (a status-line
+# bridge that then runs this script, a new process each tick) names the pid it
+# is itself the child of in CS_STATUSLINE_PARENT; that program sets it per run,
+# and a launch never exports it, so it cannot make an impostor a member.
 _sl_parent_pid() {
     _PARENT="$PPID"
     case "${CS_STATUSLINE_PARENT:-}" in
@@ -142,9 +142,9 @@ _sl_theme_from_tmux_client() {
 }
 
 # Ask the tmux server, once per theme pass, what the attached client reports
-# as its theme and which tty it is on: the two rungs that need them used to
-# fork tmux once each. Tab-separated so an empty theme (most terminals report
-# none) still leaves the tty in its own field. The answer is kept for
+# as its theme and which tty it is on, one query for the two rungs that need
+# them. Tab-separated so an empty theme (most terminals report none) still
+# leaves the tty in its own field. The answer is kept for
 # TMUX_CLIENT_CACHE_TTL under the parent pid and the TMUX claim, so the bar's
 # once-a-second repaint asks once in five: a theme toggle or a re-attach from
 # another terminal shows within that. Sets _TMUX_CLIENT_THEME and
