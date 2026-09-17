@@ -115,7 +115,8 @@ _claude_project_dir() {
 # headless run only when it opens with an `sdk-` entrypoint AND no later user
 # line carries a different value (any string that does not start `sdk-`, the
 # empty string included). An opening line with no entrypoint at all, or one
-# with a value Claude Code has not invented yet, counts as a conversation: a
+# with a value Claude Code has not invented yet, counts as a conversation
+# (unless that value itself begins `sdk-`): a
 # wrongly skipped conversation leaves a session resuming nothing, which is
 # worse than a wrongly named one. The second read happens only for files that
 # open headless; a purely headless one is read to its end. The prompt text

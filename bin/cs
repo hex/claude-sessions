@@ -2766,7 +2766,8 @@ _claude_project_dir() {
 # headless run only when it opens with an `sdk-` entrypoint AND no later user
 # line carries a different value (any string that does not start `sdk-`, the
 # empty string included). An opening line with no entrypoint at all, or one
-# with a value Claude Code has not invented yet, counts as a conversation: a
+# with a value Claude Code has not invented yet, counts as a conversation
+# (unless that value itself begins `sdk-`): a
 # wrongly skipped conversation leaves a session resuming nothing, which is
 # worse than a wrongly named one. The second read happens only for files that
 # open headless; a purely headless one is read to its end. The prompt text
@@ -7735,8 +7736,8 @@ EOF
                 _newest=$(_discover_session_uuid_in "$_proj")
                 # "Newer" is a claim about the clock, so check it rather than
                 # infer it from "discovery returned something else". Discovery
-                # skips teammates, so when the recorded slot is itself a
-                # teammate's — the state this gate exists to stop — what comes
+                # skips teammates and headless runs, so when the recorded slot
+                # is itself a teammate's — the state this gate exists to stop — what comes
                 # back is genuinely OLDER, and announcing it as newer would be
                 # a lie built on a correct skip.
                 if [ -n "$_newest" ] && [ "$_newest" != "$claude_session_id" ] \
