@@ -102,10 +102,13 @@ let adopted: string | undefined
 let clearSeen = false
 let birth: string | undefined
 let startPercent: number | undefined
+// When a prompt last entered the conversation (or, before any, when the band
+// first drew in this load): a summary written after it means a wrap already ran.
+let lastPromptAt: number | undefined
 
 export function register(on: On) {
   // A (re)load has no countdown: the engine cancelled the old one's timers.
-  left = undefined; ticker = undefined; bandIdle = false; preview = undefined; previewShown = false; adopted = undefined; clearSeen = false; birth = undefined; startPercent = undefined
+  left = undefined; ticker = undefined; bandIdle = false; preview = undefined; previewShown = false; adopted = undefined; clearSeen = false; birth = undefined; startPercent = undefined; lastPromptAt = undefined
   on('session.start', async ($, e, next) => {
     // Only a cs session has .cs/local; anywhere else the mod stays silent.
     const local = `${e.cwd}/.cs/local`
@@ -126,6 +129,7 @@ export function register(on: On) {
   // A prompt entering the session, from anywhere, means the conversation is
   // not done with: the countdown stops and the prompt goes through untouched.
   on('prompt.submit', async ($, e, next) => {
+    lastPromptAt = await $.clock.now()
     if (ticker) stopCountdown($)
     return next(e)
   })
@@ -157,6 +161,7 @@ export function register(on: On) {
     const percent = context.percent
     if (!armed && (percent === undefined || percent < (await threshold($)))) return drawn
     if (!(await ownsRotation($))) return drawn
+    const wrapped = !armed && (await wrappedSincePrompt($))
     const fill = surfaceColor(await $.env.get("CS_TERM_BG_RGB"))
     const { Box, Text, Button } = await $.ui.resolve(e)
     // One capsule in the status bar's idiom: the keys on the bar's own fill,
@@ -179,8 +184,8 @@ export function register(on: On) {
               : <Button key="cs-rotate" hotkey="1" plain label="rotate this conversation"
                         onPress={() => rotate($)} />}
             {/* a Button is a block: nested in a Text the engine refuses the whole tree (measured), so the separator stands beside it */}
-            {!armed && <Text dimColor>{'  \u00b7  '}</Text>}
-            {!armed && <Button key="cs-wrap" hotkey="2" plain label="wrap up this session" onPress={() => askToWrap($)} />}
+            {!armed && !wrapped && <Text dimColor>{'  \u00b7  '}</Text>}
+            {!armed && !wrapped && <Button key="cs-wrap" hotkey="2" plain label="wrap up this session" onPress={() => askToWrap($)} />}
             {/* the forced rotation's grace: the seconds left before the mod runs the /clear itself */}
             {armed && left !== undefined && <Text dimColor>{'  \u00b7  '}</Text>}
             {armed && left !== undefined && <Text bold>{`/clear in ${left}s`}</Text>}
@@ -404,6 +409,20 @@ async function ownsRotation($: EngineInterface): Promise<boolean> {
 // the purpose from the conversation itself.
 async function rotate($: EngineInterface) {
   await $.command.run({ command: 'rotate', args: '' })
+}
+
+// Whether .cs/summary.md was written after the last prompt: the wrap that
+// wrote it is the conversation's latest act, so the key has nothing to offer
+// until a prompt moves it on. A /wrap the band runs is not a prompt, and a
+// typed one is submitted before the summary is written, so both count.
+async function wrappedSincePrompt($: EngineInterface): Promise<boolean> {
+  if (lastPromptAt === undefined) lastPromptAt = await $.clock.now()
+  const summary = `${await $.session.cwd()}/.cs/summary.md`
+  try {
+    return (await $.fs.stat(summary)).mtimeMs > lastPromptAt
+  } catch {
+    return false // no summary yet
+  }
 }
 
 // `2` asks before running /wrap: it replaces .cs/summary.md and runs two Opus

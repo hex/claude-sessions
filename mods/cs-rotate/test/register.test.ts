@@ -30,6 +30,9 @@ let invalidated: string[]
 let toasts: string[]
 let asks: { question: string; options: any }[]
 let panes: { op: 'open' | 'close'; args: any }[]
+// The engine clock, and each file's modification time, in epoch milliseconds.
+let now: number
+let mtimes: Record<string, number>
 // What the person does with the next dialog: a label, or a rejection (dismissed, or a `-p` run).
 let answer: string | Error
 const timer = (kind: 'after' | 'every') => (ms: number, fn: () => void) => {
@@ -58,11 +61,15 @@ const $ = {
       return answer
     },
   },
-  clock: { after: timer('after'), every: timer('every') },
+  clock: { after: timer('after'), every: timer('every'), now: async () => now },
   fs: {
     write: async (path: string, text: string) => { written[path] = text; files[path] = text },
     exists: async (path: string) => existing.has(path) || path in files,
     read: async (path: string) => { if (path in files) return files[path]; throw new Error(`ENOENT ${path}`) },
+    stat: async (path: string) => {
+      if (!(path in files)) throw new Error(`ENOENT ${path}`)
+      return { kind: 'file', size: files[path].length, mtimeMs: mtimes[path] ?? 0 }
+    },
   },
 }
 
@@ -81,6 +88,7 @@ beforeEach(() => {
   for (const k of Object.keys(hooks)) delete hooks[k]
   percent = undefined; filled = []; ran = []; written = {}; existing = new Set(['/work/.cs/local'])
   timers = []; invalidated = []; toasts = []; asks = []; answer = WRAP_YES; panes = []
+  now = 1_000_000; mtimes = {}
   // The default fixture is the lead conversation of a cs session.
   sessionId = 'uuid-lead'
   envVars = {}
@@ -778,6 +786,30 @@ test('a /wrap the answer runs that the engine refuses is said once', async () =>
   $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
   expect(toasts).toEqual(['cs-rotate: /wrap did not run: Error: no session'])
   expect(ran).toEqual([])
+})
+
+// A wrap that already ran leaves nothing for the key to do until the
+// conversation moves on: once .cs/summary.md is newer than the last prompt,
+// the band draws the rotate key alone, and the next prompt brings it back.
+const wrote = (at: number) => { files['/work/.cs/summary.md'] = '# Session Summary\n'; mtimes['/work/.cs/summary.md'] = at }
+test('a summary written since the last prompt hides the wrap key until the next prompt', async () => {
+  percent = 40
+  now = 1_000
+  await hooks['prompt.submit']($, { prompt: '/wrap' }, async (e: any) => e)
+  wrote(2_000)
+  expect(wrapButton(await band())).toBeUndefined()
+  expect(findButton(await band()).props.hotkey).toBe('1')
+
+  now = 3_000
+  await hooks['prompt.submit']($, { prompt: 'next thing' }, async (e: any) => e)
+  expect(wrapButton(await band())).toBeDefined()
+})
+
+test('a summary older than the load, or none at all, keeps the wrap key', async () => {
+  percent = 40
+  expect(wrapButton(await band())).toBeDefined()
+  wrote(now - 60_000)
+  expect(wrapButton(await band())).toBeDefined()
 })
 
 test('an armed handoff draws the clear key alone: no wrap key', async () => {
