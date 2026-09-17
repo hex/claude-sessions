@@ -888,6 +888,29 @@ test('any end of the count closes the pane: a prompt, a press, zero', async () =
   expect(panes.at(-1)).toEqual({ op: 'close', args: { id: PREVIEW_PANE } })
 })
 
+// The open is a round trip: a prompt landing while it is in flight stops the
+// count and asks for a close that the engine may apply before the open lands.
+// A pane opened after its count ended must still be closed, or nothing ever
+// closes it.
+test('a count that ends while the pane is still opening closes the pane once it lands', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  let land!: () => void
+  $.ui.open = (args: any) => new Promise<void>(resolve => { land = () => { panes.push({ op: 'open', args }); resolve() } })
+  try {
+    await band(); await turnComplete()
+    const opening = fireAfter()
+    await new Promise(r => setTimeout(r, 0))
+    await promptSubmit()
+    land()
+    await opening
+  } finally {
+    $.ui.open = async (args: any) => { panes.push({ op: 'open', args }) }
+  }
+  expect(panes.map(p => p.op)).toContain('open')
+  expect(panes.at(-1)).toEqual({ op: 'close', args: { id: PREVIEW_PANE } })
+})
+
 test('a later grace in the same session keeps to the band: the pane opens once', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
   arm(); percent = 80

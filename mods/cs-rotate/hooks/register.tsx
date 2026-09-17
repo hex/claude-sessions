@@ -317,6 +317,12 @@ async function openPreview($: EngineInterface) {
   if (text === undefined || ticker === undefined) return
   preview = nextStep(text)
   await $.ui.open({ id: PREVIEW_PANE, title: 'Handoff' })
+  // The count can end while the open is in flight, and its close may reach the
+  // engine first: a pane that lands after its count is closed here, since
+  // nothing else will close it.
+  if (preview === undefined) {
+    await $.ui.close({ id: PREVIEW_PANE }).catch(err => $.ui.toast(`cs-rotate: the handoff pane did not close: ${String(err)}`))
+  }
 }
 
 // The handoff's Next Step section (`# Next Step`, `## 1. Next Step`), its
