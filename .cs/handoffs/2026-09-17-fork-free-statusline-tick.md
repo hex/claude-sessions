@@ -2,7 +2,8 @@
 parent: 720d4199-53f6-4f84-b752-a7cd76c222f5
 created: 2026-09-17T11:08:41Z
 purpose: design task #648 with Alex — a fork-free per-second statusline tick, real render only when something can have changed
-status: unconsumed
+status: consumed
+consumed_by: f4898707-3a23-4e3c-91e2-a7e1caee7952
 ---
 
 ## 1. Next Step

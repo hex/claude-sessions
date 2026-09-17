@@ -857,3 +857,23 @@ must be swept". Fix 6d38cac; ghost 66/66, prune test OK, ghost copy verified to 
 Codex review dispatched (plugin agent, background).
 
 Rotated at ~40%: handoff 2026-09-17-fork-free-statusline-tick.md (#648 design), armed. #645 merged 1542ac1 and installed; no other unconsumed handoffs; none past the 30-day prune bar.
+
+## 2026-09-17 — #648 fork-free tick: measurements (design only, no code)
+
+- Payload volatility (12 s, 5 live sessions via the bridge's <pid>.json): every idle payload differs every tick; the only idle mover is `cost.total_duration_ms`. A raw-payload cache key never hits.
+- Births per tick on ghost, pid-gap, min=median of 25, controls `:`=0 `/usr/bin/true`=1, no TMUX, non-git cwd: direct bash5 = 6, direct /bin/bash 3.2 = 8, via the sidebar bridge = 12. Attention on/off: no difference. Harness scratchpad/births.sh.
+- The 6 (bash -x): interpreter; `$(tty)` (:298, outside tmux); `$(printf | jq)` (:472) = 3; `$(_caps_file)` (:1846) = 1. docs/statusline.md:39 "forks exactly two" counts execs, not births — wrong for the endpoint agent's purpose.
+- Bridge adds 6 (mkdir lock, printf|sh subshells, sh, mv, rmdir). Zero-extra only possible inside the bridge, which needs a builtin clock (bash 5) to pick parity.
+- Codex falsification pass dispatched on claims + frame-file design.
+- Codex pass (task-mu5fqdwq-vwm6dk): sandbox could not re-run the birth counts (its own controls failed calibration: `:`=1/5, true=2/8 — this Mac is too loud; ghost's controls were 0/1 clean, so the 6/8/12 stand). Real corrections it found:
+  - Countdown text is a third time-dependent output (`_fmt_rest`, :931-955, :1670) and Fable readings expire at 1800 s (:1324, :1386) — a frame TTL must bound them or accept lag.
+  - Theme detection runs at file load (:397), before main() — a fast path must sit above it, not in main().
+  - printf '%(%s)T' is bash 4.2+, not 5 (:928).
+  - `${payload//+([0-9])/}` on a 3 KB payload exceeded 3 s under bash 3.2 (regex over the same payload: 1000 iter in 0.19 s). Builtin key construction by global extglob substitution is out.
+  - The bridge publishes with mv every tick before rendering, so even a bridge-side frame hit costs >= 1 birth unless publication changes.
+- Arithmetic that decides the shape: bridge-side fixed cost is 6 of the 12; the most any cs-only change can win is 12 -> 6.
+- Alex chose "cheap wins only" (the frame-file reuse and the bridge contract were declined for now). Built on fix/statusline-tick-forks, f24ee4b: jq via here-string, CAPS_FILE as a load-time variable, `tty` memoised under ~/.cache/cs/tty/ keyed on the parent (pruned with the other parent-keyed buckets).
+- Correction to the target in the entry above: 2 births per warm render is not reachable this way. `$(jq ... <<<"$input")` keeps its substitution shell — bash skips the exec optimisation when a here-string temp file needs cleaning up — so the floor with a substitution is 3. Re-measured on ghost, same harness and controls: 6->3 (bash 5), 8->5 (3.2), 12->9 (bridge).
+- The birth-count property is testable without pid-gap flakiness: `bash -x` the render and assert no `^++ ` line names a program other than jq/date (test_a_warm_render_runs_no_program_but_jq). Red first named `printf tty`.
+- Ghost on f24ee4b: run 1 FAILED 1/66 (test_completions.sh), that suite alone 38/38 on ghost, run 2 OK 66/66 — a parallel-run flake, not the change. Ghost copy grep-verified to carry _sl_own_tty/CAPS_FILE and the new test.
+- `/codex:review` with no argument reviews the WORKING TREE, so on a branch whose work is already committed it reports "no executable code changes" and reviews nothing. For a committed branch use /codex:adversarial-review (custom framing, main...HEAD) or dispatch the codex:rescue agent at the commit. Reviewing before committing, or passing the range, is the way to get a real pass.
