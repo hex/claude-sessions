@@ -734,3 +734,8 @@ Alex chose "Wait for Codex round 2" at the gate, then merged: main 2ce9b0f,
 installed, doctor drift OK, branch deleted. Main is 5 commits ahead of origin,
 unpushed, unreleased. hexul.com's binding (0b7dd256, the adopted run) is
 untouched by design: it is a conversation Alex continued.
+Rotated: handoff 2026-09-17-parallel-test-races.md (two passes, c9624d1 +
+6edf175), armed. No leftovers to supersede (every other handoff consumed),
+nothing old enough to prune. Note for the prune step: its `[[ "$a" < "$b" ]]`
+date comparison is a bash construct and the Bash tool runs zsh, which rejects
+it with "condition expected: <" — run that loop through /bin/bash.
