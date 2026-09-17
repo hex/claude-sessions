@@ -2735,8 +2735,9 @@ _claude_project_dir() {
 # to it makes `--resume <uuid>` equivalent to `--continue` on first contact.
 # Takes the project dir (not cwd) so callers that already computed it via
 # _claude_project_dir can avoid a second symlink resolution.
-# True when a transcript belongs to an agent-team teammate rather than to the
-# session itself. A teammate started with the session as its working directory
+# True when a transcript shares the session's project dir without being a
+# conversation of the session: an agent-team teammate's, or a headless run's.
+# A teammate started with the session as its working directory
 # writes a top-level transcript into the same project dir as the lead, so the
 # filename cannot tell them apart — and it is routinely the newest, because the
 # teammate outlives the turn that spawned it.
@@ -2752,19 +2753,41 @@ _claude_project_dir() {
 # pipe consumer SIGPIPEs its producer, and transcripts run to megabytes. `-m1`
 # also stops at the first user turn instead of scanning a whole transcript to
 # prove a marker absent.
-_is_teammate_transcript() {  # transcript_file
+#
+# A headless run is the other occupant of the project dir: an Agent SDK call
+# or a `claude -p` with the session as its working directory. Claude Code stamps
+# every user line with the entrypoint that produced it, and the headless ones
+# seen so far all begin `sdk-` (`sdk-py`, and `sdk-cli` for `claude -p`), while a
+# person's conversation reads `cli` or `claude-desktop`. Measured over 5522
+# transcripts on one machine: 4670 began headless, 842 `cli`, 6 `claude-desktop`.
+#
+# The first line alone does not settle it: `claude --resume` on a run a script
+# started makes it a person's conversation, first line unchanged. So a file is a
+# headless run only when it opens with an `sdk-` entrypoint AND carries no other
+# kind anywhere. A line with no entrypoint at all, or a value Claude Code has
+# not invented yet, counts as a conversation: a wrongly skipped conversation
+# leaves a session resuming nothing, which is worse than a wrongly named one.
+# The second read happens only for files that open headless, and those are
+# short. The prompt text shares the line with the field, but JSON escapes its
+# quotes, so a prompt that quotes the pattern cannot match it.
+_is_bystander_transcript() {  # transcript_file
     local first
     first=$(grep -m1 '"type":"user"' "$1" 2>/dev/null) || return 1
     case "$first" in
         *teammate-message*) return 0 ;;
+        *'"entrypoint":"sdk-'*)
+            # Any entrypoint value that does not begin `sdk-`.
+            grep -m1 -E '"entrypoint":"([^s"]|s[^d"]|sd[^k"]|sdk[^-"])' "$1" >/dev/null 2>&1 \
+                && return 1
+            return 0 ;;
     esac
     return 1
 }
 
-# Teammates are skipped rather than merely deprioritised: naming one is wrong
+# Bystanders are skipped rather than merely deprioritised: naming one is wrong
 # for every caller — as a rebind target it would bind the session to a
-# reviewer's conversation, and as a resume suggestion it would offer to
-# continue one.
+# reviewer's or a script's conversation, and as a resume suggestion it would
+# offer to continue one.
 _discover_session_uuid_in() {
     local proj="$1"
     [ -d "$proj" ] || return 0
@@ -2777,7 +2800,7 @@ _discover_session_uuid_in() {
     local f
     while IFS= read -r f; do
         [ -n "$f" ] || continue
-        if ! _is_teammate_transcript "$f"; then
+        if ! _is_bystander_transcript "$f"; then
             basename "$f" .jsonl
             return 0
         fi
