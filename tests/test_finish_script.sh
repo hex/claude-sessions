@@ -138,8 +138,9 @@ STUB
 }
 
 # pr_checks folds the LANDING commit's checks into one word the skill can act
-# on: success (every check green, skipped or neutral), failure (any red),
-# pending (some still running), none (no checks at all), unknown (gh failed).
+# on: success (at least one green and no red, with skipped and neutral allowed
+# beside it), failure (any red), pending (some still running), none (nothing
+# ran: no checks at all, or every one of them skipped), unknown (gh failed).
 # The PR's own rollup describes its head, which the landing commit may not be
 # (a merge with newer base changes is a tree the head's checks never saw), so
 # the fold reads the check runs and statuses of pr_merge_commit itself.
@@ -171,6 +172,11 @@ test_prepare_reports_the_landing_commits_checks() {
     stub_gh_routes "$pr" '{"check_runs":[]}' '{"statuses":[]}'
     out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" bash "$FINISH" prepare fix-auth 2>&1)
     assert_eq "none" "$(key "$out" pr_checks)" "no checks at all is none, never success" || return 1
+    # Every check skipped is nothing having run, which reads exactly like a
+    # green landing commit unless success demands at least one SUCCESS.
+    stub_gh_routes "$pr" '{"check_runs":[{"conclusion":"skipped"},{"conclusion":"neutral"}]}' '{"statuses":[]}'
+    out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" bash "$FINISH" prepare fix-auth 2>&1)
+    assert_eq "none" "$(key "$out" pr_checks)" "all skipped is none: nothing ran" || return 1
     stub_gh_routes "$pr" '{"check_runs":[{"conclusion":"success"}]}' '{"statuses":[]}'
     touch "$TEST_TMPDIR/gh-routes/status.fail"
     out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" bash "$FINISH" prepare fix-auth 2>&1)

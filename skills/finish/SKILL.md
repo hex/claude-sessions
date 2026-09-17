@@ -92,8 +92,9 @@ what creates them and fold it into the gate: `-- sh -c 'npm ci && npm test'`.
    `pr_base_ref`; if not, stop and say which branch to check out. Then
    `cs <base> -integrate-feature <task> <pr_merge_commit> --from-remote -- <gate command words>`.
    Add `--ci-green` after `--from-remote` only when `prepare` reported
-   `pr_checks: success`; with `failure`, `pending`, `none`, `unknown` (its
-   `pr_checks_reason` says why) or no line, leave it off and say in the
+   `pr_checks: success`; with `failure`, `pending`, `none` (no checks ran,
+   or every one of them was skipped), `unknown` (its `pr_checks_reason`
+   says why) or no line, leave it off and say in the
    report why the gate ran. `pr_checks` describes the landing commit
    (`pr_merge_commit`) itself, the check runs and statuses origin recorded
    on it, not the PR head's: a merge commit that took newer base changes is

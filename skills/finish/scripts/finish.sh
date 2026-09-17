@@ -80,7 +80,8 @@ landing_checks() {  # repo sha
         [split("\n")[] | select(. != "") | ascii_upcase] as $v
         | if ($v | length) == 0 then "none"
           elif ($v | any(. == "FAILURE" or . == "ERROR" or . == "CANCELLED" or . == "TIMED_OUT" or . == "ACTION_REQUIRED" or . == "STALE" or . == "STARTUP_FAILURE")) then "failure"
-          elif ($v | all(. == "SUCCESS" or . == "SKIPPED" or . == "NEUTRAL")) then "success"
+          elif ($v | all(. == "SUCCESS" or . == "SKIPPED" or . == "NEUTRAL"))
+            then (if ($v | any(. == "SUCCESS")) then "success" else "none" end)
           else "pending" end' -r)"
 }
 
