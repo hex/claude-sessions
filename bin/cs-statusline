@@ -1164,11 +1164,11 @@ _refresh_usage() {
     # never matches a directory, so nothing else would ever clear these.
     find "$dir" -maxdepth 1 -type d -name '.lock.reclaimed.*' -mmin +5 -exec rm -rf {} + 2>/dev/null
     # The two render caches keyed on the parent pid mint an entry per
-    # conversation, so they track conversations-ever; a live conversation
-    # rewrites its own entry on every miss and keeps it fresh, and an entry an
-    # hour old belongs to one that is gone. The render never forks to sweep, so
-    # this worker does it. The other buckets are keyed on identities that
-    # repeat and stay small.
+    # conversation, so they track conversations-ever. An entry an hour old is
+    # far past both TTLs (5 s, 300 s) and already a miss, so removing it costs
+    # at most one recomputation, whether its conversation is gone or only
+    # idle. The render never forks to sweep, so this worker does it. The other
+    # buckets are keyed on identities that repeat and stay small.
     local bucket
     for bucket in tmux-client tmux-real; do
         [ -d "$HOME/.cache/cs/$bucket" ] || continue
