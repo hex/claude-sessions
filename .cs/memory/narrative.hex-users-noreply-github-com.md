@@ -1042,3 +1042,11 @@ red, underpaint off → 2 red. The lab page itself was not reopened in Chrome.
   stringProp path already excluded `&`). Red first (entity probes added to the Bun-transpiler
   round-trip test, 19/20), then `&` added to the markup class, 20/20 — 679c71c. The existing test
   already exercised `<`, `{`, quotes and astral text; it lacked the one character class JSX decodes.
+- 2026-09-17: v2026.9.17 tagged on 4a44aff after CI 6/6 on that exact sha (run 35242297100) and an
+  independent Fable pass (SHIP, 0 critical/important, 5 minors -> task #652). Fable measured past
+  Codex: headless filter over ALL 7567 transcripts (entrypoints sdk-py 3097 / cli 2861 / sdk-cli 1502
+  / claude-desktop 6), and — the decisive check — 0 of the 40 live sessions' recorded conversations
+  would be skipped. kill -0 message arms probed on /bin/bash 3.2.57 and 5.3.9 both route correctly.
+  Rebuilt bin/cs, install.sh, hooks/cs-shared.sh from a `git archive` of the sha: byte-identical.
+  Most useful minor: test_mod_rotate.sh and test_mods_layout.sh `return 0` without bun — the vacuous
+  pass the 77-as-skipped change was built to close, missed by that same change's own sweep.
