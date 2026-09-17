@@ -132,22 +132,17 @@ run_spawn() {
         # buy nothing for that benign race.
         [ ! -f "$seed" ] || error "A pending spawn for $name exists: $seed"
         mkdir -p "$sdir"
-        # Brief before seed: the launch treats the seed as the signal, so a
-        # brief must never be missing once the seed is visible. A copy that
-        # fails stops here, before the seed and the window: errexit does not
-        # see a failed left operand, so the abort is explicit. The seed write
-        # below is an AND list for the same reason, and it takes the staged
-        # brief down with it: a brief left without its seed would be inherited
-        # by the next spawn of this name, which asked for no brief at all.
-        if [ -n "$brief" ]; then
-            cp "$brief" "$sdir/$name.brief.md.tmp" \
-                && mv "$sdir/$name.brief.md.tmp" "$sdir/$name.brief.md" \
-                || { rm -f "$sdir/$name.brief.md.tmp"; error "cs -spawn --brief: cannot stage $brief in $sdir"; }
-        fi
-        # One printf, so one status covers the whole seed: a brace group reports
-        # only its LAST command, so a failed first write with a succeeding task
-        # line published a seed whose spawner line was missing, and the launch
-        # treats any seed as complete staging.
+        # Order: seed content first (to a temp file), brief second, seed
+        # published last. The launch treats the seed as the signal, so the
+        # brief must exist before the seed is visible; and because the seed is
+        # published last, a write that fails leaves nothing staged and this
+        # abort never deletes a file another spawn of the same name published.
+        # Each step is an AND list, which errexit does not judge, so every
+        # abort is explicit.
+        #
+        # One printf, so one status covers the whole seed: a brace group
+        # reports only its LAST command, and a failed first write with a
+        # succeeding task line published a seed whose spawner line was missing.
         local _payload _t
         _payload="${CLAUDE_SESSION_NAME:-}
 "
@@ -155,8 +150,18 @@ run_spawn() {
         # leaves it empty; the guard expands to nothing in that case.
         for _t in ${tasks[@]+"${tasks[@]}"}; do _payload="$_payload$_t
 "; done
-        printf '%s' "$_payload" > "$seed.tmp" && mv "$seed.tmp" "$seed" \
-            || { rm -f "$seed.tmp" "$sdir/$name.brief.md" 2>/dev/null || :; error "cs -spawn: cannot stage the seed in $sdir"; }
+        printf '%s' "$_payload" > "$seed.tmp" \
+            || { rm -f "$seed.tmp" 2>/dev/null || :; error "cs -spawn: cannot stage the seed in $sdir"; }
+        if [ -n "$brief" ]; then
+            cp "$brief" "$sdir/$name.brief.md.tmp" \
+                && mv "$sdir/$name.brief.md.tmp" "$sdir/$name.brief.md" \
+                || { rm -f "$sdir/$name.brief.md.tmp" "$seed.tmp" 2>/dev/null || :
+                     error "cs -spawn --brief: cannot stage $brief in $sdir"; }
+        fi
+        # A failed rename means another spawn of this name consumed the temp
+        # path and published its own pair; its brief is not this run's to remove.
+        mv "$seed.tmp" "$seed" \
+            || { rm -f "$seed.tmp" 2>/dev/null || :; error "cs -spawn: cannot publish the seed in $sdir"; }
     fi
     _spawn_window "$name"
 }

@@ -1004,6 +1004,7 @@ USAGE_BETA="oauth-2025-04-20"
 # USAGE_MAX_AGE is 1800.
 USAGE_MIN_INTERVAL=600     # floor between successful polls
 USAGE_FAIL_BACKOFF=600     # a 429 does not reliably clear at its stated horizon
+USAGE_MAX_BACKOFF=3600     # the longest a Retry-After may hold usage polling off
 
 _usage_cache_dir() { printf '%s\n' "${CS_USAGE_DIR:-$SESSIONS_ROOT/.usage}"; }
 
@@ -1345,6 +1346,11 @@ EOF
             # cannot judge takes the floor, like one that is not a number.
             if [[ "${ra:-}" =~ ^[0-9]{1,15}$ ]] && [ $(( 10#$ra + 60 )) -gt "$wait" ]; then
                 wait=$(( 10#$ra + 60 ))
+                # A server may name any horizon, and a wrong one is unfalsifiable
+                # from here: the cache honours whatever deadline lands, so an
+                # hour is the longest this backoff will hold a machine out. The
+                # next render reads the header again anyway.
+                [ "$wait" -le "$USAGE_MAX_BACKOFF" ] || wait="$USAGE_MAX_BACKOFF"
             fi
         fi
         _usage_write "$org" - "" "$wait"

@@ -187,6 +187,27 @@ test_spawn_failed_seed_write_stages_nothing() {
         || { echo "  a window was opened after the seed write failed"; return 1; }
 }
 
+# The seed is written before the brief and published after it, so a brief that
+# cannot be staged must leave the half-written seed behind as neither a seed nor
+# a temp file. Not a red-first test: it pins the ordering the concurrent-brief
+# fix introduced, which no earlier test constrains.
+test_spawn_failed_brief_copy_leaves_no_seed_temp() {
+    printf 'brief body\n' > "$TEST_TMPDIR/brief.md"
+    # A read-only file in the brief's tmp place: cp fails, the directory stays
+    # writable, so the seed's own temp write succeeded just before it.
+    mkdir -p "$CS_SESSIONS_ROOT/.spawn"
+    : > "$CS_SESSIONS_ROOT/.spawn/worker.brief.md.tmp"
+    chmod 400 "$CS_SESSIONS_ROOT/.spawn/worker.brief.md.tmp"
+    local rc=0
+    "$CS_BIN" -spawn worker --brief "$TEST_TMPDIR/brief.md" >/dev/null 2>&1 && rc=1
+    chmod 600 "$CS_SESSIONS_ROOT/.spawn/worker.brief.md.tmp" 2>/dev/null
+    rm -f "$CS_SESSIONS_ROOT/.spawn/worker.brief.md.tmp"
+    [ "$rc" = 0 ] || { echo "  a failed brief copy still reported success"; return 1; }
+    [ ! -f "$(SEED)" ] || { echo "  seed published after the brief copy failed"; return 1; }
+    [ ! -f "$(SEED).tmp" ] || { echo "  the seed temp file was left behind"; return 1; }
+    [ ! -f "$(BRIEF)" ] || { echo "  a brief was published although the copy failed"; return 1; }
+}
+
 # The seed refusal already covers a pending brief: a brief never exists
 # without its seed. This pins that a second spawn cannot swap the brief out
 # from under the pending one.
@@ -488,6 +509,7 @@ run_test test_spawn_brief_and_tasks_stage_together
 run_test test_spawn_rejects_unreadable_or_empty_brief_before_staging
 run_test test_spawn_failed_brief_copy_publishes_no_seed
 run_test test_spawn_failed_seed_write_stages_nothing
+run_test test_spawn_failed_brief_copy_leaves_no_seed_temp
 run_test test_spawn_refuses_to_replace_a_pending_brief
 run_test test_spawn_attach_hint_uses_switch_client_inside_tmux
 run_test test_spawn_refuses_existing_seed
