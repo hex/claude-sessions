@@ -104,13 +104,10 @@ let adopted: string | undefined
 let clearSeen = false
 let birth: string | undefined
 let startPercent: number | undefined
-// A prompt queued over a running turn that has not run yet: work a wrap in
-// that turn never saw, so the marker its last pass writes hides nothing.
-let promptSinceWrap = false
 
 export function register(on: On) {
   // A (re)load has no countdown: the engine cancelled the old one's timers.
-  left = undefined; ticker = undefined; bandIdle = false; preview = undefined; previewShown = false; adopted = undefined; clearSeen = false; birth = undefined; startPercent = undefined; promptSinceWrap = false
+  left = undefined; ticker = undefined; bandIdle = false; preview = undefined; previewShown = false; adopted = undefined; clearSeen = false; birth = undefined; startPercent = undefined
   on('session.start', async ($, e, next) => {
     // Only a cs session has .cs/local; anywhere else the mod stays silent.
     const local = `${e.cwd}/.cs/local`
@@ -131,7 +128,6 @@ export function register(on: On) {
   // A prompt entering the session, from anywhere, means the conversation is
   // not done with: the countdown stops and the prompt goes through untouched.
   on('prompt.submit', async ($, e, next) => {
-    await notePrompt($, e.text, e.turnId)
     if (ticker) stopCountdown($)
     return next(e)
   })
@@ -150,9 +146,11 @@ export function register(on: On) {
     }
   })
 
-  // A wrap starting, typed or pressed, is the point its marker will describe.
-  on('command.run', { command: 'wrap' }, async ($, e, next) => {
-    promptSinceWrap = false
+  // A turn that starts from a prompt is work after any wrap that finished: the
+  // marker that wrap left no longer describes the conversation. A continuation
+  // (no prompt, as a Stop hook's feedback starts one) is the wrap's own turn.
+  on('turn.start', async ($, e, next) => {
+    if (e.text !== '') await clearWrapped($)
     return next(e)
   })
 
@@ -426,27 +424,19 @@ async function rotate($: EngineInterface) {
 }
 
 // /wrap's last pass writes WRAPPED naming the conversation it ran in
-// (CLAUDE_CODE_SESSION_ID, so a teammate's wrap names the teammate), so a wrap that finished is the conversation's
-// latest act and the key has nothing to offer. The next prompt entering that
-// conversation clears it. A summary written any other way proves nothing.
+// (CLAUDE_CODE_SESSION_ID, so a teammate's wrap names the teammate), so a wrap
+// that finished is the conversation's latest act and the key has nothing to
+// offer. The next turn started from a prompt clears it. A summary written any
+// other way proves nothing.
 async function wrapFinished($: EngineInterface): Promise<boolean> {
-  if (promptSinceWrap) return false
   const marker = await readWrapped($)
   return marker !== '' && marker === (await $.session.id())
 }
 
-// A prompt after a finished wrap (the marker names this conversation) empties
-// the marker. Otherwise only a prompt typed over a running turn (it carries that
-// turn's id) is work a wrap in the turn has not seen; an idle prompt, a /wrap
-// included, starts its own turn, and any queued one has run by then.
-async function notePrompt($: EngineInterface, text: string, turnId: string | undefined) {
+async function clearWrapped($: EngineInterface) {
   const marker = await readWrapped($)
-  if (marker !== '' && marker === (await $.session.id())) {
-    promptSinceWrap = false
-    await $.fs.write(`${await $.session.cwd()}/${WRAPPED}`, '').catch(() => {})
-    return
-  }
-  promptSinceWrap = turnId !== undefined && !/^\/wrap(\s|$)/.test(text.trim())
+  if (marker === '' || marker !== (await $.session.id())) return
+  await $.fs.write(`${await $.session.cwd()}/${WRAPPED}`, '').catch(() => {})
 }
 
 async function readWrapped($: EngineInterface): Promise<string> {

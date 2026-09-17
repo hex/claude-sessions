@@ -86,7 +86,7 @@ test_mod_validate_inventories_the_hooks_and_calls() {
         echo "    SKIP: this claude ($(claude --version 2>/dev/null | head -1)) does not inventory function hooks"
         return 77
     fi
-    assert_output_contains "$out" "hooks: session.start, turn.complete, prompt.submit, command.run{command=clear}, command.run{command=wrap}, ui.render{component=AbovePrompt}, ui.render{component=Pane}" "all seven hooks inventoried" || return 1
+    assert_output_contains "$out" "hooks: session.start, turn.complete, prompt.submit, command.run{command=clear}, turn.start, ui.render{component=AbovePrompt}, ui.render{component=Pane}" "all seven hooks inventoried" || return 1
     assert_output_not_contains "$out" '$.prompt.fill' "nothing fills the composer any more" || return 1
     assert_output_contains "$out" 'env reads: CS_ROTATE_BUTTON_CTX, CS_ROTATE_FORCE_CTX, CS_STATUSLINE_CTX_WARN, CS_TERM_BG_RGB' "the two thresholds, the bar's warn band and the measured background are read from the environment" || return 1
     assert_output_not_contains "$out" '$.prompt.submit' "and never submits" || return 1

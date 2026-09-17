@@ -782,20 +782,38 @@ test('a /wrap the answer runs that the engine refuses is said once', async () =>
 
 // A wrap that finished leaves nothing for the key to do until the conversation
 // moves on. /wrap's last pass writes .cs/local/wrapped naming the conversation
-// it wrapped; the band draws the rotate key alone while the marker names this
-// one, and the next prompt entering the conversation clears it. A summary
-// written any other way (a standalone /summary) proves nothing.
+// it ran in; the band draws the rotate key alone while the marker names this
+// one, and the next turn that starts from a prompt empties it. A continuation
+// (a turn started with no prompt, as a Stop hook's feedback starts one) does not.
+// A summary written any other way proves nothing.
 const WRAPPED = '/work/.cs/local/wrapped'
-const submit = (text: string, turnId?: string) => hooks['prompt.submit']($, { text, turnId }, async (e: any) => e)
-const wrapStarts = () => hooks['command.run:wrap']($, { command: 'wrap', args: '' }, async () => ({ text: '' }))
-test('a finished wrap hides the wrap key until the next prompt clears the marker', async () => {
+const turnStart = (text: string) => hooks['turn.start']($, { text, turnId: `turn-${text.length}` }, async (e: any) => ({ turnId: e.turnId }))
+
+test('a finished wrap hides the wrap key until a turn starts from a prompt', async () => {
   percent = 40
+  await turnStart('please wrap up')
   files[WRAPPED] = 'uuid-lead\n'
   expect(wrapButton(await band())).toBeUndefined()
   expect(findButton(await band()).props.hotkey).toBe('1')
 
-  await submit('next thing')
+  await turnStart('')
+  expect(wrapButton(await band())).toBeUndefined()
+
+  await turnStart('next thing')
   expect(files[WRAPPED]).toBe('')
+  expect(wrapButton(await band())).toBeDefined()
+})
+
+// Work queued behind the wrap starts its own turn, and a second wrap that fails
+// a pass writes no marker of its own: either way the first wrap's marker is gone.
+test('queued work, or a second wrap that fails, brings the key back', async () => {
+  percent = 40
+  files[WRAPPED] = 'uuid-lead\n'
+  await turnStart('and then fix the tests')
+  expect(wrapButton(await band())).toBeDefined()
+
+  files[WRAPPED] = 'uuid-lead\n'
+  await turnStart('/wrap')
   expect(wrapButton(await band())).toBeDefined()
 })
 
@@ -805,44 +823,8 @@ test('a summary with no wrap marker, or a marker naming another conversation, ke
   expect(wrapButton(await band())).toBeDefined()
   files[WRAPPED] = 'uuid-teammate\n'
   expect(wrapButton(await band())).toBeDefined()
-  await submit('x')
+  await turnStart('x')
   expect(files[WRAPPED]).toBe('uuid-teammate\n')
-})
-
-
-// A prompt queued while the wrap runs is work the wrap never saw: the marker
-// Pass 4 writes afterwards must not hide the key over it.
-test('a prompt queued during a wrap keeps the wrap key once the marker lands', async () => {
-  percent = 40
-  await wrapStarts()
-  await submit('and then fix the tests', 'turn-wrap')
-  files[WRAPPED] = 'uuid-lead\n'
-  expect(wrapButton(await band())).toBeDefined()
-})
-
-test('a wrap started after earlier prompts, from the band or typed, still hides the key when it finishes', async () => {
-  percent = 40
-  await submit('hi')
-  await wrapStarts()
-  files[WRAPPED] = 'uuid-lead\n'
-  expect(wrapButton(await band())).toBeUndefined()
-
-  files[WRAPPED] = ''
-  await submit('more work')
-  await submit('/wrap')
-  files[WRAPPED] = 'uuid-lead\n'
-  expect(wrapButton(await band())).toBeUndefined()
-})
-
-// A wrap run inside the turn an idle prompt started (asked for in words, run
-// as a skill) reaches no command hook: the marker still hides the key, and a
-// queued prompt that already ran stops counting once the next idle prompt comes.
-test('an idle prompt followed by a wrap no command hook saw still hides the key', async () => {
-  percent = 40
-  await submit('queued earlier', 'turn-old')
-  await submit('please wrap up this session')
-  files[WRAPPED] = 'uuid-lead\n'
-  expect(wrapButton(await band())).toBeUndefined()
 })
 
 test('an armed handoff draws the clear key alone: no wrap key', async () => {
