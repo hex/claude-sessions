@@ -232,12 +232,6 @@ export CS_NO_TASK_TOOLS="1"
 # cs keeps a value already in the shell (0 keeps function hooks off).
 export CS_NO_FUNCTION_HOOKS="1"
 
-# Leave the hint line under the prompt to Claude Code: the cs-hint mod draws
-# nothing (unread mail, an armed handoff, queued tasks, a resumed handoff's
-# purpose, or a cs tip). Per session, a `hints: off` line in .cs/local/state
-# does the same.
-export CS_NO_HINTS="1"
-
 # Override the tmux binary cs -spawn uses (default: tmux on PATH)
 export CS_TMUX_BIN="/opt/homebrew/bin/tmux"
 

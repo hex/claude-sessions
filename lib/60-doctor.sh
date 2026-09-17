@@ -697,7 +697,7 @@ _doctor_check_session_id_match() {
     fi
 }
 
-# A mod (cs-rotate, cs-hint) is a Claude Code function-hooks plugin the
+# A mod (cs-rotate) is a Claude Code function-hooks plugin the
 # installer deploys under ~/.claude/skills. Absent, it is not news. Present, the
 # row reads the heartbeat the mod writes when Claude Code loads it, never the
 # directory: the loader sits behind CLAUDE_CODE_ENABLE_FUNCTION_HOOKS, which a
@@ -751,7 +751,6 @@ run_doctor() {
         _doctor_check_session_id_match
         _doctor_check_token_cost
         _doctor_check_mod cs-rotate
-        _doctor_check_mod cs-hint
     fi
 
     echo ""

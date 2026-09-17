@@ -685,24 +685,6 @@ test_doctor_rotate_mod_row_observes_execution_not_presence() {
     assert_output_not_contains "$output" "cs-rotate" "linked but no session: nothing said" || return 1
 }
 
-# The cs-hint mod deploys the same way and doctor reads it by the same rule,
-# through its own heartbeat.
-test_doctor_hint_mod_row_observes_execution_not_presence() {
-    local fake_claude="$TEST_TMPDIR/claude-mod"
-    mkdir -p "$fake_claude"
-    echo '{}' > "$fake_claude/settings.json"
-    local output
-    output=$(CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
-    assert_output_not_contains "$output" "cs-hint" "absent: nothing said" || return 1
-    mkdir -p "$fake_claude/skills/cs-hint/hooks"
-    rm -f "$CLAUDE_SESSION_META_DIR/local/cs-hint.heartbeat"
-    output=$(CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
-    assert_output_contains "$output" "cs-hint mod: installed but has not run" "installed, never ran: WARN" || return 1
-    printf '2026-09-16T05:00:00.000Z\n' > "$CLAUDE_SESSION_META_DIR/local/cs-hint.heartbeat"
-    output=$(CS_CLAUDE_DIR="$fake_claude" "$CS_BIN" -doctor 2>&1) || true
-    assert_output_contains "$output" "cs-hint mod: last ran 2026-09-16T05:00:00.000Z" "heartbeat: OK with the stamp" || return 1
-}
-
 test_doctor_statusline_no_fail_when_not_registered() {
     local fake_claude="$TEST_TMPDIR/sl-claude-none"
     mkdir -p "$fake_claude"
@@ -941,7 +923,6 @@ run_test test_doctor_statusline_ok_when_registered_and_executable
 run_test test_doctor_statusline_fails_when_binary_missing
 run_test test_doctor_statusline_caps_row_names_the_answer_or_the_ask
 run_test test_doctor_rotate_mod_row_observes_execution_not_presence
-run_test test_doctor_hint_mod_row_observes_execution_not_presence
 run_test test_doctor_statusline_no_fail_when_not_registered
 run_test test_doctor_statusline_names_context_gating_when_absent
 run_test test_doctor_statusline_names_context_gating_for_foreign_statusline

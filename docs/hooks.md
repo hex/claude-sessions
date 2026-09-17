@@ -432,69 +432,6 @@ heartbeat) and `claude plugin validate` when each binary is on PATH, and
 always checks the manifest, the threshold pin, and that the installer and
 the launch name the mod and the flag.
 
-## cs-hint (not a hook script — a Claude Code mod)
-
-`mods/cs-hint/` is a second function-hooks plugin, deployed, enabled, observed
-and removed the same way as cs-rotate (installer, `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS`,
-a heartbeat at `.cs/local/cs-hint.heartbeat`, `cs -doctor`, `cs -uninstall`, the
-deploy-drift check). It hooks the `PromptHint` site, the dim line under the
-prompt, and draws one dim line of its own beneath the engine's, so a cs
-session says what is waiting for it. (A rewrite of the site's `hint` would be
-the lighter touch, but measured on 2.1.273 it draws nothing while the
-permission-mode notice, `auto mode on`, owns the engine's line, which in a cs
-session it always does; the notice stays, the mod's line sits under it.) The
-line is the lead conversation's only (the UUID in `.cs/local/state`), and
-only while the composer is empty and idle: while you type, and while a turn
-runs, nothing is added, since that is where the shortcuts and the interrupt
-key are. Outside a cs session, in a teammate claude, with `CS_NO_HINTS=1` in
-the launching shell, or with a `hints: off` line in `.cs/local/state`,
-nothing is drawn.
-
-What it says, in priority order, at most two joined by ` · `:
-
-- `2 messages from <session> · cs -msg`: the `.json` files under
-  `.cs/local/mail/new/`, as `cs -msg` reads them, and the sender of the one
-  with the latest `ts` (file names carry the epoch too, but cs itself warns
-  that their order is not arrival order); a sender outside a cs session
-  writes `""` and is not named.
-- `handoff armed · /clear continues it`: `.cs/local/pending-handoff` names a
-  handoff the SessionStart hook would accept (a bare basename, present,
-  frontmatter still `status: unconsumed`, the marker read with every
-  whitespace character dropped as the hook reads it; the frontmatter rule is
-  cs-rotate's, which `tests/test_mod_hint.sh` pins equal).
-- `3 queued · gate waiting`, `· deferred` or `· draining`: the files under
-  `.cs/local/queue/` (not dotfiles, which the hook's glob skips); the word
-  follows the narrative-reminder hook's rule (`queue.state` `armed` or
-  `draining` is draining; `idle` or no word, with `queue.declined` younger
-  than ten minutes, is deferred, without one the gate will ask at the next
-  turn's end; any other word the hook does not act on, so the count stands
-  alone). An empty queue says nothing, whatever the state file records.
-- `continuing: <purpose>`: the handoff whose frontmatter says
-  `consumed_by: <this conversation's id>`, its `purpose:` line (its name when
-  there is none), shown until your first prompt in the conversation (typed,
-  or through Remote Control; recorded in `.cs/local/cs-hint.spoken`, so a
-  prompt sent before the line was drawn, or a reload of the mod, does not
-  bring it back); the rotation's own wake, a peer's message or a plugin's
-  prompt does not end it.
-- Otherwise one tip from a fixed list in `register.tsx`, never generated. The
-  first fits the session: `/finish` in a worktree session (`task_branch` in the
-  state file), `/feature` elsewhere; the rest step once per finished turn of
-  the conversation (a subagent's, an interrupted or an errored turn does not
-  count; a new conversation starts over), never on a timer, so the line holds
-  still while it is read.
-
-The facts change from outside the process (another session's `cs -msg`, the
-queue drain, the rotate skill), so once the lead has drawn the line it is
-redrawn every five seconds; a redraw costs one directory listing per fact
-source, a read of each unread message, and a read of the marker and the state
-file. Module state (the tip index, the resumed handoff, the ticker) survives
-`/clear` and is reset by a plugin reload.
-
-Tests: `tests/test_mod_hint.sh` runs the bun unit tests under
-`mods/cs-hint/test/` and `claude plugin validate` when each binary is on
-PATH, and always checks the manifest, the handoff-rule pin, and that the
-installer and the launch name the mod and the flag.
-
 ## Hook Configuration
 
 The hooks are configured in `~/.claude/settings.json`:

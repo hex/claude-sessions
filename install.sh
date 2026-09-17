@@ -158,6 +158,7 @@ CS_SKILLS=(
 RETIRED_SKILLS=(
     voice   # renamed to write-as-me; Claude Code 2.1.227 ships a built-in /voice (Toggle voice mode)
     merge   # replaced by finish: integrate and report, never remove
+    cs-hint # a mod (deployed under skills/ like every mod): the hint line under the prompt, retired
 )
 
 # Support files skills ship beyond SKILL.md, as skills/<skill>/<path> entries.
@@ -172,9 +173,6 @@ CS_MOD_FILES=(
     cs-rotate/.claude-plugin/plugin.json
     cs-rotate/hooks/hooks.json
     cs-rotate/hooks/register.tsx
-    cs-hint/.claude-plugin/plugin.json
-    cs-hint/hooks/hooks.json
-    cs-hint/hooks/register.tsx
 )
 
 # Remove a hook registration from any event in a settings JSON string,
