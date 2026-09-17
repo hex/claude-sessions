@@ -128,3 +128,103 @@ Everything here exists nowhere else.
 
 Written from live context at ~80%, no compaction. Pass one carries everything
 that dies with the conversation; pass two appends the recoverable sections.
+
+## 3b. Codex round 4 — arrived while this handoff was being written
+
+Dispatched through the `/codex:` plugin. **Verdict: FIX, NOT CLOSED.** Verbatim
+substance, because the report file is not on disk (the plugin returns it in the
+agent result, not `scratchpad/review/`):
+
+1. **Important — `lib/60-doctor.sh:664`.** ESRCH proves absence only in the
+   caller's PID namespace. The writer records only `$$` (`lib/30-worktree.sh:655`).
+   If a checkout is shared with a container, a live holder's recorded pid can be
+   absent in doctor's namespace and this branch recommends removing its lock.
+   `hidepid` does not block `kill -0`, but PID namespaces still constrain pid
+   lookup. Source-checked, not reproduced.
+2. **Minor — `lib/60-doctor.sh:660`.** The `LC_ALL=C` prefix does not reliably
+   pin bash 3.2's active locale: the prefix is INSIDE the substitution, and
+   3.2's temporary-assignment path does not invoke its locale setter
+   (bash-3.2/variables.c). Probe under `fr_FR.UTF-8`:
+   `$(LC_ALL=C printf "%.1f" 1)` → `1,0`, while `$(LC_ALL=C; printf "%.1f" 1)`
+   → `1.0`. The kill.def path itself matches between 3.2 and 5.3 (both print
+   `strerror(errno)`), so the wording depends on libc's active locale.
+3. **Minor — `tests/test_doctor.sh:1221`.** Pid 1 does not guarantee EPERM
+   coverage: a sufficiently privileged caller gets success instead, so the test
+   can pass without exercising the EPERM branch.
+
+It confirmed under bash 3.2.57: success for `$$`, EPERM for pid 1, rejection of
+`999999999999`, ESRCH for a reaped pid. `bash -n` clean. No suite ran.
+
+**My read, for the successor to accept or overturn:** #2 is the one I would fix
+first and it is cheap — move the assignment so it applies to the shell, e.g.
+`err=$( LC_ALL=C; kill -0 "$pid" 2>&1 )`, and re-probe on 3.2. #1 is real but
+the writer/reader share a checkout and a namespace in every case cs supports
+(the shared-with-a-container case is hypothetical here); the honest options are
+to record the boot-relative start time beside the pid, or to soften only the
+ESRCH advice. #3 is a coverage gap, not a defect. **None of this is a
+correctness regression against main**, which used `pgrep` and was strictly
+worse. Alex may reasonably take the branch as-is and file the rest.
+
+## 4. Primary Request and Intent
+
+This conversation was woken by a rotation carrying
+`.cs/handoffs/2026-09-17-parallel-test-races.md` (now `status: consumed`) and
+did exactly what it asked: fix **#609, #603 and #638 in one branch**, in that
+order. Alex sent one message in the whole conversation, quoted in section 3.
+
+## 5. Files and Code Sections
+
+Read the diff, not a summary: `git diff main...HEAD` on
+`fix/parallel-test-races`. The pieces that matter:
+
+- `tui/src/app.rs` — `CS_BIN_ENV_LOCK` (~2567), `cs_bin()` (14),
+  `enter_runs_the_action_belonging_to_the_highlighted_row`,
+  `a_preview_in_flight_when_rotate_runs_never_reaches_the_cache`,
+  `drain_previews` (777), `request_preview` (756).
+- `lib/30-worktree.sh` — `_integrate_cleanup` (~525) and the lock acquisition
+  in `integrate_feature_worktree` (~630).
+- `lib/60-doctor.sh` — `_doctor_check_integrate_lock` (~634).
+- `tests/test_doctor.sh` — four lock tests at the end of the integrate block.
+- `tests/test_worktrees.sh` — `test_integrate_cleanup_releases_the_lock_only_once`.
+- `tests/test_run_all.sh`, `tests/test_scope_prompt.sh` — every herestring.
+- `CHANGELOG.md` `## Unreleased` — three entries added by this branch.
+- `scratchpad/review/` (untracked) — `prompt.md`, `prompt2.md`, `prompt3.md`,
+  `codex-round1.md`, `codex-round2.md`, `codex-round3.md`, `branch.diff`.
+
+## 6. Problem Solving
+
+The review briefs are reusable: `scratchpad/review/prompt.md` (whole branch),
+`prompt2.md` and `prompt3.md` (closures). For a round 4 brief, take prompt3 and
+swap in the `kill -0` closure and the three questions Codex answered above.
+Reviews name every consumer by path (`feedback_review_names_consumers`).
+
+`git log` carries the rest: each commit body states what it fixed, the
+measurement, and the review round that asked for it.
+
+## 7. Pending Tasks
+
+The native task list is keyed to the session and survives the `/clear`.
+Reconcile against this list; do not mirror it.
+
+- **#609, #603, #638 — closed this conversation**, all three on the branch.
+- **#642 pending, NOT started.** cs-statusline `--refresh-usage` forks find at
+  ~150/s (section 3). Needs Alex's go, not the peer's.
+- **#640 pending.** Four Minors from the v2026.9.16 release review.
+- **#554 pending (PARKED).** SessionStart notice for pending tool calls.
+- **#606 pending (POSTPONED).** `cs --remote` via Claude Remote Control.
+
+## 8. Current Work
+
+`fix/parallel-test-races` at `f40497c`, 8 commits over main `2ce9b0f`, ghost
+67/67 on every code sha. Codex round 4 in section 3b. One unnamed Fable review
+agent was still running at rotation; its brief is section 1's.
+
+Working tree at rotation: `.cs/memory/MEMORY.md` and
+`.cs/memory/narrative.hex-users-noreply-github-com.md` modified (the narrative
+carries a dated correction to the #638 entry), plus untracked `scratchpad/`.
+A new memory file `.cs/memory/feedback_codex_via_plugin.md` was written.
+
+## Completeness (pass two)
+
+Nothing cut. The one thing I could not carry: whether the unnamed Fable agent
+ever reported, and what it said.
