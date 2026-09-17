@@ -102,7 +102,7 @@ test_lock_prevents_duplicate_session() {
         return 1
     fi
 
-    if ! echo "$output" | grep -qi "already open\|in use"; then
+    if ! grep -qi "already open\|in use" <<< "$output"; then
         echo "  FAIL: Error should mention session being in use: $output"
         return 1
     fi

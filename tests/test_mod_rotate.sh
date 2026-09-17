@@ -105,7 +105,7 @@ test_mod_validate_inventories_the_hooks_and_calls() {
     assert_output_contains "$out" "Validation passed" "manifest and hooks validate" || return 1
     # A Claude Code from before function hooks validates the manifest and
     # prints no inventory; the pins below are about the inventory.
-    if ! printf '%s' "$out" | grep -q 'hooks:'; then
+    if ! grep -q 'hooks:' <<< "$out"; then
         echo "    SKIP: this claude ($(claude --version 2>/dev/null | head -1)) does not inventory function hooks"
         return 0
     fi

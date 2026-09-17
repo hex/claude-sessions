@@ -427,13 +427,13 @@ test_prompt_unchanged_without_handoff() {
     local output
     output=$("$CS_BIN" rot-plain <<< "n" 2>&1) || true
     assert_output_contains "$output" "Continue previous conversation?" "prompt present" || return 1
-    printf '%s' "$output" | grep -q '\[Y/n\] ' \
+    grep -q '\[Y/n\] ' <<< "$output" \
         || { echo "  FAIL: two-way prompt suffix must stay byte-identical"; return 1; }
-    if printf '%s' "$output" | grep -q '\[Y/n/r/d\]'; then
+    if grep -q '\[Y/n/r/d\]' <<< "$output"; then
         echo "  FAIL: handoff prompt must not appear without a pending handoff"
         return 1
     fi
-    if printf '%s' "$output" | grep -q "Rotation handoff pending"; then
+    if grep -q "Rotation handoff pending" <<< "$output"; then
         echo "  FAIL: pending notice must not appear without a pending handoff"
         return 1
     fi
@@ -471,7 +471,7 @@ test_context_row_sits_in_the_card_above_the_prompt() {
     [ "$ctx_line" -lt "$prompt_line" ] \
         || { echo "  FAIL: the context row must sit above the prompt (row $ctx_line, prompt $prompt_line)"; return 1; }
     # The card's bar prefixes the row, which is what separates it from the prompt.
-    printf '%s\n' "$output" | grep -q "▌.*64% context used" \
+    grep -q "▌.*64% context used" <<< "$output" \
         || { echo "  FAIL: the context row must carry the card's bar"; return 1; }
 }
 
@@ -526,7 +526,7 @@ test_context_alone_still_gets_a_row() {
     local output
     output=$("$CS_BIN" rot-ctxonly <<< "n" 2>&1) || true
     assert_output_contains "$output" "64% context used" "context still renders alone" || return 1
-    printf '%s\n' "$output" | grep -q "▌.*64% context used" \
+    grep -q "▌.*64% context used" <<< "$output" \
         || { echo "  FAIL: the lone context row must still carry the card's bar"; return 1; }
 }
 
@@ -572,7 +572,7 @@ test_esc_at_continue_prompt_cancels_launch() {
     _rot_session "rot-esc"
     local output rc=0
     output=$("$CS_BIN" rot-esc <<< "$(printf '\033')" 2>&1) || rc=$?
-    if printf '%s' "$output" | grep -q 'STUB_ARGS:'; then
+    if grep -q 'STUB_ARGS:' <<< "$output"; then
         echo "  FAIL: ESC must cancel the launch — the stub must not run"; return 1
     fi
     [ "$rc" -ne 0 ] || { echo "  FAIL: ESC cancel should exit non-zero"; return 1; }
@@ -613,7 +613,7 @@ test_rotate_answer_auto_starts_handoff() {
     output=$("$CS_BIN" rot-autostart <<< "r" 2>&1) || true
     assert_output_contains "$output" ".cs/handoffs/2026-07-16-test.md" \
         "the launch prompt points claude at the pending handoff" || return 1
-    if printf '%s' "$output" | grep -q -- '/color'; then
+    if grep -q -- '/color' <<< "$output"; then
         echo "  FAIL: the handoff prompt must displace /color for this launch"
         return 1
     fi
@@ -636,7 +636,7 @@ test_consumed_handoffs_do_not_trigger_prompt() {
     _seed_handoff "$dir" "2026-07-16-done.md" "consumed"
     local output
     output=$("$CS_BIN" rot-consumed <<< "n" 2>&1) || true
-    if printf '%s' "$output" | grep -q "Rotation handoff pending"; then
+    if grep -q "Rotation handoff pending" <<< "$output"; then
         echo "  FAIL: consumed handoff must not resurface"
         return 1
     fi
@@ -781,7 +781,7 @@ test_discard_answer_dismisses_pending_handoff() {
     _seed_handoff "$dir" "2026-07-16-test.md" "unconsumed"
     local output
     output=$("$CS_BIN" rot-d <<< "d" 2>&1) || true
-    printf '%s' "$output" | grep -q "d = discard handoff" \
+    grep -q "d = discard handoff" <<< "$output" \
         || { echo "  FAIL: prompt must offer the d answer"; return 1; }
     assert_file_contains "$dir/.cs/handoffs/2026-07-16-test.md" "status: discarded" \
         "d flips the handoff to discarded" || return 1
@@ -789,10 +789,10 @@ test_discard_answer_dismisses_pending_handoff() {
         "unconsumed line replaced" || return 1
     [ ! -f "$dir/.cs/local/pending-handoff" ] || { echo "  FAIL: d must not set the r marker"; return 1; }
     assert_output_contains "$output" "STUB_ARGS: " "launch continues" || return 1
-    printf '%s' "$output" | grep -q -- '--resume' \
+    grep -q -- '--resume' <<< "$output" \
         || { echo "  FAIL: d proceeds with the default resume"; return 1; }
     output=$("$CS_BIN" rot-d <<< "n" 2>&1) || true
-    if printf '%s' "$output" | grep -q "Rotation handoff pending"; then
+    if grep -q "Rotation handoff pending" <<< "$output"; then
         echo "  FAIL: discarded handoff must not re-prompt"
         return 1
     fi
@@ -966,7 +966,7 @@ test_rotation_preamble_wins_over_fresh_rebind_block() {
     out=$(_start_hook "$UUID_B") || { unset CS_FRESH_REBIND; return 1; }
     unset CS_FRESH_REBIND
     assert_output_contains "$out" "Conversation Rotation" "rotation preamble present" || return 1
-    if printf '%s' "$out" | grep -q "Fresh Conversation"; then
+    if grep -q "Fresh Conversation" <<< "$out"; then
         echo "  FAIL: fresh-rebind block must yield to the rotation preamble"
         return 1
     fi
@@ -989,7 +989,7 @@ test_stale_marker_is_removed_silently() {
     local out
     out=$(_start_hook "$UUID_B") || return 1
     [ ! -f "$CLAUDE_SESSION_META_DIR/local/pending-handoff" ] || { echo "  FAIL: stale marker must be removed"; return 1; }
-    if printf '%s' "$out" | grep -q "Conversation Rotation"; then
+    if grep -q "Conversation Rotation" <<< "$out"; then
         echo "  FAIL: stale marker must not inject a preamble"
         return 1
     fi
@@ -1249,7 +1249,7 @@ test_armed_rotation_preamble_expects_a_wake_not_a_message() {
     local out
     out=$(CS_ROTATION_KICK_DELAY=0 _start_hook "$UUID_B" clear) || return 1
     assert_output_contains "$out" "system-reminder" "the armed preamble names how the turn starts" || return 1
-    if printf '%s' "$out" | grep -q "the first message comes from the user"; then
+    if grep -q "the first message comes from the user" <<< "$out"; then
         echo "  FAIL: an armed rotation does not wait for a user message"
         return 1
     fi
@@ -1268,7 +1268,7 @@ test_unarmed_rotation_preamble_still_expects_a_message() {
     out=$(CS_NO_ROTATION_WAKE=1 _start_hook "$UUID_B" clear) || return 1
     assert_output_contains "$out" "the first message comes from the user" \
         "without a kick the turn really does wait for the user" || return 1
-    if printf '%s' "$out" | grep -q "system-reminder"; then
+    if grep -q "system-reminder" <<< "$out"; then
         echo "  FAIL: no wake is coming, so the preamble must not promise one"
         return 1
     fi
@@ -1425,7 +1425,7 @@ test_compact_and_fork_leave_marker_armed() {
         printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
         local out
         out=$(_start_hook "$UUID_B" "$src") || return 1
-        if printf '%s' "$out" | grep -q "Conversation Rotation"; then
+        if grep -q "Conversation Rotation" <<< "$out"; then
             echo "  FAIL: source $src must not consume the marker"; return 1
         fi
         assert_file_contains "$CLAUDE_SESSION_META_DIR/handoffs/2026-07-16-test.md" "status: unconsumed" \
@@ -1444,7 +1444,7 @@ test_spent_handoff_is_not_reconsumed() {
     printf 'claude_session_id: %s\n' "$UUID_B" > "$CLAUDE_SESSION_META_DIR/local/state"
     local out
     out=$(_start_hook "$UUID_B") || return 1
-    if printf '%s' "$out" | grep -q "Conversation Rotation"; then
+    if grep -q "Conversation Rotation" <<< "$out"; then
         echo "  FAIL: a spent handoff must not inject a preamble"; return 1
     fi
     assert_file_not_contains "$CLAUDE_SESSION_META_DIR/handoffs/2026-07-16-test.md" "consumed_by:" \
@@ -1463,7 +1463,7 @@ test_body_quote_does_not_revive_a_discarded_handoff() {
     printf 'claude_session_id: %s\n' "$UUID_B" > "$CLAUDE_SESSION_META_DIR/local/state"
     local out
     out=$(_start_hook "$UUID_B") || return 1
-    if printf '%s' "$out" | grep -q "Conversation Rotation"; then
+    if grep -q "Conversation Rotation" <<< "$out"; then
         echo "  FAIL: a flush-left body quote must not revive a discarded handoff"; return 1
     fi
 }
@@ -1499,7 +1499,7 @@ test_fork_with_armed_marker_records_rebind() {
     local ev
     ev=$(_timeline | jq -c 'select(.event == "rotated")' 2>/dev/null | tail -1)
     assert_output_contains "$ev" '"reason":"rebind"' "a fork is not a handoff rotation" || return 1
-    if printf '%s' "$ev" | grep -q '"handoff"'; then
+    if grep -q '"handoff"' <<< "$ev"; then
         echo "  FAIL: a fork event must carry no handoff field"; return 1
     fi
 }
@@ -1534,7 +1534,7 @@ test_fresh_notice_absent_on_compact() {
     local out
     out=$(_start_hook "$UUID_B" compact) || { unset CS_FRESH_REBIND; return 1; }
     unset CS_FRESH_REBIND
-    if printf '%s' "$out" | grep -q "Fresh Conversation"; then
+    if grep -q "Fresh Conversation" <<< "$out"; then
         echo "  FAIL: a compaction continues the conversation — no clean-break notice"
         return 1
     fi
@@ -1564,7 +1564,7 @@ EOF
     printf 'claude_session_id: %s\n' "$UUID_B" > "$CLAUDE_SESSION_META_DIR/local/state"
     local out
     out=$(_start_hook "$UUID_B" clear) || return 1
-    if printf '%s' "$out" | grep -q "Conversation Rotation"; then
+    if grep -q "Conversation Rotation" <<< "$out"; then
         echo "  FAIL: a marker naming a path must not rotate"; return 1
     fi
     assert_file_not_contains "$outside" "status: consumed" \
@@ -1591,7 +1591,7 @@ test_marker_with_a_backslash_path_is_rejected() {
     printf 'claude_session_id: %s\n' "$UUID_B" > "$CLAUDE_SESSION_META_DIR/local/state"
     local out
     out=$(_start_hook "$UUID_B" clear) || return 1
-    if printf '%s' "$out" | grep -q "Conversation Rotation"; then
+    if grep -q "Conversation Rotation" <<< "$out"; then
         echo "  FAIL: a marker naming a backslash path must not rotate"; return 1
     fi
     [ ! -f "$CLAUDE_SESSION_META_DIR/local/pending-handoff" ] \
@@ -1624,7 +1624,7 @@ test_nudge_fires_once_at_threshold() {
     assert_eq "$UUID_A" "$(cat "$CLAUDE_SESSION_META_DIR/local/rotate-nudged" | tr -d '[:space:]')" \
         "cursor records the nudged conversation" || return 1
     out=$(_stop_with_ctx 85 "$UUID_A") || return 1
-    if printf '%s' "$out" | grep -q "rotate skill"; then
+    if grep -q "rotate skill" <<< "$out"; then
         echo "  FAIL: same conversation must not be nudged twice"
         return 1
     fi
@@ -1642,17 +1642,17 @@ test_nudge_silent_below_threshold_and_without_signal() {
     _rot_hook_session "rot-nudge-quiet"
     local out
     out=$(_stop_with_ctx 64 "$UUID_A") || return 1
-    if printf '%s' "$out" | grep -q "rotate skill"; then
+    if grep -q "rotate skill" <<< "$out"; then
         echo "  FAIL: 64 must not nudge at default threshold"
         return 1
     fi
     out=$(_stop_with_ctx "" "$UUID_A") || return 1
-    if printf '%s' "$out" | grep -q "rotate skill"; then
+    if grep -q "rotate skill" <<< "$out"; then
         echo "  FAIL: missing context-pct must never nudge"
         return 1
     fi
     out=$(_stop_with_ctx "hot" "$UUID_A") || return 1
-    if printf '%s' "$out" | grep -q "rotate skill"; then
+    if grep -q "rotate skill" <<< "$out"; then
         echo "  FAIL: non-numeric context-pct must never nudge"
         return 1
     fi
@@ -1663,7 +1663,7 @@ test_nudge_threshold_override() {
     export CS_ROTATE_NUDGE_CTX=90
     local out
     out=$(_stop_with_ctx 85 "$UUID_A") || { unset CS_ROTATE_NUDGE_CTX; return 1; }
-    if printf '%s' "$out" | grep -q "rotate skill"; then
+    if grep -q "rotate skill" <<< "$out"; then
         unset CS_ROTATE_NUDGE_CTX
         echo "  FAIL: 85 under a 90 override must not nudge"
         return 1
@@ -1685,7 +1685,7 @@ test_nudge_threshold_override() {
     _rot_hook_session "rot-nudge-env3"
     out=$(_stop_with_ctx 64 "$UUID_A") || { unset CS_ROTATE_NUDGE_CTX; return 1; }
     unset CS_ROTATE_NUDGE_CTX
-    if printf '%s' "$out" | grep -q "rotate skill"; then
+    if grep -q "rotate skill" <<< "$out"; then
         echo "  FAIL: 64 under the 65 fallback must not nudge"
         return 1
     fi
@@ -1699,7 +1699,7 @@ test_nudge_yields_to_queue_drain() {
     local out
     out=$(_stop_with_ctx 80 "$UUID_A") || return 1
     assert_output_contains "$out" "cs task queue" "queue owns the turn loop" || return 1
-    if printf '%s' "$out" | grep -q "rotate skill"; then
+    if grep -q "rotate skill" <<< "$out"; then
         echo "  FAIL: nudge must yield to an armed queue"
         return 1
     fi
@@ -1733,7 +1733,7 @@ EOF
     # class matching any one of c/u/r/e/n/t — which every line of this output
     # already contains, so the unescaped form passed with the marker removed.
     assert_output_contains "$out" '\[current\]' "live conversation marked" || return 1
-    if printf '%s' "$out" | grep -q "checkpoint"; then
+    if grep -q "checkpoint" <<< "$out"; then
         echo "  FAIL: non-conversation events must not render"
         return 1
     fi
@@ -1832,7 +1832,7 @@ test_launch_grep_ignores_body_status_line() {
     _seed_handoff_body_echoes_contract "$dir" "2026-07-16-consumed.md" "consumed"
     local output
     output=$("$CS_BIN" rot-body-consumed <<< "n" 2>&1) || true
-    if printf '%s' "$output" | grep -q "Rotation handoff pending"; then
+    if grep -q "Rotation handoff pending" <<< "$output"; then
         echo "  FAIL: consumed handoff must not resurface because its body echoes the contract line"
         return 1
     fi
@@ -1881,7 +1881,7 @@ test_ctx_warning_fires_once_in_band() {
     assert_eq "$UUID_A" "$(cat "$CLAUDE_SESSION_META_DIR/local/ctx-warned" | tr -d '[:space:]')" \
         "cursor records the warned conversation" || return 1
     out=$(_stop_with_ctx 40 "$UUID_A") || return 1
-    if printf '%s' "$out" | grep -q "stopping point"; then
+    if grep -q "stopping point" <<< "$out"; then
         echo "  FAIL: same conversation must not be warned twice"
         return 1
     fi
@@ -1899,7 +1899,7 @@ test_ctx_warning_silent_below_band() {
     _rot_hook_session "rot-warn-low"
     local out
     out=$(_stop_with_ctx 39 "$UUID_A") || return 1
-    if printf '%s' "$out" | grep -q "stopping point"; then
+    if grep -q "stopping point" <<< "$out"; then
         echo "  FAIL: 39 must not warn at default threshold"
         return 1
     fi
@@ -1910,16 +1910,16 @@ test_ctx_warning_yields_to_nudge_at_high_ctx() {
     local out
     out=$(_stop_with_ctx 80 "$UUID_A") || return 1
     assert_output_contains "$out" "rotate skill" "nudge owns readings at its threshold" || return 1
-    if printf '%s' "$out" | grep -q "stopping point"; then
+    if grep -q "stopping point" <<< "$out"; then
         echo "  FAIL: warning must not fire at or above the nudge threshold"
         return 1
     fi
     out=$(_stop_with_ctx 85 "$UUID_A") || return 1
-    if printf '%s' "$out" | grep -q "stopping point"; then
+    if grep -q "stopping point" <<< "$out"; then
         echo "  FAIL: after the nudge, the warning may not fire"
         return 1
     fi
-    if printf '%s' "$out" | grep -q "rotate skill"; then
+    if grep -q "rotate skill" <<< "$out"; then
         echo "  FAIL: after the nudge, the nudge may not fire again"
         return 1
     fi
@@ -1930,7 +1930,7 @@ test_ctx_warning_threshold_override() {
     export CS_CTX_WARN_CTX=50
     local out
     out=$(_stop_with_ctx 45 "$UUID_A") || { unset CS_CTX_WARN_CTX; return 1; }
-    if printf '%s' "$out" | grep -q "stopping point"; then
+    if grep -q "stopping point" <<< "$out"; then
         unset CS_CTX_WARN_CTX
         echo "  FAIL: 45 under a 50 override must not warn"
         return 1
@@ -1952,7 +1952,7 @@ test_ctx_warning_escalates_to_nudge_same_conversation() {
     assert_output_contains "$out" "stopping point" "warning fires first at 60" || return 1
     out=$(_stop_with_ctx 80 "$UUID_A") || return 1
     assert_output_contains "$out" "rotate skill" "nudge still escalates after the warning" || return 1
-    if printf '%s' "$out" | grep -q "stopping point"; then
+    if grep -q "stopping point" <<< "$out"; then
         echo "  FAIL: the 80 reading belongs to the nudge alone"
         return 1
     fi
@@ -1967,7 +1967,7 @@ test_ctx_warning_band_edges() {
     out=$(_stop_with_ctx 65 "$UUID_B") || return 1
     assert_output_contains "$out" "rotate skill" "the nudge owns exactly 65 under defaults" || return 1
     out=$(_stop_with_ctx 65 "$UUID_B") || return 1
-    if printf '%s' "$out" | grep -q "stopping point"; then
+    if grep -q "stopping point" <<< "$out"; then
         echo "  FAIL: exactly the nudge threshold is outside the band even when the nudge is spent"
         return 1
     fi
@@ -1985,7 +1985,7 @@ test_ctx_warning_survives_an_interleaved_teammate() {
     _stop_with_ctx 60 "$UUID_B" >/dev/null || return 1
     local out
     out=$(_stop_with_ctx 60 "$UUID_A") || return 1
-    if printf '%s' "$out" | grep -q "stopping point"; then
+    if grep -q "stopping point" <<< "$out"; then
         echo "  FAIL: a teammate's warning must not re-arm the lead's"
         return 1
     fi
@@ -1993,7 +1993,7 @@ test_ctx_warning_survives_an_interleaved_teammate() {
     assert_output_contains "$out" "consider rotating" "the nudge still fires once for A" || return 1
     _stop_with_ctx 85 "$UUID_B" >/dev/null || return 1
     out=$(_stop_with_ctx 85 "$UUID_A") || return 1
-    if printf '%s' "$out" | grep -q "consider rotating"; then
+    if grep -q "consider rotating" <<< "$out"; then
         echo "  FAIL: a teammate's nudge must not re-arm the lead's"
         return 1
     fi
@@ -2014,7 +2014,7 @@ test_ctx_tiers_are_silent_for_a_teammate() {
     _rot_hook_session "rot-ctx-teammate"
     local out
     out=$(_stop_with_ctx_as_teammate 64 "$UUID_B") || return 1
-    if printf '%s' "$out" | grep -q "stopping point"; then
+    if grep -q "stopping point" <<< "$out"; then
         echo "  FAIL: a teammate must not be warned with the lead's reading"
         return 1
     fi
@@ -2023,7 +2023,7 @@ test_ctx_tiers_are_silent_for_a_teammate() {
         return 1
     fi
     out=$(_stop_with_ctx_as_teammate 85 "$UUID_B") || return 1
-    if printf '%s' "$out" | grep -q "consider rotating"; then
+    if grep -q "consider rotating" <<< "$out"; then
         echo "  FAIL: a teammate must not be nudged to rotate on the lead's reading"
         return 1
     fi

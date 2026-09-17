@@ -92,7 +92,7 @@ test_adopt_refuses_a_directory_already_linked() {
         echo "  FAIL: Should have failed for a directory already linked under another name"
         return 1
     fi
-    if ! echo "$output" | grep -q "first-name"; then
+    if ! grep -q "first-name" <<< "$output"; then
         echo "  FAIL: Error message should name the existing session 'first-name': $output"
         return 1
     fi
@@ -138,7 +138,7 @@ test_adopt_orphaned_records_noninteractive_hints() {
         echo "  FAIL: non-interactive re-adopt should fail without a terminal"
         return 1
     fi
-    if ! echo "$output" | grep -qi "re-run interactively"; then
+    if ! grep -qi "re-run interactively" <<< "$output"; then
         echo "  FAIL: error should hint at re-running interactively: $output"
         return 1
     fi
@@ -157,7 +157,7 @@ test_adopt_orphaned_records_decline_cancels() {
     local output rc=0
     output=$(cd "$project_dir" && printf 'n\n' | CS_ASSUME_TTY=1 "$CS_BIN" -adopt new-name 2>&1) || rc=$?
     [ "$rc" -eq 0 ] || { echo "  FAIL: declining re-adopt should exit 0: $output"; return 1; }
-    if ! echo "$output" | grep -qi "cancelled"; then
+    if ! grep -qi "cancelled" <<< "$output"; then
         echo "  FAIL: output should say Cancelled: $output"
         return 1
     fi
@@ -175,7 +175,7 @@ test_adopt_fails_if_session_name_exists() {
         return 1
     fi
 
-    if ! echo "$output" | grep -qi "already exists"; then
+    if ! grep -qi "already exists" <<< "$output"; then
         echo "  FAIL: Error message should mention 'already exists': $output"
         return 1
     fi
@@ -201,7 +201,7 @@ test_list_shows_adopted_sessions() {
     local output
     output=$("$CS_BIN" -list 2>&1)
 
-    if ! echo "$output" | grep -q "my-session"; then
+    if ! grep -q "my-session" <<< "$output"; then
         echo "  FAIL: cs -list should show adopted session 'my-session'"
         echo "  Output: $output"
         return 1
@@ -231,7 +231,7 @@ test_adopt_preserves_existing_git_repo() {
 
     local log_output
     log_output=$(cd "$project_dir" && git log --oneline --format="%s")
-    if ! echo "$log_output" | grep -q "initial"; then
+    if ! grep -q "initial" <<< "$log_output"; then
         echo "  FAIL: Original git commit 'initial' not found in history"
         echo "  History: $log_output"
         return 1
@@ -264,7 +264,7 @@ test_adopt_into_git_repo_without_claude_md_stages_bookkeeping() {
 
     local log_output
     log_output=$(git -C "$project_dir" log --oneline --format="%s")
-    if ! echo "$log_output" | grep -q "^Adopt as cs session: my-session$"; then
+    if ! grep -q "^Adopt as cs session: my-session$" <<< "$log_output"; then
         echo "  FAIL: Adopt commit 'Adopt as cs session: my-session' not found in history"
         echo "  History: $log_output"
         return 1

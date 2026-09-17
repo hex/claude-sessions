@@ -686,7 +686,7 @@ test_no_color_emits_no_escapes() {
     local out
     out=$(run_sl "$FIXTURE_DOCS")
     [ -n "$out" ] || { echo "  FAIL: expected non-empty output, got nothing"; return 1; }
-    if printf '%s' "$out" | grep -q $'\033'; then
+    if grep -q $'\033' <<< "$out"; then
         echo "  FAIL: NO_COLOR output contained an ESC byte"
         return 1
     fi
@@ -717,7 +717,7 @@ test_malformed_stdin_fallback() {
         echo "  FAIL: expected a non-empty fallback line"
         return 1
     fi
-    if printf '%s' "$out" | grep -q $'\033'; then
+    if grep -q $'\033' <<< "$out"; then
         echo "  FAIL: fallback should be plain text"
         return 1
     fi
@@ -754,7 +754,7 @@ test_ctx_threshold_red() {
     local out
     out=$(CS_STATUSLINE_NOW=1000 run_sl "$json")
     assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◕ ctx" "ctx 65% should invert to the crit fill" || return 1
-    if ! printf '%s' "$out" | grep -qF "$(printf '\033[0m')"; then
+    if ! grep -qF "$(printf '\033[0m')" <<< "$out"; then
         echo "  FAIL: colored line must contain a reset"
         return 1
     fi
@@ -1030,7 +1030,7 @@ test_term_dumb_is_plain() {
     local out
     out=$(run_sl "$FIXTURE_DOCS")
     [ -n "$out" ] || { echo "  FAIL: expected non-empty output, got nothing"; return 1; }
-    if printf '%s' "$out" | grep -q $'\033'; then
+    if grep -q $'\033' <<< "$out"; then
         echo "  FAIL: TERM=dumb should suppress all escapes"
         return 1
     fi
@@ -1072,7 +1072,7 @@ test_force_color_zero_is_plain() {
     export COLORTERM="truecolor"   # must be overridden by FORCE_COLOR=0
     local out
     out=$(run_sl "$FIXTURE_DOCS")
-    if printf '%s' "$out" | grep -q $'\033'; then
+    if grep -q $'\033' <<< "$out"; then
         echo "  FAIL: FORCE_COLOR=0 should suppress all escapes"
         return 1
     fi
