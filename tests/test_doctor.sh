@@ -1227,6 +1227,26 @@ test_doctor_reports_a_lock_held_by_another_users_process_as_held() {
     assert_output_not_contains "$output" "rm -r" "no removal advice for a held lock" || return 1
 }
 
+# When ps itself fails (a denied exec, a process listing the caller may not
+# read) doctor knows nothing about the holder and must not tell the user to
+# remove the lock.
+test_doctor_does_not_call_a_lock_stale_when_ps_cannot_answer() {
+    local sess="$TEST_TMPDIR/sess-nops"
+    mkdir -p "$sess/.cs/memory"
+    git -C "$sess" init -q
+    mkdir -p "$sess/.git/cs/integrate.lock"
+    echo "$$" > "$sess/.git/cs/integrate.lock/pid"
+    printf '#!/bin/sh\nexit 126\n' > "$TEST_TMPDIR/ps-denied"
+    chmod +x "$TEST_TMPDIR/ps-denied"
+    local output
+    output=$(CLAUDE_SESSION_DIR="$sess" CLAUDE_SESSION_META_DIR="$sess/.cs" \
+        CS_CLAUDE_DIR="$TEST_TMPDIR/claude-np" CS_PS_BIN="$TEST_TMPDIR/ps-denied" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "ps could not check it (exit 126)" \
+        "a failed check is reported as unknown" || return 1
+    assert_output_not_contains "$output" "rm -r" "no removal advice on an unknown" || return 1
+    assert_output_not_contains "$output" "held by a running integrate" "and not held either" || return 1
+}
+
 test_doctor_names_a_lock_whose_pid_is_dead_as_stale() {
     local sess="$TEST_TMPDIR/sess-deadlock"
     mkdir -p "$sess/.cs/memory"
@@ -1257,6 +1277,7 @@ test_doctor_is_silent_with_no_integrate_lock() {
 run_test test_doctor_names_a_stale_integrate_lock
 run_test test_doctor_reports_a_lock_whose_pid_is_alive_as_held
 run_test test_doctor_reports_a_lock_held_by_another_users_process_as_held
+run_test test_doctor_does_not_call_a_lock_stale_when_ps_cannot_answer
 run_test test_doctor_names_a_lock_whose_pid_is_dead_as_stale
 run_test test_doctor_is_silent_with_no_integrate_lock
 

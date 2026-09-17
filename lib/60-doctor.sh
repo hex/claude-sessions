@@ -650,8 +650,17 @@ _doctor_check_integrate_lock() {
     case "$pid" in
         *[!0-9]*|"") pid="" ;;
     esac
-    if [ -n "$pid" ] && ps -p "$pid" >/dev/null 2>&1; then
+    # ps exits 1 for a pid that does not exist; any other failure (a denied
+    # exec, a restricted process listing) means the answer is unknown, and an
+    # unknown must not come with removal advice.
+    local ps_rc=0
+    if [ -n "$pid" ]; then
+        "${CS_PS_BIN:-ps}" -p "$pid" >/dev/null 2>&1 || ps_rc=$?
+    fi
+    if [ -n "$pid" ] && [ "$ps_rc" -eq 0 ]; then
         _doctor_ok "Integrate lock: $lock held by a running integrate (pid $pid)"
+    elif [ -n "$pid" ] && [ "$ps_rc" -ne 1 ]; then
+        _doctor_warn "Integrate lock: $lock records pid $pid but ps could not check it (exit $ps_rc); remove the lock only once no cs is running"
     else
         _doctor_warn "Integrate lock: $lock exists with no integrate running; autosave skips while it does. Remove it with: rm -r \"$lock\""
     fi
