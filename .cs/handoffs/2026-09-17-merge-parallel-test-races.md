@@ -2,7 +2,8 @@
 parent: 655bde7e-d351-4345-a86e-24ba3c1e59b2
 created: 2026-09-17T09:30:00Z
 purpose: collect the two in-flight reviews of fix/parallel-test-races, fold anything material, then offer Alex the merge gate
-status: unconsumed
+status: consumed
+consumed_by: 7cc98cc6-b428-41cd-b399-a06757e3d319
 ---
 
 ## 1. Next Step

@@ -654,10 +654,13 @@ _doctor_check_integrate_lock() {
     # another user (EPERM) from a pid that is gone (ESRCH). Only ESRCH is
     # evidence of absence; anything else the check cannot read is unknown,
     # and an unknown must not come with removal advice. LC_ALL=C pins the
-    # message the builtin prints, which is the only channel for the errno.
+    # message the builtin prints, which is the only channel for the errno;
+    # it is assigned inside the subshell rather than as a command prefix
+    # because bash 3.2 does not apply a prefix assignment to a builtin's
+    # locale (probed: `$(LC_ALL=C printf "%.1f" 1)` prints 1,0 under fr_FR).
     local verdict="stale" err=""
     if [ -n "$pid" ]; then
-        if err=$(LC_ALL=C kill -0 "$pid" 2>&1); then
+        if err=$( LC_ALL=C; kill -0 "$pid" 2>&1 ); then
             verdict="held"
         else
             case "$err" in
