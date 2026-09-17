@@ -793,3 +793,39 @@ signals the caller's own group, always succeeds) and `rm -r ... || :` in _integr
 the path). Both red-first via standalone /bin/bash probes, not the suite. Left as task #644:
 empty-pid stale advice vs autosave's pidless hold, PID-namespace ESRCH, 93 surviving
 printf|grep -q sites in other suites, pid-1 EPERM coverage as root. Ghost on 540d7ea running.
+Ghost 67/67 on 540d7ea. Merged to main as 4db2d49 (--no-ff, 11 commits), installed, doctor
+drift OK (the two WARNs are the sidebar's statusline bridge and a shadow ref for the sidebar's
+own session id, both pre-existing). Branch deleted. Main is 25 commits ahead of origin,
+unpushed, unreleased. Note: the narrative IS tracked in this checkout (checkout refused with
+it modified) — commit it by path before switching branches.
+#642 closed as a measurement artefact. The peer session's pre-shim logs (Falcon, od60,
+11:26-11:36) hold zero find execs; its PATH shim (12:05) is `exec find "$@"` with the shim
+dir first on PATH, so it re-execs itself forever — 121,549 find lines in its execs.log, two
+orphans (42886, 54280) still looping at ppid 1. I made the same mistake in my own repro:
+under the zsh Bash tool `command -v find` printed the bare name, so `exec "$real"` recursed.
+Rule: a PATH shim must exec an absolute path (/usr/bin/find), never the bare name.
+_refresh_usage runs three `find -maxdepth 1` per refresh under a mkdir lock; no storm.
+Alex had the two orphan shims killed (42886, 54280, verified by pid first) and the peer
+notified; peer confirmed, deleted its shim, withdrew the finding. Memory written:
+project_path_shim_exec_absolute. Refresh cadence summary given to Alex from the source:
+600 s usage floor and backoff, 120 s lock reclaim, 5 min org cache, 5 s git/tmux-client,
+300 s tmux-real, 12 h term. Unfiled observation: ~/.cache/cs/tmux-client and tmux-real hold
+~4,000 entries each and nothing prunes them; offered to file, awaiting Alex.
+Filed #645 (tmux-client/tmux-real cache dirs never pruned). Repaint check: cs registers
+refreshInterval 1 (lib/70-statusline.sh:95, pinned by test_install.sh:891); Alex's live
+settings had the sidebar bridge at 5. On Alex's word set it back to 1 in ~/.claude/settings.json
+(jq, verified) and told the claude peer; the bridge command is unchanged.
+
+## 2026-09-17 — remove the cs-hint mod (#646)
+
+Alex: "let's remove cs-hint", chose delete-from-cs over a local off switch. Correction to
+my first read: cs-hint DID ship (2026.9.16 Features entry), so it needs a Removed changelog
+entry and an upgrade path, not a dropped entry. Mechanism: `cs-hint` added to RETIRED_SKILLS —
+mods deploy under ~/.claude/skills/<mod>/, and installer + uninstall already rm -rf every
+retired skill dir; red-first install test seeds the dir and asserts removal (RED on the old
+installer, GREEN after). Deleted mods/cs-hint, tests/test_mod_hint.sh, the doctor call + test,
+the hooks.md section (435-497), CS_NO_HINTS in configuration.md, the state/heartbeat/spoken
+rows, three README bullets. Suite count is now 66. Commit 8a1f1eb on feat/remove-hint-mod;
+ghost + Codex (plugin agent) in flight. Note: `rg -c` prints nothing on zero matches and its
+exit 1 stops an && chain — my verification line printed one stray "1" from hooks.md before
+the perl strip ran; re-verified with rg -n afterwards, clean.
