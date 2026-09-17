@@ -920,3 +920,25 @@ Commit: `ebc3c94`. 54 bun, 6/6 `tests/test_mod_rotate.sh` (including
 `claude plugin validate`, which now inventories `$.ui.ask (via askToClear,
 askToWrap)` and no `$.clock.every`). Both mutations checked: inverting the
 `CLEAR_YES` comparison reddens 6, and `marginTop={2}` reddens 2.
+
+## 2026-09-17 (later) — back to the countdown, plus a pane
+
+Alex reversed the ask for the forced rotation through a claude-sessions mail
+(confirmed with him directly here before touching code): the grace counts
+down again (`ce8365b`, the old tests restored verbatim). No-ctx, the fill and
+the one-key wrap dialog stay.
+
+He picked "first per session" for a handoff pane (`94b1b55`). Measured live
+on 2.1.274, 200-column tmux: the pane docked on the right, showed the Next
+Step lines (the next `#` section excluded) and a count in step with the band;
+zero ran `/clear` and the pane closed (no frame rows left); a second armed
+grace in the same process counted on the band with no pane.
+
+Contract fact the relayed design got wrong: a pane a mod opens on its own is
+NOT placed inline below 110 — it waits undrawn below 144 columns (110 only
+once the person asked for that id). "Once per session" is per load of the mod;
+a reload shows it again.
+
+`$.clock.after` timers in tests: the pane's open is an `after` timer, so tests
+counting `after` timers to prove "no /rotate scheduled" must spend it first
+(`fireAfter`) and count only uncancelled ones.
