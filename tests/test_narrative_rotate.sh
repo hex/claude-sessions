@@ -729,6 +729,9 @@ test_narrative_budget_reads_any_spelling_of_zero_as_the_default() {
     assert_eq "8" "$(_narrative_budget 08 5)" "08 is decimal 8" || return 1
     assert_eq "5" "$(_narrative_budget "" 5)" "empty falls back" || return 1
     assert_eq "5" "$(_narrative_budget abc 5)" "non-numeric falls back" || return 1
+    assert_eq "5" "$(_narrative_budget 99999999999999999999 5)" "a value past 64 bits falls back, not wraps" || return 1
+    assert_eq "5" "$(_narrative_budget 9999999999999999 5)" "16 digits falls back" || return 1
+    assert_eq "999999999999999" "$(_narrative_budget 999999999999999 5)" "15 digits is kept" || return 1
 }
 
 test_named_rotate_refuses_a_dangling_adopted_link() {

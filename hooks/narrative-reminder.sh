@@ -112,9 +112,10 @@ NL='
 '
 
 # Printed as decimal: a leading zero would reach the callers' arithmetic as
-# an octal literal, and `08` aborts it.
+# an octal literal, and `08` aborts it. Sixteen digits or more take the default:
+# bash arithmetic wraps past 64 bits, so such a value would arrive silently wrong.
 _num_or() {  # value, default -> prints value if a plain integer, else default
-    case "${1:-}" in ''|*[!0-9]*) echo "$2";; *) echo "$((10#$1))";; esac
+    case "${1:-}" in ''|*[!0-9]*|????????????????*) echo "$2";; *) echo "$((10#$1))";; esac
 }
 
 # The queue is a directory of one file per task (written via tmp+rename by

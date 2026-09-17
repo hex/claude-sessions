@@ -1689,6 +1689,13 @@ test_nudge_threshold_override() {
         echo "  FAIL: 64 under the 65 fallback must not nudge"
         return 1
     fi
+    # Twenty digits wrap past 64 bits to a huge positive number, which would
+    # silence the nudge for good; the override must fall back instead.
+    _rot_hook_session "rot-nudge-env4"
+    export CS_ROTATE_NUDGE_CTX=99999999999999999999
+    out=$(_stop_with_ctx 65 "$UUID_B") || { unset CS_ROTATE_NUDGE_CTX; return 1; }
+    unset CS_ROTATE_NUDGE_CTX
+    assert_output_contains "$out" "rotate skill" "a 64-bit-overflowing override falls back to 65" || return 1
 }
 
 test_nudge_yields_to_queue_drain() {

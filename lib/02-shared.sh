@@ -57,10 +57,11 @@ CS_NARRATIVE_KEEP_DEFAULT=114688
 # in any spelling (0, 00) all fall back: a zero budget would rotate on every
 # run. The zero check runs on the number, not the text, and the number is
 # decimal: a leading zero would reach the callers' arithmetic as an octal
-# literal, and `08` aborts it.
+# literal, and `08` aborts it. Sixteen digits or more fall back too: bash
+# arithmetic wraps past 64 bits, and a wrapped budget is a silent wrong one.
 _narrative_budget() {  # value, default
     local n
-    case "${1:-}" in ''|*[!0-9]*) echo "$2"; return;; esac
+    case "${1:-}" in ''|*[!0-9]*|????????????????*) echo "$2"; return;; esac
     n=$((10#$1))
     if [ "$n" -gt 0 ]; then echo "$n"; else echo "$2"; fi
 }

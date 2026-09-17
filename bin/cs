@@ -199,10 +199,11 @@ CS_NARRATIVE_KEEP_DEFAULT=114688
 # in any spelling (0, 00) all fall back: a zero budget would rotate on every
 # run. The zero check runs on the number, not the text, and the number is
 # decimal: a leading zero would reach the callers' arithmetic as an octal
-# literal, and `08` aborts it.
+# literal, and `08` aborts it. Sixteen digits or more fall back too: bash
+# arithmetic wraps past 64 bits, and a wrapped budget is a silent wrong one.
 _narrative_budget() {  # value, default
     local n
-    case "${1:-}" in ''|*[!0-9]*) echo "$2"; return;; esac
+    case "${1:-}" in ''|*[!0-9]*|????????????????*) echo "$2"; return;; esac
     n=$((10#$1))
     if [ "$n" -gt 0 ]; then echo "$n"; else echo "$2"; fi
 }
@@ -4163,7 +4164,10 @@ run_spawn() {
         # Brief before seed: the launch treats the seed as the signal, so a
         # brief must never be missing once the seed is visible. A copy that
         # fails stops here, before the seed and the window: errexit does not
-        # see a failed left operand, so the abort is explicit.
+        # see a failed left operand, so the abort is explicit. The seed write
+        # below is an AND list for the same reason, and it takes the staged
+        # brief down with it: a brief left without its seed would be inherited
+        # by the next spawn of this name, which asked for no brief at all.
         if [ -n "$brief" ]; then
             cp "$brief" "$sdir/$name.brief.md.tmp" \
                 && mv "$sdir/$name.brief.md.tmp" "$sdir/$name.brief.md" \
@@ -4175,7 +4179,8 @@ run_spawn() {
             # alone leaves it empty; the guard expands to nothing in that case.
             local _t
             for _t in ${tasks[@]+"${tasks[@]}"}; do printf '%s\n' "$_t"; done
-        } > "$seed.tmp" && mv "$seed.tmp" "$seed"
+        } > "$seed.tmp" && mv "$seed.tmp" "$seed" \
+            || { rm -f "$seed.tmp" "$sdir/$name.brief.md"; error "cs -spawn: cannot stage the seed in $sdir"; }
     fi
     _spawn_window "$name"
 }
