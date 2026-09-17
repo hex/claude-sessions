@@ -2,7 +2,8 @@
 parent: 78081cbe-36e2-4d13-9ae7-d1349ed1fb69
 created: 2026-09-17T13:25:00Z
 purpose: Replace the forced rotation's 20-second countdown with a $.ui.ask dialog, then gate the whole cs/mods branch
-status: unconsumed
+status: consumed
+consumed_by: 5e78fa59-b25a-4cee-ab89-c0960aa06052
 ---
 
 # Next Step
