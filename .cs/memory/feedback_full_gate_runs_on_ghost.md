@@ -28,3 +28,10 @@ Repeated a third time 2026-09-16 ("why do we run tests here? it hogs the machine
 suite is not an exemption either. What IS fine locally: `bun test` for a mod, `tests/test_mod_rotate.sh`
 (seconds), and a one-second in-process check that sources test_lib and runs one test function against
 a mutated helper. Anything that runs `tests/test_*.sh` end to end goes to ghost.
+
+**Caveat (2026-09-16, the v2026.9.16 release):** ghost runs bash 5.3, so eight green ghost runs
+never reached a line that only stock bash 3.2 rejects (`"$EPOCHREALTIME"` inside a double-quoted
+string under `set -u`; CI's macos-latest lane went red). The gate's only bash-3.2 judge is CI. A
+3.2-specific defect is reproduced with a one-line `/bin/bash -u -c` probe and the ONE suite it
+lives in run under `/bin/bash` with `/bin` first on PATH; that is a targeted verification, not the
+full run, and the push to CI is still the verdict. See [[release-gate-skips-ci]].

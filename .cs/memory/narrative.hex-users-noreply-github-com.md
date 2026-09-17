@@ -670,3 +670,67 @@ line printed. Pushed; CI re-polling. Lesson for #638/the gate: ghost cannot
 stand in for the bash-3.2 lane; a 3.2 run of any suite touching `$VAR` in
 strings belongs in the gate.
 CI 6/6 green on 479cd74 (run 35116138008).
+
+Doc audit (agent, read-only): 13 issues, all fixed in the release commit; the
+reports are kept at scratchpad/review/{doc-review,range-review}.md. Range review:
+no Critical/Important, four Minors filed as #640. Alex approved the notes.
+Release commit 89a6406 "Release v2026.9.16"; session-state commit 5a5f67f on top
+(.cs only, needs `git commit -- <path>` because .cs is gitignored-but-tracked, a
+plain `git add` refuses). CI 6/6 on 5a5f67f (run 35116871208). Tag + GitHub
+release on 89a6406 via `gh release create --target <full sha>` (a short sha is
+"target_commitish is invalid"). Release workflow 35117505694 green, 12 signed
+assets. Installed locally: cs 2026.9.16, doctor deploy drift OK.
+
+Self-inflicted scare: a stray `git checkout 89a6406 -- .` before the install
+rewound the two tracked .cs files (and lost one uncommitted narrative append,
+re-typed here). Never checkout a commit over `.` in this repo; the working tree
+already was the release tree.
+
+Next per Alex's order: #603 and #609 (parallel-run test races) in one branch,
+with #638 (ghost flakes) in the same class. #609 has fresh evidence from today.
+
+## 2026-09-17 — false "newer conversation" notice on iterm-agents-sidebar
+
+Alex's screenshot: the launch card said "A newer conversation was opened here
+outside cs: e8c7b6c7…". Measured: that transcript is a headless Agent SDK run
+(`entrypoint: sdk-py`, 24 lines, one user turn "Review this change for security
+vulnerabilities… page.html", 06:34Z), one of three written in the same minute
+beside the recorded conversation c8951760. The gate at lib/75-launch.sh:471-490
+asks `_discover_session_uuid_in` for the newest transcript; discovery skips
+teammates but not SDK or `claude -p` runs, so any headless run in a session
+directory reads as a rival. Not fixed (Alex asked what it was). Candidate fix:
+discovery skips transcripts whose first user line carries a non-interactive
+entrypoint; measure the entrypoint values over real project dirs first.
+
+Alex: "yes we need to fix this" → task #641, branch fix/discovery-skips-headless.
+Population: 5522 transcripts, first user line entrypoint: sdk-py 3050, sdk-cli 1620,
+cli 842 (457 of them teammates), claude-desktop 6, no user line 4. One cs session
+(hexul.com) is ALREADY bound to a transcript an SDK run started (0b7dd256) but
+that Alex then continued: 802 cli lines after the sdk-py first line, and it was
+resumed through cs on 09-16. That case set the rule: skip only when the file
+opens sdk- AND has no other entrypoint anywhere; no entrypoint or unknown =
+conversation. Rule over the sessions' own dirs: 2467 headless skipped, 391
+teammates skipped, 287 cli kept, 1 adopted run kept, 0 wrong either way.
+Four red-first tests in test_uuid.sh (notice, desktop+cli control, orphan bind,
+adopted run); mutation (drop the second read) turns the adopted-run test red.
+Rename _is_teammate_transcript → _is_bystander_transcript (two sites only).
+Commits b79da61 (fix) + 6d1c4e5 (changelog). Ghost gate + Codex round 1 running.
+Ghost 67/67 on 6d1c4e5.
+Codex round 1: FIX. Important and real: the negated-prefix ERE
+`([^s"]|s[^d"]|sd[^k"]|sdk[^-"])` cannot match the values the prefix swallows
+whole ("", s, sd, sdk) because every alternative needs one more character
+before the closing quote. Fixed 5a5ee99 with `|"|s"|sd"|sdk"` alternatives;
+regression test seeds all four, red on the old regex. Lesson worth keeping: a
+"does not start with P" regex needs an alternative for every proper prefix of
+P ending at the delimiter. Minors: comment promised no-entrypoint = conversation
+for ANY line, code only honours the opening line (comment tightened); the
+"those are short" cost claim replaced by a measurement: largest purely headless
+transcript 4.4 MB reads in 61 ms. Ghost run 2 + Codex round 2 running.
+Ghost run 2: 67/67 on 5a5ee99. Codex round 2 first attempt read the round-1 report file and ended on its text with no verdict of its own; re-dispatched with the findings inlined (never point Codex at a prior report file).
+Codex round 2 (third attempt; the first read my report file, the second hit
+"model at capacity", -m is refused on a ChatGPT account): MERGE, all three
+closed. Fable closure review also MERGE; its two wording nits folded as 26f7469.
+Alex chose "Wait for Codex round 2" at the gate, then merged: main 2ce9b0f,
+installed, doctor drift OK, branch deleted. Main is 5 commits ahead of origin,
+unpushed, unreleased. hexul.com's binding (0b7dd256, the adopted run) is
+untouched by design: it is a conversation Alex continued.
