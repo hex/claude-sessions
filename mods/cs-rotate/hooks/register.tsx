@@ -43,6 +43,8 @@ export function surfaceColor(bg: string | undefined): string | undefined {
 // relative to the session's cwd, which under cs is the session directory (or
 // its worktree).
 export const HEARTBEAT = '.cs/local/cs-rotate.heartbeat'
+// Written by /wrap's last pass: the conversation it wrapped.
+export const WRAPPED = '.cs/local/wrapped'
 
 // The rotate skill's last step writes the handoff's basename here; cs's
 // SessionStart hook reads it on the next conversation and starts the handoff's
@@ -102,13 +104,10 @@ let adopted: string | undefined
 let clearSeen = false
 let birth: string | undefined
 let startPercent: number | undefined
-// When a prompt last entered the conversation (or, before any, when the band
-// first drew in this load): a summary written after it means a wrap already ran.
-let lastPromptAt: number | undefined
 
 export function register(on: On) {
   // A (re)load has no countdown: the engine cancelled the old one's timers.
-  left = undefined; ticker = undefined; bandIdle = false; preview = undefined; previewShown = false; adopted = undefined; clearSeen = false; birth = undefined; startPercent = undefined; lastPromptAt = undefined
+  left = undefined; ticker = undefined; bandIdle = false; preview = undefined; previewShown = false; adopted = undefined; clearSeen = false; birth = undefined; startPercent = undefined
   on('session.start', async ($, e, next) => {
     // Only a cs session has .cs/local; anywhere else the mod stays silent.
     const local = `${e.cwd}/.cs/local`
@@ -129,7 +128,7 @@ export function register(on: On) {
   // A prompt entering the session, from anywhere, means the conversation is
   // not done with: the countdown stops and the prompt goes through untouched.
   on('prompt.submit', async ($, e, next) => {
-    lastPromptAt = await $.clock.now()
+    await clearWrapped($)
     if (ticker) stopCountdown($)
     return next(e)
   })
@@ -161,7 +160,7 @@ export function register(on: On) {
     const percent = context.percent
     if (!armed && (percent === undefined || percent < (await threshold($)))) return drawn
     if (!(await ownsRotation($))) return drawn
-    const wrapped = !armed && (await wrappedSincePrompt($))
+    const wrapped = !armed && (await wrapFinished($))
     const fill = surfaceColor(await $.env.get("CS_TERM_BG_RGB"))
     const { Box, Text, Button } = await $.ui.resolve(e)
     // One capsule in the status bar's idiom: the keys on the bar's own fill,
@@ -417,17 +416,26 @@ async function rotate($: EngineInterface) {
   await $.command.run({ command: 'rotate', args: '' })
 }
 
-// Whether .cs/summary.md was written after the last prompt: the wrap that
-// wrote it is the conversation's latest act, so the key has nothing to offer
-// until a prompt moves it on. A /wrap the band runs is not a prompt, and a
-// typed one is submitted before the summary is written, so both count.
-async function wrappedSincePrompt($: EngineInterface): Promise<boolean> {
-  if (lastPromptAt === undefined) lastPromptAt = await $.clock.now()
-  const summary = `${await $.session.cwd()}/.cs/summary.md`
+// /wrap's last pass writes WRAPPED naming the conversation it wrapped (the
+// lead's claude_session_id), so a wrap that finished is the conversation's
+// latest act and the key has nothing to offer. The next prompt entering that
+// conversation clears it. A summary written any other way proves nothing.
+async function wrapFinished($: EngineInterface): Promise<boolean> {
+  const marker = await readWrapped($)
+  return marker !== '' && marker === (await $.session.id())
+}
+
+async function clearWrapped($: EngineInterface) {
+  const marker = await readWrapped($)
+  if (marker === '' || marker !== (await $.session.id())) return
+  await $.fs.write(`${await $.session.cwd()}/${WRAPPED}`, '').catch(() => {})
+}
+
+async function readWrapped($: EngineInterface): Promise<string> {
   try {
-    return (await $.fs.stat(summary)).mtimeMs > lastPromptAt
+    return (await $.fs.read(`${await $.session.cwd()}/${WRAPPED}`)).trim()
   } catch {
-    return false // no summary yet
+    return '' // no wrap has finished here
   }
 }
 

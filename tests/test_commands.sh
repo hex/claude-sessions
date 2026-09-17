@@ -388,6 +388,26 @@ test_release_verifies_ci_workflow() {
 # ============================================================================
 echo "Running test_commands.sh"
 echo ""
+
+# /wrap's last pass marks the conversation it wrapped, so the rotate band stops
+# offering a wrap that already finished. The command is run exactly as the file
+# spells it, against a state line quoted and unquoted, because the band compares
+# the marker byte for byte with the conversation id.
+test_wrap_marks_the_wrapped_conversation() {
+    local block dir state
+    block=$(awk '/^## Pass 4/{p=1; next} /^## /{p=0} p && /^```/{f=!f; next} p && f' "$COMMANDS_DIR/wrap.md")
+    [ -n "$block" ] || { echo "  FAIL: wrap.md has no Pass 4 command block"; return 1; }
+    for state in 'claude_session_id: 11111111-2222-4333-8444-555555555555' \
+                 'claude_session_id: "11111111-2222-4333-8444-555555555555"  '; do
+        dir="$TEST_TMPDIR/wrapped.$RANDOM"
+        mkdir -p "$dir/.cs/local"
+        printf 'claude_session_color: red\n%s\nlast_resumed: 2026-09-17\n' "$state" > "$dir/.cs/local/state"
+        (cd "$dir" && bash -c "$block") || { echo "  FAIL: the Pass 4 command failed"; return 1; }
+        assert_eq "11111111-2222-4333-8444-555555555555" "$(cat "$dir/.cs/local/wrapped")" \
+            "the marker names the lead conversation from state: $state" || return 1
+    done
+}
+
 run_test test_checkpoint_allowed_tools_hyphenated
 run_test test_store_secret_has_frontmatter
 run_test test_store_secret_backend_neutral
@@ -488,6 +508,7 @@ test_summary_reads_live_narratives_not_archives() {
 }
 
 run_test test_wrap_rotates_the_narrative_after_the_summary
+run_test test_wrap_marks_the_wrapped_conversation
 run_test test_summary_reads_live_narratives_not_archives
 
 report_results

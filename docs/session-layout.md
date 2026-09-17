@@ -85,6 +85,7 @@ user-owned `CLAUDE.md` is never touched.
 | `rotate-nudged` | Conversation UUID last nudged to rotate by the narrative reminder — keeps the 65%-context nudge to once per conversation. |
 | `cs-rotate.heartbeat` | UTC timestamp of the last session start at which the cs-rotate mod ran — `cs -doctor` reports the mod from this file, never from the plugin directory being present. |
 | `cs-rotate.forced` | The conversation `CS_ROTATE_FORCE_CTX` already rotated, written before the `/rotate` runs so a failed one is not retried every turn. |
+| `wrapped` | The conversation a `/wrap` finished in, written by its last pass; the cs-rotate band hides the wrap key while it names the conversation, and the next prompt empties it. |
 | `disabled` | Opts the directory out of cs's hooks entirely. Present, the hooks decline as if it were not a session, whichever front end opened it. Before hooks resolved a session from the directory, a `claude` started outside `cs` in a session folder was inert; this restores that on request instead of by accident. |
 | `queue/` | The walk-away task queue (`cs -queue`): one file per task, staged in `queue.tmp/` and renamed into place so the drain never reads a torn entry. The drain pops the lexically first file by moving it aside — atomic against a second drain. |
 | `queue.state` | Drain state machine for the queue: `idle`, `armed`, or `draining`. |

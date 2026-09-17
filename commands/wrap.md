@@ -22,6 +22,16 @@ Stop after step 4. Step 5's prose critic belongs to standalone `/summary`: it sp
 
 Run `cs -narrative rotate` once and keep its single output line. It archives the oldest `## ` sections of your narrative verbatim into `.cs/narrative-archive/<actor>/` when the live file is over its byte budget, and prints `nothing to rotate` otherwise. Do not read or edit the narrative yourself for this pass; the helper does the byte-exact cut and commits it when the session is tracked.
 
+## Pass 4 — Mark the wrap finished
+
+Run this once, from the session root, only after the three passes above completed:
+
+```sh
+awk -F': *' '/^claude_session_id:/ { gsub(/"|[ \t]+$/, "", $2); print $2 }' .cs/local/state > .cs/local/wrapped
+```
+
+It names the conversation this wrap finished in, so the cs-rotate band stops offering `2: wrap up this session` until the next prompt. Skip it if any pass failed: a wrap that did not finish should stay one key away.
+
 ## Report
 
 Output a brief report with the three labeled items below. No long prose; the summary IS the prose.

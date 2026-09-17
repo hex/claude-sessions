@@ -94,7 +94,8 @@ test_mod_validate_inventories_the_hooks_and_calls() {
     assert_output_contains "$out" '$.clock.after (via forceRotation, startCountdown), $.clock.every (via startCountdown)' "the forced /rotate and the pane's open are one-shot timers and the grace a ticker, nowhere else" || return 1
     assert_output_contains "$out" '$.ui.ask (via askToWrap)' "the wrap key asks through the engine's own dialog" || return 1
     assert_output_contains "$out" '$.ui.close (via openPreview, stopCountdown)' "the handoff pane closes where the count ends, and where it lands after one" || return 1
-    assert_output_contains "$out" '$.fs.stat (via wrappedSincePrompt)' "the only stat is the summary's age, which hides the wrap key" || return 1
+    assert_output_contains "$out" '$.fs.read (via armedHandoff, forceRotation, ownsRotation, readWrapped)' "the wrap marker is read, never a file's age" || return 1
+    assert_output_not_contains "$out" '$.fs.stat' "no rule hangs on a modification time" || return 1
     assert_output_contains "$out" '$.ui.open (via openPreview)' "and opens in one place" || return 1
 }
 
