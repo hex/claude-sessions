@@ -2,7 +2,8 @@
 parent: 7cc98cc6-b428-41cd-b399-a06757e3d319
 created: 2026-09-17T10:45:00Z
 purpose: build task #645 — prune the never-swept ~/.cache/cs/tmux-client and tmux-real cache directories
-status: unconsumed
+status: consumed
+consumed_by: 720d4199-53f6-4f84-b752-a7cd76c222f5
 ---
 
 ## 1. Next Step
