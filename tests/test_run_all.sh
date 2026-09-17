@@ -68,7 +68,7 @@ test_run_all_runs_every_suite_exactly_once() {
     out=$(CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" 2>&1) || rc=$?
     [ "$rc" -eq 0 ] || { echo "expected exit 0, got $rc"; printf '%s\n' "$out"; return 1; }
     [ "$(ran_count)" -eq 7 ] || { echo "expected 7 suites to run, got $(ran_count)"; return 1; }
-    printf '%s' "$out" | grep -q 'all 7 suites passed' || { echo "missing pass line"; printf '%s\n' "$out"; return 1; }
+    grep -q 'all 7 suites passed' <<< "$out" || { echo "missing pass line"; printf '%s\n' "$out"; return 1; }
 }
 
 test_run_all_skips_the_shared_harness() {
@@ -81,7 +81,7 @@ test_run_all_skips_the_shared_harness() {
     # everywhere.
     out=$(CS_TEST_JOBS=3 CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" 2>&1) || return 1
     [ ! -f "$RAN_DIR/test_lib.sh" ] || { echo "test_lib.sh was run as a suite"; return 1; }
-    printf '%s' "$out" | grep -q 'all 3 suites passed' || { echo "harness counted as a suite"; return 1; }
+    grep -q 'all 3 suites passed' <<< "$out" || { echo "harness counted as a suite"; return 1; }
 }
 
 test_run_all_serial_mode_runs_every_suite() {
@@ -97,8 +97,8 @@ test_run_all_reports_the_failing_suite_by_name() {
     local out rc=0
     out=$(CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" 2>&1) || rc=$?
     [ "$rc" -eq 1 ] || { echo "expected exit 1 for a failing suite, got $rc"; return 1; }
-    printf '%s' "$out" | grep -q 'test_fake3.sh' || { echo "failing suite not named"; printf '%s\n' "$out"; return 1; }
-    printf '%s' "$out" | grep -q 'FAILED: 1/5' || { echo "wrong failure tally"; printf '%s\n' "$out"; return 1; }
+    grep -q 'test_fake3.sh' <<< "$out" || { echo "failing suite not named"; printf '%s\n' "$out"; return 1; }
+    grep -q 'FAILED: 1/5' <<< "$out" || { echo "wrong failure tally"; printf '%s\n' "$out"; return 1; }
     # A failure must not stop the other suites: the gate reports every failure
     # in one run rather than making the developer re-run to find the next.
     [ "$(ran_count)" -eq 5 ] || { echo "a failing suite cut the run short at $(ran_count)/5"; return 1; }
@@ -110,9 +110,9 @@ test_run_all_keeps_each_suites_own_output() {
     out=$(CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" 2>&1) || return 1
     local i
     for i in 1 2 3 4 5 6; do
-        printf '%s' "$out" | grep -q "marker-from-test_fake$i.sh" \
+        grep -q "marker-from-test_fake$i.sh" <<< "$out" \
             || { echo "lost output of test_fake$i.sh"; printf '%s\n' "$out"; return 1; }
-        printf '%s' "$out" | grep -q "=== test_fake$i.sh ===" \
+        grep -q "=== test_fake$i.sh ===" <<< "$out" \
             || { echo "lost header of test_fake$i.sh"; return 1; }
     done
 }
@@ -144,7 +144,7 @@ test_run_all_fails_loudly_when_the_log_dir_cannot_be_made() {
     local out rc=0
     out=$(PATH="$stub:$PATH" CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" 2>&1) || rc=$?
     [ "$rc" -ne 0 ] || { echo "exited 0 with no usable log dir"; printf '%s\n' "$out"; return 1; }
-    if printf '%s' "$out" | grep -q 'suites passed'; then
+    if grep -q 'suites passed' <<< "$out"; then
         echo "claimed suites passed while running none"; printf '%s\n' "$out"; return 1
     fi
     [ "$(ran_count)" -eq 0 ] || { echo "expected no suite to have run"; return 1; }
@@ -180,7 +180,7 @@ test_run_all_scales_jobs_with_the_core_count() {
     local out
     out=$(PATH="$(fake_cores 16):$PATH" CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" 2>&1)
     local n
-    n=$(printf '%s' "$out" | sed -n 's/.*at \([0-9][0-9]*\) jobs.*/\1/p' | head -1)
+    n=$(sed -n '/at [0-9][0-9]* jobs/{s/.*at \([0-9][0-9]*\) jobs.*/\1/p;q;}' <<< "$out")
     [ -n "$n" ] || { echo "runner did not announce its job count"; printf '%s\n' "$out"; return 1; }
     [ "$n" -gt 4 ] || { echo "16 cores must buy more than 4 lanes, got $n"; return 1; }
 }
@@ -192,7 +192,7 @@ test_run_all_does_not_oversubscribe_a_small_runner() {
     make_suite_dir 2
     local out n
     out=$(PATH="$(fake_cores 2):$PATH" CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" 2>&1)
-    n=$(printf '%s' "$out" | sed -n 's/.*at \([0-9][0-9]*\) jobs.*/\1/p' | head -1)
+    n=$(sed -n '/at [0-9][0-9]* jobs/{s/.*at \([0-9][0-9]*\) jobs.*/\1/p;q;}' <<< "$out")
     [ "$n" -eq 2 ] || { echo "a 2-core runner must use 2 lanes, got $n"; printf '%s\n' "$out"; return 1; }
 }
 
@@ -206,12 +206,12 @@ test_run_all_reports_each_suite_as_it_finishes() {
     err=$(CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" 2>&1 >/dev/null)
     local i
     for i in 1 2 3 4; do
-        printf '%s' "$err" | grep -q "test_fake$i.sh" \
+        grep -q "test_fake$i.sh" <<< "$err" \
             || { echo "no progress line for test_fake$i.sh"; printf '%s\n' "$err"; return 1; }
     done
-    printf '%s' "$err" | grep -Eq '\[[1-4]/4\] test_fake[1-4]\.sh .*[0-9]+s' \
+    grep -Eq '\[[1-4]/4\] test_fake[1-4]\.sh .*[0-9]+s' <<< "$err" \
         || { echo "progress line must carry [n/total], the name and seconds"; printf '%s\n' "$err"; return 1; }
-    printf '%s' "$err" | grep -q '\[4/4\]' \
+    grep -q '\[4/4\]' <<< "$err" \
         || { echo "the counter must reach the total"; printf '%s\n' "$err"; return 1; }
 }
 
@@ -219,9 +219,9 @@ test_run_all_progress_line_marks_a_failing_suite() {
     make_suite_dir 3 test_fake2.sh
     local err
     err=$(CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" 2>&1 >/dev/null) || true
-    printf '%s' "$err" | grep -E 'test_fake2\.sh' | grep -q 'FAIL' \
+    grep -q 'FAIL' <<< "$(grep -E 'test_fake2\.sh' <<< "$err")" \
         || { echo "a failing suite's progress line must say FAIL"; printf '%s\n' "$err"; return 1; }
-    printf '%s' "$err" | grep -E 'test_fake1\.sh' | grep -q 'FAIL' \
+    grep -q 'FAIL' <<< "$(grep -E 'test_fake1\.sh' <<< "$err")" \
         && { echo "a passing suite's progress line must not say FAIL"; return 1; }
     return 0
 }
@@ -232,9 +232,9 @@ test_run_all_report_lists_slowest_suites() {
     make_suite_dir 3
     local out
     out=$(CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" 2>/dev/null)
-    printf '%s' "$out" | grep -q 'slowest' \
+    grep -q 'slowest' <<< "$out" \
         || { echo "report has no slowest-suites table"; printf '%s\n' "$out"; return 1; }
-    printf '%s' "$out" | grep -Eq '[0-9]+s +test_fake[1-3]\.sh' \
+    grep -Eq '[0-9]+s +test_fake[1-3]\.sh' <<< "$out" \
         || { echo "table rows must be '<seconds>s <suite>'"; printf '%s\n' "$out"; return 1; }
 }
 
@@ -244,7 +244,7 @@ test_run_all_serial_mode_also_reports_progress() {
     make_suite_dir 2
     local err
     err=$(CS_TEST_JOBS=1 CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" 2>&1 >/dev/null)
-    printf '%s' "$err" | grep -q '\[2/2\] test_fake2\.sh' \
+    grep -q '\[2/2\] test_fake2\.sh' <<< "$err" \
         || { echo "serial mode must print the progress line too"; printf '%s\n' "$err"; return 1; }
 }
 
@@ -260,7 +260,7 @@ test_run_all_refuses_a_second_gate_on_the_same_checkout() {
     local out rc=0
     out=$(CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" 2>&1) || rc=$?
     [ "$rc" -eq 3 ] || { echo "a busy checkout must exit 3, got $rc"; printf '%s\n' "$out"; return 1; }
-    printf '%s' "$out" | grep -q "$$" || { echo "the refusal must name the holder's pid"; printf '%s\n' "$out"; return 1; }
+    grep -q "$$" <<< "$out" || { echo "the refusal must name the holder's pid"; printf '%s\n' "$out"; return 1; }
     [ "$(ran_count)" -eq 0 ] || { echo "a refused gate ran $(ran_count) suites"; return 1; }
     [ -d "$lock" ] || { echo "the refused gate must not remove the holder's lock"; return 1; }
 }
@@ -295,7 +295,7 @@ test_run_all_defaults_to_half_the_cores() {
     make_suite_dir 2
     local out n
     out=$(PATH="$(fake_cores 14):$PATH" CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" 2>&1)
-    n=$(printf '%s' "$out" | sed -n 's/.*at \([0-9][0-9]*\) jobs.*/\1/p' | head -1)
+    n=$(sed -n '/at [0-9][0-9]* jobs/{s/.*at \([0-9][0-9]*\) jobs.*/\1/p;q;}' <<< "$out")
     [ "$n" -eq 7 ] || { echo "14 cores must default to 7 lanes, got $n"; printf '%s\n' "$out"; return 1; }
 }
 
@@ -303,7 +303,7 @@ test_run_all_keeps_at_least_one_lane_on_a_single_core() {
     make_suite_dir 2
     local out n
     out=$(PATH="$(fake_cores 1):$PATH" CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" 2>&1)
-    n=$(printf '%s' "$out" | sed -n 's/.*at \([0-9][0-9]*\) jobs.*/\1/p' | head -1)
+    n=$(sed -n '/at [0-9][0-9]* jobs/{s/.*at \([0-9][0-9]*\) jobs.*/\1/p;q;}' <<< "$out")
     [ "$n" -eq 1 ] || { echo "1 core must give 1 lane, got $n"; return 1; }
 }
 
@@ -316,7 +316,7 @@ test_run_all_runs_suites_under_nice() {
     printf '#!/usr/bin/env bash\nps -o nice= -p $$ | tr -d " "\n: > "%s/test_fake1.sh"\n' "$RAN_DIR" > "$SUITE_DIR/test_fake1.sh"
     local out n
     out=$(CS_TEST_SUITE_DIR="$SUITE_DIR" CS_TEST_JOBS=1 bash "$RUN_ALL" 2>/dev/null)
-    n=$(printf '%s' "$out" | grep -E '^[0-9]+$' | head -1)
+    n=$(grep -E -m1 '^[0-9]+$' <<< "$out")
     [ -n "$n" ] && [ "$n" -ge 10 ] || { echo "suites must run at niceness >= 10, saw '${n:-none}'"; printf '%s\n' "$out"; return 1; }
 }
 
@@ -336,7 +336,7 @@ test_run_all_changed_selects_the_suites_naming_the_path() {
     out=$(CS_TEST_CHANGED="hooks/foo-hook.sh" CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" --changed 2>&1) || { echo "run failed"; printf '%s\n' "$out"; return 1; }
     [ "$(ran_count)" -eq 1 ] || { echo "expected 1 suite, ran $(ran_count)"; printf '%s\n' "$out"; return 1; }
     [ -f "$RAN_DIR/test_fake1.sh" ] || { echo "the suite naming the hook did not run"; return 1; }
-    printf '%s' "$out" | grep -q 'changed: 1 path' || { echo "must say what it selected and why"; printf '%s\n' "$out"; return 1; }
+    grep -q 'changed: 1 path' <<< "$out" || { echo "must say what it selected and why"; printf '%s\n' "$out"; return 1; }
 }
 
 # A one-suite selection is the normal --changed case, and it must still show
@@ -348,7 +348,7 @@ test_run_all_shows_suite_output_when_only_one_suite_runs() {
     local out
     out=$(CS_TEST_JOBS=4 CS_TEST_CHANGED="hooks/foo-hook.sh" CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" --changed 2>&1) || { echo "run failed"; printf '%s\n' "$out"; return 1; }
     [ "$(ran_count)" -eq 1 ] || { echo "expected 1 suite, ran $(ran_count)"; return 1; }
-    printf '%s' "$out" | grep -q 'marker-from-test_fake1.sh' || { echo "the only suite's output was swallowed"; printf '%s\n' "$out"; return 1; }
+    grep -q 'marker-from-test_fake1.sh' <<< "$out" || { echo "the only suite's output was swallowed"; printf '%s\n' "$out"; return 1; }
 }
 
 test_run_all_changed_runs_its_own_suite_for_a_test_file() {
@@ -366,7 +366,7 @@ test_run_all_changed_falls_back_to_the_full_gate_for_lib() {
     local out
     out=$(CS_TEST_CHANGED="lib/55-queue.sh" CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" --changed 2>&1) || return 1
     [ "$(ran_count)" -eq 3 ] || { echo "a lib change must run every suite, ran $(ran_count)"; return 1; }
-    printf '%s' "$out" | grep -qi 'full gate' || { echo "must say it fell back to the full gate"; printf '%s\n' "$out"; return 1; }
+    grep -qi 'full gate' <<< "$out" || { echo "must say it fell back to the full gate"; printf '%s\n' "$out"; return 1; }
 }
 
 test_run_all_changed_falls_back_for_the_harness_and_an_unmapped_path() {
@@ -407,7 +407,7 @@ test_run_all_changed_with_nothing_changed_runs_nothing() {
     out=$(CS_TEST_CHANGED="" CS_TEST_SUITE_DIR="$SUITE_DIR" bash "$RUN_ALL" --changed 2>&1) || rc=$?
     [ "$rc" -eq 0 ] || { echo "nothing changed must exit 0, got $rc"; printf '%s\n' "$out"; return 1; }
     [ "$(ran_count)" -eq 0 ] || { echo "nothing changed must run nothing, ran $(ran_count)"; return 1; }
-    printf '%s' "$out" | grep -qi 'nothing changed' || { echo "must say nothing changed"; printf '%s\n' "$out"; return 1; }
+    grep -qi 'nothing changed' <<< "$out" || { echo "must say nothing changed"; printf '%s\n' "$out"; return 1; }
 }
 
 test_run_all_changed_unions_several_paths() {

@@ -125,8 +125,9 @@ test_classifier_fires_emit_scope_block() {
         cat=$(printf '%s' "$line" | jq -r '.attack_category')
         out=$(run_hook "$p" 2>/dev/null) && rc=0 || rc=$?
         if [ "$rc" -ne 0 ]; then echo "  FAIL: hook exit $rc on firing prompt [$cat]: $p"; fails=1; continue; fi
-        if ! printf '%s' "$out" | grep -q "Scope (auto-grounded)"; then
+        if ! grep -q "Scope (auto-grounded)" <<< "$out"; then
             echo "  FAIL: expected a scope block for firing prompt [$cat]: $p"; fails=1
+            printf '    output: %s\n' "$out"
         fi
     done < <(printf '%s\n' "$FIXTURES" | jq -c 'select(.classifier_fires == true)')
     return $fails
@@ -143,7 +144,7 @@ test_classifier_silent_passthrough() {
         # The property is that the CLASSIFIER stayed silent, not that the hook
         # emitted nothing: the clarify guideline rides every non-empty prompt, so
         # "no output at all" would now assert the absence of an unrelated feature.
-        if printf '%s' "$out" | grep -q "Scope (auto-grounded)"; then
+        if grep -q "Scope (auto-grounded)" <<< "$out"; then
             echo "  FAIL: classifier fired on a silent prompt [$cat]: $p"; fails=1
         fi
     done < <(printf '%s\n' "$FIXTURES" | jq -c 'select(.classifier_fires == false)')
@@ -159,8 +160,8 @@ test_classifier_borderline_fires_as_documented() {
         cat=$(printf '%s' "$line" | jq -r '.attack_category')
         out=$(run_hook "$p" 2>/dev/null) && rc=0 || rc=$?
         if [ "$rc" -ne 0 ]; then echo "  FAIL: hook exit $rc on borderline [$cat]: $p"; fails=1; continue; fi
-        printf '%s' "$out" | grep -q "Scope (auto-grounded)" \
-            || { echo "  FAIL: borderline should fire (documented FP) [$cat]: $p"; fails=1; }
+        grep -q "Scope (auto-grounded)" <<< "$out" \
+            || { echo "  FAIL: borderline should fire (documented FP) [$cat]: $p"; printf '    output: %s\n' "$out"; fails=1; }
     done < <(printf '%s\n' "$FIXTURES" | jq -c 'select(.expect == "borderline")')
     return $fails
 }
@@ -174,9 +175,9 @@ test_scope_block_frames_matches_as_non_authoritative() {
     local out ac
     out=$(run_hook "implement a retry wrapper around the fetch call in src/api.ts")
     ac=$(additional_context "$out")
-    printf '%s' "$ac" | grep -q "src/api.ts" \
+    grep -q "src/api.ts" <<< "$ac" \
         || { echo "  FAIL: precondition — block should fire with the file"; return 1; }
-    printf '%s' "$ac" | grep -q "not a task boundary" \
+    grep -q "not a task boundary" <<< "$ac" \
         || { echo "  FAIL: scope block must frame the list as orientation, not a task boundary"; return 1; }
 }
 
@@ -185,7 +186,7 @@ test_scan_surfaces_relevant_file() {
     local out ac
     out=$(run_hook "implement a retry wrapper around the fetch call in src/api.ts so failed requests back off exponentially")
     ac=$(additional_context "$out")
-    printf '%s' "$ac" | grep -q "src/api.ts" || { echo "  FAIL: scan should surface src/api.ts"; return 1; }
+    grep -q "src/api.ts" <<< "$ac" || { echo "  FAIL: scan should surface src/api.ts"; return 1; }
 }
 
 test_scan_includes_recent_commits() {
@@ -195,7 +196,7 @@ test_scan_includes_recent_commits() {
     local out ac
     out=$(run_hook "implement a retry wrapper around the fetch call in src/api.ts")
     ac=$(additional_context "$out")
-    printf '%s' "$ac" | grep -q "DISTINCTIVE_COMMIT_MARKER" \
+    grep -q "DISTINCTIVE_COMMIT_MARKER" <<< "$ac" \
         || { echo "  FAIL: scope should include recent commits touching the file"; return 1; }
 }
 
@@ -217,12 +218,12 @@ test_scan_excludes_build_and_meta_dirs() {
     local out ac bad
     out=$(run_hook "fix the auth handler, then clean up dist and the .cs auth notes")
     ac=$(additional_context "$out")
-    printf '%s' "$ac" | grep -q "src/auth.ts" || { echo "  FAIL: should surface the real file src/auth.ts"; return 1; }
+    grep -q "src/auth.ts" <<< "$ac" || { echo "  FAIL: should surface the real file src/auth.ts"; return 1; }
     # target/ must be excluded WHOLESALE, not just target/release/deps/ (finding-02).
     for bad in "dist/auth.js" "build/auth.o" "node_modules/auth/index.js" \
                "target/release/deps/auth-1a2b.d" "target/release/auth-cli" "target/debug/auth.o" \
                "coverage/auth.html" ".next/auth.js" ".cs/auth-notes.md"; do
-        if printf '%s' "$ac" | grep -q "$bad"; then
+        if grep -q "$bad" <<< "$ac"; then
             echo "  FAIL: excluded path leaked into scope block: $bad"; return 1
         fi
     done
@@ -236,10 +237,10 @@ test_scan_over_match_lone_dot_defused() {
     local out ac bad
     out=$(run_hook "fix this . thing for me please, it's been bugging me all day")
     ac=$(additional_context "$out")
-    printf '%s' "$ac" | grep -q "Scope (auto-grounded)" \
+    grep -q "Scope (auto-grounded)" <<< "$ac" \
         || { echo "  FAIL: prompt fires on 'fix'; expected a scope block (RED guard)"; return 1; }
     for bad in "src/api.ts" "lib/util.ts" "core/engine.ts"; do
-        if printf '%s' "$ac" | grep -q "$bad"; then
+        if grep -q "$bad" <<< "$ac"; then
             echo "  FAIL: lone-'.' scan bomb surfaced unrelated file: $bad"; return 1
         fi
     done
@@ -263,7 +264,7 @@ test_scan_bounded_on_common_words() {
     local out ac count
     out=$(run_hook "fix this with that from then than")
     ac=$(additional_context "$out")
-    printf '%s' "$ac" | grep -q "Scope (auto-grounded)" || { echo "  FAIL: prompt fires on 'fix'; expected a block (RED guard)"; return 1; }
+    grep -q "Scope (auto-grounded)" <<< "$ac" || { echo "  FAIL: prompt fires on 'fix'; expected a block (RED guard)"; return 1; }
     count=$(relevant_files_count "$ac")
     [ "$count" -lt 10 ] || { echo "  FAIL: filler-only prompt over-matched $count files (stoplist not applied?)"; return 1; }
 }
@@ -279,8 +280,8 @@ test_scan_handles_spaces_in_filenames() {
     out=$(run_hook "fix the weird handler logic" 2>/dev/null) && rc=0 || rc=$?
     [ "$rc" -eq 0 ] || { echo "  FAIL: hook must exit 0 with spaced filenames (got $rc)"; return 1; }
     ac=$(additional_context "$out")
-    printf '%s' "$ac" | grep -qF "src/weird name.ts" || { echo "  FAIL: spaced filename should surface in relevant files"; return 1; }
-    printf '%s' "$ac" | grep -q "SPACEFILE_COMMIT" || { echo "  FAIL: recent commits must resolve for spaced filenames (unquoted \$RELEVANT_FILES?)"; return 1; }
+    grep -qF "src/weird name.ts" <<< "$ac" || { echo "  FAIL: spaced filename should surface in relevant files"; return 1; }
+    grep -q "SPACEFILE_COMMIT" <<< "$ac" || { echo "  FAIL: recent commits must resolve for spaced filenames (unquoted \$RELEVANT_FILES?)"; return 1; }
 }
 
 test_scan_surfaces_short_dir_tokens() {
@@ -291,8 +292,8 @@ test_scan_surfaces_short_dir_tokens() {
     local out ac
     out=$(run_hook "refactor the api and the db")
     ac=$(additional_context "$out")
-    printf '%s' "$ac" | grep -q "api/core.ts" || { echo "  FAIL: 'api' token should surface api/core.ts (length floor over-drops short tokens)"; return 1; }
-    printf '%s' "$ac" | grep -q "db/store.ts" || { echo "  FAIL: 'db' token should surface db/store.ts (length floor over-drops short tokens)"; return 1; }
+    grep -q "api/core.ts" <<< "$ac" || { echo "  FAIL: 'api' token should surface api/core.ts (length floor over-drops short tokens)"; return 1; }
+    grep -q "db/store.ts" <<< "$ac" || { echo "  FAIL: 'db' token should surface db/store.ts (length floor over-drops short tokens)"; return 1; }
 }
 
 test_scan_no_substring_overmatch() {
@@ -303,10 +304,10 @@ test_scan_no_substring_overmatch() {
     local out ac bad
     out=$(run_hook "fix this . thing for me please, it has been bugging me all day")
     ac=$(additional_context "$out")
-    printf '%s' "$ac" | grep -q "Scope (auto-grounded)" || { echo "  FAIL: prompt fires on 'fix'; expected a block (RED guard)"; return 1; }
+    grep -q "Scope (auto-grounded)" <<< "$ac" || { echo "  FAIL: prompt fires on 'fix'; expected a block (RED guard)"; return 1; }
     for bad in README.md docs/readme.md lib/runtime.ts src/components/Menu.ts \
                src/components/theme.ts src/names.ts src/payment.ts src/today.ts; do
-        if printf '%s' "$ac" | grep -qF "$bad"; then
+        if grep -qF "$bad" <<< "$ac"; then
             echo "  FAIL: substring over-match surfaced $bad (short word matched as a substring)"; return 1
         fi
     done
@@ -320,7 +321,7 @@ test_scan_component_matches_unexcluded_dir() {
     local out ac
     out=$(run_hook "fix the deps issue")
     ac=$(additional_context "$out")
-    printf '%s' "$ac" | grep -q "myapp/deps/loader.go" || { echo "  FAIL: 'deps' should component-match myapp/deps/loader.go"; return 1; }
+    grep -q "myapp/deps/loader.go" <<< "$ac" || { echo "  FAIL: 'deps' should component-match myapp/deps/loader.go"; return 1; }
 }
 
 test_scan_camelcase_component_match() {
@@ -329,8 +330,8 @@ test_scan_camelcase_component_match() {
     local out ac
     out=$(run_hook "refactor the api error handling")
     ac=$(additional_context "$out")
-    printf '%s' "$ac" | grep -q "src/apiHandler.ts" || { echo "  FAIL: 'api' should match apiHandler.ts via camelCase split"; return 1; }
-    printf '%s' "$ac" | grep -q "src/tokenStore.ts" && { echo "  FAIL: 'api' should NOT match tokenStore.ts"; return 1; }
+    grep -q "src/apiHandler.ts" <<< "$ac" || { echo "  FAIL: 'api' should match apiHandler.ts via camelCase split"; return 1; }
+    grep -q "src/tokenStore.ts" <<< "$ac" && { echo "  FAIL: 'api' should NOT match tokenStore.ts"; return 1; }
     return 0
 }
 
@@ -341,8 +342,8 @@ test_scan_trailing_punctuation_recall() {
     local out ac
     out=$(run_hook "refactor the api. and the db.")
     ac=$(additional_context "$out")
-    printf '%s' "$ac" | grep -q "api/handler.ts" || { echo "  FAIL: trailing '.' killed recall for 'api.'"; return 1; }
-    printf '%s' "$ac" | grep -q "db/store.ts" || { echo "  FAIL: trailing '.' killed recall for 'db.'"; return 1; }
+    grep -q "api/handler.ts" <<< "$ac" || { echo "  FAIL: trailing '.' killed recall for 'api.'"; return 1; }
+    grep -q "db/store.ts" <<< "$ac" || { echo "  FAIL: trailing '.' killed recall for 'db.'"; return 1; }
 }
 
 test_scan_acronym_component_match() {
@@ -351,8 +352,8 @@ test_scan_acronym_component_match() {
     local out ac
     out=$(run_hook "refactor the api and html layers")
     ac=$(additional_context "$out")
-    printf '%s' "$ac" | grep -q "src/APIClient.ts" || { echo "  FAIL: 'api' should match APIClient.ts (acronym split)"; return 1; }
-    printf '%s' "$ac" | grep -q "src/HTMLParser.ts" || { echo "  FAIL: 'html' should match HTMLParser.ts (acronym split)"; return 1; }
+    grep -q "src/APIClient.ts" <<< "$ac" || { echo "  FAIL: 'api' should match APIClient.ts (acronym split)"; return 1; }
+    grep -q "src/HTMLParser.ts" <<< "$ac" || { echo "  FAIL: 'html' should match HTMLParser.ts (acronym split)"; return 1; }
 }
 
 test_working_tree_truncation_cue() {
@@ -366,9 +367,9 @@ test_working_tree_truncation_cue() {
     local out ac
     out=$(run_hook "refactor the loader module")
     ac=$(additional_context "$out")
-    printf '%s' "$ac" | grep -q "### Working tree" \
+    grep -q "### Working tree" <<< "$ac" \
         || { echo "  FAIL: expected a Working tree section for a dirty tree"; return 1; }
-    if printf '%s' "$ac" | grep -q "truncated"; then
+    if grep -q "truncated" <<< "$ac"; then
         echo "  FAIL: a small (<=10 line) diff must not carry a truncation cue"; return 1
     fi
 
@@ -378,7 +379,7 @@ test_working_tree_truncation_cue() {
     git -C "$CLAUDE_SESSION_DIR" add -A >/dev/null 2>&1
     out=$(run_hook "refactor the loader module")
     ac=$(additional_context "$out")
-    printf '%s' "$ac" | grep -q "### Working tree (truncated" \
+    grep -q "### Working tree (truncated" <<< "$ac" \
         || { echo "  FAIL: truncated diff --stat must carry a truncation cue in the Working tree header"; return 1; }
 }
 
@@ -435,7 +436,7 @@ test_token_cap_marks_truncation() {
     ac=$(additional_context "$out")
     bytes=$(printf '%s' "$ac" | wc -c | tr -d ' ')
     [ "$bytes" -le 8000 ] || { echo "  FAIL: capped block is $bytes bytes (> 8000)"; return 1; }
-    printf '%s' "$ac" | grep -qF "[scope block truncated]" \
+    grep -qF "[scope block truncated]" <<< "$ac" \
         || { echo "  FAIL: a truncated scope block must carry the truncation marker"; return 1; }
     # The marker must be the LAST line — nothing severed after it.
     [ "$(printf '%s' "$ac" | tail -1)" = "[scope block truncated]" ] \
@@ -481,8 +482,8 @@ test_empty_tree_tombstone_marker() {
     local out ac
     out=$(run_hook "implement a retry wrapper around the fetch call in src/api.ts")
     ac=$(additional_context "$out")
-    printf '%s' "$ac" | grep -q "Scope (auto-grounded)" || { echo "  FAIL: tombstone block should still carry the header"; return 1; }
-    printf '%s' "$ac" | grep -qF "Scope: no tracked files matched" || { echo "  FAIL: expected the pinned empty-tree tombstone marker"; return 1; }
+    grep -q "Scope (auto-grounded)" <<< "$ac" || { echo "  FAIL: tombstone block should still carry the header"; printf '    output: %s\n' "$out"; return 1; }
+    grep -qF "Scope: no tracked files matched" <<< "$ac" || { echo "  FAIL: expected the pinned empty-tree tombstone marker"; return 1; }
 }
 
 test_injection_prompt_is_data_not_code() {
@@ -615,7 +616,7 @@ $filler"
     local out ac
     out=$(run_hook "$prompt")
     ac=$(additional_context "$out")
-    printf '%s' "$ac" | grep -q "Scope (auto-grounded)" \
+    grep -q "Scope (auto-grounded)" <<< "$ac" \
         || { echo "  FAIL: a large multi-line prompt was classified negative"; return 1; }
 }
 
@@ -663,7 +664,7 @@ test_classifier_falls_back_to_grep_without_ripgrep() {
     out=$(_run_hook_on_path "$p" "implement a retry wrapper around the fetch call in src/api.ts") \
         || { echo "  FAIL: the hook failed on a box without ripgrep"; return 1; }
     ac=$(additional_context "$out")
-    if ! echo "$ac" | grep -q "Scope (auto-grounded)"; then
+    if ! grep -q "Scope (auto-grounded)" <<< "$ac"; then
         echo "  FAIL: without ripgrep the classifier must still fire, not read every prompt as chitchat"
         # This arm only runs where ripgrep is absent, which means a
         # stubbed PATH. When it fails there and nowhere else, the useful question
