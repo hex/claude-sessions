@@ -112,13 +112,15 @@ _claude_project_dir() {
 #
 # The first line alone does not settle it: `claude --resume` on a run a script
 # started makes it a person's conversation, first line unchanged. So a file is a
-# headless run only when it opens with an `sdk-` entrypoint AND carries no other
-# kind anywhere. A line with no entrypoint at all, or a value Claude Code has
-# not invented yet, counts as a conversation: a wrongly skipped conversation
-# leaves a session resuming nothing, which is worse than a wrongly named one.
-# The second read happens only for files that open headless, and those are
-# short. The prompt text shares the line with the field, but JSON escapes its
-# quotes, so a prompt that quotes the pattern cannot match it.
+# headless run only when it opens with an `sdk-` entrypoint AND no later user
+# line carries a different value (any string that does not start `sdk-`, the
+# empty string included). An opening line with no entrypoint at all, or one
+# with a value Claude Code has not invented yet, counts as a conversation: a
+# wrongly skipped conversation leaves a session resuming nothing, which is
+# worse than a wrongly named one. The second read happens only for files that
+# open headless; a purely headless one is read to its end. The prompt text
+# shares the line with the field, but JSON escapes its quotes, so a prompt that
+# quotes the pattern cannot match it.
 _is_bystander_transcript() {  # transcript_file
     local first
     first=$(grep -m1 '"type":"user"' "$1" 2>/dev/null) || return 1
@@ -126,7 +128,7 @@ _is_bystander_transcript() {  # transcript_file
         *teammate-message*) return 0 ;;
         *'"entrypoint":"sdk-'*)
             # Any entrypoint value that does not begin `sdk-`.
-            grep -m1 -E '"entrypoint":"([^s"]|s[^d"]|sd[^k"]|sdk[^-"])' "$1" >/dev/null 2>&1 \
+            grep -m1 -E '"entrypoint":"([^s"]|"|s[^d"]|s"|sd[^k"]|sd"|sdk[^-"]|sdk")' "$1" >/dev/null 2>&1 \
                 && return 1
             return 0 ;;
     esac

@@ -683,6 +683,32 @@ test_a_headless_run_continued_from_a_terminal_is_a_conversation() {
 
 run_test test_a_headless_run_continued_from_a_terminal_is_a_conversation
 
+test_a_later_entrypoint_shorter_than_the_prefix_still_marks_a_conversation() {
+    # The "does not start sdk-" test has to accept values the prefix test can
+    # swallow whole: the empty string, `s`, `sd`, `sdk`. A regex built from
+    # "one more character, then anything" misses exactly these.
+    local recorded="abcd1234-5678-4abc-9def-fedcba987654"
+    local session_dir
+    session_dir=$(_seed_legacy_session "legacy-session" "$recorded")
+    _seed_claude_transcript "$session_dir" "$recorded"
+    local proj
+    proj="$CS_TRANSCRIPTS_DIR/$(_encode_cwd_for_claude_test "$session_dir")"
+
+    local v n=0 uuid output
+    for v in "" s sd sdk; do
+        n=$((n+1))
+        uuid="6666666${n}-7777-4888-8999-000000000000"
+        _seed_first_user_line "$proj/$uuid.jsonl" "sdk-py"
+        printf '%s\n' '{"type":"user","message":{"role":"user","content":"more"},"entrypoint":"'"$v"'"}' >> "$proj/$uuid.jsonl"
+        touch -t "20300101000$n" "$proj/$uuid.jsonl"
+        output=$("$CS_BIN" legacy-session <<< "" 2>&1) || true
+        assert_output_contains "$output" "$uuid" \
+            "a later entrypoint of \"$v\" is not sdk-, so the file is a conversation" || return 1
+    done
+}
+
+run_test test_a_later_entrypoint_shorter_than_the_prefix_still_marks_a_conversation
+
 run_test test_launch_exports_lead_pid_of_the_claude_process
 
 test_resume_launch_exports_lead_pid_as_the_parent() {
