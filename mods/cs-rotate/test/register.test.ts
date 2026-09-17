@@ -6,7 +6,7 @@ import { test, expect, beforeEach } from 'bun:test'
 ;(globalThis as any).h = (type: any, props: any, ...children: any[]) => ({ type, props: props ?? {}, children })
 ;(globalThis as any).Fragment = 'Fragment'
 
-import { register, DEFAULT_PERCENT, DEFAULT_CRIT, GRACE_SECONDS, gaugeColor, meter, isUnconsumed, INK } from '../hooks/register.tsx'
+import { register, DEFAULT_PERCENT, DEFAULT_CRIT, GRACE_SECONDS, gaugeColor, pie, isUnconsumed, INK } from '../hooks/register.tsx'
 
 type Hook = ($: any, e: any, next: (e: any) => Promise<any>) => Promise<any>
 const hooks: Record<string, Hook> = {}
@@ -55,6 +55,15 @@ const DRAWN = { type: 'Survey', props: {}, children: [] }
 const band = (props: Partial<{ isWorking: boolean; hasSurvey: boolean }> = {}) =>
   hooks['ui.render:AbovePrompt']($, { props: { isWorking: false, hasSurvey: false, ...props } }, async () => DRAWN)
 
+// The wording left the buttons when the hotkeys were drawn by hand, so the
+// assertions read the text the band draws, in order, the way a person sees it.
+const drawnText = (node: any): string => {
+  if (node === null || node === undefined || node === false) return ''
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(drawnText).join('')
+  return drawnText(node.children)
+}
+
 function buttons(tree: any): any[] {
   if (!tree || typeof tree !== 'object') return []
   if (tree.type === 'Button') return [tree]
@@ -93,13 +102,6 @@ test('the gauge ink steps where the status bar steps, in the theme\'s own ink', 
   expect(gaugeColor(undefined, bands, 'light')).toBe('text')
 })
 
-test('the meter fills one cell per ten percent, ten cells wide', () => {
-  expect(meter(0)).toEqual(['', '\u2591'.repeat(10)])
-  expect(meter(4)).toEqual(['', '\u2591'.repeat(10)])
-  expect(meter(5)).toEqual(['\u2588', '\u2591'.repeat(9)])
-  expect(meter(47)).toEqual(['\u2588'.repeat(5), '\u2591'.repeat(5)])
-  expect(meter(100)).toEqual(['\u2588'.repeat(10), ''])
-})
 
 test('CS_STATUSLINE_CTX_WARN and _CRIT move the gauge, the band and its threshold together', async () => {
   envVars.CS_STATUSLINE_CTX_WARN = '50'; envVars.CS_STATUSLINE_CTX_CRIT = '70'
@@ -107,15 +109,15 @@ test('CS_STATUSLINE_CTX_WARN and _CRIT move the gauge, the band and its threshol
   expect(await band()).toBe(DRAWN)
   percent = 50
   let tree = JSON.stringify(await band())
-  expect(tree).toContain('"\u2588\u2588\u2588\u2588\u2588"')
-  expect(tree).toContain('" 50%"')
+  // 50 is the moved warn: the half pie and the amber arrive together.
+  expect(tree).toContain('"\u25d1 ctx 50%"')
   expect(tree).toContain(`"color":"${INK.amber.dark}"`)
   percent = 69
   expect(JSON.stringify(await band())).not.toContain(INK.crit.dark)
   percent = 70
   tree = JSON.stringify(await band())
-  expect(tree).toContain('" 70%"')
-  expect(tree).toContain(`"borderColor":"${INK.crit.dark}"`)
+  expect(tree).toContain('"\u25d5 ctx 70%"')
+  expect(tree).toContain(`"color":"${INK.crit.dark}"`)
   envVars.CS_ROTATE_BUTTON_CTX = '10'
   percent = 10
   expect(findButton(await band())).toBeDefined()
@@ -156,36 +158,56 @@ test('at the threshold the band adds the rotate key on hotkey 1, first, beneath 
   const button = findButton(tree)
   expect(button.props.hotkey).toBe('1')
   expect(button.props.plain).toBe(true)
-  expect(button.props.label).toMatch(/rotate/)
-  expect(JSON.stringify(tree)).toContain('"Survey"')
-  expect(JSON.stringify(tree)).toContain('"borderStyle":"round"')
+  // The hotkey is drawn by hand so it reads as "1 label", underlined, with no
+  // colon; the button carries no label of its own and only owns the press.
+  expect(button.props.label).toBe('')
+  const json1 = JSON.stringify(tree)
+  expect(json1).toContain('"Survey"')
+  expect(json1).toContain('"color":"suggestion","underline":true,"bold":true},"children":["1"]')
+  expect(json1).toContain('" rotate this conversation"')
+  expect(json1).not.toContain('borderStyle')
 })
 
-test('the band carries the context meter in the status bar\'s own inks for the theme cs detected', async () => {
+test('the band carries the context gauge in the status bar\'s own inks for the theme cs detected', async () => {
   percent = 71
   let tree = JSON.stringify(await band())
-  expect(tree).toContain('"\u2588\u2588\u2588\u2588\u2588\u2588\u2588"')
-  expect(tree).toContain('"\u2591\u2591\u2591"')
-  expect(tree).toContain('" 71%"')
+  expect(tree).toContain('"\u25d5 ctx 71%"')
   expect(tree).toContain(`"color":"${INK.crit.dark}"`)
-  expect(tree).not.toContain('ctx')
   envVars.CS_TERM_THEME = 'light'
   tree = JSON.stringify(await band())
-  expect(tree).toContain(`"borderColor":"${INK.crit.light}"`)
   expect(tree).toContain(`"color":"${INK.crit.light}"`)
   expect(tree).not.toContain(INK.crit.dark)
   percent = 45
   tree = JSON.stringify(await band())
-  expect(tree).toContain('" 45%"')
+  expect(tree).toContain('"\u25d1 ctx 45%"')
   expect(tree).toContain(`"color":"${INK.amber.light}"`)
 })
 
-test('the capsule is a keyed box that turns coral under the pointer, with the mark in coral', async () => {
+// The pie steps where the bar's does: its quarter and three-quarter steps sit
+// on warn and crit, the empty and full ends at a fixed 13 and 88. Below the
+// warn band the band itself does not draw, so the shape is read from pie.
+test('the gauge pie fills the way the status bar fills it', () => {
+  const bands = { warn: 40, crit: 65 }
+  expect(pie(5, bands)).toBe('\u25cb')
+  expect(pie(13, bands)).toBe('\u25d4')
+  expect(pie(39, bands)).toBe('\u25d4')
+  expect(pie(40, bands)).toBe('\u25d1')
+  expect(pie(65, bands)).toBe('\u25d5')
+  expect(pie(88, bands)).toBe('\u25cf')
+  // The steps travel with the thresholds, the way the bar's do.
+  expect(pie(30, { warn: 25, crit: 50 })).toBe('\u25d1')
+})
+
+// A bare line: no box to draw, so no border to light up under the pointer and
+// no mark in front of the keys. The key stays: it is the band's identity.
+test('the capsule is a keyed box with no border, no hover and no mark', async () => {
   percent = 40
   const tree = JSON.stringify(await band())
   expect(tree).toContain('"key":"cs-rotate-band"')
-  expect(tree).toContain(`"hover":{"borderColor":"${INK.coral}"}`)
-  expect(tree).toContain(`"color":"${INK.coral}","bold":true},"children":["\u2733 "]`)
+  expect(tree).not.toContain('borderStyle')
+  expect(tree).not.toContain('borderColor')
+  expect(tree).not.toContain('hover')
+  expect(tree).not.toContain('\u2733')
   expect(tree).not.toContain('"claude"')
 })
 
@@ -251,13 +273,14 @@ test('an armed handoff turns the button into the clear button, whatever the cont
     const button = findButton(tree)
     expect(button.props.hotkey).toBe('1')
     expect(button.props.plain).toBe(true)
-    expect(button.props.label).toBe('/clear and continue from the handoff')
+    expect(drawnText(tree)).toContain('/clear and continue from the handoff')
     const json = JSON.stringify(tree)
-    expect(json).toContain('"borderStyle":"round"')
-    expect(json).toContain(`"borderColor":"${INK.coral}"`)
+    expect(json).not.toContain('borderStyle')
+    // The border carried the armed coral; with the bare line the label does.
+    expect(json).toContain(`{"color":"${INK.coral}"},"children":[" /clear and continue from the handoff"]`)
     expect(json).not.toContain('undefined')
     if (p === undefined) expect(json).not.toContain('%')
-    else expect(json).toContain(`" ${p}%"`)
+    else expect(json).toContain(`ctx ${p}%`)
   }
 })
 
@@ -293,7 +316,7 @@ test('a marker naming a handoff that is gone, consumed, or outside the store doe
   arm(); files[MARKER] = '../local/state\n'
   expect(await band()).toBe(DRAWN)
   percent = 40
-  expect(findButton(await band()).props.label).toMatch(/rotate/)
+  expect(drawnText(await band())).toContain('rotate this conversation')
 })
 
 test('an empty marker names no handoff, so the band behaves as unarmed', async () => {
@@ -301,7 +324,7 @@ test('an empty marker names no handoff, so the band behaves as unarmed', async (
   percent = 39
   expect(await band()).toBe(DRAWN)
   percent = 40
-  expect(findButton(await band()).props.label).toMatch(/rotate/)
+  expect(drawnText(await band())).toContain('rotate this conversation')
 })
 
 test('session.start writes a heartbeat under the session meta dir', async () => {
@@ -737,7 +760,7 @@ test('at the threshold the band adds a second button on hotkey 2 that reads as t
   expect(buttons(tree)[0].props.hotkey).toBe('1')
   const button = wrapButton(tree)
   expect(button.props.plain).toBe(true)
-  expect(button.props.label).toBe('wrap up this session')
+  expect(drawnText(tree)).toContain(' wrap up this session')
 })
 
 test('an armed handoff draws the clear key alone: no wrap key', async () => {
@@ -753,15 +776,15 @@ test('the wrap key needs two keys: 2 arms it for a moment and runs nothing, 3 wh
   expect(ran).toEqual([])
   expect(invalidated).toEqual(['ui.render'])
   let tree = await band()
-  expect(wrapButton(tree).props.label).toBe('wrap up this session?')
+  expect(drawnText(tree)).toContain(' wrap up this session?')
   expect(confirmButton(tree).props.plain).toBe(true)
-  expect(confirmButton(tree).props.label).toBe('yes, run /wrap')
+  expect(drawnText(tree)).toContain(' yes, run /wrap')
   await confirmButton(tree).props.onPress()
   expect(ran).toEqual([{ command: 'wrap', args: '' }])
   expect(filled).toEqual([])
   // Disarmed by the run: the wrap key is back and 3 presses nothing.
   tree = await band()
-  expect(wrapButton(tree).props.label).toBe('wrap up this session')
+  expect(drawnText(tree)).toContain(' wrap up this session')
   expect(confirmButton(tree)).toBeUndefined()
 })
 
@@ -773,7 +796,7 @@ test('an armed wrap key disarms on its own after a moment, and a press then only
   expect(t).toBeDefined()
   expect(t!.ms).toBe(5000)
   t!.fn()
-  expect(wrapButton(await band()).props.label).toBe('wrap up this session')
+  expect(drawnText(await band())).toContain(' wrap up this session')
   expect(confirmButton(await band())).toBeUndefined()
   await wrapButton(await band()).props.onPress()
   expect(ran).toEqual([])

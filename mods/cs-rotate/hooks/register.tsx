@@ -161,20 +161,27 @@ export function register(on: On) {
       <Box flexDirection="column">
         {drawn}
         <Box>
-          <Box key="cs-rotate-band" borderStyle="round" borderColor={armed ? INK.coral : ink} paddingX={1}
-               hover={{ borderColor: INK.coral }}>
-            <Text color={INK.coral} bold>{'\u2733 '}</Text>
-            {/* plain draws "1: label", so the hotkey is discoverable */}
+          <Box key="cs-rotate-band" paddingX={1}>
+            {/* The hotkey is drawn by hand so it reads as "1 label", underlined
+                and in the engine's own hotkey ink, with no colon. The button
+                beside it carries no label and owns nothing but the press. */}
+            <Text color="suggestion" underline bold>1</Text>
+            {/* the border carried the armed coral; the bare line's label does */}
             {armed
-              ? <Button key="cs-rotate" hotkey="1" plain label="/clear and continue from the handoff"
-                        onPress={() => clearAndContinue($)} />
-              : <Button key="cs-rotate" hotkey="1" plain label="rotate this conversation"
-                        onPress={() => rotate($)} />}
+              ? <Text color={INK.coral}>{' /clear and continue from the handoff'}</Text>
+              : <Text>{' rotate this conversation'}</Text>}
+            {armed
+              ? <Button key="cs-rotate" hotkey="1" plain label="" onPress={() => clearAndContinue($)} />
+              : <Button key="cs-rotate" hotkey="1" plain label="" onPress={() => rotate($)} />}
             {/* a Button is a block: nested in a Text the engine refuses the whole tree (measured), so the separator stands beside it */}
             {!armed && <Text dimColor>{'  \u00b7  '}</Text>}
-            {!armed && <Button key="cs-wrap" hotkey="2" plain label={wrapArmed ? 'wrap up this session?' : 'wrap up this session'} onPress={() => armWrap($)} />}
+            {!armed && <Text color="suggestion" underline bold>2</Text>}
+            {!armed && <Text>{wrapArmed ? ' wrap up this session?' : ' wrap up this session'}</Text>}
+            {!armed && <Button key="cs-wrap" hotkey="2" plain label="" onPress={() => armWrap($)} />}
             {!armed && wrapArmed && <Text dimColor>{'  \u00b7  '}</Text>}
-            {!armed && wrapArmed && <Button key="cs-wrap-confirm" hotkey="3" plain label="yes, run /wrap" onPress={() => runWrap($)} />}
+            {!armed && wrapArmed && <Text color="suggestion" underline bold>3</Text>}
+            {!armed && wrapArmed && <Text> yes, run /wrap</Text>}
+            {!armed && wrapArmed && <Button key="cs-wrap-confirm" hotkey="3" plain label="" onPress={() => runWrap($)} />}
             {/* the forced rotation's grace: the seconds left before the mod runs the /clear itself */}
             {armed && left !== undefined && (
               <Text><Text dimColor>{'  \u00b7  '}</Text><Text color={INK.coral} bold>{`/clear in ${left}s`}</Text></Text>
@@ -182,9 +189,7 @@ export function register(on: On) {
             {percent !== undefined && (
               <Text>
                 <Text dimColor>{'  \u00b7  '}</Text>
-                <Text color={ink}>{meter(percent)[0]}</Text>
-                <Text dimColor>{meter(percent)[1]}</Text>
-                <Text color={ink} bold>{` ${percent}%`}</Text>
+                <Text color={ink} bold>{`${pie(percent, bands)} ctx ${percent}%`}</Text>
               </Text>
             )}
           </Box>
@@ -196,10 +201,16 @@ export function register(on: On) {
 
 export type Bands = { warn: number; crit: number }
 
-// Ten cells, one per ten percent, rounded: the filled run and the empty run.
-export function meter(percent: number): [string, string] {
-  const n = Math.min(10, Math.max(0, Math.round(percent / 10)))
-  return ['\u2588'.repeat(n), '\u2591'.repeat(10 - n)]
+// The pie the status bar draws, filling as context does: its quarter and
+// three-quarter steps sit on the warn and crit thresholds so the shape changes
+// exactly where the ink does, and the empty and full ends at a fixed 13 and 88
+// (bin/cs-statusline, _ctx_pie: KEEP IN SYNC).
+export function pie(percent: number, bands: Bands): string {
+  if (percent >= 88) return '\u25cf'
+  if (percent >= bands.crit) return '\u25d5'
+  if (percent >= bands.warn) return '\u25d1'
+  if (percent >= 13) return '\u25d4'
+  return '\u25cb'
 }
 
 // Below warn the capsule is only ever drawn armed, in the theme's plain ink.
