@@ -137,3 +137,96 @@ narrative, or memory.
 
 Written from live context at ~48%, no compaction. Pass one carries everything
 that dies with the conversation. Pass two appends the recoverable sections.
+
+## 4. Primary Request and Intent
+
+This conversation was woken by a rotation to run the held release, then Alex
+redirected it. In order:
+
+1. **The release (#622).** Inherited from `.cs/handoffs/2026-09-16-release-v2026-9-16.md`.
+   Alex answered "Release now" at the gate. Shipped: cs **v2026.9.16**, tag on
+   `89a6406`, CI 6/6 green, release workflow green, 12 signed assets, installed
+   locally. It absorbed one bash-3.2 test fix (`479cd74`) that only CI could
+   see, and 13 documentation fixes from a read-only audit. Summary in
+   `.cs/summary.md`; wrap ran (memory, summary, rotation pass).
+2. **`[screenshot]` "what is this?"** — the launch card of the
+   `iterm-agents-sidebar` session announcing "A newer conversation was opened
+   here outside cs: e8c7b6c7…". Diagnosed as a false alarm: that transcript is
+   a headless Agent SDK run. Reported, nothing changed.
+3. **"yes we need to fix this"** → task **#641**, the whole of the work below.
+   Merged as `2ce9b0f`.
+
+The three test-race tasks are the next intent, not a completed one.
+
+## 5. Key Technical Concepts
+
+- **The two discovery callers.** `_discover_session_uuid_in`
+  (`lib/40-state.sh:142`) returns the newest transcript in a session's project
+  dir that is not a bystander. The launch notice (`lib/75-launch.sh:478`) only
+  NAMES it; migrate Phase 8 (`lib/45-migrate.sh:621`) BINDS a session to it
+  when the recorded uuid is an orphan. The bind is why a false positive is not
+  cosmetic.
+- **`_is_bystander_transcript`** (`lib/40-state.sh:124`) is the filter, renamed
+  from `_is_teammate_transcript` in this work. Two `grep` reads of the file
+  directly, never a pipe (a pipe would SIGPIPE its producer under `pipefail`).
+- **The gate is ghost**, every time; see Next Step. Ghost is bash 5.3, CI's
+  `macos-latest` lane is the only bash-3.2 judge.
+- **`bin/cs` is generated** by `./build.sh` from `lib/*.sh`, which also writes
+  `hooks/cs-shared.sh` and `install.sh`. CI fails when a committed built file
+  differs from the build.
+- **The tui crate** is `tui/`, run with `cargo test --manifest-path tui/Cargo.toml`.
+  It is the one suite that does NOT go to ghost (it is untracked there).
+  `cargo fmt` is unsafe on it: the crate is not fmt-clean and a bare run sweeps
+  ~500 unrelated lines.
+
+## 6. Problem Solving
+
+The whole of the merged fix, with the measurements behind it, is in sections 2
+and 3. What is NOT repeated there, because git carries it:
+
+- `git log v2026.9.15..HEAD` for the release content; `CHANGELOG.md` `##
+  2026.9.16` for what shipped, and `## Unreleased` for the headless fix.
+- `git show 2ce9b0f` for the merge; `b79da61` (the fix), `5a5ee99` (the regex
+  correction), `26f7469` (the two review nits), `6d1c4e5` (changelog).
+- `tests/test_uuid.sh`, the five tests added at the end of the file, and the
+  `_seed_first_user_line` helper that produces a real 2.1.274-shaped first user
+  line (prompt BEFORE the entrypoint field, as a real transcript has it).
+
+## 7. Pending Tasks
+
+The native task list is keyed to the session, so it survives the `/clear` and
+you inherit it. Reconcile against this list; do not mirror it.
+
+- **#609 pending — start here.** tui `CS_BIN` stub argv tests fail 1-in-N.
+  Fresh evidence in section 3; the task description carries it too.
+- **#603 pending.** Doctor's integrate-lock check races the finish suite under
+  `CS_TEST_JOBS>1`; `pgrep` is machine-global.
+- **#638 pending.** Two recurring ghost flakes: `test_run_all`'s failure tally
+  (reported "wrong failure tally" three times in one day while its own dump
+  showed the right numbers), and `test_scope_prompt` tripping its budget under
+  load.
+- **#640 pending.** Four Minors from the v2026.9.16 release review, none
+  blocking, safe to batch: two validators accept a 20-digit value that wraps
+  positive; `landing_checks` treats an all-skipped landing commit as `success`;
+  `CS_SCOPE_BUDGET_MS` under 1000 misbehaves on bash 3.2; a spawn brief can
+  outlive a failed seed write.
+- **#554 pending (PARKED)** — SessionStart notice for tool calls left pending.
+- **#606 pending (POSTPONED)** — `cs --remote` via Claude Remote Control.
+- Closed this conversation, do not reopen: **#622** (the release), **#641**
+  (the headless fix).
+
+## 8. Current Work
+
+Nothing in flight. Two pieces of work completed:
+
+- **v2026.9.16 released** (#622), tagged on `89a6406`, installed.
+- **fix/discovery-skips-headless merged** (#641) as `2ce9b0f`, 4 commits,
+  branch deleted, installed, `cs -doctor` deploy drift OK.
+
+Main is 5 commits ahead of `origin/main`. Unpushed, unreleased.
+
+## Completeness (pass two)
+
+Nothing cut. The one thing I could not carry: why `test_run_all`'s tally
+disagrees with its own dump (#638) — it was observed yesterday, not diagnosed,
+and it did not recur in either of today's two ghost runs.
