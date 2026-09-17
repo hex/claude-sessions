@@ -638,10 +638,19 @@ _doctor_check_integrate_lock() {
     git_dir=$(_git_path_abs "$dir" --git-dir) || return 0
     lock="$git_dir/cs/integrate.lock"
     [ -d "$lock" ] || return 0
-    if pgrep -f 'cs .*-integrate-feature' >/dev/null 2>&1; then
-        _doctor_ok "Integrate lock: $lock held by a running integrate"
+    # The integrate writes its pid into the lock; that pid is the evidence, not
+    # a process listing, which would answer for any integrate on the machine.
+    # The autosave hook's sub-second hold of the same directory records no
+    # pid, so a doctor run inside that window reads it as stale.
+    local pid
+    pid=$(cat "$lock/pid" 2>/dev/null || true)
+    case "$pid" in
+        *[!0-9]*|"") pid="" ;;
+    esac
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        _doctor_ok "Integrate lock: $lock held by a running integrate (pid $pid)"
     else
-        _doctor_warn "Integrate lock: $lock exists with no integrate running; autosave skips while it does. Remove it with: rmdir \"$lock\""
+        _doctor_warn "Integrate lock: $lock exists with no integrate running; autosave skips while it does. Remove it with: rm -r \"$lock\""
     fi
 }
 

@@ -532,7 +532,7 @@ _integrate_cleanup() {
         fi
         git -C "$_INTEGRATE_BASE_DIR" worktree prune >/dev/null 2>&1 || true
     fi
-    [ -n "${_INTEGRATE_LOCK:-}" ] && rmdir "$_INTEGRATE_LOCK" 2>/dev/null
+    [ -n "${_INTEGRATE_LOCK:-}" ] && rm -r "$_INTEGRATE_LOCK" 2>/dev/null
     return 0
 }
 
@@ -635,6 +635,10 @@ integrate_feature_worktree() {  # base_name task sha [--from-remote [--ci-green]
         fi
         sleep 1
     done
+    # The holder's pid, for cs -doctor's liveness check. Inside the lock, so
+    # the directory and its evidence are created and removed together; the
+    # autosave hook's own brief hold records nothing and releases with rmdir.
+    echo "$$" > "$lock/pid"
     _INTEGRATE_LOCK="$lock"
     _INTEGRATE_BASE_DIR="$base_dir"
     _INTEGRATE_TMP=""

@@ -7,6 +7,8 @@ All notable changes to cs are documented here. Release notes are also available 
 ## Unreleased
 
 ### Fixes
+- `cs -doctor` judges an integrate lock by the pid the integrate now records inside it, not by whether any `-integrate-feature` is running anywhere on the machine: a lock left by a killed `/finish` was reported as held whenever an unrelated integrate happened to be running. The command doctor gives to clear a stale lock is `rm -r`, since the lock is no longer an empty directory.
+- Two tui test races. The session-menu Enter test forked cs for the Archive and Secrets rows with no `CS_BIN` of its own, so under a parallel run it forked whichever recording stub a concurrent test had set and wrote into that test's argv log and sessions root (or, with no stub set, the real `cs -archive alpha` against the developer's sessions); it now holds the env lock and points `CS_BIN` at an unspawnable path. The in-flight preview test raced the worker on a loaded machine (24/30 and 1/25 red before, 0/30 and 0/25 after): it now hands the stale result to the drain on a channel it owns.
 - A headless run beside a session is not a conversation to resume. An Agent SDK call or a `claude -p` with the session as its working directory writes a transcript into the same folder as the session's own, and the launch card named it as `A newer conversation was opened here outside cs`; the orphan repair could bind a session to one. Discovery now skips a transcript that opens with an `sdk-` entrypoint and carries no other kind, while a run someone later continued with `claude --resume` stays a conversation, as does any transcript with no entrypoint or one cs does not know.
 
 ## 2026.9.16

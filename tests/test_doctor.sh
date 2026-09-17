@@ -1187,8 +1187,43 @@ test_doctor_names_a_stale_integrate_lock() {
         CS_CLAUDE_DIR="$TEST_TMPDIR/claude-sl" "$CS_BIN" -doctor 2>&1) || true
     assert_output_contains "$output" "$sess/.git/cs/integrate.lock" \
         "Doctor should name the stale lock by path" || return 1
-    assert_output_contains "$output" "rmdir" "and the command that clears it" || return 1
+    assert_output_contains "$output" "rm -r" "and the command that clears it" || return 1
     assert_output_contains "$output" "WARN" "a stale lock is a warning" || return 1
+}
+
+# The integrate records its pid inside the lock, and that pid is the only
+# liveness evidence doctor consults: a `pgrep` for any integrate on the machine
+# reported a fixture's orphan lock as held whenever another suite's integrate
+# happened to be running.
+test_doctor_reports_a_lock_whose_pid_is_alive_as_held() {
+    local sess="$TEST_TMPDIR/sess-livelock"
+    mkdir -p "$sess/.cs/memory"
+    git -C "$sess" init -q
+    mkdir -p "$sess/.git/cs/integrate.lock"
+    # This shell outlives the doctor run, so its pid is a live holder.
+    echo "$$" > "$sess/.git/cs/integrate.lock/pid"
+    local output
+    output=$(CLAUDE_SESSION_DIR="$sess" CLAUDE_SESSION_META_DIR="$sess/.cs" \
+        CS_CLAUDE_DIR="$TEST_TMPDIR/claude-ll" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "integrate.lock held by a running integrate (pid $$)" \
+        "a lock whose recorded pid is alive is held" || return 1
+    assert_output_not_contains "$output" "rm -r" "no removal advice for a held lock" || return 1
+}
+
+test_doctor_names_a_lock_whose_pid_is_dead_as_stale() {
+    local sess="$TEST_TMPDIR/sess-deadlock"
+    mkdir -p "$sess/.cs/memory"
+    git -C "$sess" init -q
+    mkdir -p "$sess/.git/cs/integrate.lock"
+    # A pid that has exited and been reaped: nothing can be running as it.
+    sh -c 'exit 0' & local dead=$!; wait "$dead"
+    echo "$dead" > "$sess/.git/cs/integrate.lock/pid"
+    local output
+    output=$(CLAUDE_SESSION_DIR="$sess" CLAUDE_SESSION_META_DIR="$sess/.cs" \
+        CS_CLAUDE_DIR="$TEST_TMPDIR/claude-dl" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "exists with no integrate running" \
+        "a dead pid is a stale lock" || return 1
+    assert_output_contains "$output" "rm -r" "and the command that clears it" || return 1
 }
 
 test_doctor_is_silent_with_no_integrate_lock() {
@@ -1203,6 +1238,8 @@ test_doctor_is_silent_with_no_integrate_lock() {
 }
 
 run_test test_doctor_names_a_stale_integrate_lock
+run_test test_doctor_reports_a_lock_whose_pid_is_alive_as_held
+run_test test_doctor_names_a_lock_whose_pid_is_dead_as_stale
 run_test test_doctor_is_silent_with_no_integrate_lock
 
 report_results
