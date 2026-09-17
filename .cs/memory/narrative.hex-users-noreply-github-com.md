@@ -780,3 +780,16 @@ bash 3.2 and 5.3. Ghost 67/67 on every code sha. Codex round 4 (plugin) + a fres
 closure review in flight at rotation; named fable-review teammate vanished unreported.
 Peer session "claude" measured cs-statusline --refresh-usage forking find ~150/s under
 the sidebar bridge (task #642, not started; render path is 6-12 execs, no diet needed).
+Rotation 7cc98cc6: Codex round-4 Minor 2 folded as bd216c2 (`err=$( LC_ALL=C; kill -0 ...)`).
+Probe on bash 3.2 under fr_FR.UTF-8: the printf mechanism reproduces (1,0 vs 1.0) but the
+kill message stays English in both forms because macOS strerror is not localised; bash 3.2
+exists only on macOS, so the fix makes the comment true rather than change a verdict.
+Round-4 #1 (PID namespace ESRCH) and #3 (pid-1 EPERM coverage) left for Alex at the gate.
+Ghost run on bd216c2 in the background; unnamed Fable agent a0071b88b9a2d99c6 still running.
+Fable closure review (unnamed agent, 172k tokens, 33 tools): MERGE, five Minors. Alex chose
+polish-first at the gate. Folded as 540d7ea: pid 0 rejected by the doctor filter (kill -0 0
+signals the caller's own group, always succeeds) and `rm -r ... || :` in _integrate_cleanup
+(under set -e a failed rm as the last AND-list command aborted the handler before it forgot
+the path). Both red-first via standalone /bin/bash probes, not the suite. Left as task #644:
+empty-pid stale advice vs autosave's pidless hold, PID-namespace ESRCH, 93 surviving
+printf|grep -q sites in other suites, pid-1 EPERM coverage as root. Ghost on 540d7ea running.
