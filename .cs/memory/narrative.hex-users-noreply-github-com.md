@@ -829,3 +829,12 @@ rows, three README bullets. Suite count is now 66. Commit 8a1f1eb on feat/remove
 ghost + Codex (plugin agent) in flight. Note: `rg -c` prints nothing on zero matches and its
 exit 1 stops an && chain — my verification line printed one stray "1" from hooks.md before
 the perl strip ran; re-verified with rg -n afterwards, clean.
+Ghost 66/66, Codex MERGE (one Minor: doctor's drift scan is source-driven, a deployed retired
+dir reads as match until install.sh runs — filed #647, applies to voice/merge too). Alex chose
+merge as-is: main 4050d5d, installed (installer logged "Removed retired skill: skills/cs-hint/"),
+doctor drift OK, cs-rotate still runs. Branch deleted. Main 28 commits ahead of origin, unpushed.
+Rotated at ~45%: handoff 2026-09-17-prune-statusline-caches.md (two passes, 9ef25e7 + 1dbe679),
+armed. All 29 other handoffs already consumed — nothing to supersede; oldest is 2026-08-24
+(24 days), so nothing meets the >30-day prune bar either. Measured for #645: tmux-client 3,986
+files/16 MB, tmux-real 4,029/16 MB; the other buckets (git 17, org 3, term 10, rewrite-config 11)
+are keyed on repeating idents and stay small.
