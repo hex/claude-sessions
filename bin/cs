@@ -101,6 +101,12 @@ CS_SKILLS=(
 # When retiring or renaming a skill in a release, add its OLD name here: a skill
 # directory left behind keeps answering its slash command forever, and nothing
 # else ever removes it.
+#
+# Do not add a doctor row for a leftover directory; it cannot report one. The
+# only cs that could still hold it is one older than the retirement, and that cs
+# has no entry here to check against; the upgrade that gives it the entry is the
+# same install that deletes the directory. So the row would warn about a state
+# it can never observe.
 RETIRED_SKILLS=(
     voice   # renamed to write-as-me; Claude Code 2.1.227 ships a built-in /voice (Toggle voice mode)
     merge   # replaced by finish: integrate and report, never remove
