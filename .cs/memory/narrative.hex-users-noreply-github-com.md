@@ -1228,3 +1228,28 @@ install 54/54, spawn 39/39, scope_prompt 52/52, statusline 237/237,
 feature_skill 5/5; shellcheck `-S error` clean; both bash 3.2 and 5.x parse
 the changed files. Nine commits on fix/v2026.9.16-minors, nothing pushed,
 nothing merged — Alex asked to see the findings first.
+
+### Codex round 2: three P3s, all on my own tests and prose
+
+Codex's second group restarts its numbering at 1 ("test and documentation
+findings"), which is why asking for "5, 6, 7" got 1-4 resent twice.
+
+- **Both Retry-After tests could pass without the 429 path running.** A
+  credential failure or a curl fixture that died early also writes the 600 s
+  fallback, and `next_poll_at` was the only assertion. Each stub now records
+  that it ran and each test asserts the marker; deleting the marker write
+  turns them red. Same class as the vacuous scope tests earlier today —
+  **twice in one branch, an assertion that the fixture reached the branch is
+  not optional.**
+- **My two spawn fixtures assumed chmod denies the owner a write.** As root,
+  or on a filesystem that ignores mode bits, `chmod 400` denies nothing and
+  the test would report broken error handling in code that is fine. New
+  `_deny_file_write` in tests/test_lib.sh (the file counterpart of
+  `_deny_writes`) probes and returns 2, callers return 77.
+- **The changelog claimed a shared threshold that is not shared**: the scope
+  budget stops at eight digits, the status line's thresholds at three, the
+  narrative budget now at sixteen. Reworded to a shared approach, not a shared
+  number.
+
+Eleven commits on fix/v2026.9.16-minors. Everything green again after the
+fold (spawn 39/39, statusline 237/237, harness 9/9, shellcheck clean).
