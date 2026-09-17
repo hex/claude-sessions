@@ -1,8 +1,8 @@
 /* @jsxRuntime classic */
 /* @jsx h */
 /* @jsxFrag Fragment */
-// ABOUTME: cs-rotate mod: keys above the prompt: rotate past the threshold, wrap up (two presses), or /clear once a handoff is armed.
-// ABOUTME: With CS_ROTATE_FORCE_CTX set a turn ending past it runs /rotate itself; session.start writes a heartbeat for doctor.
+// ABOUTME: cs-rotate mod: keys above the prompt: rotate past the threshold, wrap up, or /clear once a handoff is armed.
+// ABOUTME: With CS_ROTATE_FORCE_CTX set a turn ending past it runs /rotate itself, then asks before the /clear; session.start writes a heartbeat for doctor.
 import type { On, EngineInterface } from 'claude-code'
 
 declare const h: any
@@ -10,25 +10,32 @@ declare const Fragment: any
 
 // KEEP IN SYNC with the ctx warn and crit defaults in bin/cs-statusline
 // (_seg_ctx): by default the band appears where the status bar turns amber and
-// the Stop hook gives its headroom notice, and the gauge changes ink where the
-// bar's does. CS_STATUSLINE_CTX_WARN and _CRIT in the process environment move
-// both, as they move the bar; CS_ROTATE_BUTTON_CTX moves the band alone. A
-// value that is not a number is ignored.
+// the Stop hook gives its headroom notice. CS_STATUSLINE_CTX_WARN in the
+// process environment moves it, as it moves the bar; CS_ROTATE_BUTTON_CTX moves
+// the band alone. A value that is not a number is ignored.
 export const DEFAULT_PERCENT = 40
-export const DEFAULT_CRIT = 65
 
-// KEEP IN SYNC with the truecolor inks in bin/cs-statusline (_sgr: brand,
-// amber, crit): the capsule paints the bar's own inks, not the theme's
-// nearest keys, so it reads as one more capsule of the bar. The bar pivots
-// amber on the measured terminal background when it has one; the mod has only
-// the theme cs detected at launch (CS_TERM_THEME), dark when unset, as cs's
-// own hooks read it.
-export const INK = {
-  coral: 'rgb(217,119,87)',
-  amber: { light: 'rgb(180,83,9)', dark: 'rgb(253,230,138)' },
-  crit: { light: 'rgb(215,0,21)', dark: 'rgb(255,69,58)' },
+// KEEP IN SYNC with _bg_shade and the `surface` arm of _sgr in
+// bin/cs-statusline: the band paints the bar's own capsule fill, a shade of the
+// terminal background nudged a tenth away from itself (darker on a light
+// terminal, lighter on a dark one), so the keys read as one more capsule of the
+// bar rather than as a row of the transcript. cs measures the background at
+// launch and exports it; without that measurement the band paints no fill, so a
+// guess can never leave the engine's own text on a surface it cannot read
+// against.
+export const SURFACE_SHIFT = 10
+
+export function surfaceColor(bg: string | undefined): string | undefined {
+  const parts = (bg ?? '').split(';')
+  if (parts.length !== 3) return undefined
+  const rgb = parts.map(part => (/^\s*\d{1,3}\s*$/.test(part) ? Number(part) : 256))
+  if (rgb.some(v => v > 255)) return undefined
+  const [r, g, b] = rgb
+  const shade = 2126 * r + 7152 * g + 722 * b >= 1275000
+    ? rgb.map(v => Math.floor(v * (100 - SURFACE_SHIFT) / 100))
+    : rgb.map(v => v + Math.floor((255 - v) * SURFACE_SHIFT / 100))
+  return `rgb(${shade.join(',')})`
 }
-export type Theme = 'light' | 'dark'
 
 // Doctor observes the mod RUNNING, not merely installed: under a managed
 // machine's policy a mod can load and never run. Written when the plugin loads
@@ -47,35 +54,27 @@ export const HANDOFFS = '.cs/handoffs'
 // The conversation a forced rotation already ran /rotate for, by id. Written
 // BEFORE the run is scheduled: a rotation that fails must not be retried at
 // the end of every turn. Module state would not do: it survives a /clear
-// (measured; a ticker started before one kept firing after it) and is lost
+// (measured; a timer started before one kept firing after it) and is lost
 // on a reload of the mod.
 export const FORCED = '.cs/local/cs-rotate.forced'
 
-// Once the forced rotation has armed its handoff, how long the band counts
-// down before the mod runs the /clear itself. Pressing the button or sending a
-// prompt stops it.
-export const GRACE_SECONDS = 20
+// What the mod asks, and the answer that acts. `$.ui.ask` opens the engine's
+// own AskUserQuestion dialog and resolves to the label chosen, or to free text
+// typed under Other, so the answer is compared exactly; it rejects when the
+// dialog is dismissed and in a `-p` run, where there is nobody to ask. Both
+// questions are asked from a timer, never awaited inside a hook the turn is
+// waiting on: a turn held open until the person answers is a turn that cannot
+// draw the dialog.
+export const CLEAR_QUESTION = 'The handoff is written. Clear now and continue from it?'
+export const CLEAR_YES = 'Clear and continue'
+export const WRAP_QUESTION = 'Run /wrap for this session?'
+export const WRAP_YES = 'Yes, wrap up'
 
-// The wrap key's guard. /wrap replaces .cs/summary.md and runs two Opus
-// passes before the narrative rotation, so a mis-hit costs more than a
-// mis-hit rotation: `2` only arms the key, for WRAP_ARM_MS, and while it is
-// armed the band draws the confirmation on `3` instead. A held key repeats on
-// keydown (contract), and no elapsed time tells a repeat from a deliberate
-// second press (the first repeat lands 225 ms or more after the press, inside
-// a double-press), so the confirmation is a different key. `2` keeps a
-// button while armed that only re-arms: a digit with no button on it lands
-// in the composer (measured), and a non-empty composer takes every hotkey
-// with it. A prompt, a /clear or a conversation switch meanwhile disarms it.
-export const WRAP_ARM_MS = 5000
-let wrapArmed = false
-let wrapTimer: { cancel: () => void } | undefined
-
-// The countdown: seconds left, its ticker, and what the band last saw. Module
-// state survives a /clear (measured), so every path that ends the countdown
-// cancels the ticker; a reload of the mod drops it with its timers.
-let left: number | undefined
-let ticker: { cancel: () => void } | undefined
-let bandIdle = false
+// Whether this conversation has already been asked to clear. The forced
+// rotation asks once and takes no for an answer: a question re-opened at the
+// end of every turn is a question nobody can refuse. Module state survives a
+// /clear (measured), so the flag is dropped where the conversation changes.
+let asked = false
 
 // Which conversation the turns belong to, and whether it is being judged. A
 // conversation that begins past the force threshold did not get there by
@@ -92,9 +91,8 @@ let birth: string | undefined
 let startPercent: number | undefined
 
 export function register(on: On) {
-  // A (re)load has no countdown: the engine cancelled the old one's timers.
-  left = undefined; ticker = undefined; bandIdle = false; adopted = undefined; clearSeen = false; birth = undefined; startPercent = undefined
-  wrapArmed = false; wrapTimer = undefined
+  // A (re)load has met no conversation yet, and has asked nobody anything.
+  adopted = undefined; clearSeen = false; birth = undefined; startPercent = undefined; asked = false
   on('session.start', async ($, e, next) => {
     // Only a cs session has .cs/local; anywhere else the mod stays silent.
     const local = `${e.cwd}/.cs/local`
@@ -112,21 +110,11 @@ export function register(on: On) {
     return next(e)
   })
 
-  // A prompt entering the session, from anywhere, means the conversation is
-  // not done with: the countdown stops and the prompt goes through untouched.
-  on('prompt.submit', async ($, e, next) => {
-    if (ticker) stopCountdown($)
-    if (wrapArmed) disarmWrap($)
-    return next(e)
-  })
-
   // A /clear from anywhere else (typed, another plugin) ends the conversation
   // the count belongs to, so the timer must not outlive it, and makes the
   // next conversation a birth; a run the engine refuses makes nothing.
   on('command.run', { command: 'clear' }, async ($, e, next) => {
     clearSeen = true
-    if (ticker) stopCountdown($)
-    if (wrapArmed) disarmWrap($)
     try {
       return await next(e)
     } catch (err) {
@@ -139,29 +127,26 @@ export function register(on: On) {
     const drawn = await next(e)
     // The band draws in a new conversation before any of its turns end, so
     // the birth is settled here: a later /resume is not mistaken for it.
-    if (noteConversation(await $.session.id()) && wrapArmed) disarmWrap($)
+    noteConversation(await $.session.id())
     // A survey owns the band; a running turn cannot be rotated out of.
-    bandIdle = !e.props.hasSurvey && !e.props.isWorking
-    if (!bandIdle) return drawn
+    if (e.props.hasSurvey || e.props.isWorking) return drawn
     const armed = await handoffArmed($)
     const { context } = await $.session.usage()
     const percent = context.percent
-    const bands = await gaugeBands($)
-    if (!armed && (percent === undefined || percent < (await threshold($, bands)))) return drawn
+    if (!armed && (percent === undefined || percent < (await threshold($)))) return drawn
     if (!(await ownsRotation($))) return drawn
-    const theme = await termTheme($)
-    const ink = gaugeColor(percent, bands, theme)
+    const fill = surfaceColor(await $.env.get("CS_TERM_BG_RGB"))
     const { Box, Text, Button } = await $.ui.resolve(e)
-    // One capsule in the status bar's idiom: the Claude mark in coral, the
-    // button, and the context meter that explains why the capsule is there,
-    // in the ink the bar paints that band (amber past warn, red past crit).
-    // The keyed box lights coral under the pointer; the engine restyles it
+    // One capsule in the status bar's idiom: the keys on the bar's own fill,
+    // a blank line above them so the band reads apart from the transcript.
+    // The context percentage is the bar's to carry; the band does not repeat
+    // it. The keyed box lights coral under the pointer; the engine restyles it
     // without running the hook.
     return (
       <Box flexDirection="column">
         {drawn}
-        <Box>
-          <Box key="cs-rotate-band" paddingX={1}>
+        <Box marginTop={1}>
+          <Box key="cs-rotate-band" paddingX={1} backgroundColor={fill}>
             {/* The engine draws a plain button as "1: label", and it draws
                 that prefix whether or not the label is empty (measured live:
                 a hand-drawn digit beside an empty-label button prints the
@@ -173,61 +158,12 @@ export function register(on: On) {
                         onPress={() => rotate($)} />}
             {/* a Button is a block: nested in a Text the engine refuses the whole tree (measured), so the separator stands beside it */}
             {!armed && <Text dimColor>{'  \u00b7  '}</Text>}
-            {!armed && <Button key="cs-wrap" hotkey="2" plain label={wrapArmed ? 'wrap up this session?' : 'wrap up this session'} onPress={() => armWrap($)} />}
-            {!armed && wrapArmed && <Text dimColor>{'  \u00b7  '}</Text>}
-            {!armed && wrapArmed && <Button key="cs-wrap-confirm" hotkey="3" plain label="yes, run /wrap" onPress={() => runWrap($)} />}
-            {/* the forced rotation's grace: the seconds left before the mod runs the /clear itself */}
-            {armed && left !== undefined && (
-              <Text><Text dimColor>{'  \u00b7  '}</Text><Text color={INK.coral} bold>{`/clear in ${left}s`}</Text></Text>
-            )}
-            {percent !== undefined && (
-              <Text>
-                <Text dimColor>{'  \u00b7  '}</Text>
-                <Text color={ink} bold>{`${pie(percent, bands)} ctx ${percent}%`}</Text>
-              </Text>
-            )}
+            {!armed && <Button key="cs-wrap" hotkey="2" plain label="wrap up this session" onPress={() => askToWrap($)} />}
           </Box>
         </Box>
       </Box>
     )
   })
-}
-
-export type Bands = { warn: number; crit: number }
-
-// The pie the status bar draws, filling as context does: its quarter and
-// three-quarter steps sit on the warn and crit thresholds so the shape changes
-// exactly where the ink does, and the empty and full ends at a fixed 13 and 88
-// (bin/cs-statusline, _ctx_pie: KEEP IN SYNC).
-export function pie(percent: number, bands: Bands): string {
-  if (percent >= 88) return '\u25cf'
-  if (percent >= bands.crit) return '\u25d5'
-  if (percent >= bands.warn) return '\u25d1'
-  if (percent >= 13) return '\u25d4'
-  return '\u25cb'
-}
-
-// Below warn the capsule is only ever drawn armed, in the theme's plain ink.
-export function gaugeColor(percent: number | undefined, bands: Bands, theme: Theme): string {
-  if (percent === undefined) return 'text'
-  if (percent >= bands.crit) return INK.crit[theme]
-  if (percent >= bands.warn) return INK.amber[theme]
-  return 'text'
-}
-
-// The theme cs detected at launch; anything but "light" is dark, as cs's hooks read it.
-async function termTheme($: EngineInterface): Promise<Theme> {
-  return (await $.env.get("CS_TERM_THEME")) === 'light' ? 'light' : 'dark'
-}
-
-// The bar's own bands, read the way the bar reads them. Each variable's name
-// is a literal: `claude plugin validate` lists what a module reads, and a
-// name it does not spell is refused.
-async function gaugeBands($: EngineInterface): Promise<Bands> {
-  return {
-    warn: numberOr(await $.env.get("CS_STATUSLINE_CTX_WARN"), DEFAULT_PERCENT),
-    crit: numberOr(await $.env.get("CS_STATUSLINE_CTX_CRIT"), DEFAULT_CRIT),
-  }
 }
 
 function numberOr(raw: string | undefined, fallback: number): number {
@@ -249,6 +185,7 @@ async function forceThreshold($: EngineInterface): Promise<number | undefined> {
 function noteConversation(id: string): boolean {
   if (id === adopted) return false
   adopted = id
+  asked = false
   startPercent = undefined
   birth = clearSeen ? id : undefined
   clearSeen = false
@@ -275,7 +212,14 @@ async function forceRotation($: EngineInterface) {
     }
   }
   if (await handoffArmed($)) {
-    if (!ticker) startCountdown($)
+    // Asked once per conversation, and the flag is set BEFORE the dialog is
+    // scheduled: a question the person leaves unanswered must not be re-asked
+    // at the end of every turn that follows.
+    if (asked) return
+    asked = true
+    // The callback returns its promise so the clock's caller can await the
+    // whole question, not merely its scheduling.
+    $.clock.after(0, () => askToClear($))
     return
   }
   if (startPercent !== undefined && startPercent >= force) return
@@ -288,42 +232,34 @@ async function forceRotation($: EngineInterface) {
   })
 }
 
-// Counts the band down, one redraw a second (the contract folds calls past
-// ten a second). Each redraw re-reads the marker and the handoff: the count
-// must see the press and the prompt that stop it, so nothing here is cached.
-// At zero the /clear runs only where the band would draw the button: the band
-// idle, the handoff still armed, this the lead; otherwise the count stops and
-// the button stays for the person.
-function startCountdown($: EngineInterface) {
-  left = GRACE_SECONDS
-  ticker = $.clock.every(1000, async () => {
-    // Nothing to count once stopped, and nothing below zero: a period that
-    // lands while the zero tick is still reading leaves the count where it is.
-    if (left === undefined || left <= 0) return
-    left -= 1
-    $.ui.invalidate('ui.render')
-    if (left > 0) return
-    // The count holds at zero through the reads below: a prompt or a press
-    // landing meanwhile stops it (left becomes undefined), and this tick
-    // then does nothing, so nothing clears twice or behind a new turn.
-    const idle = bandIdle && (await handoffArmed($)) && (await ownsRotation($))
-    if (left !== 0) return
-    stopCountdown($)
-    if (idle) await clearAndContinue($).catch(err => $.ui.toast(`cs-rotate: /clear did not run: ${String(err)}`))
-  })
+// The forced rotation's question. The dialog can stand open for as long as
+// the person likes, so the three conditions the band draws its key under are
+// read again before the /clear: a handoff consumed meanwhile, or a session
+// handed on, must not be cleared out from under.
+async function askToClear($: EngineInterface) {
+  let answer: string
+  try {
+    answer = await $.ui.ask(CLEAR_QUESTION, { header: 'Rotate', options: [CLEAR_YES, 'Not yet'] })
+  } catch {
+    return // dismissed, or a `-p` run with nobody to ask: the band's key stays
+  }
+  if (answer !== CLEAR_YES) return
+  if (!(await handoffArmed($)) || !(await ownsRotation($))) return
+  try {
+    await clearAndContinue($)
+  } catch (err) {
+    $.ui.toast(`cs-rotate: /clear did not run: ${String(err)}`)
+  }
 }
 
-function stopCountdown($: EngineInterface) {
-  ticker?.cancel()
-  ticker = undefined
-  left = undefined
-  $.ui.invalidate('ui.render')
-}
-
-// The band's own threshold; without one it is the bar's warn band. `claude plugin validate` lists what a
-// module reads, and a name it does not spell is refused.
-async function threshold($: EngineInterface, bands: Bands): Promise<number> {
-  return numberOr(await $.env.get("CS_ROTATE_BUTTON_CTX"), bands.warn)
+// The band's own threshold; without one it is the bar's warn band, read the way
+// the bar reads it. Each variable's name is a literal: `claude plugin validate`
+// lists what a module reads, and a name it does not spell is refused.
+async function threshold($: EngineInterface): Promise<number> {
+  return numberOr(
+    await $.env.get("CS_ROTATE_BUTTON_CTX"),
+    numberOr(await $.env.get("CS_STATUSLINE_CTX_WARN"), DEFAULT_PERCENT),
+  )
 }
 
 // Armed means the marker names a handoff the SessionStart hook will accept
@@ -387,31 +323,22 @@ async function rotate($: EngineInterface) {
   await $.command.run({ command: 'rotate', args: '' })
 }
 
-// `2` arms the key for the window and redraws the band with the confirmation;
-// pressed again while armed it restarts the window.
-function armWrap($: EngineInterface) {
-  wrapTimer?.cancel()
-  wrapArmed = true
-  wrapTimer = $.clock.after(WRAP_ARM_MS, () => disarmWrap($))
-  $.ui.invalidate('ui.render')
-}
-
-// `3` while armed runs /wrap as if the person had typed it. The key is
-// disarmed BEFORE the run: a run that fails must not leave the next press live.
-async function runWrap($: EngineInterface) {
-  disarmWrap($)
+// `2` asks before running /wrap: it replaces .cs/summary.md and runs two Opus
+// passes before the narrative rotation, so a key that may have been meant for
+// the composer opens the engine's own dialog rather than acting on the press.
+async function askToWrap($: EngineInterface) {
+  let answer: string
+  try {
+    answer = await $.ui.ask(WRAP_QUESTION, { header: 'Wrap', options: [WRAP_YES, 'Not now'] })
+  } catch {
+    return // dismissed, or a `-p` run with nobody to ask
+  }
+  if (answer !== WRAP_YES) return
   try {
     await $.command.run({ command: 'wrap', args: '' })
   } catch (err) {
     $.ui.toast(`cs-rotate: /wrap did not run: ${String(err)}`)
   }
-}
-
-function disarmWrap($: EngineInterface) {
-  wrapTimer?.cancel()
-  wrapTimer = undefined
-  wrapArmed = false
-  $.ui.invalidate('ui.render')
 }
 
 // /clear ends this conversation, and cs's SessionStart hook then starts the
@@ -420,7 +347,6 @@ function disarmWrap($: EngineInterface) {
 // is open; the marker is the hook's to consume.
 async function clearAndContinue($: EngineInterface) {
   clearSeen = true
-  if (ticker) stopCountdown($)
   try {
     await $.command.run({ command: 'clear', args: '' })
   } catch (err) {

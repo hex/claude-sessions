@@ -27,46 +27,23 @@ test_mod_default_threshold_matches_the_statusline_warn_default() {
     [ -n "$mod_default" ] || { echo "  FAIL: DEFAULT_PERCENT literal not found in register.tsx"; return 1; }
     [ -n "$sl_warn" ] || { echo "  FAIL: ctx warn default not found in bin/cs-statusline"; return 1; }
     assert_eq "$sl_warn" "$mod_default" "mod default == statusline warn default" || return 1
-    local mod_crit sl_crit
-    mod_crit="$(sed -n 's/^export const DEFAULT_CRIT = \([0-9]*\)$/\1/p' "$MOD/hooks/register.tsx")"
-    sl_crit="$(sed -n 's/.*_num_or "\${CS_STATUSLINE_CTX_CRIT:-}" \([0-9]*\).*/\1/p' "$SCRIPT_DIR/../bin/cs-statusline")"
-    [ -n "$mod_crit" ] && [ -n "$sl_crit" ] || { echo "  FAIL: crit default literal not found in one of the two"; return 1; }
-    assert_eq "$sl_crit" "$mod_crit" "mod crit == statusline crit default" || return 1
 }
 
-# The capsule paints the bar's own truecolor inks. Each triplet is a literal in
-# both files (KEEP IN SYNC): the bar's `rgb="r;g;b"` arms of _sgr, the mod's
-# `rgb(r,g,b)` strings. brand has one value; amber and crit pivot on the theme.
-test_mod_inks_match_the_statusline_inks() {
+# The band paints the bar's own capsule fill: a shade of the terminal
+# background nudged away from itself. The shift and the luminance pivot are
+# literals in two languages (KEEP IN SYNC), so this test is the only thing
+# holding _bg_shade and surfaceColor together.
+test_mod_surface_shade_matches_the_statusline_shade() {
     local sl="$SCRIPT_DIR/../bin/cs-statusline" mod="$MOD/hooks/register.tsx"
-    local brand amber_light amber_dark crit_light crit_dark
-    brand="$(sed -n 's/^ *brand) *rgb="\([0-9;]*\)".*/\1/p' "$sl" | head -1)"
-    amber_light="$(sed -n '/^ *amber)/,/;;/p' "$sl" | grep -o 'else rgb="[0-9;]*"' | grep -o '[0-9;]*' | tail -1)"
-    amber_dark="$(sed -n '/^ *amber)/,/;;/p' "$sl" | grep -o 'dark" ]; then rgb="[0-9;]*"' | sed 's/.*rgb="//; s/"//')"
-    crit_dark="$(sed -n '/^ *crit)/,/;;/p' "$sl" | grep -o 'dark" ] && rgb="[0-9;]*"' | sed 's/.*rgb="//; s/"//')"
-    crit_light="$(sed -n '/^ *crit)/,/;;/p' "$sl" | grep -o '|| rgb="[0-9;]*"' | grep -o '[0-9;]*')"
-    # The amber arm spells each value twice: once on the measured-background
-    # branch (luminance), once on the theme branch. Both spellings are pinned.
-    local amber_lum_light amber_lum_dark
-    amber_lum_light="$(sed -n '/^ *amber)/,/;;/p' "$sl" | grep -o '1530000 ] && rgb="[0-9;]*"' | sed 's/.*rgb="//; s/"//')"
-    amber_lum_dark="$(sed -n '/^ *amber)/,/;;/p' "$sl" | grep -o '1530000 ] && rgb="[0-9;]*" || rgb="[0-9;]*"' | sed 's/.*|| rgb="//; s/"//')"
-    [ -n "$amber_lum_light" ] && [ -n "$amber_lum_dark" ] \
-        || { echo "  FAIL: the amber arm's measured-background branch not found in bin/cs-statusline"; return 1; }
-    assert_eq "$amber_light" "$amber_lum_light" "statusline amber light: theme branch == luminance branch" || return 1
-    assert_eq "$amber_dark" "$amber_lum_dark" "statusline amber dark: theme branch == luminance branch" || return 1
-    [ -n "$brand" ] && [ -n "$amber_light" ] && [ -n "$amber_dark" ] && [ -n "$crit_dark" ] && [ -n "$crit_light" ] \
-        || { echo "  FAIL: an ink is missing from bin/cs-statusline (brand=$brand amber=$amber_light/$amber_dark crit=$crit_light/$crit_dark)"; return 1; }
-    local mod_coral mod_amber_light mod_amber_dark mod_crit_light mod_crit_dark
-    mod_coral="$(sed -n "s/^ *coral: *'rgb(\([0-9,]*\))'.*/\1/p" "$mod" | tr ',' ';')"
-    mod_amber_light="$(sed -n "s/^ *amber: *{ *light: *'rgb(\([0-9,]*\))'.*/\1/p" "$mod" | tr ',' ';')"
-    mod_amber_dark="$(sed -n "s/^ *amber: *{.*dark: *'rgb(\([0-9,]*\))'.*/\1/p" "$mod" | tr ',' ';')"
-    mod_crit_light="$(sed -n "s/^ *crit: *{ *light: *'rgb(\([0-9,]*\))'.*/\1/p" "$mod" | tr ',' ';')"
-    mod_crit_dark="$(sed -n "s/^ *crit: *{.*dark: *'rgb(\([0-9,]*\))'.*/\1/p" "$mod" | tr ',' ';')"
-    assert_eq "$brand" "$mod_coral" "mod coral == statusline brand" || return 1
-    assert_eq "$amber_light" "$mod_amber_light" "mod amber light == statusline amber light" || return 1
-    assert_eq "$amber_dark" "$mod_amber_dark" "mod amber dark == statusline amber dark" || return 1
-    assert_eq "$crit_light" "$mod_crit_light" "mod crit light == statusline crit light" || return 1
-    assert_eq "$crit_dark" "$mod_crit_dark" "mod crit dark == statusline crit dark" || return 1
+    local sl_shift sl_pivot mod_shift mod_pivot
+    sl_shift="$(sed -n '/^_bg_shade()/,/^}/p' "$sl" | sed -n 's/.*shift=\([0-9]*\).*/\1/p' | head -1)"
+    sl_pivot="$(sed -n '/^_bg_shade()/,/^}/p' "$sl" | sed -n 's/.*_LUM" -ge \([0-9]*\).*/\1/p' | head -1)"
+    mod_shift="$(sed -n 's/^export const SURFACE_SHIFT = \([0-9]*\)$/\1/p' "$mod")"
+    mod_pivot="$(sed -n 's/.*722 \* b >= \([0-9]*\)$/\1/p' "$mod")"
+    [ -n "$sl_shift" ] && [ -n "$sl_pivot" ] || { echo "  FAIL: _bg_shade's shift or pivot not found in bin/cs-statusline"; return 1; }
+    [ -n "$mod_shift" ] && [ -n "$mod_pivot" ] || { echo "  FAIL: SURFACE_SHIFT or the luminance pivot not found in register.tsx"; return 1; }
+    assert_eq "$sl_shift" "$mod_shift" "mod surface shift == statusline _bg_shade shift" || return 1
+    assert_eq "$sl_pivot" "$mod_pivot" "mod luminance pivot == statusline _bg_shade pivot" || return 1
 }
 
 # The installer deploys the mod under ~/.claude/skills/cs-rotate and a cs
@@ -109,17 +86,19 @@ test_mod_validate_inventories_the_hooks_and_calls() {
         echo "    SKIP: this claude ($(claude --version 2>/dev/null | head -1)) does not inventory function hooks"
         return 0
     fi
-    assert_output_contains "$out" "hooks: session.start, turn.complete, prompt.submit, command.run{command=clear}, ui.render{component=AbovePrompt}" "all five hooks inventoried" || return 1
+    assert_output_contains "$out" "hooks: session.start, turn.complete, command.run{command=clear}, ui.render{component=AbovePrompt}" "all four hooks inventoried" || return 1
     assert_output_not_contains "$out" '$.prompt.fill' "nothing fills the composer any more" || return 1
-    assert_output_contains "$out" 'env reads: CS_ROTATE_BUTTON_CTX, CS_ROTATE_FORCE_CTX, CS_STATUSLINE_CTX_CRIT, CS_STATUSLINE_CTX_WARN, CS_TERM_THEME' "the two thresholds, the bar's bands and the theme are read from the environment" || return 1
+    assert_output_contains "$out" 'env reads: CS_ROTATE_BUTTON_CTX, CS_ROTATE_FORCE_CTX, CS_STATUSLINE_CTX_WARN, CS_TERM_BG_RGB' "the two thresholds, the bar's warn band and the measured background are read from the environment" || return 1
     assert_output_not_contains "$out" '$.prompt.submit' "and never submits" || return 1
-    assert_output_contains "$out" '$.command.run (via clearAndContinue, rotate, runWrap)' "the three presses run their commands, and nothing else runs one" || return 1
-    assert_output_contains "$out" '$.clock.after (via armWrap, forceRotation), $.clock.every (via startCountdown)' "the forced /rotate and the wrap key's arm window are one-shot timers and the grace a ticker, nowhere else" || return 1
+    assert_output_contains "$out" '$.command.run (via askToWrap, clearAndContinue, rotate)' "the keys run their commands, and nothing else runs one" || return 1
+    assert_output_contains "$out" '$.clock.after (via forceRotation)' "the forced rotation is the one timer, and nothing ticks" || return 1
+    assert_output_not_contains "$out" '$.clock.every' "nothing counts down any more" || return 1
+    assert_output_contains "$out" '$.ui.ask (via askToClear, askToWrap)' "both questions go through the engine's own dialog" || return 1
 }
 
 run_test test_mod_manifest_names_the_plugin_and_its_module
 run_test test_mod_default_threshold_matches_the_statusline_warn_default
-run_test test_mod_inks_match_the_statusline_inks
+run_test test_mod_surface_shade_matches_the_statusline_shade
 run_test test_mod_is_deployed_by_the_installer_and_enabled_at_launch
 run_test test_mod_unit_tests_pass_under_bun
 run_test test_mod_validate_inventories_the_hooks_and_calls

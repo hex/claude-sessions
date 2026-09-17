@@ -6,7 +6,7 @@ import { test, expect, beforeEach } from 'bun:test'
 ;(globalThis as any).h = (type: any, props: any, ...children: any[]) => ({ type, props: props ?? {}, children })
 ;(globalThis as any).Fragment = 'Fragment'
 
-import { register, DEFAULT_PERCENT, DEFAULT_CRIT, GRACE_SECONDS, gaugeColor, pie, isUnconsumed, INK } from '../hooks/register.tsx'
+import { register, DEFAULT_PERCENT, CLEAR_QUESTION, CLEAR_YES, WRAP_QUESTION, WRAP_YES, surfaceColor, isUnconsumed } from '../hooks/register.tsx'
 
 type Hook = ($: any, e: any, next: (e: any) => Promise<any>) => Promise<any>
 const hooks: Record<string, Hook> = {}
@@ -28,6 +28,9 @@ let envVars: Record<string, string | undefined>
 let timers: { ms: number; fn: () => void; kind: 'after' | 'every'; cancelled: boolean }[]
 let invalidated: string[]
 let toasts: string[]
+let asks: { question: string; options: any }[]
+// What the person does with the next dialog: a label, or a rejection (dismissed, or a `-p` run).
+let answer: string | Error
 const timer = (kind: 'after' | 'every') => (ms: number, fn: () => void) => {
   const t = { ms, fn, kind, cancelled: false }
   timers.push(t)
@@ -42,7 +45,16 @@ const $ = {
   },
   prompt: { fill: async (args: any) => { filled.push(args); return { isFilled: true } } },
   command: { run: async (args: any) => { ran.push(args); return { text: '' } } },
-  ui: { resolve: async () => ({ Box: 'Box', Text: 'Text', Button: 'Button' }), invalidate: (event: string) => { invalidated.push(event) }, toast: (text: string) => { toasts.push(text) } },
+  ui: {
+    resolve: async () => ({ Box: 'Box', Text: 'Text', Button: 'Button' }),
+    invalidate: (event: string) => { invalidated.push(event) },
+    toast: (text: string) => { toasts.push(text) },
+    ask: async (question: string, options: any) => {
+      asks.push({ question, options })
+      if (answer instanceof Error) throw answer
+      return answer
+    },
+  },
   clock: { after: timer('after'), every: timer('every') },
   fs: {
     write: async (path: string, text: string) => { written[path] = text; files[path] = text },
@@ -65,7 +77,7 @@ const findButton = (tree: any) => buttons(tree)[0]
 beforeEach(() => {
   for (const k of Object.keys(hooks)) delete hooks[k]
   percent = undefined; filled = []; ran = []; written = {}; existing = new Set(['/work/.cs/local'])
-  timers = []; invalidated = []; toasts = []
+  timers = []; invalidated = []; toasts = []; asks = []; answer = CLEAR_YES
   // The default fixture is the lead conversation of a cs session.
   sessionId = 'uuid-lead'
   envVars = {}
@@ -75,40 +87,14 @@ beforeEach(() => {
 
 test('the default threshold is the statusline warn band', () => {
   expect(DEFAULT_PERCENT).toBe(40)
-  expect(DEFAULT_CRIT).toBe(65)
 })
 
-// The status bar's truecolor inks, as bin/cs-statusline paints them on each
-// theme (tests/test_mod_rotate.sh pins the triplets against that file).
-test('the gauge ink steps where the status bar steps, in the theme\'s own ink', () => {
-  const bands = { warn: 40, crit: 65 }
-  const table: [number, string, string][] = [
-    [0, 'text', 'text'], [39, 'text', 'text'],
-    [40, 'rgb(180,83,9)', 'rgb(253,230,138)'], [64, 'rgb(180,83,9)', 'rgb(253,230,138)'],
-    [65, 'rgb(215,0,21)', 'rgb(255,69,58)'], [100, 'rgb(215,0,21)', 'rgb(255,69,58)'],
-  ]
-  for (const [p, light, dark] of table) {
-    expect([p, gaugeColor(p, bands, 'light'), gaugeColor(p, bands, 'dark')]).toEqual([p, light, dark])
-  }
-  expect(gaugeColor(undefined, bands, 'light')).toBe('text')
-})
-
-
-test('CS_STATUSLINE_CTX_WARN and _CRIT move the gauge, the band and its threshold together', async () => {
-  envVars.CS_STATUSLINE_CTX_WARN = '50'; envVars.CS_STATUSLINE_CTX_CRIT = '70'
+test('CS_STATUSLINE_CTX_WARN moves the band with the bar', async () => {
+  envVars.CS_STATUSLINE_CTX_WARN = '50'
   percent = 49
   expect(await band()).toBe(DRAWN)
   percent = 50
-  let tree = JSON.stringify(await band())
-  // 50 is the moved warn: the half pie and the amber arrive together.
-  expect(tree).toContain('"\u25d1 ctx 50%"')
-  expect(tree).toContain(`"color":"${INK.amber.dark}"`)
-  percent = 69
-  expect(JSON.stringify(await band())).not.toContain(INK.crit.dark)
-  percent = 70
-  tree = JSON.stringify(await band())
-  expect(tree).toContain('"\u25d5 ctx 70%"')
-  expect(tree).toContain(`"color":"${INK.crit.dark}"`)
+  expect(findButton(await band())).toBeDefined()
   envVars.CS_ROTATE_BUTTON_CTX = '10'
   percent = 10
   expect(findButton(await band())).toBeDefined()
@@ -159,34 +145,41 @@ test('at the threshold the band adds the rotate key on hotkey 1, first, beneath 
   expect(json1).not.toContain('borderStyle')
 })
 
-test('the band carries the context gauge in the status bar\'s own inks for the theme cs detected', async () => {
+test('the band draws no context gauge: the status bar already carries it', async () => {
   percent = 71
-  let tree = JSON.stringify(await band())
-  expect(tree).toContain('"\u25d5 ctx 71%"')
-  expect(tree).toContain(`"color":"${INK.crit.dark}"`)
-  envVars.CS_TERM_THEME = 'light'
-  tree = JSON.stringify(await band())
-  expect(tree).toContain(`"color":"${INK.crit.light}"`)
-  expect(tree).not.toContain(INK.crit.dark)
-  percent = 45
-  tree = JSON.stringify(await band())
-  expect(tree).toContain('"\u25d1 ctx 45%"')
-  expect(tree).toContain(`"color":"${INK.amber.light}"`)
+  const tree = JSON.stringify(await band())
+  expect(tree).not.toContain('ctx')
+  expect(tree).not.toContain('71%')
 })
 
-// The pie steps where the bar's does: its quarter and three-quarter steps sit
-// on warn and crit, the empty and full ends at a fixed 13 and 88. Below the
-// warn band the band itself does not draw, so the shape is read from pie.
-test('the gauge pie fills the way the status bar fills it', () => {
-  const bands = { warn: 40, crit: 65 }
-  expect(pie(5, bands)).toBe('\u25cb')
-  expect(pie(13, bands)).toBe('\u25d4')
-  expect(pie(39, bands)).toBe('\u25d4')
-  expect(pie(40, bands)).toBe('\u25d1')
-  expect(pie(65, bands)).toBe('\u25d5')
-  expect(pie(88, bands)).toBe('\u25cf')
-  // The steps travel with the thresholds, the way the bar's do.
-  expect(pie(30, { warn: 25, crit: 50 })).toBe('\u25d1')
+// One blank line above it, and the status bar's own capsule surface under it,
+// so the keys read as a band of their own rather than as the last row of
+// whatever the transcript ended with.
+test('the band sits a line clear of what is above it, on the bar\'s capsule surface', async () => {
+  envVars.CS_TERM_BG_RGB = '252;247;229'
+  percent = 40
+  const tree = JSON.stringify(await band())
+  expect(tree).toContain('"marginTop":1')
+  expect(tree).toContain('"backgroundColor":"rgb(226,222,206)"')
+})
+
+test('without a measured terminal background the band keeps the spacing and paints no surface', async () => {
+  percent = 40
+  const tree = JSON.stringify(await band())
+  expect(tree).toContain('"marginTop":1')
+  expect(tree).not.toContain('backgroundColor')
+})
+
+// KEEP IN SYNC with _bg_shade in bin/cs-statusline (tests/test_mod_rotate.sh
+// pins the shift against that file): a tenth away from the background's own
+// luminance, darker on a light terminal and lighter on a dark one.
+test('the surface is the shade the status bar shades the terminal background to', () => {
+  expect(surfaceColor('252;247;229')).toBe('rgb(226,222,206)')
+  expect(surfaceColor('30;30;30')).toBe('rgb(52,52,52)')
+  expect(surfaceColor(undefined)).toBeUndefined()
+  expect(surfaceColor('not a colour')).toBeUndefined()
+  expect(surfaceColor('252;247')).toBeUndefined()
+  expect(surfaceColor('252;247;300')).toBeUndefined()
 })
 
 // A bare line: no box to draw, so no border to light up under the pointer and
@@ -269,8 +262,7 @@ test('an armed handoff turns the button into the clear button, whatever the cont
     expect(json).not.toContain('borderStyle')
     expect(json).not.toContain('borderColor')
     expect(json).not.toContain('undefined')
-    if (p === undefined) expect(json).not.toContain('%')
-    else expect(json).toContain(`ctx ${p}%`)
+    expect(json).not.toContain('ctx')
   }
 })
 
@@ -403,149 +395,94 @@ test('a turn ending past the force threshold with a handoff already armed runs n
   arm()
   await turnComplete()
   await fireAfter()
-  expect(ran).toEqual([])
-})
-
-// The countdown's ticker, and one tick of it as the clock would run it.
-const ticker = () => timers.find(t => t.kind === 'every' && !t.cancelled)
-const tick = async (n = 1) => { for (let i = 0; i < n; i++) await ticker()!.fn() }
-const promptSubmit = (text = 'keep going') =>
-  hooks['prompt.submit']($, { text, wait: false, origin: { kind: 'composer' } }, async (e) => ({ text: e.text }))
-
-test('with the handoff armed and force on, a turn ending starts a countdown the band shows, one redraw a second', async () => {
-  envVars.CS_ROTATE_FORCE_CTX = '70'
-  arm(); percent = 80
-  await band()
-  await turnComplete()
-  expect(ticker()?.ms).toBe(1000)
-  expect(GRACE_SECONDS).toBe(20)
-  expect(JSON.stringify(await band())).toContain(`/clear in ${GRACE_SECONDS}s`)
-  await tick(3)
-  expect(invalidated).toEqual(['ui.render', 'ui.render', 'ui.render'])
-  expect(JSON.stringify(await band())).toContain(`/clear in ${GRACE_SECONDS - 3}s`)
-  expect(ran).toEqual([])
-  // one countdown at a time: another turn ending does not start a second
-  await turnComplete()
-  expect(timers.filter(t => t.kind === 'every')).toHaveLength(1)
-})
-
-test('at zero the countdown runs /clear, once, and stops ticking', async () => {
-  envVars.CS_ROTATE_FORCE_CTX = '70'
-  arm(); percent = 80
-  await band()
-  await turnComplete()
-  const t = ticker()!
-  await tick(GRACE_SECONDS)
-  expect(ran).toEqual([{ command: 'clear', args: '' }])
-  expect(t.cancelled).toBe(true)
-  expect(JSON.stringify(await band())).not.toContain('/clear in')
-})
-
-test('a prompt entering the session stops the countdown and passes through', async () => {
-  envVars.CS_ROTATE_FORCE_CTX = '70'
-  arm(); percent = 80
-  await band()
-  await turnComplete()
-  await tick(2)
-  const t = ticker()!
-  expect(await promptSubmit('one more thing')).toEqual({ text: 'one more thing' })
-  expect(t.cancelled).toBe(true)
-  expect(JSON.stringify(await band())).not.toContain('/clear in')
-  expect(ran).toEqual([])
-  // the next turn ending restarts it from the top
-  await turnComplete()
-  expect(JSON.stringify(await band())).toContain(`/clear in ${GRACE_SECONDS}s`)
-})
-
-test('pressing the clear button mid-countdown stops the ticker before it clears', async () => {
-  envVars.CS_ROTATE_FORCE_CTX = '70'
-  arm(); percent = 80
-  await band()
-  await turnComplete()
-  await tick(2)
-  const t = ticker()!
-  await findButton(await band()).props.onPress()
-  expect(t.cancelled).toBe(true)
   expect(ran).toEqual([{ command: 'clear', args: '' }])
 })
 
-test('a countdown reaching zero while a turn runs or a survey holds the band clears nothing and stops', async () => {
-  envVars.CS_ROTATE_FORCE_CTX = '70'
-  arm(); percent = 80
-  for (const props of [{ isWorking: true }, { hasSurvey: true }]) {
-    await band()
-    await turnComplete()
-    const t = ticker()!
-    await band(props)
-    await tick(GRACE_SECONDS)
-    expect(ran).toEqual([])
-    expect(t.cancelled).toBe(true)
-  }
-})
-
-test('a countdown reaching zero re-checks the handoff: one consumed meanwhile clears nothing', async () => {
+// With the handoff armed, the forced rotation asks instead of acting. The
+// question is opened from a 0 ms timer, never awaited inside the hook: the
+// turn the hook is waiting on cannot draw a dialog.
+test('with the handoff armed and force on, a turn ending asks, from a timer, and the answer clears', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
   arm(); percent = 80
   await band()
+  await turnComplete()
+  expect(asks).toEqual([])
+  expect(timers.map(t => t.kind)).toEqual(['after'])
+  expect(timers[0].ms).toBe(0)
+  await fireAfter()
+  expect(asks).toEqual([{ question: CLEAR_QUESTION, options: { header: 'Rotate', options: [CLEAR_YES, 'Not yet'] } }])
+  expect(ran).toEqual([{ command: 'clear', args: '' }])
+})
+
+test('the question is asked once a conversation, whatever the answer and however many turns end', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  answer = 'Not yet'
+  await turnComplete(); await fireAfter()
+  expect(asks).toHaveLength(1)
+  expect(ran).toEqual([])
+  await turnComplete(); await turnComplete(); await fireAfter()
+  expect(asks).toHaveLength(1)
+  expect(ran).toEqual([])
+  // the next conversation is asked in its turn
+  await clearRun()
+  sessionId = 'uuid-next'
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-next\n'
+  await band()
+  await turnComplete(); await fireAfter()
+  expect(asks).toHaveLength(2)
+})
+
+test('a dismissed dialog, or a run with nobody to ask, clears nothing and says nothing', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  answer = new Error('dismissed')
+  await turnComplete(); await fireAfter()
+  expect(asks).toHaveLength(1)
+  expect(ran).toEqual([])
+  expect(toasts).toEqual([])
+})
+
+// The dialog can stand open for as long as the person likes: what was true
+// when it opened is read again before anything is cleared.
+test('an answer arriving after the handoff was consumed, or the session handed on, clears nothing', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
   await turnComplete()
   files[HANDOFF] = UNCONSUMED.replace('status: unconsumed', 'status: consumed')
-  await tick(GRACE_SECONDS)
+  await fireAfter()
+  expect(asks).toHaveLength(1)
+  expect(ran).toEqual([])
+
+  register(on as any)
+  arm()
+  await turnComplete()
+  sessionId = 'uuid-teammate'
+  await fireAfter()
   expect(ran).toEqual([])
 })
 
-test('without force, or outside the lead, an armed handoff starts no countdown and prompt.submit passes through', async () => {
+test('a /clear the answer runs that the engine refuses is said once, and clears nothing', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await turnComplete()
+  $.command.run = async () => { throw new Error('no session') }
+  await fireAfter()
+  $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
+  expect(toasts).toEqual(['cs-rotate: /clear did not run: Error: no session'])
+  expect(ran).toEqual([])
+})
+
+test('without force, or outside the lead, an armed handoff asks nothing', async () => {
   arm(); percent = 80
   await turnComplete()
   envVars.CS_ROTATE_FORCE_CTX = '70'
   sessionId = 'uuid-teammate'
   await turnComplete()
+  await fireAfter()
   expect(timers).toEqual([])
+  expect(asks).toEqual([])
   expect(toasts).toEqual([])
-  expect(await promptSubmit()).toEqual({ text: 'keep going' })
-})
-
-test('a prompt arriving while the zero tick is still checking the handoff wins: nothing clears', async () => {
-  envVars.CS_ROTATE_FORCE_CTX = '70'
-  arm(); percent = 80
-  await band()
-  await turnComplete()
-  await tick(GRACE_SECONDS - 1)
-  const zero = tick()
-  await promptSubmit('wait, one more thing')
-  await zero
-  expect(ran).toEqual([])
-  // and a press racing the zero tick clears once, not twice
-  await turnComplete()
-  await tick(GRACE_SECONDS - 1)
-  const button = findButton(await band())
-  const zero2 = tick()
-  await button.props.onPress()
-  await zero2
-  expect(ran).toEqual([{ command: 'clear', args: '' }])
-})
-
-test('a /clear run from anywhere else ends the countdown, so no timer outlives the conversation', async () => {
-  envVars.CS_ROTATE_FORCE_CTX = '70'
-  arm(); percent = 80
-  await band()
-  await turnComplete()
-  const t = ticker()!
-  const e = { command: 'clear', args: '', origin: { kind: 'composer' }, presentation: { layout: 'main', columns: 80 } }
-  expect(await hooks['command.run:clear']($, e, async () => ({ text: '' }))).toEqual({ text: '' })
-  expect(t.cancelled).toBe(true)
-  expect(JSON.stringify(await band())).not.toContain('/clear in')
-})
-
-test('a rejected /clear at zero shows a toast and clears nothing else', async () => {
-  envVars.CS_ROTATE_FORCE_CTX = '70'
-  arm(); percent = 80
-  await band()
-  await turnComplete()
-  $.command.run = async () => { throw new Error('no session') }
-  await tick(GRACE_SECONDS)
-  $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
-  expect(toasts).toEqual(['cs-rotate: /clear did not run: Error: no session'])
-  expect(ran).toEqual([])
 })
 
 // The SessionStart hook's own rule (_handoff_is_unconsumed): the frontmatter
@@ -556,20 +493,6 @@ test('isUnconsumed follows the hook: unclosed frontmatter, or a status after it,
   expect(isUnconsumed('---\nparent: x\n---\nstatus: unconsumed\n')).toBe(false)
   expect(isUnconsumed('---\nstatus: consumed\n---\n')).toBe(false)
   expect(isUnconsumed('')).toBe(false)
-})
-
-test('a tick that lands while the zero tick is still reading does not push the count negative or clear twice', async () => {
-  envVars.CS_ROTATE_FORCE_CTX = '70'
-  arm(); percent = 80
-  await band()
-  await turnComplete()
-  await tick(GRACE_SECONDS - 1)
-  const t = ticker()!
-  const first = t.fn()
-  const second = t.fn()
-  await first; await second
-  expect(ran).toEqual([{ command: 'clear', args: '' }])
-  expect(JSON.stringify(await band())).not.toContain('/clear in -')
 })
 
 test('a conversation met at load is forced whatever it started at; one born of a /clear that starts past the threshold is not, and says so once', async () => {
@@ -613,21 +536,6 @@ test('a conversation met at load is forced whatever it started at; one born of a
 const clearRun = () =>
   hooks['command.run:clear']($, { command: 'clear', args: '', origin: { kind: 'composer' }, presentation: { layout: 'main', columns: 80 } }, async () => ({ text: '' }))
 
-test('a successor that starts past the threshold still gets the countdown once the person arms a handoff themselves', async () => {
-  envVars.CS_ROTATE_FORCE_CTX = '70'
-  percent = 30
-  await turnComplete()
-  await clearRun()
-  sessionId = 'uuid-next'
-  files['/work/.cs/local/state'] = 'claude_session_id: uuid-next\n'
-  percent = 75
-  await turnComplete()
-  expect(timers).toEqual([])
-  arm()
-  await turnComplete()
-  expect(ticker()).toBeDefined()
-})
-
 test('a /clear before any turn ends still marks the next conversation as /clear-born: past the threshold it is not forced', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
   await clearRun()
@@ -656,13 +564,14 @@ test('the /clear the mod runs itself marks the successor as /clear-born too, so 
   arm(); percent = 80
   await band()
   await turnComplete()
-  await findButton(await band()).props.onPress()
+  await fireAfter()
   expect(ran).toEqual([{ command: 'clear', args: '' }])
   files = { '/work/.cs/local/state': 'claude_session_id: uuid-next\n' }
   sessionId = 'uuid-next'
   percent = 75
   await turnComplete()
-  expect(timers.filter(t => t.kind === 'after')).toEqual([])
+  // the question already asked and fired is spent; the successor schedules none
+  expect(timers.filter(t => t.kind === 'after' && !t.cancelled)).toEqual([])
   expect(toasts).toHaveLength(1)
 })
 
@@ -710,7 +619,7 @@ test('a /clear the mod runs itself that is rejected leaves no birth behind: a la
   await band()
   await turnComplete()
   $.command.run = async () => { throw new Error('no session') }
-  await tick(GRACE_SECONDS)
+  await fireAfter()
   $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
   expect(toasts).toEqual(['cs-rotate: /clear did not run: Error: no session'])
   files = { '/work/.cs/local/state': 'claude_session_id: uuid-resumed\n' }
@@ -739,10 +648,6 @@ test('a typed /clear that the engine refuses leaves no birth behind either', asy
 // where the band draws unarmed; once a handoff is armed the band's one job is
 // the /clear.
 const wrapButton = (tree: any) => buttons(tree).find((b: any) => b.props.hotkey === '2')
-// The confirmation is a different key: a held `2` repeats on keydown
-// (contract) and must never confirm itself.
-const confirmButton = (tree: any) => buttons(tree).find((b: any) => b.props.hotkey === '3')
-
 test('at the threshold the band adds a second button on hotkey 2 that reads as the wrap key, after the rotate key', async () => {
   percent = 40
   const tree = await band()
@@ -753,64 +658,42 @@ test('at the threshold the band adds a second button on hotkey 2 that reads as t
   expect(wrapButton(tree).props.label).toBe('wrap up this session')
 })
 
+// One key, then the engine's own dialog. /wrap replaces .cs/summary.md and
+// runs two Opus passes, so the press asks rather than acts; a held `2` repeats
+// on keydown (contract) and each repeat only re-opens the same question.
+test('pressing 2 asks before /wrap, and only the yes runs it', async () => {
+  percent = 40
+  answer = WRAP_YES
+  await wrapButton(await band()).props.onPress()
+  expect(asks).toEqual([{ question: WRAP_QUESTION, options: { header: 'Wrap', options: [WRAP_YES, 'Not now'] } }])
+  expect(ran).toEqual([{ command: 'wrap', args: '' }])
+
+  answer = 'Not now'
+  await wrapButton(await band()).props.onPress()
+  expect(asks).toHaveLength(2)
+  expect(ran).toHaveLength(1)
+
+  // dismissed, or a `-p` run with nobody to ask: nothing runs and nothing is said
+  answer = new Error('dismissed')
+  await wrapButton(await band()).props.onPress()
+  expect(ran).toHaveLength(1)
+  expect(toasts).toEqual([])
+})
+
+test('a /wrap the answer runs that the engine refuses is said once', async () => {
+  percent = 40
+  answer = WRAP_YES
+  $.command.run = async () => { throw new Error('no session') }
+  await wrapButton(await band()).props.onPress()
+  $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
+  expect(toasts).toEqual(['cs-rotate: /wrap did not run: Error: no session'])
+  expect(ran).toEqual([])
+})
+
 test('an armed handoff draws the clear key alone: no wrap key', async () => {
   arm(); percent = 90
   expect(buttons(await band())).toHaveLength(1)
   expect(wrapButton(await band())).toBeUndefined()
-})
-
-test('the wrap key needs two keys: 2 arms it for a moment and runs nothing, 3 while armed runs /wrap', async () => {
-  percent = 40
-  expect(confirmButton(await band())).toBeUndefined()
-  await wrapButton(await band()).props.onPress()
-  expect(ran).toEqual([])
-  expect(invalidated).toEqual(['ui.render'])
-  let tree = await band()
-  expect(wrapButton(tree).props.label).toBe('wrap up this session?')
-  expect(confirmButton(tree).props.plain).toBe(true)
-  expect(confirmButton(tree).props.label).toBe('yes, run /wrap')
-  await confirmButton(tree).props.onPress()
-  expect(ran).toEqual([{ command: 'wrap', args: '' }])
-  expect(filled).toEqual([])
-  // Disarmed by the run: the wrap key is back and 3 presses nothing.
-  tree = await band()
-  expect(wrapButton(tree).props.label).toBe('wrap up this session')
-  expect(confirmButton(tree)).toBeUndefined()
-})
-
-
-test('an armed wrap key disarms on its own after a moment, and a press then only re-arms', async () => {
-  percent = 40
-  await wrapButton(await band()).props.onPress()
-  const t = timers.find(t => t.kind === 'after')
-  expect(t).toBeDefined()
-  expect(t!.ms).toBe(5000)
-  t!.fn()
-  expect(wrapButton(await band()).props.label).toBe('wrap up this session')
-  expect(confirmButton(await band())).toBeUndefined()
-  await wrapButton(await band()).props.onPress()
-  expect(ran).toEqual([])
-})
-
-test('a prompt entering the session, or a /clear, disarms the wrap key', async () => {
-  percent = 40
-  await wrapButton(await band()).props.onPress()
-  await hooks['prompt.submit']($, { text: 'hi' }, async e => e)
-  expect(confirmButton(await band())).toBeUndefined()
-  await wrapButton(await band()).props.onPress()
-  await hooks['command.run:clear']($, {}, async e => e)
-  expect(confirmButton(await band())).toBeUndefined()
-  expect(ran).toEqual([])
-})
-
-test('a rejected /wrap shows a toast and leaves the key disarmed', async () => {
-  percent = 40
-  $.command.run = async () => { throw new Error('no such command') }
-  await wrapButton(await band()).props.onPress()
-  await confirmButton(await band()).props.onPress()
-  expect(toasts).toEqual(['cs-rotate: /wrap did not run: Error: no such command'])
-  expect(confirmButton(await band())).toBeUndefined()
-  $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
 })
 
 // The engine refuses a tree with a Button under an inline element (measured
@@ -823,12 +706,9 @@ function buttonsUnderText(tree: any, inText = false): number {
   return (tree.children ?? []).reduce((n: number, c: any) => n + buttonsUnderText(c, inline), 0)
 }
 
-test('no button is ever nested in a Text: armed or not, arming the wrap key or not', async () => {
+test('no button is ever nested in a Text, armed or not', async () => {
   percent = 40
   expect(buttonsUnderText(await band())).toBe(0)
-  await wrapButton(await band()).props.onPress()
-  expect(buttonsUnderText(await band())).toBe(0)
-  await confirmButton(await band()).props.onPress()
   arm()
   expect(buttonsUnderText(await band())).toBe(0)
 })
@@ -838,29 +718,3 @@ test('no button is ever nested in a Text: armed or not, arming the wrap key or n
 // and a non-empty composer takes every hotkey with it). So `2` keeps a button
 // while armed: each press only re-arms, the window restarts, nothing is typed,
 // and the confirmation sits on `3`.
-test('a held 2 never confirms: while armed 2 only re-arms, restarting the window, and the confirmation sits on 3', async () => {
-  percent = 40
-  await wrapButton(await band()).props.onPress()
-  for (let i = 0; i < 20; i++) {
-    const tree = await band()
-    expect(wrapButton(tree).props.hotkey).toBe('2')
-    expect(confirmButton(tree).props.hotkey).toBe('3')
-    await wrapButton(tree).props.onPress()
-  }
-  expect(ran).toEqual([])
-  const afters = timers.filter(t => t.kind === 'after')
-  expect(afters).toHaveLength(21)
-  expect(afters.filter(t => !t.cancelled)).toHaveLength(1)
-  expect(afters[afters.length - 1].cancelled).toBe(false)
-})
-
-test('the arm does not survive a conversation switch: the first press in the new one only arms', async () => {
-  percent = 40
-  await wrapButton(await band()).props.onPress()
-  sessionId = 'uuid-resumed'
-  files['/work/.cs/local/state'] = 'claude_session_id: uuid-resumed\n'
-  expect(confirmButton(await band())).toBeUndefined()
-  await wrapButton(await band()).props.onPress()
-  expect(ran).toEqual([])
-  expect(confirmButton(await band())).toBeDefined()
-})
