@@ -643,13 +643,14 @@ _doctor_check_integrate_lock() {
     # The autosave hook's sub-second hold of the same directory records no
     # pid, so a doctor run inside that window reads it as stale. A recycled
     # pid reads a stale lock as held; the process listing answered for any
-    # integrate anywhere, which was worse.
+    # integrate anywhere, which was worse. `ps -p`, not `kill -0`: a holder
+    # owned by another user answers EPERM to kill and would read as stale.
     local pid
     pid=$(cat "$lock/pid" 2>/dev/null || true)
     case "$pid" in
         *[!0-9]*|"") pid="" ;;
     esac
-    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    if [ -n "$pid" ] && ps -p "$pid" >/dev/null 2>&1; then
         _doctor_ok "Integrate lock: $lock held by a running integrate (pid $pid)"
     else
         _doctor_warn "Integrate lock: $lock exists with no integrate running; autosave skips while it does. Remove it with: rm -r \"$lock\""
