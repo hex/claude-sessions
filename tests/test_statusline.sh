@@ -490,7 +490,7 @@ test_5h_rest_time_on_old_bash() {
     local old_bash=/bin/bash
     if [ ! -x "$old_bash" ] || "$old_bash" -c 'printf -v n "%(%s)T" -1 2>/dev/null; [[ "$n" =~ ^[0-9]+$ ]]' 2>/dev/null; then
         echo "    SKIP: no bash lacking the %(%s)T builtin available to exercise the fallback"
-        return 0
+        return 77
     fi
     local now reset_at
     now=$(date +%s)   # not the %(%s)T builtin: empty under the bash 3.2 that runs this suite on macOS

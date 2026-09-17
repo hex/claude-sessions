@@ -110,7 +110,7 @@ test_verify_checksum_accepts_match() {
     else
         rm -rf "$tmpdir"
         echo "  SKIP: no sha256sum or shasum available"
-        return 0
+        return 77
     fi
 
     grep -A 15 '^verify_checksum()' "$CS_BIN" > "$tmpdir/_vc.sh"

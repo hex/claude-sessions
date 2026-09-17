@@ -654,7 +654,7 @@ test_classifier_falls_back_to_grep_without_ripgrep() {
     p=$(_rg_free_path) || rc=$?
     # 2 means no such PATH can be built on this host, not that anything
     # is wrong with the fallback the test names.
-    [ "$rc" = "2" ] && return 0
+    [ "$rc" = "2" ] && return 77
     [ "$rc" = "0" ] || { echo "  FAIL: could not build an rg-free PATH"; return 1; }
     if PATH="$p" command -v rg >/dev/null 2>&1; then
         echo "  FAIL: rg is still resolvable on that PATH; the fallback arm is not reached"
@@ -693,7 +693,7 @@ test_grep_fallback_still_classifies_chitchat_negative() {
     p=$(_rg_free_path) || rc=$?
     # 2 means no such PATH can be built on this host, not that anything
     # is wrong with the fallback the test names.
-    [ "$rc" = "2" ] && return 0
+    [ "$rc" = "2" ] && return 77
     [ "$rc" = "0" ] || { echo "  FAIL: could not build an rg-free PATH"; return 1; }
     local out
     out=$(_run_hook_on_path "$p" "good morning! how is it going today?") \
@@ -785,7 +785,7 @@ test_budget_garbage_is_the_default() {
 test_budget_of_one_millisecond_expires() {
     if [ -z "$(bash -c 'printf %s "${EPOCHREALTIME:-}"')" ]; then
         echo "    SKIP: this bash has no \$EPOCHREALTIME; elapsed is whole seconds"
-        return 0
+        return 77
     fi
     seed_repo "src/api.ts"
     local ctx
@@ -923,7 +923,7 @@ test_date_note_silent_on_the_prompt_after_it_fired() {
 test_date_stamp_write_fails_quietly() {
     mkdir -p "$CLAUDE_SESSION_META_DIR/local/context-date"
     rm -f "$(_stamp_file)"
-    _deny_writes "$CLAUDE_SESSION_META_DIR/local/context-date" || return 0
+    _deny_writes "$CLAUDE_SESSION_META_DIR/local/context-date" || return 77
     local _in out
     _in=$(printf '%s' "hello" | jq -Rs '{prompt: ., hook_event_name: "UserPromptSubmit", session_id: "sid-test"}')
     out=$(bash "$HOOK" <<< "$_in" 2>"$TEST_TMPDIR/stderr") || return 1

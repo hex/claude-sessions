@@ -27,7 +27,7 @@ test_list_runs_under_old_bash() {
     local old_bash=/bin/bash
     if [ ! -x "$old_bash" ] || "$old_bash" -c 'declare -A _x' 2>/dev/null; then
         echo "    SKIP: no bash lacking associative arrays available"
-        return 0
+        return 77
     fi
     create_test_session alpha >/dev/null
     create_test_session beta >/dev/null

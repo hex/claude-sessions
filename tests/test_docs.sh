@@ -135,10 +135,57 @@ test_no_writer_pipes_into_grep_q() {
     }
 }
 
+# A test that cannot run on this host returns 77, which run_test counts as
+# skipped and names in the tally. Returning 0 instead reports a pass that
+# proved nothing, and a whole lane can read green with its coverage gone (a
+# runner without bun passed every mod unit test that way). This closes the
+# class: a SKIP message followed by `return 0`, a helper's "cannot build it
+# here" status (2) turned into `return 0`, and `_deny_writes ... || return 0`.
+_skips_that_pass() {  # files...
+    awk '
+        /^[[:space:]]*#/ { prev = ""; next }
+        /SKIP/ && /return 0/ { print FILENAME ":" FNR ": " $0 }
+        prev != "" && /^[[:space:]]*return 0[[:space:]]*$/ { print FILENAME ":" FNR ": " prev }
+        /_deny_writes .*\|\| return 0/ { print FILENAME ":" FNR ": " $0 }
+        /"\$rc" = "2" \] && return 0/ { print FILENAME ":" FNR ": " $0 }
+        /2\) return 0/ { print FILENAME ":" FNR ": " $0 }
+        { prev = ($0 ~ /echo .*SKIP/) ? $0 : "" }
+    ' "$@"
+}
+
+test_no_skip_counts_as_a_pass() {
+    local hits suite
+    local -a suites=()
+    for suite in "$REPO"/tests/test_*.sh; do
+        case "$suite" in */test_docs.sh|*/test_harness.sh) continue ;; esac
+        suites+=("$suite")
+    done
+    hits=$(_skips_that_pass "${suites[@]}")
+    if [ -n "$hits" ]; then
+        echo "  FAIL: these skips return 0, which counts as a pass; return 77 instead:"
+        printf '    %s\n' "$hits" | head -30
+        return 1
+    fi
+    # Reachability, as in the grep -q guard: the search must still find each
+    # known-bad shape, assembled at runtime so a sweep cannot rewrite the canary.
+    local canary="$TEST_TMPDIR/canary.sh" zero
+    zero="return $((1 - 1))"
+    {
+        printf '        echo "    SKIP: no tool"\n        %s\n' "$zero"
+        printf '    _deny_writes "$d" || %s\n' "$zero"
+        printf '    [ "$rc" = "2" ] && %s\n' "$zero"
+    } > "$canary"
+    [ "$(_skips_that_pass "$canary" | wc -l | tr -d ' ')" = "3" ] || {
+        echo "  FAIL: the search no longer finds all three known-bad shapes"
+        return 1
+    }
+}
+
 run_test test_configuration_documents_every_env_var_the_readme_names
 run_test test_every_backend_the_code_accepts_is_documented
 run_test test_hooks_doc_states_both_resolution_arms
 run_test test_no_surface_tells_a_resume_to_read_every_narrative
 run_test test_no_writer_pipes_into_grep_q
+run_test test_no_skip_counts_as_a_pass
 
 report_results

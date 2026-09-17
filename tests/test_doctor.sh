@@ -1049,7 +1049,7 @@ test_doctor_does_not_call_a_valid_settings_file_invalid_without_jq() {
 
     local p rc=0; p=$(_jq_free_path) || rc=$?
     # 2 means the stub PATH is not constructible on this host.
-    [ "$rc" = "2" ] && return 0
+    [ "$rc" = "2" ] && return 77
     [ "$rc" = "0" ] || { echo "  FAIL: could not build a jq-free PATH"; return 1; }
     # Drop the hashed location of the jq just run above. Under bash 3.2 — the
     # floor, and what macos-latest runs — `command -v` answers from the hash

@@ -25,7 +25,7 @@ teardown() {
 # exactly that.
 test_install_survives_an_unwritable_declined_marker_dir() {
     command -v expect >/dev/null 2>&1 \
-        || { echo "    SKIP (expect not installed; the decline needs a tty)"; return 0; }
+        || { echo "    SKIP (expect not installed; the decline needs a tty)"; return 77; }
     local fake_home="$TEST_TMPDIR/home-nowrite"
     mkdir -p "$fake_home/.claude" "$fake_home/.config/cs"
     printf '{"statusLine":{"command":"/opt/other/bar"}}\n' > "$fake_home/.claude/settings.json"
@@ -66,7 +66,7 @@ EXPECT
 # know they were making.
 test_declining_says_permanence_on_its_own_line() {
     command -v expect >/dev/null 2>&1 \
-        || { echo "    SKIP (expect not installed; the decline needs a tty)"; return 0; }
+        || { echo "    SKIP (expect not installed; the decline needs a tty)"; return 77; }
     local fake_home="$TEST_TMPDIR/home-declinemsg"
     mkdir -p "$fake_home/.claude"
     printf '{"statusLine":{"command":"/opt/other/bar"}}\n' > "$fake_home/.claude/settings.json"
@@ -103,7 +103,7 @@ EXPECT
 # into an installer preview.
 test_install_previews_the_status_line_before_asking() {
     command -v expect >/dev/null 2>&1 \
-        || { echo "    SKIP (expect not installed; the prompt needs a tty)"; return 0; }
+        || { echo "    SKIP (expect not installed; the prompt needs a tty)"; return 77; }
     local fake_home="$TEST_TMPDIR/home-preview"
     mkdir -p "$fake_home/.claude"
     local exp="$TEST_TMPDIR/preview.exp" out="$TEST_TMPDIR/preview.out"
@@ -189,7 +189,7 @@ EXPECT
 # plainly that it is remembered, and cs -statusline enable reverses it.
 test_enter_declines_the_same_as_an_explicit_n() {
     command -v expect >/dev/null 2>&1 \
-        || { echo "    SKIP (expect not installed; the prompt needs a tty)"; return 0; }
+        || { echo "    SKIP (expect not installed; the prompt needs a tty)"; return 77; }
     local ans
     for ans in "" "n"; do
         local fake_home="$TEST_TMPDIR/home-ans${ans:-enter}"

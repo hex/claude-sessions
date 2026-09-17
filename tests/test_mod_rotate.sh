@@ -58,7 +58,7 @@ test_mod_is_deployed_by_the_installer_and_enabled_at_launch() {
 test_mod_unit_tests_pass_under_bun() {
     if ! command -v bun >/dev/null 2>&1; then
         echo "    SKIP: bun not on PATH"
-        return 0
+        return 77
     fi
     local out
     out="$(cd "$MOD" && bun test 2>&1)" || { echo "$out"; return 1; }
@@ -72,7 +72,7 @@ test_mod_unit_tests_pass_under_bun() {
 test_mod_validate_inventories_the_hooks_and_calls() {
     if ! command -v claude >/dev/null 2>&1; then
         echo "    SKIP: claude not on PATH"
-        return 0
+        return 77
     fi
     local out raw="${TMPDIR:-/tmp}/cs-mod-validate.$$"
     env -u ANTHROPIC_API_KEY claude plugin validate "$MOD" > "$raw" 2>&1
@@ -84,7 +84,7 @@ test_mod_validate_inventories_the_hooks_and_calls() {
     # prints no inventory; the pins below are about the inventory.
     if ! grep -q 'hooks:' <<< "$out"; then
         echo "    SKIP: this claude ($(claude --version 2>/dev/null | head -1)) does not inventory function hooks"
-        return 0
+        return 77
     fi
     assert_output_contains "$out" "hooks: session.start, turn.complete, prompt.submit, command.run{command=clear}, ui.render{component=AbovePrompt}, ui.render{component=Pane}" "all six hooks inventoried" || return 1
     assert_output_not_contains "$out" '$.prompt.fill' "nothing fills the composer any more" || return 1

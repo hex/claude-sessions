@@ -231,7 +231,7 @@ test_legacy_conversion_survives_a_stale_queue_tmp_file() {
 test_legacy_conversion_keeps_the_legacy_file_when_a_task_cannot_be_written() {
     printf 'must survive\n' > "$(QFILE)"
     mkdir -p "$CLAUDE_SESSION_META_DIR/local/queue.tmp"
-    _deny_writes "$CLAUDE_SESSION_META_DIR/local/queue.tmp" || return 0
+    _deny_writes "$CLAUDE_SESSION_META_DIR/local/queue.tmp" || return 77
     "$CS_BIN" -queue list >/dev/null 2>&1 || true
     _allow_writes "$CLAUDE_SESSION_META_DIR/local/queue.tmp"
     assert_eq "0" "$(QCOUNT)" "nothing landed" || return 1
@@ -416,7 +416,7 @@ test_drain_gate_ignores_a_teammate_stop() {
 test_drain_disarms_when_the_pop_fails() {
     qseed "task one" "task two"
     printf 'draining\n' > "$(QDIR)/queue.state"
-    _deny_writes "$(QDIR)/queue" || return 0
+    _deny_writes "$(QDIR)/queue" || return 77
     local out; out=$(drain)
     _allow_writes "$(QDIR)/queue"
     assert_eq "idle" "$(cat "$(QDIR)/queue.state" | tr -d '[:space:]')" "failed pop disarms the drain" || return 1

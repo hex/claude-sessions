@@ -978,7 +978,7 @@ test_migration_keeps_the_legacy_file_when_a_record_cannot_be_written() {
     _seed_legacy_inbox \
         '{"id":"w1","ts":1700000000,"from":"sender","actor":"a","kind":"text","body":"must survive"}'
     mkdir -p "$(MAILDIR)/tmp"
-    _deny_writes "$(MAILDIR)/tmp" || return 0
+    _deny_writes "$(MAILDIR)/tmp" || return 77
     _open_receiver
     _allow_writes "$(MAILDIR)/tmp"
     assert_eq "0" "$(NEW_COUNT)" "nothing was delivered" || return 1
@@ -1261,7 +1261,7 @@ test_idle_wake_accepts_another_spelling_of_the_same_path() {
     "$CS_BIN" -msg receiver "wake up" >/dev/null 2>&1 || return 1
     local msg; msg=$(FIRST_MSG) || return 1
     local other; other=$(cd "$(dirname "$msg")" && pwd -P)/$(basename "$msg")
-    [ "$other" != "$msg" ] || { echo "    SKIP (no second spelling of the maildir on this host)"; return 0; }
+    [ "$other" != "$msg" ] || { echo "    SKIP (no second spelling of the maildir on this host)"; return 77; }
     [ -f "$other" ] || { echo "  FAIL: the second spelling does not name the same file"; return 1; }
     local rc=0
     filechanged "$other" add >/dev/null 2>&1 || rc=$?

@@ -116,7 +116,7 @@ test_stale_lock_is_reclaimed() {
 
     if kill -0 "$dead_pid" 2>/dev/null; then
         echo "  SKIP: PID $dead_pid is unexpectedly alive"
-        return 0
+        return 77
     fi
 
     echo "$dead_pid" > "$CS_SESSIONS_ROOT/test-session/.cs/session.lock"
@@ -389,7 +389,7 @@ STUB
 test_collision_menu_finds_the_picker_beside_cs() {
     create_lock_test_session "test-session"
     local path_no_tui
-    path_no_tui=$(_path_without_picker) || { echo "    SKIP (cs-tui resolves from PATH regardless)"; return 0; }
+    path_no_tui=$(_path_without_picker) || { echo "    SKIP (cs-tui resolves from PATH regardless)"; return 77; }
 
     # cs and a picker as siblings, reachable only by explicit path.
     mkdir -p "$TEST_TMPDIR/sibling"
@@ -419,7 +419,7 @@ test_collision_menu_omits_session_manager_without_picker() {
     chmod +x "$TEST_TMPDIR/nopicker/cs"
 
     local path_no_tui
-    path_no_tui=$(_path_without_picker) || { echo "    SKIP (cs-tui still resolves with every holding directory dropped)"; return 0; }
+    path_no_tui=$(_path_without_picker) || { echo "    SKIP (cs-tui still resolves with every holding directory dropped)"; return 77; }
 
     sleep 300 &
     local live_pid=$!

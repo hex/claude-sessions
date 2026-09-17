@@ -1755,7 +1755,7 @@ test_features_ignores_a_dead_lock_pid() {
     dead_pid=$(bash -c 'echo $$')
     if kill -0 "$dead_pid" 2>/dev/null; then
         echo "  SKIP: PID $dead_pid is unexpectedly alive"
-        return 0
+        return 77
     fi
     echo "$dead_pid" > "$wt/.cs/session.lock"
     local line

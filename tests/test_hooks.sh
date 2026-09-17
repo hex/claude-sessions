@@ -2946,7 +2946,7 @@ test_advisor_nudge_survives_an_unwritable_cooldown_dir() {
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
     rm -rf "$CLAUDE_SESSION_META_DIR/local"
     mkdir -p "$CLAUDE_SESSION_META_DIR/local"
-    _deny_writes "$CLAUDE_SESSION_META_DIR/local" || return 0
+    _deny_writes "$CLAUDE_SESSION_META_DIR/local" || return 77
 
     # Hooks fail open: a stamp that cannot be written must never cost the user
     # the reminder it rides on. The stamp is written for the lead only, so the
