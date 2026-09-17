@@ -942,3 +942,31 @@ a reload shows it again.
 `$.clock.after` timers in tests: the pane's open is an `after` timer, so tests
 counting `after` timers to prove "no /rotate scheduled" must spend it first
 (`fireAfter`) and count only uncancelled ones.
+
+## 2026-09-17 (evening) — Codex branch review: four P2s, all in the designer
+
+`/codex:review` against main (81 bun green) found nothing in `mods/cs-rotate`;
+all four findings are in `docs/mods-layout.js`, the designer's engine:
+1. `toJsx` Text children: `<` breaks the parse, `{x}` becomes an expression,
+   non-BMP chars truncated by a 4-hex `\u` escape (:310-315).
+2. `toJsx` string props: `label="say \"yes\""` — JSX attributes have no
+   backslash escape; Bun rejects it (:296).
+3. Box `backgroundColor` paints only padding/gaps, not cells under children or
+   height-added rows (:169-173) — the band now uses a fill, so the canvas
+   would show holes in exactly that.
+4. Column Box with explicit height ignores `justifyContent`/`flexGrow`: slack
+   always appended below (:165-169).
+Recommended to Alex: fix 1-3 (TDD in docs/test/layout.test.ts), defer 4. The
+16 layout tests never exercised escaping or nested backgrounds — the oracle
+was one shipped band with plain ASCII labels. Not yet fixed; awaiting his go.
+
+Codex P2s 1-3 fixed in `e709a5e` (P4, column slack, deferred as agreed).
+The oracle for "the export pastes" is Bun's own transpiler:
+`new Bun.Transpiler({ loader: 'tsx', tsconfig: JSON.stringify({ compilerOptions: { jsx: 'react', jsxFactory: 'h' } }) })`,
+transform the export, eval with an `h` that rebuilds the tree, compare.
+Bun rejects a backslash inside a JSX attribute string with "Invalid JSX
+escape - use XML entity codes quotes or pass a JavaScript string instead".
+Box underpaint copies each cell's style object: `run()` shares one style
+object across a run and `EMPTY` is global, so mutating `st.bg` in place
+would paint every blank on the canvas. Mutations: bare-text guard off → 1
+red, underpaint off → 2 red. The lab page itself was not reopened in Chrome.
