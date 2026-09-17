@@ -175,7 +175,9 @@ test_spawn_failed_seed_write_stages_nothing() {
     mkdir -p "$CS_SESSIONS_ROOT/.spawn"
     # A read-only file in the seed's tmp place: the redirect fails, while the
     # cleanup that follows still succeeds, so the abort runs its own error.
-    : > "$(SEED).tmp"; chmod 400 "$(SEED).tmp"
+    # Root, and filesystems that ignore mode bits, deny nothing — skip there
+    # rather than blame the code for a write that was always going to succeed.
+    _deny_file_write "$(SEED).tmp" || return 77
     local rc=0 err
     err=$("$CS_BIN" -spawn worker --brief "$TEST_TMPDIR/brief.md" 2>&1 >/dev/null) && rc=1
     chmod 600 "$(SEED).tmp" 2>/dev/null; rm -f "$(SEED).tmp"
@@ -196,8 +198,7 @@ test_spawn_failed_brief_copy_leaves_no_seed_temp() {
     # A read-only file in the brief's tmp place: cp fails, the directory stays
     # writable, so the seed's own temp write succeeded just before it.
     mkdir -p "$CS_SESSIONS_ROOT/.spawn"
-    : > "$CS_SESSIONS_ROOT/.spawn/worker.brief.md.tmp"
-    chmod 400 "$CS_SESSIONS_ROOT/.spawn/worker.brief.md.tmp"
+    _deny_file_write "$CS_SESSIONS_ROOT/.spawn/worker.brief.md.tmp" || return 77
     local rc=0
     "$CS_BIN" -spawn worker --brief "$TEST_TMPDIR/brief.md" >/dev/null 2>&1 && rc=1
     chmod 600 "$CS_SESSIONS_ROOT/.spawn/worker.brief.md.tmp" 2>/dev/null

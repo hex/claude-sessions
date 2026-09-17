@@ -63,6 +63,24 @@ _deny_writes() {  # dir
     return 0
 }
 
+# Stage a read-only FILE and confirm this process is actually denied writing
+# through it: as root, or on a filesystem that ignores mode bits, chmod 400
+# denies nothing and a test built on it would report broken error handling in
+# code that is fine. Returns 2 when the write is not denied, the same shape
+# _deny_writes uses, so callers return 77 (skipped).
+_deny_file_write() {  # path
+    local f="$1"
+    : > "$f" 2>/dev/null || return 2
+    chmod 400 "$f" 2>/dev/null || return 2
+    if { : > "$f"; } 2>/dev/null; then
+        chmod 600 "$f" 2>/dev/null || true
+        rm -f "$f" 2>/dev/null || true
+        echo "    SKIP (this filesystem does not deny the owner writes to a read-only file)"
+        return 2
+    fi
+    return 0
+}
+
 _allow_writes() {  # dir
     chmod 700 "$1" 2>/dev/null || true
 }

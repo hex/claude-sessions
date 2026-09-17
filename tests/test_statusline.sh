@@ -2479,6 +2479,7 @@ while [ \$# -gt 0 ]; do
     case "\$1" in -D) hdr="\$2"; shift 2 ;; *) shift ;; esac
 done
 [ -n "\$hdr" ] && printf 'HTTP/2 429\r\nretry-after: 99999999999999999999\r\n\r\n' > "\$hdr"
+: > "$TEST_TMPDIR/curl.ran"
 printf '429'
 CURL
     chmod +x "$bindir/security" "$bindir/curl"
@@ -2486,6 +2487,9 @@ CURL
     PATH="$bindir:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
     assert_eq "1787816600" "$(jq -r '.next_poll_at' "$CS_USAGE_DIR/fable.org-abc.json")" \
         "an unusable Retry-After falls back to the 600s floor" || return 1
+    # The 600 s floor is also what a missing token or a curl that never ran
+    # writes, so the assertion above proves nothing on its own.
+    assert_file_exists "$TEST_TMPDIR/curl.ran" "the 429 path was reached, not a credential failure" || return 1
 }
 
 # A Retry-After short enough to pass the digit cap can still park the next poll
@@ -2506,6 +2510,7 @@ while [ \$# -gt 0 ]; do
     case "\$1" in -D) hdr="\$2"; shift 2 ;; *) shift ;; esac
 done
 [ -n "\$hdr" ] && printf 'HTTP/2 429\r\nretry-after: 999999999999999\r\n\r\n' > "\$hdr"
+: > "$TEST_TMPDIR/curl.ran"
 printf '429'
 CURL
     chmod +x "$bindir/security" "$bindir/curl"
@@ -2513,6 +2518,7 @@ CURL
     PATH="$bindir:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
     assert_eq "1787819600" "$(jq -r '.next_poll_at' "$CS_USAGE_DIR/fable.org-abc.json")" \
         "a Retry-After past the ceiling waits an hour, not an age" || return 1
+    assert_file_exists "$TEST_TMPDIR/curl.ran" "the 429 path was reached, not a credential failure" || return 1
 }
 
 run_test test_refresh_writes_fable_window
