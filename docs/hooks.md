@@ -287,30 +287,25 @@ status bar's warn band, where the Stop hook gives its headroom notice), the band
 directly above the prompt draws `1: rotate this conversation`.
 `CS_ROTATE_BUTTON_CTX=<percent>` in the shell that launches cs moves it; unset
 or not a number, the band follows the bar's own warn band
-(`CS_STATUSLINE_CTX_WARN`, 40 by default). The band is one rounded capsule in
-the status bar's idiom: the Claude mark in coral, the button, and a ten-cell
-context meter with the percentage (`█████░░░░░ 47%`). The border and the meter
-take the bar's own truecolor inks, not the theme's nearest keys, so the capsule
-reads as one more capsule of the bar: amber past warn, red past crit, read from
-the same `CS_STATUSLINE_CTX_WARN` and `CS_STATUSLINE_CTX_CRIT` the bar reads (40
-and 65 by default), in the light or dark value for the theme cs detected at
-launch (`CS_TERM_THEME`; unset reads as dark, as cs's hooks read it). The bar
-itself picks its amber from the measured terminal background when it has one;
-the mod has only the theme, so on a terminal whose background contradicts the
-theme flag the two ambers can differ. Under the mouse pointer the border turns
-coral. Pressing `1` from an
+(`CS_STATUSLINE_CTX_WARN`, 40 by default). The band is a bare line with a
+blank line above it, painted on the status bar's own capsule fill: a shade of
+the terminal background nudged a tenth away from itself, darker on a light
+terminal and lighter on a dark one, so the keys read as one more capsule of the
+bar rather than as the last row of the transcript. cs measures that background
+at launch and exports it (`CS_TERM_BG_RGB`); without the measurement the band
+keeps the spacing and paints no fill, since a guessed surface can leave the
+engine's own text unreadable on it. The percentage itself stays on the status
+bar: the band does not repeat it. Pressing `1` from an
 empty composer runs `/rotate`, as if typed: the `rotate` skill draws the
 purpose from the conversation. Beside it the band draws `2: wrap up this
 session`. That key runs `/wrap`, which distills memory, replaces
 `.cs/summary.md` and rotates the narrative: two Opus passes and a shell
-helper, minutes and real tokens, so it takes two keys: `2` runs nothing and
-draws `3: yes, run /wrap` beside it for five seconds, and `3` within that
-window runs it. The confirmation is a different key on purpose: a held key
-repeats, and no timing tells a repeat from a second press. `2` keeps its
-button while armed (`2: wrap up this session?`) and only restarts the window,
-since a digit with no button lands in the composer and a non-empty composer
-takes every hotkey with it. A prompt entering the session, a `/clear`, or a
-switch to another conversation disarms it. Below the band the mod draws nothing, and it draws nothing while a
+helper, minutes and real tokens, so the press asks first. `2` opens the
+engine's own AskUserQuestion dialog — `Run /wrap for this session?`, with
+`Yes, wrap up` and `Not now` — and only the yes runs it. A held key repeats,
+and each repeat re-opens the same question rather than answering it; a
+dismissed dialog, and a `-p` run with nobody to ask, run nothing and say
+nothing. Below the band the mod draws nothing, and it draws nothing while a
 turn runs or while a survey holds the band. It never submits a prompt of its
 own.
 
@@ -342,7 +337,7 @@ handoff already armed: an interrupted or errored turn, or a subagent's, starts
 nothing. The run is scheduled from a timer rather than from the turn's own
 hook, which the plugin contract refuses a command from. Once the rotate skill
 has armed its handoff, the next turn's end starts a 20-second grace: the
-capsule reads `1: /clear and continue from the handoff  ·  /clear in 20s`,
+band reads `1: /clear and continue from the handoff  ·  /clear in 20s`,
 redrawn once a second, and at zero the mod runs the `/clear` itself, only if
 the band is idle at that moment (no turn running, no survey), the handoff still
 armed and this still the lead; otherwise the count stops and the button waits
@@ -355,6 +350,16 @@ timer, because a timer started before a `/clear` keeps firing after one
 (measured). At zero the mod re-reads the handoff with the SessionStart hook's
 own rule (frontmatter opened and closed by `---`, `status: unconsumed`
 inside), so a truncated handoff is never cleared into.
+
+The first grace of a session (a load of the mod) also opens a pane, titled
+`Handoff`, beside the band: the handoff's `Next Step` section, up to twelve
+lines, and the same count beneath it, so the twenty seconds are spent reading
+what the next conversation will do. The pane carries no keys; stopping the
+count stays on the band. It closes wherever the count ends: a press, a prompt,
+a `/clear`, or zero. Later graces in the same session keep to the band. A pane
+a mod opens on its own is not drawn below 144 terminal columns (110 once you
+have opened it yourself), so on a narrower terminal the band's count is all
+there is.
 
 Pick the percentage above a fresh conversation's own footprint. The wake turn
 after the `/clear` is an ordinary turn, and the once-per-conversation record
@@ -425,6 +430,13 @@ the conversation it meets next unjudged.
 Design lab: `docs/mods-design-lab.html` (open it in a browser) shows every element, prop, render site and rule a mod can use, and the
 rotate capsule's presets and knobs, each state printing the
 JSX it maps to, in the status line's inks; the shipped capsule is its "Inked" preset.
+
+The panel it opens on is a canvas: build a band out of nested Box, Text and
+Button, set each node's props, and copy the JSX underneath into a mod. The
+layout engine behind it lives in `docs/mods-layout.js`, which the page loads as
+a plain script and `tests/test_mods_layout.sh` drives through bun. It
+approximates the engine rather than porting it: a row that overruns the band is
+clipped and named, where the real one shrinks a Text to fit.
 
 Tests: `tests/test_mod_rotate.sh` runs the bun unit tests under
 `mods/cs-rotate/test/` (a fake engine drives the band, the press and the

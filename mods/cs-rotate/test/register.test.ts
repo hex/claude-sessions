@@ -6,7 +6,7 @@ import { test, expect, beforeEach } from 'bun:test'
 ;(globalThis as any).h = (type: any, props: any, ...children: any[]) => ({ type, props: props ?? {}, children })
 ;(globalThis as any).Fragment = 'Fragment'
 
-import { register, DEFAULT_PERCENT, DEFAULT_CRIT, GRACE_SECONDS, gaugeColor, meter, isUnconsumed, INK } from '../hooks/register.tsx'
+import { register, DEFAULT_PERCENT, GRACE_SECONDS, PREVIEW_PANE, WRAP_QUESTION, WRAP_YES, nextStep, surfaceColor, isUnconsumed } from '../hooks/register.tsx'
 
 type Hook = ($: any, e: any, next: (e: any) => Promise<any>) => Promise<any>
 const hooks: Record<string, Hook> = {}
@@ -28,6 +28,10 @@ let envVars: Record<string, string | undefined>
 let timers: { ms: number; fn: () => void; kind: 'after' | 'every'; cancelled: boolean }[]
 let invalidated: string[]
 let toasts: string[]
+let asks: { question: string; options: any }[]
+let panes: { op: 'open' | 'close'; args: any }[]
+// What the person does with the next dialog: a label, or a rejection (dismissed, or a `-p` run).
+let answer: string | Error
 const timer = (kind: 'after' | 'every') => (ms: number, fn: () => void) => {
   const t = { ms, fn, kind, cancelled: false }
   timers.push(t)
@@ -42,7 +46,18 @@ const $ = {
   },
   prompt: { fill: async (args: any) => { filled.push(args); return { isFilled: true } } },
   command: { run: async (args: any) => { ran.push(args); return { text: '' } } },
-  ui: { resolve: async () => ({ Box: 'Box', Text: 'Text', Button: 'Button' }), invalidate: (event: string) => { invalidated.push(event) }, toast: (text: string) => { toasts.push(text) } },
+  ui: {
+    resolve: async () => ({ Box: 'Box', Text: 'Text', Button: 'Button' }),
+    invalidate: (event: string) => { invalidated.push(event) },
+    toast: (text: string) => { toasts.push(text) },
+    open: async (args: any) => { panes.push({ op: 'open', args }) },
+    close: async (args: any) => { panes.push({ op: 'close', args }) },
+    ask: async (question: string, options: any) => {
+      asks.push({ question, options })
+      if (answer instanceof Error) throw answer
+      return answer
+    },
+  },
   clock: { after: timer('after'), every: timer('every') },
   fs: {
     write: async (path: string, text: string) => { written[path] = text; files[path] = text },
@@ -65,7 +80,7 @@ const findButton = (tree: any) => buttons(tree)[0]
 beforeEach(() => {
   for (const k of Object.keys(hooks)) delete hooks[k]
   percent = undefined; filled = []; ran = []; written = {}; existing = new Set(['/work/.cs/local'])
-  timers = []; invalidated = []; toasts = []
+  timers = []; invalidated = []; toasts = []; asks = []; answer = WRAP_YES; panes = []
   // The default fixture is the lead conversation of a cs session.
   sessionId = 'uuid-lead'
   envVars = {}
@@ -75,47 +90,14 @@ beforeEach(() => {
 
 test('the default threshold is the statusline warn band', () => {
   expect(DEFAULT_PERCENT).toBe(40)
-  expect(DEFAULT_CRIT).toBe(65)
 })
 
-// The status bar's truecolor inks, as bin/cs-statusline paints them on each
-// theme (tests/test_mod_rotate.sh pins the triplets against that file).
-test('the gauge ink steps where the status bar steps, in the theme\'s own ink', () => {
-  const bands = { warn: 40, crit: 65 }
-  const table: [number, string, string][] = [
-    [0, 'text', 'text'], [39, 'text', 'text'],
-    [40, 'rgb(180,83,9)', 'rgb(253,230,138)'], [64, 'rgb(180,83,9)', 'rgb(253,230,138)'],
-    [65, 'rgb(215,0,21)', 'rgb(255,69,58)'], [100, 'rgb(215,0,21)', 'rgb(255,69,58)'],
-  ]
-  for (const [p, light, dark] of table) {
-    expect([p, gaugeColor(p, bands, 'light'), gaugeColor(p, bands, 'dark')]).toEqual([p, light, dark])
-  }
-  expect(gaugeColor(undefined, bands, 'light')).toBe('text')
-})
-
-test('the meter fills one cell per ten percent, ten cells wide', () => {
-  expect(meter(0)).toEqual(['', '\u2591'.repeat(10)])
-  expect(meter(4)).toEqual(['', '\u2591'.repeat(10)])
-  expect(meter(5)).toEqual(['\u2588', '\u2591'.repeat(9)])
-  expect(meter(47)).toEqual(['\u2588'.repeat(5), '\u2591'.repeat(5)])
-  expect(meter(100)).toEqual(['\u2588'.repeat(10), ''])
-})
-
-test('CS_STATUSLINE_CTX_WARN and _CRIT move the gauge, the band and its threshold together', async () => {
-  envVars.CS_STATUSLINE_CTX_WARN = '50'; envVars.CS_STATUSLINE_CTX_CRIT = '70'
+test('CS_STATUSLINE_CTX_WARN moves the band with the bar', async () => {
+  envVars.CS_STATUSLINE_CTX_WARN = '50'
   percent = 49
   expect(await band()).toBe(DRAWN)
   percent = 50
-  let tree = JSON.stringify(await band())
-  expect(tree).toContain('"\u2588\u2588\u2588\u2588\u2588"')
-  expect(tree).toContain('" 50%"')
-  expect(tree).toContain(`"color":"${INK.amber.dark}"`)
-  percent = 69
-  expect(JSON.stringify(await band())).not.toContain(INK.crit.dark)
-  percent = 70
-  tree = JSON.stringify(await band())
-  expect(tree).toContain('" 70%"')
-  expect(tree).toContain(`"borderColor":"${INK.crit.dark}"`)
+  expect(findButton(await band())).toBeDefined()
   envVars.CS_ROTATE_BUTTON_CTX = '10'
   percent = 10
   expect(findButton(await band())).toBeDefined()
@@ -156,36 +138,63 @@ test('at the threshold the band adds the rotate key on hotkey 1, first, beneath 
   const button = findButton(tree)
   expect(button.props.hotkey).toBe('1')
   expect(button.props.plain).toBe(true)
-  expect(button.props.label).toMatch(/rotate/)
-  expect(JSON.stringify(tree)).toContain('"Survey"')
-  expect(JSON.stringify(tree)).toContain('"borderStyle":"round"')
+  // The engine draws the hotkey itself, as "1: label", and it draws that
+  // prefix even for an empty label (measured live), so the wording stays on
+  // the button rather than being spelled beside it.
+  expect(button.props.label).toBe('rotate this conversation')
+  const json1 = JSON.stringify(tree)
+  expect(json1).toContain('"Survey"')
+  expect(json1).not.toContain('"children":["1"]')
+  expect(json1).not.toContain('borderStyle')
 })
 
-test('the band carries the context meter in the status bar\'s own inks for the theme cs detected', async () => {
+test('the band draws no context gauge: the status bar already carries it', async () => {
   percent = 71
-  let tree = JSON.stringify(await band())
-  expect(tree).toContain('"\u2588\u2588\u2588\u2588\u2588\u2588\u2588"')
-  expect(tree).toContain('"\u2591\u2591\u2591"')
-  expect(tree).toContain('" 71%"')
-  expect(tree).toContain(`"color":"${INK.crit.dark}"`)
+  const tree = JSON.stringify(await band())
   expect(tree).not.toContain('ctx')
-  envVars.CS_TERM_THEME = 'light'
-  tree = JSON.stringify(await band())
-  expect(tree).toContain(`"borderColor":"${INK.crit.light}"`)
-  expect(tree).toContain(`"color":"${INK.crit.light}"`)
-  expect(tree).not.toContain(INK.crit.dark)
-  percent = 45
-  tree = JSON.stringify(await band())
-  expect(tree).toContain('" 45%"')
-  expect(tree).toContain(`"color":"${INK.amber.light}"`)
+  expect(tree).not.toContain('71%')
 })
 
-test('the capsule is a keyed box that turns coral under the pointer, with the mark in coral', async () => {
+// One blank line above it, and the status bar's own capsule surface under it,
+// so the keys read as a band of their own rather than as the last row of
+// whatever the transcript ended with.
+test('the band sits a line clear of what is above it, on the bar\'s capsule surface', async () => {
+  envVars.CS_TERM_BG_RGB = '252;247;229'
+  percent = 40
+  const tree = JSON.stringify(await band())
+  expect(tree).toContain('"marginTop":1')
+  expect(tree).toContain('"backgroundColor":"rgb(226,222,206)"')
+})
+
+test('without a measured terminal background the band keeps the spacing and paints no surface', async () => {
+  percent = 40
+  const tree = JSON.stringify(await band())
+  expect(tree).toContain('"marginTop":1')
+  expect(tree).not.toContain('backgroundColor')
+})
+
+// KEEP IN SYNC with _bg_shade in bin/cs-statusline (tests/test_mod_rotate.sh
+// pins the shift against that file): a tenth away from the background's own
+// luminance, darker on a light terminal and lighter on a dark one.
+test('the surface is the shade the status bar shades the terminal background to', () => {
+  expect(surfaceColor('252;247;229')).toBe('rgb(226,222,206)')
+  expect(surfaceColor('30;30;30')).toBe('rgb(52,52,52)')
+  expect(surfaceColor(undefined)).toBeUndefined()
+  expect(surfaceColor('not a colour')).toBeUndefined()
+  expect(surfaceColor('252;247')).toBeUndefined()
+  expect(surfaceColor('252;247;300')).toBeUndefined()
+})
+
+// A bare line: no box to draw, so no border to light up under the pointer and
+// no mark in front of the keys. The key stays: it is the band's identity.
+test('the capsule is a keyed box with no border, no hover and no mark', async () => {
   percent = 40
   const tree = JSON.stringify(await band())
   expect(tree).toContain('"key":"cs-rotate-band"')
-  expect(tree).toContain(`"hover":{"borderColor":"${INK.coral}"}`)
-  expect(tree).toContain(`"color":"${INK.coral}","bold":true},"children":["\u2733 "]`)
+  expect(tree).not.toContain('borderStyle')
+  expect(tree).not.toContain('borderColor')
+  expect(tree).not.toContain('hover')
+  expect(tree).not.toContain('\u2733')
   expect(tree).not.toContain('"claude"')
 })
 
@@ -251,13 +260,12 @@ test('an armed handoff turns the button into the clear button, whatever the cont
     const button = findButton(tree)
     expect(button.props.hotkey).toBe('1')
     expect(button.props.plain).toBe(true)
-    expect(button.props.label).toBe('/clear and continue from the handoff')
+    expect(findButton(tree).props.label).toBe('/clear and continue from the handoff')
     const json = JSON.stringify(tree)
-    expect(json).toContain('"borderStyle":"round"')
-    expect(json).toContain(`"borderColor":"${INK.coral}"`)
+    expect(json).not.toContain('borderStyle')
+    expect(json).not.toContain('borderColor')
     expect(json).not.toContain('undefined')
-    if (p === undefined) expect(json).not.toContain('%')
-    else expect(json).toContain(`" ${p}%"`)
+    expect(json).not.toContain('ctx')
   }
 })
 
@@ -293,7 +301,7 @@ test('a marker naming a handoff that is gone, consumed, or outside the store doe
   arm(); files[MARKER] = '../local/state\n'
   expect(await band()).toBe(DRAWN)
   percent = 40
-  expect(findButton(await band()).props.label).toMatch(/rotate/)
+  expect(findButton(await band()).props.label).toBe('rotate this conversation')
 })
 
 test('an empty marker names no handoff, so the band behaves as unarmed', async () => {
@@ -301,7 +309,7 @@ test('an empty marker names no handoff, so the band behaves as unarmed', async (
   percent = 39
   expect(await band()).toBe(DRAWN)
   percent = 40
-  expect(findButton(await band()).props.label).toMatch(/rotate/)
+  expect(findButton(await band()).props.label).toBe('rotate this conversation')
 })
 
 test('session.start writes a heartbeat under the session meta dir', async () => {
@@ -528,6 +536,7 @@ test('a rejected /clear at zero shows a toast and clears nothing else', async ()
   arm(); percent = 80
   await band()
   await turnComplete()
+  await fireAfter() // the handoff pane's open, spent
   $.command.run = async () => { throw new Error('no session') }
   await tick(GRACE_SECONDS)
   $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
@@ -558,6 +567,7 @@ test('a tick that lands while the zero tick is still reading does not push the c
   expect(ran).toEqual([{ command: 'clear', args: '' }])
   expect(JSON.stringify(await band())).not.toContain('/clear in -')
 })
+
 
 test('a conversation met at load is forced whatever it started at; one born of a /clear that starts past the threshold is not, and says so once', async () => {
   // resumed (or launched) already past the line: forced, as asked
@@ -643,13 +653,14 @@ test('the /clear the mod runs itself marks the successor as /clear-born too, so 
   arm(); percent = 80
   await band()
   await turnComplete()
+  await fireAfter() // the handoff pane's open, spent
   await findButton(await band()).props.onPress()
   expect(ran).toEqual([{ command: 'clear', args: '' }])
   files = { '/work/.cs/local/state': 'claude_session_id: uuid-next\n' }
   sessionId = 'uuid-next'
   percent = 75
   await turnComplete()
-  expect(timers.filter(t => t.kind === 'after')).toEqual([])
+  expect(timers.filter(t => t.kind === 'after' && !t.cancelled)).toEqual([])
   expect(toasts).toHaveLength(1)
 })
 
@@ -696,6 +707,7 @@ test('a /clear the mod runs itself that is rejected leaves no birth behind: a la
   arm(); percent = 80
   await band()
   await turnComplete()
+  await fireAfter() // the handoff pane's open, spent
   $.command.run = async () => { throw new Error('no session') }
   await tick(GRACE_SECONDS)
   $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
@@ -726,10 +738,6 @@ test('a typed /clear that the engine refuses leaves no birth behind either', asy
 // where the band draws unarmed; once a handoff is armed the band's one job is
 // the /clear.
 const wrapButton = (tree: any) => buttons(tree).find((b: any) => b.props.hotkey === '2')
-// The confirmation is a different key: a held `2` repeats on keydown
-// (contract) and must never confirm itself.
-const confirmButton = (tree: any) => buttons(tree).find((b: any) => b.props.hotkey === '3')
-
 test('at the threshold the band adds a second button on hotkey 2 that reads as the wrap key, after the rotate key', async () => {
   percent = 40
   const tree = await band()
@@ -737,67 +745,45 @@ test('at the threshold the band adds a second button on hotkey 2 that reads as t
   expect(buttons(tree)[0].props.hotkey).toBe('1')
   const button = wrapButton(tree)
   expect(button.props.plain).toBe(true)
-  expect(button.props.label).toBe('wrap up this session')
+  expect(wrapButton(tree).props.label).toBe('wrap up this session')
+})
+
+// One key, then the engine's own dialog. /wrap replaces .cs/summary.md and
+// runs two Opus passes, so the press asks rather than acts; a held `2` repeats
+// on keydown (contract) and each repeat only re-opens the same question.
+test('pressing 2 asks before /wrap, and only the yes runs it', async () => {
+  percent = 40
+  answer = WRAP_YES
+  await wrapButton(await band()).props.onPress()
+  expect(asks).toEqual([{ question: WRAP_QUESTION, options: { header: 'Wrap', options: [WRAP_YES, 'Not now'] } }])
+  expect(ran).toEqual([{ command: 'wrap', args: '' }])
+
+  answer = 'Not now'
+  await wrapButton(await band()).props.onPress()
+  expect(asks).toHaveLength(2)
+  expect(ran).toHaveLength(1)
+
+  // dismissed, or a `-p` run with nobody to ask: nothing runs and nothing is said
+  answer = new Error('dismissed')
+  await wrapButton(await band()).props.onPress()
+  expect(ran).toHaveLength(1)
+  expect(toasts).toEqual([])
+})
+
+test('a /wrap the answer runs that the engine refuses is said once', async () => {
+  percent = 40
+  answer = WRAP_YES
+  $.command.run = async () => { throw new Error('no session') }
+  await wrapButton(await band()).props.onPress()
+  $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
+  expect(toasts).toEqual(['cs-rotate: /wrap did not run: Error: no session'])
+  expect(ran).toEqual([])
 })
 
 test('an armed handoff draws the clear key alone: no wrap key', async () => {
   arm(); percent = 90
   expect(buttons(await band())).toHaveLength(1)
   expect(wrapButton(await band())).toBeUndefined()
-})
-
-test('the wrap key needs two keys: 2 arms it for a moment and runs nothing, 3 while armed runs /wrap', async () => {
-  percent = 40
-  expect(confirmButton(await band())).toBeUndefined()
-  await wrapButton(await band()).props.onPress()
-  expect(ran).toEqual([])
-  expect(invalidated).toEqual(['ui.render'])
-  let tree = await band()
-  expect(wrapButton(tree).props.label).toBe('wrap up this session?')
-  expect(confirmButton(tree).props.plain).toBe(true)
-  expect(confirmButton(tree).props.label).toBe('yes, run /wrap')
-  await confirmButton(tree).props.onPress()
-  expect(ran).toEqual([{ command: 'wrap', args: '' }])
-  expect(filled).toEqual([])
-  // Disarmed by the run: the wrap key is back and 3 presses nothing.
-  tree = await band()
-  expect(wrapButton(tree).props.label).toBe('wrap up this session')
-  expect(confirmButton(tree)).toBeUndefined()
-})
-
-
-test('an armed wrap key disarms on its own after a moment, and a press then only re-arms', async () => {
-  percent = 40
-  await wrapButton(await band()).props.onPress()
-  const t = timers.find(t => t.kind === 'after')
-  expect(t).toBeDefined()
-  expect(t!.ms).toBe(5000)
-  t!.fn()
-  expect(wrapButton(await band()).props.label).toBe('wrap up this session')
-  expect(confirmButton(await band())).toBeUndefined()
-  await wrapButton(await band()).props.onPress()
-  expect(ran).toEqual([])
-})
-
-test('a prompt entering the session, or a /clear, disarms the wrap key', async () => {
-  percent = 40
-  await wrapButton(await band()).props.onPress()
-  await hooks['prompt.submit']($, { text: 'hi' }, async e => e)
-  expect(confirmButton(await band())).toBeUndefined()
-  await wrapButton(await band()).props.onPress()
-  await hooks['command.run:clear']($, {}, async e => e)
-  expect(confirmButton(await band())).toBeUndefined()
-  expect(ran).toEqual([])
-})
-
-test('a rejected /wrap shows a toast and leaves the key disarmed', async () => {
-  percent = 40
-  $.command.run = async () => { throw new Error('no such command') }
-  await wrapButton(await band()).props.onPress()
-  await confirmButton(await band()).props.onPress()
-  expect(toasts).toEqual(['cs-rotate: /wrap did not run: Error: no such command'])
-  expect(confirmButton(await band())).toBeUndefined()
-  $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
 })
 
 // The engine refuses a tree with a Button under an inline element (measured
@@ -810,12 +796,9 @@ function buttonsUnderText(tree: any, inText = false): number {
   return (tree.children ?? []).reduce((n: number, c: any) => n + buttonsUnderText(c, inline), 0)
 }
 
-test('no button is ever nested in a Text: armed or not, arming the wrap key or not', async () => {
+test('no button is ever nested in a Text, armed or not', async () => {
   percent = 40
   expect(buttonsUnderText(await band())).toBe(0)
-  await wrapButton(await band()).props.onPress()
-  expect(buttonsUnderText(await band())).toBe(0)
-  await confirmButton(await band()).props.onPress()
   arm()
   expect(buttonsUnderText(await band())).toBe(0)
 })
@@ -825,29 +808,73 @@ test('no button is ever nested in a Text: armed or not, arming the wrap key or n
 // and a non-empty composer takes every hotkey with it). So `2` keeps a button
 // while armed: each press only re-arms, the window restarts, nothing is typed,
 // and the confirmation sits on `3`.
-test('a held 2 never confirms: while armed 2 only re-arms, restarting the window, and the confirmation sits on 3', async () => {
-  percent = 40
-  await wrapButton(await band()).props.onPress()
-  for (let i = 0; i < 20; i++) {
-    const tree = await band()
-    expect(wrapButton(tree).props.hotkey).toBe('2')
-    expect(confirmButton(tree).props.hotkey).toBe('3')
-    await wrapButton(tree).props.onPress()
-  }
-  expect(ran).toEqual([])
-  const afters = timers.filter(t => t.kind === 'after')
-  expect(afters).toHaveLength(21)
-  expect(afters.filter(t => !t.cancelled)).toHaveLength(1)
-  expect(afters[afters.length - 1].cancelled).toBe(false)
+
+// The first grace of a session opens a pane beside the band that shows what
+// the handoff will do next, so the twenty seconds are spent reading it. The
+// pane carries no keys: stopping the count stays on the band. Later graces in
+// the same session keep to the band alone.
+const pane = (requestId = PREVIEW_PANE) =>
+  hooks['ui.render:Pane']($, { requestId, props: { title: 'Handoff', isFocused: false, bodyColumns: 60, placement: 'dock' } }, async () => DRAWN)
+const HANDOFF_WITH_STEP = '---\nparent: uuid-lead\nstatus: unconsumed\n---\n\n# Next Step\n\nRun the secrets suites solo.\nTriage the store file.\n\n# Settled\n\nNothing.\n'
+
+test('the first grace in a session opens the handoff pane from a timer, and it shows the next step and the count', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); files[HANDOFF] = HANDOFF_WITH_STEP; percent = 80
+  await band()
+  await turnComplete()
+  expect(panes).toEqual([])
+  await fireAfter()
+  expect(panes).toEqual([{ op: 'open', args: { id: PREVIEW_PANE, title: 'Handoff' } }])
+  const body = JSON.stringify(await pane())
+  expect(body).toContain('Run the secrets suites solo.')
+  expect(body).toContain('Triage the store file.')
+  expect(body).not.toContain('Settled')
+  expect(body).toContain(`/clear in ${GRACE_SECONDS}s`)
+  expect(buttons(await pane())).toEqual([])
+  await tick(2)
+  expect(JSON.stringify(await pane())).toContain(`/clear in ${GRACE_SECONDS - 2}s`)
 })
 
-test('the arm does not survive a conversation switch: the first press in the new one only arms', async () => {
-  percent = 40
-  await wrapButton(await band()).props.onPress()
-  sessionId = 'uuid-resumed'
-  files['/work/.cs/local/state'] = 'claude_session_id: uuid-resumed\n'
-  expect(confirmButton(await band())).toBeUndefined()
-  await wrapButton(await band()).props.onPress()
-  expect(ran).toEqual([])
-  expect(confirmButton(await band())).toBeDefined()
+test('any end of the count closes the pane: a prompt, a press, zero', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band(); await turnComplete(); await fireAfter()
+  await promptSubmit()
+  expect(panes.at(-1)).toEqual({ op: 'close', args: { id: PREVIEW_PANE } })
+
+  register(on as any); panes = []
+  arm()
+  await band(); await turnComplete(); await fireAfter()
+  await findButton(await band()).props.onPress()
+  expect(panes.at(-1)).toEqual({ op: 'close', args: { id: PREVIEW_PANE } })
+
+  register(on as any); panes = []; ran = []
+  arm()
+  await band(); await turnComplete(); await fireAfter()
+  await tick(GRACE_SECONDS)
+  expect(ran).toEqual([{ command: 'clear', args: '' }])
+  expect(panes.at(-1)).toEqual({ op: 'close', args: { id: PREVIEW_PANE } })
+})
+
+test('a later grace in the same session keeps to the band: the pane opens once', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band(); await turnComplete(); await fireAfter()
+  await promptSubmit()
+  await turnComplete(); await fireAfter()
+  expect(ticker()).toBeDefined()
+  expect(panes.filter(p => p.op === 'open')).toHaveLength(1)
+})
+
+test('a pane drawn for any other id passes through, and a closed preview draws nothing of its own', async () => {
+  expect(await pane('someone-else')).toBe(DRAWN)
+  expect(await pane()).toBe(DRAWN)
+})
+
+test('nextStep reads the handoff\'s Next Step section, however it is numbered, and caps it', () => {
+  expect(nextStep(HANDOFF_WITH_STEP)).toEqual(['Run the secrets suites solo.', 'Triage the store file.'])
+  expect(nextStep('---\nstatus: unconsumed\n---\n\n## 1. Next Step\n\nOne thing.\n')).toEqual(['One thing.'])
+  expect(nextStep('---\nstatus: unconsumed\n---\n\nNo heading here.\n')).toEqual([])
+  const long = '# Next Step\n' + Array.from({ length: 30 }, (_, i) => `line ${i}`).join('\n')
+  expect(nextStep(long)).toHaveLength(12)
 })

@@ -891,3 +891,115 @@ Rotated at ~40%: handoff 2026-09-17-fork-free-statusline-tick.md (#648 design), 
 - Ghost rerun on 4f1b9f2: OK 66/66; test_prompt_rewriter failure was the parallel-sweep flake.
 - #649 resolved by claude-sessions@mods (mail fd1abb, 17:05): countdown restored ce8365b; handoff pane built 94b1b55, first per session, Next Step + count, no keys, closes on any end of the count; measured live on 2.1.274; installed. Contract CORRECTION to what I told Alex: a mod-opened pane is not drawn at all below 144 columns — not "docked from 110, inline above the prompt below that". Kept from ebc3c94: no ctx on the band, the fill, the one-key wrap dialog.
 - Codex adversarial --base main on fix/integrate-lock-advice (5 files +92/-26): approve, no material findings; its untested-runtime caveat is covered by test_doctor 71/71 local + ghost 66/66 rerun. Awaiting Alex's merge gate.
+- 2026-09-17: Alex asked "where is the designer?" after opening docs/mods-design-lab.html — the lab reads as a reference page, not a tool, even though every panel is live knobs + preview + emitted JSX. Findability gap, not a capability gap. He then asked for a visual designer: compose a tree (Box/Text/Button), export band JSX only (not a runnable mod). Measured: `boxRender` (lab:677) is ONE flat level of flex over fixed string children — no nesting, so nothing reusable for a tree; a recursive layout(node, availW) → {lines,w} is the real work and the place this stops being "bounded". Alex's two calls: Compose panel INSIDE the lab (not a separate page), and bun tests on the engine (not Chrome-only like #634). Those interact — a bun-testable engine has to leave the HTML, so docs/mods-layout.js + plain <script src> + module.exports guard; the lab stops being one self-contained file. Oracle for the tests: the rotate-band tree through the new engine must reproduce rotateRender's strip (independent implementation, not a recomputation). Awaiting Alex's go.
+- 2026-09-17 (cont): band canvas built and green. docs/mods-layout.js (layout/toText/validate/toJsx, CommonJS guard + ModLayout global), docs/test/layout.test.ts 16 bun tests, tests/test_mods_layout.sh 3/3; commits 4936f8d (engine) + 65e43ff (canvas). Two corrections I made to my own tests mid-TDD: (1) a row at width 2 starved its second child because I allocated row room sequentially — replaced with "every child measures against the full inner room, a row that overruns overflows", which is Yoga-minus-shrink and order-independent; (2) PROP_ORDER put padding before border and label before hotkey — the test encodes the spelling in mods/cs-rotate/hooks/register.tsx, so the code moved, not the test. The canvas clips a band wider than `cols` and names the overrun, because the real engine would shrink a Text and this one does not. MEASURED in Chrome (MCP, file://): compose is the landing panel, preset lays out to the shipped strip, add/inspect/refuse/clear/delete all drive, 20 inspector fields named, narrow=60 clips to 60 with the note, wide=100 no note. GHOST IS UNREACHABLE from this session: `ssh ghost` → Permission denied (publickey,password,keyboard-interactive), and remote-tests.sh has no host store (the skill's remote-hosts.json does not exist), so the full gate ran locally instead — flagged to Alex, not silently substituted.
+- 2026-09-17: Alex picked a band style off the lab's rotate panel — the "Bare line" preset (border none, inks bar, hk under, gauge pie) MINUS the ✳ mark — and chose to change the SHIPPED mod, not just the lab. Shape to land: keyed Box, paddingX 1, no border (so the hover={{borderColor}} goes too — nothing to light up), no mark, each hotkey hand-drawn as <Text color="suggestion" underline bold>N</Text> with the Button kept on label="" to own the press, dim '  ·  ' separators, pie gauge in the bar's inks. The lab's HOT is #5769F7 light / #929EFA dark, but the mod should use the palette key 'suggestion' (the engine's own hotkey blue) rather than a new const. UNVERIFIED and must be measured live before shipping: that a plain Button with label="" draws zero cells while still taking the press — the lab asserts it, the fake engine would stay green either way, and if it draws "1: " the hotkey appears twice. Local full suite (ghost unreachable): test_cs_secrets.sh FAILED at 210s, untouched by this work, to be read once the run lands; test_mods_layout.sh passed in-suite at 3s.
+- 2026-09-17 CORRECTION to the entry above: the hand-drawn hotkey I planned is NOT buildable, and the lab's "Bare line" preset was wrong to claim it. MEASURED live on 2.1.273 (throwaway cs session spike-band, tmux pane, CS_ROTATE_BUTTON_CTX=1, one real turn): a `plain` Button prints its "N: " prefix EVEN WITH label="" — the band read `1 rotate this conversation1:   ·  2 wrap up this session2:   ·  ○ ctx 8%`, the hotkey twice. The fake engine in the bun suite stayed green through all of it, which is the whole reason this needed a live run. Alex's call: let the engine draw the hotkey. Shipped shape, verified live in spike-band2: `1: rotate this conversation  ·  2: wrap up this session  ·  ○ ctx 8%` — no border, no ✳, pie gauge in the bar's inks, dim separators — and pressing 1 ran /rotate end to end. docs/mods-design-lab.html's rjsx now emits a REFUSED note instead of the false "Button still owns the press" comment, and the preset caption says so. Second live finding: killing the tmux session left the first spike's lock behind, so `cs spike-band` refused with "already running elsewhere (UUID …)" — the duplicate guard firing on a stale UUID, worth knowing before blaming a relaunch.
+
+## 2026-09-17 — $.ui.ask draws, and the band is a filled line
+
+`$.ui.ask` works from a mod, measured live on 2.1.274 in a throwaway cs
+session, both call sites:
+
+- **From a 0 ms timer scheduled in `turn.complete`** the dialog drew as
+  `☐ Rotate` / "The handoff is written. Clear now and continue from it?" with
+  `1. Clear and continue`, `2. Not yet`, and the engine's own `3. Type
+  something.` / `4. Chat about this` beneath. Answering 1 ran the `/clear`,
+  shown in the transcript as `› Prompt from the cs-rotate plugin  ❯ /clear`,
+  and the successor woke on the handoff. This is the claim the previous
+  conversation could not make: it was type-contract inference, now it is a
+  measurement.
+- **From a press** (`2` on the band) the wrap dialog drew the same way and
+  `Not now` ran nothing, leaving the band alone and typing nothing into the
+  composer.
+
+So the countdown is gone: `GRACE_SECONDS`, `left`, `ticker`,
+`startCountdown`, `stopCountdown`, the `/clear in Ns` Text and the whole
+`prompt.submit` hook (nothing was left for it to do). The wrap key's
+two-press guard is gone with it — Alex picked "2 opens a dialog" over "2 runs
+/wrap at once" when asked, so the guard survives in a better shape and `3` is
+retired.
+
+**The band's fill is the status bar's capsule surface, computed the same way.**
+`surfaceColor` mirrors `_bg_shade`: a tenth of the way away from the terminal
+background's own luminance, darker on a light terminal and lighter on a dark
+one. Measured: with `CS_TERM_BG_RGB=252;247;229` the band drew
+`^[[48;2;226;222;206m`, exactly the shade the unit test pins. `tests/test_mod_rotate.sh`
+now pins the shift and the luminance pivot against `bin/cs-statusline` in
+place of the retired ink triplets.
+
+**A cs session launched in a detached tmux pane has no `CS_TERM_BG_RGB`** —
+the OSC 11 probe needs a tty to answer, and nothing does. Measured with
+`ps eww` on the spike's claude: `CS_TERM_THEME=light` was there,
+`CS_TERM_BG_RGB` was not. The band's no-measurement fallback (spacing, no
+fill) is therefore the path every detached-pane session takes, not an edge
+case, and it is why a guessed surface would have been the wrong default: the
+engine paints the button labels itself and a mid-grey fill under them cannot
+be judged sight-unseen.
+
+**The ctx gauge is off the band** on Alex's instruction ("I don't think we
+should display context again in the aboveprompt mod") — the status bar
+already carries it. `pie`, `gaugeColor`, `termTheme`, the `INK` table,
+`DEFAULT_CRIT` and the crit half of `gaugeBands` went with it; `threshold()`
+now reads `CS_ROTATE_BUTTON_CTX` then `CS_STATUSLINE_CTX_WARN` directly.
+
+**A dim line in the composer is a suggestion, not text.** The spike showed
+`❯ rotate anyway` sitting in the composer and Enter did not submit it: it is
+the engine's own suggested reply, drawn where typed text would be. Worth
+knowing before reading one as a defect — nothing in cs or the mod types it,
+and `$.prompt.fill` appears nowhere in `mods/`.
+
+Commit: `ebc3c94`. 54 bun, 6/6 `tests/test_mod_rotate.sh` (including
+`claude plugin validate`, which now inventories `$.ui.ask (via askToClear,
+askToWrap)` and no `$.clock.every`). Both mutations checked: inverting the
+`CLEAR_YES` comparison reddens 6, and `marginTop={2}` reddens 2.
+
+## 2026-09-17 (later) — back to the countdown, plus a pane
+
+Alex reversed the ask for the forced rotation through a claude-sessions mail
+(confirmed with him directly here before touching code): the grace counts
+down again (`ce8365b`, the old tests restored verbatim). No-ctx, the fill and
+the one-key wrap dialog stay.
+
+He picked "first per session" for a handoff pane (`94b1b55`). Measured live
+on 2.1.274, 200-column tmux: the pane docked on the right, showed the Next
+Step lines (the next `#` section excluded) and a count in step with the band;
+zero ran `/clear` and the pane closed (no frame rows left); a second armed
+grace in the same process counted on the band with no pane.
+
+Contract fact the relayed design got wrong: a pane a mod opens on its own is
+NOT placed inline below 110 — it waits undrawn below 144 columns (110 only
+once the person asked for that id). "Once per session" is per load of the mod;
+a reload shows it again.
+
+`$.clock.after` timers in tests: the pane's open is an `after` timer, so tests
+counting `after` timers to prove "no /rotate scheduled" must spend it first
+(`fireAfter`) and count only uncancelled ones.
+
+## 2026-09-17 (evening) — Codex branch review: four P2s, all in the designer
+
+`/codex:review` against main (81 bun green) found nothing in `mods/cs-rotate`;
+all four findings are in `docs/mods-layout.js`, the designer's engine:
+1. `toJsx` Text children: `<` breaks the parse, `{x}` becomes an expression,
+   non-BMP chars truncated by a 4-hex `\u` escape (:310-315).
+2. `toJsx` string props: `label="say \"yes\""` — JSX attributes have no
+   backslash escape; Bun rejects it (:296).
+3. Box `backgroundColor` paints only padding/gaps, not cells under children or
+   height-added rows (:169-173) — the band now uses a fill, so the canvas
+   would show holes in exactly that.
+4. Column Box with explicit height ignores `justifyContent`/`flexGrow`: slack
+   always appended below (:165-169).
+Recommended to Alex: fix 1-3 (TDD in docs/test/layout.test.ts), defer 4. The
+16 layout tests never exercised escaping or nested backgrounds — the oracle
+was one shipped band with plain ASCII labels. Not yet fixed; awaiting his go.
+
+Codex P2s 1-3 fixed in `e709a5e` (P4, column slack, deferred as agreed).
+The oracle for "the export pastes" is Bun's own transpiler:
+`new Bun.Transpiler({ loader: 'tsx', tsconfig: JSON.stringify({ compilerOptions: { jsx: 'react', jsxFactory: 'h' } }) })`,
+transform the export, eval with an `h` that rebuilds the tree, compare.
+Bun rejects a backslash inside a JSX attribute string with "Invalid JSX
+escape - use XML entity codes quotes or pass a JavaScript string instead".
+Box underpaint copies each cell's style object: `run()` shares one style
+object across a run and `EMPTY` is global, so mutating `st.bg` in place
+would paint every blank on the canvas. Mutations: bare-text guard off → 1
+red, underpaint off → 2 red. The lab page itself was not reopened in Chrome.
