@@ -113,6 +113,40 @@ echo "Test harness assertion tests"
 echo "============================"
 echo ""
 
+# The skip column names a count only when a test was skipped: a suite with none
+# reports passed and failed, and a returned 77 adds "N skipped" and the name.
+run_throwaway_suite() {  # body of the suite's tests, as bash source
+    local dir suite
+    dir="$(mktemp -d "${TMPDIR:-/tmp}/harness-suite.XXXXXX")"
+    suite="$dir/test_throwaway.sh"
+    {
+        printf 'SCRIPT_DIR=%q\n' "$SCRIPT_DIR"
+        printf 'source %q\n' "$SCRIPT_DIR/test_lib.sh"
+        printf '%s\n' "$1"
+        printf 'report_results\n'
+    } > "$suite"
+    bash "$suite" 2>&1
+    rm -rf "$dir"
+}
+
+test_results_line_omits_the_skip_column_when_nothing_skipped() {
+    local out
+    out="$(run_throwaway_suite 'test_ok() { return 0; }
+run_test test_ok')"
+    assert_output_contains "$out" "Results: 1/1 passed, 0 failed" "the tally must still print" || return 1
+    assert_output_not_contains "$out" "skipped" "no skip column when no test was skipped" || return 1
+}
+
+test_results_line_counts_a_skip_when_a_test_returns_77() {
+    local out
+    out="$(run_throwaway_suite 'test_ok() { return 0; }
+test_needs_a_tool() { return 77; }
+run_test test_ok
+run_test test_needs_a_tool')"
+    assert_output_contains "$out" ", 1 skipped" "a returned 77 must be counted as skipped" || return 1
+    assert_output_contains "$out" "test_needs_a_tool" "a skipped test must be named" || return 1
+}
+
 run_test test_output_contains_survives_an_early_match_in_a_large_output
 run_test test_output_not_contains_survives_a_large_output
 run_test test_output_contains_still_fails_on_a_real_miss
@@ -120,5 +154,6 @@ run_test test_output_not_contains_still_fails_on_a_real_hit
 run_test test_setup_isolates_the_process_table
 run_test test_process_table_isolation_survives_a_suite_that_overrides_setup
 run_test test_process_table_stub_passes_through_other_ps_forms
-
+run_test test_results_line_omits_the_skip_column_when_nothing_skipped
+run_test test_results_line_counts_a_skip_when_a_test_returns_77
 report_results

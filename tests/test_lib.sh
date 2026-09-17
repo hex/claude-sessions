@@ -263,8 +263,10 @@ run_test() {
 # --- Result Reporting ---
 
 report_results() {
+    local skip_column=""
+    [[ ${TESTS_SKIPPED:-0} -gt 0 ]] && skip_column=", $TESTS_SKIPPED skipped"
     echo ""
-    echo "Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed${TESTS_SKIPPED:+, $TESTS_SKIPPED skipped}"
+    echo "Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed$skip_column"
     if [[ ${#SKIPS[@]} -gt 0 ]]; then
         echo "Skipped tests:"
         for s in "${SKIPS[@]}"; do
