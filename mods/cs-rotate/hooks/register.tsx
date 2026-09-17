@@ -2,7 +2,7 @@
 /* @jsx h */
 /* @jsxFrag Fragment */
 // ABOUTME: cs-rotate mod: keys above the prompt: rotate past the threshold, wrap up, or /clear once a handoff is armed.
-// ABOUTME: With CS_ROTATE_FORCE_CTX set a turn ending past it runs /rotate itself, then asks before the /clear; session.start writes a heartbeat for doctor.
+// ABOUTME: With CS_ROTATE_FORCE_CTX set a turn ending past it runs /rotate itself, then counts down to the /clear; session.start writes a heartbeat for doctor.
 import type { On, EngineInterface } from 'claude-code'
 
 declare const h: any
@@ -58,23 +58,24 @@ export const HANDOFFS = '.cs/handoffs'
 // on a reload of the mod.
 export const FORCED = '.cs/local/cs-rotate.forced'
 
-// What the mod asks, and the answer that acts. `$.ui.ask` opens the engine's
-// own AskUserQuestion dialog and resolves to the label chosen, or to free text
-// typed under Other, so the answer is compared exactly; it rejects when the
-// dialog is dismissed and in a `-p` run, where there is nobody to ask. Both
-// questions are asked from a timer, never awaited inside a hook the turn is
-// waiting on: a turn held open until the person answers is a turn that cannot
-// draw the dialog.
-export const CLEAR_QUESTION = 'The handoff is written. Clear now and continue from it?'
-export const CLEAR_YES = 'Clear and continue'
+// Once the forced rotation has armed its handoff, how long the band counts
+// down before the mod runs the /clear itself. Pressing the button or sending a
+// prompt stops it.
+export const GRACE_SECONDS = 20
+
+// The wrap key's question, and the answer that runs /wrap. `$.ui.ask` opens
+// the engine's own AskUserQuestion dialog and resolves to the label chosen, or
+// to free text typed under Other, so the answer is compared exactly; it rejects
+// when the dialog is dismissed and in a `-p` run, where there is nobody to ask.
 export const WRAP_QUESTION = 'Run /wrap for this session?'
 export const WRAP_YES = 'Yes, wrap up'
 
-// Whether this conversation has already been asked to clear. The forced
-// rotation asks once and takes no for an answer: a question re-opened at the
-// end of every turn is a question nobody can refuse. Module state survives a
-// /clear (measured), so the flag is dropped where the conversation changes.
-let asked = false
+// The countdown: seconds left, its ticker, and what the band last saw. Module
+// state survives a /clear (measured), so every path that ends the countdown
+// cancels the ticker; a reload of the mod drops it with its timers.
+let left: number | undefined
+let ticker: { cancel: () => void } | undefined
+let bandIdle = false
 
 // Which conversation the turns belong to, and whether it is being judged. A
 // conversation that begins past the force threshold did not get there by
@@ -91,8 +92,8 @@ let birth: string | undefined
 let startPercent: number | undefined
 
 export function register(on: On) {
-  // A (re)load has met no conversation yet, and has asked nobody anything.
-  adopted = undefined; clearSeen = false; birth = undefined; startPercent = undefined; asked = false
+  // A (re)load has no countdown: the engine cancelled the old one's timers.
+  left = undefined; ticker = undefined; bandIdle = false; adopted = undefined; clearSeen = false; birth = undefined; startPercent = undefined
   on('session.start', async ($, e, next) => {
     // Only a cs session has .cs/local; anywhere else the mod stays silent.
     const local = `${e.cwd}/.cs/local`
@@ -110,11 +111,19 @@ export function register(on: On) {
     return next(e)
   })
 
+  // A prompt entering the session, from anywhere, means the conversation is
+  // not done with: the countdown stops and the prompt goes through untouched.
+  on('prompt.submit', async ($, e, next) => {
+    if (ticker) stopCountdown($)
+    return next(e)
+  })
+
   // A /clear from anywhere else (typed, another plugin) ends the conversation
   // the count belongs to, so the timer must not outlive it, and makes the
   // next conversation a birth; a run the engine refuses makes nothing.
   on('command.run', { command: 'clear' }, async ($, e, next) => {
     clearSeen = true
+    if (ticker) stopCountdown($)
     try {
       return await next(e)
     } catch (err) {
@@ -129,7 +138,8 @@ export function register(on: On) {
     // the birth is settled here: a later /resume is not mistaken for it.
     noteConversation(await $.session.id())
     // A survey owns the band; a running turn cannot be rotated out of.
-    if (e.props.hasSurvey || e.props.isWorking) return drawn
+    bandIdle = !e.props.hasSurvey && !e.props.isWorking
+    if (!bandIdle) return drawn
     const armed = await handoffArmed($)
     const { context } = await $.session.usage()
     const percent = context.percent
@@ -159,6 +169,9 @@ export function register(on: On) {
             {/* a Button is a block: nested in a Text the engine refuses the whole tree (measured), so the separator stands beside it */}
             {!armed && <Text dimColor>{'  \u00b7  '}</Text>}
             {!armed && <Button key="cs-wrap" hotkey="2" plain label="wrap up this session" onPress={() => askToWrap($)} />}
+            {/* the forced rotation's grace: the seconds left before the mod runs the /clear itself */}
+            {armed && left !== undefined && <Text dimColor>{'  \u00b7  '}</Text>}
+            {armed && left !== undefined && <Text bold>{`/clear in ${left}s`}</Text>}
           </Box>
         </Box>
       </Box>
@@ -185,7 +198,6 @@ async function forceThreshold($: EngineInterface): Promise<number | undefined> {
 function noteConversation(id: string): boolean {
   if (id === adopted) return false
   adopted = id
-  asked = false
   startPercent = undefined
   birth = clearSeen ? id : undefined
   clearSeen = false
@@ -212,14 +224,7 @@ async function forceRotation($: EngineInterface) {
     }
   }
   if (await handoffArmed($)) {
-    // Asked once per conversation, and the flag is set BEFORE the dialog is
-    // scheduled: a question the person leaves unanswered must not be re-asked
-    // at the end of every turn that follows.
-    if (asked) return
-    asked = true
-    // The callback returns its promise so the clock's caller can await the
-    // whole question, not merely its scheduling.
-    $.clock.after(0, () => askToClear($))
+    if (!ticker) startCountdown($)
     return
   }
   if (startPercent !== undefined && startPercent >= force) return
@@ -232,24 +237,36 @@ async function forceRotation($: EngineInterface) {
   })
 }
 
-// The forced rotation's question. The dialog can stand open for as long as
-// the person likes, so the three conditions the band draws its key under are
-// read again before the /clear: a handoff consumed meanwhile, or a session
-// handed on, must not be cleared out from under.
-async function askToClear($: EngineInterface) {
-  let answer: string
-  try {
-    answer = await $.ui.ask(CLEAR_QUESTION, { header: 'Rotate', options: [CLEAR_YES, 'Not yet'] })
-  } catch {
-    return // dismissed, or a `-p` run with nobody to ask: the band's key stays
-  }
-  if (answer !== CLEAR_YES) return
-  if (!(await handoffArmed($)) || !(await ownsRotation($))) return
-  try {
-    await clearAndContinue($)
-  } catch (err) {
-    $.ui.toast(`cs-rotate: /clear did not run: ${String(err)}`)
-  }
+// Counts the band down, one redraw a second (the contract folds calls past
+// ten a second). Each redraw re-reads the marker and the handoff: the count
+// must see the press and the prompt that stop it, so nothing here is cached.
+// At zero the /clear runs only where the band would draw the button: the band
+// idle, the handoff still armed, this the lead; otherwise the count stops and
+// the button stays for the person.
+function startCountdown($: EngineInterface) {
+  left = GRACE_SECONDS
+  ticker = $.clock.every(1000, async () => {
+    // Nothing to count once stopped, and nothing below zero: a period that
+    // lands while the zero tick is still reading leaves the count where it is.
+    if (left === undefined || left <= 0) return
+    left -= 1
+    $.ui.invalidate('ui.render')
+    if (left > 0) return
+    // The count holds at zero through the reads below: a prompt or a press
+    // landing meanwhile stops it (left becomes undefined), and this tick
+    // then does nothing, so nothing clears twice or behind a new turn.
+    const idle = bandIdle && (await handoffArmed($)) && (await ownsRotation($))
+    if (left !== 0) return
+    stopCountdown($)
+    if (idle) await clearAndContinue($).catch(err => $.ui.toast(`cs-rotate: /clear did not run: ${String(err)}`))
+  })
+}
+
+function stopCountdown($: EngineInterface) {
+  ticker?.cancel()
+  ticker = undefined
+  left = undefined
+  $.ui.invalidate('ui.render')
 }
 
 // The band's own threshold; without one it is the bar's warn band, read the way
@@ -347,6 +364,7 @@ async function askToWrap($: EngineInterface) {
 // is open; the marker is the hook's to consume.
 async function clearAndContinue($: EngineInterface) {
   clearSeen = true
+  if (ticker) stopCountdown($)
   try {
     await $.command.run({ command: 'clear', args: '' })
   } catch (err) {

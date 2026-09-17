@@ -336,20 +336,20 @@ with an answer counts, on the main loop, in the lead conversation, with no
 handoff already armed: an interrupted or errored turn, or a subagent's, starts
 nothing. The run is scheduled from a timer rather than from the turn's own
 hook, which the plugin contract refuses a command from. Once the rotate skill
-has armed its handoff, the next turn's end asks rather than acting: the mod
-opens the engine's own AskUserQuestion dialog — `The handoff is written. Clear
-now and continue from it?`, with `Clear and continue` and `Not yet` — from a
-0 ms timer, never awaited inside the hook, since a turn held open until you
-answer is a turn that cannot draw a dialog. `Clear and continue` runs the
-`/clear`; `Not yet`, a dismissal, or a `-p` run with nobody to ask leaves the
-band's key where it is. The question is asked once per conversation, whatever
-the answer and however many turns end after it: a question re-opened at the end
-of every turn is a question nobody can refuse. Before the `/clear` runs, the
-mod re-reads the handoff with the SessionStart hook's own rule (frontmatter
-opened and closed by `---`, `status: unconsumed` inside) and re-checks that
-this is still the lead, since the dialog can stand open for as long as you
-like. The asked flag is module state: a reload of the mod forgets it, and a
-new conversation drops it.
+has armed its handoff, the next turn's end starts a 20-second grace: the
+band reads `1: /clear and continue from the handoff  ·  /clear in 20s`,
+redrawn once a second, and at zero the mod runs the `/clear` itself, only if
+the band is idle at that moment (no turn running, no survey), the handoff still
+armed and this still the lead; otherwise the count stops and the button waits
+for you. Pressing `1` during the count clears at once. Sending a prompt, from
+the composer or anywhere else a prompt enters the session, stops the count;
+the next turn's end starts it again from 20. A `/clear` from anywhere else
+(typed, or another plugin's) ends it too. The count is module state: it does
+not survive a reload of the mod, and every path that ends it cancels its
+timer, because a timer started before a `/clear` keeps firing after one
+(measured). At zero the mod re-reads the handoff with the SessionStart hook's
+own rule (frontmatter opened and closed by `---`, `status: unconsumed`
+inside), so a truncated handoff is never cleared into.
 
 Pick the percentage above a fresh conversation's own footprint. The wake turn
 after the `/clear` is an ordinary turn, and the once-per-conversation record

@@ -6,7 +6,7 @@ import { test, expect, beforeEach } from 'bun:test'
 ;(globalThis as any).h = (type: any, props: any, ...children: any[]) => ({ type, props: props ?? {}, children })
 ;(globalThis as any).Fragment = 'Fragment'
 
-import { register, DEFAULT_PERCENT, CLEAR_QUESTION, CLEAR_YES, WRAP_QUESTION, WRAP_YES, surfaceColor, isUnconsumed } from '../hooks/register.tsx'
+import { register, DEFAULT_PERCENT, GRACE_SECONDS, WRAP_QUESTION, WRAP_YES, surfaceColor, isUnconsumed } from '../hooks/register.tsx'
 
 type Hook = ($: any, e: any, next: (e: any) => Promise<any>) => Promise<any>
 const hooks: Record<string, Hook> = {}
@@ -77,7 +77,7 @@ const findButton = (tree: any) => buttons(tree)[0]
 beforeEach(() => {
   for (const k of Object.keys(hooks)) delete hooks[k]
   percent = undefined; filled = []; ran = []; written = {}; existing = new Set(['/work/.cs/local'])
-  timers = []; invalidated = []; toasts = []; asks = []; answer = CLEAR_YES
+  timers = []; invalidated = []; toasts = []; asks = []; answer = WRAP_YES
   // The default fixture is the lead conversation of a cs session.
   sessionId = 'uuid-lead'
   envVars = {}
@@ -395,94 +395,149 @@ test('a turn ending past the force threshold with a handoff already armed runs n
   arm()
   await turnComplete()
   await fireAfter()
-  expect(ran).toEqual([{ command: 'clear', args: '' }])
+  expect(ran).toEqual([])
 })
 
-// With the handoff armed, the forced rotation asks instead of acting. The
-// question is opened from a 0 ms timer, never awaited inside the hook: the
-// turn the hook is waiting on cannot draw a dialog.
-test('with the handoff armed and force on, a turn ending asks, from a timer, and the answer clears', async () => {
+// The countdown's ticker, and one tick of it as the clock would run it.
+const ticker = () => timers.find(t => t.kind === 'every' && !t.cancelled)
+const tick = async (n = 1) => { for (let i = 0; i < n; i++) await ticker()!.fn() }
+const promptSubmit = (text = 'keep going') =>
+  hooks['prompt.submit']($, { text, wait: false, origin: { kind: 'composer' } }, async (e) => ({ text: e.text }))
+
+test('with the handoff armed and force on, a turn ending starts a countdown the band shows, one redraw a second', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
   arm(); percent = 80
   await band()
   await turnComplete()
-  expect(asks).toEqual([])
-  expect(timers.map(t => t.kind)).toEqual(['after'])
-  expect(timers[0].ms).toBe(0)
-  await fireAfter()
-  expect(asks).toEqual([{ question: CLEAR_QUESTION, options: { header: 'Rotate', options: [CLEAR_YES, 'Not yet'] } }])
+  expect(ticker()?.ms).toBe(1000)
+  expect(GRACE_SECONDS).toBe(20)
+  expect(JSON.stringify(await band())).toContain(`/clear in ${GRACE_SECONDS}s`)
+  await tick(3)
+  expect(invalidated).toEqual(['ui.render', 'ui.render', 'ui.render'])
+  expect(JSON.stringify(await band())).toContain(`/clear in ${GRACE_SECONDS - 3}s`)
+  expect(ran).toEqual([])
+  // one countdown at a time: another turn ending does not start a second
+  await turnComplete()
+  expect(timers.filter(t => t.kind === 'every')).toHaveLength(1)
+})
+
+test('at zero the countdown runs /clear, once, and stops ticking', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  const t = ticker()!
+  await tick(GRACE_SECONDS)
+  expect(ran).toEqual([{ command: 'clear', args: '' }])
+  expect(t.cancelled).toBe(true)
+  expect(JSON.stringify(await band())).not.toContain('/clear in')
+})
+
+test('a prompt entering the session stops the countdown and passes through', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  await tick(2)
+  const t = ticker()!
+  expect(await promptSubmit('one more thing')).toEqual({ text: 'one more thing' })
+  expect(t.cancelled).toBe(true)
+  expect(JSON.stringify(await band())).not.toContain('/clear in')
+  expect(ran).toEqual([])
+  // the next turn ending restarts it from the top
+  await turnComplete()
+  expect(JSON.stringify(await band())).toContain(`/clear in ${GRACE_SECONDS}s`)
+})
+
+test('pressing the clear button mid-countdown stops the ticker before it clears', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  await tick(2)
+  const t = ticker()!
+  await findButton(await band()).props.onPress()
+  expect(t.cancelled).toBe(true)
   expect(ran).toEqual([{ command: 'clear', args: '' }])
 })
 
-test('the question is asked once a conversation, whatever the answer and however many turns end', async () => {
+test('a countdown reaching zero while a turn runs or a survey holds the band clears nothing and stops', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
   arm(); percent = 80
-  answer = 'Not yet'
-  await turnComplete(); await fireAfter()
-  expect(asks).toHaveLength(1)
-  expect(ran).toEqual([])
-  await turnComplete(); await turnComplete(); await fireAfter()
-  expect(asks).toHaveLength(1)
-  expect(ran).toEqual([])
-  // the next conversation is asked in its turn
-  await clearRun()
-  sessionId = 'uuid-next'
-  files['/work/.cs/local/state'] = 'claude_session_id: uuid-next\n'
+  for (const props of [{ isWorking: true }, { hasSurvey: true }]) {
+    await band()
+    await turnComplete()
+    const t = ticker()!
+    await band(props)
+    await tick(GRACE_SECONDS)
+    expect(ran).toEqual([])
+    expect(t.cancelled).toBe(true)
+  }
+})
+
+test('a countdown reaching zero re-checks the handoff: one consumed meanwhile clears nothing', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
   await band()
-  await turnComplete(); await fireAfter()
-  expect(asks).toHaveLength(2)
-})
-
-test('a dismissed dialog, or a run with nobody to ask, clears nothing and says nothing', async () => {
-  envVars.CS_ROTATE_FORCE_CTX = '70'
-  arm(); percent = 80
-  answer = new Error('dismissed')
-  await turnComplete(); await fireAfter()
-  expect(asks).toHaveLength(1)
-  expect(ran).toEqual([])
-  expect(toasts).toEqual([])
-})
-
-// The dialog can stand open for as long as the person likes: what was true
-// when it opened is read again before anything is cleared.
-test('an answer arriving after the handoff was consumed, or the session handed on, clears nothing', async () => {
-  envVars.CS_ROTATE_FORCE_CTX = '70'
-  arm(); percent = 80
   await turnComplete()
   files[HANDOFF] = UNCONSUMED.replace('status: unconsumed', 'status: consumed')
-  await fireAfter()
-  expect(asks).toHaveLength(1)
-  expect(ran).toEqual([])
-
-  register(on as any)
-  arm()
-  await turnComplete()
-  sessionId = 'uuid-teammate'
-  await fireAfter()
+  await tick(GRACE_SECONDS)
   expect(ran).toEqual([])
 })
 
-test('a /clear the answer runs that the engine refuses is said once, and clears nothing', async () => {
-  envVars.CS_ROTATE_FORCE_CTX = '70'
+test('without force, or outside the lead, an armed handoff starts no countdown and prompt.submit passes through', async () => {
   arm(); percent = 80
   await turnComplete()
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  sessionId = 'uuid-teammate'
+  await turnComplete()
+  expect(timers).toEqual([])
+  expect(toasts).toEqual([])
+  expect(await promptSubmit()).toEqual({ text: 'keep going' })
+})
+
+test('a prompt arriving while the zero tick is still checking the handoff wins: nothing clears', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  await tick(GRACE_SECONDS - 1)
+  const zero = tick()
+  await promptSubmit('wait, one more thing')
+  await zero
+  expect(ran).toEqual([])
+  // and a press racing the zero tick clears once, not twice
+  await turnComplete()
+  await tick(GRACE_SECONDS - 1)
+  const button = findButton(await band())
+  const zero2 = tick()
+  await button.props.onPress()
+  await zero2
+  expect(ran).toEqual([{ command: 'clear', args: '' }])
+})
+
+test('a /clear run from anywhere else ends the countdown, so no timer outlives the conversation', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  const t = ticker()!
+  const e = { command: 'clear', args: '', origin: { kind: 'composer' }, presentation: { layout: 'main', columns: 80 } }
+  expect(await hooks['command.run:clear']($, e, async () => ({ text: '' }))).toEqual({ text: '' })
+  expect(t.cancelled).toBe(true)
+  expect(JSON.stringify(await band())).not.toContain('/clear in')
+})
+
+test('a rejected /clear at zero shows a toast and clears nothing else', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
   $.command.run = async () => { throw new Error('no session') }
-  await fireAfter()
+  await tick(GRACE_SECONDS)
   $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
   expect(toasts).toEqual(['cs-rotate: /clear did not run: Error: no session'])
   expect(ran).toEqual([])
-})
-
-test('without force, or outside the lead, an armed handoff asks nothing', async () => {
-  arm(); percent = 80
-  await turnComplete()
-  envVars.CS_ROTATE_FORCE_CTX = '70'
-  sessionId = 'uuid-teammate'
-  await turnComplete()
-  await fireAfter()
-  expect(timers).toEqual([])
-  expect(asks).toEqual([])
-  expect(toasts).toEqual([])
 })
 
 // The SessionStart hook's own rule (_handoff_is_unconsumed): the frontmatter
@@ -494,6 +549,21 @@ test('isUnconsumed follows the hook: unclosed frontmatter, or a status after it,
   expect(isUnconsumed('---\nstatus: consumed\n---\n')).toBe(false)
   expect(isUnconsumed('')).toBe(false)
 })
+
+test('a tick that lands while the zero tick is still reading does not push the count negative or clear twice', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  await tick(GRACE_SECONDS - 1)
+  const t = ticker()!
+  const first = t.fn()
+  const second = t.fn()
+  await first; await second
+  expect(ran).toEqual([{ command: 'clear', args: '' }])
+  expect(JSON.stringify(await band())).not.toContain('/clear in -')
+})
+
 
 test('a conversation met at load is forced whatever it started at; one born of a /clear that starts past the threshold is not, and says so once', async () => {
   // resumed (or launched) already past the line: forced, as asked
@@ -536,6 +606,21 @@ test('a conversation met at load is forced whatever it started at; one born of a
 const clearRun = () =>
   hooks['command.run:clear']($, { command: 'clear', args: '', origin: { kind: 'composer' }, presentation: { layout: 'main', columns: 80 } }, async () => ({ text: '' }))
 
+test('a successor that starts past the threshold still gets the countdown once the person arms a handoff themselves', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  percent = 30
+  await turnComplete()
+  await clearRun()
+  sessionId = 'uuid-next'
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-next\n'
+  percent = 75
+  await turnComplete()
+  expect(timers).toEqual([])
+  arm()
+  await turnComplete()
+  expect(ticker()).toBeDefined()
+})
+
 test('a /clear before any turn ends still marks the next conversation as /clear-born: past the threshold it is not forced', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
   await clearRun()
@@ -564,14 +649,13 @@ test('the /clear the mod runs itself marks the successor as /clear-born too, so 
   arm(); percent = 80
   await band()
   await turnComplete()
-  await fireAfter()
+  await findButton(await band()).props.onPress()
   expect(ran).toEqual([{ command: 'clear', args: '' }])
   files = { '/work/.cs/local/state': 'claude_session_id: uuid-next\n' }
   sessionId = 'uuid-next'
   percent = 75
   await turnComplete()
-  // the question already asked and fired is spent; the successor schedules none
-  expect(timers.filter(t => t.kind === 'after' && !t.cancelled)).toEqual([])
+  expect(timers.filter(t => t.kind === 'after')).toEqual([])
   expect(toasts).toHaveLength(1)
 })
 
@@ -619,7 +703,7 @@ test('a /clear the mod runs itself that is rejected leaves no birth behind: a la
   await band()
   await turnComplete()
   $.command.run = async () => { throw new Error('no session') }
-  await fireAfter()
+  await tick(GRACE_SECONDS)
   $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
   expect(toasts).toEqual(['cs-rotate: /clear did not run: Error: no session'])
   files = { '/work/.cs/local/state': 'claude_session_id: uuid-resumed\n' }
