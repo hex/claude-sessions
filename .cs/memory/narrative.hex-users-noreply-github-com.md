@@ -1192,3 +1192,39 @@ clock-resolution rule; CHANGELOG has all five entries.
 Not yet done: the full suite (ghost is still unreachable; the handoff says
 not to run a full local suite without Alex's say), a Codex adversarial pass
 (dispatched), and the merge gate, which is Alex's.
+
+### Codex round 1 on the branch: 4 findings, all P2, all folded
+
+The wrapper's first two replies carried no findings at all (one was about
+narratives, which nothing asked for) and the third truncated — the list only
+arrived on the fourth ask, and it repeated 1-4 when asked for 5-7. Two of the
+four I had already reproduced from its own progress lines before the list
+landed.
+
+- **My minor-4 fix was itself a regression, and the worse bug of the two.**
+  On a failed `mv`, the cleanup deleted `$sdir/$name.brief.md` — which a
+  CONCURRENT spawn of the same name may have published, so that spawn launches
+  without the brief it asked for. The lesson is the shape, not the guard: an
+  abort must not delete a file it did not create. Fixed by ordering — seed
+  content to a temp file, brief second, seed published last — so a failure at
+  any step leaves nothing behind and touches nothing published. A failed final
+  `mv` now means another spawn consumed the temp path, and its brief is not
+  this run's to remove.
+- **A brace group reports only its LAST command's status.** With no tasks,
+  `{ printf spawner; local _t; for _t in ...; }` ended on an empty `for`, so a
+  failed printf still published a seed. One printf of the whole payload now.
+- **`-lt 1000` left the boundary itself broken**: the check is `-ge`, so a
+  1000 ms budget skips on the very tick the fallback exists for, while 999
+  became 1500 and survived. Now `-le 1000`.
+- **A digit cap is not a duration ceiling.** `Retry-After: 999999999999999`
+  passes fifteen digits and set `next_poll_at` 31.7 million years out, which
+  the cache honours — usage polling would never run again. Accepted values are
+  clamped to `USAGE_MAX_BACKOFF` (3600 s) now; the next render reads the
+  header again anyway.
+
+Gate (Alex chose touched suites, not the full local run): narrative_rotate
+50/50, rotation 104/104, finish_script 24/24, hooks 142/142, docs 6/6,
+install 54/54, spawn 39/39, scope_prompt 52/52, statusline 237/237,
+feature_skill 5/5; shellcheck `-S error` clean; both bash 3.2 and 5.x parse
+the changed files. Nine commits on fix/v2026.9.16-minors, nothing pushed,
+nothing merged — Alex asked to see the findings first.
