@@ -532,7 +532,9 @@ _integrate_cleanup() {
         fi
         git -C "$_INTEGRATE_BASE_DIR" worktree prune >/dev/null 2>&1 || true
     fi
-    [ -n "${_INTEGRATE_LOCK:-}" ] && rm -r "$_INTEGRATE_LOCK" 2>/dev/null
+    # A lock already gone must not abort the handler under set -e: the path
+    # still has to be forgotten below.
+    [ -n "${_INTEGRATE_LOCK:-}" ] && { rm -r "$_INTEGRATE_LOCK" 2>/dev/null || :; }
     # A TERM'd run cleans up twice, from the signal handler and then from EXIT.
     # Forgetting the paths after the first pass keeps the second from removing
     # a lock or temp another integrate has since taken.

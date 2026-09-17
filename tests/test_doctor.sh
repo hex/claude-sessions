@@ -1261,6 +1261,23 @@ test_doctor_names_a_lock_whose_pid_is_dead_as_stale() {
     assert_output_contains "$output" "rm -r" "and the command that clears it" || return 1
 }
 
+# `kill -0 0` signals the caller's own process group and always succeeds, so
+# a pid file reading 0 would report a holder that can never exit. No integrate
+# records 0; a file that says so is unreadable, not a holder.
+test_doctor_does_not_treat_pid_zero_as_a_holder() {
+    local sess="$TEST_TMPDIR/sess-zerolock"
+    mkdir -p "$sess/.cs/memory"
+    git -C "$sess" init -q
+    mkdir -p "$sess/.git/cs/integrate.lock"
+    echo 0 > "$sess/.git/cs/integrate.lock/pid"
+    local output
+    output=$(CLAUDE_SESSION_DIR="$sess" CLAUDE_SESSION_META_DIR="$sess/.cs" \
+        CS_CLAUDE_DIR="$TEST_TMPDIR/claude-zl" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_not_contains "$output" "held by a running integrate" \
+        "pid 0 is not a holder" || return 1
+    assert_output_contains "$output" "integrate.lock" "the lock is still reported" || return 1
+}
+
 test_doctor_is_silent_with_no_integrate_lock() {
     local sess="$TEST_TMPDIR/sess-nolock"
     mkdir -p "$sess/.cs/memory"
@@ -1272,6 +1289,7 @@ test_doctor_is_silent_with_no_integrate_lock() {
         "no lock, nothing to report" || return 1
 }
 
+run_test test_doctor_does_not_treat_pid_zero_as_a_holder
 run_test test_doctor_names_a_stale_integrate_lock
 run_test test_doctor_reports_a_lock_whose_pid_is_alive_as_held
 run_test test_doctor_reports_a_lock_held_by_another_users_process_as_held

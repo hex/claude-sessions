@@ -647,7 +647,7 @@ _doctor_check_integrate_lock() {
     local pid
     pid=$(cat "$lock/pid" 2>/dev/null || true)
     case "$pid" in
-        *[!0-9]*|"") pid="" ;;
+        0|*[!0-9]*|"") pid="" ;;
     esac
     # kill -0 through the shell builtin, not ps: kill(2) sees a process that a
     # restricted /proc hides from ps, and its errno tells a holder owned by

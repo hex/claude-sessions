@@ -1886,7 +1886,9 @@ _integrate_cleanup() {
         fi
         git -C "$_INTEGRATE_BASE_DIR" worktree prune >/dev/null 2>&1 || true
     fi
-    [ -n "${_INTEGRATE_LOCK:-}" ] && rm -r "$_INTEGRATE_LOCK" 2>/dev/null
+    # A lock already gone must not abort the handler under set -e: the path
+    # still has to be forgotten below.
+    [ -n "${_INTEGRATE_LOCK:-}" ] && { rm -r "$_INTEGRATE_LOCK" 2>/dev/null || :; }
     # A TERM'd run cleans up twice, from the signal handler and then from EXIT.
     # Forgetting the paths after the first pass keeps the second from removing
     # a lock or temp another integrate has since taken.
@@ -6306,7 +6308,7 @@ _doctor_check_integrate_lock() {
     local pid
     pid=$(cat "$lock/pid" 2>/dev/null || true)
     case "$pid" in
-        *[!0-9]*|"") pid="" ;;
+        0|*[!0-9]*|"") pid="" ;;
     esac
     # kill -0 through the shell builtin, not ps: kill(2) sees a process that a
     # restricted /proc hides from ps, and its errno tells a holder owned by
