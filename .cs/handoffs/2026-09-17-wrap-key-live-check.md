@@ -2,7 +2,8 @@
 parent: 9915c942-9c0c-483e-98d9-f6bc79937607
 created: 2026-09-17T17:59:23Z
 purpose: measure live that the wrap key stays hidden after /wrap across a Stop-hook continuation, then pick up #640 (v2026.9.16 minors)
-status: unconsumed
+status: consumed
+consumed_by: be426d62-7e0d-44ae-a03a-98d36f355787
 ---
 
 ## 1. Next Step
