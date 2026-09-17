@@ -170,6 +170,9 @@
     }
 
     var w = body.w;
+    // The background sits under everything the Box holds: every cell a child
+    // drew without a background of its own takes it, as the padding does.
+    if (p.backgroundColor) bodyRows = bodyRows.map(function (r) { return underpaint(padRow(r, w), p.backgroundColor); });
     var rows = bodyRows.map(function (r) { return blanks(pd.l, fillSt).concat(padRow(r, w, fillSt), blanks(pd.r, fillSt)); });
     for (var i = 0; i < pd.t; i++) rows.unshift(blanks(w + pd.l + pd.r, fillSt));
     for (var j = 0; j < pd.b; j++) rows.push(blanks(w + pd.l + pd.r, fillSt));
@@ -186,6 +189,15 @@
     for (var t = 0; t < m.t; t++) rows.unshift(blanks(mw));
     for (var b = 0; b < m.b; b++) rows.push(blanks(mw));
     return grid(rows);
+  }
+
+  function underpaint(row, bg) {
+    return row.map(function (c) {
+      if (c.st && c.st.bg) return c;
+      var st = {}; for (var k in (c.st || EMPTY)) st[k] = (c.st || EMPTY)[k];
+      st.bg = bg;
+      return { ch: c.ch, st: st };
+    });
   }
 
   function repeat(ch, n) { var s = ""; for (var i = 0; i < n; i++) s += ch; return s; }
@@ -293,7 +305,7 @@
       return inner ? "hover={{ " + inner + " }}" : "";
     }
     if (name === "color" || name === "borderColor" || name === "backgroundColor") return name + "=" + colorExpr(v);
-    return name + "=" + JSON.stringify(String(v));
+    return stringProp(name, String(v));
   }
 
   function attrs(props) {
@@ -304,18 +316,32 @@
     return out.length ? " " + out.join(" ") : "";
   }
 
-  // A literal the person can paste: plain ASCII stands as text, anything else
-  // (marks, meters, non-breaking spaces) goes through an escaped expression so
-  // it survives a copy.
-  function textLiteral(s) {
-    if (/^[\x20-\x7e]*$/.test(s)) return s;
-    var esc = Array.from(s).map(function (ch) {
+  // A single-quoted JS string the person can paste: quote and backslash
+  // escaped, anything outside printable ASCII (marks, meters, non-breaking
+  // spaces, astral characters) spelled as a code point escape.
+  function jsString(s) {
+    return "'" + Array.from(s).map(function (ch) {
       var c = ch.codePointAt(0);
+      if (c > 0xffff) return "\\u{" + c.toString(16) + "}";
       if (c < 0x20 || c > 0x7e) return "\\u" + ("000" + c.toString(16)).slice(-4);
       if (ch === "'" || ch === "\\") return "\\" + ch;
       return ch;
-    }).join("");
-    return "{'" + esc + "'}";
+    }).join("") + "'";
+  }
+
+  // Text children: printable ASCII stands bare unless JSX would read part of
+  // it as markup (`<`, `>`, `{`, `}`); everything else is a braced string.
+  function textLiteral(s) {
+    if (/^[\x20-\x7e]*$/.test(s) && !/[<>{}]/.test(s)) return s;
+    return "{" + jsString(s) + "}";
+  }
+
+  // A string prop: a JSX attribute string has no escapes and decodes entities,
+  // so only printable ASCII without `"`, `&` or `\` stands quoted; anything
+  // else is a braced string.
+  function stringProp(name, s) {
+    if (/^[\x20-\x7e]*$/.test(s) && !/["&\\]/.test(s)) return name + "=\"" + s + "\"";
+    return name + "={" + jsString(s) + "}";
   }
 
   function toJsx(node, indent) {

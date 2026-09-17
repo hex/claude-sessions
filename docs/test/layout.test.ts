@@ -1,7 +1,7 @@
 // ABOUTME: Unit tests for the mod band layout engine in docs/mods-layout.js.
 // ABOUTME: Covers Text runs, Box flex in both directions, nesting, borders and the shipped rotate band as an oracle.
 import { test, expect } from 'bun:test'
-const { layout, toText } = require('../mods-layout.js')
+const { layout, toText, toJsx } = require('../mods-layout.js')
 
 const T = (props: any, s: string) => ({ type: 'Text', props, children: [s] })
 
@@ -129,4 +129,46 @@ test('toJsx keeps plain ASCII text unescaped and nests inline Text on one line',
   expect(toJsx(T({ dimColor: true }, 'ctx 47%'))).toBe('<Text dimColor>ctx 47%</Text>')
   expect(toJsx({ type: 'Text', props: {}, children: [T({ dimColor: true }, 'a'), T({ bold: true }, 'b')] }))
     .toBe('<Text><Text dimColor>a</Text><Text bold>b</Text></Text>')
+})
+
+// The export is only worth having if it pastes: parse what toJsx wrote with
+// Bun's own JSX transpiler and rebuild the tree, which must be the one the
+// canvas held, text and labels byte for byte.
+const jsxTranspiler = new Bun.Transpiler({ loader: 'tsx', tsconfig: JSON.stringify({ compilerOptions: { jsx: 'react', jsxFactory: 'h' } }) })
+function reparse(jsx: string): any {
+  const js = jsxTranspiler.transformSync('export default (' + jsx + ')').replace('export default', 'return')
+  const h = (type: any, props: any, ...children: any[]) => ({ type, props: props ?? {}, children })
+  return new Function('h', 'Box', 'Text', 'Button', 'press', js)(h, 'Box', 'Text', 'Button', () => {})
+}
+
+test('toJsx text survives a paste: angle brackets, braces, quotes and astral characters stay literal', () => {
+  for (const s of ['a < b', '{value}', "it's \\ fine", 'say "yes"', 'rocket \u{1F680} \u00b7 ok', '<Text>']) {
+    const back = reparse(toJsx(T({}, s)))
+    expect(back.type).toBe('Text')
+    expect(back.children.join('')).toBe(s)
+  }
+})
+
+test('toJsx string props survive a paste, quotes and all', () => {
+  const tree = { type: 'Button', props: { hotkey: '1', plain: true, label: 'say "yes" & <go> {now} \u{1F680}' }, children: [] }
+  const back = reparse(toJsx(tree))
+  expect(back.props.label).toBe(tree.props.label)
+  expect(back.props.hotkey).toBe('1')
+})
+
+// A Box background sits under everything it holds: the cells its children
+// draw without a background of their own take the Box's, and so do the rows an
+// explicit height adds. A child's own background still wins.
+test('a Box background fills beneath its children and its height padding', () => {
+  const g = layout(B({ backgroundColor: 'rgb(1,2,3)', paddingX: 1, height: 2 }, T({}, 'ab'), T({ backgroundColor: 'red' }, 'c')), 40)
+  expect(toText(g)).toEqual([' abc ', '     '])
+  const bgs = g.rows.map((r: any[]) => r.map(c => c.st.bg))
+  expect(bgs[0]).toEqual(['rgb(1,2,3)', 'rgb(1,2,3)', 'rgb(1,2,3)', 'red', 'rgb(1,2,3)'])
+  expect(bgs[1]).toEqual(Array(5).fill('rgb(1,2,3)'))
+})
+
+test('a row Box with gaps and justify slack paints the whole band', () => {
+  const g = layout(B({ backgroundColor: 'rgb(9,9,9)', width: 10, justifyContent: 'space-between' }, T({}, 'a'), T({}, 'b')), 40)
+  expect(toText(g)).toEqual(['a        b'])
+  expect(g.rows[0].every((c: any) => c.st.bg === 'rgb(9,9,9)')).toBe(true)
 })
