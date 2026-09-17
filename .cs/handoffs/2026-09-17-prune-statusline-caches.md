@@ -171,3 +171,95 @@ Everything here exists nowhere else.
 
 Written from live context at ~45%, no compaction. Pass one carries everything
 that dies with the conversation; pass two appends the recoverable sections.
+
+## 4. Primary Request and Intent
+
+This conversation was woken by a rotation carrying
+`.cs/handoffs/2026-09-17-merge-parallel-test-races.md` (now `status: consumed`)
+and did what it asked: collect two in-flight reviews of
+`fix/parallel-test-races`, fold what was material, take the merge to Alex.
+Everything after that came from Alex directly, in the order quoted in
+section 3: the #642 investigation and the orphan kills, the statusline
+refresh questions, the mods inventory, the cs-hint removal, and filing #645 —
+which is what this handoff hands on.
+
+## 5. Files and Code Sections
+
+Read the code, not a summary.
+
+- `bin/cs-statusline` — `_cache_read` (75), `_cache_write` (93),
+  `_sl_parent_pid` (~102), `TMUX_CLIENT_CACHE_TTL` (152), `TMUX_REAL_CACHE_TTL`
+  (205), `_refresh_usage` (1134) with its three sweep finds (1161-1165),
+  `_fable_candidate`'s detached kick (1685), `--refresh-usage` dispatch (1930).
+- `docs/statusline.md` — the fork-count contract (39) and the cache table (46-47).
+- `lib/01-manifests.sh` — `RETIRED_HOOKS` (10), `CS_SKILLS` (~66),
+  `RETIRED_SKILLS` (~76, now carrying `cs-hint`), `CS_MOD_FILES` (~89).
+- `lib/60-doctor.sh` — `_doctor_check_integrate_lock` (~634) with the
+  `err=$( LC_ALL=C; kill -0 ... )` verdict, `_drift_scan` call (198),
+  `_doctor_check_mod` (709) and its single `cs-rotate` call site (753).
+- `lib/30-worktree.sh` — `_integrate_cleanup` (~525), lock acquisition (~630).
+- `install.sh.in` — retired-skill loop (367), mod deploy loops (401-430).
+- `lib/85-adopt-uninstall.sh` — retired skills (296), mods (307).
+- `tests/test_install.sh` — array-parity check (505),
+  `test_install_removes_the_retired_hint_mod` (~762).
+- `tests/test_doctor.sh` — the integrate-lock block at the end, including
+  `test_doctor_does_not_treat_pid_zero_as_a_holder`.
+- `tests/test_worktrees.sh` — `test_integrate_cleanup_releases_the_lock_only_once`
+  and `..._forgets_a_lock_it_could_not_remove` (~807-840).
+- `mods/cs-rotate/` — the only mod now; three deployed files plus a bun suite.
+- `scratchpad/review/` (untracked) — the prompts and Codex rounds 1-3 from the
+  parallel-test-races work, still on disk if a brief is wanted.
+
+## 6. Problem Solving
+
+- **Reviews name every consumer by path** (`feedback_review_names_consumers`).
+  Both review dispatches today did, and both found things a diff-scoped read
+  would not have. The cs-hint brief in particular listed eleven consumers and
+  four questions; reuse its shape.
+- **Codex goes through the `/codex:` plugin**, never a raw `codex exec`
+  (`feedback_codex_via_plugin`): `Agent` tool, `subagent_type:
+  "codex:codex-rescue"`. A named Fable teammate vanished without reporting in
+  the previous conversation — dispatch Fable reviews UNNAMED.
+- **Every `tests/test_*.sh` run goes to ghost**, never here:
+  `ssh ghost@ghost 'rm -f ci/claude-sessions/suite.status' </dev/null`, then
+  `bash ~/.claude/plugins/cache/hex-plugins/claude-tmux/2026.9.1/scripts/remote-tests.sh --host ghost@ghost </dev/null`,
+  then poll `suite.status` in a **background** loop — the script only launches;
+  the suite runs detached, and its own output says "Running detached".
+- `./build.sh` before committing whenever `lib/` changed; CI fails on drift.
+- Ghost is bash 5.3 and cannot see a bash-3.2 defect; probe with `/bin/bash`.
+
+## 7. Pending Tasks
+
+The native task list is keyed to the session and survives the `/clear`.
+Reconcile against this list; do not mirror it.
+
+- **#645 — the subject of this handoff.** Pending, not started.
+- **#647 pending.** Doctor warns when a known `RETIRED_SKILLS` directory is
+  still deployed (section 3).
+- **#644 pending.** Four integrate-lock Minors (section 3).
+- **#640 pending.** Four Minors from the v2026.9.16 release review.
+- **#554 pending (PARKED).** SessionStart notice for pending tool calls.
+- **#606 pending (POSTPONED).** `cs --remote` via Claude Remote Control.
+- **#642, #643, #646 closed this conversation.**
+
+## 8. Current Work
+
+Two merges landed on main today, neither pushed:
+
+- `4db2d49` — `fix/parallel-test-races` (#609, #603, #638), 11 commits,
+  ghost 67/67 on the landing sha `540d7ea`, Codex ×4 + Fable MERGE.
+- `4050d5d` — `feat/remove-hint-mod`, ghost 66/66 on `8a1f1eb`, Codex MERGE.
+
+Both branches deleted. cs is installed from main and `cs -doctor` reports no
+drift; `~/.claude/skills/cs-hint/` is gone and `cs-rotate` still runs.
+**Main is 28 commits ahead of origin, unpushed and unreleased, and Alex has
+not asked for a release.** Nothing is ever pushed without him.
+
+Working tree at rotation: `.cs/memory/narrative.hex-users-noreply-github-com.md`
+modified (carries this conversation's sections), plus untracked `scratchpad/`.
+`~/.claude/settings.json` has `statusLine.refreshInterval: 1` — changed today
+on Alex's instruction, machine-local, not part of the repo.
+
+## Completeness (pass two)
+
+Nothing cut.
