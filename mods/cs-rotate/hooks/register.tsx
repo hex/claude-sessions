@@ -63,6 +63,15 @@ export const FORCED = '.cs/local/cs-rotate.forced'
 // prompt stops it.
 export const GRACE_SECONDS = 20
 
+// The pane the first grace of a session opens beside the band: what the
+// handoff will do next, read while the count runs. It carries no keys, so
+// stopping the count stays on the band, and it closes whenever the count ends.
+// Shown once per load of the mod: later graces keep to the band. A pane the
+// mod opens on its own is not drawn below 144 columns (110 once the person has
+// opened it themselves), so on a narrow terminal the band is all there is.
+export const PREVIEW_PANE = 'cs-rotate-handoff'
+export const PREVIEW_LINES = 12
+
 // The wrap key's question, and the answer that runs /wrap. `$.ui.ask` opens
 // the engine's own AskUserQuestion dialog and resolves to the label chosen, or
 // to free text typed under Other, so the answer is compared exactly; it rejects
@@ -76,6 +85,9 @@ export const WRAP_YES = 'Yes, wrap up'
 let left: number | undefined
 let ticker: { cancel: () => void } | undefined
 let bandIdle = false
+// The preview's lines while its pane is open, and whether this load has shown it.
+let preview: string[] | undefined
+let previewShown = false
 
 // Which conversation the turns belong to, and whether it is being judged. A
 // conversation that begins past the force threshold did not get there by
@@ -93,7 +105,7 @@ let startPercent: number | undefined
 
 export function register(on: On) {
   // A (re)load has no countdown: the engine cancelled the old one's timers.
-  left = undefined; ticker = undefined; bandIdle = false; adopted = undefined; clearSeen = false; birth = undefined; startPercent = undefined
+  left = undefined; ticker = undefined; bandIdle = false; preview = undefined; previewShown = false; adopted = undefined; clearSeen = false; birth = undefined; startPercent = undefined
   on('session.start', async ($, e, next) => {
     // Only a cs session has .cs/local; anywhere else the mod stays silent.
     const local = `${e.cwd}/.cs/local`
@@ -177,6 +189,21 @@ export function register(on: On) {
       </Box>
     )
   })
+
+  // The preview's body: the handoff's next step and the count. Any other pane,
+  // or this one once the count has ended, is not the mod's to draw.
+  on('ui.render', { component: 'Pane' }, async ($, e, next) => {
+    if (e.requestId !== PREVIEW_PANE || preview === undefined) return next(e)
+    const { Box, Text } = await $.ui.resolve(e)
+    return (
+      <Box flexDirection="column" paddingX={1}>
+        {preview.map((line, i) => <Text key={`step-${i}`}>{line}</Text>)}
+        <Box marginTop={1}>
+          <Text dimColor>{left === undefined ? '' : `/clear in ${left}s \u00b7 press 1 to clear now, or send a prompt to stay`}</Text>
+        </Box>
+      </Box>
+    )
+  })
 }
 
 function numberOr(raw: string | undefined, fallback: number): number {
@@ -245,6 +272,11 @@ async function forceRotation($: EngineInterface) {
 // the button stays for the person.
 function startCountdown($: EngineInterface) {
   left = GRACE_SECONDS
+  if (!previewShown) {
+    previewShown = true
+    // From a timer: the count starts inside the turn's own hook.
+    $.clock.after(0, () => openPreview($))
+  }
   ticker = $.clock.every(1000, async () => {
     // Nothing to count once stopped, and nothing below zero: a period that
     // lands while the zero tick is still reading leaves the count where it is.
@@ -266,7 +298,35 @@ function stopCountdown($: EngineInterface) {
   ticker?.cancel()
   ticker = undefined
   left = undefined
+  if (preview !== undefined) {
+    preview = undefined
+    $.ui.close({ id: PREVIEW_PANE }).catch(err => $.ui.toast(`cs-rotate: the handoff pane did not close: ${String(err)}`))
+  }
   $.ui.invalidate('ui.render')
+}
+
+// Opens the preview for the count that scheduled it, if that count still runs.
+async function openPreview($: EngineInterface) {
+  if (ticker === undefined) return
+  const text = await armedHandoff($)
+  if (text === undefined || ticker === undefined) return
+  preview = nextStep(text)
+  await $.ui.open({ id: PREVIEW_PANE, title: 'Handoff' })
+}
+
+// The handoff's Next Step section (`# Next Step`, `## 1. Next Step`), its
+// blank lines dropped, capped at PREVIEW_LINES; empty when it has none.
+export function nextStep(text: string): string[] {
+  const lines = text.split('\n')
+  const start = lines.findIndex(line => /^#+\s*(\d+\.\s*)?next step\s*$/i.test(line.trim()))
+  if (start < 0) return []
+  const body: string[] = []
+  for (const line of lines.slice(start + 1)) {
+    if (/^#+\s/.test(line)) break
+    if (line.trim() !== '') body.push(line.trimEnd())
+    if (body.length === PREVIEW_LINES) break
+  }
+  return body
 }
 
 // The band's own threshold; without one it is the bar's warn band, read the way
@@ -286,14 +346,20 @@ async function threshold($: EngineInterface): Promise<number> {
 // /clear that lands in a conversation with nothing to continue from, so it
 // does not arm. One exists per render; the reads only while the marker is there.
 async function handoffArmed($: EngineInterface): Promise<boolean> {
+  return (await armedHandoff($)) !== undefined
+}
+
+// The armed handoff's text, read under the rule above; undefined when unarmed.
+async function armedHandoff($: EngineInterface): Promise<string | undefined> {
   const cwd = await $.session.cwd()
-  if (!(await $.fs.exists(`${cwd}/${MARKER}`))) return false
+  if (!(await $.fs.exists(`${cwd}/${MARKER}`))) return undefined
   try {
     const name = (await $.fs.read(`${cwd}/${MARKER}`)).trim()
-    if (name === '' || /[/\\]/.test(name)) return false
-    return isUnconsumed(await $.fs.read(`${cwd}/${HANDOFFS}/${name}`))
+    if (name === '' || /[/\\]/.test(name)) return undefined
+    const text = await $.fs.read(`${cwd}/${HANDOFFS}/${name}`)
+    return isUnconsumed(text) ? text : undefined
   } catch {
-    return false
+    return undefined
   }
 }
 

@@ -6,7 +6,7 @@ import { test, expect, beforeEach } from 'bun:test'
 ;(globalThis as any).h = (type: any, props: any, ...children: any[]) => ({ type, props: props ?? {}, children })
 ;(globalThis as any).Fragment = 'Fragment'
 
-import { register, DEFAULT_PERCENT, GRACE_SECONDS, WRAP_QUESTION, WRAP_YES, surfaceColor, isUnconsumed } from '../hooks/register.tsx'
+import { register, DEFAULT_PERCENT, GRACE_SECONDS, PREVIEW_PANE, WRAP_QUESTION, WRAP_YES, nextStep, surfaceColor, isUnconsumed } from '../hooks/register.tsx'
 
 type Hook = ($: any, e: any, next: (e: any) => Promise<any>) => Promise<any>
 const hooks: Record<string, Hook> = {}
@@ -29,6 +29,7 @@ let timers: { ms: number; fn: () => void; kind: 'after' | 'every'; cancelled: bo
 let invalidated: string[]
 let toasts: string[]
 let asks: { question: string; options: any }[]
+let panes: { op: 'open' | 'close'; args: any }[]
 // What the person does with the next dialog: a label, or a rejection (dismissed, or a `-p` run).
 let answer: string | Error
 const timer = (kind: 'after' | 'every') => (ms: number, fn: () => void) => {
@@ -49,6 +50,8 @@ const $ = {
     resolve: async () => ({ Box: 'Box', Text: 'Text', Button: 'Button' }),
     invalidate: (event: string) => { invalidated.push(event) },
     toast: (text: string) => { toasts.push(text) },
+    open: async (args: any) => { panes.push({ op: 'open', args }) },
+    close: async (args: any) => { panes.push({ op: 'close', args }) },
     ask: async (question: string, options: any) => {
       asks.push({ question, options })
       if (answer instanceof Error) throw answer
@@ -77,7 +80,7 @@ const findButton = (tree: any) => buttons(tree)[0]
 beforeEach(() => {
   for (const k of Object.keys(hooks)) delete hooks[k]
   percent = undefined; filled = []; ran = []; written = {}; existing = new Set(['/work/.cs/local'])
-  timers = []; invalidated = []; toasts = []; asks = []; answer = WRAP_YES
+  timers = []; invalidated = []; toasts = []; asks = []; answer = WRAP_YES; panes = []
   // The default fixture is the lead conversation of a cs session.
   sessionId = 'uuid-lead'
   envVars = {}
@@ -533,6 +536,7 @@ test('a rejected /clear at zero shows a toast and clears nothing else', async ()
   arm(); percent = 80
   await band()
   await turnComplete()
+  await fireAfter() // the handoff pane's open, spent
   $.command.run = async () => { throw new Error('no session') }
   await tick(GRACE_SECONDS)
   $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
@@ -649,13 +653,14 @@ test('the /clear the mod runs itself marks the successor as /clear-born too, so 
   arm(); percent = 80
   await band()
   await turnComplete()
+  await fireAfter() // the handoff pane's open, spent
   await findButton(await band()).props.onPress()
   expect(ran).toEqual([{ command: 'clear', args: '' }])
   files = { '/work/.cs/local/state': 'claude_session_id: uuid-next\n' }
   sessionId = 'uuid-next'
   percent = 75
   await turnComplete()
-  expect(timers.filter(t => t.kind === 'after')).toEqual([])
+  expect(timers.filter(t => t.kind === 'after' && !t.cancelled)).toEqual([])
   expect(toasts).toHaveLength(1)
 })
 
@@ -702,6 +707,7 @@ test('a /clear the mod runs itself that is rejected leaves no birth behind: a la
   arm(); percent = 80
   await band()
   await turnComplete()
+  await fireAfter() // the handoff pane's open, spent
   $.command.run = async () => { throw new Error('no session') }
   await tick(GRACE_SECONDS)
   $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
@@ -802,3 +808,73 @@ test('no button is ever nested in a Text, armed or not', async () => {
 // and a non-empty composer takes every hotkey with it). So `2` keeps a button
 // while armed: each press only re-arms, the window restarts, nothing is typed,
 // and the confirmation sits on `3`.
+
+// The first grace of a session opens a pane beside the band that shows what
+// the handoff will do next, so the twenty seconds are spent reading it. The
+// pane carries no keys: stopping the count stays on the band. Later graces in
+// the same session keep to the band alone.
+const pane = (requestId = PREVIEW_PANE) =>
+  hooks['ui.render:Pane']($, { requestId, props: { title: 'Handoff', isFocused: false, bodyColumns: 60, placement: 'dock' } }, async () => DRAWN)
+const HANDOFF_WITH_STEP = '---\nparent: uuid-lead\nstatus: unconsumed\n---\n\n# Next Step\n\nRun the secrets suites solo.\nTriage the store file.\n\n# Settled\n\nNothing.\n'
+
+test('the first grace in a session opens the handoff pane from a timer, and it shows the next step and the count', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); files[HANDOFF] = HANDOFF_WITH_STEP; percent = 80
+  await band()
+  await turnComplete()
+  expect(panes).toEqual([])
+  await fireAfter()
+  expect(panes).toEqual([{ op: 'open', args: { id: PREVIEW_PANE, title: 'Handoff' } }])
+  const body = JSON.stringify(await pane())
+  expect(body).toContain('Run the secrets suites solo.')
+  expect(body).toContain('Triage the store file.')
+  expect(body).not.toContain('Settled')
+  expect(body).toContain(`/clear in ${GRACE_SECONDS}s`)
+  expect(buttons(await pane())).toEqual([])
+  await tick(2)
+  expect(JSON.stringify(await pane())).toContain(`/clear in ${GRACE_SECONDS - 2}s`)
+})
+
+test('any end of the count closes the pane: a prompt, a press, zero', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band(); await turnComplete(); await fireAfter()
+  await promptSubmit()
+  expect(panes.at(-1)).toEqual({ op: 'close', args: { id: PREVIEW_PANE } })
+
+  register(on as any); panes = []
+  arm()
+  await band(); await turnComplete(); await fireAfter()
+  await findButton(await band()).props.onPress()
+  expect(panes.at(-1)).toEqual({ op: 'close', args: { id: PREVIEW_PANE } })
+
+  register(on as any); panes = []; ran = []
+  arm()
+  await band(); await turnComplete(); await fireAfter()
+  await tick(GRACE_SECONDS)
+  expect(ran).toEqual([{ command: 'clear', args: '' }])
+  expect(panes.at(-1)).toEqual({ op: 'close', args: { id: PREVIEW_PANE } })
+})
+
+test('a later grace in the same session keeps to the band: the pane opens once', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band(); await turnComplete(); await fireAfter()
+  await promptSubmit()
+  await turnComplete(); await fireAfter()
+  expect(ticker()).toBeDefined()
+  expect(panes.filter(p => p.op === 'open')).toHaveLength(1)
+})
+
+test('a pane drawn for any other id passes through, and a closed preview draws nothing of its own', async () => {
+  expect(await pane('someone-else')).toBe(DRAWN)
+  expect(await pane()).toBe(DRAWN)
+})
+
+test('nextStep reads the handoff\'s Next Step section, however it is numbered, and caps it', () => {
+  expect(nextStep(HANDOFF_WITH_STEP)).toEqual(['Run the secrets suites solo.', 'Triage the store file.'])
+  expect(nextStep('---\nstatus: unconsumed\n---\n\n## 1. Next Step\n\nOne thing.\n')).toEqual(['One thing.'])
+  expect(nextStep('---\nstatus: unconsumed\n---\n\nNo heading here.\n')).toEqual([])
+  const long = '# Next Step\n' + Array.from({ length: 30 }, (_, i) => `line ${i}`).join('\n')
+  expect(nextStep(long)).toHaveLength(12)
+})
