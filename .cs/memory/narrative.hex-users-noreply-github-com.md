@@ -739,3 +739,57 @@ Rotated: handoff 2026-09-17-parallel-test-races.md (two passes, c9624d1 +
 nothing old enough to prune. Note for the prune step: its `[[ "$a" < "$b" ]]`
 date comparison is a bash construct and the Bash tool runs zsh, which rejects
 it with "condition expected: <" — run that loop through /bin/bash.
+
+## 2026-09-17 — fix/parallel-test-races (#609, #603, #638)
+
+#609 root cause was not a thread outliving its test: every cs fork in the tui
+is synchronous. `enter_runs_the_action_belonging_to_the_highlighted_row`
+presses Enter on EVERY menu row (Archive and Secrets included) with no env lock
+and no CS_BIN, so it forks whatever stub a concurrent test set — and with no
+stub, the real `cs -archive alpha` against the dev's sessions. Pair repro
+24/30 red → 0/30. The in-flight preview test (red under --test-threads=1) is a
+second mechanism: the render re-request queues a fresh read to the same
+worker and under load both land in one drain, the fresh one cached
+legitimately; 1/25 red with six `yes` hogs → 0/25 after hand-feeding the stale
+result on a test-owned channel (mutation of the generation check goes red).
+Commit ec9388e.
+
+#603: integrate writes `$$` into `<lock>/pid`; doctor tests that pid with
+kill -0 instead of a machine-global pgrep; the lock is no longer empty so
+cleanup and the doctor hint use `rm -r`. Autosave's own sub-second hold still
+records nothing and rmdirs.
+
+#638 measured on ghost (macOS 26.6.2, bash 5.3.9, 16 cores): bash's builtin
+printf into an early-exiting `grep -q` exits 0 even at 300 KB, so the
+run_all tally flake is NOT the pipefail/SIGPIPE class; mechanism still open,
+both flaky tests now dump `$out` on failure so the next ghost failure carries
+its evidence.
+
+2026-09-17, later. Correction to the #638 note above: the run_all tally flake IS the
+pipefail/SIGPIPE class after all. The 300 KB standalone probe passed only because its
+match sat at the END of the string; instrumenting the real test on a loaded ghost caught
+PIPESTATUS=141 0 at a site whose match is early. Rule: a printf|grep -q probe must put
+the match early and keep the producer writing. Fix b5ea183 (herestrings, self-quitting
+sed, nested grep); loaded loop 2/20+1/20 → 0/20+0/20.
+#603 went three Codex rounds (raw `codex exec`; Alex then ruled: use the /codex: plugin,
+memory feedback_codex_via_plugin): cleanup made idempotent, traps armed before the pid
+write (f87090b); ps -p instead of kill -0 (5713e71) was itself wrong on procps with a
+restricted /proc; final f40497c reads bash's `LC_ALL=C kill -0` message: EPERM/success =
+held, ESRCH = stale (only case with rm -r advice), else unknown. Messages identical on
+bash 3.2 and 5.3. Ghost 67/67 on every code sha. Codex round 4 (plugin) + a fresh Fable
+closure review in flight at rotation; named fable-review teammate vanished unreported.
+Peer session "claude" measured cs-statusline --refresh-usage forking find ~150/s under
+the sidebar bridge (task #642, not started; render path is 6-12 execs, no diet needed).
+Rotation 7cc98cc6: Codex round-4 Minor 2 folded as bd216c2 (`err=$( LC_ALL=C; kill -0 ...)`).
+Probe on bash 3.2 under fr_FR.UTF-8: the printf mechanism reproduces (1,0 vs 1.0) but the
+kill message stays English in both forms because macOS strerror is not localised; bash 3.2
+exists only on macOS, so the fix makes the comment true rather than change a verdict.
+Round-4 #1 (PID namespace ESRCH) and #3 (pid-1 EPERM coverage) left for Alex at the gate.
+Ghost run on bd216c2 in the background; unnamed Fable agent a0071b88b9a2d99c6 still running.
+Fable closure review (unnamed agent, 172k tokens, 33 tools): MERGE, five Minors. Alex chose
+polish-first at the gate. Folded as 540d7ea: pid 0 rejected by the doctor filter (kill -0 0
+signals the caller's own group, always succeeds) and `rm -r ... || :` in _integrate_cleanup
+(under set -e a failed rm as the last AND-list command aborted the handler before it forgot
+the path). Both red-first via standalone /bin/bash probes, not the suite. Left as task #644:
+empty-pid stale advice vs autosave's pidless hold, PID-namespace ESRCH, 93 surviving
+printf|grep -q sites in other suites, pid-1 EPERM coverage as root. Ghost on 540d7ea running.

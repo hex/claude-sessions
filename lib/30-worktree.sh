@@ -532,7 +532,14 @@ _integrate_cleanup() {
         fi
         git -C "$_INTEGRATE_BASE_DIR" worktree prune >/dev/null 2>&1 || true
     fi
-    [ -n "${_INTEGRATE_LOCK:-}" ] && rmdir "$_INTEGRATE_LOCK" 2>/dev/null
+    # A lock already gone must not abort the handler under set -e: the path
+    # still has to be forgotten below.
+    [ -n "${_INTEGRATE_LOCK:-}" ] && { rm -r "$_INTEGRATE_LOCK" 2>/dev/null || :; }
+    # A TERM'd run cleans up twice, from the signal handler and then from EXIT.
+    # Forgetting the paths after the first pass keeps the second from removing
+    # a lock or temp another integrate has since taken.
+    _INTEGRATE_LOCK=""
+    _INTEGRATE_TMP=""
     return 0
 }
 
@@ -640,9 +647,14 @@ integrate_feature_worktree() {  # base_name task sha [--from-remote [--ci-green]
     _INTEGRATE_TMP=""
     # EXIT alone is not enough: a TERM/INT'd bash skips the EXIT trap
     # (measured: exit 143, no cleanup), stranding the mutex and the temp.
-    # Same shape as lib/75-launch.sh:112-113.
+    # Same shape as lib/75-launch.sh:112-113. Armed before the pid write: a
+    # write that fails under set -e must still release the directory.
     trap '_integrate_cleanup' EXIT
     trap '_integrate_cleanup; exit 130' INT TERM
+    # The holder's pid, for cs -doctor's liveness check. Inside the lock, so
+    # the directory and its evidence are created and removed together; the
+    # autosave hook's own brief hold records nothing and releases with rmdir.
+    echo "$$" > "$lock/pid"
 
     _integrate_in_temp "$base_dir" "$wt_dir" "$task" "$sha" "$common" "$from_remote" "$ci_green" "$@"
 }

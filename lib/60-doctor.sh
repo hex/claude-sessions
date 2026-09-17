@@ -638,11 +638,43 @@ _doctor_check_integrate_lock() {
     git_dir=$(_git_path_abs "$dir" --git-dir) || return 0
     lock="$git_dir/cs/integrate.lock"
     [ -d "$lock" ] || return 0
-    if pgrep -f 'cs .*-integrate-feature' >/dev/null 2>&1; then
-        _doctor_ok "Integrate lock: $lock held by a running integrate"
-    else
-        _doctor_warn "Integrate lock: $lock exists with no integrate running; autosave skips while it does. Remove it with: rmdir \"$lock\""
+    # The integrate writes its pid into the lock; that pid is the evidence, not
+    # a process listing, which would answer for any integrate on the machine.
+    # The autosave hook's sub-second hold of the same directory records no
+    # pid, so a doctor run inside that window reads it as stale. A recycled
+    # pid reads a stale lock as held; the process listing answered for any
+    # integrate anywhere, which was worse.
+    local pid
+    pid=$(cat "$lock/pid" 2>/dev/null || true)
+    case "$pid" in
+        0|*[!0-9]*|"") pid="" ;;
+    esac
+    # kill -0 through the shell builtin, not ps: kill(2) sees a process that a
+    # restricted /proc hides from ps, and its errno tells a holder owned by
+    # another user (EPERM) from a pid that is gone (ESRCH). Only ESRCH is
+    # evidence of absence; anything else the check cannot read is unknown,
+    # and an unknown must not come with removal advice. LC_ALL=C pins the
+    # message the builtin prints, which is the only channel for the errno;
+    # it is assigned inside the subshell rather than as a command prefix
+    # because bash 3.2 does not apply a prefix assignment to a builtin's
+    # locale (probed: `$(LC_ALL=C printf "%.1f" 1)` prints 1,0 under fr_FR).
+    local verdict="stale" err=""
+    if [ -n "$pid" ]; then
+        if err=$( LC_ALL=C; kill -0 "$pid" 2>&1 ); then
+            verdict="held"
+        else
+            case "$err" in
+                *"No such process"*)        verdict="stale" ;;
+                *"Operation not permitted"*) verdict="held" ;;
+                *)                           verdict="unknown" ;;
+            esac
+        fi
     fi
+    case "$verdict" in
+        held)    _doctor_ok "Integrate lock: $lock held by a running integrate (pid $pid)" ;;
+        unknown) _doctor_warn "Integrate lock: $lock records pid $pid and cs cannot tell whether it is running (${err##*: })" ;;
+        *)       _doctor_warn "Integrate lock: $lock exists with no integrate running; autosave skips while it does. Remove it with: rm -r \"$lock\"" ;;
+    esac
 }
 
 _doctor_check_session_id_match() {

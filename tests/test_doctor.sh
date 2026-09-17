@@ -1187,8 +1187,95 @@ test_doctor_names_a_stale_integrate_lock() {
         CS_CLAUDE_DIR="$TEST_TMPDIR/claude-sl" "$CS_BIN" -doctor 2>&1) || true
     assert_output_contains "$output" "$sess/.git/cs/integrate.lock" \
         "Doctor should name the stale lock by path" || return 1
-    assert_output_contains "$output" "rmdir" "and the command that clears it" || return 1
+    assert_output_contains "$output" "rm -r" "and the command that clears it" || return 1
     assert_output_contains "$output" "WARN" "a stale lock is a warning" || return 1
+}
+
+# The integrate records its pid inside the lock, and that pid is the only
+# liveness evidence doctor consults: a `pgrep` for any integrate on the machine
+# reported a fixture's orphan lock as held whenever another suite's integrate
+# happened to be running.
+test_doctor_reports_a_lock_whose_pid_is_alive_as_held() {
+    local sess="$TEST_TMPDIR/sess-livelock"
+    mkdir -p "$sess/.cs/memory"
+    git -C "$sess" init -q
+    mkdir -p "$sess/.git/cs/integrate.lock"
+    # This shell outlives the doctor run, so its pid is a live holder.
+    echo "$$" > "$sess/.git/cs/integrate.lock/pid"
+    local output
+    output=$(CLAUDE_SESSION_DIR="$sess" CLAUDE_SESSION_META_DIR="$sess/.cs" \
+        CS_CLAUDE_DIR="$TEST_TMPDIR/claude-ll" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "integrate.lock held by a running integrate (pid $$)" \
+        "a lock whose recorded pid is alive is held" || return 1
+    assert_output_not_contains "$output" "rm -r" "no removal advice for a held lock" || return 1
+}
+
+# A holder doctor cannot signal is still a holder: pid 1 exists on every
+# machine and belongs to another user, so `kill -0` answers EPERM, and EPERM
+# is a process that exists.
+test_doctor_reports_a_lock_held_by_another_users_process_as_held() {
+    local sess="$TEST_TMPDIR/sess-foreignlock"
+    mkdir -p "$sess/.cs/memory"
+    git -C "$sess" init -q
+    mkdir -p "$sess/.git/cs/integrate.lock"
+    echo 1 > "$sess/.git/cs/integrate.lock/pid"
+    local output
+    output=$(CLAUDE_SESSION_DIR="$sess" CLAUDE_SESSION_META_DIR="$sess/.cs" \
+        CS_CLAUDE_DIR="$TEST_TMPDIR/claude-fl" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "integrate.lock held by a running integrate (pid 1)" \
+        "a live process doctor cannot signal is still a holder" || return 1
+    assert_output_not_contains "$output" "rm -r" "no removal advice for a held lock" || return 1
+}
+
+# A pid the kernel refuses to answer about at all (here: one past the pid
+# range, which bash's kill rejects before the syscall) is neither held nor
+# gone; doctor must say so and must not tell the user to remove the lock.
+test_doctor_does_not_call_a_lock_stale_when_the_pid_cannot_be_checked() {
+    local sess="$TEST_TMPDIR/sess-nocheck"
+    mkdir -p "$sess/.cs/memory"
+    git -C "$sess" init -q
+    mkdir -p "$sess/.git/cs/integrate.lock"
+    echo 999999999999 > "$sess/.git/cs/integrate.lock/pid"
+    local output
+    output=$(CLAUDE_SESSION_DIR="$sess" CLAUDE_SESSION_META_DIR="$sess/.cs" \
+        CS_CLAUDE_DIR="$TEST_TMPDIR/claude-nc" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "cannot tell whether it is running" \
+        "a check with no answer is reported as unknown" || return 1
+    assert_output_not_contains "$output" "rm -r" "no removal advice on an unknown" || return 1
+    assert_output_not_contains "$output" "held by a running integrate" "and not held either" || return 1
+}
+
+test_doctor_names_a_lock_whose_pid_is_dead_as_stale() {
+    local sess="$TEST_TMPDIR/sess-deadlock"
+    mkdir -p "$sess/.cs/memory"
+    git -C "$sess" init -q
+    mkdir -p "$sess/.git/cs/integrate.lock"
+    # A pid that has exited and been reaped: nothing can be running as it.
+    sh -c 'exit 0' & local dead=$!; wait "$dead"
+    echo "$dead" > "$sess/.git/cs/integrate.lock/pid"
+    local output
+    output=$(CLAUDE_SESSION_DIR="$sess" CLAUDE_SESSION_META_DIR="$sess/.cs" \
+        CS_CLAUDE_DIR="$TEST_TMPDIR/claude-dl" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "exists with no integrate running" \
+        "a dead pid is a stale lock" || return 1
+    assert_output_contains "$output" "rm -r" "and the command that clears it" || return 1
+}
+
+# `kill -0 0` signals the caller's own process group and always succeeds, so
+# a pid file reading 0 would report a holder that can never exit. No integrate
+# records 0; a file that says so is unreadable, not a holder.
+test_doctor_does_not_treat_pid_zero_as_a_holder() {
+    local sess="$TEST_TMPDIR/sess-zerolock"
+    mkdir -p "$sess/.cs/memory"
+    git -C "$sess" init -q
+    mkdir -p "$sess/.git/cs/integrate.lock"
+    echo 0 > "$sess/.git/cs/integrate.lock/pid"
+    local output
+    output=$(CLAUDE_SESSION_DIR="$sess" CLAUDE_SESSION_META_DIR="$sess/.cs" \
+        CS_CLAUDE_DIR="$TEST_TMPDIR/claude-zl" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_not_contains "$output" "held by a running integrate" \
+        "pid 0 is not a holder" || return 1
+    assert_output_contains "$output" "integrate.lock" "the lock is still reported" || return 1
 }
 
 test_doctor_is_silent_with_no_integrate_lock() {
@@ -1202,7 +1289,12 @@ test_doctor_is_silent_with_no_integrate_lock() {
         "no lock, nothing to report" || return 1
 }
 
+run_test test_doctor_does_not_treat_pid_zero_as_a_holder
 run_test test_doctor_names_a_stale_integrate_lock
+run_test test_doctor_reports_a_lock_whose_pid_is_alive_as_held
+run_test test_doctor_reports_a_lock_held_by_another_users_process_as_held
+run_test test_doctor_does_not_call_a_lock_stale_when_the_pid_cannot_be_checked
+run_test test_doctor_names_a_lock_whose_pid_is_dead_as_stale
 run_test test_doctor_is_silent_with_no_integrate_lock
 
 report_results

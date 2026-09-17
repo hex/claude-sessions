@@ -2,7 +2,8 @@
 parent: 0643d4f0-a682-4b71-8a0c-c5bb24791f09
 created: 2026-09-17T07:46:10Z
 purpose: fix the parallel-run test races — #603 (doctor's integrate-lock vs the finish suite), #609 (tui CS_BIN stub argv), #638 (two recurring ghost flakes) — in one branch
-status: unconsumed
+status: consumed
+consumed_by: 655bde7e-d351-4345-a86e-24ba3c1e59b2
 ---
 
 ## 1. Next Step

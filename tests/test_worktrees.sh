@@ -801,6 +801,41 @@ test_integrate_refuses_foreign_live_base_lock() {
     assert_output_contains "$output" "open elsewhere" "names the live base" || return 1
 }
 
+# A TERM'd integrate runs its cleanup from the signal handler and again from
+# the EXIT trap. Between the two another integrate can take the lock, so the
+# second pass must not remove a directory it no longer owns.
+test_integrate_cleanup_releases_the_lock_only_once() {
+    local lock="$TEST_TMPDIR/cleanup-twice/integrate.lock"
+    mkdir -p "$lock"
+    echo 4242 > "$lock/pid"
+    ( source "$SCRIPT_DIR/../lib/30-worktree.sh"
+      _INTEGRATE_LOCK="$lock"; _INTEGRATE_BASE_DIR="$TEST_TMPDIR"; _INTEGRATE_TMP=""
+      _integrate_cleanup
+      [ -d "$lock" ] && { echo "  FAIL: the first pass must remove the lock"; exit 1; }
+      # The successor's lock, taken between the two passes.
+      mkdir "$lock" && echo 9999 > "$lock/pid"
+      _integrate_cleanup
+      [ -d "$lock" ] || { echo "  FAIL: the second pass removed the successor's lock"; exit 1; }
+    ) || return 1
+}
+
+# cs runs under set -e. A lock something else already removed makes the
+# handler's rm fail; that must not abort the handler before it forgets the
+# path, or the EXIT pass would remove a successor's lock.
+test_integrate_cleanup_forgets_a_lock_it_could_not_remove() {
+    local lock="$TEST_TMPDIR/cleanup-gone/integrate.lock"
+    mkdir -p "$TEST_TMPDIR/cleanup-gone"
+    ( set -e
+      source "$SCRIPT_DIR/../lib/30-worktree.sh"
+      _INTEGRATE_LOCK="$lock"; _INTEGRATE_BASE_DIR="$TEST_TMPDIR"; _INTEGRATE_TMP=""
+      _integrate_cleanup
+      [ -z "$_INTEGRATE_LOCK" ] || { echo "  FAIL: a failed rm must still forget the lock path"; exit 1; }
+      mkdir "$lock" && echo 9999 > "$lock/pid"
+      _integrate_cleanup
+      [ -d "$lock" ] || { echo "  FAIL: the second pass removed the successor's lock"; exit 1; }
+    ) || return 1
+}
+
 test_integrate_ignores_the_feature_lock() {
     # The feature session stays open: its lock is not a blocker because the
     # integrate never touches the feature worktree.
@@ -887,6 +922,8 @@ run_test test_integrate_refuses_sha_not_on_feature_branch
 run_test test_integrate_reports_already_integrated_and_does_nothing
 run_test test_integrate_refuses_dirty_base
 run_test test_integrate_refuses_foreign_live_base_lock
+run_test test_integrate_cleanup_releases_the_lock_only_once
+run_test test_integrate_cleanup_forgets_a_lock_it_could_not_remove
 run_test test_integrate_ignores_the_feature_lock
 run_test test_integrate_refuses_merge_in_progress
 run_test test_integrate_refuses_stale_mutex_and_names_it
