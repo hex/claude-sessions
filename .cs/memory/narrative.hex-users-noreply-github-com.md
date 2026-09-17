@@ -838,3 +838,20 @@ armed. All 29 other handoffs already consumed — nothing to supersede; oldest i
 (24 days), so nothing meets the >30-day prune bar either. Measured for #645: tmux-client 3,986
 files/16 MB, tmux-real 4,029/16 MB; the other buckets (git 17, org 3, term 10, rewrite-config 11)
 are keyed on repeating idents and stay small.
+
+## 2026-09-17 — #645 prune the pid-keyed statusline caches
+
+Rotation 720d4199. Alex picked "sweep in the refresher" and, on the peer's message about a
+fork-free per-second tick ("C"), confirmed it: #645 first, then design the tick with him in
+prose before code. Branch fix/prune-statusline-caches. Red test 6440f84
+(test_refresh_prunes_the_pid_keyed_caches, git/old as the untouched control) on ghost.
+Fix: a for-loop over tmux-client/tmux-real beside the refresher's three sweeps, `[ -d ] ||
+continue` so a fresh HOME never runs find on a missing path, -mmin +60 (both TTLs are far
+below an hour; a live conversation rewrites its entry on every miss). No set -e in the
+script, only pipefail. Docs row + CHANGELOG Fixes entry. lib/ untouched so build.sh is a
+no-op check.
+Red gotcha: the first ghost run on 6440f84 was 66/66 GREEN because the new test was
+defined but never registered — tests/test_statusline.sh calls `run_test <name>` explicitly,
+it does not discover functions. Amended as ccbdebc; true red: FAIL "an old tmux-client entry
+must be swept". Fix 6d38cac; ghost 66/66, prune test OK, ghost copy verified to carry the loop.
+Codex review dispatched (plugin agent, background).
