@@ -2414,21 +2414,24 @@ test_refresh_reclaims_an_abandoned_lock() {
     assert_not_exists "$CS_USAGE_DIR/.lock" "the reclaiming refresher must release the lock" || return 1
 }
 
-# The two caches keyed on the parent pid mint a new entry per conversation and
-# nothing on the render path may fork to remove them, so the refresher sweeps
-# them. Only those two: a cache keyed on a repeating identity is left alone.
+# The three caches keyed on the parent pid (tmux-client, tmux-real, tty) mint a
+# new entry per conversation and nothing on the render path may fork to remove
+# them, so the refresher sweeps them. Only those three: a cache keyed on a
+# repeating identity is left alone.
 test_refresh_prunes_the_pid_keyed_caches() {
     make_usage_shims 200 "$USAGE_BODY"
     use_scratch_usage_env
     local cache="$HOME/.cache/cs"
-    mkdir -p "$cache/tmux-client" "$cache/tmux-real" "$cache/git"
-    TZ=UTC touch -t 202608270730.00 "$cache/tmux-client/old" "$cache/tmux-real/old" "$cache/git/old"
-    touch "$cache/tmux-client/fresh" "$cache/tmux-real/fresh"
+    mkdir -p "$cache/tmux-client" "$cache/tmux-real" "$cache/tty" "$cache/git"
+    TZ=UTC touch -t 202608270730.00 "$cache/tmux-client/old" "$cache/tmux-real/old" "$cache/tty/old" "$cache/git/old"
+    touch "$cache/tmux-client/fresh" "$cache/tmux-real/fresh" "$cache/tty/fresh"
     PATH="$USAGE_BINDIR:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
     assert_not_exists "$cache/tmux-client/old" "an old tmux-client entry must be swept" || return 1
     assert_not_exists "$cache/tmux-real/old" "an old tmux-real entry must be swept" || return 1
+    assert_not_exists "$cache/tty/old" "an old tty entry must be swept" || return 1
     assert_exists "$cache/tmux-client/fresh" "a fresh tmux-client entry must survive" || return 1
     assert_exists "$cache/tmux-real/fresh" "a fresh tmux-real entry must survive" || return 1
+    assert_exists "$cache/tty/fresh" "a fresh tty entry must survive" || return 1
     assert_exists "$cache/git/old" "the sweep must not touch a cache keyed on a repeating identity" || return 1
 }
 
