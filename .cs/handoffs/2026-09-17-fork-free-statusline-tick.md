@@ -125,3 +125,56 @@ first, then design the tick with me". #645 is now done, so this is next.
   then chose polish-first at the gate; main was installed after the merge
   (`~/.local/bin/cs-statusline` byte-matches `bin/cs-statusline` on main).
 - **Context notice:** the conversation hit 40% before this rotation.
+
+## Completeness (pass one)
+
+Written from live context at ~40%, no compaction. Pass two appends the
+recoverable sections.
+
+## 4. Primary Request and Intent
+
+Woken by the rotation `.cs/handoffs/2026-09-17-prune-statusline-caches.md`
+(now `consumed`), which asked for a design for #645 with Alex's choice. Alex
+picked "Sweep in the refresher", polish-first at the merge gate, and asked for
+a local install. Then `/rotate and go`: continue with #648's design.
+
+## 5. Key Technical Concepts
+
+- The render's cost is its fork count (`docs/statusline.md:39`); caches live
+  under `~/.cache/cs/<bucket>/` as `epoch<TAB>identity` then text
+  (`_cache_read`/`_cache_write`).
+- `_refresh_usage` is the detached, mkdir-locked worker kicked from
+  `_fable_candidate`; it is the only place a slow `find` is acceptable.
+- Every suite run goes to ghost via
+  `bash ~/.claude/plugins/cache/hex-plugins/claude-tmux/2026.9.1/scripts/remote-tests.sh --host ghost@ghost </dev/null`
+  after `ssh ghost@ghost 'rm -f ci/claude-sessions/suite.status' </dev/null`;
+  poll `suite.status` in the background.
+
+## 6. Files and Code Sections
+
+- `bin/cs-statusline` `_refresh_usage` (~1134): the new sweep loop,
+  `for bucket in tmux-client tmux-real`, `-maxdepth 1 -type f -mmin +60 -delete`.
+- `tests/test_statusline.sh`: `test_refresh_prunes_the_pid_keyed_caches`
+  and its `run_test` line right after `test_refresh_reclaims_an_abandoned_lock`.
+- `docs/statusline.md` paragraph after the fork table; `CHANGELOG.md`
+  Unreleased Fixes first bullet.
+
+## 7. Pending Tasks
+
+- **#648 pending** — the subject of this handoff (design with Alex).
+- **#647 pending** — doctor warns on a deployed RETIRED_SKILLS directory.
+- **#644 pending** — integrate-lock Minors.
+- **#640 pending** — v2026.9.16 release-review Minors.
+- **#554 pending (PARKED)**, **#606 pending (POSTPONED)**.
+- #645 completed this conversation.
+
+## 8. Current Work
+
+Main is at `4142ccd`-ish (handoff commits on top of merge `1542ac1`),
+~30 commits ahead of origin, unpushed and unreleased; nothing is pushed
+without Alex. Installed cs matches main. Untracked `scratchpad/` holds the two
+install logs. No branch is open.
+
+## Completeness (pass two)
+
+Nothing cut.
