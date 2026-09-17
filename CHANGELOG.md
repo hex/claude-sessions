@@ -4,6 +4,11 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## Unreleased
+
+### Fixes
+- A headless run beside a session is not a conversation to resume. An Agent SDK call or a `claude -p` with the session as its working directory writes a transcript into the same folder as the session's own, and the launch card named it as `A newer conversation was opened here outside cs`; the orphan repair could bind a session to one. Discovery now skips a transcript that opens with an `sdk-` entrypoint and carries no other kind, while a run someone later continued with `claude --resume` stays a conversation, as does any transcript with no entrypoint or one cs does not know.
+
 ## 2026.9.16
 
 ### Changed

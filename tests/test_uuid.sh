@@ -563,6 +563,152 @@ test_resume_stays_silent_when_the_discovered_conversation_is_older() {
 
 run_test test_resume_stays_silent_when_the_discovered_conversation_is_older
 
+# The first user line of a transcript a headless run leaves in the session's
+# project dir, in the shape Claude Code 2.1.274 writes it: the prompt precedes
+# the entrypoint on the line, as it does in a real file.
+_seed_first_user_line() {  # transcript_file, entrypoint
+    printf '%s\n' '{"parentUuid":null,"isSidechain":false,"type":"user","message":{"role":"user","content":"Review this change for security vulnerabilities."},"uuid":"8f8a372f-1f5e-4db4-bad4-40c9eb1f827b","timestamp":"2030-01-01T00:00:00.000Z","permissionMode":"default","userType":"external","entrypoint":"'"$2"'","cwd":"/work","sessionId":"x","version":"2.1.274","gitBranch":"main"}' \
+        > "$1"
+}
+
+test_resume_ignores_a_newer_headless_transcript() {
+    # An Agent SDK run (`sdk-py`) or a `claude -p` (`sdk-cli`) with the session
+    # as its working directory writes a top-level transcript beside the
+    # session's own. Nobody can continue one from a terminal in any useful
+    # sense, so naming it as "a newer conversation" is a false alarm.
+    local recorded="abcd1234-5678-4abc-9def-fedcba987654"
+    local session_dir
+    session_dir=$(_seed_legacy_session "legacy-session" "$recorded")
+    _seed_claude_transcript "$session_dir" "$recorded"
+    local proj
+    proj="$CS_TRANSCRIPTS_DIR/$(_encode_cwd_for_claude_test "$session_dir")"
+
+    local sdk_run="11111111-2222-4333-8444-555555555555"
+    _seed_first_user_line "$proj/$sdk_run.jsonl" "sdk-py"
+    touch -t 203001010000 "$proj/$sdk_run.jsonl"
+    local print_run="22222222-3333-4444-8555-666666666666"
+    _seed_first_user_line "$proj/$print_run.jsonl" "sdk-cli"
+    touch -t 203001020000 "$proj/$print_run.jsonl"
+
+    local output
+    output=$("$CS_BIN" legacy-session <<< "" 2>&1) || true
+
+    assert_output_not_contains "$output" "newer conversation" \
+        "a headless run is not a conversation to continue" || return 1
+}
+
+run_test test_resume_ignores_a_newer_headless_transcript
+
+test_resume_reports_a_newer_desktop_conversation() {
+    # The other direction: `claude-desktop` is a person's conversation (what a
+    # `/desktop` handoff leaves), and so is `cli`. Skipping either would
+    # silence the notice for the very case it was written for.
+    local recorded="abcd1234-5678-4abc-9def-fedcba987654"
+    local session_dir
+    session_dir=$(_seed_legacy_session "legacy-session" "$recorded")
+    _seed_claude_transcript "$session_dir" "$recorded"
+    local proj
+    proj="$CS_TRANSCRIPTS_DIR/$(_encode_cwd_for_claude_test "$session_dir")"
+
+    local desktop="33333333-4444-4555-8666-777777777777"
+    _seed_first_user_line "$proj/$desktop.jsonl" "claude-desktop"
+    touch -t 203001010000 "$proj/$desktop.jsonl"
+
+    local output
+    output=$("$CS_BIN" legacy-session <<< "" 2>&1) || true
+    assert_output_contains "$output" "$desktop" \
+        "a desktop conversation is still named" || return 1
+
+    local terminal="44444444-5555-4666-8777-888888888888"
+    _seed_first_user_line "$proj/$terminal.jsonl" "cli"
+    touch -t 203001020000 "$proj/$terminal.jsonl"
+    output=$("$CS_BIN" legacy-session <<< "" 2>&1) || true
+    assert_output_contains "$output" "$terminal" \
+        "a terminal conversation is still named" || return 1
+}
+
+run_test test_resume_reports_a_newer_desktop_conversation
+
+test_orphan_repair_never_binds_a_headless_transcript() {
+    # The repair BINDS what discovery returns, so a headless run that happens
+    # to be newest would become the conversation `cs <name>` resumes from then
+    # on. The session's own older conversation is the one to bind.
+    local orphan="00000000-0000-4000-8000-0000000000aa"
+    local session_dir
+    session_dir=$(_seed_legacy_session "legacy-session" "$orphan")
+    local proj
+    proj="$CS_TRANSCRIPTS_DIR/$(_encode_cwd_for_claude_test "$session_dir")"
+
+    local own="abcd1234-5678-4abc-9def-fedcba987654"
+    _seed_claude_transcript "$session_dir" "$own"
+    _seed_first_user_line "$proj/$own.jsonl" "cli"
+    touch -t 200001010000 "$proj/$own.jsonl"
+
+    local sdk_run="11111111-2222-4333-8444-555555555555"
+    _seed_first_user_line "$proj/$sdk_run.jsonl" "sdk-py"
+    touch -t 203001010000 "$proj/$sdk_run.jsonl"
+
+    "$CS_BIN" legacy-session <<< "" >/dev/null 2>&1 || true
+
+    assert_eq "$own" "$(_extract_session_uuid "$session_dir/.cs/local/state")" \
+        "an orphaned slot heals to the session's own conversation, not the headless run beside it" || return 1
+}
+
+run_test test_orphan_repair_never_binds_a_headless_transcript
+
+test_a_headless_run_continued_from_a_terminal_is_a_conversation() {
+    # `claude --resume <id>` on a transcript an SDK run started makes it a
+    # person's conversation from then on: its first user line still says
+    # `sdk-py`, the lines after it say `cli`. Judging the file by its first
+    # line would hide a conversation someone has been working in.
+    local recorded="abcd1234-5678-4abc-9def-fedcba987654"
+    local session_dir
+    session_dir=$(_seed_legacy_session "legacy-session" "$recorded")
+    _seed_claude_transcript "$session_dir" "$recorded"
+    local proj
+    proj="$CS_TRANSCRIPTS_DIR/$(_encode_cwd_for_claude_test "$session_dir")"
+
+    local adopted="55555555-6666-4777-8888-999999999999"
+    _seed_first_user_line "$proj/$adopted.jsonl" "sdk-py"
+    printf '%s\n' '{"type":"assistant","message":{"content":"no findings"}}' >> "$proj/$adopted.jsonl"
+    printf '%s\n' '{"parentUuid":"a","isSidechain":false,"type":"user","message":{"role":"user","content":"carry on from here"},"userType":"external","entrypoint":"cli","cwd":"/work","sessionId":"x","version":"2.1.274"}' >> "$proj/$adopted.jsonl"
+    touch -t 203001010000 "$proj/$adopted.jsonl"
+
+    local output
+    output=$("$CS_BIN" legacy-session <<< "" 2>&1) || true
+
+    assert_output_contains "$output" "$adopted" \
+        "a run a person continued from a terminal is named like any other conversation" || return 1
+}
+
+run_test test_a_headless_run_continued_from_a_terminal_is_a_conversation
+
+test_a_later_entrypoint_shorter_than_the_prefix_still_marks_a_conversation() {
+    # The "does not start sdk-" test has to accept values the prefix test can
+    # swallow whole: the empty string, `s`, `sd`, `sdk`. A regex built from
+    # "one more character, then anything" misses exactly these.
+    local recorded="abcd1234-5678-4abc-9def-fedcba987654"
+    local session_dir
+    session_dir=$(_seed_legacy_session "legacy-session" "$recorded")
+    _seed_claude_transcript "$session_dir" "$recorded"
+    local proj
+    proj="$CS_TRANSCRIPTS_DIR/$(_encode_cwd_for_claude_test "$session_dir")"
+
+    local v n=0 uuid output
+    for v in "" s sd sdk; do
+        n=$((n+1))
+        uuid="6666666${n}-7777-4888-8999-000000000000"
+        _seed_first_user_line "$proj/$uuid.jsonl" "sdk-py"
+        printf '%s\n' '{"type":"user","message":{"role":"user","content":"more"},"entrypoint":"'"$v"'"}' >> "$proj/$uuid.jsonl"
+        touch -t "20300101000$n" "$proj/$uuid.jsonl"
+        output=$("$CS_BIN" legacy-session <<< "" 2>&1) || true
+        assert_output_contains "$output" "$uuid" \
+            "a later entrypoint of \"$v\" is not sdk-, so the file is a conversation" || return 1
+    done
+}
+
+run_test test_a_later_entrypoint_shorter_than_the_prefix_still_marks_a_conversation
+
 run_test test_launch_exports_lead_pid_of_the_claude_process
 
 test_resume_launch_exports_lead_pid_as_the_parent() {

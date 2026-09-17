@@ -478,8 +478,8 @@ EOF
                 _newest=$(_discover_session_uuid_in "$_proj")
                 # "Newer" is a claim about the clock, so check it rather than
                 # infer it from "discovery returned something else". Discovery
-                # skips teammates, so when the recorded slot is itself a
-                # teammate's — the state this gate exists to stop — what comes
+                # skips teammates and headless runs, so when the recorded slot
+                # is itself a teammate's — the state this gate exists to stop — what comes
                 # back is genuinely OLDER, and announcing it as newer would be
                 # a lie built on a correct skip.
                 if [ -n "$_newest" ] && [ "$_newest" != "$claude_session_id" ] \
