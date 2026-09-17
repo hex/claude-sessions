@@ -786,13 +786,15 @@ test('a /wrap the answer runs that the engine refuses is said once', async () =>
 // one, and the next prompt entering the conversation clears it. A summary
 // written any other way (a standalone /summary) proves nothing.
 const WRAPPED = '/work/.cs/local/wrapped'
+const submit = (text: string, turnId?: string) => hooks['prompt.submit']($, { text, turnId }, async (e: any) => e)
+const wrapStarts = () => hooks['command.run:wrap']($, { command: 'wrap', args: '' }, async () => ({ text: '' }))
 test('a finished wrap hides the wrap key until the next prompt clears the marker', async () => {
   percent = 40
   files[WRAPPED] = 'uuid-lead\n'
   expect(wrapButton(await band())).toBeUndefined()
   expect(findButton(await band()).props.hotkey).toBe('1')
 
-  await hooks['prompt.submit']($, { prompt: 'next thing' }, async (e: any) => e)
+  await submit('next thing')
   expect(files[WRAPPED]).toBe('')
   expect(wrapButton(await band())).toBeDefined()
 })
@@ -803,8 +805,44 @@ test('a summary with no wrap marker, or a marker naming another conversation, ke
   expect(wrapButton(await band())).toBeDefined()
   files[WRAPPED] = 'uuid-teammate\n'
   expect(wrapButton(await band())).toBeDefined()
-  await hooks['prompt.submit']($, { prompt: 'x' }, async (e: any) => e)
+  await submit('x')
   expect(files[WRAPPED]).toBe('uuid-teammate\n')
+})
+
+
+// A prompt queued while the wrap runs is work the wrap never saw: the marker
+// Pass 4 writes afterwards must not hide the key over it.
+test('a prompt queued during a wrap keeps the wrap key once the marker lands', async () => {
+  percent = 40
+  await wrapStarts()
+  await submit('and then fix the tests', 'turn-wrap')
+  files[WRAPPED] = 'uuid-lead\n'
+  expect(wrapButton(await band())).toBeDefined()
+})
+
+test('a wrap started after earlier prompts, from the band or typed, still hides the key when it finishes', async () => {
+  percent = 40
+  await submit('hi')
+  await wrapStarts()
+  files[WRAPPED] = 'uuid-lead\n'
+  expect(wrapButton(await band())).toBeUndefined()
+
+  files[WRAPPED] = ''
+  await submit('more work')
+  await submit('/wrap')
+  files[WRAPPED] = 'uuid-lead\n'
+  expect(wrapButton(await band())).toBeUndefined()
+})
+
+// A wrap run inside the turn an idle prompt started (asked for in words, run
+// as a skill) reaches no command hook: the marker still hides the key, and a
+// queued prompt that already ran stops counting once the next idle prompt comes.
+test('an idle prompt followed by a wrap no command hook saw still hides the key', async () => {
+  percent = 40
+  await submit('queued earlier', 'turn-old')
+  await submit('please wrap up this session')
+  files[WRAPPED] = 'uuid-lead\n'
+  expect(wrapButton(await band())).toBeUndefined()
 })
 
 test('an armed handoff draws the clear key alone: no wrap key', async () => {

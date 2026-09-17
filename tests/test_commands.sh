@@ -389,23 +389,26 @@ test_release_verifies_ci_workflow() {
 echo "Running test_commands.sh"
 echo ""
 
-# /wrap's last pass marks the conversation it wrapped, so the rotate band stops
+# /wrap's last pass marks the conversation it ran in, so the rotate band stops
 # offering a wrap that already finished. The command is run exactly as the file
-# spells it, against a state line quoted and unquoted, because the band compares
-# the marker byte for byte with the conversation id.
+# spells it. It writes the running conversation's own id (a teammate's wrap
+# names the teammate, never the lead), and with no id to write it writes nothing
+# and still succeeds, since a wrap outside Claude Code has no band to hide.
 test_wrap_marks_the_wrapped_conversation() {
-    local block dir state
+    local block dir
     block=$(awk '/^## Pass 4/{p=1; next} /^## /{p=0} p && /^```/{f=!f; next} p && f' "$COMMANDS_DIR/wrap.md")
     [ -n "$block" ] || { echo "  FAIL: wrap.md has no Pass 4 command block"; return 1; }
-    for state in 'claude_session_id: 11111111-2222-4333-8444-555555555555' \
-                 'claude_session_id: "11111111-2222-4333-8444-555555555555"  '; do
-        dir="$TEST_TMPDIR/wrapped.$RANDOM"
-        mkdir -p "$dir/.cs/local"
-        printf 'claude_session_color: red\n%s\nlast_resumed: 2026-09-17\n' "$state" > "$dir/.cs/local/state"
-        (cd "$dir" && bash -c "$block") || { echo "  FAIL: the Pass 4 command failed"; return 1; }
-        assert_eq "11111111-2222-4333-8444-555555555555" "$(cat "$dir/.cs/local/wrapped")" \
-            "the marker names the lead conversation from state: $state" || return 1
-    done
+    dir="$TEST_TMPDIR/wrapped"
+    mkdir -p "$dir/.cs/local"
+    printf 'claude_session_id: 99999999-9999-4999-8999-999999999999\n' > "$dir/.cs/local/state"
+    (cd "$dir" && CLAUDE_CODE_SESSION_ID=11111111-2222-4333-8444-555555555555 bash -c "$block") \
+        || { echo "  FAIL: the Pass 4 command failed"; return 1; }
+    assert_eq "11111111-2222-4333-8444-555555555555" "$(cat "$dir/.cs/local/wrapped")" \
+        "the marker names the conversation the wrap ran in, not the state's lead" || return 1
+    rm -f "$dir/.cs/local/wrapped"
+    (cd "$dir" && env -u CLAUDE_CODE_SESSION_ID bash -c "$block") \
+        || { echo "  FAIL: the Pass 4 command must succeed with no conversation id"; return 1; }
+    assert_not_exists "$dir/.cs/local/wrapped" "no id, no marker" || return 1
 }
 
 run_test test_checkpoint_allowed_tools_hyphenated

@@ -27,10 +27,10 @@ Run `cs -narrative rotate` once and keep its single output line. It archives the
 Run this once, from the session root, only after the three passes above completed:
 
 ```sh
-awk -F': *' '/^claude_session_id:/ { gsub(/"|[ \t]+$/, "", $2); print $2 }' .cs/local/state > .cs/local/wrapped
+[ -z "$CLAUDE_CODE_SESSION_ID" ] || printf '%s\n' "$CLAUDE_CODE_SESSION_ID" > .cs/local/wrapped
 ```
 
-It names the conversation this wrap finished in, so the cs-rotate band stops offering `2: wrap up this session` until the next prompt. Skip it if any pass failed: a wrap that did not finish should stay one key away.
+It names the conversation this wrap finished in (its own id, so a teammate's wrap never marks the lead), so the cs-rotate band stops offering `2: wrap up this session` until the next prompt. Skip it if any pass failed: a wrap that did not finish should stay one key away.
 
 ## Report
 

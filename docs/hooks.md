@@ -306,11 +306,14 @@ engine's own AskUserQuestion dialog — `Run /wrap for this session?`, with
 and each repeat re-opens the same question rather than answering it; a
 dismissed dialog, and a `-p` run with nobody to ask, run nothing and say
 nothing. A wrap that finished leaves the key nothing to do: `/wrap`'s last
-pass writes `.cs/local/wrapped` naming the lead conversation, and while it
-names this one the band draws the rotate key alone. The next prompt entering
-the conversation empties it and the wrap key comes back. A summary written any
-other way, a standalone `/summary` included, hides nothing, and a wrap that
-fails a pass skips the marker. Below the band the mod draws nothing, and it draws nothing while a
+pass writes `.cs/local/wrapped` with the id of the conversation it ran in
+(`CLAUDE_CODE_SESSION_ID`, so a teammate's wrap never marks the lead), and
+while it names this one the band draws the rotate key alone. The next prompt
+entering the conversation empties it and the wrap key comes back. A prompt
+queued over the running wrap (typed mid-turn) is work the wrap never saw, so
+the marker that lands after it hides nothing. A summary written any other way,
+a standalone `/summary` included, hides nothing, and a wrap that fails a pass
+skips the marker. Below the band the mod draws nothing, and it draws nothing while a
 turn runs or while a survey holds the band. It never submits a prompt of its
 own.
 
