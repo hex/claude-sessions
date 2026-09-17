@@ -114,7 +114,7 @@ test_no_surface_tells_a_resume_to_read_every_narrative() {
 test_no_writer_pipes_into_grep_q() {
     local writers='(printf|echo)' sink='grep -q'
     local hits
-    hits=$(grep -rnE "$writers[^|]*\| *$sink" \
+    hits=$(grep -rnE "${writers}[^|]*\| *${sink}" \
         "$REPO/tests" "$REPO/hooks" "$REPO/lib" "$REPO/bin" "$REPO/mods" 2>/dev/null \
         | grep -vE ':[0-9]+: *#' | grep -v ' sh -c ' || true)
     if [ -n "$hits" ]; then
@@ -129,7 +129,7 @@ test_no_writer_pipes_into_grep_q() {
     # cannot quietly rewrite the canary and leave the test passing on nothing.
     local canary
     canary=$(printf '%s | %s' '    if echo "$output"' 'grep -q "x"; then')
-    grep -qE "$writers[^|]*\| *$sink" <<< "$canary" || {
+    grep -qE "${writers}[^|]*\| *${sink}" <<< "$canary" || {
         echo "  FAIL: the search no longer matches a known-bad line"
         return 1
     }
