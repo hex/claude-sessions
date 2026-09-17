@@ -1158,7 +1158,7 @@ run_test test_doctor_is_quiet_when_the_session_clone_has_the_merge_driver
 # `cs <base> -integrate-feature` takes <git-dir>/cs/integrate.lock and the
 # autosave hook skips its snapshot while it exists. A lock left behind by a
 # killed integrate would silence autosave forever, with nothing to say why.
-test_doctor_names_a_stale_integrate_lock() {
+test_doctor_names_a_lock_with_no_recorded_pid_as_unknown() {
     local sess="$TEST_TMPDIR/sess-stalelock"
     mkdir -p "$sess/.cs/memory"
     git -C "$sess" init -q
@@ -1167,9 +1167,12 @@ test_doctor_names_a_stale_integrate_lock() {
     output=$(CLAUDE_SESSION_DIR="$sess" CLAUDE_SESSION_META_DIR="$sess/.cs" \
         CS_CLAUDE_DIR="$TEST_TMPDIR/claude-sl" "$CS_BIN" -doctor 2>&1) || true
     assert_output_contains "$output" "$sess/.git/cs/integrate.lock" \
-        "Doctor should name the stale lock by path" || return 1
-    assert_output_contains "$output" "rm -r" "and the command that clears it" || return 1
-    assert_output_contains "$output" "WARN" "a stale lock is a warning" || return 1
+        "Doctor should name the lock by path" || return 1
+    assert_output_contains "$output" "no holder pid" \
+        "a lock with no pid is reported as one cs cannot judge" || return 1
+    assert_output_not_contains "$output" "rm -r" \
+        "and carries no removal advice: the autosave hook takes this same lock and records no pid, and removing it does not stop its worker" || return 1
+    assert_output_contains "$output" "WARN" "still a warning" || return 1
 }
 
 # The integrate records its pid inside the lock, and that pid is the only
@@ -1195,6 +1198,20 @@ test_doctor_reports_a_lock_whose_pid_is_alive_as_held() {
 # machine and belongs to another user, so `kill -0` answers EPERM, and EPERM
 # is a process that exists.
 test_doctor_reports_a_lock_held_by_another_users_process_as_held() {
+    # The fixture is pid 1, which exists everywhere and belongs to root. As
+    # root, though, `kill -0 1` SUCCEEDS, and doctor then answers through the
+    # same "held" wording by the ordinary arm -- green without ever reaching
+    # the EPERM branch this test exists for. So the fixture is checked first,
+    # and a run that cannot produce EPERM skips loudly instead of passing.
+    local err
+    if err=$( LC_ALL=C; kill -0 1 2>&1 ); then
+        echo "    SKIP: pid 1 is signalable here, so EPERM cannot be exercised"
+        return 77
+    fi
+    case "$err" in
+        *"Operation not permitted"*) ;;
+        *) echo "    SKIP: pid 1 answered '${err##*: }', not EPERM"; return 77 ;;
+    esac
     local sess="$TEST_TMPDIR/sess-foreignlock"
     mkdir -p "$sess/.cs/memory"
     git -C "$sess" init -q
@@ -1203,7 +1220,11 @@ test_doctor_reports_a_lock_held_by_another_users_process_as_held() {
     local output
     output=$(CLAUDE_SESSION_DIR="$sess" CLAUDE_SESSION_META_DIR="$sess/.cs" \
         CS_CLAUDE_DIR="$TEST_TMPDIR/claude-fl" "$CS_BIN" -doctor 2>&1) || true
-    assert_output_contains "$output" "integrate.lock held by a running integrate (pid 1)" \
+    # The suffix is what separates this branch from the plain success arm: a
+    # test that asserted only the shared "held" text would pass either way.
+    assert_output_contains "$output" "signalling it is not permitted here" \
+        "a holder doctor may not signal is named as such" || return 1
+    assert_output_contains "$output" "integrate.lock held by a running integrate (pid 1;" \
         "a live process doctor cannot signal is still a holder" || return 1
     assert_output_not_contains "$output" "rm -r" "no removal advice for a held lock" || return 1
 }
@@ -1237,9 +1258,11 @@ test_doctor_names_a_lock_whose_pid_is_dead_as_stale() {
     local output
     output=$(CLAUDE_SESSION_DIR="$sess" CLAUDE_SESSION_META_DIR="$sess/.cs" \
         CS_CLAUDE_DIR="$TEST_TMPDIR/claude-dl" "$CS_BIN" -doctor 2>&1) || true
-    assert_output_contains "$output" "exists with no integrate running" \
-        "a dead pid is a stale lock" || return 1
-    assert_output_contains "$output" "rm -r" "and the command that clears it" || return 1
+    assert_output_contains "$output" "cannot see" \
+        "a pid this process cannot see is reported as that, not as proof the lock is dead" || return 1
+    assert_output_contains "$output" "nothing is using this checkout" \
+        "removal is conditioned on the person confirming it" || return 1
+    assert_output_contains "$output" "rm -r" "and the command is still named" || return 1
 }
 
 # `kill -0 0` signals the caller's own process group and always succeeds, so
@@ -1271,7 +1294,7 @@ test_doctor_is_silent_with_no_integrate_lock() {
 }
 
 run_test test_doctor_does_not_treat_pid_zero_as_a_holder
-run_test test_doctor_names_a_stale_integrate_lock
+run_test test_doctor_names_a_lock_with_no_recorded_pid_as_unknown
 run_test test_doctor_reports_a_lock_whose_pid_is_alive_as_held
 run_test test_doctor_reports_a_lock_held_by_another_users_process_as_held
 run_test test_doctor_does_not_call_a_lock_stale_when_the_pid_cannot_be_checked

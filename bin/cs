@@ -6305,10 +6305,18 @@ _doctor_check_integrate_lock() {
     [ -d "$lock" ] || return 0
     # The integrate writes its pid into the lock; that pid is the evidence, not
     # a process listing, which would answer for any integrate on the machine.
-    # The autosave hook's sub-second hold of the same directory records no
-    # pid, so a doctor run inside that window reads it as stale. A recycled
-    # pid reads a stale lock as held; the process listing answered for any
-    # integrate anywhere, which was worse.
+    #
+    # A lock with no pid is not a stale lock. The autosave hook takes this same
+    # directory and records nothing in it, for as long as a snapshot takes (its
+    # registration allows ten seconds), so a doctor run inside that window sees
+    # exactly this. Removing it would not stop that worker either: it would let
+    # an integrate take the directory while autosave keeps committing, which is
+    # the interleaving the lock exists to prevent. So an absent pid is reported
+    # as a thing cs cannot judge, and carries no removal command.
+    # (The worker cannot simply record its own pid: on stock bash 3.2 `$$`
+    # inside the backgrounded subshell is the parent, which has already exited,
+    # and BASHPID does not exist there — cs would write a pid that is dead on
+    # arrival and doctor would call a live worker stale.)
     local pid
     pid=$(cat "$lock/pid" 2>/dev/null || true)
     case "$pid" in
@@ -6323,22 +6331,26 @@ _doctor_check_integrate_lock() {
     # it is assigned inside the subshell rather than as a command prefix
     # because bash 3.2 does not apply a prefix assignment to a builtin's
     # locale (probed: `$(LC_ALL=C printf "%.1f" 1)` prints 1,0 under fr_FR).
-    local verdict="stale" err=""
+    local verdict="unrecorded" err=""
     if [ -n "$pid" ]; then
         if err=$( LC_ALL=C; kill -0 "$pid" 2>&1 ); then
             verdict="held"
         else
             case "$err" in
                 *"No such process"*)        verdict="stale" ;;
-                *"Operation not permitted"*) verdict="held" ;;
+                *"Operation not permitted"*) verdict="eperm" ;;
                 *)                           verdict="unknown" ;;
             esac
         fi
     fi
     case "$verdict" in
         held)    _doctor_ok "Integrate lock: $lock held by a running integrate (pid $pid)" ;;
+        eperm)   _doctor_ok "Integrate lock: $lock held by a running integrate (pid $pid; signalling it is not permitted here, which is a process that exists)" ;;
         unknown) _doctor_warn "Integrate lock: $lock records pid $pid and cs cannot tell whether it is running (${err##*: })" ;;
-        *)       _doctor_warn "Integrate lock: $lock exists with no integrate running; autosave skips while it does. Remove it with: rm -r \"$lock\"" ;;
+        # ESRCH is absence only in this process's pid namespace, and pids are
+        # recycled, so the removal stays conditional on what the person can see.
+        stale)   _doctor_warn "Integrate lock: $lock records pid $pid, which this process cannot see; the lock is probably stale. Autosave skips while it exists. Once nothing is using this checkout, clear it with: rm -r \"$lock\"" ;;
+        *)       _doctor_warn "Integrate lock: $lock has no holder pid, so cs cannot tell an active autosave or integrate from a lock left behind. Autosave skips while it exists. Recheck once nothing is working in this checkout." ;;
     esac
 }
 
