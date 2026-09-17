@@ -794,6 +794,42 @@ test_budget_of_one_millisecond_expires() {
     assert_output_not_contains "$ctx" "Scope (auto-grounded)" "and the scan did not run" || return 1
 }
 
+# A clock that ticks in whole seconds cannot judge a sub-second budget. The
+# first tick reads as a full 1000 ms although the hook may have spent almost
+# nothing, and the check is `-ge`, so even a 1000 ms budget would skip on that
+# one boundary; only the 1500 ms default sits above a single tick. On such a
+# shell a positive budget under a second takes the default, and the skip line
+# quotes the budget actually used. Needs a bash without $EPOCHREALTIME
+# (macOS's /bin/bash 3.2); elsewhere there is nothing to measure.
+test_sub_second_budget_is_the_default_on_a_second_resolution_clock() {
+    local slow
+    if [ -x /bin/bash ] && [ -z "$(/bin/bash -c 'printf %s "${EPOCHREALTIME:-}"')" ]; then
+        slow=/bin/bash
+    else
+        echo "    SKIP: no bash without \$EPOCHREALTIME here"
+        return 77
+    fi
+    seed_repo "src/api.ts"
+    local in
+    in=$(printf '%s' "fix the handler in src/api.ts" | jq -Rs '{prompt: ., hook_event_name: "UserPromptSubmit", session_id: "sid-test"}')
+    # The trace names the budget the run settled on, so the normalisation is
+    # judged directly: waiting for a tick to land inside the front half would
+    # be a test that usually measures nothing.
+    CS_SCOPE_BUDGET_MS=500 "$slow" "$HOOK" <<< "$in" >/dev/null 2>&1
+    assert_output_contains "$(_trace_stages)" "budget=1500" "a 500 ms budget takes the default on a whole-second clock" || return 1
+    assert_output_not_contains "$(_trace_stages)" "budget=500" "and the sub-second value is not kept" || return 1
+    # The zero stub is not a budget to raise: it still skips every prompt.
+    local ctx
+    ctx=$(additional_context "$(CS_SCOPE_BUDGET_MS=0 "$slow" "$HOOK" <<< "$in" 2>/dev/null)")
+    assert_output_contains "$ctx" "Scope: skipped, slow machine" "a zero budget still skips" || return 1
+    # On a shell with a sub-millisecond clock the same budget is kept as given.
+    if [ -n "${EPOCHREALTIME:-}" ]; then
+        rm -f "$(_trace_file)"
+        CS_SCOPE_BUDGET_MS=500 bash "$HOOK" <<< "$in" >/dev/null 2>&1
+        assert_output_contains "$(_trace_stages)" "budget=500" "a fine clock judges the budget as written" || return 1
+    fi
+}
+
 # The digest's surface-once budget is spent only by a delivered emission: an
 # emission the hook could not write leaves the cursor where it was, on the
 # deadline exit as on the others. Stdout is CLOSED here (`>&-`), which jq
@@ -1040,6 +1076,7 @@ run_test test_budget_exhausted_skips_the_scan_and_keeps_the_rest
 run_test test_budget_within_runs_the_scan
 run_test test_budget_garbage_is_the_default
 run_test test_budget_of_one_millisecond_expires
+run_test test_sub_second_budget_is_the_default_on_a_second_resolution_clock
 run_test test_failed_emission_leaves_the_digest_cursor_unspent
 
 report_results

@@ -464,6 +464,16 @@ _BUDGET_MS="${CS_SCOPE_BUDGET_MS:-1500}"
 # 0100 is a hundred milliseconds rather than an invalid octal — and the note
 # below quotes the number the hook actually used.
 case "$_BUDGET_MS" in ''|*[!0-9]*|????????*) _BUDGET_MS=1500 ;; *) _BUDGET_MS=$(( 10#$_BUDGET_MS )) ;; esac
+# A shell without $EPOCHREALTIME counts in whole seconds, so the first tick
+# after the hook started reads as 1000 ms however little was spent, and the
+# check below is `-ge`: any budget at or under a tick would drop the scan on
+# that boundary alone. Only the default sits above one tick, so a positive
+# sub-second budget takes it. Zero is left alone: it is the always-skip stub,
+# not a duration.
+if [ -z "${EPOCHREALTIME:-}" ] && [ "$_BUDGET_MS" -gt 0 ] && [ "$_BUDGET_MS" -lt 1000 ]; then
+    _BUDGET_MS=1500
+fi
+_trace "budget=$_BUDGET_MS"
 _now_ms
 _ELAPSED_MS=$(( _MS - _T0 ))
 if [ "$_ELAPSED_MS" -ge "$_BUDGET_MS" ]; then
