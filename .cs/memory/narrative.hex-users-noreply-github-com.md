@@ -1114,3 +1114,31 @@ red, underpaint off → 2 red. The lab page itself was not reopened in Chrome.
   contract says so; if it does not, the failure is benign (key reappears after a wrap, the old
   behaviour), not a false hide. Lesson: when inference over a stream of events keeps leaking, look
   for the boundary event the engine already defines instead of reconstructing it.
+
+## 2026-09-17 — the wrap key survives a Stop-hook continuation (MEASURED)
+
+Throwaway `wk-live` on 2.1.274, `CS_ROTATE_BUTTON_CTX=1`, launched through
+`CLAUDE_CODE_BIN='claude --settings <probe>'` so a probe Stop hook could be
+added without touching the real hook set. The probe blocks exactly ONE Stop:
+it writes the session_id from its own stdin JSON into `.cs/local/wrapped` —
+what `/wrap`'s pass 4 does — and returns `{decision:"block"}`. That is the
+real shape (marker written mid-turn, Stop feedback continues the turn), and it
+costs no Opus passes.
+
+- After the blocked Stop and its continuation turn (the model replied
+  `continued`, so the continuation really ran): marker still equals the
+  session id, band reads ` 1: rotate this conversation` ALONE. So a
+  continuation does NOT arrive as `turn.start` with non-empty text — the
+  claim #652 rested on holds live.
+- Control in the same run: one typed prompt (`Reply with the single word
+  control.`) emptied the marker and the band came back as
+  ` 1: rotate this conversation  ·  2: wrap up this session`. Without this
+  arm the first result would prove nothing (a marker never read is also a
+  marker never cleared).
+- Driver + four pane captures: `scratchpad/wk-live/` (drive2.sh, drive.log,
+  cap-*.txt, stop-once.sh, settings.json).
+- Two traps re-hit: the band does not draw before a conversation's first turn
+  (`context.percent` is undefined, the mod returns early), so a driver must
+  take a turn before it waits for the band; and editing a driver script while
+  bash is still reading it is the known mid-run edit hazard — the first run
+  was killed by pid and re-run from a copy.
