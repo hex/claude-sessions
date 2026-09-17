@@ -855,3 +855,5 @@ defined but never registered — tests/test_statusline.sh calls `run_test <name>
 it does not discover functions. Amended as ccbdebc; true red: FAIL "an old tmux-client entry
 must be swept". Fix 6d38cac; ghost 66/66, prune test OK, ghost copy verified to carry the loop.
 Codex review dispatched (plugin agent, background).
+
+Rotated at ~40%: handoff 2026-09-17-fork-free-statusline-tick.md (#648 design), armed. #645 merged 1542ac1 and installed; no other unconsumed handoffs; none past the 30-day prune bar.
