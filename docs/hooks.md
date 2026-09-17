@@ -351,6 +351,16 @@ timer, because a timer started before a `/clear` keeps firing after one
 own rule (frontmatter opened and closed by `---`, `status: unconsumed`
 inside), so a truncated handoff is never cleared into.
 
+The first grace of a session (a load of the mod) also opens a pane, titled
+`Handoff`, beside the band: the handoff's `Next Step` section, up to twelve
+lines, and the same count beneath it, so the twenty seconds are spent reading
+what the next conversation will do. The pane carries no keys; stopping the
+count stays on the band. It closes wherever the count ends: a press, a prompt,
+a `/clear`, or zero. Later graces in the same session keep to the band. A pane
+a mod opens on its own is not drawn below 144 terminal columns (110 once you
+have opened it yourself), so on a narrower terminal the band's count is all
+there is.
+
 Pick the percentage above a fresh conversation's own footprint. The wake turn
 after the `/clear` is an ordinary turn, and the once-per-conversation record
 belongs to the conversation that ended, so a threshold a fresh conversation
