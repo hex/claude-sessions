@@ -36,7 +36,7 @@ Segment icons are standard Unicode glyphs (the context pie `○ ◔ ◑ ◕ ●`
 
 ## Data sources and performance
 
-The render's cost is its fork count. The bar repaints once a second (`refreshInterval: 1`, so the Claude mark can pulse), and on a loaded machine every external command costs what the scheduler charges (measured at 0.3 s per fork at load 25); a render that forks a dozen commands runs past the limit Claude Code gives a status line and the tick is killed. So a warm render forks exactly two: the interpreter and one `jq` pass over stdin (a bash without a builtin clock, macOS's stock 3.2, adds one `date`). Everything else it needs is a builtin read of a small file, and every other fork sits behind a cache or a cadence:
+The render's cost is its fork count. The bar repaints once a second (`refreshInterval: 1`, so the Claude mark can pulse), and on a loaded machine every external command costs what the scheduler charges (measured at 0.3 s per fork at load 25); a render that forks a dozen commands runs past the limit Claude Code gives a status line and the tick is killed. So a warm render runs one program: a single `jq` pass over stdin (a bash without a builtin clock, macOS's stock 3.2, adds one `date`). The count an endpoint agent charges for is a little higher than that, because a command substitution is itself a process: measured on a quiet machine, three per warm render on bash 5 (this script, the substitution's shell, `jq`) and five on 3.2. Everything else the render needs is a builtin read of a small file, and every other fork sits behind a cache or a cadence:
 
 | Fork | Kept | Where | Comes back |
 |------|------|-------|-----------|

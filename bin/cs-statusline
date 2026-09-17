@@ -113,6 +113,25 @@ _sl_parent_pid() {
     esac
 }
 
+# This render's own terminal device, in _OWN_TTY, empty when it has none.
+# `tty` is a program, so asking it once a second costs a process a second in
+# every open session; the answer is the terminal Claude Code is attached to,
+# which is the same for every render of a conversation, so it is cached by the
+# same parent identity the tmux caches use. An entry expires with the pid it is
+# keyed on becoming plausibly reusable, not with the terminal, which is why the
+# age is the tmux ancestry cache's rather than a terminal session's.
+OWN_TTY_MAX_AGE=300
+_sl_own_tty() {
+    _OWN_TTY=""
+    _sl_parent_pid
+    if _cache_read tty "$_PARENT" "$OWN_TTY_MAX_AGE"; then
+        _OWN_TTY="$_CACHE_TEXT"
+        return 0
+    fi
+    _OWN_TTY=$(tty 2>/dev/null) || _OWN_TTY=""
+    _cache_write tty "$_PARENT" "$_OWN_TTY"
+}
+
 # Resolve SL_THEME for this render. CS_TERM_THEME set on its own (no
 # CS_TERM_THEME_AUTO marker) is an explicit user pin (see `cs -help`) and wins.
 # When launch auto-detected the theme it exports CS_TERM_THEME plus the
@@ -295,7 +314,8 @@ _sl_theme_from_client_cache() {
         _sl_tmux_client
         tty="${_TMUX_CLIENT_TTY:-}"
     else
-        tty=$(tty 2>/dev/null) || return 1
+        _sl_own_tty
+        tty="${_OWN_TTY:-}"
     fi
     [ -n "$tty" ] || return 1
     key=${tty#/dev/}; key=${key//\//-}
@@ -469,7 +489,9 @@ _parse_stdin() {
     local input="$1" fields
     command -v jq >/dev/null 2>&1 || return 1
     [ -n "$input" ] || return 1
-    fields=$(printf '%s' "$input" | jq -r '
+    # A here-string, not a `printf |` pipe: each side of a pipeline is its own
+    # process, so the pipe cost two births a second on top of jq's.
+    fields=$(jq -r '
         [ (.session_id // ""),
           (.session_name // ""),
           (.context_window.used_percentage // "" | tostring),
@@ -482,7 +504,7 @@ _parse_stdin() {
           (.rate_limits.seven_day.resets_at // "" | tostring),
           (.cost.total_cost_usd // "" | tostring),
           (.workspace.current_dir // .cwd // "")
-        ] | .[]' 2>/dev/null) || return 1
+        ] | .[]' <<< "$input" 2>/dev/null) || return 1
     {
         IFS= read -r SL_SESSION_ID
         IFS= read -r SL_SESSION
@@ -1163,14 +1185,15 @@ _refresh_usage() {
     # And any lock a reclaim renamed aside but could not remove; -type f above
     # never matches a directory, so nothing else would ever clear these.
     find "$dir" -maxdepth 1 -type d -name '.lock.reclaimed.*' -mmin +5 -exec rm -rf {} + 2>/dev/null
-    # The two render caches keyed on the parent pid mint an entry per
+    # The render caches keyed on the parent pid mint an entry per
     # conversation, so they track conversations-ever. An entry an hour old is
-    # far past both TTLs (5 s, 300 s) and already a miss, so removing it costs
+    # far past every one of their TTLs (5 s, 300 s) and already a miss, so
+    # removing it costs
     # at most one recomputation, whether its conversation is gone or only
     # idle. The render never forks to sweep, so this worker does it. The other
     # buckets are keyed on identities that repeat and stay small.
     local bucket
-    for bucket in tmux-client tmux-real; do
+    for bucket in tmux-client tmux-real tty; do
         [ -d "$HOME/.cache/cs/$bucket" ] || continue
         find "$HOME/.cache/cs/$bucket" -maxdepth 1 -type f -mmin +60 -delete 2>/dev/null
     done
@@ -1834,16 +1857,13 @@ _bg_shade() {
 # installer asks once and records the answer in the per-machine caps file
 # (`cs -statusline caps` rewrites it). CS_STATUSLINE_CAPS=1/0 in the
 # environment overrides the file either way. Unanswered means square ends.
-_caps_file() {
-    printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/cs/statusline-caps"
-}
+CAPS_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/cs/statusline-caps"
 _caps_wanted() {
     case "${CS_STATUSLINE_CAPS:-}" in
         1) return 0 ;;
         0) return 1 ;;
     esac
-    local f answer=""
-    f=$(_caps_file)
+    local f="$CAPS_FILE" answer=""
     # A regular, readable file only: a directory at the path would print "Is a
     # directory" on every repaint, and a broken symlink is no answer either.
     [ -f "$f" ] && [ -r "$f" ] && { IFS= read -r answer < "$f"; } 2>/dev/null
