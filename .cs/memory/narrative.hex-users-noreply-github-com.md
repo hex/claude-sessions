@@ -739,3 +739,28 @@ Rotated: handoff 2026-09-17-parallel-test-races.md (two passes, c9624d1 +
 nothing old enough to prune. Note for the prune step: its `[[ "$a" < "$b" ]]`
 date comparison is a bash construct and the Bash tool runs zsh, which rejects
 it with "condition expected: <" — run that loop through /bin/bash.
+
+## 2026-09-17 — fix/parallel-test-races (#609, #603, #638)
+
+#609 root cause was not a thread outliving its test: every cs fork in the tui
+is synchronous. `enter_runs_the_action_belonging_to_the_highlighted_row`
+presses Enter on EVERY menu row (Archive and Secrets included) with no env lock
+and no CS_BIN, so it forks whatever stub a concurrent test set — and with no
+stub, the real `cs -archive alpha` against the dev's sessions. Pair repro
+24/30 red → 0/30. The in-flight preview test (red under --test-threads=1) is a
+second mechanism: the render re-request queues a fresh read to the same
+worker and under load both land in one drain, the fresh one cached
+legitimately; 1/25 red with six `yes` hogs → 0/25 after hand-feeding the stale
+result on a test-owned channel (mutation of the generation check goes red).
+Commit ec9388e.
+
+#603: integrate writes `$$` into `<lock>/pid`; doctor tests that pid with
+kill -0 instead of a machine-global pgrep; the lock is no longer empty so
+cleanup and the doctor hint use `rm -r`. Autosave's own sub-second hold still
+records nothing and rmdirs.
+
+#638 measured on ghost (macOS 26.6.2, bash 5.3.9, 16 cores): bash's builtin
+printf into an early-exiting `grep -q` exits 0 even at 300 KB, so the
+run_all tally flake is NOT the pipefail/SIGPIPE class; mechanism still open,
+both flaky tests now dump `$out` on failure so the next ghost failure carries
+its evidence.
