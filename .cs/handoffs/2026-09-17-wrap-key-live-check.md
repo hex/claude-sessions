@@ -119,3 +119,69 @@ Then: #640 (four Minors from the v2026.9.16 release review), pending.
 
 Written from live context at ~75%, no compaction. Pass two appends the
 recoverable sections.
+
+## 4. Primary Request and Intent
+
+The conversation started from `.cs/handoffs/2026-09-17-release-2026-9-17.md`
+to run `/release`. Alex's decisions at the gates: push 66 commits ("Push
+now"), approve notes ("Approve"), hold the tag for Fable ("Hold for Fable
+review"), then "Run /wrap".
+
+After the wrap Alex asked "why du still have to conform the wrap?". I
+explained the two sources (my wrap-cue question, then the band's `2` dialog)
+and offered to file the band gap beside #652. Alex answered **"do them both
+now"**: #652's five minors plus the wrap-key fix. At the merge gate he picked
+"Codex review first", later "Finish here first" at the 65% nudge, and finally
+"Merge + install, then rotate".
+
+## 5. Key Technical Concepts
+
+- cs-rotate is a Claude Code function-hooks mod (TypeScript in the engine).
+  Its unit tests use a fake engine (`mods/cs-rotate/test/register.test.ts`);
+  only `claude plugin validate` computes the real hook/call inventory, which
+  `tests/test_mod_rotate.sh` pins by string.
+- `run_test` (`tests/test_lib.sh`) counts status 77 as skipped. Any other 0
+  is a pass, so a SKIP that returns 0 is a silent pass.
+- `$.fs` has no delete: the mod "clears" the marker by writing `''`.
+- The band draws only for the lead conversation (`ownsRotation` compares
+  `$.session.id()` with state's `claude_session_id`).
+
+## 6. Files and Code Sections
+
+On main, `git log --oneline 4a44aff..2d7b3aa` (release onward):
+- `mods/cs-rotate/hooks/register.tsx`: `WRAPPED = '.cs/local/wrapped'`;
+  `on('turn.start')` → `if (e.text !== '') await clearWrapped($)`;
+  `wrapFinished` (marker === session id) gates the `2` key; `openPreview`
+  closes a pane that lands after its count ended.
+- `commands/wrap.md`: `## Pass 4 — Mark the wrap finished` runs
+  `[ -z "$CLAUDE_CODE_SESSION_ID" ] || printf '%s\n' "$CLAUDE_CODE_SESSION_ID" > .cs/local/wrapped`.
+  `tests/test_commands.sh` `test_wrap_marks_the_wrapped_conversation` runs
+  that exact block with and without the var.
+- `tests/test_docs.sh`: `_skips_that_pass` + `test_no_skip_counts_as_a_pass`.
+- `tests/test_lib.sh`: `report_results` prints `, N skipped` only when N > 0
+  (tests in `tests/test_harness.sh`).
+- `tests/test_statusline.sh`: prune test covers `tty/`.
+- `bin/cs-statusline`: `_sl_own_tty` comment.
+- Docs: `docs/hooks.md`, `docs/session-layout.md` (`wrapped` row), README,
+  CHANGELOG `## Unreleased`.
+
+## 7. Pending Tasks
+
+Native list (session-keyed, inherited):
+- **#640 pending**: v2026.9.16 release-review Minors (four).
+- **#554 pending (PARKED)**, **#606 pending (POSTPONED)**.
+- #651 (release 2026.9.17) and #652 (minors + wrap key) completed.
+- Not in the list: the live measurement in Next Step.
+
+## 8. Current Work
+
+Branch `fix/release-minors-wrap-key` fast-forwarded into main at `2d7b3aa`
+and deleted. `./build.sh`, `./install.sh` exit 0, installed `cs` byte-matches
+`bin/cs`, `wrap.md` and the mod byte-match their deployed copies, doctor
+drift OK. Main is ahead of origin by the post-release commits: nothing pushed
+since the v2026.9.17 release. Summary `.cs/summary.md` was written at the
+earlier wrap and does not cover this branch; the narrative does.
+
+## Completeness (pass two)
+
+Nothing cut.
