@@ -949,7 +949,7 @@ const PRESETS=[
  {name:"Band fill",why:"the fill is the band itself: amber at warn, red at crit, coral when armed",cfg:{border:"none",fill:"band",inks:"bar",hk:"plain",gauge:"pie",mark:true,caps:true}},
  {name:"Meter",why:"ten cells instead of a pie, the number kept",cfg:{border:"round",fill:"none",inks:"bar",hk:"plain",gauge:"cells",mark:true,caps:false}},
  {name:"Raster meter",why:"a Raster instead of glyphs: any color per cell, repaintable with blit",cfg:{border:"round",fill:"none",inks:"bar",hk:"plain",gauge:"raster",mark:true,caps:false}},
- {name:"Bare line",why:"no box at all: mark, underlined hotkey, gauge; least chrome",cfg:{border:"none",fill:"none",inks:"bar",hk:"under",gauge:"pie",mark:true,caps:false}},
+ {name:"Bare line",why:"no box at all: mark, underlined hotkey, gauge; least chrome \u2014 but the hand-drawn hotkey is refused in practice: see the JSX",cfg:{border:"none",fill:"none",inks:"bar",hk:"under",gauge:"pie",mark:true,caps:false}},
  {name:"Bold frame",why:"heavy border in the band colour, label alone",cfg:{border:"bold",fill:"none",inks:"bar",hk:"box",gauge:"number",mark:false,caps:false}},
  {name:"Button",why:"the surface's own [ label ] button, no styling",cfg:{border:"none",fill:"none",inks:"theme",hk:"button",gauge:"off",mark:false,caps:false}},
 ];
@@ -1006,7 +1006,7 @@ function rjsx(c){
   const lbl=c.armed?"/clear and continue from the handoff":c.label;
   const hk=c.hk==="button"?`<Button key="cs-rotate" hotkey="1" label="${lbl}" onPress={press} />`
     :c.hk==="plain"?`<Button key="cs-rotate" hotkey="1" plain label="${lbl}" onPress={press} />`
-    :`<Text color=${c.inks==="bar"?"{HOT}":"'suggestion'"} ${c.hk==="under"?"underline ":""}bold>1</Text><Text> ${lbl}</Text>  {/* hotkey drawn by hand; Button still owns the press */}\n    <Button key="cs-rotate" hotkey="1" plain label="" onPress={press} />`;
+    :`<Text color=${c.inks==="bar"?"{HOT}":"'suggestion'"} ${c.hk==="under"?"underline ":""}bold>1</Text><Text> ${lbl}</Text>\n    <Button key="cs-rotate" hotkey="1" plain label="" onPress={press} />\n    {/* REFUSED as drawn: a plain Button prints "1: " even with an empty label (measured on 2.1.273), so this draws the hotkey twice. Let the engine draw it, or draw it by hand and give the press to something that is not a Button. */}`;
   const gauge=c.gauge==="off"?"":c.gauge==="pie"?`\n    <Text dimColor>{'  ·  '}</Text><Text color={${band}} bold>{\`\${pie(percent, bands)} ctx \${percent}%\`}</Text>`
     :c.gauge==="cells"?`\n    <Text dimColor>{'  ·  '}</Text><Text color={${band}}>{'█'.repeat(n)}</Text><Text dimColor>{'░'.repeat(10-n)}</Text><Text bold> {percent}%</Text>`
     :c.gauge==="raster"?`\n    <Text dimColor>{'  ·  '}</Text><Raster key="ctx-meter" columns={20} rows={1} cells={meterCells(percent)} /><Text color={${band}} bold> {percent}%</Text>  {/* $.ui.blit repaints it */}`

@@ -55,15 +55,6 @@ const DRAWN = { type: 'Survey', props: {}, children: [] }
 const band = (props: Partial<{ isWorking: boolean; hasSurvey: boolean }> = {}) =>
   hooks['ui.render:AbovePrompt']($, { props: { isWorking: false, hasSurvey: false, ...props } }, async () => DRAWN)
 
-// The wording left the buttons when the hotkeys were drawn by hand, so the
-// assertions read the text the band draws, in order, the way a person sees it.
-const drawnText = (node: any): string => {
-  if (node === null || node === undefined || node === false) return ''
-  if (typeof node === 'string' || typeof node === 'number') return String(node)
-  if (Array.isArray(node)) return node.map(drawnText).join('')
-  return drawnText(node.children)
-}
-
 function buttons(tree: any): any[] {
   if (!tree || typeof tree !== 'object') return []
   if (tree.type === 'Button') return [tree]
@@ -158,13 +149,13 @@ test('at the threshold the band adds the rotate key on hotkey 1, first, beneath 
   const button = findButton(tree)
   expect(button.props.hotkey).toBe('1')
   expect(button.props.plain).toBe(true)
-  // The hotkey is drawn by hand so it reads as "1 label", underlined, with no
-  // colon; the button carries no label of its own and only owns the press.
-  expect(button.props.label).toBe('')
+  // The engine draws the hotkey itself, as "1: label", and it draws that
+  // prefix even for an empty label (measured live), so the wording stays on
+  // the button rather than being spelled beside it.
+  expect(button.props.label).toBe('rotate this conversation')
   const json1 = JSON.stringify(tree)
   expect(json1).toContain('"Survey"')
-  expect(json1).toContain('"color":"suggestion","underline":true,"bold":true},"children":["1"]')
-  expect(json1).toContain('" rotate this conversation"')
+  expect(json1).not.toContain('"children":["1"]')
   expect(json1).not.toContain('borderStyle')
 })
 
@@ -273,11 +264,10 @@ test('an armed handoff turns the button into the clear button, whatever the cont
     const button = findButton(tree)
     expect(button.props.hotkey).toBe('1')
     expect(button.props.plain).toBe(true)
-    expect(drawnText(tree)).toContain('/clear and continue from the handoff')
+    expect(findButton(tree).props.label).toBe('/clear and continue from the handoff')
     const json = JSON.stringify(tree)
     expect(json).not.toContain('borderStyle')
-    // The border carried the armed coral; with the bare line the label does.
-    expect(json).toContain(`{"color":"${INK.coral}"},"children":[" /clear and continue from the handoff"]`)
+    expect(json).not.toContain('borderColor')
     expect(json).not.toContain('undefined')
     if (p === undefined) expect(json).not.toContain('%')
     else expect(json).toContain(`ctx ${p}%`)
@@ -316,7 +306,7 @@ test('a marker naming a handoff that is gone, consumed, or outside the store doe
   arm(); files[MARKER] = '../local/state\n'
   expect(await band()).toBe(DRAWN)
   percent = 40
-  expect(drawnText(await band())).toContain('rotate this conversation')
+  expect(findButton(await band()).props.label).toBe('rotate this conversation')
 })
 
 test('an empty marker names no handoff, so the band behaves as unarmed', async () => {
@@ -324,7 +314,7 @@ test('an empty marker names no handoff, so the band behaves as unarmed', async (
   percent = 39
   expect(await band()).toBe(DRAWN)
   percent = 40
-  expect(drawnText(await band())).toContain('rotate this conversation')
+  expect(findButton(await band()).props.label).toBe('rotate this conversation')
 })
 
 test('session.start writes a heartbeat under the session meta dir', async () => {
@@ -760,7 +750,7 @@ test('at the threshold the band adds a second button on hotkey 2 that reads as t
   expect(buttons(tree)[0].props.hotkey).toBe('1')
   const button = wrapButton(tree)
   expect(button.props.plain).toBe(true)
-  expect(drawnText(tree)).toContain(' wrap up this session')
+  expect(wrapButton(tree).props.label).toBe('wrap up this session')
 })
 
 test('an armed handoff draws the clear key alone: no wrap key', async () => {
@@ -776,15 +766,15 @@ test('the wrap key needs two keys: 2 arms it for a moment and runs nothing, 3 wh
   expect(ran).toEqual([])
   expect(invalidated).toEqual(['ui.render'])
   let tree = await band()
-  expect(drawnText(tree)).toContain(' wrap up this session?')
+  expect(wrapButton(tree).props.label).toBe('wrap up this session?')
   expect(confirmButton(tree).props.plain).toBe(true)
-  expect(drawnText(tree)).toContain(' yes, run /wrap')
+  expect(confirmButton(tree).props.label).toBe('yes, run /wrap')
   await confirmButton(tree).props.onPress()
   expect(ran).toEqual([{ command: 'wrap', args: '' }])
   expect(filled).toEqual([])
   // Disarmed by the run: the wrap key is back and 3 presses nothing.
   tree = await band()
-  expect(drawnText(tree)).toContain(' wrap up this session')
+  expect(wrapButton(tree).props.label).toBe('wrap up this session')
   expect(confirmButton(tree)).toBeUndefined()
 })
 
@@ -796,7 +786,7 @@ test('an armed wrap key disarms on its own after a moment, and a press then only
   expect(t).toBeDefined()
   expect(t!.ms).toBe(5000)
   t!.fn()
-  expect(drawnText(await band())).toContain(' wrap up this session')
+  expect(wrapButton(await band()).props.label).toBe('wrap up this session')
   expect(confirmButton(await band())).toBeUndefined()
   await wrapButton(await band()).props.onPress()
   expect(ran).toEqual([])

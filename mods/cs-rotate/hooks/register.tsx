@@ -162,26 +162,20 @@ export function register(on: On) {
         {drawn}
         <Box>
           <Box key="cs-rotate-band" paddingX={1}>
-            {/* The hotkey is drawn by hand so it reads as "1 label", underlined
-                and in the engine's own hotkey ink, with no colon. The button
-                beside it carries no label and owns nothing but the press. */}
-            <Text color="suggestion" underline bold>1</Text>
-            {/* the border carried the armed coral; the bare line's label does */}
+            {/* The engine draws a plain button as "1: label", and it draws
+                that prefix whether or not the label is empty (measured live:
+                a hand-drawn digit beside an empty-label button prints the
+                hotkey twice), so the label stays on the button. */}
             {armed
-              ? <Text color={INK.coral}>{' /clear and continue from the handoff'}</Text>
-              : <Text>{' rotate this conversation'}</Text>}
-            {armed
-              ? <Button key="cs-rotate" hotkey="1" plain label="" onPress={() => clearAndContinue($)} />
-              : <Button key="cs-rotate" hotkey="1" plain label="" onPress={() => rotate($)} />}
+              ? <Button key="cs-rotate" hotkey="1" plain label="/clear and continue from the handoff"
+                        onPress={() => clearAndContinue($)} />
+              : <Button key="cs-rotate" hotkey="1" plain label="rotate this conversation"
+                        onPress={() => rotate($)} />}
             {/* a Button is a block: nested in a Text the engine refuses the whole tree (measured), so the separator stands beside it */}
             {!armed && <Text dimColor>{'  \u00b7  '}</Text>}
-            {!armed && <Text color="suggestion" underline bold>2</Text>}
-            {!armed && <Text>{wrapArmed ? ' wrap up this session?' : ' wrap up this session'}</Text>}
-            {!armed && <Button key="cs-wrap" hotkey="2" plain label="" onPress={() => armWrap($)} />}
+            {!armed && <Button key="cs-wrap" hotkey="2" plain label={wrapArmed ? 'wrap up this session?' : 'wrap up this session'} onPress={() => armWrap($)} />}
             {!armed && wrapArmed && <Text dimColor>{'  \u00b7  '}</Text>}
-            {!armed && wrapArmed && <Text color="suggestion" underline bold>3</Text>}
-            {!armed && wrapArmed && <Text> yes, run /wrap</Text>}
-            {!armed && wrapArmed && <Button key="cs-wrap-confirm" hotkey="3" plain label="" onPress={() => runWrap($)} />}
+            {!armed && wrapArmed && <Button key="cs-wrap-confirm" hotkey="3" plain label="yes, run /wrap" onPress={() => runWrap($)} />}
             {/* the forced rotation's grace: the seconds left before the mod runs the /clear itself */}
             {armed && left !== undefined && (
               <Text><Text dimColor>{'  \u00b7  '}</Text><Text color={INK.coral} bold>{`/clear in ${left}s`}</Text></Text>
