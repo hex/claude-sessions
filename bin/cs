@@ -6302,27 +6302,35 @@ _doctor_check_integrate_lock() {
     # The autosave hook's sub-second hold of the same directory records no
     # pid, so a doctor run inside that window reads it as stale. A recycled
     # pid reads a stale lock as held; the process listing answered for any
-    # integrate anywhere, which was worse. `ps -p`, not `kill -0`: a holder
-    # owned by another user answers EPERM to kill and would read as stale.
+    # integrate anywhere, which was worse.
     local pid
     pid=$(cat "$lock/pid" 2>/dev/null || true)
     case "$pid" in
         *[!0-9]*|"") pid="" ;;
     esac
-    # ps exits 1 for a pid that does not exist; any other failure (a denied
-    # exec, a restricted process listing) means the answer is unknown, and an
-    # unknown must not come with removal advice.
-    local ps_rc=0
+    # kill -0 through the shell builtin, not ps: kill(2) sees a process that a
+    # restricted /proc hides from ps, and its errno tells a holder owned by
+    # another user (EPERM) from a pid that is gone (ESRCH). Only ESRCH is
+    # evidence of absence; anything else the check cannot read is unknown,
+    # and an unknown must not come with removal advice. LC_ALL=C pins the
+    # message the builtin prints, which is the only channel for the errno.
+    local verdict="stale" err=""
     if [ -n "$pid" ]; then
-        "${CS_PS_BIN:-ps}" -p "$pid" >/dev/null 2>&1 || ps_rc=$?
+        if err=$(LC_ALL=C kill -0 "$pid" 2>&1); then
+            verdict="held"
+        else
+            case "$err" in
+                *"No such process"*)        verdict="stale" ;;
+                *"Operation not permitted"*) verdict="held" ;;
+                *)                           verdict="unknown" ;;
+            esac
+        fi
     fi
-    if [ -n "$pid" ] && [ "$ps_rc" -eq 0 ]; then
-        _doctor_ok "Integrate lock: $lock held by a running integrate (pid $pid)"
-    elif [ -n "$pid" ] && [ "$ps_rc" -ne 1 ]; then
-        _doctor_warn "Integrate lock: $lock records pid $pid but ps could not check it (exit $ps_rc); remove the lock only once no cs is running"
-    else
-        _doctor_warn "Integrate lock: $lock exists with no integrate running; autosave skips while it does. Remove it with: rm -r \"$lock\""
-    fi
+    case "$verdict" in
+        held)    _doctor_ok "Integrate lock: $lock held by a running integrate (pid $pid)" ;;
+        unknown) _doctor_warn "Integrate lock: $lock records pid $pid and cs cannot tell whether it is running (${err##*: })" ;;
+        *)       _doctor_warn "Integrate lock: $lock exists with no integrate running; autosave skips while it does. Remove it with: rm -r \"$lock\"" ;;
+    esac
 }
 
 _doctor_check_session_id_match() {
