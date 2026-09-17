@@ -1142,3 +1142,53 @@ costs no Opus passes.
   take a turn before it waits for the band; and editing a driver script while
   bash is still reading it is the known mid-run edit hazard — the first run
   was killed by pid and re-run from a copy.
+
+## 2026-09-17 — #640, the four v2026.9.16 review minors (fix/v2026.9.16-minors)
+
+Alex: "You run all" — run the live check myself and take #640 in the same
+pass. Six commits, each red-first.
+
+1. **Wrapping decimals (a class, swept).** `_narrative_budget` and
+   `_num_or` accepted 20 digits, which bash wraps to 7766279631452241919:
+   rotation never fired, and the same wrap through `CS_ROTATE_NUDGE_CTX`
+   silenced the rotate nudge. Both take 16+ digits as the default now. The
+   advisor was right that two sites is not the class: `bin/cs-statusline`
+   carried two more. Its own `_num_or` already caps at three digits, but a
+   `Retry-After` header of twenty digits became a backoff centuries out —
+   **one hostile or broken 429 would have ended usage polling on the machine
+   for good** — and `CS_STATUSLINE_NOW` wrapped the same way. Both bounded to
+   15 digits; the Retry-After case has its own red-first test. `lib/75-launch.sh`
+   and `lib/45-migrate.sh` read values cs itself wrote and are left alone.
+2. **pr_checks all-skipped.** Every check skipped classified as `success`,
+   so `/finish` passed `--ci-green` and skipped the gate on a tree CI never
+   ran. `success` now needs one real SUCCESS; all-skipped is `none`.
+3. **Scope budget on a whole-second clock.** My first design (floor the
+   budget at 1000) was wrong and the advisor caught it before it shipped: the
+   check is `-ge` and a single tick reads 1000, so a 1000 ms budget still
+   skips on one boundary. A positive sub-second budget takes the 1500 ms
+   default instead — the only value above one tick. Zero stays the
+   always-skip stub the suite uses as its clock.
+   The first two tests I wrote for this were **vacuous**: on a second-clock
+   shell the elapsed reading is usually 0, so the run never reached the
+   branch and passed with or without a fix. The third judges the
+   normalisation directly through a new `budget=<n>` trace stage, and was red
+   before the fix.
+4. **Spawn seed write.** `{...} > tmp && mv` is an AND list, which errexit
+   does not judge, so a failed write opened the window anyway and left the
+   staged brief for the next spawn of that name to inherit. Now it aborts and
+   removes the brief. Two traps here: my first fixture (a directory at
+   `$seed.tmp`) made `rm -f` fail INSIDE the `||` group, and errexit ended the
+   shell before `error` printed — the test passed on the exit status while
+   the diagnostic was lost (reproduced standalone). Fixture is a 0444 file
+   now and the test asserts the message; mutating the message text turns it
+   red.
+
+Suites: test_narrative_rotate 50/50, test_rotation 104/104, test_finish_script
+24/24, test_spawn 38/38, test_scope_prompt 52/52, test_statusline 236/236.
+CI's shellcheck line (`-S error` over tracked .sh plus the four bin scripts)
+exits 0. Docs: `docs/configuration.md` and `docs/hooks.md` now state the
+clock-resolution rule; CHANGELOG has all five entries.
+
+Not yet done: the full suite (ghost is still unreachable; the handoff says
+not to run a full local suite without Alex's say), a Codex adversarial pass
+(dispatched), and the merge gate, which is Alex's.
