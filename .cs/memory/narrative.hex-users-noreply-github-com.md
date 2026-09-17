@@ -1050,3 +1050,67 @@ red, underpaint off → 2 red. The lab page itself was not reopened in Chrome.
   Rebuilt bin/cs, install.sh, hooks/cs-shared.sh from a `git archive` of the sha: byte-identical.
   Most useful minor: test_mod_rotate.sh and test_mods_layout.sh `return 0` without bun — the vacuous
   pass the 77-as-skipped change was built to close, missed by that same change's own sweep.
+
+- 2026-09-17 (after the wrap): Alex asked why he had to confirm the wrap twice. Two sources: my
+  CLAUDE.local.md "Wrap up?" cue, then the band's `2` dialog. The real gap was that the band
+  offered a wrap straight after one finished. Built on fix/release-minors-wrap-key (7 commits,
+  unmerged): the wrap key hides while `.cs/summary.md` mtime > the last prompt.submit time (set to
+  the band's first draw in a load), via `$.fs.stat().mtimeMs` and `$.clock.now()`, both in the
+  2.1.274 contract. Why prompt.submit and not turn end: a /wrap run from the band is command.run
+  (no prompt), a typed /wrap submits before the summary is written, and Stop-hook feedback turns
+  are not prompts — so all three leave it hidden and only a real prompt brings it back.
+- #652's "bun-absent return 0" was a CLASS of 27 sites in 14 suites, not two: echo SKIP + return 0
+  (same or next line), `_deny_writes ... || return 0` (5), `[ "$rc" = "2" ] && return 0` (3) and a
+  `case $? in 2) return 0`. All now 77; test_docs.sh `test_no_skip_counts_as_a_pass` guards the
+  five shapes with a runtime-assembled canary (zero written as `$((1 - 1))`). Diff verified as
+  exactly 27 `return 0` -> `return 77`.
+- Mutation-command trap in the Bash tool (zsh): a `sed -i ''` + subshell `bun test | grep` chain
+  reported the mutation count then silently stopped, and the file was left unmutated — a green run
+  would have been vacuous. perl -0pi with `git diff --stat` shown before the test run is the
+  reliable form (`project_verify_mutation_landed`).
+- 2026-09-17: full gate on the branch: shellcheck lane clean, run_all 66/67. The one red was
+  test_mod_rotate.sh's `claude plugin validate` inventory pin — `$.ui.close (via stopCountdown)`
+  became `(via openPreview, stopCountdown)` with the pane fix. A stale pin, not a regression; the
+  bun unit tests cannot see it because only the real validator computes the call graph. Pin
+  updated plus a new `$.fs.stat (via wrappedSincePrompt)` pin; suite 6/6. No test skipped on this
+  machine. Alex chose a Codex review before merging; launched with scope pinned and /tmp granted.
+- 2026-09-17 CORRECTION to my entry above ("the wrap key hides while .cs/summary.md mtime > the
+  last prompt.submit time"): superseded. Codex (medium, reproduced against the render hook) showed
+  mtime is not proof of a finished wrap — a standalone /summary writes the same file and hid the
+  key; a teammate write, a future-dated or lagging mtime, and a reload all misclassified. Replaced
+  by an explicit completion marker: commands/wrap.md Pass 4 runs
+  `awk -F': *' '/^claude_session_id:/ { gsub(/"|[ \t]+$/, "", $2); print $2 }' .cs/local/state > .cs/local/wrapped`
+  only after the three passes succeed; the mod hides the key while the marker equals
+  $.session.id() and prompt.submit empties it when it names this conversation ($.fs has no delete,
+  so it writes ''). No clock anywhere. Lesson: an artifact's timestamp is not an event record —
+  when the UI must know an action completed, have the action write a record of its own completion.
+  Known limit kept: a teammate's /wrap writes the lead's id (the only id in state). Codex closure
+  pass running.
+- 2026-09-17 CORRECTION to my entry above ("Pass 4 runs awk ... claude_session_id ... .cs/local/state"):
+  superseded after Codex closure pass 1 (two mediums, both reproduced against the hooks): a
+  teammate's /wrap copied the LEAD's id from state and hid the lead's key; a prompt queued mid-wrap
+  (submitted before Pass 4) left the key hidden after the queued work ran. Now Pass 4 writes
+  `$CLAUDE_CODE_SESSION_ID` (nothing when unset). MEASURED in this conversation's Bash tool:
+  CLAUDE_CODE_SESSION_ID == the live conversation id and == state's claude_session_id AFTER a /clear
+  rotation; CS_CLAUDE_SESSION_ID != it (the stale launch id, as project_cs_claude_session_id_is_launch_id
+  says). So a Bash tool can learn its own conversation id from CLAUDE_CODE_SESSION_ID. The mod's
+  prompt.submit now reads `e.turnId` (contract: present only for a prompt typed over / delivered into
+  a running turn): a non-/wrap prompt with turnId sets promptSinceWrap; an idle prompt, a /wrap prompt,
+  command.run{wrap}, or emptying our own marker clears it; the key hides only when marker ==
+  $.session.id() and !promptSinceWrap. The turnId rule (not "any prompt") keeps the case Alex actually
+  hit working: a wrap run as a skill inside an idle prompt's turn reaches no command.run hook.
+  Mod 71/71, command tests 47/47 on bash 5 + 3.2, mutation red. Full suite + Codex closure pass 2 running.
+- 2026-09-17 CORRECTION to my previous entry ("prompt.submit reads e.turnId ... promptSinceWrap"):
+  superseded after Codex closure pass 2 (two more mediums, reproduced): a failed second wrap
+  re-hid the key off the FIRST wrap's marker (command.run cleared the flag, not the marker), and
+  turnId is also attached to peer/plugin deliveries and to mid-turn requests already consumed, so a
+  Skill-run wrap after a mid-turn request stayed visible. Three rounds of inferring "was there work
+  after the wrap" from prompt events each leaked. Replaced with the contract's own boundary:
+  `turn.start` (TurnStartInput.text is "" for a turn started without a prompt, "e.g. a
+  continuation") — a turn.start with non-empty text empties a marker naming this conversation.
+  promptSinceWrap, notePrompt and the command.run{wrap} hook are gone; the marker read/clear is two
+  small functions. Mod 69/69; two mutations red (never clear; clear on continuations too).
+  UNMEASURED LIVE: that a Stop-hook feedback continuation arrives as turn.start with text "" — the
+  contract says so; if it does not, the failure is benign (key reappears after a wrap, the old
+  behaviour), not a false hide. Lesson: when inference over a stream of events keeps leaking, look
+  for the boundary event the engine already defines instead of reconstructing it.
