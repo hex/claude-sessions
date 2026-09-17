@@ -20,7 +20,9 @@ unset CLAUDE_PROJECT_DIR CS_ACTOR 2>/dev/null || true
 TESTS_RUN=0
 TESTS_PASSED=0
 TESTS_FAILED=0
+TESTS_SKIPPED=0
 FAILURES=()
+SKIPS=()
 
 # --- Paths ---
 # SCRIPT_DIR must be set by the sourcing test file before calling any helpers
@@ -234,14 +236,23 @@ teardown() {
 
 # --- Test Runner ---
 
+# Status 77 is "skipped", not "passed": a test whose fixture the machine cannot
+# produce (a privilege it does not have, a kernel answer it cannot provoke) has
+# proven nothing, and counting it as OK is how missing coverage hides. The test
+# says why on its way out; the tally keeps skips in their own column so a run
+# that skips everything cannot read as a green one.
 run_test() {
-    local test_name="$1"
+    local test_name="$1" status=0
     TESTS_RUN=$((TESTS_RUN + 1))
     echo "  $test_name..."
     setup
-    if "$test_name" 2>&1; then
+    "$test_name" 2>&1 || status=$?
+    if [ "$status" -eq 0 ]; then
         TESTS_PASSED=$((TESTS_PASSED + 1))
         echo "    OK"
+    elif [ "$status" -eq 77 ]; then
+        TESTS_SKIPPED=$((TESTS_SKIPPED + 1))
+        SKIPS+=("$test_name")
     else
         TESTS_FAILED=$((TESTS_FAILED + 1))
         FAILURES+=("$test_name")
@@ -253,7 +264,13 @@ run_test() {
 
 report_results() {
     echo ""
-    echo "Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed"
+    echo "Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed${TESTS_SKIPPED:+, $TESTS_SKIPPED skipped}"
+    if [[ ${#SKIPS[@]} -gt 0 ]]; then
+        echo "Skipped tests:"
+        for s in "${SKIPS[@]}"; do
+            echo "  - $s"
+        done
+    fi
     if [[ ${#FAILURES[@]} -gt 0 ]]; then
         echo "Failed tests:"
         for f in "${FAILURES[@]}"; do
