@@ -114,10 +114,12 @@ _sl_parent_pid() {
 }
 
 # This render's own terminal device, in _OWN_TTY, empty when it has none.
-# `tty` is a program, so asking it once a second costs a process a second in
-# every open session; the answer is the terminal Claude Code is attached to,
-# which is the same for every render of a conversation, so it is cached by the
-# same parent identity the tmux caches use. An entry expires with the pid it is
+# `tty` names the terminal on stdin, and Claude Code runs the render with the
+# JSON payload piped to stdin, so under Claude Code the answer is always empty
+# (`not a tty`) and only a render started from a shell gets a device. The
+# answer is the same for every render of a conversation either way, and `tty`
+# is a program, so asking it once a second costs a process a second in every
+# open session: it is cached by the same parent identity the tmux caches use. An entry expires with the pid it is
 # keyed on becoming plausibly reusable, not with the terminal, which is why the
 # age is the tmux ancestry cache's rather than a terminal session's.
 OWN_TTY_MAX_AGE=300
