@@ -2461,6 +2461,33 @@ CURL
         "Retry-After must be honoured with a 60s margin (900+60) over the 600s floor" || return 1
 }
 
+# A Retry-After too long for the shell's arithmetic wraps to a positive number
+# centuries away, and cs would never poll usage again. A header cs cannot judge
+# takes the floor, the same answer as a header that is not a number at all.
+test_refresh_ignores_an_overflowing_retry_after() {
+    use_scratch_usage_env
+    local bindir="$TEST_TMPDIR/bin"; mkdir -p "$bindir"
+    cat > "$bindir/security" <<'SEC'
+#!/bin/bash
+printf '%s\n' '{"claudeAiOauth":{"accessToken":"test-token-not-real"}}'
+SEC
+    cat > "$bindir/curl" <<CURL
+#!/bin/bash
+cat > /dev/null
+hdr=""
+while [ \$# -gt 0 ]; do
+    case "\$1" in -D) hdr="\$2"; shift 2 ;; *) shift ;; esac
+done
+[ -n "\$hdr" ] && printf 'HTTP/2 429\r\nretry-after: 99999999999999999999\r\n\r\n' > "\$hdr"
+printf '429'
+CURL
+    chmod +x "$bindir/security" "$bindir/curl"
+    export CS_SECURITY_BIN="$bindir/security"
+    PATH="$bindir:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
+    assert_eq "1787816600" "$(jq -r '.next_poll_at' "$CS_USAGE_DIR/fable.org-abc.json")" \
+        "an unusable Retry-After falls back to the 600s floor" || return 1
+}
+
 run_test test_refresh_writes_fable_window
 run_test test_refresh_keeps_token_off_argv
 run_test test_refresh_429_backs_off_and_keeps_last_good
@@ -2470,6 +2497,7 @@ run_test test_refresh_respects_a_held_lock
 run_test test_refresh_reclaims_an_abandoned_lock
 run_test test_refresh_prunes_the_pid_keyed_caches
 run_test test_refresh_honours_retry_after
+run_test test_refresh_ignores_an_overflowing_retry_after
 
 # Seed a cache record and a Claude config naming account "org-abc".
 # $1 org, $2 pct, $3 resets_at, $4 fetched_at, $5 next_poll_at.

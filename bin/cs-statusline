@@ -45,7 +45,10 @@ _sl_now() {
     # Normalize to canonical base-10: a leading-zero value (e.g. a pin of 08) is
     # read as octal by bash arithmetic and aborts on an 8/9 digit. 10# forces
     # base-10 so the countdown, stamp, and pulse all get a safe integer.
-    if [[ "${_NOW:-}" =~ ^[0-9]+$ ]]; then _NOW=$((10#$_NOW)); else _NOW=""; fi
+    # Fifteen digits at most, for the reason the Retry-After branch gives: a
+    # longer value wraps past 64 bits and every clock reading built on it is
+    # wrong. An unusable stamp is no stamp.
+    if [[ "${_NOW:-}" =~ ^[0-9]{1,15}$ ]]; then _NOW=$((10#$_NOW)); else _NOW=""; fi
 }
 
 # --- render caches ----------------------------------------------------------
@@ -1336,8 +1339,11 @@ EOF
             # producer, which under `set -o pipefail` reports failure.
             ra=$(tr -d '\r' < "$hdr" | awk 'tolower($1)=="retry-after:"{v=$2} END{print v}') || ra=""
             # 10# forces base 10: a zero-padded value would otherwise be read
-            # as octal by $(( )) and abort the arithmetic on an 8 or 9.
-            if [[ "${ra:-}" =~ ^[0-9]+$ ]] && [ $(( 10#$ra + 60 )) -gt "$wait" ]; then
+            # as octal by $(( )) and abort the arithmetic on an 8 or 9. At most
+            # fifteen digits: a longer header wraps past 64 bits to a positive
+            # number centuries out, and cs would never poll again. A header cs
+            # cannot judge takes the floor, like one that is not a number.
+            if [[ "${ra:-}" =~ ^[0-9]{1,15}$ ]] && [ $(( 10#$ra + 60 )) -gt "$wait" ]; then
                 wait=$(( 10#$ra + 60 ))
             fi
         fi

@@ -151,7 +151,7 @@ run_spawn() {
             local _t
             for _t in ${tasks[@]+"${tasks[@]}"}; do printf '%s\n' "$_t"; done
         } > "$seed.tmp" && mv "$seed.tmp" "$seed" \
-            || { rm -f "$seed.tmp" "$sdir/$name.brief.md"; error "cs -spawn: cannot stage the seed in $sdir"; }
+            || { rm -f "$seed.tmp" "$sdir/$name.brief.md" 2>/dev/null || :; error "cs -spawn: cannot stage the seed in $sdir"; }
     fi
     _spawn_window "$name"
 }

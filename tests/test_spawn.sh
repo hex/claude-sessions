@@ -169,15 +169,18 @@ test_spawn_failed_brief_copy_publishes_no_seed() {
 
 # The mirror case: the brief copied but the seed could not be written. The
 # spawn must abort with nothing left behind, or a later spawn of the same name
-# with no --brief inherits this one's brief. A directory in the seed's tmp
-# place makes the write fail with the directory still writable.
+# with no --brief inherits this one's brief.
 test_spawn_failed_seed_write_stages_nothing() {
     printf 'brief body\n' > "$TEST_TMPDIR/brief.md"
-    mkdir -p "$CS_SESSIONS_ROOT/.spawn" "$(SEED).tmp"
-    local rc=0
-    "$CS_BIN" -spawn worker --brief "$TEST_TMPDIR/brief.md" >/dev/null 2>&1 && rc=1
-    rmdir "$(SEED).tmp" 2>/dev/null
+    mkdir -p "$CS_SESSIONS_ROOT/.spawn"
+    # A read-only file in the seed's tmp place: the redirect fails, while the
+    # cleanup that follows still succeeds, so the abort runs its own error.
+    : > "$(SEED).tmp"; chmod 400 "$(SEED).tmp"
+    local rc=0 err
+    err=$("$CS_BIN" -spawn worker --brief "$TEST_TMPDIR/brief.md" 2>&1 >/dev/null) && rc=1
+    chmod 600 "$(SEED).tmp" 2>/dev/null; rm -f "$(SEED).tmp"
     [ "$rc" = 0 ] || { echo "  a failed seed write still reported success"; return 1; }
+    assert_output_contains "$err" "cannot stage the seed" "the abort says what failed" || return 1
     [ ! -f "$(SEED)" ] || { echo "  seed published although its write failed"; return 1; }
     [ ! -f "$(BRIEF)" ] || { echo "  the brief was left behind for the next spawn to inherit"; return 1; }
     ! grep -E -q '^(new-session|new-window) ' "$FAKE_TMUX_DIR/log" 2>/dev/null \
