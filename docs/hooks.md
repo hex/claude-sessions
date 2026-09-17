@@ -305,7 +305,10 @@ engine's own AskUserQuestion dialog — `Run /wrap for this session?`, with
 `Yes, wrap up` and `Not now` — and only the yes runs it. A held key repeats,
 and each repeat re-opens the same question rather than answering it; a
 dismissed dialog, and a `-p` run with nobody to ask, run nothing and say
-nothing. Below the band the mod draws nothing, and it draws nothing while a
+nothing. A wrap that already ran leaves the key nothing to do: while
+`.cs/summary.md` is newer than the last prompt entering the conversation (or,
+before any, than the mod's load), the band draws the rotate key alone, and the
+next prompt brings the wrap key back. Below the band the mod draws nothing, and it draws nothing while a
 turn runs or while a survey holds the band. It never submits a prompt of its
 own.
 

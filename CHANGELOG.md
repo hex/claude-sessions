@@ -4,6 +4,15 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## Unreleased
+
+### Changed
+- The rotation band stops offering a wrap that already ran. `2: wrap up this session` hides while `.cs/summary.md` is newer than the last prompt entering the conversation, so a wrap run from the band, a typed `/wrap` or any other route is not offered again straight after it finishes; the next prompt brings the key back.
+
+### Fixes
+- A skipped test is counted as skipped. Twenty-seven sites across fourteen suites printed `SKIP` and returned 0, which `run_test` counts as a pass, so a runner without bun passed every mod and layout unit test, and a host that cannot deny a write or build a stub PATH passed the tests that needed one. Each now returns 77 (skipped, and named in the tally), and `tests/test_docs.sh` fails on the shapes that returned 0: a `SKIP` message followed by `return 0`, `_deny_writes ... || return 0`, and a helper's cannot-build-here status turned into `return 0`, with a canary assembled at runtime so a sweep cannot empty the search. The results line names a skip count only when a test was skipped.
+- The forced rotation's `Handoff` pane closes when its count ends while the pane is still opening. The count set the pane's contents before the open's round trip, so a prompt landing in between asked for a close the engine could apply first, and the pane that opened afterwards had nothing left to close it.
+
 ## 2026.9.17
 
 ### Changed
