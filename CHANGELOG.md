@@ -6,6 +6,9 @@ All notable changes to cs are documented here. Release notes are also available 
 
 ## Unreleased
 
+### Docs
+- The mods design lab opens on a band canvas. `docs/mods-design-lab.html` showed one element at a time; its new first panel builds a whole tree out of nested Box, Text and Button, with an outline to move and delete nodes, an inspector per node, the strip as the terminal would draw it, and the JSX to paste into a mod. `docs/mods-layout.js` holds the layout pass (flex in both directions, gaps, alignment, `flexGrow`, padding, margins, the eight borders, wrapping, hidden overflow), loaded by the page as a plain script and covered by `tests/test_mods_layout.sh` through bun, with the shipped rotate band as its oracle.
+
 ### Removed
 - The cs-hint mod. `mods/cs-hint/` drew the hint line under the prompt (unread mail, an armed handoff, the queue, a resumed handoff's purpose, else a cs tip); the mod, its doctor row, `CS_NO_HINTS`, the `hints: off` state line and `.cs/local/cs-hint.*` leave with it. The installer and `cs -uninstall` remove a deployed copy from `~/.claude/skills/cs-hint/` (now a retired skill directory), so an upgrade takes the line away rather than leaving a mod that nothing ships or checks for drift. cs-rotate stays.
 

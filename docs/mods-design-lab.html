@@ -143,6 +143,24 @@ kbd{font:11px "JetBrains Mono",monospace;background:var(--panel);border:1px soli
 .finder .hit .where{margin-left:auto;color:var(--fg2);font-size:12px}
 @media (max-width:900px){.shell{grid-template-columns:1fr}.rail{position:static;height:auto;flex-direction:row;flex-wrap:wrap;border-right:0;border-bottom:1px solid var(--line)}.rail .grp{display:none}.lab > div:last-child{position:static}.controls{max-height:none}}
 @media (prefers-reduced-motion:reduce){.panel.on,.finder.on{animation:none}.term,.rail a,.copy{transition:none}}
+/* ---- compose ---- */
+.compose{display:grid;grid-template-columns:minmax(220px,300px) 1fr;gap:18px;align-items:start}
+.compose .tree{border:1px solid var(--line);border-radius:10px;padding:8px;background:var(--panel)}
+.compose .tree ul{list-style:none;margin:0;padding:0 0 0 14px}
+.compose .tree>ul{padding-left:0}
+.compose .node{display:flex;align-items:center;gap:6px;width:100%;text-align:left;border:1px solid transparent;border-radius:6px;padding:3px 6px;background:none;color:var(--fg);font:inherit;font-size:13px;cursor:pointer}
+.compose .node:hover{border-color:var(--line)}
+.compose .node.on{border-color:var(--accent);background:var(--panel2,rgba(127,127,127,.12))}
+.compose .node .ty{font-weight:600}
+.compose .node .sum{color:var(--fg2);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.compose .treebar{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.compose .treebar button{font:inherit;font-size:12px;padding:3px 8px;border:1px solid var(--line);border-radius:6px;background:var(--page);color:var(--fg);cursor:pointer}
+.compose .treebar button:hover{border-color:var(--accent)}
+.compose .insp{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px 14px;margin-bottom:14px}
+.compose .insp label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--fg2)}
+.compose .insp label.inline{flex-direction:row;align-items:center;gap:6px}
+.compose .refuse{border-left:3px solid var(--error);padding:6px 10px;margin:0 0 12px;color:var(--error);font-size:13px}
+
 </style>
 
 <div class="shell">
@@ -162,6 +180,34 @@ kbd{font:11px "JetBrains Mono",monospace;background:var(--panel);border:1px soli
 
 <main class="content">
 
+<!-- ============================== COMPOSE ============================== -->
+<section class="panel" id="p-compose">
+<h2 id="compose">Compose a band <span class="src">Box · Text · Button</span></h2>
+<p class="sub">Build the tree a <code>ui.render</code> hook returns for <code>AbovePrompt</code>. Pick a node, set its props, watch the strip. The JSX underneath is what you paste into the mod. The other six elements are in their own panels; the canvas draws these three.</p>
+<div class="compose">
+  <div>
+    <div class="tree" id="cp-tree"></div>
+    <div class="treebar">
+      <button type="button" data-add="Box">+ Box</button>
+      <button type="button" data-add="Text">+ Text</button>
+      <button type="button" data-add="Button">+ Button</button>
+      <button type="button" id="cp-up">↑</button>
+      <button type="button" id="cp-down">↓</button>
+      <button type="button" id="cp-del">delete</button>
+      <button type="button" id="cp-preset">load the rotate band</button>
+    </div>
+    <p class="why" style="margin-top:10px">A new node lands inside the selected Box, or beside the selected leaf, so a Text never takes one: the engine drops a tree that nests a Box or a Button in a Text, and says nothing about it. The refusal you can still reach — a hover with no key to scope it — prints above the strip.</p>
+  </div>
+  <div>
+    <div class="insp" id="cp-insp"></div>
+    <div id="cp-refuse"></div>
+    <div class="term" id="cp-term"></div>
+    <div id="cp-over"></div>
+    <pre class="spec" id="cp-spec"></pre>
+  </div>
+</div>
+
+</section>
 <!-- ============================== SITES ============================== -->
 <section class="panel" id="p-sites">
 <h2 id="sites">Where a mod draws <span class="src">RenderComponent, RenderPropsOf</span></h2>
@@ -515,6 +561,7 @@ none|start fresh</textarea></label>
 </main>
 </div>
 </div>
+<script src="mods-layout.js"></script>
 <script>
 const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;");
@@ -1008,8 +1055,177 @@ function coverage(){
   $("cov-out").textContent=out;
 }
 
+
+// ---------- COMPOSE ----------
+// One tree, edited in place. Nodes carry an id so the outline can name the
+// selection without holding a reference the re-render would stale.
+const CP_SCHEMA={
+  Box:[
+    ["key","text","a key scopes hover and keeps the node's identity across redraws"],
+    ["flexDirection","select",["row","column","row-reverse","column-reverse"]],
+    ["justifyContent","select",["flex-start","center","flex-end","space-between","space-around","space-evenly"]],
+    ["alignItems","select",["flex-start","center","flex-end"]],
+    ["gap","num"],["flexGrow","num"],["width","num"],["height","num"],
+    ["borderStyle","select",["","single","double","round","bold","singleDouble","doubleSingle","classic","arrow"]],
+    ["borderColor","color"],["borderDimColor","bool"],
+    ["paddingX","num"],["paddingY","num"],["marginX","num"],["marginY","num"],
+    ["backgroundColor","color"],
+    ["overflow","select",["visible","hidden"]],["display","select",["flex","none"]],
+    ["hoverBorderColor","color","hover={{ borderColor }} — needs a key"],
+    ["hoverBackgroundColor","color","hover={{ backgroundColor }} — needs a key"],
+  ],
+  Text:[
+    ["text","text","what it says"],
+    ["color","color"],["backgroundColor","color"],
+    ["bold","bool"],["dimColor","bool"],["italic","bool"],["underline","bool"],["strikethrough","bool"],["inverse","bool"],
+    ["wrap","select",["wrap","end","middle","truncate","truncate-start","truncate-middle","truncate-end"]],
+    ["flexGrow","num"],
+  ],
+  Button:[
+    ["label","text"],["key","text"],["hotkey","text","a digit or a letter the band arms"],
+    ["action","text","a keybinding to run instead of onPress"],
+    ["plain","bool"],["dimColor","bool"],["autoFocus","bool"],["flexGrow","num"],
+  ],
+};
+let cpId=0;
+const cpNode=(type,props,kids)=>({id:++cpId,type,props:props||{},kids:kids||[]});
+let cpTree=null, cpSel=0;
+
+function cpRotatePreset(){
+  const band=cpNode("Box",{key:"cs-rotate-band",borderStyle:"round",borderColor:"CORAL",paddingX:1,hoverBorderColor:"CORAL"},[
+    cpNode("Text",{text:"✳ ",color:"CORAL",bold:true}),
+    cpNode("Button",{key:"cs-rotate",hotkey:"1",plain:true,label:"rotate this conversation"}),
+    cpNode("Text",{text:"  ·  ",dimColor:true}),
+    cpNode("Button",{key:"cs-wrap",hotkey:"2",plain:true,label:"wrap up this session"}),
+    cpNode("Text",{text:"  ·  ",dimColor:true}),
+    cpNode("Text",{text:"█████",color:"warning"}),
+    cpNode("Text",{text:"░░░░░",dimColor:true}),
+    cpNode("Text",{text:" 47%",color:"warning",bold:true}),
+  ]);
+  return cpNode("Box",{flexDirection:"column"},[band]);
+}
+// The tree the editor holds carries editor-only props (text, hoverBorderColor);
+// this is the shape the engine and the JSX printer read.
+function cpToEngine(n){
+  const p=Object.assign({},n.props);
+  const text=p.text||""; delete p.text;
+  const hb=p.hoverBorderColor, hg=p.hoverBackgroundColor;
+  delete p.hoverBorderColor; delete p.hoverBackgroundColor;
+  if(hb||hg){ p.hover={}; if(hb) p.hover.borderColor=hb; if(hg) p.hover.backgroundColor=hg; }
+  Object.keys(p).forEach(k=>{ if(p[k]===""||p[k]===false||p[k]===undefined) delete p[k]; });
+  if(n.type==="Text") return {type:"Text",props:p,children:[text]};
+  if(n.type==="Button") return {type:"Button",props:p,children:[]};
+  return {type:"Box",props:p,children:n.kids.map(cpToEngine)};
+}
+function cpFind(n,id,parent){ if(n.id===id) return {node:n,parent:parent}; for(const k of n.kids){ const hit=cpFind(k,id,n); if(hit) return hit; } return null; }
+function cpSelected(){ return cpFind(cpTree,cpSel,null)||{node:cpTree,parent:null}; }
+
+function cpOutline(n,depth){
+  const sum=n.type==="Text"?(n.props.text||"").slice(0,24):n.type==="Button"?(n.props.label||""):`${n.kids.length} child${n.kids.length===1?"":"ren"}`;
+  let html=`<li><button type="button" class="node${n.id===cpSel?" on":""}" data-node="${n.id}"><span class="ty">${n.type}</span><span class="sum">${esc(sum)}</span></button>`;
+  if(n.kids.length) html+=`<ul>${n.kids.map(k=>cpOutline(k,depth+1)).join("")}</ul>`;
+  return html+"</li>";
+}
+function cpInspector(){
+  const n=cpSelected().node, rows=CP_SCHEMA[n.type]||[];
+  return rows.map(([name,kind,extra])=>{
+    const v=n.props[name], hint=typeof extra==="string"?` title="${esc(extra)}"`:"";
+    if(kind==="bool") return `<label class="inline"${hint}><input type="checkbox" name="${name}" data-prop="${name}" data-kind="bool"${v?" checked":""}> ${name}</label>`;
+    if(kind==="num") return `<label${hint}>${name} <input type="number" name="${name}" data-prop="${name}" data-kind="num" value="${v===undefined?"":v}" style="width:80px"></label>`;
+    if(kind==="color") return `<label${hint}>${name} <select name="${name}" data-prop="${name}" data-kind="text" class="cpcolor">${cpColorOptions(v)}</select></label>`;
+    if(kind==="select") return `<label${hint}>${name} <select name="${name}" data-prop="${name}" data-kind="text">${(extra||[]).map(o=>`<option value="${o}"${String(v||"")===o?" selected":""}>${o||"(none)"}</option>`).join("")}</select></label>`;
+    return `<label${hint}>${name} <input type="text" name="${name}" data-prop="${name}" data-kind="text" value="${esc(String(v==null?"":v)).replace(/"/g,"&quot;")}"></label>`;
+  }).join("");
+}
+function cpColorOptions(v){
+  const raw=Object.keys(RAW);
+  const opts=['<option value="">(none)</option>'].concat(
+    Object.keys(PALETTE).map(k=>`<option value="${k}"${v===k?" selected":""}>${k}</option>`),
+    raw.map(k=>`<option value="${k}"${v===k?" selected":""}>${k} (const)</option>`));
+  return opts.join("");
+}
+// Grid of cells -> spans, one span per run of cells that share a style.
+function cpPaint(g){
+  return g.rows.map(row=>{
+    let html="",i=0;
+    while(i<row.length){
+      const st=row[i].st; let j=i,txt="";
+      while(j<row.length&&row[j].st===st){ txt+=row[j].ch; j++; }
+      const css=[];
+      if(st.color) css.push(`color:${col(st.color)}`);
+      if(st.bg) css.push(`background:${col(st.bg)}`);
+      if(st.bold) css.push("font-weight:700");
+      if(st.dim) css.push("opacity:.55");
+      if(st.italic) css.push("font-style:italic");
+      const deco=[st.underline?"underline":"",st.strikethrough?"line-through":""].filter(Boolean).join(" ");
+      if(deco) css.push(`text-decoration:${deco}`);
+      if(st.inverse) css.push(`background:${col("text")};color:${col("inverseText")}`);
+      html+=span(txt,css.join(";"));
+      i=j;
+    }
+    return html;
+  }).join("\n");
+}
+function composeRender(){
+  if(!cpTree) cpTree=cpLoad()||cpRotatePreset();
+  $("cp-tree").innerHTML=`<ul>${cpOutline(cpTree,0)}</ul>`;
+  $("cp-insp").innerHTML=cpInspector();
+  const tree=cpToEngine(cpTree);
+  const refused=ModLayout.validate(tree);
+  $("cp-refuse").innerHTML=refused.length?`<p class="refuse">${refused.map(esc).join("<br>")}</p>`:"";
+  const g=ModLayout.layout(tree,cols());
+  // A band wider than the terminal is clipped here, as the terminal clips it.
+  // Yoga would shrink a Text to fit; the canvas does not, so it says so rather
+  // than drawing a band that could never look like this.
+  const over=g.w>cols();
+  const shown=over?{w:cols(),h:g.h,rows:g.rows.map(r=>r.slice(0,cols()))}:g;
+  $("cp-term").innerHTML=cpPaint(shown)+`\n<span class="rule">${"─".repeat(Math.min(cols(),100))}</span>\n<span class="prompt">❯ </span>`;
+  $("cp-over").innerHTML=over?`<p class="why">The tree measures ${g.w} cells and the band has ${cols()}: clipped above. The engine would shrink a Text to fit; the canvas does not, so narrow it by hand.</p>`:"";
+  $("cp-spec").textContent=ModLayout.toJsx(tree);
+  cpSave();
+}
+function cpSave(){ try{ localStorage.setItem("mods-lab-band",JSON.stringify(cpTree)); }catch{} }
+function cpLoad(){ try{ const raw=localStorage.getItem("mods-lab-band"); if(!raw) return null; const t=JSON.parse(raw); cpId=cpMaxId(t); return t; }catch{ return null; } }
+function cpMaxId(n){ return n.kids.reduce((a,k)=>Math.max(a,cpMaxId(k)),n.id||0); }
+function cpAdd(type){
+  const {node,parent}=cpSelected();
+  const fresh=type==="Text"?cpNode("Text",{text:"new text"}):type==="Button"?cpNode("Button",{label:"press me",plain:true}):cpNode("Box",{});
+  if(node.type==="Box"){ node.kids.push(fresh); }
+  else if(parent){ parent.kids.splice(parent.kids.indexOf(node)+1,0,fresh); }
+  else { cpTree.kids.push(fresh); }
+  cpSel=fresh.id; composeRender();
+}
+function cpMove(d){
+  const {node,parent}=cpSelected(); if(!parent) return;
+  const i=parent.kids.indexOf(node), j=i+d;
+  if(j<0||j>=parent.kids.length) return;
+  parent.kids.splice(i,1); parent.kids.splice(j,0,node); composeRender();
+}
+function cpDelete(){
+  const {node,parent}=cpSelected(); if(!parent) return;
+  parent.kids.splice(parent.kids.indexOf(node),1); cpSel=parent.id; composeRender();
+}
+function composeUI(){
+  $("cp-tree").addEventListener("click",e=>{ const b=e.target.closest("[data-node]"); if(!b) return; cpSel=+b.dataset.node; composeRender(); });
+  document.querySelectorAll("[data-add]").forEach(b=>b.onclick=()=>cpAdd(b.dataset.add));
+  $("cp-up").onclick=()=>cpMove(-1); $("cp-down").onclick=()=>cpMove(1); $("cp-del").onclick=cpDelete;
+  $("cp-preset").onclick=()=>{ cpTree=cpRotatePreset(); cpSel=0; composeRender(); };
+  $("cp-insp").addEventListener("input",e=>{
+    const el=e.target, name=el.dataset.prop; if(!name) return;
+    const n=cpSelected().node;
+    if(el.dataset.kind==="bool") n.props[name]=el.checked;
+    else if(el.dataset.kind==="num") n.props[name]=el.value===""?undefined:+el.value;
+    else n.props[name]=el.value;
+    if(n.props[name]===undefined||n.props[name]===""||n.props[name]===false) delete n.props[name];
+    const keep=document.activeElement===el?[name,el.selectionStart]:null;
+    composeRender();
+    if(keep){ const again=$("cp-insp").querySelector(`[data-prop="${keep[0]}"]`); if(again){ again.focus(); if(again.setSelectionRange&&keep[1]!=null) try{ again.setSelectionRange(keep[1],keep[1]); }catch{} } }
+  });
+}
+
 // ---------- shell: rail, hotkeys, finder, copy ----------
 const NAV=[
+  {grp:"Compose"},{id:"compose",hk:"d",label:"Band designer",cnt:"canvas"},
   {grp:"Where"},{id:"sites",hk:"1",label:"Render sites",cnt:"14"},
   {grp:"Elements"},{id:"box",hk:"2",label:"Box",cnt:"36 props"},{id:"text",hk:"3",label:"Text",cnt:"10"},{id:"button",hk:"4",label:"Button",cnt:"9"},{id:"input",hk:"5",label:"Input",cnt:"8"},{id:"select",hk:"6",label:"Select",cnt:"6"},{id:"link",hk:"7",label:"Link",cnt:"2"},{id:"code",hk:"8",label:"Code",cnt:"6"},{id:"raster",hk:"9",label:"Raster",cnt:"4"},{id:"client",hk:"0",label:"Client",cnt:"6"},
   {grp:"Reference"},{id:"borders",hk:"b",label:"Border styles",cnt:"8"},{id:"palette",hk:"p",label:"Palette",cnt:"17"},{id:"rules",hk:"u",label:"Rules"},
@@ -1022,7 +1238,7 @@ function buildRail(){
     r.insertAdjacentHTML("beforeend",`<a href="#${n.id}" data-id="${n.id}"><span class="hk">${n.hk}</span>${n.label}${n.cnt?`<span class="cnt">${n.cnt}</span>`:""}</a>`); });
 }
 function show(id,push=true){
-  if(!PANELS.some(p=>p.id===id)) id="sites";
+  if(!PANELS.some(p=>p.id===id)) id="compose";
   document.querySelectorAll(".panel").forEach(p=>p.classList.toggle("on",p.id==="p-"+id));
   document.querySelectorAll(".rail a").forEach(a=>a.classList.toggle("on",a.dataset.id===id));
   if(push&&location.hash!=="#"+id) history.replaceState(null,"","#"+id);
@@ -1087,11 +1303,11 @@ function finderUI(){
 // ---------- wire ----------
 function renderAll(){
   document.documentElement.setAttribute("data-theme",theme());
-  drawScreens(); boxRender(); textRender(); buttonRender(); inputRender(); selectRender(); linkRender(); codeRender(); rasterRender(); clientRender(); bordersGallery(); swatches(); rotateRender(); coverage();
+  drawScreens(); composeRender(); boxRender(); textRender(); buttonRender(); inputRender(); selectRender(); linkRender(); codeRender(); rasterRender(); clientRender(); bordersGallery(); swatches(); rotateRender(); coverage();
 }
-sitesUI(); buildRail(); buildIndex(); finderUI();
+sitesUI(); composeUI(); buildRail(); buildIndex(); finderUI();
 const headH=()=>document.documentElement.style.setProperty("--head-h",document.querySelector(".head").offsetHeight+"px"); new ResizeObserver(headH).observe(document.querySelector(".head")); headH();
 document.querySelectorAll("input,select,textarea").forEach(el=>el.addEventListener("input",()=>{ renderAll(); tick(el.closest(".lab")?.querySelector(".term")); }));
 renderAll(); copyButtons();
-show(location.hash.slice(1)||"sites",false);
+show(location.hash.slice(1)||"compose",false);
 </script>

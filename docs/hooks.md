@@ -426,6 +426,13 @@ Design lab: `docs/mods-design-lab.html` (open it in a browser) shows every eleme
 rotate capsule's presets and knobs, each state printing the
 JSX it maps to, in the status line's inks; the shipped capsule is its "Inked" preset.
 
+The panel it opens on is a canvas: build a band out of nested Box, Text and
+Button, set each node's props, and copy the JSX underneath into a mod. The
+layout engine behind it lives in `docs/mods-layout.js`, which the page loads as
+a plain script and `tests/test_mods_layout.sh` drives through bun. It
+approximates the engine rather than porting it: a row that overruns the band is
+clipped and named, where the real one shrinks a Text to fit.
+
 Tests: `tests/test_mod_rotate.sh` runs the bun unit tests under
 `mods/cs-rotate/test/` (a fake engine drives the band, the press and the
 heartbeat) and `claude plugin validate` when each binary is on PATH, and
