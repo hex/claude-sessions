@@ -6294,7 +6294,9 @@ _doctor_check_integrate_lock() {
     # The integrate writes its pid into the lock; that pid is the evidence, not
     # a process listing, which would answer for any integrate on the machine.
     # The autosave hook's sub-second hold of the same directory records no
-    # pid, so a doctor run inside that window reads it as stale.
+    # pid, so a doctor run inside that window reads it as stale. A recycled
+    # pid reads a stale lock as held; the process listing answered for any
+    # integrate anywhere, which was worse.
     local pid
     pid=$(cat "$lock/pid" 2>/dev/null || true)
     case "$pid" in
