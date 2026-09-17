@@ -131,3 +131,4 @@
 - [PromptHint rewrite draws nothing](project_prompthint_rewrite_draws_nothing.md): on 2.1.273 a `hint` rewrite never shows under the mode notice; a mod draws its own tree; debug with `claude --debug`
 - [Commit before mutating](feedback_commit_before_mutating.md): `git checkout <file>` after a mutation drops uncommitted work too; commit green first, assert the mutation landed
 - [Mod Button in a Text is refused](project_mod_button_inline_refused.md): the engine drops the whole band silently while the fake engine stays green; --debug throwaway before trusting a new element
+- [Codex via plugin](feedback_codex_via_plugin.md): use /codex: (codex:rescue skill or agent), never raw `codex exec` from Bash

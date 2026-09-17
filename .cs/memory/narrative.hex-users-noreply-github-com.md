@@ -764,3 +764,19 @@ printf into an early-exiting `grep -q` exits 0 even at 300 KB, so the
 run_all tally flake is NOT the pipefail/SIGPIPE class; mechanism still open,
 both flaky tests now dump `$out` on failure so the next ghost failure carries
 its evidence.
+
+2026-09-17, later. Correction to the #638 note above: the run_all tally flake IS the
+pipefail/SIGPIPE class after all. The 300 KB standalone probe passed only because its
+match sat at the END of the string; instrumenting the real test on a loaded ghost caught
+PIPESTATUS=141 0 at a site whose match is early. Rule: a printf|grep -q probe must put
+the match early and keep the producer writing. Fix b5ea183 (herestrings, self-quitting
+sed, nested grep); loaded loop 2/20+1/20 → 0/20+0/20.
+#603 went three Codex rounds (raw `codex exec`; Alex then ruled: use the /codex: plugin,
+memory feedback_codex_via_plugin): cleanup made idempotent, traps armed before the pid
+write (f87090b); ps -p instead of kill -0 (5713e71) was itself wrong on procps with a
+restricted /proc; final f40497c reads bash's `LC_ALL=C kill -0` message: EPERM/success =
+held, ESRCH = stale (only case with rm -r advice), else unknown. Messages identical on
+bash 3.2 and 5.3. Ghost 67/67 on every code sha. Codex round 4 (plugin) + a fresh Fable
+closure review in flight at rotation; named fable-review teammate vanished unreported.
+Peer session "claude" measured cs-statusline --refresh-usage forking find ~150/s under
+the sidebar bridge (task #642, not started; render path is 6-12 execs, no diet needed).
