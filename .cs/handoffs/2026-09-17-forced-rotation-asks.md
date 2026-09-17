@@ -104,3 +104,96 @@ exactly how the last claim in this area died (see Problem Solving).
   That preset's pie gauge is why the band's ten-cell meter became
   `◑ ctx 47%`.
 - Context stood at 44% when this rotation was written; nothing was compacted.
+
+# Primary Request and Intent
+
+Alex opened `docs/mods-design-lab.html`, asked "where is the designer?",
+and then: "create a visual designer as well". His words on scope: the
+export hands you **"band"** JSX, not a runnable mod. Later, from a
+screenshot of the lab's rotate panel: "I think I prefer this style, but
+without the claude star". Then, from a screenshot of the AskUserQuestion
+render-site snippet: "should we use this instead?" — which on asking meant
+the band's own hotkeys becoming a real question, narrowed by his next
+answer to the forced threshold alone.
+
+# Key Technical Concepts
+
+- **The mods contract is the authority**, not docs:
+  `~/.claude/plugins/marketplaces/claude-code-plugins/mods/types/claude-code.d.ts`.
+- **`$.ui.ask(question, options)`** opens the engine's own AskUserQuestion
+  dialog from a mod and resolves to the chosen label (or free text typed
+  under Other). Rejects when dismissed and in a `-p` run. Drawn by
+  `ui.render` on `AskUserQuestion`; raises a `tool.call` through every hook
+  but the calling one.
+- **A hook the turn waits on cannot run a command; a 0 ms timer scheduled
+  inside it can.** Measured in #616, and the existing `forceRotation` already
+  relies on it (register.tsx:283).
+- **A `plain` Button always draws `N: `**, empty label included (measured,
+  2.1.273).
+- **The band is `ui.render` on `AbovePrompt`**, lead-only, yielding to a
+  survey and to a running turn.
+
+# Files and Code Sections
+
+- `docs/mods-layout.js` (new, commit 4936f8d) — `layout(node, width)` →
+  grid of styled cells; `toText`, `validate`, `toJsx`, `BORDERS`.
+  `PROP_ORDER` spells props in the order `register.tsx` does. Exported
+  through a CommonJS guard, so the page loads it with a plain `<script src>`
+  (a module script is blocked over `file://`).
+- `docs/test/layout.test.ts` — 16 tests. The oracle is the shipped rotate
+  band, hand-worked from `register.tsx`, asserting the exact 3-line strip.
+- `tests/test_mods_layout.sh` — bash wrapper: pins the plain-script seam,
+  the two export lines, and runs `cd docs && bun test`.
+- `docs/mods-design-lab.html` — the Compose panel (`#p-compose`, first in
+  `NAV`, the landing panel), `CP_SCHEMA`, `cpToEngine`, `cpPaint`,
+  `composeRender`, `composeUI`; `cpRotatePreset` is the "load the rotate
+  band" button. Commit 65e43ff, corrected in 6ba8bd1.
+- `mods/cs-rotate/hooks/register.tsx` — the band at :160; `forceRotation`
+  at :258; `startCountdown`/`stopCountdown` at :292-317; `pie(percent,
+  bands)` replaced `meter()` and is pinned against `bin/cs-statusline`'s
+  `_ctx_pie` (:1605).
+- `.cs/memory/narrative.hex-users-noreply-github-com.md` — three dated
+  entries today, including a correction that names the claim it overturns.
+
+# Problem Solving
+
+- **The lab was a tool nobody could see.** Every panel was already live
+  knobs plus preview plus emitted JSX; Alex still read it as a reference.
+  Fixed by making the canvas the landing panel — a findability defect, not
+  a capability one.
+- **`boxRender` could not be reused**: one flat level of flex over fixed
+  strings. Hence a real recursive engine.
+- **Two of my own tests were wrong and the code was right**: a row at width
+  2 starved its second child (my sequential allocation), and my prop order
+  put padding before border where `register.tsx` puts border first. Both
+  corrected toward the shipped convention.
+- **The lab asserted something false** and the fake engine agreed with it.
+  Only the live run caught it. The lab now prints what the engine really
+  does with that tree.
+
+# Pending Tasks
+
+Native list (survives the `/clear`; reconcile, do not mirror):
+#640 pending — four release-review Minors from v2026.9.16, none blocking.
+#644 pending — integrate-lock follow-ups (Minor).
+#554 pending — PARKED, SessionStart notice for pending tool calls.
+#606 pending — POSTPONED, cs --remote.
+No task was opened for this conversation's work; open one for the ask.
+
+Not in the list, and owed:
+1. The `$.ui.ask` change above, with its live measurement.
+2. The two secrets suites: triage or hand back with a reason.
+3. A full gate on the whole `cs/mods` branch — on ghost if its ssh is
+   fixed, and say plainly if it runs locally again.
+4. `/codex:review` before any of this is called done. Alex runs it; you
+   cannot. Offer it.
+5. `docs/hooks.md` and `CHANGELOG.md` already describe the canvas; the band
+   restyle and the ask are NOT in the changelog yet.
+
+# Current Work
+
+Four commits on `cs/mods`, all local, nothing pushed: `4936f8d` (engine),
+`65e43ff` (canvas), `eec2465` (bare line), `6ba8bd1` (engine draws the
+hotkey; lab correction). Working tree clean but for the narrative. This
+checkout is **installed** — Alex's live band is the new bare line.
+`mods/cs-rotate` is 63/63 under bun; `docs` is 16/16.
