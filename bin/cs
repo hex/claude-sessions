@@ -104,6 +104,7 @@ CS_SKILLS=(
 RETIRED_SKILLS=(
     voice   # renamed to write-as-me; Claude Code 2.1.227 ships a built-in /voice (Toggle voice mode)
     merge   # replaced by finish: integrate and report, never remove
+    cs-hint # a mod (deployed under skills/ like every mod): the hint line under the prompt, retired
 )
 
 # Support files skills ship beyond SKILL.md, as skills/<skill>/<path> entries.
@@ -118,9 +119,6 @@ CS_MOD_FILES=(
     cs-rotate/.claude-plugin/plugin.json
     cs-rotate/hooks/hooks.json
     cs-rotate/hooks/register.tsx
-    cs-hint/.claude-plugin/plugin.json
-    cs-hint/hooks/hooks.json
-    cs-hint/hooks/register.tsx
 )
 
 # Remove a hook registration from any event in a settings JSON string,
@@ -6358,7 +6356,7 @@ _doctor_check_session_id_match() {
     fi
 }
 
-# A mod (cs-rotate, cs-hint) is a Claude Code function-hooks plugin the
+# A mod (cs-rotate) is a Claude Code function-hooks plugin the
 # installer deploys under ~/.claude/skills. Absent, it is not news. Present, the
 # row reads the heartbeat the mod writes when Claude Code loads it, never the
 # directory: the loader sits behind CLAUDE_CODE_ENABLE_FUNCTION_HOOKS, which a
@@ -6412,7 +6410,6 @@ run_doctor() {
         _doctor_check_session_id_match
         _doctor_check_token_cost
         _doctor_check_mod cs-rotate
-        _doctor_check_mod cs-hint
     fi
 
     echo ""

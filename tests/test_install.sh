@@ -756,6 +756,24 @@ EOF
     fi
 }
 
+# A mod deploys under ~/.claude/skills/<mod>; one that a past version shipped
+# and this one does not is a retired skill directory, and a copy left behind
+# keeps loading into every Claude Code the machine starts.
+test_install_removes_the_retired_hint_mod() {
+    local fake_home="$TEST_TMPDIR/home-hintmod"
+    mkdir -p "$fake_home/.claude/skills/cs-hint/hooks"
+    echo '{}' > "$fake_home/.claude/skills/cs-hint/hooks/hooks.json"
+    HOME="$fake_home" bash "$INSTALL_SH" > /dev/null 2>&1 || {
+        echo "  FAIL: install.sh exited non-zero"
+        return 1
+    }
+    if [ -d "$fake_home/.claude/skills/cs-hint" ]; then
+        echo "  FAIL: retired cs-hint mod directory survived the install"
+        return 1
+    fi
+    assert_dir "$fake_home/.claude/skills/cs-rotate" "the shipped mod is still deployed" || return 1
+}
+
 test_install_writes_version_stamp() {
     local fake_home="$TEST_TMPDIR/home"
     mkdir -p "$fake_home"
@@ -1436,4 +1454,5 @@ run_test test_install_declined_marker_honors_xdg_and_foreign_statusline
 run_test test_install_refreshes_registered_statusline_despite_marker
 run_test test_statusline_disable_sets_and_enable_clears_declined_marker
 run_test test_uninstall_removes_declined_marker
+run_test test_install_removes_the_retired_hint_mod
 report_results
