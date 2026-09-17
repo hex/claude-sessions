@@ -2414,6 +2414,24 @@ test_refresh_reclaims_an_abandoned_lock() {
     assert_not_exists "$CS_USAGE_DIR/.lock" "the reclaiming refresher must release the lock" || return 1
 }
 
+# The two caches keyed on the parent pid mint a new entry per conversation and
+# nothing on the render path may fork to remove them, so the refresher sweeps
+# them. Only those two: a cache keyed on a repeating identity is left alone.
+test_refresh_prunes_the_pid_keyed_caches() {
+    make_usage_shims 200 "$USAGE_BODY"
+    use_scratch_usage_env
+    local cache="$HOME/.cache/cs"
+    mkdir -p "$cache/tmux-client" "$cache/tmux-real" "$cache/git"
+    TZ=UTC touch -t 202608270730.00 "$cache/tmux-client/old" "$cache/tmux-real/old" "$cache/git/old"
+    touch "$cache/tmux-client/fresh" "$cache/tmux-real/fresh"
+    PATH="$USAGE_BINDIR:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
+    assert_not_exists "$cache/tmux-client/old" "an old tmux-client entry must be swept" || return 1
+    assert_not_exists "$cache/tmux-real/old" "an old tmux-real entry must be swept" || return 1
+    assert_exists "$cache/tmux-client/fresh" "a fresh tmux-client entry must survive" || return 1
+    assert_exists "$cache/tmux-real/fresh" "a fresh tmux-real entry must survive" || return 1
+    assert_exists "$cache/git/old" "the sweep must not touch a cache keyed on a repeating identity" || return 1
+}
+
 # The Retry-After branch had no test: a server asking for a longer wait than the
 # floor must be honoured, or cs keeps knocking while it is blocked.
 test_refresh_honours_retry_after() {
@@ -2447,6 +2465,7 @@ run_test test_refresh_no_fable_bucket_clears
 run_test test_refresh_without_a_token_still_schedules
 run_test test_refresh_respects_a_held_lock
 run_test test_refresh_reclaims_an_abandoned_lock
+run_test test_refresh_prunes_the_pid_keyed_caches
 run_test test_refresh_honours_retry_after
 
 # Seed a cache record and a Claude config naming account "org-abc".
