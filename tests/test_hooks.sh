@@ -1058,18 +1058,18 @@ test_session_start_includes_sibling_sessions() {
     local context
     context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
 
-    if ! echo "$context" | grep -q "api-refactor"; then
+    if ! grep -q "api-refactor" <<< "$context"; then
         echo "  FAIL: Should include sibling session api-refactor"
         echo "  Context: $(echo "$context" | tail -10)"
         session_start_teardown
         return 1
     fi
-    if ! echo "$context" | grep -q "auth-migration"; then
+    if ! grep -q "auth-migration" <<< "$context"; then
         echo "  FAIL: Should include sibling session auth-migration"
         session_start_teardown
         return 1
     fi
-    if ! echo "$context" | grep -q "cs -msg"; then
+    if ! grep -q "cs -msg" <<< "$context"; then
         echo "  FAIL: sibling block should name cs -msg as the way to reach another session"
         session_start_teardown
         return 1
@@ -1092,7 +1092,7 @@ test_session_start_excludes_current_session() {
 
     # Current session should NOT appear in the sibling list
     # (it's already the session being started)
-    if echo "$context" | grep -q "Other Sessions" && echo "$context" | grep -q "current-session:"; then
+    if grep -q "Other Sessions" <<< "$context" && grep -q "current-session:" <<< "$context"; then
         echo "  FAIL: Should not include current session in sibling list"
         session_start_teardown
         return 1
@@ -1115,7 +1115,7 @@ test_session_start_sibling_block_mandates_asking() {
         | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
     context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
 
-    if ! echo "$context" | grep -q "AskUserQuestion"; then
+    if ! grep -q "AskUserQuestion" <<< "$context"; then
         echo "  FAIL: sibling block must name AskUserQuestion, not just 'say so'"
         session_start_teardown
         return 1
@@ -1123,7 +1123,7 @@ test_session_start_sibling_block_mandates_asking() {
     # Picky, not trigger-happy: the wrap-up cue text warns that false positives
     # erode the signal, and a routing prompt that fires on vocabulary overlap
     # becomes the next ignored block.
-    if ! echo "$context" | grep -qi "substantially"; then
+    if ! grep -qi "substantially" <<< "$context"; then
         echo "  FAIL: sibling block must set a high bar, not fire on any overlap"
         session_start_teardown
         return 1
@@ -1146,12 +1146,12 @@ test_session_start_sibling_line_carries_the_send_syntax() {
         | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
     context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
 
-    if ! echo "$context" | grep -q 'cs -msg <session> "<body>"'; then
+    if ! grep -q 'cs -msg <session> "<body>"' <<< "$context"; then
         echo "  FAIL: the sibling line must carry the full send form, not just the verb"
         session_start_teardown
         return 1
     fi
-    if ! echo "$context" | grep -q 'notify|task|text|result'; then
+    if ! grep -q 'notify|task|text|result' <<< "$context"; then
         echo "  FAIL: the sibling line must name the --kind values"
         session_start_teardown
         return 1
@@ -1215,7 +1215,7 @@ test_session_start_shows_objectives() {
     local context
     context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
 
-    if ! echo "$context" | grep -q "analytics dashboard"; then
+    if ! grep -q "analytics dashboard" <<< "$context"; then
         echo "  FAIL: Should include sibling objective text"
         echo "  Context: $(echo "$context" | tail -10)"
         session_start_teardown
@@ -1296,7 +1296,7 @@ test_session_start_skips_siblings_on_startup() {
     context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
 
     # On startup, no dynamic context is injected (including siblings)
-    if echo "$context" | grep -q "Other Sessions"; then
+    if grep -q "Other Sessions" <<< "$context"; then
         echo "  FAIL: Should not inject siblings on startup (only on resume)"
         session_start_teardown
         return 1
@@ -1941,13 +1941,13 @@ test_session_start_fresh_rebind_injects_clean_break_notice() {
         | CS_FRESH_REBIND=1 bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
     context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
 
-    if ! echo "$context" | grep -q "Fresh Conversation"; then
+    if ! grep -q "Fresh Conversation" <<< "$context"; then
         echo "  FAIL: fresh-rebind context block missing"
         echo "  Context tail: $(echo "$context" | tail -8)"
         session_start_teardown
         return 1
     fi
-    if ! echo "$context" | grep -q "clean break"; then
+    if ! grep -q "clean break" <<< "$context"; then
         echo "  FAIL: fresh-rebind block should mention the clean break"
         session_start_teardown
         return 1
@@ -1965,7 +1965,7 @@ test_session_start_without_fresh_rebind_omits_clean_break_notice() {
         | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
     context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
 
-    if echo "$context" | grep -q "Fresh Conversation"; then
+    if grep -q "Fresh Conversation" <<< "$context"; then
         echo "  FAIL: fresh-rebind block must not appear when CS_FRESH_REBIND is unset"
         session_start_teardown
         return 1

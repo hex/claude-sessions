@@ -98,9 +98,47 @@ test_no_surface_tells_a_resume_to_read_every_narrative() {
     fi
 }
 
+# A `grep -q` exits at its first match, so feeding it from a pipe leaves the
+# writer with nowhere to put the rest: the writer dies of SIGPIPE, `pipefail`
+# promotes 141 to the pipeline's status, and a pattern that MATCHED reads as a
+# failure. Measured on a loaded runner as 3 red runs in 40 (see the
+# assert_output_contains comment in test_lib.sh, which is the fix: a here-string
+# is a file, and a file has no reader to close). The class is closed here rather
+# than site by site, since every new suite would otherwise reintroduce it.
+#
+# The search is for a writer piping into `grep -q`; a `grep -q <<< "$var"` and a
+# `grep -q -- pattern file` are both fine. Comment lines are skipped so the
+# prose that explains the trap (here and in test_lib.sh) is not a hit, and so is
+# anything inside `sh -c`: test_scope_prompt probes a PATH's own grep through a
+# real pipeline there, and a here-string is not POSIX sh.
+test_no_writer_pipes_into_grep_q() {
+    local writers='(printf|echo)' sink='grep -q'
+    local hits
+    hits=$(grep -rnE "$writers[^|]*\| *$sink" \
+        "$REPO/tests" "$REPO/hooks" "$REPO/lib" "$REPO/bin" "$REPO/mods" 2>/dev/null \
+        | grep -vE ':[0-9]+: *#' | grep -v ' sh -c ' || true)
+    if [ -n "$hits" ]; then
+        echo "  FAIL: these sites pipe a writer into grep -q; read from a here-string instead:"
+        printf '    %s\n' "$hits" | head -20
+        echo "    ($(printf '%s\n' "$hits" | grep -c . ) site(s) total)"
+        return 1
+    fi
+    # Reachability: a search that can no longer find the shape proves nothing,
+    # so the same expression must still find a known-bad line. Assembled from
+    # halves rather than written out, so a sweep that rewrites the real sites
+    # cannot quietly rewrite the canary and leave the test passing on nothing.
+    local canary
+    canary=$(printf '%s | %s' '    if echo "$output"' 'grep -q "x"; then')
+    grep -qE "$writers[^|]*\| *$sink" <<< "$canary" || {
+        echo "  FAIL: the search no longer matches a known-bad line"
+        return 1
+    }
+}
+
 run_test test_configuration_documents_every_env_var_the_readme_names
 run_test test_every_backend_the_code_accepts_is_documented
 run_test test_hooks_doc_states_both_resolution_arms
 run_test test_no_surface_tells_a_resume_to_read_every_narrative
+run_test test_no_writer_pipes_into_grep_q
 
 report_results

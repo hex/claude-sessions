@@ -314,7 +314,7 @@ link_test_session() {
 # the dot in ".obsidian" would otherwise be read as a regex wildcard.
 assert_candidate() {
     local output="$1" name="$2" msg="$3"
-    if ! printf '%s\n' "$output" | grep -qxF -- "$name"; then
+    if ! grep -qxF -- "$name" <<< "$output"; then
         echo "  FAIL: $msg"
         echo "    candidates: $(printf '%s' "$output" | tr '\n' ' ')"
         return 1
@@ -323,7 +323,7 @@ assert_candidate() {
 
 assert_not_candidate() {
     local output="$1" name="$2" msg="$3"
-    if printf '%s\n' "$output" | grep -qxF -- "$name"; then
+    if grep -qxF -- "$name" <<< "$output"; then
         echo "  FAIL: $msg"
         echo "    candidates: $(printf '%s' "$output" | tr '\n' ' ')"
         return 1

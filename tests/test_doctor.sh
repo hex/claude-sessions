@@ -233,7 +233,7 @@ test_doctor_drift_silent_when_in_sync() {
 
     local output
     output=$(cd "$checkout" && CS_HOOKS_DIR="$deployed" "$CS_BIN" -doctor 2>&1) || true
-    if echo "$output" | grep -q "differs from source\|not deployed"; then
+    if grep -q "differs from source\|not deployed" <<< "$output"; then
         echo "  FAIL: in-sync hooks should not produce drift warnings"
         echo "$output" | grep "Hook drift"
         return 1
@@ -267,7 +267,7 @@ test_doctor_drift_skipped_outside_checkout() {
 
     local output
     output=$(cd "$plain" && CS_HOOKS_DIR="$deployed" "$CS_BIN" -doctor 2>&1) || true
-    if echo "$output" | grep -qi "drift"; then
+    if grep -qi "drift" <<< "$output"; then
         echo "  FAIL: drift check should be silent outside a cs source checkout"
         return 1
     fi
@@ -339,7 +339,7 @@ test_doctor_version_silent_without_stamp() {
 
     local output
     output=$(CS_HOOKS_DIR="$deployed" "$CS_BIN" -doctor 2>&1) || true
-    if echo "$output" | grep -q "Deployed version.*WARN\|WARN.*Deployed version"; then
+    if grep -q "Deployed version.*WARN\|WARN.*Deployed version" <<< "$output"; then
         echo "  FAIL: missing stamp should not produce a version warning"
         return 1
     fi

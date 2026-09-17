@@ -36,7 +36,7 @@ test_help_does_not_show_auto_update() {
         "Help should not reference CS_AUTO_UPDATE env var" || return 1
     local update_section
     update_section=$(echo "$output" | sed -n '/-update/,/^  -/p' | head -5)
-    if echo "$update_section" | grep -q -- "auto"; then
+    if grep -q -- "auto" <<< "$update_section"; then
         echo "  FAIL: Update section should not mention auto"
         return 1
     fi
@@ -262,11 +262,11 @@ test_render_strips_markdown_and_joins_summary() {
     assert_output_contains "$out" '\[G\]chiptext' "code spans in bullet bodies get the gold tint" || return 1
     assert_output_not_contains "$out" "##" "no literal heading markers" || return 1
     assert_output_not_contains "$out" '\*\*' "no literal bold markers" || return 1
-    if printf '%s' "$out" | grep -q '`'; then
+    if grep -q '`' <<< "$out"; then
         echo "  FAIL: no literal backticks in rendered output"
         return 1
     fi
-    if printf '%s' "$out" | grep -q "example.com/x"; then
+    if grep -q "example.com/x" <<< "$out"; then
         echo "  FAIL: link targets must not render"
         return 1
     fi
@@ -280,7 +280,7 @@ test_render_emits_escape_bytes_not_literal_backslash() {
     expected_esc=$(printf '%b' "$GOLD")
     out=$(changelog_span "$fix" "2026.99.0" | render_changelog) || { GOLD=""; return 1; }
     GOLD=""
-    if printf '%s' "$out" | grep -q -- '\\033'; then
+    if grep -q -- '\\033' <<< "$out"; then
         echo "  FAIL: color codes must be emitted as escape bytes, not literal backslash-033 text"
         return 1
     fi
@@ -290,7 +290,7 @@ test_render_emits_escape_bytes_not_literal_backslash() {
     # escape: the leading backslash is eaten and only a bare '0' leaks into
     # the text. Assert byte-for-byte that the expanded escape sequence itself
     # (not a mangled remnant of it) wraps the code span.
-    if ! printf '%s' "$out" | grep -qF -- "${expected_esc}chiptext"; then
+    if ! grep -qF -- "${expected_esc}chiptext" <<< "$out"; then
         echo "  FAIL: code span must be wrapped in the expanded escape byte sequence"
         return 1
     fi

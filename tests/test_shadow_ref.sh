@@ -311,7 +311,7 @@ test_recovery_detects_crash_and_injects_context() {
         return 1
     fi
 
-    if ! echo "$output" | grep -q "CRASH RECOVERY"; then
+    if ! grep -q "CRASH RECOVERY" <<< "$output"; then
         echo "  FAIL: hook output should contain CRASH RECOVERY context"
         echo "  Output: $(echo "$output" | head -5)"
         return 1
@@ -348,13 +348,13 @@ test_recovery_refuses_blanket_restore_when_head_moved() {
     output=$(echo '{"session_id":"10000000-0000-0000-0000-000000000001","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
         | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
 
-    if ! echo "$output" | grep -q "CRASH RECOVERY"; then
+    if ! grep -q "CRASH RECOVERY" <<< "$output"; then
         echo "  FAIL: should still surface CRASH RECOVERY context"; return 1
     fi
-    if echo "$output" | grep -qF "checkout refs/worktree/cs/session/10000000-0000-0000-0000-000000000001 -- ."; then
+    if grep -qF "checkout refs/worktree/cs/session/10000000-0000-0000-0000-000000000001 -- ." <<< "$output"; then
         echo "  FAIL: must NOT offer the blanket checkout restore once HEAD moved off the recorded base"; return 1
     fi
-    if ! echo "$output" | grep -q "HEAD has moved"; then
+    if ! grep -q "HEAD has moved" <<< "$output"; then
         echo "  FAIL: should warn that HEAD has moved since the snapshot"; return 1
     fi
     if ! git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify refs/worktree/cs/session/10000000-0000-0000-0000-000000000001 >/dev/null 2>&1; then
@@ -387,13 +387,13 @@ test_recovery_offers_restore_when_base_matches() {
     output=$(echo '{"session_id":"10000000-0000-0000-0000-000000000001","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
         | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
 
-    if ! echo "$output" | grep -q "CRASH RECOVERY"; then
+    if ! grep -q "CRASH RECOVERY" <<< "$output"; then
         echo "  FAIL: should surface CRASH RECOVERY context"; return 1
     fi
-    if ! echo "$output" | grep -qF "checkout refs/worktree/cs/session/10000000-0000-0000-0000-000000000001 -- ."; then
+    if ! grep -qF "checkout refs/worktree/cs/session/10000000-0000-0000-0000-000000000001 -- ." <<< "$output"; then
         echo "  FAIL: should offer the blanket restore when the snapshot sits on current HEAD"; return 1
     fi
-    if echo "$output" | grep -q "HEAD has moved"; then
+    if grep -q "HEAD has moved" <<< "$output"; then
         echo "  FAIL: should not warn about a moved HEAD when base matches"; return 1
     fi
     git -C "$CLAUDE_SESSION_DIR" update-ref -d refs/worktree/cs/session/10000000-0000-0000-0000-000000000001 2>/dev/null || true
@@ -506,16 +506,16 @@ test_recovery_legacy_ref_warns_unverifiable_not_moved() {
     output=$(echo '{"session_id":"10000000-0000-0000-0000-000000000001","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
         | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
 
-    if ! echo "$output" | grep -q "CRASH RECOVERY"; then
+    if ! grep -q "CRASH RECOVERY" <<< "$output"; then
         echo "  FAIL: should surface CRASH RECOVERY context"; return 1
     fi
-    if echo "$output" | grep -qF "checkout refs/worktree/cs/session/10000000-0000-0000-0000-000000000001 -- ."; then
+    if grep -qF "checkout refs/worktree/cs/session/10000000-0000-0000-0000-000000000001 -- ." <<< "$output"; then
         echo "  FAIL: must NOT offer the blanket restore for an unverifiable (no-base) snapshot"; return 1
     fi
-    if echo "$output" | grep -q "HEAD has moved"; then
+    if grep -q "HEAD has moved" <<< "$output"; then
         echo "  FAIL: must NOT assert HEAD has moved when the base is merely unrecorded"; return 1
     fi
-    if ! echo "$output" | grep -q "no recorded base"; then
+    if ! grep -q "no recorded base" <<< "$output"; then
         echo "  FAIL: should explain the base is unrecorded (pre-upgrade autosave)"; return 1
     fi
     git -C "$CLAUDE_SESSION_DIR" update-ref -d refs/worktree/cs/session/10000000-0000-0000-0000-000000000001 2>/dev/null || true
@@ -543,7 +543,7 @@ test_recovery_ignores_sibling_conversation_ref() {
     output=$(echo '{"session_id":"'"$me"'","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
         | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
 
-    if echo "$output" | grep -q "CRASH RECOVERY"; then
+    if grep -q "CRASH RECOVERY" <<< "$output"; then
         echo "  FAIL: must NOT surface a crash for a sibling conversation's ref"; return 1
     fi
     if ! git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify "refs/worktree/cs/session/$sib" >/dev/null 2>&1; then
@@ -569,7 +569,7 @@ test_recovery_detects_own_conversation_crash() {
     local output
     output=$(echo '{"session_id":"'"$me"'","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
         | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
-    if ! echo "$output" | grep -q "CRASH RECOVERY"; then
+    if ! grep -q "CRASH RECOVERY" <<< "$output"; then
         echo "  FAIL: must surface a crash for the conversation's OWN ref"; return 1
     fi
     git -C "$CLAUDE_SESSION_DIR" update-ref -d "refs/worktree/cs/session/$me" 2>/dev/null || true

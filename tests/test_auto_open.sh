@@ -355,11 +355,11 @@ EOF
     )
 
     seen=$(cat "$TEST_TMPDIR/tmux-calls" 2>/dev/null || true)
-    if printf '%s' "$seen" | grep -q 'rename-window'; then
+    if grep -q 'rename-window' <<< "$seen"; then
         echo "  FAIL: a pty test renamed a tmux window: $seen"
         return 1
     fi
-    if printf '%s' "$seen" | grep -q 'allow-rename off'; then
+    if grep -q 'allow-rename off' <<< "$seen"; then
         echo "  FAIL: a pty test locked a tmux window's name: $seen"
         return 1
     fi
