@@ -4156,4 +4156,33 @@ test_git_branch_shows_from_a_subdirectory_of_the_checkout() {
 
 run_test test_git_branch_shows_from_a_subdirectory_of_the_checkout
 
+# The bar repaints once a second in every open session, and an endpoint agent
+# charges the machine for every process born, so what a warm render costs is
+# the number of processes it starts, not the number of programs it runs: a
+# command substitution and each side of a pipeline are processes too. The only
+# program a warm render needs is the single jq pass over stdin; a bash without
+# a builtin clock (stock macOS 3.2) adds its date. A trace names them, since a
+# child shows as a deeper `+` level. Measured on a quiet machine, that leaves
+# three processes per render on bash 5 (this script, the shell of the jq
+# substitution, jq) and five on 3.2, where the clock is a second substitution.
+test_a_warm_render_runs_no_program_but_jq() {
+    export CS_TERM_THEME=light CS_TERM_THEME_AUTO=1 FORCE_COLOR=0
+    # The theme pin carries the auto marker, so the ladder runs as it does in a
+    # live session rather than short-circuiting on the pin.
+    export CS_STATUSLINE_PARENT=4242
+    unset COLORFGBG
+    local trace children
+    trace="$TEST_TMPDIR/render.trace"
+    # The first render fills the caches; the second is the warm one measured.
+    printf '%s' "$FIXTURE_DOCS" | bash "$SL" >/dev/null 2>/dev/null
+    printf '%s' "$FIXTURE_DOCS" | bash -x "$SL" >/dev/null 2>"$trace"
+    children=$(grep '^++ ' "$trace" | awk '{print $2}' | sort -u | grep -v -x -e jq -e date)
+    [ -z "$children" ] || {
+        echo "  FAIL: a warm render runs a program other than jq: $(echo $children)"
+        return 1
+    }
+}
+
+run_test test_a_warm_render_runs_no_program_but_jq
+
 report_results
