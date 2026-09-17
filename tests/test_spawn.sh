@@ -167,6 +167,23 @@ test_spawn_failed_brief_copy_publishes_no_seed() {
         || { echo "  a window was opened after the brief copy failed"; return 1; }
 }
 
+# The mirror case: the brief copied but the seed could not be written. The
+# spawn must abort with nothing left behind, or a later spawn of the same name
+# with no --brief inherits this one's brief. A directory in the seed's tmp
+# place makes the write fail with the directory still writable.
+test_spawn_failed_seed_write_stages_nothing() {
+    printf 'brief body\n' > "$TEST_TMPDIR/brief.md"
+    mkdir -p "$CS_SESSIONS_ROOT/.spawn" "$(SEED).tmp"
+    local rc=0
+    "$CS_BIN" -spawn worker --brief "$TEST_TMPDIR/brief.md" >/dev/null 2>&1 && rc=1
+    rmdir "$(SEED).tmp" 2>/dev/null
+    [ "$rc" = 0 ] || { echo "  a failed seed write still reported success"; return 1; }
+    [ ! -f "$(SEED)" ] || { echo "  seed published although its write failed"; return 1; }
+    [ ! -f "$(BRIEF)" ] || { echo "  the brief was left behind for the next spawn to inherit"; return 1; }
+    ! grep -E -q '^(new-session|new-window) ' "$FAKE_TMUX_DIR/log" 2>/dev/null \
+        || { echo "  a window was opened after the seed write failed"; return 1; }
+}
+
 # The seed refusal already covers a pending brief: a brief never exists
 # without its seed. This pins that a second spawn cannot swap the brief out
 # from under the pending one.
@@ -467,6 +484,7 @@ run_test test_spawn_stages_brief_beside_the_seed
 run_test test_spawn_brief_and_tasks_stage_together
 run_test test_spawn_rejects_unreadable_or_empty_brief_before_staging
 run_test test_spawn_failed_brief_copy_publishes_no_seed
+run_test test_spawn_failed_seed_write_stages_nothing
 run_test test_spawn_refuses_to_replace_a_pending_brief
 run_test test_spawn_attach_hint_uses_switch_client_inside_tmux
 run_test test_spawn_refuses_existing_seed

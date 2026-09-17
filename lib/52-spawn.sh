@@ -135,7 +135,10 @@ run_spawn() {
         # Brief before seed: the launch treats the seed as the signal, so a
         # brief must never be missing once the seed is visible. A copy that
         # fails stops here, before the seed and the window: errexit does not
-        # see a failed left operand, so the abort is explicit.
+        # see a failed left operand, so the abort is explicit. The seed write
+        # below is an AND list for the same reason, and it takes the staged
+        # brief down with it: a brief left without its seed would be inherited
+        # by the next spawn of this name, which asked for no brief at all.
         if [ -n "$brief" ]; then
             cp "$brief" "$sdir/$name.brief.md.tmp" \
                 && mv "$sdir/$name.brief.md.tmp" "$sdir/$name.brief.md" \
@@ -147,7 +150,8 @@ run_spawn() {
             # alone leaves it empty; the guard expands to nothing in that case.
             local _t
             for _t in ${tasks[@]+"${tasks[@]}"}; do printf '%s\n' "$_t"; done
-        } > "$seed.tmp" && mv "$seed.tmp" "$seed"
+        } > "$seed.tmp" && mv "$seed.tmp" "$seed" \
+            || { rm -f "$seed.tmp" "$sdir/$name.brief.md"; error "cs -spawn: cannot stage the seed in $sdir"; }
     fi
     _spawn_window "$name"
 }
