@@ -5191,7 +5191,7 @@ mod tests {
 
         let mut app = App::new(session::scan_sessions());
         app.request_preview();
-        assert!(app.preview_pending.contains_key("alpha"), "the read must be in flight");
+        let stale = *app.preview_pending.get("alpha").expect("the read must be in flight");
         app.handle_key(KeyEvent::from(KeyCode::Char('R')));
         app.handle_key(KeyEvent::from(KeyCode::Char('y')));
         std::env::remove_var("CS_BIN");
@@ -5200,21 +5200,29 @@ mod tests {
         // re-arms pending for this very session — so name identity alone cannot
         // tell the stale in-flight read from the fresh one it queues.
         app.request_preview();
+        assert_ne!(app.preview_pending.get("alpha"), Some(&stale), "rotation must re-arm");
 
-        // Wait for the worker to actually deliver, then assert it was dropped.
-        // Breaking on delivery rather than on the assertion's negation matters
-        // twice: a passing run no longer sleeps the whole budget, and a run
-        // where the worker delivered nothing at all can no longer pass
-        // vacuously — "not cached" would be true either way.
-        let mut delivered = 0;
-        for _ in 0..200 {
-            delivered += app.drain_previews();
-            if delivered > 0 {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
-        assert!(delivered > 0, "the worker must have delivered the in-flight read");
+        // Deliver the stale read by hand, on a channel the test owns. The real
+        // worker serves both requests in order, and on a loaded machine it
+        // finishes the fresh one too before this thread drains; that fresh
+        // read landing is correct, and it would overwrite a stale one that
+        // landed first — the very bug this test exists to catch.
+        let (deliver, results) = std::sync::mpsc::channel();
+        app.preview_results = results;
+        deliver
+            .send((
+                stale,
+                "alpha".to_string(),
+                session::SessionPreview {
+                    objective: None,
+                    last_discovery: Some("archived heading".into()),
+                    discoveries: vec!["archived heading".into()],
+                    memory_entries: Vec::new(),
+                    contributors: Vec::new(),
+                },
+            ))
+            .unwrap();
+        assert_eq!(app.drain_previews(), 1, "the stale read must be delivered, then dropped");
         assert!(
             !app.preview_cache.contains_key("alpha"),
             "an in-flight read must not restore the pre-rotation preview"
@@ -5228,6 +5236,13 @@ mod tests {
     /// error and every key-driven test still green.
     #[test]
     fn enter_runs_the_action_belonging_to_the_highlighted_row() {
+        // Enter on the Archive and Secrets rows forks cs. Unguarded, that fork
+        // reads whatever CS_BIN a concurrent stub test has set and lands
+        // "-archive alpha" in that test's argv log and an archived marker in
+        // its root; with nothing set it forks the real cs against the
+        // developer's sessions. Neither arm's outcome is asserted here.
+        let _env = CS_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("CS_BIN", "/nonexistent/cs");
         for (i, (action, label, _)) in MENU_ITEMS.iter().enumerate() {
             let mut app = App::new(sample_sessions());
             app.mode = Mode::SessionMenu;
@@ -5267,6 +5282,7 @@ mod tests {
                 );
             }
         }
+        std::env::remove_var("CS_BIN");
     }
 
     /// Each entry's key selects its own action — the property the key column
