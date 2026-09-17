@@ -330,9 +330,10 @@
   }
 
   // Text children: printable ASCII stands bare unless JSX would read part of
-  // it as markup (`<`, `>`, `{`, `}`); everything else is a braced string.
+  // it as markup (`<`, `>`, `{`, `}`) or decode it as an entity (`&`);
+  // everything else is a braced string.
   function textLiteral(s) {
-    if (/^[\x20-\x7e]*$/.test(s) && !/[<>{}]/.test(s)) return s;
+    if (/^[\x20-\x7e]*$/.test(s) && !/[<>{}&]/.test(s)) return s;
     return "{" + jsString(s) + "}";
   }
 

@@ -141,8 +141,8 @@ function reparse(jsx: string): any {
   return new Function('h', 'Box', 'Text', 'Button', 'press', js)(h, 'Box', 'Text', 'Button', () => {})
 }
 
-test('toJsx text survives a paste: angle brackets, braces, quotes and astral characters stay literal', () => {
-  for (const s of ['a < b', '{value}', "it's \\ fine", 'say "yes"', 'rocket \u{1F680} \u00b7 ok', '<Text>']) {
+test('toJsx text survives a paste: angle brackets, braces, quotes, entities and astral characters stay literal', () => {
+  for (const s of ['a < b', '{value}', "it's \\ fine", 'say "yes"', 'rocket \u{1F680} \u00b7 ok', '<Text>', 'a &lt; b', 'Save &amp; continue']) {
     const back = reparse(toJsx(T({}, s)))
     expect(back.type).toBe('Text')
     expect(back.children.join('')).toBe(s)
