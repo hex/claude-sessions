@@ -1003,3 +1003,42 @@ Box underpaint copies each cell's style object: `run()` shares one style
 object across a run and `EMPTY` is global, so mutating `st.bg` in place
 would paint every blank on the canvas. Mutations: bare-text guard off → 1
 red, underpaint off → 2 red. The lab page itself was not reopened in Chrome.
+
+- 2026-09-17 (release 2026.9.17): step 0b pushed 66 commits (5a5f67f..a5bd934) on Alex's
+  explicit go, and CI immediately failed **shellcheck** on content the full local suite had
+  called green. SC1087 on `tests/test_docs.sh:117,132`: `"$writers[^|]*\| *$sink"` reads as an
+  array expansion, so shellcheck errors on a string that bash expands correctly. Fixed with
+  braces (`"${writers}[^|]*\| *${sink}"`), b7e37a1. **The lesson is the lane, not the fix:**
+  `tests/run_all.sh` does not run shellcheck — it is a separate CI job — so a local 67/67 says
+  nothing about it. Before pushing a new `.sh`, run CI's own line:
+  `{ git ls-files '*.sh'; printf '%s\n' bin/cs bin/cs-secrets bin/cs-statusline bin/cs-subagent-statusline; } | xargs shellcheck -S error`.
+  The guard was proven in both directions after the edit: a planted
+  `if echo "$out" | grep -q "zz"` under tests/ turned it red naming the file, removing it turned
+  it green, and the runtime-assembled canary still asserts reachability.
+- 2026-09-17: `/codex:adversarial-review` (the plugin's companion script, run directly since the
+  command carries `disable-model-invocation: true`) **spends a whole run asking a scope question
+  when the worktree is dirty** — mine held the version bump, the rebuilt bin/cs and an untracked
+  scratchpad/, and Codex returned "Should this read-only review cover only committed
+  v2026.9.16..HEAD?" as its final message instead of a review, which the companion then reported
+  as a JSON parse error. Pin the scope inside the prompt text ("Scope is settled, do not ask:
+  review ONLY the committed range"), name what the dirty files are, and grant /tmp explicitly for
+  measurement probes (`project_codex_readonly_no_probes`). Pass the prompt via `"$(cat file)"`.
+- 2026-09-17: ghost is still unreachable from this session (`ssh ghost` → Permission denied
+  (publickey,password,keyboard-interactive)), and `remote-tests.sh` still has no host store, so
+  `feedback_full_gate_runs_on_ghost` could not be honoured. CI's ubuntu+macos bash jobs are the
+  cross-platform judge for this release; the local suite is the second opinion, and both were
+  named to Alex rather than silently substituted.
+- 2026-09-17: README carried a **stale wrap-key description** — `2` arms and `3` confirms for
+  five seconds — which #649 replaced with one key plus an AskUserQuestion dialog. `docs/hooks.md`
+  was already correct. A feature reworked twice in one day leaves the overview prose behind while
+  the reference doc gets updated; the release doc pass is what caught it. Vale delta on README
+  was 195 -> 196 alerts, the one addition a spaced em dash matching 76 already in the file.
+- 2026-09-17: Codex adversarial pass over v2026.9.16..HEAD (pinned scope): verdict needs-attention,
+  one medium, no runtime defect. It MEASURED the rule-shaped changes rather than reading them:
+  headless-transcript filter 4,999/4,999 correct over 5,420 real transcripts; tmux cache prune dry run
+  8,034/8,034 over 8,044 files, zero fresh deletions; lock liveness 3/3 live + 1/1 stale; handoff
+  extraction 33/33. The finding: docs/mods-layout.js textLiteral let `&` stand bare in JSX text, so
+  `a &lt; b` pasted as `a < b` (JSX decodes entities in text children, not only in attributes; the
+  stringProp path already excluded `&`). Red first (entity probes added to the Bun-transpiler
+  round-trip test, 19/20), then `&` added to the markup class, 20/20 — 679c71c. The existing test
+  already exercised `<`, `{`, quotes and astral text; it lacked the one character class JSX decodes.
