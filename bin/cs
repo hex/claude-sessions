@@ -4173,13 +4173,18 @@ run_spawn() {
                 && mv "$sdir/$name.brief.md.tmp" "$sdir/$name.brief.md" \
                 || { rm -f "$sdir/$name.brief.md.tmp"; error "cs -spawn --brief: cannot stage $brief in $sdir"; }
         fi
-        {
-            printf '%s\n' "${CLAUDE_SESSION_NAME:-}"
-            # An empty array is unbound under bash 3.2's set -u, and a brief
-            # alone leaves it empty; the guard expands to nothing in that case.
-            local _t
-            for _t in ${tasks[@]+"${tasks[@]}"}; do printf '%s\n' "$_t"; done
-        } > "$seed.tmp" && mv "$seed.tmp" "$seed" \
+        # One printf, so one status covers the whole seed: a brace group reports
+        # only its LAST command, so a failed first write with a succeeding task
+        # line published a seed whose spawner line was missing, and the launch
+        # treats any seed as complete staging.
+        local _payload _t
+        _payload="${CLAUDE_SESSION_NAME:-}
+"
+        # An empty array is unbound under bash 3.2's set -u, and a brief alone
+        # leaves it empty; the guard expands to nothing in that case.
+        for _t in ${tasks[@]+"${tasks[@]}"}; do _payload="$_payload$_t
+"; done
+        printf '%s' "$_payload" > "$seed.tmp" && mv "$seed.tmp" "$seed" \
             || { rm -f "$seed.tmp" "$sdir/$name.brief.md" 2>/dev/null || :; error "cs -spawn: cannot stage the seed in $sdir"; }
     fi
     _spawn_window "$name"

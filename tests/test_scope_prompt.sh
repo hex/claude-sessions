@@ -818,6 +818,11 @@ test_sub_second_budget_is_the_default_on_a_second_resolution_clock() {
     CS_SCOPE_BUDGET_MS=500 "$slow" "$HOOK" <<< "$in" >/dev/null 2>&1
     assert_output_contains "$(_trace_stages)" "budget=1500" "a 500 ms budget takes the default on a whole-second clock" || return 1
     assert_output_not_contains "$(_trace_stages)" "budget=500" "and the sub-second value is not kept" || return 1
+    # A budget of exactly one tick is the boundary case: the check is `-ge`, so
+    # 1000 would skip on the first tick as surely as 500 does.
+    rm -f "$(_trace_file)"
+    CS_SCOPE_BUDGET_MS=1000 "$slow" "$HOOK" <<< "$in" >/dev/null 2>&1
+    assert_output_contains "$(_trace_stages)" "budget=1500" "a budget of exactly one tick takes the default too" || return 1
     # The zero stub is not a budget to raise: it still skips every prompt.
     local ctx
     ctx=$(additional_context "$(CS_SCOPE_BUDGET_MS=0 "$slow" "$HOOK" <<< "$in" 2>/dev/null)")
