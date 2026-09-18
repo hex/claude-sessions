@@ -86,8 +86,8 @@ export CS_SCOPE_TRACE_DISABLE="1"
 # the date note and the clarify guideline reach the model instead of dying
 # with a scan the registered timeout kills. 0 skips the scan on every prompt;
 # a value that is not a number, or longer than seven digits, is the default; so
-# is a value under 1000 on a shell whose clock ticks in whole seconds (bash 3.2),
-# which cannot judge a sub-second budget.
+# is a value of 1000 or less on a shell whose clock ticks in whole seconds
+# (bash 3.2), which cannot judge a budget of one tick.
 export CS_SCOPE_BUDGET_MS="1500"
 
 # Opt a session out of first-prompt Objective capture (see hooks.md)
@@ -182,7 +182,7 @@ export CS_ROTATE_NUDGE_CTX="65"
 # The mod reads it from the launched process's environment.
 export CS_ROTATE_BUTTON_CTX="40"
 
-# Forced rotation with grace (off unless set): once a turn ends with context
+# Forced rotation with grace (on at 80 unless set): once a turn ends with context
 # at or past this percentage the mod runs /rotate itself, once per
 # conversation, then counts the band down for 20 seconds and runs the /clear
 # that continues from the handoff. Pressing 1 clears at once; sending a

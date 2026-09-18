@@ -234,7 +234,9 @@ test_large_transcript_builds_cleanly() {
 
 test_voice_dir_permissions() {
     add_msg "$(proj_file projA)" "one real message so the build has something to keep"
-    run_build > /dev/null || { echo "  FAIL: build exited non-zero"; return 1; }
+    # A permissive umask, so the modes below are the builder's own doing and
+    # not the host's default.
+    (umask 022; run_build > /dev/null) || { echo "  FAIL: build exited non-zero"; return 1; }
     local mode
     mode=$(_file_mode "$CS_SESSIONS_ROOT/.voice")
     assert_eq "700" "$mode" ".voice directory should be private" || return 1
