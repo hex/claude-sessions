@@ -1589,3 +1589,37 @@ CS_STATUSLINE_WALK_DEADLINE undocumented (test knob); mod parity test checks
 only the default and `off`; register.test.ts:368 folds two cases into one.
 Notes approved by Alex ("Approve"); full suite rerunning on 35be897 before
 the bump. Not pushed, not tagged.
+
+### 2026-09-18 — release commit ab60b01 pushed and RED on CI macOS; fix 9ce826a
+
+Suite rerun on 35be897: 67/67. Bumped 2026.9.18, folded the approved notes
+into CHANGELOG (Unreleased -> 2026.9.18, plus the notice-fix and Docs
+entries), committed ab60b01, pushed. CI: 5/6 green, bash (macos-latest) red on
+`test_a_stalled_walker_is_killed_before_its_mark_expires` ("no stalled ps
+outlives its deadline", expected 0 actual 1) on BOTH ab60b01 and the
+narrative commit 8464c55. Cause: the test slept a fixed 1.6 s after the third
+window; the walker's deadline is 10 x (sleep 0.1 + a fork), which on the
+GitHub macOS runner runs past 1.6 s, so the last ps was still alive. Local
+Macs pass it (bash 5 and /bin/bash 3.2). The test came in with #659, whose
+gate was local-only (ghost unreachable) — exactly the "CI macOS is the only
+3.2 judge" case. Fix: poll for the kill up to 8 s (< TMUX_WALK_MARK_TTL 10),
+which asserts the property instead of runner speed; verified red when the
+`kill -9` is removed. Merged 9ce826a, pushed; CI poll keyed on that sha. The
+tag goes on 9ce826a with --target, never on ab60b01.
+My first CI poll matched the wrong run (case pattern hit the latest run,
+8464c55, not the release sha): key polls on headSha == the sha, not on
+"completed" appearing.
+
+### 2026-09-18 — v2026.9.18 tagged on 9ce826a
+
+CI on 9ce826a 6/6 green (macOS bash included). `gh release create
+v2026.9.18 --target 9ce826a… --notes-file <approved notes>`; the tag resolves
+to 9ce826a. Release workflow (signing, assets) being watched; local install +
+doctor + /wrap still owed.
+
+### 2026-09-18 — v2026.9.18 RELEASED
+
+Release workflow green on 9ce826a, 12 assets (3 cs-tui binaries + minisig +
+sha256, install.sh + minisig + sha256). install.sh exit 0, `cs -version`
+2026.9.18, doctor: deploy drift OK, artifacts stamped 2026.9.18, installed
+bin/cs byte-matches. #662 closed. Alex: "wrap when finished" — /wrap next.
