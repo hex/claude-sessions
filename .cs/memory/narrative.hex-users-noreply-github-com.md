@@ -1435,3 +1435,116 @@ and outlives the directory, so that keypress is paid once per path ever used.
 Measured while deciding: `~/.claude.json` took **13 distinct size/mtime states
 in 60 s** (~one write every 4.6 s) with nothing unusual running. The handoff's
 OPEN RISK was real — a read-modify-write from cs would have had to survive that.
+
+### 2026-09-18 — Fable's ruling, and two corrections to my own probe
+
+Alex asked for a Fable pass on the three fix candidates. Ruling: **D, re-aimed** —
+measure the floor, ship nothing yet. Two of its findings I verified in source
+and accept; two of its "rows the kill model fails on" are artifacts of MY probe,
+and correcting them matters more than the ruling.
+
+**Accepted, verified in source. `refreshInterval: 2` breaks the attention
+pulse.** The pulse is second-parity: `bin/cs-statusline:1571` and `:1923` both
+do `[ $(( ${_NOW:-0} % 2 )) -eq 1 ]`. A 2 s tick samples one parity forever, so
+the mark and the crit ink freeze permanently on or permanently off depending on
+the launch second. Interval 3 alternates on a 6 s period. `tests/test_install.sh:909`
+pins the value at 1 and would go red — correctly. **Raising `refreshInterval` is
+not a free knob; anything that changes it must move the parity to print time.**
+
+**Accepted. The dominant term is upstream of the render.** Launch to the FIRST
+invocation measured 2.8 s, 2.9 s, 3.0 s, and 9.6 s across runs, and a `sleep 0.2`
+render painted at +10.9 s. cs's warm render is 0.16-0.21 s, the same class as
+`sleep 0.2`. So warming the cache and widening the deadline are both fighting
+over a slice, and nothing yet measures what sets the rest.
+
+**Correction to my own table, twice — both my measurement, not Claude Code:**
+
+- The `sleep 3.0` arm's one completed render ends at `1789720702.47`, which is
+  **+270.8 s** after that arm's T0, while its poll loop stopped looking at +60 s.
+  It is NOT evidence that a surviving render's output was discarded. I was not
+  watching. A probe whose observation window closes before the event cannot
+  report the event's absence as a finding.
+- The `sleep 0.2` arm's "2 invocations in 10.9 s" counts invocations **from the
+  first one onward** — the first landed at +9.6 s. The invoke log begins when
+  Claude Code begins invoking, not at launch. Reading a log's line count as a
+  rate over the whole window overstates the quiet period every time.
+
+What survives untouched is the interval pairs, which no alternative explains:
+2 s dies 117/117 at interval 1 and survives first try at interval 5; 4 s
+survives first try at interval 10.
+
+Running now: Fable's item 6 — a `printf` status line, n=5, two arms, bare
+`claude` in a trusted non-cs directory vs a `cs` launch. The gap between the
+arms is what cs owns; the floor is what Claude Code costs regardless.
+
+### 2026-09-18 — The floor measurement: the kill race is real but subordinate
+
+n=5, `printf` status line, `refreshInterval: 1`, `cs spike-band`, fresh
+conversation each time. Every run identical in shape: **1 invocation,
+1 completion, paint 0.09-0.40 s later**, first invocation 10.30 / 13.73 /
+12.37 / 11.23 / 11.09 s after launch (mean 11.7 s). **A fast render is never
+killed at all.**
+
+That **demotes my own headline from earlier today**. "The status line is killed
+by the next render request" is true, but it is not what Alex is waiting
+through. The budget is ~11.7 s before Claude Code first asks for a status line,
+then ~0.1-0.4 s to render and paint. Warming the cache or widening the deadline
+address the last 3%.
+
+It also **supersedes the storm explanation**. I read 117-in-40 s and 207-in-60 s
+as Claude Code re-requesting several times a second on its own. It does not: the
+same session with a fast render invokes ONCE in sixty seconds. The storm is
+self-inflicted — a render slower than the re-request gap is killed, the kill
+triggers another request, and that loop feeds itself. A slow render is both the
+cause and the victim. So render speed still matters at the margin (cs's cold
+bridged render is 1.51 s), it just is not the bulk of the wait.
+
+Void arm worth recording so nobody repeats it: bare `claude` in a trusted
+non-cs directory (`/private/tmp/cs-desktop-probe`) is NOT a floor control. It
+lands on a "describe a task for a new session" screen that draws no status line,
+so it rendered 115-179 times per run, completed every one, and painted nothing.
+A control that cannot display the thing being measured reads exactly like a
+failure of the thing being measured.
+
+Running: the decomposition of the 11.7 s into shell-up, cs-to-its-resume-
+question, Claude Code's first request, and paint — with `bash --noprofile
+--norc` so login-shell startup, which nobody pays typing `cs` in a live shell,
+stays out of cs's column.
+
+### 2026-09-18 — Correction: cs DOES own most of the wait
+
+The section above ("the kill race is real but subordinate") is **wrong on the
+apportionment**, and I told Alex the wrong thing before this arm finished. Same
+decomposition, same machine, only the status-line command differs:
+
+| segment | `printf` render (n=5) | real bridge -> cs-statusline (n=4) |
+|---|---|---|
+| Claude Code startup -> first request | 2.0-3.4 s | 2.1-4.0 s |
+| first request -> paint | **0.12-0.66 s** | **5.19 / 7.25 / 7.34 / 8.80 s** |
+| invocations before one survives | 1 | 5-9 |
+
+So the blank bar is ~7-13 s and roughly 70% of it is the render losing the
+kill/retry race — ~1.5 s per attempt, five to nine attempts. Claude Code's
+2-4 s startup is a floor underneath, not the bulk. The lesson for me: the
+`printf` control measured the FLOOR, and I read a floor as if it were the
+budget. A control tells you what is irreducible; only the real arm tells you
+what you own.
+
+Recommendation given to Alex, not yet built:
+1. **Stale-first render** (Fable's fifth option). cs-statusline already
+   publishes its frame through the 81 ms `mv`. Print the published frame on
+   entry (one read, no forks) and refresh in a detached child. The `printf`
+   arm is the existence proof: a ~zero-cost render paints in 0.12-0.66 s with
+   zero kills. Guards it needs: pulse parity applied at PRINT time (a baked
+   frame freezes the pulse — see the interval-2 finding), a single-flight lock
+   so the 0.3 s retry cadence cannot pile up children, and a seed for the
+   first-ever frame of a new session.
+2. **Do not raise `refreshInterval`** — broken at 2, degraded at 3, and it
+   slows the `.cs/local/context-pct` heartbeat by the same factor.
+3. **Do not build cache-warming alone** — ~0.5 s against a 5-9 s problem.
+
+**Open and NOT measured:** my real arm runs through the sidebar bridge, so
+5-9 s is bridge + cs-statusline. cs-statusline alone is 0.16-0.21 s warm and
+would fit easily. If the bridge's own fork is the bulk, this belongs to the
+iterm-agents-sidebar session, not cs. Same probe with the bridge removed
+settles it; Alex has been asked whether to run it.
