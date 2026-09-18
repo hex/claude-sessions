@@ -2,7 +2,8 @@
 parent: be426d62-7e0d-44ae-a03a-98d36f355787
 created: 2026-09-18T08:05:50Z
 purpose: find why the status line takes seconds to appear at session open, and decide whether cs should pre-accept the folder-trust dialog for directories it creates
-status: unconsumed
+status: consumed
+consumed_by: 601bd3d4-a5e2-4f9a-a65e-1587ba90a07e
 ---
 
 ## 1. Next Step
