@@ -4042,8 +4042,17 @@ test_a_stalled_walker_is_killed_before_its_mark_expires() {
         sleep 1.6   # past the one-second deadline
     done
     assert_eq "3" "$(wc -l < "$STALLLOG" | tr -d ' ')" "each mark window spawns one walker" || return 1
-    alive=0
-    while read -r p; do kill -0 "$p" 2>/dev/null && alive=$((alive + 1)); done < "$STALLLOG"
+    # The walker polls its ps with a sleep and a fork per tick, so on a slow
+    # runner the one-second deadline lands well after one second. The claim
+    # is that the kill comes before the mark expires (TMUX_WALK_MARK_TTL, 10 s),
+    # so wait for it up to eight seconds rather than a fixed pause.
+    n=0
+    while [ "$n" -lt 80 ]; do
+        alive=0
+        while read -r p; do kill -0 "$p" 2>/dev/null && alive=$((alive + 1)); done < "$STALLLOG"
+        [ "$alive" -eq 0 ] && break
+        n=$((n + 1)); sleep 0.1
+    done
     assert_eq "0" "$alive" "no stalled ps outlives its deadline" || return 1
     # The killed walk is a ps that could not answer: no verdict, and the pane
     # still draws as real.
